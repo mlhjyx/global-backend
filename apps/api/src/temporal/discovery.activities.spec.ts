@@ -104,9 +104,22 @@ function okAdapter(
 
 function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
   const rows: Array<Record<string, unknown>> = [];
+  let runStats: Record<string, unknown> = {};
   const tx = {
     $executeRaw: async () => 1,
-    $queryRaw: async (statement: { values: readonly unknown[] }) => {
+    $queryRaw: async (statement: {
+      strings?: readonly string[];
+      values: readonly unknown[];
+    }) => {
+      if (statement.strings?.join("?").includes("FROM discovery_run")) {
+        return [
+          {
+            id: String(statement.values[0]),
+            plan_id: "50000000-0000-4000-8000-000000000001",
+            stats: runStats,
+          },
+        ];
+      }
       const command = JSON.parse(String(statement.values[0])) as Record<
         string,
         unknown
@@ -136,6 +149,12 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
           inserted: true,
         },
       ];
+    },
+    discoveryRun: {
+      update: async ({ data }: { data: { stats: Record<string, unknown> } }) => {
+        runStats = data.stats;
+        return {};
+      },
     },
     rawSourceRecord: {
       findMany: async () => rows,
@@ -312,7 +331,175 @@ function makeEnrichDeps(enrichers: unknown[]) {
   } as unknown as Parameters<typeof createDiscoveryActivities>[0];
 }
 
+describe("loadPlanQueries receipt identity inputs", () => {
+  it("fails missing/non-ready plans and deterministically sorts nullable query fields", async () => {
+    let plan: Record<string, unknown> | null = null;
+    const tx = {
+      discoveryQueryPlan: { findUnique: vi.fn(async () => plan) },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+    const args = {
+      workspaceId: DISCOVERY_BINDING.scopeKey,
+      planId: "50000000-0000-4000-8000-000000000001",
+      executionContractVersion: 2 as const,
+      executionBudget: DISCOVERY_BINDING,
+    };
+
+    await expect(activities.loadPlanQueries(args)).rejects.toThrow(
+      "query plan 50000000-0000-4000-8000-000000000001 not found",
+    );
+    plan = { status: "DRAFT", queries: [] };
+    await expect(activities.loadPlanQueries(args)).rejects.toThrow(
+      "query plan is DRAFT",
+    );
+    plan = { status: "READY", queries: null };
+    await expect(activities.loadPlanQueries(args)).resolves.toEqual({
+      queries: [],
+    });
+    plan = {
+      status: "EXECUTED",
+      queries: [
+        { ...QUERY, priority: undefined },
+        { ...QUERY, priority: 1 },
+      ],
+    };
+    await expect(activities.loadPlanQueries(args)).resolves.toEqual({
+      queries: [
+        { ...QUERY, priority: 1 },
+        { ...QUERY, priority: undefined },
+      ],
+    });
+  });
+});
+
 describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错", () => {
+  it("rejects missing durable query identity after valid budget admission", async () => {
+    const acts = createDiscoveryActivities(makeDeps([]));
+    await expect(
+      acts.executeQuery(
+        discoveryArgs("run-ok-x", {
+          planId: undefined,
+          queryOrdinal: undefined,
+          query: QUERY,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      type: "DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID",
+      nonRetryable: true,
+    });
+  });
+
+  it("persists a bounded zero receipt when a source hint routes to no adapter", async () => {
+    const acts = createDiscoveryActivities(makeDeps([]));
+    await expect(
+      acts.executeQuery(
+        discoveryArgs("run-ok-x", {
+          query: { ...QUERY, filters: { source_hint: "missing" } },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      rawCount: 0,
+      rejectedCount: 0,
+      quarantinedCount: 0,
+      duplicateCount: 0,
+      provider: null,
+      queryReceipt: { providers: [], usageQuantity: 0 },
+    });
+  });
+
+  it("normalizes taxonomy branches before applying a narrowed provider route", async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const deps = makeDeps([
+      {
+        ...okAdapter("wikidata", []),
+        discoverCompanies,
+      },
+      okAdapter("ted", []),
+    ]);
+    deps.taxonomy = {
+      resolveMany: vi.fn(async () => [
+        { wikidataQid: "Q1", osmTags: ["industrial=pump"], code: "pump" },
+        { wikidataQid: null, osmTags: undefined, code: "valve" },
+      ]),
+      resolve: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ wikidataQid: "Q183", code: "DE" }),
+    } as never;
+    const acts = createDiscoveryActivities(deps);
+
+    await acts.executeQuery(
+      discoveryArgs("run-ok-x", {
+        query: {
+          source_class: "public_intelligence",
+          filters: {
+            source_hint: "wiki",
+            industry: "pump",
+            sub_industry: "valve",
+            country: "Germany",
+            region: "DACH",
+          },
+          keywords: undefined,
+          priority: 1,
+        } as never,
+      }),
+    );
+
+    expect(discoverCompanies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({
+          _industryQids: ["Q1"],
+          _osmTags: ["industrial=pump"],
+          _industryCodes: ["pump", "valve"],
+          _countryQid: "Q183",
+          _countryCode: "DE",
+        }),
+        keywords: [],
+      }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
+  it("fails closed on an unknown durable receipt producer", async () => {
+    const provider: CompanyDiscoveryAdapter = {
+      ...okAdapter("wikidata", []),
+      discoverCompanies: vi.fn(async (_query, ctx) => {
+        ctx.onDurableReceipt?.("unknown.producer", ENRICHMENT_RECEIPT);
+        return { records: [], costCents: 0 };
+      }),
+    };
+    const acts = createDiscoveryActivities(makeDeps([provider]));
+
+    await expect(
+      acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).rejects.toThrow("DOMAIN_ACK_CONSUMER_BINDING_MISSING");
+  });
+
+  it("contains an ordinary provider failure as a zero query receipt", async () => {
+    const provider: CompanyDiscoveryAdapter = {
+      ...okAdapter("wikidata", []),
+      discoverCompanies: vi.fn(async () => {
+        throw new Error("provider unavailable");
+      }),
+    };
+    const acts = createDiscoveryActivities(makeDeps([provider]));
+    await expect(
+      acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).resolves.toMatchObject({
+      rawCount: 0,
+      provider: null,
+      queryReceipt: { providers: [] },
+    });
+  });
+
   it("uses the relayed authority account and rejects missing binding before provider execution", async () => {
     const discoverCompanies = vi.fn(async () => ({
       records: [],
@@ -342,6 +529,8 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     await acts.executeQuery({
       workspaceId: DISCOVERY_BINDING.scopeKey,
       runId: "run-row-id",
+      planId: "50000000-0000-4000-8000-000000000001",
+      queryOrdinal: 0,
       query: QUERY,
       executionContractVersion: 2,
       executionBudget: DISCOVERY_BINDING,
@@ -367,6 +556,8 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       acts.executeQuery({
         workspaceId: DISCOVERY_BINDING.scopeKey,
         runId: "run-row-id",
+        planId: "50000000-0000-4000-8000-000000000001",
+        queryOrdinal: 0,
         query: QUERY,
       } as never),
     ).rejects.toMatchObject({
@@ -585,10 +776,73 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         [first.queryReceipt.queryKey]: first.queryReceipt,
       },
     });
+
+    acknowledgementMocks.apply.mockImplementationOnce(async (input) => ({
+      status: "APPLIED",
+      acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+        producerId,
+        status: "APPLIED",
+      })),
+      value: await input.apply(input.transaction),
+    }));
+    await expect(activities.executeQuery(args)).resolves.toEqual(first);
+    expect(writerInvocation).toBe(2);
+  });
+
+  it("fails closed when DomainAck replay has no locked query receipt", async () => {
+    const activities = createDiscoveryActivities(makeDeps([okAdapter("wikidata", [])]));
+    acknowledgementMocks.apply.mockImplementationOnce(async (input: {
+      transaction: unknown;
+      acknowledgements: Array<{ producerId: string }>;
+      readback: (transaction: unknown) => Promise<unknown>;
+    }) => ({
+      status: "REPLAYED",
+      acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+        producerId,
+        status: "REPLAYED",
+      })),
+      value: await input.readback(input.transaction),
+    }));
+    await expect(
+      activities.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_READBACK_MISSING");
   });
 });
 
 describe("canonicalizeRun —— suppression authority 线性化", () => {
+  it("skips an accepted Raw row that has no canonical company name", async () => {
+    const canonicalUpsert = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      rawSourceRecord: {
+        findMany: vi.fn(async () => [
+          {
+            id: "raw-no-name",
+            providerKey: "registry",
+            ingestStatus: "ACCEPTED",
+            ingestVersion: "raw-source/v2",
+            payload: { externalId: "registry:no-name", attributes: {} },
+          },
+        ]),
+      },
+      rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      canonicalCompany: { upsert: canonicalUpsert },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-no-name", {})),
+    ).resolves.toEqual({ companies: 0, suppressed: 0 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+  });
+
   it("excludes every legacy ingest version from downstream materialization", async () => {
     const rawFindMany = vi.fn(async () => []);
     const tx = {
@@ -764,7 +1018,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           attributes: {
             products: ["pump", "person@example.test"],
             gleif: {
-              lei: "529900SAFEENTITY001",
+              lei: "529900T8BM49AURSDO55",
               legal_name: "Parker Hannifin",
             },
             contact_email: "person@example.test",
@@ -814,7 +1068,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const update = upsert.mock.calls[0]![0].update as Record<string, unknown>;
     expect(update.attributes).toEqual({
       products: ["pump", "valve"],
-      gleif: { lei: "529900SAFEENTITY001", legal_name: "Parker Hannifin" },
+      gleif: { lei: "529900T8BM49AURSDO55", legal_name: "Parker Hannifin" },
     });
     expect(JSON.stringify(update)).not.toMatch(
       /person@example|alice van smith|unbounded historical prose/u,
@@ -1004,7 +1258,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(upsert).toHaveBeenCalledOnce();
   });
 
-  it("applies a real sanitizer repair once and carries governed evidence without relinking Raw", async () => {
+  it("applies a real sanitizer repair once and preserves its existing governed evidence without relinking Raw", async () => {
     const raw = {
       id: "raw-repair",
       providerKey: "registry",
@@ -1074,21 +1328,187 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     ).resolves.toEqual({ companies: 1, suppressed: 0 });
     expect(company.attributes).toEqual({ products: ["pump"] });
     expect(company.version).toBe(4);
-    expect(evidenceCreate).toHaveBeenCalledOnce();
-    expect(evidenceCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        rawRecordId: raw.id,
-        field: "attributes",
-        value: { products: ["pump"] },
-      }),
-    });
+    expect(evidenceCreate).not.toHaveBeenCalled();
 
     const repairedBytes = JSON.stringify(company);
     await expect(
       activities.canonicalizeRun(discoveryArgs("run-repair", {})),
     ).resolves.toEqual({ companies: 0, suppressed: 0 });
     expect(JSON.stringify(company)).toBe(repairedBytes);
-    expect(evidenceCreate).toHaveBeenCalledOnce();
+    expect(evidenceCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("finalizeRun durable query receipt readback", () => {
+  const receipt = Object.freeze({
+    schemaVersion: "discovery-query-receipt/v1" as const,
+    queryKey: "a".repeat(64),
+    queryOrdinal: 0,
+    sourceClass: "public_intelligence",
+    providers: Object.freeze(["ted"]),
+    accepted: 1,
+    quarantined: 0,
+    rejected: 0,
+    governanceDenied: 0,
+    duplicate: 2,
+    usageQuantity: 1,
+    costCents: 3,
+  });
+  const derived = {
+    perQuery: { [receipt.queryKey]: receipt },
+    perSource: {
+      public_intelligence: {
+        rawCount: 1,
+        quarantinedCount: 0,
+        rejectedCount: 0,
+        governanceDenied: 0,
+        duplicateCount: 2,
+        usageQuantity: 1,
+        costCents: 3,
+        providers: ["ted"],
+        provider: "ted",
+      },
+    },
+    rawGovernance: {
+      accepted: 1,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 2,
+      usageQuantity: 1,
+      costCents: 3,
+    },
+  };
+
+  function finalizeHarness(stats: unknown = { perQuery: derived.perQuery }) {
+    const update = vi.fn(async () => ({}));
+    const outboxCreate = vi.fn(async () => ({}));
+    const tx = {
+      $queryRaw: vi.fn(async () => [
+        {
+          id: "40000000-0000-4000-8000-000000000001",
+          plan_id: "50000000-0000-4000-8000-000000000001",
+          stats,
+        },
+      ]),
+      discoveryRun: { update },
+      discoveryQueryPlan: { update: vi.fn(async () => ({})) },
+      outboxEvent: { create: outboxCreate },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+    return { activities, outboxCreate, update };
+  }
+
+  it("merges the locked immutable receipt into final stats and Outbox metadata", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness();
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "DONE" as const,
+        stats: { ...derived, companies: 1 },
+      }),
+    );
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "40000000-0000-4000-8000-000000000001" },
+      data: expect.objectContaining({
+        status: "DONE",
+        stats: { ...derived, companies: 1 },
+        completedAt: expect.any(Date),
+      }),
+    });
+    expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+      data: {
+        eventType: "DiscoveryRunCompleted",
+        payload: { status: "DONE", stats: { ...derived, companies: 1 } },
+      },
+    });
+    expect(JSON.stringify(outboxCreate.mock.calls)).not.toMatch(
+      /keywords|filters|payloadBody|externalId|rawId|person@example/u,
+    );
+  });
+
+  it("fails closed when final workflow totals drift from the locked receipts", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness();
+    await expect(
+      activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status: "PARTIAL" as const,
+          stats: {
+            ...derived,
+            rawGovernance: { ...derived.rawGovernance, duplicate: 0 },
+          },
+        }),
+      ),
+    ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_FINALIZE_DRIFT");
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it("preserves the legacy finalization shape when the locked run has no receipts", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness(null);
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: { failures: 1 },
+      }),
+    );
+    expect(update).toHaveBeenCalledOnce();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects finalization that omits a receipt already stored on the locked run", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness();
+    await expect(
+      activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: { failures: 1 },
+        }),
+      ),
+    ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING");
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing or cross-plan locked run before final mutation", async () => {
+    const { outboxCreate, update } = finalizeHarness();
+    const invalid = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) =>
+          callback({
+            $queryRaw: vi.fn(async () => []),
+            discoveryRun: { update },
+            outboxEvent: { create: outboxCreate },
+          }),
+        ),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+    await expect(
+      invalid.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: { failures: 1 },
+        }),
+      ),
+    ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_RUN_BINDING_INVALID");
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 });
 

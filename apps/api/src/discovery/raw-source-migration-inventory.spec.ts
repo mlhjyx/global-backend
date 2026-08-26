@@ -431,6 +431,14 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
               secondChecksum === OLD_REVIEWED_1600_CHECKSUM
                 ? OLD_REVIEWED_1600_CHECKSUM
                 : null,
+            ...(secondChecksum === OLD_REVIEWED_1600_CHECKSUM
+              ? {}
+              : {
+                  observedChecksums: [
+                    OLD_REVIEWED_1600_CHECKSUM,
+                    secondChecksum,
+                  ].sort(),
+                }),
             rowCount: 2,
             lifecycleState: "CONFLICT",
           }),

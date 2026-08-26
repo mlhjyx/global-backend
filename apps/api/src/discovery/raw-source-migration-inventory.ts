@@ -67,7 +67,9 @@ export type RawSourceMigrationDecision = Readonly<{
     | "CURRENT_SUCCESSOR_APPLIED";
   observations: readonly Readonly<{
     migrationName: string;
+    expectedMigrationName?: string;
     observedChecksum: string | null;
+    observedChecksums?: readonly string[];
     expectedChecksum: string | null;
     rowCount?: number;
     lifecycleState?: "APPLIED" | "UNFINISHED" | "ROLLED_BACK" | "CONFLICT";
@@ -117,16 +119,77 @@ export function assessRawSourceMigrationInventory(
     const checksums = [...new Set(rows.map((row) => row.checksum))];
     return checksums.length === 1 ? checksums[0]! : null;
   };
+  const observedChecksums = (
+    rows: readonly PrismaMigrationInventoryRow[],
+  ): readonly string[] => [...new Set(rows.map((row) => row.checksum))].sort();
   const observation = (
     entry: ExpectedMigrationChecksum,
     rows: readonly PrismaMigrationInventoryRow[],
+    actualMigrationName = entry.migrationName,
   ) => ({
-    migrationName: entry.migrationName,
+    migrationName: actualMigrationName,
+    ...(actualMigrationName === entry.migrationName
+      ? {}
+      : { expectedMigrationName: entry.migrationName }),
     observedChecksum: observedChecksum(rows),
+    ...(observedChecksums(rows).length > 1
+      ? { observedChecksums: Object.freeze(observedChecksums(rows)) }
+      : {}),
     expectedChecksum: entry.checksum,
     rowCount: rows.length,
     lifecycleState: lifecycle(rows),
   });
+
+  // Content provenance is authoritative. Scan every supplied row for every
+  // forbidden historical/pre-release digest before any name-based current
+  // successor decision. Rows sharing the observed name are kept together so
+  // duplicate and conflicting lifecycle/checksum forms cannot be hidden by a
+  // rename.
+  const forbiddenByChecksum = [
+    ...HISTORICAL_PR407_RAW_MIGRATIONS.map((entry) => ({
+      entry,
+      state: "OLD_PR_MIGRATION_PRESENT" as const,
+    })),
+    ...PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS.map((entry) => ({
+      entry,
+      state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT" as const,
+    })),
+  ];
+  const forbiddenMatches = forbiddenByChecksum.flatMap(({ entry, state }) => {
+    const actualNames = [
+      ...new Set(
+        inventory
+          .filter((row) => row.checksum === entry.checksum)
+          .map((row) => row.migration_name),
+      ),
+    ];
+    return actualNames.map((actualMigrationName) => {
+      const rows = rowsByName.get(actualMigrationName) ?? [];
+      const canonicalCurrent = expectedCurrent.find(
+        (candidate) => candidate.migrationName === entry.migrationName,
+      );
+      const expectedEntry =
+        actualMigrationName === entry.migrationName && canonicalCurrent
+          ? canonicalCurrent
+          : entry;
+      return { actualMigrationName, expectedEntry, rows, state };
+    });
+  });
+  if (forbiddenMatches.length) {
+    return decision({
+      subject: "SUPPLIED",
+      decision: "HOLD",
+      state: forbiddenMatches.some(
+        (match) => match.state === "OLD_PR_MIGRATION_PRESENT",
+      )
+        ? "OLD_PR_MIGRATION_PRESENT"
+        : "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+      observations: forbiddenMatches.map(
+        ({ actualMigrationName, expectedEntry, rows }) =>
+          observation(expectedEntry, rows, actualMigrationName),
+      ),
+    });
+  }
 
   // Historical names are a HOLD regardless of their lifecycle or checksum.
   const historical = HISTORICAL_PR407_RAW_MIGRATIONS.flatMap((entry) => {
@@ -139,31 +202,6 @@ export function assessRawSourceMigrationInventory(
       decision: "HOLD",
       state: "OLD_PR_MIGRATION_PRESENT",
       observations: historical.map(({ entry, rows }) =>
-        observation(entry, rows),
-      ),
-    });
-  }
-
-  // A locally reviewed but never deployed 1600 was reissued before release.
-  // Any database carrying its old checksum requires explicit provenance
-  // recovery and cannot be treated as a deployable predecessor.
-  const preReleaseReissued = PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS.flatMap(
-    (reissuedEntry) => {
-      const rows = rowsByName.get(reissuedEntry.migrationName) ?? [];
-      if (!rows.some((row) => row.checksum === reissuedEntry.checksum)) return [];
-      const currentEntry =
-        expectedCurrent.find(
-          (entry) => entry.migrationName === reissuedEntry.migrationName,
-        ) ?? reissuedEntry;
-      return [{ entry: currentEntry, rows }];
-    },
-  );
-  if (preReleaseReissued.length) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
-      observations: preReleaseReissued.map(({ entry, rows }) =>
         observation(entry, rows),
       ),
     });

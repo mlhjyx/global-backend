@@ -176,6 +176,20 @@ describe('discoveryWorkflow execution-control propagation', () => {
       primeDiscovery();
       acts.executeQuery.mockResolvedValue({
         ...receipt,
+        queryReceipt: {
+          schemaVersion: 'discovery-query-receipt/v1',
+          queryKey: 'd'.repeat(64),
+          queryOrdinal: 0,
+          sourceClass: 'official_registry',
+          providers: ['public_web'],
+          accepted: receipt.rawCount,
+          quarantined: receipt.quarantinedCount,
+          rejected: receipt.rejectedCount,
+          governanceDenied: receipt.quarantinedCount + receipt.rejectedCount,
+          duplicate: receipt.duplicateCount,
+          usageQuantity: receipt.rawCount,
+          costCents: 0,
+        },
         provider: 'public_web',
         budgetTruncated: false,
       });
@@ -187,10 +201,10 @@ describe('discoveryWorkflow execution-control propagation', () => {
           status: 'FAILED',
           stats: expect.objectContaining({
             perSource: {
-              official_registry: {
+              official_registry: expect.objectContaining({
                 ...receipt,
                 provider: 'public_web',
-              },
+              }),
             },
           }),
         }),
@@ -205,6 +219,20 @@ describe('discoveryWorkflow execution-control propagation', () => {
       quarantinedCount: 2,
       rejectedCount: 3,
       duplicateCount: 4,
+      queryReceipt: {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: 'e'.repeat(64),
+        queryOrdinal: 0,
+        sourceClass: 'official_registry',
+        providers: ['public_web'],
+        accepted: 1,
+        quarantined: 2,
+        rejected: 3,
+        governanceDenied: 5,
+        duplicate: 4,
+        usageQuantity: 1,
+        costCents: 0,
+      },
       provider: 'public_web',
       budgetTruncated: false,
     });
@@ -215,14 +243,14 @@ describe('discoveryWorkflow execution-control propagation', () => {
       expect.objectContaining({
         status: 'PARTIAL',
         stats: expect.objectContaining({
-          perSource: {
-            official_registry: {
-              rawCount: 1,
-              quarantinedCount: 2,
-              rejectedCount: 3,
-              duplicateCount: 4,
-              provider: 'public_web',
-            },
+            perSource: {
+              official_registry: expect.objectContaining({
+                rawCount: 1,
+                quarantinedCount: 2,
+                rejectedCount: 3,
+                duplicateCount: 4,
+                provider: 'public_web',
+              }),
           },
         }),
       }),
@@ -356,6 +384,7 @@ describe('discoveryWorkflow execution-control propagation', () => {
               usageQuantity: 1,
               costCents: 12,
               providers: ['openfda', 'public_web', 'ted'],
+              provider: 'openfda+public_web+ted',
             },
           },
           rawGovernance: {
@@ -366,6 +395,76 @@ describe('discoveryWorkflow execution-control propagation', () => {
             duplicate: 9,
             usageQuantity: 1,
             costCents: 12,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('preserves earlier same-class receipts when a later query fails', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({
+      queries: [
+        {
+          source_class: 'public_intelligence',
+          filters: { source_hint: 'ted' },
+          keywords: [],
+          priority: 1,
+        },
+        {
+          source_class: 'public_intelligence',
+          filters: { source_hint: 'public_web' },
+          keywords: ['pump'],
+          priority: 2,
+        },
+      ],
+    });
+    const receipt = {
+      schemaVersion: 'discovery-query-receipt/v1',
+      queryKey: 'f'.repeat(64),
+      queryOrdinal: 0,
+      sourceClass: 'public_intelligence',
+      providers: ['ted'],
+      accepted: 1,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: 1,
+      costCents: 0,
+    } as const;
+    acts.executeQuery
+      .mockResolvedValueOnce({
+        rawCount: 1,
+        quarantinedCount: 0,
+        rejectedCount: 0,
+        duplicateCount: 0,
+        queryReceipt: receipt,
+        provider: 'ted',
+        budgetTruncated: false,
+      })
+      .mockRejectedValueOnce(new Error('provider unavailable'));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          failures: 1,
+          perQuery: { [receipt.queryKey]: receipt },
+          perSource: {
+            public_intelligence: {
+              rawCount: 1,
+              quarantinedCount: 0,
+              rejectedCount: 0,
+              governanceDenied: 0,
+              duplicateCount: 0,
+              usageQuantity: 1,
+              costCents: 0,
+              providers: ['ted'],
+              provider: 'ted',
+            },
           },
         }),
       }),

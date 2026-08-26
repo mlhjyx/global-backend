@@ -11,7 +11,10 @@ import {
   lockWorkspaceSuppressionPolicy,
   type SuppressionPolicyLockReceipt,
 } from './suppression-policy-lock';
-import { sanitizeCanonicalCompanyAttributes } from './canonical-company-attributes';
+import {
+  canonicalCompanyAttributesEqual,
+  sanitizeCanonicalCompanyAttributes,
+} from './canonical-company-attributes';
 
 /**
  * Final gate for writers that may create a canonical company from a platform
@@ -55,7 +58,18 @@ export async function loadMaterializableCompanyState(
   else await lockWorkspaceSuppressionPolicy(tx, workspaceId);
   const prior = await tx.canonicalCompany.findUnique({
     where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-    select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      domain: true,
+      country: true,
+      region: true,
+      dedupeKey: true,
+      attributes: true,
+      status: true,
+      version: true,
+      updatedAt: true,
+    },
   });
   const suppressions =
     options?.knownSuppressions ??
@@ -74,13 +88,25 @@ export async function loadMaterializableCompanyState(
   };
   if (prior && blocked)
     await repairSuppressedCompany(tx, prior, sanitizeAttributes);
+  const storedAttributes = prior ? jsonObject(prior.attributes) : {};
   const safePrior = prior
     ? {
         ...prior,
-        attributes: sanitizeAttributes(jsonObject(prior.attributes)),
+        attributes: sanitizeAttributes(storedAttributes),
       }
     : null;
-  return { allowed: !blocked, prior: safePrior } as const;
+  return {
+    allowed: !blocked,
+    prior: safePrior,
+    attributesRequireRepair: Boolean(
+      prior &&
+        safePrior &&
+        !canonicalCompanyAttributesEqual(
+          storedAttributes,
+          safePrior.attributes,
+        ),
+    ),
+  } as const;
 }
 
 /**

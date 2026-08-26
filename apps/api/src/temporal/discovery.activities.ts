@@ -43,6 +43,15 @@ import {
 import { persistPreparedRawSourceRecord } from '../discovery/raw-source-writer';
 import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
 import {
+  discoveryQueryKey,
+  mergeDiscoveryQueryReceipt,
+  parseDiscoveryQueryReceipt,
+  readDiscoveryQueryReceipt,
+  summarizeDiscoveryQueryReceipts,
+  type DiscoveryQueryReceipt,
+} from '../discovery/discovery-query-receipt';
+import {
+  canonicalCompanyAttributesEqual,
   mergeCanonicalCompanyAttributes,
   sanitizeCanonicalCompanyAttributes,
 } from '../discovery/canonical-company-attributes';
@@ -67,6 +76,56 @@ export interface PlanQuery {
   filters: Record<string, unknown>;
   keywords: string[];
   priority: number;
+}
+
+interface DiscoveryQueryExecutionResult {
+  rawCount: number;
+  quarantinedCount: number;
+  rejectedCount: number;
+  duplicateCount: number;
+  costCents: number;
+  provider: string | null;
+  budgetTruncated: boolean;
+  queryReceipt: DiscoveryQueryReceipt;
+}
+
+interface LockedDiscoveryRunReceiptState {
+  id: string;
+  plan_id: string;
+  stats: unknown;
+}
+
+async function lockDiscoveryRunReceiptState(
+  transaction: Prisma.TransactionClient,
+  args: { runId: string; planId: string },
+): Promise<LockedDiscoveryRunReceiptState> {
+  const rows = await transaction.$queryRaw<LockedDiscoveryRunReceiptState[]>(
+    Prisma.sql`SELECT id::text, plan_id::text, stats
+      FROM discovery_run
+      WHERE id = ${args.runId}
+      FOR UPDATE`,
+  );
+  const row = rows[0];
+  if (!row || row.id !== args.runId || row.plan_id !== args.planId) {
+    throw new Error('DISCOVERY_QUERY_RECEIPT_RUN_BINDING_INVALID');
+  }
+  return row;
+}
+
+function executionResult(
+  receipt: DiscoveryQueryReceipt,
+  budgetTruncated: boolean,
+): DiscoveryQueryExecutionResult {
+  return {
+    rawCount: receipt.accepted,
+    quarantinedCount: receipt.quarantined,
+    rejectedCount: receipt.rejected,
+    duplicateCount: receipt.duplicate,
+    costCents: receipt.costCents,
+    provider: receipt.providers.join('+') || null,
+    budgetTruncated,
+    queryReceipt: receipt,
+  };
 }
 
 const PER_SOURCE_LIMIT = 25; // sandbox 阶段每源上限；真源接入后由预算/配额驱动（PRD 7.4.8）
@@ -162,16 +221,31 @@ export function createDiscoveryActivities(deps: {
      * raw 原样落地（幂等 by externalId）。
      * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
      */
-    async executeQuery(args: DiscoveryActivityInput & { runId: string; query: PlanQuery }): Promise<{
-      rawCount: number;
-      quarantinedCount: number;
-      rejectedCount: number;
-      duplicateCount: number;
-      costCents: number;
-      provider: string | null;
-      budgetTruncated: boolean;
-    }> {
+    async executeQuery(args: DiscoveryActivityInput & {
+      runId: string;
+      planId?: string;
+      queryOrdinal?: number;
+      query: PlanQuery;
+    }): Promise<DiscoveryQueryExecutionResult> {
       const binding = await ensureRunBudget(args);
+      if (
+        typeof args.planId !== 'string' ||
+        !Number.isSafeInteger(args.queryOrdinal) ||
+        Number(args.queryOrdinal) < 0
+      ) {
+        throw ApplicationFailure.nonRetryable(
+          'DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID',
+          'DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID',
+        );
+      }
+      const planId = args.planId;
+      const queryOrdinal = args.queryOrdinal as number;
+      const queryKey = discoveryQueryKey({
+        runId: args.runId,
+        planId,
+        queryOrdinal,
+        query: args.query,
+      });
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -232,17 +306,6 @@ export function createDiscoveryActivities(deps: {
       for (const adapter of adapters) {
         assertProductDiscoveryProvenance({ providerKey: adapter.key });
       }
-      if (!adapters.length)
-        return {
-          rawCount: 0,
-          quarantinedCount: 0,
-          rejectedCount: 0,
-          duplicateCount: 0,
-          costCents: 0,
-          provider: null,
-          budgetTruncated: false,
-        };
-
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
       const ctx: ExecutionContext = {
@@ -298,18 +361,32 @@ export function createDiscoveryActivities(deps: {
             ? item.value.durableReceipts.map(({ producerId, receipt }) => ({
                 producerId,
                 receipt,
-                domainAckKey: `${args.runId}:${item.value.key}:${receipt.operationId}`,
+                domainAckKey: `${args.runId}:${queryKey}:${item.value.key}:${receipt.operationId}`,
                 domainRevision: receipt.resultDigest,
               }))
             : []),
           apply: async (transaction) => {
+            const lockedRun = await lockDiscoveryRunReceiptState(transaction, {
+              runId: args.runId,
+              planId,
+            });
+            const existingReceipt = readDiscoveryQueryReceipt(
+              lockedRun.stats,
+              queryKey,
+            );
+            if (existingReceipt) {
+              return executionResult(existingReceipt, budgetTruncated);
+            }
             let totalCost = 0;
             let duplicateCount = 0;
-            const providersHit: string[] = [];
+            let acceptedCount = 0;
+            let quarantinedCount = 0;
+            let rejectedCount = 0;
+            const providersObserved: string[] = [];
             for (const item of settled) {
               if (item.status !== 'fulfilled') continue;
               const { key, r } = item.value;
-              if (r.records.length) providersHit.push(key);
+              providersObserved.push(key);
               const prepared = prepareRawSourceBatch({
                 providerKey: key,
                 records: r.records,
@@ -344,57 +421,73 @@ export function createDiscoveryActivities(deps: {
                 );
                 if (!receipt.inserted) {
                   duplicateCount += 1;
+                  continue;
+                }
+                if (row.ingestStatus === 'ACCEPTED') {
+                  acceptedCount += 1;
+                } else if (row.ingestStatus === 'QUARANTINED') {
+                  quarantinedCount += 1;
+                } else if (row.ingestStatus === 'REJECTED') {
+                  rejectedCount += 1;
                 }
               }
               totalCost += r.costCents;
             }
-            const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'ACCEPTED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'QUARANTINED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'REJECTED' } }),
-            ]);
+            const receipt = parseDiscoveryQueryReceipt({
+              schemaVersion: 'discovery-query-receipt/v1',
+              queryKey,
+              queryOrdinal,
+              sourceClass: q.sourceClass,
+              providers: [...new Set(providersObserved)].sort(),
+              accepted: acceptedCount,
+              quarantined: quarantinedCount,
+              rejected: rejectedCount,
+              governanceDenied: quarantinedCount + rejectedCount,
+              duplicate: duplicateCount,
+              usageQuantity: acceptedCount,
+              costCents: totalCost,
+            });
+            const stats = mergeDiscoveryQueryReceipt(lockedRun.stats, receipt);
+            await transaction.discoveryRun.update({
+              where: { id: args.runId },
+              data: { stats: stats as Prisma.InputJsonValue },
+            });
             if (totalCost > 0) {
               await transaction.usageLedger.create({
                 data: {
                   workspaceId: args.workspaceId,
                   resourceType: 'provider_call',
-                  quantity: rawCount,
+                  quantity: receipt.usageQuantity,
                   costUsd: totalCost / 100,
                   refType: 'discovery_run',
                   refId: args.runId,
-                  meta: { providers: providersHit, sourceClass: q.sourceClass },
+                  meta: {
+                    queryKey: receipt.queryKey,
+                    queryOrdinal: receipt.queryOrdinal,
+                    sourceClass: receipt.sourceClass,
+                    providers: receipt.providers,
+                    accepted: receipt.accepted,
+                    quarantined: receipt.quarantined,
+                    rejected: receipt.rejected,
+                    governanceDenied: receipt.governanceDenied,
+                    duplicate: receipt.duplicate,
+                    usageQuantity: receipt.usageQuantity,
+                  },
                 },
               });
             }
-            return {
-              rawCount, quarantinedCount, rejectedCount, duplicateCount,
-              costCents: totalCost,
-              provider: providersHit.join('+') || null,
-              budgetTruncated,
-            };
+            return executionResult(receipt, budgetTruncated);
           },
           readback: async (transaction) => {
-            const fulfilled = settled.filter((item) => item.status === 'fulfilled');
-            const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'ACCEPTED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'QUARANTINED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'REJECTED' } }),
-            ]);
-            return {
-              rawCount,
-              quarantinedCount,
-              rejectedCount,
-              duplicateCount: 0,
-              costCents: fulfilled.reduce(
-                (sum, item) => sum + item.value.r.costCents,
-                0,
-              ),
-              provider: fulfilled
-                .filter((item) => item.value.r.records.length > 0)
-                .map((item) => item.value.key)
-                .join('+') || null,
-              budgetTruncated,
-            };
+            const lockedRun = await lockDiscoveryRunReceiptState(transaction, {
+              runId: args.runId,
+              planId,
+            });
+            const receipt = readDiscoveryQueryReceipt(lockedRun.stats, queryKey);
+            if (!receipt) {
+              throw new Error('DISCOVERY_QUERY_RECEIPT_READBACK_MISSING');
+            }
+            return executionResult(receipt, budgetTruncated);
           },
         });
         return persisted.value;
@@ -477,44 +570,74 @@ export function createDiscoveryActivities(deps: {
           const currentAttributes = sanitizeCanonicalCompanyAttributes(
             rec.attributes,
           );
+          const prior = materialization.prior;
           const canonicalAttributes = mergeCanonicalCompanyAttributes(
-            materialization.prior?.attributes,
+            prior?.attributes,
             currentAttributes,
           );
+          const attributesChanged = prior
+            ? materialization.attributesRequireRepair ||
+              !canonicalCompanyAttributesEqual(
+                canonicalAttributes,
+                prior.attributes,
+              )
+            : true;
+          const regionChanged = Boolean(
+            prior &&
+              typeof rec.region === 'string' &&
+              rec.region !== prior.region,
+          );
+          const canonicalChanged = !prior || attributesChanged || regionChanged;
+          const existingLink = prior
+            ? await tx.identityLink.findFirst({
+                where: { canonicalId: prior.id, rawRecordId: raw.id },
+                select: { id: true },
+              })
+            : null;
+          if (existingLink && !canonicalChanged) continue;
 
-          const canonical = await tx.canonicalCompany.upsert({
-            where: {
-              workspaceId_dedupeKey: {
-                workspaceId: args.workspaceId,
-                dedupeKey: identity.dedupeKey,
-              },
-            },
-            update: {
-              // 后到的源只补缺，不覆盖已有值（冲突留在 field_evidence 里可见）
-              ...(rec.region ? { region: { set: rec.region } } : {}),
-              attributes: canonicalAttributes as Prisma.InputJsonValue,
-              version: { increment: 1 },
-            },
-            create: {
-              workspaceId: args.workspaceId,
-              name: rec.name,
-              domain: rec.domain ?? null,
-              country: rec.country ?? null,
-              region: rec.region ?? null,
-              industry: rec.industry ?? null,
-              employeeCount: rec.employeeCount ?? null,
-              revenueUsd: rec.revenueUsd ?? null,
-              attributes: canonicalAttributes as Prisma.InputJsonValue,
-              status: 'NEW',
-              dedupeKey: identity.dedupeKey,
-            },
-          });
-          companies += 1;
+          const canonical = canonicalChanged
+            ? await tx.canonicalCompany.upsert({
+                where: {
+                  workspaceId_dedupeKey: {
+                    workspaceId: args.workspaceId,
+                    dedupeKey: identity.dedupeKey,
+                  },
+                },
+                update: {
+                  // 后到的源只补缺，不覆盖已有值（冲突留在 field_evidence 里可见）
+                  ...(regionChanged ? { region: { set: rec.region } } : {}),
+                  ...(attributesChanged
+                    ? {
+                        attributes:
+                          canonicalAttributes as Prisma.InputJsonValue,
+                      }
+                    : {}),
+                  version: { increment: 1 },
+                },
+                create: {
+                  workspaceId: args.workspaceId,
+                  name: rec.name,
+                  domain: rec.domain ?? null,
+                  country: rec.country ?? null,
+                  region: rec.region ?? null,
+                  industry: rec.industry ?? null,
+                  employeeCount: rec.employeeCount ?? null,
+                  revenueUsd: rec.revenueUsd ?? null,
+                  attributes: canonicalAttributes as Prisma.InputJsonValue,
+                  status: 'NEW',
+                  dedupeKey: identity.dedupeKey,
+                },
+              })
+            : { id: prior!.id };
+          if (canonicalChanged) companies += 1;
 
-          const linkExists = await tx.identityLink.findFirst({
-            where: { canonicalId: canonical.id, rawRecordId: raw.id },
-            select: { id: true },
-          });
+          const linkExists = existingLink;
+          // Existing links were committed atomically with their evidence. A
+          // sanitizer-only canonical repair reuses that governed evidence;
+          // inserting the same `(entity, field, raw)` identity would violate
+          // the database uniqueness contract. Migration 2000 applies the same
+          // full-path correction to its retained evidence value.
           if (!linkExists) {
             await tx.identityLink.create({
               data: {
@@ -1139,11 +1262,42 @@ export function createDiscoveryActivities(deps: {
     }): Promise<void> {
       await ensureRunBudget(args);
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const lockedRun = await lockDiscoveryRunReceiptState(tx, args);
+        if (
+          lockedRun.stats !== null &&
+          (typeof lockedRun.stats !== 'object' || Array.isArray(lockedRun.stats))
+        ) {
+          throw new Error('DISCOVERY_QUERY_RECEIPT_STORE_INVALID');
+        }
+        const storedStats = (lockedRun.stats ?? {}) as Record<string, unknown>;
+        let finalStats: Record<string, unknown> = args.stats;
+        if (Object.prototype.hasOwnProperty.call(args.stats, 'perQuery')) {
+          const derived = summarizeDiscoveryQueryReceipts(storedStats);
+          if (
+            !canonicalCompanyAttributesEqual(
+              {
+                perQuery: args.stats.perQuery,
+                perSource: args.stats.perSource,
+                rawGovernance: args.stats.rawGovernance,
+              },
+              derived,
+            )
+          ) {
+            throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_DRIFT');
+          }
+          finalStats = {
+            ...storedStats,
+            ...args.stats,
+            ...derived,
+          };
+        } else if (Object.keys(summarizeDiscoveryQueryReceipts(storedStats).perQuery).length) {
+          throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING');
+        }
         await tx.discoveryRun.update({
           where: { id: args.runId },
           data: {
             status: args.status,
-            stats: args.stats as Prisma.InputJsonValue,
+            stats: finalStats as Prisma.InputJsonValue,
             completedAt: new Date(),
           },
         });
@@ -1162,7 +1316,7 @@ export function createDiscoveryActivities(deps: {
             payload: {
               planId: args.planId,
               status: args.status,
-              stats: args.stats,
+              stats: finalStats,
             } as Prisma.InputJsonValue,
           },
         });

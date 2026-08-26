@@ -1,7 +1,7 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   isContactFreeText,
   isControlledBusinessTerm,
-  isSecretFreeText,
 } from "./raw-source-provider-normalizer";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
@@ -80,6 +80,118 @@ const SEMANTIC_IDENTIFIER_KEYS = new Set([
   "winner_identifier",
 ]);
 
+type SemanticIdentifierContract = Readonly<{
+  allowArray?: boolean;
+  validate: (value: string) => boolean;
+}>;
+
+function safeCode(value: string, maximumBytes = 128): boolean {
+  return (
+    Buffer.byteLength(value, "utf8") <= maximumBytes &&
+    /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$/u.test(value) &&
+    isContactFreeText(value)
+  );
+}
+
+function safeProviderIdentifier(value: string): boolean {
+  return (
+    Buffer.byteLength(value, "utf8") <= 80 &&
+    /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]{0,79}$/u.test(value) &&
+    isContactFreeText(value)
+  );
+}
+
+function safeHttpsSource(value: string): boolean {
+  if (!isContactFreeText(value)) return false;
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+const semanticIdentifierContracts = new Map<
+  string,
+  SemanticIdentifierContract
+>([
+  ["wikidata_qid", { validate: (value) => /^Q[1-9]\d{0,15}$/u.test(value) }],
+  [
+    "osm_id",
+    { validate: (value) => /^(?:node|way|relation)\/\d{1,20}$/u.test(value) },
+  ],
+  [
+    "ted.publication_number",
+    { validate: (value) => /^\d{1,9}(?:-\d{4})?$/u.test(value) },
+  ],
+  [
+    "ted.cpv",
+    { allowArray: true, validate: (value) => /^\d{8}$/u.test(value) },
+  ],
+  ["ted.winner_identifier", { validate: safeProviderIdentifier }],
+  [
+    "fda.registration_number",
+    { validate: (value) => /^\d{1,32}$/u.test(value) },
+  ],
+  ["fda.fei_number", { validate: (value) => /^\d{1,32}$/u.test(value) }],
+  [
+    "fda.owner_operator_numbers",
+    { allowArray: true, validate: (value) => /^\d{1,32}$/u.test(value) },
+  ],
+  ["gleif.lei", { validate: (value) => /^[A-Z0-9]{20}$/u.test(value) }],
+  [
+    "gleif.parent_lei",
+    { validate: (value) => /^[A-Z0-9]{20}$/u.test(value) },
+  ],
+  [
+    "gleif.ultimate_parent_lei",
+    { validate: (value) => /^[A-Z0-9]{20}$/u.test(value) },
+  ],
+  ["gleif.legal_form_code", { validate: safeCode }],
+  ["wikidata.qid", { validate: (value) => /^Q[1-9]\d{0,15}$/u.test(value) }],
+  [
+    "wikidata.parent_qid",
+    { validate: (value) => /^Q[1-9]\d{0,15}$/u.test(value) },
+  ],
+  ["wikidata.lei", { validate: (value) => /^[A-Z0-9]{20}$/u.test(value) }],
+  [
+    "wikidata.isin",
+    { validate: (value) => /^[A-Z]{2}[A-Z0-9]{9}\d$/u.test(value) },
+  ],
+  [
+    "structured_harvest.hiring_signal.source",
+    {
+      validate: (value) =>
+        ["sitemap", "ats:greenhouse", "ats:lever", "ats:ashby"].includes(
+          value,
+        ) || safeHttpsSource(value),
+    },
+  ],
+  [
+    "intent.events.evidence.source",
+    { validate: (value) => ["ted", "samgov", "openfda"].includes(value) },
+  ],
+  ["intent.events.evidence.notice", { validate: safeCode }],
+  [
+    "intent.events.evidence.cpv",
+    { allowArray: true, validate: (value) => /^\d{8}$/u.test(value) },
+  ],
+  [
+    "intent.events.evidence.naics",
+    { allowArray: true, validate: (value) => /^\d{2,6}$/u.test(value) },
+  ],
+  [
+    "intent.events.evidence.product_code",
+    { validate: (value) => /^[A-Z]{3}$/u.test(value) },
+  ],
+  ["intent.events.evidence.k_number", { validate: safeCode }],
+]);
+
 interface SanitizeState {
   remaining: number;
 }
@@ -102,6 +214,7 @@ function sanitizeValue(
   value: unknown,
   state: SanitizeState,
   depth: number,
+  path: readonly string[],
 ): unknown {
   state.remaining -= 1;
   if (
@@ -118,14 +231,20 @@ function sanitizeValue(
     const terms = value.filter(predicate);
     return terms.length ? [...new Set(terms)] : undefined;
   }
+  const semanticContract = SEMANTIC_IDENTIFIER_KEYS.has(key)
+    ? semanticIdentifierContracts.get(path.join("."))
+    : undefined;
+  if (SEMANTIC_IDENTIFIER_KEYS.has(key) && !semanticContract) {
+    return undefined;
+  }
   if (value === null) return undefined;
   if (typeof value === "boolean") return value;
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : undefined;
   }
   if (typeof value === "string") {
-    const safeString = SEMANTIC_IDENTIFIER_KEYS.has(key)
-      ? isSecretFreeText(value)
+    const safeString = semanticContract
+      ? semanticContract.validate(value)
       : isContactFreeText(value);
     return value.normalize("NFKC") === value &&
       Buffer.byteLength(value, "utf8") <= 1_024 &&
@@ -134,9 +253,12 @@ function sanitizeValue(
       : undefined;
   }
   if (Array.isArray(value)) {
+    if (semanticContract && semanticContract.allowArray !== true) {
+      return undefined;
+    }
     if (value.length > 50) return undefined;
     const items = value
-      .map((item) => sanitizeValue(key, item, state, depth + 1))
+      .map((item) => sanitizeValue(key, item, state, depth + 1, path))
       .filter((item) => item !== undefined);
     return items.length ? items : undefined;
   }
@@ -145,7 +267,13 @@ function sanitizeValue(
   if (entries.length > 64) return undefined;
   const sanitized = Object.fromEntries(
     entries.flatMap(([nestedKey, item]) => {
-      const sanitized = sanitizeValue(nestedKey, item, state, depth + 1);
+      const sanitized = sanitizeValue(
+        nestedKey,
+        item,
+        state,
+        depth + 1,
+        [...path, nestedKey],
+      );
       return sanitized === undefined ? [] : [[nestedKey, sanitized]];
     }),
   );
@@ -167,7 +295,7 @@ export function sanitizeCanonicalCompanyAttributes(
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
       if (!RETAINED_TOP_LEVEL_KEYS.has(key)) return [];
-      const sanitized = sanitizeValue(key, item, state, 0);
+      const sanitized = sanitizeValue(key, item, state, 0, [key]);
       return sanitized === undefined ? [] : [[key, sanitized]];
     }),
   );
@@ -188,4 +316,11 @@ export function mergeCanonicalCompanyAttributes(
     ...safeNext,
     ...(products.length ? { products: [...new Set(products)] } : {}),
   };
+}
+
+export function canonicalCompanyAttributesEqual(
+  left: unknown,
+  right: unknown,
+): boolean {
+  return isDeepStrictEqual(left, right);
 }

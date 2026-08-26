@@ -163,9 +163,22 @@ describe("executeQuery Raw Source v2 persistence", () => {
       ];
     });
     const directCreateMany = vi.fn(async () => ({ count: 0 }));
+    let runStats: Record<string, unknown> = {};
+    const queryRaw = vi.fn(
+      async (statement: { strings?: readonly string[]; values: readonly unknown[] }) =>
+        statement.strings?.join("?").includes("FROM discovery_run")
+          ? [
+              {
+                id: "40000000-0000-4000-8000-000000000001",
+                plan_id: "50000000-0000-4000-8000-000000000001",
+                stats: runStats,
+              },
+            ]
+          : writer(statement),
+    );
     const tx = {
       $executeRaw: vi.fn(async () => 1),
-      $queryRaw: writer,
+      $queryRaw: queryRaw,
       rawSourceRecord: {
         findMany: vi.fn(async () => []),
         createMany: directCreateMany,
@@ -176,6 +189,12 @@ describe("executeQuery Raw Source v2 persistence", () => {
                 !where.ingestStatus || row.ingestStatus === where.ingestStatus,
             ).length,
         ),
+      },
+      discoveryRun: {
+        update: vi.fn(async ({ data }: { data: { stats: Record<string, unknown> } }) => {
+          runStats = data.stats;
+          return {};
+        }),
       },
       usageLedger: { create: vi.fn(async () => ({})) },
     };
@@ -274,6 +293,8 @@ describe("executeQuery Raw Source v2 persistence", () => {
       activities.executeQuery({
         workspaceId: binding.scopeKey,
         runId: "40000000-0000-4000-8000-000000000001",
+        planId: "50000000-0000-4000-8000-000000000001",
+        queryOrdinal: 0,
         query: {
           source_class: "company_registry",
           filters: {},

@@ -141,6 +141,15 @@ describe("durable Discovery query receipts", () => {
     ).toThrow("DISCOVERY_QUERY_RECEIPT_STORE_LIMIT");
   });
 
+  it("rejects forged non-object stats instead of treating them as an empty store", () => {
+    expect(() => readDiscoveryQueryReceipt("forged", "a".repeat(64))).toThrow(
+      "DISCOVERY_QUERY_RECEIPT_STORE_INVALID",
+    );
+    expect(() => mergeDiscoveryQueryReceipt([], receipt())).toThrow(
+      "DISCOVERY_QUERY_RECEIPT_STORE_INVALID",
+    );
+  });
+
   it("derives exact per-query, per-source, and total governance accounting", () => {
     const first = receipt();
     const second = receipt({
@@ -175,6 +184,7 @@ describe("durable Discovery query receipts", () => {
           usageQuantity: 1,
           costCents: 7,
           providers: ["openfda", "ted"],
+          provider: "openfda+ted",
         },
       },
       rawGovernance: {

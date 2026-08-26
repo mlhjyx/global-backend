@@ -4,6 +4,7 @@ import { companyIdentity } from '../discovery/identity';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import {
+  canonicalCompanyAttributesEqual,
   mergeCanonicalCompanyAttributes,
   sanitizeCanonicalCompanyAttributes,
 } from '../discovery/canonical-company-attributes';
@@ -154,22 +155,61 @@ export class TenantProjectionService {
             prepared: preparedRaw,
           });
 
+          const mergedAttributes = mergeCanonicalCompanyAttributes(
+            prior?.attributes,
+            attributes,
+          );
+          const attributesChanged = prior
+            ? materialization.attributesRequireRepair ||
+              !canonicalCompanyAttributesEqual(
+                mergedAttributes,
+                prior.attributes,
+              )
+            : true;
+          const domainChanged = Boolean(
+            prior &&
+              preparedCompany.domain &&
+              preparedCompany.domain !== prior.domain,
+          );
+          const countryChanged = Boolean(
+            prior &&
+              preparedCompany.country &&
+              preparedCompany.country !== prior.country,
+          );
+          const canonicalChanged =
+            !prior || attributesChanged || domainChanged || countryChanged;
+          const existingLink = prior
+            ? await tx.identityLink.findFirst({
+                where: { canonicalId: prior.id, rawRecordId: raw.id },
+                select: { id: true },
+              })
+            : null;
+          if (existingLink && !canonicalChanged) continue;
+
           // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
           // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
           const canonical = prior
-            ? await tx.canonicalCompany.update({
-                where: { id: prior.id },
-                data: {
-                  // 后到的源只补缺（domain/country），不覆盖已有
-                  ...(preparedCompany.domain ? { domain: { set: preparedCompany.domain } } : {}),
-                  ...(preparedCompany.country ? { country: { set: preparedCompany.country } } : {}),
-                  attributes: mergeCanonicalCompanyAttributes(
-                    prior.attributes,
-                    attributes,
-                  ) as Prisma.InputJsonValue,
-                  version: { increment: 1 },
-                },
-              })
+            ? canonicalChanged
+              ? await tx.canonicalCompany.update({
+                  where: { id: prior.id },
+                  data: {
+                    // 后到的源只补缺（domain/country），不覆盖已有
+                    ...(domainChanged
+                      ? { domain: { set: preparedCompany.domain } }
+                      : {}),
+                    ...(countryChanged
+                      ? { country: { set: preparedCompany.country } }
+                      : {}),
+                    ...(attributesChanged
+                      ? {
+                          attributes:
+                            mergedAttributes as Prisma.InputJsonValue,
+                        }
+                      : {}),
+                    version: { increment: 1 },
+                  },
+                })
+              : { id: prior.id }
             : await tx.canonicalCompany.create({
                 data: {
                   workspaceId,
@@ -181,14 +221,18 @@ export class TenantProjectionService {
                   dedupeKey: identity.dedupeKey,
                 },
               });
-          projected += 1;
+          if (canonicalChanged) projected += 1;
 
           // Downstream facts reference the governed Raw receipt, never SourceEntity directly.
-          const linkExists = await tx.identityLink.findFirst({
-            where: { canonicalId: canonical.id, rawRecordId: raw.id },
-            select: { id: true },
-          });
-          if (linkExists) continue;
+          const linkExists = existingLink;
+          if (linkExists) {
+            // The original Raw/IdentityLink/FieldEvidence transaction already
+            // carries the provenance for this canonical repair. Do not append
+            // a duplicate `(entity, field, raw)` row: the database enforces
+            // that evidence identity as unique, and 2000 has already applied
+            // the same full-path sanitizer to the retained evidence value.
+            continue;
+          }
           await tx.identityLink.create({
             data: {
               workspaceId,

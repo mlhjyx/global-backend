@@ -120,6 +120,7 @@ const databases = Object.freeze({
   evidenceChainRollback: "task6a_raw_evidence_chain_rollback",
   pathSanitizerRollback: "task6a_raw_path_sanitizer_rollback",
   pathCleanupRollback: "task6a_raw_path_cleanup_rollback",
+  pathCleanup: "task6a_raw_path_cleanup",
   dottedReceipt: "task6a_raw_dotted_receipt",
   locks: "task6a_raw_locks",
 });
@@ -484,8 +485,7 @@ function seedCurrentMainClone(database = databases.upgrade) {
       '${COMPANY_A}','${WORKSPACE_A}','Unsafe A',NULL,
       '{
         "products":["pump","LLZ","SECRET","person@example.test"],
-        "gleif":{"lei":"529900SAFEENTITY001","legal_name":"Parker Hannifin"},
-        "digital_footprint":{"source":"Call 555-0100"},
+        "gleif":{"lei":"529900T8BM49AURSDO55","legal_name":"Parker Hannifin"},
         "contact_email":"person@example.test",
         "owner_name":"alice van smith",
         "custom_payload":{"notes":"unbounded historical prose"}
@@ -569,12 +569,40 @@ function seedCurrentMainClone(database = databases.upgrade) {
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
         '{"products":["AB"],"custom_payload":{"notes":"forbidden free text"}}',
         'registry','${EVIDENCE_CHAIN_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
-      ),
-      (
-        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}',
-        'digital_footprint.source','"Call 555-0100"',
-        'registry','${SAFE_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
       );
+  `,
+  );
+}
+
+function seedPathSemanticCollision(database) {
+  dockerPsql(
+    database,
+    `
+    UPDATE canonical_company
+    SET attributes = attributes ||
+      '{"digital_footprint":{"source":"Call 555-0100"}}'::jsonb
+    WHERE id='${COMPANY_A}';
+    INSERT INTO field_evidence(
+      id,workspace_id,entity_type,entity_id,field,value,provider_key,
+      raw_record_id,confidence,license,allowed_actions,fetched_at
+    ) VALUES (
+      gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}',
+      'digital_footprint','{"source":"Call 555-0100"}',
+      'registry_path_collision','${SAFE_RAW_A}',1,'public',
+      '["display","match"]','2026-08-25T16:31:00Z'
+    ),(
+      gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}',
+      'digital_footprint',
+      '{
+        "_historicalCleanup":"canonical-attribute-cleanup/v2",
+        "reason":"UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+        "originalValueHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "predecessorReceiptHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "retainedValue":{"source":"Call 555-0100"}
+      }',
+      'registry_path_v2_collision','${EVIDENCE_CHAIN_RAW_A}',1,'public',
+      '["display","match"]','2026-08-25T16:31:00Z'
+    );
   `,
   );
 }
@@ -777,6 +805,32 @@ before(() => {
   seedCurrentMainClone(databases.dottedReceipt);
   seedDottedProductsEvidence(databases.dottedReceipt);
   migrateDeploy(databases.dottedReceipt);
+
+  migrateDeploy(databases.pathCleanup, baseline.schemaPath);
+  seedCurrentMainClone(databases.pathCleanup);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+  ]) {
+    dockerPsql(databases.pathCleanup, readFileSync(migrationPath, "utf8"));
+  }
+  seedPathSemanticCollision(databases.pathCleanup);
+  dockerPsql(
+    databases.pathCleanup,
+    readFileSync(pathSanitizerMigrationPath, "utf8"),
+  );
+  dockerPsql(
+    databases.pathCleanup,
+    readFileSync(pathCleanupMigrationPath, "utf8"),
+  );
 
   migrateDeploy(databases.backfillRollback, baseline.schemaPath);
   seedCurrentMainClone(databases.backfillRollback);
@@ -1006,13 +1060,17 @@ before(() => {
     finalCorrectionMigrationPath,
     writerParityMigrationPath,
     evidenceChainMigrationPath,
-    pathSanitizerMigrationPath,
   ]) {
     dockerPsql(
       databases.pathCleanupRollback,
       readFileSync(migrationPath, "utf8"),
     );
   }
+  seedPathSemanticCollision(databases.pathCleanupRollback);
+  dockerPsql(
+    databases.pathCleanupRollback,
+    readFileSync(pathSanitizerMigrationPath, "utf8"),
+  );
   const injectedPathCleanup = readFileSync(
     pathCleanupMigrationPath,
     "utf8",
@@ -1221,7 +1279,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       {
         gleif: {
-          lei: "529900SAFEENTITY001",
+          lei: "529900T8BM49AURSDO55",
           legal_name: "Parker Hannifin",
         },
         products: ["pump", "LLZ"],
@@ -1232,7 +1290,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.upgrade,
         `SELECT count(*) FROM field_evidence WHERE entity_id='${COMPANY_A}';`,
       ),
-      "9",
+      "8",
     );
     const cleanedEvidence = JSON.parse(
       dockerPsql(
@@ -1289,29 +1347,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          (attributes #> '{digital_footprint,structured_org}' IS NULL)::text)
        FROM canonical_company WHERE id='${COMPANY_A}';`,
     );
-    assert.equal(correctedCanonical, "4|true|true");
-    assert.deepEqual(
-      JSON.parse(
-        dockerPsql(
-          databases.upgrade,
-          `SELECT jsonb_build_object(
-             'value',value,'class',data_class,'actions',allowed_actions
-           )::text
-           FROM field_evidence
-           WHERE entity_id='${COMPANY_A}'
-             AND field='digital_footprint.source';`,
-        ),
-      ),
-      {
-        value: {
-          _historicalCleanup: "canonical-attribute-cleanup/v2",
-          reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
-          originalValueHash: "5404d8b66cb280539521998c3d56b30cac838dead037463fa46ff72908c792b9",
-        },
-        class: "red",
-        actions: [],
-      },
-    );
+    assert.equal(correctedCanonical, "3|true|true");
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -1345,6 +1381,101 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       class: "green",
       actions: ["display"],
     });
+  });
+
+  it("cleans historical full-path collisions once without deleting or weakening restrictive evidence", () => {
+    assert.equal(
+      dockerPsql(
+        databases.pathCleanup,
+        `SELECT concat_ws('|',version::text,
+          (attributes #> '{digital_footprint,source}' IS NULL)::text,
+          (SELECT count(*)::text FROM field_evidence
+             WHERE entity_id='${COMPANY_A}'),
+          (SELECT count(*)::text FROM field_evidence
+             WHERE raw_record_id='${RESTRICTED_RAW_A}'
+               AND value::text LIKE '%protected.person@example.test%')
+        ) FROM canonical_company WHERE id='${COMPANY_A}';`,
+      ),
+      "4|true|10|1",
+    );
+    assert.deepEqual(
+      JSON.parse(
+        dockerPsql(
+          databases.pathCleanup,
+          `SELECT jsonb_build_object(
+             'value',value,'class',data_class,'actions',allowed_actions
+           )::text
+           FROM field_evidence
+           WHERE entity_id='${COMPANY_A}'
+             AND field='digital_footprint'
+             AND provider_key='registry_path_collision';`,
+        ),
+      ),
+      {
+        value: {
+          _historicalCleanup: "canonical-attribute-cleanup/v2",
+          reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+          originalValueHash: "f7b7eecb5b69d0e0f5cf7f7cb4e5f98a6d22c7f141d53ab32352bd9a3ca1b597",
+        },
+        class: "red",
+        actions: [],
+      },
+    );
+    assert.deepEqual(
+      JSON.parse(
+        dockerPsql(
+          databases.pathCleanup,
+          `SELECT jsonb_build_object(
+             'value',value,'class',data_class,'actions',allowed_actions
+           )::text
+           FROM field_evidence
+           WHERE entity_id='${COMPANY_A}'
+             AND field='digital_footprint'
+             AND provider_key='registry_path_v2_collision';`,
+        ),
+      ),
+      {
+        value: {
+          _historicalCleanup: "canonical-attribute-cleanup/v3",
+          reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+          originalValueHash: "a".repeat(64),
+          predecessorReceiptHash: "e000760d92e0936eaa0557c1b97a476b728b2a42361d7614e0fcc4bd230e15b7",
+        },
+        class: "red",
+        actions: [],
+      },
+    );
+    const beforeRerun = dockerPsql(
+      databases.pathCleanup,
+      `SELECT concat_ws('|',version::text,
+        (SELECT encode(digest(raw_source_canonical_json_v1(value),'sha256'),'hex')
+           FROM field_evidence
+           WHERE entity_id='${COMPANY_A}'
+             AND field='digital_footprint'
+             AND provider_key='registry_path_collision'),
+        (SELECT count(*)::text FROM field_evidence
+           WHERE entity_id='${COMPANY_A}')
+      ) FROM canonical_company WHERE id='${COMPANY_A}';`,
+    );
+    dockerPsql(
+      databases.pathCleanup,
+      readFileSync(pathCleanupMigrationPath, "utf8"),
+    );
+    assert.equal(
+      dockerPsql(
+        databases.pathCleanup,
+        `SELECT concat_ws('|',version::text,
+          (SELECT encode(digest(raw_source_canonical_json_v1(value),'sha256'),'hex')
+             FROM field_evidence
+             WHERE entity_id='${COMPANY_A}'
+               AND field='digital_footprint'
+               AND provider_key='registry_path_collision'),
+          (SELECT count(*)::text FROM field_evidence
+             WHERE entity_id='${COMPANY_A}')
+        ) FROM canonical_company WHERE id='${COMPANY_A}';`,
+      ),
+      beforeRerun,
+    );
   });
 
   it("keeps a dotted products v2 receipt byte-stable across direct sanitization and a second 1800 pass", () => {
@@ -3408,7 +3539,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                AND value::text LIKE '%person@example.test%')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "true|true|true|9|3",
+      "true|true|true|8|3",
     );
   });
 
@@ -3514,7 +3645,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "true",
         "red",
         "[]",
-        "9",
+        "8",
         "2",
         "true",
         "2",
@@ -3570,23 +3701,26 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           version::text,
           (attributes #>> '{digital_footprint,source}' =
             'Call 555-0100')::text,
-          (SELECT value #>> '{}' = 'Call 555-0100'
+          (SELECT value #>> '{source}' = 'Call 555-0100'
              FROM field_evidence
              WHERE entity_id='${COMPANY_A}'
-               AND field='digital_footprint.source')::text,
+               AND field='digital_footprint'
+               AND provider_key='registry_path_collision')::text,
           (SELECT data_class
              FROM field_evidence
              WHERE entity_id='${COMPANY_A}'
-               AND field='digital_footprint.source'),
+               AND field='digital_footprint'
+               AND provider_key='registry_path_collision'),
           (SELECT allowed_actions::text
              FROM field_evidence
              WHERE entity_id='${COMPANY_A}'
-               AND field='digital_footprint.source'),
+               AND field='digital_footprint'
+               AND provider_key='registry_path_collision'),
           (SELECT count(*)::text FROM field_evidence
              WHERE entity_id='${COMPANY_A}')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "3|true|true|green|[\"display\", \"match\"]|9",
+      "3|true|true|green|[\"display\", \"match\"]|10",
     );
   });
 });
