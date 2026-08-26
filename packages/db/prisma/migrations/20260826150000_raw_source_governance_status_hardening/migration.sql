@@ -1,6 +1,8 @@
--- Close every remaining Raw status/scalar boundary without rewriting 0900-1400.
--- This forward migration deliberately keeps the proven 1300 relational writer
--- as an uncallable implementation detail behind stricter 1500 validation.
+-- Pre-release reissue: close every remaining Raw status/scalar boundary
+-- without rewriting 0900-1400. The prior 1500 checksum was never pushed or
+-- applied to a retained database and is forbidden by the experiment checker.
+-- This migration keeps the proven 1300 relational writer as an uncallable
+-- implementation detail behind stricter 1500 validation.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
@@ -589,7 +591,9 @@ $$;
 UPDATE canonical_company company
 SET attributes = public.sanitize_canonical_company_attributes_v2(
   company.attributes
-)
+),
+    version = company.version + 1,
+    updated_at = statement_timestamp()
 WHERE company.attributes IS DISTINCT FROM
   public.sanitize_canonical_company_attributes_v2(company.attributes);
 

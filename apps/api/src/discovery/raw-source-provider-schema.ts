@@ -197,7 +197,7 @@ function providerIdentifierToken(
     value.normalize("NFKC") === value &&
     Buffer.byteLength(value, "utf8") <= maximumBytes &&
     /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]*$/u.test(value) &&
-    isSecretFreeText(value)
+    isContactFreeText(value)
   );
 }
 
@@ -326,7 +326,8 @@ function validIdentifier(providerKey: string, value: unknown): boolean {
   if (providerKey === "ted") {
     return (
       /^ted-natid(?::[a-z]{2})?$/u.test(scheme) &&
-      /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]{0,79}$/u.test(identifier)
+      /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]{0,79}$/u.test(identifier) &&
+      isContactFreeText(identifier)
     );
   }
   if (providerKey === "openfda") {

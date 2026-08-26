@@ -1081,7 +1081,7 @@ model DiscoveryRun {
   @@map("discovery_run")
 }
 
-/// Raw Zone（PRD 8.7）：Provider 原始返回原样落地，永不直接进领域层（ADR-017）。
+/// Raw Zone（PRD 8.7）：Raw v2 是 provider-bound、governed/minimized 的不可变 observation receipt，不是 untouched wire capture；永不直接进领域层（ADR-017）。
 model RawSourceRecord {
   id                   String    @id @default(uuid()) @db.Uuid
   workspaceId          String    @map("workspace_id") @db.Uuid

@@ -1,7 +1,8 @@
--- Historical stored-FieldEvidence correction using the closed adapter and
--- value-free audit surface installed by 2100. This migration is DML-only,
--- preserves provenance columns/times and restrictive evidence bytes, and
--- remains HOLD for retained-size timing/locks and retained application.
+-- Pre-release reissue of the historical stored-FieldEvidence correction using
+-- the closed adapter and value-free audit surface installed by 2100. The prior
+-- 2200 checksum was never pushed/applied to retained data and is checker-HOLD.
+-- This migration is DML-only, preserves provenance columns/times and
+-- restrictive evidence bytes, and remains HOLD for retained application.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
@@ -57,6 +58,9 @@ WITH source_rows AS MATERIALIZED (
       THEN source.value->>'predecessorReceiptHash'
       ELSE NULL
     END AS predecessor_receipt_hash,
+    CASE WHEN source.known_receipt THEN encode(digest(
+      public.raw_source_canonical_json_v1(source.value),'sha256'
+    ),'hex') ELSE NULL END AS current_receipt_hash,
     public.raw_source_sanitize_stored_company_field_evidence_v1(
       source.field,source.value
     ) AS direct_sanitized_value,
@@ -150,7 +154,8 @@ SELECT decision.workspace_id,
   CASE WHEN decision.recoverable THEN 'RESTORED'
     ELSE 'UNRECOVERABLE_HOLD' END,
   decision.original_value_hash,
-  decision.predecessor_receipt_hash,
+  CASE WHEN decision.recoverable THEN decision.current_receipt_hash
+    ELSE decision.predecessor_receipt_hash END,
   CASE WHEN decision.recoverable THEN decision.recovery_candidate_hash
     ELSE NULL END,
   decision.fetched_at,

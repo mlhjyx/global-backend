@@ -211,9 +211,9 @@ const MIXED_SITE_SECTION_ORIGINAL_VALUE_HASH =
 const POST_2200_UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH =
   "81274b3550f64bae21465854464f7a7a83c6e34f309039e49d04973e983dc090";
 const TENDER_V2_CURRENT_RECEIPT_HASH =
-  "e4e8cb71abd5f7edf9c850b8195913e6453284f0b7c443c93083c804de9bc9ca";
+  "525b9e4fe9d8ca4551d183995ddc53a2d1b422f44f2b0d366c1eded67f44ad4b";
 const TENDER_V3_CURRENT_RECEIPT_HASH =
-  "5d2c9d65fd8e25089eaf9a782169b358196b06a083a37da24262c3598a26945c";
+  "c3cfb200899b4edcf1455aa15de9caa5087d37b82fa26ae97d04381eab6d5184";
 
 let baselineDirectory;
 let firstDeployOutput = "";
@@ -1907,7 +1907,7 @@ after(() => {
 });
 
 describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", () => {
-  it("keeps every 0900-2000 migration byte-identical to the authorized Task 6A.3 base", () => {
+  it("keeps frozen 0900-1400/1600-2000 bytes and binds the authorized 1500 reissue", () => {
     assert.deepEqual(
       [
         schemaMigrationPath,
@@ -1930,12 +1930,31 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "e47383e385783156fda945f70dbeab88cef675777aa09ccf9a1e29d7651f933c",
         "acde428d93524c78eb85250b0534a5ec37f8448abbc2983c52f2a7c07a341cba",
         "b1a22391272ea71285332e8765cd9b92f9a3e4e98fb3a2109226f6537c1ad6cc",
-        "952a96461ac38028e758a89c93bf320a4122f3a4db6273ce9355bdfd9262196c",
+        "61788ae2e4c914119b4408f1566634a1fbb5b035b987b9d958a7bb94e2dd49d8",
         "f8909dda8108b75416a050ea8cf29a57e7f2e1387a31f7ac7a9d09211ca42f77",
         "9cf80d782330417fa12f8f500214aa40e1469c4423f462cd2bcd2aa79fe8fe1e",
         "ec18e777ef578d46a90f9158da5cf1942008da36402550877469113b4f80b1b0",
         "5a601a60427fc97f2fd06d5582844ae33441df69d253dbff43fd586700d1a994",
         "39e2d28f7c353b021e7a22fbdc2cdd7fdfcca7d7b66c070a3defbfaab783f5d1",
+      ],
+    );
+  });
+
+  it("binds the reviewed 2100-2500 correction lineage", () => {
+    assert.deepEqual(
+      [
+        storedFieldAdapterMigrationPath,
+        storedFieldCleanupMigrationPath,
+        siteSectionContractMigrationPath,
+        siteSectionCleanupMigrationPath,
+        tedIdentifierContactGateMigrationPath,
+      ].map((migrationPath) => sha256(readFileSync(migrationPath))),
+      [
+        "859c1e655b4946bcfb12940d755a1fec97d1b2f47269314a02d5594996236cf5",
+        "aea5db4bdfc240c3767657410be47b5c3d138ac9725726f30c7cf4830668472b",
+        "eb04e4f4fafccb1acbd49a0fe40d5ceae3b8c2642e77e75c57be605444905dc9",
+        "e755ff504ddb0ffa9e9d7da7b49f7d02e8eb082a774d1a79758c12b353e715c6",
+        "8f70627cf475a18145ea4ef6cc4ad872295f5ac57b157a0af98255f09ff0da1d",
       ],
     );
   });
@@ -2174,7 +2193,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          (attributes #> '{digital_footprint,structured_org}' IS NULL)::text)
        FROM canonical_company WHERE id='${COMPANY_A}';`,
     );
-    assert.equal(correctedCanonical, "3|true|true");
+    assert.equal(correctedCanonical, "4|true|true");
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -2223,7 +2242,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                AND value::text LIKE '%protected.person@example.test%')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "4|true|10|1",
+      "5|true|10|1",
     );
     assert.deepEqual(
       JSON.parse(
@@ -4554,6 +4573,23 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "85600000-0000-4000-8000-000000000006|DE111|DE111",
       ].join("\n"),
     );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',
+          has_function_privilege('app_user',
+            'raw_source_ted_national_identifier_contact_valid_v1(text)',
+            'EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_identifier_valid_v2(text,jsonb)','EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_provider_payload_valid_v2(text,jsonb)','EXECUTE')::text,
+          has_function_privilege('app_user',
+            'write_raw_source_record_v2(jsonb)','EXECUTE')::text
+        );`,
+      ),
+      "false|false|false|true",
+    );
   });
 
   it("denies hostile app_user payload forgery, unbounded JSON, and immutable cost drift", () => {
@@ -5282,7 +5318,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           ) IS NULL)::text
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "2|true|2|false|true|true",
+      "3|true|2|false|true|true",
     );
   });
 
@@ -5343,7 +5379,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "red",
         "[]",
         "8",
-        "2",
+        "3",
         "true",
         "2",
       ].join("|"),
@@ -5474,7 +5510,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
              WHERE entity_id='${COMPANY_A}')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      '3|true|true|green|["display", "match"]|10',
+      '4|true|true|green|["display", "match"]|10',
     );
   });
 
