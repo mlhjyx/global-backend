@@ -173,7 +173,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
   });
 
-  it('removes a prior role mailbox when its own domain becomes suppressed', async () => {
+  it('does not use a linked Raw replay to repair a prior role mailbox', async () => {
     const harness = projectionHarness(
       [entity(1, 'buyer@agency.example')],
       [[{ type: 'domain', value: 'agency.example' }]],
@@ -186,17 +186,16 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       },
     );
 
-    await harness.service.projectSource(
+    const result = await harness.service.projectSource(
       '11111111-1111-4111-8111-111111111111',
       source.id,
     );
 
-    expect(harness.updates).toHaveLength(1);
-    expect(harness.updates[0].attributes).not.toHaveProperty('contact_email');
-    expect(harness.updates[0].attributes).toHaveProperty('products', ['pump']);
+    expect(result).toMatchObject({ projected: 0 });
+    expect(harness.updates).toHaveLength(0);
   });
 
-  it('always removes an unsuppressed prior mailbox and unsafe legacy Raw-derived attributes', async () => {
+  it('leaves unsafe current-state cleanup to 2100/2200 on a linked Raw replay', async () => {
     const harness = projectionHarness([entity(1)], [[]], {
       id: 'company-existing',
       attributes: {
@@ -209,16 +208,13 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       },
     });
 
-    await harness.service.projectSource(
+    const result = await harness.service.projectSource(
       '11111111-1111-4111-8111-111111111111',
       source.id,
     );
 
-    expect(harness.updates).toHaveLength(1);
-    expect(harness.updates[0].attributes).toEqual({
-      products: ['pump'],
-      gleif: { lei: '529900T8BM49AURSDO55' },
-    });
+    expect(result).toMatchObject({ projected: 0 });
+    expect(harness.updates).toHaveLength(0);
   });
 
   it('refreshes suppression facts for each chunk so a later fact blocks later projection', async () => {
