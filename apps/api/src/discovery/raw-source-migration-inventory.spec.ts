@@ -38,6 +38,14 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826160000_raw_source_governance_final_correction",
     checksum: "1".repeat(64),
   },
+  {
+    migrationName: "20260826170000_raw_source_governance_writer_parity",
+    checksum: "2".repeat(64),
+  },
+  {
+    migrationName: "20260826180000_raw_source_evidence_chain_correction",
+    checksum: "3".repeat(64),
+  },
 ];
 
 const REISSUED_1600_MIGRATION =

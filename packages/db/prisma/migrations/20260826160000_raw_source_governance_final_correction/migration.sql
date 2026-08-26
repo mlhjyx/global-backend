@@ -1,4 +1,7 @@
--- Forward-only final Raw Source correction. Migrations 0900-1500 are frozen.
+-- Pre-release reissue of the final Raw Source helper/ACL correction.
+-- Migrations 0900-1500 are frozen. The prior reviewed 1600 checksum was never
+-- pushed or applied to a retained database; its historical DML moved to 1800
+-- so the original evidence digest survives v1 receipt upgrades.
 -- Retained-size lock/timing validation remains HOLD; this migration is not a
 -- retained-database or deployment authorization.
 BEGIN;
@@ -140,9 +143,9 @@ DECLARE
   item_index INTEGER;
   normalized_field TEXT := lower(regexp_replace(p_field,'[^a-z0-9]','','g'));
 BEGIN
-  -- Preserve an exact prior cleanup receipt when its optional retained value
-  -- already satisfies the current sanitizer. This avoids receipt-on-receipt
-  -- churn while still reprocessing stale retained values.
+  -- Preserve an exact v1 cleanup receipt when its optional retained value
+  -- already satisfies the current sanitizer. Stale v1 retained values are
+  -- upgraded by the DML-only 1800 migration.
   IF jsonb_typeof(p_value) = 'object'
     AND public.raw_source_json_keys_within_v2(
       p_value,
@@ -151,7 +154,38 @@ BEGIN
     )
     AND p_value->>'_historicalCleanup' = 'canonical-attribute-cleanup/v1'
     AND p_value->>'reason' = 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD'
+    AND jsonb_typeof(p_value->'originalValueHash') = 'string'
     AND p_value->>'originalValueHash' ~ '^[0-9a-f]{64}$'
+    AND (
+      NOT p_value ? 'retainedValue'
+      OR p_value->'retainedValue' IS NOT DISTINCT FROM
+        public.sanitize_canonical_company_attributes_v3(
+          p_value->'retainedValue'
+        )
+    )
+  THEN RETURN p_value; END IF;
+
+  -- Current v2 receipts are terminal sanitizer values. The predecessor hash
+  -- is present only when the immediately prior value was a v1 receipt; plain
+  -- pre-cleanup values deliberately have no predecessorReceiptHash.
+  IF jsonb_typeof(p_value) = 'object'
+    AND public.raw_source_json_keys_within_v2(
+      p_value,
+      ARRAY['_historicalCleanup','reason','originalValueHash',
+        'predecessorReceiptHash','retainedValue'],
+      ARRAY['_historicalCleanup','reason','originalValueHash']
+    )
+    AND p_value->>'_historicalCleanup' = 'canonical-attribute-cleanup/v2'
+    AND p_value->>'reason' = 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD'
+    AND jsonb_typeof(p_value->'originalValueHash') = 'string'
+    AND p_value->>'originalValueHash' ~ '^[0-9a-f]{64}$'
+    AND (
+      NOT p_value ? 'predecessorReceiptHash'
+      OR (
+        jsonb_typeof(p_value->'predecessorReceiptHash') = 'string'
+        AND p_value->>'predecessorReceiptHash' ~ '^[0-9a-f]{64}$'
+      )
+    )
     AND (
       NOT p_value ? 'retainedValue'
       OR p_value->'retainedValue' IS NOT DISTINCT FROM
@@ -198,51 +232,6 @@ BEGIN
   RETURN p_value;
 END
 $$;
-
--- Advance projection provenance only when this correction changes attributes.
-UPDATE canonical_company AS company
-SET attributes = public.sanitize_canonical_company_attributes_v3(
-      company.attributes
-    ),
-    version = company.version + 1,
-    updated_at = statement_timestamp()
-WHERE company.attributes IS DISTINCT FROM
-  public.sanitize_canonical_company_attributes_v3(company.attributes);
-
--- Preserve evidence rows and restriction immutability. Only affected,
--- non-protected values become a value-free audit receipt; safe retained values
--- may be carried solely inside the closed sanitized namespace.
-UPDATE field_evidence AS evidence
-SET value = jsonb_strip_nulls(jsonb_build_object(
-      '_historicalCleanup', 'canonical-attribute-cleanup/v2',
-      'reason', 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD',
-      'originalValueHash', encode(digest(
-        raw_source_canonical_json_v1(evidence.value), 'sha256'
-      ), 'hex'),
-      'retainedValue', CASE
-        WHEN public.raw_source_sanitize_field_evidence_v4(
-          evidence.field,evidence.value
-        ) NOT IN ('{}'::jsonb,'[]'::jsonb)
-        THEN public.raw_source_sanitize_field_evidence_v4(
-          evidence.field,evidence.value
-        )
-        ELSE NULL
-      END
-    )),
-    allowed_actions = '[]'::jsonb,
-    data_class = 'red'
-WHERE evidence.entity_type = 'company'
-  AND NOT EXISTS (
-    SELECT 1
-    FROM raw_source_governance_disposition AS disposition
-    WHERE disposition.workspace_id = evidence.workspace_id
-      AND disposition.raw_record_id = evidence.raw_record_id
-      AND disposition.effect = 'RESTRICT_PROCESSING'
-  )
-  AND evidence.value IS DISTINCT FROM
-    public.raw_source_sanitize_field_evidence_v4(
-      evidence.field,evidence.value
-    );
 
 REVOKE ALL ON FUNCTION raw_source_provider_company_name_valid_v2(TEXT)
   FROM PUBLIC, app_user;

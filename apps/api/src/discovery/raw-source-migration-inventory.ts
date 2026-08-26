@@ -39,6 +39,15 @@ export const HISTORICAL_PR407_RAW_MIGRATIONS: readonly ExpectedMigrationChecksum
     }),
   ]);
 
+export const PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS: readonly ExpectedMigrationChecksum[] =
+  Object.freeze([
+    Object.freeze({
+      migrationName: "20260826160000_raw_source_governance_final_correction",
+      checksum:
+        "d8783aa0b513679d8944841c7e55b03812cc9709cc6d6c39005a9caadeaeea11",
+    }),
+  ]);
+
 export type RawSourceMigrationDecision = Readonly<{
   schemaVersion: "pr407-raw-source-migration-decision/v1";
   subject: "UNKNOWN" | "SUPPLIED";
@@ -46,6 +55,7 @@ export type RawSourceMigrationDecision = Readonly<{
   state:
     | "LIVE_EXPERIMENT_DB_NOT_SUPPLIED"
     | "OLD_PR_MIGRATION_PRESENT"
+    | "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT"
     | "MIGRATION_INVENTORY_CONFLICT"
     | "SUCCESSOR_CHECKSUM_MISMATCH"
     | "CURRENT_SUCCESSOR_INCOMPLETE"
@@ -124,6 +134,31 @@ export function assessRawSourceMigrationInventory(
       decision: "HOLD",
       state: "OLD_PR_MIGRATION_PRESENT",
       observations: historical.map(({ entry, rows }) =>
+        observation(entry, rows),
+      ),
+    });
+  }
+
+  // A locally reviewed but never deployed 1600 was reissued before release.
+  // Any database carrying its old checksum requires explicit provenance
+  // recovery and cannot be treated as a deployable predecessor.
+  const preReleaseReissued = PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS.flatMap(
+    (reissuedEntry) => {
+      const rows = rowsByName.get(reissuedEntry.migrationName) ?? [];
+      if (!rows.some((row) => row.checksum === reissuedEntry.checksum)) return [];
+      const currentEntry =
+        expectedCurrent.find(
+          (entry) => entry.migrationName === reissuedEntry.migrationName,
+        ) ?? reissuedEntry;
+      return [{ entry: currentEntry, rows }];
+    },
+  );
+  if (preReleaseReissued.length) {
+    return decision({
+      subject: "SUPPLIED",
+      decision: "HOLD",
+      state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+      observations: preReleaseReissued.map(({ entry, rows }) =>
         observation(entry, rows),
       ),
     });

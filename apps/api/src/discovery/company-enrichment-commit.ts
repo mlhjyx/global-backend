@@ -35,15 +35,16 @@ export async function commitCompanyEnrichmentResults(
       [hit.key]: candidate,
     })[hit.key];
     if (governed === undefined) continue;
-    merged[hit.key] = governed;
     const governedEvidence = sanitizeCanonicalCompanyAttributes({
       [hit.key]: hit.result.attributes,
     })[hit.key];
     if (
       governedEvidence === null ||
       typeof governedEvidence !== 'object' ||
-      Array.isArray(governedEvidence)
+      Array.isArray(governedEvidence) ||
+      Object.keys(governedEvidence).length === 0
     ) continue;
+    merged[hit.key] = governed;
     governedHits.push({
       ...hit,
       result: {

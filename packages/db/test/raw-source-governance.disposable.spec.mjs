@@ -35,6 +35,10 @@ const statusHardeningMigrationName =
   "20260826150000_raw_source_governance_status_hardening";
 const finalCorrectionMigrationName =
   "20260826160000_raw_source_governance_final_correction";
+const writerParityMigrationName =
+  "20260826170000_raw_source_governance_writer_parity";
+const evidenceChainMigrationName =
+  "20260826180000_raw_source_evidence_chain_correction";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -75,6 +79,16 @@ const finalCorrectionMigrationPath = resolve(
   finalCorrectionMigrationName,
   "migration.sql",
 );
+const writerParityMigrationPath = resolve(
+  migrationRoot,
+  writerParityMigrationName,
+  "migration.sql",
+);
+const evidenceChainMigrationPath = resolve(
+  migrationRoot,
+  evidenceChainMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -88,6 +102,8 @@ const databases = Object.freeze({
   historicalCleanupRollback: "task6a_raw_history_cleanup_rollback",
   statusHardeningRollback: "task6a_raw_status_hardening_rollback",
   finalCorrectionRollback: "task6a_raw_final_correction_rollback",
+  writerParityRollback: "task6a_raw_writer_parity_rollback",
+  evidenceChainRollback: "task6a_raw_evidence_chain_rollback",
   locks: "task6a_raw_locks",
 });
 
@@ -122,6 +138,8 @@ let injectedWriterHardeningRollbackOutput = "";
 let injectedHistoricalCleanupRollbackOutput = "";
 let injectedStatusHardeningRollbackOutput = "";
 let injectedFinalCorrectionRollbackOutput = "";
+let injectedWriterParityRollbackOutput = "";
+let injectedEvidenceChainRollbackOutput = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -642,6 +660,16 @@ before(() => {
     true,
     `${finalCorrectionMigrationName} must exist`,
   );
+  assert.equal(
+    existsSync(writerParityMigrationPath),
+    true,
+    `${writerParityMigrationName} must exist`,
+  );
+  assert.equal(
+    existsSync(evidenceChainMigrationPath),
+    true,
+    `${evidenceChainMigrationName} must exist`,
+  );
   dockerPsql(
     "postgres",
     Object.values(databases)
@@ -812,6 +840,60 @@ before(() => {
     { rejects: /division by zero/u },
   );
 
+  migrateDeploy(databases.writerParityRollback, baseline.schemaPath);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.writerParityRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedWriterParity = readFileSync(
+    writerParityMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedWriterParityRollbackOutput = dockerPsql(
+    databases.writerParityRollback,
+    injectedWriterParity,
+    { rejects: /division by zero/u },
+  );
+
+  migrateDeploy(databases.evidenceChainRollback, baseline.schemaPath);
+  seedCurrentMainClone(databases.evidenceChainRollback);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.evidenceChainRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedEvidenceChain = readFileSync(
+    evidenceChainMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedEvidenceChainRollbackOutput = dockerPsql(
+    databases.evidenceChainRollback,
+    injectedEvidenceChain,
+    { rejects: /division by zero/u },
+  );
+
   migrateDeploy(databases.locks);
   dockerPsql(
     databases.locks,
@@ -906,6 +988,11 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       firstDeployOutput,
       new RegExp(finalCorrectionMigrationName, "u"),
     );
+    assert.match(firstDeployOutput, new RegExp(writerParityMigrationName, "u"));
+    assert.match(
+      firstDeployOutput,
+      new RegExp(evidenceChainMigrationName, "u"),
+    );
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -916,12 +1003,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         '${schemaMigrationName}','${backfillMigrationName}',
         '${constraintsMigrationName}','${writerMigrationName}',
         '${writerHardeningMigrationName}','${historicalCleanupMigrationName}',
-        '${statusHardeningMigrationName}','${finalCorrectionMigrationName}'
+        '${statusHardeningMigrationName}','${finalCorrectionMigrationName}',
+        '${writerParityMigrationName}','${evidenceChainMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "8",
+      "10",
     );
   });
 
@@ -1154,6 +1242,57 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           AND raw_record_id='${EVIDENCE_CHAIN_RAW_A}';`,
       ),
       "true",
+    );
+    const beforeRerun = dockerPsql(
+      databases.upgrade,
+      `SELECT concat_ws('|',
+        encode(digest(raw_source_canonical_json_v1(value),'sha256'),'hex'),
+        data_class,
+        allowed_actions::text,
+        (SELECT version::text FROM canonical_company
+          WHERE id='${COMPANY_A}'),
+        (SELECT updated_at::text FROM canonical_company
+          WHERE id='${COMPANY_A}'),
+        (SELECT count(*)::text FROM field_evidence
+          WHERE entity_id='${COMPANY_A}'),
+        (SELECT encode(digest(string_agg(
+          id::text || '|' || field || '|' ||
+          raw_source_canonical_json_v1(value) || '|' || data_class || '|' ||
+          coalesce(allowed_actions::text,'null'), E'\n' ORDER BY id
+        ),'sha256'),'hex') FROM field_evidence
+          WHERE entity_id='${COMPANY_A}')
+      ) FROM field_evidence
+      WHERE entity_id='${COMPANY_A}'
+        AND raw_record_id='${EVIDENCE_CHAIN_RAW_A}';`,
+    );
+    dockerPsql(
+      databases.upgrade,
+      readFileSync(evidenceChainMigrationPath, "utf8"),
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',
+          encode(digest(raw_source_canonical_json_v1(value),'sha256'),'hex'),
+          data_class,
+          allowed_actions::text,
+          (SELECT version::text FROM canonical_company
+            WHERE id='${COMPANY_A}'),
+          (SELECT updated_at::text FROM canonical_company
+            WHERE id='${COMPANY_A}'),
+          (SELECT count(*)::text FROM field_evidence
+            WHERE entity_id='${COMPANY_A}'),
+          (SELECT encode(digest(string_agg(
+            id::text || '|' || field || '|' ||
+            raw_source_canonical_json_v1(value) || '|' || data_class || '|' ||
+            coalesce(allowed_actions::text,'null'), E'\n' ORDER BY id
+          ),'sha256'),'hex') FROM field_evidence
+            WHERE entity_id='${COMPANY_A}')
+        ) FROM field_evidence
+        WHERE entity_id='${COMPANY_A}'
+          AND raw_record_id='${EVIDENCE_CHAIN_RAW_A}';`,
+      ),
+      beforeRerun,
     );
   });
 
@@ -2787,7 +2926,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     );
   });
 
-  it("rolls back all 1600 provider parity and final historical corrections before COMMIT", () => {
+  it("rolls back all 1600 helper and ACL definitions before COMMIT", () => {
     assert.match(injectedFinalCorrectionRollbackOutput, /division by zero/u);
     assert.equal(
       dockerPsql(
@@ -2805,6 +2944,70 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
       "2|true|2|false",
+    );
+  });
+
+  it("rolls back the 1700 company-name parity definition before COMMIT", () => {
+    assert.match(injectedWriterParityRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.writerParityRollback,
+        `SELECT concat_ws('|',
+          raw_source_provider_company_name_valid_v2(
+            'Alice Van Smith '
+          )::text,
+          has_function_privilege(
+            'app_user',
+            'raw_source_provider_company_name_valid_v2(text)',
+            'EXECUTE'
+          )::text,
+          raw_source_provider_payload_valid_v2(
+            'registry',
+            '{"externalId":"rollback-alice","name":"Alice Van Smith","attributes":{"products":["pump"]},"provenance":{"sourceUrl":"https://registry.example/company/rollback-alice","fetchedAt":"2026-08-26T00:00:00.000Z","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parserVersion":"registry/v2"}}'::jsonb
+          )::text
+        );`,
+      ),
+      "true|false|true",
+    );
+  });
+
+  it("rolls back all 1800 historical evidence-chain DML before COMMIT", () => {
+    assert.match(injectedEvidenceChainRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.evidenceChainRollback,
+        `SELECT concat_ws('|',
+          value->>'_historicalCleanup',
+          value->>'originalValueHash',
+          (NOT value ? 'predecessorReceiptHash')::text,
+          ((value #> '{retainedValue,products}') ? 'AB')::text,
+          data_class,
+          allowed_actions::text,
+          (SELECT count(*)::text FROM field_evidence
+            WHERE entity_id='${COMPANY_A}'),
+          (SELECT version::text FROM canonical_company
+            WHERE id='${COMPANY_A}'),
+          (SELECT attributes #> '{digital_footprint,structured_org}' = '{}'::jsonb
+            FROM canonical_company WHERE id='${COMPANY_A}')::text,
+          (SELECT count(*)::text FROM field_evidence
+            WHERE entity_id='${COMPANY_A}'
+              AND value::text LIKE '%LLZ1%')
+        ) FROM field_evidence
+        WHERE entity_id='${COMPANY_A}'
+          AND raw_record_id='${EVIDENCE_CHAIN_RAW_A}';`,
+      ),
+      [
+        "canonical-attribute-cleanup/v1",
+        EVIDENCE_CHAIN_ORIGINAL_VALUE_HASH,
+        "true",
+        "true",
+        "red",
+        "[]",
+        "8",
+        "2",
+        "true",
+        "2",
+      ].join("|"),
     );
   });
 });
