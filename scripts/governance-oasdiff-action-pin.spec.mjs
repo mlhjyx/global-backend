@@ -43,14 +43,8 @@ function assertOasdiffPolicy(policy, workflow) {
   });
 
   const step = oasdiffStep(workflow);
-  assert.match(
-    step,
-    new RegExp(`uses: ${action}@${revision} # ${version}`),
-  );
-  assert.match(
-    step,
-    /        env:\n          OASDIFF_INTERNAL: "1"\n/u,
-  );
+  assert.match(step, new RegExp(`uses: ${action}@${revision} # ${version}`));
+  assert.match(step, /        env:\n          OASDIFF_INTERNAL: "1"\n/u);
   assert.match(
     step,
     /        with:\n          base: base-openapi\.json\n          revision: packages\/contracts\/openapi\/openapi\.json\n          fail-on: ERR\n/u,
@@ -88,12 +82,36 @@ test("oasdiff breaking is policy-bound to the reviewed v0.1.13 commit and privac
   );
 
   for (const [description, mutate] of [
-    ["privacy env removed", (value) => value.replace(/          OASDIFF_INTERNAL: "1"\n/u, "")],
-    ["privacy env changed", (value) => value.replace('OASDIFF_INTERNAL: "1"', 'OASDIFF_INTERNAL: "0"')],
-    ["review enabled", (value) => value.replace('review: "false"', 'review: "true"')],
-    ["review removed", (value) => value.replace(/          review: "false"\n/u, "")],
-    ["moving tag", (value) => value.replace(`@${revision} # ${version}`, `@${version} # ${version}`)],
-    ["tag object pin", (value) => value.replace(`@${revision} # ${version}`, "@1111111111111111111111111111111111111111 # v0.1.13 tag object")],
+    [
+      "privacy env removed",
+      (value) => value.replace(/          OASDIFF_INTERNAL: "1"\n/u, ""),
+    ],
+    [
+      "privacy env changed",
+      (value) =>
+        value.replace('OASDIFF_INTERNAL: "1"', 'OASDIFF_INTERNAL: "0"'),
+    ],
+    [
+      "review enabled",
+      (value) => value.replace('review: "false"', 'review: "true"'),
+    ],
+    [
+      "review removed",
+      (value) => value.replace(/          review: "false"\n/u, ""),
+    ],
+    [
+      "moving tag",
+      (value) =>
+        value.replace(`@${revision} # ${version}`, `@${version} # ${version}`),
+    ],
+    [
+      "tag object pin",
+      (value) =>
+        value.replace(
+          `@${revision} # ${version}`,
+          "@1111111111111111111111111111111111111111 # v0.1.13 tag object",
+        ),
+    ],
     [
       "failure swallowing",
       (value) =>
