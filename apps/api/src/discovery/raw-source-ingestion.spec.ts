@@ -21,6 +21,7 @@ const POLICIES: RawSourcePolicySnapshot[] = [
     domain: "registry.example",
     retentionDays: 90,
     reviewStatus: "APPROVED",
+    allowedPurpose: ["discovery"],
     updatedAt: new Date("2026-08-25T00:00:00.000Z"),
   },
 ];
@@ -455,6 +456,28 @@ describe("Raw Source v2 ingestion boundary", () => {
       "registry",
       companyRecord({ externalId: "person@example.test" }),
     ],
+    [
+      "local-phone externalId",
+      "registry",
+      companyRecord({ externalId: "555-0100" }),
+    ],
+    [
+      "credential marker in externalId",
+      "registry",
+      companyRecord({ externalId: "bearer-secret" }),
+    ],
+    [
+      "local-phone provider identifier",
+      "registry",
+      companyRecord({
+        identifier: { scheme: "registry-id", value: "555-0100" },
+      }),
+    ],
+    [
+      "cross-provider identifier scheme",
+      "registry",
+      companyRecord({ identifier: { scheme: "fda-reg", value: "3004512345" } }),
+    ],
     ["empty externalId", "registry", companyRecord({ externalId: "" })],
     [
       "unbounded externalId",
@@ -468,6 +491,16 @@ describe("Raw Source v2 ingestion boundary", () => {
         provenance: {
           ...companyRecord().provenance,
           sourceUrl: "https://user:password@registry.example/company/1",
+        },
+      }),
+    ],
+    [
+      "local-phone URL path",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/company/555-0100",
         },
       }),
     ],
@@ -530,6 +563,16 @@ describe("Raw Source v2 ingestion boundary", () => {
           contentHash: "not-sha256",
         },
       }),
+    ],
+    [
+      "credential marker in company name",
+      "registry",
+      companyRecord({ name: "Bearer secret" }),
+    ],
+    [
+      "explicit personal contact name",
+      "registry",
+      companyRecord({ name: "Jane Doe" }),
     ],
     [
       "non-HTTPS provenance URL",
@@ -674,6 +717,34 @@ describe("Raw Source v2 ingestion boundary", () => {
     },
   );
 
+  it.each([
+    [undefined, "missing"],
+    [null, "null"],
+    [[], "empty"],
+    ["discovery", "malformed"],
+    [["enrichment"], "other-purpose"],
+  ])(
+    "quarantines an approved policy with %s allowedPurpose (%s)",
+    (allowedPurpose) => {
+      const row = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: [{ ...POLICIES[0]!, allowedPurpose }],
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+
+      expect(row).toMatchObject({
+        ingestStatus: "QUARANTINED",
+        dispositionCode: "SOURCE_POLICY_PURPOSE_NOT_ALLOWED",
+        externalId: null,
+      });
+      expect(row.sourcePolicySnapshot).toMatchObject({
+        allowedPurpose: [],
+      });
+    },
+  );
+
   it("reconciles exact replays and turns a reused processing key with changed content into one receipt", () => {
     const original = prepareRawSourceBatch({
       providerKey: "registry",
@@ -762,10 +833,7 @@ describe("Raw Source v2 ingestion boundary", () => {
       records: [
         companyRecord({
           attributes: {
-            products: Array.from(
-              { length: 20 },
-              () => "industrial pump",
-            ),
+            products: Array.from({ length: 20 }, () => "industrial pump"),
           },
         }),
       ],

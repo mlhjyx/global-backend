@@ -1,16 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDiscoveryActivities } from './discovery.activities';
-import { resolveRunStatus } from './discovery.run-status';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createDiscoveryActivities } from "./discovery.activities";
+import { resolveRunStatus } from "./discovery.run-status";
 import {
   BudgetLedger,
   InMemoryBudgetStoreAdapter,
   TestBudgetExceededError as BudgetExceededError,
-} from '@global/test-support';
+} from "@global/test-support";
 import {
   BudgetOperationReplayError,
   BudgetUnsettledOperationsError,
   type BudgetStore,
-} from '../tools/budget-store';
+} from "../tools/budget-store";
 
 const budgetLedger = new BudgetLedger();
 import type {
@@ -18,8 +18,8 @@ import type {
   EnrichmentResult,
   ExecutionContext,
   ProviderCompanyRecord,
-} from '../discovery/provider-contract';
-import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+} from "../discovery/provider-contract";
+import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 
 const acknowledgementMocks = vi.hoisted(() => ({
   apply: vi.fn(
@@ -28,18 +28,27 @@ const acknowledgementMocks = vi.hoisted(() => ({
       acknowledgements: Array<{ producerId: string }>;
       apply: (transaction: unknown) => Promise<unknown>;
     }) => ({
-      status: 'APPLIED',
+      status: "APPLIED",
       acknowledgements: input.acknowledgements.map(({ producerId }) => ({
         producerId,
-        status: 'APPLIED',
+        status: "APPLIED",
       })),
       value: await input.apply(input.transaction),
     }),
   ),
 }));
+const fitRuntimeMocks = vi.hoisted(() => ({ execute: vi.fn() }));
 
-vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+vi.mock("../model-runtime/structured-task-runtime-bridge", () => ({
+  executeStructuredTaskWithRuntime: fitRuntimeMocks.execute,
+}));
+
+vi.mock("../durable-results/domain-ack-consumer-bindings", () => ({
   applyDomainAckConsumerTransactions: acknowledgementMocks.apply,
+  applyDomainAckConsumerTransaction: async (input: {
+    transaction: unknown;
+    apply: (transaction: unknown) => Promise<unknown>;
+  }) => input.apply(input.transaction),
 }));
 
 /**
@@ -50,19 +59,19 @@ vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
  */
 
 const REC: ProviderCompanyRecord = {
-  externalId: 'wikidata:Q1',
-  name: 'Acme GmbH',
-  domain: 'acme.de',
+  externalId: "wikidata:Q1",
+  name: "Acme GmbH",
+  domain: "acme.de",
   attributes: {
-    wikidata_qid: 'Q1',
-    source_class: 'company_registry',
+    wikidata_qid: "Q1",
+    source_class: "company_registry",
   },
-  license: 'CC0-1.0',
+  license: "CC0-1.0",
   provenance: {
-    sourceUrl: 'https://acme.de/',
-    fetchedAt: '2026-07-11T00:00:00.000Z',
-    contentHash: 'a'.repeat(64),
-    parserVersion: 'wikidata/1',
+    sourceUrl: "https://acme.de/",
+    fetchedAt: "2026-07-11T00:00:00.000Z",
+    contentHash: "a".repeat(64),
+    parserVersion: "wikidata/1",
   },
 };
 
@@ -70,7 +79,7 @@ const REC: ProviderCompanyRecord = {
 function budgetSwallowingAdapter(key: string): CompanyDiscoveryAdapter {
   return {
     key,
-    classes: ['public_intelligence'],
+    classes: ["public_intelligence"],
     discoverCompanies: async (_q: unknown, ctx: ExecutionContext) => {
       try {
         budgetLedger.reserve(ctx.runId ?? ctx.workspaceId, 10_000_000); // 远超 cap → 打穿
@@ -88,7 +97,7 @@ function okAdapter(
 ): CompanyDiscoveryAdapter {
   return {
     key,
-    classes: ['public_intelligence'],
+    classes: ["public_intelligence"],
     discoverCompanies: async () => ({ records, costCents: 0 }),
   } as unknown as CompanyDiscoveryAdapter;
 }
@@ -110,7 +119,7 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         payload: command.payload,
         ingestStatus: command.ingestStatus,
         sourceClass: command.sourceClass,
-        ingestVersion: 'raw-source/v2',
+        ingestVersion: "raw-source/v2",
       };
       rows.push(row);
       return [
@@ -137,11 +146,11 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
     sourcePolicy: {
       findMany: async () => [
         {
-          id: 'policy-acme',
-          domain: 'acme.de',
+          id: "policy-acme",
+          domain: "acme.de",
           retentionDays: 365,
-          reviewStatus: 'APPROVED',
-          updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+          reviewStatus: "APPROVED",
+          updatedAt: new Date("2026-08-20T00:00:00.000Z"),
         },
       ],
     },
@@ -160,40 +169,40 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
 }
 
 const QUERY = {
-  source_class: 'public_intelligence',
+  source_class: "public_intelligence",
   filters: {},
   keywords: [],
   priority: 1,
 };
 const DISCOVERY_BINDING = Object.freeze({
-  authorityId: '20000000-0000-4000-8000-000000000002',
+  authorityId: "20000000-0000-4000-8000-000000000002",
   replay: false,
-  scopeKey: '10000000-0000-4000-8000-000000000001',
-  accountKey: `discovery.run:discovery_run:request:${'a'.repeat(64)}:${'a'.repeat(64)}`,
-  purpose: 'discovery.run' as const,
-  subjectType: 'discovery_run',
-  subjectId: `request:${'a'.repeat(64)}`,
-  requestSha256: 'a'.repeat(64),
+  scopeKey: "10000000-0000-4000-8000-000000000001",
+  accountKey: `discovery.run:discovery_run:request:${"a".repeat(64)}:${"a".repeat(64)}`,
+  purpose: "discovery.run" as const,
+  subjectType: "discovery_run",
+  subjectId: `request:${"a".repeat(64)}`,
+  requestSha256: "a".repeat(64),
 });
 
 const ENRICHMENT_RECEIPT: DurableExecutionReceipt = Object.freeze({
-  schemaVersion: 'durable-execution-receipt/v1',
+  schemaVersion: "durable-execution-receipt/v1",
   scopeKey: DISCOVERY_BINDING.scopeKey,
   authorityId: DISCOVERY_BINDING.authorityId,
-  accountId: '30000000-0000-4000-8000-000000000001',
-  operationId: '40000000-0000-4000-8000-000000000001',
-  operationKey: 'discovery-gleif-enrichment',
-  resultStrategy: 'typed_projection',
-  resultSchema: 'gleif-fetch/v1',
-  resultDigest: 'a'.repeat(64),
+  accountId: "30000000-0000-4000-8000-000000000001",
+  operationId: "40000000-0000-4000-8000-000000000001",
+  operationKey: "discovery-gleif-enrichment",
+  resultStrategy: "typed_projection",
+  resultSchema: "gleif-fetch/v1",
+  resultDigest: "a".repeat(64),
   artifactId: null,
   usage: {
-    currency: 'USD',
-    unit: 'microusd',
+    currency: "USD",
+    unit: "microusd",
     callCount: 1,
-    upperBoundMicrousd: '10000',
+    upperBoundMicrousd: "10000",
   },
-  costBasis: 'estimated_upper_bound',
+  costBasis: "estimated_upper_bound",
 });
 
 function authorityBudgetStore(): BudgetStore {
@@ -205,7 +214,7 @@ function authorityBudgetStore(): BudgetStore {
   }
   store.attestAuthorized = vi.fn(async (input) => {
     return {
-      accountId: '40000000-0000-4000-8000-000000000004',
+      accountId: "40000000-0000-4000-8000-000000000004",
       authorityId: input.authorityId,
       authorizedCapMicrousd: 1_000_000n,
       generation: 1,
@@ -227,12 +236,12 @@ function discoveryArgs<T extends object>(runId: string, extra: T) {
 // executeQuery/enrichRun 不 close run 预算账户（finalizeRun 才 close）→ 测试自行 force-close，清打标防单例泄漏。
 afterEach(() => {
   for (const k of [
-    'run-budget-x',
-    'run-ok-x',
-    'run-enrich-x',
-    'run-enrich-ok',
-    'run-signal-x',
-    'run-leak',
+    "run-budget-x",
+    "run-ok-x",
+    "run-enrich-x",
+    "run-enrich-ok",
+    "run-signal-x",
+    "run-leak",
   ]) {
     budgetLedger.close(k, { force: true });
   }
@@ -241,7 +250,7 @@ afterEach(() => {
 
 /** 模拟真实富集源：enrichCompany 里 broker/gateway 的 reserve 打穿预算 → enrichRun 的 catch 吞掉。 */
 const budgetSwallowingEnricher = {
-  key: 'gleif',
+  key: "gleif",
   enrichCompany: async (_c: unknown, ctx: ExecutionContext) => {
     budgetLedger.reserve(ctx.runId ?? ctx.workspaceId, 10_000_000); // 抛 → enrichRun catch 吞掉（fail-safe）
     return { matched: false } as EnrichmentResult;
@@ -251,15 +260,15 @@ const budgetSwallowingEnricher = {
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
     $queryRaw: async () => [{ locked: true }],
-    rawSourceRecord: { findMany: async () => [{ id: 'raw1' }] },
-    identityLink: { findMany: async () => [{ canonicalId: 'c1' }] },
+    rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
+    identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
     canonicalCompany: {
       findMany: async () => [
         {
-          id: 'c1',
-          name: 'C1',
-          domain: 'c1.de',
-          country: 'DE',
+          id: "c1",
+          name: "C1",
+          domain: "c1.de",
+          country: "DE",
           region: null,
           attributes: {},
         },
@@ -267,10 +276,10 @@ function makeEnrichDeps(enrichers: unknown[]) {
       updateMany: async () => ({ count: 1 }),
       update: async () => ({}),
       findUnique: async () => ({
-        id: 'c1',
-        name: 'C1',
-        domain: 'c1.de',
-        status: 'NEW',
+        id: "c1",
+        name: "C1",
+        domain: "c1.de",
+        status: "NEW",
       }),
     },
     suppressionRecord: { findMany: async () => [] },
@@ -295,21 +304,21 @@ function makeEnrichDeps(enrichers: unknown[]) {
   } as unknown as Parameters<typeof createDiscoveryActivities>[0];
 }
 
-describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错', () => {
-  it('uses the relayed authority account and rejects missing binding before provider execution', async () => {
+describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错", () => {
+  it("uses the relayed authority account and rejects missing binding before provider execution", async () => {
     const discoverCompanies = vi.fn(async () => ({
       records: [],
       costCents: 0,
     }));
     const open = vi.fn(async () => undefined);
     const attestAuthorized = vi.fn(async () => ({
-      accountId: '40000000-0000-4000-8000-000000000004',
+      accountId: "40000000-0000-4000-8000-000000000004",
       authorityId: DISCOVERY_BINDING.authorityId,
       authorizedCapMicrousd: 1_000_000n,
       generation: 1,
     }));
     const deps = makeDeps([
-      { ...okAdapter('wikidata', []), discoverCompanies },
+      { ...okAdapter("wikidata", []), discoverCompanies },
     ]);
     deps.budgetStore = {
       open,
@@ -324,7 +333,7 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
 
     await acts.executeQuery({
       workspaceId: DISCOVERY_BINDING.scopeKey,
-      runId: 'run-row-id',
+      runId: "run-row-id",
       query: QUERY,
       executionContractVersion: 2,
       executionBudget: DISCOVERY_BINDING,
@@ -349,78 +358,78 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     await expect(
       acts.executeQuery({
         workspaceId: DISCOVERY_BINDING.scopeKey,
-        runId: 'run-row-id',
+        runId: "run-row-id",
         query: QUERY,
       } as never),
     ).rejects.toMatchObject({
-      type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      type: "EXECUTION_BUDGET_LEGACY_HISTORY_PARKED",
       nonRetryable: true,
     });
     expect(discoverCompanies).not.toHaveBeenCalled();
   });
 
-  it('产品路径在调用 provider 和持久化之前拒绝 synthetic sandbox adapter', async () => {
+  it("产品路径在调用 provider 和持久化之前拒绝 synthetic sandbox adapter", async () => {
     const discoverCompanies = vi.fn(async () => ({
       records: [REC],
       costCents: 0,
     }));
     const deps = makeDeps([
       {
-        key: 'sandbox',
-        classes: ['public_intelligence'],
+        key: "sandbox",
+        classes: ["public_intelligence"],
         discoverCompanies,
       } as CompanyDiscoveryAdapter,
     ]);
     const acts = createDiscoveryActivities(deps);
 
     await expect(
-      acts.executeQuery(discoveryArgs('run-ok-x', { query: QUERY })),
-    ).rejects.toMatchObject({ code: 'SYNTHETIC_DISCOVERY_PROVENANCE' });
+      acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).rejects.toMatchObject({ code: "SYNTHETIC_DISCOVERY_PROVENANCE" });
     expect(discoverCompanies).not.toHaveBeenCalled();
   });
 
-  it('某源打穿 run 预算并被 fail-safe 吞掉 → wasExhausted 检出 budgetTruncated=true，其余源记录仍落库', async () => {
+  it("某源打穿 run 预算并被 fail-safe 吞掉 → wasExhausted 检出 budgetTruncated=true，其余源记录仍落库", async () => {
     const deps = makeDeps([
-      budgetSwallowingAdapter('public_web'),
-      okAdapter('wikidata', [REC]),
+      budgetSwallowingAdapter("public_web"),
+      okAdapter("wikidata", [REC]),
     ]);
     const acts = createDiscoveryActivities(deps);
     const r = await acts.executeQuery(
-      discoveryArgs('run-budget-x', { query: QUERY }),
+      discoveryArgs("run-budget-x", { query: QUERY }),
     );
     expect(r.budgetTruncated).toBe(true);
     expect(r.rawCount).toBe(1); // wikidata 的记录不因 public_web 打穿而丢失
   });
 
-  it('全部源正常 → budgetTruncated=false，记录照常落库', async () => {
-    const deps = makeDeps([okAdapter('wikidata', [REC])]);
+  it("全部源正常 → budgetTruncated=false，记录照常落库", async () => {
+    const deps = makeDeps([okAdapter("wikidata", [REC])]);
     const acts = createDiscoveryActivities(deps);
     const r = await acts.executeQuery(
-      discoveryArgs('run-ok-x', { query: QUERY }),
+      discoveryArgs("run-ok-x", { query: QUERY }),
     );
     expect(r.budgetTruncated).toBe(false);
     expect(r.rawCount).toBe(1);
   });
 
-  it('generic replay 不可恢复时拒绝 activity，而不是把已付费结果吞成空成功', async () => {
+  it("generic replay 不可恢复时拒绝 activity，而不是把已付费结果吞成空成功", async () => {
     const deps = makeDeps([
       {
-        ...okAdapter('ted', []),
+        ...okAdapter("ted", []),
         discoverCompanies: async () => {
-          throw new BudgetOperationReplayError('ted-op');
+          throw new BudgetOperationReplayError("ted-op");
         },
       },
     ]);
     const acts = createDiscoveryActivities(deps);
 
     await expect(
-      acts.executeQuery(discoveryArgs('run-ok-x', { query: QUERY })),
+      acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
     ).rejects.toBeInstanceOf(BudgetOperationReplayError);
   });
 });
 
-describe('canonicalizeRun —— suppression authority 线性化', () => {
-  it('excludes every legacy ingest version from downstream materialization', async () => {
+describe("canonicalizeRun —— suppression authority 线性化", () => {
+  it("excludes every legacy ingest version from downstream materialization", async () => {
     const rawFindMany = vi.fn(async () => []);
     const tx = {
       $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
@@ -441,25 +450,25 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       budgetStore: authorityBudgetStore(),
     } as never);
 
-    await activities.canonicalizeRun(discoveryArgs('run-legacy', {}));
+    await activities.canonicalizeRun(discoveryArgs("run-legacy", {}));
 
     expect(rawFindMany).toHaveBeenCalledWith({
       where: {
-        runId: 'run-legacy',
-        ingestStatus: 'ACCEPTED',
-        ingestVersion: 'raw-source/v2',
+        runId: "run-legacy",
+        ingestStatus: "ACCEPTED",
+        ingestVersion: "raw-source/v2",
       },
     });
   });
 
   it.each([
-    { providerKey: 'sandbox', payload: { name: 'Synthetic Co' } },
+    { providerKey: "sandbox", payload: { name: "Synthetic Co" } },
     {
-      providerKey: 'public_web',
-      payload: { name: 'Synthetic Co', license: 'sandbox' },
+      providerKey: "public_web",
+      payload: { name: "Synthetic Co", license: "sandbox" },
     },
   ])(
-    'quarantines historical synthetic raw rows from canonical materialization: %j',
+    "quarantines historical synthetic raw rows from canonical materialization: %j",
     async (raw) => {
       const canonicalUpsert = vi.fn();
       const identityCreate = vi.fn();
@@ -467,7 +476,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       const tx = {
         $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
         rawSourceRecord: {
-          findMany: async () => [{ id: 'raw-synthetic', ...raw }],
+          findMany: async () => [{ id: "raw-synthetic", ...raw }],
         },
         rawSourceGovernanceDisposition: { findMany: async () => [] },
         suppressionRecord: { findMany: async () => [] },
@@ -489,7 +498,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       } as never);
 
       await expect(
-        activities.canonicalizeRun(discoveryArgs('run-1', {})),
+        activities.canonicalizeRun(discoveryArgs("run-1", {})),
       ).resolves.toEqual({
         companies: 0,
         suppressed: 0,
@@ -500,26 +509,26 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
     },
   );
 
-  it('在读 suppression 和任何 canonical write 前先取 workspace policy lock', async () => {
+  it("在读 suppression 和任何 canonical write 前先取 workspace policy lock", async () => {
     const order: string[] = [];
     const tx = {
       $queryRaw: async () => {
-        order.push('lock');
+        order.push("lock");
         return [{ pg_advisory_xact_lock: null }];
       },
       rawSourceRecord: {
         findMany: async () => [
           {
-            id: 'raw-1',
-            providerKey: 'wikidata',
-            payload: { name: 'Acme GmbH', domain: 'acme.de', country: 'DE' },
+            id: "raw-1",
+            providerKey: "wikidata",
+            payload: { name: "Acme GmbH", domain: "acme.de", country: "DE" },
           },
         ],
       },
       rawSourceGovernanceDisposition: { findMany: async () => [] },
       suppressionRecord: {
         findMany: async () => {
-          order.push('suppression-read');
+          order.push("suppression-read");
           return [];
         },
       },
@@ -527,12 +536,12 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
         findUnique: async () => null,
         updateMany: async () => ({ count: 0 }),
         upsert: async () => {
-          order.push('canonical-write');
-          return { id: 'company-1' };
+          order.push("canonical-write");
+          return { id: "company-1" };
         },
       },
       identityLink: {
-        findFirst: async () => ({ id: 'existing-link' }),
+        findFirst: async () => ({ id: "existing-link" }),
         create: async () => ({}),
       },
       fieldEvidence: { create: async () => ({}) },
@@ -550,12 +559,135 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       budgetStore: authorityBudgetStore(),
     } as never);
 
-    await activities.canonicalizeRun(discoveryArgs('run-1', {}));
+    await activities.canonicalizeRun(discoveryArgs("run-1", {}));
 
-    expect(order).toEqual(['lock', 'suppression-read', 'canonical-write']);
+    expect(order).toEqual(["lock", "suppression-read", "canonical-write"]);
   });
 
-  it('既有 canonical identity 命中 suppression 时只修复状态，不再链接或写 evidence', async () => {
+  it("ordinary discovery scrubs an existing Canonical to retained namespaces before linking current v2 Raw", async () => {
+    let storedAttributes: Record<string, unknown> = {};
+    const upsert = vi.fn(
+      async (input: { update: { attributes?: unknown } }) => {
+        storedAttributes = (input.update.attributes ?? {}) as Record<
+          string,
+          unknown
+        >;
+        return { id: "company-1" };
+      },
+    );
+    const linkCreate = vi.fn(async () => ({}));
+    const tx = {
+      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      rawSourceRecord: {
+        findMany: async () => [
+          {
+            id: "raw-v2",
+            providerKey: "registry",
+            payload: {
+              externalId: "acme-1",
+              name: "Acme GmbH",
+              domain: "acme.example",
+              country: "DE",
+              attributes: { products: ["valve"] },
+            },
+          },
+        ],
+      },
+      rawSourceGovernanceDisposition: { findMany: async () => [] },
+      suppressionRecord: { findMany: async () => [] },
+      canonicalCompany: {
+        findUnique: async () => ({
+          id: "company-1",
+          name: "Acme GmbH",
+          domain: "acme.example",
+          dedupeKey: "d:acme.example",
+          attributes: {
+            products: ["pump", "person@example.test"],
+            gleif: {
+              lei: "529900SAFEENTITY001",
+              legal_name: "Parker Hannifin",
+            },
+            contact_email: "person@example.test",
+            owner_name: "alice van smith",
+            custom_payload: { notes: "unbounded historical prose" },
+          },
+          status: "NEW",
+        }),
+        updateMany: async () => ({ count: 0 }),
+        upsert,
+        findMany: async () => [
+          {
+            id: "company-1",
+            name: "Acme GmbH",
+            domain: "acme.example",
+            country: "DE",
+            industry: null,
+            attributes: storedAttributes,
+          },
+        ],
+      },
+      identityLink: {
+        findFirst: async () => null,
+        findMany: async () => [{ canonicalId: "company-1" }],
+        create: linkCreate,
+      },
+      fieldEvidence: { create: async () => ({}) },
+      icpDefinition: { findUnique: async () => null },
+      lead: { upsert: async () => ({}) },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: async <T>(
+          _workspaceId: string,
+          callback: (client: typeof tx) => Promise<T>,
+        ): Promise<T> => callback(tx),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-1", {})),
+    ).resolves.toEqual({ companies: 1, suppressed: 0 });
+
+    const update = upsert.mock.calls[0]![0].update as Record<string, unknown>;
+    expect(update.attributes).toEqual({
+      products: ["pump", "valve"],
+      gleif: { lei: "529900SAFEENTITY001", legal_name: "Parker Hannifin" },
+    });
+    expect(JSON.stringify(update)).not.toMatch(
+      /person@example|alice van smith|unbounded historical prose/u,
+    );
+    expect(linkCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ rawRecordId: "raw-v2" }),
+    });
+
+    fitRuntimeMocks.execute.mockResolvedValueOnce({
+      provider: "test",
+      data: {
+        verdict: "match",
+        material_gate: "match",
+        role_gate: "match",
+        process_gate: "match",
+        business_model_gate: "match",
+        reasons: ["safe"],
+      },
+    });
+    await expect(
+      activities.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ judged: 1, verdicts: { match: 1 } });
+    const prompt = String(
+      fitRuntimeMocks.execute.mock.calls.at(-1)?.[1]?.prompt,
+    );
+    expect(prompt).toContain("pump");
+    expect(prompt).toContain("valve");
+    expect(prompt).not.toMatch(
+      /person@example|alice van smith|unbounded historical prose/u,
+    );
+  });
+
+  it("既有 canonical identity 命中 suppression 时只修复状态，不再链接或写 evidence", async () => {
     const upsert = vi.fn();
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const linkCreate = vi.fn();
@@ -565,23 +697,23 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       rawSourceRecord: {
         findMany: async () => [
           {
-            id: 'raw-1',
-            providerKey: 'wikidata',
-            payload: { name: 'Source Listing Name', country: 'DE' },
+            id: "raw-1",
+            providerKey: "wikidata",
+            payload: { name: "Source Listing Name", country: "DE" },
           },
         ],
       },
       rawSourceGovernanceDisposition: { findMany: async () => [] },
       suppressionRecord: {
-        findMany: async () => [{ type: 'domain', value: 'blocked.example' }],
+        findMany: async () => [{ type: "domain", value: "blocked.example" }],
       },
       canonicalCompany: {
         findUnique: async () => ({
-          id: 'company-1',
-          name: 'Existing Legal Entity GmbH',
-          domain: 'blocked.example',
+          id: "company-1",
+          name: "Existing Legal Entity GmbH",
+          domain: "blocked.example",
           attributes: {},
-          status: 'NEW',
+          status: "NEW",
         }),
         updateMany,
         upsert,
@@ -603,7 +735,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
     } as never);
 
     await expect(
-      activities.canonicalizeRun(discoveryArgs('run-1', {})),
+      activities.canonicalizeRun(discoveryArgs("run-1", {})),
     ).resolves.toEqual({
       companies: 0,
       suppressed: 1,
@@ -615,9 +747,9 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
   });
 });
 
-describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知调用不重试', () => {
-  it.each(['enrichRun', 'enrichSignalsRun'] as const)(
-    '%s parks a pending legacy activity before provider routing or early success',
+describe("enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知调用不重试", () => {
+  it.each(["enrichRun", "enrichSignalsRun"] as const)(
+    "%s parks a pending legacy activity before provider routing or early success",
     async (activityName) => {
       const routeEnrichment = vi.fn(async () => []);
       const routeSignalEnrichment = vi.fn(async () => []);
@@ -637,11 +769,11 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
       await expect(
         activities[activityName]({
           workspaceId: DISCOVERY_BINDING.scopeKey,
-          runId: 'legacy-run',
-          icpId: 'icp-1',
+          runId: "legacy-run",
+          icpId: "icp-1",
         } as never),
       ).rejects.toMatchObject({
-        type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        type: "EXECUTION_BUDGET_LEGACY_HISTORY_PARKED",
         nonRetryable: true,
       });
       expect(withWorkspace).not.toHaveBeenCalled();
@@ -650,27 +782,27 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
     },
   );
 
-  it('富集源预算控制失败上抛，不降级为 PARTIAL', async () => {
+  it("富集源预算控制失败上抛，不降级为 PARTIAL", async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
     const acts = createDiscoveryActivities(deps);
     await expect(
-      acts.enrichRun(discoveryArgs('run-enrich-x', { icpId: 'icp-1' })),
+      acts.enrichRun(discoveryArgs("run-enrich-x", { icpId: "icp-1" })),
     ).rejects.toBeInstanceOf(BudgetExceededError);
   });
 
-  it('富集正常 → enrichRun.budgetTruncated=false', async () => {
+  it("富集正常 → enrichRun.budgetTruncated=false", async () => {
     const deps = makeEnrichDeps([
-      { key: 'gleif', enrichCompany: async () => ({ matched: false }) },
+      { key: "gleif", enrichCompany: async () => ({ matched: false }) },
     ]);
     const acts = createDiscoveryActivities(deps);
     const r = await acts.enrichRun(
-      discoveryArgs('run-enrich-ok', { icpId: 'icp-1' }),
+      discoveryArgs("run-enrich-ok", { icpId: "icp-1" }),
     );
     expect(r.budgetTruncated).toBe(false);
   });
 
-  it.each(['enrichRun', 'enrichSignalsRun'] as const)(
-    '%s ACKs a valid no-match enrichment receipt on its exact workspace transaction',
+  it.each(["enrichRun", "enrichSignalsRun"] as const)(
+    "%s ACKs a valid no-match enrichment receipt on its exact workspace transaction",
     async (activityName) => {
       acknowledgementMocks.apply.mockClear();
       acknowledgementMocks.apply.mockImplementationOnce(
@@ -679,26 +811,26 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
           acknowledgements: Array<{ producerId: string }>;
           readback: (transaction: unknown) => Promise<unknown>;
         }) => ({
-          status: 'REPLAYED',
+          status: "REPLAYED",
           acknowledgements: input.acknowledgements.map(({ producerId }) => ({
             producerId,
-            status: 'REPLAYED',
+            status: "REPLAYED",
           })),
           value: await input.readback(input.transaction),
         }),
       );
       const enricher = {
-        key: 'gleif',
+        key: "gleif",
         enrichCompany: vi.fn(
           async (_company: unknown, ctx: ExecutionContext) => {
-            ctx.onDurableReceipt?.('gleif.fetch', ENRICHMENT_RECEIPT);
+            ctx.onDurableReceipt?.("gleif.fetch", ENRICHMENT_RECEIPT);
             return { matched: false } as EnrichmentResult;
           },
         ),
       };
       const deps = makeEnrichDeps([enricher]);
       const result = await createDiscoveryActivities(deps)[activityName](
-        discoveryArgs(`run-${activityName}`, { icpId: 'icp-1' }),
+        discoveryArgs(`run-${activityName}`, { icpId: "icp-1" }),
       );
 
       expect(result).toMatchObject({ enriched: 1, matched: 0 });
@@ -706,44 +838,44 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
         expect.objectContaining({
           acknowledgements: [
             expect.objectContaining({
-              producerId: 'gleif.fetch',
+              producerId: "gleif.fetch",
               receipt: ENRICHMENT_RECEIPT,
             }),
           ],
         }),
       );
       const acknowledgement = acknowledgementMocks.apply.mock.calls.at(-1)?.[0];
-      expect(acknowledgement.apply).toBeTypeOf('function');
-      expect(acknowledgement.readback).toBeTypeOf('function');
+      expect(acknowledgement.apply).toBeTypeOf("function");
+      expect(acknowledgement.readback).toBeTypeOf("function");
     },
   );
 
-  it('信号富集预算控制失败上抛，不降级为 best-effort', async () => {
+  it("信号富集预算控制失败上抛，不降级为 best-effort", async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
     const acts = createDiscoveryActivities(deps);
     await expect(
-      acts.enrichSignalsRun(discoveryArgs('run-signal-x', { icpId: 'icp-1' })),
+      acts.enrichSignalsRun(discoveryArgs("run-signal-x", { icpId: "icp-1" })),
     ).rejects.toBeInstanceOf(BudgetExceededError);
   });
 
-  it('authority workflow compatibility activity never closes a legacy run account', async () => {
+  it("authority workflow compatibility activity never closes a legacy run account", async () => {
     const deps = makeEnrichDeps([]);
-    const close = vi.spyOn(deps.budgetStore!, 'close');
+    const close = vi.spyOn(deps.budgetStore!, "close");
     const acts = createDiscoveryActivities(deps);
 
-    await acts.resetRunBudget(discoveryArgs('run-leak', {}));
+    await acts.resetRunBudget(discoveryArgs("run-leak", {}));
 
     expect(close).not.toHaveBeenCalled();
   });
 
-  it('propagates authority account open failures before provider execution', async () => {
+  it("propagates authority account open failures before provider execution", async () => {
     const close = vi.fn(async () => undefined);
     const attestAuthorized = vi.fn(async () => {
-      throw new BudgetUnsettledOperationsError('run-unknown');
+      throw new BudgetUnsettledOperationsError("run-unknown");
     });
     const adapter = vi.fn(async () => ({ records: [], costCents: 0 }));
     const deps = makeDeps([
-      { ...okAdapter('public-web', []), discoverCompanies: adapter },
+      { ...okAdapter("public-web", []), discoverCompanies: adapter },
     ]);
     deps.budgetStore = {
       open: vi.fn(),
@@ -757,45 +889,45 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
     const acts = createDiscoveryActivities(deps);
 
     await expect(
-      acts.executeQuery(discoveryArgs('run-unknown', { query: QUERY })),
+      acts.executeQuery(discoveryArgs("run-unknown", { query: QUERY })),
     ).rejects.toBeInstanceOf(BudgetUnsettledOperationsError);
     expect(close).not.toHaveBeenCalled();
     expect(adapter).not.toHaveBeenCalled();
   });
 });
 
-describe('resolveRunStatus —— 预算截断绝不判 DONE', () => {
-  it('无失败无截断 → DONE', () => {
+describe("resolveRunStatus —— 预算截断绝不判 DONE", () => {
+  it("无失败无截断 → DONE", () => {
     expect(
       resolveRunStatus({
         failures: 0,
         totalQueries: 3,
         budgetTruncated: false,
       }),
-    ).toBe('DONE');
+    ).toBe("DONE");
   });
-  it('预算截断（即使零失败）→ PARTIAL', () => {
+  it("预算截断（即使零失败）→ PARTIAL", () => {
     expect(
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: true }),
-    ).toBe('PARTIAL');
+    ).toBe("PARTIAL");
   });
-  it('部分源失败 → PARTIAL', () => {
+  it("部分源失败 → PARTIAL", () => {
     expect(
       resolveRunStatus({
         failures: 1,
         totalQueries: 3,
         budgetTruncated: false,
       }),
-    ).toBe('PARTIAL');
+    ).toBe("PARTIAL");
   });
-  it('全部源失败 → FAILED', () => {
+  it("全部源失败 → FAILED", () => {
     expect(
       resolveRunStatus({
         failures: 3,
         totalQueries: 3,
         budgetTruncated: false,
       }),
-    ).toBe('FAILED');
+    ).toBe("FAILED");
   });
 });
 
@@ -803,12 +935,12 @@ describe('resolveRunStatus —— 预算截断绝不判 DONE', () => {
  * P1-1 kill-switch（Codex PR #93）：专利缓存冷启动 enqueue 必须受 data_provider.google_patents ENABLED 门控。
  * seed=DISABLED（未签 LIA/DPIA）时绝不 enqueue——不污染刷新队列（PII 物化的真正闸在 refreshPatentCache）。
  */
-describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
-  it('provider DISABLED → 不 enqueue（candidates:0, enqueued:0），且绝不查公司表', async () => {
+describe("enqueuePatentLookupsForRun · P1-1 kill-switch", () => {
+  it("provider DISABLED → 不 enqueue（candidates:0, enqueued:0），且绝不查公司表", async () => {
     const prisma = {
-      dataProvider: { findUnique: async () => ({ status: 'DISABLED' }) },
+      dataProvider: { findUnique: async () => ({ status: "DISABLED" }) },
       withWorkspace: async () => {
-        throw new Error('DISABLED 时绝不应查公司表');
+        throw new Error("DISABLED 时绝不应查公司表");
       },
     };
     const deps = {
@@ -819,22 +951,22 @@ describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
     } as unknown as Parameters<typeof createDiscoveryActivities>[0];
     const acts = createDiscoveryActivities(deps);
     const res = await acts.enqueuePatentLookupsForRun(
-      discoveryArgs('run', { icpId: 'icp' }),
+      discoveryArgs("run", { icpId: "icp" }),
     );
     expect(res).toEqual({ candidates: 0, enqueued: 0 });
   });
 
-  it('provider ENABLED → 正常 enqueue 本 run fit=match 公司', async () => {
+  it("provider ENABLED → 正常 enqueue 本 run fit=match 公司", async () => {
     const upserts: unknown[] = [];
     const tx = {
-      rawSourceRecord: { findMany: async () => [{ id: 'raw1' }] },
-      identityLink: { findMany: async () => [{ canonicalId: 'c1' }] },
+      rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
+      identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
       canonicalCompany: {
-        findMany: async () => [{ name: 'Acme GmbH', country: 'DE' }],
+        findMany: async () => [{ name: "Acme GmbH", country: "DE" }],
       },
     };
     const prisma = {
-      dataProvider: { findUnique: async () => ({ status: 'ENABLED' }) },
+      dataProvider: { findUnique: async () => ({ status: "ENABLED" }) },
       withWorkspace: async <T>(
         _ws: string,
         fn: (tx: unknown) => Promise<T>,
@@ -854,7 +986,7 @@ describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
     } as unknown as Parameters<typeof createDiscoveryActivities>[0];
     const acts = createDiscoveryActivities(deps);
     const res = await acts.enqueuePatentLookupsForRun(
-      discoveryArgs('run', { icpId: 'icp' }),
+      discoveryArgs("run", { icpId: "icp" }),
     );
     expect(res).toEqual({ candidates: 1, enqueued: 1 });
     expect(upserts).toHaveLength(1);
