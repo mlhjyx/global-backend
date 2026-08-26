@@ -51,6 +51,8 @@ const siteSectionContractMigrationName =
   "20260826230000_raw_source_site_section_key_contract";
 const siteSectionCleanupMigrationName =
   "20260826240000_raw_source_site_section_cleanup";
+const tedIdentifierContactGateMigrationName =
+  "20260826250000_raw_source_ted_identifier_contact_gate";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -131,6 +133,11 @@ const siteSectionCleanupMigrationPath = resolve(
   siteSectionCleanupMigrationName,
   "migration.sql",
 );
+const tedIdentifierContactGateMigrationPath = resolve(
+  migrationRoot,
+  tedIdentifierContactGateMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -143,6 +150,7 @@ const databases = Object.freeze({
   writerHardeningRollback: "task6a_raw_writer_hardening_rollback",
   historicalCleanupRollback: "task6a_raw_history_cleanup_rollback",
   statusHardeningRollback: "task6a_raw_status_hardening_rollback",
+  statusHardeningMinimal: "task6a_raw_status_hardening_minimal",
   finalCorrectionRollback: "task6a_raw_final_correction_rollback",
   writerParityRollback: "task6a_raw_writer_parity_rollback",
   evidenceChainRollback: "task6a_raw_evidence_chain_rollback",
@@ -154,6 +162,8 @@ const databases = Object.freeze({
   storedFieldCleanupRollback: "task6a_raw_stored_cleanup_rollback",
   siteSectionContractRollback: "task6a_raw_site_section_contract_rollback",
   siteSectionCleanupRollback: "task6a_raw_site_section_cleanup_rollback",
+  tedIdentifierContactGateRollback:
+    "task6a_raw_ted_identifier_contact_gate_rollback",
   dottedReceipt: "task6a_raw_dotted_receipt",
   locks: "task6a_raw_locks",
 });
@@ -177,10 +187,13 @@ const COMPANY_CLEARANCE = "70000000-0000-4000-8000-000000000102";
 const COMPANY_SOURCES_SOUGHT = "70000000-0000-4000-8000-000000000103";
 const COMPANY_WEBSITE_CHANGE = "70000000-0000-4000-8000-000000000104";
 const COMPANY_LINKED_RECOVERY = "70000000-0000-4000-8000-000000000105";
+const COMPANY_TENDER_V3 = "70000000-0000-4000-8000-000000000115";
+const COMPANY_MINIMAL_1500 = "70000000-0000-4000-8000-000000000150";
 const LINKED_RECOVERY_RAW = "30000000-0000-4000-8000-000000000105";
 const LOCKED_RAW = "90000000-0000-4000-8000-000000000001";
 const POLICY_A = "a0000000-0000-4000-8000-000000000001";
 const POLICY_B = "a0000000-0000-4000-8000-000000000002";
+const POLICY_TED = "a0000000-0000-4000-8000-000000000025";
 const EVIDENCE_CHAIN_ORIGINAL_VALUE_HASH =
   "2613c94b602988c61f1b56c42e51b814a1310baee6a73b999be84460472a7be7";
 const EVIDENCE_CHAIN_PREDECESSOR_RECEIPT_HASH =
@@ -197,6 +210,10 @@ const MIXED_SITE_SECTION_ORIGINAL_VALUE_HASH =
   "3d8ee7ad8c041cef294161b8e02d97da50d708b6add4dcff50ff67db4fac286a";
 const POST_2200_UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH =
   "81274b3550f64bae21465854464f7a7a83c6e34f309039e49d04973e983dc090";
+const TENDER_V2_CURRENT_RECEIPT_HASH =
+  "e4e8cb71abd5f7edf9c850b8195913e6453284f0b7c443c93083c804de9bc9ca";
+const TENDER_V3_CURRENT_RECEIPT_HASH =
+  "5d2c9d65fd8e25089eaf9a782169b358196b06a083a37da24262c3598a26945c";
 
 let baselineDirectory;
 let firstDeployOutput = "";
@@ -217,7 +234,11 @@ let injectedStoredFieldAdapterRollbackOutput = "";
 let injectedStoredFieldCleanupRollbackOutput = "";
 let injectedSiteSectionContractRollbackOutput = "";
 let injectedSiteSectionCleanupRollbackOutput = "";
+let injectedTedIdentifierContactGateRollbackOutput = "";
 let storedFieldAfter2000 = "";
+let minimal1500Before = "";
+let minimal1500After = "";
+let minimal1500SecondPass = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -460,6 +481,51 @@ function writerCommand(overrides = {}) {
   };
 }
 
+function tedWriterCommand({
+  recordId,
+  publicationNumber,
+  winnerIdentifier,
+  withIdentifier,
+}) {
+  const externalId = `ted:${publicationNumber}:0`;
+  const payload = {
+    externalId,
+    name: "Johnson Controls",
+    country: "DE",
+    ...(withIdentifier
+      ? {
+          identifier: {
+            scheme: "ted-natid:de",
+            value: winnerIdentifier,
+          },
+        }
+      : {}),
+    attributes: {
+      ted: {
+        publication_number: publicationNumber,
+        publication_date: "2026-08-25",
+        notice_type: "award",
+        winner_identifier: winnerIdentifier,
+      },
+    },
+    license: "CC BY 4.0",
+    provenance: {
+      sourceUrl: "https://api.ted.europa.eu/v3/notices/search",
+      fetchedAt: "2026-08-25T12:00:00.000Z",
+      contentHash: "a".repeat(64),
+      parserVersion: "ted/v1",
+    },
+  };
+  return writerCommand({
+    recordId,
+    externalId,
+    payload,
+    providerKey: "ted",
+    sourceClass: "public_intelligence",
+    sourcePolicyId: POLICY_TED,
+  });
+}
+
 function nonAcceptedWriterCommand({
   recordId,
   status,
@@ -503,15 +569,18 @@ function seedCurrentMainClone(database = databases.upgrade) {
     database,
     `
     INSERT INTO data_provider(id,key,class,status,cost_per_call_cents,created_at)
-      VALUES (gen_random_uuid(),'registry','company_registry','ENABLED',0,now());
+      VALUES
+        (gen_random_uuid(),'registry','company_registry','ENABLED',0,now()),
+        (gen_random_uuid(),'ted','public_intelligence','ENABLED',0,now());
     INSERT INTO source_policy(
       id,domain,source_type,access_mode,robots_status,terms_status,
       personal_data,allowed_purpose,crawl_delay_ms,retention_days,
       review_status,owner,created_at,updated_at
-    ) VALUES (
-      '${POLICY_A}','registry.example','gov_registry','api','ALLOWS',
-      'REVIEWED_OK',false,'["discovery"]',0,30,'APPROVED','backend',now(),now()
-    );
+    ) VALUES
+      ('${POLICY_A}','registry.example','gov_registry','api','ALLOWS',
+       'REVIEWED_OK',false,'["discovery"]',0,30,'APPROVED','backend',now(),now()),
+      ('${POLICY_TED}','api.ted.europa.eu','gov_registry','api','ALLOWS',
+       'REVIEWED_OK',false,'["discovery"]',0,30,'APPROVED','backend',now(),now());
     INSERT INTO workspace(id,name,created_at,updated_at) VALUES
       ('${WORKSPACE_A}','A',now(),now()),
       ('${WORKSPACE_B}','B',now(),now());
@@ -626,6 +695,31 @@ function seedCurrentMainClone(database = databases.upgrade) {
         'registry','${EVIDENCE_CHAIN_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
       );
   `,
+  );
+}
+
+function seedMinimal1500Company(database) {
+  dockerPsql(
+    database,
+    `INSERT INTO canonical_company(
+      id,workspace_id,name,attributes,status,dedupe_key,version,
+      created_at,updated_at
+    ) VALUES (
+      '${COMPANY_MINIMAL_1500}','${WORKSPACE_A}','Minimal Products',
+      '{"products":["pump","AB"]}','NEW','n:minimal products:',7,
+      '2026-08-25T00:00:00Z','2026-08-25T00:00:00Z'
+    );`,
+  );
+}
+
+function readMinimal1500Company(database) {
+  return dockerPsql(
+    database,
+    `SELECT jsonb_build_object(
+      'attributes',attributes,
+      'version',version,
+      'updatedAt',to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    )::text FROM canonical_company WHERE id='${COMPANY_MINIMAL_1500}';`,
   );
 }
 
@@ -783,6 +877,15 @@ function seedStoredFieldEvidence(database) {
       ('${COMPANY_LINKED_RECOVERY}','${WORKSPACE_A}','Linked Recovery',
        'later.example','DE','{"products":["pump"]}'::jsonb,
        'NEW','d:later.example',1,'2026-08-25T16:31:00Z','2026-08-25T16:31:00Z');
+    INSERT INTO canonical_company(
+      id,workspace_id,name,domain,country,attributes,status,dedupe_key,
+      version,created_at,updated_at
+    ) VALUES (
+      '${COMPANY_TENDER_V3}','${WORKSPACE_A}','Tender V3 Agency',NULL,'DE',
+      '${JSON.stringify({ intent: tender })}'::jsonb,'NEW',
+      'n:tender v3 agency:de',1,
+      '2026-08-25T16:31:00Z','2026-08-25T16:31:00Z'
+    );
 
     INSERT INTO field_evidence(
       id,workspace_id,entity_type,entity_id,field,value,provider_key,
@@ -838,6 +941,15 @@ function seedStoredFieldEvidence(database) {
        '${COMPANY_LINKED_RECOVERY}','domain',
        '{"_historicalCleanup":"canonical-attribute-cleanup/v2","reason":"UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD","originalValueHash":"13fdcb3e867c757286bd4e924cfd97f77de31d2ca4f856a8110e430fbbfcdedd","predecessorReceiptHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'::jsonb,
        'unrecoverable',NULL,1,'public','[]','red','2026-08-25T16:31:00Z');
+    INSERT INTO field_evidence(
+      id,workspace_id,entity_type,entity_id,field,value,provider_key,
+      raw_record_id,confidence,license,allowed_actions,data_class,fetched_at
+    ) VALUES (
+      '81000000-0000-4000-8000-000000000115','${WORKSPACE_A}','company',
+      '${COMPANY_TENDER_V3}','intent.tender',
+      '{"_historicalCleanup":"canonical-attribute-cleanup/v3","reason":"UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD","originalValueHash":"01666d0021c08e02df9edd362eea3ea4af5d6f314c1fa9737aa5ba7647f4c6d3","predecessorReceiptHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'::jsonb,
+      'ted',NULL,1,'CC BY 4.0','[]','red','2026-08-25T16:31:00Z'
+    );
   `,
   );
 
@@ -1140,6 +1252,44 @@ before(() => {
   seedCurrentMainClone();
   migrateDeploy(databases.upgrade);
 
+  migrateDeploy(databases.statusHardeningMinimal, baseline.schemaPath);
+  seedCurrentMainClone(databases.statusHardeningMinimal);
+  seedMinimal1500Company(databases.statusHardeningMinimal);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.statusHardeningMinimal,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  minimal1500Before = readMinimal1500Company(databases.statusHardeningMinimal);
+  dockerPsql(
+    databases.statusHardeningMinimal,
+    readFileSync(statusHardeningMigrationPath, "utf8"),
+  );
+  minimal1500After = readMinimal1500Company(databases.statusHardeningMinimal);
+  for (const migrationPath of [
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+    pathSanitizerMigrationPath,
+    pathCleanupMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.statusHardeningMinimal,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  minimal1500SecondPass = readMinimal1500Company(
+    databases.statusHardeningMinimal,
+  );
+
   migrateDeploy(databases.dottedReceipt, baseline.schemaPath);
   seedCurrentMainClone(databases.dottedReceipt);
   seedDottedProductsEvidence(databases.dottedReceipt);
@@ -1320,6 +1470,7 @@ before(() => {
 
   migrateDeploy(databases.statusHardeningRollback, baseline.schemaPath);
   seedCurrentMainClone(databases.statusHardeningRollback);
+  seedMinimal1500Company(databases.statusHardeningRollback);
   for (const migrationPath of [
     schemaMigrationPath,
     backfillMigrationPath,
@@ -1644,6 +1795,45 @@ before(() => {
     );
   }
 
+  if (existsSync(tedIdentifierContactGateMigrationPath)) {
+    migrateDeploy(
+      databases.tedIdentifierContactGateRollback,
+      baseline.schemaPath,
+    );
+    for (const migrationPath of [
+      schemaMigrationPath,
+      backfillMigrationPath,
+      constraintsMigrationPath,
+      writerMigrationPath,
+      writerHardeningMigrationPath,
+      historicalCleanupMigrationPath,
+      statusHardeningMigrationPath,
+      finalCorrectionMigrationPath,
+      writerParityMigrationPath,
+      evidenceChainMigrationPath,
+      pathSanitizerMigrationPath,
+      pathCleanupMigrationPath,
+      storedFieldAdapterMigrationPath,
+      storedFieldCleanupMigrationPath,
+      siteSectionContractMigrationPath,
+      siteSectionCleanupMigrationPath,
+    ]) {
+      dockerPsql(
+        databases.tedIdentifierContactGateRollback,
+        readFileSync(migrationPath, "utf8"),
+      );
+    }
+    const injectedTedIdentifierContactGate = readFileSync(
+      tedIdentifierContactGateMigrationPath,
+      "utf8",
+    ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+    injectedTedIdentifierContactGateRollbackOutput = dockerPsql(
+      databases.tedIdentifierContactGateRollback,
+      injectedTedIdentifierContactGate,
+      { rejects: /division by zero/u },
+    );
+  }
+
   migrateDeploy(databases.locks);
   dockerPsql(
     databases.locks,
@@ -1797,6 +1987,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       firstDeployOutput,
       new RegExp(siteSectionCleanupMigrationName, "u"),
     );
+    assert.match(
+      firstDeployOutput,
+      new RegExp(tedIdentifierContactGateMigrationName, "u"),
+    );
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -1811,12 +2005,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         '${writerParityMigrationName}','${evidenceChainMigrationName}',
         '${pathSanitizerMigrationName}','${pathCleanupMigrationName}',
         '${storedFieldAdapterMigrationName}','${storedFieldCleanupMigrationName}',
-        '${siteSectionContractMigrationName}','${siteSectionCleanupMigrationName}'
+        '${siteSectionContractMigrationName}','${siteSectionCleanupMigrationName}',
+        '${tedIdentifierContactGateMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "16",
+      "17",
     );
   });
 
@@ -1881,6 +2076,24 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       "0",
     );
+  });
+
+  it("advances minimal 1500 product cleanup provenance exactly once", () => {
+    const before = JSON.parse(minimal1500Before);
+    const after = JSON.parse(minimal1500After);
+    const secondPass = JSON.parse(minimal1500SecondPass);
+
+    assert.deepEqual(before, {
+      attributes: { products: ["pump", "AB"] },
+      version: 7,
+      updatedAt: "2026-08-25T00:00:00.000Z",
+    });
+    assert.deepEqual(
+      { attributes: after.attributes, version: after.version },
+      { attributes: { products: ["pump"] }, version: 8 },
+    );
+    assert.notEqual(after.updatedAt, before.updatedAt);
+    assert.deepEqual(secondPass, after);
   });
 
   it("cleans historical Canonical attributes and redacts unsafe FieldEvidence without deleting provenance rows", () => {
@@ -2455,7 +2668,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           '81000000-0000-4000-8000-000000000102',
           '81000000-0000-4000-8000-000000000103',
           '81000000-0000-4000-8000-000000000104',
-          '81000000-0000-4000-8000-000000000105'
+          '81000000-0000-4000-8000-000000000105',
+          '81000000-0000-4000-8000-000000000115'
         );`,
       ),
       [
@@ -2464,6 +2678,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         '81000000-0000-4000-8000-000000000103:a66aa3e4376a0e3afd6ba6ac1a67fa42a29acc5a02bc3bc943b3372b36d6e7e7:green:["display", "match"]:US Government Public Domain:2026-08-25T16:31:00.000Z',
         '81000000-0000-4000-8000-000000000104:dbce91d07200ee4034c7a499d6da5d208877e7e3ab53c1bb4cb542483deffa43:green:["display", "match"]:public:2026-08-25T16:31:00.000Z',
         '81000000-0000-4000-8000-000000000105:e0abd8c37da5f30a6844e4d90be289f1ad7e8ba1545191f80c87259657088b75:green:["display", "match"]:public:2026-08-25T16:31:00.000Z',
+        '81000000-0000-4000-8000-000000000115:01666d0021c08e02df9edd362eea3ea4af5d6f314c1fa9737aa5ba7647f4c6d3:green:["display", "match"]:CC BY 4.0:2026-08-25T16:31:00.000Z',
       ].join("\n"),
     );
     assert.equal(
@@ -2474,7 +2689,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
            '81000000-0000-4000-8000-000000000101',
            '81000000-0000-4000-8000-000000000102',
            '81000000-0000-4000-8000-000000000103',
-           '81000000-0000-4000-8000-000000000105'
+           '81000000-0000-4000-8000-000000000105',
+           '81000000-0000-4000-8000-000000000115'
          )
            AND cleanup_contract='raw-source-stored-field-cleanup/v1'
            AND adapter_version='stored-company-field-evidence/v1'
@@ -2482,7 +2698,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
            AND restored_value_hash=original_value_hash
            AND original_value_hash ~ '^[0-9a-f]{64}$';`,
       ),
-      "4",
+      "5",
     );
     assert.equal(
       dockerPsql(
@@ -2491,6 +2707,28 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          WHERE field_evidence_id='81000000-0000-4000-8000-000000000104';`,
       ),
       "0",
+    );
+  });
+
+  it("binds each restored v2/v3 transition to the exact current receipt digest", () => {
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT string_agg(
+          field_evidence_id::text || ':' ||
+            coalesce(predecessor_receipt_hash,'NULL'),
+          E'\n' ORDER BY field_evidence_id
+        )
+        FROM raw_source_field_evidence_cleanup_audit
+        WHERE field_evidence_id IN (
+          '81000000-0000-4000-8000-000000000101',
+          '81000000-0000-4000-8000-000000000115'
+        ) AND status='RESTORED';`,
+      ),
+      [
+        `81000000-0000-4000-8000-000000000101:${TENDER_V2_CURRENT_RECEIPT_HASH}`,
+        `81000000-0000-4000-8000-000000000115:${TENDER_V3_CURRENT_RECEIPT_HASH}`,
+      ].join("\n"),
     );
   });
 
@@ -2721,7 +2959,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
              '81000000-0000-4000-8000-0000000001%';`,
         ),
       ),
-      `${WORKSPACE_A}\n7`,
+      `${WORKSPACE_A}\n8`,
     );
     assert.equal(
       dockerPsql(
@@ -4236,6 +4474,88 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     }
   });
 
+  it("requires the forward-only TED identifier contact gate migration", () => {
+    assert.equal(
+      existsSync(tedIdentifierContactGateMigrationPath),
+      true,
+      `${tedIdentifierContactGateMigrationName} must exist`,
+    );
+  });
+
+  it("rejects TED local-phone winner identifiers before the real writer persists Raw and preserves valid equality", () => {
+    const hostile = [
+      ["85500000-0000-4000-8000-000000000001", "1", "Call 555-0100", false],
+      ["85500000-0000-4000-8000-000000000002", "2", "Call 555-0100", true],
+      ["85500000-0000-4000-8000-000000000003", "3", "Call ٥٥٥-٠١٠٠", false],
+      ["85500000-0000-4000-8000-000000000004", "4", "Call ٥٥٥-٠١٠٠", true],
+    ];
+    for (const [
+      recordId,
+      publicationNumber,
+      winnerIdentifier,
+      withIdentifier,
+    ] of hostile) {
+      dockerPsql(
+        databases.upgrade,
+        asApp(
+          WORKSPACE_A,
+          writerSql(
+            tedWriterCommand({
+              recordId,
+              publicationNumber,
+              winnerIdentifier,
+              withIdentifier,
+            }),
+          ),
+        ),
+        { rejects: /RAW_SOURCE_WRITER_PAYLOAD_SCHEMA_INVALID/u },
+      );
+    }
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM raw_source_record
+         WHERE id::text LIKE '85500000-0000-4000-8000-%';`,
+      ),
+      "0",
+    );
+
+    for (const [recordId, publicationNumber, withIdentifier] of [
+      ["85600000-0000-4000-8000-000000000005", "5", false],
+      ["85600000-0000-4000-8000-000000000006", "6", true],
+    ]) {
+      dockerPsql(
+        databases.upgrade,
+        asApp(
+          WORKSPACE_A,
+          writerSql(
+            tedWriterCommand({
+              recordId,
+              publicationNumber,
+              winnerIdentifier: "DE111",
+              withIdentifier,
+            }),
+          ),
+        ),
+      );
+    }
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT string_agg(concat_ws('|',id::text,
+          payload #>> '{attributes,ted,winner_identifier}',
+          coalesce(payload #>> '{identifier,value}','NO_ID')
+        ),E'\n' ORDER BY id)
+        FROM raw_source_record
+        WHERE id::text LIKE '85600000-0000-4000-8000-%';`,
+      ),
+      [
+        "85600000-0000-4000-8000-000000000005|DE111|NO_ID",
+        "85600000-0000-4000-8000-000000000006|DE111|DE111",
+      ].join("\n"),
+    );
+  });
+
   it("denies hostile app_user payload forgery, unbounded JSON, and immutable cost drift", () => {
     const base = writerCommand({
       recordId: "84000000-0000-4000-8000-000000000001",
@@ -4929,6 +5249,14 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       "true|true|true",
     );
+    assert.deepEqual(
+      JSON.parse(readMinimal1500Company(databases.statusHardeningRollback)),
+      {
+        attributes: { products: ["pump", "AB"] },
+        version: 7,
+        updatedAt: "2026-08-25T00:00:00.000Z",
+      },
+    );
   });
 
   it("rolls back all 1600 helper and ACL definitions before COMMIT", () => {
@@ -5022,7 +5350,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     );
   });
 
-  it("keeps 1900/2100/2300 DDL-ACL-only and 2000/2200/2400 historical correction DML-only", () => {
+  it("keeps 1900/2100/2300/2500 DDL-ACL-only and 2000/2200/2400 historical correction DML-only", () => {
     const pathDdl = readFileSync(pathSanitizerMigrationPath, "utf8");
     const pathDml = readFileSync(pathCleanupMigrationPath, "utf8");
     const storedDdl = readFileSync(storedFieldAdapterMigrationPath, "utf8");
@@ -5033,6 +5361,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     );
     const siteSectionDml = readFileSync(
       siteSectionCleanupMigrationPath,
+      "utf8",
+    );
+    const tedIdentifierDdl = readFileSync(
+      tedIdentifierContactGateMigrationPath,
       "utf8",
     );
 
@@ -5084,6 +5416,12 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     assert.doesNotMatch(
       siteSectionDml,
       /\b(?:CREATE|ALTER|DROP)\s+(?:FUNCTION|TABLE|INDEX|TYPE|POLICY|TRIGGER|CONSTRAINT)\b|\b(?:GRANT|REVOKE)\b/iu,
+    );
+    assert.match(tedIdentifierDdl, /CREATE OR REPLACE FUNCTION/u);
+    assert.match(tedIdentifierDdl, /REVOKE ALL ON FUNCTION/u);
+    assert.doesNotMatch(
+      tedIdentifierDdl,
+      /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:raw_source_record|canonical_company|field_evidence)\b/iu,
     );
   });
 
@@ -5239,6 +5577,33 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         );`,
       ),
       'true|green|["display", "match"]|stored-field-evidence-cleanup/v1|0',
+    );
+  });
+
+  it("rolls back every 2500 TED identifier predicate and ACL replacement", () => {
+    assert.match(
+      injectedTedIdentifierContactGateRollbackOutput,
+      /division by zero/u,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.tedIdentifierContactGateRollback,
+        `SELECT concat_ws('|',
+          raw_source_identifier_valid_v2(
+            'ted','{"scheme":"ted-natid:de","value":"Call 555-0100"}'::jsonb
+          )::text,
+          raw_source_provider_payload_valid_v2(
+            'ted','{"externalId":"ted:1:0","name":"Johnson Controls","country":"DE","attributes":{"ted":{"publication_number":"1","publication_date":"2026-08-25","notice_type":"award","winner_identifier":"Call 555-0100"}},"license":"CC BY 4.0","provenance":{"sourceUrl":"https://api.ted.europa.eu/v3/notices/search","fetchedAt":"2026-08-25T12:00:00.000Z","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parserVersion":"ted/v1"}}'::jsonb
+          )::text,
+          raw_source_provider_payload_valid_v2(
+            'ted','{"externalId":"ted:2:0","name":"Johnson Controls","country":"DE","identifier":{"scheme":"ted-natid:de","value":"Call ٥٥٥-٠١٠٠"},"attributes":{"ted":{"publication_number":"2","publication_date":"2026-08-25","notice_type":"award","winner_identifier":"Call ٥٥٥-٠١٠٠"}},"license":"CC BY 4.0","provenance":{"sourceUrl":"https://api.ted.europa.eu/v3/notices/search","fetchedAt":"2026-08-25T12:00:00.000Z","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parserVersion":"ted/v1"}}'::jsonb
+          )::text,
+          has_function_privilege(
+            'app_user','raw_source_identifier_valid_v2(text,jsonb)','EXECUTE'
+          )::text
+        );`,
+      ),
+      "true|true|true|false",
     );
   });
 });

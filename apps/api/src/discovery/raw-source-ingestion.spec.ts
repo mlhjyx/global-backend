@@ -420,6 +420,90 @@ describe("Raw Source v2 ingestion boundary", () => {
     },
   );
 
+  it("rejects TED winner identifiers carrying ASCII or Unicode local phones with or without the optional identifier", () => {
+    const policies = POLICIES.map((policy) => ({
+      ...policy,
+      domain: "api.ted.europa.eu",
+    }));
+    const tedRecord = (winnerIdentifier: string, withIdentifier: boolean) =>
+      companyRecord({
+        externalId: "ted:1:0",
+        name: "Johnson Controls",
+        country: "DE",
+        ...(withIdentifier
+          ? {
+              identifier: {
+                scheme: "ted-natid:de",
+                value: winnerIdentifier,
+              },
+            }
+          : {}),
+        attributes: {
+          ted: {
+            publication_number: "1",
+            publication_date: "2026-08-25",
+            notice_type: "award",
+            winner_identifier: winnerIdentifier,
+          },
+        },
+        license: "CC BY 4.0",
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://ted.europa.eu/en/notice/-/detail/1",
+          parserVersion: "ted/v1",
+        },
+      });
+
+    for (const winnerIdentifier of ["Call 555-0100", "Call ٥٥٥-٠١٠٠"]) {
+      for (const withIdentifier of [false, true]) {
+        const row = prepareRawSourceBatch({
+          providerKey: "ted",
+          records: [tedRecord(winnerIdentifier, withIdentifier)],
+          policies,
+          limits: {
+            ...LIMITS,
+            maxRecordBytes: 2_048,
+            maxBatchBytes: 4_096,
+          },
+          now: NOW,
+        }).rows[0]!;
+        expect(row).toMatchObject({
+          ingestStatus: "REJECTED",
+          dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+          payload: {
+            _rawReceipt: "raw-source/rejected/v1",
+            reason: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+          },
+        });
+        expect(JSON.stringify(row.payload)).not.toContain(winnerIdentifier);
+      }
+    }
+
+    for (const withIdentifier of [false, true]) {
+      const row = prepareRawSourceBatch({
+        providerKey: "ted",
+        records: [tedRecord("DE111", withIdentifier)],
+        policies,
+        limits: {
+          ...LIMITS,
+          maxRecordBytes: 2_048,
+          maxBatchBytes: 4_096,
+        },
+        now: NOW,
+      }).rows[0]!;
+      expect(row).toMatchObject({
+        ingestStatus: "ACCEPTED",
+        dispositionCode: null,
+        payload: {
+          attributes: { ted: { winner_identifier: "DE111" } },
+          ...(withIdentifier
+            ? { identifier: { scheme: "ted-natid:de", value: "DE111" } }
+            : {}),
+        },
+      });
+    }
+  });
+
   it("rejects personal/contact fields before hashing or persistence", () => {
     const prepared = prepareRawSourceBatch({
       providerKey: "trade_fair",

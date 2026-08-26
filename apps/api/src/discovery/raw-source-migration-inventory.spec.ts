@@ -72,14 +72,26 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826240000_raw_source_site_section_cleanup",
     checksum: "9".repeat(64),
   },
+  {
+    migrationName: "20260826250000_raw_source_ted_identifier_contact_gate",
+    checksum: "0f".repeat(32),
+  },
 ];
 
+const REISSUED_1500_MIGRATION =
+  "20260826150000_raw_source_governance_status_hardening";
+const OLD_REVIEWED_1500_CHECKSUM =
+  "952a96461ac38028e758a89c93bf320a4122f3a4db6273ce9355bdfd9262196c";
 const REISSUED_1600_MIGRATION =
   "20260826160000_raw_source_governance_final_correction";
 const OLD_REVIEWED_1600_CHECKSUM =
   "d8783aa0b513679d8944841c7e55b03812cc9709cc6d6c39005a9caadeaeea11";
 const INITIAL_TASK_6A1_1600_CHECKSUM =
   "c8e6e5520747ada0d0f70104a7dd0f8ece2edcc7ccdcc7237cacbfd7566c24d0";
+const REISSUED_2200_MIGRATION =
+  "20260826220000_raw_source_stored_field_cleanup";
+const OLD_REVIEWED_2200_CHECKSUM =
+  "2f05e19488c57004bab2061026eace24a1f6650107c9a42b94070a94541b9d22";
 
 const completed = new Date("2026-08-26T00:00:00.000Z");
 
@@ -115,6 +127,20 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
       "20260826230000_raw_source_site_section_key_contract",
     );
     expect(checker).toContain("20260826240000_raw_source_site_section_cleanup");
+    expect(checker).toContain(
+      "20260826250000_raw_source_ted_identifier_contact_gate",
+    );
+  });
+
+  it("describes Raw v2 as a governed minimized immutable observation receipt instead of an untouched wire capture", () => {
+    const schema = readFileSync(
+      new URL("../../../../packages/db/prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    expect(schema).toContain(
+      "Raw v2 是 provider-bound、governed/minimized 的不可变 observation receipt",
+    );
+    expect(schema).not.toContain("Provider 原始返回原样落地");
   });
   it("returns an explicit UNKNOWN/HOLD when no live experiment subject is supplied", () => {
     expect(assessRawSourceMigrationInventory(undefined, expected)).toEqual({
@@ -206,6 +232,82 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
             migrationName: historical.migrationName,
             lifecycleState,
           }),
+        ],
+      });
+    },
+  );
+
+  it.each([
+    [
+      "1500",
+      REISSUED_1500_MIGRATION,
+      OLD_REVIEWED_1500_CHECKSUM,
+      "0".repeat(64),
+    ],
+    [
+      "2200",
+      REISSUED_2200_MIGRATION,
+      OLD_REVIEWED_2200_CHECKSUM,
+      "7".repeat(64),
+    ],
+  ])(
+    "returns an explicit provenance HOLD for the old pre-release %s checksum under its canonical name",
+    (_label, migrationName, oldChecksum, newChecksum) => {
+      const inventory = exactCurrentInventory().map((row) =>
+        row.migration_name === migrationName
+          ? { ...row, checksum: oldChecksum }
+          : row,
+      );
+      expect(assessRawSourceMigrationInventory(inventory, expected)).toEqual({
+        schemaVersion: "pr407-raw-source-migration-decision/v1",
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+        observations: [
+          {
+            migrationName,
+            observedChecksum: oldChecksum,
+            expectedChecksum: newChecksum,
+            rowCount: 1,
+            lifecycleState: "APPLIED",
+          },
+        ],
+      });
+    },
+  );
+
+  it.each([
+    ["1500", REISSUED_1500_MIGRATION, OLD_REVIEWED_1500_CHECKSUM],
+    ["2200", REISSUED_2200_MIGRATION, OLD_REVIEWED_2200_CHECKSUM],
+  ])(
+    "finds a renamed old pre-release %s checksum before accepting an otherwise exact current inventory",
+    (label, migrationName, oldChecksum) => {
+      const actualName = `20260826250500_renamed_old_${label}`;
+      expect(
+        assessRawSourceMigrationInventory(
+          [
+            ...exactCurrentInventory(),
+            {
+              migration_name: actualName,
+              checksum: oldChecksum,
+              finished_at: completed,
+              rolled_back_at: null,
+            },
+          ],
+          expected,
+        ),
+      ).toMatchObject({
+        decision: "HOLD",
+        state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+        observations: [
+          {
+            migrationName: actualName,
+            expectedMigrationName: migrationName,
+            observedChecksum: oldChecksum,
+            expectedChecksum: oldChecksum,
+            rowCount: 1,
+            lifecycleState: "APPLIED",
+          },
         ],
       });
     },
