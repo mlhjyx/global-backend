@@ -1265,10 +1265,37 @@ model FieldEvidence {
   dataClass      String   @default("green") @map("data_class") // green（公司事实）| amber（职能邮箱 ePrivacy）| red（具名个人 GDPR Art.4）——收口⑥：替代 value JSON 里的 personal_data 代码纪律，可查询/可索引；喂 DataRightsService
   fetchedAt      DateTime @default(now()) @map("fetched_at")
 
+  cleanupAudits RawSourceFieldEvidenceCleanupAudit[]
+
   @@unique([workspaceId, entityType, entityId, field, rawRecordId], map: "field_evidence_raw_field_unique")
+  @@unique([workspaceId, id], map: "field_evidence_workspace_id_id_key")
   @@index([workspaceId])
   @@index([workspaceId, entityType, entityId])
   @@map("field_evidence")
+}
+
+/// Value-free correction provenance for historical company FieldEvidence.
+/// It stores only opaque ids, closed contract/status literals, hashes and
+/// bounded timestamps; the displayable evidence value remains on FieldEvidence.
+model RawSourceFieldEvidenceCleanupAudit {
+  id                     String   @id @default(uuid()) @db.Uuid
+  workspaceId            String   @map("workspace_id") @db.Uuid
+  fieldEvidenceId        String   @map("field_evidence_id") @db.Uuid
+  rawRecordId            String?  @map("raw_record_id") @db.Uuid
+  cleanupContract        String   @map("cleanup_contract") @db.VarChar(64)
+  adapterVersion         String   @map("adapter_version") @db.VarChar(64)
+  status                 String   @db.VarChar(32)
+  originalValueHash      String   @map("original_value_hash") @db.Char(64)
+  predecessorReceiptHash String?  @map("predecessor_receipt_hash") @db.Char(64)
+  restoredValueHash      String?  @map("restored_value_hash") @db.Char(64)
+  evidenceFetchedAt      DateTime @map("evidence_fetched_at") @db.Timestamp(3)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  fieldEvidence FieldEvidence @relation(fields: [workspaceId, fieldEvidenceId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction, map: "raw_source_field_evidence_cleanup_audit_evidence_fkey")
+
+  @@unique([fieldEvidenceId, cleanupContract, adapterVersion], map: "raw_source_field_evidence_cleanup_audit_unique")
+  @@index([workspaceId, createdAt], map: "raw_source_field_evidence_cleanup_audit_workspace_created_idx")
+  @@map("raw_source_field_evidence_cleanup_audit")
 }
 
 /// Suppression（PRD 7.4 / 12.6）：禁联名单，任何对外动作前的第一道检查。

@@ -783,11 +783,6 @@ function seedStoredFieldEvidence(database) {
        '{"name":"Acme Pump GmbH","source":"Call 555-0100 person@example.test Bearer secret"}'::jsonb,
        'digital_footprint',NULL,1,'public','["display","match"]','green',
        '2026-08-25T16:31:00Z'),
-      ('81000000-0000-4000-8000-000000000108','${WORKSPACE_A}','company',
-       '${COMPANY_WEBSITE_CHANGE}','source',
-       '"protected.person@example.test"'::jsonb,'restricted_unknown',
-       '${RESTRICTED_RAW_A}',1,'public','["display"]','green',
-       '2026-08-25T16:31:00Z'),
       ('81000000-0000-4000-8000-000000000109','${WORKSPACE_A}','company',
        '${COMPANY_WEBSITE_CHANGE}','name','"Website Company"'::jsonb,
        'registry',NULL,1,'public','["display","match"]','green',
@@ -2081,7 +2076,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       "protected.person@example.test",
       "green",
       '["display"]',
-      "restricted_unknown",
+      "usaspending_awards",
       RESTRICTED_RAW_A,
       "2026-08-25T16:31:00.000Z",
     ].join("|");
@@ -2092,7 +2087,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           provider_key,raw_record_id::text,
           to_char(fetched_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
          FROM field_evidence
-         WHERE id='81000000-0000-4000-8000-000000000108';`,
+         WHERE raw_record_id='${RESTRICTED_RAW_A}'
+           AND field='contact_email';`,
       ),
       restrictedBefore,
     );
@@ -2143,8 +2139,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         },
         {
           id: "81000000-0000-4000-8000-000000000107",
-          contract: "stored-field-evidence-cleanup/v1",
-          reason: "UNRECOVERABLE_STORED_FIELD_VALUE_WITHHELD",
+          contract: "canonical-attribute-cleanup/v2",
+          reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
           original:
             "1b00174bbde20a10c55e527d7a39a537049dfe2719e15b7b5cea1e654f980a1f",
           class: "red",
@@ -2176,7 +2172,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       dockerPsql(
         databases.storedField,
         `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
-         WHERE field_evidence_id='81000000-0000-4000-8000-000000000108';`,
+         WHERE raw_record_id='${RESTRICTED_RAW_A}';`,
       ),
       "0",
     );
@@ -2220,7 +2216,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           has_table_privilege('app_user',c.oid,'INSERT')::text,
           has_table_privilege('app_user',c.oid,'UPDATE')::text,
           has_table_privilege('app_user',c.oid,'DELETE')::text,
-          (SELECT confdeltype='c' FROM pg_constraint
+          (SELECT (confdeltype='c')::text FROM pg_constraint
              WHERE conrelid=c.oid AND contype='f'
                AND confrelid='field_evidence'::regclass),
           (SELECT count(*)::text FROM information_schema.columns
@@ -2231,7 +2227,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                  'cleanup_contract','adapter_version','status',
                  'original_value_hash','predecessor_receipt_hash',
                  'restored_value_hash','created_at'
-               ))
+               )))
          FROM pg_class AS c
          WHERE c.oid='raw_source_field_evidence_cleanup_audit'::regclass;`,
       ),
@@ -2242,7 +2238,9 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.storedField,
         asApp(
           WORKSPACE_A,
-          `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit;`,
+          `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
+           WHERE field_evidence_id::text LIKE
+             '81000000-0000-4000-8000-0000000001%';`,
         ),
       ),
       `${WORKSPACE_A}\n7`,
@@ -2252,7 +2250,9 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.storedField,
         asApp(
           WORKSPACE_B,
-          `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit;`,
+          `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
+           WHERE field_evidence_id::text LIKE
+             '81000000-0000-4000-8000-0000000001%';`,
         ),
       ),
       `${WORKSPACE_B}\n0`,
@@ -2290,11 +2290,12 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
        );
        INSERT INTO raw_source_field_evidence_cleanup_audit(
          workspace_id,field_evidence_id,cleanup_contract,adapter_version,
-         status,original_value_hash
+         status,original_value_hash,evidence_fetched_at
        ) VALUES (
          '${WORKSPACE_A}','81000000-0000-4000-8000-000000000199',
          'raw-source-stored-field-cleanup/v1',
-         'stored-company-field-evidence/v1','UNRECOVERABLE_HOLD',repeat('a',64)
+         'stored-company-field-evidence/v1','UNRECOVERABLE_HOLD',repeat('a',64),
+         '2026-08-25T16:31:00Z'
        );
        DELETE FROM field_evidence
        WHERE id='81000000-0000-4000-8000-000000000199';`,
