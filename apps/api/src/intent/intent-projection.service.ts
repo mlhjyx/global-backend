@@ -20,6 +20,7 @@ import {
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { sanitizeStoredCompanyFieldEvidence } from '../discovery/canonical-company-attributes';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
@@ -234,7 +235,11 @@ export class IntentProjectionService {
         const events = changes.map(toIntentEvent);
         const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const priorIntent = (existing.intent as IntentAttr | undefined) ?? undefined;
-        const intent = mergeIntent(priorIntent, events);
+        const intent = sanitizeStoredCompanyFieldEvidence(
+          'intent.website_change',
+          mergeIntent(priorIntent, events),
+        ) as IntentAttr | undefined;
+        if (!intent) return false;
 
         await tx.canonicalCompany.update({
           where: { id: company.id },

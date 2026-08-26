@@ -6,6 +6,7 @@ import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
+import { sanitizeStoredCompanyFieldEvidence } from '../discovery/canonical-company-attributes';
 
 // 单一真值在 signals/signal-mappers（摄取层先用）；此处 re-export 保持既有 import 路径不破。
 export { TENDER_PUBLISHED, TENDER_STRENGTH };
@@ -166,7 +167,11 @@ export class TedIntentProjectionService {
           source: 'ted',
         },
       };
-      const intent = mergeIntent(priorIntent, [event]);
+      const intent = sanitizeStoredCompanyFieldEvidence(
+        'intent.tender',
+        mergeIntent(priorIntent, [event]),
+      ) as IntentAttr | undefined;
+      if (!intent) return false;
       // 幂等门：既有买方且合并后 intent 实质未变（同一开放招标每日 sweep 复现）→ 不 bump version、不堆 evidence 行。
       if (prior && priorIntent && sameIntent(priorIntent, intent)) return false;
 
@@ -210,19 +215,21 @@ export class TedIntentProjectionService {
       });
       // 🟢 买方身份事实署名（CC BY 4.0）——仅新建时写一次（幂等，避免每 sweep 堆行）。
       if (!prior) {
+        const identityEvidence = sanitizeStoredCompanyFieldEvidence('identity', {
+          name: demand.name,
+          country: demand.country,
+          source: 'ted',
+          notice: demand.publicationNumber,
+          attribution: TED_ATTRIBUTION,
+        });
+        if (identityEvidence === undefined) return true;
         await tx.fieldEvidence.create({
           data: {
             workspaceId,
             entityType: 'company',
             entityId: saved.id,
             field: 'identity',
-            value: {
-              name: demand.name,
-              country: demand.country,
-              source: 'ted',
-              notice: demand.publicationNumber,
-              attribution: TED_ATTRIBUTION,
-            } as unknown as Prisma.InputJsonValue,
+            value: identityEvidence as Prisma.InputJsonValue,
             providerKey: 'ted',
             confidence: 1,
             license: 'CC BY 4.0',

@@ -7,10 +7,13 @@ import {
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import type { DiscoveryQueryReceipt } from '../discovery/discovery-query-receipt';
+import { DISCOVERY_QUERY_RECEIPT_MODE as QUERY_RECEIPT_MODE } from '../discovery/discovery-query-receipt-contract';
 
 export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
 export const DISCOVERY_RAW_GOVERNANCE_PATCH =
   'discovery-raw-governance-dispositions-v1';
+export const DISCOVERY_QUERY_RECEIPT_PATCH = 'discovery-query-receipt-input-v1';
+export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
 function invalidAuthorityInput(): never {
@@ -42,6 +45,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const { workspaceId, runId, planId } = input;
   const usesAuthority = patched(DISCOVERY_AUTHORITY_PATCH);
   const usesRawGovernance = patched(DISCOVERY_RAW_GOVERNANCE_PATCH);
+  const usesQueryReceipts = usesRawGovernance && patched(DISCOVERY_QUERY_RECEIPT_PATCH);
   let executionBudget: ExecutionBudgetBinding | undefined;
   if (usesAuthority) {
     if (input.executionContractVersion !== EXECUTION_CONTRACT_VERSION) {
@@ -91,20 +95,27 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   for (const [queryOrdinal, query] of queries.entries()) {
     try {
       const r = await acts.executeQuery(
-        usesRawGovernance
+        usesQueryReceipts
           ? {
               workspaceId,
               runId,
               planId,
               queryOrdinal,
+              queryReceiptMode: DISCOVERY_QUERY_RECEIPT_MODE,
               query,
               ...authorityArgs,
             }
           : { workspaceId, runId, query, ...authorityArgs },
       );
       acceptedRaw += r.rawCount;
-      if (usesRawGovernance) {
+      if (usesQueryReceipts) {
         const receipt = r.queryReceipt;
+        if (!receipt) {
+          throw ApplicationFailure.nonRetryable(
+            'DISCOVERY_QUERY_RECEIPT_MISSING',
+            'DISCOVERY_QUERY_RECEIPT_MISSING',
+          );
+        }
         perQuery[receipt.queryKey] = receipt;
         quarantinedRaw += receipt.quarantined;
         rejectedRaw += receipt.rejected;
@@ -131,6 +142,18 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           providers,
           provider: providers.join('+') || null,
         };
+      } else if (usesRawGovernance) {
+        quarantinedRaw += r.quarantinedCount;
+        rejectedRaw += r.rejectedCount;
+        duplicateRaw += r.duplicateCount;
+        governanceDenied += r.quarantinedCount + r.rejectedCount;
+        perSource[query.source_class] = {
+          rawCount: r.rawCount,
+          quarantinedCount: r.quarantinedCount,
+          rejectedCount: r.rejectedCount,
+          duplicateCount: r.duplicateCount,
+          provider: r.provider,
+        };
       } else {
         perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
       }
@@ -139,7 +162,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
       failures += 1;
-      if (!usesRawGovernance) {
+      if (!usesQueryReceipts) {
         perSource[query.source_class] = {
           rawCount: 0,
           provider: null,
@@ -210,7 +233,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     status,
     stats: {
       perSource,
-      ...(usesRawGovernance
+      ...(usesQueryReceipts
         ? {
             perQuery,
             rawGovernance: {
@@ -229,6 +252,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
               ),
             },
           }
+        : usesRawGovernance
+          ? {
+              rawGovernance: {
+                accepted: acceptedRaw,
+                quarantined: quarantinedRaw,
+                rejected: rejectedRaw,
+                duplicate: duplicateRaw,
+              },
+            }
         : {}),
       companies,
       suppressed,

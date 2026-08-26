@@ -5,6 +5,10 @@ import { loadMaterializableCompanyState } from '../discovery/company-suppression
 import { US_FED_SOURCES_SOUGHT, SOURCES_SOUGHT_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
+import {
+  sanitizeCanonicalCompanyAttributes,
+  sanitizeStoredCompanyFieldEvidence,
+} from '../discovery/canonical-company-attributes';
 
 // 单一真值在 signals/signal-mappers；此处 re-export 保持既有 import 路径不破。
 export { US_FED_SOURCES_SOUGHT, SOURCES_SOUGHT_STRENGTH };
@@ -164,7 +168,16 @@ export class SamIntentProjectionService {
           source: 'samgov',
         },
       };
-      const intent = mergeIntent(priorIntent, [event]);
+      const intent = sanitizeCanonicalCompanyAttributes({
+        intent: mergeIntent(priorIntent, [event]),
+      }).intent as IntentAttr | undefined;
+      if (!intent) return false;
+      const samEvents = intent.events.filter((candidate) => candidate.type === US_FED_SOURCES_SOUGHT);
+      const samEvidence = sanitizeStoredCompanyFieldEvidence(
+        'intent.sources_sought',
+        { events: samEvents },
+      );
+      if (samEvidence === undefined) return false;
       // 幂等门：既有买方且合并后 intent 实质未变（同一 Sources Sought 每 sweep 复现）→ 不 bump、不堆 evidence。
       if (prior && priorIntent && sameIntent(priorIntent, intent)) return false;
 
@@ -197,14 +210,13 @@ export class SamIntentProjectionService {
       // 🟢 intent 事实证据（美国政府作品公共领域，署名非义务；买方=机构，不落具名联系人）。
       // 🔴 只存 **SAM 事件子集**（非合并后 intent）：company.attributes.intent 保留跨源合并结果，但本证据行
       // providerKey='samgov'/license=公共领域，若塞进 TED(CC BY)/FDA 事件=把他源信号误挂 SAM 署名/许可（Codex P2 #3）。
-      const samEvents = intent.events.filter((e) => e.type === US_FED_SOURCES_SOUGHT);
       await tx.fieldEvidence.create({
         data: {
           workspaceId,
           entityType: 'company',
           entityId: saved.id,
           field: 'intent.sources_sought',
-          value: { events: samEvents } as unknown as Prisma.InputJsonValue,
+          value: samEvidence as Prisma.InputJsonValue,
           providerKey: 'samgov',
           confidence: 1,
           license: SAM_LICENSE,
@@ -213,19 +225,21 @@ export class SamIntentProjectionService {
       });
       // 🟢 机构买方身份事实——仅新建时写一次（幂等，避免每 sweep 堆行）。
       if (!prior) {
+        const identityEvidence = sanitizeStoredCompanyFieldEvidence('identity', {
+          name: demand.name,
+          country: 'US',
+          source: 'samgov',
+          notice: demand.noticeId,
+          disclaimer: SAM_DISCLAIMER,
+        });
+        if (identityEvidence === undefined) return true;
         await tx.fieldEvidence.create({
           data: {
             workspaceId,
             entityType: 'company',
             entityId: saved.id,
             field: 'identity',
-            value: {
-              name: demand.name,
-              country: 'US',
-              source: 'samgov',
-              notice: demand.noticeId,
-              disclaimer: SAM_DISCLAIMER,
-            } as unknown as Prisma.InputJsonValue,
+            value: identityEvidence as Prisma.InputJsonValue,
             providerKey: 'samgov',
             confidence: 1,
             license: SAM_LICENSE,

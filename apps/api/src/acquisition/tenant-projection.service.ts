@@ -7,6 +7,7 @@ import {
   canonicalCompanyAttributesEqual,
   mergeCanonicalCompanyAttributes,
   sanitizeCanonicalCompanyAttributes,
+  sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
 import {
   persistMonitoredSourceRawBridge,
@@ -147,13 +148,23 @@ export class TenantProjectionService {
             continue;
           }
 
-          const attributes = sanitizeCanonicalCompanyAttributes(
-            preparedCompany.attributes,
-          );
           const raw = await persistMonitoredSourceRawBridge(tx, {
             workspaceId,
             prepared: preparedRaw,
           });
+          const existingLink = prior
+            ? await tx.identityLink.findFirst({
+                where: { canonicalId: prior.id, rawRecordId: raw.id },
+                select: { id: true },
+              })
+            : null;
+          // Suppression admission remains first. Existing-link precedence then
+          // prevents an old Raw payload from merging over current Canonical.
+          if (existingLink) continue;
+
+          const attributes = sanitizeCanonicalCompanyAttributes(
+            preparedCompany.attributes,
+          );
 
           const mergedAttributes = mergeCanonicalCompanyAttributes(
             prior?.attributes,
@@ -178,14 +189,6 @@ export class TenantProjectionService {
           );
           const canonicalChanged =
             !prior || attributesChanged || domainChanged || countryChanged;
-          const existingLink = prior
-            ? await tx.identityLink.findFirst({
-                where: { canonicalId: prior.id, rawRecordId: raw.id },
-                select: { id: true },
-              })
-            : null;
-          if (existingLink && !canonicalChanged) continue;
-
           // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
           // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
           const canonical = prior
@@ -224,15 +227,6 @@ export class TenantProjectionService {
           if (canonicalChanged) projected += 1;
 
           // Downstream facts reference the governed Raw receipt, never SourceEntity directly.
-          const linkExists = existingLink;
-          if (linkExists) {
-            // The original Raw/IdentityLink/FieldEvidence transaction already
-            // carries the provenance for this canonical repair. Do not append
-            // a duplicate `(entity, field, raw)` row: the database enforces
-            // that evidence identity as unique, and 2000 has already applied
-            // the same full-path sanitizer to the retained evidence value.
-            continue;
-          }
           await tx.identityLink.create({
             data: {
               workspaceId,
@@ -252,13 +246,15 @@ export class TenantProjectionService {
           ];
           for (const [field, value] of fields) {
             if (value == null) continue;
+            const governedValue = sanitizeStoredCompanyFieldEvidence(field, value);
+            if (governedValue === undefined) continue;
             await tx.fieldEvidence.create({
               data: {
                 workspaceId,
                 entityType: 'company',
                 entityId: canonical.id,
                 field,
-                value: value as Prisma.InputJsonValue,
+                value: governedValue as Prisma.InputJsonValue,
                 providerKey: preparedRaw.identityProviderKey,
                 rawRecordId: raw.id,
                 license: preparedRaw.license,

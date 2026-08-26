@@ -51,9 +51,14 @@ import {
   type DiscoveryQueryReceipt,
 } from '../discovery/discovery-query-receipt';
 import {
+  DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL,
+  DISCOVERY_QUERY_RECEIPT_MODE,
+} from '../discovery/discovery-query-receipt-contract';
+import {
   canonicalCompanyAttributesEqual,
   mergeCanonicalCompanyAttributes,
   sanitizeCanonicalCompanyAttributes,
+  sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
 
 export interface DiscoveryRunInput {
@@ -86,7 +91,33 @@ interface DiscoveryQueryExecutionResult {
   costCents: number;
   provider: string | null;
   budgetTruncated: boolean;
-  queryReceipt: DiscoveryQueryReceipt;
+  queryReceipt?: DiscoveryQueryReceipt;
+}
+
+function invalidDiscoveryQueryReceiptIdentity(): never {
+  throw ApplicationFailure.nonRetryable(
+    'DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID',
+    'DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID',
+  );
+}
+
+function parseDiscoveryQueryReceiptIdentity(args: {
+  queryReceiptMode?: unknown;
+  planId?: unknown;
+  queryOrdinal?: unknown;
+}): Readonly<{ planId: string; queryOrdinal: number }> | null {
+  const hasMode = args.queryReceiptMode !== undefined;
+  const hasPlanId = args.planId !== undefined;
+  const hasOrdinal = args.queryOrdinal !== undefined;
+  if (!hasMode && !hasPlanId && !hasOrdinal) return null;
+  if (
+    args.queryReceiptMode !== DISCOVERY_QUERY_RECEIPT_MODE ||
+    typeof args.planId !== 'string' ||
+    !Number.isSafeInteger(args.queryOrdinal) ||
+    Number(args.queryOrdinal) < 0 ||
+    Number(args.queryOrdinal) > DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL
+  ) invalidDiscoveryQueryReceiptIdentity();
+  return { planId: args.planId, queryOrdinal: Number(args.queryOrdinal) };
 }
 
 interface LockedDiscoveryRunReceiptState {
@@ -223,29 +254,21 @@ export function createDiscoveryActivities(deps: {
      */
     async executeQuery(args: DiscoveryActivityInput & {
       runId: string;
+      queryReceiptMode?: string;
       planId?: string;
       queryOrdinal?: number;
       query: PlanQuery;
     }): Promise<DiscoveryQueryExecutionResult> {
       const binding = await ensureRunBudget(args);
-      if (
-        typeof args.planId !== 'string' ||
-        !Number.isSafeInteger(args.queryOrdinal) ||
-        Number(args.queryOrdinal) < 0
-      ) {
-        throw ApplicationFailure.nonRetryable(
-          'DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID',
-          'DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID',
-        );
-      }
-      const planId = args.planId;
-      const queryOrdinal = args.queryOrdinal as number;
-      const queryKey = discoveryQueryKey({
-        runId: args.runId,
-        planId,
-        queryOrdinal,
-        query: args.query,
-      });
+      const receiptIdentity = parseDiscoveryQueryReceiptIdentity(args);
+      const queryKey = receiptIdentity
+        ? discoveryQueryKey({
+            runId: args.runId,
+            planId: receiptIdentity.planId,
+            queryOrdinal: receiptIdentity.queryOrdinal,
+            query: args.query,
+          })
+        : null;
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -361,21 +384,22 @@ export function createDiscoveryActivities(deps: {
             ? item.value.durableReceipts.map(({ producerId, receipt }) => ({
                 producerId,
                 receipt,
-                domainAckKey: `${args.runId}:${queryKey}:${item.value.key}:${receipt.operationId}`,
+                domainAckKey: queryKey
+                  ? `${args.runId}:${queryKey}:${item.value.key}:${receipt.operationId}`
+                  : `${args.runId}:${item.value.key}:${receipt.operationId}`,
                 domainRevision: receipt.resultDigest,
               }))
             : []),
           apply: async (transaction) => {
-            const lockedRun = await lockDiscoveryRunReceiptState(transaction, {
-              runId: args.runId,
-              planId,
-            });
-            const existingReceipt = readDiscoveryQueryReceipt(
-              lockedRun.stats,
-              queryKey,
-            );
-            if (existingReceipt) {
-              return executionResult(existingReceipt, budgetTruncated);
+            const lockedRun = receiptIdentity
+              ? await lockDiscoveryRunReceiptState(transaction, {
+                  runId: args.runId,
+                  planId: receiptIdentity.planId,
+                })
+              : null;
+            if (lockedRun && queryKey) {
+              const existingReceipt = readDiscoveryQueryReceipt(lockedRun.stats, queryKey);
+              if (existingReceipt) return executionResult(existingReceipt, budgetTruncated);
             }
             let totalCost = 0;
             let duplicateCount = 0;
@@ -383,10 +407,12 @@ export function createDiscoveryActivities(deps: {
             let quarantinedCount = 0;
             let rejectedCount = 0;
             const providersObserved: string[] = [];
+            const providersHit: string[] = [];
             for (const item of settled) {
               if (item.status !== 'fulfilled') continue;
               const { key, r } = item.value;
               providersObserved.push(key);
+              if (r.records.length > 0) providersHit.push(key);
               const prepared = prepareRawSourceBatch({
                 providerKey: key,
                 records: r.records,
@@ -433,10 +459,39 @@ export function createDiscoveryActivities(deps: {
               }
               totalCost += r.costCents;
             }
+            if (!receiptIdentity || !lockedRun || !queryKey) {
+              const [rawCount, storedQuarantined, storedRejected] = await Promise.all([
+                transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'ACCEPTED' } }),
+                transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'QUARANTINED' } }),
+                transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'REJECTED' } }),
+              ]);
+              if (totalCost > 0) {
+                await transaction.usageLedger.create({
+                  data: {
+                    workspaceId: args.workspaceId,
+                    resourceType: 'provider_call',
+                    quantity: rawCount,
+                    costUsd: totalCost / 100,
+                    refType: 'discovery_run',
+                    refId: args.runId,
+                    meta: { providers: providersHit, sourceClass: q.sourceClass },
+                  },
+                });
+              }
+              return {
+                rawCount,
+                quarantinedCount: storedQuarantined,
+                rejectedCount: storedRejected,
+                duplicateCount,
+                costCents: totalCost,
+                provider: providersHit.join('+') || null,
+                budgetTruncated,
+              };
+            }
             const receipt = parseDiscoveryQueryReceipt({
               schemaVersion: 'discovery-query-receipt/v1',
               queryKey,
-              queryOrdinal,
+              queryOrdinal: receiptIdentity.queryOrdinal,
               sourceClass: q.sourceClass,
               providers: [...new Set(providersObserved)].sort(),
               accepted: acceptedCount,
@@ -479,9 +534,26 @@ export function createDiscoveryActivities(deps: {
             return executionResult(receipt, budgetTruncated);
           },
           readback: async (transaction) => {
+            if (!receiptIdentity || !queryKey) {
+              const fulfilled = settled.filter((item) => item.status === 'fulfilled');
+              const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
+                transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'ACCEPTED' } }),
+                transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'QUARANTINED' } }),
+                transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'REJECTED' } }),
+              ]);
+              return {
+                rawCount,
+                quarantinedCount,
+                rejectedCount,
+                duplicateCount: 0,
+                costCents: fulfilled.reduce((sum, item) => sum + item.value.r.costCents, 0),
+                provider: fulfilled.filter((item) => item.value.r.records.length > 0).map((item) => item.value.key).join('+') || null,
+                budgetTruncated,
+              };
+            }
             const lockedRun = await lockDiscoveryRunReceiptState(transaction, {
               runId: args.runId,
-              planId,
+              planId: receiptIdentity.planId,
             });
             const receipt = readDiscoveryQueryReceipt(lockedRun.stats, queryKey);
             if (!receipt) {
@@ -567,10 +639,20 @@ export function createDiscoveryActivities(deps: {
             continue;
           }
 
+          const prior = materialization.prior;
+          const existingLink = prior
+            ? await tx.identityLink.findFirst({
+                where: { canonicalId: prior.id, rawRecordId: raw.id },
+                select: { id: true },
+              })
+            : null;
+          // Suppression admission remains first; a linked Raw observation then
+          // wins before stale contribution bytes are merged into Canonical.
+          if (existingLink) continue;
+
           const currentAttributes = sanitizeCanonicalCompanyAttributes(
             rec.attributes,
           );
-          const prior = materialization.prior;
           const canonicalAttributes = mergeCanonicalCompanyAttributes(
             prior?.attributes,
             currentAttributes,
@@ -588,14 +670,6 @@ export function createDiscoveryActivities(deps: {
               rec.region !== prior.region,
           );
           const canonicalChanged = !prior || attributesChanged || regionChanged;
-          const existingLink = prior
-            ? await tx.identityLink.findFirst({
-                where: { canonicalId: prior.id, rawRecordId: raw.id },
-                select: { id: true },
-              })
-            : null;
-          if (existingLink && !canonicalChanged) continue;
-
           const canonical = canonicalChanged
             ? await tx.canonicalCompany.upsert({
                 where: {
@@ -632,50 +706,44 @@ export function createDiscoveryActivities(deps: {
             : { id: prior!.id };
           if (canonicalChanged) companies += 1;
 
-          const linkExists = existingLink;
-          // Existing links were committed atomically with their evidence. A
-          // sanitizer-only canonical repair reuses that governed evidence;
-          // inserting the same `(entity, field, raw)` identity would violate
-          // the database uniqueness contract. Migration 2000 applies the same
-          // full-path correction to its retained evidence value.
-          if (!linkExists) {
-            await tx.identityLink.create({
+          await tx.identityLink.create({
+            data: {
+              workspaceId: args.workspaceId,
+              canonicalType: 'company',
+              canonicalId: canonical.id,
+              rawRecordId: raw.id,
+              matchRule: identity.matchRule,
+              confidence: identity.matchRule === 'name_country' ? 0.8 : 1, // §8.4：identifier_exact 同 domain_exact=1
+            },
+          });
+          // 字段级 Evidence：该 raw 记录贡献的每个非空字段留痕
+          const fields: [string, unknown][] = [
+            ['name', rec.name],
+            ['domain', rec.domain],
+            ['country', rec.country],
+            ['region', rec.region],
+            ['industry', rec.industry],
+            ['employee_count', rec.employeeCount],
+            ['revenue_usd', rec.revenueUsd],
+            ['attributes', currentAttributes],
+          ];
+          for (const [field, value] of fields) {
+            if (value == null) continue;
+            const governedValue = sanitizeStoredCompanyFieldEvidence(field, value);
+            if (governedValue === undefined) continue;
+            await tx.fieldEvidence.create({
               data: {
                 workspaceId: args.workspaceId,
-                canonicalType: 'company',
-                canonicalId: canonical.id,
+                entityType: 'company',
+                entityId: canonical.id,
+                field,
+                value: governedValue as Prisma.InputJsonValue,
+                providerKey: raw.providerKey,
                 rawRecordId: raw.id,
-                matchRule: identity.matchRule,
-                confidence: identity.matchRule === 'name_country' ? 0.8 : 1, // §8.4：identifier_exact 同 domain_exact=1
+                license: resolveEvidenceLicense(rec.license, raw.providerKey), // §8.5：记录声明许可优先（TED CC BY 4.0），否则回退不变
+                allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
               },
             });
-            // 字段级 Evidence：该 raw 记录贡献的每个非空字段留痕
-            const fields: [string, unknown][] = [
-              ['name', rec.name],
-              ['domain', rec.domain],
-              ['country', rec.country],
-              ['region', rec.region],
-              ['industry', rec.industry],
-              ['employee_count', rec.employeeCount],
-              ['revenue_usd', rec.revenueUsd],
-              ['attributes', currentAttributes],
-            ];
-            for (const [field, value] of fields) {
-              if (value == null) continue;
-              await tx.fieldEvidence.create({
-                data: {
-                  workspaceId: args.workspaceId,
-                  entityType: 'company',
-                  entityId: canonical.id,
-                  field,
-                  value: value as Prisma.InputJsonValue,
-                  providerKey: raw.providerKey,
-                  rawRecordId: raw.id,
-                  license: resolveEvidenceLicense(rec.license, raw.providerKey), // §8.5：记录声明许可优先（TED CC BY 4.0），否则回退不变
-                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                },
-              });
-            }
           }
         }
         return { companies, suppressed };

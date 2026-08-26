@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import { DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL } from "./discovery-query-receipt-contract";
+
+export {
+  DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL,
+  DISCOVERY_QUERY_RECEIPT_MODE,
+} from "./discovery-query-receipt-contract";
 
 export const DISCOVERY_QUERY_RECEIPT_MAX_ENTRIES = 128;
 const MAX_RECEIPT_STORE_BYTES = 64 * 1024;
@@ -6,7 +12,6 @@ const MAX_COUNT = 1_000_000;
 const MAX_COST_CENTS = 1_000_000_000;
 const MAX_FILTER_BYTES = 32 * 1024;
 const MAX_FILTER_NODES = 1_024;
-const MAX_QUERY_ORDINAL = 1_023;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_IDENTIFIER = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const RECEIPT_KEYS = [
@@ -146,7 +151,7 @@ function canonicalQuery(input: DiscoveryQueryIdentityInput): string {
     !safeIdentifier(input.planId) ||
     !boundedInteger(
       input.queryOrdinal,
-      MAX_QUERY_ORDINAL,
+      DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL,
     ) ||
     !safeIdentifier(input.query.source_class) ||
     !boundedInteger(priority, 1_000_000) ||
@@ -196,7 +201,7 @@ export function parseDiscoveryQueryReceipt(
     !SHA256.test(input.queryKey) ||
     !boundedInteger(
       input.queryOrdinal,
-      MAX_QUERY_ORDINAL,
+      DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL,
     ) ||
     !safeIdentifier(input.sourceClass) ||
     !Array.isArray(providers) ||

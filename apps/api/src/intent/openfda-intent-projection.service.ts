@@ -5,6 +5,10 @@ import { OPENFDA_ATTRIBUTION, OPENFDA_LICENSE, FDA_REGISTRATION_DISCLAIMER } fro
 import { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
+import {
+  sanitizeCanonicalCompanyAttributes,
+  sanitizeStoredCompanyFieldEvidence,
+} from '../discovery/canonical-company-attributes';
 
 // 单一真值在 signals/signal-mappers（摄取层先用：§6 个体户在摄取层即拒）；re-export 保持既有 import 路径不破。
 export { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant };
@@ -163,7 +167,15 @@ export class OpenFdaIntentProjectionService {
           source: 'openfda',
         },
       };
-      const intent = mergeIntent(priorIntent, [event]);
+      const governedEvent = sanitizeStoredCompanyFieldEvidence(
+        'intent.clearance',
+        event,
+      ) as IntentEvent | undefined;
+      if (!governedEvent) return false;
+      const intent = sanitizeCanonicalCompanyAttributes({
+        intent: mergeIntent(priorIntent, [governedEvent]),
+      }).intent as IntentAttr | undefined;
+      if (!intent) return false;
       // 幂等门：既有申请人且合并后 intent 实质未变（同一清关每 sweep 复现）→ 不 bump version、不堆 evidence 行。
       if (prior && priorIntent && sameIntent(priorIntent, intent)) return false;
 
@@ -206,7 +218,7 @@ export class OpenFdaIntentProjectionService {
           entityType: 'company',
           entityId: saved.id,
           field: 'intent.clearance',
-          value: event as unknown as Prisma.InputJsonValue,
+          value: governedEvent as unknown as Prisma.InputJsonValue,
           providerKey: 'openfda',
           confidence: 1,
           license: OPENFDA_LICENSE,
@@ -215,20 +227,22 @@ export class OpenFdaIntentProjectionService {
       });
       // 🟢 申请人身份事实 provenance（CC0）——仅新建时写一次（幂等，避免每 sweep 堆行）。
       if (!prior) {
+        const identityEvidence = sanitizeStoredCompanyFieldEvidence('identity', {
+          name: c.applicant,
+          country: c.country,
+          source: 'openfda',
+          k_number: c.kNumber,
+          attribution: OPENFDA_ATTRIBUTION,
+          disclaimer: FDA_REGISTRATION_DISCLAIMER,
+        });
+        if (identityEvidence === undefined) return true;
         await tx.fieldEvidence.create({
           data: {
             workspaceId,
             entityType: 'company',
             entityId: saved.id,
             field: 'identity',
-            value: {
-              name: c.applicant,
-              country: c.country,
-              source: 'openfda',
-              k_number: c.kNumber,
-              attribution: OPENFDA_ATTRIBUTION,
-              disclaimer: FDA_REGISTRATION_DISCLAIMER,
-            } as unknown as Prisma.InputJsonValue,
+            value: identityEvidence as Prisma.InputJsonValue,
             providerKey: 'openfda',
             confidence: 1,
             license: OPENFDA_LICENSE,

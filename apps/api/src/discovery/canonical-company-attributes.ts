@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import {
   isContactFreeText,
   isControlledBusinessTerm,
+  isProviderCompanyName,
+  isSecretFreeText,
 } from "./raw-source-provider-normalizer";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
@@ -93,6 +95,13 @@ function safeCode(value: string, maximumBytes = 128): boolean {
   );
 }
 
+function safeNotice(value: string): boolean {
+  return (
+    (/^\d{1,9}-(?:19|20)\d{2}$/u.test(value) && isSecretFreeText(value)) ||
+    safeCode(value)
+  );
+}
+
 function safeProviderIdentifier(value: string): boolean {
   return (
     Buffer.byteLength(value, "utf8") <= 80 &&
@@ -176,7 +185,7 @@ const semanticIdentifierContracts = new Map<
     "intent.events.evidence.source",
     { validate: (value) => ["ted", "samgov", "openfda"].includes(value) },
   ],
-  ["intent.events.evidence.notice", { validate: safeCode }],
+  ["intent.events.evidence.notice", { validate: safeNotice }],
   [
     "intent.events.evidence.cpv",
     { allowArray: true, validate: (value) => /^\d{8}$/u.test(value) },
@@ -191,6 +200,114 @@ const semanticIdentifierContracts = new Map<
   ],
   ["intent.events.evidence.k_number", { validate: safeCode }],
 ]);
+
+const storedCompanyFieldAttributePaths = new Map<
+  string,
+  readonly string[]
+>([
+  ["digital_footprint.ad_pixels", ["digital_footprint", "ad_pixels"]],
+  ["digital_footprint.email_provider", ["digital_footprint", "email_provider"]],
+  ["digital_footprint.hiring_signal", ["digital_footprint", "hiring_signal"]],
+  ["digital_footprint.is_advertiser", ["digital_footprint", "is_advertiser"]],
+  ["digital_footprint.served_langs", ["digital_footprint", "served_langs"]],
+  ["digital_footprint.served_markets", ["digital_footprint", "served_markets"]],
+  ["digital_footprint.structured_org", ["digital_footprint", "structured_org"]],
+  ["digital_footprint.structured_products", ["digital_footprint", "structured_products"]],
+  ["digital_footprint.tech_platform", ["digital_footprint", "tech_platform"]],
+  ["gleif.entity_status", ["gleif", "entity_status"]],
+  ["gleif.is_subsidiary", ["gleif", "is_subsidiary"]],
+  ["gleif.legal_form", ["gleif", "legal_form"]],
+  ["gleif.legal_form_code", ["gleif", "legal_form_code"]],
+  ["gleif.legal_name", ["gleif", "legal_name"]],
+  ["gleif.lei", ["gleif", "lei"]],
+  ["gleif.match_confidence", ["gleif", "match_confidence"]],
+  ["gleif.parent_lei", ["gleif", "parent_lei"]],
+  ["gleif.parent_name", ["gleif", "parent_name"]],
+  ["gleif.registered_city", ["gleif", "registered_city"]],
+  ["gleif.registered_country", ["gleif", "registered_country"]],
+  ["gleif.registration_status", ["gleif", "registration_status"]],
+  ["gleif.ultimate_parent_lei", ["gleif", "ultimate_parent_lei"]],
+  ["gleif.ultimate_parent_name", ["gleif", "ultimate_parent_name"]],
+  ["structured_harvest.careers_url", ["structured_harvest", "careers_url"]],
+  ["structured_harvest.hiring_signal", ["structured_harvest", "hiring_signal"]],
+  ["structured_harvest.site_sections", ["structured_harvest", "site_sections"]],
+  ["structured_harvest.sitemap_url_count", ["structured_harvest", "sitemap_url_count"]],
+  ["wikidata.country", ["wikidata", "country"]],
+  ["wikidata.employees", ["wikidata", "employees"]],
+  ["wikidata.headquarters", ["wikidata", "headquarters"]],
+  ["wikidata.inception_year", ["wikidata", "inception_year"]],
+  ["wikidata.industries", ["wikidata", "industries"]],
+  ["wikidata.isin", ["wikidata", "isin"]],
+  ["wikidata.label", ["wikidata", "label"]],
+  ["wikidata.lei", ["wikidata", "lei"]],
+  ["wikidata.match_confidence", ["wikidata", "match_confidence"]],
+  ["wikidata.parent_name", ["wikidata", "parent_name"]],
+  ["wikidata.parent_qid", ["wikidata", "parent_qid"]],
+  ["wikidata.products", ["wikidata", "products"]],
+  ["wikidata.qid", ["wikidata", "qid"]],
+  ["wikidata.stock_exchange", ["wikidata", "stock_exchange"]],
+  ["wikidata.subsidiary_count", ["wikidata", "subsidiary_count"]],
+  ["wikidata.website", ["wikidata", "website"]],
+]);
+
+export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
+  "attributes",
+  "country",
+  "digital_footprint.ad_pixels",
+  "digital_footprint.email_provider",
+  "digital_footprint.hiring_signal",
+  "digital_footprint.is_advertiser",
+  "digital_footprint.served_langs",
+  "digital_footprint.served_markets",
+  "digital_footprint.structured_org",
+  "digital_footprint.structured_products",
+  "digital_footprint.tech_platform",
+  "domain",
+  "employee_count",
+  "gleif.entity_status",
+  "gleif.is_subsidiary",
+  "gleif.legal_form",
+  "gleif.legal_form_code",
+  "gleif.legal_name",
+  "gleif.lei",
+  "gleif.match_confidence",
+  "gleif.parent_lei",
+  "gleif.parent_name",
+  "gleif.registered_city",
+  "gleif.registered_country",
+  "gleif.registration_status",
+  "gleif.ultimate_parent_lei",
+  "gleif.ultimate_parent_name",
+  "identity",
+  "industry",
+  "intent.clearance",
+  "intent.sources_sought",
+  "intent.tender",
+  "intent.website_change",
+  "name",
+  "region",
+  "revenue_usd",
+  "structured_harvest.careers_url",
+  "structured_harvest.hiring_signal",
+  "structured_harvest.site_sections",
+  "structured_harvest.sitemap_url_count",
+  "wikidata.country",
+  "wikidata.employees",
+  "wikidata.headquarters",
+  "wikidata.inception_year",
+  "wikidata.industries",
+  "wikidata.isin",
+  "wikidata.label",
+  "wikidata.lei",
+  "wikidata.match_confidence",
+  "wikidata.parent_name",
+  "wikidata.parent_qid",
+  "wikidata.products",
+  "wikidata.qid",
+  "wikidata.stock_exchange",
+  "wikidata.subsidiary_count",
+  "wikidata.website",
+] as const);
 
 interface SanitizeState {
   remaining: number;
@@ -224,7 +341,10 @@ function sanitizeValue(
   ) {
     return undefined;
   }
-  if (key === "products" || key === "keywords") {
+  if (
+    (key === "products" || key === "keywords") &&
+    !(path[0] === "structured_harvest" && path[1] === "site_sections")
+  ) {
     if (!Array.isArray(value)) return undefined;
     const predicate =
       key === "products" ? safeProduct : isControlledBusinessTerm;
@@ -299,6 +419,142 @@ export function sanitizeCanonicalCompanyAttributes(
       return sanitized === undefined ? [] : [[key, sanitized]];
     }),
   );
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function wrapStoredAttributePath(
+  path: readonly string[],
+  value: unknown,
+): Record<string, unknown> {
+  return path.reduceRight<Record<string, unknown>>(
+    (wrapped, part, index) => ({
+      [part]: index === path.length - 1 ? value : wrapped,
+    }),
+    {},
+  );
+}
+
+function readStoredAttributePath(
+  value: unknown,
+  path: readonly string[],
+): unknown {
+  let current = value;
+  for (const part of path) {
+    const object = record(current);
+    if (!object || !Object.prototype.hasOwnProperty.call(object, part)) {
+      return undefined;
+    }
+    current = object[part];
+  }
+  return current;
+}
+
+function sanitizeStoredAttributePath(
+  path: readonly string[],
+  value: unknown,
+): unknown {
+  return readStoredAttributePath(
+    sanitizeCanonicalCompanyAttributes(wrapStoredAttributePath(path, value)),
+    path,
+  );
+}
+
+function safeStoredText(value: unknown, maximumBytes: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.normalize("NFKC") === value &&
+    Buffer.byteLength(value, "utf8") <= maximumBytes &&
+    isContactFreeText(value)
+  );
+}
+
+function safeStoredDomain(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.normalize("NFKC") === value &&
+    value === value.toLowerCase() &&
+    Buffer.byteLength(value, "utf8") <= 253 &&
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(value) &&
+    isContactFreeText(value)
+  );
+}
+
+function sanitizeStoredIdentity(value: unknown): Record<string, unknown> | undefined {
+  const input = record(value);
+  if (!input) return undefined;
+  const output: Record<string, unknown> = {};
+  if (
+    typeof input.name === "string" &&
+    input.name.normalize("NFKC") === input.name &&
+    Buffer.byteLength(input.name, "utf8") <= 160 &&
+    isProviderCompanyName(input.name)
+  ) output.name = input.name;
+  if (safeStoredText(input.country, 80)) output.country = input.country;
+  if (
+    typeof input.source === "string" &&
+    ["openfda", "samgov", "ted"].includes(input.source)
+  ) output.source = input.source;
+  if (typeof input.notice === "string" && safeNotice(input.notice)) {
+    output.notice = input.notice;
+  }
+  if (typeof input.k_number === "string" && safeCode(input.k_number)) {
+    output.k_number = input.k_number;
+  }
+  if (safeStoredText(input.attribution, 1_024)) output.attribution = input.attribution;
+  if (safeStoredText(input.disclaimer, 1_024)) output.disclaimer = input.disclaimer;
+  return Object.keys(output).length ? output : undefined;
+}
+
+/** FieldEvidence.field is a closed storage contract, not a JSON path. */
+export function sanitizeStoredCompanyFieldEvidence(
+  field: string,
+  value: unknown,
+): unknown {
+  if (field === "attributes") {
+    const attributes = sanitizeCanonicalCompanyAttributes(value);
+    return Object.keys(attributes).length ? attributes : undefined;
+  }
+  if (field === "name") {
+    return typeof value === "string" &&
+      value.normalize("NFKC") === value &&
+      Buffer.byteLength(value, "utf8") <= 160 &&
+      isProviderCompanyName(value)
+      ? value
+      : undefined;
+  }
+  if (field === "domain") return safeStoredDomain(value) ? value : undefined;
+  if (["country", "industry", "region"].includes(field)) {
+    return safeStoredText(value, 160) ? value : undefined;
+  }
+  if (field === "employee_count") {
+    return Number.isSafeInteger(value) && Number(value) >= 0 ? value : undefined;
+  }
+  if (field === "revenue_usd") {
+    return typeof value === "number" &&
+      Number.isFinite(value) &&
+      value >= 0 &&
+      value <= 1_000_000_000_000_000
+      ? value
+      : undefined;
+  }
+  if (field === "identity") return sanitizeStoredIdentity(value);
+  if (
+    field === "intent.tender" ||
+    field === "intent.sources_sought" ||
+    field === "intent.website_change"
+  ) return sanitizeStoredAttributePath(["intent"], value);
+  if (field === "intent.clearance") {
+    const intent = sanitizeStoredAttributePath(["intent"], { events: [value] });
+    const events = record(intent)?.events;
+    return Array.isArray(events) ? events[0] : undefined;
+  }
+  const path = storedCompanyFieldAttributePaths.get(field);
+  return path ? sanitizeStoredAttributePath(path, value) : undefined;
 }
 
 export function mergeCanonicalCompanyAttributes(
