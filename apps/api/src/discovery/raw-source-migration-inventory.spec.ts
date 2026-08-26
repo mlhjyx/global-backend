@@ -52,6 +52,8 @@ const REISSUED_1600_MIGRATION =
   "20260826160000_raw_source_governance_final_correction";
 const OLD_REVIEWED_1600_CHECKSUM =
   "d8783aa0b513679d8944841c7e55b03812cc9709cc6d6c39005a9caadeaeea11";
+const INITIAL_TASK_6A1_1600_CHECKSUM =
+  "c8e6e5520747ada0d0f70104a7dd0f8ece2edcc7ccdcc7237cacbfd7566c24d0";
 
 describe("PR #407 experiment _prisma_migrations bridge decision", () => {
   it("returns an explicit UNKNOWN/HOLD when no live experiment subject is supplied", () => {
@@ -242,32 +244,38 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
     });
   });
 
-  it("returns an explicit provenance HOLD for the pre-release 1600 checksum that was reissued", () => {
-    const completed = new Date("2026-08-26T00:00:00.000Z");
-    const inventory = expected.map((entry) => ({
-      migration_name: entry.migrationName,
-      checksum:
-        entry.migrationName === REISSUED_1600_MIGRATION
-          ? OLD_REVIEWED_1600_CHECKSUM
-          : entry.checksum,
-      finished_at: completed,
-      rolled_back_at: null,
-    }));
+  it.each([
+    ["old reviewed", OLD_REVIEWED_1600_CHECKSUM],
+    ["initial Task 6A.1", INITIAL_TASK_6A1_1600_CHECKSUM],
+  ])(
+    "returns an explicit provenance HOLD for the %s pre-release 1600 checksum",
+    (_label, reissuedChecksum) => {
+      const completed = new Date("2026-08-26T00:00:00.000Z");
+      const inventory = expected.map((entry) => ({
+        migration_name: entry.migrationName,
+        checksum:
+          entry.migrationName === REISSUED_1600_MIGRATION
+            ? reissuedChecksum
+            : entry.checksum,
+        finished_at: completed,
+        rolled_back_at: null,
+      }));
 
-    expect(assessRawSourceMigrationInventory(inventory, expected)).toEqual({
-      schemaVersion: "pr407-raw-source-migration-decision/v1",
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
-      observations: [
-        {
-          migrationName: REISSUED_1600_MIGRATION,
-          observedChecksum: OLD_REVIEWED_1600_CHECKSUM,
-          expectedChecksum: "1".repeat(64),
-          rowCount: 1,
-          lifecycleState: "APPLIED",
-        },
-      ],
-    });
-  });
+      expect(assessRawSourceMigrationInventory(inventory, expected)).toEqual({
+        schemaVersion: "pr407-raw-source-migration-decision/v1",
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+        observations: [
+          {
+            migrationName: REISSUED_1600_MIGRATION,
+            observedChecksum: reissuedChecksum,
+            expectedChecksum: "1".repeat(64),
+            rowCount: 1,
+            lifecycleState: "APPLIED",
+          },
+        ],
+      });
+    },
+  );
 });

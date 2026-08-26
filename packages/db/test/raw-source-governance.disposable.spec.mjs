@@ -104,6 +104,7 @@ const databases = Object.freeze({
   finalCorrectionRollback: "task6a_raw_final_correction_rollback",
   writerParityRollback: "task6a_raw_writer_parity_rollback",
   evidenceChainRollback: "task6a_raw_evidence_chain_rollback",
+  dottedReceipt: "task6a_raw_dotted_receipt",
   locks: "task6a_raw_locks",
 });
 
@@ -115,6 +116,7 @@ const SAFE_RAW_A = "30000000-0000-4000-8000-000000000001";
 const RESTRICTED_RAW_A = "30000000-0000-4000-8000-000000000002";
 const SAFE_RAW_B = "30000000-0000-4000-8000-000000000003";
 const EVIDENCE_CHAIN_RAW_A = "30000000-0000-4000-8000-000000000004";
+const DOTTED_PRODUCTS_RAW_A = "30000000-0000-4000-8000-000000000005";
 const SOURCE = "40000000-0000-4000-8000-000000000001";
 const FETCH = "50000000-0000-4000-8000-000000000001";
 const SOURCE_ENTITY = "60000000-0000-4000-8000-000000000001";
@@ -126,6 +128,8 @@ const EVIDENCE_CHAIN_ORIGINAL_VALUE_HASH =
   "2613c94b602988c61f1b56c42e51b814a1310baee6a73b999be84460472a7be7";
 const EVIDENCE_CHAIN_PREDECESSOR_RECEIPT_HASH =
   "c3c29511a75ec65ac77a677770336c5adb1f0936d94c132139edd11382b2caec";
+const DOTTED_PRODUCTS_ORIGINAL_VALUE_HASH =
+  "e97c88ca4b437bca8733e84c282fe070cf75af0bac750c818fed33c72d23b6f6";
 
 let baselineDirectory;
 let firstDeployOutput = "";
@@ -551,6 +555,34 @@ function seedCurrentMainClone(database = databases.upgrade) {
   );
 }
 
+function seedDottedProductsEvidence(database) {
+  dockerPsql(
+    database,
+    `
+    INSERT INTO raw_source_record(
+      id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+      source_url,fetched_at,content_hash,parser_version,cost_cents,created_at
+    ) VALUES (
+      '${DOTTED_PRODUCTS_RAW_A}','${WORKSPACE_A}','${RUN_A}',
+      'registry','company_registry','dotted-products-a',
+      '{"name":"Dotted Products A","domain":"dotted-products-a.example"}',
+      'https://registry.example/dotted-products-a',
+      now()-interval '2 days',repeat('f',64),'registry/v1',0,
+      now()-interval '2 days'
+    );
+    INSERT INTO field_evidence(
+      id,workspace_id,entity_type,entity_id,field,value,provider_key,
+      raw_record_id,confidence,license,allowed_actions,fetched_at
+    ) VALUES (
+      gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}',
+      'gleif.products','["pump","AB"]','registry',
+      '${DOTTED_PRODUCTS_RAW_A}',1,'public','["display","match"]',
+      '2026-08-25T16:31:00Z'
+    );
+  `,
+  );
+}
+
 function openRowLock(database, rowId) {
   requireTopology();
   const child = spawn(
@@ -706,6 +738,11 @@ before(() => {
   );
   seedCurrentMainClone();
   migrateDeploy(databases.upgrade);
+
+  migrateDeploy(databases.dottedReceipt, baseline.schemaPath);
+  seedCurrentMainClone(databases.dottedReceipt);
+  seedDottedProductsEvidence(databases.dottedReceipt);
+  migrateDeploy(databases.dottedReceipt);
 
   migrateDeploy(databases.backfillRollback, baseline.schemaPath);
   seedCurrentMainClone(databases.backfillRollback);
@@ -1188,6 +1225,126 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       class: "green",
       actions: ["display"],
     });
+  });
+
+  it("keeps a dotted products v2 receipt byte-stable across direct sanitization and a second 1800 pass", () => {
+    const readSnapshot = () =>
+      JSON.parse(
+        dockerPsql(
+          databases.dottedReceipt,
+          `SELECT jsonb_build_object(
+            'value',evidence.value,
+            'sanitized',raw_source_sanitize_field_evidence_v4(
+              evidence.field,evidence.value
+            ),
+            'receiptHash',encode(digest(
+              raw_source_canonical_json_v1(evidence.value),'sha256'
+            ),'hex'),
+            'rowDigest',encode(digest(concat_ws('|',
+              evidence.id::text,evidence.workspace_id::text,
+              evidence.entity_type,evidence.entity_id::text,evidence.field,
+              raw_source_canonical_json_v1(evidence.value),
+              evidence.provider_key,coalesce(evidence.raw_record_id::text,'null'),
+              coalesce(evidence.confidence::text,'null'),evidence.license,
+              coalesce(evidence.allowed_actions::text,'null'),
+              evidence.data_class,evidence.fetched_at::text
+            ),'sha256'),'hex'),
+            'rowCount',(SELECT count(*) FROM field_evidence
+              WHERE entity_id='${COMPANY_A}'),
+            'targetCount',(SELECT count(*) FROM field_evidence
+              WHERE entity_id='${COMPANY_A}'
+                AND raw_record_id='${DOTTED_PRODUCTS_RAW_A}'),
+            'workspaceId',evidence.workspace_id,
+            'entityType',evidence.entity_type,
+            'entityId',evidence.entity_id,
+            'field',evidence.field,
+            'providerKey',evidence.provider_key,
+            'rawRecordId',evidence.raw_record_id,
+            'confidence',evidence.confidence,
+            'license',evidence.license,
+            'actions',evidence.allowed_actions,
+            'dataClass',evidence.data_class,
+            'fetchedAt',to_char(
+              evidence.fetched_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+            ),
+            'predecessorPresent',(evidence.value ? 'predecessorReceiptHash'),
+            'containsUnsafe',(evidence.value::text LIKE '%"AB"%')
+          )::text
+          FROM field_evidence AS evidence
+          WHERE evidence.entity_id='${COMPANY_A}'
+            AND evidence.raw_record_id='${DOTTED_PRODUCTS_RAW_A}';`,
+        ),
+      );
+    const expectedReceipt = {
+      _historicalCleanup: "canonical-attribute-cleanup/v2",
+      reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+      originalValueHash: DOTTED_PRODUCTS_ORIGINAL_VALUE_HASH,
+      retainedValue: ["pump"],
+    };
+    const expectedMetadata = {
+      rowCount: 9,
+      targetCount: 1,
+      workspaceId: WORKSPACE_A,
+      entityType: "company",
+      entityId: COMPANY_A,
+      field: "gleif.products",
+      providerKey: "registry",
+      rawRecordId: DOTTED_PRODUCTS_RAW_A,
+      confidence: 1,
+      license: "public",
+      actions: [],
+      dataClass: "red",
+      fetchedAt: "2026-08-25T16:31:00.000Z",
+      predecessorPresent: false,
+      containsUnsafe: false,
+    };
+    const metadata = (snapshot) => ({
+      rowCount: snapshot.rowCount,
+      targetCount: snapshot.targetCount,
+      workspaceId: snapshot.workspaceId,
+      entityType: snapshot.entityType,
+      entityId: snapshot.entityId,
+      field: snapshot.field,
+      providerKey: snapshot.providerKey,
+      rawRecordId: snapshot.rawRecordId,
+      confidence: snapshot.confidence,
+      license: snapshot.license,
+      actions: snapshot.actions,
+      dataClass: snapshot.dataClass,
+      fetchedAt: snapshot.fetchedAt,
+      predecessorPresent: snapshot.predecessorPresent,
+      containsUnsafe: snapshot.containsUnsafe,
+    });
+
+    const first = readSnapshot();
+    dockerPsql(
+      databases.dottedReceipt,
+      readFileSync(evidenceChainMigrationPath, "utf8"),
+    );
+    const second = readSnapshot();
+
+    assert.deepEqual(
+      {
+        firstReceipt: first.value,
+        directSanitized: first.sanitized,
+        secondReceipt: second.value,
+        secondSanitized: second.sanitized,
+        receiptBytesStable: first.receiptHash === second.receiptHash,
+        rowBytesStable: first.rowDigest === second.rowDigest,
+        firstMetadata: metadata(first),
+        secondMetadata: metadata(second),
+      },
+      {
+        firstReceipt: expectedReceipt,
+        directSanitized: expectedReceipt,
+        secondReceipt: expectedReceipt,
+        secondSanitized: expectedReceipt,
+        receiptBytesStable: true,
+        rowBytesStable: true,
+        firstMetadata: expectedMetadata,
+        secondMetadata: expectedMetadata,
+      },
+    );
   });
 
   it("preserves the original evidence digest and binds the immediate v1 cleanup receipt", () => {
