@@ -5,6 +5,7 @@ import {
   isProviderCompanyName,
   isSecretFreeText,
 } from "./raw-source-provider-normalizer";
+import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site-sections";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
   "digital_footprint",
@@ -342,9 +343,15 @@ function sanitizeValue(
     return undefined;
   }
   if (
-    (key === "products" || key === "keywords") &&
-    !(path[0] === "structured_harvest" && path[1] === "site_sections")
+    path.length === 2 &&
+    path[0] === "structured_harvest" &&
+    path[1] === "site_sections"
   ) {
+    const sections = sanitizeStructuredHarvestSiteSections(value);
+    state.remaining -= sections ? Object.keys(sections).length : 0;
+    return state.remaining < 0 ? undefined : sections;
+  }
+  if (key === "products" || key === "keywords") {
     if (!Array.isArray(value)) return undefined;
     const predicate =
       key === "products" ? safeProduct : isControlledBusinessTerm;
@@ -543,6 +550,9 @@ export function sanitizeStoredCompanyFieldEvidence(
       : undefined;
   }
   if (field === "identity") return sanitizeStoredIdentity(value);
+  if (field === "structured_harvest.site_sections") {
+    return sanitizeStructuredHarvestSiteSections(value);
+  }
   if (
     field === "intent.tender" ||
     field === "intent.sources_sought" ||

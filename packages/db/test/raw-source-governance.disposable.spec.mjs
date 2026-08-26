@@ -167,6 +167,7 @@ const RESTRICTED_RAW_A = "30000000-0000-4000-8000-000000000002";
 const SAFE_RAW_B = "30000000-0000-4000-8000-000000000003";
 const EVIDENCE_CHAIN_RAW_A = "30000000-0000-4000-8000-000000000004";
 const DOTTED_PRODUCTS_RAW_A = "30000000-0000-4000-8000-000000000005";
+const SITE_SECTION_RAW_A = "30000000-0000-4000-8000-000000000006";
 const SOURCE = "40000000-0000-4000-8000-000000000001";
 const FETCH = "50000000-0000-4000-8000-000000000001";
 const SOURCE_ENTITY = "60000000-0000-4000-8000-000000000001";
@@ -188,10 +189,14 @@ const DOTTED_PRODUCTS_ORIGINAL_VALUE_HASH =
   "e97c88ca4b437bca8733e84c282fe070cf75af0bac750c818fed33c72d23b6f6";
 const WELL_KNOWN_SITE_SECTION_ORIGINAL_VALUE_HASH =
   "b7bb67490a2371c33f625125ff0f25a55f9c5dc7af43c4962b9c32742c7d7bb0";
+const PRODUCTS_SITE_SECTION_ORIGINAL_VALUE_HASH =
+  "a8fda5acab00edc40db93c7fd977449ea0eb0c9633dd0f22b3153664dd08084d";
 const UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH =
   "9b85fcc354a642b4274b3fbf3751b5ca66b54b8653c4e47e62712502d48f2f8d";
 const MIXED_SITE_SECTION_ORIGINAL_VALUE_HASH =
   "3d8ee7ad8c041cef294161b8e02d97da50d708b6add4dcff50ff67db4fac286a";
+const POST_2200_UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH =
+  "81274b3550f64bae21465854464f7a7a83c6e34f309039e49d04973e983dc090";
 
 let baselineDirectory;
 let firstDeployOutput = "";
@@ -892,10 +897,6 @@ function seedSiteSectionEvidence(database) {
       id,workspace_id,entity_type,entity_id,field,value,provider_key,
       raw_record_id,confidence,license,allowed_actions,data_class,fetched_at
     ) VALUES
-      ('81000000-0000-4000-8000-000000000201','${WORKSPACE_A}','company',
-       '${COMPANY_WEBSITE_CHANGE}','structured_harvest.site_sections',
-       '{"products":2}'::jsonb,'structured_harvest',NULL,1,'public',
-       '["display","match"]','green','2026-08-25T16:31:00Z'),
       ('81000000-0000-4000-8000-000000000202','${WORKSPACE_A}','company',
        '${COMPANY_WEBSITE_CHANGE}','structured_harvest.site_sections',
        '{".well-known":1}'::jsonb,'structured_harvest',NULL,1,'public',
@@ -922,15 +923,43 @@ function seedSiteSectionEvidence(database) {
 function seedHistoricalSiteSectionRestrictiveEvidence(database) {
   dockerPsql(
     database,
-    `INSERT INTO field_evidence(
+    `INSERT INTO raw_source_record(
+      id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+      source_url,fetched_at,content_hash,parser_version,cost_cents,created_at
+    ) VALUES (
+      '${SITE_SECTION_RAW_A}','${WORKSPACE_A}','${RUN_A}',
+      'structured_harvest','public_intelligence','site-section-products',
+      '{"name":"Website Company","attributes":{"site_sections":{"products":2}}}',
+      'https://website.example/sitemap.xml','2026-08-25T16:31:00Z',
+      repeat('6',64),'structured-harvest/v1',0,'2026-08-25T16:31:00Z'
+    );
+    INSERT INTO field_evidence(
       id,workspace_id,entity_type,entity_id,field,value,provider_key,
       raw_record_id,confidence,license,allowed_actions,fetched_at
+    ) VALUES
+      ('81000000-0000-4000-8000-000000000201','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','structured_harvest.site_sections',
+       '{"products":2}'::jsonb,'structured_harvest','${SITE_SECTION_RAW_A}',
+       1,'public','["display","match"]','2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000205','${WORKSPACE_A}','company',
+       '${COMPANY_A}','structured_harvest.site_sections',
+       '{"555-0100":1,"bearer-secret":1}'::jsonb,'structured_harvest',
+       '${RESTRICTED_RAW_A}',1,'public','["display","match"]',
+       '2026-08-25T16:31:00Z');`,
+  );
+}
+
+function seedPost2200SiteSectionEvidence(database) {
+  dockerPsql(
+    database,
+    `INSERT INTO field_evidence(
+      id,workspace_id,entity_type,entity_id,field,value,provider_key,
+      confidence,license,allowed_actions,data_class,fetched_at
     ) VALUES (
-      '81000000-0000-4000-8000-000000000205','${WORKSPACE_A}','company',
-      '${COMPANY_A}','structured_harvest.site_sections',
-      '{"555-0100":1,"bearer-secret":1}'::jsonb,'structured_harvest',
-      '${RESTRICTED_RAW_A}',1,'public','["display","match"]',
-      '2026-08-25T16:31:00Z'
+      '81000000-0000-4000-8000-000000000207','${WORKSPACE_A}','company',
+      '${COMPANY_WEBSITE_CHANGE}','structured_harvest.site_sections',
+      '{"555-0100":1,"bearer-secret":1}'::jsonb,'structured_harvest',1,
+      'public','["display","match"]','green','2026-08-25T16:31:00Z'
     );`,
   );
 }
@@ -1192,6 +1221,7 @@ before(() => {
     databases.storedField,
     readFileSync(storedFieldCleanupMigrationPath, "utf8"),
   );
+  seedPost2200SiteSectionEvidence(databases.storedField);
   if (
     existsSync(siteSectionContractMigrationPath) &&
     existsSync(siteSectionCleanupMigrationPath)
@@ -1592,13 +1622,17 @@ before(() => {
       pathCleanupMigrationPath,
       storedFieldAdapterMigrationPath,
       storedFieldCleanupMigrationPath,
-      siteSectionContractMigrationPath,
     ]) {
       dockerPsql(
         databases.siteSectionCleanupRollback,
         readFileSync(migrationPath, "utf8"),
       );
     }
+    seedPost2200SiteSectionEvidence(databases.siteSectionCleanupRollback);
+    dockerPsql(
+      databases.siteSectionCleanupRollback,
+      readFileSync(siteSectionContractMigrationPath, "utf8"),
+    );
     const injectedSiteSectionCleanup = readFileSync(
       siteSectionCleanupMigrationPath,
       "utf8",
@@ -2292,7 +2326,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           '81000000-0000-4000-8000-000000000203',
           '81000000-0000-4000-8000-000000000204',
           '81000000-0000-4000-8000-000000000205',
-          '81000000-0000-4000-8000-000000000206'
+          '81000000-0000-4000-8000-000000000206',
+          '81000000-0000-4000-8000-000000000207'
         );`,
       ),
     );
@@ -2303,10 +2338,11 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         value: { products: 2 },
         class: "green",
         actions: ["display", "match"],
-        status: null,
-        original: null,
-        predecessor: null,
-        restored: null,
+        status: "RESTORED",
+        original: PRODUCTS_SITE_SECTION_ORIGINAL_VALUE_HASH,
+        predecessor:
+          "4a2a6800ad3d813b1a8a8f41e815309845364c3a14a47a315766c1ce932fa810",
+        restored: PRODUCTS_SITE_SECTION_ORIGINAL_VALUE_HASH,
       },
       {
         id: "81000000-0000-4000-8000-000000000202",
@@ -2316,7 +2352,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         status: "RESTORED",
         original: WELL_KNOWN_SITE_SECTION_ORIGINAL_VALUE_HASH,
         predecessor:
-          "fd863347623e6404a2e98c2cc36bd8c63f353246da98a392172d4c02fd2b11cf",
+          "58afd74ac691a441f68cec27bbeff75cb777e612b283018b097fb9481f5a8c43",
         restored: WELL_KNOWN_SITE_SECTION_ORIGINAL_VALUE_HASH,
       },
       {
@@ -2330,7 +2366,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         actions: [],
         status: "UNRECOVERABLE_HOLD",
         original: UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH,
-        predecessor: null,
+        predecessor:
+          "abba34be33e1b8dfbf4bf5f242cdb850c0429c4d5f72e25de5a608c6b101261f",
         restored: null,
       },
       {
@@ -2370,7 +2407,21 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         status: "UNRECOVERABLE_HOLD",
         original: WELL_KNOWN_SITE_SECTION_ORIGINAL_VALUE_HASH,
         predecessor:
-          "fd863347623e6404a2e98c2cc36bd8c63f353246da98a392172d4c02fd2b11cf",
+          "58afd74ac691a441f68cec27bbeff75cb777e612b283018b097fb9481f5a8c43",
+        restored: null,
+      },
+      {
+        id: "81000000-0000-4000-8000-000000000207",
+        value: {
+          _historicalCleanup: "structured-harvest-site-section-cleanup/v1",
+          reason: "UNSAFE_SITE_SECTION_KEY_WITHHELD",
+          originalValueHash: POST_2200_UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH,
+        },
+        class: "red",
+        actions: [],
+        status: "UNRECOVERABLE_HOLD",
+        original: POST_2200_UNSAFE_SITE_SECTION_ORIGINAL_VALUE_HASH,
+        predecessor: null,
         restored: null,
       },
     ]);
@@ -2567,7 +2618,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             coalesce(predecessor_receipt_hash,'null'),
             coalesce(restored_value_hash,'null'),created_at::text
           ),E'\n' ORDER BY id)
-           FROM raw_source_field_evidence_cleanup_audit)
+           FROM raw_source_field_evidence_cleanup_audit
+           WHERE cleanup_contract='raw-source-stored-field-cleanup/v1'
+             AND field_evidence_id::text LIKE
+               '81000000-0000-4000-8000-0000000001%')
         ),'sha256'),'hex');`,
       );
     const before = snapshot();
@@ -2636,6 +2690,30 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     assert.equal(
       dockerPsql(
         databases.storedField,
+        `SELECT concat_ws('|',
+          has_function_privilege('app_user',
+            'raw_source_site_section_key_valid_v1(text)','EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_sanitize_site_sections_v1(jsonb)','EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_sanitize_stored_company_field_evidence_v1(text,jsonb)',
+            'EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_linked_site_sections_candidate_v1(text,jsonb)',
+            'EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_current_site_sections_candidate_v1(text,jsonb)',
+            'EXECUTE')::text,
+          has_function_privilege('app_user',
+            'raw_source_site_section_cleanup_receipt_shape_valid_v1(jsonb)',
+            'EXECUTE')::text
+        );`,
+      ),
+      "false|false|false|false|false|false",
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
         asApp(
           WORKSPACE_A,
           `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
@@ -2666,7 +2744,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
            WHERE cleanup_contract='raw-source-site-section-cleanup/v1';`,
         ),
       ),
-      `${WORKSPACE_A}\n4`,
+      `${WORKSPACE_A}\n6`,
     );
     assert.equal(
       dockerPsql(
@@ -5149,11 +5227,11 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.siteSectionCleanupRollback,
         `SELECT concat_ws('|',
           (SELECT value ? '555-0100' FROM field_evidence
-            WHERE id='81000000-0000-4000-8000-000000000203')::text,
+            WHERE id='81000000-0000-4000-8000-000000000207')::text,
           (SELECT data_class FROM field_evidence
-            WHERE id='81000000-0000-4000-8000-000000000203'),
+            WHERE id='81000000-0000-4000-8000-000000000207'),
           (SELECT allowed_actions::text FROM field_evidence
-            WHERE id='81000000-0000-4000-8000-000000000203'),
+            WHERE id='81000000-0000-4000-8000-000000000207'),
           (SELECT value->>'_historicalCleanup' FROM field_evidence
             WHERE id='81000000-0000-4000-8000-000000000202'),
           (SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
