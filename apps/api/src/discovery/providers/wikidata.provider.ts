@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
@@ -60,30 +59,42 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
     }
 
     const now = new Date().toISOString();
-    const records: ProviderCompanyRecord[] = companies.map((c) => ({
-      externalId: `wikidata:${c.qid}`,
-      name: c.name,
-      domain: c.website ? normalizeToDomain(c.website) : undefined,
-      country: c.countryCode,
-      employeeCount: c.employees,
-      attributes: {
-        wikidata_qid: c.qid,
-        latitude: c.latitude,
-        longitude: c.longitude,
-        source_class: query.sourceClass,
-      },
-      license: 'CC0-1.0',
-      provenance: {
-        sourceUrl: 'https://query.wikidata.org/sparql',
+    const records = companies.map((company) =>
+      mapWikidataCompanyToRecord({
+        company,
+        sourceClass: query.sourceClass,
         fetchedAt: now,
-        contentHash: createHash('sha256')
-          .update(`wikidata:${c.qid}:${c.name}`)
-          .digest('hex'),
-        parserVersion: 'wikidata/1',
-      },
-    }));
+      }),
+    );
     return { records, costCents: 0 };
   }
+}
+
+export function mapWikidataCompanyToRecord(args: {
+  company: WikidataCompany;
+  sourceClass: SourceClass;
+  fetchedAt: string;
+}): ProviderCompanyRecord {
+  const { company } = args;
+  return {
+    externalId: `wikidata:${company.qid}`,
+    name: company.name,
+    domain: company.website ? normalizeToDomain(company.website) : undefined,
+    country: company.countryCode,
+    employeeCount: company.employees,
+    attributes: {
+      wikidata_qid: company.qid,
+      latitude: company.latitude,
+      longitude: company.longitude,
+      source_class: args.sourceClass,
+    },
+    provenance: {
+      sourceUrl: `https://www.wikidata.org/wiki/${company.qid}`,
+      fetchedAt: args.fetchedAt,
+      contentHash: company.qid,
+      parserVersion: 'wikidata/1',
+    },
+  };
 }
 
 function mapIndustries(query: CompanyDiscoveryQuery): string[] {

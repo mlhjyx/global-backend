@@ -5,6 +5,7 @@ import {
   type PreparedRawSourceRow,
   type RawSourcePolicySnapshot,
 } from "../discovery/raw-source-ingestion";
+import { persistPreparedRawSourceRecord } from "../discovery/raw-source-writer";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -305,35 +306,23 @@ export async function persistMonitoredSourceRawBridge(
     );
   }
   const { prepared } = args;
-  const raw = await tx.rawSourceRecord.upsert({
-    where: { workspaceId_sourceEntityId_ingestKey: prepared.uniqueWhere },
-    update: {},
-    create: {
+  let raw: Awaited<ReturnType<typeof persistPreparedRawSourceRecord>>;
+  try {
+    raw = await persistPreparedRawSourceRecord(tx, {
       workspaceId: args.workspaceId,
       runId: null,
       sourceEntityId: prepared.uniqueWhere.sourceEntityId,
       providerKey: prepared.identityProviderKey,
       sourceClass: prepared.sourceClass,
-      externalId: prepared.row.externalId,
-      payload: prepared.row.payload as Prisma.InputJsonValue,
-      sourceUrl: prepared.row.sourceUrl,
-      fetchedAt: prepared.row.fetchedAt,
-      contentHash: prepared.row.contentHash,
-      parserVersion: prepared.row.parserVersion,
-      ingestKey: prepared.row.ingestKey,
-      payloadHash: prepared.row.payloadHash,
-      payloadBytes: prepared.row.payloadBytes,
-      ingestVersion: prepared.row.ingestVersion,
-      ingestStatus: prepared.row.ingestStatus,
-      dispositionCode: prepared.row.dispositionCode,
-      retentionDays: prepared.row.retentionDays,
-      expiresAt: prepared.row.expiresAt,
-      sourcePolicySnapshot: prepared.row
-        .sourcePolicySnapshot as Prisma.InputJsonValue,
+      row: prepared.row,
       costCents: 0,
-    },
-    select: { id: true, payloadHash: true, ingestStatus: true },
-  });
+    });
+  } catch {
+    throw new MonitoredSourceRawBridgeError(
+      "MONITORED_SOURCE_RAW_DRIFT",
+      "controlled Raw writer rejected the monitored snapshot",
+    );
+  }
   if (
     raw.ingestStatus !== "ACCEPTED" ||
     raw.payloadHash !== prepared.row.payloadHash
@@ -343,5 +332,9 @@ export async function persistMonitoredSourceRawBridge(
       "existing monitored Raw receipt differs from the deterministic snapshot",
     );
   }
-  return raw;
+  return {
+    id: raw.id,
+    payloadHash: raw.payloadHash,
+    ingestStatus: raw.ingestStatus,
+  };
 }

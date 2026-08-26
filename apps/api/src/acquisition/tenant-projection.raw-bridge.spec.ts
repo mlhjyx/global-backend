@@ -9,19 +9,36 @@ const FETCH = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 describe("TenantProjectionService Raw Source bridge", () => {
   it("materializes one governed Raw origin and uses its id for identity/evidence writes", async () => {
-    const rawUpsert = vi.fn(async ({ create }) => ({
-      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-      payloadHash: create.payloadHash,
-      ingestStatus: create.ingestStatus,
-    }));
+    const writerCommands: Record<string, unknown>[] = [];
     const identityCreate = vi.fn(async () => ({}));
     const evidenceCreate = vi.fn(async () => ({}));
     const canonicalCreate = vi.fn(async ({ data }) => ({
       id: "company-1",
       ...data,
     }));
+    const queryRaw = vi.fn(
+      async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+        if (statement.strings?.join("?").includes("write_raw_source_record_v2")) {
+          const command = JSON.parse(String(statement.values?.[0])) as Record<
+            string,
+            unknown
+          >;
+          writerCommands.push(command);
+          return [
+            {
+              raw_record_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+              payload_hash: command.expectedPayloadHash,
+              payload_bytes: command.expectedPayloadBytes,
+              ingest_status: command.ingestStatus,
+              inserted: true,
+            },
+          ];
+        }
+        return [{ pg_advisory_xact_lock: null }];
+      },
+    );
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: queryRaw,
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
         findUnique: vi.fn(async () => null),
@@ -29,7 +46,6 @@ describe("TenantProjectionService Raw Source bridge", () => {
         create: canonicalCreate,
         update: vi.fn(),
       },
-      rawSourceRecord: { upsert: rawUpsert },
       identityLink: {
         findFirst: vi.fn(async () => null),
         create: identityCreate,
@@ -101,7 +117,7 @@ describe("TenantProjectionService Raw Source bridge", () => {
       projected: 1,
       personalContactsWithheld: 1,
     });
-    expect(rawUpsert).toHaveBeenCalledOnce();
+    expect(writerCommands).toHaveLength(1);
     expect(identityCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -116,10 +132,13 @@ describe("TenantProjectionService Raw Source bridge", () => {
         }),
       }),
     );
-    expect(JSON.stringify(rawUpsert.mock.calls[0]?.[0])).not.toContain(
+    expect(JSON.stringify(writerCommands[0])).not.toContain(
       "sales@example.test",
     );
-    const preparedPayload = rawUpsert.mock.calls[0]![0].create.payload;
+    const preparedPayload = writerCommands[0]!.payload as Record<
+      string,
+      unknown
+    >;
     expect(canonicalCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

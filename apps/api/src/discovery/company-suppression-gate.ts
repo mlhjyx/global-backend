@@ -45,6 +45,9 @@ export async function loadMaterializableCompanyState(
   options?: {
     knownSuppressions?: ReadonlyArray<{ type: string; value: string }>;
     policyLock?: SuppressionPolicyLockReceipt;
+    sanitizeAttributes?: (
+      attributes: Record<string, unknown>,
+    ) => Record<string, unknown>;
   },
 ) {
   if (options?.policyLock) assertWorkspaceSuppressionPolicyLock(options.policyLock, workspaceId);
@@ -62,7 +65,8 @@ export async function loadMaterializableCompanyState(
   const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
   const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
   const blocked = prior?.status === 'SUPPRESSED' || sourceSuppressed || canonicalSuppressed;
-  if (prior && blocked) await repairSuppressedCompany(tx, prior);
+  if (prior && blocked)
+    await repairSuppressedCompany(tx, prior, options?.sanitizeAttributes);
   return { allowed: !blocked, prior } as const;
 }
 
@@ -216,22 +220,28 @@ export async function contactMayUseExternalProcessing(
 async function repairSuppressedCompany(
   tx: Prisma.TransactionClient,
   company: { id: string; status: string; attributes?: unknown },
+  sanitizeAttributes?: (
+    attributes: Record<string, unknown>,
+  ) => Record<string, unknown>,
 ): Promise<void> {
   const attributes = jsonObject(company.attributes);
-  const hasMailbox = Object.prototype.hasOwnProperty.call(attributes, 'contact_email');
-  const { contact_email: _removedContactEmail, ...safeAttributes } = attributes;
+  const sanitized = sanitizeAttributes ? sanitizeAttributes(attributes) : attributes;
+  const { contact_email: _removedContactEmail, ...safeAttributes } = sanitized;
+  const attributesChanged = JSON.stringify(safeAttributes) !== JSON.stringify(attributes);
 
   if (company.status !== 'SUPPRESSED') {
     const repaired = await tx.canonicalCompany.updateMany({
       where: { id: company.id, status: { not: 'SUPPRESSED' } },
       data: {
         status: 'SUPPRESSED',
-        ...(hasMailbox ? { attributes: safeAttributes as Prisma.InputJsonValue } : {}),
+        ...(attributesChanged
+          ? { attributes: safeAttributes as Prisma.InputJsonValue }
+          : {}),
         version: { increment: 1 },
       },
     });
-    if (repaired.count > 0 || !hasMailbox) return;
-  } else if (!hasMailbox) {
+    if (repaired.count > 0 || !attributesChanged) return;
+  } else if (!attributesChanged) {
     return;
   }
 
@@ -242,8 +252,14 @@ async function repairSuppressedCompany(
     select: { attributes: true },
   });
   const currentAttributes = jsonObject(current?.attributes);
-  if (!Object.prototype.hasOwnProperty.call(currentAttributes, 'contact_email')) return;
-  const { contact_email: _currentMailbox, ...currentSafeAttributes } = currentAttributes;
+  const currentSanitized = sanitizeAttributes
+    ? sanitizeAttributes(currentAttributes)
+    : currentAttributes;
+  const { contact_email: _currentMailbox, ...currentSafeAttributes } = currentSanitized;
+  if (
+    JSON.stringify(currentSafeAttributes) === JSON.stringify(currentAttributes)
+  )
+    return;
   await tx.canonicalCompany.updateMany({
     where: { id: company.id },
     data: { attributes: currentSafeAttributes as Prisma.InputJsonValue, version: { increment: 1 } },

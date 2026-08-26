@@ -40,6 +40,7 @@ import {
   reconcileRawSourceBatch,
   type RawSourceIngestLimits,
 } from '../discovery/raw-source-ingestion';
+import { persistPreparedRawSourceRecord } from '../discovery/raw-source-writer';
 import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
 
 export interface DiscoveryRunInput {
@@ -323,33 +324,22 @@ export function createDiscoveryActivities(deps: {
               });
               const reconciled = reconcileRawSourceBatch(prepared.rows, existing);
               duplicateCount += reconciled.duplicateCount;
-              if (reconciled.rows.length) {
-                const created = await transaction.rawSourceRecord.createMany({
-                  data: reconciled.rows.map((row) => ({
+              for (const row of reconciled.rows) {
+                const receipt = await persistPreparedRawSourceRecord(
+                  transaction,
+                  {
                     workspaceId: args.workspaceId,
                     runId: args.runId,
+                    sourceEntityId: null,
                     providerKey: key,
                     sourceClass: q.sourceClass,
-                    externalId: row.externalId,
-                    payload: row.payload as Prisma.InputJsonValue,
-                    sourceUrl: row.sourceUrl,
-                    fetchedAt: row.fetchedAt,
-                    contentHash: row.contentHash,
-                    parserVersion: row.parserVersion,
+                    row,
                     costCents: 0,
-                    ingestKey: row.ingestKey,
-                    payloadHash: row.payloadHash,
-                    payloadBytes: row.payloadBytes,
-                    ingestVersion: row.ingestVersion,
-                    ingestStatus: row.ingestStatus,
-                    dispositionCode: row.dispositionCode,
-                    retentionDays: row.retentionDays,
-                    expiresAt: row.expiresAt,
-                    sourcePolicySnapshot: row.sourcePolicySnapshot as Prisma.InputJsonValue,
-                  })),
-                  skipDuplicates: true,
-                });
-                duplicateCount += reconciled.rows.length - created.count;
+                  },
+                );
+                if (!receipt.inserted) {
+                  duplicateCount += 1;
+                }
               }
               totalCost += r.costCents;
             }

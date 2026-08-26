@@ -494,14 +494,14 @@ export function prepareRawSourceBatch(args: {
         canonical = diagnosticShape(sanitized.value);
       }
     }
-    const payloadBytes = Buffer.byteLength(canonical, "utf8");
-    const payloadHash = jsonInvalid
+    const originalPayloadBytes = Buffer.byteLength(canonical, "utf8");
+    const originalPayloadHash = jsonInvalid
       ? sha256(canonical)
       : sanitized.error
         ? rawPayloadHash(original)
         : rawPayloadHash(normalizedPayload);
-    const ingestKey = ingestKeyFor(normalizedPayload, payloadHash);
-    batchBytes += payloadBytes;
+    const ingestKey = ingestKeyFor(normalizedPayload, originalPayloadHash);
+    batchBytes += originalPayloadBytes;
     const record = plainRecord(normalizedPayload);
     const provenance = provenanceOf(normalizedPayload);
     const policy = policyFor(
@@ -529,7 +529,7 @@ export function prepareRawSourceBatch(args: {
     } else if (policy.snapshot.reviewStatus !== "APPROVED") {
       ingestStatus = "QUARANTINED";
       dispositionCode = "SOURCE_POLICY_SUSPENDED";
-    } else if (payloadBytes > limits.maxRecordBytes) {
+    } else if (originalPayloadBytes > limits.maxRecordBytes) {
       ingestStatus = "QUARANTINED";
       dispositionCode = "PAYLOAD_TOO_LARGE";
     } else if (batchBytes > limits.maxBatchBytes) {
@@ -543,9 +543,12 @@ export function prepareRawSourceBatch(args: {
         : minimalReceipt(
             ingestStatus,
             dispositionCode!,
-            payloadHash,
-            payloadBytes,
+            originalPayloadHash,
+            originalPayloadBytes,
           );
+    const persistedCanonical = canonicalJson(payload);
+    const payloadHash = rawPayloadHash(payload);
+    const payloadBytes = Buffer.byteLength(persistedCanonical, "utf8");
     return {
       externalId: ingestStatus === "ACCEPTED" ? externalId : null,
       payload,
@@ -637,19 +640,22 @@ export function reconcileRawSourceBatch(
       duplicateCount += 1;
       continue;
     }
+    const driftPayload = minimalReceipt(
+      "QUARANTINED",
+      "PROCESSING_KEY_DRIFT",
+      candidate.payloadHash,
+      candidate.payloadBytes,
+      { conflictWithRawId: prior.id },
+    );
     const drift: PreparedRawSourceRow = {
       ...candidate,
       externalId: null,
       ingestKey: driftKey,
       ingestStatus: "QUARANTINED",
       dispositionCode: "PROCESSING_KEY_DRIFT",
-      payload: minimalReceipt(
-        "QUARANTINED",
-        "PROCESSING_KEY_DRIFT",
-        candidate.payloadHash,
-        candidate.payloadBytes,
-        { conflictWithRawId: prior.id },
-      ),
+      payload: driftPayload,
+      payloadHash: rawPayloadHash(driftPayload),
+      payloadBytes: Buffer.byteLength(canonicalJson(driftPayload), "utf8"),
     };
     rows.push(drift);
     byKey.set(driftKey, {

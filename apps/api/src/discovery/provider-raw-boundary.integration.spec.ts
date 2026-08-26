@@ -141,7 +141,7 @@ describe("actual provider mapper output → governed Raw boundary", () => {
       osm_tags: expect.any(Object),
     });
 
-    const row = prepare("openstreetmap", mapped, "www.openstreetmap.org");
+    const row = prepare("openstreetmap", mapped, "overpass-api.de");
     expect(row.ingestStatus).toBe("ACCEPTED");
     expect(row.payload).toMatchObject({
       name: "General Dynamics",
@@ -151,6 +151,9 @@ describe("actual provider mapper output → governed Raw boundary", () => {
         latitude: 38.95,
         longitude: -77.35,
         source_class: "industry_data",
+      },
+      provenance: {
+        sourceUrl: "https://overpass-api.de/api/interpreter",
       },
     });
     expect(JSON.stringify(row.payload)).not.toMatch(/Reston|555-0100/u);
@@ -223,7 +226,7 @@ describe("actual provider mapper output → governed Raw boundary", () => {
       }),
     });
 
-    const row = prepare("ted", mapped, "ted.europa.eu");
+    const row = prepare("ted", mapped, "api.ted.europa.eu");
     expect(row.ingestStatus).toBe("ACCEPTED");
     expect(row.payload).toMatchObject({
       name: "Johnson Controls",
@@ -233,6 +236,9 @@ describe("actual provider mapper output → governed Raw boundary", () => {
           publication_number: "123456-2026",
           cpv: ["42122000"],
         }),
+      },
+      provenance: {
+        sourceUrl: "https://api.ted.europa.eu/v3/notices/search",
       },
     });
     expect(JSON.stringify(row.payload)).not.toMatch(

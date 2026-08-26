@@ -41,8 +41,28 @@ function projectionHarness(
   const suppressionRecord = {
     findMany: vi.fn(async () => suppressions.shift() ?? []),
   };
+  const queryRaw = vi.fn(
+    async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+      if (statement.strings?.join("?").includes("write_raw_source_record_v2")) {
+        const command = JSON.parse(String(statement.values?.[0])) as Record<
+          string,
+          unknown
+        >;
+        return [
+          {
+            raw_record_id: "raw-bridge",
+            payload_hash: command.expectedPayloadHash,
+            payload_bytes: command.expectedPayloadBytes,
+            ingest_status: command.ingestStatus,
+            inserted: true,
+          },
+        ];
+      }
+      return [{ pg_advisory_xact_lock: null }];
+    },
+  );
   const tx = {
-    $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+    $queryRaw: queryRaw,
     suppressionRecord,
     canonicalCompany: {
       findUnique: vi.fn(async () =>
@@ -239,6 +259,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
         attributes: {
           products: ['pump'],
           contact_email: 'sales@blocked.example',
+          description: 'unsafe legacy prose',
         },
       },
     );

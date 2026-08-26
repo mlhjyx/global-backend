@@ -77,29 +77,27 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
     createdDate: '2009-03-01',
   };
 
-  it('establishment → bounded structured ProviderCompanyRecord', () => {
+  it('establishment → ProviderCompanyRecord（名/国/行业=专科/attributes.fda）', () => {
     const rec = mapEstablishmentToRecord(est, NOW);
     expect(rec.name).toBe('Philips Ultrasound LLC');
     expect(rec.country).toBe('US');
-    expect(rec.industry).toBeUndefined();
+    expect(rec.industry).toBe('Radiology');
     const fda = rec.attributes!.fda as Record<string, unknown>;
     expect(fda.registration_number).toBe('3004512345');
     expect(fda.initial_importer).toBe(true);
     expect(fda.product_codes).toEqual(['LLZ', 'IYN']);
-    expect(fda).not.toHaveProperty('city');
-    expect(fda).not.toHaveProperty('device_facts');
   });
 
   it('license=CC0-1.0（非硬编码 licensed；写入 field_evidence.license）', () => {
     const rec = mapEstablishmentToRecord(est, NOW);
     expect(rec.license).toBe('CC0-1.0');
-    expect((rec.attributes!.fda as Record<string, unknown>)).not.toHaveProperty('license');
+    expect((rec.attributes!.fda as Record<string, unknown>).license).toBe('CC0-1.0');
   });
 
-  it('keeps unbounded legal prose outside the green Raw payload', () => {
+  it('🔴 文案红线：attributes.fda.disclaimer 标注「注册≠核准」', () => {
     const rec = mapEstablishmentToRecord(est, NOW);
-    expect((rec.attributes!.fda as Record<string, unknown>)).not.toHaveProperty('disclaimer');
-    expect((rec.attributes!.fda as Record<string, unknown>)).not.toHaveProperty('attribution');
+    const disclaimer = String((rec.attributes!.fda as Record<string, unknown>).disclaimer);
+    expect(disclaimer).toContain('非 FDA 核准');
   });
 
   it('FDA 注册号 → identifier scheme=fda-reg（全局唯一，不按国别限定）', () => {
@@ -110,9 +108,9 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
     expect(key.startsWith('id:fda-reg:')).toBe(true);
   });
 
-  it('fit 门只读 structured product codes and excludes device-name prose', () => {
+  it('fit 门可读设备信号：attributes.products = device_name（无则退产品码）', () => {
     const rec = mapEstablishmentToRecord(est, NOW);
-    expect((rec.attributes as { products: string[] }).products).toEqual(['LLZ', 'IYN']);
+    expect((rec.attributes as { products: string[] }).products).toEqual(['System, Image Processing, Radiological']);
     const noNames = mapEstablishmentToRecord({ ...est, deviceNames: [] }, NOW);
     expect((noNames.attributes as { products: string[] }).products).toEqual(['LLZ', 'IYN']); // 退产品码
   });
@@ -125,7 +123,7 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
   it('无注册号 → 回退 name+country 身份 + externalId 含国别（防跨国同名互撞）', () => {
     const rec = mapEstablishmentToRecord({ ...est, registrationNumber: undefined }, NOW);
     expect(rec.identifier).toBeUndefined();
-    expect(rec.externalId).toMatch(/^openfda:[0-9a-f]{64}$/u);
+    expect(rec.externalId).toBe('openfda:Philips Ultrasound LLC:US'); // 含国别，非塌成 name-only
   });
 
   it('无注册号的两家同名不同国 → externalId 各异（不被 raw @@unique skipDuplicates 静默丢一个）', () => {
@@ -137,6 +135,6 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
   it('空串注册号当无（|| 不 ?? 兜空串）→ 不产生空 identifier / externalId', () => {
     const rec = mapEstablishmentToRecord({ ...est, registrationNumber: '' }, NOW);
     expect(rec.identifier).toBeUndefined();
-    expect(rec.externalId).toMatch(/^openfda:[0-9a-f]{64}$/u);
+    expect(rec.externalId).toBe('openfda:Philips Ultrasound LLC:US');
   });
 });

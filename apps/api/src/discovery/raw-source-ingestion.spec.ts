@@ -266,13 +266,33 @@ describe("Raw Source v2 ingestion boundary", () => {
             attributes,
             ...({
               wikidata: { license: "CC0-1.0" },
-              openstreetmap: { license: "ODbL-1.0" },
-              ted: { license: "CC BY 4.0" },
+              openstreetmap: {
+                license: "ODbL-1.0",
+                provenance: {
+                  ...companyRecord().provenance,
+                  sourceUrl: "https://www.openstreetmap.org/node/1",
+                },
+              },
+              ted: {
+                license: "CC BY 4.0",
+                provenance: {
+                  ...companyRecord().provenance,
+                  sourceUrl: "https://ted.europa.eu/en/notice/-/detail/1",
+                },
+              },
               openfda: { license: "CC0-1.0" },
             }[providerKey] ?? {}),
           }),
         ],
-        policies: POLICIES,
+        policies: POLICIES.map((policy) => ({
+          ...policy,
+          domain:
+            providerKey === "openstreetmap"
+              ? "overpass-api.de"
+              : providerKey === "ted"
+                ? "api.ted.europa.eu"
+                : policy.domain,
+        })),
         limits: {
           ...LIMITS,
           maxRecordBytes: 2_048,
@@ -352,20 +372,38 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(getterCalls).toBe(0);
   });
 
+  it("withholds free-text PublicWeb evidence behind a deterministic digest", () => {
+    const row = prepareRawSourceBatch({
+      providerKey: "public_web",
+      records: [
+        companyRecord({
+          attributes: {
+            products: ["pump"],
+            keywords: ["industrial"],
+            extraction_evidence: "Contact Jane Doe at person@example.test",
+            extraction_confidence: 0.9,
+            source_class: "public_intelligence",
+          },
+        }),
+      ],
+      policies: POLICIES,
+      limits: { ...LIMITS, maxRecordBytes: 2_048, maxBatchBytes: 4_096 },
+      now: NOW,
+    }).rows[0]!;
+    expect(row.ingestStatus).toBe("ACCEPTED");
+    expect(row.payload).toMatchObject({
+      attributes: {
+        products: ["pump"],
+        keywords: ["industrial"],
+        extraction_evidence_digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        extraction_confidence: 0.9,
+        source_class: "public_intelligence",
+      },
+    });
+    expect(JSON.stringify(row.payload)).not.toMatch(/Jane Doe|person@example/u);
+  });
+
   it.each([
-    [
-      "free-text evidence with email and personal name",
-      "public_web",
-      companyRecord({
-        attributes: {
-          products: ["pump"],
-          keywords: ["industrial"],
-          extraction_evidence: "Contact Jane Doe at person@example.test",
-          extraction_confidence: 0.9,
-          source_class: "public_intelligence",
-        },
-      }),
-    ],
     [
       "PII in products",
       "trade_fair",
@@ -726,7 +764,7 @@ describe("Raw Source v2 ingestion boundary", () => {
           attributes: {
             products: Array.from(
               { length: 20 },
-              (_, index) => `industrial-pump-${index}-${"x".repeat(50)}`,
+              () => "industrial pump",
             ),
           },
         }),
@@ -736,7 +774,7 @@ describe("Raw Source v2 ingestion boundary", () => {
       now: NOW,
     }).rows[0]!;
     expect(oversized.dispositionCode).toBe("PAYLOAD_TOO_LARGE");
-    expect(JSON.stringify(oversized.payload)).not.toContain("x".repeat(100));
+    expect(JSON.stringify(oversized.payload)).not.toContain("industrial pump");
 
     const batched = prepareRawSourceBatch({
       providerKey: "registry",

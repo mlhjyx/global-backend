@@ -55,6 +55,7 @@ const databases = Object.freeze({
   upgrade: "task6a_raw_upgrade",
   rollback: "task6a_raw_rollback",
   backfillRollback: "task6a_raw_backfill_rollback",
+  writerRollback: "task6a_raw_writer_rollback",
   locks: "task6a_raw_locks",
 });
 
@@ -79,6 +80,7 @@ let secondDeployOutput = "";
 let baselineDeployOutput = "";
 let injectedRollbackOutput = "";
 let injectedBackfillRollbackOutput = "";
+let injectedWriterRollbackOutput = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -482,6 +484,24 @@ before(() => {
   injectedBackfillRollbackOutput = dockerPsql(
     databases.backfillRollback,
     injectedBackfill,
+    { rejects: /division by zero/u },
+  );
+
+  migrateDeploy(databases.writerRollback, baseline.schemaPath);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+  ]) {
+    dockerPsql(databases.writerRollback, readFileSync(migrationPath, "utf8"));
+  }
+  const injectedWriter = readFileSync(writerMigrationPath, "utf8").replace(
+    /COMMIT;\s*$/u,
+    "SELECT 1 / 0;\nCOMMIT;\n",
+  );
+  injectedWriterRollbackOutput = dockerPsql(
+    databases.writerRollback,
+    injectedWriter,
     { rejects: /division by zero/u },
   );
 
@@ -1306,6 +1326,21 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     `,
       ),
       "0",
+    );
+  });
+
+  it("rolls back writer functions and the INSERT revoke when 1200 fails before commit", () => {
+    assert.match(injectedWriterRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.writerRollback,
+        `SELECT concat_ws('|',
+          (to_regprocedure('write_raw_source_record_v2(jsonb)') IS NULL)::text,
+          (to_regprocedure('raw_source_canonical_json_v1(jsonb)') IS NULL)::text,
+          has_table_privilege('app_user','raw_source_record','INSERT')::text
+        );`,
+      ),
+      "true|true|true",
     );
   });
 });

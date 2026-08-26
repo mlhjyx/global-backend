@@ -97,16 +97,34 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
   const rows: Array<Record<string, unknown>> = [];
   const tx = {
     $executeRaw: async () => 1,
+    $queryRaw: async (statement: { values: readonly unknown[] }) => {
+      const command = JSON.parse(String(statement.values[0])) as Record<
+        string,
+        unknown
+      >;
+      const row = {
+        id: `raw-${rows.length + 1}`,
+        externalId: command.externalId,
+        ingestKey: command.ingestKey,
+        payloadHash: command.expectedPayloadHash,
+        payload: command.payload,
+        ingestStatus: command.ingestStatus,
+        sourceClass: command.sourceClass,
+        ingestVersion: 'raw-source/v2',
+      };
+      rows.push(row);
+      return [
+        {
+          raw_record_id: row.id,
+          payload_hash: command.expectedPayloadHash,
+          payload_bytes: command.expectedPayloadBytes,
+          ingest_status: command.ingestStatus,
+          inserted: true,
+        },
+      ];
+    },
     rawSourceRecord: {
       findMany: async () => rows,
-      createMany: async ({
-        data,
-      }: {
-        data: Array<Record<string, unknown>>;
-      }) => {
-        rows.push(...data);
-        return { count: data.length };
-      },
       count: async ({ where }: { where: { ingestStatus?: string } }) =>
         rows.filter(
           (row) =>

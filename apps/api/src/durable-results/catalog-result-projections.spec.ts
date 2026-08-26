@@ -1128,14 +1128,8 @@ describe('closed catalog Tool result projections', () => {
     expect(result.records).toHaveLength(1);
     expect(result.records[0]).toMatchObject({
       externalId: 'osm:node/1', name: 'Factory', domain: 'factory.example',
-      attributes: {
-        osm_id: 'node/1',
-        latitude: 50,
-        longitude: 8,
-        source_class: 'industry_data',
-      },
+      attributes: { osm_tags: {} },
     });
-    expect(result.records[0]?.attributes).not.toHaveProperty('osm_tags');
   });
 
   it('rejects Proxy, accessor, sparse, custom-prototype, and symbol containers', () => {

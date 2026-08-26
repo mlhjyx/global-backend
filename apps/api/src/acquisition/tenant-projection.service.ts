@@ -1,9 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
-import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
+import {
+  isContactFreeText,
+  isControlledBusinessTerm,
+} from '../discovery/raw-source-provider-normalizer';
 import {
   persistMonitoredSourceRawBridge,
   prepareMonitoredSourceRawBridge,
@@ -103,14 +106,6 @@ export class TenantProjectionService {
           },
           select: { type: true, value: true },
         });
-        const suppressedDomains = canonicalizeSuppressionValues(
-          'domain',
-          suppressionRows.filter((row) => row.type === 'domain').map((row) => row.value),
-        );
-        const suppressedEmails = canonicalizeSuppressionValues(
-          'email',
-          suppressionRows.filter((row) => row.type === 'email').map((row) => row.value),
-        );
         for (const e of chunk) {
           const cleaned = (e.cleaned ?? {}) as Record<string, unknown>;
           if (typeof cleaned.email === 'string') personalWithheld += 1;
@@ -139,7 +134,11 @@ export class TenantProjectionService {
             workspaceId,
             identity.dedupeKey,
             { name: preparedCompany.name, domain: preparedCompany.domain },
-            { knownSuppressions: suppressionRows, policyLock },
+            {
+              knownSuppressions: suppressionRows,
+              policyLock,
+              sanitizeAttributes: sanitizePriorAttributes,
+            },
           );
           const { prior } = materialization;
           if (!materialization.allowed) {
@@ -163,11 +162,8 @@ export class TenantProjectionService {
                   ...(preparedCompany.domain ? { domain: { set: preparedCompany.domain } } : {}),
                   ...(preparedCompany.country ? { country: { set: preparedCompany.country } } : {}),
                   attributes: mergeAttributes(
-                    withoutSuppressedContactEmail(
+                    sanitizePriorAttributes(
                       (prior.attributes ?? {}) as Record<string, unknown>,
-                      suppressedEmails,
-                      suppressedDomains,
-                      false,
                     ),
                     attributes,
                   ) as Prisma.InputJsonValue,
@@ -269,24 +265,71 @@ function companyFromPreparedRaw(value: unknown): {
   };
 }
 
-function withoutSuppressedContactEmail(
+const UNSAFE_LEGACY_ATTRIBUTE_KEYS = new Set([
+  'address',
+  'attribution',
+  'buyernames',
+  'city',
+  'contact',
+  'contactemail',
+  'contactname',
+  'description',
+  'devicefacts',
+  'disclaimer',
+  'email',
+  'extractionevidence',
+  'listinglocation',
+  'osmtags',
+  'phone',
+  'publicemail',
+  'publicphone',
+  'recipientname',
+  'sourcefairname',
+  'winnercity',
+]);
+
+function normalizedAttributeKey(value: string): string {
+  return value.toLowerCase().replaceAll(/[^a-z0-9]/gu, '');
+}
+
+function sanitizePriorValue(
+  key: string,
+  value: unknown,
+  depth: number,
+): unknown {
+  if (depth > 6) return undefined;
+  if (key === 'products' || key === 'keywords') {
+    return Array.isArray(value)
+      ? value.filter(isControlledBusinessTerm)
+      : undefined;
+  }
+  if (typeof value === 'string') {
+    return isContactFreeText(value) ? value : undefined;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizePriorValue('', item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+  if (value !== null && typeof value === 'object') {
+    return sanitizePriorAttributes(value as Record<string, unknown>, depth + 1);
+  }
+  return value;
+}
+
+function sanitizePriorAttributes(
   attributes: Record<string, unknown>,
-  suppressedEmails: ReadonlySet<string>,
-  suppressedDomains: ReadonlySet<string>,
-  suppressCompany: boolean,
+  depth = 0,
 ): Record<string, unknown> {
-  const current =
-    typeof attributes.contact_email === 'string'
-      ? canonicalizeSuppressionValue('email', attributes.contact_email)
-      : null;
-  const currentDomain = current ? canonicalizeSuppressionValue('domain', current.split('@')[1]) : null;
-  if (
-    !suppressCompany &&
-    (!current || (!suppressedEmails.has(current) && (!currentDomain || !suppressedDomains.has(currentDomain))))
-  )
-    return attributes;
-  const { contact_email: _removed, ...safe } = attributes;
-  return safe;
+  return Object.fromEntries(
+    Object.entries(attributes).flatMap(([key, value]) => {
+      if (UNSAFE_LEGACY_ATTRIBUTE_KEYS.has(normalizedAttributeKey(key))) {
+        return [];
+      }
+      const sanitized = sanitizePriorValue(key, value, depth);
+      return sanitized === undefined ? [] : [[key, sanitized]];
+    }),
+  );
 }
 
 /** 合并已有 canonical.attributes 与新源属性：新源覆盖同名标量、**并集 products**，

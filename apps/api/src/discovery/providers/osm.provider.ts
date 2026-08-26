@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
@@ -15,7 +14,7 @@ import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
 /**
  * OpenStreetMap 地理发现 Provider（Overpass API，ODbL 开放数据，零爬取）。
  * 按 filters.industry → OSM 标签、filters.region/country → OSM area 枚举工业实体。
- * 产出真实企业名 + 坐标 + website；原始 tag/address 不进入公司绿 Raw。
+ * 产出真实企业名 + 坐标 + 地址；website 命中率参差，交 mineDomain 富化。
  * 属 industry_data 类。
  *
  * 收口②：出网经 ToolBroker（`osm.overpass` 为 required 工具）——SUSPENDED/未登记/
@@ -61,29 +60,43 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
     }
 
     const now = new Date().toISOString();
-    const records: ProviderCompanyRecord[] = places.map((p) => ({
-      externalId: `osm:${p.osmId}`,
-      name: p.name,
-      domain: p.website ? normalizeToDomain(p.website) : undefined,
-      country: p.countryCode,
-      attributes: {
-        osm_id: p.osmId,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        source_class: query.sourceClass,
-      },
-      license: 'ODbL-1.0',
-      provenance: {
-        sourceUrl: 'https://overpass-api.de/api/interpreter',
+    const records = places.map((place) =>
+      mapOsmPlaceToRecord({
+        place,
+        sourceClass: query.sourceClass,
         fetchedAt: now,
-        contentHash: createHash('sha256')
-          .update(`openstreetmap:${p.osmId}:${p.name}`)
-          .digest('hex'),
-        parserVersion: 'osm/1',
-      },
-    }));
+      }),
+    );
     return { records, costCents: 0 };
   }
+}
+
+export function mapOsmPlaceToRecord(args: {
+  place: OsmPlace;
+  sourceClass: SourceClass;
+  fetchedAt: string;
+}): ProviderCompanyRecord {
+  const { place } = args;
+  return {
+    externalId: `osm:${place.osmId}`,
+    name: place.name,
+    domain: place.website ? normalizeToDomain(place.website) : undefined,
+    country: place.countryCode,
+    attributes: {
+      osm_id: place.osmId,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      city: place.city,
+      osm_tags: place.tags,
+      source_class: args.sourceClass,
+    },
+    provenance: {
+      sourceUrl: `https://www.openstreetmap.org/${place.osmId}`,
+      fetchedAt: args.fetchedAt,
+      contentHash: place.osmId,
+      parserVersion: 'osm/1',
+    },
+  };
 }
 
 function mapTags(query: CompanyDiscoveryQuery): { k: string; v?: string }[] {

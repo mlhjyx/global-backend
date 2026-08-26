@@ -1,3 +1,11 @@
+import {
+  isContactFreeText,
+  isProviderCompanyName,
+  isSecretFreeText,
+  isStableSafeHttpsUrl,
+  normalizeRawSourceProviderPayload,
+} from "./raw-source-provider-normalizer";
+
 type JsonRecord = Record<string, unknown>;
 
 export type RawProviderPayloadValidation =
@@ -17,6 +25,7 @@ const TOP_LEVEL_KEYS = new Set([
   "domain",
   "country",
   "employeeCount",
+  "industry",
   "revenueUsd",
   "attributes",
   "identifier",
@@ -43,88 +52,6 @@ const GOVERNED_PROVIDERS = new Set([
   "openfda",
   "public_web",
 ]);
-const PROVIDER_TOP_LEVEL_KEYS: Readonly<Record<string, readonly string[]>> =
-  Object.freeze({
-    registry: [
-      "attributes",
-      "country",
-      "domain",
-      "employeeCount",
-      "externalId",
-      "identifier",
-      "license",
-      "name",
-      "provenance",
-      "revenueUsd",
-    ],
-    directory: [
-      "attributes",
-      "country",
-      "domain",
-      "externalId",
-      "name",
-      "provenance",
-    ],
-    wikidata: [
-      "attributes",
-      "country",
-      "domain",
-      "employeeCount",
-      "externalId",
-      "license",
-      "name",
-      "provenance",
-    ],
-    openstreetmap: [
-      "attributes",
-      "country",
-      "domain",
-      "externalId",
-      "license",
-      "name",
-      "provenance",
-    ],
-    trade_fair: [
-      "attributes",
-      "country",
-      "domain",
-      "externalId",
-      "license",
-      "monitoredSource",
-      "name",
-      "provenance",
-    ],
-    ted: [
-      "attributes",
-      "country",
-      "domain",
-      "externalId",
-      "identifier",
-      "license",
-      "name",
-      "provenance",
-    ],
-    openfda: [
-      "attributes",
-      "country",
-      "domain",
-      "externalId",
-      "identifier",
-      "license",
-      "name",
-      "provenance",
-    ],
-    public_web: [
-      "attributes",
-      "country",
-      "domain",
-      "employeeCount",
-      "externalId",
-      "license",
-      "name",
-      "provenance",
-    ],
-  });
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
     registry: new Set(["public", "licensed", "byo"]),
@@ -145,12 +72,6 @@ const EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,255}$/u;
 const STRUCTURED_TOKEN = /^[\p{L}\p{N}][\p{L}\p{N} ._+&'(),/#:-]*$/u;
 const CODE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,79}$/u;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
-const PII_OR_SECRET =
-  /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\b(?:bearer|basic auth|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|secret|password|passwd|private[_ -]?key|first[_ -]?name|last[_ -]?name|full[_ -]?name|contact[_ -]?name|personal data|jane doe|john doe|john smith)\b|\bsk-[a-z0-9_-]{6,})/iu;
-const PHONE = /(?:^|[^\d])\+\d[\d ().-]{6,}\d(?:$|[^\d])/u;
-const BUSINESS_NAME_MARKER =
-  /\b(?:ag|ab|bv|co|company|corp|corporation|electric|engineering|group|gmbh|holding|holdings|inc|industrial|industries|kg|llc|ltd|maschinenbau|manufacturing|motors|nv|oy|pump|pumps|sa|sas|solutions|srl|systems|technologies|technology)\b/iu;
-const PERSON_LIKE_NAME = /^\p{Lu}[\p{L}'-]+(?:\s+\p{Lu}[\p{L}'-]+){1,3}$/u;
 
 function record(value: unknown): JsonRecord | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -245,14 +166,6 @@ function ordinalCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function noSensitiveText(value: string): boolean {
-  return (
-    !PII_OR_SECRET.test(value) &&
-    !PHONE.test(value) &&
-    (!PERSON_LIKE_NAME.test(value) || BUSINESS_NAME_MARKER.test(value))
-  );
-}
-
 function structuredToken(value: unknown, maximumBytes = 80): value is string {
   if (typeof value !== "string") return false;
   const trimmed = value.normalize("NFKC").trim();
@@ -261,7 +174,7 @@ function structuredToken(value: unknown, maximumBytes = 80): value is string {
     Buffer.byteLength(trimmed, "utf8") <= maximumBytes &&
     STRUCTURED_TOKEN.test(trimmed) &&
     trimmed.split(/\s+/u).length <= 8 &&
-    noSensitiveText(trimmed)
+    isContactFreeText(trimmed)
   );
 }
 
@@ -271,7 +184,7 @@ function codeToken(value: unknown, maximumBytes = 80): value is string {
     value.normalize("NFKC") === value &&
     Buffer.byteLength(value, "utf8") <= maximumBytes &&
     CODE_TOKEN.test(value) &&
-    noSensitiveText(value)
+    isSecretFreeText(value)
   );
 }
 
@@ -287,7 +200,15 @@ function tokenArray(
 }
 
 function validCompanyName(value: unknown): value is string {
-  return structuredToken(value, 160);
+  if (typeof value !== "string") return false;
+  const normalized = value.normalize("NFKC").trim();
+  return (
+    normalized === value &&
+    Buffer.byteLength(value, "utf8") <= 160 &&
+    STRUCTURED_TOKEN.test(value) &&
+    value.split(/\s+/u).length <= 16 &&
+    isProviderCompanyName(value)
+  );
 }
 
 function validDomain(value: unknown): value is string {
@@ -295,7 +216,7 @@ function validDomain(value: unknown): value is string {
     typeof value === "string" &&
     value === value.toLowerCase() &&
     DOMAIN.test(value) &&
-    noSensitiveText(value)
+    isSecretFreeText(value)
   );
 }
 
@@ -304,34 +225,8 @@ function validExternalId(value: unknown): value is string {
     typeof value === "string" &&
     Buffer.byteLength(value, "utf8") <= 256 &&
     EXTERNAL_ID.test(value) &&
-    noSensitiveText(value)
+    isSecretFreeText(value)
   );
-}
-
-function validHttpsUrl(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 2_048) return false;
-  try {
-    const parsed = new URL(value);
-    let decodedPath: string;
-    try {
-      decodedPath = decodeURIComponent(parsed.pathname);
-    } catch {
-      return false;
-    }
-    return (
-      parsed.protocol === "https:" &&
-      parsed.username === "" &&
-      parsed.password === "" &&
-      parsed.search === "" &&
-      parsed.hash === "" &&
-      (parsed.port === "" || parsed.port === "443") &&
-      validDomain(parsed.hostname.toLowerCase()) &&
-      noSensitiveText(value) &&
-      noSensitiveText(decodedPath)
-    );
-  } catch {
-    return false;
-  }
 }
 
 function validIsoInstant(value: unknown): value is string {
@@ -360,7 +255,7 @@ function validProvenance(value: unknown): boolean {
       "parserVersion",
       "sourceUrl",
     ]) &&
-    validHttpsUrl(input.sourceUrl) &&
+    isStableSafeHttpsUrl(input.sourceUrl) &&
     validIsoInstant(input.fetchedAt) &&
     typeof input.contentHash === "string" &&
     SHA256.test(input.contentHash) &&
@@ -407,7 +302,8 @@ function validDirectoryAttributes(value: JsonRecord): boolean {
       "source_directory",
       "source_kind",
     ]) &&
-    (value.detail_url === undefined || validHttpsUrl(value.detail_url)) &&
+    (value.detail_url === undefined ||
+      isStableSafeHttpsUrl(value.detail_url)) &&
     validDomain(value.source_directory) &&
     value.source_kind === "directory" &&
     value.source_class === "industry_data"
@@ -536,7 +432,7 @@ function validTedAttributes(value: JsonRecord): boolean {
     (ted.buyer_countries === undefined ||
       tokenArray(
         ted.buyer_countries,
-        (item) => typeof item === "string" && /^[A-Z]{2}$/u.test(item),
+        (item) => typeof item === "string" && /^[A-Z]{2,3}$/u.test(item),
       )) &&
     (ted.winner_identifier === undefined ||
       codeToken(ted.winner_identifier, 80))
@@ -659,40 +555,44 @@ export function validateRawSourceProviderPayload(
   if (typeof input.name !== "string" || !input.name.trim()) {
     return { ok: false, reason: "MALFORMED_PAYLOAD" };
   }
+  const governed = normalizeRawSourceProviderPayload(providerKey, input);
+  if (!governed) {
+    return { ok: false, reason: "PROVIDER_PAYLOAD_SCHEMA_INVALID" };
+  }
   if (
-    !keysWithin(input, PROVIDER_TOP_LEVEL_KEYS[providerKey] ?? []) ||
-    (input.externalId !== undefined && !validExternalId(input.externalId)) ||
-    !validCompanyName(input.name) ||
-    (input.domain !== undefined && !validDomain(input.domain)) ||
-    (input.country !== undefined &&
-      (typeof input.country !== "string" ||
-        !/^[A-Z]{2}$/u.test(input.country))) ||
-    (input.employeeCount !== undefined &&
-      (!Number.isSafeInteger(input.employeeCount) ||
-        Number(input.employeeCount) < 0 ||
-        Number(input.employeeCount) > 10_000_000_000)) ||
-    (input.revenueUsd !== undefined &&
-      (typeof input.revenueUsd !== "number" ||
-        !Number.isFinite(input.revenueUsd) ||
-        input.revenueUsd < 0 ||
-        input.revenueUsd > 1_000_000_000_000_000)) ||
-    !validAttributes(providerKey, input.attributes) ||
-    !validIdentifier(input.identifier) ||
-    !validProvenance(input.provenance) ||
-    (input.license !== undefined &&
-      (typeof input.license !== "string" ||
-        !LICENSES_BY_PROVIDER[providerKey]?.has(input.license))) ||
+    (governed.externalId !== undefined &&
+      !validExternalId(governed.externalId)) ||
+    !validCompanyName(governed.name) ||
+    (governed.domain !== undefined && !validDomain(governed.domain)) ||
+    (governed.country !== undefined &&
+      (typeof governed.country !== "string" ||
+        !/^[A-Z]{2}$/u.test(governed.country))) ||
+    (governed.employeeCount !== undefined &&
+      (!Number.isSafeInteger(governed.employeeCount) ||
+        Number(governed.employeeCount) < 0 ||
+        Number(governed.employeeCount) > 10_000_000_000)) ||
+    (governed.revenueUsd !== undefined &&
+      (typeof governed.revenueUsd !== "number" ||
+        !Number.isFinite(governed.revenueUsd) ||
+        governed.revenueUsd < 0 ||
+        governed.revenueUsd > 1_000_000_000_000_000)) ||
+    !validAttributes(providerKey, governed.attributes) ||
+    !validIdentifier(governed.identifier) ||
+    !validProvenance(governed.provenance) ||
+    (governed.license !== undefined &&
+      (typeof governed.license !== "string" ||
+        !LICENSES_BY_PROVIDER[providerKey]?.has(governed.license))) ||
     (["wikidata", "openstreetmap", "ted", "openfda"].includes(providerKey) &&
-      input.license === undefined) ||
+      governed.license === undefined) ||
     (providerKey === "trade_fair"
-      ? !validMonitoredSource(input.monitoredSource)
-      : input.monitoredSource !== undefined) ||
+      ? !validMonitoredSource(governed.monitoredSource)
+      : governed.monitoredSource !== undefined) ||
     (providerKey === "trade_fair" &&
-      input.monitoredSource === undefined &&
-      (record(input.attributes)?.source_fair === undefined ||
-        record(input.attributes)?.source_class !== "industry_data"))
+      governed.monitoredSource === undefined &&
+      (record(governed.attributes)?.source_fair === undefined ||
+        record(governed.attributes)?.source_class !== "industry_data"))
   ) {
     return { ok: false, reason: "PROVIDER_PAYLOAD_SCHEMA_INVALID" };
   }
-  return { ok: true, value: input };
+  return { ok: true, value: governed };
 }

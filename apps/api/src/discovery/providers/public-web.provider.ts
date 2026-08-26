@@ -50,7 +50,7 @@ const NOISE_DOMAINS = [
 const MAX_DOMAINS_PER_QUERY = 14; // 每条计划查询最多深挖的候选域名数（控成本/时长）
 const CRAWL_CONCURRENCY = 5;
 
-interface ExtractedCompany {
+export interface ExtractedCompany {
   is_company_site: boolean;
   name?: string;
   country?: string;
@@ -205,34 +205,14 @@ export class PublicWebDiscoveryProvider
     }
     this.log(`✓ ${domain}: ${out.name}`);
 
-    return {
-      externalId: domain,
-      name: out.name.trim(),
+    return mapPublicWebCompanyToRecord({
       domain,
-      country: out.country || undefined,
-      employeeCount: typeof out.employee_count === 'number' ? out.employee_count : undefined,
-      attributes: {
-        products: out.products ?? [],
-        keywords: out.keywords ?? [],
-        extraction_evidence_digest: createHash('sha256')
-          .update(out.evidence ?? '')
-          .digest('hex'),
-        extraction_confidence:
-          typeof out.confidence === 'number' &&
-          Number.isFinite(out.confidence) &&
-          out.confidence >= 0 &&
-          out.confidence <= 1
-            ? out.confidence
-            : 0,
-        source_class: query.sourceClass,
-      },
-      provenance: {
-        sourceUrl: homeUrl,
-        fetchedAt: new Date().toISOString(),
-        contentHash: createHash('sha256').update(text).digest('hex'),
-        parserVersion: PARSER_VERSION,
-      },
-    };
+      homeUrl,
+      sourceText: text,
+      extracted: out,
+      sourceClass: query.sourceClass,
+      fetchedAt: new Date().toISOString(),
+    });
   }
 
   // ── 联系人（公开、确定性）────────────────────────────────────────────────
@@ -307,6 +287,42 @@ export class PublicWebDiscoveryProvider
       return { status: 'INVALID', detail: 'DNS lookup failed', costCents: 0 };
     }
   }
+}
+
+export function mapPublicWebCompanyToRecord(args: {
+  domain: string;
+  homeUrl: string;
+  sourceText: string;
+  extracted: ExtractedCompany;
+  sourceClass: SourceClass;
+  fetchedAt: string;
+}): ProviderCompanyRecord {
+  const name = args.extracted.name?.trim();
+  if (!name) throw new Error('public web company name is required');
+  return {
+    externalId: args.domain,
+    name,
+    domain: args.domain,
+    country: args.extracted.country || undefined,
+    industry: args.extracted.industry || undefined,
+    employeeCount:
+      typeof args.extracted.employee_count === 'number'
+        ? args.extracted.employee_count
+        : undefined,
+    attributes: {
+      products: args.extracted.products ?? [],
+      keywords: args.extracted.keywords ?? [],
+      extraction_evidence: args.extracted.evidence ?? null,
+      extraction_confidence: args.extracted.confidence ?? null,
+      source_class: args.sourceClass,
+    },
+    provenance: {
+      sourceUrl: args.homeUrl,
+      fetchedAt: args.fetchedAt,
+      contentHash: createHash('sha256').update(args.sourceText).digest('hex'),
+      parserVersion: PARSER_VERSION,
+    },
+  };
 }
 
 /**
