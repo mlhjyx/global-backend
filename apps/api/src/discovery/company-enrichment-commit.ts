@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { EnrichmentResult } from './provider-contract';
 import { loadCompanyForSuppressionSafeWrite } from './company-suppression-gate';
+import { sanitizeCanonicalCompanyAttributes } from './canonical-company-attributes';
 
 export interface CompanyEnrichmentHit {
   key: string;
@@ -25,10 +26,31 @@ export async function commitCompanyEnrichmentResults(
   if (!current) return false;
 
   const merged: Record<string, unknown> = { ...current.attributes };
+  const governedHits: CompanyEnrichmentHit[] = [];
   for (const hit of args.hits) {
-    merged[hit.key] = args.signalTimestamp
+    const candidate = args.signalTimestamp
       ? { ...hit.result.attributes, _ts: args.signalTimestamp.toISOString() }
       : hit.result.attributes;
+    const governed = sanitizeCanonicalCompanyAttributes({
+      [hit.key]: candidate,
+    })[hit.key];
+    if (governed === undefined) continue;
+    merged[hit.key] = governed;
+    const governedEvidence = sanitizeCanonicalCompanyAttributes({
+      [hit.key]: hit.result.attributes,
+    })[hit.key];
+    if (
+      governedEvidence === null ||
+      typeof governedEvidence !== 'object' ||
+      Array.isArray(governedEvidence)
+    ) continue;
+    governedHits.push({
+      ...hit,
+      result: {
+        ...hit.result,
+        attributes: governedEvidence as Record<string, unknown>,
+      },
+    });
   }
   const updated = await tx.canonicalCompany.updateMany({
     where: { id: current.id, status: { not: 'SUPPRESSED' } },
@@ -40,7 +62,7 @@ export async function commitCompanyEnrichmentResults(
   });
   if (updated.count !== 1) return false;
 
-  for (const hit of args.hits) {
+  for (const hit of governedHits) {
     for (const [field, value] of Object.entries(hit.result.attributes)) {
       if (value == null) continue;
       await tx.fieldEvidence.create({

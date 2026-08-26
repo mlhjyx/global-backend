@@ -20,6 +20,7 @@ const migrationNames = Object.freeze([
   "20260826120000_raw_source_governance_writer",
   "20260826130000_raw_source_governance_writer_hardening",
   "20260826140000_raw_source_governance_historical_cleanup",
+  "20260826150000_raw_source_governance_status_hardening",
 ]);
 
 async function expectedChecksums(): Promise<ExpectedMigrationChecksum[]> {

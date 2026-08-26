@@ -518,7 +518,9 @@ function validOpenFdaAttributes(value: JsonRecord): boolean {
     return false;
   }
   const productCode = (item: unknown) =>
-    typeof item === "string" && /^[A-Z0-9]{2,10}$/u.test(item);
+    typeof item === "string" &&
+    /^[A-Z]{3}$/u.test(item) &&
+    isContactFreeText(item);
   const numericId = (item: unknown) =>
     typeof item === "string" && /^\d{1,32}$/u.test(item);
   const hasStructuredFact =
@@ -530,10 +532,12 @@ function validOpenFdaAttributes(value: JsonRecord): boolean {
     (fda.registration_number === undefined ||
       numericId(fda.registration_number)) &&
     (fda.fei_number === undefined || numericId(fda.fei_number)) &&
-    (fda.status_code === undefined || codeToken(fda.status_code, 32)) &&
+    (fda.status_code === undefined ||
+      (typeof fda.status_code === "string" &&
+        /^\d{1,3}$/u.test(fda.status_code))) &&
     (fda.state_code === undefined ||
       (typeof fda.state_code === "string" &&
-        /^[A-Z0-9]{2,3}$/u.test(fda.state_code))) &&
+        /^[A-Z]{2}$/u.test(fda.state_code))) &&
     (fda.initial_importer === undefined ||
       typeof fda.initial_importer === "boolean") &&
     (fda.product_codes === undefined ||

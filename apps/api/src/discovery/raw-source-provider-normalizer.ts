@@ -95,7 +95,7 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const PII_OR_SECRET =
   /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\b(?:bearer|basic auth|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|secret|password|passwd|private[_ -]?key|first[_ -]?name|last[_ -]?name|full[_ -]?name|contact[_ -]?name|personal data|jane doe|john doe|john smith)\b|\bsk-[a-z0-9_-]{6,})/iu;
 const CONTACT_LIKE_PHONE =
-  /(?:^|[^\p{L}\d])(?:\+?\d[\s().-]*){7,}(?:$|[^\p{L}\d])/u;
+  /(?:^|[^\p{L}\p{Nd}])(?:\+?\p{Nd}[\s().-]*){7,}(?:$|[^\p{L}\p{Nd}])/u;
 const CONTROLLED_BUSINESS_TOKENS = new Set([
   "aerospace",
   "automation",

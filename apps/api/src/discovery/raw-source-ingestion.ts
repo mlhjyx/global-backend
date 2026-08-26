@@ -6,6 +6,20 @@ export const RAW_SOURCE_INGEST_VERSION = "raw-source/v2" as const;
 export type RawSourceIngestStatus =
   "ACCEPTED" | "QUARANTINED" | "REJECTED" | "EXPIRED";
 
+export type RawSourceDispositionCode =
+  | "INVALID_JSON"
+  | "MALFORMED_PAYLOAD"
+  | "UNKNOWN_PAYLOAD_FIELD"
+  | "UNGOVERNED_PROVIDER_PAYLOAD"
+  | "PROVIDER_PAYLOAD_SCHEMA_INVALID"
+  | "INVALID_PROVENANCE"
+  | "SOURCE_POLICY_MISSING"
+  | "SOURCE_POLICY_PURPOSE_NOT_ALLOWED"
+  | "SOURCE_POLICY_SUSPENDED"
+  | "PAYLOAD_TOO_LARGE"
+  | "BATCH_LIMIT_EXCEEDED"
+  | "PROCESSING_KEY_DRIFT";
+
 export interface RawSourceIngestLimits {
   maxRecordBytes: number;
   maxBatchBytes: number;
@@ -33,7 +47,7 @@ export interface PreparedRawSourceRow {
   payloadBytes: number;
   ingestVersion: typeof RAW_SOURCE_INGEST_VERSION;
   ingestStatus: Exclude<RawSourceIngestStatus, "EXPIRED">;
-  dispositionCode: string | null;
+  dispositionCode: RawSourceDispositionCode | null;
   retentionDays: number;
   expiresAt: Date;
   sourcePolicySnapshot: Record<string, unknown>;
@@ -376,12 +390,12 @@ function policyFor(
       },
     };
   }
-  const allowedPurpose = Array.isArray(policy.allowedPurpose)
-    ? policy.allowedPurpose.filter(
-        (purpose): purpose is string => typeof purpose === "string",
-      )
-    : [];
-  const purposeAllowed = allowedPurpose.includes("discovery");
+  const allowedPurpose = policy.allowedPurpose;
+  const purposeAllowed =
+    Array.isArray(allowedPurpose) &&
+    allowedPurpose.length > 0 &&
+    allowedPurpose.every((purpose) => typeof purpose === "string") &&
+    allowedPurpose.includes("discovery");
   return {
     retentionDays,
     missing: false,
@@ -454,10 +468,10 @@ export function rawSourceIngestLimits(
 
 function minimalReceipt(
   status: "QUARANTINED" | "REJECTED",
-  reason: string,
+  reason: RawSourceDispositionCode,
   payloadHash: string,
   payloadBytes: number,
-  extra: Record<string, unknown> = {},
+  conflictWithRawId?: string,
 ): Record<string, unknown> {
   return {
     _rawReceipt:
@@ -467,7 +481,7 @@ function minimalReceipt(
     reason,
     originalPayloadHash: payloadHash,
     originalPayloadBytes: payloadBytes,
-    ...extra,
+    ...(conflictWithRawId ? { conflictWithRawId } : {}),
   };
 }
 
@@ -512,7 +526,6 @@ export function prepareRawSourceBatch(args: {
       : sanitized.error
         ? rawPayloadHash(original)
         : rawPayloadHash(normalizedPayload);
-    const ingestKey = ingestKeyFor(normalizedPayload, originalPayloadHash);
     batchBytes += originalPayloadBytes;
     const record = plainRecord(normalizedPayload);
     const provenance = provenanceOf(normalizedPayload);
@@ -525,7 +538,7 @@ export function prepareRawSourceBatch(args: {
     const externalId = boundedString(record?.externalId, MAX_EXTERNAL_ID_BYTES);
 
     let ingestStatus: PreparedRawSourceRow["ingestStatus"] = "ACCEPTED";
-    let dispositionCode: string | null = null;
+    let dispositionCode: RawSourceDispositionCode | null = null;
     if (jsonInvalid) {
       ingestStatus = "REJECTED";
       dispositionCode = "INVALID_JSON";
@@ -564,6 +577,7 @@ export function prepareRawSourceBatch(args: {
     const persistedCanonical = canonicalJson(payload);
     const payloadHash = rawPayloadHash(payload);
     const payloadBytes = Buffer.byteLength(persistedCanonical, "utf8");
+    const ingestKey = ingestKeyFor(payload, payloadHash);
     return {
       externalId: ingestStatus === "ACCEPTED" ? externalId : null,
       payload,
@@ -583,13 +597,6 @@ export function prepareRawSourceBatch(args: {
     };
   });
   return { rows };
-}
-
-export function rawDriftIngestKey(
-  ingestKey: string,
-  payloadHash: string,
-): string {
-  return `drift:${sha256(`${ingestKey}\0${payloadHash}`)}`;
 }
 
 function receiptHash(receipt: ExistingRawSourceReceipt): string {
@@ -646,21 +653,25 @@ export function reconcileRawSourceBatch(
       duplicateCount += 1;
       continue;
     }
-    const driftKey = rawDriftIngestKey(
-      candidate.ingestKey,
-      candidate.payloadHash,
-    );
-    if (byKey.has(driftKey)) {
-      duplicateCount += 1;
-      continue;
-    }
+    const conflictWithRawId =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+        prior.id,
+      )
+        ? prior.id
+        : undefined;
     const driftPayload = minimalReceipt(
       "QUARANTINED",
       "PROCESSING_KEY_DRIFT",
       candidate.payloadHash,
       candidate.payloadBytes,
-      { conflictWithRawId: prior.id },
+      conflictWithRawId,
     );
+    const driftPayloadHash = rawPayloadHash(driftPayload);
+    const driftKey = ingestKeyFor(driftPayload, driftPayloadHash);
+    if (byKey.has(driftKey)) {
+      duplicateCount += 1;
+      continue;
+    }
     const drift: PreparedRawSourceRow = {
       ...candidate,
       externalId: null,
@@ -668,7 +679,7 @@ export function reconcileRawSourceBatch(
       ingestStatus: "QUARANTINED",
       dispositionCode: "PROCESSING_KEY_DRIFT",
       payload: driftPayload,
-      payloadHash: rawPayloadHash(driftPayload),
+      payloadHash: driftPayloadHash,
       payloadBytes: Buffer.byteLength(canonicalJson(driftPayload), "utf8"),
     };
     rows.push(drift);

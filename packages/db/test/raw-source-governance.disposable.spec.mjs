@@ -1848,7 +1848,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             name: `Acme ${"x".repeat(4 * 1024 * 1024)}`,
           },
         }),
-        /RAW_SOURCE_WRITER_PAYLOAD_BOUNDS/u,
+        /RAW_SOURCE_WRITER_COMMAND_BOUNDS/u,
       ],
       [
         writerCommand({

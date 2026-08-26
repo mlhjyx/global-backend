@@ -92,7 +92,7 @@ function safeProduct(value: unknown): value is string {
   return (
     isControlledBusinessTerm(value) ||
     (typeof value === "string" &&
-      /^[A-Z0-9]{2,10}$/u.test(value) &&
+      /^[A-Z]{3}$/u.test(value) &&
       isContactFreeText(value))
   );
 }
