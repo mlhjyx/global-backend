@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
+vi.mock(
+  '@temporalio/workflow',
+  () => import('./testing/temporal-workflow.mock'),
+);
 
-import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
+import {
+  acts,
+  resetActivities,
+  setPatched,
+} from './testing/temporal-workflow.mock';
 import { discoveryWorkflow } from './discovery.workflow';
 import { understandingWorkflow } from './understanding.workflow';
 
@@ -27,15 +34,48 @@ const UNDERSTANDING_BUDGET = Object.freeze({
 
 function primeDiscovery() {
   acts.loadPlanQueries.mockResolvedValue({
-    queries: [{ source_class: 'official_registry', filters: {}, keywords: [], priority: 1 }],
+    queries: [
+      {
+        source_class: 'official_registry',
+        filters: {},
+        keywords: [],
+        priority: 1,
+      },
+    ],
   });
-  acts.executeQuery.mockResolvedValue({ rawCount: 1, provider: 'gleif', budgetTruncated: false });
+  acts.executeQuery.mockResolvedValue({
+    rawCount: 1,
+    quarantinedCount: 0,
+    rejectedCount: 0,
+    duplicateCount: 0,
+    provider: 'gleif',
+    budgetTruncated: false,
+  });
   acts.canonicalizeRun.mockResolvedValue({ companies: 1, suppressed: 0 });
-  acts.qualifyFitForRun.mockResolvedValue({ verdicts: { match: 1 }, skippedForBudget: 0 });
-  acts.enrichRun.mockResolvedValue({ matched: 1, enriched: 1, provider: 'gleif', budgetTruncated: false });
-  acts.enrichSignalsRun.mockResolvedValue({ matched: 1, enriched: 1, provider: 'public_web', budgetTruncated: false });
-  acts.registerWatchesForRun.mockResolvedValue({ candidates: 1, registered: 1 });
-  acts.enqueuePatentLookupsForRun.mockResolvedValue({ candidates: 1, enqueued: 1 });
+  acts.qualifyFitForRun.mockResolvedValue({
+    verdicts: { match: 1 },
+    skippedForBudget: 0,
+  });
+  acts.enrichRun.mockResolvedValue({
+    matched: 1,
+    enriched: 1,
+    provider: 'gleif',
+    budgetTruncated: false,
+  });
+  acts.enrichSignalsRun.mockResolvedValue({
+    matched: 1,
+    enriched: 1,
+    provider: 'public_web',
+    budgetTruncated: false,
+  });
+  acts.registerWatchesForRun.mockResolvedValue({
+    candidates: 1,
+    registered: 1,
+  });
+  acts.enqueuePatentLookupsForRun.mockResolvedValue({
+    candidates: 1,
+    enqueued: 1,
+  });
   acts.finalizeRun.mockResolvedValue(undefined);
   acts.resetRunBudget.mockResolvedValue(undefined);
 }
@@ -67,18 +107,21 @@ describe('discoveryWorkflow execution-control propagation', () => {
     'enrichSignalsRun',
     'registerWatchesForRun',
     'enqueuePatentLookupsForRun',
-  ])('rethrows wrapped controls from %s instead of finalizing EXECUTED/PARTIAL', async (activityName) => {
-    primeDiscovery();
-    const failure = wrappedControl(
-      activityName === 'executeQuery'
-        ? 'BUDGET_OPERATION_REPLAY_UNAVAILABLE'
-        : 'EXECUTION_BUDGET_AUTHORITY_REVOKED',
-    );
-    acts[activityName].mockRejectedValue(failure);
+  ])(
+    'rethrows wrapped controls from %s instead of finalizing EXECUTED/PARTIAL',
+    async (activityName) => {
+      primeDiscovery();
+      const failure = wrappedControl(
+        activityName === 'executeQuery'
+          ? 'BUDGET_OPERATION_REPLAY_UNAVAILABLE'
+          : 'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+      );
+      acts[activityName].mockRejectedValue(failure);
 
-    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failure);
-    expect(acts.finalizeRun).not.toHaveBeenCalled();
-  });
+      await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failure);
+      expect(acts.finalizeRun).not.toHaveBeenCalled();
+    },
+  );
 
   it('keeps an ordinary query failure in the normal status path while still finalizing', async () => {
     primeDiscovery();
@@ -86,10 +129,90 @@ describe('discoveryWorkflow execution-control propagation', () => {
 
     await discoveryWorkflow(discoveryInput());
 
-    expect(acts.finalizeRun).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'FAILED',
-      stats: expect.objectContaining({ failures: 1 }),
-    }));
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({ failures: 1 }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: 'SOURCE_POLICY_MISSING quarantine',
+      receipt: {
+        rawCount: 0,
+        quarantinedCount: 1,
+        rejectedCount: 0,
+        duplicateCount: 0,
+      },
+    },
+    {
+      label: 'UNKNOWN_PAYLOAD_FIELD rejection',
+      receipt: {
+        rawCount: 0,
+        quarantinedCount: 0,
+        rejectedCount: 1,
+        duplicateCount: 0,
+      },
+    },
+  ])(
+    'does not finalize DONE when every provider result is denied by governance: $label',
+    async ({ receipt }) => {
+      primeDiscovery();
+      acts.executeQuery.mockResolvedValue({
+        ...receipt,
+        provider: 'public_web',
+        budgetTruncated: false,
+      });
+
+      await discoveryWorkflow(discoveryInput());
+
+      expect(acts.finalizeRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'FAILED',
+          stats: expect.objectContaining({
+            perSource: {
+              official_registry: {
+                ...receipt,
+                provider: 'public_web',
+              },
+            },
+          }),
+        }),
+      );
+    },
+  );
+
+  it('finalizes PARTIAL and preserves all disposition counters for mixed accepted and denied Raw', async () => {
+    primeDiscovery();
+    acts.executeQuery.mockResolvedValue({
+      rawCount: 1,
+      quarantinedCount: 2,
+      rejectedCount: 3,
+      duplicateCount: 4,
+      provider: 'public_web',
+      budgetTruncated: false,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          perSource: {
+            official_registry: {
+              rawCount: 1,
+              quarantinedCount: 2,
+              rejectedCount: 3,
+              duplicateCount: 4,
+              provider: 'public_web',
+            },
+          },
+        }),
+      }),
+    );
   });
 
   it.each([
@@ -116,14 +239,30 @@ describe('workspace authority Temporal compatibility', () => {
       icpId: 'icp-1',
     } as never);
 
-    expect(acts.resetRunBudget).toHaveBeenCalledWith({ workspaceId: WS, runId: 'run-1' });
-    expect(acts.loadPlanQueries).toHaveBeenCalledWith({ workspaceId: WS, planId: 'plan-1' });
-    expect(acts.executeQuery).toHaveBeenCalledWith(expect.not.objectContaining({ executionBudget: expect.anything() }));
-    expect(acts.finalizeRun).toHaveBeenCalledWith(expect.not.objectContaining({ executionBudget: expect.anything() }));
+    expect(acts.resetRunBudget).toHaveBeenCalledWith({
+      workspaceId: WS,
+      runId: 'run-1',
+    });
+    expect(acts.loadPlanQueries).toHaveBeenCalledWith({
+      workspaceId: WS,
+      planId: 'plan-1',
+    });
+    expect(acts.executeQuery).toHaveBeenCalledWith(
+      expect.not.objectContaining({ executionBudget: expect.anything() }),
+    );
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.not.objectContaining({ executionBudget: expect.anything() }),
+    );
     for (const activityName of [
-      'loadPlanQueries', 'executeQuery', 'canonicalizeRun', 'qualifyFitForRun',
-      'enrichRun', 'enrichSignalsRun', 'registerWatchesForRun',
-      'enqueuePatentLookupsForRun', 'finalizeRun',
+      'loadPlanQueries',
+      'executeQuery',
+      'canonicalizeRun',
+      'qualifyFitForRun',
+      'enrichRun',
+      'enrichSignalsRun',
+      'registerWatchesForRun',
+      'enqueuePatentLookupsForRun',
+      'finalizeRun',
     ]) {
       for (const [args] of acts[activityName].mock.calls) {
         expect(args).not.toHaveProperty('executionContractVersion');
@@ -135,7 +274,10 @@ describe('workspace authority Temporal compatibility', () => {
   it('replays a pre-authority understanding history with its exact legacy activity argument shapes', async () => {
     setPatched(() => false);
     acts.setStatus.mockResolvedValue(undefined);
-    acts.crawlWebsite.mockResolvedValue({ url: 'https://acme.example/', text: 'home' });
+    acts.crawlWebsite.mockResolvedValue({
+      url: 'https://acme.example/',
+      text: 'home',
+    });
     acts.selectSubpages.mockResolvedValue([]);
     acts.crawlPages.mockResolvedValue({ pages: [] });
     acts.extractClaims.mockResolvedValue({ claims: [] });
@@ -152,19 +294,34 @@ describe('workspace authority Temporal compatibility', () => {
     } as never);
 
     expect(acts.setStatus).toHaveBeenNthCalledWith(1, {
-      companyId: 'company-1', workspaceId: WS, status: 'ENRICHING',
+      companyId: 'company-1',
+      workspaceId: WS,
+      status: 'ENRICHING',
     });
     expect(acts.selectSubpages).toHaveBeenCalledWith({
-      markdown: 'home', website: 'https://acme.example/',
+      markdown: 'home',
+      website: 'https://acme.example/',
     });
-    expect(acts.extractClaims).toHaveBeenCalledWith({ workspaceId: WS, text: 'home' });
+    expect(acts.extractClaims).toHaveBeenCalledWith({
+      workspaceId: WS,
+      text: 'home',
+    });
     expect(acts.setStatus).toHaveBeenNthCalledWith(2, {
-      companyId: 'company-1', workspaceId: WS, status: 'REVIEW',
+      companyId: 'company-1',
+      workspaceId: WS,
+      status: 'REVIEW',
     });
     for (const activityName of [
-      'setStatus', 'crawlWebsite', 'selectSubpages', 'crawlPages', 'extractClaims',
-      'extractOfferings', 'persistClaims', 'persistOfferings',
-      'persistPublicContacts', 'extractAndPersistProfile',
+      'setStatus',
+      'crawlWebsite',
+      'selectSubpages',
+      'crawlPages',
+      'extractClaims',
+      'extractOfferings',
+      'persistClaims',
+      'persistOfferings',
+      'persistPublicContacts',
+      'extractAndPersistProfile',
     ]) {
       for (const [args] of acts[activityName].mock.calls) {
         expect(args).not.toHaveProperty('executionContractVersion');
@@ -179,15 +336,20 @@ describe('workspace authority Temporal compatibility', () => {
     await discoveryWorkflow(discoveryInput());
 
     expect(acts.resetRunBudget).not.toHaveBeenCalled();
-    expect(acts.loadPlanQueries).toHaveBeenCalledWith(expect.objectContaining({
-      executionContractVersion: 2,
-      executionBudget: DISCOVERY_BUDGET,
-    }));
+    expect(acts.loadPlanQueries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContractVersion: 2,
+        executionBudget: DISCOVERY_BUDGET,
+      }),
+    );
   });
 
   it('uses explicit v2 inputs across a new understanding history', async () => {
     acts.setStatus.mockResolvedValue(undefined);
-    acts.crawlWebsite.mockResolvedValue({ url: 'https://acme.example/', text: 'home' });
+    acts.crawlWebsite.mockResolvedValue({
+      url: 'https://acme.example/',
+      text: 'home',
+    });
     acts.selectSubpages.mockResolvedValue([]);
     acts.crawlPages.mockResolvedValue({ pages: [] });
     acts.extractClaims.mockResolvedValue({ claims: [] });
@@ -205,31 +367,43 @@ describe('workspace authority Temporal compatibility', () => {
       executionBudget: UNDERSTANDING_BUDGET,
     });
 
-    expect(acts.setStatus).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      executionContractVersion: 2,
-      executionBudget: UNDERSTANDING_BUDGET,
-    }));
-    expect(acts.selectSubpages).toHaveBeenCalledWith(expect.objectContaining({
-      workspaceId: WS,
-      executionContractVersion: 2,
-      executionBudget: UNDERSTANDING_BUDGET,
-    }));
+    expect(acts.setStatus).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        executionContractVersion: 2,
+        executionBudget: UNDERSTANDING_BUDGET,
+      }),
+    );
+    expect(acts.selectSubpages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: WS,
+        executionContractVersion: 2,
+        executionBudget: UNDERSTANDING_BUDGET,
+      }),
+    );
   });
 
   it.each([
     {
-      workspaceId: WS, companyId: 'company-1', website: 'https://acme.example/',
+      workspaceId: WS,
+      companyId: 'company-1',
+      website: 'https://acme.example/',
       executionBudget: UNDERSTANDING_BUDGET,
     },
     {
-      workspaceId: WS, companyId: 'company-1', website: 'https://acme.example/',
+      workspaceId: WS,
+      companyId: 'company-1',
+      website: 'https://acme.example/',
       executionContractVersion: 2 as const,
     },
-  ])('fails a malformed understanding v2 input non-retryably', async (input) => {
-    await expect(understandingWorkflow(input)).rejects.toMatchObject({
-      type: 'EXECUTION_BUDGET_WORKFLOW_INPUT_INVALID',
-      nonRetryable: true,
-    });
-    expect(acts.setStatus).not.toHaveBeenCalled();
-  });
+  ])(
+    'fails a malformed understanding v2 input non-retryably',
+    async (input) => {
+      await expect(understandingWorkflow(input)).rejects.toMatchObject({
+        type: 'EXECUTION_BUDGET_WORKFLOW_INPUT_INVALID',
+        nonRetryable: true,
+      });
+      expect(acts.setStatus).not.toHaveBeenCalled();
+    },
+  );
 });

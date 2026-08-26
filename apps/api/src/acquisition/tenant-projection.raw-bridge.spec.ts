@@ -1,3 +1,4 @@
+// Test intent source-mined from tugjvnh@70885cdb; rewritten for current main.
 import { describe, expect, it, vi } from "vitest";
 import { TenantProjectionService } from "./tenant-projection.service";
 
@@ -15,13 +16,17 @@ describe("TenantProjectionService Raw Source bridge", () => {
     }));
     const identityCreate = vi.fn(async () => ({}));
     const evidenceCreate = vi.fn(async () => ({}));
+    const canonicalCreate = vi.fn(async ({ data }) => ({
+      id: "company-1",
+      ...data,
+    }));
     const tx = {
       $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
         findUnique: vi.fn(async () => null),
         updateMany: vi.fn(async () => ({ count: 0 })),
-        create: vi.fn(async ({ data }) => ({ id: "company-1", ...data })),
+        create: canonicalCreate,
         update: vi.fn(),
       },
       rawSourceRecord: { upsert: rawUpsert },
@@ -51,8 +56,8 @@ describe("TenantProjectionService Raw Source bridge", () => {
             country: "DE",
             cleaned: {
               products: ["pump"],
-              email: "named.person@example.test",
-              email_kind: "personal",
+              email: "sales@example.test",
+              email_kind: "role",
               stand: "A42",
               source_kind: "trade_fair_exhibitor_mys",
             },
@@ -112,7 +117,27 @@ describe("TenantProjectionService Raw Source bridge", () => {
       }),
     );
     expect(JSON.stringify(rawUpsert.mock.calls[0]?.[0])).not.toContain(
-      "named.person",
+      "sales@example.test",
+    );
+    const preparedPayload = rawUpsert.mock.calls[0]![0].create.payload;
+    expect(canonicalCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: preparedPayload.name,
+          domain: preparedPayload.domain,
+          country: preparedPayload.country,
+          attributes: preparedPayload.attributes,
+        }),
+      }),
+    );
+    expect(
+      canonicalCreate.mock.calls[0]![0].data.attributes,
+    ).not.toHaveProperty("contact_email");
+    const attributeEvidence = evidenceCreate.mock.calls.find(
+      ([call]) => call.data.field === "attributes",
+    );
+    expect(attributeEvidence?.[0].data.value).toEqual(
+      preparedPayload.attributes,
     );
   });
 });

@@ -73,6 +73,20 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(replay.fetchedAt?.toISOString()).toBe("2026-08-26T12:00:00.000Z");
   });
 
+  it("uses an ordinal comparator even when localeCompare is hostile, including non-ASCII keys", () => {
+    const original = String.prototype.localeCompare;
+    String.prototype.localeCompare = () => {
+      throw new Error("locale comparator must not be used");
+    };
+    try {
+      expect(rawPayloadHash({ ä: 1, z: 2, A: 3 })).toBe(
+        rawPayloadHash({ A: 3, z: 2, ä: 1 }),
+      );
+    } finally {
+      String.prototype.localeCompare = original;
+    }
+  });
+
   it("creates a bounded accepted receipt with an exact policy snapshot", () => {
     const prepared = prepareRawSourceBatch({
       providerKey: "registry",
@@ -126,7 +140,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(changed.payloadHash).not.toBe(first.payloadHash);
   });
 
-  it("minimizes an attribute outside the provider allowlist and rejects an ungoverned provider", () => {
+  it("rejects an attribute outside the provider schema and an ungoverned provider", () => {
     const bounded = prepareRawSourceBatch({
       providerKey: "registry",
       records: [
@@ -136,14 +150,9 @@ describe("Raw Source v2 ingestion boundary", () => {
       limits: LIMITS,
       now: NOW,
     }).rows[0]!;
-    expect(bounded.ingestStatus).toBe("ACCEPTED");
-    expect(bounded.payload).toMatchObject({
-      attributes: { products: ["pump"] },
-    });
+    expect(bounded.ingestStatus).toBe("REJECTED");
+    expect(bounded.dispositionCode).toBe("PROVIDER_PAYLOAD_SCHEMA_INVALID");
     expect(JSON.stringify(bounded.payload)).not.toContain("mystery");
-    expect(bounded.sourcePolicySnapshot).toMatchObject({
-      minimizedFields: ["attributes.mystery"],
-    });
 
     const ungoverned = prepareRawSourceBatch({
       providerKey: "unknown-provider",
@@ -164,7 +173,8 @@ describe("Raw Source v2 ingestion boundary", () => {
       {
         source_kind: "directory",
         source_directory: "registry.example",
-        listing_location: "DE",
+        detail_url: "https://registry.example/company/1",
+        source_class: "public_intelligence",
       },
     ],
     [
@@ -178,20 +188,46 @@ describe("Raw Source v2 ingestion boundary", () => {
     ],
     [
       "openstreetmap",
-      { osm_id: "node/1", city: "Berlin", osm_tags: { industrial: "factory" } },
+      {
+        osm_id: "node/1",
+        latitude: 52.5,
+        longitude: 13.4,
+        source_class: "public_intelligence",
+      },
     ],
     ["trade_fair", { stand: "A42", products: ["pump"], source_fair: "fair-1" }],
     [
       "ted",
-      { ted: { publication_number: "1", buyer_names: ["Public Authority"] } },
+      {
+        ted: {
+          publication_number: "1",
+          publication_date: "2026-08-25",
+          notice_type: "award",
+          cpv: ["42122000"],
+          buyer_countries: ["DE"],
+        },
+      },
     ],
-    ["openfda", { fda: { registration_number: "1" }, products: ["device"] }],
+    [
+      "openfda",
+      {
+        fda: {
+          registration_number: "1",
+          status_code: "A",
+          product_codes: ["LLZ"],
+          initial_importer: false,
+        },
+        products: ["LLZ"],
+      },
+    ],
     [
       "public_web",
       {
         products: ["pump"],
         keywords: ["industrial"],
         extraction_confidence: 0.9,
+        extraction_evidence_digest: "b".repeat(64),
+        source_class: "public_intelligence",
       },
     ],
   ])(
@@ -209,7 +245,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     },
   );
 
-  it("minimizes personal/contact fields before hashing or persistence", () => {
+  it("rejects personal/contact fields before hashing or persistence", () => {
     const prepared = prepareRawSourceBatch({
       providerKey: "trade_fair",
       records: [
@@ -227,16 +263,204 @@ describe("Raw Source v2 ingestion boundary", () => {
       now: NOW,
     }).rows[0]!;
 
-    expect(prepared.ingestStatus).toBe("ACCEPTED");
+    expect(prepared.ingestStatus).toBe("REJECTED");
+    expect(prepared.dispositionCode).toBe("PROVIDER_PAYLOAD_SCHEMA_INVALID");
     expect(JSON.stringify(prepared.payload)).not.toContain("named.person");
     expect(JSON.stringify(prepared.payload)).not.toContain("Must Not Persist");
-    expect(prepared.sourcePolicySnapshot).toMatchObject({
-      minimizedFields: [
-        "attributes.contact",
-        "attributes.public_email",
-        "attributes.public_phone",
-      ],
+  });
+
+  it.each([
+    [
+      "free-text evidence with email and personal name",
+      "public_web",
+      companyRecord({
+        attributes: {
+          products: ["pump"],
+          keywords: ["industrial"],
+          extraction_evidence: "Contact Jane Doe at person@example.test",
+          extraction_confidence: 0.9,
+          source_class: "public_intelligence",
+        },
+      }),
+    ],
+    [
+      "PII in products",
+      "trade_fair",
+      companyRecord({ attributes: { products: ["Jane Doe"] } }),
+    ],
+    [
+      "credential marker in an allowed product token",
+      "trade_fair",
+      companyRecord({ attributes: { products: ["Bearer sk-secret-value"] } }),
+    ],
+    [
+      "personal name as company name",
+      "registry",
+      companyRecord({ name: "Jane Doe" }),
+    ],
+    [
+      "email-shaped domain",
+      "registry",
+      companyRecord({ domain: "person@example.test" }),
+    ],
+    [
+      "syntactically invalid domain",
+      "registry",
+      companyRecord({ domain: "not a domain" }),
+    ],
+    [
+      "email-shaped externalId",
+      "registry",
+      companyRecord({ externalId: "person@example.test" }),
+    ],
+    [
+      "unbounded externalId",
+      "registry",
+      companyRecord({ externalId: "x".repeat(257) }),
+    ],
+    [
+      "credential URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://user:password@registry.example/company/1",
+        },
+      }),
+    ],
+    [
+      "query URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/company/1?token=secret",
+        },
+      }),
+    ],
+    [
+      "fragment URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/company/1#person",
+        },
+      }),
+    ],
+    [
+      "malformed content hash",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          contentHash: "not-sha256",
+        },
+      }),
+    ],
+    [
+      "non-HTTPS provenance URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "http://registry.example/company/1",
+        },
+      }),
+    ],
+    [
+      "malformed observation timestamp",
+      "registry",
+      companyRecord({
+        provenance: { ...companyRecord().provenance, fetchedAt: "tomorrow" },
+      }),
+    ],
+    [
+      "malformed parser version",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          parserVersion: "free text version",
+        },
+      }),
+    ],
+    [
+      "unknown sensitive key",
+      "registry",
+      companyRecord({
+        attributes: { products: ["pump"], safe_note: "Bearer token-value" },
+      }),
+    ],
+    [
+      "wrong scalar type",
+      "wikidata",
+      companyRecord({ attributes: { wikidata_qid: 123, latitude: "52" } }),
+    ],
+    [
+      "out-of-range coordinates",
+      "wikidata",
+      companyRecord({
+        attributes: { wikidata_qid: "Q1", latitude: 91, longitude: 181 },
+      }),
+    ],
+    [
+      "invalid TED semantic codes",
+      "ted",
+      companyRecord({
+        attributes: {
+          ted: {
+            publication_number: "free text number",
+            publication_date: "2026-99-99",
+            notice_type: "personal note",
+            cpv: ["pump"],
+            buyer_countries: ["Germany"],
+          },
+        },
+      }),
+    ],
+    [
+      "out-of-range extraction confidence",
+      "public_web",
+      companyRecord({
+        attributes: {
+          products: ["pump"],
+          extraction_confidence: 2,
+          extraction_evidence_digest: "b".repeat(64),
+          source_class: "public_intelligence",
+        },
+      }),
+    ],
+    [
+      "oversized array",
+      "trade_fair",
+      companyRecord({
+        attributes: { products: Array.from({ length: 21 }, () => "pump") },
+      }),
+    ],
+    [
+      "oversized token",
+      "trade_fair",
+      companyRecord({ attributes: { products: ["x".repeat(81)] } }),
+    ],
+  ])("rejects %s with a value-free receipt", (_name, providerKey, value) => {
+    const row = prepareRawSourceBatch({
+      providerKey,
+      records: [value],
+      policies: POLICIES,
+      limits: { ...LIMITS, maxRecordBytes: 8_192, maxBatchBytes: 16_384 },
+      now: NOW,
+    }).rows[0]!;
+    expect(row).toMatchObject({
+      ingestStatus: "REJECTED",
+      dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+      externalId: null,
     });
+    const serialized = JSON.stringify(row.payload);
+    expect(serialized).not.toContain("person@example.test");
+    expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("token-value");
+    expect(serialized).not.toContain("secret-value");
   });
 
   it.each([
@@ -361,7 +585,14 @@ describe("Raw Source v2 ingestion boundary", () => {
     const oversized = prepareRawSourceBatch({
       providerKey: "registry",
       records: [
-        companyRecord({ attributes: { company_text: "x".repeat(2_000) } }),
+        companyRecord({
+          attributes: {
+            products: Array.from(
+              { length: 20 },
+              (_, index) => `industrial-pump-${index}-${"x".repeat(50)}`,
+            ),
+          },
+        }),
       ],
       policies: POLICIES,
       limits: { ...LIMITS, maxRecordBytes: 100, maxBatchBytes: 4_000 },

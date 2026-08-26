@@ -1,5 +1,6 @@
+// Test intent source-mined from tugjvnh@70885cdb; rewritten for current main.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -22,6 +23,8 @@ const repositoryRoot = resolve(
 const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 const schemaMigrationName = "20260826090000_raw_source_governance_schema";
 const backfillMigrationName = "20260826100000_raw_source_governance_backfill";
+const constraintsMigrationName =
+  "20260826110000_raw_source_governance_constraints";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -32,6 +35,11 @@ const backfillMigrationPath = resolve(
   backfillMigrationName,
   "migration.sql",
 );
+const constraintsMigrationPath = resolve(
+  migrationRoot,
+  constraintsMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -39,6 +47,8 @@ const databases = Object.freeze({
   fresh: "task6a_raw_fresh",
   upgrade: "task6a_raw_upgrade",
   rollback: "task6a_raw_rollback",
+  backfillRollback: "task6a_raw_backfill_rollback",
+  locks: "task6a_raw_locks",
 });
 
 const WORKSPACE_A = "10000000-0000-4000-8000-000000000001";
@@ -52,12 +62,14 @@ const SOURCE = "40000000-0000-4000-8000-000000000001";
 const FETCH = "50000000-0000-4000-8000-000000000001";
 const SOURCE_ENTITY = "60000000-0000-4000-8000-000000000001";
 const COMPANY_A = "70000000-0000-4000-8000-000000000001";
+const LOCKED_RAW = "90000000-0000-4000-8000-000000000001";
 
 let baselineDirectory;
 let firstDeployOutput = "";
 let secondDeployOutput = "";
 let baselineDeployOutput = "";
 let injectedRollbackOutput = "";
+let injectedBackfillRollbackOutput = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -177,9 +189,9 @@ function asApp(workspaceId, sql) {
   `;
 }
 
-function seedCurrentMainClone() {
+function seedCurrentMainClone(database = databases.upgrade) {
   dockerPsql(
-    databases.upgrade,
+    database,
     `
     INSERT INTO workspace(id,name,created_at,updated_at) VALUES
       ('${WORKSPACE_A}','A',now(),now()),
@@ -226,16 +238,93 @@ function seedCurrentMainClone() {
     );
     INSERT INTO identity_link(
       id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,confidence,created_at
-    ) VALUES (gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','${SOURCE_ENTITY}','domain_exact',1,now());
+    ) VALUES
+      (gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','${SOURCE_ENTITY}','domain_exact',1,now()),
+      (gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','${RESTRICTED_RAW_A}','provider_id',1,now());
     INSERT INTO field_evidence(
       id,workspace_id,entity_type,entity_id,field,value,provider_key,raw_record_id,
       confidence,license,allowed_actions,fetched_at
-    ) VALUES (
-      gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','name','"Legacy GmbH"',
-      'mapyourshow','${SOURCE_ENTITY}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
-    );
+    ) VALUES
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','name','"Legacy GmbH"',
+        'mapyourshow','${SOURCE_ENTITY}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
+      ),
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','country','"DE"',
+        'usaspending_awards','${RESTRICTED_RAW_A}',1,'public','["display"]','2026-08-25T16:31:00Z'
+      );
   `,
   );
+}
+
+function openRowLock(database, rowId) {
+  requireTopology();
+  const child = spawn(
+    "docker",
+    [
+      "exec",
+      "-i",
+      container,
+      "psql",
+      "-U",
+      "global",
+      "-d",
+      database,
+      "--no-psqlrc",
+      "-X",
+      "-qAt",
+      "-v",
+      "ON_ERROR_STOP=1",
+    ],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  let output = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stdin.write(`BEGIN;\nSELECT 'LOCKED:${rowId}'
+    FROM raw_source_record WHERE id='${rowId}' FOR UPDATE;\n`);
+
+  const ready = new Promise((resolveReady, rejectReady) => {
+    let poll;
+    const timeout = setTimeout(
+      () => {
+        clearInterval(poll);
+        rejectReady(new Error(`row lock did not become ready:\n${output}`));
+      },
+      5_000,
+    );
+    poll = setInterval(() => {
+      if (!output.includes(`LOCKED:${rowId}`)) return;
+      clearTimeout(timeout);
+      clearInterval(poll);
+      resolveReady();
+    }, 10);
+    child.once("exit", (code) => {
+      if (output.includes(`LOCKED:${rowId}`)) return;
+      clearTimeout(timeout);
+      clearInterval(poll);
+      rejectReady(new Error(`row-lock session exited ${code}:\n${output}`));
+    });
+  });
+
+  const release = () =>
+    new Promise((resolveRelease, rejectRelease) => {
+      child.once("exit", (code) => {
+        if (code === 0) resolveRelease();
+        else
+          rejectRelease(
+            new Error(`row-lock release exited ${code}:\n${output}`),
+          );
+      });
+      child.stdin.end("ROLLBACK;\n\\q\n");
+    });
+  return { ready, release };
 }
 
 before(() => {
@@ -249,6 +338,11 @@ before(() => {
     existsSync(backfillMigrationPath),
     true,
     `${backfillMigrationName} must exist`,
+  );
+  assert.equal(
+    existsSync(constraintsMigrationPath),
+    true,
+    `${constraintsMigrationName} must exist`,
   );
   dockerPsql(
     "postgres",
@@ -287,6 +381,51 @@ before(() => {
   seedCurrentMainClone();
   migrateDeploy(databases.upgrade);
 
+  migrateDeploy(databases.backfillRollback, baseline.schemaPath);
+  seedCurrentMainClone(databases.backfillRollback);
+  dockerPsql(
+    databases.backfillRollback,
+    readFileSync(schemaMigrationPath, "utf8"),
+  );
+  // The committed 1000 VALIDATE statements are the transactional integrity
+  // gate after its DML. Inject only in-memory after that gate, before COMMIT.
+  const injectedBackfill = readFileSync(backfillMigrationPath, "utf8").replace(
+    /COMMIT;\s*$/u,
+    "SELECT 1 / 0;\nCOMMIT;\n",
+  );
+  injectedBackfillRollbackOutput = dockerPsql(
+    databases.backfillRollback,
+    injectedBackfill,
+    { rejects: /division by zero/u },
+  );
+
+  migrateDeploy(databases.locks);
+  dockerPsql(
+    databases.locks,
+    `
+    INSERT INTO workspace(id,name,created_at,updated_at)
+      VALUES ('${WORKSPACE_A}','Locks',now(),now());
+    INSERT INTO discovery_run(id,workspace_id,plan_id,icp_id,status,created_at)
+      VALUES ('${RUN_A}','${WORKSPACE_A}',gen_random_uuid(),gen_random_uuid(),'RUNNING',now());
+    ${asApp(
+      WORKSPACE_A,
+      `INSERT INTO raw_source_record(
+        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
+        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
+        disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
+      ) VALUES (
+        '${LOCKED_RAW}','${WORKSPACE_A}','${RUN_A}','registry','company_registry',
+        'locked-a','{"name":"Locked A","domain":"locked-a.example"}',
+        'https://registry.example/locked-a',now(),repeat('a',64),'registry/v2',0,now(),
+        'external:${"a".repeat(64)}',repeat('b',64),48,'raw-source/v2','ACCEPTED',
+        NULL,30,now()-interval '1 minute',NULL,
+        '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
+      );`,
+    )}
+  `,
+  );
+
   migrateDeploy(databases.rollback, baseline.schemaPath);
   const injected = readFileSync(schemaMigrationPath, "utf8").replace(
     /COMMIT;\s*$/u,
@@ -320,17 +459,20 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
   it("applies the entire migration lineage to a fresh database and is idempotent on second deploy", () => {
     assert.match(firstDeployOutput, new RegExp(schemaMigrationName, "u"));
     assert.match(firstDeployOutput, new RegExp(backfillMigrationName, "u"));
+    assert.match(firstDeployOutput, new RegExp(constraintsMigrationName, "u"));
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
         databases.fresh,
         `
       SELECT count(*) FROM "_prisma_migrations"
-      WHERE migration_name IN ('${schemaMigrationName}','${backfillMigrationName}')
+      WHERE migration_name IN (
+        '${schemaMigrationName}','${backfillMigrationName}','${constraintsMigrationName}'
+      )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "2",
+      "3",
     );
   });
 
@@ -374,8 +516,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.upgrade,
         `
       SELECT concat_ws('|',
-        (SELECT raw_record_id::text FROM identity_link WHERE canonical_id='${COMPANY_A}' LIMIT 1),
-        (SELECT raw_record_id::text FROM field_evidence WHERE entity_id='${COMPANY_A}' LIMIT 1)
+        (SELECT raw_record_id::text FROM identity_link
+          WHERE canonical_id='${COMPANY_A}' AND match_rule='domain_exact' LIMIT 1),
+        (SELECT raw_record_id::text FROM field_evidence
+          WHERE entity_id='${COMPANY_A}' AND field='name' LIMIT 1)
       );
     `,
       ),
@@ -470,6 +614,45 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       "0",
     );
 
+    for (const legacyInsert of [
+      `INSERT INTO raw_source_record(
+        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at
+      ) VALUES (
+        '81000000-0000-4000-8000-000000000001','${WORKSPACE_A}','${RUN_A}',
+        'registry','company_registry','default-legacy','{"name":"Default Legacy"}',
+        'https://registry.example/default-legacy',now(),repeat('a',64),'registry/v1',0,now()
+      );`,
+      `INSERT INTO raw_source_record(
+        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
+        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
+        retention_days,expires_at,source_policy_snapshot
+      ) VALUES (
+        '81000000-0000-4000-8000-000000000002','${WORKSPACE_A}','${RUN_A}',
+        'registry','company_registry','explicit-legacy','{"name":"Explicit Legacy"}',
+        'https://registry.example/explicit-legacy',now(),repeat('b',64),'registry/v1',0,now(),
+        'external:${"c".repeat(64)}',repeat('d',64),32,'raw-source/v1','ACCEPTED',
+        30,now()+interval '30 days','{"kind":"source_policy","retentionDays":30,"minimizedFields":[]}'
+      );`,
+    ]) {
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, legacyInsert), {
+        rejects:
+          /RAW_SOURCE_INSERT_V2_REQUIRED|raw-source\/v2|check constraint/u,
+      });
+    }
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM raw_source_record
+         WHERE id IN (
+           '81000000-0000-4000-8000-000000000001',
+           '81000000-0000-4000-8000-000000000002'
+         );`,
+      ),
+      "0",
+    );
+
     dockerPsql(
       databases.upgrade,
       asApp(
@@ -486,6 +669,27 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         'https://registry.example/new-a',now(),repeat('e',64),'registry/v1',0,now(),
         'external:${"e".repeat(64)}',repeat('f',64),16,'raw-source/v2','ACCEPTED',
         NULL,30,now()-interval '1 minute',NULL,
+        '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
+      );
+    `,
+      ),
+    );
+    dockerPsql(
+      databases.upgrade,
+      asApp(
+        WORKSPACE_A,
+        `
+      INSERT INTO raw_source_record(
+        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
+        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
+        disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
+      ) VALUES (
+        '80000000-0000-4000-8000-000000000003','${WORKSPACE_A}','${RUN_A}',
+        'registry','company_registry','future-a','{"name":"Future A"}',
+        'https://registry.example/future-a',now(),repeat('a',64),'registry/v2',0,now(),
+        'external:${"f".repeat(64)}',repeat('e',64),24,'raw-source/v2','ACCEPTED',
+        NULL,30,now()+interval '30 days',NULL,
         '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
       );
     `,
@@ -542,9 +746,24 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           `UPDATE raw_source_record SET ${mutation}
            WHERE id='80000000-0000-4000-8000-000000000001';`,
         ),
-        { rejects: /immutable|raw-source\/v2/u },
+        { rejects: /immutable|permission denied|raw-source\/v2/u },
       );
     }
+    dockerPsql(
+      databases.upgrade,
+      asApp(
+        WORKSPACE_A,
+        `UPDATE raw_source_record
+         SET payload=jsonb_build_object(
+             '_rawReceipt','raw-source/expired/v1',
+             'previousStatus',ingest_status,
+             'payloadHash',payload_hash,
+             'payloadBytes',payload_bytes
+           ), ingest_status='EXPIRED', expired_at=statement_timestamp()
+         WHERE id='80000000-0000-4000-8000-000000000003';`,
+      ),
+      { rejects: /permission denied/u },
+    );
     dockerPsql(
       databases.upgrade,
       asApp(
@@ -570,7 +789,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         `
       SELECT 'result:' || row_to_json(x)::text
       FROM expire_due_raw_source_records_v1(
-        '${WORKSPACE_A}'::uuid,50,statement_timestamp()
+        '${WORKSPACE_A}'::uuid,50,'infinity'::timestamptz
       ) x;
       SELECT 'row:' || jsonb_build_object(
           'status',ingest_status,'expiredAt',expired_at,'payload',payload,
@@ -598,6 +817,31 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     ]);
     assert.equal(expired.payload.payloadHash, expired.payloadHash);
     assert.equal(expired.payload.payloadBytes, expired.payloadBytes);
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT ingest_status || '|' || (expired_at IS NULL)::text
+         FROM raw_source_record
+         WHERE id='80000000-0000-4000-8000-000000000003';`,
+      ),
+      "ACCEPTED|true",
+    );
+
+    for (const deniedInvocation of [
+      `SELECT * FROM expire_due_raw_source_records_v1(
+        '${WORKSPACE_A}'::uuid,50,'infinity'::timestamptz);`,
+      `SET SESSION AUTHORIZATION app_user;
+       SELECT * FROM expire_due_raw_source_records_v1(
+         '${WORKSPACE_A}'::uuid,50,'infinity'::timestamptz);`,
+      `SET ROLE app_user;
+       SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',false);
+       SELECT * FROM expire_due_raw_source_records_v1(
+         '${WORKSPACE_A}'::uuid,50,'infinity'::timestamptz);`,
+    ]) {
+      dockerPsql(databases.upgrade, deniedInvocation, {
+        rejects: /RAW_RETENTION_EXPIRE_DENIED|permission denied/u,
+      });
+    }
 
     dockerPsql(
       databases.upgrade,
@@ -624,6 +868,33 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         ),
       ),
       `${WORKSPACE_A}\n0`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        asApp(
+          WORKSPACE_A,
+          `SELECT concat_ws('|',
+             (SELECT count(*) FROM identity_link
+               WHERE raw_record_id='${RESTRICTED_RAW_A}'),
+             (SELECT count(*) FROM field_evidence
+               WHERE raw_record_id='${RESTRICTED_RAW_A}')
+           );`,
+        ),
+      ),
+      `${WORKSPACE_A}\n0|0`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',
+           (SELECT count(*) FROM identity_link
+             WHERE raw_record_id='${RESTRICTED_RAW_A}'),
+           (SELECT count(*) FROM field_evidence
+             WHERE raw_record_id='${RESTRICTED_RAW_A}')
+         );`,
+      ),
+      "1|1",
     );
     dockerPsql(
       databases.upgrade,
@@ -655,6 +926,91 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     `,
       ),
       { rejects: /restricted from downstream processing|row-level security/u },
+    );
+  });
+
+  it("reports real SKIP LOCKED deferral and expires the row on the next run", async () => {
+    const lock = openRowLock(databases.locks, LOCKED_RAW);
+    await lock.ready;
+    try {
+      assert.equal(
+        dockerPsql(
+          databases.locks,
+          asApp(
+            WORKSPACE_A,
+            `SELECT expired || '|' || deferred_for_conflict
+             FROM expire_due_raw_source_records_v1(
+               '${WORKSPACE_A}'::uuid,1,NULL
+             );`,
+          ),
+        ),
+        `${WORKSPACE_A}\n0|1`,
+      );
+    } finally {
+      await lock.release();
+    }
+
+    assert.equal(
+      dockerPsql(
+        databases.locks,
+        asApp(
+          WORKSPACE_A,
+          `SELECT expired || '|' || deferred_for_conflict
+           FROM expire_due_raw_source_records_v1(
+             '${WORKSPACE_A}'::uuid,1,NULL
+           );`,
+        ),
+      ),
+      `${WORKSPACE_A}\n1|0`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.locks,
+        `SELECT ingest_status FROM raw_source_record WHERE id='${LOCKED_RAW}';`,
+      ),
+      "EXPIRED",
+    );
+  });
+
+  it("rolls back post-backfill DML and every validation when the integrity gate fails before COMMIT", () => {
+    assert.match(injectedBackfillRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.backfillRollback,
+        `SELECT concat_ws('|',
+           (SELECT (last_seen_fetch_id IS NULL)::text FROM source_entity
+             WHERE id='${SOURCE_ENTITY}'),
+           (SELECT count(*) FROM raw_source_record
+             WHERE source_entity_id='${SOURCE_ENTITY}'),
+           (SELECT (payload_hash IS NULL)::text FROM raw_source_record
+             WHERE id='${RESTRICTED_RAW_A}'),
+           (SELECT count(*) FROM raw_source_governance_disposition),
+           (SELECT raw_record_id::text FROM identity_link
+             WHERE canonical_id='${COMPANY_A}' AND match_rule='domain_exact'),
+           (SELECT raw_record_id::text FROM field_evidence
+             WHERE entity_id='${COMPANY_A}' AND field='name')
+         );`,
+      ),
+      `true|0|true|0|${SOURCE_ENTITY}|${SOURCE_ENTITY}`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.backfillRollback,
+        `SELECT count(*)
+         FROM pg_constraint
+         WHERE conname IN (
+           'raw_source_record_exactly_one_origin_check',
+           'raw_source_record_ingest_status_check',
+           'raw_source_record_v2_receipt_check',
+           'raw_source_record_source_entity_id_fkey',
+           'raw_source_record_workspace_run_fkey',
+           'source_entity_last_seen_fetch_id_fkey',
+           'source_entity_last_seen_fetch_fkey',
+           'identity_link_workspace_raw_fkey',
+           'field_evidence_workspace_raw_fkey'
+         ) AND NOT convalidated;`,
+      ),
+      "9",
     );
   });
 

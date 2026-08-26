@@ -54,6 +54,22 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
     expect(acts.expireRawSourceRecords).toHaveBeenCalledTimes(2);
   });
 
+  it("never reports success while every due row remains deferred by a real lock conflict", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-locked"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({
+      expired: 0,
+      deferredForConflict: 1,
+    });
+
+    await expect(rawRetentionSweepWorkflow({ batchSize: 1 })).rejects.toThrow(
+      "RAW_RETENTION_WORKSPACE_FAILURE:1",
+    );
+    expect(acts.expireRawSourceRecords).toHaveBeenCalledTimes(20);
+  });
+
   it("continues as new with a stable cursor and aggregate when the page bound is reached", async () => {
     acts.listRawRetentionWorkspaces.mockResolvedValue({
       workspaceIds: ["ws-1"],

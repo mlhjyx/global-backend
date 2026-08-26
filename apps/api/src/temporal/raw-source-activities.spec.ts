@@ -3,8 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
 
-const NOW = new Date("2026-08-26T12:00:00.000Z");
-
 describe("Raw Source retention activities", () => {
   it("lists only bounded workspace ids through the aggregate DB function", async () => {
     const query = vi.fn(async () => [
@@ -13,7 +11,6 @@ describe("Raw Source retention activities", () => {
     ]);
     const activities = createRawSourceActivities({
       prisma: { $queryRaw: query } as never,
-      now: () => NOW,
     });
 
     await expect(
@@ -72,7 +69,6 @@ describe("Raw Source retention activities", () => {
     );
     const activities = createRawSourceActivities({
       prisma: { withWorkspace } as never,
-      now: () => NOW,
     });
 
     await expect(
@@ -86,6 +82,13 @@ describe("Raw Source retention activities", () => {
       expect.any(Function),
     );
     expect(query).toHaveBeenCalledOnce();
+    const statement = query.mock.calls[0]?.[0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(statement.values).not.toEqual(
+      expect.arrayContaining([expect.any(Date)]),
+    );
   });
 
   it("propagates database failure so the workflow cannot report a false terminal success", async () => {
@@ -99,7 +102,6 @@ describe("Raw Source retention activities", () => {
           }),
         ),
       } as never,
-      now: () => NOW,
     });
 
     await expect(
@@ -110,7 +112,7 @@ describe("Raw Source retention activities", () => {
     ).rejects.toThrow("db unavailable");
   });
 
-  it("rejects an invalid DB receipt and invalid clock value", async () => {
+  it("rejects an invalid DB receipt without accepting an activity-supplied clock", async () => {
     const invalidReceipt = createRawSourceActivities({
       prisma: {
         withWorkspace: vi.fn(async (_workspaceId, callback) =>
@@ -127,16 +129,6 @@ describe("Raw Source retention activities", () => {
         workspaceId: "11111111-1111-4111-8111-111111111111",
       }),
     ).rejects.toThrow("RAW_RETENTION_RECEIPT_INVALID");
-
-    const invalidTime = createRawSourceActivities({
-      prisma: { withWorkspace: vi.fn() } as never,
-      now: () => new Date(Number.NaN),
-    });
-    await expect(
-      invalidTime.expireRawSourceRecords({
-        workspaceId: "11111111-1111-4111-8111-111111111111",
-      }),
-    ).rejects.toThrow("RAW_RETENTION_TIME_INVALID");
   });
 });
 
@@ -195,7 +187,6 @@ describe("executeQuery Raw Source v2 persistence", () => {
                 name: "Safe GmbH",
                 attributes: {
                   products: ["pump"],
-                  public_email: "named.person@example.test",
                 },
                 provenance: {
                   sourceUrl: "https://registry.example/safe",
@@ -277,7 +268,6 @@ describe("executeQuery Raw Source v2 persistence", () => {
       ingestVersion: "raw-source/v2",
       ingestStatus: "ACCEPTED",
     });
-    expect(JSON.stringify(created[0]?.payload)).not.toContain("named.person");
     expect(created[1]).toMatchObject({
       ingestStatus: "REJECTED",
       dispositionCode: "UNKNOWN_PAYLOAD_FIELD",
