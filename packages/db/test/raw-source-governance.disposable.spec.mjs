@@ -33,6 +33,8 @@ const historicalCleanupMigrationName =
   "20260826140000_raw_source_governance_historical_cleanup";
 const statusHardeningMigrationName =
   "20260826150000_raw_source_governance_status_hardening";
+const finalCorrectionMigrationName =
+  "20260826160000_raw_source_governance_final_correction";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -68,6 +70,11 @@ const statusHardeningMigrationPath = resolve(
   statusHardeningMigrationName,
   "migration.sql",
 );
+const finalCorrectionMigrationPath = resolve(
+  migrationRoot,
+  finalCorrectionMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -80,6 +87,7 @@ const databases = Object.freeze({
   writerHardeningRollback: "task6a_raw_writer_hardening_rollback",
   historicalCleanupRollback: "task6a_raw_history_cleanup_rollback",
   statusHardeningRollback: "task6a_raw_status_hardening_rollback",
+  finalCorrectionRollback: "task6a_raw_final_correction_rollback",
   locks: "task6a_raw_locks",
 });
 
@@ -108,6 +116,7 @@ let injectedWriterRollbackOutput = "";
 let injectedWriterHardeningRollbackOutput = "";
 let injectedHistoricalCleanupRollbackOutput = "";
 let injectedStatusHardeningRollbackOutput = "";
+let injectedFinalCorrectionRollbackOutput = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -432,7 +441,19 @@ function seedCurrentMainClone(database = databases.upgrade) {
         "owner_name":"alice van smith",
         "custom_payload":{"notes":"unbounded historical prose"}
       }',
-      'NEW','n:unsafe a:',1,now(),now()
+      'NEW','n:unsafe a:',1,'2026-08-25T00:00:00Z','2026-08-25T00:00:00Z'
+    );
+    UPDATE canonical_company
+    SET attributes = attributes ||
+      '{"digital_footprint":{"structured_org":{"contact_email":"person@example.test"}}}'::jsonb
+    WHERE id='${COMPANY_A}';
+    INSERT INTO canonical_company(
+      id,workspace_id,name,domain,attributes,status,dedupe_key,version,created_at,updated_at
+    ) VALUES (
+      '70000000-0000-4000-8000-000000000002','${WORKSPACE_A}',
+      'Stable GmbH','stable.example','{"products":["pump"]}',
+      'NEW','d:stable.example',7,
+      '2026-08-25T00:00:00Z','2026-08-25T00:00:00Z'
     );
     INSERT INTO monitored_source(
       id,provider_key,source_key,label,config,status,created_at,updated_at
@@ -483,6 +504,16 @@ function seedCurrentMainClone(database = databases.upgrade) {
       ),
       (
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','contact_email','"protected.person@example.test"',
+        'usaspending_awards','${RESTRICTED_RAW_A}',1,'public','["display"]','2026-08-25T16:31:00Z'
+      ),
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
+        '{"products":["LLZ1","AB"]}',
+        'registry','${SAFE_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
+      ),
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
+        '{"products":["LLZ1","AB"]}',
         'usaspending_awards','${RESTRICTED_RAW_A}',1,'public','["display"]','2026-08-25T16:31:00Z'
       );
   `,
@@ -592,6 +623,11 @@ before(() => {
     existsSync(statusHardeningMigrationPath),
     true,
     `${statusHardeningMigrationName} must exist`,
+  );
+  assert.equal(
+    existsSync(finalCorrectionMigrationPath),
+    true,
+    `${finalCorrectionMigrationName} must exist`,
   );
   dockerPsql(
     "postgres",
@@ -737,6 +773,32 @@ before(() => {
     { rejects: /division by zero/u },
   );
 
+  migrateDeploy(databases.finalCorrectionRollback, baseline.schemaPath);
+  seedCurrentMainClone(databases.finalCorrectionRollback);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.finalCorrectionRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedFinalCorrection = readFileSync(
+    finalCorrectionMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedFinalCorrectionRollbackOutput = dockerPsql(
+    databases.finalCorrectionRollback,
+    injectedFinalCorrection,
+    { rejects: /division by zero/u },
+  );
+
   migrateDeploy(databases.locks);
   dockerPsql(
     databases.locks,
@@ -827,6 +889,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       firstDeployOutput,
       new RegExp(statusHardeningMigrationName, "u"),
     );
+    assert.match(
+      firstDeployOutput,
+      new RegExp(finalCorrectionMigrationName, "u"),
+    );
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -837,12 +903,12 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         '${schemaMigrationName}','${backfillMigrationName}',
         '${constraintsMigrationName}','${writerMigrationName}',
         '${writerHardeningMigrationName}','${historicalCleanupMigrationName}',
-        '${statusHardeningMigrationName}'
+        '${statusHardeningMigrationName}','${finalCorrectionMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "7",
+      "8",
     );
   });
 
@@ -930,7 +996,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.upgrade,
         `SELECT count(*) FROM field_evidence WHERE entity_id='${COMPANY_A}';`,
       ),
-      "5",
+      "7",
     );
     const cleanedEvidence = JSON.parse(
       dockerPsql(
@@ -980,6 +1046,46 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       "1",
     );
+    const correctedCanonical = dockerPsql(
+      databases.upgrade,
+      `SELECT concat_ws('|',version::text,
+         (updated_at > '2026-08-25T00:00:00Z'::timestamptz)::text,
+         (attributes #> '{digital_footprint,structured_org}' IS NULL)::text)
+       FROM canonical_company WHERE id='${COMPANY_A}';`,
+    );
+    assert.equal(correctedCanonical, "3|true|true");
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',version::text,updated_at::text)
+         FROM canonical_company
+         WHERE id='70000000-0000-4000-8000-000000000002';`,
+      ),
+      "7|2026-08-25 00:00:00+00",
+    );
+    const obsoleteEvidence = JSON.parse(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT jsonb_agg(jsonb_build_object(
+           'value',value,'class',data_class,'actions',allowed_actions
+         ) ORDER BY provider_key)::text
+         FROM field_evidence
+         WHERE entity_id='${COMPANY_A}'
+           AND value::text LIKE '%LLZ1%';`,
+      ),
+    );
+    assert.equal(obsoleteEvidence.length, 2);
+    assert.equal(
+      obsoleteEvidence[0].value._historicalCleanup,
+      "canonical-attribute-cleanup/v2",
+    );
+    assert.equal(obsoleteEvidence[0].class, "red");
+    assert.deepEqual(obsoleteEvidence[0].actions, []);
+    assert.deepEqual(obsoleteEvidence[1], {
+      value: { products: ["LLZ1", "AB"] },
+      class: "green",
+      actions: ["display"],
+    });
   });
 
   it("applies the closed PostgreSQL semantic schema to every governed provider payload", () => {
@@ -990,6 +1096,18 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       parserVersion,
     });
     const payloads = [
+      [
+        "registry",
+        {
+          externalId: "registry-alice-van-smith",
+          name: "Alice Van Smith",
+          attributes: { products: ["pump"] },
+          provenance: provenance(
+            "https://registry.example/company/alice-van-smith",
+            "registry/v2",
+          ),
+        },
+      ],
       [
         "registry",
         {
@@ -1644,11 +1762,12 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     );
 
     const result = runApplicationWriterFixture(databases.upgrade);
-    assert.equal(result.receipts.length, 4);
-    assert.equal(result.rows.length, 4);
+    assert.equal(result.receipts.length, 5);
+    assert.equal(result.rows.length, 5);
     assert.deepEqual(
       new Set(result.rows.map((row) => row.dispositionCode)),
       new Set([
+        null,
         "UNKNOWN_PAYLOAD_FIELD",
         "SOURCE_POLICY_SUSPENDED",
         "PAYLOAD_TOO_LARGE",
@@ -1656,6 +1775,11 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ]),
     );
     for (const row of result.rows) {
+      if (row.ingestStatus === "ACCEPTED") {
+        assert.equal(row.dispositionCode, null);
+        assert.equal(row.payload.name, "Alice Van Smith");
+        continue;
+      }
       assert.notEqual(row.ingestStatus, "ACCEPTED");
       assert.equal(row.ingestKey, `payload:${row.payloadHash}`);
       assert.equal(row.payload.reason, row.dispositionCode);
@@ -2441,6 +2565,27 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
       "true|true|true",
+    );
+  });
+
+  it("rolls back all 1600 provider parity and final historical corrections before COMMIT", () => {
+    assert.match(injectedFinalCorrectionRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.finalCorrectionRollback,
+        `SELECT concat_ws('|',
+          version::text,
+          (attributes #> '{digital_footprint,structured_org}' = '{}'::jsonb)::text,
+          (SELECT count(*) FROM field_evidence
+             WHERE entity_id='${COMPANY_A}'
+               AND value::text LIKE '%LLZ1%'),
+          raw_source_provider_payload_valid_v2(
+            'registry',
+            '{"externalId":"rollback-alice","name":"Alice Van Smith","attributes":{"products":["pump"]},"provenance":{"sourceUrl":"https://registry.example/company/rollback-alice","fetchedAt":"2026-08-26T00:00:00.000Z","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parserVersion":"registry/v2"}}'::jsonb
+          )::text
+        ) FROM canonical_company WHERE id='${COMPANY_A}';`,
+      ),
+      "2|true|2|false",
     );
   });
 });

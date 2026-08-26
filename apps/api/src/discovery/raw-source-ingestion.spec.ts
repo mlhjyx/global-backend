@@ -141,7 +141,12 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(changed.payloadHash).not.toBe(first.payloadHash);
   });
 
-  it.each(["Johnson Controls", "Parker Hannifin", "General Dynamics"])(
+  it.each([
+    "Johnson Controls",
+    "Parker Hannifin",
+    "General Dynamics",
+    "Alice Van Smith",
+  ])(
     "admits the provider-classified industrial company %s without a title-case person heuristic",
     (name) => {
       const row = prepareRawSourceBatch({

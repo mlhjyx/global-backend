@@ -10,8 +10,9 @@ const WORKSPACE_ID = "10000000-0000-4000-8000-000000000001";
 const RUN_ID = "20000000-0000-4000-8000-000000000001";
 const APPROVED_POLICY_ID = "a0000000-0000-4000-8000-000000000001";
 const SUSPENDED_POLICY_ID = "a0000000-0000-4000-8000-000000000003";
-const OBSERVED_AT = "2026-08-26T00:00:00.000Z";
-const NOW = new Date("2026-08-26T00:00:00.000Z");
+const NOW = new Date();
+const OBSERVED_AT = NOW.toISOString();
+const POLICY_UPDATED_AT = new Date(NOW.getTime() - 1_000);
 
 const approvedPolicy: RawSourcePolicySnapshot = {
   id: APPROVED_POLICY_ID,
@@ -19,7 +20,7 @@ const approvedPolicy: RawSourcePolicySnapshot = {
   retentionDays: 30,
   reviewStatus: "APPROVED",
   allowedPurpose: ["discovery"],
-  updatedAt: new Date("2026-08-25T00:00:00.000Z"),
+  updatedAt: POLICY_UPDATED_AT,
 };
 const suspendedPolicy: RawSourcePolicySnapshot = {
   id: SUSPENDED_POLICY_ID,
@@ -27,7 +28,7 @@ const suspendedPolicy: RawSourcePolicySnapshot = {
   retentionDays: 30,
   reviewStatus: "SUSPENDED",
   allowedPurpose: ["discovery"],
-  updatedAt: new Date("2026-08-25T00:00:00.000Z"),
+  updatedAt: POLICY_UPDATED_AT,
 };
 
 function registryRecord(
@@ -102,6 +103,16 @@ async function main(): Promise<void> {
       policies: [approvedPolicy],
       now: NOW,
     }).rows[0]!;
+    const providerClassifiedCompany = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [
+        registryRecord("app-flow-alice-van-smith", {
+          name: "Alice Van Smith",
+        }),
+      ],
+      policies: [approvedPolicy],
+      now: NOW,
+    }).rows[0]!;
 
     const persisted = await withWorkspace(database, async (tx) => {
       const receipts = [];
@@ -117,6 +128,16 @@ async function main(): Promise<void> {
           }),
         );
       }
+      receipts.push(
+        await persistPreparedRawSourceRecord(tx, {
+          workspaceId: WORKSPACE_ID,
+          runId: RUN_ID,
+          sourceEntityId: null,
+          providerKey: "registry",
+          sourceClass: "company_registry",
+          row: providerClassifiedCompany,
+        }),
+      );
       const originalReceipt = await persistPreparedRawSourceRecord(tx, {
         workspaceId: WORKSPACE_ID,
         runId: RUN_ID,

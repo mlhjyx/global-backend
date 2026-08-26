@@ -144,4 +144,48 @@ describe('company enrichment commit suppression boundary', () => {
     expect(JSON.stringify({ update: updateMany.mock.calls, evidence: create.mock.calls }))
       .not.toMatch(/Bearer secret|٥٥٥-٠١٠٠|SECRET/u);
   });
+
+  it('treats an enrichment hit with no governed fact as a truthful no-op', async () => {
+    const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
+    const create = vi.fn(async (_input: unknown) => ({}));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1',
+          name: 'Acme GmbH',
+          domain: 'acme.example',
+          status: 'NEW',
+          attributes: { products: ['pump'] },
+        })),
+        updateMany,
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      fieldEvidence: { create },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(commitCompanyEnrichmentResults(tx, {
+      workspaceId: 'ws-1',
+      companyId: 'co-1',
+      hits: [{
+        key: 'digital_footprint',
+        result: {
+          matched: true,
+          confidence: 0.9,
+          attributes: {
+            structured_org: {
+              contact_email: 'person@example.test',
+              credential: 'Bearer secret',
+              phone: '٥٥٥-٠١٠٠',
+            },
+          },
+          costCents: 0,
+        },
+      }],
+      status: 'ENRICHED',
+    })).resolves.toBe(false);
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
 });
