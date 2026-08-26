@@ -23,11 +23,9 @@ function issueCodes(result) {
 }
 
 function validate(policy, workflow) {
-  return validateRequiredContexts(
-    policy,
-    new Map([[workflowPath, workflow]]),
-    { codeowners: read(".github/CODEOWNERS") },
-  );
+  return validateRequiredContexts(policy, new Map([[workflowPath, workflow]]), {
+    codeowners: read(".github/CODEOWNERS"),
+  });
 }
 
 test("CodeQL init and analyze are atomically policy-bound to the v4.37.8 peeled commit", () => {
@@ -40,10 +38,18 @@ test("CodeQL init and analyze are atomically policy-bound to the v4.37.8 peeled 
 
   assert.deepEqual(
     pins,
-    actions.map((action) => ({ workflow: workflowPath, action, revision, version })),
+    actions.map((action) => ({
+      workflow: workflowPath,
+      action,
+      revision,
+      version,
+    })),
   );
   for (const action of actions) {
-    assert.match(workflow, new RegExp(`uses: ${action}@${revision} # ${version}`));
+    assert.match(
+      workflow,
+      new RegExp(`uses: ${action}@${revision} # ${version}`),
+    );
   }
 
   const stalePolicy = structuredClone(policy);
@@ -52,7 +58,9 @@ test("CodeQL init and analyze are atomically policy-bound to the v4.37.8 peeled 
       candidate.workflow === workflowPath && candidate.action === actions[0],
   ).revision = staleRevision;
   assert.ok(
-    issueCodes(validate(stalePolicy, workflow)).includes("WORKFLOW_ACTION_UNPINNED"),
+    issueCodes(validate(stalePolicy, workflow)).includes(
+      "WORKFLOW_ACTION_UNPINNED",
+    ),
   );
 
   const splitPins = workflow.replace(
@@ -60,7 +68,9 @@ test("CodeQL init and analyze are atomically policy-bound to the v4.37.8 peeled 
     `${actions[1]}@${staleRevision}`,
   );
   assert.ok(
-    issueCodes(validate(policy, splitPins)).includes("WORKFLOW_ACTION_UNPINNED"),
+    issueCodes(validate(policy, splitPins)).includes(
+      "WORKFLOW_ACTION_UNPINNED",
+    ),
   );
 
   const tagObjectPin = workflow.replace(
@@ -68,7 +78,9 @@ test("CodeQL init and analyze are atomically policy-bound to the v4.37.8 peeled 
     `${actions[0]}@${tagObject}`,
   );
   assert.ok(
-    issueCodes(validate(policy, tagObjectPin)).includes("WORKFLOW_ACTION_UNPINNED"),
+    issueCodes(validate(policy, tagObjectPin)).includes(
+      "WORKFLOW_ACTION_UNPINNED",
+    ),
   );
 
   const movingTag = workflow.replace(
@@ -76,6 +88,8 @@ test("CodeQL init and analyze are atomically policy-bound to the v4.37.8 peeled 
     `${actions[1]}@${version}`,
   );
   assert.ok(
-    issueCodes(validate(policy, movingTag)).includes("WORKFLOW_ACTION_UNPINNED"),
+    issueCodes(validate(policy, movingTag)).includes(
+      "WORKFLOW_ACTION_UNPINNED",
+    ),
   );
 });
