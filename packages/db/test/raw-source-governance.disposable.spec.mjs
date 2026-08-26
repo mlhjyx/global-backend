@@ -1,6 +1,7 @@
 // Test intent source-mined from tugjvnh@70885cdb; rewritten for current main.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -25,6 +26,7 @@ const schemaMigrationName = "20260826090000_raw_source_governance_schema";
 const backfillMigrationName = "20260826100000_raw_source_governance_backfill";
 const constraintsMigrationName =
   "20260826110000_raw_source_governance_constraints";
+const writerMigrationName = "20260826120000_raw_source_governance_writer";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -38,6 +40,11 @@ const backfillMigrationPath = resolve(
 const constraintsMigrationPath = resolve(
   migrationRoot,
   constraintsMigrationName,
+  "migration.sql",
+);
+const writerMigrationPath = resolve(
+  migrationRoot,
+  writerMigrationName,
   "migration.sql",
 );
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
@@ -63,6 +70,8 @@ const FETCH = "50000000-0000-4000-8000-000000000001";
 const SOURCE_ENTITY = "60000000-0000-4000-8000-000000000001";
 const COMPANY_A = "70000000-0000-4000-8000-000000000001";
 const LOCKED_RAW = "90000000-0000-4000-8000-000000000001";
+const POLICY_A = "a0000000-0000-4000-8000-000000000001";
+const POLICY_B = "a0000000-0000-4000-8000-000000000002";
 
 let baselineDirectory;
 let firstDeployOutput = "";
@@ -189,10 +198,85 @@ function asApp(workspaceId, sql) {
   `;
 }
 
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.entries(value)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    .join(",")}}`;
+}
+
+function writerCommand(overrides = {}) {
+  const fetchedAt = overrides.fetchedAt ?? new Date().toISOString();
+  const payload = overrides.payload ?? {
+    externalId: overrides.externalId ?? "writer-a",
+    name: "Writer A GmbH",
+    domain: "writer-a.example",
+    attributes: { products: ["pump"] },
+    provenance: {
+      sourceUrl: "https://registry.example/writer-a",
+      fetchedAt,
+      contentHash: "a".repeat(64),
+      parserVersion: "registry/v2",
+    },
+  };
+  const hashBasis = structuredClone(payload);
+  if (hashBasis.provenance) delete hashBasis.provenance.fetchedAt;
+  const canonical = canonicalJson(payload);
+  return {
+    schemaVersion: "raw-source-writer/v1",
+    recordId: overrides.recordId ?? "82000000-0000-4000-8000-000000000001",
+    workspaceId: overrides.workspaceId ?? WORKSPACE_A,
+    runId: overrides.runId === undefined ? RUN_A : overrides.runId,
+    sourceEntityId: overrides.sourceEntityId ?? null,
+    providerKey: overrides.providerKey ?? "registry",
+    sourceClass: overrides.sourceClass ?? "company_registry",
+    externalId: overrides.externalId ?? "writer-a",
+    payload,
+    sourceUrl: payload.provenance?.sourceUrl ?? null,
+    fetchedAt: payload.provenance?.fetchedAt ?? null,
+    contentHash: payload.provenance?.contentHash ?? null,
+    parserVersion: payload.provenance?.parserVersion ?? null,
+    ingestKey: overrides.ingestKey ?? `external:${"7".repeat(64)}`,
+    expectedPayloadHash:
+      overrides.expectedPayloadHash ??
+      createHash("sha256").update(canonicalJson(hashBasis)).digest("hex"),
+    expectedPayloadBytes:
+      overrides.expectedPayloadBytes ?? Buffer.byteLength(canonical, "utf8"),
+    ingestStatus: overrides.ingestStatus ?? "ACCEPTED",
+    dispositionCode: overrides.dispositionCode ?? null,
+    sourcePolicyId:
+      overrides.sourcePolicyId === undefined
+        ? POLICY_A
+        : overrides.sourcePolicyId,
+    retentionDays: overrides.retentionDays ?? 30,
+    costCents: overrides.costCents ?? 0,
+  };
+}
+
+function writerSql(command) {
+  const encoded = JSON.stringify(command).replaceAll("'", "''");
+  return `SELECT raw_record_id::text || '|' || payload_hash || '|' ||
+    payload_bytes::text || '|' || ingest_status || '|' || inserted::text
+    FROM write_raw_source_record_v2('${encoded}'::jsonb);`;
+}
+
 function seedCurrentMainClone(database = databases.upgrade) {
   dockerPsql(
     database,
     `
+    INSERT INTO data_provider(id,key,class,status,cost_per_call_cents,created_at)
+      VALUES (gen_random_uuid(),'registry','company_registry','ENABLED',0,now());
+    INSERT INTO source_policy(
+      id,domain,source_type,access_mode,robots_status,terms_status,
+      personal_data,allowed_purpose,crawl_delay_ms,retention_days,
+      review_status,owner,created_at,updated_at
+    ) VALUES (
+      '${POLICY_A}','registry.example','gov_registry','api','ALLOWS',
+      'REVIEWED_OK',false,'["discovery"]',0,30,'APPROVED','backend',now(),now()
+    );
     INSERT INTO workspace(id,name,created_at,updated_at) VALUES
       ('${WORKSPACE_A}','A',now(),now()),
       ('${WORKSPACE_B}','B',now(),now());
@@ -341,6 +425,11 @@ before(() => {
     true,
     `${constraintsMigrationName} must exist`,
   );
+  assert.equal(
+    existsSync(writerMigrationPath),
+    true,
+    `${writerMigrationName} must exist`,
+  );
   dockerPsql(
     "postgres",
     Object.values(databases)
@@ -400,25 +489,42 @@ before(() => {
   dockerPsql(
     databases.locks,
     `
+    INSERT INTO data_provider(id,key,class,status,cost_per_call_cents,created_at)
+      VALUES (gen_random_uuid(),'registry','company_registry','ENABLED',0,now());
+    INSERT INTO source_policy(
+      id,domain,source_type,access_mode,robots_status,terms_status,
+      personal_data,allowed_purpose,crawl_delay_ms,retention_days,
+      review_status,owner,created_at,updated_at
+    ) VALUES (
+      '${POLICY_A}','registry.example','gov_registry','api','ALLOWS',
+      'REVIEWED_OK',false,'["discovery"]',0,30,'APPROVED','backend',now(),now()
+    );
     INSERT INTO workspace(id,name,created_at,updated_at)
       VALUES ('${WORKSPACE_A}','Locks',now(),now());
     INSERT INTO discovery_run(id,workspace_id,plan_id,icp_id,status,created_at)
       VALUES ('${RUN_A}','${WORKSPACE_A}',gen_random_uuid(),gen_random_uuid(),'RUNNING',now());
     ${asApp(
       WORKSPACE_A,
-      `INSERT INTO raw_source_record(
-        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
-        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
-        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
-        disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
-      ) VALUES (
-        '${LOCKED_RAW}','${WORKSPACE_A}','${RUN_A}','registry','company_registry',
-        'locked-a','{"name":"Locked A","domain":"locked-a.example"}',
-        'https://registry.example/locked-a',now(),repeat('a',64),'registry/v2',0,now(),
-        'external:${"a".repeat(64)}',repeat('b',64),48,'raw-source/v2','ACCEPTED',
-        NULL,30,now()-interval '1 minute',NULL,
-        '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
-      );`,
+      writerSql(
+        writerCommand({
+          recordId: LOCKED_RAW,
+          externalId: "locked-a",
+          ingestKey: `external:${"a".repeat(64)}`,
+          fetchedAt: "2000-01-01T00:00:00.000Z",
+          payload: {
+            externalId: "locked-a",
+            name: "Locked A GmbH",
+            domain: "locked-a.example",
+            attributes: { products: ["pump"] },
+            provenance: {
+              sourceUrl: "https://registry.example/locked-a",
+              fetchedAt: "2000-01-01T00:00:00.000Z",
+              contentHash: "a".repeat(64),
+              parserVersion: "registry/v2",
+            },
+          },
+        }),
+      ),
     )}
   `,
   );
@@ -457,6 +563,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     assert.match(firstDeployOutput, new RegExp(schemaMigrationName, "u"));
     assert.match(firstDeployOutput, new RegExp(backfillMigrationName, "u"));
     assert.match(firstDeployOutput, new RegExp(constraintsMigrationName, "u"));
+    assert.match(firstDeployOutput, new RegExp(writerMigrationName, "u"));
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -464,12 +571,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         `
       SELECT count(*) FROM "_prisma_migrations"
       WHERE migration_name IN (
-        '${schemaMigrationName}','${backfillMigrationName}','${constraintsMigrationName}'
+        '${schemaMigrationName}','${backfillMigrationName}',
+        '${constraintsMigrationName}','${writerMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "3",
+      "4",
     );
   });
 
@@ -632,10 +740,22 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         'external:${"c".repeat(64)}',repeat('d',64),32,'raw-source/v1','ACCEPTED',
         30,now()+interval '30 days','{"kind":"source_policy","retentionDays":30,"minimizedFields":[]}'
       );`,
+      `INSERT INTO raw_source_record(
+        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
+        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
+        retention_days,expires_at,source_policy_snapshot
+      ) VALUES (
+        '81000000-0000-4000-8000-000000000004','${WORKSPACE_A}','${RUN_A}',
+        'registry','company_registry','forged-v2','{"name":"Forged V2"}',
+        'https://registry.example/forged-v2',now(),repeat('a',64),'registry/v2',0,now(),
+        'external:${"9".repeat(64)}',repeat('0',64),1,'raw-source/v2','ACCEPTED',
+        30,now()+interval '30 days','{"kind":"source_policy","id":"${POLICY_A}"}'
+      );`,
     ]) {
       dockerPsql(databases.upgrade, asApp(WORKSPACE_A, legacyInsert), {
         rejects:
-          /RAW_SOURCE_INSERT_V2_REQUIRED|raw-source\/v2|check constraint/u,
+          /RAW_SOURCE_INSERT_V2_REQUIRED|raw-source\/v2|check constraint|permission denied/u,
       });
     }
     assert.equal(
@@ -644,7 +764,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         `SELECT count(*) FROM raw_source_record
          WHERE id IN (
            '81000000-0000-4000-8000-000000000001',
-           '81000000-0000-4000-8000-000000000002'
+           '81000000-0000-4000-8000-000000000002',
+           '81000000-0000-4000-8000-000000000004'
          );`,
       ),
       "0",
@@ -653,19 +774,25 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       databases.upgrade,
       asApp(
         WORKSPACE_A,
-        `INSERT INTO raw_source_record(
-          id,workspace_id,run_id,provider_key,source_class,external_id,payload,
-          source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
-          ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
-          disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
-        ) VALUES (
-          '81000000-0000-4000-8000-000000000003','${WORKSPACE_A}','${RUN_A}',
-          'registry','company_registry','safe-a','{"name":"Safe A GmbH"}',
-          'https://registry.example/safe-a-v2',now(),repeat('a',64),'registry/v2',0,now(),
-          'external:${"7".repeat(64)}',repeat('8',64),24,'raw-source/v2','ACCEPTED',
-          NULL,30,now()+interval '30 days',NULL,
-          '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
-        );`,
+        writerSql(
+          writerCommand({
+            recordId: "81000000-0000-4000-8000-000000000003",
+            externalId: "safe-a",
+            ingestKey: `external:${"7".repeat(64)}`,
+            payload: {
+              externalId: "safe-a",
+              name: "Safe A GmbH",
+              domain: "safe-a.example",
+              attributes: { products: ["pump"] },
+              provenance: {
+                sourceUrl: "https://registry.example/safe-a-v2",
+                fetchedAt: "2026-08-26T00:00:00.000Z",
+                contentHash: "a".repeat(64),
+                parserVersion: "registry/v2",
+              },
+            },
+          }),
+        ),
       ),
     );
     assert.equal(
@@ -682,64 +809,67 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       databases.upgrade,
       asApp(
         WORKSPACE_A,
-        `
-      INSERT INTO raw_source_record(
-        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
-        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
-        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
-        disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
-      ) VALUES (
-        '80000000-0000-4000-8000-000000000001','${WORKSPACE_A}','${RUN_A}',
-        'registry','company_registry','new-a','{"name":"New A"}',
-        'https://registry.example/new-a',now(),repeat('e',64),'registry/v1',0,now(),
-        'external:${"e".repeat(64)}',repeat('f',64),16,'raw-source/v2','ACCEPTED',
-        NULL,30,now()-interval '1 minute',NULL,
-        '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
-      );
-    `,
+        writerSql(
+          writerCommand({
+            recordId: "80000000-0000-4000-8000-000000000001",
+            externalId: "new-a",
+            ingestKey: `external:${"e".repeat(64)}`,
+            payload: {
+              externalId: "new-a",
+              name: "New A GmbH",
+              domain: "new-a.example",
+              attributes: { products: ["pump"] },
+              provenance: {
+                sourceUrl: "https://registry.example/new-a",
+                fetchedAt: "2000-01-01T00:00:00.000Z",
+                contentHash: "e".repeat(64),
+                parserVersion: "registry/v2",
+              },
+            },
+          }),
+        ),
       ),
     );
     dockerPsql(
       databases.upgrade,
       asApp(
         WORKSPACE_A,
-        `
-      INSERT INTO raw_source_record(
-        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
-        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
-        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
-        disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
-      ) VALUES (
-        '80000000-0000-4000-8000-000000000003','${WORKSPACE_A}','${RUN_A}',
-        'registry','company_registry','future-a','{"name":"Future A"}',
-        'https://registry.example/future-a',now(),repeat('a',64),'registry/v2',0,now(),
-        'external:${"f".repeat(64)}',repeat('e',64),24,'raw-source/v2','ACCEPTED',
-        NULL,30,now()+interval '30 days',NULL,
-        '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
-      );
-    `,
+        writerSql(
+          writerCommand({
+            recordId: "80000000-0000-4000-8000-000000000003",
+            externalId: "future-a",
+            ingestKey: `external:${"f".repeat(64)}`,
+            payload: {
+              externalId: "future-a",
+              name: "Future A GmbH",
+              domain: "future-a.example",
+              attributes: { products: ["pump"] },
+              provenance: {
+                sourceUrl: "https://registry.example/future-a",
+                fetchedAt: new Date().toISOString(),
+                contentHash: "a".repeat(64),
+                parserVersion: "registry/v2",
+              },
+            },
+          }),
+        ),
       ),
     );
     dockerPsql(
       databases.upgrade,
       asApp(
         WORKSPACE_B,
-        `
-      INSERT INTO raw_source_record(
-        id,workspace_id,run_id,provider_key,source_class,external_id,payload,
-        source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
-        ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
-        retention_days,expires_at,source_policy_snapshot
-      ) VALUES (
-        '80000000-0000-4000-8000-000000000002','${WORKSPACE_B}','${RUN_A}',
-        'registry','company_registry','cross-run','{"name":"Cross"}',
-        'https://registry.example/cross',now(),repeat('e',64),'registry/v1',0,now(),
-        'external:${"d".repeat(64)}',repeat('c',64),16,'raw-source/v2','ACCEPTED',
-        30,now()+interval '30 days','{"kind":"source_policy","retentionDays":30,"minimizedFields":[]}'
-      );
-    `,
+        writerSql(
+          writerCommand({
+            recordId: "80000000-0000-4000-8000-000000000002",
+            workspaceId: WORKSPACE_B,
+            runId: RUN_A,
+            externalId: "cross-run",
+            ingestKey: `external:${"d".repeat(64)}`,
+          }),
+        ),
       ),
-      { rejects: /raw_source_record_workspace_run_fkey|foreign key/u },
+      { rejects: /RAW_SOURCE_WRITER_RUN_BINDING_INVALID|foreign key/u },
     );
     assert.equal(
       dockerPsql(
@@ -752,6 +882,112 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       `${WORKSPACE_A}\n${WORKSPACE_A}`,
     );
+  });
+
+  it("admits only the direct app principal through the canonical writer and derives immutable receipt facts", () => {
+    const valid = writerCommand({
+      recordId: "83000000-0000-4000-8000-000000000001",
+      externalId: "writer-valid",
+      ingestKey: `external:${"3".repeat(64)}`,
+    });
+    assert.equal(
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(valid))),
+      `${WORKSPACE_A}\n${valid.recordId}|${valid.expectedPayloadHash}|${valid.expectedPayloadBytes}|ACCEPTED|true`,
+    );
+    assert.equal(
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(valid))),
+      `${WORKSPACE_A}\n${valid.recordId}|${valid.expectedPayloadHash}|${valid.expectedPayloadBytes}|ACCEPTED|false`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',
+           (payload_hash = '${valid.expectedPayloadHash}')::text,
+           (payload_bytes = ${valid.expectedPayloadBytes})::text,
+           source_policy_snapshot->>'id',
+           source_policy_snapshot->>'domain',
+           source_policy_snapshot->>'retentionDays'
+         ) FROM raw_source_record WHERE id='${valid.recordId}';`,
+      ),
+      `true|true|${POLICY_A}|registry.example|30`,
+    );
+
+    dockerPsql(
+      databases.upgrade,
+      `INSERT INTO source_policy(
+        id,domain,source_type,access_mode,robots_status,terms_status,
+        personal_data,allowed_purpose,crawl_delay_ms,retention_days,
+        review_status,owner,created_at,updated_at
+      ) VALUES (
+        '${POLICY_B}','other.example','gov_registry','api','ALLOWS',
+        'REVIEWED_OK',false,'["discovery"]',0,30,'APPROVED','backend',now(),now()
+      );`,
+    );
+
+    const mismatches = [
+      [
+        writerCommand({
+          recordId: "83000000-0000-4000-8000-000000000002",
+          ingestKey: `external:${"4".repeat(64)}`,
+          expectedPayloadHash: "0".repeat(64),
+        }),
+        /RAW_SOURCE_WRITER_HASH_MISMATCH/u,
+      ],
+      [
+        writerCommand({
+          recordId: "83000000-0000-4000-8000-000000000003",
+          ingestKey: `external:${"5".repeat(64)}`,
+          expectedPayloadBytes: 1,
+        }),
+        /RAW_SOURCE_WRITER_BYTES_MISMATCH/u,
+      ],
+      [
+        writerCommand({
+          recordId: "83000000-0000-4000-8000-000000000004",
+          ingestKey: `external:${"6".repeat(64)}`,
+          sourcePolicyId: POLICY_B,
+        }),
+        /RAW_SOURCE_WRITER_POLICY_BINDING_INVALID/u,
+      ],
+      [
+        writerCommand({
+          recordId: "83000000-0000-4000-8000-000000000005",
+          ingestKey: `external:${"8".repeat(64)}`,
+          providerKey: "missing-provider",
+        }),
+        /RAW_SOURCE_WRITER_PROVIDER_BINDING_INVALID/u,
+      ],
+    ];
+    for (const [command, rejects] of mismatches) {
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(command)), {
+        rejects,
+      });
+    }
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM raw_source_record
+         WHERE id IN (
+           '83000000-0000-4000-8000-000000000002',
+           '83000000-0000-4000-8000-000000000003',
+           '83000000-0000-4000-8000-000000000004',
+           '83000000-0000-4000-8000-000000000005'
+         );`,
+      ),
+      "0",
+    );
+
+    for (const deniedInvocation of [
+      writerSql(valid),
+      `SET SESSION AUTHORIZATION app_user; ${writerSql(valid)}`,
+      `SET ROLE app_user;
+       SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',false);
+       ${writerSql(valid)}`,
+    ]) {
+      dockerPsql(databases.upgrade, deniedInvocation, {
+        rejects: /RAW_SOURCE_WRITER_DENIED|permission denied/u,
+      });
+    }
   });
 
   it("prevents provenance rewrites and physical delete while allowing one-way minimal expiry", () => {
@@ -963,13 +1199,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           databases.locks,
           asApp(
             WORKSPACE_A,
-            `SELECT expired || '|' || deferred_for_conflict
+            `SELECT expired || '|' || deferred_for_conflict || '|' || has_more
              FROM expire_due_raw_source_records_v1(
                '${WORKSPACE_A}'::uuid,1,NULL
              );`,
           ),
         ),
-        `${WORKSPACE_A}\n0|1`,
+        `${WORKSPACE_A}\n0|1|true`,
       );
     } finally {
       await lock.release();
@@ -980,13 +1216,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.locks,
         asApp(
           WORKSPACE_A,
-          `SELECT expired || '|' || deferred_for_conflict
+          `SELECT expired || '|' || deferred_for_conflict || '|' || has_more
            FROM expire_due_raw_source_records_v1(
              '${WORKSPACE_A}'::uuid,1,NULL
            );`,
         ),
       ),
-      `${WORKSPACE_A}\n1|0`,
+      `${WORKSPACE_A}\n1|0|false`,
     );
     assert.equal(
       dockerPsql(

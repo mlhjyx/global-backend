@@ -73,33 +73,46 @@ function projectionHarness(
       create: vi.fn(),
     },
     rawSourceRecord: {
-      upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
-        id: 'raw-bridge',
-        payloadHash: create.payloadHash,
-        ingestStatus: create.ingestStatus,
-      })),
+      upsert: vi.fn(
+        async ({ create }: { create: Record<string, unknown> }) => ({
+          id: 'raw-bridge',
+          payloadHash: create.payloadHash,
+          ingestStatus: create.ingestStatus,
+        }),
+      ),
     },
     fieldEvidence: { create: vi.fn() },
   };
   const prisma = {
     monitoredSource: { findUnique: vi.fn(async () => source) },
     sourceEntity: { findMany: vi.fn(async () => entities) },
-    sourceFetch: { findMany: vi.fn(async () => [{
-      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-      sourceId: source.id,
-      status: 'DONE',
-      parserVersion: 'acquisition/v1',
-      finishedAt: new Date('2026-08-25T16:31:00.000Z'),
-    }]) },
-    sourcePolicy: { findMany: vi.fn(async () => [{
-      id: 'policy-1',
-      domain: 'mapyourshow.com',
-      retentionDays: 365,
-      reviewStatus: 'APPROVED',
-      allowedPurpose: ['discovery'],
-      updatedAt: new Date('2026-08-20T00:00:00.000Z'),
-    }]) },
-    withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
+    sourceFetch: {
+      findMany: vi.fn(async () => [
+        {
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          sourceId: source.id,
+          status: 'DONE',
+          parserVersion: 'acquisition/v1',
+          finishedAt: new Date('2026-08-25T16:31:00.000Z'),
+        },
+      ]),
+    },
+    sourcePolicy: {
+      findMany: vi.fn(async () => [
+        {
+          id: 'policy-1',
+          domain: 'mapyourshow.com',
+          retentionDays: 365,
+          reviewStatus: 'APPROVED',
+          allowedPurpose: ['discovery'],
+          updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+        },
+      ]),
+    },
+    withWorkspace: vi.fn(
+      async (_workspaceId: string, callback: (client: typeof tx) => unknown) =>
+        callback(tx),
+    ),
   };
   return {
     service: new TenantProjectionService({ prisma: prisma as never }),
@@ -111,9 +124,15 @@ function projectionHarness(
 
 describe('TenantProjectionService — suppression-aware role mailbox projection', () => {
   it('does not rematerialize an already suppressed exact role mailbox', async () => {
-    const harness = projectionHarness([entity(1)], [[{ type: 'email', value: ' Sales@EXAMPLE.COM ' }]]);
+    const harness = projectionHarness(
+      [entity(1)],
+      [[{ type: 'email', value: ' Sales@EXAMPLE.COM ' }]],
+    );
 
-    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.creates).toHaveLength(1);
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
@@ -125,7 +144,10 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       [[{ type: 'domain', value: 'agency.example' }]],
     );
 
-    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.creates).toHaveLength(1);
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
@@ -144,28 +166,68 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       },
     );
 
-    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.updates).toHaveLength(1);
     expect(harness.updates[0].attributes).not.toHaveProperty('contact_email');
     expect(harness.updates[0].attributes).toHaveProperty('products', ['pump']);
   });
 
+  it('always removes an unsuppressed prior mailbox and unsafe legacy Raw-derived attributes', async () => {
+    const harness = projectionHarness([entity(1)], [[]], {
+      id: 'company-existing',
+      attributes: {
+        contact_email: 'sales@example.com',
+        extraction_evidence: 'Contact alice van smith at 555-0100',
+        description: 'unbounded prose',
+        public_phone: '555-0100',
+        products: ['pump', 'alice van smith pump'],
+        gleif: { lei: '529900T8BM49AURSDO55' },
+      },
+    });
+
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
+
+    expect(harness.updates).toHaveLength(1);
+    expect(harness.updates[0].attributes).toEqual({
+      products: ['pump'],
+      gleif: { lei: '529900T8BM49AURSDO55' },
+    });
+  });
+
   it('refreshes suppression facts for each chunk so a later fact blocks later projection', async () => {
     const entities = Array.from({ length: 101 }, (_, index) =>
       entity(index + 1, index === 100 ? 'blocked@example.com' : undefined),
     );
-    const harness = projectionHarness(entities, [[], [{ type: 'email', value: 'blocked@example.com' }]]);
+    const harness = projectionHarness(entities, [
+      [],
+      [{ type: 'email', value: 'blocked@example.com' }],
+    ]);
 
-    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.suppressionRecord.findMany).toHaveBeenCalledTimes(2);
     expect(harness.creates).toHaveLength(101);
-    expect(harness.creates.at(-1)?.attributes).not.toHaveProperty('contact_email');
+    expect(harness.creates.at(-1)?.attributes).not.toHaveProperty(
+      'contact_email',
+    );
   });
 
   it('repairs and stops when an existing canonical identity matches company suppression', async () => {
-    const incoming = { ...entity(1), name: 'Source Listing GmbH', domain: null };
+    const incoming = {
+      ...entity(1),
+      name: 'Source Listing GmbH',
+      domain: null,
+    };
     const harness = projectionHarness(
       [incoming],
       [[{ type: 'domain', value: 'blocked.example' }]],
@@ -174,7 +236,10 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
         name: 'Existing Legal Entity GmbH',
         domain: 'https://www.blocked.example/about',
         status: 'NEW',
-        attributes: { products: ['pump'], contact_email: 'sales@blocked.example' },
+        attributes: {
+          products: ['pump'],
+          contact_email: 'sales@blocked.example',
+        },
       },
     );
 

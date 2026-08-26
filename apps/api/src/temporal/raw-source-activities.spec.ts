@@ -142,16 +142,29 @@ describe("Raw Source retention activities", () => {
 describe("executeQuery Raw Source v2 persistence", () => {
   it("persists only accepted bounded receipts and reports minimized/quarantined records explicitly", async () => {
     const created: Record<string, unknown>[] = [];
+    const writer = vi.fn(async (statement: { values: readonly unknown[] }) => {
+      const command = JSON.parse(String(statement.values[0])) as Record<
+        string,
+        unknown
+      >;
+      created.push(command);
+      return [
+        {
+          raw_record_id: `raw-${created.length}`,
+          payload_hash: command.expectedPayloadHash,
+          payload_bytes: command.expectedPayloadBytes,
+          ingest_status: command.ingestStatus,
+          inserted: true,
+        },
+      ];
+    });
+    const directCreateMany = vi.fn(async () => ({ count: 0 }));
     const tx = {
       $executeRaw: vi.fn(async () => 1),
+      $queryRaw: writer,
       rawSourceRecord: {
         findMany: vi.fn(async () => []),
-        createMany: vi.fn(
-          async ({ data }: { data: Record<string, unknown>[] }) => {
-            created.push(...data);
-            return { count: data.length };
-          },
-        ),
+        createMany: directCreateMany,
         count: vi.fn(
           async ({ where }: { where: { ingestStatus?: string } }) =>
             created.filter(
@@ -271,9 +284,18 @@ describe("executeQuery Raw Source v2 persistence", () => {
       rejectedCount: 1,
     });
     expect(created).toHaveLength(2);
+    expect(directCreateMany).not.toHaveBeenCalled();
+    expect(writer).toHaveBeenCalledTimes(2);
+    for (const [statement] of writer.mock.calls) {
+      expect(statement.strings.join("?")).toContain(
+        "write_raw_source_record_v2",
+      );
+      expect(statement.values).toHaveLength(1);
+    }
     expect(created[0]).toMatchObject({
-      ingestVersion: "raw-source/v2",
       ingestStatus: "ACCEPTED",
+      expectedPayloadHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      expectedPayloadBytes: expect.any(Number),
     });
     expect(created[1]).toMatchObject({
       ingestStatus: "REJECTED",

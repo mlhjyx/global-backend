@@ -140,6 +140,24 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(changed.payloadHash).not.toBe(first.payloadHash);
   });
 
+  it.each(["Johnson Controls", "Parker Hannifin", "General Dynamics"])(
+    "admits the provider-classified industrial company %s without a title-case person heuristic",
+    (name) => {
+      const row = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      expect(row).toMatchObject({
+        ingestStatus: "ACCEPTED",
+        dispositionCode: null,
+        payload: expect.objectContaining({ name }),
+      });
+    },
+  );
+
   it("rejects an attribute outside the provider schema and an ungoverned provider", () => {
     const bounded = prepareRawSourceBatch({
       providerKey: "registry",
@@ -359,9 +377,30 @@ describe("Raw Source v2 ingestion boundary", () => {
       companyRecord({ attributes: { products: ["Bearer sk-secret-value"] } }),
     ],
     [
-      "personal name as company name",
-      "registry",
-      companyRecord({ name: "Jane Doe" }),
+      "common local phone in an allowed product value",
+      "public_web",
+      companyRecord({
+        attributes: {
+          products: ["Call 555-0100"],
+          keywords: ["industrial"],
+          extraction_confidence: 0.9,
+          extraction_evidence_digest: "b".repeat(64),
+          source_class: "public_intelligence",
+        },
+      }),
+    ],
+    [
+      "lowercase particle personal name in an allowed product value",
+      "public_web",
+      companyRecord({
+        attributes: {
+          products: ["alice van smith pump"],
+          keywords: ["industrial"],
+          extraction_confidence: 0.9,
+          extraction_evidence_digest: "b".repeat(64),
+          source_class: "public_intelligence",
+        },
+      }),
     ],
     [
       "email-shaped domain",
@@ -411,6 +450,36 @@ describe("Raw Source v2 ingestion boundary", () => {
         provenance: {
           ...companyRecord().provenance,
           sourceUrl: "https://registry.example/company/1#person",
+        },
+      }),
+    ],
+    [
+      "double-encoded email URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/person%2540example.test",
+        },
+      }),
+    ],
+    [
+      "multi-encoded credential URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/api%25255Fkey%25253Dsecret",
+        },
+      }),
+    ],
+    [
+      "residual percent-25 URL",
+      "registry",
+      companyRecord({
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/value%2525252525",
         },
       }),
     ],

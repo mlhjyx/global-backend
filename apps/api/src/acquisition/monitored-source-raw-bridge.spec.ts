@@ -195,7 +195,7 @@ describe("monitored source to Raw Source bridge", () => {
     );
   });
 
-  it("uses one compound upsert and rejects an existing receipt with drift", async () => {
+  it("uses only the parameterized controlled DB writer and rejects a drifted readback", async () => {
     const prepared = prepareMonitoredSourceRawBridge({
       workspaceId: WORKSPACE_A,
       source,
@@ -203,42 +203,59 @@ describe("monitored source to Raw Source bridge", () => {
       fetch,
       policies,
     });
-    const upsert = vi.fn(async ({ create }) => ({
-      id: "raw-1",
-      payloadHash: create.payloadHash,
-      ingestStatus: create.ingestStatus,
-    }));
+    const query = vi.fn(async () => [
+      {
+        raw_record_id: "raw-1",
+        payload_hash: prepared.row.payloadHash,
+        payload_bytes: prepared.row.payloadBytes,
+        ingest_status: prepared.row.ingestStatus,
+        inserted: true,
+      },
+    ]);
 
     await expect(
-      persistMonitoredSourceRawBridge(
-        { rawSourceRecord: { upsert } } as never,
-        { workspaceId: WORKSPACE_A, prepared },
-      ),
-    ).resolves.toMatchObject({ id: "raw-1", ingestStatus: "ACCEPTED" });
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { workspaceId_sourceEntityId_ingestKey: prepared.uniqueWhere },
-        update: {},
+      persistMonitoredSourceRawBridge({ $queryRaw: query } as never, {
+        workspaceId: WORKSPACE_A,
+        prepared,
       }),
-    );
-
-    upsert.mockResolvedValueOnce({
-      id: "raw-1",
-      payloadHash: "b".repeat(64),
-      ingestStatus: "ACCEPTED",
+    ).resolves.toMatchObject({ id: "raw-1", ingestStatus: "ACCEPTED" });
+    expect(query).toHaveBeenCalledOnce();
+    const statement = query.mock.calls[0]?.[0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(statement.strings.join("?")).toContain("write_raw_source_record_v2");
+    expect(statement.values).toHaveLength(1);
+    expect(JSON.parse(String(statement.values[0]))).toMatchObject({
+      workspaceId: WORKSPACE_A,
+      runId: null,
+      sourceEntityId: entity.id,
+      providerKey: "trade_fair",
+      expectedPayloadHash: prepared.row.payloadHash,
+      expectedPayloadBytes: prepared.row.payloadBytes,
     });
+
+    query.mockResolvedValueOnce([
+      {
+        raw_record_id: "raw-1",
+        payload_hash: "b".repeat(64),
+        payload_bytes: prepared.row.payloadBytes,
+        ingest_status: "ACCEPTED",
+        inserted: false,
+      },
+    ]);
     await expect(
-      persistMonitoredSourceRawBridge(
-        { rawSourceRecord: { upsert } } as never,
-        { workspaceId: WORKSPACE_A, prepared },
-      ),
+      persistMonitoredSourceRawBridge({ $queryRaw: query } as never, {
+        workspaceId: WORKSPACE_A,
+        prepared,
+      }),
     ).rejects.toMatchObject({ code: "MONITORED_SOURCE_RAW_DRIFT" });
 
     await expect(
-      persistMonitoredSourceRawBridge(
-        { rawSourceRecord: { upsert } } as never,
-        { workspaceId: WORKSPACE_B, prepared },
-      ),
+      persistMonitoredSourceRawBridge({ $queryRaw: query } as never, {
+        workspaceId: WORKSPACE_B,
+        prepared,
+      }),
     ).rejects.toMatchObject({ code: "MONITORED_SOURCE_WORKSPACE_MISMATCH" });
   });
 
