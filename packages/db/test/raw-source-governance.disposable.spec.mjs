@@ -31,6 +31,8 @@ const writerHardeningMigrationName =
   "20260826130000_raw_source_governance_writer_hardening";
 const historicalCleanupMigrationName =
   "20260826140000_raw_source_governance_historical_cleanup";
+const statusHardeningMigrationName =
+  "20260826150000_raw_source_governance_status_hardening";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -61,6 +63,11 @@ const historicalCleanupMigrationPath = resolve(
   historicalCleanupMigrationName,
   "migration.sql",
 );
+const statusHardeningMigrationPath = resolve(
+  migrationRoot,
+  statusHardeningMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -72,6 +79,7 @@ const databases = Object.freeze({
   writerRollback: "task6a_raw_writer_rollback",
   writerHardeningRollback: "task6a_raw_writer_hardening_rollback",
   historicalCleanupRollback: "task6a_raw_history_cleanup_rollback",
+  statusHardeningRollback: "task6a_raw_status_hardening_rollback",
   locks: "task6a_raw_locks",
 });
 
@@ -99,6 +107,7 @@ let injectedBackfillRollbackOutput = "";
 let injectedWriterRollbackOutput = "";
 let injectedWriterHardeningRollbackOutput = "";
 let injectedHistoricalCleanupRollbackOutput = "";
+let injectedStatusHardeningRollbackOutput = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -108,6 +117,38 @@ function requireTopology() {
 function ownerUrl(database) {
   requireTopology();
   return `postgresql://global:global@127.0.0.1:${port}/${database}?schema=public`;
+}
+
+function appUrl(database) {
+  requireTopology();
+  const localTestPassword = ["app", "pw"].join("_");
+  return `postgresql://app_user:${localTestPassword}@127.0.0.1:${port}/${database}?schema=public`;
+}
+
+function runApplicationWriterFixture(database) {
+  const result = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "@global/api",
+      "exec",
+      "tsx",
+      "test/fixtures/raw-source-app-writer.disposable.ts",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: { ...process.env, DATABASE_URL: appUrl(database) },
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const line = result.stdout
+    .trim()
+    .split("\n")
+    .findLast((entry) => entry.startsWith("{"));
+  assert.ok(line, result.stdout);
+  return JSON.parse(line);
 }
 
 function dockerPsql(database, sql, options = {}) {
@@ -309,6 +350,37 @@ function writerCommand(overrides = {}) {
   };
 }
 
+function nonAcceptedWriterCommand({
+  recordId,
+  status,
+  reason,
+  originalPayloadHash = "a".repeat(64),
+  originalPayloadBytes = 512,
+  conflictWithRawId,
+  payloadOverrides = {},
+}) {
+  const payload = {
+    _rawReceipt:
+      status === "REJECTED"
+        ? "raw-source/rejected/v1"
+        : "raw-source/quarantine/v1",
+    reason,
+    originalPayloadHash,
+    originalPayloadBytes,
+    ...(conflictWithRawId === undefined ? {} : { conflictWithRawId }),
+    ...payloadOverrides,
+  };
+  return writerCommand({
+    recordId,
+    payload,
+    commandExternalId: null,
+    ingestKey: `payload:${sha256(canonicalJson(payload))}`,
+    ingestStatus: status,
+    dispositionCode: reason,
+    sourcePolicyId: null,
+  });
+}
+
 function writerSql(command) {
   const encoded = JSON.stringify(command).replaceAll("'", "''");
   return `SELECT raw_record_id::text || '|' || payload_hash || '|' ||
@@ -354,7 +426,7 @@ function seedCurrentMainClone(database = databases.upgrade) {
     ) VALUES (
       '${COMPANY_A}','${WORKSPACE_A}','Unsafe A',NULL,
       '{
-        "products":["pump","person@example.test"],
+        "products":["pump","LLZ","SECRET","person@example.test"],
         "gleif":{"lei":"529900SAFEENTITY001","legal_name":"Parker Hannifin"},
         "contact_email":"person@example.test",
         "owner_name":"alice van smith",
@@ -516,6 +588,11 @@ before(() => {
     true,
     `${historicalCleanupMigrationName} must exist`,
   );
+  assert.equal(
+    existsSync(statusHardeningMigrationPath),
+    true,
+    `${statusHardeningMigrationName} must exist`,
+  );
   dockerPsql(
     "postgres",
     Object.values(databases)
@@ -635,6 +712,31 @@ before(() => {
     { rejects: /division by zero/u },
   );
 
+  migrateDeploy(databases.statusHardeningRollback, baseline.schemaPath);
+  seedCurrentMainClone(databases.statusHardeningRollback);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.statusHardeningRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedStatusHardening = readFileSync(
+    statusHardeningMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedStatusHardeningRollbackOutput = dockerPsql(
+    databases.statusHardeningRollback,
+    injectedStatusHardening,
+    { rejects: /division by zero/u },
+  );
+
   migrateDeploy(databases.locks);
   dockerPsql(
     databases.locks,
@@ -721,6 +823,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       firstDeployOutput,
       new RegExp(historicalCleanupMigrationName, "u"),
     );
+    assert.match(
+      firstDeployOutput,
+      new RegExp(statusHardeningMigrationName, "u"),
+    );
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -730,12 +836,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       WHERE migration_name IN (
         '${schemaMigrationName}','${backfillMigrationName}',
         '${constraintsMigrationName}','${writerMigrationName}',
-        '${writerHardeningMigrationName}','${historicalCleanupMigrationName}'
+        '${writerHardeningMigrationName}','${historicalCleanupMigrationName}',
+        '${statusHardeningMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "6",
+      "7",
     );
   });
 
@@ -815,7 +922,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           lei: "529900SAFEENTITY001",
           legal_name: "Parker Hannifin",
         },
-        products: ["pump"],
+        products: ["pump", "LLZ"],
       },
     );
     assert.equal(
@@ -1050,6 +1157,118 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         providerKey,
       );
     }
+  });
+
+  it("rejects Unicode phones, secret-shaped FDA codes, booleans, and present JSON null across PostgreSQL provider scalars", () => {
+    const registryBase = {
+      externalId: "registry-types",
+      name: "Parker Hannifin",
+      country: "US",
+      attributes: { products: ["pump"], employee_band: "50-100" },
+      license: "public",
+      provenance: {
+        sourceUrl: "https://registry.example/company/types",
+        fetchedAt: "2026-08-26T00:00:00.000Z",
+        contentHash: "a".repeat(64),
+        parserVersion: "registry/v2",
+      },
+    };
+    const openFdaBase = {
+      externalId: "openfda:3004512345",
+      name: "Parker Hannifin",
+      country: "US",
+      identifier: { scheme: "fda-reg", value: "3004512345" },
+      attributes: {
+        fda: {
+          registration_number: "3004512345",
+          fei_number: "3004512345",
+          status_code: "1",
+          state_code: "OH",
+          product_codes: ["LLZ"],
+        },
+        products: ["LLZ"],
+      },
+      license: "CC0-1.0",
+      provenance: {
+        sourceUrl: "https://api.fda.gov/device/registrationlisting.json",
+        fetchedAt: "2026-08-26T00:00:00.000Z",
+        contentHash: "a".repeat(64),
+        parserVersion: "openfda/v1",
+      },
+    };
+    const hostile = [
+      ["registry", { ...registryBase, name: true }],
+      ["registry", { ...registryBase, country: null }],
+      ["registry", { ...registryBase, license: null }],
+      [
+        "registry",
+        { ...registryBase, attributes: { ...registryBase.attributes, employee_band: null } },
+      ],
+      [
+        "registry",
+        {
+          ...registryBase,
+          name: "Acme ٥٥٥-٠١٠٠",
+        },
+      ],
+      [
+        "registry",
+        {
+          ...registryBase,
+          provenance: {
+            ...registryBase.provenance,
+            sourceUrl: "https://registry.example/company/٥٥٥-٠١٠٠",
+          },
+        },
+      ],
+      [
+        "openfda",
+        {
+          ...openFdaBase,
+          attributes: {
+            ...openFdaBase.attributes,
+            fda: { ...openFdaBase.attributes.fda, fei_number: null },
+          },
+        },
+      ],
+      ...["SECRET", "LLZ1", "AB"].map((productCode) => [
+        "openfda",
+        {
+          ...openFdaBase,
+          attributes: {
+            fda: {
+              ...openFdaBase.attributes.fda,
+              product_codes: [productCode],
+            },
+            products: [productCode],
+          },
+        },
+      ]),
+    ];
+    for (const [providerKey, payload] of hostile) {
+      const encoded = JSON.stringify(payload).replaceAll("'", "''");
+      assert.equal(
+        dockerPsql(
+          databases.upgrade,
+          `SELECT raw_source_provider_payload_valid_v2(
+             '${providerKey}','${encoded}'::jsonb
+           );`,
+        ),
+        "f",
+        `${providerKey}:${encoded.slice(0, 120)}`,
+      );
+    }
+    assert.deepEqual(
+      JSON.parse(
+        dockerPsql(
+          databases.upgrade,
+          `SELECT sanitize_canonical_company_attributes_v2(
+            '{"products":["pump","LLZ","SECRET","LLZ1","AB"]}'::jsonb
+          )::text;`,
+        ),
+      ),
+      { products: ["pump", "LLZ"] },
+    );
   });
 
   it("stores an immutable historical restriction with the exact Raw provenance snapshot", () => {
@@ -1310,6 +1529,16 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(valid))),
       `${WORKSPACE_A}\n${valid.recordId}|${firstHash}|${firstBytes}|ACCEPTED|false`,
     );
+    const timeoutScope = dockerPsql(
+      databases.upgrade,
+      asApp(
+        WORKSPACE_A,
+        `SET LOCAL statement_timeout='23s';
+         ${writerSql(valid)}
+         SELECT current_setting('statement_timeout');`,
+      ),
+    );
+    assert.equal(timeoutScope.split("\n").at(-1), "23s");
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -1394,6 +1623,141 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
        ${writerSql(valid)}`,
     ]) {
       dockerPsql(databases.upgrade, deniedInvocation, {
+        rejects: /RAW_SOURCE_WRITER_DENIED|permission denied/u,
+      });
+    }
+  });
+
+  it("persists real application-prepared rejected, quarantined, oversize, and drift receipts through the actual writer", () => {
+    const suspendedPolicy = "a0000000-0000-4000-8000-000000000003";
+    dockerPsql(
+      databases.upgrade,
+      `INSERT INTO source_policy(
+        id,domain,source_type,access_mode,robots_status,terms_status,
+        personal_data,allowed_purpose,crawl_delay_ms,retention_days,
+        review_status,owner,created_at,updated_at
+      ) VALUES (
+        '${suspendedPolicy}','suspended.example','gov_registry','api','ALLOWS',
+        'REVIEWED_OK',false,'["discovery"]',0,30,'SUSPENDED','backend',
+        '2026-08-25T00:00:00.000Z','2026-08-25T00:00:00.000Z'
+      );`,
+    );
+
+    const result = runApplicationWriterFixture(databases.upgrade);
+    assert.equal(result.receipts.length, 4);
+    assert.equal(result.rows.length, 4);
+    assert.deepEqual(
+      new Set(result.rows.map((row) => row.dispositionCode)),
+      new Set([
+        "UNKNOWN_PAYLOAD_FIELD",
+        "SOURCE_POLICY_SUSPENDED",
+        "PAYLOAD_TOO_LARGE",
+        "PROCESSING_KEY_DRIFT",
+      ]),
+    );
+    for (const row of result.rows) {
+      assert.notEqual(row.ingestStatus, "ACCEPTED");
+      assert.equal(row.ingestKey, `payload:${row.payloadHash}`);
+      assert.equal(row.payload.reason, row.dispositionCode);
+      assert.match(row.payload.originalPayloadHash, /^[0-9a-f]{64}$/u);
+      assert.ok(Number.isSafeInteger(row.payload.originalPayloadBytes));
+      assert.ok(row.payload.originalPayloadBytes >= 0);
+      const expectedKeys = [
+        "_rawReceipt",
+        "originalPayloadBytes",
+        "originalPayloadHash",
+        "reason",
+        ...(row.dispositionCode === "PROCESSING_KEY_DRIFT"
+          ? ["conflictWithRawId"]
+          : []),
+      ].sort();
+      assert.deepEqual(Object.keys(row.payload).sort(), expectedKeys);
+    }
+  });
+
+  it("accepts only exact closed non-ACCEPTED receipts and denies them for owner, unset app, and SET ROLE", () => {
+    const validRejected = nonAcceptedWriterCommand({
+      recordId: "83500000-0000-4000-8000-000000000001",
+      status: "REJECTED",
+      reason: "UNKNOWN_PAYLOAD_FIELD",
+    });
+    const validQuarantined = nonAcceptedWriterCommand({
+      recordId: "83500000-0000-4000-8000-000000000002",
+      status: "QUARANTINED",
+      reason: "PROCESSING_KEY_DRIFT",
+      conflictWithRawId: "83000000-0000-4000-8000-000000000001",
+    });
+    for (const command of [validRejected, validQuarantined]) {
+      const receipt = dockerPsql(
+        databases.upgrade,
+        asApp(WORKSPACE_A, writerSql(command)),
+      )
+        .split("\n")
+        .at(-1);
+      assert.match(receipt, /\|(REJECTED|QUARANTINED)\|true$/u);
+    }
+
+    const hostile = [
+      nonAcceptedWriterCommand({
+        recordId: "83500000-0000-4000-8000-000000000003",
+        status: "REJECTED",
+        reason: "UNKNOWN_PAYLOAD_FIELD",
+        payloadOverrides: { email: "person@example.test" },
+      }),
+      nonAcceptedWriterCommand({
+        recordId: "83500000-0000-4000-8000-000000000004",
+        status: "REJECTED",
+        reason: "ARBITRARY_REASON",
+      }),
+      nonAcceptedWriterCommand({
+        recordId: "83500000-0000-4000-8000-000000000005",
+        status: "QUARANTINED",
+        reason: "SOURCE_POLICY_MISSING",
+        conflictWithRawId: "person@example.test",
+      }),
+      nonAcceptedWriterCommand({
+        recordId: "83500000-0000-4000-8000-000000000006",
+        status: "REJECTED",
+        reason: "UNKNOWN_PAYLOAD_FIELD",
+        originalPayloadHash: "SECRET",
+      }),
+      nonAcceptedWriterCommand({
+        recordId: "83500000-0000-4000-8000-000000000007",
+        status: "QUARANTINED",
+        reason: "PAYLOAD_TOO_LARGE",
+        originalPayloadBytes: null,
+      }),
+    ];
+    hostile.push({ ...validRejected, contentHash: "SECRET" });
+    hostile.push({ ...validRejected, parserVersion: true });
+    for (const command of hostile) {
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(command)), {
+        rejects:
+          /RAW_SOURCE_WRITER_(COMMAND_INVALID|RECEIPT_INVALID|PROVENANCE_BINDING_INVALID)/u,
+      });
+    }
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM raw_source_record
+         WHERE id::text LIKE '83500000-0000-4000-8000-%';`,
+      ),
+      "2",
+    );
+
+    const denied = nonAcceptedWriterCommand({
+      recordId: "83500000-0000-4000-8000-000000000008",
+      status: "REJECTED",
+      reason: "MALFORMED_PAYLOAD",
+    });
+    for (const invocation of [
+      writerSql(denied),
+      `SET SESSION AUTHORIZATION app_user; ${writerSql(denied)}`,
+      `SET ROLE app_user;
+       SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',false);
+       ${writerSql(denied)}`,
+    ]) {
+      dockerPsql(databases.upgrade, invocation, {
         rejects: /RAW_SOURCE_WRITER_DENIED|permission denied/u,
       });
     }
@@ -1516,6 +1880,25 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         rejects,
       });
     }
+    const oversizedUnusedV1 = {
+      ...base,
+      schemaVersion: "raw-source-writer/v1",
+      expectedPayloadHash: "x".repeat(4 * 1024 * 1024),
+      expectedPayloadBytes: 1,
+    };
+    dockerPsql(
+      databases.upgrade,
+      asApp(WORKSPACE_A, writerSql(oversizedUnusedV1)),
+      { rejects: /RAW_SOURCE_WRITER_COMMAND_BOUNDS/u },
+    );
+    for (const malformedV1 of [
+      { ...base, schemaVersion: "raw-source-writer/v1", expectedPayloadHash: null, expectedPayloadBytes: 1 },
+      { ...base, schemaVersion: "raw-source-writer/v1", expectedPayloadHash: "a".repeat(64), expectedPayloadBytes: true },
+    ]) {
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(malformedV1)), {
+        rejects: /RAW_SOURCE_WRITER_COMMAND_INVALID/u,
+      });
+    }
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -1558,6 +1941,11 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "b0000000-0000-4000-8000-000000000004",
         "purpose-other.example",
         ["enrichment"],
+      ],
+      [
+        "b0000000-0000-4000-8000-000000000005",
+        "purpose-mixed.example",
+        ["discovery", 42],
       ],
     ];
     for (const [id, domain, allowedPurpose] of purposePolicies) {
@@ -2034,6 +2422,25 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
       "true|true|true|5|3",
+    );
+  });
+
+  it("rolls back all 1500 writer, sanitizer, and historical status hardening before COMMIT", () => {
+    assert.match(injectedStatusHardeningRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.statusHardeningRollback,
+        `SELECT concat_ws('|',
+          (attributes::text LIKE '%SECRET%')::text,
+          (sanitize_canonical_company_attributes_v2(
+            '{"products":["pump","LLZ","SECRET"]}'::jsonb
+          )::text LIKE '%SECRET%')::text,
+          (position('set_config(''statement_timeout''' in pg_get_functiondef(
+            'write_raw_source_record_v2(jsonb)'::regprocedure
+          )) > 0)::text
+        ) FROM canonical_company WHERE id='${COMPANY_A}';`,
+      ),
+      "true|true|true",
     );
   });
 });

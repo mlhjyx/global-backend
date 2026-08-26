@@ -85,4 +85,63 @@ describe('company enrichment commit suppression boundary', () => {
     });
     expect(create).not.toHaveBeenCalled();
   });
+
+  it('sanitizes each new enrichment hit before both CanonicalCompany and FieldEvidence persistence', async () => {
+    const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
+    const create = vi.fn(async (_input: unknown) => ({}));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1',
+          name: 'Acme GmbH',
+          domain: 'acme.example',
+          status: 'NEW',
+          attributes: { products: ['pump', 'SECRET'] },
+        })),
+        updateMany,
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      fieldEvidence: { create },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(commitCompanyEnrichmentResults(tx, {
+      workspaceId: 'ws-1',
+      companyId: 'co-1',
+      hits: [{
+        key: 'digital_footprint',
+        result: {
+          matched: true,
+          confidence: 0.9,
+          attributes: {
+            structured_org: {
+              name: 'Bearer secret',
+              phone: '٥٥٥-٠١٠٠',
+              url: 'https://acme.example',
+            },
+          },
+          costCents: 0,
+        },
+      }],
+    })).resolves.toBe(true);
+
+    const update = updateMany.mock.calls[0]![0] as {
+      data: { attributes: Record<string, unknown> };
+    };
+    expect(update.data.attributes).toEqual({
+      products: ['pump'],
+      digital_footprint: {
+        structured_org: { url: 'https://acme.example' },
+      },
+    });
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      data: {
+        field: 'digital_footprint.structured_org',
+        value: { url: 'https://acme.example' },
+      },
+    });
+    expect(JSON.stringify({ update: updateMany.mock.calls, evidence: create.mock.calls }))
+      .not.toMatch(/Bearer secret|٥٥٥-٠١٠٠|SECRET/u);
+  });
 });

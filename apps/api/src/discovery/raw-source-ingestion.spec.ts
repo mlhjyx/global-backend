@@ -159,6 +159,34 @@ describe("Raw Source v2 ingestion boundary", () => {
     },
   );
 
+  it.each([
+    ["company name", { name: "Acme ٥٥٥-٠١٠٠" }],
+    [
+      "URL path",
+      {
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://registry.example/company/٥٥٥-٠١٠٠",
+        },
+      },
+    ],
+  ])("rejects a Unicode-decimal local phone in every persisted %s", (_label, overrides) => {
+    const row = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [companyRecord(overrides)],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+
+    expect(row).toMatchObject({
+      ingestStatus: "REJECTED",
+      dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+      externalId: null,
+    });
+    expect(JSON.stringify(row.payload)).not.toContain("٥٥٥-٠١٠٠");
+  });
+
   it("rejects an attribute outside the provider schema and an ungoverned provider", () => {
     const bounded = prepareRawSourceBatch({
       providerKey: "registry",
@@ -240,7 +268,7 @@ describe("Raw Source v2 ingestion boundary", () => {
       {
         fda: {
           registration_number: "1",
-          status_code: "A",
+          status_code: "1",
           product_codes: ["LLZ"],
           initial_importer: false,
         },
@@ -364,6 +392,46 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(prepared.dispositionCode).toBe("PROVIDER_PAYLOAD_SCHEMA_INVALID");
     expect(JSON.stringify(prepared.payload)).not.toContain("named.person");
     expect(JSON.stringify(prepared.payload)).not.toContain("Must Not Persist");
+  });
+
+  it("rejects secret-shaped and non-semantic openFDA product codes", () => {
+    for (const productCode of ["SECRET", "LLZ1", "AB"]) {
+      const row = prepareRawSourceBatch({
+        providerKey: "openfda",
+        records: [
+          companyRecord({
+            externalId: "openfda:3004512345",
+            identifier: { scheme: "fda-reg", value: "3004512345" },
+            attributes: {
+              fda: {
+                registration_number: "3004512345",
+                status_code: "1",
+                product_codes: [productCode],
+              },
+              products: [productCode],
+            },
+            license: "CC0-1.0",
+            provenance: {
+              ...companyRecord().provenance,
+              sourceUrl:
+                "https://api.fda.gov/device/registrationlisting.json",
+            },
+          }),
+        ],
+        policies: POLICIES.map((policy) => ({
+          ...policy,
+          domain: "api.fda.gov",
+        })),
+        limits: { ...LIMITS, maxRecordBytes: 2_048, maxBatchBytes: 4_096 },
+        now: NOW,
+      }).rows[0]!;
+
+      expect(row).toMatchObject({
+        ingestStatus: "REJECTED",
+        dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+      });
+      expect(JSON.stringify(row.payload)).not.toContain(productCode);
+    }
   });
 
   it("rejects cyclic, over-deep, and accessor payloads without executing untrusted getters", () => {
@@ -837,6 +905,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     [[], "empty"],
     ["discovery", "malformed"],
     [["enrichment"], "other-purpose"],
+    [["discovery", 42], "mixed-type"],
   ])(
     "quarantines an approved policy with %s allowedPurpose (%s)",
     (allowedPurpose) => {
@@ -859,6 +928,44 @@ describe("Raw Source v2 ingestion boundary", () => {
     },
   );
 
+  it("derives every non-ACCEPTED persisted key from the final exact minimal receipt", () => {
+    const rejected = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [companyRecord({ unknown: "never persist" })],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    const quarantined = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [companyRecord()],
+      policies: [{ ...POLICIES[0]!, reviewStatus: "SUSPENDED" }],
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    const oversized = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [companyRecord()],
+      policies: POLICIES,
+      limits: { ...LIMITS, maxRecordBytes: 32 },
+      now: NOW,
+    }).rows[0]!;
+
+    for (const row of [rejected, quarantined, oversized]) {
+      expect(row.ingestStatus).not.toBe("ACCEPTED");
+      expect(row.ingestKey).toBe(`payload:${row.payloadHash}`);
+      expect(row.payload).toEqual({
+        _rawReceipt:
+          row.ingestStatus === "REJECTED"
+            ? "raw-source/rejected/v1"
+            : "raw-source/quarantine/v1",
+        reason: row.dispositionCode,
+        originalPayloadHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        originalPayloadBytes: expect.any(Number),
+      });
+    }
+  });
+
   it("reconciles exact replays and turns a reused processing key with changed content into one receipt", () => {
     const original = prepareRawSourceBatch({
       providerKey: "registry",
@@ -876,7 +983,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     }).rows[0]!;
     const existing = [
       {
-        id: "raw-original",
+        id: "83000000-0000-4000-8000-000000000001",
         externalId: original.externalId,
         ingestKey: original.ingestKey,
         payloadHash: original.payloadHash,
@@ -894,8 +1001,13 @@ describe("Raw Source v2 ingestion boundary", () => {
       externalId: null,
       ingestStatus: "QUARANTINED",
       dispositionCode: "PROCESSING_KEY_DRIFT",
-      payload: { conflictWithRawId: "raw-original" },
+      payload: {
+        conflictWithRawId: "83000000-0000-4000-8000-000000000001",
+      },
     });
+    expect(drift.rows[0]!.ingestKey).toBe(
+      `payload:${drift.rows[0]!.payloadHash}`,
+    );
     expect(
       reconcileRawSourceBatch(
         [changed],
