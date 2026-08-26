@@ -10,11 +10,17 @@ import {
   resetActivities,
   setPatched,
 } from './testing/temporal-workflow.mock';
-import { discoveryWorkflow } from './discovery.workflow';
+import {
+  DISCOVERY_AUTHORITY_PATCH,
+  DISCOVERY_RAW_GOVERNANCE_PATCH,
+  discoveryWorkflow,
+} from './discovery.workflow';
 import { understandingWorkflow } from './understanding.workflow';
 
 const WS = '10000000-0000-4000-8000-000000000001';
 const SHA = 'a'.repeat(64);
+const QUERY_RECEIPT_PATCH = 'discovery-query-receipt-input-v1';
+const QUERY_RECEIPT_MODE = 'raw-governance-query-receipt/v1';
 const DISCOVERY_BUDGET = Object.freeze({
   authorityId: '20000000-0000-4000-8000-000000000002',
   replay: false,
@@ -243,14 +249,14 @@ describe('discoveryWorkflow execution-control propagation', () => {
       expect.objectContaining({
         status: 'PARTIAL',
         stats: expect.objectContaining({
-            perSource: {
-              official_registry: expect.objectContaining({
-                rawCount: 1,
-                quarantinedCount: 2,
-                rejectedCount: 3,
-                duplicateCount: 4,
-                provider: 'public_web',
-              }),
+          perSource: {
+            official_registry: expect.objectContaining({
+              rawCount: 1,
+              quarantinedCount: 2,
+              rejectedCount: 3,
+              duplicateCount: 4,
+              provider: 'public_web',
+            }),
           },
         }),
       }),
@@ -356,14 +362,32 @@ describe('discoveryWorkflow execution-control propagation', () => {
 
     await discoveryWorkflow(discoveryInput());
 
-    expect(acts.executeQuery.mock.calls.map(([args]) => ({
-      planId: args.planId,
-      queryOrdinal: args.queryOrdinal,
-      sourceHint: args.query.filters.source_hint,
-    }))).toEqual([
-      { planId: 'plan-1', queryOrdinal: 0, sourceHint: 'ted' },
-      { planId: 'plan-1', queryOrdinal: 1, sourceHint: 'openfda' },
-      { planId: 'plan-1', queryOrdinal: 2, sourceHint: 'public_web' },
+    expect(
+      acts.executeQuery.mock.calls.map(([args]) => ({
+        planId: args.planId,
+        queryOrdinal: args.queryOrdinal,
+        queryReceiptMode: args.queryReceiptMode,
+        sourceHint: args.query.filters.source_hint,
+      })),
+    ).toEqual([
+      {
+        planId: 'plan-1',
+        queryOrdinal: 0,
+        queryReceiptMode: QUERY_RECEIPT_MODE,
+        sourceHint: 'ted',
+      },
+      {
+        planId: 'plan-1',
+        queryOrdinal: 1,
+        queryReceiptMode: QUERY_RECEIPT_MODE,
+        sourceHint: 'openfda',
+      },
+      {
+        planId: 'plan-1',
+        queryOrdinal: 2,
+        queryReceiptMode: QUERY_RECEIPT_MODE,
+        sourceHint: 'public_web',
+      },
     ]);
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -484,6 +508,108 @@ describe('discoveryWorkflow execution-control propagation', () => {
 });
 
 describe('workspace authority Temporal compatibility', () => {
+  it('keeps an authority-era non-Raw history on the exact legacy executeQuery shape', async () => {
+    setPatched((patchId) => patchId === DISCOVERY_AUTHORITY_PATCH);
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery).toHaveBeenCalledWith({
+      workspaceId: WS,
+      runId: 'run-1',
+      query: {
+        source_class: 'official_registry',
+        filters: {},
+        keywords: [],
+        priority: 1,
+      },
+      executionContractVersion: 2,
+      executionBudget: DISCOVERY_BUDGET,
+    });
+    expect(acts.finalizeRun.mock.calls[0]![0].stats).not.toHaveProperty(
+      'perQuery',
+    );
+  });
+
+  it('replays a Raw-governance history recorded before the receipt patch without receipt identity or parsing', async () => {
+    setPatched(
+      (patchId) =>
+        patchId === DISCOVERY_AUTHORITY_PATCH ||
+        patchId === DISCOVERY_RAW_GOVERNANCE_PATCH,
+    );
+    primeDiscovery();
+    acts.executeQuery.mockResolvedValue({
+      rawCount: 1,
+      quarantinedCount: 2,
+      rejectedCount: 3,
+      duplicateCount: 4,
+      costCents: 0,
+      provider: 'gleif',
+      budgetTruncated: false,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery).toHaveBeenCalledWith({
+      workspaceId: WS,
+      runId: 'run-1',
+      query: {
+        source_class: 'official_registry',
+        filters: {},
+        keywords: [],
+        priority: 1,
+      },
+      executionContractVersion: 2,
+      executionBudget: DISCOVERY_BUDGET,
+    });
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          perSource: {
+            official_registry: {
+              rawCount: 1,
+              quarantinedCount: 2,
+              rejectedCount: 3,
+              duplicateCount: 4,
+              provider: 'gleif',
+            },
+          },
+          rawGovernance: {
+            accepted: 1,
+            quarantined: 2,
+            rejected: 3,
+            duplicate: 4,
+          },
+        }),
+      }),
+    );
+    expect(acts.finalizeRun.mock.calls[0]![0].stats).not.toHaveProperty(
+      'perQuery',
+    );
+  });
+
+  it('uses the closed receipt identity only when the new Raw receipt patch is present', async () => {
+    setPatched(
+      (patchId) =>
+        patchId === DISCOVERY_AUTHORITY_PATCH ||
+        patchId === DISCOVERY_RAW_GOVERNANCE_PATCH ||
+        patchId === QUERY_RECEIPT_PATCH,
+    );
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planId: 'plan-1',
+        queryOrdinal: 0,
+        queryReceiptMode: QUERY_RECEIPT_MODE,
+      }),
+    );
+    expect(acts.finalizeRun.mock.calls[0]![0].stats).toHaveProperty('perQuery');
+  });
+
   it('replays a pre-authority discovery history with its exact legacy activity argument shapes', async () => {
     setPatched(() => false);
     primeDiscovery();

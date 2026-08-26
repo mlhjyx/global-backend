@@ -43,6 +43,10 @@ const pathSanitizerMigrationName =
   "20260826190000_raw_source_governance_path_sanitizer";
 const pathCleanupMigrationName =
   "20260826200000_raw_source_path_evidence_cleanup";
+const storedFieldAdapterMigrationName =
+  "20260826210000_raw_source_stored_field_path_adapter";
+const storedFieldCleanupMigrationName =
+  "20260826220000_raw_source_stored_field_cleanup";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -103,6 +107,16 @@ const pathCleanupMigrationPath = resolve(
   pathCleanupMigrationName,
   "migration.sql",
 );
+const storedFieldAdapterMigrationPath = resolve(
+  migrationRoot,
+  storedFieldAdapterMigrationName,
+  "migration.sql",
+);
+const storedFieldCleanupMigrationPath = resolve(
+  migrationRoot,
+  storedFieldCleanupMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -121,6 +135,9 @@ const databases = Object.freeze({
   pathSanitizerRollback: "task6a_raw_path_sanitizer_rollback",
   pathCleanupRollback: "task6a_raw_path_cleanup_rollback",
   pathCleanup: "task6a_raw_path_cleanup",
+  storedField: "task6a_raw_stored_field",
+  storedFieldAdapterRollback: "task6a_raw_stored_adapter_rollback",
+  storedFieldCleanupRollback: "task6a_raw_stored_cleanup_rollback",
   dottedReceipt: "task6a_raw_dotted_receipt",
   locks: "task6a_raw_locks",
 });
@@ -138,6 +155,12 @@ const SOURCE = "40000000-0000-4000-8000-000000000001";
 const FETCH = "50000000-0000-4000-8000-000000000001";
 const SOURCE_ENTITY = "60000000-0000-4000-8000-000000000001";
 const COMPANY_A = "70000000-0000-4000-8000-000000000001";
+const COMPANY_TENDER = "70000000-0000-4000-8000-000000000101";
+const COMPANY_CLEARANCE = "70000000-0000-4000-8000-000000000102";
+const COMPANY_SOURCES_SOUGHT = "70000000-0000-4000-8000-000000000103";
+const COMPANY_WEBSITE_CHANGE = "70000000-0000-4000-8000-000000000104";
+const COMPANY_LINKED_RECOVERY = "70000000-0000-4000-8000-000000000105";
+const LINKED_RECOVERY_RAW = "30000000-0000-4000-8000-000000000105";
 const LOCKED_RAW = "90000000-0000-4000-8000-000000000001";
 const POLICY_A = "a0000000-0000-4000-8000-000000000001";
 const POLICY_B = "a0000000-0000-4000-8000-000000000002";
@@ -163,6 +186,9 @@ let injectedWriterParityRollbackOutput = "";
 let injectedEvidenceChainRollbackOutput = "";
 let injectedPathSanitizerRollbackOutput = "";
 let injectedPathCleanupRollbackOutput = "";
+let injectedStoredFieldAdapterRollbackOutput = "";
+let injectedStoredFieldCleanupRollbackOutput = "";
+let storedFieldAfter2000 = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -635,6 +661,205 @@ function seedDottedProductsEvidence(database) {
   );
 }
 
+function seedStoredFieldEvidence(database) {
+  const tender = {
+    last_change_at: "2026-08-26T00:00:00.000Z",
+    intent_score: 0.9,
+    counts: { TENDER_PUBLISHED: 1 },
+    events: [
+      {
+        type: "TENDER_PUBLISHED",
+        at: "2026-08-26T00:00:00.000Z",
+        strength: 0.9,
+        evidence: {
+          cpv: ["42122130"],
+          notice: "notice-1",
+          source: "ted",
+        },
+      },
+    ],
+    _ts: "2026-08-26T00:00:00.000Z",
+  };
+  const clearanceEvent = {
+    type: "FDA_CLEARANCE",
+    at: "2026-08-26T00:00:00.000Z",
+    strength: 0.85,
+    evidence: {
+      product_code: "LLZ",
+      k_number: "K123456",
+      device: "Industrial pump controller",
+      source: "openfda",
+    },
+  };
+  const clearanceIntent = {
+    last_change_at: "2026-08-26T00:00:00.000Z",
+    intent_score: 0.85,
+    counts: { FDA_CLEARANCE: 1 },
+    events: [clearanceEvent],
+    _ts: "2026-08-26T00:00:00.000Z",
+  };
+  const sourcesSoughtEvent = {
+    type: "US_FED_SOURCES_SOUGHT",
+    at: "2026-08-26T00:00:00.000Z",
+    strength: 0.7,
+    evidence: {
+      naics: ["333914"],
+      notice: "W912HQ-26-S-0001",
+      source: "samgov",
+    },
+  };
+  const sourcesSoughtEvidence = { events: [sourcesSoughtEvent] };
+  const sourcesSoughtIntent = {
+    last_change_at: "2026-08-26T00:00:00.000Z",
+    intent_score: 0.7,
+    counts: { US_FED_SOURCES_SOUGHT: 1 },
+    events: [sourcesSoughtEvent],
+    _ts: "2026-08-26T00:00:00.000Z",
+  };
+  const websiteChange = {
+    last_change_at: "2026-08-26T00:00:00.000Z",
+    intent_score: 0.6,
+    counts: { PRODUCT_ADDED: 1 },
+    events: [
+      {
+        type: "PRODUCT_ADDED",
+        at: "2026-08-26T00:00:00.000Z",
+        strength: 0.6,
+        page_kind: "products",
+        page_url: "https://acme.example/products/pump",
+        evidence: { new_products: ["industrial pump"] },
+      },
+    ],
+    _ts: "2026-08-26T00:00:00.000Z",
+  };
+  dockerPsql(
+    database,
+    `
+    INSERT INTO canonical_company(
+      id,workspace_id,name,domain,country,attributes,status,dedupe_key,
+      version,created_at,updated_at
+    ) VALUES
+      ('${COMPANY_TENDER}','${WORKSPACE_A}','Tender Agency',NULL,'DE',
+       '${JSON.stringify({ intent: tender })}'::jsonb,'NEW',
+       'n:tender agency:de',1,'2026-08-25T16:31:00Z','2026-08-25T16:31:00Z'),
+      ('${COMPANY_CLEARANCE}','${WORKSPACE_A}','Clearance Applicant',NULL,'US',
+       '${JSON.stringify({ intent: clearanceIntent })}'::jsonb,'NEW',
+       'n:clearance applicant:us',1,'2026-08-25T16:31:00Z','2026-08-25T16:31:00Z'),
+      ('${COMPANY_SOURCES_SOUGHT}','${WORKSPACE_A}','Federal Buyer',NULL,'US',
+       '${JSON.stringify({ intent: sourcesSoughtIntent })}'::jsonb,'NEW',
+       'n:federal buyer:us',1,'2026-08-25T16:31:00Z','2026-08-25T16:31:00Z'),
+      ('${COMPANY_WEBSITE_CHANGE}','${WORKSPACE_A}','Website Company',
+       'website.example','DE','${JSON.stringify({ intent: websiteChange })}'::jsonb,
+       'NEW','d:website.example',1,'2026-08-25T16:31:00Z','2026-08-25T16:31:00Z'),
+      ('${COMPANY_LINKED_RECOVERY}','${WORKSPACE_A}','Linked Recovery',
+       'later.example','DE','{"products":["pump"]}'::jsonb,
+       'NEW','d:later.example',1,'2026-08-25T16:31:00Z','2026-08-25T16:31:00Z');
+
+    INSERT INTO field_evidence(
+      id,workspace_id,entity_type,entity_id,field,value,provider_key,
+      raw_record_id,confidence,license,allowed_actions,data_class,fetched_at
+    ) VALUES
+      ('81000000-0000-4000-8000-000000000101','${WORKSPACE_A}','company',
+       '${COMPANY_TENDER}','intent.tender','${JSON.stringify(tender)}'::jsonb,
+       'ted',NULL,1,'CC BY 4.0','["display","match"]','green','2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000102','${WORKSPACE_A}','company',
+       '${COMPANY_CLEARANCE}','intent.clearance','${JSON.stringify(clearanceEvent)}'::jsonb,
+       'openfda',NULL,1,'CC0-1.0','["display","match"]','green','2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000103','${WORKSPACE_A}','company',
+       '${COMPANY_SOURCES_SOUGHT}','intent.sources_sought',
+       '${JSON.stringify(sourcesSoughtEvidence)}'::jsonb,'samgov',NULL,1,
+       'US Government Public Domain','["display","match"]','green','2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000104','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','intent.website_change',
+       '${JSON.stringify(websiteChange)}'::jsonb,'web_watch',NULL,1,'public',
+       '["display","match"]','green','2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000106','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','source',
+       '"Call 555-0100 person@example.test Bearer secret"'::jsonb,
+       'unsafe_unknown',NULL,1,'public','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000107','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','digital_footprint.structured_org',
+       '{"name":"Acme Pump GmbH","source":"Call 555-0100 person@example.test Bearer secret"}'::jsonb,
+       'digital_footprint',NULL,1,'public','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000108','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','source',
+       '"protected.person@example.test"'::jsonb,'restricted_unknown',
+       '${RESTRICTED_RAW_A}',1,'public','["display"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000109','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','name','"Website Company"'::jsonb,
+       'registry',NULL,1,'public','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000110','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','gleif.lei','"529900T8BM49AURSDO55"'::jsonb,
+       'gleif',NULL,1,'public','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000111','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','wikidata.qid','"Q123"'::jsonb,
+       'wikidata',NULL,1,'public','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000112','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','structured_harvest.hiring_signal',
+       '{"source":"sitemap","open_roles":2,"titles":["Buyer"]}'::jsonb,
+       'structured_harvest',NULL,1,'public','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000113','${WORKSPACE_A}','company',
+       '${COMPANY_WEBSITE_CHANGE}','identity',
+       '{"name":"Website Company","country":"DE","source":"ted","notice":"notice-1","attribution":"TED CC BY 4.0"}'::jsonb,
+       'ted',NULL,1,'CC BY 4.0','["display","match"]','green',
+       '2026-08-25T16:31:00Z'),
+      ('81000000-0000-4000-8000-000000000114','${WORKSPACE_A}','company',
+       '${COMPANY_LINKED_RECOVERY}','domain',
+       '{"_historicalCleanup":"canonical-attribute-cleanup/v2","reason":"UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD","originalValueHash":"13fdcb3e867c757286bd4e924cfd97f77de31d2ca4f856a8110e430fbbfcdedd","predecessorReceiptHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'::jsonb,
+       'unrecoverable',NULL,1,'public','[]','red','2026-08-25T16:31:00Z');
+  `,
+  );
+
+  dockerPsql(
+    database,
+    asApp(
+      WORKSPACE_A,
+      writerSql(
+        writerCommand({
+          recordId: LINKED_RECOVERY_RAW,
+          externalId: "linked-recovery",
+          fetchedAt: "2026-08-25T16:31:00.000Z",
+          payload: {
+            externalId: "linked-recovery",
+            name: "Linked Recovery",
+            domain: "raw-recover.example",
+            country: "DE",
+            attributes: { products: ["pump"] },
+            provenance: {
+              sourceUrl: "https://registry.example/linked-recovery",
+              fetchedAt: "2026-08-25T16:31:00.000Z",
+              contentHash: "9".repeat(64),
+              parserVersion: "registry/v2",
+            },
+          },
+        }),
+      ),
+    ),
+  );
+  dockerPsql(
+    database,
+    `
+    INSERT INTO field_evidence(
+      id,workspace_id,entity_type,entity_id,field,value,provider_key,
+      raw_record_id,confidence,license,allowed_actions,data_class,fetched_at
+    ) VALUES (
+      '81000000-0000-4000-8000-000000000105','${WORKSPACE_A}','company',
+      '${COMPANY_LINKED_RECOVERY}','domain',
+      '{"_historicalCleanup":"canonical-attribute-cleanup/v2","reason":"UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD","originalValueHash":"e0abd8c37da5f30a6844e4d90be289f1ad7e8ba1545191f80c87259657088b75","predecessorReceiptHash":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}'::jsonb,
+      'registry','${LINKED_RECOVERY_RAW}',1,'public','[]','red',
+      '2026-08-25T16:31:00Z'
+    );
+  `,
+  );
+}
+
 function openRowLock(database, rowId) {
   requireTopology();
   const child = spawn(
@@ -764,6 +989,16 @@ before(() => {
     true,
     `${pathCleanupMigrationName} must exist`,
   );
+  assert.equal(
+    existsSync(storedFieldAdapterMigrationPath),
+    true,
+    `${storedFieldAdapterMigrationName} must exist`,
+  );
+  assert.equal(
+    existsSync(storedFieldCleanupMigrationPath),
+    true,
+    `${storedFieldCleanupMigrationName} must exist`,
+  );
   dockerPsql(
     "postgres",
     Object.values(databases)
@@ -830,6 +1065,55 @@ before(() => {
   dockerPsql(
     databases.pathCleanup,
     readFileSync(pathCleanupMigrationPath, "utf8"),
+  );
+
+  migrateDeploy(databases.storedField, baseline.schemaPath);
+  seedCurrentMainClone(databases.storedField);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+  ]) {
+    dockerPsql(databases.storedField, readFileSync(migrationPath, "utf8"));
+  }
+  seedStoredFieldEvidence(databases.storedField);
+  dockerPsql(
+    databases.storedField,
+    readFileSync(pathSanitizerMigrationPath, "utf8"),
+  );
+  dockerPsql(
+    databases.storedField,
+    readFileSync(pathCleanupMigrationPath, "utf8"),
+  );
+  storedFieldAfter2000 = dockerPsql(
+    databases.storedField,
+    `SELECT jsonb_agg(jsonb_build_object(
+       'id',id,'field',field,'cleanup',value->>'_historicalCleanup',
+       'originalValueHash',value->>'originalValueHash',
+       'class',data_class,'actions',allowed_actions
+     ) ORDER BY id)::text
+     FROM field_evidence
+     WHERE id IN (
+       '81000000-0000-4000-8000-000000000101',
+       '81000000-0000-4000-8000-000000000102',
+       '81000000-0000-4000-8000-000000000103',
+       '81000000-0000-4000-8000-000000000104'
+     );`,
+  );
+  dockerPsql(
+    databases.storedField,
+    readFileSync(storedFieldAdapterMigrationPath, "utf8"),
+  );
+  dockerPsql(
+    databases.storedField,
+    readFileSync(storedFieldCleanupMigrationPath, "utf8"),
   );
 
   migrateDeploy(databases.backfillRollback, baseline.schemaPath);
@@ -1081,6 +1365,76 @@ before(() => {
     { rejects: /division by zero/u },
   );
 
+  migrateDeploy(databases.storedFieldAdapterRollback, baseline.schemaPath);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+    pathSanitizerMigrationPath,
+    pathCleanupMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.storedFieldAdapterRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedStoredFieldAdapter = readFileSync(
+    storedFieldAdapterMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedStoredFieldAdapterRollbackOutput = dockerPsql(
+    databases.storedFieldAdapterRollback,
+    injectedStoredFieldAdapter,
+    { rejects: /division by zero/u },
+  );
+
+  migrateDeploy(databases.storedFieldCleanupRollback, baseline.schemaPath);
+  seedCurrentMainClone(databases.storedFieldCleanupRollback);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.storedFieldCleanupRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  seedStoredFieldEvidence(databases.storedFieldCleanupRollback);
+  for (const migrationPath of [
+    pathSanitizerMigrationPath,
+    pathCleanupMigrationPath,
+    storedFieldAdapterMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.storedFieldCleanupRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedStoredFieldCleanup = readFileSync(
+    storedFieldCleanupMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedStoredFieldCleanupRollbackOutput = dockerPsql(
+    databases.storedFieldCleanupRollback,
+    injectedStoredFieldCleanup,
+    { rejects: /division by zero/u },
+  );
+
   migrateDeploy(databases.locks);
   dockerPsql(
     databases.locks,
@@ -1154,6 +1508,39 @@ after(() => {
 });
 
 describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", () => {
+  it("keeps every 0900-2000 migration byte-identical to the authorized Task 6A.3 base", () => {
+    assert.deepEqual(
+      [
+        schemaMigrationPath,
+        backfillMigrationPath,
+        constraintsMigrationPath,
+        writerMigrationPath,
+        writerHardeningMigrationPath,
+        historicalCleanupMigrationPath,
+        statusHardeningMigrationPath,
+        finalCorrectionMigrationPath,
+        writerParityMigrationPath,
+        evidenceChainMigrationPath,
+        pathSanitizerMigrationPath,
+        pathCleanupMigrationPath,
+      ].map((migrationPath) => sha256(readFileSync(migrationPath))),
+      [
+        "4d9bda5096fc46e2d62918f28d3bfe4207dfbdaadb61f077bf9ae50616b43285",
+        "385cafd1226a3c73d148742da4f555652a7f8e862db24b92a419d42e0c26e324",
+        "555f04775d091178c817da0f5ea6cf4fce150c2442be58ff0121c31fa68c8ef6",
+        "e47383e385783156fda945f70dbeab88cef675777aa09ccf9a1e29d7651f933c",
+        "acde428d93524c78eb85250b0534a5ec37f8448abbc2983c52f2a7c07a341cba",
+        "b1a22391272ea71285332e8765cd9b92f9a3e4e98fb3a2109226f6537c1ad6cc",
+        "952a96461ac38028e758a89c93bf320a4122f3a4db6273ce9355bdfd9262196c",
+        "f8909dda8108b75416a050ea8cf29a57e7f2e1387a31f7ac7a9d09211ca42f77",
+        "9cf80d782330417fa12f8f500214aa40e1469c4423f462cd2bcd2aa79fe8fe1e",
+        "ec18e777ef578d46a90f9158da5cf1942008da36402550877469113b4f80b1b0",
+        "5a601a60427fc97f2fd06d5582844ae33441df69d253dbff43fd586700d1a994",
+        "39e2d28f7c353b021e7a22fbdc2cdd7fdfcca7d7b66c070a3defbfaab783f5d1",
+      ],
+    );
+  });
+
   it("applies the entire migration lineage to a fresh database and is idempotent on second deploy", () => {
     assert.match(firstDeployOutput, new RegExp(schemaMigrationName, "u"));
     assert.match(firstDeployOutput, new RegExp(backfillMigrationName, "u"));
@@ -1185,6 +1572,14 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       new RegExp(pathSanitizerMigrationName, "u"),
     );
     assert.match(firstDeployOutput, new RegExp(pathCleanupMigrationName, "u"));
+    assert.match(
+      firstDeployOutput,
+      new RegExp(storedFieldAdapterMigrationName, "u"),
+    );
+    assert.match(
+      firstDeployOutput,
+      new RegExp(storedFieldCleanupMigrationName, "u"),
+    );
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -1197,12 +1592,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         '${writerHardeningMigrationName}','${historicalCleanupMigrationName}',
         '${statusHardeningMigrationName}','${finalCorrectionMigrationName}',
         '${writerParityMigrationName}','${evidenceChainMigrationName}',
-        '${pathSanitizerMigrationName}','${pathCleanupMigrationName}'
+        '${pathSanitizerMigrationName}','${pathCleanupMigrationName}',
+        '${storedFieldAdapterMigrationName}','${storedFieldCleanupMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "12",
+      "14",
     );
   });
 
@@ -1415,7 +1811,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         value: {
           _historicalCleanup: "canonical-attribute-cleanup/v2",
           reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
-          originalValueHash: "f7b7eecb5b69d0e0f5cf7f7cb4e5f98a6d22c7f141d53ab32352bd9a3ca1b597",
+          originalValueHash:
+            "f7b7eecb5b69d0e0f5cf7f7cb4e5f98a6d22c7f141d53ab32352bd9a3ca1b597",
         },
         class: "red",
         actions: [],
@@ -1439,7 +1836,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           _historicalCleanup: "canonical-attribute-cleanup/v3",
           reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
           originalValueHash: "a".repeat(64),
-          predecessorReceiptHash: "e000760d92e0936eaa0557c1b97a476b728b2a42361d7614e0fcc4bd230e15b7",
+          predecessorReceiptHash:
+            "e000760d92e0936eaa0557c1b97a476b728b2a42361d7614e0fcc4bd230e15b7",
         },
         class: "red",
         actions: [],
@@ -1475,6 +1873,443 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
       beforeRerun,
+    );
+  });
+
+  it("reproduces the frozen 2000 stored-intent misclassification before the forward correction", () => {
+    assert.deepEqual(JSON.parse(storedFieldAfter2000), [
+      {
+        id: "81000000-0000-4000-8000-000000000101",
+        field: "intent.tender",
+        cleanup: "canonical-attribute-cleanup/v2",
+        originalValueHash:
+          "01666d0021c08e02df9edd362eea3ea4af5d6f314c1fa9737aa5ba7647f4c6d3",
+        class: "red",
+        actions: [],
+      },
+      {
+        id: "81000000-0000-4000-8000-000000000102",
+        field: "intent.clearance",
+        cleanup: "canonical-attribute-cleanup/v2",
+        originalValueHash:
+          "27632d241236aa702afa8533dae6ae02108ce38917ab59da0b72b62096478309",
+        class: "red",
+        actions: [],
+      },
+      {
+        id: "81000000-0000-4000-8000-000000000103",
+        field: "intent.sources_sought",
+        cleanup: "canonical-attribute-cleanup/v2",
+        originalValueHash:
+          "a66aa3e4376a0e3afd6ba6ac1a67fa42a29acc5a02bc3bc943b3372b36d6e7e7",
+        class: "red",
+        actions: [],
+      },
+      {
+        id: "81000000-0000-4000-8000-000000000104",
+        field: "intent.website_change",
+        cleanup: null,
+        originalValueHash: null,
+        class: "green",
+        actions: ["display", "match"],
+      },
+    ]);
+  });
+
+  it("applies the same closed stored-field adapter shapes as the application", () => {
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT concat_ws('|',
+          encode(digest(raw_source_canonical_json_v1(
+            raw_source_sanitize_stored_company_field_evidence_v1(
+              'intent.tender',
+              '${JSON.stringify({
+                last_change_at: "2026-08-26T00:00:00.000Z",
+                intent_score: 0.9,
+                counts: { TENDER_PUBLISHED: 1 },
+                events: [
+                  {
+                    type: "TENDER_PUBLISHED",
+                    at: "2026-08-26T00:00:00.000Z",
+                    strength: 0.9,
+                    evidence: {
+                      cpv: ["42122130"],
+                      notice: "notice-1",
+                      source: "ted",
+                    },
+                  },
+                ],
+                _ts: "2026-08-26T00:00:00.000Z",
+              })}'::jsonb
+            )), 'sha256'),'hex'),
+          encode(digest(raw_source_canonical_json_v1(
+            raw_source_sanitize_stored_company_field_evidence_v1(
+              'intent.clearance',
+              '${JSON.stringify({
+                type: "FDA_CLEARANCE",
+                at: "2026-08-26T00:00:00.000Z",
+                strength: 0.85,
+                evidence: {
+                  product_code: "LLZ",
+                  k_number: "K123456",
+                  device: "Industrial pump controller",
+                  source: "openfda",
+                },
+              })}'::jsonb
+            )), 'sha256'),'hex'),
+          encode(digest(raw_source_canonical_json_v1(
+            raw_source_sanitize_stored_company_field_evidence_v1(
+              'intent.sources_sought',
+              '${JSON.stringify({
+                events: [
+                  {
+                    type: "US_FED_SOURCES_SOUGHT",
+                    at: "2026-08-26T00:00:00.000Z",
+                    strength: 0.7,
+                    evidence: {
+                      naics: ["333914"],
+                      notice: "W912HQ-26-S-0001",
+                      source: "samgov",
+                    },
+                  },
+                ],
+              })}'::jsonb
+            )), 'sha256'),'hex'),
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'source','"Call 555-0100 person@example.test Bearer secret"'::jsonb
+          ) IS NULL)::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'unknown.lei','"529900T8BM49AURSDO55"'::jsonb
+          ) IS NULL)::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'digital_footprint.structured_org',
+            '{"name":"Acme Pump GmbH","source":"Call 555-0100 person@example.test Bearer secret"}'::jsonb
+          ) = '{"name":"Acme Pump GmbH"}'::jsonb)::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'intent.tender',
+            '{"events":[{"type":"TENDER_PUBLISHED","at":"2026-08-26T00:00:00.000Z","strength":0.9,"evidence":{"cpv":["42122130"],"notice":"123456-2026","source":"ted"}}]}'::jsonb
+          ) #>> '{events,0,evidence,notice}' = '123456-2026')::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'gleif.lei','"529900T8BM49AURSDO55"'::jsonb
+          ) = '"529900T8BM49AURSDO55"'::jsonb)::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'wikidata.qid','"Q123"'::jsonb
+          ) = '"Q123"'::jsonb)::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'structured_harvest.hiring_signal',
+            '{"source":"sitemap","open_roles":2,"titles":["Buyer"]}'::jsonb
+          ) = '{"source":"sitemap","open_roles":2,"titles":["Buyer"]}'::jsonb)::text,
+          (raw_source_sanitize_stored_company_field_evidence_v1(
+            'identity',
+            '{"name":"Website Company","country":"DE","source":"ted","notice":"notice-1","attribution":"TED CC BY 4.0"}'::jsonb
+          ) #>> '{source}' = 'ted')::text
+        );`,
+      ),
+      [
+        "01666d0021c08e02df9edd362eea3ea4af5d6f314c1fa9737aa5ba7647f4c6d3",
+        "27632d241236aa702afa8533dae6ae02108ce38917ab59da0b72b62096478309",
+        "a66aa3e4376a0e3afd6ba6ac1a67fa42a29acc5a02bc3bc943b3372b36d6e7e7",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+      ].join("|"),
+    );
+  });
+
+  it("restores only exact hash-matching current/linked candidates and preserves provenance bytes", () => {
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT string_agg(concat_ws(':',id::text,
+          encode(digest(raw_source_canonical_json_v1(value),'sha256'),'hex'),
+          data_class,allowed_actions::text,license,
+          to_char(fetched_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        ),E'\n' ORDER BY id)
+        FROM field_evidence
+        WHERE id IN (
+          '81000000-0000-4000-8000-000000000101',
+          '81000000-0000-4000-8000-000000000102',
+          '81000000-0000-4000-8000-000000000103',
+          '81000000-0000-4000-8000-000000000104',
+          '81000000-0000-4000-8000-000000000105'
+        );`,
+      ),
+      [
+        '81000000-0000-4000-8000-000000000101:01666d0021c08e02df9edd362eea3ea4af5d6f314c1fa9737aa5ba7647f4c6d3:green:["display", "match"]:CC BY 4.0:2026-08-25T16:31:00.000Z',
+        '81000000-0000-4000-8000-000000000102:27632d241236aa702afa8533dae6ae02108ce38917ab59da0b72b62096478309:green:["display", "match"]:CC0-1.0:2026-08-25T16:31:00.000Z',
+        '81000000-0000-4000-8000-000000000103:a66aa3e4376a0e3afd6ba6ac1a67fa42a29acc5a02bc3bc943b3372b36d6e7e7:green:["display", "match"]:US Government Public Domain:2026-08-25T16:31:00.000Z',
+        '81000000-0000-4000-8000-000000000104:dbce91d07200ee4034c7a499d6da5d208877e7e3ab53c1bb4cb542483deffa43:green:["display", "match"]:public:2026-08-25T16:31:00.000Z',
+        '81000000-0000-4000-8000-000000000105:e0abd8c37da5f30a6844e4d90be289f1ad7e8ba1545191f80c87259657088b75:green:["display", "match"]:public:2026-08-25T16:31:00.000Z',
+      ].join("\n"),
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
+         WHERE field_evidence_id IN (
+           '81000000-0000-4000-8000-000000000101',
+           '81000000-0000-4000-8000-000000000102',
+           '81000000-0000-4000-8000-000000000103',
+           '81000000-0000-4000-8000-000000000105'
+         )
+           AND cleanup_contract='raw-source-stored-field-cleanup/v1'
+           AND adapter_version='stored-company-field-evidence/v1'
+           AND status='RESTORED'
+           AND restored_value_hash=original_value_hash
+           AND original_value_hash ~ '^[0-9a-f]{64}$';`,
+      ),
+      "4",
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
+         WHERE field_evidence_id='81000000-0000-4000-8000-000000000104';`,
+      ),
+      "0",
+    );
+  });
+
+  it("keeps unknown or non-matching evidence red/value-free and restrictive evidence byte-identical", () => {
+    const restrictedBefore = [
+      "protected.person@example.test",
+      "green",
+      '["display"]',
+      "restricted_unknown",
+      RESTRICTED_RAW_A,
+      "2026-08-25T16:31:00.000Z",
+    ].join("|");
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT concat_ws('|',value #>> '{}',data_class,allowed_actions::text,
+          provider_key,raw_record_id::text,
+          to_char(fetched_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+         FROM field_evidence
+         WHERE id='81000000-0000-4000-8000-000000000108';`,
+      ),
+      restrictedBefore,
+    );
+    const unsafe = JSON.parse(
+      dockerPsql(
+        databases.storedField,
+        `SELECT jsonb_agg(jsonb_build_object(
+           'id',evidence.id,'value',evidence.value,
+           'class',evidence.data_class,'actions',evidence.allowed_actions,
+           'status',audit.status,'original',audit.original_value_hash,
+           'predecessor',audit.predecessor_receipt_hash,
+           'restored',audit.restored_value_hash
+         ) ORDER BY evidence.id)::text
+         FROM field_evidence AS evidence
+         JOIN raw_source_field_evidence_cleanup_audit AS audit
+           ON audit.field_evidence_id=evidence.id
+         WHERE evidence.id IN (
+           '81000000-0000-4000-8000-000000000106',
+           '81000000-0000-4000-8000-000000000107',
+           '81000000-0000-4000-8000-000000000114'
+         );`,
+      ),
+    );
+    assert.deepEqual(
+      unsafe.map((row) => ({
+        id: row.id,
+        contract: row.value._historicalCleanup,
+        reason: row.value.reason,
+        original: row.original,
+        class: row.class,
+        actions: row.actions,
+        status: row.status,
+        predecessor: row.predecessor,
+        restored: row.restored,
+      })),
+      [
+        {
+          id: "81000000-0000-4000-8000-000000000106",
+          contract: "stored-field-evidence-cleanup/v1",
+          reason: "UNRECOVERABLE_STORED_FIELD_VALUE_WITHHELD",
+          original:
+            "9cb73648154637d87c88bf92036896531ce3fe96fb3a7271aabf0de1d4e5ae02",
+          class: "red",
+          actions: [],
+          status: "UNRECOVERABLE_HOLD",
+          predecessor: null,
+          restored: null,
+        },
+        {
+          id: "81000000-0000-4000-8000-000000000107",
+          contract: "stored-field-evidence-cleanup/v1",
+          reason: "UNRECOVERABLE_STORED_FIELD_VALUE_WITHHELD",
+          original:
+            "1b00174bbde20a10c55e527d7a39a537049dfe2719e15b7b5cea1e654f980a1f",
+          class: "red",
+          actions: [],
+          status: "UNRECOVERABLE_HOLD",
+          predecessor: null,
+          restored: null,
+        },
+        {
+          id: "81000000-0000-4000-8000-000000000114",
+          contract: "canonical-attribute-cleanup/v2",
+          reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+          original:
+            "13fdcb3e867c757286bd4e924cfd97f77de31d2ca4f856a8110e430fbbfcdedd",
+          class: "red",
+          actions: [],
+          status: "UNRECOVERABLE_HOLD",
+          predecessor:
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          restored: null,
+        },
+      ],
+    );
+    assert.doesNotMatch(
+      JSON.stringify(unsafe),
+      /555-0100|person@example|Bearer secret/u,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
+         WHERE field_evidence_id='81000000-0000-4000-8000-000000000108';`,
+      ),
+      "0",
+    );
+  });
+
+  it("is byte-stable when 2200 is applied a second time", () => {
+    const snapshot = () =>
+      dockerPsql(
+        databases.storedField,
+        `SELECT encode(digest(concat_ws(E'\n',
+          (SELECT string_agg(concat_ws('|',id::text,field,
+            raw_source_canonical_json_v1(value),provider_key,
+            coalesce(raw_record_id::text,'null'),coalesce(confidence::text,'null'),
+            license,coalesce(allowed_actions::text,'null'),data_class,fetched_at::text
+          ),E'\n' ORDER BY id) FROM field_evidence
+            WHERE id::text LIKE '81000000-0000-4000-8000-0000000001%'),
+          (SELECT string_agg(concat_ws('|',id::text,workspace_id::text,
+            field_evidence_id::text,coalesce(raw_record_id::text,'null'),
+            cleanup_contract,adapter_version,status,original_value_hash,
+            coalesce(predecessor_receipt_hash,'null'),
+            coalesce(restored_value_hash,'null'),created_at::text
+          ),E'\n' ORDER BY id)
+           FROM raw_source_field_evidence_cleanup_audit)
+        ),'sha256'),'hex');`,
+      );
+    const before = snapshot();
+    dockerPsql(
+      databases.storedField,
+      readFileSync(storedFieldCleanupMigrationPath, "utf8"),
+    );
+    assert.equal(snapshot(), before);
+  });
+
+  it("keeps the value-free audit surface FORCE-RLS scoped and application-write denied", () => {
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT concat_ws('|',
+          c.relrowsecurity::text,c.relforcerowsecurity::text,
+          has_table_privilege('app_user',c.oid,'SELECT')::text,
+          has_table_privilege('app_user',c.oid,'INSERT')::text,
+          has_table_privilege('app_user',c.oid,'UPDATE')::text,
+          has_table_privilege('app_user',c.oid,'DELETE')::text,
+          (SELECT confdeltype='c' FROM pg_constraint
+             WHERE conrelid=c.oid AND contype='f'
+               AND confrelid='field_evidence'::regclass),
+          (SELECT count(*)::text FROM information_schema.columns
+             WHERE table_schema='public'
+               AND table_name='raw_source_field_evidence_cleanup_audit'
+               AND column_name IN (
+                 'workspace_id','field_evidence_id','raw_record_id',
+                 'cleanup_contract','adapter_version','status',
+                 'original_value_hash','predecessor_receipt_hash',
+                 'restored_value_hash','created_at'
+               ))
+         FROM pg_class AS c
+         WHERE c.oid='raw_source_field_evidence_cleanup_audit'::regclass;`,
+      ),
+      "true|true|true|false|false|false|true|10",
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        asApp(
+          WORKSPACE_A,
+          `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit;`,
+        ),
+      ),
+      `${WORKSPACE_A}\n7`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        asApp(
+          WORKSPACE_B,
+          `SELECT count(*) FROM raw_source_field_evidence_cleanup_audit;`,
+        ),
+      ),
+      `${WORKSPACE_B}\n0`,
+    );
+    for (const statement of [
+      `INSERT INTO raw_source_field_evidence_cleanup_audit(
+         workspace_id,field_evidence_id,cleanup_contract,adapter_version,
+         status,original_value_hash
+       ) VALUES (
+         '${WORKSPACE_A}','81000000-0000-4000-8000-000000000101',
+         'raw-source-stored-field-cleanup/v1',
+         'stored-company-field-evidence/v1','UNRECOVERABLE_HOLD',repeat('a',64)
+       );`,
+      `UPDATE raw_source_field_evidence_cleanup_audit
+       SET status='RESTORED' WHERE workspace_id='${WORKSPACE_A}';`,
+      `DELETE FROM raw_source_field_evidence_cleanup_audit
+       WHERE workspace_id='${WORKSPACE_A}';`,
+    ]) {
+      dockerPsql(databases.storedField, asApp(WORKSPACE_A, statement), {
+        rejects: /permission denied/u,
+      });
+    }
+  });
+
+  it("allows parent FieldEvidence erasure to cascade without an audit immutability block", () => {
+    dockerPsql(
+      databases.storedField,
+      `INSERT INTO field_evidence(
+         id,workspace_id,entity_type,entity_id,field,value,provider_key,
+         confidence,license,allowed_actions,data_class,fetched_at
+       ) VALUES (
+         '81000000-0000-4000-8000-000000000199','${WORKSPACE_A}','company',
+         '${COMPANY_WEBSITE_CHANGE}','name','"Cascade Test"','registry',1,
+         'public','["display"]','green','2026-08-25T16:31:00Z'
+       );
+       INSERT INTO raw_source_field_evidence_cleanup_audit(
+         workspace_id,field_evidence_id,cleanup_contract,adapter_version,
+         status,original_value_hash
+       ) VALUES (
+         '${WORKSPACE_A}','81000000-0000-4000-8000-000000000199',
+         'raw-source-stored-field-cleanup/v1',
+         'stored-company-field-evidence/v1','UNRECOVERABLE_HOLD',repeat('a',64)
+       );
+       DELETE FROM field_evidence
+       WHERE id='81000000-0000-4000-8000-000000000199';`,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.storedField,
+        `SELECT concat_ws('|',
+          (SELECT count(*) FROM field_evidence
+            WHERE id='81000000-0000-4000-8000-000000000199'),
+          (SELECT count(*) FROM raw_source_field_evidence_cleanup_audit
+            WHERE field_evidence_id='81000000-0000-4000-8000-000000000199')
+        );`,
+      ),
+      "0|0",
     );
   });
 
@@ -3653,20 +4488,43 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     );
   });
 
-  it("keeps 1900 DDL/ACL-only and 2000 historical correction DML-only", () => {
-    const ddl = readFileSync(pathSanitizerMigrationPath, "utf8");
-    const dml = readFileSync(pathCleanupMigrationPath, "utf8");
+  it("keeps 1900/2100 DDL-ACL-only and 2000/2200 historical correction DML-only", () => {
+    const pathDdl = readFileSync(pathSanitizerMigrationPath, "utf8");
+    const pathDml = readFileSync(pathCleanupMigrationPath, "utf8");
+    const storedDdl = readFileSync(storedFieldAdapterMigrationPath, "utf8");
+    const storedDml = readFileSync(storedFieldCleanupMigrationPath, "utf8");
 
-    assert.match(ddl, /CREATE (?:OR REPLACE )?FUNCTION/u);
-    assert.match(ddl, /REVOKE ALL ON FUNCTION/u);
+    assert.match(pathDdl, /CREATE (?:OR REPLACE )?FUNCTION/u);
+    assert.match(pathDdl, /REVOKE ALL ON FUNCTION/u);
     assert.doesNotMatch(
-      ddl,
+      pathDdl,
       /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:canonical_company|field_evidence)\b/iu,
     );
-    assert.match(dml, /\bUPDATE\s+canonical_company\b/iu);
-    assert.match(dml, /\bUPDATE\s+field_evidence\b/iu);
+    assert.match(pathDml, /\bUPDATE\s+canonical_company\b/iu);
+    assert.match(pathDml, /\bUPDATE\s+field_evidence\b/iu);
     assert.doesNotMatch(
-      dml,
+      pathDml,
+      /\b(?:CREATE|ALTER|DROP)\s+(?:FUNCTION|TABLE|INDEX|TYPE|POLICY|TRIGGER|CONSTRAINT)\b|\b(?:GRANT|REVOKE)\b/iu,
+    );
+    assert.match(
+      storedDdl,
+      /CREATE TABLE raw_source_field_evidence_cleanup_audit/u,
+    );
+    assert.match(storedDdl, /CREATE (?:OR REPLACE )?FUNCTION/u);
+    assert.match(storedDdl, /ENABLE ROW LEVEL SECURITY/u);
+    assert.match(storedDdl, /FORCE ROW LEVEL SECURITY/u);
+    assert.match(storedDdl, /REVOKE/u);
+    assert.doesNotMatch(
+      storedDdl,
+      /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:canonical_company|field_evidence)\b/iu,
+    );
+    assert.match(storedDml, /\bUPDATE\s+field_evidence\b/iu);
+    assert.match(
+      storedDml,
+      /\bINSERT\s+INTO\s+raw_source_field_evidence_cleanup_audit\b/iu,
+    );
+    assert.doesNotMatch(
+      storedDml,
       /\b(?:CREATE|ALTER|DROP)\s+(?:FUNCTION|TABLE|INDEX|TYPE|POLICY|TRIGGER|CONSTRAINT)\b|\b(?:GRANT|REVOKE)\b/iu,
     );
   });
@@ -3720,7 +4578,49 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
              WHERE entity_id='${COMPANY_A}')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "3|true|true|green|[\"display\", \"match\"]|10",
+      '3|true|true|green|["display", "match"]|10',
+    );
+  });
+
+  it("rolls back every 2100 adapter, audit-table, RLS and ACL definition", () => {
+    assert.match(injectedStoredFieldAdapterRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.storedFieldAdapterRollback,
+        `SELECT concat_ws('|',
+          (to_regclass('raw_source_field_evidence_cleanup_audit') IS NULL)::text,
+          (to_regprocedure(
+            'raw_source_sanitize_stored_company_field_evidence_v1(text,jsonb)'
+          ) IS NULL)::text,
+          (to_regprocedure(
+            'raw_source_current_stored_field_candidate_v1(text,text,jsonb)'
+          ) IS NULL)::text
+        );`,
+      ),
+      "true|true|true",
+    );
+  });
+
+  it("rolls back every 2200 evidence correction and value-free audit insert", () => {
+    assert.match(injectedStoredFieldCleanupRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.storedFieldCleanupRollback,
+        `SELECT concat_ws('|',
+          (SELECT value->>'_historicalCleanup' FROM field_evidence
+            WHERE id='81000000-0000-4000-8000-000000000101'),
+          (SELECT data_class FROM field_evidence
+            WHERE id='81000000-0000-4000-8000-000000000101'),
+          (SELECT allowed_actions::text FROM field_evidence
+            WHERE id='81000000-0000-4000-8000-000000000101'),
+          (SELECT value #>> '{}' FROM field_evidence
+            WHERE id='81000000-0000-4000-8000-000000000106'),
+          (SELECT data_class FROM field_evidence
+            WHERE id='81000000-0000-4000-8000-000000000106'),
+          (SELECT count(*) FROM raw_source_field_evidence_cleanup_audit)
+        );`,
+      ),
+      "canonical-attribute-cleanup/v2|red|[]|Call 555-0100 person@example.test Bearer secret|green|0",
     );
   });
 });

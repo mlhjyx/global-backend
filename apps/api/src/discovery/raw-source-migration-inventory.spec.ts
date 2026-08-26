@@ -56,6 +56,14 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826200000_raw_source_path_evidence_cleanup",
     checksum: "5".repeat(64),
   },
+  {
+    migrationName: "20260826210000_raw_source_stored_field_path_adapter",
+    checksum: "6".repeat(64),
+  },
+  {
+    migrationName: "20260826220000_raw_source_stored_field_cleanup",
+    checksum: "7".repeat(64),
+  },
 ];
 
 const REISSUED_1600_MIGRATION =
@@ -77,9 +85,12 @@ function exactCurrentInventory() {
 }
 
 describe("PR #407 experiment _prisma_migrations bridge decision", () => {
-  it("binds the checker to both forward path-sanitizer migrations", () => {
+  it("binds the checker to all forward path and stored-field correction migrations", () => {
     const checker = readFileSync(
-      new URL("../../scripts/check-pr407-experiment-migrations.mts", import.meta.url),
+      new URL(
+        "../../scripts/check-pr407-experiment-migrations.mts",
+        import.meta.url,
+      ),
       "utf8",
     );
     expect(checker).toContain(
@@ -88,6 +99,10 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
     expect(checker).toContain(
       "20260826200000_raw_source_path_evidence_cleanup",
     );
+    expect(checker).toContain(
+      "20260826210000_raw_source_stored_field_path_adapter",
+    );
+    expect(checker).toContain("20260826220000_raw_source_stored_field_cleanup");
   });
   it("returns an explicit UNKNOWN/HOLD when no live experiment subject is supplied", () => {
     expect(assessRawSourceMigrationInventory(undefined, expected)).toEqual({

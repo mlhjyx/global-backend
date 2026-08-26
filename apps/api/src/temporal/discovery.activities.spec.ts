@@ -151,7 +151,11 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
       ];
     },
     discoveryRun: {
-      update: async ({ data }: { data: { stats: Record<string, unknown> } }) => {
+      update: async ({
+        data,
+      }: {
+        data: { stats: Record<string, unknown> };
+      }) => {
         runStats = data.stats;
         return {};
       },
@@ -199,6 +203,7 @@ const QUERY = {
   keywords: [],
   priority: 1,
 };
+const QUERY_RECEIPT_MODE = "raw-governance-query-receipt/v1" as const;
 const DISCOVERY_BINDING = Object.freeze({
   authorityId: "20000000-0000-4000-8000-000000000002",
   replay: false,
@@ -254,6 +259,7 @@ function discoveryArgs<T extends object>(runId: string, extra: T) {
     runId,
     planId: "50000000-0000-4000-8000-000000000001",
     queryOrdinal: 0,
+    queryReceiptMode: QUERY_RECEIPT_MODE,
     executionContractVersion: 2 as const,
     executionBudget: DISCOVERY_BINDING,
     ...extra,
@@ -380,15 +386,54 @@ describe("loadPlanQueries receipt identity inputs", () => {
 });
 
 describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错", () => {
-  it("rejects missing durable query identity after valid budget admission", async () => {
+  it("accepts the exact authority-era legacy shape without entering query-receipt persistence", async () => {
     const acts = createDiscoveryActivities(makeDeps([]));
     await expect(
       acts.executeQuery(
         discoveryArgs("run-ok-x", {
           planId: undefined,
           queryOrdinal: undefined,
+          queryReceiptMode: undefined,
           query: QUERY,
         }),
+      ),
+    ).resolves.toEqual({
+      rawCount: 0,
+      quarantinedCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 0,
+      costCents: 0,
+      provider: null,
+      budgetTruncated: false,
+    });
+  });
+
+  it.each([
+    {
+      label: "receipt mode without plan identity",
+      overrides: {
+        planId: undefined,
+        queryOrdinal: undefined,
+        queryReceiptMode: QUERY_RECEIPT_MODE,
+      },
+    },
+    {
+      label: "plan identity without receipt mode",
+      overrides: { queryReceiptMode: undefined },
+    },
+    {
+      label: "forged receipt mode",
+      overrides: { queryReceiptMode: "raw-governance-query-receipt/v0" },
+    },
+    {
+      label: "out-of-range query ordinal",
+      overrides: { queryOrdinal: 1_024 },
+    },
+  ])("fails closed for $label", async ({ overrides }) => {
+    const acts = createDiscoveryActivities(makeDeps([]));
+    await expect(
+      acts.executeQuery(
+        discoveryArgs("run-ok-x", { ...overrides, query: QUERY }),
       ),
     ).rejects.toMatchObject({
       type: "DISCOVERY_QUERY_RECEIPT_IDENTITY_INVALID",
@@ -415,7 +460,10 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
   });
 
   it("normalizes taxonomy branches before applying a narrowed provider route", async () => {
-    const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const discoverCompanies = vi.fn(async () => ({
+      records: [],
+      costCents: 0,
+    }));
     const deps = makeDeps([
       {
         ...okAdapter("wikidata", []),
@@ -531,6 +579,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       runId: "run-row-id",
       planId: "50000000-0000-4000-8000-000000000001",
       queryOrdinal: 0,
+      queryReceiptMode: QUERY_RECEIPT_MODE,
       query: QUERY,
       executionContractVersion: 2,
       executionBudget: DISCOVERY_BINDING,
@@ -643,7 +692,10 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     const persistedRows: Array<Record<string, unknown>> = [];
     let writerInvocation = 0;
     const queryRaw = vi.fn(
-      async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+      async (statement: {
+        strings?: readonly string[];
+        values?: readonly unknown[];
+      }) => {
         const sql = statement.strings?.join("?") ?? "";
         if (sql.includes("FROM discovery_run")) {
           return [
@@ -686,14 +738,20 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       $queryRaw: queryRaw,
       rawSourceRecord: {
         findMany: vi.fn(async () => []),
-        count: vi.fn(async ({ where }: { where: { ingestStatus: string } }) =>
-          persistedRows.filter((row) => row.ingestStatus === where.ingestStatus).length),
+        count: vi.fn(
+          async ({ where }: { where: { ingestStatus: string } }) =>
+            persistedRows.filter(
+              (row) => row.ingestStatus === where.ingestStatus,
+            ).length,
+        ),
       },
       discoveryRun: {
-        update: vi.fn(async ({ data }: { data: { stats: Record<string, unknown> } }) => {
-          runStats = data.stats;
-          return {};
-        }),
+        update: vi.fn(
+          async ({ data }: { data: { stats: Record<string, unknown> } }) => {
+            runStats = data.stats;
+            return {};
+          },
+        ),
       },
       usageLedger: { create: vi.fn(async () => ({})) },
     };
@@ -741,18 +799,20 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         })),
         value: await input.apply(input.transaction),
       }))
-      .mockImplementationOnce(async (input: {
-        transaction: unknown;
-        acknowledgements: Array<{ producerId: string }>;
-        readback: (transaction: unknown) => Promise<unknown>;
-      }) => ({
-        status: "REPLAYED",
-        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
-          producerId,
+      .mockImplementationOnce(
+        async (input: {
+          transaction: unknown;
+          acknowledgements: Array<{ producerId: string }>;
+          readback: (transaction: unknown) => Promise<unknown>;
+        }) => ({
           status: "REPLAYED",
-        })),
-        value: await input.readback(input.transaction),
-      }));
+          acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+            producerId,
+            status: "REPLAYED",
+          })),
+          value: await input.readback(input.transaction),
+        }),
+      );
 
     const args = discoveryArgs("40000000-0000-4000-8000-000000000001", {
       planId: "50000000-0000-4000-8000-000000000001",
@@ -790,19 +850,23 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
   });
 
   it("fails closed when DomainAck replay has no locked query receipt", async () => {
-    const activities = createDiscoveryActivities(makeDeps([okAdapter("wikidata", [])]));
-    acknowledgementMocks.apply.mockImplementationOnce(async (input: {
-      transaction: unknown;
-      acknowledgements: Array<{ producerId: string }>;
-      readback: (transaction: unknown) => Promise<unknown>;
-    }) => ({
-      status: "REPLAYED",
-      acknowledgements: input.acknowledgements.map(({ producerId }) => ({
-        producerId,
+    const activities = createDiscoveryActivities(
+      makeDeps([okAdapter("wikidata", [])]),
+    );
+    acknowledgementMocks.apply.mockImplementationOnce(
+      async (input: {
+        transaction: unknown;
+        acknowledgements: Array<{ producerId: string }>;
+        readback: (transaction: unknown) => Promise<unknown>;
+      }) => ({
         status: "REPLAYED",
-      })),
-      value: await input.readback(input.transaction),
-    }));
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: "REPLAYED",
+        })),
+        value: await input.readback(input.transaction),
+      }),
+    );
     await expect(
       activities.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
     ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_READBACK_MISSING");
@@ -1160,8 +1224,8 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(evidenceCreate).not.toHaveBeenCalled();
   });
 
-  it("treats an activity response-loss retry for the same Raw link as an exact canonical no-op", async () => {
-    const raw = {
+  it("keeps response-loss and stale linked-Raw replay behind a later Canonical update as exact no-ops", async () => {
+    const rawA = {
       id: "raw-replay",
       providerKey: "registry",
       ingestStatus: "ACCEPTED",
@@ -1171,39 +1235,52 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         name: "Acme GmbH",
         domain: "acme.example",
         country: "DE",
-        attributes: { products: ["pump"] },
+        attributes: { products: ["pump"], stand: "A42" },
       },
     };
+    const rawB = {
+      ...rawA,
+      id: "raw-intervening",
+      providerKey: "directory",
+      payload: {
+        ...rawA.payload,
+        externalId: "directory:acme",
+        attributes: { products: ["pump", "valve"], stand: "B42" },
+      },
+    };
+    let raws = [rawA];
     let company: Record<string, unknown> | null = null;
     const links: Array<Record<string, unknown>> = [];
     const evidence: Array<Record<string, unknown>> = [];
     let clock = 0;
-    const upsert = vi.fn(async (input: {
-      update: Record<string, unknown>;
-      create: Record<string, unknown>;
-    }) => {
-      clock += 1;
-      if (!company) {
-        company = {
-          id: "company-replay",
-          ...input.create,
-          version: 1,
-          updatedAt: new Date(`2026-08-26T00:00:0${clock}.000Z`),
-        };
-      } else {
-        const attributes = input.update.attributes ?? company.attributes;
-        company = {
-          ...company,
-          attributes,
-          version: Number(company.version) + 1,
-          updatedAt: new Date(`2026-08-26T00:00:0${clock}.000Z`),
-        };
-      }
-      return { id: company.id };
-    });
+    const upsert = vi.fn(
+      async (input: {
+        update: Record<string, unknown>;
+        create: Record<string, unknown>;
+      }) => {
+        clock += 1;
+        if (!company) {
+          company = {
+            id: "company-replay",
+            ...input.create,
+            version: 1,
+            updatedAt: new Date(`2026-08-26T00:00:0${clock}.000Z`),
+          };
+        } else {
+          const attributes = input.update.attributes ?? company.attributes;
+          company = {
+            ...company,
+            attributes,
+            version: Number(company.version) + 1,
+            updatedAt: new Date(`2026-08-26T00:00:0${clock}.000Z`),
+          };
+        }
+        return { id: company.id };
+      },
+    );
     const tx = {
       $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
-      rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
+      rawSourceRecord: { findMany: vi.fn(async () => raws) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
@@ -1212,8 +1289,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         upsert,
       },
       identityLink: {
-        findFirst: vi.fn(async ({ where }: { where: { rawRecordId: string } }) =>
-          links.find((row) => row.rawRecordId === where.rawRecordId) ?? null),
+        findFirst: vi.fn(
+          async ({ where }: { where: { rawRecordId: string } }) =>
+            links.find((row) => row.rawRecordId === where.rawRecordId) ?? null,
+        ),
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
           links.push({ id: `link-${links.length + 1}`, ...data });
           return {};
@@ -1256,9 +1335,41 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(links).toHaveLength(committedLinkCount);
     expect(evidence).toHaveLength(committedEvidenceCount);
     expect(upsert).toHaveBeenCalledOnce();
+
+    // A genuinely new Raw B may update the overlapping namespace once and
+    // receives its own provenance rows.
+    raws = [rawB];
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-intervening", {})),
+    ).resolves.toEqual({ companies: 1, suppressed: 0 });
+    expect(company!.attributes).toMatchObject({
+      products: ["pump", "valve"],
+      stand: "B42",
+    });
+    const interveningBytes = JSON.stringify(company);
+    const interveningVersion = company!.version;
+    const interveningUpdatedAt = company!.updatedAt;
+    const interveningStatus = company!.status;
+    const interveningLinks = links.length;
+    const interveningEvidence = evidence.length;
+
+    // Temporal may retry the original activity after its response is lost.
+    // Since Raw A is already linked, it cannot restore A42 over B42 or advance
+    // any Canonical/provenance counter.
+    raws = [rawA];
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-replay", {})),
+    ).resolves.toEqual({ companies: 0, suppressed: 0 });
+    expect(JSON.stringify(company)).toBe(interveningBytes);
+    expect(company!.version).toBe(interveningVersion);
+    expect(company!.updatedAt).toEqual(interveningUpdatedAt);
+    expect(company!.status).toBe(interveningStatus);
+    expect(links).toHaveLength(interveningLinks);
+    expect(evidence).toHaveLength(interveningEvidence);
+    expect(upsert).toHaveBeenCalledTimes(2);
   });
 
-  it("applies a real sanitizer repair once and preserves its existing governed evidence without relinking Raw", async () => {
+  it("leaves current-state sanitizer cleanup to 2100/2200 instead of mutating through a linked Raw replay", async () => {
     const raw = {
       id: "raw-repair",
       providerKey: "registry",
@@ -1323,19 +1434,16 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       budgetStore: authorityBudgetStore(),
     } as never);
 
-    await expect(
-      activities.canonicalizeRun(discoveryArgs("run-repair", {})),
-    ).resolves.toEqual({ companies: 1, suppressed: 0 });
-    expect(company.attributes).toEqual({ products: ["pump"] });
-    expect(company.version).toBe(4);
-    expect(evidenceCreate).not.toHaveBeenCalled();
-
-    const repairedBytes = JSON.stringify(company);
+    const originalBytes = JSON.stringify(company);
+    const originalUpdatedAt = company.updatedAt;
     await expect(
       activities.canonicalizeRun(discoveryArgs("run-repair", {})),
     ).resolves.toEqual({ companies: 0, suppressed: 0 });
-    expect(JSON.stringify(company)).toBe(repairedBytes);
+    expect(JSON.stringify(company)).toBe(originalBytes);
+    expect(company.version).toBe(3);
+    expect(company.updatedAt).toEqual(originalUpdatedAt);
     expect(evidenceCreate).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 });
 

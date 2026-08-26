@@ -295,6 +295,7 @@ describe("executeQuery Raw Source v2 persistence", () => {
         runId: "40000000-0000-4000-8000-000000000001",
         planId: "50000000-0000-4000-8000-000000000001",
         queryOrdinal: 0,
+        queryReceiptMode: "raw-governance-query-receipt/v1",
         query: {
           source_class: "company_registry",
           filters: {},

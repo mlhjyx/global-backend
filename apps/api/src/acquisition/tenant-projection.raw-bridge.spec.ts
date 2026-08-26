@@ -17,8 +17,13 @@ describe("TenantProjectionService Raw Source bridge", () => {
       ...data,
     }));
     const queryRaw = vi.fn(
-      async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
-        if (statement.strings?.join("?").includes("write_raw_source_record_v2")) {
+      async (statement: {
+        strings?: readonly string[];
+        values?: readonly unknown[];
+      }) => {
+        if (
+          statement.strings?.join("?").includes("write_raw_source_record_v2")
+        ) {
           const command = JSON.parse(String(statement.values?.[0])) as Record<
             string,
             unknown
@@ -162,7 +167,7 @@ describe("TenantProjectionService Raw Source bridge", () => {
 
   it("keeps response-loss replay byte-stable and updates once for a changed governed snapshot", async () => {
     const FETCH_2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-    let entity = {
+    const firstEntity = {
       id: ENTITY,
       sourceId: SOURCE,
       externalId: "exhibitor-1",
@@ -175,21 +180,28 @@ describe("TenantProjectionService Raw Source bridge", () => {
       lastSeenFetchId: FETCH,
       withdrawnAt: null,
     };
-    let fetch = {
+    let entity = firstEntity;
+    const firstFetch = {
       id: FETCH,
       sourceId: SOURCE,
       status: "DONE",
       parserVersion: "acquisition/v1",
       finishedAt: new Date("2026-08-25T16:31:00.000Z"),
     };
+    let fetch = firstFetch;
     let company: Record<string, unknown> | null = null;
     const rawByIngestKey = new Map<string, string>();
     const links: Array<Record<string, unknown>> = [];
     const evidence: Array<Record<string, unknown>> = [];
     let updateClock = 0;
     const writer = vi.fn(
-      async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
-        if (!statement.strings?.join("?").includes("write_raw_source_record_v2")) {
+      async (statement: {
+        strings?: readonly string[];
+        values?: readonly unknown[];
+      }) => {
+        if (
+          !statement.strings?.join("?").includes("write_raw_source_record_v2")
+        ) {
           return [{ pg_advisory_xact_lock: null }];
         }
         const command = JSON.parse(String(statement.values?.[0])) as Record<
@@ -211,32 +223,36 @@ describe("TenantProjectionService Raw Source bridge", () => {
         ];
       },
     );
-    const canonicalCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-      updateClock += 1;
-      company = {
-        id: "company-1",
-        ...data,
-        version: 1,
-        updatedAt: new Date(`2026-08-26T00:00:0${updateClock}.000Z`),
-      };
-      return company;
-    });
-    const canonicalUpdate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-      updateClock += 1;
-      company = {
-        ...company,
-        ...(data.domain && typeof data.domain === "object"
-          ? { domain: (data.domain as { set: string }).set }
-          : {}),
-        ...(data.country && typeof data.country === "object"
-          ? { country: (data.country as { set: string }).set }
-          : {}),
-        attributes: data.attributes,
-        version: Number(company?.version ?? 0) + 1,
-        updatedAt: new Date(`2026-08-26T00:00:0${updateClock}.000Z`),
-      };
-      return company;
-    });
+    const canonicalCreate = vi.fn(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        updateClock += 1;
+        company = {
+          id: "company-1",
+          ...data,
+          version: 1,
+          updatedAt: new Date(`2026-08-26T00:00:0${updateClock}.000Z`),
+        };
+        return company;
+      },
+    );
+    const canonicalUpdate = vi.fn(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        updateClock += 1;
+        company = {
+          ...company,
+          ...(data.domain && typeof data.domain === "object"
+            ? { domain: (data.domain as { set: string }).set }
+            : {}),
+          ...(data.country && typeof data.country === "object"
+            ? { country: (data.country as { set: string }).set }
+            : {}),
+          attributes: data.attributes,
+          version: Number(company?.version ?? 0) + 1,
+          updatedAt: new Date(`2026-08-26T00:00:0${updateClock}.000Z`),
+        };
+        return company;
+      },
+    );
     const tx = {
       $queryRaw: writer,
       suppressionRecord: { findMany: vi.fn(async () => []) },
@@ -247,8 +263,10 @@ describe("TenantProjectionService Raw Source bridge", () => {
         update: canonicalUpdate,
       },
       identityLink: {
-        findFirst: vi.fn(async ({ where }: { where: { rawRecordId: string } }) =>
-          links.find((row) => row.rawRecordId === where.rawRecordId) ?? null),
+        findFirst: vi.fn(
+          async ({ where }: { where: { rawRecordId: string } }) =>
+            links.find((row) => row.rawRecordId === where.rawRecordId) ?? null,
+        ),
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
           links.push({ id: `link-${links.length + 1}`, ...data });
           return {};
@@ -288,7 +306,9 @@ describe("TenantProjectionService Raw Source bridge", () => {
     };
     const service = new TenantProjectionService({ prisma: prisma as never });
 
-    await expect(service.projectSource(WORKSPACE, SOURCE)).resolves.toMatchObject({
+    await expect(
+      service.projectSource(WORKSPACE, SOURCE),
+    ).resolves.toMatchObject({
       entities: 1,
       projected: 1,
     });
@@ -299,7 +319,9 @@ describe("TenantProjectionService Raw Source bridge", () => {
     const firstEvidence = evidence.length;
 
     // The first transaction committed, but its activity response was lost.
-    await expect(service.projectSource(WORKSPACE, SOURCE)).resolves.toMatchObject({
+    await expect(
+      service.projectSource(WORKSPACE, SOURCE),
+    ).resolves.toMatchObject({
       entities: 1,
       projected: 0,
     });
@@ -311,7 +333,7 @@ describe("TenantProjectionService Raw Source bridge", () => {
 
     entity = {
       ...entity,
-      cleaned: { products: ["pump", "valve"], stand: "A42" },
+      cleaned: { products: ["pump", "valve"], stand: "B42" },
       contentHash: "c".repeat(64),
       lastSeenAt: new Date("2026-08-25T17:31:00.000Z"),
       lastSeenFetchId: FETCH_2,
@@ -321,20 +343,49 @@ describe("TenantProjectionService Raw Source bridge", () => {
       id: FETCH_2,
       finishedAt: new Date("2026-08-25T17:31:00.000Z"),
     };
-    await expect(service.projectSource(WORKSPACE, SOURCE)).resolves.toMatchObject({
+    await expect(
+      service.projectSource(WORKSPACE, SOURCE),
+    ).resolves.toMatchObject({
       projected: 1,
     });
-    expect(company!.attributes).toMatchObject({ products: ["pump", "valve"] });
+    expect(company!.attributes).toMatchObject({
+      products: ["pump", "valve"],
+      stand: "B42",
+    });
     expect(company!.version).toBe(Number(firstVersion) + 1);
     expect(links).toHaveLength(firstLinks + 1);
     expect(evidence.length).toBeGreaterThan(firstEvidence);
 
     const changedBytes = JSON.stringify(company);
+    const changedVersion = company!.version;
+    const changedUpdatedAt = company!.updatedAt;
+    const changedStatus = company!.status;
+    const changedLinks = links.length;
     const changedEvidence = evidence.length;
-    await expect(service.projectSource(WORKSPACE, SOURCE)).resolves.toMatchObject({
+    await expect(
+      service.projectSource(WORKSPACE, SOURCE),
+    ).resolves.toMatchObject({
       projected: 0,
     });
     expect(JSON.stringify(company)).toBe(changedBytes);
+    expect(evidence).toHaveLength(changedEvidence);
+
+    // Raw A was already linked. After Raw B changed the overlapping `stand`
+    // namespace, an activity retry or old-source replay of A must not merge
+    // A's stale payload back over the current Canonical bytes.
+    entity = firstEntity;
+    fetch = firstFetch;
+    await expect(
+      service.projectSource(WORKSPACE, SOURCE),
+    ).resolves.toMatchObject({
+      entities: 1,
+      projected: 0,
+    });
+    expect(JSON.stringify(company)).toBe(changedBytes);
+    expect(company!.version).toBe(changedVersion);
+    expect(company!.updatedAt).toEqual(changedUpdatedAt);
+    expect(company!.status).toBe(changedStatus);
+    expect(links).toHaveLength(changedLinks);
     expect(evidence).toHaveLength(changedEvidence);
   });
 });
