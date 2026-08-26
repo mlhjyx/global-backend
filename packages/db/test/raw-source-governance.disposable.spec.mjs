@@ -509,7 +509,7 @@ function seedCurrentMainClone(database = databases.upgrade) {
       (
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
         '{"products":["LLZ1","AB"]}',
-        'registry','${SAFE_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
+        'mapyourshow','${SOURCE_ENTITY}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
       ),
       (
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
@@ -1061,7 +1061,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          FROM canonical_company
          WHERE id='70000000-0000-4000-8000-000000000002';`,
       ),
-      "7|2026-08-25 00:00:00+00",
+      "7|2026-08-25 00:00:00",
     );
     const obsoleteEvidence = JSON.parse(
       dockerPsql(
@@ -1071,7 +1071,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          ) ORDER BY provider_key)::text
          FROM field_evidence
          WHERE entity_id='${COMPANY_A}'
-           AND value::text LIKE '%LLZ1%';`,
+           AND field='attributes'
+           AND provider_key IN ('mapyourshow','usaspending_awards');`,
       ),
     );
     assert.equal(obsoleteEvidence.length, 2);
@@ -1327,6 +1328,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         {
           ...registryBase,
           name: "Acme ٥٥٥-٠١٠٠",
+        },
+      ],
+      [
+        "registry",
+        {
+          ...registryBase,
+          name: "https://registry.example/company/acme",
         },
       ],
       [
@@ -2343,7 +2351,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
              WHERE raw_record_id='${RESTRICTED_RAW_A}')
          );`,
       ),
-      "1|2",
+      "1|3",
     );
     dockerPsql(
       databases.upgrade,
@@ -2545,7 +2553,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                AND value::text LIKE '%person@example.test%')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "true|true|true|5|3",
+      "true|true|true|7|3",
     );
   });
 

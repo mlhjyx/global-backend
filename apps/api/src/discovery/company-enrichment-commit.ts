@@ -52,6 +52,7 @@ export async function commitCompanyEnrichmentResults(
       },
     });
   }
+  if (governedHits.length === 0) return false;
   const updated = await tx.canonicalCompany.updateMany({
     where: { id: current.id, status: { not: 'SUPPRESSED' } },
     data: {

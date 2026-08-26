@@ -34,6 +34,10 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826150000_raw_source_governance_status_hardening",
     checksum: "0".repeat(64),
   },
+  {
+    migrationName: "20260826160000_raw_source_governance_final_correction",
+    checksum: "1".repeat(64),
+  },
 ];
 
 describe("PR #407 experiment _prisma_migrations bridge decision", () => {
@@ -47,7 +51,7 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
     });
   });
 
-  it("accepts a clean inventory with both exact successor checksums", () => {
+  it("accepts a clean inventory with every exact successor checksum", () => {
     expect(
       assessRawSourceMigrationInventory(
         expected.map((entry) => ({

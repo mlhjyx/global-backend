@@ -21,6 +21,6 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
           },
         },
       }),
-    ).toEqual({ digital_footprint: { safe: "industrial", nested: {} } });
+    ).toEqual({ digital_footprint: { safe: "industrial" } });
   });
 });

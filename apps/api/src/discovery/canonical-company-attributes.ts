@@ -118,7 +118,8 @@ function sanitizeValue(
     const terms = value.filter(predicate);
     return terms.length ? [...new Set(terms)] : undefined;
   }
-  if (value === null || typeof value === "boolean") return value;
+  if (value === null) return undefined;
+  if (typeof value === "boolean") return value;
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : undefined;
   }
@@ -134,19 +135,21 @@ function sanitizeValue(
   }
   if (Array.isArray(value)) {
     if (value.length > 50) return undefined;
-    return value
+    const items = value
       .map((item) => sanitizeValue(key, item, state, depth + 1))
       .filter((item) => item !== undefined);
+    return items.length ? items : undefined;
   }
   if (value === null || typeof value !== "object") return undefined;
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length > 64) return undefined;
-  return Object.fromEntries(
+  const sanitized = Object.fromEntries(
     entries.flatMap(([nestedKey, item]) => {
       const sanitized = sanitizeValue(nestedKey, item, state, depth + 1);
       return sanitized === undefined ? [] : [[nestedKey, sanitized]];
     }),
   );
+  return Object.keys(sanitized).length ? sanitized : undefined;
 }
 
 /**

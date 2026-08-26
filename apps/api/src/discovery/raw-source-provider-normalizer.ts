@@ -203,7 +203,11 @@ export function isSecretFreeText(value: unknown): value is string {
   return typeof value === "string" && !PII_OR_SECRET.test(value);
 }
 export function isProviderCompanyName(value: unknown): value is string {
-  return typeof value === "string" && isContactFreeText(value);
+  return (
+    typeof value === "string" &&
+    !/(?:[a-z][a-z0-9+.-]*:\/\/|\bwww\.)/iu.test(value) &&
+    isContactFreeText(value)
+  );
 }
 export function isContactFreeText(value: unknown): value is string {
   return isSecretFreeText(value) && !CONTACT_LIKE_PHONE.test(value);

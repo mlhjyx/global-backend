@@ -165,7 +165,12 @@ describe("Raw Source v2 ingestion boundary", () => {
   );
 
   it.each([
-    ["company name", { name: "Acme ٥٥٥-٠١٠٠" }],
+    ["company name", { name: "Acme ٥٥٥-٠١٠٠" }, "٥٥٥-٠١٠٠"],
+    [
+      "company name URL",
+      { name: "https://registry.example/company/acme" },
+      "https://registry.example/company/acme",
+    ],
     [
       "URL path",
       {
@@ -174,8 +179,9 @@ describe("Raw Source v2 ingestion boundary", () => {
           sourceUrl: "https://registry.example/company/٥٥٥-٠١٠٠",
         },
       },
+      "٥٥٥-٠١٠٠",
     ],
-  ])("rejects a Unicode-decimal local phone in every persisted %s", (_label, overrides) => {
+  ])("rejects a contact- or URL-shaped value in persisted %s", (_label, overrides, forbidden) => {
     const row = prepareRawSourceBatch({
       providerKey: "registry",
       records: [companyRecord(overrides)],
@@ -189,7 +195,7 @@ describe("Raw Source v2 ingestion boundary", () => {
       dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
       externalId: null,
     });
-    expect(JSON.stringify(row.payload)).not.toContain("٥٥٥-٠١٠٠");
+    expect(JSON.stringify(row.payload)).not.toContain(forbidden);
   });
 
   it("rejects an attribute outside the provider schema and an ungoverned provider", () => {
