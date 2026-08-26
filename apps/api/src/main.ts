@@ -50,6 +50,11 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     // become part of its public contract through permissive code generation.
     technicalBudgetQuote.additionalProperties = false;
   }
+  const workspaceTechnicalBudgetQuote =
+    document.components?.schemas?.WorkspaceTechnicalBudgetQuoteResponseDto;
+  if (workspaceTechnicalBudgetQuote && !('$ref' in workspaceTechnicalBudgetQuote)) {
+    workspaceTechnicalBudgetQuote.additionalProperties = false;
+  }
   return document;
 }
 

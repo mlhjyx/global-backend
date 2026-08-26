@@ -2624,6 +2624,341 @@
         ]
       }
     },
+    "/api/v1/execution-budget/workspace-technical-quote": {
+      "post": {
+        "operationId": "WorkspaceTechnicalBudgetQuoteController_quote_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "body"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /companies"
+                        ]
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "website"
+                        ],
+                        "properties": {
+                          "website": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "maxLength": 200
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "companyId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /companies/:companyId/icps"
+                        ]
+                      },
+                      "companyId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "icpId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /icps/:icpId/query-plans"
+                        ]
+                      },
+                      "icpId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "planId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /query-plans/:planId/execute"
+                        ]
+                      },
+                      "planId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "companyId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /canonical-companies/:id/discover-contacts"
+                        ]
+                      },
+                      "companyId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "companyId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /canonical-companies/:id/guess-emails"
+                        ]
+                      },
+                      "companyId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lawfulBasis": {
+                            "type": "string",
+                            "enum": [
+                              "legitimate_interest",
+                              "consent",
+                              "contract",
+                              "legal_obligation"
+                            ]
+                          },
+                          "lawfulBasisRef": {
+                            "type": "string",
+                            "maxLength": 512
+                          },
+                          "lawfulBasisNote": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "allowPersonalWithoutBasis": {
+                            "type": "boolean"
+                          },
+                          "maxContacts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 25
+                          },
+                          "maxProbe": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "pointId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /contact-points/:pointId/verify"
+                        ]
+                      },
+                      "pointId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lawfulBasis": {
+                            "type": "string",
+                            "enum": [
+                              "legitimate_interest",
+                              "consent",
+                              "contract",
+                              "legal_obligation"
+                            ]
+                          },
+                          "lawfulBasisRef": {
+                            "type": "string",
+                            "maxLength": 512
+                          },
+                          "lawfulBasisNote": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "allowPersonalWithoutBasis": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspaceTechnicalBudgetQuoteResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_QUOTE_INVALID"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_QUOTE_UNAVAILABLE",
+                            "EXECUTION_BUDGET_POLICY_DRIFT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "计算 Workspace operation 的平台内部执行安全包络；不构成客户价格、余额或额度",
+        "tags": [
+          "ExecutionBudget"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -12147,6 +12482,107 @@
       }
     },
     "schemas": {
+      "WorkspaceTechnicalBudgetQuoteResponseDto": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "execution-budget-technical-quote/v1"
+            ]
+          },
+          "authorityKind": {
+            "type": "string",
+            "enum": [
+              "WORKSPACE_GRANT"
+            ]
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "POST /companies",
+              "POST /companies/:companyId/icps",
+              "POST /icps/:icpId/query-plans",
+              "POST /query-plans/:planId/execute",
+              "POST /canonical-companies/:id/discover-contacts",
+              "POST /canonical-companies/:id/guess-emails",
+              "POST /contact-points/:pointId/verify"
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "understanding.run",
+              "icp.design",
+              "icp.query_plan",
+              "discovery.run",
+              "contact.verify"
+            ]
+          },
+          "subjectType": {
+            "type": "string",
+            "enum": [
+              "company",
+              "icp",
+              "discovery_run",
+              "contact_point"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "requestSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "microusd"
+            ]
+          },
+          "requiredCapMicrousd": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "policyRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "authorityKind",
+          "operation",
+          "workspaceId",
+          "purpose",
+          "subjectType",
+          "subjectId",
+          "requestSha256",
+          "currency",
+          "unit",
+          "requiredCapMicrousd",
+          "policyRevision",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
       "PublicContactDto": {
         "type": "object",
         "properties": {

@@ -1,5 +1,6 @@
 import { AiTaskContract } from './task-contract';
 import { resolveTaskRoute } from '../site-builder/agents/task-routes';
+import { MAX_CONTACTS_PER_DISCOVERY_ADAPTER } from '../discovery/execution-envelope';
 
 type OutputSchema = Record<string, unknown>;
 
@@ -79,6 +80,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // 理解管线的页面抓取以本契约身份经 Broker（understanding.activities）——白名单收口②填实。
     allowedTools: ['crawl4ai.fetch'],
     maxCostCents: 20,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '从企业官网/文档文本中抽取带类型与置信度的企业事实（Claim）。覆盖 KNW-002 全范围：能力、认证、案例、参数、MOQ、交期、市场、企业基本面；发现营销性/绝对化表述时输出 forbidden_expression_candidate 供品牌审核。只抽文本中明确存在的信息。',
@@ -105,6 +107,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'company_understanding.extract_profile',
     allowedTools: [],
     maxCostCents: 10,
+    maxOutputTokens: 4_096,
     timeoutMs: 120000,
     description:
       '从企业官网首页文本提炼企业画像：行业归类与一段话简介（中文，仅基于给定文本，不得编造规模/年份等未出现的信息）。',
@@ -121,6 +124,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'company_understanding.extract_offerings',
     allowedTools: [],
     maxCostCents: 20,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '从企业官网页面文本中抽取结构化的产品/服务（Offering）：名称、简述、关键属性（MOQ/交期/参数/认证/材料等，仅当文本中明确出现时才填），并附来源原文片段。禁止编造文本中不存在的属性。',
@@ -151,6 +155,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'icp.design',
     allowedTools: [],
     maxCostCents: 40,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '基于卖方企业的已确认事实(Claim)，设计理想客户画像(ICP)：目标公司属性、痛点、采购触发信号、排除条件、价值主张、目标市场、买家委员会角色，以及机器可评估的验证规则(qualification_rules)。规则的 field 使用规范属性名：industry/sub_industry/region/country/employee_count/revenue/certifications/keywords/tech/business_model/end_markets。',
@@ -224,6 +229,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②：白名单真实生效）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 15,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '判断给定网页是否为一家真实企业的官网，若是则抽取结构化企业属性。只允许使用网页文本中明确出现的信息，禁止编造或从画像上下文照抄。若不是企业官网（是目录/百科/新闻/市场平台/博客），is_company_site 置 false。',
@@ -259,12 +265,13 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // DecisionMaker/public_web 联系人路径以本契约身份经 Broker 搜索/抓取（收口②）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 15,
+    maxOutputTokens: 4_096,
     timeoutMs: 120000,
     description:
       '从企业的 Impressum/法律声明/团队/管理层/联系页文本里抽取**具名的人**及其职务与联系方式，并按买家委员会角色分类。铁律：只抽取页面文本中**明确出现**的人名/职务/邮箱/电话，禁止编造或推断未写出的邮箱；抽不到就返回空数组。德国 Impressum 依法列 Geschäftsführer（总经理）——优先抽取。给定卖方 ICP 的目标买家角色时，标注每个人是否命中目标角色。所有具名人属个人数据。',
     outputSchema: closedObject({
       people: {
-        ...boundedArray(64, closedObject({
+        ...boundedArray(MAX_CONTACTS_PER_DISCOVERY_ADAPTER, closedObject({
           full_name: boundedString(500),
           title: boundedString(500, {
             description: '职务原文（如 Geschäftsführer / Head of Production）',
@@ -297,6 +304,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // DirectoryDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 20,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '判断给定网页是否为一个企业名录/列表页（协会会员名录、展会参展商名单、行业目录），若是则抽取其中列出的**多家公司**。只允许使用页面文本中明确出现的公司，禁止编造。若页面只讲一家公司或根本不是名录，is_directory 置 false、companies 置空。每家公司尽量给出官网与所在地（仅当文本出现）。',
@@ -333,6 +341,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['code']),
     allowedTools: [], // 纯生成，无工具
     maxCostCents: 5,
+    maxOutputTokens: 4_096,
     timeoutMs: 60000,
     model: 'deepseek-v4-flash', // 高频、便宜、冷路径
     risk: 'low',
@@ -343,6 +352,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.qualify_fit',
     allowedTools: [],
     maxCostCents: 20,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '给定卖方 ICP 与一家候选公司，判断它是否为该卖方的真实目标客户。必须通过四个门：\n1) 材质门：候选的加工材质是否与 ICP 目标一致（如金属 vs 塑料/织物/粉体）——注意 "RF welding"（射频热合塑料）≠ 金属焊接，"toll processing/筛分" 处理粉末≠金属工件加工。\n2) 角色门：候选是设备/产品的下游买家，还是与卖方同类的设备制造商（竞品）？竞品判 mismatch。\n3) 工艺子集门：候选是否真正从事 ICP 核心工艺，还是仅相邻工艺（如纯机加/磨削而无激光/钣金/折弯/焊接）。\n4) 商业模式门：候选是自有产线的制造商，还是聚合第三方供应商的采购中介平台？中介平台判 weak。\n任一硬门失败判 mismatch；边缘/相邻判 weak；全部通过判 match。只依据给定信息，理由需具体。',
@@ -370,6 +380,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.query_plan',
     allowedTools: [],
     maxCostCents: 40,
+    maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
       '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（可用 filters.source_hint 精确路由，省略=该类全跑）：\n- public_intelligence → public_web（SearXNG 官网挖掘，关键词驱动）、ted（欧盟招投标中标发现：需 filters.cpv + filters.buyer_country；CPV 由系统按 ICP 冷路径确定性注入，勿自行臆造码）\n- company_registry → wikidata（结构化：按行业+国家零爬取查公司+官网+员工数）\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索。',
@@ -431,6 +442,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // ToolBroker 合同复制第二份会随 MODEL promotion/rollback 漂移的快照。
     get maxCostCents() {
       return resolveTaskRoute('site_builder.brand_profile').maxCostCents;
+    },
+    get maxOutputTokens() {
+      return resolveTaskRoute('site_builder.brand_profile').maxTokens;
     },
     get timeoutMs() {
       return resolveTaskRoute('site_builder.brand_profile').timeoutMs;

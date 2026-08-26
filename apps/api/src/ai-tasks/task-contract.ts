@@ -26,6 +26,8 @@ export interface AiTaskContract {
   allowedTools?: string[];
   /** Hard budget ceiling for one task invocation (reserve-then-settle in the broker). */
   maxCostCents?: number;
+  /** Hard provider-wire output token ceiling for every invocation. */
+  maxOutputTokens: number;
   /** Per-invocation timeout for the model call. */
   timeoutMs?: number;
   /** Retry budget for transient failures (broker/activity level). */

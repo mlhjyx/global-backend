@@ -7,7 +7,13 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
 import { EmailGuesser, GuessResult } from './email-guesser';
 import { persistGuessedEmail, readbackGuessedEmail } from './email-guess-persist';
-import { buildGuessTargets } from './email-guess-targets';
+import {
+  assertContactDiscoveryAdapterFanout,
+  assertContactDiscoveryResultBound,
+  assertEmailGuessContactBound,
+  assertEmailProbeBound,
+  buildGuessTargets,
+} from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis,
@@ -277,6 +283,7 @@ export class DiscoveryService {
         });
       }
       const adapters = await this.providers.routeContactDiscovery(tx as never);
+      assertContactDiscoveryAdapterFanout(adapters.length);
       if (!adapters.length) {
         throw new ConflictException({
           error: {
@@ -345,6 +352,7 @@ export class DiscoveryService {
               onDurableReceipt: captureContactReceipt,
             },
           );
+          assertContactDiscoveryResultBound(result.contacts.length);
           perAdapter.push({
             key: adapter.key,
             contacts: result.contacts,
@@ -444,6 +452,9 @@ export class DiscoveryService {
     compactJws?: string,
     publicRequestBody?: GuessEmailsHttpRequestBody,
   ) {
+    // Controller DTO 不是唯一入口：内部调用也必须在 grant、DB 或 SMTP 之前接受同一上界。
+    assertEmailGuessContactBound(opts?.maxContacts);
+    assertEmailProbeBound(opts?.maxProbe);
     const binding = await this.authority.consumeWorkspaceGrant({
       compactJws,
       identity: ctx,

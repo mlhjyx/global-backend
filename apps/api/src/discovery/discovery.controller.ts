@@ -30,6 +30,7 @@ import {
   SuppressionDecisionRequest,
 } from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
+import { DEFAULT_MAX_GUESS_CONTACTS, MAX_EMAIL_PROBE_CANDIDATES } from './email-guess-targets';
 import { LawfulBasisKind } from './provider-contract';
 import { SUPPRESSION_TYPES } from './suppression-value';
 import {
@@ -170,24 +171,24 @@ class GuessEmailsDto {
     type: 'integer',
     description: '最多补全几个缺邮箱决策人（有界护栏，默认 25）',
     minimum: 1,
-    maximum: 25,
+    maximum: DEFAULT_MAX_GUESS_CONTACTS,
   })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(25)
+  @Max(DEFAULT_MAX_GUESS_CONTACTS)
   maxContacts?: number;
 
   @ApiPropertyOptional({
     type: 'integer',
     description: '每人最多探测几个候选（有界护栏，默认 8）',
     minimum: 1,
-    maximum: 8,
+    maximum: MAX_EMAIL_PROBE_CANDIDATES,
   })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(8)
+  @Max(MAX_EMAIL_PROBE_CANDIDATES)
   maxProbe?: number;
 }
 

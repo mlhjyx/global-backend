@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestContext } from '../auth/request-context';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import type { EmailVerifyContext, ExecutionContext } from './provider-contract';
+import {
+  MAX_CONTACT_DISCOVERY_ADAPTERS,
+  MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+  MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET,
+} from './email-guess-targets';
 
 const mocks = vi.hoisted(() => ({
   persistDiscoveredContacts: vi.fn(),
@@ -231,6 +236,78 @@ describe('actual discovery receipt consumers', () => {
     );
   });
 
+  it('rejects an over-cap contact adapter fan-out before any adapter can make a physical call', async () => {
+    const discoverContacts = vi.fn();
+    const adapter = { key: 'decision_maker', discoverContacts };
+    const company = {
+      id: COMPANY_ID,
+      name: 'Acme GmbH',
+      domain: 'acme.example',
+      country: 'DE',
+      status: 'NEW',
+      dedupeKey: 'd:acme.example',
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: { findUnique: vi.fn(async () => company) },
+      fieldEvidence: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+    };
+    const service = new DiscoveryService(
+      { withWorkspace: async (_workspaceId: string, callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx) } as never,
+      {
+        routeContactDiscovery: vi.fn(async () =>
+          Array.from({ length: MAX_CONTACT_DISCOVERY_ADAPTERS + 1 }, () => adapter),
+        ),
+      } as never,
+      authority('over-cap-contact-adapters') as never,
+      budgetStore() as never,
+    );
+
+    await expect(service.discoverContacts(CTX, COMPANY_ID)).rejects.toMatchObject({
+      response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
+    });
+    expect(discoverContacts).not.toHaveBeenCalled();
+    expect(mocks.persistDiscoveredContacts).not.toHaveBeenCalled();
+  });
+
+  it('rejects an adapter result above 25 contacts before any contact persistence', async () => {
+    const discoverContacts = vi.fn(async () => ({
+      contacts: Array.from({ length: MAX_CONTACTS_PER_DISCOVERY_ADAPTER + 1 }, (_, index) => ({
+        externalId: `over-cap-${index}`,
+        fullName: `Person ${index}`,
+        personalData: true,
+      })),
+      costCents: 0,
+    }));
+    const company = {
+      id: COMPANY_ID,
+      name: 'Acme GmbH',
+      domain: 'acme.example',
+      country: 'DE',
+      status: 'NEW',
+      dedupeKey: 'd:acme.example',
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: { findUnique: vi.fn(async () => company) },
+      fieldEvidence: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+    };
+    const service = new DiscoveryService(
+      { withWorkspace: async (_workspaceId: string, callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx) } as never,
+      { routeContactDiscovery: vi.fn(async () => [{ key: 'decision_maker', discoverContacts }]) } as never,
+      authority('over-cap-contact-result') as never,
+      budgetStore() as never,
+    );
+
+    await expect(service.discoverContacts(CTX, COMPANY_ID)).rejects.toMatchObject({
+      response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
+    });
+    expect(discoverContacts).toHaveBeenCalledOnce();
+    expect(mocks.persistDiscoveredContacts).not.toHaveBeenCalled();
+  });
+
   it('captures smtp.rcpt_probe and ACKs the exact ContactPoint verdict writes transaction', async () => {
     const company = {
       id: COMPANY_ID,
@@ -306,6 +383,9 @@ describe('actual discovery receipt consumers', () => {
     );
 
     await service.verifyContactPoint(CTX, POINT_ID);
+
+    expect(MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET).toBe(1);
+    expect(verifyEmail).toHaveBeenCalledOnce();
 
     expect(mocks.applyDomainAckConsumerTransactions).toHaveBeenCalledOnce();
     expect(mocks.applyDomainAckConsumerTransactions.mock.calls[0]?.[0]).toMatchObject({

@@ -38,6 +38,7 @@ describe('executeStructuredTaskWithRuntime', () => {
       task: 'taxonomy.normalize',
       model: 'deepseek-v4-flash',
       prompt: 'Normalize pumps.',
+      maxTokens: 4_096,
     });
     expect(result).toMatchObject({
       data: { code: '123' },
@@ -100,5 +101,43 @@ describe('executeStructuredTaskWithRuntime', () => {
       { workspaceId: 'ws-1', runId: 'run-1', paidCost: {} as never },
     )).rejects.toThrow(/settlement is unknown/);
     expect(generateStructured).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an unregistered structured task before the gateway even with an explicit token cap', async () => {
+    const generateStructured = vi.fn();
+
+    await expect(
+      executeStructuredTaskWithRuntime(
+        { generateStructured } as unknown as ModelGateway,
+        {
+          task: 'unregistered.task',
+          prompt: 'x',
+          model: 'deepseek-v4-flash',
+          schema,
+          maxTokens: 1,
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
+    expect(generateStructured).not.toHaveBeenCalled();
+  });
+
+  it('rejects a caller token cap above the registered task contract before the gateway', async () => {
+    const generateStructured = vi.fn();
+
+    await expect(
+      executeStructuredTaskWithRuntime(
+        { generateStructured } as unknown as ModelGateway,
+        {
+          task: 'taxonomy.normalize',
+          prompt: 'x',
+          model: 'deepseek-v4-flash',
+          schema,
+          maxTokens: 4_097,
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
+    expect(generateStructured).not.toHaveBeenCalled();
   });
 });
