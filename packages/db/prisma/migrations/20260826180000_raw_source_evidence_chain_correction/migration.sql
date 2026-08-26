@@ -47,6 +47,10 @@ WITH receipt_candidates AS (
         AND disposition.raw_record_id = evidence.raw_record_id
         AND disposition.effect = 'RESTRICT_PROCESSING'
     )
+    -- A recognized current receipt is terminal. If a later field-aware rule
+    -- rejects its retained value, leave it unchanged for an explicit future
+    -- chained correction rather than misclassifying it as a plain value.
+    AND NOT public.raw_source_cleanup_receipt_v2_shape_valid_v1(evidence.value)
     AND evidence.value IS DISTINCT FROM
       public.raw_source_sanitize_field_evidence_v4(
         evidence.field,evidence.value
@@ -56,7 +60,8 @@ WITH receipt_candidates AS (
     CASE
       WHEN candidate.is_v1_receipt
         AND candidate.value ? 'retainedValue'
-      THEN public.sanitize_canonical_company_attributes_v3(
+      THEN public.raw_source_sanitize_field_evidence_plain_v5(
+        candidate.field,
         candidate.value->'retainedValue'
       )
       WHEN candidate.is_v1_receipt THEN NULL

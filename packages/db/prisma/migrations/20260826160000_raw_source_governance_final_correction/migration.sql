@@ -125,8 +125,10 @@ AS $$
   )
 $$;
 
--- Re-evaluate governed attribute evidence with the same path-aware sanitizer.
-CREATE FUNCTION raw_source_sanitize_field_evidence_v4(
+-- Sanitize a plain FieldEvidence value through its own field path. This helper
+-- deliberately knows nothing about cleanup receipts so receipt terminal checks
+-- cannot recurse back into receipt handling.
+CREATE FUNCTION raw_source_sanitize_field_evidence_plain_v5(
   p_field TEXT,
   p_value JSONB
 )
@@ -143,58 +145,6 @@ DECLARE
   item_index INTEGER;
   normalized_field TEXT := lower(regexp_replace(p_field,'[^a-z0-9]','','g'));
 BEGIN
-  -- Preserve an exact v1 cleanup receipt when its optional retained value
-  -- already satisfies the current sanitizer. Stale v1 retained values are
-  -- upgraded by the DML-only 1800 migration.
-  IF jsonb_typeof(p_value) = 'object'
-    AND public.raw_source_json_keys_within_v2(
-      p_value,
-      ARRAY['_historicalCleanup','reason','originalValueHash','retainedValue'],
-      ARRAY['_historicalCleanup','reason','originalValueHash']
-    )
-    AND p_value->>'_historicalCleanup' = 'canonical-attribute-cleanup/v1'
-    AND p_value->>'reason' = 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD'
-    AND jsonb_typeof(p_value->'originalValueHash') = 'string'
-    AND p_value->>'originalValueHash' ~ '^[0-9a-f]{64}$'
-    AND (
-      NOT p_value ? 'retainedValue'
-      OR p_value->'retainedValue' IS NOT DISTINCT FROM
-        public.sanitize_canonical_company_attributes_v3(
-          p_value->'retainedValue'
-        )
-    )
-  THEN RETURN p_value; END IF;
-
-  -- Current v2 receipts are terminal sanitizer values. The predecessor hash
-  -- is present only when the immediately prior value was a v1 receipt; plain
-  -- pre-cleanup values deliberately have no predecessorReceiptHash.
-  IF jsonb_typeof(p_value) = 'object'
-    AND public.raw_source_json_keys_within_v2(
-      p_value,
-      ARRAY['_historicalCleanup','reason','originalValueHash',
-        'predecessorReceiptHash','retainedValue'],
-      ARRAY['_historicalCleanup','reason','originalValueHash']
-    )
-    AND p_value->>'_historicalCleanup' = 'canonical-attribute-cleanup/v2'
-    AND p_value->>'reason' = 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD'
-    AND jsonb_typeof(p_value->'originalValueHash') = 'string'
-    AND p_value->>'originalValueHash' ~ '^[0-9a-f]{64}$'
-    AND (
-      NOT p_value ? 'predecessorReceiptHash'
-      OR (
-        jsonb_typeof(p_value->'predecessorReceiptHash') = 'string'
-        AND p_value->>'predecessorReceiptHash' ~ '^[0-9a-f]{64}$'
-      )
-    )
-    AND (
-      NOT p_value ? 'retainedValue'
-      OR p_value->'retainedValue' IS NOT DISTINCT FROM
-        public.sanitize_canonical_company_attributes_v3(
-          p_value->'retainedValue'
-        )
-    )
-  THEN RETURN p_value; END IF;
-
   IF p_field = 'attributes' THEN
     RETURN public.sanitize_canonical_company_attributes_v3(p_value);
   END IF;
@@ -233,6 +183,88 @@ BEGIN
 END
 $$;
 
+-- Recognize the closed v2 receipt envelope independently from whether its
+-- retained value is still admissible under the current field-aware sanitizer.
+CREATE FUNCTION raw_source_cleanup_receipt_v2_shape_valid_v1(p_value JSONB)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+STRICT
+SET search_path = pg_catalog, public
+AS $$
+  SELECT CASE WHEN jsonb_typeof(p_value) = 'object' THEN
+    public.raw_source_json_keys_within_v2(
+      p_value,
+      ARRAY['_historicalCleanup','reason','originalValueHash',
+        'predecessorReceiptHash','retainedValue'],
+      ARRAY['_historicalCleanup','reason','originalValueHash']
+    )
+    AND p_value->>'_historicalCleanup' = 'canonical-attribute-cleanup/v2'
+    AND p_value->>'reason' = 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD'
+    AND jsonb_typeof(p_value->'originalValueHash') = 'string'
+    AND p_value->>'originalValueHash' ~ '^[0-9a-f]{64}$'
+    AND (
+      NOT p_value ? 'predecessorReceiptHash'
+      OR (
+        jsonb_typeof(p_value->'predecessorReceiptHash') = 'string'
+        AND p_value->>'predecessorReceiptHash' ~ '^[0-9a-f]{64}$'
+      )
+    )
+  ELSE false END
+$$;
+
+-- Re-evaluate governed attribute evidence while treating recognized current
+-- receipts as terminal values. Invalid current retained values fail closed and
+-- never fall through to the plain-value path.
+CREATE FUNCTION raw_source_sanitize_field_evidence_v4(
+  p_field TEXT,
+  p_value JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  -- Preserve an exact v1 cleanup receipt when its optional retained value
+  -- already satisfies the current sanitizer. Stale v1 retained values are
+  -- upgraded by the DML-only 1800 migration.
+  IF jsonb_typeof(p_value) = 'object'
+    AND public.raw_source_json_keys_within_v2(
+      p_value,
+      ARRAY['_historicalCleanup','reason','originalValueHash','retainedValue'],
+      ARRAY['_historicalCleanup','reason','originalValueHash']
+    )
+    AND p_value->>'_historicalCleanup' = 'canonical-attribute-cleanup/v1'
+    AND p_value->>'reason' = 'UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD'
+    AND jsonb_typeof(p_value->'originalValueHash') = 'string'
+    AND p_value->>'originalValueHash' ~ '^[0-9a-f]{64}$'
+    AND (
+      NOT p_value ? 'retainedValue'
+      OR p_value->'retainedValue' IS NOT DISTINCT FROM
+        public.raw_source_sanitize_field_evidence_plain_v5(
+          p_field,
+          p_value->'retainedValue'
+        )
+    )
+  THEN RETURN p_value; END IF;
+
+  IF public.raw_source_cleanup_receipt_v2_shape_valid_v1(p_value) THEN
+    IF (
+      NOT p_value ? 'retainedValue'
+      OR p_value->'retainedValue' IS NOT DISTINCT FROM
+        public.raw_source_sanitize_field_evidence_plain_v5(
+          p_field,
+          p_value->'retainedValue'
+        )
+    ) THEN RETURN p_value; END IF;
+    RETURN NULL;
+  END IF;
+
+  RETURN public.raw_source_sanitize_field_evidence_plain_v5(p_field,p_value);
+END
+$$;
+
 REVOKE ALL ON FUNCTION raw_source_provider_company_name_valid_v2(TEXT)
   FROM PUBLIC, app_user;
 REVOKE ALL ON FUNCTION raw_source_provider_payload_valid_v2_status_hardening(TEXT,JSONB)
@@ -242,6 +274,10 @@ REVOKE ALL ON FUNCTION raw_source_provider_payload_valid_v2(TEXT,JSONB)
 REVOKE ALL ON FUNCTION raw_source_prune_empty_json_v4(JSONB)
   FROM PUBLIC, app_user;
 REVOKE ALL ON FUNCTION sanitize_canonical_company_attributes_v3(JSONB)
+  FROM PUBLIC, app_user;
+REVOKE ALL ON FUNCTION raw_source_sanitize_field_evidence_plain_v5(TEXT,JSONB)
+  FROM PUBLIC, app_user;
+REVOKE ALL ON FUNCTION raw_source_cleanup_receipt_v2_shape_valid_v1(JSONB)
   FROM PUBLIC, app_user;
 REVOKE ALL ON FUNCTION raw_source_sanitize_field_evidence_v4(TEXT,JSONB)
   FROM PUBLIC, app_user;

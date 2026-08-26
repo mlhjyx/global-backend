@@ -1268,7 +1268,19 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
               evidence.fetched_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
             ),
             'predecessorPresent',(evidence.value ? 'predecessorReceiptHash'),
-            'containsUnsafe',(evidence.value::text LIKE '%"AB"%')
+            'containsUnsafe',(evidence.value::text LIKE '%"AB"%'),
+            'helperAclClosed',(
+              NOT has_function_privilege(
+                'app_user',
+                'raw_source_sanitize_field_evidence_plain_v5(text,jsonb)',
+                'EXECUTE'
+              )
+              AND NOT has_function_privilege(
+                'app_user',
+                'raw_source_cleanup_receipt_v2_shape_valid_v1(jsonb)',
+                'EXECUTE'
+              )
+            )
           )::text
           FROM field_evidence AS evidence
           WHERE evidence.entity_id='${COMPANY_A}'
@@ -1297,6 +1309,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       fetchedAt: "2026-08-25T16:31:00.000Z",
       predecessorPresent: false,
       containsUnsafe: false,
+      helperAclClosed: true,
     };
     const metadata = (snapshot) => ({
       rowCount: snapshot.rowCount,
@@ -1314,6 +1327,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       fetchedAt: snapshot.fetchedAt,
       predecessorPresent: snapshot.predecessorPresent,
       containsUnsafe: snapshot.containsUnsafe,
+      helperAclClosed: snapshot.helperAclClosed,
     });
 
     const first = readSnapshot();
@@ -1343,6 +1357,71 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         rowBytesStable: true,
         firstMetadata: expectedMetadata,
         secondMetadata: expectedMetadata,
+      },
+    );
+
+    dockerPsql(
+      databases.dottedReceipt,
+      `UPDATE field_evidence
+       SET value=jsonb_build_object(
+         '_historicalCleanup','canonical-attribute-cleanup/v2',
+         'reason','UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD',
+         'originalValueHash','${DOTTED_PRODUCTS_ORIGINAL_VALUE_HASH}',
+         'retainedValue','["pump","AB"]'::jsonb
+       )
+       WHERE entity_id='${COMPANY_A}'
+         AND raw_record_id='${DOTTED_PRODUCTS_RAW_A}';`,
+    );
+    const readFailClosedSnapshot = () =>
+      JSON.parse(
+        dockerPsql(
+          databases.dottedReceipt,
+          `SELECT jsonb_build_object(
+            'originalValueHash',value->>'originalValueHash',
+            'retainedHasSafe',((value->'retainedValue') ? 'pump'),
+            'retainedHasUnsafe',((value->'retainedValue') ? 'AB'),
+            'sanitizerIsNull',(
+              raw_source_sanitize_field_evidence_v4(field,value) IS NULL
+            ),
+            'receiptHash',encode(digest(
+              raw_source_canonical_json_v1(value),'sha256'
+            ),'hex'),
+            'rowDigest',encode(digest(concat_ws('|',
+              id::text,workspace_id::text,entity_type,entity_id::text,field,
+              raw_source_canonical_json_v1(value),provider_key,
+              coalesce(raw_record_id::text,'null'),
+              coalesce(confidence::text,'null'),license,
+              coalesce(allowed_actions::text,'null'),data_class,fetched_at::text
+            ),'sha256'),'hex')
+          )::text
+          FROM field_evidence
+          WHERE entity_id='${COMPANY_A}'
+            AND raw_record_id='${DOTTED_PRODUCTS_RAW_A}';`,
+        ),
+      );
+    const invalidBefore = readFailClosedSnapshot();
+    dockerPsql(
+      databases.dottedReceipt,
+      readFileSync(evidenceChainMigrationPath, "utf8"),
+    );
+    const invalidAfter = readFailClosedSnapshot();
+    assert.deepEqual(
+      {
+        originalValueHash: invalidAfter.originalValueHash,
+        retainedHasSafe: invalidAfter.retainedHasSafe,
+        retainedHasUnsafe: invalidAfter.retainedHasUnsafe,
+        sanitizerIsNull: invalidAfter.sanitizerIsNull,
+        receiptBytesStable:
+          invalidBefore.receiptHash === invalidAfter.receiptHash,
+        rowBytesStable: invalidBefore.rowDigest === invalidAfter.rowDigest,
+      },
+      {
+        originalValueHash: DOTTED_PRODUCTS_ORIGINAL_VALUE_HASH,
+        retainedHasSafe: true,
+        retainedHasUnsafe: true,
+        sanitizerIsNull: true,
+        receiptBytesStable: true,
+        rowBytesStable: true,
       },
     );
   });
@@ -3097,10 +3176,16 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           raw_source_provider_payload_valid_v2(
             'registry',
             '{"externalId":"rollback-alice","name":"Alice Van Smith","attributes":{"products":["pump"]},"provenance":{"sourceUrl":"https://registry.example/company/rollback-alice","fetchedAt":"2026-08-26T00:00:00.000Z","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parserVersion":"registry/v2"}}'::jsonb
-          )::text
+          )::text,
+          (to_regprocedure(
+            'raw_source_sanitize_field_evidence_plain_v5(text,jsonb)'
+          ) IS NULL)::text,
+          (to_regprocedure(
+            'raw_source_cleanup_receipt_v2_shape_valid_v1(jsonb)'
+          ) IS NULL)::text
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "2|true|2|false",
+      "2|true|2|false|true|true",
     );
   });
 

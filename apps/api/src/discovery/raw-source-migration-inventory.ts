@@ -46,6 +46,11 @@ export const PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS: readonly ExpectedMigrati
       checksum:
         "d8783aa0b513679d8944841c7e55b03812cc9709cc6d6c39005a9caadeaeea11",
     }),
+    Object.freeze({
+      migrationName: "20260826160000_raw_source_governance_final_correction",
+      checksum:
+        "c8e6e5520747ada0d0f70104a7dd0f8ece2edcc7ccdcc7237cacbfd7566c24d0",
+    }),
   ]);
 
 export type RawSourceMigrationDecision = Readonly<{
