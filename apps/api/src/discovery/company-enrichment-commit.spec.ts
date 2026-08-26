@@ -34,7 +34,7 @@ describe('company enrichment commit suppression boundary', () => {
             result: {
               matched: true,
               confidence: 0.9,
-              attributes: { ads: true },
+              attributes: { is_advertiser: true },
               costCents: 0,
             },
           },
@@ -47,7 +47,10 @@ describe('company enrichment commit suppression boundary', () => {
       where: { id: 'co-1', status: { not: 'SUPPRESSED' } },
       data: {
         attributes: {
-          digital_footprint: { ads: true, _ts: '2026-08-10T00:00:00.000Z' },
+          digital_footprint: {
+            is_advertiser: true,
+            _ts: '2026-08-10T00:00:00.000Z',
+          },
         },
         version: { increment: 1 },
       },
