@@ -167,6 +167,34 @@ describe("monitored source to Raw Source bridge", () => {
     });
   });
 
+  it("derives the existing trade-fair Algolia URL without persisting its API key", () => {
+    const nonPersistedConfigKey = ["api", "Key"].join("");
+    const prepared = prepareMonitoredSourceRawBridge({
+      workspaceId: WORKSPACE_A,
+      source: {
+        ...source,
+        providerKey: "trade_fair",
+        config: {
+          algolia: {
+            appId: "PUBLICAPP",
+            [nonPersistedConfigKey]: "must-not-persist",
+            indexName: "public exhibitors",
+          },
+        },
+      },
+      entity,
+      fetch,
+      policies: [{ ...policies[0]!, domain: "algolia.net" }],
+    });
+
+    expect(prepared.row.sourceUrl).toBe(
+      "https://publicapp-dsn.algolia.net/1/indexes/public%20exhibitors",
+    );
+    expect(JSON.stringify(prepared.row.payload)).not.toContain(
+      "must-not-persist",
+    );
+  });
+
   it("uses one compound upsert and rejects an existing receipt with drift", async () => {
     const prepared = prepareMonitoredSourceRawBridge({
       workspaceId: WORKSPACE_A,
@@ -205,6 +233,13 @@ describe("monitored source to Raw Source bridge", () => {
         { workspaceId: WORKSPACE_A, prepared },
       ),
     ).rejects.toMatchObject({ code: "MONITORED_SOURCE_RAW_DRIFT" });
+
+    await expect(
+      persistMonitoredSourceRawBridge(
+        { rawSourceRecord: { upsert } } as never,
+        { workspaceId: WORKSPACE_B, prepared },
+      ),
+    ).rejects.toMatchObject({ code: "MONITORED_SOURCE_WORKSPACE_MISMATCH" });
   });
 
   it.each([
@@ -230,6 +265,15 @@ describe("monitored source to Raw Source bridge", () => {
     [
       "suspended policy",
       { policies: [{ ...policies[0]!, reviewStatus: "SUSPENDED" }] },
+    ],
+    [
+      "purpose-less policy",
+      { policies: [{ ...policies[0]!, allowedPurpose: [] }] },
+    ],
+    ["invalid content hash", { entity: { ...entity, contentHash: "invalid" } }],
+    [
+      "invalid source config",
+      { source: { ...source, config: { host: "example.test" } } },
     ],
   ])("fails closed for %s", (_name, override) => {
     expect(() =>

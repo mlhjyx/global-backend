@@ -774,25 +774,27 @@ model MonitoredSource {
 
 /// 一次采集（一个 monitored_source 的一次抓取），带增量统计审计。
 model SourceFetch {
-  id            String    @id @default(uuid()) @db.Uuid
-  sourceId      String    @map("source_id") @db.Uuid
-  status        String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
-  total         Int       @default(0) // 本次抓到的记录数
-  added         Int       @default(0)
-  updated       Int       @default(0)
-  removed       Int       @default(0)
-  unchanged     Int       @default(0)
-  costCents     Int       @default(0) @map("cost_cents")
-  parserVersion String?   @map("parser_version")
-  error         String?
-  startedAt     DateTime  @default(now()) @map("started_at")
-  finishedAt    DateTime? @map("finished_at")
-  executionOperationIds Json? @map("execution_operation_ids")
-  executionResult Json? @map("execution_result")
+  id                    String    @id @default(uuid()) @db.Uuid
+  sourceId              String    @map("source_id") @db.Uuid
+  status                String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
+  total                 Int       @default(0) // 本次抓到的记录数
+  added                 Int       @default(0)
+  updated               Int       @default(0)
+  removed               Int       @default(0)
+  unchanged             Int       @default(0)
+  costCents             Int       @default(0) @map("cost_cents")
+  parserVersion         String?   @map("parser_version")
+  error                 String?
+  startedAt             DateTime  @default(now()) @map("started_at")
+  finishedAt            DateTime? @map("finished_at")
+  executionOperationIds Json?     @map("execution_operation_ids")
+  executionResult       Json?     @map("execution_result")
 
-  source  MonitoredSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  changes SourceEntityChange[]
+  source           MonitoredSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  changes          SourceEntityChange[]
+  observedEntities SourceEntity[]       @relation("SourceEntityLastSeenFetch")
 
+  @@unique([id, sourceId], map: "source_fetch_id_source_id_key")
   @@index([sourceId])
   @@map("source_fetch")
 }
@@ -800,27 +802,31 @@ model SourceFetch {
 /// 一个源里的一条已清洗、去重、持久化的实体（公司/联系人）+ 快照指纹 + 生命周期。
 /// 增量更新的锚：按 (source, externalId) upsert，contentHash 判是否变化，缺席判退出。
 model SourceEntity {
-  id          String    @id @default(uuid()) @db.Uuid
-  sourceId    String    @map("source_id") @db.Uuid
-  externalId  String    @map("external_id") // 源侧稳定 id（如 organisationGuid / 域名）
-  entityKind  String    @default("company") @map("entity_kind") // company | contact
-  name        String
-  domain      String?
-  country     String?
-  cleaned     Json // 清洗后的结构化字段（email/phone/products/stand/hiring…，命名空间化）
-  contentHash String    @map("content_hash") // 清洗后内容指纹，diff 用
-  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
-  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
-  withdrawnAt DateTime? @map("withdrawn_at") // 非空=已从源退出（连续缺席判定）
-  missCount   Int       @default(0) @map("miss_count") // 连续缺席次数（防单次抓取失败误杀）
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id              String    @id @default(uuid()) @db.Uuid
+  sourceId        String    @map("source_id") @db.Uuid
+  externalId      String    @map("external_id") // 源侧稳定 id（如 organisationGuid / 域名）
+  entityKind      String    @default("company") @map("entity_kind") // company | contact
+  name            String
+  domain          String?
+  country         String?
+  cleaned         Json // 清洗后的结构化字段（email/phone/products/stand/hiring…，命名空间化）
+  contentHash     String    @map("content_hash") // 清洗后内容指纹，diff 用
+  firstSeenAt     DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt      DateTime  @default(now()) @map("last_seen_at")
+  lastSeenFetchId String?   @map("last_seen_fetch_id") @db.Uuid
+  withdrawnAt     DateTime? @map("withdrawn_at") // 非空=已从源退出（连续缺席判定）
+  missCount       Int       @default(0) @map("miss_count") // 连续缺席次数（防单次抓取失败误杀）
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  source MonitoredSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  source        MonitoredSource   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  lastSeenFetch SourceFetch?      @relation("SourceEntityLastSeenFetch", fields: [lastSeenFetchId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rawRecords    RawSourceRecord[]
 
   @@unique([sourceId, externalId])
   @@index([domain])
   @@index([sourceId, withdrawnAt])
+  @@index([lastSeenFetchId])
   @@map("source_entity")
 }
 
@@ -1006,18 +1012,18 @@ model PatentLookupRequest {
 
 /// 专利缓存刷新审计（quota 观测/告警：bytesScanned 超阈可告警）。平台级、无 RLS。
 model PatentCacheRefreshAudit {
-  id           String    @id @default(uuid()) @db.Uuid
-  startedAt    DateTime  @default(now()) @map("started_at")
-  finishedAt   DateTime? @map("finished_at")
-  anchorCount  Int       @default(0) @map("anchor_count")
-  rowCount     Int       @default(0) @map("row_count")
-  bytesScanned BigInt?   @map("bytes_scanned")
-  status       String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | SKIPPED_NOSCAN | DENIED | DISABLED | FAILED
-  detail       String?   @map("detail")
-  executionOperationIds Json? @map("execution_operation_ids")
-  purged       Int?
-  cached       Int?
-  empty        Int?
+  id                    String    @id @default(uuid()) @db.Uuid
+  startedAt             DateTime  @default(now()) @map("started_at")
+  finishedAt            DateTime? @map("finished_at")
+  anchorCount           Int       @default(0) @map("anchor_count")
+  rowCount              Int       @default(0) @map("row_count")
+  bytesScanned          BigInt?   @map("bytes_scanned")
+  status                String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | SKIPPED_NOSCAN | DENIED | DISABLED | FAILED
+  detail                String?   @map("detail")
+  executionOperationIds Json?     @map("execution_operation_ids")
+  purged                Int?
+  cached                Int?
+  empty                 Int?
 
   @@index([startedAt])
   @@map("patent_cache_refresh_audit")
@@ -1069,6 +1075,7 @@ model DiscoveryRun {
 
   rawRecords RawSourceRecord[]
 
+  @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
   @@index([planId])
   @@map("discovery_run")
@@ -1076,26 +1083,69 @@ model DiscoveryRun {
 
 /// Raw Zone（PRD 8.7）：Provider 原始返回原样落地，永不直接进领域层（ADR-017）。
 model RawSourceRecord {
-  id            String    @id @default(uuid()) @db.Uuid
-  workspaceId   String    @map("workspace_id") @db.Uuid
-  runId         String    @map("run_id") @db.Uuid
-  providerKey   String    @map("provider_key")
-  sourceClass   String    @map("source_class")
-  externalId    String?   @map("external_id") // Provider 侧 id（幂等去重）
-  payload       Json
+  id                   String    @id @default(uuid()) @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  runId                String?   @map("run_id") @db.Uuid
+  sourceEntityId       String?   @map("source_entity_id") @db.Uuid
+  providerKey          String    @map("provider_key")
+  sourceClass          String    @map("source_class")
+  externalId           String?   @map("external_id") // Provider 侧 id（幂等去重）
+  payload              Json
   // 公开采集留痕（PRD 8.11）：来源 URL、抓取时间、内容指纹、解析版本
-  sourceUrl     String?   @map("source_url")
-  fetchedAt     DateTime? @map("fetched_at")
-  contentHash   String?   @map("content_hash")
-  parserVersion String?   @map("parser_version")
-  costCents     Int       @default(0) @map("cost_cents")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  sourceUrl            String?   @map("source_url")
+  fetchedAt            DateTime? @map("fetched_at")
+  contentHash          String?   @map("content_hash")
+  parserVersion        String?   @map("parser_version")
+  costCents            Int       @default(0) @map("cost_cents")
+  ingestKey            String?   @map("ingest_key")
+  payloadHash          String?   @map("payload_hash") @db.Char(64)
+  payloadBytes         Int?      @map("payload_bytes")
+  ingestVersion        String    @default("raw-source/v1") @map("ingest_version") @db.VarChar(64)
+  ingestStatus         String    @default("ACCEPTED") @map("ingest_status") @db.VarChar(32)
+  dispositionCode      String?   @map("disposition_code") @db.VarChar(128)
+  retentionDays        Int?      @map("retention_days")
+  expiresAt            DateTime? @map("expires_at") @db.Timestamptz(3)
+  expiredAt            DateTime? @map("expired_at") @db.Timestamptz(3)
+  sourcePolicySnapshot Json?     @map("source_policy_snapshot")
+  createdAt            DateTime  @default(now()) @map("created_at")
 
-  run DiscoveryRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run                    DiscoveryRun?                    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceEntity           SourceEntity?                    @relation(fields: [sourceEntityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  governanceDispositions RawSourceGovernanceDisposition[]
 
+  @@unique([workspaceId, id], map: "raw_source_record_workspace_id_id_key")
+  @@unique([workspaceId, sourceEntityId, ingestKey], map: "raw_source_record_workspace_source_entity_ingest_key")
   @@unique([runId, providerKey, externalId])
   @@index([workspaceId])
+  @@index([workspaceId, ingestStatus, expiresAt], map: "raw_source_record_workspace_status_expires_idx")
   @@map("raw_source_record")
+}
+
+/// Append-only restricted-processing decision. Restricted values never leave
+/// Raw payloads; only detected field names and the exact provenance are copied.
+model RawSourceGovernanceDisposition {
+  id                String   @id @default(uuid()) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  rawRecordId       String   @map("raw_record_id") @db.Uuid
+  runId             String?  @map("run_id") @db.Uuid
+  sourceEntityId    String?  @map("source_entity_id") @db.Uuid
+  providerKey       String   @map("provider_key") @db.VarChar(128)
+  effect            String   @db.VarChar(64)
+  reasonCode        String   @map("reason_code") @db.VarChar(128)
+  detectedFields    Json     @map("detected_fields")
+  rawPayloadHash    String   @map("raw_payload_hash") @db.Char(64)
+  rawIngestVersion  String   @map("raw_ingest_version") @db.VarChar(64)
+  rawCreatedAt      DateTime @map("raw_created_at") @db.Timestamp(3)
+  actor             String   @db.VarChar(128)
+  governanceVersion String   @map("governance_version") @db.VarChar(64)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  rawRecord RawSourceRecord @relation(fields: [rawRecordId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([rawRecordId, effect, reasonCode, governanceVersion], map: "raw_source_governance_disposition_unique_decision")
+  @@index([workspaceId, runId, effect], map: "raw_source_governance_disposition_workspace_run_effect_idx")
+  @@index([workspaceId, createdAt], map: "raw_source_governance_disposition_workspace_created_idx")
+  @@map("raw_source_governance_disposition")
 }
 
 /// Canonical 公司（PRD 8.8/8.9）：跨源归一后的目标客户公司。
@@ -1215,6 +1265,7 @@ model FieldEvidence {
   dataClass      String   @default("green") @map("data_class") // green（公司事实）| amber（职能邮箱 ePrivacy）| red（具名个人 GDPR Art.4）——收口⑥：替代 value JSON 里的 personal_data 代码纪律，可查询/可索引；喂 DataRightsService
   fetchedAt      DateTime @default(now()) @map("fetched_at")
 
+  @@unique([workspaceId, entityType, entityId, field, rawRecordId], map: "field_evidence_raw_field_unique")
   @@index([workspaceId])
   @@index([workspaceId, entityType, entityId])
   @@map("field_evidence")

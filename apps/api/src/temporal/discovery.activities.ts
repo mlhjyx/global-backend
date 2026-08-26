@@ -34,6 +34,13 @@ import {
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import {
+  prepareRawSourceBatch,
+  rawSourceIngestLimits,
+  reconcileRawSourceBatch,
+  type RawSourceIngestLimits,
+} from '../discovery/raw-source-ingestion';
+import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -86,6 +93,7 @@ export function createDiscoveryActivities(deps: {
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
   platformWriter?: PrismaClient;
+  rawIngestLimits?: RawSourceIngestLimits;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
@@ -151,6 +159,9 @@ export function createDiscoveryActivities(deps: {
      */
     async executeQuery(args: DiscoveryActivityInput & { runId: string; query: PlanQuery }): Promise<{
       rawCount: number;
+      quarantinedCount: number;
+      rejectedCount: number;
+      duplicateCount: number;
       costCents: number;
       provider: string | null;
       budgetTruncated: boolean;
@@ -196,9 +207,14 @@ export function createDiscoveryActivities(deps: {
       };
       // Source Registry（DAT-011）：SUSPENDED 的域名列入黑名单，适配器抓取前跳过。
       // source_policy 是无 RLS 的平台治理表（app_user 有 SELECT）→ 直接读。
-      const suspended = await deps.prisma.sourcePolicy.findMany({
-        where: { reviewStatus: 'SUSPENDED' },
-        select: { domain: true },
+      const sourcePolicies = await deps.prisma.sourcePolicy.findMany({
+        select: {
+          id: true,
+          domain: true,
+          retentionDays: true,
+          reviewStatus: true,
+          updatedAt: true,
+        },
       });
       // 多源 fan-out：该 source_class 下**全部 ENABLED 适配器**并行召回（蓝图集成点 1）。
       // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
@@ -213,6 +229,9 @@ export function createDiscoveryActivities(deps: {
       if (!adapters.length)
         return {
           rawCount: 0,
+          quarantinedCount: 0,
+          rejectedCount: 0,
+          duplicateCount: 0,
           costCents: 0,
           provider: null,
           budgetTruncated: false,
@@ -225,7 +244,9 @@ export function createDiscoveryActivities(deps: {
         runId: binding.accountKey,
         correlationId: binding.accountKey,
       };
-      const blockedDomains = suspended.map((s) => s.domain);
+      const blockedDomains = sourcePolicies
+        .filter((policy) => policy.reviewStatus === 'SUSPENDED')
+        .map((policy) => policy.domain);
       const settled = await Promise.allSettled(
         adapters.map(async (a) => {
           const durableReceipts: Array<{
@@ -263,9 +284,7 @@ export function createDiscoveryActivities(deps: {
       // wasExhausted=true → 显性上报截断，让 workflow 判 PARTIAL 而非假 DONE（各源 fail-safe 拿到的部分记录仍落库）。
       const budgetTruncated = (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted;
 
-      // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
-      // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务
-      // （Postgres 里 catch 单条 P2002 会毒化整个事务）。批内先按 externalId 去重。
+      // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const persisted = await applyDomainAckConsumerTransactions({
           transaction: tx,
@@ -278,69 +297,95 @@ export function createDiscoveryActivities(deps: {
               }))
             : []),
           apply: async (transaction) => {
-        let rawCount = 0;
-        let totalCost = 0;
-        const providersHit: string[] = [];
-        for (const s of settled) {
-          if (s.status !== 'fulfilled') continue;
-          const { key, r } = s.value;
-          if (r.records.length) providersHit.push(key);
-          const seen = new Set<string>();
-          const rows = r.records
-            .filter((rec) => {
-              const k = rec.externalId ?? JSON.stringify(rec);
-              if (seen.has(k)) return false;
-              seen.add(k);
-              return true;
-            })
-            .map((rec) => ({
-              workspaceId: args.workspaceId,
-              runId: args.runId,
-              providerKey: key,
-              sourceClass: q.sourceClass,
-              externalId: rec.externalId,
-              payload: rec as unknown as Prisma.InputJsonValue,
-              sourceUrl: rec.provenance?.sourceUrl ?? null,
-              fetchedAt: rec.provenance ? new Date(rec.provenance.fetchedAt) : null,
-              contentHash: rec.provenance?.contentHash ?? null,
-              parserVersion: rec.provenance?.parserVersion ?? null,
-              costCents: 0,
-            }));
-          if (rows.length) {
-            const created = await transaction.rawSourceRecord.createMany({
-              data: rows,
-              skipDuplicates: true,
-            });
-            rawCount += created.count;
-          }
-          totalCost += r.costCents;
-        }
-        if (totalCost > 0) {
-          await transaction.usageLedger.create({
-            data: {
-              workspaceId: args.workspaceId,
-              resourceType: 'provider_call',
-              quantity: rawCount,
-              costUsd: totalCost / 100,
-              refType: 'discovery_run',
-              refId: args.runId,
-              meta: { providers: providersHit, sourceClass: q.sourceClass },
-            },
-          });
-        }
-        return {
-          rawCount,
-          costCents: totalCost,
-          provider: providersHit.join('+') || null,
-          budgetTruncated,
-        };
+            let totalCost = 0;
+            let duplicateCount = 0;
+            const providersHit: string[] = [];
+            for (const item of settled) {
+              if (item.status !== 'fulfilled') continue;
+              const { key, r } = item.value;
+              if (r.records.length) providersHit.push(key);
+              const prepared = prepareRawSourceBatch({
+                providerKey: key,
+                records: r.records,
+                policies: sourcePolicies,
+                limits: deps.rawIngestLimits ?? rawSourceIngestLimits(),
+              });
+              await transaction.$executeRaw(
+                Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`raw-source:${args.workspaceId}:${args.runId}:${key}`}, 0))`,
+              );
+              const existing = await transaction.rawSourceRecord.findMany({
+                where: { runId: args.runId, providerKey: key },
+                select: { id: true, externalId: true, ingestKey: true, payloadHash: true, payload: true },
+              });
+              const reconciled = reconcileRawSourceBatch(prepared.rows, existing);
+              duplicateCount += reconciled.duplicateCount;
+              if (reconciled.rows.length) {
+                const created = await transaction.rawSourceRecord.createMany({
+                  data: reconciled.rows.map((row) => ({
+                    workspaceId: args.workspaceId,
+                    runId: args.runId,
+                    providerKey: key,
+                    sourceClass: q.sourceClass,
+                    externalId: row.externalId,
+                    payload: row.payload as Prisma.InputJsonValue,
+                    sourceUrl: row.sourceUrl,
+                    fetchedAt: row.fetchedAt,
+                    contentHash: row.contentHash,
+                    parserVersion: row.parserVersion,
+                    costCents: 0,
+                    ingestKey: row.ingestKey,
+                    payloadHash: row.payloadHash,
+                    payloadBytes: row.payloadBytes,
+                    ingestVersion: row.ingestVersion,
+                    ingestStatus: row.ingestStatus,
+                    dispositionCode: row.dispositionCode,
+                    retentionDays: row.retentionDays,
+                    expiresAt: row.expiresAt,
+                    sourcePolicySnapshot: row.sourcePolicySnapshot as Prisma.InputJsonValue,
+                  })),
+                  skipDuplicates: true,
+                });
+                duplicateCount += reconciled.rows.length - created.count;
+              }
+              totalCost += r.costCents;
+            }
+            const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'ACCEPTED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'QUARANTINED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'REJECTED' } }),
+            ]);
+            if (totalCost > 0) {
+              await transaction.usageLedger.create({
+                data: {
+                  workspaceId: args.workspaceId,
+                  resourceType: 'provider_call',
+                  quantity: rawCount,
+                  costUsd: totalCost / 100,
+                  refType: 'discovery_run',
+                  refId: args.runId,
+                  meta: { providers: providersHit, sourceClass: q.sourceClass },
+                },
+              });
+            }
+            return {
+              rawCount, quarantinedCount, rejectedCount, duplicateCount,
+              costCents: totalCost,
+              provider: providersHit.join('+') || null,
+              budgetTruncated,
+            };
           },
           readback: async (transaction) => {
             const fulfilled = settled.filter((item) => item.status === 'fulfilled');
+            const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'ACCEPTED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'QUARANTINED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'REJECTED' } }),
+            ]);
             return {
-              rawCount: await transaction.rawSourceRecord.count({
-                where: { runId: args.runId, sourceClass: q.sourceClass },
-              }),
+              rawCount,
+              quarantinedCount,
+              rejectedCount,
+              duplicateCount: 0,
               costCents: fulfilled.reduce(
                 (sum, item) => sum + item.value.r.costCents,
                 0,
@@ -372,9 +417,22 @@ export function createDiscoveryActivities(deps: {
         // stage performs no network I/O, so the transaction-scoped lock covers
         // the authoritative suppression read and every canonical write.
         const policyLock = await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
-        const raws = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId },
+        const candidates = await tx.rawSourceRecord.findMany({
+          where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
         });
+        const restricted = candidates.length
+          ? await tx.rawSourceGovernanceDisposition.findMany({
+              where: {
+                rawRecordId: { in: candidates.map((raw) => raw.id) },
+                effect: 'RESTRICT_PROCESSING',
+              },
+              select: { rawRecordId: true },
+            })
+          : [];
+        const { consumable: raws } = partitionGovernedRawRecords(
+          candidates,
+          new Set(restricted.map((row) => row.rawRecordId)),
+        );
         const suppressions = await tx.suppressionRecord.findMany({
           where: { type: { in: ['domain', 'company_name'] } },
         });
@@ -507,7 +565,7 @@ export function createDiscoveryActivities(deps: {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId },
+            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -619,7 +677,7 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId },
+            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -778,7 +836,7 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId },
+            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -922,7 +980,7 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId },
+            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -993,7 +1051,7 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId },
+            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);

@@ -4,6 +4,7 @@ import {
   RAW_SOURCE_INGEST_VERSION,
   prepareRawSourceBatch,
   rawPayloadHash,
+  rawSourceIngestLimits,
   reconcileRawSourceBatch,
   type RawSourcePolicySnapshot,
 } from "./raw-source-ingestion";
@@ -99,6 +100,114 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(prepared.payloadBytes).toBeGreaterThan(0);
     expect(prepared.expiresAt.toISOString()).toBe("2026-11-24T00:00:00.000Z");
   });
+
+  it("derives a stable identity key when externalId is absent", () => {
+    const first = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [
+        companyRecord({ externalId: "", attributes: { employees: 10 } }),
+      ],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    const changed = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [
+        companyRecord({ externalId: "", attributes: { employees: 11 } }),
+      ],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+
+    expect(first.ingestKey).toMatch(/^identity:[0-9a-f]{64}$/u);
+    expect(changed.ingestKey).toBe(first.ingestKey);
+    expect(changed.payloadHash).not.toBe(first.payloadHash);
+  });
+
+  it("minimizes an attribute outside the provider allowlist and rejects an ungoverned provider", () => {
+    const bounded = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [
+        companyRecord({ attributes: { products: ["pump"], mystery: "drop" } }),
+      ],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(bounded.ingestStatus).toBe("ACCEPTED");
+    expect(bounded.payload).toMatchObject({
+      attributes: { products: ["pump"] },
+    });
+    expect(JSON.stringify(bounded.payload)).not.toContain("mystery");
+    expect(bounded.sourcePolicySnapshot).toMatchObject({
+      minimizedFields: ["attributes.mystery"],
+    });
+
+    const ungoverned = prepareRawSourceBatch({
+      providerKey: "unknown-provider",
+      records: [companyRecord()],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(ungoverned).toMatchObject({
+      ingestStatus: "REJECTED",
+      dispositionCode: "UNGOVERNED_PROVIDER_PAYLOAD",
+    });
+  });
+
+  it.each([
+    [
+      "directory",
+      {
+        source_kind: "directory",
+        source_directory: "registry.example",
+        listing_location: "DE",
+      },
+    ],
+    [
+      "wikidata",
+      {
+        wikidata_qid: "Q1",
+        latitude: 1,
+        longitude: 2,
+        source_class: "public_intelligence",
+      },
+    ],
+    [
+      "openstreetmap",
+      { osm_id: "node/1", city: "Berlin", osm_tags: { industrial: "factory" } },
+    ],
+    ["trade_fair", { stand: "A42", products: ["pump"], source_fair: "fair-1" }],
+    [
+      "ted",
+      { ted: { publication_number: "1", buyer_names: ["Public Authority"] } },
+    ],
+    ["openfda", { fda: { registration_number: "1" }, products: ["device"] }],
+    [
+      "public_web",
+      {
+        products: ["pump"],
+        keywords: ["industrial"],
+        extraction_confidence: 0.9,
+      },
+    ],
+  ])(
+    "accepts the bounded current-main %s mapper surface",
+    (providerKey, attributes) => {
+      const row = prepareRawSourceBatch({
+        providerKey,
+        records: [companyRecord({ attributes })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      expect(row.ingestStatus).toBe("ACCEPTED");
+      expect(row.sourcePolicySnapshot).toMatchObject({ minimizedFields: [] });
+    },
+  );
 
   it("minimizes personal/contact fields before hashing or persistence", () => {
     const prepared = prepareRawSourceBatch({
@@ -202,6 +311,86 @@ describe("Raw Source v2 ingestion boundary", () => {
       ingestStatus: "QUARANTINED",
       dispositionCode: "PROCESSING_KEY_DRIFT",
       payload: { conflictWithRawId: "raw-original" },
+    });
+    expect(
+      reconcileRawSourceBatch(
+        [changed],
+        [
+          ...existing,
+          {
+            id: "raw-drift",
+            externalId: null,
+            ingestKey: drift.rows[0]!.ingestKey,
+            payloadHash: drift.rows[0]!.payloadHash,
+            payload: drift.rows[0]!.payload,
+          },
+        ],
+      ),
+    ).toMatchObject({ rows: [], duplicateCount: 1 });
+  });
+
+  it.each([
+    ["missing source policy", [], "SOURCE_POLICY_MISSING"],
+    [
+      "invalid provenance shape",
+      POLICIES,
+      "INVALID_PROVENANCE",
+      companyRecord({
+        provenance: { ...companyRecord().provenance, extra: true },
+      }),
+    ],
+    [
+      "missing company name",
+      POLICIES,
+      "MALFORMED_PAYLOAD",
+      companyRecord({ name: "" }),
+    ],
+  ])("fails closed for %s", (_name, policyRows, reason, recordOverride) => {
+    const row = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [recordOverride ?? companyRecord()],
+      policies: policyRows as RawSourcePolicySnapshot[],
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(row.dispositionCode).toBe(reason);
+    expect(row.ingestStatus).not.toBe("ACCEPTED");
+  });
+
+  it("bounds record and batch bytes and uses safe environment defaults", () => {
+    const oversized = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [
+        companyRecord({ attributes: { company_text: "x".repeat(2_000) } }),
+      ],
+      policies: POLICIES,
+      limits: { ...LIMITS, maxRecordBytes: 100, maxBatchBytes: 4_000 },
+      now: NOW,
+    }).rows[0]!;
+    expect(oversized.dispositionCode).toBe("PAYLOAD_TOO_LARGE");
+    expect(JSON.stringify(oversized.payload)).not.toContain("x".repeat(100));
+
+    const batched = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [
+        companyRecord({ externalId: "one" }),
+        companyRecord({ externalId: "two" }),
+      ],
+      policies: POLICIES,
+      limits: { ...LIMITS, maxRecordBytes: 2_000, maxBatchBytes: 600 },
+      now: NOW,
+    });
+    expect(batched.rows[1]?.dispositionCode).toBe("BATCH_LIMIT_EXCEEDED");
+    expect(
+      rawSourceIngestLimits({
+        RAW_SOURCE_MAX_RECORD_BYTES: "invalid",
+        RAW_SOURCE_MAX_BATCH_BYTES: "999999999",
+        RAW_SOURCE_DEFAULT_RETENTION_DAYS: "0",
+      }),
+    ).toEqual({
+      maxRecordBytes: 512 * 1024,
+      maxBatchBytes: 20 * 1024 * 1024,
+      defaultRetentionDays: 365,
     });
   });
 });

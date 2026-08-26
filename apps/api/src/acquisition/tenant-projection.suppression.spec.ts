@@ -4,18 +4,23 @@ import { TenantProjectionService } from './tenant-projection.service';
 const source = {
   id: 'source-1',
   sourceKey: 'fair:example',
-  providerKey: 'trade_fair',
+  providerKey: 'mapyourshow',
+  config: { host: 'example.mapyourshow.com' },
 };
 
 function entity(index: number, email = 'sales@example.com') {
   return {
     id: `entity-${index}`,
     sourceId: source.id,
+    externalId: `source-entity-${index}`,
     name: `Example ${index}`,
     domain: `example-${index}.com`,
     country: 'DE',
     withdrawnAt: null,
     cleaned: { email_kind: 'role', email },
+    contentHash: 'a'.repeat(64),
+    lastSeenAt: new Date('2026-08-25T16:31:00.000Z'),
+    lastSeenFetchId: 'fetch-1',
   };
 }
 
@@ -66,11 +71,33 @@ function projectionHarness(
       findFirst: vi.fn(async () => ({ id: 'existing-link' })),
       create: vi.fn(),
     },
+    rawSourceRecord: {
+      upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+        id: 'raw-bridge',
+        payloadHash: create.payloadHash,
+        ingestStatus: create.ingestStatus,
+      })),
+    },
     fieldEvidence: { create: vi.fn() },
   };
   const prisma = {
     monitoredSource: { findUnique: vi.fn(async () => source) },
     sourceEntity: { findMany: vi.fn(async () => entities) },
+    sourceFetch: { findMany: vi.fn(async () => [{
+      id: 'fetch-1',
+      sourceId: source.id,
+      status: 'DONE',
+      parserVersion: 'acquisition/v1',
+      finishedAt: new Date('2026-08-25T16:31:00.000Z'),
+    }]) },
+    sourcePolicy: { findMany: vi.fn(async () => [{
+      id: 'policy-1',
+      domain: 'mapyourshow.com',
+      retentionDays: 365,
+      reviewStatus: 'APPROVED',
+      allowedPurpose: ['discovery'],
+      updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+    }]) },
     withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
   };
   return {

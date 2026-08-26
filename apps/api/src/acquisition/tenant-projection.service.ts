@@ -4,6 +4,10 @@ import { companyIdentity } from '../discovery/identity';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
+import {
+  persistMonitoredSourceRawBridge,
+  prepareMonitoredSourceRawBridge,
+} from './monitored-source-raw-bridge';
 
 const CHUNK = 100;
 
@@ -40,10 +44,22 @@ export class TenantProjectionService {
     if (!source) throw new Error(`monitored_source ${sourceId} not found`);
 
     // 平台级表无 RLS，直接读活跃实体
-    const entities = await prisma.sourceEntity.findMany({
-      where: { sourceId, withdrawnAt: null },
-      ...(opts?.limit ? { take: opts.limit } : {}),
-    });
+    const [entities, policies] = await Promise.all([
+      prisma.sourceEntity.findMany({
+        where: { sourceId, withdrawnAt: null },
+        ...(opts?.limit ? { take: opts.limit } : {}),
+      }),
+      prisma.sourcePolicy.findMany({
+        select: {
+          id: true,
+          domain: true,
+          retentionDays: true,
+          reviewStatus: true,
+          allowedPurpose: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
     if (!entities.length) {
       return {
         sourceId,
@@ -56,6 +72,20 @@ export class TenantProjectionService {
         reason: 'no active entities',
       };
     }
+    const fetchIds = [...new Set(entities.flatMap((entity) => entity.lastSeenFetchId ? [entity.lastSeenFetchId] : []))];
+    const fetches = fetchIds.length
+      ? await prisma.sourceFetch.findMany({
+          where: { id: { in: fetchIds }, sourceId },
+          select: {
+            id: true,
+            sourceId: true,
+            status: true,
+            parserVersion: true,
+            finishedAt: true,
+          },
+        })
+      : [];
+    const fetchById = new Map(fetches.map((fetch) => [fetch.id, fetch]));
 
     let projected = 0,
       suppressed = 0,
@@ -128,6 +158,24 @@ export class TenantProjectionService {
             acquired_via: source.providerKey,
             source_key: source.sourceKey,
           });
+          const fetch = e.lastSeenFetchId ? fetchById.get(e.lastSeenFetchId) : undefined;
+          const preparedRaw = prepareMonitoredSourceRawBridge({
+            workspaceId,
+            source,
+            entity: e,
+            fetch: fetch ?? {
+              id: '',
+              sourceId,
+              status: 'MISSING',
+              parserVersion: null,
+              finishedAt: null,
+            },
+            policies,
+          });
+          const raw = await persistMonitoredSourceRawBridge(tx, {
+            workspaceId,
+            prepared: preparedRaw,
+          });
 
           // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
           // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
@@ -163,9 +211,9 @@ export class TenantProjectionService {
               });
           projected += 1;
 
-          // identity_link：canonical ↔ source_entity（rawRecordId=source_entity.id），去重
+          // Downstream facts reference the governed Raw receipt, never SourceEntity directly.
           const linkExists = await tx.identityLink.findFirst({
-            where: { canonicalId: canonical.id, rawRecordId: e.id },
+            where: { canonicalId: canonical.id, rawRecordId: raw.id },
             select: { id: true },
           });
           if (linkExists) continue;
@@ -174,7 +222,7 @@ export class TenantProjectionService {
               workspaceId,
               canonicalType: 'company',
               canonicalId: canonical.id,
-              rawRecordId: e.id,
+              rawRecordId: raw.id,
               matchRule: identity.matchRule,
               confidence: identity.matchRule === 'domain_exact' ? 1 : 0.8,
             },
@@ -195,9 +243,9 @@ export class TenantProjectionService {
                 entityId: canonical.id,
                 field,
                 value: value as Prisma.InputJsonValue,
-                providerKey: source.providerKey,
-                rawRecordId: e.id,
-                license: 'public',
+                providerKey: preparedRaw.identityProviderKey,
+                rawRecordId: raw.id,
+                license: preparedRaw.license,
                 allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
               },
             });

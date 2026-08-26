@@ -31,6 +31,40 @@ describe("Raw Source retention activities", () => {
     expect(query).toHaveBeenCalledOnce();
   });
 
+  it("returns a stable cursor only when the aggregate function provides an extra row", async () => {
+    const activities = createRawSourceActivities({
+      prisma: {
+        $queryRaw: vi.fn(async () => [
+          { workspace_id: "11111111-1111-4111-8111-111111111111" },
+          { workspace_id: "22222222-2222-4222-8222-222222222222" },
+          { workspace_id: "33333333-3333-4333-8333-333333333333" },
+        ]),
+      } as never,
+    });
+
+    await expect(
+      activities.listRawRetentionWorkspaces({ limit: 2 }),
+    ).resolves.toEqual({
+      workspaceIds: [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      nextCursor: "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
+  it("rejects an invalid cursor before any database function is called", async () => {
+    const query = vi.fn();
+    const activities = createRawSourceActivities({
+      prisma: { $queryRaw: query } as never,
+    });
+
+    await expect(
+      activities.listRawRetentionWorkspaces({ afterWorkspaceId: "not-a-uuid" }),
+    ).rejects.toThrow("RAW_RETENTION_WORKSPACE_INVALID");
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("expires only inside the requested workspace transaction and returns the DB receipt", async () => {
     const query = vi.fn(async () => [{ expired: 3, deferred_for_conflict: 0 }]);
     const withWorkspace = vi.fn(async (_workspaceId, callback) =>
@@ -74,6 +108,35 @@ describe("Raw Source retention activities", () => {
         limit: 50,
       }),
     ).rejects.toThrow("db unavailable");
+  });
+
+  it("rejects an invalid DB receipt and invalid clock value", async () => {
+    const invalidReceipt = createRawSourceActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) =>
+          callback({
+            $queryRaw: vi.fn(async () => [
+              { expired: -1, deferred_for_conflict: 0 },
+            ]),
+          }),
+        ),
+      } as never,
+    });
+    await expect(
+      invalidReceipt.expireRawSourceRecords({
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+      }),
+    ).rejects.toThrow("RAW_RETENTION_RECEIPT_INVALID");
+
+    const invalidTime = createRawSourceActivities({
+      prisma: { withWorkspace: vi.fn() } as never,
+      now: () => new Date(Number.NaN),
+    });
+    await expect(
+      invalidTime.expireRawSourceRecords({
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+      }),
+    ).rejects.toThrow("RAW_RETENTION_TIME_INVALID");
   });
 });
 
@@ -159,6 +222,7 @@ describe("executeQuery Raw Source v2 persistence", () => {
     };
     const binding = {
       authorityId: "20000000-0000-4000-8000-000000000002",
+      replay: false,
       scopeKey: "10000000-0000-4000-8000-000000000001",
       accountKey: `discovery.run:discovery_run:request:${"a".repeat(64)}:${"a".repeat(64)}`,
       purpose: "discovery.run",

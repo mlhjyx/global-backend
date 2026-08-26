@@ -76,12 +76,25 @@ function okAdapter(key: string, records: ProviderCompanyRecord[]): CompanyDiscov
 }
 
 function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
+  const rows: Array<Record<string, unknown>> = [];
   const tx = {
-    rawSourceRecord: { createMany: async ({ data }: { data: unknown[] }) => ({ count: data.length }) },
+    $executeRaw: async () => 1,
+    rawSourceRecord: {
+      findMany: async () => rows,
+      createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
+        rows.push(...data);
+        return { count: data.length };
+      },
+      count: async ({ where }: { where: { ingestStatus?: string } }) =>
+        rows.filter((row) => !where.ingestStatus || row.ingestStatus === where.ingestStatus).length,
+    },
     usageLedger: { create: async () => ({}) },
   };
   const prisma = {
-    sourcePolicy: { findMany: async () => [] as { domain: string }[] },
+    sourcePolicy: { findMany: async () => [{
+      id: 'policy-acme', domain: 'acme.de', retentionDays: 365,
+      reviewStatus: 'APPROVED', updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+    }] },
     withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> => fn(tx),
   };
   const providers = { routeCompanyDiscovery: async () => adapters };
@@ -307,6 +320,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
     const tx = {
       $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
       rawSourceRecord: { findMany: async () => [{ id: 'raw-synthetic', ...raw }] },
+      rawSourceGovernanceDisposition: { findMany: async () => [] },
       suppressionRecord: { findMany: async () => [] },
       canonicalCompany: { upsert: canonicalUpsert },
       identityLink: { findFirst: vi.fn(), create: identityCreate },
@@ -345,6 +359,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
           },
         ],
       },
+      rawSourceGovernanceDisposition: { findMany: async () => [] },
       suppressionRecord: {
         findMany: async () => {
           order.push('suppression-read');
@@ -399,6 +414,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
           },
         ],
       },
+      rawSourceGovernanceDisposition: { findMany: async () => [] },
       suppressionRecord: {
         findMany: async () => [{ type: 'domain', value: 'blocked.example' }],
       },

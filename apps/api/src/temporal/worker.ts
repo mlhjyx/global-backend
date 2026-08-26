@@ -11,6 +11,7 @@ import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { createRawSourceActivities } from "./raw-source.activities";
 import { createQualifyActivities } from "./qualify.activities";
 import { createAcquisitionActivities } from "./acquisition.activities";
 import { buildSourceAdapterRegistry } from "../acquisition/registry";
@@ -388,6 +389,7 @@ async function main(): Promise<void> {
         budgetStore,
         platformWriter: authorityWriter,
       }),
+      ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createAcquisitionActivities({
         prisma,

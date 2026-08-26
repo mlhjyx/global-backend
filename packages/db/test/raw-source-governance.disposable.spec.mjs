@@ -41,7 +41,6 @@ const databases = Object.freeze({
   rollback: "task6a_raw_rollback",
 });
 
-const ORGANIZATION = "00000000-0000-4000-8000-000000000001";
 const WORKSPACE_A = "10000000-0000-4000-8000-000000000001";
 const WORKSPACE_B = "10000000-0000-4000-8000-000000000002";
 const RUN_A = "20000000-0000-4000-8000-000000000001";
@@ -57,6 +56,7 @@ const COMPANY_A = "70000000-0000-4000-8000-000000000001";
 let baselineDirectory;
 let firstDeployOutput = "";
 let secondDeployOutput = "";
+let baselineDeployOutput = "";
 let injectedRollbackOutput = "";
 
 function requireTopology() {
@@ -181,11 +181,9 @@ function seedCurrentMainClone() {
   dockerPsql(
     databases.upgrade,
     `
-    INSERT INTO organization(id,name,created_at,updated_at)
-      VALUES ('${ORGANIZATION}','Task 6A',now(),now());
-    INSERT INTO workspace(id,organization_id,name,created_at,updated_at) VALUES
-      ('${WORKSPACE_A}','${ORGANIZATION}','A',now(),now()),
-      ('${WORKSPACE_B}','${ORGANIZATION}','B',now(),now());
+    INSERT INTO workspace(id,name,created_at,updated_at) VALUES
+      ('${WORKSPACE_A}','A',now(),now()),
+      ('${WORKSPACE_B}','B',now(),now());
     INSERT INTO discovery_run(id,workspace_id,plan_id,icp_id,status,created_at) VALUES
       ('${RUN_A}','${WORKSPACE_A}',gen_random_uuid(),gen_random_uuid(),'RUNNING',now()),
       ('${RUN_B}','${WORKSPACE_B}',gen_random_uuid(),gen_random_uuid(),'RUNNING',now());
@@ -272,7 +270,20 @@ before(() => {
   firstDeployOutput = migrateDeploy(databases.fresh);
   secondDeployOutput = migrateDeploy(databases.fresh);
 
-  migrateDeploy(databases.upgrade, baseline.schemaPath);
+  baselineDeployOutput = migrateDeploy(databases.upgrade, baseline.schemaPath);
+  assert.match(baselineDeployOutput, new RegExp(baselineLastMigration, "u"));
+  assert.equal(
+    dockerPsql(
+      databases.upgrade,
+      `SELECT current_database() || '|' || coalesce((
+        SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_schema, table_name)
+        FROM information_schema.tables
+        WHERE table_name IN ('workspace', '_prisma_migrations')
+      ), 'missing');`,
+    ),
+    `${databases.upgrade}|public._prisma_migrations,public.workspace`,
+    baselineDeployOutput,
+  );
   seedCurrentMainClone();
   migrateDeploy(databases.upgrade);
 
@@ -409,6 +420,18 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     assert.equal(snapshot.ingestVersion, snapshot.rawIngestVersion);
     assert.equal(snapshot.rawCreatedAt, snapshot.rawCreated);
     assert.deepEqual(snapshot.fields, ["recipient_name", "description"]);
+    dockerPsql(
+      databases.upgrade,
+      `UPDATE raw_source_governance_disposition SET actor='rewritten'
+       WHERE raw_record_id='${RESTRICTED_RAW_A}';`,
+      { rejects: /permanent and append-only/u },
+    );
+    dockerPsql(
+      databases.upgrade,
+      `DELETE FROM raw_source_governance_disposition
+       WHERE raw_record_id='${RESTRICTED_RAW_A}';`,
+      { rejects: /permanent and append-only/u },
+    );
   });
 
   it("enforces workspace A/B/unset RLS and a composite workspace/run foreign key", () => {
@@ -422,7 +445,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     `,
         ),
       ),
-      `SET\nBEGIN\n${WORKSPACE_A}\n1\nCOMMIT`,
+      `${WORKSPACE_A}\n1`,
     );
     assert.equal(
       dockerPsql(
@@ -434,7 +457,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     `,
         ),
       ),
-      `SET\nBEGIN\n${WORKSPACE_B}\n0\nCOMMIT`,
+      `${WORKSPACE_B}\n0`,
     );
     assert.equal(
       dockerPsql(
@@ -444,7 +467,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       SELECT count(*) FROM raw_source_record WHERE id='${SAFE_RAW_A}';
     `,
       ),
-      "SET\n0",
+      "0",
     );
 
     dockerPsql(
@@ -489,20 +512,39 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       { rejects: /raw_source_record_workspace_run_fkey|foreign key/u },
     );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        asApp(
+          WORKSPACE_A,
+          `SELECT workspace_id::text
+           FROM list_due_raw_retention_workspaces_v1(10, NULL);`,
+        ),
+      ),
+      `${WORKSPACE_A}\n${WORKSPACE_A}`,
+    );
   });
 
   it("prevents provenance rewrites and physical delete while allowing one-way minimal expiry", () => {
-    dockerPsql(
-      databases.upgrade,
-      asApp(
-        WORKSPACE_A,
-        `
-      UPDATE raw_source_record SET provider_key='rewritten'
-      WHERE id='80000000-0000-4000-8000-000000000001';
-    `,
-      ),
-      { rejects: /immutable|raw-source\/v2/u },
-    );
+    for (const mutation of [
+      "provider_key='rewritten'",
+      `run_id='${RUN_B}'`,
+      `source_entity_id='${SOURCE_ENTITY}'`,
+      `payload_hash='${"1".repeat(64)}'`,
+      `ingest_key='external:${"2".repeat(64)}'`,
+      "ingest_version='raw-source/v999'",
+      "created_at=created_at + interval '1 second'",
+    ]) {
+      dockerPsql(
+        databases.upgrade,
+        asApp(
+          WORKSPACE_A,
+          `UPDATE raw_source_record SET ${mutation}
+           WHERE id='80000000-0000-4000-8000-000000000001';`,
+        ),
+        { rejects: /immutable|raw-source\/v2/u },
+      );
+    }
     dockerPsql(
       databases.upgrade,
       asApp(
@@ -514,39 +556,48 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       { rejects: /permission denied|physical deletion/u },
     );
+    dockerPsql(
+      databases.upgrade,
+      `DELETE FROM raw_source_record
+       WHERE id='80000000-0000-4000-8000-000000000001';`,
+      { rejects: /physical deletion/u },
+    );
 
-    const expired = JSON.parse(
-      dockerPsql(
-        databases.upgrade,
-        asApp(
-          WORKSPACE_A,
-          `
-      SELECT jsonb_build_object(
-        'result',(SELECT row_to_json(x) FROM expire_due_raw_source_records_v1(
-          '${WORKSPACE_A}'::uuid,50,statement_timestamp()
-        ) x),
-        'row',(SELECT jsonb_build_object(
+    const expiredOutput = dockerPsql(
+      databases.upgrade,
+      asApp(
+        WORKSPACE_A,
+        `
+      SELECT 'result:' || row_to_json(x)::text
+      FROM expire_due_raw_source_records_v1(
+        '${WORKSPACE_A}'::uuid,50,statement_timestamp()
+      ) x;
+      SELECT 'row:' || jsonb_build_object(
           'status',ingest_status,'expiredAt',expired_at,'payload',payload,
           'payloadHash',payload_hash,'payloadBytes',payload_bytes
-        ) FROM raw_source_record WHERE id='80000000-0000-4000-8000-000000000001')
-      )::text;
+        )::text
+      FROM raw_source_record WHERE id='80000000-0000-4000-8000-000000000001';
     `,
-        )
-          .split("\n")
-          .find((line) => line.startsWith("{")),
       ),
     );
-    assert.equal(expired.result.expired, 1);
-    assert.equal(expired.row.status, "EXPIRED");
-    assert.equal(expired.row.payload._rawReceipt, "raw-source/expired/v1");
-    assert.deepEqual(Object.keys(expired.row.payload).sort(), [
+    const outputLines = expiredOutput.split("\n");
+    const resultLine = outputLines.find((line) => line.startsWith("result:"));
+    const rowLine = outputLines.find((line) => line.startsWith("row:"));
+    assert.ok(resultLine, expiredOutput);
+    assert.ok(rowLine, expiredOutput);
+    const result = JSON.parse(resultLine.slice("result:".length));
+    const expired = JSON.parse(rowLine.slice("row:".length));
+    assert.equal(result.expired, 1);
+    assert.equal(expired.status, "EXPIRED");
+    assert.equal(expired.payload._rawReceipt, "raw-source/expired/v1");
+    assert.deepEqual(Object.keys(expired.payload).sort(), [
       "_rawReceipt",
       "payloadBytes",
       "payloadHash",
       "previousStatus",
     ]);
-    assert.equal(expired.row.payload.payloadHash, expired.row.payloadHash);
-    assert.equal(expired.row.payload.payloadBytes, expired.row.payloadBytes);
+    assert.equal(expired.payload.payloadHash, expired.payloadHash);
+    assert.equal(expired.payload.payloadBytes, expired.payloadBytes);
 
     dockerPsql(
       databases.upgrade,
@@ -572,7 +623,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     `,
         ),
       ),
-      `SET\nBEGIN\n${WORKSPACE_A}\n0\nCOMMIT`,
+      `${WORKSPACE_A}\n0`,
     );
     dockerPsql(
       databases.upgrade,
