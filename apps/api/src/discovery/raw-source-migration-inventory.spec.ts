@@ -64,6 +64,14 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826220000_raw_source_stored_field_cleanup",
     checksum: "7".repeat(64),
   },
+  {
+    migrationName: "20260826230000_raw_source_site_section_key_contract",
+    checksum: "8".repeat(64),
+  },
+  {
+    migrationName: "20260826240000_raw_source_site_section_cleanup",
+    checksum: "9".repeat(64),
+  },
 ];
 
 const REISSUED_1600_MIGRATION =
@@ -103,6 +111,10 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
       "20260826210000_raw_source_stored_field_path_adapter",
     );
     expect(checker).toContain("20260826220000_raw_source_stored_field_cleanup");
+    expect(checker).toContain(
+      "20260826230000_raw_source_site_section_key_contract",
+    );
+    expect(checker).toContain("20260826240000_raw_source_site_section_cleanup");
   });
   it("returns an explicit UNKNOWN/HOLD when no live experiment subject is supplied", () => {
     expect(assessRawSourceMigrationInventory(undefined, expected)).toEqual({

@@ -173,6 +173,87 @@ describe('company enrichment commit suppression boundary', () => {
     ).not.toMatch(/Bearer secret|٥٥٥-٠١٠٠|SECRET/u);
   });
 
+  it('never commits URL-segment contact or secret keys as green site-section evidence', async () => {
+    const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
+    const create = vi.fn(async (_input: unknown) => ({}));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1',
+          name: 'Acme GmbH',
+          domain: 'acme.example',
+          status: 'NEW',
+          attributes: {},
+        })),
+        updateMany,
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      fieldEvidence: { create },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      commitCompanyEnrichmentResults(tx, {
+        workspaceId: 'ws-1',
+        companyId: 'co-1',
+        hits: [
+          {
+            key: 'structured_harvest',
+            result: {
+              matched: true,
+              confidence: 1,
+              attributes: {
+                site_sections: {
+                  products: 2,
+                  '.well-known': 1,
+                  source: 1,
+                  'person@example.test': 1,
+                  '555-0100': 1,
+                  '٥٥٥-٠١٠٠': 1,
+                  'bearer-secret': 1,
+                  '%70roducts': 1,
+                  Ａbout: 1,
+                },
+              },
+              costCents: 0,
+            },
+          },
+        ],
+      }),
+    ).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'co-1', status: { not: 'SUPPRESSED' } },
+      data: {
+        attributes: {
+          structured_harvest: {
+            site_sections: { '.well-known': 1, products: 2 },
+          },
+        },
+        version: { increment: 1 },
+      },
+    });
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: 'ws-1',
+        entityType: 'company',
+        entityId: 'co-1',
+        field: 'structured_harvest.site_sections',
+        value: { '.well-known': 1, products: 2 },
+        providerKey: 'structured_harvest',
+        confidence: 1,
+        license: 'public',
+        allowedActions: ['display', 'match'],
+      },
+    });
+    expect(
+      JSON.stringify({
+        update: updateMany.mock.calls,
+        evidence: create.mock.calls,
+      }),
+    ).not.toMatch(/person@example|555-0100|٥٥٥-٠١٠٠|bearer-secret|%70roducts|Ａbout/u);
+  });
+
   it('treats an enrichment hit with no governed fact as a truthful no-op', async () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));
@@ -261,8 +342,12 @@ describe('company enrichment commit suppression boundary', () => {
 
     expect(updateMany).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
-    expect(JSON.stringify({ update: updateMany.mock.calls, evidence: create.mock.calls }))
-      .not.toContain('555-0100');
+    expect(
+      JSON.stringify({
+        update: updateMany.mock.calls,
+        evidence: create.mock.calls,
+      }),
+    ).not.toContain('555-0100');
   });
 
   it('omits an all-withheld signal namespace when a safe sibling hit is committed', async () => {

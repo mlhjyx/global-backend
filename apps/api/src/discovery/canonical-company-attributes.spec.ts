@@ -363,6 +363,79 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
     );
   });
 
+  it("applies one closed site-section key contract to Canonical and stored FieldEvidence values", () => {
+    const sections = {
+      products: 8,
+      about: 2,
+      ".well-known": 1,
+      source: 1,
+      notice: 1,
+      contact: 1,
+      "person@example.test": 1,
+      "555-0100": 1,
+      "٥٥٥-٠١٠٠": 1,
+      "bearer-secret": 1,
+      "%70roducts": 1,
+      ["x".repeat(25)]: 1,
+      Ａbout: 1,
+    };
+    const expectedBytes = '{".well-known":1,"about":2,"products":8}';
+
+    expect(
+      JSON.stringify(
+        sanitizeStored("structured_harvest.site_sections", sections),
+      ),
+    ).toBe(expectedBytes);
+    expect(
+      JSON.stringify(
+        sanitizeCanonicalCompanyAttributes({
+          structured_harvest: { site_sections: sections },
+        }),
+      ),
+    ).toBe('{"structured_harvest":{"site_sections":' + expectedBytes + "}}");
+  });
+
+  it("bounds site-section object width and integer counts at the real producer limits", () => {
+    const twentyKeys = {
+      ".well-known": 1,
+      about: 1,
+      blog: 1,
+      careers: 1,
+      company: 1,
+      docs: 1,
+      downloads: 1,
+      events: 1,
+      industries: 1,
+      insights: 1,
+      jobs: 1,
+      news: 1,
+      partners: 1,
+      press: 1,
+      products: 5000,
+      publications: 1,
+      resources: 1,
+      services: 1,
+      solutions: 1,
+      support: 1,
+    };
+    expect(
+      sanitizeStored("structured_harvest.site_sections", twentyKeys),
+    ).toEqual(twentyKeys);
+    expect(
+      sanitizeStored("structured_harvest.site_sections", {
+        ...twentyKeys,
+        sustainability: 1,
+      }),
+    ).toBeUndefined();
+    expect(
+      sanitizeStored("structured_harvest.site_sections", {
+        products: 5001,
+        about: 0,
+        careers: 1.5,
+      }),
+    ).toBeUndefined();
+  });
+
   it("rejects Unicode-decimal local phones in ordinary retained scalar namespaces", () => {
     expect(
       sanitizeCanonicalCompanyAttributes({
