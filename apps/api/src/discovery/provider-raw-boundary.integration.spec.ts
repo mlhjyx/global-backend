@@ -25,6 +25,7 @@ function policies(domain: string): RawSourcePolicySnapshot[] {
       domain,
       retentionDays: 90,
       reviewStatus: "APPROVED",
+      allowedPurpose: ["discovery"],
       updatedAt: new Date("2026-08-20T00:00:00.000Z"),
     },
   ];
@@ -68,6 +69,21 @@ describe("actual provider mapper output → governed Raw boundary", () => {
       }),
     });
     expect(JSON.stringify(row.payload)).not.toContain("Milwaukee");
+
+    const withoutWebsite = mapDirectoryCompanyToRecord({
+      company: { name: "Parker Hannifin" },
+      listKind: "association_members",
+      pageUrl: "https://directory.example/members",
+      sourceClass: "industry_data",
+    });
+    expect(
+      prepare("directory", withoutWebsite, "directory.example"),
+    ).toMatchObject({
+      ingestStatus: "ACCEPTED",
+      externalId: expect.stringMatching(
+        /^directory:directory\.example:parker-hannifin$/u,
+      ),
+    });
   });
 
   it("keeps openFDA fit/intent mapper facts while Raw stores only structured codes", () => {

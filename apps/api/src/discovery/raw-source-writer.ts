@@ -42,7 +42,7 @@ export async function persistPreparedRawSourceRecord(
   },
 ): Promise<RawSourceWriterResult> {
   const command = {
-    schemaVersion: "raw-source-writer/v1",
+    schemaVersion: "raw-source-writer/v2",
     recordId: randomUUID(),
     workspaceId: args.workspaceId,
     runId: args.runId,
@@ -56,8 +56,6 @@ export async function persistPreparedRawSourceRecord(
     contentHash: args.row.contentHash,
     parserVersion: args.row.parserVersion,
     ingestKey: args.row.ingestKey,
-    expectedPayloadHash: args.row.payloadHash,
-    expectedPayloadBytes: args.row.payloadBytes,
     ingestStatus: args.row.ingestStatus,
     dispositionCode: args.row.dispositionCode,
     sourcePolicyId: sourcePolicyId(args.row.sourcePolicySnapshot),
@@ -73,8 +71,10 @@ export async function persistPreparedRawSourceRecord(
   if (
     !receipt ||
     typeof receipt.raw_record_id !== "string" ||
-    receipt.payload_hash !== args.row.payloadHash ||
-    receipt.payload_bytes !== args.row.payloadBytes ||
+    !/^[0-9a-f]{64}$/u.test(receipt.payload_hash) ||
+    !Number.isSafeInteger(receipt.payload_bytes) ||
+    receipt.payload_bytes < 1 ||
+    receipt.payload_bytes > 4 * 1024 * 1024 ||
     receipt.ingest_status !== args.row.ingestStatus ||
     typeof receipt.inserted !== "boolean"
   ) {

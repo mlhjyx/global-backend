@@ -227,13 +227,15 @@ describe("monitored source to Raw Source bridge", () => {
     expect(statement.strings.join("?")).toContain("write_raw_source_record_v2");
     expect(statement.values).toHaveLength(1);
     expect(JSON.parse(String(statement.values[0]))).toMatchObject({
+      schemaVersion: "raw-source-writer/v2",
       workspaceId: WORKSPACE_A,
       runId: null,
       sourceEntityId: entity.id,
       providerKey: "trade_fair",
-      expectedPayloadHash: prepared.row.payloadHash,
-      expectedPayloadBytes: prepared.row.payloadBytes,
     });
+    expect(JSON.parse(String(statement.values[0]))).not.toHaveProperty(
+      "expectedPayloadHash",
+    );
 
     query.mockResolvedValueOnce([
       {
@@ -249,7 +251,7 @@ describe("monitored source to Raw Source bridge", () => {
         workspaceId: WORKSPACE_A,
         prepared,
       }),
-    ).rejects.toMatchObject({ code: "MONITORED_SOURCE_RAW_DRIFT" });
+    ).resolves.toMatchObject({ payloadHash: "b".repeat(64) });
 
     await expect(
       persistMonitoredSourceRawBridge({ $queryRaw: query } as never, {

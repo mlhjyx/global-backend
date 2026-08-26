@@ -11,6 +11,7 @@ import {
   lockWorkspaceSuppressionPolicy,
   type SuppressionPolicyLockReceipt,
 } from './suppression-policy-lock';
+import { sanitizeCanonicalCompanyAttributes } from './canonical-company-attributes';
 
 /**
  * Final gate for writers that may create a canonical company from a platform
@@ -65,9 +66,21 @@ export async function loadMaterializableCompanyState(
   const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
   const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
   const blocked = prior?.status === 'SUPPRESSED' || sourceSuppressed || canonicalSuppressed;
+  const sanitizeAttributes = (attributes: Record<string, unknown>) => {
+    const governed = sanitizeCanonicalCompanyAttributes(attributes);
+    return options?.sanitizeAttributes
+      ? options.sanitizeAttributes(governed)
+      : governed;
+  };
   if (prior && blocked)
-    await repairSuppressedCompany(tx, prior, options?.sanitizeAttributes);
-  return { allowed: !blocked, prior } as const;
+    await repairSuppressedCompany(tx, prior, sanitizeAttributes);
+  const safePrior = prior
+    ? {
+        ...prior,
+        attributes: sanitizeAttributes(jsonObject(prior.attributes)),
+      }
+    : null;
+  return { allowed: !blocked, prior: safePrior } as const;
 }
 
 /**
@@ -98,7 +111,20 @@ export async function companyMayUseExternalProcessing(
     where: { type: { in: ['domain', 'company_name'] } },
     select: { type: true, value: true },
   });
-  if (!companyMatchesSuppression(suppressions, company)) return true;
+  if (!companyMatchesSuppression(suppressions, company)) {
+    const attributes = jsonObject(company.attributes);
+    const sanitized = sanitizeCanonicalCompanyAttributes(attributes);
+    if (JSON.stringify(sanitized) !== JSON.stringify(attributes)) {
+      await tx.canonicalCompany.updateMany({
+        where: { id: company.id, status: { not: 'SUPPRESSED' } },
+        data: {
+          attributes: sanitized as Prisma.InputJsonValue,
+          version: { increment: 1 },
+        },
+      });
+    }
+    return true;
+  }
 
   await repairSuppressedCompany(tx, company);
   return false;
@@ -130,7 +156,9 @@ export async function loadCompanyForSuppressionSafeWrite(
     return null;
   }
 
-  const attributes = jsonObject(company.attributes);
+  const attributes = sanitizeCanonicalCompanyAttributes(
+    jsonObject(company.attributes),
+  );
   const mailbox = canonicalizeSuppressionValue(
     'email',
     typeof attributes.contact_email === 'string' ? attributes.contact_email : '',
@@ -225,7 +253,10 @@ async function repairSuppressedCompany(
   ) => Record<string, unknown>,
 ): Promise<void> {
   const attributes = jsonObject(company.attributes);
-  const sanitized = sanitizeAttributes ? sanitizeAttributes(attributes) : attributes;
+  const governed = sanitizeCanonicalCompanyAttributes(attributes);
+  const sanitized = sanitizeAttributes
+    ? sanitizeAttributes(governed)
+    : governed;
   const { contact_email: _removedContactEmail, ...safeAttributes } = sanitized;
   const attributesChanged = JSON.stringify(safeAttributes) !== JSON.stringify(attributes);
 
@@ -252,9 +283,10 @@ async function repairSuppressedCompany(
     select: { attributes: true },
   });
   const currentAttributes = jsonObject(current?.attributes);
+  const currentGoverned = sanitizeCanonicalCompanyAttributes(currentAttributes);
   const currentSanitized = sanitizeAttributes
-    ? sanitizeAttributes(currentAttributes)
-    : currentAttributes;
+    ? sanitizeAttributes(currentGoverned)
+    : currentGoverned;
   const { contact_email: _currentMailbox, ...currentSafeAttributes } = currentSanitized;
   if (
     JSON.stringify(currentSafeAttributes) === JSON.stringify(currentAttributes)

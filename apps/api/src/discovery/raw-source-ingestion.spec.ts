@@ -264,9 +264,25 @@ describe("Raw Source v2 ingestion boundary", () => {
         providerKey,
         records: [
           companyRecord({
+            externalId:
+              ({
+                directory: "directory:acme.example",
+                wikidata: "wikidata:Q1",
+                openstreetmap: "osm:node/1",
+                trade_fair: "fair-1:company-1",
+                ted: "ted:1:0",
+                openfda: "openfda:1",
+                public_web: "acme.example",
+              } as Record<string, string>)[providerKey] ?? "company-1",
             attributes,
             ...({
-              wikidata: { license: "CC0-1.0" },
+              wikidata: {
+                license: "CC0-1.0",
+                provenance: {
+                  ...companyRecord().provenance,
+                  sourceUrl: "https://www.wikidata.org/wiki/Q1",
+                },
+              },
               openstreetmap: {
                 license: "ODbL-1.0",
                 provenance: {
@@ -281,7 +297,21 @@ describe("Raw Source v2 ingestion boundary", () => {
                   sourceUrl: "https://ted.europa.eu/en/notice/-/detail/1",
                 },
               },
-              openfda: { license: "CC0-1.0" },
+              openfda: {
+                license: "CC0-1.0",
+                identifier: { scheme: "fda-reg", value: "1" },
+                provenance: {
+                  ...companyRecord().provenance,
+                  sourceUrl:
+                    "https://api.fda.gov/device/registrationlisting.json",
+                },
+              },
+              public_web: {
+                provenance: {
+                  ...companyRecord().provenance,
+                  sourceUrl: "https://acme.example/company",
+                },
+              },
             }[providerKey] ?? {}),
           }),
         ],
@@ -290,8 +320,14 @@ describe("Raw Source v2 ingestion boundary", () => {
           domain:
             providerKey === "openstreetmap"
               ? "overpass-api.de"
+              : providerKey === "wikidata"
+                ? "wikidata.org"
               : providerKey === "ted"
                 ? "api.ted.europa.eu"
+                : providerKey === "openfda"
+                  ? "api.fda.gov"
+                  : providerKey === "public_web"
+                    ? "acme.example"
                 : policy.domain,
         })),
         limits: {
@@ -378,6 +414,7 @@ describe("Raw Source v2 ingestion boundary", () => {
       providerKey: "public_web",
       records: [
         companyRecord({
+          externalId: "acme.example",
           attributes: {
             products: ["pump"],
             keywords: ["industrial"],
@@ -385,9 +422,16 @@ describe("Raw Source v2 ingestion boundary", () => {
             extraction_confidence: 0.9,
             source_class: "public_intelligence",
           },
+          provenance: {
+            ...companyRecord().provenance,
+            sourceUrl: "https://acme.example/company",
+          },
         }),
       ],
-      policies: POLICIES,
+      policies: POLICIES.map((policy) => ({
+        ...policy,
+        domain: "acme.example",
+      })),
       limits: { ...LIMITS, maxRecordBytes: 2_048, maxBatchBytes: 4_096 },
       now: NOW,
     }).rows[0]!;
@@ -491,6 +535,76 @@ describe("Raw Source v2 ingestion boundary", () => {
         provenance: {
           ...companyRecord().provenance,
           sourceUrl: "https://user:password@registry.example/company/1",
+        },
+      }),
+    ],
+    [
+      "Wikidata externalId-to-QID mismatch",
+      "wikidata",
+      companyRecord({
+        externalId: "wikidata:Q2",
+        attributes: { wikidata_qid: "Q1", source_class: "company_registry" },
+        license: "CC0-1.0",
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://www.wikidata.org/wiki/Q1",
+        },
+      }),
+    ],
+    [
+      "TED identifier-to-winner mismatch",
+      "ted",
+      companyRecord({
+        externalId: "ted:1:0",
+        identifier: { scheme: "ted-natid:de", value: "DE222" },
+        attributes: {
+          ted: {
+            publication_number: "1",
+            publication_date: "2026-08-25",
+            notice_type: "award",
+            winner_identifier: "DE111",
+          },
+        },
+        license: "CC BY 4.0",
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://api.ted.europa.eu/v3/notices/search",
+        },
+      }),
+    ],
+    [
+      "openFDA identifier-to-registration mismatch",
+      "openfda",
+      companyRecord({
+        externalId: "openfda:3004512345",
+        identifier: { scheme: "fda-reg", value: "3004512345" },
+        attributes: {
+          fda: { registration_number: "999", product_codes: ["LLZ"] },
+          products: ["LLZ"],
+        },
+        license: "CC0-1.0",
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://api.fda.gov/device/registrationlisting.json",
+        },
+      }),
+    ],
+    [
+      "PublicWeb externalId-to-domain mismatch",
+      "public_web",
+      companyRecord({
+        externalId: "other.example",
+        domain: "acme.example",
+        attributes: {
+          products: ["pump"],
+          keywords: ["industrial"],
+          extraction_confidence: 0.9,
+          extraction_evidence_digest: "b".repeat(64),
+          source_class: "public_intelligence",
+        },
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://acme.example/company",
         },
       }),
     ],
@@ -793,6 +907,31 @@ describe("Raw Source v2 ingestion boundary", () => {
             ingestKey: drift.rows[0]!.ingestKey,
             payloadHash: drift.rows[0]!.payloadHash,
             payload: drift.rows[0]!.payload,
+          },
+        ],
+      ),
+    ).toMatchObject({ rows: [], duplicateCount: 1 });
+  });
+
+  it("treats the same numeric payload as a replay when PostgreSQL stores a different canonical digest", () => {
+    const candidate = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [companyRecord({ revenueUsd: 1e-7 })],
+      policies: POLICIES,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+
+    expect(
+      reconcileRawSourceBatch(
+        [candidate],
+        [
+          {
+            id: "raw-db-canonical",
+            externalId: candidate.externalId,
+            ingestKey: candidate.ingestKey,
+            payloadHash: "b".repeat(64),
+            payload: candidate.payload,
           },
         ],
       ),

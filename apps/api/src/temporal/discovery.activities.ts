@@ -42,6 +42,10 @@ import {
 } from '../discovery/raw-source-ingestion';
 import { persistPreparedRawSourceRecord } from '../discovery/raw-source-writer';
 import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
+import {
+  mergeCanonicalCompanyAttributes,
+  sanitizeCanonicalCompanyAttributes,
+} from '../discovery/canonical-company-attributes';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -214,6 +218,7 @@ export function createDiscoveryActivities(deps: {
           domain: true,
           retentionDays: true,
           reviewStatus: true,
+          allowedPurpose: true,
           updatedAt: true,
         },
       });
@@ -469,6 +474,14 @@ export function createDiscoveryActivities(deps: {
             continue;
           }
 
+          const currentAttributes = sanitizeCanonicalCompanyAttributes(
+            rec.attributes,
+          );
+          const canonicalAttributes = mergeCanonicalCompanyAttributes(
+            materialization.prior?.attributes,
+            currentAttributes,
+          );
+
           const canonical = await tx.canonicalCompany.upsert({
             where: {
               workspaceId_dedupeKey: {
@@ -479,6 +492,7 @@ export function createDiscoveryActivities(deps: {
             update: {
               // 后到的源只补缺，不覆盖已有值（冲突留在 field_evidence 里可见）
               ...(rec.region ? { region: { set: rec.region } } : {}),
+              attributes: canonicalAttributes as Prisma.InputJsonValue,
               version: { increment: 1 },
             },
             create: {
@@ -490,7 +504,7 @@ export function createDiscoveryActivities(deps: {
               industry: rec.industry ?? null,
               employeeCount: rec.employeeCount ?? null,
               revenueUsd: rec.revenueUsd ?? null,
-              attributes: (rec.attributes ?? undefined) as never,
+              attributes: canonicalAttributes as Prisma.InputJsonValue,
               status: 'NEW',
               dedupeKey: identity.dedupeKey,
             },
@@ -521,7 +535,7 @@ export function createDiscoveryActivities(deps: {
               ['industry', rec.industry],
               ['employee_count', rec.employeeCount],
               ['revenue_usd', rec.revenueUsd],
-              ['attributes', rec.attributes],
+              ['attributes', currentAttributes],
             ];
             for (const [field, value] of fields) {
               if (value == null) continue;
@@ -579,27 +593,32 @@ export function createDiscoveryActivities(deps: {
           select: { canonicalId: true },
         });
         const ids = [...new Set(links.map((l) => l.canonicalId))];
-        const companies = await tx.canonicalCompany.findMany({
-          // 尚无「本 run ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）才判定——防重复判、
-          // 且以 icpId 限定 → 别的 ICP 判过的公司在本 ICP 仍会被判（修「后判 ICP 判不了」的漏斗断流）。
-          where: {
-            id: { in: ids },
-            status: { not: 'SUPPRESSED' },
-            NOT: {
-              leads: {
-                some: { icpId: args.icpId, fitVerdict: { not: null } },
+        const companies = (
+          await tx.canonicalCompany.findMany({
+            // 尚无「本 run ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）才判定——防重复判、
+            // 且以 icpId 限定 → 别的 ICP 判过的公司在本 ICP 仍会被判（修「后判 ICP 判不了」的漏斗断流）。
+            where: {
+              id: { in: ids },
+              status: { not: 'SUPPRESSED' },
+              NOT: {
+                leads: {
+                  some: { icpId: args.icpId, fitVerdict: { not: null } },
+                },
               },
             },
-          },
-          select: {
-            id: true,
-            name: true,
-            domain: true,
-            country: true,
-            industry: true,
-            attributes: true,
-          },
-        });
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              industry: true,
+              attributes: true,
+            },
+          })
+        ).map((company) => ({
+          ...company,
+          attributes: sanitizeCanonicalCompanyAttributes(company.attributes),
+        }));
         return { icpBrief, companies };
       });
 

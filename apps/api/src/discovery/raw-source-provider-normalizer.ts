@@ -159,13 +159,27 @@ function validDomain(value: unknown): value is string {
     DOMAIN.test(value)
   );
 }
-function validExternalId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    Buffer.byteLength(value, "utf8") <= 256 &&
-    EXTERNAL_ID.test(value) &&
-    isSecretFreeText(value)
-  );
+function validExternalId(providerKey: string, value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value, "utf8") > 256 ||
+    !EXTERNAL_ID.test(value) ||
+    !isSecretFreeText(value)
+  ) {
+    return false;
+  }
+  switch (providerKey) {
+    case "wikidata":
+      return /^wikidata:Q[1-9]\d{0,15}$/u.test(value);
+    case "openstreetmap":
+      return /^osm:(?:node|way|relation)\/\d{1,20}$/u.test(value);
+    case "ted":
+      return /^ted:\d{1,9}(?:-\d{4})?:\d{1,6}$/u.test(value);
+    case "openfda":
+      return /^openfda:(?:\d{1,32}|[0-9a-f]{64})$/u.test(value);
+    default:
+      return isContactFreeText(value);
+  }
 }
 function codeToken(value: unknown, maximumBytes = 128): value is string {
   return (
@@ -173,7 +187,7 @@ function codeToken(value: unknown, maximumBytes = 128): value is string {
     value.normalize("NFKC") === value &&
     Buffer.byteLength(value, "utf8") <= maximumBytes &&
     CODE_TOKEN.test(value) &&
-    isSecretFreeText(value)
+    isContactFreeText(value)
   );
 }
 function validIsoInstant(value: unknown): value is string {
@@ -189,11 +203,7 @@ export function isSecretFreeText(value: unknown): value is string {
   return typeof value === "string" && !PII_OR_SECRET.test(value);
 }
 export function isProviderCompanyName(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value) &&
-    !CONTACT_LIKE_PHONE.test(value)
-  );
+  return typeof value === "string" && isContactFreeText(value);
 }
 export function isContactFreeText(value: unknown): value is string {
   return isSecretFreeText(value) && !CONTACT_LIKE_PHONE.test(value);
@@ -225,7 +235,7 @@ function controlledTerms(value: unknown): string[] | null {
 function stableDecodedPath(pathname: string): string | null {
   let current = pathname;
   for (let pass = 0; pass < 6; pass += 1) {
-    if (!isSecretFreeText(current)) return null;
+    if (!isContactFreeText(current)) return null;
     let decoded: string;
     try {
       decoded = decodeURIComponent(current);
@@ -250,7 +260,7 @@ export function isStableSafeHttpsUrl(value: unknown): value is string {
       parsed.hash === "" &&
       (parsed.port === "" || parsed.port === "443") &&
       validDomain(parsed.hostname.toLowerCase()) &&
-      isSecretFreeText(value) &&
+      isContactFreeText(value) &&
       stableDecodedPath(parsed.pathname) !== null
     );
   } catch {
@@ -346,7 +356,9 @@ function normalizeProvenance(
     typeof contentHash === "string" &&
     !SHA256.test(contentHash) &&
     ["wikidata", "openstreetmap"].includes(providerKey) &&
-    codeToken(contentHash)
+    Buffer.byteLength(contentHash, "utf8") <= 128 &&
+    CODE_TOKEN.test(contentHash) &&
+    isSecretFreeText(contentHash)
   ) {
     contentHash = sha256(`${providerKey}:${contentHash}`);
   }
@@ -603,7 +615,7 @@ export function normalizeRawSourceProviderPayload(
   if (
     providerKey === "openfda" &&
     typeof externalId === "string" &&
-    !validExternalId(externalId)
+    !validExternalId(providerKey, externalId)
   )
     externalId = `openfda:${sha256(externalId)}`;
   const license =

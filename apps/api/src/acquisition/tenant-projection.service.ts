@@ -4,9 +4,9 @@ import { companyIdentity } from '../discovery/identity';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import {
-  isContactFreeText,
-  isControlledBusinessTerm,
-} from '../discovery/raw-source-provider-normalizer';
+  mergeCanonicalCompanyAttributes,
+  sanitizeCanonicalCompanyAttributes,
+} from '../discovery/canonical-company-attributes';
 import {
   persistMonitoredSourceRawBridge,
   prepareMonitoredSourceRawBridge,
@@ -137,7 +137,7 @@ export class TenantProjectionService {
             {
               knownSuppressions: suppressionRows,
               policyLock,
-              sanitizeAttributes: sanitizePriorAttributes,
+              sanitizeAttributes: sanitizeCanonicalCompanyAttributes,
             },
           );
           const { prior } = materialization;
@@ -146,7 +146,9 @@ export class TenantProjectionService {
             continue;
           }
 
-          const attributes = preparedCompany.attributes;
+          const attributes = sanitizeCanonicalCompanyAttributes(
+            preparedCompany.attributes,
+          );
           const raw = await persistMonitoredSourceRawBridge(tx, {
             workspaceId,
             prepared: preparedRaw,
@@ -161,10 +163,8 @@ export class TenantProjectionService {
                   // 后到的源只补缺（domain/country），不覆盖已有
                   ...(preparedCompany.domain ? { domain: { set: preparedCompany.domain } } : {}),
                   ...(preparedCompany.country ? { country: { set: preparedCompany.country } } : {}),
-                  attributes: mergeAttributes(
-                    sanitizePriorAttributes(
-                      (prior.attributes ?? {}) as Record<string, unknown>,
-                    ),
+                  attributes: mergeCanonicalCompanyAttributes(
+                    prior.attributes,
                     attributes,
                   ) as Prisma.InputJsonValue,
                   version: { increment: 1 },
@@ -263,83 +263,4 @@ function companyFromPreparedRaw(value: unknown): {
     ...(typeof payload.country === 'string' ? { country: payload.country } : {}),
     attributes: attributes as Record<string, unknown>,
   };
-}
-
-const UNSAFE_LEGACY_ATTRIBUTE_KEYS = new Set([
-  'address',
-  'attribution',
-  'buyernames',
-  'city',
-  'contact',
-  'contactemail',
-  'contactname',
-  'description',
-  'devicefacts',
-  'disclaimer',
-  'email',
-  'extractionevidence',
-  'listinglocation',
-  'osmtags',
-  'phone',
-  'publicemail',
-  'publicphone',
-  'recipientname',
-  'sourcefairname',
-  'winnercity',
-]);
-
-function normalizedAttributeKey(value: string): string {
-  return value.toLowerCase().replaceAll(/[^a-z0-9]/gu, '');
-}
-
-function sanitizePriorValue(
-  key: string,
-  value: unknown,
-  depth: number,
-): unknown {
-  if (depth > 6) return undefined;
-  if (key === 'products' || key === 'keywords') {
-    return Array.isArray(value)
-      ? value.filter(isControlledBusinessTerm)
-      : undefined;
-  }
-  if (typeof value === 'string') {
-    return isContactFreeText(value) ? value : undefined;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitizePriorValue('', item, depth + 1))
-      .filter((item) => item !== undefined);
-  }
-  if (value !== null && typeof value === 'object') {
-    return sanitizePriorAttributes(value as Record<string, unknown>, depth + 1);
-  }
-  return value;
-}
-
-function sanitizePriorAttributes(
-  attributes: Record<string, unknown>,
-  depth = 0,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(attributes).flatMap(([key, value]) => {
-      if (UNSAFE_LEGACY_ATTRIBUTE_KEYS.has(normalizedAttributeKey(key))) {
-        return [];
-      }
-      const sanitized = sanitizePriorValue(key, value, depth);
-      return sanitized === undefined ? [] : [[key, sanitized]];
-    }),
-  );
-}
-
-/** 合并已有 canonical.attributes 与新源属性：新源覆盖同名标量、**并集 products**，
- *  保留 prev 里其它键（含 gleif/wikidata/digital_footprint 等富集命名空间）。 */
-function mergeAttributes(prev: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...prev, ...next };
-  const prods = [
-    ...(Array.isArray(prev.products) ? (prev.products as unknown[]) : []),
-    ...(Array.isArray(next.products) ? (next.products as unknown[]) : []),
-  ].map(String);
-  if (prods.length) merged.products = [...new Set(prods)];
-  return merged;
 }

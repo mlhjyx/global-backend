@@ -22,6 +22,14 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826120000_raw_source_governance_writer",
     checksum: "d".repeat(64),
   },
+  {
+    migrationName: "20260826130000_raw_source_governance_writer_hardening",
+    checksum: "e".repeat(64),
+  },
+  {
+    migrationName: "20260826140000_raw_source_governance_historical_cleanup",
+    checksum: "f".repeat(64),
+  },
 ];
 
 describe("PR #407 experiment _prisma_migrations bridge decision", () => {

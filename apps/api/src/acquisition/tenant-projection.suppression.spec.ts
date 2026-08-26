@@ -51,8 +51,8 @@ function projectionHarness(
         return [
           {
             raw_record_id: "raw-bridge",
-            payload_hash: command.expectedPayloadHash,
-            payload_bytes: command.expectedPayloadBytes,
+            payload_hash: "b".repeat(64),
+            payload_bytes: Buffer.byteLength(JSON.stringify(command.payload)),
             ingest_status: command.ingestStatus,
             inserted: true,
           },

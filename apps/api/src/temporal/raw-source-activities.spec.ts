@@ -148,11 +148,15 @@ describe("executeQuery Raw Source v2 persistence", () => {
         unknown
       >;
       created.push(command);
+      const databasePayloadHash = "f".repeat(64);
+      const databasePayloadBytes = Buffer.byteLength(
+        JSON.stringify(command.payload),
+      );
       return [
         {
           raw_record_id: `raw-${created.length}`,
-          payload_hash: command.expectedPayloadHash,
-          payload_bytes: command.expectedPayloadBytes,
+          payload_hash: databasePayloadHash,
+          payload_bytes: databasePayloadBytes,
           ingest_status: command.ingestStatus,
           inserted: true,
         },
@@ -183,6 +187,7 @@ describe("executeQuery Raw Source v2 persistence", () => {
             domain: "registry.example",
             retentionDays: 90,
             reviewStatus: "APPROVED",
+            allowedPurpose: ["discovery"],
             updatedAt: new Date("2026-08-25T00:00:00.000Z"),
           },
         ]),
@@ -293,10 +298,11 @@ describe("executeQuery Raw Source v2 persistence", () => {
       expect(statement.values).toHaveLength(1);
     }
     expect(created[0]).toMatchObject({
+      schemaVersion: "raw-source-writer/v2",
       ingestStatus: "ACCEPTED",
-      expectedPayloadHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      expectedPayloadBytes: expect.any(Number),
     });
+    expect(created[0]).not.toHaveProperty("expectedPayloadHash");
+    expect(created[0]).not.toHaveProperty("expectedPayloadBytes");
     expect(created[1]).toMatchObject({
       ingestStatus: "REJECTED",
       dispositionCode: "UNKNOWN_PAYLOAD_FIELD",

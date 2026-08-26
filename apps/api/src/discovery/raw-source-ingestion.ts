@@ -17,6 +17,7 @@ export interface RawSourcePolicySnapshot {
   domain: string;
   retentionDays: number;
   reviewStatus: string;
+  allowedPurpose?: unknown;
   updatedAt: Date;
 }
 
@@ -348,6 +349,7 @@ function policyFor(
   retentionDays: number;
   snapshot: Record<string, unknown>;
   missing: boolean;
+  purposeAllowed: boolean;
 } {
   const policy = hostname
     ? [...policies]
@@ -365,22 +367,32 @@ function policyFor(
     return {
       retentionDays,
       missing: true,
+      purposeAllowed: false,
       snapshot: {
         kind: "missing",
         retentionDays,
+        allowedPurpose: [],
         minimizedFields: [...minimizedFields],
       },
     };
   }
+  const allowedPurpose = Array.isArray(policy.allowedPurpose)
+    ? policy.allowedPurpose.filter(
+        (purpose): purpose is string => typeof purpose === "string",
+      )
+    : [];
+  const purposeAllowed = allowedPurpose.includes("discovery");
   return {
     retentionDays,
     missing: false,
+    purposeAllowed,
     snapshot: {
       kind: "source_policy",
       id: policy.id,
       domain: policy.domain,
       retentionDays,
       reviewStatus: policy.reviewStatus,
+      allowedPurpose: purposeAllowed ? ["discovery"] : [],
       updatedAt: policy.updatedAt.toISOString(),
       minimizedFields: [...minimizedFields],
     },
@@ -526,6 +538,9 @@ export function prepareRawSourceBatch(args: {
     } else if (policy.missing) {
       ingestStatus = "QUARANTINED";
       dispositionCode = "SOURCE_POLICY_MISSING";
+    } else if (!policy.purposeAllowed) {
+      ingestStatus = "QUARANTINED";
+      dispositionCode = "SOURCE_POLICY_PURPOSE_NOT_ALLOWED";
     } else if (policy.snapshot.reviewStatus !== "APPROVED") {
       ingestStatus = "QUARANTINED";
       dispositionCode = "SOURCE_POLICY_SUSPENDED";
@@ -578,11 +593,10 @@ export function rawDriftIngestKey(
 }
 
 function receiptHash(receipt: ExistingRawSourceReceipt): string {
-  if (receipt.payloadHash) return receipt.payloadHash;
   try {
     return rawPayloadHash(receipt.payload);
   } catch {
-    return sha256(diagnosticShape(receipt.payload));
+    return receipt.payloadHash ?? sha256(diagnosticShape(receipt.payload));
   }
 }
 

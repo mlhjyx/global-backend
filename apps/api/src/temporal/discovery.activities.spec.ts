@@ -68,7 +68,7 @@ const REC: ProviderCompanyRecord = {
   },
   license: "CC0-1.0",
   provenance: {
-    sourceUrl: "https://acme.de/",
+    sourceUrl: "https://www.wikidata.org/wiki/Q1",
     fetchedAt: "2026-07-11T00:00:00.000Z",
     contentHash: "a".repeat(64),
     parserVersion: "wikidata/1",
@@ -111,11 +111,16 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         string,
         unknown
       >;
+      const databasePayloadHash = "f".repeat(64);
+      const databasePayloadBytes = Buffer.byteLength(
+        JSON.stringify(command.payload),
+        "utf8",
+      );
       const row = {
         id: `raw-${rows.length + 1}`,
         externalId: command.externalId,
         ingestKey: command.ingestKey,
-        payloadHash: command.expectedPayloadHash,
+        payloadHash: databasePayloadHash,
         payload: command.payload,
         ingestStatus: command.ingestStatus,
         sourceClass: command.sourceClass,
@@ -125,8 +130,8 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
       return [
         {
           raw_record_id: row.id,
-          payload_hash: command.expectedPayloadHash,
-          payload_bytes: command.expectedPayloadBytes,
+          payload_hash: databasePayloadHash,
+          payload_bytes: databasePayloadBytes,
           ingest_status: command.ingestStatus,
           inserted: true,
         },
@@ -147,9 +152,10 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
       findMany: async () => [
         {
           id: "policy-acme",
-          domain: "acme.de",
+          domain: "wikidata.org",
           retentionDays: 365,
           reviewStatus: "APPROVED",
+          allowedPurpose: ["discovery"],
           updatedAt: new Date("2026-08-20T00:00:00.000Z"),
         },
       ],

@@ -184,6 +184,19 @@ function codeToken(value: unknown, maximumBytes = 80): value is string {
     value.normalize("NFKC") === value &&
     Buffer.byteLength(value, "utf8") <= maximumBytes &&
     CODE_TOKEN.test(value) &&
+    isContactFreeText(value)
+  );
+}
+
+function providerIdentifierToken(
+  value: unknown,
+  maximumBytes = 80,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.normalize("NFKC") === value &&
+    Buffer.byteLength(value, "utf8") <= maximumBytes &&
+    /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]*$/u.test(value) &&
     isSecretFreeText(value)
   );
 }
@@ -220,13 +233,36 @@ function validDomain(value: unknown): value is string {
   );
 }
 
-function validExternalId(value: unknown): value is string {
+function validGenericExternalId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     Buffer.byteLength(value, "utf8") <= 256 &&
     EXTERNAL_ID.test(value) &&
-    isSecretFreeText(value)
+    isContactFreeText(value)
   );
+}
+
+function validExternalId(providerKey: string, value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value, "utf8") > 256 ||
+    !EXTERNAL_ID.test(value) ||
+    !isSecretFreeText(value)
+  ) {
+    return false;
+  }
+  switch (providerKey) {
+    case "wikidata":
+      return /^wikidata:Q[1-9]\d{0,15}$/u.test(value);
+    case "openstreetmap":
+      return /^osm:(?:node|way|relation)\/\d{1,20}$/u.test(value);
+    case "ted":
+      return /^ted:\d{1,9}(?:-\d{4})?:\d{1,6}$/u.test(value);
+    case "openfda":
+      return /^openfda:(?:\d{1,32}|[0-9a-f]{64})$/u.test(value);
+    default:
+      return validGenericExternalId(value);
+  }
 }
 
 function validIsoInstant(value: unknown): value is string {
@@ -263,15 +299,40 @@ function validProvenance(value: unknown): boolean {
   );
 }
 
-function validIdentifier(value: unknown): boolean {
+function validIdentifier(providerKey: string, value: unknown): boolean {
   if (value === undefined) return true;
   const input = record(value);
-  return Boolean(
-    input &&
-    exactKeys(input, ["scheme", "value"]) &&
-    codeToken(input.scheme, 64) &&
-    codeToken(input.value, 128),
-  );
+  if (!input || !exactKeys(input, ["scheme", "value"])) return false;
+  const scheme = input.scheme;
+  const identifier = input.value;
+  if (typeof scheme !== "string" || typeof identifier !== "string") {
+    return false;
+  }
+  if (
+    identifier.normalize("NFKC") !== identifier ||
+    Buffer.byteLength(identifier, "utf8") > 128 ||
+    !isSecretFreeText(identifier)
+  ) {
+    return false;
+  }
+  if (providerKey === "registry") {
+    return (
+      (scheme === "registry-id" &&
+        CODE_TOKEN.test(identifier) &&
+        isContactFreeText(identifier)) ||
+      (scheme === "lei" && /^[A-Z0-9]{20}$/u.test(identifier))
+    );
+  }
+  if (providerKey === "ted") {
+    return (
+      /^ted-natid(?::[a-z]{2})?$/u.test(scheme) &&
+      /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]{0,79}$/u.test(identifier)
+    );
+  }
+  if (providerKey === "openfda") {
+    return scheme === "fda-reg" && /^\d{1,32}$/u.test(identifier);
+  }
+  return false;
 }
 
 function validSourceClass(value: unknown): value is string {
@@ -310,11 +371,10 @@ function validDirectoryAttributes(value: JsonRecord): boolean {
   );
 }
 
-function validCoordinates(value: JsonRecord, idKey: string): boolean {
+function validCoordinates(value: JsonRecord): boolean {
   const latitude = value.latitude;
   const longitude = value.longitude;
   return (
-    codeToken(value[idKey], 80) &&
     (latitude === undefined ||
       (typeof latitude === "number" &&
         Number.isFinite(latitude) &&
@@ -339,7 +399,7 @@ function validWikidataAttributes(value: JsonRecord): boolean {
     ]) &&
     typeof value.wikidata_qid === "string" &&
     /^Q[1-9]\d{0,15}$/u.test(value.wikidata_qid) &&
-    validCoordinates(value, "wikidata_qid") &&
+    validCoordinates(value) &&
     ["company_registry", "industry_data"].includes(String(value.source_class))
   );
 }
@@ -349,7 +409,7 @@ function validOsmAttributes(value: JsonRecord): boolean {
     keysWithin(value, ["latitude", "longitude", "osm_id", "source_class"]) &&
     typeof value.osm_id === "string" &&
     /^(?:node|way|relation)\/\d{1,20}$/u.test(value.osm_id) &&
-    validCoordinates(value, "osm_id") &&
+    validCoordinates(value) &&
     value.source_class === "industry_data"
   );
 }
@@ -373,7 +433,7 @@ function validMonitoredSource(value: unknown): boolean {
     UUID.test(input.sourceEntityId) &&
     typeof input.sourceFetchId === "string" &&
     UUID.test(input.sourceFetchId) &&
-    validExternalId(input.sourceExternalId) &&
+    validGenericExternalId(input.sourceExternalId) &&
     codeToken(input.sourceKey, 128) &&
     ["mapyourshow", "trade_fair"].includes(String(input.originProviderKey)),
   );
@@ -435,7 +495,7 @@ function validTedAttributes(value: JsonRecord): boolean {
         (item) => typeof item === "string" && /^[A-Z]{2,3}$/u.test(item),
       )) &&
     (ted.winner_identifier === undefined ||
-      codeToken(ted.winner_identifier, 80))
+      providerIdentifierToken(ted.winner_identifier, 80))
   );
 }
 
@@ -533,6 +593,89 @@ function validAttributes(providerKey: string, value: unknown): boolean {
   }
 }
 
+function validProviderBindings(
+  providerKey: string,
+  payload: JsonRecord,
+): boolean {
+  const attributes = record(payload.attributes);
+  const provenance = record(payload.provenance);
+  if (!attributes || !provenance) return false;
+  let host: string;
+  let path: string;
+  try {
+    const source = new URL(String(provenance.sourceUrl));
+    host = source.hostname.toLowerCase();
+    path = source.pathname;
+  } catch {
+    return false;
+  }
+  switch (providerKey) {
+    case "directory":
+      return (
+        (typeof payload.domain === "string"
+          ? payload.externalId === `directory:${payload.domain}`
+          : typeof payload.externalId === "string" &&
+            payload.externalId.startsWith(
+              `directory:${String(attributes.source_directory)}:`,
+            )) &&
+        host === attributes.source_directory
+      );
+    case "wikidata":
+      return (
+        payload.externalId === `wikidata:${String(attributes.wikidata_qid)}` &&
+        host === "www.wikidata.org" &&
+        path === `/wiki/${String(attributes.wikidata_qid)}`
+      );
+    case "openstreetmap":
+      return (
+        payload.externalId === `osm:${String(attributes.osm_id)}` &&
+        host === "overpass-api.de" &&
+        path === "/api/interpreter"
+      );
+    case "trade_fair": {
+      const monitored = record(payload.monitoredSource);
+      return typeof payload.externalId === "string" &&
+        (monitored
+          ? /^monitored:[0-9a-f]{64}$/u.test(payload.externalId)
+          : payload.externalId.startsWith(
+              `${String(attributes.source_fair)}:`,
+            ));
+    }
+    case "ted": {
+      const ted = record(attributes.ted);
+      const identifier = record(payload.identifier);
+      const externalId = String(payload.externalId);
+      const prefix = `ted:${String(ted?.publication_number)}:`;
+      return Boolean(
+        ted &&
+          externalId.startsWith(prefix) &&
+          /^\d+$/u.test(externalId.slice(prefix.length)) &&
+          host === "api.ted.europa.eu" &&
+          path === "/v3/notices/search" &&
+          (identifier === null || identifier.value === ted.winner_identifier),
+      );
+    }
+    case "openfda": {
+      const fda = record(attributes.fda);
+      const identifier = record(payload.identifier);
+      return Boolean(
+        fda &&
+          host === "api.fda.gov" &&
+          path === "/device/registrationlisting.json" &&
+          (identifier === null
+            ? typeof payload.externalId === "string" &&
+              /^openfda:[0-9a-f]{64}$/u.test(payload.externalId)
+            : identifier.value === fda.registration_number &&
+              payload.externalId === `openfda:${String(identifier.value)}`),
+      );
+    }
+    case "public_web":
+      return payload.externalId === payload.domain && host === payload.domain;
+    default:
+      return true;
+  }
+}
+
 export function validateRawSourceProviderPayload(
   providerKey: string,
   value: unknown,
@@ -561,7 +704,7 @@ export function validateRawSourceProviderPayload(
   }
   if (
     (governed.externalId !== undefined &&
-      !validExternalId(governed.externalId)) ||
+      !validExternalId(providerKey, governed.externalId)) ||
     !validCompanyName(governed.name) ||
     (governed.domain !== undefined && !validDomain(governed.domain)) ||
     (governed.country !== undefined &&
@@ -577,7 +720,8 @@ export function validateRawSourceProviderPayload(
         governed.revenueUsd < 0 ||
         governed.revenueUsd > 1_000_000_000_000_000)) ||
     !validAttributes(providerKey, governed.attributes) ||
-    !validIdentifier(governed.identifier) ||
+    !validProviderBindings(providerKey, governed) ||
+    !validIdentifier(providerKey, governed.identifier) ||
     !validProvenance(governed.provenance) ||
     (governed.license !== undefined &&
       (typeof governed.license !== "string" ||

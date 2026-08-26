@@ -323,10 +323,7 @@ export async function persistMonitoredSourceRawBridge(
       "controlled Raw writer rejected the monitored snapshot",
     );
   }
-  if (
-    raw.ingestStatus !== "ACCEPTED" ||
-    raw.payloadHash !== prepared.row.payloadHash
-  ) {
+  if (raw.ingestStatus !== "ACCEPTED") {
     throw new MonitoredSourceRawBridgeError(
       "MONITORED_SOURCE_RAW_DRIFT",
       "existing monitored Raw receipt differs from the deterministic snapshot",

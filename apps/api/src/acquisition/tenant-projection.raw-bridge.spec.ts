@@ -27,8 +27,8 @@ describe("TenantProjectionService Raw Source bridge", () => {
           return [
             {
               raw_record_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-              payload_hash: command.expectedPayloadHash,
-              payload_bytes: command.expectedPayloadBytes,
+              payload_hash: "b".repeat(64),
+              payload_bytes: Buffer.byteLength(JSON.stringify(command.payload)),
               ingest_status: command.ingestStatus,
               inserted: true,
             },

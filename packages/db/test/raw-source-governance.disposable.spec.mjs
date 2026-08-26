@@ -408,6 +408,10 @@ function seedCurrentMainClone(database = databases.upgrade) {
       (
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','contact_email','"person@example.test"',
         'registry','${SAFE_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
+      ),
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','contact_email','"protected.person@example.test"',
+        'usaspending_awards','${RESTRICTED_RAW_A}',1,'public','["display"]','2026-08-25T16:31:00Z'
       );
   `,
   );
@@ -819,7 +823,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.upgrade,
         `SELECT count(*) FROM field_evidence WHERE entity_id='${COMPANY_A}';`,
       ),
-      "4",
+      "5",
     );
     const cleanedEvidence = JSON.parse(
       dockerPsql(
@@ -830,7 +834,8 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          ) ORDER BY field)::text
          FROM field_evidence
          WHERE entity_id='${COMPANY_A}'
-           AND field IN ('attributes','contact_email');`,
+           AND field IN ('attributes','contact_email')
+           AND raw_record_id='${SAFE_RAW_A}';`,
       ),
     );
     assert.equal(cleanedEvidence.length, 2);
@@ -859,6 +864,192 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       `${WORKSPACE_A}\n0`,
     );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM field_evidence
+         WHERE raw_record_id='${RESTRICTED_RAW_A}'
+           AND value::text LIKE '%protected.person@example.test%';`,
+      ),
+      "1",
+    );
+  });
+
+  it("applies the closed PostgreSQL semantic schema to every governed provider payload", () => {
+    const provenance = (sourceUrl, parserVersion) => ({
+      sourceUrl,
+      fetchedAt: "2026-08-26T00:00:00.000Z",
+      contentHash: "a".repeat(64),
+      parserVersion,
+    });
+    const payloads = [
+      [
+        "registry",
+        {
+          externalId: "registry-1",
+          name: "Johnson Controls",
+          domain: "johnson.example",
+          country: "US",
+          attributes: { products: ["industrial pump"], employee_band: "50-100" },
+          identifier: { scheme: "lei", value: "529900T8BM49AURSDO55" },
+          license: "public",
+          provenance: provenance("https://registry.example/company/1", "registry/v2"),
+        },
+      ],
+      [
+        "directory",
+        {
+          externalId: "directory:parker.example",
+          name: "Parker Hannifin",
+          domain: "parker.example",
+          attributes: {
+            detail_url: "https://directory.example/company/parker",
+            source_class: "industry_data",
+            source_directory: "directory.example",
+            source_kind: "directory",
+          },
+          provenance: provenance("https://directory.example/list", "directory/v1"),
+        },
+      ],
+      [
+        "directory",
+        {
+          externalId: "directory:directory.example:parker-hannifin",
+          name: "Parker Hannifin",
+          attributes: {
+            source_class: "industry_data",
+            source_directory: "directory.example",
+            source_kind: "directory",
+          },
+          provenance: provenance(
+            "https://directory.example/list",
+            "directory/v1",
+          ),
+        },
+      ],
+      [
+        "wikidata",
+        {
+          externalId: "wikidata:Q1",
+          name: "General Dynamics",
+          attributes: {
+            wikidata_qid: "Q1",
+            latitude: 38.95,
+            longitude: -77.35,
+            source_class: "company_registry",
+          },
+          license: "CC0-1.0",
+          provenance: provenance("https://www.wikidata.org/wiki/Q1", "wikidata/v1"),
+        },
+      ],
+      [
+        "openstreetmap",
+        {
+          externalId: "osm:node/1",
+          name: "General Dynamics",
+          attributes: {
+            osm_id: "node/1",
+            latitude: 38.95,
+            longitude: -77.35,
+            source_class: "industry_data",
+          },
+          license: "ODbL-1.0",
+          provenance: provenance("https://overpass-api.de/api/interpreter", "osm/v1"),
+        },
+      ],
+      [
+        "trade_fair",
+        {
+          externalId: "fair-2026:ex-1",
+          name: "Parker Hannifin",
+          attributes: {
+            stand: "A42",
+            products: ["industrial pump"],
+            source_fair: "fair-2026",
+            source_class: "industry_data",
+          },
+          license: "SOURCE_SPECIFIC_RESTRICTED",
+          provenance: provenance("https://fair.example/exhibitors", "trade-fair/v1"),
+        },
+      ],
+      [
+        "ted",
+        {
+          externalId: "ted:123456-2026:0",
+          name: "Johnson Controls",
+          country: "DE",
+          identifier: { scheme: "ted-natid:de", value: "DE111" },
+          attributes: {
+            ted: {
+              publication_number: "123456-2026",
+              publication_date: "2026-08-25",
+              notice_type: "can-standard",
+              cpv: ["42122000"],
+              buyer_countries: ["DEU"],
+              winner_identifier: "DE111",
+            },
+          },
+          license: "CC BY 4.0",
+          provenance: provenance("https://api.ted.europa.eu/v3/notices/search", "ted/v1"),
+        },
+      ],
+      [
+        "openfda",
+        {
+          externalId: "openfda:3004512345",
+          name: "Parker Hannifin",
+          country: "US",
+          identifier: { scheme: "fda-reg", value: "3004512345" },
+          attributes: {
+            fda: {
+              registration_number: "3004512345",
+              fei_number: "3004512345",
+              status_code: "1",
+              state_code: "OH",
+              initial_importer: false,
+              product_codes: ["LLZ"],
+              owner_operator_numbers: ["9012345"],
+              created_date: "2009-03-01",
+            },
+            products: ["LLZ"],
+          },
+          license: "CC0-1.0",
+          provenance: provenance(
+            "https://api.fda.gov/device/registrationlisting.json",
+            "openfda/v1",
+          ),
+        },
+      ],
+      [
+        "public_web",
+        {
+          externalId: "numeric.example",
+          name: "General Dynamics",
+          domain: "numeric.example",
+          attributes: {
+            products: ["industrial pump"],
+            keywords: ["industrial"],
+            extraction_confidence: 1e-7,
+            extraction_evidence_digest: "f".repeat(64),
+            source_class: "public_intelligence",
+          },
+          provenance: provenance("https://numeric.example/company", "public-web/v1"),
+        },
+      ],
+    ];
+    for (const [providerKey, payload] of payloads) {
+      const encoded = JSON.stringify(payload).replaceAll("'", "''");
+      assert.equal(
+        dockerPsql(
+          databases.upgrade,
+          `SELECT raw_source_provider_payload_valid_v2(
+             '${providerKey}','${encoded}'::jsonb
+           );`,
+        ),
+        "t",
+        providerKey,
+      );
+    }
   });
 
   it("stores an immutable historical restriction with the exact Raw provenance snapshot", () => {
@@ -1640,7 +1831,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
              WHERE raw_record_id='${RESTRICTED_RAW_A}')
          );`,
       ),
-      "1|1",
+      "1|2",
     );
     dockerPsql(
       databases.upgrade,
@@ -1842,7 +2033,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                AND value::text LIKE '%person@example.test%')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "true|true|true|4|2",
+      "true|true|true|5|3",
     );
   });
 });
