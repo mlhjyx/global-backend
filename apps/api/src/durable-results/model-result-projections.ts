@@ -1,5 +1,6 @@
 import { types } from 'node:util';
 import type { ModelResult } from '../model-gateway/types';
+import { MAX_CONTACTS_PER_DISCOVERY_ADAPTER } from '../discovery/execution-envelope';
 import type { TypedProjectionSchema } from './durable-result-strategy';
 import { TypedProjectionRegistry } from './typed-projection.registry';
 import type { TypedProjectionDefinition } from './typed-projection.types';
@@ -772,7 +773,7 @@ const listDefinition: TypedProjectionDefinition<unknown, unknown> = {
 const peopleDefinition: TypedProjectionDefinition<unknown, unknown> = {
   schema: 'contact-decision-makers/v1',
   jsonSchema: modelResultSchema(objectSchema({
-    people: arraySchema(64, optionalObjectSchema({
+    people: arraySchema(MAX_CONTACTS_PER_DISCOVERY_ADAPTER, optionalObjectSchema({
       fullName: stringSchema(500),
       title: stringSchema(500),
       email: stringSchema(320),
