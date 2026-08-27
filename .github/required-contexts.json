@@ -154,14 +154,14 @@
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/init",
-      "revision": "5595ccaf912efad79be6eef63a5619ff05969be3",
-      "version": "v4"
+      "revision": "db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28",
+      "version": "v4.37.8"
     },
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/analyze",
-      "revision": "5595ccaf912efad79be6eef63a5619ff05969be3",
-      "version": "v4"
+      "revision": "db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28",
+      "version": "v4.37.8"
     },
     {
       "workflow": ".github/workflows/publish-runtime-image.yml",
