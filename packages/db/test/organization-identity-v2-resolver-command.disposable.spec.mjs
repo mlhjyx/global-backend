@@ -28,6 +28,7 @@ const RAW_CONFLICT = "22000000-0000-4000-8000-000000000004";
 const COMPANY_A = "23000000-0000-4000-8000-000000000001";
 const COMPANY_B = "23000000-0000-4000-8000-000000000002";
 const COMPANY_CREATE = "23000000-0000-4000-8000-000000000003";
+const COMPANY_LAZY = "23000000-0000-4000-8000-000000000004";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
@@ -149,6 +150,33 @@ function hash(value) {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
+function domainAuthority(providerKey, domain) {
+  return {
+    providerKey,
+    scheme: "domain",
+    jurisdiction: "GLOBAL",
+    normalizedValue: domain,
+    validatorVersion: "domain-v1",
+    normalizerVersion: "organization-identity-authority/v1",
+    key: `domain:GLOBAL:${domain}`,
+  };
+}
+
+function registryAuthority(domain) {
+  return [
+    domainAuthority("registry", domain),
+    {
+      providerKey: "registry",
+      scheme: "registry-id",
+      jurisdiction: "DE",
+      normalizedValue: "DE1234",
+      validatorVersion: "registry-id-v1",
+      normalizerVersion: "organization-identity-authority/v1",
+      key: "registry-id:DE:DE1234",
+    },
+  ];
+}
+
 function inputFacts({
   rawRecordId,
   payloadHash,
@@ -159,7 +187,7 @@ function inputFacts({
   return {
     raw: {
       rawRecordId,
-      providerKey: authorityIdentifiers.length ? "registry" : "directory",
+      providerKey: authorityIdentifiers[0]?.providerKey ?? "directory",
       payloadHash,
       ingestVersion: "raw-source/v2",
     },
@@ -218,39 +246,47 @@ function appCommand(database, value, options = {}) {
     .find((line) => line.startsWith("{"));
 }
 
-function seed(database) {
-  const registryPayload = JSON.stringify({
+function rawPayload({ providerKey, domain }) {
+  const base = {
     externalId: "company-1",
     name: "Acme GmbH",
-    domain: "acme.example",
+    domain,
     country: "DE",
     attributes: { products: ["pump"] },
-    identifier: { scheme: "registry-id", value: "de-12/34" },
     provenance: {
       sourceUrl: "https://registry.example/companies/1",
       fetchedAt: "2026-08-25T12:00:00.000Z",
       contentHash: HASH_B,
       parserVersion: "registry/v1",
     },
-  }).replaceAll("'", "''");
-  const directoryPayload = JSON.stringify({
-    externalId: "directory:acme.example",
-    name: "Acme GmbH",
-    domain: "acme.example",
-    country: "DE",
-    attributes: {
-      source_kind: "directory",
-      source_directory: "registry.example",
-      detail_url: "https://registry.example/company/1",
-      source_class: "industry_data",
-    },
-    provenance: {
-      sourceUrl: "https://registry.example/companies/1",
-      fetchedAt: "2026-08-25T12:00:00.000Z",
-      contentHash: HASH_B,
-      parserVersion: "registry/v1",
-    },
-  }).replaceAll("'", "''");
+  };
+  return providerKey === "registry"
+    ? { ...base, identifier: { scheme: "registry-id", value: "de-12/34" } }
+    : {
+        ...base,
+        externalId: `directory:${domain}`,
+        attributes: {
+          source_kind: "directory",
+          source_directory: "registry.example",
+          detail_url: "https://registry.example/company/1",
+          source_class: "industry_data",
+        },
+      };
+}
+
+function seed(database) {
+  const registryBindPayload = JSON.stringify(
+    rawPayload({ providerKey: "registry", domain: "bind.example" }),
+  ).replaceAll("'", "''");
+  const registryConflictPayload = JSON.stringify(
+    rawPayload({ providerKey: "registry", domain: "conflict.example" }),
+  ).replaceAll("'", "''");
+  const directoryLazyPayload = JSON.stringify(
+    rawPayload({ providerKey: "directory", domain: "lazy.example" }),
+  ).replaceAll("'", "''");
+  const directoryCreatePayload = JSON.stringify(
+    rawPayload({ providerKey: "directory", domain: "create.example" }),
+  ).replaceAll("'", "''");
   dockerPsql(
     database,
     `INSERT INTO workspace(id,name,updated_at) VALUES
@@ -261,15 +297,18 @@ function seed(database) {
        VALUES ('${SOURCE_ENTITY_ID}','${SOURCE_ID}','task6b-entity','company','Acme GmbH','acme.example','DE','{}'::jsonb,'${HASH_A}',now(),now());
      INSERT INTO canonical_company(id,workspace_id,name,domain,country,status,dedupe_key,version,created_at,updated_at) VALUES
        ('${COMPANY_A}','${WORKSPACE_A}','Acme Root','root.example','DE','NEW','d:root.example',1,now(),now()),
-       ('${COMPANY_B}','${WORKSPACE_A}','Acme Legacy','acme.example','DE','NEW','d:acme.example',1,now(),now()),
-       ('${COMPANY_CREATE}','${WORKSPACE_A}','Create Target','create.example','DE','NEW','d:create.example',1,now(),now());
+       ('${COMPANY_B}','${WORKSPACE_A}','Conflict Legacy','conflict.example','DE','NEW','d:conflict.example',1,now(),now()),
+       ('${COMPANY_CREATE}','${WORKSPACE_A}','Create Target','create.example','DE','NEW','d:create.example',1,now(),now()),
+       ('${COMPANY_LAZY}','${WORKSPACE_A}','Lazy Target','lazy.example','DE','NEW','d:lazy.example',1,now(),now());
      INSERT INTO raw_source_record(id,workspace_id,source_entity_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at) VALUES
-       ('${RAW_BIND}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:bind','${HASH_A}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
-       ('${RAW_LAZY}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:lazy','${HASH_B}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
-       ('${RAW_CREATE}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:create','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
-       ('${RAW_CONFLICT}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:conflict','${HASH_D}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
+       ('${RAW_BIND}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryBindPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:bind','${HASH_A}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_LAZY}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryLazyPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:lazy','${HASH_B}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_CREATE}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryCreatePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:create','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_CONFLICT}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryConflictPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:conflict','${HASH_D}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
      INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
-     VALUES ('${WORKSPACE_A}','${COMPANY_A}','registry-id','DE','DE1234','registry','${RAW_BIND}',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE');`,
+     VALUES
+       ('${WORKSPACE_A}','${COMPANY_A}','registry-id','DE','DE1234','registry','${RAW_BIND}',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE'),
+       ('${WORKSPACE_A}','${COMPANY_B}','domain','GLOBAL','conflict.example','registry','${RAW_CONFLICT}',1,'organization-identity-authority/v1','domain-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE');`,
   );
 }
 
@@ -357,17 +396,7 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
   });
 
   it("persists bind, lazy, create and conflict variants with exact match rules", () => {
-    const authority = [
-      {
-        providerKey: "registry",
-        scheme: "registry-id",
-        jurisdiction: "DE",
-        normalizedValue: "DE1234",
-        validatorVersion: "registry-id-v1",
-        normalizerVersion: "organization-identity-authority/v1",
-        key: "registry-id:DE:DE1234",
-      },
-    ];
+    const authority = registryAuthority("bind.example");
     const binding = [
       { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
     ];
@@ -399,20 +428,22 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       },
     });
     const lazyBlocker = {
-      blockerKey: "d:acme.example",
+      blockerKey: "d:lazy.example",
       matchRule: "domain_exact",
-      legacyCandidateCompanyId: COMPANY_B,
+      legacyCandidateCompanyId: COMPANY_LAZY,
     };
+    const lazyAuthority = [domainAuthority("directory", "lazy.example")];
     const lazy = command({
       rawRecordId: RAW_LAZY,
       payloadHash: HASH_B,
       blocker: lazyBlocker,
-      targetCompanyId: COMPANY_B,
+      authorityIdentifiers: lazyAuthority,
+      targetCompanyId: COMPANY_LAZY,
       plan: {
         kind: "lazy_upgrade",
-        companyId: COMPANY_B,
-        matchRule: "domain_exact",
-        identifiers: [],
+        companyId: COMPANY_LAZY,
+        matchRule: "identity_v2",
+        identifiers: lazyAuthority,
       },
     });
     const createBlocker = {
@@ -420,15 +451,29 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       matchRule: "domain_exact",
       legacyCandidateCompanyId: null,
     };
+    const createAuthority = [domainAuthority("directory", "create.example")];
     const create = command({
       rawRecordId: RAW_CREATE,
       payloadHash: HASH_C,
       blocker: createBlocker,
+      authorityIdentifiers: createAuthority,
       targetCompanyId: COMPANY_CREATE,
-      plan: { kind: "create_new", matchRule: "domain_exact", identifiers: [] },
+      plan: {
+        kind: "create_new",
+        matchRule: "identity_v2",
+        identifiers: createAuthority,
+      },
     });
+    const conflictAuthority = registryAuthority("conflict.example");
+    const conflictBindings = [
+      {
+        identifierKey: "domain:GLOBAL:conflict.example",
+        companyId: COMPANY_B,
+      },
+      ...binding,
+    ];
     const conflictBlocker = {
-      blockerKey: "d:acme.example",
+      blockerKey: "d:conflict.example",
       matchRule: "domain_exact",
       legacyCandidateCompanyId: COMPANY_B,
     };
@@ -436,11 +481,11 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       rawRecordId: RAW_CONFLICT,
       payloadHash: HASH_D,
       blocker: conflictBlocker,
-      authorityIdentifiers: authority,
-      bindings: binding,
+      authorityIdentifiers: conflictAuthority,
+      bindings: conflictBindings,
     });
     const companyIds = [COMPANY_A, COMPANY_B].sort();
-    const identifierKeys = ["registry-id:DE:DE1234"];
+    const identifierKeys = conflictAuthority.map((item) => item.key).sort();
     const fingerprint = hash({
       resolverVersion: RESOLVER_VERSION,
       blocker: {
@@ -455,8 +500,8 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       rawRecordId: RAW_CONFLICT,
       payloadHash: HASH_D,
       blocker: conflictBlocker,
-      authorityIdentifiers: authority,
-      bindings: binding,
+      authorityIdentifiers: conflictAuthority,
+      bindings: conflictBindings,
       plan: {
         kind: "conflict",
         matchRule: "identity_conflict",
@@ -475,8 +520,8 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       receipts.map((value) => [value.outcome_kind, value.match_rule]),
       [
         ["bound", "identity_v2"],
-        ["bound", "domain_exact"],
-        ["bound", "domain_exact"],
+        ["bound", "identity_v2"],
+        ["bound", "identity_v2"],
         ["conflict", "identity_conflict"],
       ],
     );
@@ -495,12 +540,20 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       matchRule: "domain_exact",
       legacyCandidateCompanyId: null,
     };
+    const authorityIdentifiers = [
+      domainAuthority("directory", "create.example"),
+    ];
     const value = command({
       rawRecordId: RAW_CREATE,
       payloadHash: HASH_C,
       blocker,
+      authorityIdentifiers,
       targetCompanyId: COMPANY_CREATE,
-      plan: { kind: "create_new", matchRule: "domain_exact", identifiers: [] },
+      plan: {
+        kind: "create_new",
+        matchRule: "identity_v2",
+        identifiers: authorityIdentifiers,
+      },
     });
     const replay = JSON.parse(appCommand(databases.fresh, value));
     assert.equal(replay.replayed, true);
