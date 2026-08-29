@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { types as nodeUtilTypes } from 'node:util';
+import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 
 const repositoryUrl = new URL('./governed-subject-relation.repository.ts', import.meta.url);
@@ -20,6 +21,15 @@ const IDS = Object.freeze({
 const ACK = 'a'.repeat(64);
 const DIGEST = 'b'.repeat(64);
 const CONTRACT = 'c'.repeat(64);
+const STABLE_ERRORS = [
+  'GOVERNED_OPERATION_SUBJECT_INVALID',
+  'GOVERNED_SUBJECT_INVALID',
+  'GOVERNED_SUBJECT_RELATION_INVALID',
+  'GOVERNED_SUBJECT_RELATION_CONFLICT',
+  'GOVERNED_SUBJECT_TOMBSTONED',
+  'GOVERNED_SUBJECT_AUTHORITY_REVOKED',
+  'GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE',
+] as const;
 
 type RepositoryModule = {
   GovernedSubjectRelationRepository: new () => {
@@ -28,9 +38,34 @@ type RepositoryModule = {
   };
   GOVERNED_SUBJECT_RELATION_INVALID: string;
   GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE: string;
+} & Record<(typeof STABLE_ERRORS)[number], string>;
+
+type TestInput = {
+  workspaceId: string;
+  authorityId: string;
+  accountId: string;
+  operationId: string;
+  operationGeneration: number;
+  ackId: string;
+  resultDigest: string;
+  rootSubjectType: string;
+  rootSubjectId: string;
+  rootDataClass: string;
+  rootDsrSubjectType: string | null;
+  rootDsrSubjectId: string | null;
+  parentGovernedSubjectId: string | null;
+  childSubjectType: string;
+  childSubjectId: string;
+  childDataClass: string;
+  childDsrSubjectType: string | null;
+  childDsrSubjectId: string | null;
+  relationKey: string;
+  relationKind: string;
+  sourceRef: { namespace: string; uuid: string | null; sha256: string | null };
+  contractSha256: string;
 };
 
-function validInput() {
+function validInput(): TestInput {
   return {
     workspaceId: IDS.workspaceId,
     authorityId: IDS.authorityId,
@@ -61,8 +96,7 @@ function validInput() {
   };
 }
 
-function expectedValues(): unknown[] {
-  const input = validInput();
+function expectedValues(input: TestInput = validInput()): unknown[] {
   return [
     input.workspaceId, input.authorityId, input.accountId, input.operationId,
     input.operationGeneration, input.ackId, input.resultDigest,
@@ -83,12 +117,30 @@ async function loadRepository(): Promise<RepositoryModule> {
   }
 }
 
-function transaction(row: unknown | Error) {
+function transactionRows(rows: readonly unknown[] | Error) {
   const queryRaw = vi.fn(async () => {
-    if (row instanceof Error) throw row;
-    return [row];
+    if (rows instanceof Error) throw rows;
+    return rows;
   });
-  return { value: { $queryRaw: queryRaw }, queryRaw };
+  const executeRaw = vi.fn();
+  const queryRawUnsafe = vi.fn();
+  const executeRawUnsafe = vi.fn();
+  return {
+    value: {
+      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
+      $queryRawUnsafe: queryRawUnsafe,
+      $executeRawUnsafe: executeRawUnsafe,
+    },
+    queryRaw,
+    executeRaw,
+    queryRawUnsafe,
+    executeRawUnsafe,
+  };
+}
+
+function transaction(row: unknown | Error) {
+  return transactionRows(row instanceof Error ? row : [row]);
 }
 
 function resultRow(replay: boolean) {
@@ -108,6 +160,30 @@ function capturedQuery(queryRaw: ReturnType<typeof vi.fn>) {
   };
   expect(query).toBeDefined();
   return query;
+}
+
+function assertSingleSelect(
+  database: ReturnType<typeof transactionRows>,
+  functionName: string,
+): void {
+  expect(database.queryRaw).toHaveBeenCalledOnce();
+  expect(database.executeRaw).not.toHaveBeenCalled();
+  expect(database.queryRawUnsafe).not.toHaveBeenCalled();
+  expect(database.executeRawUnsafe).not.toHaveBeenCalled();
+  const query = capturedQuery(database.queryRaw);
+  expect(query.values).toHaveLength(24);
+  expect(query.strings).toHaveLength(25);
+  const sql = query.strings.join('?').replace(/\s+/g, ' ').trim();
+  expect(sql).toMatch(new RegExp(`^SELECT [^;]* FROM (?:public\\.)?${functionName}\\(`, 'iu'));
+  expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|MERGE|CALL|EXECUTE)\b/iu);
+}
+
+function databaseMarker(code: string): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('redacted database marker', {
+    code: 'P2010',
+    clientVersion: 'task2-test',
+    meta: { code: 'P0001', message: `ERROR: ${code}` },
+  });
 }
 
 function exactClosed(value: unknown, keys: readonly string[]): boolean {
@@ -140,8 +216,7 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
     expect(repository).not.toMatch(/@Injectable|@Module|Temporal|Worker/iu);
     for (const token of [
       'GovernedSubjectRelationInput', 'GovernedSubjectRelationResult',
-      'GOVERNED_SUBJECT_RELATION_INVALID',
-      'GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE',
+      ...STABLE_ERRORS,
     ]) expect(`${types}\n${repository}`).toContain(token);
   });
 
@@ -151,6 +226,7 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
     const result = await new module.GovernedSubjectRelationRepository()
       .appendChildRelationV1(database.value, validInput());
     const query = capturedQuery(database.queryRaw);
+    assertSingleSelect(database, APPEND);
     expect(query.strings.join('')).toContain(APPEND);
     expect(query.values).toEqual(expectedValues());
     expect(result).toEqual({
@@ -161,6 +237,7 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
       replay: false,
     });
     expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
   });
 
   it('binds attest to the identical 24 SQL values and requires replay=true', async () => {
@@ -169,9 +246,16 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
     const result = await new module.GovernedSubjectRelationRepository()
       .attestChildRelationV1(database.value, validInput());
     const query = capturedQuery(database.queryRaw);
+    assertSingleSelect(database, ATTEST);
     expect(query.strings.join('')).toContain(ATTEST);
     expect(query.values).toEqual(expectedValues());
-    expect(result).toMatchObject({ relationId: IDS.relationId, replay: true });
+    expect(result).toEqual({
+      operationSubjectId: IDS.operationSubjectId,
+      parentSubjectId: IDS.operationSubjectId,
+      childSubjectId: IDS.childSubjectId,
+      relationId: IDS.relationId,
+      replay: true,
+    });
     expect(Object.isFrozen(result)).toBe(true);
   });
 
@@ -197,16 +281,174 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
     expect(exactClosed(validInput(), inputKeys)).toBe(true);
     expect(exactClosed(validInput().sourceRef, sourceKeys)).toBe(true);
     for (const candidate of candidates) {
-      const database = transaction(resultRow(false));
-      await expect(repository.appendChildRelationV1(database.value, candidate))
-        .rejects.toThrow(module.GOVERNED_SUBJECT_RELATION_INVALID);
-      expect(database.queryRaw).not.toHaveBeenCalled();
+      for (const method of ['appendChildRelationV1', 'attestChildRelationV1'] as const) {
+        const database = transaction(resultRow(method === 'attestChildRelationV1'));
+        await expect(repository[method](database.value, candidate))
+          .rejects.toThrow(module.GOVERNED_SUBJECT_RELATION_INVALID);
+        expect(database.queryRaw).not.toHaveBeenCalled();
+      }
     }
+  });
+
+  it('enforces the complete semantic input contract identically before append and attest SQL', async () => {
+    const module = await loadRepository();
+    const repository = new module.GovernedSubjectRelationRepository();
+    const personal = {
+      ...validInput(),
+      childDataClass: 'PERSONAL',
+      childDsrSubjectType: 'person',
+      childDsrSubjectId: '61000000-0000-4000-8000-000000000099',
+    };
+    const invalid = [
+      { ...validInput(), workspaceId: 'not-a-uuid' },
+      { ...validInput(), authorityId: 'not-a-uuid' },
+      { ...validInput(), accountId: 'not-a-uuid' },
+      { ...validInput(), operationId: 'not-a-uuid' },
+      { ...validInput(), operationGeneration: 0 },
+      { ...validInput(), operationGeneration: 1.5 },
+      { ...validInput(), ackId: ACK.toUpperCase() },
+      { ...validInput(), resultDigest: 'b'.repeat(63) },
+      { ...validInput(), contractSha256: CONTRACT.toUpperCase() },
+      { ...validInput(), rootSubjectType: 'other' },
+      { ...validInput(), rootSubjectId: IDS.childId },
+      { ...validInput(), rootDataClass: 'PERSONAL' },
+      { ...validInput(), rootDsrSubjectType: 'person' },
+      { ...validInput(), rootDsrSubjectId: IDS.sourceId },
+      { ...validInput(), parentGovernedSubjectId: 'not-a-uuid' },
+      { ...validInput(), childSubjectType: 'Bad-Type' },
+      { ...validInput(), childDataClass: 'UNKNOWN' },
+      { ...validInput(), childDsrSubjectType: 'Bad-Type' },
+      { ...validInput(), relationKey: 'Bad Key' },
+      { ...validInput(), relationKind: 'ARBITRARY_EDGE' },
+      { ...validInput(), sourceRef: { ...validInput().sourceRef, namespace: 'Bad-Type' } },
+      { ...validInput(), sourceRef: { namespace: 'source_record', uuid: null, sha256: null } },
+      { ...validInput(), sourceRef: { namespace: 'source_record', uuid: IDS.sourceId, sha256: CONTRACT } },
+      { ...validInput(), sourceRef: { namespace: 'source_record', uuid: null, sha256: CONTRACT.toUpperCase() } },
+      { ...personal, childDsrSubjectType: null },
+      { ...personal, childDsrSubjectId: null },
+      { ...validInput(), childDsrSubjectType: 'person', childDsrSubjectId: IDS.sourceId },
+      { ...validInput(), childSubjectType: 'confusable＿namespace' },
+    ];
+    for (const candidate of invalid) {
+      for (const method of ['appendChildRelationV1', 'attestChildRelationV1'] as const) {
+        const database = transaction(resultRow(method === 'attestChildRelationV1'));
+        await expect(repository[method](database.value, candidate))
+          .rejects.toThrow(module.GOVERNED_SUBJECT_RELATION_INVALID);
+        expect(database.queryRaw).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('accepts the PERSONAL DSR and SHA-source union without changing SQL order', async () => {
+    const module = await loadRepository();
+    const input = {
+      ...validInput(),
+      parentGovernedSubjectId: IDS.operationSubjectId,
+      childDataClass: 'PERSONAL',
+      childDsrSubjectType: 'person',
+      childDsrSubjectId: '61000000-0000-4000-8000-000000000099',
+      relationKind: 'DERIVED_FROM',
+      sourceRef: { namespace: 'source_digest', uuid: null, sha256: CONTRACT },
+    };
+    for (const [method, replay] of [
+      ['appendChildRelationV1', false],
+      ['attestChildRelationV1', true],
+    ] as const) {
+      const database = transaction(resultRow(replay));
+      await new module.GovernedSubjectRelationRepository()[method](database.value, input);
+      assertSingleSelect(database, method === 'appendChildRelationV1' ? APPEND : ATTEST);
+      expect(capturedQuery(database.queryRaw).values).toEqual(expectedValues(input));
+    }
+  });
+
+  it('rejects zero/multi/open/malformed result rows and opposite replay semantics', async () => {
+    const module = await loadRepository();
+    const repository = new module.GovernedSubjectRelationRepository();
+    const accessor = resultRow(false) as Record<string, unknown>;
+    Object.defineProperty(accessor, 'relation_id', {
+      enumerable: true,
+      get: () => IDS.relationId,
+    });
+    const symbol = Object.assign(resultRow(false), { [Symbol('hidden')]: true });
+    const { relation_id: _removed, ...missingRelationId } = resultRow(false);
+    const appendRows = [
+      [],
+      [resultRow(false), resultRow(false)],
+      [missingRelationId],
+      [{ ...resultRow(false), extra: true }],
+      [new Proxy(resultRow(false), {})],
+      [accessor],
+      [symbol],
+      [{ ...resultRow(false), operation_subject_id: 'not-a-uuid' }],
+      [{ ...resultRow(false), parent_subject_id: 'not-a-uuid' }],
+      [{ ...resultRow(false), child_subject_id: 'not-a-uuid' }],
+      [{ ...resultRow(false), relation_id: 'not-a-uuid' }],
+      [{ ...resultRow(false), replay: 'false' }],
+      [resultRow(true)],
+    ];
+    for (const rows of appendRows) {
+      await expect(repository.appendChildRelationV1(transactionRows(rows).value, validInput()))
+        .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+    }
+    await expect(repository.attestChildRelationV1(
+      transactionRows([resultRow(false)]).value,
+      validInput(),
+    )).rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+    for (const rows of [
+      [],
+      [resultRow(true), resultRow(true)],
+      [{ ...resultRow(true), extra: true }],
+      [{ ...resultRow(true), relation_id: 'not-a-uuid' }],
+      [{ ...resultRow(true), replay: 1 }],
+    ]) {
+      await expect(repository.attestChildRelationV1(transactionRows(rows).value, validInput()))
+        .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+    }
+  });
+
+  it('snapshots the complete input before awaiting SQL to close mutation TOCTOU', async () => {
+    const module = await loadRepository();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let captured: { strings: readonly string[]; values: readonly unknown[] } | undefined;
+    const queryRaw = vi.fn(async (query: typeof captured) => {
+      captured = query;
+      await gate;
+      return [resultRow(false)];
+    });
+    const database = {
+      value: {
+        $queryRaw: queryRaw,
+        $executeRaw: vi.fn(),
+        $queryRawUnsafe: vi.fn(),
+        $executeRawUnsafe: vi.fn(),
+      },
+    };
+    const input = validInput();
+    const original = expectedValues();
+    const pending = new module.GovernedSubjectRelationRepository()
+      .appendChildRelationV1(database.value, input);
+    input.childSubjectId = '60000000-0000-4000-8000-000000000099';
+    input.sourceRef.uuid = '90000000-0000-4000-8000-000000000099';
+    input.relationKey = 'record:mutated';
+    release();
+    await expect(pending).resolves.toMatchObject({ replay: false });
+    expect(captured?.values).toEqual(original);
   });
 
   it('maps database details to stable non-leaking append and attest errors', async () => {
     const module = await loadRepository();
     const repository = new module.GovernedSubjectRelationRepository();
+    for (const code of STABLE_ERRORS) {
+      expect(module[code]).toBe(code);
+      for (const method of ['appendChildRelationV1', 'attestChildRelationV1'] as const) {
+        await expect(repository[method](transaction(databaseMarker(code)).value, validInput()))
+          .rejects.toThrow(code);
+      }
+    }
+    const spoofed = new Error(`ERROR: ${module.GOVERNED_SUBJECT_TOMBSTONED}`);
+    await expect(repository.appendChildRelationV1(transaction(spoofed).value, validInput()))
+      .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
     const secret = new Error('private SQL row secret@example.test token');
     await expect(repository.attestChildRelationV1(transaction(secret).value, validInput()))
       .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);

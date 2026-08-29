@@ -48,12 +48,19 @@ function compact(value: string): string {
 }
 
 function functionBlock(sql: string, name: string): string {
-  const match = new RegExp(
-    `CREATE FUNCTION public\\.${name}\\(([^]*?)\\)\\s*RETURNS TABLE\\(([^]*?)\\)([^]*?)\\$function\\$;`,
-    'iu',
-  ).exec(sql);
-  if (!match) throw new Error(`MISSING_FUNCTION_${name}`);
-  return match[0];
+  const start = new RegExp(`CREATE FUNCTION public\\.${name}\\(`, 'iu').exec(sql)?.index;
+  if (start === undefined) throw new Error(`MISSING_FUNCTION_${name}`);
+  const tail = sql.slice(start);
+  const delimiter = /\bAS\s+(\$[A-Za-z0-9_]*\$)/iu.exec(tail);
+  if (!delimiter?.[1] || delimiter.index === undefined) {
+    throw new Error(`MISSING_FUNCTION_BODY_${name}`);
+  }
+  const bodyStart = delimiter.index + delimiter[0].length;
+  const bodyEnd = tail.indexOf(delimiter[1], bodyStart);
+  if (bodyEnd < 0) throw new Error(`MISSING_FUNCTION_END_${name}`);
+  const semicolon = tail.indexOf(';', bodyEnd + delimiter[1].length);
+  if (semicolon < 0) throw new Error(`MISSING_FUNCTION_TERMINATOR_${name}`);
+  return tail.slice(0, semicolon + 1);
 }
 
 function signatureParts(sql: string, name: string): {
@@ -69,6 +76,25 @@ function signatureParts(sql: string, name: string): {
   if (!match) throw new Error(`MISSING_SIGNATURE_${name}`);
   const split = (value: string) => value.split(',').map(compact);
   return { parameters: split(match[1] ?? ''), returns: split(match[2] ?? ''), block };
+}
+
+const READ_ONLY_FORBIDDEN = /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL|EXECUTE|NEXTVAL|CURRVAL|SETVAL|LOCK\s+TABLE|FOR\s+(?:NO\s+KEY\s+)?UPDATE|FOR\s+SHARE)\b/iu;
+
+function validateReadOnlyBlock(
+  sql: string,
+  name: string,
+  block: string,
+  visited: ReadonlySet<string> = new Set(),
+): void {
+  if (READ_ONLY_FORBIDDEN.test(block)) throw new Error(`ATTEST_NOT_READ_ONLY_${name}`);
+  const nextVisited = new Set(visited).add(name);
+  const helpers = [...block.matchAll(/public\.(_[a-z0-9_]+)\s*\(/giu)]
+    .map((match) => match[1])
+    .filter((helper): helper is string => Boolean(helper));
+  for (const helper of helpers) {
+    if (nextVisited.has(helper)) throw new Error(`ATTEST_HELPER_CYCLE_${name}`);
+    validateReadOnlyBlock(sql, name, functionBlock(sql, helper), nextVisited);
+  }
 }
 
 function validateFunction(sql: string, name: string, readOnly: boolean): void {
@@ -89,15 +115,15 @@ function validateFunction(sql: string, name: string, readOnly: boolean): void {
   ]) {
     if (!normalized.includes(required)) throw new Error(`INVALID_FUNCTION_SECURITY_${name}`);
   }
-  if (
-    readOnly &&
-    /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|NEXTVAL|SETVAL)\b/iu.test(parsed.block)
-  ) {
-    throw new Error(`ATTEST_NOT_READ_ONLY_${name}`);
-  }
+  if (readOnly) validateReadOnlyBlock(sql, name, parsed.block);
 }
 
-function fixtureFunction(name: string, body: string, volatility = 'VOLATILE'): string {
+function fixtureFunction(
+  name: string,
+  body: string,
+  volatility = 'VOLATILE',
+  delimiter = '$governed_relation$',
+): string {
   return `
     CREATE FUNCTION public.${name}(
       ${PARAMETERS.join(',\n      ')}
@@ -108,13 +134,45 @@ function fixtureFunction(name: string, body: string, volatility = 'VOLATILE'): s
     ${volatility}
     SECURITY DEFINER
     SET search_path = pg_catalog, public
-    AS $function$
+    AS ${delimiter}
     BEGIN
       PERFORM pg_advisory_xact_lock(1);
       ${body}
     END
-    $function$;
+    ${delimiter};
   `;
+}
+
+function fixtureAcl(name: string): string {
+  const types = PARAMETER_TYPES.join(', ');
+  return `
+    REVOKE ALL ON FUNCTION public.${name}(${types}) FROM
+      PUBLIC, app_user, execution_budget_platform_writer,
+      runtime_api, runtime_worker, runtime_outbox_relay;
+    GRANT EXECUTE ON FUNCTION public.${name}(${types}) TO app_user;
+  `;
+}
+
+function validateAcl(sql: string): void {
+  const normalized = compact(sql);
+  const types = compact(PARAMETER_TYPES.join(', '));
+  for (const name of [APPEND, ATTEST]) {
+    const grants = [...sql.matchAll(new RegExp(
+      `GRANT\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+public\\.${name}\\(([^;]*)\\)\\s+TO\\s+([^;]+);`,
+      'giu',
+    ))];
+    if (
+      grants.length !== 1 || compact(grants[0]?.[1] ?? '') !== types ||
+      compact(grants[0]?.[2] ?? '') !== 'APP_USER'
+    ) throw new Error(`INVALID_FUNCTION_GRANT_${name}`);
+    const revoke = compact(
+      `REVOKE ALL ON FUNCTION public.${name}(${PARAMETER_TYPES.join(', ')}) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay`,
+    );
+    if (!normalized.includes(revoke)) throw new Error(`INVALID_FUNCTION_REVOKE_${name}`);
+  }
+  if (/GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\._/iu.test(sql)) {
+    throw new Error('INTERNAL_HELPER_EXECUTE_EXPOSED');
+  }
 }
 
 async function migration(): Promise<string> {
@@ -141,15 +199,7 @@ describe('governed relation append and attest migration contract', () => {
 
   it('exposes function-only app ACL and no Task 3 tombstone function', async () => {
     const sql = await migration();
-    const types = PARAMETER_TYPES.join(', ');
-    for (const name of [APPEND, ATTEST]) {
-      expect(compact(sql)).toContain(compact(
-        `REVOKE ALL ON FUNCTION public.${name}(${types}) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay`,
-      ));
-      expect(compact(sql)).toContain(compact(
-        `GRANT EXECUTE ON FUNCTION public.${name}(${types}) TO app_user`,
-      ));
-    }
+    expect(() => validateAcl(sql)).not.toThrow();
     expect(sql).not.toContain('tombstone_workspace_governed_subject_v1');
   });
 
@@ -161,8 +211,9 @@ describe('governed relation append and attest migration contract', () => {
     ]) expect(sql).not.toContain(forbidden);
   });
 
-  it('mutation-kills reordered parameters, weak security, STABLE attest and attest DML', () => {
-    const valid = fixtureFunction(APPEND, 'RETURN;') + fixtureFunction(ATTEST, 'RETURN;');
+  it('mutation-kills reordered parameters, arbitrary quote regressions and every attest write path', () => {
+    const valid = fixtureFunction(APPEND, 'RETURN;', 'VOLATILE', '$append_v2$') +
+      fixtureFunction(ATTEST, 'RETURN;', 'VOLATILE', '$ATTEST_9$');
     expect(() => validateFunction(valid, APPEND, false)).not.toThrow();
     expect(() => validateFunction(valid, ATTEST, true)).not.toThrow();
 
@@ -181,10 +232,46 @@ describe('governed relation append and attest migration contract', () => {
     expect(() => validateFunction(writing, ATTEST, true))
       .toThrow(`ATTEST_NOT_READ_ONLY_${ATTEST}`);
 
+    for (const body of [
+      'CALL public.some_procedure();',
+      "EXECUTE 'SELECT 1';",
+      'PERFORM 1 FROM public.governed_subject FOR UPDATE;',
+      'PERFORM 1 FROM public.governed_subject FOR SHARE;',
+      'LOCK TABLE public.governed_subject;',
+      "PERFORM nextval('forbidden_sequence');",
+      "PERFORM currval('forbidden_sequence');",
+      "PERFORM setval('forbidden_sequence',1);",
+    ]) {
+      expect(() => validateFunction(fixtureFunction(ATTEST, body), ATTEST, true))
+        .toThrow(`ATTEST_NOT_READ_ONLY_${ATTEST}`);
+    }
+
+    const helper = `
+      CREATE FUNCTION public._writing_helper() RETURNS void
+      LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+      SET search_path=pg_catalog,public AS $helper_1$
+      BEGIN UPDATE public.governed_subject SET id=id; END $helper_1$;
+    `;
+    const helperCall = helper + fixtureFunction(ATTEST, 'PERFORM public._writing_helper();');
+    expect(() => validateFunction(helperCall, ATTEST, true))
+      .toThrow(`ATTEST_NOT_READ_ONLY_${ATTEST}`);
+
     const weak = fixtureFunction(APPEND, 'RETURN;')
       .replace('SECURITY DEFINER', 'SECURITY INVOKER')
       .replace('SET search_path = pg_catalog, public', '');
     expect(() => validateFunction(weak, APPEND, false))
       .toThrow(`INVALID_FUNCTION_SECURITY_${APPEND}`);
+  });
+
+  it('mutation-kills later public grants and every helper execute grant', () => {
+    const valid = fixtureFunction(APPEND, 'RETURN;') + fixtureFunction(ATTEST, 'RETURN;') +
+      fixtureAcl(APPEND) + fixtureAcl(ATTEST);
+    expect(() => validateAcl(valid)).not.toThrow();
+    expect(() => validateAcl(`${valid}\n${fixtureAcl(APPEND)}`))
+      .toThrow(`INVALID_FUNCTION_GRANT_${APPEND}`);
+    expect(() => validateAcl(`${valid}\nGRANT EXECUTE ON FUNCTION public.${ATTEST}(${PARAMETER_TYPES.join(', ')}) TO runtime_worker;`))
+      .toThrow(`INVALID_FUNCTION_GRANT_${ATTEST}`);
+    expect(() => validateAcl(`${valid}\nGRANT EXECUTE ON FUNCTION public._read_helper() TO app_user;`))
+      .toThrow('INTERNAL_HELPER_EXECUTE_EXPOSED');
   });
 });
