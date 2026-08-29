@@ -584,4 +584,111 @@ describe("Organization Identity/Provider migration provenance Gate 0", () => {
       ],
     });
   });
+
+  it.each([
+    [
+      "an invalid Date subclass that overrides getTime",
+      new (class extends Date {
+        override getTime() {
+          return 0;
+        }
+      })("invalid"),
+    ],
+    [
+      "an invalid Date with an own getTime method",
+      Object.assign(new Date("invalid"), { getTime: () => 0 }),
+    ],
+    [
+      "a valid Date with an own valueOf method",
+      Object.assign(new Date("2026-08-29T00:00:00.000Z"), {
+        valueOf: () => 0,
+      }),
+    ],
+    [
+      "a Date with an own throwing getTime accessor",
+      Object.defineProperty(new Date("2026-08-29T00:00:00.000Z"), "getTime", {
+        get() {
+          throw new Error("untrusted Date method");
+        },
+      }),
+    ],
+    ["a Date proxy", new Proxy(new Date("2026-08-29T00:00:00.000Z"), {})],
+  ] as const)(
+    "rejects %s as a redacted invalid lifecycle without throwing",
+    (_label, lifecycleValue) => {
+      let result: ReturnType<
+        typeof assessOrganizationIdentityMigrationInventory
+      >;
+      expect(() => {
+        result = assessOrganizationIdentityMigrationInventory(
+          [
+            {
+              ...exactRawInventory()[0]!,
+              finished_at: lifecycleValue,
+            },
+          ] as never,
+          [],
+          expectedRaw,
+          [],
+        );
+      }).not.toThrow();
+      expect(result!).toEqual({
+        schemaVersion: "organization-identity-migration-decision/v1",
+        subject: "UNKNOWN",
+        decision: "HOLD",
+        state: "INVALID_INVENTORY_INPUT",
+        observations: [
+          {
+            kind: "MIGRATION",
+            name: "inventory-input",
+            reasonCode: "INVALID_INVENTORY_INPUT",
+          },
+        ],
+      });
+    },
+  );
+
+  it("preserves a plain valid Date lifecycle as current-main readiness", () => {
+    expect(assess(exactRawInventory(), [], [])).toEqual({
+      schemaVersion: "organization-identity-migration-decision/v1",
+      subject: "SUPPLIED",
+      decision: "GO",
+      state: "CURRENT_MAIN_READY_FOR_IDENTITY_SUCCESSOR",
+      observations: [],
+    });
+  });
+
+  it("rejects a revoked Date proxy without throwing", () => {
+    const { proxy, revoke } = Proxy.revocable(
+      new Date("2026-08-29T00:00:00.000Z"),
+      {},
+    );
+    revoke();
+    let result: ReturnType<typeof assessOrganizationIdentityMigrationInventory>;
+    expect(() => {
+      result = assessOrganizationIdentityMigrationInventory(
+        [
+          {
+            ...exactRawInventory()[0]!,
+            finished_at: proxy,
+          },
+        ] as never,
+        [],
+        expectedRaw,
+        [],
+      );
+    }).not.toThrow();
+    expect(result!).toMatchObject({
+      subject: "UNKNOWN",
+      decision: "HOLD",
+      state: "INVALID_INVENTORY_INPUT",
+      observations: [
+        {
+          kind: "MIGRATION",
+          name: "inventory-input",
+          reasonCode: "INVALID_INVENTORY_INPUT",
+        },
+      ],
+    });
+  });
 });
