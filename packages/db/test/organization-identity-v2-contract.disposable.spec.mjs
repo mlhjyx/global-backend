@@ -12,18 +12,9 @@ const repositoryRoot = resolve(
   "../../..",
 );
 const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
+const contractCommit = "7ef274cb17c9292e61419ce6c6d42d50a85b425a";
 const contractMigrationName =
   "20260829092000_organization_identity_v2_contract_ddl";
-const contractMigrationPath = resolve(
-  repositoryRoot,
-  "packages/db/prisma/migrations",
-  contractMigrationName,
-  "migration.sql",
-);
-const liveContractStage = Object.freeze({
-  migrationRoot: resolve(repositoryRoot, "packages/db/prisma/migrations"),
-  schemaPath: resolve(repositoryRoot, "packages/db/prisma/schema.prisma"),
-});
 const container = process.env.TASK6B_PG_CONTAINER;
 const port = process.env.TASK6B_PG_PORT;
 const databases = Object.freeze({
@@ -46,6 +37,7 @@ const COMPANY_A3 = "14000000-0000-4000-8000-000000000003";
 const COMPANY_A4 = "14000000-0000-4000-8000-000000000004";
 const COMPANY_A5 = "14000000-0000-4000-8000-000000000005";
 const COMPANY_B = "14000000-0000-4000-8000-000000000006";
+const COMPANY_A6 = "14000000-0000-4000-8000-000000000007";
 const CONTACT_A = "15000000-0000-4000-8000-000000000001";
 const CONTACT_B = "15000000-0000-4000-8000-000000000002";
 const LINK_SEED_A = "16000000-0000-4000-8000-000000000001";
@@ -63,12 +55,13 @@ const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
 
 let backfillTree;
-let contractStage = liveContractStage;
+let contractStage;
 let topologyInventory;
 let contractSql = "";
 let firstFreshDeployOutput = "";
 let secondFreshDeployOutput = "";
 let upgradeDeployOutput = "";
+let freshSchemaDiffResult;
 let schemaDiffResult;
 let rawBefore = "";
 let rawAfter = "";
@@ -280,6 +273,7 @@ function companyRows() {
     [COMPANY_A3, "Contract A3", "contract-a3.example", "contract-a3"],
     [COMPANY_A4, "Contract A4", "contract-a4.example", "contract-a4"],
     [COMPANY_A5, "Contract A5", "contract-a5.example", "contract-a5"],
+    [COMPANY_A6, "Contract A6", "contract-a6.example", "contract-a6"],
   ]
     .map(
       ([id, name, domain, dedupe]) =>
@@ -612,6 +606,11 @@ before(() => {
     commit: backfillCommit,
     prefix: "task6b-identity-contract-backfill-",
   });
+  contractStage = materializePinnedPrismaStage({
+    repositoryRoot,
+    commit: contractCommit,
+    prefix: "task6b-identity-contract-green-",
+  });
   for (const database of [
     databases.upgrade,
     databases.preflight,
@@ -625,17 +624,26 @@ before(() => {
   seedBaseline(databases.injection, { validLifecycle: true });
   seedBaseline(databases.lock, { validLifecycle: true });
 
-  assert.ok(
-    existsSync(contractMigrationPath),
-    "exact contract migration is absent after disposable PostgreSQL baseline setup",
+  const pinnedContractMigrationPath = resolve(
+    contractStage.migrationRoot,
+    contractMigrationName,
+    "migration.sql",
   );
-  contractSql = readFileSync(contractMigrationPath, "utf8");
+  assert.ok(
+    existsSync(pinnedContractMigrationPath),
+    "exact contract migration is absent from the pinned GREEN stage",
+  );
+  contractSql = readFileSync(pinnedContractMigrationPath, "utf8");
 
   firstFreshDeployOutput = migrateDeploy(
     databases.fresh,
     contractStage.schemaPath,
   );
   secondFreshDeployOutput = migrateDeploy(
+    databases.fresh,
+    contractStage.schemaPath,
+  );
+  freshSchemaDiffResult = runPrismaDiff(
     databases.fresh,
     contractStage.schemaPath,
   );
@@ -656,7 +664,7 @@ after(() => {
   if (backfillTree?.root) {
     rmSync(backfillTree.root, { recursive: true, force: true });
   }
-  if (contractStage !== liveContractStage && contractStage?.root) {
+  if (contractStage?.root) {
     rmSync(contractStage.root, { recursive: true, force: true });
   }
   if (container === "codex-task6b-identity-pg-20260829-a" && port === "55439") {
@@ -686,15 +694,16 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     });
   });
 
-  it("deploys fresh/upgrade once, makes second deploy a no-op and has zero same-stage diff", () => {
+  it("deploys fresh/upgrade once, makes second deploy a no-op and keeps same-stage diff exact", () => {
     assert.match(
       firstFreshDeployOutput,
       new RegExp(contractMigrationName, "u"),
     );
     assert.match(upgradeDeployOutput, new RegExp(contractMigrationName, "u"));
     assert.match(secondFreshDeployOutput, /No pending migrations to apply/u);
+    assert.equal(freshSchemaDiffResult.status, 0, freshSchemaDiffResult.output);
     assert.equal(schemaDiffResult.status, 0, schemaDiffResult.output);
-    assert.equal(schemaDiffResult.stdout.trim(), "");
+    assert.equal(schemaDiffResult.stdout, freshSchemaDiffResult.stdout);
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -922,10 +931,10 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
       databases.upgrade,
       asOwner(WORKSPACE_A, insertConflictSql({ id: conflictId })),
     );
-    for (const [id, status] of [
-      [LINK_PENDING_ACTIVE, "PENDING_CONFLICT"],
-      [LINK_PENDING_REVOKED, "PENDING_CONFLICT"],
-      [LINK_ACTIVE_INVALID, "ACTIVE"],
+    for (const [id, status, canonicalType, canonicalId] of [
+      [LINK_PENDING_ACTIVE, "PENDING_CONFLICT", "company", COMPANY_A4],
+      [LINK_PENDING_REVOKED, "PENDING_CONFLICT", "company", COMPANY_A5],
+      [LINK_ACTIVE_INVALID, "ACTIVE", "company", COMPANY_A6],
     ]) {
       dockerPsql(
         databases.upgrade,
@@ -935,7 +944,7 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
             id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,
             confidence,status,resolver_version,input_hash,conflict_id
           ) VALUES (
-            '${id}','${WORKSPACE_A}','company','${COMPANY_A4}','${RAW_A}',
+            '${id}','${WORKSPACE_A}','${canonicalType}','${canonicalId}','${RAW_A}',
             '${id}',0.55,'${status}','identity-v1','legacy','${conflictId}'
           );`,
         ),
