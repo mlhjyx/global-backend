@@ -21,6 +21,12 @@ const IDS = Object.freeze({
 const ACK = 'a'.repeat(64);
 const DIGEST = 'b'.repeat(64);
 const CONTRACT = 'c'.repeat(64);
+const SQL_CASTS = [
+  'uuid', 'uuid', 'uuid', 'uuid', 'integer', 'char(64)', 'char(64)',
+  'varchar(191)', 'uuid', 'varchar(16)', 'varchar(191)', 'uuid', 'uuid',
+  'varchar(191)', 'uuid', 'varchar(16)', 'varchar(191)', 'uuid',
+  'varchar(200)', 'varchar(32)', 'varchar(64)', 'uuid', 'char(64)', 'char(64)',
+] as const;
 const STABLE_ERRORS = [
   'GOVERNED_OPERATION_SUBJECT_INVALID',
   'GOVERNED_SUBJECT_INVALID',
@@ -173,9 +179,20 @@ function assertSingleSelect(
   const query = capturedQuery(database.queryRaw);
   expect(query.values).toHaveLength(24);
   expect(query.strings).toHaveLength(25);
+  validateTaggedSelect(query, functionName);
+}
+
+function validateTaggedSelect(
+  query: { strings: readonly string[]; values: readonly unknown[] },
+  functionName: string,
+): void {
+  if (query.values.length !== 24 || query.strings.length !== 25) {
+    throw new Error('INVALID_TAGGED_SELECT_ARITY');
+  }
   const sql = query.strings.join('?').replace(/\s+/g, ' ').trim();
-  expect(sql).toMatch(new RegExp(`^SELECT [^;]* FROM (?:public\\.)?${functionName}\\(`, 'iu'));
-  expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|MERGE|CALL|EXECUTE)\b/iu);
+  const expected = `SELECT * FROM public.${functionName}(${SQL_CASTS.map((cast) => `?::${cast}`).join(',')})`;
+  if (sql !== expected && sql !== `${expected};`) throw new Error('INVALID_TAGGED_SELECT_SHAPE');
+  if ((sql.match(/\?/gu) ?? []).length !== 24) throw new Error('INVALID_TAGGED_SELECT_PLACEHOLDERS');
 }
 
 function databaseMarker(code: string): Prisma.PrismaClientKnownRequestError {
@@ -468,5 +485,25 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
     const accessor = validInput() as Record<string, unknown>;
     Object.defineProperty(accessor, 'workspaceId', { enumerable: true, get: () => IDS.workspaceId });
     expect(exactClosed(accessor, keys)).toBe(false);
+  });
+
+  it('mutation vectors require one exact public 24-placeholder SELECT and no trailing SQL', () => {
+    const expected = `SELECT * FROM public.${APPEND}(${SQL_CASTS.map((cast) => `?::${cast}`).join(',')});`;
+    const query = (sql: string, valueCount = 24) => ({
+      strings: sql.split('?'),
+      values: Array.from({ length: valueCount }, (_, index) => index),
+    });
+    expect(() => validateTaggedSelect(query(expected), APPEND)).not.toThrow();
+    expect(() => validateTaggedSelect(query(expected.replace('public.', '')), APPEND))
+      .toThrow('INVALID_TAGGED_SELECT_SHAPE');
+    expect(() => validateTaggedSelect(query(`${expected} SELECT 1`), APPEND))
+      .toThrow('INVALID_TAGGED_SELECT_SHAPE');
+    expect(() => validateTaggedSelect(query(`${expected} -- trailing comment`), APPEND))
+      .toThrow('INVALID_TAGGED_SELECT_SHAPE');
+    expect(() => validateTaggedSelect(
+      query(expected.replace(');', ',?::uuid);'), 25),
+      APPEND,
+    ))
+      .toThrow('INVALID_TAGGED_SELECT_ARITY');
   });
 });

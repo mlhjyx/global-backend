@@ -79,6 +79,27 @@ function signatureParts(sql: string, name: string): {
 }
 
 const READ_ONLY_FORBIDDEN = /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL|EXECUTE|NEXTVAL|CURRVAL|SETVAL|LOCK\s+TABLE|FOR\s+(?:NO\s+KEY\s+)?UPDATE|FOR\s+SHARE)\b/iu;
+const READ_ONLY_CALL_ALLOWLIST = new Set([
+  'array_length', 'cardinality', 'char_length', 'coalesce', 'count',
+  'current_workspace_id', 'greatest', 'hashtextextended', 'least', 'lower',
+  'nullif', 'pg_advisory_xact_lock',
+]);
+
+function stripSqlNoise(value: string): string {
+  return value
+    .replace(/\/\*[^]*?\*\//gu, ' ')
+    .replace(/--[^\n]*(?:\n|$)/gu, ' ')
+    .replace(/(?:E|U&)?'(?:''|[^'])*'/giu, "''");
+}
+
+function executableBody(block: string): string {
+  const delimiter = /\bAS\s+(\$[A-Za-z0-9_]*\$)/iu.exec(block);
+  if (!delimiter?.[1] || delimiter.index === undefined) throw new Error('MISSING_EXECUTABLE_BODY');
+  const start = delimiter.index + delimiter[0].length;
+  const end = block.indexOf(delimiter[1], start);
+  if (end < 0) throw new Error('MISSING_EXECUTABLE_BODY_END');
+  return stripSqlNoise(block.slice(start, end));
+}
 
 function validateReadOnlyBlock(
   sql: string,
@@ -86,14 +107,24 @@ function validateReadOnlyBlock(
   block: string,
   visited: ReadonlySet<string> = new Set(),
 ): void {
-  if (READ_ONLY_FORBIDDEN.test(block)) throw new Error(`ATTEST_NOT_READ_ONLY_${name}`);
+  const executable = executableBody(block);
+  if (READ_ONLY_FORBIDDEN.test(executable)) throw new Error(`ATTEST_NOT_READ_ONLY_${name}`);
   const nextVisited = new Set(visited).add(name);
-  const helpers = [...block.matchAll(/public\.(_[a-z0-9_]+)\s*\(/giu)]
-    .map((match) => match[1])
-    .filter((helper): helper is string => Boolean(helper));
-  for (const helper of helpers) {
-    if (nextVisited.has(helper)) throw new Error(`ATTEST_HELPER_CYCLE_${name}`);
-    validateReadOnlyBlock(sql, name, functionBlock(sql, helper), nextVisited);
+  const calls = [...executable.matchAll(/(?:(public|pg_catalog)\.)?([a-z_][a-z0-9_]*)\s*\(/giu)];
+  for (const call of calls) {
+    const schema = call[1]?.toLowerCase() ?? null;
+    const called = call[2]?.toLowerCase();
+    if (!called) continue;
+    if (called === APPEND) throw new Error(`ATTEST_CALLS_APPEND_${name}`);
+    if (called.startsWith('_')) {
+      if (schema !== null && schema !== 'public') throw new Error(`ATTEST_HELPER_SCHEMA_${name}`);
+      if (nextVisited.has(called)) throw new Error(`ATTEST_HELPER_CYCLE_${name}`);
+      validateReadOnlyBlock(sql, name, functionBlock(sql, called), nextVisited);
+      continue;
+    }
+    if (!READ_ONLY_CALL_ALLOWLIST.has(called)) {
+      throw new Error(`ATTEST_CALL_NOT_ALLOWLISTED_${name}`);
+    }
   }
 }
 
@@ -156,6 +187,22 @@ function fixtureAcl(name: string): string {
 function validateAcl(sql: string): void {
   const normalized = compact(sql);
   const types = compact(PARAMETER_TYPES.join(', '));
+  if (
+    /\bGRANT\s+(?:ALL|ALL\s+PRIVILEGES)\b/iu.test(sql) ||
+    /\bON\s+ALL\s+FUNCTIONS\s+IN\s+SCHEMA\b/iu.test(sql) ||
+    /\bALTER\s+DEFAULT\s+PRIVILEGES\b/iu.test(sql)
+  ) throw new Error('BROAD_FUNCTION_GRANT_FORBIDDEN');
+  if (/GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\._/iu.test(sql)) {
+    throw new Error('INTERNAL_HELPER_EXECUTE_EXPOSED');
+  }
+  const actualGrants = [...sql.matchAll(/\bGRANT\b[^;]*;/giu)].map((match) => compact(match[0]));
+  const expectedGrants = [APPEND, ATTEST].map((name) => compact(
+    `GRANT EXECUTE ON FUNCTION public.${name}(${PARAMETER_TYPES.join(', ')}) TO app_user;`,
+  ));
+  if (
+    actualGrants.length !== expectedGrants.length ||
+    expectedGrants.some((grant) => !actualGrants.includes(grant))
+  ) throw new Error('UNEXPECTED_FUNCTION_GRANT');
   for (const name of [APPEND, ATTEST]) {
     const grants = [...sql.matchAll(new RegExp(
       `GRANT\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+public\\.${name}\\(([^;]*)\\)\\s+TO\\s+([^;]+);`,
@@ -169,9 +216,6 @@ function validateAcl(sql: string): void {
       `REVOKE ALL ON FUNCTION public.${name}(${PARAMETER_TYPES.join(', ')}) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay`,
     );
     if (!normalized.includes(revoke)) throw new Error(`INVALID_FUNCTION_REVOKE_${name}`);
-  }
-  if (/GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\._/iu.test(sql)) {
-    throw new Error('INTERNAL_HELPER_EXECUTE_EXPOSED');
   }
 }
 
@@ -255,6 +299,26 @@ describe('governed relation append and attest migration contract', () => {
     const helperCall = helper + fixtureFunction(ATTEST, 'PERFORM public._writing_helper();');
     expect(() => validateFunction(helperCall, ATTEST, true))
       .toThrow(`ATTEST_NOT_READ_ONLY_${ATTEST}`);
+    const unqualifiedHelper = helper + fixtureFunction(ATTEST, 'PERFORM _writing_helper();');
+    expect(() => validateFunction(unqualifiedHelper, ATTEST, true))
+      .toThrow(`ATTEST_NOT_READ_ONLY_${ATTEST}`);
+    const appendCall = fixtureFunction(
+      ATTEST,
+      `PERFORM public.${APPEND}();`,
+    );
+    expect(() => validateFunction(appendCall, ATTEST, true))
+      .toThrow(`ATTEST_CALLS_APPEND_${ATTEST}`);
+    for (const body of ['PERFORM public.unknown_project_call();', 'PERFORM unknown_project_call();']) {
+      expect(() => validateFunction(fixtureFunction(ATTEST, body), ATTEST, true))
+        .toThrow(`ATTEST_CALL_NOT_ALLOWLISTED_${ATTEST}`);
+    }
+
+    const harmlessText = fixtureFunction(ATTEST, `
+      -- UPDATE public.governed_subject SET id=id;
+      RAISE NOTICE 'CALL public.${APPEND}(); DELETE FROM secret';
+      RETURN;
+    `);
+    expect(() => validateFunction(harmlessText, ATTEST, true)).not.toThrow();
 
     const weak = fixtureFunction(APPEND, 'RETURN;')
       .replace('SECURITY DEFINER', 'SECURITY INVOKER')
@@ -268,10 +332,14 @@ describe('governed relation append and attest migration contract', () => {
       fixtureAcl(APPEND) + fixtureAcl(ATTEST);
     expect(() => validateAcl(valid)).not.toThrow();
     expect(() => validateAcl(`${valid}\n${fixtureAcl(APPEND)}`))
-      .toThrow(`INVALID_FUNCTION_GRANT_${APPEND}`);
+      .toThrow('UNEXPECTED_FUNCTION_GRANT');
     expect(() => validateAcl(`${valid}\nGRANT EXECUTE ON FUNCTION public.${ATTEST}(${PARAMETER_TYPES.join(', ')}) TO runtime_worker;`))
-      .toThrow(`INVALID_FUNCTION_GRANT_${ATTEST}`);
+      .toThrow('UNEXPECTED_FUNCTION_GRANT');
     expect(() => validateAcl(`${valid}\nGRANT EXECUTE ON FUNCTION public._read_helper() TO app_user;`))
       .toThrow('INTERNAL_HELPER_EXECUTE_EXPOSED');
+    expect(() => validateAcl(`${valid}\nGRANT ALL PRIVILEGES ON FUNCTION public.${ATTEST}(${PARAMETER_TYPES.join(', ')}) TO app_user;`))
+      .toThrow('BROAD_FUNCTION_GRANT_FORBIDDEN');
+    expect(() => validateAcl(`${valid}\nGRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO app_user;`))
+      .toThrow('BROAD_FUNCTION_GRANT_FORBIDDEN');
   });
 });
