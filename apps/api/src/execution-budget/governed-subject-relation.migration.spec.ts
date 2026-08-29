@@ -77,8 +77,8 @@ const MODEL_FIELD_NAMES = Object.freeze({
   GovernedSubject: [
     'id', 'scopeKey', 'workspaceId', 'subjectType', 'subjectId', 'dataClass',
     'dsrSubjectType', 'dsrSubjectId', 'createdAt', 'workspace',
-    'operationSubject', 'operationRoot', 'operationRelations',
-    'parentRelations', 'childRelations', 'tombstone',
+    'operationSubject', 'operationRoot', 'parentRelations', 'childRelations',
+    'tombstone',
   ],
   ToolOperationSubject: [
     'subjectId', 'scopeKey', 'workspaceId', 'authorityId', 'accountId',
@@ -114,6 +114,7 @@ const MODEL_ATTRIBUTES = Object.freeze({
   ],
   ToolOperationSubject: [
     '@@unique([workspaceId, operationId], map: "tool_operation_subject_workspace_operation_key")',
+    '@@unique([scopeKey, operationId], map: "tool_operation_subject_scope_operation_key")',
     '@@unique([workspaceId, operationGeneration, subjectId], map: "tool_operation_subject_workspace_generation_subject_key")',
     '@@index([scopeKey, authorityId, accountId, operationId, operationGeneration], map: "tool_operation_subject_authority_operation_idx")',
     '@@map("tool_operation_subject")',
@@ -141,7 +142,7 @@ const FORBIDDEN_OWNERSHIP = [
 ] as const;
 
 function compact(value: string): string {
-  return value.replaceAll('"', '').replace(/\s+/g, ' ').trim();
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function requirePattern(value: string, pattern: RegExp, label: string): void {
@@ -217,6 +218,7 @@ describe('governed subject relation schema migration', () => {
       'ack_id CHAR(64) NOT NULL', 'result_digest CHAR(64) NOT NULL',
       'created_at TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
       'UNIQUE (workspace_id, operation_id)',
+      'UNIQUE (scope_key, operation_id)',
       'UNIQUE (workspace_id, operation_generation, subject_id)',
       'CHECK (scope_key = workspace_id::text)', 'CHECK (operation_generation >= 1)',
       'CHECK (root_subject_id = subject_id)',

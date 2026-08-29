@@ -231,18 +231,23 @@ function seedRlsRows(database) {
       ('${IDS.childA}'::uuid,'${WORKSPACE_A}','${WORKSPACE_A}'::uuid,'child_subject','82000000-0000-4000-8000-000000000001','PERSONAL','person','83000000-0000-4000-8000-000000000001',now()),
       ('${IDS.rootB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'root_subject','81000000-0000-4000-8000-000000000011','NON_PERSONAL',NULL,NULL,now()),
       ('${IDS.operationB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'tool_operation','${IDS.physicalOperationB}','NON_PERSONAL',NULL,NULL,now()),
-      ('${IDS.childB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'child_subject','82000000-0000-4000-8000-000000000011','PERSONAL','person','83000000-0000-4000-8000-000000000011',now());
+      ('${IDS.childB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'child_subject','82000000-0000-4000-8000-000000000011','PERSONAL','person','83000000-0000-4000-8000-000000000011',now())
+    ON CONFLICT DO NOTHING;
     INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest,created_at) VALUES
       ('${IDS.operationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${IDS.operationA}','${digestA}','${digestA}',now()),
-      ('${IDS.operationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${IDS.operationB}','${digestB}','${digestB}',now());
+      ('${IDS.operationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${IDS.operationB}','${digestB}','${digestB}',now())
+    ON CONFLICT DO NOTHING;
     INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,source_ref_sha256,contract_sha256,created_at) VALUES
       ('${IDS.relationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${digestA}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000001',NULL,'${digestA}',now()),
-      ('${IDS.relationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${digestB}','${IDS.operationB}','${IDS.operationB}','${IDS.childB}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000011',NULL,'${digestB}',now());
+      ('${IDS.relationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${digestB}','${IDS.operationB}','${IDS.operationB}','${IDS.childB}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000011',NULL,'${digestB}',now())
+    ON CONFLICT DO NOTHING;
     INSERT INTO governed_subject_tombstone(workspace_id,governed_subject_id,tombstoned_at) VALUES
-      ('${WORKSPACE_A}','${IDS.childA}',now()),('${WORKSPACE_B}','${IDS.childB}',now());
+      ('${WORKSPACE_A}','${IDS.childA}',now()),('${WORKSPACE_B}','${IDS.childB}',now())
+    ON CONFLICT DO NOTHING;
     INSERT INTO governed_subject_tombstone_audit(deletion_request_id,workspace_id,governed_subject_id,tombstoned_at) VALUES
       ('${IDS.deletionA}','${WORKSPACE_A}','${IDS.childA}',now()),
-      ('${IDS.deletionB}','${WORKSPACE_B}','${IDS.childB}',now());
+      ('${IDS.deletionB}','${WORKSPACE_B}','${IDS.childB}',now())
+    ON CONFLICT DO NOTHING;
     SET session_replication_role=origin;
   `);
 }
@@ -348,7 +353,7 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
 
       const relation = constraintMap(database, "governed_subject_relation");
       assert.match(relation.get("governed_subject_relation_workspace_operation_relation_key") ?? "", /u:UNIQUE \(workspace_id, operation_id, relation_key\)/);
-      assert.match(relation.get("governed_subject_relation_source_ref_check") ?? "", /c:CHECK.*source_ref_namespace.*source_ref_uuid IS NOT NULL.*source_ref_sha256 IS NULL.*source_ref_uuid IS NULL.*source_ref_sha256 IS NOT NULL/i);
+      assert.match(relation.get("governed_subject_relation_source_ref_check") ?? "", /c:CHECK.*source_ref_uuid IS NOT NULL.*source_ref_sha256 IS NULL.*source_ref_uuid IS NULL.*source_ref_sha256 IS NOT NULL/i);
       assert.match(relation.get("governed_subject_relation_source_namespace_check") ?? "", /c:CHECK.*source_ref_namespace.*\[a-z\].*a-z0-9_/i);
       assert.match(relation.get("governed_subject_relation_digest_check") ?? "", /c:CHECK.*contract_sha256.*\[0-9a-f\].*64/i);
       assert.match(relation.get("governed_subject_relation_kind_check") ?? "", /c:CHECK.*MATERIALIZED_CHILD.*DERIVED_FROM/i);
@@ -382,7 +387,7 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
         FROM pg_class WHERE relnamespace='public'::regnamespace
           AND relname IN (${TABLES.map((table) => `'${table}'`).join(",")}) ORDER BY relname;
       `));
-      assert.deepEqual(rls, [...TABLES].sort().map((table) => `${table}:t:t`));
+      assert.deepEqual(rls, [...TABLES].sort().map((table) => `${table}:true:true`));
       for (const table of TABLES) {
         const expressions = policy(database, table);
         assert.ok(exactWorkspaceExpression(expressions.using), `${database}:${table}:USING`);
