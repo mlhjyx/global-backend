@@ -180,16 +180,16 @@ type ValidatedInventoryInput = Readonly<{
   expectedIdentitySuccessor: readonly ExpectedMigrationChecksum[];
 }>;
 
-function hasExactDataKeys(
+function readExactDataFields(
   value: unknown,
   expectedKeys: readonly string[],
-): value is Record<string, unknown> {
+): readonly unknown[] | undefined {
   if (
     typeof value !== "object" ||
     value === null ||
     Object.getPrototypeOf(value) !== Object.prototype
   ) {
-    return false;
+    return undefined;
   }
   const ownKeys = Reflect.ownKeys(value);
   if (
@@ -198,19 +198,65 @@ function hasExactDataKeys(
       (key) => typeof key !== "string" || !expectedKeys.includes(key),
     )
   ) {
-    return false;
+    return undefined;
   }
-  return expectedKeys.every((key) => {
+  const fields: unknown[] = [];
+  for (let index = 0; index < expectedKeys.length; index += 1) {
+    const key = expectedKeys[index]!;
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return descriptor !== undefined && "value" in descriptor;
-  });
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      !descriptor.enumerable
+    ) {
+      return undefined;
+    }
+    fields[index] = descriptor.value;
+  }
+  return Object.freeze(fields);
 }
 
-function isBoundedArray(
+function readDenseArray(
   value: unknown,
   maximumLength: number,
-): value is unknown[] {
-  return Array.isArray(value) && value.length <= maximumLength;
+): readonly unknown[] | undefined {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype
+  ) {
+    return undefined;
+  }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (
+    lengthDescriptor === undefined ||
+    !("value" in lengthDescriptor) ||
+    typeof lengthDescriptor.value !== "number" ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 0 ||
+    lengthDescriptor.value > maximumLength
+  ) {
+    return undefined;
+  }
+  const length = lengthDescriptor.value;
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== length + 1 || !ownKeys.includes("length")) {
+    return undefined;
+  }
+  const copy: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const key = String(index);
+    if (!ownKeys.includes(key)) return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      !descriptor.enumerable
+    ) {
+      return undefined;
+    }
+    copy[index] = descriptor.value;
+  }
+  return Object.freeze(copy);
 }
 
 function isCatalogObjectKind(value: unknown): value is CatalogObjectKind {
@@ -245,55 +291,71 @@ function isLifecycleTimestamp(value: unknown): value is Date | string | null {
 function parseMigrationRow(
   value: unknown,
 ): PrismaMigrationInventoryRow | undefined {
+  const fields = readExactDataFields(value, [
+    "migration_name",
+    "checksum",
+    "finished_at",
+    "rolled_back_at",
+  ]);
   if (
-    !hasExactDataKeys(value, [
-      "migration_name",
-      "checksum",
-      "finished_at",
-      "rolled_back_at",
-    ]) ||
-    !isMachineName(value.migration_name, MIGRATION_NAME) ||
-    !isLowercaseSha256(value.checksum) ||
-    !isLifecycleTimestamp(value.finished_at) ||
-    !isLifecycleTimestamp(value.rolled_back_at)
+    fields === undefined ||
+    !isMachineName(fields[0], MIGRATION_NAME) ||
+    !isLowercaseSha256(fields[1]) ||
+    !isLifecycleTimestamp(fields[2]) ||
+    !isLifecycleTimestamp(fields[3])
   ) {
     return undefined;
   }
   return Object.freeze({
-    migration_name: value.migration_name,
-    checksum: value.checksum,
-    finished_at: value.finished_at,
-    rolled_back_at: value.rolled_back_at,
+    migration_name: fields[0],
+    checksum: fields[1],
+    finished_at: fields[2],
+    rolled_back_at: fields[3],
   });
 }
 
 function parseCatalogRecord(
   value: unknown,
 ): CatalogInventoryRecord | undefined {
+  const fields = readExactDataFields(value, ["kind", "name"]);
   if (
-    !hasExactDataKeys(value, ["kind", "name"]) ||
-    !isCatalogObjectKind(value.kind) ||
-    !isMachineName(value.name, CATALOG_NAME)
+    fields === undefined ||
+    !isCatalogObjectKind(fields[0]) ||
+    !isMachineName(fields[1], CATALOG_NAME)
   ) {
     return undefined;
   }
-  return Object.freeze({ kind: value.kind, name: value.name });
+  return Object.freeze({ kind: fields[0], name: fields[1] });
 }
 
 function parseExpectedMigration(
   value: unknown,
 ): ExpectedMigrationChecksum | undefined {
+  const fields = readExactDataFields(value, ["migrationName", "checksum"]);
   if (
-    !hasExactDataKeys(value, ["migrationName", "checksum"]) ||
-    !isMachineName(value.migrationName, MIGRATION_NAME) ||
-    !isLowercaseSha256(value.checksum)
+    fields === undefined ||
+    !isMachineName(fields[0], MIGRATION_NAME) ||
+    !isLowercaseSha256(fields[1])
   ) {
     return undefined;
   }
   return Object.freeze({
-    migrationName: value.migrationName,
-    checksum: value.checksum,
+    migrationName: fields[0],
+    checksum: fields[1],
   });
+}
+
+function parseDenseRecords<T>(
+  values: readonly unknown[],
+  parser: (value: unknown) => T | undefined,
+): readonly T[] | undefined {
+  const records: T[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const record = parser(values[index]);
+    if (record === undefined) return undefined;
+    records[index] = record;
+  }
+  return Object.freeze(records);
 }
 
 function parseInventoryInput(
@@ -303,43 +365,59 @@ function parseInventoryInput(
   expectedIdentitySuccessor: unknown,
 ): ValidatedInventoryInput | undefined {
   try {
+    const migrationRows = readDenseArray(
+      migrationInventory,
+      MAX_MIGRATION_INVENTORY_ROWS,
+    );
+    const catalogRows = readDenseArray(
+      catalogInventory,
+      MAX_CATALOG_INVENTORY_ROWS,
+    );
+    const expectedRawRows = readDenseArray(
+      expectedCurrentRaw,
+      MAX_EXPECTED_MIGRATIONS,
+    );
+    const expectedIdentityRows = readDenseArray(
+      expectedIdentitySuccessor,
+      MAX_EXPECTED_MIGRATIONS,
+    );
     if (
-      !isBoundedArray(migrationInventory, MAX_MIGRATION_INVENTORY_ROWS) ||
-      !isBoundedArray(catalogInventory, MAX_CATALOG_INVENTORY_ROWS) ||
-      !isBoundedArray(expectedCurrentRaw, MAX_EXPECTED_MIGRATIONS) ||
-      !isBoundedArray(expectedIdentitySuccessor, MAX_EXPECTED_MIGRATIONS)
+      migrationRows === undefined ||
+      catalogRows === undefined ||
+      expectedRawRows === undefined ||
+      expectedIdentityRows === undefined
     ) {
       return undefined;
     }
-    const parsedMigrationInventory = migrationInventory.map(parseMigrationRow);
-    const parsedCatalogInventory = catalogInventory.map(parseCatalogRecord);
-    const parsedExpectedCurrentRaw = expectedCurrentRaw.map(
+    const parsedMigrationInventory = parseDenseRecords(
+      migrationRows,
+      parseMigrationRow,
+    );
+    const parsedCatalogInventory = parseDenseRecords(
+      catalogRows,
+      parseCatalogRecord,
+    );
+    const parsedExpectedCurrentRaw = parseDenseRecords(
+      expectedRawRows,
       parseExpectedMigration,
     );
-    const parsedExpectedIdentitySuccessor = expectedIdentitySuccessor.map(
+    const parsedExpectedIdentitySuccessor = parseDenseRecords(
+      expectedIdentityRows,
       parseExpectedMigration,
     );
     if (
-      parsedMigrationInventory.some((row) => row === undefined) ||
-      parsedCatalogInventory.some((row) => row === undefined) ||
-      parsedExpectedCurrentRaw.some((row) => row === undefined) ||
-      parsedExpectedIdentitySuccessor.some((row) => row === undefined)
+      parsedMigrationInventory === undefined ||
+      parsedCatalogInventory === undefined ||
+      parsedExpectedCurrentRaw === undefined ||
+      parsedExpectedIdentitySuccessor === undefined
     ) {
       return undefined;
     }
     return Object.freeze({
-      migrationInventory: Object.freeze(
-        parsedMigrationInventory as PrismaMigrationInventoryRow[],
-      ),
-      catalogInventory: Object.freeze(
-        parsedCatalogInventory as CatalogInventoryRecord[],
-      ),
-      expectedCurrentRaw: Object.freeze(
-        parsedExpectedCurrentRaw as ExpectedMigrationChecksum[],
-      ),
-      expectedIdentitySuccessor: Object.freeze(
-        parsedExpectedIdentitySuccessor as ExpectedMigrationChecksum[],
-      ),
+      migrationInventory: parsedMigrationInventory,
+      catalogInventory: parsedCatalogInventory,
+      expectedCurrentRaw: parsedExpectedCurrentRaw,
+      expectedIdentitySuccessor: parsedExpectedIdentitySuccessor,
     });
   } catch {
     return undefined;
@@ -459,194 +537,206 @@ export function assessOrganizationIdentityMigrationInventory(
     });
   }
 
-  const parsedInput = parseInventoryInput(
-    migrationInventory,
-    catalogInventory,
-    expectedCurrentRaw,
-    expectedIdentitySuccessor,
-  );
-  if (parsedInput === undefined) return invalidInventoryInputDecision();
-  if (parsedInput.expectedCurrentRaw.length === 0) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "RAW_SOURCE_LINEAGE_HOLD",
-      observations: [
-        {
-          kind: "MIGRATION",
-          name: "raw-source-current-successor",
-          reasonCode: "RAW_CURRENT_SUCCESSOR_REQUIRED",
-        },
-      ],
-    });
-  }
+  try {
+    const parsedInput = parseInventoryInput(
+      migrationInventory,
+      catalogInventory,
+      expectedCurrentRaw,
+      expectedIdentitySuccessor,
+    );
+    if (parsedInput === undefined) return invalidInventoryInputDecision();
+    if (parsedInput.expectedCurrentRaw.length === 0) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "RAW_SOURCE_LINEAGE_HOLD",
+        observations: [
+          {
+            kind: "MIGRATION",
+            name: "raw-source-current-successor",
+            reasonCode: "RAW_CURRENT_SUCCESSOR_REQUIRED",
+          },
+        ],
+      });
+    }
 
-  const {
-    migrationInventory: validatedMigrationInventory,
-    catalogInventory: validatedCatalogInventory,
-    expectedCurrentRaw: validatedExpectedCurrentRaw,
-    expectedIdentitySuccessor: validatedExpectedIdentitySuccessor,
-  } = parsedInput;
+    const {
+      migrationInventory: validatedMigrationInventory,
+      catalogInventory: validatedCatalogInventory,
+      expectedCurrentRaw: validatedExpectedCurrentRaw,
+      expectedIdentitySuccessor: validatedExpectedIdentitySuccessor,
+    } = parsedInput;
 
-  const rowsByName = groupRowsByName(validatedMigrationInventory);
-  const historicalChecksumMatches =
-    HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS.flatMap((historical) => {
-      const actualNames = [
-        ...new Set(
-          validatedMigrationInventory
-            .filter((row) => row.checksum === historical.checksum)
-            .map((row) => row.migration_name),
-        ),
-      ];
-      return actualNames.map((actualName) =>
-        migrationObservation(
-          historical,
-          rowsByName.get(actualName) ?? [],
-          "HISTORICAL_MIGRATION_CHECKSUM_PRESENT",
-          actualName,
-        ),
-      );
-    });
-  if (historicalChecksumMatches.length) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "OLD_IDENTITY_MIGRATION_PRESENT",
-      observations: historicalChecksumMatches,
-    });
-  }
+    const rowsByName = groupRowsByName(validatedMigrationInventory);
+    const historicalChecksumMatches =
+      HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS.flatMap((historical) => {
+        const actualNames = [
+          ...new Set(
+            validatedMigrationInventory
+              .filter((row) => row.checksum === historical.checksum)
+              .map((row) => row.migration_name),
+          ),
+        ];
+        return actualNames.map((actualName) =>
+          migrationObservation(
+            historical,
+            rowsByName.get(actualName) ?? [],
+            "HISTORICAL_MIGRATION_CHECKSUM_PRESENT",
+            actualName,
+          ),
+        );
+      });
+    if (historicalChecksumMatches.length) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "OLD_IDENTITY_MIGRATION_PRESENT",
+        observations: historicalChecksumMatches,
+      });
+    }
 
-  const historicalNameMatches =
-    HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS.flatMap((historical) => {
-      const rows = rowsByName.get(historical.migrationName) ?? [];
-      return rows.length
+    const historicalNameMatches =
+      HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS.flatMap((historical) => {
+        const rows = rowsByName.get(historical.migrationName) ?? [];
+        return rows.length
+          ? [
+              migrationObservation(
+                historical,
+                rows,
+                "HISTORICAL_MIGRATION_NAME_PRESENT",
+              ),
+            ]
+          : [];
+      });
+    if (historicalNameMatches.length) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "OLD_IDENTITY_MIGRATION_PRESENT",
+        observations: historicalNameMatches,
+      });
+    }
+
+    const historicalObjects = validatedCatalogInventory.filter((observed) =>
+      FORBIDDEN_HISTORICAL_IDENTITY_CATALOG_OBJECTS.some(
+        (forbidden) =>
+          forbidden.kind === observed.kind && forbidden.name === observed.name,
+      ),
+    );
+    if (historicalObjects.length) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "OLD_IDENTITY_OBJECT_RESIDUE_PRESENT",
+        observations: historicalObjects.map((object) => ({
+          kind: object.kind,
+          name: object.name,
+          reasonCode: "HISTORICAL_CATALOG_OBJECT_PRESENT",
+        })),
+      });
+    }
+
+    const rawDecision = assessRawSourceMigrationInventory(
+      validatedMigrationInventory,
+      validatedExpectedCurrentRaw,
+    );
+    if (rawDecision.decision === "HOLD") {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "RAW_SOURCE_LINEAGE_HOLD",
+        observations: rawHoldObservations(rawDecision),
+      });
+    }
+
+    const conflicts = validatedExpectedIdentitySuccessor.flatMap((expected) => {
+      const rows = rowsByName.get(expected.migrationName) ?? [];
+      return rows.length > 1
         ? [
             migrationObservation(
-              historical,
+              expected,
               rows,
-              "HISTORICAL_MIGRATION_NAME_PRESENT",
+              "EXPECTED_SUCCESSOR_DUPLICATE_OR_CONFLICTING",
             ),
           ]
         : [];
     });
-  if (historicalNameMatches.length) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "OLD_IDENTITY_MIGRATION_PRESENT",
-      observations: historicalNameMatches,
-    });
-  }
-
-  const historicalObjects = validatedCatalogInventory.filter((observed) =>
-    FORBIDDEN_HISTORICAL_IDENTITY_CATALOG_OBJECTS.some(
-      (forbidden) =>
-        forbidden.kind === observed.kind && forbidden.name === observed.name,
-    ),
-  );
-  if (historicalObjects.length) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "OLD_IDENTITY_OBJECT_RESIDUE_PRESENT",
-      observations: historicalObjects.map((object) => ({
-        kind: object.kind,
-        name: object.name,
-        reasonCode: "HISTORICAL_CATALOG_OBJECT_PRESENT",
-      })),
-    });
-  }
-
-  const rawDecision = assessRawSourceMigrationInventory(
-    validatedMigrationInventory,
-    validatedExpectedCurrentRaw,
-  );
-  if (rawDecision.decision === "HOLD") {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "RAW_SOURCE_LINEAGE_HOLD",
-      observations: rawHoldObservations(rawDecision),
-    });
-  }
-
-  const conflicts = validatedExpectedIdentitySuccessor.flatMap((expected) => {
-    const rows = rowsByName.get(expected.migrationName) ?? [];
-    return rows.length > 1
-      ? [
-          migrationObservation(
-            expected,
-            rows,
-            "EXPECTED_SUCCESSOR_DUPLICATE_OR_CONFLICTING",
-          ),
-        ]
-      : [];
-  });
-  if (conflicts.length) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "MIGRATION_INVENTORY_CONFLICT",
-      observations: conflicts,
-    });
-  }
-
-  const mismatches = validatedExpectedIdentitySuccessor.flatMap((expected) => {
-    const rows = rowsByName.get(expected.migrationName) ?? [];
-    return rows.length === 1 && rows[0]!.checksum !== expected.checksum
-      ? [
-          migrationObservation(
-            expected,
-            rows,
-            "EXPECTED_SUCCESSOR_CHECKSUM_MISMATCH",
-          ),
-        ]
-      : [];
-  });
-  if (mismatches.length) {
-    return decision({
-      subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "SUCCESSOR_CHECKSUM_MISMATCH",
-      observations: mismatches,
-    });
-  }
-
-  const incomplete = validatedExpectedIdentitySuccessor.flatMap((expected) => {
-    const rows = rowsByName.get(expected.migrationName) ?? [];
-    if (rows.length === 1 && lifecycle(rows) === "APPLIED") return [];
-    if (!rows.length) {
-      return [
-        {
-          kind: "MIGRATION" as const,
-          name: expected.migrationName,
-          observedChecksum: null,
-          expectedChecksum: expected.checksum,
-          rowCount: 0,
-          reasonCode: "EXPECTED_SUCCESSOR_NOT_APPLIED",
-        },
-      ];
+    if (conflicts.length) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "MIGRATION_INVENTORY_CONFLICT",
+        observations: conflicts,
+      });
     }
-    return [
-      migrationObservation(expected, rows, "EXPECTED_SUCCESSOR_NOT_APPLIED"),
-    ];
-  });
-  if (incomplete.length) {
+
+    const mismatches = validatedExpectedIdentitySuccessor.flatMap(
+      (expected) => {
+        const rows = rowsByName.get(expected.migrationName) ?? [];
+        return rows.length === 1 && rows[0]!.checksum !== expected.checksum
+          ? [
+              migrationObservation(
+                expected,
+                rows,
+                "EXPECTED_SUCCESSOR_CHECKSUM_MISMATCH",
+              ),
+            ]
+          : [];
+      },
+    );
+    if (mismatches.length) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "SUCCESSOR_CHECKSUM_MISMATCH",
+        observations: mismatches,
+      });
+    }
+
+    const incomplete = validatedExpectedIdentitySuccessor.flatMap(
+      (expected) => {
+        const rows = rowsByName.get(expected.migrationName) ?? [];
+        if (rows.length === 1 && lifecycle(rows) === "APPLIED") return [];
+        if (!rows.length) {
+          return [
+            {
+              kind: "MIGRATION" as const,
+              name: expected.migrationName,
+              observedChecksum: null,
+              expectedChecksum: expected.checksum,
+              rowCount: 0,
+              reasonCode: "EXPECTED_SUCCESSOR_NOT_APPLIED",
+            },
+          ];
+        }
+        return [
+          migrationObservation(
+            expected,
+            rows,
+            "EXPECTED_SUCCESSOR_NOT_APPLIED",
+          ),
+        ];
+      },
+    );
+    if (incomplete.length) {
+      return decision({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state: "CURRENT_IDENTITY_SUCCESSOR_INCOMPLETE",
+        observations: incomplete,
+      });
+    }
+
     return decision({
       subject: "SUPPLIED",
-      decision: "HOLD",
-      state: "CURRENT_IDENTITY_SUCCESSOR_INCOMPLETE",
-      observations: incomplete,
+      decision: "GO",
+      state:
+        validatedExpectedIdentitySuccessor.length === 0
+          ? "CURRENT_MAIN_READY_FOR_IDENTITY_SUCCESSOR"
+          : "CURRENT_IDENTITY_SUCCESSOR_APPLIED",
+      observations: [],
     });
+  } catch {
+    return invalidInventoryInputDecision();
   }
-
-  return decision({
-    subject: "SUPPLIED",
-    decision: "GO",
-    state:
-      validatedExpectedIdentitySuccessor.length === 0
-        ? "CURRENT_MAIN_READY_FOR_IDENTITY_SUCCESSOR"
-        : "CURRENT_IDENTITY_SUCCESSOR_APPLIED",
-    observations: [],
-  });
 }
