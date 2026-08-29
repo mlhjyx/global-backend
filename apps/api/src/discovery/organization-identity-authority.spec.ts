@@ -252,6 +252,67 @@ describe("governed Raw organization identity authority", () => {
       getOwnPropertyDescriptor: 0,
     });
   });
+
+  it("uses exact TED UTF-8 byte reachability and never rewrites submitted output fields", () => {
+    const forty = "Ä".repeat(40);
+    const fortyOne = "Ä".repeat(41);
+    const tedPayload = (value: string) => ({
+      ...validPayloads().ted,
+      identifier: { scheme: "ted-natid:de", value },
+      attributes: {
+        ted: {
+          publication_number: "1",
+          publication_date: "2026-08-25",
+          notice_type: "award",
+          winner_identifier: value,
+        },
+      },
+    });
+    const produced = extractOrganizationIdentityAuthority("ted", tedPayload(forty));
+    const ted = produced.find((item) => item.scheme === "ted-natid")!;
+    expect(Buffer.byteLength(forty, "utf8")).toBe(80);
+    expect(parseOrganizationIdentityAuthorityIdentifier(ted)).toEqual(ted);
+    expect(() =>
+      extractOrganizationIdentityAuthority("ted", tedPayload(fortyOne)),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+    expect(parseOrganizationIdentityAuthorityIdentifier({
+      ...ted,
+      normalizedValue: fortyOne,
+      key: `ted-natid:DE:${fortyOne}`,
+    })).toBeNull();
+
+    const registry = extractOrganizationIdentityAuthority(
+      "registry",
+      rawRecord({ identifier: { scheme: "registry-id", value: "de-12/34" } }),
+    ).find((item) => item.scheme === "registry-id")!;
+    const domain = extractOrganizationIdentityAuthority(
+      "registry",
+      rawRecord(),
+    ).find((item) => item.scheme === "domain")!;
+    expect(parseOrganizationIdentityAuthorityIdentifier({
+      ...registry,
+      normalizedValue: "DE-12/34",
+      key: registry.key,
+    })).toBeNull();
+    expect(parseOrganizationIdentityAuthorityIdentifier({
+      ...domain,
+      jurisdiction: "DE",
+      normalizedValue: "WWW.Acme.Example",
+      key: domain.key,
+    })).toBeNull();
+    for (const field of [
+      "providerKey",
+      "scheme",
+      "jurisdiction",
+      "normalizedValue",
+      "validatorVersion",
+      "normalizerVersion",
+      "key",
+    ] as const) {
+      const mismatch = { ...registry, [field]: `${registry[field]}-mismatch` };
+      expect(parseOrganizationIdentityAuthorityIdentifier(mismatch)).toBeNull();
+    }
+  });
   it("keeps authority profiles exactly aligned with the exported Raw provider list", () => {
     expect(GOVERNED_RAW_SOURCE_PROVIDER_KEYS).toEqual([
       "registry",

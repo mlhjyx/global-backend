@@ -817,4 +817,24 @@ describe("deterministic organization identity resolution plan", () => {
     expect(results.map((result) => JSON.stringify(result))).toEqual(before);
     for (const result of results) expect(Object.isFrozen(result)).toBe(true);
   });
+
+  it("rejects a TED authority fact above the admitted UTF-8 byte boundary", () => {
+    const value = "Ä".repeat(41);
+    expectRejected(
+      input({
+        raw: { ...input().raw, providerKey: "ted" },
+        authorityIdentifiers: [
+          {
+            providerKey: "ted",
+            scheme: "ted-natid",
+            jurisdiction: "DE",
+            normalizedValue: value,
+            validatorVersion: "ted-natid-v1",
+            normalizerVersion: "organization-identity-authority/v1",
+            key: `ted-natid:DE:${value}`,
+          },
+        ],
+      }),
+    );
+  });
 });
