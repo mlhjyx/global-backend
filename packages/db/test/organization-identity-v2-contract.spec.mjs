@@ -109,6 +109,24 @@ describe("Organization Identity v2 contract DDL", () => {
     assert.equal(occurrences(sql, /^LOCK TABLE /gmu), 10);
   });
 
+  it("never reverses the frozen order when DDL upgrades table locks", () => {
+    const sql = readContractMigration();
+    const orderedDdlTargets = [
+      'ALTER TABLE "organization_identity_conflict"',
+      'ALTER TABLE "organization_identifier"',
+      'ALTER TABLE "organization_canonical_mapping"',
+      'ALTER TABLE "organization_identity_replay"',
+      'ALTER TABLE "identity_link"',
+    ];
+    const offsets = orderedDdlTargets.map((target) => sql.indexOf(target));
+
+    assert.ok(offsets.every((offset) => offset >= 0));
+    assert.deepEqual(
+      offsets,
+      [...offsets].sort((left, right) => left - right),
+    );
+  });
+
   it("fails closed before DDL on incomplete IdentityLink lifecycle and target state", () => {
     const sql = readContractMigration();
     const firstAlter = sql.indexOf('ALTER TABLE "identity_link"');
@@ -179,6 +197,7 @@ describe("Organization Identity v2 contract DDL", () => {
     assert.match(sql, /TG_OP = 'INSERT'/u);
     assert.match(sql, /NEW\."canonical_type" = 'company'/u);
     assert.match(sql, /NEW\."canonical_type" = 'contact'/u);
+    assert.equal(occurrences(sql, /FOR KEY SHARE/gu), 2);
     assert.match(sql, /'PENDING_CONFLICT'[\s\S]*'ACTIVE'[\s\S]*'REVOKED'/u);
     assert.match(
       sql,

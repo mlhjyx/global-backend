@@ -48,8 +48,10 @@ const LINK_HASH = "16000000-0000-4000-8000-000000000005";
 const LINK_PENDING_ACTIVE = "16000000-0000-4000-8000-000000000006";
 const LINK_PENDING_REVOKED = "16000000-0000-4000-8000-000000000007";
 const LINK_ACTIVE_INVALID = "16000000-0000-4000-8000-000000000008";
+const LINK_TARGET_LOCK = "16000000-0000-4000-8000-000000000009";
 const POLICY = "17000000-0000-4000-8000-000000000001";
 const MISSING_TARGET = "18000000-0000-4000-8000-000000000001";
+const COMPANY_TARGET_LOCK = "19000000-0000-4000-8000-000000000001";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
@@ -566,6 +568,65 @@ function startCanonicalCompanyLockHolder(database) {
   });
 }
 
+function startIdentityTargetLockHolder(database) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn("docker", dockerPsqlArgs(database), {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let ready = false;
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      rejectPromise(
+        new Error(
+          `target lock holder did not become ready:\n${stdout}\n${stderr}`,
+        ),
+      );
+    }, 5000);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (!ready && stdout.includes("TASK6B_TARGET_LOCK_READY")) {
+        ready = true;
+        clearTimeout(timer);
+        resolvePromise(Object.freeze({ child }));
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      if (!ready) rejectPromise(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (!ready) {
+        rejectPromise(
+          new Error(
+            `target lock holder exited before ready (${code}):\n${stdout}\n${stderr}`,
+          ),
+        );
+      }
+    });
+    child.stdin.write(`
+      BEGIN;
+      SELECT set_config('app.current_workspace_id', '${WORKSPACE_A}', true);
+      INSERT INTO identity_link(
+        id,workspace_id,canonical_type,canonical_id,raw_record_id,
+        match_rule,confidence
+      ) VALUES (
+        '${LINK_TARGET_LOCK}','${WORKSPACE_A}','company',
+        '${COMPANY_TARGET_LOCK}','${RAW_A}','target-lock',0.91
+      );
+      SELECT 'TASK6B_TARGET_LOCK_READY';
+    `);
+  });
+}
+
 function releaseLockHolder(holder) {
   return new Promise((resolvePromise, rejectPromise) => {
     holder.child.once("error", rejectPromise);
@@ -925,6 +986,32 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     }
   });
 
+  it("holds a canonical target key lock until the IdentityLink insert transaction ends", async () => {
+    dockerPsql(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `INSERT INTO canonical_company(
+          id,workspace_id,name,domain,status,dedupe_key,version,created_at,updated_at
+        ) VALUES (
+          '${COMPANY_TARGET_LOCK}','${WORKSPACE_A}','Target Lock',
+          'target-lock.example','NEW','target-lock',1,now(),now()
+        );`,
+      ),
+    );
+    const holder = await startIdentityTargetLockHolder(databases.upgrade);
+    try {
+      dockerPsql(
+        databases.upgrade,
+        `SET lock_timeout='1s';
+         DELETE FROM canonical_company WHERE id='${COMPANY_TARGET_LOCK}';`,
+        { rejects: /canceling statement due to lock timeout/u },
+      );
+    } finally {
+      await releaseLockHolder(holder);
+    }
+  });
+
   it("allows only the complete IdentityLink status graph and immutable/no-delete rules", () => {
     const conflictId = "21000000-0000-4000-8000-000000000001";
     dockerPsql(
@@ -1034,6 +1121,11 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
       `UPDATE organization_identifier SET status='ACTIVE',revoked_at=NULL WHERE id='${activeRevoked}';`,
       /ORGANIZATION_IDENTIFIER_STATUS_TRANSITION_INVALID/u,
     );
+    expectOwnerFailure(
+      databases.upgrade,
+      `UPDATE organization_identifier SET status='PENDING_CONFLICT' WHERE id='${pendingActive}';`,
+      /ORGANIZATION_IDENTIFIER_STATUS_TRANSITION_INVALID/u,
+    );
     for (const assignment of [
       "normalized_value='rewritten'",
       "provenance='{}'::jsonb || '{\"changed\":true}'::jsonb",
@@ -1057,17 +1149,21 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     const illegal = "23000000-0000-4000-8000-000000000002";
     const party = "23000000-0000-4000-8000-000000000003";
     const decision = "23000000-0000-4000-8000-000000000004";
+    const resolvingIllegal = "23000000-0000-4000-8000-000000000005";
     dockerPsql(
       databases.upgrade,
       asOwner(
         WORKSPACE_A,
         `${insertConflictSql({ id: legal })}
          ${insertConflictSql({ id: illegal })}
+         ${insertConflictSql({ id: resolvingIllegal })}
          UPDATE organization_identity_conflict SET status='RESOLVING',revision=2
            WHERE id='${legal}';
          UPDATE organization_identity_conflict
            SET status='RESOLVED',revision=3,resolved_at='2026-08-29T04:00:00Z'
            WHERE id='${legal}';
+         UPDATE organization_identity_conflict SET status='RESOLVING',revision=2
+           WHERE id='${resolvingIllegal}';
          INSERT INTO organization_identity_conflict_party(
            id,workspace_id,conflict_id,company_id,role,created_at
          ) VALUES (
@@ -1093,6 +1189,11 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     );
     expectOwnerFailure(
       databases.upgrade,
+      `UPDATE organization_identity_conflict SET status='OPEN',revision=3 WHERE id='${resolvingIllegal}';`,
+      /ORGANIZATION_IDENTITY_CONFLICT_STATUS_TRANSITION_INVALID/u,
+    );
+    expectOwnerFailure(
+      databases.upgrade,
       `UPDATE organization_identity_conflict SET facts='{\"changed\":true}' WHERE id='${illegal}';`,
       /ORGANIZATION_IDENTITY_CONFLICT_IMMUTABLE/u,
     );
@@ -1112,11 +1213,19 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
         /ORGANIZATION_IDENTITY_CONFLICT_PARTY_IMMUTABLE/u,
       ],
       [
+        `UPDATE organization_identity_conflict_party SET created_at=created_at + interval '1 second' WHERE id='${party}';`,
+        /ORGANIZATION_IDENTITY_CONFLICT_PARTY_IMMUTABLE/u,
+      ],
+      [
         `DELETE FROM organization_identity_conflict_party WHERE id='${party}';`,
         /ORGANIZATION_IDENTITY_CONFLICT_PARTY_DELETE_FORBIDDEN/u,
       ],
       [
         `UPDATE organization_identity_decision SET note='rewrite' WHERE id='${decision}';`,
+        /ORGANIZATION_IDENTITY_DECISION_APPEND_ONLY/u,
+      ],
+      [
+        `UPDATE organization_identity_decision SET created_at=created_at + interval '1 second' WHERE id='${decision}';`,
         /ORGANIZATION_IDENTITY_DECISION_APPEND_ONLY/u,
       ],
       [
@@ -1139,6 +1248,8 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     const wrongTarget = "24000000-0000-4000-8000-000000000004";
     const split = "24000000-0000-4000-8000-000000000005";
     const mapping = "24000000-0000-4000-8000-000000000006";
+    const conflictB = "24000000-0000-4000-8000-000000000007";
+    const wrongWorkspace = "24000000-0000-4000-8000-000000000008";
     dockerPsql(
       databases.upgrade,
       asOwner(
@@ -1150,9 +1261,25 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
          ${insertDecisionSql({ id: split, requestId: "map-split", action: "SPLIT" })}`,
       ),
     );
+    dockerPsql(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_B,
+        `${insertConflictSql({ id: conflictB, workspaceId: WORKSPACE_B })}
+         ${insertDecisionSql({
+           id: wrongWorkspace,
+           requestId: "map-wrong-workspace",
+           action: "MERGE",
+           workspaceId: WORKSPACE_B,
+           conflictId: conflictB,
+           canonicalCompanyId: COMPANY_B,
+         })}`,
+      ),
+    );
     for (const [decisionId, expected] of [
       [wrongAction, /ORGANIZATION_CANONICAL_MAPPING_DECISION_INVALID/u],
       [wrongTarget, /ORGANIZATION_CANONICAL_MAPPING_DECISION_INVALID/u],
+      [wrongWorkspace, /ORGANIZATION_CANONICAL_MAPPING_DECISION_INVALID/u],
     ]) {
       expectOwnerFailure(
         databases.upgrade,
@@ -1252,6 +1379,11 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
       ) VALUES (
         gen_random_uuid(),'${WORKSPACE_A}','${decisionIllegal}','PENDING',0,'${HASH_A}',now(),now()
       );`,
+      /ORGANIZATION_IDENTITY_REPLAY_INPUT_HASH_MISMATCH/u,
+    );
+    expectOwnerFailure(
+      databases.upgrade,
+      `UPDATE organization_identity_replay SET input_hash='${HASH_A}' WHERE id='${replayIllegal}';`,
       /ORGANIZATION_IDENTITY_REPLAY_INPUT_HASH_MISMATCH/u,
     );
     expectOwnerFailure(
