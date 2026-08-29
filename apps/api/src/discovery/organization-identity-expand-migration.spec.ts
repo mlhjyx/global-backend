@@ -199,7 +199,7 @@ describe("Organization Identity v2 expand migration", () => {
     for (const name of expectedForeignKeys) {
       expect(migration).toMatch(
         new RegExp(
-          `ADD CONSTRAINT "${name}"[\\s\\S]+?FOREIGN KEY \\(\"workspace_id\", [^)]+\\)[\\s\\S]+?ON DELETE RESTRICT ON UPDATE NO ACTION`,
+          `ADD CONSTRAINT "${name}"[\\s\\S]+?FOREIGN KEY \\("workspace_id", [^)]+\\)[\\s\\S]+?ON DELETE RESTRICT ON UPDATE NO ACTION`,
           "u",
         ),
       );
@@ -229,7 +229,7 @@ describe("Organization Identity v2 expand migration", () => {
       );
       expect(migration).toMatch(
         new RegExp(
-          `CREATE POLICY "${table}_tenant_isolation" ON "${table}"[\\s\\S]+?FOR ALL[\\s\\S]+?USING \\(\"workspace_id\" = current_workspace_id\\(\\)\\)[\\s\\S]+?WITH CHECK \\(\"workspace_id\" = current_workspace_id\\(\\)\\);`,
+          `CREATE POLICY "${table}_tenant_isolation" ON "${table}"[\\s\\S]+?FOR ALL[\\s\\S]+?USING \\("workspace_id" = current_workspace_id\\(\\)\\)[\\s\\S]+?WITH CHECK \\("workspace_id" = current_workspace_id\\(\\)\\);`,
           "u",
         ),
       );
@@ -273,7 +273,7 @@ describe("Organization Identity v2 expand migration", () => {
       expect(schema).toContain(`model ${model} {`);
       expect(schema).toMatch(
         new RegExp(
-          `model ${model} \\{[\\s\\S]+?id\\s+String\\s+@id @default\\(dbgenerated\\(\"gen_random_uuid\\(\\)\"\\)\\) @db.Uuid`,
+          `model ${model} \\{[\\s\\S]+?id\\s+String\\s+@id @default\\(dbgenerated\\("gen_random_uuid\\(\\)"\\)\\) @db.Uuid`,
           "u",
         ),
       );

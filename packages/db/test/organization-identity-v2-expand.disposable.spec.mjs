@@ -863,6 +863,16 @@ describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () =
       databases.upgrade,
       asOwner(
         WORKSPACE_A,
+        `INSERT INTO organization_identity_conflict_party(
+          workspace_id,conflict_id,company_id,role
+        ) VALUES ('${WORKSPACE_A}','${CONFLICT_A}','${COMPANY_B}','CROSS_COMPANY');`,
+      ),
+      /organization_identity_conflict_party_company_scope_fkey/u,
+    );
+    expectSqlReject(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
         `INSERT INTO organization_identity_decision(
           workspace_id,conflict_id,action,canonical_company_id,request_id,
           expected_revision,request_precondition_etag,reason_code,decided_by,
@@ -873,6 +883,22 @@ describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () =
         );`,
       ),
       /organization_identity_decision_conflict_scope_fkey/u,
+    );
+    expectSqlReject(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `INSERT INTO organization_identity_decision(
+          workspace_id,conflict_id,action,canonical_company_id,request_id,
+          expected_revision,request_precondition_etag,reason_code,decided_by,
+          decision_hash,fact_snapshot
+        ) VALUES (
+          '${WORKSPACE_A}','${CONFLICT_A}','MERGE','${COMPANY_B}',
+          'cross-decision-company',1,'"cross-company"','CROSS','service',
+          '${hash}','{}'
+        );`,
+      ),
+      /organization_identity_decision_company_scope_fkey/u,
     );
     expectSqlReject(
       databases.upgrade,
@@ -895,7 +921,7 @@ describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () =
           workspace_id,source_company_id,canonical_company_id,status,revision,
           merge_decision_id
         ) VALUES (
-          '${WORKSPACE_A}','${COMPANY_A_ALIAS}','${COMPANY_B}','ACTIVE',1,'${DECISION_A}'
+          '${WORKSPACE_A}','${COMPANY_A}','${COMPANY_B}','ACTIVE',1,'${DECISION_A}'
         );`,
       ),
       /organization_canonical_mapping_canonical_scope_fkey/u,
@@ -908,10 +934,24 @@ describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () =
           workspace_id,source_company_id,canonical_company_id,status,revision,
           merge_decision_id
         ) VALUES (
-          '${WORKSPACE_A}','${COMPANY_A_ALIAS}','${COMPANY_A}','ACTIVE',1,'${DECISION_B}'
+          '${WORKSPACE_A}','${COMPANY_A}','${COMPANY_A_ALIAS}','ACTIVE',1,'${DECISION_B}'
         );`,
       ),
       /organization_canonical_mapping_merge_decision_scope_fkey/u,
+    );
+    expectSqlReject(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `INSERT INTO organization_canonical_mapping(
+          workspace_id,source_company_id,canonical_company_id,status,revision,
+          merge_decision_id,split_decision_id,revoked_at
+        ) VALUES (
+          '${WORKSPACE_A}','${COMPANY_A}','${COMPANY_A_ALIAS}','REVOKED',1,
+          '${DECISION_A}','${DECISION_B}',now()
+        );`,
+      ),
+      /organization_canonical_mapping_split_decision_scope_fkey/u,
     );
     expectSqlReject(
       databases.upgrade,
@@ -928,10 +968,10 @@ describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () =
       asOwner(
         WORKSPACE_A,
         `INSERT INTO identity_link(
-          workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,
+          id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,
           confidence,conflict_id
         ) VALUES (
-          '${WORKSPACE_A}','company','${COMPANY_A}','${RAW_A}',
+          gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','${RAW_A}',
           'cross_conflict',0,'${CONFLICT_B}'
         );`,
       ),
