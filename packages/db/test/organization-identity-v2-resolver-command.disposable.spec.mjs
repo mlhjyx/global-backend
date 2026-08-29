@@ -282,7 +282,7 @@ function appCommand(database, value, options = {}) {
      SELECT set_config('app.current_workspace_id','${options.workspaceId ?? WORKSPACE_A}',true);
      SELECT row_to_json(result)::text
        FROM public.apply_organization_identity_resolution_v1('${json}'::jsonb) AS result;
-     COMMIT;`,
+     ${options.rollback ? "ROLLBACK" : "COMMIT"};`,
     { appUser: true, rejects: options.rejects },
   )
     .split("\n")
@@ -684,6 +684,11 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
     });
     const replay = JSON.parse(appCommand(databases.fresh, value));
     assert.equal(replay.replayed, true);
+    const driftedReplay = structuredClone(value);
+    driftedReplay.blocker.blockerKey = "d:drifted.example";
+    appCommand(databases.fresh, driftedReplay, {
+      rejects: /IDENTITY_RESOLUTION_INPUT_INVALID/u,
+    });
     appCommand(databases.fresh, value, {
       workspaceId: WORKSPACE_B,
       rejects: /IDENTITY_RESOLUTION_COMMAND_DENIED/u,
@@ -693,6 +698,46 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       `BEGIN; SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true); INSERT INTO organization_identity_conflict(workspace_id,conflict_type,fingerprint,facts) VALUES ('${WORKSPACE_A}','forged','${HASH_A}','{}'); ROLLBACK;`,
       { appUser: true, rejects: /permission denied/u },
     );
+  });
+
+  it("rejects a conflict command that omits a live authority binding", () => {
+    const authorityIdentifiers = registryAuthority("conflict.example");
+    const blocker = {
+      blockerKey: "d:conflict.example",
+      matchRule: "domain_exact",
+      legacyCandidateCompanyId: COMPANY_B,
+    };
+    const companyIds = [COMPANY_A, COMPANY_B].sort();
+    const identifierKeys = authorityIdentifiers.map((item) => item.key).sort();
+    const fingerprint = hash({
+      resolverVersion: RESOLVER_VERSION,
+      blocker: {
+        blockerKey: blocker.blockerKey,
+        matchRule: blocker.matchRule,
+      },
+      conflictType: "blocking_key_disagreement",
+      companyIds,
+      identifierKeys,
+    });
+    const forged = command({
+      rawRecordId: RAW_CONFLICT,
+      payloadHash: HASH_D,
+      blocker,
+      authorityIdentifiers,
+      bindings: [],
+      plan: {
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "blocking_key_disagreement",
+        companyIds,
+        identifierKeys,
+        conflictFingerprint: fingerprint,
+      },
+    });
+    appCommand(databases.upgrade, forged, {
+      rollback: true,
+      rejects: /IDENTITY_RESOLUTION_PLAN_STALE/u,
+    });
   });
 
   it("uses two physical app_user connections to converge same-authority Raw rows on one company", async () => {

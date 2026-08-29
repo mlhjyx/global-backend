@@ -586,6 +586,25 @@ describe("organization identity DB resolver source contract", () => {
     );
   });
 
+  it("maps the nested SQLSTATE from a real Prisma raw-query error envelope", async () => {
+    const fixture = transactionFixture({
+      identifierCompanyId: COMPANY_A,
+      commandError: Object.assign(new Error("raw query failed"), {
+        code: "P2010",
+        meta: { code: "42501", message: "command denied" },
+      }),
+    });
+    await expect(
+      resolveOrganizationIdentityForRaw(fixture.tx, {
+        workspaceId: WORKSPACE_ID,
+        rawRecordId: RAW_ID,
+      }),
+    ).rejects.toMatchObject({
+      code: "IDENTITY_RESOLUTION_COMMAND_DENIED",
+      message: "organization identity resolution failed",
+    });
+  });
+
   it("uses a closed generic error type", () => {
     const error = new OrganizationIdentityResolverError(
       "IDENTITY_RESOLUTION_PLAN_STALE",
