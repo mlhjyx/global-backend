@@ -282,6 +282,7 @@ function startConnection(sql) {
   const child = spawn("docker", dockerArgs(), { stdio: ["pipe", "pipe", "pipe"] });
   let stdout = ""; let stderr = ""; let settled = false;
   const listeners = [];
+  child.on("error", (error) => { stderr += `${error.message}\n`; });
   child.stdout.setEncoding("utf8").on("data", (chunk) => {
     stdout += chunk;
     for (const listener of listeners) listener(stdout);
@@ -293,6 +294,8 @@ function startConnection(sql) {
   child.stdin.end(sql);
   return {
     done, isSettled: () => settled,
+    abort: () => child.kill("SIGTERM"),
+    end: () => { if (!child.stdin.destroyed) child.stdin.end(); },
     waitFor: (sentinel) => new Promise((resolve) => {
       if (stdout.includes(sentinel)) resolve();
       else listeners.push((current) => current.includes(sentinel) && resolve());
@@ -317,7 +320,7 @@ function startInteractiveConnection(sql) {
   return {
     done, isSettled: () => settled, output: () => stdout,
     write: (nextSql) => child.stdin.write(nextSql),
-    end: () => child.stdin.end(),
+    end: () => { if (!child.stdin.destroyed) child.stdin.end(); },
     abort: () => child.kill("SIGTERM"),
     waitFor: (sentinel, timeoutMs = 3000) => new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`timed out waiting for ${sentinel}: ${stderr}`)), timeoutMs);
@@ -329,6 +332,33 @@ function startInteractiveConnection(sql) {
       else listeners.push(observe);
     }),
   };
+}
+
+async function boundedClose(connection, timeoutMs = 1500) {
+  return Promise.race([
+    connection.done,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("child close timeout")), timeoutMs)),
+  ]);
+}
+
+async function cleanupConnection(connection, applicationName) {
+  if (!connection || connection.isSettled()) return [];
+  const errors = [];
+  try { connection.end(); } catch (error) { errors.push(error); }
+  try { connection.abort(); } catch (error) { errors.push(error); }
+  try {
+    await boundedClose(connection, 700);
+  } catch (error) {
+    errors.push(error);
+    try {
+      psql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+        WHERE application_name='${applicationName}' AND pid<>pg_backend_pid();`);
+      await boundedClose(connection, 700);
+    } catch (fallbackError) {
+      errors.push(fallbackError);
+    }
+  }
+  return errors;
 }
 
 async function observeExactAdvisoryWait(holderPid, applicationName, writer, timeoutMs = 3000) {
@@ -522,35 +552,54 @@ describe("governed relation graph concurrency and DSR contract", () => {
     const parent = seedPersonalPath(low, high);
     assertSortedLockKeys([low, high]);
     assert.throws(() => assertSortedLockKeys([high, low]));
-    const holder = startInteractiveConnection(`SET application_name='gsr_dsr_holder';
+    const lowName = "gsr_dsr_holder_low";
+    const highName = "gsr_dsr_holder_high";
+    const writerName = "gsr_dsr_writer_exact";
+    const holderSql = (name, key, sentinel) => `SET application_name='${name}';
       SET SESSION AUTHORIZATION app_user; BEGIN;
       SET LOCAL statement_timeout='8s'; SET LOCAL lock_timeout='3s';
       SELECT set_config('app.current_workspace_id','${WS}',true);
       SELECT pg_advisory_xact_lock(hashtextextended(
-      'generic-operation-artifact-subject:${WS}:company:${low}',0));
-      SELECT pg_backend_pid()::text||'|LOW_LOCK_READY';\n`);
+        'generic-operation-artifact-subject:${WS}:company:${key}',0));
+      SELECT pg_backend_pid()::text||'|${sentinel}';\n`;
+    const lowHolder = startInteractiveConnection(holderSql(lowName, low, "LOW_LOCK_READY"));
+    const highHolder = startInteractiveConnection(holderSql(highName, high, "HIGH_LOCK_READY"));
     let writerConnection;
+    let primaryError;
     try {
-      const ready = await holder.waitFor("LOW_LOCK_READY");
-      const holderPid = Number(ready.match(/(\d+)\|LOW_LOCK_READY/)?.[1]);
-      assert.ok(Number.isInteger(holderPid));
-      const writerName = "gsr_dsr_writer_exact";
+      const [lowReady, highReady] = await Promise.all([
+        lowHolder.waitFor("LOW_LOCK_READY"), highHolder.waitFor("HIGH_LOCK_READY"),
+      ]);
+      const lowPid = Number(lowReady.match(/(\d+)\|LOW_LOCK_READY/)?.[1]);
+      const highPid = Number(highReady.match(/(\d+)\|HIGH_LOCK_READY/)?.[1]);
+      assert.ok(Number.isInteger(lowPid)); assert.ok(Number.isInteger(highPid));
       const writer = `SET application_name='${writerName}';\n${asApp(invocation(APPEND, {
         parentId: parent, childId: "52000000-0000-4000-8000-000000000002",
         relationKey: "personal:final",
       }))}`;
       writerConnection = startConnection(writer);
-      await observeExactAdvisoryWait(holderPid, writerName, writerConnection);
-      holder.write(`SELECT pg_advisory_xact_lock(hashtextextended(
-        'generic-operation-artifact-subject:${WS}:company:${high}',0)); COMMIT;\n`);
-      holder.end();
-      const results = await Promise.all([holder.done, writerConnection.done]);
+      await observeExactAdvisoryWait(lowPid, writerName, writerConnection);
+      lowHolder.write("COMMIT;\n"); lowHolder.end();
+      const lowResult = await boundedClose(lowHolder);
+      assert.equal(lowResult.status, 0, lowResult.stderr);
+      await observeExactAdvisoryWait(highPid, writerName, writerConnection);
+      highHolder.write("COMMIT;\n"); highHolder.end();
+      const results = await Promise.all([highHolder.done, writerConnection.done]);
       assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
       assert.ok(results.every((result) => result.status === 0));
+    } catch (error) {
+      primaryError = error;
     } finally {
-      if (!holder.isSettled()) { holder.abort(); holder.end(); }
-      if (writerConnection && !writerConnection.isSettled()) writerConnection.abort();
+      const cleanupErrors = (await Promise.all([
+        cleanupConnection(lowHolder, lowName),
+        cleanupConnection(highHolder, highName),
+        cleanupConnection(writerConnection, writerName),
+      ])).flat();
+      if (!primaryError && cleanupErrors.length > 0) {
+        primaryError = new AggregateError(cleanupErrors, "DSR lock child cleanup failed");
+      }
     }
+    if (primaryError) throw primaryError;
     const snapshot = JSON.parse(graphSnapshot());
     assert.equal(snapshot.subjects, 4); assert.equal(snapshot.relations, 3);
     assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
@@ -577,6 +626,7 @@ describe("governed relation graph concurrency and DSR contract", () => {
     const lowConnection = startInteractiveConnection(beginLock(lowName, low));
     const highConnection = startInteractiveConnection(beginLock(highName, high));
     const started = Date.now();
+    let primaryError;
     try {
       await Promise.all([
         lowConnection.waitFor(`${lowName}_READY`),
@@ -592,9 +642,17 @@ describe("governed relation graph concurrency and DSR contract", () => {
       assert.ok(Date.now() - started < 5000);
       assert.ok(results.some((result) => result.status !== 0));
       assert.match(results.map((result) => result.stderr).join("\n"), /deadlock|lock timeout|40P01|55P03/i);
+    } catch (error) {
+      primaryError = error;
     } finally {
-      if (!lowConnection.isSettled()) lowConnection.abort();
-      if (!highConnection.isSettled()) highConnection.abort();
+      const cleanupErrors = (await Promise.all([
+        cleanupConnection(lowConnection, lowName),
+        cleanupConnection(highConnection, highName),
+      ])).flat();
+      if (!primaryError && cleanupErrors.length > 0) {
+        primaryError = new AggregateError(cleanupErrors, "wrong-order child cleanup failed");
+      }
     }
+    if (primaryError) throw primaryError;
   });
 });
