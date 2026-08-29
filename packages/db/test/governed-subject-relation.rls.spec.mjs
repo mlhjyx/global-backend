@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { before, describe, it } from "node:test";
 
 const CONTAINER = process.env.GOVERNED_RELATION_PG_CONTAINER;
@@ -66,7 +67,7 @@ const EXPECTED_COLUMNS = Object.freeze({
     "operation_subject_id:uuid:NO:", "parent_subject_id:uuid:NO:",
     "child_subject_id:uuid:NO:", "relation_key:character varying(200):NO:",
     "relation_kind:character varying(32):NO:",
-    "source_ref_namespace:character varying(64):YES:",
+    "source_ref_namespace:character varying(64):NO:",
     "source_ref_uuid:uuid:YES:", "source_ref_sha256:character(64):YES:",
     "contract_sha256:character(64):NO:",
     "created_at:timestamp(3) with time zone:NO:CURRENT_TIMESTAMP",
@@ -170,33 +171,48 @@ function exactWorkspaceExpression(value) {
 
 function schemaInventory(database) {
   return psql(database, `
-    WITH targets AS (
-      SELECT unnest(ARRAY[${TABLES.map((table) => `'${table}'`).join(",")}]) AS name
+    WITH relations AS (
+      SELECT c.oid,c.relname,c.relkind,c.relrowsecurity,c.relforcerowsecurity,
+        pg_get_userbyid(c.relowner) AS owner
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S')
     ), facts AS (
+      SELECT 'relation:' || relname || ':' || relkind::text || ':' || owner || ':'
+        || relrowsecurity::text || ':' || relforcerowsecurity::text AS fact FROM relations
+      UNION ALL
       SELECT 'column:' || c.relname || ':' || a.attnum || ':' || a.attname || ':'
         || format_type(a.atttypid,a.atttypmod) || ':' || a.attnotnull || ':'
         || COALESCE(pg_get_expr(d.adbin,d.adrelid),'') AS fact
-      FROM targets t JOIN pg_class c ON c.relname=t.name
-      JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public'
+      FROM relations c
       JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
       LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
       UNION ALL
       SELECT 'constraint:' || c.relname || ':' || k.conname || ':' || k.contype::text || ':'
         || pg_get_constraintdef(k.oid,true)
-      FROM targets t JOIN pg_class c ON c.relname=t.name
-      JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public'
-      JOIN pg_constraint k ON k.conrelid=c.oid
+      FROM relations c JOIN pg_constraint k ON k.conrelid=c.oid
       UNION ALL
       SELECT 'index:' || tablename || ':' || indexname || ':' || indexdef
-      FROM pg_indexes WHERE schemaname='public' AND tablename IN (SELECT name FROM targets)
+      FROM pg_indexes WHERE schemaname='public'
       UNION ALL
       SELECT 'policy:' || tablename || ':' || policyname || ':' || COALESCE(qual,'') || ':'
         || COALESCE(with_check,'')
-      FROM pg_policies WHERE schemaname='public' AND tablename IN (SELECT name FROM targets)
+      FROM pg_policies WHERE schemaname='public'
       UNION ALL
-      SELECT 'rls:' || c.relname || ':' || c.relrowsecurity || ':' || c.relforcerowsecurity
-      FROM targets t JOIN pg_class c ON c.relname=t.name
-      JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public'
+      SELECT 'function:' || p.proname || ':' || pg_get_function_identity_arguments(p.oid)
+        || ':' || pg_get_function_result(p.oid) || ':' || p.provolatile::text || ':'
+        || p.prosecdef::text || ':' || COALESCE(array_to_string(p.proconfig,','),'')
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public'
+      UNION ALL
+      SELECT 'trigger:' || c.relname || ':' || t.tgname || ':' || pg_get_triggerdef(t.oid,true)
+      FROM pg_trigger t JOIN relations c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal
+      UNION ALL
+      SELECT 'enum:' || typ.typname || ':' || enum.enumsortorder || ':' || enum.enumlabel
+      FROM pg_type typ JOIN pg_namespace n ON n.oid=typ.typnamespace
+      JOIN pg_enum enum ON enum.enumtypid=typ.oid WHERE n.nspname='public'
+      UNION ALL
+      SELECT 'grant:' || table_name || ':' || grantee || ':' || privilege_type
+      FROM information_schema.table_privileges WHERE table_schema='public'
     ) SELECT fact FROM facts ORDER BY fact;
   `);
 }
@@ -217,8 +233,8 @@ function seedRlsRows(database) {
       ('${IDS.operationB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'tool_operation','${IDS.physicalOperationB}','NON_PERSONAL',NULL,NULL,now()),
       ('${IDS.childB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'child_subject','82000000-0000-4000-8000-000000000011','PERSONAL','person','83000000-0000-4000-8000-000000000011',now());
     INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest,created_at) VALUES
-      ('${IDS.operationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${IDS.rootA}','${digestA}','${digestA}',now()),
-      ('${IDS.operationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${IDS.rootB}','${digestB}','${digestB}',now());
+      ('${IDS.operationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${IDS.operationA}','${digestA}','${digestA}',now()),
+      ('${IDS.operationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${IDS.operationB}','${digestB}','${digestB}',now());
     INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,source_ref_sha256,contract_sha256,created_at) VALUES
       ('${IDS.relationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${digestA}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000001',NULL,'${digestA}',now()),
       ('${IDS.relationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${digestB}','${IDS.operationB}','${IDS.operationB}','${IDS.childB}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000011',NULL,'${digestB}',now());
@@ -237,7 +253,7 @@ function crossWorkspaceInsert(table) {
   const digest = "c".repeat(64);
   const rows = {
     governed_subject: `INSERT INTO governed_subject(id,scope_key,workspace_id,subject_type,subject_id,data_class,dsr_subject_type,dsr_subject_id,created_at) VALUES ('${id}','${WORKSPACE_B}','${WORKSPACE_B}','probe_subject','${id}','NON_PERSONAL',NULL,NULL,now());`,
-    tool_operation_subject: `INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest,created_at) VALUES ('${id}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${id}',1,'${IDS.rootB}','${digest}','${digest}',now());`,
+    tool_operation_subject: `INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest,created_at) VALUES ('${id}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${id}',1,'${id}','${digest}','${digest}',now());`,
     governed_subject_relation: `INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,source_ref_sha256,contract_sha256,created_at) VALUES ('${id}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${digest}','${IDS.operationB}','${IDS.operationB}','${IDS.childB}','probe:${table.length}','MATERIALIZED_CHILD','probe','${id}',NULL,'${digest}',now());`,
     governed_subject_tombstone: `INSERT INTO governed_subject_tombstone(workspace_id,governed_subject_id,tombstoned_at) VALUES ('${WORKSPACE_B}','${IDS.rootB}',now());`,
     governed_subject_tombstone_audit: `INSERT INTO governed_subject_tombstone_audit(deletion_request_id,workspace_id,governed_subject_id,tombstoned_at) VALUES ('${id}','${WORKSPACE_B}','${IDS.childB}',now());`,
@@ -247,12 +263,27 @@ function crossWorkspaceInsert(table) {
 
 describe("governed subject relation schema PostgreSQL and RLS", () => {
   before(() => {
+    assert.notEqual(FRESH_DATABASE, UPGRADE_DATABASE);
+    const identities = [];
     for (const database of DATABASES) {
       assert.equal(psql(database, "SELECT current_database() || ':' || current_user;"), `${database}:${OWNER}`);
+      identities.push(psql(database, "SELECT oid::text FROM pg_database WHERE datname=current_database();"));
     }
+    assert.notEqual(identities[0], identities[1], "fresh/upgrade database OIDs must differ");
   });
 
-  it("records identical successful Prisma migration ledgers and exact final schema inventory", () => {
+  it("binds upgrade provenance to a pre-Task1 baseline and applies the target migration exactly once", () => {
+    const baseline = psql(UPGRADE_DATABASE, `
+      SELECT database_name || E'\\t' || database_oid || E'\\t'
+        || baseline_migration_count || E'\\t' || baseline_ledger_sha256
+        || E'\\t' || target_migration_count || E'\\t' || target_table_count
+      FROM gsr_harness.upgrade_baseline_attestation;
+    `).split("\t");
+    assert.equal(baseline[0], UPGRADE_DATABASE);
+    assert.match(baseline[1] ?? "", /^[0-9]+$/);
+    assert.equal(baseline[4], "0");
+    assert.equal(baseline[5], "0");
+
     const ledgers = DATABASES.map((database) => psql(database, `
       SELECT migration_name || ':' || checksum
       FROM _prisma_migrations
@@ -260,11 +291,28 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
       ORDER BY migration_name;
     `));
     assert.equal(ledgers[0], ledgers[1]);
-    assert.match(ledgers[0], new RegExp(`(?:^|\\n)${MIGRATION}:[0-9a-f]{64}(?:\\n|$)`));
+    const withoutTarget = lines(ledgers[1]).filter((line) => !line.startsWith(`${MIGRATION}:`)).join("\n");
+    assert.equal(createHash("sha256").update(withoutTarget).digest("hex"), baseline[3]);
+    assert.equal(Number(baseline[2]), lines(withoutTarget).length);
+    for (const database of DATABASES) {
+      assert.equal(psql(database, `
+        SELECT count(*) FROM _prisma_migrations
+        WHERE migration_name='${MIGRATION}' AND finished_at IS NOT NULL
+          AND rolled_back_at IS NULL;
+      `), "1");
+    }
+  });
 
-    const inventories = DATABASES.map(schemaInventory);
-    assert.notEqual(inventories[0], "");
-    assert.equal(inventories[0], inventories[1], "fresh/upgrade schema diff must be zero");
+  it("has a bidirectional zero diff and identical digest for the complete public schema catalog", () => {
+    const inventories = DATABASES.map((database) => lines(schemaInventory(database)));
+    assert.notEqual(inventories[0].length, 0);
+    const fresh = new Set(inventories[0]);
+    const upgrade = new Set(inventories[1]);
+    assert.deepEqual([...fresh].filter((fact) => !upgrade.has(fact)), [], "fresh MINUS upgrade");
+    assert.deepEqual([...upgrade].filter((fact) => !fresh.has(fact)), [], "upgrade MINUS fresh");
+    const digests = inventories.map((facts) =>
+      createHash("sha256").update(facts.join("\n")).digest("hex"));
+    assert.equal(digests[0], digests[1]);
   });
 
   it("locks every pg_catalog column type, nullability and default in both databases", () => {
@@ -285,6 +333,7 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
       const operation = constraintMap(database, "tool_operation_subject");
       assert.match(operation.get("tool_operation_subject_workspace_operation_key") ?? "", /u:UNIQUE \(workspace_id, operation_id\)/);
       assert.match(operation.get("tool_operation_subject_workspace_generation_subject_key") ?? "", /u:UNIQUE \(workspace_id, operation_generation, subject_id\)/);
+      assert.match(operation.get("tool_operation_subject_root_check") ?? "", /c:CHECK.*root_subject_id = subject_id/i);
       for (const [name, target] of [
         ["tool_operation_subject_authority_fkey", "execution_budget_authority(scope_key, id)"],
         ["tool_operation_subject_account_fkey", "tool_budget_account(scope_key, id)"],
@@ -297,6 +346,7 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
       const relation = constraintMap(database, "governed_subject_relation");
       assert.match(relation.get("governed_subject_relation_workspace_operation_relation_key") ?? "", /u:UNIQUE \(workspace_id, operation_id, relation_key\)/);
       assert.match(relation.get("governed_subject_relation_source_ref_check") ?? "", /c:CHECK.*source_ref_namespace.*source_ref_uuid IS NOT NULL.*source_ref_sha256 IS NULL.*source_ref_uuid IS NULL.*source_ref_sha256 IS NOT NULL/i);
+      assert.match(relation.get("governed_subject_relation_source_namespace_check") ?? "", /c:CHECK.*source_ref_namespace.*\[a-z\].*a-z0-9_/i);
       assert.match(relation.get("governed_subject_relation_digest_check") ?? "", /c:CHECK.*contract_sha256.*\[0-9a-f\].*64/i);
       assert.match(relation.get("governed_subject_relation_kind_check") ?? "", /c:CHECK.*MATERIALIZED_CHILD.*DERIVED_FROM/i);
       assert.match(relation.get("governed_subject_relation_generation_check") ?? "", /c:CHECK.*operation_generation >= 1/i);
@@ -364,6 +414,53 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
     const [using, check] = result[1].split("\t");
     assert.equal(exactWorkspaceExpression(using), false);
     assert.equal(exactWorkspaceExpression(check), false);
+  });
+
+  it("rejects a distinct operation root and any missing or non-canonical source namespace", () => {
+    const digest = "d".repeat(64);
+    for (const database of DATABASES) {
+      psql(database, `
+        SET session_replication_role=replica;
+        INSERT INTO tool_operation_subject(
+          subject_id,scope_key,workspace_id,authority_id,account_id,operation_id,
+          operation_generation,root_subject_id,ack_id,result_digest,created_at
+        ) VALUES (
+          '90000000-0000-4000-8000-000000000001','${WORKSPACE_A}','${WORKSPACE_A}',
+          '${IDS.authorityA}','${IDS.accountA}','90000000-0000-4000-8000-000000000002',
+          1,'90000000-0000-4000-8000-000000000003','${digest}','${digest}',now()
+        );
+      `, { rejects: /tool_operation_subject_root_check/i });
+      psql(database, `
+        SET session_replication_role=replica;
+        INSERT INTO governed_subject_relation(
+          id,scope_key,workspace_id,authority_id,account_id,operation_id,
+          operation_generation,ack_id,operation_subject_id,parent_subject_id,
+          child_subject_id,relation_key,relation_kind,source_ref_namespace,
+          source_ref_uuid,source_ref_sha256,contract_sha256,created_at
+        ) VALUES (
+          '90000000-0000-4000-8000-000000000011','${WORKSPACE_A}','${WORKSPACE_A}',
+          '${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,
+          '${digest}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}',
+          'negative:missing_source','MATERIALIZED_CHILD',NULL,
+          '90000000-0000-4000-8000-000000000012',NULL,'${digest}',now()
+        );
+      `, { rejects: /source_ref_namespace|null value/i });
+      psql(database, `
+        SET session_replication_role=replica;
+        INSERT INTO governed_subject_relation(
+          id,scope_key,workspace_id,authority_id,account_id,operation_id,
+          operation_generation,ack_id,operation_subject_id,parent_subject_id,
+          child_subject_id,relation_key,relation_kind,source_ref_namespace,
+          source_ref_uuid,source_ref_sha256,contract_sha256,created_at
+        ) VALUES (
+          '90000000-0000-4000-8000-000000000021','${WORKSPACE_A}','${WORKSPACE_A}',
+          '${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,
+          '${digest}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}',
+          'negative:uppercase_source','MATERIALIZED_CHILD','Not_Canonical',
+          '90000000-0000-4000-8000-000000000022',NULL,'${digest}',now()
+        );
+      `, { rejects: /governed_subject_relation_source_namespace_check/i });
+    }
   });
 
   it("attests app_user as an unprivileged no-SET-ROLE session principal", () => {
