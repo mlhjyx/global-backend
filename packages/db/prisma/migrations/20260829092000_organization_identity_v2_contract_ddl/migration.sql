@@ -145,6 +145,9 @@ ALTER TABLE "identity_link"
   ALTER COLUMN "input_hash" SET NOT NULL,
   ADD CONSTRAINT "identity_link_input_hash_check" CHECK (
     "input_hash" = 'legacy' OR "input_hash" ~ '^[0-9a-f]{64}$'
+  ),
+  ADD CONSTRAINT "identity_link_pending_conflict_owner_check" CHECK (
+    "status" <> 'PENDING_CONFLICT' OR "conflict_id" IS NOT NULL
   );
 
 CREATE UNIQUE INDEX "identity_link_workspace_canonical_raw_key"
@@ -152,6 +155,9 @@ CREATE UNIQUE INDEX "identity_link_workspace_canonical_raw_key"
     "workspace_id", "canonical_type", "canonical_id", "raw_record_id"
   );
 
+-- IdentityLink is a creation-time reference, not a durable canonical FK.
+-- Post-commit company/contact deletion and company-to-contact cascade are allowed.
+-- Future readers must tolerate a missing canonical target and retain a historical UUID stub.
 CREATE FUNCTION enforce_identity_link_target_v2()
 RETURNS trigger
 LANGUAGE plpgsql

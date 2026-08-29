@@ -62,7 +62,18 @@ const CONTACT_HISTORY_CASCADE = "19500000-0000-4000-8000-000000000001";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
-const REVIEWED_PRISMA_RESIDUAL_SHA256 = "REVIEW_REQUIRED";
+// Exact pre-existing DB-to-Prisma residual reviewed for Task 6B.1c. It consists
+// only of SQL-owned composite FKs, DB defaults/columns absent from the current
+// datamodel, the legacy execution_domain_ack table, and one index-name drift.
+// None is created or changed by the Organization Identity contract migration.
+const REVIEWED_PRISMA_RESIDUAL_SHA256 =
+  "74f090715241bd8fb14c66f327f5505491065d976a25e35d1752f3e2c3e1afb8";
+const REVIEWED_PRISMA_RESIDUAL_MARKERS = Object.freeze([
+  'ALTER TABLE "identity_link" DROP CONSTRAINT "identity_link_workspace_raw_fkey";',
+  'DROP TABLE "execution_domain_ack";',
+  'ALTER TABLE "tool_budget_operation" DROP COLUMN "receipt_cost_basis"',
+  'ALTER INDEX "source_entity_last_seen_fetch_idx" RENAME TO "source_entity_last_seen_fetch_id_idx";',
+]);
 
 const CONTRACT_TABLES = Object.freeze([
   "identity_link",
@@ -237,6 +248,16 @@ function reviewedPrismaDiffDigest(result, label) {
     digest,
     REVIEWED_PRISMA_RESIDUAL_SHA256,
     `${label} emitted an unreviewed Prisma residual SHA-256 ${digest}`,
+  );
+  for (const marker of REVIEWED_PRISMA_RESIDUAL_MARKERS) {
+    assert.match(
+      result.stdout,
+      new RegExp(marker.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    );
+  }
+  assert.doesNotMatch(
+    result.stdout,
+    /organization_identity|identity_link_(?:input_hash|pending_conflict_owner|workspace_canonical_raw)|resolver_version/u,
   );
   return digest;
 }
@@ -1973,10 +1994,12 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     const expectedTablePrivileges = [...tables]
       .sort()
       .flatMap((table) =>
-        [...privileges].sort().map(
-          (privilege) =>
-            `${table}|${privilege}|${privilege === "SELECT" ? "true" : "false"}`,
-        ),
+        [...privileges]
+          .sort()
+          .map(
+            (privilege) =>
+              `${table}|${privilege}|${privilege === "SELECT" ? "true" : "false"}`,
+          ),
       )
       .join("\n");
     assert.equal(actualTablePrivileges, expectedTablePrivileges);

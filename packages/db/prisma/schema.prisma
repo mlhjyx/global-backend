@@ -1244,6 +1244,8 @@ model ContactPoint {
 model IdentityLink {
   id              String             @id @default(uuid()) @db.Uuid
   workspaceId     String             @map("workspace_id") @db.Uuid
+  /// This is a creation-time reference, not a durable canonical relation.
+  /// Target deletion/cascade is allowed; readers must tolerate a missing canonical target and retain a historical UUID stub.
   canonicalType   String             @map("canonical_type") // company | contact
   canonicalId     String             @map("canonical_id") @db.Uuid
   rawRecordId     String             @map("raw_record_id") @db.Uuid
