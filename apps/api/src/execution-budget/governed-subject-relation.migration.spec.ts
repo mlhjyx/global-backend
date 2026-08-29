@@ -54,7 +54,7 @@ const MODEL_FIELDS = Object.freeze({
     ['childSubjectId', 'String', '@map("child_subject_id")', '@db.Uuid'],
     ['relationKey', 'String', '@map("relation_key")', '@db.VarChar(200)'],
     ['relationKind', 'String', '@map("relation_kind")', '@db.VarChar(32)'],
-    ['sourceRefNamespace', 'String?', '@map("source_ref_namespace")', '@db.VarChar(64)'],
+    ['sourceRefNamespace', 'String', '@map("source_ref_namespace")', '@db.VarChar(64)'],
     ['sourceRefUuid', 'String?', '@map("source_ref_uuid")', '@db.Uuid'],
     ['sourceRefSha256', 'String?', '@map("source_ref_sha256")', '@db.Char(64)'],
     ['contractSha256', 'String', '@map("contract_sha256")', '@db.Char(64)'],
@@ -70,6 +70,37 @@ const MODEL_FIELDS = Object.freeze({
     ['workspaceId', 'String', '@map("workspace_id")', '@db.Uuid'],
     ['governedSubjectId', 'String', '@map("governed_subject_id")', '@db.Uuid'],
     ['tombstonedAt', 'DateTime', '@map("tombstoned_at")', '@db.Timestamptz(3)'],
+  ],
+});
+
+const MODEL_FIELD_NAMES = Object.freeze({
+  GovernedSubject: [
+    'id', 'scopeKey', 'workspaceId', 'subjectType', 'subjectId', 'dataClass',
+    'dsrSubjectType', 'dsrSubjectId', 'createdAt', 'workspace',
+    'operationSubject', 'operationRoot', 'operationRelations',
+    'parentRelations', 'childRelations', 'tombstone',
+  ],
+  ToolOperationSubject: [
+    'subjectId', 'scopeKey', 'workspaceId', 'authorityId', 'accountId',
+    'operationId', 'operationGeneration', 'rootSubjectId', 'ackId',
+    'resultDigest', 'createdAt', 'workspace', 'authority', 'account',
+    'operation', 'subject', 'rootSubject', 'relations',
+  ],
+  GovernedSubjectRelation: [
+    'id', 'scopeKey', 'workspaceId', 'authorityId', 'accountId', 'operationId',
+    'operationGeneration', 'ackId', 'operationSubjectId', 'parentSubjectId',
+    'childSubjectId', 'relationKey', 'relationKind', 'sourceRefNamespace',
+    'sourceRefUuid', 'sourceRefSha256', 'contractSha256', 'createdAt',
+    'workspace', 'authority', 'account', 'operation', 'operationSubject',
+    'parentSubject', 'childSubject',
+  ],
+  GovernedSubjectTombstone: [
+    'workspaceId', 'governedSubjectId', 'tombstonedAt', 'workspace',
+    'subject', 'audits',
+  ],
+  GovernedSubjectTombstoneAudit: [
+    'deletionRequestId', 'workspaceId', 'governedSubjectId', 'tombstonedAt',
+    'request', 'workspace', 'tombstone',
   ],
 });
 
@@ -188,6 +219,7 @@ describe('governed subject relation schema migration', () => {
       'UNIQUE (workspace_id, operation_id)',
       'UNIQUE (workspace_id, operation_generation, subject_id)',
       'CHECK (scope_key = workspace_id::text)', 'CHECK (operation_generation >= 1)',
+      'CHECK (root_subject_id = subject_id)',
       "CHECK (ack_id ~ '^[0-9a-f]{64}$')", "CHECK (result_digest ~ '^[0-9a-f]{64}$')",
       'FOREIGN KEY (scope_key, authority_id) REFERENCES public.execution_budget_authority(scope_key, id)',
       'FOREIGN KEY (scope_key, account_id) REFERENCES public.tool_budget_account(scope_key, id)',
@@ -205,7 +237,7 @@ describe('governed subject relation schema migration', () => {
       'operation_generation INTEGER NOT NULL', 'ack_id CHAR(64) NOT NULL',
       'operation_subject_id UUID NOT NULL', 'parent_subject_id UUID NOT NULL',
       'child_subject_id UUID NOT NULL', 'relation_key VARCHAR(200) NOT NULL',
-      'relation_kind VARCHAR(32) NOT NULL', 'source_ref_namespace VARCHAR(64)',
+      'relation_kind VARCHAR(32) NOT NULL', 'source_ref_namespace VARCHAR(64) NOT NULL',
       'source_ref_uuid UUID', 'source_ref_sha256 CHAR(64)',
       'contract_sha256 CHAR(64) NOT NULL',
       'created_at TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
@@ -299,6 +331,37 @@ describe('governed subject relation schema migration', () => {
     `;
     expect(() => assertExactWorkspacePolicy(weakPolicy, 'governed_subject'))
       .toThrow('MISSING_POLICY_governed_subject');
+
+    const distinctRoot = `
+      CREATE TABLE public.tool_operation_subject (
+        subject_id UUID NOT NULL,
+        root_subject_id UUID NOT NULL,
+        CONSTRAINT tool_operation_subject_root_check
+          CHECK (root_subject_id <> subject_id)
+      );
+    `;
+    expect(() => requirePattern(
+      tableBody(distinctRoot, 'tool_operation_subject'),
+      /CHECK \(root_subject_id = subject_id\)/i,
+      'OPERATION_IS_GRAPH_ROOT',
+    )).toThrow('MISSING_OPERATION_IS_GRAPH_ROOT');
+
+    const nullableSourceNamespace = `
+      CREATE TABLE public.governed_subject_relation (
+        source_ref_namespace VARCHAR(64),
+        source_ref_uuid UUID,
+        source_ref_sha256 CHAR(64),
+        CONSTRAINT governed_subject_relation_source_ref_check CHECK (
+          (source_ref_uuid IS NOT NULL AND source_ref_sha256 IS NULL)
+          OR (source_ref_uuid IS NULL AND source_ref_sha256 IS NOT NULL)
+        )
+      );
+    `;
+    expect(() => requirePattern(
+      tableBody(nullableSourceNamespace, 'governed_subject_relation'),
+      /source_ref_namespace VARCHAR\(64\) NOT NULL/i,
+      'SOURCE_NAMESPACE_REQUIRED',
+    )).toThrow('MISSING_SOURCE_NAMESPACE_REQUIRED');
   });
 
   it('keeps the Task 1 SQL product-neutral', async () => {
@@ -310,11 +373,16 @@ describe('governed subject relation schema migration', () => {
     const schema = await readFile(schemaUrl, 'utf8');
     const projection = Object.keys(MODEL_FIELDS).map((model) => modelBody(schema, model)).join('\n');
     for (const [model, fields] of Object.entries(MODEL_FIELDS)) {
-      const body = compact(modelBody(schema, model));
+      const rawBody = modelBody(schema, model);
+      const body = compact(rawBody);
       for (const field of fields) expect(body).toContain(field.join(' '));
-      for (const attribute of MODEL_ATTRIBUTES[model as keyof typeof MODEL_ATTRIBUTES]) {
-        expect(body).toContain(attribute);
-      }
+      const fieldNames = rawBody.split('\n').map((line) => line.trim())
+        .map((line) => /^([A-Za-z][A-Za-z0-9]*)\s+[A-Z][A-Za-z0-9]*(?:\[\]|\?)?/u.exec(line)?.[1])
+        .filter((value): value is string => typeof value === 'string');
+      expect(fieldNames).toEqual(MODEL_FIELD_NAMES[model as keyof typeof MODEL_FIELD_NAMES]);
+      const attributes = rawBody.split('\n').map((line) => line.trim())
+        .filter((line) => line.startsWith('@@'));
+      expect(attributes).toEqual(MODEL_ATTRIBUTES[model as keyof typeof MODEL_ATTRIBUTES]);
     }
     for (const forbidden of ['RawSourceRecord', 'IdentityLink', 'CanonicalCompany', 'CanonicalContact', 'Opportunity']) {
       expect(projection).not.toContain(forbidden);
