@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -11,6 +12,24 @@ const repositoryRoot = resolve(
 );
 const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
+const disposableSpecPath = resolve(
+  repositoryRoot,
+  "packages/db/test/organization-identity-v2-contract.disposable.spec.mjs",
+);
+const residualFixtureRelativePath =
+  "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.sql";
+const residualManifestRelativePath =
+  "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.manifest.json";
+const residualFixturePath = resolve(
+  repositoryRoot,
+  residualFixtureRelativePath,
+);
+const residualManifestPath = resolve(
+  repositoryRoot,
+  residualManifestRelativePath,
+);
+const expectedResidualChecksum =
+  "74f090715241bd8fb14c66f327f5505491065d976a25e35d1752f3e2c3e1afb8";
 const expandMigrationPath = resolve(
   migrationRoot,
   "20260829090000_organization_identity_v2_expand_ddl/migration.sql",
@@ -45,6 +64,40 @@ function occurrences(value, pattern) {
 }
 
 describe("Organization Identity v2 contract DDL", () => {
+  it("removes the old EMPTY/digest-only Prisma residual gate", () => {
+    const source = readFileSync(disposableSpecPath, "utf8");
+    assert.doesNotMatch(source, /result\.stdout === ""/u);
+    assert.doesNotMatch(source, /return "EMPTY"/u);
+    assert.match(source, /assert\.equal\(result\.stdout, fixture/u);
+    assert.match(source, /parseResidualStatements/u);
+    assert.match(source, /forbiddenStatementPatterns/u);
+  });
+
+  it("requires the exact nonempty residual fixture and manifest to be tracked", () => {
+    for (const [relativePath, absolutePath] of [
+      [residualFixtureRelativePath, residualFixturePath],
+      [residualManifestRelativePath, residualManifestPath],
+    ]) {
+      assert.ok(existsSync(absolutePath), `${relativePath} must exist`);
+      const tracked = spawnSync(
+        "git",
+        ["ls-files", "--error-unmatch", "--", relativePath],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          maxBuffer: 1024 * 1024,
+        },
+      );
+      assert.equal(tracked.status, 0, `${relativePath} must be tracked`);
+      assert.equal(tracked.stdout.trim(), relativePath);
+    }
+    const fixture = readFileSync(residualFixturePath, "utf8");
+    assert.notEqual(fixture, "");
+    assert.equal(sha256(fixture), expectedResidualChecksum);
+    const manifest = JSON.parse(readFileSync(residualManifestPath, "utf8"));
+    assert.equal(manifest.sha256, expectedResidualChecksum);
+  });
+
   it("preserves reviewed expand/DML bytes and requires the exact contract successor", () => {
     assert.equal(
       sha256(readFileSync(expandMigrationPath)),

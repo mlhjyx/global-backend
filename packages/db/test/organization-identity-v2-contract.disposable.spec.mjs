@@ -62,18 +62,20 @@ const CONTACT_HISTORY_CASCADE = "19500000-0000-4000-8000-000000000001";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
-// Exact pre-existing DB-to-Prisma residual reviewed for Task 6B.1c. It consists
-// only of SQL-owned composite FKs, DB defaults/columns absent from the current
-// datamodel, the legacy execution_domain_ack table, and one index-name drift.
-// None is created or changed by the Organization Identity contract migration.
+const PRISMA_RESIDUAL_FIXTURE_RELATIVE_PATH =
+  "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.sql";
+const PRISMA_RESIDUAL_MANIFEST_RELATIVE_PATH =
+  "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.manifest.json";
+const prismaResidualFixturePath = resolve(
+  repositoryRoot,
+  PRISMA_RESIDUAL_FIXTURE_RELATIVE_PATH,
+);
+const prismaResidualManifestPath = resolve(
+  repositoryRoot,
+  PRISMA_RESIDUAL_MANIFEST_RELATIVE_PATH,
+);
 const REVIEWED_PRISMA_RESIDUAL_SHA256 =
   "74f090715241bd8fb14c66f327f5505491065d976a25e35d1752f3e2c3e1afb8";
-const REVIEWED_PRISMA_RESIDUAL_MARKERS = Object.freeze([
-  'ALTER TABLE "identity_link" DROP CONSTRAINT "identity_link_workspace_raw_fkey";',
-  'DROP TABLE "execution_domain_ack";',
-  'ALTER TABLE "tool_budget_operation" DROP COLUMN "receipt_cost_basis"',
-  'ALTER INDEX "source_entity_last_seen_fetch_idx" RENAME TO "source_entity_last_seen_fetch_id_idx";',
-]);
 
 const CONTRACT_TABLES = Object.freeze([
   "identity_link",
@@ -93,6 +95,28 @@ const CONTRACT_FUNCTIONS = Object.freeze([
   "enforce_organization_identity_conflict_party_contract_v2",
   "enforce_organization_identity_decision_contract_v2",
   "enforce_organization_identity_replay_contract_v2",
+]);
+const REQUIRED_FORBIDDEN_RESIDUAL_PATTERNS = Object.freeze([
+  'ALTER TABLE\\s+"identity_link"[\\s\\S]*?ALTER COLUMN\\s+"(?:status|resolver_version|input_hash|conflict_id)"',
+  "identity_link_status",
+  "identity_link_input_hash_check",
+  "identity_link_pending_conflict_owner_check",
+  "identity_link_workspace_canonical_raw_key",
+  "organization_identifier",
+  "organization_identity_conflict",
+  "organization_identity_conflict_party",
+  "organization_identity_decision",
+  "organization_canonical_mapping",
+  "organization_identity_replay",
+  "identity_link_10_typed_target_guard",
+  "identity_link_20_contract_guard",
+  "organization_identifier_contract_guard",
+  "organization_identity_conflict_contract_guard",
+  "organization_identity_conflict_party_contract_guard",
+  "organization_identity_decision_contract_guard",
+  "organization_canonical_mapping_contract_guard",
+  "organization_identity_replay_contract_guard",
+  ...CONTRACT_FUNCTIONS,
 ]);
 
 let backfillTree;
@@ -238,28 +262,100 @@ function runPrismaDiff(database, schemaPath) {
   );
 }
 
-function reviewedPrismaDiffDigest(result, label) {
+function assertTrackedPath(relativePath) {
+  const result = spawnSync(
+    "git",
+    ["ls-files", "--error-unmatch", "--", relativePath],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  assert.equal(
+    result.status,
+    0,
+    `reviewed Prisma residual artifact is not tracked: ${relativePath}\n${result.stdout}\n${result.stderr}`,
+  );
+  assert.equal(result.stdout.trim(), relativePath);
+}
+
+function parseResidualStatements(sql) {
+  const uncommented = sql
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n")
+    .trim();
+  assert.ok(uncommented.endsWith(";"));
+  return uncommented
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean)
+    .map((statement) => `${statement};`);
+}
+
+function loadReviewedPrismaResidual(observedOutput) {
+  assert.ok(
+    existsSync(prismaResidualFixturePath),
+    `tracked exact Prisma residual fixture is absent: ${PRISMA_RESIDUAL_FIXTURE_RELATIVE_PATH}\nObserved stdout:\n${observedOutput}`,
+  );
+  assert.ok(
+    existsSync(prismaResidualManifestPath),
+    `tracked Prisma residual manifest is absent: ${PRISMA_RESIDUAL_MANIFEST_RELATIVE_PATH}`,
+  );
+  assertTrackedPath(PRISMA_RESIDUAL_FIXTURE_RELATIVE_PATH);
+  assertTrackedPath(PRISMA_RESIDUAL_MANIFEST_RELATIVE_PATH);
+
+  const fixture = readFileSync(prismaResidualFixturePath, "utf8");
+  assert.notEqual(
+    fixture,
+    "",
+    "reviewed Prisma residual fixture must be nonempty",
+  );
+  assert.equal(sha256(fixture), REVIEWED_PRISMA_RESIDUAL_SHA256);
+
+  const manifest = JSON.parse(readFileSync(prismaResidualManifestPath, "utf8"));
+  assert.equal(
+    manifest.schemaVersion,
+    "organization-identity-v2-contract-prisma-residual/v1",
+  );
+  assert.equal(manifest.fixture, PRISMA_RESIDUAL_FIXTURE_RELATIVE_PATH);
+  assert.equal(manifest.sha256, REVIEWED_PRISMA_RESIDUAL_SHA256);
+  assert.equal(manifest.contractStageCommit, contractCommit);
+  assert.equal(
+    manifest.command,
+    "prisma migrate diff --script --from-url <task6b_identity_database> --to-schema-datamodel <exact_contract_stage_schema>",
+  );
+  assert.ok(Array.isArray(manifest.allowedCategories));
+  assert.ok(manifest.allowedCategories.length > 0);
+  const allowedStatements = manifest.allowedCategories.flatMap((category) => {
+    assert.equal(typeof category.id, "string");
+    assert.ok(category.id.length > 0);
+    assert.equal(typeof category.reason, "string");
+    assert.ok(category.reason.length > 0);
+    assert.ok(Array.isArray(category.statements));
+    assert.ok(category.statements.length > 0);
+    return category.statements;
+  });
+  assert.deepEqual(parseResidualStatements(fixture), allowedStatements);
+  assert.deepEqual(
+    manifest.forbiddenStatementPatterns,
+    REQUIRED_FORBIDDEN_RESIDUAL_PATTERNS,
+  );
+  for (const statement of allowedStatements) {
+    for (const pattern of manifest.forbiddenStatementPatterns) {
+      assert.doesNotMatch(statement, new RegExp(pattern, "u"));
+    }
+  }
+  return fixture;
+}
+
+function assertExactPrismaDiff(result, label, fixture) {
   assert.equal(result.status, 0, `${label}: ${result.output}`);
   assert.equal(result.stderr, "", `${label} emitted stderr`);
-  if (result.stdout === "") return "EMPTY";
-
-  const digest = sha256(result.stdout);
-  assert.equal(
-    digest,
-    REVIEWED_PRISMA_RESIDUAL_SHA256,
-    `${label} emitted an unreviewed Prisma residual SHA-256 ${digest}`,
-  );
-  for (const marker of REVIEWED_PRISMA_RESIDUAL_MARKERS) {
-    assert.match(
-      result.stdout,
-      new RegExp(marker.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
-    );
-  }
-  assert.doesNotMatch(
-    result.stdout,
-    /organization_identity|identity_link_(?:input_hash|pending_conflict_owner|workspace_canonical_raw)|resolver_version/u,
-  );
-  return digest;
+  assert.notEqual(fixture, "", "reviewed Prisma residual cannot be empty");
+  assert.equal(result.stdout, fixture, `${label} differs from tracked fixture`);
+  return sha256(result.stdout);
 }
 
 function asApp(workspaceId, sql) {
@@ -901,9 +997,14 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     );
     assert.match(upgradeDeployOutput, new RegExp(contractMigrationName, "u"));
     assert.match(secondFreshDeployOutput, /No pending migrations to apply/u);
+    const fixture = loadReviewedPrismaResidual(freshSchemaDiffResult.stdout);
     assert.equal(
-      reviewedPrismaDiffDigest(freshSchemaDiffResult, "fresh schema diff"),
-      reviewedPrismaDiffDigest(schemaDiffResult, "upgrade schema diff"),
+      assertExactPrismaDiff(
+        freshSchemaDiffResult,
+        "fresh schema diff",
+        fixture,
+      ),
+      assertExactPrismaDiff(schemaDiffResult, "upgrade schema diff", fixture),
     );
     assert.equal(
       dockerPsql(
