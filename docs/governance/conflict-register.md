@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；Program A closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 main `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
+> 当前工程核验基线：`origin/main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`，closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 historical base `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -36,7 +36,11 @@
 
 | Blocker ID | 阻塞 | Accountable Owner | 最新关闭条件 | 安全默认 |
 |---|---|---|---|---|
-| `BLK-GPP-001` | Git merge-conflict shape、Program A writer inactivity and stale ledger/provenance are closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; ownership conflict remains because ADR-025/`DEC-GPP-001` 尚未进入 current main，mega-branch 尚未由 current-main authority 采用上述非破坏性 disposition，且没有唯一 current-main Program B successor/card/handoff。 | `OWN-PRODUCT` | (1) 将 ADR-025/`DEC-GPP-001` 合入并逐字回读 current main；(2) 由该 current-main authority 将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，不删除、不 revert、不 cherry-pick；(3) 从该 current main 指派一个唯一 Program B successor/card/handoff 和 writer；然后 (4) 独立 G0 readback。B 的 RED/GREEN、DB/RLS/replay 和集成分别属于 G2/G3，不是 G0 条件。任何后来 A head/index/working-tree/merge movement 都重开 delta audit。 | `HOLD_OWNERSHIP`；只禁止受 `CON-GPP-001` 影响的 Discovery seam 实现、集成、migration、runtime、release 或 pilot promotion；不自动冻结无依赖的 Site/Program C 工作。 |
+| `BLK-GPP-001` | ADR-025/`DEC-GPP-001` 已通过 PR #424 进入并逐字回读 `main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`；mega-branch 的 `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition 已生效。唯一 Program B successor/card/writer 已在下表形成 candidate，但该卡尚未进入 current main，因此 G0 仍保持 HOLD。 | `OWN-PRODUCT` | 将 `GPP-B-LINEAGE-001` 通过独立 review/CI 合入 current main，然后独立回读 main 中的 card、exact base、唯一 writer 与 mega-branch disposition；通过后 G0 可 PASS。B 的 RED/GREEN、DB/RLS/replay 和集成分别属于 G2/G3，不是 G0 条件。任何后来 A head/index/working-tree/merge movement 都重开 delta audit。 | `HOLD_OWNERSHIP`；只禁止受 `CON-GPP-001` 影响的 Discovery seam 实现、集成、migration、runtime、release 或 pilot promotion；不自动冻结无依赖的 Site/Program C 工作。 |
+
+| Card ID | 当前状态 | 唯一 writer | Exact base / scope |
+|---|---|---|---|
+| `GPP-B-LINEAGE-001` | `ASSIGNED / ZERO_PRODUCT_CODE / AWAITING_CURRENT_MAIN_READBACK` | `codex/discovery-query-materialization-successor` | `c7e39e050b2f30ed9ff155aec139ff206fb850d0`；仅 Program B ACK identity、index-preserving Raw resolution 与 Provider-owned company lineage。旧 A mega-branch 继续 `NON_DEPLOYABLE / PROVENANCE_ONLY`；本卡进入 current main 并被独立 readback 前 G0 不升级。 |
 
 固定接口仅为：
 

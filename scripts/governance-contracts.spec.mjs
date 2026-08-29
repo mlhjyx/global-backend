@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import "./governance-ci-topology.spec.mjs";
@@ -32,6 +33,58 @@ const SHA_C = "c".repeat(40);
 const SHA_D = "d".repeat(40);
 const DIGEST = `sha256:${"e".repeat(64)}`;
 const NOW = new Date("2026-08-07T12:00:00.000Z");
+
+test("the discovery lineage successor is current-main based and the quarantined mega-branch is provenance only", () => {
+  const plan = readFileSync(
+    new URL(
+      "../docs/superpowers/plans/2026-08-29-discovery-query-lineage-foundation.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const conflicts = readFileSync(
+    new URL("../docs/governance/conflict-register.md", import.meta.url),
+    "utf8",
+  );
+  for (const required of [
+    "c7e39e050b2f30ed9ff155aec139ff206fb850d0",
+    "codex/discovery-query-materialization-successor",
+    "NON_DEPLOYABLE / PROVENANCE_ONLY",
+    "no-product-code boundary",
+  ]) {
+    assert.match(plan, new RegExp(required.replaceAll("/", "\\/")));
+  }
+  assert.match(plan, /DISCOVERY_GOVERNED_LINEAGE_NOT_READY/);
+
+  const expectedCard = "| `GPP-B-LINEAGE-001` | `ASSIGNED / ZERO_PRODUCT_CODE / AWAITING_CURRENT_MAIN_READBACK` | `codex/discovery-query-materialization-successor` | `c7e39e050b2f30ed9ff155aec139ff206fb850d0`；仅 Program B ACK identity、index-preserving Raw resolution 与 Provider-owned company lineage。旧 A mega-branch 继续 `NON_DEPLOYABLE / PROVENANCE_ONLY`；本卡进入 current main 并被独立 readback 前 G0 不升级。 |";
+  const assertUniqueDiscoveryLineageCard = (document) => {
+    const rows = document
+      .split("\n")
+      .filter((line) => line.startsWith("| `GPP-B-LINEAGE-001` |"));
+    assert.deepEqual(rows, [expectedCard]);
+  };
+  assertUniqueDiscoveryLineageCard(conflicts);
+  assert.match(
+    conflicts,
+    /> 当前工程核验基线：`origin\/main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`/,
+  );
+  for (const mutation of [
+    ["ZERO_PRODUCT_CODE", "PRODUCT_CODE"],
+    ["codex/discovery-query-materialization-successor", "codex/other-writer"],
+    ["c7e39e050b2f30ed9ff155aec139ff206fb850d0", "b".repeat(40)],
+    ["仅 Program B ACK identity", "Program A ACK identity"],
+    ["G0 不升级", "G0 PASS"],
+  ]) {
+    assert.throws(() =>
+      assertUniqueDiscoveryLineageCard(
+        conflicts.replace(
+          expectedCard,
+          expectedCard.replace(mutation[0], mutation[1]),
+        ),
+      ),
+    );
+  }
+});
 
 function issueCodes(result) {
   return result.issues.map((issue) => issue.code);
