@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "organization-identity-v2-contract-prisma-residual/v1",
+  "fixture": "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.sql",
+  "sha256": "74f090715241bd8fb14c66f327f5505491065d976a25e35d1752f3e2c3e1afb8",
+  "contractStageCommit": "400caab2f8d827cc012ee5f928e7af4d6a1d6e08",
+  "command": "prisma migrate diff --script --from-url <task6b_identity_database> --to-schema-datamodel <exact_contract_stage_schema>",
+  "allowedCategories": [
+    {
+      "id": "sql_owned_composite_foreign_keys",
+      "reason": "These pre-existing composite and SQL-owned foreign keys are installed by earlier migrations but intentionally have no equivalent relation in the current Prisma datamodel.",
+      "statements": [
+        "ALTER TABLE \"execution_domain_ack\" DROP CONSTRAINT \"execution_domain_ack_account_fkey\";",
+        "ALTER TABLE \"execution_domain_ack\" DROP CONSTRAINT \"execution_domain_ack_authority_fkey\";",
+        "ALTER TABLE \"execution_domain_ack\" DROP CONSTRAINT \"execution_domain_ack_operation_fkey\";",
+        "ALTER TABLE \"field_evidence\" DROP CONSTRAINT \"field_evidence_workspace_raw_fkey\";",
+        "ALTER TABLE \"identity_link\" DROP CONSTRAINT \"identity_link_workspace_raw_fkey\";",
+        "ALTER TABLE \"personal_artifact_cleanup_command\" DROP CONSTRAINT \"personal_artifact_cleanup_command_artifact_fkey\";",
+        "ALTER TABLE \"personal_artifact_cleanup_command\" DROP CONSTRAINT \"personal_artifact_cleanup_command_request_fkey\";",
+        "ALTER TABLE \"personal_artifact_cleanup_command\" DROP CONSTRAINT \"personal_artifact_cleanup_command_workspace_fkey\";",
+        "ALTER TABLE \"raw_source_governance_disposition\" DROP CONSTRAINT \"raw_source_governance_disposition_raw_scope_fkey\";",
+        "ALTER TABLE \"raw_source_record\" DROP CONSTRAINT \"raw_source_record_workspace_run_fkey\";",
+        "ALTER TABLE \"source_entity\" DROP CONSTRAINT \"source_entity_last_seen_fetch_fkey\";"
+      ]
+    },
+    {
+      "id": "historical_database_defaults",
+      "reason": "These database-side UUID or command defaults predate Task 6B.1c and are not expressed as equivalent defaults by the exact pinned Prisma schema.",
+      "statements": [
+        "ALTER TABLE \"personal_artifact_cleanup_command\" ALTER COLUMN \"command_id\" DROP DEFAULT;",
+        "ALTER TABLE \"raw_source_field_evidence_cleanup_audit\" ALTER COLUMN \"id\" DROP DEFAULT;",
+        "ALTER TABLE \"raw_source_governance_disposition\" ALTER COLUMN \"id\" DROP DEFAULT;",
+        "ALTER TABLE \"runtime_process_lease\" ALTER COLUMN \"id\" DROP DEFAULT;",
+        "ALTER TABLE \"site_build_budget_grant\" ALTER COLUMN \"id\" DROP DEFAULT;",
+        "ALTER TABLE \"site_build_spend_reconciliation\" ALTER COLUMN \"id\" DROP DEFAULT;",
+        "ALTER TABLE \"suppression_decision\" ALTER COLUMN \"id\" DROP DEFAULT;",
+        "ALTER TABLE \"tool_budget_account\" ALTER COLUMN \"id\" DROP DEFAULT;"
+      ]
+    },
+    {
+      "id": "historical_tool_budget_receipt_shape",
+      "reason": "The SQL-owned receipt columns and UUID default are present in the pre-existing database lineage but absent from the exact pinned Prisma ToolBudgetOperation model.",
+      "statements": [
+        "ALTER TABLE \"tool_budget_operation\" DROP COLUMN \"receipt_cost_basis\",\nDROP COLUMN \"receipt_usage\",\nALTER COLUMN \"id\" DROP DEFAULT;"
+      ]
+    },
+    {
+      "id": "legacy_execution_domain_ack_table",
+      "reason": "The pre-existing execution_domain_ack table remains SQL-owned and is intentionally absent from the exact pinned Prisma datamodel.",
+      "statements": ["DROP TABLE \"execution_domain_ack\";"]
+    },
+    {
+      "id": "historical_index_name",
+      "reason": "The earlier SQL migration and Prisma datamodel use different names for the same SourceEntity last-seen-fetch index.",
+      "statements": [
+        "ALTER INDEX \"source_entity_last_seen_fetch_idx\" RENAME TO \"source_entity_last_seen_fetch_id_idx\";"
+      ]
+    }
+  ],
+  "forbiddenStatementPatterns": [
+    "ALTER TABLE\\s+\"identity_link\"[\\s\\S]*?ALTER COLUMN\\s+\"(?:status|resolver_version|input_hash|conflict_id)\"",
+    "identity_link_status",
+    "identity_link_input_hash_check",
+    "identity_link_pending_conflict_owner_check",
+    "identity_link_workspace_canonical_raw_key",
+    "organization_identifier",
+    "organization_identity_conflict",
+    "organization_identity_conflict_party",
+    "organization_identity_decision",
+    "organization_canonical_mapping",
+    "organization_identity_replay",
+    "identity_link_10_typed_target_guard",
+    "identity_link_20_contract_guard",
+    "organization_identifier_contract_guard",
+    "organization_identity_conflict_contract_guard",
+    "organization_identity_conflict_party_contract_guard",
+    "organization_identity_decision_contract_guard",
+    "organization_canonical_mapping_contract_guard",
+    "organization_identity_replay_contract_guard",
+    "enforce_identity_link_contract_v2",
+    "enforce_identity_link_target_v2",
+    "enforce_organization_canonical_mapping_contract_v2",
+    "enforce_organization_identifier_contract_v2",
+    "enforce_organization_identity_conflict_contract_v2",
+    "enforce_organization_identity_conflict_party_contract_v2",
+    "enforce_organization_identity_decision_contract_v2",
+    "enforce_organization_identity_replay_contract_v2"
+  ]
+}

@@ -94,6 +94,20 @@ describe("Organization Identity v2 contract DDL", () => {
     const fixture = readFileSync(residualFixturePath, "utf8");
     assert.notEqual(fixture, "");
     assert.equal(sha256(fixture), expectedResidualChecksum);
+    const whitespaceAttribute = spawnSync(
+      "git",
+      ["check-attr", "whitespace", "--", residualFixtureRelativePath],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    assert.equal(whitespaceAttribute.status, 0);
+    assert.equal(
+      whitespaceAttribute.stdout.trim(),
+      `${residualFixtureRelativePath}: whitespace: -blank-at-eof`,
+    );
     const manifest = JSON.parse(readFileSync(residualManifestPath, "utf8"));
     assert.equal(manifest.sha256, expectedResidualChecksum);
   });
