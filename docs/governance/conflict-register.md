@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 工程核验基线：`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
+> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；Program A 的 closing observation 是 `ed615d1bd9beda77e43091f8ce3eb6b6424c9633`，其 main 未完成合并仅为审计观察，不是已接纳 source
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -20,6 +20,37 @@
 | `CONTRACT_BLOCKED` | 产品方向可继续，但缺机器合同，不能进入 Dev-Ready/用户承诺 |
 | `INPUT_BLOCKED` | 缺仓库、Owner、设计源、数据或外部输入 |
 | `PARKED` | 已知但属于后置阶段或冻结产品面 |
+| `HOLD_OWNERSHIP` | 活跃或未解决的单 writer/schema/migration 责任碰撞；在记录 exact owner、head 与 disposition 前，不得继续任何实现或集成 |
+
+## 1.1 当前 Global Product Program ownership 与接口
+
+本节把 [Phase 0 计划](../superpowers/plans/2026-08-29-global-product-program-phase0.md) 和 [current status](../status/current.md) 的当前裁决写入唯一治理登记。它是对 `.superpowers/sdd/2026-08-29-global-product-program-phase0/ab-three-way-audit.md` 的简要治理结论，而非对其 85 条 assertion 的复制；完整工作证据仍仅保留在该 ignored audit，直至后续已接纳 successor 决定是否创建 tracked handoff。
+
+| Decision ID | 当前裁决 | 状态 | Decision Owner | 裁决位置 |
+|---|---|---|---|---|
+| `DEC-GPP-001` | 用户已批准 Program A/B/C ownership 与固定接口。 | `APPROVED` | `OWN-PRODUCT` | 本节及 `ADR-025` |
+
+| Conflict ID | 主题 | 当前状态 | 唯一 Owner | 审计事实与处置 |
+|---|---|---|---|---|
+| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 quarantined commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b`。不接纳、不 revert 任一 commit/migration/source；仅保留 provenance，等待 exact owner、head 和 disposition。 |
+
+| Blocker ID | 阻塞 | Accountable Owner | 最新关闭条件 | 安全默认 |
+|---|---|---|---|---|
+| `BLK-GPP-001` | Program A 活跃 overlapping writer / unresolved merge。closing observation=`MERGE_HEAD=23d111f7b400403deb7466abf34ab709685b8376`，81 tracked entries、7 unmerged paths。 | `OWN-PRODUCT` | frozen known head、clean/unmerged worktree、complete delta audit，且已指派 single current-main writer。 | `HOLD_OWNERSHIP`；不继续实现或集成。 |
+
+固定接口仅为：
+
+```text
+ExecutionAuthority
+→ ToolOperationSubject
+→ B-owned QueryReceipt
+→ B-owned RawSourceRecord UUID
+→ B-owned IdentityLink / CanonicalCompany UUID
+→ A-owned append governed child/relation primitive
+→ Domain ACK
+```
+
+当前 B gaps 仅作实现前记录：缺 per-operation header、dense `recordIndex→RawUUID`、Raw→Canonical 或 terminal outcome、B→A generic relation calls，以及 complete B outcome 后的 exact replay 和 ACK readiness；本登记不暗示这些缺口已实现、已验证或获授权施工。
 
 ## 2. Gate 2 已批准决议
 
