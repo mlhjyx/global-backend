@@ -74,7 +74,10 @@ DECLARE
   link_total integer;
   conflict_company_ids uuid[];
   expected_company_ids uuid[];
+  bound_company_ids uuid[];
+  legacy_root_company_id uuid;
   conflict_identifier_keys text[];
+  expected_identifier_keys text[];
   existing_link_hashes text[];
   existing_link_versions text[];
   existing_link_statuses text[];
@@ -229,6 +232,27 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
+  derived_input_hash := encode(
+    public.digest(
+      public.raw_source_canonical_json_v1(
+        jsonb_build_object(
+          'raw', command_raw,
+          'resolverVersion', 'organization-identity-resolver/v1',
+          'blocker', command_blocker,
+          'authorityIdentifiers', command_authority,
+          'bindings', command_bindings,
+          'rootMappings', command_roots
+        )
+      ),
+      'sha256'
+    ),
+    'hex'
+  );
+  IF derived_input_hash IS DISTINCT FROM plan_input_hash THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = '22023';
+  END IF;
+
   SELECT
     array_agg(DISTINCT l.input_hash ORDER BY l.input_hash),
     array_agg(DISTINCT l.resolver_version ORDER BY l.resolver_version),
@@ -303,27 +327,6 @@ BEGIN
     END IF;
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
       USING ERRCODE = 'P0001';
-  END IF;
-
-  derived_input_hash := encode(
-    public.digest(
-      public.raw_source_canonical_json_v1(
-        jsonb_build_object(
-          'raw', command_raw,
-          'resolverVersion', 'organization-identity-resolver/v1',
-          'blocker', command_blocker,
-          'authorityIdentifiers', command_authority,
-          'bindings', command_bindings,
-          'rootMappings', command_roots
-        )
-      ),
-      'sha256'
-    ),
-    'hex'
-  );
-  IF derived_input_hash IS DISTINCT FROM plan_input_hash THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
-      USING ERRCODE = '22023';
   END IF;
 
   payload_identifier := stored_raw.payload->'identifier';
@@ -416,11 +419,19 @@ BEGIN
     END IF;
     identifier_total := identifier_total + 1;
   END LOOP;
-  IF stored_raw.payload ? 'domain'
-    AND NOT EXISTS (
-      SELECT 1 FROM jsonb_array_elements(command_authority) AS item
-      WHERE item->>'scheme' = 'domain'
+  IF identifier_total IS DISTINCT FROM
+      (CASE WHEN stored_raw.payload ? 'domain' THEN 1 ELSE 0 END) +
+      (CASE WHEN jsonb_typeof(payload_identifier) = 'object'
+        AND command_provider_key IN ('registry', 'ted', 'openfda')
+        THEN 1 ELSE 0 END)
+    OR identifier_total IS DISTINCT FROM (
+      SELECT count(DISTINCT item->>'key')::integer
+      FROM jsonb_array_elements(command_authority) AS item
     )
+    OR command_authority IS DISTINCT FROM coalesce((
+      SELECT jsonb_agg(item.value ORDER BY item.value->>'key' COLLATE "C")
+      FROM jsonb_array_elements(command_authority) AS item(value)
+    ), '[]'::jsonb)
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
       USING ERRCODE = '22023';
@@ -452,6 +463,51 @@ BEGIN
     END IF;
   END LOOP;
 
+  IF jsonb_array_length(command_bindings) IS DISTINCT FROM (
+      SELECT count(*)::integer
+      FROM (
+        SELECT DISTINCT item->>'identifierKey', item->>'companyId'
+        FROM jsonb_array_elements(command_bindings) AS item
+      ) AS distinct_binding
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT
+          oi.scheme || ':' || oi.jurisdiction || ':' || oi.normalized_value
+            AS identifier_key,
+          oi.company_id::text AS company_id
+        FROM public.organization_identifier AS oi
+        JOIN jsonb_array_elements(command_authority) AS authority
+          ON authority->>'key' =
+            oi.scheme || ':' || oi.jurisdiction || ':' || oi.normalized_value
+        WHERE oi.workspace_id = command_workspace_id
+          AND oi.status = 'ACTIVE'
+        EXCEPT
+        SELECT item->>'identifierKey', item->>'companyId'
+        FROM jsonb_array_elements(command_bindings) AS item
+      ) AS missing_binding
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT item->>'identifierKey', item->>'companyId'
+        FROM jsonb_array_elements(command_bindings) AS item
+        EXCEPT
+        SELECT
+          oi.scheme || ':' || oi.jurisdiction || ':' || oi.normalized_value,
+          oi.company_id::text
+        FROM public.organization_identifier AS oi
+        JOIN jsonb_array_elements(command_authority) AS authority
+          ON authority->>'key' =
+            oi.scheme || ':' || oi.jurisdiction || ':' || oi.normalized_value
+        WHERE oi.workspace_id = command_workspace_id
+          AND oi.status = 'ACTIVE'
+      ) AS extra_binding
+    )
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+      USING ERRCODE = '40001';
+  END IF;
+
   FOR mapping IN SELECT value FROM jsonb_array_elements(command_roots)
   LOOP
     IF NOT EXISTS (
@@ -465,6 +521,52 @@ BEGIN
         USING ERRCODE = '40001';
     END IF;
   END LOOP;
+
+  IF jsonb_array_length(command_roots) IS DISTINCT FROM (
+      SELECT count(*)::integer
+      FROM (
+        SELECT DISTINCT item->>'sourceCompanyId', item->>'rootCompanyId'
+        FROM jsonb_array_elements(command_roots) AS item
+      ) AS distinct_mapping
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT m.source_company_id::text, m.canonical_company_id::text
+        FROM public.organization_canonical_mapping AS m
+        JOIN (
+          SELECT (item->>'companyId')::uuid AS company_id
+          FROM jsonb_array_elements(command_bindings) AS item
+          UNION
+          SELECT command_legacy_company_id
+          WHERE command_legacy_company_id IS NOT NULL
+        ) AS source ON source.company_id = m.source_company_id
+        WHERE m.workspace_id = command_workspace_id AND m.status = 'ACTIVE'
+        EXCEPT
+        SELECT item->>'sourceCompanyId', item->>'rootCompanyId'
+        FROM jsonb_array_elements(command_roots) AS item
+      ) AS missing_mapping
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT item->>'sourceCompanyId', item->>'rootCompanyId'
+        FROM jsonb_array_elements(command_roots) AS item
+        EXCEPT
+        SELECT m.source_company_id::text, m.canonical_company_id::text
+        FROM public.organization_canonical_mapping AS m
+        JOIN (
+          SELECT (item->>'companyId')::uuid AS company_id
+          FROM jsonb_array_elements(command_bindings) AS item
+          UNION
+          SELECT command_legacy_company_id
+          WHERE command_legacy_company_id IS NOT NULL
+        ) AS source ON source.company_id = m.source_company_id
+        WHERE m.workspace_id = command_workspace_id AND m.status = 'ACTIVE'
+      ) AS extra_mapping
+    )
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+      USING ERRCODE = '40001';
+  END IF;
 
   IF command_legacy_company_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM public.canonical_company AS c
@@ -487,6 +589,24 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
+  SELECT array_agg(
+    DISTINCT coalesce(m.canonical_company_id, (binding->>'companyId')::uuid)
+    ORDER BY coalesce(m.canonical_company_id, (binding->>'companyId')::uuid)
+  )
+  INTO bound_company_ids
+  FROM jsonb_array_elements(command_bindings) AS binding
+  LEFT JOIN public.organization_canonical_mapping AS m
+    ON m.workspace_id = command_workspace_id
+    AND m.status = 'ACTIVE'
+    AND m.source_company_id = (binding->>'companyId')::uuid;
+  SELECT coalesce(m.canonical_company_id, command_legacy_company_id)
+  INTO legacy_root_company_id
+  FROM (SELECT command_legacy_company_id AS company_id) AS legacy
+  LEFT JOIN public.organization_canonical_mapping AS m
+    ON m.workspace_id = command_workspace_id
+    AND m.status = 'ACTIVE'
+    AND m.source_company_id = legacy.company_id;
+
   IF plan_kind = 'conflict' THEN
     SELECT string_agg(key, ',' ORDER BY key COLLATE "C")
     INTO command_keys FROM jsonb_object_keys(command_plan) AS key;
@@ -508,7 +628,32 @@ BEGIN
     SELECT array_agg(value ORDER BY value COLLATE "C")
     INTO conflict_identifier_keys
     FROM jsonb_array_elements_text(command_plan->'identifierKeys') AS value;
-    IF array_length(conflict_company_ids, 1) < 2
+    SELECT array_agg(item->>'key' ORDER BY item->>'key' COLLATE "C")
+    INTO expected_identifier_keys
+    FROM jsonb_array_elements(command_authority) AS item;
+    IF plan_conflict_type = 'identifier_split' THEN
+      IF coalesce(cardinality(bound_company_ids), 0) < 2 THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+          USING ERRCODE = '40001';
+      END IF;
+      expected_company_ids := bound_company_ids;
+    ELSE
+      IF cardinality(bound_company_ids) IS DISTINCT FROM 1
+        OR legacy_root_company_id IS NULL
+        OR legacy_root_company_id = bound_company_ids[1]
+      THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+          USING ERRCODE = '40001';
+      END IF;
+      SELECT array_agg(DISTINCT company ORDER BY company)
+      INTO expected_company_ids
+      FROM unnest(bound_company_ids || legacy_root_company_id) AS company;
+    END IF;
+    IF conflict_company_ids IS DISTINCT FROM expected_company_ids
+      OR conflict_identifier_keys IS DISTINCT FROM expected_identifier_keys
+      OR command_plan->'companyIds' IS DISTINCT FROM to_jsonb(conflict_company_ids)
+      OR command_plan->'identifierKeys' IS DISTINCT FROM to_jsonb(conflict_identifier_keys)
+      OR array_length(conflict_company_ids, 1) < 2
       OR EXISTS (
         SELECT 1
         FROM unnest(conflict_company_ids) AS candidate(candidate_id)
@@ -631,6 +776,20 @@ BEGIN
       (command_plan->>'companyId')::uuid IS DISTINCT FROM command_target_company_id)
     OR (identifier_total > 0 AND plan_match_rule IS DISTINCT FROM 'identity_v2')
     OR (identifier_total = 0 AND plan_match_rule IS DISTINCT FROM command_blocker_rule)
+    OR (plan_kind = 'bind_existing' AND (
+      cardinality(bound_company_ids) IS DISTINCT FROM 1
+      OR command_target_company_id IS DISTINCT FROM bound_company_ids[1]
+      OR (legacy_root_company_id IS NOT NULL AND
+        legacy_root_company_id IS DISTINCT FROM command_target_company_id)
+    ))
+    OR (plan_kind = 'lazy_upgrade' AND (
+      coalesce(cardinality(bound_company_ids), 0) <> 0
+      OR legacy_root_company_id IS DISTINCT FROM command_target_company_id
+    ))
+    OR (plan_kind = 'create_new' AND (
+      coalesce(cardinality(bound_company_ids), 0) <> 0
+      OR legacy_root_company_id IS NOT NULL
+    ))
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
       USING ERRCODE = '22023';

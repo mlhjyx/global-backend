@@ -220,28 +220,32 @@ function parseReceipt(
   });
 }
 
-function postgresCode(error: unknown): string | null {
-  if (error === null || typeof error !== "object" || types.isProxy(error)) {
+function ownDataValue(value: unknown, key: string): unknown {
+  if (value === null || typeof value !== "object" || types.isProxy(value)) {
     return null;
   }
-  const descriptor = Object.getOwnPropertyDescriptor(error, "code");
-  return descriptor &&
-    "value" in descriptor &&
-    typeof descriptor.value === "string"
-    ? descriptor.value
-    : null;
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && "value" in descriptor ? descriptor.value : null;
+}
+
+function prismaMeta(error: unknown): unknown {
+  return ownDataValue(error, "meta");
+}
+
+function postgresCode(error: unknown): string | null {
+  const direct = ownDataValue(error, "code");
+  const nested = ownDataValue(prismaMeta(error), "code");
+  if (typeof nested === "string" && nested.length > 0 && nested !== "N/A") {
+    return nested;
+  }
+  return typeof direct === "string" ? direct : null;
 }
 
 function postgresMessage(error: unknown): string | null {
-  if (error === null || typeof error !== "object" || types.isProxy(error)) {
-    return null;
-  }
-  const descriptor = Object.getOwnPropertyDescriptor(error, "message");
-  return descriptor &&
-    "value" in descriptor &&
-    typeof descriptor.value === "string"
-    ? descriptor.value
-    : null;
+  const nested = ownDataValue(prismaMeta(error), "message");
+  if (typeof nested === "string") return nested;
+  const direct = ownDataValue(error, "message");
+  return typeof direct === "string" ? direct : null;
 }
 
 function mapDatabaseError(error: unknown): never {
