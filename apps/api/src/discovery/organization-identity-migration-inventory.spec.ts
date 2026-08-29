@@ -473,4 +473,115 @@ describe("Organization Identity/Provider migration provenance Gate 0", () => {
       ],
     });
   });
+
+  it.each([
+    ["migration inventory", Array(1), [], expectedRaw, []],
+    ["catalog inventory", exactRawInventory(), Array(1), expectedRaw, []],
+    ["expected Raw lineage", exactRawInventory(), [], Array(1), []],
+    [
+      "expected Identity successor",
+      exactRawInventory(),
+      [],
+      expectedRaw,
+      Array(1),
+    ],
+  ] as const)(
+    "rejects a sparse %s without throwing or reaching a GO decision",
+    (_label, migrations, objects, raw, identity) => {
+      let result: ReturnType<
+        typeof assessOrganizationIdentityMigrationInventory
+      >;
+      expect(() => {
+        result = assessOrganizationIdentityMigrationInventory(
+          migrations as never,
+          objects as never,
+          raw as never,
+          identity as never,
+        );
+      }).not.toThrow();
+      expect(result!).toEqual({
+        schemaVersion: "organization-identity-migration-decision/v1",
+        subject: "UNKNOWN",
+        decision: "HOLD",
+        state: "INVALID_INVENTORY_INPUT",
+        observations: [
+          {
+            kind: "MIGRATION",
+            name: "inventory-input",
+            reasonCode: "INVALID_INVENTORY_INPUT",
+          },
+        ],
+      });
+    },
+  );
+
+  it.each([
+    ["an own map method", Object.assign([], { map: () => [] })],
+    ["an own some method", Object.assign([], { some: () => false })],
+    ["an extra string key", Object.assign([], { extra: "ignored" })],
+    ["a symbol key", Object.assign([], { [Symbol("extra")]: "ignored" })],
+    ["an array subclass", new (class extends Array<unknown> {})()],
+    [
+      "a throwing proxy",
+      new Proxy([], {
+        getOwnPropertyDescriptor() {
+          throw new Error("untrusted reflection");
+        },
+      }),
+    ],
+  ] as const)(
+    "rejects catalog inventory with %s using the fixed redacted HOLD",
+    (_label, objects) => {
+      let result: ReturnType<
+        typeof assessOrganizationIdentityMigrationInventory
+      >;
+      expect(() => {
+        result = assessOrganizationIdentityMigrationInventory(
+          exactRawInventory(),
+          objects as never,
+          expectedRaw,
+          [],
+        );
+      }).not.toThrow();
+      expect(result!).toEqual({
+        schemaVersion: "organization-identity-migration-decision/v1",
+        subject: "UNKNOWN",
+        decision: "HOLD",
+        state: "INVALID_INVENTORY_INPUT",
+        observations: [
+          {
+            kind: "MIGRATION",
+            name: "inventory-input",
+            reasonCode: "INVALID_INVENTORY_INPUT",
+          },
+        ],
+      });
+    },
+  );
+
+  it("rejects a revoked expected Raw proxy without throwing", () => {
+    const { proxy, revoke } = Proxy.revocable([], {});
+    revoke();
+    let result: ReturnType<typeof assessOrganizationIdentityMigrationInventory>;
+    expect(() => {
+      result = assessOrganizationIdentityMigrationInventory(
+        exactRawInventory(),
+        [],
+        proxy as never,
+        [],
+      );
+    }).not.toThrow();
+    expect(result!).toMatchObject({
+      subject: "UNKNOWN",
+      decision: "HOLD",
+      state: "INVALID_INVENTORY_INPUT",
+      observations: [
+        {
+          kind: "MIGRATION",
+          name: "inventory-input",
+          reasonCode: "INVALID_INVENTORY_INPUT",
+        },
+      ],
+    });
+  });
 });
