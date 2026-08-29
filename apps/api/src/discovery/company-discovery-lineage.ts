@@ -65,18 +65,32 @@ const OBSERVATION_KEYS = Object.freeze([
   'receipt',
   'recordIndexes',
 ] as const);
-const PROVIDER_PRODUCER = Object.freeze({
-  trade_fair: 'tradefair.algolia',
-  public_web: 'discovery.extract_company',
-  directory: 'discovery.extract_list',
-} satisfies Record<DiscoveryCompanyLineageProviderKey, string>);
+const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
+  trade_fair: Object.freeze({
+    producerId: 'tradefair.algolia',
+    resultSchema: 'tradefair-algolia/v1',
+  }),
+  public_web: Object.freeze({
+    producerId: 'discovery.extract_company',
+    resultSchema: 'discovery-extract-company/v1',
+  }),
+  directory: Object.freeze({
+    producerId: 'discovery.extract_list',
+    resultSchema: 'discovery-extract-list/v1',
+  }),
+} satisfies Record<
+  DiscoveryCompanyLineageProviderKey,
+  Readonly<{ producerId: string; resultSchema: string }>
+>);
 
 type DataRecord = Record<string, unknown>;
 
 type CollectorState = Readonly<
   | { phase: 'idle' }
   | { phase: 'invoked' }
+  | { phase: 'forwarding_failed' }
   | { phase: 'settled'; receipt: DurableExecutionReceipt }
+  | { phase: 'terminal' }
   | { phase: 'invalid' }
 >;
 
@@ -167,8 +181,26 @@ function expectedProducer(
   provider: DiscoveryCompanyLineageProviderKey,
   value: unknown,
 ): string {
-  if (value !== PROVIDER_PRODUCER[provider]) invalid();
-  return value;
+  const expected = PROVIDER_RECEIPT_CONTRACT[provider].producerId;
+  if (value !== expected) invalid();
+  return expected;
+}
+
+function parseSupportedReceipt(
+  provider: DiscoveryCompanyLineageProviderKey,
+  producerId: string,
+  value: unknown,
+): DurableExecutionReceipt {
+  expectedProducer(provider, producerId);
+  const receipt = parseDurableExecutionReceipt(value);
+  const contract = PROVIDER_RECEIPT_CONTRACT[provider];
+  if (
+    receipt.resultStrategy !== 'typed_projection' ||
+    receipt.resultSchema !== contract.resultSchema
+  ) {
+    invalid();
+  }
+  return receipt;
 }
 
 function nonNegativeInteger(value: unknown): number {
@@ -191,9 +223,14 @@ function parseAttempt(
   provider: DiscoveryCompanyLineageProviderKey,
 ): DiscoveryCompanyReceiptAttemptV1 {
   const record = ownDataRecord(value, ATTEMPT_KEYS);
+  const producerId = expectedProducer(provider, field(record, 'producerId'));
   return Object.freeze({
-    producerId: expectedProducer(provider, field(record, 'producerId')),
-    receipt: parseDurableExecutionReceipt(field(record, 'receipt')),
+    producerId,
+    receipt: parseSupportedReceipt(
+      provider,
+      producerId,
+      field(record, 'receipt'),
+    ),
   });
 }
 
@@ -202,9 +239,14 @@ function parseCoverage(
   provider: DiscoveryCompanyLineageProviderKey,
 ): DiscoveryCompanyReceiptCoverageV1 {
   const record = ownDataRecord(value, COVERAGE_KEYS);
+  const producerId = expectedProducer(provider, field(record, 'producerId'));
   return Object.freeze({
-    producerId: expectedProducer(provider, field(record, 'producerId')),
-    receipt: parseDurableExecutionReceipt(field(record, 'receipt')),
+    producerId,
+    receipt: parseSupportedReceipt(
+      provider,
+      producerId,
+      field(record, 'receipt'),
+    ),
     recordIndexes: parseRecordIndexes(field(record, 'recordIndexes'), false),
   });
 }
@@ -219,11 +261,14 @@ function parseObservation(
   const rawReceipt = field(record, 'receipt');
   const recordIndexes = parseRecordIndexes(field(record, 'recordIndexes'), true);
   if (!invoked && (rawReceipt !== null || recordIndexes.length > 0)) invalid();
+  const producerId = expectedProducer(provider, field(record, 'producerId'));
   return Object.freeze({
-    producerId: expectedProducer(provider, field(record, 'producerId')),
+    producerId,
     invoked,
     receipt:
-      rawReceipt === null ? null : parseDurableExecutionReceipt(rawReceipt),
+      rawReceipt === null
+        ? null
+        : parseSupportedReceipt(provider, producerId, rawReceipt),
     recordIndexes,
   });
 }
@@ -301,26 +346,36 @@ export function createDiscoveryCompanyReceiptCollector(input: Readonly<{
       state = Object.freeze({ phase: 'invoked' });
     },
     onDurableReceipt: (actualProducerId, value) => {
+      if (state.phase === 'terminal' || state.phase === 'forwarding_failed') {
+        invalid();
+      }
       if (state.phase !== 'invoked' || actualProducerId !== producerId) fail();
       let receipt: DurableExecutionReceipt;
       try {
-        receipt = parseDurableExecutionReceipt(value);
+        receipt = parseSupportedReceipt(provider, producerId, value);
       } catch {
         return fail();
       }
-      parent?.(actualProducerId, value);
+      state = Object.freeze({ phase: 'forwarding_failed' });
+      try {
+        parent?.(actualProducerId, value);
+      } catch {
+        return;
+      }
       state = Object.freeze({ phase: 'settled', receipt });
     },
     finish: (value) => {
-      if (state.phase === 'invalid') invalid();
+      if (state.phase === 'invalid' || state.phase === 'terminal') invalid();
       const recordIndexes = parseRecordIndexes(value, true);
       if (state.phase === 'idle' && recordIndexes.length > 0) invalid();
-      return Object.freeze({
+      const observation = Object.freeze({
         producerId,
         invoked: state.phase !== 'idle',
         receipt: state.phase === 'settled' ? state.receipt : null,
         recordIndexes,
       });
+      state = Object.freeze({ phase: 'terminal' });
+      return observation;
     },
   });
 }
