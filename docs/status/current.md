@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[发布路线](../roadmap/release-plan.md)、[ADR registry](../adr/registry.md)、本页所列 exact Git/worktree 与 development-runtime 只读观察
-> 最后核验：2026-08-29T19:07:39+08:00（Asia/Shanghai）
+> 最后核验：2026-08-29T20:33:05+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -30,7 +30,7 @@ Phase 0 文档分支的固定施工基线是 `23d111f7b400403deb7466abf34ab70968
 
 | Program | RAG | Current owner boundary | Phase 0 condition |
 | --- | --- | --- | --- |
-| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `HOLD_OWNERSHIP`: the audited post-`ed615d1b` packet has 41 commits. Its first 35 are accepted PR #423/main ancestry (`KEEP_AS_MAIN_INTEGRATION_PROVENANCE`); `b57af498` is two-parent main-integration provenance; `fb65f25a`, `7db10915`, `58e151ba`, `f68b67ed`, `91cae351` are B-owned Activity/provider/receipt deltas located on the A branch, not accepted A work. Original Task 5.2 migration/writer commits `655d1b89`, `fc6d78b5`, `166b7507`, `ed615d1b` remain `QUARANTINED / HOLD_OWNERSHIP`: retained provenance only, not accepted, reverted, or adopted. `DiscoveryGovernedMaterializationWriter` production callers=`NONE`, but its tracked Prisma migration is deploy-runner-reachable, so the branch remains unsafe to deploy. |
+| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `HOLD_OWNERSHIP`: writer inactivity, the clean/no-`MERGE_HEAD` exact packet, the post-`ed615d1b` delta classification, and the binding-ledger/provenance correction are complete at `91cae351795cceced59893bcf552c2b502a4ebaa`. Its first 35 post-`ed615d1b` commits are accepted PR #423/main ancestry (`KEEP_AS_MAIN_INTEGRATION_PROVENANCE`); `b57af498` is two-parent main-integration provenance; `fb65f25a`, `7db10915`, `58e151ba`, `f68b67ed`, `91cae351` are B-owned Activity/provider/receipt deltas located on the A branch, not accepted A work. Original Task 5.2 migration/writer commits `655d1b89`, `fc6d78b5`, `166b7507`, `ed615d1b` remain `QUARANTINED / HOLD_OWNERSHIP`: retained provenance only, not accepted, reverted, or adopted. `DiscoveryGovernedMaterializationWriter` production callers=`NONE`, but its tracked Prisma migration is deploy-runner-reachable, so the mega-branch remains unsafe to deploy. |
 | B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | Exact PR-worktree source captured; its upstream is gone. ADR-025/`DEC-GPP-001` 已明确 producer/consumer/transaction split；下一个 ownership 需求是一张从 current main 开始、具有唯一 writer 的 Program B successor/card/handoff，而不是将 A 分支上的 B-owned delta 当作已接纳实现。 |
 | C — SaaS handoff/commercial loop | RED | Owns server-side handoff consumer, receipt, QualificationSnapshot, Opportunity, QGO/SAO/CLOSED, SalesAcceptance, CommercialOutcome and Conversation linkage; it must commit before ACK and must not copy Buyer Intelligence SoR | No selected C1 implementation card or verified consumer/runtime path. Owner/assignee remains `UNKNOWN`/`UNASSIGNED`, not inferred from a branch. |
 
@@ -40,7 +40,7 @@ Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → 
 
 | Gate | Current verdict | Evidence and blocker |
 | --- | --- | --- |
-| G0 — Truth & Ownership | `HOLD_OWNERSHIP` | `DEC-GPP-001`/ADR-025 remain fixed and the exact delta packet is classified, but writer inactivity is unproven; the Program A plan identity and Task 5.2 GREEN/complete language are stale; the quarantined deployable migration/writer remains branch-reachable; and no single current-main successor/handoff is assigned. |
+| G0 — Truth & Ownership | `HOLD_OWNERSHIP` | `DEC-GPP-001`/ADR-025 remain fixed; writer inactivity, the clean/no-`MERGE_HEAD` `91cae351` packet, delta classification and binding ledger/provenance correction are complete. G0 is held only because (1) the quarantined deploy-runner-reachable migration/writer remains on the mega-branch and (2) no unique current-main Program B successor/card/handoff is assigned. Program B implementation/TDD is G2 and DB/RLS/replay or G3 integration is not a G0 closure condition. |
 | G1 — Product/UX/Contract | `AMBER / SPEC_ALIGNED / MACHINE_CONTRACT_AND_IMPLEMENTATION_PENDING` | Task 4/product docs are complete. Remaining gaps include the Program C machine contract/source, formal capability manifest and release adoption, and user validation. |
 | G2 — Source/TDD/Security | `AMBER / SOURCE_REVIEWED_NOT_ACCEPTED` | ADR-025/`DEC-GPP-001` ownership and interface are accepted, but the Program A quarantined source and B-owned deltas are not accepted as Program A implementation; Program C C1 TDD/security has not started; GrowthOS remote CI/release remains unverified. |
 | G3 — Integration/Data | `RED / NOT_INTEGRATED` | No accepted A/B seam implementation, Program C consumer, durable handoff transaction, current-data integration or end-to-end integration evidence exists. |
@@ -55,8 +55,8 @@ Captured at the timestamp above by `systemctl show` and `ss -ltnp`; no service w
 
 | Surface | Observation | Meaning and limitation |
 | --- | --- | --- |
-| `global-api.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=3221`, `ExecMainStatus=0` | Degraded development-runtime observation, not a healthy API proof. |
-| `global-worker.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=3221`, `ExecMainStatus=0` | Degraded development-runtime observation, not a consuming Worker proof. |
+| `global-api.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=4195`, `ExecMainStatus=0` | Degraded development-runtime observation, not a healthy API proof. |
+| `global-worker.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=4195`, `ExecMainStatus=0` | Degraded development-runtime observation, not a consuming Worker proof. |
 | `temporal-dev.service` | `ActiveState=active`, `SubState=running`, `NRestarts=0`, `ExecMainStatus=0` | Only the service-manager state is observed; this does not prove workflow execution. |
 | `3000` | No listener observed | API reachability is not established. |
 | `3001` | Docker proxy listens on `0.0.0.0:3001` and `[::]:3001` | Observed non-loopback exposure conflicts with the development-port policy; diagnose read-only before any mutation. |
