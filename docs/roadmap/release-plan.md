@@ -22,7 +22,7 @@ The fixed G0–G7 meanings and current verdicts are exactly those in [current st
 
 | Gate | Current verdict |
 | --- | --- |
-| G0 — Truth & Ownership | `HOLD_OWNERSHIP` |
+| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` |
 | G1 — Product/UX/Contract | `AMBER / SPEC_ALIGNED / MACHINE_CONTRACT_AND_IMPLEMENTATION_PENDING` |
 | G2 — Source/TDD/Security | `AMBER / SOURCE_REVIEWED_NOT_ACCEPTED` |
 | G3 — Integration/Data | `RED / NOT_INTEGRATED` |
@@ -33,7 +33,7 @@ The fixed G0–G7 meanings and current verdicts are exactly those in [current st
 
 ### Active sequence and boundaries
 
-1. **Phase 0:** current truth, A/B interface, provenance and documentation. Writer inactivity、delta classification 与 ledger provenance 已关闭；G0 只等待 ADR-025/`DEC-GPP-001` 进入 current main、mega-branch 获得 `NON_DEPLOYABLE / PROVENANCE_ONLY` 的非破坏性 disposition、从该 main 指派唯一 Program B successor/card/handoff，以及随后的独立 readback。
+1. **Phase 0:** current truth、A/B interface、provenance 与 documentation 已完成；G0=`PASS / OWNERSHIP_CLOSED`，绑定 PR #424 与 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171`。这不升级 G1–G7；Program B source/TDD 从 G2 继续，DB/RLS/replay/integration 从 G3 继续。
 2. **MVP-0:** Program A current-main slices; formal GrowthOS source/Builder/remote/CI; Backend runtime recovery; and authentic capability availability/onboarding.
 3. **MVP-1, Program C:** C1 service principal plus durable handoff/commit-before-ACK; C2 Opportunity aggregate; C3 human QGO; C4 SalesAcceptance/Outcome feedback; C5 Conversation linkage.
 4. **Pilot 3-A:** one internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.
