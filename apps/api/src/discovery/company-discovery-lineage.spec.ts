@@ -37,6 +37,17 @@ function receipt(
   });
 }
 
+function artifactReceipt(
+  operationId: string,
+  resultSchema: string,
+): DurableExecutionReceipt {
+  return Object.freeze({
+    ...receipt(operationId, resultSchema),
+    resultStrategy: 'artifact_reference',
+    artifactId: 'e9335aa2-c9ab-4db4-92bd-bd7c734b89e8',
+  });
+}
+
 const OPERATION_A = 'f9c22f2a-3578-4ed2-ac8b-0819e9147c40';
 const OPERATION_B = '2e09726e-16de-42c5-875c-92d02cf58df0';
 
@@ -390,6 +401,104 @@ describe('company discovery receipt lineage', () => {
       producerId: 'discovery.extract_company',
     });
     expect(() => idle.finish([0])).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+  });
+
+  it('terminalizes collectors after finish and never forwards a later callback', () => {
+    const parent = vi.fn();
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+      parentOnDurableReceipt: parent,
+    });
+    collector.markExpectedInvocation();
+    collector.onDurableReceipt('discovery.extract_company', receipt(OPERATION_A));
+    expect(collector.finish([0]).recordIndexes).toEqual([0]);
+    expect(() => collector.finish([0])).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => collector.onDurableReceipt(
+      'discovery.extract_company',
+      receipt(OPERATION_B),
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(parent).toHaveBeenCalledOnce();
+  });
+
+  it('forwards a parent callback at most once when it throws and omits the entire lineage', () => {
+    const parent = vi.fn(() => {
+      throw new Error('parent unavailable');
+    });
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'directory',
+      producerId: 'discovery.extract_list',
+      parentOnDurableReceipt: parent,
+    });
+    collector.markExpectedInvocation();
+    expect(() => collector.onDurableReceipt(
+      'discovery.extract_list',
+      receipt(OPERATION_A, 'discovery-extract-list/v1'),
+    )).not.toThrow();
+    expect(() => collector.onDurableReceipt(
+      'discovery.extract_list',
+      receipt(OPERATION_B, 'discovery-extract-list/v1'),
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(parent).toHaveBeenCalledOnce();
+    const observation = collector.finish([0]);
+    expect(observation).toMatchObject({ invoked: true, receipt: null, recordIndexes: [0] });
+    expect(buildDiscoveryCompanyResultLineage({
+      providerKey: 'directory',
+      recordCount: 1,
+      observations: [observation],
+    })).toBeUndefined();
+  });
+
+  it.each([
+    ['trade_fair', 'tradefair.algolia', 'tradefair-algolia/v1'],
+    ['public_web', 'discovery.extract_company', 'discovery-extract-company/v1'],
+    ['directory', 'discovery.extract_list', 'discovery-extract-list/v1'],
+  ] as const)(
+    'binds %s <- %s to its exact typed projection schema',
+    (providerKey, producerId, resultSchema) => {
+      const wrongSchema = createDiscoveryCompanyReceiptCollector({
+        providerKey,
+        producerId,
+      });
+      wrongSchema.markExpectedInvocation();
+      expect(() => wrongSchema.onDurableReceipt(
+        producerId,
+        receipt(OPERATION_A, 'wrong-company-result/v1'),
+      )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+      const wrongStrategy = createDiscoveryCompanyReceiptCollector({
+        providerKey,
+        producerId,
+      });
+      wrongStrategy.markExpectedInvocation();
+      expect(() => wrongStrategy.onDurableReceipt(
+        producerId,
+        artifactReceipt(OPERATION_B, resultSchema),
+      )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    },
+  );
+
+  it('rejects wrong schema or artifact-reference receipts in parsed attempts and coverage', () => {
+    expect(() => parseDiscoveryCompanyResultLineage({
+      schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      recordCount: 0,
+      attemptReceipts: [{
+        producerId: 'discovery.extract_company',
+        receipt: receipt(OPERATION_A, 'wrong-company-result/v1'),
+      }],
+      receiptCoverage: [],
+    }, 'public_web')).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    expect(() => parseDiscoveryCompanyResultLineage({
+      schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      recordCount: 1,
+      attemptReceipts: [],
+      receiptCoverage: [{
+        producerId: 'discovery.extract_company',
+        receipt: artifactReceipt(OPERATION_A, 'discovery-extract-company/v1'),
+        recordIndexes: [0],
+      }],
+    }, 'public_web')).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
   });
 
   it('rejects malformed observation semantics without exposing partial output', () => {

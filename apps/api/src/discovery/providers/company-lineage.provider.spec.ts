@@ -470,4 +470,83 @@ describe('provider-owned company receipt lineage', () => {
     }).discoverCompanies(query, context()))
       .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
   });
+
+  it('all three providers preserve records and cost while omitting lineage after parent forwarding fails', async () => {
+    const parent = vi.fn(() => {
+      throw new Error('parent unavailable');
+    });
+
+    const fairBroker = broker(async (toolId, _input, ctx) => {
+      ctx.onDurableReceipt?.(toolId, FAIR_RECEIPT);
+      return {
+        data: { exhibitors: [{
+          externalId: 'preserved-fair',
+          companyName: 'Preserved Fair GmbH',
+          website: 'https://preserved-fair.test',
+        }] },
+        costCents: 0,
+      };
+    });
+    const fair = await new TradeFairDiscoveryProvider({ broker: fairBroker })
+      .discoverCompanies(query, context(parent));
+    expect(fair.records).toHaveLength(1);
+    expect(fair.costCents).toBe(0);
+    expect(fair).not.toHaveProperty('lineage');
+
+    const publicBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://preserved-web.test/', title: 'Preserved' }] }, costCents: 0 }
+      : { data: { text: 'Preserved industrial company '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementationOnce(
+      async (_gateway, input, ctx) => {
+        ctx.onDurableReceipt?.(input.task, MODEL_A);
+        return {
+          data: { is_company_site: true, name: 'Preserved Web GmbH' },
+          provider: 'gateway',
+          model: 'model',
+          runtimeExecution: {},
+        };
+      },
+    );
+    const publicWeb = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: publicBroker,
+    }).discoverCompanies(query, context(parent));
+    expect(publicWeb.records).toHaveLength(1);
+    expect(publicWeb.costCents).toBe(0);
+    expect(publicWeb).not.toHaveProperty('lineage');
+
+    const directoryBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [{
+            url: 'https://preserved-directory.test/members',
+            title: 'Members directory',
+          }] },
+          costCents: 0,
+        }
+      : { data: { text: 'Preserved directory companies '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementationOnce(
+      async (_gateway, input, ctx) => {
+        ctx.onDurableReceipt?.(input.task, MODEL_B);
+        return {
+          data: {
+            is_directory: true,
+            companies: [{ name: 'Preserved Directory GmbH', website: 'https://preserved.test' }],
+            has_next_page: false,
+          },
+          provider: 'gateway',
+          model: 'model',
+          runtimeExecution: {},
+        };
+      },
+    );
+    const directory = await new DirectoryDiscoveryProvider({
+      gateway: {} as never,
+      broker: directoryBroker,
+    }).discoverCompanies(query, context(parent));
+    expect(directory.records).toHaveLength(1);
+    expect(directory.costCents).toBe(0);
+    expect(directory).not.toHaveProperty('lineage');
+
+    expect(parent).toHaveBeenCalledTimes(3);
+  });
 });
