@@ -2,32 +2,19 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
+import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs";
 
 const repositoryRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../..",
 );
-const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
-const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
-const exactBaseCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
+const preExpandCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
+const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
 const migrationName = "20260829090000_organization_identity_v2_expand_ddl";
-const backfillMigrationName =
-  "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
-const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
 const container = process.env.TASK6B_PG_CONTAINER;
 const port = process.env.TASK6B_PG_PORT;
 const databases = Object.freeze({
@@ -80,8 +67,9 @@ const enumNames = Object.freeze([
   "identity_link_status",
 ]);
 
-let baselineDirectory;
-let expandOnlyDirectory;
+let baselineStage;
+let expandStage;
+let migrationPath = "";
 let firstDeployOutput = "";
 let secondDeployOutput = "";
 let baselineDeployOutput = "";
@@ -249,6 +237,9 @@ function runPrisma(args, database) {
       encoding: "utf8",
       env: {
         ...process.env,
+        CHECKPOINT_DISABLE: "1",
+        PRISMA_GENERATE_SKIP_AUTOINSTALL: "true",
+        PRISMA_HIDE_UPDATE_MESSAGE: "true",
         ...(database ? { DATABASE_URL: ownerUrl(database) } : {}),
       },
       maxBuffer: 32 * 1024 * 1024,
@@ -277,88 +268,13 @@ function runPrismaDiff(database, candidateSchemaPath) {
   );
 }
 
-function migrateDeploy(database, candidateSchemaPath = schemaPath) {
+function migrateDeploy(database, candidateSchemaPath) {
   const result = runPrisma(
     ["migrate", "deploy", "--schema", candidateSchemaPath],
     database,
   );
   assert.equal(result.status, 0, result.output);
   return result.output;
-}
-
-function readExactBaseSchema() {
-  const result = spawnSync(
-    "git",
-    ["show", `${exactBaseCommit}:packages/db/prisma/schema.prisma`],
-    {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  );
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.equal(result.stderr, "");
-  assert.ok(result.stdout.startsWith("// Global backend — schema."));
-  return result.stdout;
-}
-
-function createBaselineMigrationTree() {
-  const root = mkdtempSync(join(tmpdir(), "task6b-identity-current-main-"));
-  const prismaRoot = join(root, "prisma");
-  const migrations = join(prismaRoot, "migrations");
-  mkdirSync(migrations, { recursive: true, mode: 0o700 });
-  cpSync(
-    resolve(migrationRoot, "migration_lock.toml"),
-    resolve(migrations, "migration_lock.toml"),
-  );
-  for (const entry of readdirSync(migrationRoot, { withFileTypes: true })) {
-    if (
-      !entry.isDirectory() ||
-      entry.name === migrationName ||
-      entry.name === backfillMigrationName ||
-      !/^\d{14}_[a-z0-9_]+$/u.test(entry.name)
-    ) {
-      continue;
-    }
-    cpSync(
-      resolve(migrationRoot, entry.name),
-      resolve(migrations, entry.name),
-      {
-        recursive: true,
-      },
-    );
-  }
-  const baselineSchemaPath = resolve(prismaRoot, "schema.prisma");
-  writeFileSync(baselineSchemaPath, readExactBaseSchema(), { mode: 0o600 });
-  return { root, schemaPath: baselineSchemaPath };
-}
-
-function createExpandOnlyMigrationTree() {
-  const root = mkdtempSync(join(tmpdir(), "task6b-identity-expand-only-"));
-  const prismaRoot = join(root, "prisma");
-  const migrations = join(prismaRoot, "migrations");
-  mkdirSync(migrations, { recursive: true, mode: 0o700 });
-  cpSync(
-    resolve(migrationRoot, "migration_lock.toml"),
-    resolve(migrations, "migration_lock.toml"),
-  );
-  for (const entry of readdirSync(migrationRoot, { withFileTypes: true })) {
-    if (
-      !entry.isDirectory() ||
-      entry.name === backfillMigrationName ||
-      !/^\d{14}_[a-z0-9_]+$/u.test(entry.name)
-    ) {
-      continue;
-    }
-    cpSync(
-      resolve(migrationRoot, entry.name),
-      resolve(migrations, entry.name),
-      { recursive: true },
-    );
-  }
-  const candidateSchemaPath = resolve(prismaRoot, "schema.prisma");
-  writeFileSync(candidateSchemaPath, readFileSync(schemaPath), { mode: 0o600 });
-  return { root, schemaPath: candidateSchemaPath };
 }
 
 function asApp(workspaceId, sql) {
@@ -684,34 +600,51 @@ before(() => {
       .join("\n"),
   );
 
-  const baseline = createBaselineMigrationTree();
-  baselineDirectory = baseline.root;
-  const expandOnly = createExpandOnlyMigrationTree();
-  expandOnlyDirectory = expandOnly.root;
-
-  migrateDeploy(databases.diffBaseline, baseline.schemaPath);
-  baselineDiffResult = runPrismaDiff(
-    databases.diffBaseline,
-    baseline.schemaPath,
+  baselineStage = materializePinnedPrismaStage({
+    repositoryRoot,
+    commit: preExpandCommit,
+    prefix: "task6b-identity-pre-expand-",
+  });
+  expandStage = materializePinnedPrismaStage({
+    repositoryRoot,
+    commit: expandCommit,
+    prefix: "task6b-identity-expand-",
+  });
+  migrationPath = resolve(
+    expandStage.migrationRoot,
+    migrationName,
+    "migration.sql",
   );
 
-  firstDeployOutput = migrateDeploy(databases.fresh, expandOnly.schemaPath);
-  secondDeployOutput = migrateDeploy(databases.fresh, expandOnly.schemaPath);
+  migrateDeploy(databases.diffBaseline, baselineStage.schemaPath);
+  baselineDiffResult = runPrismaDiff(
+    databases.diffBaseline,
+    baselineStage.schemaPath,
+  );
 
-  baselineDeployOutput = migrateDeploy(databases.upgrade, baseline.schemaPath);
+  firstDeployOutput = migrateDeploy(databases.fresh, expandStage.schemaPath);
+  secondDeployOutput = migrateDeploy(databases.fresh, expandStage.schemaPath);
+
+  baselineDeployOutput = migrateDeploy(
+    databases.upgrade,
+    baselineStage.schemaPath,
+  );
   seedCurrentMainClone(databases.upgrade);
   legacyIdentityBefore = legacyIdentityBytes(databases.upgrade);
   rawBefore = rawBytes(databases.upgrade);
   candidateDeployOutput = migrateDeploy(
     databases.upgrade,
-    expandOnly.schemaPath,
+    expandStage.schemaPath,
   );
   legacyIdentityAfter = legacyIdentityBytes(databases.upgrade);
   rawAfter = rawBytes(databases.upgrade);
-  candidateDiffResult = runPrismaDiff(databases.upgrade, schemaPath);
+  candidateDiffResult = runPrismaDiff(
+    databases.upgrade,
+    expandStage.schemaPath,
+  );
 
-  migrateDeploy(databases.rollback, baseline.schemaPath);
-  migrateDeploy(databases.lockTimeout, baseline.schemaPath);
+  migrateDeploy(databases.rollback, baselineStage.schemaPath);
+  migrateDeploy(databases.lockTimeout, baselineStage.schemaPath);
   if (existsSync(migrationPath)) {
     const injected = readFileSync(migrationPath, "utf8").replace(
       /COMMIT;\s*$/u,
@@ -728,21 +661,20 @@ before(() => {
   }
 
   validateResult = runPrisma(
-    ["validate", "--schema", schemaPath],
+    ["validate", "--schema", expandStage.schemaPath],
     databases.fresh,
   );
   generateResult = runPrisma(
-    ["generate", "--schema", schemaPath],
+    ["generate", "--schema", expandStage.schemaPath],
     databases.fresh,
   );
 });
 
 after(() => {
-  if (baselineDirectory) {
-    rmSync(baselineDirectory, { recursive: true, force: true });
-  }
-  if (expandOnlyDirectory) {
-    rmSync(expandOnlyDirectory, { recursive: true, force: true });
+  for (const stage of [baselineStage, expandStage]) {
+    if (stage?.root) {
+      rmSync(stage.root, { recursive: true, force: true });
+    }
   }
   if (container === "codex-task6b-identity-pg-20260829-a" && port === "55439") {
     dockerPsql(
