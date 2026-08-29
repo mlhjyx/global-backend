@@ -322,4 +322,155 @@ describe("Organization Identity/Provider migration provenance Gate 0", () => {
       ],
     });
   });
+
+  it.each([
+    [
+      "an oversized migration inventory",
+      Array.from({ length: 513 }, () => exactRawInventory()[0]!),
+      [] as const,
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "a catalog record with an extra field",
+      exactRawInventory(),
+      [{ kind: "TABLE", name: "organization_identifier", sql: "SELECT 1" }],
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "a catalog record with a non-catalog kind",
+      exactRawInventory(),
+      [{ kind: "SQL", name: "drop_table" }],
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "a SQL-shaped catalog name",
+      exactRawInventory(),
+      [{ kind: "TABLE", name: "DROP TABLE organization_identifier" }],
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "a URL-shaped migration name",
+      [
+        {
+          migration_name:
+            "postgresql://example-user:example-password@example.invalid/example-db",
+          checksum: HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS[0]!.checksum,
+          finished_at: completed,
+          rolled_back_at: null,
+        },
+      ],
+      [] as const,
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "a secret-shaped checksum",
+      [
+        {
+          migration_name:
+            HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS[0]!.migrationName,
+          checksum: "fake-secret-free-text-not-a-sha256",
+          finished_at: completed,
+          rolled_back_at: null,
+        },
+      ],
+      [] as const,
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "a non-canonical lifecycle timestamp",
+      [
+        {
+          ...exactRawInventory()[0]!,
+          finished_at: "2026-08-29 00:00:00",
+        },
+      ],
+      [] as const,
+      expectedRaw,
+      [] as const,
+    ],
+    [
+      "an invalid expected Raw checksum",
+      exactRawInventory(),
+      [] as const,
+      [
+        {
+          migrationName: expectedRaw[0]!.migrationName,
+          checksum: "A".repeat(64),
+        },
+      ],
+      [] as const,
+    ],
+    [
+      "an invalid expected Identity migration name",
+      exactRawInventory(),
+      [] as const,
+      expectedRaw,
+      [
+        {
+          migrationName: "not a migration name",
+          checksum: "a".repeat(64),
+        },
+      ],
+    ],
+  ] as const)(
+    "returns one redacted INVALID_INVENTORY_INPUT HOLD for %s",
+    (_label, migrations, objects, raw, identity) => {
+      const rejectedValues = JSON.stringify([
+        migrations,
+        objects,
+        raw,
+        identity,
+      ]);
+      const result = assessOrganizationIdentityMigrationInventory(
+        migrations as never,
+        objects as never,
+        raw as never,
+        identity as never,
+      );
+
+      expect(result).toEqual({
+        schemaVersion: "organization-identity-migration-decision/v1",
+        subject: "UNKNOWN",
+        decision: "HOLD",
+        state: "INVALID_INVENTORY_INPUT",
+        observations: [
+          {
+            kind: "MIGRATION",
+            name: "inventory-input",
+            reasonCode: "INVALID_INVENTORY_INPUT",
+          },
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain(rejectedValues);
+    },
+  );
+
+  it("holds an empty expected Raw lineage without weakening the existing Raw checker", () => {
+    expect(
+      assessOrganizationIdentityMigrationInventory(
+        exactRawInventory(),
+        [],
+        [],
+        [],
+      ),
+    ).toEqual({
+      schemaVersion: "organization-identity-migration-decision/v1",
+      subject: "SUPPLIED",
+      decision: "HOLD",
+      state: "RAW_SOURCE_LINEAGE_HOLD",
+      observations: [
+        {
+          kind: "MIGRATION",
+          name: "raw-source-current-successor",
+          reasonCode: "RAW_CURRENT_SUCCESSOR_REQUIRED",
+        },
+      ],
+    });
+  });
 });
