@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -95,19 +96,23 @@ const ROUTES: Record<string, TechnicalBudgetRoute> = {
   },
 };
 
+const FIXTURE_SHA256 =
+  '6e1e4df075004639dd81d2e82341306d1adea4c937d350893bc41aecee6152da';
+
 let privateKey: CryptoKey;
 let keyResolver: ReturnType<typeof createLocalJWKSet>;
 
-function document(): GoldenDocument {
-  return JSON.parse(
-    readFileSync(
-      resolve(
-        process.cwd(),
-        '../../packages/contracts/fixtures/site-builder/site-build-budget.v1.json',
-      ),
-      'utf8',
+function fixtureBytes(): Buffer {
+  return readFileSync(
+    resolve(
+      process.cwd(),
+      '../../packages/contracts/fixtures/site-builder/site-build-budget.v1.json',
     ),
-  ) as GoldenDocument;
+  );
+}
+
+function document(): GoldenDocument {
+  return JSON.parse(fixtureBytes().toString('utf8')) as GoldenDocument;
 }
 
 function exactKeys(value: unknown, expected: readonly string[]): void {
@@ -236,6 +241,12 @@ beforeAll(async () => {
 });
 
 describe('Site Builder cross-repository budget golden vectors', () => {
+  it('pins the raw fixture bytes for cross-repository replay', () => {
+    expect(createHash('sha256').update(fixtureBytes()).digest('hex')).toBe(
+      FIXTURE_SHA256,
+    );
+  });
+
   it('locks a closed, versioned fixture containing no compact JWS or credential material', () => {
     const fixture = document();
     exactKeys(fixture, ['frozenNow', 'schemaVersion', 'vectors']);
