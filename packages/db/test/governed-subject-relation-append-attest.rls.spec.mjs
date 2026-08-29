@@ -117,42 +117,88 @@ function assertExactFunctionCatalog(rows) {
     assert.equal(row.security, true);
     assert.equal(row.owner, "global");
     assert.deepEqual(row.config, ["search_path=pg_catalog, public"]);
-    assert.deepEqual(row.acl, [["global", "app_user", "EXECUTE", false]]);
+    assert.deepEqual(row.acl, [
+      ["global", "global", "EXECUTE", false],
+      ["global", "app_user", "EXECUTE", false],
+    ]);
   }
 }
 
-function assertNoUnsafeHelpers(schema) {
-  const violations = JSON.parse(psql(`SELECT jsonb_build_object(
-    'acl',(SELECT count(*) FROM pg_proc p CROSS JOIN LATERAL
-      aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) x
-      WHERE p.pronamespace='${schema}'::regnamespace AND p.proname LIKE '\\_%'
-        AND (x.grantee=0 OR x.grantee::regrole::text IN
-          (${MANAGED_ROLES.map((role) => `'${role}'`).join(",")}))),
-    'writes',(SELECT count(*) FROM pg_proc p
-      WHERE p.pronamespace='${schema}'::regnamespace AND p.proname LIKE '\\_%'
-        AND pg_get_functiondef(p.oid) ~* '\\m(insert|update|delete|merge|truncate|execute)\\M')
-  )::text;`));
-  assert.deepEqual(violations, { acl: 0, writes: 0 });
+function assertExactHelperPolicy(schema) {
+  const output = psql(`SELECT jsonb_build_object(
+    'name',p.proname,'owner',pg_get_userbyid(p.proowner),
+    'definition',pg_get_functiondef(p.oid),
+    'acl',COALESCE((SELECT jsonb_agg(jsonb_build_array(
+      x.grantor::regrole::text,CASE WHEN x.grantee=0 THEN 'PUBLIC'
+        ELSE x.grantee::regrole::text END,x.privilege_type,x.is_grantable)
+      ORDER BY x.grantee,x.privilege_type)
+      FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) x),'[]')
+    )::text FROM pg_proc p WHERE p.pronamespace='${schema}'::regnamespace
+      AND p.proname LIKE '\\_%' ORDER BY p.proname;`);
+  const helpers = output ? output.split("\n").map(JSON.parse) : [];
+  const byName = new Map(helpers.map((helper) => [helper.name, helper]));
+  const roots = JSON.parse(psql(`SELECT jsonb_object_agg(p.proname,pg_get_functiondef(p.oid))::text
+    FROM pg_proc p WHERE p.pronamespace='${schema}'::regnamespace
+      AND p.proname IN ('${APPEND}','${ATTEST}');`));
+  const collectReachable = (rootName, readOnly) => {
+    const pending = [roots[rootName]];
+    const visited = new Set();
+    while (pending.length > 0) {
+      const definition = pending.pop();
+      for (const match of definition.matchAll(/\b(_[a-z0-9_]+)\s*\(/gi)) {
+        const name = match[1];
+        if (visited.has(name)) continue;
+        visited.add(name);
+        const helper = byName.get(name);
+        assert.ok(helper, `${rootName} helper ${name} must be schema-local and inspectable`);
+        assert.equal(helper.owner, "global");
+        assert.deepEqual(helper.acl, [["global", "global", "EXECUTE", false]]);
+        if (readOnly) {
+          assert.doesNotMatch(helper.definition,
+            /\b(insert|update|delete|merge|truncate|execute|nextval|setval)\b/i);
+        }
+        pending.push(helper.definition);
+      }
+    }
+  };
+  collectReachable(APPEND, false);
+  collectReachable(ATTEST, true);
 }
 
-function probeInvalidFunctionCatalog(label, mutation) {
+function createExactMutationBaseline(label) {
   const schema = `task2_mutation_${label}`;
   const returns = `TABLE(operation_subject_id uuid,parent_subject_id uuid,
     child_subject_id uuid,relation_id uuid,replay boolean)`;
   psql(`DROP SCHEMA IF EXISTS ${schema} CASCADE;
     CREATE SCHEMA ${schema};
+    CREATE FUNCTION ${schema}._append_writer() RETURNS void LANGUAGE plpgsql
+      VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $writer$
+      BEGIN DELETE FROM public.governed_subject WHERE false; END $writer$;
+    CREATE FUNCTION ${schema}._attest_reader() RETURNS void LANGUAGE sql
+      STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $reader$
+      SELECT NULL::void $reader$;
     CREATE FUNCTION ${schema}.${APPEND}(${ARGUMENTS}) RETURNS ${returns}
       LANGUAGE plpgsql VOLATILE SECURITY DEFINER
-      SET search_path=pg_catalog,public AS $$ BEGIN ${mutation.body ?? "RETURN;"} END $$;
-    CREATE FUNCTION ${schema}.${ATTEST}(${mutation.arguments ?? ARGUMENTS}) RETURNS ${returns}
-      LANGUAGE plpgsql ${mutation.volatility ?? "VOLATILE"} ${mutation.security ?? "SECURITY DEFINER"}
-      SET search_path=${mutation.searchPath ?? "pg_catalog,public"}
-      AS $$ BEGIN RETURN; END $$;
-    ${mutation.after ?? ""}`);
+      SET search_path=pg_catalog,public AS $append$ BEGIN
+        PERFORM ${schema}._append_writer(); RETURN; END $append$;
+    CREATE FUNCTION ${schema}.${ATTEST}(${ARGUMENTS}) RETURNS ${returns}
+      LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+      AS $attest$ BEGIN PERFORM ${schema}._attest_reader(); RETURN; END $attest$;
+    REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ${schema} FROM PUBLIC,
+      ${MANAGED_ROLES.join(",")};
+    GRANT EXECUTE ON FUNCTION ${schema}.${APPEND}(${IDENTITY_TYPES}),
+      ${schema}.${ATTEST}(${IDENTITY_TYPES}) TO app_user;`);
+  assertExactFunctionCatalog(functionCatalog(schema));
+  assertExactHelperPolicy(schema);
+  return schema;
+}
+
+function probeInvalidFunctionCatalog(label, mutationSql, helperMutation = false) {
+  const schema = createExactMutationBaseline(label);
   try {
-    const rows = functionCatalog(schema);
-    assert.throws(() => assertExactFunctionCatalog(rows));
-    if (mutation.unsafeHelper) assert.throws(() => assertNoUnsafeHelpers(schema));
+    psql(mutationSql(schema));
+    if (helperMutation) assert.throws(() => assertExactHelperPolicy(schema));
+    else assert.throws(() => assertExactFunctionCatalog(functionCatalog(schema)));
   } finally {
     psql(`DROP SCHEMA ${schema} CASCADE;`);
   }
@@ -340,6 +386,23 @@ function canonicalSnapshot() {
   `);
 }
 
+function lifecycleSnapshot(authorityId, accountId, operationId, ackId) {
+  return psql(`SELECT jsonb_build_object(
+    'authority',(SELECT to_jsonb(a) FROM execution_budget_authority a WHERE id='${authorityId}'),
+    'account',(SELECT to_jsonb(a) FROM tool_budget_account a WHERE id='${accountId}'),
+    'operation',(SELECT to_jsonb(o) FROM tool_budget_operation o WHERE id='${operationId}'),
+    'ack',(SELECT to_jsonb(a) FROM execution_domain_ack a WHERE ack_id='${ackId}')
+  )::text;`);
+}
+
+function governedGraphSnapshot() {
+  return psql(`SELECT jsonb_build_object(
+    'subjects',(SELECT COALESCE(jsonb_agg(to_jsonb(s) ORDER BY id),'[]') FROM governed_subject s),
+    'operationSubjects',(SELECT COALESCE(jsonb_agg(to_jsonb(s) ORDER BY subject_id),'[]') FROM tool_operation_subject s),
+    'relations',(SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY id),'[]') FROM governed_subject_relation r)
+  )::text;`);
+}
+
 function captureFailure(functionName, facts, overrides, expectedCode, callerWorkspace = facts.workspaceId) {
   const before = canonicalSnapshot();
   const captured = psql(asApp(`
@@ -413,28 +476,38 @@ describe("governed relation append/attest database contract", () => {
         AND (x.grantee=0 OR x.grantee::regrole::text IN
           (${MANAGED_ROLES.map((role) => `'${role}'`).join(",")}));`);
     assert.equal(helperLeak, "0");
-    assertNoUnsafeHelpers("public");
+    assertExactHelperPolicy("public");
   });
 
   it("shares the exact catalog validator with all catalog mutation probes", () => {
-    probeInvalidFunctionCatalog("stable", { volatility: "STABLE" });
-    probeInvalidFunctionCatalog("invoker", { security: "SECURITY INVOKER" });
-    probeInvalidFunctionCatalog("search", { searchPath: "pg_catalog,public,pg_temp" });
-    probeInvalidFunctionCatalog("reorder", {
-      arguments: ARGUMENTS.replace("p_workspace_id uuid, p_authority_id uuid", "p_authority_id uuid, p_workspace_id uuid"),
-    });
-    probeInvalidFunctionCatalog("public_acl", {
-      after: `GRANT EXECUTE ON FUNCTION task2_mutation_public_acl.${ATTEST}(${IDENTITY_TYPES}) TO PUBLIC;`,
-    });
-    probeInvalidFunctionCatalog("owner", {
-      after: `ALTER FUNCTION task2_mutation_owner.${ATTEST}(${IDENTITY_TYPES}) OWNER TO app_user;`,
-    });
-    probeInvalidFunctionCatalog("helper", {
-      unsafeHelper: true,
-      after: `CREATE FUNCTION task2_mutation_helper._governed_subject_relation_bad()
-        RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $helper$
-        BEGIN EXECUTE 'UPDATE governed_subject SET subject_id=subject_id'; END $helper$;`,
-    });
+    const signature = (schema) => `${schema}.${ATTEST}(${IDENTITY_TYPES})`;
+    probeInvalidFunctionCatalog("stable", (schema) =>
+      `ALTER FUNCTION ${signature(schema)} STABLE;`);
+    probeInvalidFunctionCatalog("invoker", (schema) =>
+      `ALTER FUNCTION ${signature(schema)} SECURITY INVOKER;`);
+    probeInvalidFunctionCatalog("search", (schema) =>
+      `ALTER FUNCTION ${signature(schema)} SET search_path=pg_catalog,public,pg_temp;`);
+    probeInvalidFunctionCatalog("public_acl", (schema) =>
+      `GRANT EXECUTE ON FUNCTION ${signature(schema)} TO PUBLIC;`);
+    probeInvalidFunctionCatalog("owner", (schema) =>
+      `ALTER FUNCTION ${signature(schema)} OWNER TO app_user;`);
+    probeInvalidFunctionCatalog("reorder", (schema) => `
+      DROP FUNCTION ${signature(schema)};
+      CREATE FUNCTION ${schema}.${ATTEST}(
+        ${ARGUMENTS.replace("p_workspace_id uuid, p_authority_id uuid", "p_authority_id uuid, p_workspace_id uuid")}
+      ) RETURNS TABLE(operation_subject_id uuid,parent_subject_id uuid,
+        child_subject_id uuid,relation_id uuid,replay boolean)
+      LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+      AS $attest$ BEGIN PERFORM ${schema}._attest_reader(); RETURN; END $attest$;
+      REVOKE ALL ON FUNCTION ${schema}.${ATTEST}(${IDENTITY_TYPES}) FROM PUBLIC,
+        ${MANAGED_ROLES.join(",")};
+      GRANT EXECUTE ON FUNCTION ${schema}.${ATTEST}(${IDENTITY_TYPES}) TO app_user;`);
+    probeInvalidFunctionCatalog("helper", (schema) => `
+      CREATE OR REPLACE FUNCTION ${schema}.${ATTEST}(${ARGUMENTS})
+      RETURNS TABLE(operation_subject_id uuid,parent_subject_id uuid,
+        child_subject_id uuid,relation_id uuid,replay boolean)
+      LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+      AS $attest$ BEGIN PERFORM ${schema}._append_writer(); RETURN; END $attest$;`, true);
   });
 
   it("denies SET ROLE and temp shadow substitution", () => {
@@ -473,16 +546,32 @@ describe("governed relation append/attest database contract", () => {
       operationId: OP_H, suffix: "03", expired: true, closed: true,
       insertWorkspace: false,
     });
+    const lifecycleBefore = lifecycleSnapshot(
+      historical.authorityId, historical.accountId, historical.operationId, historical.ackId,
+    );
+    const graphBefore = JSON.parse(governedGraphSnapshot());
+    assert.deepEqual(graphBefore, { subjects: [], operationSubjects: [], relations: [] });
     const first = parseRow(psql(asApp(selectCall(APPEND, historical), WS_A)));
+    assert.equal(lifecycleSnapshot(
+      historical.authorityId, historical.accountId, historical.operationId, historical.ackId,
+    ), lifecycleBefore);
+    const graphAfterAppendText = governedGraphSnapshot();
+    const graphAfterAppend = JSON.parse(graphAfterAppendText);
+    assert.equal(graphAfterAppend.subjects.length, 2);
+    assert.equal(graphAfterAppend.operationSubjects.length, 1);
+    assert.equal(graphAfterAppend.relations.length, 1);
     const replay = parseRow(psql(asApp(selectCall(APPEND, historical), WS_A)));
     assert.equal(first[4], "f");
     assert.deepEqual(replay.slice(0, 4), first.slice(0, 4));
     assert.equal(replay[4], "t");
-    const before = canonicalSnapshot();
+    assert.equal(governedGraphSnapshot(), graphAfterAppendText);
     const calls = Array.from({ length: 100 }, () => selectCall(ATTEST, historical)).join("\n");
     const rows = psql(asApp(calls, WS_A, true)).split("\n").filter((line) => line.includes("|"));
     assert.equal(rows.length, 100);
-    assert.equal(canonicalSnapshot(), before);
+    assert.equal(lifecycleSnapshot(
+      historical.authorityId, historical.accountId, historical.operationId, historical.ackId,
+    ), lifecycleBefore);
+    assert.equal(governedGraphSnapshot(), graphAfterAppendText);
   });
 
   it("appends, exact-replays and attests 100x with a byte-stable canonical snapshot", () => {
@@ -520,32 +609,60 @@ describe("governed relation append/attest database contract", () => {
     for (const [fn,facts,override,code] of vectors) captureFailure(fn,facts,override,code);
   });
 
-  it("rejects non-settled stored operations and stored receipt or ACK tuple mismatches", () => {
+  it("rejects a non-settled stored operation and cross-operation ACK tuples", () => {
     const reserved = seedReservedOperation();
-    const receiptFacts = seedOperation({
+    const otherSettled = seedOperation({
       workspaceId: WS_A, authorityId: AUTH_A, accountId: ACCOUNT_A,
       operationId: OP_RECEIPT, suffix: "05",
     });
     for (const fn of [APPEND, ATTEST]) {
       captureFailure(fn, reserved, { ackId: factsA.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
-      captureFailure(fn, receiptFacts, { ackId: factsA.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
-      captureFailure(fn, factsA, { ackId: receiptFacts.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
+      captureFailure(fn, otherSettled, { ackId: factsA.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
+      captureFailure(fn, factsA, { ackId: otherSettled.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
     }
   });
 
   it("returns a stable conflict for any post-append tuple drift in append and attest", () => {
-    psql(asApp(selectCall(APPEND, factsA), WS_A));
+    const parentSeed = parseRow(psql(asApp(selectCall(APPEND, factsA, {
+      childId: "51000000-0000-4000-8000-000000000099",
+      relationKey: "parent:seed", sourceUuid: SOURCE_B,
+    }), WS_A)));
+    const baseline = {
+      rootDataClass: "PERSONAL", rootDsrSubjectType: "company",
+      rootDsrSubjectId: "71000000-0000-4000-8000-000000000001",
+      childDataClass: "PERSONAL", childDsrSubjectType: "company",
+      childDsrSubjectId: "71000000-0000-4000-8000-000000000002",
+    };
+    psql(asApp(selectCall(APPEND, factsA, baseline), WS_A));
     const conflicts = [
+      { rootDataClass: "NON_PERSONAL", rootDsrSubjectType: null, rootDsrSubjectId: null },
+      { rootDsrSubjectType: "person" },
+      { rootDsrSubjectId: "71000000-0000-4000-8000-000000000011" },
+      { parentId: parentSeed[2] },
+      { childType: "derived_record" },
+      { childId: CHILD_B },
+      { childDataClass: "NON_PERSONAL", childDsrSubjectType: null, childDsrSubjectId: null },
+      { childDsrSubjectType: "person" },
+      { childDsrSubjectId: "71000000-0000-4000-8000-000000000012" },
       { relationKind: "DERIVED_FROM" },
+      { sourceNamespace: "alternate_source" },
       { sourceUuid: SOURCE_B },
+      { sourceUuid: null, sourceSha256: CONTRACT_B },
       { contractSha256: CONTRACT_B },
-      { childDataClass: "PERSONAL", childDsrSubjectType: "company",
-        childDsrSubjectId: "71000000-0000-4000-8000-000000000002" },
     ];
     for (const fn of [APPEND, ATTEST]) {
       for (const override of conflicts) {
-        captureFailure(fn, factsA, override, "GOVERNED_SUBJECT_RELATION_CONFLICT");
+        captureFailure(fn, factsA, { ...baseline, ...override }, "GOVERNED_SUBJECT_RELATION_CONFLICT");
       }
+    }
+    const shaBaseline = {
+      relationKey: "record:sha", childId: CHILD_B,
+      sourceUuid: null, sourceSha256: CONTRACT_A,
+    };
+    psql(asApp(selectCall(APPEND, factsA, shaBaseline), WS_A));
+    for (const fn of [APPEND, ATTEST]) {
+      captureFailure(fn, factsA, { ...shaBaseline, sourceSha256: CONTRACT_B },
+        "GOVERNED_SUBJECT_RELATION_CONFLICT");
     }
   });
 
