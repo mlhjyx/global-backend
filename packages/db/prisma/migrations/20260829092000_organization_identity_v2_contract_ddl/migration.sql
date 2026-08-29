@@ -75,20 +75,9 @@ BEGIN
 END
 $identity_link_contract_preflight$;
 
-ALTER TABLE "identity_link"
-  ALTER COLUMN "status" SET DEFAULT 'ACTIVE',
-  ALTER COLUMN "status" SET NOT NULL,
-  ALTER COLUMN "resolver_version" SET DEFAULT 'identity-v1',
-  ALTER COLUMN "resolver_version" SET NOT NULL,
-  ALTER COLUMN "input_hash" SET DEFAULT 'legacy',
-  ALTER COLUMN "input_hash" SET NOT NULL,
-  ADD CONSTRAINT "identity_link_input_hash_check" CHECK (
-    "input_hash" = 'legacy' OR "input_hash" ~ '^[0-9a-f]{64}$'
-  );
-
-CREATE UNIQUE INDEX "identity_link_workspace_canonical_raw_key"
-  ON "identity_link"(
-    "workspace_id", "canonical_type", "canonical_id", "raw_record_id"
+ALTER TABLE "organization_identity_conflict"
+  ADD CONSTRAINT "organization_identity_conflict_resolved_time_check" CHECK (
+    "resolved_at" IS NULL OR "resolved_at" >= "created_at"
   );
 
 ALTER TABLE "organization_identifier"
@@ -97,11 +86,6 @@ ALTER TABLE "organization_identifier"
   ),
   ADD CONSTRAINT "organization_identifier_revoked_time_check" CHECK (
     "revoked_at" IS NULL OR "revoked_at" >= "last_seen_at"
-  );
-
-ALTER TABLE "organization_identity_conflict"
-  ADD CONSTRAINT "organization_identity_conflict_resolved_time_check" CHECK (
-    "resolved_at" IS NULL OR "resolved_at" >= "created_at"
   );
 
 ALTER TABLE "organization_canonical_mapping"
@@ -152,6 +136,22 @@ ALTER TABLE "organization_identity_replay"
     )
   );
 
+ALTER TABLE "identity_link"
+  ALTER COLUMN "status" SET DEFAULT 'ACTIVE',
+  ALTER COLUMN "status" SET NOT NULL,
+  ALTER COLUMN "resolver_version" SET DEFAULT 'identity-v1',
+  ALTER COLUMN "resolver_version" SET NOT NULL,
+  ALTER COLUMN "input_hash" SET DEFAULT 'legacy',
+  ALTER COLUMN "input_hash" SET NOT NULL,
+  ADD CONSTRAINT "identity_link_input_hash_check" CHECK (
+    "input_hash" = 'legacy' OR "input_hash" ~ '^[0-9a-f]{64}$'
+  );
+
+CREATE UNIQUE INDEX "identity_link_workspace_canonical_raw_key"
+  ON "identity_link"(
+    "workspace_id", "canonical_type", "canonical_id", "raw_record_id"
+  );
+
 CREATE FUNCTION enforce_identity_link_target_v2()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -159,23 +159,23 @@ SET search_path = pg_catalog, public
 AS $enforce_identity_link_target_v2$
 BEGIN
   IF NEW."canonical_type" = 'company' THEN
-    IF NOT EXISTS (
-      SELECT 1
-      FROM public."canonical_company" AS company
-      WHERE company."workspace_id" = NEW."workspace_id"
-        AND company."id" = NEW."canonical_id"
-    ) THEN
+    PERFORM 1
+    FROM public."canonical_company" AS company
+    WHERE company."workspace_id" = NEW."workspace_id"
+      AND company."id" = NEW."canonical_id"
+    FOR KEY SHARE;
+    IF NOT FOUND THEN
       RAISE EXCEPTION USING
         ERRCODE = '23503',
         MESSAGE = 'IDENTITY_LINK_CANONICAL_TARGET_INVALID';
     END IF;
   ELSIF NEW."canonical_type" = 'contact' THEN
-    IF NOT EXISTS (
-      SELECT 1
-      FROM public."canonical_contact" AS contact
-      WHERE contact."workspace_id" = NEW."workspace_id"
-        AND contact."id" = NEW."canonical_id"
-    ) THEN
+    PERFORM 1
+    FROM public."canonical_contact" AS contact
+    WHERE contact."workspace_id" = NEW."workspace_id"
+      AND contact."id" = NEW."canonical_id"
+    FOR KEY SHARE;
+    IF NOT FOUND THEN
       RAISE EXCEPTION USING
         ERRCODE = '23503',
         MESSAGE = 'IDENTITY_LINK_CANONICAL_TARGET_INVALID';
