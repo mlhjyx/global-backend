@@ -8,6 +8,7 @@ import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs"
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
+const resolverCommit = "eb40556986e05adaff42a844ded91197a3e41789";
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const container = process.env.TASK6B_RESOLVER_PG_CONTAINER;
@@ -25,6 +26,9 @@ const RAW_BIND = "22000000-0000-4000-8000-000000000001";
 const RAW_LAZY = "22000000-0000-4000-8000-000000000002";
 const RAW_CREATE = "22000000-0000-4000-8000-000000000003";
 const RAW_CONFLICT = "22000000-0000-4000-8000-000000000004";
+const RAW_RACE_A = "22000000-0000-4000-8000-000000000005";
+const RAW_RACE_B = "22000000-0000-4000-8000-000000000006";
+const RAW_ROLLBACK = "22000000-0000-4000-8000-000000000007";
 const COMPANY_A = "23000000-0000-4000-8000-000000000001";
 const COMPANY_B = "23000000-0000-4000-8000-000000000002";
 const COMPANY_CREATE = "23000000-0000-4000-8000-000000000003";
@@ -35,6 +39,7 @@ const HASH_C = "c".repeat(64);
 const HASH_D = "d".repeat(64);
 const RESOLVER_VERSION = "organization-identity-resolver/v1";
 let contractStage;
+let resolverStage;
 let topology;
 let freshFirstDeploy = "";
 let freshSecondDeploy = "";
@@ -236,6 +241,7 @@ function appCommand(database, value, options = {}) {
   return dockerPsql(
     database,
     `BEGIN;
+     ${options.lockTimeout === "100ms" ? "SET LOCAL lock_timeout='100ms';" : ""}
      SELECT set_config('app.current_workspace_id','${options.workspaceId ?? WORKSPACE_A}',true);
      SELECT row_to_json(result)::text
        FROM public.apply_organization_identity_resolution_v1('${json}'::jsonb) AS result;
@@ -244,6 +250,76 @@ function appCommand(database, value, options = {}) {
   )
     .split("\n")
     .find((line) => line.startsWith("{"));
+}
+
+function runAppResolver(database, rawRecordId) {
+  requireTopology();
+  assertDatabase(database);
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(
+      "pnpm",
+      [
+        "--filter",
+        "@global/api",
+        "exec",
+        "tsx",
+        "test/fixtures/organization-identity-resolver-app-writer.disposable.ts",
+        WORKSPACE_A,
+        rawRecordId,
+      ],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          TASK6B_RESOLVER_APP_DATABASE_URL: `postgresql://app_user:app_pw@127.0.0.1:${port}/${database}?schema=public`,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", rejectPromise);
+    child.on("close", (code) => {
+      const line = stdout
+        .trim()
+        .split("\n")
+        .findLast((candidate) => candidate.startsWith("{"));
+      if (!line) {
+        rejectPromise(
+          new Error(`resolver fixture emitted no receipt: ${stderr}`),
+        );
+        return;
+      }
+      const value = JSON.parse(line);
+      if (code === 0) resolvePromise(value);
+      else
+        rejectPromise(
+          Object.assign(
+            new Error(
+              `resolver fixture failed:${value.errorCode ?? "UNKNOWN"}:${value.databaseCode ?? "UNKNOWN"}:${value.sqlState ?? "UNKNOWN"}:${value.databaseToken ?? "UNKNOWN"}`,
+            ),
+            { value },
+          ),
+        );
+    });
+  });
+}
+
+function collectProcess(child) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", rejectPromise);
+    child.on("close", (code) =>
+      code === 0
+        ? resolvePromise(stdout.trim())
+        : rejectPromise(new Error(stderr)),
+    );
+  });
 }
 
 function rawPayload({ providerKey, domain }) {
@@ -287,6 +363,12 @@ function seed(database) {
   const directoryCreatePayload = JSON.stringify(
     rawPayload({ providerKey: "directory", domain: "create.example" }),
   ).replaceAll("'", "''");
+  const directoryRacePayload = JSON.stringify(
+    rawPayload({ providerKey: "directory", domain: "race.example" }),
+  ).replaceAll("'", "''");
+  const directoryRollbackPayload = JSON.stringify(
+    rawPayload({ providerKey: "directory", domain: "rollback.example" }),
+  ).replaceAll("'", "''");
   dockerPsql(
     database,
     `INSERT INTO workspace(id,name,updated_at) VALUES
@@ -304,7 +386,10 @@ function seed(database) {
        ('${RAW_BIND}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryBindPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:bind','${HASH_A}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
        ('${RAW_LAZY}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryLazyPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:lazy','${HASH_B}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
        ('${RAW_CREATE}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryCreatePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:create','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
-       ('${RAW_CONFLICT}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryConflictPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:conflict','${HASH_D}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
+       ('${RAW_CONFLICT}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryConflictPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:conflict','${HASH_D}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_RACE_A}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRacePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:race-a','${HASH_A}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_RACE_B}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRacePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:race-b','${HASH_B}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_ROLLBACK}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRollbackPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:rollback','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
      INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
      VALUES
        ('${WORKSPACE_A}','${COMPANY_A}','registry-id','DE','DE1234','registry','${RAW_BIND}',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE'),
@@ -326,19 +411,15 @@ before(() => {
     commit: contractCommit,
     prefix: "task6b-identity-resolver-contract-",
   });
+  resolverStage = materializePinnedPrismaStage({
+    repositoryRoot,
+    commit: resolverCommit,
+    prefix: "task6b-identity-resolver-green-",
+  });
   runPrisma(contractStage.schemaPath, databases.upgrade);
-  freshFirstDeploy = runPrisma(
-    resolve(repositoryRoot, "packages/db/prisma/schema.prisma"),
-    databases.fresh,
-  );
-  freshSecondDeploy = runPrisma(
-    resolve(repositoryRoot, "packages/db/prisma/schema.prisma"),
-    databases.fresh,
-  );
-  upgradeDeploy = runPrisma(
-    resolve(repositoryRoot, "packages/db/prisma/schema.prisma"),
-    databases.upgrade,
-  );
+  freshFirstDeploy = runPrisma(resolverStage.schemaPath, databases.fresh);
+  freshSecondDeploy = runPrisma(resolverStage.schemaPath, databases.fresh);
+  upgradeDeploy = runPrisma(resolverStage.schemaPath, databases.upgrade);
   seed(databases.fresh);
   seed(databases.upgrade);
 });
@@ -346,6 +427,8 @@ before(() => {
 after(() => {
   if (contractStage?.root)
     rmSync(contractStage.root, { recursive: true, force: true });
+  if (resolverStage?.root)
+    rmSync(resolverStage.root, { recursive: true, force: true });
   if (
     container === "codex-task6b-identity-resolver-pg-20260830-a" &&
     port === "55440"
@@ -568,6 +651,185 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
     );
   });
 
+  it("uses two physical app_user connections to converge same-authority Raw rows on one company", async () => {
+    const [first, second] = await Promise.all([
+      runAppResolver(databases.fresh, RAW_RACE_A),
+      runAppResolver(databases.fresh, RAW_RACE_B),
+    ]);
+    assert.notEqual(first.backendPid, second.backendPid);
+    assert.equal(first.receipt.kind, "bound");
+    assert.equal(second.receipt.kind, "bound");
+    assert.equal(first.receipt.companyId, second.receipt.companyId);
+    assert.equal(first.receipt.matchRule, "identity_v2");
+    assert.equal(second.receipt.matchRule, "identity_v2");
+    assert.equal(
+      dockerPsql(
+        databases.fresh,
+        `SELECT count(DISTINCT company_id) FROM organization_identifier
+         WHERE workspace_id='${WORKSPACE_A}' AND scheme='domain'
+           AND jurisdiction='GLOBAL' AND normalized_value='race.example'
+           AND status='ACTIVE';
+         SELECT count(*) FROM identity_link
+         WHERE workspace_id='${WORKSPACE_A}'
+           AND raw_record_id IN ('${RAW_RACE_A}','${RAW_RACE_B}');`,
+      ),
+      "1\n2",
+    );
+  });
+
+  it("rolls back the source-created company and every identity write on link failure", async () => {
+    dockerPsql(
+      databases.fresh,
+      `CREATE FUNCTION task6b_identity_resolver_fail_link()
+       RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN
+         IF NEW.raw_record_id='${RAW_ROLLBACK}'::uuid THEN
+           RAISE EXCEPTION 'TASK6B_TEST_LINK_FAILURE';
+         END IF;
+         RETURN NEW;
+       END $$;
+       CREATE TRIGGER task6b_identity_resolver_fail_link
+       BEFORE INSERT ON identity_link FOR EACH ROW
+       EXECUTE FUNCTION task6b_identity_resolver_fail_link();`,
+    );
+    try {
+      await assert.rejects(
+        runAppResolver(databases.fresh, RAW_ROLLBACK),
+        (error) =>
+          error?.value?.errorCode === "IDENTITY_RESOLUTION_STATE_INVALID",
+      );
+      assert.equal(
+        dockerPsql(
+          databases.fresh,
+          `SELECT count(*) FROM canonical_company
+           WHERE workspace_id='${WORKSPACE_A}' AND dedupe_key='d:rollback.example';
+           SELECT count(*) FROM organization_identifier
+           WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_ROLLBACK}';
+           SELECT count(*) FROM identity_link
+           WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_ROLLBACK}';`,
+        ),
+        "0\n0\n0",
+      );
+    } finally {
+      dockerPsql(
+        databases.fresh,
+        `DROP TRIGGER IF EXISTS task6b_identity_resolver_fail_link ON identity_link;
+         DROP FUNCTION IF EXISTS task6b_identity_resolver_fail_link();`,
+      );
+    }
+  });
+
+  it("bounds lock wait timeout and leaves zero partial identity state", async () => {
+    const holder = spawn(
+      "docker",
+      [
+        "exec",
+        "-i",
+        container,
+        "psql",
+        "-U",
+        "global",
+        "-d",
+        databases.upgrade,
+        "--no-psqlrc",
+        "-X",
+        "-qAt",
+        "-v",
+        "ON_ERROR_STOP=1",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const holderResultPromise = collectProcess(holder);
+    holder.stdin.end(
+      `BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('acquisition-suppression-policy:${WORKSPACE_A}',0)); SELECT pg_sleep(0.5); COMMIT; SELECT 'holder-done';`,
+    );
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    const authorityIdentifiers = [domainAuthority("directory", "lazy.example")];
+    const blocker = {
+      blockerKey: "d:lazy.example",
+      matchRule: "domain_exact",
+      legacyCandidateCompanyId: COMPANY_LAZY,
+    };
+    const value = command({
+      rawRecordId: RAW_LAZY,
+      payloadHash: HASH_B,
+      blocker,
+      authorityIdentifiers,
+      targetCompanyId: COMPANY_LAZY,
+      plan: {
+        kind: "lazy_upgrade",
+        companyId: COMPANY_LAZY,
+        matchRule: "identity_v2",
+        identifiers: authorityIdentifiers,
+      },
+    });
+    appCommand(databases.upgrade, value, {
+      lockTimeout: "100ms",
+      rejects: /lock timeout/u,
+    });
+    assert.match(await holderResultPromise, /holder-done/u);
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM identity_link
+         WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_LAZY}';
+         SELECT count(*) FROM organization_identifier
+         WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_LAZY}';`,
+      ),
+      "0\n0",
+    );
+  });
+
+  it("waits behind a committed suppression and then performs zero identity writes", async () => {
+    const writer = spawn(
+      "docker",
+      [
+        "exec",
+        "-i",
+        container,
+        "psql",
+        "-U",
+        "global",
+        "-d",
+        databases.upgrade,
+        "--no-psqlrc",
+        "-X",
+        "-qAt",
+        "-v",
+        "ON_ERROR_STOP=1",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const writerResultPromise = collectProcess(writer);
+    writer.stdin.end(
+      `BEGIN;
+       SELECT pg_advisory_xact_lock(hashtextextended('acquisition-suppression-policy:${WORKSPACE_A}',0));
+       INSERT INTO suppression_record(id,workspace_id,type,value,reason,protection_class)
+       VALUES ('24000000-0000-4000-8000-000000000001','${WORKSPACE_A}','domain','create.example','legal','LEGAL');
+       SELECT pg_sleep(0.4);
+       COMMIT;
+       SELECT 'suppression-done';`,
+    );
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    await assert.rejects(
+      runAppResolver(databases.upgrade, RAW_CREATE),
+      (error) => error?.value?.errorCode === "IDENTITY_RESOLUTION_SUPPRESSED",
+    );
+    const writerResult = await writerResultPromise;
+    assert.match(writerResult, /suppression-done/u);
+    assert.doesNotMatch(writerResult, /40P01/u);
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM identity_link
+         WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_CREATE}';
+         SELECT count(*) FROM organization_identifier
+         WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_CREATE}';`,
+      ),
+      "0\n0",
+    );
+  });
+
   it("serializes the suppression lock before identity without deadlock", async () => {
     const first = spawn(
       "docker",
@@ -588,6 +850,7 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       ],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
+    const firstResultPromise = collectProcess(first);
     first.stdin.end(
       `BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('acquisition-suppression-policy:${WORKSPACE_A}',0)); SELECT pg_sleep(0.4); COMMIT; SELECT 'first-done';`,
     );
@@ -596,16 +859,7 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       databases.fresh,
       `BEGIN; SET LOCAL lock_timeout='5s'; SELECT pg_advisory_xact_lock(hashtextextended('acquisition-suppression-policy:${WORKSPACE_A}',0)); SELECT pg_advisory_xact_lock(hashtextextended('organization-identity:${WORKSPACE_A}',0)); COMMIT; SELECT 'second-done';`,
     );
-    const firstOutput = await new Promise((resolvePromise, reject) => {
-      let stdout = "";
-      let stderr = "";
-      first.stdout.on("data", (chunk) => (stdout += chunk));
-      first.stderr.on("data", (chunk) => (stderr += chunk));
-      first.on("error", reject);
-      first.on("close", (code) =>
-        code === 0 ? resolvePromise(stdout.trim()) : reject(new Error(stderr)),
-      );
-    });
+    const firstOutput = await firstResultPromise;
     assert.match(firstOutput, /first-done/u);
     assert.match(second, /second-done/u);
   });

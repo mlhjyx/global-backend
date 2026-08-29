@@ -32,16 +32,23 @@ const contractSuitePath = resolve(
   repositoryRoot,
   "packages/db/test/organization-identity-v2-contract.disposable.spec.mjs",
 );
+const resolverSuitePath = resolve(
+  repositoryRoot,
+  "packages/db/test/organization-identity-v2-resolver-command.disposable.spec.mjs",
+);
 const preExpandCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
 const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
 const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
+const resolverCommit = "eb40556986e05adaff42a844ded91197a3e41789";
 const expandMigration = "20260829090000_organization_identity_v2_expand_ddl";
 const backfillMigration =
   "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
 const contractMigration =
   "20260829092000_organization_identity_v2_contract_ddl";
-const futureMigration = "20260829093000_organization_identity_v2_future_guard";
+const resolverMigration =
+  "20260830090000_organization_identity_v2_resolver_command";
+const futureMigration = "20260830091000_organization_identity_v2_future_guard";
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, {
@@ -108,6 +115,7 @@ function createFutureMigrationRepository({ testHooks } = {}) {
       expand: writeStage(root, expandMigration, "expand"),
       backfill: writeStage(root, backfillMigration, "backfill"),
       contract: writeStage(root, contractMigration, "contract"),
+      resolver: writeStage(root, resolverMigration, "resolver"),
       future: writeStage(root, futureMigration, "future"),
     });
     return Object.freeze({ root, commits });
@@ -148,6 +156,7 @@ describe("pinned Prisma migration stages", () => {
       readFileSync(expandSuitePath, "utf8"),
       readFileSync(backfillSuitePath, "utf8"),
       readFileSync(contractSuitePath, "utf8"),
+      readFileSync(resolverSuitePath, "utf8"),
     ];
     const combined = sources.join("\n");
 
@@ -161,6 +170,7 @@ describe("pinned Prisma migration stages", () => {
       expandCommit,
       backfillCommit,
       contractCommit,
+      resolverCommit,
     ]) {
       assert.match(combined, new RegExp(commit, "u"));
     }
@@ -201,6 +211,18 @@ describe("pinned Prisma migration stages", () => {
             contractMigration,
           ],
           "// schema:contract\n",
+        ],
+        [
+          "resolver",
+          fixture.commits.resolver,
+          [
+            "20260829080000_fixture_base",
+            expandMigration,
+            backfillMigration,
+            contractMigration,
+            resolverMigration,
+          ],
+          "// schema:resolver\n",
         ],
       ]) {
         const stage = materializePinnedPrismaStage({
@@ -243,6 +265,7 @@ describe("pinned Prisma migration stages", () => {
         ["expand", expandCommit],
         ["backfill", backfillCommit],
         ["contract", contractCommit],
+        ["resolver", resolverCommit],
       ]) {
         const stage = materializePinnedPrismaStage({
           repositoryRoot,
@@ -268,6 +291,11 @@ describe("pinned Prisma migration stages", () => {
       assert.ok(migrationNames(stages[3]).includes(expandMigration));
       assert.ok(migrationNames(stages[3]).includes(backfillMigration));
       assert.ok(migrationNames(stages[3]).includes(contractMigration));
+      assert.ok(!migrationNames(stages[3]).includes(resolverMigration));
+      assert.ok(migrationNames(stages[4]).includes(expandMigration));
+      assert.ok(migrationNames(stages[4]).includes(backfillMigration));
+      assert.ok(migrationNames(stages[4]).includes(contractMigration));
+      assert.ok(migrationNames(stages[4]).includes(resolverMigration));
     } finally {
       for (const stage of stages) {
         rmSync(stage.root, { recursive: true, force: true });
