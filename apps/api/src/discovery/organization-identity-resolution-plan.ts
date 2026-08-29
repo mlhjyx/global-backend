@@ -43,7 +43,7 @@ export type OrganizationIdentityAuthorityIdentifierPlan = Readonly<{
 type BindExistingPlan = Readonly<{
   kind: "bind_existing";
   companyId: string;
-  matchRule: "domain_exact" | "name_country";
+  matchRule: "identity_v2";
   identifiers: readonly OrganizationIdentityAuthorityIdentifierPlan[];
   inputHash: string;
 }>;
@@ -546,7 +546,7 @@ export function planOrganizationIdentityResolution(
     return deepFreeze({
       kind: "bind_existing" as const,
       companyId: boundRoots[0],
-      matchRule: parsed.blocker.matchRule,
+      matchRule: "identity_v2" as const,
       identifiers,
       inputHash,
     });
