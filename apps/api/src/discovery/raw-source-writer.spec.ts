@@ -97,4 +97,53 @@ describe("Raw Source controlled writer receipt authority", () => {
     expect(command).not.toHaveProperty("expectedPayloadHash");
     expect(command).not.toHaveProperty("expectedPayloadBytes");
   });
+
+  it("keeps captured Date behavior and writer serialization stable after prototype mutation", async () => {
+    const queryRaw = vi.fn(async () => [
+      {
+        raw_record_id: "83000000-0000-4000-8000-000000000001",
+        payload_hash: DB_HASH,
+        payload_bytes: 529,
+        ingest_status: "ACCEPTED",
+        inserted: true,
+      },
+    ]);
+    const resolution = resolveRawSourceBatchByIndex([preparedRow()], [])[0]!;
+    if (resolution.kind !== "WRITE") throw new Error("expected WRITE");
+    const originalToISOString = Date.prototype.toISOString;
+    const originalValueOf = Date.prototype.valueOf;
+
+    try {
+      Date.prototype.toISOString = () => "PROTOTYPE_MUTATED_SECRET";
+      Date.prototype.valueOf = () => 0;
+
+      expect(resolution.row.fetchedAt?.toISOString()).toBe(
+        "2026-08-26T00:00:00.000Z",
+      );
+      expect(resolution.row.fetchedAt?.valueOf()).toBe(
+        Date.parse("2026-08-26T00:00:00.000Z"),
+      );
+      await persistPreparedRawSourceRecord({ $queryRaw: queryRaw } as never, {
+        workspaceId: "10000000-0000-4000-8000-000000000001",
+        runId: "20000000-0000-4000-8000-000000000001",
+        sourceEntityId: null,
+        providerKey: "public_web",
+        sourceClass: "public_intelligence",
+        row: resolution.row,
+      });
+    } finally {
+      Date.prototype.toISOString = originalToISOString;
+      Date.prototype.valueOf = originalValueOf;
+    }
+
+    const statement = queryRaw.mock.calls[0]![0] as {
+      values: readonly unknown[];
+    };
+    const command = JSON.parse(String(statement.values[0])) as Record<
+      string,
+      unknown
+    >;
+    expect(command.fetchedAt).toBe("2026-08-26T00:00:00.000Z");
+    expect(JSON.stringify(command)).not.toContain("PROTOTYPE_MUTATED_SECRET");
+  });
 });
