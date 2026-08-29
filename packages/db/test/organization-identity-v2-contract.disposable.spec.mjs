@@ -12,7 +12,7 @@ const repositoryRoot = resolve(
   "../../..",
 );
 const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
-const contractCommit = "7ef274cb17c9292e61419ce6c6d42d50a85b425a";
+const contractCommit = "792f05045ff0350396bdc2d271e8e85cbeb7f999";
 const contractMigrationName =
   "20260829092000_organization_identity_v2_contract_ddl";
 const container = process.env.TASK6B_PG_CONTAINER;
