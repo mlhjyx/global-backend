@@ -111,6 +111,7 @@ export type OrganizationIdentityMigrationDecision = Readonly<{
   decision: "GO" | "HOLD";
   state:
     | "INVENTORY_NOT_SUPPLIED"
+    | "INVALID_INVENTORY_INPUT"
     | "OLD_IDENTITY_MIGRATION_PRESENT"
     | "OLD_IDENTITY_OBJECT_RESIDUE_PRESENT"
     | "RAW_SOURCE_LINEAGE_HOLD"
@@ -154,6 +155,209 @@ function decision(
         }),
       ),
     ),
+  });
+}
+
+const MAX_MIGRATION_INVENTORY_ROWS = 512;
+const MAX_CATALOG_INVENTORY_ROWS = 128;
+const MAX_EXPECTED_MIGRATIONS = 128;
+const MAX_MACHINE_NAME_LENGTH = 128;
+const CATALOG_OBJECT_KINDS = Object.freeze([
+  "TABLE",
+  "TYPE",
+  "FUNCTION",
+  "TRIGGER",
+] as const);
+const LOWERCASE_SHA256 = /^[0-9a-f]{64}$/;
+const CATALOG_NAME = /^[a-z][a-z0-9_]*$/;
+const MIGRATION_NAME = /^\d{14}_[a-z][a-z0-9_]*$/;
+const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+type ValidatedInventoryInput = Readonly<{
+  migrationInventory: readonly PrismaMigrationInventoryRow[];
+  catalogInventory: readonly CatalogInventoryRecord[];
+  expectedCurrentRaw: readonly ExpectedMigrationChecksum[];
+  expectedIdentitySuccessor: readonly ExpectedMigrationChecksum[];
+}>;
+
+function hasExactDataKeys(
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return false;
+  }
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.length !== expectedKeys.length ||
+    ownKeys.some(
+      (key) => typeof key !== "string" || !expectedKeys.includes(key),
+    )
+  ) {
+    return false;
+  }
+  return expectedKeys.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor;
+  });
+}
+
+function isBoundedArray(
+  value: unknown,
+  maximumLength: number,
+): value is unknown[] {
+  return Array.isArray(value) && value.length <= maximumLength;
+}
+
+function isCatalogObjectKind(value: unknown): value is CatalogObjectKind {
+  return (
+    typeof value === "string" &&
+    (CATALOG_OBJECT_KINDS as readonly string[]).includes(value)
+  );
+}
+
+function isMachineName(value: unknown, expression: RegExp): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_MACHINE_NAME_LENGTH &&
+    expression.test(value)
+  );
+}
+
+function isLowercaseSha256(value: unknown): value is string {
+  return typeof value === "string" && LOWERCASE_SHA256.test(value);
+}
+
+function isLifecycleTimestamp(value: unknown): value is Date | string | null {
+  if (value === null) return true;
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value !== "string" || !CANONICAL_UTC_TIMESTAMP.test(value)) {
+    return false;
+  }
+  return new Date(value).toISOString() === value;
+}
+
+function parseMigrationRow(
+  value: unknown,
+): PrismaMigrationInventoryRow | undefined {
+  if (
+    !hasExactDataKeys(value, [
+      "migration_name",
+      "checksum",
+      "finished_at",
+      "rolled_back_at",
+    ]) ||
+    !isMachineName(value.migration_name, MIGRATION_NAME) ||
+    !isLowercaseSha256(value.checksum) ||
+    !isLifecycleTimestamp(value.finished_at) ||
+    !isLifecycleTimestamp(value.rolled_back_at)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    migration_name: value.migration_name,
+    checksum: value.checksum,
+    finished_at: value.finished_at,
+    rolled_back_at: value.rolled_back_at,
+  });
+}
+
+function parseCatalogRecord(
+  value: unknown,
+): CatalogInventoryRecord | undefined {
+  if (
+    !hasExactDataKeys(value, ["kind", "name"]) ||
+    !isCatalogObjectKind(value.kind) ||
+    !isMachineName(value.name, CATALOG_NAME)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({ kind: value.kind, name: value.name });
+}
+
+function parseExpectedMigration(
+  value: unknown,
+): ExpectedMigrationChecksum | undefined {
+  if (
+    !hasExactDataKeys(value, ["migrationName", "checksum"]) ||
+    !isMachineName(value.migrationName, MIGRATION_NAME) ||
+    !isLowercaseSha256(value.checksum)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    migrationName: value.migrationName,
+    checksum: value.checksum,
+  });
+}
+
+function parseInventoryInput(
+  migrationInventory: unknown,
+  catalogInventory: unknown,
+  expectedCurrentRaw: unknown,
+  expectedIdentitySuccessor: unknown,
+): ValidatedInventoryInput | undefined {
+  try {
+    if (
+      !isBoundedArray(migrationInventory, MAX_MIGRATION_INVENTORY_ROWS) ||
+      !isBoundedArray(catalogInventory, MAX_CATALOG_INVENTORY_ROWS) ||
+      !isBoundedArray(expectedCurrentRaw, MAX_EXPECTED_MIGRATIONS) ||
+      !isBoundedArray(expectedIdentitySuccessor, MAX_EXPECTED_MIGRATIONS)
+    ) {
+      return undefined;
+    }
+    const parsedMigrationInventory = migrationInventory.map(parseMigrationRow);
+    const parsedCatalogInventory = catalogInventory.map(parseCatalogRecord);
+    const parsedExpectedCurrentRaw = expectedCurrentRaw.map(
+      parseExpectedMigration,
+    );
+    const parsedExpectedIdentitySuccessor = expectedIdentitySuccessor.map(
+      parseExpectedMigration,
+    );
+    if (
+      parsedMigrationInventory.some((row) => row === undefined) ||
+      parsedCatalogInventory.some((row) => row === undefined) ||
+      parsedExpectedCurrentRaw.some((row) => row === undefined) ||
+      parsedExpectedIdentitySuccessor.some((row) => row === undefined)
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      migrationInventory: Object.freeze(
+        parsedMigrationInventory as PrismaMigrationInventoryRow[],
+      ),
+      catalogInventory: Object.freeze(
+        parsedCatalogInventory as CatalogInventoryRecord[],
+      ),
+      expectedCurrentRaw: Object.freeze(
+        parsedExpectedCurrentRaw as ExpectedMigrationChecksum[],
+      ),
+      expectedIdentitySuccessor: Object.freeze(
+        parsedExpectedIdentitySuccessor as ExpectedMigrationChecksum[],
+      ),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function invalidInventoryInputDecision(): OrganizationIdentityMigrationDecision {
+  return decision({
+    subject: "UNKNOWN",
+    decision: "HOLD",
+    state: "INVALID_INVENTORY_INPUT",
+    observations: [
+      {
+        kind: "MIGRATION",
+        name: "inventory-input",
+        reasonCode: "INVALID_INVENTORY_INPUT",
+      },
+    ],
   });
 }
 
@@ -255,12 +459,41 @@ export function assessOrganizationIdentityMigrationInventory(
     });
   }
 
-  const rowsByName = groupRowsByName(migrationInventory);
+  const parsedInput = parseInventoryInput(
+    migrationInventory,
+    catalogInventory,
+    expectedCurrentRaw,
+    expectedIdentitySuccessor,
+  );
+  if (parsedInput === undefined) return invalidInventoryInputDecision();
+  if (parsedInput.expectedCurrentRaw.length === 0) {
+    return decision({
+      subject: "SUPPLIED",
+      decision: "HOLD",
+      state: "RAW_SOURCE_LINEAGE_HOLD",
+      observations: [
+        {
+          kind: "MIGRATION",
+          name: "raw-source-current-successor",
+          reasonCode: "RAW_CURRENT_SUCCESSOR_REQUIRED",
+        },
+      ],
+    });
+  }
+
+  const {
+    migrationInventory: validatedMigrationInventory,
+    catalogInventory: validatedCatalogInventory,
+    expectedCurrentRaw: validatedExpectedCurrentRaw,
+    expectedIdentitySuccessor: validatedExpectedIdentitySuccessor,
+  } = parsedInput;
+
+  const rowsByName = groupRowsByName(validatedMigrationInventory);
   const historicalChecksumMatches =
     HISTORICAL_ORGANIZATION_IDENTITY_MIGRATIONS.flatMap((historical) => {
       const actualNames = [
         ...new Set(
-          migrationInventory
+          validatedMigrationInventory
             .filter((row) => row.checksum === historical.checksum)
             .map((row) => row.migration_name),
         ),
@@ -305,7 +538,7 @@ export function assessOrganizationIdentityMigrationInventory(
     });
   }
 
-  const historicalObjects = catalogInventory.filter((observed) =>
+  const historicalObjects = validatedCatalogInventory.filter((observed) =>
     FORBIDDEN_HISTORICAL_IDENTITY_CATALOG_OBJECTS.some(
       (forbidden) =>
         forbidden.kind === observed.kind && forbidden.name === observed.name,
@@ -325,8 +558,8 @@ export function assessOrganizationIdentityMigrationInventory(
   }
 
   const rawDecision = assessRawSourceMigrationInventory(
-    migrationInventory,
-    expectedCurrentRaw,
+    validatedMigrationInventory,
+    validatedExpectedCurrentRaw,
   );
   if (rawDecision.decision === "HOLD") {
     return decision({
@@ -337,7 +570,7 @@ export function assessOrganizationIdentityMigrationInventory(
     });
   }
 
-  const conflicts = expectedIdentitySuccessor.flatMap((expected) => {
+  const conflicts = validatedExpectedIdentitySuccessor.flatMap((expected) => {
     const rows = rowsByName.get(expected.migrationName) ?? [];
     return rows.length > 1
       ? [
@@ -358,7 +591,7 @@ export function assessOrganizationIdentityMigrationInventory(
     });
   }
 
-  const mismatches = expectedIdentitySuccessor.flatMap((expected) => {
+  const mismatches = validatedExpectedIdentitySuccessor.flatMap((expected) => {
     const rows = rowsByName.get(expected.migrationName) ?? [];
     return rows.length === 1 && rows[0]!.checksum !== expected.checksum
       ? [
@@ -379,7 +612,7 @@ export function assessOrganizationIdentityMigrationInventory(
     });
   }
 
-  const incomplete = expectedIdentitySuccessor.flatMap((expected) => {
+  const incomplete = validatedExpectedIdentitySuccessor.flatMap((expected) => {
     const rows = rowsByName.get(expected.migrationName) ?? [];
     if (rows.length === 1 && lifecycle(rows) === "APPLIED") return [];
     if (!rows.length) {
@@ -411,7 +644,7 @@ export function assessOrganizationIdentityMigrationInventory(
     subject: "SUPPLIED",
     decision: "GO",
     state:
-      expectedIdentitySuccessor.length === 0
+      validatedExpectedIdentitySuccessor.length === 0
         ? "CURRENT_MAIN_READY_FOR_IDENTITY_SUCCESSOR"
         : "CURRENT_IDENTITY_SUCCESSOR_APPLIED",
     observations: [],
