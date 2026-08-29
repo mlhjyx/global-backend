@@ -1,8 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
-import { isExecutionControlError } from './execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from './execution-control-error';
 
 describe('isExecutionControlError', () => {
+  it('preserves a bounded structured code directly and through Temporal conversion', () => {
+    const direct = new ExecutionControlError(
+      'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+    );
+    const temporal = ApplicationFailure.fromError(direct);
+
+    expect(direct).toMatchObject({
+      code: 'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+      name: 'ExecutionControlError',
+      type: 'ExecutionControlError',
+      message: 'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+    });
+    expect(temporal.type).toBe('ExecutionControlError');
+    expect(isExecutionControlError(direct)).toBe(true);
+    expect(isExecutionControlError(temporal)).toBe(true);
+    expect(() => new ExecutionControlError('ordinary failure')).toThrow(
+      'EXECUTION_CONTROL_ERROR_CODE_INVALID',
+    );
+  });
+
   it.each([
     'EXECUTION_BUDGET_GRANT_EXPIRED',
     'BUDGET_STORE_UNAVAILABLE',

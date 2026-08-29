@@ -40,6 +40,7 @@ function controlToken(value: unknown): boolean {
   }
   const token = value.toUpperCase();
   return (
+    token === 'EXECUTIONCONTROLERROR' ||
     token.includes('EXECUTION_BUDGET_') ||
     token.includes('EXECUTIONBUDGET') ||
     token.includes('BUDGET_') ||
@@ -58,6 +59,26 @@ function controlToken(value: unknown): boolean {
     token.includes('DURABLE_REPLAY_') ||
     token.includes('_REPLAY_')
   );
+}
+
+export class ExecutionControlError extends Error {
+  readonly code: string;
+  readonly type = 'ExecutionControlError';
+
+  constructor(code: string, message: string = code) {
+    if (
+      !/^[A-Z][A-Z0-9_]{2,127}$/u.test(code) ||
+      !controlToken(code)
+    ) {
+      throw new TypeError('EXECUTION_CONTROL_ERROR_CODE_INVALID');
+    }
+    if (message.length === 0 || message.length > 1_024) {
+      throw new TypeError('EXECUTION_CONTROL_ERROR_MESSAGE_INVALID');
+    }
+    super(message);
+    this.name = 'ExecutionControlError';
+    this.code = code;
+  }
 }
 
 type SafeFailureSnapshot = Readonly<{
