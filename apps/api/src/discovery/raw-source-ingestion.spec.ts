@@ -1246,6 +1246,29 @@ describe("Raw Source v2 ingestion boundary", () => {
       ).toEqual([{ recordIndex: 0, kind: "EXISTING", rawRecordId }]);
     });
 
+    it("treats the payload as canonical replay evidence when the stored PostgreSQL JSONB digest differs", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ revenueUsd: 1e-7 })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const rawRecordId = "83000000-0000-4000-8000-000000000001";
+
+      expect(
+        resolveRawSourceBatchByIndex([candidate], [
+          {
+            id: rawRecordId,
+            externalId: candidate.externalId,
+            ingestKey: candidate.ingestKey,
+            payloadHash: "b".repeat(64),
+            payload: candidate.payload,
+          },
+        ]),
+      ).toEqual([{ recordIndex: 0, kind: "EXISTING", rawRecordId }]);
+    });
+
     it("matches legacy external-ID drift and reuses the first drift receipt by original index", () => {
       const original = prepareRawSourceBatch({
         providerKey: "registry",
@@ -1480,6 +1503,128 @@ describe("Raw Source v2 ingestion boundary", () => {
           },
         ]),
       ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
+
+    it("rejects a stateful existing-array Proxy instead of validating one iteration and consuming another", () => {
+      const validReceipt = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: "company-1",
+        ingestKey: "external:one",
+        payloadHash: rawPayloadHash({ company: "Acme" }),
+        payload: { company: "Acme" },
+      };
+      let iterations = 0;
+      const stateful = new Proxy([validReceipt], {
+        get(target, property, receiver) {
+          if (property === Symbol.iterator) {
+            return function* iterator() {
+              iterations += 1;
+              yield iterations === 1
+                ? validReceipt
+                : { ...validReceipt, id: "not-a-uuid" };
+            };
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+
+      expect(() => resolveRawSourceBatchByIndex([], stateful)).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+    });
+
+    it("rejects a sparse existing array", () => {
+      const sparse = new Array(1) as Parameters<
+        typeof resolveRawSourceBatchByIndex
+      >[1];
+      expect(() => resolveRawSourceBatchByIndex([], sparse)).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+    });
+
+    it.each([
+      ["sparse", Object.assign(new Array(2), { 1: undefined })],
+      ["Proxy", new Proxy([], {})],
+    ])("rejects a %s prepared array", (_label, prepared) => {
+      expect(() =>
+        resolveRawSourceBatchByIndex(
+          prepared as unknown as Parameters<
+            typeof resolveRawSourceBatchByIndex
+          >[0],
+          [],
+        ),
+      ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
+
+    it("returns an owned deeply immutable WRITE snapshot without losing Date semantics", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const candidatePayload = candidate.payload as {
+        name: string;
+        attributes: { products: string[] };
+      };
+      const candidatePolicy = candidate.sourcePolicySnapshot as {
+        kind: string;
+        minimizedFields: string[];
+      };
+      const originalFetchedAt = candidate.fetchedAt!.getTime();
+      const originalExpiresAt = candidate.expiresAt.getTime();
+
+      const resolution = resolveRawSourceBatchByIndex([candidate], [])[0]!;
+      expect(resolution.kind).toBe("WRITE");
+      if (resolution.kind !== "WRITE") throw new Error("expected WRITE");
+
+      expect(resolution.row).not.toBe(candidate);
+      expect(resolution.row.payload).not.toBe(candidate.payload);
+      expect(resolution.row.sourcePolicySnapshot).not.toBe(
+        candidate.sourcePolicySnapshot,
+      );
+      expect(resolution.row.fetchedAt).toBeInstanceOf(Date);
+      expect(resolution.row.expiresAt).toBeInstanceOf(Date);
+
+      candidatePayload.name = "Mutated GmbH";
+      candidatePayload.attributes.products[0] = "mutated product";
+      candidatePolicy.kind = "mutated";
+      candidatePolicy.minimizedFields.push("mutated");
+      candidate.fetchedAt!.setTime(0);
+      candidate.expiresAt.setTime(0);
+
+      expect(resolution.row.payload).toMatchObject({
+        name: "Acme GmbH",
+        attributes: { products: ["pump"] },
+      });
+      expect(resolution.row.sourcePolicySnapshot).toMatchObject({
+        kind: "source_policy",
+        minimizedFields: [],
+      });
+      expect(resolution.row.fetchedAt!.getTime()).toBe(originalFetchedAt);
+      expect(resolution.row.expiresAt.getTime()).toBe(originalExpiresAt);
+      expect(Object.isFrozen(resolution.row)).toBe(true);
+      expect(Object.isFrozen(resolution.row.payload)).toBe(true);
+      expect(
+        Object.isFrozen(
+          (resolution.row.payload as { attributes: unknown }).attributes,
+        ),
+      ).toBe(true);
+      expect(Object.isFrozen(resolution.row.sourcePolicySnapshot)).toBe(true);
+
+      expect(() => {
+        (
+          resolution.row.payload as {
+            attributes: { products: string[] };
+          }
+        ).attributes.products[0] = "returned mutation";
+      }).toThrow(TypeError);
+      expect(() => {
+        resolution.row.sourcePolicySnapshot.kind = "returned mutation";
+      }).toThrow(TypeError);
+      expect(() => resolution.row.fetchedAt!.setTime(0)).toThrow(TypeError);
+      expect(() => resolution.row.expiresAt.setTime(0)).toThrow(TypeError);
     });
   });
 

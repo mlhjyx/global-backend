@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { validateRawSourceProviderPayload } from "./raw-source-provider-schema";
 
 export const RAW_SOURCE_INGEST_VERSION = "raw-source/v2" as const;
@@ -634,6 +635,41 @@ const EXISTING_RECEIPT_KEYS = Object.freeze([
   "payload",
   "payloadHash",
 ]);
+const PREPARED_ROW_KEYS = Object.freeze([
+  "externalId",
+  "payload",
+  "sourceUrl",
+  "fetchedAt",
+  "contentHash",
+  "parserVersion",
+  "ingestKey",
+  "payloadHash",
+  "payloadBytes",
+  "ingestVersion",
+  "ingestStatus",
+  "dispositionCode",
+  "retentionDays",
+  "expiresAt",
+  "sourcePolicySnapshot",
+]);
+const DATE_MUTATOR_METHODS = Object.freeze([
+  "setDate",
+  "setFullYear",
+  "setHours",
+  "setMilliseconds",
+  "setMinutes",
+  "setMonth",
+  "setSeconds",
+  "setTime",
+  "setUTCDate",
+  "setUTCFullYear",
+  "setUTCHours",
+  "setUTCMilliseconds",
+  "setUTCMinutes",
+  "setUTCMonth",
+  "setUTCSeconds",
+  "setYear",
+] as const);
 
 type IndexedResolutionFact =
   | Readonly<{
@@ -655,30 +691,207 @@ function exactStringOrNull(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && value.length > 0);
 }
 
-function validateExistingRawSourceReceipts(
-  existing: readonly ExistingRawSourceReceipt[],
+function snapshotDenseArray<T>(
+  value: unknown,
+  snapshotItem: (item: unknown) => T,
+): readonly T[] {
+  if (!Array.isArray(value) || types.isProxy(value)) {
+    invalidIndexedResolution();
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(value);
+  const length = (descriptors as Record<string, PropertyDescriptor>)["length"]
+    ?.value;
+  if (
+    !Number.isSafeInteger(length) ||
+    length < 0 ||
+    keys.length !== length + 1 ||
+    keys.some(
+      (key) =>
+        typeof key !== "string" ||
+        (key !== "length" && !/^(?:0|[1-9][0-9]*)$/u.test(key)),
+    )
+  ) {
+    invalidIndexedResolution();
+  }
+  const items = Array.from({ length }, (_, index) => {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor?.enumerable || !("value" in descriptor)) {
+      invalidIndexedResolution();
+    }
+    return snapshotItem(descriptor.value);
+  });
+  return Object.freeze(items);
+}
+
+function snapshotJsonValue(
+  value: unknown,
+  state: BoundedTraversal = { ancestors: new Set<object>(), remaining: 1_000 },
+  depth = 0,
+): unknown {
+  state.remaining -= 1;
+  if (state.remaining < 0 || depth > 32) invalidIndexedResolution();
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) invalidIndexedResolution();
+    return value;
+  }
+  if (typeof value !== "object" || types.isProxy(value)) {
+    invalidIndexedResolution();
+  }
+  if (state.ancestors.has(value)) invalidIndexedResolution();
+  state.ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return snapshotDenseArray(value, (item) =>
+        snapshotJsonValue(item, state, depth + 1),
+      );
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      invalidIndexedResolution();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length > 128 ||
+      keys.some((key) => typeof key !== "string") ||
+      Object.values(descriptors).some(
+        (descriptor) => !descriptor.enumerable || !("value" in descriptor),
+      )
+    ) {
+      invalidIndexedResolution();
+    }
+    const snapshot = Object.create(prototype) as Record<string, unknown>;
+    for (const key of keys as string[]) {
+      const item = descriptors[key];
+      if (!item || !("value" in item)) invalidIndexedResolution();
+      snapshot[key] = snapshotJsonValue(item.value, state, depth + 1);
+    }
+    return Object.freeze(snapshot);
+  } finally {
+    state.ancestors.delete(value);
+  }
+}
+
+function snapshotDate(value: unknown): Date {
+  if (
+    !(value instanceof Date) ||
+    types.isProxy(value) ||
+    Object.getPrototypeOf(value) !== Date.prototype ||
+    !Number.isFinite(value.getTime())
+  ) {
+    invalidIndexedResolution();
+  }
+  const snapshot = new Date(value.getTime());
+  const immutableDateMutation = () => {
+    throw new TypeError("immutable Raw Source Date");
+  };
+  for (const method of DATE_MUTATOR_METHODS) {
+    Object.defineProperty(snapshot, method, {
+      configurable: false,
+      enumerable: false,
+      value: immutableDateMutation,
+      writable: false,
+    });
+  }
+  return Object.freeze(snapshot);
+}
+
+function closedRecordDescriptors(
+  value: unknown,
+  requiredKeys: readonly string[],
+): Record<string, PropertyDescriptor> {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    types.isProxy(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    invalidIndexedResolution();
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(value);
+  if (
+    keys.some((key) => typeof key !== "string") ||
+    keys.length !== requiredKeys.length ||
+    !requiredKeys.every((key) => keys.includes(key)) ||
+    Object.values(descriptors).some(
+      (descriptor) => !descriptor.enumerable || !("value" in descriptor),
+    )
+  ) {
+    invalidIndexedResolution();
+  }
+  return descriptors;
+}
+
+function snapshotPreparedRawSourceRow(value: unknown): PreparedRawSourceRow {
+  const descriptors = closedRecordDescriptors(value, PREPARED_ROW_KEYS);
+  const fetchedAt = descriptors.fetchedAt?.value;
+  const snapshot = {
+    externalId: descriptors.externalId?.value,
+    payload: snapshotJsonValue(descriptors.payload?.value),
+    sourceUrl: descriptors.sourceUrl?.value,
+    fetchedAt: fetchedAt === null ? null : snapshotDate(fetchedAt),
+    contentHash: descriptors.contentHash?.value,
+    parserVersion: descriptors.parserVersion?.value,
+    ingestKey: descriptors.ingestKey?.value,
+    // This is opaque database evidence. PostgreSQL JSONB canonicalization can
+    // differ from JavaScript JSON; never compare it to the cloned payload here.
+    payloadHash: descriptors.payloadHash?.value,
+    payloadBytes: descriptors.payloadBytes?.value,
+    ingestVersion: descriptors.ingestVersion?.value,
+    ingestStatus: descriptors.ingestStatus?.value,
+    dispositionCode: descriptors.dispositionCode?.value,
+    retentionDays: descriptors.retentionDays?.value,
+    expiresAt: snapshotDate(descriptors.expiresAt?.value),
+    sourcePolicySnapshot: snapshotJsonValue(
+      descriptors.sourcePolicySnapshot?.value,
+    ),
+  };
+  if (
+    !exactStringOrNull(snapshot.externalId) ||
+    !exactStringOrNull(snapshot.sourceUrl) ||
+    !exactStringOrNull(snapshot.contentHash) ||
+    !exactStringOrNull(snapshot.parserVersion) ||
+    typeof snapshot.ingestKey !== "string" ||
+    snapshot.ingestKey.length === 0 ||
+    typeof snapshot.payloadHash !== "string" ||
+    !RAW_SOURCE_PAYLOAD_HASH_PATTERN.test(snapshot.payloadHash) ||
+    !Number.isSafeInteger(snapshot.payloadBytes) ||
+    snapshot.payloadBytes < 1 ||
+    snapshot.ingestVersion !== RAW_SOURCE_INGEST_VERSION ||
+    !["ACCEPTED", "QUARANTINED", "REJECTED"].includes(
+      snapshot.ingestStatus,
+    ) ||
+    (snapshot.dispositionCode !== null &&
+      typeof snapshot.dispositionCode !== "string") ||
+    !Number.isSafeInteger(snapshot.retentionDays) ||
+    snapshot.retentionDays < 1 ||
+    !plainRecord(snapshot.sourcePolicySnapshot)
+  ) {
+    invalidIndexedResolution();
+  }
+  return Object.freeze(snapshot) as PreparedRawSourceRow;
+}
+
+function snapshotExistingRawSourceReceipts(
+  existing: unknown,
 ): readonly ExistingRawSourceReceipt[] {
   const ids = new Set<string>();
   const ingestKeys = new Set<string>();
   const externalIds = new Set<string>();
 
   try {
-    for (const receipt of existing) {
-      const record = plainRecord(receipt);
-      if (!record) invalidIndexedResolution();
-      const descriptors = Object.getOwnPropertyDescriptors(record);
-      const keys = Reflect.ownKeys(record);
-      if (
-        keys.some((key) => typeof key !== "string") ||
-        keys.length !== EXISTING_RECEIPT_KEYS.length ||
-        !EXISTING_RECEIPT_KEYS.every((key) => keys.includes(key)) ||
-        Object.values(descriptors).some(
-          (descriptor) => !descriptor.enumerable || !("value" in descriptor),
-        )
-      ) {
-        invalidIndexedResolution();
-      }
-
+    return snapshotDenseArray(existing, (value) => {
+      const descriptors = closedRecordDescriptors(value, EXISTING_RECEIPT_KEYS);
       const id = descriptors.id?.value;
       const externalId = descriptors.externalId?.value;
       const ingestKey = descriptors.ingestKey?.value;
@@ -698,11 +911,13 @@ function validateExistingRawSourceReceipts(
       ) {
         invalidIndexedResolution();
       }
-      rawPayloadHash(descriptors.payload?.value);
+      const payload = snapshotJsonValue(descriptors.payload?.value);
+      rawPayloadHash(payload);
       ids.add(id);
       if (ingestKey !== null) ingestKeys.add(ingestKey);
       if (externalId !== null) externalIds.add(externalId);
-    }
+      return Object.freeze({ id, externalId, ingestKey, payloadHash, payload });
+    });
   } catch (error) {
     if (
       error instanceof Error &&
@@ -712,7 +927,6 @@ function validateExistingRawSourceReceipts(
     }
     invalidIndexedResolution();
   }
-  return existing;
 }
 
 function sameResolutionFact(
@@ -773,8 +987,22 @@ export function resolveRawSourceBatchByIndex(
 ): readonly RawSourceIndexedResolution[] {
   const byKey = new Map<string, IndexedResolutionFact>();
   const byExternalId = new Map<string, IndexedResolutionFact>();
+  let preparedSnapshot: readonly PreparedRawSourceRow[];
+  let existingSnapshot: readonly ExistingRawSourceReceipt[];
+  try {
+    preparedSnapshot = snapshotDenseArray(prepared, snapshotPreparedRawSourceRow);
+    existingSnapshot = snapshotExistingRawSourceReceipts(existing);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "RAW_SOURCE_INDEXED_RESOLUTION_INVALID"
+    ) {
+      throw error;
+    }
+    invalidIndexedResolution();
+  }
 
-  for (const receipt of validateExistingRawSourceReceipts(existing)) {
+  for (const receipt of existingSnapshot) {
     const fact: IndexedResolutionFact = Object.freeze({
       kind: "EXISTING",
       rawRecordId: receipt.id,
@@ -815,7 +1043,7 @@ export function resolveRawSourceBatchByIndex(
     if (row.externalId) byExternalId.set(row.externalId, fact);
   };
 
-  const resolutions = prepared.map((candidate, recordIndex) => {
+  const resolutions = preparedSnapshot.map((candidate, recordIndex) => {
     const prior = lookup(candidate);
     if (!prior) {
       rememberWrite(recordIndex, candidate);
@@ -829,7 +1057,9 @@ export function resolveRawSourceBatchByIndex(
       return resolutionForFact(recordIndex, prior);
     }
 
-    const drift = driftRowForIndexedResolution(candidate, prior);
+    const drift = snapshotPreparedRawSourceRow(
+      driftRowForIndexedResolution(candidate, prior),
+    );
     const priorDrift = lookup(drift);
     if (priorDrift) {
       if (receiptHash(priorDrift.receipt) !== drift.payloadHash) {
