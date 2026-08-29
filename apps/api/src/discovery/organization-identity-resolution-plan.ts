@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { types } from "node:util";
-import {
-  GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
-} from "./raw-source-provider-schema";
+import { GOVERNED_RAW_SOURCE_PROVIDER_KEYS } from "./raw-source-provider-schema";
 
 const RESOLVER_VERSION = "organization-identity-resolver/v1" as const;
 const AUTHORITY_NORMALIZER_VERSION =
@@ -76,12 +74,11 @@ type ConflictPlan = Readonly<{
 }>;
 
 export type OrganizationIdentityResolutionPlan =
-  | BindExistingPlan
-  | LazyUpgradePlan
-  | CreateNewPlan
-  | ConflictPlan;
+  BindExistingPlan | LazyUpgradePlan | CreateNewPlan | ConflictPlan;
 
-function reject(code: PlanErrorCode = "IDENTITY_RESOLUTION_INPUT_INVALID"): never {
+function reject(
+  code: PlanErrorCode = "IDENTITY_RESOLUTION_INPUT_INVALID",
+): never {
   throw new OrganizationIdentityResolutionPlanError(code);
 }
 
@@ -108,7 +105,10 @@ function passiveJsonClone(value: unknown): SafeJson {
     try {
       const prototype = Object.getPrototypeOf(input);
       if (Array.isArray(input)) {
-        const lengthDescriptor = Object.getOwnPropertyDescriptor(input, "length");
+        const lengthDescriptor = Object.getOwnPropertyDescriptor(
+          input,
+          "length",
+        );
         if (
           prototype !== Array.prototype ||
           !lengthDescriptor ||
@@ -134,8 +134,15 @@ function passiveJsonClone(value: unknown): SafeJson {
         }
         const result: SafeJson[] = [];
         for (let index = 0; index < length; index += 1) {
-          const descriptor = Object.getOwnPropertyDescriptor(input, String(index));
-          if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
+          const descriptor = Object.getOwnPropertyDescriptor(
+            input,
+            String(index),
+          );
+          if (
+            !descriptor ||
+            !descriptor.enumerable ||
+            !("value" in descriptor)
+          ) {
             return reject();
           }
           result.push(clone(descriptor.value, depth + 1));
@@ -157,7 +164,8 @@ function passiveJsonClone(value: unknown): SafeJson {
         if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
           return reject();
         }
-        if (descriptor.value !== undefined) result[key] = clone(descriptor.value, depth + 1);
+        if (descriptor.value !== undefined)
+          result[key] = clone(descriptor.value, depth + 1);
       }
       return result;
     } finally {
@@ -287,22 +295,46 @@ function parseAuthorityIdentifiers(
     ]);
     const parsed: OrganizationIdentityAuthorityIdentifierPlan = {
       providerKey: providerKey(source.providerKey),
-      scheme: requiredString(source, "scheme", 96, /^[a-z][a-z0-9-]*(?::[a-z]{2})?$/u),
-      jurisdiction: requiredString(source, "jurisdiction", 16, /^(?:GLOBAL|[A-Z]{2,15})$/u),
+      scheme: requiredString(
+        source,
+        "scheme",
+        96,
+        /^[a-z][a-z0-9-]*(?::[a-z]{2})?$/u,
+      ),
+      jurisdiction: requiredString(
+        source,
+        "jurisdiction",
+        16,
+        /^(?:GLOBAL|[A-Z]{2,15})$/u,
+      ),
       normalizedValue: requiredString(source, "normalizedValue", 256),
-      validatorVersion: requiredString(source, "validatorVersion", 128, /^[a-z0-9][a-z0-9._/-]*$/u),
-      normalizerVersion: requiredString(source, "normalizerVersion", 128) as typeof AUTHORITY_NORMALIZER_VERSION,
+      validatorVersion: requiredString(
+        source,
+        "validatorVersion",
+        128,
+        /^[a-z0-9][a-z0-9._/-]*$/u,
+      ),
+      normalizerVersion: requiredString(
+        source,
+        "normalizerVersion",
+        128,
+      ) as typeof AUTHORITY_NORMALIZER_VERSION,
       key: requiredString(source, "key", 512),
     };
     if (
       parsed.providerKey !== expectedProviderKey ||
       parsed.normalizerVersion !== AUTHORITY_NORMALIZER_VERSION ||
-      parsed.key !== `${parsed.scheme}:${parsed.jurisdiction}:${parsed.normalizedValue}`
+      parsed.key !==
+        `${parsed.scheme}:${parsed.jurisdiction}:${parsed.normalizedValue}`
     ) {
       return reject();
     }
     const previous = byKey.get(parsed.key);
-    if (previous && stableJson(previous as unknown as SafeJson) !== stableJson(parsed as unknown as SafeJson)) {
+    if (
+      previous &&
+      stableJson(previous as unknown as SafeJson) !==
+        stableJson(parsed as unknown as SafeJson)
+    ) {
       return reject("IDENTITY_RESOLUTION_INPUT_CONTRADICTORY");
     }
     byKey.set(parsed.key, parsed);
@@ -370,12 +402,22 @@ function parseInput(value: unknown) {
     "rootMappings",
   ]);
   const raw = record(source.raw);
-  exactKeys(raw, ["rawRecordId", "providerKey", "payloadHash", "ingestVersion"]);
+  exactKeys(raw, [
+    "rawRecordId",
+    "providerKey",
+    "payloadHash",
+    "ingestVersion",
+  ]);
   const parsedRaw = {
     rawRecordId: uuid(raw.rawRecordId),
     providerKey: providerKey(raw.providerKey),
     payloadHash: requiredString(raw, "payloadHash", 64, /^[a-f0-9]{64}$/u),
-    ingestVersion: requiredString(raw, "ingestVersion", 128, /^[a-z0-9][a-z0-9._/-]*$/u),
+    ingestVersion: requiredString(
+      raw,
+      "ingestVersion",
+      128,
+      /^[a-z0-9][a-z0-9._/-]*$/u,
+    ),
   };
   if (requiredString(source, "resolverVersion", 128) !== RESOLVER_VERSION) {
     return reject();
@@ -393,8 +435,7 @@ function parseInput(value: unknown) {
   } = {
     blockerKey: requiredString(blocker, "blockerKey", 512),
     matchRule: requiredString(blocker, "matchRule", 32) as
-      | "domain_exact"
-      | "name_country",
+      "domain_exact" | "name_country",
     legacyCandidateCompanyId: optionalUuid(blocker, "legacyCandidateCompanyId"),
   };
   if (
@@ -438,16 +479,21 @@ export function planOrganizationIdentityResolution(
     ]),
   );
   const bindingByKey = new Map(
-    parsed.bindings.map((binding) => [binding.identifierKey, binding.companyId]),
+    parsed.bindings.map((binding) => [
+      binding.identifierKey,
+      binding.companyId,
+    ]),
   );
   const rootFor = (companyId: string): string =>
     rootBySource.get(companyId) ?? companyId;
-  const boundRoots = [...new Set(
-    parsed.identifiers
-      .map((identifier) => bindingByKey.get(identifier.key))
-      .filter((companyId): companyId is string => companyId !== undefined)
-      .map(rootFor),
-  )].sort();
+  const boundRoots = [
+    ...new Set(
+      parsed.identifiers
+        .map((identifier) => bindingByKey.get(identifier.key))
+        .filter((companyId): companyId is string => companyId !== undefined)
+        .map(rootFor),
+    ),
+  ].sort();
   const legacyRoot = parsed.blocker.legacyCandidateCompanyId
     ? rootFor(parsed.blocker.legacyCandidateCompanyId)
     : null;
@@ -455,17 +501,23 @@ export function planOrganizationIdentityResolution(
     raw: parsed.raw,
     resolverVersion: parsed.resolverVersion,
     blocker: parsed.blocker,
-    authorityIdentifierKeys: parsed.identifiers.map((identifier) => identifier.key),
+    authorityIdentifierKeys: parsed.identifiers.map(
+      (identifier) => identifier.key,
+    ),
     bindings: parsed.bindings,
     rootMappings: parsed.rootMappings,
   } as unknown as SafeJson);
-  const identifiers = deepFreeze(parsed.identifiers.map((identifier) => ({ ...identifier })));
+  const identifiers = deepFreeze(
+    parsed.identifiers.map((identifier) => ({ ...identifier })),
+  );
   const conflict = (
     conflictType: "identifier_split" | "blocking_key_disagreement",
     companyIds: readonly string[],
   ): ConflictPlan => {
     const sortedCompanyIds = [...new Set(companyIds)].sort();
-    const identifierKeys = parsed.identifiers.map((identifier) => identifier.key);
+    const identifierKeys = parsed.identifiers.map(
+      (identifier) => identifier.key,
+    );
     return deepFreeze({
       kind: "conflict" as const,
       matchRule: "identity_conflict" as const,

@@ -70,7 +70,9 @@ describe("deterministic organization identity resolution plan", () => {
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.identifiers)).toBe(true);
     expect(Object.isFrozen(result.identifiers[0])).toBe(true);
-    expect(() => (result.identifiers as unknown as string[]).push("mutate")).toThrow();
+    expect(() =>
+      (result.identifiers as unknown as string[]).push("mutate"),
+    ).toThrow();
   });
 
   it("retains the legacy domain rule when no authority identifier exists", () => {
@@ -86,8 +88,12 @@ describe("deterministic organization identity resolution plan", () => {
 
   it("binds a single root and preserves the exact persisted match rule", () => {
     const result = plan({
-      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
-      rootMappings: [{ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT }],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
+      rootMappings: [
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+      ],
     });
 
     expect(result).toMatchObject({
@@ -157,7 +163,9 @@ describe("deterministic organization identity resolution plan", () => {
         matchRule: "name_country",
         legacyCandidateCompanyId: COMPANY_B,
       },
-      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
     });
 
     expect(result).toMatchObject({
@@ -178,7 +186,9 @@ describe("deterministic organization identity resolution plan", () => {
         { identifierKey: first.key, companyId: COMPANY_A },
         { identifierKey: first.key, companyId: COMPANY_A },
       ],
-      rootMappings: [{ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT }],
+      rootMappings: [
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+      ],
     });
     const before = JSON.stringify(facts);
     const reversed = input({
@@ -187,7 +197,9 @@ describe("deterministic organization identity resolution plan", () => {
         { identifierKey: first.key, companyId: COMPANY_A },
         { identifierKey: second.key, companyId: COMPANY_B },
       ],
-      rootMappings: [{ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT }],
+      rootMappings: [
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+      ],
     });
 
     expect(planOrganizationIdentityResolution(facts)).toEqual(
@@ -198,7 +210,9 @@ describe("deterministic organization identity resolution plan", () => {
 
   it("includes semantic input facts in inputHash but excludes reingest fields from conflictFingerprint", () => {
     const conflict = {
-      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
       blocker: {
         blockerKey: "n:acme:de",
         matchRule: "name_country",
@@ -225,8 +239,12 @@ describe("deterministic organization identity resolution plan", () => {
     });
 
     expect(changedPayload.inputHash).not.toBe(original.inputHash);
-    expect(changedPayload.conflictFingerprint).toBe(original.conflictFingerprint);
-    expect(changedBlocker.conflictFingerprint).not.toBe(original.conflictFingerprint);
+    expect(changedPayload.conflictFingerprint).toBe(
+      original.conflictFingerprint,
+    );
+    expect(changedBlocker.conflictFingerprint).not.toBe(
+      original.conflictFingerprint,
+    );
   });
 
   it("rejects contradictory facts, alias chains, malformed tokens, and unsafe containers without echoing them", () => {
@@ -246,7 +264,9 @@ describe("deterministic organization identity resolution plan", () => {
         ],
       }),
     ).toThrow(resolutionError());
-    expect(() => plan({ resolverVersion: "bad/value" })).toThrow(resolutionError());
+    expect(() => plan({ resolverVersion: "bad/value" })).toThrow(
+      resolutionError(),
+    );
     expect(() =>
       plan({ raw: { ...input().raw, payloadHash: "UPPERCASE" } }),
     ).toThrow(resolutionError());
@@ -268,8 +288,12 @@ describe("deterministic organization identity resolution plan", () => {
       },
     });
 
-    expect(() => planOrganizationIdentityResolution(hostile)).toThrow(resolutionError());
+    expect(() => planOrganizationIdentityResolution(hostile)).toThrow(
+      resolutionError(),
+    );
     expect(getterCalls).toBe(0);
-    expect(() => planOrganizationIdentityResolution(proxy)).toThrow(resolutionError());
+    expect(() => planOrganizationIdentityResolution(proxy)).toThrow(
+      resolutionError(),
+    );
   });
 });
