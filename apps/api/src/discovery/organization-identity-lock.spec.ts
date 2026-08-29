@@ -12,12 +12,12 @@ const OTHER_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 describe("organization identity composite lock", () => {
   it("takes the workspace suppression lock before the workspace identity lock", async () => {
     const calls: unknown[][] = [];
-    const executeRaw = vi.fn(async (...args: unknown[]) => {
+    const queryRaw = vi.fn(async (...args: unknown[]) => {
       calls.push(args);
-      return 1;
+      return [{ locked: "" }];
     });
-    const queryRaw = vi.fn(async () => {
-      throw new Error("void advisory locks must not use queryRaw");
+    const executeRaw = vi.fn(async () => {
+      throw new Error("advisory locks use one typed queryRaw path");
     });
 
     const receipt = await lockWorkspaceSuppressionThenIdentity(
@@ -28,8 +28,8 @@ describe("organization identity composite lock", () => {
       WORKSPACE_ID,
     );
 
-    expect(executeRaw).toHaveBeenCalledTimes(2);
-    expect(queryRaw).not.toHaveBeenCalled();
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(executeRaw).not.toHaveBeenCalled();
     expect(calls[0]?.slice(1)).toEqual([
       `acquisition-suppression-policy:${WORKSPACE_ID}`,
     ]);
@@ -46,7 +46,7 @@ describe("organization identity composite lock", () => {
   it("rejects a forged or cross-workspace receipt", async () => {
     const receipt = await lockWorkspaceSuppressionThenIdentity(
       {
-        $executeRaw: vi.fn(async () => 1),
+        $queryRaw: vi.fn(async () => [{ locked: "" }]),
       } as unknown as Prisma.TransactionClient,
       WORKSPACE_ID,
     );

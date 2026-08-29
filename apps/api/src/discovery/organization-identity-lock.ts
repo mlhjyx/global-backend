@@ -23,10 +23,10 @@ export async function lockWorkspaceSuppressionThenIdentity(
     tx,
     workspaceId,
   );
-  await tx.$executeRaw`
+  await tx.$queryRaw`
     SELECT pg_advisory_xact_lock(hashtextextended(${
       "organization-identity:" + workspaceId
-    }, 0))`;
+    }, 0))::text AS "locked"`;
   return Object.freeze({
     workspaceId,
     suppressionPolicyLock,

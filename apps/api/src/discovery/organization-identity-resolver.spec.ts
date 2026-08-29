@@ -107,23 +107,22 @@ function transactionFixture(options: FixtureOptions = {}) {
       dedupeKey: "d:legacy.example",
     },
   ];
-  let queryIndex = 0;
   let observedCommand: Record<string, unknown> | null = null;
   let observedRawSql = "";
-  const executeRaw = vi.fn(async (...args: unknown[]) => {
-    const key = args.slice(1).find((value) => typeof value === "string");
-    if (typeof key !== "string") throw new Error("missing lock key");
-    events.push(
-      key.startsWith("acquisition-suppression-policy:")
-        ? "suppression-lock"
-        : "identity-lock",
-    );
-    return 1;
-  });
   const queryRaw = vi.fn(async (...args: unknown[]) => {
-    queryIndex += 1;
-    if (queryIndex === 1) {
-      observedRawSql = (args[0] as TemplateStringsArray).join("?");
+    const sql = (args[0] as TemplateStringsArray).join("?");
+    if (sql.includes("pg_advisory_xact_lock")) {
+      const key = args.slice(1).find((value) => typeof value === "string");
+      if (typeof key !== "string") throw new Error("missing lock key");
+      events.push(
+        key.startsWith("acquisition-suppression-policy:")
+          ? "suppression-lock"
+          : "identity-lock",
+      );
+      return [{ locked: "" }];
+    }
+    if (sql.includes('FROM "raw_source_record"')) {
+      observedRawSql = sql;
       events.push("raw-read");
       return (
         options.rawRows ?? [
@@ -153,7 +152,6 @@ function transactionFixture(options: FixtureOptions = {}) {
 
   const tx = {
     $queryRaw: queryRaw,
-    $executeRaw: executeRaw,
     rawSourceGovernanceDisposition: {
       findFirst: vi.fn(async () => {
         events.push("raw-disposition");

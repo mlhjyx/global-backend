@@ -1,6 +1,6 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from "@prisma/client";
 
-const POLICY_LOCK_RECEIPT = Symbol('workspace-suppression-policy-lock');
+const POLICY_LOCK_RECEIPT = Symbol("workspace-suppression-policy-lock");
 
 export type SuppressionPolicyLockReceipt = Readonly<{
   workspaceId: string;
@@ -18,8 +18,8 @@ export async function lockWorkspaceSuppressionPolicy(
   tx: Prisma.TransactionClient,
   workspaceId: string,
 ): Promise<SuppressionPolicyLockReceipt> {
-  await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtextextended(${'acquisition-suppression-policy:' + workspaceId}, 0))`;
+  await tx.$queryRaw`
+    SELECT pg_advisory_xact_lock(hashtextextended(${"acquisition-suppression-policy:" + workspaceId}, 0))::text AS "locked"`;
   return Object.freeze({ workspaceId, [POLICY_LOCK_RECEIPT]: true as const });
 }
 
@@ -27,7 +27,10 @@ export function assertWorkspaceSuppressionPolicyLock(
   receipt: SuppressionPolicyLockReceipt,
   workspaceId: string,
 ): void {
-  if (receipt?.[POLICY_LOCK_RECEIPT] !== true || receipt.workspaceId !== workspaceId) {
-    throw new Error('workspace suppression policy lock receipt mismatch');
+  if (
+    receipt?.[POLICY_LOCK_RECEIPT] !== true ||
+    receipt.workspaceId !== workspaceId
+  ) {
+    throw new Error("workspace suppression policy lock receipt mismatch");
   }
 }
