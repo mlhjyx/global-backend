@@ -279,13 +279,24 @@ function isLowercaseSha256(value: unknown): value is string {
   return typeof value === "string" && LOWERCASE_SHA256.test(value);
 }
 
-function isLifecycleTimestamp(value: unknown): value is Date | string | null {
-  if (value === null) return true;
-  if (value instanceof Date) return !Number.isNaN(value.getTime());
-  if (typeof value !== "string" || !CANONICAL_UTC_TIMESTAMP.test(value)) {
-    return false;
+function parseLifecycleTimestamp(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    if (!CANONICAL_UTC_TIMESTAMP.test(value)) return undefined;
+    return new Date(value).toISOString() === value ? value : undefined;
   }
-  return new Date(value).toISOString() === value;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Object.getPrototypeOf(value) !== Date.prototype ||
+    Reflect.ownKeys(value).length !== 0
+  ) {
+    return undefined;
+  }
+  const milliseconds = Date.prototype.getTime.call(value);
+  return Number.isFinite(milliseconds)
+    ? new Date(milliseconds).toISOString()
+    : undefined;
 }
 
 function parseMigrationRow(
@@ -297,20 +308,22 @@ function parseMigrationRow(
     "finished_at",
     "rolled_back_at",
   ]);
+  const finishedAt = fields && parseLifecycleTimestamp(fields[2]);
+  const rolledBackAt = fields && parseLifecycleTimestamp(fields[3]);
   if (
     fields === undefined ||
     !isMachineName(fields[0], MIGRATION_NAME) ||
     !isLowercaseSha256(fields[1]) ||
-    !isLifecycleTimestamp(fields[2]) ||
-    !isLifecycleTimestamp(fields[3])
+    finishedAt === undefined ||
+    rolledBackAt === undefined
   ) {
     return undefined;
   }
   return Object.freeze({
     migration_name: fields[0],
     checksum: fields[1],
-    finished_at: fields[2],
-    rolled_back_at: fields[3],
+    finished_at: finishedAt,
+    rolled_back_at: rolledBackAt,
   });
 }
 
