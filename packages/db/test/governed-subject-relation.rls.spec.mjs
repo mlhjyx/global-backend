@@ -280,7 +280,10 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
       FROM gsr_harness.upgrade_baseline_attestation;
     `).split("\t");
     assert.equal(baseline[0], UPGRADE_DATABASE);
-    assert.match(baseline[1] ?? "", /^[0-9]+$/);
+    assert.equal(
+      baseline[1],
+      psql(UPGRADE_DATABASE, "SELECT oid::text FROM pg_database WHERE datname=current_database();"),
+    );
     assert.equal(baseline[4], "0");
     assert.equal(baseline[5], "0");
 
@@ -460,6 +463,36 @@ describe("governed subject relation schema PostgreSQL and RLS", () => {
           '90000000-0000-4000-8000-000000000022',NULL,'${digest}',now()
         );
       `, { rejects: /governed_subject_relation_source_namespace_check/i });
+      psql(database, `
+        SET session_replication_role=replica;
+        INSERT INTO governed_subject_relation(
+          id,scope_key,workspace_id,authority_id,account_id,operation_id,
+          operation_generation,ack_id,operation_subject_id,parent_subject_id,
+          child_subject_id,relation_key,relation_kind,source_ref_namespace,
+          source_ref_uuid,source_ref_sha256,contract_sha256,created_at
+        ) VALUES (
+          '90000000-0000-4000-8000-000000000031','${WORKSPACE_A}','${WORKSPACE_A}',
+          '${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,
+          '${digest}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}',
+          'negative:empty_source_union','MATERIALIZED_CHILD','record',
+          NULL,NULL,'${digest}',now()
+        );
+      `, { rejects: /governed_subject_relation_source_ref_check/i });
+      psql(database, `
+        SET session_replication_role=replica;
+        INSERT INTO governed_subject_relation(
+          id,scope_key,workspace_id,authority_id,account_id,operation_id,
+          operation_generation,ack_id,operation_subject_id,parent_subject_id,
+          child_subject_id,relation_key,relation_kind,source_ref_namespace,
+          source_ref_uuid,source_ref_sha256,contract_sha256,created_at
+        ) VALUES (
+          '90000000-0000-4000-8000-000000000041','${WORKSPACE_A}','${WORKSPACE_A}',
+          '${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,
+          '${digest}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}',
+          'negative:double_source_union','MATERIALIZED_CHILD','record',
+          '90000000-0000-4000-8000-000000000042','${digest}','${digest}',now()
+        );
+      `, { rejects: /governed_subject_relation_source_ref_check/i });
     }
   });
 
