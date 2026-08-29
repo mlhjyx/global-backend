@@ -204,4 +204,3 @@
 - [ ] **Step 5: 选择下一张卡**
 
   优先顺序：`Program C C1 service principal + handoff receipt contract`，或 `Program A Technical Quote current-main slice`；不得启动 Discovery GREEN、真实 Pilot、runtime cutover、Provider wire 或邮件发送。
-
