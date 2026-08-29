@@ -32,7 +32,17 @@ test("current repository keeps representative business and dynamic chains comple
       node.id.startsWith("service:temporal-schedule:") &&
       !node.id.includes("registration"),
   );
-  assert.equal(schedules.length, 9);
+  assert.equal(schedules.length, 10);
+  assert.equal(
+    graph.edges.some(
+      (edge) =>
+        edge.from === "service:temporal-schedule:raw-source-retention" &&
+        edge.kind === "calls" &&
+        edge.to === "workflow:temporal:rawRetentionSweepWorkflow",
+    ),
+    true,
+    "raw-source-retention must point to rawRetentionSweepWorkflow",
+  );
   for (const schedule of schedules) {
     assert.equal(
       graph.edges.some(
