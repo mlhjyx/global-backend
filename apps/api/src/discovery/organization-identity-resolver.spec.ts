@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   OrganizationIdentityResolverError,
@@ -73,6 +73,8 @@ type FixtureOptions = Readonly<{
     dedupeKey: string;
   }[];
   suppressions?: readonly { type: string; value: string }[];
+  rawRows?: readonly Record<string, unknown>[];
+  restricted?: boolean;
   commandReceipt?: (
     command: Record<string, unknown>,
   ) => Record<string, unknown>;
@@ -119,18 +121,20 @@ function transactionFixture(options: FixtureOptions = {}) {
     }
     if (queryIndex === 3) {
       events.push("raw-for-key-share");
-      return [
-        {
-          id: RAW_ID,
-          workspace_id: WORKSPACE_ID,
-          provider_key: providerKey,
-          payload,
-          payload_hash: PAYLOAD_HASH,
-          ingest_version: "raw-source/v2",
-          ingest_status: "ACCEPTED",
-          is_current: true,
-        },
-      ];
+      return (
+        options.rawRows ?? [
+          {
+            id: RAW_ID,
+            workspace_id: WORKSPACE_ID,
+            provider_key: providerKey,
+            payload,
+            payload_hash: PAYLOAD_HASH,
+            ingest_version: "raw-source/v2",
+            ingest_status: "ACCEPTED",
+            is_current: true,
+          },
+        ]
+      );
     }
     events.push("command");
     const commandJson = args
@@ -148,7 +152,7 @@ function transactionFixture(options: FixtureOptions = {}) {
     rawSourceGovernanceDisposition: {
       findFirst: vi.fn(async () => {
         events.push("raw-disposition");
-        return null;
+        return options.restricted ? { id: "restricted" } : null;
       }),
     },
     suppressionRecord: {
@@ -162,10 +166,14 @@ function transactionFixture(options: FixtureOptions = {}) {
         events.push("blocker-read");
         return legacyCompany;
       }),
-      findMany: vi.fn(async () => {
-        events.push("company-read");
-        return companies;
-      }),
+      findMany: vi.fn(
+        async ({ where }: { where: { id: { in: string[] } } }) => {
+          events.push("company-read");
+          return companies.filter((company) =>
+            where.id.in.includes(company.id),
+          );
+        },
+      ),
       create: vi.fn(async () => {
         events.push("company-create");
         return {
@@ -268,7 +276,7 @@ describe("organization identity DB resolver source contract", () => {
       matchRule: "identity_v2",
       rawRecordId: RAW_ID,
       replayed: false,
-      identifierCount: 1,
+      identifierCount: 2,
     });
     expect(Object.isFrozen(receipt)).toBe(true);
     expect(fixture.create).not.toHaveBeenCalled();
@@ -304,8 +312,8 @@ describe("organization identity DB resolver source contract", () => {
     expect(receipt).toMatchObject({
       kind: "bound",
       companyId: COMPANY_A,
-      matchRule: "domain_exact",
-      identifierCount: 0,
+      matchRule: "identity_v2",
+      identifierCount: 1,
     });
     expect(fixture.create).not.toHaveBeenCalled();
     expect((fixture.command?.plan as { kind: string }).kind).toBe(
@@ -328,7 +336,7 @@ describe("organization identity DB resolver source contract", () => {
     expect(receipt).toMatchObject({
       kind: "bound",
       companyId: NEW_COMPANY,
-      matchRule: "domain_exact",
+      matchRule: "identity_v2",
     });
     expect(fixture.create).toHaveBeenCalledWith({
       data: {
@@ -338,7 +346,7 @@ describe("organization identity DB resolver source contract", () => {
         country: "DE",
         status: "NEW",
         dedupeKey: "d:acme.example",
-        attributes: null,
+        attributes: Prisma.DbNull,
       },
       select: expect.objectContaining({ id: true }),
     });
@@ -450,6 +458,104 @@ describe("organization identity DB resolver source contract", () => {
       }),
     );
   });
+
+  it("rejects hostile and non-exact resolver inputs before any transaction call", async () => {
+    const getter = vi.fn(() => WORKSPACE_ID);
+    const accessor = Object.create(Object.prototype, {
+      workspaceId: { enumerable: true, get: getter },
+      rawRecordId: { enumerable: true, value: RAW_ID },
+    });
+    const candidates: unknown[] = [
+      null,
+      [],
+      { workspaceId: WORKSPACE_ID, rawRecordId: RAW_ID, extra: true },
+      accessor,
+    ];
+    for (const candidate of candidates) {
+      const fixture = transactionFixture({
+        commandReceipt: (command) => boundReceipt(command, COMPANY_A),
+      });
+      await expect(
+        resolveOrganizationIdentityForRaw(
+          fixture.tx,
+          candidate as { workspaceId: string; rawRecordId: string },
+        ),
+      ).rejects.toMatchObject({ code: "IDENTITY_RESOLUTION_INPUT_INVALID" });
+      expect(fixture.events).toEqual([]);
+    }
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for absent and restricted Raw records", async () => {
+    const absent = transactionFixture({
+      rawRows: [],
+      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
+    });
+    await expect(
+      resolveOrganizationIdentityForRaw(absent.tx, {
+        workspaceId: WORKSPACE_ID,
+        rawRecordId: RAW_ID,
+      }),
+    ).rejects.toMatchObject({ code: "IDENTITY_RAW_NOT_RESOLVABLE" });
+
+    const restricted = transactionFixture({
+      restricted: true,
+      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
+    });
+    await expect(
+      resolveOrganizationIdentityForRaw(restricted.tx, {
+        workspaceId: WORKSPACE_ID,
+        rawRecordId: RAW_ID,
+      }),
+    ).rejects.toMatchObject({
+      code: "IDENTITY_RAW_PROCESSING_RESTRICTED",
+    });
+    expect(restricted.events).not.toContain("command");
+  });
+
+  it("rejects a DB receipt that does not bind the requested Raw occurrence", async () => {
+    const fixture = transactionFixture({
+      identifierCompanyId: COMPANY_A,
+      commandReceipt: (command) => ({
+        ...boundReceipt(command, COMPANY_A),
+        raw_record_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      }),
+    });
+    await expect(
+      resolveOrganizationIdentityForRaw(fixture.tx, {
+        workspaceId: WORKSPACE_ID,
+        rawRecordId: RAW_ID,
+      }),
+    ).rejects.toMatchObject({
+      code: "IDENTITY_RESOLUTION_RECEIPT_INVALID",
+    });
+  });
+
+  it.each([
+    ["55P03", "lock wait", "IDENTITY_RESOLUTION_LOCK_TIMEOUT"],
+    ["57014", "statement timeout", "IDENTITY_RESOLUTION_LOCK_TIMEOUT"],
+    ["40001", "serialization", "IDENTITY_RESOLUTION_PLAN_STALE"],
+    ["P0001", "IDENTITY_INPUT_DRIFT", "IDENTITY_INPUT_DRIFT"],
+    [
+      "P0001",
+      "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
+      "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
+    ],
+  ])(
+    "maps PostgreSQL %s to the closed %s error",
+    async (code, message, expected) => {
+      const fixture = transactionFixture({
+        identifierCompanyId: COMPANY_A,
+        commandError: Object.assign(new Error(message), { code }),
+      });
+      await expect(
+        resolveOrganizationIdentityForRaw(fixture.tx, {
+          workspaceId: WORKSPACE_ID,
+          rawRecordId: RAW_ID,
+        }),
+      ).rejects.toMatchObject({ code: expected });
+    },
+  );
 
   it("maps only closed PostgreSQL failures and never exposes database details", async () => {
     const marker = "postgresql://owner:secret@customer";
