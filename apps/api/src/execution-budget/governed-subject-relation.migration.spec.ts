@@ -301,10 +301,12 @@ describe('governed subject relation schema migration', () => {
       .toThrow('MISSING_POLICY_governed_subject');
   });
 
-  it('keeps SQL product-neutral and projects complete Prisma models plus relation anchors', async () => {
+  it('keeps the Task 1 SQL product-neutral', async () => {
     const sql = (await migration()).toLowerCase();
     for (const forbidden of FORBIDDEN_OWNERSHIP) expect(sql).not.toContain(forbidden);
+  });
 
+  it('projects complete Prisma models plus relation anchors independently of migration presence', async () => {
     const schema = await readFile(schemaUrl, 'utf8');
     const projection = Object.keys(MODEL_FIELDS).map((model) => modelBody(schema, model)).join('\n');
     for (const [model, fields] of Object.entries(MODEL_FIELDS)) {
