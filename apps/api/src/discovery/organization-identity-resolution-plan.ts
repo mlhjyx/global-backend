@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { types } from "node:util";
 import {
   GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
-  type GovernedRawSourceProviderKey,
 } from "./raw-source-provider-schema";
 
 const RESOLVER_VERSION = "organization-identity-resolver/v1" as const;
@@ -15,8 +14,12 @@ const MAX_AUTHORITY_IDENTIFIERS = 32;
 const MAX_BINDINGS = 64;
 const MAX_ROOT_MAPPINGS = 64;
 
+type GovernedRawSourceProviderKey =
+  (typeof GOVERNED_RAW_SOURCE_PROVIDER_KEYS)[number];
 type SafeJson = null | boolean | number | string | SafeJson[] | SafeJsonRecord;
-type SafeJsonRecord = Record<string, SafeJson>;
+interface SafeJsonRecord {
+  [key: string]: SafeJson;
+}
 
 type PlanErrorCode =
   | "IDENTITY_RESOLUTION_INPUT_INVALID"
@@ -149,6 +152,7 @@ function passiveJsonClone(value: unknown): SafeJson {
       }
       const result: SafeJsonRecord = Object.create(null) as SafeJsonRecord;
       for (const key of keys) {
+        if (typeof key !== "string") return reject();
         const descriptor = Object.getOwnPropertyDescriptor(input, key);
         if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
           return reject();
@@ -382,9 +386,15 @@ function parseInput(value: unknown) {
     blockerKeys.join(",") === "blockerKey,matchRule" ||
     blockerKeys.join(",") === "blockerKey,legacyCandidateCompanyId,matchRule";
   if (!allowsAbsentCandidate) return reject();
-  const parsedBlocker = {
+  const parsedBlocker: {
+    blockerKey: string;
+    matchRule: "domain_exact" | "name_country";
+    legacyCandidateCompanyId: string | null;
+  } = {
     blockerKey: requiredString(blocker, "blockerKey", 512),
-    matchRule: requiredString(blocker, "matchRule", 32),
+    matchRule: requiredString(blocker, "matchRule", 32) as
+      | "domain_exact"
+      | "name_country",
     legacyCandidateCompanyId: optionalUuid(blocker, "legacyCandidateCompanyId"),
   };
   if (
