@@ -1,5 +1,8 @@
 BEGIN;
 
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '60s';
+
 CREATE TYPE "organization_identifier_status" AS ENUM ('ACTIVE', 'PENDING_CONFLICT', 'REVOKED');
 CREATE TYPE "organization_identity_conflict_status" AS ENUM ('OPEN', 'RESOLVING', 'RESOLVED');
 CREATE TYPE "organization_identity_decision_action" AS ENUM ('MERGE', 'KEEP_SEPARATE', 'SPLIT');

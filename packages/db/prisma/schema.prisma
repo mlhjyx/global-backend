@@ -1114,7 +1114,6 @@ model RawSourceRecord {
   governanceDispositions  RawSourceGovernanceDisposition[]
   organizationIdentifiers OrganizationIdentifier[]
   identityConflicts       OrganizationIdentityConflict[]
-  identityLinks           IdentityLink[]
 
   @@unique([workspaceId, id], map: "raw_source_record_workspace_id_id_key")
   @@unique([workspaceId, sourceEntityId, ingestKey], map: "raw_source_record_workspace_source_entity_ingest_key")
@@ -1256,8 +1255,7 @@ model IdentityLink {
   conflictId      String?             @map("conflict_id") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at")
 
-  rawRecord RawSourceRecord               @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "identity_link_workspace_raw_fkey")
-  conflict  OrganizationIdentityConflict? @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "identity_link_conflict_scope_fkey")
+  conflict OrganizationIdentityConflict? @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "identity_link_conflict_scope_fkey")
 
   @@index([workspaceId])
   @@index([canonicalId])

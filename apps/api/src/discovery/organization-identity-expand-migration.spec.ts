@@ -306,7 +306,10 @@ describe("Organization Identity v2 expand migration", () => {
       '@map("request_precondition_etag") @db.VarChar(256)',
     );
     expect(schema).toMatch(
-      /model RawSourceRecord \{[\s\S]+governanceDispositions\s+RawSourceGovernanceDisposition\[\][\s\S]+organizationIdentifiers\s+OrganizationIdentifier\[\][\s\S]+identityConflicts\s+OrganizationIdentityConflict\[\][\s\S]+identityLinks\s+IdentityLink\[\]/u,
+      /model RawSourceRecord \{[\s\S]+governanceDispositions\s+RawSourceGovernanceDisposition\[\][\s\S]+organizationIdentifiers\s+OrganizationIdentifier\[\][\s\S]+identityConflicts\s+OrganizationIdentityConflict\[\]/u,
+    );
+    expect(schema).not.toMatch(
+      /model IdentityLink \{[\s\S]+@relation\([^\n]+identity_link_workspace_raw_fkey/u,
     );
     expect(schema).toMatch(
       /model RuntimeProcessLease \{[\s\S]+artifactDigest[\s\S]+migrationRevision[\s\S]+lastSeenAt/u,
