@@ -634,4 +634,96 @@ describe("deterministic organization identity resolution plan", () => {
     expect(Object.isFrozen(conflict.companyIds)).toBe(true);
     expect(Object.isFrozen(conflict.identifierKeys)).toBe(true);
   });
+
+  it("keeps provider-sensitive input hashes and occurrence-invariant conflict fingerprints isolated", () => {
+    const domain = (providerKey: string) => ({
+      providerKey,
+      scheme: "domain",
+      jurisdiction: "GLOBAL",
+      normalizedValue: "acme.example",
+      validatorVersion: "domain-v1",
+      normalizerVersion: "organization-identity-authority/v1",
+      key: "domain:GLOBAL:acme.example",
+    });
+    const conflict = (providerKey: string, rawOverrides: Record<string, string> = {}) =>
+      plan({
+        raw: { ...input().raw, providerKey, ...rawOverrides },
+        authorityIdentifiers: [domain(providerKey)],
+        existingBindings: [{ identifierKey: domain(providerKey).key, companyId: COMPANY_A }],
+        blocker: {
+          blockerKey: "n:acme:de",
+          matchRule: "name_country",
+          legacyCandidateCompanyId: COMPANY_B,
+        },
+      });
+    const original = conflict("registry");
+    const provider = conflict("directory");
+    const payload = conflict("registry", { payloadHash: "b".repeat(64) });
+    const ingest = conflict("registry", { ingestVersion: "raw-source/v2" });
+    for (const result of [provider, payload, ingest]) {
+      expect(result.inputHash).not.toBe(original.inputHash);
+      if (result.kind !== "conflict" || original.kind !== "conflict") {
+        throw new Error("expected conflict");
+      }
+      expect(result.conflictFingerprint).toBe(original.conflictFingerprint);
+    }
+  });
+
+  it("isolates conflict-type sensitivity and malformed identity primitives", () => {
+    const second = identifier({ normalizedValue: "DE9999" });
+    const split = plan({
+      authorityIdentifiers: [identifier(), second],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+        { identifierKey: second.key, companyId: COMPANY_B },
+      ],
+    });
+    const disagreement = plan({
+      authorityIdentifiers: [identifier(), second],
+      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      blocker: {
+        blockerKey: "n:acme:de",
+        matchRule: "name_country",
+        legacyCandidateCompanyId: COMPANY_B,
+      },
+    });
+    if (split.kind !== "conflict" || disagreement.kind !== "conflict") {
+      throw new Error("expected conflicts");
+    }
+    expect(split.companyIds).toEqual(disagreement.companyIds);
+    expect(split.identifierKeys).toEqual(disagreement.identifierKeys);
+    expect(split.conflictFingerprint).not.toBe(disagreement.conflictFingerprint);
+
+    for (const candidate of [
+      input({ raw: { ...input().raw, rawRecordId: "not-a-uuid" } }),
+      input({ raw: { ...input().raw, providerKey: "not-governed" } }),
+      input({ blocker: { ...input().blocker, matchRule: "not-a-rule" } }),
+      input({ resolverVersion: "organization-identity-resolver/v2" }),
+    ]) {
+      expectRejected(candidate);
+    }
+  });
+
+  it("deep-freezes and detaches caller aliases for every non-conflict variant", () => {
+    const cases = [
+      plan({ existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }] }),
+      plan({ blocker: { ...input().blocker, legacyCandidateCompanyId: COMPANY_A } }),
+      plan(),
+    ];
+    expect(cases.map((result) => result.kind)).toEqual([
+      "bind_existing",
+      "lazy_upgrade",
+      "create_new",
+    ]);
+    for (const result of cases) {
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.identifiers)).toBe(true);
+      expect(Object.isFrozen(result.identifiers[0]!)).toBe(true);
+    }
+    const facts = input({ existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }] });
+    const result = planOrganizationIdentityResolution(facts);
+    facts.existingBindings[0]!.companyId = COMPANY_B;
+    if (result.kind !== "bind_existing") throw new Error("expected binding");
+    expect(result.companyId).toBe(COMPANY_A);
+  });
 });
