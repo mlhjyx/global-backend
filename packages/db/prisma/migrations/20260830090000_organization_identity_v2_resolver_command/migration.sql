@@ -590,15 +590,21 @@ BEGIN
   END IF;
 
   SELECT array_agg(
-    DISTINCT coalesce(m.canonical_company_id, (binding->>'companyId')::uuid)
-    ORDER BY coalesce(m.canonical_company_id, (binding->>'companyId')::uuid)
+    DISTINCT coalesce(
+      m.canonical_company_id,
+      (binding_fact.value->>'companyId')::uuid
+    )
+    ORDER BY coalesce(
+      m.canonical_company_id,
+      (binding_fact.value->>'companyId')::uuid
+    )
   )
   INTO bound_company_ids
-  FROM jsonb_array_elements(command_bindings) AS binding
+  FROM jsonb_array_elements(command_bindings) AS binding_fact(value)
   LEFT JOIN public.organization_canonical_mapping AS m
     ON m.workspace_id = command_workspace_id
     AND m.status = 'ACTIVE'
-    AND m.source_company_id = (binding->>'companyId')::uuid;
+    AND m.source_company_id = (binding_fact.value->>'companyId')::uuid;
   SELECT coalesce(m.canonical_company_id, command_legacy_company_id)
   INTO legacy_root_company_id
   FROM (SELECT command_legacy_company_id AS company_id) AS legacy
