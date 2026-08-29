@@ -367,6 +367,49 @@ describe('provider-owned company receipt lineage', () => {
     );
   });
 
+  it('public-web passes hostile getter and descriptor-trap failures through without logging', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://hostile.test/', title: 'Candidate' }] }, costCents: 0 }
+      : { data: { text: 'candidate content '.repeat(30) }, costCents: 0 });
+    let getterCalls = 0;
+    const hostileGetter = Object.defineProperty({}, 'code', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 'sensitive-getter-payload';
+      },
+    });
+    const hostileProxy = new Proxy(Object.create(null), {
+      ownKeys() {
+        throw new Error('sensitive-descriptor-payload');
+      },
+    });
+    mocks.executeStructuredTaskWithRuntime
+      .mockRejectedValueOnce(hostileGetter)
+      .mockRejectedValueOnce(hostileProxy);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const caught: unknown[] = [];
+
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await new PublicWebDiscoveryProvider({
+            gateway: {} as never,
+            broker: executionBroker,
+          }).discoverCompanies(query, context());
+        } catch (error) {
+          caught.push(error);
+        }
+      }
+      expect(caught[0]).toBe(hostileGetter);
+      expect(caught[1]).toBe(hostileProxy);
+      expect(getterCalls).toBe(0);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('directory applies first-wins final dedup indexes to each physical extract-list receipt', async () => {
     const parent = vi.fn();
     const executionBroker = broker(async (toolId, _input, ctx) => {

@@ -62,11 +62,52 @@ describe('isExecutionControlError', () => {
       message: 'provider returned 502',
       cause: { type: 'ProviderUnavailableError', message: 'upstream down' },
     })).toBe(false);
+    expect(isExecutionControlError(new Error('ordinary provider failure'))).toBe(
+      false,
+    );
   });
 
-  it('terminates safely on cyclic failure causes', () => {
+  it('never executes an own getter and requires the caller to pass the hostile shape through', () => {
+    let getterCalls = 0;
+    const failure = Object.defineProperty({}, 'code', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 'sensitive-getter-payload';
+      },
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+    expect(getterCalls).toBe(0);
+  });
+
+  it('contains Proxy descriptor traps and requires pass-through without leaking trap text', () => {
+    const failure = new Proxy(Object.create(null), {
+      ownKeys() {
+        throw new Error('sensitive-descriptor-trap-payload');
+      },
+    });
+
+    expect(() => isExecutionControlError(failure)).not.toThrow();
+    expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('requires pass-through on cyclic failure causes', () => {
     const failure: { message: string; cause?: unknown } = { message: 'ordinary failure' };
     failure.cause = failure;
-    expect(isExecutionControlError(failure)).toBe(false);
+    expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('requires pass-through when a safe cause chain exceeds the depth bound', () => {
+    const root: { name: string; cause?: unknown } = { name: 'ActivityFailure' };
+    let cursor = root;
+    for (let index = 0; index < 14; index += 1) {
+      const next: { name: string; cause?: unknown } = {
+        name: 'ProviderUnavailableError',
+      };
+      cursor.cause = next;
+      cursor = next;
+    }
+    expect(isExecutionControlError(root)).toBe(true);
   });
 });
