@@ -321,7 +321,9 @@ describe("deterministic organization identity resolution plan", () => {
       scheme: "forged",
       validatorVersion: "forged-v1",
     });
-    const forgedValidator = identifier({ validatorVersion: "registry-id-v999" });
+    const forgedValidator = identifier({
+      validatorVersion: "registry-id-v999",
+    });
     const invalidDomain = {
       ...identifier({
         scheme: "domain",
@@ -363,13 +365,35 @@ describe("deterministic organization identity resolution plan", () => {
     try {
       plan({
         existingBindings: [
-          { identifierKey: "registry-id:DE:NOT-IN-AUTHORITY", companyId: COMPANY_A },
-          { identifierKey: "registry-id:DE:NOT-IN-AUTHORITY", companyId: COMPANY_B },
+          {
+            identifierKey: "registry-id:DE:NOT-IN-AUTHORITY",
+            companyId: COMPANY_A,
+          },
+          {
+            identifierKey: "registry-id:DE:NOT-IN-AUTHORITY",
+            companyId: COMPANY_B,
+          },
         ],
       });
       throw new Error("expected contradictory binding rejection");
     } catch (error) {
       expect(errorCode(error)).toBe("IDENTITY_RESOLUTION_INPUT_CONTRADICTORY");
+    }
+  });
+
+  it("does not allow changed emitted authority provenance to share an input hash", () => {
+    const original = plan();
+    const forged = input({
+      authorityIdentifiers: [
+        identifier({ validatorVersion: "registry-id-v999" }),
+      ],
+    });
+    try {
+      expect(planOrganizationIdentityResolution(forged).inputHash).not.toBe(
+        original.inputHash,
+      );
+    } catch (error) {
+      expect(errorCode(error)).toBe("IDENTITY_RESOLUTION_INPUT_INVALID");
     }
   });
 
@@ -391,14 +415,21 @@ describe("deterministic organization identity resolution plan", () => {
     if (original.kind !== "conflict") throw new Error("expected conflict");
 
     const hashVariants = [
-      { raw: { ...input().raw, rawRecordId: "55555555-5555-4555-8555-555555555555" } },
+      {
+        raw: {
+          ...input().raw,
+          rawRecordId: "55555555-5555-4555-8555-555555555555",
+        },
+      },
       { raw: { ...input().raw, payloadHash: "b".repeat(64) } },
       { raw: { ...input().raw, ingestVersion: "raw-source/v2" } },
       { blocker: { ...conflict.blocker, blockerKey: "n:other:de" } },
       { blocker: { ...conflict.blocker, matchRule: "domain_exact" } },
-      { blocker: { ...conflict.blocker, legacyCandidateCompanyId: COMPANY_ROOT } },
       {
-        authorityIdentifiers: [identifier({ normalizedValue: "DE5678" })],
+        blocker: {
+          ...conflict.blocker,
+          legacyCandidateCompanyId: COMPANY_ROOT,
+        },
       },
       {
         existingBindings: [
@@ -416,6 +447,11 @@ describe("deterministic organization identity resolution plan", () => {
         original.inputHash,
       );
     }
+    expect(
+      plan({
+        authorityIdentifiers: [identifier({ normalizedValue: "DE5678" })],
+      }).inputHash,
+    ).not.toBe(plan().inputHash);
 
     const changedCompany = plan({
       ...conflict,
@@ -426,7 +462,10 @@ describe("deterministic organization identity resolution plan", () => {
     });
     const changedIdentifier = plan({
       ...conflict,
-      authorityIdentifiers: [identifier(), identifier({ normalizedValue: "DE5678" })],
+      authorityIdentifiers: [
+        identifier(),
+        identifier({ normalizedValue: "DE5678" }),
+      ],
       existingBindings: [
         { identifierKey: identifier().key, companyId: COMPANY_A },
         { identifierKey: "registry-id:DE:DE5678", companyId: COMPANY_B },
@@ -438,7 +477,9 @@ describe("deterministic organization identity resolution plan", () => {
     });
     const changedType = plan({
       authorityIdentifiers: [identifier()],
-      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
       blocker: {
         blockerKey: "n:acme:de",
         matchRule: "name_country",
@@ -456,7 +497,10 @@ describe("deterministic organization identity resolution plan", () => {
     }
     const reingest = plan({
       ...conflict,
-      raw: { ...input().raw, rawRecordId: "55555555-5555-4555-8555-555555555555" },
+      raw: {
+        ...input().raw,
+        rawRecordId: "55555555-5555-4555-8555-555555555555",
+      },
     });
     if (reingest.kind !== "conflict") throw new Error("expected conflict");
     expect(reingest.conflictFingerprint).toBe(original.conflictFingerprint);
@@ -477,28 +521,50 @@ describe("deterministic organization identity resolution plan", () => {
       input({ authorityIdentifiers: sparse }),
       input({ authorityIdentifiers: Array.from({ length: 65 }, identifier) }),
       input({ authorityIdentifiers: Array.from({ length: 33 }, identifier) }),
-      input({ existingBindings: Array.from({ length: 65 }, () => ({ identifierKey: identifier().key, companyId: COMPANY_A })) }),
-      input({ rootMappings: Array.from({ length: 65 }, () => ({ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B })) }),
+      input({
+        existingBindings: Array.from({ length: 65 }, () => ({
+          identifierKey: identifier().key,
+          companyId: COMPANY_A,
+        })),
+      }),
+      input({
+        rootMappings: Array.from({ length: 65 }, () => ({
+          sourceCompanyId: COMPANY_A,
+          rootCompanyId: COMPANY_B,
+        })),
+      }),
       customPrototype,
       symbolInput,
       input({ unexpected: marker }),
       input({ raw: { ...input().raw, ingestVersion: "bad\u0001version" } }),
       input({ raw: { ...input().raw, payloadHash: Number.NaN } }),
-      input({ rootMappings: [{ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_A }] }),
-      input({ rootMappings: [
-        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
-        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
-      ] }),
-      input({ rootMappings: [
-        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
-        { sourceCompanyId: COMPANY_B, rootCompanyId: COMPANY_A },
-      ] }),
+      input({
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_A },
+        ],
+      }),
+      input({
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+        ],
+      }),
+      input({
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
+          { sourceCompanyId: COMPANY_B, rootCompanyId: COMPANY_A },
+        ],
+      }),
     ];
     for (const candidate of cases) expectRejected(candidate, marker);
   });
 
   it("never invokes accessor or Proxy traps in nested hostile input", () => {
-    const traps = { ownKeys: 0, getPrototypeOf: 0, getOwnPropertyDescriptor: 0 };
+    const traps = {
+      ownKeys: 0,
+      getPrototypeOf: 0,
+      getOwnPropertyDescriptor: 0,
+    };
     const proxy = new Proxy([identifier()], {
       ownKeys(target) {
         traps.ownKeys += 1;
@@ -525,7 +591,11 @@ describe("deterministic organization identity resolution plan", () => {
 
     expectRejected(input({ authorityIdentifiers: proxy }));
     expectRejected(accessor);
-    expect(traps).toEqual({ ownKeys: 0, getPrototypeOf: 0, getOwnPropertyDescriptor: 0 });
+    expect(traps).toEqual({
+      ownKeys: 0,
+      getPrototypeOf: 0,
+      getOwnPropertyDescriptor: 0,
+    });
     expect(getterCalls).toBe(0);
   });
 
@@ -541,7 +611,10 @@ describe("deterministic organization identity resolution plan", () => {
     expect(Object.isFrozen(result.identifiers[0]!)).toBe(true);
 
     const conflict = plan({
-      authorityIdentifiers: [identifier(), identifier({ normalizedValue: "DE9999" })],
+      authorityIdentifiers: [
+        identifier(),
+        identifier({ normalizedValue: "DE9999" }),
+      ],
       existingBindings: [
         { identifierKey: identifier().key, companyId: COMPANY_A },
         { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },

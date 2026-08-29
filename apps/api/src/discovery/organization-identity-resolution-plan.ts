@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { types } from "node:util";
+import { ORGANIZATION_IDENTITY_AUTHORITY_PROFILES } from "./organization-identity-authority";
 import { GOVERNED_RAW_SOURCE_PROVIDER_KEYS } from "./raw-source-provider-schema";
 
 const RESOLVER_VERSION = "organization-identity-resolver/v1" as const;
@@ -11,6 +12,7 @@ const MAX_OBJECT_FIELDS = 16;
 const MAX_AUTHORITY_IDENTIFIERS = 32;
 const MAX_BINDINGS = 64;
 const MAX_ROOT_MAPPINGS = 64;
+const MAX_ARRAY_PRECHECK_LENGTH = MAX_BINDINGS;
 
 type GovernedRawSourceProviderKey =
   (typeof GOVERNED_RAW_SOURCE_PROVIDER_KEYS)[number];
@@ -82,6 +84,10 @@ function reject(
   throw new OrganizationIdentityResolutionPlanError(code);
 }
 
+function compareOrdinal(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function passiveJsonClone(value: unknown): SafeJson {
   const state = { ancestors: new Set<object>(), nodes: 0 };
   const clone = (input: unknown, depth: number): SafeJson => {
@@ -120,6 +126,7 @@ function passiveJsonClone(value: unknown): SafeJson {
           return reject();
         }
         const length = lengthDescriptor.value;
+        if (length > MAX_ARRAY_PRECHECK_LENGTH) return reject();
         const keys = Reflect.ownKeys(input);
         if (
           keys.length !== length + 1 ||
@@ -193,8 +200,8 @@ function array(value: SafeJson, maximum: number): SafeJson[] {
 }
 
 function exactKeys(value: SafeJsonRecord, keys: readonly string[]): void {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
+  const actual = Object.keys(value).sort(compareOrdinal);
+  const expected = [...keys].sort(compareOrdinal);
   if (
     actual.length !== expected.length ||
     actual.some((key, index) => key !== expected[index])
@@ -215,7 +222,10 @@ function requiredString(
     !candidate.length ||
     candidate.length > maximum ||
     candidate.normalize("NFC") !== candidate ||
-    /[\u0000-\u001F\u007F]/u.test(candidate) ||
+    [...candidate].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    }) ||
     (expression !== undefined && !expression.test(candidate))
   ) {
     return reject();
@@ -256,11 +266,75 @@ function stableJson(value: SafeJson): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
     return `{${Object.keys(value)
-      .sort()
+      .sort(compareOrdinal)
       .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function validLei(value: string): boolean {
+  if (!/^[A-Z0-9]{20}$/u.test(value)) return false;
+  const expanded = [...value]
+    .map((character) =>
+      /[A-Z]/u.test(character)
+        ? String(character.charCodeAt(0) - 55)
+        : character,
+    )
+    .join("");
+  let remainder = 0;
+  for (const digit of expanded)
+    remainder = (remainder * 10 + Number(digit)) % 97;
+  return remainder === 1;
+}
+
+function isExactAuthorityIdentifier(
+  identifier: OrganizationIdentityAuthorityIdentifierPlan,
+): boolean {
+  if (identifier.scheme === "domain") {
+    return (
+      identifier.jurisdiction === "GLOBAL" &&
+      identifier.validatorVersion === "domain-v1" &&
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u.test(
+        identifier.normalizedValue,
+      ) &&
+      !identifier.normalizedValue.startsWith("www.")
+    );
+  }
+
+  const profile =
+    ORGANIZATION_IDENTITY_AUTHORITY_PROFILES[identifier.providerKey];
+  const rule = profile.identifierRules.find(
+    (candidate) => candidate.scheme === identifier.scheme,
+  );
+  if (!rule || rule.validatorVersion !== identifier.validatorVersion) {
+    return false;
+  }
+
+  switch (identifier.scheme) {
+    case "registry-id":
+      return (
+        /^(?:GLOBAL|[A-Z]{2})$/u.test(identifier.jurisdiction) &&
+        /^[\p{L}\p{N}]+$/u.test(identifier.normalizedValue)
+      );
+    case "lei":
+      return (
+        identifier.jurisdiction === "GLOBAL" &&
+        validLei(identifier.normalizedValue)
+      );
+    case "ted-natid":
+      return (
+        /^[A-Z]{2}$/u.test(identifier.jurisdiction) &&
+        /^[\p{L}\p{N}]+$/u.test(identifier.normalizedValue)
+      );
+    case "fda-reg":
+      return (
+        identifier.jurisdiction === "US" &&
+        /^\d+$/u.test(identifier.normalizedValue)
+      );
+    default:
+      return false;
+  }
 }
 
 function sha256(value: SafeJson): string {
@@ -325,7 +399,8 @@ function parseAuthorityIdentifiers(
       parsed.providerKey !== expectedProviderKey ||
       parsed.normalizerVersion !== AUTHORITY_NORMALIZER_VERSION ||
       parsed.key !==
-        `${parsed.scheme}:${parsed.jurisdiction}:${parsed.normalizedValue}`
+        `${parsed.scheme}:${parsed.jurisdiction}:${parsed.normalizedValue}` ||
+      !isExactAuthorityIdentifier(parsed)
     ) {
       return reject();
     }
@@ -340,14 +415,17 @@ function parseAuthorityIdentifiers(
     byKey.set(parsed.key, parsed);
   }
   return [...byKey.values()]
-    .sort((left, right) => left.key.localeCompare(right.key))
+    .sort((left, right) => compareOrdinal(left.key, right.key))
     .map((item) => deepFreeze({ ...item }));
 }
 
 type Binding = Readonly<{ identifierKey: string; companyId: string }>;
 type RootMapping = Readonly<{ sourceCompanyId: string; rootCompanyId: string }>;
 
-function parseBindings(value: SafeJson): readonly Binding[] {
+function parseBindings(
+  value: SafeJson,
+  authorityIdentifierKeys: ReadonlySet<string>,
+): readonly Binding[] {
   const byKey = new Map<string, Binding>();
   for (const item of array(value, MAX_BINDINGS)) {
     const source = record(item);
@@ -362,8 +440,11 @@ function parseBindings(value: SafeJson): readonly Binding[] {
     }
     byKey.set(parsed.identifierKey, deepFreeze(parsed));
   }
+  for (const binding of byKey.values()) {
+    if (!authorityIdentifierKeys.has(binding.identifierKey)) return reject();
+  }
   return [...byKey.values()].sort((left, right) =>
-    left.identifierKey.localeCompare(right.identifierKey),
+    compareOrdinal(left.identifierKey, right.identifierKey),
   );
 }
 
@@ -387,7 +468,7 @@ function parseRootMappings(value: SafeJson): readonly RootMapping[] {
     if (bySource.has(mapping.rootCompanyId)) return reject();
   }
   return [...bySource.values()].sort((left, right) =>
-    left.sourceCompanyId.localeCompare(right.sourceCompanyId),
+    compareOrdinal(left.sourceCompanyId, right.sourceCompanyId),
   );
 }
 
@@ -423,7 +504,7 @@ function parseInput(value: unknown) {
     return reject();
   }
   const blocker = record(source.blocker);
-  const blockerKeys = Object.keys(blocker).sort();
+  const blockerKeys = Object.keys(blocker).sort(compareOrdinal);
   const allowsAbsentCandidate =
     blockerKeys.join(",") === "blockerKey,matchRule" ||
     blockerKeys.join(",") === "blockerKey,legacyCandidateCompanyId,matchRule";
@@ -444,15 +525,19 @@ function parseInput(value: unknown) {
   ) {
     return reject();
   }
+  const identifiers = parseAuthorityIdentifiers(
+    source.authorityIdentifiers,
+    parsedRaw.providerKey,
+  );
   return {
     raw: deepFreeze(parsedRaw),
     resolverVersion: RESOLVER_VERSION,
     blocker: deepFreeze(parsedBlocker),
-    identifiers: parseAuthorityIdentifiers(
-      source.authorityIdentifiers,
-      parsedRaw.providerKey,
+    identifiers,
+    bindings: parseBindings(
+      source.existingBindings,
+      new Set(identifiers.map((identifier) => identifier.key)),
     ),
-    bindings: parseBindings(source.existingBindings),
     rootMappings: parseRootMappings(source.rootMappings),
   };
 }
@@ -493,7 +578,7 @@ export function planOrganizationIdentityResolution(
         .filter((companyId): companyId is string => companyId !== undefined)
         .map(rootFor),
     ),
-  ].sort();
+  ].sort(compareOrdinal);
   const legacyRoot = parsed.blocker.legacyCandidateCompanyId
     ? rootFor(parsed.blocker.legacyCandidateCompanyId)
     : null;
@@ -501,9 +586,7 @@ export function planOrganizationIdentityResolution(
     raw: parsed.raw,
     resolverVersion: parsed.resolverVersion,
     blocker: parsed.blocker,
-    authorityIdentifierKeys: parsed.identifiers.map(
-      (identifier) => identifier.key,
-    ),
+    authorityIdentifiers: parsed.identifiers,
     bindings: parsed.bindings,
     rootMappings: parsed.rootMappings,
   } as unknown as SafeJson);
@@ -514,7 +597,7 @@ export function planOrganizationIdentityResolution(
     conflictType: "identifier_split" | "blocking_key_disagreement",
     companyIds: readonly string[],
   ): ConflictPlan => {
-    const sortedCompanyIds = [...new Set(companyIds)].sort();
+    const sortedCompanyIds = [...new Set(companyIds)].sort(compareOrdinal);
     const identifierKeys = parsed.identifiers.map(
       (identifier) => identifier.key,
     );
