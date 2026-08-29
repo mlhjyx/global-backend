@@ -1,6 +1,6 @@
 // Test intent source-mined from tugjvnh@70885cdb; rewritten for current main.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -23,6 +23,7 @@ const repositoryRoot = resolve(
 );
 const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
+const exactBaseCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
 const migrationName = "20260829090000_organization_identity_v2_expand_ddl";
 const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
 const container = process.env.TASK6B_PG_CONTAINER;
@@ -31,6 +32,8 @@ const databases = Object.freeze({
   fresh: "task6b_identity_fresh",
   upgrade: "task6b_identity_upgrade",
   rollback: "task6b_identity_rollback",
+  diffBaseline: "task6b_identity_diff_baseline",
+  lockTimeout: "task6b_identity_lock_timeout",
 });
 
 const WORKSPACE_A = "10000000-0000-4000-8000-000000000001";
@@ -87,7 +90,9 @@ let rawBefore = "";
 let rawAfter = "";
 let validateResult;
 let generateResult;
-let diffResult;
+let baselineDiffResult;
+let candidateDiffResult;
+let topologyInventory;
 
 function requireTopology() {
   assert.equal(container, "codex-task6b-identity-pg-20260829-a");
@@ -108,32 +113,58 @@ function ownerUrl(database) {
   return `postgresql://global:global@127.0.0.1:${port}/${database}?schema=public`;
 }
 
-function dockerPsql(database, sql, options = {}) {
+function dockerPsqlArgs(database) {
   requireTopology();
   assertDatabase(database);
+  return [
+    "exec",
+    "-i",
+    container,
+    "psql",
+    "-U",
+    "global",
+    "-d",
+    database,
+    "--no-psqlrc",
+    "-X",
+    "-qAt",
+    "-v",
+    "ON_ERROR_STOP=1",
+  ];
+}
+
+function inspectExactTopology() {
+  requireTopology();
   const result = spawnSync(
     "docker",
     [
-      "exec",
-      "-i",
+      "inspect",
+      "--format",
+      "{{json .Config.Image}}\n{{json .NetworkSettings.Ports}}",
       container,
-      "psql",
-      "-U",
-      "global",
-      "-d",
-      database,
-      "--no-psqlrc",
-      "-X",
-      "-qAt",
-      "-v",
-      "ON_ERROR_STOP=1",
     ],
-    {
-      encoding: "utf8",
-      input: sql,
-      maxBuffer: 16 * 1024 * 1024,
-    },
+    { encoding: "utf8", maxBuffer: 1024 * 1024 },
   );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.stderr, "");
+  const [imageJson, portsJson, ...extra] = result.stdout.trim().split("\n");
+  assert.deepEqual(extra, []);
+  const image = JSON.parse(imageJson);
+  const publishedPorts = JSON.parse(portsJson);
+  assert.equal(image, "pgvector/pgvector:pg16");
+  assert.deepEqual(Object.keys(publishedPorts), ["5432/tcp"]);
+  assert.deepEqual(publishedPorts["5432/tcp"], [
+    { HostIp: "127.0.0.1", HostPort: "55439" },
+  ]);
+  return Object.freeze({ image, publishedPorts });
+}
+
+function dockerPsql(database, sql, options = {}) {
+  const result = spawnSync("docker", dockerPsqlArgs(database), {
+    encoding: "utf8",
+    input: sql,
+    maxBuffer: 16 * 1024 * 1024,
+  });
   const output = `${result.stdout}\n${result.stderr}`.trim();
   if (options.rejects) {
     assert.notEqual(result.status, 0, `SQL unexpectedly succeeded:\n${output}`);
@@ -142,6 +173,68 @@ function dockerPsql(database, sql, options = {}) {
   }
   assert.equal(result.status, 0, output);
   return result.stdout.trim();
+}
+
+function startExistingTableLockHolder(database) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn("docker", dockerPsqlArgs(database), {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let ready = false;
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      rejectPromise(
+        new Error(`lock holder did not become ready:\n${stdout}\n${stderr}`),
+      );
+    }, 5000);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (!ready && stdout.includes("TASK6B_LOCKS_READY")) {
+        ready = true;
+        clearTimeout(timer);
+        resolvePromise(Object.freeze({ child }));
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      if (!ready) rejectPromise(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (!ready) {
+        rejectPromise(
+          new Error(
+            `lock holder exited before ready (${code}):\n${stdout}\n${stderr}`,
+          ),
+        );
+      }
+    });
+    child.stdin.write(`
+      BEGIN;
+      LOCK TABLE canonical_company IN ACCESS EXCLUSIVE MODE;
+      LOCK TABLE identity_link IN ACCESS EXCLUSIVE MODE;
+      SELECT 'TASK6B_LOCKS_READY';
+    `);
+  });
+}
+
+function releaseExistingTableLockHolder(holder) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    holder.child.once("error", rejectPromise);
+    holder.child.once("close", (code) => {
+      if (code === 0) resolvePromise();
+      else rejectPromise(new Error(`lock holder rollback exited ${code}`));
+    });
+    holder.child.stdin.end("ROLLBACK;\n");
+  });
 }
 
 function runPrisma(args, database) {
@@ -160,8 +253,25 @@ function runPrisma(args, database) {
   );
   return Object.freeze({
     status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
     output: `${result.stdout}\n${result.stderr}`.trim(),
   });
+}
+
+function runPrismaDiff(database, candidateSchemaPath) {
+  return runPrisma(
+    [
+      "migrate",
+      "diff",
+      "--script",
+      "--from-url",
+      ownerUrl(database),
+      "--to-schema-datamodel",
+      candidateSchemaPath,
+    ],
+    database,
+  );
 }
 
 function migrateDeploy(database, candidateSchemaPath = schemaPath) {
@@ -171,6 +281,22 @@ function migrateDeploy(database, candidateSchemaPath = schemaPath) {
   );
   assert.equal(result.status, 0, result.output);
   return result.output;
+}
+
+function readExactBaseSchema() {
+  const result = spawnSync(
+    "git",
+    ["show", `${exactBaseCommit}:packages/db/prisma/schema.prisma`],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.stderr, "");
+  assert.ok(result.stdout.startsWith("// Global backend — schema."));
+  return result.stdout;
 }
 
 function createBaselineMigrationTree() {
@@ -199,21 +325,7 @@ function createBaselineMigrationTree() {
     );
   }
   const baselineSchemaPath = resolve(prismaRoot, "schema.prisma");
-  writeFileSync(
-    baselineSchemaPath,
-    [
-      "datasource db {",
-      '  provider = "postgresql"',
-      '  url      = env("DATABASE_URL")',
-      "}",
-      "",
-      "generator client {",
-      '  provider = "prisma-client-js"',
-      "}",
-      "",
-    ].join("\n"),
-    { mode: 0o600 },
-  );
+  writeFileSync(baselineSchemaPath, readExactBaseSchema(), { mode: 0o600 });
   return { root, schemaPath: baselineSchemaPath };
 }
 
@@ -499,8 +611,26 @@ function expectSqlReject(database, sql, expected) {
   return dockerPsql(database, sql, { rejects: expected });
 }
 
+function candidateObjectAbsence(database) {
+  return dockerPsql(
+    database,
+    `SELECT concat_ws('|',
+      (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+        WHERE n.nspname='public' AND typname IN (${enumNames.map((name) => `'${name}'`).join(",")})),
+      (SELECT count(*) FROM information_schema.tables
+        WHERE table_schema='public' AND table_name IN (${tenantTables.map((name) => `'${name}'`).join(",")})),
+      (SELECT count(*) FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='identity_link'
+          AND column_name IN ('status','resolver_version','input_hash','conflict_id')),
+      (to_regclass('public.canonical_company_workspace_id_id_key') IS NULL)::text,
+      (to_regclass('public.identity_link_workspace_id_conflict_id_idx') IS NULL)::text
+    );`,
+  );
+}
+
 before(() => {
   requireTopology();
+  topologyInventory = inspectExactTopology();
   assert.equal(
     dockerPsql(
       "postgres",
@@ -525,6 +655,12 @@ before(() => {
   const baseline = createBaselineMigrationTree();
   baselineDirectory = baseline.root;
 
+  migrateDeploy(databases.diffBaseline, baseline.schemaPath);
+  baselineDiffResult = runPrismaDiff(
+    databases.diffBaseline,
+    baseline.schemaPath,
+  );
+
   firstDeployOutput = migrateDeploy(databases.fresh);
   secondDeployOutput = migrateDeploy(databases.fresh);
 
@@ -535,8 +671,10 @@ before(() => {
   candidateDeployOutput = migrateDeploy(databases.upgrade);
   legacyIdentityAfter = legacyIdentityBytes(databases.upgrade);
   rawAfter = rawBytes(databases.upgrade);
+  candidateDiffResult = runPrismaDiff(databases.upgrade, schemaPath);
 
   migrateDeploy(databases.rollback, baseline.schemaPath);
+  migrateDeploy(databases.lockTimeout, baseline.schemaPath);
   if (existsSync(migrationPath)) {
     const injected = readFileSync(migrationPath, "utf8").replace(
       /COMMIT;\s*$/u,
@@ -558,18 +696,6 @@ before(() => {
   );
   generateResult = runPrisma(
     ["generate", "--schema", schemaPath],
-    databases.fresh,
-  );
-  diffResult = runPrisma(
-    [
-      "migrate",
-      "diff",
-      "--exit-code",
-      "--from-url",
-      ownerUrl(databases.fresh),
-      "--to-schema-datamodel",
-      schemaPath,
-    ],
     databases.fresh,
   );
 });
@@ -595,6 +721,15 @@ after(() => {
 });
 
 describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () => {
+  it("attests the exact local image and loopback publish topology", () => {
+    assert.deepEqual(topologyInventory, {
+      image: "pgvector/pgvector:pg16",
+      publishedPorts: {
+        "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55439" }],
+      },
+    });
+  });
+
   it("applies the full migration lineage to a fresh database and is a no-op on second deploy", () => {
     assert.match(firstDeployOutput, new RegExp(migrationName, "u"));
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
@@ -1043,47 +1178,48 @@ describe("Organization Identity v2 expand DDL on disposable PostgreSQL 16", () =
 
   it("rolls back every enum, table, IdentityLink column and index on injected migration failure", () => {
     assert.match(injectedRollbackOutput, /division by zero/u);
-    assert.equal(
-      dockerPsql(
-        databases.rollback,
-        `SELECT concat_ws('|',
-          (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
-            WHERE n.nspname='public' AND typname IN (${enumNames.map((name) => `'${name}'`).join(",")})),
-          (SELECT count(*) FROM information_schema.tables
-            WHERE table_schema='public' AND table_name IN (${tenantTables.map((name) => `'${name}'`).join(",")})),
-          (SELECT count(*) FROM information_schema.columns
-            WHERE table_schema='public' AND table_name='identity_link'
-              AND column_name IN ('status','resolver_version','input_hash','conflict_id')),
-          (to_regclass('public.canonical_company_workspace_id_id_key') IS NULL)::text,
-          (to_regclass('public.identity_link_workspace_id_conflict_id_idx') IS NULL)::text
-        );`,
-      ),
-      "0|0|0|true|true",
-    );
+    assert.equal(candidateObjectAbsence(databases.rollback), "0|0|0|true|true");
   });
 
-  it("validates and generates Prisma and has no candidate-scoped database-to-schema diff", () => {
+  it("fails within the migration lock bound and rolls back under existing-table contention", async () => {
+    const holder = await startExistingTableLockHolder(databases.lockTimeout);
+    let failureOutput = "";
+    let durationMs = 0;
+    let absence = "";
+    try {
+      const startedAt = Date.now();
+      failureOutput = expectSqlReject(
+        databases.lockTimeout,
+        `SET lock_timeout = '8s';\n${readFileSync(migrationPath, "utf8")}`,
+        /canceling statement due to lock timeout/u,
+      );
+      durationMs = Date.now() - startedAt;
+      absence = candidateObjectAbsence(databases.lockTimeout);
+    } finally {
+      await releaseExistingTableLockHolder(holder);
+    }
+
+    assert.match(failureOutput, /canceling statement due to lock timeout/u);
+    assert.ok(
+      durationMs >= 4000,
+      `lock timeout fired too early: ${durationMs}ms`,
+    );
+    assert.ok(
+      durationMs < 7000,
+      `migration did not enforce the reviewed 5s lock bound: ${durationMs}ms`,
+    );
+    assert.equal(absence, "0|0|0|true|true");
+  });
+
+  it("validates and generates Prisma with a full byte-identical baseline diff", () => {
     assert.equal(validateResult.status, 0, validateResult.output);
     assert.match(validateResult.output, /schema\.prisma is valid/u);
     assert.equal(generateResult.status, 0, generateResult.output);
     assert.match(generateResult.output, /Generated Prisma Client/u);
-    assert.notEqual(diffResult.status, null, diffResult.output);
-    assert.doesNotMatch(
-      diffResult.output,
-      new RegExp(
-        [...tenantTables, ...enumNames]
-          .map((name) => name.replaceAll("_", "[_ ]"))
-          .join("|"),
-        "iu",
-      ),
-    );
-    assert.doesNotMatch(
-      diffResult.output,
-      /canonical_company_workspace_id_id_key|identity_link_workspace_id_conflict_id_idx|identity_link_conflict_scope_fkey/iu,
-    );
-    assert.doesNotMatch(
-      diffResult.output,
-      /Changed the `identity_link` table[\s\S]+?(?:Added|Removed|Altered) column `(?:status|resolver_version|input_hash|conflict_id)`/iu,
-    );
+    assert.equal(baselineDiffResult.status, 0, baselineDiffResult.output);
+    assert.equal(baselineDiffResult.stderr, "");
+    assert.equal(candidateDiffResult.status, 0, candidateDiffResult.output);
+    assert.equal(candidateDiffResult.stderr, "");
+    assert.equal(candidateDiffResult.stdout, baselineDiffResult.stdout);
   });
 });

@@ -67,6 +67,14 @@ describe("Organization Identity v2 expand migration", () => {
     );
   });
 
+  it("bounds existing-table lock acquisition and the complete transaction", () => {
+    expect(migration).toMatch(
+      /^BEGIN;\n\nSET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '60s';/u,
+    );
+    expect(occurrences(migration, /SET LOCAL lock_timeout/gu)).toBe(1);
+    expect(occurrences(migration, /SET LOCAL statement_timeout/gu)).toBe(1);
+  });
+
   it("creates exactly the six required enums and six required tenant tables", () => {
     expect(occurrences(migration, /CREATE TYPE\s+"[a-z_]+"\s+AS ENUM/gu)).toBe(
       6,
