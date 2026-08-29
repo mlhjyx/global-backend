@@ -90,34 +90,62 @@
 
 ## 6. 多轴交付状态
 
-每项 Capability 必须分别记录以下轴，禁止只写“已完成”：
+当前 Capability 交付状态的七个唯一基础轴是：
 
-| 轴 | 允许状态 |
+```text
+PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA
+```
+
+每条详细状态行必须分别记录这七个轴，并且只能使用以下闭集基态：
+
+| 轴 | 允许的基态 |
 |---|---|
-| 产品 | `UNDEFINED / HYPOTHESIS / PROPOSED / APPROVED / FROZEN / REJECTED` |
-| UX | `NONE / FLOW_ONLY / SPEC_READY / DESIGNED / VALIDATED` |
-| 前端 | `NONE / MOCK_PROTOTYPE / IN_PROGRESS / MERGED / DEPLOYED` |
-| API/事件 | `NONE / DRAFT / EXPORTED / VERIFIED / EXTERNAL_OWNED` |
-| 数据/工作流 | `NONE / PARTIAL / WIRED / VERIFIED / EXTERNAL_OWNED` |
-| 质量 | `UNTESTED / UNIT / CONTRACT / E2E / REAL_SERVICE / RELEASE_EVIDENCE` |
-| 用户可用性 | `DISABLED / INTERNAL_ONLY / PILOT / GA / UNKNOWN` |
+| `PRODUCT` | `UNDEFINED / HYPOTHESIS / PROPOSED / APPROVED / DEFERRED / NOT_OFFERED / REJECTED` |
+| `UX` | `NONE / FLOW_ONLY / SPEC_READY / DESIGNED / VALIDATED` |
+| `SOURCE` | `NONE / NOT_IMPLEMENTED / PARTIAL_AS_BUILT / AS_BUILT / EXTERNAL_OWNED` |
+| `TEST` | `NOT_IMPLEMENTED / NOT_RUN / UNIT_PASS / CONTRACT_PASS / INTEGRATION_PASS / E2E_PASS / REAL_SERVICE_PASS` |
+| `RUNTIME` | `NO_TRUSTED_OBSERVATION / DEGRADED_OBSERVED / HEALTHY_OBSERVED` |
+| `RELEASE` | `NOT_IMPLEMENTED / UNVERIFIED / CANDIDATE / VERIFIED` |
+| `PILOT_GA` | `NOT_AUTHORIZED / INTERNAL_ONLY / PILOT_AUTHORIZED / GA_AUTHORIZED` |
 
-最高质量标签只表示找到的最高证据，不表示低层证据自动完整；`DEPLOYED` 必须指明环境，不能由“本地能运行”推出。
+`UAT=NOT_RUN|PARTIAL|PASS|FAIL` 是相关用户面 Capability 和 G6 的必填证据限定词，不是第八个 Capability 轴。`UAT=PASS` 也不授权 `PILOT_GA`；Pilot/GA 只能由具有独立授权 provenance 的 `PILOT_GA` 基态表达。
 
-### 6.1 Capability Pack 交接限定词
+`*_EVIDENCE`、`*_GAP` 和 `*_QUALIFIER` 可以解释一个基态，但不得取代基态、得出更高轴的结论或合并多个轴。例如 `SOURCE=PARTIAL_AS_BUILT; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; RELEASE=UNVERIFIED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` 仍然只证明局部源码与未验证发布缺口。
 
-以下是跨轴结论的可读限定词，不是新增单轴状态；Registry 仍必须分别填写 §6 的 UX、前端、API、数据、质量和用户可用性：
+### 6.1 Capability Pack 交接限定词与前代词汇迁移
 
-| 限定词 | 精确定义 |
+以下是当前跨文档共用的限定词，不是新增基态：
+
+| 限定词 | 应用字段 | 精确定义 |
+|---|---|---|
+| `LOCAL_SOURCE_AUTHORITY_FOUND` | `SOURCE_EVIDENCE` | 本地受控来源已定位；不证明 remote CI、当前 Release、runtime 或用户可用 |
+| `REMOTE_CI_RELEASE_UNVERIFIED` | `RELEASE_GAP` | remote、hosted CI、deployment 和 current release adoption 未回读验证 |
+| `MAP_COMPLETE_NOT_DEV_READY` | `UX_QUALIFIER` | 用户结果、Page family、对象、接缝、失败和开放输入已登记，但未满足 Dev-Ready |
+| `SPEC_READY_WITH_BLOCKERS` | `UX_QUALIFIER` | UX 规格已就绪，但合同、Owner、Source、Test、Runtime 或 Release 仍有 blocker |
+| `TARGET_NOT_RUNNABLE` | `UX_QUALIFIER` | 目标体验有规格，但当前合同/实现/证据不足，不得用于当前验收 |
+| `LOCAL_SOURCE_OBSERVED` | `UX_QUALIFIER` 或 `SOURCE_EVIDENCE` | 仅观察到本地 route/page/flow 或 source；不代表正式设计、正式聚合、runtime 或 UAT |
+| `LOCAL_SOURCE_DRIFT` | `SOURCE_GAP` | 本地源码与当前目标合同/路由存在已知漂移 |
+| `NORMATIVE_SPEC_FOUND` | `SOURCE_EVIDENCE` | 已定位规范文本，但它不是可执行产品 source 或 test evidence |
+| `APPROVED_PHASE_0_SPEC` | `PRODUCT_EVIDENCE` | 用户批准的 Phase 0 计划已定义该目标；不证明机器合同或实现 |
+| `CURRENT_MVP` | `PRODUCT_QUALIFIER` | `NOT_OFFERED` 限定于当前 MVP，不是永久拒绝或已实现的后续承诺 |
+| `CURRENT_SCOPE_NOT_RUN` | `TEST_QUALIFIER` | 当前精确范围未重跑；不删除历史证据，也不把历史证据写成当前 PASS |
+| `BOUNDED_PROTOTYPE_ONLY` | `UX_QUALIFIER` | 只观察到有界原型流程，不是正式设计、实现或用户可用性 |
+| `SPECIFIED_CONTROLLED_FALLBACK` | `UX_QUALIFIER` | 主路径有规格，但某个读/动作合同缺失，当前只能显式阻塞或走经批准人工兜底 |
+| `PARTIAL_AS_BUILT_TARGET_SPECIFIED` | `SOURCE_QUALIFIER` | 一部分地基有 source 证据，完整目标另有规格；两者不能合并为“已实现” |
+| `SPEC_ONLY_NOT_CREATED` | `TEST_QUALIFIER` | 场景、Fixture 或资产 manifest 已定义，但可执行文件/受控资产尚未创建 |
+| `SCHEMA_HYPOTHESIS_ONLY` | `SOURCE_QUALIFIER` | 事件/指标逻辑已描述，正式 schema、Owner、隐私或采集实现未批准 |
+
+前代 Capability 轴“产品 / UX / 前端 / API事件 / 数据工作流 / 质量 / 用户可用性”已被本节的七轴模型 supersede，不得用于新的当前 Capability 报告。迁移关系如下：
+
+| 前代词汇 | 当前归属 |
 |---|---|
-| `SPEC_READY_WITH_BLOCKERS` | UX 轴可为 `SPEC_READY`，但正式前端、合同、Owner、质量或部署等一个或多个轴仍为 `NONE/BLOCKED`；不可据此施工或声明用户可用 |
-| `SPECIFIED_CONTROLLED_FALLBACK` | 主路径有规格，但某个读/动作合同缺失，当前只能显式阻塞或走经批准人工兜底 |
-| `PARTIAL_AS_BUILT_TARGET_SPECIFIED` | 一部分运行地基有 main 证据，完整目标另有规格；两者不能合并为“已实现” |
-| `SPEC_ONLY_NOT_CREATED` | 场景、Fixture 或资产的 manifest 已定义，但可执行文件/受控资产尚未创建 |
-| `SCHEMA_HYPOTHESIS_ONLY` | 事件/指标逻辑已描述，正式 schema、Owner、隐私或采集实现未批准 |
-| `MAP_COMPLETE / NOT_DEV_READY` | 产品域的用户结果、Page family、对象、接缝、边界、失败和开放输入已完整登记，但页面级 UX、机器合同、实现或证据尚不满足 Dev-Ready |
+| 产品 / UX | 分别迁入 `PRODUCT` / `UX`；不在闭集内的旧组合值改为基态 + qualifier/gap |
+| 前端 / API事件 / 数据工作流 | 实现事实进入 `SOURCE`，验证强度进入 `TEST`，合同、局部地基和缺口用 evidence/gap 表达 |
+| 质量 | 迁入 `TEST`；历史真服务或 release evidence 不得自动变成当前 PASS |
+| 用户可用性 | 迁入 `PILOT_GA`；旧 `UNKNOWN/DISABLED` 不得冒充授权 |
+| 部署证明 | 必须分开进入 `RUNTIME` + `RELEASE`，不得由本地 source/test 推导 |
 
-这些限定词只有同时列出具体多轴状态和 Blocker/Gap ID 才可使用。`DEC-FE-P5-010` 已在 Gate 5 获批；Site 继续使用 `SPEC_READY_WITH_BLOCKERS`。Phase 6 非 Site Pack 使用 `MAP_COMPLETE / NOT_DEV_READY` 时仍须保留各轴的 `NONE/PROTOTYPE/EXTERNAL_OWNED/UNKNOWN`，不能由地图完整推出可施工。
+限定词只有在同一状态行已列出全部七个基础轴时才可使用。`DEC-FE-P5-010` 已在 Gate 5 获批；Site 仍以 `UX=SPEC_READY; UX_QUALIFIER=SPEC_READY_WITH_BLOCKERS` 表达，Phase 6 非 Site Pack 以 `UX=FLOW_ONLY; UX_QUALIFIER=MAP_COMPLETE_NOT_DEV_READY` 表达，二者都不能推出 Dev-Ready 或用户可用。
 
 ### 6.2 外部能力采用状态
 

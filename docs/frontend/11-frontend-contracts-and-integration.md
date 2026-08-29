@@ -9,7 +9,9 @@
 
 ## 1. 当前边界
 
-本仓 code-first OpenAPI 是本仓 HTTP 合同的机器真值；身份、Workspace 控制面、完整 SaaS UI 和 Campaign/Conversation/Opportunity 等由外部 SaaS 拥有。正式前端 repo、BFF、客户端生成方式和部署尚未确定，本文件定义消费语义和质量门，不描述 as-built 前端架构。
+本仓 code-first OpenAPI 与 event schema 是本仓 HTTP/事件合同的机器真值；身份、Workspace 控制面、完整 SaaS UI 和 Campaign/Conversation/Opportunity 等由外部 SaaS 拥有。本文件同时区分已观察的 GrowthOS local source 与批准的 target contract，不能把两者合并成 as-built release claim。
+
+GrowthOS 状态为 `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`：`/global/frontend/growthos-source` 是 archive+patch authority package，不是正常 mutable remote-backed repo。Local adapters/routes/pages 存在；owner、remote、hosted CI、generated client、BFF、capability manifest、deployment、current release adoption、runtime 与 UAT 仍未验证。
 
 `packages/contracts/INTEGRATION.md` 存在 dated 漂移，`docs/architecture/current.md` 的手写 path 数也不是长期真值；接入一律引用 operationId/schema/event version，不把手写统计复制进客户端规范。
 
@@ -37,13 +39,20 @@ Route / Page composition
 - 401、会话过期、Workspace 缺失、403/404、entitlement 和配置错误分开映射；禁止无限 refresh loop。
 - support/impersonation 使用独立短时上下文与显著 UI，不替换普通 token 后静默操作。
 
+### 3.1 Program C service principal
+
+- Program C 的 durable handoff consumer 只允许 internal server identity 使用固定 Backend audience、单一 workspace/service identity 与最小 scopes：`acquisition:read`、`personal-data:read`、`acquisition:event:ack`。
+- service credential 必须受审计、轮换和 kill switch 约束；scope/audience/workspace 任一不匹配均 fail closed。
+- browser/user token 永不获得 `acquisition:event:ack` 或不受限的 `personal-data:read`；浏览器不能消费 `RESTRICTED` event payload，也不能作为 durable consumer 发 ACK。
+- 该边界当前是 `PRODUCT_SPECIFIED / PROGRAM_C_SOURCE_NOT_IMPLEMENTED / TEST_RUNTIME_RELEASE_UAT_NOT_RUN_OR_UNVERIFIED`。
+
 ## 4. HTTP/命令合同
 
 | Concern | 前端必须遵守 |
 |---|---|
 | operation identity | 引用 OpenAPI `operationId` 和 schema/version；不以 Controller 文件名作产品合同 |
 | correlation | 接收/显示脱敏 correlation ID；客户端日志与支持可关联，不能把原始 trace 暴露 |
-| idempotency | 创建/外部副作用使用服务端规定 key；ACK 不明复用原 key，不自动生成新对象 |
+| idempotency | 创建/外部副作用同时使用 transport key 与 persistent business-intent identity；ACK 不明复用原 identity/key，不自动生成新对象，不把 raw HTTP request ID 当唯一业务身份 |
 | optimistic concurrency | 保存/批准/切换使用 ETag/version/CAS；冲突保留本地修改并可比较 |
 | validation | 客户端用于即时反馈，服务端仍为最终真值；枚举/limit 从能力合同读取 |
 | errors | 稳定 machine code → `STATE-FE-*` + `COPY-FE-*`；unknown code 安全降级并可观察 |
@@ -69,7 +78,7 @@ Route / Page composition
 | partial/degraded payload | `PARTIAL/DEGRADED` | 保留成功数据，逐项说明 |
 | unknown schema/state | fail-safe | 不渲染伪成功；记录兼容性错误并保留旧结果 |
 
-HTTP status 不是最终文案；同一 409 可能是版本冲突、已有 active task 或幂等 payload 冲突，必须以稳定 error code 分辨。
+HTTP status 不是最终文案；同一 409 可能是版本冲突、已有 active task 或幂等 payload 冲突，必须以稳定 error code 分辨。用户文案表达业务影响、保留结果和下一动作，不把 raw HTTP、API、provider/model 名称或内部 transport error 作为 primary copy。
 
 ## 6. 长任务、事件与实时更新
 
@@ -85,9 +94,26 @@ HTTP status 不是最终文案；同一 409 可能是版本冲突、已有 activ
 
 事件用于更新提示，不直接绕过服务端 snapshot 改 canonical object。Temporal replay/outbox redelivery 必须按事件 ID/version 去重。
 
+### 6.1 Program C commit-before-ACK
+
+```text
+server consume LeadQualifiedPackage
+→ validate schema / scope / workspace / privacy
+→ transaction writes LeadHandoffReceipt + unique Opportunity(CANDIDATE) + QualificationSnapshot
+→ commit
+→ Backend domain ACK
+```
+
+- receipt 保存 event identity、payload digest、Opportunity identity 与 ACK state；Opportunity、receipt 和 snapshot 必须同事务提交。
+- 同一 event/business intent 并发或 replay 10 次只产生一个 Opportunity；service restart 或 ACK loss 后保持 durable `ACK_PENDING` 并 reconcile，不二次 materialize。
+- 相同 identity 的 digest drift、错误 workspace/scope、无 `personal-data:read` 的 `RESTRICTED` payload、DSR/retention/suppression 命中必须 quarantine/deny，不泄漏或 ACK 非法数据。
+- browser ACK、ACK-before-candidate、以响应成功替代 commit readback 均被禁止。当前 Backend producer source 存在，但 Program C transaction/consumer/test/runtime/release/UAT 未实现或未运行。
+
 ## 7. Capability、Entitlement 与 Allowed Actions
 
 目标控制面应提供有版本的 capability manifest、Workspace entitlement/quota、对象 allowed actions/redactions 和必要配置。客户端使用同一版本做导航、表单选项和动作解释，但服务端在提交时重判。
+
+当前精确状态是 `capability manifest = NOT_IMPLEMENTED / NOT_VERIFIED`。GrowthOS hard-coded local menu/routes 只是 source observation，不是 entitlement truth，也不证明 manifest schema/endpoint/client、remote CI、deployment 或 release adoption。
 
 manifest 不存在/过期/解析失败时：保留已知只读对象，隐藏或禁用高风险动作并标 unavailable/stale；绝不能默认开放。具体 schema 属 `BLK-FE-003`，本阶段不伪造为已存在端点。
 
@@ -147,4 +173,4 @@ manifest 不存在/过期/解析失败时：保留已知只读对象，隐藏或
 
 ## 12. 正式技术方案前的输入
 
-`BLK-FE-001/003` 关闭后，Phase 5/实施方案才选择 repo、runtime/framework、rendering/BFF、contract generator、query/state、forms、i18n、observability、testing、deployment 和 ownership。候选必须用首个纵切场景、性能/a11y、安全、维护和退出成本比较，而不是继承 Word 或 Mock 技术栈。
+`BLK-FE-001/003` 关闭后，Phase 5/实施方案才选择 repo、runtime/framework、rendering/BFF、contract generator、query/state、forms、i18n、observability、testing、deployment 和 ownership。候选必须用首个纵切场景、性能/a11y、安全、维护和退出成本比较，而不是继承 Word 或 Mock 技术栈。Design system、a11y、visual/performance 与 responsive 仍是 `NORMATIVE_SPEC_ONLY`；本文件不声称组件/Token 已实现、browser/a11y test 已运行、release 或 UAT 已通过。

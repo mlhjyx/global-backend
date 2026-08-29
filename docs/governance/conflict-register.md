@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 工程核验基线：`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
+> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；Program A closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 main `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -20,6 +20,37 @@
 | `CONTRACT_BLOCKED` | 产品方向可继续，但缺机器合同，不能进入 Dev-Ready/用户承诺 |
 | `INPUT_BLOCKED` | 缺仓库、Owner、设计源、数据或外部输入 |
 | `PARKED` | 已知但属于后置阶段或冻结产品面 |
+| `HOLD_OWNERSHIP` | 活跃或未解决的单 writer/schema/migration 责任碰撞；在记录 exact owner、head 与非破坏性 disposition 前，不得继续受该碰撞影响的实现、集成、migration、runtime 或 release。与该 seam 无依赖且已有独立 owner 的工作不被本状态自动冻结 |
+
+## 1.1 当前 Global Product Program ownership 与接口
+
+本节把 [Phase 0 计划](../superpowers/plans/2026-08-29-global-product-program-phase0.md) 和 [current status](../status/current.md) 的当前裁决写入唯一治理登记。它是对 `.superpowers/sdd/2026-08-29-global-product-program-phase0/ab-three-way-audit.md` 的简要治理结论，而非对其 85 条 assertion 的复制；完整工作证据仍仅保留在该 ignored audit，直至后续已接纳 successor 决定是否创建 tracked handoff。
+
+| Decision ID | 当前裁决 | 状态 | Decision Owner | 裁决位置 |
+|---|---|---|---|---|
+| `DEC-GPP-001` | 用户已批准 Program A/B/C ownership 与固定接口。 | `APPROVED` | `OWN-PRODUCT` | 本节及 `ADR-025` |
+
+| Conflict ID | 主题 | 当前状态 | 唯一 Owner | 审计事实与处置 |
+|---|---|---|---|---|
+| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | `DEC-GPP-001=APPROVED` 不升级 implementation。Program A writer inactivity and the stale binding-ledger/Task 5.2 provenance have closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; this closes neither the conflict nor acceptance. RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 Task 5.2 commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b` 继续 `QUARANTINED / HOLD_OWNERSHIP`，不接纳、不 revert、不删除。后续 packet 中 35 个 main ancestry commits 仅为 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`，不是 A implementation；`fb65f25a`、`7db10915`、`58e151ba`、`f68b67ed`、`91cae351` 是位于 A branch 的 B-owned deltas，等待 current-main B successor disposition。整个 mega-branch 的非破坏性 disposition 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`；任何 successor 不得以它为 base，不得 cherry-pick 上述隔离提交或将该分支用于 migration/deploy。 |
+
+| Blocker ID | 阻塞 | Accountable Owner | 最新关闭条件 | 安全默认 |
+|---|---|---|---|---|
+| `BLK-GPP-001` | Git merge-conflict shape、Program A writer inactivity and stale ledger/provenance are closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; ownership conflict remains because ADR-025/`DEC-GPP-001` 尚未进入 current main，mega-branch 尚未由 current-main authority 采用上述非破坏性 disposition，且没有唯一 current-main Program B successor/card/handoff。 | `OWN-PRODUCT` | (1) 将 ADR-025/`DEC-GPP-001` 合入并逐字回读 current main；(2) 由该 current-main authority 将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，不删除、不 revert、不 cherry-pick；(3) 从该 current main 指派一个唯一 Program B successor/card/handoff 和 writer；然后 (4) 独立 G0 readback。B 的 RED/GREEN、DB/RLS/replay 和集成分别属于 G2/G3，不是 G0 条件。任何后来 A head/index/working-tree/merge movement 都重开 delta audit。 | `HOLD_OWNERSHIP`；只禁止受 `CON-GPP-001` 影响的 Discovery seam 实现、集成、migration、runtime、release 或 pilot promotion；不自动冻结无依赖的 Site/Program C 工作。 |
+
+固定接口仅为：
+
+```text
+ExecutionAuthority
+→ ToolOperationSubject
+→ B-owned QueryReceipt
+→ B-owned RawSourceRecord UUID
+→ B-owned IdentityLink / CanonicalCompany UUID
+→ A-owned append governed child/relation primitive
+→ Domain ACK
+```
+
+当前 B gaps 仅作实现前记录：Trade Fair/Public Web/Directory 的 provider causal-receipt DTO 已存在，但仍是 optional、unconsumed 的 producer-side DTO；它只改善 causal receipt coverage，未持久化 per-operation header、dense `recordIndex→RawUUID`、Raw→Canonical/terminal outcomes 或 B→A generic relation calls，也未完成 exact replay/final ACK readiness。本登记不暗示这些缺口已实现、已验证或获授权施工。
 
 ## 2. Gate 2 已批准决议
 
