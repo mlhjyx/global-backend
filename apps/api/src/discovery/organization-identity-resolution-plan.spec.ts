@@ -99,7 +99,7 @@ describe("deterministic organization identity resolution plan", () => {
     expect(result).toMatchObject({
       kind: "bind_existing",
       companyId: COMPANY_ROOT,
-      matchRule: "domain_exact",
+      matchRule: "identity_v2",
     });
   });
 
