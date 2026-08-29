@@ -8,7 +8,7 @@ import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs"
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
-const resolverCommit = "9c555bd0ed3b1eb06b5dfb698570f64f04624e0c";
+const resolverCommit = "94138fc2c516bd1a43cc4344ed7bb5876f52a14b";
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const container = process.env.TASK6B_RESOLVER_PG_CONTAINER;
