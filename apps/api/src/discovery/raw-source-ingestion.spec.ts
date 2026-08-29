@@ -1410,6 +1410,77 @@ describe("Raw Source v2 ingestion boundary", () => {
         "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
       );
     });
+
+    it("rejects a candidate whose ingest key and external ID resolve to different existing facts", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+
+      expect(() =>
+        resolveRawSourceBatchByIndex([candidate], [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: candidate.externalId,
+            ingestKey: "external:different-key",
+            payloadHash: candidate.payloadHash,
+            payload: candidate.payload,
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: "different-company",
+            ingestKey: candidate.ingestKey,
+            payloadHash: candidate.payloadHash,
+            payload: candidate.payload,
+          },
+        ]),
+      ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
+
+    it("rejects an existing drift key whose payload does not match the expected drift receipt", () => {
+      const original = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const changed = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name: "Changed GmbH" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const originalReceipt = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: original.externalId,
+        ingestKey: original.ingestKey,
+        payloadHash: original.payloadHash,
+        payload: original.payload,
+      };
+      const expectedDrift = reconcileRawSourceBatch(
+        [changed],
+        [originalReceipt],
+      ).rows[0]!;
+      const poisonedPayload = { poison: true };
+
+      expect(() =>
+        resolveRawSourceBatchByIndex([changed], [
+          originalReceipt,
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: null,
+            ingestKey: expectedDrift.ingestKey,
+            payloadHash: rawPayloadHash(poisonedPayload),
+            payload: poisonedPayload,
+          },
+        ]),
+      ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
   });
 
   it.each([
