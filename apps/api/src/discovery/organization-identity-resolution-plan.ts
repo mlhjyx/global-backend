@@ -4,8 +4,6 @@ import { parseOrganizationIdentityAuthorityIdentifier } from "./organization-ide
 import { GOVERNED_RAW_SOURCE_PROVIDER_KEYS } from "./raw-source-provider-schema";
 
 const RESOLVER_VERSION = "organization-identity-resolver/v1" as const;
-const AUTHORITY_NORMALIZER_VERSION =
-  "organization-identity-authority/v1" as const;
 const MAX_CONTAINER_DEPTH = 6;
 const MAX_CONTAINER_NODES = 256;
 const MAX_OBJECT_FIELDS = 16;
@@ -38,7 +36,7 @@ export type OrganizationIdentityAuthorityIdentifierPlan = Readonly<{
   jurisdiction: string;
   normalizedValue: string;
   validatorVersion: string;
-  normalizerVersion: typeof AUTHORITY_NORMALIZER_VERSION;
+  normalizerVersion: "organization-identity-authority/v1";
   key: string;
 }>;
 
