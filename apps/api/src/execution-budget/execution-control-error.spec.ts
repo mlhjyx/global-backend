@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
 import { isExecutionControlError } from './execution-control-error';
 
 describe('isExecutionControlError', () => {
@@ -27,6 +28,59 @@ describe('isExecutionControlError', () => {
       },
     };
     expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('classifies the actual Temporal 1.20.3 ActivityFailure/ApplicationFailure shapes', () => {
+    const ordinary = new ActivityFailure(
+      'activity failed',
+      'mineDomain',
+      'activity-1',
+      'NON_RETRYABLE_FAILURE',
+      'worker-1',
+      new ApplicationFailure(
+        'provider unavailable',
+        'ProviderUnavailableError',
+        false,
+        [{ sensitive: 'must-not-be-read' }],
+      ),
+    );
+    const control = new ActivityFailure(
+      'activity failed',
+      'mineDomain',
+      'activity-2',
+      'NON_RETRYABLE_FAILURE',
+      'worker-1',
+      new ApplicationFailure(
+        'control message is not classification input',
+        'BudgetOperationReplayError',
+        true,
+        [{ sensitive: 'must-not-be-read' }],
+      ),
+    );
+
+    expect(Reflect.ownKeys(ordinary)).toEqual([
+      'stack',
+      'message',
+      'cause',
+      'failure',
+      'activityType',
+      'activityId',
+      'retryState',
+      'identity',
+    ]);
+    expect(Reflect.ownKeys(ordinary.cause!)).toEqual([
+      'stack',
+      'message',
+      'cause',
+      'failure',
+      'type',
+      'nonRetryable',
+      'details',
+      'nextRetryDelay',
+      'category',
+    ]);
+    expect(isExecutionControlError(ordinary)).toBe(false);
+    expect(isExecutionControlError(control)).toBe(true);
   });
 
   it('recursively recognizes Temporal ActivityFailure cause/type/message fields', () => {

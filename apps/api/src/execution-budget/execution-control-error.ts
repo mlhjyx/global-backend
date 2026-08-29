@@ -1,10 +1,31 @@
 const MAX_CAUSE_DEPTH = 12;
 const MAX_CONTROL_TOKEN_LENGTH = 256;
-const SAFE_FAILURE_KEYS = Object.freeze([
+const PLAIN_FAILURE_KEYS = Object.freeze([
   'cause',
   'code',
   'message',
   'name',
+  'stack',
+  'type',
+]);
+const TEMPORAL_ACTIVITY_FAILURE_KEYS = Object.freeze([
+  'activityId',
+  'activityType',
+  'cause',
+  'failure',
+  'identity',
+  'message',
+  'retryState',
+  'stack',
+]);
+const TEMPORAL_APPLICATION_FAILURE_KEYS = Object.freeze([
+  'category',
+  'cause',
+  'details',
+  'failure',
+  'message',
+  'nextRetryDelay',
+  'nonRetryable',
   'stack',
   'type',
 ]);
@@ -45,6 +66,29 @@ type SafeFailureSnapshot = Readonly<{
   name?: unknown;
   cause?: unknown;
 }>;
+type SafeFailureFamily = 'PLAIN' | 'TEMPORAL_ACTIVITY' | 'TEMPORAL_APPLICATION';
+
+function exactKeys(
+  keys: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return (
+    keys.length === expected.length &&
+    expected.every((key) => keys.includes(key))
+  );
+}
+
+function safeFailureFamily(keys: readonly string[]): SafeFailureFamily | null {
+  if (exactKeys(keys, TEMPORAL_ACTIVITY_FAILURE_KEYS)) {
+    return 'TEMPORAL_ACTIVITY';
+  }
+  if (exactKeys(keys, TEMPORAL_APPLICATION_FAILURE_KEYS)) {
+    return 'TEMPORAL_APPLICATION';
+  }
+  return keys.every((key) => PLAIN_FAILURE_KEYS.includes(key))
+    ? 'PLAIN'
+    : null;
+}
 
 function safeFailurePrototypeChain(value: object): boolean {
   const visited = new Set<object>();
@@ -80,12 +124,12 @@ function safeFailureSnapshot(value: object): SafeFailureSnapshot | null {
       return null;
     }
     const descriptors = Object.getOwnPropertyDescriptors(value);
-    const keys = Reflect.ownKeys(descriptors);
+    const ownKeys = Reflect.ownKeys(descriptors);
+    if (ownKeys.some((key) => typeof key !== 'string')) return null;
+    const keys = ownKeys as string[];
+    const family = safeFailureFamily(keys);
     if (
-      keys.some(
-        (key) =>
-          typeof key !== 'string' || !SAFE_FAILURE_KEYS.includes(key),
-      ) ||
+      !family ||
       Object.entries(descriptors).some(
         ([key, descriptor]) =>
           !('value' in descriptor) &&
@@ -101,7 +145,12 @@ function safeFailureSnapshot(value: object): SafeFailureSnapshot | null {
     ) {
       return null;
     }
-    const tokenValues = ['code', 'type', 'name'] as const;
+    const tokenValues =
+      family === 'PLAIN'
+        ? (['code', 'type', 'name'] as const)
+        : family === 'TEMPORAL_APPLICATION'
+          ? (['type'] as const)
+          : ([] as const);
     for (const key of tokenValues) {
       const descriptor = descriptors[key];
       if (
