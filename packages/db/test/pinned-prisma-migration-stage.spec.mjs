@@ -1,0 +1,223 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, it } from "node:test";
+
+const repositoryRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
+const expandSuitePath = resolve(
+  repositoryRoot,
+  "packages/db/test/organization-identity-v2-expand.disposable.spec.mjs",
+);
+const backfillSuitePath = resolve(
+  repositoryRoot,
+  "packages/db/test/organization-identity-v2-legacy-link-backfill.disposable.spec.mjs",
+);
+const preExpandCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
+const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
+const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
+const expandMigration = "20260829090000_organization_identity_v2_expand_ddl";
+const backfillMigration =
+  "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
+const futureMigration = "20260829092000_organization_identity_v2_contract";
+
+function runGit(cwd, args) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  assert.equal(
+    result.status,
+    0,
+    `git ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`,
+  );
+  return result.stdout;
+}
+
+function writeStage(repository, migrationName, schemaLabel) {
+  const prismaRoot = resolve(repository, "packages/db/prisma");
+  const migrationRoot = resolve(prismaRoot, "migrations");
+  const migrationDirectory = resolve(migrationRoot, migrationName);
+  mkdirSync(migrationDirectory, { recursive: true, mode: 0o700 });
+  if (!readdirSync(migrationRoot).includes("migration_lock.toml")) {
+    writeFileSync(
+      resolve(migrationRoot, "migration_lock.toml"),
+      'provider = "postgresql"\n',
+      { mode: 0o600 },
+    );
+  }
+  writeFileSync(
+    resolve(migrationDirectory, "migration.sql"),
+    `SELECT '${migrationName}';\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    resolve(prismaRoot, "schema.prisma"),
+    `// schema:${schemaLabel}\n`,
+    { mode: 0o600 },
+  );
+  runGit(repository, ["add", "packages/db/prisma"]);
+  runGit(repository, ["commit", "-m", `stage ${schemaLabel}`]);
+  return runGit(repository, ["rev-parse", "HEAD"]).trim();
+}
+
+function createFutureMigrationRepository() {
+  const root = mkdtempSync(join(tmpdir(), "task6b-pinned-stage-fixture-"));
+  chmodSync(root, 0o700);
+  runGit(root, ["init", "--quiet"]);
+  runGit(root, ["config", "user.name", "Task 6B Test"]);
+  runGit(root, ["config", "user.email", "task6b@example.invalid"]);
+
+  const commits = Object.freeze({
+    preExpand: writeStage(root, "20260829080000_fixture_base", "pre-expand"),
+    expand: writeStage(root, expandMigration, "expand"),
+    backfill: writeStage(root, backfillMigration, "backfill"),
+    future: writeStage(root, futureMigration, "future"),
+  });
+  return Object.freeze({ root, commits });
+}
+
+function migrationNames(stage) {
+  return readdirSync(stage.migrationRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function gitSchemaAt(repository, commit) {
+  return runGit(repository, [
+    "show",
+    `${commit}:packages/db/prisma/schema.prisma`,
+  ]);
+}
+
+async function loadMaterializer() {
+  return import("./helpers/pinned-prisma-stage.mjs");
+}
+
+describe("pinned Prisma migration stages", () => {
+  it("statically rejects live migration enumeration and blacklist stages", () => {
+    const sources = [
+      readFileSync(expandSuitePath, "utf8"),
+      readFileSync(backfillSuitePath, "utf8"),
+    ];
+    const combined = sources.join("\n");
+
+    for (const source of sources) {
+      assert.doesNotMatch(source, /readdirSync\(migrationRoot/u);
+      assert.doesNotMatch(source, /excludedMigrations/u);
+      assert.doesNotMatch(source, /cpSync\(\s*resolve\(migrationRoot/u);
+    }
+    for (const commit of [preExpandCommit, expandCommit, backfillCommit]) {
+      assert.match(combined, new RegExp(commit, "u"));
+    }
+    assert.match(combined, /materializePinnedPrismaStage/u);
+  });
+
+  it("excludes an unknown future migration from every earlier stage and pairs schema with the same commit", async () => {
+    const { materializePinnedPrismaStage } = await loadMaterializer();
+    const fixture = createFutureMigrationRepository();
+    const stages = [];
+    try {
+      for (const [name, commit, expectedMigrations, expectedSchema] of [
+        [
+          "pre-expand",
+          fixture.commits.preExpand,
+          ["20260829080000_fixture_base"],
+          "// schema:pre-expand\n",
+        ],
+        [
+          "expand",
+          fixture.commits.expand,
+          ["20260829080000_fixture_base", expandMigration],
+          "// schema:expand\n",
+        ],
+        [
+          "backfill",
+          fixture.commits.backfill,
+          ["20260829080000_fixture_base", expandMigration, backfillMigration],
+          "// schema:backfill\n",
+        ],
+      ]) {
+        const stage = materializePinnedPrismaStage({
+          repositoryRoot: fixture.root,
+          commit,
+          prefix: `task6b-${name}-`,
+        });
+        stages.push(stage);
+        assert.equal(stage.commit, commit);
+        assert.equal(statSync(stage.root).mode & 0o777, 0o700);
+        assert.deepEqual(migrationNames(stage), expectedMigrations);
+        assert.ok(!migrationNames(stage).includes(futureMigration));
+        assert.equal(readFileSync(stage.schemaPath, "utf8"), expectedSchema);
+        assert.equal(
+          readFileSync(stage.schemaPath, "utf8"),
+          gitSchemaAt(fixture.root, commit),
+        );
+      }
+
+      assert.equal(fixture.commits.future.length, 40);
+      assert.ok(
+        readdirSync(
+          resolve(fixture.root, "packages/db/prisma/migrations"),
+        ).includes(futureMigration),
+      );
+    } finally {
+      for (const stage of stages) {
+        rmSync(stage.root, { recursive: true, force: true });
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes each reviewed real stage from its exact commit only", async () => {
+    const { materializePinnedPrismaStage } = await loadMaterializer();
+    const stages = [];
+    try {
+      for (const [name, commit] of [
+        ["pre-expand", preExpandCommit],
+        ["expand", expandCommit],
+        ["backfill", backfillCommit],
+      ]) {
+        const stage = materializePinnedPrismaStage({
+          repositoryRoot,
+          commit,
+          prefix: `task6b-real-${name}-`,
+        });
+        stages.push(stage);
+        assert.equal(stage.commit, commit);
+        assert.equal(
+          readFileSync(stage.schemaPath, "utf8"),
+          gitSchemaAt(repositoryRoot, commit),
+        );
+        assert.ok(!migrationNames(stage).includes(futureMigration));
+      }
+
+      assert.ok(!migrationNames(stages[0]).includes(expandMigration));
+      assert.ok(!migrationNames(stages[0]).includes(backfillMigration));
+      assert.ok(migrationNames(stages[1]).includes(expandMigration));
+      assert.ok(!migrationNames(stages[1]).includes(backfillMigration));
+      assert.ok(migrationNames(stages[2]).includes(expandMigration));
+      assert.ok(migrationNames(stages[2]).includes(backfillMigration));
+    } finally {
+      for (const stage of stages) {
+        rmSync(stage.root, { recursive: true, force: true });
+      }
+    }
+  });
+});
