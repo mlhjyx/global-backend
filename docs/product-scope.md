@@ -61,13 +61,13 @@
 
 | Bounded context | 唯一 SoR / 产品边界 | 当前 SOURCE / TEST / RUNTIME / RELEASE / UAT 状态 |
 |---|---|---|
-| SaaS Control Plane | SaaS 拥有身份、Organization、Workspace、Membership、Billing/Credits 与 Site Builder Budget Grant 签发 | GrowthOS `SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND`；`REMOTE_CI_RELEASE=UNVERIFIED`；runtime/UAT 未验证 |
-| Growth Strategy | SaaS 拥有 Goal、GrowthInitiative、OfferingSnapshot、MarketThesis、ICPVersion 与 Pack Snapshot | `PRODUCT_SPECIFIED`；正式 source/test/runtime/release/UAT 未验证 |
-| Buyer Intelligence | 本仓拥有采集、Identity/Canonical、Evidence、数据权利、Signal、Reachability 与资格输入 | 本仓 source/机器合同存在；本次未运行测试，current runtime/release/UAT 仍以 evidence 为准 |
-| Qualification & Handoff | 本仓止于不可变 `LeadQualifiedPackage + Outbox/ACK`；SaaS Program C 独占服务端 consumer/receipt/snapshot 事务 | Backend producer `SOURCE=AS_BUILT`；Program C consumer `SOURCE=NOT_IMPLEMENTED`，test/runtime/release/UAT `NOT_RUN/UNVERIFIED` |
-| Opportunity & Sales | SaaS Program C 拥有单一 Opportunity 聚合及 QGO/SAO/CLOSED、SalesAcceptance、CommercialOutcome、Conversation linkage | `PRODUCT_SPECIFIED`；canonical aggregate source 未实现，runtime/release/UAT 未验证 |
-| Growth Execution | SaaS/执行系统拥有 Campaign、ExecutionAuthorization、Content、Outreach、Publish 与 provider loop | 当前 MVP `PRODUCT=NOT_OFFERED`；本地 route/page 仅是 source observation，API/runtime/release/UAT 未验证 |
-| Learning & Economics | SaaS 拥有 Touchpoint、Attribution、Feedback、Experiment、ROI 主状态；本仓只接收结构化学习标签并保留域内成本事实 | `PRODUCT_SPECIFIED`；统一 source/test/runtime/release/UAT 未验证 |
+| SaaS Control Plane | SaaS 拥有身份、Organization、Workspace、Membership、Billing/Credits 与 Site Builder Budget Grant 签发 | `PRODUCT=APPROVED; UX=NOT_VERIFIED; SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=REMOTE_UNVERIFIED; UAT=NOT_RUN`；GrowthOS provenance=`REMOTE_CI_RELEASE_UNVERIFIED` |
+| Growth Strategy | SaaS 拥有 Goal、GrowthInitiative、OfferingSnapshot、MarketThesis、ICPVersion 与 Pack Snapshot | `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` |
+| Buyer Intelligence | 本仓拥有采集、Identity/Canonical、Evidence、数据权利、Signal、Reachability 与资格输入 | `PRODUCT=APPROVED; UX=NOT_IMPLEMENTED; SOURCE=AS_BUILT; TEST=NOT_RUN_NOW; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; UAT=NOT_RUN` |
+| Qualification & Handoff | 本仓止于不可变 `LeadQualifiedPackage + Outbox/ACK`；SaaS Program C 独占服务端 consumer/receipt/snapshot 事务 | `PRODUCT=APPROVED; UX=NOT_IMPLEMENTED; SOURCE=BACKEND_PRODUCER_AS_BUILT,PROGRAM_C_CONSUMER_NOT_IMPLEMENTED; TEST=PROGRAM_C_NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=BACKEND_UNVERIFIED,PROGRAM_C_NOT_IMPLEMENTED; UAT=NOT_RUN` |
+| Opportunity & Sales | SaaS Program C 拥有单一 Opportunity 聚合及 QGO/SAO/CLOSED、SalesAcceptance、CommercialOutcome、Conversation linkage | `PRODUCT=SPECIFIED; UX=LOCAL_SOURCE_OBSERVED; SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND,CANONICAL_AGGREGATE_NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` |
+| Growth Execution | SaaS/执行系统拥有 Campaign、ExecutionAuthorization、Content、Outreach、Publish 与 provider loop | `PRODUCT=NOT_OFFERED_CURRENT_MVP; UX=LOCAL_SOURCE_OBSERVED; SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND,CANONICAL_IMPLEMENTATION_NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN`；GrowthOS provenance=`REMOTE_CI_RELEASE_UNVERIFIED` |
+| Learning & Economics | SaaS 拥有 Touchpoint、Attribution、Feedback、Experiment、ROI 主状态；本仓只接收结构化学习标签并保留域内成本事实 | `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` |
 
 横切控制仍包括 Evidence、Data Rights、Policy、Suppression、Budget、Approval、Audit、幂等、Temporal、Outbox、Trace 与 Eval。执行层、商机域、Pack 和前端 IA 的详细设计输入见附录 A；它们不扩大本仓边界。
 
@@ -122,7 +122,7 @@ Goal（业务目标：如进入德国市场）
 - 交付模式：Managed/Collaborative 起步，逐步 Self-service。
 - MVP 假设：「对上述企业，输入官网、产品和目标市场后，平台在可解释成本内持续产出有证据、可联系的海外进口商/采购企业，并在 **30 天内形成至少一个人工确认 QGO**。」北极星保持“每活跃 Workspace 每月新增 QGO”，SAO 只作为后续商业验证。
 - 首版不做：4 个发布平台、完整视频、全渠道 Inbox、专家市场、多行业同时商业化、多触点归因。
-- 客户 subscription、Billing、Credits、usage 与 pricing 继续 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 只是平台执行安全包络，不是客户余额、quota、价格、Credit 或发票。
+- 客户 subscription、Billing、Credits、usage 与 pricing 的独立状态为 `PRODUCT=DEFERRED; SOURCE=NOT_IMPLEMENTED`；`cap_microusd` 只是平台执行安全包络，不是客户余额、quota、价格、Credit 或发票。
 
 ## 8. 文档权威关系
 
