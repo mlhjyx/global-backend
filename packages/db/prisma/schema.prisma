@@ -1242,21 +1242,22 @@ model ContactPoint {
 
 /// 身份解析连接（PRD 8.8）：canonical 实体 ↔ raw 记录，可审计可回溯。
 model IdentityLink {
-  id              String              @id @default(uuid()) @db.Uuid
-  workspaceId     String              @map("workspace_id") @db.Uuid
-  canonicalType   String              @map("canonical_type") // company | contact
-  canonicalId     String              @map("canonical_id") @db.Uuid
-  rawRecordId     String              @map("raw_record_id") @db.Uuid
-  matchRule       String              @map("match_rule") // domain_exact | name_country | provider_id
-  confidence      Float               @default(1)
-  status          IdentityLinkStatus?
-  resolverVersion String?             @map("resolver_version") @db.VarChar(64)
-  inputHash       String?             @map("input_hash") @db.VarChar(64)
-  conflictId      String?             @map("conflict_id") @db.Uuid
-  createdAt       DateTime            @default(now()) @map("created_at")
+  id              String             @id @default(uuid()) @db.Uuid
+  workspaceId     String             @map("workspace_id") @db.Uuid
+  canonicalType   String             @map("canonical_type") // company | contact
+  canonicalId     String             @map("canonical_id") @db.Uuid
+  rawRecordId     String             @map("raw_record_id") @db.Uuid
+  matchRule       String             @map("match_rule") // domain_exact | name_country | provider_id
+  confidence      Float              @default(1)
+  status          IdentityLinkStatus @default(ACTIVE)
+  resolverVersion String             @default("identity-v1") @map("resolver_version") @db.VarChar(64)
+  inputHash       String             @default("legacy") @map("input_hash") @db.VarChar(64)
+  conflictId      String?            @map("conflict_id") @db.Uuid
+  createdAt       DateTime           @default(now()) @map("created_at")
 
   conflict OrganizationIdentityConflict? @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "identity_link_conflict_scope_fkey")
 
+  @@unique([workspaceId, canonicalType, canonicalId, rawRecordId], map: "identity_link_workspace_canonical_raw_key")
   @@index([workspaceId])
   @@index([canonicalId])
   @@index([workspaceId, conflictId], map: "identity_link_workspace_id_conflict_id_idx")
