@@ -122,7 +122,7 @@ Goal（业务目标：如进入德国市场）
 - 交付模式：Managed/Collaborative 起步，逐步 Self-service。
 - MVP 假设：「对上述企业，输入官网、产品和目标市场后，平台在可解释成本内持续产出有证据、可联系的海外进口商/采购企业，并在 **30 天内形成至少一个人工确认 QGO**。」北极星保持“每活跃 Workspace 每月新增 QGO”，SAO 只作为后续商业验证。
 - 首版不做：4 个发布平台、完整视频、全渠道 Inbox、专家市场、多行业同时商业化、多触点归因。
-- 客户 subscription、Billing、Credits、usage 与 pricing 的独立状态为 `PRODUCT=DEFERRED; SOURCE=NOT_IMPLEMENTED`；`cap_microusd` 只是平台执行安全包络，不是客户余额、quota、价格、Credit 或发票。
+- 客户 subscription、Billing、Credits、usage 与 pricing 的独立状态为 `PRODUCT=DEFERRED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN`；`cap_microusd` 只是平台执行安全包络，不是客户余额、quota、价格、Credit 或发票。
 
 ## 8. 文档权威关系
 
