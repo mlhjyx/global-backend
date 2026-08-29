@@ -268,18 +268,23 @@ describe("governed Raw organization identity authority", () => {
         },
       },
     });
-    const produced = extractOrganizationIdentityAuthority("ted", tedPayload(forty));
+    const produced = extractOrganizationIdentityAuthority(
+      "ted",
+      tedPayload(forty),
+    );
     const ted = produced.find((item) => item.scheme === "ted-natid")!;
     expect(Buffer.byteLength(forty, "utf8")).toBe(80);
     expect(parseOrganizationIdentityAuthorityIdentifier(ted)).toEqual(ted);
     expect(() =>
       extractOrganizationIdentityAuthority("ted", tedPayload(fortyOne)),
     ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
-    expect(parseOrganizationIdentityAuthorityIdentifier({
-      ...ted,
-      normalizedValue: fortyOne,
-      key: `ted-natid:DE:${fortyOne}`,
-    })).toBeNull();
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        ...ted,
+        normalizedValue: fortyOne,
+        key: `ted-natid:DE:${fortyOne}`,
+      }),
+    ).toBeNull();
 
     const registry = extractOrganizationIdentityAuthority(
       "registry",
@@ -289,17 +294,21 @@ describe("governed Raw organization identity authority", () => {
       "registry",
       rawRecord(),
     ).find((item) => item.scheme === "domain")!;
-    expect(parseOrganizationIdentityAuthorityIdentifier({
-      ...registry,
-      normalizedValue: "DE-12/34",
-      key: registry.key,
-    })).toBeNull();
-    expect(parseOrganizationIdentityAuthorityIdentifier({
-      ...domain,
-      jurisdiction: "DE",
-      normalizedValue: "WWW.Acme.Example",
-      key: domain.key,
-    })).toBeNull();
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        ...registry,
+        normalizedValue: "DE-12/34",
+        key: registry.key,
+      }),
+    ).toBeNull();
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        ...domain,
+        jurisdiction: "DE",
+        normalizedValue: "WWW.Acme.Example",
+        key: domain.key,
+      }),
+    ).toBeNull();
     for (const field of [
       "providerKey",
       "scheme",

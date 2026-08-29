@@ -385,6 +385,7 @@ function canonicalAuthorityIdentifier(input: {
         if (
           input.providerKey !== "ted" ||
           !RAW_TED_IDENTIFIER.test(input.rawValue) ||
+          Buffer.byteLength(input.rawValue, "utf8") > 80 ||
           !/^[A-Z]{2}$/u.test(input.jurisdiction)
         )
           return null;
@@ -486,6 +487,10 @@ export function parseOrganizationIdentityAuthorityIdentifier(
     rawValue: fields.normalizedValue,
   });
   return canonical &&
+    canonical.providerKey === fields.providerKey &&
+    canonical.scheme === fields.scheme &&
+    canonical.jurisdiction === fields.jurisdiction &&
+    canonical.normalizedValue === fields.normalizedValue &&
     canonical.validatorVersion === fields.validatorVersion &&
     canonical.normalizerVersion === fields.normalizerVersion &&
     canonical.key === fields.key
