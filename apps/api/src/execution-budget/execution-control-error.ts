@@ -65,17 +65,14 @@ export class ExecutionControlError extends Error {
   readonly code: string;
   readonly type = 'ExecutionControlError';
 
-  constructor(code: string, message: string = code) {
+  constructor(code: string) {
     if (
       !/^[A-Z][A-Z0-9_]{2,127}$/u.test(code) ||
       !controlToken(code)
     ) {
       throw new TypeError('EXECUTION_CONTROL_ERROR_CODE_INVALID');
     }
-    if (message.length === 0 || message.length > 1_024) {
-      throw new TypeError('EXECUTION_CONTROL_ERROR_MESSAGE_INVALID');
-    }
-    super(message);
+    super(code);
     this.name = 'ExecutionControlError';
     this.code = code;
   }

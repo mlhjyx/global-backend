@@ -24,6 +24,16 @@ describe('isExecutionControlError', () => {
     expect(() => new ExecutionControlError('ordinary failure')).toThrow(
       'EXECUTION_CONTROL_ERROR_CODE_INVALID',
     );
+    const RuntimeConstructor = ExecutionControlError as unknown as new (
+      code: string,
+      customMessage: string,
+    ) => ExecutionControlError;
+    expect(
+      new RuntimeConstructor(
+        'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+        'Bearer custom-message-must-not-survive',
+      ).message,
+    ).toBe('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   });
 
   it.each([
