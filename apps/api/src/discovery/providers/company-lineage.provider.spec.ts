@@ -334,6 +334,39 @@ describe('provider-owned company receipt lineage', () => {
       .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
   });
 
+  it('public-web logs only a stable failure class for a secret-bearing model error', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://secret-domain.test/', title: 'Candidate' }] }, costCents: 0 }
+      : { data: { text: 'candidate content '.repeat(30) }, costCents: 0 });
+    const sensitiveErrorText = [
+      'Bearer',
+      'test-credential',
+      'token=redacted',
+      'https://private.invalid/prompt-response',
+    ].join(' ');
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(
+      new Error(sensitiveErrorText),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let serialized: string;
+
+    try {
+      const result = await new PublicWebDiscoveryProvider({
+        gateway: {} as never,
+        broker: executionBroker,
+      }).discoverCompanies(query, context());
+      expect(result.records).toEqual([]);
+    } finally {
+      serialized = log.mock.calls.flat().join(' ');
+      log.mockRestore();
+    }
+
+    expect(serialized).toContain('[public_web] skip: extract failed (ERROR)');
+    expect(serialized).not.toMatch(
+      /Bearer|test-credential|token=redacted|secret-domain|private\.invalid|prompt-response/u,
+    );
+  });
+
   it('directory applies first-wins final dedup indexes to each physical extract-list receipt', async () => {
     const parent = vi.fn();
     const executionBroker = broker(async (toolId, _input, ctx) => {

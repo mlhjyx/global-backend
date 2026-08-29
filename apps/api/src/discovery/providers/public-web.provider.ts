@@ -219,7 +219,7 @@ export class PublicWebDiscoveryProvider
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
-      this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
+      this.log('skip: crawl failed (ERROR)');
       return Object.freeze({ record: null }); // 站点不可达/闸门拒绝 → 放弃该候选
     }
     if (text.trim().length < 200) {
@@ -263,7 +263,7 @@ export class PublicWebDiscoveryProvider
       ) {
         throw error;
       }
-      this.log(`skip ${domain}: extract failed (${String(error).slice(0, 80)})`);
+      this.log('skip: extract failed (ERROR)');
       return Object.freeze({ record: null, collector });
     }
     const out = result.data;
