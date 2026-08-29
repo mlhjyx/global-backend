@@ -38,6 +38,7 @@ const COMPANY_A4 = "14000000-0000-4000-8000-000000000004";
 const COMPANY_A5 = "14000000-0000-4000-8000-000000000005";
 const COMPANY_B = "14000000-0000-4000-8000-000000000006";
 const COMPANY_A6 = "14000000-0000-4000-8000-000000000007";
+const COMPANY_A7 = "14000000-0000-4000-8000-000000000008";
 const CONTACT_A = "15000000-0000-4000-8000-000000000001";
 const CONTACT_B = "15000000-0000-4000-8000-000000000002";
 const LINK_SEED_A = "16000000-0000-4000-8000-000000000001";
@@ -49,12 +50,39 @@ const LINK_PENDING_ACTIVE = "16000000-0000-4000-8000-000000000006";
 const LINK_PENDING_REVOKED = "16000000-0000-4000-8000-000000000007";
 const LINK_ACTIVE_INVALID = "16000000-0000-4000-8000-000000000008";
 const LINK_TARGET_LOCK = "16000000-0000-4000-8000-000000000009";
+const LINK_PENDING_OWNER_INVALID = "16000000-0000-4000-8000-000000000010";
+const LINK_HISTORY_COMPANY = "16000000-0000-4000-8000-000000000011";
+const LINK_HISTORY_CONTACT = "16000000-0000-4000-8000-000000000012";
 const POLICY = "17000000-0000-4000-8000-000000000001";
 const MISSING_TARGET = "18000000-0000-4000-8000-000000000001";
 const COMPANY_TARGET_LOCK = "19000000-0000-4000-8000-000000000001";
+const COMPANY_HISTORY_DIRECT = "19000000-0000-4000-8000-000000000002";
+const COMPANY_HISTORY_CASCADE = "19000000-0000-4000-8000-000000000003";
+const CONTACT_HISTORY_CASCADE = "19500000-0000-4000-8000-000000000001";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
+const REVIEWED_PRISMA_RESIDUAL_SHA256 = "REVIEW_REQUIRED";
+
+const CONTRACT_TABLES = Object.freeze([
+  "identity_link",
+  "organization_identifier",
+  "organization_identity_conflict",
+  "organization_identity_conflict_party",
+  "organization_identity_decision",
+  "organization_canonical_mapping",
+  "organization_identity_replay",
+]);
+const CONTRACT_FUNCTIONS = Object.freeze([
+  "enforce_identity_link_contract_v2",
+  "enforce_identity_link_target_v2",
+  "enforce_organization_canonical_mapping_contract_v2",
+  "enforce_organization_identifier_contract_v2",
+  "enforce_organization_identity_conflict_contract_v2",
+  "enforce_organization_identity_conflict_party_contract_v2",
+  "enforce_organization_identity_decision_contract_v2",
+  "enforce_organization_identity_replay_contract_v2",
+]);
 
 let backfillTree;
 let contractStage;
@@ -199,6 +227,20 @@ function runPrismaDiff(database, schemaPath) {
   );
 }
 
+function reviewedPrismaDiffDigest(result, label) {
+  assert.equal(result.status, 0, `${label}: ${result.output}`);
+  assert.equal(result.stderr, "", `${label} emitted stderr`);
+  if (result.stdout === "") return "EMPTY";
+
+  const digest = sha256(result.stdout);
+  assert.equal(
+    digest,
+    REVIEWED_PRISMA_RESIDUAL_SHA256,
+    `${label} emitted an unreviewed Prisma residual SHA-256 ${digest}`,
+  );
+  return digest;
+}
+
 function asApp(workspaceId, sql) {
   return `
     SET SESSION AUTHORIZATION app_user;
@@ -276,6 +318,7 @@ function companyRows() {
     [COMPANY_A4, "Contract A4", "contract-a4.example", "contract-a4"],
     [COMPANY_A5, "Contract A5", "contract-a5.example", "contract-a5"],
     [COMPANY_A6, "Contract A6", "contract-a6.example", "contract-a6"],
+    [COMPANY_A7, "Contract A7", "contract-a7.example", "contract-a7"],
   ]
     .map(
       ([id, name, domain, dedupe]) =>
@@ -445,31 +488,106 @@ function runtimeSnapshot(database) {
 }
 
 function contractObjectSnapshot(database) {
+  const tableValues = CONTRACT_TABLES.map((table) => `('${table}')`).join(",");
+  const functionValues = CONTRACT_FUNCTIONS.map(
+    (functionName) => `('${functionName}')`,
+  ).join(",");
   return dockerPsql(
     database,
-    `SELECT jsonb_build_object(
-      'columns', (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.column_name) FROM (
-        SELECT column_name,is_nullable,column_default
-        FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='identity_link'
-      ) x),
-      'constraints', (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.conname) FROM (
-        SELECT conname,pg_get_constraintdef(oid,true) AS definition
-        FROM pg_constraint WHERE conrelid='public.identity_link'::regclass
-      ) x),
-      'indexes', (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.indexname) FROM (
-        SELECT indexname,indexdef FROM pg_indexes
-        WHERE schemaname='public' AND tablename='identity_link'
-      ) x),
-      'triggers', (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.tgname) FROM (
-        SELECT tgname,pg_get_triggerdef(oid,true) AS definition
-        FROM pg_trigger WHERE tgrelid='public.identity_link'::regclass
-          AND NOT tgisinternal
-      ) x),
-      'functions', (SELECT jsonb_agg(p.oid::regprocedure::text ORDER BY p.oid::regprocedure::text)
-        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-        WHERE n.nspname='public' AND p.proname LIKE 'enforce_%identity%')
-    )::text;`,
+    `WITH target_tables(table_name) AS (VALUES ${tableValues}),
+     target_functions(function_name) AS (VALUES ${functionValues})
+     SELECT jsonb_build_object(
+       'columns', COALESCE((
+         SELECT jsonb_agg(to_jsonb(snapshot) ORDER BY snapshot.table_name,snapshot.ordinal_position)
+         FROM (
+           SELECT columns.table_name,columns.ordinal_position,columns.column_name,
+             columns.is_nullable,columns.data_type,columns.udt_name,
+             COALESCE(columns.column_default,'') AS column_default
+           FROM information_schema.columns AS columns
+           JOIN target_tables USING (table_name)
+           WHERE columns.table_schema='public'
+         ) AS snapshot
+       ),'[]'::jsonb),
+       'constraints', COALESCE((
+         SELECT jsonb_agg(to_jsonb(snapshot) ORDER BY snapshot.table_name,snapshot.constraint_name)
+         FROM (
+           SELECT relation.relname AS table_name,constraint_record.conname AS constraint_name,
+             constraint_record.contype AS constraint_type,
+             constraint_record.convalidated AS validated,
+             pg_get_constraintdef(constraint_record.oid,true) AS definition
+           FROM pg_constraint AS constraint_record
+           JOIN pg_class AS relation ON relation.oid=constraint_record.conrelid
+           JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+           JOIN target_tables ON target_tables.table_name=relation.relname
+           WHERE namespace.nspname='public'
+         ) AS snapshot
+       ),'[]'::jsonb),
+       'indexes', COALESCE((
+         SELECT jsonb_agg(to_jsonb(snapshot) ORDER BY snapshot.table_name,snapshot.index_name)
+         FROM (
+           SELECT indexes.tablename AS table_name,indexes.indexname AS index_name,
+             indexes.indexdef AS definition
+           FROM pg_indexes AS indexes
+           JOIN target_tables ON target_tables.table_name=indexes.tablename
+           WHERE indexes.schemaname='public'
+         ) AS snapshot
+       ),'[]'::jsonb),
+       'triggers', COALESCE((
+         SELECT jsonb_agg(to_jsonb(snapshot) ORDER BY snapshot.table_name,snapshot.trigger_name)
+         FROM (
+           SELECT relation.relname AS table_name,trigger_record.tgname AS trigger_name,
+             trigger_record.tgenabled AS enabled,
+             pg_get_triggerdef(trigger_record.oid,true) AS definition
+           FROM pg_trigger AS trigger_record
+           JOIN pg_class AS relation ON relation.oid=trigger_record.tgrelid
+           JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+           JOIN target_tables ON target_tables.table_name=relation.relname
+           WHERE namespace.nspname='public' AND NOT trigger_record.tgisinternal
+         ) AS snapshot
+       ),'[]'::jsonb),
+       'table_acl', COALESCE((
+         SELECT jsonb_agg(to_jsonb(snapshot) ORDER BY snapshot.table_name)
+         FROM (
+           SELECT relation.relname AS table_name,pg_get_userbyid(relation.relowner) AS owner,
+             COALESCE(relation.relacl::text,'') AS raw_acl,
+             COALESCE((
+               SELECT string_agg(
+                 (CASE WHEN acl.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(acl.grantee) END)
+                   || ':' || acl.privilege_type || ':' || acl.is_grantable,
+                 ',' ORDER BY acl.grantee,acl.privilege_type,acl.is_grantable
+               )
+               FROM aclexplode(COALESCE(relation.relacl,acldefault('r',relation.relowner))) AS acl
+             ),'') AS effective_acl
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+           JOIN target_tables ON target_tables.table_name=relation.relname
+           WHERE namespace.nspname='public'
+         ) AS snapshot
+       ),'[]'::jsonb),
+       'functions', COALESCE((
+         SELECT jsonb_agg(to_jsonb(snapshot) ORDER BY snapshot.identity)
+         FROM (
+           SELECT format('public.%I(%s)',procedure_record.proname,
+                    pg_get_function_identity_arguments(procedure_record.oid)) AS identity,
+             pg_get_functiondef(procedure_record.oid) AS definition,
+             COALESCE(to_jsonb(procedure_record.proconfig),'[]'::jsonb) AS proconfig,
+             COALESCE(procedure_record.proacl::text,'') AS raw_acl,
+             COALESCE((
+               SELECT string_agg(
+                 (CASE WHEN acl.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(acl.grantee) END)
+                   || ':' || acl.privilege_type || ':' || acl.is_grantable,
+                 ',' ORDER BY acl.grantee,acl.privilege_type,acl.is_grantable
+               )
+               FROM aclexplode(COALESCE(procedure_record.proacl,
+                 acldefault('f',procedure_record.proowner))) AS acl
+             ),'') AS effective_acl
+           FROM pg_proc AS procedure_record
+           JOIN pg_namespace AS namespace ON namespace.oid=procedure_record.pronamespace
+           JOIN target_functions ON target_functions.function_name=procedure_record.proname
+           WHERE namespace.nspname='public' AND procedure_record.pronargs=0
+         ) AS snapshot
+       ),'[]'::jsonb)
+     )::text;`,
   );
 }
 
@@ -762,9 +880,10 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     );
     assert.match(upgradeDeployOutput, new RegExp(contractMigrationName, "u"));
     assert.match(secondFreshDeployOutput, /No pending migrations to apply/u);
-    assert.equal(freshSchemaDiffResult.status, 0, freshSchemaDiffResult.output);
-    assert.equal(schemaDiffResult.status, 0, schemaDiffResult.output);
-    assert.equal(schemaDiffResult.stdout, freshSchemaDiffResult.stdout);
+    assert.equal(
+      reviewedPrismaDiffDigest(freshSchemaDiffResult, "fresh schema diff"),
+      reviewedPrismaDiffDigest(schemaDiffResult, "upgrade schema diff"),
+    );
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -914,6 +1033,26 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
       databases.upgrade,
       `INSERT INTO identity_link(
         id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,
+        confidence,status,resolver_version,input_hash,conflict_id
+      ) VALUES (
+        '${LINK_PENDING_OWNER_INVALID}','${WORKSPACE_A}','company','${COMPANY_A7}',
+        '${RAW_A}','pending-without-owner',0.61,'PENDING_CONFLICT',
+        'identity-v1','legacy',NULL
+      );`,
+      /identity_link_pending_conflict_owner_check/u,
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM identity_link WHERE id='${LINK_PENDING_OWNER_INVALID}';`,
+      ),
+      "0",
+    );
+
+    expectOwnerFailure(
+      databases.upgrade,
+      `INSERT INTO identity_link(
+        id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,
         confidence,status,resolver_version,input_hash
       ) VALUES (
         '${LINK_HASH}','${WORKSPACE_A}','company','${COMPANY_A3}','${RAW_A}',
@@ -973,9 +1112,25 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
       );
     }
 
+    for (const [column, value] of [
+      ["status", "'ACTIVE'"],
+      ["resolver_version", "'identity-v1'"],
+      ["input_hash", "'legacy'"],
+      ["conflict_id", `'${MISSING_TARGET}'`],
+      ["created_at", "now()"],
+    ]) {
+      const sql = `INSERT INTO identity_link(
+        id,workspace_id,canonical_type,canonical_id,raw_record_id,
+        match_rule,confidence,${column}
+      ) VALUES (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A4}',
+        '${RAW_A}','acl-${column}',0.3,${value}
+      );`;
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, sql), {
+        rejects: /permission denied for table identity_link/u,
+      });
+    }
     for (const sql of [
-      `INSERT INTO identity_link(id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,confidence,status)
-       VALUES (gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A4}','${RAW_A}','acl',0.3,'ACTIVE');`,
       `UPDATE identity_link SET status='REVOKED' WHERE id='${LINK_APP_COMPANY}';`,
       `DELETE FROM identity_link WHERE id='${LINK_APP_COMPANY}';`,
       "TRUNCATE identity_link;",
@@ -1010,6 +1165,81 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     } finally {
       await releaseLockHolder(holder);
     }
+  });
+
+  it("keeps historical UUID stubs when committed company/contact targets are later deleted", () => {
+    dockerPsql(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `INSERT INTO canonical_company(
+          id,workspace_id,name,domain,status,dedupe_key,version,created_at,updated_at
+        ) VALUES
+          ('${COMPANY_HISTORY_DIRECT}','${WORKSPACE_A}','History Direct',
+           'history-direct.example','NEW','history-direct',1,now(),now()),
+          ('${COMPANY_HISTORY_CASCADE}','${WORKSPACE_A}','History Cascade',
+           'history-cascade.example','NEW','history-cascade',1,now(),now());
+         INSERT INTO canonical_contact(
+           id,workspace_id,company_id,full_name,title,seniority,department,
+           dedupe_key,created_at
+         ) VALUES (
+           '${CONTACT_HISTORY_CASCADE}','${WORKSPACE_A}','${COMPANY_HISTORY_CASCADE}',
+           'Historical Contact','CTO','c_level','Engineering',
+           'historical-contact',now()
+         );
+         INSERT INTO identity_link(
+           id,workspace_id,canonical_type,canonical_id,raw_record_id,
+           match_rule,confidence
+         ) VALUES
+           ('${LINK_HISTORY_COMPANY}','${WORKSPACE_A}','company',
+            '${COMPANY_HISTORY_DIRECT}','${RAW_A}','history-company',0.81),
+           ('${LINK_HISTORY_CONTACT}','${WORKSPACE_A}','contact',
+            '${CONTACT_HISTORY_CASCADE}','${RAW_A}','history-contact',0.82);`,
+      ),
+    );
+
+    dockerPsql(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `DELETE FROM canonical_company
+         WHERE id IN ('${COMPANY_HISTORY_DIRECT}','${COMPANY_HISTORY_CASCADE}');`,
+      ),
+    );
+
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',
+          (SELECT count(*) FROM canonical_company
+           WHERE id IN ('${COMPANY_HISTORY_DIRECT}','${COMPANY_HISTORY_CASCADE}')),
+          (SELECT count(*) FROM canonical_contact
+           WHERE id='${CONTACT_HISTORY_CASCADE}'),
+          (SELECT count(*) FROM identity_link
+           WHERE id IN ('${LINK_HISTORY_COMPANY}','${LINK_HISTORY_CONTACT}')),
+          (SELECT count(*) FROM identity_link
+           WHERE id='${LINK_HISTORY_COMPANY}'
+             AND canonical_type='company'
+             AND canonical_id='${COMPANY_HISTORY_DIRECT}'),
+          (SELECT count(*) FROM identity_link
+           WHERE id='${LINK_HISTORY_CONTACT}'
+             AND canonical_type='contact'
+             AND canonical_id='${CONTACT_HISTORY_CASCADE}')
+        );`,
+      ),
+      "0|0|2|1|1",
+    );
+    expectOwnerFailure(
+      databases.upgrade,
+      `INSERT INTO identity_link(
+        id,workspace_id,canonical_type,canonical_id,raw_record_id,
+        match_rule,confidence
+      ) VALUES (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_HISTORY_DIRECT}',
+        '${RAW_A}','post-delete-target',0.1
+      );`,
+      /IDENTITY_LINK_CANONICAL_TARGET_INVALID/u,
+    );
   });
 
   it("allows only the complete IdentityLink status graph and immutable/no-delete rules", () => {
@@ -1250,6 +1480,12 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     const mapping = "24000000-0000-4000-8000-000000000006";
     const conflictB = "24000000-0000-4000-8000-000000000007";
     const wrongWorkspace = "24000000-0000-4000-8000-000000000008";
+    const wrongSplitAction = "24000000-0000-4000-8000-000000000009";
+    const wrongSplitWorkspace = "24000000-0000-4000-8000-000000000010";
+    const mappingWrongSplitAction = "24000000-0000-4000-8000-000000000011";
+    const mappingWrongSplitWorkspace = "24000000-0000-4000-8000-000000000012";
+    const mappingRevisionJump = "24000000-0000-4000-8000-000000000013";
+    const mappingMissingSplit = "24000000-0000-4000-8000-000000000014";
     dockerPsql(
       databases.upgrade,
       asOwner(
@@ -1258,7 +1494,8 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
          ${insertDecisionSql({ id: merge, requestId: "map-merge", action: "MERGE", conflictId: conflict, canonicalCompanyId: COMPANY_A2 })}
          ${insertDecisionSql({ id: wrongAction, requestId: "map-wrong-action", action: "KEEP_SEPARATE", conflictId: conflict })}
          ${insertDecisionSql({ id: wrongTarget, requestId: "map-wrong-target", action: "MERGE", conflictId: conflict, canonicalCompanyId: COMPANY_A3 })}
-         ${insertDecisionSql({ id: split, requestId: "map-split", action: "SPLIT" })}`,
+         ${insertDecisionSql({ id: split, requestId: "map-split", action: "SPLIT" })}
+         ${insertDecisionSql({ id: wrongSplitAction, requestId: "map-wrong-split-action", action: "KEEP_SEPARATE", conflictId: conflict })}`,
       ),
     );
     dockerPsql(
@@ -1273,6 +1510,12 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
            workspaceId: WORKSPACE_B,
            conflictId: conflictB,
            canonicalCompanyId: COMPANY_B,
+         })}
+         ${insertDecisionSql({
+           id: wrongSplitWorkspace,
+           requestId: "map-wrong-split-workspace",
+           action: "SPLIT",
+           workspaceId: WORKSPACE_B,
          })}`,
       ),
     );
@@ -1309,6 +1552,72 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
               revoked_at='2026-08-29T07:00:00Z'
           WHERE id='${mapping}';`,
       ),
+    );
+    dockerPsql(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `INSERT INTO organization_canonical_mapping(
+          id,workspace_id,source_company_id,canonical_company_id,status,revision,
+          merge_decision_id,created_at
+        ) VALUES
+          ('${mappingWrongSplitAction}','${WORKSPACE_A}','${COMPANY_A3}',
+           '${COMPANY_A2}','ACTIVE',1,'${merge}','2026-08-29T06:00:00Z'),
+          ('${mappingWrongSplitWorkspace}','${WORKSPACE_A}','${COMPANY_A4}',
+           '${COMPANY_A2}','ACTIVE',1,'${merge}','2026-08-29T06:00:00Z'),
+          ('${mappingRevisionJump}','${WORKSPACE_A}','${COMPANY_A5}',
+           '${COMPANY_A2}','ACTIVE',1,'${merge}','2026-08-29T06:00:00Z'),
+          ('${mappingMissingSplit}','${WORKSPACE_A}','${COMPANY_A6}',
+           '${COMPANY_A2}','ACTIVE',1,'${merge}','2026-08-29T06:00:00Z');`,
+      ),
+    );
+    for (const [mappingId, revision, splitDecisionId, expected] of [
+      [
+        mappingWrongSplitAction,
+        2,
+        wrongSplitAction,
+        /ORGANIZATION_CANONICAL_MAPPING_DECISION_INVALID/u,
+      ],
+      [
+        mappingWrongSplitWorkspace,
+        2,
+        wrongSplitWorkspace,
+        /ORGANIZATION_CANONICAL_MAPPING_DECISION_INVALID/u,
+      ],
+      [
+        mappingRevisionJump,
+        3,
+        split,
+        /ORGANIZATION_CANONICAL_MAPPING_REVISION_INVALID/u,
+      ],
+      [
+        mappingMissingSplit,
+        2,
+        null,
+        /ORGANIZATION_CANONICAL_MAPPING_STATUS_TRANSITION_INVALID/u,
+      ],
+    ]) {
+      expectOwnerFailure(
+        databases.upgrade,
+        `UPDATE organization_canonical_mapping
+         SET status='REVOKED',revision=${revision},
+             split_decision_id=${splitDecisionId ? `'${splitDecisionId}'` : "NULL"},
+             revoked_at='2026-08-29T07:00:00Z'
+         WHERE id='${mappingId}';`,
+        expected,
+      );
+    }
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM organization_canonical_mapping
+         WHERE id IN (
+           '${mappingWrongSplitAction}','${mappingWrongSplitWorkspace}',
+           '${mappingRevisionJump}','${mappingMissingSplit}'
+         ) AND status='ACTIVE' AND revision=1
+           AND split_decision_id IS NULL AND revoked_at IS NULL;`,
+      ),
+      "4",
     );
     expectOwnerFailure(
       databases.upgrade,
@@ -1418,33 +1727,296 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
     );
   });
 
-  it("keeps all six new tables SELECT-only for app_user", () => {
-    assert.equal(
-      dockerPsql(
-        databases.upgrade,
-        `SELECT string_agg(table_name || ':' ||
-          has_table_privilege('app_user',format('public.%I',table_name),'SELECT')::text || ':' ||
-          has_table_privilege('app_user',format('public.%I',table_name),'INSERT')::text || ':' ||
-          has_table_privilege('app_user',format('public.%I',table_name),'UPDATE')::text || ':' ||
-          has_table_privilege('app_user',format('public.%I',table_name),'DELETE')::text,
-          E'\\n' ORDER BY table_name)
-         FROM (VALUES
-           ('organization_identifier'),
-           ('organization_identity_conflict'),
-           ('organization_identity_conflict_party'),
-           ('organization_identity_decision'),
-           ('organization_canonical_mapping'),
-           ('organization_identity_replay')
-         ) tables(table_name);`,
+  it("rejects the compact replay illegal-edge, attempt and state-shape matrix", () => {
+    const pendingDecision = "26000000-0000-4000-8000-000000000001";
+    const runningDecision = "26000000-0000-4000-8000-000000000002";
+    const failedDecision = "26000000-0000-4000-8000-000000000003";
+    const succeededDecision = "26000000-0000-4000-8000-000000000004";
+    const pendingReplay = "26000000-0000-4000-8000-000000000005";
+    const runningReplay = "26000000-0000-4000-8000-000000000006";
+    const failedReplay = "26000000-0000-4000-8000-000000000007";
+    const succeededReplay = "26000000-0000-4000-8000-000000000008";
+    const hashD = "d".repeat(64);
+    const hashE = "e".repeat(64);
+    const hashF = "f".repeat(64);
+    const hashZero = "0".repeat(64);
+
+    dockerPsql(
+      databases.upgrade,
+      asOwner(
+        WORKSPACE_A,
+        `${insertDecisionSql({ id: pendingDecision, requestId: "matrix-pending", action: "SPLIT", decisionHash: hashD })}
+         ${insertDecisionSql({ id: runningDecision, requestId: "matrix-running", action: "SPLIT", decisionHash: hashE })}
+         ${insertDecisionSql({ id: failedDecision, requestId: "matrix-failed", action: "SPLIT", decisionHash: hashF })}
+         ${insertDecisionSql({ id: succeededDecision, requestId: "matrix-succeeded", action: "SPLIT", decisionHash: hashZero })}
+         INSERT INTO organization_identity_replay(
+           id,workspace_id,decision_id,status,attempt,input_hash,created_at,updated_at
+         ) VALUES
+           ('${pendingReplay}','${WORKSPACE_A}','${pendingDecision}','PENDING',0,
+            '${hashD}','2026-08-29T08:00:00Z','2026-08-29T08:00:00Z'),
+           ('${runningReplay}','${WORKSPACE_A}','${runningDecision}','PENDING',0,
+            '${hashE}','2026-08-29T08:00:00Z','2026-08-29T08:00:00Z'),
+           ('${failedReplay}','${WORKSPACE_A}','${failedDecision}','PENDING',0,
+            '${hashF}','2026-08-29T08:00:00Z','2026-08-29T08:00:00Z'),
+           ('${succeededReplay}','${WORKSPACE_A}','${succeededDecision}','PENDING',0,
+            '${hashZero}','2026-08-29T08:00:00Z','2026-08-29T08:00:00Z');
+         UPDATE organization_identity_replay
+           SET status='RUNNING',attempt=1,updated_at='2026-08-29T09:00:00Z'
+           WHERE id IN ('${runningReplay}','${failedReplay}','${succeededReplay}');
+         UPDATE organization_identity_replay
+           SET status='FAILED',error_code='EXPECTED_FAILURE',
+               completed_at='2026-08-29T10:00:00Z',updated_at='2026-08-29T10:00:00Z'
+           WHERE id='${failedReplay}';
+         UPDATE organization_identity_replay
+           SET status='SUCCEEDED',output_hash='${hashZero}',
+               completed_at='2026-08-29T10:00:00Z',updated_at='2026-08-29T10:00:00Z'
+           WHERE id='${succeededReplay}';`,
       ),
+    );
+
+    for (const [sql, expected] of [
       [
-        "organization_canonical_mapping:true:false:false:false",
-        "organization_identifier:true:false:false:false",
-        "organization_identity_conflict:true:false:false:false",
-        "organization_identity_conflict_party:true:false:false:false",
-        "organization_identity_decision:true:false:false:false",
-        "organization_identity_replay:true:false:false:false",
-      ].join("\n"),
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',attempt=0,output_hash='${hashD}',
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${pendingReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='FAILED',attempt=0,error_code='DIRECT_FAILURE',
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${pendingReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='PENDING',attempt=1,updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='PENDING',error_code=NULL,completed_at=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${failedReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',output_hash='${hashF}',error_code=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${failedReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='PENDING',attempt=0,output_hash=NULL,completed_at=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${succeededReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='RUNNING',attempt=2,output_hash=NULL,completed_at=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${succeededReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='FAILED',output_hash=NULL,error_code='LATE_FAILURE',
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${succeededReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATUS_TRANSITION_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='RUNNING',attempt=2,updated_at='2026-08-29T09:00:00Z'
+         WHERE id='${pendingReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_ATTEMPT_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='RUNNING',attempt=1,error_code=NULL,completed_at=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${failedReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_ATTEMPT_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',attempt=2,output_hash='${hashE}',
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_ATTEMPT_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='RUNNING',attempt=1,output_hash='${hashD}',
+             updated_at='2026-08-29T09:00:00Z'
+         WHERE id='${pendingReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',output_hash=NULL,
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',output_hash='${hashE}',error_code='UNEXPECTED',
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',output_hash='${hashE}',completed_at=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='FAILED',error_code=NULL,
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='FAILED',error_code='',
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='FAILED',output_hash='${hashE}',error_code='FAILURE',
+             completed_at='2026-08-29T11:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='FAILED',error_code='FAILURE',completed_at=NULL,
+             updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='RUNNING',attempt=1,updated_at='2026-08-29T07:00:00Z'
+         WHERE id='${pendingReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_TIMESTAMP_INVALID/u,
+      ],
+      [
+        `UPDATE organization_identity_replay
+         SET status='SUCCEEDED',output_hash='${hashE}',
+             completed_at='2026-08-29T12:00:00Z',updated_at='2026-08-29T11:00:00Z'
+         WHERE id='${runningReplay}';`,
+        /ORGANIZATION_IDENTITY_REPLAY_TIMESTAMP_INVALID/u,
+      ],
+    ]) {
+      expectOwnerFailure(databases.upgrade, sql, expected);
+    }
+
+    for (const [attempt, outputHash] of [
+      [1, null],
+      [0, hashD],
+    ]) {
+      expectOwnerFailure(
+        databases.upgrade,
+        `INSERT INTO organization_identity_replay(
+          id,workspace_id,decision_id,status,attempt,input_hash,output_hash,
+          created_at,updated_at
+        ) VALUES (
+          gen_random_uuid(),'${WORKSPACE_A}','${pendingDecision}','PENDING',
+          ${attempt},'${hashD}',${outputHash ? `'${outputHash}'` : "NULL"},
+          '2026-08-29T08:00:00Z','2026-08-29T08:00:00Z'
+        );`,
+        /ORGANIZATION_IDENTITY_REPLAY_STATE_SHAPE_INVALID/u,
+      );
+    }
+  });
+
+  it("keeps all six tables SELECT-only and removes app/PUBLIC contract-function execution", () => {
+    const tables = CONTRACT_TABLES.filter((table) => table !== "identity_link");
+    const privileges = [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE",
+      "TRUNCATE",
+      "REFERENCES",
+      "TRIGGER",
+    ];
+    const tableValues = tables.map((table) => `('${table}')`).join(",");
+    const privilegeValues = privileges
+      .map((privilege) => `('${privilege}')`)
+      .join(",");
+    const actualTablePrivileges = dockerPsql(
+      databases.upgrade,
+      `WITH tables(table_name) AS (VALUES ${tableValues}),
+       privileges(privilege_name) AS (VALUES ${privilegeValues})
+       SELECT string_agg(
+         table_name || '|' || privilege_name || '|' ||
+         has_table_privilege(
+           'app_user',format('public.%I',table_name),privilege_name
+         )::text,
+         E'\\n' ORDER BY table_name,privilege_name
+       )
+       FROM tables CROSS JOIN privileges;`,
+    );
+    const expectedTablePrivileges = [...tables]
+      .sort()
+      .flatMap((table) =>
+        [...privileges].sort().map(
+          (privilege) =>
+            `${table}|${privilege}|${privilege === "SELECT" ? "true" : "false"}`,
+        ),
+      )
+      .join("\n");
+    assert.equal(actualTablePrivileges, expectedTablePrivileges);
+
+    const functionValues = CONTRACT_FUNCTIONS.map(
+      (functionName) => `('${functionName}')`,
+    ).join(",");
+    const actualFunctionPrivileges = dockerPsql(
+      databases.upgrade,
+      `WITH target_functions(function_name) AS (VALUES ${functionValues})
+       SELECT string_agg(
+         identity || '|' || app_execute::text || '|' || public_execute::text,
+         E'\\n' ORDER BY identity
+       )
+       FROM (
+         SELECT format('public.%I(%s)',procedure_record.proname,
+                  pg_get_function_identity_arguments(procedure_record.oid)) AS identity,
+           has_function_privilege(
+             'app_user',procedure_record.oid,'EXECUTE'
+           ) AS app_execute,
+           COALESCE(bool_or(
+             acl.grantee=0 AND acl.privilege_type='EXECUTE'
+           ),false) AS public_execute
+         FROM pg_proc AS procedure_record
+         JOIN pg_namespace AS namespace ON namespace.oid=procedure_record.pronamespace
+         JOIN target_functions ON target_functions.function_name=procedure_record.proname
+         LEFT JOIN LATERAL aclexplode(COALESCE(
+           procedure_record.proacl,acldefault('f',procedure_record.proowner)
+         )) AS acl ON true
+         WHERE namespace.nspname='public' AND procedure_record.pronargs=0
+         GROUP BY procedure_record.oid,procedure_record.proname
+       ) AS function_privileges;`,
+    );
+    assert.equal(
+      actualFunctionPrivileges,
+      CONTRACT_FUNCTIONS.map(
+        (functionName) => `public.${functionName}()|false|false`,
+      )
+        .sort()
+        .join("\n"),
     );
   });
 });

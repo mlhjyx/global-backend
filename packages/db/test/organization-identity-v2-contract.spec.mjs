@@ -174,6 +174,10 @@ describe("Organization Identity v2 contract DDL", () => {
     }
     assert.doesNotMatch(sql, /ALTER COLUMN "conflict_id" SET NOT NULL/u);
     assert.match(sql, /CONSTRAINT "identity_link_input_hash_check"/u);
+    assert.match(
+      sql,
+      /CONSTRAINT "identity_link_pending_conflict_owner_check" CHECK \(\s*"status" <> 'PENDING_CONFLICT' OR "conflict_id" IS NOT NULL\s*\)/u,
+    );
     assert.match(sql, /"input_hash" = 'legacy'/u);
     assert.match(sql, /"input_hash" ~ '\^\[0-9a-f\]\{64\}\$'/u);
     assert.match(
@@ -198,6 +202,9 @@ describe("Organization Identity v2 contract DDL", () => {
     assert.match(sql, /NEW\."canonical_type" = 'company'/u);
     assert.match(sql, /NEW\."canonical_type" = 'contact'/u);
     assert.equal(occurrences(sql, /FOR KEY SHARE/gu), 2);
+    assert.match(sql, /creation-time reference/u);
+    assert.match(sql, /historical UUID stub/u);
+    assert.match(sql, /readers must tolerate a missing canonical target/u);
     assert.match(sql, /'PENDING_CONFLICT'[\s\S]*'ACTIVE'[\s\S]*'REVOKED'/u);
     assert.match(
       sql,
@@ -319,6 +326,9 @@ describe("Organization Identity v2 contract DDL", () => {
       /inputHash\s+String\s+@default\("legacy"\)\s+@map\("input_hash"\)\s+@db\.VarChar\(64\)/u,
     );
     assert.match(identityLink, /conflictId\s+String\?/u);
+    assert.match(identityLink, /creation-time reference/u);
+    assert.match(identityLink, /historical UUID stub/u);
+    assert.match(identityLink, /tolerate a missing canonical target/u);
     assert.match(
       identityLink,
       /@@unique\(\[workspaceId, canonicalType, canonicalId, rawRecordId\], map: "identity_link_workspace_canonical_raw_key"\)/u,
