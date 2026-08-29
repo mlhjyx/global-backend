@@ -154,6 +154,34 @@ describe('provider-owned company receipt lineage', () => {
     expect(result.lineage?.receiptCoverage).toEqual([]);
   });
 
+  it('trade-fair keeps non-invoked exits explicit and invoked missing receipts fail closed', async () => {
+    const noBroker = await new TradeFairDiscoveryProvider()
+      .discoverCompanies(query, context());
+    expect(noBroker.lineage?.recordCount).toBe(0);
+
+    const executionBroker = broker(async () => {
+      throw new Error('upstream failed before settlement');
+    });
+    const missing = await new TradeFairDiscoveryProvider({ broker: executionBroker })
+      .discoverCompanies(query, context());
+    expect(missing).not.toHaveProperty('lineage');
+
+    const noFair = await new TradeFairDiscoveryProvider({ broker: executionBroker })
+      .discoverCompanies({ ...query, filters: {}, keywords: [] }, context());
+    expect(noFair.lineage?.recordCount).toBe(0);
+  });
+
+  it('trade-fair propagates malformed duplicate receipt callbacks', async () => {
+    const executionBroker = broker(async (toolId, _input, ctx) => {
+      ctx.onDurableReceipt?.(toolId, FAIR_RECEIPT);
+      ctx.onDurableReceipt?.(toolId, FAIR_RECEIPT);
+      return { data: { exhibitors: [] }, costCents: 0 };
+    });
+    await expect(new TradeFairDiscoveryProvider({ broker: executionBroker })
+      .discoverCompanies(query, context()))
+      .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
+  });
+
   it('public-web excludes search/crawl receipts and covers only the final model record', async () => {
     const parent = vi.fn();
     const executionBroker = broker(async (toolId, _input, ctx) => {
@@ -244,6 +272,68 @@ describe('provider-owned company receipt lineage', () => {
     });
   });
 
+  it('public-web covers no-broker, too-short, ordinary rejection and settled no-output paths', async () => {
+    const noBroker = await new PublicWebDiscoveryProvider({ gateway: {} as never })
+      .discoverCompanies(query, context());
+    expect(noBroker.lineage?.recordCount).toBe(0);
+
+    const tooShortBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://short.test/', title: 'Short' }] }, costCents: 0 }
+      : { data: { text: 'short' }, costCents: 0 });
+    const tooShort = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: tooShortBroker,
+    }).discoverCompanies(query, context());
+    expect(tooShort.lineage?.recordCount).toBe(0);
+
+    mocks.isAllowedByRobots.mockRejectedValueOnce(new Error('robots unavailable'));
+    const rejected = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: tooShortBroker,
+    }).discoverCompanies(query, context());
+    expect(rejected.lineage?.recordCount).toBe(0);
+
+    const settledBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://noncompany.test/', title: 'Candidate' }] }, costCents: 0 }
+      : { data: { text: 'candidate content '.repeat(30) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementationOnce(
+      async (_gateway, input, ctx) => {
+        ctx.onDurableReceipt?.(input.task, MODEL_A);
+        return {
+          data: { is_company_site: false },
+          provider: 'gateway',
+          model: 'model',
+          runtimeExecution: {},
+        };
+      },
+    );
+    const noOutput = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: settledBroker,
+    }).discoverCompanies(query, context());
+    expect(noOutput.lineage?.attemptReceipts).toEqual([
+      { producerId: 'discovery.extract_company', receipt: MODEL_A },
+    ]);
+  });
+
+  it('public-web propagates malformed company callback lineage', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://acme.test/', title: 'Acme' }] }, costCents: 0 }
+      : { data: { text: 'Acme industrial pump manufacturer '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementationOnce(
+      async (_gateway, input, ctx) => {
+        ctx.onDurableReceipt?.(input.task, MODEL_A);
+        ctx.onDurableReceipt?.(input.task, MODEL_A);
+        throw new Error('unreachable');
+      },
+    );
+    await expect(new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: executionBroker,
+    }).discoverCompanies(query, context()))
+      .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
+  });
+
   it('directory applies first-wins final dedup indexes to each physical extract-list receipt', async () => {
     const parent = vi.fn();
     const executionBroker = broker(async (toolId, _input, ctx) => {
@@ -316,5 +406,68 @@ describe('provider-owned company receipt lineage', () => {
         ['discovery.extract_list', MODEL_B],
         ['discovery.extract_list', MODEL_C],
       ]);
+  });
+
+  it('directory preserves early exits and omits lineage after an invoked model lacks a receipt', async () => {
+    const noBroker = await new DirectoryDiscoveryProvider({ gateway: {} as never })
+      .discoverCompanies(query, context());
+    expect(noBroker.lineage?.recordCount).toBe(0);
+
+    const noListingBroker = broker(async () => ({ data: { results: [] }, costCents: 0 }));
+    const noListing = await new DirectoryDiscoveryProvider({
+      gateway: {} as never,
+      broker: noListingBroker,
+    }).discoverCompanies(query, context());
+    expect(noListing.lineage?.recordCount).toBe(0);
+
+    const listingBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [{
+            url: 'https://directory.test/members',
+            title: 'Members directory',
+          }] },
+          costCents: 0,
+        }
+      : { data: { text: 'Directory member companies '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValueOnce({
+      data: {
+        is_directory: true,
+        companies: [{ name: 'No website company' }],
+        has_next_page: false,
+      },
+      provider: 'gateway',
+      model: 'model',
+      runtimeExecution: {},
+    });
+    const missing = await new DirectoryDiscoveryProvider({
+      gateway: {} as never,
+      broker: listingBroker,
+    }).discoverCompanies(query, context());
+    expect(missing.records).toHaveLength(1);
+    expect(missing).not.toHaveProperty('lineage');
+  });
+
+  it('directory propagates malformed company callback lineage', async () => {
+    const listingBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [{
+            url: 'https://directory.test/members',
+            title: 'Members directory',
+          }] },
+          costCents: 0,
+        }
+      : { data: { text: 'Directory member companies '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementationOnce(
+      async (_gateway, input, ctx) => {
+        ctx.onDurableReceipt?.(input.task, MODEL_B);
+        ctx.onDurableReceipt?.(input.task, MODEL_B);
+        throw new Error('unreachable');
+      },
+    );
+    await expect(new DirectoryDiscoveryProvider({
+      gateway: {} as never,
+      broker: listingBroker,
+    }).discoverCompanies(query, context()))
+      .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
   });
 });

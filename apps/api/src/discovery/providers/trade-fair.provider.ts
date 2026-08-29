@@ -13,6 +13,13 @@ import type { TradeFairAlgoliaInput } from '../../tools/source-tools';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { selectFairs, TradeFairTemplate } from '../trade-fairs';
 import { normalizeDomain } from '../identity';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyLineageInvalid,
+  type DiscoveryCompanyReceiptObservation,
+} from '../company-discovery-lineage';
 
 const PARSER_VERSION = 'trade_fair/v1';
 const PER_FAIR_LIMIT = 400; // 单展会拉取上限（护栏；尊重 Algolia 限流）
@@ -29,6 +36,7 @@ const PER_FAIR_LIMIT = 400; // 单展会拉取上限（护栏；尊重 Algolia �
 export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'trade_fair';
   readonly classes: SourceClass[] = ['industry_data'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
@@ -45,7 +53,15 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     const broker = this.deps?.broker;
     if (!broker) {
       console.warn('[trade_fair] broker unavailable, fail-closed (no raw egress)');
-      return { records: [], costCents: 0 };
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'trade_fair',
+          recordCount: 0,
+          observations: [],
+        }),
+      };
     }
 
     const f = query.filters ?? {};
@@ -55,29 +71,69 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
       keywords: query.keywords,
       region: String(f.region ?? ''),
     });
-    if (!fairs.length) return { records: [], costCents: 0 };
+    if (!fairs.length) {
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'trade_fair',
+          recordCount: 0,
+          observations: [],
+        }),
+      };
+    }
 
     const toolCtx: ToolContext = { ...ctx };
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const dedup = new Map<string, ProviderCompanyRecord>();
+    const observations: DiscoveryCompanyReceiptObservation[] = [];
     const perFair = Math.min(PER_FAIR_LIMIT, Math.max(query.limit, 50));
 
     for (const fair of fairs) {
+      const collector = createDiscoveryCompanyReceiptCollector({
+        providerKey: 'trade_fair',
+        producerId: 'tradefair.algolia',
+        parentOnDurableReceipt: ctx.onDurableReceipt,
+      });
+      collector.markExpectedInvocation();
       let records: ProviderCompanyRecord[];
       try {
-        records = await this.pullFair(broker, toolCtx, fair, perFair, query.sourceClass);
+        records = await this.pullFair(
+          broker,
+          { ...toolCtx, onDurableReceipt: collector.onDurableReceipt },
+          fair,
+          perFair,
+          query.sourceClass,
+        );
       } catch (err) {
+        if (isDiscoveryCompanyLineageInvalid(err)) throw err;
+        observations.push(collector.finish([]));
         this.log(`skip ${fair.slug}: ${String(err).slice(0, 100)}`);
         continue; // 单展会失败/闸门拒绝不影响其余（如 key 换届失效、SUSPENDED）
       }
+      const recordIndexes: number[] = [];
       for (const rec of records) {
         if (rec.domain && blocked.has(rec.domain)) continue;
         const key = rec.domain ?? rec.externalId;
-        if (!dedup.has(key)) dedup.set(key, rec);
+        if (!dedup.has(key)) {
+          recordIndexes.push(dedup.size);
+          dedup.set(key, rec);
+        }
       }
+      observations.push(collector.finish(recordIndexes));
       this.log(`✓ ${fair.slug}: ${records.length} exhibitors`);
     }
-    return { records: [...dedup.values()], costCents: 0 };
+    const records = [...dedup.values()];
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'trade_fair',
+      recordCount: records.length,
+      observations,
+    });
+    return {
+      records,
+      costCents: 0,
+      ...(lineage ? { lineage } : {}),
+    };
   }
 
   private async pullFair(

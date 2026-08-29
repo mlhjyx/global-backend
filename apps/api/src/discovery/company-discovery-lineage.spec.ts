@@ -137,9 +137,44 @@ describe('company discovery receipt lineage', () => {
     missing.markExpectedInvocation();
     expect(buildDiscoveryCompanyResultLineage({
       providerKey: 'directory',
-      recordCount: 0,
-      observations: [missing.finish([])],
+      recordCount: 1,
+      observations: [
+        (() => {
+          const complete = createDiscoveryCompanyReceiptCollector({
+            providerKey: 'directory',
+            producerId: 'discovery.extract_list',
+          });
+          complete.markExpectedInvocation();
+          complete.onDurableReceipt(
+            'discovery.extract_list',
+            receipt(OPERATION_A, 'discovery-extract-list/v1'),
+          );
+          return complete.finish([0]);
+        })(),
+        missing.finish([]),
+      ],
     })).toBeUndefined();
+  });
+
+  it('rejects accessor observations without invoking their getters', () => {
+    let getterCalls = 0;
+    const observation = Object.defineProperty({
+      producerId: 'discovery.extract_company',
+      receipt: null,
+      recordIndexes: [],
+    }, 'invoked', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return false;
+      },
+    });
+    expect(() => buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount: 0,
+      observations: [observation as never],
+    })).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(getterCalls).toBe(0);
   });
 
   it.each([
@@ -154,16 +189,21 @@ describe('company discovery receipt lineage', () => {
   });
 
   it('rejects duplicate or mismatched callbacks before exposing partial lineage', () => {
-    const collector = createDiscoveryCompanyReceiptCollector({
+    const unmarked = createDiscoveryCompanyReceiptCollector({
       providerKey: 'public_web',
       producerId: 'discovery.extract_company',
     });
-    expect(() => collector.onDurableReceipt(
+    expect(() => unmarked.onDurableReceipt(
       'discovery.extract_company',
       receipt(OPERATION_A),
     )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
-    collector.markExpectedInvocation();
-    expect(() => collector.onDurableReceipt(
+
+    const mismatched = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    mismatched.markExpectedInvocation();
+    expect(() => mismatched.onDurableReceipt(
       'tradefair.algolia',
       receipt(OPERATION_A),
     )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
@@ -249,5 +289,129 @@ describe('company discovery receipt lineage', () => {
     expect(() => parseDiscoveryCompanyResultLineage(accessor, 'public_web'))
       .toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
     expect(getterCalls).toBe(0);
+  });
+
+  it('fails closed across malformed object, array, numeric and schema boundaries', () => {
+    const empty = {
+      schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      recordCount: 0,
+      attemptReceipts: [],
+      receiptCoverage: [],
+    };
+    class LineagePayload {}
+    expect(() => parseDiscoveryCompanyResultLineage(
+      Object.assign(new LineagePayload(), empty),
+      'public_web',
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => parseDiscoveryCompanyResultLineage(empty, 'unknown'))
+      .toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => parseDiscoveryCompanyResultLineage(
+      { ...empty, schemaVersion: 'wrong/v1' },
+      'public_web',
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => parseDiscoveryCompanyResultLineage(
+      { ...empty, recordCount: -1 },
+      'public_web',
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => parseDiscoveryCompanyResultLineage(
+      { ...empty, attemptReceipts: new Proxy([], {}) },
+      'public_web',
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const sparse = new Array(1);
+    expect(() => parseDiscoveryCompanyResultLineage(
+      { ...empty, attemptReceipts: sparse },
+      'public_web',
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    const accessorArray = [null];
+    Object.defineProperty(accessorArray, '0', {
+      enumerable: true,
+      get: () => null,
+    });
+    expect(() => parseDiscoveryCompanyResultLineage(
+      { ...empty, attemptReceipts: accessorArray },
+      'public_web',
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    expect(() => parseDiscoveryCompanyResultLineage({
+      ...empty,
+      receiptCoverage: [{
+        producerId: 'discovery.extract_company',
+        receipt: receipt(OPERATION_A),
+        recordIndexes: [],
+      }],
+    }, 'public_web')).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => parseDiscoveryCompanyResultLineage({
+      ...empty,
+      recordCount: 1,
+      receiptCoverage: [{
+        producerId: 'discovery.extract_company',
+        receipt: receipt(OPERATION_A),
+        recordIndexes: [1],
+      }],
+    }, 'public_web')).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => parseDiscoveryCompanyResultLineage({
+      ...empty,
+      attemptReceipts: [{
+        producerId: 'discovery.extract_company',
+        receipt: { ...receipt(OPERATION_A), resultDigest: 'INVALID' },
+      }],
+    }, 'public_web')).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+  });
+
+  it('rejects malformed collector configuration and invalid state transitions', () => {
+    expect(() => createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+      parentOnDurableReceipt: 1 as never,
+    })).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const markedTwice = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    markedTwice.markExpectedInvocation();
+    expect(() => markedTwice.markExpectedInvocation())
+      .toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => markedTwice.finish([])).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const invalidReceipt = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    invalidReceipt.markExpectedInvocation();
+    expect(() => invalidReceipt.onDurableReceipt(
+      'discovery.extract_company',
+      { ...receipt(OPERATION_A), resultDigest: 'INVALID' },
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const idle = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    expect(() => idle.finish([0])).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+  });
+
+  it('rejects malformed observation semantics without exposing partial output', () => {
+    expect(() => buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount: 0,
+      observations: [{
+        producerId: 'discovery.extract_company',
+        invoked: 'yes',
+        receipt: null,
+        recordIndexes: [],
+      } as never],
+    })).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount: 0,
+      observations: [{
+        producerId: 'discovery.extract_company',
+        invoked: false,
+        receipt: receipt(OPERATION_A),
+        recordIndexes: [],
+      }],
+    })).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
   });
 });
