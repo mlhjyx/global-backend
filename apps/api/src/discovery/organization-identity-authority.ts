@@ -8,6 +8,7 @@ import {
   GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
   validateRawSourceProviderPayload,
 } from "./raw-source-provider-schema";
+import { types } from "node:util";
 
 const NORMALIZER_VERSION = "organization-identity-authority/v1" as const;
 const GLOBAL_JURISDICTION = "GLOBAL" as const;
@@ -124,6 +125,7 @@ function passivePlainJsonClone(value: unknown): SafeJson {
       return Number.isFinite(input) ? input : unsafeContainer();
     }
     if (typeof input !== "object") return unsafeContainer();
+    if (types.isProxy(input)) return unsafeContainer();
     if (state.ancestors.has(input)) return unsafeContainer();
     state.ancestors.add(input);
     try {
@@ -194,6 +196,7 @@ function passivePlainJsonClone(value: unknown): SafeJson {
         if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
           return unsafeContainer();
         }
+        if (descriptor.value === undefined) continue;
         Object.defineProperty(copy, key, {
           configurable: true,
           enumerable: true,
@@ -417,6 +420,9 @@ export function extractOrganizationIdentityAuthority(
   providerKey: string,
   payloadValue: unknown,
 ): readonly OrganizationIdentityAuthorityIdentifier[] {
+  if (!GOVERNED_RAW_SOURCE_PROVIDER_KEYS.includes(providerKey as never)) {
+    return error("IDENTITY_RAW_PAYLOAD_NOT_GOVERNED");
+  }
   let safePayload: SafeJson;
   try {
     safePayload = passivePlainJsonClone(payloadValue);
