@@ -70,8 +70,8 @@
     {
       "workflow": ".github/workflows/ci.yml",
       "action": "oasdiff/oasdiff-action/breaking",
-      "revision": "033c15c845bef10f148afb0fa781bf1b2a7fe1bf",
-      "version": "v0.1.12"
+      "revision": "2649ebe137aeb72a95707671204e829f86e091fc",
+      "version": "v0.1.13"
     },
     {
       "workflow": ".github/workflows/security.yml",
