@@ -6,7 +6,7 @@ import {
   OrganizationIdentityAuthorityError,
 } from "./organization-identity-authority";
 import {
-  GOVENED_RAW_SOURCE_PROVIDER_KEYS,
+  GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
   validateRawSourceProviderPayload,
 } from "./raw-source-provider-schema";
 
@@ -32,7 +32,7 @@ function rawRecord(overrides: Record<string, unknown> = {}) {
 function validPayloads(): Readonly<Record<string, Record<string, unknown>>> {
   return Object.freeze({
     registry: rawRecord({
-      identifier: { scheme: "registry-id", value: "de 12/34" },
+      identifier: { scheme: "registry-id", value: "de-12/34" },
     }),
     directory: rawRecord({
       externalId: "directory:acme.example",
@@ -52,7 +52,10 @@ function validPayloads(): Readonly<Record<string, Record<string, unknown>>> {
         source_class: "company_registry",
       },
       license: "CC0-1.0",
-      provenance: { ...PROVENANCE, sourceUrl: "https://www.wikidata.org/wiki/Q1" },
+      provenance: {
+        ...PROVENANCE,
+        sourceUrl: "https://www.wikidata.org/wiki/Q1",
+      },
     }),
     openstreetmap: rawRecord({
       externalId: "osm:node/1",
@@ -63,7 +66,10 @@ function validPayloads(): Readonly<Record<string, Record<string, unknown>>> {
         source_class: "industry_data",
       },
       license: "ODbL-1.0",
-      provenance: { ...PROVENANCE, sourceUrl: "https://www.openstreetmap.org/node/1" },
+      provenance: {
+        ...PROVENANCE,
+        sourceUrl: "https://www.openstreetmap.org/node/1",
+      },
     }),
     trade_fair: rawRecord({
       externalId: "fair-1:company-1",
@@ -76,13 +82,13 @@ function validPayloads(): Readonly<Record<string, Record<string, unknown>>> {
     }),
     ted: rawRecord({
       externalId: "ted:1:0",
-      identifier: { scheme: "ted-natid:de", value: "DE 291-499-156" },
+      identifier: { scheme: "ted-natid:de", value: "de291499156" },
       attributes: {
         ted: {
           publication_number: "1",
           publication_date: "2026-08-25",
           notice_type: "award",
-          winner_identifier: "DE 291-499-156",
+          winner_identifier: "de291499156",
         },
       },
       license: "CC BY 4.0",
@@ -119,12 +125,14 @@ function validPayloads(): Readonly<Record<string, Record<string, unknown>>> {
 }
 
 function authorityError(code: string) {
-  return expect.objectContaining({ code }) as OrganizationIdentityAuthorityError;
+  return expect.objectContaining({
+    code,
+  }) as OrganizationIdentityAuthorityError;
 }
 
 describe("governed Raw organization identity authority", () => {
   it("keeps authority profiles exactly aligned with the exported Raw provider list", () => {
-    expect(GOVENED_RAW_SOURCE_PROVIDER_KEYS).toEqual([
+    expect(GOVERNED_RAW_SOURCE_PROVIDER_KEYS).toEqual([
       "registry",
       "directory",
       "wikidata",
@@ -135,17 +143,26 @@ describe("governed Raw organization identity authority", () => {
       "public_web",
     ]);
     expect(Object.keys(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).toEqual(
-      GOVENED_RAW_SOURCE_PROVIDER_KEYS,
+      GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
     );
-    expect(Object.keys(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).not.toContain("gleif");
-    expect(Object.keys(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).not.toContain("sec_edgar");
+    expect(Object.keys(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).not.toContain(
+      "gleif",
+    );
+    expect(Object.keys(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).not.toContain(
+      "sec_edgar",
+    );
   });
 
   it("admits a representative current Raw payload for every governed provider", () => {
-    for (const providerKey of GOVENED_RAW_SOURCE_PROVIDER_KEYS) {
+    for (const providerKey of GOVERNED_RAW_SOURCE_PROVIDER_KEYS) {
       const payload = validPayloads()[providerKey]!;
-      expect(validateRawSourceProviderPayload(providerKey, payload)).toMatchObject({ ok: true });
-      expect(extractOrganizationIdentityAuthority(providerKey, payload)).toEqual(
+      expect(
+        validateRawSourceProviderPayload(providerKey, payload),
+        providerKey,
+      ).toMatchObject({ ok: true });
+      expect(
+        extractOrganizationIdentityAuthority(providerKey, payload),
+      ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             providerKey,
@@ -161,7 +178,7 @@ describe("governed Raw organization identity authority", () => {
   it("normalizes domains and identifiers, sorts keys, and removes duplicates", () => {
     const payload = rawRecord({
       domain: "www.acme.example",
-      identifier: { scheme: "registry-id", value: " DE 12/34 " },
+      identifier: { scheme: "registry-id", value: "DE-12/34" },
     });
     const result = extractOrganizationIdentityAuthority("registry", payload);
     expect(result).toEqual([
@@ -180,13 +197,26 @@ describe("governed Raw organization identity authority", () => {
         validatorVersion: "registry-id-v1",
       }),
     ]);
-    expect(result.map((item) => item.key)).toEqual([...result.map((item) => item.key)].sort());
+    expect(result.map((item) => item.key)).toEqual(
+      [...result.map((item) => item.key)].sort(),
+    );
+  });
+
+  it("does not invent name-country authority when a valid admitted record has no domain or identifier", () => {
+    const { domain: _domain, ...withoutDomain } = rawRecord({
+      attributes: { employees: 50 },
+    });
+    expect(
+      extractOrganizationIdentityAuthority("registry", withoutDomain),
+    ).toEqual([]);
   });
 
   it("only admits a checksum-valid GLOBAL LEI for registry", () => {
     const valid = extractOrganizationIdentityAuthority(
       "registry",
-      rawRecord({ identifier: { scheme: "lei", value: "529900T8BM49AURSDO55" } }),
+      rawRecord({
+        identifier: { scheme: "lei", value: "529900T8BM49AURSDO55" },
+      }),
     );
     expect(valid).toEqual(
       expect.arrayContaining([
@@ -201,13 +231,35 @@ describe("governed Raw organization identity authority", () => {
     expect(() =>
       extractOrganizationIdentityAuthority(
         "registry",
-        rawRecord({ identifier: { scheme: "lei", value: "529900T8BM49AURSDO56" } }),
+        rawRecord({
+          identifier: { scheme: "lei", value: "529900T8BM49AURSDO56" },
+        }),
       ),
     ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
   });
 
+  it("uses GLOBAL for a registry identifier when the Raw payload has no country", () => {
+    const { country: _country, ...withoutCountry } = rawRecord({
+      identifier: { scheme: "registry-id", value: "AB-123" },
+    });
+    expect(
+      extractOrganizationIdentityAuthority("registry", withoutCountry),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scheme: "registry-id",
+          jurisdiction: "GLOBAL",
+          normalizedValue: "AB123",
+        }),
+      ]),
+    );
+  });
+
   it("uses TED suffix jurisdiction or payload country, while refusing free-text and missing jurisdiction", () => {
-    const fromSuffix = extractOrganizationIdentityAuthority("ted", validPayloads().ted);
+    const fromSuffix = extractOrganizationIdentityAuthority(
+      "ted",
+      validPayloads().ted,
+    );
     expect(fromSuffix).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -222,13 +274,13 @@ describe("governed Raw organization identity authority", () => {
       "ted",
       rawRecord({
         externalId: "ted:1:0",
-        identifier: { scheme: "ted-natid", value: "DE 291-499-156" },
+        identifier: { scheme: "ted-natid", value: "de291499156" },
         attributes: {
           ted: {
             publication_number: "1",
             publication_date: "2026-08-25",
             notice_type: "award",
-            winner_identifier: "DE 291-499-156",
+            winner_identifier: "de291499156",
           },
         },
         license: "CC BY 4.0",
@@ -276,7 +328,10 @@ describe("governed Raw organization identity authority", () => {
   });
 
   it("keeps FDA identifiers numeric and pinned to US", () => {
-    const result = extractOrganizationIdentityAuthority("openfda", validPayloads().openfda);
+    const result = extractOrganizationIdentityAuthority(
+      "openfda",
+      validPayloads().openfda,
+    );
     expect(result).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -287,6 +342,17 @@ describe("governed Raw organization identity authority", () => {
         }),
       ]),
     );
+    expect(() =>
+      extractOrganizationIdentityAuthority("openfda", {
+        ...validPayloads().openfda,
+        externalId: "openfda:ABC",
+        identifier: { scheme: "fda-reg", value: "ABC" },
+        attributes: {
+          fda: { registration_number: "ABC", product_codes: ["LLZ"] },
+          products: ["LLZ"],
+        },
+      }),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
   });
 
   it("rejects identifier authority outside registry, TED, and FDA at the Raw boundary", () => {
@@ -345,11 +411,16 @@ describe("governed Raw organization identity authority", () => {
     expect(JSON.stringify(payload)).toBe(before);
     expect(Object.isFrozen(first)).toBe(true);
     for (const item of first) expect(Object.isFrozen(item)).toBe(true);
-    expect(Object.isFrozen(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).toBe(true);
-    for (const profile of Object.values(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)) {
+    expect(Object.isFrozen(ORGANIZATION_IDENTITY_AUTHORITY_PROFILES)).toBe(
+      true,
+    );
+    for (const profile of Object.values(
+      ORGANIZATION_IDENTITY_AUTHORITY_PROFILES,
+    )) {
       expect(Object.isFrozen(profile)).toBe(true);
       expect(Object.isFrozen(profile.identifierRules)).toBe(true);
-      for (const rule of profile.identifierRules) expect(Object.isFrozen(rule)).toBe(true);
+      for (const rule of profile.identifierRules)
+        expect(Object.isFrozen(rule)).toBe(true);
     }
   });
 });

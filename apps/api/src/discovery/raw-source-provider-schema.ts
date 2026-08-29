@@ -42,7 +42,7 @@ const SOURCE_CLASSES = new Set([
   "public_intelligence",
   "industry_data",
 ]);
-const GOVERNED_PROVIDERS = new Set([
+export const GOVERNED_RAW_SOURCE_PROVIDER_KEYS = Object.freeze([
   "registry",
   "directory",
   "wikidata",
@@ -51,7 +51,10 @@ const GOVERNED_PROVIDERS = new Set([
   "ted",
   "openfda",
   "public_web",
-]);
+] as const);
+const GOVERNED_PROVIDERS: ReadonlySet<string> = new Set(
+  GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
+);
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
     registry: new Set(["public", "licensed", "byo"]),
