@@ -34,7 +34,7 @@ const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
 const expandMigration = "20260829090000_organization_identity_v2_expand_ddl";
 const backfillMigration =
   "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
-const futureMigration = "20260829092000_organization_identity_v2_contract";
+const futureMigration = "20260829092000_organization_identity_v2_contract_ddl";
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, {
