@@ -2,20 +2,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { TenantProjectionService } from './tenant-projection.service';
 
 const source = {
-  id: 'source-1',
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   sourceKey: 'fair:example',
-  providerKey: 'trade_fair',
+  providerKey: 'mapyourshow',
+  config: { host: 'example.mapyourshow.com' },
 };
 
 function entity(index: number, email = 'sales@example.com') {
+  const entityId = index.toString(16).padStart(12, '0');
   return {
-    id: `entity-${index}`,
+    id: `bbbbbbbb-bbbb-4bbb-8bbb-${entityId}`,
     sourceId: source.id,
+    externalId: `source-entity-${index}`,
     name: `Example ${index}`,
     domain: `example-${index}.com`,
     country: 'DE',
     withdrawnAt: null,
     cleaned: { email_kind: 'role', email },
+    contentHash: 'a'.repeat(64),
+    lastSeenAt: new Date('2026-08-25T16:31:00.000Z'),
+    lastSeenFetchId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   };
 }
 
@@ -35,8 +41,28 @@ function projectionHarness(
   const suppressionRecord = {
     findMany: vi.fn(async () => suppressions.shift() ?? []),
   };
+  const queryRaw = vi.fn(
+    async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+      if (statement.strings?.join("?").includes("write_raw_source_record_v2")) {
+        const command = JSON.parse(String(statement.values?.[0])) as Record<
+          string,
+          unknown
+        >;
+        return [
+          {
+            raw_record_id: "raw-bridge",
+            payload_hash: "b".repeat(64),
+            payload_bytes: Buffer.byteLength(JSON.stringify(command.payload)),
+            ingest_status: command.ingestStatus,
+            inserted: true,
+          },
+        ];
+      }
+      return [{ pg_advisory_xact_lock: null }];
+    },
+  );
   const tx = {
-    $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+    $queryRaw: queryRaw,
     suppressionRecord,
     canonicalCompany: {
       findUnique: vi.fn(async () =>
@@ -66,12 +92,47 @@ function projectionHarness(
       findFirst: vi.fn(async () => ({ id: 'existing-link' })),
       create: vi.fn(),
     },
+    rawSourceRecord: {
+      upsert: vi.fn(
+        async ({ create }: { create: Record<string, unknown> }) => ({
+          id: 'raw-bridge',
+          payloadHash: create.payloadHash,
+          ingestStatus: create.ingestStatus,
+        }),
+      ),
+    },
     fieldEvidence: { create: vi.fn() },
   };
   const prisma = {
     monitoredSource: { findUnique: vi.fn(async () => source) },
     sourceEntity: { findMany: vi.fn(async () => entities) },
-    withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
+    sourceFetch: {
+      findMany: vi.fn(async () => [
+        {
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          sourceId: source.id,
+          status: 'DONE',
+          parserVersion: 'acquisition/v1',
+          finishedAt: new Date('2026-08-25T16:31:00.000Z'),
+        },
+      ]),
+    },
+    sourcePolicy: {
+      findMany: vi.fn(async () => [
+        {
+          id: 'policy-1',
+          domain: 'mapyourshow.com',
+          retentionDays: 365,
+          reviewStatus: 'APPROVED',
+          allowedPurpose: ['discovery'],
+          updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+        },
+      ]),
+    },
+    withWorkspace: vi.fn(
+      async (_workspaceId: string, callback: (client: typeof tx) => unknown) =>
+        callback(tx),
+    ),
   };
   return {
     service: new TenantProjectionService({ prisma: prisma as never }),
@@ -83,9 +144,15 @@ function projectionHarness(
 
 describe('TenantProjectionService — suppression-aware role mailbox projection', () => {
   it('does not rematerialize an already suppressed exact role mailbox', async () => {
-    const harness = projectionHarness([entity(1)], [[{ type: 'email', value: ' Sales@EXAMPLE.COM ' }]]);
+    const harness = projectionHarness(
+      [entity(1)],
+      [[{ type: 'email', value: ' Sales@EXAMPLE.COM ' }]],
+    );
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.creates).toHaveLength(1);
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
@@ -97,13 +164,16 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       [[{ type: 'domain', value: 'agency.example' }]],
     );
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.creates).toHaveLength(1);
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
   });
 
-  it('removes a prior role mailbox when its own domain becomes suppressed', async () => {
+  it('does not use a linked Raw replay to repair a prior role mailbox', async () => {
     const harness = projectionHarness(
       [entity(1, 'buyer@agency.example')],
       [[{ type: 'domain', value: 'agency.example' }]],
@@ -116,28 +186,64 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       },
     );
 
-    await harness.service.projectSource('workspace-1', source.id);
+    const result = await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
-    expect(harness.updates).toHaveLength(1);
-    expect(harness.updates[0].attributes).not.toHaveProperty('contact_email');
-    expect(harness.updates[0].attributes).toHaveProperty('products', ['pump']);
+    expect(result).toMatchObject({ projected: 0 });
+    expect(harness.updates).toHaveLength(0);
+  });
+
+  it('leaves unsafe current-state cleanup to 2100/2200 on a linked Raw replay', async () => {
+    const harness = projectionHarness([entity(1)], [[]], {
+      id: 'company-existing',
+      attributes: {
+        contact_email: 'sales@example.com',
+        extraction_evidence: 'Contact alice van smith at 555-0100',
+        description: 'unbounded prose',
+        public_phone: '555-0100',
+        products: ['pump', 'alice van smith pump'],
+        gleif: { lei: '529900T8BM49AURSDO55' },
+      },
+    });
+
+    const result = await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
+
+    expect(result).toMatchObject({ projected: 0 });
+    expect(harness.updates).toHaveLength(0);
   });
 
   it('refreshes suppression facts for each chunk so a later fact blocks later projection', async () => {
     const entities = Array.from({ length: 101 }, (_, index) =>
       entity(index + 1, index === 100 ? 'blocked@example.com' : undefined),
     );
-    const harness = projectionHarness(entities, [[], [{ type: 'email', value: 'blocked@example.com' }]]);
+    const harness = projectionHarness(entities, [
+      [],
+      [{ type: 'email', value: 'blocked@example.com' }],
+    ]);
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(harness.suppressionRecord.findMany).toHaveBeenCalledTimes(2);
     expect(harness.creates).toHaveLength(101);
-    expect(harness.creates.at(-1)?.attributes).not.toHaveProperty('contact_email');
+    expect(harness.creates.at(-1)?.attributes).not.toHaveProperty(
+      'contact_email',
+    );
   });
 
   it('repairs and stops when an existing canonical identity matches company suppression', async () => {
-    const incoming = { ...entity(1), name: 'Source Listing Name', domain: null };
+    const incoming = {
+      ...entity(1),
+      name: 'Source Listing GmbH',
+      domain: null,
+    };
     const harness = projectionHarness(
       [incoming],
       [[{ type: 'domain', value: 'blocked.example' }]],
@@ -146,11 +252,18 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
         name: 'Existing Legal Entity GmbH',
         domain: 'https://www.blocked.example/about',
         status: 'NEW',
-        attributes: { products: ['pump'], contact_email: 'sales@blocked.example' },
+        attributes: {
+          products: ['pump'],
+          contact_email: 'sales@blocked.example',
+          description: 'unsafe legacy prose',
+        },
       },
     );
 
-    const result = await harness.service.projectSource('workspace-1', source.id);
+    const result = await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(result).toMatchObject({ projected: 0, suppressed: 1 });
     expect(harness.updates).toEqual([

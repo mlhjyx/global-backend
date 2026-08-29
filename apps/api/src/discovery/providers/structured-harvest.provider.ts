@@ -22,10 +22,16 @@ import {
   buildHiringFromAtsJobs,
   type AtsBoard,
 } from '../../adapters/ats-boards';
+import {
+  isStructuredHarvestSiteSectionKey,
+  MAX_STRUCTURED_HARVEST_SITE_SECTION_COUNT,
+  MAX_STRUCTURED_HARVEST_SITE_SECTION_KEYS,
+  sanitizeStructuredHarvestSiteSections,
+} from '../structured-harvest-site-sections';
 
 const PARSER_VERSION = 'structured-harvest/v1';
 const MAX_CHILD_SITEMAPS = 3;
-const MAX_URLS = 5000;
+const MAX_URLS = MAX_STRUCTURED_HARVEST_SITE_SECTION_COUNT;
 
 /**
  * 结构化收割 Provider（v3.0 P0，signal 源，零付费）。发布者主动供机器消费的公开数据面，
@@ -150,17 +156,22 @@ export function pickCareersUrl(urls: string[]): string | undefined {
 /** 按 URL 一级路径段盘点站点区块（产品/关于/新闻/招聘/…），产出「站点结构」画像。 */
 export function tallySections(urls: string[]): Record<string, number> {
   const tally: Record<string, number> = {};
-  for (const u of urls) {
+  for (const u of urls.slice(0, MAX_URLS)) {
     const seg = pathOf(u).split('/').filter(Boolean)[0]?.toLowerCase();
-    if (!seg || seg.length > 24) continue;
+    if (!seg || !isStructuredHarvestSiteSectionKey(seg)) continue;
     tally[seg] = (tally[seg] ?? 0) + 1;
   }
   // 只留计数靠前的段，避免噪声
-  return Object.fromEntries(
+  const bounded = Object.fromEntries(
     Object.entries(tally)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20),
+      .sort(
+        ([leftKey, leftCount], [rightKey, rightCount]) =>
+          rightCount - leftCount ||
+          (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0),
+      )
+      .slice(0, MAX_STRUCTURED_HARVEST_SITE_SECTION_KEYS),
   );
+  return sanitizeStructuredHarvestSiteSections(bounded) ?? {};
 }
 
 // 职位详情 URL：招聘路径下带具体岗位 slug（≥4 字符 slug，排除落地页本身）

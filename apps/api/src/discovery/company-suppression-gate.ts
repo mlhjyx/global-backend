@@ -11,6 +11,10 @@ import {
   lockWorkspaceSuppressionPolicy,
   type SuppressionPolicyLockReceipt,
 } from './suppression-policy-lock';
+import {
+  canonicalCompanyAttributesEqual,
+  sanitizeCanonicalCompanyAttributes,
+} from './canonical-company-attributes';
 
 /**
  * Final gate for writers that may create a canonical company from a platform
@@ -45,13 +49,27 @@ export async function loadMaterializableCompanyState(
   options?: {
     knownSuppressions?: ReadonlyArray<{ type: string; value: string }>;
     policyLock?: SuppressionPolicyLockReceipt;
+    sanitizeAttributes?: (
+      attributes: Record<string, unknown>,
+    ) => Record<string, unknown>;
   },
 ) {
   if (options?.policyLock) assertWorkspaceSuppressionPolicyLock(options.policyLock, workspaceId);
   else await lockWorkspaceSuppressionPolicy(tx, workspaceId);
   const prior = await tx.canonicalCompany.findUnique({
     where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-    select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      domain: true,
+      country: true,
+      region: true,
+      dedupeKey: true,
+      attributes: true,
+      status: true,
+      version: true,
+      updatedAt: true,
+    },
   });
   const suppressions =
     options?.knownSuppressions ??
@@ -62,8 +80,33 @@ export async function loadMaterializableCompanyState(
   const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
   const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
   const blocked = prior?.status === 'SUPPRESSED' || sourceSuppressed || canonicalSuppressed;
-  if (prior && blocked) await repairSuppressedCompany(tx, prior);
-  return { allowed: !blocked, prior } as const;
+  const sanitizeAttributes = (attributes: Record<string, unknown>) => {
+    const governed = sanitizeCanonicalCompanyAttributes(attributes);
+    return options?.sanitizeAttributes
+      ? options.sanitizeAttributes(governed)
+      : governed;
+  };
+  if (prior && blocked)
+    await repairSuppressedCompany(tx, prior, sanitizeAttributes);
+  const storedAttributes = prior ? jsonObject(prior.attributes) : {};
+  const safePrior = prior
+    ? {
+        ...prior,
+        attributes: sanitizeAttributes(storedAttributes),
+      }
+    : null;
+  return {
+    allowed: !blocked,
+    prior: safePrior,
+    attributesRequireRepair: Boolean(
+      prior &&
+        safePrior &&
+        !canonicalCompanyAttributesEqual(
+          storedAttributes,
+          safePrior.attributes,
+        ),
+    ),
+  } as const;
 }
 
 /**
@@ -94,7 +137,20 @@ export async function companyMayUseExternalProcessing(
     where: { type: { in: ['domain', 'company_name'] } },
     select: { type: true, value: true },
   });
-  if (!companyMatchesSuppression(suppressions, company)) return true;
+  if (!companyMatchesSuppression(suppressions, company)) {
+    const attributes = jsonObject(company.attributes);
+    const sanitized = sanitizeCanonicalCompanyAttributes(attributes);
+    if (JSON.stringify(sanitized) !== JSON.stringify(attributes)) {
+      await tx.canonicalCompany.updateMany({
+        where: { id: company.id, status: { not: 'SUPPRESSED' } },
+        data: {
+          attributes: sanitized as Prisma.InputJsonValue,
+          version: { increment: 1 },
+        },
+      });
+    }
+    return true;
+  }
 
   await repairSuppressedCompany(tx, company);
   return false;
@@ -126,7 +182,9 @@ export async function loadCompanyForSuppressionSafeWrite(
     return null;
   }
 
-  const attributes = jsonObject(company.attributes);
+  const attributes = sanitizeCanonicalCompanyAttributes(
+    jsonObject(company.attributes),
+  );
   const mailbox = canonicalizeSuppressionValue(
     'email',
     typeof attributes.contact_email === 'string' ? attributes.contact_email : '',
@@ -216,22 +274,31 @@ export async function contactMayUseExternalProcessing(
 async function repairSuppressedCompany(
   tx: Prisma.TransactionClient,
   company: { id: string; status: string; attributes?: unknown },
+  sanitizeAttributes?: (
+    attributes: Record<string, unknown>,
+  ) => Record<string, unknown>,
 ): Promise<void> {
   const attributes = jsonObject(company.attributes);
-  const hasMailbox = Object.prototype.hasOwnProperty.call(attributes, 'contact_email');
-  const { contact_email: _removedContactEmail, ...safeAttributes } = attributes;
+  const governed = sanitizeCanonicalCompanyAttributes(attributes);
+  const sanitized = sanitizeAttributes
+    ? sanitizeAttributes(governed)
+    : governed;
+  const { contact_email: _removedContactEmail, ...safeAttributes } = sanitized;
+  const attributesChanged = JSON.stringify(safeAttributes) !== JSON.stringify(attributes);
 
   if (company.status !== 'SUPPRESSED') {
     const repaired = await tx.canonicalCompany.updateMany({
       where: { id: company.id, status: { not: 'SUPPRESSED' } },
       data: {
         status: 'SUPPRESSED',
-        ...(hasMailbox ? { attributes: safeAttributes as Prisma.InputJsonValue } : {}),
+        ...(attributesChanged
+          ? { attributes: safeAttributes as Prisma.InputJsonValue }
+          : {}),
         version: { increment: 1 },
       },
     });
-    if (repaired.count > 0 || !hasMailbox) return;
-  } else if (!hasMailbox) {
+    if (repaired.count > 0 || !attributesChanged) return;
+  } else if (!attributesChanged) {
     return;
   }
 
@@ -242,8 +309,15 @@ async function repairSuppressedCompany(
     select: { attributes: true },
   });
   const currentAttributes = jsonObject(current?.attributes);
-  if (!Object.prototype.hasOwnProperty.call(currentAttributes, 'contact_email')) return;
-  const { contact_email: _currentMailbox, ...currentSafeAttributes } = currentAttributes;
+  const currentGoverned = sanitizeCanonicalCompanyAttributes(currentAttributes);
+  const currentSanitized = sanitizeAttributes
+    ? sanitizeAttributes(currentGoverned)
+    : currentGoverned;
+  const { contact_email: _currentMailbox, ...currentSafeAttributes } = currentSanitized;
+  if (
+    JSON.stringify(currentSafeAttributes) === JSON.stringify(currentAttributes)
+  )
+    return;
   await tx.canonicalCompany.updateMany({
     where: { id: company.id },
     data: { attributes: currentSafeAttributes as Prisma.InputJsonValue, version: { increment: 1 } },

@@ -58,13 +58,68 @@ describe('结构化收割 · 纯解析器', () => {
   });
 
   it('站点区块盘点：按一级路径段计数', () => {
-    const t = tallySections([
-      'https://acme.de/products/a',
-      'https://acme.de/products/b',
-      'https://acme.de/about',
-    ]);
+    const t = tallySections(['https://acme.de/products/a', 'https://acme.de/products/b', 'https://acme.de/about']);
     expect(t.products).toBe(2);
     expect(t.about).toBe(1);
+  });
+
+  it('站点区块盘点：只产出有界且非联系/密钥的闭集一级路径段', () => {
+    const sections = tallySections([
+      'https://acme.example/products/a',
+      'https://acme.example/products/b',
+      'https://acme.example/about',
+      'https://acme.example/.well-known/security.txt',
+      'https://acme.example/source/a',
+      'https://acme.example/notice/a',
+      'https://acme.example/contact/a',
+      'https://acme.example/person@example.test/a',
+      'https://acme.example/555-0100/a',
+      'https://acme.example/%D9%A5%D9%A5%D9%A5-%D9%A0%D9%A1%D9%A0%D9%A0/a',
+      'https://acme.example/bearer-secret/a',
+      'https://acme.example/%70roducts/a',
+      `https://acme.example/${'x'.repeat(25)}/a`,
+      'https://acme.example/Ａbout/a',
+    ]);
+
+    // Hand-fixed bytes: this expectation does not call the stored-value
+    // sanitizer or derive an allow-list from production code.
+    expect(JSON.stringify(sections)).toBe('{".well-known":1,"about":1,"products":2}');
+  });
+
+  it('站点区块盘点：输出最多 20 个 key，单 key 计数最多 5000', () => {
+    const closedSectionUrls = [
+      '.well-known',
+      'about',
+      'blog',
+      'careers',
+      'company',
+      'docs',
+      'downloads',
+      'events',
+      'industries',
+      'insights',
+      'jobs',
+      'news',
+      'partners',
+      'press',
+      'products',
+      'publications',
+      'resources',
+      'services',
+      'solutions',
+      'support',
+      'sustainability',
+      'technology',
+    ].map((section) => `https://acme.example/${section}/index.html`);
+    const boundedKeys = tallySections(closedSectionUrls);
+    expect(Object.keys(boundedKeys)).toHaveLength(20);
+    expect(boundedKeys).not.toHaveProperty('sustainability');
+    expect(boundedKeys).not.toHaveProperty('technology');
+
+    const boundedCount = tallySections(
+      Array.from({ length: 5001 }, (_, index) => `https://acme.example/products/${index}`),
+    );
+    expect(boundedCount).toEqual({ products: 5000 });
   });
 
   it('职位详情 URL 识别 + slug → 岗位名', () => {

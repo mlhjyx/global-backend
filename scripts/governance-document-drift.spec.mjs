@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dirname, join, resolve } from "node:path";
@@ -92,9 +93,13 @@ test("the Copy fixed-source governance document reflects the active reviewed suc
   const governance = read(
     "docs/implementation-records/copy-fixed-source-impact-governance.md",
   );
-  const eligibility = JSON.parse(
-    read("docs/evidence/site-builder/copy-runtime-eligibility.json"),
+  const eligibilityBytes = read(
+    "docs/evidence/site-builder/copy-runtime-eligibility.json",
   );
+  const eligibility = JSON.parse(eligibilityBytes);
+  const eligibilitySha256 = createHash("sha256")
+    .update(eligibilityBytes)
+    .digest("hex");
 
   assert.match(governance, /active v22/i);
   assert.doesNotMatch(governance, /\bv15\b/i);
@@ -107,6 +112,14 @@ test("the Copy fixed-source governance document reflects the active reviewed suc
   assert.match(governance, /NOT_AUTHORIZED/);
   assert.match(governance, /BLOCKED/);
   assert.match(governance, /REBASE_FIXED_SOURCE_BEFORE_DISPATCH/);
+  assert.ok(
+    governance.includes(eligibility.current_source_fingerprint),
+    "Copy governance must quote the current machine source fingerprint",
+  );
+  assert.ok(
+    governance.includes(eligibilitySha256),
+    "Copy governance must quote the exact current eligibility receipt SHA-256",
+  );
   assert.match(governance, /successor[^\n]*(?:不是|不等于)[^\n]*CURRENT/i);
   assert.match(governance, /successor[^\n]*(?:不代表|不构成)[^\n]*rebaseline/i);
   assert.match(governance, /successor[^\n]*(?:不授权|不能授权)[^\n]*dispatch/i);

@@ -30,6 +30,8 @@ export const SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW =
   'siteBuildCostReconciliationSweepWorkflow';
 export const SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID =
   'site-builder-cost-reconciliation';
+export const RAW_RETENTION_SWEEP_WORKFLOW = 'rawRetentionSweepWorkflow';
+export const RAW_RETENTION_SWEEP_SCHEDULE_ID = 'raw-source-retention';
 export const ASSET_OBJECT_CLEANUP_WORKFLOW = 'assetObjectCleanupWorkflow';
 // 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
 export const DELETION_WORKFLOW = 'deletionWorkflow';

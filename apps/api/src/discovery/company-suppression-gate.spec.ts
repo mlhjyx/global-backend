@@ -132,7 +132,7 @@ describe('company suppression terminal gate', () => {
     ).resolves.toMatchObject({ allowed: false, prior: { id: 'co-1' } });
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'co-1' },
-      data: { attributes: { keep: true }, version: { increment: 1 } },
+      data: { attributes: {}, version: { increment: 1 } },
     });
   });
 
@@ -159,7 +159,7 @@ describe('company suppression terminal gate', () => {
     ).resolves.toMatchObject({ allowed: false });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: { id: 'co-1' },
-      data: { attributes: { keep: 'current' }, version: { increment: 1 } },
+      data: { attributes: {}, version: { increment: 1 } },
     });
   });
 

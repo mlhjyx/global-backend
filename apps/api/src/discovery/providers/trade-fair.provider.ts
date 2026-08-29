@@ -94,29 +94,50 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     );
     const exhibitors = res.data.exhibitors ?? [];
     const now = new Date().toISOString();
-    return exhibitors.map((e) => ({
-      externalId: `${fair.slug}:${e.externalId}`,
-      name: e.companyName,
-      domain: e.website ? (normalizeDomain(e.website) ?? undefined) : undefined,
-      country: e.country,
-      attributes: {
-        // 展会公示的公开商务联系点（非个人数据）——直接进 attributes，供后续按需晋级
-        public_email: e.email ?? null,
-        public_phone: e.phone ?? null,
-        stand: e.stand ?? null,
-        products: e.products,
-        description: e.description ?? null,
-        hiring_signal: e.hiring ?? false,
-        source_fair: fair.slug,
-        source_fair_name: fair.name,
-        source_class: sourceClass,
-      },
-      provenance: {
-        sourceUrl: fair.exhibitorUrl,
+    return exhibitors.map((exhibitor) =>
+      mapTradeFairExhibitorToRecord({
+        fair,
+        exhibitor,
+        sourceClass,
         fetchedAt: now,
-        contentHash: createHash('sha256').update(`${fair.slug}:${e.externalId}`).digest('hex'),
-        parserVersion: PARSER_VERSION,
-      },
-    }));
+      }),
+    );
   }
+}
+
+export function mapTradeFairExhibitorToRecord(args: {
+  fair: Pick<TradeFairTemplate, 'slug' | 'name' | 'exhibitorUrl'>;
+  exhibitor: FairExhibitor;
+  sourceClass: SourceClass;
+  fetchedAt: string;
+}): ProviderCompanyRecord {
+  const { fair, exhibitor } = args;
+  return {
+    externalId: `${fair.slug}:${exhibitor.externalId}`,
+    name: exhibitor.companyName,
+    domain: exhibitor.website
+      ? (normalizeDomain(exhibitor.website) ?? undefined)
+      : undefined,
+    country: exhibitor.country,
+    attributes: {
+      // 展会公示的公开商务联系点（非个人数据）——adapter 输出保持不变；Raw boundary 另做公司事实净化。
+      public_email: exhibitor.email ?? null,
+      public_phone: exhibitor.phone ?? null,
+      stand: exhibitor.stand ?? null,
+      products: exhibitor.products,
+      description: exhibitor.description ?? null,
+      hiring_signal: exhibitor.hiring ?? false,
+      source_fair: fair.slug,
+      source_fair_name: fair.name,
+      source_class: args.sourceClass,
+    },
+    provenance: {
+      sourceUrl: fair.exhibitorUrl,
+      fetchedAt: args.fetchedAt,
+      contentHash: createHash('sha256')
+        .update(`${fair.slug}:${exhibitor.externalId}`)
+        .digest('hex'),
+      parserVersion: PARSER_VERSION,
+    },
+  };
 }

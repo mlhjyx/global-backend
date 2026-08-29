@@ -160,7 +160,7 @@ export class AcquisitionService {
           sourceId, externalId: c.externalId, entityKind: 'company',
           name: c.name, domain: c.domain ?? null, country: c.country ?? null,
           cleaned: c.cleaned as Prisma.InputJsonValue, contentHash: c.contentHash,
-          firstSeenAt: now, lastSeenAt: now,
+          firstSeenAt: now, lastSeenAt: now, lastSeenFetchId: fetch.id,
         });
         changes.push({ sourceId, fetchId: fetch.id, externalId: c.externalId, changeType: 'ADDED', detail: { name: c.name, domain: c.domain } as Prisma.InputJsonValue });
       } else if (prev.withdrawnAt || prev.contentHash !== c.contentHash) {
@@ -198,11 +198,11 @@ export class AcquisitionService {
         data: {
           name: u.c.name, domain: u.c.domain ?? null, country: u.c.country ?? null,
           cleaned: u.c.cleaned as Prisma.InputJsonValue, contentHash: u.c.contentHash,
-          lastSeenAt: now, withdrawnAt: null, missCount: 0,
+          lastSeenAt: now, lastSeenFetchId: fetch.id, withdrawnAt: null, missCount: 0,
         },
       }),
     );
-    await inChunks(toTouch, CHUNK, (id) => database.sourceEntity.update({ where: { id }, data: { lastSeenAt: now, missCount: 0 } }));
+    await inChunks(toTouch, CHUNK, (id) => database.sourceEntity.update({ where: { id }, data: { lastSeenAt: now, lastSeenFetchId: fetch.id, missCount: 0 } }));
     await inChunks(toMiss, CHUNK, (m) => database.sourceEntity.update({ where: { id: m.id }, data: { missCount: m.miss } }));
     await inChunks(toRemove, CHUNK, (id) => database.sourceEntity.update({ where: { id }, data: { withdrawnAt: now, missCount: MISS_THRESHOLD } }));
     if (changes.length) await database.sourceEntityChange.createMany({ data: changes });

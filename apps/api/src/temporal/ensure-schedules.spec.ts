@@ -5,6 +5,7 @@ import {
   INTENT_SWEEP_SCHEDULE_ID,
   KB_RECOVERY_SWEEP_SCHEDULE_ID,
   PATENTS_CACHE_REFRESH_SCHEDULE_ID,
+  RAW_RETENTION_SWEEP_SCHEDULE_ID,
   SANCTIONS_REFRESH_SCHEDULE_ID,
   SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID,
 } from "./understanding.constants";
@@ -149,7 +150,7 @@ describe("ensurePlatformSchedules", () => {
     await ensurePlatformSchedules();
 
     expect(connect).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledTimes(9);
+    expect(create).toHaveBeenCalledTimes(10);
     expect(getHandle).toHaveBeenCalledTimes(2);
     expect(updates[KB_RECOVERY_SWEEP_SCHEDULE_ID]).toMatchObject({
       action: {
@@ -199,6 +200,71 @@ describe("ensurePlatformSchedules", () => {
     expect(JSON.stringify(authorityActions)).not.toMatch(/jws|token|workspace|cap/i);
   });
 
+  it('creates the raw retention schedule with the fixed self-healing contract', async () => {
+    create.mockResolvedValue(undefined);
+    const previous = process.env.RAW_RETENTION_SWEEP_EVERY;
+    delete process.env.RAW_RETENTION_SWEEP_EVERY;
+
+    try {
+      await ensurePlatformSchedules();
+
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({
+        scheduleId: RAW_RETENTION_SWEEP_SCHEDULE_ID,
+        spec: { intervals: [{ every: '24h' }] },
+        action: {
+          type: 'startWorkflow',
+          workflowType: 'rawRetentionSweepWorkflow',
+          taskQueue: 'understanding',
+          args: [{}],
+        },
+        policies: { overlap: 'SKIP', catchupWindow: '1 minute' },
+      }));
+    } finally {
+      if (previous === undefined) delete process.env.RAW_RETENTION_SWEEP_EVERY;
+      else process.env.RAW_RETENTION_SWEEP_EVERY = previous;
+    }
+  });
+
+  it('applies RAW_RETENTION_SWEEP_EVERY only to the raw retention interval', async () => {
+    create.mockResolvedValue(undefined);
+    const previous = process.env.RAW_RETENTION_SWEEP_EVERY;
+    process.env.RAW_RETENTION_SWEEP_EVERY = '6h';
+
+    try {
+      await ensurePlatformSchedules();
+
+      const calls = create.mock.calls.map(([value]) => value as {
+        scheduleId: string;
+        spec: { intervals: [{ every: string }] };
+        action: { args?: unknown[] };
+      });
+      const raw = calls.find(({ scheduleId }) => scheduleId === RAW_RETENTION_SWEEP_SCHEDULE_ID);
+      expect(raw).toMatchObject({
+        spec: { intervals: [{ every: '6h' }] },
+        action: { args: [{}] },
+      });
+      for (const { scheduleId, spec, action } of calls) {
+        if (scheduleId === RAW_RETENTION_SWEEP_SCHEDULE_ID) continue;
+        const expectedEvery = {
+          [ACQ_SWEEP_SCHEDULE_ID]: '10m',
+          [INTENT_SWEEP_SCHEDULE_ID]: '1h',
+          'backlog-sweep': '24h',
+          'external-intent-sweep': '6h',
+          [PATENTS_CACHE_REFRESH_SCHEDULE_ID]: '7d',
+          [SANCTIONS_REFRESH_SCHEDULE_ID]: '24h',
+          'site-builder-kb-recovery': '5m',
+          'site-builder-release-maintenance': '24h',
+          'site-builder-cost-reconciliation': '1m',
+        }[scheduleId];
+        expect(spec.intervals[0].every).toBe(expectedEvery);
+        expect(JSON.stringify(action.args)).not.toContain('6h');
+      }
+    } finally {
+      if (previous === undefined) delete process.env.RAW_RETENTION_SWEEP_EVERY;
+      else process.env.RAW_RETENTION_SWEEP_EVERY = previous;
+    }
+  });
+
   it('reconciles a pre-cutover authority schedule action while preserving cadence and pause state', async () => {
     const update = vi.fn(async (updateFn: (previous: unknown) => unknown) => updateFn({
       spec: { intervals: [{ every: '17m' }] },
@@ -235,5 +301,16 @@ describe("ensurePlatformSchedules", () => {
       state: { paused: true, notes: 'ops hold' },
       searchAttributes: { source: ['legacy'] },
     });
+  });
+
+  it('does not reconcile an already-running raw retention schedule', async () => {
+    create.mockImplementation(async (payload: { scheduleId: string }) => {
+      if (payload.scheduleId === RAW_RETENTION_SWEEP_SCHEDULE_ID) throw scheduleAlreadyRunning;
+      return undefined;
+    });
+
+    await expect(ensurePlatformSchedules()).resolves.toBeUndefined();
+
+    expect(getHandle).not.toHaveBeenCalled();
   });
 });

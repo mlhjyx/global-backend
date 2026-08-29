@@ -6,8 +6,14 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import type { DiscoveryQueryReceipt } from '../discovery/discovery-query-receipt';
+import { DISCOVERY_QUERY_RECEIPT_MODE as QUERY_RECEIPT_MODE } from '../discovery/discovery-query-receipt-contract';
 
 export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
+export const DISCOVERY_RAW_GOVERNANCE_PATCH =
+  'discovery-raw-governance-dispositions-v1';
+export const DISCOVERY_QUERY_RECEIPT_PATCH = 'discovery-query-receipt-input-v1';
+export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
 function invalidAuthorityInput(): never {
@@ -38,6 +44,8 @@ const signalActs = proxyActivities<DiscoveryActivities>({
 export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void> {
   const { workspaceId, runId, planId } = input;
   const usesAuthority = patched(DISCOVERY_AUTHORITY_PATCH);
+  const usesRawGovernance = patched(DISCOVERY_RAW_GOVERNANCE_PATCH);
+  const usesQueryReceipts = usesRawGovernance && patched(DISCOVERY_QUERY_RECEIPT_PATCH);
   let executionBudget: ExecutionBudgetBinding | undefined;
   if (usesAuthority) {
     if (input.executionContractVersion !== EXECUTION_CONTRACT_VERSION) {
@@ -56,24 +64,111 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const authorityArgs = usesAuthority
     ? { executionContractVersion: EXECUTION_CONTRACT_VERSION, executionBudget: executionBudget! }
     : {};
-  const perSource: Record<string, { rawCount: number; provider: string | null; error?: string }> = {};
+  const perSource: Record<
+    string,
+    {
+      rawCount: number;
+      provider: string | null;
+      providers?: string[];
+      quarantinedCount?: number;
+      rejectedCount?: number;
+      governanceDenied?: number;
+      duplicateCount?: number;
+      usageQuantity?: number;
+      costCents?: number;
+      error?: string;
+    }
+  > = {};
+  const perQuery: Record<string, DiscoveryQueryReceipt> = {};
   let failures = 0;
   let discoveryBudgetTruncated = false;
+  let acceptedRaw = 0;
+  let governanceDenied = 0;
+  let quarantinedRaw = 0;
+  let rejectedRaw = 0;
+  let duplicateRaw = 0;
 
   if (!usesAuthority) {
     await acts.resetRunBudget({ workspaceId, runId });
   }
   const { queries } = await acts.loadPlanQueries({ workspaceId, planId, ...authorityArgs });
-  for (const query of queries) {
+  for (const [queryOrdinal, query] of queries.entries()) {
     try {
-      const r = await acts.executeQuery({ workspaceId, runId, query, ...authorityArgs });
-      perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
+      const r = await acts.executeQuery(
+        usesQueryReceipts
+          ? {
+              workspaceId,
+              runId,
+              planId,
+              queryOrdinal,
+              queryReceiptMode: DISCOVERY_QUERY_RECEIPT_MODE,
+              query,
+              ...authorityArgs,
+            }
+          : { workspaceId, runId, query, ...authorityArgs },
+      );
+      acceptedRaw += r.rawCount;
+      if (usesQueryReceipts) {
+        const receipt = r.queryReceipt;
+        if (!receipt) {
+          throw ApplicationFailure.nonRetryable(
+            'DISCOVERY_QUERY_RECEIPT_MISSING',
+            'DISCOVERY_QUERY_RECEIPT_MISSING',
+          );
+        }
+        perQuery[receipt.queryKey] = receipt;
+        quarantinedRaw += receipt.quarantined;
+        rejectedRaw += receipt.rejected;
+        duplicateRaw += receipt.duplicate;
+        governanceDenied += receipt.governanceDenied;
+        const prior = perSource[receipt.sourceClass];
+        const providers = [
+          ...new Set([
+            ...(prior?.providers ?? []),
+            ...receipt.providers,
+          ]),
+        ].sort();
+        perSource[receipt.sourceClass] = {
+          rawCount: (prior?.rawCount ?? 0) + receipt.accepted,
+          quarantinedCount:
+            (prior?.quarantinedCount ?? 0) + receipt.quarantined,
+          rejectedCount: (prior?.rejectedCount ?? 0) + receipt.rejected,
+          governanceDenied:
+            (prior?.governanceDenied ?? 0) + receipt.governanceDenied,
+          duplicateCount: (prior?.duplicateCount ?? 0) + receipt.duplicate,
+          usageQuantity:
+            (prior?.usageQuantity ?? 0) + receipt.usageQuantity,
+          costCents: (prior?.costCents ?? 0) + receipt.costCents,
+          providers,
+          provider: providers.join('+') || null,
+        };
+      } else if (usesRawGovernance) {
+        quarantinedRaw += r.quarantinedCount;
+        rejectedRaw += r.rejectedCount;
+        duplicateRaw += r.duplicateCount;
+        governanceDenied += r.quarantinedCount + r.rejectedCount;
+        perSource[query.source_class] = {
+          rawCount: r.rawCount,
+          quarantinedCount: r.quarantinedCount,
+          rejectedCount: r.rejectedCount,
+          duplicateCount: r.duplicateCount,
+          provider: r.provider,
+        };
+      } else {
+        perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
+      }
       // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
       if (r.budgetTruncated) discoveryBudgetTruncated = true;
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
       failures += 1;
-      perSource[query.source_class] = { rawCount: 0, provider: null, error: String(err).slice(0, 200) };
+      if (!usesQueryReceipts) {
+        perSource[query.source_class] = {
+          rawCount: 0,
+          provider: null,
+          error: 'QUERY_EXECUTION_FAILED',
+        };
+      }
     }
   }
 
@@ -126,7 +221,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     discoveryBudgetTruncated ||
     enrich.budgetTruncated ||
     (signals.budgetTruncated ?? false);
-  const status = resolveRunStatus({ failures, totalQueries: queries.length, budgetTruncated });
+  let status = resolveRunStatus({ failures, totalQueries: queries.length, budgetTruncated });
+  if (usesRawGovernance && governanceDenied > 0) {
+    status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
+  }
   await acts.finalizeRun({
     workspaceId,
     runId,
@@ -135,6 +233,35 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     status,
     stats: {
       perSource,
+      ...(usesQueryReceipts
+        ? {
+            perQuery,
+            rawGovernance: {
+              accepted: acceptedRaw,
+              quarantined: quarantinedRaw,
+              rejected: rejectedRaw,
+              governanceDenied,
+              duplicate: duplicateRaw,
+              usageQuantity: Object.values(perQuery).reduce(
+                (sum, receipt) => sum + receipt.usageQuantity,
+                0,
+              ),
+              costCents: Object.values(perQuery).reduce(
+                (sum, receipt) => sum + receipt.costCents,
+                0,
+              ),
+            },
+          }
+        : usesRawGovernance
+          ? {
+              rawGovernance: {
+                accepted: acceptedRaw,
+                quarantined: quarantinedRaw,
+                rejected: rejectedRaw,
+                duplicate: duplicateRaw,
+              },
+            }
+        : {}),
       companies,
       suppressed,
       fit: fit.verdicts,

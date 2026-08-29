@@ -60,28 +60,43 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
     }
 
     const now = new Date().toISOString();
-    const records: ProviderCompanyRecord[] = places.map((p) => ({
-      externalId: `osm:${p.osmId}`,
-      name: p.name,
-      domain: p.website ? normalizeToDomain(p.website) : undefined,
-      country: p.countryCode,
-      attributes: {
-        osm_id: p.osmId,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        city: p.city,
-        osm_tags: p.tags,
-        source_class: query.sourceClass,
-      },
-      provenance: {
-        sourceUrl: `https://www.openstreetmap.org/${p.osmId}`,
+    const records = places.map((place) =>
+      mapOsmPlaceToRecord({
+        place,
+        sourceClass: query.sourceClass,
         fetchedAt: now,
-        contentHash: p.osmId,
-        parserVersion: 'osm/1',
-      },
-    }));
+      }),
+    );
     return { records, costCents: 0 };
   }
+}
+
+export function mapOsmPlaceToRecord(args: {
+  place: OsmPlace;
+  sourceClass: SourceClass;
+  fetchedAt: string;
+}): ProviderCompanyRecord {
+  const { place } = args;
+  return {
+    externalId: `osm:${place.osmId}`,
+    name: place.name,
+    domain: place.website ? normalizeToDomain(place.website) : undefined,
+    country: place.countryCode,
+    attributes: {
+      osm_id: place.osmId,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      city: place.city,
+      osm_tags: place.tags,
+      source_class: args.sourceClass,
+    },
+    provenance: {
+      sourceUrl: `https://www.openstreetmap.org/${place.osmId}`,
+      fetchedAt: args.fetchedAt,
+      contentHash: place.osmId,
+      parserVersion: 'osm/1',
+    },
+  };
 }
 
 function mapTags(query: CompanyDiscoveryQuery): { k: string; v?: string }[] {

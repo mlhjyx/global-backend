@@ -177,29 +177,23 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (page === 0) this.log(`${pageUrl}: not a directory (llm)`);
         break; // 首页就不是名录 → 放弃；翻页中途变样 → 停
       }
-      const sourceDomain = normalizeDomain(pageUrl) ?? '';
       for (const c of extracted.companies) {
         if (!c.name?.trim()) continue;
-        const domain = c.website ? normalizeDomain(c.website) : undefined;
-        if (domain && NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-        out.push({
-          externalId: domain ? `directory:${domain}` : `directory:${sourceDomain}:${slug(c.name)}`,
-          name: c.name.trim(),
-          domain: domain || undefined,
-          attributes: {
-            source_kind: extracted.list_kind ?? 'directory',
-            source_directory: sourceDomain,
-            listing_location: c.location ?? null,
-            detail_url: c.detail_url ?? null,
-            source_class: query.sourceClass,
-          },
-          provenance: {
-            sourceUrl: pageUrl,
-            fetchedAt: new Date().toISOString(),
-            contentHash: createHash('sha256').update(`${pageUrl}:${c.name}`).digest('hex'),
-            parserVersion: PARSER_VERSION,
-          },
+        const mapped = mapDirectoryCompanyToRecord({
+          company: c,
+          listKind: extracted.list_kind,
+          pageUrl,
+          sourceClass: query.sourceClass,
         });
+        if (
+          mapped.domain &&
+          NOISE_DOMAINS.some(
+            (noise) =>
+              mapped.domain === noise || mapped.domain?.endsWith(`.${noise}`),
+          )
+        )
+          continue;
+        out.push(mapped);
       }
       this.log(`✓ ${pageUrl}: +${extracted.companies.length} companies (page ${page + 1})`);
       pageUrl = extracted.has_next_page ? nextPageLink(text, pageUrl) : null;
@@ -240,6 +234,45 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       return null;
     }
   }
+}
+
+export function mapDirectoryCompanyToRecord(args: {
+  company: {
+    name: string;
+    website?: string;
+    location?: string;
+    detail_url?: string;
+  };
+  listKind?: string;
+  pageUrl: string;
+  sourceClass: SourceClass;
+}): ProviderCompanyRecord {
+  const sourceDomain = normalizeDomain(args.pageUrl) ?? '';
+  const domain = args.company.website
+    ? normalizeDomain(args.company.website)
+    : undefined;
+  return {
+    externalId: domain
+      ? `directory:${domain}`
+      : `directory:${sourceDomain}:${slug(args.company.name)}`,
+    name: args.company.name.trim(),
+    domain: domain || undefined,
+    attributes: {
+      source_kind: args.listKind ?? 'directory',
+      source_directory: sourceDomain,
+      listing_location: args.company.location ?? null,
+      detail_url: args.company.detail_url ?? null,
+      source_class: args.sourceClass,
+    },
+    provenance: {
+      sourceUrl: args.pageUrl,
+      fetchedAt: new Date().toISOString(),
+      contentHash: createHash('sha256')
+        .update(`${args.pageUrl}:${args.company.name}`)
+        .digest('hex'),
+      parserVersion: PARSER_VERSION,
+    },
+  };
 }
 
 /** 构造名录检索串：行业/关键词 × 意图词（EN + DE）× 地区。 */
