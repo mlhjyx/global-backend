@@ -653,6 +653,37 @@ const PREPARED_ROW_KEYS = Object.freeze([
   "sourcePolicySnapshot",
 ]);
 const IMMUTABLE_DATE_EPOCHS = new WeakMap<object, number>();
+const DATE_READ_METHODS = Object.freeze([
+  "getDate",
+  "getDay",
+  "getFullYear",
+  "getHours",
+  "getMilliseconds",
+  "getMinutes",
+  "getMonth",
+  "getSeconds",
+  "getTime",
+  "getTimezoneOffset",
+  "getUTCDate",
+  "getUTCDay",
+  "getUTCFullYear",
+  "getUTCHours",
+  "getUTCMilliseconds",
+  "getUTCMinutes",
+  "getUTCMonth",
+  "getUTCSeconds",
+  "getYear",
+  "toDateString",
+  "toISOString",
+  "toJSON",
+  "toLocaleDateString",
+  "toLocaleString",
+  "toLocaleTimeString",
+  "toString",
+  "toTimeString",
+  "toUTCString",
+  "valueOf",
+] as const);
 
 type IndexedResolutionFact =
   | Readonly<{
@@ -769,16 +800,31 @@ function immutableDateSnapshot(epoch: number): Date {
   const immutableDateMutation = () => {
     throw new TypeError("immutable Raw Source Date");
   };
+  const bindDateMethod = (property: string | symbol) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      Date.prototype,
+      property,
+    );
+    const method = descriptor && "value" in descriptor ? descriptor.value : null;
+    if (typeof method !== "function") invalidIndexedResolution();
+    return method.bind(target) as unknown;
+  };
   const snapshot = new Proxy(target, {
     defineProperty: immutableDateMutation,
     deleteProperty: immutableDateMutation,
-    get(date, property) {
+    get(_date, property) {
       if (typeof property === "string" && property.startsWith("set")) {
         return immutableDateMutation;
       }
       if (property === "constructor") return Date;
-      const member = Reflect.get(date, property, date) as unknown;
-      return typeof member === "function" ? member.bind(date) : member;
+      if (property === Symbol.toPrimitive) return bindDateMethod(property);
+      if (
+        typeof property === "string" &&
+        DATE_READ_METHODS.includes(property as never)
+      ) {
+        return bindDateMethod(property);
+      }
+      return undefined;
     },
     set: immutableDateMutation,
     setPrototypeOf: immutableDateMutation,
