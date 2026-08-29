@@ -84,11 +84,11 @@ model Workspace {
   genericOperationArtifactSubjects               GenericOperationArtifactSubject[]               @relation("GenericOperationArtifactSubjectWorkspace")
   genericOperationArtifactSubjectTombstones      GenericOperationArtifactSubjectTombstone[]      @relation("GenericOperationArtifactSubjectTombstoneWorkspace")
   genericOperationArtifactSubjectTombstoneAudits GenericOperationArtifactSubjectTombstoneAudit[] @relation("GenericOperationArtifactSubjectTombstoneAuditWorkspace")
-  governedSubjects                               GovernedSubject[]                                @relation("GovernedSubjectWorkspace")
-  toolOperationSubjects                          ToolOperationSubject[]                           @relation("ToolOperationSubjectWorkspace")
-  governedSubjectRelations                       GovernedSubjectRelation[]                        @relation("GovernedSubjectRelationWorkspace")
-  governedSubjectTombstones                      GovernedSubjectTombstone[]                       @relation("GovernedSubjectTombstoneWorkspace")
-  governedSubjectTombstoneAudits                 GovernedSubjectTombstoneAudit[]                  @relation("GovernedSubjectTombstoneAuditWorkspace")
+  governedSubjects                               GovernedSubject[]                               @relation("GovernedSubjectWorkspace")
+  toolOperationSubjects                          ToolOperationSubject[]                          @relation("ToolOperationSubjectWorkspace")
+  governedSubjectRelations                       GovernedSubjectRelation[]                       @relation("GovernedSubjectRelationWorkspace")
+  governedSubjectTombstones                      GovernedSubjectTombstone[]                      @relation("GovernedSubjectTombstoneWorkspace")
+  governedSubjectTombstoneAudits                 GovernedSubjectTombstoneAudit[]                 @relation("GovernedSubjectTombstoneAuditWorkspace")
 
   @@map("workspace")
 }
@@ -135,8 +135,8 @@ model ToolBudgetAccount {
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  operations ToolBudgetOperation[]
-  authority  ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
+  operations               ToolBudgetOperation[]
+  authority                ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
   toolOperationSubjects    ToolOperationSubject[]    @relation("ToolOperationSubjectAccount")
   governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationAccount")
 
@@ -178,12 +178,12 @@ model ExecutionBudgetAuthority {
   revokedAt           DateTime?                    @map("revoked_at") @db.Timestamptz(3)
   createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  workspace   Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
-  accounts    ToolBudgetAccount[]
-  revocations ExecutionBudgetAuthorityRevocation[]
-  artifacts   GenericOperationArtifact[]
-  toolOperationSubjects    ToolOperationSubject[]    @relation("ToolOperationSubjectAuthority")
-  governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationAuthority")
+  workspace                Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
+  accounts                 ToolBudgetAccount[]
+  revocations              ExecutionBudgetAuthorityRevocation[]
+  artifacts                GenericOperationArtifact[]
+  toolOperationSubjects    ToolOperationSubject[]               @relation("ToolOperationSubjectAuthority")
+  governedSubjectRelations GovernedSubjectRelation[]            @relation("GovernedSubjectRelationAuthority")
 
   @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
@@ -238,8 +238,8 @@ model ToolBudgetOperation {
   createdAt                   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   settledAt                   DateTime?                 @map("settled_at") @db.Timestamptz(3)
 
-  account  ToolBudgetAccount         @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
-  artifact GenericOperationArtifact?
+  account                  ToolBudgetAccount         @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
+  artifact                 GenericOperationArtifact?
   toolOperationSubject     ToolOperationSubject?     @relation("ToolOperationSubjectOperation")
   governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationOperation")
 
@@ -345,20 +345,20 @@ model GenericOperationArtifactSubjectTombstoneAudit {
 model GovernedSubject {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   scopeKey       String   @map("scope_key") @db.VarChar(200)
-  workspaceId   String   @map("workspace_id") @db.Uuid
-  subjectType   String   @map("subject_type") @db.VarChar(191)
-  subjectId     String   @map("subject_id") @db.Uuid
-  dataClass     String   @map("data_class") @db.VarChar(16)
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  subjectType    String   @map("subject_type") @db.VarChar(191)
+  subjectId      String   @map("subject_id") @db.Uuid
+  dataClass      String   @map("data_class") @db.VarChar(16)
   dsrSubjectType String?  @map("dsr_subject_type") @db.VarChar(191)
-  dsrSubjectId  String?  @map("dsr_subject_id") @db.Uuid
+  dsrSubjectId   String?  @map("dsr_subject_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  workspace          Workspace                 @relation("GovernedSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_workspace_fkey")
-  operationSubject   ToolOperationSubject?     @relation("ToolOperationSubjectNode")
-  operationRoot      ToolOperationSubject[]    @relation("ToolOperationSubjectRoot")
-  parentRelations    GovernedSubjectRelation[] @relation("GovernedRelationParent")
-  childRelations     GovernedSubjectRelation[] @relation("GovernedRelationChild")
-  tombstone          GovernedSubjectTombstone?
+  workspace        Workspace                 @relation("GovernedSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_workspace_fkey")
+  operationSubject ToolOperationSubject?     @relation("ToolOperationSubjectNode")
+  operationRoot    ToolOperationSubject[]    @relation("ToolOperationSubjectRoot")
+  parentRelations  GovernedSubjectRelation[] @relation("GovernedRelationParent")
+  childRelations   GovernedSubjectRelation[] @relation("GovernedRelationChild")
+  tombstone        GovernedSubjectTombstone?
 
   @@unique([workspaceId, subjectType, subjectId], map: "governed_subject_workspace_subject_key")
   @@unique([scopeKey, id], map: "governed_subject_scope_id_key")
@@ -371,26 +371,27 @@ model GovernedSubject {
 model ToolOperationSubject {
   subjectId           String   @id @map("subject_id") @db.Uuid
   scopeKey            String   @map("scope_key") @db.VarChar(200)
-  workspaceId        String   @map("workspace_id") @db.Uuid
-  authorityId        String   @map("authority_id") @db.Uuid
-  accountId          String   @map("account_id") @db.Uuid
-  operationId        String   @map("operation_id") @db.Uuid
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  authorityId         String   @map("authority_id") @db.Uuid
+  accountId           String   @map("account_id") @db.Uuid
+  operationId         String   @map("operation_id") @db.Uuid
   operationGeneration Int      @map("operation_generation")
-  rootSubjectId      String   @map("root_subject_id") @db.Uuid
-  ackId              String   @map("ack_id") @db.Char(64)
-  resultDigest       String   @map("result_digest") @db.Char(64)
+  rootSubjectId       String   @map("root_subject_id") @db.Uuid
+  ackId               String   @map("ack_id") @db.Char(64)
+  resultDigest        String   @map("result_digest") @db.Char(64)
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  workspace  Workspace                @relation("ToolOperationSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_workspace_fkey")
-  authority  ExecutionBudgetAuthority @relation("ToolOperationSubjectAuthority", fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_authority_fkey")
-  account    ToolBudgetAccount        @relation("ToolOperationSubjectAccount", fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_account_fkey")
-  operation  ToolBudgetOperation      @relation("ToolOperationSubjectOperation", fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_operation_fkey")
-  subject    GovernedSubject          @relation("ToolOperationSubjectNode", fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_subject_fkey")
-  rootSubject GovernedSubject         @relation("ToolOperationSubjectRoot", fields: [rootSubjectId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_root_fkey")
-  relations  GovernedSubjectRelation[] @relation("GovernedRelationOperationSubject")
+  workspace   Workspace                 @relation("ToolOperationSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_workspace_fkey")
+  authority   ExecutionBudgetAuthority  @relation("ToolOperationSubjectAuthority", fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_authority_fkey")
+  account     ToolBudgetAccount         @relation("ToolOperationSubjectAccount", fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_account_fkey")
+  operation   ToolBudgetOperation       @relation("ToolOperationSubjectOperation", fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_operation_fkey")
+  subject     GovernedSubject           @relation("ToolOperationSubjectNode", fields: [workspaceId, subjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_subject_fkey")
+  rootSubject GovernedSubject           @relation("ToolOperationSubjectRoot", fields: [workspaceId, rootSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "tool_operation_subject_root_fkey")
+  relations   GovernedSubjectRelation[] @relation("GovernedRelationOperationSubject")
 
   @@unique([workspaceId, operationId], map: "tool_operation_subject_workspace_operation_key")
   @@unique([scopeKey, operationId], map: "tool_operation_subject_scope_operation_key")
+  @@unique([workspaceId, subjectId], map: "tool_operation_subject_workspace_subject_key")
   @@unique([workspaceId, operationGeneration, subjectId], map: "tool_operation_subject_workspace_generation_subject_key")
   @@index([scopeKey, authorityId, accountId, operationId, operationGeneration], map: "tool_operation_subject_authority_operation_idx")
   @@map("tool_operation_subject")
@@ -398,14 +399,14 @@ model ToolOperationSubject {
 
 /// Immutable edge within one ToolOperationSubject-rooted provenance graph.
 model GovernedSubjectRelation {
-  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  scopeKey             String   @map("scope_key") @db.VarChar(200)
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeKey            String   @map("scope_key") @db.VarChar(200)
   workspaceId         String   @map("workspace_id") @db.Uuid
   authorityId         String   @map("authority_id") @db.Uuid
   accountId           String   @map("account_id") @db.Uuid
   operationId         String   @map("operation_id") @db.Uuid
   operationGeneration Int      @map("operation_generation")
-  ackId                String   @map("ack_id") @db.Char(64)
+  ackId               String   @map("ack_id") @db.Char(64)
   operationSubjectId  String   @map("operation_subject_id") @db.Uuid
   parentSubjectId     String   @map("parent_subject_id") @db.Uuid
   childSubjectId      String   @map("child_subject_id") @db.Uuid
@@ -415,15 +416,15 @@ model GovernedSubjectRelation {
   sourceRefUuid       String?  @map("source_ref_uuid") @db.Uuid
   sourceRefSha256     String?  @map("source_ref_sha256") @db.Char(64)
   contractSha256      String   @map("contract_sha256") @db.Char(64)
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace        Workspace                @relation("GovernedSubjectRelationWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_workspace_fkey")
   authority        ExecutionBudgetAuthority @relation("GovernedSubjectRelationAuthority", fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_authority_fkey")
   account          ToolBudgetAccount        @relation("GovernedSubjectRelationAccount", fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_account_fkey")
   operation        ToolBudgetOperation      @relation("GovernedSubjectRelationOperation", fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_fkey")
-  operationSubject ToolOperationSubject     @relation("GovernedRelationOperationSubject", fields: [operationSubjectId], references: [subjectId], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_subject_fkey")
-  parentSubject    GovernedSubject          @relation("GovernedRelationParent", fields: [parentSubjectId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_parent_fkey")
-  childSubject     GovernedSubject          @relation("GovernedRelationChild", fields: [childSubjectId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_child_fkey")
+  operationSubject ToolOperationSubject     @relation("GovernedRelationOperationSubject", fields: [workspaceId, operationSubjectId], references: [workspaceId, subjectId], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_subject_fkey")
+  parentSubject    GovernedSubject          @relation("GovernedRelationParent", fields: [workspaceId, parentSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_parent_fkey")
+  childSubject     GovernedSubject          @relation("GovernedRelationChild", fields: [workspaceId, childSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_child_fkey")
 
   @@unique([workspaceId, operationId, relationKey], map: "governed_subject_relation_workspace_operation_relation_key")
   @@index([workspaceId, operationId, parentSubjectId], map: "governed_subject_relation_operation_parent_idx")
@@ -437,8 +438,8 @@ model GovernedSubjectTombstone {
   governedSubjectId String   @map("governed_subject_id") @db.Uuid
   tombstonedAt      DateTime @default(now()) @map("tombstoned_at") @db.Timestamptz(3)
 
-  workspace Workspace                         @relation("GovernedSubjectTombstoneWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_workspace_fkey")
-  subject   GovernedSubject                   @relation(fields: [workspaceId, governedSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_subject_fkey")
+  workspace Workspace                       @relation("GovernedSubjectTombstoneWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_workspace_fkey")
+  subject   GovernedSubject                 @relation(fields: [workspaceId, governedSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_subject_fkey")
   audits    GovernedSubjectTombstoneAudit[]
 
   @@id([workspaceId, governedSubjectId], map: "governed_subject_tombstone_pkey")
@@ -453,9 +454,9 @@ model GovernedSubjectTombstoneAudit {
   governedSubjectId String   @map("governed_subject_id") @db.Uuid
   tombstonedAt      DateTime @map("tombstoned_at") @db.Timestamptz(3)
 
-  request   DeletionRequest             @relation(fields: [deletionRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_audit_request_fkey")
-  workspace Workspace                   @relation("GovernedSubjectTombstoneAuditWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_audit_workspace_fkey")
-  tombstone GovernedSubjectTombstone    @relation(fields: [workspaceId, governedSubjectId], references: [workspaceId, governedSubjectId], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_audit_subject_fkey")
+  request   DeletionRequest          @relation(fields: [deletionRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_audit_request_fkey")
+  workspace Workspace                @relation("GovernedSubjectTombstoneAuditWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_audit_workspace_fkey")
+  tombstone GovernedSubjectTombstone @relation(fields: [workspaceId, governedSubjectId], references: [workspaceId, governedSubjectId], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_tombstone_audit_subject_fkey")
 
   @@index([workspaceId, governedSubjectId, tombstonedAt], map: "governed_subject_tombstone_audit_subject_idx")
   @@map("governed_subject_tombstone_audit")
