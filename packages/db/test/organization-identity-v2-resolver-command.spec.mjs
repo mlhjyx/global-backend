@@ -13,6 +13,8 @@ const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
+const expectedMigrationChecksum =
+  "7e101a1d13c31a2657ea84b19b82e3b855102db104393ee33a9bb8a6c5415972";
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
 
 const frozenFiles = Object.freeze([
@@ -55,7 +57,7 @@ describe("Organization Identity resolver command migration", () => {
       sha256(readFileSync(schemaPath)),
       "0858f0d36634246e20a4dfd5fdae3ab6910d945af1e45e0c44ad489a13a0fca4",
     );
-    migrationSql();
+    assert.equal(sha256(migrationSql()), expectedMigrationChecksum);
   });
 
   it("is one bounded DDL/ACL transaction with no datamodel mutation", () => {

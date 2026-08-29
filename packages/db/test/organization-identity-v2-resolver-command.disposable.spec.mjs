@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs";
@@ -44,6 +44,15 @@ let topology;
 let freshFirstDeploy = "";
 let freshSecondDeploy = "";
 let upgradeDeploy = "";
+let freshPrismaDiff = "";
+let upgradePrismaDiff = "";
+const reviewedPrismaResidual = readFileSync(
+  resolve(
+    repositoryRoot,
+    "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.sql",
+  ),
+  "utf8",
+);
 
 function requireTopology() {
   assert.equal(container, "codex-task6b-identity-resolver-pg-20260830-a");
@@ -138,6 +147,34 @@ function runPrisma(schemaPath, database) {
   );
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   return `${result.stdout}\n${result.stderr}`;
+}
+
+function runPrismaDiff(schemaPath, database) {
+  const result = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "@global/db",
+      "exec",
+      "prisma",
+      "migrate",
+      "diff",
+      "--script",
+      "--from-url",
+      `postgresql://global:global@127.0.0.1:${port}/${database}?schema=public`,
+      "--to-schema-datamodel",
+      schemaPath,
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: { ...process.env, PRISMA_HIDE_UPDATE_MESSAGE: "true" },
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.stderr, "");
+  return result.stdout;
 }
 
 function stableJson(value) {
@@ -420,6 +457,11 @@ before(() => {
   freshFirstDeploy = runPrisma(resolverStage.schemaPath, databases.fresh);
   freshSecondDeploy = runPrisma(resolverStage.schemaPath, databases.fresh);
   upgradeDeploy = runPrisma(resolverStage.schemaPath, databases.upgrade);
+  freshPrismaDiff = runPrismaDiff(resolverStage.schemaPath, databases.fresh);
+  upgradePrismaDiff = runPrismaDiff(
+    resolverStage.schemaPath,
+    databases.upgrade,
+  );
   seed(databases.fresh);
   seed(databases.upgrade);
 });
@@ -457,6 +499,8 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
     assert.match(freshFirstDeploy, new RegExp(migrationName, "u"));
     assert.match(upgradeDeploy, new RegExp(migrationName, "u"));
     assert.match(freshSecondDeploy, /No pending migrations to apply/u);
+    assert.equal(freshPrismaDiff, reviewedPrismaResidual);
+    assert.equal(upgradePrismaDiff, reviewedPrismaResidual);
     assert.equal(
       dockerPsql(
         databases.fresh,
