@@ -75,6 +75,7 @@ type FixtureOptions = Readonly<{
   suppressions?: readonly { type: string; value: string }[];
   rawRows?: readonly Record<string, unknown>[];
   restricted?: boolean;
+  lockError?: unknown;
   commandReceipt?: (
     command: Record<string, unknown>,
   ) => Record<string, unknown>;
@@ -119,6 +120,12 @@ function transactionFixture(options: FixtureOptions = {}) {
           ? "suppression-lock"
           : "identity-lock",
       );
+      if (
+        key.startsWith("acquisition-suppression-policy:") &&
+        options.lockError !== undefined
+      ) {
+        throw options.lockError;
+      }
       return [{ locked: "" }];
     }
     if (sql.includes('FROM "raw_source_record"')) {
@@ -603,6 +610,26 @@ describe("organization identity DB resolver source contract", () => {
       code: "IDENTITY_RESOLUTION_COMMAND_DENIED",
       message: "organization identity resolution failed",
     });
+  });
+
+  it("maps a Prisma lock failure before any resolver read to the typed timeout", async () => {
+    const fixture = transactionFixture({
+      lockError: Object.assign(new Error("raw query failed"), {
+        code: "P2010",
+        meta: { code: "55P03", message: "lock unavailable" },
+      }),
+      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
+    });
+    await expect(
+      resolveOrganizationIdentityForRaw(fixture.tx, {
+        workspaceId: WORKSPACE_ID,
+        rawRecordId: RAW_ID,
+      }),
+    ).rejects.toMatchObject({
+      code: "IDENTITY_RESOLUTION_LOCK_TIMEOUT",
+      message: "organization identity resolution failed",
+    });
+    expect(fixture.events).toEqual(["suppression-lock"]);
   });
 
   it("uses a closed generic error type", () => {
