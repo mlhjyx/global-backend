@@ -300,6 +300,72 @@ function startConnection(sql) {
   };
 }
 
+function startInteractiveConnection(sql) {
+  const child = spawn("docker", dockerArgs(), { stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = ""; let stderr = ""; let settled = false;
+  const listeners = [];
+  child.on("error", (error) => { stderr += `${error.message}\n`; });
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    stdout += chunk;
+    for (const listener of listeners) listener(stdout);
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+  const done = new Promise((resolve) => child.on("close", (status) => {
+    settled = true; resolve({ status, stdout: stdout.trim(), stderr });
+  }));
+  child.stdin.write(sql);
+  return {
+    done, isSettled: () => settled, output: () => stdout,
+    write: (nextSql) => child.stdin.write(nextSql),
+    end: () => child.stdin.end(),
+    abort: () => child.kill("SIGTERM"),
+    waitFor: (sentinel, timeoutMs = 3000) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out waiting for ${sentinel}: ${stderr}`)), timeoutMs);
+      const observe = (current) => {
+        if (!current.includes(sentinel)) return;
+        clearTimeout(timer); resolve(current);
+      };
+      if (stdout.includes(sentinel)) observe(stdout);
+      else listeners.push(observe);
+    }),
+  };
+}
+
+async function observeExactAdvisoryWait(holderPid, applicationName, writer, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (writer.isSettled()) {
+      const early = await writer.done;
+      assert.equal(early.status, 0, early.stderr);
+      assert.fail("writer exited before the exact advisory wait was observed");
+    }
+    const observed = psql(`SELECT count(*) FROM pg_locks holder
+      JOIN pg_locks waiter ON waiter.locktype=holder.locktype
+        AND waiter.database IS NOT DISTINCT FROM holder.database
+        AND waiter.classid IS NOT DISTINCT FROM holder.classid
+        AND waiter.objid IS NOT DISTINCT FROM holder.objid
+        AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid
+      JOIN pg_stat_activity activity ON activity.pid=waiter.pid
+      WHERE holder.pid=${holderPid} AND holder.locktype='advisory' AND holder.granted
+        AND NOT waiter.granted AND activity.application_name='${applicationName}';`);
+    if (observed === "1") return;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  assert.fail(`no exact advisory wait observed for ${applicationName}`);
+}
+
+async function observeAnyAdvisoryWait(applicationNames, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const observed = psql(`SELECT count(*) FROM pg_locks locks JOIN pg_stat_activity activity
+      ON activity.pid=locks.pid WHERE locks.locktype='advisory' AND NOT locks.granted
+      AND activity.application_name IN (${applicationNames.map((name) => `'${name}'`).join(",")});`);
+    if (Number(observed) >= 1) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail("wrong-order mutant never produced an observed advisory wait");
+}
+
 function assertSortedLockKeys(keys) {
   assert.deepEqual(keys, [...keys].sort());
 }
@@ -456,25 +522,35 @@ describe("governed relation graph concurrency and DSR contract", () => {
     const parent = seedPersonalPath(low, high);
     assertSortedLockKeys([low, high]);
     assert.throws(() => assertSortedLockKeys([high, low]));
-    const holder = startConnection(asApp(`SELECT pg_advisory_xact_lock(hashtextextended(
-      'generic-operation-artifact-subject:${WS}:company:${low}',0));
-      SELECT 'LOW_LOCK_HELD';
-      SELECT pg_sleep(0.3);
+    const holder = startInteractiveConnection(`SET application_name='gsr_dsr_holder';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SET LOCAL statement_timeout='8s'; SET LOCAL lock_timeout='3s';
+      SELECT set_config('app.current_workspace_id','${WS}',true);
       SELECT pg_advisory_xact_lock(hashtextextended(
-        'generic-operation-artifact-subject:${WS}:company:${high}',0));`));
-    await holder.waitFor("LOW_LOCK_HELD");
-    const writer = asApp(invocation(APPEND, { parentId: parent,
-      childId: "52000000-0000-4000-8000-000000000002", relationKey: "personal:final" }));
-    const writerConnection = startConnection(writer);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    if (writerConnection.isSettled()) {
-      const early = await writerConnection.done;
-      assert.equal(early.status, 0, early.stderr);
-      assert.fail("writer must wait on the exact low artifact lock");
+      'generic-operation-artifact-subject:${WS}:company:${low}',0));
+      SELECT pg_backend_pid()::text||'|LOW_LOCK_READY';\n`);
+    let writerConnection;
+    try {
+      const ready = await holder.waitFor("LOW_LOCK_READY");
+      const holderPid = Number(ready.match(/(\d+)\|LOW_LOCK_READY/)?.[1]);
+      assert.ok(Number.isInteger(holderPid));
+      const writerName = "gsr_dsr_writer_exact";
+      const writer = `SET application_name='${writerName}';\n${asApp(invocation(APPEND, {
+        parentId: parent, childId: "52000000-0000-4000-8000-000000000002",
+        relationKey: "personal:final",
+      }))}`;
+      writerConnection = startConnection(writer);
+      await observeExactAdvisoryWait(holderPid, writerName, writerConnection);
+      holder.write(`SELECT pg_advisory_xact_lock(hashtextextended(
+        'generic-operation-artifact-subject:${WS}:company:${high}',0)); COMMIT;\n`);
+      holder.end();
+      const results = await Promise.all([holder.done, writerConnection.done]);
+      assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
+      assert.ok(results.every((result) => result.status === 0));
+    } finally {
+      if (!holder.isSettled()) { holder.abort(); holder.end(); }
+      if (writerConnection && !writerConnection.isSettled()) writerConnection.abort();
     }
-    const results = await Promise.all([holder.done, writerConnection.done]);
-    assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
-    assert.ok(results.every((result) => result.status === 0));
     const snapshot = JSON.parse(graphSnapshot());
     assert.equal(snapshot.subjects, 4); assert.equal(snapshot.relations, 3);
     assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
@@ -491,16 +567,34 @@ describe("governed relation graph concurrency and DSR contract", () => {
   it("bounds a controlled wrong-order artifact lock mutant", async () => {
     const low = "72000000-0000-4000-8000-000000000001";
     const high = "72000000-0000-4000-8000-000000000002";
-    const lock = (first, second) => asApp(`SET LOCAL lock_timeout='700ms';
+    const beginLock = (name, first) => `SET application_name='${name}';
+      SET SESSION AUTHORIZATION app_user; BEGIN; SET LOCAL statement_timeout='4s';
+      SET LOCAL lock_timeout='700ms'; SELECT set_config('app.current_workspace_id','${WS}',true);
       SELECT pg_advisory_xact_lock(hashtextextended(
         'generic-operation-artifact-subject:${WS}:company:${first}',0));
-      SELECT pg_sleep(0.2);
-      SELECT pg_advisory_xact_lock(hashtextextended(
-        'generic-operation-artifact-subject:${WS}:company:${second}',0));`);
+      SELECT pg_backend_pid()::text||'|${name}_READY';\n`;
+    const lowName = "gsr_wrong_low"; const highName = "gsr_wrong_high";
+    const lowConnection = startInteractiveConnection(beginLock(lowName, low));
+    const highConnection = startInteractiveConnection(beginLock(highName, high));
     const started = Date.now();
-    const results = await concurrent([lock(low, high), lock(high, low)]);
-    assert.ok(Date.now() - started < 5000);
-    assert.ok(results.some((result) => result.status !== 0));
-    assert.match(results.map((result) => result.stderr).join("\n"), /deadlock|lock timeout|40P01|55P03/i);
+    try {
+      await Promise.all([
+        lowConnection.waitFor(`${lowName}_READY`),
+        highConnection.waitFor(`${highName}_READY`),
+      ]);
+      lowConnection.write(`SELECT pg_advisory_xact_lock(hashtextextended(
+        'generic-operation-artifact-subject:${WS}:company:${high}',0)); COMMIT;\n`);
+      highConnection.write(`SELECT pg_advisory_xact_lock(hashtextextended(
+        'generic-operation-artifact-subject:${WS}:company:${low}',0)); COMMIT;\n`);
+      lowConnection.end(); highConnection.end();
+      await observeAnyAdvisoryWait([lowName, highName]);
+      const results = await Promise.all([lowConnection.done, highConnection.done]);
+      assert.ok(Date.now() - started < 5000);
+      assert.ok(results.some((result) => result.status !== 0));
+      assert.match(results.map((result) => result.stderr).join("\n"), /deadlock|lock timeout|40P01|55P03/i);
+    } finally {
+      if (!lowConnection.isSettled()) lowConnection.abort();
+      if (!highConnection.isSettled()) highConnection.abort();
+    }
   });
 });
