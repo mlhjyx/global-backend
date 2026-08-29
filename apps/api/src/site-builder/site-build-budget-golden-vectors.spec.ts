@@ -97,7 +97,7 @@ const ROUTES: Record<string, TechnicalBudgetRoute> = {
 };
 
 const FIXTURE_SHA256 =
-  '6e1e4df075004639dd81d2e82341306d1adea4c937d350893bc41aecee6152da';
+  '599051d43110d73169153d3e770820f9efddbd94929cdac8a731961ae0ffa791';
 
 let privateKey: CryptoKey;
 let keyResolver: ReturnType<typeof createLocalJWKSet>;
@@ -359,6 +359,13 @@ describe('Site Builder cross-repository budget golden vectors', () => {
       FIXTURE_SHA256,
     );
   });
+
+  it.each(document().vectors)(
+    'uses the canonical root-path issuer required by the shared JWS consumer for $id',
+    (vector) => {
+      expect(vector.expected.claims.iss).toBe('https://saas.example.test/');
+    },
+  );
 
   it('locks a closed, versioned fixture containing no compact JWS or credential material', () => {
     const fixture = document();

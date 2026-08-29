@@ -47,7 +47,7 @@
           "typ": "site-build-budget-grant+jwt"
         },
         "claims": {
-          "iss": "https://saas.example.test",
+          "iss": "https://saas.example.test/",
           "aud": "global-backend:site-builder-budget",
           "jti": "33333333-3333-4333-8333-333333333333",
           "schema_version": "site-builder-budget-grant/v1",
@@ -108,7 +108,7 @@
           "typ": "site-build-budget-grant+jwt"
         },
         "claims": {
-          "iss": "https://saas.example.test",
+          "iss": "https://saas.example.test/",
           "aud": "global-backend:site-builder-budget",
           "jti": "44444444-4444-4444-8444-444444444444",
           "schema_version": "site-builder-budget-grant/v1",
