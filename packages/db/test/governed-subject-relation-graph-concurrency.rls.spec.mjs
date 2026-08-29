@@ -278,6 +278,32 @@ function concurrent(sqlStatements) {
   })));
 }
 
+function startConnection(sql) {
+  const child = spawn("docker", dockerArgs(), { stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = ""; let stderr = ""; let settled = false;
+  const listeners = [];
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    stdout += chunk;
+    for (const listener of listeners) listener(stdout);
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+  const done = new Promise((resolve) => child.on("close", (status) => {
+    settled = true; resolve({ status, stdout: stdout.trim(), stderr });
+  }));
+  child.stdin.end(sql);
+  return {
+    done, isSettled: () => settled,
+    waitFor: (sentinel) => new Promise((resolve) => {
+      if (stdout.includes(sentinel)) resolve();
+      else listeners.push((current) => current.includes(sentinel) && resolve());
+    }),
+  };
+}
+
+function assertSortedLockKeys(keys) {
+  assert.deepEqual(keys, [...keys].sort());
+}
+
 describe("governed relation graph concurrency and DSR contract", () => {
   before(() => assert.equal(psql("SELECT current_database()||':'||current_user;"), "gsr_task2:global"));
   beforeEach(() => { reset(); facts = seedOperation(); rootId = null; });
@@ -303,13 +329,13 @@ describe("governed relation graph concurrency and DSR contract", () => {
       parentId: psql(`SELECT child_subject_id::text FROM governed_subject_relation WHERE relation_key='depth:64';`),
       childId: "52000000-0000-4000-8000-000000000065", relationKey: "depth:65",
     })));
-    assert.notEqual(denied.status, 0); assert.match(denied.stderr, /GOVERNED_SUBJECT_GRAPH_LIMIT/);
+    assert.notEqual(denied.status, 0); assert.match(denied.stderr, /GOVERNED_SUBJECT_RELATION_INVALID/);
     assert.equal(graphSnapshot(), before);
   });
 
-  for (const [label, subjects, relations, code] of [
-    ["subjects", 4095, 4094, "GOVERNED_SUBJECT_GRAPH_SUBJECT_LIMIT"],
-    ["relations", 2, 8191, "GOVERNED_SUBJECT_GRAPH_RELATION_LIMIT"],
+  for (const [label, subjects, relations] of [
+    ["subjects", 4095, 4094],
+    ["relations", 2, 8191],
   ]) {
     it(`accepts the ${label} boundary and rejects the next item pre-write`, () => {
       seedStar(subjects, relations);
@@ -322,7 +348,7 @@ describe("governed relation graph concurrency and DSR contract", () => {
         childId: label === "subjects" ? "52000000-0000-4000-8000-000000004097" : CHILD,
         relationKey: `${label}:overflow`, sourceUuid: "62000000-0000-4000-8000-000000009999",
       })));
-      assert.notEqual(denied.status, 0); assert.match(denied.stderr, new RegExp(code));
+      assert.notEqual(denied.status, 0); assert.match(denied.stderr, /GOVERNED_SUBJECT_RELATION_INVALID/);
       assert.equal(graphSnapshot(), before);
     });
   }
@@ -333,6 +359,9 @@ describe("governed relation graph concurrency and DSR contract", () => {
     const rows = same.map((result) => result.stdout.split("\n").findLast((line) => line.includes("|")));
     assert.equal(new Set(rows.map((row) => row.split("|").slice(0, 4).join("|"))).size, 1);
     assert.deepEqual(rows.map((row) => row.split("|")[4]).sort(), ["f", "t"]);
+    const sameSnapshot = JSON.parse(graphSnapshot());
+    assert.equal(sameSnapshot.subjects, 2); assert.equal(sameSnapshot.relations, 1);
+    assert.match(sameSnapshot.digest, /^[0-9a-f]{64}$/);
     reset(); facts = seedOperation();
     const conflict = await concurrent([
       asApp(invocation(APPEND)),
@@ -344,10 +373,11 @@ describe("governed relation graph concurrency and DSR contract", () => {
     const snapshot = JSON.parse(graphSnapshot());
     assert.equal(snapshot.subjects, 2);
     assert.equal(snapshot.relations, 1);
+    assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
   });
 
   it("serializes opposite edges without deadlock and leaves an acyclic graph", async () => {
-    seedStar(3, 0);
+    seedStar(3, 2);
     const [a, b] = psql(`SELECT id::text||'|'||subject_id::text FROM governed_subject
       WHERE subject_type='materialized_record' ORDER BY id;`).split("\n").map((row) => row.split("|"));
     const results = await concurrent([
@@ -358,12 +388,16 @@ describe("governed relation graph concurrency and DSR contract", () => {
     assert.equal(results.filter((result) => result.status === 0).length, 1);
     assert.match(results.find((result) => result.status !== 0).stderr,
       /GOVERNED_SUBJECT_RELATION_INVALID/);
-    assert.equal(psql(`WITH RECURSIVE walk(start_id,node,path,cycle) AS (
+    const cycleCount = psql(`WITH RECURSIVE walk(start_id,node,path,cycle) AS (
       SELECT parent_subject_id,child_subject_id,ARRAY[parent_subject_id,child_subject_id],false
       FROM governed_subject_relation UNION ALL SELECT w.start_id,r.child_subject_id,
       w.path||r.child_subject_id,r.child_subject_id=ANY(w.path) FROM walk w
       JOIN governed_subject_relation r ON r.parent_subject_id=w.node WHERE NOT w.cycle)
-      SELECT count(*) FROM walk WHERE cycle;`), "0");
+      SELECT count(*) FROM walk WHERE cycle;`);
+    assert.equal(cycleCount, "0");
+    const snapshot = JSON.parse(graphSnapshot());
+    assert.equal(snapshot.subjects, 3); assert.equal(snapshot.relations, 3);
+    assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
   });
 
   it("rejects a real parent owned by another operation", () => {
@@ -395,6 +429,7 @@ describe("governed relation graph concurrency and DSR contract", () => {
     const dsrId = "72000000-0000-4000-8000-000000000001";
     const personal = { childData: "PERSONAL", childDsrType: "company", childDsrId: dsrId };
     psql(asApp(invocation(APPEND, personal)));
+    const exactSnapshot = graphSnapshot();
     psql(`INSERT INTO generic_operation_artifact_subject_tombstone(workspace_id,subject_type,subject_id,tombstoned_at)
       VALUES ('${WS}','company','${dsrId}',now()),('${WS}','company',
       '72000000-0000-4000-8000-000000000099',now());`);
@@ -402,24 +437,70 @@ describe("governed relation graph concurrency and DSR contract", () => {
       const denied = raw(asApp(invocation(fn, personal)));
       assert.notEqual(denied.status, 0); assert.match(denied.stderr, /GOVERNED_SUBJECT_TOMBSTONED/);
     }
-    psql(asApp(invocation(APPEND, { ...personal, childDsrId: "72000000-0000-4000-8000-000000000002",
-      relationKey: "personal:unrelated" })));
-    psql(asApp(invocation(APPEND, { relationKey: "nonpersonal:unrelated" })));
+    assert.equal(graphSnapshot(), exactSnapshot);
+    const unrelated = { ...personal, childId: "52000000-0000-4000-8000-000000000002",
+      childDsrId: "72000000-0000-4000-8000-000000000002", relationKey: "personal:unrelated" };
+    psql(asApp(invocation(APPEND, unrelated)));
+    psql(asApp(invocation(ATTEST, unrelated), WS, true));
+    const nonpersonal = { childId: dsrId, relationKey: "nonpersonal:unrelated" };
+    psql(asApp(invocation(APPEND, nonpersonal)));
+    psql(asApp(invocation(ATTEST, nonpersonal), WS, true));
+    const snapshot = JSON.parse(graphSnapshot());
+    assert.equal(snapshot.subjects, 4); assert.equal(snapshot.relations, 3);
+    assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
   });
 
   it("orders multiple PERSONAL locks with the artifact namespace and never deadlocks", async () => {
     const low = "72000000-0000-4000-8000-000000000001";
     const high = "72000000-0000-4000-8000-000000000002";
     const parent = seedPersonalPath(low, high);
-    const holder = asApp(`SELECT pg_advisory_xact_lock(hashtextextended(
+    assertSortedLockKeys([low, high]);
+    assert.throws(() => assertSortedLockKeys([high, low]));
+    const holder = startConnection(asApp(`SELECT pg_advisory_xact_lock(hashtextextended(
       'generic-operation-artifact-subject:${WS}:company:${low}',0));
+      SELECT 'LOW_LOCK_HELD';
       SELECT pg_sleep(0.3);
       SELECT pg_advisory_xact_lock(hashtextextended(
-        'generic-operation-artifact-subject:${WS}:company:${high}',0));`);
+        'generic-operation-artifact-subject:${WS}:company:${high}',0));`));
+    await holder.waitFor("LOW_LOCK_HELD");
     const writer = asApp(invocation(APPEND, { parentId: parent,
       childId: "52000000-0000-4000-8000-000000000002", relationKey: "personal:final" }));
-    const results = await concurrent([holder, writer]);
+    const writerConnection = startConnection(writer);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (writerConnection.isSettled()) {
+      const early = await writerConnection.done;
+      assert.equal(early.status, 0, early.stderr);
+      assert.fail("writer must wait on the exact low artifact lock");
+    }
+    const results = await Promise.all([holder.done, writerConnection.done]);
     assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
     assert.ok(results.every((result) => result.status === 0));
+    const snapshot = JSON.parse(graphSnapshot());
+    assert.equal(snapshot.subjects, 4); assert.equal(snapshot.relations, 3);
+    assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
+    assert.equal(psql(`SELECT count(*) FROM governed_subject s LEFT JOIN governed_subject_relation r
+      ON r.child_subject_id=s.id WHERE s.workspace_id='${WS}' AND s.id<>'${rootId}' AND r.id IS NULL;`), "0");
+    assert.equal(psql(`WITH RECURSIVE walk(node,path,cycle) AS (
+      SELECT child_subject_id,ARRAY[parent_subject_id,child_subject_id],false
+      FROM governed_subject_relation UNION ALL SELECT r.child_subject_id,
+      w.path||r.child_subject_id,r.child_subject_id=ANY(w.path) FROM walk w
+      JOIN governed_subject_relation r ON r.parent_subject_id=w.node WHERE NOT w.cycle)
+      SELECT count(*) FROM walk WHERE cycle;`), "0");
+  });
+
+  it("bounds a controlled wrong-order artifact lock mutant", async () => {
+    const low = "72000000-0000-4000-8000-000000000001";
+    const high = "72000000-0000-4000-8000-000000000002";
+    const lock = (first, second) => asApp(`SET LOCAL lock_timeout='700ms';
+      SELECT pg_advisory_xact_lock(hashtextextended(
+        'generic-operation-artifact-subject:${WS}:company:${first}',0));
+      SELECT pg_sleep(0.2);
+      SELECT pg_advisory_xact_lock(hashtextextended(
+        'generic-operation-artifact-subject:${WS}:company:${second}',0));`);
+    const started = Date.now();
+    const results = await concurrent([lock(low, high), lock(high, low)]);
+    assert.ok(Date.now() - started < 5000);
+    assert.ok(results.some((result) => result.status !== 0));
+    assert.match(results.map((result) => result.stderr).join("\n"), /deadlock|lock timeout|40P01|55P03/i);
   });
 });
