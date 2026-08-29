@@ -295,6 +295,7 @@ function isExactAuthorityIdentifier(
     return (
       identifier.jurisdiction === "GLOBAL" &&
       identifier.validatorVersion === "domain-v1" &&
+      identifier.normalizedValue.length <= 253 &&
       /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u.test(
         identifier.normalizedValue,
       ) &&

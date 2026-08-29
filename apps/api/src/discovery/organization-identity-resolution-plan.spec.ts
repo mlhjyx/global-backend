@@ -333,11 +333,21 @@ describe("deterministic organization identity resolution plan", () => {
       }),
       key: "domain:GLOBAL:WWW.Acme.Example",
     };
+    const overlongDomain = {
+      ...identifier({
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: `${"a.".repeat(126)}aa`,
+        validatorVersion: "domain-v1",
+      }),
+      key: `domain:GLOBAL:${"a.".repeat(126)}aa`,
+    };
 
     for (const authorityIdentifier of [
       forgedScheme,
       forgedValidator,
       invalidDomain,
+      overlongDomain,
     ]) {
       expectRejected(
         input({
