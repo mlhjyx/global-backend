@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-QA-EVIDENCE`
 > 产品批准范围：Gate 2 首个纵切及完整产品地图
-> 工程核验基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
+> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`
 
 本目录为产品评审、设计、前端、后端、E2E、演示和指南提供同一组稳定场景 ID。它只登记 Fixture 语义和验收关系；Site 已有页面/运营规格，但没有创建可执行测试数据或浏览器 E2E，也不把后置能力冒充可运行。
 
@@ -98,8 +98,10 @@
 | Scenario ID | Actor / goal | Preconditions | 关键预期 | 状态 | Owner |
 |---|---|---|---|---|---|
 | `SCN-FE-BUYER-001` | ACT-002 查看可解释客户池 | `FX-FE-BUYER-001` | 显示来源、资格、Reachability、拒绝原因；不可达高 Fit 不进入推荐 | `MAP_ONLY/BACKEND_CODE_BACKED`；冻结已解除，M1 后重验，前端未接 | `OWN-BUYER-BE` |
-| `SCN-FE-HANDOFF-001` | ACT-004 接收 qualified package | immutable package + Outbox/ACK | SaaS 创建 Opportunity candidate；本仓不创建 QGO/SAO | `EXTERNAL_OWNED`；本仓 side code-backed | `OWN-SAAS-PLATFORM` |
+| `SCN-FE-HANDOFF-001` | ACT-004 接收 qualified package | immutable package + Outbox；Program C service principal | server consume `LeadQualifiedPackage` → validate schema/scope/workspace/privacy → transaction writes receipt + unique Opportunity `CANDIDATE` + QualificationSnapshot → commit → Backend ACK；浏览器不消费/ACK | `BACKEND_PRODUCER=CODE_BACKED / PROGRAM_C_CONSUMER_TEST_RUNTIME_RELEASE_UAT=NOT_IMPLEMENTED_OR_NOT_RUN` | `OWN-SAAS-PLATFORM` |
 | `SCN-FE-HANDOFF-002` | ACT-004 回写 Outcome | SaaS Opportunity closed | 只回传结构化学习标签，不覆盖 Lead/Company 主状态 | `EXTERNAL_OWNED` | `OWN-SAAS-PLATFORM` |
+| `SCN-FE-HANDOFF-003` | Program C 安全重放交接 | 同一 event 并发/重放 10 次；service restart；commit 后 ACK 丢失 | event/business-intent idempotency + digest comparison；只写一个 receipt、一个 Opportunity 和一个 snapshot；保持 durable `ACK_PENDING` 并安全 reconcile，不二次 materialize | `PRODUCT_SPECIFIED / PROGRAM_C_SOURCE_TEST_RUNTIME_RELEASE_UAT=NOT_IMPLEMENTED_OR_NOT_RUN` | `OWN-SAAS-PLATFORM` |
+| `SCN-FE-HANDOFF-004` | Program C 拒绝非法或受限制交接 | payload digest drift、错误 workspace/scope、`RESTRICTED` 且无 `personal-data:read`、DSR/retention/suppression 命中 | quarantine/deny；不泄漏受限数据，不创建 Opportunity，不 ACK 非法 payload；保留有界审计和安全恢复路径 | `PRODUCT_SPECIFIED / PROGRAM_C_SOURCE_TEST_RUNTIME_RELEASE_UAT=NOT_IMPLEMENTED_OR_NOT_RUN` | `OWN-SAAS-PLATFORM` |
 
 ## 7. 地图级跨域场景
 
@@ -116,7 +118,7 @@
 | `SCN-FE-GROWTH-003` | 渠道部分成功与 ACK unknown | `FX-FE-CAMPAIGN-001`；两渠道/三目标，一成功/失败/未知 | 逐目标回执；只重试可重试失败，未知先对账 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
 | `SCN-FE-GROWTH-004` | Suppression/授权/预算 fail-closed | `FX-FE-CAMPAIGN-001`；受众含禁联、授权过期、额度变化 | Dry Run 阻止越权目标，要求新授权；不扩大名单 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
 | `SCN-FE-ENGAGE-001` | 入站回复到会话分派 | `FX-FE-CONVERSATION-001` | 去重/身份关联/opt-out→分派；不确定身份进入待确认 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
-| `SCN-FE-ENGAGE-002` | Lead package 到 Opportunity candidate/QGO | `FX-FE-BUYER-001` + `FX-FE-OPPORTUNITY-001` | ACK 后建 candidate；Evidence 完整才人工 QGO；本仓不建主状态 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-ENGAGE-002` | Lead package 到 Opportunity candidate/QGO | `FX-FE-BUYER-001` + `FX-FE-OPPORTUNITY-001` | Program C server consume → validate schema/scope/workspace/privacy → transaction writes receipt + unique candidate + QualificationSnapshot → commit → Backend ACK；ACK 不明保持 `ACK_PENDING`；Evidence 完整后仍须人工 QGO | `PRODUCT_SPECIFIED / BACKEND_PRODUCER_CODE_BACKED / PROGRAM_C_CONSUMER_TEST_RUNTIME_RELEASE_UAT_NOT_IMPLEMENTED_OR_NOT_RUN` / `OWN-SAAS-PLATFORM` |
 | `SCN-FE-ENGAGE-003` | QGO→SAO→Outcome | `FX-FE-OPPORTUNITY-001` | 销售接受带 Owner/next step；Outcome provisional→verified；追加审计 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
 | `SCN-FE-INSIGHT-001` | 指标下钻和数据缺口 | `FX-FE-INSIGHT-001` | 显示口径/时区/权限/新鲜度；partial 不补 0；下钻 canonical object | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
 | `SCN-FE-INSIGHT-002` | 成本和归因不确定性 | reported/estimated/unknown；样本不足 | 保持来源和未知；归因不充分显示 inconclusive | `TARGET_NOT_RUNNABLE` / `OWN-DATA-PRIVACY` |
@@ -130,15 +132,15 @@
 |---|---|
 | 无会话、无 Workspace、无权 | `SCN-FE-SHELL-001/002/003` |
 | 空、缺资料、待审核 | `SCN-FE-SITE-003/008/009` |
-| ACK 不明、幂等与重复 | `SCN-FE-SITE-002/005/006/015` |
+| ACK 不明、幂等与重复 | `SCN-FE-SITE-002/005/006/015`、`SCN-FE-HANDOFF-003`、`SCN-FE-ENGAGE-002` |
 | 并发、冲突与 stale | `SCN-FE-SITE-003/012/019` |
 | 部分成功与 degraded | `SCN-FE-SITE-008/013/018/020/022` |
 | 预算、配额与成本未知 | `SCN-FE-SITE-012/013` |
 | 取消、失败恢复和旧结果保留 | `SCN-FE-SITE-014/015/019/020` |
-| 权利、批准、撤销与个人数据 | `SCN-FE-SITE-009/010/020/022` |
+| 权利、批准、撤销与个人数据 | `SCN-FE-SITE-009/010/020/022`、`SCN-FE-HANDOFF-004` |
 | 产物完整性和 fail-closed | `SCN-FE-SITE-016/017` |
 | 外部依赖、域名和投递 | `SCN-FE-SITE-021/022/023` |
-| 客户开发恢复与跨仓 ownership | `SCN-FE-BUYER-001`、`SCN-FE-HANDOFF-001/002` |
+| 客户开发恢复、跨仓 ownership 与交接事务 | `SCN-FE-BUYER-001`、`SCN-FE-HANDOFF-001..004` |
 | 外部执行、回执和未知 ACK | `SCN-FE-GROWTH-001..004` |
 | 会话、商机与 Outcome | `SCN-FE-ENGAGE-001..003` |
 | 指标缺口、成本与归因不确定性 | `SCN-FE-INSIGHT-001/002` |
