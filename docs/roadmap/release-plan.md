@@ -5,6 +5,46 @@
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md)。
 > 2026-07-10 v2（获客合流定稿）；**2026-07-27 模型候选重基线更新**。历史实施日志见 [changelog.md](changelog.md)。
 
+## 2026-08-29 current execution override
+
+**This is the active delivery sequence.** Product stage is `SOURCE_INTEGRATED_ALPHA / CROSS_REPO_PRODUCT_ASSEMBLY / USER_JOURNEY_NOT_VALIDATED / COMMERCIAL_LOOP_NOT_CLOSED / PRODUCTION_READINESS_BLOCKED`. The product spine is `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`; the parallel Site spine `Quote → Grant → Build → Preview` does not replace QGO.
+
+The first Job is evidence-backed overseas importer/procurement discovery for Chinese B2B manufacturing, trade-integrated and high-ticket exporters. Human QGO is the north star. Dealer recruitment, Campaign, social/publishing, analytics, Agent auto-send, Site Publish/Domain/Inquiry/Analytics and customer Billing/Credits are outside this critical path. Billing/Credits is `DEFERRED / NOT_IMPLEMENTED`; `cap_microusd` is an execution safety envelope, not customer billing.
+
+### Provenance, ownership and gates
+
+- The binding Program A technical plan is `/root/.codex/attachments/87cc329a-8441-47cb-bcfe-834e918ed20b/pasted-text.txt`: ability-priority plan.
+- The predecessor is `/root/.codex/attachments/40238abb-37c2-482a-aa4d-2d226e0680ca/pasted-text.txt`: `PREDECESSOR / PARTIALLY_IMPLEMENTED / SUPERSEDED_FOR_CURRENT_EXECUTION`; its stable Production Parity principles remain valid.
+- The derived GovernedSubject plan is a safety prerequisite, not Discovery ownership. Program ownership and the fixed interface are defined by [ADR-025](../adr/registry.md) and [`DEC-GPP-001`](../governance/conflict-register.md), not restated here.
+- Program A Task 5.2 is `RED_CAPTURED / POST_RED_QUARANTINED / HOLD_OWNERSHIP / REQUIRES_CLEAN_KNOWN_HEAD_AND_INTERFACE_HANDOFF`.
+
+The fixed G0–G7 meanings and current verdicts are exactly those in [current status](../status/current.md):
+
+| Gate | Current verdict |
+| --- | --- |
+| G0 — Truth & Ownership | `HOLD_OWNERSHIP` |
+| G1 — Product/UX/Contract | `AMBER / DOC_TRUTH_SYNC_PENDING` |
+| G2 — Source/TDD/Security | `AMBER / SOURCE_ONLY` |
+| G3 — Integration/Data | `RED / NOT_INTEGRATED` |
+| G4 — Release Candidate | `RED / NO_RELEASE_CANDIDATE` |
+| G5 — Runtime Observed | `RED / DEGRADED_NO_CURRENT_EVIDENCE` |
+| G6 — UAT Accepted | `RED / NOT_VALIDATED` |
+| G7 — Pilot/GA Authorized | `RED / NOT_AUTHORIZED` |
+
+### Active sequence and boundaries
+
+1. **Phase 0:** current truth, A/B interface, provenance and documentation. G0 remains hold while the Program A writer/merge is active.
+2. **MVP-0:** Program A current-main slices; formal GrowthOS source/Builder/remote/CI; Backend runtime recovery; and authentic capability availability/onboarding.
+3. **MVP-1, Program C:** C1 service principal plus durable handoff/commit-before-ACK; C2 Opportunity aggregate; C3 human QGO; C4 SalesAcceptance/Outcome feedback; C5 Conversation linkage.
+4. **Pilot 3-A:** one internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.
+5. **Site 3-B:** SaaS `Session → Quote → Grant → Build → Preview`; no Publish, Domain, Inquiry, Analytics or Design Editor.
+6. **MVP-2:** one approved email provider only after MVP-0/1 and separate OAuth/send authorization.
+7. **Later:** Site Publish, Buyer R2, Agent Operation Contract, a second mail provider, social/WhatsApp, attribution, and multi-industry/agency.
+
+No more than two implementation programs may run in parallel. Program C contract/spec may proceed while G0 holds, but cross-repo integration waits for accepted A/B interfaces; the Site vertical may parallel B. No Discovery GREEN, runtime mutation or Pilot may proceed while its corresponding gate is red. Push, PR, merge, deploy, restart, retained migration, provider/model/paid/OAuth/email/credential actions each require separate exact authorization.
+
+See [current status](../status/current.md), [ADR-025](../adr/registry.md), the [conflict register](../governance/conflict-register.md), and the [Phase 0 plan](../superpowers/plans/2026-08-29-global-product-program-phase0.md). The dated long sections below are historical or capability-specific inputs where they conflict with this override; they do not replace the active sequence.
+
 > **2026-08-12 Copy Sonnet native capability（当前覆盖顺序）**：基于 `origin/main@d5e53eca8fdb1b67492536f0788c9593482c4845`，用户授权启用 New API channel #20 并仅以 `claude-sonnet-5 × Anthropic Messages × special` 运行 1 execution / 最多 2 wires / 最多 1 repair。实际首调被当前 Copy 合同以 `MARKDOWN_CODE_FENCE` 拒绝；唯一 repair 通过事实槽位和生产 validator 硬门，随后 purpose-specific token 被禁用。结果见 [native capability evidence](../evidence/site-builder/m1-g-copy-sonnet-native-capability-2026-08-12.json) 与其 [Git-review acceptance](../evidence/site-builder/m1-g-copy-sonnet-native-capability-git-review-acceptance-2026-08-12.json)。它只证明一个 factual fixture 的 gateway capability，不证明全量 quality matrix、模型 promotion 或生产 route adoption；三道门仍为 `NOT_AUTHORIZED`，不得由本记录自动开启。MiniMax/Doubao 继续 retired。
 
 > **2026-08-12 Copy Sonnet native route adoption（已接受）**：用户随后授权质量、promotion、route 三道独立门。Sonnet-only matrix 使用 `origin/main@642f3b9185b3e667c6b73622bcd11448f8be7a62` 的六个 production fixtures × 2 repeats；12/12 accepted outputs 通过 `COPY_TASK`/事实硬门，矩阵共 13 条物理 wire（初始 structured-output failure 与同 execution 的有界补发均计入，总上限 24）。另有 1 条先前本地 serializer 诊断 wire 独立审计、未进入矩阵或评分。独立盲审四项均值为 4、4、3.8、4，唯一 minor CTA finding 未低于阈值；每次 purpose-specific token 均已禁用。质量 [Git-review acceptance](../evidence/site-builder/m1-g-copy-sonnet-native-quality-git-review-acceptance-2026-08-12.json) 锁定 #396 merge，promotion [Git-review acceptance](../evidence/site-builder/m1-g-copy-sonnet-native-promotion-git-review-acceptance-2026-08-12.json) 锁定 #397 merge，source-level route [Git-review acceptance](../evidence/site-builder/m1-g-copy-sonnet-native-route-adoption-git-review-acceptance-2026-08-12.json) 锁定 #398 merge。当前 active route 采用精确的 Sonnet Messages/medium/no-fallback，并保留 DeepSeek Pro→GLM rollback；不产生新 dispatch、Terra/Sol 比较或 MiniMax/Doubao 复活，部署仍不在此决策中。
