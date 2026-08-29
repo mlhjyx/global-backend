@@ -39,14 +39,14 @@ Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → 
 
 | Gate | Current verdict | Evidence and blocker |
 | --- | --- | --- |
-| G0 — ownership/interface | `HOLD_OWNERSHIP` | A/B three-way assertion audit, unique owner decision, quarantine review and active-writer/provenance correction are not complete. |
-| G1 — product and document truth | `AMBER / DOC_TRUTH_SYNC_PENDING` | Phase 0 baseline exists; Task 4 still must align product, capability, object, scenario and frontend truth to the ownership decision. |
-| G2 — source-integrated alpha | `AMBER / SOURCE_ONLY` | Exact local source heads are captured, but Program A/B interface acceptance and C consumer are not established. |
-| G3 — user journey | `RED / NOT_VALIDATED` | No evidence of the required end-to-end user path, human QGO decision or user acceptance. |
-| G4 — development runtime | `RED / DEGRADED` | API and Worker are restart-looping; no runtime recovery diagnosis or authorized mutation has occurred. |
-| G5 — RuntimeEvidence | `RED / NO_CURRENT_PASS` | Governance verifier count at capture: `runtime_current=0`, `runtime_historical=0`; a service observation cannot substitute for valid RuntimeEvidence. |
-| G6 — release/provenance | `RED / NO_RELEASE_BUNDLE` | Governance verifier count at capture: `release_bundles=0`; no independent external readback exists for promotion. |
-| G7 — commercial loop | `RED / NOT_CLOSED` | Opportunity → human QGO → feedback/commercial outcome is not validated; Billing/Credits remains `DEFERRED / NOT_IMPLEMENTED`. |
+| G0 — Truth & Ownership | `HOLD_OWNERSHIP` | A/B three-way assertion audit, unique owner decision, quarantine review and active-writer/provenance correction are not complete. |
+| G1 — Product/UX/Contract | `AMBER / DOC_TRUTH_SYNC_PENDING` | Phase 0 baseline exists; Task 4 still must align product, UX, capability, object, scenario and frontend contract truth to the ownership decision. |
+| G2 — Source/TDD/Security | `AMBER / SOURCE_ONLY` | Exact local source heads are captured and structural verifiers passed, but the A/B interface has not been accepted and C consumer TDD/security work is not selected. |
+| G3 — Integration/Data | `RED / NOT_INTEGRATED` | No accepted A/B interface, Program C consumer, durable handoff transaction, current-data integration or end-to-end integration evidence exists. |
+| G4 — Release Candidate | `RED / NO_RELEASE_CANDIDATE` | No current release-candidate package, current PASS RuntimeEvidence or Release Bundle is present; governance count is `release_bundles=0`. |
+| G5 — Runtime Observed | `RED / DEGRADED_NO_CURRENT_EVIDENCE` | API and Worker are restart-looping; governance count is `runtime_current=0`, `runtime_historical=0`. Service observation cannot substitute for valid RuntimeEvidence. |
+| G6 — UAT Accepted | `RED / NOT_VALIDATED` | No evidence of an end-to-end user journey, human QGO decision, user acceptance or UAT. |
+| G7 — Pilot/GA Authorized | `RED / NOT_AUTHORIZED` | No pilot/GA authorization, independent external readback or commercial-loop closure exists; Billing/Credits remains `DEFERRED / NOT_IMPLEMENTED`. |
 
 ## 3. Runtime observation — development only
 
@@ -74,10 +74,10 @@ The parallel Site path is:
 
 It does not create Campaign, outreach, conversation execution, attribution, SaaS product UI or commercial acceptance state in this backend. Product Billing/Credits remains `DEFERRED / NOT_IMPLEMENTED`; `cap_microusd` is an execution safety envelope, not a customer billing feature.
 
-**Next single highest-priority user result:** establish the Program C server-side handoff-consumer/service-principal and receipt contract so one immutable `LeadQualifiedPackage` can become a durable Opportunity candidate only after the G0 ownership boundary is selected. Until then, C1 is specification/TDD-only; no Discovery GREEN, actual pilot, runtime cutover, Provider wire or email sending is authorized.
+**Next single highest-priority user result:** establish the Program C server-side handoff-consumer/service-principal and receipt contract so one immutable `LeadQualifiedPackage` can become a durable Opportunity candidate only after the G0 ownership boundary is selected. C1 begins as G2 Source/TDD/Security work and must satisfy G3 Integration/Data before it can support the user journey; no Discovery GREEN, actual pilot, runtime cutover, Provider wire or email sending is authorized.
 
 ## 5. Critical risks and external authorization queue
 
 Critical risks are (1) Program A post-RED schema/writer provenance can collide with Program B Raw/Identity SoR if treated as accepted, (2) API/Worker restart loops and wildcard development listeners have no current diagnosis/remediation evidence, and (3) no validated user journey, current RuntimeEvidence or Release Bundle exists.
 
-The following actions require separate explicit authorization and are not performed by this baseline: any service restart/configuration or listener remediation; retained migration or database mutation; provider/model/paid call; credential/JWKS/OAuth/email action; push, PR mutation, merge, deploy or external control-plane readback. Read-only runtime diagnosis is allowed; it cannot upgrade G3–G7.
+The following actions require separate explicit authorization and are not performed by this baseline: any service restart/configuration or listener remediation; retained migration or database mutation; provider/model/paid call; credential/JWKS/OAuth/email action; push, PR mutation, merge, deploy or external control-plane readback. Read-only runtime diagnosis is allowed; it cannot upgrade G5–G7 or substitute for G3 integration, G4 release-candidate, or G6 UAT evidence.
