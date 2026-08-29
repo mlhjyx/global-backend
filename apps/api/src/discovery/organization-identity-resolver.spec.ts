@@ -109,18 +109,22 @@ function transactionFixture(options: FixtureOptions = {}) {
   ];
   let queryIndex = 0;
   let observedCommand: Record<string, unknown> | null = null;
+  let observedRawSql = "";
+  const executeRaw = vi.fn(async (...args: unknown[]) => {
+    const key = args.slice(1).find((value) => typeof value === "string");
+    if (typeof key !== "string") throw new Error("missing lock key");
+    events.push(
+      key.startsWith("acquisition-suppression-policy:")
+        ? "suppression-lock"
+        : "identity-lock",
+    );
+    return 1;
+  });
   const queryRaw = vi.fn(async (...args: unknown[]) => {
     queryIndex += 1;
     if (queryIndex === 1) {
-      events.push("suppression-lock");
-      return [{ locked: true }];
-    }
-    if (queryIndex === 2) {
-      events.push("identity-lock");
-      return [{ locked: true }];
-    }
-    if (queryIndex === 3) {
-      events.push("raw-for-key-share");
+      observedRawSql = (args[0] as TemplateStringsArray).join("?");
+      events.push("raw-read");
       return (
         options.rawRows ?? [
           {
@@ -149,6 +153,7 @@ function transactionFixture(options: FixtureOptions = {}) {
 
   const tx = {
     $queryRaw: queryRaw,
+    $executeRaw: executeRaw,
     rawSourceGovernanceDisposition: {
       findFirst: vi.fn(async () => {
         events.push("raw-disposition");
@@ -214,6 +219,9 @@ function transactionFixture(options: FixtureOptions = {}) {
     events,
     get command() {
       return observedCommand;
+    },
+    get rawSql() {
+      return observedRawSql;
     },
     create: (
       tx as unknown as {
@@ -284,8 +292,9 @@ describe("organization identity DB resolver source contract", () => {
       fixture.events.indexOf("identity-lock"),
     );
     expect(fixture.events.indexOf("identity-lock")).toBeLessThan(
-      fixture.events.indexOf("raw-for-key-share"),
+      fixture.events.indexOf("raw-read"),
     );
+    expect(fixture.rawSql).not.toMatch(/FOR\s+(?:KEY\s+)?SHARE|FOR\s+UPDATE/iu);
     expect(fixture.events.at(-1)).toBe("command");
   });
 

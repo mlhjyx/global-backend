@@ -305,8 +305,7 @@ export async function resolveOrganizationIdentityForRaw(
         ("expires_at" IS NULL OR "expires_at" > statement_timestamp()) AS "is_current"
       FROM "raw_source_record"
       WHERE "workspace_id" = ${input.workspaceId}::uuid
-        AND "id" = ${input.rawRecordId}::uuid
-      FOR KEY SHARE`,
+        AND "id" = ${input.rawRecordId}::uuid`,
     "IDENTITY_RAW_NOT_RESOLVABLE",
   );
   if (

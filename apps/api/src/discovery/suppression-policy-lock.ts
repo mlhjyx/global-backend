@@ -18,7 +18,7 @@ export async function lockWorkspaceSuppressionPolicy(
   tx: Prisma.TransactionClient,
   workspaceId: string,
 ): Promise<SuppressionPolicyLockReceipt> {
-  await tx.$queryRaw`
+  await tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtextextended(${'acquisition-suppression-policy:' + workspaceId}, 0))`;
   return Object.freeze({ workspaceId, [POLICY_LOCK_RECEIPT]: true as const });
 }
