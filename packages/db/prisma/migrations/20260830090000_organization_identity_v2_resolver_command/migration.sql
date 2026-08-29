@@ -282,7 +282,7 @@ BEGIN
       RAISE EXCEPTION 'IDENTITY_INPUT_DRIFT'
         USING ERRCODE = 'P0001';
     END IF;
-    IF existing_link_statuses = ARRAY['ACTIVE'] THEN
+    IF existing_link_statuses = ARRAY['ACTIVE'] AND link_total = 1 THEN
       SELECT l.* INTO stored_link
       FROM public.identity_link AS l
       WHERE l.workspace_id = command_workspace_id
