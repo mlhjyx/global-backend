@@ -466,6 +466,109 @@ describe("governed Raw organization identity authority", () => {
     expect(getterCalls).toBe(0);
   });
 
+  it("rejects transparent object and array proxies before every reflection trap", () => {
+    const objectTraps = {
+      getOwnPropertyDescriptor: 0,
+      getPrototypeOf: 0,
+      ownKeys: 0,
+    };
+    const objectProxy = new Proxy(rawRecord(), {
+      getOwnPropertyDescriptor(target, property) {
+        objectTraps.getOwnPropertyDescriptor += 1;
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+      getPrototypeOf(target) {
+        objectTraps.getPrototypeOf += 1;
+        return Reflect.getPrototypeOf(target);
+      },
+      ownKeys(target) {
+        objectTraps.ownKeys += 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+    const arrayTraps = {
+      getOwnPropertyDescriptor: 0,
+      getPrototypeOf: 0,
+      ownKeys: 0,
+    };
+    const productsProxy = new Proxy(["pump"], {
+      getOwnPropertyDescriptor(target, property) {
+        arrayTraps.getOwnPropertyDescriptor += 1;
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+      getPrototypeOf(target) {
+        arrayTraps.getPrototypeOf += 1;
+        return Reflect.getPrototypeOf(target);
+      },
+      ownKeys(target) {
+        arrayTraps.ownKeys += 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+
+    for (const payload of [
+      objectProxy,
+      rawRecord({ attributes: { products: productsProxy } }),
+    ]) {
+      expect(() =>
+        extractOrganizationIdentityAuthority("registry", payload),
+      ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+    }
+    expect(objectTraps).toEqual({
+      getOwnPropertyDescriptor: 0,
+      getPrototypeOf: 0,
+      ownKeys: 0,
+    });
+    expect(arrayTraps).toEqual({
+      getOwnPropertyDescriptor: 0,
+      getPrototypeOf: 0,
+      ownKeys: 0,
+    });
+  });
+
+  it("keeps unknown-provider membership ahead of hostile container preflight", () => {
+    const traps = { getPrototypeOf: 0 };
+    const payload = new Proxy(rawRecord(), {
+      getPrototypeOf() {
+        traps.getPrototypeOf += 1;
+        throw new Error("unknown-hostile-marker");
+      },
+    });
+    expect(() =>
+      extractOrganizationIdentityAuthority("unknown", payload),
+    ).toThrow(authorityError("IDENTITY_RAW_PAYLOAD_NOT_GOVERNED"));
+    expect(traps).toEqual({ getPrototypeOf: 0 });
+  });
+
+  it("preserves Raw omission parity for undefined object fields while arrays remain dense and fail closed", () => {
+    const payload = rawRecord({ externalId: undefined });
+    expect(validateRawSourceProviderPayload("registry", payload)).toMatchObject(
+      {
+        ok: true,
+      },
+    );
+    expect(extractOrganizationIdentityAuthority("registry", payload)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scheme: "domain",
+          normalizedValue: "acme.example",
+        }),
+      ]),
+    );
+    expect(Object.hasOwn(payload, "externalId")).toBe(true);
+    expect(payload.externalId).toBeUndefined();
+
+    const arrayUndefined = rawRecord({
+      attributes: { products: [undefined] },
+    });
+    expect(
+      validateRawSourceProviderPayload("registry", arrayUndefined),
+    ).toMatchObject({ ok: false });
+    expect(() =>
+      extractOrganizationIdentityAuthority("registry", arrayUndefined),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+  });
+
   it("translates an unexpected Raw validator exception to the stable generic domain error", () => {
     const marker = "unexpected-validator-marker";
     const rawValidator = vi
