@@ -1,5 +1,5 @@
 // Test intent source-mined from tugjvnh@70885cdb; rewritten against current Raw Source contracts.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   extractOrganizationIdentityAuthority,
   ORGANIZATION_IDENTITY_AUTHORITY_PROFILES,
@@ -9,6 +9,7 @@ import {
   GOVERNED_RAW_SOURCE_PROVIDER_KEYS,
   validateRawSourceProviderPayload,
 } from "./raw-source-provider-schema";
+import * as rawSourceProviderSchema from "./raw-source-provider-schema";
 
 const PROVENANCE = Object.freeze({
   sourceUrl: "https://registry.example/companies/1",
@@ -255,7 +256,7 @@ describe("governed Raw organization identity authority", () => {
     );
   });
 
-  it("uses TED suffix jurisdiction or payload country, while refusing free-text and missing jurisdiction", () => {
+  it("uses TED suffix jurisdiction or payload country, while rejecting a conflicting country", () => {
     const fromSuffix = extractOrganizationIdentityAuthority(
       "ted",
       validPayloads().ted,
@@ -293,6 +294,20 @@ describe("governed Raw organization identity authority", () => {
     expect(fromCountry).toEqual(
       expect.arrayContaining([expect.objectContaining({ jurisdiction: "DE" })]),
     );
+    expect(() =>
+      extractOrganizationIdentityAuthority("ted", {
+        ...validPayloads().ted,
+        identifier: { scheme: "ted-natid:fr", value: "fr291499156" },
+        attributes: {
+          ted: {
+            publication_number: "1",
+            publication_date: "2026-08-25",
+            notice_type: "award",
+            winner_identifier: "fr291499156",
+          },
+        },
+      }),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
     for (const identifier of ["Call 555-0100", "Bearer secret"]) {
       const payload = validPayloads().ted;
       expect(() =>
@@ -355,7 +370,11 @@ describe("governed Raw organization identity authority", () => {
     ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
   });
 
-  it("rejects identifier authority outside registry, TED, and FDA at the Raw boundary", () => {
+  it("classifies unknown and provider-disallowed identifiers without conflating them with invalid values", () => {
+    expect(() =>
+      extractOrganizationIdentityAuthority("unknown", rawRecord()),
+    ).toThrow(authorityError("IDENTITY_RAW_PAYLOAD_NOT_GOVERNED"));
+
     for (const providerKey of [
       "directory",
       "wikidata",
@@ -368,7 +387,99 @@ describe("governed Raw organization identity authority", () => {
           ...validPayloads()[providerKey],
           identifier: { scheme: "registry-id", value: "DE1234" },
         }),
+      ).toThrow(authorityError("IDENTITY_IDENTIFIER_NOT_AUTHORIZED"));
+    }
+
+    expect(() =>
+      extractOrganizationIdentityAuthority(
+        "registry",
+        rawRecord({
+          identifier: { scheme: "unregistered-id", value: "DE1234" },
+        }),
+      ),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_NOT_AUTHORIZED"));
+    expect(() =>
+      extractOrganizationIdentityAuthority(
+        "registry",
+        rawRecord({ identifier: { scheme: "registry-id", value: "" } }),
+      ),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+  });
+
+  it("preflights hostile containers passively before Raw validation and never echoes their marker", () => {
+    const marker = "hostile-container-marker";
+    const ownAccessor = rawRecord();
+    let getterCalls = 0;
+    Object.defineProperty(ownAccessor, "name", {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error(marker);
+      },
+    });
+    const symbol = Symbol("hostile-symbol");
+    const withSymbol = rawRecord();
+    Object.defineProperty(withSymbol, symbol, {
+      value: marker,
+      enumerable: true,
+    });
+    const withHole = rawRecord({ attributes: { products: ["pump", ,] } });
+    const inherited = Object.create({
+      get products() {
+        getterCalls += 1;
+        throw new Error(marker);
+      },
+    }) as Record<string, unknown>;
+    const customPrototype = rawRecord({ attributes: inherited });
+    const cyclic = rawRecord();
+    (cyclic as { self?: unknown }).self = cyclic;
+    const throwingProxy = new Proxy(rawRecord(), {
+      getPrototypeOf() {
+        throw new Error(marker);
+      },
+    });
+    const revocable = Proxy.revocable(rawRecord(), {});
+    revocable.revoke();
+
+    for (const payload of [
+      ownAccessor,
+      withSymbol,
+      withHole,
+      customPrototype,
+      cyclic,
+      throwingProxy,
+      revocable.proxy,
+    ]) {
+      try {
+        extractOrganizationIdentityAuthority("registry", payload);
+        throw new Error("expected hostile payload rejection");
+      } catch (error) {
+        expect(error).toBeInstanceOf(OrganizationIdentityAuthorityError);
+        expect(error).toMatchObject({ code: "IDENTITY_IDENTIFIER_INVALID" });
+        expect(String(error)).not.toContain(marker);
+      }
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it("translates an unexpected Raw validator exception to the stable generic domain error", () => {
+    const marker = "unexpected-validator-marker";
+    const rawValidator = vi
+      .spyOn(rawSourceProviderSchema, "validateRawSourceProviderPayload")
+      .mockImplementation(() => {
+        throw new Error(marker);
+      });
+    try {
+      expect(() =>
+        extractOrganizationIdentityAuthority("registry", rawRecord()),
       ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+      try {
+        extractOrganizationIdentityAuthority("registry", rawRecord());
+      } catch (error) {
+        expect(String(error)).not.toContain(marker);
+      }
+    } finally {
+      rawValidator.mockRestore();
     }
   });
 
