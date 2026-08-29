@@ -202,20 +202,27 @@ describe("ensurePlatformSchedules", () => {
 
   it('creates the raw retention schedule with the fixed self-healing contract', async () => {
     create.mockResolvedValue(undefined);
+    const previous = process.env.RAW_RETENTION_SWEEP_EVERY;
+    delete process.env.RAW_RETENTION_SWEEP_EVERY;
 
-    await ensurePlatformSchedules();
+    try {
+      await ensurePlatformSchedules();
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      scheduleId: RAW_RETENTION_SWEEP_SCHEDULE_ID,
-      spec: { intervals: [{ every: '24h' }] },
-      action: {
-        type: 'startWorkflow',
-        workflowType: 'rawRetentionSweepWorkflow',
-        taskQueue: 'understanding',
-        args: [{}],
-      },
-      policies: { overlap: 'SKIP', catchupWindow: '1 minute' },
-    }));
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({
+        scheduleId: RAW_RETENTION_SWEEP_SCHEDULE_ID,
+        spec: { intervals: [{ every: '24h' }] },
+        action: {
+          type: 'startWorkflow',
+          workflowType: 'rawRetentionSweepWorkflow',
+          taskQueue: 'understanding',
+          args: [{}],
+        },
+        policies: { overlap: 'SKIP', catchupWindow: '1 minute' },
+      }));
+    } finally {
+      if (previous === undefined) delete process.env.RAW_RETENTION_SWEEP_EVERY;
+      else process.env.RAW_RETENTION_SWEEP_EVERY = previous;
+    }
   });
 
   it('applies RAW_RETENTION_SWEEP_EVERY only to the raw retention interval', async () => {
@@ -294,5 +301,16 @@ describe("ensurePlatformSchedules", () => {
       state: { paused: true, notes: 'ops hold' },
       searchAttributes: { source: ['legacy'] },
     });
+  });
+
+  it('does not reconcile an already-running raw retention schedule', async () => {
+    create.mockImplementation(async (payload: { scheduleId: string }) => {
+      if (payload.scheduleId === RAW_RETENTION_SWEEP_SCHEDULE_ID) throw scheduleAlreadyRunning;
+      return undefined;
+    });
+
+    await expect(ensurePlatformSchedules()).resolves.toBeUndefined();
+
+    expect(getHandle).not.toHaveBeenCalled();
   });
 });
