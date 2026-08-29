@@ -115,6 +115,7 @@ const MODEL_ATTRIBUTES = Object.freeze({
   ToolOperationSubject: [
     '@@unique([workspaceId, operationId], map: "tool_operation_subject_workspace_operation_key")',
     '@@unique([scopeKey, operationId], map: "tool_operation_subject_scope_operation_key")',
+    '@@unique([workspaceId, subjectId], map: "tool_operation_subject_workspace_subject_key")',
     '@@unique([workspaceId, operationGeneration, subjectId], map: "tool_operation_subject_workspace_generation_subject_key")',
     '@@index([scopeKey, authorityId, accountId, operationId, operationGeneration], map: "tool_operation_subject_authority_operation_idx")',
     '@@map("tool_operation_subject")',
@@ -133,6 +134,18 @@ const MODEL_ATTRIBUTES = Object.freeze({
   GovernedSubjectTombstoneAudit: [
     '@@index([workspaceId, governedSubjectId, tombstonedAt], map: "governed_subject_tombstone_audit_subject_idx")',
     '@@map("governed_subject_tombstone_audit")',
+  ],
+});
+
+const MODEL_RELATION_PROJECTIONS = Object.freeze({
+  ToolOperationSubject: [
+    '@relation("ToolOperationSubjectNode", fields: [workspaceId, subjectId], references: [workspaceId, id]',
+    '@relation("ToolOperationSubjectRoot", fields: [workspaceId, rootSubjectId], references: [workspaceId, id]',
+  ],
+  GovernedSubjectRelation: [
+    '@relation("GovernedRelationOperationSubject", fields: [workspaceId, operationSubjectId], references: [workspaceId, subjectId]',
+    '@relation("GovernedRelationParent", fields: [workspaceId, parentSubjectId], references: [workspaceId, id]',
+    '@relation("GovernedRelationChild", fields: [workspaceId, childSubjectId], references: [workspaceId, id]',
   ],
 });
 
@@ -385,6 +398,11 @@ describe('governed subject relation schema migration', () => {
       const attributes = rawBody.split('\n').map((line) => line.trim())
         .filter((line) => line.startsWith('@@'));
       expect(attributes).toEqual(MODEL_ATTRIBUTES[model as keyof typeof MODEL_ATTRIBUTES]);
+      for (const relation of MODEL_RELATION_PROJECTIONS[
+        model as keyof typeof MODEL_RELATION_PROJECTIONS
+      ] ?? []) {
+        expect(body).toContain(relation);
+      }
     }
     for (const forbidden of ['RawSourceRecord', 'IdentityLink', 'CanonicalCompany', 'CanonicalContact', 'Opportunity']) {
       expect(projection).not.toContain(forbidden);

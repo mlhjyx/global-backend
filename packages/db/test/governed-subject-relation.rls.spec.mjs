@@ -220,7 +220,24 @@ function schemaInventory(database) {
 function seedRlsRows(database) {
   const digestA = "a".repeat(64);
   const digestB = "b".repeat(64);
-  psql(database, `
+  const readback = JSON.parse(psql(database, `
+    SET session_replication_role=replica;
+    DELETE FROM governed_subject_tombstone_audit
+      WHERE deletion_request_id IN ('${IDS.deletionA}','${IDS.deletionB}');
+    DELETE FROM governed_subject_tombstone
+      WHERE (workspace_id,governed_subject_id) IN (
+        ('${WORKSPACE_A}','${IDS.childA}'),('${WORKSPACE_B}','${IDS.childB}')
+      );
+    DELETE FROM governed_subject_relation
+      WHERE id IN ('${IDS.relationA}','${IDS.relationB}');
+    DELETE FROM tool_operation_subject
+      WHERE subject_id IN ('${IDS.operationA}','${IDS.operationB}');
+    DELETE FROM governed_subject
+      WHERE id IN (
+        '${IDS.rootA}','${IDS.operationA}','${IDS.childA}',
+        '${IDS.rootB}','${IDS.operationB}','${IDS.childB}'
+      );
+    SET session_replication_role=origin;
     INSERT INTO workspace(id,name,created_at,updated_at) VALUES
       ('${WORKSPACE_A}'::uuid,'GSR A',now(),now()),
       ('${WORKSPACE_B}'::uuid,'GSR B',now(),now()) ON CONFLICT(id) DO NOTHING;
@@ -231,25 +248,73 @@ function seedRlsRows(database) {
       ('${IDS.childA}'::uuid,'${WORKSPACE_A}','${WORKSPACE_A}'::uuid,'child_subject','82000000-0000-4000-8000-000000000001','PERSONAL','person','83000000-0000-4000-8000-000000000001',now()),
       ('${IDS.rootB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'root_subject','81000000-0000-4000-8000-000000000011','NON_PERSONAL',NULL,NULL,now()),
       ('${IDS.operationB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'tool_operation','${IDS.physicalOperationB}','NON_PERSONAL',NULL,NULL,now()),
-      ('${IDS.childB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'child_subject','82000000-0000-4000-8000-000000000011','PERSONAL','person','83000000-0000-4000-8000-000000000011',now())
-    ON CONFLICT DO NOTHING;
+      ('${IDS.childB}'::uuid,'${WORKSPACE_B}','${WORKSPACE_B}'::uuid,'child_subject','82000000-0000-4000-8000-000000000011','PERSONAL','person','83000000-0000-4000-8000-000000000011',now());
     INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest,created_at) VALUES
       ('${IDS.operationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${IDS.operationA}','${digestA}','${digestA}',now()),
-      ('${IDS.operationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${IDS.operationB}','${digestB}','${digestB}',now())
-    ON CONFLICT DO NOTHING;
+      ('${IDS.operationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${IDS.operationB}','${digestB}','${digestB}',now());
     INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,source_ref_sha256,contract_sha256,created_at) VALUES
       ('${IDS.relationA}','${WORKSPACE_A}','${WORKSPACE_A}','${IDS.authorityA}','${IDS.accountA}','${IDS.physicalOperationA}',1,'${digestA}','${IDS.operationA}','${IDS.operationA}','${IDS.childA}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000001',NULL,'${digestA}',now()),
-      ('${IDS.relationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${digestB}','${IDS.operationB}','${IDS.operationB}','${IDS.childB}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000011',NULL,'${digestB}',now())
-    ON CONFLICT DO NOTHING;
+      ('${IDS.relationB}','${WORKSPACE_B}','${WORKSPACE_B}','${IDS.authorityB}','${IDS.accountB}','${IDS.physicalOperationB}',1,'${digestB}','${IDS.operationB}','${IDS.operationB}','${IDS.childB}','child:1','MATERIALIZED_CHILD','record','84000000-0000-4000-8000-000000000011',NULL,'${digestB}',now());
     INSERT INTO governed_subject_tombstone(workspace_id,governed_subject_id,tombstoned_at) VALUES
-      ('${WORKSPACE_A}','${IDS.childA}',now()),('${WORKSPACE_B}','${IDS.childB}',now())
-    ON CONFLICT DO NOTHING;
+      ('${WORKSPACE_A}','${IDS.childA}',now()),('${WORKSPACE_B}','${IDS.childB}',now());
     INSERT INTO governed_subject_tombstone_audit(deletion_request_id,workspace_id,governed_subject_id,tombstoned_at) VALUES
       ('${IDS.deletionA}','${WORKSPACE_A}','${IDS.childA}',now()),
-      ('${IDS.deletionB}','${WORKSPACE_B}','${IDS.childB}',now())
-    ON CONFLICT DO NOTHING;
+      ('${IDS.deletionB}','${WORKSPACE_B}','${IDS.childB}',now());
     SET session_replication_role=origin;
-  `);
+    SELECT jsonb_build_object(
+      'subjects',(SELECT jsonb_agg(jsonb_build_array(
+        id::text,scope_key,workspace_id::text,subject_type,subject_id::text,
+        data_class,dsr_subject_type,dsr_subject_id::text
+      ) ORDER BY id) FROM governed_subject WHERE id IN (
+        '${IDS.rootA}','${IDS.operationA}','${IDS.childA}',
+        '${IDS.rootB}','${IDS.operationB}','${IDS.childB}'
+      )),
+      'operations',(SELECT jsonb_agg(jsonb_build_array(
+        subject_id::text,scope_key,workspace_id::text,authority_id::text,
+        account_id::text,operation_id::text,operation_generation,
+        root_subject_id::text,ack_id,result_digest
+      ) ORDER BY subject_id) FROM tool_operation_subject
+        WHERE subject_id IN ('${IDS.operationA}','${IDS.operationB}')),
+      'relations',(SELECT jsonb_agg(jsonb_build_array(
+        id::text,scope_key,workspace_id::text,authority_id::text,account_id::text,
+        operation_id::text,operation_generation,ack_id,
+        operation_subject_id::text,parent_subject_id::text,child_subject_id::text,
+        relation_key,relation_kind,source_ref_namespace,source_ref_uuid::text,
+        source_ref_sha256,contract_sha256
+      ) ORDER BY id) FROM governed_subject_relation
+        WHERE id IN ('${IDS.relationA}','${IDS.relationB}')),
+      'tombstones',(SELECT jsonb_agg(jsonb_build_array(
+        workspace_id::text,governed_subject_id::text
+      ) ORDER BY workspace_id,governed_subject_id) FROM governed_subject_tombstone
+        WHERE (workspace_id,governed_subject_id) IN (
+          ('${WORKSPACE_A}','${IDS.childA}'),('${WORKSPACE_B}','${IDS.childB}')
+        )),
+      'audits',(SELECT jsonb_agg(jsonb_build_array(
+        deletion_request_id::text,workspace_id::text,governed_subject_id::text
+      ) ORDER BY deletion_request_id) FROM governed_subject_tombstone_audit
+        WHERE deletion_request_id IN ('${IDS.deletionA}','${IDS.deletionB}'))
+    )::text;
+  `));
+  assert.deepEqual(readback, {
+    subjects: [
+      [IDS.rootA, WORKSPACE_A, WORKSPACE_A, "root_subject", "81000000-0000-4000-8000-000000000001", "NON_PERSONAL", null, null],
+      [IDS.operationA, WORKSPACE_A, WORKSPACE_A, "tool_operation", IDS.physicalOperationA, "NON_PERSONAL", null, null],
+      [IDS.childA, WORKSPACE_A, WORKSPACE_A, "child_subject", "82000000-0000-4000-8000-000000000001", "PERSONAL", "person", "83000000-0000-4000-8000-000000000001"],
+      [IDS.rootB, WORKSPACE_B, WORKSPACE_B, "root_subject", "81000000-0000-4000-8000-000000000011", "NON_PERSONAL", null, null],
+      [IDS.operationB, WORKSPACE_B, WORKSPACE_B, "tool_operation", IDS.physicalOperationB, "NON_PERSONAL", null, null],
+      [IDS.childB, WORKSPACE_B, WORKSPACE_B, "child_subject", "82000000-0000-4000-8000-000000000011", "PERSONAL", "person", "83000000-0000-4000-8000-000000000011"],
+    ],
+    operations: [
+      [IDS.operationA, WORKSPACE_A, WORKSPACE_A, IDS.authorityA, IDS.accountA, IDS.physicalOperationA, 1, IDS.operationA, digestA, digestA],
+      [IDS.operationB, WORKSPACE_B, WORKSPACE_B, IDS.authorityB, IDS.accountB, IDS.physicalOperationB, 1, IDS.operationB, digestB, digestB],
+    ],
+    relations: [
+      [IDS.relationA, WORKSPACE_A, WORKSPACE_A, IDS.authorityA, IDS.accountA, IDS.physicalOperationA, 1, digestA, IDS.operationA, IDS.operationA, IDS.childA, "child:1", "MATERIALIZED_CHILD", "record", "84000000-0000-4000-8000-000000000001", null, digestA],
+      [IDS.relationB, WORKSPACE_B, WORKSPACE_B, IDS.authorityB, IDS.accountB, IDS.physicalOperationB, 1, digestB, IDS.operationB, IDS.operationB, IDS.childB, "child:1", "MATERIALIZED_CHILD", "record", "84000000-0000-4000-8000-000000000011", null, digestB],
+    ],
+    tombstones: [[WORKSPACE_A, IDS.childA], [WORKSPACE_B, IDS.childB]],
+    audits: [[IDS.deletionA, WORKSPACE_A, IDS.childA], [IDS.deletionB, WORKSPACE_B, IDS.childB]],
+  });
 }
 
 function crossWorkspaceInsert(table) {
