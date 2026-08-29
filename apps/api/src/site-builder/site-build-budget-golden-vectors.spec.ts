@@ -124,16 +124,110 @@ function exactKeys(value: unknown, expected: readonly string[]): void {
   );
 }
 
-function assertClosedVector(vector: GoldenVector): void {
-  exactKeys(vector, ['id', 'request', 'expected']);
-  exactKeys(vector.expected, [
-    'claims',
-    'normalizedRequest',
-    'protectedHeader',
-    'quote',
-    'requestSha256',
+function mutableRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('test fixture must be an object');
+  }
+  return value as Record<string, unknown>;
+}
+
+function clonedVector(id: string): GoldenVector {
+  const vector = document().vectors.find((candidate) => candidate.id === id);
+  if (!vector) throw new Error(`missing fixture vector ${id}`);
+  return JSON.parse(JSON.stringify(vector)) as GoldenVector;
+}
+
+function expectString(value: unknown): asserts value is string {
+  expect(typeof value).toBe('string');
+}
+
+function expectStringArray(value: unknown): asserts value is readonly string[] {
+  expect(Array.isArray(value)).toBe(true);
+  expect((value as unknown[]).every((item) => typeof item === 'string')).toBe(
+    true,
+  );
+}
+
+function assertIntakeInput(input: unknown): void {
+  exactKeys(input, [
+    'businessEmail',
+    'company',
+    'hasWebsite',
+    'industry',
+    'products',
+    'targetMarkets',
+    'websiteUrl',
   ]);
+  const record = mutableRecord(input);
+  exactKeys(record.company, ['nameEn', 'nameZh']);
+  const company = mutableRecord(record.company);
+  expectString(company.nameZh);
+  expectString(company.nameEn);
+  expectString(record.industry);
+  expectStringArray(record.products);
+  expectStringArray(record.targetMarkets);
+  expect(typeof record.hasWebsite).toBe('boolean');
+  expect(record.websiteUrl === null || typeof record.websiteUrl === 'string').toBe(
+    true,
+  );
+  expectString(record.businessEmail);
+}
+
+function assertBuildOptions(value: unknown): void {
+  const options = mutableRecord(value);
+  const expectedKeys = [
+    ...(options.stylePreset === undefined ? [] : ['stylePreset']),
+    ...(options.pages === undefined ? [] : ['pages']),
+    ...(options.locales === undefined ? [] : ['locales']),
+  ];
+  exactKeys(options, expectedKeys);
+  if (options.stylePreset !== undefined) expectString(options.stylePreset);
+  if (options.pages !== undefined) expectStringArray(options.pages);
+  if (options.locales !== undefined) expectStringArray(options.locales);
+}
+
+function assertBuildRequestInput(value: unknown): void {
+  const input = mutableRecord(value);
+  const expectedKeys = [
+    'scope',
+    ...(input.targetId === undefined ? [] : ['targetId']),
+    ...(input.options === undefined ? [] : ['options']),
+  ];
+  exactKeys(input, expectedKeys);
+  expect(['site', 'page', 'section']).toContain(input.scope);
+  if (input.targetId !== undefined) expectString(input.targetId);
+  if (input.options !== undefined) assertBuildOptions(input.options);
+}
+
+function assertQuoteShape(quote: unknown, operation: 'intake' | 'refurbish', siteId: string | null): void {
+  exactKeys(quote, [
+    'currency',
+    'expiresAt',
+    'operation',
+    'policyRevision',
+    'requestSha256',
+    'requiredCapMicrousd',
+    'schemaVersion',
+    'siteId',
+    'unit',
+  ]);
+  const record = mutableRecord(quote);
+  expect(record.schemaVersion).toBe('site-builder-technical-budget-quote/v1');
+  expect(record.operation).toBe(operation);
+  expect(record.siteId).toBe(siteId);
+  expect(record.requestSha256).toMatch(/^[0-9a-f]{64}$/);
+  expect(record.currency).toBe('USD');
+  expect(record.unit).toBe('microusd');
+  expect(record.requiredCapMicrousd).toMatch(/^[1-9][0-9]*$/);
+  expect(record.policyRevision).toMatch(/^[0-9a-f]{64}$/);
+  expect(Number.isFinite(Date.parse(String(record.expiresAt)))).toBe(true);
+}
+
+function assertGrantShape(vector: GoldenVector): void {
   exactKeys(vector.expected.protectedHeader, ['alg', 'kid', 'typ']);
+  expect(vector.expected.protectedHeader.alg).toBe('RS256');
+  expect(vector.expected.protectedHeader.kid).toMatch(/^[-A-Za-z0-9._]{1,191}$/);
+  expect(vector.expected.protectedHeader.typ).toBe('site-build-budget-grant+jwt');
   exactKeys(
     vector.expected.claims,
     vector.request.operation === 'intake'
@@ -171,43 +265,62 @@ function assertClosedVector(vector: GoldenVector): void {
           'workspace_id',
         ],
   );
-  exactKeys(vector.expected.quote, [
-    'currency',
-    'expiresAt',
-    'operation',
-    'policyRevision',
+  const claims = vector.expected.claims;
+  expectString(claims.iss);
+  expect(claims.aud).toBe('global-backend:site-builder-budget');
+  expect(claims.jti).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
+  expect(claims.schema_version).toBe('site-builder-budget-grant/v1');
+  expect(claims.purpose).toBe('site_builder.build_run');
+  expect(claims.operation).toBe(vector.request.operation);
+  expect(claims.workspace_id).toBe(vector.request.workspaceId);
+  expect(claims.site_id).toBe(vector.request.siteId ?? undefined);
+  expect(claims.request_sha256).toBe(vector.expected.requestSha256);
+  expect(claims.currency).toBe('USD');
+  expect(claims.unit).toBe('microusd');
+  expect(claims.cap_microusd).toBe(vector.expected.quote.requiredCapMicrousd);
+  expect(Number.isSafeInteger(claims.iat)).toBe(true);
+  expect(Number.isSafeInteger(claims.nbf)).toBe(true);
+  expect(Number.isSafeInteger(claims.exp)).toBe(true);
+  expect(claims.iat).toBeGreaterThanOrEqual(0);
+  expect(claims.iat).toBeLessThanOrEqual(claims.nbf);
+  expect(claims.nbf).toBeLessThanOrEqual(claims.exp);
+  expect(claims.exp - claims.iat).toBe(300);
+}
+
+function assertClosedVector(vector: GoldenVector): void {
+  exactKeys(vector, ['id', 'request', 'expected']);
+  exactKeys(vector.expected, [
+    'claims',
+    'normalizedRequest',
+    'protectedHeader',
+    'quote',
     'requestSha256',
-    'requiredCapMicrousd',
-    'schemaVersion',
-    'siteId',
-    'unit',
   ]);
   expect(vector.id).toMatch(/^[a-z][a-z0-9-]{0,79}$/);
+  exactKeys(vector.request, ['input', 'operation', 'siteId', 'workspaceId']);
+  expect(vector.request.workspaceId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
   expect(vector.expected.requestSha256).toMatch(/^[0-9a-f]{64}$/);
-  expect(vector.expected.quote.requiredCapMicrousd).toMatch(/^[1-9][0-9]*$/);
-  expect(vector.expected.quote.policyRevision).toMatch(/^[0-9a-f]{64}$/);
-  expect(vector.expected.protectedHeader.kid).toMatch(/^[-A-Za-z0-9._]{1,191}$/);
-  expect(vector.expected.claims.iat).toBeLessThanOrEqual(
-    vector.expected.claims.nbf,
-  );
-  expect(vector.expected.claims.nbf).toBeLessThanOrEqual(
-    vector.expected.claims.exp,
-  );
-  expect(vector.expected.claims.exp - vector.expected.claims.iat).toBe(300);
   if (vector.request.operation === 'intake') {
-    exactKeys(vector.request, ['input', 'operation', 'siteId', 'workspaceId']);
+    assertIntakeInput(vector.request.input);
     expect(vector.expected.normalizedRequest).toBeNull();
-    expect(vector.expected.quote.siteId).toBeNull();
-    expect(vector.expected.claims.site_id).toBeUndefined();
   } else {
-    exactKeys(vector.request, ['input', 'operation', 'siteId', 'workspaceId']);
+    assertBuildRequestInput(vector.request.input);
     expect(vector.request.siteId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
     expect(vector.expected.normalizedRequest).not.toBeNull();
-    expect(vector.expected.quote.siteId).toBe(vector.request.siteId);
-    expect(vector.expected.claims.site_id).toBe(vector.request.siteId);
+    assertBuildRequestInput(vector.expected.normalizedRequest);
   }
+  assertQuoteShape(
+    vector.expected.quote,
+    vector.request.operation,
+    vector.request.siteId,
+  );
+  assertGrantShape(vector);
 }
 
 function quoteService(now: Date): SiteBuildTechnicalBudgetQuoteService {
@@ -260,6 +373,58 @@ describe('Site Builder cross-repository budget golden vectors', () => {
     expect(JSON.stringify(fixture)).toContain('泵');
     expect(JSON.stringify(fixture)).not.toMatch(/(?:private[_-]?key|access[_-]?token|cookie|eyJ[A-Za-z0-9_-]*\.)/i);
     fixture.vectors.forEach(assertClosedVector);
+  });
+
+  it.each([
+    [
+      'intake request input',
+      'unicode-intake-no-site',
+      (vector: GoldenVector) => {
+        mutableRecord(vector.request.input).unexpected = true;
+      },
+    ],
+    [
+      'intake company input',
+      'unicode-intake-no-site',
+      (vector: GoldenVector) => {
+        mutableRecord(mutableRecord(vector.request.input).company).unexpected = true;
+      },
+    ],
+    [
+      'refurbish request input',
+      'refurbish-canonical-locales',
+      (vector: GoldenVector) => {
+        mutableRecord(vector.request.input).unexpected = true;
+      },
+    ],
+    [
+      'refurbish request options',
+      'refurbish-canonical-locales',
+      (vector: GoldenVector) => {
+        mutableRecord(mutableRecord(vector.request.input).options).unexpected = true;
+      },
+    ],
+    [
+      'refurbish normalized request',
+      'refurbish-canonical-locales',
+      (vector: GoldenVector) => {
+        mutableRecord(vector.expected.normalizedRequest).unexpected = true;
+      },
+    ],
+    [
+      'refurbish normalized request options',
+      'refurbish-canonical-locales',
+      (vector: GoldenVector) => {
+        mutableRecord(
+          mutableRecord(vector.expected.normalizedRequest).options,
+        ).unexpected = true;
+      },
+    ],
+  ])('rejects an unknown field in %s', (_name, id, mutate) => {
+    const vector = clonedVector(id);
+    mutate(vector);
+
+    expect(() => assertClosedVector(vector)).toThrow();
   });
 
   it.each(document().vectors)(
