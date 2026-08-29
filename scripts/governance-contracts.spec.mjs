@@ -46,6 +46,10 @@ test("the discovery lineage successor is current-main based and the quarantined 
     new URL("../docs/governance/conflict-register.md", import.meta.url),
     "utf8",
   );
+  const status = readFileSync(
+    new URL("../docs/status/current.md", import.meta.url),
+    "utf8",
+  );
   for (const required of [
     "c7e39e050b2f30ed9ff155aec139ff206fb850d0",
     "codex/discovery-query-materialization-successor",
@@ -84,6 +88,58 @@ test("the discovery lineage successor is current-main based and the quarantined 
       ),
     );
   }
+
+  const expectedProgramBRow = "| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | `GPP-B-LINEAGE-001` candidate 已从 `main@c7e39e050b2f30ed9ff155aec139ff206fb850d0` 指派给唯一 writer `codex/discovery-query-materialization-successor`，状态 `ASSIGNED / ZERO_PRODUCT_CODE / AWAITING_CURRENT_MAIN_READBACK`。该 card 尚未进入 current main，G0 继续 HOLD；不得把 A 分支的 B-owned delta 当作已接纳实现，也不得开始 Discovery seam 产品代码。 |";
+  const expectedG0Row = "| G0 — Truth & Ownership | `HOLD_OWNERSHIP` | PR #424 已把 ADR-025/`DEC-GPP-001` 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition 合入并回读 `main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`。`GPP-B-LINEAGE-001` candidate 与唯一 writer 已形成，但仍为 `AWAITING_CURRENT_MAIN_READBACK`。剩余顺序是：(1) card 独立 review/CI/merge/current-main readback；(2) 独立 governance-only closeout 将 `CON-GPP-001` 转为 `RESOLVED_WITH_REMEDIATION`、`BLK-GPP-001` 关闭、card 转为 `CURRENT_MAIN_READBACK_PASS` 并持久更新本行；(3) closeout 再次 review/CI/merge/readback。Program B implementation/TDD 属于 G2，DB/RLS/replay 和集成属于 G3，均不是 G0 条件。 |";
+  const assertUniqueStatusRow = (document, prefix, expected) => {
+    const rows = document.split("\n").filter((line) => line.startsWith(prefix));
+    assert.deepEqual(rows, [expected]);
+  };
+  assertUniqueStatusRow(
+    status,
+    "| B — Buyer Intelligence discovery |",
+    expectedProgramBRow,
+  );
+  assertUniqueStatusRow(status, "| G0 — Truth & Ownership |", expectedG0Row);
+  for (const [expected, prefix, mutations] of [
+    [
+      expectedProgramBRow,
+      "| B — Buyer Intelligence discovery |",
+      [
+        ["ZERO_PRODUCT_CODE", "PRODUCT_CODE"],
+        ["G0 继续 HOLD", "G0 PASS"],
+        ["codex/discovery-query-materialization-successor", "codex/other-writer"],
+      ],
+    ],
+    [
+      expectedG0Row,
+      "| G0 — Truth & Ownership |",
+      [
+        ["`HOLD_OWNERSHIP`", "`PASS / HOLD_OWNERSHIP`"],
+        ["CURRENT_MAIN_READBACK_PASS", "IMPLEMENTATION_AUTHORIZED"],
+        ["RESOLVED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
+      ],
+    ],
+  ]) {
+    for (const [from, to] of mutations) {
+      assert.throws(() =>
+        assertUniqueStatusRow(
+          status.replace(expected, expected.replace(from, to)),
+          prefix,
+          expected,
+        ),
+      );
+    }
+  }
+  assert.match(status, /> 最后核验：2026-08-29T23:49:15\+08:00/);
+  assert.match(
+    status,
+    /当前 source authority 是 `main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`/,
+  );
+  assert.match(
+    status,
+    /historical construction base 是 `23d111f7b400403deb7466abf34ab709685b8376`/,
+  );
 });
 
 function issueCodes(result) {

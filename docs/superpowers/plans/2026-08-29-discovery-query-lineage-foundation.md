@@ -16,7 +16,7 @@
 - Candidate writer is branch `codex/discovery-query-materialization-successor` at `/global/backend/.codex/worktrees/discovery-query-materialization-successor`.
 - `codex/production-parity-capability-cutover@91cae351795cceced59893bcf552c2b502a4ebaa` remains `NON_DEPLOYABLE / PROVENANCE_ONLY`; do not base on it, cherry-pick it, run its migration, or copy its PASS evidence.
 - Until this card is merged and independently read back from main, G0 remains `HOLD_OWNERSHIP` and no ACK/Raw/Provider/DB/Activity/Workflow implementation may begin.
-- This plan has a strict no-product-code boundary: it may change only this plan, `docs/governance/conflict-register.md`, and `scripts/governance-contracts.spec.mjs`.
+- This plan has a strict no-product-code boundary: it may change only this plan, `docs/governance/conflict-register.md`, `docs/status/current.md`, and `scripts/governance-contracts.spec.mjs`.
 - No product source, schema, migration, database, Provider/model/tool wire, paid call, service, runtime, deploy, image, GrowthOS, Contact/PII/SMTP, Billing/Credits, RuntimeEvidence or Release Bundle change.
 
 ---
@@ -26,6 +26,7 @@
 **Files:**
 - Create: `docs/superpowers/plans/2026-08-29-discovery-query-lineage-foundation.md`
 - Modify: `docs/governance/conflict-register.md`
+- Modify: `docs/status/current.md`
 - Test: `scripts/governance-contracts.spec.mjs`
 
 **Interfaces:**
@@ -50,27 +51,27 @@ const expectedCard = "| `GPP-B-LINEAGE-001` | `ASSIGNED / ZERO_PRODUCT_CODE / AW
 
 - [ ] **Step 3: Register the exact zero-code card and run GREEN**
 
-  Add exactly the `expectedCard` row under `BLK-GPP-001`, without changing G0 to PASS. Do not change any product file.
+  Add exactly the `expectedCard` row under `BLK-GPP-001`. Update the Program B and G0 rows in `docs/status/current.md` to record the same candidate writer/card while preserving `HOLD_OWNERSHIP`. Do not change any product file.
 
   Run: `node --test --test-name-pattern='discovery lineage successor' scripts/governance-contracts.spec.mjs`
 
   Run: `pnpm docs:verify && pnpm governance:verify && pnpm code-intelligence:scan && git diff --check`
 
-  Expected: focused PASS; governance 136/136 PASS; docs 0 errors; ContractGraph 0 errors; changed paths are exactly the three files in this task; `runtime_current=0`, `runtime_historical=0`, `release_bundles=0`.
+  Expected: focused PASS; governance 136/136 PASS; docs 0 errors; ContractGraph 0 errors; changed paths are exactly the four files in this task; `runtime_current=0`, `runtime_historical=0`, `release_bundles=0`.
 
 - [ ] **Step 4: Independent review, commit, push, PR and CI**
 
   Require an independent reviewer to verify: no product code; exact current-main base; one atomic card; old A branch remains provenance-only; G0 remains HOLD; no future product work is executable from this plan. Resolve all Critical/Important findings.
 
-  Run: `git add docs/superpowers/plans/2026-08-29-discovery-query-lineage-foundation.md docs/governance/conflict-register.md scripts/governance-contracts.spec.mjs && git commit -m "docs: assign discovery lineage successor"`
+  Run: `git add docs/superpowers/plans/2026-08-29-discovery-query-lineage-foundation.md docs/governance/conflict-register.md docs/status/current.md scripts/governance-contracts.spec.mjs && git commit -m "docs: assign discovery lineage successor"`
 
-  Push the exact commit, open a PR to `main`, require hosted CI/review to pass, re-read exact base/head and mergeability, then merge only under the user's existing authorization. Do not deploy or delete either branch.
+  Before each push, PR creation/update and merge, require and record user authorization for that exact external action; absent authorization stops with an exact run card. After authorization, push the exact commit, open a PR to `main`, require hosted CI/review to pass, re-read exact base/head and mergeability, and merge. Do not deploy or delete either branch.
 
 - [ ] **Step 5: Hand off a second governance-only G0 closeout**
 
   Synchronize the root main with `scripts/governance-main-worktree-sync.mjs` and prove status preservation. Read back the merged card row, ADR-025, `DEC-GPP-001`, `NON_DEPLOYABLE / PROVENANCE_ONLY`, and the exact merge commit from main. Obtain a fresh independent readback verdict, but do not treat that external verdict as durable G0 PASS while main still says `AWAITING_CURRENT_MAIN_READBACK` and `HOLD_OWNERSHIP`.
 
-  From the card-merged main create a separate governance-only branch and plan named `codex/discovery-lineage-g0-closeout`. That closeout must atomically update the card to `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`, mark `BLK-GPP-001` resolved with the exact card merge/readback commit, update `docs/status/current.md` G0 to PASS without changing G1–G7, and update the machine test from the awaiting row to the admitted row with the same negative mutations. It must pass independent review, hosted CI, merge and a second current-main readback.
+  From the card-merged main create a separate governance-only branch and plan named `codex/discovery-lineage-g0-closeout`. That closeout must atomically update `CON-GPP-001` to `RESOLVED_WITH_REMEDIATION`, update the card to `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`, mark `BLK-GPP-001` resolved with the exact card merge/readback commit, update `docs/status/current.md` G0 to PASS without changing G1–G7, and update the machine test from the awaiting row to the admitted row with the same negative mutations. It must obtain separate exact user authorization for each push/PR/merge action, pass independent review and hosted CI, merge, and complete a second current-main readback.
 
   This admission plan never creates an implementation worktree. Only after current main itself contains the durable G0 PASS closeout may a later implementation plan/worktree begin RED tests for the known P0 gaps: one v3 Domain ACK identity, index-preserving Raw resolution, provider-owned company lineage and the absent A-owned generic governed-relation interface. That later plan must preserve `DISCOVERY_GOVERNED_LINEAGE_NOT_READY` until DB materialization, canonical/terminal outcomes and Temporal replay are separately complete.
 
