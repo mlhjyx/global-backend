@@ -199,7 +199,7 @@
 
 - [ ] **Step 4: 决定 G0**
 
-  仅当 A/B 分类完整、唯一 owner 明确、Program A 越界提交隔离、没有活跃重叠 writer 且 provenance 已修正时，G0 才可从 FAIL 变为 PASS。任何一项未满足则保持 `HOLD_OWNERSHIP`，但可启动不依赖该接口的 Program C C1 规格/TDD或 Program A 非 Discovery 拆分卡。
+  仅当 A/B 分类完整、Program A 越界提交已隔离、没有活跃重叠 writer、provenance 已修正，且 ADR-025/`DEC-GPP-001` 已进入 current main 后，由该 main 把 mega-branch 精确登记为 `NON_DEPLOYABLE / PROVENANCE_ONLY` 并从该 main 指派唯一 Program B successor/card/handoff 与 writer，独立 readback 才可把 G0 从 FAIL/HOLD 改为 PASS。这里的 disposition 是保留 Git provenance、禁止用作 base/cherry-pick/migration/deploy subject，不是删除、revert 或改写历史。B successor 的 RED/GREEN、DB/RLS/replay 与集成分别属于 G2/G3，不是 G0 条件。任何一项未满足则保持 `HOLD_OWNERSHIP`，但只冻结依赖该 Discovery seam 的工作；可启动不依赖该接口的 Program C C1 规格/TDD、Program A 非 Discovery 拆分卡或 Site vertical。
 
 - [ ] **Step 5: 选择下一张卡**
 

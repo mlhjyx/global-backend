@@ -20,7 +20,7 @@
 | `CONTRACT_BLOCKED` | 产品方向可继续，但缺机器合同，不能进入 Dev-Ready/用户承诺 |
 | `INPUT_BLOCKED` | 缺仓库、Owner、设计源、数据或外部输入 |
 | `PARKED` | 已知但属于后置阶段或冻结产品面 |
-| `HOLD_OWNERSHIP` | 活跃或未解决的单 writer/schema/migration 责任碰撞；在记录 exact owner、head 与 disposition 前，不得继续任何实现或集成 |
+| `HOLD_OWNERSHIP` | 活跃或未解决的单 writer/schema/migration 责任碰撞；在记录 exact owner、head 与非破坏性 disposition 前，不得继续受该碰撞影响的实现、集成、migration、runtime 或 release。与该 seam 无依赖且已有独立 owner 的工作不被本状态自动冻结 |
 
 ## 1.1 当前 Global Product Program ownership 与接口
 
@@ -32,11 +32,11 @@
 
 | Conflict ID | 主题 | 当前状态 | 唯一 Owner | 审计事实与处置 |
 |---|---|---|---|---|
-| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | `DEC-GPP-001=APPROVED` 不升级 implementation。Program A writer inactivity and the stale binding-ledger/Task 5.2 provenance have closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; this closes neither the conflict nor acceptance. RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 Task 5.2 commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b` 继续 `QUARANTINED / HOLD_OWNERSHIP`，不接纳、不 revert。后续 packet 中 35 个 main ancestry commits 仅为 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`，不是 A implementation；`fb65f25a`、`7db10915`、`58e151ba`、`f68b67ed`、`91cae351` 是位于 A branch 的 B-owned deltas，等待 current-main B successor disposition。 |
+| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | `DEC-GPP-001=APPROVED` 不升级 implementation。Program A writer inactivity and the stale binding-ledger/Task 5.2 provenance have closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; this closes neither the conflict nor acceptance. RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 Task 5.2 commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b` 继续 `QUARANTINED / HOLD_OWNERSHIP`，不接纳、不 revert、不删除。后续 packet 中 35 个 main ancestry commits 仅为 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`，不是 A implementation；`fb65f25a`、`7db10915`、`58e151ba`、`f68b67ed`、`91cae351` 是位于 A branch 的 B-owned deltas，等待 current-main B successor disposition。整个 mega-branch 的非破坏性 disposition 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`；任何 successor 不得以它为 base，不得 cherry-pick 上述隔离提交或将该分支用于 migration/deploy。 |
 
 | Blocker ID | 阻塞 | Accountable Owner | 最新关闭条件 | 安全默认 |
 |---|---|---|---|---|
-| `BLK-GPP-001` | Git merge-conflict shape、Program A writer inactivity and stale ledger/provenance are closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; ownership conflict remains because the quarantined migration/writer is still deploy-runner reachable on the mega-branch and there is no unique current-main Program B successor/card/handoff. | `OWN-PRODUCT` | (1) dispose the quarantined deployable migration/writer; (2) assign one current-main Program B successor/card/handoff with a unique writer; (3) carry ADR-025/`DEC-GPP-001` authority into that current-main card (the local candidate is not main authority); then (4) obtain independent G0 readback. Any later A head/index/working-tree/merge movement reopens delta audit. | `HOLD_OWNERSHIP`；不继续实现、集成、migration、runtime、release 或 pilot promotion。 |
+| `BLK-GPP-001` | Git merge-conflict shape、Program A writer inactivity and stale ledger/provenance are closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; ownership conflict remains because ADR-025/`DEC-GPP-001` 尚未进入 current main，mega-branch 尚未由 current-main authority 采用上述非破坏性 disposition，且没有唯一 current-main Program B successor/card/handoff。 | `OWN-PRODUCT` | (1) 将 ADR-025/`DEC-GPP-001` 合入并逐字回读 current main；(2) 由该 current-main authority 将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，不删除、不 revert、不 cherry-pick；(3) 从该 current main 指派一个唯一 Program B successor/card/handoff 和 writer；然后 (4) 独立 G0 readback。B 的 RED/GREEN、DB/RLS/replay 和集成分别属于 G2/G3，不是 G0 条件。任何后来 A head/index/working-tree/merge movement 都重开 delta audit。 | `HOLD_OWNERSHIP`；只禁止受 `CON-GPP-001` 影响的 Discovery seam 实现、集成、migration、runtime、release 或 pilot promotion；不自动冻结无依赖的 Site/Program C 工作。 |
 
 固定接口仅为：
 

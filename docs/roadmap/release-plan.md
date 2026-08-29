@@ -33,7 +33,7 @@ The fixed G0–G7 meanings and current verdicts are exactly those in [current st
 
 ### Active sequence and boundaries
 
-1. **Phase 0:** current truth, A/B interface, provenance and documentation. G0 remains hold while writer inactivity, ledger provenance, branch quarantine and the current-main successor/card/handoff remain unresolved.
+1. **Phase 0:** current truth, A/B interface, provenance and documentation. Writer inactivity、delta classification 与 ledger provenance 已关闭；G0 只等待 ADR-025/`DEC-GPP-001` 进入 current main、mega-branch 获得 `NON_DEPLOYABLE / PROVENANCE_ONLY` 的非破坏性 disposition、从该 main 指派唯一 Program B successor/card/handoff，以及随后的独立 readback。
 2. **MVP-0:** Program A current-main slices; formal GrowthOS source/Builder/remote/CI; Backend runtime recovery; and authentic capability availability/onboarding.
 3. **MVP-1, Program C:** C1 service principal plus durable handoff/commit-before-ACK; C2 Opportunity aggregate; C3 human QGO; C4 SalesAcceptance/Outcome feedback; C5 Conversation linkage.
 4. **Pilot 3-A:** one internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.
