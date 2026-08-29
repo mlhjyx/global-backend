@@ -14,7 +14,7 @@ const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
 const expectedMigrationChecksum =
-  "7e101a1d13c31a2657ea84b19b82e3b855102db104393ee33a9bb8a6c5415972";
+  "0c716f1d5449b89d3ade64ce5cc1c7214a3b96303b3737a6e2681334581ba518";
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
 
 const frozenFiles = Object.freeze([

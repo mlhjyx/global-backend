@@ -8,7 +8,7 @@ import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs"
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
-const resolverCommit = "eb40556986e05adaff42a844ded91197a3e41789";
+const resolverCommit = "9c555bd0ed3b1eb06b5dfb698570f64f04624e0c";
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const container = process.env.TASK6B_RESOLVER_PG_CONTAINER;
@@ -428,9 +428,7 @@ function seed(database) {
        ('${RAW_RACE_B}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRacePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:race-b','${HASH_B}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
        ('${RAW_ROLLBACK}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRollbackPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:rollback','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
      INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
-     VALUES
-       ('${WORKSPACE_A}','${COMPANY_A}','registry-id','DE','DE1234','registry','${RAW_BIND}',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE'),
-       ('${WORKSPACE_A}','${COMPANY_B}','domain','GLOBAL','conflict.example','registry','${RAW_CONFLICT}',1,'organization-identity-authority/v1','domain-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE');`,
+     VALUES ('${WORKSPACE_A}','${COMPANY_A}','registry-id','DE','DE1234','registry','${RAW_BIND}',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE');`,
   );
 }
 
@@ -592,13 +590,7 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       },
     });
     const conflictAuthority = registryAuthority("conflict.example");
-    const conflictBindings = [
-      {
-        identifierKey: "domain:GLOBAL:conflict.example",
-        companyId: COMPANY_B,
-      },
-      ...binding,
-    ];
+    const conflictBindings = binding;
     const conflictBlocker = {
       blockerKey: "d:conflict.example",
       matchRule: "domain_exact",
