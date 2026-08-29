@@ -102,10 +102,25 @@ function exactCommit(repositoryRoot, commit) {
   return resolvedCommit;
 }
 
+function injectedAfterMkdtempHook(testHooks) {
+  if (testHooks === undefined) return undefined;
+  if (
+    testHooks === null ||
+    typeof testHooks !== "object" ||
+    Array.isArray(testHooks) ||
+    Object.keys(testHooks).length !== 1 ||
+    typeof testHooks.afterMkdtemp !== "function"
+  ) {
+    throw new TypeError("testHooks must contain only an afterMkdtemp function");
+  }
+  return testHooks.afterMkdtemp;
+}
+
 export function materializePinnedPrismaStage({
   repositoryRoot,
   commit,
   prefix,
+  testHooks,
 }) {
   if (typeof repositoryRoot !== "string" || repositoryRoot.length === 0) {
     throw new TypeError("repositoryRoot must be a non-empty string");
@@ -118,6 +133,7 @@ export function materializePinnedPrismaStage({
       "prefix must be a bounded lowercase task prefix ending in a hyphen",
     );
   }
+  const afterMkdtemp = injectedAfterMkdtempHook(testHooks);
 
   const exactRepositoryRoot = realpathSync(repositoryRoot);
   if (!lstatSync(exactRepositoryRoot).isDirectory()) {
@@ -129,9 +145,9 @@ export function materializePinnedPrismaStage({
     throw new Error("repositoryRoot is missing packages/db");
   }
   const root = mkdtempSync(resolve(temporaryParent, `.${prefix}`));
-  chmodSync(root, 0o700);
-
   try {
+    afterMkdtemp?.(root);
+    chmodSync(root, 0o700);
     const archive = runGit(
       exactRepositoryRoot,
       ["archive", "--format=tar", sourceCommit, "--", ...ARCHIVE_PATHS],

@@ -77,20 +77,36 @@ function writeStage(repository, migrationName, schemaLabel) {
   return runGit(repository, ["rev-parse", "HEAD"]).trim();
 }
 
-function createFutureMigrationRepository() {
+function createFutureMigrationRepository({ testHooks } = {}) {
+  if (
+    testHooks !== undefined &&
+    (testHooks === null ||
+      typeof testHooks !== "object" ||
+      Array.isArray(testHooks) ||
+      Object.keys(testHooks).length !== 1 ||
+      typeof testHooks.afterMkdtemp !== "function")
+  ) {
+    throw new TypeError("testHooks must contain only an afterMkdtemp function");
+  }
   const root = mkdtempSync(join(tmpdir(), "task6b-pinned-stage-fixture-"));
-  chmodSync(root, 0o700);
-  runGit(root, ["init", "--quiet"]);
-  runGit(root, ["config", "user.name", "Task 6B Test"]);
-  runGit(root, ["config", "user.email", "task6b@example.invalid"]);
+  try {
+    testHooks?.afterMkdtemp(root);
+    chmodSync(root, 0o700);
+    runGit(root, ["init", "--quiet"]);
+    runGit(root, ["config", "user.name", "Task 6B Test"]);
+    runGit(root, ["config", "user.email", "task6b@example.invalid"]);
 
-  const commits = Object.freeze({
-    preExpand: writeStage(root, "20260829080000_fixture_base", "pre-expand"),
-    expand: writeStage(root, expandMigration, "expand"),
-    backfill: writeStage(root, backfillMigration, "backfill"),
-    future: writeStage(root, futureMigration, "future"),
-  });
-  return Object.freeze({ root, commits });
+    const commits = Object.freeze({
+      preExpand: writeStage(root, "20260829080000_fixture_base", "pre-expand"),
+      expand: writeStage(root, expandMigration, "expand"),
+      backfill: writeStage(root, backfillMigration, "backfill"),
+      future: writeStage(root, futureMigration, "future"),
+    });
+    return Object.freeze({ root, commits });
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function migrationNames(stage) {
