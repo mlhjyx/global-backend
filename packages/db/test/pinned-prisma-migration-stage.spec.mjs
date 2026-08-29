@@ -35,7 +35,7 @@ const contractSuitePath = resolve(
 const preExpandCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
 const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
 const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
-const contractCommit = "792f05045ff0350396bdc2d271e8e85cbeb7f999";
+const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
 const expandMigration = "20260829090000_organization_identity_v2_expand_ddl";
 const backfillMigration =
   "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
