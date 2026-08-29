@@ -58,6 +58,25 @@ function resolutionError() {
   }) as OrganizationIdentityResolutionPlanError;
 }
 
+function errorCode(error: unknown) {
+  return error instanceof OrganizationIdentityResolutionPlanError
+    ? error.code
+    : null;
+}
+
+function expectRejected(value: unknown, marker?: string) {
+  try {
+    planOrganizationIdentityResolution(value);
+    throw new Error("expected planner rejection");
+  } catch (error) {
+    expect(error).toMatchObject({
+      name: "OrganizationIdentityResolutionPlanError",
+      code: expect.stringMatching(/^IDENTITY_RESOLUTION_INPUT_/u),
+    });
+    if (marker) expect(String(error)).not.toContain(marker);
+  }
+}
+
 describe("deterministic organization identity resolution plan", () => {
   it("creates an immutable identity_v2 plan when authority identifiers are unbound", () => {
     const result = plan();
@@ -295,5 +314,241 @@ describe("deterministic organization identity resolution plan", () => {
     expect(() => planOrganizationIdentityResolution(proxy)).toThrow(
       resolutionError(),
     );
+  });
+
+  it("admits only exact frozen authority output facts before identity_v2 binding", () => {
+    const forgedScheme = identifier({
+      scheme: "forged",
+      validatorVersion: "forged-v1",
+    });
+    const forgedValidator = identifier({ validatorVersion: "registry-id-v999" });
+    const invalidDomain = {
+      ...identifier({
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "WWW.Acme.Example",
+        validatorVersion: "domain-v1",
+      }),
+      key: "domain:GLOBAL:WWW.Acme.Example",
+    };
+
+    for (const authorityIdentifier of [
+      forgedScheme,
+      forgedValidator,
+      invalidDomain,
+    ]) {
+      expectRejected(
+        input({
+          authorityIdentifiers: [authorityIdentifier],
+          existingBindings: [
+            { identifierKey: authorityIdentifier.key, companyId: COMPANY_A },
+          ],
+        }),
+      );
+    }
+  });
+
+  it("rejects bindings outside the exact authority occurrence key set", () => {
+    expectRejected(
+      input({
+        existingBindings: [
+          {
+            identifierKey: "registry-id:DE:NOT-IN-AUTHORITY",
+            companyId: COMPANY_A,
+          },
+        ],
+      }),
+    );
+
+    try {
+      plan({
+        existingBindings: [
+          { identifierKey: "registry-id:DE:NOT-IN-AUTHORITY", companyId: COMPANY_A },
+          { identifierKey: "registry-id:DE:NOT-IN-AUTHORITY", companyId: COMPANY_B },
+        ],
+      });
+      throw new Error("expected contradictory binding rejection");
+    } catch (error) {
+      expect(errorCode(error)).toBe("IDENTITY_RESOLUTION_INPUT_CONTRADICTORY");
+    }
+  });
+
+  it("binds inputHash to every admitted fact and keeps conflict fingerprints occurrence-invariant", () => {
+    const second = identifier({ normalizedValue: "DE9999" });
+    const conflict = {
+      authorityIdentifiers: [identifier(), second],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+        { identifierKey: second.key, companyId: COMPANY_B },
+      ],
+      blocker: {
+        blockerKey: "n:acme:de",
+        matchRule: "name_country",
+        legacyCandidateCompanyId: null,
+      },
+    };
+    const original = plan(conflict);
+    if (original.kind !== "conflict") throw new Error("expected conflict");
+
+    const hashVariants = [
+      { raw: { ...input().raw, rawRecordId: "55555555-5555-4555-8555-555555555555" } },
+      { raw: { ...input().raw, payloadHash: "b".repeat(64) } },
+      { raw: { ...input().raw, ingestVersion: "raw-source/v2" } },
+      { blocker: { ...conflict.blocker, blockerKey: "n:other:de" } },
+      { blocker: { ...conflict.blocker, matchRule: "domain_exact" } },
+      { blocker: { ...conflict.blocker, legacyCandidateCompanyId: COMPANY_ROOT } },
+      {
+        authorityIdentifiers: [identifier({ normalizedValue: "DE5678" })],
+      },
+      {
+        existingBindings: [
+          { identifierKey: identifier().key, companyId: COMPANY_ROOT },
+        ],
+      },
+      {
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+        ],
+      },
+    ];
+    for (const variant of hashVariants) {
+      expect(plan({ ...conflict, ...variant }).inputHash).not.toBe(
+        original.inputHash,
+      );
+    }
+
+    const changedCompany = plan({
+      ...conflict,
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+        { identifierKey: second.key, companyId: COMPANY_ROOT },
+      ],
+    });
+    const changedIdentifier = plan({
+      ...conflict,
+      authorityIdentifiers: [identifier(), identifier({ normalizedValue: "DE5678" })],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+        { identifierKey: "registry-id:DE:DE5678", companyId: COMPANY_B },
+      ],
+    });
+    const changedRule = plan({
+      ...conflict,
+      blocker: { ...conflict.blocker, matchRule: "domain_exact" },
+    });
+    const changedType = plan({
+      authorityIdentifiers: [identifier()],
+      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      blocker: {
+        blockerKey: "n:acme:de",
+        matchRule: "name_country",
+        legacyCandidateCompanyId: COMPANY_B,
+      },
+    });
+    for (const result of [
+      changedCompany,
+      changedIdentifier,
+      changedRule,
+      changedType,
+    ]) {
+      if (result.kind !== "conflict") throw new Error("expected conflict");
+      expect(result.conflictFingerprint).not.toBe(original.conflictFingerprint);
+    }
+    const reingest = plan({
+      ...conflict,
+      raw: { ...input().raw, rawRecordId: "55555555-5555-4555-8555-555555555555" },
+    });
+    if (reingest.kind !== "conflict") throw new Error("expected conflict");
+    expect(reingest.conflictFingerprint).toBe(original.conflictFingerprint);
+  });
+
+  it("rejects hostile, malformed, oversized, and one-hop-invalid inputs without echoing values", () => {
+    const marker = "untrusted-resolution-marker";
+    const sparse = new Array(2);
+    sparse[0] = identifier();
+    const customPrototype = Object.create({ unexpected: marker });
+    Object.assign(customPrototype, input());
+    const symbolInput = input();
+    Object.defineProperty(symbolInput, Symbol(marker), {
+      enumerable: true,
+      value: marker,
+    });
+    const cases: unknown[] = [
+      input({ authorityIdentifiers: sparse }),
+      input({ authorityIdentifiers: Array.from({ length: 65 }, identifier) }),
+      input({ authorityIdentifiers: Array.from({ length: 33 }, identifier) }),
+      input({ existingBindings: Array.from({ length: 65 }, () => ({ identifierKey: identifier().key, companyId: COMPANY_A })) }),
+      input({ rootMappings: Array.from({ length: 65 }, () => ({ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B })) }),
+      customPrototype,
+      symbolInput,
+      input({ unexpected: marker }),
+      input({ raw: { ...input().raw, ingestVersion: "bad\u0001version" } }),
+      input({ raw: { ...input().raw, payloadHash: Number.NaN } }),
+      input({ rootMappings: [{ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_A }] }),
+      input({ rootMappings: [
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+      ] }),
+      input({ rootMappings: [
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
+        { sourceCompanyId: COMPANY_B, rootCompanyId: COMPANY_A },
+      ] }),
+    ];
+    for (const candidate of cases) expectRejected(candidate, marker);
+  });
+
+  it("never invokes accessor or Proxy traps in nested hostile input", () => {
+    const traps = { ownKeys: 0, getPrototypeOf: 0, getOwnPropertyDescriptor: 0 };
+    const proxy = new Proxy([identifier()], {
+      ownKeys(target) {
+        traps.ownKeys += 1;
+        return Reflect.ownKeys(target);
+      },
+      getPrototypeOf(target) {
+        traps.getPrototypeOf += 1;
+        return Reflect.getPrototypeOf(target);
+      },
+      getOwnPropertyDescriptor(target, key) {
+        traps.getOwnPropertyDescriptor += 1;
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    let getterCalls = 0;
+    const accessor = input();
+    Object.defineProperty(accessor.authorityIdentifiers, "0", {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return identifier();
+      },
+    });
+
+    expectRejected(input({ authorityIdentifiers: proxy }));
+    expectRejected(accessor);
+    expect(traps).toEqual({ ownKeys: 0, getPrototypeOf: 0, getOwnPropertyDescriptor: 0 });
+    expect(getterCalls).toBe(0);
+  });
+
+  it("deep-freezes all variants and detaches return facts from caller aliases", () => {
+    const facts = input();
+    const result = planOrganizationIdentityResolution(facts);
+    facts.authorityIdentifiers[0]!.normalizedValue = "MUTATED";
+    expect(result.kind).toBe("create_new");
+    if (result.kind !== "create_new") throw new Error("expected create plan");
+    expect(result.identifiers[0]?.normalizedValue).toBe("DE1234");
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.identifiers)).toBe(true);
+    expect(Object.isFrozen(result.identifiers[0]!)).toBe(true);
+
+    const conflict = plan({
+      authorityIdentifiers: [identifier(), identifier({ normalizedValue: "DE9999" })],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+      ],
+    });
+    if (conflict.kind !== "conflict") throw new Error("expected conflict");
+    expect(Object.isFrozen(conflict.companyIds)).toBe(true);
+    expect(Object.isFrozen(conflict.identifierKeys)).toBe(true);
   });
 });
