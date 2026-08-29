@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 当前工程核验基线：`origin/main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`，closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 historical base `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
+> 当前工程核验基线：`origin/main@d2c93dd6bea0348381286558896b395c84945171`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`，closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 historical base `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -32,15 +32,15 @@
 
 | Conflict ID | 主题 | 当前状态 | 唯一 Owner | 审计事实与处置 |
 |---|---|---|---|---|
-| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | `DEC-GPP-001=APPROVED` 不升级 implementation。Program A writer inactivity and the stale binding-ledger/Task 5.2 provenance have closed at clean/no-`MERGE_HEAD` packet `91cae351795cceced59893bcf552c2b502a4ebaa`; this closes neither the conflict nor acceptance. RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 Task 5.2 commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b` 继续 `QUARANTINED / HOLD_OWNERSHIP`，不接纳、不 revert、不删除。后续 packet 中 35 个 main ancestry commits 仅为 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`，不是 A implementation；`fb65f25a`、`7db10915`、`58e151ba`、`f68b67ed`、`91cae351` 是位于 A branch 的 B-owned deltas，等待 current-main B successor disposition。整个 mega-branch 的非破坏性 disposition 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`；任何 successor 不得以它为 base，不得 cherry-pick 上述隔离提交或将该分支用于 migration/deploy。 |
+| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | PR #424 固定 owner/seam 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 将唯一 `GPP-B-LINEAGE-001` card/writer 写入 current main。ownership collision 已关闭；四个 Task 5.2 commits 与五个 B-owned deltas 继续按 ADR-025 分类，G2/G3 产品实现仍未接纳。 |
 
 | Blocker ID | 阻塞 | Accountable Owner | 最新关闭条件 | 安全默认 |
 |---|---|---|---|---|
-| `BLK-GPP-001` | ADR-025/`DEC-GPP-001` 已通过 PR #424 进入并逐字回读 `main@c7e39e050b2f30ed9ff155aec139ff206fb850d0`；mega-branch 的 `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition 已生效。唯一 Program B successor/card/writer 已在下表形成 candidate，但该卡尚未进入 current main，因此 G0 仍保持 HOLD。 | `OWN-PRODUCT` | 将 `GPP-B-LINEAGE-001` 通过独立 review/CI 合入 current main，然后独立回读 main 中的 card、exact base、唯一 writer 与 mega-branch disposition；通过后 G0 可 PASS。B 的 RED/GREEN、DB/RLS/replay 和集成分别属于 G2/G3，不是 G0 条件。任何后来 A head/index/working-tree/merge movement 都重开 delta audit。 | `HOLD_OWNERSHIP`；只禁止受 `CON-GPP-001` 影响的 Discovery seam 实现、集成、migration、runtime、release 或 pilot promotion；不自动冻结无依赖的 Site/Program C 工作。 |
+| `BLK-GPP-001` | Ownership/provenance collision 已由 PR #424 与 PR #425 current-main readback 关闭。 | `OWN-PRODUCT` | `RESOLVED` at `main@d2c93dd6bea0348381286558896b395c84945171`；若 Program A head/index/worktree/merge 移动、出现第二 writer/card、或隔离提交进入 successor/migration/deploy，则重新打开 G0。 | `RESOLVED`；不授权 Discovery 产品实现，后续仍受 G2/G3、费用、runtime 与发布门约束。 |
 
 | Card ID | 当前状态 | 唯一 writer | Exact base / scope |
 |---|---|---|---|
-| `GPP-B-LINEAGE-001` | `ASSIGNED / ZERO_PRODUCT_CODE / AWAITING_CURRENT_MAIN_READBACK` | `codex/discovery-query-materialization-successor` | `c7e39e050b2f30ed9ff155aec139ff206fb850d0`；仅 Program B ACK identity、index-preserving Raw resolution 与 Provider-owned company lineage。旧 A mega-branch 继续 `NON_DEPLOYABLE / PROVENANCE_ONLY`；本卡进入 current main 并被独立 readback 前 G0 不升级。 |
+| `GPP-B-LINEAGE-001` | `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS` | `codex/discovery-query-materialization-successor` | initial base=`c7e39e050b2f30ed9ff155aec139ff206fb850d0`；PR #425 merge/readback=`d2c93dd6bea0348381286558896b395c84945171`；scope 仍仅为 Program B ACK identity、index-preserving Raw resolution 与 Provider-owned company lineage。旧 A mega-branch 继续 `NON_DEPLOYABLE / PROVENANCE_ONLY`；G0 ownership 已关闭，但本卡不授权 G2/G3 产品实现。 |
 
 固定接口仅为：
 
