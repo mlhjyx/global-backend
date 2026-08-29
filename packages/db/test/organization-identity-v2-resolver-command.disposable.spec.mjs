@@ -29,6 +29,7 @@ const RAW_CONFLICT = "22000000-0000-4000-8000-000000000004";
 const RAW_RACE_A = "22000000-0000-4000-8000-000000000005";
 const RAW_RACE_B = "22000000-0000-4000-8000-000000000006";
 const RAW_ROLLBACK = "22000000-0000-4000-8000-000000000007";
+const RAW_PARTIAL = "22000000-0000-4000-8000-000000000008";
 const COMPANY_A = "23000000-0000-4000-8000-000000000001";
 const COMPANY_B = "23000000-0000-4000-8000-000000000002";
 const COMPANY_CREATE = "23000000-0000-4000-8000-000000000003";
@@ -406,6 +407,9 @@ function seed(database) {
   const directoryRollbackPayload = JSON.stringify(
     rawPayload({ providerKey: "directory", domain: "rollback.example" }),
   ).replaceAll("'", "''");
+  const directoryPartialPayload = JSON.stringify(
+    rawPayload({ providerKey: "directory", domain: "partial.example" }),
+  ).replaceAll("'", "''");
   dockerPsql(
     database,
     `INSERT INTO workspace(id,name,updated_at) VALUES
@@ -426,7 +430,8 @@ function seed(database) {
        ('${RAW_CONFLICT}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','registry','company_registry','${registryConflictPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:conflict','${HASH_D}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
        ('${RAW_RACE_A}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRacePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:race-a','${HASH_A}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
        ('${RAW_RACE_B}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRacePayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:race-b','${HASH_B}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
-       ('${RAW_ROLLBACK}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRollbackPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:rollback','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
+       ('${RAW_ROLLBACK}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryRollbackPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:rollback','${HASH_C}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now()),
+       ('${RAW_PARTIAL}','${WORKSPACE_A}','${SOURCE_ENTITY_ID}','directory','industry_data','${directoryPartialPayload}'::jsonb,'https://registry.example/companies/1',now(),'${HASH_B}','registry/v1','task6b:partial','${HASH_D}',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
      INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
      VALUES ('${WORKSPACE_A}','${COMPANY_A}','registry-id','DE','DE1234','registry','${RAW_BIND}',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE');`,
   );
@@ -729,6 +734,39 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
     appCommand(databases.upgrade, forged, {
       rollback: true,
       rejects: /IDENTITY_RESOLUTION_PLAN_STALE/u,
+    });
+  });
+
+  it("rejects multiple ACTIVE resolver links instead of replaying an arbitrary company", () => {
+    const authorityIdentifiers = [
+      domainAuthority("directory", "partial.example"),
+    ];
+    const blocker = {
+      blockerKey: "d:partial.example",
+      matchRule: "domain_exact",
+      legacyCandidateCompanyId: null,
+    };
+    const value = command({
+      rawRecordId: RAW_PARTIAL,
+      payloadHash: HASH_D,
+      blocker,
+      authorityIdentifiers,
+      targetCompanyId: COMPANY_CREATE,
+      plan: {
+        kind: "create_new",
+        matchRule: "identity_v2",
+        identifiers: authorityIdentifiers,
+      },
+    });
+    dockerPsql(
+      databases.upgrade,
+      `INSERT INTO identity_link(id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,confidence,status,resolver_version,input_hash)
+       VALUES
+       ('25000000-0000-4000-8000-000000000001','${WORKSPACE_A}','company','${COMPANY_A}','${RAW_PARTIAL}','identity_v2',1,'ACTIVE','${RESOLVER_VERSION}','${value.plan.inputHash}'),
+       ('25000000-0000-4000-8000-000000000002','${WORKSPACE_A}','company','${COMPANY_B}','${RAW_PARTIAL}','identity_v2',1,'ACTIVE','${RESOLVER_VERSION}','${value.plan.inputHash}');`,
+    );
+    appCommand(databases.upgrade, value, {
+      rejects: /IDENTITY_RESOLUTION_STATE_INVALID/u,
     });
   });
 
