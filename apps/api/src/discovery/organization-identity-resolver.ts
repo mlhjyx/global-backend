@@ -289,7 +289,7 @@ function targetCompanyId(
  * Internal source contract only. The caller owns the tenant transaction and
  * must have already set app.current_workspace_id on the same app_user session.
  */
-export async function resolveOrganizationIdentityForRaw(
+async function resolveOrganizationIdentityForRawTransaction(
   tx: TransactionClient,
   unsafeInput: ResolveOrganizationIdentityForRawInput,
 ): Promise<OrganizationIdentityResolutionReceipt> {
@@ -545,6 +545,17 @@ export async function resolveOrganizationIdentityForRaw(
       return fail("IDENTITY_RESOLUTION_RECEIPT_INVALID");
     }
     return receipt;
+  } catch (error) {
+    return mapDatabaseError(error);
+  }
+}
+
+export async function resolveOrganizationIdentityForRaw(
+  tx: TransactionClient,
+  unsafeInput: ResolveOrganizationIdentityForRawInput,
+): Promise<OrganizationIdentityResolutionReceipt> {
+  try {
+    return await resolveOrganizationIdentityForRawTransaction(tx, unsafeInput);
   } catch (error) {
     return mapDatabaseError(error);
   }
