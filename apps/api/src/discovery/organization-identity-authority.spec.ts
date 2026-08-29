@@ -191,11 +191,21 @@ describe("governed Raw organization identity authority", () => {
     ).find((item) => item.scheme === "ted-natid")!;
     const unreachable = [
       { ...registry, normalizedValue: "Ä1", key: "registry-id:DE:Ä1" },
-      { ...registry, normalizedValue: "A".repeat(81), key: `registry-id:DE:${"A".repeat(81)}` },
-      { ...ted, normalizedValue: "A".repeat(81), key: `ted-natid:DE:${"A".repeat(81)}` },
+      {
+        ...registry,
+        normalizedValue: "A".repeat(81),
+        key: `registry-id:DE:${"A".repeat(81)}`,
+      },
+      {
+        ...ted,
+        normalizedValue: "A".repeat(81),
+        key: `ted-natid:DE:${"A".repeat(81)}`,
+      },
     ];
     for (const candidate of unreachable) {
-      expect(parseOrganizationIdentityAuthorityIdentifier(candidate)).toBeNull();
+      expect(
+        parseOrganizationIdentityAuthorityIdentifier(candidate),
+      ).toBeNull();
     }
 
     const marker = "authority-parser-hostile-marker";
@@ -208,26 +218,39 @@ describe("governed Raw organization identity authority", () => {
         throw new Error(marker);
       },
     });
-    const traps = { ownKeys: 0, getPrototypeOf: 0, getOwnPropertyDescriptor: 0 };
-    const proxy = new Proxy({ ...registry }, {
-      ownKeys(target) {
-        traps.ownKeys += 1;
-        return Reflect.ownKeys(target);
+    const traps = {
+      ownKeys: 0,
+      getPrototypeOf: 0,
+      getOwnPropertyDescriptor: 0,
+    };
+    const proxy = new Proxy(
+      { ...registry },
+      {
+        ownKeys(target) {
+          traps.ownKeys += 1;
+          return Reflect.ownKeys(target);
+        },
+        getPrototypeOf(target) {
+          traps.getPrototypeOf += 1;
+          return Reflect.getPrototypeOf(target);
+        },
+        getOwnPropertyDescriptor(target, key) {
+          traps.getOwnPropertyDescriptor += 1;
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
       },
-      getPrototypeOf(target) {
-        traps.getPrototypeOf += 1;
-        return Reflect.getPrototypeOf(target);
-      },
-      getOwnPropertyDescriptor(target, key) {
-        traps.getOwnPropertyDescriptor += 1;
-        return Reflect.getOwnPropertyDescriptor(target, key);
-      },
-    });
+    );
     for (const candidate of [accessor, proxy]) {
-      expect(parseOrganizationIdentityAuthorityIdentifier(candidate)).toBeNull();
+      expect(
+        parseOrganizationIdentityAuthorityIdentifier(candidate),
+      ).toBeNull();
     }
     expect(getterCalls).toBe(0);
-    expect(traps).toEqual({ ownKeys: 0, getPrototypeOf: 0, getOwnPropertyDescriptor: 0 });
+    expect(traps).toEqual({
+      ownKeys: 0,
+      getPrototypeOf: 0,
+      getOwnPropertyDescriptor: 0,
+    });
   });
   it("keeps authority profiles exactly aligned with the exported Raw provider list", () => {
     expect(GOVERNED_RAW_SOURCE_PROVIDER_KEYS).toEqual([

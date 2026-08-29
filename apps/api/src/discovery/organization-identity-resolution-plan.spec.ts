@@ -755,7 +755,9 @@ describe("deterministic organization identity resolution plan", () => {
     };
     const disagreement = plan({
       authorityIdentifiers: [identifier(), second],
-      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
       blocker,
     });
     const split = plan({
@@ -771,21 +773,34 @@ describe("deterministic organization identity resolution plan", () => {
     }
     expect(disagreement.companyIds).toEqual(split.companyIds);
     expect(disagreement.identifierKeys).toEqual(split.identifierKeys);
-    expect(disagreement.conflictFingerprint).not.toBe(split.conflictFingerprint);
+    expect(disagreement.conflictFingerprint).not.toBe(
+      split.conflictFingerprint,
+    );
   });
 
   it("detaches raw, blocker, authority, binding, and root aliases for every output variant", () => {
     const variants = [
-      input({ existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }] }),
-      input({ blocker: { ...input().blocker, legacyCandidateCompanyId: COMPANY_A } }),
+      input({
+        existingBindings: [
+          { identifierKey: identifier().key, companyId: COMPANY_A },
+        ],
+      }),
+      input({
+        blocker: { ...input().blocker, legacyCandidateCompanyId: COMPANY_A },
+      }),
       input(),
       input({
-        authorityIdentifiers: [identifier(), identifier({ normalizedValue: "DE9999" })],
+        authorityIdentifiers: [
+          identifier(),
+          identifier({ normalizedValue: "DE9999" }),
+        ],
         existingBindings: [
           { identifierKey: identifier().key, companyId: COMPANY_A },
           { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
         ],
-        rootMappings: [{ sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT }],
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+        ],
       }),
     ];
     const results = variants.map(planOrganizationIdentityResolution);
@@ -794,8 +809,10 @@ describe("deterministic organization identity resolution plan", () => {
       facts.raw.payloadHash = "b".repeat(64);
       facts.blocker.blockerKey = "changed";
       facts.authorityIdentifiers[0]!.normalizedValue = "CHANGED";
-      if (facts.existingBindings[0]) facts.existingBindings[0].companyId = COMPANY_ROOT;
-      if (facts.rootMappings[0]) facts.rootMappings[0].rootCompanyId = COMPANY_B;
+      if (facts.existingBindings[0])
+        facts.existingBindings[0].companyId = COMPANY_ROOT;
+      if (facts.rootMappings[0])
+        facts.rootMappings[0].rootCompanyId = COMPANY_B;
     }
     expect(results.map((result) => JSON.stringify(result))).toEqual(before);
     for (const result of results) expect(Object.isFrozen(result)).toBe(true);

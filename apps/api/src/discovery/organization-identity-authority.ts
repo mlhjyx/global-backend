@@ -17,6 +17,8 @@ const MAX_CONTAINER_DEPTH = 6;
 const MAX_CONTAINER_NODES = 256;
 const MAX_OBJECT_FIELDS = 32;
 const MAX_ARRAY_ITEMS = 20;
+const RAW_CODE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,79}$/u;
+const RAW_TED_IDENTIFIER = /^[\p{L}\p{N}][\p{L}\p{N} ._+&'(),/#:-]{0,79}$/u;
 
 type IdentityAuthorityErrorCode =
   | "IDENTITY_RAW_PAYLOAD_NOT_GOVERNED"
@@ -289,12 +291,19 @@ function validLei(value: string): boolean {
   return remainder === 1;
 }
 
-function normalizedDomain(value: string): string {
+function canonicalDomainValue(value: string): string {
   const normalized = value.toLocaleLowerCase("en-US").replace(/^www\./u, "");
-  return normalized || error("IDENTITY_IDENTIFIER_INVALID");
+  if (
+    !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(
+      normalized,
+    )
+  ) {
+    return error("IDENTITY_IDENTIFIER_INVALID");
+  }
+  return normalized;
 }
 
-function normalizedStructuredValue(value: string): string {
+function canonicalStructuredValue(value: string): string {
   if (!isContactFreeText(value) || !isSecretFreeText(value)) {
     return error("IDENTITY_IDENTIFIER_INVALID");
   }
@@ -320,22 +329,92 @@ function frozenIdentifier(input: {
   });
 }
 
-function canonicalStructuredOutput(value: string): string | null {
-  if (!isContactFreeText(value) || !isSecretFreeText(value)) return null;
-  const normalized = value
-    .normalize("NFC")
-    .toLocaleUpperCase("en-US")
-    .replace(/[^\p{L}\p{N}]+/gu, "");
-  return normalized || null;
-}
-
-function canonicalDomainOutput(value: string): string | null {
-  const normalized = value.toLocaleLowerCase("en-US").replace(/^www\./u, "");
-  return /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(
-    normalized,
-  )
-    ? normalized
-    : null;
+function canonicalAuthorityIdentifier(input: {
+  providerKey: (typeof GOVERNED_RAW_SOURCE_PROVIDER_KEYS)[number];
+  scheme: string;
+  jurisdiction: string;
+  rawValue: string;
+}): OrganizationIdentityAuthorityIdentifier | null {
+  try {
+    if (input.scheme === DOMAIN_SCHEME) {
+      return frozenIdentifier({
+        providerKey: input.providerKey,
+        scheme: DOMAIN_SCHEME,
+        jurisdiction: GLOBAL_JURISDICTION,
+        normalizedValue: canonicalDomainValue(input.rawValue),
+        validatorVersion: "domain-v1",
+      });
+    }
+    const profile = ORGANIZATION_IDENTITY_AUTHORITY_PROFILES[input.providerKey];
+    const rule = profile.identifierRules.find(
+      (candidate) => candidate.scheme === input.scheme,
+    );
+    if (!rule) return null;
+    switch (input.scheme) {
+      case "registry-id":
+        if (
+          input.providerKey !== "registry" ||
+          !RAW_CODE_TOKEN.test(input.rawValue) ||
+          !/^(?:GLOBAL|[A-Z]{2})$/u.test(input.jurisdiction)
+        )
+          return null;
+        return frozenIdentifier({
+          providerKey: input.providerKey,
+          scheme: input.scheme,
+          jurisdiction: input.jurisdiction,
+          normalizedValue: canonicalStructuredValue(input.rawValue),
+          validatorVersion: rule.validatorVersion,
+        });
+      case "lei": {
+        const normalizedValue = canonicalStructuredValue(input.rawValue);
+        if (
+          input.providerKey !== "registry" ||
+          input.jurisdiction !== GLOBAL_JURISDICTION ||
+          !validLei(normalizedValue)
+        )
+          return null;
+        return frozenIdentifier({
+          providerKey: input.providerKey,
+          scheme: input.scheme,
+          jurisdiction: GLOBAL_JURISDICTION,
+          normalizedValue,
+          validatorVersion: rule.validatorVersion,
+        });
+      }
+      case "ted-natid":
+        if (
+          input.providerKey !== "ted" ||
+          !RAW_TED_IDENTIFIER.test(input.rawValue) ||
+          !/^[A-Z]{2}$/u.test(input.jurisdiction)
+        )
+          return null;
+        return frozenIdentifier({
+          providerKey: input.providerKey,
+          scheme: input.scheme,
+          jurisdiction: input.jurisdiction,
+          normalizedValue: canonicalStructuredValue(input.rawValue),
+          validatorVersion: rule.validatorVersion,
+        });
+      case "fda-reg":
+        if (
+          input.providerKey !== "openfda" ||
+          input.jurisdiction !== "US" ||
+          !/^\d{1,32}$/u.test(input.rawValue)
+        )
+          return null;
+        return frozenIdentifier({
+          providerKey: input.providerKey,
+          scheme: input.scheme,
+          jurisdiction: "US",
+          normalizedValue: input.rawValue,
+          validatorVersion: rule.validatorVersion,
+        });
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -400,96 +479,18 @@ export function parseOrganizationIdentityAuthorityIdentifier(
   }
   const providerKey =
     fields.providerKey as (typeof GOVERNED_RAW_SOURCE_PROVIDER_KEYS)[number];
-  const profile = ORGANIZATION_IDENTITY_AUTHORITY_PROFILES[providerKey];
-  let canonical: OrganizationIdentityAuthorityIdentifier | null = null;
-  if (fields.scheme === DOMAIN_SCHEME) {
-    const normalizedValue = canonicalDomainOutput(fields.normalizedValue);
-    if (
-      normalizedValue &&
-      fields.jurisdiction === GLOBAL_JURISDICTION &&
-      fields.validatorVersion === "domain-v1"
-    ) {
-      canonical = frozenIdentifier({
-        providerKey,
-        scheme: DOMAIN_SCHEME,
-        jurisdiction: GLOBAL_JURISDICTION,
-        normalizedValue,
-        validatorVersion: "domain-v1",
-      });
-    }
-  } else {
-    const rule = profile.identifierRules.find(
-      (candidate) => candidate.scheme === fields.scheme,
-    );
-    if (!rule || rule.validatorVersion !== fields.validatorVersion) return null;
-    const normalizedValue = canonicalStructuredOutput(fields.normalizedValue);
-    switch (fields.scheme) {
-      case "registry-id":
-        if (
-          providerKey === "registry" &&
-          normalizedValue === fields.normalizedValue &&
-          /^(?:GLOBAL|[A-Z]{2})$/u.test(fields.jurisdiction)
-        ) {
-          canonical = frozenIdentifier({
-            providerKey,
-            scheme: fields.scheme,
-            jurisdiction: fields.jurisdiction,
-            normalizedValue: fields.normalizedValue,
-            validatorVersion: rule.validatorVersion,
-          });
-        }
-        break;
-      case "lei":
-        if (
-          providerKey === "registry" &&
-          normalizedValue === fields.normalizedValue &&
-          fields.jurisdiction === GLOBAL_JURISDICTION &&
-          validLei(fields.normalizedValue)
-        ) {
-          canonical = frozenIdentifier({
-            providerKey,
-            scheme: fields.scheme,
-            jurisdiction: GLOBAL_JURISDICTION,
-            normalizedValue: fields.normalizedValue,
-            validatorVersion: rule.validatorVersion,
-          });
-        }
-        break;
-      case "ted-natid":
-        if (
-          providerKey === "ted" &&
-          normalizedValue === fields.normalizedValue &&
-          /^[A-Z]{2}$/u.test(fields.jurisdiction)
-        ) {
-          canonical = frozenIdentifier({
-            providerKey,
-            scheme: fields.scheme,
-            jurisdiction: fields.jurisdiction,
-            normalizedValue: fields.normalizedValue,
-            validatorVersion: rule.validatorVersion,
-          });
-        }
-        break;
-      case "fda-reg":
-        if (
-          providerKey === "openfda" &&
-          fields.jurisdiction === "US" &&
-          /^\d{1,32}$/u.test(fields.normalizedValue)
-        ) {
-          canonical = frozenIdentifier({
-            providerKey,
-            scheme: fields.scheme,
-            jurisdiction: "US",
-            normalizedValue: fields.normalizedValue,
-            validatorVersion: rule.validatorVersion,
-          });
-        }
-        break;
-      default:
-        return null;
-    }
-  }
-  return canonical && canonical.key === fields.key ? canonical : null;
+  const canonical = canonicalAuthorityIdentifier({
+    providerKey,
+    scheme: fields.scheme,
+    jurisdiction: fields.jurisdiction,
+    rawValue: fields.normalizedValue,
+  });
+  return canonical &&
+    canonical.validatorVersion === fields.validatorVersion &&
+    canonical.normalizerVersion === fields.normalizerVersion &&
+    canonical.key === fields.key
+    ? canonical
+    : null;
 }
 
 function extractPayloadIdentifier(
@@ -520,33 +521,18 @@ function extractPayloadIdentifier(
   );
   if (!rule) return error("IDENTITY_IDENTIFIER_NOT_AUTHORIZED");
 
+  let jurisdiction: string;
   switch (rule.scheme) {
-    case "registry-id": {
-      const jurisdiction =
+    case "registry-id":
+      jurisdiction =
         typeof payload.country === "string" &&
         /^[A-Z]{2}$/u.test(payload.country)
           ? payload.country
           : GLOBAL_JURISDICTION;
-      return frozenIdentifier({
-        providerKey,
-        scheme: rule.scheme,
-        jurisdiction,
-        normalizedValue: normalizedStructuredValue(value),
-        validatorVersion: rule.validatorVersion,
-      });
-    }
-    case "lei": {
-      const normalizedValue = normalizedStructuredValue(value);
-      if (!validLei(normalizedValue))
-        return error("IDENTITY_IDENTIFIER_INVALID");
-      return frozenIdentifier({
-        providerKey,
-        scheme: rule.scheme,
-        jurisdiction: GLOBAL_JURISDICTION,
-        normalizedValue,
-        validatorVersion: rule.validatorVersion,
-      });
-    }
+      break;
+    case "lei":
+      jurisdiction = GLOBAL_JURISDICTION;
+      break;
     case "ted-natid": {
       const suffix = /^ted-natid:([a-z]{2})$/u.exec(scheme)?.[1];
       const country =
@@ -558,30 +544,24 @@ function extractPayloadIdentifier(
       if (suffixJurisdiction && country && suffixJurisdiction !== country) {
         return error("IDENTITY_IDENTIFIER_INVALID");
       }
-      const jurisdiction = suffixJurisdiction ?? country ?? "";
+      jurisdiction = suffixJurisdiction ?? country ?? "";
       if (!jurisdiction) return error("IDENTITY_IDENTIFIER_INVALID");
-      return frozenIdentifier({
-        providerKey,
-        scheme: rule.scheme,
-        jurisdiction,
-        normalizedValue: normalizedStructuredValue(value),
-        validatorVersion: rule.validatorVersion,
-      });
+      break;
     }
     case "fda-reg":
-      if (!/^\d+$/u.test(value)) {
-        return error("IDENTITY_IDENTIFIER_INVALID");
-      }
-      return frozenIdentifier({
-        providerKey,
-        scheme: rule.scheme,
-        jurisdiction: "US",
-        normalizedValue: value,
-        validatorVersion: rule.validatorVersion,
-      });
+      jurisdiction = "US";
+      break;
     default:
       return error("IDENTITY_IDENTIFIER_NOT_AUTHORIZED");
   }
+  return (
+    canonicalAuthorityIdentifier({
+      providerKey,
+      scheme: rule.scheme,
+      jurisdiction,
+      rawValue: value,
+    }) ?? error("IDENTITY_IDENTIFIER_INVALID")
+  );
 }
 
 /**
@@ -614,14 +594,13 @@ export function extractOrganizationIdentityAuthority(
   const governedProviderKey = profile.providerKey;
   const byKey = new Map<string, OrganizationIdentityAuthorityIdentifier>();
   if (typeof admitted.value.domain === "string") {
-    const normalizedValue = normalizedDomain(admitted.value.domain);
-    const domain = frozenIdentifier({
-      providerKey: governedProviderKey,
-      scheme: DOMAIN_SCHEME,
-      jurisdiction: GLOBAL_JURISDICTION,
-      normalizedValue,
-      validatorVersion: "domain-v1",
-    });
+    const domain =
+      canonicalAuthorityIdentifier({
+        providerKey: governedProviderKey,
+        scheme: DOMAIN_SCHEME,
+        jurisdiction: GLOBAL_JURISDICTION,
+        rawValue: admitted.value.domain,
+      }) ?? error("IDENTITY_IDENTIFIER_INVALID");
     byKey.set(domain.key, domain);
   }
   const identifier = extractPayloadIdentifier(
