@@ -20,19 +20,25 @@
 | `TARGET_EXTERNAL` | 由正式 SaaS/其他 SoR 负责 |
 | `DEFERRED` | 已知后置 |
 | `PROTOTYPE_ONLY` | 只在本地 Mock/旧 API 出现 |
+| `LOCAL_SOURCE_AUTHORITY_FOUND` | `/global/frontend/growthos-source` archive+patch authority 中存在 route/page/adapter；不证明 remote CI、release、runtime 或 UAT |
+| `NOT_OFFERED_CURRENT_MVP` | 当前产品不向用户提供；本地菜单、route 或 page shell 不得点亮为 offer |
+
+GrowthOS 当前统一 source 状态是 `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`。它不是正常 mutable remote-backed repo；owner、remote、hosted CI、deployment 和 current release adoption 未验证。
 
 ## 2. 产品区域目录
 
 | 区域 | Page family | 关键页面/面板 | Capability | 当前深度 |
 |---|---|---|---|---|
-| Shell/今日 | `PAGE-FE-001..010` | 登录/会话、Workspace、今日、Search、通知、任务、审批、异常、长任务、帮助 | `CAP-ID-001`、`CAP-SHELL-001`、`CAP-ONB-001`、`CAP-TODAY-001` | IA 批准；正式 repo/合同/部署未知；本地多为 Mock |
+| Shell/今日 | `PAGE-FE-001..010` | 登录/会话、Workspace、今日、Search、通知、任务、审批、异常、长任务、帮助 | `CAP-ID-001`、`CAP-SHELL-001`、`CAP-ONB-001`、`CAP-TODAY-001` | IA 批准；`SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND`；capability manifest/remote CI/release/runtime/UAT 未验证 |
 | 企业资料与信任 | `PAGE-FE-020..026` | 企业资料、Offering、事实审查、Evidence drawer、知识、信任评估、Asset 详情 | `CAP-TRUTH-001`、`CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | 后端对象局部已建；统一 CRUD/审核/UX 不完整 |
-| 独立站管理 | `PAGE-FE-030..057` | 站点、Intake、资料、素材、KB、Claim、Build、Preview、编辑、版本、发布、域名、询盘、分析、诊断、公开输出 | `CAP-SITE-001..005` + 16 个 Site child | 当前主线；首个承诺仅 `PAGE-FE-030..043` 中合同相称子集 |
+| 独立站管理 | `PAGE-FE-030..057` | 站点、Intake、资料、素材、KB、Claim、Build、Preview、编辑、版本、发布、域名、询盘、分析、诊断、公开输出 | `CAP-SITE-001..005` + 16 个 Site child | Approved target + GrowthOS local source；state-driven entry 未实现/未验证；首个承诺仅 `PAGE-FE-030..043` 合同相称子集，remote CI/release/runtime/UAT 未验证 |
 | 客户开发 | `PAGE-FE-060..066` | 市场/ICP、客户池、公司/联系人、发现任务、资格包、数据权利 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | 后端真实能力；前端 Mock；冻结已解除，M1 收口后按重审结果恢复实现 |
-| 增长执行 | `PAGE-FE-070..079` | Goal/Initiative、Campaign、Audience、内容、素材、发布任务、渠道账号、日历、实验 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | 产品地图/原型；正式 SoR 与前端未知 |
-| 互动与商机 | `PAGE-FE-080..083` | Inbox、Conversation、Opportunity、Outcome | `CAP-ENGAGE-001`、`CAP-OPP-001` | SaaS external-owned；本仓不建主状态 |
-| 洞察 | `PAGE-FE-084..086` | 经营/漏斗、归因、质量/成本/实验 | `CAP-INSIGHT-001` | 目标读模型；Site 仅有局部成本事实 |
-| 管理与运营 | `PAGE-FE-090..096` | Team/Role、Integration、Billing/Usage、Settings/Security、数据权利、Operations、审计 | `CAP-TEAM-001`、`CAP-INTEG-001`、`CAP-SET-001`、`CAP-ADMIN-001` | 正式 ownership/合同未知；旧原型不作真值 |
+| 增长执行 | `PAGE-FE-070..079` | Goal/Initiative、Campaign、Audience、内容、素材、发布任务、渠道账号、日历、实验 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | `PRODUCT=NOT_OFFERED_CURRENT_MVP`；local route/page 仅 source observation；API/runtime/release/UAT 未验证 |
+| 互动与商机 | `PAGE-FE-080..083` | Inbox、Conversation、Opportunity、Outcome | `CAP-ENGAGE-001`、`CAP-OPP-001` | Conversation substrate local source exists；canonical Opportunity/receipt/snapshot/acceptance/outcome source 未实现；remote release/runtime/UAT 未验证 |
+| 洞察 | `PAGE-FE-084..086` | 经营/漏斗、归因、质量/成本/实验 | `CAP-INSIGHT-001` | `PRODUCT=NOT_OFFERED_CURRENT_MVP`；local route/page 仅 source observation；Site 只有局部成本事实 |
+| 管理与运营 | `PAGE-FE-090..096` | Team/Role、Integration、Settings/Security/Privacy、Operations、审计；Billing/Usage 后置 | `CAP-TEAM-001`、`CAP-INTEG-001`、`CAP-SET-001`、`CAP-ADMIN-001` | GrowthOS local source exists；正式合同/remote release/runtime/UAT 未验证；customer Billing/Credits `DEFERRED/NOT_IMPLEMENTED` |
+
+这八个 catalog region 不是八个 primary navigation area。六个 primary IA area 固定为 Today、Customer Development、Site Management、Growth Execution、Engagement & Opportunities、Insights；Enterprise facts/trust 是 cross-cutting context，Team/Integrations/Security/Privacy/Settings/Admin 是 secondary management surfaces。GrowthOS hard-coded menu 只是 local source observation，不是 capability-manifest implementation 或 entitlement truth。
 
 ### 2.1 非 Site 产品域的当前深度
 
@@ -46,7 +52,7 @@
 
 | Page ID | 名称 | 建议阶段 |
 |---|---|---|
-| `PAGE-FE-001` | 登录/会话入口 | `SHELL_FOUNDATION` |
+| `PAGE-FE-001` | 登录/会话入口 | `STATE_DRIVEN_TARGET / LOCAL_SOURCE_DRIFT` |
 | `PAGE-FE-002` | Workspace 选择/切换 | `SHELL_FOUNDATION` |
 | `PAGE-FE-003` | 今日 | `SHELL_FOUNDATION` |
 | `PAGE-FE-004` | 全局搜索/命令面板 | `SHELL_FOUNDATION` |
@@ -113,28 +119,28 @@
 
 | Page ID | 名称 | 建议阶段 |
 |---|---|---|
-| `PAGE-FE-070` | Goal/Initiative | `TARGET_EXTERNAL` |
-| `PAGE-FE-071` | Campaign 列表 | `TARGET_EXTERNAL` |
-| `PAGE-FE-072` | Campaign Canvas | `TARGET_EXTERNAL` |
-| `PAGE-FE-073` | Audience/名单快照 | `TARGET_EXTERNAL` |
-| `PAGE-FE-074` | Dry Run 与授权 | `TARGET_EXTERNAL` |
-| `PAGE-FE-075` | 内容库 | `TARGET_EXTERNAL` |
-| `PAGE-FE-076` | 内容编辑/审核 | `TARGET_EXTERNAL` |
-| `PAGE-FE-077` | 内容日历 | `TARGET_EXTERNAL` |
-| `PAGE-FE-078` | 发布任务 | `TARGET_EXTERNAL` |
-| `PAGE-FE-079` | 渠道账号 | `TARGET_EXTERNAL` |
+| `PAGE-FE-070` | Goal/Initiative | `NOT_OFFERED_CURRENT_MVP / LOCAL_SOURCE_OBSERVATION` |
+| `PAGE-FE-071` | Campaign 列表 | `NOT_OFFERED_CURRENT_MVP / LOCAL_SOURCE_OBSERVATION` |
+| `PAGE-FE-072` | Campaign Canvas | `NOT_OFFERED_CURRENT_MVP / LOCAL_SOURCE_OBSERVATION` |
+| `PAGE-FE-073` | Audience/名单快照 | `NOT_OFFERED_CURRENT_MVP` |
+| `PAGE-FE-074` | Dry Run 与授权 | `NOT_OFFERED_CURRENT_MVP` |
+| `PAGE-FE-075` | 内容库 | `NOT_OFFERED_CURRENT_MVP / BOUNDED_PROTOTYPE_ONLY` |
+| `PAGE-FE-076` | 内容编辑/审核 | `NOT_OFFERED_CURRENT_MVP / BOUNDED_PROTOTYPE_ONLY` |
+| `PAGE-FE-077` | 内容日历 | `NOT_OFFERED_CURRENT_MVP / LOCAL_SOURCE_OBSERVATION` |
+| `PAGE-FE-078` | 发布任务 | `NOT_OFFERED_CURRENT_MVP` |
+| `PAGE-FE-079` | 渠道账号 | `NOT_OFFERED_CURRENT_MVP` |
 
 ### 3.5 互动、商机与洞察
 
 | Page ID | 名称 | 建议阶段 |
 |---|---|---|
-| `PAGE-FE-080` | Unified Inbox | `TARGET_EXTERNAL` |
-| `PAGE-FE-081` | 会话详情 | `TARGET_EXTERNAL` |
-| `PAGE-FE-082` | Opportunity 列表/看板 | `TARGET_EXTERNAL` |
-| `PAGE-FE-083` | Opportunity 详情 | `TARGET_EXTERNAL` |
-| `PAGE-FE-084` | 经营洞察 | `TARGET_EXTERNAL` |
-| `PAGE-FE-085` | 归因与实验 | `TARGET_EXTERNAL` |
-| `PAGE-FE-086` | 成本与用量 | `TARGET_EXTERNAL`；Site 局部事实可引用 |
+| `PAGE-FE-080` | Unified Inbox | Conversation substrate `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_RUNTIME_UAT_UNVERIFIED` |
+| `PAGE-FE-081` | 会话详情 | Conversation substrate `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_RUNTIME_UAT_UNVERIFIED` |
+| `PAGE-FE-082` | Opportunity 列表/看板 | `PRODUCT_SPECIFIED / CANONICAL_SOURCE_NOT_IMPLEMENTED`；local page shell 不等于 aggregate |
+| `PAGE-FE-083` | Opportunity 详情 | `PRODUCT_SPECIFIED / CANONICAL_SOURCE_NOT_IMPLEMENTED`；local page shell 不等于 aggregate |
+| `PAGE-FE-084` | 经营洞察 | `NOT_OFFERED_CURRENT_MVP / LOCAL_SOURCE_OBSERVATION` |
+| `PAGE-FE-085` | 归因与实验 | `NOT_OFFERED_CURRENT_MVP` |
+| `PAGE-FE-086` | 成本与用量 | `NOT_OFFERED_CURRENT_MVP`；Site 局部成本事实可引用但不是 customer billing |
 
 ### 3.6 管理与运营
 
@@ -145,12 +151,16 @@
 | `PAGE-FE-092` | 集成中心 | `TARGET_EXTERNAL` |
 | `PAGE-FE-093` | Workspace 设置 | `TARGET_EXTERNAL` |
 | `PAGE-FE-094` | 安全与审计 | `TARGET_EXTERNAL` |
-| `PAGE-FE-095` | 套餐、用量与账单 | `TARGET_EXTERNAL/OPEN_DECISION` |
+| `PAGE-FE-095` | 套餐、用量与账单 | customer Billing/Credits `DEFERRED / NOT_IMPLEMENTED` |
 | `PAGE-FE-096` | 运营控制台 | `TARGET_EXTERNAL` |
 
 该索引共 76 个稳定 Page ID；缺号是预留，不代表遗漏。新增页面先证明既有 Page/Capability 不能承载，并更新 Registry/Decision，而不是直接占一个菜单入口。
 
 ## 4. 独立站管理页面边界
+
+登录和 Site 入口是 state-driven target contracts，不由静态 route 决定。登录后必须先判定 authenticated/restricted/loading/error、Workspace/Site entitlement、无可访问 Site、active Site 与 active Build，再选择安全入口。GrowthOS 当前固定跳转 `/sites` 和 design-first route 只是 `LOCAL_SOURCE_DRIFT`，不是获批跨产品 entry policy。
+
+Site 入口先校验 eligibility/session/access，再分别呈现 no Site/intake、draft/building/ready、active Build、failed/retryable 和 old-ready-preview preserved。Site、BuildRun、SiteRelease 与 public service 四层状态保持独立；route/page 存在不等于 capability available。
 
 | 子区 | Page IDs | 当前用户承诺 |
 |---|---|---|

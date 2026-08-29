@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 关系 Owner：`OWN-DOC-GOV`
 > 产品批准基线：Gate 2 + Gate 4 + Gate 5 + Gate 6 + Gate 7 + Gate 8，2026-07-20；Gate 8 为保留独立人工、真实 Release 和全部 blocker 的条件通过
-> 工程核验基线：当前 main 见 [`status/current.md`](../status/current.md)；存在性硬门见 [`delivery-traceability/v1`](delivery-traceability.json)
+> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；存在性硬门见 [`delivery-traceability/v1`](delivery-traceability.json)
 
 本表回答“一个用户结果如何追到页面、对象、机器合同、main 代码、测试和场景”。它不复制规范或测试内容；链接只证明关系存在，是否通过/部署仍看精确 Evidence/Release Bundle。
 
@@ -32,18 +32,19 @@ Segment/Actor/Problem/Job
 - hidden preview controller 是内部输出边界，不进入 public OpenAPI operation 列。
 - 当前真实 Release Bundle 数由 `governance:verify` 扫描 `docs/releases/*.release.json` 得出；模板明确位于 `docs/templates/` 且永远不计作 release，不能从文档计划推出“用户可用”或“已发布”。
 - 进入交付的机器链以 [`delivery-traceability.json`](delivery-traceability.json) 为准：Capability、Object、OpenAPI operationId、code path、test path 与 Scenario 都做真实存在性检查；`PILOT/GA` 另须满足链上全部 `required_evidence_kinds` 的 fresh PASS RuntimeEvidence，并由有效 Release Bundle 的 `traceability_bindings` 精确绑定同一 chain、capability 与 evidence set。Bundle 中的外部 refs 仅是待回读声明；当前独立 external verifier 不存在，所以所有 `PILOT/GA` 仍被 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED` 阻断。
+- 对 GrowthOS 与 Program C 的每条详细关系分别记录[唯一七轴基态](terminology-and-status.md#6-多轴交付状态) `PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA`；`UAT` 是证据限定词，不是第八轴。`LOCAL_SOURCE_AUTHORITY_FOUND`、route/page 或 test anchor 只能作 `*_EVIDENCE / *_GAP / *_QUALIFIER`，不能升级 runtime、release、UAT、`PILOT_GA` 或 offerability。
 
 ## 2. 全 SaaS 产品地图追踪
 
 | 产品区域 | Capability IDs | 主要 Journey / Jobs | Page IDs | 核心对象 | SoR Owner | 当前深度 | 后续规范归属 |
 |---|---|---|---|---|---|---|---|
-| 公共 Shell / 今日 | `CAP-SHELL-001`、`CAP-ID-001`、`CAP-ONB-001`、`CAP-TODAY-001` | `JRN-FE-001/007/008`；`JOB-FE-001/005` | `PAGE-FE-001..010` | `OBJ-FE-001/002/025/026` | `OWN-SAAS-PLATFORM` | 产品 IA 已批；Phase 6 map complete；本地 Mock；正式合同/部署未知 | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| 公共 Shell / 今日 | `CAP-SHELL-001`、`CAP-ID-001`、`CAP-ONB-001`、`CAP-TODAY-001` | `JRN-FE-001/007/008`；`JOB-FE-001/005` | `PAGE-FE-001..010` | `OBJ-FE-001/002/025/026` | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_QUALIFIER=MAP_COMPLETE_NOT_DEV_READY; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=CAPABILITY_MANIFEST_NOT_IMPLEMENTED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
 | 客户开发 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | `JRN-FE-004/005`；`JOB-FE-006/007` | `PAGE-FE-060..066` | `OBJ-FE-009..011` | `OWN-BUYER-BE` 到 package；SaaS thereafter | 后端真实服务历史证据、前端 Mock；冻结已解除，M1 后重验并恢复实现；Phase 6 map complete | [页面目录](../frontend/04-page-and-capability-catalog.md) |
-| 独立站管理 | `CAP-SITE-001..005` + Site child IDs | `JRN-FE-001..003/006/007`；`JOB-FE-003..005` | `PAGE-FE-030..057` | `OBJ-FE-003..008/012..017/027` | 企业事实、Site、SaaS 接缝分层 | 当前纵切 UX `SPEC_READY_WITH_BLOCKERS`；正式 FE `NONE`；承诺止于开发预览 | [全局规则](../frontend/README.md) + [Phase 5 Site Pack](../frontend/modules/independent-site-management/README.md) |
-| 增长执行 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | `JRN-FE-006/008`；`JOB-FE-008/009` | `PAGE-FE-070..079` | `OBJ-FE-018/019/024/025` | `OWN-SAAS-PLATFORM` | Phase 6 map complete；原型 Mock；正式 SoR 未定位 | [页面目录](../frontend/04-page-and-capability-catalog.md) |
-| 互动与商机 | `CAP-ENGAGE-001`、`CAP-OPP-001` | `JRN-FE-005/008`；`JOB-FE-010/011` | `PAGE-FE-080..083` | `OBJ-FE-020..022/027` | `OWN-SAAS-PLATFORM` | Phase 6 map complete；外部 ownership；本仓不实现 Opportunity 主状态 | [页面目录](../frontend/04-page-and-capability-catalog.md) |
-| 洞察 | `CAP-INSIGHT-001` | `JRN-FE-008`；`JOB-FE-012` | `PAGE-FE-084..086` | `OBJ-FE-023` + read models | `OWN-SAAS-PLATFORM` | Phase 6 map complete；平台目标态；Site 有局部 cost ledger | [页面目录](../frontend/04-page-and-capability-catalog.md) |
-| 团队/集成/设置/运营 | `CAP-INTEG-001`、`CAP-TEAM-001`、`CAP-SET-001`、`CAP-ADMIN-001` | 多旅程横切 | `PAGE-FE-090..096` | `OBJ-FE-001/002/024..026` | `OWN-SAAS-PLATFORM` | Phase 6 map complete；本地原型/旧 Spring；正式 ownership 未定 | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| 独立站管理 | `CAP-SITE-001..005` + Site child IDs | `JRN-FE-001..003/006/007`；`JOB-FE-003..005` | `PAGE-FE-030..057` | `OBJ-FE-003..008/012..017/027` | 企业事实、Site、SaaS 接缝分层 | `PRODUCT=APPROVED; UX=SPEC_READY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_QUALIFIER=SPEC_READY_WITH_BLOCKERS; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND,BACKEND_PARTIAL_AS_BUILT; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` | [全局规则](../frontend/README.md) + [Phase 5 Site Pack](../frontend/modules/independent-site-management/README.md) |
+| 增长执行 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | `JRN-FE-006/008`；`JOB-FE-008/009` | `PAGE-FE-070..079` | `OBJ-FE-018/019/024/025` | `OWN-SAAS-PLATFORM` | `PRODUCT=NOT_OFFERED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_QUALIFIER=CURRENT_MVP; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=CANONICAL_API_NOT_IMPLEMENTED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| 互动与商机 | `CAP-ENGAGE-001`、`CAP-OPP-001` | `JRN-FE-005/008`；`JOB-FE-010/011` | `PAGE-FE-080..083` | `OBJ-FE-020..022/027/028..030` | `OWN-SAAS-PLATFORM` / Program C | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=PROGRAM_C_CANONICAL_OBJECTS_NOT_IMPLEMENTED; TEST_GAP=PROGRAM_C_NOT_IMPLEMENTED; RELEASE_GAP=PROGRAM_C_NOT_IMPLEMENTED,REMOTE_CI_RELEASE_UNVERIFIED` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| 洞察 | `CAP-INSIGHT-001` | `JRN-FE-008`；`JOB-FE-012` | `PAGE-FE-084..086` | `OBJ-FE-023` + read models | `OWN-SAAS-PLATFORM` | `PRODUCT=NOT_OFFERED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_QUALIFIER=CURRENT_MVP; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND,SITE_COST_SUBSET_AS_BUILT; SOURCE_GAP=PLATFORM_READ_MODEL_NOT_IMPLEMENTED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| 团队/集成/设置/运营 | `CAP-INTEG-001`、`CAP-TEAM-001`、`CAP-SET-001`、`CAP-ADMIN-001` | 多旅程横切 | `PAGE-FE-090..096` | `OBJ-FE-001/002/024..026` | `OWN-SAAS-PLATFORM` | `PRODUCT=PROPOSED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_GAP=BILLING_CREDITS_DEFERRED; UX_QUALIFIER=MAP_COMPLETE_NOT_DEV_READY; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=BILLING_CREDITS_NOT_IMPLEMENTED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
 | 企业事实横切 | `CAP-TRUTH-001`、`CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | `JRN-FE-002/006`；`JOB-FE-001/002/004/009` | `PAGE-FE-020..026/034..039` | `OBJ-FE-003..008/017` | `OWN-TRUTH-BE` + `OWN-SITE-BE` | Phase 6 map complete；后端地基存在；审核合同未完成 | [页面目录](../frontend/04-page-and-capability-catalog.md) + [Site 生命周期](../frontend/modules/independent-site-management/lifecycle-permissions-and-state.md) |
 
 完整 Page 名称和当前归属见[页面与能力目录](../frontend/04-page-and-capability-catalog.md)。该目录不证明页面已接入。
@@ -99,10 +100,10 @@ Segment/Actor/Problem/Job
 | Concern ID | Applies to | 当前事实源 | 缺口 | Future owner/spec |
 |---|---|---|---|---|
 | `TRC-FE-PERM-001` | 所有 Capability/Page/Object | Workspace RLS、JWKS、本表社会属性 | [当前权限规范](../frontend/06-permissions-and-data-visibility.md) + [Site 矩阵](../frontend/modules/independent-site-management/lifecycle-permissions-and-state.md)已定义；allowed actions 合同仍缺 | `OWN-SAAS-PLATFORM` / `BLK-FE-003` |
-| `TRC-FE-STATE-001` | Site/Build/Release/Public service | Object lifecycle + OpenAPI/code | [当前状态规范](../frontend/07-state-error-degradation-and-recovery.md) + Site 四层映射已建；正式设计/E2E 仍缺 | `OWN-DESIGN` / `BLK-FE-001/002/006` |
+| `TRC-FE-STATE-001` | Site/Build/Release/Public service | Object lifecycle + OpenAPI/code | `PRODUCT=APPROVED; UX=SPEC_READY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; SOURCE_EVIDENCE=NORMATIVE_SPEC_FOUND,BACKEND_CONTRACT_FOUND`；[当前状态规范](../frontend/07-state-error-degradation-and-recovery.md)和 Site 四层映射不证明正式设计、组件或 E2E | `OWN-DESIGN` / `BLK-FE-001/002/006` |
 | `TRC-FE-AI-001` | Claim/Brand/Copy/Recommendation | bounded AI tasks、EvidenceRef、Claim/Evidence | [AI/Evidence](../frontend/08-ai-approval-evidence-and-human-control.md)和 Site fail-closed 已定义；Site review/impact 合同仍缺 | `OWN-PRODUCT` / `BLK-FE-004` |
 | `TRC-FE-METRIC-001` | `MET-SITE-001..014` + anti-metrics | Phase 2 指标 provenance、Build cost facts | [分析规范](../frontend/12-analytics-testing-and-release-evidence.md) + [Site 验收](../frontend/modules/independent-site-management/operations-and-acceptance.md)已映射；schema/baseline/target/privacy 仍缺 | `OWN-DATA-PRIVACY` / `BLK-FE-005` |
-| `TRC-FE-QA-001` | 所有 Site scenarios | tests + scenario catalog | [Site 验收矩阵](../frontend/modules/independent-site-management/operations-and-acceptance.md)已建；executable fixtures/frontend E2E/a11y/visual/perf/security/release evidence 仍缺 | `OWN-QA-EVIDENCE` / `BLK-FE-001/002/006` |
+| `TRC-FE-QA-001` | 所有 UI scenarios | tests + scenario catalog | `PRODUCT=APPROVED; UX=SPEC_READY; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; SOURCE_EVIDENCE=NORMATIVE_SPEC_FOUND`；component/token implementation、executable fixtures、frontend E2E、a11y/visual/performance/security evidence 仍缺 | `OWN-QA-EVIDENCE` / `BLK-FE-001/002/006` |
 | `TRC-FE-OPS-001` | failure/cancel/cleanup/provider issues | stable errors、Temporal、operator-disabled maintenance | [Site runbook/兜底](../frontend/modules/independent-site-management/operations-and-acceptance.md)已建；SLA、实际 assignee、redrive permissions 仍缺 | `OWN-OPS` / `BLK-FE-006` |
 | `TRC-FE-COMM-001` | entitlement/budget/publish/license | cost ledger/OSS audit/decision inputs |套餐、额度、升级/降级、License approval、exit plan | `OWN-SEC-COMMERCIAL` / Phase 4/7 |
 
@@ -125,7 +126,7 @@ Segment/Actor/Problem/Job
 
 - 24 个顶层 Capability 已映射到产品区域、Page family、核心对象和 Owner。
 - 16 个 Site child Capability 已建立稳定 ID；首个纵切 9 个关键子能力已追到 public operation/internal resolver、main 代码、TEST_ANCHOR 和 Scenario。
-- 27 个核心对象均有 SoR、唯一 Object Owner、事实状态和社会属性/生命周期边界。
+- 30 个核心对象均有 SoR、唯一 Object Owner、事实状态和社会属性/生命周期边界；Program C 新对象仍是 product-specified，不能按登记数量推导实现。
 - 8 条 Journey 和完整 Page ID 集未丢失；冻结/外部/后置能力在地图中保留但没有被点亮为可用。
 - 旧 Word、Site v3.1/v3.2、本地原型和外部项目均有明确输入边界，不覆盖当前规范。
 

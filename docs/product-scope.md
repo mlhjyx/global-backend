@@ -41,26 +41,37 @@
 - 效率：首次有效账户时间、首次 QGO 时间、单位 QGO/SAO 成本。
 - 风险护栏：退信/投诉率、Suppression 越权数（恒 0）、数据权利违规数（恒 0）。
 
-## 3. 完整产品上下文地图（五层，本仓只实现 ★ 两层）
+## 3. 五阶段用户价值旅程与七个 bounded context
 
-```
-SaaS Control Plane（A 拥有）：身份 / Organization / Workspace / Membership / Billing / Credits
-        ↓ JWKS token + Site Builder Budget Grant
-Growth Strategy（产品脊柱，见 §5）：Goal / GrowthInitiative / OfferingSnapshot / MarketThesis / ICPVersion / Pack Snapshot
-        ↓
-★ Buyer Intelligence（本仓核心）：多源采集 / 公司身份解析 / Evidence / 数据权利 / Signal / 联系人可达性
-        ↓
-★ Qualification & Handoff（本仓核心，止于此）：确定性硬门 / QualificationDecision / LeadQualifiedPackage ══►（事件交付）
-        ↓
-Opportunity & Sales（SaaS 侧）：Opportunity 单一聚合：CANDIDATE → QGO → SAO → CLOSED（状态，不建三套实体）
-        ↓
-Growth Execution（SaaS/执行系统侧，后建）：Campaign / ExecutionAuthorization / Content / Outreach / Publish / Conversation
-        ↓
-Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost / ROI
-横切：Evidence·Data Rights·Policy·Suppression ｜ Budget·Approval·Audit·幂等 ｜ Temporal·Outbox·Trace·Eval
+产品价值旅程与系统 ownership 是两个不同视图，不能用“层数”代替实现状态。
+
+### 3.1 五阶段用户价值旅程
+
+```text
+可信基础
+→ 增长目标
+→ 发现与资格
+→ 商机推进
+→ 学习与改进
 ```
 
-执行层/商机域/Pack/前端 IA 的详细设计输入见本文附录 A（给 A/B 的参照，实现不在本仓）。
+这条旅程描述用户价值，不表示五个阶段已实现或已上线。首发闭环聚焦“可信基础 → 发现与资格 → 人工 QGO 判断”；商机推进和结果学习由 SaaS Program C 持有主状态。
+
+### 3.2 七个 bounded context 与当前证据边界
+
+以下详细状态使用[唯一七轴模型](governance/terminology-and-status.md#6-多轴交付状态)：`PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA`。`UAT` 是用户验收证据限定词，不是第八轴；所有 `*_EVIDENCE / *_GAP / *_QUALIFIER` 只解释基态，不改变本表的 SoR 或授权真值。
+
+| Bounded context | 唯一 SoR / 产品边界 | 当前七轴基态 + UAT/限定词 |
+|---|---|---|
+| SaaS Control Plane | SaaS 拥有身份、Organization、Workspace、Membership、Billing/Credits 与 Site Builder Budget Grant 签发 | `PRODUCT=APPROVED; UX=NONE; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NO_VERIFIED_UX; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
+| Growth Strategy | SaaS 拥有 Goal、GrowthInitiative、OfferingSnapshot、MarketThesis、ICPVersion 与 Pack Snapshot | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED` |
+| Buyer Intelligence | 本仓拥有采集、Identity/Canonical、Evidence、数据权利、Signal、Reachability 与资格输入 | `PRODUCT=APPROVED; UX=NONE; SOURCE=AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN` |
+| Qualification & Handoff | 本仓止于不可变 `LeadQualifiedPackage + Outbox/ACK`；SaaS Program C 独占服务端 consumer/receipt/snapshot 事务 | `PRODUCT=APPROVED; UX=NONE; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED; SOURCE_EVIDENCE=BACKEND_PRODUCER_AS_BUILT; SOURCE_GAP=PROGRAM_C_CONSUMER_NOT_IMPLEMENTED; TEST_GAP=PROGRAM_C_NOT_IMPLEMENTED; RELEASE_GAP=BACKEND_UNVERIFIED,PROGRAM_C_NOT_IMPLEMENTED` |
+| Opportunity & Sales | SaaS Program C 拥有单一 Opportunity 聚合及 QGO/SAO/CLOSED、SalesAcceptance、CommercialOutcome、Conversation linkage | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=CANONICAL_AGGREGATE_NOT_IMPLEMENTED` |
+| Growth Execution | SaaS/执行系统拥有 Campaign、ExecutionAuthorization、Content、Outreach、Publish 与 provider loop | `PRODUCT=NOT_OFFERED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_QUALIFIER=CURRENT_MVP; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=CANONICAL_IMPLEMENTATION_NOT_IMPLEMENTED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
+| Learning & Economics | SaaS 拥有 Touchpoint、Attribution、Feedback、Experiment、ROI 主状态；本仓只接收结构化学习标签并保留域内成本事实 | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED` |
+
+横切控制仍包括 Evidence、Data Rights、Policy、Suppression、Budget、Approval、Audit、幂等、Temporal、Outbox、Trace 与 Eval。执行层、商机域、Pack 和前端 IA 的详细设计输入见附录 A；它们不扩大本仓边界。
 
 ## 4. 本仓边界（获客情报后端）【已拍板 2026-07-10】
 
@@ -109,11 +120,11 @@ Goal（业务目标：如进入德国市场）
 ## 7. 首个商业切口
 
 - 经济购买者=外贸老板/出海负责人；操作者=海外增长/外贸销售/数据运营。
-- 首发客户：B2B 制造、工贸一体、高客单传统出口企业。首发 Job 二选一（待拍板，见 [status/current.md](status/current.md)）：进口商/采购商发现 vs 经销商招募（建议前者）。
+- 首发客户：中国 B2B 制造、工贸一体和高客单传统出口企业。首发 Job 固定为发现有真实需求证据的海外进口商/采购商，并把至少一个候选推进到人工 QGO 判断；经销商招募属于后续 Job。
 - 交付模式：Managed/Collaborative 起步，逐步 Self-service。
-- MVP 假设：「对 B2B 制造/工贸企业，输入官网、产品和目标市场后，平台在可解释成本内持续产出有证据、可联系的目标采购企业，并在 **30 天内形成至少一个人工确认 QGO**（SAO 为 M3 商业验证目标）。」
+- MVP 假设：「对上述企业，输入官网、产品和目标市场后，平台在可解释成本内持续产出有证据、可联系的海外进口商/采购企业，并在 **30 天内形成至少一个人工确认 QGO**。」北极星保持“每活跃 Workspace 每月新增 QGO”，SAO 只作为后续商业验证。
 - 首版不做：4 个发布平台、完整视频、全渠道 Inbox、专家市场、多行业同时商业化、多触点归因。
-- 定价方向：Workspace 订阅 + Buyer Intelligence/QGO Credits + 超额统一 Credit + Managed 服务包单独收费。
+- 客户 subscription、Billing、Credits、usage 与 pricing 的独立状态为 `PRODUCT=DEFERRED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED`；`cap_microusd` 只是平台执行安全包络，不是客户余额、quota、价格、Credit 或发票。
 
 ## 8. 文档权威关系
 

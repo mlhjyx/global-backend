@@ -5,18 +5,20 @@
 > 生命周期：`CURRENT`
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
-> 工程基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
-> 最后核验：2026-07-23
+> 工程基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`
+> 最后核验：2026-08-29
 
 本目录定义整个 SaaS 共用的目标前端规则，回答“不同产品域如何保持一致”。它是交给独立前端团队的产品与工程约束，不是本仓已实现的前端，也不替代产品边界、as-built 架构、ADR、状态或机器合同。
 
 ## 1. 当前效力
 
 - `DEC-FE-P4-001..011` 继续有效；批准结论统一在[冲突登记](../governance/conflict-register.md)维护。
-- 正式 SaaS 前端仓库、CI、部署、设计事实源、Token 数值、组件库和实际 Owner 尚未定位。
-- 本地 Mock、Readdy、模板、截图和竞品只能作为参考，不能证明页面、组件或视觉规范已经交付。
+- 前端 source 状态为 `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`：`/global/frontend/growthos-source` 是 archive+patch authority package，不是正常 mutable remote-backed repo。owner、remote、hosted CI、deployment 与 current release adoption 未验证。
+- GrowthOS local source、Readdy、模板、截图和竞品只能作为 source/reference evidence；不能证明页面、组件、runtime、release、UAT 或用户可用。
 - 独立站管理是统一 SaaS 的一级区域；Astro 公开站是版本化输出，不是第二套管理前端。
 - 除独立站管理外，其他产品域当前只完成地图级覆盖，仍为 `MAP_COMPLETE / NOT_DEV_READY`。
+- 六个 primary IA area 固定为 Today、Customer Development、Site Management、Growth Execution、Engagement & Opportunities、Insights。Enterprise facts/trust 是 cross-cutting context；Team、Integrations、Security、Privacy、Settings 与 Admin 是 secondary management surfaces。
+- Design system、a11y、visual/performance 与 responsive 规则是 `NORMATIVE_SPEC_ONLY`；受控设计源、Token/component implementation、executable tests、release 与 UAT 均未实现或未运行。
 
 ## 2. 按任务阅读
 
