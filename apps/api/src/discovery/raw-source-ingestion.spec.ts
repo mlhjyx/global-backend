@@ -10,6 +10,18 @@ import {
   type RawSourcePolicySnapshot,
 } from "./raw-source-ingestion";
 
+function comparableRawRow(row: {
+  fetchedAt: Date | null;
+  expiresAt: Date;
+  [key: string]: unknown;
+}) {
+  return {
+    ...row,
+    fetchedAt: row.fetchedAt?.toISOString() ?? null,
+    expiresAt: row.expiresAt.toISOString(),
+  };
+}
+
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const LIMITS = Object.freeze({
   maxRecordBytes: 512,
@@ -1213,11 +1225,21 @@ describe("Raw Source v2 ingestion boundary", () => {
         [],
       );
 
-      expect(resolutions).toEqual([
-        { recordIndex: 0, kind: "WRITE", row: accepted },
+      expect(
+        resolutions.map((resolution) =>
+          resolution.kind === "WRITE"
+            ? { ...resolution, row: comparableRawRow(resolution.row) }
+            : resolution,
+        ),
+      ).toEqual([
+        { recordIndex: 0, kind: "WRITE", row: comparableRawRow(accepted) },
         { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
-        { recordIndex: 2, kind: "WRITE", row: quarantined },
-        { recordIndex: 3, kind: "WRITE", row: rejected },
+        {
+          recordIndex: 2,
+          kind: "WRITE",
+          row: comparableRawRow(quarantined),
+        },
+        { recordIndex: 3, kind: "WRITE", row: comparableRawRow(rejected) },
       ]);
       expect(Object.isFrozen(resolutions)).toBe(true);
       expect(resolutions.every(Object.isFrozen)).toBe(true);
@@ -1298,8 +1320,18 @@ describe("Raw Source v2 ingestion boundary", () => {
         [existing],
       );
 
-      expect(resolutions).toEqual([
-        { recordIndex: 0, kind: "WRITE", row: legacyDrift },
+      expect(
+        resolutions.map((resolution) =>
+          resolution.kind === "WRITE"
+            ? { ...resolution, row: comparableRawRow(resolution.row) }
+            : resolution,
+        ),
+      ).toEqual([
+        {
+          recordIndex: 0,
+          kind: "WRITE",
+          row: comparableRawRow(legacyDrift),
+        },
         { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
       ]);
       expect(resolutions[1]).toMatchObject({ sourceRecordIndex: 0 });
@@ -1604,6 +1636,10 @@ describe("Raw Source v2 ingestion boundary", () => {
       });
       expect(resolution.row.fetchedAt!.getTime()).toBe(originalFetchedAt);
       expect(resolution.row.expiresAt.getTime()).toBe(originalExpiresAt);
+      expect(resolution.row.fetchedAt!.toISOString()).toBe(
+        new Date(originalFetchedAt).toISOString(),
+      );
+      expect(resolution.row.expiresAt.valueOf()).toBe(originalExpiresAt);
       expect(Object.isFrozen(resolution.row)).toBe(true);
       expect(Object.isFrozen(resolution.row.payload)).toBe(true);
       expect(
@@ -1625,6 +1661,36 @@ describe("Raw Source v2 ingestion boundary", () => {
       }).toThrow(TypeError);
       expect(() => resolution.row.fetchedAt!.setTime(0)).toThrow(TypeError);
       expect(() => resolution.row.expiresAt.setTime(0)).toThrow(TypeError);
+      expect(() =>
+        Date.prototype.setTime.call(resolution.row.expiresAt, 0),
+      ).toThrow(TypeError);
+      expect(resolution.row.expiresAt.getTime()).toBe(originalExpiresAt);
+      expect(Object.isFrozen(resolution.row.fetchedAt)).toBe(true);
+      expect(Object.isFrozen(resolution.row.expiresAt)).toBe(true);
+    });
+
+    it("rejects a Date with an own getTime accessor without invoking it", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      let getterCalls = 0;
+      Object.defineProperty(candidate.expiresAt, "getTime", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          getterCalls += 1;
+          return Date.prototype.getTime;
+        },
+      });
+
+      expect(() => resolveRawSourceBatchByIndex([candidate], [])).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+      expect(getterCalls).toBe(0);
     });
   });
 

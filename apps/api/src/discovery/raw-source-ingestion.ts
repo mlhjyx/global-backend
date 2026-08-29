@@ -652,24 +652,7 @@ const PREPARED_ROW_KEYS = Object.freeze([
   "expiresAt",
   "sourcePolicySnapshot",
 ]);
-const DATE_MUTATOR_METHODS = Object.freeze([
-  "setDate",
-  "setFullYear",
-  "setHours",
-  "setMilliseconds",
-  "setMinutes",
-  "setMonth",
-  "setSeconds",
-  "setTime",
-  "setUTCDate",
-  "setUTCFullYear",
-  "setUTCHours",
-  "setUTCMilliseconds",
-  "setUTCMinutes",
-  "setUTCMonth",
-  "setUTCSeconds",
-  "setYear",
-] as const);
+const IMMUTABLE_DATE_EPOCHS = new WeakMap<object, number>();
 
 type IndexedResolutionFact =
   | Readonly<{
@@ -780,28 +763,51 @@ function snapshotJsonValue(
   }
 }
 
+function immutableDateSnapshot(epoch: number): Date {
+  const target = new Date(epoch);
+  Object.freeze(target);
+  const immutableDateMutation = () => {
+    throw new TypeError("immutable Raw Source Date");
+  };
+  const snapshot = new Proxy(target, {
+    defineProperty: immutableDateMutation,
+    deleteProperty: immutableDateMutation,
+    get(date, property) {
+      if (typeof property === "string" && property.startsWith("set")) {
+        return immutableDateMutation;
+      }
+      if (property === "constructor") return Date;
+      const member = Reflect.get(date, property, date) as unknown;
+      return typeof member === "function" ? member.bind(date) : member;
+    },
+    set: immutableDateMutation,
+    setPrototypeOf: immutableDateMutation,
+  });
+  IMMUTABLE_DATE_EPOCHS.set(snapshot, epoch);
+  return snapshot;
+}
+
 function snapshotDate(value: unknown): Date {
+  if (value && typeof value === "object") {
+    const knownEpoch = IMMUTABLE_DATE_EPOCHS.get(value);
+    if (knownEpoch !== undefined) return immutableDateSnapshot(knownEpoch);
+  }
   if (
     !(value instanceof Date) ||
     types.isProxy(value) ||
     Object.getPrototypeOf(value) !== Date.prototype ||
-    !Number.isFinite(value.getTime())
+    Reflect.ownKeys(value).length !== 0
   ) {
     invalidIndexedResolution();
   }
-  const snapshot = new Date(value.getTime());
-  const immutableDateMutation = () => {
-    throw new TypeError("immutable Raw Source Date");
-  };
-  for (const method of DATE_MUTATOR_METHODS) {
-    Object.defineProperty(snapshot, method, {
-      configurable: false,
-      enumerable: false,
-      value: immutableDateMutation,
-      writable: false,
-    });
+  let epoch: number;
+  try {
+    epoch = Date.prototype.getTime.call(value);
+  } catch {
+    invalidIndexedResolution();
   }
-  return Object.freeze(snapshot);
+  if (!Number.isFinite(epoch)) invalidIndexedResolution();
+  return immutableDateSnapshot(epoch);
 }
 
 function closedRecordDescriptors(

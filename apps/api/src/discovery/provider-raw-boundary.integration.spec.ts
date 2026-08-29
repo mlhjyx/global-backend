@@ -61,10 +61,24 @@ describe("actual provider mapper output → governed Raw boundary", () => {
       now: new Date(NOW),
     }).rows;
 
-    expect(resolveRawSourceBatchByIndex(prepared, [])).toEqual([
-      { recordIndex: 0, kind: "WRITE", row: prepared[0] },
-      { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
-    ]);
+    const resolutions = resolveRawSourceBatchByIndex(prepared, []);
+    const first = resolutions[0]!;
+    if (first.kind !== "WRITE") throw new Error("expected WRITE");
+    expect({
+      ...first.row,
+      fetchedAt: first.row.fetchedAt?.toISOString() ?? null,
+      expiresAt: first.row.expiresAt.toISOString(),
+    }).toEqual({
+      ...prepared[0],
+      fetchedAt: prepared[0]!.fetchedAt?.toISOString() ?? null,
+      expiresAt: prepared[0]!.expiresAt.toISOString(),
+    });
+    expect(resolutions[0]).toMatchObject({ recordIndex: 0, kind: "WRITE" });
+    expect(resolutions[1]).toEqual({
+      recordIndex: 1,
+      kind: "REUSE_BATCH",
+      sourceRecordIndex: 0,
+    });
   });
 
   it("keeps Directory consumer output intact while withholding listing prose from Raw", () => {

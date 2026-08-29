@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PreparedRawSourceRow } from "./raw-source-ingestion";
+import {
+  resolveRawSourceBatchByIndex,
+  type PreparedRawSourceRow,
+} from "./raw-source-ingestion";
 import { persistPreparedRawSourceRecord } from "./raw-source-writer";
 
 const DB_HASH = "b".repeat(64);
@@ -61,7 +64,9 @@ describe("Raw Source controlled writer receipt authority", () => {
         inserted: true,
       },
     ]);
-    const row = preparedRow();
+    const resolution = resolveRawSourceBatchByIndex([preparedRow()], [])[0]!;
+    if (resolution.kind !== "WRITE") throw new Error("expected WRITE");
+    const row = resolution.row;
 
     await expect(
       persistPreparedRawSourceRecord({ $queryRaw: queryRaw } as never, {
@@ -86,6 +91,9 @@ describe("Raw Source controlled writer receipt authority", () => {
       unknown
     >;
     expect(command).toMatchObject({ schemaVersion: "raw-source-writer/v2" });
+    expect(command).toMatchObject({
+      fetchedAt: "2026-08-26T00:00:00.000Z",
+    });
     expect(command).not.toHaveProperty("expectedPayloadHash");
     expect(command).not.toHaveProperty("expectedPayloadBytes");
   });
