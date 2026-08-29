@@ -6,6 +6,7 @@ import {
   rawPayloadHash,
   rawSourceIngestLimits,
   reconcileRawSourceBatch,
+  resolveRawSourceBatchByIndex,
   type RawSourcePolicySnapshot,
 } from "./raw-source-ingestion";
 
@@ -1181,6 +1182,234 @@ describe("Raw Source v2 ingestion boundary", () => {
         ],
       ),
     ).toMatchObject({ rows: [], duplicateCount: 1 });
+  });
+
+  describe("index-preserving reconciliation", () => {
+    it("returns one frozen resolution per original accepted, quarantined, and rejected index", () => {
+      const accepted = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const quarantined = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: [{ ...POLICIES[0]!, reviewStatus: "SUSPENDED" }],
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const rejected = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ unknown: "not governed" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+
+      const resolutions = resolveRawSourceBatchByIndex(
+        [accepted, accepted, quarantined, rejected],
+        [],
+      );
+
+      expect(resolutions).toEqual([
+        { recordIndex: 0, kind: "WRITE", row: accepted },
+        { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
+        { recordIndex: 2, kind: "WRITE", row: quarantined },
+        { recordIndex: 3, kind: "WRITE", row: rejected },
+      ]);
+      expect(Object.isFrozen(resolutions)).toBe(true);
+      expect(resolutions.every(Object.isFrozen)).toBe(true);
+    });
+
+    it("resolves an exact persisted replay to its exact Raw UUID", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const rawRecordId = "83000000-0000-4000-8000-000000000001";
+
+      expect(
+        resolveRawSourceBatchByIndex([candidate], [
+          {
+            id: rawRecordId,
+            externalId: candidate.externalId,
+            ingestKey: candidate.ingestKey,
+            payloadHash: candidate.payloadHash,
+            payload: candidate.payload,
+          },
+        ]),
+      ).toEqual([{ recordIndex: 0, kind: "EXISTING", rawRecordId }]);
+    });
+
+    it("matches legacy external-ID drift and reuses the first drift receipt by original index", () => {
+      const original = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const changed = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name: "Changed GmbH" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const existing = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: original.externalId,
+        ingestKey: original.ingestKey,
+        payloadHash: original.payloadHash,
+        payload: original.payload,
+      };
+      const legacyDrift = reconcileRawSourceBatch([changed], [existing]).rows[0]!;
+
+      const resolutions = resolveRawSourceBatchByIndex(
+        [changed, changed],
+        [existing],
+      );
+
+      expect(resolutions).toEqual([
+        { recordIndex: 0, kind: "WRITE", row: legacyDrift },
+        { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
+      ]);
+      expect(resolutions[1]).toMatchObject({ sourceRecordIndex: 0 });
+    });
+
+    it("resolves repeated drift to an existing drift Raw UUID", () => {
+      const original = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const changed = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name: "Changed GmbH" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const originalReceipt = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: original.externalId,
+        ingestKey: original.ingestKey,
+        payloadHash: original.payloadHash,
+        payload: original.payload,
+      };
+      const drift = reconcileRawSourceBatch([changed], [originalReceipt]).rows[0]!;
+      const driftRecordId = "83000000-0000-4000-8000-000000000002";
+
+      expect(
+        resolveRawSourceBatchByIndex([changed], [
+          originalReceipt,
+          {
+            id: driftRecordId,
+            externalId: null,
+            ingestKey: drift.ingestKey,
+            payloadHash: drift.payloadHash,
+            payload: drift.payload,
+          },
+        ]),
+      ).toEqual([
+        { recordIndex: 0, kind: "EXISTING", rawRecordId: driftRecordId },
+      ]);
+    });
+
+    it.each([
+      [
+        "non-UUID id",
+        [
+          {
+            id: "raw-1",
+            externalId: "company-1",
+            ingestKey: "external:one",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "duplicate id",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-1",
+            ingestKey: "external:one",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-2",
+            ingestKey: "external:two",
+            payloadHash: "b".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "duplicate ingest key",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-1",
+            ingestKey: "external:same",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: "company-2",
+            ingestKey: "external:same",
+            payloadHash: "b".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "duplicate external id",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-same",
+            ingestKey: "external:one",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: "company-same",
+            ingestKey: "external:two",
+            payloadHash: "b".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "unaddressable receipt",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: null,
+            ingestKey: null,
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+    ])("rejects an invalid existing fact: %s", (_label, existing) => {
+      expect(() => resolveRawSourceBatchByIndex([], existing)).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+    });
   });
 
   it.each([

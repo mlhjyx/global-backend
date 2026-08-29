@@ -61,6 +61,23 @@ export interface ExistingRawSourceReceipt {
   payload: unknown;
 }
 
+export type RawSourceIndexedResolution =
+  | Readonly<{
+      recordIndex: number;
+      kind: "WRITE";
+      row: PreparedRawSourceRow;
+    }>
+  | Readonly<{
+      recordIndex: number;
+      kind: "EXISTING";
+      rawRecordId: string;
+    }>
+  | Readonly<{
+      recordIndex: number;
+      kind: "REUSE_BATCH";
+      sourceRecordIndex: number;
+    }>;
+
 const DEFAULT_LIMITS: RawSourceIngestLimits = Object.freeze({
   maxRecordBytes: 512 * 1024,
   maxBatchBytes: 5 * 1024 * 1024,
@@ -605,6 +622,230 @@ function receiptHash(receipt: ExistingRawSourceReceipt): string {
   } catch {
     return receipt.payloadHash ?? sha256(diagnosticShape(receipt.payload));
   }
+}
+
+const RAW_SOURCE_RECORD_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const RAW_SOURCE_PAYLOAD_HASH_PATTERN = /^[0-9a-f]{64}$/u;
+const EXISTING_RECEIPT_KEYS = Object.freeze([
+  "externalId",
+  "id",
+  "ingestKey",
+  "payload",
+  "payloadHash",
+]);
+
+type IndexedResolutionFact =
+  | Readonly<{
+      kind: "EXISTING";
+      rawRecordId: string;
+      receipt: ExistingRawSourceReceipt;
+    }>
+  | Readonly<{
+      kind: "BATCH";
+      sourceRecordIndex: number;
+      receipt: ExistingRawSourceReceipt;
+    }>;
+
+function invalidIndexedResolution(): never {
+  throw new Error("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+}
+
+function exactStringOrNull(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && value.length > 0);
+}
+
+function validateExistingRawSourceReceipts(
+  existing: readonly ExistingRawSourceReceipt[],
+): readonly ExistingRawSourceReceipt[] {
+  const ids = new Set<string>();
+  const ingestKeys = new Set<string>();
+  const externalIds = new Set<string>();
+
+  try {
+    for (const receipt of existing) {
+      const record = plainRecord(receipt);
+      if (!record) invalidIndexedResolution();
+      const descriptors = Object.getOwnPropertyDescriptors(record);
+      const keys = Reflect.ownKeys(record);
+      if (
+        keys.some((key) => typeof key !== "string") ||
+        keys.length !== EXISTING_RECEIPT_KEYS.length ||
+        !EXISTING_RECEIPT_KEYS.every((key) => keys.includes(key)) ||
+        Object.values(descriptors).some(
+          (descriptor) => !descriptor.enumerable || !("value" in descriptor),
+        )
+      ) {
+        invalidIndexedResolution();
+      }
+
+      const id = descriptors.id?.value;
+      const externalId = descriptors.externalId?.value;
+      const ingestKey = descriptors.ingestKey?.value;
+      const payloadHash = descriptors.payloadHash?.value;
+      if (
+        typeof id !== "string" ||
+        !RAW_SOURCE_RECORD_ID_PATTERN.test(id) ||
+        !exactStringOrNull(externalId) ||
+        !exactStringOrNull(ingestKey) ||
+        (payloadHash !== null &&
+          (typeof payloadHash !== "string" ||
+            !RAW_SOURCE_PAYLOAD_HASH_PATTERN.test(payloadHash))) ||
+        (externalId === null && ingestKey === null) ||
+        ids.has(id) ||
+        (ingestKey !== null && ingestKeys.has(ingestKey)) ||
+        (externalId !== null && externalIds.has(externalId))
+      ) {
+        invalidIndexedResolution();
+      }
+      rawPayloadHash(descriptors.payload?.value);
+      ids.add(id);
+      if (ingestKey !== null) ingestKeys.add(ingestKey);
+      if (externalId !== null) externalIds.add(externalId);
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "RAW_SOURCE_INDEXED_RESOLUTION_INVALID"
+    ) {
+      throw error;
+    }
+    invalidIndexedResolution();
+  }
+  return existing;
+}
+
+function sameResolutionFact(
+  left: IndexedResolutionFact,
+  right: IndexedResolutionFact,
+): boolean {
+  return left.kind === "EXISTING" && right.kind === "EXISTING"
+    ? left.rawRecordId === right.rawRecordId
+    : left.kind === "BATCH" && right.kind === "BATCH"
+      ? left.sourceRecordIndex === right.sourceRecordIndex
+      : false;
+}
+
+function resolutionForFact(
+  recordIndex: number,
+  fact: IndexedResolutionFact,
+): RawSourceIndexedResolution {
+  return fact.kind === "EXISTING"
+    ? Object.freeze({
+        recordIndex,
+        kind: "EXISTING" as const,
+        rawRecordId: fact.rawRecordId,
+      })
+    : Object.freeze({
+        recordIndex,
+        kind: "REUSE_BATCH" as const,
+        sourceRecordIndex: fact.sourceRecordIndex,
+      });
+}
+
+function driftRowForIndexedResolution(
+  candidate: PreparedRawSourceRow,
+  prior: IndexedResolutionFact,
+): PreparedRawSourceRow {
+  const driftPayload = minimalReceipt(
+    "QUARANTINED",
+    "PROCESSING_KEY_DRIFT",
+    candidate.payloadHash,
+    candidate.payloadBytes,
+    prior.kind === "EXISTING" ? prior.rawRecordId : undefined,
+  );
+  const payloadHash = rawPayloadHash(driftPayload);
+  return {
+    ...candidate,
+    externalId: null,
+    ingestKey: ingestKeyFor(driftPayload, payloadHash),
+    ingestStatus: "QUARANTINED",
+    dispositionCode: "PROCESSING_KEY_DRIFT",
+    payload: driftPayload,
+    payloadHash,
+    payloadBytes: Buffer.byteLength(canonicalJson(driftPayload), "utf8"),
+  };
+}
+
+export function resolveRawSourceBatchByIndex(
+  prepared: readonly PreparedRawSourceRow[],
+  existing: readonly ExistingRawSourceReceipt[],
+): readonly RawSourceIndexedResolution[] {
+  const byKey = new Map<string, IndexedResolutionFact>();
+  const byExternalId = new Map<string, IndexedResolutionFact>();
+
+  for (const receipt of validateExistingRawSourceReceipts(existing)) {
+    const fact: IndexedResolutionFact = Object.freeze({
+      kind: "EXISTING",
+      rawRecordId: receipt.id,
+      receipt,
+    });
+    if (receipt.ingestKey) byKey.set(receipt.ingestKey, fact);
+    if (receipt.externalId) byExternalId.set(receipt.externalId, fact);
+  }
+
+  const lookup = (candidate: PreparedRawSourceRow) => {
+    const byIngestKey = byKey.get(candidate.ingestKey);
+    const byExternal = candidate.externalId
+      ? byExternalId.get(candidate.externalId)
+      : undefined;
+    if (
+      byIngestKey &&
+      byExternal &&
+      !sameResolutionFact(byIngestKey, byExternal)
+    ) {
+      invalidIndexedResolution();
+    }
+    return byIngestKey ?? byExternal;
+  };
+
+  const rememberWrite = (recordIndex: number, row: PreparedRawSourceRow) => {
+    const fact: IndexedResolutionFact = Object.freeze({
+      kind: "BATCH",
+      sourceRecordIndex: recordIndex,
+      receipt: {
+        id: "pending",
+        externalId: row.externalId,
+        ingestKey: row.ingestKey,
+        payloadHash: row.payloadHash,
+        payload: row.payload,
+      },
+    });
+    byKey.set(row.ingestKey, fact);
+    if (row.externalId) byExternalId.set(row.externalId, fact);
+  };
+
+  const resolutions = prepared.map((candidate, recordIndex) => {
+    const prior = lookup(candidate);
+    if (!prior) {
+      rememberWrite(recordIndex, candidate);
+      return Object.freeze({
+        recordIndex,
+        kind: "WRITE" as const,
+        row: candidate,
+      });
+    }
+    if (receiptHash(prior.receipt) === candidate.payloadHash) {
+      return resolutionForFact(recordIndex, prior);
+    }
+
+    const drift = driftRowForIndexedResolution(candidate, prior);
+    const priorDrift = lookup(drift);
+    if (priorDrift) {
+      if (receiptHash(priorDrift.receipt) !== drift.payloadHash) {
+        invalidIndexedResolution();
+      }
+      return resolutionForFact(recordIndex, priorDrift);
+    }
+    rememberWrite(recordIndex, drift);
+    return Object.freeze({
+      recordIndex,
+      kind: "WRITE" as const,
+      row: drift,
+    });
+  });
+
+  return Object.freeze(resolutions);
 }
 
 export function reconcileRawSourceBatch(

@@ -8,6 +8,7 @@ import { mapTradeFairExhibitorToRecord } from "./providers/trade-fair.provider";
 import { mapWikidataCompanyToRecord } from "./providers/wikidata.provider";
 import {
   prepareRawSourceBatch,
+  resolveRawSourceBatchByIndex,
   type RawSourcePolicySnapshot,
 } from "./raw-source-ingestion";
 
@@ -42,6 +43,30 @@ function prepare(providerKey: string, record: unknown, policyDomain: string) {
 }
 
 describe("actual provider mapper output → governed Raw boundary", () => {
+  it("preserves each original mapper index when identical provider records share one Raw write", () => {
+    const mapped = mapDirectoryCompanyToRecord({
+      company: {
+        name: "Parker Hannifin",
+        website: "https://parker.example/",
+      },
+      listKind: "association_members",
+      pageUrl: "https://directory.example/members",
+      sourceClass: "industry_data",
+    });
+    const prepared = prepareRawSourceBatch({
+      providerKey: "directory",
+      records: [mapped, mapped],
+      policies: policies("directory.example"),
+      limits: LIMITS,
+      now: new Date(NOW),
+    }).rows;
+
+    expect(resolveRawSourceBatchByIndex(prepared, [])).toEqual([
+      { recordIndex: 0, kind: "WRITE", row: prepared[0] },
+      { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
+    ]);
+  });
+
   it("keeps Directory consumer output intact while withholding listing prose from Raw", () => {
     const mapped = mapDirectoryCompanyToRecord({
       company: {
