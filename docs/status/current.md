@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[发布路线](../roadmap/release-plan.md)、[ADR registry](../adr/registry.md)、本页所列 exact Git/worktree 与 development-runtime 只读观察
-> 最后核验：2026-08-29T17:08:17+08:00（Asia/Shanghai）
+> 最后核验：2026-08-29T19:07:39+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `/global/backend` root `main` | `HEAD=23d111f7b400403deb7466abf34ab709685b8376`; local `origin/main=23d111f7b400403deb7466abf34ab709685b8376`; clean at capture | Live local Git readback. This proves only this checkout and locally available remote-tracking ref; no fetch or remote readback occurred. |
 | Phase 0 controller | `codex/global-product-program-phase0@23d111f7b400403deb7466abf34ab709685b8376`, `0 ahead / 0 behind` local `origin/main`; pre-existing untracked plan `docs/superpowers/plans/2026-08-29-global-product-program-phase0.md` is preserved | Live local Git readback. The controller is the only Phase 0 tracked-doc writer. |
-| Program A | `/global/backend/.codex/worktrees/production-parity-capability-cutover`; `codex/production-parity-capability-cutover@fc6d78b5ce6bb11fc25ca381350f067766f77970`; clean; `51 ahead / 35 behind` local `origin/main` | Live local Git readback. Not a current-main acceptance claim. |
+| Program A | `/global/backend/.codex/worktrees/production-parity-capability-cutover`; `codex/production-parity-capability-cutover@91cae351795cceced59893bcf552c2b502a4ebaa`; clean; `MERGE_HEAD=NONE`; `59 ahead / 0 behind` local `origin/main@23d111f7b400403deb7466abf34ab709685b8376` | Live local Git readback. This is the closed 41-commit audit packet, not a current-main acceptance claim; any later head/index/working-tree/merge movement reopens the delta audit. |
 | Program B | `/global/backend/.codex/worktrees/pr407-raw-source-governance`; `codex/pr407-raw-source-governance@96e22e82009992aa20523a4d3075943b695f00c2`; clean; `0 ahead / 1 behind` local `origin/main`; configured `origin/codex/pr407-raw-source-governance` is `GONE` | Live local Git readback. A gone local tracking ref is not a PR or merge verdict. |
 | Closeout plan | `/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan`; `codex/root-worktree-remote-closeout-plan@3c9156d05ba6509c58bd4b806349fb5f07aef9a6`; clean; `28 ahead / 45 behind` local `origin/main` | Live local Git readback; provenance only. |
 | GrowthOS local source | `/global/frontend/growthos-source`; `codex/production-parity-jwks-budget-grants@251dd1ecf15b1ebe58896027dc9c8a0d9d5ac8aa`; dirty paths: `scripts/materialize-and-build.mjs`, `scripts/materialize-and-build.spec.mjs`, `scripts/authority-builder.mjs`; untracked `node_modules/` content was not read | Live local Git readback. Status is `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`; local source neither proves a remote release nor user availability. |
@@ -29,7 +29,7 @@
 
 | Program | RAG | Current owner boundary | Phase 0 condition |
 | --- | --- | --- | --- |
-| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `HOLD_OWNERSHIP`: the plan snapshot `Program A=6c3ca8a0 / RED-only` has drifted. Audit observed successor `655d1b8986950807b76c0005f20cc10e92ce2df7` adding migration `20260827200000_discovery_governed_materialization`, then current head `fc6d78b5ce6bb11fc25ca381350f067766f77970` adding its writer. All post-RED implementation is `QUARANTINED / HOLD_OWNERSHIP`; it is retained provenance, not accepted, reverted, or adopted. |
+| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `HOLD_OWNERSHIP`: the audited post-`ed615d1b` packet has 41 commits. Its first 35 are accepted PR #423/main ancestry (`KEEP_AS_MAIN_INTEGRATION_PROVENANCE`); `b57af498` is two-parent main-integration provenance; `fb65f25a`, `7db10915`, `58e151ba`, `f68b67ed`, `91cae351` are B-owned Activity/provider/receipt deltas located on the A branch, not accepted A work. Original Task 5.2 migration/writer commits `655d1b89`, `fc6d78b5`, `166b7507`, `ed615d1b` remain `QUARANTINED / HOLD_OWNERSHIP`: retained provenance only, not accepted, reverted, or adopted. `DiscoveryGovernedMaterializationWriter` production callers=`NONE`, but its tracked Prisma migration is deploy-runner-reachable, so the branch remains unsafe to deploy. |
 | B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | Exact PR-worktree source captured; its upstream is gone. Task 2 must make the A/B producer/consumer/transaction split explicit before implementation. |
 | C — SaaS handoff/commercial loop | RED | Owns server-side handoff consumer, receipt, QualificationSnapshot, Opportunity, QGO/SAO/CLOSED, SalesAcceptance, CommercialOutcome and Conversation linkage; it must commit before ACK and must not copy Buyer Intelligence SoR | No selected C1 implementation card or verified consumer/runtime path. Owner/assignee remains `UNKNOWN`/`UNASSIGNED`, not inferred from a branch. |
 
@@ -39,7 +39,7 @@ Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → 
 
 | Gate | Current verdict | Evidence and blocker |
 | --- | --- | --- |
-| G0 — Truth & Ownership | `HOLD_OWNERSHIP` | A/B three-way assertion audit, unique owner decision, quarantine review and active-writer/provenance correction are not complete. |
+| G0 — Truth & Ownership | `HOLD_OWNERSHIP` | `DEC-GPP-001`/ADR-025 remain fixed and the exact delta packet is classified, but writer inactivity is unproven; the Program A plan identity and Task 5.2 GREEN/complete language are stale; the quarantined deployable migration/writer remains branch-reachable; and no single current-main successor/handoff is assigned. |
 | G1 — Product/UX/Contract | `AMBER / DOC_TRUTH_SYNC_PENDING` | Phase 0 baseline exists; Task 4 still must align product, UX, capability, object, scenario and frontend contract truth to the ownership decision. |
 | G2 — Source/TDD/Security | `AMBER / SOURCE_ONLY` | Exact local source heads are captured and structural verifiers passed, but the A/B interface has not been accepted and C consumer TDD/security work is not selected. |
 | G3 — Integration/Data | `RED / NOT_INTEGRATED` | No accepted A/B interface, Program C consumer, durable handoff transaction, current-data integration or end-to-end integration evidence exists. |
@@ -54,8 +54,8 @@ Captured at the timestamp above by `systemctl show` and `ss -ltnp`; no service w
 
 | Surface | Observation | Meaning and limitation |
 | --- | --- | --- |
-| `global-api.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=1850`, `ExecMainStatus=0` | Degraded development-runtime observation, not a healthy API proof. |
-| `global-worker.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=1850`, `ExecMainStatus=0` | Degraded development-runtime observation, not a consuming Worker proof. |
+| `global-api.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=3221`, `ExecMainStatus=0` | Degraded development-runtime observation, not a healthy API proof. |
+| `global-worker.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=3221`, `ExecMainStatus=0` | Degraded development-runtime observation, not a consuming Worker proof. |
 | `temporal-dev.service` | `ActiveState=active`, `SubState=running`, `NRestarts=0`, `ExecMainStatus=0` | Only the service-manager state is observed; this does not prove workflow execution. |
 | `3000` | No listener observed | API reachability is not established. |
 | `3001` | Docker proxy listens on `0.0.0.0:3001` and `[::]:3001` | Observed non-loopback exposure conflicts with the development-port policy; diagnose read-only before any mutation. |

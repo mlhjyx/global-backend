@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；Program A 的 closing observation 是 `ed615d1bd9beda77e43091f8ce3eb6b6424c9633`，其 main 未完成合并仅为审计观察，不是已接纳 source
+> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；Program A closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 main `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -32,11 +32,11 @@
 
 | Conflict ID | 主题 | 当前状态 | 唯一 Owner | 审计事实与处置 |
 |---|---|---|---|---|
-| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 quarantined commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b`。不接纳、不 revert 任一 commit/migration/source；仅保留 provenance，等待 exact owner、head 和 disposition。 |
+| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `HOLD_OWNERSHIP` | `OWN-PRODUCT` | `DEC-GPP-001=APPROVED` 不升级 implementation。RED checkpoint=`6c3ca8a0c9715b325eee1cfccf38f7a07db51429`；四个 Task 5.2 commits=`655d1b89`、`fc6d78b5`、`166b7507`、`ed615d1b` 继续 `QUARANTINED / HOLD_OWNERSHIP`，不接纳、不 revert。后续 packet 中 35 个 main ancestry commits 仅为 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`，不是 A implementation；`fb65f25a`、`7db10915`、`58e151ba`、`f68b67ed`、`91cae351` 是位于 A branch 的 B-owned deltas，等待 current-main B successor disposition。 |
 
 | Blocker ID | 阻塞 | Accountable Owner | 最新关闭条件 | 安全默认 |
 |---|---|---|---|---|
-| `BLK-GPP-001` | Program A 活跃 overlapping writer / unresolved merge。closing observation=`MERGE_HEAD=23d111f7b400403deb7466abf34ab709685b8376`，81 tracked entries、7 unmerged paths。 | `OWN-PRODUCT` | frozen known head、clean/unmerged worktree、complete delta audit，且已指派 single current-main writer。 | `HOLD_OWNERSHIP`；不继续实现或集成。 |
+| `BLK-GPP-001` | Git merge-conflict shape 已关闭，但 Program A writer 仍 active/unproven inactive；plan identity 与 Task 5.2 GREEN/complete claims 仍 stale；quarantined migration/writer 仍 branch-deployable；head movement 必须重开 delta；尚无 single current-main writer/handoff。 | `OWN-PRODUCT` | 在所有 top-level writer 停止后冻结 clean/no-`MERGE_HEAD` exact head；对 `91cae351` 后每个 commit 重开并分类 delta；更正 A plan/Task 5.2 为 quarantined/HOLD；处置每个 B-owned delta 并指派单一 current-main B successor；确保 A successor 不含 accepted Discovery migration/writer，再独立 G0 readback。 | `HOLD_OWNERSHIP`；不继续实现、集成、migration、runtime、release 或 pilot promotion。 |
 
 固定接口仅为：
 
@@ -50,7 +50,7 @@ ExecutionAuthority
 → Domain ACK
 ```
 
-当前 B gaps 仅作实现前记录：缺 per-operation header、dense `recordIndex→RawUUID`、Raw→Canonical 或 terminal outcome、B→A generic relation calls，以及 complete B outcome 后的 exact replay 和 ACK readiness；本登记不暗示这些缺口已实现、已验证或获授权施工。
+当前 B gaps 仅作实现前记录：Trade Fair/Public Web/Directory 的 provider causal-receipt DTO 已存在，但仍是 optional、unconsumed 的 producer-side DTO；它只改善 causal receipt coverage，未持久化 per-operation header、dense `recordIndex→RawUUID`、Raw→Canonical/terminal outcomes 或 B→A generic relation calls，也未完成 exact replay/final ACK readiness。本登记不暗示这些缺口已实现、已验证或获授权施工。
 
 ## 2. Gate 2 已批准决议
 
