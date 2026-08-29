@@ -593,20 +593,37 @@ describe("governed relation append/attest database contract", () => {
   });
 
   it("fails closed for caller and stored authority/account/operation/ACK/result/root/source drift", () => {
+    psql(asApp(selectCall(APPEND, factsA), WS_A));
     const vectors = [
-      [APPEND, factsA, { authorityId: factsB.authorityId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { accountId: factsB.accountId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { generation: 2 }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { operationId: factsB.operationId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { ackId: factsB.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { resultDigest: factsB.resultDigest }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { rootSubjectType: "other" }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { rootSubjectId: CHILD_A }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
-      [APPEND, factsA, { sourceUuid: null, sourceSha256: null }, "GOVERNED_SUBJECT_RELATION_INVALID"],
-      [APPEND, factsA, { sourceUuid: SOURCE_A, sourceSha256: CONTRACT_A }, "GOVERNED_SUBJECT_RELATION_INVALID"],
-      [APPEND, factsA, { workspaceId: WS_B }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ authorityId: factsB.authorityId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ accountId: factsB.accountId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ generation: 2 }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ operationId: factsB.operationId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ ackId: factsB.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ resultDigest: factsB.resultDigest }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
+      [{ sourceUuid: null, sourceSha256: null }, "GOVERNED_SUBJECT_RELATION_INVALID"],
+      [{ sourceUuid: SOURCE_A, sourceSha256: CONTRACT_A }, "GOVERNED_SUBJECT_RELATION_INVALID"],
+      [{ workspaceId: WS_B }, "GOVERNED_OPERATION_SUBJECT_INVALID"],
     ];
-    for (const [fn,facts,override,code] of vectors) captureFailure(fn,facts,override,code);
+    for (const fn of [APPEND, ATTEST]) {
+      for (const [override, code] of vectors) captureFailure(fn, factsA, override, code);
+    }
+  });
+
+  it("rejects each non-canonical root field for append and attest", () => {
+    psql(asApp(selectCall(APPEND, factsA), WS_A));
+    const rootDrifts = [
+      { rootSubjectType: "other" },
+      { rootSubjectId: CHILD_A },
+      { rootDataClass: "PERSONAL" },
+      { rootDsrSubjectType: "company" },
+      { rootDsrSubjectId: "71000000-0000-4000-8000-000000000001" },
+    ];
+    for (const fn of [APPEND, ATTEST]) {
+      for (const override of rootDrifts) {
+        captureFailure(fn, factsA, override, "GOVERNED_OPERATION_SUBJECT_INVALID");
+      }
+    }
   });
 
   it("rejects a non-settled stored operation and cross-operation ACK tuples", () => {
@@ -628,16 +645,11 @@ describe("governed relation append/attest database contract", () => {
       relationKey: "parent:seed", sourceUuid: SOURCE_B,
     }), WS_A)));
     const baseline = {
-      rootDataClass: "PERSONAL", rootDsrSubjectType: "company",
-      rootDsrSubjectId: "71000000-0000-4000-8000-000000000001",
       childDataClass: "PERSONAL", childDsrSubjectType: "company",
       childDsrSubjectId: "71000000-0000-4000-8000-000000000002",
     };
     psql(asApp(selectCall(APPEND, factsA, baseline), WS_A));
     const conflicts = [
-      { rootDataClass: "NON_PERSONAL", rootDsrSubjectType: null, rootDsrSubjectId: null },
-      { rootDsrSubjectType: "person" },
-      { rootDsrSubjectId: "71000000-0000-4000-8000-000000000011" },
       { parentId: parentSeed[2] },
       { childType: "derived_record" },
       { childId: CHILD_B },
