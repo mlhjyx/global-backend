@@ -37,7 +37,10 @@ import {
   type GuessEmailsHttpRequestBody,
   type VerifyContactPointHttpRequestBody,
 } from '../execution-budget/execution-budget-request-scope';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -317,7 +320,7 @@ export class DiscoveryService {
             receipt: DurableExecutionReceipt,
           ): void => {
             if (!contactReceiptProducer(producerId)) {
-              throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+              throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
             }
             durableReceipts.push({ producerId, receipt });
           };
@@ -563,7 +566,7 @@ export class DiscoveryService {
               ),
             onDurableReceipt: (producerId, receipt) => {
               if (producerId !== 'smtp.rcpt_probe') {
-                throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+                throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
               }
               durableReceipts.push(receipt);
             },
@@ -756,7 +759,7 @@ export class DiscoveryService {
       receipt: DurableExecutionReceipt,
     ): void => {
       if (producerId !== 'smtp.rcpt_probe') {
-        throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+        throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
       }
       smtpReceipts.push(receipt);
     };

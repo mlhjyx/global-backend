@@ -29,7 +29,10 @@ import {
 import { normForMatch } from '../discovery/name-match';
 import { foldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
 import { encryptPii, decryptPii, blindContactKey, piiKeyConfigured } from '../compliance/pii-crypto';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 
 /** §8.8 治理域（与 googlePatentsSearchTool.compliance.policyDomain 一致）。 */
 export const PATENT_POLICY_DOMAIN = 'bigquery.googleapis.com';
@@ -565,7 +568,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
       !Number.isSafeInteger(row.cached) ||
       !Number.isSafeInteger(row.empty)
     ) {
-      throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+      throw new ExecutionControlError('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
     }
     return {
       status: 'OK',

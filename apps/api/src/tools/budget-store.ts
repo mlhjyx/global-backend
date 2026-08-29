@@ -42,7 +42,10 @@ import {
   type DurableExecutionReceiptFacts,
 } from '../durable-results/durable-execution-receipt';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 const MAX_KEY_LENGTH = 200;
 
 function bindExpectedArtifactSubject(
@@ -509,7 +512,7 @@ function durableReceiptFromLedgerRow(input: {
 }
 
 function ledgerReceiptMismatch(): never {
-  throw new Error('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+  throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
 }
 
 function canonicalJson(value: unknown): string {
@@ -676,11 +679,11 @@ function receiptFactsForSettlement(
   receiptFacts: DurableExecutionReceiptFacts | undefined,
 ): DurableExecutionReceiptFacts | null {
   if (!projection) {
-    if (receiptFacts) throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    if (receiptFacts) throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
     return null;
   }
   if (!receiptFacts) {
-    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
+    throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
   }
   return parseDurableExecutionReceiptFacts(receiptFacts, projection.schema);
 }
@@ -1201,7 +1204,7 @@ export class PostgresBudgetStore implements BudgetStore {
           apply: async () => undefined,
         });
         if (acknowledgement.status === 'UNRECEIPTED') {
-          throw new Error('DOMAIN_ACK_RECEIPT_REQUIRED');
+          throw new ExecutionControlError('DOMAIN_ACK_RECEIPT_REQUIRED');
         }
         return {
           chargedMicrousd: row.charged_microusd,

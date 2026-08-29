@@ -1,4 +1,5 @@
 import type { ModelResult } from '../model-gateway/types';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import type { ToolResult } from '../tools/tool-contract';
 import {
   parseDurableExecutionReceiptFacts,
@@ -51,7 +52,7 @@ interface PatentCostFacts {
 const DECIMAL = /^(0|[1-9][0-9]{0,39})$/u;
 
 function microusd(value: bigint): string {
-  if (value < 0n) throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+  if (value < 0n) throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
   return value.toString();
 }
 
@@ -59,12 +60,12 @@ function patentCostFacts(result: ToolResult<unknown>): PatentCostFacts {
   const data = result.data as { readonly costFacts?: unknown };
   const value = data?.costFacts;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
   }
   const record = value as Record<string, unknown>;
   if (Object.keys(record).sort().join(',') !==
     'costBasis,maxRows,maximumBytesBilled,observedBytesBilled') {
-    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
   }
   const basis = record.costBasis;
   const maximum = record.maximumBytesBilled;
@@ -77,14 +78,14 @@ function patentCostFacts(result: ToolResult<unknown>): PatentCostFacts {
     !Number.isSafeInteger(maxRows) || (maxRows as number) < 0 || (maxRows as number) > 50 ||
     observed !== null && BigInt(observed) > BigInt(maximum)
   ) {
-    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
   }
   if (
     basis === 'not_incurred' && (maximum !== '0' || observed !== null || maxRows !== 0) ||
     basis === 'provider_reported' && observed === null ||
     basis === 'estimated_upper_bound' && observed !== null
   ) {
-    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
   }
   return Object.freeze({
     costBasis: basis as PatentCostBasis,

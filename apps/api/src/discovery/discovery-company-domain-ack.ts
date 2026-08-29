@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 
 export const DISCOVERY_COMPANY_DOMAIN_ACK_INVALID =
   'DISCOVERY_COMPANY_DOMAIN_ACK_INVALID' as const;
@@ -27,7 +28,7 @@ const PROVIDER_KEY = /^[a-z][a-z0-9_]{0,63}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 
 function invalid(): never {
-  throw new Error(DISCOVERY_COMPANY_DOMAIN_ACK_INVALID);
+  throw new ExecutionControlError(DISCOVERY_COMPANY_DOMAIN_ACK_INVALID);
 }
 
 function closedInput(value: unknown): DiscoveryCompanyDomainAckInput {
