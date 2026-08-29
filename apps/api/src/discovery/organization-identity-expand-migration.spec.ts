@@ -1,20 +1,27 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migrationName = "20260829090000_organization_identity_v2_expand_ddl";
+const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
+const repositoryRoot = resolve(process.cwd(), "../..");
 const migrationPath = resolve(
-  process.cwd(),
-  `../../packages/db/prisma/migrations/${migrationName}/migration.sql`,
-);
-const schemaPath = resolve(
-  process.cwd(),
-  "../../packages/db/prisma/schema.prisma",
+  repositoryRoot,
+  `packages/db/prisma/migrations/${migrationName}/migration.sql`,
 );
 const migration = existsSync(migrationPath)
   ? readFileSync(migrationPath, "utf8")
   : "";
-const schema = readFileSync(schemaPath, "utf8");
+const schema = execFileSync(
+  "git",
+  ["show", `${expandCommit}:packages/db/prisma/schema.prisma`],
+  {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  },
+);
 
 const tenantTables = [
   "organization_identifier",
