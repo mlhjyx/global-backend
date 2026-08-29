@@ -16,10 +16,11 @@
 
 ## 1. Exact source baseline
 
+Phase 0 文档分支的固定施工基线是 `23d111f7b400403deb7466abf34ab709685b8376`；该 SHA 是 construction-base provenance，不是当前 documentation candidate head。精确本地候选由 Git 当前 HEAD 与冻结的 review/handoff packet 绑定，不嵌入本 tracked 页，因为一个 commit 无法稳定包含自身最终 SHA。
+
 | Subject | Exact head / state | Evidence class and limitation |
 | --- | --- | --- |
 | `/global/backend` root `main` | `HEAD=23d111f7b400403deb7466abf34ab709685b8376`; local `origin/main=23d111f7b400403deb7466abf34ab709685b8376`; clean at capture | Live local Git readback. This proves only this checkout and locally available remote-tracking ref; no fetch or remote readback occurred. |
-| Phase 0 controller | `codex/global-product-program-phase0@23d111f7b400403deb7466abf34ab709685b8376`, `0 ahead / 0 behind` local `origin/main`; pre-existing untracked plan `docs/superpowers/plans/2026-08-29-global-product-program-phase0.md` is preserved | Live local Git readback. The controller is the only Phase 0 tracked-doc writer. |
 | Program A | `/global/backend/.codex/worktrees/production-parity-capability-cutover`; `codex/production-parity-capability-cutover@91cae351795cceced59893bcf552c2b502a4ebaa`; clean; `MERGE_HEAD=NONE`; `59 ahead / 0 behind` local `origin/main@23d111f7b400403deb7466abf34ab709685b8376` | Live local Git readback. This is the closed 41-commit audit packet, not a current-main acceptance claim; any later head/index/working-tree/merge movement reopens the delta audit. |
 | Program B | `/global/backend/.codex/worktrees/pr407-raw-source-governance`; `codex/pr407-raw-source-governance@96e22e82009992aa20523a4d3075943b695f00c2`; clean; `0 ahead / 1 behind` local `origin/main`; configured `origin/codex/pr407-raw-source-governance` is `GONE` | Live local Git readback. A gone local tracking ref is not a PR or merge verdict. |
 | Closeout plan | `/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan`; `codex/root-worktree-remote-closeout-plan@3c9156d05ba6509c58bd4b806349fb5f07aef9a6`; clean; `28 ahead / 45 behind` local `origin/main` | Live local Git readback; provenance only. |
@@ -30,7 +31,7 @@
 | Program | RAG | Current owner boundary | Phase 0 condition |
 | --- | --- | --- | --- |
 | A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `HOLD_OWNERSHIP`: the audited post-`ed615d1b` packet has 41 commits. Its first 35 are accepted PR #423/main ancestry (`KEEP_AS_MAIN_INTEGRATION_PROVENANCE`); `b57af498` is two-parent main-integration provenance; `fb65f25a`, `7db10915`, `58e151ba`, `f68b67ed`, `91cae351` are B-owned Activity/provider/receipt deltas located on the A branch, not accepted A work. Original Task 5.2 migration/writer commits `655d1b89`, `fc6d78b5`, `166b7507`, `ed615d1b` remain `QUARANTINED / HOLD_OWNERSHIP`: retained provenance only, not accepted, reverted, or adopted. `DiscoveryGovernedMaterializationWriter` production callers=`NONE`, but its tracked Prisma migration is deploy-runner-reachable, so the branch remains unsafe to deploy. |
-| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | Exact PR-worktree source captured; its upstream is gone. Task 2 must make the A/B producer/consumer/transaction split explicit before implementation. |
+| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | Exact PR-worktree source captured; its upstream is gone. ADR-025/`DEC-GPP-001` 已明确 producer/consumer/transaction split；下一个 ownership 需求是一张从 current main 开始、具有唯一 writer 的 Program B successor/card/handoff，而不是将 A 分支上的 B-owned delta 当作已接纳实现。 |
 | C — SaaS handoff/commercial loop | RED | Owns server-side handoff consumer, receipt, QualificationSnapshot, Opportunity, QGO/SAO/CLOSED, SalesAcceptance, CommercialOutcome and Conversation linkage; it must commit before ACK and must not copy Buyer Intelligence SoR | No selected C1 implementation card or verified consumer/runtime path. Owner/assignee remains `UNKNOWN`/`UNASSIGNED`, not inferred from a branch. |
 
 Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → B-owned QueryReceipt → B-owned RawSourceRecord UUID → B-owned IdentityLink/CanonicalCompany UUID → A-owned append governed child/relation primitive → Domain ACK`.
@@ -40,9 +41,9 @@ Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → 
 | Gate | Current verdict | Evidence and blocker |
 | --- | --- | --- |
 | G0 — Truth & Ownership | `HOLD_OWNERSHIP` | `DEC-GPP-001`/ADR-025 remain fixed and the exact delta packet is classified, but writer inactivity is unproven; the Program A plan identity and Task 5.2 GREEN/complete language are stale; the quarantined deployable migration/writer remains branch-reachable; and no single current-main successor/handoff is assigned. |
-| G1 — Product/UX/Contract | `AMBER / DOC_TRUTH_SYNC_PENDING` | Phase 0 baseline exists; Task 4 still must align product, UX, capability, object, scenario and frontend contract truth to the ownership decision. |
-| G2 — Source/TDD/Security | `AMBER / SOURCE_ONLY` | Exact local source heads are captured and structural verifiers passed, but the A/B interface has not been accepted and C consumer TDD/security work is not selected. |
-| G3 — Integration/Data | `RED / NOT_INTEGRATED` | No accepted A/B interface, Program C consumer, durable handoff transaction, current-data integration or end-to-end integration evidence exists. |
+| G1 — Product/UX/Contract | `AMBER / SPEC_ALIGNED / MACHINE_CONTRACT_AND_IMPLEMENTATION_PENDING` | Task 4/product docs are complete. Remaining gaps include the Program C machine contract/source, formal capability manifest and release adoption, and user validation. |
+| G2 — Source/TDD/Security | `AMBER / SOURCE_REVIEWED_NOT_ACCEPTED` | ADR-025/`DEC-GPP-001` ownership and interface are accepted, but the Program A quarantined source and B-owned deltas are not accepted as Program A implementation; Program C C1 TDD/security has not started; GrowthOS remote CI/release remains unverified. |
+| G3 — Integration/Data | `RED / NOT_INTEGRATED` | No accepted A/B seam implementation, Program C consumer, durable handoff transaction, current-data integration or end-to-end integration evidence exists. |
 | G4 — Release Candidate | `RED / NO_RELEASE_CANDIDATE` | No current release-candidate package, current PASS RuntimeEvidence or Release Bundle is present; governance count is `release_bundles=0`. |
 | G5 — Runtime Observed | `RED / DEGRADED_NO_CURRENT_EVIDENCE` | API and Worker are restart-looping; governance count is `runtime_current=0`, `runtime_historical=0`. Service observation cannot substitute for valid RuntimeEvidence. |
 | G6 — UAT Accepted | `RED / NOT_VALIDATED` | No evidence of an end-to-end user journey, human QGO decision, user acceptance or UAT. |
@@ -62,7 +63,19 @@ Captured at the timestamp above by `systemctl show` and `ss -ltnp`; no service w
 | `3002` / `3003` | Docker proxy listens on `0.0.0.0:3002` / `0.0.0.0:3003` | Observed non-loopback exposure; not deployment proof. |
 | `8080` | Java listens on `*:8080` | Observed wildcard listener; identity and external reachability are unverified. |
 
-## 4. Product path and current priority
+## 4. Other readiness and security gates
+
+| Gate | Current disposition | Unique authority/history pointer and limitation |
+| --- | --- | --- |
+| Production dependency/advisory audit baseline | `UNKNOWN / REVALIDATION_REQUIRED` | The [2026-08-24 changelog entry](../roadmap/changelog.md#2026-08-24-production-parity-personal_data-cleanup-runtime-readback) is historical provenance only; no prior count is restored as current and the present lock/advisory set must be recaptured. |
+| Live required ruleset / branch protection / Dependency Review / CodeQL configuration | `EXTERNAL_STATE_UNVERIFIED` | [Repository ruleset authority](../backend/ci-merge-automation.md#仓内-required-contexts-与外部-ruleset) states that repository files cannot prove live external enforcement; no external readback was performed in this Phase 0 fix. |
+| Container / Compose / IaC supply-chain gate | `PARTIAL / REVALIDATION_REQUIRED` | The [dependency and security aggregate-gate sequence](../backend/ci-merge-automation.md#依赖与安全聚合门的启用顺序) is the authority pointer; source-side pieces do not prove a current complete required gate. |
+| Application DB principal admission (`app_user`, non-owner/non-superuser/non-`BYPASSRLS`) | `UNVERIFIED / REVALIDATION_REQUIRED` | Source/history exists, but [the current architecture gap register](../architecture/current.md#8-as-built-缺口登记已核验8-项) does not provide target-runtime admission evidence. |
+| Target PostgreSQL/Temporal, real SaaS JWKS/token and cross-workspace negatives | `RUNTIME_UNVERIFIED / REVALIDATION_REQUIRED` | The [risk-trigger verification matrix](../backend/ci-merge-automation.md#风险分级决定验证深度不授予自动合并) requires target DB/RLS and JWKS/workspace negative evidence; none was produced here. |
+
+These dispositions do not resolve or supersede the current API/Worker restart-loop and wildcard-listener observations above.
+
+## 5. Product path and current priority
 
 The first user result is not a raw-record count, build count or page count. The product path is:
 
@@ -74,9 +87,9 @@ The parallel Site path is:
 
 It does not create Campaign, outreach, conversation execution, attribution, SaaS product UI or commercial acceptance state in this backend. Product Billing/Credits remains `DEFERRED / NOT_IMPLEMENTED`; `cap_microusd` is an execution safety envelope, not a customer billing feature.
 
-**Next single highest-priority user result:** establish the Program C server-side handoff-consumer/service-principal and receipt contract so one immutable `LeadQualifiedPackage` can become a durable Opportunity candidate only after the G0 ownership boundary is selected. C1 begins as G2 Source/TDD/Security work and must satisfy G3 Integration/Data before it can support the user journey; no Discovery GREEN, actual pilot, runtime cutover, Provider wire or email sending is authorized.
+**Next single highest-priority user result:** establish the Program C server-side handoff-consumer/service-principal and receipt contract so one immutable `LeadQualifiedPackage` can become a durable Opportunity candidate only after the G0 ownership/provenance hold closes. C1 begins as G2 Source/TDD/Security work and must satisfy G3 Integration/Data before it can support the user journey; no Discovery GREEN, actual pilot, runtime cutover, Provider wire or email sending is authorized.
 
-## 5. Critical risks and external authorization queue
+## 6. Critical risks and external authorization queue
 
 Critical risks are (1) Program A post-RED schema/writer provenance can collide with Program B Raw/Identity SoR if treated as accepted, (2) API/Worker restart loops and wildcard development listeners have no current diagnosis/remediation evidence, and (3) no validated user journey, current RuntimeEvidence or Release Bundle exists.
 

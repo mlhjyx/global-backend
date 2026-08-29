@@ -16,6 +16,7 @@
 - 一个对象可在多个域出现，但只能有一个 canonical object identity；聚合页和读模型不取得对象 ownership。
 - 个人数据、个人草稿、公开候选和系统诊断具有不同社会属性，管理员身份不自动等于无限读取。
 - 当前没有证据的对象保持 `PROPOSED / EXTERNAL_OWNED / OPEN_DECISION`，不得用原型页面补成 as-built。
+- 本表中的详细交付状态必须包含[唯一七轴基态](terminology-and-status.md#6-多轴交付状态) `PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA`；`UAT` 是证据限定词，`*_EVIDENCE / *_GAP / *_QUALIFIER` 不得代替基态。
 
 ## 2. 核心对象总表
 
@@ -40,17 +41,17 @@
 | `OBJ-FE-017` | BrandProfile、PublishableClaimSnapshot、CopyBundle / 品牌理解、发布事实快照、文案包 | 本仓 Site Builder | `OWN-SITE-BE` | internal `AS_BUILT`；通用编辑 API 未建 | 独立站管理 / 派生与不可变输入 | 不反向覆盖 Company/Claim SoR |
 | `OBJ-FE-018` | Goal、Initiative、Campaign / 目标、增长计划、战役 | SaaS 业务域 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED` | 增长执行 / Workspace 共享 | 正式 SoR/repo/状态机未定位 |
 | `OBJ-FE-019` | ContentAsset、PublishJob / 内容、发布任务 | SaaS 内容与执行域 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED` | 增长执行 / 共享与公开候选 | Content 与发布回执必须分离 |
-| `OBJ-FE-020` | Conversation、Message、Intent / 互动、消息、意向 | SaaS 互动域 | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=LOCAL_SOURCE_OBSERVED; SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=REMOTE_UNVERIFIED; UAT=NOT_RUN`；GrowthOS provenance=`REMOTE_CI_RELEASE_UNVERIFIED` | 互动与商机 / 个人数据与受限 | Conversation 是 Opportunity 的 child/link；本地 route/page/conversation source 不能替代 canonical Opportunity |
-| `OBJ-FE-021` | Opportunity、QGO、SAO / 商机 | SaaS Program C 单一聚合 | `OWN-SAAS-PLATFORM` | `PRODUCT=SPECIFIED; UX=LOCAL_SOURCE_OBSERVED; SOURCE=LOCAL_SOURCE_AUTHORITY_FOUND,CANONICAL_AGGREGATE_NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` | 互动与商机 / 商业敏感 | `LC-OPPORTUNITY-001`；`CANDIDATE → QGO → SAO → CLOSED` 是状态，不建三套实体 |
-| `OBJ-FE-022` | CommercialOutcome / 商业结果 | SaaS Program C 商机域 | `OWN-SAAS-PLATFORM` | `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` | 商机/洞察 / 商业敏感 | CLOSED 的追加式结果事实；本仓只接收结构化学习标签，不接管主状态 |
+| `OBJ-FE-020` | Conversation、Message、Intent / 互动、消息、意向 | SaaS 互动域 | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` | 互动与商机 / 个人数据与受限 | Conversation 是 Opportunity 的 child/link；本地 route/page/conversation source 不能替代 canonical Opportunity |
+| `OBJ-FE-021` | Opportunity、QGO、SAO / 商机 | SaaS Program C 单一聚合 | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=CANONICAL_AGGREGATE_NOT_IMPLEMENTED` | 互动与商机 / 商业敏感 | `LC-OPPORTUNITY-001`；`CANDIDATE → QGO → SAO → CLOSED` 是状态，不建三套实体 |
+| `OBJ-FE-022` | CommercialOutcome / 商业结果 | SaaS Program C 商机域 | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED` | 商机/洞察 / 商业敏感 | CLOSED 的追加式结果事实；本仓只接收结构化学习标签，不接管主状态 |
 | `OBJ-FE-023` | Touchpoint、Attribution、Recommendation / 触点、归因、建议 | SaaS 分析读模型 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED` | 洞察 / 聚合读模型 | 不成为业务对象写入 SoR |
 | `OBJ-FE-024` | Integration、CredentialRef / 集成、凭据引用 | SaaS 控制面 + Secret store | `OWN-SAAS-PLATFORM` | `EXTERNAL_OWNED` | Shell/运营 / 高敏感 | UI 永不持有明文 Secret 真值 |
 | `OBJ-FE-025` | Approval、Authorization / 审批、执行授权 | SaaS Policy/Control Plane；域内决定写回对象 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED`；Claim 有局部事实 | Shell/跨域 / 审计决定 | Phase 4 候选已分 Approval/execution auth；机器合同仍缺，不建万能聚合根 |
 | `OBJ-FE-026` | Notification、Task、Incident / 通知、任务、异常 | SaaS 聚合读模型 + 域事件 | `OWN-SAAS-PLATFORM` | `PROPOSED` | Shell/运营 / 个人或团队范围待定 | Phase 4 候选要求数据社会属性和深链；读模型合同仍缺 |
 | `OBJ-FE-027` | Inquiry / 站点询盘 | 原始接收边界 + SaaS 投影待 ADR | `OWN-PRODUCT` | `DEFERRED/OPEN_DECISION` | Site→互动 / 个人数据 | `LC-INQUIRY-001` 目标边界，M2 前必须裁决 |
-| `OBJ-FE-028` | LeadHandoffReceipt / 线索交接回执 | SaaS Program C | `OWN-SAAS-PLATFORM` | `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` | 客户开发→商机 / durable integration record | 记录 event identity、payload digest、Opportunity identity 与 ACK 状态；`LC-HANDOFF-001` |
-| `OBJ-FE-029` | QualificationSnapshot / 资格快照 | SaaS Program C | `OWN-SAAS-PLATFORM` | `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` | 商机 / 不可变证据快照 | 冻结 package/evidence/score/freshness/reachability/rights/package digest；与 receipt 和 candidate 同事务写入 |
-| `OBJ-FE-030` | SalesAcceptance / 销售接受记录 | SaaS Program C | `OWN-SAAS-PLATFORM` | `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN` | 商机 / append-only 商业审计 | QGO→SAO 必须追加 `owner/stage/nextStep/dueAt/reason`，不得仅改 badge |
+| `OBJ-FE-028` | LeadHandoffReceipt / 线索交接回执 | SaaS Program C | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED; SOURCE_GAP=PROGRAM_C_NOT_IMPLEMENTED` | 客户开发→商机 / durable integration record | 记录 event identity、payload digest、Opportunity identity 与 ACK 状态；`LC-HANDOFF-001` |
+| `OBJ-FE-029` | QualificationSnapshot / 资格快照 | SaaS Program C | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED; SOURCE_GAP=PROGRAM_C_NOT_IMPLEMENTED` | 商机 / 不可变证据快照 | 冻结 package/evidence/score/freshness/reachability/rights/package digest；与 receipt 和 candidate 同事务写入 |
+| `OBJ-FE-030` | SalesAcceptance / 销售接受记录 | SaaS Program C | `OWN-SAAS-PLATFORM` | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED; SOURCE_GAP=PROGRAM_C_NOT_IMPLEMENTED` | 商机 / append-only 商业审计 | QGO→SAO 必须追加 `owner/stage/nextStep/dueAt/reason`，不得仅改 badge |
 
 ## 3. 对象社会属性
 
@@ -172,7 +173,7 @@ RECEIVED → VALIDATED → MATERIALIZED → ACK_PENDING → ACKED
 - 验证 schema、scope、workspace 与 privacy 后，在一个事务内写入 `LeadHandoffReceipt`、唯一 `Opportunity(CANDIDATE)` 与不可变 `QualificationSnapshot`；事务提交后才向 Backend 发 domain ACK。
 - ACK 物理结果未知时保持 durable `ACK_PENDING` 并安全 reconcile；不得再次 materialize 或自动发起第二次业务写入。
 - 同一事件并发/重放 10 次只产生一个 Opportunity。相同 identity 的 payload digest 漂移、错误 workspace/scope 或不合法个人数据进入 `QUARANTINED`，不得 ACK。
-- 本生命周期当前是 `PRODUCT=SPECIFIED; UX=NOT_IMPLEMENTED; SOURCE=PROGRAM_C_NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN`；Backend Outbox/ACK source 不能证明 SaaS consumer。
+- 本生命周期当前是 `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED; SOURCE_GAP=PROGRAM_C_NOT_IMPLEMENTED`；Backend Outbox/ACK source 不能证明 SaaS consumer。
 
 ### `LC-OPPORTUNITY-001`
 
@@ -184,7 +185,7 @@ CANDIDATE → QGO → SAO → CLOSED
 - SAO 必须追加 `SalesAcceptance`，含 owner、stage、nextStep、dueAt 和 reason。
 - CLOSED 必须追加 `CommercialOutcome`；结果验证与结构化拒绝/纠正标签可回流本仓学习，但不复制 Opportunity 主状态。
 - Conversation 是 Opportunity 的 child/link；一个 Opportunity 可关联多个 Conversation，Conversation route/page 不能替代聚合。
-- 具体合并/拆分、CRM 同步和恢复必须由 `OWN-SAAS-PLATFORM` 提供机器合同。当前 canonical aggregate 仍为 `PRODUCT=SPECIFIED; UX=LOCAL_SOURCE_OBSERVED; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; UAT=NOT_RUN`。
+- 具体合并/拆分、CRM 同步和恢复必须由 `OWN-SAAS-PLATFORM` 提供机器合同。当前 canonical aggregate 仍为 `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_GAP=PROGRAM_C_NOT_IMPLEMENTED`。
 
 ### `LC-INQUIRY-001`
 
@@ -195,7 +196,7 @@ CANDIDATE → QGO → SAO → CLOSED
 | Handoff ID | 上游 SoR | 交付形态 | 下游 SoR | 不变边界 | 当前状态 |
 |---|---|---|---|---|---|
 | `HND-FE-001` | Company/Offering/Claim/Evidence | approved/current snapshot | Site Build/Copy/Version | 派生 snapshot 不回写原事实 | internal `AS_BUILT` |
-| `HND-FE-002` | Buyer Intelligence | `LeadQualifiedPackage` + Outbox/ACK | SaaS Program C receipt + Opportunity + QualificationSnapshot | 服务端同事务 materialize，commit 后才 ACK；Outcome 只回作学习标签 | `PRODUCT=APPROVED; UX=NOT_IMPLEMENTED; SOURCE=BACKEND_PRODUCER_AS_BUILT,PROGRAM_C_TRANSACTION_NOT_IMPLEMENTED; TEST=PROGRAM_C_NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=PROGRAM_C_NOT_IMPLEMENTED; UAT=NOT_RUN` |
+| `HND-FE-002` | Buyer Intelligence | `LeadQualifiedPackage` + Outbox/ACK | SaaS Program C receipt + Opportunity + QualificationSnapshot | 服务端同事务 materialize，commit 后才 ACK；Outcome 只回作学习标签 | `PRODUCT=APPROVED; UX=NONE; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED; SOURCE_EVIDENCE=BACKEND_PRODUCER_AS_BUILT; SOURCE_GAP=PROGRAM_C_TRANSACTION_NOT_IMPLEMENTED; TEST_GAP=PROGRAM_C_NOT_IMPLEMENTED; RELEASE_GAP=PROGRAM_C_NOT_IMPLEMENTED` |
 | `HND-FE-003` | SiteVersion/Release | future PublishReview + Authorization | public service | Build/Release/Preview 不等于 Publish | `APPROVED_NOT_BUILT` |
 | `HND-FE-004` | Site receiver | Inquiry event | SaaS Conversation/Opportunity | Site 不内建第二套 CRM/Inbox | `DEFERRED/OPEN_DECISION` |
 | `HND-FE-005` | SaaS Workspace/Entitlement | token + allowed actions/capability manifest | 本仓 API 与 SaaS UI | 本仓不签发身份、不存用户表 | backend verifier exists；完整 SaaS contract unknown |

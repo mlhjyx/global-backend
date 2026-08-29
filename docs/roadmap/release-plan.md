@@ -23,8 +23,8 @@ The fixed G0–G7 meanings and current verdicts are exactly those in [current st
 | Gate | Current verdict |
 | --- | --- |
 | G0 — Truth & Ownership | `HOLD_OWNERSHIP` |
-| G1 — Product/UX/Contract | `AMBER / DOC_TRUTH_SYNC_PENDING` |
-| G2 — Source/TDD/Security | `AMBER / SOURCE_ONLY` |
+| G1 — Product/UX/Contract | `AMBER / SPEC_ALIGNED / MACHINE_CONTRACT_AND_IMPLEMENTATION_PENDING` |
+| G2 — Source/TDD/Security | `AMBER / SOURCE_REVIEWED_NOT_ACCEPTED` |
 | G3 — Integration/Data | `RED / NOT_INTEGRATED` |
 | G4 — Release Candidate | `RED / NO_RELEASE_CANDIDATE` |
 | G5 — Runtime Observed | `RED / DEGRADED_NO_CURRENT_EVIDENCE` |
@@ -33,7 +33,7 @@ The fixed G0–G7 meanings and current verdicts are exactly those in [current st
 
 ### Active sequence and boundaries
 
-1. **Phase 0:** current truth, A/B interface, provenance and documentation. G0 remains hold while the Program A writer/merge is active.
+1. **Phase 0:** current truth, A/B interface, provenance and documentation. G0 remains hold while writer inactivity, ledger provenance, branch quarantine and the current-main successor/card/handoff remain unresolved.
 2. **MVP-0:** Program A current-main slices; formal GrowthOS source/Builder/remote/CI; Backend runtime recovery; and authentic capability availability/onboarding.
 3. **MVP-1, Program C:** C1 service principal plus durable handoff/commit-before-ACK; C2 Opportunity aggregate; C3 human QGO; C4 SalesAcceptance/Outcome feedback; C5 Conversation linkage.
 4. **Pilot 3-A:** one internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.
