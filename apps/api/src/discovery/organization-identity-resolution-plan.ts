@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { types } from "node:util";
-import { ORGANIZATION_IDENTITY_AUTHORITY_PROFILES } from "./organization-identity-authority";
+import { parseOrganizationIdentityAuthorityIdentifier } from "./organization-identity-authority";
 import { GOVERNED_RAW_SOURCE_PROVIDER_KEYS } from "./raw-source-provider-schema";
 
 const RESOLVER_VERSION = "organization-identity-resolver/v1" as const;
@@ -273,71 +273,6 @@ function stableJson(value: SafeJson): string {
   return JSON.stringify(value);
 }
 
-function validLei(value: string): boolean {
-  if (!/^[A-Z0-9]{20}$/u.test(value)) return false;
-  const expanded = [...value]
-    .map((character) =>
-      /[A-Z]/u.test(character)
-        ? String(character.charCodeAt(0) - 55)
-        : character,
-    )
-    .join("");
-  let remainder = 0;
-  for (const digit of expanded)
-    remainder = (remainder * 10 + Number(digit)) % 97;
-  return remainder === 1;
-}
-
-function isExactAuthorityIdentifier(
-  identifier: OrganizationIdentityAuthorityIdentifierPlan,
-): boolean {
-  if (identifier.scheme === "domain") {
-    return (
-      identifier.jurisdiction === "GLOBAL" &&
-      identifier.validatorVersion === "domain-v1" &&
-      identifier.normalizedValue.length <= 253 &&
-      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u.test(
-        identifier.normalizedValue,
-      ) &&
-      !identifier.normalizedValue.startsWith("www.")
-    );
-  }
-
-  const profile =
-    ORGANIZATION_IDENTITY_AUTHORITY_PROFILES[identifier.providerKey];
-  const rule = profile.identifierRules.find(
-    (candidate) => candidate.scheme === identifier.scheme,
-  );
-  if (!rule || rule.validatorVersion !== identifier.validatorVersion) {
-    return false;
-  }
-
-  switch (identifier.scheme) {
-    case "registry-id":
-      return (
-        /^(?:GLOBAL|[A-Z]{2})$/u.test(identifier.jurisdiction) &&
-        /^[\p{L}\p{N}]+$/u.test(identifier.normalizedValue)
-      );
-    case "lei":
-      return (
-        identifier.jurisdiction === "GLOBAL" &&
-        validLei(identifier.normalizedValue)
-      );
-    case "ted-natid":
-      return (
-        /^[A-Z]{2}$/u.test(identifier.jurisdiction) &&
-        /^[\p{L}\p{N}]+$/u.test(identifier.normalizedValue)
-      );
-    case "fda-reg":
-      return (
-        identifier.jurisdiction === "US" &&
-        /^\d+$/u.test(identifier.normalizedValue)
-      );
-    default:
-      return false;
-  }
-}
-
 function sha256(value: SafeJson): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
@@ -368,41 +303,8 @@ function parseAuthorityIdentifiers(
       "normalizerVersion",
       "key",
     ]);
-    const parsed: OrganizationIdentityAuthorityIdentifierPlan = {
-      providerKey: providerKey(source.providerKey),
-      scheme: requiredString(
-        source,
-        "scheme",
-        96,
-        /^[a-z][a-z0-9-]*(?::[a-z]{2})?$/u,
-      ),
-      jurisdiction: requiredString(
-        source,
-        "jurisdiction",
-        16,
-        /^(?:GLOBAL|[A-Z]{2,15})$/u,
-      ),
-      normalizedValue: requiredString(source, "normalizedValue", 256),
-      validatorVersion: requiredString(
-        source,
-        "validatorVersion",
-        128,
-        /^[a-z0-9][a-z0-9._/-]*$/u,
-      ),
-      normalizerVersion: requiredString(
-        source,
-        "normalizerVersion",
-        128,
-      ) as typeof AUTHORITY_NORMALIZER_VERSION,
-      key: requiredString(source, "key", 512),
-    };
-    if (
-      parsed.providerKey !== expectedProviderKey ||
-      parsed.normalizerVersion !== AUTHORITY_NORMALIZER_VERSION ||
-      parsed.key !==
-        `${parsed.scheme}:${parsed.jurisdiction}:${parsed.normalizedValue}` ||
-      !isExactAuthorityIdentifier(parsed)
-    ) {
+    const parsed = parseOrganizationIdentityAuthorityIdentifier(source);
+    if (!parsed || parsed.providerKey !== expectedProviderKey) {
       return reject();
     }
     const previous = byKey.get(parsed.key);

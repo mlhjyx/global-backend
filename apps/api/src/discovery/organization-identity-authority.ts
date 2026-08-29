@@ -320,6 +320,178 @@ function frozenIdentifier(input: {
   });
 }
 
+function canonicalStructuredOutput(value: string): string | null {
+  if (!isContactFreeText(value) || !isSecretFreeText(value)) return null;
+  const normalized = value
+    .normalize("NFC")
+    .toLocaleUpperCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+  return normalized || null;
+}
+
+function canonicalDomainOutput(value: string): string | null {
+  const normalized = value.toLocaleLowerCase("en-US").replace(/^www\./u, "");
+  return /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(
+    normalized,
+  )
+    ? normalized
+    : null;
+}
+
+/**
+ * Parses an already-normalized authority-output fact without invoking getters.
+ * It deliberately owns the same canonical reconstruction as the producer so
+ * downstream consumers do not maintain a second identifier registry.
+ */
+export function parseOrganizationIdentityAuthorityIdentifier(
+  value: unknown,
+): OrganizationIdentityAuthorityIdentifier | null {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    types.isProxy(value)
+  ) {
+    return null;
+  }
+  if (
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  ) {
+    return null;
+  }
+  const keys = Reflect.ownKeys(value);
+  const expected = [
+    "providerKey",
+    "scheme",
+    "jurisdiction",
+    "normalizedValue",
+    "validatorVersion",
+    "normalizerVersion",
+    "key",
+  ];
+  if (
+    keys.length !== expected.length ||
+    keys.some((key) => typeof key !== "string" || !expected.includes(key))
+  ) {
+    return null;
+  }
+  const fields: Record<string, string> = Object.create(null) as Record<
+    string,
+    string
+  >;
+  for (const key of expected) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      !descriptor ||
+      !descriptor.enumerable ||
+      !("value" in descriptor) ||
+      typeof descriptor.value !== "string"
+    ) {
+      return null;
+    }
+    fields[key] = descriptor.value;
+  }
+  if (
+    !GOVERNED_RAW_SOURCE_PROVIDER_KEYS.includes(fields.providerKey as never) ||
+    fields.normalizerVersion !== NORMALIZER_VERSION
+  ) {
+    return null;
+  }
+  const providerKey =
+    fields.providerKey as (typeof GOVERNED_RAW_SOURCE_PROVIDER_KEYS)[number];
+  const profile = ORGANIZATION_IDENTITY_AUTHORITY_PROFILES[providerKey];
+  let canonical: OrganizationIdentityAuthorityIdentifier | null = null;
+  if (fields.scheme === DOMAIN_SCHEME) {
+    const normalizedValue = canonicalDomainOutput(fields.normalizedValue);
+    if (
+      normalizedValue &&
+      fields.jurisdiction === GLOBAL_JURISDICTION &&
+      fields.validatorVersion === "domain-v1"
+    ) {
+      canonical = frozenIdentifier({
+        providerKey,
+        scheme: DOMAIN_SCHEME,
+        jurisdiction: GLOBAL_JURISDICTION,
+        normalizedValue,
+        validatorVersion: "domain-v1",
+      });
+    }
+  } else {
+    const rule = profile.identifierRules.find(
+      (candidate) => candidate.scheme === fields.scheme,
+    );
+    if (!rule || rule.validatorVersion !== fields.validatorVersion) return null;
+    const normalizedValue = canonicalStructuredOutput(fields.normalizedValue);
+    switch (fields.scheme) {
+      case "registry-id":
+        if (
+          providerKey === "registry" &&
+          normalizedValue === fields.normalizedValue &&
+          /^(?:GLOBAL|[A-Z]{2})$/u.test(fields.jurisdiction)
+        ) {
+          canonical = frozenIdentifier({
+            providerKey,
+            scheme: fields.scheme,
+            jurisdiction: fields.jurisdiction,
+            normalizedValue: fields.normalizedValue,
+            validatorVersion: rule.validatorVersion,
+          });
+        }
+        break;
+      case "lei":
+        if (
+          providerKey === "registry" &&
+          normalizedValue === fields.normalizedValue &&
+          fields.jurisdiction === GLOBAL_JURISDICTION &&
+          validLei(fields.normalizedValue)
+        ) {
+          canonical = frozenIdentifier({
+            providerKey,
+            scheme: fields.scheme,
+            jurisdiction: GLOBAL_JURISDICTION,
+            normalizedValue: fields.normalizedValue,
+            validatorVersion: rule.validatorVersion,
+          });
+        }
+        break;
+      case "ted-natid":
+        if (
+          providerKey === "ted" &&
+          normalizedValue === fields.normalizedValue &&
+          /^[A-Z]{2}$/u.test(fields.jurisdiction)
+        ) {
+          canonical = frozenIdentifier({
+            providerKey,
+            scheme: fields.scheme,
+            jurisdiction: fields.jurisdiction,
+            normalizedValue: fields.normalizedValue,
+            validatorVersion: rule.validatorVersion,
+          });
+        }
+        break;
+      case "fda-reg":
+        if (
+          providerKey === "openfda" &&
+          fields.jurisdiction === "US" &&
+          /^\d{1,32}$/u.test(fields.normalizedValue)
+        ) {
+          canonical = frozenIdentifier({
+            providerKey,
+            scheme: fields.scheme,
+            jurisdiction: "US",
+            normalizedValue: fields.normalizedValue,
+            validatorVersion: rule.validatorVersion,
+          });
+        }
+        break;
+      default:
+        return null;
+    }
+  }
+  return canonical && canonical.key === fields.key ? canonical : null;
+}
+
 function extractPayloadIdentifier(
   providerKey: (typeof GOVERNED_RAW_SOURCE_PROVIDER_KEYS)[number],
   payload: Record<string, unknown>,

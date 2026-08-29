@@ -645,11 +645,16 @@ describe("deterministic organization identity resolution plan", () => {
       normalizerVersion: "organization-identity-authority/v1",
       key: "domain:GLOBAL:acme.example",
     });
-    const conflict = (providerKey: string, rawOverrides: Record<string, string> = {}) =>
+    const conflict = (
+      providerKey: string,
+      rawOverrides: Record<string, string> = {},
+    ) =>
       plan({
         raw: { ...input().raw, providerKey, ...rawOverrides },
         authorityIdentifiers: [domain(providerKey)],
-        existingBindings: [{ identifierKey: domain(providerKey).key, companyId: COMPANY_A }],
+        existingBindings: [
+          { identifierKey: domain(providerKey).key, companyId: COMPANY_A },
+        ],
         blocker: {
           blockerKey: "n:acme:de",
           matchRule: "name_country",
@@ -680,7 +685,9 @@ describe("deterministic organization identity resolution plan", () => {
     });
     const disagreement = plan({
       authorityIdentifiers: [identifier(), second],
-      existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }],
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
       blocker: {
         blockerKey: "n:acme:de",
         matchRule: "name_country",
@@ -692,7 +699,9 @@ describe("deterministic organization identity resolution plan", () => {
     }
     expect(split.companyIds).toEqual(disagreement.companyIds);
     expect(split.identifierKeys).toEqual(disagreement.identifierKeys);
-    expect(split.conflictFingerprint).not.toBe(disagreement.conflictFingerprint);
+    expect(split.conflictFingerprint).not.toBe(
+      disagreement.conflictFingerprint,
+    );
 
     for (const candidate of [
       input({ raw: { ...input().raw, rawRecordId: "not-a-uuid" } }),
@@ -706,8 +715,14 @@ describe("deterministic organization identity resolution plan", () => {
 
   it("deep-freezes and detaches caller aliases for every non-conflict variant", () => {
     const cases = [
-      plan({ existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }] }),
-      plan({ blocker: { ...input().blocker, legacyCandidateCompanyId: COMPANY_A } }),
+      plan({
+        existingBindings: [
+          { identifierKey: identifier().key, companyId: COMPANY_A },
+        ],
+      }),
+      plan({
+        blocker: { ...input().blocker, legacyCandidateCompanyId: COMPANY_A },
+      }),
       plan(),
     ];
     expect(cases.map((result) => result.kind)).toEqual([
@@ -720,7 +735,11 @@ describe("deterministic organization identity resolution plan", () => {
       expect(Object.isFrozen(result.identifiers)).toBe(true);
       expect(Object.isFrozen(result.identifiers[0]!)).toBe(true);
     }
-    const facts = input({ existingBindings: [{ identifierKey: identifier().key, companyId: COMPANY_A }] });
+    const facts = input({
+      existingBindings: [
+        { identifierKey: identifier().key, companyId: COMPANY_A },
+      ],
+    });
     const result = planOrganizationIdentityResolution(facts);
     facts.existingBindings[0]!.companyId = COMPANY_B;
     if (result.kind !== "bind_existing") throw new Error("expected binding");

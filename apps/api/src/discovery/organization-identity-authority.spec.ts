@@ -155,19 +155,28 @@ describe("governed Raw organization identity authority", () => {
     ).find((item) => item.scheme === "fda-reg")!;
     const malformed = [
       { ...registry, normalizedValue: "de1234", key: "registry-id:DE:de1234" },
-      { ...registry, jurisdiction: "US", key: "registry-id:US:DE1234" },
+      { ...registry, jurisdiction: "USA", key: "registry-id:USA:DE1234" },
       { ...registry, scheme: "forged", key: "forged:DE:DE1234" },
       { ...registry, validatorVersion: "registry-id-v999" },
-      { ...registry, normalizerVersion: "organization-identity-authority/v999" },
+      {
+        ...registry,
+        normalizerVersion: "organization-identity-authority/v999",
+      },
       { ...registry, key: "registry-id:DE:OTHER" },
       { ...registry, providerKey: "directory" },
       { ...registry, extra: "unexpected" },
-      { ...fda, normalizedValue: "1".repeat(33), key: `fda-reg:US:${"1".repeat(33)}` },
+      {
+        ...fda,
+        normalizedValue: "1".repeat(33),
+        key: `fda-reg:US:${"1".repeat(33)}`,
+      },
       null,
       [],
     ];
     for (const candidate of malformed) {
-      expect(parseOrganizationIdentityAuthorityIdentifier(candidate)).toBeNull();
+      expect(
+        parseOrganizationIdentityAuthorityIdentifier(candidate),
+      ).toBeNull();
     }
   });
   it("keeps authority profiles exactly aligned with the exported Raw provider list", () => {
