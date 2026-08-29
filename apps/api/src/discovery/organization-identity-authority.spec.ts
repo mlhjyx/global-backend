@@ -423,7 +423,11 @@ describe("governed Raw organization identity authority", () => {
       value: marker,
       enumerable: true,
     });
-    const withHole = rawRecord({ attributes: { products: ["pump", ,] } });
+    const productsWithHole = new Array<string>(2);
+    productsWithHole[0] = "pump";
+    const withHole = rawRecord({
+      attributes: { products: productsWithHole },
+    });
     const inherited = Object.create({
       get products() {
         getterCalls += 1;

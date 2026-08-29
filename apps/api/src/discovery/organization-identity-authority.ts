@@ -12,6 +12,10 @@ import {
 const NORMALIZER_VERSION = "organization-identity-authority/v1" as const;
 const GLOBAL_JURISDICTION = "GLOBAL" as const;
 const DOMAIN_SCHEME = "domain" as const;
+const MAX_CONTAINER_DEPTH = 6;
+const MAX_CONTAINER_NODES = 256;
+const MAX_OBJECT_FIELDS = 32;
+const MAX_ARRAY_ITEMS = 20;
 
 type IdentityAuthorityErrorCode =
   | "IDENTITY_RAW_PAYLOAD_NOT_GOVERNED"
@@ -85,6 +89,177 @@ export const ORGANIZATION_IDENTITY_AUTHORITY_PROFILES: Readonly<
 
 function error(code: IdentityAuthorityErrorCode): never {
   throw new OrganizationIdentityAuthorityError(code);
+}
+
+type SafeJson = null | boolean | number | string | SafeJson[] | SafeJsonRecord;
+interface SafeJsonRecord {
+  [key: string]: SafeJson;
+}
+
+class UnsafeAuthorityContainerError extends Error {}
+
+function unsafeContainer(): never {
+  throw new UnsafeAuthorityContainerError();
+}
+
+/**
+ * This is a bounded passive container preflight, not another Raw schema.
+ * It reads only descriptors and never invokes an input getter while cloning.
+ */
+function passivePlainJsonClone(value: unknown): SafeJson {
+  const state = { nodes: 0, ancestors: new Set<object>() };
+  const clone = (input: unknown, depth: number): SafeJson => {
+    state.nodes += 1;
+    if (state.nodes > MAX_CONTAINER_NODES || depth > MAX_CONTAINER_DEPTH) {
+      return unsafeContainer();
+    }
+    if (
+      input === null ||
+      typeof input === "boolean" ||
+      typeof input === "string"
+    ) {
+      return input;
+    }
+    if (typeof input === "number") {
+      return Number.isFinite(input) ? input : unsafeContainer();
+    }
+    if (typeof input !== "object") return unsafeContainer();
+    if (state.ancestors.has(input)) return unsafeContainer();
+    state.ancestors.add(input);
+    try {
+      const prototype = Object.getPrototypeOf(input);
+      if (Array.isArray(input)) {
+        const lengthDescriptor = Object.getOwnPropertyDescriptor(
+          input,
+          "length",
+        );
+        if (
+          !lengthDescriptor ||
+          lengthDescriptor.enumerable ||
+          !("value" in lengthDescriptor)
+        ) {
+          return unsafeContainer();
+        }
+        const length = lengthDescriptor.value;
+        if (
+          prototype !== Array.prototype ||
+          !Number.isSafeInteger(length) ||
+          length < 0 ||
+          length > MAX_ARRAY_ITEMS
+        ) {
+          return unsafeContainer();
+        }
+        const keys = Reflect.ownKeys(input);
+        if (
+          keys.length !== length + 1 ||
+          keys.some(
+            (key) =>
+              typeof key === "symbol" ||
+              (key !== "length" &&
+                (!/^\d+$/u.test(key) || Number(key) >= length)),
+          )
+        ) {
+          return unsafeContainer();
+        }
+        const copy: SafeJson[] = [];
+        for (let index = 0; index < length; index += 1) {
+          const descriptor = Object.getOwnPropertyDescriptor(
+            input,
+            String(index),
+          );
+          if (
+            !descriptor ||
+            !descriptor.enumerable ||
+            !("value" in descriptor)
+          ) {
+            return unsafeContainer();
+          }
+          copy.push(clone(descriptor.value, depth + 1));
+        }
+        return copy;
+      }
+      if (prototype !== Object.prototype && prototype !== null) {
+        return unsafeContainer();
+      }
+      const keys = Reflect.ownKeys(input);
+      if (
+        keys.length > MAX_OBJECT_FIELDS ||
+        keys.some((key) => typeof key === "symbol")
+      ) {
+        return unsafeContainer();
+      }
+      const copy: SafeJsonRecord = Object.create(null) as SafeJsonRecord;
+      for (const key of keys) {
+        const descriptor = Object.getOwnPropertyDescriptor(input, key);
+        if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
+          return unsafeContainer();
+        }
+        Object.defineProperty(copy, key, {
+          configurable: true,
+          enumerable: true,
+          value: clone(descriptor.value, depth + 1),
+          writable: true,
+        });
+      }
+      return copy;
+    } finally {
+      state.ancestors.delete(input);
+    }
+  };
+  return clone(value, 0);
+}
+
+function safeRecord(value: SafeJson | undefined): SafeJsonRecord | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as SafeJsonRecord)
+    : null;
+}
+
+function isAuthorizedIdentifierScheme(
+  providerKey: string,
+  scheme: string,
+  profile: OrganizationIdentityAuthorityProfile,
+): boolean {
+  if (providerKey === "ted") return /^ted-natid(?::[a-z]{2})?$/u.test(scheme);
+  return profile.identifierRules.some((rule) => rule.scheme === scheme);
+}
+
+function rejectionCodeForSafePayload(
+  providerKey: string,
+  payload: SafeJson,
+): IdentityAuthorityErrorCode {
+  if (!GOVERNED_RAW_SOURCE_PROVIDER_KEYS.includes(providerKey as never)) {
+    return "IDENTITY_RAW_PAYLOAD_NOT_GOVERNED";
+  }
+  const profile = (
+    ORGANIZATION_IDENTITY_AUTHORITY_PROFILES as Readonly<
+      Record<string, OrganizationIdentityAuthorityProfile>
+    >
+  )[providerKey];
+  if (!profile) return "IDENTITY_AUTHORITY_PROFILE_MISSING";
+  const record = safeRecord(payload);
+  const identifier = record?.identifier;
+  const identifierRecord =
+    identifier === undefined ? null : safeRecord(identifier);
+  if (!identifierRecord) return "IDENTITY_IDENTIFIER_INVALID";
+  const scheme = identifierRecord.scheme;
+  const value = identifierRecord.value;
+  if (typeof scheme !== "string" || typeof value !== "string") {
+    return "IDENTITY_IDENTIFIER_INVALID";
+  }
+  if (
+    Object.keys(identifierRecord).length !== 2 ||
+    !Object.hasOwn(identifierRecord, "scheme") ||
+    !Object.hasOwn(identifierRecord, "value")
+  ) {
+    return "IDENTITY_IDENTIFIER_INVALID";
+  }
+  if (profile.identifierRules.length === 0) {
+    return "IDENTITY_IDENTIFIER_NOT_AUTHORIZED";
+  }
+  return isAuthorizedIdentifierScheme(providerKey, scheme, profile)
+    ? "IDENTITY_IDENTIFIER_INVALID"
+    : "IDENTITY_IDENTIFIER_NOT_AUTHORIZED";
 }
 
 function profileFor(providerKey: string): OrganizationIdentityAuthorityProfile {
@@ -199,12 +374,16 @@ function extractPayloadIdentifier(
     }
     case "ted-natid": {
       const suffix = /^ted-natid:([a-z]{2})$/u.exec(scheme)?.[1];
-      const jurisdiction =
-        suffix?.toLocaleUpperCase("en-US") ??
-        (typeof payload.country === "string" &&
+      const country =
+        typeof payload.country === "string" &&
         /^[A-Z]{2}$/u.test(payload.country)
           ? payload.country
-          : "");
+          : null;
+      const suffixJurisdiction = suffix?.toLocaleUpperCase("en-US");
+      if (suffixJurisdiction && country && suffixJurisdiction !== country) {
+        return error("IDENTITY_IDENTIFIER_INVALID");
+      }
+      const jurisdiction = suffixJurisdiction ?? country ?? "";
       if (!jurisdiction) return error("IDENTITY_IDENTIFIER_INVALID");
       return frozenIdentifier({
         providerKey,
@@ -238,13 +417,20 @@ export function extractOrganizationIdentityAuthority(
   providerKey: string,
   payloadValue: unknown,
 ): readonly OrganizationIdentityAuthorityIdentifier[] {
-  const admitted = validateRawSourceProviderPayload(providerKey, payloadValue);
+  let safePayload: SafeJson;
+  try {
+    safePayload = passivePlainJsonClone(payloadValue);
+  } catch {
+    return error("IDENTITY_IDENTIFIER_INVALID");
+  }
+  let admitted;
+  try {
+    admitted = validateRawSourceProviderPayload(providerKey, safePayload);
+  } catch {
+    return error("IDENTITY_IDENTIFIER_INVALID");
+  }
   if (!admitted.ok) {
-    return error(
-      admitted.reason === "UNGOVERNED_PROVIDER_PAYLOAD"
-        ? "IDENTITY_RAW_PAYLOAD_NOT_GOVERNED"
-        : "IDENTITY_IDENTIFIER_INVALID",
-    );
+    return error(rejectionCodeForSafePayload(providerKey, safePayload));
   }
   const profile = profileFor(providerKey);
   const governedProviderKey = profile.providerKey;
