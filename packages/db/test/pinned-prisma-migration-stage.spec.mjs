@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -108,6 +109,13 @@ function gitSchemaAt(repository, commit) {
 
 async function loadMaterializer() {
   return import("./helpers/pinned-prisma-stage.mjs");
+}
+
+function taskDirectoryInventory(parent, prefix) {
+  return readdirSync(parent, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+    .map((entry) => entry.name)
+    .sort();
 }
 
 describe("pinned Prisma migration stages", () => {
@@ -219,5 +227,62 @@ describe("pinned Prisma migration stages", () => {
         rmSync(stage.root, { recursive: true, force: true });
       }
     }
+  });
+
+  it("removes only its exact materializer root after an injected post-mkdtemp failure", async () => {
+    const { materializePinnedPrismaStage } = await loadMaterializer();
+    const prefix = "task6b-cleanup-materializer-";
+    const parent = resolve(repositoryRoot, "packages/db");
+    const inventoryPrefix = `.${prefix}`;
+    const before = taskDirectoryInventory(parent, inventoryPrefix);
+    let unexpectedStage;
+
+    try {
+      assert.throws(() => {
+        unexpectedStage = materializePinnedPrismaStage({
+          repositoryRoot,
+          commit: preExpandCommit,
+          prefix,
+          testHooks: {
+            afterMkdtemp() {
+              throw new Error("TEST_POST_MKDTEMP_MATERIALIZER_FAILURE");
+            },
+          },
+        });
+      }, /TEST_POST_MKDTEMP_MATERIALIZER_FAILURE/u);
+      assert.deepEqual(taskDirectoryInventory(parent, inventoryPrefix), before);
+    } finally {
+      if (unexpectedStage?.root && existsSync(unexpectedStage.root)) {
+        rmSync(unexpectedStage.root, { recursive: true, force: true });
+      }
+    }
+
+    assert.deepEqual(taskDirectoryInventory(parent, inventoryPrefix), before);
+  });
+
+  it("removes only its exact fixture root after an injected post-mkdtemp failure", () => {
+    const prefix = "task6b-pinned-stage-fixture-";
+    const parent = tmpdir();
+    const before = taskDirectoryInventory(parent, prefix);
+    let unexpectedFixture;
+
+    try {
+      assert.throws(() => {
+        unexpectedFixture = createFutureMigrationRepository({
+          testHooks: {
+            afterMkdtemp() {
+              throw new Error("TEST_POST_MKDTEMP_FIXTURE_FAILURE");
+            },
+          },
+        });
+      }, /TEST_POST_MKDTEMP_FIXTURE_FAILURE/u);
+      assert.deepEqual(taskDirectoryInventory(parent, prefix), before);
+    } finally {
+      if (unexpectedFixture?.root && existsSync(unexpectedFixture.root)) {
+        rmSync(unexpectedFixture.root, { recursive: true, force: true });
+      }
+    }
+
+    assert.deepEqual(taskDirectoryInventory(parent, prefix), before);
   });
 });
