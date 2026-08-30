@@ -41,7 +41,8 @@ function call(workspaceId, subjectId, requestId) {
 }
 
 function appCall(workspaceId, subjectId, requestId) {
-  return psql(asApp(call(workspaceId, subjectId, requestId), workspaceId));
+  return psql(asApp(call(workspaceId, subjectId, requestId), workspaceId))
+    .split("\n").at(-1);
 }
 
 function deletionSnapshot() {
