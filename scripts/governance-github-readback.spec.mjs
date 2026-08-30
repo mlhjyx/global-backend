@@ -104,7 +104,8 @@ test('collects frozen bounded observed evidence without claiming complete approv
       { path: PROPOSAL_SIDECAR_PATH, commit_sha: HEAD_SHA, blob_sha: PROPOSAL_SIDECAR_BLOB_SHA, mode: '100644' },
     ],
   );
-  assert.deepEqual(evidence.proposal_files[0].value, {
+  assert.equal(Object.hasOwn(evidence.proposal_files[0], 'value'), false);
+  assert.deepEqual(evidence.proposal_files[0].subject, {
     schema_version: 'approval-proposal-manifest/v1',
     decision_id: 'ADR-027',
     policy_revision: 'program-c/policy-r2',
@@ -112,9 +113,14 @@ test('collects frozen bounded observed evidence without claiming complete approv
     decision_semantic_sha256: DECISION_SEMANTIC_SHA256,
     sidecar_path: PROPOSAL_SIDECAR_PATH,
   });
+  assert.match(evidence.proposal_files[0].semantic_sha256, /^sha256:[0-9a-f]{64}$/);
   assert.equal(evidence.ruleset.id, 777);
   assert.deepEqual(evidence.ruleset.bypass_actors, []);
   assert.deepEqual(evidence.ruleset.required_status_checks, [{ context: 'approval/readback', integration_id: 15368 }]);
+  assert.deepEqual(evidence.ruleset.ref_name, {
+    include: ['~DEFAULT_BRANCH'],
+    exclude: [],
+  });
   assert.match(evidence.ruleset.normalized_sha256, /^sha256:[0-9a-f]{64}$/);
   assert.deepEqual(evidence.readback.pre, {
     base_sha: BASE_SHA,
@@ -126,7 +132,7 @@ test('collects frozen bounded observed evidence without claiming complete approv
   assert.equal(evidence.observed_at, OBSERVED_AT);
   assert.ok(Object.isFrozen(evidence));
   assert.ok(Object.isFrozen(evidence.machine_checks[0].reusable_signer));
-  assert.ok(Object.isFrozen(evidence.proposal_files[0].value));
+  assert.ok(Object.isFrozen(evidence.proposal_files[0].subject));
   assert.ok(Object.isFrozen(client));
   assert.equal(Object.hasOwn(client, 'token'), false);
 
@@ -307,3 +313,4 @@ test('fails closed on malformed, looping, over-page, and over-item pagination', 
 });
 
 await import('./governance-github-readback-evidence.spec.mjs');
+await import('./governance-github-readback-round1.spec.mjs');

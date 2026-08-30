@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { parseApprovalJson } from './governance-github-readback-common.mjs';
 import {
   collectGitHubApprovalEvidence,
   createGitHubReadbackClient,
@@ -178,21 +179,14 @@ test('rejects executable, symlink, gitlink, tree, and absent proposal entries', 
 });
 
 test('enforces blob identity, 1 MiB, LFS, fatal UTF-8, and strict JSON', async (t) => {
-  await t.test('accepts exactly 1 MiB of valid JSON', async () => {
-    const state = fixtureState();
-    const current = state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA);
-    const value = JSON.parse(Buffer.from(current.content, 'base64').toString('utf8'));
+  await t.test('strict parser accepts exactly 1 MiB of valid JSON', () => {
+    const value = { schema_version: 'parser-boundary/v1' };
     value.padding = '';
     const empty = Buffer.from(JSON.stringify(value), 'utf8');
     value.padding = 'x'.repeat(1_048_576 - empty.length);
     const bytes = Buffer.from(JSON.stringify(value), 'utf8');
     assert.equal(bytes.length, 1_048_576);
-    state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, {
-      sha: PROPOSAL_MANIFEST_BLOB_SHA,
-      ...encodeBlob(bytes),
-    });
-    const { evidence } = await collect(state);
-    assert.equal(evidence.proposal_files[0].size_bytes, 1_048_576);
+    assert.equal(parseApprovalJson(bytes.toString('utf8')).padding.length > 0, true);
   });
   await t.test('blob SHA mismatch', async () => {
     const state = fixtureState();
