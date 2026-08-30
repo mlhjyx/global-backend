@@ -147,15 +147,45 @@ export const fetchJson = async (state, url, limits) => {
 };
 
 const parseNextLink = (header, currentUrl) => {
-  const closedQuery = (url) => {
+  const closedRawQuery = (url) => {
+    const raw = url.search.startsWith('?') ? url.search.slice(1) : '';
+    requireCondition(raw.length >= 1 && raw.length <= 8192, 'APPROVAL_GITHUB_PAGINATION_INVALID');
     const result = new Map();
-    for (const [key, value] of url.searchParams) {
+    for (const token of raw.split('&')) {
+      requireCondition(token.length >= 3, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+      const separator = token.indexOf('=');
+      requireCondition(
+        separator >= 1 && separator === token.lastIndexOf('='),
+        'APPROVAL_GITHUB_PAGINATION_INVALID',
+      );
+      const key = token.slice(0, separator);
+      const value = token.slice(separator + 1);
+      requireCondition(
+        /^[a-z][a-z0-9_]*$/.test(key)
+          && /^[A-Za-z0-9._~-]+$/.test(value),
+        'APPROVAL_GITHUB_PAGINATION_INVALID',
+      );
       requireCondition(!result.has(key), 'APPROVAL_GITHUB_PAGINATION_INVALID');
       result.set(key, value);
     }
+    for (const key of ['page', 'per_page']) {
+      const value = result.get(key);
+      requireCondition(
+        typeof value === 'string' && /^[1-9][0-9]*$/.test(value),
+        'APPROVAL_GITHUB_PAGINATION_INVALID',
+      );
+      const number = Number(value);
+      requireCondition(
+        Number.isSafeInteger(number) && String(number) === value,
+        'APPROVAL_GITHUB_PAGINATION_INVALID',
+      );
+    }
+    if (result.has('filter')) {
+      requireCondition(result.get('filter') === 'all', 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    }
     return result;
   };
-  const currentQuery = closedQuery(currentUrl);
+  const currentQuery = closedRawQuery(currentUrl);
   const pageNumber = (query) => {
     const raw = query.get('page');
     requireCondition(
@@ -194,7 +224,7 @@ const parseNextLink = (header, currentUrl) => {
         && url.hash === '',
       'APPROVAL_GITHUB_PAGINATION_INVALID',
     );
-    const query = closedQuery(url);
+    const query = closedRawQuery(url);
     requireCondition(
       currentQuery.size === query.size
         && [...currentQuery.keys()].every((key) => query.has(key)),
