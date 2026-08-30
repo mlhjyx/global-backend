@@ -1040,6 +1040,50 @@ DECLARE
   v_raw_record_id uuid;
   workspace_setting text;
   lock_deadline timestamptz;
+  statement_deadline timestamptz;
+  stored_raw record;
+  stored_company record;
+  stored_identifier record;
+  stored_link record;
+  stored_conflict record;
+  authority_identifiers jsonb;
+  blocker jsonb;
+  resolution_plan jsonb;
+  existing_bindings jsonb := '[]'::jsonb;
+  root_mappings jsonb := '[]'::jsonb;
+  expected_conflict_facts jsonb;
+  blocker_company_id uuid;
+  legacy_company_id uuid;
+  legacy_dedupe_key text;
+  legacy_match_rule text;
+  target_company_id uuid;
+  existing_identifier_root uuid;
+  planner_company_ids uuid[] := ARRAY[]::uuid[];
+  locked_company_ids uuid[] := ARRAY[]::uuid[];
+  conflict_company_ids uuid[] := ARRAY[]::uuid[];
+  actual_party_ids uuid[] := ARRAY[]::uuid[];
+  expected_identifier_keys text[] := ARRAY[]::text[];
+  actual_link_company_ids uuid[] := ARRAY[]::uuid[];
+  raw_name text;
+  raw_domain text;
+  raw_country text;
+  canonical_raw_name text;
+  canonical_raw_domain text;
+  legacy_identifier_value text;
+  plan_kind text;
+  plan_match_rule text;
+  plan_input_hash text;
+  plan_conflict_fingerprint text;
+  plan_conflict_type text;
+  identifier_fact jsonb;
+  conflict_company_id uuid;
+  locked_company_count integer := 0;
+  link_total integer := 0;
+  identifier_total integer := 0;
+  party_total integer := 0;
+  conflict_created boolean := false;
+  error_state text;
+  error_message text;
 BEGIN
   IF session_user IS DISTINCT FROM 'app_user'
     OR current_user IS NOT DISTINCT FROM session_user
@@ -1079,6 +1123,7 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
+  statement_deadline := clock_timestamp() + interval '60 seconds';
   lock_deadline := clock_timestamp() + interval '5 seconds';
   PERFORM public.organization_identity_acquire_advisory_until_v1(
     hashtextextended(
@@ -1091,17 +1136,947 @@ BEGIN
     lock_deadline
   );
   PERFORM 1
-  FROM public.raw_source_record AS r
-  WHERE r.workspace_id = v_workspace_id
-    AND r.id = v_raw_record_id
-  FOR KEY SHARE;
+  FROM public.workspace AS w
+  WHERE w.id = v_workspace_id;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
-      USING ERRCODE = '40001';
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
   END IF;
 
-  RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_INCOMPLETE'
-    USING ERRCODE = 'P0001';
+  BEGIN
+    SELECT
+      r.id,
+      r.workspace_id,
+      r.provider_key,
+      r.payload,
+      r.payload_hash,
+      r.ingest_version,
+      r.ingest_status,
+      r.disposition_code,
+      r.expires_at,
+      r.expired_at
+    INTO stored_raw
+    FROM public.raw_source_record AS r
+    WHERE r.workspace_id = v_workspace_id
+      AND r.id = v_raw_record_id
+    FOR KEY SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+        USING ERRCODE = '40001';
+    END IF;
+    IF stored_raw.workspace_id IS DISTINCT FROM v_workspace_id
+      OR stored_raw.id IS DISTINCT FROM v_raw_record_id
+      OR stored_raw.ingest_status IS DISTINCT FROM 'ACCEPTED'
+      OR stored_raw.ingest_version IS DISTINCT FROM 'raw-source/v2'
+      OR stored_raw.payload_hash IS NULL
+      OR stored_raw.payload_hash !~ '^[0-9a-f]{64}$'
+      OR jsonb_typeof(stored_raw.payload) IS DISTINCT FROM 'object'
+      OR octet_length(stored_raw.payload::text) > 65536
+      OR stored_raw.expired_at IS NOT NULL
+      OR (
+        stored_raw.expires_at IS NOT NULL
+        AND stored_raw.expires_at <= statement_timestamp()
+      )
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RAW_NOT_RESOLVABLE'
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM public.raw_source_governance_disposition AS d
+        WHERE d.workspace_id = v_workspace_id
+          AND d.raw_record_id = v_raw_record_id
+          AND d.effect = 'RESTRICT_PROCESSING'
+      )
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RAW_PROCESSING_RESTRICTED'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    BEGIN
+      authority_identifiers :=
+        public.organization_identity_authority_from_raw_v1(
+          stored_raw.provider_key,
+          stored_raw.payload
+        );
+      blocker := public.organization_identity_blocker_from_raw_v1(
+        stored_raw.payload
+      );
+    EXCEPTION WHEN OTHERS THEN
+      RAISE EXCEPTION 'IDENTITY_RAW_NOT_RESOLVABLE'
+        USING ERRCODE = 'P0001';
+    END;
+    IF jsonb_typeof(authority_identifiers) IS DISTINCT FROM 'array'
+      OR jsonb_array_length(authority_identifiers) > 32
+      OR jsonb_typeof(blocker) IS DISTINCT FROM 'object'
+      OR blocker ? 'kind'
+      OR blocker->>'matchRule' IS NULL
+      OR blocker->>'matchRule' NOT IN ('domain_exact', 'name_country')
+      OR octet_length(blocker->>'blockerKey') NOT BETWEEN 1 AND 512
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RAW_NOT_RESOLVABLE'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    raw_name := stored_raw.payload->>'name';
+    raw_domain := CASE
+      WHEN jsonb_typeof(stored_raw.payload->'domain') = 'string'
+        THEN stored_raw.payload->>'domain'
+      ELSE NULL
+    END;
+    raw_country := CASE
+      WHEN jsonb_typeof(stored_raw.payload->'country') = 'string'
+        THEN stored_raw.payload->>'country'
+      ELSE NULL
+    END;
+    canonical_raw_name :=
+      public.organization_identity_canonical_suppression_value_v1(
+        'company_name', raw_name
+      );
+    canonical_raw_domain := CASE
+      WHEN raw_domain IS NULL THEN NULL
+      ELSE public.organization_identity_canonical_suppression_value_v1(
+        'domain', raw_domain
+      )
+    END;
+    IF canonical_raw_name IS NULL
+      OR (raw_domain IS NOT NULL AND canonical_raw_domain IS NULL)
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RAW_NOT_RESOLVABLE'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    legacy_dedupe_key := blocker->>'blockerKey';
+    legacy_match_rule := blocker->>'matchRule';
+    IF raw_domain IS NULL
+      AND jsonb_typeof(stored_raw.payload->'identifier') = 'object'
+      AND jsonb_typeof(stored_raw.payload->'identifier'->'scheme') = 'string'
+      AND jsonb_typeof(stored_raw.payload->'identifier'->'value') = 'string'
+    THEN
+      legacy_identifier_value := lower(regexp_replace(
+        normalize(stored_raw.payload->'identifier'->>'value', NFC),
+        '[^[:alnum:]]+',
+        '',
+        'g'
+      ));
+      IF legacy_identifier_value <> '' THEN
+        legacy_dedupe_key :=
+          'id:' || lower(stored_raw.payload->'identifier'->>'scheme') ||
+          ':' || legacy_identifier_value;
+        legacy_match_rule := 'identifier_exact';
+      END IF;
+    END IF;
+
+    SELECT c.id
+    INTO blocker_company_id
+    FROM public.canonical_company AS c
+    WHERE c.workspace_id = v_workspace_id
+      AND c.dedupe_key = blocker->>'blockerKey';
+    SELECT c.id
+    INTO legacy_company_id
+    FROM public.canonical_company AS c
+    WHERE c.workspace_id = v_workspace_id
+      AND c.dedupe_key = legacy_dedupe_key;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.organization_identifier AS oi
+      JOIN jsonb_array_elements(authority_identifiers) AS authority(value)
+        ON oi.scheme = authority.value->>'scheme'
+        AND oi.jurisdiction = authority.value->>'jurisdiction'
+        AND oi.normalized_value = authority.value->>'normalizedValue'
+      WHERE oi.workspace_id = v_workspace_id
+        AND oi.status = 'ACTIVE'
+        AND (
+          oi.conflict_id IS NOT NULL
+          OR oi.revoked_at IS NOT NULL
+          OR oi.confidence IS DISTINCT FROM 1
+          OR oi.authority_provider_key IS DISTINCT FROM
+            authority.value->>'providerKey'
+          OR oi.normalizer_version IS DISTINCT FROM
+            authority.value->>'normalizerVersion'
+          OR oi.validator_version IS DISTINCT FROM
+            authority.value->>'validatorVersion'
+        )
+    ) THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+    SELECT coalesce(jsonb_agg(
+      jsonb_build_object(
+        'identifierKey',
+          oi.scheme || ':' || oi.jurisdiction || ':' || oi.normalized_value,
+        'companyId', oi.company_id::text
+      ) ORDER BY
+        oi.scheme || ':' || oi.jurisdiction || ':' || oi.normalized_value
+        COLLATE "C"
+    ), '[]'::jsonb)
+    INTO existing_bindings
+    FROM public.organization_identifier AS oi
+    JOIN jsonb_array_elements(authority_identifiers) AS authority(value)
+      ON oi.scheme = authority.value->>'scheme'
+      AND oi.jurisdiction = authority.value->>'jurisdiction'
+      AND oi.normalized_value = authority.value->>'normalizedValue'
+    WHERE oi.workspace_id = v_workspace_id
+      AND oi.status = 'ACTIVE';
+    IF jsonb_array_length(existing_bindings) > 64 THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT coalesce(
+      array_agg(involved.involved_company_id ORDER BY involved.involved_company_id),
+      ARRAY[]::uuid[]
+    )
+    INTO planner_company_ids
+    FROM (
+      SELECT DISTINCT blocker_company_id AS involved_company_id
+      WHERE blocker_company_id IS NOT NULL
+      UNION
+      SELECT DISTINCT (binding.value->>'companyId')::uuid
+      FROM jsonb_array_elements(existing_bindings) AS binding(value)
+    ) AS involved;
+    IF EXISTS (
+      SELECT 1
+      FROM public.organization_canonical_mapping AS m
+      WHERE m.workspace_id = v_workspace_id
+        AND m.status = 'ACTIVE'
+        AND m.source_company_id = ANY(planner_company_ids)
+        AND (
+          m.source_company_id = m.canonical_company_id
+          OR m.revision < 1
+          OR m.revoked_at IS NOT NULL
+          OR m.split_decision_id IS NOT NULL
+        )
+    ) OR EXISTS (
+      SELECT 1
+      FROM public.organization_canonical_mapping AS first_mapping
+      JOIN public.organization_canonical_mapping AS next_mapping
+        ON next_mapping.workspace_id = v_workspace_id
+        AND next_mapping.status = 'ACTIVE'
+        AND next_mapping.source_company_id =
+          first_mapping.canonical_company_id
+      WHERE first_mapping.workspace_id = v_workspace_id
+        AND first_mapping.status = 'ACTIVE'
+        AND first_mapping.source_company_id = ANY(planner_company_ids)
+    ) THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+    SELECT coalesce(jsonb_agg(
+      jsonb_build_object(
+        'sourceCompanyId', m.source_company_id::text,
+        'rootCompanyId', m.canonical_company_id::text
+      ) ORDER BY m.source_company_id
+    ), '[]'::jsonb)
+    INTO root_mappings
+    FROM public.organization_canonical_mapping AS m
+    WHERE m.workspace_id = v_workspace_id
+      AND m.status = 'ACTIVE'
+      AND m.source_company_id = ANY(planner_company_ids);
+    IF jsonb_array_length(root_mappings) > 64 THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT coalesce(
+      array_agg(involved.involved_company_id ORDER BY involved.involved_company_id),
+      ARRAY[]::uuid[]
+    )
+    INTO locked_company_ids
+    FROM (
+      SELECT DISTINCT planner_id AS involved_company_id
+      FROM unnest(planner_company_ids) AS planner(planner_id)
+      UNION
+      SELECT DISTINCT legacy_company_id WHERE legacy_company_id IS NOT NULL
+      UNION
+      SELECT DISTINCT (mapping.value->>'rootCompanyId')::uuid
+      FROM jsonb_array_elements(root_mappings) AS mapping(value)
+    ) AS involved;
+    locked_company_count := 0;
+    FOR stored_company IN
+      SELECT c.*
+      FROM public.canonical_company AS c
+      WHERE c.workspace_id = v_workspace_id
+        AND c.id = ANY(locked_company_ids)
+      ORDER BY c.id
+      FOR UPDATE
+    LOOP
+      locked_company_count := locked_company_count + 1;
+      IF stored_company.name IS NULL
+        OR public.organization_identity_canonical_suppression_value_v1(
+          'company_name', stored_company.name
+        ) IS NULL
+        OR (
+          stored_company.domain IS NOT NULL
+          AND public.organization_identity_canonical_suppression_value_v1(
+            'domain', stored_company.domain
+          ) IS NULL
+        )
+      THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+    END LOOP;
+    IF locked_company_count IS DISTINCT FROM cardinality(locked_company_ids)
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.suppression_record AS s
+      WHERE s.workspace_id = v_workspace_id
+        AND (
+          (
+            s.type = 'company_name'
+            AND public.organization_identity_canonical_suppression_value_v1(
+              'company_name', s.value
+            ) = canonical_raw_name
+          ) OR (
+            s.type = 'domain'
+            AND canonical_raw_domain IS NOT NULL
+            AND public.organization_identity_canonical_suppression_value_v1(
+              'domain', s.value
+            ) = canonical_raw_domain
+          )
+        )
+    ) OR EXISTS (
+      SELECT 1
+      FROM public.canonical_company AS c
+      WHERE c.workspace_id = v_workspace_id
+        AND c.id = ANY(locked_company_ids)
+        AND (
+          c.status = 'SUPPRESSED'
+          OR EXISTS (
+            SELECT 1
+            FROM public.suppression_record AS s
+            WHERE s.workspace_id = v_workspace_id
+              AND (
+                (
+                  s.type = 'company_name'
+                  AND public.organization_identity_canonical_suppression_value_v1(
+                    'company_name', s.value
+                  ) =
+                    public.organization_identity_canonical_suppression_value_v1(
+                      'company_name', c.name
+                    )
+                ) OR (
+                  s.type = 'domain'
+                  AND c.domain IS NOT NULL
+                  AND public.organization_identity_canonical_suppression_value_v1(
+                    'domain', s.value
+                  ) =
+                    public.organization_identity_canonical_suppression_value_v1(
+                      'domain', c.domain
+                    )
+                )
+              )
+          )
+        )
+    ) THEN
+      RETURN QUERY SELECT
+        'suppressed'::text,
+        v_raw_record_id,
+        NULL::uuid,
+        NULL::uuid,
+        NULL::text,
+        NULL::text,
+        NULL::text,
+        false,
+        false,
+        0,
+        0;
+      RETURN;
+    END IF;
+
+    BEGIN
+      resolution_plan := public.organization_identity_plan_from_snapshot_v1(
+        jsonb_build_object(
+          'raw', jsonb_build_object(
+            'rawRecordId', stored_raw.id::text,
+            'providerKey', stored_raw.provider_key,
+            'payloadHash', stored_raw.payload_hash,
+            'ingestVersion', stored_raw.ingest_version
+          ),
+          'resolverVersion', 'organization-identity-resolver/v1',
+          'blocker', jsonb_build_object(
+            'blockerKey', blocker->>'blockerKey',
+            'matchRule', blocker->>'matchRule',
+            'legacyCandidateCompanyId', blocker_company_id
+          ),
+          'authorityIdentifiers', authority_identifiers,
+          'existingBindings', existing_bindings,
+          'rootMappings', root_mappings
+        )
+      );
+    EXCEPTION WHEN OTHERS THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END;
+    plan_kind := resolution_plan->>'kind';
+    plan_match_rule := resolution_plan->>'matchRule';
+    plan_input_hash := resolution_plan->>'inputHash';
+    plan_conflict_fingerprint := resolution_plan->>'conflictFingerprint';
+    plan_conflict_type := resolution_plan->>'conflictType';
+    IF plan_kind IS NULL
+      OR plan_kind NOT IN (
+        'bind_existing', 'lazy_upgrade', 'create_new', 'conflict'
+      )
+      OR plan_input_hash IS NULL
+      OR plan_input_hash !~ '^[0-9a-f]{64}$'
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    PERFORM 1
+    FROM public.identity_link AS l
+    WHERE l.workspace_id = v_workspace_id
+      AND l.raw_record_id = v_raw_record_id
+    ORDER BY l.id
+    FOR UPDATE;
+    SELECT count(*)::integer
+    INTO link_total
+    FROM public.identity_link AS l
+    WHERE l.workspace_id = v_workspace_id
+      AND l.raw_record_id = v_raw_record_id;
+
+    IF plan_kind <> 'conflict' AND link_total > 0 THEN
+      IF link_total <> 1 THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+      SELECT l.*
+      INTO stored_link
+      FROM public.identity_link AS l
+      WHERE l.workspace_id = v_workspace_id
+        AND l.raw_record_id = v_raw_record_id;
+      IF stored_link.resolver_version = 'identity-v1' THEN
+        IF stored_link.canonical_type IS DISTINCT FROM 'company'
+          OR stored_link.canonical_id IS DISTINCT FROM legacy_company_id
+          OR stored_link.match_rule IS DISTINCT FROM legacy_match_rule
+          OR stored_link.confidence IS DISTINCT FROM (CASE
+            WHEN legacy_match_rule = 'name_country' THEN 0.8
+            ELSE 1
+          END)
+          OR stored_link.status IS DISTINCT FROM 'ACTIVE'
+          OR stored_link.input_hash IS DISTINCT FROM 'legacy'
+          OR stored_link.conflict_id IS NOT NULL
+          OR legacy_company_id IS NULL
+        THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+        RETURN QUERY SELECT
+          'legacy_bound'::text,
+          v_raw_record_id,
+          stored_link.canonical_id,
+          NULL::uuid,
+          legacy_match_rule,
+          'legacy'::text,
+          NULL::text,
+          true,
+          false,
+          0,
+          0;
+        RETURN;
+      END IF;
+      IF stored_link.resolver_version IS DISTINCT FROM
+          'organization-identity-resolver/v1'
+        OR stored_link.canonical_type IS DISTINCT FROM 'company'
+        OR stored_link.status IS DISTINCT FROM 'ACTIVE'
+        OR stored_link.conflict_id IS NOT NULL
+        OR plan_kind NOT IN ('bind_existing', 'lazy_upgrade')
+      THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+      target_company_id := (resolution_plan->>'companyId')::uuid;
+      IF stored_link.canonical_id IS DISTINCT FROM target_company_id
+        OR stored_link.match_rule IS DISTINCT FROM plan_match_rule
+        OR stored_link.confidence IS DISTINCT FROM (CASE
+          WHEN plan_match_rule = 'name_country' THEN 0.8
+          ELSE 1
+        END)
+      THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+      IF stored_link.input_hash IS DISTINCT FROM plan_input_hash THEN
+        RAISE EXCEPTION 'IDENTITY_INPUT_DRIFT'
+          USING ERRCODE = 'P0001';
+      END IF;
+      RETURN QUERY SELECT
+        'bound'::text,
+        v_raw_record_id,
+        target_company_id,
+        NULL::uuid,
+        plan_match_rule,
+        plan_input_hash,
+        NULL::text,
+        true,
+        false,
+        jsonb_array_length(authority_identifiers),
+        0;
+      RETURN;
+    END IF;
+
+    IF plan_kind = 'conflict' THEN
+      IF plan_match_rule IS DISTINCT FROM 'identity_conflict'
+        OR plan_conflict_type NOT IN (
+          'identifier_split', 'blocking_key_disagreement'
+        )
+        OR plan_conflict_fingerprint !~ '^[0-9a-f]{64}$'
+        OR jsonb_typeof(resolution_plan->'companyIds') IS DISTINCT FROM 'array'
+        OR jsonb_typeof(resolution_plan->'identifierKeys') IS DISTINCT FROM 'array'
+      THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+      SELECT coalesce(array_agg(value::uuid ORDER BY value::uuid), ARRAY[]::uuid[])
+      INTO conflict_company_ids
+      FROM jsonb_array_elements_text(
+        resolution_plan->'companyIds'
+      ) AS value;
+      SELECT coalesce(array_agg(value ORDER BY value COLLATE "C"), ARRAY[]::text[])
+      INTO expected_identifier_keys
+      FROM jsonb_array_elements_text(
+        resolution_plan->'identifierKeys'
+      ) AS value;
+      IF cardinality(conflict_company_ids) NOT BETWEEN 2 AND 64
+        OR conflict_company_ids IS DISTINCT FROM ARRAY(
+          SELECT DISTINCT candidate_id
+          FROM unnest(conflict_company_ids) AS candidate(candidate_id)
+          ORDER BY candidate_id
+        )
+        OR expected_identifier_keys IS DISTINCT FROM ARRAY(
+          SELECT DISTINCT identifier_key COLLATE "C"
+          FROM unnest(expected_identifier_keys) AS item(identifier_key)
+          ORDER BY identifier_key COLLATE "C"
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM unnest(conflict_company_ids) AS candidate(candidate_id)
+          WHERE NOT candidate.candidate_id = ANY(locked_company_ids)
+        )
+      THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+      expected_conflict_facts := jsonb_build_object(
+        'schemaVersion', 'organization-identity-conflict/v1',
+        'resolverVersion', 'organization-identity-resolver/v1',
+        'blockerKey', blocker->>'blockerKey',
+        'blockerRule', blocker->>'matchRule',
+        'conflictType', plan_conflict_type,
+        'companyIds', to_jsonb(conflict_company_ids),
+        'identifierKeys', to_jsonb(expected_identifier_keys)
+      );
+
+      SELECT c.*
+      INTO stored_conflict
+      FROM public.organization_identity_conflict AS c
+      WHERE c.workspace_id = v_workspace_id
+        AND c.fingerprint = plan_conflict_fingerprint
+      FOR UPDATE;
+      IF FOUND THEN
+        IF stored_conflict.conflict_type IS DISTINCT FROM plan_conflict_type
+          OR stored_conflict.status IS DISTINCT FROM 'OPEN'
+          OR stored_conflict.revision IS DISTINCT FROM 1
+          OR stored_conflict.facts IS DISTINCT FROM expected_conflict_facts
+          OR stored_conflict.resolved_at IS NOT NULL
+          OR stored_conflict.raw_record_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+            FROM public.raw_source_record AS conflict_raw
+            WHERE conflict_raw.workspace_id = v_workspace_id
+              AND conflict_raw.id = stored_conflict.raw_record_id
+          )
+        THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+      ELSE
+        INSERT INTO public.organization_identity_conflict(
+          workspace_id,
+          raw_record_id,
+          conflict_type,
+          fingerprint,
+          status,
+          revision,
+          facts
+        ) VALUES (
+          v_workspace_id,
+          v_raw_record_id,
+          plan_conflict_type,
+          plan_conflict_fingerprint,
+          'OPEN',
+          1,
+          expected_conflict_facts
+        )
+        RETURNING * INTO stored_conflict;
+        IF clock_timestamp() >= statement_deadline THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+            USING ERRCODE = '57014';
+        END IF;
+        conflict_created := true;
+      END IF;
+
+      IF conflict_created THEN
+        FOREACH conflict_company_id IN ARRAY conflict_company_ids LOOP
+          INSERT INTO public.organization_identity_conflict_party(
+            workspace_id, conflict_id, company_id, role
+          ) VALUES (
+            v_workspace_id,
+            stored_conflict.id,
+            conflict_company_id,
+            'CANDIDATE'
+          );
+          IF clock_timestamp() >= statement_deadline THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+              USING ERRCODE = '57014';
+          END IF;
+        END LOOP;
+      ELSE
+        PERFORM 1
+        FROM public.organization_identity_conflict_party AS party
+        WHERE party.workspace_id = v_workspace_id
+          AND party.conflict_id = stored_conflict.id
+        ORDER BY party.company_id, party.role
+        FOR UPDATE;
+        SELECT
+          coalesce(
+            array_agg(party.company_id ORDER BY party.company_id),
+            ARRAY[]::uuid[]
+          ),
+          count(*)::integer
+        INTO actual_party_ids, party_total
+        FROM public.organization_identity_conflict_party AS party
+        WHERE party.workspace_id = v_workspace_id
+          AND party.conflict_id = stored_conflict.id
+          AND party.role = 'CANDIDATE';
+        IF party_total IS DISTINCT FROM cardinality(conflict_company_ids)
+          OR actual_party_ids IS DISTINCT FROM conflict_company_ids
+          OR EXISTS (
+            SELECT 1
+            FROM public.organization_identity_conflict_party AS party
+            WHERE party.workspace_id = v_workspace_id
+              AND party.conflict_id = stored_conflict.id
+              AND party.role IS DISTINCT FROM 'CANDIDATE'
+          )
+        THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+      END IF;
+      party_total := cardinality(conflict_company_ids);
+
+      IF link_total > 0 THEN
+        SELECT
+          coalesce(
+            array_agg(l.canonical_id ORDER BY l.canonical_id),
+            ARRAY[]::uuid[]
+          )
+        INTO actual_link_company_ids
+        FROM public.identity_link AS l
+        WHERE l.workspace_id = v_workspace_id
+          AND l.raw_record_id = v_raw_record_id
+          AND l.canonical_type = 'company'
+          AND l.match_rule = 'identity_conflict'
+          AND l.confidence = 0
+          AND l.status = 'PENDING_CONFLICT'
+          AND l.resolver_version = 'organization-identity-resolver/v1'
+          AND l.input_hash = plan_input_hash
+          AND l.conflict_id = stored_conflict.id;
+        IF link_total IS DISTINCT FROM cardinality(conflict_company_ids)
+          OR actual_link_company_ids IS DISTINCT FROM conflict_company_ids
+        THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+        RETURN QUERY SELECT
+          'conflict'::text,
+          v_raw_record_id,
+          NULL::uuid,
+          stored_conflict.id,
+          'identity_conflict'::text,
+          plan_input_hash,
+          plan_conflict_fingerprint,
+          true,
+          false,
+          0,
+          party_total;
+        RETURN;
+      END IF;
+
+      FOREACH conflict_company_id IN ARRAY conflict_company_ids LOOP
+        INSERT INTO public.identity_link(
+          id,
+          workspace_id,
+          canonical_type,
+          canonical_id,
+          raw_record_id,
+          match_rule,
+          confidence,
+          status,
+          resolver_version,
+          input_hash,
+          conflict_id
+        ) VALUES (
+          gen_random_uuid(),
+          v_workspace_id,
+          'company',
+          conflict_company_id,
+          v_raw_record_id,
+          'identity_conflict',
+          0,
+          'PENDING_CONFLICT',
+          'organization-identity-resolver/v1',
+          plan_input_hash,
+          stored_conflict.id
+        );
+        IF clock_timestamp() >= statement_deadline THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+            USING ERRCODE = '57014';
+        END IF;
+      END LOOP;
+      RETURN QUERY SELECT
+        'conflict'::text,
+        v_raw_record_id,
+        NULL::uuid,
+        stored_conflict.id,
+        'identity_conflict'::text,
+        plan_input_hash,
+        plan_conflict_fingerprint,
+        false,
+        false,
+        0,
+        party_total;
+      RETURN;
+    END IF;
+
+    IF link_total <> 0
+      OR plan_match_rule NOT IN ('identity_v2', 'domain_exact', 'name_country')
+      OR jsonb_typeof(resolution_plan->'identifiers') IS DISTINCT FROM 'array'
+      OR resolution_plan->'identifiers' IS DISTINCT FROM authority_identifiers
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF plan_kind = 'create_new' THEN
+      INSERT INTO public.canonical_company(
+        id,
+        workspace_id,
+        name,
+        domain,
+        country,
+        region,
+        industry,
+        employee_count,
+        revenue_usd,
+        attributes,
+        status,
+        dedupe_key,
+        version,
+        created_at,
+        updated_at
+      ) VALUES (
+        gen_random_uuid(),
+        v_workspace_id,
+        raw_name,
+        raw_domain,
+        raw_country,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        'NEW',
+        blocker->>'blockerKey',
+        1,
+        statement_timestamp(),
+        statement_timestamp()
+      )
+      RETURNING id INTO target_company_id;
+      IF clock_timestamp() >= statement_deadline THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+          USING ERRCODE = '57014';
+      END IF;
+    ELSIF plan_kind IN ('bind_existing', 'lazy_upgrade') THEN
+      target_company_id := (resolution_plan->>'companyId')::uuid;
+      IF NOT target_company_id = ANY(locked_company_ids) THEN
+        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+          USING ERRCODE = 'P0001';
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    identifier_total := 0;
+    FOR identifier_fact IN
+      SELECT value
+      FROM jsonb_array_elements(authority_identifiers) AS item(value)
+      ORDER BY value->>'key' COLLATE "C"
+    LOOP
+      identifier_total := identifier_total + 1;
+      SELECT oi.*
+      INTO stored_identifier
+      FROM public.organization_identifier AS oi
+      WHERE oi.workspace_id = v_workspace_id
+        AND oi.scheme = identifier_fact->>'scheme'
+        AND oi.jurisdiction = identifier_fact->>'jurisdiction'
+        AND oi.normalized_value = identifier_fact->>'normalizedValue'
+        AND oi.status = 'ACTIVE'
+      FOR UPDATE;
+      IF FOUND THEN
+        SELECT coalesce(
+          (
+            SELECT (mapping.value->>'rootCompanyId')::uuid
+            FROM jsonb_array_elements(root_mappings) AS mapping(value)
+            WHERE (mapping.value->>'sourceCompanyId')::uuid =
+              stored_identifier.company_id
+          ),
+          stored_identifier.company_id
+        )
+        INTO existing_identifier_root;
+        IF existing_identifier_root IS DISTINCT FROM target_company_id THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+        UPDATE public.organization_identifier AS oi
+        SET last_seen_at = greatest(oi.last_seen_at, statement_timestamp())
+        WHERE oi.workspace_id = v_workspace_id
+          AND oi.id = stored_identifier.id;
+        IF clock_timestamp() >= statement_deadline THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+            USING ERRCODE = '57014';
+        END IF;
+      ELSE
+        INSERT INTO public.organization_identifier(
+          workspace_id,
+          company_id,
+          scheme,
+          jurisdiction,
+          normalized_value,
+          authority_provider_key,
+          raw_record_id,
+          conflict_id,
+          confidence,
+          normalizer_version,
+          validator_version,
+          provenance,
+          status,
+          first_seen_at,
+          last_seen_at,
+          created_at,
+          revoked_at
+        ) VALUES (
+          v_workspace_id,
+          target_company_id,
+          identifier_fact->>'scheme',
+          identifier_fact->>'jurisdiction',
+          identifier_fact->>'normalizedValue',
+          identifier_fact->>'providerKey',
+          v_raw_record_id,
+          NULL,
+          1,
+          identifier_fact->>'normalizerVersion',
+          identifier_fact->>'validatorVersion',
+          jsonb_build_object(
+            'schemaVersion', 'organization-identifier-provenance/v1',
+            'rawRecordId', v_raw_record_id,
+            'providerKey', stored_raw.provider_key
+          ),
+          'ACTIVE',
+          statement_timestamp(),
+          statement_timestamp(),
+          statement_timestamp(),
+          NULL
+        );
+        IF clock_timestamp() >= statement_deadline THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+            USING ERRCODE = '57014';
+        END IF;
+      END IF;
+    END LOOP;
+
+    INSERT INTO public.identity_link(
+      id,
+      workspace_id,
+      canonical_type,
+      canonical_id,
+      raw_record_id,
+      match_rule,
+      confidence,
+      status,
+      resolver_version,
+      input_hash,
+      conflict_id
+    ) VALUES (
+      gen_random_uuid(),
+      v_workspace_id,
+      'company',
+      target_company_id,
+      v_raw_record_id,
+      plan_match_rule,
+      CASE WHEN plan_match_rule = 'name_country' THEN 0.8 ELSE 1 END,
+      'ACTIVE',
+      'organization-identity-resolver/v1',
+      plan_input_hash,
+      NULL
+    );
+    IF clock_timestamp() >= statement_deadline THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+        USING ERRCODE = '57014';
+    END IF;
+    RETURN QUERY SELECT
+      CASE WHEN plan_kind = 'create_new' THEN 'created' ELSE 'bound' END,
+      v_raw_record_id,
+      target_company_id,
+      NULL::uuid,
+      plan_match_rule,
+      plan_input_hash,
+      NULL::text,
+      false,
+      plan_kind = 'create_new',
+      identifier_total,
+      0;
+    RETURN;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS
+      error_state = RETURNED_SQLSTATE,
+      error_message = MESSAGE_TEXT;
+    IF error_state = '57014' THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+        USING ERRCODE = '57014';
+    ELSIF error_state = '55P03'
+      AND error_message = 'IDENTITY_RESOLUTION_LOCK_TIMEOUT'
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_LOCK_TIMEOUT'
+        USING ERRCODE = '55P03';
+    ELSIF error_state = '40001'
+      AND error_message = 'IDENTITY_RESOLUTION_PLAN_STALE'
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+        USING ERRCODE = '40001';
+    ELSIF error_state = 'P0001'
+      AND error_message IN (
+        'IDENTITY_RAW_NOT_RESOLVABLE',
+        'IDENTITY_RAW_PROCESSING_RESTRICTED',
+        'IDENTITY_INPUT_DRIFT',
+        'IDENTITY_RESOLUTION_STATE_INVALID'
+      )
+    THEN
+      RAISE EXCEPTION USING
+        ERRCODE = 'P0001',
+        MESSAGE = error_message;
+    END IF;
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+      USING ERRCODE = 'P0001';
+  END;
 END
 $organization_identity_command$;
 

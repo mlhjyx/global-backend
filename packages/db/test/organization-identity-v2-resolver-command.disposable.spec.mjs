@@ -19,7 +19,7 @@ const networkId =
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationChecksum =
-  "098aa285a17cdc6e5ea2c092cbfb31a57cd0ec3ed6db83b0c1221e9d86f55c6a";
+  "3bf6e58db819352ca0777380e9adb2fbf32ca9eeb311b91df696b569302da7af";
 const migrationPath = resolve(
   repositoryRoot,
   "packages/db/prisma/migrations",
