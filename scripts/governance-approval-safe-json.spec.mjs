@@ -54,6 +54,10 @@ const expectApprovalError = async (callback, code) => {
   });
 };
 
+const expectApprovalErrorSync = (callback, code) => {
+  assert.throws(callback, (error) => error.message === `APPROVAL_JSON_${code}`);
+};
+
 test('parseApprovalJson rejects literal and escaped duplicate object keys without reflecting input', () => {
   for (const text of [
     '{"actor":"sensitive-approval-input","actor":"second"}',
@@ -73,7 +77,10 @@ test('parseApprovalJson rejects literal and escaped duplicate object keys withou
 
 test('parseApprovalJson rejects Unicode whitespace, negative zero, and non-finite numbers', () => {
   for (const text of ['{\u00a0"id":1}', '{"value":-0}', '{"value":1e400}']) {
-    assert.throws(() => parseApprovalJson(text, 'approval'), /^APPROVAL_JSON_/);
+    assert.throws(
+      () => parseApprovalJson(text, 'approval'),
+      (error) => error.message.startsWith('APPROVAL_JSON_'),
+    );
   }
 });
 
@@ -82,10 +89,7 @@ test('parseApprovalJson permits only valid JSON values with finite safe numbers'
     parseApprovalJson('{"array":[true,null,"ok",0,1.5e2]}', 'approval'),
     { array: [true, null, 'ok', 0, 150] },
   );
-  assert.throws(
-    () => parseApprovalJson('{"value":9007199254740992}', 'approval'),
-    /^APPROVAL_JSON_NUMBER$/,
-  );
+  expectApprovalErrorSync(() => parseApprovalJson('{"value":9007199254740992}', 'approval'), 'NUMBER');
 });
 
 test('readApprovalJson decodes UTF-8 fatally and preserves bounded raw bytes', async () => {
@@ -164,9 +168,9 @@ test('readApprovalJson rejects an opened regular file whose identity changes dur
 });
 
 test('renderApprovalReceiptCore requires canonical ISO instants and renders schema field order', () => {
-  assert.throws(
+  expectApprovalErrorSync(
     () => renderApprovalReceiptCore(approvalCore({ approved_at: '2026-08-30T12:34:56Z' })),
-    /^APPROVAL_JSON_CORE_INSTANT$/,
+    'CORE_INSTANT',
   );
   const reordered = Object.fromEntries(Object.entries(approvalCore()).reverse());
   const bytes = renderApprovalReceiptCore(reordered);
@@ -218,12 +222,31 @@ test('buildApprovalReceiptArtifact rejects core-digest drift and every recursive
     sha256Prefixed(renderApprovalReceiptCore(driftedEnvelope.core)),
     driftedEnvelope.receipt_core_sha256,
   );
+  expectApprovalErrorSync(
+    () => parseApprovalJson(`${JSON.stringify(driftedEnvelope, null, 2)}\n`, 'receipt'),
+    'CORE_DIGEST',
+  );
   for (const alternative of alternatives) {
-    assert.throws(
-      () => buildApprovalReceiptArtifact({ ...core, ...alternative }),
-      /^APPROVAL_JSON_CORE_PROPERTY$/,
+    expectApprovalErrorSync(
+      () => parseApprovalJson(
+        `${JSON.stringify({ ...artifact.envelope, ...alternative }, null, 2)}\n`,
+        'receipt',
+      ),
+      'RECEIPT_PROPERTY',
     );
   }
+});
+
+test('parseApprovalJson accepts only exact final receipt bytes after canonical rendering', () => {
+  const artifact = buildApprovalReceiptArtifact(approvalCore());
+  assert.deepEqual(
+    parseApprovalJson(artifact.bytes.toString('utf8'), 'receipt'),
+    artifact.envelope,
+  );
+  expectApprovalErrorSync(
+    () => parseApprovalJson(JSON.stringify(artifact.envelope), 'receipt'),
+    'RECEIPT_RENDER',
+  );
 });
 
 test('external raw digest is derived from final bytes and detects one-byte receipt drift', async () => {
@@ -240,11 +263,12 @@ test('external raw digest is derived from final bytes and detects one-byte recei
     );
 
     const driftedBytes = Buffer.from(exactBytes);
-    driftedBytes[driftedBytes.length - 2] ^= 0x01;
+    const mutableOffset = driftedBytes.indexOf(Buffer.from('approval-owner', 'utf8'));
+    assert.notEqual(mutableOffset, -1);
+    driftedBytes[mutableOffset] = 0x78;
     assert.notEqual(sha256Prefixed(driftedBytes), artifact.receiptRawSha256);
     await writeFile(receiptPath, driftedBytes);
-    const reread = await readApprovalJson(receiptPath, 'receipt');
-    assert.notEqual(sha256Prefixed(reread.bytes), artifact.receiptRawSha256);
+    await expectApprovalError(() => readApprovalJson(receiptPath, 'receipt'), 'CORE_DIGEST');
   });
 });
 
