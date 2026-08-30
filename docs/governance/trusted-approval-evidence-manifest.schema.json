@@ -10,13 +10,14 @@
     "receipt_core_sha256": { "$ref": "#/$defs/digest" },
     "receipt_raw_sha256": { "$ref": "#/$defs/digest" },
     "attestation_subject_sha256": { "$ref": "#/$defs/digest" },
-    "files": { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "$ref": "#/$defs/file" }, { "$ref": "#/$defs/file" }], "items": false },
+    "files": { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "$ref": "#/$defs/coreFile" }, { "$ref": "#/$defs/rawFile" }], "items": false },
     "attestation_bundle": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}\\.jsonl$" }, "sha256": { "$ref": "#/$defs/digest" } } },
     "trusted_root": { "type": "object", "additionalProperties": false, "required": ["path", "sha256", "acquired_at", "gh_path", "gh_version", "tuf_source"], "properties": { "path": { "const": "trusted_root.jsonl" }, "sha256": { "$ref": "#/$defs/digest" }, "acquired_at": { "$ref": "#/$defs/instant" }, "gh_path": { "const": "/opt/global/toolchains/gh/2.89.0/bin/gh" }, "gh_version": { "const": "2.89.0" }, "tuf_source": { "const": "GH_ATTESTATION_TRUSTED_ROOT" } } }
   },
   "$defs": {
     "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "instant": { "type": "string", "format": "iso-instant" },
-    "file": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$" }, "sha256": { "$ref": "#/$defs/digest" } } }
+    "coreFile": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "const": "receipt-core.json" }, "sha256": { "$ref": "#/$defs/digest" } } },
+    "rawFile": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "const": "receipt.json" }, "sha256": { "$ref": "#/$defs/digest" } } }
   }
 }
