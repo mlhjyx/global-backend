@@ -11,6 +11,7 @@ import {
   validateProgramCMergeAuthorizationGrant,
   validateProgramCMergeAuthorizationConsumption,
   validateProgramCMergeAuthorizationConsumptionContext,
+  inspectSyntheticProgramCMergeAuthorizationConsumptionContext,
 } from './governance-approval-schema-validator.mjs';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -394,7 +395,15 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
       }],
     },
   });
-  expectValid(validateProgramCMergeAuthorizationConsumptionContext, context());
+  const positive = inspectSyntheticProgramCMergeAuthorizationConsumptionContext(context());
+  assert.equal(positive.synthetic_consistent, true);
+  assert.equal(positive.evidence_trust_state, 'EXTERNAL_UNVERIFIED');
+  assert.equal(positive.trust_eligible, false);
+  assert.equal(positive.external_receipt_bytes_observed, false);
+  assert.equal(positive.durable_ledger_readback_observed, false);
+  assert.equal(positive.issues.at(-1).stable_code, 'APPROVAL_INDEPENDENCE_NOT_PROVEN');
+  const legacy = validateProgramCMergeAuthorizationConsumptionContext(context());
+  assert.deepEqual(legacy, positive);
   for (const mutate of [
     (value) => { delete value.now; },
     (value) => { value.now = '2026-08-30T00:30:00Z'; },
@@ -428,6 +437,11 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
     },
     (value) => { value.grant.head_sha = 'e'.repeat(40); },
   ]) {
-    const value = context(); mutate(value); expectInvalid(validateProgramCMergeAuthorizationConsumptionContext, value);
+    const value = context(); mutate(value);
+    const result = inspectSyntheticProgramCMergeAuthorizationConsumptionContext(value);
+    assert.equal(result.synthetic_consistent, false);
+    assert.equal(result.trust_eligible, false);
+    assert.equal(result.evidence_trust_state, 'EXTERNAL_UNVERIFIED');
+    assert.ok(result.issues.every(({ stable_code }) => stable_code.startsWith('APPROVAL_')));
   }
 });
