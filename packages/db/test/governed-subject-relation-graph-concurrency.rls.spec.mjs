@@ -570,6 +570,27 @@ describe("governed relation graph concurrency and DSR contract", () => {
     }
   });
 
+  it("replays the exact domain ACK concurrently with append and attest without deadlock", async () => {
+    const ackReplay = asApp(`SELECT status||'|'||(ack_json->>'ackId')
+      FROM apply_execution_domain_ack_v1('${WS}','${OP}','GraphConsumer',
+        'GraphAggregate',repeat('3',64),repeat('4',64));`);
+    let results = await concurrent([asApp(invocation(APPEND)), ackReplay]);
+    assert.ok(results.every((result) => result.status === 0));
+    assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
+    assert.match(results[1].stdout, /REPLAYED\|[0-9a-f]{64}/);
+    assert.equal(psql(`SELECT count(*) FROM execution_domain_ack WHERE operation_id='${OP}';`), "1");
+    assert.equal(JSON.parse(graphSnapshot()).relations, 1);
+
+    reset(); facts = seedOperation();
+    psql(asApp(invocation(APPEND)));
+    results = await concurrent([asApp(invocation(ATTEST), WS, true), ackReplay]);
+    assert.ok(results.every((result) => result.status === 0));
+    assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
+    assert.match(results[1].stdout, /REPLAYED\|[0-9a-f]{64}/);
+    assert.equal(psql(`SELECT count(*) FROM execution_domain_ack WHERE operation_id='${OP}';`), "1");
+    assert.equal(JSON.parse(graphSnapshot()).relations, 1);
+  });
+
   it("serializes opposite edges without deadlock and leaves an acyclic graph", async () => {
     seedStar(3, 2);
     const [a, b] = psql(`SELECT id::text||'|'||subject_id::text FROM governed_subject

@@ -247,8 +247,8 @@ describe('governed relation append and attest migration contract', () => {
     expect(caller).toMatch(/current_setting\s*\(\s*'role'\s*,\s*true\s*\)\s+IS\s+DISTINCT\s+FROM\s+'none'/iu);
     const operation = functionBlock(sql, '_governed_relation_lock_operation_v1');
     const facts = [
-      'execution_budget_authority', 'tool_budget_account',
-      'tool_budget_operation', 'execution_domain_ack',
+      'tool_budget_operation', 'tool_budget_account',
+      'execution_budget_authority', 'execution_domain_ack',
     ];
     let cursor = -1;
     for (const fact of facts) {
@@ -257,6 +257,8 @@ describe('governed relation append and attest migration contract', () => {
       cursor = index;
     }
     expect(operation.match(/FOR\s+SHARE/giu)).toHaveLength(4);
+    expect(operation).toMatch(/revoked_at\s+IS\s+NOT\s+NULL[^]*?GOVERNED_SUBJECT_AUTHORITY_REVOKED/iu);
+    expect(operation).toMatch(/consumed_at\s+IS\s+NULL[^]*?GOVERNED_OPERATION_SUBJECT_INVALID/iu);
     const append = functionBlock(sql, APPEND);
     expect(append).toMatch(/WITH\s+RECURSIVE\s+reachable[^]*?\bUNION\b(?!\s+ALL)[^]*?depth\s*<\s*65/iu);
   });

@@ -20,6 +20,8 @@ const ACCOUNT_H = "31000000-0000-4000-8000-000000000003";
 const OP_H = "41000000-0000-4000-8000-000000000003";
 const OP_RESERVED = "41000000-0000-4000-8000-000000000004";
 const OP_RECEIPT = "41000000-0000-4000-8000-000000000005";
+const OP_ARTIFACT = "41000000-0000-4000-8000-000000000006";
+const ARTIFACT_ID = "51000000-0000-4000-8000-0000000000a6";
 const CHILD_A = "51000000-0000-4000-8000-000000000001";
 const CHILD_B = "51000000-0000-4000-8000-000000000002";
 const SOURCE_A = "61000000-0000-4000-8000-000000000001";
@@ -224,7 +226,7 @@ function resetDatabase() {
 
 function seedAuthority({
   workspaceId, authorityId, accountId, operationId, suffix,
-  expired = false, closed = false, insertWorkspace = true,
+  expired = false, closed = false, insertWorkspace = true, consumed = true,
 }) {
   psql(`
     ${insertWorkspace ? `INSERT INTO workspace(id,name,created_at,updated_at)
@@ -243,7 +245,7 @@ function seedAuthority({
       statement_timestamp()-interval '${expired ? "10 minutes" : "30 seconds"}',
       statement_timestamp()-interval '${expired ? "9 minutes" : "20 seconds"}',
       statement_timestamp()${expired ? "-interval '5 minutes'" : "+interval '4 minutes'"},
-      statement_timestamp()-interval '${expired ? "8 minutes" : "30 seconds"}'
+      ${consumed ? `statement_timestamp()-interval '${expired ? "8 minutes" : "30 seconds"}'` : "NULL"}
     );
     INSERT INTO tool_budget_account(
       id,scope_key,account_key,generation,cap_cents,reserved_cents,charged_cents,
@@ -315,7 +317,41 @@ function seedReservedOperation() {
   return { ...factsA, operationId: OP_RESERVED };
 }
 
-function cloneAckWithDrift(kind, suffix) {
+function seedArtifactOperation() {
+  const digest = "d".repeat(64);
+  const ackOutput = psql(`DO $artifact$
+    DECLARE reference jsonb; usage jsonb;
+    BEGIN
+      reference := jsonb_build_object(
+        'schemaVersion','generic-operation-artifact-ref/v1','artifactId','${ARTIFACT_ID}',
+        'operationId','${OP_ARTIFACT}','resultSchema','artifact-result/v1',
+        'sha256','${digest}','sizeBytes','128','mediaType','application/json',
+        'expiresAt','2036-08-31T00:00:00.000Z');
+      usage := jsonb_build_object('currency','USD','unit','microusd','callCount',1,
+        'inputTokens',1,'outputTokens',1,'chargedMicrousd','50','upperBoundMicrousd','100');
+      INSERT INTO tool_budget_operation(id,scope_key,account_id,generation,operation_key,
+        amount_unit,reserved_cents,reserved_microusd,observed_microusd,charged_microusd,
+        result_schema_version,result_schema,result_digest,result_json,status,receipt_usage,
+        receipt_cost_basis,settled_at,created_at)
+      VALUES ('${OP_ARTIFACT}','${WS_A}','${ACCOUNT_A}',1,'artifact-operation','microusd',
+        0,100,50,50,'generic-operation-artifact-ref/v1','artifact-result/v1','${digest}',
+        reference,'SETTLED',usage,'token_pricing',now(),now());
+      UPDATE tool_budget_account SET charged_microusd=charged_microusd+50
+        WHERE id='${ACCOUNT_A}';
+    END $artifact$;
+    SET SESSION AUTHORIZATION app_user; BEGIN;
+    SELECT set_config('app.current_workspace_id','${WS_A}',true);
+    SELECT ack_json::text FROM apply_execution_domain_ack_v1(
+      '${WS_A}','${OP_ARTIFACT}','ArtifactConsumer','ArtifactAggregate',
+      repeat('c',64),repeat('d',64)); COMMIT;`)
+    .split("\n").findLast((line) => line.startsWith("{"));
+  const ack = JSON.parse(ackOutput);
+  return { workspaceId: WS_A, authorityId: AUTH_A, accountId: ACCOUNT_A,
+    operationId: OP_ARTIFACT, generation: 1, ackId: ack.ackId,
+    resultDigest: ack.resultDigest, artifactId: ARTIFACT_ID };
+}
+
+function cloneAckWithDrift(kind, suffix, sourceAckId = factsA.ackId) {
   const ackId = suffix.repeat(64);
   const expressions = {
     operationKey: ["'drift-operation-key'", "source.result_strategy", "source.artifact_id", "source.result_schema", "source.usage", "source.cost_basis",
@@ -329,6 +365,9 @@ function cloneAckWithDrift(kind, suffix) {
       "jsonb_build_object('costBasis','provider_reported')"],
     strategy: ["source.operation_key", "'artifact_reference'", "'artifact://drift'", "source.result_schema", "source.usage", "source.cost_basis",
       "jsonb_build_object('resultStrategy','artifact_reference','artifactId','artifact://drift')"],
+    artifactId: ["source.operation_key", "source.result_strategy",
+      "'51000000-0000-4000-8000-0000000000b6'", "source.result_schema", "source.usage",
+      "source.cost_basis", "jsonb_build_object('artifactId','51000000-0000-4000-8000-0000000000b6')"],
   }[kind];
   assert.ok(expressions);
   const [operationKey, strategy, artifact, schema, usage, cost, jsonDrift] = expressions;
@@ -341,25 +380,31 @@ function cloneAckWithDrift(kind, suffix) {
     source.domain_ack_key,source.domain_revision,${strategy},${schema},source.result_digest,
     ${artifact},${usage},${cost},source.ack_json || jsonb_build_object(
       'ackId','${ackId}','consumer','Task2Drift${suffix}') || ${jsonDrift},clock_timestamp()
-  FROM execution_domain_ack source WHERE source.ack_id='${factsA.ackId}';`);
+  FROM execution_domain_ack source WHERE source.ack_id='${sourceAckId}';`);
   return ackId;
 }
 
-function seedDirectRelationForAck(ackId) {
+function seedDirectRelationForAck(ackId, operationFacts = factsA) {
   const rootId = "81000000-0000-4000-8000-000000000001";
   const childId = "81000000-0000-4000-8000-000000000002";
   psql(`INSERT INTO governed_subject(id,scope_key,workspace_id,subject_type,subject_id,data_class)
-    VALUES ('${rootId}','${WS_A}','${WS_A}','tool_operation','${OP_A}','NON_PERSONAL'),
-      ('${childId}','${WS_A}','${WS_A}','materialized_record','${CHILD_A}','NON_PERSONAL');
+    VALUES ('${rootId}','${operationFacts.workspaceId}','${operationFacts.workspaceId}',
+      'tool_operation','${operationFacts.operationId}','NON_PERSONAL'),
+      ('${childId}','${operationFacts.workspaceId}','${operationFacts.workspaceId}',
+      'materialized_record','${CHILD_A}','NON_PERSONAL');
     INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,
       account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest)
-    VALUES ('${rootId}','${WS_A}','${WS_A}','${AUTH_A}','${ACCOUNT_A}','${OP_A}',1,
-      '${rootId}','${ackId}','${factsA.resultDigest}');
+    VALUES ('${rootId}','${operationFacts.workspaceId}','${operationFacts.workspaceId}',
+      '${operationFacts.authorityId}','${operationFacts.accountId}',
+      '${operationFacts.operationId}',${operationFacts.generation},'${rootId}','${ackId}',
+      '${operationFacts.resultDigest}');
     INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
       operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
       child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,
       contract_sha256)
-    VALUES ('${WS_A}','${WS_A}','${AUTH_A}','${ACCOUNT_A}','${OP_A}',1,'${ackId}',
+    VALUES ('${operationFacts.workspaceId}','${operationFacts.workspaceId}',
+      '${operationFacts.authorityId}','${operationFacts.accountId}',
+      '${operationFacts.operationId}',${operationFacts.generation},'${ackId}',
       '${rootId}','${rootId}','${childId}','record:0','MATERIALIZED_CHILD','source_record',
       '${SOURCE_A}','${CONTRACT_A}');`);
 }
@@ -741,6 +786,34 @@ describe("governed relation append/attest database contract", () => {
       seedDirectRelationForAck(ackId);
       captureFailure(ATTEST, factsA, { ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
     }
+  });
+
+  it("derives typed and artifact strategies from schema version and binds artifact identity", () => {
+    const artifactFacts = seedArtifactOperation();
+    const first = parseRow(psql(asApp(selectCall(APPEND, artifactFacts, {
+      childId: "51000000-0000-4000-8000-0000000000a7", relationKey: "artifact:result",
+    }), WS_A)));
+    assert.equal(first[4], "f");
+    const replay = parseRow(psql(asApp(selectCall(APPEND, artifactFacts, {
+      childId: "51000000-0000-4000-8000-0000000000a7", relationKey: "artifact:result",
+    }), WS_A)));
+    assert.equal(replay[4], "t");
+    parseRow(psql(asApp(selectCall(ATTEST, artifactFacts, {
+      childId: "51000000-0000-4000-8000-0000000000a7", relationKey: "artifact:result",
+    }), WS_A, true)));
+
+    resetDatabase();
+    factsA = seedAuthority({ workspaceId: WS_A, authorityId: AUTH_A,
+      accountId: ACCOUNT_A, operationId: OP_A, suffix: "01" });
+    factsB = seedAuthority({ workspaceId: WS_B, authorityId: AUTH_B,
+      accountId: ACCOUNT_B, operationId: OP_B, suffix: "02" });
+    const driftFacts = seedArtifactOperation();
+    const driftAck = cloneAckWithDrift("artifactId", "e", driftFacts.ackId);
+    captureFailure(APPEND, driftFacts, { ackId: driftAck },
+      "GOVERNED_OPERATION_SUBJECT_INVALID");
+    seedDirectRelationForAck(driftAck, driftFacts);
+    captureFailure(ATTEST, driftFacts, { ackId: driftAck },
+      "GOVERNED_OPERATION_SUBJECT_INVALID");
   });
 
   it("returns a stable conflict for any post-append tuple drift in append and attest", () => {
