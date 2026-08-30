@@ -55,9 +55,15 @@ function validate(sql: string): void {
     'unique (workspace_id,run_id,query_key,provider_key,record_index)',
     'unique (workspace_id,operation_id,relation_key)',
     'references public.raw_source_record(workspace_id,id)',
+    'references public.discovery_query_attempt_item(workspace_id,run_id,query_key,provider_key,record_index,raw_record_id)',
     "resolution_kind in ('inserted','existing','reuse_batch')",
     "raw_ingest_status in ('accepted','quarantined','rejected')",
     'source_record_index < record_index',
+    'collate c',
+    'create trigger discovery_query_receipt_immutable',
+    'create trigger discovery_query_operation_attempt_immutable',
+    'create trigger discovery_query_attempt_item_immutable',
+    'execute function public.reject_discovery_query_lineage_mutation_v1()',
   ]) if (!normalized.includes(required)) throw new Error(`MISSING_CONTRACT_${required}`);
   if (/(canonical_company|identity_link|opportunity)/iu.test(sql)) {
     throw new Error('FORBIDDEN_OWNERSHIP');
@@ -68,7 +74,9 @@ function validate(sql: string): void {
 }
 
 function fixture(): string {
-  return TABLES.map((table) => `CREATE TABLE public.${table} (
+  return `CREATE FUNCTION public.reject_discovery_query_lineage_mutation_v1()
+    RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END';
+    SELECT 'a' COLLATE "C";\n` + TABLES.map((table) => `CREATE TABLE public.${table} (
     workspace_id uuid, run_id uuid, query_key char(64), query_ordinal integer,
     provider_key varchar(128), operation_id uuid, record_index integer,
     relation_key varchar(192), scope_key varchar(128), id uuid, ack_id char(64),
@@ -82,11 +90,14 @@ function fixture(): string {
       'PRIMARY KEY (id),' }
     UNIQUE (workspace_id, run_id, query_ordinal),
     UNIQUE (workspace_id, run_id, query_key, provider_key, record_index),
+    UNIQUE (workspace_id, run_id, query_key, provider_key, record_index, raw_record_id),
     UNIQUE (workspace_id, operation_id, relation_key),
     FOREIGN KEY (workspace_id,run_id) REFERENCES public.discovery_run(workspace_id,id),
     FOREIGN KEY (scope_key,id) REFERENCES public.tool_budget_operation(scope_key,id),
     FOREIGN KEY (ack_id) REFERENCES public.execution_domain_ack(ack_id),
     FOREIGN KEY (workspace_id,raw_record_id) REFERENCES public.raw_source_record(workspace_id,id),
+    FOREIGN KEY (workspace_id,run_id,query_key,provider_key,source_record_index,raw_record_id)
+      REFERENCES public.discovery_query_attempt_item(workspace_id,run_id,query_key,provider_key,record_index,raw_record_id),
     CHECK (purpose='discovery.run'), CHECK (subject_type='discovery_run'),
     CHECK (subject_id='request:'||request_sha256), CHECK (query_ordinal BETWEEN 0 AND 1023),
     CHECK (provider_count=jsonb_array_length(providers)), CHECK (provider_count BETWEEN 0 AND 16),
@@ -101,7 +112,9 @@ function fixture(): string {
       USING (workspace_id=public.current_workspace_id())
       WITH CHECK (workspace_id=public.current_workspace_id());
     REVOKE ALL ON TABLE public.${table} FROM PUBLIC;
-    GRANT SELECT ON TABLE public.${table} TO app_user;`).join('\n');
+    GRANT SELECT ON TABLE public.${table} TO app_user;
+    CREATE TRIGGER ${table}_immutable BEFORE UPDATE OR DELETE ON public.${table}
+      FOR EACH ROW EXECUTE FUNCTION public.reject_discovery_query_lineage_mutation_v1();`).join('\n');
 }
 
 describe('Discovery query lineage schema migration', () => {
@@ -115,6 +128,8 @@ describe('Discovery query lineage schema migration', () => {
       .toThrow('FORBIDDEN_OWNERSHIP');
     expect(() => validate(`${valid}\nGRANT INSERT ON discovery_query_receipt TO app_user;`))
       .toThrow('APP_DML_EXPOSED');
+    expect(() => validate(valid.replace('CREATE TRIGGER discovery_query_receipt_immutable',
+      'CREATE TRIGGER removed_receipt_immutable'))).toThrow();
   });
 
   it('requires only the additive 20260830130000 schema migration', async () => {

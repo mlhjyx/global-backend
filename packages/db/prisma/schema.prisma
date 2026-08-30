@@ -238,10 +238,11 @@ model ToolBudgetOperation {
   createdAt                   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   settledAt                   DateTime?                 @map("settled_at") @db.Timestamptz(3)
 
-  account                  ToolBudgetAccount         @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
+  account                  ToolBudgetAccount                @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
   artifact                 GenericOperationArtifact?
-  toolOperationSubject     ToolOperationSubject?     @relation("ToolOperationSubjectOperation")
-  governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationOperation")
+  toolOperationSubject     ToolOperationSubject?            @relation("ToolOperationSubjectOperation")
+  governedSubjectRelations GovernedSubjectRelation[]        @relation("GovernedSubjectRelationOperation")
+  discoveryQueryAttempts   DiscoveryQueryOperationAttempt[]
 
   @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
   @@unique([scopeKey, id], map: "tool_budget_operation_scope_id_key")
@@ -1206,7 +1207,8 @@ model DiscoveryRun {
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")
 
-  rawRecords RawSourceRecord[]
+  rawRecords    RawSourceRecord[]
+  queryReceipts DiscoveryQueryReceipt[]
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
@@ -1245,6 +1247,7 @@ model RawSourceRecord {
   run                    DiscoveryRun?                    @relation(fields: [runId], references: [id], onDelete: Cascade)
   sourceEntity           SourceEntity?                    @relation(fields: [sourceEntityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   governanceDispositions RawSourceGovernanceDisposition[]
+  queryAttemptItems      DiscoveryQueryAttemptItem[]
 
   @@unique([workspaceId, id], map: "raw_source_record_workspace_id_id_key")
   @@unique([workspaceId, sourceEntityId, ingestKey], map: "raw_source_record_workspace_source_entity_ingest_key")
@@ -1252,6 +1255,110 @@ model RawSourceRecord {
   @@index([workspaceId])
   @@index([workspaceId, ingestStatus, expiresAt], map: "raw_source_record_workspace_status_expires_idx")
   @@map("raw_source_record")
+}
+
+/// Append-only normalized query receipt. This is the replay SoR; DiscoveryRun.stats is a compatibility read model.
+model DiscoveryQueryReceipt {
+  workspaceId           String   @map("workspace_id") @db.Uuid
+  runId                 String   @map("run_id") @db.Uuid
+  planId                String   @map("plan_id") @db.Uuid
+  authorityId           String   @map("authority_id") @db.Uuid
+  accountKey            String   @map("account_key") @db.VarChar(200)
+  purpose               String   @db.VarChar(64)
+  subjectType           String   @map("subject_type") @db.VarChar(80)
+  subjectId             String   @map("subject_id") @db.VarChar(200)
+  requestSha256         String   @map("request_sha256") @db.Char(64)
+  queryKey              String   @map("query_key") @db.Char(64)
+  queryOrdinal          Int      @map("query_ordinal")
+  sourceClass           String   @map("source_class") @db.VarChar(128)
+  providers             Json
+  providerCount         Int      @map("provider_count")
+  recordCount           BigInt   @map("record_count")
+  acceptedCount         BigInt   @map("accepted_count")
+  quarantinedCount      BigInt   @map("quarantined_count")
+  rejectedCount         BigInt   @map("rejected_count")
+  duplicateCount        BigInt   @map("duplicate_count")
+  governanceDeniedCount BigInt   @map("governance_denied_count")
+  usageQuantity         BigInt   @map("usage_quantity")
+  costCents             BigInt   @map("cost_cents")
+  contractSha256        String   @map("contract_sha256") @db.Char(64)
+  createdAt             DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  run      DiscoveryRun                     @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_receipt_run_fkey")
+  attempts DiscoveryQueryOperationAttempt[]
+
+  @@id([workspaceId, runId, queryKey], map: "discovery_query_receipt_pkey")
+  @@unique([workspaceId, runId, queryOrdinal], map: "discovery_query_receipt_workspace_run_ordinal_key")
+  @@index([workspaceId, createdAt], map: "discovery_query_receipt_workspace_created_idx")
+  @@map("discovery_query_receipt")
+}
+
+/// One settled company-producing physical operation participating in a query receipt.
+model DiscoveryQueryOperationAttempt {
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  runId               String   @map("run_id") @db.Uuid
+  queryKey            String   @map("query_key") @db.Char(64)
+  providerKey         String   @map("provider_key") @db.VarChar(128)
+  producerId          String   @map("producer_id") @db.VarChar(128)
+  operationId         String   @map("operation_id") @db.Uuid
+  scopeKey            String   @map("scope_key") @db.VarChar(200)
+  authorityId         String   @map("authority_id") @db.Uuid
+  accountId           String   @map("account_id") @db.Uuid
+  operationGeneration Int      @map("operation_generation")
+  ackId               String   @map("ack_id") @db.Char(64)
+  consumer            String   @db.VarChar(200)
+  domainAggregateType String   @map("domain_aggregate_type") @db.VarChar(200)
+  domainAckKey        String   @map("domain_ack_key") @db.Char(64)
+  domainRevision      String   @map("domain_revision") @db.Char(64)
+  resultDigest        String   @map("result_digest") @db.Char(64)
+  resultSchema        String   @map("result_schema") @db.VarChar(128)
+  lineageSchema       String   @map("lineage_schema") @db.VarChar(128)
+  providerRecordCount Int      @map("provider_record_count")
+  coveredItemCount    Int      @map("covered_item_count")
+  contractSha256      String   @map("contract_sha256") @db.Char(64)
+  createdAt           DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  query     DiscoveryQueryReceipt       @relation(fields: [workspaceId, runId, queryKey], references: [workspaceId, runId, queryKey], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_operation_attempt_query_fkey")
+  operation ToolBudgetOperation         @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_operation_attempt_operation_fkey")
+  items     DiscoveryQueryAttemptItem[]
+
+  @@id([workspaceId, operationId], map: "discovery_query_operation_attempt_pkey")
+  @@unique([workspaceId, runId, queryKey, providerKey, operationId], map: "discovery_query_operation_attempt_query_operation_key")
+  @@index([workspaceId, runId, queryKey], map: "discovery_query_operation_attempt_query_idx")
+  @@map("discovery_query_operation_attempt")
+}
+
+/// Dense provider-local index to exact Raw v2 and A-owned governed relation identity.
+model DiscoveryQueryAttemptItem {
+  id                 String   @id @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  runId              String   @map("run_id") @db.Uuid
+  queryKey           String   @map("query_key") @db.Char(64)
+  providerKey        String   @map("provider_key") @db.VarChar(128)
+  operationId        String   @map("operation_id") @db.Uuid
+  recordIndex        Int      @map("record_index")
+  resolutionKind     String   @map("resolution_kind") @db.VarChar(32)
+  sourceRecordIndex  Int?     @map("source_record_index")
+  rawRecordId        String   @map("raw_record_id") @db.Uuid
+  rawPayloadHash     String   @map("raw_payload_hash") @db.Char(64)
+  rawIngestStatus    String   @map("raw_ingest_status") @db.VarChar(32)
+  relationKey        String   @map("relation_key") @db.VarChar(192)
+  operationSubjectId String   @map("operation_subject_id") @db.Uuid
+  childSubjectId     String   @map("child_subject_id") @db.Uuid
+  relationId         String   @map("relation_id") @db.Uuid
+  contractSha256     String   @map("contract_sha256") @db.Char(64)
+  createdAt          DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  attempt    DiscoveryQueryOperationAttempt @relation(fields: [workspaceId, runId, queryKey, providerKey, operationId], references: [workspaceId, runId, queryKey, providerKey, operationId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_attempt_fkey")
+  rawRecord  RawSourceRecord                @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_raw_fkey")
+  sourceItem DiscoveryQueryAttemptItem?     @relation("DiscoveryQueryAttemptItemReuse", fields: [workspaceId, runId, queryKey, providerKey, sourceRecordIndex, rawRecordId], references: [workspaceId, runId, queryKey, providerKey, recordIndex, rawRecordId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_source_fkey")
+  reusedBy   DiscoveryQueryAttemptItem[]    @relation("DiscoveryQueryAttemptItemReuse")
+
+  @@unique([workspaceId, runId, queryKey, providerKey, recordIndex], map: "discovery_query_attempt_item_provider_index_key")
+  @@unique([workspaceId, runId, queryKey, providerKey, recordIndex, rawRecordId], map: "discovery_query_attempt_item_provider_index_raw_key")
+  @@unique([workspaceId, operationId, relationKey], map: "discovery_query_attempt_item_operation_relation_key")
+  @@index([workspaceId, rawRecordId], map: "discovery_query_attempt_item_raw_idx")
+  @@map("discovery_query_attempt_item")
 }
 
 /// Append-only restricted-processing decision. Restricted values never leave
