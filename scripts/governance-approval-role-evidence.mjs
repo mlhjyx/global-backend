@@ -265,11 +265,13 @@ const validateGlobalIsolation = (candidate, policy) => {
     candidate.security_review?.actor_id,
     candidate.codeowner_review?.actor?.id,
   ];
-  const comparableActors = policy.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
-    ? [actors[0], ...actors.slice(2)]
-    : actors;
+  const roleActors = actors.slice(0, 4);
+  const comparableActors = (
+    policy.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
+    && actors[1] === actors[0]
+  ) ? [actors[0], ...roleActors.slice(2)] : roleActors;
   if (new Set(comparableActors).size !== comparableActors.length) codes.push('APPROVAL_EVIDENCE_SLOT_REUSE');
-  if (actors.slice(0, 3).includes(actors[3]) || actors[4] === actors[3]) {
+  if (actors.slice(0, 3).includes(actors[3])) {
     codes.push('APPROVAL_SECURITY_REVIEW_REUSED');
   }
   return codes;

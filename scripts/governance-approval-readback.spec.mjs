@@ -551,7 +551,6 @@ test('OWN-SECURITY remains a closed exact-head independent human evidence slot',
     ['security-free-form-body', (v) => { v.security_review.review_body = 'secret candidate'; }, 'APPROVAL_SECURITY_REVIEW_REQUIRED'],
     ['security-product-actor-reuse', (v) => { v.security_review.actor_id = 101; v.security_review.actor_node_id = 'MDQ6VXNlcj101'; v.security_review.actor_login = 'product-owner'; }, 'APPROVAL_SECURITY_REVIEW_REUSED'],
     ['security-privacy-actor-reuse', (v) => { v.security_review.actor_id = 102; v.security_review.actor_node_id = 'MDQ6VXNlcj102'; v.security_review.actor_login = 'privacy-owner'; }, 'APPROVAL_SECURITY_REVIEW_REUSED'],
-    ['security-codeowner-actor-reuse', (v) => { v.security_review.actor_id = 107; v.security_review.actor_node_id = 'MDQ6VXNlcj107'; v.security_review.actor_login = 'codeowner-reviewer'; }, 'APPROVAL_SECURITY_REVIEW_REUSED'],
     ['security-qa-actor-reuse', (v) => { v.security_review.actor_id = 103; v.security_review.actor_node_id = 'MDQ6VXNlcj103'; v.security_review.actor_login = 'qa-owner'; }, 'APPROVAL_SECURITY_REVIEW_REUSED'],
     ['security-machine-id-reuse', (v) => { v.security_review.review_id = v.machine_checks[0].check_run_id; }, 'APPROVAL_SECURITY_REVIEW_REUSED'],
   ];
@@ -692,13 +691,11 @@ test('revocation and supersession validation returns append-only bound state fac
     supersessions: [],
   };
   const superseded = validateReceiptSupersession(supersession, lifecycleSnapshot, authority(), NOW);
-  assert.equal(superseded.valid, true);
-  assert.deepEqual(superseded.facts, {
-    state: 'SUPERSEDED',
-    predecessor_receipt_id: core.receipt_id,
-    successor_receipt_id: successor.envelope.core.receipt_id,
-    effective_at: NOW,
-  });
+  assert.equal(superseded.valid, false);
+  assert.ok(superseded.issues.some(
+    ({ stable_code: stableCode }) => stableCode === 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+  ));
+  assert.equal(Object.hasOwn(superseded, 'facts'), false);
 
   runMutation(
     'supersession-cycle',

@@ -1,20 +1,18 @@
-import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
+import { APPROVAL_SCHEMA_CATALOG } from './governance-approval-schema-catalog.mjs';
 import { renderApprovalReceiptCore, sha256Prefixed } from './governance-approval-safe-json.mjs';
 
-const schemaPath = (filename) => fileURLToPath(new URL(`../docs/governance/${filename}`, import.meta.url));
-const loadSchema = (filename) => JSON.parse(readFileSync(schemaPath(filename), 'utf8'));
+const catalogSchema = (filename) => APPROVAL_SCHEMA_CATALOG[filename].schema;
 const schemas = Object.freeze({
-  authorities: loadSchema('approval-authorities.schema.json'),
-  receipt: loadSchema('trusted-approval-readback.schema.json'),
-  evidenceManifest: loadSchema('trusted-approval-evidence-manifest.schema.json'),
-  revocation: loadSchema('trusted-approval-revocation.schema.json'),
-  supersession: loadSchema('trusted-approval-supersession.schema.json'),
-  grant: loadSchema('program-c-merge-authorization-grant.schema.json'),
-  consumption: loadSchema('program-c-merge-authorization-consumption.schema.json'),
+  authorities: catalogSchema('approval-authorities.schema.json'),
+  receipt: catalogSchema('trusted-approval-readback.schema.json'),
+  evidenceManifest: catalogSchema('trusted-approval-evidence-manifest.schema.json'),
+  revocation: catalogSchema('trusted-approval-revocation.schema.json'),
+  supersession: catalogSchema('trusted-approval-supersession.schema.json'),
+  grant: catalogSchema('program-c-merge-authorization-grant.schema.json'),
+  consumption: catalogSchema('program-c-merge-authorization-consumption.schema.json'),
 });
 
 const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: true });

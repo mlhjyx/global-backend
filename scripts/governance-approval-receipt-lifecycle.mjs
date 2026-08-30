@@ -129,7 +129,7 @@ const isReachable = (adjacency, start, target) => {
   return false;
 };
 
-export const validateReceiptSupersession = (supersession, snapshot, authority, now) => {
+export const inspectSyntheticReceiptSupersession = (supersession, snapshot, authority, now) => {
   const codes = [];
   if (!snapshotValid(snapshot)) {
     return resultFromCodes(['APPROVAL_RECEIPT_LIFECYCLE_SNAPSHOT_INVALID']);
@@ -163,6 +163,14 @@ export const validateReceiptSupersession = (supersession, snapshot, authority, n
     successor_receipt_id: supersession.successor.receipt_id,
     effective_at: supersession.effective_at,
   });
+};
+
+export const validateReceiptSupersession = (supersession, snapshot, authority, now) => {
+  const synthetic = inspectSyntheticReceiptSupersession(supersession, snapshot, authority, now);
+  return resultFromCodes([
+    ...synthetic.issues.map(({ stable_code: stableCode }) => stableCode),
+    'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+  ]);
 };
 
 export const isLifecycleSnapshot = (value) => isPlainObject(value) && snapshotValid(value);

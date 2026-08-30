@@ -402,7 +402,6 @@ test('FIX4 CODEOWNER evidence and all evidence IDs/actors are globally disjoint'
     ['codeowner-bot', (v) => { v.codeowner_review.actor.type = 'Bot'; }, 'APPROVAL_CODEOWNER_REVIEW_REQUIRED'],
     ['global-human-machine-id-reuse', (v) => { v.machine_checks[0].check_run_id = v.product_review.review_id; }, 'APPROVAL_EVIDENCE_SLOT_REUSE'],
     ['global-machine-machine-id-reuse', (v) => { v.machine_checks[0].check_suite_id = v.machine_checks[0].check_run_id; }, 'APPROVAL_EVIDENCE_SLOT_REUSE'],
-    ['codeowner-actor-reuse', (v) => { v.codeowner_review.actor = clone(v.product_review.actor); }, 'APPROVAL_EVIDENCE_SLOT_REUSE'],
   ];
   for (const [name, mutate, code] of cases) mutation(name, () => {
     const value = candidate();
@@ -593,6 +592,17 @@ test('FIX2D CODEOWNER actor sharing follows the 3.4 adjudication without evidenc
     ];
     assert.equal(new Set(ids).size, ids.length);
   });
+  mutation('round2-security-codeowner-actor-allowed', () => {
+    const value = candidate();
+    value.codeowner_review.actor = {
+      id: value.security_review.actor_id,
+      node_id: value.security_review.actor_node_id,
+      login: value.security_review.actor_login,
+      type: 'User',
+    };
+    assert.deepEqual(validateCandidate(value), { valid: true, issues: [] });
+    assert.notEqual(value.codeowner_review.review_id, value.security_review.review_id);
+  });
   mutation('round2-dual-coapprover-reused', () => {
     const value = candidate();
     const authorityValue = authority();
@@ -628,7 +638,10 @@ test('FIX2C importing the facade is filesystem-independent and the schema catalo
   try {
     const facadeUrl = new URL('./governance-approval-readback.mjs', import.meta.url).href;
     execFileSync(process.execPath, ['--input-type=module', '--eval', `
-      import fs, { syncBuiltinESMExports } from 'node:fs';
+      await import('ajv/dist/2020.js');
+      await import('ajv-formats');
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
       fs.readFileSync = () => { throw new Error('EXPLICIT_FS_IO_DENIED'); };
       syncBuiltinESMExports();
       await import(${JSON.stringify(facadeUrl)});
@@ -642,6 +655,12 @@ test('FIX2C importing the facade is filesystem-independent and the schema catalo
   try {
     const catalog = await import('./governance-approval-schema-catalog.mjs');
     assert.ok(Object.isFrozen(catalog.APPROVAL_SCHEMA_CATALOG));
+    const validatorSource = await readFile(
+      new URL('./governance-approval-schema-validator.mjs', import.meta.url),
+      'utf8',
+    );
+    assert.match(validatorSource, /governance-approval-schema-catalog\.mjs/);
+    assert.doesNotMatch(validatorSource, /node:fs|fileURLToPath|readFileSync|\.schema\.json`, import\.meta\.url/);
   } catch (error) {
     fixMutationFailures.set('round2-schema-catalog-present', error);
   }
@@ -671,6 +690,8 @@ test('FIX8 manifest is a complete exact-once external requirement inventory', ()
   assert.deepEqual(
     [...fixMutationFailures.keys()],
     [],
-    `failing mutations: ${[...fixMutationFailures.keys()].join(', ')}`,
+    `failing mutations: ${[...fixMutationFailures.entries()].map(([name, error]) => (
+      `${name}=${error?.stderr?.toString('utf8') || error?.message || String(error)}`
+    )).join('; ')}`,
   );
 });

@@ -17,7 +17,7 @@ import {
   sameJson,
 } from './governance-approval-readback-common.mjs';
 import {
-  normalizeMachineCheckEvidence,
+  normalizePolicyMachineCheckEvidence,
   validateMachineChecks,
 } from './governance-approval-machine-policy.mjs';
 import {
@@ -212,7 +212,7 @@ export const buildApprovalReceiptCore = (candidate, authority, verifier, mergeAu
     head_sha: candidate.pull_request.head_sha,
     approved_at: now,
     trust_class: 'TRUSTED_BASE_VERIFIED',
-    machine_check_evidence: normalizeMachineCheckEvidence(candidate.machine_checks),
+    machine_check_evidence: normalizePolicyMachineCheckEvidence(candidate, candidate.policy),
   };
   if (stage !== null) core.merge_authorization_evidence = mergeReceiptReference(mergeAuthorizationEvidence);
   const frozenCore = deepFreeze(core);

@@ -67,7 +67,6 @@
         "security-free-form-body",
         "security-product-actor-reuse",
         "security-privacy-actor-reuse",
-        "security-codeowner-actor-reuse",
         "security-qa-actor-reuse",
         "security-machine-id-reuse",
         "security-unassigned",
@@ -150,8 +149,7 @@
         "codeowner-wrong-head",
         "codeowner-bot",
         "global-human-machine-id-reuse",
-        "global-machine-machine-id-reuse",
-        "codeowner-actor-reuse"
+        "global-machine-machine-id-reuse"
       ]
     },
     {
@@ -218,6 +216,7 @@
       "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
       "mutation_ids": [
         "round2-dual-privacy-codeowner-actor-allowed",
+        "round2-security-codeowner-actor-allowed",
         "round2-dual-coapprover-reused",
         "round2-codeowner-review-id-reuse"
       ]
@@ -229,6 +228,8 @@
     "scripts/governance-approval-role-evidence.mjs",
     "scripts/governance-approval-machine-policy.mjs",
     "scripts/governance-approval-merge-authorization.mjs",
-    "scripts/governance-approval-receipt-lifecycle.mjs"
+    "scripts/governance-approval-receipt-lifecycle.mjs",
+    "scripts/governance-approval-schema-catalog.mjs",
+    "scripts/governance-approval-schema-validator.mjs"
   ]
 }

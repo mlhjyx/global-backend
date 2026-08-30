@@ -83,6 +83,17 @@ export const validateMachineChecks = (candidate, policy) => {
   }
   const contexts = candidate.machine_checks.map(({ context }) => context);
   if (new Set(contexts).size !== contexts.length) codes.push('APPROVAL_CHECK_AMBIGUOUS');
+  const requiredContexts = policy.required_machine_checks.map(({ context }) => context);
+  const requiredSet = new Set(requiredContexts);
+  const candidateSet = new Set(contexts);
+  if (
+    requiredSet.size !== requiredContexts.length
+    || candidateSet.size !== contexts.length
+    || requiredSet.size !== candidateSet.size
+    || contexts.some((context) => !requiredSet.has(context))
+  ) codes.push('APPROVAL_CHECK_WORKFLOW_MISMATCH');
+  const dynamicIds = candidate.machine_checks.flatMap((check) => [check.check_run_id, check.check_suite_id]);
+  if (new Set(dynamicIds).size !== dynamicIds.length) codes.push('APPROVAL_CHECK_AMBIGUOUS');
   return codes;
 };
 
@@ -120,6 +131,13 @@ export const normalizeMachineCheckEvidence = (checks) => deepFreeze(
     .map(copyCheck)
     .sort(compareChecks),
 );
+
+export const normalizePolicyMachineCheckEvidence = (candidate, policy) => {
+  const requiredContexts = new Set(policy.required_machine_checks.map(({ context }) => context));
+  return normalizeMachineCheckEvidence(
+    candidate.machine_checks.filter(({ context }) => requiredContexts.has(context)),
+  );
+};
 
 export const isMachineEvidenceItem = (value) => (
   hasExactKeys(value, MACHINE_CHECK_KEYS)
