@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.example/governance/program-c-merge-authorization-consumption.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "consumption_id", "grant_id", "grant_raw_sha256", "single_use_nonce", "repository", "decision_adr", "decision_revision", "policy_revision", "stage", "pr_number", "authorized_head_sha", "result_commit_sha", "observed_merge_method", "consumed_at", "nonce_ledger_key", "nonce_ledger_reserved_revision", "independent_verifier", "current_main", "pre_readback_sha256", "post_readback_sha256"],
+  "properties": {
+    "schema_version": { "const": "program-c-merge-authorization-consumption/v1" },
+    "consumption_id": { "$ref": "#/$defs/id" },
+    "grant_id": { "$ref": "#/$defs/id" },
+    "grant_raw_sha256": { "$ref": "#/$defs/digest" },
+    "single_use_nonce": { "type": "string", "pattern": "^nonce-program-c-[a-z0-9-]{4,96}$" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "decision_adr": { "const": "ADR-042" },
+    "decision_revision": { "type": "string", "pattern": "^program-c/decision-r[1-9][0-9]*$" },
+    "policy_revision": { "type": "string", "pattern": "^program-c/policy-r[1-9][0-9]*$" },
+    "stage": { "enum": ["PROPOSAL_MERGE", "ACCEPTANCE_MERGE"] },
+    "pr_number": { "type": "integer", "minimum": 1 },
+    "authorized_head_sha": { "$ref": "#/$defs/gitSha" },
+    "result_commit_sha": { "$ref": "#/$defs/gitSha" },
+    "observed_merge_method": { "enum": ["MERGE", "SQUASH", "REBASE"] },
+    "consumed_at": { "$ref": "#/$defs/instant" },
+    "nonce_ledger_key": { "type": "string", "pattern": "^program-c-merge:nonce-program-c-[a-z0-9-]{4,96}$" },
+    "nonce_ledger_reserved_revision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "independent_verifier": { "$ref": "#/$defs/verifier" },
+    "current_main": { "$ref": "#/$defs/currentMain" },
+    "pre_readback_sha256": { "$ref": "#/$defs/digest" },
+    "post_readback_sha256": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,127}$" },
+    "repository": { "type": "object", "additionalProperties": false, "required": ["id", "full_name"], "properties": { "id": { "const": 1291151138 }, "full_name": { "const": "mlhjyx/global-backend" } } },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "instant": { "type": "string", "format": "iso-instant" },
+    "verifier": { "type": "object", "additionalProperties": false, "required": ["repository", "path", "sha", "run_id", "attempt", "identity"], "properties": { "repository": { "$ref": "#/$defs/repository" }, "path": { "type": "string", "pattern": "^\\.github/workflows/[a-zA-Z0-9._-]+\\.ya?ml$" }, "sha": { "$ref": "#/$defs/gitSha" }, "run_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "attempt": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "identity": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "currentMain": { "type": "object", "additionalProperties": false, "required": ["ref", "sha", "read_at"], "properties": { "ref": { "const": "refs/heads/main" }, "sha": { "$ref": "#/$defs/gitSha" }, "read_at": { "$ref": "#/$defs/instant" } } }
+  }
+}

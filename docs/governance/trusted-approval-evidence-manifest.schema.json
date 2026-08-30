@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.example/governance/trusted-approval-evidence-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "receipt_core_sha256", "receipt_raw_sha256", "attestation_subject_sha256", "files", "attestation_bundle", "trusted_root"],
+  "properties": {
+    "schema_version": { "const": "trusted-approval-evidence-manifest/v1" },
+    "receipt_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,127}$" },
+    "receipt_core_sha256": { "$ref": "#/$defs/digest" },
+    "receipt_raw_sha256": { "$ref": "#/$defs/digest" },
+    "attestation_subject_sha256": { "$ref": "#/$defs/digest" },
+    "files": { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "$ref": "#/$defs/file" }, { "$ref": "#/$defs/file" }], "items": false },
+    "attestation_bundle": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}\\.jsonl$" }, "sha256": { "$ref": "#/$defs/digest" } } },
+    "trusted_root": { "type": "object", "additionalProperties": false, "required": ["path", "sha256", "acquired_at", "gh_path", "gh_version", "tuf_source"], "properties": { "path": { "const": "trusted_root.jsonl" }, "sha256": { "$ref": "#/$defs/digest" }, "acquired_at": { "$ref": "#/$defs/instant" }, "gh_path": { "const": "/opt/global/toolchains/gh/2.89.0/bin/gh" }, "gh_version": { "const": "2.89.0" }, "tuf_source": { "const": "GH_ATTESTATION_TRUSTED_ROOT" } } }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "instant": { "type": "string", "format": "iso-instant" },
+    "file": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$" }, "sha256": { "$ref": "#/$defs/digest" } } }
+  }
+}

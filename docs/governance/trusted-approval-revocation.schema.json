@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.example/governance/trusted-approval-revocation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "receipt_core_sha256", "receipt_raw_sha256", "authority_revision", "authority_sha256", "reason_code", "revoking_role", "revoking_actor_id", "effective_at"],
+  "properties": {
+    "schema_version": { "const": "trusted-approval-revocation/v1" },
+    "receipt_id": { "$ref": "#/$defs/id" },
+    "receipt_core_sha256": { "$ref": "#/$defs/digest" },
+    "receipt_raw_sha256": { "$ref": "#/$defs/digest" },
+    "authority_revision": { "type": "string", "pattern": "^approval-authorities/r[1-9][0-9]*$" },
+    "authority_sha256": { "$ref": "#/$defs/digest" },
+    "reason_code": { "enum": ["AUTHORITY_REVOKED", "EVIDENCE_INVALID", "POLICY_WITHDRAWN", "SECURITY_INCIDENT"] },
+    "revoking_role": { "enum": ["OWN-PRODUCT", "OWN-DATA-PRIVACY", "OWN-QA-EVIDENCE", "OWN-SECURITY", "LEGAL-REVIEW", "MERGE-AUTHORIZER"] },
+    "revoking_actor_id": { "$ref": "#/$defs/actorId" },
+    "effective_at": { "$ref": "#/$defs/instant" }
+  },
+  "$defs": { "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,127}$" }, "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "actorId": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "instant": { "type": "string", "format": "iso-instant" } }
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.example/governance/approval-authorities.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "revision", "actor_policy", "roles"],
+  "properties": {
+    "schema_version": { "const": "approval-authorities/v1" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "revision": { "type": "string", "pattern": "^approval-authorities/(initial-unassigned|r[1-9][0-9]*)$" },
+    "actor_policy": { "const": "DISTINCT_ACTORS_REQUIRED" },
+    "roles": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        { "$ref": "#/$defs/productRole" },
+        { "$ref": "#/$defs/privacyRole" },
+        { "$ref": "#/$defs/qaRole" },
+        { "$ref": "#/$defs/securityRole" },
+        { "$ref": "#/$defs/legalRole" },
+        { "$ref": "#/$defs/mergeRole" }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "full_name"],
+      "properties": {
+        "id": { "const": 1291151138 },
+        "full_name": { "const": "mlhjyx/global-backend" }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "status"],
+      "properties": {
+        "role": { "type": "string" },
+        "status": { "enum": ["UNASSIGNED", "ASSIGNED"] },
+        "actor_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "actor_login": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "UNASSIGNED" } } },
+          "then": { "properties": { "actor_id": false, "actor_login": false } },
+          "else": { "properties": { "actor_id": true }, "required": ["actor_id"] }
+        }
+      ]
+    },
+    "productRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-PRODUCT" } } }] },
+    "privacyRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-DATA-PRIVACY" } } }] },
+    "qaRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-QA-EVIDENCE" } } }] },
+    "securityRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-SECURITY" } } }] },
+    "legalRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "LEGAL-REVIEW" } } }] },
+    "mergeRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "MERGE-AUTHORIZER" } } }] }
+  }
+}
