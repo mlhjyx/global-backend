@@ -125,22 +125,22 @@ function seedPath({ diamond = false } = {}) {
       'PERSONAL','company','${high}'),
       (${parent},'${WS}','${WS}','materialized_record',${deterministicUuid("roundb-ext","3")},
       'NON_PERSONAL',NULL,NULL);
-    INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
+    INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,
       operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
       child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
-    VALUES ('${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
+    VALUES ('83000000-0000-4000-8000-000000000001','${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
       '${rootId}',${a},'roundb:root-a','DERIVED_FROM','source_record',
       ${deterministicUuid("roundb-src","1")},'${CONTRACT}'),
-      ('${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
+      ('83000000-0000-4000-8000-000000000002','${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
       ${a},${parent},'roundb:a-parent','DERIVED_FROM','source_record',
       ${deterministicUuid("roundb-src","2")},'${CONTRACT}'),
-      ('${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
+      ('83000000-0000-4000-8000-000000000003','${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
       '${rootId}',${b},'roundb:root-b','DERIVED_FROM','source_record',
       ${deterministicUuid("roundb-src","3")},'${CONTRACT}');
-    ${diamond ? `INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,
+    ${diamond ? `INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,
       account_id,operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
       child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
-      VALUES ('${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
+      VALUES ('83000000-0000-4000-8000-000000000004','${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
       ${b},${parent},'roundb:b-parent','DERIVED_FROM','source_record',
       ${deterministicUuid("roundb-src","4")},'${CONTRACT}');` : ""}`);
   return { low, high, a: psql(`SELECT ${a}::text;`), b: psql(`SELECT ${b}::text;`),
@@ -159,6 +159,17 @@ function invocation(fn, override = {}) {
     '${input.relationKey}'::varchar(200),'MATERIALIZED_CHILD'::varchar(32),
     'source_record'::varchar(64),'63000000-0000-4000-8000-000000000001'::uuid,
     NULL::char(64),'${CONTRACT}'::char(64));`;
+}
+
+function canonicalSnapshot() {
+  return psql(`SELECT encode(digest(convert_to(jsonb_build_object(
+    'subjects',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM governed_subject s WHERE workspace_id='${WS}'),
+    'operations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY subject_id) FROM tool_operation_subject o WHERE workspace_id='${WS}'),
+    'relations',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM governed_subject_relation r WHERE workspace_id='${WS}'),
+    'tombstones',(SELECT jsonb_agg(to_jsonb(t) ORDER BY governed_subject_id) FROM governed_subject_tombstone t WHERE workspace_id='${WS}'),
+    'artifactTombstones',(SELECT jsonb_agg(to_jsonb(t) ORDER BY subject_type,subject_id)
+      FROM generic_operation_artifact_subject_tombstone t WHERE workspace_id='${WS}')
+  )::text,'UTF8'),'sha256'),'hex');`);
 }
 
 function startConnection(sql, interactive = false) {
@@ -248,6 +259,22 @@ describe("governed relation exact path lock ordering", () => {
     } finally { await Promise.all([cleanup(graph,"roundb_graph"),cleanup(dsr,"roundb_dsr"),cleanup(writer,"roundb_writer")]); }
   });
 
+  it("attest READ ONLY waits on DSR before graph and preserves its snapshot", async () => {
+    const path=seedPath(); const input={parentId:path.parent,relationKey:"roundb:attest-order"};
+    psql(asApp(invocation(APPEND,input))); const before=canonicalSnapshot();
+    const graph=holder("roundb_attest_graph",`governed-subject-relation:${WS}:${OP}`,"GRAPH");
+    const dsr=holder("roundb_attest_dsr",`generic-operation-artifact-subject:${WS}:company:${path.low}`,"DSR");
+    let writer; try {
+      const [g,d]=await Promise.all([graph.waitFor("GRAPH"),dsr.waitFor("DSR")]);
+      const graphPid=Number(g.match(/(\d+)\|GRAPH/)?.[1]); const dsrPid=Number(d.match(/(\d+)\|DSR/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_attest_writer';${asApp(invocation(ATTEST,input),true)}`);
+      await observeWait(dsrPid,"roundb_attest_writer",writer); dsr.write("COMMIT;\n"); dsr.end(); await dsr.done;
+      await observeWait(graphPid,"roundb_attest_writer",writer); graph.write("COMMIT;\n"); graph.end();
+      const result=await writer.done; assert.equal(result.status,0,result.stderr);
+      assert.match(result.stdout,/\|t$/m); assert.equal(canonicalSnapshot(),before);
+    } finally { await Promise.all([cleanup(graph,"roundb_attest_graph"),cleanup(dsr,"roundb_attest_dsr"),cleanup(writer,"roundb_attest_writer")]); }
+  });
+
   it("does not fence or lock an unrelated branch", async () => {
     let path=seedPath(); psql(`INSERT INTO governed_subject_tombstone VALUES ('${WS}','${path.b}',now());`);
     psql(asApp(invocation(APPEND,{parentId:path.parent,relationKey:"roundb:unrelated-governed"})));
@@ -267,13 +294,38 @@ describe("governed relation exact path lock ordering", () => {
     } finally { await Promise.all([cleanup(unrelated,"roundb_unrelated"),cleanup(writer,"roundb_exact")]); }
   });
 
+  it("attest ignores unrelated governed tombstones and DSR locks", async () => {
+    let path=seedPath(); const input={parentId:path.parent,relationKey:"roundb:attest-unrelated"};
+    psql(asApp(invocation(APPEND,input)));
+    psql(`INSERT INTO governed_subject_tombstone VALUES ('${WS}','${path.b}',now());`);
+    let before=canonicalSnapshot(); let result=raw(asApp(invocation(ATTEST,input),true));
+    assert.equal(result.status,0,result.stderr); assert.equal(canonicalSnapshot(),before);
+
+    reset(); facts=seedOperation(); path=seedPath(); psql(asApp(invocation(APPEND,input)));
+    before=canonicalSnapshot(); const lock=holder("roundb_attest_unrelated",
+      `generic-operation-artifact-subject:${WS}:company:${path.high}`,"READY");
+    let writer; try {
+      const ready=await lock.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_attest_exact';${asApp(invocation(ATTEST,input),true)}`);
+      await new Promise((resolve)=>setTimeout(resolve,150));
+      const waits=psql(`SELECT count(*) FROM pg_locks h JOIN pg_locks w ON w.locktype=h.locktype
+        AND w.classid=h.classid AND w.objid=h.objid AND w.objsubid=h.objsubid
+        JOIN pg_stat_activity a ON a.pid=w.pid WHERE h.pid=${pid} AND h.granted AND NOT w.granted
+        AND a.application_name='roundb_attest_exact';`);
+      assert.equal(waits,"0");
+      result=await Promise.race([writer.done,new Promise((_,reject)=>setTimeout(()=>reject(new Error("extra attest lock")),1500))]);
+      assert.equal(result.status,0,result.stderr); assert.equal(canonicalSnapshot(),before);
+    } finally { await Promise.all([cleanup(lock,"roundb_attest_unrelated"),cleanup(writer,"roundb_attest_exact")]); }
+  });
+
   it("fences every ancestor in a diamond", () => {
     for (const [kind,key] of [["governed","a"],["governed","b"],["artifact","low"],["artifact","high"]]) {
       reset(); facts=seedOperation(); const path=seedPath({diamond:true});
       const input={parentId:path.parent,relationKey:"roundb:diamond"}; psql(asApp(invocation(APPEND,input)));
       if(kind==="governed") psql(`INSERT INTO governed_subject_tombstone VALUES ('${WS}','${path[key]}',now());`);
       else psql(`INSERT INTO generic_operation_artifact_subject_tombstone VALUES ('${WS}','company','${path[key]}',now());`);
-      for(const fn of [APPEND,ATTEST]) { const denied=raw(asApp(invocation(fn,input))); assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_TOMBSTONED/); }
+      const before=canonicalSnapshot();
+      for(const fn of [APPEND,ATTEST]) { const denied=raw(asApp(invocation(fn,input),fn===ATTEST)); assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_TOMBSTONED/); assert.equal(canonicalSnapshot(),before); }
     }
   });
 
@@ -293,5 +345,27 @@ describe("governed relation exact path lock ordering", () => {
       assert.notEqual(result.status,0); assert.match(result.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
       assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE relation_key='roundb:drift';`),"0");
     } finally { await Promise.all([cleanup(graph,"roundb_drift_graph"),cleanup(writer,"roundb_drift")]); }
+  });
+
+  it("attest fails with zero writes when ancestors drift before graph lock", async () => {
+    const path=seedPath(); const input={parentId:path.parent,relationKey:"roundb:attest-drift"};
+    psql(asApp(invocation(APPEND,input)));
+    const graph=holder("roundb_attest_drift_graph",`governed-subject-relation:${WS}:${OP}`,"READY");
+    let writer; try {
+      const ready=await graph.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_attest_drift';${asApp(invocation(ATTEST,input),true)}`);
+      await observeWait(pid,"roundb_attest_drift",writer);
+      psql(`INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,
+        operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,child_subject_id,
+        relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
+      VALUES ('83000000-0000-4000-8000-000000000099','${WS}','${WS}','${AUTH}','${ACCOUNT}',
+        '${OP}',1,'${facts.ackId}','${rootId}','${path.b}','${path.parent}',
+        'roundb:attest-drift-edge','DERIVED_FROM','source_record',
+        ${deterministicUuid("roundb-src","98")},'${CONTRACT}');`);
+      const afterDrift=canonicalSnapshot(); graph.write("COMMIT;\n"); graph.end();
+      const result=await writer.done; assert.notEqual(result.status,0);
+      assert.match(result.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+      assert.equal(canonicalSnapshot(),afterDrift);
+    } finally { await Promise.all([cleanup(graph,"roundb_attest_drift_graph"),cleanup(writer,"roundb_attest_drift")]); }
   });
 });
