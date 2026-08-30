@@ -12,7 +12,7 @@
     "decision_revision": { "type": "string", "pattern": "^program-c/decision-r[1-9][0-9]*$" },
     "policy_revision": { "type": "string", "pattern": "^program-c/policy-r[1-9][0-9]*$" },
     "stage": { "enum": ["PROPOSAL_MERGE", "ACCEPTANCE_MERGE"] },
-    "pr_number": { "type": "integer", "minimum": 1 },
+    "pr_number": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
     "base_sha": { "$ref": "#/$defs/gitSha" },
     "head_sha": { "$ref": "#/$defs/gitSha" },
     "decision_raw_sha256": { "$ref": "#/$defs/digest" },

@@ -7,6 +7,7 @@ import {
   reconcileMergeAuthorizationReservation,
   reserveMergeAuthorizationNonce,
 } from './governance-approval-state.mjs';
+import { validateProgramCMergeAuthorizationGrant } from './governance-approval-schema-validator.mjs';
 
 const NOW = new Date('2026-08-30T08:30:00.000Z');
 const RESERVATION_NOW = new Date('2026-08-30T08:10:00.000Z');
@@ -26,6 +27,8 @@ class Ledger {
 
   constructor(snapshot = []) {
     this.streams = new Map(snapshot.map((stream) => [this.id(stream.key), clone(stream)]));
+    this.readCalls = 0;
+    this.casCalls = 0;
   }
 
   id(key) {
@@ -33,10 +36,12 @@ class Ledger {
   }
 
   async read(key) {
+    this.readCalls += 1;
     return clone(this.streams.get(this.id(key)) ?? null);
   }
 
   async compareAndSwap(input) {
+    this.casCalls += 1;
     const id = this.id(input.key);
     const current = this.streams.get(id) ?? { key: clone(input.key), committedRevision: 0, events: [] };
     if (current.committedRevision !== input.expectedRevision) {
@@ -73,6 +78,33 @@ const requestFor = (grant, overrides = {}) => ({
 const reserve = async (ledger, grant, request = requestFor(grant)) => (
   reserveMergeAuthorizationNonce(grant, digest(grant), request, 0, ledger, RESERVATION_NOW)
 );
+
+test('unsafe PR numbers fail before ledger read or CAS while the safe maximum remains valid', async () => {
+  const valid = await readJson('valid-grant.json');
+  const safeMaximum = clone(valid);
+  safeMaximum.pr_number = Number.MAX_SAFE_INTEGER;
+  assert.equal(validateProgramCMergeAuthorizationGrant(safeMaximum).valid, true);
+
+  const unsafe = clone(valid);
+  unsafe.pr_number = Number.MAX_SAFE_INTEGER + 1;
+  assert.equal(validateProgramCMergeAuthorizationGrant(unsafe).valid, false);
+  const ledger = new Ledger();
+  await assert.rejects(
+    reserveMergeAuthorizationNonce(
+      unsafe,
+      digest(unsafe),
+      requestFor(unsafe),
+      0,
+      ledger,
+      RESERVATION_NOW,
+    ),
+    /^Error: APPROVAL_/,
+  );
+  assert.deepEqual({ readCalls: ledger.readCalls, casCalls: ledger.casCalls }, {
+    readCalls: 0,
+    casCalls: 0,
+  });
+});
 
 test('reviewer C2 restart counterexample cannot restore fresh physical-dispatch authority from JSON', async () => {
   const grant = await readJson('valid-grant.json');

@@ -133,6 +133,8 @@ const validateGrantAndRequest = (grant, grantRawSha256, request, expectedRevisio
   const expected = isPlainObject(request) ? bindingFromGrant(grant, request) : {};
   if (!hasExactKeys(request, REQUEST_KEYS)
     || !isSafeNonNegativeInteger(expectedRevision)
+    || !isSafePositiveInteger(grant.pr_number)
+    || !isSafePositiveInteger(request.prNumber)
     || !isBoundedId(request.requestId, MERGE_REQUEST_ID_PATTERN)
     || !isBoundedId(request.reservationId, MERGE_RESERVATION_ID_PATTERN)
     || request.repositoryId !== expected.repositoryId
