@@ -6,17 +6,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import * as safeJsonFacade from './governance-approval-safe-json.mjs';
 import {
   buildApprovalReceiptArtifact,
   parseApprovalJson,
   readApprovalJson,
-  readApprovalJsonFromHandle,
   renderApprovalReceiptCore,
   sha256Prefixed,
   verifyApprovalReceiptRawSha256,
 } from './governance-approval-safe-json.mjs';
 
 const MAX_BYTES = 1_048_576;
+const INTERNAL_SEAM_VERSION = 'approval-safe-json-structural-test-seam/v1';
 
 const digest = (character) => `sha256:${character.repeat(64)}`;
 
@@ -166,7 +167,67 @@ test('readApprovalJson accepts exactly 1 MiB and rejects one byte more', async (
   });
 });
 
-test('readApprovalJson rejects an opened regular file whose identity changes during the read', async () => {
+test('public facade exports only path-safe approval JSON operations', () => {
+  assert.deepEqual(Object.keys(safeJsonFacade).sort(), [
+    'buildApprovalReceiptArtifact',
+    'parseApprovalJson',
+    'readApprovalJson',
+    'renderApprovalReceiptCore',
+    'sha256Prefixed',
+    'verifyApprovalReceiptRawSha256',
+  ]);
+});
+
+test('internal structural seam is non-authoritative and not re-exported by facade or package', async () => {
+  const facadeSource = await readFile(
+    new URL('./governance-approval-safe-json.mjs', import.meta.url),
+    'utf8',
+  );
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.match(facadeSource, /from '\.\/governance-approval-safe-json-internal\.mjs'/u);
+  assert.doesNotMatch(facadeSource, /export\s+(?:const|function|\{)[^\n]*StructuralTestSeam/iu);
+  assert.equal(JSON.stringify(packageJson.exports ?? {}).includes('safe-json-internal'), false);
+
+  const internal = await import('./governance-approval-safe-json-internal.mjs');
+  assert.deepEqual(Object.keys(internal), ['readApprovalJsonBytesFromStructuralTestSeam']);
+});
+
+test('internal structural seam marks stable fake results as non-authoritative test evidence', async () => {
+  const { readApprovalJsonBytesFromStructuralTestSeam } = await import(
+    './governance-approval-safe-json-internal.mjs'
+  );
+  const bytes = Buffer.from('{"approved":true}\n', 'utf8');
+  const stable = {
+    dev: 2049n,
+    ino: 427001n,
+    mode: 33188n,
+    size: BigInt(bytes.length),
+    mtimeNs: 1788087600000000000n,
+    ctimeNs: 1788087600000000000n,
+    isFile: () => true,
+  };
+  const adapter = {
+    schemaVersion: INTERNAL_SEAM_VERSION,
+    stat: async () => stable,
+    readAt: async (target, offset, length, position) => {
+      if (position >= bytes.length) return { bytesRead: 0 };
+      const bytesRead = Math.min(length, bytes.length - position);
+      bytes.copy(target, offset, position, position + bytesRead);
+      return { bytesRead };
+    },
+  };
+
+  const result = await readApprovalJsonBytesFromStructuralTestSeam(adapter);
+  assert.equal(result.seam, 'NON_AUTHORITATIVE_INTERNAL_STRUCTURAL_TEST_SEAM');
+  assert.equal(result.identityStable, true);
+  assert.deepEqual(result.bytes, bytes);
+  assert.equal(Object.isFrozen(result), true);
+});
+
+test('internal structural seam deterministically rejects identity change after bounded read', async () => {
+  const { readApprovalJsonBytesFromStructuralTestSeam } = await import(
+    './governance-approval-safe-json-internal.mjs'
+  );
   const bytes = Buffer.from('{"approved":true}\n', 'utf8');
   const stat = (mtimeNs) => ({
     dev: 2049n,
@@ -181,11 +242,12 @@ test('readApprovalJson rejects an opened regular file whose identity changes dur
   let statReads = 0;
   let byteReads = 0;
   const handle = {
+    schemaVersion: INTERNAL_SEAM_VERSION,
     stat: async ({ bigint }) => {
       assert.equal(bigint, true);
       return stats[statReads++];
     },
-    read: async (target, offset, length, position) => {
+    readAt: async (target, offset, length, position) => {
       byteReads += 1;
       if (position >= bytes.length) return { bytesRead: 0, buffer: target };
       const bytesRead = Math.min(length, bytes.length - position);
@@ -195,7 +257,7 @@ test('readApprovalJson rejects an opened regular file whose identity changes dur
   };
 
   await expectApprovalError(
-    () => readApprovalJsonFromHandle(handle, 'approval'),
+    () => readApprovalJsonBytesFromStructuralTestSeam(handle),
     'FILE_CHANGED',
   );
   assert.equal(statReads, 2);
