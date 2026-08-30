@@ -80,9 +80,14 @@ function signatureParts(sql: string, name: string): {
 
 const READ_ONLY_FORBIDDEN = /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL|EXECUTE|NEXTVAL|CURRVAL|SETVAL|LOCK\s+TABLE|FOR\s+(?:NO\s+KEY\s+)?UPDATE|FOR\s+SHARE)\b/iu;
 const READ_ONLY_CALL_ALLOWLIST = new Set([
-  'array_length', 'cardinality', 'char_length', 'coalesce', 'count',
+  'array_agg', 'array_length', 'cardinality', 'char_length', 'coalesce', 'count',
   'current_workspace_id', 'greatest', 'hashtextextended', 'least', 'lower',
-  'nullif', 'pg_advisory_xact_lock', 'current_setting',
+  'nullif', 'pg_advisory_xact_lock', 'current_setting', 'jsonb_agg',
+  'jsonb_build_object', 'jsonb_array_elements_text', 'split_part', 'to_jsonb',
+]);
+const SQL_CALL_KEYWORDS = new Set([
+  'and', 'as', 'exists', 'in', 'not', 'or', 'reachable', 'ancestors',
+  'path_subjects', 'personal_subjects', 'any',
 ]);
 
 function stripSqlNoise(value: string): string {
@@ -115,6 +120,7 @@ function validateReadOnlyBlock(
     const schema = call[1]?.toLowerCase() ?? null;
     const called = call[2]?.toLowerCase();
     if (!called) continue;
+    if (SQL_CALL_KEYWORDS.has(called)) continue;
     if (called === APPEND) throw new Error(`ATTEST_CALLS_APPEND_${name}`);
     if (called.startsWith('_')) {
       if (schema !== null && schema !== 'public') throw new Error(`ATTEST_HELPER_SCHEMA_${name}`);
@@ -261,6 +267,25 @@ describe('governed relation append and attest migration contract', () => {
     expect(operation).toMatch(/consumed_at\s+IS\s+NULL[^]*?GOVERNED_OPERATION_SUBJECT_INVALID/iu);
     const append = functionBlock(sql, APPEND);
     expect(append).toMatch(/WITH\s+RECURSIVE\s+reachable[^]*?\bUNION\b(?!\s+ALL)[^]*?depth\s*<\s*65/iu);
+  });
+
+  it('acquires the exact DSR path set before the graph lock and reattests it under graph lock', async () => {
+    const sql = await migration();
+    for (const name of [APPEND, ATTEST]) {
+      const block = functionBlock(sql, name);
+      const preRead = block.indexOf('_governed_relation_path_snapshot_v1');
+      const dsrLock = block.indexOf('_governed_relation_lock_snapshot_dsr_v1');
+      const graphLock = block.indexOf("'governed-subject-relation:'");
+      const secondRead = block.indexOf('_governed_relation_path_snapshot_v1', preRead + 1);
+      expect(preRead).toBeGreaterThan(0);
+      expect(dsrLock).toBeGreaterThan(preRead);
+      expect(graphLock).toBeGreaterThan(dsrLock);
+      expect(secondRead).toBeGreaterThan(graphLock);
+      expect(block).toContain('GOVERNED_SUBJECT_RELATION_INVALID');
+    }
+    const snapshot = functionBlock(sql, '_governed_relation_path_snapshot_v1');
+    expect(snapshot).toMatch(/WITH\s+RECURSIVE[^]*?UNION(?!\s+ALL)[^]*?parent_subject_id/iu);
+    expect(snapshot).toContain('p_child_subject_id');
   });
 
   it('exposes function-only app ACL and no Task 3 tombstone function', async () => {
