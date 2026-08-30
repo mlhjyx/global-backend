@@ -15,6 +15,15 @@ const FUNCTIONS = Object.freeze({
   finalizeRun: 'finalize_discovery_company_materialization_run_v1',
 });
 const PUBLIC_FUNCTIONS = Object.freeze(Object.values(FUNCTIONS));
+const RAW_FACT_HELPER = '_discovery_company_materialization_lock_raw_fact_v1';
+const INTERNAL_EXECUTE_GRANTS = Object.freeze({
+  _discovery_company_materialization_lock_raw_fact_v1:
+    'discovery_materialization_function_owner',
+  append_workspace_governed_child_relation_v1:
+    'discovery_materialization_function_owner',
+  attest_workspace_governed_child_relation_v1:
+    'discovery_materialization_function_owner',
+});
 const STABLE_ERRORS = Object.freeze([
   'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID',
   'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_CONFLICT',
@@ -92,19 +101,36 @@ function validateSecurity(sql: string, name: string): void {
   ]) requireText(normalized, required, `C_TX_FUNCTION_SECURITY_INVALID_${name}`);
 }
 
+function validateRawFactHelper(sql: string): void {
+  validateSecurity(sql, RAW_FACT_HELPER);
+  const clean = stripComments(sql);
+  requireText(clean,
+    `ALTER FUNCTION public.${RAW_FACT_HELPER}(UUID,UUID) OWNER TO discovery_materialization_fact_reader`,
+    'C_TX_RAW_FACT_HELPER_OWNER_INVALID');
+  requireText(clean,
+    `REVOKE ALL ON FUNCTION public.${RAW_FACT_HELPER}(UUID,UUID) FROM PUBLIC,app_user`,
+    'C_TX_RAW_FACT_HELPER_REVOKE_INVALID');
+}
+
 function validateAcl(sql: string): void {
   const clean = stripComments(sql);
   if (
     /GRANT\s+(?:ALL|ALL\s+PRIVILEGES)\b/iu.test(clean) ||
     /GRANT\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS/iu.test(clean) ||
-    /ALTER\s+DEFAULT\s+PRIVILEGES/iu.test(clean) ||
-    /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\._/iu.test(clean)
+    /ALTER\s+DEFAULT\s+PRIVILEGES/iu.test(clean)
   ) throw new Error('C_TX_FUNCTION_BROAD_ACL_FORBIDDEN');
 
   const grants = [...clean.matchAll(
     /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\([^;]*\)\s+TO\s+([^;]+);/giu,
   )];
-  if (grants.length !== PUBLIC_FUNCTIONS.length) {
+  const allowedGrantNames = new Set([
+    ...PUBLIC_FUNCTIONS,
+    ...Object.keys(INTERNAL_EXECUTE_GRANTS),
+  ]);
+  if (grants.some((grant) => !allowedGrantNames.has(grant[1]?.toLowerCase() ?? ''))) {
+    throw new Error('C_TX_FUNCTION_BROAD_ACL_FORBIDDEN');
+  }
+  if (grants.length !== PUBLIC_FUNCTIONS.length + Object.keys(INTERNAL_EXECUTE_GRANTS).length) {
     throw new Error('C_TX_FUNCTION_GRANT_COUNT_INVALID');
   }
   for (const name of PUBLIC_FUNCTIONS) {
@@ -117,6 +143,12 @@ function validateAcl(sql: string): void {
       'iu',
     );
     if (!revoke.test(clean)) throw new Error(`C_TX_FUNCTION_PUBLIC_REVOKE_MISSING_${name}`);
+  }
+  for (const [name, role] of Object.entries(INTERNAL_EXECUTE_GRANTS)) {
+    const internal = grants.filter((grant) => grant[1]?.toLowerCase() === name);
+    if (internal.length !== 1 || compact(internal[0]?.[2] ?? '').toLowerCase() !== role) {
+      throw new Error('C_TX_FUNCTION_BROAD_ACL_FORBIDDEN');
+    }
   }
 }
 
@@ -160,8 +192,13 @@ function validateBatchFacts(sql: string): void {
     'acquisition-suppression-policy:',
     'discovery-company-materialization-run:',
     'discovery-company-materialization:',
-    'FOR UPDATE',
+    RAW_FACT_HELPER,
   ], 'C_TX_BATCH_LOCK_ORDER_INVALID');
+  const rawHelper = executableBody(sql, RAW_FACT_HELPER);
+  requireOrdered(rawHelper, [
+    'raw_source_record',
+    'FOR UPDATE',
+  ], 'C_TX_RAW_FACT_HELPER_INVALID');
   for (const required of [
     'pg_advisory_xact_lock',
     'query_ordinal',
@@ -252,6 +289,7 @@ function validateNoBypass(sql: string): void {
 
 function validateFunctionsMigration(sql: string): void {
   for (const name of PUBLIC_FUNCTIONS) validateSecurity(sql, name);
+  validateRawFactHelper(sql);
   validateAcl(sql);
   validateAdmission(sql);
   validateInspect(sql);
@@ -279,6 +317,16 @@ function fixtureFunction(name: string, body: string): string {
       runtime_api, runtime_worker, runtime_outbox_relay;
     GRANT EXECUTE ON FUNCTION public.${name}(uuid,uuid) TO app_user;
   `;
+}
+
+function mutateFunction(
+  sql: string,
+  name: string,
+  from: string,
+  to: string,
+): string {
+  const block = functionBlock(sql, name);
+  return sql.replace(block, block.replace(from, to));
 }
 
 function lockedReference(): string {
@@ -309,7 +357,8 @@ function lockedReference(): string {
         (ORDER BY provider_key, record_index, raw_record_id, id) AS position
       FROM public.discovery_query_attempt_item item
     ) ranked WHERE ((ranked.position - 1) / 128)=p_run_id::text::integer;
-    PERFORM 1 FROM public.raw_source_record FOR UPDATE;
+    PERFORM 1 FROM public._discovery_company_materialization_lock_raw_fact_v1(
+      p_workspace_id,p_run_id);
     PERFORM public.attest_workspace_governed_child_relation_v1();
     INSERT INTO public.discovery_company_materialization_tx_fence(
       backend_pid,transaction_id,snapshot_sha256)
@@ -341,6 +390,22 @@ function lockedReference(): string {
     RETURN;`);
   const errors = STABLE_ERRORS.map((error) => `RAISE NOTICE '${error}';`).join('\n');
   return `
+    CREATE FUNCTION public._discovery_company_materialization_lock_raw_fact_v1(uuid,uuid)
+      RETURNS TABLE(raw_status text) LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+      SET search_path=pg_catalog,public AS $raw$ BEGIN
+        RETURN QUERY SELECT raw.ingest_status::text
+          FROM public.raw_source_record raw FOR UPDATE;
+      END $raw$;
+    REVOKE ALL ON FUNCTION public._discovery_company_materialization_lock_raw_fact_v1(uuid,uuid)
+      FROM PUBLIC,app_user,runtime_api,runtime_worker,runtime_outbox_relay;
+    ALTER FUNCTION public._discovery_company_materialization_lock_raw_fact_v1(uuid,uuid)
+      OWNER TO discovery_materialization_fact_reader;
+    GRANT EXECUTE ON FUNCTION public._discovery_company_materialization_lock_raw_fact_v1(uuid,uuid)
+      TO discovery_materialization_function_owner;
+    GRANT EXECUTE ON FUNCTION public.append_workspace_governed_child_relation_v1(uuid)
+      TO discovery_materialization_function_owner;
+    GRANT EXECUTE ON FUNCTION public.attest_workspace_governed_child_relation_v1(uuid)
+      TO discovery_materialization_function_owner;
     ${admit}${inspect}${facts}${append}${query}${run}
     CREATE FUNCTION public.reject_unconsumed_discovery_company_materialization_fence_v1()
       RETURNS trigger LANGUAGE plpgsql AS $guard$ BEGIN ${errors} RETURN NEW; END $guard$;
@@ -370,27 +435,31 @@ describe('Discovery company materialization C3 SECURITY DEFINER functions migrat
     expect(() => validateFunctionsMigration(valid)).not.toThrow();
 
     const mutations = [
-      valid.replace('SECURITY DEFINER', 'SECURITY INVOKER'),
-      valid.replace('SET search_path=pg_catalog,public', ''),
-      valid.replace('acquisition-suppression-policy:', 'zz-after-query-lock:'),
-      valid.replace('/ 128', '/ 129'),
-      valid.replace('DELETE FROM public.discovery_company_materialization_tx_fence',
-        'PERFORM 1 FROM public.discovery_company_materialization_tx_fence'),
-      valid.replace('append_workspace_governed_child_relation_v1',
-        'missing_workspace_governed_child_relation_v1'),
-      valid.replace('sum(o.record_index)', 'max(o.record_index)'),
-      valid.replace('sum(c.item_count)', 'max(c.item_count)'),
-      valid.replace(`REVOKE ALL ON FUNCTION public.${FUNCTIONS.admit}`,
-        `REVOKE ALL ON FUNCTION public.${FUNCTIONS.admit}_missing`),
-      valid.replace(`GRANT EXECUTE ON FUNCTION public.${FUNCTIONS.inspect}`,
-        `GRANT EXECUTE ON FUNCTION public.${FUNCTIONS.inspect}x`),
-      valid.replace('RETURN QUERY SELECT \'NOT_FOUND\';',
-        'UPDATE public.discovery_company_materialization_outcome SET outcome=outcome;'),
-      valid.replace('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_CONFLICT',
-        'C_TX_CONFLICT_ERROR_REMOVED'),
+      ['security-definer', mutateFunction(valid, FUNCTIONS.admit,
+        'SECURITY DEFINER', 'SECURITY INVOKER')],
+      ['raw-helper-security-definer', mutateFunction(valid, RAW_FACT_HELPER,
+        'SECURITY DEFINER', 'SECURITY INVOKER')],
+      ['search-path', mutateFunction(valid, FUNCTIONS.admit,
+        'SET search_path=pg_catalog,public', '')],
+      ['lock-order', valid.replace('acquisition-suppression-policy:', 'zz-after-query-lock:')],
+      ['batch-size', valid.replace('/ 128', '/ 129')],
+      ['fence-consume', valid.replace('DELETE FROM public.discovery_company_materialization_tx_fence',
+        'PERFORM 1 FROM public.discovery_company_materialization_tx_fence')],
+      ['a-append', valid.replace('append_workspace_governed_child_relation_v1',
+        'missing_workspace_governed_child_relation_v1')],
+      ['query-sum', valid.replace('sum(o.record_index)', 'max(o.record_index)')],
+      ['run-sum', valid.replace('sum(c.item_count)', 'max(c.item_count)')],
+      ['public-revoke', valid.replace(`REVOKE ALL ON FUNCTION public.${FUNCTIONS.admit}`,
+        `REVOKE ALL ON FUNCTION public.${FUNCTIONS.admit}_missing`)],
+      ['public-grant', valid.replace(`GRANT EXECUTE ON FUNCTION public.${FUNCTIONS.inspect}`,
+        `GRANT EXECUTE ON FUNCTION public.${FUNCTIONS.inspect}x`)],
+      ['inspect-write', valid.replace('RETURN QUERY SELECT \'NOT_FOUND\';',
+        'UPDATE public.discovery_company_materialization_outcome SET outcome=outcome;')],
+      ['stable-error', valid.replace('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_CONFLICT',
+        'C_TX_CONFLICT_ERROR_REMOVED')],
     ];
-    for (const mutation of mutations) {
-      expect(() => validateFunctionsMigration(mutation)).toThrow();
+    for (const [label, mutation] of mutations) {
+      expect(() => validateFunctionsMigration(mutation), label).toThrow();
     }
 
     expect(() => validateFunctionsMigration(`${valid}

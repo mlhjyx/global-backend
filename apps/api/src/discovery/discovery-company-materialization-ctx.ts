@@ -189,7 +189,10 @@ function parseFacts(value: unknown, snapshotBudget: SnapshotBudget): Readonly<Da
     product: snapshotPlain(field(facts, 'product'), snapshotBudget) });
 }
 
-function parseCanonical(value: unknown): Readonly<Data> {
+function parseCanonical(
+  value: unknown,
+  aIdentity: 'new' | 'reuse' | 'persisted',
+): Readonly<Data> {
   const item = record(value, CANONICAL_KEYS);
   const mutation = field(item, 'mutationClass');
   const rule = field(item, 'matchRule');
@@ -199,10 +202,18 @@ function parseCanonical(value: unknown): Readonly<Data> {
       !['domain_exact', 'identifier_exact', 'name_country'].includes(String(rule)) ||
       field(item, 'identityCanonicalType') !== 'company' ||
       typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) fail();
+  const governedSubjectId = field(item, 'canonicalGovernedSubjectId');
+  const relationId = field(item, 'cRelationId');
+  if (aIdentity === 'persisted') {
+    uuid(governedSubjectId); uuid(relationId);
+  } else if (aIdentity === 'reuse') {
+    uuid(governedSubjectId);
+    if (relationId !== null) fail();
+  } else if (governedSubjectId !== null || relationId !== null) fail();
   return frozen({ canonicalCompanyId: uuid(field(item, 'canonicalCompanyId')),
     identityLinkId: uuid(field(item, 'identityLinkId')), identityCanonicalType: 'company',
-    canonicalGovernedSubjectId: uuid(field(item, 'canonicalGovernedSubjectId')),
-    cRelationId: uuid(field(item, 'cRelationId')), cRelationKey: text(field(item, 'cRelationKey'), RELATION_KEY),
+    canonicalGovernedSubjectId: governedSubjectId,
+    cRelationId: relationId, cRelationKey: text(field(item, 'cRelationKey'), RELATION_KEY),
     matchRule: rule, confidence, mutationClass: mutation, evidenceCount,
     evidenceManifestSha256: sha(field(item, 'evidenceManifestSha256')) });
 }
@@ -274,6 +285,7 @@ function parseExistingOutcome(
   if (outcome === 'CANONICALIZED') {
     const canonical = parseCanonical(
       Object.fromEntries(CANONICAL_KEYS.map((key) => [key, field(row, key)])),
+      'persisted',
     );
     if (canonical.cRelationKey !== `discovery.canonical_company:${q.recordIndex}`) fail(HOLD);
     if (provenanceKeys.some((key) => field(row, key) !== null)) fail(HOLD);
@@ -305,9 +317,14 @@ function itemPlan(raw: unknown, context: Data, snapshotBudget: SnapshotBudget): 
   const existing = field(source, 'exactExistingOutcome');
   if (existing !== null)
     return parseExistingOutcome(existing, q, context.contractSha256, snapshotBudget);
+  if (q.qIngestStatus === 'QUARANTINED' || q.qIngestStatus === 'REJECTED') {
+    const outcome = q.qIngestStatus === 'QUARANTINED' ? 'RAW_QUARANTINED' : 'RAW_REJECTED';
+    return frozen({ ...q, outcome, contractSha256: context.contractSha256,
+      ...terminalColumns(outcome, { suppressionRecordIds: [] }, null) });
+  }
   const facts = parseFacts(field(source, 'lockedFacts'), snapshotBudget);
-  const reuseSource = field(source, 'reusableIdentity') ?? field(source, 'canonicalWrite');
-  const expectedReuse = reuseSource === null ? null : parseCanonical(reuseSource);
+  const reuseSource = field(source, 'reusableIdentity');
+  const expectedReuse = reuseSource === null ? null : parseCanonical(reuseSource, 'reuse');
   const manifestCandidateCount = validateManifestCandidates(
     field(source, 'reusableManifestCandidates'), {
     ...context, rawRecordId: q.rawRecordId,
@@ -316,15 +333,13 @@ function itemPlan(raw: unknown, context: Data, snapshotBudget: SnapshotBudget): 
   let outcome: Outcome;
   let canonical: Readonly<Data> | null = null;
   let reason: string | null = null;
-  if (q.qIngestStatus === 'QUARANTINED') outcome = 'RAW_QUARANTINED';
-  else if (q.qIngestStatus === 'REJECTED') outcome = 'RAW_REJECTED';
-  else if (facts.restrictedDispositionId !== null) outcome = 'RESTRICTED_PROCESSING';
+  if (facts.restrictedDispositionId !== null) outcome = 'RESTRICTED_PROCESSING';
   else if ((facts.suppressionRecordIds as readonly string[]).length > 0) outcome = 'SUPPRESSED';
   else if (
     field(source, 'reusableIdentity') !== null &&
     (facts.rawStatus !== 'EXPIRED' || manifestCandidateCount > 0)
   ) {
-    outcome = 'CANONICALIZED'; canonical = parseCanonical(field(source, 'reusableIdentity'));
+    outcome = 'CANONICALIZED'; canonical = parseCanonical(field(source, 'reusableIdentity'), 'reuse');
   } else if (facts.rawStatus === 'EXPIRED') outcome = 'EXPIRED_BEFORE_CANONICALIZATION';
   else {
     const rawParser = field(source, 'companyParse');
@@ -336,7 +351,7 @@ function itemPlan(raw: unknown, context: Data, snapshotBudget: SnapshotBudget): 
     } else {
       if (field(parser, 'status') !== 'VALID') fail();
       text(field(parser, 'dedupeKey'), /^[a-z][a-z0-9._:-]{0,255}$/u);
-      outcome = 'CANONICALIZED'; canonical = parseCanonical(field(source, 'canonicalWrite'));
+      outcome = 'CANONICALIZED'; canonical = parseCanonical(field(source, 'canonicalWrite'), 'new');
     }
   }
   if (canonical && canonical.cRelationKey !== `discovery.canonical_company:${q.recordIndex}`) fail(HOLD);

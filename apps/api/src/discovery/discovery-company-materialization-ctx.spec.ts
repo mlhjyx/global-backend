@@ -59,10 +59,18 @@ function facts(overrides: Record<string, unknown> = {}): Record<string, unknown>
 }
 function canonical(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { canonicalCompanyId: UUID.canonical, identityLinkId: UUID.identityLink,
-    identityCanonicalType: 'company', canonicalGovernedSubjectId: UUID.canonicalSubject,
-    cRelationId: UUID.cRelation, cRelationKey: 'discovery.canonical_company:0',
+    identityCanonicalType: 'company', canonicalGovernedSubjectId: null,
+    cRelationId: null, cRelationKey: 'discovery.canonical_company:0',
     matchRule: 'domain_exact', confidence: 1, mutationClass: 'CREATED', evidenceCount: 2,
     evidenceManifestSha256: SHA.evidence, ...overrides };
+}
+function canonicalResult(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return canonical({ canonicalGovernedSubjectId: UUID.canonicalSubject,
+    cRelationId: UUID.cRelation, ...overrides });
+}
+function reusableCanonical(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return canonical({ canonicalGovernedSubjectId: UUID.canonicalSubject,
+    mutationClass: 'REUSED', ...overrides });
 }
 function candidate(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const item = (overrides.qItem as Record<string, unknown> | undefined) ?? qItem();
@@ -91,7 +99,7 @@ function terminal(outcome: string): Record<string, unknown> {
 }
 function storedOutcome(outcome: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { ...qItem(), outcome, contractSha256: SHA.contract, ...terminal(outcome),
-    ...(outcome === 'CANONICALIZED' ? canonical() : {}), ...overrides };
+    ...(outcome === 'CANONICALIZED' ? canonicalResult() : {}), ...overrides };
 }
 
 describe('C-TX pure Q-item batch builder', () => {
@@ -180,7 +188,7 @@ describe('C-TX exact outcome precedence and row matrix', () => {
 
   it('locks existing > Q terminal > restriction > suppression > reuse > expiry > invalid > canonicalized', async () => {
     const module = await load();
-    const reuse = canonical({ mutationClass: 'REUSED' });
+    const reuse = reusableCanonical();
     const vectors = [
       [candidate({ exactExistingOutcome: storedOutcome('RAW_REJECTED', { qIngestStatus: 'REJECTED' }), qItem: qItem({ qIngestStatus: 'REJECTED' }),
         lockedFacts: facts({ restrictedDispositionId: UUID.disposition }) }), 'RAW_REJECTED'],
@@ -196,6 +204,30 @@ describe('C-TX exact outcome precedence and row matrix', () => {
       expect(module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([item])).items[0]).toMatchObject({ outcome });
   });
 
+  it('ends frozen Q terminal items before reading Raw facts or canonical intent', async () => {
+    const module = await load();
+    for (const [qIngestStatus, outcome] of [
+      ['QUARANTINED', 'RAW_QUARANTINED'],
+      ['REJECTED', 'RAW_REJECTED'],
+    ] as const) {
+      const row = module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([
+        candidate({ qItem: qItem({ qIngestStatus }), lockedFacts: new Proxy({}, {}),
+          companyParse: new Proxy({}, {}), canonicalWrite: new Proxy({}, {}) }),
+      ])).items[0];
+      expect(row.outcome).toBe(outcome);
+    }
+  });
+
+  it('keeps A subject and relation ids absent until the official append returns them', async () => {
+    const module = await load();
+    const row = module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([candidate()])).items[0];
+    expect(row).toMatchObject({ outcome: 'CANONICALIZED',
+      canonicalGovernedSubjectId: null, cRelationId: null });
+    expect(() => module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([
+      candidate({ canonicalWrite: canonicalResult() }),
+    ]))).toThrow('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
+  });
+
   it.each(['CREATED', 'UPDATED', 'LINKED', 'REUSED'] as const)('allows mutation class %s only for CANONICALIZED', async (mutationClass) => {
     const module = await load();
     expect(module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([
@@ -207,7 +239,7 @@ describe('C-TX exact outcome precedence and row matrix', () => {
 
   it('returns an exact existing outcome without recomputing it from changed current facts', async () => {
     const module = await load();
-    const existing = Object.freeze(storedOutcome('CANONICALIZED', canonical({ mutationClass: 'LINKED' })));
+    const existing = Object.freeze(storedOutcome('CANONICALIZED', canonicalResult({ mutationClass: 'LINKED' })));
     const row = module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([candidate({
       exactExistingOutcome: existing,
       lockedFacts: facts({ rawStatus: 'EXPIRED', rawExpiredAt: '2026-08-31T00:00:00.000Z',
@@ -247,7 +279,7 @@ describe('C-TX shared manifest reuse and hostile reflection', () => {
       recordIndex: 99, coveringBatchReceipt: true };
     const plan = module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([candidate({
       lockedFacts: facts({ rawStatus: 'EXPIRED', rawExpiredAt: '2026-08-31T00:00:00.000Z', product: null }),
-      reusableIdentity: canonical({ mutationClass: 'REUSED' }), reusableManifestCandidates: [{ ...shared, ...priorA }],
+      reusableIdentity: reusableCanonical(), reusableManifestCandidates: [{ ...shared, ...priorA }],
     })]));
     expect(plan.items[0]).toMatchObject({ outcome: 'CANONICALIZED', mutationClass: 'REUSED',
       evidenceCount: 2, evidenceManifestSha256: SHA.evidence, queryItemId: UUID.queryItem,
