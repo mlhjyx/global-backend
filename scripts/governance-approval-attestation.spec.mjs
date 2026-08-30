@@ -94,11 +94,13 @@ const verificationJson = (rawDigest, overrides = {}) => ({
 
 const fixture = () => {
   const artifact = buildApprovalReceiptArtifact(approvalCore());
+  const receiptCoreBytes = renderApprovalReceiptCore(artifact.envelope.core);
   const bundleBytes = Buffer.from('fixture-sigstore-bundle\n', 'utf8');
   const trustedRootBytes = Buffer.from('fixture-trusted-root\n', 'utf8');
   const rawHex = artifact.receiptRawSha256.slice('sha256:'.length);
   const manifest = {
     schema_version: 'trusted-approval-evidence-manifest/v1',
+    path_bytes_bound: false,
     receipt_id: artifact.envelope.core.receipt_id,
     receipt_core_sha256: artifact.receiptCoreSha256,
     receipt_raw_sha256: artifact.receiptRawSha256,
@@ -117,6 +119,18 @@ const fixture = () => {
       acquired_at: '2026-08-30T11:00:00.000Z',
       gh_path: GH_PATH,
       gh_version: '2.89.0',
+      gh_binary_sha256: digest('9'),
+      owner_uid: 0,
+      owner_gid: 0,
+      mode: '0755',
+      file_identity: {
+        device: '2049',
+        inode: '427001',
+        size: 48_000_000,
+        mtime_ns: '1788087600000000000',
+        ctime_ns: '1788087600000000000',
+      },
+      observed_at: '2026-08-30T11:05:00.000Z',
       tuf_source: 'GH_ATTESTATION_TRUSTED_ROOT',
     },
   };
@@ -125,6 +139,8 @@ const fixture = () => {
     output: verificationJson(artifact.receiptRawSha256),
     input: {
       ghPath: GH_PATH,
+      receiptCorePath: '/evidence/receipt-core.json',
+      receiptCoreBytes,
       receiptPath: '/evidence/receipt.json',
       receiptBytes: artifact.bytes,
       bundlePath: `/evidence/${manifest.attestation_bundle.path}`,
@@ -293,7 +309,7 @@ test('verification uses exact hardened execFile options but returns only a synth
   assert.equal(Object.isFrozen(result.blockingCodes), true);
   assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 32_768);
   assert.equal(JSON.stringify(result).includes('must-never-be-projected'), false);
-  assert.equal(JSON.stringify(result).includes('VERIFIED'), false);
+  assert.equal(JSON.stringify(result).includes('"status":"VERIFIED"'), false);
   assert.equal(JSON.stringify(result).includes('TRUSTED_BASE_VERIFIED'), false);
 });
 

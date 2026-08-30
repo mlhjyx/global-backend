@@ -3,6 +3,7 @@ import { basename, isAbsolute } from 'node:path';
 import { deepFreeze } from './governance-approval-readback-common.mjs';
 import {
   parseApprovalJson,
+  renderApprovalReceiptCore,
   sha256Prefixed,
 } from './governance-approval-safe-json.mjs';
 import {
@@ -20,14 +21,16 @@ const MAX_BYTES = 1_048_576;
 const MAX_RESULT_BYTES = 32_768;
 const MAX_PATH_BYTES = 4_096;
 const MAX_IDS = 64;
+const EXEC_TIMEOUT_MS = 30_000;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const GIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const ID_PATTERN = /^[a-z][a-z0-9-]{7,127}$/u;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const WORKFLOW_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\/\.github\/workflows\/[a-zA-Z0-9._-]+\.ya?ml$/u;
 const INPUT_KEYS = Object.freeze([
-  'ghPath', 'receiptPath', 'receiptBytes', 'bundlePath', 'bundleBytes',
-  'trustedRootPath', 'trustedRootBytes', 'manifest', 'expected', 'lifecycle',
+  'ghPath', 'receiptCorePath', 'receiptCoreBytes', 'receiptPath', 'receiptBytes',
+  'bundlePath', 'bundleBytes', 'trustedRootPath', 'trustedRootBytes', 'manifest',
+  'expected', 'lifecycle',
 ]);
 const EXPECTED_KEYS = Object.freeze([
   'repository', 'signerWorkflow', 'signerDigest', 'sourceRef', 'sourceDigest',
@@ -36,10 +39,21 @@ const EXPECTED_KEYS = Object.freeze([
 const LIFECYCLE_KEYS = Object.freeze([
   'verifiedAt', 'validUntil', 'revokedReceiptIds', 'supersededReceiptIds',
 ]);
-const EXEC_OPTIONS = Object.freeze({
+const SAFE_EXEC_ENV = Object.freeze({
+  GH_CONFIG_DIR: '/nonexistent',
+  GH_PROMPT_DISABLED: '1',
+  LANG: 'C',
+  LC_ALL: 'C',
+  NO_COLOR: '1',
+});
+const execOptions = (signal) => Object.freeze({
   encoding: 'utf8',
+  env: SAFE_EXEC_ENV,
+  killSignal: 'SIGKILL',
   maxBuffer: MAX_BYTES,
   shell: false,
+  signal,
+  timeout: EXEC_TIMEOUT_MS,
   windowsHide: true,
 });
 
@@ -83,7 +97,13 @@ const idsAreClosed = (values) => (
   && new Set(values).size === values.length
 );
 
-const toolchainHold = (code) => deepFreeze({ status: 'HOLD', version: null, code });
+const toolchainHold = (code) => deepFreeze({
+  status: 'HOLD',
+  version: null,
+  contractStatus: 'FAIL',
+  syntheticVersion: null,
+  code,
+});
 
 export const inspectApprovalAttestationToolchain = (input) => {
   if (
@@ -99,7 +119,13 @@ export const inspectApprovalAttestationToolchain = (input) => {
   if (version !== GH_VERSION) {
     return toolchainHold('APPROVAL_ATTESTATION_TOOLCHAIN_VERSION_MISMATCH');
   }
-  return deepFreeze({ status: 'AVAILABLE', version: GH_VERSION, code: 'PASS' });
+  return deepFreeze({
+    status: 'HOLD',
+    version: null,
+    contractStatus: 'SYNTHETIC_CONTRACT_PASS',
+    syntheticVersion: GH_VERSION,
+    code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+  });
 };
 
 const parseReceipt = (bytes) => {
@@ -182,10 +208,12 @@ const validateManifest = (input, receipt, receiptRawSha256) => {
     'APPROVAL_EVIDENCE_BUNDLE_REQUIRED',
   );
   requireCondition(
-    manifest.receipt_id === receipt.core.receipt_id
+    manifest.path_bytes_bound === false
+      && manifest.receipt_id === receipt.core.receipt_id
       && manifest.receipt_core_sha256 === receipt.receipt_core_sha256
       && manifest.receipt_raw_sha256 === receiptRawSha256
       && manifest.attestation_subject_sha256 === receiptRawSha256
+      && manifest.files[0].sha256 === sha256Prefixed(input.receiptCoreBytes)
       && manifest.files[0].sha256 === receipt.receipt_core_sha256
       && manifest.files[1].sha256 === receiptRawSha256,
     'APPROVAL_RECEIPT_DIGEST_MISMATCH',
@@ -200,7 +228,10 @@ const validateManifest = (input, receipt, receiptRawSha256) => {
       && manifest.trusted_root.sha256 === sha256Prefixed(input.trustedRootBytes)
       && manifest.trusted_root.gh_path === GH_PATH
       && manifest.trusted_root.tuf_source === 'GH_ATTESTATION_TRUSTED_ROOT'
-      && Date.parse(manifest.trusted_root.acquired_at) <= Date.parse(input.lifecycle.verifiedAt),
+      && Date.parse(manifest.trusted_root.acquired_at)
+        <= Date.parse(manifest.trusted_root.observed_at)
+      && Date.parse(manifest.trusted_root.observed_at)
+        <= Date.parse(input.lifecycle.verifiedAt),
     'APPROVAL_EVIDENCE_BUNDLE_REQUIRED',
   );
 };
@@ -214,8 +245,11 @@ const validateStaticInput = (input) => {
   requireCondition(
     isAbsolutePath(input.receiptPath)
       && basename(input.receiptPath) === 'receipt.json'
+      && isAbsolutePath(input.receiptCorePath)
+      && basename(input.receiptCorePath) === 'receipt-core.json'
       && isAbsolutePath(input.bundlePath)
       && isAbsolutePath(input.trustedRootPath)
+      && isBytes(input.receiptCoreBytes)
       && isBytes(input.receiptBytes)
       && isBytes(input.bundleBytes)
       && isBytes(input.trustedRootBytes),
@@ -229,6 +263,11 @@ const validateStaticInput = (input) => {
     'APPROVAL_RECEIPT_RAW_DIGEST_MISMATCH',
   );
   const receipt = parseReceipt(input.receiptBytes);
+  requireCondition(
+    input.receiptCoreBytes.equals(renderApprovalReceiptCore(receipt.core))
+      && sha256Prefixed(input.receiptCoreBytes) === receipt.receipt_core_sha256,
+    'APPROVAL_RECEIPT_CORE_DIGEST_MISMATCH',
+  );
   validateExpected(input.expected, receipt);
   validateLifecycle(input.lifecycle, receipt.core.receipt_id);
   validateManifest(input, receipt, receiptRawSha256);
@@ -240,6 +279,10 @@ const snapshotInput = (input) => {
   try {
     return {
       ghPath: input.ghPath,
+      receiptCorePath: input.receiptCorePath,
+      receiptCoreBytes: Buffer.isBuffer(input.receiptCoreBytes)
+        ? Buffer.from(input.receiptCoreBytes)
+        : input.receiptCoreBytes,
       receiptPath: input.receiptPath,
       receiptBytes: Buffer.isBuffer(input.receiptBytes)
         ? Buffer.from(input.receiptBytes)
@@ -261,11 +304,15 @@ const snapshotInput = (input) => {
   }
 };
 
-const runCommand = async (commandRunner, args, failureCode) => {
+const runCommand = async (commandRunner, args, failureCode, signal) => {
   requireCondition(typeof commandRunner === 'function', failureCode);
   let result;
   try {
-    result = await commandRunner(GH_PATH, Object.freeze([...args]), EXEC_OPTIONS);
+    result = await commandRunner(
+      GH_PATH,
+      Object.freeze([...args]),
+      execOptions(signal),
+    );
   } catch {
     throw approvalError(failureCode);
   }
@@ -279,11 +326,12 @@ const runCommand = async (commandRunner, args, failureCode) => {
   return result;
 };
 
-const verifyToolchain = async (commandRunner) => {
+const verifyToolchain = async (commandRunner, signal) => {
   const version = await runCommand(
     commandRunner,
     ['--version'],
     'APPROVAL_ATTESTATION_TOOLCHAIN_UNAVAILABLE',
+    signal,
   );
   if (version.exitCode !== 0) throw approvalError('APPROVAL_ATTESTATION_TOOLCHAIN_UNAVAILABLE');
   const parsedVersion = inspectApprovalAttestationToolchain({
@@ -291,18 +339,23 @@ const verifyToolchain = async (commandRunner) => {
     versionOutput: version.stdout,
     attestationHelpExitCode: 0,
   });
-  if (parsedVersion.status !== 'AVAILABLE') throw approvalError(parsedVersion.code);
+  if (parsedVersion.contractStatus !== 'SYNTHETIC_CONTRACT_PASS') {
+    throw approvalError(parsedVersion.code);
+  }
   const help = await runCommand(
     commandRunner,
     ['attestation', 'verify', '--help'],
     'APPROVAL_ATTESTATION_TOOLCHAIN_UNAVAILABLE',
+    signal,
   );
   const inspection = inspectApprovalAttestationToolchain({
     ghPath: GH_PATH,
     versionOutput: version.stdout,
     attestationHelpExitCode: help.exitCode,
   });
-  if (inspection.status !== 'AVAILABLE') throw approvalError(inspection.code);
+  if (inspection.contractStatus !== 'SYNTHETIC_CONTRACT_PASS') {
+    throw approvalError(inspection.code);
+  }
 };
 
 const parseVerificationOutput = (stdout) => {
@@ -362,31 +415,43 @@ const verificationArgs = (input) => Object.freeze([
 export const verifyApprovalAttestation = async (input, commandRunner) => {
   const snapshot = snapshotInput(input);
   const { receipt, receiptRawSha256 } = validateStaticInput(snapshot);
-  await verifyToolchain(commandRunner);
+  const signal = AbortSignal.timeout(EXEC_TIMEOUT_MS);
+  await verifyToolchain(commandRunner, signal);
   const verification = await runCommand(
     commandRunner,
     verificationArgs(snapshot),
     'APPROVAL_ATTESTATION_REQUIRED',
+    signal,
   );
   requireCondition(verification.exitCode === 0, 'APPROVAL_ATTESTATION_REQUIRED');
   const attestation = parseVerificationOutput(verification.stdout);
   validateVerificationIdentity(attestation, snapshot, receiptRawSha256);
   const output = deepFreeze({
-    schemaVersion: 'approval-attestation-verification/v1',
-    status: 'VERIFIED',
-    trustClass: 'TRUSTED_BASE_VERIFIED',
-    receiptId: receipt.core.receipt_id,
-    receiptCoreSha256: receipt.receipt_core_sha256,
-    receiptRawSha256,
-    repository: snapshot.expected.repository,
-    signerWorkflow: snapshot.expected.signerWorkflow,
-    signerDigest: snapshot.expected.signerDigest,
-    sourceRef: snapshot.expected.sourceRef,
-    sourceDigest: snapshot.expected.sourceDigest,
-    oidcIssuer: snapshot.expected.oidcIssuer,
-    runnerEnvironment: snapshot.expected.runnerEnvironment,
-    verifiedAt: snapshot.lifecycle.verifiedAt,
-    toolchain: { path: GH_PATH, version: GH_VERSION },
+    schemaVersion: 'approval-attestation-contract-result/v1',
+    contractStatus: 'PASS',
+    verificationStatus: 'HOLD',
+    evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+    trustEligible: false,
+    pathBytesBound: false,
+    toolchainIdentityBound: false,
+    signerAuthorityBound: false,
+    lifecycleAuthorityBound: false,
+    blockingCodes: ['APPROVAL_INDEPENDENCE_NOT_PROVEN'],
+    syntheticComparison: {
+      receiptId: receipt.core.receipt_id,
+      receiptCoreSha256: receipt.receipt_core_sha256,
+      receiptRawSha256,
+      repository: snapshot.expected.repository,
+      signerWorkflow: snapshot.expected.signerWorkflow,
+      signerDigest: snapshot.expected.signerDigest,
+      sourceRef: snapshot.expected.sourceRef,
+      sourceDigest: snapshot.expected.sourceDigest,
+      oidcIssuer: snapshot.expected.oidcIssuer,
+      runnerEnvironment: snapshot.expected.runnerEnvironment,
+      observedAt: snapshot.lifecycle.verifiedAt,
+      toolchainPath: GH_PATH,
+      toolchainVersion: GH_VERSION,
+    },
   });
   requireCondition(
     byteLength(JSON.stringify(output)) <= MAX_RESULT_BYTES,

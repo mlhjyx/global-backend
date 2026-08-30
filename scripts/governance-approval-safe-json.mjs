@@ -423,27 +423,50 @@ export const parseApprovalJson = (text, _label) => {
   }
 };
 
-export const readApprovalJson = async (path, _label) => {
-  let handle;
+const readApprovalJsonFromHandleImpl = async (handle, label) => {
+  const before = await handle.stat({ bigint: true });
+  requireCondition(
+    before.isFile() && before.size <= BigInt(MAX_BYTES),
+    before.size > BigInt(MAX_BYTES) ? 'FILE_TOO_LARGE' : 'UNSAFE_FILE',
+  );
+  const bytes = await readBoundedBytes(handle, Number(before.size));
+  const after = await handle.stat({ bigint: true });
+  requireCondition(sameIdentity(statIdentity(before), statIdentity(after)), 'FILE_CHANGED');
+  let text;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const before = await handle.stat({ bigint: true });
-    requireCondition(before.isFile() && before.size <= BigInt(MAX_BYTES), before.size > BigInt(MAX_BYTES) ? 'FILE_TOO_LARGE' : 'UNSAFE_FILE');
-    const bytes = await readBoundedBytes(handle, Number(before.size));
-    const after = await handle.stat({ bigint: true });
-    requireCondition(sameIdentity(statIdentity(before), statIdentity(after)), 'FILE_CHANGED');
-    let text;
-    try {
-      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    } catch {
-      throw approvalJsonError('UTF8');
-    }
-    const value = parseApprovalJson(text, _label);
-    return immutableBytesResult(value, bytes);
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw approvalJsonError('UTF8');
+  }
+  const value = parseApprovalJson(text, label);
+  return immutableBytesResult(value, bytes);
+};
+
+export const readApprovalJsonFromHandle = async (handle, label) => {
+  try {
+    requireCondition(
+      handle !== null
+        && typeof handle === 'object'
+        && typeof handle.stat === 'function'
+        && typeof handle.read === 'function',
+      'UNSAFE_FILE',
+    );
+    return await readApprovalJsonFromHandleImpl(handle, label);
   } catch (error) {
     if (error?.message?.startsWith('APPROVAL_JSON_')) {
       throw error;
     }
+    throw approvalJsonError('READ_FAILED');
+  }
+};
+
+export const readApprovalJson = async (path, label) => {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    return await readApprovalJsonFromHandle(handle, label);
+  } catch (error) {
+    if (error?.message?.startsWith('APPROVAL_JSON_')) throw error;
     if (error?.code === 'ELOOP' || error?.code === 'EISDIR') {
       throw approvalJsonError('UNSAFE_FILE');
     }
