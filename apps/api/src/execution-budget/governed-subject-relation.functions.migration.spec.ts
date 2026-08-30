@@ -82,12 +82,12 @@ const READ_ONLY_FORBIDDEN = /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL|EXECU
 const READ_ONLY_CALL_ALLOWLIST = new Set([
   'array_agg', 'array_length', 'cardinality', 'char_length', 'coalesce', 'count',
   'current_workspace_id', 'greatest', 'hashtextextended', 'least', 'lower',
-  'nullif', 'pg_advisory_xact_lock', 'current_setting', 'jsonb_agg',
+  'nullif', 'pg_advisory_xact_lock', 'current_setting', 'jsonb_agg', 'jsonb_array_length',
   'jsonb_build_object', 'jsonb_array_elements_text', 'split_part', 'to_jsonb',
 ]);
 const SQL_CALL_KEYWORDS = new Set([
   'and', 'as', 'exists', 'in', 'not', 'or', 'reachable', 'ancestors',
-  'path_subjects', 'personal_subjects', 'any',
+  'path_subjects', 'personal_subjects', 'personal', 'any',
 ]);
 
 function stripSqlNoise(value: string): string {
