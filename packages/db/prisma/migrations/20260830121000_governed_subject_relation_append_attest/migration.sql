@@ -203,11 +203,13 @@ $operation_read$;
 CREATE FUNCTION public._governed_relation_path_snapshot_v1(
   p_workspace_id UUID,p_operation_id UUID,p_parent_subject_id UUID,
   p_child_subject_type VARCHAR(191),p_child_subject_id UUID,p_child_data_class VARCHAR(16),
-  p_child_dsr_subject_type VARCHAR(191),p_child_dsr_subject_id UUID
+  p_child_dsr_subject_type VARCHAR(191),p_child_dsr_subject_id UUID,p_tuple JSONB
 ) RETURNS JSONB LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public AS $path$
-DECLARE subjects UUID[]; dsr TEXT[]; governed UUID[]; artifact TEXT[]; reachable BOOLEAN;
+DECLARE ancestors_set UUID[]; subjects UUID[]; dsr TEXT[]; governed UUID[]; artifact TEXT[]; reachable BOOLEAN;
   operation_subject UUID; child_internal UUID; effective_parent UUID;
+  relation public.governed_subject_relation%ROWTYPE; relation_child public.governed_subject%ROWTYPE;
+  caller_tuple JSONB; stored_tuple JSONB;
 BEGIN
   SELECT subject_id INTO operation_subject FROM public.tool_operation_subject
     WHERE workspace_id=p_workspace_id AND operation_id=p_operation_id;
@@ -215,19 +217,38 @@ BEGIN
     WHERE workspace_id=p_workspace_id AND subject_type=p_child_subject_type
       AND subject_id=p_child_subject_id;
   effective_parent:=COALESCE(p_parent_subject_id,operation_subject);
+  caller_tuple:=p_tuple||jsonb_build_object('effectiveParentId',effective_parent);
+  SELECT target.* INTO relation FROM public.governed_subject_relation target
+    WHERE target.workspace_id=p_workspace_id AND target.operation_id=p_operation_id
+      AND target.relation_key=p_tuple->>'relationKey';
+  IF FOUND THEN
+    SELECT target.* INTO relation_child FROM public.governed_subject target
+      WHERE target.workspace_id=p_workspace_id AND target.id=relation.child_subject_id;
+    stored_tuple:=jsonb_build_object('authorityId',relation.authority_id,
+      'accountId',relation.account_id,'generation',relation.operation_generation,
+      'ackId',relation.ack_id,'parentInputId',p_parent_subject_id,
+      'childType',relation_child.subject_type,'childId',relation_child.subject_id,
+      'childData',relation_child.data_class,'childDsrType',relation_child.dsr_subject_type,
+      'childDsrId',relation_child.dsr_subject_id,'relationKey',relation.relation_key,
+      'relationKind',relation.relation_kind,'sourceNamespace',relation.source_ref_namespace,
+      'sourceUuid',relation.source_ref_uuid,'sourceSha',relation.source_ref_sha256,
+      'contractSha',relation.contract_sha256,'effectiveParentId',relation.parent_subject_id);
+  END IF;
   WITH RECURSIVE ancestors(subject_id) AS (
     SELECT effective_parent WHERE effective_parent IS NOT NULL
-    UNION SELECT relation.parent_subject_id FROM public.governed_subject_relation relation
-      JOIN ancestors path ON path.subject_id=relation.child_subject_id
-      WHERE relation.workspace_id=p_workspace_id AND relation.operation_id=p_operation_id
-  ), path_subjects(subject_id) AS (
-    SELECT subject_id FROM ancestors
+    UNION SELECT edge.parent_subject_id FROM public.governed_subject_relation edge
+      JOIN ancestors path ON path.subject_id=edge.child_subject_id
+      WHERE edge.workspace_id=p_workspace_id AND edge.operation_id=p_operation_id
+  ) SELECT COALESCE(array_agg(subject_id ORDER BY subject_id),ARRAY[]::UUID[])
+    INTO ancestors_set FROM ancestors;
+  reachable := operation_subject IS NULL AND p_parent_subject_id IS NULL
+    OR operation_subject=ANY(ancestors_set);
+  WITH path_subjects(subject_id) AS (
+    SELECT unnest(ancestors_set)
     UNION SELECT operation_subject WHERE operation_subject IS NOT NULL
     UNION SELECT child_internal WHERE child_internal IS NOT NULL
   ) SELECT COALESCE(array_agg(subject_id ORDER BY subject_id),ARRAY[]::UUID[])
     INTO subjects FROM path_subjects;
-  reachable := operation_subject IS NULL AND p_parent_subject_id IS NULL
-    OR operation_subject=ANY(subjects);
   WITH personal(subject_type,subject_id) AS (
     SELECT subject.dsr_subject_type,subject.dsr_subject_id FROM public.governed_subject subject
       WHERE subject.workspace_id=p_workspace_id AND subject.id=ANY(subjects)
@@ -247,7 +268,10 @@ BEGIN
   RETURN jsonb_build_object('subjectIds',to_jsonb(subjects),'dsrKeys',to_jsonb(dsr),
     'governedFences',to_jsonb(governed),'artifactFences',to_jsonb(artifact),
     'rootReachable',reachable,'operationSubjectId',operation_subject,
-    'effectiveParentId',effective_parent,'childInternalId',child_internal);
+    'effectiveParentId',effective_parent,'childInternalId',child_internal,
+    'relationExists',relation.id IS NOT NULL,'relationId',relation.id,
+    'tuple',caller_tuple,'storedTuple',stored_tuple,
+    'relationExact',stored_tuple IS NOT DISTINCT FROM caller_tuple);
 END $path$;
 CREATE FUNCTION public._governed_relation_lock_snapshot_dsr_v1(
   p_workspace_id UUID,p_snapshot JSONB
@@ -260,30 +284,7 @@ BEGIN
     'generic-operation-artifact-subject:'||p_workspace_id::text||':'||key,0)); END LOOP;
 END $locks$;
 CREATE FUNCTION public.append_workspace_governed_child_relation_v1(
-  p_workspace_id UUID,
-  p_authority_id UUID,
-  p_account_id UUID,
-  p_operation_id UUID,
-  p_operation_generation INTEGER,
-  p_ack_id CHAR(64),
-  p_result_digest CHAR(64),
-  p_root_subject_type VARCHAR(191),
-  p_root_subject_id UUID,
-  p_root_data_class VARCHAR(16),
-  p_root_dsr_subject_type VARCHAR(191),
-  p_root_dsr_subject_id UUID,
-  p_parent_governed_subject_id UUID,
-  p_child_subject_type VARCHAR(191),
-  p_child_subject_id UUID,
-  p_child_data_class VARCHAR(16),
-  p_child_dsr_subject_type VARCHAR(191),
-  p_child_dsr_subject_id UUID,
-  p_relation_key VARCHAR(200),
-  p_relation_kind VARCHAR(32),
-  p_source_ref_namespace VARCHAR(64),
-  p_source_ref_uuid UUID,
-  p_source_ref_sha256 CHAR(64),
-  p_contract_sha256 CHAR(64)
+ p_workspace_id UUID, p_authority_id UUID, p_account_id UUID, p_operation_id UUID, p_operation_generation INTEGER, p_ack_id CHAR(64), p_result_digest CHAR(64), p_root_subject_type VARCHAR(191), p_root_subject_id UUID, p_root_data_class VARCHAR(16), p_root_dsr_subject_type VARCHAR(191), p_root_dsr_subject_id UUID, p_parent_governed_subject_id UUID, p_child_subject_type VARCHAR(191), p_child_subject_id UUID, p_child_data_class VARCHAR(16), p_child_dsr_subject_type VARCHAR(191), p_child_dsr_subject_id UUID, p_relation_key VARCHAR(200), p_relation_kind VARCHAR(32), p_source_ref_namespace VARCHAR(64), p_source_ref_uuid UUID, p_source_ref_sha256 CHAR(64), p_contract_sha256 CHAR(64)
 ) RETURNS TABLE(
   operation_subject_id UUID,
   parent_subject_id UUID,
@@ -306,6 +307,8 @@ DECLARE
   operation_subject_count INTEGER;
   child_in_operation BOOLEAN;
   pre_snapshot JSONB; post_snapshot JSONB;
+  caller_tuple JSONB;
+  materialization_allowance INTEGER;
 BEGIN
   PERFORM _governed_relation_assert_caller_v1(p_workspace_id);
   IF p_authority_id IS NULL OR p_account_id IS NULL OR p_operation_id IS NULL
@@ -367,11 +370,18 @@ BEGIN
   IF p_child_data_class <> 'PERSONAL' AND p_child_data_class <> 'NON_PERSONAL' THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
   END IF;
-  PERFORM _governed_relation_assert_operation_v1(p_workspace_id,p_authority_id,p_account_id,
+  caller_tuple:=jsonb_build_object('authorityId',p_authority_id,'accountId',p_account_id,
+    'generation',p_operation_generation,'ackId',p_ack_id,'parentInputId',p_parent_governed_subject_id,
+    'childType',p_child_subject_type,'childId',p_child_subject_id,'childData',p_child_data_class,
+    'childDsrType',p_child_dsr_subject_type,'childDsrId',p_child_dsr_subject_id,
+    'relationKey',p_relation_key,'relationKind',p_relation_kind,
+    'sourceNamespace',p_source_ref_namespace,'sourceUuid',p_source_ref_uuid,
+    'sourceSha',p_source_ref_sha256,'contractSha',p_contract_sha256);
+  PERFORM _governed_relation_lock_operation_v1(p_workspace_id,p_authority_id,p_account_id,
     p_operation_id,p_operation_generation,p_ack_id,p_result_digest);
   pre_snapshot:=_governed_relation_path_snapshot_v1(p_workspace_id,p_operation_id,
     p_parent_governed_subject_id,p_child_subject_type,p_child_subject_id,p_child_data_class,
-    p_child_dsr_subject_type,p_child_dsr_subject_id);
+    p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
   IF COALESCE((pre_snapshot->>'rootReachable')::BOOLEAN,false) IS NOT TRUE THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
   PERFORM _governed_relation_lock_snapshot_dsr_v1(p_workspace_id,pre_snapshot);
@@ -379,19 +389,21 @@ BEGIN
     'governed-subject-relation:' || p_workspace_id::text || ':' || p_operation_id::text,
     0
   ));
-  PERFORM _governed_relation_lock_operation_v1(
-    p_workspace_id, p_authority_id, p_account_id, p_operation_id,
-    p_operation_generation, p_ack_id, p_result_digest
-  );
   post_snapshot:=_governed_relation_path_snapshot_v1(p_workspace_id,p_operation_id,
     p_parent_governed_subject_id,p_child_subject_type,p_child_subject_id,p_child_data_class,
-    p_child_dsr_subject_type,p_child_dsr_subject_id);
+    p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
+  materialization_allowance:=CASE WHEN pre_snapshot->>'operationSubjectId' IS NULL THEN 1 ELSE 0 END
+    + CASE WHEN pre_snapshot->>'childInternalId' IS NULL THEN 1 ELSE 0 END;
   IF post_snapshot IS DISTINCT FROM pre_snapshot THEN
-    PERFORM 1 FROM public.governed_subject_relation relation
-      WHERE relation.workspace_id=p_workspace_id AND relation.operation_id=p_operation_id
-        AND relation.relation_key=p_relation_key;
-    IF post_snapshot->'dsrKeys' IS DISTINCT FROM pre_snapshot->'dsrKeys' OR NOT FOUND THEN
+    IF COALESCE((pre_snapshot->>'relationExists')::BOOLEAN,false)
+      OR COALESCE((post_snapshot->>'relationExists')::BOOLEAN,false) IS NOT TRUE
+      OR post_snapshot->'dsrKeys' IS DISTINCT FROM pre_snapshot->'dsrKeys'
+      OR NOT ((post_snapshot->'subjectIds') @> (pre_snapshot->'subjectIds'))
+      OR jsonb_array_length(post_snapshot->'subjectIds')>
+        jsonb_array_length(pre_snapshot->'subjectIds')+materialization_allowance THEN
       RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
+    IF COALESCE((post_snapshot->>'relationExact')::BOOLEAN,false) IS NOT TRUE THEN
+      RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_CONFLICT' USING ERRCODE='P0001'; END IF;
     pre_snapshot:=post_snapshot;
   END IF;
   IF jsonb_array_length(pre_snapshot->'governedFences')>0
@@ -571,30 +583,7 @@ BEGIN
 END
 $append$;
 CREATE FUNCTION public.attest_workspace_governed_child_relation_v1(
-  p_workspace_id UUID,
-  p_authority_id UUID,
-  p_account_id UUID,
-  p_operation_id UUID,
-  p_operation_generation INTEGER,
-  p_ack_id CHAR(64),
-  p_result_digest CHAR(64),
-  p_root_subject_type VARCHAR(191),
-  p_root_subject_id UUID,
-  p_root_data_class VARCHAR(16),
-  p_root_dsr_subject_type VARCHAR(191),
-  p_root_dsr_subject_id UUID,
-  p_parent_governed_subject_id UUID,
-  p_child_subject_type VARCHAR(191),
-  p_child_subject_id UUID,
-  p_child_data_class VARCHAR(16),
-  p_child_dsr_subject_type VARCHAR(191),
-  p_child_dsr_subject_id UUID,
-  p_relation_key VARCHAR(200),
-  p_relation_kind VARCHAR(32),
-  p_source_ref_namespace VARCHAR(64),
-  p_source_ref_uuid UUID,
-  p_source_ref_sha256 CHAR(64),
-  p_contract_sha256 CHAR(64)
+ p_workspace_id UUID, p_authority_id UUID, p_account_id UUID, p_operation_id UUID, p_operation_generation INTEGER, p_ack_id CHAR(64), p_result_digest CHAR(64), p_root_subject_type VARCHAR(191), p_root_subject_id UUID, p_root_data_class VARCHAR(16), p_root_dsr_subject_type VARCHAR(191), p_root_dsr_subject_id UUID, p_parent_governed_subject_id UUID, p_child_subject_type VARCHAR(191), p_child_subject_id UUID, p_child_data_class VARCHAR(16), p_child_dsr_subject_type VARCHAR(191), p_child_dsr_subject_id UUID, p_relation_key VARCHAR(200), p_relation_kind VARCHAR(32), p_source_ref_namespace VARCHAR(64), p_source_ref_uuid UUID, p_source_ref_sha256 CHAR(64), p_contract_sha256 CHAR(64)
 ) RETURNS TABLE(
   operation_subject_id UUID,
   parent_subject_id UUID,
@@ -613,6 +602,7 @@ DECLARE
   stored_relation public.governed_subject_relation%ROWTYPE;
   effective_parent UUID;
   pre_snapshot JSONB; post_snapshot JSONB;
+  caller_tuple JSONB;
 BEGIN
   PERFORM _governed_relation_assert_caller_v1(p_workspace_id);
   IF p_authority_id IS NULL OR p_account_id IS NULL OR p_operation_id IS NULL
@@ -674,11 +664,18 @@ BEGIN
   IF p_child_data_class <> 'PERSONAL' AND p_child_data_class <> 'NON_PERSONAL' THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
   END IF;
+  caller_tuple:=jsonb_build_object('authorityId',p_authority_id,'accountId',p_account_id,
+    'generation',p_operation_generation,'ackId',p_ack_id,'parentInputId',p_parent_governed_subject_id,
+    'childType',p_child_subject_type,'childId',p_child_subject_id,'childData',p_child_data_class,
+    'childDsrType',p_child_dsr_subject_type,'childDsrId',p_child_dsr_subject_id,
+    'relationKey',p_relation_key,'relationKind',p_relation_kind,
+    'sourceNamespace',p_source_ref_namespace,'sourceUuid',p_source_ref_uuid,
+    'sourceSha',p_source_ref_sha256,'contractSha',p_contract_sha256);
   PERFORM _governed_relation_assert_operation_v1(p_workspace_id,p_authority_id,p_account_id,
     p_operation_id,p_operation_generation,p_ack_id,p_result_digest);
   pre_snapshot:=_governed_relation_path_snapshot_v1(p_workspace_id,p_operation_id,
     p_parent_governed_subject_id,p_child_subject_type,p_child_subject_id,p_child_data_class,
-    p_child_dsr_subject_type,p_child_dsr_subject_id);
+    p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
   IF pre_snapshot->>'operationSubjectId' IS NULL THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE' USING ERRCODE='P0001'; END IF;
   IF COALESCE((pre_snapshot->>'rootReachable')::BOOLEAN,false) IS NOT TRUE THEN
@@ -694,15 +691,9 @@ BEGIN
   );
   post_snapshot:=_governed_relation_path_snapshot_v1(p_workspace_id,p_operation_id,
     p_parent_governed_subject_id,p_child_subject_type,p_child_subject_id,p_child_data_class,
-    p_child_dsr_subject_type,p_child_dsr_subject_id);
+    p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
   IF post_snapshot IS DISTINCT FROM pre_snapshot THEN
-    PERFORM 1 FROM public.governed_subject_relation relation
-      WHERE relation.workspace_id=p_workspace_id AND relation.operation_id=p_operation_id
-        AND relation.relation_key=p_relation_key;
-    IF post_snapshot->'dsrKeys' IS DISTINCT FROM pre_snapshot->'dsrKeys' OR NOT FOUND THEN
-      RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
-    pre_snapshot:=post_snapshot;
-  END IF;
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
   IF jsonb_array_length(pre_snapshot->'governedFences')>0
     OR jsonb_array_length(pre_snapshot->'artifactFences')>0 THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_TOMBSTONED' USING ERRCODE='P0001'; END IF;
@@ -785,7 +776,7 @@ $attest$;
 REVOKE ALL ON FUNCTION public._governed_relation_assert_caller_v1(UUID) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public._governed_relation_assert_operation_v1(UUID,UUID,UUID,UUID,INTEGER,CHAR(64),CHAR(64)) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public._governed_relation_lock_operation_v1(UUID,UUID,UUID,UUID,INTEGER,CHAR(64),CHAR(64)) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
-REVOKE ALL ON FUNCTION public._governed_relation_path_snapshot_v1(UUID,UUID,UUID,VARCHAR(191),UUID,VARCHAR(16),VARCHAR(191),UUID) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
+REVOKE ALL ON FUNCTION public._governed_relation_path_snapshot_v1(UUID,UUID,UUID,VARCHAR(191),UUID,VARCHAR(16),VARCHAR(191),UUID,JSONB) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public._governed_relation_lock_snapshot_dsr_v1(UUID,JSONB) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public.append_workspace_governed_child_relation_v1(UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64), VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, UUID, VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, VARCHAR(200), VARCHAR(32), VARCHAR(64), UUID, CHAR(64), CHAR(64)) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public.attest_workspace_governed_child_relation_v1(UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64), VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, UUID, VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, VARCHAR(200), VARCHAR(32), VARCHAR(64), UUID, CHAR(64), CHAR(64)) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay;
