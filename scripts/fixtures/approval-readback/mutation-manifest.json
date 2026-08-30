@@ -121,7 +121,10 @@
         "merge-causal-order",
         "merge-revocation-shape",
         "merge-ledger-shape",
-        "merge-candidate-binding"
+        "merge-candidate-binding",
+        "merge-authority-receipt-binding",
+        "merge-verifier-binding",
+        "merge-verifier-subject-repo"
       ]
     },
     {

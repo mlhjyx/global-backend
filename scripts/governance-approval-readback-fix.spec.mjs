@@ -165,6 +165,7 @@ const verifier = () => ({
   event: 'workflow_call',
   runner_environment: 'github-hosted',
   api_version: '2022-11-28',
+  identity: 'github-actions[bot]',
   read_at: '2026-08-30T11:30:00.000Z',
 });
 const candidate = () => {
@@ -228,6 +229,24 @@ const candidate = () => {
   return value;
 };
 const mergeEvidence = () => {
+  const authorityReceiptArtifact = buildRawApprovalReceiptArtifact({
+    receipt_id: 'merge-authority-receipt-0001',
+    repository: clone(REPOSITORY),
+    authority_revision: 'approval-authorities/r2',
+    authority_sha256: DIGEST_B,
+    role: 'MERGE-AUTHORIZER',
+    actor_id: 106,
+    actor_login: 'merge-authorizer',
+    decision_adr: 'ADR-042',
+    decision_revision: 'program-c/decision-r2',
+    policy_revision: 'program-c/policy-r2',
+    pr_number: 427,
+    base_sha: BASE_SHA,
+    head_sha: HEAD_SHA,
+    approved_at: '2026-08-30T10:30:00.000Z',
+    trust_class: 'TRUSTED_BASE_VERIFIED',
+    machine_check_evidence: [machineCheck()],
+  });
   const grant = {
     schema_version: 'program-c-merge-authorization-grant/v1', grant_id: 'program-c-grant-0001',
     repository: clone(REPOSITORY), decision_adr: 'ADR-042', decision_revision: 'program-c/decision-r2',
@@ -235,8 +254,10 @@ const mergeEvidence = () => {
     base_sha: BASE_SHA, head_sha: HEAD_SHA, decision_raw_sha256: DIGEST_A,
     decision_semantic_sha256: DIGEST_C, allowed_merge_method: 'SQUASH', authority_role: 'MERGE-AUTHORIZER',
     authority_actor_id: 106, authority_revision: 'approval-authorities/r2', authority_sha256: DIGEST_B,
-    authority_receipt_id: 'merge-authority-receipt-0001', authority_receipt_core_sha256: DIGEST_C,
-    authority_receipt_raw_sha256: DIGEST_D, authorized_at: '2026-08-30T11:00:00.000Z',
+    authority_receipt_id: authorityReceiptArtifact.envelope.core.receipt_id,
+    authority_receipt_core_sha256: authorityReceiptArtifact.receiptCoreSha256,
+    authority_receipt_raw_sha256: authorityReceiptArtifact.receiptRawSha256,
+    authorized_at: '2026-08-30T11:00:00.000Z',
     expires_at: '2026-08-30T13:00:00.000Z', single_use_nonce: 'nonce-program-c-0001',
   };
   const consumption = {
@@ -248,20 +269,32 @@ const mergeEvidence = () => {
     consumed_at: '2026-08-30T11:20:00.000Z', nonce_ledger_key: `program-c-merge:${grant.single_use_nonce}`,
     nonce_ledger_reserved_revision: 17,
     independent_verifier: {
-      repository: clone(REPOSITORY), path: '.github/workflows/verify.yml', sha: WORKFLOW_SHA,
-      run_id: 3001, attempt: 1, identity: 'github-actions[bot]',
+      repository: { id: 99887766, full_name: 'mlhjyx/global-governance-verifier' },
+      path: '.github/workflows/verify-approval.yml', sha: '7'.repeat(40),
+      run_id: 92001, attempt: 1, identity: 'github-actions[bot]',
     },
     current_main: { ref: 'refs/heads/main', sha: RESULT_SHA, read_at: '2026-08-30T11:40:00.000Z' },
     pre_readback_sha256: DIGEST_B, post_readback_sha256: DIGEST_C,
   };
   return {
-    grant, grant_raw_sha256: DIGEST_A, consumption, consumption_raw_sha256: DIGEST_B, grant_revocations: [],
+    grant,
+    grant_raw_sha256: DIGEST_A,
+    consumption,
+    consumption_raw_sha256: DIGEST_B,
+    authority_receipt: authorityReceiptArtifact.envelope,
+    authority_receipt_raw_sha256: authorityReceiptArtifact.receiptRawSha256,
+    grant_revocations: [],
     ledger_snapshot: {
       schema_version: 'approval-nonce-ledger-snapshot/v1', durability_class: 'SHARED_DURABLE_CAS',
-      committed_revision: 19,
+      repository_id: REPOSITORY.id, committed_revision: 19,
       reservations: [{
         key: consumption.nonce_ledger_key, grant_id: grant.grant_id, grant_raw_sha256: DIGEST_A,
         single_use_nonce: grant.single_use_nonce, reserved_revision: 17, state: 'CONSUMED',
+        request_binding: {
+          repository_id: REPOSITORY.id, decision_adr: grant.decision_adr,
+          decision_revision: grant.decision_revision, policy_revision: grant.policy_revision,
+          stage: grant.stage, pr_number: grant.pr_number, head_sha: grant.head_sha,
+        },
       }],
     },
   };
@@ -302,6 +335,9 @@ test('FIX1 merge path starts with Task 1 closed schemas and enforces causality',
     ['merge-revocation-shape', (v) => { v.grant_revocations.push({ grant_id: 'other-grant-0001', extra: true }); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
     ['merge-ledger-shape', (v) => { v.ledger_snapshot.extra = true; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],
     ['merge-candidate-binding', (v) => { v.consumption.current_main.sha = BASE_SHA; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
+    ['merge-authority-receipt-binding', (v) => { v.grant.authority_receipt_id = 'other-authority-receipt-0001'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH'],
+    ['merge-verifier-binding', (v) => { v.consumption.independent_verifier.run_id = 92002; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
+    ['merge-verifier-subject-repo', (v) => { v.consumption.independent_verifier.repository = clone(REPOSITORY); }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
   ];
   for (const [name, mutate, code] of cases) mutation(name, () => {
     const value = mergeEvidence();
@@ -335,7 +371,9 @@ test('FIX2 receipt schema and renderer preserve deterministic machine evidence',
     const partial = clone(core);
     delete partial.machine_check_evidence;
     assert.throws(() => buildRawApprovalReceiptArtifact(partial));
-    expectIssue(validateApprovalReceipt(buildRawApprovalReceiptArtifact(core).envelope), 'APPROVAL_SCHEMA_REQUIRED');
+    const invalidEnvelope = clone(buildRawApprovalReceiptArtifact(core).envelope);
+    delete invalidEnvelope.core.machine_check_evidence;
+    expectIssue(validateApprovalReceipt(invalidEnvelope), 'APPROVAL_SCHEMA_REQUIRED');
   });
   mutation('machine-receipt-alias', () => {
     const core = buildApprovalReceiptCore(candidate(), authority(), verifier(), null, NOW);

@@ -33,7 +33,8 @@
     "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "instant": { "type": "string", "format": "iso-instant" },
-    "verifier": { "type": "object", "additionalProperties": false, "required": ["repository", "path", "sha", "run_id", "attempt", "identity"], "properties": { "repository": { "$ref": "#/$defs/repository" }, "path": { "type": "string", "pattern": "^\\.github/workflows/[a-zA-Z0-9._-]+\\.ya?ml$" }, "sha": { "$ref": "#/$defs/gitSha" }, "run_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "attempt": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "identity": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "verifier": { "type": "object", "additionalProperties": false, "required": ["repository", "path", "sha", "run_id", "attempt", "identity"], "properties": { "repository": { "$ref": "#/$defs/verifierRepository" }, "path": { "type": "string", "pattern": "^\\.github/workflows/[a-zA-Z0-9._-]+\\.ya?ml$" }, "sha": { "$ref": "#/$defs/gitSha" }, "run_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "attempt": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "identity": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "verifierRepository": { "type": "object", "additionalProperties": false, "required": ["id", "full_name"], "properties": { "id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "full_name": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "maxLength": 256 } }, "not": { "properties": { "id": { "const": 1291151138 } }, "required": ["id"] } },
     "currentMain": { "type": "object", "additionalProperties": false, "required": ["ref", "sha", "read_at"], "properties": { "ref": { "const": "refs/heads/main" }, "sha": { "$ref": "#/$defs/gitSha" }, "read_at": { "$ref": "#/$defs/instant" } } }
   }
 }

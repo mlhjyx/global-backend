@@ -84,6 +84,22 @@ const receipt = () => {
     head_sha: 'b'.repeat(40),
     approved_at: INSTANT,
     trust_class: 'TRUSTED_BASE_VERIFIED',
+    machine_check_evidence: [{
+      github_app_id: 15368,
+      github_app_slug: 'github-actions',
+      check_run_id: 81001,
+      check_suite_id: 71001,
+      context: 'approval/readback',
+      workflow_id: 61001,
+      workflow_path: '.github/workflows/approval-readback.yml',
+      trusted_base_workflow_blob_sha: 'c'.repeat(40),
+      actions_run_id: 51001,
+      actions_run_attempt: 1,
+      actions_run_event: 'pull_request_target',
+      actions_run_head_sha: 'b'.repeat(40),
+      actions_run_conclusion: 'success',
+      reusable_signer: null,
+    }],
   };
   return {
     schema_version: 'product-privacy-approval-readback-receipt/v1',
@@ -190,7 +206,7 @@ const consumption = () => ({
   nonce_ledger_key: 'program-c-merge:nonce-program-c-0001',
   nonce_ledger_reserved_revision: 1,
   independent_verifier: {
-    repository: clone(REPOSITORY),
+    repository: { id: 99887766, full_name: 'mlhjyx/global-governance-verifier' },
     path: '.github/workflows/verify.yml',
     sha: 'd'.repeat(40),
     run_id: 99,
@@ -358,6 +374,7 @@ test('program c consumption is an append-only independent fact that cannot chang
     (value) => { value.nonce_ledger_reserved_revision = Number.MAX_SAFE_INTEGER + 1; },
     (value) => { delete value.current_main; },
     (value) => { delete value.pre_readback_sha256; },
+    (value) => { value.independent_verifier.repository = clone(REPOSITORY); },
     (value) => { value.grant = { ...grant(), status: 'CONSUMED' }; },
     (value) => { value.schema_version = 'program-c-merge-authorization/v1'; },
   ]) {

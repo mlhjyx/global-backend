@@ -11,6 +11,7 @@ import {
   validateReceiptRevocation,
   validateReceiptSupersession,
 } from './governance-approval-readback.mjs';
+import { buildApprovalReceiptArtifact as buildRawApprovalReceiptArtifact } from './governance-approval-safe-json.mjs';
 
 const DIGEST_A = `sha256:${'a'.repeat(64)}`;
 const DIGEST_B = `sha256:${'b'.repeat(64)}`;
@@ -93,6 +94,19 @@ const review = (role, id, actorValue) => ({
   independently_read_at: '2026-08-30T11:00:00.000Z',
   actor: clone(actorValue),
   command: parsedCommand(role),
+  dismissed: false,
+  superseded: false,
+  later_changes_requested: false,
+});
+
+const codeownerReview = () => ({
+  evidence_kind: 'CODEOWNER_REPOSITORY_REVIEW',
+  review_id: 2005,
+  review_state: 'APPROVED',
+  review_commit_id: HEAD_SHA,
+  submitted_at: '2026-08-30T10:00:00.000Z',
+  independently_read_at: '2026-08-30T11:00:00.000Z',
+  actor: actor(107, 'codeowner-reviewer'),
   dismissed: false,
   superseded: false,
   later_changes_requested: false,
@@ -218,6 +232,7 @@ const verifier = () => ({
   event: 'workflow_call',
   runner_environment: 'github-hosted',
   api_version: '2022-11-28',
+  identity: 'github-actions[bot]',
   read_at: '2026-08-30T11:30:00.000Z',
 });
 
@@ -258,7 +273,7 @@ const candidate = () => {
     product_review: review('OWN-PRODUCT', 2001, actor(101, 'product-owner')),
     privacy_review: review('OWN-DATA-PRIVACY', 2002, actor(102, 'privacy-owner')),
     qa_review: review('OWN-QA-EVIDENCE', 2003, actor(103, 'qa-owner')),
-    codeowner_review: review('OWN-QA-EVIDENCE', 2005, actor(107, 'codeowner-reviewer')),
+    codeowner_review: codeownerReview(),
     security_review: securityEvidence(),
     legal_input: legalInput(),
     review_pagination_complete: true,
@@ -298,6 +313,24 @@ const dualRoleCandidate = () => {
 };
 
 const mergeEvidence = () => {
+  const authorityReceiptArtifact = buildRawApprovalReceiptArtifact({
+    receipt_id: 'merge-authority-receipt-0001',
+    repository: clone(REPOSITORY),
+    authority_revision: 'approval-authorities/r2',
+    authority_sha256: DIGEST_B,
+    role: 'MERGE-AUTHORIZER',
+    actor_id: 106,
+    actor_login: 'merge-authorizer',
+    decision_adr: 'ADR-042',
+    decision_revision: 'program-c/decision-r2',
+    policy_revision: 'program-c/policy-r2',
+    pr_number: 427,
+    base_sha: BASE_SHA,
+    head_sha: HEAD_SHA,
+    approved_at: '2026-08-30T10:30:00.000Z',
+    trust_class: 'TRUSTED_BASE_VERIFIED',
+    machine_check_evidence: [machineCheck()],
+  });
   const grant = {
     schema_version: 'program-c-merge-authorization-grant/v1',
     grant_id: 'program-c-grant-0001',
@@ -316,9 +349,9 @@ const mergeEvidence = () => {
     authority_actor_id: 106,
     authority_revision: 'approval-authorities/r2',
     authority_sha256: DIGEST_B,
-    authority_receipt_id: 'merge-authority-receipt-0001',
-    authority_receipt_core_sha256: DIGEST_C,
-    authority_receipt_raw_sha256: DIGEST_D,
+    authority_receipt_id: authorityReceiptArtifact.envelope.core.receipt_id,
+    authority_receipt_core_sha256: authorityReceiptArtifact.receiptCoreSha256,
+    authority_receipt_raw_sha256: authorityReceiptArtifact.receiptRawSha256,
     authorized_at: '2026-08-30T11:00:00.000Z',
     expires_at: '2026-08-30T13:00:00.000Z',
     single_use_nonce: 'nonce-program-c-0001',
@@ -342,10 +375,10 @@ const mergeEvidence = () => {
     nonce_ledger_key: `program-c-merge:${grant.single_use_nonce}`,
     nonce_ledger_reserved_revision: 17,
     independent_verifier: {
-      repository: clone(REPOSITORY),
-      path: '.github/workflows/verify.yml',
-      sha: WORKFLOW_SHA,
-      run_id: 3001,
+      repository: { id: 99887766, full_name: 'mlhjyx/global-governance-verifier' },
+      path: '.github/workflows/verify-approval.yml',
+      sha: '7'.repeat(40),
+      run_id: 92001,
       attempt: 1,
       identity: 'github-actions[bot]',
     },
@@ -358,10 +391,13 @@ const mergeEvidence = () => {
     grant_raw_sha256: DIGEST_A,
     consumption,
     consumption_raw_sha256: DIGEST_B,
+    authority_receipt: authorityReceiptArtifact.envelope,
+    authority_receipt_raw_sha256: authorityReceiptArtifact.receiptRawSha256,
     grant_revocations: [],
     ledger_snapshot: {
       schema_version: 'approval-nonce-ledger-snapshot/v1',
       durability_class: 'SHARED_DURABLE_CAS',
+      repository_id: REPOSITORY.id,
       committed_revision: 19,
       reservations: [{
         key: consumption.nonce_ledger_key,
@@ -370,6 +406,15 @@ const mergeEvidence = () => {
         single_use_nonce: grant.single_use_nonce,
         reserved_revision: 17,
         state: 'CONSUMED',
+        request_binding: {
+          repository_id: REPOSITORY.id,
+          decision_adr: grant.decision_adr,
+          decision_revision: grant.decision_revision,
+          policy_revision: grant.policy_revision,
+          stage: grant.stage,
+          pr_number: grant.pr_number,
+          head_sha: grant.head_sha,
+        },
       }],
     },
   };
@@ -377,7 +422,10 @@ const mergeEvidence = () => {
 
 const expectIssue = (result, stableCode) => {
   assert.equal(result.valid, false);
-  assert.ok(result.issues.some(({ stable_code: code }) => code === stableCode), stableCode);
+  assert.ok(
+    result.issues.some(({ stable_code: code }) => code === stableCode),
+    `${stableCode}: ${JSON.stringify(result)}`,
+  );
   assert.ok(Object.isFrozen(result));
   assert.ok(Object.isFrozen(result.issues));
   assert.ok(result.issues.every(({ stable_code: code }) => code.startsWith('APPROVAL_')));
@@ -521,7 +569,11 @@ test('OWN-SECURITY remains a closed exact-head independent human evidence slot',
 });
 
 test('merge grant, separate consumption, and durable ledger evidence fail closed', () => {
-  const validate = (value) => validateMergeAuthorizationGrantForCandidate(value, candidate(), authority(), NOW);
+  const validate = (value) => {
+    const candidateValue = candidate();
+    candidateValue.receipt_subject.phase = 'POST_MERGE';
+    return validateMergeAuthorizationGrantForCandidate(value, candidateValue, authority(), NOW);
+  };
   assert.deepEqual(validate(mergeEvidence()), { valid: true, issues: [] });
   const cases = [
     ['grant-missing-authority', (v) => { v.grant.authority_role = 'OWN-PRODUCT'; }, 'APPROVAL_MERGE_AUTHORIZER_UNASSIGNED'],
@@ -557,7 +609,9 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
   assert.ok(Object.isFrozen(artifact));
 
   const mergeValue = mergeEvidence();
-  const mergeCore = buildApprovalReceiptCore(value, authority(), verifier(), mergeValue, NOW);
+  const mergeCandidate = candidate();
+  mergeCandidate.receipt_subject.phase = 'POST_MERGE';
+  const mergeCore = buildApprovalReceiptCore(mergeCandidate, authority(), verifier(), mergeValue, NOW);
   assert.deepEqual(mergeCore.merge_authorization_evidence, {
     stage: 'PROPOSAL_MERGE',
     grant_id: 'program-c-grant-0001',
@@ -574,7 +628,7 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
   const mutatedGrant = mergeEvidence();
   mutatedGrant.grant.status = 'CONSUMED';
   assert.throws(
-    () => buildApprovalReceiptCore(value, authority(), verifier(), mutatedGrant, NOW),
+    () => buildApprovalReceiptCore(mergeCandidate, authority(), verifier(), mutatedGrant, NOW),
     (error) => error.message === 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH',
   );
 });
@@ -607,7 +661,6 @@ test('revocation and supersession validation returns append-only bound state fac
 
   const successorCandidate = candidate();
   successorCandidate.receipt_subject.receipt_id = 'approval-receipt-0004';
-  successorCandidate.receipt_subject.phase = 'POST_MERGE';
   const successorArtifact = buildApprovalReceiptArtifact(
     buildApprovalReceiptCore(successorCandidate, authority(), verifier(), null, NOW),
   );
@@ -632,7 +685,13 @@ test('revocation and supersession validation returns append-only bound state fac
     effective_at: NOW,
     predecessor_chain: [core.receipt_id],
   };
-  const superseded = validateReceiptSupersession(supersession, [receipt, successor], authority(), NOW);
+  const lifecycleSnapshot = {
+    schema_version: 'approval-receipt-lifecycle-snapshot/v1',
+    receipts: [receipt, successor],
+    revocations: [],
+    supersessions: [],
+  };
+  const superseded = validateReceiptSupersession(supersession, lifecycleSnapshot, authority(), NOW);
   assert.equal(superseded.valid, true);
   assert.deepEqual(superseded.facts, {
     state: 'SUPERSEDED',
@@ -645,7 +704,7 @@ test('revocation and supersession validation returns append-only bound state fac
     'supersession-cycle',
     () => supersession,
     (v) => { v.predecessor_chain.push(v.successor.receipt_id); },
-    (v) => validateReceiptSupersession(v, [receipt, successor], authority(), NOW),
+    (v) => validateReceiptSupersession(v, lifecycleSnapshot, authority(), NOW),
     'APPROVAL_RECEIPT_REPLAYED',
   );
   runMutation(

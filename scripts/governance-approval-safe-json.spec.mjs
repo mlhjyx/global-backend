@@ -20,6 +20,23 @@ const MAX_BYTES = 1_048_576;
 
 const digest = (character) => `sha256:${character.repeat(64)}`;
 
+const machineCheckEvidence = () => [{
+  github_app_id: 15368,
+  github_app_slug: 'github-actions',
+  check_run_id: 81001,
+  check_suite_id: 71001,
+  context: 'approval/readback',
+  workflow_id: 61001,
+  workflow_path: '.github/workflows/approval-readback.yml',
+  trusted_base_workflow_blob_sha: 'd'.repeat(40),
+  actions_run_id: 51001,
+  actions_run_attempt: 1,
+  actions_run_event: 'pull_request_target',
+  actions_run_head_sha: 'c'.repeat(40),
+  actions_run_conclusion: 'success',
+  reusable_signer: null,
+}];
+
 const approvalCore = (overrides = {}) => ({
   receipt_id: 'approval-receipt-0001',
   repository: { id: 1291151138, full_name: 'mlhjyx/global-backend' },
@@ -36,6 +53,7 @@ const approvalCore = (overrides = {}) => ({
   head_sha: 'c'.repeat(40),
   approved_at: '2026-08-30T12:34:56.789Z',
   trust_class: 'TRUSTED_BASE_VERIFIED',
+  machine_check_evidence: machineCheckEvidence(),
   ...overrides,
 });
 

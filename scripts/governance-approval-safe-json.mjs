@@ -4,6 +4,11 @@ import { open } from 'node:fs/promises';
 import { scheduler } from 'node:timers/promises';
 import { TextDecoder } from 'node:util';
 
+import {
+  isMachineEvidenceItem,
+  normalizeMachineCheckEvidence,
+} from './governance-approval-machine-policy.mjs';
+
 const MAX_BYTES = 1_048_576;
 const MAX_NESTING = 128;
 const RECEIPT_SCHEMA_VERSION = 'product-privacy-approval-readback-receipt/v1';
@@ -28,6 +33,7 @@ const CORE_KEYS = Object.freeze([
   'head_sha',
   'approved_at',
   'trust_class',
+  'machine_check_evidence',
 ]);
 const MERGE_AUTHORIZATION_EVIDENCE_KEYS = Object.freeze([
   'stage',
@@ -273,6 +279,17 @@ const normalizeApprovalReceiptCore = (core) => {
   requireString(core.head_sha, GIT_SHA_PATTERN, 'CORE_PROPERTY');
   requireCanonicalInstant(core.approved_at);
   requireCondition(core.trust_class === 'TRUSTED_BASE_VERIFIED', 'CORE_PROPERTY');
+  requireCondition(
+    Array.isArray(core.machine_check_evidence)
+    && core.machine_check_evidence.length >= 1
+    && core.machine_check_evidence.length <= 16
+    && core.machine_check_evidence.every(isMachineEvidenceItem),
+    'CORE_PROPERTY',
+  );
+  const machineIds = core.machine_check_evidence.flatMap((check) => [check.check_run_id, check.check_suite_id]);
+  const machineContexts = core.machine_check_evidence.map((check) => check.context);
+  requireCondition(new Set(machineIds).size === machineIds.length, 'CORE_PROPERTY');
+  requireCondition(new Set(machineContexts).size === machineContexts.length, 'CORE_PROPERTY');
 
   const normalized = {
     receipt_id: core.receipt_id,
@@ -290,6 +307,7 @@ const normalizeApprovalReceiptCore = (core) => {
     head_sha: core.head_sha,
     approved_at: core.approved_at,
     trust_class: core.trust_class,
+    machine_check_evidence: normalizeMachineCheckEvidence(core.machine_check_evidence),
   };
   if (Object.hasOwn(core, 'merge_authorization_evidence')) {
     const evidence = core.merge_authorization_evidence;
