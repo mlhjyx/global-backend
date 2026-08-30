@@ -59,8 +59,11 @@ function receipt(
       ? 'discovery-extract-company/v1' : 'searxng-search/v1',
     resultDigest: operationId.replaceAll('-', '').padEnd(64, 'a').slice(0, 64),
     artifactId: null,
-    usage: Object.freeze({ currency: 'USD', unit: 'microusd', callCount: 1 }),
-    costBasis: 'token_pricing',
+    usage: Object.freeze({
+      currency: 'USD', unit: 'microusd', callCount: 1,
+      upperBoundMicrousd: '0',
+    }),
+    costBasis: 'estimated_upper_bound',
     status: 'SETTLED',
   });
 }
@@ -254,6 +257,32 @@ describe('exact Domain ACK materialization facts', () => {
         ...base, companyAcknowledgements,
       })).rejects.toThrow();
       expect(queryRaw).not.toHaveBeenCalled();
+    }
+  });
+
+  it('validates every raw identity and execution binding before the first SQL call', async () => {
+    const module = await load();
+    const valid = acknowledgement('discovery.extract_company', OPS.a);
+    const second = acknowledgement('discovery.extract_company', OPS.c);
+    for (const invalid of [
+      { ...second, domainAckKey: 'token' },
+      { ...second, domainRevision: 'bad\0revision' },
+      { ...second, domainAckKey: 'decomposed-e\u0301' },
+      { ...second, receipt: { ...second.receipt, scopeKey: 'workspace-2' } },
+      { ...second, receipt: { ...second.receipt, accountId: OPS.b } },
+      { ...second, receipt: { ...second.receipt, authorityId: OPS.b } },
+    ]) {
+      const queryRaw = vi.fn();
+      const apply = vi.fn();
+      const readback = vi.fn();
+      await expect(module.applyPartitionedDomainAckConsumerTransactions({
+        transaction: { $queryRaw: queryRaw },
+        companyAcknowledgements: [valid, invalid],
+        auxiliaryAcknowledgements: [], apply, readback,
+      })).rejects.toThrow();
+      expect(queryRaw).not.toHaveBeenCalled();
+      expect(apply).not.toHaveBeenCalled();
+      expect(readback).not.toHaveBeenCalled();
     }
   });
 

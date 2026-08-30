@@ -1,9 +1,16 @@
-import type { DurableExecutionReceipt } from './durable-execution-receipt';
+import { createHash } from 'node:crypto';
+import { types } from 'node:util';
+import {
+  parseDurableExecutionReceipt,
+  type DurableExecutionReceipt,
+} from './durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   DomainAckService,
   PostgresDomainAckRepository,
+  validateDomainAckRawIdentity,
   type DomainAckApplyResult,
+  type DomainAckRecord,
   type DomainAckTransaction,
 } from './domain-ack';
 
@@ -85,6 +92,115 @@ export type DomainAckConsumerBatchResult<TValue> = Readonly<{
   acknowledgements: readonly DomainAckBatchItemState[];
   value: TValue;
 }>;
+
+export type DomainAckMaterializationFact = Readonly<{
+  producerId: string;
+  operationId: string;
+  status: 'APPLIED' | 'REPLAYED';
+  ack: DomainAckRecord;
+}>;
+
+type PartitionedAcknowledgement = Readonly<{
+  producerId: string;
+  receipt: DurableExecutionReceipt;
+  domainAckKey: string;
+  domainRevision: string;
+}>;
+
+const PARTITION_INPUT_KEYS = Object.freeze([
+  'transaction', 'companyAcknowledgements', 'auxiliaryAcknowledgements',
+  'apply', 'readback',
+] as const);
+const ACKNOWLEDGEMENT_KEYS = Object.freeze([
+  'producerId', 'receipt', 'domainAckKey', 'domainRevision',
+] as const);
+
+function invalidPartitionedInput(): never {
+  throw new ExecutionControlError('DOMAIN_ACK_PARTITIONED_INPUT_INVALID');
+}
+
+function dataRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || types.isProxy(value)) {
+      invalidPartitionedInput();
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) invalidPartitionedInput();
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const ownKeys = Reflect.ownKeys(value);
+    if (
+      ownKeys.length !== keys.length ||
+      ownKeys.some((key) => typeof key !== 'string' || !keys.includes(key)) ||
+      keys.some((key) => {
+        const descriptor = descriptors[key];
+        return descriptor?.enumerable !== true || !Object.hasOwn(descriptor, 'value');
+      })
+    ) invalidPartitionedInput();
+    return value as Record<string, unknown>;
+  } catch (error) {
+    if (
+      error instanceof ExecutionControlError &&
+      error.code === 'DOMAIN_ACK_PARTITIONED_INPUT_INVALID'
+    ) throw error;
+    return invalidPartitionedInput();
+  }
+}
+
+function recordValue(record: Record<string, unknown>, key: string): unknown {
+  return Object.getOwnPropertyDescriptor(record, key)?.value;
+}
+
+function denseArray(value: unknown, maximum: number): readonly unknown[] {
+  try {
+    if (!Array.isArray(value) || types.isProxy(value)) invalidPartitionedInput();
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const length = Object.getOwnPropertyDescriptor(value, 'length')?.value;
+    if (!Number.isSafeInteger(length) || length < 0 || length > maximum) {
+      invalidPartitionedInput();
+    }
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== length + 1) invalidPartitionedInput();
+    return Object.freeze(Array.from({ length }, (_, index) => {
+      const descriptor = descriptors[String(index)];
+      if (descriptor?.enumerable !== true || !Object.hasOwn(descriptor, 'value')) {
+        invalidPartitionedInput();
+      }
+      return descriptor.value;
+    }));
+  } catch (error) {
+    if (
+      error instanceof ExecutionControlError &&
+      error.code === 'DOMAIN_ACK_PARTITIONED_INPUT_INVALID'
+    ) throw error;
+    return invalidPartitionedInput();
+  }
+}
+
+function acknowledgementSnapshot(value: unknown): PartitionedAcknowledgement {
+  const record = dataRecord(value, ACKNOWLEDGEMENT_KEYS);
+  const producerId = recordValue(record, 'producerId');
+  const domainAckKey = recordValue(record, 'domainAckKey');
+  const domainRevision = recordValue(record, 'domainRevision');
+  if (
+    typeof producerId !== 'string' || producerId.length < 1 || producerId.length > 128 ||
+    typeof domainAckKey !== 'string' || typeof domainRevision !== 'string'
+  ) invalidPartitionedInput();
+  const validDomainAckKey = validateDomainAckRawIdentity(domainAckKey);
+  const validDomainRevision = validateDomainAckRawIdentity(domainRevision);
+  const receipt = parseDurableExecutionReceipt(recordValue(record, 'receipt'));
+  const binding = getDomainAckProductConsumerBinding(producerId);
+  assertReceiptBinding(binding, receipt);
+  return Object.freeze({
+    producerId,
+    receipt,
+    domainAckKey: validDomainAckKey,
+    domainRevision: validDomainRevision,
+  });
+}
+
+function partitionSnapshot(value: unknown): readonly PartitionedAcknowledgement[] {
+  return Object.freeze(denseArray(value, 640).map(acknowledgementSnapshot));
+}
 
 function assertReceiptBinding(
   binding: DomainAckProductConsumerBinding,
@@ -208,4 +324,81 @@ export async function applyDomainAckConsumerTransactions<
     value,
   });
 }
-import { createHash } from 'node:crypto';
+
+export async function applyPartitionedDomainAckConsumerTransactions<
+  TTransaction extends DomainAckTransaction,
+  TValue,
+>(value: unknown): Promise<Readonly<{
+  status: 'APPLIED' | 'REPLAYED';
+  companyFacts: readonly DomainAckMaterializationFact[];
+  auxiliaryFacts: readonly DomainAckMaterializationFact[];
+  value: TValue;
+}>> {
+  const input = dataRecord(value, PARTITION_INPUT_KEYS);
+  const transaction = recordValue(input, 'transaction') as TTransaction;
+  const apply = recordValue(input, 'apply');
+  const readback = recordValue(input, 'readback');
+  if (
+    !transaction || typeof transaction !== 'object' ||
+    typeof apply !== 'function' || typeof readback !== 'function'
+  ) invalidPartitionedInput();
+  const company = partitionSnapshot(recordValue(input, 'companyAcknowledgements'));
+  const auxiliary = partitionSnapshot(recordValue(input, 'auxiliaryAcknowledgements'));
+  const tagged = [
+    ...company.map((acknowledgement) => Object.freeze({
+      partition: 'company' as const, acknowledgement,
+    })),
+    ...auxiliary.map((acknowledgement) => Object.freeze({
+      partition: 'auxiliary' as const, acknowledgement,
+    })),
+  ].sort((left, right) =>
+    left.acknowledgement.receipt.operationId.localeCompare(
+      right.acknowledgement.receipt.operationId,
+    ));
+  const operationIds = tagged.map((item) => item.acknowledgement.receipt.operationId);
+  if (new Set(operationIds).size !== operationIds.length) invalidPartitionedInput();
+  const firstReceipt = tagged[0]?.acknowledgement.receipt;
+  if (firstReceipt && tagged.some(({ acknowledgement }) =>
+    acknowledgement.receipt.scopeKey !== firstReceipt.scopeKey ||
+    acknowledgement.receipt.authorityId !== firstReceipt.authorityId ||
+    acknowledgement.receipt.accountId !== firstReceipt.accountId)) {
+    invalidPartitionedInput();
+  }
+
+  const companyFacts: DomainAckMaterializationFact[] = [];
+  const auxiliaryFacts: DomainAckMaterializationFact[] = [];
+  for (const item of tagged) {
+    const result = await applyDomainAckConsumerTransaction({
+      transaction,
+      ...item.acknowledgement,
+      apply: async () => undefined,
+    });
+    if (result.status === 'UNRECEIPTED') invalidPartitionedInput();
+    const fact = Object.freeze({
+      producerId: item.acknowledgement.producerId,
+      operationId: item.acknowledgement.receipt.operationId,
+      status: result.status,
+      ack: result.ack,
+    });
+    (item.partition === 'company' ? companyFacts : auxiliaryFacts).push(fact);
+  }
+  const frozenCompany = Object.freeze(companyFacts);
+  const frozenAuxiliary = Object.freeze(auxiliaryFacts);
+  const companyStatuses = new Set(frozenCompany.map((fact) => fact.status));
+  if (companyStatuses.size > 1) {
+    throw new ExecutionControlError('DOMAIN_ACK_MIXED_REPLAY_STATE');
+  }
+  const status = frozenCompany[0]?.status ?? 'APPLIED';
+  const callback = status === 'APPLIED' ? apply : readback;
+  const resultValue = await (callback as (
+    tx: TTransaction,
+    companyFacts: readonly DomainAckMaterializationFact[],
+    auxiliaryFacts: readonly DomainAckMaterializationFact[],
+  ) => Promise<TValue>)(transaction, frozenCompany, frozenAuxiliary);
+  return Object.freeze({
+    status,
+    companyFacts: frozenCompany,
+    auxiliaryFacts: frozenAuxiliary,
+    value: resultValue,
+  });
+}
