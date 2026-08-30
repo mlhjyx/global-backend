@@ -184,18 +184,19 @@ function seedOtherPersonalParent() {
     VALUES ('${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP2}',1,'${ack.ackId}','${otherRoot}',
       '${otherRoot}','${child}','roundb:other-parent','DERIVED_FROM','source_record',
       ${deterministicUuid("roundb-other-src","1")},'${CONTRACT}');`);
-  return { child, dsr };
+  return { child, dsr, ackId:ack.ackId, resultDigest:ack.resultDigest, operationId:OP2 };
 }
 
 function invocation(fn, override = {}) {
   const input = { parentId: null, childId: "53000000-0000-4000-8000-000000000001",
     relationKey: "roundb:final", childDataClass:"NON_PERSONAL",
-    childDsrSubjectType:null,childDsrSubjectId:null,...override };
+    childDsrSubjectType:null,childDsrSubjectId:null,operationId:OP,
+    ackId:facts.ackId,resultDigest:facts.resultDigest,...override };
   const uuid = (value) => value === null ? "NULL::uuid" : `'${value}'::uuid`;
   const text = (value,type) => value === null ? `NULL::${type}` : `'${value}'::${type}`;
   return `SELECT * FROM public.${fn}('${WS}'::uuid,'${AUTH}'::uuid,'${ACCOUNT}'::uuid,
-    '${OP}'::uuid,1,'${facts.ackId}'::char(64),'${facts.resultDigest}'::char(64),
-    'tool_operation'::varchar(191),'${OP}'::uuid,'NON_PERSONAL'::varchar(16),
+    '${input.operationId}'::uuid,1,'${input.ackId}'::char(64),'${input.resultDigest}'::char(64),
+    'tool_operation'::varchar(191),'${input.operationId}'::uuid,'NON_PERSONAL'::varchar(16),
     NULL::varchar(191),NULL::uuid,${uuid(input.parentId)},'materialized_record'::varchar(191),
     '${input.childId}'::uuid,${text(input.childDataClass,"varchar(16)")},
     ${text(input.childDsrSubjectType,"varchar(191)")},${uuid(input.childDsrSubjectId)},
@@ -348,6 +349,37 @@ describe("governed relation exact path lock ordering", () => {
         tombstone_workspace_governed_subject_v1('${WS}','${subjectB}','${GUARD_REQUEST}');`)}`);
       await observeWait(pid,tombName,tomb); tx.write(`${invocation(APPEND,inputB)} COMMIT;\n`); tx.end();
       const txResult=await tx.done, tombResult=await tomb.done;
+      assert.notEqual(txResult.status,0); assert.match(txResult.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+      assert.doesNotMatch(`${txResult.stderr}${tombResult.stderr}`,/40P01|deadlock detected/i);
+      assert.equal(tombResult.status,0,tombResult.stderr);
+    } finally { await Promise.all([cleanup(tx,holderName),cleanup(tomb,tombName)]); }
+  });
+
+  it("retains the graph guard independently across opA opB opA", async () => {
+    const other=seedOtherPersonalParent(), dsrA="73000000-0000-4000-8000-000000000091";
+    const inputB={childId:"53000000-0000-4000-8000-000000000092",childDataClass:"PERSONAL",
+      childDsrSubjectType:"company",childDsrSubjectId:"73000000-0000-4000-8000-000000000092",
+      relationKey:"guard:multi-b"}; psql(asApp(invocation(APPEND,inputB)));
+    const subjectB=psql(`SELECT child_subject_id::text FROM governed_subject_relation
+      WHERE relation_key='guard:multi-b';`);
+    psql(`INSERT INTO deletion_request(id,workspace_id,subject_type,subject_id,status,
+      requested_by,reason,created_at,updated_at) VALUES ('${GUARD_REQUEST}','${WS}','company',
+      '${inputB.childDsrSubjectId}','RECEIVED','guard-multi','erasure',now(),now());`);
+    const holderName="guard_multi_holder", tombName="guard_multi_tombstone";
+    const tx=startConnection(`SET application_name='${holderName}';SET SESSION AUTHORIZATION app_user;
+      BEGIN;SELECT set_config('app.current_workspace_id','${WS}',true);
+      ${invocation(APPEND,{childId:"53000000-0000-4000-8000-000000000091",
+        childDataClass:"PERSONAL",childDsrSubjectType:"company",childDsrSubjectId:dsrA,
+        relationKey:"guard:multi-a"})}
+      ${invocation(APPEND,{operationId:other.operationId,ackId:other.ackId,
+        resultDigest:other.resultDigest,childId:"53000000-0000-4000-8000-000000000093",
+        relationKey:"guard:multi-op-b"})} SELECT pg_backend_pid()::text||'|READY';\n`,true);
+    let tomb; try {
+      const ready=await tx.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      tomb=startConnection(`SET application_name='${tombName}';${asApp(`SELECT outcome FROM
+        tombstone_workspace_governed_subject_v1('${WS}','${subjectB}','${GUARD_REQUEST}');`)}`);
+      await observeWait(pid,tombName,tomb); tx.write(`${invocation(APPEND,inputB)} COMMIT;\n`); tx.end();
+      const txResult=await tx.done,tombResult=await tomb.done;
       assert.notEqual(txResult.status,0); assert.match(txResult.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
       assert.doesNotMatch(`${txResult.stderr}${tombResult.stderr}`,/40P01|deadlock detected/i);
       assert.equal(tombResult.status,0,tombResult.stderr);
