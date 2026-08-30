@@ -143,6 +143,48 @@ test('I2 dispatch rechecks the immutable grant interval at the canonical dispatc
   assert.equal(physicalCalls, 0);
 });
 
+test('round2 I2 backdated dispatch cannot append a guard or consume fresh authority unsafely', async () => {
+  const grant = await readJson('valid-grant.json');
+  const ledger = new Ledger();
+  const fresh = await reserve(ledger, grant);
+  let physicalCalls = 0;
+  const requester = {
+    requestMerge: async () => { physicalCalls += 1; return { acknowledgement: 'ACKNOWLEDGED' }; },
+  };
+  const backdated = await executeReservedMerge(
+    fresh.reservation,
+    requester,
+    ledger,
+    new Date('2026-08-30T08:05:00.000Z'),
+  );
+  const afterBackdated = ledger.snapshot()[0];
+  const validRetry = await executeReservedMerge(
+    fresh.reservation,
+    requester,
+    ledger,
+    new Date('2026-08-30T08:11:00.000Z'),
+  );
+  const replay = await executeReservedMerge(
+    fresh.reservation,
+    requester,
+    ledger,
+    new Date('2026-08-30T08:12:00.000Z'),
+  );
+  assert.deepEqual({
+    backdated: backdated.outcome,
+    afterBackdatedEvents: afterBackdated.events.map(({ type }) => type),
+    validRetry: validRetry.outcome,
+    replay: replay.outcome,
+    physicalCalls,
+  }, {
+    backdated: 'HOLD',
+    afterBackdatedEvents: ['NONCE_RESERVED'],
+    validRetry: 'ACKNOWLEDGED',
+    replay: 'HOLD',
+    physicalCalls: 1,
+  });
+});
+
 test('I1 reconciliation accepts a merge result reachable from a later current-main descendant', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
