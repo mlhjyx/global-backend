@@ -293,14 +293,17 @@ export class IntentProjectionService {
   ): Promise<{ url: string; kind: PageKind }[]> {
     if (!this.deps.broker) return discoverWatchPages(domain);
     if (!opts?.budgetKey) throw new Error('registerWatch requires budgetKey before sitemap discovery');
-    const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
-    const budgets = this.deps.budgetStore
-      ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
     if (!opts.executionBudget) {
       throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_REQUIRED');
     }
+    const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
+    if (budgetWorkspaceId !== workspaceId) {
+      throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_INVALID');
+    }
+    const budgets = this.deps.budgetStore
+      ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
     const binding = parseExecutionBudgetBinding(opts.executionBudget, {
-      scopeKey: budgetWorkspaceId,
+      scopeKey: workspaceId,
       purpose: 'discovery.run',
       subjectType: 'discovery_run',
     });
