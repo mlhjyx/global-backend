@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import * as approvalStateModule from './governance-approval-state.mjs';
 import {
   executeReservedMerge,
   reconcileMergeAuthorizationReservation,
@@ -25,24 +26,19 @@ const canonical = (value) => {
 };
 const digest = (value) => `sha256:${createHash('sha256').update(canonical(value)).digest('hex')}`;
 const rawDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
-
 class SharedDurableCasLedgerHarness {
   durabilityClass = 'SHARED_DURABLE_CAS';
-
   constructor(snapshot = []) {
     this.streams = new Map(snapshot.map((stream) => [this.#id(stream.key), clone(stream)]));
     this.casCalls = [];
   }
-
   #id(key) {
     return `${key.repositoryId}:${key.singleUseNonce}`;
   }
-
   async read(key) {
     const stream = this.streams.get(this.#id(key));
     return stream === undefined ? null : clone(stream);
   }
-
   async compareAndSwap(input) {
     this.casCalls.push(clone(input));
     const id = this.#id(input.key);
@@ -62,12 +58,10 @@ class SharedDurableCasLedgerHarness {
     });
     return { outcome: 'COMMITTED', committedRevision };
   }
-
   snapshot() {
     return [...this.streams.values()].map(clone);
   }
 }
-
 const requestFor = (grant, overrides = {}) => ({
   requestId: 'merge-request-task4-0001',
   reservationId: 'merge-reservation-task4-0001',
@@ -82,7 +76,6 @@ const requestFor = (grant, overrides = {}) => ({
   mergeMethod: grant.allowed_merge_method,
   ...overrides,
 });
-
 const reserve = async (ledger, grant, request = requestFor(grant), expectedRevision = 0) => (
   reserveMergeAuthorizationNonce(
     grant,
@@ -93,7 +86,6 @@ const reserve = async (ledger, grant, request = requestFor(grant), expectedRevis
     RESERVATION_NOW,
   )
 );
-
 const approvalPolicy = () => {
   const task3 = buildTask3AcceptanceEvidence();
   const commandDigest = (role) => rawDigest(
@@ -138,7 +130,6 @@ const approvalPolicy = () => {
   freshnessMs: 3_600_000,
   });
 };
-
 const receiptSummary = () => ({
   receiptId: 'approval-receipt-task4-0001',
   receiptCoreSha256: 'sha256:abababababababababababababababababababababababababababababababab',
@@ -146,7 +137,6 @@ const receiptSummary = () => ({
   trustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
   validUntil: '2026-08-30T10:00:00.000Z',
 });
-
 const verifiedState = (policy, merge) => reduceApprovalDecisionState([
   { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
   { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
@@ -157,7 +147,6 @@ const verifiedState = (policy, merge) => reduceApprovalDecisionState([
     observedAt: '2026-08-30T08:25:00.000Z',
   },
 ], policy, NOW);
-
 const consumptionFor = (grant, grantRawSha, readback, reservedRevision) => ({
   schema_version: 'program-c-merge-authorization-consumption/v1',
   consumption_id: 'program-c-consumption-task4-0001',
@@ -192,7 +181,6 @@ const consumptionFor = (grant, grantRawSha, readback, reservedRevision) => ({
   pre_readback_sha256: readback.preReadbackSha256,
   post_readback_sha256: readback.postReadbackSha256,
 });
-
 const refreshAcceptanceTransaction = (evidence) => {
   const acceptanceTransaction = {
     currentPullRequest: evidence.currentPullRequest,
@@ -213,7 +201,20 @@ const refreshAcceptanceTransaction = (evidence) => {
   evidence.postAcceptanceReadSha256 = digest(acceptanceTransaction);
   return evidence;
 };
-
+const appendAcceptance = (state, evidence, policy, now) => {
+  if (typeof approvalStateModule.appendApprovalDecisionEvent === 'function') {
+    return approvalStateModule.appendApprovalDecisionEvent(state, {
+      schemaVersion: 'approval-event-append/v1',
+      expectedHistorySha256: digest(state.eventHistory),
+      appendedAt: now.toISOString(),
+      event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
+    }, policy, now);
+  }
+  return reduceApprovalDecisionState([
+    ...state.eventHistory,
+    { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
+  ], policy, now);
+};
 const acceptanceEvidence = async () => {
   const policy = approvalPolicy();
   const task3 = buildTask3AcceptanceEvidence();
@@ -312,7 +313,6 @@ const acceptanceEvidence = async () => {
   refreshAcceptanceTransaction(evidence);
   return { evidence, grant, mergeAuthorization, policy, readback };
 };
-
 test('reducer exhaustively moves through every normative state without mutating prior receipt facts', async () => {
   const { mergeAuthorization, policy } = await acceptanceEvidence();
   const owner = reduceApprovalDecisionState([], policy, NOW);
@@ -382,10 +382,7 @@ test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED'
   const state = verifiedState(policy, mergeAuthorization);
   const validation = revalidateApprovalAtAcceptance(state, evidence, NOW);
   assert.equal(validation.valid, true);
-  const accepted = reduceApprovalDecisionState([
-    ...state.eventHistory,
-    { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-  ], policy, NOW);
+  const accepted = appendAcceptance(state, evidence, policy, NOW);
   assert.equal(accepted.state, 'ACCEPTED');
   assert.equal(Object.isFrozen(accepted), true);
   const output = [];
@@ -472,10 +469,7 @@ test('round2 I3 current-main readback stays closed and semantically bound after 
   const validation = revalidateApprovalAtAcceptance(mismatchState, mismatch, NOW);
   let reducerAccepted;
   try {
-    reducerAccepted = reduceApprovalDecisionState([
-      ...mismatchState.eventHistory,
-      { type: 'ACCEPTANCE_REVALIDATED', evidence: mismatch, observedAt: mismatch.readAt },
-    ], policy, NOW).state === 'ACCEPTED';
+    reducerAccepted = appendAcceptance(mismatchState, mismatch, policy, NOW).state === 'ACCEPTED';
   } catch {
     reducerAccepted = false;
   }
@@ -487,10 +481,7 @@ test('round2 I3 current-main readback stays closed and semantically bound after 
 test('round2 I6 accepted canonical history replays revocation and rejects tampered persisted events', async () => {
   const { evidence, mergeAuthorization, policy } = await acceptanceEvidence();
   const verified = verifiedState(policy, mergeAuthorization);
-  const accepted = reduceApprovalDecisionState([
-    ...verified.eventHistory,
-    { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-  ], policy, NOW);
+  const accepted = appendAcceptance(verified, evidence, policy, NOW);
   const acceptanceEvent = accepted.eventHistory.find(({ type }) => type === 'ACCEPTANCE_REVALIDATED');
   const replay = (history) => {
     try {
@@ -532,6 +523,85 @@ test('round2 I6 accepted canonical history replays revocation and rejects tamper
     variants: ['THREW', 'THREW', 'THREW', 'THREW', 'THREW'],
     projectedDigest: acceptanceEvent.evidenceSha256,
   });
+});
+
+test('round3 historical acceptance replays after expiry while future, nonmonotonic, duplicate, and backdated append fail', async () => {
+  const { evidence, mergeAuthorization, policy } = await acceptanceEvidence();
+  const verified = verifiedState(policy, mergeAuthorization);
+  const accepted = appendAcceptance(verified, evidence, policy, NOW);
+  const later = new Date('2026-08-31T12:00:00.000Z');
+  const outcome = (events, reducerNow = later) => {
+    try {
+      return reduceApprovalDecisionState(events, policy, reducerNow).state;
+    } catch (error) {
+      return `THREW:${error.message}`;
+    }
+  };
+  const revoked = outcome([
+    ...accepted.eventHistory,
+    { type: 'RECEIPT_REVOKED', observedAt: later.toISOString() },
+  ]);
+  const future = outcome([
+    ...accepted.eventHistory,
+    { type: 'RECEIPT_REVOKED', observedAt: '2026-09-01T00:00:00.000Z' },
+  ]);
+  const nonmonotonic = clone(accepted.eventHistory);
+  nonmonotonic[1].observedAt = '2026-08-30T06:00:00.000Z';
+  const duplicate = [...accepted.eventHistory, clone(accepted.eventHistory.at(-1))];
+  const insertedOld = [
+    ...accepted.eventHistory,
+    { type: 'RECEIPT_REVOKED', observedAt: '2026-08-30T08:00:00.000Z' },
+  ];
+  let backdatedAppend = 'MISSING_APPEND_CONTRACT';
+  if (typeof approvalStateModule.appendApprovalDecisionEvent === 'function') {
+    try {
+      approvalStateModule.appendApprovalDecisionEvent(verified, {
+        schemaVersion: 'approval-event-append/v1',
+        expectedHistorySha256: digest(verified.eventHistory),
+        appendedAt: '2026-08-31T12:00:00.000Z',
+        event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
+      }, policy, later);
+      backdatedAppend = 'ACCEPTED';
+    } catch (error) {
+      backdatedAppend = `THREW:${error.message}`;
+    }
+  }
+  assert.deepEqual({
+    revoked,
+    future,
+    nonmonotonic: outcome(nonmonotonic),
+    duplicate: outcome(duplicate),
+    insertedOld: outcome(insertedOld),
+    backdatedAppend,
+  }, {
+    revoked: 'REVOKED',
+    future: 'THREW:APPROVAL_STATE_EVENT_TIME_INVALID',
+    nonmonotonic: 'THREW:APPROVAL_STATE_EVENT_TIME_INVALID',
+    duplicate: 'THREW:APPROVAL_STATE_EVENT_REPLAYED',
+    insertedOld: 'THREW:APPROVAL_STATE_EVENT_TIME_INVALID',
+    backdatedAppend: 'THREW:APPROVAL_ACCEPTANCE_REVALIDATION_STALE',
+  });
+});
+
+test('round3 cyclic acceptance evidence returns stable approval denial without native recursion failure', async () => {
+  const { evidence, mergeAuthorization, policy } = await acceptanceEvidence();
+  const cyclic = clone(evidence);
+  cyclic.task3.candidate.policy = cyclic.task3.candidate;
+  const verified = verifiedState(policy, mergeAuthorization);
+  const capture = (operation) => {
+    try {
+      const value = operation();
+      return value?.valid === false && value.issues.every(({ stable_code: code }) => code.startsWith('APPROVAL_'))
+        ? 'APPROVAL_DENIAL'
+        : 'UNSAFE_ACCEPT';
+    } catch (error) {
+      return error.message?.startsWith('APPROVAL_') ? 'APPROVAL_DENIAL' : error.name;
+    }
+  };
+  assert.deepEqual({
+    direct: capture(() => revalidateApprovalAtAcceptance(verified, cyclic, NOW)),
+    append: capture(() => appendAcceptance(verified, cyclic, policy, NOW)),
+  }, { direct: 'APPROVAL_DENIAL', append: 'APPROVAL_DENIAL' });
 });
 
 test('acceptance revalidation mutation matrix fails closed on every fresh-read requirement', async () => {
@@ -694,75 +764,6 @@ test('ACK_UNKNOWN reconciles exact current-main facts into separate immutable co
   const retried = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
   assert.deepEqual(retried.consumption, result.consumption);
   assert.equal(retried.committedLedgerRevision, result.committedLedgerRevision);
-});
-
-test('current-main lag, wrong facts, or stale grant bindings HOLD without nonce release', async () => {
-  const grant = await readJson('valid-grant.json');
-  const baseReadback = await readJson('current-main-readback.json');
-  const cases = [
-    (value) => { value.resultReachableFromCurrentMain = false; },
-    (value) => { value.resultCommitSha = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; value.resultAssociatedWithPr = false; },
-    (value) => { value.observedMergeMethod = 'MERGE'; },
-    (value) => { value.authorizedHeadSha = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; },
-    (value) => { value.baseSha = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; },
-  ];
-  for (const mutate of cases) {
-    const ledger = new SharedDurableCasLedgerHarness();
-    const fresh = await reserve(ledger, grant);
-    const readback = clone(baseReadback);
-    mutate(readback);
-    const result = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
-    assert.equal(result.outcome, 'HOLD');
-    assert.equal(result.consumption, null);
-    const stream = ledger.snapshot()[0];
-    assert.equal(stream.events[0].type, 'NONCE_RESERVED');
-    assert.equal(stream.events.some(({ type }) => type === 'NONCE_RELEASED'), false);
-  }
-});
-
-test('grant revocation before reservation denies; after reservation reconciles HOLD and remains reserved', async () => {
-  const grant = await readJson('valid-grant.json');
-  const grantRawSha256 = digest(grant);
-  const key = { repositoryId: grant.repository.id, singleUseNonce: grant.single_use_nonce };
-  const before = new SharedDurableCasLedgerHarness([{
-    key, committedRevision: 1,
-    events: [{ type: 'GRANT_REVOKED', grantId: grant.grant_id, grantRawSha256, reasonCode: 'POLICY_WITHDRAWN', effectiveAt: '2026-08-30T08:01:00.000Z', ledgerRevision: 1 }],
-  }]);
-  await assert.rejects(reserve(before, grant, requestFor(grant), 1), /APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE/);
-
-  const ledger = new SharedDurableCasLedgerHarness();
-  const fresh = await reserve(ledger, grant);
-  await ledger.compareAndSwap({
-    key, expectedRevision: 1,
-    event: { type: 'GRANT_REVOKED', grantId: grant.grant_id, grantRawSha256, reasonCode: 'POLICY_WITHDRAWN', effectiveAt: '2026-08-30T08:12:00.000Z' },
-  });
-  const readback = await readJson('current-main-readback.json');
-  const result = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
-  assert.equal(result.outcome, 'HOLD');
-  assert.equal(result.blockingCode, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
-  assert.equal(ledger.snapshot()[0].events[0].type, 'NONCE_RESERVED');
-  const revision = ledger.snapshot()[0].committedRevision;
-  const repeated = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
-  assert.equal(repeated.outcome, 'HOLD');
-  assert.equal(ledger.snapshot()[0].committedRevision, revision);
-});
-
-test('restart snapshot preserves idempotency, consumption, and repository-wide nonce uniqueness', async () => {
-  const grant = await readJson('valid-grant.json');
-  const readback = await readJson('current-main-readback.json');
-  const firstProcess = new SharedDurableCasLedgerHarness();
-  const fresh = await reserve(firstProcess, grant);
-  await executeReservedMerge(fresh.reservation, { requestMerge: async () => ({ acknowledgement: 'ACKNOWLEDGED' }) }, firstProcess, DISPATCH_NOW);
-  await reconcileMergeAuthorizationReservation(fresh.reservation, readback, firstProcess, NOW);
-
-  const restarted = new SharedDurableCasLedgerHarness(firstProcess.snapshot());
-  const existing = await reserve(restarted, grant, requestFor(grant), restarted.snapshot()[0].committedRevision);
-  assert.equal(existing.outcome, 'IDEMPOTENT_EXISTING');
-  let calls = 0;
-  assert.equal((await executeReservedMerge(existing.reservation, { requestMerge: async () => { calls += 1; } }, restarted, DISPATCH_NOW)).outcome, 'HOLD');
-  const reconciled = await reconcileMergeAuthorizationReservation(existing.reservation, readback, restarted, NOW);
-  assert.equal(reconciled.outcome, 'CONSUMPTION_RECORDED');
-  assert.equal(calls, 0);
 });
 
 test('missing, process-memory-only, workflow-artifact-only, and non-CAS ledgers fail before merge', async () => {

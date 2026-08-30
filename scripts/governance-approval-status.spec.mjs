@@ -128,6 +128,33 @@ test('I5 renderer and CLI reject nested nonce, extra projected keys, and multiby
   assert.ok(Buffer.byteLength(JSON.stringify(valid), 'utf8') <= 32_768);
 });
 
+test('round3 status traversal permits shared DAG references and rejects only real cycles or nonce values', () => {
+  const sharedState = cliState();
+  const shared = [];
+  sharedState.receiptHistory = shared;
+  sharedState.blockingCodes = shared;
+  let sharedResult;
+  try {
+    renderApprovalStatusReadModel(sharedState);
+    sharedResult = 'ACCEPTED_DAG';
+  } catch (error) {
+    sharedResult = error.message;
+  }
+  const cyclicState = cliState();
+  cyclicState.receiptHistory.push(cyclicState.receiptHistory);
+  let cycleResult;
+  try {
+    renderApprovalStatusReadModel(cyclicState);
+    cycleResult = 'UNSAFE_ACCEPT';
+  } catch (error) {
+    cycleResult = error.message?.startsWith('APPROVAL_') ? 'APPROVAL_DENIAL' : error.name;
+  }
+  assert.deepEqual({ sharedResult, cycleResult }, {
+    sharedResult: 'ACCEPTED_DAG',
+    cycleResult: 'APPROVAL_DENIAL',
+  });
+});
+
 test('CLI rejects every force-accept spelling and never loads decision evidence', async () => {
   const spellings = [
     ['--decision', 'ADR-027', '--format', 'json', '--force-accept'],
