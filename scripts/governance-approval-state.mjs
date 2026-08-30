@@ -18,6 +18,10 @@ import {
   isClosedApprovalAcceptanceEvidence,
   revalidateApprovalAtAcceptance,
 } from './governance-approval-acceptance.mjs';
+import {
+  approvalGraphUnsafe,
+  inspectApprovalValueGraph,
+} from './governance-approval-safe-traversal.mjs';
 
 export {
   executeReservedMerge,
@@ -27,6 +31,11 @@ export {
 export { revalidateApprovalAtAcceptance };
 
 const DECISION_IDS = new Set(['ADR-026', 'ADR-027']);
+const EVENT_TYPES = new Set([
+  'AUTHORITIES_ASSIGNED', 'PROPOSAL_RENDERED', 'PRODUCT_REVIEW_VERIFIED',
+  'RECEIPT_VERIFIED', 'HEAD_CHANGED', 'REVIEW_REJECTED', 'RECEIPT_SUPERSEDED',
+  'ACCEPTANCE_REVALIDATED', 'RECEIPT_REVOKED',
+]);
 const STATE_VALUES = new Set([
   'OWNER_ASSIGNMENT_REQUIRED', 'PROPOSED', 'AWAITING_PRODUCT_REVIEW',
   'AWAITING_PRIVACY_REVIEW', 'STALE_AFTER_PUSH', 'VERIFIED', 'ACCEPTED',
@@ -51,7 +60,10 @@ const STATE_KEYS = new Set([
 const MAX_ACCEPTANCE_EVENT_BYTES = 262_144;
 const ACCEPTANCE_LIVE_KEYS = Object.freeze(['type', 'evidence', 'observedAt']);
 const ACCEPTANCE_STORED_KEYS = Object.freeze([
-  'type', 'evidence', 'evidenceSha256', 'observedAt',
+  'type', 'evidence', 'evidenceSha256', 'observedAt', 'checkedAt',
+]);
+const APPEND_KEYS = Object.freeze([
+  'schemaVersion', 'expectedHistorySha256', 'appendedAt', 'event',
 ]);
 const POLICY_KEYS = Object.freeze([
   'repository', 'decisionId', 'decisionRevision', 'policyRevision', 'currentBaseSha',
@@ -113,6 +125,8 @@ const acceptanceEventEvidenceValid = (event) => {
   return !stored || (
     isDigest(event.evidenceSha256)
     && event.evidenceSha256 === canonicalApprovalDigest(event.evidence)
+    && isCanonicalInstant(event.checkedAt)
+    && Date.parse(event.observedAt) <= Date.parse(event.checkedAt)
   );
 };
 const safeEventRecord = (event) => {
@@ -120,6 +134,7 @@ const safeEventRecord = (event) => {
     return {
       type: event.type,
       observedAt: event.observedAt,
+      checkedAt: event.checkedAt,
       evidence: clone(event.evidence),
       evidenceSha256: canonicalApprovalDigest(event.evidence),
     };
@@ -168,17 +183,37 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
     throw approvalError('APPROVAL_STATE_INPUT_INVALID');
   }
   let state = baseState(policy);
+  let priorEventTime = null;
+  const eventDigests = new Set();
   for (const rawEvent of events) {
-    if (!isPlainObject(rawEvent) || typeof rawEvent.type !== 'string') transitionError();
+    if (!isPlainObject(rawEvent) || !EVENT_TYPES.has(rawEvent.type)) {
+      transitionError('APPROVAL_STATE_EVENT_UNSUPPORTED');
+    }
+    const inspection = inspectApprovalValueGraph(rawEvent);
+    if (approvalGraphUnsafe(inspection)) transitionError('APPROVAL_STATE_EVENT_REPLAYED');
     const event = clone(rawEvent);
+    if (!isCanonicalInstant(event.observedAt)) transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
+    const eventTime = event.type === 'ACCEPTANCE_REVALIDATED'
+      ? event.checkedAt
+      : event.observedAt;
+    if (!isCanonicalInstant(eventTime)
+      || Date.parse(eventTime) > Date.parse(reductionNow)
+      || (priorEventTime !== null && Date.parse(eventTime) < Date.parse(priorEventTime))) {
+      transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
+    }
+    const eventDigest = canonicalApprovalDigest(event);
+    if (eventDigests.has(eventDigest)) transitionError('APPROVAL_STATE_EVENT_REPLAYED');
+    eventDigests.add(eventDigest);
+    priorEventTime = eventTime;
+    const eventClock = new Date(eventTime);
     if (event.type === 'AUTHORITIES_ASSIGNED') {
       if (!hasExactKeys(event, ['type', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || !['OWNER_ASSIGNMENT_REQUIRED', 'REVOKED', 'REJECTED'].includes(state.state)) transitionError();
       state = { ...state, state: 'PROPOSED', blockingCodes: [], revocationStatus: 'ACTIVE' };
     } else if (event.type === 'PROPOSAL_RENDERED') {
       if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || !['PROPOSED', 'STALE_AFTER_PUSH'].includes(state.state)
         || event.headSha !== policy.currentHeadSha) transitionError();
       state = {
@@ -189,7 +224,7 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       };
     } else if (event.type === 'PRODUCT_REVIEW_VERIFIED') {
       if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || state.state !== 'AWAITING_PRODUCT_REVIEW'
         || event.headSha !== state.currentHeadSha) transitionError();
       state = {
@@ -200,10 +235,10 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       };
     } else if (event.type === 'RECEIPT_VERIFIED') {
       if (!hasExactKeys(event, ['type', 'headSha', 'receipt', 'mergeAuthorization', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || state.state !== 'AWAITING_PRIVACY_REVIEW'
         || event.headSha !== state.currentHeadSha
-        || !receiptSummaryValid(event.receipt, now)
+        || !receiptSummaryValid(event.receipt, eventClock)
         || !mergeSummaryValid(event.mergeAuthorization, true)) {
         transitionError('APPROVAL_RECEIPT_REQUIRED');
       }
@@ -226,7 +261,7 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       };
     } else if (event.type === 'HEAD_CHANGED') {
       if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || !isGitSha(event.headSha)
         || ['ACCEPTED', 'REVOKED'].includes(state.state)) transitionError();
       state = {
@@ -240,7 +275,7 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       };
     } else if (event.type === 'REVIEW_REJECTED') {
       if (!hasExactKeys(event, ['type', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || !['AWAITING_PRODUCT_REVIEW', 'AWAITING_PRIVACY_REVIEW', 'VERIFIED'].includes(state.state)) {
         transitionError();
       }
@@ -249,10 +284,10 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       if (!hasExactKeys(event, [
         'type', 'predecessorReceiptId', 'successor', 'validation', 'observedAt',
       ])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || !state.receipt
         || state.receipt.receiptId !== event.predecessorReceiptId
-        || !receiptSummaryValid(event.successor, now)
+        || !receiptSummaryValid(event.successor, eventClock)
         || event.validation?.valid !== false
         || !event.validation?.issues?.some?.(
           ({ stable_code: code }) => code === 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
@@ -272,13 +307,14 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       };
     } else if (event.type === 'ACCEPTANCE_REVALIDATED') {
       if (!acceptanceEventEvidenceValid(event)
+        || !hasExactKeys(event, ACCEPTANCE_STORED_KEYS)
         || state.state !== 'VERIFIED'
         || event.observedAt !== event.evidence?.readAt
-        || !observedAtValid(event.observedAt, now)) {
+        || !observedAtValid(event.observedAt, eventClock)) {
         transitionError('APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
       }
-      const validation = revalidateApprovalAtAcceptance(state, event.evidence, now);
-      if (!validation.valid || validation.checkedAt !== reductionNow) {
+      const validation = revalidateApprovalAtAcceptance(state, event.evidence, eventClock);
+      if (!validation.valid || validation.checkedAt !== event.checkedAt) {
         transitionError(validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
       }
       state = {
@@ -289,7 +325,7 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
       };
     } else if (event.type === 'RECEIPT_REVOKED') {
       if (!hasExactKeys(event, ['type', 'observedAt'])
-        || !observedAtValid(event.observedAt, now)
+        || !observedAtValid(event.observedAt, eventClock)
         || !['VERIFIED', 'ACCEPTED'].includes(state.state)) transitionError();
       state = {
         ...state,
@@ -305,6 +341,39 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
   return frozenClone(state);
 };
 
+export const appendApprovalDecisionEvent = (state, append, policy, now) => {
+  const appendedAt = nowIso(now);
+  if (!isPlainObject(state)
+    || !Array.isArray(state.eventHistory)
+    || !hasExactKeys(append, APPEND_KEYS)
+    || append.schemaVersion !== 'approval-event-append/v1'
+    || append.appendedAt !== appendedAt
+    || !isDigest(append.expectedHistorySha256)
+    || append.expectedHistorySha256 !== canonicalApprovalDigest(state.eventHistory)
+    || !isPlainObject(append.event)) transitionError('APPROVAL_STATE_APPEND_INVALID');
+  let event;
+  if (append.event.type === 'ACCEPTANCE_REVALIDATED') {
+    if (!hasExactKeys(append.event, ACCEPTANCE_LIVE_KEYS)
+      || !acceptanceEventEvidenceValid(append.event)
+      || append.event.observedAt !== append.event.evidence.readAt) {
+      transitionError('APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
+    }
+    const validation = revalidateApprovalAtAcceptance(state, append.event.evidence, now);
+    if (!validation.valid) {
+      transitionError(validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
+    }
+    event = {
+      ...clone(append.event),
+      checkedAt: validation.checkedAt,
+      evidenceSha256: canonicalApprovalDigest(append.event.evidence),
+    };
+  } else {
+    if (append.event.observedAt !== appendedAt) transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
+    event = clone(append.event);
+  }
+  return reduceApprovalDecisionState([...state.eventHistory, event], policy, now);
+};
+
 const STATUS_COPY = Object.freeze({
   OWNER_ASSIGNMENT_REQUIRED: ['approval.owner_required', '审批责任人尚未完成可信指派，当前决策不能进入评审。', '查看缺失角色'],
   PROPOSED: ['approval.proposed', '决策提案已生成，尚未进入精确版本审核。', '打开提案'],
@@ -316,15 +385,9 @@ const STATUS_COPY = Object.freeze({
   REVOKED: ['approval.policy_revoked', '当前政策已撤销，不可用于新的准入或放行。', '创建替代修订'],
   REJECTED: ['approval.review_rejected', '当前修订已被拒绝，不能继续复用既有审批。', '创建修订'],
 });
-const containsNonce = (value, seen = new Set()) => {
-  if (typeof value === 'string') return /nonce-program-c-/i.test(value);
-  if (value === null || typeof value !== 'object') return false;
-  if (seen.has(value)) return true;
-  seen.add(value);
-  if (Array.isArray(value)) return value.some((entry) => containsNonce(entry, seen));
-  return Object.entries(value).some(([key, child]) => (
-    /nonce/i.test(key) || containsNonce(child, seen)
-  ));
+const containsNonce = (value) => {
+  const inspection = inspectApprovalValueGraph(value, { checkNonce: true });
+  return approvalGraphUnsafe(inspection) || inspection.nonce;
 };
 const HISTORY_EVENT_KEYS = Object.freeze({
   AUTHORITIES_ASSIGNED: ['type', 'observedAt'],

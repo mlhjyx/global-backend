@@ -258,3 +258,73 @@ test('M1 request and reservation identifiers fail before the first durable appen
   assert.ok(results.every(({ error }) => error === 'APPROVAL_MERGE_AUTHORIZATION_REQUEST_INVALID'));
   assert.ok(results.every(({ snapshot }) => snapshot.length === 0));
 });
+
+test('round3 orchestration preserves bounded HOLD semantics across CAS races and repeated readback', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+  const resultRaceLedger = new Ledger();
+  const resultRace = await reserve(resultRaceLedger, grant);
+  const resultConflictPort = {
+    durabilityClass: 'SHARED_DURABLE_CAS',
+    read: (key) => resultRaceLedger.read(key),
+    compareAndSwap: async () => ({ outcome: 'CONFLICT', currentRevision: 1 }),
+  };
+  const resultConflict = await reconcileMergeAuthorizationReservation(
+    resultRace.reservation,
+    readback,
+    resultConflictPort,
+    NOW,
+  );
+
+  const holdLedger = new Ledger();
+  const holdReservation = await reserve(holdLedger, grant);
+  const lag = clone(readback);
+  lag.resultReachableFromCurrentMain = false;
+  const firstHold = await reconcileMergeAuthorizationReservation(
+    holdReservation.reservation,
+    lag,
+    holdLedger,
+    NOW,
+  );
+  const revision = holdLedger.snapshot()[0].committedRevision;
+  const repeatedHold = await reconcileMergeAuthorizationReservation(
+    holdReservation.reservation,
+    lag,
+    holdLedger,
+    NOW,
+  );
+
+  const observedLedger = new Ledger();
+  const observedReservation = await reserve(observedLedger, grant);
+  await observedLedger.compareAndSwap({
+    key: observedReservation.reservation.key,
+    expectedRevision: 1,
+    event: {
+      type: 'MERGE_RESULT_OBSERVED',
+      resultCommitSha: readback.resultCommitSha,
+      observedMergeMethod: readback.observedMergeMethod,
+      observedAt: readback.currentMain.readAt,
+    },
+  });
+  const wrongResult = clone(readback);
+  wrongResult.resultCommitSha = 'e'.repeat(40);
+  const mismatch = await reconcileMergeAuthorizationReservation(
+    observedReservation.reservation,
+    wrongResult,
+    observedLedger,
+    NOW,
+  );
+  assert.deepEqual({
+    resultConflict: resultConflict.outcome,
+    firstHold: firstHold.outcome,
+    repeatedHold: repeatedHold.outcome,
+    revisionStable: holdLedger.snapshot()[0].committedRevision === revision,
+    mismatch: mismatch.outcome,
+  }, {
+    resultConflict: 'HOLD',
+    firstHold: 'HOLD',
+    repeatedHold: 'HOLD',
+    revisionStable: true,
+    mismatch: 'HOLD',
+  });
+});

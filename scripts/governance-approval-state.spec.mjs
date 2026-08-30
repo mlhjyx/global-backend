@@ -392,13 +392,8 @@ test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED'
     writeStderr: () => assert.fail('accepted ADR-027 state must render'),
   }), 0);
   assert.equal(JSON.parse(output.join('')).decisionId, 'ADR-027');
-  assert.throws(
-    () => reduceApprovalDecisionState([
-      ...state.eventHistory,
-      { type: 'ACCEPTANCE_REVALIDATED', evidence: { ...evidence, readAt: '2026-08-29T08:00:00.000Z' }, observedAt: evidence.readAt },
-    ], policy, NOW),
-    /APPROVAL_ACCEPTANCE_REVALIDATION_STALE/,
-  );
+  const stale = { ...evidence, readAt: '2026-08-29T08:00:00.000Z' };
+  assert.throws(() => appendAcceptance(state, stale, policy, NOW), /APPROVAL_ACCEPTANCE_REVALIDATION_STALE/);
 });
 
 test('reviewer C1 counterexample cannot promote caller-declared receipt or validation booleans', async () => {
@@ -518,7 +513,7 @@ test('round2 I6 accepted canonical history replays revocation and rejects tamper
     variants,
     projectedDigest: JSON.parse(stdout.join('')).acceptanceEvidenceSha256,
   }, {
-    acceptanceKeys: ['evidence', 'evidenceSha256', 'observedAt', 'type'],
+    acceptanceKeys: ['checkedAt', 'evidence', 'evidenceSha256', 'observedAt', 'type'],
     replay: 'REVOKED',
     variants: ['THREW', 'THREW', 'THREW', 'THREW', 'THREW'],
     projectedDigest: acceptanceEvent.evidenceSha256,
@@ -790,7 +785,7 @@ test('reducer and acceptance validator reject malformed boundaries without trans
   assert.throws(() => reduceApprovalDecisionState(null, policy, NOW), /APPROVAL_STATE_INPUT_INVALID/);
   assert.throws(
     () => reduceApprovalDecisionState([{ type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha }], policy, NOW),
-    /APPROVAL_STATE_TRANSITION_INVALID/,
+    /APPROVAL_STATE_EVENT_TIME_INVALID/,
   );
   const result = revalidateApprovalAtAcceptance({ state: 'ACCEPTED' }, null, NOW);
   assert.equal(result.valid, false);

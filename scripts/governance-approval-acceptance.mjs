@@ -17,6 +17,10 @@ import {
   validateApprovalLedgerStream,
 } from './governance-approval-ledger-stream.mjs';
 import { validateCurrentMainMergeReadback } from './governance-approval-current-main-readback.mjs';
+import {
+  approvalGraphUnsafe,
+  inspectApprovalValueGraph,
+} from './governance-approval-safe-traversal.mjs';
 
 const EVIDENCE_KEYS = Object.freeze([
   'schemaVersion', 'task3', 'readAt', 'preAcceptanceRead', 'postAcceptanceRead',
@@ -78,18 +82,14 @@ const freshInstant = (value, now, maximumAge) => (
 const sortedFiles = (files) => Array.isArray(files)
   ? [...files].sort((left, right) => left.path.localeCompare(right.path))
   : [];
-const containsForbiddenContent = (value) => {
-  if (value === null || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some(containsForbiddenContent);
-  return Object.entries(value).some(([key, child]) => (
-    ['body', 'content', 'reviewbody', 'legalcontent', 'freeform', 'free_form'].includes(key.toLowerCase())
-    || containsForbiddenContent(child)
-  ));
-};
 export const isClosedApprovalAcceptanceEvidence = (value) => shapeValid(value);
-export const approvalAcceptanceEvidenceHasForbiddenContent = (value) => (
-  containsForbiddenContent(value)
+export const inspectApprovalAcceptanceEvidenceGraph = (value) => (
+  inspectApprovalValueGraph(value, { checkForbiddenContent: true })
 );
+export const approvalAcceptanceEvidenceHasForbiddenContent = (value) => {
+  const inspection = inspectApprovalAcceptanceEvidenceGraph(value);
+  return approvalGraphUnsafe(inspection) || inspection.forbiddenContent;
+};
 const shapeValid = (evidence) => (
   hasExactKeys(evidence, EVIDENCE_KEYS)
   && evidence.schemaVersion === 'approval-acceptance-evidence/v1'
@@ -186,7 +186,7 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
   }
   if (!isPlainObject(evidence) || !shapeValid(evidence)) {
     pushIssue(codes, 'APPROVAL_ACCEPTANCE_EVIDENCE_SHAPE_INVALID');
-    if (isPlainObject(evidence) && containsForbiddenContent(evidence)) {
+    if (isPlainObject(evidence) && approvalAcceptanceEvidenceHasForbiddenContent(evidence)) {
       pushIssue(codes, 'APPROVAL_ACCEPTANCE_FORBIDDEN_CONTENT');
     }
     if (evidence?.mergeAuthorization === null
@@ -204,7 +204,13 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
       issues: [...new Set(codes)].map((stable_code) => ({ stable_code })),
     });
   }
-  if (containsForbiddenContent(evidence)) pushIssue(codes, 'APPROVAL_ACCEPTANCE_FORBIDDEN_CONTENT');
+  if (approvalAcceptanceEvidenceHasForbiddenContent(evidence)) {
+    return frozenClone({
+      valid: false,
+      checkedAt,
+      issues: [{ stable_code: 'APPROVAL_ACCEPTANCE_FORBIDDEN_CONTENT' }],
+    });
+  }
   if (!transactionValid(evidence)) pushIssue(codes, 'APPROVAL_TOCTOU_DETECTED');
   const freshnessMs = policy.freshnessMs;
   if (!Number.isSafeInteger(freshnessMs)

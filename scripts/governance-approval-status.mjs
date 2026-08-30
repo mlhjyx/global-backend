@@ -1,21 +1,13 @@
 import { pathToFileURL } from 'node:url';
 import { renderApprovalStatusReadModel } from './governance-approval-state.mjs';
+import {
+  approvalGraphUnsafe,
+  inspectApprovalValueGraph,
+} from './governance-approval-safe-traversal.mjs';
 
-const FORBIDDEN_KEYS = new Set([
-  'body', 'content', 'reviewbody', 'legalcontent', 'freeform', 'free_form',
-]);
-
-const containsForbiddenContent = (value, seen = new Set()) => {
-  if (value === null || typeof value !== 'object') return false;
-  if (seen.has(value)) return true;
-  seen.add(value);
-  const forbidden = Array.isArray(value)
-    ? value.some((entry) => containsForbiddenContent(entry, seen))
-    : Object.entries(value).some(([key, child]) => (
-    FORBIDDEN_KEYS.has(key.toLowerCase()) || containsForbiddenContent(child, seen)
-  ));
-  seen.delete(value);
-  return forbidden;
+const containsForbiddenContent = (value) => {
+  const inspection = inspectApprovalValueGraph(value, { checkForbiddenContent: true });
+  return approvalGraphUnsafe(inspection) || inspection.forbiddenContent;
 };
 
 const forceAcceptRequested = (argv) => {
