@@ -57,6 +57,23 @@ const OUTCOME_KEYS = Object.freeze([
 type Data = Record<string, unknown>;
 type Outcome = typeof DISCOVERY_COMPANY_MATERIALIZATION_OUTCOMES[number];
 type SnapshotBudget = { remaining: number; bytes: number };
+export type DiscoveryCompanyMaterializationItemOrderKey = Readonly<{
+  providerKey: string;
+  recordIndex: number;
+  rawRecordId: string;
+  queryItemId: string;
+}>;
+
+export function compareDiscoveryCompanyMaterializationItems(
+  left: DiscoveryCompanyMaterializationItemOrderKey,
+  right: DiscoveryCompanyMaterializationItemOrderKey,
+): number {
+  const ordinal = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+  return ordinal(left.providerKey, right.providerKey) ||
+    left.recordIndex - right.recordIndex ||
+    ordinal(left.rawRecordId, right.rawRecordId) ||
+    ordinal(left.queryItemId, right.queryItemId);
+}
 
 function fail(code = INVALID): never { throw new ExecutionControlError(code); }
 function field(record: Data, key: string): unknown {
@@ -379,12 +396,11 @@ export function buildDiscoveryCompanyMaterializationBatchPlanV1(value: unknown):
   if (rawCandidates.length === 0) fail();
   const candidates = rawCandidates.map((candidate) => ({ candidate,
     q: parseQ(field(record(candidate, CANDIDATE_KEYS), 'qItem')) }));
-  const ordinal = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
   const sorted = candidates.sort((left, right) =>
-    ordinal(String(left.q.providerKey), String(right.q.providerKey)) ||
-    Number(left.q.recordIndex) - Number(right.q.recordIndex) ||
-    ordinal(String(left.q.rawRecordId), String(right.q.rawRecordId)) ||
-    ordinal(String(left.q.queryItemId), String(right.q.queryItemId)));
+    compareDiscoveryCompanyMaterializationItems(
+      left.q as DiscoveryCompanyMaterializationItemOrderKey,
+      right.q as DiscoveryCompanyMaterializationItemOrderKey,
+    ));
   const queryItemIds = sorted.map(({ q }) => q.queryItemId);
   if (new Set(queryItemIds).size !== queryItemIds.length) fail();
   const keys = sorted.map(({ q }) => `${q.providerKey}:${q.recordIndex}:${q.rawRecordId}:${q.queryItemId}`);

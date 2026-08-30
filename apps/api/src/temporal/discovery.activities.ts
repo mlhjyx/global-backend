@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
@@ -75,6 +76,8 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
+import { executeDiscoveryCompanyMaterialization } from './discovery-company-materialization';
+import { companyMatchesSuppression } from '../discovery/suppression-value';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -158,6 +161,85 @@ async function lockDiscoveryRunReceiptState(
   return row;
 }
 
+async function lockCompanyRawIdentity(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  rawRecordId: string,
+): Promise<void> {
+  await transaction.$queryRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
+      ${`discovery-company-raw-identity:${workspaceId}:${rawRecordId}`}, 0
+    ))`,
+  );
+}
+
+function isPrismaUniqueCollision(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
+}
+
+async function resolveDiscoveryCompanySuppressionMatches(
+  transaction: Prisma.TransactionClient,
+  expectation: Readonly<{ workspaceId: string; count: number; sha256: string }>,
+  companies: readonly Readonly<{ key: string; name: string; domain?: string }>[],
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  const digest = createHash('sha256');
+  const matches = new Map(companies.map((company) => [company.key, [] as string[]]));
+  let lastId: string | undefined;
+  let observed = 0;
+  while (true) {
+    const page = await transaction.suppressionRecord.findMany({
+      where: {
+        workspaceId: expectation.workspaceId,
+        type: { in: ['domain', 'company_name'] },
+        ...(lastId ? { id: { gt: lastId } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: 128,
+      select: { id: true, type: true, value: true },
+    });
+    if (page.length === 0) break;
+    if (page.length > 128) throw ApplicationFailure.nonRetryable(
+      'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+      'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+    );
+    for (const row of page) {
+      if (lastId !== undefined && row.id <= lastId ||
+          !['domain', 'company_name'].includes(row.type) ||
+          row.value.length > 2_048) {
+        throw ApplicationFailure.nonRetryable(
+          'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+          'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+        );
+      }
+      for (const value of [row.id, row.type, row.value]) {
+        digest.update(String(Buffer.byteLength(value, 'utf8'))).update(':').update(value, 'utf8');
+      }
+      for (const company of companies) {
+        if (!companyMatchesSuppression([row], company)) continue;
+        const ids = matches.get(company.key)!;
+        if (ids.length >= 64) throw ApplicationFailure.nonRetryable(
+          'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+          'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+        );
+        ids.push(row.id);
+      }
+      observed += 1;
+      lastId = row.id;
+    }
+    if (page.length < 128) break;
+  }
+  if (observed !== expectation.count || digest.digest('hex') !== expectation.sha256) {
+    throw ApplicationFailure.nonRetryable(
+      'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+      'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
+    );
+  }
+  return new Map([...matches].map(([key, ids]) => [key, Object.freeze([...new Set(ids)].sort())]));
+}
+
 function executionResult(
   receipt: DiscoveryQueryReceipt,
   budgetTruncated: boolean,
@@ -236,7 +318,7 @@ export function createDiscoveryActivities(deps: {
     () =>
       deps.prisma.withWorkspace(workspaceId, (tx) => companyMayUseExternalProcessing(tx, workspaceId, companyId));
 
-  return {
+  const activities = {
     /**
      * Frozen compatibility activity name/shape for pre-authority histories.
      * Replayed completions remain deterministic; a still-pending legacy command
@@ -675,7 +757,7 @@ export function createDiscoveryActivities(deps: {
      * 归一 + 身份解析（PRD 8.8）+ 字段级 Evidence（8.10）+ Suppression 标记。
      * 幂等：canonical 按 dedupeKey upsert；identity_link 按 (canonical,raw) 去重。
      */
-    async canonicalizeRun(args: DiscoveryActivityInput & {
+    async canonicalizeLegacyDiscoveryRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
     }): Promise<{ companies: number; suppressed: number }> {
@@ -732,6 +814,7 @@ export function createDiscoveryActivities(deps: {
             country: rec.country,
             identifier: rec.identifier, // §8.4：无域名时按税号消歧，防同名同国不同实体误并
           });
+          await lockCompanyRawIdentity(tx, args.workspaceId, raw.id);
           const materialization = await loadMaterializableCompanyState(
             tx,
             args.workspaceId,
@@ -745,15 +828,23 @@ export function createDiscoveryActivities(deps: {
           }
 
           const prior = materialization.prior;
-          const existingLink = prior
-            ? await tx.identityLink.findFirst({
-                where: { canonicalId: prior.id, rawRecordId: raw.id },
-                select: { id: true },
-              })
-            : null;
+          const existingLink = await tx.identityLink.findFirst({
+            where: {
+              workspaceId: args.workspaceId,
+              canonicalType: 'company',
+              rawRecordId: raw.id,
+            },
+            select: { id: true, canonicalId: true },
+          });
           // Suppression admission remains first; a linked Raw observation then
           // wins before stale contribution bytes are merged into Canonical.
-          if (existingLink) continue;
+          if (existingLink) {
+            if (prior && existingLink.canonicalId === prior.id) continue;
+            throw ApplicationFailure.nonRetryable(
+              'DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT',
+              'DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT',
+            );
+          }
 
           const currentAttributes = sanitizeCanonicalCompanyAttributes(
             rec.attributes,
@@ -811,16 +902,27 @@ export function createDiscoveryActivities(deps: {
             : { id: prior!.id };
           if (canonicalChanged) companies += 1;
 
-          await tx.identityLink.create({
-            data: {
-              workspaceId: args.workspaceId,
-              canonicalType: 'company',
-              canonicalId: canonical.id,
-              rawRecordId: raw.id,
-              matchRule: identity.matchRule,
-              confidence: identity.matchRule === 'name_country' ? 0.8 : 1, // §8.4：identifier_exact 同 domain_exact=1
-            },
-          });
+          try {
+            await tx.identityLink.create({
+              data: {
+                workspaceId: args.workspaceId,
+                canonicalType: 'company',
+                canonicalId: canonical.id,
+                rawRecordId: raw.id,
+                matchRule: identity.matchRule,
+                confidence: identity.matchRule === 'name_country' ? 0.8 : 1, // §8.4：identifier_exact 同 domain_exact=1
+              },
+            });
+          } catch (error) {
+            if (!isPrismaUniqueCollision(error)) throw error;
+            // Every compliant company writer shares the advisory lock above.
+            // A post-read P2002 therefore proves a non-compliant or conflicting
+            // writer, and the aborted transaction must not attempt a readback.
+            throw ApplicationFailure.nonRetryable(
+              'DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT',
+              'DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT',
+            );
+          }
           // 字段级 Evidence：该 raw 记录贡献的每个非空字段留痕
           const fields: [string, unknown][] = [
             ['name', rec.name],
@@ -1509,6 +1611,20 @@ export function createDiscoveryActivities(deps: {
             },
           });
         }
+      });
+    },
+  };
+  const { canonicalizeLegacyDiscoveryRun, ...publicActivities } = activities;
+  return {
+    ...publicActivities,
+    async canonicalizeRun(args: DiscoveryActivityInput & {
+      workspaceId: string;
+      runId: string;
+    }): Promise<{ companies: number; suppressed: number }> {
+      return executeDiscoveryCompanyMaterialization(args, {
+        prisma: deps.prisma,
+        canonicalizeLegacyDiscoveryRun,
+        resolveSuppressionMatches: resolveDiscoveryCompanySuppressionMatches,
       });
     },
   };

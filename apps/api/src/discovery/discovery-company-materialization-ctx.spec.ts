@@ -26,6 +26,10 @@ const SHA = Object.freeze({ contract: '558e526a674a7eac4e5e83d03fcf4f635c15b1b30
 
 type Module = Readonly<{
   DISCOVERY_COMPANY_MATERIALIZATION_OUTCOMES: readonly string[];
+  compareDiscoveryCompanyMaterializationItems(
+    left: Readonly<Record<string, string | number>>,
+    right: Readonly<Record<string, string | number>>,
+  ): number;
   buildDiscoveryCompanyMaterializationBatchPlanV1(value: unknown): Readonly<{
     schemaVersion: 'discovery-company-materialization-batch-plan/v1';
     batchOrdinal: number;
@@ -167,6 +171,10 @@ describe('C-TX pure Q-item batch builder', () => {
       queryItemId: '30000000-0000-4000-8000-000000000002' }) });
     const result = module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([at10, at2]));
     expect(result.items.map((item) => item.recordIndex)).toEqual([2, 10]);
+    expect(module.compareDiscoveryCompanyMaterializationItems(
+      qItem({ recordIndex: 2 }) as Record<string, string | number>,
+      qItem({ recordIndex: 10 }) as Record<string, string | number>,
+    )).toBeLessThan(0);
   });
 });
 
