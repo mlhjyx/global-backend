@@ -430,6 +430,42 @@ describe("governed relation exact path lock ordering", () => {
     } finally { await Promise.all([cleanup(graph,"roundb_drift_graph"),cleanup(writer,"roundb_drift")]); }
   });
 
+  it("reports a governed fence committed between append snapshots as tombstoned", async () => {
+    const path=seedPath(); const graph=holder("roundb_fence_graph",
+      `governed-subject-relation:${WS}:${OP}`,"READY");
+    let writer; try {
+      const ready=await graph.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_fence_writer';${asApp(invocation(APPEND,
+        {parentId:path.parent,relationKey:"roundb:fence-drift"}))}`);
+      await observeWait(pid,"roundb_fence_writer",writer);
+      psql(`INSERT INTO governed_subject_tombstone(workspace_id,governed_subject_id)
+        VALUES ('${WS}','${path.a}');`);
+      graph.write("COMMIT;\n"); graph.end(); const result=await writer.done;
+      assert.notEqual(result.status,0); assert.match(result.stderr,/GOVERNED_SUBJECT_TOMBSTONED/);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation
+        WHERE relation_key='roundb:fence-drift';`),"0");
+    } finally { await Promise.all([cleanup(graph,"roundb_fence_graph"),
+      cleanup(writer,"roundb_fence_writer")]); }
+  });
+
+  it("reports an artifact fence committed during the DSR wait as tombstoned", async () => {
+    const path=seedPath(); const dsr=holder("roundb_artifact_fence_dsr",
+      `generic-operation-artifact-subject:${WS}:company:${path.low}`,"READY");
+    let writer; try {
+      const ready=await dsr.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_artifact_fence_writer';${asApp(
+        invocation(APPEND,{parentId:path.parent,relationKey:"roundb:artifact-fence-drift"}))}`);
+      await observeWait(pid,"roundb_artifact_fence_writer",writer);
+      psql(`INSERT INTO generic_operation_artifact_subject_tombstone(
+        workspace_id,subject_type,subject_id) VALUES ('${WS}','company','${path.low}');`);
+      dsr.write("COMMIT;\n"); dsr.end(); const result=await writer.done;
+      assert.notEqual(result.status,0); assert.match(result.stderr,/GOVERNED_SUBJECT_TOMBSTONED/);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation
+        WHERE relation_key='roundb:artifact-fence-drift';`),"0");
+    } finally { await Promise.all([cleanup(dsr,"roundb_artifact_fence_dsr"),
+      cleanup(writer,"roundb_artifact_fence_writer")]); }
+  });
+
   it("attest fails with zero writes when ancestors drift before graph lock", async () => {
     const path=seedPath(); const input={parentId:path.parent,relationKey:"roundb:attest-drift"};
     psql(asApp(invocation(APPEND,input)));
