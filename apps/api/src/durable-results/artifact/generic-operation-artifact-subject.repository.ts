@@ -2,6 +2,7 @@ import { types } from "node:util";
 import { Prisma } from "@prisma/client";
 import type { DeletionSubjectType } from "../../compliance/deletion.types";
 import { isCanonicalArtifactUuid } from "./artifact.types";
+import { ExecutionControlError } from "../../execution-budget/execution-control-error";
 
 export const GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID =
   "GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID" as const;
@@ -60,7 +61,7 @@ type ResolvedSubjectRow = Readonly<{
 }>;
 
 function invalid(): never {
-  throw new Error(GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID);
+  throw new ExecutionControlError(GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID);
 }
 
 function closedRecord(

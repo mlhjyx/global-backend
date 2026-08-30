@@ -10,6 +10,7 @@ import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 
 const DUE_LIMIT = 50;
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000; // web_watch intent 事件保留 90 天（可 arg 覆盖）
@@ -70,7 +71,7 @@ export function createIntentActivities(deps: {
         receipt: DurableExecutionReceipt,
       ): void => {
         if (producerId !== 'crawl4ai.render') {
-          throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+          throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
         }
         durableReceipts.push({ producerId, receipt });
       };

@@ -11,6 +11,7 @@ import {
   applyDomainAckConsumerTransactions,
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 
 export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
 
@@ -79,7 +80,7 @@ export function createPatentsCacheActivities(deps: {
           accountKey: binding.accountKey,
           onDurableReceipt: (producerId, durableReceipt) => {
             if (producerId !== 'google_patents.search') {
-              throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+              throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
             }
             durableReceipts.push(durableReceipt);
           },
@@ -87,7 +88,7 @@ export function createPatentsCacheActivities(deps: {
         applyScanWithAck: async (_scan, persist, context) => {
           if (!durableReceipts.length) return persist(deps.ownerDb as unknown as PatentRefreshDb);
           if (!deps.platformWriter) {
-            throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+            throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
           }
           return deps.platformWriter.$transaction(async (tx) => {
             const result = await applyDomainAckConsumerTransactions({

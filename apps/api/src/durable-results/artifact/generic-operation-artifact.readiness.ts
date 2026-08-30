@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { ExecutionControlError } from '../../execution-budget/execution-control-error';
 
 export interface ArtifactReadinessS3Client {
   send(command: object): Promise<unknown>;
@@ -208,7 +209,7 @@ export async function checkGenericOperationArtifactStorageReadiness(
       !hasExpectedEncryption(encryption) ||
       !hasExpectedLifecycle(lifecycle)
     ) {
-      throw new Error('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
+      throw new ExecutionControlError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
     }
     const put = asRecord(
       await client.send(

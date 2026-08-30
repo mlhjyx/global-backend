@@ -6,6 +6,7 @@
 
 import type { CompanyIdentifier } from './identity';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import type { DiscoveryCompanyResultLineageV1 } from './company-discovery-lineage';
 
 export type SourceClass =
   | 'trade_data'
@@ -126,6 +127,8 @@ export interface ProviderContactRecord {
 export interface DiscoveryResult {
   records: ProviderCompanyRecord[];
   costCents: number;
+  /** Optional closed lineage for providers that advertise the v1 capability. */
+  lineage?: DiscoveryCompanyResultLineageV1;
 }
 
 export interface ContactDiscoveryResult {
@@ -170,6 +173,7 @@ export interface EmailVerdict {
 export interface CompanyDiscoveryAdapter {
   key: string;
   classes: SourceClass[];
+  readonly companyResultLineage?: 'discovery-company-result-lineage/v1';
   discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult>;
 }
