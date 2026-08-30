@@ -42,16 +42,78 @@
         "role": { "type": "string" },
         "status": { "enum": ["UNASSIGNED", "ASSIGNED"] },
         "actor_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-        "actor_login": { "type": "string", "minLength": 1, "maxLength": 256 }
+        "actor_node_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "actor_login": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "effective_from": { "$ref": "#/$defs/instant" },
+        "effective_until": { "$ref": "#/$defs/instant" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "assignment_evidence": { "$ref": "#/$defs/assignmentEvidence" },
+        "revocation_status": { "enum": ["ACTIVE", "REVOKED"] },
+        "superseded_by": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^approval-authorities/r[1-9][0-9]*$" }
+          ]
+        }
       },
       "allOf": [
         {
           "if": { "properties": { "status": { "const": "UNASSIGNED" } } },
-          "then": { "properties": { "actor_id": false, "actor_login": false } },
-          "else": { "properties": { "actor_id": true }, "required": ["actor_id"] }
+          "then": {
+            "properties": {
+              "actor_id": false,
+              "actor_node_id": false,
+              "actor_login": false,
+              "effective_from": false,
+              "effective_until": false,
+              "scope": false,
+              "assignment_evidence": false,
+              "revocation_status": false,
+              "superseded_by": false
+            }
+          },
+          "else": {
+            "required": [
+              "actor_id",
+              "actor_node_id",
+              "actor_login",
+              "effective_from",
+              "effective_until",
+              "scope",
+              "assignment_evidence",
+              "revocation_status",
+              "superseded_by"
+            ]
+          }
         }
       ]
     },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id", "decision_adr", "policy_revision", "purpose"],
+      "properties": {
+        "repository_id": { "const": 1291151138 },
+        "decision_adr": { "enum": ["ADR-026", "ADR-027"] },
+        "policy_revision": { "type": "string", "pattern": "^program-c/policy-r[1-9][0-9]*$" },
+        "purpose": { "enum": ["DECISION_REVIEW", "QA_EVIDENCE_REVIEW", "SECURITY_REVIEW", "LEGAL_REVIEW", "MERGE_AUTHORIZATION"] }
+      }
+    },
+    "assignmentEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_kind", "assignment_pr_number", "assignment_head_sha", "observed_at", "evidence_sha256"],
+      "properties": {
+        "evidence_kind": { "const": "BASE_REGISTRY_ASSIGNMENT" },
+        "assignment_pr_number": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "assignment_head_sha": { "$ref": "#/$defs/gitSha" },
+        "observed_at": { "$ref": "#/$defs/instant" },
+        "evidence_sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "instant": { "type": "string", "format": "iso-instant" },
     "productRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-PRODUCT" } } }] },
     "privacyRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-DATA-PRIVACY" } } }] },
     "qaRole": { "allOf": [{ "$ref": "#/$defs/actor" }, { "type": "object", "properties": { "role": { "const": "OWN-QA-EVIDENCE" } } }] },

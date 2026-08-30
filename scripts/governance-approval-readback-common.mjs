@@ -86,6 +86,22 @@ export const authorityIntervalContains = (entry, instant) => (
   && instantValue(instant) < instantValue(entry.effective_until)
 );
 
+const assignmentEvidenceIsCurrent = (evidence, instants) => (
+  hasExactKeys(evidence, [
+    'evidence_kind', 'assignment_pr_number', 'assignment_head_sha', 'observed_at',
+    'evidence_sha256',
+  ])
+  && evidence.evidence_kind === 'BASE_REGISTRY_ASSIGNMENT'
+  && isSafePositiveInteger(evidence.assignment_pr_number)
+  && isGitSha(evidence.assignment_head_sha)
+  && isCanonicalInstant(evidence.observed_at)
+  && isDigest(evidence.evidence_sha256)
+  && instants.every((instant) => (
+    isCanonicalInstant(instant)
+    && instantValue(evidence.observed_at) <= instantValue(instant)
+  ))
+);
+
 export const authorityIsCurrent = (entry, instants, purpose, candidate) => (
   entry?.status === 'ASSIGNED'
   && isSafePositiveInteger(entry.actor_id)
@@ -94,6 +110,7 @@ export const authorityIsCurrent = (entry, instants, purpose, candidate) => (
   && typeof entry.actor_login === 'string'
   && entry.actor_login.length > 0
   && instants.every((instant) => authorityIntervalContains(entry, instant))
+  && assignmentEvidenceIsCurrent(entry.assignment_evidence, instants)
   && entry.scope?.repository_id === candidate?.repository?.id
   && entry.scope?.decision_adr === candidate?.decision?.adr
   && entry.scope?.policy_revision === candidate?.decision?.policy_revision

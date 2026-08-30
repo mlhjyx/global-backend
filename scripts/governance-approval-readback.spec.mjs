@@ -62,6 +62,13 @@ const authorityRole = (role, id, login, purpose) => ({
     policy_revision: 'program-c/policy-r2',
     purpose,
   },
+  assignment_evidence: {
+    evidence_kind: 'BASE_REGISTRY_ASSIGNMENT',
+    assignment_pr_number: id,
+    assignment_head_sha: BASE_SHA,
+    observed_at: '2026-08-30T00:00:00.000Z',
+    evidence_sha256: DIGEST_D,
+  },
   revocation_status: 'ACTIVE',
   superseded_by: null,
 });

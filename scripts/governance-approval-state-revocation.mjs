@@ -5,6 +5,7 @@ import {
   isCanonicalInstant,
   isCausalOrder,
   isDigest,
+  isGitSha,
   isPlainObject,
   isSafePositiveInteger,
 } from './governance-approval-readback-common.mjs';
@@ -36,14 +37,18 @@ const AUTHORITY_ROOT_KEYS = Object.freeze([
 ]);
 const AUTHORITY_ROLE_KEYS = Object.freeze([
   'role', 'status', 'actor_id', 'actor_node_id', 'actor_login', 'effective_from',
-  'effective_until', 'scope', 'revocation_status', 'superseded_by',
+  'effective_until', 'scope', 'assignment_evidence', 'revocation_status', 'superseded_by',
+]);
+const AUTHORITY_ASSIGNMENT_KEYS = Object.freeze([
+  'evidence_kind', 'assignment_pr_number', 'assignment_head_sha', 'observed_at',
+  'evidence_sha256',
 ]);
 const AUTHORITY_SCOPE_KEYS = Object.freeze([
   'repository_id', 'decision_adr', 'policy_revision', 'purpose',
 ]);
 const AUTHORITY_FACT_KEYS = Object.freeze([
   'revision', 'sha256', 'rawSha256', 'role', 'actorId', 'effectiveFrom',
-  'effectiveUntil', 'scope', 'revocationStatus', 'supersededBy',
+  'effectiveUntil', 'scope', 'assignmentEvidence', 'revocationStatus', 'supersededBy',
 ]);
 const AUTHORITY_FACT_SCOPE_KEYS = Object.freeze([
   'repositoryId', 'decisionId', 'policyRevision', 'purpose',
@@ -82,6 +87,14 @@ const byteLengthWithin = (value, limit) => {
 const receiptIdValid = (value) => (
   typeof value === 'string' && RECEIPT_ID_PATTERN.test(value)
 );
+const assignmentEvidenceClosed = (value) => (
+  hasExactKeys(value, AUTHORITY_ASSIGNMENT_KEYS)
+  && value.evidence_kind === 'BASE_REGISTRY_ASSIGNMENT'
+  && isSafePositiveInteger(value.assignment_pr_number)
+  && isGitSha(value.assignment_head_sha)
+  && isCanonicalInstant(value.observed_at)
+  && isDigest(value.evidence_sha256)
+);
 const registryRoleClosed = (role) => (
   hasExactKeys(role, AUTHORITY_ROLE_KEYS)
   && AUTHORITY_ROLES.has(role.role)
@@ -99,6 +112,7 @@ const registryRoleClosed = (role) => (
   && ['ADR-026', 'ADR-027'].includes(role.scope.decision_adr)
   && /^program-c\/policy-r[1-9][0-9]*$/.test(role.scope.policy_revision)
   && PURPOSE_BY_ROLE[role.role] === role.scope.purpose
+  && assignmentEvidenceClosed(role.assignment_evidence)
   && ['ACTIVE', 'REVOKED'].includes(role.revocation_status)
   && (role.superseded_by === null
     || /^approval-authorities\/r[1-9][0-9]*$/.test(role.superseded_by))
@@ -142,6 +156,15 @@ const authorityFactClosed = (authority) => (
   && ['ADR-026', 'ADR-027'].includes(authority.scope.decisionId)
   && /^program-c\/policy-r[1-9][0-9]*$/.test(authority.scope.policyRevision)
   && PURPOSE_BY_ROLE[authority.role] === authority.scope.purpose
+  && hasExactKeys(authority.assignmentEvidence, [
+    'evidenceKind', 'assignmentPrNumber', 'assignmentHeadSha', 'observedAt',
+    'evidenceSha256',
+  ])
+  && authority.assignmentEvidence.evidenceKind === 'BASE_REGISTRY_ASSIGNMENT'
+  && isSafePositiveInteger(authority.assignmentEvidence.assignmentPrNumber)
+  && isGitSha(authority.assignmentEvidence.assignmentHeadSha)
+  && isCanonicalInstant(authority.assignmentEvidence.observedAt)
+  && isDigest(authority.assignmentEvidence.evidenceSha256)
   && ['ACTIVE', 'REVOKED'].includes(authority.revocationStatus)
   && (authority.supersededBy === null
     || /^approval-authorities\/r[1-9][0-9]*$/.test(authority.supersededBy))
@@ -168,6 +191,13 @@ const authorityFact = (authority, rawSha256, roleName) => {
       decisionId: role.scope.decision_adr,
       policyRevision: role.scope.policy_revision,
       purpose: role.scope.purpose,
+    },
+    assignmentEvidence: {
+      evidenceKind: role.assignment_evidence.evidence_kind,
+      assignmentPrNumber: role.assignment_evidence.assignment_pr_number,
+      assignmentHeadSha: role.assignment_evidence.assignment_head_sha,
+      observedAt: role.assignment_evidence.observed_at,
+      evidenceSha256: role.assignment_evidence.evidence_sha256,
     },
     revocationStatus: role.revocation_status,
     supersededBy: role.superseded_by,

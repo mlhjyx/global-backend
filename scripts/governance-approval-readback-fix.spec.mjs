@@ -51,6 +51,13 @@ const authorityRole = (role, id, login, purpose) => ({
   effective_from: '2026-08-30T00:00:00.000Z',
   effective_until: '2026-08-31T00:00:00.000Z',
   scope: { repository_id: REPOSITORY.id, decision_adr: 'ADR-027', policy_revision: 'program-c/policy-r2', purpose },
+  assignment_evidence: {
+    evidence_kind: 'BASE_REGISTRY_ASSIGNMENT',
+    assignment_pr_number: id,
+    assignment_head_sha: BASE_SHA,
+    observed_at: '2026-08-30T00:00:00.000Z',
+    evidence_sha256: DIGEST_D,
+  },
   revocation_status: 'ACTIVE',
   superseded_by: null,
 });

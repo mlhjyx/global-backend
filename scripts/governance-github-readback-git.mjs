@@ -18,6 +18,7 @@ import {
   stableJson,
 } from './governance-github-readback-common.mjs';
 import { apiUrl, fetchJson } from './governance-github-readback-rest.mjs';
+import { validateApprovalAuthorities } from './governance-approval-schema-validator.mjs';
 
 const LFS_PREFIX = Buffer.from('version https://git-lfs.github.com/spec/v1', 'ascii');
 
@@ -114,8 +115,10 @@ export const readJsonFile = async (state, entry, commitSha, limits) => {
 
 export const authorityActors = (authorityFile) => {
   const value = authorityFile.value;
+  const schemaValidation = validateApprovalAuthorities(value);
   requireCondition(
-    isPlainObject(value)
+    schemaValidation.valid
+      && isPlainObject(value)
       && value.schema_version === 'approval-authorities/v1'
       && value.repository?.id === REPOSITORY_ID
       && value.repository?.full_name === REPOSITORY_FULL_NAME
@@ -124,7 +127,6 @@ export const authorityActors = (authorityFile) => {
     'APPROVAL_GITHUB_AUTHORITY_MISMATCH',
   );
   const result = new Map();
-  const roles = [];
   for (const role of ROLES) {
     const matches = value.roles.filter((entry) => entry?.role === role);
     requireCondition(matches.length === 1 && matches[0].status === 'ASSIGNED', 'APPROVAL_GITHUB_AUTHORITY_MISMATCH');
@@ -136,14 +138,20 @@ export const authorityActors = (authorityFile) => {
       'APPROVAL_GITHUB_AUTHORITY_MISMATCH',
     );
     result.set(role, entry);
-    roles.push({
-      role,
-      status: entry.status,
-      actor_id: entry.actor_id,
-      actor_node_id: entry.actor_node_id,
-      actor_login: entry.actor_login,
-    });
   }
+  const roles = value.roles.map((entry) => ({
+    role: entry.role,
+    status: entry.status,
+    actor_id: entry.actor_id,
+    actor_node_id: entry.actor_node_id,
+    actor_login: entry.actor_login,
+    effective_from: entry.effective_from,
+    effective_until: entry.effective_until,
+    scope: { ...entry.scope },
+    assignment_evidence: { ...entry.assignment_evidence },
+    revocation_status: entry.revocation_status,
+    superseded_by: entry.superseded_by,
+  }));
   return {
     actors: result,
     file: deepFreeze({
@@ -152,6 +160,7 @@ export const authorityActors = (authorityFile) => {
         schema_version: value.schema_version,
         repository: { id: value.repository.id, full_name: value.repository.full_name },
         revision: value.revision,
+        actor_policy: value.actor_policy,
         roles,
       },
     }),

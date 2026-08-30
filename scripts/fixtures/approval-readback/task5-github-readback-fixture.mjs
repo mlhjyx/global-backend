@@ -34,6 +34,19 @@ export const ROLES = Object.freeze([
   'OWN-QA-EVIDENCE',
   'OWN-SECURITY',
 ]);
+const AUTHORITY_ROLES = Object.freeze([
+  ...ROLES,
+  'LEGAL-REVIEW',
+  'MERGE-AUTHORIZER',
+]);
+const PURPOSE_BY_ROLE = Object.freeze({
+  'OWN-PRODUCT': 'DECISION_REVIEW',
+  'OWN-DATA-PRIVACY': 'DECISION_REVIEW',
+  'OWN-QA-EVIDENCE': 'QA_EVIDENCE_REVIEW',
+  'OWN-SECURITY': 'SECURITY_REVIEW',
+  'LEGAL-REVIEW': 'LEGAL_REVIEW',
+  'MERGE-AUTHORIZER': 'MERGE_AUTHORIZATION',
+});
 
 export const commandLine = (role) => (
   `APPROVE DECISION ADR-027 REV program-c/policy-r2 ROLE ${role} DIGEST sha256:${'a'.repeat(64)}`
@@ -69,17 +82,37 @@ export const fixtureState = () => {
     'OWN-DATA-PRIVACY': actor(102, 'privacy-owner'),
     'OWN-QA-EVIDENCE': actor(103, 'qa-owner'),
     'OWN-SECURITY': actor(104, 'security-owner'),
+    'LEGAL-REVIEW': actor(105, 'legal-owner'),
+    'MERGE-AUTHORIZER': actor(106, 'merge-authorizer'),
   };
   const authorityValue = {
     schema_version: 'approval-authorities/v1',
     repository: { id: REPOSITORY_ID, full_name: REPOSITORY_FULL_NAME },
     revision: 'approval-authorities/r2',
-    roles: ROLES.map((role) => ({
+    actor_policy: 'DISTINCT_ACTORS_REQUIRED',
+    roles: AUTHORITY_ROLES.map((role) => ({
       role,
       status: 'ASSIGNED',
       actor_id: actors[role].id,
       actor_node_id: actors[role].node_id,
       actor_login: actors[role].login,
+      effective_from: '2026-08-30T08:00:00.000Z',
+      effective_until: '2026-08-30T13:00:00.000Z',
+      scope: {
+        repository_id: REPOSITORY_ID,
+        decision_adr: 'ADR-027',
+        policy_revision: 'program-c/policy-r2',
+        purpose: PURPOSE_BY_ROLE[role],
+      },
+      assignment_evidence: {
+        evidence_kind: 'BASE_REGISTRY_ASSIGNMENT',
+        assignment_pr_number: actors[role].id,
+        assignment_head_sha: BASE_SHA,
+        observed_at: '2026-08-30T08:00:00.000Z',
+        evidence_sha256: DECISION_RAW_SHA256,
+      },
+      revocation_status: 'ACTIVE',
+      superseded_by: null,
     })),
   };
   const manifestValue = {

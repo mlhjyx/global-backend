@@ -15,6 +15,7 @@ import {
   inspectSyntheticProgramCMergeAuthorizationConsumptionContext,
 } from './governance-approval-schema-validator.mjs';
 import { buildApprovalReceiptArtifact, renderApprovalReceiptCore, sha256Prefixed } from './governance-approval-safe-json.mjs';
+import { authorityIsCurrent } from './governance-approval-readback-common.mjs';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const OTHER_DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -74,7 +75,37 @@ const authorities = () => ({
 const assignedAuthorities = () => ({
   ...authorities(),
   revision: 'approval-authorities/r2',
-  roles: ROLES.map((role, index) => ({ role, actor_id: index + 1, status: 'ASSIGNED' })),
+  roles: ROLES.map((role, index) => ({
+    role,
+    status: 'ASSIGNED',
+    actor_id: index + 1,
+    actor_node_id: `NODE-${index + 1}`,
+    actor_login: `${role.toLowerCase()}-owner`,
+    effective_from: '2026-08-29T00:00:00.000Z',
+    effective_until: '2026-08-31T00:00:00.000Z',
+    scope: {
+      repository_id: REPOSITORY.id,
+      decision_adr: 'ADR-027',
+      policy_revision: 'program-c/policy-r2',
+      purpose: {
+        'OWN-PRODUCT': 'DECISION_REVIEW',
+        'OWN-DATA-PRIVACY': 'DECISION_REVIEW',
+        'OWN-QA-EVIDENCE': 'QA_EVIDENCE_REVIEW',
+        'OWN-SECURITY': 'SECURITY_REVIEW',
+        'LEGAL-REVIEW': 'LEGAL_REVIEW',
+        'MERGE-AUTHORIZER': 'MERGE_AUTHORIZATION',
+      }[role],
+    },
+    assignment_evidence: {
+      evidence_kind: 'BASE_REGISTRY_ASSIGNMENT',
+      assignment_pr_number: 40 + index,
+      assignment_head_sha: `${index + 1}`.repeat(40),
+      observed_at: '2026-08-29T00:00:00.000Z',
+      evidence_sha256: index % 2 === 0 ? DIGEST : OTHER_DIGEST,
+    },
+    revocation_status: 'ACTIVE',
+    superseded_by: null,
+  })),
 });
 
 const receipt = () => {
@@ -265,8 +296,37 @@ test('approval authorities are closed, exact, and honestly unassigned', () => {
   ]) {
     const value = authorities(); mutate(value); expectInvalid(validateApprovalAuthorities, value);
   }
-  const assigned = assignedAuthorities(); assigned.roles[1].actor_id = 1;
-  expectInvalid(validateApprovalAuthorities, assigned);
+  const assigned = assignedAuthorities();
+  expectValid(validateApprovalAuthorities, assigned);
+  const candidateContext = {
+    repository: clone(REPOSITORY),
+    decision: { adr: 'ADR-027', policy_revision: 'program-c/policy-r2' },
+  };
+  assert.equal(assigned.roles.every((role) => authorityIsCurrent(
+    role,
+    [INSTANT],
+    role.scope.purpose,
+    candidateContext,
+  )), true);
+
+  const duplicate = assignedAuthorities(); duplicate.roles[1].actor_id = 1;
+  expectInvalid(validateApprovalAuthorities, duplicate);
+
+  const actorIdOnly = {
+    ...authorities(),
+    revision: 'approval-authorities/r2',
+    roles: ROLES.map((role, index) => ({ role, actor_id: index + 1, status: 'ASSIGNED' })),
+  };
+  expectInvalid(validateApprovalAuthorities, actorIdOnly);
+
+  for (const field of [
+    'actor_node_id', 'actor_login', 'effective_from', 'effective_until', 'scope',
+    'assignment_evidence', 'revocation_status', 'superseded_by',
+  ]) {
+    const incomplete = assignedAuthorities();
+    delete incomplete.roles[0][field];
+    expectInvalid(validateApprovalAuthorities, incomplete);
+  }
 });
 
 test('approval receipts bind distinct numeric actors and canonical approval context', () => {

@@ -144,17 +144,21 @@ test('rejects cross-pair recombination inside multi-entry static tuple allowlist
   });
 });
 
-test('normalizes authority identities without forwarding free-form authority fields', async () => {
-  const state = fixtureState();
-  const blob = state.blobs.get('4'.repeat(40));
-  const authority = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
-  authority.private_notes = 'authority-free-form-must-not-escape';
-  authority.roles[0].free_text = 'role-free-form-must-not-escape';
-  state.blobs.set('4'.repeat(40), { sha: '4'.repeat(40), ...encodeBlob(JSON.stringify(authority)) });
-  const { evidence } = await collect(state);
-  const retained = JSON.stringify(evidence.authority_file);
-  assert.equal(retained.includes('authority-free-form'), false);
-  assert.equal(retained.includes('role-free-form'), false);
+test('rejects free-form root and role fields in the closed authority registry', async (t) => {
+  for (const [name, mutate] of [
+    ['root field', (authority) => { authority.private_notes = 'authority-free-form'; }],
+    ['role field', (authority) => { authority.roles[0].free_text = 'role-free-form'; }],
+  ]) await t.test(name, async () => {
+    const state = fixtureState();
+    const blob = state.blobs.get('4'.repeat(40));
+    const authority = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+    mutate(authority);
+    state.blobs.set('4'.repeat(40), {
+      sha: '4'.repeat(40),
+      ...encodeBlob(JSON.stringify(authority)),
+    });
+    await expectCode(() => collect(state), 'APPROVAL_GITHUB_AUTHORITY_MISMATCH');
+  });
 });
 
 test('rejects executable, symlink, gitlink, tree, and absent proposal entries', async (t) => {
