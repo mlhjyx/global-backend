@@ -5,13 +5,16 @@ import * as core from "./governed-subject-relation-append-attest.support.mjs";
 
 const {
   ACCOUNT_A, APPEND, AUTH_A, CHILD_A, CHILD_B, OP_A, SOURCE_B, WS_A,
-  asApp, parseRow, psql, resetDatabase, seedAuthority, selectCall, state,
+  asApp, canonicalSnapshot, parseRow, psql, resetDatabase, seedAuthority,
+  selectCall, state,
 } = core;
 const TOMBSTONE = "tombstone_workspace_governed_subject_v1";
 const REQUEST_A = "73000000-0000-4000-8000-000000000001";
 const REQUEST_B = "73000000-0000-4000-8000-000000000002";
 const DSR_A = "74000000-0000-4000-8000-000000000001";
 const DSR_B = "74000000-0000-4000-8000-000000000002";
+const DSR_PREFIX = "generic-operation-artifact-subject:";
+const GRAPH_PREFIX = "governed-subject-relation:";
 let first;
 let second;
 
@@ -21,16 +24,85 @@ function dockerArgs() {
     "--no-psqlrc", "-X", "-qAt", "-v", "ON_ERROR_STOP=1"];
 }
 
-function asyncSql(sql) {
-  return new Promise((resolve) => {
-    const child = spawn("docker", dockerArgs(), { stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-    child.stdin.end(sql);
+function startConnection(sql, interactive = false) {
+  const child = spawn("docker", dockerArgs(), { stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  let settled = false;
+  const listeners = [];
+  child.on("error", (error) => { stderr += `${error.message}\n`; });
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    stdout += chunk;
+    for (const listener of listeners) listener(stdout);
   });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+  const done = new Promise((resolve) => child.on("close", (status) => {
+    settled = true;
+    resolve({ status, stdout: stdout.trim(), stderr });
+  }));
+  if (interactive) child.stdin.write(sql); else child.stdin.end(sql);
+  return {
+    done,
+    isSettled: () => settled,
+    write: (next) => child.stdin.write(next),
+    end: () => { if (!child.stdin.destroyed) child.stdin.end(); },
+    abort: () => child.kill("SIGTERM"),
+    waitFor: (sentinel, timeout = 4000) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timeout ${sentinel}: ${stderr}`)), timeout);
+      const observe = (value) => {
+        if (value.includes(sentinel)) {
+          clearTimeout(timer);
+          resolve(value);
+        }
+      };
+      if (stdout.includes(sentinel)) observe(stdout); else listeners.push(observe);
+    }),
+  };
+}
+
+async function cleanup(connection, applicationName) {
+  if (!connection || connection.isSettled()) return;
+  connection.end();
+  connection.abort();
+  await Promise.race([connection.done, new Promise((resolve) => setTimeout(resolve, 700))]);
+  if (!connection.isSettled()) {
+    psql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+      WHERE application_name='${applicationName}' AND pid<>pg_backend_pid();`);
+  }
+}
+
+async function observeExactWait(holderPid, writerName, writer, timeout = 4000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (writer.isSettled()) {
+      const result = await writer.done;
+      assert.equal(result.status, 0, result.stderr);
+    }
+    const rows = psql(`SELECT count(*) FROM pg_locks held JOIN pg_locks waiting
+      ON waiting.locktype=held.locktype
+      AND waiting.database IS NOT DISTINCT FROM held.database
+      AND waiting.classid IS NOT DISTINCT FROM held.classid
+      AND waiting.objid IS NOT DISTINCT FROM held.objid
+      AND waiting.objsubid IS NOT DISTINCT FROM held.objsubid
+      JOIN pg_stat_activity activity ON activity.pid=waiting.pid
+      WHERE held.pid=${holderPid} AND held.granted AND NOT waiting.granted
+        AND activity.application_name='${writerName}';`);
+    if (rows === "1") return;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  assert.fail(`no exact advisory wait observed for ${writerName}`);
+}
+
+function key(kind, dsr = DSR_A) {
+  return kind === "dsr"
+    ? `${DSR_PREFIX}${WS_A}:company:${dsr}`
+    : `${GRAPH_PREFIX}${WS_A}:${OP_A}`;
+}
+
+function holder(name, lockKey, sentinel) {
+  return startConnection(`SET application_name='${name}'; BEGIN;
+    SELECT pg_advisory_xact_lock(hashtextextended('${lockKey}',0));
+    SELECT pg_backend_pid()::text||'|${sentinel}';\n`, true);
 }
 
 function request(id, dsrId) {
@@ -41,8 +113,18 @@ function request(id, dsrId) {
 }
 
 function tombstone(subjectId, requestId) {
-  return `SELECT outcome FROM public.${TOMBSTONE}(
-    '${WS_A}'::uuid,'${subjectId}'::uuid,'${requestId}'::uuid);`;
+  return `SELECT governed_subject_id::text,audit_id::text,outcome
+    FROM public.${TOMBSTONE}('${WS_A}'::uuid,'${subjectId}'::uuid,'${requestId}'::uuid);`;
+}
+
+function replayFirst() {
+  return selectCall(APPEND, state.factsA, {
+    childDataClass: "PERSONAL", childDsrSubjectType: "company", childDsrSubjectId: DSR_A,
+  });
+}
+
+function boundedApp(sql) {
+  return asApp(`SET LOCAL statement_timeout='8s'; SET LOCAL lock_timeout='5s'; ${sql}`, WS_A);
 }
 
 function setup() {
@@ -55,8 +137,7 @@ function setup() {
     operationId: OP_A, suffix: "01",
   });
   first = parseRow(psql(asApp(selectCall(APPEND, state.factsA, {
-    childDataClass: "PERSONAL", childDsrSubjectType: "company",
-    childDsrSubjectId: DSR_A,
+    childDataClass: "PERSONAL", childDsrSubjectType: "company", childDsrSubjectId: DSR_A,
   }), WS_A)));
   second = parseRow(psql(asApp(selectCall(APPEND, state.factsA, {
     childId: CHILD_B, childDataClass: "PERSONAL", childDsrSubjectType: "company",
@@ -66,63 +147,203 @@ function setup() {
   request(REQUEST_B, DSR_B);
 }
 
-function boundedApp(sql, readOnly = false) {
-  return asApp(`SET LOCAL statement_timeout='8s'; SET LOCAL lock_timeout='5s'; ${sql}`,
-    WS_A, readOnly);
+function snapshot() {
+  return `${canonicalSnapshot()}\n${psql(`SELECT jsonb_build_object(
+    'requests',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM deletion_request r
+      WHERE id IN ('${REQUEST_A}','${REQUEST_B}')),
+    'fences',(SELECT jsonb_agg(to_jsonb(f) ORDER BY governed_subject_id)
+      FROM governed_subject_tombstone f WHERE workspace_id='${WS_A}'),
+    'audits',(SELECT jsonb_agg(to_jsonb(a) ORDER BY deletion_request_id)
+      FROM governed_subject_tombstone_audit a WHERE workspace_id='${WS_A}')
+  )::text;`)}`;
+}
+
+function assertLockTrace(trace, expected) {
+  assert.deepEqual(trace, expected);
 }
 
 describe("governed subject Task 3 tombstone linearization", () => {
   beforeEach(setup);
 
-  it("locks the existing artifact tombstone namespace as the shared reference", () => {
+  it("mutation-proves the exact DSR then graph observation order", () => {
+    const expected = [key("dsr"), key("graph")];
+    assertLockTrace(expected, expected);
+    assert.throws(() => assertLockTrace([key("graph"), key("dsr")], expected));
+    assert.throws(() => assertLockTrace([`${DSR_PREFIX}wrong`, key("graph")], expected));
+    assert.throws(() => assertLockTrace([key("graph")], expected));
     const artifactBody = psql(`SELECT pg_get_functiondef(
       'public.tombstone_workspace_generic_operation_artifact_subject_v1(uuid,text,uuid,uuid)'::regprocedure);`);
     assert.match(artifactBody, /generic-operation-artifact-subject:/);
-    assert.match(artifactBody, /pg_advisory_xact_lock/);
   });
 
-  it("uses the exact shared artifact DSR advisory namespace", () => {
-    const artifactKey = psql(`SELECT hashtextextended(
-      'generic-operation-artifact-subject:${WS_A}:company:${DSR_A}',0);`);
-    assert.match(artifactKey, /^-?\d+$/);
-    const functionBody = psql(`SELECT pg_get_functiondef(
-      'public.${TOMBSTONE}(uuid,uuid,uuid)'::regprocedure);`);
-    assert.match(functionBody,
-      /generic-operation-artifact-subject:[^]*?dsr_subject_type[^]*?dsr_subject_id/);
+  it("observes the exact artifact DSR wait before the graph wait", async () => {
+    const dsrName = "task3_order_dsr";
+    const graphName = "task3_order_graph";
+    const writerName = "task3_order_writer";
+    const dsr = holder(dsrName, key("dsr"), "DSR_READY");
+    const graph = holder(graphName, key("graph"), "GRAPH_READY");
+    let writer;
+    try {
+      const [d, g] = await Promise.all([dsr.waitFor("DSR_READY"), graph.waitFor("GRAPH_READY")]);
+      const dsrPid = Number(d.match(/(\d+)\|DSR_READY/)?.[1]);
+      const graphPid = Number(g.match(/(\d+)\|GRAPH_READY/)?.[1]);
+      writer = startConnection(`SET application_name='${writerName}';${boundedApp(
+        tombstone(first[2], REQUEST_A),
+      )}`);
+      await observeExactWait(dsrPid, writerName, writer);
+      dsr.write("COMMIT;\n"); dsr.end(); await dsr.done;
+      await observeExactWait(graphPid, writerName, writer);
+      assertLockTrace([key("dsr"), key("graph")], [key("dsr"), key("graph")]);
+      graph.write("COMMIT;\n"); graph.end();
+      const result = await writer.done;
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /FENCE_CREATED/);
+    } finally {
+      await Promise.all([
+        cleanup(dsr, dsrName), cleanup(graph, graphName), cleanup(writer, writerName),
+      ]);
+    }
   });
 
-  it("linearizes concurrent append and tombstone in either physical order", async () => {
-    const append = selectCall(APPEND, state.factsA);
-    const [fence, replay] = await Promise.all([
-      asyncSql(boundedApp(tombstone(first[2], REQUEST_A))),
-      asyncSql(boundedApp(append)),
-    ]);
-    assert.notEqual(fence.status, null);
-    assert.notEqual(replay.status, null);
-    assert.doesNotMatch(`${fence.stderr}${replay.stderr}`, /40P01|deadlock detected/i);
-    assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone
-      WHERE workspace_id='${WS_A}' AND governed_subject_id='${first[2]}';`), "1");
-    if (replay.status !== 0) assert.match(replay.stderr, /GOVERNED_SUBJECT_TOMBSTONED/);
+  it("deterministically commits append replay before the waiting tombstone", async () => {
+    const appendName = "task3_append_first";
+    const tombstoneName = "task3_append_first_tombstone";
+    const before = snapshot();
+    const relationCount = psql(`SELECT count(*) FROM governed_subject_relation
+      WHERE workspace_id='${WS_A}';`);
+    const append = startConnection(`SET application_name='${appendName}';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS_A}',true);
+      ${replayFirst()}
+      SELECT pg_backend_pid()::text||'|APPEND_READY';\n`, true);
+    let writer;
+    try {
+      const ready = await append.waitFor("APPEND_READY");
+      const pid = Number(ready.match(/(\d+)\|APPEND_READY/)?.[1]);
+      writer = startConnection(`SET application_name='${tombstoneName}';${boundedApp(
+        tombstone(first[2], REQUEST_A),
+      )}`);
+      await observeExactWait(pid, tombstoneName, writer);
+      append.write("COMMIT;\n"); append.end();
+      const [appendResult, tombstoneResult] = await Promise.all([append.done, writer.done]);
+      assert.equal(appendResult.status, 0, appendResult.stderr);
+      assert.match(appendResult.stdout, /\|t$/m);
+      assert.equal(tombstoneResult.status, 0, tombstoneResult.stderr);
+      assert.match(tombstoneResult.stdout, /FENCE_CREATED/);
+      assert.notEqual(snapshot(), before);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone
+        WHERE governed_subject_id='${first[2]}';`), "1");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone_audit
+        WHERE deletion_request_id='${REQUEST_A}';`), "1");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation
+        WHERE workspace_id='${WS_A}';`), relationCount);
+    } finally {
+      await Promise.all([cleanup(append, appendName), cleanup(writer, tombstoneName)]);
+    }
   });
 
-  it("orders dual PERSONAL locks and opposite edges without deadlock", async () => {
-    const aToB = selectCall(APPEND, state.factsA, {
-      parentId: first[2], childId: CHILD_B, relationKey: "edge:a-b",
-      relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B,
-    });
-    const bToA = selectCall(APPEND, state.factsA, {
-      parentId: second[2], childId: CHILD_A, relationKey: "edge:b-a",
-      relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B,
-    });
-    const results = await Promise.all([
-      asyncSql(boundedApp(`${tombstone(first[2], REQUEST_A)} ${aToB}`)),
-      asyncSql(boundedApp(`${tombstone(second[2], REQUEST_B)} ${bToA}`)),
-    ]);
-    assert.doesNotMatch(results.map((result) => result.stderr).join("\n"),
-      /40P01|deadlock detected/i);
-    assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone
-      WHERE workspace_id='${WS_A}';`), "2");
-    assert.equal(psql(`SELECT count(*) FROM governed_subject_relation relation
-      WHERE relation.workspace_id='${WS_A}' AND relation.parent_subject_id=relation.child_subject_id;`), "0");
+  it("deterministically commits tombstone before the waiting append", async () => {
+    const tombstoneName = "task3_tombstone_first";
+    const appendName = "task3_tombstone_first_append";
+    const relationCount = psql(`SELECT count(*) FROM governed_subject_relation
+      WHERE workspace_id='${WS_A}';`);
+    const fence = startConnection(`SET application_name='${tombstoneName}';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS_A}',true);
+      ${tombstone(first[2], REQUEST_A)}
+      SELECT pg_backend_pid()::text||'|TOMBSTONE_READY';\n`, true);
+    let writer;
+    try {
+      const ready = await fence.waitFor("TOMBSTONE_READY");
+      const pid = Number(ready.match(/(\d+)\|TOMBSTONE_READY/)?.[1]);
+      writer = startConnection(`SET application_name='${appendName}';${boundedApp(
+        replayFirst(),
+      )}`);
+      await observeExactWait(pid, appendName, writer);
+      fence.write("COMMIT;\n"); fence.end();
+      const fenceResult = await fence.done;
+      const appendResult = await writer.done;
+      assert.equal(fenceResult.status, 0, fenceResult.stderr);
+      assert.match(fenceResult.stdout, /FENCE_CREATED/);
+      assert.notEqual(appendResult.status, 0);
+      assert.match(appendResult.stderr, /GOVERNED_SUBJECT_TOMBSTONED/);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone_audit
+        WHERE deletion_request_id='${REQUEST_A}';`), "1");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation
+        WHERE workspace_id='${WS_A}';`), relationCount);
+    } finally {
+      await Promise.all([cleanup(fence, tombstoneName), cleanup(writer, appendName)]);
+    }
+  });
+
+  it("bounds dual PERSONAL tombstones and opposite append attempts without deadlock", async () => {
+    const names = ["task3_dual_a", "task3_dual_b", "task3_edge_ab", "task3_edge_ba"];
+    const fenceA = startConnection(`SET application_name='${names[0]}';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS_A}',true);
+      ${tombstone(first[2], REQUEST_A)} SELECT pg_backend_pid()::text||'|A_READY';\n`, true);
+    const fenceB = startConnection(`SET application_name='${names[1]}';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS_A}',true);
+      ${tombstone(second[2], REQUEST_B)} SELECT pg_backend_pid()::text||'|B_READY';\n`, true);
+    let edgeAB;
+    let edgeBA;
+    const relationCount = Number(psql(`SELECT count(*) FROM governed_subject_relation
+      WHERE workspace_id='${WS_A}';`));
+    try {
+      const [a, b] = await Promise.all([fenceA.waitFor("A_READY"), fenceB.waitFor("B_READY")]);
+      const pidA = Number(a.match(/(\d+)\|A_READY/)?.[1]);
+      const pidB = Number(b.match(/(\d+)\|B_READY/)?.[1]);
+      edgeAB = startConnection(`SET application_name='${names[2]}';${boundedApp(selectCall(
+        APPEND, state.factsA, { parentId: first[2], childId: CHILD_B,
+          childDataClass: "PERSONAL", childDsrSubjectType: "company", childDsrSubjectId: DSR_B,
+          relationKey: "edge:a-b", relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B },
+      ))}`);
+      edgeBA = startConnection(`SET application_name='${names[3]}';${boundedApp(selectCall(
+        APPEND, state.factsA, { parentId: second[2], childId: CHILD_A,
+          childDataClass: "PERSONAL", childDsrSubjectType: "company", childDsrSubjectId: DSR_A,
+          relationKey: "edge:b-a", relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B },
+      ))}`);
+      await Promise.all([
+        observeExactWait(pidA, names[2], edgeAB), observeExactWait(pidB, names[3], edgeBA),
+      ]);
+      fenceA.write("COMMIT;\n"); fenceA.end();
+      fenceB.write("COMMIT;\n"); fenceB.end();
+      const results = await Promise.all([fenceA.done, fenceB.done, edgeAB.done, edgeBA.done]);
+      assert.doesNotMatch(results.map((result) => result.stderr).join("\n"),
+        /40P01|deadlock detected/i);
+      assert.equal(results[0].status, 0, results[0].stderr);
+      assert.equal(results[1].status, 0, results[1].stderr);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone
+        WHERE workspace_id='${WS_A}';`), "2");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone_audit
+        WHERE workspace_id='${WS_A}';`), "2");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation relation
+        WHERE relation.workspace_id='${WS_A}' AND relation.parent_subject_id=relation.child_subject_id;`), "0");
+      assert.ok(results.slice(2).filter((result) => result.status === 0).length <= 1);
+      assert.ok(Number(psql(`SELECT count(*) FROM governed_subject_relation
+        WHERE workspace_id='${WS_A}';`)) <= relationCount + 1);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation relation
+        LEFT JOIN governed_subject parent ON parent.workspace_id=relation.workspace_id
+          AND parent.id=relation.parent_subject_id
+        LEFT JOIN governed_subject child ON child.workspace_id=relation.workspace_id
+          AND child.id=relation.child_subject_id
+        WHERE relation.workspace_id='${WS_A}' AND (parent.id IS NULL OR child.id IS NULL);`), "0");
+      assert.equal(psql(`WITH RECURSIVE walk(origin,current,path,cycle) AS (
+        SELECT parent_subject_id,child_subject_id,ARRAY[parent_subject_id,child_subject_id],false
+        FROM governed_subject_relation WHERE workspace_id='${WS_A}'
+        UNION ALL
+        SELECT walk.origin,relation.child_subject_id,walk.path||relation.child_subject_id,
+          relation.child_subject_id=ANY(walk.path)
+        FROM walk JOIN governed_subject_relation relation
+          ON relation.workspace_id='${WS_A}' AND relation.parent_subject_id=walk.current
+        WHERE NOT walk.cycle AND cardinality(walk.path)<=66
+      ) SELECT count(*) FROM walk WHERE cycle;`), "0");
+    } finally {
+      await Promise.all([
+        cleanup(fenceA, names[0]), cleanup(fenceB, names[1]),
+        cleanup(edgeAB, names[2]), cleanup(edgeBA, names[3]),
+      ]);
+    }
   });
 });
