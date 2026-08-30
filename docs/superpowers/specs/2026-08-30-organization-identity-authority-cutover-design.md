@@ -92,7 +92,7 @@ RETURNS TABLE (
 
 The parameters are `text`, not `uuid`, so malformed hostile values enter the function and can be rejected with a fixed `IDENTITY_RESOLUTION_INPUT_INVALID` token without PostgreSQL echoing the original value before function entry.
 
-The function is `SECURITY DEFINER`, fixes `search_path=pg_catalog,public`, sets bounded runtime `lock_timeout='5s'` and `statement_timeout='60s'`, verifies `session_user='app_user'`, rejects owner/PUBLIC/SET ROLE/wrong or unset workspace, and applies explicit workspace predicates to every read and write.
+The function is `SECURITY DEFINER`, fixes `search_path=pg_catalog,public`, verifies `session_user='app_user'`, rejects owner/PUBLIC/SET ROLE/wrong or unset workspace, and applies explicit workspace predicates to every read and write. The calling transaction must pre-arm `lock_timeout` to a non-zero value no greater than five seconds and `statement_timeout` to a non-zero value no greater than sixty seconds **before** issuing the resolver statement. The function must read back and enforce both bounds before its first database read or advisory lock; an unarmed, zero, malformed, or over-limit caller is denied with a fixed no-echo command-admission error. Function `proconfig` must not override those caller-prearmed values, because PostgreSQL 16 cannot asynchronously arm a new timer for the already-running statement from inside the function.
 
 No public function accepts JSON plan facts. The rejected `apply_organization_identity_resolution_v1(jsonb)` signature must be absent in fresh and upgrade catalogs.
 
@@ -166,7 +166,7 @@ Any foreign resolver version, multiple ACTIVE legacy/v2 links, ACTIVE+PENDING mi
 
 It must:
 
-- set a bounded transaction-local timeout before the first source-level advisory lock;
+- before the resolver `SELECT` begins, set transaction-local `lock_timeout` to a non-zero value no greater than five seconds and `statement_timeout` to a non-zero value no greater than sixty seconds; preserve that ordering before the first source-level advisory lock and let the database command verify the armed values;
 - use one `SuppressionThenIdentityLockReceipt` when a surrounding caller needs to keep suppression/identity linearized across subsequent Canonical/Evidence writes;
 - validate exact DB row shape, UUID/hash/null matrix, counts, and outcome union;
 - map direct and Prisma-nested SQLSTATEs to fixed no-echo errors;
@@ -253,7 +253,7 @@ RED must reproduce and GREEN must reject:
 - exact same-Raw replay, self-consistent different hash drift, foreign resolver, multiple ACTIVE, ACTIVE+PENDING, partial/resolved conflict;
 - equivalent different-Raw conflict reuse with exact facts/party/link readback;
 - malformed nested UUID/no-echo markers, oversized JSON/arrays, owner/PUBLIC/SET ROLE/unset/wrong workspace/cross-tenant;
-- runtime lock/statement timeout without a test-injected caller timeout;
+- hard runtime lock/statement timeout with transaction-local bounds pre-armed before the resolver statement; unarmed/zero/over-limit direct calls must fail closed, and real slow pre-write reads, cumulative row-lock waits, replay returns, and write triggers must be bounded without relying only on cooperative post-phase checks;
 - unexpected function owner/ACL/catalog residue before `CREATE FUNCTION`.
 
 ### 8.2 Caller cutover
