@@ -259,7 +259,7 @@ CREATE FUNCTION public._governed_relation_lock_snapshot_dsr_v1(
 SET search_path = pg_catalog, public AS $locks$
 DECLARE key TEXT;
 BEGIN
-  IF current_setting('app.governed_relation_graph_lock',true)=p_operation_id::text AND EXISTS (
+  IF current_setting('app.governed_relation_graph_lock',true)=p_operation_id::text AND EXISTS (SELECT 1 FROM pg_locks graph WHERE graph.pid=pg_backend_pid() AND graph.locktype='advisory' AND graph.granted AND graph.classid::bigint=((hashtextextended('governed-subject-relation:'||p_workspace_id::text||':'||p_operation_id::text,0)>>32)&4294967295) AND graph.objid::bigint=(hashtextextended('governed-subject-relation:'||p_workspace_id::text||':'||p_operation_id::text,0)&4294967295)) AND EXISTS (
     SELECT 1 FROM jsonb_array_elements_text(p_snapshot->'dsrKeys') value WHERE NOT EXISTS (
       SELECT 1 FROM pg_locks held WHERE held.pid=pg_backend_pid() AND held.locktype='advisory'
        AND held.granted AND held.classid::bigint=((hashtextextended(
