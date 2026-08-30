@@ -33,10 +33,10 @@ const APPROVAL_SCHEMA_VERSIONS = Object.freeze({
   release: "release-bundle/v1",
 });
 const APPROVAL_SCHEMA_CANONICAL_SHA256 = Object.freeze({
-  receipt: "6f6d73c63adedd137a00197dba4ef2adb9d8443411ee7e30527dd03a22ff89de",
+  receipt: "fc440f57d9932fbcd8827df2d29a4e98fe87f2a68028d11e22a7467ba384e998",
   attestation:
     "70e64fc4c2b766124d5a29cecb1997ac5c26aad4e75061afb0918b6d76715b1e",
-  verifier: "f066d584da33ecb456bba0ab81b029435a5ac85619fca2f5b833e788ca09a59a",
+  verifier: "64aef09506fef75aa33f1cb038fd8607f383df468a4bf680773434433b8ac271",
   release: "3406f720c2dbac3b072f71a5805629f63dc6924072b0643cf573d235e716e3f1",
 });
 const AUTHORITY_RELATIONSHIPS = Object.freeze([
