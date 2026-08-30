@@ -346,7 +346,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
         fn({
           $queryRaw: vi.fn(async (query) => {
             queries.push(query);
-            if (queries.length === 2) {
+            if (queries.length === 3) {
               return [{ status: "APPLIED", ack_json: artifactAck(query.values ?? []) }];
             }
             return [
@@ -419,6 +419,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
       null,
       null,
     ]);
+    expect(queries[1]?.strings?.join("")).toContain(
+      "lock_execution_domain_ack_authority_first_v1",
+    );
+    expect(queries[2]?.strings?.join("")).toContain(
+      "apply_execution_domain_ack_v1",
+    );
   });
 
   it("rejects artifact receipts when the locked row omits or drifts from the submitted manifest reference", async () => {
