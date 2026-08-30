@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it } from "node:test";
+import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs";
+
+const repositoryRoot = resolve(import.meta.dirname, "../../..");
+const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
+const currentSchemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
+const currentMigrationPath = resolve(
+  repositoryRoot,
+  "packages/db/prisma/migrations/20260830090000_organization_identity_v2_resolver_command/migration.sql",
+);
 
 const receiptPath = process.env.TASK6B_A1_RECEIPT_PATH;
 const receiptPathExpected =
   "/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan/.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A1-disposable-setup-receipt.md";
 const receiptHash =
   "4596418fc39fc8b7ce8a6cd9b299e936f5e1e215512e4d1356ad5b95aeb9839c";
+const admissionBaseUrl = process.env.TASK6B_A3_DATABASE_URL;
 const topology = Object.freeze({
   container: "codex-task6b-identity-authority-pg-20260830-a",
   containerId:
@@ -59,6 +70,30 @@ const catalogContract = Object.freeze({
   [signature.command]:
     "TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|true|v|u|true|false|false|f|search_path=pg_catalog, public,lock_timeout=5s,statement_timeout=60s,row_security=off|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
 });
+const admissionDatabases = Object.freeze([
+  "task_a3_fix3_unrelated_default_positive",
+  "task_a3_fix3_owner_defaults_positive",
+  "task_a3_fix3_global_default_negative",
+  "task_a3_fix3_public_default_negative",
+  "task_a3_fix3_direct_membership_negative",
+  "task_a3_fix3_transitive_membership_negative",
+  "task_a3_fix3_inert_membership_positive",
+]);
+const admissionDatabaseSet = new Set(admissionDatabases);
+const admissionRoles = Object.freeze([
+  "task_a3_fix3_direct_member",
+  "task_a3_fix3_transitive_leaf",
+  "task_a3_fix3_transitive_mid",
+  "task_a3_fix3_inert_member",
+]);
+const finalAclRows = Object.freeze([
+  "organization_identity_acquire_advisory_until_v1|global:EXECUTE:false:global",
+  "organization_identity_authority_from_raw_v1|global:EXECUTE:false:global",
+  "organization_identity_blocker_from_raw_v1|global:EXECUTE:false:global",
+  "organization_identity_canonical_suppression_value_v1|global:EXECUTE:false:global",
+  "organization_identity_plan_from_snapshot_v1|global:EXECUTE:false:global",
+  "resolve_organization_identity_for_raw_v1|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
+]);
 
 function docker(args, input = "") {
   const result = spawnSync("docker", args, {
@@ -89,6 +124,196 @@ function psql(statement) {
       "ON_ERROR_STOP=1",
     ],
     { encoding: "utf8", input: statement, maxBuffer: 4 * 1024 * 1024 },
+  );
+}
+
+function psqlDatabase(database, statement) {
+  assert.ok(
+    database === "global" || database === "postgres" || admissionDatabaseSet.has(database),
+    `database outside Task A3 admission scope: ${database}`,
+  );
+  return spawnSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      topology.container,
+      "psql",
+      "-U",
+      "global",
+      "-d",
+      database,
+      "--no-psqlrc",
+      "-X",
+      "-qAt",
+      "-v",
+      "ON_ERROR_STOP=1",
+    ],
+    { encoding: "utf8", input: statement, maxBuffer: 16 * 1024 * 1024 },
+  );
+}
+
+function sqlDatabase(database, statement) {
+  const result = psqlDatabase(database, statement);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`.trim());
+  return result.stdout.trim();
+}
+
+function createAdmissionDatabase(database) {
+  assert.ok(admissionDatabaseSet.has(database));
+  sqlDatabase("global", `DROP DATABASE IF EXISTS ${database};`);
+  sqlDatabase("global", `CREATE DATABASE ${database};`);
+}
+
+function dropAdmissionDatabase(database) {
+  assert.ok(admissionDatabaseSet.has(database));
+  sqlDatabase(
+    "global",
+    `SELECT pg_terminate_backend(pid)
+     FROM pg_stat_activity
+     WHERE datname='${database}' AND pid<>pg_backend_pid();`,
+  );
+  sqlDatabase("global", `DROP DATABASE IF EXISTS ${database};`);
+}
+
+function runPrisma(schemaPath, database) {
+  assert.ok(admissionDatabaseSet.has(database));
+  assert.ok(admissionBaseUrl, "TASK6B_A3_DATABASE_URL is required");
+  const databaseUrl = new URL(admissionBaseUrl);
+  assert.equal(databaseUrl.protocol, "postgresql:");
+  assert.equal(databaseUrl.username, "global");
+  assert.ok(databaseUrl.password, "disposable database password is required");
+  assert.equal(databaseUrl.hostname, "127.0.0.1");
+  assert.equal(databaseUrl.port, "55441");
+  assert.equal(databaseUrl.pathname, "/postgres");
+  databaseUrl.pathname = `/${database}`;
+  databaseUrl.search = "";
+  databaseUrl.searchParams.set("schema", "public");
+  const result = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "@global/db",
+      "exec",
+      "prisma",
+      "migrate",
+      "deploy",
+      "--schema",
+      schemaPath,
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl.href,
+        PRISMA_HIDE_UPDATE_MESSAGE: "true",
+      },
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`.trim());
+  return `${result.stdout}\n${result.stderr}`;
+}
+
+function dropAdmissionRoles() {
+  for (const role of [...admissionRoles].reverse()) {
+    sqlDatabase("global", `DROP ROLE IF EXISTS ${role};`);
+  }
+}
+
+function withAdmissionDatabase(database, callback) {
+  assert.ok(admissionDatabaseSet.has(database));
+  let stage;
+  createAdmissionDatabase(database);
+  try {
+    stage = materializePinnedPrismaStage({
+      repositoryRoot,
+      commit: contractCommit,
+      prefix: "task-a3-fix3-admission-",
+    });
+    runPrisma(stage.schemaPath, database);
+    callback();
+  } finally {
+    if (stage?.root) rmSync(stage.root, { recursive: true, force: true });
+    dropAdmissionDatabase(database);
+  }
+}
+
+function assertAdmissionSuccess(database) {
+  const migrationHash = createHash("sha256")
+    .update(readFileSync(currentMigrationPath))
+    .digest("hex");
+  const deployOutput = runPrisma(currentSchemaPath, database);
+  assert.match(
+    deployOutput,
+    /20260830090000_organization_identity_v2_resolver_command/u,
+  );
+  assert.equal(
+    sqlDatabase(
+      database,
+      `SELECT count(*)||'|'||min(checksum)||'|'||
+        count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)
+       FROM _prisma_migrations
+       WHERE migration_name='20260830090000_organization_identity_v2_resolver_command';`,
+    ),
+    `1|${migrationHash}|1`,
+  );
+  assert.deepEqual(
+    sqlDatabase(
+      database,
+      `SELECT p.proname||'|'||coalesce((
+        SELECT string_agg(
+          CASE WHEN acl.grantee=0 THEN 'PUBLIC'
+            ELSE pg_get_userbyid(acl.grantee) END||':'||
+          acl.privilege_type||':'||acl.is_grantable::text||':'||
+          pg_get_userbyid(acl.grantor),
+          ',' ORDER BY CASE WHEN acl.grantee=0 THEN 'PUBLIC'
+            ELSE pg_get_userbyid(acl.grantee) END COLLATE "C"
+        )
+        FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl
+      ),'')
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public'
+        AND p.proname IN (
+          'organization_identity_authority_from_raw_v1',
+          'organization_identity_blocker_from_raw_v1',
+          'organization_identity_canonical_suppression_value_v1',
+          'organization_identity_plan_from_snapshot_v1',
+          'organization_identity_acquire_advisory_until_v1',
+          'resolve_organization_identity_for_raw_v1'
+        )
+      ORDER BY p.proname;`,
+    ).split("\n"),
+    finalAclRows,
+  );
+}
+
+function assertAdmissionFailure(database) {
+  const result = psqlDatabase(database, readFileSync(currentMigrationPath, "utf8"));
+  assert.notEqual(result.status, 0, "migration admission unexpectedly succeeded");
+  assert.match(result.stderr, /IDENTITY_RESOLUTION_CATALOG_RESIDUE/u);
+  assert.equal(
+    sqlDatabase(
+      database,
+      `SELECT count(*)
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='public'
+         AND p.proname IN (
+           'organization_identity_authority_from_raw_v1',
+           'organization_identity_blocker_from_raw_v1',
+           'organization_identity_canonical_suppression_value_v1',
+           'organization_identity_plan_from_snapshot_v1',
+           'organization_identity_acquire_advisory_until_v1',
+           'resolve_organization_identity_for_raw_v1'
+         );
+       SELECT count(*)
+       FROM _prisma_migrations
+       WHERE migration_name='20260830090000_organization_identity_v2_resolver_command';`,
+    ),
+    "0\n0",
   );
 }
 
@@ -852,18 +1077,35 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           rolcreatedb||'|'||rolreplication||'|'||rolbypassrls
         FROM pg_roles
         WHERE rolname='app_user';
-        WITH RECURSIVE role_paths(member,roleid) AS (
-          SELECT member,roleid FROM pg_auth_members
+        WITH RECURSIVE capability_paths(start_role,reached_role,mode) AS (
+          SELECT membership.member,membership.roleid,capability.mode
+          FROM pg_auth_members AS membership
+          CROSS JOIN LATERAL (VALUES
+            ('inherit'::text,membership.inherit_option),
+            ('set_role'::text,membership.set_option)
+          ) AS capability(mode,enabled)
+          WHERE capability.enabled
           UNION
-          SELECT path.member,next_membership.roleid
-          FROM role_paths AS path
+          SELECT path.start_role,next_membership.roleid,path.mode
+          FROM capability_paths AS path
           JOIN pg_auth_members AS next_membership
-            ON next_membership.member=path.roleid
+            ON next_membership.member=path.reached_role
+          WHERE (
+            path.mode='inherit' AND next_membership.inherit_option
+          ) OR (
+            path.mode='set_role' AND next_membership.set_option
+          )
         )
-        SELECT 'transitive_global_paths='||count(*)
-        FROM role_paths
-        WHERE roleid='global'::regrole
-          AND member<>'global'::regrole;
+        SELECT 'effective_inherit_paths='||count(*) FILTER (
+            WHERE mode='inherit'
+              AND reached_role='global'::regrole
+              AND start_role<>'global'::regrole
+          )||'|effective_set_role_paths='||count(*) FILTER (
+            WHERE mode='set_role'
+              AND reached_role='global'::regrole
+              AND start_role<>'global'::regrole
+          )
+        FROM capability_paths;
         SELECT 'applicable_nonowner_function_defaults='||count(*)
         FROM pg_default_acl AS defaults
         CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
@@ -875,10 +1117,194 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
         [
           "current_owner=global",
           "app_user|false|false|false|false|false",
-          "transitive_global_paths=0",
+          "effective_inherit_paths=0|effective_set_role_paths=0",
           "applicable_nonowner_function_defaults=0",
         ].join("\n"),
       );
+    });
+  });
+
+  describe("migration admission matrix", { concurrency: 1 }, () => {
+    it("admits an unrelated-schema non-owner function default and normalizes final ACL", () => {
+      const database = "task_a3_fix3_unrelated_default_positive";
+      withAdmissionDatabase(database, () => {
+        sqlDatabase(
+          database,
+          `CREATE SCHEMA task_a3_fix3_unrelated AUTHORIZATION global;
+           ALTER DEFAULT PRIVILEGES FOR ROLE global
+             IN SCHEMA task_a3_fix3_unrelated
+             GRANT EXECUTE ON FUNCTIONS TO app_user WITH GRANT OPTION;`,
+        );
+        assert.equal(
+          sqlDatabase(
+            database,
+            `SELECT
+              count(*) FILTER (
+                WHERE defaults.defaclnamespace='task_a3_fix3_unrelated'::regnamespace
+                  AND acl.grantee='app_user'::regrole::oid
+              )||'|'||
+              count(*) FILTER (
+                WHERE defaults.defaclnamespace IN (0,'public'::regnamespace)
+                  AND acl.grantee<>'global'::regrole::oid
+                  AND (acl.privilege_type='EXECUTE' OR acl.is_grantable)
+              )
+             FROM pg_default_acl defaults
+             CROSS JOIN LATERAL aclexplode(defaults.defaclacl) acl
+             WHERE defaults.defaclrole='global'::regrole
+               AND defaults.defaclobjtype='f';`,
+          ),
+          "1|0",
+        );
+        assertAdmissionSuccess(database);
+      });
+    });
+
+    it("admits applicable owner-only global and public defaults and normalizes grant options", () => {
+      const database = "task_a3_fix3_owner_defaults_positive";
+      withAdmissionDatabase(database, () => {
+        sqlDatabase(
+          database,
+          `ALTER DEFAULT PRIVILEGES FOR ROLE global
+             REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+           ALTER DEFAULT PRIVILEGES FOR ROLE global
+             GRANT EXECUTE ON FUNCTIONS TO global WITH GRANT OPTION;
+           ALTER DEFAULT PRIVILEGES FOR ROLE global IN SCHEMA public
+             GRANT EXECUTE ON FUNCTIONS TO global WITH GRANT OPTION;`,
+        );
+        assert.equal(
+          sqlDatabase(
+            database,
+            `SELECT count(*)
+             FROM pg_default_acl defaults
+             CROSS JOIN LATERAL aclexplode(defaults.defaclacl) acl
+             WHERE defaults.defaclrole='global'::regrole
+               AND defaults.defaclobjtype='f'
+               AND defaults.defaclnamespace IN (0,'public'::regnamespace)
+               AND acl.grantee='global'::regrole::oid;`,
+          ),
+          "2",
+        );
+        assertAdmissionSuccess(database);
+      });
+    });
+
+    it("rejects a global applicable non-owner function default before first CREATE", () => {
+      const database = "task_a3_fix3_global_default_negative";
+      withAdmissionDatabase(database, () => {
+        sqlDatabase(
+          database,
+          `ALTER DEFAULT PRIVILEGES FOR ROLE global
+             GRANT EXECUTE ON FUNCTIONS TO app_user WITH GRANT OPTION;`,
+        );
+        assertAdmissionFailure(database);
+      });
+    });
+
+    it("rejects a public applicable non-owner function default before first CREATE", () => {
+      const database = "task_a3_fix3_public_default_negative";
+      withAdmissionDatabase(database, () => {
+        sqlDatabase(
+          database,
+          `ALTER DEFAULT PRIVILEGES FOR ROLE global IN SCHEMA public
+             GRANT EXECUTE ON FUNCTIONS TO app_user WITH GRANT OPTION;`,
+        );
+        assertAdmissionFailure(database);
+      });
+    });
+
+    it("rejects direct executable inheritance even when the member role is NOINHERIT", () => {
+      const database = "task_a3_fix3_direct_membership_negative";
+      dropAdmissionRoles();
+      try {
+        withAdmissionDatabase(database, () => {
+          sqlDatabase(
+            "global",
+            `CREATE ROLE task_a3_fix3_direct_member NOLOGIN NOINHERIT;
+             GRANT global TO task_a3_fix3_direct_member
+               WITH INHERIT TRUE, SET FALSE;`,
+          );
+          assert.equal(
+            sqlDatabase(
+              database,
+              `SELECT member_role.rolinherit||'|'||
+                membership.inherit_option||'|'||membership.set_option
+               FROM pg_auth_members membership
+               JOIN pg_roles member_role ON member_role.oid=membership.member
+               WHERE member_role.rolname='task_a3_fix3_direct_member'
+                 AND membership.roleid='global'::regrole;`,
+            ),
+            "false|true|false",
+          );
+          assertAdmissionFailure(database);
+        });
+      } finally {
+        dropAdmissionRoles();
+      }
+    });
+
+    it("rejects a transitive executable SET ROLE path", () => {
+      const database = "task_a3_fix3_transitive_membership_negative";
+      dropAdmissionRoles();
+      try {
+        withAdmissionDatabase(database, () => {
+          sqlDatabase(
+            "global",
+            `CREATE ROLE task_a3_fix3_transitive_leaf NOLOGIN NOINHERIT;
+             CREATE ROLE task_a3_fix3_transitive_mid NOLOGIN NOINHERIT;
+             GRANT global TO task_a3_fix3_transitive_mid
+               WITH INHERIT FALSE, SET TRUE;
+             GRANT task_a3_fix3_transitive_mid TO task_a3_fix3_transitive_leaf
+               WITH INHERIT FALSE, SET TRUE;`,
+          );
+          assertAdmissionFailure(database);
+        });
+      } finally {
+        dropAdmissionRoles();
+      }
+    });
+
+    it("admits inert membership with neither inheritance nor SET ROLE capability", () => {
+      const database = "task_a3_fix3_inert_membership_positive";
+      dropAdmissionRoles();
+      try {
+        withAdmissionDatabase(database, () => {
+          sqlDatabase(
+            "global",
+            `CREATE ROLE task_a3_fix3_inert_member NOLOGIN INHERIT;
+             GRANT global TO task_a3_fix3_inert_member
+               WITH INHERIT FALSE, SET FALSE;`,
+          );
+          assert.equal(
+            sqlDatabase(
+              database,
+              `SELECT member_role.rolinherit||'|'||
+                membership.inherit_option||'|'||membership.set_option
+               FROM pg_auth_members membership
+               JOIN pg_roles member_role ON member_role.oid=membership.member
+               WHERE member_role.rolname='task_a3_fix3_inert_member'
+                 AND membership.roleid='global'::regrole;`,
+            ),
+            "true|false|false",
+          );
+          assertAdmissionSuccess(database);
+        });
+      } finally {
+        dropAdmissionRoles();
+      }
+    });
+
+    it("uses mode-bearing UNION recursion for PG16 cycle-safe capability closure", () => {
+      assert.match(sql("SHOW server_version_num;"), /^16\d{4}$/u);
+      const migration = readFileSync(currentMigrationPath, "utf8");
+      assert.match(
+        migration,
+        /WITH RECURSIVE capability_paths\(start_role, reached_role, mode\)/u,
+      );
+      assert.match(migration, /membership\.inherit_option/u);
+      assert.match(migration, /membership\.set_option/u);
+      assert.match(migration, /UNION\s+SELECT path\.start_role/u);
+      assert.doesNotMatch(migration, /UNION ALL\s+SELECT path\.start_role/u);
+      assert.doesNotMatch(migration, /(?:INSERT|UPDATE|DELETE)\s+pg_auth_members/iu);
     });
   });
 

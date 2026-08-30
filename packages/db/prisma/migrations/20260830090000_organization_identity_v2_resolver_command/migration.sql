@@ -25,17 +25,28 @@ BEGIN
         AND NOT r.rolbypassrls
     )
     OR EXISTS (
-      WITH RECURSIVE role_paths(member, roleid) AS (
-        SELECT member, roleid FROM pg_auth_members
+      WITH RECURSIVE capability_paths(start_role, reached_role, mode) AS (
+        SELECT membership.member, membership.roleid, capability.mode
+        FROM pg_auth_members AS membership
+        CROSS JOIN LATERAL (VALUES
+          ('inherit'::text, membership.inherit_option),
+          ('set_role'::text, membership.set_option)
+        ) AS capability(mode, enabled)
+        WHERE capability.enabled
         UNION
-        SELECT path.member, next_membership.roleid
-        FROM role_paths AS path
+        SELECT path.start_role, next_membership.roleid, path.mode
+        FROM capability_paths AS path
         JOIN pg_auth_members AS next_membership
-          ON next_membership.member = path.roleid
+          ON next_membership.member = path.reached_role
+        WHERE (
+          path.mode = 'inherit' AND next_membership.inherit_option
+        ) OR (
+          path.mode = 'set_role' AND next_membership.set_option
+        )
       )
-      SELECT 1 FROM role_paths
-      WHERE roleid = 'global'::regrole
-        AND member <> 'global'::regrole
+      SELECT 1 FROM capability_paths
+      WHERE reached_role = 'global'::regrole
+        AND start_role <> 'global'::regrole
     )
     OR EXISTS (
       SELECT 1
@@ -190,6 +201,9 @@ $organization_identity_suppression$;
 REVOKE ALL ON FUNCTION
   public.organization_identity_canonical_suppression_value_v1(text, text)
 FROM PUBLIC, app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.organization_identity_canonical_suppression_value_v1(text, text)
+FROM global;
 
 CREATE FUNCTION public.organization_identity_authority_from_raw_v1(
   p_provider_key text,
@@ -402,6 +416,9 @@ $organization_identity_authority$;
 REVOKE ALL ON FUNCTION public.organization_identity_authority_from_raw_v1(
   text, jsonb
 ) FROM PUBLIC, app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.organization_identity_authority_from_raw_v1(text, jsonb)
+FROM global;
 
 CREATE FUNCTION public.organization_identity_blocker_from_raw_v1(p_raw jsonb)
 RETURNS jsonb
@@ -505,6 +522,9 @@ $organization_identity_blocker$;
 REVOKE ALL ON FUNCTION
   public.organization_identity_blocker_from_raw_v1(jsonb)
 FROM PUBLIC, app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.organization_identity_blocker_from_raw_v1(jsonb)
+FROM global;
 
 CREATE FUNCTION public.organization_identity_plan_from_snapshot_v1(
   p_snapshot jsonb
@@ -941,6 +961,9 @@ $organization_identity_plan$;
 REVOKE ALL ON FUNCTION
   public.organization_identity_plan_from_snapshot_v1(jsonb)
 FROM PUBLIC, app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.organization_identity_plan_from_snapshot_v1(jsonb)
+FROM global;
 
 CREATE FUNCTION public.organization_identity_acquire_advisory_until_v1(
   p_lock_key bigint,
@@ -984,6 +1007,9 @@ $organization_identity_advisory$;
 REVOKE ALL ON FUNCTION
   public.organization_identity_acquire_advisory_until_v1(bigint, timestamptz)
 FROM PUBLIC, app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.organization_identity_acquire_advisory_until_v1(bigint, timestamptz)
+FROM global;
 
 CREATE FUNCTION public.resolve_organization_identity_for_raw_v1(
   p_workspace_id text,
@@ -1085,6 +1111,9 @@ FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION
   public.resolve_organization_identity_for_raw_v1(text, text)
 FROM app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.resolve_organization_identity_for_raw_v1(text, text)
+FROM global;
 GRANT EXECUTE ON FUNCTION
   public.resolve_organization_identity_for_raw_v1(text, text)
 TO app_user;
@@ -1109,17 +1138,28 @@ BEGIN
         AND NOT r.rolbypassrls
     )
     OR EXISTS (
-      WITH RECURSIVE role_paths(member, roleid) AS (
-        SELECT member, roleid FROM pg_auth_members
+      WITH RECURSIVE capability_paths(start_role, reached_role, mode) AS (
+        SELECT membership.member, membership.roleid, capability.mode
+        FROM pg_auth_members AS membership
+        CROSS JOIN LATERAL (VALUES
+          ('inherit'::text, membership.inherit_option),
+          ('set_role'::text, membership.set_option)
+        ) AS capability(mode, enabled)
+        WHERE capability.enabled
         UNION
-        SELECT path.member, next_membership.roleid
-        FROM role_paths AS path
+        SELECT path.start_role, next_membership.roleid, path.mode
+        FROM capability_paths AS path
         JOIN pg_auth_members AS next_membership
-          ON next_membership.member = path.roleid
+          ON next_membership.member = path.reached_role
+        WHERE (
+          path.mode = 'inherit' AND next_membership.inherit_option
+        ) OR (
+          path.mode = 'set_role' AND next_membership.set_option
+        )
       )
-      SELECT 1 FROM role_paths
-      WHERE roleid = 'global'::regrole
-        AND member <> 'global'::regrole
+      SELECT 1 FROM capability_paths
+      WHERE reached_role = 'global'::regrole
+        AND start_role <> 'global'::regrole
     )
     OR EXISTS (
       SELECT 1
