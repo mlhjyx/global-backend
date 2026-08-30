@@ -326,3 +326,76 @@ export const validateRequest = (request, policy) => {
   );
   return request;
 };
+
+const copyDataRecord = (value, keys, code) => {
+  requireCondition(hasExactKeys(value, keys), code);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  requireCondition(
+    keys.every((key) => descriptors[key]?.enumerable === true && Object.hasOwn(descriptors[key], 'value')),
+    code,
+  );
+  return Object.fromEntries(keys.map((key) => [key, descriptors[key].value]));
+};
+
+const copyDenseArray = (value, maximum, code) => {
+  requireCondition(Array.isArray(value) && value.length <= maximum, code);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const expectedKeys = Array.from({ length: value.length }, (_unused, index) => String(index));
+  requireCondition(
+    Object.keys(value).length === expectedKeys.length
+      && expectedKeys.every((key) => (
+        descriptors[key]?.enumerable === true && Object.hasOwn(descriptors[key], 'value')
+      )),
+    code,
+  );
+  return expectedKeys.map((key) => descriptors[key].value);
+};
+
+const copyPolicy = (value) => {
+  if (isPlainObject(value) && Object.keys(value).some(dynamicPolicyKey)) {
+    throw approvalError('APPROVAL_GITHUB_STATIC_DYNAMIC_ID_FORBIDDEN');
+  }
+  const source = copyDataRecord(value, POLICY_KEYS, 'APPROVAL_GITHUB_POLICY_INVALID');
+  return {
+    repositoryId: source.repositoryId,
+    allowedRepoPaths: copyDenseArray(source.allowedRepoPaths, 32, 'APPROVAL_GITHUB_POLICY_INVALID'),
+    allowedCheckContexts: copyDenseArray(source.allowedCheckContexts, 16, 'APPROVAL_GITHUB_POLICY_INVALID'),
+    allowedActionsAppIds: copyDenseArray(source.allowedActionsAppIds, 16, 'APPROVAL_GITHUB_POLICY_INVALID'),
+    allowedWorkflowIds: copyDenseArray(source.allowedWorkflowIds, 16, 'APPROVAL_GITHUB_POLICY_INVALID'),
+    allowedWorkflowPaths: copyDenseArray(source.allowedWorkflowPaths, 16, 'APPROVAL_GITHUB_POLICY_INVALID'),
+    allowedReusableSignerWorkflowIds: copyDenseArray(
+      source.allowedReusableSignerWorkflowIds,
+      16,
+      'APPROVAL_GITHUB_POLICY_INVALID',
+    ),
+    allowedReusableSignerWorkflowPaths: copyDenseArray(
+      source.allowedReusableSignerWorkflowPaths,
+      16,
+      'APPROVAL_GITHUB_POLICY_INVALID',
+    ),
+  };
+};
+
+const copyLimits = (value) => copyDataRecord(value, LIMIT_KEYS, 'APPROVAL_GITHUB_LIMIT_INVALID');
+
+const copyRequest = (value) => {
+  const source = copyDataRecord(value, REQUEST_KEYS, 'APPROVAL_GITHUB_REQUEST_INVALID');
+  return {
+    ...source,
+    repository: copyDataRecord(
+      source.repository,
+      ['id', 'full_name'],
+      'APPROVAL_GITHUB_REQUEST_INVALID',
+    ),
+  };
+};
+
+export const snapshotGitHubReadbackInputs = (requestValue, limitValue, policyValue) => {
+  const policy = copyPolicy(policyValue);
+  const limits = copyLimits(limitValue);
+  const request = copyRequest(requestValue);
+  validatePolicy(policy);
+  validateLimits(limits);
+  validateRequest(request, policy);
+  return deepFreeze({ request, limits, policy });
+};

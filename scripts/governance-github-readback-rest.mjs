@@ -6,8 +6,10 @@ import {
   approvalError,
   deepFreeze,
   hasExactKeys,
+  isSafePositiveInteger,
   isSafeString,
   requireCondition,
+  stableJson,
 } from './governance-github-readback-common.mjs';
 
 const CLIENT_KEYS = Object.freeze(['fetch', 'token', 'apiVersion']);
@@ -164,26 +166,49 @@ const parseNextLink = (header, currentUrl) => {
   requireCondition(next.origin === API_ORIGIN, 'APPROVAL_GITHUB_ORIGIN_FORBIDDEN');
   requireCondition(next.pathname === currentUrl.pathname, 'APPROVAL_GITHUB_PAGINATION_INVALID');
   requireCondition(next.href !== currentUrl.href, 'APPROVAL_GITHUB_PAGINATION_LOOP');
-  const currentPage = Number(currentUrl.searchParams.get('page'));
-  const nextPage = Number(next.searchParams.get('page'));
+  requireCondition(next.hash === '', 'APPROVAL_GITHUB_PAGINATION_INVALID');
+  const closedQuery = (url) => {
+    const result = new Map();
+    for (const [key, value] of url.searchParams) {
+      requireCondition(!result.has(key), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+      result.set(key, value);
+    }
+    return result;
+  };
+  const currentQuery = closedQuery(currentUrl);
+  const nextQuery = closedQuery(next);
+  requireCondition(
+    currentQuery.size === nextQuery.size
+      && [...currentQuery.keys()].every((key) => nextQuery.has(key)),
+    'APPROVAL_GITHUB_PAGINATION_INVALID',
+  );
+  const currentPage = Number(currentQuery.get('page'));
+  const nextPage = Number(nextQuery.get('page'));
   requireCondition(
     Number.isSafeInteger(currentPage)
       && Number.isSafeInteger(nextPage)
-      && nextPage > currentPage,
+      && nextPage === currentPage + 1,
     'APPROVAL_GITHUB_PAGINATION_INVALID',
   );
-  for (const [key, value] of currentUrl.searchParams) {
-    if (key !== 'page') requireCondition(next.searchParams.get(key) === value, 'APPROVAL_GITHUB_PAGINATION_INVALID');
-  }
-  for (const key of next.searchParams.keys()) {
-    requireCondition(key === 'page' || currentUrl.searchParams.has(key), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+  for (const [key, value] of currentQuery) {
+    if (key !== 'page') requireCondition(nextQuery.get(key) === value, 'APPROVAL_GITHUB_PAGINATION_INVALID');
   }
   return next;
 };
 
-export const paginate = async (state, firstUrl, limits, budget, extract, totalField = null) => {
+export const paginate = async (
+  state,
+  firstUrl,
+  limits,
+  budget,
+  extract,
+  totalField = null,
+  options = {},
+) => {
   const visited = new Set();
   const items = [];
+  const seenItemIds = new Set();
+  const seenPages = new Set();
   let url = firstUrl;
   let declaredTotal = null;
   while (url !== null) {
@@ -194,6 +219,21 @@ export const paginate = async (state, firstUrl, limits, budget, extract, totalFi
     const response = await fetchJson(state, url, limits);
     const pageItems = extract(response.value);
     requireCondition(Array.isArray(pageItems), 'APPROVAL_GITHUB_RESPONSE_INVALID');
+    if (options.rejectDuplicatePage === true) {
+      const fingerprint = stableJson(pageItems);
+      requireCondition(!seenPages.has(fingerprint), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+      seenPages.add(fingerprint);
+    }
+    if (typeof options.itemId === 'function') {
+      for (const item of pageItems) {
+        const id = options.itemId(item);
+        requireCondition(
+          isSafePositiveInteger(id) && !seenItemIds.has(id),
+          'APPROVAL_GITHUB_PAGINATION_INVALID',
+        );
+        seenItemIds.add(id);
+      }
+    }
     if (totalField !== null) {
       requireCondition(
         Number.isSafeInteger(response.value?.[totalField]) && response.value[totalField] >= 0,

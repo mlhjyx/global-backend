@@ -163,17 +163,35 @@ test('F1 snapshots closed request, policy tuples, and limits before the first aw
   });
 });
 
-test('F2 ruleset status checks must match the exact indexed context-App tuple', async () => {
-  const state = fixtureState();
-  const trustedPolicy = addSecondMachineTuple(state);
-  state.ruleset.rules[0].parameters.required_status_checks = [
-    { context: 'approval/readback', integration_id: 15369 },
-    { context: 'other/context', integration_id: 15368 },
-  ];
-  await expectCode(
-    () => collect(state, { policy: trustedPolicy }),
-    'APPROVAL_GITHUB_RULESET_MISMATCH',
-  );
+test('F2 ruleset status checks must match the exact indexed context-App tuple', async (t) => {
+  for (const [name, checks] of [
+    ['swapped', [
+      { context: 'approval/readback', integration_id: 15369 },
+      { context: 'other/context', integration_id: 15368 },
+    ]],
+    ['missing', [
+      { context: 'approval/readback', integration_id: 15368 },
+    ]],
+    ['extra', [
+      { context: 'approval/readback', integration_id: 15368 },
+      { context: 'other/context', integration_id: 15369 },
+      { context: 'extra/context', integration_id: 15370 },
+    ]],
+    ['duplicate', [
+      { context: 'approval/readback', integration_id: 15368 },
+      { context: 'approval/readback', integration_id: 15368 },
+    ]],
+  ]) {
+    await t.test(name, async () => {
+      const state = fixtureState();
+      const trustedPolicy = addSecondMachineTuple(state);
+      state.ruleset.rules[0].parameters.required_status_checks = checks;
+      await expectCode(
+        () => collect(state, { policy: trustedPolicy }),
+        'APPROVAL_GITHUB_RULESET_MISMATCH',
+      );
+    });
+  }
 });
 
 test('F3 ruleset ref include/exclude is exact, closed, and part of TOCTOU identity', async (t) => {
@@ -240,6 +258,27 @@ test('F5 review pagination requires exact next page/query and globally unique ra
     state.reviewPages[1] = structuredClone(state.reviewPages[0]);
     await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
   });
+  for (const [name, mutate] of [
+    ['filter drift', (next) => next.searchParams.set('filter', 'latest')],
+    ['duplicate filter', (next) => next.searchParams.append('filter', 'latest')],
+  ]) {
+    await t.test(`check-runs ${name}`, async () => {
+      const state = fixtureState();
+      state.forced = {
+        predicate: (url) => url.pathname.endsWith(`/commits/${HEAD_SHA}/check-runs`),
+        response: (url) => {
+          const next = new URL(url);
+          next.searchParams.set('page', '2');
+          mutate(next);
+          return jsonResponse(
+            { total_count: 2, check_runs: state.checkPages[0] },
+            { headers: { link: `<${next.href}>; rel="next"` } },
+          );
+        },
+      };
+      await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    });
+  }
 });
 
 test('F6 proposal schemas reject extra PR-controlled fields before public projection', async (t) => {

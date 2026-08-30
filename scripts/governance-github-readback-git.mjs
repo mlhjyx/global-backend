@@ -7,6 +7,7 @@ import {
   ROLES,
   assertSafeParsedValue,
   deepFreeze,
+  hasExactKeys,
   isGitSha,
   isPlainObject,
   isSafePositiveInteger,
@@ -14,6 +15,7 @@ import {
   parseApprovalJson,
   requireCondition,
   sha256,
+  stableJson,
 } from './governance-github-readback-common.mjs';
 import { apiUrl, fetchJson } from './governance-github-readback-rest.mjs';
 
@@ -157,11 +159,30 @@ export const authorityActors = (authorityFile) => {
 };
 
 export const assertProposalSubject = (files, request) => {
-  const manifest = files.find(({ path }) => path === request.proposalManifestPath)?.value;
-  const sidecar = files.find(({ path }) => path === request.proposalSidecarPath)?.value;
+  const manifestFile = files.find(({ path }) => path === request.proposalManifestPath);
+  const sidecarFile = files.find(({ path }) => path === request.proposalSidecarPath);
+  const manifest = manifestFile?.value;
+  const sidecar = sidecarFile?.value;
+  const manifestKeys = [
+    'schema_version',
+    'decision_id',
+    'policy_revision',
+    'decision_raw_sha256',
+    'decision_semantic_sha256',
+    'sidecar_path',
+  ];
+  const sidecarKeys = [
+    'schema_version',
+    'decision_id',
+    'policy_revision',
+    'decision_raw_sha256',
+    'decision_semantic_sha256',
+  ];
   requireCondition(
-    isPlainObject(manifest)
-      && isPlainObject(sidecar)
+    hasExactKeys(manifest, manifestKeys)
+      && hasExactKeys(sidecar, sidecarKeys)
+      && manifest.schema_version === 'approval-proposal-manifest/v1'
+      && sidecar.schema_version === 'approval-proposal-sidecar/v1'
       && manifest.decision_id === request.decisionId
       && sidecar.decision_id === request.decisionId
       && manifest.policy_revision === request.policyRevision
@@ -173,4 +194,22 @@ export const assertProposalSubject = (files, request) => {
       && manifest.sidecar_path === request.proposalSidecarPath,
     'APPROVAL_GITHUB_PROPOSAL_MISMATCH',
   );
+  return deepFreeze([
+    projectProposalFile(manifestFile, manifestKeys),
+    projectProposalFile(sidecarFile, sidecarKeys),
+  ]);
+};
+
+const projectProposalFile = (file, keys) => {
+  const subject = Object.fromEntries(keys.map((key) => [key, file.value[key]]));
+  return {
+    path: file.path,
+    commit_sha: file.commit_sha,
+    blob_sha: file.blob_sha,
+    mode: file.mode,
+    size_bytes: file.size_bytes,
+    raw_sha256: file.raw_sha256,
+    semantic_sha256: sha256(Buffer.from(stableJson(subject), 'utf8')),
+    subject,
+  };
 };

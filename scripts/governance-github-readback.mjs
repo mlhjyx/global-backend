@@ -9,9 +9,7 @@ import {
   isGitSha,
   requireCondition,
   sameJson,
-  validateLimits,
-  validatePolicy,
-  validateRequest,
+  snapshotGitHubReadbackInputs,
 } from './governance-github-readback-common.mjs';
 import {
   assertProposalSubject,
@@ -38,9 +36,11 @@ import {
 
 const collectImpl = async (client, requestValue, limitValue, policyValue) => {
   const state = getRestState(client);
-  const policy = validatePolicy(policyValue);
-  const limits = validateLimits(limitValue);
-  const request = validateRequest(requestValue, policy);
+  const { request, limits, policy } = snapshotGitHubReadbackInputs(
+    requestValue,
+    limitValue,
+    policyValue,
+  );
   const budget = { items: 0, pages: 0 };
 
   const repositoryResponse = await fetchJson(
@@ -76,11 +76,11 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
 
   const rawAuthorityFile = await readJsonFile(state, authorityEntry, request.expectedBaseSha, limits);
   const { actors: authority, file: authorityFile } = authorityActors(rawAuthorityFile);
-  const proposalFiles = [];
+  const rawProposalFiles = [];
   for (const entry of proposalEntries) {
-    proposalFiles.push(await readJsonFile(state, entry, request.expectedHeadSha, limits));
+    rawProposalFiles.push(await readJsonFile(state, entry, request.expectedHeadSha, limits));
   }
-  assertProposalSubject(proposalFiles, request);
+  const proposalFiles = assertProposalSubject(rawProposalFiles, request);
   for (const entry of machineEntries) await readBlobBytes(state, entry, limits);
 
   const reviews = await paginate(
@@ -89,6 +89,8 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
     limits,
     budget,
     (value) => value,
+    null,
+    { itemId: (review) => review?.id, rejectDuplicatePage: true },
   );
   const reviewEvidence = normalizeReviews(reviews, authority, request);
   const associatedPulls = await paginate(
@@ -109,7 +111,10 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
 
   const checks = await paginate(
     state,
-    apiUrl([...REPOSITORY_SEGMENTS, 'commits', request.expectedHeadSha, 'check-runs'], { per_page: 100, page: 1 }),
+    apiUrl(
+      [...REPOSITORY_SEGMENTS, 'commits', request.expectedHeadSha, 'check-runs'],
+      { filter: 'all', per_page: 100, page: 1 },
+    ),
     limits,
     budget,
     (value) => value?.check_runs,

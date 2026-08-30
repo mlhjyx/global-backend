@@ -65,7 +65,7 @@ test('requires complete exact-head Product, Privacy, QA, and numeric OWN-SECURIT
   await t.test('cross-slot review ID reuse', async () => {
     const state = fixtureState();
     state.reviewPages[1][1].id = 2001;
-    await expectCode(() => collect(state), 'APPROVAL_EVIDENCE_SLOT_REUSE');
+    await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
   });
 });
 

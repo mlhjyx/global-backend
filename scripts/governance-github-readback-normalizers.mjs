@@ -6,6 +6,7 @@ import {
   approvalError,
   arrayIsUnique,
   deepFreeze,
+  hasExactKeys,
   isCanonicalInstant,
   isGitSha,
   isPlainObject,
@@ -14,6 +15,7 @@ import {
   isWorkflowPath,
   parseApprovalReviewCommand,
   requireCondition,
+  sameJson,
   sha256,
   stableJson,
 } from './governance-github-readback-common.mjs';
@@ -122,9 +124,27 @@ const normalizeRoleReview = (parsed, role, authority, request) => {
 const normalizeCodeownerReview = (reviews, request) => {
   const matches = reviews.filter((review) => review?.id === request.codeownerReviewId);
   requireCondition(matches.length === 1, 'APPROVAL_CODEOWNER_REVIEW_REQUIRED');
-  const review = matches[0];
+  const requested = matches[0];
+  const actor = normalizeActor(requested.user);
+  const actorStream = reviews.filter((review) => review?.user?.id === actor.id);
+  requireCondition(actorStream.length >= 1, 'APPROVAL_CODEOWNER_REVIEW_REQUIRED');
+  for (const review of actorStream) {
+    requireCondition(
+      isSafePositiveInteger(review?.id)
+        && isCanonicalInstant(review?.submitted_at)
+        && isSafeString(review?.state, 64)
+        && isGitSha(review?.commit_id)
+        && sameJson(normalizeActor(review?.user), actor),
+      'APPROVAL_CODEOWNER_REVIEW_REQUIRED',
+    );
+  }
+  const review = actorStream
+    .map((event) => ({ review: event }))
+    .sort(reviewOrder)
+    .at(-1).review;
   requireCondition(
-    review.state === 'APPROVED'
+    review.id === request.codeownerReviewId
+      && review.state === 'APPROVED'
       && review.commit_id === request.expectedHeadSha
       && isCanonicalInstant(review.submitted_at),
     'APPROVAL_CODEOWNER_REVIEW_REQUIRED',
@@ -135,7 +155,7 @@ const normalizeCodeownerReview = (reviews, request) => {
     review_state: review.state,
     review_commit_id: review.commit_id,
     submitted_at: review.submitted_at,
-    actor: normalizeActor(review.user),
+    actor,
     review_command_sha256: null,
   });
 };
@@ -300,7 +320,15 @@ const rulesetFacts = (value) => {
       && typeof value.source === 'string'
       && typeof value.enforcement === 'string'
       && Array.isArray(value.bypass_actors)
-      && Array.isArray(value.rules),
+      && Array.isArray(value.rules)
+      && hasExactKeys(value.conditions, ['ref_name'])
+      && hasExactKeys(value.conditions.ref_name, ['include', 'exclude'])
+      && Array.isArray(value.conditions.ref_name.include)
+      && Array.isArray(value.conditions.ref_name.exclude)
+      && value.conditions.ref_name.include.every((entry) => typeof entry === 'string')
+      && value.conditions.ref_name.exclude.every((entry) => typeof entry === 'string')
+      && arrayIsUnique(value.conditions.ref_name.include)
+      && arrayIsUnique(value.conditions.ref_name.exclude),
     'APPROVAL_GITHUB_RULESET_MISMATCH',
   );
   const statusRules = value.rules.filter((rule) => rule?.type === 'required_status_checks');
@@ -310,9 +338,17 @@ const rulesetFacts = (value) => {
     isPlainObject(parameters) && Array.isArray(parameters.required_status_checks),
     'APPROVAL_GITHUB_RULESET_MISMATCH',
   );
+  requireCondition(
+    parameters.required_status_checks.every((check) => (
+      hasExactKeys(check, ['context', 'integration_id'])
+      && isSafeString(check.context, 256)
+      && isSafePositiveInteger(check.integration_id)
+    )),
+    'APPROVAL_GITHUB_RULESET_MISMATCH',
+  );
   const required = parameters.required_status_checks.map((check) => ({
-    context: check?.context,
-    integration_id: check?.integration_id,
+    context: check.context,
+    integration_id: check.integration_id,
   })).sort((left, right) => left.context.localeCompare(right.context));
   return {
     id: value.id,
@@ -324,7 +360,10 @@ const rulesetFacts = (value) => {
       actor_type: entry?.actor_type,
       bypass_mode: entry?.bypass_mode,
     })),
-    default_branch_included: value.conditions?.ref_name?.include?.includes('~DEFAULT_BRANCH') === true,
+    ref_name: {
+      include: [...value.conditions.ref_name.include],
+      exclude: [...value.conditions.ref_name.exclude],
+    },
     strict_required_status_checks_policy: parameters.strict_required_status_checks_policy,
     required_status_checks: required,
   };
@@ -332,7 +371,15 @@ const rulesetFacts = (value) => {
 
 export const normalizeRuleset = (value, policy, request, enforcePolicy) => {
   const facts = rulesetFacts(value);
-  const contexts = facts.required_status_checks.map(({ context }) => context);
+  const exactCheckTuples = (
+    facts.required_status_checks.length === policy.allowedCheckContexts.length
+    && policy.allowedCheckContexts.every((context, index) => {
+      const matching = facts.required_status_checks.filter((check) => check.context === context);
+      return matching.length === 1
+        && matching[0].integration_id === policy.allowedActionsAppIds[index];
+    })
+    && facts.required_status_checks.every((check) => policy.allowedCheckContexts.includes(check.context))
+  );
   if (enforcePolicy) {
     requireCondition(
       facts.id === request.rulesetId
@@ -340,15 +387,10 @@ export const normalizeRuleset = (value, policy, request, enforcePolicy) => {
         && facts.source === REPOSITORY_FULL_NAME
         && facts.enforcement === 'active'
         && facts.bypass_actors.length === 0
-        && facts.default_branch_included
+        && sameJson(facts.ref_name, { include: ['~DEFAULT_BRANCH'], exclude: [] })
         && facts.strict_required_status_checks_policy === true
-        && arrayIsUnique(contexts)
-        && contexts.length === policy.allowedCheckContexts.length
-        && contexts.every((context) => policy.allowedCheckContexts.includes(context))
-        && facts.required_status_checks.every((check) => (
-          isSafePositiveInteger(check.integration_id)
-          && policy.allowedActionsAppIds.includes(check.integration_id)
-        )),
+        && facts.required_status_checks.every((check) => isSafePositiveInteger(check.integration_id))
+        && exactCheckTuples,
       'APPROVAL_GITHUB_RULESET_MISMATCH',
     );
   }
