@@ -25,6 +25,13 @@ const signature = Object.freeze({
   planner: "public.organization_identity_plan_from_snapshot_v1(jsonb)",
   command: "public.resolve_organization_identity_for_raw_v1(text,text)",
 });
+const catalogIdentity = Object.freeze({
+  [signature.authority]: "public|organization_identity_authority_from_raw_v1|text, jsonb",
+  [signature.blocker]: "public|organization_identity_blocker_from_raw_v1|jsonb",
+  [signature.suppression]: "public|organization_identity_canonical_suppression_value_v1|text, text",
+  [signature.planner]: "public|organization_identity_plan_from_snapshot_v1|jsonb",
+  [signature.command]: "public|resolve_organization_identity_for_raw_v1|text, text",
+});
 
 function docker(args, input = "") {
   const result = spawnSync("docker", args, { encoding: "utf8", input, maxBuffer: 4 * 1024 * 1024 });
@@ -39,7 +46,12 @@ function sql(statement, rejects) {
   return result.stdout.trim();
 }
 function exactHelper(vector) {
-  assert.equal(sql(`SELECT coalesce(to_regprocedure('${vector.signature}')::text, '<ABSENT>');`), vector.signature, `${vector.name}: missing exact helper`);
+  const [schema, name, argumentsText] = catalogIdentity[vector.signature].split("|");
+  assert.equal(
+    sql(`SELECT coalesce((SELECT n.nspname||'|'||p.proname||'|'||pg_get_function_identity_arguments(p.oid) FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid=p.pronamespace WHERE n.nspname='${schema}' AND p.proname='${name}' AND pg_get_function_identity_arguments(p.oid)='${argumentsText}'),'<ABSENT>');`),
+    catalogIdentity[vector.signature],
+    `${vector.name}: exact helper OID/namespace/name/identity arguments are absent`,
+  );
 }
 function value(vector) {
   it(vector.name, () => {
@@ -106,7 +118,15 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
     receipt();
     assert.equal(docker(["inspect", "--format", "{{.Id}}|{{json .State.Running}}|{{json .NetworkSettings.Ports}}|{{json .Config.Labels}}|{{.Image}}", topology.container]), `${topology.containerId}|true|{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"55441"}]}|${topology.labels}|sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb`);
     assert.equal(docker(["network", "inspect", "--format", "{{.Id}}|{{.Driver}}|{{len .Containers}}|{{json .Labels}}", topology.network]), `${topology.networkId}|bridge|1|${topology.labels}`);
+    const bridgeMembers = JSON.parse(docker(["network", "inspect", "--format", "{{json .Containers}}", topology.network]));
+    assert.deepEqual(Object.keys(bridgeMembers), [topology.containerId]);
+    assert.equal(bridgeMembers[topology.containerId].Name, topology.container);
     assert.equal(docker(["volume", "inspect", "--format", "{{.Name}}|{{.Driver}}|{{json .Labels}}", topology.volume]), `${topology.volume}|local|{"com.docker.volume.anonymous":""}`);
+    const mounts = JSON.parse(docker(["inspect", "--format", "{{json .Mounts}}", topology.container]));
+    assert.deepEqual(
+      mounts.filter((mount) => mount.Name === topology.volume).map((mount) => ({ Destination: mount.Destination, RW: mount.RW })),
+      [{ Destination: "/var/lib/postgresql/data", RW: true }],
+    );
     assert.equal(docker(["image", "inspect", "--format", "{{range .RepoDigests}}{{println .}}{{end}}", "pgvector/pgvector:pg16"]), topology.image);
     assert.equal(sql("SELECT current_database() || '|' || current_user;"), "postgres|global");
   });
