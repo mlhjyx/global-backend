@@ -66,6 +66,10 @@ function invalid(): never {
   throw new Error(GOVERNED_SUBJECT_RELATION_INVALID);
 }
 
+function invalidOperation(): never {
+  throw new Error(GOVERNED_OPERATION_SUBJECT_INVALID);
+}
+
 function closedRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
   try {
     if (
@@ -116,7 +120,10 @@ function snapshotInput(value: unknown): GovernedSubjectRelationInput {
   const authorityId = uuid(input.authorityId);
   const accountId = uuid(input.accountId);
   const operationId = uuid(input.operationId);
-  if (!Number.isSafeInteger(input.operationGeneration) || Number(input.operationGeneration) < 1) {
+  if (
+    !Number.isSafeInteger(input.operationGeneration) ||
+    Number(input.operationGeneration) < 1 || Number(input.operationGeneration) > 2_147_483_647
+  ) {
     return invalid();
   }
   const operationGeneration = Number(input.operationGeneration);
@@ -126,7 +133,7 @@ function snapshotInput(value: unknown): GovernedSubjectRelationInput {
     input.rootSubjectType !== 'tool_operation' || input.rootSubjectId !== operationId ||
     input.rootDataClass !== 'NON_PERSONAL' || input.rootDsrSubjectType !== null ||
     input.rootDsrSubjectId !== null
-  ) return invalid();
+  ) return invalidOperation();
   const parentGovernedSubjectId = nullableUuid(input.parentGovernedSubjectId);
   const childSubjectType = boundedPattern(input.childSubjectType, SUBJECT_TYPE);
   const childSubjectId = uuid(input.childSubjectId);
@@ -162,13 +169,19 @@ function snapshotInput(value: unknown): GovernedSubjectRelationInput {
   });
 }
 
-function parseResult(value: unknown, expectedReplay: boolean): GovernedSubjectRelationResult {
+function parseResult(
+  value: unknown,
+  expectedReplay: true | null,
+): GovernedSubjectRelationResult {
   if (!Array.isArray(value) || value.length !== 1) {
     throw new Error(GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
   }
   try {
     const row = closedRecord(value[0], RESULT_KEYS) as RelationRow;
-    if (row.replay !== expectedReplay) throw new Error(GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+    if (
+      typeof row.replay !== 'boolean' ||
+      (expectedReplay === true && row.replay !== true)
+    ) throw new Error(GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
     return Object.freeze({
       operationSubjectId: uuid(row.operation_subject_id),
       parentSubjectId: uuid(row.parent_subject_id),
@@ -187,7 +200,7 @@ function mappedDatabaseError(error: unknown): Error {
     error.meta?.code === 'P0001' && typeof error.meta.message === 'string'
   ) {
     for (const code of STABLE_ERRORS) {
-      if (new RegExp(`(?:^|[^A-Z0-9_])${code}(?:$|[^A-Z0-9_])`, 'u').test(error.meta.message)) {
+      if (error.meta.message === `ERROR: ${code}`) {
         return new Error(code);
       }
     }
@@ -213,7 +226,7 @@ export class GovernedSubjectRelationRepository {
       const rows = await transaction.$queryRaw(
         appendQuery(input),
       );
-      return parseResult(rows, false);
+      return parseResult(rows, null);
     } catch (error) {
       if (error instanceof Error && error.message === GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE) throw error;
       throw mappedDatabaseError(error);

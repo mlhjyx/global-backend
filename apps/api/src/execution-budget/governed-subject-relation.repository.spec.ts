@@ -257,6 +257,20 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
     expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
   });
 
+  it('accepts both strict boolean replay outcomes for append while attest remains replay-only', async () => {
+    const module = await loadRepository();
+    const repository = new module.GovernedSubjectRelationRepository();
+    await expect(repository.appendChildRelationV1(
+      transaction(resultRow(false)).value, validInput(),
+    )).resolves.toMatchObject({ replay: false });
+    await expect(repository.appendChildRelationV1(
+      transaction(resultRow(true)).value, validInput(),
+    )).resolves.toMatchObject({ replay: true });
+    await expect(repository.attestChildRelationV1(
+      transaction(resultRow(false)).value, validInput(),
+    )).rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+  });
+
   it('binds attest to the identical 24 SQL values and requires replay=true', async () => {
     const module = await loadRepository();
     const database = transaction(resultRow(true));
@@ -323,14 +337,10 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
       { ...validInput(), operationId: 'not-a-uuid' },
       { ...validInput(), operationGeneration: 0 },
       { ...validInput(), operationGeneration: 1.5 },
+      { ...validInput(), operationGeneration: 2_147_483_648 },
       { ...validInput(), ackId: ACK.toUpperCase() },
       { ...validInput(), resultDigest: 'b'.repeat(63) },
       { ...validInput(), contractSha256: CONTRACT.toUpperCase() },
-      { ...validInput(), rootSubjectType: 'other' },
-      { ...validInput(), rootSubjectId: IDS.childId },
-      { ...validInput(), rootDataClass: 'PERSONAL' },
-      { ...validInput(), rootDsrSubjectType: 'person' },
-      { ...validInput(), rootDsrSubjectId: IDS.sourceId },
       { ...validInput(), parentGovernedSubjectId: 'not-a-uuid' },
       { ...validInput(), childSubjectType: 'Bad-Type' },
       { ...validInput(), childDataClass: 'UNKNOWN' },
@@ -351,6 +361,26 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
         const database = transaction(resultRow(method === 'attestChildRelationV1'));
         await expect(repository[method](database.value, candidate))
           .rejects.toThrow(module.GOVERNED_SUBJECT_RELATION_INVALID);
+        expect(database.queryRaw).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('maps every invalid canonical root field to the operation-subject error before SQL', async () => {
+    const module = await loadRepository();
+    const repository = new module.GovernedSubjectRelationRepository();
+    const roots = [
+      { ...validInput(), rootSubjectType: 'other' },
+      { ...validInput(), rootSubjectId: IDS.childId },
+      { ...validInput(), rootDataClass: 'PERSONAL' },
+      { ...validInput(), rootDsrSubjectType: 'person' },
+      { ...validInput(), rootDsrSubjectId: IDS.sourceId },
+    ];
+    for (const input of roots) {
+      for (const method of ['appendChildRelationV1', 'attestChildRelationV1'] as const) {
+        const database = transaction(resultRow(method === 'attestChildRelationV1'));
+        await expect(repository[method](database.value, input))
+          .rejects.toThrow(module.GOVERNED_OPERATION_SUBJECT_INVALID);
         expect(database.queryRaw).not.toHaveBeenCalled();
       }
     }
@@ -401,7 +431,6 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
       [{ ...resultRow(false), child_subject_id: 'not-a-uuid' }],
       [{ ...resultRow(false), relation_id: 'not-a-uuid' }],
       [{ ...resultRow(false), replay: 'false' }],
-      [resultRow(true)],
     ];
     for (const rows of appendRows) {
       await expect(repository.appendChildRelationV1(transactionRows(rows).value, validInput()))
@@ -462,6 +491,19 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
         await expect(repository[method](transaction(databaseMarker(code)).value, validInput()))
           .rejects.toThrow(code);
       }
+    }
+    for (const message of [
+      `DETAIL: ERROR: ${module.GOVERNED_SUBJECT_TOMBSTONED}`,
+      `ERROR: prefix ${module.GOVERNED_SUBJECT_TOMBSTONED}`,
+      `ERROR: ${module.GOVERNED_SUBJECT_TOMBSTONED} suffix`,
+      `ERROR: ${module.GOVERNED_SUBJECT_TOMBSTONED}\nERROR: ${module.GOVERNED_SUBJECT_RELATION_INVALID}`,
+    ]) {
+      const marker = new Prisma.PrismaClientKnownRequestError('redacted', {
+        code: 'P2010', clientVersion: 'task2-test',
+        meta: { code: 'P0001', message },
+      });
+      await expect(repository.appendChildRelationV1(transaction(marker).value, validInput()))
+        .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
     }
     const spoofed = new Error(`ERROR: ${module.GOVERNED_SUBJECT_TOMBSTONED}`);
     await expect(repository.appendChildRelationV1(transaction(spoofed).value, validInput()))
