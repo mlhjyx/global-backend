@@ -476,29 +476,16 @@ describe("governed relation graph concurrency and DSR contract", () => {
   });
 
   it("includes the existing child descendant height in the depth bound", () => {
-    seedDepth(62); const parent=psql(`SELECT child_subject_id::text
-      FROM governed_subject_relation WHERE relation_key='depth:62';`);
-    psql(asApp(invocation(APPEND,{childId:"52000000-0000-4000-8000-000000000080",
-      relationKey:"branch:one"}))); const branch=psql(`SELECT child_subject_id::text
-      FROM governed_subject_relation WHERE relation_key='branch:one';`);
-    psql(asApp(invocation(APPEND,{parentId:branch,
-      childId:"52000000-0000-4000-8000-000000000081",relationKey:"branch:one-child"})));
-    psql(asApp(invocation(APPEND,{parentId:parent,
-      childId:"52000000-0000-4000-8000-000000000080",relationKey:"depth:height-boundary"})));
-    psql(asApp(invocation(APPEND,{childId:"52000000-0000-4000-8000-000000000090",
-      relationKey:"branch:two"}))); const branch2=psql(`SELECT child_subject_id::text
-      FROM governed_subject_relation WHERE relation_key='branch:two';`);
-    psql(asApp(invocation(APPEND,{parentId:branch2,
-      childId:"52000000-0000-4000-8000-000000000091",relationKey:"branch:two-child"})));
-    const branch2Child=psql(`SELECT child_subject_id::text FROM governed_subject_relation
-      WHERE relation_key='branch:two-child';`);
-    psql(asApp(invocation(APPEND,{parentId:branch2Child,
-      childId:"52000000-0000-4000-8000-000000000092",relationKey:"branch:two-grandchild"})));
-    const before=graphSnapshot(); const denied=raw(asApp(invocation(APPEND,{
-      parentId:parent,childId:"52000000-0000-4000-8000-000000000090",
-      relationKey:"depth:descendants-overflow"})));
-    assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
-    assert.equal(graphSnapshot(),before);
+    seedDepth(62); const child=(key)=>psql(`SELECT child_subject_id::text FROM governed_subject_relation WHERE relation_key='${key}';`); const parent=child("depth:62");
+    psql(asApp(invocation(APPEND,{childId:"52000000-0000-4000-8000-000000000080",relationKey:"branch:one"})));
+    psql(asApp(invocation(APPEND,{parentId:child("branch:one"),childId:"52000000-0000-4000-8000-000000000081",relationKey:"branch:one-child"})));
+    psql(asApp(invocation(APPEND,{parentId:parent,childId:"52000000-0000-4000-8000-000000000080",relationKey:"depth:height-boundary"})));
+    psql(asApp(invocation(APPEND,{childId:"52000000-0000-4000-8000-000000000090",relationKey:"branch:two"})));
+    psql(asApp(invocation(APPEND,{parentId:child("branch:two"),childId:"52000000-0000-4000-8000-000000000091",relationKey:"branch:two-child"})));
+    psql(asApp(invocation(APPEND,{parentId:child("branch:two-child"),childId:"52000000-0000-4000-8000-000000000092",relationKey:"branch:two-grandchild"})));
+    const before=graphSnapshot(); const denied=raw(asApp(invocation(APPEND,{parentId:parent,
+      childId:"52000000-0000-4000-8000-000000000090",relationKey:"depth:descendants-overflow"})));
+    assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/); assert.equal(graphSnapshot(),before);
   });
 
   for (const [label, subjects, relations] of [
@@ -597,17 +584,12 @@ describe("governed relation graph concurrency and DSR contract", () => {
   });
 
   it("uses one global lock order for concurrent account reopen and append", async () => {
-    const results=await concurrent([
-      asApp(invocation(APPEND)),
-      `BEGIN; SELECT set_config('app.current_workspace_id','${WS}',true);
-       SELECT account_id::text,generation FROM open_authorized_tool_budget_v1(
-        '${WS}','${AUTH}','graph-account',true); COMMIT;`,
-    ]);
-    assert.equal(results[0].status,0,results[0].stderr);
-    assert.equal(results[1].status,0,results[1].stderr);
+    const results=await concurrent([asApp(invocation(APPEND)),`BEGIN; SELECT
+      set_config('app.current_workspace_id','${WS}',true); SELECT account_id::text,generation
+      FROM open_authorized_tool_budget_v1('${WS}','${AUTH}','graph-account',true); COMMIT;`]);
+    assert.equal(results[0].status,0,results[0].stderr); assert.equal(results[1].status,0,results[1].stderr);
     assert.doesNotMatch(results.map((result)=>result.stderr).join("\n"),/40P01|deadlock detected/i);
-    assert.equal(psql(`SELECT ref_count FROM tool_budget_account WHERE id='${ACCOUNT}';`),"2");
-    assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP}';`),"1");
+    assert.equal(psql(`SELECT ref_count FROM tool_budget_account WHERE id='${ACCOUNT}';`),"2"); assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP}';`),"1");
   });
 
   it("replays the exact domain ACK concurrently with append and attest without deadlock", async () => {
