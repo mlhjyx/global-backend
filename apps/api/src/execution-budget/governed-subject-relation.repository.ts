@@ -194,16 +194,35 @@ function parseResult(
   }
 }
 
+function trustedDatabaseMarker(error: unknown, marker: string): boolean {
+  try {
+    if (
+      nodeUtilTypes.isProxy(error) ||
+      !(error instanceof Prisma.PrismaClientKnownRequestError)
+    ) return false;
+    const errorDescriptors = Object.getOwnPropertyDescriptors(error);
+    const code = errorDescriptors.code;
+    const meta = errorDescriptors.meta;
+    if (
+      !code || !('value' in code) || code.value !== 'P2010' ||
+      !meta || !('value' in meta) || meta.value === null ||
+      typeof meta.value !== 'object' || nodeUtilTypes.isProxy(meta.value)
+    ) return false;
+    const metaDescriptors = Object.getOwnPropertyDescriptors(meta.value);
+    const sqlState = metaDescriptors.code;
+    const message = metaDescriptors.message;
+    return Boolean(
+      sqlState && 'value' in sqlState && sqlState.value === 'P0001' &&
+      message && 'value' in message && message.value === `ERROR: ${marker}`,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function mappedDatabaseError(error: unknown): Error {
-  if (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010' &&
-    error.meta?.code === 'P0001' && typeof error.meta.message === 'string'
-  ) {
-    for (const code of STABLE_ERRORS) {
-      if (error.meta.message === `ERROR: ${code}`) {
-        return new Error(code);
-      }
-    }
+  for (const code of STABLE_ERRORS) {
+    if (trustedDatabaseMarker(error, code)) return new Error(code);
   }
   return new Error(GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
 }
@@ -228,7 +247,6 @@ export class GovernedSubjectRelationRepository {
       );
       return parseResult(rows, null);
     } catch (error) {
-      if (error instanceof Error && error.message === GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE) throw error;
       throw mappedDatabaseError(error);
     }
   }
@@ -244,7 +262,6 @@ export class GovernedSubjectRelationRepository {
       );
       return parseResult(rows, true);
     } catch (error) {
-      if (error instanceof Error && error.message === GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE) throw error;
       throw mappedDatabaseError(error);
     }
   }

@@ -324,6 +324,11 @@ BEGIN
   THEN
     RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
   END IF;
+  IF p_parent_governed_subject_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.governed_subject subject
+    WHERE subject.workspace_id=p_workspace_id AND subject.id=p_parent_governed_subject_id
+      AND subject.subject_type='tool_operation' AND subject.subject_id=p_operation_id
+  ) THEN RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
   IF p_child_subject_type !~ '^[a-z][a-z0-9_.]{0,190}$'
     OR p_relation_key !~ '^[a-z][a-z0-9_.:-]{0,199}$'
     OR p_source_ref_namespace !~ '^[a-z][a-z0-9_.]{0,63}$'
@@ -618,6 +623,11 @@ BEGIN
   THEN
     RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
   END IF;
+  IF p_parent_governed_subject_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.governed_subject subject
+    WHERE subject.workspace_id=p_workspace_id AND subject.id=p_parent_governed_subject_id
+      AND subject.subject_type='tool_operation' AND subject.subject_id=p_operation_id
+  ) THEN RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
   IF p_child_subject_type !~ '^[a-z][a-z0-9_.]{0,190}$'
     OR p_relation_key !~ '^[a-z][a-z0-9_.:-]{0,199}$'
     OR p_source_ref_namespace !~ '^[a-z][a-z0-9_.]{0,63}$'
