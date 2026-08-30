@@ -315,6 +315,55 @@ function seedReservedOperation() {
   return { ...factsA, operationId: OP_RESERVED };
 }
 
+function cloneAckWithDrift(kind, suffix) {
+  const ackId = suffix.repeat(64);
+  const expressions = {
+    operationKey: ["'drift-operation-key'", "source.result_strategy", "source.artifact_id", "source.result_schema", "source.usage", "source.cost_basis",
+      "jsonb_build_object('operationKey','drift-operation-key')"],
+    resultSchema: ["source.operation_key", "source.result_strategy", "source.artifact_id", "'drift-result/v1'", "source.usage", "source.cost_basis",
+      "jsonb_build_object('resultSchema','drift-result/v1')"],
+    usage: ["source.operation_key", "source.result_strategy", "source.artifact_id", "source.result_schema",
+      "jsonb_set(source.usage,'{inputTokens}','2'::jsonb)", "source.cost_basis",
+      "jsonb_build_object('usage',jsonb_set(source.usage,'{inputTokens}','2'::jsonb))"],
+    costBasis: ["source.operation_key", "source.result_strategy", "source.artifact_id", "source.result_schema", "source.usage", "'provider_reported'",
+      "jsonb_build_object('costBasis','provider_reported')"],
+    strategy: ["source.operation_key", "'artifact_reference'", "'artifact://drift'", "source.result_schema", "source.usage", "source.cost_basis",
+      "jsonb_build_object('resultStrategy','artifact_reference','artifactId','artifact://drift')"],
+  }[kind];
+  assert.ok(expressions);
+  const [operationKey, strategy, artifact, schema, usage, cost, jsonDrift] = expressions;
+  psql(`INSERT INTO execution_domain_ack(
+    ack_id,operation_id,operation_key,authority_id,account_id,scope_key,consumer,
+    domain_aggregate_type,domain_ack_key,domain_revision,result_strategy,result_schema,
+    result_digest,artifact_id,usage,cost_basis,ack_json,created_at
+  ) SELECT '${ackId}',source.operation_id,${operationKey},source.authority_id,
+    source.account_id,source.scope_key,'Task2Drift${suffix}',source.domain_aggregate_type,
+    source.domain_ack_key,source.domain_revision,${strategy},${schema},source.result_digest,
+    ${artifact},${usage},${cost},source.ack_json || jsonb_build_object(
+      'ackId','${ackId}','consumer','Task2Drift${suffix}') || ${jsonDrift},clock_timestamp()
+  FROM execution_domain_ack source WHERE source.ack_id='${factsA.ackId}';`);
+  return ackId;
+}
+
+function seedDirectRelationForAck(ackId) {
+  const rootId = "81000000-0000-4000-8000-000000000001";
+  const childId = "81000000-0000-4000-8000-000000000002";
+  psql(`INSERT INTO governed_subject(id,scope_key,workspace_id,subject_type,subject_id,data_class)
+    VALUES ('${rootId}','${WS_A}','${WS_A}','tool_operation','${OP_A}','NON_PERSONAL'),
+      ('${childId}','${WS_A}','${WS_A}','materialized_record','${CHILD_A}','NON_PERSONAL');
+    INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,
+      account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest)
+    VALUES ('${rootId}','${WS_A}','${WS_A}','${AUTH_A}','${ACCOUNT_A}','${OP_A}',1,
+      '${rootId}','${ackId}','${factsA.resultDigest}');
+    INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
+      operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
+      child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,
+      contract_sha256)
+    VALUES ('${WS_A}','${WS_A}','${AUTH_A}','${ACCOUNT_A}','${OP_A}',1,'${ackId}',
+      '${rootId}','${rootId}','${childId}','record:0','MATERIALIZED_CHILD','source_record',
+      '${SOURCE_A}','${CONTRACT_A}');`);
+}
+
 function invocation(functionName, facts, overrides = {}) {
   const input = {
     ...facts,
@@ -524,6 +573,11 @@ describe("governed relation append/attest database contract", () => {
     assert.equal(shadow.status, 0, shadow.stderr);
     assert.doesNotMatch(shadow.stdout, /shadow/);
     assert.match(shadow.stdout, /^[0-9a-f-]+\|[0-9a-f-]+\|[0-9a-f-]+\|[0-9a-f-]+\|f$/m);
+    const selfRole = rawPsql(asApp(`SET ROLE app_user; ${selectCall(APPEND, factsA, {
+      childId: "51000000-0000-4000-8000-000000000099", relationKey: "role:self",
+    })}`, WS_A));
+    assert.notEqual(selfRole.status, 0);
+    assert.match(selfRole.stderr, /GOVERNED_OPERATION_SUBJECT_INVALID/);
   });
 
   it("missing attest before append fails inside READ ONLY without any canonical mutation", () => {
@@ -626,6 +680,37 @@ describe("governed relation append/attest database contract", () => {
     }
   });
 
+  it("rejects every required NULL while preserving the four nullable union fields", () => {
+    psql(asApp(selectCall(APPEND, factsA), WS_A));
+    const operationNulls = [
+      { workspaceId: null }, { authorityId: null }, { accountId: null },
+      { operationId: null }, { generation: null }, { ackId: null },
+      { resultDigest: null }, { rootSubjectType: null }, { rootSubjectId: null },
+      { rootDataClass: null },
+    ];
+    const relationNulls = [
+      { childType: null }, { childId: null }, { childDataClass: null },
+      { relationKey: null }, { relationKind: null }, { sourceNamespace: null },
+      { contractSha256: null },
+    ];
+    for (const fn of [APPEND, ATTEST]) {
+      for (const override of operationNulls) {
+        captureFailure(fn, factsA, override, "GOVERNED_OPERATION_SUBJECT_INVALID");
+      }
+      for (const override of relationNulls) {
+        captureFailure(fn, factsA, override, "GOVERNED_SUBJECT_RELATION_INVALID");
+      }
+    }
+    const nullable = {
+      parentId: null, rootDsrSubjectType: null, rootDsrSubjectId: null,
+      childDsrSubjectType: null, childDsrSubjectId: null,
+      sourceUuid: null, sourceSha256: CONTRACT_A, relationKey: "nullable:sha",
+      childId: "51000000-0000-4000-8000-000000000098",
+    };
+    psql(asApp(selectCall(APPEND, factsA, nullable), WS_A));
+    psql(asApp(selectCall(ATTEST, factsA, nullable), WS_A, true));
+  });
+
   it("rejects a non-settled stored operation and cross-operation ACK tuples", () => {
     const reserved = seedReservedOperation();
     const otherSettled = seedOperation({
@@ -636,6 +721,25 @@ describe("governed relation append/attest database contract", () => {
       captureFailure(fn, reserved, { ackId: factsA.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
       captureFailure(fn, otherSettled, { ackId: factsA.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
       captureFailure(fn, factsA, { ackId: otherSettled.ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
+    }
+  });
+
+  it("binds operation key, result schema, receipt usage, cost basis and result strategy", () => {
+    const drifts = [
+      ["operationKey", "7"], ["resultSchema", "8"], ["usage", "9"],
+      ["costBasis", "a"], ["strategy", "b"],
+    ];
+    for (const [kind, suffix] of drifts) {
+      let ackId = cloneAckWithDrift(kind, suffix);
+      captureFailure(APPEND, factsA, { ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
+      resetDatabase();
+      factsA = seedAuthority({ workspaceId: WS_A, authorityId: AUTH_A,
+        accountId: ACCOUNT_A, operationId: OP_A, suffix: "01" });
+      factsB = seedAuthority({ workspaceId: WS_B, authorityId: AUTH_B,
+        accountId: ACCOUNT_B, operationId: OP_B, suffix: "02" });
+      ackId = cloneAckWithDrift(kind, suffix);
+      seedDirectRelationForAck(ackId);
+      captureFailure(ATTEST, factsA, { ackId }, "GOVERNED_OPERATION_SUBJECT_INVALID");
     }
   });
 

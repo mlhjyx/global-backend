@@ -82,7 +82,7 @@ const READ_ONLY_FORBIDDEN = /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL|EXECU
 const READ_ONLY_CALL_ALLOWLIST = new Set([
   'array_length', 'cardinality', 'char_length', 'coalesce', 'count',
   'current_workspace_id', 'greatest', 'hashtextextended', 'least', 'lower',
-  'nullif', 'pg_advisory_xact_lock',
+  'nullif', 'pg_advisory_xact_lock', 'current_setting',
 ]);
 
 function stripSqlNoise(value: string): string {
@@ -239,6 +239,26 @@ describe('governed relation append and attest migration contract', () => {
     validateFunction(sql, APPEND, false);
     validateFunction(sql, ATTEST, true);
     expect(functionBlock(sql, ATTEST)).not.toMatch(/apply_execution_domain_ack_v1/iu);
+  });
+
+  it('locks caller role, fixed operation facts and bounded dense-DAG reachability', async () => {
+    const sql = await migration();
+    const caller = functionBlock(sql, '_governed_relation_assert_caller_v1');
+    expect(caller).toMatch(/current_setting\s*\(\s*'role'\s*,\s*true\s*\)\s+IS\s+DISTINCT\s+FROM\s+'none'/iu);
+    const operation = functionBlock(sql, '_governed_relation_lock_operation_v1');
+    const facts = [
+      'execution_budget_authority', 'tool_budget_account',
+      'tool_budget_operation', 'execution_domain_ack',
+    ];
+    let cursor = -1;
+    for (const fact of facts) {
+      const index = operation.indexOf(fact, cursor + 1);
+      expect(index).toBeGreaterThan(cursor);
+      cursor = index;
+    }
+    expect(operation.match(/FOR\s+SHARE/giu)).toHaveLength(4);
+    const append = functionBlock(sql, APPEND);
+    expect(append).toMatch(/WITH\s+RECURSIVE\s+reachable[^]*?\bUNION\b(?!\s+ALL)[^]*?depth\s*<\s*65/iu);
   });
 
   it('exposes function-only app ACL and no Task 3 tombstone function', async () => {

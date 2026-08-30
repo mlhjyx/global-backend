@@ -203,6 +203,33 @@ function seedDepth(edgeCount) {
       '${CONTRACT}' FROM generate_series(1,${edgeCount}) n;`);
 }
 
+function seedDenseDag(layers) {
+  seedRoot();
+  psql(`INSERT INTO governed_subject(id,scope_key,workspace_id,subject_type,subject_id,data_class)
+    SELECT ${deterministicUuid("dense-node","n")},'${WS}','${WS}','materialized_record',
+      ${deterministicUuid("dense-external","n")},'NON_PERSONAL'
+    FROM generate_series(1,${layers * 2}) n;
+    INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
+      operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
+      child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
+    SELECT '${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
+      '${rootId}',${deterministicUuid("dense-node","n")},'dense:root:'||n,'DERIVED_FROM',
+      'source_record',${deterministicUuid("dense-source","n")},'${CONTRACT}'
+    FROM generate_series(1,2) n;
+    INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
+      operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
+      child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
+    SELECT '${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP}',1,'${facts.ackId}','${rootId}',
+      ${deterministicUuid("dense-node","((layer-2)*2+parent_side+1)")},
+      ${deterministicUuid("dense-node","((layer-1)*2+child_side+1)")},
+      'dense:'||layer||':'||parent_side||':'||child_side,'DERIVED_FROM','source_record',
+      ${deterministicUuid("dense-edge-source","(layer*100+parent_side*10+child_side)")},
+      '${CONTRACT}' FROM generate_series(2,${layers}) layer
+      CROSS JOIN generate_series(0,1) parent_side
+      CROSS JOIN generate_series(0,1) child_side;`);
+  return psql(`SELECT id::text FROM governed_subject WHERE id=${deterministicUuid("dense-node",String(layers * 2))};`);
+}
+
 function seedOtherOperation() {
   const ackOutput = psql(`DO $seed$ DECLARE base jsonb; projection jsonb; digest text; usage jsonb;
     BEGIN base:=jsonb_build_object('schemaVersion','generic-operation-projection/v1',
@@ -243,6 +270,25 @@ function seedOtherOperation() {
       'source_record',${deterministicUuid("other-source","1")},'${CONTRACT}');`);
   return psql(`SELECT child_subject_id::text FROM governed_subject_relation
     WHERE operation_id='${OP2}' AND relation_key='other:child';`);
+}
+
+function seedOtherOperationGraph(subjectCount) {
+  seedOtherOperation();
+  if (subjectCount <= 2) return;
+  psql(`INSERT INTO governed_subject(id,scope_key,workspace_id,subject_type,subject_id,data_class)
+    SELECT ${deterministicUuid("other-node","n")},'${WS}','${WS}','materialized_record',
+      ${deterministicUuid("other-external","n")},'NON_PERSONAL'
+    FROM generate_series(2,${subjectCount - 1}) n;
+    INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
+      operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
+      child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
+    SELECT seed.scope_key,seed.workspace_id,seed.authority_id,seed.account_id,seed.operation_id,
+      seed.operation_generation,seed.ack_id,seed.operation_subject_id,seed.operation_subject_id,
+      ${deterministicUuid("other-node","n")},'other:bulk:'||n,'MATERIALIZED_CHILD',
+      'source_record',${deterministicUuid("other-source","n")},'${CONTRACT}'
+    FROM generate_series(2,${subjectCount - 1}) n
+    CROSS JOIN LATERAL (SELECT relation.* FROM governed_subject_relation relation
+      WHERE relation.operation_id='${OP2}' ORDER BY relation.id LIMIT 1) seed;`);
 }
 
 function seedPersonalPath(low, high) {
@@ -449,6 +495,41 @@ describe("governed relation graph concurrency and DSR contract", () => {
     });
   }
 
+  it("counts distinct subjects per operation instead of per workspace", () => {
+    seedOtherOperationGraph(4096);
+    psql(asApp(invocation(APPEND, { relationKey: "current:after-other-limit" })));
+    let snapshot = JSON.parse(graphSnapshot());
+    assert.equal(snapshot.subjects, 4098);
+
+    reset(); facts = seedOperation();
+    seedOtherOperation();
+    const sharedExternal = psql(`SELECT subject_id::text FROM governed_subject
+      WHERE workspace_id='${WS}' AND subject_type='materialized_record'
+      AND id IN (SELECT child_subject_id FROM governed_subject_relation WHERE operation_id='${OP2}')
+      LIMIT 1;`);
+    psql(asApp(invocation(APPEND, {
+      childId: sharedExternal, relationKey: "current:shared-existing",
+    })));
+
+    reset(); facts = seedOperation();
+    seedStar(4096, 4095);
+    const existing = psql(`SELECT subject_id::text FROM governed_subject
+      WHERE workspace_id='${WS}' AND subject_type='materialized_record' ORDER BY id LIMIT 1;`);
+    psql(asApp(invocation(APPEND, {
+      childId: existing, relationKey: "current:relation-only",
+      sourceUuid: "62000000-0000-4000-8000-000000008888",
+    })));
+    snapshot = JSON.parse(graphSnapshot());
+    assert.equal(snapshot.subjects, 4096);
+    assert.equal(snapshot.relations, 4096);
+  });
+
+  it("keeps dense DAG reachability bounded without duplicate recursion amplification", () => {
+    const parent = seedDenseDag(24);
+    psql(asApp(invocation(APPEND, { parentId: parent, relationKey: "dense:final" })));
+    assert.equal(JSON.parse(graphSnapshot()).relations, 95);
+  });
+
   it("linearizes the same tuple and same-key conflicting tuples", async () => {
     const same = await concurrent([asApp(invocation(APPEND)), asApp(invocation(APPEND))]);
     assert.deepEqual(same.map((result) => result.status), [0, 0]);
@@ -470,6 +551,23 @@ describe("governed relation graph concurrency and DSR contract", () => {
     assert.equal(snapshot.subjects, 2);
     assert.equal(snapshot.relations, 1);
     assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
+  });
+
+  it("linearizes append and attest against concurrent authority revocation", async () => {
+    const revoke = asApp(`INSERT INTO execution_budget_authority_revocation(
+      scope_key,authority_id,reason,revoked_at
+    ) VALUES ('${WS}','${AUTH}','round-a-concurrent',clock_timestamp());`);
+    const results = await concurrent([asApp(invocation(APPEND)), revoke]);
+    assert.doesNotMatch(results.map((result) => result.stderr).join("\n"), /deadlock|40P01/i);
+    assert.equal(results[1].status, 0, results[1].stderr);
+    assert.ok(results[0].status === 0 || results[0].status === 3);
+    const relationCount = Number(JSON.parse(graphSnapshot()).relations);
+    assert.equal(relationCount, results[0].status === 0 ? 1 : 0);
+    for (const fn of [APPEND, ATTEST]) {
+      const denied = raw(asApp(invocation(fn)));
+      assert.notEqual(denied.status, 0);
+      assert.match(denied.stderr, /GOVERNED_SUBJECT_AUTHORITY_REVOKED/);
+    }
   });
 
   it("serializes opposite edges without deadlock and leaves an acyclic graph", async () => {
