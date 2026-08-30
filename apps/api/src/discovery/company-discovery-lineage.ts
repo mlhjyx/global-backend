@@ -44,6 +44,7 @@ export type DiscoveryCompanyReceiptCollector = Readonly<{
     producerId: string,
     receipt: DurableExecutionReceipt,
   ) => void;
+  isForwardingFailure: (error: unknown) => boolean;
   finish: (recordIndexes: readonly number[]) => DiscoveryCompanyReceiptObservation;
 }>;
 
@@ -82,13 +83,18 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   DiscoveryCompanyLineageProviderKey,
   Readonly<{ producerId: string; resultSchema: string }>
 >);
+const PARENT_FORWARDING_FAILURES = new WeakSet<object>();
 
 type DataRecord = Record<string, unknown>;
 
 type CollectorState = Readonly<
   | { phase: 'idle' }
   | { phase: 'invoked' }
-  | { phase: 'forwarding_failed' }
+  | {
+      phase: 'forwarding_failed';
+      receipt: DurableExecutionReceipt;
+      error: unknown;
+    }
   | { phase: 'settled'; receipt: DurableExecutionReceipt }
   | { phase: 'terminal' }
   | { phase: 'invalid' }
@@ -100,6 +106,16 @@ function invalid(): never {
 
 export function isDiscoveryCompanyLineageInvalid(error: unknown): boolean {
   return error instanceof Error && error.message === DISCOVERY_COMPANY_LINEAGE_INVALID;
+}
+
+export function isDiscoveryCompanyReceiptForwardingFailure(
+  error: unknown,
+): boolean {
+  return Boolean(
+    error !== null &&
+    typeof error === 'object' &&
+    PARENT_FORWARDING_FAILURES.has(error),
+  );
 }
 
 function ownDataRecord(value: unknown, keys: readonly string[]): DataRecord {
@@ -356,16 +372,32 @@ export function createDiscoveryCompanyReceiptCollector(input: Readonly<{
       } catch {
         return fail();
       }
-      state = Object.freeze({ phase: 'forwarding_failed' });
+      state = Object.freeze({
+        phase: 'forwarding_failed',
+        receipt,
+        error: undefined,
+      });
       try {
         parent?.(actualProducerId, value);
-      } catch {
-        return;
+      } catch (error) {
+        if (error !== null && typeof error === 'object') {
+          PARENT_FORWARDING_FAILURES.add(error);
+        }
+        state = Object.freeze({ phase: 'forwarding_failed', receipt, error });
+        throw error;
       }
       state = Object.freeze({ phase: 'settled', receipt });
     },
+    isForwardingFailure: (error) =>
+      state.phase === 'forwarding_failed' && Object.is(state.error, error),
     finish: (value) => {
-      if (state.phase === 'invalid' || state.phase === 'terminal') invalid();
+      if (
+        state.phase === 'invalid' ||
+        state.phase === 'terminal' ||
+        state.phase === 'forwarding_failed'
+      ) {
+        invalid();
+      }
       const recordIndexes = parseRecordIndexes(value, true);
       if (state.phase === 'idle' && recordIndexes.length > 0) invalid();
       const observation = Object.freeze({

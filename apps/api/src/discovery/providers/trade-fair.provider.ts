@@ -106,7 +106,12 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
           query.sourceClass,
         );
       } catch (err) {
-        if (isDiscoveryCompanyLineageInvalid(err)) throw err;
+        if (
+          collector.isForwardingFailure(err) ||
+          isDiscoveryCompanyLineageInvalid(err)
+        ) {
+          throw err;
+        }
         observations.push(collector.finish([]));
         this.log(`skip ${fair.slug}: ${String(err).slice(0, 100)}`);
         continue; // 单展会失败/闸门拒绝不影响其余（如 key 换届失效、SUSPENDED）

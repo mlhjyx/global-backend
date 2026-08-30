@@ -36,6 +36,7 @@ import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
   createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyReceiptForwardingFailure,
   isDiscoveryCompanyLineageInvalid,
   type DiscoveryCompanyReceiptCollector,
   type DiscoveryCompanyReceiptObservation,
@@ -150,6 +151,7 @@ export class PublicWebDiscoveryProvider
       const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
+        if (s.status === 'rejected' && isDiscoveryCompanyReceiptForwardingFailure(s.reason)) throw s.reason;
         if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
         if (s.status !== 'fulfilled') continue;
         const recordIndexes: number[] = [];
@@ -258,6 +260,7 @@ export class PublicWebDiscoveryProvider
       );
     } catch (error) {
       if (
+        collector.isForwardingFailure(error) ||
         isExecutionControlError(error) ||
         isDiscoveryCompanyLineageInvalid(error)
       ) {

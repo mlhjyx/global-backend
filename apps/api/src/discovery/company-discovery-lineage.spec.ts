@@ -449,9 +449,10 @@ describe('company discovery receipt lineage', () => {
     expect(parent).toHaveBeenCalledOnce();
   });
 
-  it('forwards a parent callback at most once when it throws and omits the entire lineage', () => {
+  it('forwards a parent callback at most once and fails closed with the exact error', () => {
+    const parentFailure = new Error('parent unavailable');
     const parent = vi.fn(() => {
-      throw new Error('parent unavailable');
+      throw parentFailure;
     });
     const collector = createDiscoveryCompanyReceiptCollector({
       providerKey: 'directory',
@@ -462,19 +463,15 @@ describe('company discovery receipt lineage', () => {
     expect(() => collector.onDurableReceipt(
       'discovery.extract_list',
       receipt(OPERATION_A, 'discovery-extract-list/v1'),
-    )).not.toThrow();
+    )).toThrow(parentFailure);
     expect(() => collector.onDurableReceipt(
       'discovery.extract_list',
       receipt(OPERATION_B, 'discovery-extract-list/v1'),
     )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
     expect(parent).toHaveBeenCalledOnce();
-    const observation = collector.finish([0]);
-    expect(observation).toMatchObject({ invoked: true, receipt: null, recordIndexes: [0] });
-    expect(buildDiscoveryCompanyResultLineage({
-      providerKey: 'directory',
-      recordCount: 1,
-      observations: [observation],
-    })).toBeUndefined();
+    expect(() => collector.finish([0])).toThrow(
+      DISCOVERY_COMPANY_LINEAGE_INVALID,
+    );
   });
 
   it.each([

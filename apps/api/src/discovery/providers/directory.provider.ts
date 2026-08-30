@@ -26,6 +26,7 @@ import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
   createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyReceiptForwardingFailure,
   isDiscoveryCompanyLineageInvalid,
   type DiscoveryCompanyReceiptCollector,
 } from '../company-discovery-lineage';
@@ -153,6 +154,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query, ctx)));
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
+        if (s.status === 'rejected' && isDiscoveryCompanyReceiptForwardingFailure(s.reason)) throw s.reason;
         if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
         if (s.status !== 'fulfilled') continue;
         collectors.push(...s.value.collectors);
@@ -315,6 +317,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       return Object.freeze({ data: result.data, collector });
     } catch (err) {
       if (
+        collector.isForwardingFailure(err) ||
         isExecutionControlError(err) ||
         isDiscoveryCompanyLineageInvalid(err)
       ) {
