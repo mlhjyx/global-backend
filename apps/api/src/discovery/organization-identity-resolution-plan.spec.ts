@@ -78,154 +78,273 @@ function expectRejected(value: unknown, marker?: string) {
 }
 
 describe("deterministic organization identity resolution plan", () => {
-  it("keeps literal SQL-parity plans invariant across realistic persistence ordering mutations", () => {
-    // An unbound authority occurrence must create an identity_v2 candidate.
-    expect(plan()).toMatchObject({
-      kind: "create_new",
-      matchRule: "identity_v2",
-      inputHash: "be8c1309ff19260a4b93dca3716d398535a5277067362c91ee01e368cc28aa94",
+  describe("A2 literal SQL-parity planner vectors", () => {
+    it("returns the complete create-new variant with its literal input hash", () => {
+      expect(plan()).toEqual({
+        kind: "create_new",
+        matchRule: "identity_v2",
+        identifiers: [
+          {
+            providerKey: "registry",
+            scheme: "registry-id",
+            jurisdiction: "DE",
+            normalizedValue: "DE1234",
+            validatorVersion: "registry-id-v1",
+            normalizerVersion: "organization-identity-authority/v1",
+            key: "registry-id:DE:DE1234",
+          },
+        ],
+        inputHash:
+          "be8c1309ff19260a4b93dca3716d398535a5277067362c91ee01e368cc28aa94",
+      });
     });
 
-    // A legacy-only candidate must remain a domain fallback rather than acquiring an identifier rule.
-    expect(
-      plan({
-        authorityIdentifiers: [],
-        blocker: {
-          blockerKey: "d:acme.example",
-          matchRule: "domain_exact",
-          legacyCandidateCompanyId: COMPANY_A,
-        },
-      }),
-    ).toMatchObject({
-      kind: "lazy_upgrade",
-      companyId: COMPANY_A,
-      matchRule: "domain_exact",
-      inputHash: "6952f0036ae5d335e55f536735844bc3e4a73ad3a138c60be5d5efb0db0a8a29",
+    it("returns the complete lazy-upgrade variant with its literal input hash", () => {
+      expect(
+        plan({
+          authorityIdentifiers: [],
+          blocker: {
+            blockerKey: "d:acme.example",
+            matchRule: "domain_exact",
+            legacyCandidateCompanyId: COMPANY_A,
+          },
+        }),
+      ).toEqual({
+        kind: "lazy_upgrade",
+        companyId: COMPANY_A,
+        matchRule: "domain_exact",
+        identifiers: [],
+        inputHash:
+          "6952f0036ae5d335e55f536735844bc3e4a73ad3a138c60be5d5efb0db0a8a29",
+      });
     });
 
-    // A one-hop mapping must bind its root, not retain the mapped source company.
-    expect(
-      plan({
+    it("returns the complete bind-existing variant at the one-hop root", () => {
+      expect(
+        plan({
+          existingBindings: [
+            { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+          ],
+          rootMappings: [
+            { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+          ],
+        }),
+      ).toEqual({
+        kind: "bind_existing",
+        companyId: COMPANY_ROOT,
+        matchRule: "identity_v2",
+        identifiers: [
+          {
+            providerKey: "registry",
+            scheme: "registry-id",
+            jurisdiction: "DE",
+            normalizedValue: "DE1234",
+            validatorVersion: "registry-id-v1",
+            normalizerVersion: "organization-identity-authority/v1",
+            key: "registry-id:DE:DE1234",
+          },
+        ],
+        inputHash:
+          "d8abe41e3201d05746f69cb4e444826451b9d8ff14d8e64eb8ea1077c7967b67",
+      });
+    });
+
+    it("returns the complete identifier-split conflict for duplicate facts", () => {
+      const second = identifier({ normalizedValue: "DE9999" });
+      const splitInput = {
+        authorityIdentifiers: [second, { ...second }, identifier()],
         existingBindings: [
+          { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+          { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
           { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
         ],
-        rootMappings: [
-          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
-        ],
-      }),
-    ).toMatchObject({
-      kind: "bind_existing",
-      companyId: COMPANY_ROOT,
-      matchRule: "identity_v2",
-      inputHash: "d8abe41e3201d05746f69cb4e444826451b9d8ff14d8e64eb8ea1077c7967b67",
+        rootMappings: [],
+      };
+      expect(plan(splitInput)).toEqual({
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "identifier_split",
+        companyIds: [COMPANY_A, COMPANY_B],
+        identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
+        inputHash:
+          "10783186050404c807d0d2aa4a4bb528de8c4e3f2c824db486ab9a59813c739d",
+        conflictFingerprint:
+          "a1becc5d8cefb096ea5abb746a5c121d73b14761112fa1552077f376609ebd03",
+      });
     });
 
-    const second = identifier({ normalizedValue: "DE9999" });
-    const splitInput = {
-      authorityIdentifiers: [second, identifier(), { ...second }],
-      existingBindings: [
-        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
-        { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
-        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
-      ],
-      rootMappings: [],
-    };
-    const split = plan(splitInput);
-    // Reverse/random SQL row order and duplicate rows must not change a two-root conflict receipt.
-    expect(split).toMatchObject({
-      kind: "conflict",
-      conflictType: "identifier_split",
-      companyIds: [COMPANY_A, COMPANY_B],
-      identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
-      inputHash: "10783186050404c807d0d2aa4a4bb528de8c4e3f2c824db486ab9a59813c739d",
-      conflictFingerprint: "a1becc5d8cefb096ea5abb746a5c121d73b14761112fa1552077f376609ebd03",
-    });
-    expect(
-      plan({
-        authorityIdentifiers: [...splitInput.authorityIdentifiers].reverse(),
-        existingBindings: [...splitInput.existingBindings].reverse(),
-        rootMappings: [...splitInput.rootMappings].reverse(),
-      }),
-    ).toMatchObject({
-      inputHash: "10783186050404c807d0d2aa4a4bb528de8c4e3f2c824db486ab9a59813c739d",
-      conflictFingerprint: "a1becc5d8cefb096ea5abb746a5c121d73b14761112fa1552077f376609ebd03",
+    it("returns the identical complete identifier-split conflict for reversed duplicate facts", () => {
+      const second = identifier({ normalizedValue: "DE9999" });
+      expect(
+        plan({
+          authorityIdentifiers: [identifier(), second, { ...second }],
+          existingBindings: [
+            { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+            { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+            { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+          ],
+          rootMappings: [],
+        }),
+      ).toEqual({
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "identifier_split",
+        companyIds: [COMPANY_A, COMPANY_B],
+        identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
+        inputHash:
+          "10783186050404c807d0d2aa4a4bb528de8c4e3f2c824db486ab9a59813c739d",
+        conflictFingerprint:
+          "a1becc5d8cefb096ea5abb746a5c121d73b14761112fa1552077f376609ebd03",
+      });
     });
 
-    // A blocker bound to a different root must remain a disagreement, never a silent merge.
-    expect(
-      plan({
-        existingBindings: [
-          { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
-        ],
-        blocker: {
-          blockerKey: "d:acme.example",
-          matchRule: "domain_exact",
-          legacyCandidateCompanyId: COMPANY_B,
-        },
-      }),
-    ).toMatchObject({
-      kind: "conflict",
-      conflictType: "blocking_key_disagreement",
-      companyIds: [COMPANY_A, COMPANY_B],
-      identifierKeys: ["registry-id:DE:DE1234"],
-      conflictFingerprint: "3d875a6549bdb9afe1dae5d9f3127554e194a1417a7c272ef79498dea303040d",
+    it("returns the complete blocker-disagreement conflict", () => {
+      expect(
+        plan({
+          existingBindings: [
+            { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+          ],
+          blocker: {
+            blockerKey: "d:acme.example",
+            matchRule: "domain_exact",
+            legacyCandidateCompanyId: COMPANY_B,
+          },
+        }),
+      ).toEqual({
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "blocking_key_disagreement",
+        companyIds: [COMPANY_A, COMPANY_B],
+        identifierKeys: ["registry-id:DE:DE1234"],
+        inputHash:
+          "ebb725ebe12e75778bbee94b60ab062587734263da02842050c4e85fce7136f0",
+        conflictFingerprint:
+          "3d875a6549bdb9afe1dae5d9f3127554e194a1417a7c272ef79498dea303040d",
+      });
     });
 
-    // A two-hop alias chain would make root selection non-deterministic and must be rejected.
-    expect(() =>
-      plan({
-        rootMappings: [
-          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
-          { sourceCompanyId: COMPANY_B, rootCompanyId: COMPANY_ROOT },
-        ],
-      }),
-    ).toThrow(resolutionError());
-
-    // A legacy provider identifier is never a v2 fallback blocker; only domain/name rules are admissible.
-    expect(() =>
-      plan({
-        authorityIdentifiers: [],
-        blocker: {
-          blockerKey: "id:registry-id:DE1234",
-          matchRule: "identifier_exact",
-          legacyCandidateCompanyId: null,
-        },
-      }),
-    ).toThrow(resolutionError());
-  });
-
-  it("keeps a fixed multi-root permutation and duplicate binding receipt invariant", () => {
-    // Production mutation: unordered database facts change the chosen roots or conflict receipt.
-    const second = identifier({ normalizedValue: "DE9999" });
-    const facts = {
-      authorityIdentifiers: [second, identifier(), { ...second }],
-      existingBindings: [
-        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
-        { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
-        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
-      ],
-      rootMappings: [
-        { sourceCompanyId: COMPANY_B, rootCompanyId: "55555555-5555-4555-8555-555555555555" },
-        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
-      ],
-    };
-    const first = plan(facts);
-    const reversed = plan({
-      authorityIdentifiers: [...facts.authorityIdentifiers].reverse(),
-      existingBindings: [...facts.existingBindings].reverse(),
-      rootMappings: [...facts.rootMappings].reverse(),
+    it("changes the occurrence input hash while preserving the literal conflict fingerprint", () => {
+      expect(
+        plan({
+          raw: {
+            rawRecordId: "55555555-5555-4555-8555-555555555555",
+            providerKey: "registry",
+            payloadHash:
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ingestVersion: "raw-source/v1",
+          },
+          existingBindings: [
+            { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+          ],
+          blocker: {
+            blockerKey: "d:acme.example",
+            matchRule: "domain_exact",
+            legacyCandidateCompanyId: COMPANY_B,
+          },
+        }),
+      ).toEqual({
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "blocking_key_disagreement",
+        companyIds: [COMPANY_A, COMPANY_B],
+        identifierKeys: ["registry-id:DE:DE1234"],
+        inputHash:
+          "837d6648633c20db5001be083b831d433b1c54bacd5a67c8cf159f641cc8baa1",
+        conflictFingerprint:
+          "3d875a6549bdb9afe1dae5d9f3127554e194a1417a7c272ef79498dea303040d",
+      });
     });
-    expect(first).toMatchObject({
-      kind: "conflict",
-      conflictType: "identifier_split",
-      companyIds: [COMPANY_ROOT, "55555555-5555-4555-8555-555555555555"],
-      identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
-      inputHash: "0e586afcfa62c7679a530d1d9439fc58f072117b3933a43e75701b293294bad2",
-      conflictFingerprint: "c104982be03334fde490c1345c27888aaa72595b1d8ae97665c129ee2ccbc6bc",
+
+    it("rejects an alias chain with the exact planner code", () => {
+      try {
+        plan({
+          rootMappings: [
+            { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
+            { sourceCompanyId: COMPANY_B, rootCompanyId: COMPANY_ROOT },
+          ],
+        });
+        throw new Error("expected alias-chain rejection");
+      } catch (error) {
+        expect(errorCode(error)).toBe("IDENTITY_RESOLUTION_INPUT_INVALID");
+      }
     });
-    expect(reversed).toMatchObject({
-      inputHash: "0e586afcfa62c7679a530d1d9439fc58f072117b3933a43e75701b293294bad2",
-      conflictFingerprint: "c104982be03334fde490c1345c27888aaa72595b1d8ae97665c129ee2ccbc6bc",
+
+    it("rejects a provider identifier as a v2 fallback blocker with the exact planner code", () => {
+      try {
+        plan({
+          authorityIdentifiers: [],
+          blocker: {
+            blockerKey: "id:registry-id:DE1234",
+            matchRule: "identifier_exact",
+            legacyCandidateCompanyId: null,
+          },
+        });
+        throw new Error("expected identifier-blocker rejection");
+      } catch (error) {
+        expect(errorCode(error)).toBe("IDENTITY_RESOLUTION_INPUT_INVALID");
+      }
+    });
+
+    it("returns the complete multi-root conflict for random duplicate authority and binding order", () => {
+      const second = identifier({ normalizedValue: "DE9999" });
+      expect(
+        plan({
+          authorityIdentifiers: [second, { ...second }, identifier()],
+          existingBindings: [
+            { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+            { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+            { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+          ],
+          rootMappings: [
+            {
+              sourceCompanyId: COMPANY_B,
+              rootCompanyId: "55555555-5555-4555-8555-555555555555",
+            },
+            { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+          ],
+        }),
+      ).toEqual({
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "identifier_split",
+        companyIds: [COMPANY_ROOT, "55555555-5555-4555-8555-555555555555"],
+        identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
+        inputHash:
+          "0e586afcfa62c7679a530d1d9439fc58f072117b3933a43e75701b293294bad2",
+        conflictFingerprint:
+          "c104982be03334fde490c1345c27888aaa72595b1d8ae97665c129ee2ccbc6bc",
+      });
+    });
+
+    it("returns the identical complete multi-root conflict for reversed duplicate and root order", () => {
+      const second = identifier({ normalizedValue: "DE9999" });
+      expect(
+        plan({
+          authorityIdentifiers: [identifier(), second, { ...second }],
+          existingBindings: [
+            { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+            { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+            { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+          ],
+          rootMappings: [
+            { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+            {
+              sourceCompanyId: COMPANY_B,
+              rootCompanyId: "55555555-5555-4555-8555-555555555555",
+            },
+          ],
+        }),
+      ).toEqual({
+        kind: "conflict",
+        matchRule: "identity_conflict",
+        conflictType: "identifier_split",
+        companyIds: [COMPANY_ROOT, "55555555-5555-4555-8555-555555555555"],
+        identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
+        inputHash:
+          "0e586afcfa62c7679a530d1d9439fc58f072117b3933a43e75701b293294bad2",
+        conflictFingerprint:
+          "c104982be03334fde490c1345c27888aaa72595b1d8ae97665c129ee2ccbc6bc",
+      });
     });
   });
 
