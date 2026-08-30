@@ -10,6 +10,7 @@ const WS = "13000000-0000-4000-8000-000000000001";
 const AUTH = "23000000-0000-4000-8000-000000000001";
 const ACCOUNT = "33000000-0000-4000-8000-000000000001";
 const OP = "43000000-0000-4000-8000-000000000001";
+const OP2 = "43000000-0000-4000-8000-000000000002";
 const CONTRACT = "c".repeat(64);
 let facts;
 let rootId;
@@ -147,6 +148,42 @@ function seedPath({ diamond = false } = {}) {
     parent: psql(`SELECT ${parent}::text;`) };
 }
 
+function seedOtherPersonalParent() {
+  const dsr = "73000000-0000-4000-8000-000000000099";
+  psql(`INSERT INTO tool_budget_operation(id,scope_key,account_id,generation,operation_key,
+      amount_unit,reserved_cents,observed_cents,charged_cents,reserved_microusd,
+      observed_microusd,charged_microusd,result_schema_version,result_schema,result_digest,
+      result_json,status,settled_at,created_at,receipt_usage,receipt_cost_basis)
+    SELECT '${OP2}',scope_key,account_id,generation,'roundb-operation-2',amount_unit,
+      reserved_cents,observed_cents,charged_cents,reserved_microusd,observed_microusd,
+      charged_microusd,result_schema_version,result_schema,result_digest,result_json,status,
+      settled_at,created_at,receipt_usage,receipt_cost_basis
+    FROM tool_budget_operation WHERE id='${OP}';
+    SET SESSION AUTHORIZATION app_user; BEGIN;
+    SELECT set_config('app.current_workspace_id','${WS}',true);
+    SELECT ack_json::text FROM apply_execution_domain_ack_v1('${WS}','${OP2}',
+      'RoundBConsumer2','RoundBAggregate',repeat('5',64),repeat('6',64)); COMMIT;`);
+  const ack=JSON.parse(psql(`SELECT ack_json::text FROM execution_domain_ack
+    WHERE operation_id='${OP2}';`));
+  const otherRoot=psql(`INSERT INTO governed_subject(scope_key,workspace_id,subject_type,
+    subject_id,data_class) VALUES ('${WS}','${WS}','tool_operation','${OP2}','NON_PERSONAL')
+    RETURNING id::text;`);
+  const child=psql(`INSERT INTO governed_subject(scope_key,workspace_id,subject_type,subject_id,
+    data_class,dsr_subject_type,dsr_subject_id) VALUES ('${WS}','${WS}','materialized_record',
+    ${deterministicUuid("roundb-other-ext","1")},'PERSONAL','company','${dsr}') RETURNING id::text;`);
+  psql(`INSERT INTO tool_operation_subject(subject_id,scope_key,workspace_id,authority_id,
+      account_id,operation_id,operation_generation,root_subject_id,ack_id,result_digest)
+    VALUES ('${otherRoot}','${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP2}',1,'${otherRoot}',
+      '${ack.ackId}','${ack.resultDigest}');
+    INSERT INTO governed_subject_relation(scope_key,workspace_id,authority_id,account_id,
+      operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
+      child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
+    VALUES ('${WS}','${WS}','${AUTH}','${ACCOUNT}','${OP2}',1,'${ack.ackId}','${otherRoot}',
+      '${otherRoot}','${child}','roundb:other-parent','DERIVED_FROM','source_record',
+      ${deterministicUuid("roundb-other-src","1")},'${CONTRACT}');`);
+  return { child, dsr };
+}
+
 function invocation(fn, override = {}) {
   const input = { parentId: null, childId: "53000000-0000-4000-8000-000000000001",
     relationKey: "roundb:final", ...override };
@@ -243,6 +280,52 @@ describe("governed relation exact path lock ordering", () => {
       WHERE operation_id='${OP}';`), "4");
     assert.equal(psql(`SELECT count(*) FROM governed_subject_relation
       WHERE operation_id='${OP}' AND child_subject_id='${path.parent}';`), "2");
+  });
+
+  it("lets an ACK replay transaction callback append before a standalone append", async () => {
+    const callbackName="roundb_ack_callback"; const standaloneName="roundb_ack_standalone";
+    const callback=startConnection(`SET application_name='${callbackName}';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS}',true);
+      SELECT status FROM apply_execution_domain_ack_v1('${WS}','${OP}','RoundBConsumer',
+        'RoundBAggregate',repeat('3',64),repeat('4',64));
+      SELECT pg_backend_pid()::text||'|ACK_READY';\n`,true);
+    let standalone; try {
+      await callback.waitFor("ACK_READY");
+      standalone=startConnection(`SET application_name='${standaloneName}';${asApp(invocation(APPEND))}`);
+      await new Promise((resolve)=>setTimeout(resolve,150));
+      assert.equal(standalone.isSettled(),false);
+      callback.write(`${invocation(APPEND)} COMMIT;\n`); callback.end();
+      const [callbackResult,standaloneResult]=await Promise.all([callback.done,standalone.done]);
+      assert.equal(callbackResult.status,0,callbackResult.stderr);
+      assert.equal(standaloneResult.status,0,standaloneResult.stderr);
+      assert.match(callbackResult.stdout,/REPLAYED/); assert.match(callbackResult.stdout,/\|f$/m);
+      assert.match(standaloneResult.stdout,/\|t$/m);
+      assert.equal(psql(`SELECT count(*) FROM execution_domain_ack WHERE operation_id='${OP}';`),"1");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP}';`),"1");
+    } finally { await Promise.all([cleanup(callback,callbackName),cleanup(standalone,standaloneName)]); }
+  });
+
+  it("rejects another operation PERSONAL parent before waiting on its DSR key", async () => {
+    const foreign=seedOtherPersonalParent();
+    const lockName="roundb_foreign_dsr"; const lock=holder(lockName,
+      `generic-operation-artifact-subject:${WS}:company:${foreign.dsr}`,"READY");
+    try {
+      const ready=await lock.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      for(const fn of [APPEND,ATTEST]) {
+        if(fn===ATTEST) psql(asApp(invocation(APPEND)));
+        const writerName=`roundb_foreign_${fn===APPEND?"append":"attest"}`;
+        const writer=startConnection(`SET application_name='${writerName}';${asApp(invocation(fn,{parentId:foreign.child}),fn===ATTEST)}`);
+        await new Promise((resolve)=>setTimeout(resolve,150));
+        const waits=psql(`SELECT count(*) FROM pg_locks h JOIN pg_locks w ON w.locktype=h.locktype
+          AND w.classid=h.classid AND w.objid=h.objid AND w.objsubid=h.objsubid
+          JOIN pg_stat_activity a ON a.pid=w.pid WHERE h.pid=${pid} AND h.granted AND NOT w.granted
+          AND a.application_name='${writerName}';`);
+        assert.equal(waits,"0"); const result=await writer.done;
+        assert.notEqual(result.status,0); assert.match(result.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+        await cleanup(writer,writerName);
+      }
+    } finally { await cleanup(lock,lockName); }
   });
 
   it("waits on DSR before graph", async () => {
@@ -367,5 +450,38 @@ describe("governed relation exact path lock ordering", () => {
       assert.match(result.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
       assert.equal(canonicalSnapshot(),afterDrift);
     } finally { await Promise.all([cleanup(graph,"roundb_attest_drift_graph"),cleanup(writer,"roundb_attest_drift")]); }
+  });
+
+  it("rejects nonpersonal ancestor drift for a pre-existing relation", async () => {
+    for(const fn of [APPEND,ATTEST]) {
+      reset(); facts=seedOperation(); const path=seedPath();
+      const input={parentId:path.parent,relationKey:"roundb:nonpersonal-drift"};
+      psql(asApp(invocation(APPEND,input)));
+      const holderName=`roundb_nonpersonal_holder_${fn===APPEND?"a":"t"}`;
+      const writerName=`roundb_nonpersonal_writer_${fn===APPEND?"a":"t"}`;
+      const graph=holder(holderName,`governed-subject-relation:${WS}:${OP}`,"READY");
+      let writer; try {
+        const ready=await graph.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+        writer=startConnection(`SET application_name='${writerName}';${asApp(invocation(fn,input),fn===ATTEST)}`);
+        await observeWait(pid,writerName,writer);
+        const c=deterministicUuid("roundb-nonpersonal","1");
+        psql(`INSERT INTO governed_subject(id,scope_key,workspace_id,subject_type,subject_id,data_class)
+          VALUES (${c},'${WS}','${WS}','materialized_record',
+            ${deterministicUuid("roundb-nonpersonal-ext","1")},'NON_PERSONAL');
+          INSERT INTO governed_subject_relation(id,scope_key,workspace_id,authority_id,account_id,
+            operation_id,operation_generation,ack_id,operation_subject_id,parent_subject_id,
+            child_subject_id,relation_key,relation_kind,source_ref_namespace,source_ref_uuid,contract_sha256)
+          VALUES ('83000000-0000-4000-8000-000000000091','${WS}','${WS}','${AUTH}','${ACCOUNT}',
+            '${OP}',1,'${facts.ackId}','${rootId}','${rootId}',${c},'roundb:nonpersonal-root',
+            'DERIVED_FROM','source_record',${deterministicUuid("roundb-nonpersonal-src","1")},'${CONTRACT}'),
+            ('83000000-0000-4000-8000-000000000092','${WS}','${WS}','${AUTH}','${ACCOUNT}',
+            '${OP}',1,'${facts.ackId}','${rootId}',${c},'${path.parent}','roundb:nonpersonal-parent',
+            'DERIVED_FROM','source_record',${deterministicUuid("roundb-nonpersonal-src","2")},'${CONTRACT}');`);
+        const afterDrift=canonicalSnapshot(); graph.write("COMMIT;\n"); graph.end();
+        const result=await writer.done; assert.notEqual(result.status,0);
+        assert.match(result.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+        assert.equal(canonicalSnapshot(),afterDrift);
+      } finally { await Promise.all([cleanup(graph,holderName),cleanup(writer,writerName)]); }
+    }
   });
 });

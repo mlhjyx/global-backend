@@ -84,6 +84,7 @@ const READ_ONLY_CALL_ALLOWLIST = new Set([
   'current_workspace_id', 'greatest', 'hashtextextended', 'least', 'lower',
   'nullif', 'pg_advisory_xact_lock', 'current_setting', 'jsonb_agg', 'jsonb_array_length',
   'jsonb_build_object', 'jsonb_array_elements_text', 'split_part', 'to_jsonb',
+  'unnest', 'md5',
 ]);
 const SQL_CALL_KEYWORDS = new Set([
   'and', 'as', 'exists', 'in', 'not', 'or', 'reachable', 'ancestors',
@@ -273,11 +274,15 @@ describe('governed relation append and attest migration contract', () => {
     const sql = await migration();
     for (const name of [APPEND, ATTEST]) {
       const block = functionBlock(sql, name);
+      const operationLock = block.indexOf('_governed_relation_lock_operation_v1');
+      const operationRead = block.indexOf('_governed_relation_assert_operation_v1');
       const preRead = block.indexOf('_governed_relation_path_snapshot_v1');
       const dsrLock = block.indexOf('_governed_relation_lock_snapshot_dsr_v1');
       const graphLock = block.indexOf("'governed-subject-relation:'");
       const secondRead = block.indexOf('_governed_relation_path_snapshot_v1', preRead + 1);
       expect(preRead).toBeGreaterThan(0);
+      if (name === APPEND) expect(operationLock).toBeLessThan(preRead);
+      else expect(operationRead).toBeLessThan(preRead);
       expect(dsrLock).toBeGreaterThan(preRead);
       expect(graphLock).toBeGreaterThan(dsrLock);
       expect(secondRead).toBeGreaterThan(graphLock);
