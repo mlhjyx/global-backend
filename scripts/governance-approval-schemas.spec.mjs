@@ -129,6 +129,7 @@ const mergeAuthorityReceipt = () => {
 
 const evidenceManifest = () => ({
   schema_version: 'trusted-approval-evidence-manifest/v1',
+  path_bytes_bound: false,
   receipt_id: RECEIPT_ID,
   receipt_core_sha256: DIGEST,
   receipt_raw_sha256: OTHER_DIGEST,
@@ -144,6 +145,18 @@ const evidenceManifest = () => ({
     acquired_at: INSTANT,
     gh_path: '/opt/global/toolchains/gh/2.89.0/bin/gh',
     gh_version: '2.89.0',
+    gh_binary_sha256: DIGEST,
+    owner_uid: 0,
+    owner_gid: 0,
+    mode: '0755',
+    file_identity: {
+      device: '2049',
+      inode: '427001',
+      size: 48_000_000,
+      mtime_ns: '1788087600000000000',
+      ctime_ns: '1788087600000000000',
+    },
+    observed_at: INSTANT,
     tuf_source: 'GH_ATTESTATION_TRUSTED_ROOT',
   },
 });
@@ -337,12 +350,27 @@ test('evidence manifests cryptographically bind a closed receipt evidence set', 
     (value) => { value.files[1].sha256 = DIGEST; },
     (value) => { value.attestation_subject_sha256 = DIGEST; },
     (value) => { value.attestation_bundle.path = 'sha256-not-the-raw-digest.jsonl'; },
+    (value) => { value.path_bytes_bound = true; },
     (value) => { value.trusted_root.path = 'root.jsonl'; },
     (value) => { value.trusted_root.gh_version = '2.88.0'; },
+    (value) => { delete value.trusted_root.gh_binary_sha256; },
+    (value) => { value.trusted_root.owner_uid = 1000; },
+    (value) => { value.trusted_root.owner_gid = 1000; },
+    (value) => { value.trusted_root.mode = '0777'; },
+    (value) => { value.trusted_root.file_identity.inode = '0'; },
+    (value) => { value.trusted_root.file_identity.extra = 'caller'; },
+    (value) => { value.trusted_root.observed_at = '2026-08-30T00:00:00Z'; },
     (value) => { value.trusted_root.acquired_at = '2026-08-30T00:00:00Z'; },
   ]) {
     const value = evidenceManifest(); mutate(value); expectInvalid(validateApprovalEvidenceManifest, value);
   }
+
+  const legacy = evidenceManifest();
+  delete legacy.path_bytes_bound;
+  for (const key of [
+    'gh_binary_sha256', 'owner_uid', 'owner_gid', 'mode', 'file_identity', 'observed_at',
+  ]) delete legacy.trusted_root[key];
+  expectInvalid(validateApprovalEvidenceManifest, legacy);
 });
 
 test('revocations and supersessions retain immutable receipt provenance', () => {

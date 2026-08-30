@@ -5,12 +5,12 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { Worker } from 'node:worker_threads';
 
 import {
   buildApprovalReceiptArtifact,
   parseApprovalJson,
   readApprovalJson,
+  readApprovalJsonFromHandle,
   renderApprovalReceiptCore,
   sha256Prefixed,
   verifyApprovalReceiptRawSha256,
@@ -167,32 +167,39 @@ test('readApprovalJson accepts exactly 1 MiB and rejects one byte more', async (
 });
 
 test('readApprovalJson rejects an opened regular file whose identity changes during the read', async () => {
-  await withTempDirectory(async (directory) => {
-    const file = join(directory, 'changing.json');
-    const prefix = Buffer.from('{"payload":"', 'utf8');
-    const suffix = Buffer.from('"}', 'utf8');
-    await writeFile(file, Buffer.concat([prefix, Buffer.alloc(MAX_BYTES - prefix.length - suffix.length, 0x61), suffix]));
-
-    const worker = new Worker(
-      `const { parentPort, workerData } = require('node:worker_threads');
-       const { utimesSync } = require('node:fs');
-       let running = true;
-       parentPort.on('message', (message) => { if (message === 'stop') running = false; });
-       parentPort.postMessage('ready');
-       while (running) utimesSync(workerData, new Date(), new Date());`,
-      { eval: true, workerData: file },
-    );
-    await new Promise((resolve, reject) => {
-      worker.once('message', resolve);
-      worker.once('error', reject);
-    });
-    try {
-      await expectApprovalError(() => readApprovalJson(file, 'approval'), 'FILE_CHANGED');
-    } finally {
-      worker.postMessage('stop');
-      await worker.terminate();
-    }
+  const bytes = Buffer.from('{"approved":true}\n', 'utf8');
+  const stat = (mtimeNs) => ({
+    dev: 2049n,
+    ino: 427001n,
+    mode: 33188n,
+    size: BigInt(bytes.length),
+    mtimeNs,
+    ctimeNs: 1788087600000000000n,
+    isFile: () => true,
   });
+  const stats = [stat(1788087600000000000n), stat(1788087600000000001n)];
+  let statReads = 0;
+  let byteReads = 0;
+  const handle = {
+    stat: async ({ bigint }) => {
+      assert.equal(bigint, true);
+      return stats[statReads++];
+    },
+    read: async (target, offset, length, position) => {
+      byteReads += 1;
+      if (position >= bytes.length) return { bytesRead: 0, buffer: target };
+      const bytesRead = Math.min(length, bytes.length - position);
+      bytes.copy(target, offset, position, position + bytesRead);
+      return { bytesRead, buffer: target };
+    },
+  };
+
+  await expectApprovalError(
+    () => readApprovalJsonFromHandle(handle, 'approval'),
+    'FILE_CHANGED',
+  );
+  assert.equal(statReads, 2);
+  assert.equal(byteReads, 2);
 });
 
 test('renderApprovalReceiptCore requires canonical ISO instants and renders schema field order', () => {

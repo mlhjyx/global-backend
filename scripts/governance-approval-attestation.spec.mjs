@@ -6,7 +6,10 @@ import {
   inspectApprovalAttestationToolchain,
   verifyApprovalAttestation,
 } from './governance-approval-attestation.mjs';
-import { buildApprovalReceiptArtifact } from './governance-approval-safe-json.mjs';
+import {
+  buildApprovalReceiptArtifact,
+  renderApprovalReceiptCore,
+} from './governance-approval-safe-json.mjs';
 
 const GH_PATH = '/opt/global/toolchains/gh/2.89.0/bin/gh';
 const REPOSITORY = 'mlhjyx/global-backend';
@@ -16,6 +19,14 @@ const SOURCE_SHA = 'e'.repeat(40);
 const VERIFIED_AT = '2026-08-30T12:00:00.000Z';
 const VALID_UNTIL = '2026-08-30T13:00:00.000Z';
 const MAX_OUTPUT_BYTES = 1_048_576;
+const EXEC_TIMEOUT_MS = 30_000;
+const SAFE_EXEC_ENV = Object.freeze({
+  GH_CONFIG_DIR: '/nonexistent',
+  GH_PROMPT_DISABLED: '1',
+  LANG: 'C',
+  LC_ALL: 'C',
+  NO_COLOR: '1',
+});
 
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 const digest = (character) => `sha256:${character.repeat(64)}`;
@@ -184,12 +195,46 @@ const rebindReceiptBytes = (state, bytes) => {
   state.output = verificationJson(rawDigest);
 };
 
-test('toolchain inspection accepts only the pinned absolute gh 2.89.0 with attestation help', () => {
+const expectedSyntheticHold = (state) => ({
+  schemaVersion: 'approval-attestation-contract-result/v1',
+  contractStatus: 'PASS',
+  verificationStatus: 'HOLD',
+  evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+  trustEligible: false,
+  pathBytesBound: false,
+  toolchainIdentityBound: false,
+  signerAuthorityBound: false,
+  lifecycleAuthorityBound: false,
+  blockingCodes: ['APPROVAL_INDEPENDENCE_NOT_PROVEN'],
+  syntheticComparison: {
+    receiptId: state.artifact.envelope.core.receipt_id,
+    receiptCoreSha256: state.artifact.receiptCoreSha256,
+    receiptRawSha256: state.artifact.receiptRawSha256,
+    repository: state.input.expected.repository,
+    signerWorkflow: state.input.expected.signerWorkflow,
+    signerDigest: state.input.expected.signerDigest,
+    sourceRef: state.input.expected.sourceRef,
+    sourceDigest: state.input.expected.sourceDigest,
+    oidcIssuer: state.input.expected.oidcIssuer,
+    runnerEnvironment: state.input.expected.runnerEnvironment,
+    observedAt: state.input.lifecycle.verifiedAt,
+    toolchainPath: GH_PATH,
+    toolchainVersion: '2.89.0',
+  },
+});
+
+test('toolchain inspection can only report synthetic contract pass and HOLD', () => {
   assert.deepEqual(inspectApprovalAttestationToolchain({
     ghPath: GH_PATH,
-    versionOutput: 'gh version 2.89.0 (2026-08-26)\nhttps://github.com/cli/cli/releases/tag/v2.89.0\n',
+    versionOutput: 'gh version 2.89.0\nTHIS IS CALLER-SUPPLIED, NOT A BINARY IDENTITY\n',
     attestationHelpExitCode: 0,
-  }), { status: 'AVAILABLE', version: '2.89.0', code: 'PASS' });
+  }), {
+    status: 'HOLD',
+    version: null,
+    contractStatus: 'SYNTHETIC_CONTRACT_PASS',
+    syntheticVersion: '2.89.0',
+    code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+  });
 
   for (const [name, input, expected] of [
     ['current host lacks attestation', { ghPath: '/usr/bin/gh', versionOutput: 'gh version 2.46.0 (2024-02-28 Ubuntu 2.46.0-1ubuntu0.3)\n', attestationHelpExitCode: 1 }, 'APPROVAL_ATTESTATION_TOOLCHAIN_UNAVAILABLE'],
@@ -200,12 +245,14 @@ test('toolchain inspection accepts only the pinned absolute gh 2.89.0 with attes
     const result = inspectApprovalAttestationToolchain(input);
     assert.equal(result.status, 'HOLD', name);
     assert.equal(result.version, null, name);
+    assert.equal(result.contractStatus, 'FAIL', name);
+    assert.equal(result.syntheticVersion, null, name);
     assert.equal(result.code, expected, name);
     assert.equal(Object.isFrozen(result), true, name);
   }
 });
 
-test('verification uses the exact execFile argv with no shell and returns a closed bounded projection', async () => {
+test('verification uses exact hardened execFile options but returns only a synthetic typed HOLD', async () => {
   const state = fixture();
   const injected = runnerFor(state.output);
   const result = await verifyApprovalAttestation(state.input, injected.runner);
@@ -226,30 +273,67 @@ test('verification uses the exact execFile argv with no shell and returns a clos
     [GH_PATH, ['attestation', 'verify', '--help']],
     [GH_PATH, expectedArgv],
   ]);
-  assert.ok(injected.calls.every(({ options }) => (
-    options.shell === false && options.encoding === 'utf8' && options.maxBuffer === MAX_OUTPUT_BYTES
-  )));
-  assert.deepEqual(result, {
-    schemaVersion: 'approval-attestation-verification/v1',
-    status: 'VERIFIED',
-    trustClass: 'TRUSTED_BASE_VERIFIED',
-    receiptId: state.artifact.envelope.core.receipt_id,
-    receiptCoreSha256: state.artifact.receiptCoreSha256,
-    receiptRawSha256: state.artifact.receiptRawSha256,
-    repository: REPOSITORY,
-    signerWorkflow: WORKFLOW,
-    signerDigest: WORKFLOW_SHA,
-    sourceRef: 'refs/heads/main',
-    sourceDigest: SOURCE_SHA,
-    oidcIssuer: 'https://token.actions.githubusercontent.com',
-    runnerEnvironment: 'github-hosted',
-    verifiedAt: VERIFIED_AT,
-    toolchain: { path: GH_PATH, version: '2.89.0' },
-  });
+  for (const { options } of injected.calls) {
+    assert.deepEqual(Object.keys(options).sort(), [
+      'encoding', 'env', 'killSignal', 'maxBuffer', 'shell', 'signal', 'timeout', 'windowsHide',
+    ]);
+    assert.equal(options.shell, false);
+    assert.equal(options.encoding, 'utf8');
+    assert.equal(options.maxBuffer, MAX_OUTPUT_BYTES);
+    assert.equal(options.timeout, EXEC_TIMEOUT_MS);
+    assert.equal(options.killSignal, 'SIGKILL');
+    assert.equal(options.signal instanceof AbortSignal, true);
+    assert.equal(options.signal.aborted, false);
+    assert.deepEqual(options.env, SAFE_EXEC_ENV);
+    assert.deepEqual(Object.keys(options.env).sort(), Object.keys(SAFE_EXEC_ENV).sort());
+  }
+  assert.deepEqual(result, expectedSyntheticHold(state));
   assert.equal(Object.isFrozen(result), true);
-  assert.equal(Object.isFrozen(result.toolchain), true);
+  assert.equal(Object.isFrozen(result.syntheticComparison), true);
+  assert.equal(Object.isFrozen(result.blockingCodes), true);
   assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 32_768);
   assert.equal(JSON.stringify(result).includes('must-never-be-projected'), false);
+  assert.equal(JSON.stringify(result).includes('VERIFIED'), false);
+  assert.equal(JSON.stringify(result).includes('TRUSTED_BASE_VERIFIED'), false);
+});
+
+test('caller-selected signer and omitted lifecycle horizon stay synthetic and trust-ineligible', async () => {
+  const state = fixture();
+  state.input.expected.signerWorkflow = 'attacker/untrusted/.github/workflows/self-signed.yml';
+  state.input.expected.signerDigest = 'f'.repeat(40);
+  state.output.verificationResult.signature.certificate.buildSignerUri =
+    `https://github.com/${state.input.expected.signerWorkflow}@refs/heads/main`;
+  state.output.verificationResult.signature.certificate.buildSignerDigest =
+    state.input.expected.signerDigest;
+  state.input.lifecycle.revokedReceiptIds = [];
+  state.input.lifecycle.supersededReceiptIds = [];
+
+  const result = await verifyApprovalAttestation(state.input, runnerFor(state.output).runner);
+  assert.deepEqual(result, expectedSyntheticHold(state));
+  assert.equal(result.signerAuthorityBound, false);
+  assert.equal(result.lifecycleAuthorityBound, false);
+  assert.equal(result.trustEligible, false);
+});
+
+test('missing command paths cannot become path-bound evidence even when injected execution matches', async () => {
+  const state = fixture();
+  state.input.receiptPath = '/__task6_missing__/receipt.json';
+  state.input.bundlePath = `/__task6_missing__/${state.input.manifest.attestation_bundle.path}`;
+  state.input.trustedRootPath = '/__task6_missing__/trusted_root.jsonl';
+  const result = await verifyApprovalAttestation(state.input, runnerFor(state.output).runner);
+  assert.deepEqual(result, expectedSyntheticHold(state));
+  assert.equal(result.pathBytesBound, false);
+  assert.equal(result.verificationStatus, 'HOLD');
+});
+
+test('the local contract requires receipt-core path and bytes but never claims those paths are bound', async () => {
+  const state = fixture();
+  state.input.receiptCorePath = '/__task6_missing__/receipt-core.json';
+  state.input.receiptCoreBytes = renderApprovalReceiptCore(state.artifact.envelope.core);
+  const result = await verifyApprovalAttestation(state.input, runnerFor(state.output).runner);
+  assert.equal(result.pathBytesBound, false);
+  assert.equal(result.verificationStatus, 'HOLD');
+  assert.equal(result.syntheticComparison.receiptCoreSha256, sha256(state.input.receiptCoreBytes));
 });
 
 test('verification snapshots all caller-owned input before the first awaited command', async () => {
@@ -267,10 +351,10 @@ test('verification snapshots all caller-owned input before the first awaited com
     return injected.runner(...args);
   };
   const result = await verifyApprovalAttestation(state.input, mutatingRunner);
-  assert.equal(result.repository, REPOSITORY);
-  assert.equal(result.signerWorkflow, WORKFLOW);
-  assert.equal(result.verifiedAt, VERIFIED_AT);
-  assert.ok(injected.calls[2].args.includes(`/evidence/sha256-${result.receiptRawSha256.slice('sha256:'.length)}.jsonl`));
+  assert.equal(result.syntheticComparison.repository, REPOSITORY);
+  assert.equal(result.syntheticComparison.signerWorkflow, WORKFLOW);
+  assert.equal(result.syntheticComparison.observedAt, VERIFIED_AT);
+  assert.ok(injected.calls[2].args.includes(`/evidence/sha256-${result.syntheticComparison.receiptRawSha256.slice('sha256:'.length)}.jsonl`));
   assert.equal(injected.calls[2].args.includes('/evidence/caller-mutated.jsonl'), false);
 });
 
