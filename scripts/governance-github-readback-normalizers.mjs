@@ -350,10 +350,30 @@ const rulesetFacts = (value) => {
     'APPROVAL_GITHUB_RULESET_MISMATCH',
   );
   const statusRules = value.rules.filter((rule) => rule?.type === 'required_status_checks');
-  requireCondition(statusRules.length === 1, 'APPROVAL_GITHUB_RULESET_MISMATCH');
+  const pullRequestRules = value.rules.filter((rule) => rule?.type === 'pull_request');
+  const deletionRules = value.rules.filter((rule) => rule?.type === 'deletion');
+  const nonFastForwardRules = value.rules.filter((rule) => rule?.type === 'non_fast_forward');
+  requireCondition(
+    value.rules.length === 4
+      && statusRules.length === 1
+      && pullRequestRules.length === 1
+      && deletionRules.length === 1
+      && nonFastForwardRules.length === 1
+      && hasExactKeys(statusRules[0], ['type', 'parameters'])
+      && hasExactKeys(pullRequestRules[0], ['type', 'parameters'])
+      && hasExactKeys(deletionRules[0], ['type'])
+      && hasExactKeys(nonFastForwardRules[0], ['type']),
+    'APPROVAL_GITHUB_RULESET_MISMATCH',
+  );
   const parameters = statusRules[0].parameters;
   requireCondition(
-    isPlainObject(parameters) && Array.isArray(parameters.required_status_checks),
+    hasExactKeys(parameters, [
+      'strict_required_status_checks_policy', 'do_not_enforce_on_create',
+      'required_status_checks',
+    ])
+      && typeof parameters.strict_required_status_checks_policy === 'boolean'
+      && typeof parameters.do_not_enforce_on_create === 'boolean'
+      && Array.isArray(parameters.required_status_checks),
     'APPROVAL_GITHUB_RULESET_MISMATCH',
   );
   requireCondition(
@@ -368,6 +388,33 @@ const rulesetFacts = (value) => {
     context: check.context,
     integration_id: check.integration_id,
   })).sort((left, right) => left.context.localeCompare(right.context));
+  const pullRequest = pullRequestRules[0].parameters;
+  requireCondition(
+    hasExactKeys(pullRequest, [
+      'required_approving_review_count', 'dismiss_stale_reviews_on_push',
+      'required_reviewers', 'require_code_owner_review', 'require_last_push_approval',
+      'required_review_thread_resolution',
+      'require_extra_approval_for_unattributed_changes', 'allowed_merge_methods',
+    ])
+      && Number.isSafeInteger(pullRequest.required_approving_review_count)
+      && pullRequest.required_approving_review_count >= 0
+      && pullRequest.required_approving_review_count <= 10
+      && typeof pullRequest.dismiss_stale_reviews_on_push === 'boolean'
+      && Array.isArray(pullRequest.required_reviewers)
+      && pullRequest.required_reviewers.length === 0
+      && typeof pullRequest.require_code_owner_review === 'boolean'
+      && typeof pullRequest.require_last_push_approval === 'boolean'
+      && typeof pullRequest.required_review_thread_resolution === 'boolean'
+      && typeof pullRequest.require_extra_approval_for_unattributed_changes === 'boolean'
+      && Array.isArray(pullRequest.allowed_merge_methods)
+      && pullRequest.allowed_merge_methods.length >= 1
+      && pullRequest.allowed_merge_methods.length <= 3
+      && arrayIsUnique(pullRequest.allowed_merge_methods)
+      && pullRequest.allowed_merge_methods.every(
+        (method) => ['merge', 'rebase', 'squash'].includes(method),
+      ),
+    'APPROVAL_GITHUB_RULESET_MISMATCH',
+  );
   return {
     id: value.id,
     source_type: value.source_type,
@@ -383,7 +430,21 @@ const rulesetFacts = (value) => {
       exclude: [...value.conditions.ref_name.exclude],
     },
     strict_required_status_checks_policy: parameters.strict_required_status_checks_policy,
+    do_not_enforce_on_create: parameters.do_not_enforce_on_create,
     required_status_checks: required,
+    pull_request: {
+      required_approving_review_count: pullRequest.required_approving_review_count,
+      dismiss_stale_reviews_on_push: pullRequest.dismiss_stale_reviews_on_push,
+      required_reviewers: [],
+      require_code_owner_review: pullRequest.require_code_owner_review,
+      require_last_push_approval: pullRequest.require_last_push_approval,
+      required_review_thread_resolution: pullRequest.required_review_thread_resolution,
+      require_extra_approval_for_unattributed_changes:
+        pullRequest.require_extra_approval_for_unattributed_changes,
+      allowed_merge_methods: pullRequest.allowed_merge_methods.toSorted(),
+    },
+    deletion_protection: true,
+    non_fast_forward_protection: true,
   };
 };
 
@@ -398,6 +459,22 @@ export const normalizeRuleset = (value, policy, request, enforcePolicy) => {
     })
     && facts.required_status_checks.every((check) => policy.allowedCheckContexts.includes(check.context))
   );
+  const expectedPullRequest = {
+    required_approving_review_count:
+      policy.requiredRuleset.pullRequest.requiredApprovingReviewCount,
+    dismiss_stale_reviews_on_push:
+      policy.requiredRuleset.pullRequest.dismissStaleReviewsOnPush,
+    required_reviewers: policy.requiredRuleset.pullRequest.requiredReviewers,
+    require_code_owner_review:
+      policy.requiredRuleset.pullRequest.requireCodeOwnerReview,
+    require_last_push_approval:
+      policy.requiredRuleset.pullRequest.requireLastPushApproval,
+    required_review_thread_resolution:
+      policy.requiredRuleset.pullRequest.requiredReviewThreadResolution,
+    require_extra_approval_for_unattributed_changes:
+      policy.requiredRuleset.pullRequest.requireExtraApprovalForUnattributedChanges,
+    allowed_merge_methods: policy.requiredRuleset.pullRequest.allowedMergeMethods.toSorted(),
+  };
   if (enforcePolicy) {
     requireCondition(
       facts.id === request.rulesetId
@@ -407,8 +484,13 @@ export const normalizeRuleset = (value, policy, request, enforcePolicy) => {
         && facts.bypass_actors.length === 0
         && sameJson(facts.ref_name, { include: ['~DEFAULT_BRANCH'], exclude: [] })
         && facts.strict_required_status_checks_policy === true
+        && facts.do_not_enforce_on_create === policy.requiredRuleset.doNotEnforceOnCreate
         && facts.required_status_checks.every((check) => isSafePositiveInteger(check.integration_id))
-        && exactCheckTuples,
+        && exactCheckTuples
+        && sameJson(facts.pull_request, expectedPullRequest)
+        && facts.deletion_protection === policy.requiredRuleset.deletionProtection
+        && facts.non_fast_forward_protection
+          === policy.requiredRuleset.nonFastForwardProtection,
       'APPROVAL_GITHUB_RULESET_MISMATCH',
     );
   }

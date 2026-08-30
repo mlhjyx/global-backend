@@ -231,13 +231,31 @@ export const fixtureState = () => {
       enforcement: 'active',
       bypass_actors: [],
       conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
-      rules: [{
-        type: 'required_status_checks',
-        parameters: {
-          strict_required_status_checks_policy: true,
-          required_status_checks: [{ context: 'approval/readback', integration_id: 15368 }],
+      rules: [
+        {
+          type: 'required_status_checks',
+          parameters: {
+            strict_required_status_checks_policy: true,
+            do_not_enforce_on_create: false,
+            required_status_checks: [{ context: 'approval/readback', integration_id: 15368 }],
+          },
         },
-      }],
+        {
+          type: 'pull_request',
+          parameters: {
+            required_approving_review_count: 0,
+            dismiss_stale_reviews_on_push: true,
+            required_reviewers: [],
+            require_code_owner_review: false,
+            require_last_push_approval: false,
+            required_review_thread_resolution: true,
+            require_extra_approval_for_unattributed_changes: true,
+            allowed_merge_methods: ['squash', 'merge', 'rebase'],
+          },
+        },
+        { type: 'deletion' },
+        { type: 'non_fast_forward' },
+      ],
       name: 'free-form ruleset name',
     },
     associatedPulls: [{ number: 427, head: { sha: HEAD_SHA }, base: { sha: BASE_SHA } }],
@@ -287,6 +305,21 @@ export const policy = () => ({
   allowedWorkflowPaths: [WORKFLOW_PATH],
   allowedReusableSignerWorkflowIds: [61002],
   allowedReusableSignerWorkflowPaths: [SIGNER_PATH],
+  requiredRuleset: {
+    doNotEnforceOnCreate: false,
+    pullRequest: {
+      requiredApprovingReviewCount: 0,
+      dismissStaleReviewsOnPush: true,
+      requiredReviewers: [],
+      requireCodeOwnerReview: false,
+      requireLastPushApproval: false,
+      requiredReviewThreadResolution: true,
+      requireExtraApprovalForUnattributedChanges: true,
+      allowedMergeMethods: ['merge', 'rebase', 'squash'],
+    },
+    deletionProtection: true,
+    nonFastForwardProtection: true,
+  },
 });
 export const limits = (overrides = {}) => ({
   timeoutMs: 1_000,

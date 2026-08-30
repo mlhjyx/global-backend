@@ -288,6 +288,32 @@ test('requires ruleset and commit-associated PR identity', async (t) => {
   }
 });
 
+test('complete ruleset facts detect review, deletion, and non-fast-forward drift', async (t) => {
+  for (const [name, mutate] of [
+    ['missing pull request rule', (ruleset) => {
+      ruleset.rules = ruleset.rules.filter(({ type }) => type !== 'pull_request');
+    }],
+    ['missing deletion protection', (ruleset) => {
+      ruleset.rules = ruleset.rules.filter(({ type }) => type !== 'deletion');
+    }],
+    ['missing non-fast-forward protection', (ruleset) => {
+      ruleset.rules = ruleset.rules.filter(({ type }) => type !== 'non_fast_forward');
+    }],
+    ['review-thread resolution disabled', (ruleset) => {
+      ruleset.rules.find(({ type }) => type === 'pull_request')
+        .parameters.required_review_thread_resolution = false;
+    }],
+    ['last-push approval drift', (ruleset) => {
+      ruleset.rules.find(({ type }) => type === 'pull_request')
+        .parameters.require_last_push_approval = true;
+    }],
+  ]) await t.test(name, async () => {
+    const state = fixtureState();
+    mutate(state.ruleset);
+    await expectCode(() => collect(state), 'APPROVAL_GITHUB_RULESET_MISMATCH');
+  });
+});
+
 test('validates hard limit ceilings before making a request', async () => {
   for (const unsafeLimits of [
     limits({ maxPages: 101 }),

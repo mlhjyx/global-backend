@@ -33,7 +33,16 @@ const LIMIT_KEYS = Object.freeze([
 const POLICY_KEYS = Object.freeze([
   'repositoryId', 'allowedRepoPaths', 'allowedCheckContexts', 'allowedActionsAppIds',
   'allowedWorkflowIds', 'allowedWorkflowPaths', 'allowedReusableSignerWorkflowIds',
-  'allowedReusableSignerWorkflowPaths',
+  'allowedReusableSignerWorkflowPaths', 'requiredRuleset',
+]);
+const REQUIRED_RULESET_KEYS = Object.freeze([
+  'doNotEnforceOnCreate', 'pullRequest', 'deletionProtection',
+  'nonFastForwardProtection',
+]);
+const REQUIRED_PULL_REQUEST_KEYS = Object.freeze([
+  'requiredApprovingReviewCount', 'dismissStaleReviewsOnPush', 'requiredReviewers',
+  'requireCodeOwnerReview', 'requireLastPushApproval', 'requiredReviewThreadResolution',
+  'requireExtraApprovalForUnattributedChanges', 'allowedMergeMethods',
 ]);
 const REQUEST_KEYS = Object.freeze([
   'repository', 'prNumber', 'expectedBaseSha', 'expectedHeadSha', 'rulesetId',
@@ -255,6 +264,29 @@ const validIdList = (values, maximum, allowEmpty = false) => (
   && arrayIsUnique(values)
 );
 
+const validRequiredRuleset = (value) => (
+  hasExactKeys(value, REQUIRED_RULESET_KEYS)
+  && typeof value.doNotEnforceOnCreate === 'boolean'
+  && typeof value.deletionProtection === 'boolean'
+  && typeof value.nonFastForwardProtection === 'boolean'
+  && hasExactKeys(value.pullRequest, REQUIRED_PULL_REQUEST_KEYS)
+  && Number.isSafeInteger(value.pullRequest.requiredApprovingReviewCount)
+  && value.pullRequest.requiredApprovingReviewCount >= 0
+  && value.pullRequest.requiredApprovingReviewCount <= 10
+  && typeof value.pullRequest.dismissStaleReviewsOnPush === 'boolean'
+  && Array.isArray(value.pullRequest.requiredReviewers)
+  && value.pullRequest.requiredReviewers.length === 0
+  && typeof value.pullRequest.requireCodeOwnerReview === 'boolean'
+  && typeof value.pullRequest.requireLastPushApproval === 'boolean'
+  && typeof value.pullRequest.requiredReviewThreadResolution === 'boolean'
+  && typeof value.pullRequest.requireExtraApprovalForUnattributedChanges === 'boolean'
+  && validStringList(
+    value.pullRequest.allowedMergeMethods,
+    (method) => ['merge', 'rebase', 'squash'].includes(method),
+    3,
+  )
+);
+
 export const validatePolicy = (policy) => {
   if (isPlainObject(policy) && Object.keys(policy).some(dynamicPolicyKey)) {
     throw approvalError('APPROVAL_GITHUB_STATIC_DYNAMIC_ID_FORBIDDEN');
@@ -274,6 +306,7 @@ export const validatePolicy = (policy) => {
       && policy.allowedCheckContexts.length === policy.allowedWorkflowIds.length
       && policy.allowedReusableSignerWorkflowIds.length
         === policy.allowedReusableSignerWorkflowPaths.length
+      && validRequiredRuleset(policy.requiredRuleset)
       && (
         policy.allowedReusableSignerWorkflowIds.length === 0
         || policy.allowedReusableSignerWorkflowIds.length === policy.allowedCheckContexts.length
@@ -356,6 +389,16 @@ const copyPolicy = (value) => {
     throw approvalError('APPROVAL_GITHUB_STATIC_DYNAMIC_ID_FORBIDDEN');
   }
   const source = copyDataRecord(value, POLICY_KEYS, 'APPROVAL_GITHUB_POLICY_INVALID');
+  const requiredRuleset = copyDataRecord(
+    source.requiredRuleset,
+    REQUIRED_RULESET_KEYS,
+    'APPROVAL_GITHUB_POLICY_INVALID',
+  );
+  const pullRequest = copyDataRecord(
+    requiredRuleset.pullRequest,
+    REQUIRED_PULL_REQUEST_KEYS,
+    'APPROVAL_GITHUB_POLICY_INVALID',
+  );
   return {
     repositoryId: source.repositoryId,
     allowedRepoPaths: copyDenseArray(source.allowedRepoPaths, 32, 'APPROVAL_GITHUB_POLICY_INVALID'),
@@ -373,6 +416,30 @@ const copyPolicy = (value) => {
       16,
       'APPROVAL_GITHUB_POLICY_INVALID',
     ),
+    requiredRuleset: {
+      doNotEnforceOnCreate: requiredRuleset.doNotEnforceOnCreate,
+      pullRequest: {
+        requiredApprovingReviewCount: pullRequest.requiredApprovingReviewCount,
+        dismissStaleReviewsOnPush: pullRequest.dismissStaleReviewsOnPush,
+        requiredReviewers: copyDenseArray(
+          pullRequest.requiredReviewers,
+          10,
+          'APPROVAL_GITHUB_POLICY_INVALID',
+        ),
+        requireCodeOwnerReview: pullRequest.requireCodeOwnerReview,
+        requireLastPushApproval: pullRequest.requireLastPushApproval,
+        requiredReviewThreadResolution: pullRequest.requiredReviewThreadResolution,
+        requireExtraApprovalForUnattributedChanges:
+          pullRequest.requireExtraApprovalForUnattributedChanges,
+        allowedMergeMethods: copyDenseArray(
+          pullRequest.allowedMergeMethods,
+          3,
+          'APPROVAL_GITHUB_POLICY_INVALID',
+        ),
+      },
+      deletionProtection: requiredRuleset.deletionProtection,
+      nonFastForwardProtection: requiredRuleset.nonFastForwardProtection,
+    },
   };
 };
 
