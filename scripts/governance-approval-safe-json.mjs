@@ -271,7 +271,7 @@ const normalizeApprovalReceiptCore = (core) => {
     && unicodeCodePointLength(core.actor_login) <= 256,
     'CORE_PROPERTY',
   );
-  requireCondition(core.decision_adr === 'ADR-042', 'CORE_PROPERTY');
+  requireCondition(['ADR-026', 'ADR-027'].includes(core.decision_adr), 'CORE_PROPERTY');
   requireString(core.decision_revision, /^program-c\/decision-r[1-9][0-9]*$/, 'CORE_PROPERTY');
   requireString(core.policy_revision, /^program-c\/policy-r[1-9][0-9]*$/, 'CORE_PROPERTY');
   requireCondition(Number.isSafeInteger(core.pr_number) && core.pr_number >= 1, 'CORE_PROPERTY');

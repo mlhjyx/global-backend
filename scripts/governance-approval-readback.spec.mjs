@@ -32,7 +32,7 @@ const MUTATION_MANIFEST = JSON.parse(
 const clone = (value) => structuredClone(value);
 
 const commandLine = (role, digest = DIGEST_A) => (
-  `APPROVE DECISION ADR-042 REV program-c/policy-r2 ROLE ${role} DIGEST ${digest}`
+  `APPROVE DECISION ADR-027 REV program-c/policy-r2 ROLE ${role} DIGEST ${digest}`
 );
 
 const parsedCommand = (role) => parseApprovalReviewCommand(commandLine(role));
@@ -54,7 +54,7 @@ const authorityRole = (role, id, login, purpose) => ({
   effective_until: '2026-08-31T00:00:00.000Z',
   scope: {
     repository_id: REPOSITORY.id,
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     policy_revision: 'program-c/policy-r2',
     purpose,
   },
@@ -117,7 +117,7 @@ const securityEvidence = () => ({
   evidence_id: 'security-evidence-0001',
   repository_id: REPOSITORY.id,
   repository_full_name: REPOSITORY.full_name,
-  decision_adr: 'ADR-042',
+  decision_adr: 'ADR-027',
   decision_revision: 'program-c/decision-r2',
   policy_revision: 'program-c/policy-r2',
   proposal_pr_number: 427,
@@ -251,7 +251,7 @@ const candidate = () => {
     schema_version: 'trusted-approval-candidate/v1',
     repository: clone(REPOSITORY),
     decision: {
-      adr: 'ADR-042',
+      adr: 'ADR-027',
       revision: 'program-c/decision-r2',
       policy_revision: 'program-c/policy-r2',
       raw_sha256: DIGEST_A,
@@ -298,7 +298,7 @@ const dualRoleCandidate = () => {
   const value = candidate();
   value.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
   value.policy.dual_role_exception = {
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     valid_from: '2026-08-30T00:00:00.000Z',
     valid_until: '2026-08-31T00:00:00.000Z',
     coapprover_role: 'OWN-QA-EVIDENCE',
@@ -321,7 +321,7 @@ const mergeEvidence = () => {
     role: 'MERGE-AUTHORIZER',
     actor_id: 106,
     actor_login: 'merge-authorizer',
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     decision_revision: 'program-c/decision-r2',
     policy_revision: 'program-c/policy-r2',
     pr_number: 427,
@@ -335,7 +335,7 @@ const mergeEvidence = () => {
     schema_version: 'program-c-merge-authorization-grant/v1',
     grant_id: 'program-c-grant-0001',
     repository: clone(REPOSITORY),
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     decision_revision: 'program-c/decision-r2',
     policy_revision: 'program-c/policy-r2',
     stage: 'PROPOSAL_MERGE',
@@ -445,7 +445,7 @@ test('review command grammar accepts only the canonical bounded single line', as
   const fixture = JSON.parse(await readFile(new URL('./fixtures/approval-readback/review-commands.json', import.meta.url), 'utf8'));
   const parsed = parseApprovalReviewCommand(fixture.canonical);
   assert.deepEqual(parsed, {
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     policy_revision: 'program-c/policy-r2',
     role: 'OWN-PRODUCT',
     decision_raw_sha256: DIGEST_A,
@@ -463,7 +463,7 @@ test('review command grammar accepts only the canonical bounded single line', as
     `${fixture.canonical} @owner`,
     `${fixture.canonical}; true`,
     fixture.canonical.replace('OWN-PRODUCT', 'PRODUCT-OWNER'),
-    fixture.canonical.replace('ADR-042', 'ADR-42'),
+    fixture.canonical.replace('ADR-027', 'ADR-42'),
     fixture.canonical.replace('program-c/policy-r2', 'program-c/policy-r02'),
     fixture.canonical.replace(' DIGEST ', '\tDIGEST '),
     fixture.canonical.replace(DIGEST_A, 'sha256:abc'),

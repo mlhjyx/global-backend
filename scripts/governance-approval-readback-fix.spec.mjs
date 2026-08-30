@@ -36,7 +36,7 @@ const MANIFEST = JSON.parse(await readFile(MANIFEST_URL, 'utf8'));
 const clone = (value) => structuredClone(value);
 const actor = (id, login) => ({ id, node_id: `NODE-${id}`, login, type: 'User' });
 const command = (role) => parseApprovalReviewCommand(
-  `APPROVE DECISION ADR-042 REV program-c/policy-r2 ROLE ${role} DIGEST ${DIGEST_A}`,
+  `APPROVE DECISION ADR-027 REV program-c/policy-r2 ROLE ${role} DIGEST ${DIGEST_A}`,
 );
 const authorityRole = (role, id, login, purpose) => ({
   role,
@@ -46,7 +46,7 @@ const authorityRole = (role, id, login, purpose) => ({
   actor_login: login,
   effective_from: '2026-08-30T00:00:00.000Z',
   effective_until: '2026-08-31T00:00:00.000Z',
-  scope: { repository_id: REPOSITORY.id, decision_adr: 'ADR-042', policy_revision: 'program-c/policy-r2', purpose },
+  scope: { repository_id: REPOSITORY.id, decision_adr: 'ADR-027', policy_revision: 'program-c/policy-r2', purpose },
   revocation_status: 'ACTIVE',
   superseded_by: null,
 });
@@ -94,7 +94,7 @@ const securityReview = () => ({
   evidence_id: 'security-evidence-0001',
   repository_id: REPOSITORY.id,
   repository_full_name: REPOSITORY.full_name,
-  decision_adr: 'ADR-042',
+  decision_adr: 'ADR-027',
   decision_revision: 'program-c/decision-r2',
   policy_revision: 'program-c/policy-r2',
   proposal_pr_number: 427,
@@ -175,7 +175,7 @@ const candidate = () => {
     schema_version: 'trusted-approval-candidate/v1',
     repository: clone(REPOSITORY),
     decision: {
-      adr: 'ADR-042', revision: 'program-c/decision-r2', policy_revision: 'program-c/policy-r2',
+      adr: 'ADR-027', revision: 'program-c/decision-r2', policy_revision: 'program-c/policy-r2',
       raw_sha256: DIGEST_A, semantic_sha256: DIGEST_C,
       proposed_sidecar_path: 'docs/governance/decisions/adr-042-r2.md', proposed_sidecar_raw_sha256: DIGEST_D,
     },
@@ -238,7 +238,7 @@ const mergeEvidence = () => {
     role: 'MERGE-AUTHORIZER',
     actor_id: 106,
     actor_login: 'merge-authorizer',
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     decision_revision: 'program-c/decision-r2',
     policy_revision: 'program-c/policy-r2',
     pr_number: 427,
@@ -250,7 +250,7 @@ const mergeEvidence = () => {
   });
   const grant = {
     schema_version: 'program-c-merge-authorization-grant/v1', grant_id: 'program-c-grant-0001',
-    repository: clone(REPOSITORY), decision_adr: 'ADR-042', decision_revision: 'program-c/decision-r2',
+    repository: clone(REPOSITORY), decision_adr: 'ADR-027', decision_revision: 'program-c/decision-r2',
     policy_revision: 'program-c/policy-r2', stage: 'PROPOSAL_MERGE', pr_number: 427,
     base_sha: BASE_SHA, head_sha: HEAD_SHA, decision_raw_sha256: DIGEST_A,
     decision_semantic_sha256: DIGEST_C, allowed_merge_method: 'SQUASH', authority_role: 'MERGE-AUTHORIZER',
@@ -335,7 +335,7 @@ test('FIX1 merge path starts with Task 1 closed schemas and enforces causality',
     ['merge-causal-order', (v) => { v.consumption.consumed_at = '2026-08-30T10:00:00.000Z'; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['merge-revocation-shape', (v) => { v.grant_revocations.push({ grant_id: 'other-grant-0001', extra: true }); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
     ['merge-ledger-shape', (v) => { v.ledger_snapshot.extra = true; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],
-    ['merge-candidate-binding', (v) => { v.consumption.current_main.sha = BASE_SHA; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
+    ['merge-candidate-binding', (v) => { v.consumption.current_main.ref = 'refs/heads/not-main'; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['merge-authority-receipt-binding', (v) => { v.grant.authority_receipt_id = 'other-authority-receipt-0001'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH'],
     ['merge-verifier-binding', (v) => { v.consumption.independent_verifier.run_id = 92002; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['merge-verifier-subject-repo', (v) => { v.consumption.independent_verifier.repository = clone(REPOSITORY); }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
@@ -570,7 +570,7 @@ test('FIX2D CODEOWNER actor sharing follows the 3.4 adjudication without evidenc
     const authorityValue = authority();
     value.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
     value.policy.dual_role_exception = {
-      decision_adr: 'ADR-042',
+      decision_adr: 'ADR-027',
       valid_from: '2026-08-30T00:00:00.000Z',
       valid_until: '2026-08-31T00:00:00.000Z',
       coapprover_role: 'OWN-QA-EVIDENCE',
@@ -597,7 +597,7 @@ test('FIX2D CODEOWNER actor sharing follows the 3.4 adjudication without evidenc
     const authorityValue = authority();
     value.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
     value.policy.dual_role_exception = {
-      decision_adr: 'ADR-042',
+      decision_adr: 'ADR-027',
       valid_from: '2026-08-30T00:00:00.000Z',
       valid_until: '2026-08-31T00:00:00.000Z',
       coapprover_role: 'OWN-QA-EVIDENCE',
@@ -657,7 +657,7 @@ test('FIX3 closed CODEOWNER actor-sharing policy contract governs role validatio
     const reusedAuthority = authority();
     reusedCoapprover.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
     reusedCoapprover.policy.dual_role_exception = {
-      decision_adr: 'ADR-042',
+      decision_adr: 'ADR-027',
       valid_from: '2026-08-30T00:00:00.000Z',
       valid_until: '2026-08-31T00:00:00.000Z',
       coapprover_role: 'OWN-QA-EVIDENCE',

@@ -11,7 +11,7 @@
     "grant_raw_sha256": { "$ref": "#/$defs/digest" },
     "single_use_nonce": { "type": "string", "pattern": "^nonce-program-c-[a-z0-9-]{4,96}$" },
     "repository": { "$ref": "#/$defs/repository" },
-    "decision_adr": { "const": "ADR-042" },
+    "decision_adr": { "enum": ["ADR-026", "ADR-027"] },
     "decision_revision": { "type": "string", "pattern": "^program-c/decision-r[1-9][0-9]*$" },
     "policy_revision": { "type": "string", "pattern": "^program-c/policy-r[1-9][0-9]*$" },
     "stage": { "enum": ["PROPOSAL_MERGE", "ACCEPTANCE_MERGE"] },

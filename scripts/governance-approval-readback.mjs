@@ -119,7 +119,7 @@ export const validateApprovalReadback = (candidate, authority, policy, now) => {
   if (!isGitSha(candidate.pull_request?.base_sha)) codes.push('APPROVAL_BASE_MISMATCH');
   if (!isGitSha(candidate.pull_request?.head_sha)) codes.push('APPROVAL_HEAD_MISMATCH');
   if (
-    candidate.decision?.adr !== 'ADR-042'
+    !['ADR-026', 'ADR-027'].includes(candidate.decision?.adr)
     || !DECISION_REVISION_PATTERN.test(candidate.decision?.revision ?? '')
     || !POLICY_REVISION_PATTERN.test(candidate.decision?.policy_revision ?? '')
     || !isDigest(candidate.decision?.raw_sha256)

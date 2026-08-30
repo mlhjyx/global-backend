@@ -45,7 +45,7 @@ const approvalCore = (overrides = {}) => ({
   role: 'OWN-PRODUCT',
   actor_id: 42,
   actor_login: 'approval-owner',
-  decision_adr: 'ADR-042',
+  decision_adr: 'ADR-027',
   decision_revision: 'program-c/decision-r1',
   policy_revision: 'program-c/policy-r1',
   pr_number: 426,

@@ -13,7 +13,7 @@ import {
   sha256,
 } from './governance-approval-readback-common.mjs';
 
-const REVIEW_COMMAND_PATTERN = /^APPROVE DECISION (ADR-042) REV (program-c\/policy-r[1-9][0-9]*) ROLE (OWN-PRODUCT|OWN-DATA-PRIVACY|OWN-QA-EVIDENCE|OWN-SECURITY) DIGEST (sha256:[0-9a-f]{64})$/;
+const REVIEW_COMMAND_PATTERN = /^APPROVE DECISION (ADR-026|ADR-027) REV (program-c\/policy-r[1-9][0-9]*) ROLE (OWN-PRODUCT|OWN-DATA-PRIVACY|OWN-QA-EVIDENCE|OWN-SECURITY) DIGEST (sha256:[0-9a-f]{64})$/;
 const PARSED_COMMAND_KEYS = Object.freeze([
   'decision_adr', 'policy_revision', 'role', 'decision_raw_sha256', 'command_sha256',
 ]);

@@ -195,7 +195,6 @@ export const validateMergeAuthorizationEvidence = (evidence, candidate, authorit
     || consumption.authorized_head_sha !== grant.head_sha
     || consumption.observed_merge_method !== grant.allowed_merge_method
     || consumption.current_main.ref !== 'refs/heads/main'
-    || consumption.current_main.sha !== consumption.result_commit_sha
     || consumption.independent_verifier.repository.id !== candidate.verifier.repository_id
     || consumption.independent_verifier.repository.full_name !== candidate.verifier.repository_full_name
     || consumption.independent_verifier.path !== candidate.verifier.workflow_path

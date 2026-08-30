@@ -106,6 +106,7 @@ test('I5 renderer and CLI reject nested nonce, extra projected keys, and multiby
     (state) => { state.repository.extra = true; },
     (state) => { state.evidenceSlots.extra = 'VERIFIED'; },
     (state) => { state.evidenceSlots.product = 'nonce-program-c-never-output'; },
+    (state) => { state.policySnapshot = { extra: true }; },
   ];
   for (const mutate of mutations) {
     const state = cliState();
@@ -122,6 +123,8 @@ test('I5 renderer and CLI reject nested nonce, extra projected keys, and multiby
   assert.equal(await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], deps.value), 1);
   assert.equal(deps.stdout.length, 0);
   const valid = renderApprovalStatusReadModel(cliState());
+  assert.equal(Object.isFrozen(valid), true);
+  assert.equal(JSON.stringify(valid).includes('nonce-program-c'), false);
   assert.ok(Buffer.byteLength(JSON.stringify(valid), 'utf8') <= 32_768);
 });
 

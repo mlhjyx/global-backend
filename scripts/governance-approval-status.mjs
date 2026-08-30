@@ -69,7 +69,9 @@ export const runApprovalStatusCli = async (argv, dependencies) => {
   }
   if (model.decisionId !== parsed.decisionId) return writeError(dependencies, 'APPROVAL_STATUS_DECISION_MISMATCH');
   const output = parsed.format === 'json' ? `${JSON.stringify(model)}\n` : renderText(model);
-  if (output.length > 32_768) return writeError(dependencies, 'APPROVAL_STATUS_OUTPUT_OVERFLOW');
+  if (Buffer.byteLength(output, 'utf8') > 32_768) {
+    return writeError(dependencies, 'APPROVAL_STATUS_OUTPUT_OVERFLOW');
+  }
   dependencies.writeStdout(output);
   return 0;
 };

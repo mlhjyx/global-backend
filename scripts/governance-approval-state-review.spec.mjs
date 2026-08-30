@@ -9,6 +9,7 @@ import {
 } from './governance-approval-state.mjs';
 
 const NOW = new Date('2026-08-30T08:30:00.000Z');
+const RESERVATION_NOW = new Date('2026-08-30T08:10:00.000Z');
 const ROOT = new URL('./fixtures/approval-readback/merge-authorization/', import.meta.url);
 const clone = (value) => structuredClone(value);
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -70,7 +71,7 @@ const requestFor = (grant, overrides = {}) => ({
   ...overrides,
 });
 const reserve = async (ledger, grant, request = requestFor(grant)) => (
-  reserveMergeAuthorizationNonce(grant, digest(grant), request, 0, ledger, NOW)
+  reserveMergeAuthorizationNonce(grant, digest(grant), request, 0, ledger, RESERVATION_NOW)
 );
 
 test('reviewer C2 restart counterexample cannot restore fresh physical-dispatch authority from JSON', async () => {

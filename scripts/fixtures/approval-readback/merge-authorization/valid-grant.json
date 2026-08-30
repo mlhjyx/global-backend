@@ -5,7 +5,7 @@
     "id": 1291151138,
     "full_name": "mlhjyx/global-backend"
   },
-  "decision_adr": "ADR-042",
+  "decision_adr": "ADR-027",
   "decision_revision": "program-c/decision-r1",
   "policy_revision": "program-c/policy-r1",
   "stage": "ACCEPTANCE_MERGE",

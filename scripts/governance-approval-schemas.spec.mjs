@@ -86,7 +86,7 @@ const receipt = () => {
     role: 'OWN-PRODUCT',
     actor_id: 1,
     actor_login: 'product-owner',
-    decision_adr: 'ADR-042',
+    decision_adr: 'ADR-027',
     decision_revision: 'program-c/decision-r2',
     policy_revision: 'program-c/policy-r2',
     pr_number: 42,
@@ -175,7 +175,7 @@ const grant = () => ({
   schema_version: 'program-c-merge-authorization-grant/v1',
   grant_id: 'program-c-grant-0001',
   repository: clone(REPOSITORY),
-  decision_adr: 'ADR-042',
+  decision_adr: 'ADR-027',
   decision_revision: 'program-c/decision-r2',
   policy_revision: 'program-c/policy-r2',
   stage: 'PROPOSAL_MERGE',
@@ -204,7 +204,7 @@ const consumption = () => ({
   grant_raw_sha256: DIGEST,
   single_use_nonce: 'nonce-program-c-0001',
   repository: clone(REPOSITORY),
-  decision_adr: 'ADR-042',
+  decision_adr: 'ADR-027',
   decision_revision: 'program-c/decision-r2',
   policy_revision: 'program-c/policy-r2',
   stage: 'PROPOSAL_MERGE',
@@ -263,7 +263,7 @@ test('approval receipts bind distinct numeric actors and canonical approval cont
     (value) => { delete value.core.actor_id; },
     (value) => { value.core.actor_id = 'product-owner'; },
     (value) => { value.core.role = 'UNASSIGNED'; },
-    (value) => { value.core.decision_adr = 'adr-042'; },
+    (value) => { value.core.decision_adr = 'adr-027'; },
     (value) => { value.core.authority_revision = 'approval-authorities/stale'; },
     (value) => { value.core.head_sha = 'A'.repeat(40); },
     (value) => { value.core.approved_at = '2026-08-30T00:00:00Z'; },
@@ -279,10 +279,12 @@ test('approval receipts bind distinct numeric actors and canonical approval cont
 });
 
 test('Task 1 receipt validation uses the Task 2 schema-ordered renderer and accepts built artifacts', () => {
-  const core = receipt().core;
-  const artifact = buildApprovalReceiptArtifact(core);
-  assert.equal(artifact.receiptCoreSha256, sha256Prefixed(renderApprovalReceiptCore(core)));
-  expectValid(validateApprovalReceipt, artifact.envelope);
+  for (const decisionAdr of ['ADR-026', 'ADR-027']) {
+    const core = { ...receipt().core, decision_adr: decisionAdr };
+    const artifact = buildApprovalReceiptArtifact(core);
+    assert.equal(artifact.receiptCoreSha256, sha256Prefixed(renderApprovalReceiptCore(core)));
+    expectValid(validateApprovalReceipt, artifact.envelope);
+  }
 });
 
 test('receipt schema permits only a complete closed merge authorization evidence reference set', () => {
