@@ -12,6 +12,7 @@ SET search_path = pg_catalog, public
 AS $caller$
 BEGIN
   IF session_user IS DISTINCT FROM 'app_user'
+    OR current_setting('role', true) IS DISTINCT FROM 'none'
     OR p_workspace_id IS NULL
     OR p_workspace_id IS DISTINCT FROM current_workspace_id()
   THEN
@@ -19,6 +20,91 @@ BEGIN
   END IF;
 END
 $caller$;
+
+CREATE FUNCTION public._governed_relation_lock_operation_v1(
+  p_workspace_id UUID,
+  p_authority_id UUID,
+  p_account_id UUID,
+  p_operation_id UUID,
+  p_operation_generation INTEGER,
+  p_ack_id CHAR(64),
+  p_result_digest CHAR(64)
+) RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $operation$
+DECLARE
+  authority public.execution_budget_authority%ROWTYPE;
+  account public.tool_budget_account%ROWTYPE;
+  operation public.tool_budget_operation%ROWTYPE;
+  ack public.execution_domain_ack%ROWTYPE;
+BEGIN
+  SELECT target.* INTO authority
+  FROM public.execution_budget_authority target
+  WHERE target.scope_key = p_workspace_id::text
+    AND target.workspace_id = p_workspace_id
+    AND target.id = p_authority_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+  IF authority.consumed_at IS NULL OR authority.revoked_at IS NOT NULL THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM 1 FROM public.execution_budget_authority_revocation revocation
+  WHERE revocation.scope_key = authority.scope_key
+    AND revocation.authority_id = authority.id;
+  IF FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT target.* INTO account
+  FROM public.tool_budget_account target
+  WHERE target.scope_key = authority.scope_key
+    AND target.id = p_account_id
+    AND target.authority_id = authority.id
+    AND target.generation = p_operation_generation
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT target.* INTO operation
+  FROM public.tool_budget_operation target
+  WHERE target.scope_key = account.scope_key
+    AND target.id = p_operation_id
+    AND target.account_id = account.id
+    AND target.generation = p_operation_generation
+    AND target.status = 'SETTLED'
+    AND target.result_digest = p_result_digest
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT target.* INTO ack
+  FROM public.execution_domain_ack target
+  WHERE target.scope_key = operation.scope_key
+    AND target.ack_id = p_ack_id
+    AND target.operation_id = operation.id
+    AND target.account_id = account.id
+    AND target.authority_id = authority.id
+    AND target.result_digest = p_result_digest
+  FOR SHARE;
+  IF NOT FOUND
+    OR ack.operation_key IS DISTINCT FROM operation.operation_key
+    OR ack.result_schema IS DISTINCT FROM operation.result_schema
+    OR ack.usage IS DISTINCT FROM operation.receipt_usage
+    OR ack.cost_basis IS DISTINCT FROM operation.receipt_cost_basis
+    OR operation.result_json IS NOT NULL AND ack.result_strategy IS DISTINCT FROM 'typed_projection'
+    OR operation.result_json IS NULL AND ack.result_strategy IS DISTINCT FROM 'artifact_reference'
+  THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+END
+$operation$;
 
 CREATE FUNCTION public._governed_relation_assert_operation_v1(
   p_workspace_id UUID,
@@ -33,22 +119,24 @@ LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = pg_catalog, public
-AS $operation$
+AS $operation_read$
+DECLARE
+  matched_count INTEGER;
 BEGIN
-  PERFORM 1
-  FROM execution_budget_authority authority
-  JOIN tool_budget_account account
+  SELECT count(*) INTO matched_count
+  FROM public.execution_budget_authority authority
+  JOIN public.tool_budget_account account
     ON account.scope_key = authority.scope_key
    AND account.authority_id = authority.id
-  JOIN tool_budget_operation operation
+  JOIN public.tool_budget_operation operation
     ON operation.scope_key = account.scope_key
    AND operation.account_id = account.id
-  JOIN execution_domain_ack ack
+  JOIN public.execution_domain_ack ack
     ON ack.scope_key = operation.scope_key
    AND ack.operation_id = operation.id
    AND ack.account_id = account.id
    AND ack.authority_id = authority.id
-  LEFT JOIN execution_budget_authority_revocation revocation
+  LEFT JOIN public.execution_budget_authority_revocation revocation
     ON revocation.scope_key = authority.scope_key
    AND revocation.authority_id = authority.id
   WHERE authority.scope_key = p_workspace_id::text
@@ -56,6 +144,7 @@ BEGIN
     AND authority.id = p_authority_id
     AND authority.consumed_at IS NOT NULL
     AND authority.revoked_at IS NULL
+    AND revocation.authority_id IS NULL
     AND account.id = p_account_id
     AND account.generation = p_operation_generation
     AND operation.id = p_operation_id
@@ -64,25 +153,31 @@ BEGIN
     AND operation.result_digest = p_result_digest
     AND ack.ack_id = p_ack_id
     AND ack.result_digest = p_result_digest
-    AND revocation.authority_id IS NULL;
-  IF NOT FOUND THEN
-    PERFORM 1 FROM execution_budget_authority_revocation revocation
-    WHERE revocation.scope_key = p_workspace_id::text
-      AND revocation.authority_id = p_authority_id;
-    IF FOUND THEN
-      RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
-    END IF;
-    PERFORM 1 FROM execution_budget_authority authority
-    WHERE authority.scope_key = p_workspace_id::text
-      AND authority.id = p_authority_id
-      AND authority.revoked_at IS NOT NULL;
-    IF FOUND THEN
-      RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
-    END IF;
-    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+    AND ack.operation_key = operation.operation_key
+    AND ack.result_schema = operation.result_schema
+    AND ack.usage = operation.receipt_usage
+    AND ack.cost_basis = operation.receipt_cost_basis
+    AND ack.result_strategy = CASE WHEN operation.result_json IS NULL
+      THEN 'artifact_reference' ELSE 'typed_projection' END;
+  IF matched_count = 1 THEN
+    RETURN;
   END IF;
+  PERFORM 1 FROM public.execution_budget_authority_revocation revocation
+  WHERE revocation.scope_key = p_workspace_id::text
+    AND revocation.authority_id = p_authority_id;
+  IF FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM 1 FROM public.execution_budget_authority authority
+  WHERE authority.scope_key = p_workspace_id::text
+    AND authority.id = p_authority_id
+    AND authority.revoked_at IS NOT NULL;
+  IF FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
+  END IF;
+  RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
 END
-$operation$;
+$operation_read$;
 
 CREATE FUNCTION public._governed_relation_assert_path_v1(
   p_workspace_id UUID,
@@ -250,8 +345,15 @@ DECLARE
   stored_relation public.governed_subject_relation%ROWTYPE;
   effective_parent UUID;
   parent_depth INTEGER;
+  operation_subject_count INTEGER;
+  child_in_operation BOOLEAN;
 BEGIN
   PERFORM _governed_relation_assert_caller_v1(p_workspace_id);
+  IF p_authority_id IS NULL OR p_account_id IS NULL OR p_operation_id IS NULL
+    OR p_operation_generation IS NULL OR p_operation_generation < 1
+    OR p_ack_id IS NULL OR p_result_digest IS NULL THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
   IF p_root_subject_type IS DISTINCT FROM 'tool_operation'
     OR p_root_subject_id IS DISTINCT FROM p_operation_id
     OR p_root_data_class IS DISTINCT FROM 'NON_PERSONAL'
@@ -265,6 +367,12 @@ BEGIN
     OR p_source_ref_namespace !~ '^[a-z][a-z0-9_.]{0,63}$'
     OR p_contract_sha256 !~ '^[0-9a-f]{64}$'
   THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+  IF p_child_subject_type IS NULL OR p_child_subject_id IS NULL
+    OR p_child_data_class IS NULL OR p_relation_key IS NULL
+    OR p_relation_kind IS NULL OR p_source_ref_namespace IS NULL
+    OR p_contract_sha256 IS NULL THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
   END IF;
   IF p_relation_kind <> 'MATERIALIZED_CHILD'
@@ -305,7 +413,7 @@ BEGIN
     'governed-subject-relation:' || p_workspace_id::text || ':' || p_operation_id::text,
     0
   ));
-  PERFORM _governed_relation_assert_operation_v1(
+  PERFORM _governed_relation_lock_operation_v1(
     p_workspace_id, p_authority_id, p_account_id, p_operation_id,
     p_operation_generation, p_ack_id, p_result_digest
   );
@@ -359,7 +467,7 @@ BEGIN
   );
   WITH RECURSIVE reachable(subject_id, depth) AS (
     SELECT stored_operation_subject.subject_id, 0
-    UNION ALL
+    UNION
     SELECT relation.child_subject_id, reachable.depth + 1
     FROM reachable
     JOIN public.governed_subject_relation relation
@@ -441,9 +549,28 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
   END IF;
-  IF (stored_child.id IS NULL AND (
-      SELECT count(*) FROM public.governed_subject WHERE workspace_id = p_workspace_id
-    ) >= 4096) OR (
+  SELECT count(*) INTO operation_subject_count
+  FROM (
+    SELECT stored_operation_subject.subject_id AS subject_id
+    UNION SELECT relation.parent_subject_id
+      FROM public.governed_subject_relation relation
+      WHERE relation.workspace_id = p_workspace_id
+        AND relation.operation_id = p_operation_id
+    UNION SELECT relation.child_subject_id
+      FROM public.governed_subject_relation relation
+      WHERE relation.workspace_id = p_workspace_id
+        AND relation.operation_id = p_operation_id
+  ) operation_subjects;
+  child_in_operation := stored_child.id IS NOT NULL AND (
+    stored_child.id = stored_operation_subject.subject_id OR EXISTS (
+      SELECT 1 FROM public.governed_subject_relation relation
+      WHERE relation.workspace_id = p_workspace_id
+        AND relation.operation_id = p_operation_id
+        AND (relation.parent_subject_id = stored_child.id
+          OR relation.child_subject_id = stored_child.id)
+    )
+  );
+  IF (NOT child_in_operation AND operation_subject_count >= 4096) OR (
       SELECT count(*) FROM public.governed_subject_relation
       WHERE workspace_id = p_workspace_id AND operation_id = p_operation_id
     ) >= 8192
@@ -530,6 +657,11 @@ DECLARE
   effective_parent UUID;
 BEGIN
   PERFORM _governed_relation_assert_caller_v1(p_workspace_id);
+  IF p_authority_id IS NULL OR p_account_id IS NULL OR p_operation_id IS NULL
+    OR p_operation_generation IS NULL OR p_operation_generation < 1
+    OR p_ack_id IS NULL OR p_result_digest IS NULL THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
   IF p_root_subject_type IS DISTINCT FROM 'tool_operation'
     OR p_root_subject_id IS DISTINCT FROM p_operation_id
     OR p_root_data_class IS DISTINCT FROM 'NON_PERSONAL'
@@ -543,6 +675,12 @@ BEGIN
     OR p_source_ref_namespace !~ '^[a-z][a-z0-9_.]{0,63}$'
     OR p_contract_sha256 !~ '^[0-9a-f]{64}$'
   THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+  IF p_child_subject_type IS NULL OR p_child_subject_id IS NULL
+    OR p_child_data_class IS NULL OR p_relation_key IS NULL
+    OR p_relation_kind IS NULL OR p_source_ref_namespace IS NULL
+    OR p_contract_sha256 IS NULL THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE = 'P0001';
   END IF;
   IF p_relation_kind <> 'MATERIALIZED_CHILD'
@@ -675,6 +813,10 @@ REVOKE ALL ON FUNCTION public._governed_relation_assert_caller_v1(UUID) FROM
   PUBLIC, app_user, execution_budget_platform_writer,
   runtime_api, runtime_worker, runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public._governed_relation_assert_operation_v1(
+  UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64)
+) FROM PUBLIC, app_user, execution_budget_platform_writer,
+  runtime_api, runtime_worker, runtime_outbox_relay;
+REVOKE ALL ON FUNCTION public._governed_relation_lock_operation_v1(
   UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64)
 ) FROM PUBLIC, app_user, execution_budget_platform_writer,
   runtime_api, runtime_worker, runtime_outbox_relay;
