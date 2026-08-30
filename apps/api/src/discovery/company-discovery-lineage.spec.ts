@@ -125,6 +125,34 @@ describe('company discovery receipt lineage', () => {
     expect(lineage?.receiptCoverage).toEqual([]);
   });
 
+  it('preserves and rethrows an exact parent forwarding failure only once', () => {
+    const parentFailure = new Error('parent durable ACK unavailable');
+    const parent = vi.fn(() => {
+      throw parentFailure;
+    });
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+      parentOnDurableReceipt: parent,
+    });
+    collector.markExpectedInvocation();
+
+    expect(() => collector.onDurableReceipt(
+      'discovery.extract_company',
+      receipt(OPERATION_A),
+    )).toThrow(parentFailure);
+    expect(collector.isForwardingFailure(parentFailure)).toBe(true);
+    expect(collector.isForwardingFailure(new Error('other'))).toBe(false);
+    expect(() => collector.onDurableReceipt(
+      'discovery.extract_company',
+      receipt(OPERATION_A),
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+    expect(() => collector.finish([])).toThrow(
+      DISCOVERY_COMPANY_LINEAGE_INVALID,
+    );
+    expect(parent).toHaveBeenCalledOnce();
+  });
+
   it('returns an empty lineage for non-invoked early exits but omits all lineage after an invoked call has no receipt', () => {
     const notInvoked = createDiscoveryCompanyReceiptCollector({
       providerKey: 'directory',

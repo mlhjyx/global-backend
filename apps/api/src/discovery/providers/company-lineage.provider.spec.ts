@@ -547,9 +547,10 @@ describe('provider-owned company receipt lineage', () => {
       .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
   });
 
-  it('all three providers preserve records and cost while omitting lineage after parent forwarding fails', async () => {
+  it('all three providers rethrow the exact parent forwarding failure without returning records', async () => {
+    const parentFailure = new Error('parent unavailable');
     const parent = vi.fn(() => {
-      throw new Error('parent unavailable');
+      throw parentFailure;
     });
 
     const fairBroker = broker(async (toolId, _input, ctx) => {
@@ -563,11 +564,8 @@ describe('provider-owned company receipt lineage', () => {
         costCents: 0,
       };
     });
-    const fair = await new TradeFairDiscoveryProvider({ broker: fairBroker })
-      .discoverCompanies(query, context(parent));
-    expect(fair.records).toHaveLength(1);
-    expect(fair.costCents).toBe(0);
-    expect(fair).not.toHaveProperty('lineage');
+    await expect(new TradeFairDiscoveryProvider({ broker: fairBroker })
+      .discoverCompanies(query, context(parent))).rejects.toBe(parentFailure);
 
     const publicBroker = broker(async (toolId) => toolId === 'searxng.search'
       ? { data: { results: [{ url: 'https://preserved-web.test/', title: 'Preserved' }] }, costCents: 0 }
@@ -583,13 +581,10 @@ describe('provider-owned company receipt lineage', () => {
         };
       },
     );
-    const publicWeb = await new PublicWebDiscoveryProvider({
+    await expect(new PublicWebDiscoveryProvider({
       gateway: {} as never,
       broker: publicBroker,
-    }).discoverCompanies(query, context(parent));
-    expect(publicWeb.records).toHaveLength(1);
-    expect(publicWeb.costCents).toBe(0);
-    expect(publicWeb).not.toHaveProperty('lineage');
+    }).discoverCompanies(query, context(parent))).rejects.toBe(parentFailure);
 
     const directoryBroker = broker(async (toolId) => toolId === 'searxng.search'
       ? {
@@ -615,13 +610,10 @@ describe('provider-owned company receipt lineage', () => {
         };
       },
     );
-    const directory = await new DirectoryDiscoveryProvider({
+    await expect(new DirectoryDiscoveryProvider({
       gateway: {} as never,
       broker: directoryBroker,
-    }).discoverCompanies(query, context(parent));
-    expect(directory.records).toHaveLength(1);
-    expect(directory.costCents).toBe(0);
-    expect(directory).not.toHaveProperty('lineage');
+    }).discoverCompanies(query, context(parent))).rejects.toBe(parentFailure);
 
     expect(parent).toHaveBeenCalledTimes(3);
   });
