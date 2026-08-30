@@ -1,0 +1,28 @@
+{
+  "schema_version": "program-c-merge-authorization-grant/v1",
+  "grant_id": "program-c-grant-task4-0001",
+  "repository": {
+    "id": 1291151138,
+    "full_name": "mlhjyx/global-backend"
+  },
+  "decision_adr": "ADR-042",
+  "decision_revision": "program-c/decision-r1",
+  "policy_revision": "program-c/policy-r1",
+  "stage": "ACCEPTANCE_MERGE",
+  "pr_number": 427,
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "decision_raw_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "decision_semantic_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "allowed_merge_method": "SQUASH",
+  "authority_role": "MERGE-AUTHORIZER",
+  "authority_actor_id": 427001,
+  "authority_revision": "approval-authorities/r1",
+  "authority_sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "authority_receipt_id": "merge-authority-receipt-task4-0001",
+  "authority_receipt_core_sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "authority_receipt_raw_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "authorized_at": "2026-08-30T08:00:00.000Z",
+  "expires_at": "2026-08-30T10:00:00.000Z",
+  "single_use_nonce": "nonce-program-c-task4-once-0001"
+}
