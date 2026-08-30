@@ -587,7 +587,7 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
   });
 
   describe("two-ID command matrix", () => {
-    it("returns the complete typed bound result from transaction-arranged workspace and Raw facts", () => {
+    it("persists the exact registry-bound result from transaction-arranged workspace and Raw facts", () => {
       exactHelper("valid two-ID command", signature.command);
       assert.equal(
         sql(`BEGIN;
@@ -598,11 +598,243 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           INSERT INTO raw_source_record(id,workspace_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at)
           VALUES ('72000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','registry','company_registry','{"externalId":"company-1","name":"Acme GmbH","domain":"a2-valid.example","country":"DE","attributes":{"products":["pump"],"employee_band":"50-100"},"provenance":{"sourceUrl":"https://registry.example/companies/1","fetchedAt":"2026-08-25T12:00:00.000Z","contentHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","parserVersion":"registry/v1"},"identifier":{"scheme":"registry-id","value":"de-12/34"}}'::jsonb,'https://registry.example/companies/1',now(),'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','registry/v1','task-a2:valid','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
           INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
-          VALUES ('71000000-0000-4000-8000-000000000001','73000000-0000-4000-8000-000000000001','registry-id','DE','DE1234','registry','72000000-0000-4000-8000-000000000001',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,'ACTIVE');
+          VALUES ('71000000-0000-4000-8000-000000000001','73000000-0000-4000-8000-000000000001','registry-id','DE','DE1234','registry','72000000-0000-4000-8000-000000000001',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000001","providerKey":"registry"}'::jsonb,'ACTIVE');
           SET SESSION AUTHORIZATION app_user;
           SET LOCAL app.current_workspace_id = '71000000-0000-4000-8000-000000000001';
-          SELECT (to_jsonb(result)='{"outcome_kind":"bound","raw_record_id":"72000000-0000-4000-8000-000000000001","company_id":"73000000-0000-4000-8000-000000000001","conflict_id":null,"match_rule":"identity_v2","input_hash":"e2d767b2b0e679b1f039709da028010b595ddff946115d8531e654f3fa98eb14","conflict_fingerprint":null,"replayed":false,"company_created":false,"identifier_count":2,"party_count":0}'::jsonb)::text
-          FROM public.resolve_organization_identity_for_raw_v1('71000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001') AS result;
+          SELECT to_jsonb(result)::text AS command_result
+          FROM public.resolve_organization_identity_for_raw_v1('71000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001') AS result
+          \\gset task_a2_registry_
+          WITH command_result AS (
+            SELECT :'task_a2_registry_command_result'::jsonb AS value
+          ), link_readback AS (
+            SELECT
+              count(*)::integer AS row_count,
+              coalesce(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'workspace_id', workspace_id,
+                    'raw_record_id', raw_record_id,
+                    'canonical_type', canonical_type,
+                    'canonical_id', canonical_id,
+                    'match_rule', match_rule,
+                    'confidence', confidence,
+                    'status', status,
+                    'resolver_version', resolver_version,
+                    'input_hash', input_hash,
+                    'conflict_id', conflict_id
+                  ) ORDER BY canonical_id
+                ),
+                '[]'::jsonb
+              ) AS rows
+            FROM identity_link
+            WHERE workspace_id='71000000-0000-4000-8000-000000000001'
+              AND raw_record_id='72000000-0000-4000-8000-000000000001'
+          ), identifier_readback AS (
+            SELECT
+              count(*)::integer AS row_count,
+              coalesce(
+                jsonb_agg(
+                  scheme||':'||jurisdiction||':'||normalized_value
+                  ORDER BY scheme, jurisdiction, normalized_value
+                ),
+                '[]'::jsonb
+              ) AS keys,
+              coalesce(
+                jsonb_agg(DISTINCT company_id::text),
+                '[]'::jsonb
+              ) AS company_ids,
+              coalesce(
+                jsonb_agg(DISTINCT raw_record_id::text),
+                '[]'::jsonb
+              ) AS raw_record_ids,
+              coalesce(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'workspace_id', workspace_id,
+                    'company_id', company_id,
+                    'scheme', scheme,
+                    'identifier_key', scheme||':'||jurisdiction||':'||normalized_value,
+                    'jurisdiction', jurisdiction,
+                    'normalized_value', normalized_value,
+                    'authority_provider_key', authority_provider_key,
+                    'raw_record_id', raw_record_id,
+                    'conflict_id', conflict_id,
+                    'confidence', confidence,
+                    'normalizer_version', normalizer_version,
+                    'validator_version', validator_version,
+                    'provenance', provenance,
+                    'status', status,
+                    'revoked_at', revoked_at
+                  ) ORDER BY scheme, jurisdiction, normalized_value
+                ),
+                '[]'::jsonb
+              ) AS rows
+            FROM organization_identifier
+            WHERE workspace_id='71000000-0000-4000-8000-000000000001'
+              AND raw_record_id='72000000-0000-4000-8000-000000000001'
+          ), party_readback AS (
+            SELECT count(*)::integer AS row_count
+            FROM organization_identity_conflict_party
+            WHERE workspace_id='71000000-0000-4000-8000-000000000001'
+          )
+          SELECT (jsonb_build_object(
+            'returned', command_result.value,
+            'persisted', jsonb_build_object(
+              'identity_link_count', link_readback.row_count,
+              'identity_links', link_readback.rows,
+              'identifier_count', identifier_readback.row_count,
+              'identifier_keys', identifier_readback.keys,
+              'identifiers', identifier_readback.rows
+            ),
+            'mechanical_consistency', jsonb_build_object(
+              'company_matches_identity_link',
+                command_result.value->>'company_id' = link_readback.rows->0->>'canonical_id',
+              'company_matches_identifiers',
+                identifier_readback.company_ids = jsonb_build_array(command_result.value->>'company_id'),
+              'conflict_matches_identity_link',
+                command_result.value->'conflict_id' IS NOT DISTINCT FROM link_readback.rows->0->'conflict_id',
+              'identifier_count_matches',
+                (command_result.value->>'identifier_count')::integer = identifier_readback.row_count,
+              'input_hash_matches_identity_link',
+                command_result.value->>'input_hash' = link_readback.rows->0->>'input_hash',
+              'match_rule_matches_identity_link',
+                command_result.value->>'match_rule' = link_readback.rows->0->>'match_rule',
+              'party_count_matches',
+                (command_result.value->>'party_count')::integer = party_readback.row_count,
+              'raw_matches_identity_link',
+                command_result.value->>'raw_record_id' = link_readback.rows->0->>'raw_record_id',
+              'raw_matches_identifiers',
+                identifier_readback.raw_record_ids = jsonb_build_array(command_result.value->>'raw_record_id')
+            )
+          )='{"returned":{"outcome_kind":"bound","raw_record_id":"72000000-0000-4000-8000-000000000001","company_id":"73000000-0000-4000-8000-000000000001","conflict_id":null,"match_rule":"identity_v2","input_hash":"e2d767b2b0e679b1f039709da028010b595ddff946115d8531e654f3fa98eb14","conflict_fingerprint":null,"replayed":false,"company_created":false,"identifier_count":2,"party_count":0},"persisted":{"identity_link_count":1,"identity_links":[{"workspace_id":"71000000-0000-4000-8000-000000000001","raw_record_id":"72000000-0000-4000-8000-000000000001","canonical_type":"company","canonical_id":"73000000-0000-4000-8000-000000000001","match_rule":"identity_v2","confidence":1,"status":"ACTIVE","resolver_version":"organization-identity-resolver/v1","input_hash":"e2d767b2b0e679b1f039709da028010b595ddff946115d8531e654f3fa98eb14","conflict_id":null}],"identifier_count":2,"identifier_keys":["domain:GLOBAL:a2-valid.example","registry-id:DE:DE1234"],"identifiers":[{"workspace_id":"71000000-0000-4000-8000-000000000001","company_id":"73000000-0000-4000-8000-000000000001","scheme":"domain","identifier_key":"domain:GLOBAL:a2-valid.example","jurisdiction":"GLOBAL","normalized_value":"a2-valid.example","authority_provider_key":"registry","raw_record_id":"72000000-0000-4000-8000-000000000001","conflict_id":null,"confidence":1,"normalizer_version":"organization-identity-authority/v1","validator_version":"domain-v1","provenance":{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000001","providerKey":"registry"},"status":"ACTIVE","revoked_at":null},{"workspace_id":"71000000-0000-4000-8000-000000000001","company_id":"73000000-0000-4000-8000-000000000001","scheme":"registry-id","identifier_key":"registry-id:DE:DE1234","jurisdiction":"DE","normalized_value":"DE1234","authority_provider_key":"registry","raw_record_id":"72000000-0000-4000-8000-000000000001","conflict_id":null,"confidence":1,"normalizer_version":"organization-identity-authority/v1","validator_version":"registry-id-v1","provenance":{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000001","providerKey":"registry"},"status":"ACTIVE","revoked_at":null}]},"mechanical_consistency":{"company_matches_identity_link":true,"company_matches_identifiers":true,"conflict_matches_identity_link":true,"identifier_count_matches":true,"input_hash_matches_identity_link":true,"match_rule_matches_identity_link":true,"party_count_matches":true,"raw_matches_identity_link":true,"raw_matches_identifiers":true}}'::jsonb)::text
+          FROM command_result, link_readback, identifier_readback, party_readback;
+          RESET SESSION AUTHORIZATION;
+          ROLLBACK;`),
+        "true",
+      );
+    });
+
+    it("persists a different directory-bound result with one literal authority", () => {
+      exactHelper("second valid two-ID command", signature.command);
+      assert.equal(
+        sql(`BEGIN;
+          INSERT INTO workspace(id,name,updated_at)
+          VALUES ('71000000-0000-4000-8000-000000000002','Task A2 second command',now());
+          INSERT INTO canonical_company(id,workspace_id,name,domain,country,status,dedupe_key,version,created_at,updated_at)
+          VALUES ('73000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000002','Secondary Root','secondary-root.example','DE','NEW','d:secondary-root.example',1,now(),now());
+          INSERT INTO raw_source_record(id,workspace_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at)
+          VALUES ('72000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000002','directory','industry_data','{"externalId":"directory:a2-secondary.example","name":"Secondary GmbH","domain":"a2-secondary.example","country":"DE","attributes":{"source_kind":"directory","source_directory":"registry.example","detail_url":"https://registry.example/company/2","source_class":"industry_data"},"provenance":{"sourceUrl":"https://registry.example/companies/2","fetchedAt":"2026-08-26T12:00:00.000Z","contentHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parserVersion":"registry/v1"}}'::jsonb,'https://registry.example/companies/2',now(),'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd','registry/v1','task-a2:second-valid','cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
+          INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
+          VALUES ('71000000-0000-4000-8000-000000000002','73000000-0000-4000-8000-000000000002','domain','GLOBAL','a2-secondary.example','directory','72000000-0000-4000-8000-000000000002',1,'organization-identity-authority/v1','domain-v1','{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000002","providerKey":"directory"}'::jsonb,'ACTIVE');
+          SET SESSION AUTHORIZATION app_user;
+          SET LOCAL app.current_workspace_id = '71000000-0000-4000-8000-000000000002';
+          SELECT to_jsonb(result)::text AS command_result
+          FROM public.resolve_organization_identity_for_raw_v1('71000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002') AS result
+          \\gset task_a2_directory_
+          WITH command_result AS (
+            SELECT :'task_a2_directory_command_result'::jsonb AS value
+          ), link_readback AS (
+            SELECT
+              count(*)::integer AS row_count,
+              coalesce(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'workspace_id', workspace_id,
+                    'raw_record_id', raw_record_id,
+                    'canonical_type', canonical_type,
+                    'canonical_id', canonical_id,
+                    'match_rule', match_rule,
+                    'confidence', confidence,
+                    'status', status,
+                    'resolver_version', resolver_version,
+                    'input_hash', input_hash,
+                    'conflict_id', conflict_id
+                  ) ORDER BY canonical_id
+                ),
+                '[]'::jsonb
+              ) AS rows
+            FROM identity_link
+            WHERE workspace_id='71000000-0000-4000-8000-000000000002'
+              AND raw_record_id='72000000-0000-4000-8000-000000000002'
+          ), identifier_readback AS (
+            SELECT
+              count(*)::integer AS row_count,
+              coalesce(
+                jsonb_agg(
+                  scheme||':'||jurisdiction||':'||normalized_value
+                  ORDER BY scheme, jurisdiction, normalized_value
+                ),
+                '[]'::jsonb
+              ) AS keys,
+              coalesce(
+                jsonb_agg(DISTINCT company_id::text),
+                '[]'::jsonb
+              ) AS company_ids,
+              coalesce(
+                jsonb_agg(DISTINCT raw_record_id::text),
+                '[]'::jsonb
+              ) AS raw_record_ids,
+              coalesce(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'workspace_id', workspace_id,
+                    'company_id', company_id,
+                    'scheme', scheme,
+                    'identifier_key', scheme||':'||jurisdiction||':'||normalized_value,
+                    'jurisdiction', jurisdiction,
+                    'normalized_value', normalized_value,
+                    'authority_provider_key', authority_provider_key,
+                    'raw_record_id', raw_record_id,
+                    'conflict_id', conflict_id,
+                    'confidence', confidence,
+                    'normalizer_version', normalizer_version,
+                    'validator_version', validator_version,
+                    'provenance', provenance,
+                    'status', status,
+                    'revoked_at', revoked_at
+                  ) ORDER BY scheme, jurisdiction, normalized_value
+                ),
+                '[]'::jsonb
+              ) AS rows
+            FROM organization_identifier
+            WHERE workspace_id='71000000-0000-4000-8000-000000000002'
+              AND raw_record_id='72000000-0000-4000-8000-000000000002'
+          ), party_readback AS (
+            SELECT count(*)::integer AS row_count
+            FROM organization_identity_conflict_party
+            WHERE workspace_id='71000000-0000-4000-8000-000000000002'
+          )
+          SELECT (jsonb_build_object(
+            'returned', command_result.value,
+            'persisted', jsonb_build_object(
+              'identity_link_count', link_readback.row_count,
+              'identity_links', link_readback.rows,
+              'identifier_count', identifier_readback.row_count,
+              'identifier_keys', identifier_readback.keys,
+              'identifiers', identifier_readback.rows
+            ),
+            'mechanical_consistency', jsonb_build_object(
+              'company_matches_identity_link',
+                command_result.value->>'company_id' = link_readback.rows->0->>'canonical_id',
+              'company_matches_identifiers',
+                identifier_readback.company_ids = jsonb_build_array(command_result.value->>'company_id'),
+              'conflict_matches_identity_link',
+                command_result.value->'conflict_id' IS NOT DISTINCT FROM link_readback.rows->0->'conflict_id',
+              'identifier_count_matches',
+                (command_result.value->>'identifier_count')::integer = identifier_readback.row_count,
+              'input_hash_matches_identity_link',
+                command_result.value->>'input_hash' = link_readback.rows->0->>'input_hash',
+              'match_rule_matches_identity_link',
+                command_result.value->>'match_rule' = link_readback.rows->0->>'match_rule',
+              'party_count_matches',
+                (command_result.value->>'party_count')::integer = party_readback.row_count,
+              'raw_matches_identity_link',
+                command_result.value->>'raw_record_id' = link_readback.rows->0->>'raw_record_id',
+              'raw_matches_identifiers',
+                identifier_readback.raw_record_ids = jsonb_build_array(command_result.value->>'raw_record_id')
+            )
+          )='{"returned":{"outcome_kind":"bound","raw_record_id":"72000000-0000-4000-8000-000000000002","company_id":"73000000-0000-4000-8000-000000000002","conflict_id":null,"match_rule":"identity_v2","input_hash":"1b1116123797795d5a9d955af10dcf94dff616c557f7d89882c70c3ee44a9393","conflict_fingerprint":null,"replayed":false,"company_created":false,"identifier_count":1,"party_count":0},"persisted":{"identity_link_count":1,"identity_links":[{"workspace_id":"71000000-0000-4000-8000-000000000002","raw_record_id":"72000000-0000-4000-8000-000000000002","canonical_type":"company","canonical_id":"73000000-0000-4000-8000-000000000002","match_rule":"identity_v2","confidence":1,"status":"ACTIVE","resolver_version":"organization-identity-resolver/v1","input_hash":"1b1116123797795d5a9d955af10dcf94dff616c557f7d89882c70c3ee44a9393","conflict_id":null}],"identifier_count":1,"identifier_keys":["domain:GLOBAL:a2-secondary.example"],"identifiers":[{"workspace_id":"71000000-0000-4000-8000-000000000002","company_id":"73000000-0000-4000-8000-000000000002","scheme":"domain","identifier_key":"domain:GLOBAL:a2-secondary.example","jurisdiction":"GLOBAL","normalized_value":"a2-secondary.example","authority_provider_key":"directory","raw_record_id":"72000000-0000-4000-8000-000000000002","conflict_id":null,"confidence":1,"normalizer_version":"organization-identity-authority/v1","validator_version":"domain-v1","provenance":{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000002","providerKey":"directory"},"status":"ACTIVE","revoked_at":null}]},"mechanical_consistency":{"company_matches_identity_link":true,"company_matches_identifiers":true,"conflict_matches_identity_link":true,"identifier_count_matches":true,"input_hash_matches_identity_link":true,"match_rule_matches_identity_link":true,"party_count_matches":true,"raw_matches_identity_link":true,"raw_matches_identifiers":true}}'::jsonb)::text
+          FROM command_result, link_readback, identifier_readback, party_readback;
           RESET SESSION AUTHORIZATION;
           ROLLBACK;`),
         "true",
