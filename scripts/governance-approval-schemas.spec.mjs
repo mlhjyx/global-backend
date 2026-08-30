@@ -32,6 +32,7 @@ const ROLES = [
 ];
 
 const clone = (value) => structuredClone(value);
+const receiptCoreDigest = (value) => sha256Prefixed(renderApprovalReceiptCore(value));
 const canonicalize = (value) => {
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
   if (value !== null && typeof value === 'object') {
@@ -87,7 +88,7 @@ const receipt = () => {
   return {
     schema_version: 'product-privacy-approval-readback-receipt/v1',
     core,
-    receipt_core_sha256: canonicalDigest(core),
+    receipt_core_sha256: receiptCoreDigest(core),
   };
 };
 
@@ -96,7 +97,7 @@ const mergeAuthorityReceipt = () => {
   value.core.role = 'MERGE-AUTHORIZER';
   value.core.actor_id = 6;
   value.core.actor_login = 'merge-authorizer';
-  value.receipt_core_sha256 = canonicalDigest(value.core);
+  value.receipt_core_sha256 = receiptCoreDigest(value.core);
   return value;
 };
 
@@ -365,7 +366,7 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
   const authoritySha = canonicalDigest(authoritiesValue);
   const authorityReceipt = mergeAuthorityReceipt();
   authorityReceipt.core.authority_sha256 = authoritySha;
-  authorityReceipt.receipt_core_sha256 = canonicalDigest(authorityReceipt.core);
+  authorityReceipt.receipt_core_sha256 = receiptCoreDigest(authorityReceipt.core);
   const grantValue = {
     ...grant(),
     authority_sha256: authoritySha,
@@ -448,7 +449,7 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
     (value) => { value.ledger_snapshot.durability_class = 'PROCESS_MEMORY'; },
     (value) => {
       const duplicate = { ...value.authority_receipt, core: { ...value.authority_receipt.core, role: 'OWN-SECURITY' } };
-      duplicate.receipt_core_sha256 = canonicalDigest(duplicate.core);
+      duplicate.receipt_core_sha256 = receiptCoreDigest(duplicate.core);
       value.approval_receipts.push({ receipt: duplicate, receipt_raw_sha256: OTHER_DIGEST });
     },
     (value) => { value.grant.head_sha = 'e'.repeat(40); },

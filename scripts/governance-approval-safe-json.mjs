@@ -11,6 +11,7 @@ const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const RECEIPT_ID_PATTERN = /^[a-z][a-z0-9-]{7,127}$/;
 const CANONICAL_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const CANONICAL_NUMBER_PATTERN = /^-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?(?:e-?[1-9]\d*)?$/;
 const CORE_KEYS = Object.freeze([
   'receipt_id',
   'repository',
@@ -88,6 +89,8 @@ const scanJsonNumber = (text, start) => {
   match.lastIndex = start;
   const token = match.exec(text);
   requireCondition(token !== null, 'SYNTAX');
+  requireCondition(CANONICAL_NUMBER_PATTERN.test(token[0]), 'NUMBER_LEXEME');
+  requireCondition(!token[0].includes('e') || Number(token[0].slice(0, token[0].indexOf('e'))) !== 0, 'NUMBER_LEXEME');
   return start + token[0].length;
 };
 
@@ -233,6 +236,8 @@ const requireCanonicalInstant = (value) => {
   return value;
 };
 
+const unicodeCodePointLength = (value) => Array.from(value).length;
+
 const normalizeApprovalReceiptCore = (core) => {
   requireClosedObject(core, CORE_KEYS, 'CORE_PROPERTY');
   requireString(core.receipt_id, RECEIPT_ID_PATTERN, 'CORE_PROPERTY');
@@ -242,7 +247,12 @@ const normalizeApprovalReceiptCore = (core) => {
   requireString(core.authority_sha256, DIGEST_PATTERN, 'CORE_PROPERTY');
   requireCondition(ROLES.has(core.role), 'CORE_PROPERTY');
   requireCondition(Number.isSafeInteger(core.actor_id) && core.actor_id >= 1 && core.actor_id <= Number.MAX_SAFE_INTEGER, 'CORE_PROPERTY');
-  requireCondition(typeof core.actor_login === 'string' && core.actor_login.length >= 1 && core.actor_login.length <= 256, 'CORE_PROPERTY');
+  requireCondition(
+    typeof core.actor_login === 'string'
+    && unicodeCodePointLength(core.actor_login) >= 1
+    && unicodeCodePointLength(core.actor_login) <= 256,
+    'CORE_PROPERTY',
+  );
   requireCondition(core.decision_adr === 'ADR-042', 'CORE_PROPERTY');
   requireString(core.decision_revision, /^program-c\/decision-r[1-9][0-9]*$/, 'CORE_PROPERTY');
   requireString(core.policy_revision, /^program-c\/policy-r[1-9][0-9]*$/, 'CORE_PROPERTY');
@@ -281,6 +291,16 @@ const deepFreeze = (value) => {
   return value;
 };
 
+const immutableBytesResult = (value, bytes) => {
+  const privateBytes = Buffer.from(bytes);
+  return Object.freeze({
+    value,
+    get bytes() {
+      return Buffer.from(privateBytes);
+    },
+  });
+};
+
 const renderApprovalReceiptEnvelope = (core, receiptCoreSha256) => Buffer.from(
   `${JSON.stringify({
     schema_version: RECEIPT_SCHEMA_VERSION,
@@ -309,6 +329,16 @@ const normalizeParsedReceipt = (receipt, sourceBytes) => {
 export const sha256Prefixed = (bytes) => {
   requireCondition(Buffer.isBuffer(bytes) || bytes instanceof Uint8Array, 'DIGEST_INPUT');
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+};
+
+export const verifyApprovalReceiptRawSha256 = (bytes, expectedReceiptRawSha256) => {
+  requireCondition(Buffer.isBuffer(bytes) || bytes instanceof Uint8Array, 'RECEIPT_RAW_DIGEST_INPUT');
+  requireString(expectedReceiptRawSha256, DIGEST_PATTERN, 'RECEIPT_RAW_DIGEST_INVALID');
+  requireCondition(
+    sha256Prefixed(bytes) === expectedReceiptRawSha256,
+    'RECEIPT_RAW_DIGEST_MISMATCH',
+  );
+  return Object.freeze({ valid: true });
 };
 
 export const parseApprovalJson = (text, _label) => {
@@ -354,7 +384,7 @@ export const readApprovalJson = async (path, _label) => {
       throw approvalJsonError('UTF8');
     }
     const value = parseApprovalJson(text, _label);
-    return Object.freeze({ value, bytes: Buffer.from(bytes) });
+    return immutableBytesResult(value, bytes);
   } catch (error) {
     if (error?.message?.startsWith('APPROVAL_JSON_')) {
       throw error;
@@ -386,9 +416,12 @@ export const buildApprovalReceiptArtifact = (core) => {
   });
   const bytes = renderApprovalReceiptEnvelope(normalized, receiptCoreSha256);
   const receiptRawSha256 = sha256Prefixed(bytes);
+  const privateBytes = Buffer.from(bytes);
   return Object.freeze({
     envelope,
-    bytes: Buffer.from(bytes),
+    get bytes() {
+      return Buffer.from(privateBytes);
+    },
     receiptCoreSha256,
     receiptRawSha256,
   });

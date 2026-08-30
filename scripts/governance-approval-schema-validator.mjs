@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
+import { renderApprovalReceiptCore, sha256Prefixed } from './governance-approval-safe-json.mjs';
 
 const schemaPath = (filename) => fileURLToPath(new URL(`../docs/governance/${filename}`, import.meta.url));
 const loadSchema = (filename) => JSON.parse(readFileSync(schemaPath(filename), 'utf8'));
@@ -54,7 +55,6 @@ const canonicalize = (value) => {
   return JSON.stringify(value);
 };
 const canonicalDigest = (value) => `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`;
-
 const schemaIssues = (errors = []) => errors.map((error) => issue(
   error.schemaPath,
   error.instancePath,
@@ -84,7 +84,7 @@ const duplicateActorIssues = (value) => {
     : [issue('#/actor_policy', '/roles', 'APPROVAL_DISTINCT_ACTORS_REQUIRED')];
 };
 
-const receiptIssues = (value) => value.receipt_core_sha256 === canonicalDigest(value.core)
+const receiptIssues = (value) => value.receipt_core_sha256 === sha256Prefixed(renderApprovalReceiptCore(value.core))
   ? []
   : [issue('#/receipt_core_sha256', '/receipt_core_sha256', 'APPROVAL_RECEIPT_CORE_DIGEST_MISMATCH')];
 
