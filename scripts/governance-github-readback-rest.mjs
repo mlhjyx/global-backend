@@ -204,7 +204,7 @@ const parseNextLink = (header, currentUrl) => {
   if (header !== null && header !== '') {
     requireCondition(typeof header === 'string' && header.length <= 8192, 'APPROVAL_GITHUB_PAGINATION_INVALID');
     for (const part of header.split(',')) {
-      const match = /^\s*<([^<>]+)>;\s*rel="(next|last)"\s*$/.exec(part);
+      const match = /^\s*<([^<>]+)>;\s*rel="(next|last|prev|first)"\s*$/.exec(part);
       requireCondition(match !== null && !links.has(match?.[2]), 'APPROVAL_GITHUB_PAGINATION_INVALID');
       links.set(match[2], match[1]);
     }
@@ -238,6 +238,8 @@ const parseNextLink = (header, currentUrl) => {
   };
   const next = links.has('next') ? resolveRelation(links.get('next')) : null;
   const last = links.has('last') ? resolveRelation(links.get('last')) : null;
+  const previous = links.has('prev') ? resolveRelation(links.get('prev')) : null;
+  const first = links.has('first') ? resolveRelation(links.get('first')) : null;
   if (next !== null) {
     requireCondition(next.url.href !== currentUrl.href, 'APPROVAL_GITHUB_PAGINATION_LOOP');
     requireCondition(next.page === currentPage + 1, 'APPROVAL_GITHUB_PAGINATION_INVALID');
@@ -249,6 +251,15 @@ const parseNextLink = (header, currentUrl) => {
     } else {
       requireCondition(next === null, 'APPROVAL_GITHUB_PAGINATION_INVALID');
     }
+  }
+  if (previous !== null) {
+    requireCondition(
+      currentPage > 1 && previous.page === currentPage - 1,
+      'APPROVAL_GITHUB_PAGINATION_INVALID',
+    );
+  }
+  if (first !== null) {
+    requireCondition(first.page === 1, 'APPROVAL_GITHUB_PAGINATION_INVALID');
   }
   return {
     currentPage,

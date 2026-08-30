@@ -50,11 +50,11 @@ test('round2 rejects reviewer counterexample: future last page without sequentia
 test('round2 closes supported Link relations and rejects duplicates or ambiguity', async (t) => {
   for (const [name, header] of [
     ['unknown relation', `<${relativePage(1)}>; rel="canonical"`],
-    ['unsupported first', `<${relativePage(1)}>; rel="first"`],
-    ['unsupported prev', `<${relativePage(1)}>; rel="prev"`],
+    ['invalid previous direction', `<${relativePage(1)}>; rel="prev"`],
     ['ambiguous relation list', `<${relativePage(2)}>; rel="next last"`],
     ['duplicate last', `<${relativePage(1)}>; rel="last", <${relativePage(1)}>; rel="last"`],
     ['duplicate next', `<${relativePage(2)}>; rel="next", <${relativePage(2)}>; rel="next"`],
+    ['duplicate first', `<${relativePage(1)}>; rel="first", <${relativePage(1)}>; rel="first"`],
   ]) {
     await t.test(name, async () => {
       const state = fixtureState();
@@ -119,7 +119,11 @@ test('round2 accepts relative sequential next and a true relative last page', as
       if (page === 1) {
         return `<${relativePage(2)}>; rel="next", <${relativePage(2)}>; rel="last"`;
       }
-      return `<${relativePage(2)}>; rel="last"`;
+      return [
+        `<${relativePage(1)}>; rel="prev"`,
+        `<${relativePage(1)}>; rel="first"`,
+        `<${relativePage(2)}>; rel="last"`,
+      ].join(', ');
     },
   );
   const { evidence, calls } = await collect(state);
