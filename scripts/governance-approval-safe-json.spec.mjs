@@ -249,10 +249,10 @@ test('internal structural seam deterministically rejects identity change after b
     },
     readAt: async (target, offset, length, position) => {
       byteReads += 1;
-      if (position >= bytes.length) return { bytesRead: 0, buffer: target };
+      if (position >= bytes.length) return { bytesRead: 0 };
       const bytesRead = Math.min(length, bytes.length - position);
       bytes.copy(target, offset, position, position + bytesRead);
-      return { bytesRead, buffer: target };
+      return { bytesRead };
     },
   };
 

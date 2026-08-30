@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
-import { scheduler } from 'node:timers/promises';
 import { TextDecoder } from 'node:util';
 
 import {
   isMachineEvidenceItem,
   normalizeMachineCheckEvidence,
 } from './governance-approval-machine-policy.mjs';
+import { readApprovalJsonBytesFromStructuralTestSeam } from './governance-approval-safe-json-internal.mjs';
 
 const MAX_BYTES = 1_048_576;
 const MAX_NESTING = 128;
@@ -188,41 +188,6 @@ const assertSafeJsonNumbers = (value, depth = 0) => {
       assertSafeJsonNumbers(item, depth + 1);
     }
   }
-};
-
-const statIdentity = (stat) => Object.freeze({
-  dev: stat.dev,
-  ino: stat.ino,
-  mode: stat.mode,
-  size: stat.size,
-  mtimeNs: stat.mtimeNs,
-  ctimeNs: stat.ctimeNs,
-});
-
-const sameIdentity = (before, after) => (
-  before.dev === after.dev
-  && before.ino === after.ino
-  && before.mode === after.mode
-  && before.size === after.size
-  && before.mtimeNs === after.mtimeNs
-  && before.ctimeNs === after.ctimeNs
-);
-
-const readBoundedBytes = async (handle, expectedSize) => {
-  const chunks = [];
-  let offset = 0;
-  while (offset < expectedSize) {
-    const chunk = Buffer.allocUnsafe(Math.min(65_536, expectedSize - offset));
-    const { bytesRead } = await handle.read(chunk, 0, chunk.length, offset);
-    requireCondition(bytesRead > 0, 'FILE_CHANGED');
-    chunks.push(chunk.subarray(0, bytesRead));
-    offset += bytesRead;
-    await scheduler.yield();
-  }
-  const extra = Buffer.allocUnsafe(1);
-  const { bytesRead: extraBytes } = await handle.read(extra, 0, 1, offset);
-  requireCondition(extraBytes === 0, 'FILE_CHANGED');
-  return Buffer.concat(chunks, offset);
 };
 
 const isPlainObject = (value) => (
@@ -423,15 +388,7 @@ export const parseApprovalJson = (text, _label) => {
   }
 };
 
-const readApprovalJsonFromHandleImpl = async (handle, label) => {
-  const before = await handle.stat({ bigint: true });
-  requireCondition(
-    before.isFile() && before.size <= BigInt(MAX_BYTES),
-    before.size > BigInt(MAX_BYTES) ? 'FILE_TOO_LARGE' : 'UNSAFE_FILE',
-  );
-  const bytes = await readBoundedBytes(handle, Number(before.size));
-  const after = await handle.stat({ bigint: true });
-  requireCondition(sameIdentity(statIdentity(before), statIdentity(after)), 'FILE_CHANGED');
+const parseApprovalJsonBytes = (bytes, label) => {
   let text;
   try {
     text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -442,29 +399,19 @@ const readApprovalJsonFromHandleImpl = async (handle, label) => {
   return immutableBytesResult(value, bytes);
 };
 
-export const readApprovalJsonFromHandle = async (handle, label) => {
-  try {
-    requireCondition(
-      handle !== null
-        && typeof handle === 'object'
-        && typeof handle.stat === 'function'
-        && typeof handle.read === 'function',
-      'UNSAFE_FILE',
-    );
-    return await readApprovalJsonFromHandleImpl(handle, label);
-  } catch (error) {
-    if (error?.message?.startsWith('APPROVAL_JSON_')) {
-      throw error;
-    }
-    throw approvalJsonError('READ_FAILED');
-  }
-};
-
 export const readApprovalJson = async (path, label) => {
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    return await readApprovalJsonFromHandle(handle, label);
+    const structural = await readApprovalJsonBytesFromStructuralTestSeam(Object.freeze({
+      schemaVersion: 'approval-safe-json-structural-test-seam/v1',
+      stat: (options) => handle.stat(options),
+      readAt: async (target, offset, length, position) => {
+        const { bytesRead } = await handle.read(target, offset, length, position);
+        return { bytesRead };
+      },
+    }));
+    return parseApprovalJsonBytes(structural.bytes, label);
   } catch (error) {
     if (error?.message?.startsWith('APPROVAL_JSON_')) throw error;
     if (error?.code === 'ELOOP' || error?.code === 'EISDIR') {
