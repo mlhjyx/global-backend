@@ -39,34 +39,9 @@ DECLARE
   expected_strategy TEXT;
   expected_artifact_id TEXT;
 BEGIN
-  SELECT target.* INTO operation
-  FROM public.tool_budget_operation target
-  WHERE target.scope_key = p_workspace_id::text
-    AND target.id = p_operation_id
-    AND target.generation = p_operation_generation
-    AND target.status = 'SETTLED'
-    AND target.result_digest = p_result_digest
-  FOR SHARE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
-  END IF;
-  SELECT target.* INTO account
-  FROM public.tool_budget_account target
-  WHERE target.scope_key = operation.scope_key
-    AND target.id = p_account_id
-    AND target.id = operation.account_id
-    AND target.generation = p_operation_generation
-  FOR SHARE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
-  END IF;
-  SELECT target.* INTO authority
-  FROM public.execution_budget_authority target
-  WHERE target.scope_key = account.scope_key
-    AND target.workspace_id = p_workspace_id
-    AND target.id = p_authority_id
-    AND target.id = account.authority_id
-  FOR SHARE;
+  SELECT target.* INTO authority FROM public.execution_budget_authority target
+  WHERE target.scope_key=p_workspace_id::text AND target.workspace_id=p_workspace_id
+    AND target.id=p_authority_id FOR SHARE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
   END IF;
@@ -82,6 +57,15 @@ BEGIN
   IF FOUND THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
   END IF;
+  SELECT target.* INTO operation FROM public.tool_budget_operation target
+  WHERE target.scope_key=p_workspace_id::text AND target.id=p_operation_id
+    AND target.generation=p_operation_generation AND target.status='SETTLED'
+    AND target.result_digest=p_result_digest FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE='P0001'; END IF;
+  SELECT target.* INTO account FROM public.tool_budget_account target
+  WHERE target.scope_key=operation.scope_key AND target.id=p_account_id
+    AND target.id=operation.account_id AND target.authority_id=authority.id FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE='P0001'; END IF;
   SELECT target.* INTO ack
   FROM public.execution_domain_ack target
   WHERE target.scope_key = operation.scope_key
@@ -156,7 +140,6 @@ BEGIN
     AND authority.revoked_at IS NULL
     AND revocation.authority_id IS NULL
     AND account.id = p_account_id
-    AND account.generation = p_operation_generation
     AND operation.id = p_operation_id
     AND operation.generation = p_operation_generation
     AND operation.status = 'SETTLED'
@@ -272,10 +255,18 @@ BEGIN
     'relationExact',stored_tuple IS NOT DISTINCT FROM caller_tuple);
 END $path$;
 CREATE FUNCTION public._governed_relation_lock_snapshot_dsr_v1(
-  p_workspace_id UUID,p_snapshot JSONB) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+  p_workspace_id UUID,p_operation_id UUID,p_snapshot JSONB) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public AS $locks$
 DECLARE key TEXT;
 BEGIN
+  IF current_setting('app.governed_relation_graph_lock',true)=p_operation_id::text AND EXISTS (
+    SELECT 1 FROM jsonb_array_elements_text(p_snapshot->'dsrKeys') value WHERE NOT EXISTS (
+      SELECT 1 FROM pg_locks held WHERE held.pid=pg_backend_pid() AND held.locktype='advisory'
+       AND held.granted AND held.classid::bigint=((hashtextextended(
+        'generic-operation-artifact-subject:'||p_workspace_id::text||':'||value,0)>>32)&4294967295)
+       AND held.objid::bigint=(hashtextextended(
+        'generic-operation-artifact-subject:'||p_workspace_id::text||':'||value,0)&4294967295)
+    )) THEN RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
   FOR key IN SELECT value FROM jsonb_array_elements_text(p_snapshot->'dsrKeys') value ORDER BY value
   LOOP PERFORM pg_advisory_xact_lock(hashtextextended(
     'generic-operation-artifact-subject:'||p_workspace_id::text||':'||key,0)); END LOOP;
@@ -300,7 +291,7 @@ DECLARE
   stored_child public.governed_subject%ROWTYPE;
   stored_relation public.governed_subject_relation%ROWTYPE;
   effective_parent UUID;
-  parent_depth INTEGER;
+  parent_depth INTEGER; child_height INTEGER:=0;
   operation_subject_count INTEGER;
   child_in_operation BOOLEAN;
   pre_snapshot JSONB; post_snapshot JSONB;
@@ -386,11 +377,12 @@ BEGIN
     p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
   IF COALESCE((pre_snapshot->>'rootReachable')::BOOLEAN,false) IS NOT TRUE THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
-  PERFORM _governed_relation_lock_snapshot_dsr_v1(p_workspace_id,pre_snapshot);
+  PERFORM _governed_relation_lock_snapshot_dsr_v1(p_workspace_id,p_operation_id,pre_snapshot);
   PERFORM pg_advisory_xact_lock(hashtextextended(
     'governed-subject-relation:' || p_workspace_id::text || ':' || p_operation_id::text,
     0
   ));
+  PERFORM set_config('app.governed_relation_graph_lock',p_operation_id::text,true);
   post_snapshot:=_governed_relation_path_snapshot_v1(p_workspace_id,p_operation_id,
     p_parent_governed_subject_id,p_child_subject_type,p_child_subject_id,p_child_data_class,
     p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
@@ -516,6 +508,14 @@ BEGIN
     OR stored_child.dsr_subject_id IS DISTINCT FROM p_child_dsr_subject_id
   ) THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+  IF stored_child.id IS NOT NULL THEN WITH RECURSIVE descendants(id,depth) AS (SELECT stored_child.id,0 UNION
+      SELECT relation.child_subject_id,path.depth+1 FROM descendants path
+      JOIN public.governed_subject_relation relation ON relation.workspace_id=p_workspace_id
+       AND relation.operation_id=p_operation_id AND relation.parent_subject_id=path.id
+      WHERE path.depth<65) SELECT COALESCE(MAX(depth),0) INTO child_height FROM descendants;
+    IF parent_depth+1+child_height>64 THEN RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID'
+      USING ERRCODE='P0001'; END IF;
   END IF;
   IF stored_child.id IS NOT NULL AND (
     stored_child.id = effective_parent OR EXISTS (
@@ -690,11 +690,12 @@ BEGIN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE' USING ERRCODE='P0001'; END IF;
   IF COALESCE((pre_snapshot->>'rootReachable')::BOOLEAN,false) IS NOT TRUE THEN
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
-  PERFORM _governed_relation_lock_snapshot_dsr_v1(p_workspace_id,pre_snapshot);
+  PERFORM _governed_relation_lock_snapshot_dsr_v1(p_workspace_id,p_operation_id,pre_snapshot);
   PERFORM pg_advisory_xact_lock(hashtextextended(
     'governed-subject-relation:' || p_workspace_id::text || ':' || p_operation_id::text,
     0
   ));
+  PERFORM set_config('app.governed_relation_graph_lock',p_operation_id::text,true);
   PERFORM _governed_relation_assert_operation_v1(
     p_workspace_id, p_authority_id, p_account_id, p_operation_id,
     p_operation_generation, p_ack_id, p_result_digest
@@ -790,7 +791,7 @@ REVOKE ALL ON FUNCTION public._governed_relation_assert_caller_v1(UUID) FROM PUB
 REVOKE ALL ON FUNCTION public._governed_relation_assert_operation_v1(UUID,UUID,UUID,UUID,INTEGER,CHAR(64),CHAR(64)) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public._governed_relation_lock_operation_v1(UUID,UUID,UUID,UUID,INTEGER,CHAR(64),CHAR(64)) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public._governed_relation_path_snapshot_v1(UUID,UUID,UUID,VARCHAR(191),UUID,VARCHAR(16),VARCHAR(191),UUID,JSONB) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
-REVOKE ALL ON FUNCTION public._governed_relation_lock_snapshot_dsr_v1(UUID,JSONB) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
+REVOKE ALL ON FUNCTION public._governed_relation_lock_snapshot_dsr_v1(UUID,UUID,JSONB) FROM PUBLIC,app_user,execution_budget_platform_writer,runtime_api,runtime_worker,runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public.append_workspace_governed_child_relation_v1(UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64), VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, UUID, VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, VARCHAR(200), VARCHAR(32), VARCHAR(64), UUID, CHAR(64), CHAR(64)) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay;
 REVOKE ALL ON FUNCTION public.attest_workspace_governed_child_relation_v1(UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64), VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, UUID, VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, VARCHAR(200), VARCHAR(32), VARCHAR(64), UUID, CHAR(64), CHAR(64)) FROM PUBLIC, app_user, execution_budget_platform_writer, runtime_api, runtime_worker, runtime_outbox_relay;
 GRANT EXECUTE ON FUNCTION public.append_workspace_governed_child_relation_v1(UUID, UUID, UUID, UUID, INTEGER, CHAR(64), CHAR(64), VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, UUID, VARCHAR(191), UUID, VARCHAR(16), VARCHAR(191), UUID, VARCHAR(200), VARCHAR(32), VARCHAR(64), UUID, CHAR(64), CHAR(64)) TO app_user;
