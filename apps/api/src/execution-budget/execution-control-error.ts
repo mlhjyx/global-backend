@@ -29,6 +29,10 @@ const TEMPORAL_APPLICATION_FAILURE_KEYS = Object.freeze([
   'stack',
   'type',
 ]);
+const LEGACY_TEMPORAL_APPLICATION_FAILURE_COMPATIBILITY = Object.freeze({
+  sdkBoundary: '@temporalio/workflow@1.20.x',
+  genericTypes: Object.freeze(['', 'Error']),
+});
 
 function controlToken(value: unknown): boolean {
   if (
@@ -79,9 +83,11 @@ export class ExecutionControlError extends Error {
 }
 
 type SafeFailureSnapshot = Readonly<{
+  family: SafeFailureFamily;
   code?: unknown;
   type?: unknown;
   name?: unknown;
+  message?: unknown;
   cause?: unknown;
 }>;
 type SafeFailureFamily = 'PLAIN' | 'TEMPORAL_ACTIVITY' | 'TEMPORAL_APPLICATION';
@@ -181,14 +187,33 @@ function safeFailureSnapshot(value: object): SafeFailureSnapshot | null {
       }
     }
     return Object.freeze({
+      family,
       code: descriptors.code?.value,
       type: descriptors.type?.value,
       name: descriptors.name?.value,
+      message: descriptors.message?.value,
       cause: descriptors.cause?.value,
     });
   } catch {
     return null;
   }
+}
+
+function isLegacyTemporalApplicationControl(
+  snapshot: SafeFailureSnapshot,
+): boolean {
+  if (
+    snapshot.family !== 'TEMPORAL_APPLICATION' ||
+    typeof snapshot.type !== 'string' ||
+    !LEGACY_TEMPORAL_APPLICATION_FAILURE_COMPATIBILITY.genericTypes.includes(
+      snapshot.type,
+    ) ||
+    typeof snapshot.message !== 'string' ||
+    !/^[A-Z][A-Z0-9_]{2,127}$/u.test(snapshot.message)
+  ) {
+    return false;
+  }
+  return controlToken(snapshot.message);
 }
 
 /**
@@ -207,7 +232,10 @@ export function isExecutionControlError(error: unknown): boolean {
     visited.add(current);
     const snapshot = safeFailureSnapshot(current);
     if (!snapshot) return true;
-    if ([snapshot.code, snapshot.type, snapshot.name].some(controlToken)) {
+    if (
+      [snapshot.code, snapshot.type, snapshot.name].some(controlToken) ||
+      isLegacyTemporalApplicationControl(snapshot)
+    ) {
       return true;
     }
     if (snapshot.cause === null || snapshot.cause === undefined) return false;
