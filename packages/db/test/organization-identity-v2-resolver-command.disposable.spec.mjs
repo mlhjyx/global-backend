@@ -529,16 +529,77 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
     );
   });
 
+  it("stores public-command timeouts and the exact non-owner EXECUTE ACL in catalog", () => {
+    assert.equal(
+      dockerPsql(
+        databases.fresh,
+        `BEGIN;
+         CREATE TEMP TABLE task6b_identity_command_catalog ON COMMIT DROP AS
+         SELECT p.oid, p.proacl, p.proconfig, p.proowner
+         FROM pg_proc AS p
+         JOIN pg_namespace AS n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.proname = 'resolve_organization_identity_for_raw_v1'
+           AND pg_get_function_identity_arguments(p.oid) = 'text, text';
+         SELECT count(*) FROM task6b_identity_command_catalog;
+         SELECT count(*)
+         FROM task6b_identity_command_catalog AS c
+         CROSS JOIN LATERAL unnest(coalesce(c.proconfig, '{}'::text[])) AS setting
+         WHERE setting = 'lock_timeout=5s';
+         SELECT count(*)
+         FROM task6b_identity_command_catalog AS c
+         CROSS JOIN LATERAL unnest(coalesce(c.proconfig, '{}'::text[])) AS setting
+         WHERE setting = 'statement_timeout=60s';
+         SELECT coalesce(min(pg_get_userbyid(proowner)), '') FROM task6b_identity_command_catalog;
+         SELECT count(*)
+         FROM task6b_identity_command_catalog
+         WHERE has_function_privilege('app_user', oid, 'EXECUTE');
+         SELECT count(*)
+         FROM task6b_identity_command_catalog
+         WHERE has_function_privilege('public', oid, 'EXECUTE');
+         SELECT count(*)
+         FROM task6b_identity_command_catalog AS c
+         CROSS JOIN LATERAL aclexplode(
+           coalesce(c.proacl, acldefault('f', c.proowner))
+         ) AS acl
+         WHERE acl.privilege_type = 'EXECUTE'
+           AND acl.grantee <> 0
+           AND acl.grantee <> c.proowner
+           AND pg_get_userbyid(acl.grantee) <> 'app_user';
+         SELECT count(*)
+         FROM task6b_identity_command_catalog AS c
+         CROSS JOIN LATERAL aclexplode(
+           coalesce(c.proacl, acldefault('f', c.proowner))
+         ) AS acl
+         WHERE acl.privilege_type = 'EXECUTE'
+           AND pg_get_userbyid(acl.grantee) = 'app_user';
+         SELECT count(*)
+         FROM task6b_identity_command_catalog AS c
+         CROSS JOIN LATERAL aclexplode(
+           coalesce(c.proacl, acldefault('f', c.proowner))
+         ) AS acl
+         WHERE acl.privilege_type = 'EXECUTE'
+           AND pg_get_userbyid(acl.grantee) = 'app_user'
+           AND acl.is_grantable;
+         SELECT count(*)
+         FROM task6b_identity_command_catalog
+         WHERE has_function_privilege(proowner, oid, 'EXECUTE');
+         ROLLBACK;`,
+      ),
+      ["1", "1", "1", "global", "1", "0", "0", "1", "0", "1"].join(
+        "\n",
+      ),
+    );
+  });
+
   it("admits only the app_user two-ID principal without caller-injected timeouts", () => {
     assert.equal(
       dockerPsql(
         databases.fresh,
         `SELECT rolname||':'||rolsuper||':'||rolbypassrls FROM pg_roles WHERE rolname='app_user';
-         SELECT has_function_privilege('app_user','public.resolve_organization_identity_for_raw_v1(text,text)','EXECUTE');
-         SELECT has_function_privilege('public','public.resolve_organization_identity_for_raw_v1(text,text)','EXECUTE');
          SELECT has_table_privilege('app_user','organization_identifier','INSERT,UPDATE,DELETE');`,
       ),
-      ["app_user:false:false", "t", "f", "f"].join("\n"),
+      ["app_user:false:false", "f"].join("\n"),
     );
     assert.doesNotThrow(() =>
       twoIdAppCommand(databases.fresh, WORKSPACE_A, RAW_BIND, {

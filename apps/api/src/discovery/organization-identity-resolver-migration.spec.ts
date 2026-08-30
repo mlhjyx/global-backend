@@ -34,6 +34,82 @@ function withoutDollarQuotedBodies(sql: string): string {
   );
 }
 
+type PublicFunctionDefinition = Readonly<{
+  name: string;
+  parameterDeclaration: string;
+  parameterTypes: string;
+  header: string;
+}>;
+
+function normalizeSql(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
+function sqlWithoutComments(sql: string): string {
+  return sql.replace(/\/\*[\s\S]*?\*\/|--[^\r\n]*/gu, "");
+}
+
+function parameterTypes(parameters: string): string {
+  return parameters
+    .split(",")
+    .map((parameter) =>
+      normalizeSql(parameter)
+        .replace(/^(?:in|out|inout|variadic)\s+/u, "")
+        .replace(/^[a-z_][a-z0-9_]*\s+/u, ""),
+    )
+    .join(", ");
+}
+
+function publicFunctionDefinitions(sql: string): PublicFunctionDefinition[] {
+  const definitions: PublicFunctionDefinition[] = [];
+  const functionPattern =
+    /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s*RETURNS\b[\s\S]*?AS\s+(?:(?<dollar>\$[a-z0-9_]*\$)[\s\S]*?\k<dollar>|'(?:''|[^'])*')\s*;/gimu;
+  for (const match of sqlWithoutComments(sql).matchAll(functionPattern)) {
+    const definition = match[0];
+    const header = definition.slice(
+      0,
+      definition.search(/\s+AS\s+(?:\$[a-z0-9_]*\$|')/iu),
+    );
+    definitions.push({
+      name: match[1].toLowerCase(),
+      parameterDeclaration: normalizeSql(match[2]),
+      parameterTypes: parameterTypes(match[2]),
+      header: normalizeSql(header),
+    });
+  }
+  return definitions;
+}
+
+function functionGrantees(sql: string, definition: PublicFunctionDefinition): string[][] {
+  const grants: string[][] = [];
+  const grantPattern =
+    /^\s*GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s+TO\s+([^;]+);/gimu;
+  for (const match of sqlWithoutComments(sql).matchAll(grantPattern)) {
+    if (
+      match[1].toLowerCase() === definition.name &&
+      parameterTypes(match[2]) === definition.parameterTypes
+    ) {
+      grants.push(match[3].split(",").map(normalizeSql));
+    }
+  }
+  return grants;
+}
+
+function functionRevokes(sql: string, definition: PublicFunctionDefinition): string[][] {
+  const revokes: string[][] = [];
+  const revokePattern =
+    /^\s*REVOKE\s+ALL\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s+FROM\s+([^;]+);/gimu;
+  for (const match of sqlWithoutComments(sql).matchAll(revokePattern)) {
+    if (
+      match[1].toLowerCase() === definition.name &&
+      parameterTypes(match[2]) === definition.parameterTypes
+    ) {
+      revokes.push(match[3].split(",").map(normalizeSql));
+    }
+  }
+  return revokes;
+}
+
 describe("organization identity resolver command migration", () => {
   it("adds only the reviewed command migration and preserves the Prisma datamodel", () => {
     const sql = source(migrationPath);
@@ -55,38 +131,31 @@ describe("organization identity resolver command migration", () => {
 
   it("rejects the JSON command and requires the two-ID public resolver with private helpers", () => {
     const sql = source(migrationPath);
-    const command =
-      "public.resolve_organization_identity_for_raw_v1(p_workspace_id text, p_raw_record_id text)";
+    const definitions = publicFunctionDefinitions(sql);
+    const commands = definitions.filter(
+      (definition) =>
+        definition.name === "resolve_organization_identity_for_raw_v1" &&
+        definition.parameterTypes === "text, text",
+    );
 
-    expect(sql).toContain(`CREATE FUNCTION ${command}`);
-    expect(sql).not.toContain("apply_organization_identity_resolution_v1");
-    expect(sql).toContain("SET lock_timeout = '5s'");
-    expect(sql).toContain("SET statement_timeout = '60s'");
-    expect(sql).toMatch(
-      /LANGUAGE\s+plpgsql\s+SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public/iu,
+    expect(commands).toHaveLength(1);
+    const [command] = commands;
+    expect(command.parameterDeclaration).toBe(
+      "p_workspace_id text, p_raw_record_id text",
     );
-    expect(sql).toContain(
-      "REVOKE ALL ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) FROM PUBLIC",
-    );
-    expect(sql).toContain(
-      "GRANT EXECUTE ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) TO app_user",
-    );
-    expect(sql).not.toMatch(
-      /GRANT EXECUTE ON FUNCTION public\.resolve_organization_identity_for_raw_v1\(text, text\) TO (?!app_user\b)/iu,
-    );
+    expect(command.header).toContain("language plpgsql security definer");
+    expect(command.header).toContain("set search_path = pg_catalog, public");
+    expect(command.header).toContain("set lock_timeout = '5s'");
+    expect(command.header).toContain("set statement_timeout = '60s'");
+    expect(functionRevokes(sql, command)).toEqual([["public"]]);
+    expect(functionGrantees(sql, command)).toEqual([["app_user"]]);
     expect(sql).not.toMatch(
       /ALTER FUNCTION public\.[a-z0-9_]+\([^)]*\) OWNER TO (?!global\b)/iu,
     );
-    for (const match of sql.matchAll(
-      /CREATE FUNCTION public\.([a-z0-9_]+)\([^)]*\)/gu,
-    )) {
-      if (match[1] === "resolve_organization_identity_for_raw_v1") continue;
-      expect(sql).toMatch(
-        new RegExp(
-          `REVOKE ALL ON FUNCTION public\\.${match[1]}\\([^;]+ FROM PUBLIC, app_user`,
-          "u",
-        ),
-      );
+    for (const definition of definitions) {
+      if (definition === command) continue;
+      expect(functionRevokes(sql, definition)).toEqual([["public", "app_user"]]);
+      expect(functionGrantees(sql, definition)).toEqual([]);
     }
     expect(sql).not.toMatch(
       /GRANT\s+(?:INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER|ALL)[\s\S]*ON\s+(?:TABLE\s+)?(?:public\.)?(?:identity_link|organization_)/iu,

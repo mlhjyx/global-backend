@@ -43,6 +43,75 @@ function occurrences(value, pattern) {
   return [...value.matchAll(pattern)].length;
 }
 
+function normalizeSql(value) {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
+function sqlWithoutComments(sql) {
+  return sql.replace(/\/\*[\s\S]*?\*\/|--[^\r\n]*/gu, "");
+}
+
+function parameterTypes(parameters) {
+  return parameters
+    .split(",")
+    .map((parameter) =>
+      normalizeSql(parameter)
+        .replace(/^(?:in|out|inout|variadic)\s+/u, "")
+        .replace(/^[a-z_][a-z0-9_]*\s+/u, ""),
+    )
+    .join(", ");
+}
+
+function publicFunctionDefinitions(sql) {
+  const definitions = [];
+  const functionPattern =
+    /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s*RETURNS\b[\s\S]*?AS\s+(?:(?<dollar>\$[a-z0-9_]*\$)[\s\S]*?\k<dollar>|'(?:''|[^'])*')\s*;/gimu;
+  for (const match of sqlWithoutComments(sql).matchAll(functionPattern)) {
+    const definition = match[0];
+    const header = definition.slice(
+      0,
+      definition.search(/\s+AS\s+(?:\$[a-z0-9_]*\$|')/iu),
+    );
+    definitions.push({
+      name: match[1].toLowerCase(),
+      parameterDeclaration: normalizeSql(match[2]),
+      parameterTypes: parameterTypes(match[2]),
+      header: normalizeSql(header),
+    });
+  }
+  return definitions;
+}
+
+function functionGrantees(sql, definition) {
+  const grants = [];
+  const grantPattern =
+    /^\s*GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s+TO\s+([^;]+);/gimu;
+  for (const match of sqlWithoutComments(sql).matchAll(grantPattern)) {
+    if (
+      match[1].toLowerCase() === definition.name &&
+      parameterTypes(match[2]) === definition.parameterTypes
+    ) {
+      grants.push(match[3].split(",").map(normalizeSql));
+    }
+  }
+  return grants;
+}
+
+function functionRevokes(sql, definition) {
+  const revokes = [];
+  const revokePattern =
+    /^\s*REVOKE\s+ALL\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s+FROM\s+([^;]+);/gimu;
+  for (const match of sqlWithoutComments(sql).matchAll(revokePattern)) {
+    if (
+      match[1].toLowerCase() === definition.name &&
+      parameterTypes(match[2]) === definition.parameterTypes
+    ) {
+      revokes.push(match[3].split(",").map(normalizeSql));
+    }
+  }
+  return revokes;
+}
+
 describe("Organization Identity resolver command migration", () => {
   it("preserves every reviewed predecessor and the Prisma datamodel", () => {
     for (const [relativePath, expected] of frozenFiles) {
@@ -61,8 +130,6 @@ describe("Organization Identity resolver command migration", () => {
     const sql = migrationSql();
     assert.equal(occurrences(sql, /^BEGIN;\s*$/gmu), 1);
     assert.equal(occurrences(sql, /^COMMIT;\s*$/gmu), 1);
-    assert.ok(sql.includes("SET lock_timeout = '5s'"));
-    assert.ok(sql.includes("SET statement_timeout = '60s'"));
     assert.doesNotMatch(
       sql,
       /^\s*(?:ALTER|CREATE|DROP)\s+(?:TABLE|TYPE|INDEX|POLICY)\b/gimu,
@@ -71,30 +138,31 @@ describe("Organization Identity resolver command migration", () => {
 
   it("rejects JSON command residue and exposes only the two-ID app_user command", () => {
     const sql = migrationSql();
-    const command =
-      "public.resolve_organization_identity_for_raw_v1(p_workspace_id text, p_raw_record_id text)";
-
-    assert.ok(sql.includes(`CREATE FUNCTION ${command}`));
-    assert.ok(!sql.includes("apply_organization_identity_resolution_v1"));
-    assert.doesNotMatch(
-      sql,
-      /resolve_organization_identity_for_raw_v1\(jsonb\)/u,
+    const definitions = publicFunctionDefinitions(sql);
+    const commands = definitions.filter(
+      (definition) =>
+        definition.name === "resolve_organization_identity_for_raw_v1" &&
+        definition.parameterTypes === "text, text",
     );
-    assert.match(sql, /SECURITY DEFINER/u);
-    assert.match(sql, /SET search_path = pg_catalog, public/u);
-    assert.ok(
-      sql.includes(
-        "REVOKE ALL ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) FROM PUBLIC",
-      ),
+    assert.equal(commands.length, 1);
+    const [command] = commands;
+    assert.equal(
+      command.parameterDeclaration,
+      "p_workspace_id text, p_raw_record_id text",
     );
-    assert.ok(
-      sql.includes(
-        "GRANT EXECUTE ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) TO app_user",
-      ),
-    );
-    assert.doesNotMatch(
-      sql,
-      /GRANT EXECUTE ON FUNCTION public\.resolve_organization_identity_for_raw_v1\(text, text\) TO (?!app_user\b)/u,
+    assert.match(command.header, /language plpgsql security definer/u);
+    assert.match(command.header, /set search_path = pg_catalog, public/u);
+    assert.match(command.header, /set lock_timeout = '5s'/u);
+    assert.match(command.header, /set statement_timeout = '60s'/u);
+    assert.deepEqual(functionRevokes(sql, command), [["public"]]);
+    assert.deepEqual(functionGrantees(sql, command), [["app_user"]]);
+    assert.equal(
+      definitions.filter(
+        (definition) =>
+          definition.name === "apply_organization_identity_resolution_v1" &&
+          definition.parameterTypes === "jsonb",
+      ).length,
+      0,
     );
     assert.doesNotMatch(
       sql,
@@ -122,27 +190,23 @@ describe("Organization Identity resolver command migration", () => {
 
   it("fails closed on unexpected public function, owner, or ACL residue", () => {
     const sql = migrationSql();
-    for (const match of sql.matchAll(
-      /CREATE FUNCTION public\.([a-z0-9_]+)\(/gu,
-    )) {
-      if (match[1] === "resolve_organization_identity_for_raw_v1") continue;
-      assert.match(
-        sql,
-        new RegExp(
-          `REVOKE ALL ON FUNCTION public\\.${match[1]}\\([^;]+ FROM PUBLIC, app_user`,
-          "u",
-        ),
-      );
-      assert.doesNotMatch(
-        sql,
-        new RegExp(
-          `GRANT EXECUTE ON FUNCTION public\\.${match[1]}\\([^;]+ TO (?:PUBLIC|app_user)`,
-          "u",
-        ),
-      );
+    const definitions = publicFunctionDefinitions(sql);
+    const commands = definitions.filter(
+      (definition) =>
+        definition.name === "resolve_organization_identity_for_raw_v1" &&
+        definition.parameterTypes === "text, text",
+    );
+    assert.equal(commands.length, 1);
+    const [command] = commands;
+    for (const definition of definitions) {
+      if (definition === command) continue;
+      assert.deepEqual(functionRevokes(sql, definition), [
+        ["public", "app_user"],
+      ]);
+      assert.deepEqual(functionGrantees(sql, definition), []);
     }
     assert.doesNotMatch(
-      sql,
+      sqlWithoutComments(sql),
       /ALTER FUNCTION public\.[a-z0-9_]+\([^)]*\) OWNER TO (?!global\b)/u,
     );
   });
