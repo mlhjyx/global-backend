@@ -1674,13 +1674,26 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
 
   it("resumes a governed terminal-only batch through query and run finalization without BudgetStore", async () => {
     const queryKey = "a".repeat(64);
-    const emptySuppressionSha = suppressionSnapshotDigest([]);
+    const suppressionRows = [{
+      id: "60000000-0000-4000-8000-000000000099",
+      type: "domain", value: "canonical-reused-blocked.example",
+    }];
+    const suppressionSha = suppressionSnapshotDigest(suppressionRows);
     let inspection = 0;
     const attestAuthorized = vi.fn(async () => {
       throw new Error("governed C-TX must not consult BudgetStore");
     });
     const tx = {
-      suppressionRecord: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => suppressionRows) },
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: "86000000-0000-4000-8000-000000000007",
+          dedupeKey: "id:registry:reused1", name: "Canonical Reused GmbH",
+          domain: "canonical-reused-blocked.example", country: "DE", region: null,
+          attributes: {}, status: "NEW", version: 1, updatedAt: new Date(),
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
       $queryRaw: vi.fn(async (query: unknown) => {
         const sql = materializationSqlText(query);
         if (sql.includes("admit_discovery_company_materialization_v1")) {
@@ -1721,7 +1734,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{
             status: "APPLIED",
             fence_id: "70000000-0000-4000-8000-000000000007",
-            snapshot_sha256: emptySuppressionSha,
+            snapshot_sha256: suppressionSha,
             facts: [{
               qItem: {
                 queryItemId: "71000000-0000-4000-8000-000000000007",
@@ -1739,8 +1752,8 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
                 rawStatus: "REJECTED",
                 rawExpiredAt: null,
                 restrictedDispositionId: null,
-                suppressionSnapshotCount: 0,
-                suppressionSnapshotSha256: emptySuppressionSha,
+                suppressionSnapshotCount: 1,
+                suppressionSnapshotSha256: suppressionSha,
                 product: null,
               },
               exactExistingOutcome: null,
@@ -1760,8 +1773,8 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               },
               lockedFacts: {
                 rawStatus: "EXPIRED", rawExpiredAt: "2026-08-30T00:00:00.000Z",
-                restrictedDispositionId: null, suppressionSnapshotCount: 0,
-                suppressionSnapshotSha256: emptySuppressionSha, product: null,
+                restrictedDispositionId: null, suppressionSnapshotCount: 1,
+                suppressionSnapshotSha256: suppressionSha, product: null,
               },
               exactExistingOutcome: null,
               reusableIdentity: {
@@ -1800,8 +1813,9 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 0, suppressed: 0 }];
+          return [{ status: "APPLIED", companies: 0, suppressed: 1 }];
         }
+        if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed C-TX query: ${sql}`);
       }),
     };
@@ -1816,7 +1830,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
 
     await expect(
       activities.canonicalizeRun(discoveryArgs("run-governed-terminal", {})),
-    ).resolves.toEqual({ companies: 0, suppressed: 0 });
+    ).resolves.toEqual({ companies: 0, suppressed: 1 });
     expect(attestAuthorized).not.toHaveBeenCalled();
     expect(inspection).toBe(3);
     const append = tx.$queryRaw.mock.calls.find(([query]) =>
@@ -1824,7 +1838,16 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const appendValues = Object.getOwnPropertyDescriptor(append?.[0] as object, "values")?.value;
     const command = JSON.parse(String(appendValues?.[0]));
     expect(command.items.map((item: Record<string, unknown>) => item.mutationClass))
-      .toEqual([null, "REUSED"]);
+      .toEqual([null, null]);
+    expect(command.items[1]).toMatchObject({
+      outcome: "SUPPRESSED",
+      suppressionRecordIds: [suppressionRows[0]!.id],
+      mutationClass: null,
+    });
+    expect(tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+      where: { id: "86000000-0000-4000-8000-000000000007", status: { not: "SUPPRESSED" } },
+      data: { status: "SUPPRESSED", version: { increment: 1 } },
+    });
   });
 
   it("returns the exact governed run receipt on response-loss replay", async () => {
@@ -2016,12 +2039,19 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     suppressionRows[129] = {
       ...suppressionRows[129]!, type: "company_name", value: "Mu\u0308ller GmbH",
     };
+    suppressionRows[128] = { ...suppressionRows[128]!, value: "canonical-blocked.example" };
     const suppressionSha = suppressionSnapshotDigest(suppressionRows);
+    const createdLinks = new Map<string, { id: string; canonicalId: string; matchRule: string; confidence: number }>();
     const canonicalState: Record<string, unknown> = {
       id: canonicalCompanyId, name: "Existing GmbH", dedupeKey: "id:registry:acme-1",
       domain: null, country: null, region: null, industry: null,
       employeeCount: null, revenueUsd: null, attributes: {}, status: "NEW",
       version: 1, updatedAt: new Date("2026-08-30T00:00:00.000Z"),
+    };
+    const canonicalSuppressedState: Record<string, unknown> = {
+      ...canonicalState, id: "78000000-0000-4000-8000-000000000007",
+      name: "Canonical Blocked GmbH", dedupeKey: "id:registry:canonical1",
+      domain: "canonical-blocked.example", status: "NEW",
     };
     const governedFact = (index: number, product: Record<string, unknown>) => ({
       qItem: {
@@ -2050,7 +2080,13 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         ? suppressionRows.filter((row) => !args.where?.id?.gt || row.id > args.where.id.gt).slice(0, 128)
         : suppressionRows) },
       canonicalCompany: {
-        findUnique: vi.fn(async () => ({ ...canonicalState })),
+        findUnique: vi.fn(async (args: { where: {
+          id?: string; workspaceId_dedupeKey?: { dedupeKey: string };
+        } }) => {
+          const key = args.where.workspaceId_dedupeKey?.dedupeKey;
+          return key === "id:registry:canonical1" || args.where.id === canonicalSuppressedState.id
+            ? { ...canonicalSuppressedState } : { ...canonicalState };
+        }),
         upsert: vi.fn(async ({ update }: { update: Record<string, unknown> }) => {
           for (const scalar of ["domain", "country", "region", "industry", "employeeCount", "revenueUsd"]) {
             const value = update[scalar] as { set?: unknown } | undefined;
@@ -2060,10 +2096,17 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           canonicalState.version = Number(canonicalState.version) + 1;
           return { id: canonicalCompanyId };
         }),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       identityLink: {
-        findFirst: vi.fn(async () => null),
-        create: vi.fn(async () => ({ id: identityLinkId })),
+        findFirst: vi.fn(async ({ where }: { where: { rawRecordId: string } }) =>
+          createdLinks.get(where.rawRecordId) ?? null),
+        create: vi.fn(async ({ data }: { data: { rawRecordId: string; canonicalId: string;
+          matchRule: string; confidence: number } }) => {
+          const link = { id: identityLinkId, canonicalId: data.canonicalId,
+            matchRule: data.matchRule, confidence: data.confidence };
+          createdLinks.set(data.rawRecordId, link); return { id: identityLinkId };
+        }),
       },
       fieldEvidence: { create: vi.fn(async () => ({})) },
       $queryRaw: vi.fn(async (query: unknown) => {
@@ -2099,11 +2142,19 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               governedFact(3, { name: "Broken GmbH", identifier: { scheme: 3, value: "x" } }),
               governedFact(4, { name: "IDN GmbH", domain: "xn--bcher-kva.example" }),
               governedFact(5, { name: "Müller GmbH" }),
-              governedFact(6, {
+              (() => {
+                const duplicate = governedFact(6, {
                 name: "Conflicting GmbH", domain: "wrong.example", country: "US",
                 region: "CA", industry: "wrong", employeeCount: 99, revenueUsd: 9999,
                 attributes: { products: ["pump"] },
                 identifier: { scheme: "registry", value: "acme-1" },
+                });
+                duplicate.qItem.rawRecordId = "f9000000-0000-4000-8000-000000000007";
+                return duplicate;
+              })(),
+              governedFact(7, {
+                name: "Unmatched Source Alias",
+                identifier: { scheme: "registry", value: "canonical-1" },
               }),
             ].reverse(),
           }];
@@ -2119,7 +2170,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 1, suppressed: 2 }];
+          return [{ status: "APPLIED", companies: 1, suppressed: 3 }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed canonical query: ${sql}`);
@@ -2133,10 +2184,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
 
     await expect(activities.canonicalizeRun(
       discoveryArgs("run-governed-canonical", {}),
-    )).resolves.toEqual({ companies: 1, suppressed: 2 });
+    )).resolves.toEqual({ companies: 1, suppressed: 3 });
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
-    expect(tx.identityLink.create).toHaveBeenCalledTimes(2);
-    expect(tx.fieldEvidence.create).toHaveBeenCalledTimes(16);
+    expect(tx.identityLink.create).toHaveBeenCalledOnce();
+    expect(tx.fieldEvidence.create).toHaveBeenCalledTimes(8);
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(canonicalState).toMatchObject({
       domain: "acme.example", country: "DE", region: "BE", industry: "industrial",
@@ -2159,7 +2210,12 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(suppressed.map((outcome) => outcome.suppressionRecordIds)).toEqual([
       [suppressionRows[7]!.id],
       [suppressionRows[129]!.id],
+      [suppressionRows[128]!.id],
     ]);
+    expect(tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+      where: { id: canonicalSuppressedState.id, status: { not: "SUPPRESSED" } },
+      data: { status: "SUPPRESSED", version: { increment: 1 } },
+    });
     const canonicalized = (appendCommand?.items as Record<string, unknown>[])
       .filter((outcome) => outcome.outcome === "CANONICALIZED");
     expect(canonicalized.map((outcome) => outcome.mutationClass)).toEqual(["UPDATED", "LINKED"]);

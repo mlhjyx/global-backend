@@ -8,6 +8,10 @@ const schemaMigrationUrl = new URL(
   repositoryRoot,
 );
 const prismaSchemaUrl = new URL('packages/db/prisma/schema.prisma', repositoryRoot);
+const discoveryServiceUrl = new URL(
+  'apps/api/src/discovery/discovery.service.ts',
+  repositoryRoot,
+);
 const C_TX_CONTRACT_SHA256 =
   '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe';
 
@@ -252,6 +256,16 @@ describe('Discovery company materialization C-TX inventory and schema migration'
     ]) expect(schema).toContain(`model ${model}`);
     expect(schema).toContain(
       '@@unique([workspaceId, entityType, entityId, field, rawRecordId], map: "field_evidence_raw_field_unique")',
+    );
+  });
+
+  it('requires every product DiscoveryRun creator to write the explicit v1 marker', async () => {
+    const source = await readRequired(discoveryServiceUrl, 'DISCOVERY_RUN_CREATOR_MISSING');
+    expect(source).toContain(
+      'materializationContractVersion: DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION',
+    );
+    expect(source).toContain(
+      "import { DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION } from './discovery-company-materialization-ctx';",
     );
   });
 

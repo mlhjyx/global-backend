@@ -43,6 +43,7 @@ import {
 } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION } from './discovery-company-materialization-ctx';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
@@ -120,7 +121,13 @@ export class DiscoveryService {
         });
       }
       const run = await tx.discoveryRun.create({
-        data: { id: runId, workspaceId: ctx.workspaceId, planId, icpId: plan.icpId },
+        data: {
+          id: runId,
+          workspaceId: ctx.workspaceId,
+          planId,
+          icpId: plan.icpId,
+          materializationContractVersion: DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION,
+        },
       });
       await tx.outboxEvent.create({
         data: {

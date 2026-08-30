@@ -3,17 +3,7 @@ import { Prisma } from '@prisma/client';
 import { ApplicationFailure, heartbeat } from '@temporalio/activity';
 import type { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
-import {
-  assertProductDiscoveryProvenance,
-  resolveEvidenceLicense,
-} from '../discovery/evidence-license';
-import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
-import {
-  canonicalCompanyAttributesEqual,
-  mergeCanonicalCompanyAttributes,
-  sanitizeCanonicalCompanyAttributes,
-  sanitizeStoredCompanyFieldEvidence,
-} from '../discovery/canonical-company-attributes';
+import type { PrecomputedCompanySuppressionDecision } from '../discovery/company-suppression-gate';
 import {
   buildDiscoveryCompanyMaterializationBatchPlanV1,
   compareDiscoveryCompanyMaterializationItems,
@@ -23,6 +13,7 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
+import { materializeDiscoveryCompanyCanonicalCandidate } from './discovery-company-materialization-canonical';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const STABLE_FAILURES = new Set([
@@ -302,6 +293,9 @@ const LOCKED_FACT_KEYS = [
 const BUILDER_FACT_KEYS = [
   'rawStatus', 'rawExpiredAt', 'restrictedDispositionId', 'suppressionRecordIds', 'product',
 ] as const;
+const REUSABLE_IDENTITY_KEYS = ['canonicalCompanyId', 'identityLinkId', 'identityCanonicalType',
+  'canonicalGovernedSubjectId', 'cRelationId', 'cRelationKey', 'matchRule', 'confidence',
+  'mutationClass', 'evidenceCount', 'evidenceManifestSha256'] as const;
 function productRecord(value: unknown): Record<string, unknown> | null {
   const snapshot = frozenJson(value);
   return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
@@ -311,237 +305,7 @@ function productRecord(value: unknown): Record<string, unknown> | null {
 function optionalText(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
-async function readEvidenceManifest(
-  transaction: Transaction,
-  workspaceId: string,
-  canonicalCompanyId: string,
-  rawRecordId: string,
-): Promise<Readonly<{ count: number; sha256: string }>> {
-  const rows = await transaction.$queryRaw<unknown[]>(Prisma.sql`
-    SELECT count(*)::integer AS evidence_count,
-      encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_array(
-        evidence.field,evidence.id,encode(digest(evidence.value::text,'sha256'),'hex'),
-        evidence.provider_key,evidence.license,
-        encode(digest(coalesce(evidence.allowed_actions,'null'::jsonb)::text,'sha256'),'hex')
-        ORDER BY evidence.field,evidence.id),'[]'::jsonb)::text,'UTF8'),'sha256'),'hex')
-        AS evidence_manifest_sha256
-    FROM field_evidence evidence
-    WHERE evidence.workspace_id=${workspaceId}::uuid
-      AND evidence.entity_type='company'
-      AND evidence.entity_id=${canonicalCompanyId}::uuid
-      AND evidence.raw_record_id=${rawRecordId}::uuid
-  `);
-  const row = oneRow(rows, ['evidence_count', 'evidence_manifest_sha256']);
-  return Object.freeze({
-    count: count(field(row, 'evidence_count'), 1_000_000),
-    sha256: sha256(field(row, 'evidence_manifest_sha256')),
-  });
-}
-async function materializeCanonicalCandidate(
-  transaction: Transaction,
-  input: DiscoveryCompanyMaterializationInput,
-  candidate: Data,
-): Promise<Data> {
-  const qItem = record(field(candidate, 'qItem'), Q_ITEM_KEYS);
-  const lockedFacts = record(field(candidate, 'lockedFacts'), BUILDER_FACT_KEYS);
-  if (
-    field(candidate, 'exactExistingOutcome') !== null ||
-    field(qItem, 'qIngestStatus') !== 'ACCEPTED' ||
-    field(lockedFacts, 'restrictedDispositionId') !== null ||
-    (Array.isArray(field(lockedFacts, 'suppressionRecordIds')) &&
-      (field(lockedFacts, 'suppressionRecordIds') as unknown[]).length > 0) ||
-    field(candidate, 'reusableIdentity') !== null ||
-    field(lockedFacts, 'rawStatus') === 'EXPIRED'
-  ) {
-    return candidate;
-  }
-  const product = productRecord(field(lockedFacts, 'product'));
-  const name = product ? optionalText(product.name) : undefined;
-  if (!product || !name) {
-    return Object.freeze({
-      ...candidate,
-      companyParse: Object.freeze({
-        status: 'INVALID',
-        reasonCode: 'MISSING_NAME',
-      }),
-    });
-  }
-  const providerKey = text(field(qItem, 'providerKey'), /^[a-z][a-z0-9._-]{0,127}$/u);
-  try {
-    assertProductDiscoveryProvenance({ providerKey, license: product.license });
-  } catch {
-    return Object.freeze({ ...candidate, companyParse: Object.freeze({
-      status: 'INVALID', reasonCode: 'NON_PRODUCT_PROVENANCE',
-    }) });
-  }
-  const domain = optionalText(product.domain);
-  const country = optionalText(product.country);
-  const identifierValue = product.identifier;
-  const identifier = identifierValue && typeof identifierValue === 'object' && !Array.isArray(identifierValue)
-    ? identifierValue as { scheme?: unknown; value?: unknown }
-    : undefined;
-  if (
-    identifier &&
-    (typeof identifier.scheme !== 'string' || typeof identifier.value !== 'string')
-  ) {
-    return Object.freeze({
-      ...candidate,
-      companyParse: Object.freeze({ status: 'INVALID', reasonCode: 'COMPANY_IDENTITY_INVALID' }),
-    });
-  }
-  const identity = companyIdentity({
-    name,
-    domain,
-    country,
-    identifier: identifier
-      ? { scheme: identifier.scheme as string, value: identifier.value as string }
-      : undefined,
-  });
-  const materialization = await loadMaterializableCompanyState(
-    transaction,
-    input.workspaceId,
-    identity.dedupeKey,
-    { name, domain },
-  );
-  if (!materialization.allowed) {
-    fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD');
-  }
-  const rawRecordId = uuid(field(qItem, 'rawRecordId'));
-  const existingLink = await transaction.identityLink.findFirst({
-    where: {
-      workspaceId: input.workspaceId,
-      canonicalType: 'company',
-      rawRecordId,
-    },
-    select: { id: true, canonicalId: true },
-  });
-  if (existingLink) {
-    fail('DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT');
-  }
-  const attributes = product.attributes && typeof product.attributes === 'object' && !Array.isArray(product.attributes)
-    ? product.attributes as Record<string, unknown>
-    : undefined;
-  const currentAttributes = sanitizeCanonicalCompanyAttributes(attributes);
-  const prior = materialization.prior;
-  const priorScalars = prior ? await transaction.canonicalCompany.findUnique({
-    where: { id: prior.id },
-    select: {
-      id: true, domain: true, country: true, region: true, industry: true,
-      employeeCount: true, revenueUsd: true,
-    },
-  }) : null;
-  if (prior && (!priorScalars || priorScalars.id !== prior.id))
-    fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD');
-  const canonicalAttributes = mergeCanonicalCompanyAttributes(prior?.attributes, currentAttributes);
-  const attributesChanged = prior
-    ? materialization.attributesRequireRepair ||
-      !canonicalCompanyAttributesEqual(canonicalAttributes, prior.attributes)
-    : true;
-  const region = optionalText(product.region); const industry = optionalText(product.industry);
-  const employeeCount = Number.isSafeInteger(product.employeeCount) ? Number(product.employeeCount) : undefined;
-  const revenueUsd = typeof product.revenueUsd === 'number' && Number.isFinite(product.revenueUsd) ? product.revenueUsd : undefined;
-  const domainChanged = Boolean(priorScalars && priorScalars.domain === null && domain),
-    countryChanged = Boolean(priorScalars && priorScalars.country === null && country),
-    regionChanged = Boolean(priorScalars && priorScalars.region === null && region),
-    industryChanged = Boolean(priorScalars && priorScalars.industry === null && industry);
-  const employeeCountChanged = Boolean(priorScalars && priorScalars.employeeCount === null && employeeCount !== undefined);
-  const revenueUsdChanged = Boolean(priorScalars && priorScalars.revenueUsd === null && revenueUsd !== undefined);
-  const scalarChanged = domainChanged || countryChanged || regionChanged || industryChanged ||
-    employeeCountChanged || revenueUsdChanged;
-  const canonicalChanged = !prior || attributesChanged || scalarChanged;
-  const canonical = canonicalChanged
-    ? await transaction.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId: input.workspaceId, dedupeKey: identity.dedupeKey } },
-        update: {
-          ...(domainChanged ? { domain: { set: domain } } : {}),
-          ...(countryChanged ? { country: { set: country } } : {}),
-          ...(regionChanged ? { region: { set: region } } : {}),
-          ...(industryChanged ? { industry: { set: industry } } : {}),
-          ...(employeeCountChanged ? { employeeCount: { set: employeeCount } } : {}),
-          ...(revenueUsdChanged ? { revenueUsd: { set: revenueUsd } } : {}),
-          ...(attributesChanged ? { attributes: canonicalAttributes as Prisma.InputJsonValue } : {}),
-          version: { increment: 1 },
-        },
-        create: {
-          workspaceId: input.workspaceId,
-          name,
-          domain: domain ?? null,
-          country: country ?? null,
-          region: region ?? null,
-          industry: industry ?? null,
-          employeeCount: employeeCount ?? null,
-          revenueUsd: revenueUsd ?? null,
-          attributes: canonicalAttributes as Prisma.InputJsonValue,
-          status: 'NEW',
-          dedupeKey: identity.dedupeKey,
-        },
-        select: { id: true },
-      })
-    : { id: prior!.id };
-  let identityLink: { id: string };
-  try {
-    identityLink = await transaction.identityLink.create({
-      data: {
-        workspaceId: input.workspaceId,
-        canonicalType: 'company',
-        canonicalId: canonical.id,
-        rawRecordId,
-        matchRule: identity.matchRule,
-        confidence: identity.matchRule === 'name_country' ? 0.8 : 1,
-      },
-      select: { id: true },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      fail('DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT');
-    }
-    throw error;
-  }
-  const evidenceFields: readonly [string, unknown][] = [
-    ['name', name], ['domain', domain], ['country', country], ['region', region],
-    ['industry', product.industry], ['employee_count', product.employeeCount],
-    ['revenue_usd', product.revenueUsd], ['attributes', currentAttributes],
-  ];
-  for (const [evidenceField, value] of evidenceFields) {
-    if (value === undefined || value === null) continue;
-    const governedValue = sanitizeStoredCompanyFieldEvidence(evidenceField, value);
-    if (governedValue === undefined) continue;
-    await transaction.fieldEvidence.create({
-      data: {
-        workspaceId: input.workspaceId,
-        entityType: 'company',
-        entityId: canonical.id,
-        field: evidenceField,
-        value: governedValue as Prisma.InputJsonValue,
-        providerKey,
-        rawRecordId,
-        license: resolveEvidenceLicense(optionalText(product.license), providerKey),
-        allowedActions: ['display', 'match'] as Prisma.InputJsonValue,
-      },
-    });
-  }
-  const manifest = await readEvidenceManifest(
-    transaction, input.workspaceId, canonical.id, rawRecordId,
-  );
-  return Object.freeze({
-    ...candidate,
-    companyParse: Object.freeze({ status: 'VALID', dedupeKey: identity.dedupeKey }),
-    canonicalWrite: Object.freeze({
-      canonicalCompanyId: canonical.id,
-      identityLinkId: identityLink.id,
-      identityCanonicalType: 'company',
-      canonicalGovernedSubjectId: null,
-      cRelationId: null,
-      cRelationKey: `discovery.canonical_company:${count(field(qItem, 'recordIndex'), 999_999)}`,
-      matchRule: identity.matchRule,
-      confidence: identity.matchRule === 'name_country' ? 0.8 : 1,
-      mutationClass: prior ? (canonicalChanged ? 'UPDATED' : 'LINKED') : 'CREATED',
-      evidenceCount: manifest.count,
-      evidenceManifestSha256: manifest.sha256,
-    }),
-  });
-}
-async function materializeLockedDiscoveryCompanyBatch(
+ async function materializeLockedDiscoveryCompanyBatch(
   transaction: Transaction,
   input: DiscoveryCompanyMaterializationInput,
   admission: Admission,
@@ -561,7 +325,7 @@ async function materializeLockedDiscoveryCompanyBatch(
     });
   let snapshotCount: number | null = null;
   let snapshotSha256: string | null = null;
-  const companyInputs: Array<{ key: string; name: string; domain?: string }> = [];
+  const sourceInputs: Array<{ key: string; name: string; domain?: string }> = [];
   for (const candidate of rawCandidates) {
     const locked = record(field(candidate, 'lockedFacts'), LOCKED_FACT_KEYS);
     const candidateCount = count(field(locked, 'suppressionSnapshotCount'));
@@ -572,31 +336,32 @@ async function materializeLockedDiscoveryCompanyBatch(
     snapshotCount = candidateCount; snapshotSha256 = candidateSha;
     const product = productRecord(field(locked, 'product'));
     const name = product ? optionalText(product.name) : undefined;
-    if (name) companyInputs.push({ key: String(field(record(field(candidate, 'qItem'), Q_ITEM_KEYS), 'queryItemId')),
+    if (name) sourceInputs.push({ key: `source:${String(field(record(field(candidate, 'qItem'), Q_ITEM_KEYS), 'queryItemId'))}`,
       name, domain: optionalText(product?.domain) });
   }
   if (snapshotCount === null || snapshotSha256 === null || snapshotSha256 !== facts.snapshotSha256)
     fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD');
-  const matches = await deps.resolveSuppressionMatches(
-    transaction, { workspaceId: input.workspaceId, count: snapshotCount, sha256: snapshotSha256 }, companyInputs,
-  );
-  const candidates = rawCandidates.map((candidate) => {
-    const locked = record(field(candidate, 'lockedFacts'), LOCKED_FACT_KEYS);
-    const key = String(field(record(field(candidate, 'qItem'), Q_ITEM_KEYS), 'queryItemId'));
-    const suppressionRecordIds = matches.get(key) ?? [];
-    return Object.freeze({ ...candidate, lockedFacts: Object.freeze({
-      rawStatus: field(locked, 'rawStatus'), rawExpiredAt: field(locked, 'rawExpiredAt'),
-      restrictedDispositionId: field(locked, 'restrictedDispositionId'),
-      suppressionRecordIds: Object.freeze([...suppressionRecordIds]), product: field(locked, 'product'),
-    }) });
-  });
   const identityKeys = new Set<string>();
-  for (const candidate of candidates) {
+  const identities = new Map<string, Readonly<{ dedupeKey: string; reusableCanonicalId?: string }>>();
+  for (const candidate of rawCandidates) {
     const qItem = record(field(candidate, 'qItem'), Q_ITEM_KEYS);
-    const locked = record(field(candidate, 'lockedFacts'), BUILDER_FACT_KEYS);
+    const locked = record(field(candidate, 'lockedFacts'), LOCKED_FACT_KEYS);
+    const key = String(field(qItem, 'queryItemId'));
+    const reusableValue = field(candidate, 'reusableIdentity');
+    if (reusableValue !== null) {
+      const reusable = record(reusableValue, REUSABLE_IDENTITY_KEYS);
+      const canonicalCompanyId = uuid(field(reusable, 'canonicalCompanyId'));
+      const canonical = await transaction.canonicalCompany.findUnique({
+        where: { id: canonicalCompanyId },
+        select: { id: true, dedupeKey: true, name: true, domain: true, status: true },
+      });
+      if (!canonical || canonical.id !== canonicalCompanyId)
+        fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD');
+      identities.set(key, { dedupeKey: canonical.dedupeKey, reusableCanonicalId: canonicalCompanyId });
+      identityKeys.add(canonical.dedupeKey); continue;
+    }
     if (field(qItem, 'qIngestStatus') !== 'ACCEPTED' ||
         field(candidate, 'exactExistingOutcome') !== null ||
-        field(candidate, 'reusableIdentity') !== null ||
         field(locked, 'restrictedDispositionId') !== null ||
         field(locked, 'rawStatus') !== 'ACCEPTED') continue;
     const product = productRecord(field(locked, 'product'));
@@ -606,16 +371,64 @@ async function materializeLockedDiscoveryCompanyBatch(
     if (rawIdentifier && (typeof rawIdentifier !== 'object' || Array.isArray(rawIdentifier))) continue;
     const identifier = rawIdentifier as { scheme?: unknown; value?: unknown } | undefined;
     if (identifier && (typeof identifier.scheme !== 'string' || typeof identifier.value !== 'string')) continue;
-    identityKeys.add(companyIdentity({ name, domain: optionalText(product.domain),
-      country: optionalText(product.country), identifier: identifier as { scheme: string; value: string } }).dedupeKey);
+    const identity = companyIdentity({ name, domain: optionalText(product.domain),
+      country: optionalText(product.country), identifier: identifier as { scheme: string; value: string } });
+    identities.set(key, identity); identityKeys.add(identity.dedupeKey);
   }
   for (const identityKey of [...identityKeys].sort()) {
     await transaction.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
       ${`discovery-company-identity:${input.workspaceId}:${identityKey}`},0))`);
   }
+  const canonicalByIdentity = new Map<string, Readonly<{
+    id: string; dedupeKey: string; name: string; domain: string | null; status: string }> | null>();
+  for (const identityKey of [...identityKeys].sort()) {
+    canonicalByIdentity.set(identityKey, await transaction.canonicalCompany.findUnique({
+      where: { workspaceId_dedupeKey: { workspaceId: input.workspaceId, dedupeKey: identityKey } },
+      select: { id: true, dedupeKey: true, name: true, domain: true, status: true },
+    }));
+  }
+  for (const identity of identities.values()) {
+    const canonical = canonicalByIdentity.get(identity.dedupeKey);
+    if (identity.reusableCanonicalId && canonical?.id !== identity.reusableCanonicalId)
+      fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD');
+  }
+  const canonicalInputs = [...identities].flatMap(([key, identity]) => {
+    const canonical = canonicalByIdentity.get(identity.dedupeKey);
+    return canonical ? [{ key: `canonical:${key}`, name: canonical.name, domain: canonical.domain ?? undefined }] : [];
+  });
+  const matches = await deps.resolveSuppressionMatches(transaction,
+    { workspaceId: input.workspaceId, count: snapshotCount, sha256: snapshotSha256 }, [...sourceInputs, ...canonicalInputs]);
+  const decisions = new Map<string, PrecomputedCompanySuppressionDecision>();
+  const candidates = rawCandidates.map((candidate) => {
+    const locked = record(field(candidate, 'lockedFacts'), LOCKED_FACT_KEYS);
+    const key = String(field(record(field(candidate, 'qItem'), Q_ITEM_KEYS), 'queryItemId'));
+    const identity = identities.get(key); const canonical = identity ? canonicalByIdentity.get(identity.dedupeKey) : null;
+    const sourceIds = matches.get(`source:${key}`) ?? [], canonicalIds = matches.get(`canonical:${key}`) ?? [];
+    if (identity) decisions.set(key, Object.freeze({ canonicalCompanyId: canonical?.id ?? null,
+      sourceMatched: sourceIds.length > 0, canonicalMatched: canonicalIds.length > 0,
+      sourceSuppressionIds: sourceIds, canonicalSuppressionIds: canonicalIds }));
+    const suppressionRecordIds = [...new Set([...sourceIds, ...canonicalIds])].sort();
+    return Object.freeze({ ...candidate, lockedFacts: Object.freeze({
+      rawStatus: field(locked, 'rawStatus'), rawExpiredAt: field(locked, 'rawExpiredAt'),
+      restrictedDispositionId: field(locked, 'restrictedDispositionId'),
+      suppressionRecordIds: Object.freeze(suppressionRecordIds), product: field(locked, 'product') }) });
+  });
   const enriched: Data[] = [];
   for (const candidate of candidates) {
-    enriched.push(await materializeCanonicalCandidate(transaction, input, candidate));
+    const key = String(field(record(field(candidate, 'qItem'), Q_ITEM_KEYS), 'queryItemId'));
+    let decision = decisions.get(key);
+    const identity = identities.get(key);
+    if (decision && decision.canonicalCompanyId === null && identity) {
+      const current = await transaction.canonicalCompany.findUnique({
+        where: { workspaceId_dedupeKey: { workspaceId: input.workspaceId, dedupeKey: identity.dedupeKey } },
+        select: { id: true },
+      });
+      if (current) decision = Object.freeze({ ...decision, canonicalCompanyId: current.id });
+    }
+    const canonical = identity ? canonicalByIdentity.get(identity.dedupeKey) ?? undefined : undefined;
+    enriched.push(await materializeDiscoveryCompanyCanonicalCandidate(
+      transaction, input.workspaceId, candidate, decision, canonical,
+    ));
   }
   const plan = buildDiscoveryCompanyMaterializationBatchPlanV1({
     schemaVersion: 'discovery-company-materialization-builder-input/v1',
