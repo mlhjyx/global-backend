@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { DurableExecutionReceipt } from './durable-execution-receipt';
 import {
@@ -100,6 +101,12 @@ function ackRecord(domainAggregateId = 'taxonomy:cpv:pump', revision = '0') {
 }
 
 describe('DomainAckService', () => {
+  it('exposes partitioned company and auxiliary facts for governed discovery lineage', () => {
+    const source = readFileSync(new URL('./domain-ack-consumer-bindings.ts', import.meta.url), 'utf8');
+    expect(source).toContain('applyPartitionedDomainAckConsumerTransactions');
+    expect(source).toMatch(/companyFacts[\s\S]{0,300}auxiliaryFacts/u);
+    expect(source).toMatch(/status:\s*'APPLIED'\s*\|\s*'REPLAYED'/u);
+  });
   it('applies once and replays the same ack without running the consumer twice', async () => {
     const service = new DomainAckService(new InMemoryDomainAckRepository());
     const apply = vi.fn(async () => ({ code: 'CPV-123' }));

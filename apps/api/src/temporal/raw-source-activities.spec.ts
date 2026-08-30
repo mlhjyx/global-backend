@@ -1,9 +1,21 @@
 // Test intent source-mined from tugjvnh@70885cdb; rewritten around least-privilege DB functions.
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
 
 describe("Raw Source retention activities", () => {
+  it("binds G2 company identity and all three governed providers to RawSourceRecord", () => {
+    const activity = readFileSync(new URL('./discovery.activities.ts', import.meta.url), 'utf8');
+    const bindings = readFileSync(new URL('../durable-results/domain-ack-consumer-bindings.ts', import.meta.url), 'utf8');
+    expect(activity).toContain('discoveryCompanyDomainAckIdentity');
+    for (const producer of ['tradefair.algolia', 'discovery.extract_company', 'discovery.extract_list']) {
+      const escaped = producer.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      expect(bindings).toMatch(new RegExp(
+        `producerId: '${escaped}'[\\s\\S]{0,220}domainAggregateType: 'RawSourceRecord'`, 'u',
+      ));
+    }
+  });
   it("lists only bounded workspace ids through the aggregate DB function", async () => {
     const query = vi.fn(async () => [
       { workspace_id: "11111111-1111-4111-8111-111111111111" },
