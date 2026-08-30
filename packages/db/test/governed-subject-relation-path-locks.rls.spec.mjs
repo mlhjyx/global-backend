@@ -313,6 +313,24 @@ describe("governed relation exact path lock ordering", () => {
     } finally { await Promise.all([cleanup(callback,callbackName),cleanup(standalone,standaloneName)]); }
   });
 
+  it("runs the repository authority prelock before ACK callback append against reopen", async () => {
+    const ackName="authority_first_ack", reopenName="authority_first_reopen";
+    const ack=startConnection(`SET application_name='${ackName}';SET SESSION AUTHORIZATION app_user;
+      BEGIN;SELECT set_config('app.current_workspace_id','${WS}',true);
+      SELECT lock_execution_domain_ack_authority_first_v1('${WS}','${AUTH}');
+      SELECT status FROM apply_execution_domain_ack_v1('${WS}','${OP}','RoundBConsumer',
+        'RoundBAggregate',repeat('3',64),repeat('4',64)); ${invocation(APPEND)} COMMIT;`);
+    const reopen=startConnection(`SET application_name='${reopenName}';BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS}',true);
+      SELECT * FROM open_authorized_tool_budget_v1('${WS}','${AUTH}','roundb-account',true);
+      COMMIT;`);
+    const results=await Promise.all([ack.done,reopen.done]);
+    assert.equal(results[0].status,0,results[0].stderr); assert.equal(results[1].status,0,results[1].stderr);
+    assert.doesNotMatch(results.map((result)=>result.stderr).join("\n"),/40P01|deadlock detected/i);
+    assert.equal(psql(`SELECT ref_count FROM tool_budget_account WHERE id='${ACCOUNT}';`),"2");
+    assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP}';`),"1");
+  });
+
   it("fails closed before a repeated append acquires a new DSR after graph", () => {
     const firstInput={childDataClass:"PERSONAL",childDsrSubjectType:"company",
       childDsrSubjectId:"73000000-0000-4000-8000-000000000071",relationKey:"guard:first"};
@@ -325,6 +343,18 @@ describe("governed relation exact path lock ordering", () => {
     assert.equal(canonicalSnapshot(),before);
     psql(asApp(`${invocation(APPEND,firstInput)} ${invocation(APPEND,{...secondInput,
       childDsrSubjectId:firstInput.childDsrSubjectId,relationKey:"guard:same-dsr"})}`));
+  });
+
+  it("uses exact bigint graph locks without marker or two-int impersonation", () => {
+    const graph=`hashtextextended('governed-subject-relation:${WS}:${OP}',0)`;
+    const personal={childDataClass:"PERSONAL",childDsrSubjectType:"company",
+      childDsrSubjectId:"73000000-0000-4000-8000-000000000075",relationKey:"guard:direct"};
+    const before=canonicalSnapshot(); const denied=raw(asApp(
+      `SELECT pg_advisory_xact_lock(${graph}); ${invocation(APPEND,personal)}`));
+    assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+    assert.equal(canonicalSnapshot(),before);
+    psql(asApp(`SELECT pg_advisory_xact_lock((${graph}>>32)::integer,${graph}::integer);
+      ${invocation(APPEND,{...personal,relationKey:"guard:two-int"})}`));
   });
 
   it("breaks the two-append tombstone lock cycle before acquiring the second DSR", async () => {

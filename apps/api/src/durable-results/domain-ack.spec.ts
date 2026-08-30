@@ -18,6 +18,10 @@ import {
 const UUID_A = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
 const UUID_B = '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0';
 const UUID_C = '1b3d6096-b924-4bc8-bb4f-8436efb37b07';
+const authorityLockMigration = new URL(
+  '../../../../packages/db/prisma/migrations/20260830121500_execution_domain_ack_authority_first_lock/migration.sql',
+  import.meta.url,
+);
 
 function receipt(
   overrides: Partial<DurableExecutionReceipt> = {},
@@ -360,7 +364,9 @@ describe('DomainAckService', () => {
     const readback = vi.fn(async () => 'must-not-read');
     const transaction = {
       $queryRaw: vi.fn()
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ status: 'APPLIED', ack_json: ackRecord() }])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ status: 'REPLAYED', ack_json: ackRecord() }]),
     };
     const acknowledgement = {
@@ -486,7 +492,12 @@ describe('DomainAckService', () => {
       value: { code: 'CPV-123' },
     });
     expect(apply).toHaveBeenCalledTimes(1);
-    const query = transaction.$queryRaw.mock.calls[0]?.[0] as {
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(2);
+    const prelock = transaction.$queryRaw.mock.calls[0]?.[0] as {
+      readonly values: readonly unknown[];
+    };
+    expect(prelock.values).toEqual(['workspace-1', UUID_A]);
+    const query = transaction.$queryRaw.mock.calls[1]?.[0] as {
       readonly values: readonly unknown[];
     };
     expect(query.values).toEqual([
@@ -500,6 +511,28 @@ describe('DomainAckService', () => {
     expect(query.values).not.toContainEqual(expect.objectContaining({
       resultStrategy: expect.anything(),
     }));
+  });
+
+  it('locks authority before ACK SQL and never enters callback when prelock fails', async () => {
+    const unavailable = new Error('authority prelock rejected');
+    const transaction = { $queryRaw: vi.fn(async () => { throw unavailable; }) };
+    const apply = vi.fn(async () => undefined);
+    const service = new DomainAckService(new PostgresDomainAckRepository(transaction));
+    await expect(service.applyWithAck({ receipt: receipt(), consumer: 'TaxonomyResolver',
+      domainAggregateType: 'TermAlias', domainAckKey: 'taxonomy:cpv:pump' }, apply))
+      .rejects.toBe(unavailable);
+    expect(transaction.$queryRaw).toHaveBeenCalledOnce();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('defines an authority-first historical-safe ACK prelock with matching ACL', async () => {
+    const migration = await readFile(authorityLockMigration, 'utf8');
+    expect(migration).toContain('lock_execution_domain_ack_authority_first_v1');
+    expect(migration).toContain('PERFORM public.assert_execution_domain_ack_scope_v1');
+    expect(migration).toMatch(/execution_budget_authority[\s\S]*?FOR SHARE/);
+    expect(migration).not.toMatch(/expires_at|revoked_at|consumed_at|ref_count/);
+    expect(migration).toMatch(/SECURITY DEFINER[\s\S]*?SET search_path = pg_catalog, public/);
+    expect(migration).toMatch(/GRANT EXECUTE[\s\S]*?TO app_user,execution_budget_platform_writer/);
   });
 
   it('returns APPLIED from the transaction repository only after the domain callback succeeds', async () => {
