@@ -362,9 +362,9 @@ describe('IntentProjectionService — sitemap budget scope', () => {
     const invoke = vi.fn(async (_tool, _input, context) => {
       order.push('wire');
       expect(context).toMatchObject({
-        workspaceId: 'workspace-1',
-        runId: 'discovery:run-1:watches:company-1',
-        correlationId: 'discovery:run-1:watches:company-1',
+        workspaceId: WATCH_WORKSPACE,
+        runId: WATCH_BINDING.accountKey,
+        correlationId: WATCH_BINDING.accountKey,
       });
       return { data: { status: 404, body: '', headers: {}, url: 'https://acme.example/sitemap.xml' }, costCents: 0 };
     });

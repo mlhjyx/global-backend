@@ -589,6 +589,47 @@ describe("PostgresBudgetStore artifact recovery", () => {
     });
   });
 
+  it("never invokes accessors while deciding whether a Prisma rejection is trusted", async () => {
+    let metaGetterCalls = 0;
+    const hostile = rawQueryMarkerError("GENERIC_OPERATION_ARTIFACT_INVALID");
+    Object.defineProperty(hostile, "meta", {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        metaGetterCalls += 1;
+        return {
+          code: "P0001",
+          message: "ERROR: GENERIC_OPERATION_ARTIFACT_INVALID",
+        };
+      },
+    });
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) =>
+        fn({
+          $queryRaw: vi.fn(async () => {
+            throw hostile;
+          }),
+        } as never),
+      ),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.settleArtifactManifest(
+      {
+        workspaceId: TEST_WORKSPACE_ID,
+        accountKey: "artifact-account",
+        operationId: ARTIFACT_REFERENCE.operationId,
+        estimatedMicrousd: 170_000n,
+        replay: false,
+      },
+      130_000n,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+      ARTIFACT_DOMAIN_ACK,
+    )).rejects.toBe(hostile);
+    expect(metaGetterCalls).toBe(0);
+  });
+
   it("redacts untrusted database details from artifact transitions", async () => {
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) =>
