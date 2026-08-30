@@ -1,10 +1,40 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
+const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const container = "codex-task6b-identity-authority-pg-20260830-a";
 const database = "postgres";
+const port = "55441";
+const network = "codex-task6b-identity-authority-net-20260830-a";
+const volume =
+  "164e3d2bdb7eb4abd0c433ea69076572281db2acd95eb33b0e3d5c288a6fa1e1";
+const containerId =
+  "9ea3ae5bc1c34a074452e32d8d75c02c57e1cf1a84857fbe6c210a961776b915";
+const networkId =
+  "14e022a6f17fd723013d2f73ba879927df097c2c3d383adee3381adda689153a";
+const migrationChecksums = Object.freeze([
+  [
+    "20260829090000_organization_identity_v2_expand_ddl",
+    "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119",
+  ],
+  [
+    "20260829091000_organization_identity_v2_legacy_link_backfill_dml",
+    "d897ab5c50dd038e2f4bb04b7d1b37bd404ce7f9c68ac7dc5a45a47272fc9426",
+  ],
+  [
+    "20260829092000_organization_identity_v2_contract_ddl",
+    "1d8368c81f7af17dcb96999d23a4cd35d387436282935c20eb11befcb8c08396",
+  ],
+  [
+    "20260830090000_organization_identity_v2_resolver_command",
+    "098aa285a17cdc6e5ea2c092cbfb31a57cd0ec3ed6db83b0c1221e9d86f55c6a",
+  ],
+]);
 const WORKSPACE_A = "41000000-0000-4000-8000-000000000001";
 const WORKSPACE_B = "41000000-0000-4000-8000-000000000002";
 const SOURCE = "41100000-0000-4000-8000-000000000001";
@@ -17,6 +47,34 @@ const COMPANY_C = "43000000-0000-4000-8000-000000000003";
 const COMPANY_D = "43000000-0000-4000-8000-000000000004";
 const COMPANY_FORGED = "43000000-0000-4000-8000-000000000009";
 const CONFLICT = "44000000-0000-4000-8000-000000000001";
+const IDENTIFIER_A = "45100000-0000-4000-8000-000000000001";
+const IDENTIFIER_DOMAIN_A = "45100000-0000-4000-8000-000000000002";
+const IDENTIFIER_REGISTRY_B = "45100000-0000-4000-8000-000000000003";
+const IDENTIFIER_CREATED = "45100000-0000-4000-8000-000000000004";
+const IDENTIFIER_CREATED_DOMAIN = "45100000-0000-4000-8000-000000000005";
+const IDENTIFIER_CREATED_SECOND = "45100000-0000-4000-8000-000000000006";
+const PARTY_A = "45200000-0000-4000-8000-000000000001";
+const PARTY_B = "45200000-0000-4000-8000-000000000002";
+const PARTY_C = "45200000-0000-4000-8000-000000000003";
+const PARTY_D = "45200000-0000-4000-8000-000000000004";
+const COMMAND_LINK_A = "46100000-0000-4000-8000-000000000001";
+const COMMAND_LINK_B = "46100000-0000-4000-8000-000000000002";
+const COMMAND_LINK_C = "46100000-0000-4000-8000-000000000003";
+const COMMAND_LINK_D = "46100000-0000-4000-8000-000000000004";
+const COMMAND_LINK_B_A = "46100000-0000-4000-8000-000000000005";
+const COMMAND_LINK_B_B = "46100000-0000-4000-8000-000000000006";
+const FIXTURE_SQL_TIME = "2026-08-30 00:00:00.000";
+const COMMAND_SQL_TIME = "2026-08-30 01:00:00.000";
+const SENTINEL_RAW = "42900000-0000-4000-8000-000000000001";
+const SENTINEL_COMPANY_A = "43900000-0000-4000-8000-000000000001";
+const SENTINEL_COMPANY_B = "43900000-0000-4000-8000-000000000002";
+const SENTINEL_IDENTIFIER = "45900000-0000-4000-8000-000000000001";
+const SENTINEL_CONFLICT = "44900000-0000-4000-8000-000000000001";
+const SENTINEL_PARTY = "45800000-0000-4000-8000-000000000001";
+const SENTINEL_LINK = "46900000-0000-4000-8000-000000000001";
+const SENTINEL_MAPPING = "47900000-0000-4000-8000-000000000001";
+const SENTINEL_DECISION = "48900000-0000-4000-8000-000000000001";
+const SENTINEL_SUPPRESSION = "49900000-0000-4000-8000-000000000001";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const RESOLVER = "organization-identity-resolver/v1";
@@ -42,6 +100,174 @@ const FINGERPRINT_SPLIT =
   "d3a3b92142a380eec8aa9c48444472f50efe8dcf3d0ef3e2a87ab9f87ec2898f";
 const FINGERPRINT_SPLIT_ROOTS =
   "029b8e60b7821c12cfa8c721ae9fe572e6c4aaf5f6a804081a693a657684f3dd";
+let prerequisiteReceipt;
+
+function checkedSpawn(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: options.timeout ?? 10_000,
+    input: options.input,
+  });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  return result.stdout.trim();
+}
+
+function inspectResource(kind, name) {
+  const prefix = kind === "container" ? ["inspect"] : [kind, "inspect"];
+  return JSON.parse(
+    checkedSpawn("docker", [...prefix, "--format", "{{json .}}", name]),
+  );
+}
+
+function prerequisiteSql(sql) {
+  return checkedSpawn(
+    "docker",
+    [
+      "exec",
+      "-i",
+      container,
+      "psql",
+      "-U",
+      "global",
+      "-d",
+      database,
+      "--no-psqlrc",
+      "-X",
+      "-qAt",
+      "-v",
+      "ON_ERROR_STOP=1",
+    ],
+    { input: sql },
+  );
+}
+
+function ensurePrerequisite() {
+  if (prerequisiteReceipt) return prerequisiteReceipt;
+  for (const [name, expected] of migrationChecksums) {
+    assert.equal(
+      createHash("sha256")
+        .update(
+          readFileSync(
+            resolve(
+              repositoryRoot,
+              "packages/db/prisma/migrations",
+              name,
+              "migration.sql",
+            ),
+          ),
+        )
+        .digest("hex"),
+      expected,
+    );
+  }
+  const image = inspectResource("image", "pgvector/pgvector:pg16");
+  assert.deepEqual(image.RepoDigests, [
+    "pgvector/pgvector@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb",
+  ]);
+  const containerState = inspectResource("container", container);
+  assert.deepEqual(
+    {
+      id: containerState.Id,
+      image: containerState.Config.Image,
+      running: containerState.State.Running,
+      ports: containerState.NetworkSettings.Ports,
+      labels: containerState.Config.Labels,
+      mounts: containerState.Mounts,
+      networks: Object.keys(containerState.NetworkSettings.Networks),
+    },
+    {
+      id: containerId,
+      image: "pgvector/pgvector:pg16",
+      running: true,
+      ports: { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: port }] },
+      labels: {
+        "com.openai.codex.artifact": "identity-authority",
+        "com.openai.codex.task": "organization-identity-command-expansion",
+      },
+      mounts: [
+        {
+          Type: "volume",
+          Name: volume,
+          Source: `/data/docker/volumes/${volume}/_data`,
+          Destination: "/var/lib/postgresql/data",
+          Driver: "local",
+          Mode: "z",
+          RW: true,
+          Propagation: "",
+        },
+      ],
+      networks: [network],
+    },
+  );
+  const networkState = inspectResource("network", network);
+  assert.equal(networkState.Id, networkId);
+  assert.equal(networkState.Driver, "bridge");
+  assert.deepEqual(networkState.Labels, containerState.Config.Labels);
+  assert.deepEqual(Object.keys(networkState.Containers), [containerId]);
+  const volumeState = inspectResource("volume", volume);
+  assert.deepEqual(
+    {
+      name: volumeState.Name,
+      driver: volumeState.Driver,
+      labels: volumeState.Labels,
+    },
+    {
+      name: volume,
+      driver: "local",
+      labels: { "com.docker.volume.anonymous": "" },
+    },
+  );
+  const ledger = prerequisiteSql(`SELECT migration_name||'|'||checksum||'|'||
+    (finished_at IS NOT NULL)::text||'|'||(rolled_back_at IS NULL)::text
+    FROM "_prisma_migrations"
+    WHERE migration_name IN (${migrationChecksums
+      .map(([name]) => `'${name}'`)
+      .join(",")}) ORDER BY migration_name;`);
+  assert.equal(
+    ledger,
+    migrationChecksums
+      .map(([name, checksum]) => `${name}|${checksum}|true|true`)
+      .join("\n"),
+  );
+  const catalog = prerequisiteSql(`SELECT p.proname||'|'||
+    pg_get_function_identity_arguments(p.oid)||'|'||
+    pg_get_userbyid(p.proowner)||'|'||p.prosecdef||'|'||
+    array_to_string(p.proconfig, ',')||'|'||
+    has_function_privilege('app_user',p.oid,'EXECUTE')||'|'||
+    has_function_privilege('public',p.oid,'EXECUTE')
+    FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname IN (
+      'organization_identity_acquire_advisory_until_v1',
+      'organization_identity_authority_from_raw_v1',
+      'organization_identity_blocker_from_raw_v1',
+      'organization_identity_canonical_suppression_value_v1',
+      'organization_identity_plan_from_snapshot_v1',
+      'resolve_organization_identity_for_raw_v1'
+    ) ORDER BY p.proname;`);
+  assert.equal(
+    catalog,
+    [
+      "organization_identity_acquire_advisory_until_v1|p_lock_key bigint, p_deadline timestamp with time zone|global|false|search_path=pg_catalog, public|false|false",
+      "organization_identity_authority_from_raw_v1|p_provider_key text, p_raw jsonb|global|false|search_path=pg_catalog, public|false|false",
+      "organization_identity_blocker_from_raw_v1|p_raw jsonb|global|false|search_path=pg_catalog, public|false|false",
+      "organization_identity_canonical_suppression_value_v1|p_type text, p_value text|global|false|search_path=pg_catalog, public|false|false",
+      "organization_identity_plan_from_snapshot_v1|p_snapshot jsonb|global|false|search_path=pg_catalog, public|false|false",
+      "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,lock_timeout=5s,statement_timeout=60s,row_security=off|true|false",
+    ].join("\n"),
+  );
+  const boundary = prerequisiteSql(`SELECT
+      to_regprocedure('public.apply_organization_identity_resolution_v1(jsonb)') IS NULL,
+      (SELECT rolname||':'||rolsuper||':'||rolbypassrls
+       FROM pg_roles WHERE rolname='app_user'),
+      has_table_privilege(
+        'app_user','organization_identifier','INSERT,UPDATE,DELETE'
+      );`);
+  assert.equal(boundary, "t|app_user:false:false|f");
+  prerequisiteReceipt = Object.freeze({ ledger, catalog, boundary });
+  return prerequisiteReceipt;
+}
 
 const RAW_CREATE = Object.freeze({
   id: RAW_A,
@@ -196,17 +422,6 @@ function state({
   };
 }
 
-const EMPTY_CROSS = Object.freeze({
-  raws: 0,
-  companies: 0,
-  identifiers: 0,
-  conflicts: 0,
-  parties: 0,
-  links: 0,
-  mappings: 0,
-  suppressions: 0,
-});
-
 function rawView(raw) {
   return {
     id: raw.id,
@@ -219,6 +434,113 @@ function rawView(raw) {
 
 function sqlJson(value) {
   return JSON.stringify(value).replaceAll("'", "''");
+}
+
+function fixtureIdentifierId(row) {
+  if (row.companyId === COMPANY_A && row.scheme === "registry-id") {
+    return IDENTIFIER_A;
+  }
+  if (row.companyId === COMPANY_A && row.scheme === "domain") {
+    return IDENTIFIER_DOMAIN_A;
+  }
+  if (row.companyId === COMPANY_B && row.scheme === "registry-id") {
+    return IDENTIFIER_REGISTRY_B;
+  }
+  assert.fail(`missing literal fixture identifier ID for ${row.scheme}`);
+}
+
+function fixturePartyId(row) {
+  const id = new Map([
+    [COMPANY_A, PARTY_A],
+    [COMPANY_B, PARTY_B],
+    [COMPANY_C, PARTY_C],
+    [COMPANY_D, PARTY_D],
+  ]).get(row.companyId);
+  assert.ok(id, `missing literal party ID for ${row.companyId}`);
+  return id;
+}
+
+function sentinelSql() {
+  const facts = sqlJson({
+    schemaVersion: "organization-identity-conflict/v1",
+    resolverVersion: RESOLVER,
+    blockerKey: "d:a4-sentinel.example",
+    blockerRule: "domain_exact",
+    conflictType: "blocking_key_disagreement",
+    companyIds: [SENTINEL_COMPANY_A, SENTINEL_COMPANY_B],
+    identifierKeys: ["domain:GLOBAL:a4-sentinel.example"],
+  });
+  return `INSERT INTO raw_source_record(
+      id,workspace_id,source_entity_id,provider_key,source_class,payload,
+      source_url,fetched_at,content_hash,parser_version,ingest_key,
+      payload_hash,payload_bytes,ingest_version,ingest_status,
+      retention_days,expires_at,source_policy_snapshot,created_at
+    ) VALUES (
+      '${SENTINEL_RAW}','${WORKSPACE_B}','${ENTITY}','directory',
+      'company_registry','{"name":"A4 Sentinel","domain":"a4-sentinel.example","country":"DE"}'::jsonb,
+      'https://fixture.invalid/sentinel','${FIXTURE_SQL_TIME}','${HASH_B}',
+      'a4/v1','a4:sentinel','${HASH_A}',1,'raw-source/v2','ACCEPTED',
+      30,'2099-08-30 00:00:00+00','{}'::jsonb,'${FIXTURE_SQL_TIME}'
+    );
+    INSERT INTO canonical_company(
+      id,workspace_id,name,domain,country,status,dedupe_key,version,
+      created_at,updated_at
+    ) VALUES
+      ('${SENTINEL_COMPANY_A}','${WORKSPACE_B}','A4 Sentinel A',
+       'a4-sentinel-a.example','DE','NEW','d:a4-sentinel-a.example',1,
+       '${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}'),
+      ('${SENTINEL_COMPANY_B}','${WORKSPACE_B}','A4 Sentinel B',
+       'a4-sentinel-b.example','DE','NEW','d:a4-sentinel-b.example',1,
+       '${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}');
+    INSERT INTO organization_identity_conflict(
+      id,workspace_id,raw_record_id,conflict_type,fingerprint,status,
+      revision,facts,resolved_at,created_at
+    ) VALUES (
+      '${SENTINEL_CONFLICT}','${WORKSPACE_B}','${SENTINEL_RAW}',
+      'blocking_key_disagreement','${HASH_B}','OPEN',1,'${facts}'::jsonb,
+      NULL,'${FIXTURE_SQL_TIME}'
+    );
+    INSERT INTO organization_identifier(
+      id,workspace_id,company_id,scheme,jurisdiction,normalized_value,
+      authority_provider_key,raw_record_id,conflict_id,confidence,
+      normalizer_version,validator_version,provenance,status,
+      first_seen_at,last_seen_at,created_at,revoked_at
+    ) VALUES (
+      '${SENTINEL_IDENTIFIER}','${WORKSPACE_B}','${SENTINEL_COMPANY_A}',
+      'domain','GLOBAL','a4-sentinel.example','directory','${SENTINEL_RAW}',
+      NULL,1,'organization-identity-authority/v1','domain-v1',
+      '{"schemaVersion":"organization-identifier-provenance/v1"}'::jsonb,
+      'ACTIVE','${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}',
+      '${FIXTURE_SQL_TIME}',NULL
+    );
+    INSERT INTO organization_identity_conflict_party(
+      id,workspace_id,conflict_id,company_id,role,created_at
+    ) VALUES (
+      '${SENTINEL_PARTY}','${WORKSPACE_B}','${SENTINEL_CONFLICT}',
+      '${SENTINEL_COMPANY_A}','CANDIDATE','${FIXTURE_SQL_TIME}'
+    );
+    INSERT INTO identity_link(
+      id,workspace_id,canonical_type,canonical_id,raw_record_id,match_rule,
+      confidence,status,resolver_version,input_hash,conflict_id,created_at
+    ) VALUES (
+      '${SENTINEL_LINK}','${WORKSPACE_B}','company','${SENTINEL_COMPANY_A}',
+      '${SENTINEL_RAW}','identity_conflict',0,'PENDING_CONFLICT','${RESOLVER}',
+      '${HASH_A}','${SENTINEL_CONFLICT}','${FIXTURE_SQL_TIME}'
+    );
+    INSERT INTO organization_canonical_mapping(
+      id,workspace_id,source_company_id,canonical_company_id,status,revision,
+      merge_decision_id,split_decision_id,created_at,revoked_at
+    ) VALUES (
+      '${SENTINEL_MAPPING}','${WORKSPACE_B}','${SENTINEL_COMPANY_A}',
+      '${SENTINEL_COMPANY_B}','ACTIVE',1,'${SENTINEL_DECISION}',NULL,
+      '${FIXTURE_SQL_TIME}',NULL
+    );
+    INSERT INTO suppression_record(
+      id,workspace_id,type,value,reason,protection_class,created_at
+    ) VALUES (
+      '${SENTINEL_SUPPRESSION}','${WORKSPACE_B}','domain',
+      'a4-sentinel.example','a4-sentinel','LEGAL','${FIXTURE_SQL_TIME}'
+    );`;
 }
 
 function fixtureSql({
@@ -237,9 +559,10 @@ function fixtureSql({
     .map(
       (raw) => `('${raw.id}','${WORKSPACE_A}','${ENTITY}',
         '${raw.providerKey}','company_registry','${sqlJson(raw.payload)}'::jsonb,
-        'https://fixture.invalid/${raw.id}',now(),'${HASH_B}','a4/v1',
+        'https://fixture.invalid/${raw.id}','${FIXTURE_SQL_TIME}','${HASH_B}','a4/v1',
         'a4:${raw.id}','${raw.payloadHash}',1,'${raw.ingestVersion}',
-        '${raw.ingestStatus}',30,now()+interval '30 days','{}'::jsonb,now())`,
+        '${raw.ingestStatus}',30,'2099-08-30 00:00:00+00','{}'::jsonb,
+        '${FIXTURE_SQL_TIME}')`,
     )
     .join(",\n");
   const companyRows = companies
@@ -247,17 +570,20 @@ function fixtureSql({
       (row) => `('${row.id}','${WORKSPACE_A}','${row.name}',${
         row.domain === null ? "NULL" : `'${row.domain}'`
       },${row.country === null ? "NULL" : `'${row.country}'`},
-        '${row.status}','${row.dedupeKey}',${row.version},now(),now())`,
+        '${row.status}','${row.dedupeKey}',${row.version},
+        '${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}')`,
     )
     .join(",\n");
   const identifierRows = identifiers
     .map(
-      (row) => `('${WORKSPACE_A}','${row.companyId}','${row.scheme}',
+      (row) => `('${fixtureIdentifierId(row)}','${WORKSPACE_A}',
+        '${row.companyId}','${row.scheme}',
         '${row.jurisdiction}','${row.normalizedValue}',
         '${row.authorityProviderKey}','${row.rawRecordId}',
         ${row.conflictId === null ? "NULL" : `'${row.conflictId}'`},
         ${row.confidence},'${row.normalizerVersion}','${row.validatorVersion}',
-        '${sqlJson(row.provenance)}'::jsonb,'${row.status}')`,
+        '${sqlJson(row.provenance)}'::jsonb,'${row.status}',
+        '${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}',NULL)`,
     )
     .join(",\n");
   const conflictRows = conflicts
@@ -266,13 +592,15 @@ function fixtureSql({
         row.rawRecordId === null ? "NULL" : `'${row.rawRecordId}'`
       },'${row.conflictType}','${row.fingerprint}','${row.status}',
         ${row.revision},'${sqlJson(row.facts)}'::jsonb,
-        ${row.status === "RESOLVED" ? "now()" : "NULL"},now())`,
+        ${row.status === "RESOLVED" ? `'${FIXTURE_SQL_TIME}'` : "NULL"},
+        '${FIXTURE_SQL_TIME}')`,
     )
     .join(",\n");
   const partyRows = parties
     .map(
-      (row) => `('${WORKSPACE_A}','${row.conflictId}',
-        '${row.companyId}','${row.role}',now())`,
+      (row) => `('${fixturePartyId(row)}','${WORKSPACE_A}',
+        '${row.conflictId}',
+        '${row.companyId}','${row.role}','${FIXTURE_SQL_TIME}')`,
     )
     .join(",\n");
   const linkRows = links
@@ -283,7 +611,8 @@ function fixtureSql({
       )}','${WORKSPACE_A}','company','${row.canonicalId}',
         '${row.rawRecordId}','${row.matchRule}',${row.confidence},
         '${row.status}','${row.resolverVersion}','${row.inputHash}',
-        ${row.conflictId === null ? "NULL" : `'${row.conflictId}'`})`,
+        ${row.conflictId === null ? "NULL" : `'${row.conflictId}'`},
+        '${FIXTURE_SQL_TIME}')`,
     )
     .join(",\n");
   const mappingRows = mappings
@@ -293,7 +622,8 @@ function fixtureSql({
         "0",
       )}','${WORKSPACE_A}','${row.sourceCompanyId}',
         '${row.canonicalCompanyId}','${row.status}',${row.revision},
-        '48000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}',NULL,now(),NULL)`,
+        '48000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}',
+        NULL,'${FIXTURE_SQL_TIME}',NULL)`,
     )
     .join(",\n");
   const suppressionRows = suppressions
@@ -302,20 +632,21 @@ function fixtureSql({
         12,
         "0",
       )}','${WORKSPACE_A}','${row.type}','${row.value}',
-        'a4-test','${row.protectionClass}')`,
+        'a4-test','${row.protectionClass}','${FIXTURE_SQL_TIME}')`,
     )
     .join(",\n");
-  return `INSERT INTO workspace(id,name,updated_at) VALUES
-      ('${WORKSPACE_A}','A4 Workspace A',now()),
-      ('${WORKSPACE_B}','A4 Workspace B',now());
+  return `INSERT INTO workspace(id,name,created_at,updated_at) VALUES
+      ('${WORKSPACE_A}','A4 Workspace A','${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}'),
+      ('${WORKSPACE_B}','A4 Workspace B','${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}');
     INSERT INTO monitored_source(
       id,provider_key,source_key,label,config,status,created_at,updated_at
-    ) VALUES ('${SOURCE}','registry','a4:source','A4 Source','{}','ACTIVE',now(),now());
+    ) VALUES ('${SOURCE}','registry','a4:source','A4 Source','{}','ACTIVE',
+      '${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}');
     INSERT INTO source_entity(
       id,source_id,external_id,entity_kind,name,cleaned,content_hash,
       created_at,updated_at
     ) VALUES ('${ENTITY}','${SOURCE}','a4-entity','company','A4 Entity',
-      '{}','${HASH_A}',now(),now());
+      '{}','${HASH_A}','${FIXTURE_SQL_TIME}','${FIXTURE_SQL_TIME}');
     INSERT INTO raw_source_record(
       id,workspace_id,source_entity_id,provider_key,source_class,payload,
       source_url,fetched_at,content_hash,parser_version,ingest_key,
@@ -343,16 +674,17 @@ function fixtureSql({
       identifierRows === ""
         ? ""
         : `INSERT INTO organization_identifier(
-      workspace_id,company_id,scheme,jurisdiction,normalized_value,
+      id,workspace_id,company_id,scheme,jurisdiction,normalized_value,
       authority_provider_key,raw_record_id,conflict_id,confidence,
-      normalizer_version,validator_version,provenance,status
+      normalizer_version,validator_version,provenance,status,
+      first_seen_at,last_seen_at,created_at,revoked_at
     ) VALUES ${identifierRows};`
     }
     ${
       partyRows === ""
         ? ""
         : `INSERT INTO organization_identity_conflict_party(
-      workspace_id,conflict_id,company_id,role,created_at
+      id,workspace_id,conflict_id,company_id,role,created_at
     ) VALUES ${partyRows};`
     }
     ${
@@ -360,7 +692,8 @@ function fixtureSql({
         ? ""
         : `INSERT INTO identity_link(
       id,workspace_id,canonical_type,canonical_id,raw_record_id,
-      match_rule,confidence,status,resolver_version,input_hash,conflict_id
+      match_rule,confidence,status,resolver_version,input_hash,conflict_id,
+      created_at
     ) VALUES ${linkRows};`
     }
     ${
@@ -375,14 +708,16 @@ function fixtureSql({
       suppressionRows === ""
         ? ""
         : `INSERT INTO suppression_record(
-      id,workspace_id,type,value,reason,protection_class
+      id,workspace_id,type,value,reason,protection_class,created_at
     ) VALUES ${suppressionRows};`
     }
-    ${bypassTriggers ? "SET LOCAL session_replication_role='origin';" : ""}
+    ${bypassTriggers ? "" : "SET LOCAL session_replication_role='replica';"}
+    ${sentinelSql()}
+    SET LOCAL session_replication_role='origin';
     ${extraSql}`;
 }
 
-function stateSql(workspaceId) {
+function semanticStateSql(workspaceId) {
   const array = (query) => `coalesce((${query}),'[]'::jsonb)`;
   return `jsonb_build_object(
     'raws',${array(`SELECT jsonb_agg(jsonb_build_object(
@@ -430,21 +765,231 @@ function stateSql(workspaceId) {
   )`;
 }
 
-function crossSql() {
+function fullStateSql(workspaceId) {
+  const rows = (table, orderBy = "id") =>
+    `coalesce((SELECT jsonb_agg(to_jsonb(row) ORDER BY ${orderBy})
+      FROM ${table} AS row WHERE workspace_id='${workspaceId}'),'[]'::jsonb)`;
   return `jsonb_build_object(
-    'raws',(SELECT count(*) FROM raw_source_record WHERE workspace_id='${WORKSPACE_B}'),
-    'companies',(SELECT count(*) FROM canonical_company WHERE workspace_id='${WORKSPACE_B}'),
-    'identifiers',(SELECT count(*) FROM organization_identifier WHERE workspace_id='${WORKSPACE_B}'),
-    'conflicts',(SELECT count(*) FROM organization_identity_conflict WHERE workspace_id='${WORKSPACE_B}'),
-    'parties',(SELECT count(*) FROM organization_identity_conflict_party WHERE workspace_id='${WORKSPACE_B}'),
-    'links',(SELECT count(*) FROM identity_link WHERE workspace_id='${WORKSPACE_B}'),
-    'mappings',(SELECT count(*) FROM organization_canonical_mapping WHERE workspace_id='${WORKSPACE_B}'),
-    'suppressions',(SELECT count(*) FROM suppression_record WHERE workspace_id='${WORKSPACE_B}')
+    'raws',${rows("raw_source_record")},
+    'companies',${rows("canonical_company")},
+    'identifiers',${rows("organization_identifier")},
+    'conflicts',${rows("organization_identity_conflict")},
+    'parties',${rows("organization_identity_conflict_party")},
+    'links',${rows("identity_link")},
+    'mappings',${rows("organization_canonical_mapping")},
+    'suppressions',${rows("suppression_record")}
   )`;
 }
 
+const FULL_COLUMNS = Object.freeze({
+  raws: "content_hash,cost_cents,created_at,disposition_code,expired_at,expires_at,external_id,fetched_at,id,ingest_key,ingest_status,ingest_version,parser_version,payload,payload_bytes,payload_hash,provider_key,retention_days,run_id,source_class,source_entity_id,source_policy_snapshot,source_url,workspace_id".split(
+    ",",
+  ),
+  companies:
+    "attributes,contact_discovery_attempted_at,country,created_at,dedupe_key,domain,email_guess_attempted_at,employee_count,id,industry,last_enriched_at,last_signal_at,last_watch_at,name,region,revenue_usd,status,updated_at,version,workspace_id".split(
+      ",",
+    ),
+  identifiers:
+    "authority_provider_key,company_id,confidence,conflict_id,created_at,first_seen_at,id,jurisdiction,last_seen_at,normalized_value,normalizer_version,provenance,raw_record_id,revoked_at,scheme,status,validator_version,workspace_id".split(
+      ",",
+    ),
+  conflicts:
+    "conflict_type,created_at,facts,fingerprint,id,raw_record_id,resolved_at,revision,status,workspace_id".split(
+      ",",
+    ),
+  parties: "company_id,conflict_id,created_at,id,role,workspace_id".split(","),
+  links:
+    "canonical_id,canonical_type,confidence,conflict_id,created_at,id,input_hash,match_rule,raw_record_id,resolver_version,status,workspace_id".split(
+      ",",
+    ),
+  mappings:
+    "canonical_company_id,created_at,id,merge_decision_id,revision,revoked_at,source_company_id,split_decision_id,status,workspace_id".split(
+      ",",
+    ),
+  suppressions:
+    "created_at,id,protection_class,reason,type,value,workspace_id".split(","),
+});
+const FULL_ALLOWED_IDS = Object.freeze({
+  raws: [RAW_A, RAW_B],
+  companies: [COMPANY_A, COMPANY_B, COMPANY_C, COMPANY_D, COMPANY_FORGED],
+  identifiers: [
+    IDENTIFIER_A,
+    IDENTIFIER_DOMAIN_A,
+    IDENTIFIER_REGISTRY_B,
+    IDENTIFIER_CREATED,
+    IDENTIFIER_CREATED_DOMAIN,
+    IDENTIFIER_CREATED_SECOND,
+  ],
+  conflicts: [CONFLICT],
+  parties: [PARTY_A, PARTY_B, PARTY_C, PARTY_D],
+  links: [
+    "46000000-0000-4000-8000-000000000001",
+    "46000000-0000-4000-8000-000000000002",
+    "46000000-0000-4000-8000-000000000003",
+    "46000000-0000-4000-8000-000000000004",
+    COMMAND_LINK_A,
+    COMMAND_LINK_B,
+    COMMAND_LINK_C,
+    COMMAND_LINK_D,
+    COMMAND_LINK_B_A,
+    COMMAND_LINK_B_B,
+  ],
+  mappings: [
+    "47000000-0000-4000-8000-000000000001",
+    "47000000-0000-4000-8000-000000000002",
+  ],
+  suppressions: ["49000000-0000-4000-8000-000000000001"],
+});
+const UUID_TEXT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function assertFullColumns(fullState, workspaceId = WORKSPACE_A) {
+  assert.deepEqual(
+    Object.keys(fullState).sort(),
+    Object.keys(FULL_COLUMNS).sort(),
+  );
+  for (const [table, rows] of Object.entries(fullState)) {
+    assert.ok(Array.isArray(rows));
+    for (const row of rows) {
+      assert.deepEqual(Object.keys(row).sort(), FULL_COLUMNS[table]);
+      assert.equal(row.workspace_id, workspaceId);
+      assert.match(row.id, UUID_TEXT);
+      for (const [column, value] of Object.entries(row)) {
+        if (column.endsWith("_id") && value !== null)
+          assert.match(value, UUID_TEXT);
+        if (column.endsWith("_at") && value !== null) {
+          assert.equal(
+            Number.isFinite(Date.parse(value)),
+            true,
+            `${table}.${column}`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function assertSentinel(fullState) {
+  assertFullColumns(fullState, WORKSPACE_B);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(fullState).map(([table, rows]) => [table, rows.length]),
+    ),
+    {
+      raws: 1,
+      companies: 2,
+      identifiers: 1,
+      conflicts: 1,
+      parties: 1,
+      links: 1,
+      mappings: 1,
+      suppressions: 1,
+    },
+  );
+  assert.deepEqual(
+    [
+      fullState.raws[0].id,
+      ...fullState.companies.map((row) => row.id),
+      fullState.identifiers[0].id,
+      fullState.conflicts[0].id,
+      fullState.parties[0].id,
+      fullState.links[0].id,
+      fullState.mappings[0].id,
+      fullState.suppressions[0].id,
+    ],
+    [
+      SENTINEL_RAW,
+      SENTINEL_COMPANY_A,
+      SENTINEL_COMPANY_B,
+      SENTINEL_IDENTIFIER,
+      SENTINEL_CONFLICT,
+      SENTINEL_PARTY,
+      SENTINEL_LINK,
+      SENTINEL_MAPPING,
+      SENTINEL_SUPPRESSION,
+    ],
+  );
+}
+
+function assertFullSuccessInvariant(pre, post, semantic) {
+  assertFullColumns(post);
+  for (const table of Object.keys(FULL_COLUMNS)) {
+    assert.equal(post[table].length, semantic[table].length, table);
+    for (const row of post[table]) {
+      assert.equal(
+        FULL_ALLOWED_IDS[table].includes(row.id),
+        true,
+        `${table} used nondeterministic ID ${row.id}`,
+      );
+    }
+  }
+  for (const table of ["raws", "mappings", "suppressions"]) {
+    assert.deepEqual(post[table], pre[table], `${table} changed`);
+  }
+  const existing = (table) => new Map(pre[table].map((row) => [row.id, row]));
+  for (const table of ["companies", "conflicts", "parties", "links"]) {
+    const before = existing(table);
+    for (const row of post[table]) {
+      if (before.has(row.id)) assert.deepEqual(row, before.get(row.id));
+    }
+  }
+  const identifiersBefore = existing("identifiers");
+  for (const row of post.identifiers) {
+    const old = identifiersBefore.get(row.id);
+    if (!old) continue;
+    const { last_seen_at: oldLastSeen, ...oldStable } = old;
+    const { last_seen_at: newLastSeen, ...newStable } = row;
+    assert.deepEqual(newStable, oldStable);
+    assert.ok([oldLastSeen, "2026-08-30T01:00:00"].includes(newLastSeen));
+  }
+  for (const row of post.companies) {
+    for (const column of [
+      "attributes",
+      "contact_discovery_attempted_at",
+      "email_guess_attempted_at",
+      "employee_count",
+      "industry",
+      "last_enriched_at",
+      "last_signal_at",
+      "last_watch_at",
+      "region",
+      "revenue_usd",
+    ]) {
+      assert.equal(row[column], null, `company.${column}`);
+    }
+  }
+  for (const row of post.links) assert.equal(row.canonical_type, "company");
+  for (const table of [
+    "companies",
+    "identifiers",
+    "conflicts",
+    "parties",
+    "links",
+  ]) {
+    for (const row of post[table]) {
+      for (const column of Object.keys(row).filter((key) =>
+        key.endsWith("_at"),
+      )) {
+        if (row[column] !== null) {
+          assert.ok(
+            ["2026-08-30T00:00:00", "2026-08-30T01:00:00"].includes(
+              row[column],
+            ),
+            `${table}.${column} was not deterministic`,
+          );
+        }
+      }
+    }
+  }
+}
+
 function runScenario(scenario) {
-  const sql = `BEGIN;
+  ensurePrerequisite();
+  const stageReceipt = scenario.stageLockKey
+    ? `SELECT to_jsonb(pg_advisory_unlock(hashtextextended('${scenario.stageLockKey}',0)))`
+    : "SELECT 'true'::jsonb";
+  const sql = `SELECT 'A4_CALLER_PID|'||pg_backend_pid();
+    BEGIN;
     ${fixtureSql(scenario.fixture)}
     CREATE TEMP TABLE a4_observed(
       stage text PRIMARY KEY,value jsonb NOT NULL
@@ -452,9 +997,10 @@ function runScenario(scenario) {
     GRANT SELECT,INSERT ON a4_observed TO app_user;
     SET SESSION AUTHORIZATION app_user;
     SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
-    INSERT INTO a4_observed VALUES ('preA',${stateSql(WORKSPACE_A)});
+    INSERT INTO a4_observed VALUES ('preA',${semanticStateSql(WORKSPACE_A)});
+    INSERT INTO a4_observed VALUES ('preAFull',${fullStateSql(WORKSPACE_A)});
     SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
-    INSERT INTO a4_observed VALUES ('preB',${crossSql()});
+    INSERT INTO a4_observed VALUES ('preBFull',${fullStateSql(WORKSPACE_B)});
     SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
     DO $a4_call$
     DECLARE resolved jsonb;
@@ -474,9 +1020,11 @@ function runScenario(scenario) {
       );
     END
     $a4_call$;
-    INSERT INTO a4_observed VALUES ('postA',${stateSql(WORKSPACE_A)});
+    INSERT INTO a4_observed VALUES ('stageFired',(${stageReceipt}));
+    INSERT INTO a4_observed VALUES ('postA',${semanticStateSql(WORKSPACE_A)});
+    INSERT INTO a4_observed VALUES ('postAFull',${fullStateSql(WORKSPACE_A)});
     SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
-    INSERT INTO a4_observed VALUES ('postB',${crossSql()});
+    INSERT INTO a4_observed VALUES ('postBFull',${fullStateSql(WORKSPACE_B)});
     SELECT jsonb_object_agg(stage,value ORDER BY stage)::text FROM a4_observed;
     ROLLBACK;`;
   const startedAt = Date.now();
@@ -485,6 +1033,8 @@ function runScenario(scenario) {
     [
       "exec",
       "-i",
+      "-e",
+      "PGAPPNAME=a4-command-caller",
       container,
       "psql",
       "-U",
@@ -504,14 +1054,27 @@ function runScenario(scenario) {
       maxBuffer: 32 * 1024 * 1024,
     },
   );
-  assert.equal(result.error, undefined, result.error?.message);
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  const line = result.stdout
-    .trim()
-    .split("\n")
-    .findLast((candidate) => candidate.startsWith("{"));
-  assert.ok(line, `scenario emitted no JSON readback:\n${result.stdout}`);
-  return { observed: JSON.parse(line), elapsedMs: Date.now() - startedAt };
+  const callerMatch = result.stdout?.match(/^A4_CALLER_PID\|([0-9]+)$/mu);
+  const callerPid = callerMatch ? Number(callerMatch[1]) : null;
+  try {
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const line = result.stdout
+      .trim()
+      .split("\n")
+      .findLast((candidate) => candidate.startsWith("{"));
+    assert.ok(line, `scenario emitted no JSON readback:\n${result.stdout}`);
+    assert.ok(callerPid, `scenario emitted no caller PID:\n${result.stdout}`);
+    return {
+      observed: JSON.parse(line),
+      elapsedMs: Date.now() - startedAt,
+      callerPid,
+      processOutput: result.stderr,
+    };
+  } finally {
+    if (callerPid !== null) assertBackendCleanup(callerPid);
+    else assertApplicationCleanup("a4-command-caller");
+  }
 }
 
 function error(sqlstate, message) {
@@ -523,18 +1086,39 @@ function resultRow(row) {
 }
 
 function assertScenario(scenario) {
-  const { observed, elapsedMs } = runScenario(scenario);
+  const { observed, elapsedMs, processOutput } = runScenario(scenario);
   assert.deepEqual(observed.preA, scenario.expectedPre);
-  assert.deepEqual(observed.preB, EMPTY_CROSS);
+  assertFullColumns(observed.preAFull);
+  assertSentinel(observed.preBFull);
+  assert.deepEqual(observed.postBFull, observed.preBFull);
+  const noWrite =
+    scenario.expectedOutcome.kind === "error" ||
+    scenario.expectNoWrite === true;
+  if (noWrite) assert.deepEqual(observed.postAFull, observed.preAFull);
+  else if (isDeepStrictEqual(observed.outcome, scenario.expectedOutcome)) {
+    assertFullSuccessInvariant(
+      observed.preAFull,
+      observed.postAFull,
+      observed.postA,
+    );
+  }
+  const publicSurface = `${JSON.stringify(observed.outcome)}\n${processOutput}`;
+  for (const forbidden of scenario.forbiddenPublicFragments ?? []) {
+    assert.equal(
+      publicSurface.includes(forbidden),
+      false,
+      `public error leaked ${forbidden}`,
+    );
+  }
   const actual = {
     outcome: observed.outcome,
     state: observed.postA,
-    crossWorkspace: observed.postB,
+    stageFired: observed.stageFired,
   };
   const expected = {
     outcome: scenario.expectedOutcome,
     state: scenario.expectedPost,
-    crossWorkspace: EMPTY_CROSS,
+    stageFired: true,
   };
   if (!isDeepStrictEqual(actual, expected)) {
     assert.fail(
@@ -543,9 +1127,14 @@ function assertScenario(scenario) {
         `actual=${JSON.stringify(actual.outcome)}`,
         `desired=${JSON.stringify(expected.outcome)}`,
         `stateExact=${isDeepStrictEqual(actual.state, expected.state)}`,
-        `crossWorkspaceExact=${isDeepStrictEqual(
-          actual.crossWorkspace,
-          expected.crossWorkspace,
+        `stageFired=${observed.stageFired}`,
+        `fullPreimageExact=${isDeepStrictEqual(
+          observed.postAFull,
+          observed.preAFull,
+        )}`,
+        `workspaceBSentinelExact=${isDeepStrictEqual(
+          observed.postBFull,
+          observed.preBFull,
         )}`,
       ].join("|"),
     );
@@ -559,7 +1148,6 @@ function boundResult({
   matchRule,
   inputHash,
   replayed = false,
-  companyCreated = false,
   identifierCount = 0,
 }) {
   return resultRow({
@@ -571,8 +1159,56 @@ function boundResult({
     input_hash: inputHash,
     conflict_fingerprint: null,
     replayed,
-    company_created: companyCreated,
+    company_created: false,
     identifier_count: identifierCount,
+    party_count: 0,
+  });
+}
+
+function createdResult({ companyId, matchRule, inputHash, identifierCount }) {
+  return resultRow({
+    outcome_kind: "created",
+    raw_record_id: RAW_A,
+    company_id: companyId,
+    conflict_id: null,
+    match_rule: matchRule,
+    input_hash: inputHash,
+    conflict_fingerprint: null,
+    replayed: false,
+    company_created: true,
+    identifier_count: identifierCount,
+    party_count: 0,
+  });
+}
+
+function legacyBoundResult({ companyId, matchRule }) {
+  return resultRow({
+    outcome_kind: "legacy_bound",
+    raw_record_id: RAW_A,
+    company_id: companyId,
+    conflict_id: null,
+    match_rule: matchRule,
+    input_hash: "legacy",
+    conflict_fingerprint: null,
+    replayed: true,
+    company_created: false,
+    identifier_count: 0,
+    party_count: 0,
+  });
+}
+
+function suppressedResult() {
+  return resultRow({
+    outcome_kind: "suppressed",
+    raw_record_id: RAW_A,
+    company_id: null,
+    conflict_id: null,
+    match_rule: null,
+    input_hash: null,
+    conflict_fingerprint: null,
+    replayed: false,
+    company_created: false,
+    identifier_count: 0,
     party_count: 0,
   });
 }
@@ -666,31 +1302,210 @@ function mapping(sourceCompanyId, canonicalCompanyId) {
   return { sourceCompanyId, canonicalCompanyId, status: "ACTIVE", revision: 1 };
 }
 
-function deterministicIdTrigger(table, column, whenSql, id) {
-  return `CREATE FUNCTION pg_temp.a4_force_id() RETURNS trigger
+function deterministicWritesSql() {
+  return `CREATE FUNCTION pg_temp.a4_deterministic_company() RETURNS trigger
     LANGUAGE plpgsql AS $$ BEGIN
-      IF ${whenSql} THEN NEW.${column}:='${id}'; END IF;
+      IF NEW.workspace_id='${WORKSPACE_A}'::uuid THEN
+        IF NEW.dedupe_key='n:a4 create:de' THEN NEW.id='${COMPANY_C}'::uuid; END IF;
+        NEW.created_at='${COMMAND_SQL_TIME}';
+        NEW.updated_at='${COMMAND_SQL_TIME}';
+      END IF;
       RETURN NEW;
     END $$;
-    CREATE TRIGGER a4_force_id BEFORE INSERT ON ${table}
-    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_force_id();`;
+    CREATE TRIGGER a4_deterministic_company
+    BEFORE INSERT OR UPDATE ON canonical_company
+    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_deterministic_company();
+
+    CREATE FUNCTION pg_temp.a4_deterministic_identifier() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.workspace_id='${WORKSPACE_A}'::uuid THEN
+        IF TG_OP='INSERT' THEN
+          NEW.id=CASE
+            WHEN NEW.scheme='domain' THEN '${IDENTIFIER_CREATED_DOMAIN}'::uuid
+            WHEN NEW.normalized_value='DE9999' THEN '${IDENTIFIER_CREATED_SECOND}'::uuid
+            ELSE '${IDENTIFIER_CREATED}'::uuid
+          END;
+          NEW.first_seen_at='${COMMAND_SQL_TIME}';
+          NEW.created_at='${COMMAND_SQL_TIME}';
+        END IF;
+        NEW.last_seen_at='${COMMAND_SQL_TIME}';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER a4_deterministic_identifier
+    BEFORE INSERT OR UPDATE ON organization_identifier
+    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_deterministic_identifier();
+
+    CREATE FUNCTION pg_temp.a4_deterministic_conflict() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.workspace_id='${WORKSPACE_A}'::uuid THEN
+        NEW.id='${CONFLICT}'::uuid;
+        NEW.created_at='${COMMAND_SQL_TIME}';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER a4_deterministic_conflict
+    BEFORE INSERT ON organization_identity_conflict
+    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_deterministic_conflict();
+
+    CREATE FUNCTION pg_temp.a4_deterministic_party() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.workspace_id='${WORKSPACE_A}'::uuid THEN
+        NEW.id=CASE NEW.company_id
+          WHEN '${COMPANY_A}'::uuid THEN '${PARTY_A}'::uuid
+          WHEN '${COMPANY_B}'::uuid THEN '${PARTY_B}'::uuid
+          WHEN '${COMPANY_C}'::uuid THEN '${PARTY_C}'::uuid
+          ELSE '${PARTY_D}'::uuid
+        END;
+        NEW.created_at='${COMMAND_SQL_TIME}';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER a4_deterministic_party
+    BEFORE INSERT ON organization_identity_conflict_party
+    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_deterministic_party();
+
+    CREATE FUNCTION pg_temp.a4_deterministic_link() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.workspace_id='${WORKSPACE_A}'::uuid THEN
+        NEW.id=CASE
+          WHEN NEW.raw_record_id='${RAW_B}'::uuid AND NEW.canonical_id='${COMPANY_A}'::uuid
+            THEN '${COMMAND_LINK_B_A}'::uuid
+          WHEN NEW.raw_record_id='${RAW_B}'::uuid AND NEW.canonical_id='${COMPANY_B}'::uuid
+            THEN '${COMMAND_LINK_B_B}'::uuid
+          WHEN NEW.canonical_id='${COMPANY_A}'::uuid THEN '${COMMAND_LINK_A}'::uuid
+          WHEN NEW.canonical_id='${COMPANY_B}'::uuid THEN '${COMMAND_LINK_B}'::uuid
+          WHEN NEW.canonical_id='${COMPANY_C}'::uuid THEN '${COMMAND_LINK_C}'::uuid
+          ELSE '${COMMAND_LINK_D}'::uuid
+        END;
+        NEW.created_at='${COMMAND_SQL_TIME}';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER a4_deterministic_link
+    BEFORE INSERT ON identity_link
+    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_deterministic_link();`;
 }
 
-function faultTrigger(table, sqlstate, message) {
-  return `CREATE FUNCTION pg_temp.a4_fault() RETURNS trigger
-    LANGUAGE plpgsql AS $$ BEGIN
-      RAISE EXCEPTION '${message}' USING ERRCODE='${sqlstate}';
-    END $$;
-    CREATE TRIGGER a4_fault BEFORE INSERT ON ${table}
-    FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_fault();`;
+function afterStageFault(table, stageName, targetCount, sqlstate, message) {
+  const stageLockKey = `a4-hidden-stage:${stageName}`;
+  return Object.freeze({
+    stageLockKey,
+    sql: `CREATE TEMP TABLE a4_stage_counter(
+        stage text PRIMARY KEY, seen integer NOT NULL
+      ) ON COMMIT DROP;
+      CREATE FUNCTION pg_temp.a4_after_stage_fault() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      DECLARE current_count integer;
+      BEGIN
+        INSERT INTO pg_temp.a4_stage_counter(stage,seen)
+        VALUES ('${stageName}',1)
+        ON CONFLICT (stage) DO UPDATE
+        SET seen=a4_stage_counter.seen+1
+        RETURNING seen INTO current_count;
+        IF current_count=${targetCount} THEN
+          PERFORM pg_advisory_lock(hashtextextended('${stageLockKey}',0));
+          RAISE EXCEPTION '${message}' USING ERRCODE='${sqlstate}';
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER a4_after_${stageName}
+      AFTER INSERT ON ${table}
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_after_stage_fault();`,
+    forbidden: [
+      sqlstate,
+      message,
+      "CONTEXT:",
+      "DETAIL:",
+      "HINT:",
+      "fixture.invalid",
+      "not-a-uuid-a4",
+      "a4_after_stage_fault",
+      "pg_temp",
+      WORKSPACE_A,
+      RAW_A,
+      COMPANY_A,
+    ],
+  });
+}
+
+function backendArtifactState(pid) {
+  assert.ok(Number.isInteger(pid) && pid > 0, `invalid backend PID ${pid}`);
+  return JSON.parse(
+    prerequisiteSql(`SELECT jsonb_build_object(
+      'backend',(SELECT count(*) FROM pg_stat_activity
+        WHERE pid=${pid} AND datname='${database}' AND usename='global'),
+      'transaction',(SELECT count(*) FROM pg_stat_activity
+        WHERE pid=${pid} AND xact_start IS NOT NULL),
+      'locks',(SELECT count(*) FROM pg_locks WHERE pid=${pid}),
+      'triggers',(SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'a4_%')
+    )::text;`),
+  );
+}
+
+function terminateExactBackend(pid) {
+  assert.ok(Number.isInteger(pid) && pid > 0, `invalid backend PID ${pid}`);
+  prerequisiteSql(`SELECT coalesce(bool_or(pg_terminate_backend(pid)),false)
+    FROM pg_stat_activity
+    WHERE pid=${pid} AND datname='${database}' AND usename='global';`);
+}
+
+function assertBackendCleanup(pid) {
+  if (backendArtifactState(pid).backend !== 0) terminateExactBackend(pid);
+  assert.deepEqual(backendArtifactState(pid), {
+    backend: 0,
+    transaction: 0,
+    locks: 0,
+    triggers: 0,
+  });
+}
+
+function assertApplicationCleanup(applicationName) {
+  const pids = prerequisiteSql(`SELECT coalesce(
+    string_agg(pid::text,',' ORDER BY pid),'')
+    FROM pg_stat_activity
+    WHERE application_name='${applicationName}'
+      AND datname='${database}' AND usename='global';`);
+  for (const pid of pids === "" ? [] : pids.split(",").map(Number)) {
+    terminateExactBackend(pid);
+    assertBackendCleanup(pid);
+  }
+  assert.equal(
+    prerequisiteSql(`SELECT count(*) FROM pg_stat_activity
+      WHERE application_name='${applicationName}'
+        AND datname='${database}' AND usename='global';`),
+    "0",
+  );
+}
+
+function bounded(promise, milliseconds, label) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(
+      () => rejectPromise(new Error(`${label} exceeded ${milliseconds}ms`)),
+      milliseconds,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolvePromise(value);
+      },
+      (cause) => {
+        clearTimeout(timer);
+        rejectPromise(cause);
+      },
+    );
+  });
 }
 
 function startHolder(statement) {
+  ensurePrerequisite();
   const child = spawn(
     "docker",
     [
       "exec",
       "-i",
+      "-e",
+      "PGAPPNAME=a4-holder",
       container,
       "psql",
       "-U",
@@ -707,6 +1522,7 @@ function startHolder(statement) {
   );
   let stdout = "";
   let stderr = "";
+  let backendPid = null;
   let readySettled = false;
   let releaseStarted = false;
   let readyResolve;
@@ -718,7 +1534,13 @@ function startHolder(statement) {
   const completion = new Promise((resolvePromise) => {
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      if (!readySettled && stdout.includes("A4_HOLDER_READY")) {
+      const pidMatch = stdout.match(/A4_HOLDER_PID\|([0-9]+)/u);
+      if (pidMatch) backendPid = Number(pidMatch[1]);
+      if (
+        !readySettled &&
+        backendPid !== null &&
+        stdout.includes("A4_HOLDER_READY")
+      ) {
         readySettled = true;
         readyResolve();
       }
@@ -745,42 +1567,51 @@ function startHolder(statement) {
   const acquisitionTimer = setTimeout(() => {
     if (!readySettled) {
       readySettled = true;
-      child.kill("SIGTERM");
       readyReject(
         new Error("holder did not acquire the lock within 5 seconds"),
       );
     }
   }, 5_000);
-  child.stdin.write(`BEGIN; ${statement}; SELECT 'A4_HOLDER_READY';\n`);
+  child.stdin.write(
+    `SELECT 'A4_HOLDER_PID|'||pg_backend_pid(); BEGIN; ${statement}; SELECT 'A4_HOLDER_READY';\n`,
+  );
   return {
     ready: ready.finally(() => clearTimeout(acquisitionTimer)),
     async release() {
       if (!releaseStarted) {
         releaseStarted = true;
-        child.stdin.end("ROLLBACK;\\q\n");
+        if (child.stdin.writable) child.stdin.end("ROLLBACK;\\q\n");
       }
-      const result = await completion;
-      assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+      let result;
+      let forced = false;
+      try {
+        result = await bounded(completion, 3_000, "holder graceful release");
+      } catch {
+        forced = true;
+        if (backendPid !== null) terminateExactBackend(backendPid);
+        child.kill("SIGTERM");
+        result = await bounded(completion, 3_000, "holder forced completion");
+      } finally {
+        if (backendPid !== null) assertBackendCleanup(backendPid);
+        else assertApplicationCleanup("a4-holder");
+      }
+      if (!forced) {
+        assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+      }
+      return Object.freeze({ backendPid, forced });
     },
   };
 }
 
-function uncaughtScenario(scenario) {
-  const sql = `\\set VERBOSITY verbose
-    BEGIN;
-    ${fixtureSql(scenario.fixture)}
-    SET SESSION AUTHORIZATION app_user;
-    SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
-    SELECT * FROM public.resolve_organization_identity_for_raw_v1(
-      '${WORKSPACE_A}','${scenario.rawRecordId ?? RAW_A}'
-    );
-    ROLLBACK;`;
-  const startedAt = Date.now();
-  const result = spawnSync(
+async function runStatementScenario(scenario) {
+  ensurePrerequisite();
+  const child = spawn(
     "docker",
     [
       "exec",
       "-i",
+      "-e",
+      "PGAPPNAME=a4-statement-caller",
       container,
       "psql",
       "-U",
@@ -790,66 +1621,134 @@ function uncaughtScenario(scenario) {
       "--no-psqlrc",
       "-X",
       "-qAt",
-      "-v",
-      "ON_ERROR_STOP=1",
     ],
-    {
-      encoding: "utf8",
-      input: sql,
-      timeout: scenario.processTimeout,
-      maxBuffer: 16 * 1024 * 1024,
-    },
+    { stdio: ["pipe", "pipe", "pipe"] },
   );
-  assert.equal(result.error, undefined, result.error?.message);
-  assert.notEqual(result.status, 0, "timeout scenario unexpectedly succeeded");
-  const output = `${result.stdout}\n${result.stderr}`;
-  const match = output.match(/^ERROR:\s+([0-9A-Z]{5}): (.+)$/mu);
-  assert.ok(match, `timeout scenario emitted no typed error:\n${output}`);
-  return {
-    elapsedMs: Date.now() - startedAt,
-    outcome: error(match[1], match[2]),
-    output,
-  };
-}
-
-function emptyReadback() {
-  const result = spawnSync(
-    "docker",
-    [
-      "exec",
-      "-i",
-      container,
-      "psql",
-      "-U",
-      "app_user",
-      "-d",
-      database,
-      "--no-psqlrc",
-      "-X",
-      "-qAt",
-      "-v",
-      "ON_ERROR_STOP=1",
-    ],
-    {
-      encoding: "utf8",
-      input: `BEGIN;
-        SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
-        SELECT ${stateSql(WORKSPACE_A)}::text;
-        SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
-        SELECT ${crossSql()}::text;
-        ROLLBACK;`,
-      timeout: 10_000,
-      maxBuffer: 16 * 1024 * 1024,
-    },
+  let stdout = "";
+  let stderr = "";
+  let callerPid = null;
+  let pidResolve;
+  let pidReject;
+  const pidReady = new Promise((resolvePromise, rejectPromise) => {
+    pidResolve = resolvePromise;
+    pidReject = rejectPromise;
+  });
+  const completion = new Promise((resolvePromise, rejectPromise) => {
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const match = stdout.match(/A4_STATEMENT_PID\|([0-9]+)/u);
+      if (match && callerPid === null) {
+        callerPid = Number(match[1]);
+        pidResolve(callerPid);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (cause) => {
+      if (callerPid === null) pidReject(cause);
+      rejectPromise(cause);
+    });
+    child.on("close", (code) => {
+      if (callerPid === null) {
+        pidReject(new Error(`statement caller closed before PID: ${stderr}`));
+      }
+      resolvePromise({ code });
+    });
+  });
+  child.stdin.write(
+    `\\set ON_ERROR_STOP on\n\\set VERBOSITY terse\nSELECT 'A4_STATEMENT_PID|'||pg_backend_pid();\n`,
   );
-  assert.equal(result.error, undefined, result.error?.message);
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  const jsonLines = result.stdout
-    .trim()
-    .split("\n")
-    .filter((line) => line.startsWith("{"));
-  assert.equal(jsonLines.length, 2, result.stdout);
-  return jsonLines.map((line) => JSON.parse(line));
+  let startedAt;
+  try {
+    await bounded(pidReady, 5_000, "statement caller PID readiness");
+    startedAt = Date.now();
+    child.stdin.end(`BEGIN;
+      ${fixtureSql(scenario.fixture)}
+      CREATE TEMP TABLE a4_statement_observed(
+        stage text PRIMARY KEY,value jsonb NOT NULL
+      ) ON COMMIT DROP;
+      GRANT SELECT,INSERT ON a4_statement_observed TO app_user;
+      SET SESSION AUTHORIZATION app_user;
+      SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
+      INSERT INTO a4_statement_observed VALUES (
+        'preA',${semanticStateSql(WORKSPACE_A)}
+      );
+      INSERT INTO a4_statement_observed VALUES (
+        'preAFull',${fullStateSql(WORKSPACE_A)}
+      );
+      SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
+      INSERT INTO a4_statement_observed VALUES (
+        'preBFull',${fullStateSql(WORKSPACE_B)}
+      );
+      SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
+      SAVEPOINT a4_statement_call;
+      \\set ON_ERROR_STOP off
+      SELECT * FROM public.resolve_organization_identity_for_raw_v1(
+        '${WORKSPACE_A}','${scenario.rawRecordId ?? RAW_A}'
+      );
+      \\echo A4_ERROR_SQLSTATE|:LAST_ERROR_SQLSTATE
+      ROLLBACK TO SAVEPOINT a4_statement_call;
+      \\set ON_ERROR_STOP on
+      INSERT INTO a4_statement_observed VALUES (
+        'stageFired',to_jsonb(pg_advisory_unlock(
+          hashtextextended('${scenario.stageLockKey}',0)
+        ))
+      );
+      INSERT INTO a4_statement_observed VALUES (
+        'postA',${semanticStateSql(WORKSPACE_A)}
+      );
+      INSERT INTO a4_statement_observed VALUES (
+        'postAFull',${fullStateSql(WORKSPACE_A)}
+      );
+      SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
+      INSERT INTO a4_statement_observed VALUES (
+        'postBFull',${fullStateSql(WORKSPACE_B)}
+      );
+      SELECT jsonb_object_agg(stage,value ORDER BY stage)::text
+      FROM a4_statement_observed;
+      ROLLBACK;`);
+    const result = await bounded(
+      completion,
+      scenario.processTimeout,
+      "statement caller process guard",
+    );
+    assert.equal(result.code, 0, `${stdout}\n${stderr}`);
+    const stateMatch = stdout.match(/A4_ERROR_SQLSTATE\|([0-9A-Z]{5})/u);
+    const messageMatch = stderr.match(/^ERROR:\s+(.+)$/mu);
+    const jsonLine = stdout
+      .trim()
+      .split("\n")
+      .findLast((line) => line.startsWith("{"));
+    assert.ok(stateMatch, `statement caller emitted no SQLSTATE:\n${stdout}`);
+    assert.ok(
+      messageMatch,
+      `statement caller emitted no fixed error:\n${stderr}`,
+    );
+    assert.ok(
+      jsonLine,
+      `statement caller emitted no full readback:\n${stdout}`,
+    );
+    return {
+      elapsedMs: Date.now() - startedAt,
+      outcome: error(stateMatch[1], messageMatch[1]),
+      observed: JSON.parse(jsonLine),
+      output: stderr,
+      callerPid,
+    };
+  } catch (cause) {
+    if (callerPid !== null) terminateExactBackend(callerPid);
+    child.kill("SIGTERM");
+    try {
+      await bounded(completion, 3_000, "statement forced completion");
+    } catch {
+      // The exact PID cleanup below is the authoritative terminal check.
+    }
+    throw cause;
+  } finally {
+    if (callerPid !== null) assertBackendCleanup(callerPid);
+    else assertApplicationCleanup("a4-statement-caller");
+  }
 }
 
 const CREATE_PRE = state({
@@ -894,19 +1793,13 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
       fixture: {
         raws: [RAW_CREATE],
         companies: [COMPANY_FORGED_STATE],
-        extraSql: deterministicIdTrigger(
-          "canonical_company",
-          "id",
-          `NEW.workspace_id='${WORKSPACE_A}' AND NEW.dedupe_key='n:a4 create:de'`,
-          COMPANY_C,
-        ),
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: CREATE_PRE,
-      expectedOutcome: boundResult({
+      expectedOutcome: createdResult({
         companyId: COMPANY_C,
         matchRule: "identity_v2",
         inputHash: INPUT_CREATE,
-        companyCreated: true,
         identifierCount: 1,
       }),
       expectedPost: CREATE_POST,
@@ -916,6 +1809,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
       fixture: {
         raws: [RAW_LAZY],
         companies: [COMPANY_LAZY, COMPANY_FORGED_STATE],
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: LAZY_PRE,
       expectedOutcome: boundResult({
@@ -931,6 +1825,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
         raws: [RAW_CREATE],
         companies: [COMPANY_A_BASE, COMPANY_FORGED_STATE],
         identifiers: [REGISTRY_IDENTIFIER_A],
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: BIND_PRE,
       expectedOutcome: boundResult({
@@ -947,12 +1842,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
         raws: [RAW_CREATE],
         companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER, COMPANY_FORGED_STATE],
         identifiers: [REGISTRY_IDENTIFIER_A],
-        extraSql: deterministicIdTrigger(
-          "organization_identity_conflict",
-          "id",
-          `NEW.workspace_id='${WORKSPACE_A}'`,
-          CONFLICT,
-        ),
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: state({
         raws: [rawView(RAW_CREATE)],
@@ -1051,11 +1941,146 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
         companies: [COMPANY_LAZY],
         links: [legacyLink],
       }),
-      expectedOutcome: error("P0001", "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED"),
+      expectedOutcome: legacyBoundResult({
+        companyId: COMPANY_A,
+        matchRule: "name_country",
+      }),
+      expectNoWrite: true,
       expectedPost: state({
         raws: [rawView(RAW_LAZY)],
         companies: [COMPANY_LAZY],
         links: [legacyLink],
+      }),
+    },
+    {
+      name: "legacy target drift is rejected after deterministic blocker revalidation",
+      fixture: {
+        raws: [RAW_LAZY],
+        companies: [COMPANY_LAZY, COMPANY_C_ROOT],
+        links: [
+          link({
+            canonicalId: COMPANY_C,
+            matchRule: "name_country",
+            confidence: 0.8,
+            resolverVersion: "identity-v1",
+            inputHash: "legacy",
+          }),
+        ],
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_LAZY)],
+        companies: [COMPANY_LAZY, COMPANY_C_ROOT],
+        links: [
+          link({
+            canonicalId: COMPANY_C,
+            matchRule: "name_country",
+            confidence: 0.8,
+            resolverVersion: "identity-v1",
+            inputHash: "legacy",
+          }),
+        ],
+      }),
+      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+      expectedPost: state({
+        raws: [rawView(RAW_LAZY)],
+        companies: [COMPANY_LAZY, COMPANY_C_ROOT],
+        links: [
+          link({
+            canonicalId: COMPANY_C,
+            matchRule: "name_country",
+            confidence: 0.8,
+            resolverVersion: "identity-v1",
+            inputHash: "legacy",
+          }),
+        ],
+      }),
+    },
+    {
+      name: "ambiguous multiple legacy links are rejected without arbitrary readback",
+      fixture: {
+        raws: [RAW_LAZY],
+        companies: [COMPANY_LAZY, COMPANY_C_ROOT],
+        links: [
+          legacyLink,
+          link({
+            canonicalId: COMPANY_C,
+            matchRule: "name_country",
+            confidence: 0.8,
+            resolverVersion: "identity-v1",
+            inputHash: "legacy",
+          }),
+        ],
+        bypassTriggers: true,
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_LAZY)],
+        companies: [COMPANY_LAZY, COMPANY_C_ROOT],
+        links: [
+          legacyLink,
+          link({
+            canonicalId: COMPANY_C,
+            matchRule: "name_country",
+            confidence: 0.8,
+            resolverVersion: "identity-v1",
+            inputHash: "legacy",
+          }),
+        ],
+      }),
+      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+      expectedPost: state({
+        raws: [rawView(RAW_LAZY)],
+        companies: [COMPANY_LAZY, COMPANY_C_ROOT],
+        links: [
+          legacyLink,
+          link({
+            canonicalId: COMPANY_C,
+            matchRule: "name_country",
+            confidence: 0.8,
+            resolverVersion: "identity-v1",
+            inputHash: "legacy",
+          }),
+        ],
+      }),
+    },
+    {
+      name: "legacy replay checks current suppression before read-only receipt",
+      fixture: {
+        raws: [RAW_LAZY],
+        companies: [COMPANY_LAZY],
+        links: [legacyLink],
+        suppressions: [
+          {
+            type: "company_name",
+            value: "a4 lazy gmbh",
+            protectionClass: "LEGAL",
+          },
+        ],
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_LAZY)],
+        companies: [COMPANY_LAZY],
+        links: [legacyLink],
+        suppressions: [
+          {
+            type: "company_name",
+            value: "a4 lazy gmbh",
+            protectionClass: "LEGAL",
+          },
+        ],
+      }),
+      expectedOutcome: suppressedResult(),
+      expectNoWrite: true,
+      expectedPost: state({
+        raws: [rawView(RAW_LAZY)],
+        companies: [COMPANY_LAZY],
+        links: [legacyLink],
+        suppressions: [
+          {
+            type: "company_name",
+            value: "a4 lazy gmbh",
+            protectionClass: "LEGAL",
+          },
+        ],
       }),
     },
     {
@@ -1079,6 +2104,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
         replayed: true,
         identifierCount: 1,
       }),
+      expectNoWrite: true,
       expectedPost: state({
         raws: [rawView(RAW_CREATE)],
         companies: [COMPANY_A_BASE],
@@ -1319,7 +2345,8 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
           },
         ],
       }),
-      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_SUPPRESSED"),
+      expectedOutcome: suppressedResult(),
+      expectNoWrite: true,
       expectedPost: state({
         raws: [rawView(RAW_CREATE)],
         companies: [COMPANY_A_BASE],
@@ -1412,12 +2439,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
       name: "identifier split derives the exact facts, parties and links",
       fixture: {
         ...splitBase,
-        extraSql: deterministicIdTrigger(
-          "organization_identity_conflict",
-          "id",
-          `NEW.workspace_id='${WORKSPACE_A}'`,
-          CONFLICT,
-        ),
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: splitPre,
       expectedOutcome: conflictResult({
@@ -1449,12 +2471,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
           mapping(COMPANY_B, COMPANY_D),
         ],
         bypassTriggers: true,
-        extraSql: deterministicIdTrigger(
-          "organization_identity_conflict",
-          "id",
-          `NEW.workspace_id='${WORKSPACE_A}'`,
-          CONFLICT,
-        ),
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: state({
         raws: [rawView(RAW_SPLIT)],
@@ -1514,6 +2531,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
       fixture: exactConflictFixture,
       expectedPre: DISAGREEMENT_REPLAY_PRE,
       expectedOutcome: conflictResult({ replayed: true }),
+      expectNoWrite: true,
       expectedPost: DISAGREEMENT_REPLAY_PRE,
     },
     {
@@ -1526,6 +2544,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
         conflicts: [DISAGREEMENT_CONFLICT],
         parties: DISAGREEMENT_PARTIES,
         links: DISAGREEMENT_LINKS_A,
+        extraSql: deterministicWritesSql(),
       },
       expectedPre: state({
         raws: [rawView(RAW_CREATE), rawView(RAW_CREATE_B)],
@@ -1576,6 +2595,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
           conflictState({ facts: { ...conflictFacts(), unexpected: "drift" } }),
         ],
         parties: DISAGREEMENT_PARTIES,
+        links: DISAGREEMENT_LINKS_A,
         bypassTriggers: true,
       },
       expectedPre: state({
@@ -1586,6 +2606,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
           conflictState({ facts: { ...conflictFacts(), unexpected: "drift" } }),
         ],
         parties: DISAGREEMENT_PARTIES,
+        links: DISAGREEMENT_LINKS_A,
       }),
       expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
       expectedPost: state({
@@ -1596,6 +2617,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
           conflictState({ facts: { ...conflictFacts(), unexpected: "drift" } }),
         ],
         parties: DISAGREEMENT_PARTIES,
+        links: DISAGREEMENT_LINKS_A,
       }),
     },
     {
@@ -1746,87 +2768,121 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
     identifiers: [REGISTRY_IDENTIFIER_A],
   });
-  const forceCompanyId = deterministicIdTrigger(
+  const multiIdentifierPreimage = state({ raws: [rawView(RAW_SPLIT)] });
+  const companyAfter = afterStageFault(
     "canonical_company",
-    "id",
-    `NEW.workspace_id='${WORKSPACE_A}' AND NEW.dedupe_key='n:a4 create:de'`,
-    COMPANY_C,
+    "company_after",
+    1,
+    "ZX101",
+    "A4_COMPANY_AFTER_FAULT",
   );
+  const identifierFirst = afterStageFault(
+    "organization_identifier",
+    "identifier_first",
+    1,
+    "ZX102",
+    "A4_IDENTIFIER_FIRST_FAULT",
+  );
+  const identifierLast = afterStageFault(
+    "organization_identifier",
+    "identifier_last",
+    2,
+    "ZX103",
+    "A4_IDENTIFIER_LAST_FAULT",
+  );
+  const conflictAfter = afterStageFault(
+    "organization_identity_conflict",
+    "conflict_after",
+    1,
+    "ZX104",
+    "A4_CONFLICT_AFTER_FAULT",
+  );
+  const partyFirst = afterStageFault(
+    "organization_identity_conflict_party",
+    "party_first",
+    1,
+    "ZX105",
+    "A4_PARTY_FIRST_FAULT",
+  );
+  const partyMiddle = afterStageFault(
+    "organization_identity_conflict_party",
+    "party_middle",
+    2,
+    "ZX106",
+    "A4_PARTY_MIDDLE_FAULT",
+  );
+  const linkFirst = afterStageFault(
+    "identity_link",
+    "link_first",
+    1,
+    "ZX107",
+    "A4_LINK_FIRST_FAULT",
+  );
+  const linkFinal = afterStageFault(
+    "identity_link",
+    "link_final",
+    2,
+    "ZX108",
+    "A4_LINK_FINAL_FAULT",
+  );
+  const fixedFault = (name, fixture, preimage, stage) => ({
+    name,
+    fixture: { ...fixture, extraSql: stage.sql },
+    expectedPre: preimage,
+    expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+    expectedPost: preimage,
+    stageLockKey: stage.stageLockKey,
+    forbiddenPublicFragments: stage.forbidden,
+  });
   const faultCases = [
-    {
-      name: "company insert fault propagates exactly and restores full preimage",
-      fixture: {
-        raws: [RAW_CREATE],
-        extraSql: faultTrigger(
-          "canonical_company",
-          "ZX101",
-          "A4_COMPANY_INSERT_FAULT",
-        ),
-      },
-      expectedPre: createOnlyPreimage,
-      expectedOutcome: error("ZX101", "A4_COMPANY_INSERT_FAULT"),
-      expectedPost: createOnlyPreimage,
-    },
-    {
-      name: "identifier insert fault propagates exactly and restores full preimage",
-      fixture: {
-        raws: [RAW_CREATE],
-        extraSql: `${forceCompanyId}
-          ${faultTrigger(
-            "organization_identifier",
-            "ZX102",
-            "A4_IDENTIFIER_INSERT_FAULT",
-          )}`,
-      },
-      expectedPre: createOnlyPreimage,
-      expectedOutcome: error("ZX102", "A4_IDENTIFIER_INSERT_FAULT"),
-      expectedPost: createOnlyPreimage,
-    },
-    {
-      name: "conflict insert fault propagates exactly and restores full preimage",
-      fixture: {
-        ...DISAGREEMENT_BASE,
-        extraSql: faultTrigger(
-          "organization_identity_conflict",
-          "ZX103",
-          "A4_CONFLICT_INSERT_FAULT",
-        ),
-      },
-      expectedPre: disagreementPreimage,
-      expectedOutcome: error("ZX103", "A4_CONFLICT_INSERT_FAULT"),
-      expectedPost: disagreementPreimage,
-    },
-    {
-      name: "party insert fault propagates exactly and restores full preimage",
-      fixture: {
-        ...DISAGREEMENT_BASE,
-        extraSql: `${deterministicIdTrigger(
-          "organization_identity_conflict",
-          "id",
-          `NEW.workspace_id='${WORKSPACE_A}'`,
-          CONFLICT,
-        )}
-          ${faultTrigger(
-            "organization_identity_conflict_party",
-            "ZX104",
-            "A4_PARTY_INSERT_FAULT",
-          )}`,
-      },
-      expectedPre: disagreementPreimage,
-      expectedOutcome: error("ZX104", "A4_PARTY_INSERT_FAULT"),
-      expectedPost: disagreementPreimage,
-    },
-    {
-      name: "link insert fault propagates exactly and restores full preimage",
-      fixture: {
-        raws: [RAW_CREATE],
-        extraSql: `${forceCompanyId}
-          ${faultTrigger("identity_link", "ZX105", "A4_LINK_INSERT_FAULT")}`,
-      },
-      expectedPre: createOnlyPreimage,
-      expectedOutcome: error("ZX105", "A4_LINK_INSERT_FAULT"),
-      expectedPost: createOnlyPreimage,
-    },
+    fixedFault(
+      "company AFTER INSERT fault restores the complete preimage",
+      { raws: [RAW_CREATE] },
+      createOnlyPreimage,
+      companyAfter,
+    ),
+    fixedFault(
+      "identifier first AFTER INSERT fault restores company and identifier preimage",
+      { raws: [RAW_SPLIT] },
+      multiIdentifierPreimage,
+      identifierFirst,
+    ),
+    fixedFault(
+      "identifier last AFTER INSERT fault restores both identifiers and company",
+      { raws: [RAW_SPLIT] },
+      multiIdentifierPreimage,
+      identifierLast,
+    ),
+    fixedFault(
+      "conflict AFTER INSERT fault restores the disagreement preimage",
+      DISAGREEMENT_BASE,
+      disagreementPreimage,
+      conflictAfter,
+    ),
+    fixedFault(
+      "party first AFTER INSERT fault restores conflict and party preimage",
+      DISAGREEMENT_BASE,
+      disagreementPreimage,
+      partyFirst,
+    ),
+    fixedFault(
+      "party middle AFTER INSERT fault restores all prior party writes",
+      DISAGREEMENT_BASE,
+      disagreementPreimage,
+      partyMiddle,
+    ),
+    fixedFault(
+      "link first AFTER INSERT fault restores conflict parties and link preimage",
+      DISAGREEMENT_BASE,
+      disagreementPreimage,
+      linkFirst,
+    ),
+    fixedFault(
+      "final link AFTER INSERT fault restores the full conflict occurrence",
+      DISAGREEMENT_BASE,
+      disagreementPreimage,
+      linkFinal,
+    ),
   ];
   for (const scenario of faultCases) {
     it(scenario.name, () => assertScenario(scenario));
@@ -1838,8 +2894,8 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
         'acquisition-suppression-policy:${WORKSPACE_A}',0
       ))`,
     );
-    await holder.ready;
     try {
+      await holder.ready;
       const elapsedMs = assertScenario({
         fixture: { raws: [RAW_CREATE] },
         expectedPre: createOnlyPreimage,
@@ -1856,29 +2912,73 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     }
   });
 
-  it("function-owned statement timeout cancels a bounded downstream trigger", () => {
+  it("function-owned statement timeout returns a fixed no-leak token", async () => {
+    const stageLockKey = "a4-hidden-stage:statement_timeout";
     const slowTrigger = `CREATE FUNCTION pg_temp.a4_slow_company()
       RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        PERFORM pg_advisory_lock(hashtextextended('${stageLockKey}',0));
         PERFORM pg_sleep(61);
         RETURN NEW;
       END $$;
-      CREATE TRIGGER a4_slow_company BEFORE INSERT ON canonical_company
+      CREATE TRIGGER a4_slow_company AFTER INSERT ON canonical_company
       FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_slow_company();`;
-    const observed = uncaughtScenario({
+    const result = await runStatementScenario({
       fixture: { raws: [RAW_CREATE], extraSql: slowTrigger },
       processTimeout: 66_000,
+      stageLockKey,
     });
-    const [workspaceState, crossState] = emptyReadback();
-    assert.deepEqual(workspaceState, state());
-    assert.deepEqual(crossState, EMPTY_CROSS);
-    assert.deepEqual(observed.outcome, {
+    assert.deepEqual(result.observed.preA, createOnlyPreimage);
+    assertFullColumns(result.observed.preAFull);
+    assertSentinel(result.observed.preBFull);
+    assert.deepEqual(result.observed.postAFull, result.observed.preAFull);
+    assert.deepEqual(result.observed.postBFull, result.observed.preBFull);
+    for (const forbidden of [
+      "canceling statement due to statement timeout",
+      "CONTEXT:",
+      "DETAIL:",
+      "HINT:",
+      "fixture.invalid",
+      "A4_STATEMENT_HIDDEN_FAULT",
+      "ZX109",
+      "not-a-uuid-a4",
+      "PL/pgSQL function",
+      "a4_slow_company",
+      "pg_sleep",
+      WORKSPACE_A,
+      RAW_A,
+      COMPANY_A,
+    ]) {
+      assert.equal(result.output.includes(forbidden), false);
+    }
+    const desired = {
       kind: "error",
       sqlstate: "57014",
-      message: "canceling statement due to statement timeout",
-    });
+      message: "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    };
+    if (
+      !isDeepStrictEqual(result.outcome, desired) ||
+      result.observed.stageFired !== true
+    ) {
+      assert.fail(
+        [
+          "A4_EXPECTED_BEHAVIOR_MISMATCH",
+          `actual=${JSON.stringify(result.outcome)}`,
+          `desired=${JSON.stringify(desired)}`,
+          `stageFired=${result.observed.stageFired}`,
+          `fullPreimageExact=${isDeepStrictEqual(
+            result.observed.postAFull,
+            result.observed.preAFull,
+          )}`,
+          `workspaceBSentinelExact=${isDeepStrictEqual(
+            result.observed.postBFull,
+            result.observed.preBFull,
+          )}`,
+        ].join("|"),
+      );
+    }
     assert.ok(
-      observed.elapsedMs >= 55_000 && observed.elapsedMs < 66_000,
-      `function-owned statement timeout was not bounded: ${observed.elapsedMs}`,
+      result.elapsedMs >= 55_000 && result.elapsedMs < 66_000,
+      `function-owned statement timeout was not bounded: ${result.elapsedMs}`,
     );
   });
 });
