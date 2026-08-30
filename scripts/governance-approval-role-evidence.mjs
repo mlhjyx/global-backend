@@ -33,6 +33,15 @@ const SECURITY_EVIDENCE_KEYS = Object.freeze([
   'later_changes_requested',
 ]);
 
+export const CODEOWNER_ACTOR_SHARING_POLICY = deepFreeze({
+  schema_version: 'codeowner-actor-sharing-policy/v1',
+  codeowner_actor_reuse: 'ALLOWED_WITH_DISTINCT_EVIDENCE_IDS',
+  evidence_id_uniqueness: 'ALL_HUMAN_AND_MACHINE_EVIDENCE_IDS_DISTINCT',
+  dual_role_coapprover: 'DISTINCT_LEGAL_OR_QA_REQUIRED',
+  minimum_distinct_humans: 2,
+  security_actor_isolation_roles: ['OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'OWN-QA-EVIDENCE'],
+});
+
 export const parseApprovalReviewCommand = (body) => {
   if (typeof body !== 'string' || Buffer.byteLength(body, 'utf8') > 512) {
     throw approvalError('APPROVAL_REVIEW_COMMAND_INVALID');
@@ -132,11 +141,15 @@ const validateDualRolePolicy = (candidate, policy, now) => {
     || duration <= 0
     || duration > 30 * 24 * 60 * 60 * 1000
     || !['OWN-QA-EVIDENCE', 'LEGAL-REVIEW'].includes(exception.coapprover_role)
-    || exception.minimum_distinct_human_actors !== 2
+    || exception.minimum_distinct_human_actors !== CODEOWNER_ACTOR_SHARING_POLICY.minimum_distinct_humans
     || exception.cannot_authorize_merge !== true
     || exception.cannot_authorize_release !== true
     || candidate.legal_input?.status !== 'NO_BLOCKER_RECORDED'
-    || (productActor === privacyActor && (coapprover === productActor || !isSafePositiveInteger(coapprover)))
+    || (
+      CODEOWNER_ACTOR_SHARING_POLICY.dual_role_coapprover === 'DISTINCT_LEGAL_OR_QA_REQUIRED'
+      && productActor === privacyActor
+      && (coapprover === productActor || !isSafePositiveInteger(coapprover))
+    )
   ) return ['APPROVAL_DISTINCT_ACTORS_REQUIRED'];
   return [];
 };
@@ -237,7 +250,7 @@ const validateLegal = (candidate, authority, now) => {
   return [];
 };
 
-const validateGlobalIsolation = (candidate, policy) => {
+const validateGlobalIsolation = (candidate, _policy) => {
   const codes = [];
   const humanIds = [
     candidate.product_review?.review_id,
@@ -250,7 +263,11 @@ const validateGlobalIsolation = (candidate, policy) => {
     ? candidate.machine_checks.flatMap((check) => [check?.check_run_id, check?.check_suite_id])
     : [];
   const allIds = [...humanIds, ...machineIds];
-  if (allIds.some((id) => !isSafePositiveInteger(id)) || new Set(allIds).size !== allIds.length) {
+  if (
+    CODEOWNER_ACTOR_SHARING_POLICY.evidence_id_uniqueness
+      === 'ALL_HUMAN_AND_MACHINE_EVIDENCE_IDS_DISTINCT'
+    && (allIds.some((id) => !isSafePositiveInteger(id)) || new Set(allIds).size !== allIds.length)
+  ) {
     codes.push('APPROVAL_EVIDENCE_SLOT_REUSE');
   }
   if (
@@ -265,13 +282,22 @@ const validateGlobalIsolation = (candidate, policy) => {
     candidate.security_review?.actor_id,
     candidate.codeowner_review?.actor?.id,
   ];
-  const roleActors = actors.slice(0, 4);
-  const comparableActors = (
-    policy.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
-    && actors[1] === actors[0]
-  ) ? [actors[0], ...roleActors.slice(2)] : roleActors;
-  if (new Set(comparableActors).size !== comparableActors.length) codes.push('APPROVAL_EVIDENCE_SLOT_REUSE');
-  if (actors.slice(0, 3).includes(actors[3])) {
+  const actorByRole = new Map([
+    ['OWN-PRODUCT', actors[0]],
+    ['OWN-DATA-PRIVACY', actors[1]],
+    ['OWN-QA-EVIDENCE', actors[2]],
+  ]);
+  const securityConflicts = CODEOWNER_ACTOR_SHARING_POLICY.security_actor_isolation_roles
+    .map((role) => actorByRole.get(role))
+    .includes(actors[3]);
+  const codeownerSharesRoleActor = actors.slice(0, 4).includes(actors[4]);
+  if (
+    codeownerSharesRoleActor
+    && CODEOWNER_ACTOR_SHARING_POLICY.codeowner_actor_reuse
+      !== 'ALLOWED_WITH_DISTINCT_EVIDENCE_IDS'
+  ) codes.push('APPROVAL_EVIDENCE_SLOT_REUSE');
+  if (securityConflicts) {
+    codes.push('APPROVAL_EVIDENCE_SLOT_REUSE');
     codes.push('APPROVAL_SECURITY_REVIEW_REUSED');
   }
   return codes;
@@ -294,6 +320,9 @@ export const validateRoleEvidence = (candidate, authority, policy, now) => {
     candidate.security_review?.actor_id,
     candidate.codeowner_review?.actor?.id,
   ].filter(isSafePositiveInteger));
-  if (humanActors.size < policy.minimum_distinct_human_actors) codes.push('APPROVAL_DISTINCT_ACTORS_REQUIRED');
+  const minimumHumans = policy.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
+    ? Math.max(policy.minimum_distinct_human_actors, CODEOWNER_ACTOR_SHARING_POLICY.minimum_distinct_humans)
+    : policy.minimum_distinct_human_actors;
+  if (humanActors.size < minimumHumans) codes.push('APPROVAL_DISTINCT_ACTORS_REQUIRED');
   return codes;
 };

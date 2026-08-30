@@ -692,6 +692,7 @@ test('FIX3 closed CODEOWNER actor-sharing policy contract governs role validatio
 
     const source = await readFile(new URL('./governance-approval-role-evidence.mjs', import.meta.url), 'utf8');
     assert.ok((source.match(/CODEOWNER_ACTOR_SHARING_POLICY/g) ?? []).length >= 3);
+    assert.match(source, /CODEOWNER_ACTOR_SHARING_POLICY\.codeowner_actor_reuse/);
   } catch (error) {
     fixMutationFailures.set(mutationId, error);
   }
