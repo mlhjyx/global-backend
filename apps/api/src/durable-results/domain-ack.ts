@@ -204,6 +204,11 @@ export class PostgresDomainAckRepository implements DomainAckRepository<DomainAc
     record: DomainAckRecord,
     apply: (transaction: DomainAckTransaction) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>> {
+    await this.transaction.$queryRaw(
+      Prisma.sql`SELECT public.lock_execution_domain_ack_authority_first_v1(
+        ${record.scopeKey}, ${record.authorityId}::uuid
+      )`,
+    );
     const locked = parseAckRow(
       await this.transaction.$queryRaw<PostgresDomainAckRow[]>(
         Prisma.sql`SELECT * FROM apply_execution_domain_ack_v1(
