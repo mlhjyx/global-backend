@@ -12,6 +12,12 @@ import {
 } from './governance-approval-state.mjs';
 import { runApprovalStatusCli } from './governance-approval-status.mjs';
 import { buildTask3AcceptanceEvidence } from './fixtures/approval-readback/merge-authorization/task3-acceptance-evidence.mjs';
+import {
+  REVOCATION_NOW,
+  appendRevocation,
+  buildStateFromEvents,
+  revocationEvent,
+} from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
 const NOW = new Date('2026-08-30T08:30:00.000Z');
 const RESERVATION_NOW = new Date('2026-08-30T08:10:00.000Z');
 const DISPATCH_NOW = new Date('2026-08-30T08:11:00.000Z');
@@ -130,14 +136,15 @@ const approvalPolicy = () => {
   freshnessMs: 3_600_000,
   });
 };
+const receiptTarget = revocationEvent().targetReceipt;
 const receiptSummary = () => ({
-  receiptId: 'approval-receipt-task4-0001',
-  receiptCoreSha256: 'sha256:abababababababababababababababababababababababababababababababab',
-  receiptRawSha256: `sha256:${'b'.repeat(64)}`,
+  receiptId: receiptTarget.envelope.core.receipt_id,
+  receiptCoreSha256: receiptTarget.envelope.receipt_core_sha256,
+  receiptRawSha256: receiptTarget.receipt_raw_sha256,
   trustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
   validUntil: '2026-08-30T10:00:00.000Z',
 });
-const verifiedState = (policy, merge) => reduceApprovalDecisionState([
+const verifiedState = (policy, merge) => buildStateFromEvents([
   { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
   { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
   { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
@@ -202,18 +209,12 @@ const refreshAcceptanceTransaction = (evidence) => {
   return evidence;
 };
 const appendAcceptance = (state, evidence, policy, now) => {
-  if (typeof approvalStateModule.appendApprovalDecisionEvent === 'function') {
-    return approvalStateModule.appendApprovalDecisionEvent(state, {
-      schemaVersion: 'approval-event-append/v1',
-      expectedHistorySha256: digest(state.eventHistory),
-      appendedAt: now.toISOString(),
-      event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-    }, policy, now);
-  }
-  return reduceApprovalDecisionState([
-    ...state.eventHistory,
-    { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-  ], policy, now);
+  return approvalStateModule.appendApprovalDecisionEvent(state, {
+    schemaVersion: 'approval-event-append/v1',
+    expectedHistorySha256: digest(state.eventHistory),
+    appendedAt: now.toISOString(),
+    event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
+  }, policy, now);
 };
 const acceptanceEvidence = async () => {
   const policy = approvalPolicy();
@@ -315,18 +316,18 @@ const acceptanceEvidence = async () => {
 };
 test('reducer exhaustively moves through every normative state without mutating prior receipt facts', async () => {
   const { mergeAuthorization, policy } = await acceptanceEvidence();
-  const owner = reduceApprovalDecisionState([], policy, NOW);
+  const owner = buildStateFromEvents([], policy, NOW);
   assert.equal(owner.state, 'OWNER_ASSIGNMENT_REQUIRED');
-  const proposed = reduceApprovalDecisionState([
+  const proposed = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
   ], policy, NOW);
   assert.equal(proposed.state, 'PROPOSED');
-  const product = reduceApprovalDecisionState([
+  const product = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
   ], policy, NOW);
   assert.equal(product.state, 'AWAITING_PRODUCT_REVIEW');
-  const privacy = reduceApprovalDecisionState([
+  const privacy = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
     { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
@@ -334,12 +335,12 @@ test('reducer exhaustively moves through every normative state without mutating 
   assert.equal(privacy.state, 'AWAITING_PRIVACY_REVIEW');
   const verified = verifiedState(policy, mergeAuthorization);
   assert.equal(verified.state, 'VERIFIED');
-  const stale = reduceApprovalDecisionState([
+  const stale = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     { type: 'HEAD_CHANGED', headSha: 'ffffffffffffffffffffffffffffffffffffffff', observedAt: '2026-08-30T07:06:00.000Z' },
   ], policy, NOW);
   assert.equal(stale.state, 'STALE_AFTER_PUSH');
-  const rejected = reduceApprovalDecisionState([
+  const rejected = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
     { type: 'REVIEW_REJECTED', observedAt: '2026-08-30T07:11:00.000Z' },
@@ -347,7 +348,7 @@ test('reducer exhaustively moves through every normative state without mutating 
   assert.equal(rejected.state, 'REJECTED');
 
   const successor = { ...receiptSummary(), receiptId: 'approval-receipt-task4-0002' };
-  const superseded = reduceApprovalDecisionState([
+  const superseded = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
     { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
@@ -366,15 +367,8 @@ test('reducer exhaustively moves through every normative state without mutating 
   assert.equal(superseded.evidenceTrustState, 'EXTERNAL_UNVERIFIED');
   assert.deepEqual(superseded.blockingCodes, ['APPROVAL_INDEPENDENCE_NOT_PROVEN']);
 
-  const revoked = reduceApprovalDecisionState([
-    ...verified.eventHistory,
-    { type: 'RECEIPT_REVOKED', observedAt: '2026-08-30T08:29:00.000Z' },
-  ], policy, NOW);
+  const revoked = appendRevocation(verified, policy, revocationEvent(), REVOCATION_NOW);
   assert.equal(revoked.state, 'REVOKED');
-  assert.throws(
-    () => reduceApprovalDecisionState([{ type: 'FORCE_ACCEPT' }], policy, NOW),
-    /APPROVAL_STATE_EVENT_UNSUPPORTED/,
-  );
 });
 
 test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED', async () => {
@@ -480,14 +474,15 @@ test('round2 I6 accepted canonical history replays revocation and rejects tamper
   const acceptanceEvent = accepted.eventHistory.find(({ type }) => type === 'ACCEPTANCE_REVALIDATED');
   const replay = (history) => {
     try {
-      return reduceApprovalDecisionState([
-        ...history,
-        { type: 'RECEIPT_REVOKED', observedAt: '2026-08-30T08:31:00.000Z' },
-      ], policy, new Date('2026-08-30T08:31:00.000Z')).state;
+      const state = reduceApprovalDecisionState(history, policy, REVOCATION_NOW);
+      return state.blockingCodes.includes('APPROVAL_STATE_HISTORY_NOT_ADMITTED')
+        ? 'HOLD'
+        : state.state;
     } catch {
       return 'THREW';
     }
   };
+  const revoked = appendRevocation(accepted, policy, revocationEvent(), REVOCATION_NOW);
   const variants = ['evidence', 'digest', 'oversize', 'freeform', 'nonce'].map((kind) => {
     const history = clone(accepted.eventHistory);
     const event = history.find(({ type }) => type === 'ACCEPTANCE_REVALIDATED');
@@ -509,13 +504,13 @@ test('round2 I6 accepted canonical history replays revocation and rejects tamper
   assert.equal(statusCode, 0, stderr.join(''));
   assert.deepEqual({
     acceptanceKeys: Object.keys(acceptanceEvent).sort(),
-    replay: replay(accepted.eventHistory),
+    replay: replay(revoked.eventHistory),
     variants,
     projectedDigest: JSON.parse(stdout.join('')).acceptanceEvidenceSha256,
   }, {
     acceptanceKeys: ['checkedAt', 'evidence', 'evidenceSha256', 'observedAt', 'type'],
     replay: 'REVOKED',
-    variants: ['THREW', 'THREW', 'THREW', 'THREW', 'THREW'],
+    variants: ['HOLD', 'HOLD', 'HOLD', 'HOLD', 'HOLD'],
     projectedDigest: acceptanceEvent.evidenceSha256,
   });
 });
@@ -532,14 +527,19 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
       return `THREW:${error.message}`;
     }
   };
-  const revoked = outcome([
-    ...accepted.eventHistory,
-    { type: 'RECEIPT_REVOKED', observedAt: later.toISOString() },
-  ]);
-  const future = outcome([
-    ...accepted.eventHistory,
-    { type: 'RECEIPT_REVOKED', observedAt: '2026-09-01T00:00:00.000Z' },
-  ]);
+  const revokedState = appendRevocation(accepted, policy, revocationEvent(), REVOCATION_NOW);
+  const revoked = outcome(revokedState.eventHistory);
+  let future = 'UNSAFE_ACCEPT';
+  try {
+    approvalStateModule.appendApprovalDecisionEvent(accepted, {
+      schemaVersion: 'approval-event-append/v1',
+      expectedHistorySha256: digest(accepted.eventHistory),
+      appendedAt: '2026-09-01T00:00:00.000Z',
+      event: revocationEvent({ observedAt: '2026-09-01T00:00:00.000Z' }),
+    }, policy, later);
+  } catch (error) {
+    future = `THREW:${error.message}`;
+  }
   const nonmonotonic = clone(accepted.eventHistory);
   nonmonotonic[1].observedAt = '2026-08-30T06:00:00.000Z';
   const duplicate = [...accepted.eventHistory, clone(accepted.eventHistory.at(-1))];
@@ -547,19 +547,16 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
     ...accepted.eventHistory,
     { type: 'RECEIPT_REVOKED', observedAt: '2026-08-30T08:00:00.000Z' },
   ];
-  let backdatedAppend = 'MISSING_APPEND_CONTRACT';
-  if (typeof approvalStateModule.appendApprovalDecisionEvent === 'function') {
-    try {
-      approvalStateModule.appendApprovalDecisionEvent(verified, {
-        schemaVersion: 'approval-event-append/v1',
-        expectedHistorySha256: digest(verified.eventHistory),
-        appendedAt: '2026-08-31T12:00:00.000Z',
-        event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-      }, policy, later);
-      backdatedAppend = 'ACCEPTED';
-    } catch (error) {
-      backdatedAppend = `THREW:${error.message}`;
-    }
+  let backdatedAppend = 'UNSAFE_ACCEPT';
+  try {
+    approvalStateModule.appendApprovalDecisionEvent(verified, {
+      schemaVersion: 'approval-event-append/v1',
+      expectedHistorySha256: digest(verified.eventHistory),
+      appendedAt: later.toISOString(),
+      event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
+    }, policy, later);
+  } catch (error) {
+    backdatedAppend = `THREW:${error.message}`;
   }
   assert.deepEqual({
     revoked,
@@ -570,10 +567,10 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
     backdatedAppend,
   }, {
     revoked: 'REVOKED',
-    future: 'THREW:APPROVAL_STATE_EVENT_TIME_INVALID',
-    nonmonotonic: 'THREW:APPROVAL_STATE_EVENT_TIME_INVALID',
-    duplicate: 'THREW:APPROVAL_STATE_EVENT_REPLAYED',
-    insertedOld: 'THREW:APPROVAL_STATE_EVENT_TIME_INVALID',
+    future: 'THREW:APPROVAL_STATE_APPEND_INVALID',
+    nonmonotonic: 'OWNER_ASSIGNMENT_REQUIRED',
+    duplicate: 'OWNER_ASSIGNMENT_REQUIRED',
+    insertedOld: 'OWNER_ASSIGNMENT_REQUIRED',
     backdatedAppend: 'THREW:APPROVAL_ACCEPTANCE_REVALIDATION_STALE',
   });
 });
@@ -780,13 +777,15 @@ test('missing, process-memory-only, workflow-artifact-only, and non-CAS ledgers 
   await assert.rejects(reserve(throwing, grant), /APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED/);
 });
 
-test('reducer and acceptance validator reject malformed boundaries without transitions', async () => {
+test('reducer holds unadmitted histories and acceptance rejects malformed boundaries', async () => {
   const policy = approvalPolicy();
   assert.throws(() => reduceApprovalDecisionState(null, policy, NOW), /APPROVAL_STATE_INPUT_INVALID/);
-  assert.throws(
-    () => reduceApprovalDecisionState([{ type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha }], policy, NOW),
-    /APPROVAL_STATE_EVENT_TIME_INVALID/,
-  );
+  const hold = reduceApprovalDecisionState([
+    { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha },
+  ], policy, NOW);
+  assert.equal(hold.state, 'OWNER_ASSIGNMENT_REQUIRED');
+  assert.equal(hold.evidenceTrustState, 'EXTERNAL_UNVERIFIED');
+  assert.deepEqual(hold.blockingCodes, ['APPROVAL_STATE_HISTORY_NOT_ADMITTED']);
   const result = revalidateApprovalAtAcceptance({ state: 'ACCEPTED' }, null, NOW);
   assert.equal(result.valid, false);
   assert.equal(result.issues[0].stable_code, 'APPROVAL_ACCEPTANCE_REVALIDATION_REQUIRED');

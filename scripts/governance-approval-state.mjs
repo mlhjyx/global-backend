@@ -22,6 +22,11 @@ import {
   approvalGraphUnsafe,
   inspectApprovalValueGraph,
 } from './governance-approval-safe-traversal.mjs';
+import {
+  buildStoredReceiptRevocationEvent,
+  isClosedStoredReceiptRevocationEvent,
+  storedReceiptRevocationIssue,
+} from './governance-approval-state-revocation.mjs';
 
 export {
   executeReservedMerge,
@@ -73,8 +78,15 @@ const POLICY_KEYS = Object.freeze([
   'liveRulesetSha256', 'acceptanceAllowlist', 'requiredReviews',
   'requiredMachineChecks', 'freshnessMs',
 ]);
+const admittedApprovalHistories = new WeakSet();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
+const admittedHistory = (events) => {
+  const history = events.map((event) => deepFreeze(clone(event)));
+  deepFreeze(history);
+  admittedApprovalHistories.add(history);
+  return history;
+};
 const nowIso = (now) => {
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw approvalError('APPROVAL_NOW_INVALID');
   return now.toISOString();
@@ -129,19 +141,14 @@ const acceptanceEventEvidenceValid = (event) => {
     && Date.parse(event.observedAt) <= Date.parse(event.checkedAt)
   );
 };
-const safeEventRecord = (event) => {
-  if (event.type === 'ACCEPTANCE_REVALIDATED') {
-    return {
-      type: event.type,
-      observedAt: event.observedAt,
-      checkedAt: event.checkedAt,
-      evidence: clone(event.evidence),
-      evidenceSha256: canonicalApprovalDigest(event.evidence),
-    };
-  }
-  return clone(event);
-};
-const baseState = (policy) => ({
+const policyBoundaryValid = (policy) => (
+  isPlainObject(policy)
+  && hasExactKeys(policy.repository, ['id', 'fullName'])
+  && isSafePositiveInteger(policy.repository.id)
+  && typeof policy.repository.fullName === 'string'
+  && DECISION_IDS.has(policy.decisionId)
+);
+const baseState = (policy, eventHistory = []) => ({
   schemaVersion: 'approval-decision-state/v1',
   repository: clone(policy.repository),
   decisionId: policy.decisionId,
@@ -166,23 +173,20 @@ const baseState = (policy) => ({
   revocationStatus: 'ACTIVE',
   supersessionStatus: 'CURRENT',
   blockingCodes: ['APPROVAL_OWNER_ASSIGNMENT_REQUIRED'],
-  eventHistory: [],
+  eventHistory,
   policySnapshot: clone(policy),
   acceptanceCheckedAt: null,
 });
 
-export const reduceApprovalDecisionState = (events, policy, now) => {
+const reduceAdmittedApprovalDecisionState = (events, policy, now) => {
   const reductionNow = nowIso(now);
   if (!Array.isArray(events)
     || events.length > 128
-    || !isPlainObject(policy)
-    || !hasExactKeys(policy.repository, ['id', 'fullName'])
-    || !isSafePositiveInteger(policy.repository.id)
-    || typeof policy.repository.fullName !== 'string'
-    || !DECISION_IDS.has(policy.decisionId)) {
+    || !admittedApprovalHistories.has(events)
+    || !policyBoundaryValid(policy)) {
     throw approvalError('APPROVAL_STATE_INPUT_INVALID');
   }
-  let state = baseState(policy);
+  let state = baseState(policy, events);
   let priorEventTime = null;
   const eventDigests = new Set();
   for (const rawEvent of events) {
@@ -324,8 +328,9 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
         acceptanceCheckedAt: validation.checkedAt,
       };
     } else if (event.type === 'RECEIPT_REVOKED') {
-      if (!hasExactKeys(event, ['type', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
+      const issue = storedReceiptRevocationIssue(event, state, policy);
+      if (issue) transitionError(issue);
+      if (!observedAtValid(event.observedAt, eventClock)
         || !['VERIFIED', 'ACCEPTED'].includes(state.state)) transitionError();
       state = {
         ...state,
@@ -336,21 +341,46 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
     } else {
       transitionError('APPROVAL_STATE_EVENT_UNSUPPORTED');
     }
-    state = { ...state, eventHistory: [...state.eventHistory, safeEventRecord(event)] };
   }
-  return frozenClone(state);
+  return deepFreeze({ ...state, eventHistory: events });
+};
+
+export const reduceApprovalDecisionState = (events, policy, now) => {
+  nowIso(now);
+  if (!Array.isArray(events) || !policyBoundaryValid(policy)) {
+    throw approvalError('APPROVAL_STATE_INPUT_INVALID');
+  }
+  if (!admittedApprovalHistories.has(events)) {
+    return frozenClone({
+      ...baseState(policy),
+      evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+      blockingCodes: ['APPROVAL_STATE_HISTORY_NOT_ADMITTED'],
+      eventHistory: [],
+    });
+  }
+  return reduceAdmittedApprovalDecisionState(events, policy, now);
+};
+
+export const initializeApprovalDecisionState = (policy, now) => {
+  nowIso(now);
+  if (!policyBoundaryValid(policy)) throw approvalError('APPROVAL_STATE_INPUT_INVALID');
+  return reduceAdmittedApprovalDecisionState(admittedHistory([]), policy, now);
 };
 
 export const appendApprovalDecisionEvent = (state, append, policy, now) => {
   const appendedAt = nowIso(now);
   if (!isPlainObject(state)
     || !Array.isArray(state.eventHistory)
+    || !admittedApprovalHistories.has(state.eventHistory)
     || !hasExactKeys(append, APPEND_KEYS)
     || append.schemaVersion !== 'approval-event-append/v1'
     || append.appendedAt !== appendedAt
     || !isDigest(append.expectedHistorySha256)
     || append.expectedHistorySha256 !== canonicalApprovalDigest(state.eventHistory)
     || !isPlainObject(append.event)) transitionError('APPROVAL_STATE_APPEND_INVALID');
+  const inspection = inspectApprovalValueGraph(append.event);
+  if (approvalGraphUnsafe(inspection)) transitionError('APPROVAL_STATE_APPEND_INVALID');
+  const currentState = reduceAdmittedApprovalDecisionState(state.eventHistory, policy, now);
   let event;
   if (append.event.type === 'ACCEPTANCE_REVALIDATED') {
     if (!hasExactKeys(append.event, ACCEPTANCE_LIVE_KEYS)
@@ -358,7 +388,7 @@ export const appendApprovalDecisionEvent = (state, append, policy, now) => {
       || append.event.observedAt !== append.event.evidence.readAt) {
       transitionError('APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
     }
-    const validation = revalidateApprovalAtAcceptance(state, append.event.evidence, now);
+    const validation = revalidateApprovalAtAcceptance(currentState, append.event.evidence, now);
     if (!validation.valid) {
       transitionError(validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
     }
@@ -367,11 +397,19 @@ export const appendApprovalDecisionEvent = (state, append, policy, now) => {
       checkedAt: validation.checkedAt,
       evidenceSha256: canonicalApprovalDigest(append.event.evidence),
     };
+  } else if (append.event.type === 'RECEIPT_REVOKED') {
+    event = buildStoredReceiptRevocationEvent(
+      append.event,
+      currentState,
+      policy,
+      appendedAt,
+    );
   } else {
     if (append.event.observedAt !== appendedAt) transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
     event = clone(append.event);
   }
-  return reduceApprovalDecisionState([...state.eventHistory, event], policy, now);
+  const nextHistory = admittedHistory([...state.eventHistory, event]);
+  return reduceAdmittedApprovalDecisionState(nextHistory, policy, now);
 };
 
 const STATUS_COPY = Object.freeze({
@@ -397,7 +435,6 @@ const HISTORY_EVENT_KEYS = Object.freeze({
   HEAD_CHANGED: ['type', 'headSha', 'observedAt'],
   REVIEW_REJECTED: ['type', 'observedAt'],
   RECEIPT_SUPERSEDED: ['type', 'predecessorReceiptId', 'successor', 'validation', 'observedAt'],
-  RECEIPT_REVOKED: ['type', 'observedAt'],
 });
 const eventHistoryValid = (events) => (
   Array.isArray(events)
@@ -406,6 +443,9 @@ const eventHistoryValid = (events) => (
     if (event?.type === 'ACCEPTANCE_REVALIDATED') {
       return hasExactKeys(event, ACCEPTANCE_STORED_KEYS)
         && acceptanceEventEvidenceValid(event);
+    }
+    if (event?.type === 'RECEIPT_REVOKED') {
+      return isClosedStoredReceiptRevocationEvent(event);
     }
     const keys = HISTORY_EVENT_KEYS[event?.type];
     if (!keys || !hasExactKeys(event, keys) || containsNonce(event)) return false;

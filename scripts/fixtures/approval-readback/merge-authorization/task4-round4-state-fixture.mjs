@@ -185,11 +185,14 @@ const append = (state, event, policy, now) => approvalState.appendApprovalDecisi
   event,
 }, policy, now);
 
-const reduceInitialEvents = (events, policy) => {
+export const buildStateFromEvents = (events, policy, now = NOW) => {
   if (typeof approvalState.initializeApprovalDecisionState !== 'function') {
-    return approvalState.reduceApprovalDecisionState(events, policy, NOW);
+    return approvalState.reduceApprovalDecisionState(events, policy, now);
   }
-  let state = approvalState.initializeApprovalDecisionState(policy, new Date(events[0].observedAt));
+  let state = approvalState.initializeApprovalDecisionState(
+    policy,
+    events.length === 0 ? now : new Date(events[0].observedAt),
+  );
   for (const event of events) {
     state = append(state, event, policy, new Date(event.observedAt));
   }
@@ -345,7 +348,7 @@ export const buildRound4AcceptedState = () => {
       ledgerSnapshot,
     },
   });
-  const verified = reduceInitialEvents([
+  const verified = buildStateFromEvents([
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     {
       type: 'PROPOSAL_RENDERED',

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import * as approvalState from './governance-approval-state.mjs';
 import { renderApprovalStatusReadModel } from './governance-approval-state.mjs';
+import { storedReceiptRevocationIssue } from './governance-approval-state-revocation.mjs';
 import {
   NOW,
   REVOCATION_NOW,
@@ -72,8 +73,11 @@ test('round4 initializer and append return new frozen admitted histories without
   assert.equal(accepted.eventHistory.every(Object.isFrozen), true);
   assert.equal(historyOutcome(verified.eventHistory, policy).state, 'VERIFIED');
 
-  const output = JSON.stringify(renderApprovalStatusReadModel(accepted));
-  assert.doesNotMatch(output, /brand|capability|eventHistory|evidence/i);
+  const projected = renderApprovalStatusReadModel(accepted);
+  assert.equal(Object.hasOwn(projected, 'eventHistory'), false);
+  assert.equal(Object.hasOwn(projected, 'historyBrand'), false);
+  assert.equal(Object.hasOwn(projected, 'historyCapability'), false);
+  assert.doesNotMatch(JSON.stringify(projected), /history.?brand|history.?capability/i);
 
   const clonedState = { ...accepted, eventHistory: clone(accepted.eventHistory) };
   assert.throws(
@@ -110,6 +114,7 @@ test('round4 revocation append validates Task1 receipt/revocation and Task3 curr
   assert.match(stored.validationSha256, /^sha256:[0-9a-f]{64}$/);
   assert.match(stored.evidenceSha256, /^sha256:[0-9a-f]{64}$/);
   assert.doesNotMatch(JSON.stringify(stored), /freeform|single.?use.?nonce|nonce-program-c/i);
+  assert.equal(storedReceiptRevocationIssue(stored, accepted, policy), null);
 
   const replayedLater = approvalState.reduceApprovalDecisionState(
     revoked.eventHistory,
@@ -132,8 +137,11 @@ test('round4 revocation rejects arbitrary denial, wrong bindings, stale authorit
   });
 
   const cases = [
+    ['revocation schema', (event) => { event.revocation.reason_code = 'FREEFORM_REASON'; }],
+    ['receipt schema', (event) => { event.targetReceipt.envelope.core.actor_id += 1; }],
     ['wrong receipt', (event) => { event.revocation.receipt_raw_sha256 = `sha256:${'e'.repeat(64)}`; }],
     ['wrong actor', (event) => { event.revocation.revoking_actor_id += 1; }],
+    ['wrong authority repository', (event) => { event.authority.repository.id += 1; }],
     ['revoked authority', (event) => { event.authority.roles[0].revocation_status = 'REVOKED'; }],
     ['expired authority', (event) => { event.authority.roles[0].effective_until = REVOCATION_NOW.toISOString(); }],
     ['wrong scope', (event) => { event.authority.roles[0].scope.policy_revision = 'program-c/policy-r9'; }],
@@ -164,6 +172,18 @@ test('round4 revocation rejects arbitrary denial, wrong bindings, stale authorit
   );
   const tampered = clone(revoked.eventHistory);
   tampered.at(-1).validationSha256 = `sha256:${'0'.repeat(64)}`;
+  assert.equal(
+    storedReceiptRevocationIssue(tampered.at(-1), accepted, policy),
+    'APPROVAL_STATE_REVOCATION_DIGEST_MISMATCH',
+  );
+  const wrongTargetState = {
+    ...accepted,
+    receipt: { ...accepted.receipt, receiptRawSha256: `sha256:${'9'.repeat(64)}` },
+  };
+  assert.equal(
+    storedReceiptRevocationIssue(revoked.eventHistory.at(-1), wrongTargetState, policy),
+    'APPROVAL_RECEIPT_DIGEST_MISMATCH',
+  );
   assert.equal(
     approvalState.reduceApprovalDecisionState(tampered, policy, REVOCATION_NOW).evidenceTrustState,
     'EXTERNAL_UNVERIFIED',
