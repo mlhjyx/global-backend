@@ -271,7 +271,7 @@ RED must reproduce and GREEN must reject:
 - After Artifact C, direct table and every column-level company/contact INSERT are denied for app_user/PUBLIC while resolver command succeeds.
 - Full API, Temporal replay, static migration, fresh/upgrade/second deploy, schema diff, RLS/ACL, two-connection concurrency, rollback injection, governance/docs, Gitleaks, ContractGraph, and cleanup receipts all pass.
 
-Each artifact requires independent code, database, and security reviews with zero Critical and zero Important before the next deployment gate.
+Artifact A and Artifact B each require independent code, database, and security reviews with zero new or artifact-owned Critical/Important. The single pre-existing ambient IdentityLink INSERT bypass remains explicitly carried as `TRANSITION_HOLD` and prevents any final authority/readiness claim until Artifact C. Artifact C final reviews must report cumulative zero Critical and zero Important, including closure of that carried bypass.
 
 ## 9. Rollback and recovery
 
