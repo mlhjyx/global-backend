@@ -845,31 +845,38 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
       }
     });
 
-    it("binds owner inheritance and default function ACL state", () => {
+    it("binds security-relevant roles, transitive owner reachability and applicable defaults", () => {
       assert.equal(
-        sql(`SELECT rolname||'|'||rolsuper||'|'||rolinherit||'|'||
-          rolcreaterole||'|'||rolcreatedb||'|'||rolcanlogin||'|'||
-          rolreplication||'|'||rolbypassrls
+        sql(`SELECT 'current_owner='||current_user;
+        SELECT rolname||'|'||rolsuper||'|'||rolcreaterole||'|'||
+          rolcreatedb||'|'||rolreplication||'|'||rolbypassrls
         FROM pg_roles
-        WHERE rolname IN ('app_user','global')
-        ORDER BY rolname COLLATE "C";
-        SELECT 'members='||count(*)
-        FROM pg_auth_members WHERE roleid='global'::regrole;
-        SELECT 'function_defaults='||coalesce(jsonb_agg(
-          jsonb_build_object(
-            'namespace',coalesce(n.nspname,'<GLOBAL>'),
-            'acl',d.defaclacl
-          ) ORDER BY d.oid
-        ),'[]'::jsonb)::text
-        FROM pg_default_acl d
-        LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace
-        WHERE d.defaclrole='global'::regrole
-          AND d.defaclobjtype='f';`),
+        WHERE rolname='app_user';
+        WITH RECURSIVE role_paths(member,roleid) AS (
+          SELECT member,roleid FROM pg_auth_members
+          UNION
+          SELECT path.member,next_membership.roleid
+          FROM role_paths AS path
+          JOIN pg_auth_members AS next_membership
+            ON next_membership.member=path.roleid
+        )
+        SELECT 'transitive_global_paths='||count(*)
+        FROM role_paths
+        WHERE roleid='global'::regrole
+          AND member<>'global'::regrole;
+        SELECT 'applicable_nonowner_function_defaults='||count(*)
+        FROM pg_default_acl AS defaults
+        CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+        WHERE defaults.defaclrole='global'::regrole
+          AND defaults.defaclobjtype='f'
+          AND defaults.defaclnamespace IN (0,'public'::regnamespace)
+          AND acl.grantee<>'global'::regrole::oid
+          AND (acl.privilege_type='EXECUTE' OR acl.is_grantable);`),
         [
-          "app_user|false|true|false|false|true|false|false",
-          "global|true|true|true|true|true|true|true",
-          "members=0",
-          "function_defaults=[]",
+          "current_owner=global",
+          "app_user|false|false|false|false|false",
+          "transitive_global_paths=0",
+          "applicable_nonowner_function_defaults=0",
         ].join("\n"),
       );
     });

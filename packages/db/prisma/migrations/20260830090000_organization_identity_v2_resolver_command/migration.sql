@@ -17,31 +17,25 @@ BEGIN
     OR NOT EXISTS (
       SELECT 1
       FROM pg_roles AS r
-      WHERE r.rolname = 'global'
-        AND r.rolsuper
-        AND r.rolinherit
-        AND r.rolcreaterole
-        AND r.rolcreatedb
-        AND r.rolcanlogin
-        AND r.rolreplication
-        AND r.rolbypassrls
-    )
-    OR NOT EXISTS (
-      SELECT 1
-      FROM pg_roles AS r
       WHERE r.rolname = 'app_user'
         AND NOT r.rolsuper
-        AND r.rolinherit
         AND NOT r.rolcreaterole
         AND NOT r.rolcreatedb
-        AND r.rolcanlogin
         AND NOT r.rolreplication
         AND NOT r.rolbypassrls
     )
     OR EXISTS (
-      SELECT 1
-      FROM pg_auth_members AS membership
-      WHERE membership.roleid = 'global'::regrole
+      WITH RECURSIVE role_paths(member, roleid) AS (
+        SELECT member, roleid FROM pg_auth_members
+        UNION
+        SELECT path.member, next_membership.roleid
+        FROM role_paths AS path
+        JOIN pg_auth_members AS next_membership
+          ON next_membership.member = path.roleid
+      )
+      SELECT 1 FROM role_paths
+      WHERE roleid = 'global'::regrole
+        AND member <> 'global'::regrole
     )
     OR EXISTS (
       SELECT 1
@@ -49,7 +43,9 @@ BEGIN
       CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
       WHERE defaults.defaclrole = 'global'::regrole
         AND defaults.defaclobjtype = 'f'
+        AND defaults.defaclnamespace IN (0, 'public'::regnamespace)
         AND acl.grantee <> 'global'::regrole::oid
+        AND (acl.privilege_type = 'EXECUTE' OR acl.is_grantable)
     )
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
@@ -1105,30 +1101,25 @@ BEGIN
     OR NOT EXISTS (
       SELECT 1
       FROM pg_roles AS r
-      WHERE r.rolname = 'global'
-        AND r.rolsuper
-        AND r.rolinherit
-        AND r.rolcreaterole
-        AND r.rolcreatedb
-        AND r.rolcanlogin
-        AND r.rolreplication
-        AND r.rolbypassrls
-    )
-    OR NOT EXISTS (
-      SELECT 1
-      FROM pg_roles AS r
       WHERE r.rolname = 'app_user'
         AND NOT r.rolsuper
-        AND r.rolinherit
         AND NOT r.rolcreaterole
         AND NOT r.rolcreatedb
-        AND r.rolcanlogin
         AND NOT r.rolreplication
         AND NOT r.rolbypassrls
     )
     OR EXISTS (
-      SELECT 1 FROM pg_auth_members AS membership
-      WHERE membership.roleid = 'global'::regrole
+      WITH RECURSIVE role_paths(member, roleid) AS (
+        SELECT member, roleid FROM pg_auth_members
+        UNION
+        SELECT path.member, next_membership.roleid
+        FROM role_paths AS path
+        JOIN pg_auth_members AS next_membership
+          ON next_membership.member = path.roleid
+      )
+      SELECT 1 FROM role_paths
+      WHERE roleid = 'global'::regrole
+        AND member <> 'global'::regrole
     )
     OR EXISTS (
       SELECT 1
@@ -1136,7 +1127,9 @@ BEGIN
       CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
       WHERE defaults.defaclrole = 'global'::regrole
         AND defaults.defaclobjtype = 'f'
+        AND defaults.defaclnamespace IN (0, 'public'::regnamespace)
         AND acl.grantee <> 'global'::regrole::oid
+        AND (acl.privilege_type = 'EXECUTE' OR acl.is_grantable)
     )
     OR to_regprocedure(
       'public.apply_organization_identity_resolution_v1(jsonb)'
