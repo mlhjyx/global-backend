@@ -168,9 +168,9 @@ const revocation = () => ({
   receipt_raw_sha256: OTHER_DIGEST,
   authority_revision: 'approval-authorities/r2',
   authority_sha256: DIGEST,
-  reason_code: 'AUTHORITY_REVOKED',
-  revoking_role: 'OWN-SECURITY',
-  revoking_actor_id: 4,
+  reason_code: 'POLICY_WITHDRAWN',
+  revoking_role: 'OWN-PRODUCT',
+  revoking_actor_id: 1,
   effective_at: INSTANT,
 });
 
@@ -376,6 +376,11 @@ test('evidence manifests cryptographically bind a closed receipt evidence set', 
 test('revocations and supersessions retain immutable receipt provenance', () => {
   expectValid(validateApprovalRevocation, revocation());
   expectValid(validateApprovalSupersession, supersession());
+  for (const role of ['OWN-QA-EVIDENCE', 'OWN-SECURITY', 'MERGE-AUTHORIZER']) {
+    const value = revocation();
+    value.revoking_role = role;
+    expectInvalid(validateApprovalRevocation, value);
+  }
   for (const mutate of [
     (value) => { delete value.receipt_core_sha256; },
     (value) => { value.reason = 'free text is forbidden'; },

@@ -129,6 +129,22 @@ test('round4 revocation append validates Task1 receipt/revocation and Task3 curr
   assert.equal(replayedLater.state, 'REVOKED');
 });
 
+test('round4 accepted policy rejects QA, Security, and merge-authorizer revocation authority', () => {
+  for (const roleName of ['OWN-QA-EVIDENCE', 'OWN-SECURITY', 'MERGE-AUTHORIZER']) {
+    const { accepted, policy } = buildRound4AcceptedState();
+    const event = revocationEvent();
+    const role = event.authority.roles.find(({ role: value }) => value === roleName);
+    event.revocation.revoking_role = roleName;
+    event.revocation.revoking_actor_id = role.actor_id;
+
+    assert.throws(
+      () => appendRevocation(accepted, policy, event),
+      /^Error: APPROVAL_/,
+      `${roleName} must not revoke accepted policy truth`,
+    );
+  }
+});
+
 test('round4 revocation rejects arbitrary denial, wrong bindings, stale authority, tamper, and replay', () => {
   const { accepted, policy } = buildRound4AcceptedState();
   assert.deepEqual(historyOutcome([

@@ -23,6 +23,9 @@ const PURPOSE_BY_ROLE = Object.freeze({
   'LEGAL-REVIEW': 'LEGAL_REVIEW',
   'MERGE-AUTHORIZER': 'MERGE_AUTHORIZATION',
 });
+const POLICY_REVOCATION_ROLES = new Set([
+  'OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'LEGAL-REVIEW',
+]);
 
 const receiptRef = (receipt) => ({
   receipt_id: receipt?.envelope?.core?.receipt_id,
@@ -80,6 +83,9 @@ export const validateReceiptRevocation = (revocation, receipt, authority, now) =
   const codes = [];
   if (!validateApprovalRevocation(revocation).valid || !receiptEntryValid(receipt)) {
     return resultFromCodes(['APPROVAL_RECEIPT_DIGEST_MISMATCH']);
+  }
+  if (!POLICY_REVOCATION_ROLES.has(revocation.revoking_role)) {
+    return resultFromCodes(['APPROVAL_ROLE_AUTHORITY_STALE']);
   }
   if (!receiptReferenceMatches(revocation, receipt)) codes.push('APPROVAL_RECEIPT_DIGEST_MISMATCH');
   const assigned = authorityRole(authority, revocation.revoking_role);

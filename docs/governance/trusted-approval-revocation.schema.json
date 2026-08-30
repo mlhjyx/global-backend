@@ -12,7 +12,7 @@
     "authority_revision": { "type": "string", "pattern": "^approval-authorities/r[1-9][0-9]*$" },
     "authority_sha256": { "$ref": "#/$defs/digest" },
     "reason_code": { "enum": ["AUTHORITY_REVOKED", "EVIDENCE_INVALID", "POLICY_WITHDRAWN", "SECURITY_INCIDENT"] },
-    "revoking_role": { "enum": ["OWN-PRODUCT", "OWN-DATA-PRIVACY", "OWN-QA-EVIDENCE", "OWN-SECURITY", "LEGAL-REVIEW", "MERGE-AUTHORIZER"] },
+    "revoking_role": { "enum": ["OWN-PRODUCT", "OWN-DATA-PRIVACY", "LEGAL-REVIEW"] },
     "revoking_actor_id": { "$ref": "#/$defs/actorId" },
     "effective_at": { "$ref": "#/$defs/instant" }
   },

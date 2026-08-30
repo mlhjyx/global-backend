@@ -52,6 +52,9 @@ const AUTHORITY_ROLES = new Set([
   'OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'OWN-QA-EVIDENCE', 'OWN-SECURITY',
   'LEGAL-REVIEW', 'MERGE-AUTHORIZER',
 ]);
+const POLICY_REVOCATION_ROLES = new Set([
+  'OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'LEGAL-REVIEW',
+]);
 const PURPOSE_BY_ROLE = Object.freeze({
   'OWN-PRODUCT': 'DECISION_REVIEW',
   'OWN-DATA-PRIVACY': 'DECISION_REVIEW',
@@ -234,6 +237,9 @@ export const buildStoredReceiptRevocationEvent = (event, state, policy, appended
   const revocationSchema = validateApprovalRevocation(event.revocation);
   if (!revocationSchema.valid) {
     fail(validationCode(revocationSchema, 'APPROVAL_STATE_REVOCATION_INVALID'));
+  }
+  if (!POLICY_REVOCATION_ROLES.has(event.revocation.revoking_role)) {
+    fail('APPROVAL_ROLE_AUTHORITY_STALE');
   }
   const receiptSchema = validateApprovalReceipt(event.targetReceipt.envelope);
   if (!receiptSchema.valid) {
