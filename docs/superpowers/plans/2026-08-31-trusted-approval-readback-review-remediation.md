@@ -529,3 +529,39 @@ Prepare an exact run card containing old PR head, new local head, commits, chang
 - Type consistency: PR subject SHA, event-time trusted base SHA, check-suite identity, authority assignment, policy revision and PR-number identity remain separate across tasks.
 - Gate consistency: local success cannot upgrade external verifier, receipt, RuntimeEvidence, Release, UAT, Pilot, GA, Copy dispatch or merge authorization.
 - Execution choice: the user's continuing instruction selects inline, single-writer execution in this task; subagents are limited to read-only verification and later independent review.
+
+## Local Execution Record
+
+Exact pre-remediation PR head: `4c8ecb4640fb7d07d0066d1418b46092ccf5267a`.
+
+Completed local commits:
+
+1. `c19b5d18` — rejected/revoked policy revisions remain terminal.
+2. `6b973999` — accepted-policy revocation is limited to Product/Privacy/Legal.
+3. `91621fa6` — caller-owned verifier facts cannot issue trusted receipt cores.
+4. `330d69ba` — assigned authority schema and runtime currentness share one closed contract.
+5. `efa3096e` — `pull_request_target` execution identity is separated from PR head identity.
+6. `344693fe` — standard GitHub `prev`/`first` pagination relations are validated safely.
+7. `b73e93c7` — Legal evidence is decision/scope-aware.
+8. `7065f2df` — complete live ruleset facts enter policy comparison and canonical digest.
+9. `4062a8a2` — unsafe PR identity is rejected before ledger read/CAS.
+10. `328fb26c` — machine-policy and acceptance consumers bind trusted run execution to PR base.
+11. `adbcaf67` — ContractGraph approval schema digests match the forward schema revisions.
+
+Fresh local verification on exact `adbcaf6734e805eff7b7a80645320db261c084f6` before this execution-record commit:
+
+- Approval root plus extended GitHub suites: PASS.
+- Node coverage: lines `97.53%`, branches `93.37%`, functions `98.01%`; unchanged 80% thresholds.
+- Changed-file ESLint: PASS.
+- Code Intelligence: `56/56` tests PASS; TypeScript build PASS.
+- `pnpm docs:verify`: PASS; `0` errors and one pre-existing `TABLE_COLUMNS` warning at `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md:1549`.
+- Governance: `136/136` PASS.
+- Copy fixed-source: `12/12` PASS; exact 11-path `STALE_HOLD / NOT_AUTHORIZED / BLOCKED` remains unchanged.
+- ContractGraph: exact commit, clean, fresh, `11,476` nodes, `26,175` edges, `0` errors; business impact remains `UNKNOWN`.
+- RuntimeEvidence, Release Bundle, actual trusted receipt, independent external verifier, UAT, Pilot and GA remain absent/HOLD and were not upgraded.
+
+Pending before any external update:
+
+- Independent security/correctness review of all nine remediations.
+- Independent exact-base integration-delta review.
+- A separate user authorization for push/PR update/thread replies. Merge and deploy remain separately unauthorized.
