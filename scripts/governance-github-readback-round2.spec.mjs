@@ -65,13 +65,14 @@ test('round2 closes supported Link relations and rejects duplicates or ambiguity
 });
 
 test('round2 validates last target origin, path, closed query, and page direction', async (t) => {
-  for (const [name, target] of [
-    ['cross origin', 'https://evil.example/reviews?per_page=100&page=1'],
-    ['wrong path', 'https://api.github.com/repos/mlhjyx/global-backend/pulls/999/reviews?per_page=100&page=1'],
-    ['missing page', '?per_page=100'],
-    ['duplicate page', '?per_page=100&page=1&page=2'],
-    ['extra query', '?per_page=100&page=1&filter=all'],
-    ['last before current', '?per_page=100&page=0'],
+  for (const [name, target, code] of [
+    ['cross origin', 'https://evil.example/reviews?per_page=100&page=1', 'APPROVAL_GITHUB_ORIGIN_FORBIDDEN'],
+    ['wrong path', 'https://api.github.com/repos/mlhjyx/global-backend/pulls/999/reviews?per_page=100&page=1', 'APPROVAL_GITHUB_PAGINATION_INVALID'],
+    ['missing page', '?per_page=100', 'APPROVAL_GITHUB_PAGINATION_INVALID'],
+    ['duplicate page', '?per_page=100&page=1&page=2', 'APPROVAL_GITHUB_PAGINATION_INVALID'],
+    ['extra query', '?per_page=100&page=1&filter=all', 'APPROVAL_GITHUB_PAGINATION_INVALID'],
+    ['noncanonical page', '?per_page=100&page=01', 'APPROVAL_GITHUB_PAGINATION_INVALID'],
+    ['last before current', '?per_page=100&page=0', 'APPROVAL_GITHUB_PAGINATION_INVALID'],
   ]) {
     await t.test(name, async () => {
       const state = fixtureState();
@@ -80,7 +81,7 @@ test('round2 validates last target origin, path, closed query, and page directio
         [state.reviewPages.flat()],
         () => `<${target}>; rel="last"`,
       );
-      await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+      await expectCode(() => collect(state), code);
     });
   }
 });
@@ -149,4 +150,51 @@ test('round2 accepts a single real terminal page identified by relative last=cur
   );
   const { evidence } = await collect(state);
   assert.equal(evidence.review_pagination_complete, true);
+});
+
+test('round2 preserves an observed last-page horizon across later responses', async (t) => {
+  await t.test('rejects an intermediate page that drops next before the known last page', async () => {
+    const state = fixtureState();
+    forceReviewPagination(
+      state,
+      [state.reviewPages[0], state.reviewPages[1], [codeownerReversal(state)]],
+      (_url, page) => (page === 1
+        ? `<${relativePage(2)}>; rel="next", <${relativePage(3)}>; rel="last"`
+        : null),
+    );
+    await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+  });
+
+  await t.test('rejects a changed last-page horizon', async () => {
+    const state = fixtureState();
+    forceReviewPagination(
+      state,
+      [state.reviewPages[0], state.reviewPages[1], [codeownerReversal(state)]],
+      (_url, page) => {
+        if (page === 1) {
+          return `<${relativePage(2)}>; rel="next", <${relativePage(3)}>; rel="last"`;
+        }
+        return `<${relativePage(2)}>; rel="last"`;
+      },
+    );
+    await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+  });
+
+  await t.test('allows an intermediate page to omit last while continuing to the known horizon', async () => {
+    const state = fixtureState();
+    const pages = [
+      state.reviewPages[0],
+      state.reviewPages[1].slice(0, 2),
+      [state.reviewPages[1][2]],
+    ];
+    forceReviewPagination(state, pages, (_url, page) => {
+      if (page === 1) {
+        return `<${relativePage(2)}>; rel="next", <${relativePage(3)}>; rel="last"`;
+      }
+      if (page === 2) return `<${relativePage(3)}>; rel="next"`;
+      return null;
+    });
+    const { evidence } = await collect(state);
+    assert.equal(evidence.review_pagination_complete, true);
+  });
 });

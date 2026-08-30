@@ -147,26 +147,6 @@ export const fetchJson = async (state, url, limits) => {
 };
 
 const parseNextLink = (header, currentUrl) => {
-  if (header === null || header === '') return null;
-  requireCondition(typeof header === 'string' && header.length <= 8192, 'APPROVAL_GITHUB_PAGINATION_INVALID');
-  const links = new Map();
-  for (const part of header.split(',')) {
-    const match = /^\s*<([^<>]+)>;\s*rel="(next|prev|first|last)"\s*$/.exec(part);
-    requireCondition(match !== null && !links.has(match?.[2]), 'APPROVAL_GITHUB_PAGINATION_INVALID');
-    links.set(match[2], match[1]);
-  }
-  const nextTarget = links.get('next');
-  if (nextTarget === undefined) return null;
-  let next;
-  try {
-    next = new URL(nextTarget, currentUrl);
-  } catch {
-    throw approvalError('APPROVAL_GITHUB_PAGINATION_INVALID');
-  }
-  requireCondition(next.origin === API_ORIGIN, 'APPROVAL_GITHUB_ORIGIN_FORBIDDEN');
-  requireCondition(next.pathname === currentUrl.pathname, 'APPROVAL_GITHUB_PAGINATION_INVALID');
-  requireCondition(next.href !== currentUrl.href, 'APPROVAL_GITHUB_PAGINATION_LOOP');
-  requireCondition(next.hash === '', 'APPROVAL_GITHUB_PAGINATION_INVALID');
   const closedQuery = (url) => {
     const result = new Map();
     for (const [key, value] of url.searchParams) {
@@ -176,24 +156,75 @@ const parseNextLink = (header, currentUrl) => {
     return result;
   };
   const currentQuery = closedQuery(currentUrl);
-  const nextQuery = closedQuery(next);
-  requireCondition(
-    currentQuery.size === nextQuery.size
-      && [...currentQuery.keys()].every((key) => nextQuery.has(key)),
-    'APPROVAL_GITHUB_PAGINATION_INVALID',
-  );
-  const currentPage = Number(currentQuery.get('page'));
-  const nextPage = Number(nextQuery.get('page'));
-  requireCondition(
-    Number.isSafeInteger(currentPage)
-      && Number.isSafeInteger(nextPage)
-      && nextPage === currentPage + 1,
-    'APPROVAL_GITHUB_PAGINATION_INVALID',
-  );
-  for (const [key, value] of currentQuery) {
-    if (key !== 'page') requireCondition(nextQuery.get(key) === value, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+  const pageNumber = (query) => {
+    const raw = query.get('page');
+    requireCondition(
+      typeof raw === 'string' && /^[1-9][0-9]*$/.test(raw),
+      'APPROVAL_GITHUB_PAGINATION_INVALID',
+    );
+    const page = Number(raw);
+    requireCondition(
+      Number.isSafeInteger(page) && String(page) === raw,
+      'APPROVAL_GITHUB_PAGINATION_INVALID',
+    );
+    return page;
+  };
+  const currentPage = pageNumber(currentQuery);
+  const links = new Map();
+  if (header !== null && header !== '') {
+    requireCondition(typeof header === 'string' && header.length <= 8192, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    for (const part of header.split(',')) {
+      const match = /^\s*<([^<>]+)>;\s*rel="(next|last)"\s*$/.exec(part);
+      requireCondition(match !== null && !links.has(match?.[2]), 'APPROVAL_GITHUB_PAGINATION_INVALID');
+      links.set(match[2], match[1]);
+    }
   }
-  return next;
+  const resolveRelation = (target) => {
+    let url;
+    try {
+      url = new URL(target, currentUrl);
+    } catch {
+      throw approvalError('APPROVAL_GITHUB_PAGINATION_INVALID');
+    }
+    requireCondition(url.origin === API_ORIGIN, 'APPROVAL_GITHUB_ORIGIN_FORBIDDEN');
+    requireCondition(
+      url.username === ''
+        && url.password === ''
+        && url.pathname === currentUrl.pathname
+        && url.hash === '',
+      'APPROVAL_GITHUB_PAGINATION_INVALID',
+    );
+    const query = closedQuery(url);
+    requireCondition(
+      currentQuery.size === query.size
+        && [...currentQuery.keys()].every((key) => query.has(key)),
+      'APPROVAL_GITHUB_PAGINATION_INVALID',
+    );
+    for (const [key, value] of currentQuery) {
+      if (key !== 'page') requireCondition(query.get(key) === value, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    }
+    const page = pageNumber(query);
+    return { page, url };
+  };
+  const next = links.has('next') ? resolveRelation(links.get('next')) : null;
+  const last = links.has('last') ? resolveRelation(links.get('last')) : null;
+  if (next !== null) {
+    requireCondition(next.url.href !== currentUrl.href, 'APPROVAL_GITHUB_PAGINATION_LOOP');
+    requireCondition(next.page === currentPage + 1, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+  }
+  if (last !== null) {
+    requireCondition(last.page >= currentPage, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    if (last.page > currentPage) {
+      requireCondition(next !== null, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    } else {
+      requireCondition(next === null, 'APPROVAL_GITHUB_PAGINATION_INVALID');
+    }
+  }
+  return {
+    currentPage,
+    lastPage: last?.page ?? null,
+    nextUrl: next?.url ?? null,
+  };
 };
 
 export const paginate = async (
@@ -211,6 +242,7 @@ export const paginate = async (
   const seenPages = new Set();
   let url = firstUrl;
   let declaredTotal = null;
+  let knownLastPage = null;
   while (url !== null) {
     requireCondition(!visited.has(url.href), 'APPROVAL_GITHUB_PAGINATION_LOOP');
     budget.pages += 1;
@@ -245,7 +277,26 @@ export const paginate = async (
     budget.items += pageItems.length;
     requireCondition(budget.items <= limits.maxItems, 'APPROVAL_GITHUB_ITEM_LIMIT_EXCEEDED');
     items.push(...pageItems);
-    url = parseNextLink(response.link, url);
+    const relations = parseNextLink(response.link, url);
+    if (relations.lastPage !== null) {
+      if (knownLastPage === null) knownLastPage = relations.lastPage;
+      requireCondition(
+        knownLastPage === relations.lastPage,
+        'APPROVAL_GITHUB_PAGINATION_INVALID',
+      );
+    }
+    if (knownLastPage !== null) {
+      requireCondition(
+        relations.currentPage <= knownLastPage
+          && (
+            relations.currentPage < knownLastPage
+              ? relations.nextUrl !== null
+              : relations.nextUrl === null
+          ),
+        'APPROVAL_GITHUB_PAGINATION_INVALID',
+      );
+    }
+    url = relations.nextUrl;
   }
   if (declaredTotal !== null) {
     requireCondition(declaredTotal === items.length, 'APPROVAL_GITHUB_PAGINATION_INVALID');
