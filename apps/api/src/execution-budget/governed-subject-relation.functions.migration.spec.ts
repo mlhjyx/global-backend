@@ -83,6 +83,7 @@ const READ_ONLY_CALL_ALLOWLIST = new Set([
   'array_agg', 'array_length', 'cardinality', 'char_length', 'coalesce', 'count',
   'current_workspace_id', 'greatest', 'hashtextextended', 'least', 'lower',
   'nullif', 'pg_advisory_xact_lock', 'current_setting', 'jsonb_agg', 'jsonb_array_length',
+  'pg_backend_pid',
   'jsonb_build_object', 'jsonb_array_elements_text', 'split_part', 'to_jsonb',
   'unnest', 'md5',
 ]);

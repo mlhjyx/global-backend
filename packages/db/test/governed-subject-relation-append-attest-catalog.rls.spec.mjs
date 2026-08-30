@@ -123,6 +123,8 @@ describe("governed relation append/attest catalog and validation contract", () =
       operationId: OP_H, suffix: "03", expired: true, closed: true,
       insertWorkspace: false,
     });
+    psql(`UPDATE tool_budget_account SET generation=generation+1
+      WHERE id='${historical.accountId}';`);
     const lifecycleBefore = lifecycleSnapshot(
       historical.authorityId, historical.accountId, historical.operationId, historical.ackId,
     );

@@ -188,13 +188,16 @@ function seedOtherPersonalParent() {
 
 function invocation(fn, override = {}) {
   const input = { parentId: null, childId: "53000000-0000-4000-8000-000000000001",
-    relationKey: "roundb:final", ...override };
+    relationKey: "roundb:final", childDataClass:"NON_PERSONAL",
+    childDsrSubjectType:null,childDsrSubjectId:null,...override };
   const uuid = (value) => value === null ? "NULL::uuid" : `'${value}'::uuid`;
+  const text = (value,type) => value === null ? `NULL::${type}` : `'${value}'::${type}`;
   return `SELECT * FROM public.${fn}('${WS}'::uuid,'${AUTH}'::uuid,'${ACCOUNT}'::uuid,
     '${OP}'::uuid,1,'${facts.ackId}'::char(64),'${facts.resultDigest}'::char(64),
     'tool_operation'::varchar(191),'${OP}'::uuid,'NON_PERSONAL'::varchar(16),
     NULL::varchar(191),NULL::uuid,${uuid(input.parentId)},'materialized_record'::varchar(191),
-    '${input.childId}'::uuid,'NON_PERSONAL'::varchar(16),NULL::varchar(191),NULL::uuid,
+    '${input.childId}'::uuid,${text(input.childDataClass,"varchar(16)")},
+    ${text(input.childDsrSubjectType,"varchar(191)")},${uuid(input.childDsrSubjectId)},
     '${input.relationKey}'::varchar(200),'MATERIALIZED_CHILD'::varchar(32),
     'source_record'::varchar(64),'63000000-0000-4000-8000-000000000001'::uuid,
     NULL::char(64),'${CONTRACT}'::char(64));`;
@@ -306,6 +309,20 @@ describe("governed relation exact path lock ordering", () => {
       assert.equal(psql(`SELECT count(*) FROM execution_domain_ack WHERE operation_id='${OP}';`),"1");
       assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP}';`),"1");
     } finally { await Promise.all([cleanup(callback,callbackName),cleanup(standalone,standaloneName)]); }
+  });
+
+  it("fails closed before a repeated append acquires a new DSR after graph", () => {
+    const firstInput={childDataClass:"PERSONAL",childDsrSubjectType:"company",
+      childDsrSubjectId:"73000000-0000-4000-8000-000000000071",relationKey:"guard:first"};
+    const secondInput={childId:"53000000-0000-4000-8000-000000000072",
+      childDataClass:"PERSONAL",childDsrSubjectType:"company",
+      childDsrSubjectId:"73000000-0000-4000-8000-000000000072",relationKey:"guard:second"};
+    const before=canonicalSnapshot(); const denied=raw(asApp(
+      `${invocation(APPEND,firstInput)} ${invocation(APPEND,secondInput)}`));
+    assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+    assert.equal(canonicalSnapshot(),before);
+    psql(asApp(`${invocation(APPEND,firstInput)} ${invocation(APPEND,{...secondInput,
+      childDsrSubjectId:firstInput.childDsrSubjectId,relationKey:"guard:same-dsr"})}`));
   });
 
   it("rejects another operation PERSONAL parent before waiting on its DSR key", async () => {
