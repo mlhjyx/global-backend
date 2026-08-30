@@ -40,6 +40,8 @@ const signature = Object.freeze({
   planner: "public.organization_identity_plan_from_snapshot_v1(jsonb)",
   advisory:
     "public.organization_identity_acquire_advisory_until_v1(bigint,timestamptz)",
+  worker:
+    "public.organization_identity_resolve_for_raw_worker_v1(text,text)",
   command: "public.resolve_organization_identity_for_raw_v1(text,text)",
 });
 const catalogIdentity = Object.freeze({
@@ -52,6 +54,8 @@ const catalogIdentity = Object.freeze({
     "public|organization_identity_plan_from_snapshot_v1|jsonb",
   [signature.advisory]:
     "public|organization_identity_acquire_advisory_until_v1|bigint, timestamp with time zone",
+  [signature.worker]:
+    "public|organization_identity_resolve_for_raw_worker_v1|text, text",
   [signature.command]:
     "public|resolve_organization_identity_for_raw_v1|text, text",
 });
@@ -67,6 +71,8 @@ const catalogContract = Object.freeze({
     `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
   [signature.advisory]:
     `void|plpgsql|global|false|v|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.worker]:
+    `TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|false|v|u|true|false|false|f|search_path=pg_catalog, public,row_security=off|${ownerOnlyAcl}`,
   [signature.command]:
     "TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|true|v|u|true|false|false|f|search_path=pg_catalog, public,row_security=off|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
 });
@@ -92,6 +98,7 @@ const finalAclRows = Object.freeze([
   "organization_identity_blocker_from_raw_v1|global:EXECUTE:false:global",
   "organization_identity_canonical_suppression_value_v1|global:EXECUTE:false:global",
   "organization_identity_plan_from_snapshot_v1|global:EXECUTE:false:global",
+  "organization_identity_resolve_for_raw_worker_v1|global:EXECUTE:false:global",
   "resolve_organization_identity_for_raw_v1|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
 ]);
 
@@ -341,6 +348,7 @@ function assertAdmissionSuccess(database) {
           'organization_identity_canonical_suppression_value_v1',
           'organization_identity_plan_from_snapshot_v1',
           'organization_identity_acquire_advisory_until_v1',
+          'organization_identity_resolve_for_raw_worker_v1',
           'resolve_organization_identity_for_raw_v1'
         )
       ORDER BY p.proname;`,
@@ -366,6 +374,7 @@ function assertAdmissionFailure(database) {
            'organization_identity_canonical_suppression_value_v1',
            'organization_identity_plan_from_snapshot_v1',
            'organization_identity_acquire_advisory_until_v1',
+           'organization_identity_resolve_for_raw_worker_v1',
            'resolve_organization_identity_for_raw_v1'
          );
        SELECT count(*)
@@ -1159,6 +1168,7 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
         signature.suppression,
         signature.planner,
         signature.advisory,
+        signature.worker,
       ]) {
         exactHelper("private helper ACL", helperSignature);
         const [schema, functionName, argumentsText] =
@@ -1228,9 +1238,10 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
             'organization_identity_canonical_suppression_value_v1',
             'organization_identity_plan_from_snapshot_v1',
             'organization_identity_acquire_advisory_until_v1',
+            'organization_identity_resolve_for_raw_worker_v1',
             'resolve_organization_identity_for_raw_v1'
           );`),
-        "6|6",
+        "7|7",
       );
       for (const helperSignature of Object.values(signature)) {
         exactHelper("complete catalog matrix", helperSignature);

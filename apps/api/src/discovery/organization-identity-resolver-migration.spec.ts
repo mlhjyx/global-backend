@@ -36,6 +36,7 @@ type PublicFunctionDefinition = Readonly<{
   parameterDeclaration: string;
   parameterTypes: string;
   header: string;
+  definition: string;
 }>;
 
 function normalizeSql(value: string): string {
@@ -72,6 +73,7 @@ function publicFunctionDefinitions(sql: string): PublicFunctionDefinition[] {
       parameterDeclaration: normalizeSql(match[2]),
       parameterTypes: parameterTypes(match[2]),
       header: normalizeSql(header),
+      definition,
     });
   }
   return definitions;
@@ -157,9 +159,40 @@ describe("organization identity resolver command migration", () => {
     );
     expect(sql).toMatch(/EXCEPTION WHEN query_canceled THEN/u);
     expect(sql).toMatch(/WHEN assert_failure THEN/u);
-    expect(sql).not.toMatch(/clock_timestamp\(\)\s*>=\s*statement_deadline/u);
+    expect(
+      sql.match(/clock_timestamp\(\)\s*>=\s*statement_deadline/gu),
+    ).toHaveLength(1);
+    expect(sql).toMatch(
+      /EXCEPTION WHEN query_canceled THEN[\s\S]*clock_timestamp\(\)\s*>=\s*statement_deadline/u,
+    );
     expect(functionRevokes(sql, command)).toEqual([["public"]]);
     expect(functionGrantees(sql, command)).toEqual([["app_user"]]);
+    expect(command.definition).not.toMatch(
+      /public\.(?:raw_source_record|raw_source_governance_disposition|canonical_company|organization_identifier|organization_canonical_mapping|suppression_record|identity_link|organization_identity_conflict|organization_identity_conflict_party)\b/iu,
+    );
+    expect(command.definition).not.toMatch(
+      /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\./iu,
+    );
+    expect(
+      command.definition.match(
+        /organization_identity_resolve_for_raw_worker_v1/gu,
+      ),
+    ).toHaveLength(1);
+    expect(command.definition).toMatch(/EXECUTE[\s\S]*USING[\s\S]*v_workspace_id/u);
+    const workers = definitions.filter(
+      (definition) =>
+        definition.name === "organization_identity_resolve_for_raw_worker_v1" &&
+        definition.parameterTypes === "text, text",
+    );
+    expect(workers).toHaveLength(1);
+    const [worker] = workers;
+    expect(worker.header).toContain("language plpgsql security invoker");
+    expect(worker.header).toContain("set search_path = pg_catalog, public");
+    expect(worker.header).toContain("set row_security = off");
+    expect(worker.header).not.toContain("set lock_timeout");
+    expect(worker.header).not.toContain("set statement_timeout");
+    expect(functionRevokes(sql, worker)).toEqual([["public", "app_user"]]);
+    expect(functionGrantees(sql, worker)).toEqual([]);
     expect(sql).not.toMatch(
       /ALTER FUNCTION public\.[a-z0-9_]+\([^)]*\) OWNER TO (?!global\b)/iu,
     );

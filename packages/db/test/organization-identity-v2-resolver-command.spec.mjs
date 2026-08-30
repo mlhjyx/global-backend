@@ -77,6 +77,7 @@ function publicFunctionDefinitions(sql) {
       parameterDeclaration: normalizeSql(match[2]),
       parameterTypes: parameterTypes(match[2]),
       header: normalizeSql(header),
+      definition,
     });
   }
   return definitions;
@@ -170,12 +171,52 @@ describe("Organization Identity resolver command migration", () => {
     );
     assert.match(sql, /EXCEPTION WHEN query_canceled THEN/u);
     assert.match(sql, /WHEN assert_failure THEN/u);
-    assert.doesNotMatch(
+    assert.equal(
+      occurrences(
+        sql,
+        /clock_timestamp\(\)\s*>=\s*statement_deadline/gu,
+      ),
+      1,
+    );
+    assert.match(
       sql,
-      /clock_timestamp\(\)\s*>=\s*statement_deadline/u,
+      /EXCEPTION WHEN query_canceled THEN[\s\S]*clock_timestamp\(\)\s*>=\s*statement_deadline/u,
     );
     assert.deepEqual(functionRevokes(sql, command), [["public"]]);
     assert.deepEqual(functionGrantees(sql, command), [["app_user"]]);
+    assert.doesNotMatch(
+      command.definition,
+      /public\.(?:raw_source_record|raw_source_governance_disposition|canonical_company|organization_identifier|organization_canonical_mapping|suppression_record|identity_link|organization_identity_conflict|organization_identity_conflict_party)\b/iu,
+    );
+    assert.doesNotMatch(
+      command.definition,
+      /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\./iu,
+    );
+    assert.equal(
+      occurrences(
+        command.definition,
+        /organization_identity_resolve_for_raw_worker_v1/gu,
+      ),
+      1,
+    );
+    assert.match(
+      command.definition,
+      /EXECUTE[\s\S]*USING[\s\S]*v_workspace_id/u,
+    );
+    const workers = definitions.filter(
+      (definition) =>
+        definition.name === "organization_identity_resolve_for_raw_worker_v1" &&
+        definition.parameterTypes === "text, text",
+    );
+    assert.equal(workers.length, 1);
+    const [worker] = workers;
+    assert.match(worker.header, /language plpgsql security invoker/u);
+    assert.match(worker.header, /set search_path = pg_catalog, public/u);
+    assert.match(worker.header, /set row_security = off/u);
+    assert.doesNotMatch(worker.header, /set lock_timeout/u);
+    assert.doesNotMatch(worker.header, /set statement_timeout/u);
+    assert.deepEqual(functionRevokes(sql, worker), [["public", "app_user"]]);
+    assert.deepEqual(functionGrantees(sql, worker), []);
     assert.equal(
       definitions.filter(
         (definition) =>

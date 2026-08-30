@@ -19,7 +19,7 @@ const networkId =
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationChecksum =
-  "3bf6e58db819352ca0777380e9adb2fbf32ca9eeb311b91df696b569302da7af";
+  "3cb5fe7ca22b3067b92d71ac25198c7ff14d08c08a0907343d84130bb0b7a882";
 const migrationPath = resolve(
   repositoryRoot,
   "packages/db/prisma/migrations",
@@ -282,6 +282,7 @@ describe("Organization Identity v2 direct command A3 boundary", () => {
         'organization_identity_blocker_from_raw_v1',
         'organization_identity_canonical_suppression_value_v1',
         'organization_identity_plan_from_snapshot_v1',
+        'organization_identity_resolve_for_raw_worker_v1',
         'resolve_organization_identity_for_raw_v1'
       )
       ORDER BY p.proname;`),
@@ -291,6 +292,7 @@ describe("Organization Identity v2 direct command A3 boundary", () => {
         "organization_identity_blocker_from_raw_v1|p_raw jsonb|global|false|search_path=pg_catalog, public|false|false",
         "organization_identity_canonical_suppression_value_v1|p_type text, p_value text|global|false|search_path=pg_catalog, public|false|false",
         "organization_identity_plan_from_snapshot_v1|p_snapshot jsonb|global|false|search_path=pg_catalog, public|false|false",
+        "organization_identity_resolve_for_raw_worker_v1|p_workspace_id text, p_raw_record_id text|global|false|search_path=pg_catalog, public,row_security=off|false|false",
         "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,row_security=off|true|false",
       ].join("\n"),
     );

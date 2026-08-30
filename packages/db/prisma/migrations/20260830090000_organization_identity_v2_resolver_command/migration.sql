@@ -75,7 +75,8 @@ BEGIN
         'organization_identity_blocker_from_raw_v1',
         'organization_identity_canonical_suppression_value_v1',
         'organization_identity_plan_from_snapshot_v1',
-        'organization_identity_acquire_advisory_until_v1'
+        'organization_identity_acquire_advisory_until_v1',
+        'organization_identity_resolve_for_raw_worker_v1'
       )
   ) THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
@@ -1011,7 +1012,7 @@ REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
   public.organization_identity_acquire_advisory_until_v1(bigint, timestamptz)
 FROM global;
 
-CREATE FUNCTION public.resolve_organization_identity_for_raw_v1(
+CREATE FUNCTION public.organization_identity_resolve_for_raw_worker_v1(
   p_workspace_id text,
   p_raw_record_id text
 )
@@ -1029,41 +1030,49 @@ RETURNS TABLE (
   party_count integer
 )
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = pg_catalog, public
-SET lock_timeout = '5s'
-SET statement_timeout = '60s'
 SET row_security = off
-AS $organization_identity_command$
+AS $organization_identity_worker$
 DECLARE
   v_workspace_id uuid;
   v_raw_record_id uuid;
-  workspace_setting text;
   lock_deadline timestamptz;
-  statement_deadline timestamptz;
   stored_raw record;
   stored_company record;
   stored_identifier record;
   stored_link record;
   stored_conflict record;
+  stored_owner_raw record;
   authority_identifiers jsonb;
+  owner_authority_identifiers jsonb;
   blocker jsonb;
+  owner_blocker jsonb;
   resolution_plan jsonb;
+  owner_resolution_plan jsonb;
   existing_bindings jsonb := '[]'::jsonb;
+  owner_existing_bindings jsonb := '[]'::jsonb;
   root_mappings jsonb := '[]'::jsonb;
+  owner_root_mappings jsonb := '[]'::jsonb;
+  all_root_mappings jsonb := '[]'::jsonb;
   expected_conflict_facts jsonb;
   blocker_company_id uuid;
+  owner_blocker_company_id uuid;
   legacy_company_id uuid;
   legacy_dedupe_key text;
   legacy_match_rule text;
   target_company_id uuid;
   existing_identifier_root uuid;
   planner_company_ids uuid[] := ARRAY[]::uuid[];
+  owner_planner_company_ids uuid[] := ARRAY[]::uuid[];
+  owner_involved_company_ids uuid[] := ARRAY[]::uuid[];
+  mapping_source_company_ids uuid[] := ARRAY[]::uuid[];
   locked_company_ids uuid[] := ARRAY[]::uuid[];
   conflict_company_ids uuid[] := ARRAY[]::uuid[];
   actual_party_ids uuid[] := ARRAY[]::uuid[];
   expected_identifier_keys text[] := ARRAY[]::text[];
   actual_link_company_ids uuid[] := ARRAY[]::uuid[];
+  owner_link_company_ids uuid[] := ARRAY[]::uuid[];
   raw_name text;
   raw_domain text;
   raw_country text;
@@ -1075,23 +1084,22 @@ DECLARE
   plan_input_hash text;
   plan_conflict_fingerprint text;
   plan_conflict_type text;
+  owner_input_hash text;
   identifier_fact jsonb;
   conflict_company_id uuid;
   locked_company_count integer := 0;
   link_total integer := 0;
+  owner_link_total integer := 0;
   identifier_total integer := 0;
   party_total integer := 0;
   conflict_created boolean := false;
+  raw_processing_restricted boolean := false;
+  owner_processing_restricted boolean := false;
+  owner_raw_found boolean := false;
+  command_admission_open boolean := true;
   error_state text;
   error_message text;
 BEGIN
-  IF session_user IS DISTINCT FROM 'app_user'
-    OR current_user IS NOT DISTINCT FROM session_user
-    OR current_setting('role', true) IS DISTINCT FROM 'none'
-  THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
-      USING ERRCODE = '42501';
-  END IF;
   IF p_workspace_id IS NULL OR p_raw_record_id IS NULL
     OR octet_length(p_workspace_id) > 36
     OR octet_length(p_raw_record_id) > 36
@@ -1100,50 +1108,42 @@ BEGIN
     OR p_raw_record_id !~
       '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
       USING ERRCODE = 'P0001';
-  END IF;
-  workspace_setting := current_setting(
-    'app.current_workspace_id', true
-  );
-  IF workspace_setting IS NULL
-    OR workspace_setting !~
-      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-    OR workspace_setting IS DISTINCT FROM p_workspace_id
-  THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
-      USING ERRCODE = '42501';
   END IF;
   v_workspace_id := p_workspace_id::uuid;
   v_raw_record_id := p_raw_record_id::uuid;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.workspace AS w WHERE w.id = v_workspace_id
-  ) THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
-      USING ERRCODE = '42501';
-  END IF;
-
-  statement_deadline := clock_timestamp() + interval '60 seconds';
-  lock_deadline := clock_timestamp() + interval '5 seconds';
-  PERFORM public.organization_identity_acquire_advisory_until_v1(
-    hashtextextended(
-      'acquisition-suppression-policy:' || v_workspace_id::text, 0
-    ),
-    lock_deadline
-  );
-  PERFORM public.organization_identity_acquire_advisory_until_v1(
-    hashtextextended('organization-identity:' || v_workspace_id::text, 0),
-    lock_deadline
-  );
-  PERFORM 1
-  FROM public.workspace AS w
-  WHERE w.id = v_workspace_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
-      USING ERRCODE = '42501';
-  END IF;
-
   BEGIN
+    IF NOT EXISTS (
+    SELECT 1 FROM public.workspace AS w WHERE w.id = v_workspace_id
+    ) THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+        USING ERRCODE = '42501';
+    END IF;
+
+    lock_deadline := least(
+      statement_timestamp() + current_setting('statement_timeout')::interval,
+      clock_timestamp() + current_setting('lock_timeout')::interval
+    );
+    PERFORM public.organization_identity_acquire_advisory_until_v1(
+      hashtextextended(
+        'acquisition-suppression-policy:' || v_workspace_id::text, 0
+      ),
+      lock_deadline
+    );
+    PERFORM public.organization_identity_acquire_advisory_until_v1(
+      hashtextextended('organization-identity:' || v_workspace_id::text, 0),
+      lock_deadline
+    );
+    PERFORM 1
+    FROM public.workspace AS w
+    WHERE w.id = v_workspace_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+        USING ERRCODE = '42501';
+    END IF;
+    command_admission_open := false;
+
     SELECT
       r.id,
       r.workspace_id,
@@ -1181,14 +1181,18 @@ BEGIN
       RAISE EXCEPTION 'IDENTITY_RAW_NOT_RESOLVABLE'
         USING ERRCODE = 'P0001';
     END IF;
-    IF EXISTS (
+    EXECUTE $restricted_raw$
+      SELECT EXISTS (
         SELECT 1
-        FROM public.raw_source_governance_disposition AS d
-        WHERE d.workspace_id = v_workspace_id
-          AND d.raw_record_id = v_raw_record_id
-          AND d.effect = 'RESTRICT_PROCESSING'
+        FROM public.raw_source_governance_disposition AS disposition
+        WHERE disposition.workspace_id = $1
+          AND disposition.raw_record_id = $2
+          AND disposition.effect = 'RESTRICT_PROCESSING'
       )
-    THEN
+    $restricted_raw$
+    INTO raw_processing_restricted
+    USING v_workspace_id, v_raw_record_id;
+    IF raw_processing_restricted THEN
       RAISE EXCEPTION 'IDENTITY_RAW_PROCESSING_RESTRICTED'
         USING ERRCODE = 'P0001';
     END IF;
@@ -1336,12 +1340,24 @@ BEGIN
       SELECT DISTINCT (binding.value->>'companyId')::uuid
       FROM jsonb_array_elements(existing_bindings) AS binding(value)
     ) AS involved;
+    SELECT coalesce(
+      array_agg(involved.involved_company_id ORDER BY involved.involved_company_id),
+      ARRAY[]::uuid[]
+    )
+    INTO mapping_source_company_ids
+    FROM (
+      SELECT DISTINCT planner_id AS involved_company_id
+      FROM unnest(planner_company_ids) AS planner(planner_id)
+      UNION
+      SELECT DISTINCT legacy_company_id
+      WHERE legacy_company_id IS NOT NULL
+    ) AS involved;
     IF EXISTS (
       SELECT 1
       FROM public.organization_canonical_mapping AS m
       WHERE m.workspace_id = v_workspace_id
         AND m.status = 'ACTIVE'
-        AND m.source_company_id = ANY(planner_company_ids)
+        AND m.source_company_id = ANY(mapping_source_company_ids)
         AND (
           m.source_company_id = m.canonical_company_id
           OR m.revision < 1
@@ -1358,7 +1374,7 @@ BEGIN
           first_mapping.canonical_company_id
       WHERE first_mapping.workspace_id = v_workspace_id
         AND first_mapping.status = 'ACTIVE'
-        AND first_mapping.source_company_id = ANY(planner_company_ids)
+        AND first_mapping.source_company_id = ANY(mapping_source_company_ids)
     ) THEN
       RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
         USING ERRCODE = 'P0001';
@@ -1369,15 +1385,22 @@ BEGIN
         'rootCompanyId', m.canonical_company_id::text
       ) ORDER BY m.source_company_id
     ), '[]'::jsonb)
-    INTO root_mappings
+    INTO all_root_mappings
     FROM public.organization_canonical_mapping AS m
     WHERE m.workspace_id = v_workspace_id
       AND m.status = 'ACTIVE'
-      AND m.source_company_id = ANY(planner_company_ids);
-    IF jsonb_array_length(root_mappings) > 64 THEN
+      AND m.source_company_id = ANY(mapping_source_company_ids);
+    IF jsonb_array_length(all_root_mappings) > 64 THEN
       RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
         USING ERRCODE = 'P0001';
     END IF;
+    SELECT coalesce(jsonb_agg(
+      mapping.value ORDER BY mapping.value->>'sourceCompanyId' COLLATE "C"
+    ), '[]'::jsonb)
+    INTO root_mappings
+    FROM jsonb_array_elements(all_root_mappings) AS mapping(value)
+    WHERE (mapping.value->>'sourceCompanyId')::uuid =
+      ANY(planner_company_ids);
 
     SELECT coalesce(
       array_agg(involved.involved_company_id ORDER BY involved.involved_company_id),
@@ -1385,13 +1408,11 @@ BEGIN
     )
     INTO locked_company_ids
     FROM (
-      SELECT DISTINCT planner_id AS involved_company_id
-      FROM unnest(planner_company_ids) AS planner(planner_id)
-      UNION
-      SELECT DISTINCT legacy_company_id WHERE legacy_company_id IS NOT NULL
+      SELECT DISTINCT source_id AS involved_company_id
+      FROM unnest(mapping_source_company_ids) AS source(source_id)
       UNION
       SELECT DISTINCT (mapping.value->>'rootCompanyId')::uuid
-      FROM jsonb_array_elements(root_mappings) AS mapping(value)
+      FROM jsonb_array_elements(all_root_mappings) AS mapping(value)
     ) AS involved;
     locked_company_count := 0;
     FOR stored_company IN
@@ -1717,10 +1738,6 @@ BEGIN
           expected_conflict_facts
         )
         RETURNING * INTO stored_conflict;
-        IF clock_timestamp() >= statement_deadline THEN
-          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-            USING ERRCODE = '57014';
-        END IF;
         conflict_created := true;
       END IF;
 
@@ -1734,10 +1751,6 @@ BEGIN
             conflict_company_id,
             'CANDIDATE'
           );
-          IF clock_timestamp() >= statement_deadline THEN
-            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-              USING ERRCODE = '57014';
-          END IF;
         END LOOP;
       ELSE
         PERFORM 1
@@ -1772,6 +1785,313 @@ BEGIN
         END IF;
       END IF;
       party_total := cardinality(conflict_company_ids);
+
+      IF NOT conflict_created THEN
+        IF stored_conflict.raw_record_id = v_raw_record_id THEN
+          owner_resolution_plan := resolution_plan;
+        ELSE
+          SELECT
+            owner_raw.id,
+            owner_raw.workspace_id,
+            owner_raw.provider_key,
+            owner_raw.payload,
+            owner_raw.payload_hash,
+            owner_raw.ingest_version,
+            owner_raw.ingest_status,
+            owner_raw.expires_at,
+            owner_raw.expired_at
+          INTO stored_owner_raw
+          FROM public.raw_source_record AS owner_raw
+          WHERE owner_raw.workspace_id = v_workspace_id
+            AND owner_raw.id = stored_conflict.raw_record_id
+          FOR KEY SHARE;
+          owner_raw_found := FOUND;
+          EXECUTE $restricted_owner_raw$
+            SELECT EXISTS (
+              SELECT 1
+              FROM public.raw_source_governance_disposition AS disposition
+              WHERE disposition.workspace_id = $1
+                AND disposition.raw_record_id = $2
+                AND disposition.effect = 'RESTRICT_PROCESSING'
+            )
+          $restricted_owner_raw$
+          INTO owner_processing_restricted
+          USING v_workspace_id, stored_conflict.raw_record_id;
+          IF NOT owner_raw_found
+            OR stored_owner_raw.workspace_id IS DISTINCT FROM v_workspace_id
+            OR stored_owner_raw.id IS DISTINCT FROM
+              stored_conflict.raw_record_id
+            OR stored_owner_raw.ingest_status IS DISTINCT FROM 'ACCEPTED'
+            OR stored_owner_raw.ingest_version IS DISTINCT FROM
+              'raw-source/v2'
+            OR stored_owner_raw.payload_hash IS NULL
+            OR stored_owner_raw.payload_hash !~ '^[0-9a-f]{64}$'
+            OR jsonb_typeof(stored_owner_raw.payload) IS DISTINCT FROM
+              'object'
+            OR octet_length(stored_owner_raw.payload::text) > 65536
+            OR stored_owner_raw.expired_at IS NOT NULL
+            OR (
+              stored_owner_raw.expires_at IS NOT NULL
+              AND stored_owner_raw.expires_at <= statement_timestamp()
+            )
+            OR owner_processing_restricted
+          THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END IF;
+
+          BEGIN
+            owner_authority_identifiers :=
+              public.organization_identity_authority_from_raw_v1(
+                stored_owner_raw.provider_key,
+                stored_owner_raw.payload
+              );
+            owner_blocker :=
+              public.organization_identity_blocker_from_raw_v1(
+                stored_owner_raw.payload
+              );
+          EXCEPTION WHEN OTHERS THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END;
+          IF jsonb_typeof(owner_authority_identifiers) IS DISTINCT FROM 'array'
+            OR jsonb_array_length(owner_authority_identifiers) > 32
+            OR jsonb_typeof(owner_blocker) IS DISTINCT FROM 'object'
+            OR owner_blocker ? 'kind'
+            OR owner_blocker->>'matchRule' IS NULL
+            OR owner_blocker->>'matchRule' NOT IN (
+              'domain_exact', 'name_country'
+            )
+            OR octet_length(owner_blocker->>'blockerKey') NOT BETWEEN 1 AND 512
+          THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END IF;
+
+          SELECT owner_company.id
+          INTO owner_blocker_company_id
+          FROM public.canonical_company AS owner_company
+          WHERE owner_company.workspace_id = v_workspace_id
+            AND owner_company.dedupe_key = owner_blocker->>'blockerKey';
+          IF EXISTS (
+            SELECT 1
+            FROM public.organization_identifier AS owner_identifier
+            JOIN jsonb_array_elements(
+              owner_authority_identifiers
+            ) AS owner_authority(value)
+              ON owner_identifier.scheme = owner_authority.value->>'scheme'
+              AND owner_identifier.jurisdiction =
+                owner_authority.value->>'jurisdiction'
+              AND owner_identifier.normalized_value =
+                owner_authority.value->>'normalizedValue'
+            WHERE owner_identifier.workspace_id = v_workspace_id
+              AND owner_identifier.status = 'ACTIVE'
+              AND (
+                owner_identifier.conflict_id IS NOT NULL
+                OR owner_identifier.revoked_at IS NOT NULL
+                OR owner_identifier.confidence IS DISTINCT FROM 1
+                OR owner_identifier.authority_provider_key IS DISTINCT FROM
+                  owner_authority.value->>'providerKey'
+                OR owner_identifier.normalizer_version IS DISTINCT FROM
+                  owner_authority.value->>'normalizerVersion'
+                OR owner_identifier.validator_version IS DISTINCT FROM
+                  owner_authority.value->>'validatorVersion'
+              )
+          ) THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END IF;
+          SELECT coalesce(jsonb_agg(
+            jsonb_build_object(
+              'identifierKey',
+                owner_identifier.scheme || ':' ||
+                owner_identifier.jurisdiction || ':' ||
+                owner_identifier.normalized_value,
+              'companyId', owner_identifier.company_id::text
+            ) ORDER BY
+              owner_identifier.scheme || ':' ||
+              owner_identifier.jurisdiction || ':' ||
+              owner_identifier.normalized_value COLLATE "C"
+          ), '[]'::jsonb)
+          INTO owner_existing_bindings
+          FROM public.organization_identifier AS owner_identifier
+          JOIN jsonb_array_elements(
+            owner_authority_identifiers
+          ) AS owner_authority(value)
+            ON owner_identifier.scheme = owner_authority.value->>'scheme'
+            AND owner_identifier.jurisdiction =
+              owner_authority.value->>'jurisdiction'
+            AND owner_identifier.normalized_value =
+              owner_authority.value->>'normalizedValue'
+          WHERE owner_identifier.workspace_id = v_workspace_id
+            AND owner_identifier.status = 'ACTIVE';
+          IF jsonb_array_length(owner_existing_bindings) > 64 THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END IF;
+
+          SELECT coalesce(
+            array_agg(owner_involved.company_id ORDER BY owner_involved.company_id),
+            ARRAY[]::uuid[]
+          )
+          INTO owner_planner_company_ids
+          FROM (
+            SELECT DISTINCT owner_blocker_company_id AS company_id
+            WHERE owner_blocker_company_id IS NOT NULL
+            UNION
+            SELECT DISTINCT (owner_binding.value->>'companyId')::uuid
+            FROM jsonb_array_elements(
+              owner_existing_bindings
+            ) AS owner_binding(value)
+          ) AS owner_involved;
+          IF EXISTS (
+            SELECT 1
+            FROM public.organization_canonical_mapping AS owner_mapping
+            WHERE owner_mapping.workspace_id = v_workspace_id
+              AND owner_mapping.status = 'ACTIVE'
+              AND owner_mapping.source_company_id =
+                ANY(owner_planner_company_ids)
+              AND (
+                owner_mapping.source_company_id =
+                  owner_mapping.canonical_company_id
+                OR owner_mapping.revision < 1
+                OR owner_mapping.revoked_at IS NOT NULL
+                OR owner_mapping.split_decision_id IS NOT NULL
+              )
+          ) OR EXISTS (
+            SELECT 1
+            FROM public.organization_canonical_mapping AS owner_first_mapping
+            JOIN public.organization_canonical_mapping AS owner_next_mapping
+              ON owner_next_mapping.workspace_id = v_workspace_id
+              AND owner_next_mapping.status = 'ACTIVE'
+              AND owner_next_mapping.source_company_id =
+                owner_first_mapping.canonical_company_id
+            WHERE owner_first_mapping.workspace_id = v_workspace_id
+              AND owner_first_mapping.status = 'ACTIVE'
+              AND owner_first_mapping.source_company_id =
+                ANY(owner_planner_company_ids)
+          ) THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END IF;
+          SELECT coalesce(jsonb_agg(
+            jsonb_build_object(
+              'sourceCompanyId', owner_mapping.source_company_id::text,
+              'rootCompanyId', owner_mapping.canonical_company_id::text
+            ) ORDER BY owner_mapping.source_company_id
+          ), '[]'::jsonb)
+          INTO owner_root_mappings
+          FROM public.organization_canonical_mapping AS owner_mapping
+          WHERE owner_mapping.workspace_id = v_workspace_id
+            AND owner_mapping.status = 'ACTIVE'
+            AND owner_mapping.source_company_id =
+              ANY(owner_planner_company_ids);
+          SELECT coalesce(
+            array_agg(owner_involved.company_id ORDER BY owner_involved.company_id),
+            ARRAY[]::uuid[]
+          )
+          INTO owner_involved_company_ids
+          FROM (
+            SELECT DISTINCT owner_id AS company_id
+            FROM unnest(owner_planner_company_ids) AS owner_source(owner_id)
+            UNION
+            SELECT DISTINCT (owner_mapping.value->>'rootCompanyId')::uuid
+            FROM jsonb_array_elements(
+              owner_root_mappings
+            ) AS owner_mapping(value)
+          ) AS owner_involved;
+          IF cardinality(owner_involved_company_ids) > 64
+            OR EXISTS (
+              SELECT 1
+              FROM unnest(
+                owner_involved_company_ids
+              ) AS owner_involved(owner_id)
+              WHERE NOT owner_involved.owner_id = ANY(locked_company_ids)
+            )
+          THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END IF;
+
+          BEGIN
+            owner_resolution_plan :=
+              public.organization_identity_plan_from_snapshot_v1(
+                jsonb_build_object(
+                  'raw', jsonb_build_object(
+                    'rawRecordId', stored_owner_raw.id::text,
+                    'providerKey', stored_owner_raw.provider_key,
+                    'payloadHash', stored_owner_raw.payload_hash,
+                    'ingestVersion', stored_owner_raw.ingest_version
+                  ),
+                  'resolverVersion', 'organization-identity-resolver/v1',
+                  'blocker', jsonb_build_object(
+                    'blockerKey', owner_blocker->>'blockerKey',
+                    'matchRule', owner_blocker->>'matchRule',
+                    'legacyCandidateCompanyId', owner_blocker_company_id
+                  ),
+                  'authorityIdentifiers', owner_authority_identifiers,
+                  'existingBindings', owner_existing_bindings,
+                  'rootMappings', owner_root_mappings
+                )
+              );
+          EXCEPTION WHEN OTHERS THEN
+            RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+              USING ERRCODE = 'P0001';
+          END;
+        END IF;
+
+        owner_input_hash := owner_resolution_plan->>'inputHash';
+        IF owner_resolution_plan->>'kind' IS DISTINCT FROM 'conflict'
+          OR owner_resolution_plan->>'matchRule' IS DISTINCT FROM
+            'identity_conflict'
+          OR owner_resolution_plan->>'conflictType' IS DISTINCT FROM
+            plan_conflict_type
+          OR owner_resolution_plan->>'conflictFingerprint' IS DISTINCT FROM
+            plan_conflict_fingerprint
+          OR owner_resolution_plan->'companyIds' IS DISTINCT FROM
+            to_jsonb(conflict_company_ids)
+          OR owner_resolution_plan->'identifierKeys' IS DISTINCT FROM
+            to_jsonb(expected_identifier_keys)
+          OR owner_input_hash !~ '^[0-9a-f]{64}$'
+        THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+
+        PERFORM 1
+        FROM public.identity_link AS owner_link
+        WHERE owner_link.workspace_id = v_workspace_id
+          AND owner_link.raw_record_id = stored_conflict.raw_record_id
+        ORDER BY owner_link.id
+        FOR UPDATE;
+        SELECT count(*)::integer
+        INTO owner_link_total
+        FROM public.identity_link AS owner_link
+        WHERE owner_link.workspace_id = v_workspace_id
+          AND owner_link.raw_record_id = stored_conflict.raw_record_id;
+        SELECT coalesce(
+          array_agg(owner_link.canonical_id ORDER BY owner_link.canonical_id),
+          ARRAY[]::uuid[]
+        )
+        INTO owner_link_company_ids
+        FROM public.identity_link AS owner_link
+        WHERE owner_link.workspace_id = v_workspace_id
+          AND owner_link.raw_record_id = stored_conflict.raw_record_id
+          AND owner_link.canonical_type = 'company'
+          AND owner_link.match_rule = 'identity_conflict'
+          AND owner_link.confidence = 0
+          AND owner_link.status = 'PENDING_CONFLICT'
+          AND owner_link.resolver_version =
+            'organization-identity-resolver/v1'
+          AND owner_link.input_hash = owner_input_hash
+          AND owner_link.conflict_id = stored_conflict.id;
+        IF owner_link_total IS DISTINCT FROM cardinality(conflict_company_ids)
+          OR owner_link_company_ids IS DISTINCT FROM conflict_company_ids
+        THEN
+          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+            USING ERRCODE = 'P0001';
+        END IF;
+      END IF;
 
       IF link_total > 0 THEN
         SELECT
@@ -1837,10 +2157,6 @@ BEGIN
           plan_input_hash,
           stored_conflict.id
         );
-        IF clock_timestamp() >= statement_deadline THEN
-          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-            USING ERRCODE = '57014';
-        END IF;
       END LOOP;
       RETURN QUERY SELECT
         'conflict'::text,
@@ -1900,10 +2216,6 @@ BEGIN
         statement_timestamp()
       )
       RETURNING id INTO target_company_id;
-      IF clock_timestamp() >= statement_deadline THEN
-        RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-          USING ERRCODE = '57014';
-      END IF;
     ELSIF plan_kind IN ('bind_existing', 'lazy_upgrade') THEN
       target_company_id := (resolution_plan->>'companyId')::uuid;
       IF NOT target_company_id = ANY(locked_company_ids) THEN
@@ -1950,10 +2262,6 @@ BEGIN
         SET last_seen_at = greatest(oi.last_seen_at, statement_timestamp())
         WHERE oi.workspace_id = v_workspace_id
           AND oi.id = stored_identifier.id;
-        IF clock_timestamp() >= statement_deadline THEN
-          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-            USING ERRCODE = '57014';
-        END IF;
       ELSE
         INSERT INTO public.organization_identifier(
           workspace_id,
@@ -1996,10 +2304,6 @@ BEGIN
           statement_timestamp(),
           NULL
         );
-        IF clock_timestamp() >= statement_deadline THEN
-          RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-            USING ERRCODE = '57014';
-        END IF;
       END IF;
     END LOOP;
 
@@ -2028,10 +2332,6 @@ BEGIN
       plan_input_hash,
       NULL
     );
-    IF clock_timestamp() >= statement_deadline THEN
-      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-        USING ERRCODE = '57014';
-    END IF;
     RETURN QUERY SELECT
       CASE WHEN plan_kind = 'create_new' THEN 'created' ELSE 'bound' END,
       v_raw_record_id,
@@ -2045,23 +2345,24 @@ BEGIN
       identifier_total,
       0;
     RETURN;
-  EXCEPTION WHEN OTHERS THEN
+  EXCEPTION WHEN lock_not_available THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_LOCK_TIMEOUT'
+      USING ERRCODE = '55P03';
+  WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS
       error_state = RETURNED_SQLSTATE,
       error_message = MESSAGE_TEXT;
-    IF error_state = '57014' THEN
-      RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
-        USING ERRCODE = '57014';
-    ELSIF error_state = '55P03'
-      AND error_message = 'IDENTITY_RESOLUTION_LOCK_TIMEOUT'
-    THEN
-      RAISE EXCEPTION 'IDENTITY_RESOLUTION_LOCK_TIMEOUT'
-        USING ERRCODE = '55P03';
-    ELSIF error_state = '40001'
+    IF error_state = '40001'
       AND error_message = 'IDENTITY_RESOLUTION_PLAN_STALE'
     THEN
       RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
         USING ERRCODE = '40001';
+    ELSIF error_state = '42501'
+      AND error_message = 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      AND command_admission_open
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+        USING ERRCODE = '42501';
     ELSIF error_state = 'P0001'
       AND error_message IN (
         'IDENTITY_RAW_NOT_RESOLVABLE',
@@ -2077,6 +2378,176 @@ BEGIN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
       USING ERRCODE = 'P0001';
   END;
+END
+$organization_identity_worker$;
+
+REVOKE ALL ON FUNCTION
+  public.organization_identity_resolve_for_raw_worker_v1(text, text)
+FROM PUBLIC, app_user;
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+  public.organization_identity_resolve_for_raw_worker_v1(text, text)
+FROM global;
+
+CREATE FUNCTION public.resolve_organization_identity_for_raw_v1(
+  p_workspace_id text,
+  p_raw_record_id text
+)
+RETURNS TABLE (
+  outcome_kind text,
+  raw_record_id uuid,
+  company_id uuid,
+  conflict_id uuid,
+  match_rule text,
+  input_hash text,
+  conflict_fingerprint text,
+  replayed boolean,
+  company_created boolean,
+  identifier_count integer,
+  party_count integer
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+SET row_security = off
+AS $organization_identity_command$
+DECLARE
+  v_workspace_id uuid;
+  v_raw_record_id uuid;
+  workspace_setting text;
+  caller_lock_timeout text;
+  caller_statement_timeout text;
+  lock_timeout_seconds numeric;
+  statement_timeout_seconds numeric;
+  statement_deadline timestamptz;
+  worker_invoked boolean := false;
+  error_state text;
+  error_message text;
+BEGIN
+  IF session_user IS DISTINCT FROM 'app_user'
+    OR current_user IS NOT DISTINCT FROM session_user
+    OR current_setting('role', true) IS DISTINCT FROM 'none'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_workspace_id IS NULL OR p_raw_record_id IS NULL
+    OR octet_length(p_workspace_id) > 36
+    OR octet_length(p_raw_record_id) > 36
+    OR p_workspace_id !~
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    OR p_raw_record_id !~
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  workspace_setting := current_setting(
+    'app.current_workspace_id', true
+  );
+  IF workspace_setting IS NULL
+    OR workspace_setting !~
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    OR workspace_setting IS DISTINCT FROM p_workspace_id
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
+  END IF;
+  v_workspace_id := p_workspace_id::uuid;
+  v_raw_record_id := p_raw_record_id::uuid;
+  caller_lock_timeout := current_setting('lock_timeout', true);
+  caller_statement_timeout := current_setting('statement_timeout', true);
+  BEGIN
+    IF caller_lock_timeout IS NULL
+      OR caller_statement_timeout IS NULL
+      OR octet_length(caller_lock_timeout) NOT BETWEEN 1 AND 64
+      OR octet_length(caller_statement_timeout) NOT BETWEEN 1 AND 64
+    THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+        USING ERRCODE = '42501';
+    END IF;
+    lock_timeout_seconds := extract(
+      epoch FROM caller_lock_timeout::interval
+    );
+    statement_timeout_seconds := extract(
+      epoch FROM caller_statement_timeout::interval
+    );
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
+  END;
+  IF lock_timeout_seconds NOT BETWEEN 0.001 AND 5
+    OR statement_timeout_seconds NOT BETWEEN 0.001 AND 60
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
+  END IF;
+  statement_deadline :=
+    statement_timestamp() + caller_statement_timeout::interval;
+  worker_invoked := true;
+  RETURN QUERY EXECUTE $organization_identity_worker_call$
+    SELECT *
+    FROM public.organization_identity_resolve_for_raw_worker_v1($1, $2)
+  $organization_identity_worker_call$
+  USING v_workspace_id::text, v_raw_record_id::text;
+  RETURN;
+EXCEPTION WHEN query_canceled THEN
+  IF statement_deadline IS NOT NULL
+    AND clock_timestamp() >= statement_deadline - interval '10 milliseconds'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATEMENT_TIMEOUT'
+      USING ERRCODE = '57014';
+  END IF;
+  RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+    USING ERRCODE = 'P0001';
+WHEN assert_failure THEN
+  RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+    USING ERRCODE = 'P0001';
+WHEN lock_not_available THEN
+  RAISE EXCEPTION 'IDENTITY_RESOLUTION_LOCK_TIMEOUT'
+    USING ERRCODE = '55P03';
+WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS
+    error_state = RETURNED_SQLSTATE,
+    error_message = MESSAGE_TEXT;
+  IF NOT worker_invoked
+    AND error_state = '42501'
+    AND error_message = 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
+  ELSIF NOT worker_invoked
+    AND error_state = 'P0001'
+    AND error_message = 'IDENTITY_RESOLUTION_INPUT_INVALID'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  ELSIF worker_invoked
+    AND error_state = '40001'
+    AND error_message = 'IDENTITY_RESOLUTION_PLAN_STALE'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_PLAN_STALE'
+      USING ERRCODE = '40001';
+  ELSIF worker_invoked
+    AND error_state = '42501'
+    AND error_message = 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_COMMAND_DENIED'
+      USING ERRCODE = '42501';
+  ELSIF worker_invoked
+    AND error_state = 'P0001'
+    AND error_message IN (
+      'IDENTITY_RAW_NOT_RESOLVABLE',
+      'IDENTITY_RAW_PROCESSING_RESTRICTED',
+      'IDENTITY_INPUT_DRIFT',
+      'IDENTITY_RESOLUTION_STATE_INVALID'
+    )
+  THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'P0001',
+      MESSAGE = error_message;
+  END IF;
+  RAISE EXCEPTION 'IDENTITY_RESOLUTION_STATE_INVALID'
+    USING ERRCODE = 'P0001';
 END
 $organization_identity_command$;
 
@@ -2160,9 +2631,10 @@ BEGIN
           'organization_identity_canonical_suppression_value_v1',
           'organization_identity_plan_from_snapshot_v1',
           'organization_identity_acquire_advisory_until_v1',
+          'organization_identity_resolve_for_raw_worker_v1',
           'resolve_organization_identity_for_raw_v1'
         )
-    ) IS DISTINCT FROM 6
+    ) IS DISTINCT FROM 7
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
       USING ERRCODE = 'P0001';
@@ -2201,6 +2673,18 @@ BEGIN
         ARRAY['search_path=pg_catalog, public']::text[], false
       ),
       (
+        'organization_identity_resolve_for_raw_worker_v1',
+        'text, text',
+        'TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)',
+        false, 'v'::"char",
+        true,
+        ARRAY[
+          'search_path=pg_catalog, public',
+          'row_security=off'
+        ]::text[],
+        false
+      ),
+      (
         'resolve_organization_identity_for_raw_v1',
         'text, text',
         'TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)',
@@ -2208,8 +2692,6 @@ BEGIN
         true,
         ARRAY[
           'search_path=pg_catalog, public',
-          'lock_timeout=5s',
-          'statement_timeout=60s',
           'row_security=off'
         ]::text[],
         true

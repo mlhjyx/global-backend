@@ -32,7 +32,7 @@ const migrationChecksums = Object.freeze([
   ],
   [
     "20260830090000_organization_identity_v2_resolver_command",
-    "3bf6e58db819352ca0777380e9adb2fbf32ca9eeb311b91df696b569302da7af",
+    "3cb5fe7ca22b3067b92d71ac25198c7ff14d08c08a0907343d84130bb0b7a882",
   ],
 ]);
 const WORKSPACE_A = "41000000-0000-4000-8000-000000000001";
@@ -247,6 +247,7 @@ function ensurePrerequisite() {
       'organization_identity_blocker_from_raw_v1',
       'organization_identity_canonical_suppression_value_v1',
       'organization_identity_plan_from_snapshot_v1',
+      'organization_identity_resolve_for_raw_worker_v1',
       'resolve_organization_identity_for_raw_v1'
     ) ORDER BY p.proname;`);
   assert.equal(
@@ -257,6 +258,7 @@ function ensurePrerequisite() {
       "organization_identity_blocker_from_raw_v1|p_raw jsonb|global|false|search_path=pg_catalog, public|false|false",
       "organization_identity_canonical_suppression_value_v1|p_type text, p_value text|global|false|search_path=pg_catalog, public|false|false",
       "organization_identity_plan_from_snapshot_v1|p_snapshot jsonb|global|false|search_path=pg_catalog, public|false|false",
+      "organization_identity_resolve_for_raw_worker_v1|p_workspace_id text, p_raw_record_id text|global|false|search_path=pg_catalog, public,row_security=off|false|false",
       "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,row_security=off|true|false",
     ].join("\n"),
   );
@@ -2050,12 +2052,26 @@ async function runStatementScenario(scenario) {
       resolvePromise({ code });
     });
   });
+  const warmupSql = scenario.warmupFixture
+    ? `BEGIN;
+      ${fixtureSql(scenario.warmupFixture)}
+      SET SESSION AUTHORIZATION app_user;
+      SET LOCAL lock_timeout='5s';
+      SET LOCAL statement_timeout='60s';
+      SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
+      SELECT count(*) FROM public.resolve_organization_identity_for_raw_v1(
+        '${WORKSPACE_A}','${scenario.rawRecordId ?? RAW_A}'
+      );
+      RESET SESSION AUTHORIZATION;
+      ROLLBACK;`
+    : "";
   child.stdin.write(
-    `\\set ON_ERROR_STOP on\n\\set VERBOSITY verbose\nSELECT 'A4_STATEMENT_PID|'||pg_backend_pid();\n`,
+    `\\set ON_ERROR_STOP on\n\\set VERBOSITY verbose\n${warmupSql}\nSELECT 'A4_STATEMENT_PID|'||pg_backend_pid();\n`,
   );
   let startedAt;
   try {
     await bounded(pidReady, 5_000, "statement caller PID readiness");
+    if (scenario.beforeMain) await scenario.beforeMain();
     startedAt = Date.now();
     child.stdin.end(`BEGIN;
       ${scenario.skipFixture ? "" : fixtureSql(scenario.fixture)}
@@ -2108,6 +2124,18 @@ async function runStatementScenario(scenario) {
       scenario.processTimeout,
       "statement caller process guard",
     );
+    if (scenario.nativePreContext) {
+      assert.notEqual(result.code, 0, "native cancellation unexpectedly succeeded");
+      const diagnostics = parseVerboseDiagnostics(stderr, "57014");
+      return {
+        elapsedMs: Date.now() - startedAt,
+        outcome: error("57014", diagnostics.message),
+        diagnostics,
+        observed: null,
+        output: stderr,
+        callerPid,
+      };
+    }
     assert.equal(result.code, 0, `${stdout}\n${stderr}`);
     const stateMatch = stdout.match(/A4_ERROR_SQLSTATE\|([0-9A-Z]{5})/u);
     const jsonLine = stdout
@@ -3778,23 +3806,76 @@ describe("Organization Identity prearmed timeout and fault rollback matrix", () 
   });
 
   it("hard statement timer cancels a blocked pre-write table read", async () => {
-    const holder = startHolder(
-      "LOCK TABLE raw_source_governance_disposition IN ACCESS EXCLUSIVE MODE",
-    );
+    let holder;
     try {
-      await holder.ready;
       const result = await runStatementScenario({
+        warmupFixture: { raws: [RAW_CREATE] },
+        beforeMain: async () => {
+          holder = startHolder(
+            "LOCK TABLE raw_source_governance_disposition IN ACCESS EXCLUSIVE MODE",
+          );
+          await holder.ready;
+        },
         fixture: { raws: [RAW_CREATE] },
         lockTimeout: "5s",
         statementTimeout: "750ms",
         processTimeout: 4_000,
+        nativePreContext: true,
       });
-      assertHardTimeoutResult(result, createOnlyPreimage, {
-        minimumMs: 500,
-        maximumMs: 2_500,
+      assert.deepEqual(result.outcome, {
+        kind: "error",
+        sqlstate: "57014",
+        message: "canceling statement due to statement timeout",
+      });
+      assert.equal(result.diagnostics.detail, null);
+      assert.equal(result.diagnostics.hint, null);
+      assert.equal(result.diagnostics.context, null);
+      assert.match(
+        result.diagnostics.location,
+        /^ProcessInterrupts, postgres\.c:[0-9]+$/u,
+      );
+      for (const forbidden of [
+        "PL/pgSQL",
+        "resolve_organization_identity_for_raw_v1",
+        "organization_identity_resolve_for_raw_worker_v1",
+        "raw_source_governance_disposition",
+        "SELECT",
+        "DETAIL:",
+        "HINT:",
+        "CONTEXT:",
+        "password",
+        "credential",
+        "fixture.invalid",
+        WORKSPACE_A,
+        RAW_A,
+        COMPANY_A,
+      ]) {
+        assert.equal(result.output.includes(forbidden), false);
+      }
+      assert.ok(
+        result.elapsedMs >= 500 && result.elapsedMs < 2_500,
+        `native pre-context timeout was outside bounds: ${result.elapsedMs}`,
+      );
+      assert.equal(
+        prerequisiteSql(`SELECT
+          (SELECT count(*) FROM workspace
+            WHERE id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+          (SELECT count(*) FROM raw_source_record
+            WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+          (SELECT count(*) FROM canonical_company
+            WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+          (SELECT count(*) FROM identity_link
+            WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'));`),
+        "0|0|0|0",
+      );
+      assert.deepEqual(backendArtifactState(result.callerPid), {
+        backend: 0,
+        transaction: 0,
+        locks: 0,
+        triggers: 0,
       });
     } finally {
-      await holder.release();
+      if (holder) await holder.release();
     }
   });
 
