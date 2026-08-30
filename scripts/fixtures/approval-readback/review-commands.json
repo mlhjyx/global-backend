@@ -1,0 +1,10 @@
+{
+  "schema_version": "approval-review-command-fixtures/v1",
+  "canonical": "APPROVE DECISION ADR-042 REV program-c/policy-r2 ROLE OWN-PRODUCT DIGEST sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "representative_invalid": [
+    "APPROVE  DECISION ADR-042 REV program-c/policy-r2 ROLE OWN-PRODUCT DIGEST sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "APPROVE DECISION ADR-042 REV program-c/policy-r2 ROLE OWN-PRODUCT DIGEST sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "APPROVE DECISION ADR-042 REV program-c/policy-r2 ROLE OWN-PRODUCT DIGEST sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nextra",
+    "@owner APPROVE DECISION ADR-042 REV program-c/policy-r2 ROLE OWN-PRODUCT DIGEST sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ]
+}

@@ -343,3 +343,41 @@ test('buildApprovalReceiptArtifact does not retain mutable caller objects', () =
     artifact.envelope.core.actor_login = 'attempted-mutation';
   }, TypeError);
 });
+
+test('approval receipt core renders optional merge authorization references in one schema order', () => {
+  const mergeAuthorizationEvidence = {
+    stage: 'PROPOSAL_MERGE',
+    grant_id: 'program-c-grant-0001',
+    grant_raw_sha256: digest('b'),
+    single_use_nonce: 'nonce-program-c-0001',
+    consumption_id: 'program-c-consumption-0001',
+    consumption_raw_sha256: digest('c'),
+    reserved_ledger_revision: 17,
+  };
+  const ordinary = buildApprovalReceiptArtifact(approvalCore());
+  assert.equal(Object.hasOwn(ordinary.envelope.core, 'merge_authorization_evidence'), false);
+
+  const merged = buildApprovalReceiptArtifact(approvalCore({ merge_authorization_evidence: mergeAuthorizationEvidence }));
+  assert.deepEqual(merged.envelope.core.merge_authorization_evidence, mergeAuthorizationEvidence);
+  assert.match(
+    merged.bytes.toString('utf8'),
+    /"merge_authorization_evidence": \{\n      "stage": "PROPOSAL_MERGE",\n      "grant_id":/,
+  );
+  assert.equal(Object.hasOwn(merged.envelope.core.merge_authorization_evidence, 'grant'), false);
+  assert.equal(Object.hasOwn(merged.envelope.core.merge_authorization_evidence, 'consumption'), false);
+
+  for (const mutate of [
+    (value) => { delete value.consumption_id; },
+    (value) => { value.status = 'CONSUMED'; },
+    (value) => { value.grant_digest = value.grant_raw_sha256; },
+    (value) => { value.grant = { grant_id: value.grant_id, status: 'CONSUMED' }; },
+    (value) => { value.receipt_raw_sha256 = digest('d'); },
+  ]) {
+    const value = structuredClone(mergeAuthorizationEvidence);
+    mutate(value);
+    assert.throws(
+      () => buildApprovalReceiptArtifact(approvalCore({ merge_authorization_evidence: value })),
+      (error) => error.message === 'APPROVAL_JSON_CORE_PROPERTY',
+    );
+  }
+});

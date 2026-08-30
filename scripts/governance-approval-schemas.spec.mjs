@@ -249,6 +249,37 @@ test('Task 1 receipt validation uses the Task 2 schema-ordered renderer and acce
   expectValid(validateApprovalReceipt, artifact.envelope);
 });
 
+test('receipt schema permits only a complete closed merge authorization evidence reference set', () => {
+  const mergeAuthorizationEvidence = {
+    stage: 'ACCEPTANCE_MERGE',
+    grant_id: 'program-c-grant-0001',
+    grant_raw_sha256: DIGEST,
+    single_use_nonce: 'nonce-program-c-0001',
+    consumption_id: 'program-c-consumption-0001',
+    consumption_raw_sha256: OTHER_DIGEST,
+    reserved_ledger_revision: 17,
+  };
+  const merged = buildApprovalReceiptArtifact({
+    ...receipt().core,
+    merge_authorization_evidence: mergeAuthorizationEvidence,
+  });
+  expectValid(validateApprovalReceipt, merged.envelope);
+
+  for (const mutate of [
+    (value) => { delete value.consumption_raw_sha256; },
+    (value) => { value.mutable_status = 'CONSUMED'; },
+    (value) => { value.grant_digest = value.grant_raw_sha256; },
+    (value) => { value.grant = grant(); },
+    (value) => { value.consumption = consumption(); },
+  ]) {
+    const evidence = clone(mergeAuthorizationEvidence);
+    mutate(evidence);
+    const value = receipt();
+    value.core.merge_authorization_evidence = evidence;
+    expectInvalid(validateApprovalReceipt, value);
+  }
+});
+
 test('Task 1 receipt validation and Task 2 construction agree on actor_login Unicode code points', () => {
   const envelope = buildApprovalReceiptArtifact({
     ...receipt().core,
