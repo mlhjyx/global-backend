@@ -293,6 +293,18 @@ describe('governed relation append and attest migration contract', () => {
     expect(snapshot).toContain('p_child_subject_id');
   });
 
+  it('rejects an explicit operation-root parent before append or attest replay handling', async () => {
+    const sql = await readFile(migrationUrl, 'utf8');
+    for (const name of [APPEND, ATTEST]) {
+      const block = functionBlock(sql, name);
+      const guard = /IF\s+p_parent_governed_subject_id\s+IS\s+NOT\s+NULL\s+AND\s+EXISTS\s*\([^]*?subject\.id\s*=\s*p_parent_governed_subject_id[^]*?subject\.subject_type\s*=\s*'tool_operation'[^]*?subject\.subject_id\s*=\s*p_operation_id[^]*?GOVERNED_SUBJECT_RELATION_INVALID/iu.exec(block);
+      const rejection = guard?.index ?? -1;
+      const replayRead = block.indexOf('_governed_relation_path_snapshot_v1');
+      expect(rejection).toBeGreaterThan(0);
+      expect(rejection).toBeLessThan(replayRead);
+    }
+  });
+
   it('exposes function-only app ACL and no Task 3 tombstone function', async () => {
     const sql = await migration();
     expect(() => validateAcl(sql)).not.toThrow();

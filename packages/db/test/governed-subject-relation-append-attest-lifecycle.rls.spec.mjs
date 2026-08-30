@@ -149,9 +149,22 @@ describe("governed relation append/attest lifecycle and graph contract", () => {
       workspaceId: WS_A, authorityId: AUTH_A, accountId: ACCOUNT_A,
       operationId: OP_A2, suffix: "11",
     });
+    const explicitRoot = psql(`INSERT INTO governed_subject(
+        scope_key,workspace_id,subject_type,subject_id,data_class
+      ) VALUES ('${WS_A}','${WS_A}','tool_operation','${OP_A2}','NON_PERSONAL')
+      RETURNING id;`);
+    for (const fn of [APPEND, ATTEST]) {
+      captureFailure(fn, otherFacts, { parentId: explicitRoot },
+        "GOVERNED_SUBJECT_RELATION_INVALID");
+    }
     const other = parseRow(psql(asApp(selectCall(APPEND, otherFacts, {
       childId: "51000000-0000-4000-8000-000000000011", relationKey: "other:0",
     }), WS_A)));
+    assert.equal(other[0], explicitRoot);
+    for (const fn of [APPEND, ATTEST]) {
+      captureFailure(fn, otherFacts, { parentId: explicitRoot },
+        "GOVERNED_SUBJECT_RELATION_INVALID");
+    }
     captureFailure(APPEND, state.factsA, { parentId: other[2], relationKey: "bad:other" }, "GOVERNED_SUBJECT_RELATION_INVALID");
     captureFailure(APPEND, state.factsA, { parentId: childInternal, relationKey: "bad:self" }, "GOVERNED_SUBJECT_RELATION_INVALID");
     captureFailure(APPEND, state.factsA, {

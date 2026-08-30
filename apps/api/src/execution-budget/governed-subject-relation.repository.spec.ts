@@ -517,6 +517,55 @@ describe('GovernedSubjectRelationRepository Task 2 contract', () => {
       .rejects.not.toThrow(/secret@example|private SQL|token/iu);
   });
 
+  it('reads Prisma markers only through own data descriptors and rejects hostile reflection', async () => {
+    const module = await loadRepository();
+    const repository = new module.GovernedSubjectRelationRepository();
+    const stable = module.GOVERNED_SUBJECT_TOMBSTONED;
+    const hostilePayload = 'private-marker-payload@example.test';
+    const marker = () => databaseMarker(stable);
+    const accessor = (level: 'code' | 'meta' | 'meta.code' | 'meta.message') => {
+      const error = marker();
+      if (level === 'code' || level === 'meta') {
+        Object.defineProperty(error, level, {
+          configurable: true, enumerable: true,
+          get: () => { throw new Error(hostilePayload); },
+        });
+      } else {
+        const meta = { code: 'P0001', message: `ERROR: ${stable}` };
+        Object.defineProperty(meta, level.slice(5), {
+          configurable: true, enumerable: true,
+          get: () => { throw new Error(hostilePayload); },
+        });
+        Object.defineProperty(error, 'meta', {
+          configurable: true, enumerable: true, value: meta,
+        });
+      }
+      return error;
+    };
+    const proxyError = new Proxy(marker(), {});
+    const proxyMeta = marker();
+    Object.defineProperty(proxyMeta, 'meta', {
+      configurable: true, enumerable: true,
+      value: new Proxy({ code: 'P0001', message: `ERROR: ${stable}` }, {}),
+    });
+    const secretData = marker();
+    Object.defineProperty(secretData, 'meta', {
+      configurable: true, enumerable: true,
+      value: { code: 'P0001', message: `ERROR: ${stable} ${hostilePayload}` },
+    });
+    const hostile = [
+      accessor('code'), accessor('meta'), accessor('meta.code'), accessor('meta.message'),
+      proxyError, proxyMeta, secretData,
+    ];
+    for (const error of hostile) {
+      for (const method of ['appendChildRelationV1', 'attestChildRelationV1'] as const) {
+        const failure = repository[method](transactionRows(error).value, validInput());
+        await expect(failure).rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+        await expect(failure).rejects.not.toThrow(/private-marker|payload@example/iu);
+      }
+    }
+  });
+
   it('mutation vectors prove closed-object validation rejects every reflective bypass', () => {
     const keys = Object.keys(validInput());
     expect(exactClosed(validInput(), keys)).toBe(true);
