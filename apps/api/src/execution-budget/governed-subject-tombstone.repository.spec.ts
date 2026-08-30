@@ -59,7 +59,14 @@ function transaction(result: unknown) {
     if (result instanceof Error) throw result;
     return result;
   });
-  return { value: { $queryRaw: queryRaw }, queryRaw };
+  const executeRaw = vi.fn();
+  const queryRawUnsafe = vi.fn();
+  const executeRawUnsafe = vi.fn();
+  return {
+    value: { $queryRaw: queryRaw, $executeRaw: executeRaw, $queryRawUnsafe: queryRawUnsafe,
+      $executeRawUnsafe: executeRawUnsafe },
+    queryRaw, executeRaw, queryRawUnsafe, executeRawUnsafe,
+  };
 }
 
 function exactClosed(value: unknown, keys: readonly string[]): boolean {
@@ -87,11 +94,15 @@ function marker(message: string) {
 describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
   it('declares the exact closed immutable tombstone input and result types', async () => {
     const source = await readFile(typesUrl, 'utf8');
-    expect(source).toContain('GovernedSubjectTombstoneInput');
-    expect(source).toContain('GovernedSubjectTombstoneResult');
-    expect(source).toContain("'FENCE_CREATED'");
-    expect(source).toContain("'AUDIT_APPENDED_WITH_EXISTING_FENCE'");
-    expect(source).toContain("'REPLAYED'");
+    const body = (name: string) => new RegExp(`export interface ${name} \\{([^]*?)\\n\\}`, 'u')
+      .exec(source)?.[1]?.replace(/\s+/gu, ' ').trim();
+    expect(body('GovernedSubjectTombstoneInput')).toBe(
+      'readonly workspaceId: string; readonly governedSubjectId: string; readonly deletionRequestId: string;',
+    );
+    expect(body('GovernedSubjectTombstoneResult')).toBe(
+      'readonly governedSubjectId: string; readonly tombstonedAt: string; readonly auditId: string; readonly outcome: GovernedSubjectTombstoneOutcome;',
+    );
+    expect(source).toMatch(/export type GovernedSubjectTombstoneOutcome\s*=\s*'FENCE_CREATED'\s*\|\s*'REPLAYED'\s*\|\s*'AUDIT_APPENDED_WITH_EXISTING_FENCE';/u);
   });
 
   it('mutation-proves closed input and result shapes reject reflective bypasses', () => {
@@ -105,27 +116,35 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
     expect(exactClosed(accessor, inputKeys)).toBe(false);
     expect(exactClosed({ ...input(), [Symbol('x')]: true }, inputKeys)).toBe(false);
     expect(exactClosed({
-      governedSubjectId: IDS.subject, tombstonedAt: new Date(), auditId: IDS.audit,
+      governedSubjectId: IDS.subject, tombstonedAt: '2026-08-30T00:00:00.000Z', auditId: IDS.audit,
       outcome: 'FENCE_CREATED',
     }, resultKeys)).toBe(true);
   });
 
   it('executes one exact public three-parameter tagged SELECT and freezes the result', async () => {
     const module = await load();
-    const database = transaction([row()]);
+    const databaseRow = row();
+    const database = transaction([databaseRow]);
     const result = await new module.GovernedSubjectRelationRepository()
       .tombstoneSubjectV1(database.value, input());
     expect(result).toEqual({
       governedSubjectId: IDS.subject,
-      tombstonedAt: new Date('2026-08-30T00:00:00.000Z'),
+      tombstonedAt: '2026-08-30T00:00:00.000Z',
       auditId: IDS.audit,
       outcome: 'FENCE_CREATED',
     });
     expect(Object.isFrozen(result)).toBe(true);
+    databaseRow.tombstoned_at.setUTCFullYear(2037);
+    expect(result).toMatchObject({ tombstonedAt: '2026-08-30T00:00:00.000Z' });
     const query = database.queryRaw.mock.calls[0]?.[0] as {
       strings: readonly string[]; values: readonly unknown[];
     };
     expect(query.values).toEqual([IDS.workspace, IDS.subject, IDS.request]);
+    expect(database.queryRaw).toHaveBeenCalledOnce();
+    expect(database.executeRaw).not.toHaveBeenCalled();
+    expect(database.queryRawUnsafe).not.toHaveBeenCalled();
+    expect(database.executeRawUnsafe).not.toHaveBeenCalled();
+    expect(query.strings).toHaveLength(4);
     expect(query.strings.join('?').replace(/\s+/gu, ' ').trim()).toBe(
       `SELECT * FROM public.${FUNCTION}(?::uuid,?::uuid,?::uuid)`,
     );
@@ -138,11 +157,44 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
       await expect(repository.tombstoneSubjectV1(transaction([row(outcome)]).value, input()))
         .resolves.toMatchObject({ outcome });
     }
+    class DateSubclass extends Date {}
+    const accessor = row() as Record<string, unknown>;
+    Object.defineProperty(accessor, 'outcome', { enumerable: true, get: () => 'FENCE_CREATED' });
+    const symbol = { ...row(), [Symbol('x')]: true };
+    const invalidDate = new Date(Number.NaN);
     for (const invalid of [[], [row(), row()], [{ ...row(), extra: true }],
-      [{ ...row(), outcome: 'CREATED' }], [{ ...row(), tombstoned_at: 'not-date' }]]) {
+      [{ governed_subject_id: IDS.subject, tombstoned_at: row().tombstoned_at,
+        audit_id: IDS.audit }], [{ ...row(), outcome: 'CREATED' }],
+      [{ ...row(), governed_subject_id: 'bad' }], [{ ...row(), audit_id: 'bad' }],
+      [{ ...row(), tombstoned_at: 'not-date' }], [{ ...row(), tombstoned_at: invalidDate }],
+      [{ ...row(), tombstoned_at: new DateSubclass() }],
+      [{ ...row(), tombstoned_at: new Proxy(row().tombstoned_at, {}) }],
+      [new Proxy(row(), {})], [accessor], [symbol]]) {
       await expect(repository.tombstoneSubjectV1(transaction(invalid).value, input()))
         .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
     }
+  });
+
+  it('snapshots input and trusted Date before awaiting SQL to close mutation TOCTOU', async () => {
+    const module = await load();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const database = transaction([row()]);
+    database.queryRaw.mockImplementationOnce(async () => {
+      await gate;
+      return [row()];
+    });
+    const value = input();
+    const pending = new module.GovernedSubjectRelationRepository()
+      .tombstoneSubjectV1(database.value, value);
+    value.workspaceId = '10000000-0000-4000-8000-000000000099';
+    value.governedSubjectId = '20000000-0000-4000-8000-000000000099';
+    release();
+    await expect(pending).resolves.toMatchObject({
+      governedSubjectId: IDS.subject, tombstonedAt: '2026-08-30T00:00:00.000Z',
+    });
+    const query = database.queryRaw.mock.calls[0]?.[0] as { values: readonly unknown[] };
+    expect(query.values).toEqual([IDS.workspace, IDS.subject, IDS.request]);
   });
 
   it('rejects invalid UUIDs, extras, accessors, symbols and proxies before SQL', async () => {
