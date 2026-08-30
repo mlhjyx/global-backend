@@ -8,6 +8,8 @@ const schemaMigrationUrl = new URL(
   repositoryRoot,
 );
 const prismaSchemaUrl = new URL('packages/db/prisma/schema.prisma', repositoryRoot);
+const C_TX_CONTRACT_SHA256 =
+  '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe';
 
 const WORKSPACE_TABLES = [
   'discovery_company_materialization_admission',
@@ -211,6 +213,27 @@ describe('Discovery company materialization C-TX inventory and schema migration'
       'DISCOVERY_COMPANY_MATERIALIZATION_SCHEMA_MIGRATION_MISSING',
     );
     validateMaterializationSchemaMigration(migration);
+    expect(migration.split(C_TX_CONTRACT_SHA256).length - 1).toBeGreaterThanOrEqual(8);
+    expect(migration).toContain('DISCOVERY_COMPANY_MATERIALIZATION_MIGRATION_PRINCIPAL_INVALID');
+    expect(migration).toContain('discovery_company_materialization_activation_insert_guard');
+    expect(migration).toMatch(/NOLOGIN\s+NOINHERIT[\s\S]{0,100}BYPASSRLS/u);
+    expect(migration).toContain('membership.roleid=reader_oid OR membership.member=reader_oid');
+    for (const catalog of [
+      'information_schema.column_privileges',
+      'pg_database database_object',
+      'pg_namespace schema_object',
+      'pg_default_acl defaults',
+      'pg_type object',
+      'pg_operator object',
+      'pg_foreign_data_wrapper object',
+      'pg_largeobject_metadata object',
+    ]) expect(migration).toContain(catalog);
+    expect(migration).toContain(
+      'UNIQUE(workspace_id,id,operation_id,relation_key)',
+    );
+    expect(migration).toContain(
+      'REFERENCES public.governed_subject_relation(workspace_id,id,operation_id,relation_key)',
+    );
   });
 
   it('requires Prisma parity while preserving the existing FieldEvidence identity key', async () => {
@@ -218,6 +241,8 @@ describe('Discovery company materialization C-TX inventory and schema migration'
     expect(schema).toMatch(
       /materializationContractVersion\s+String\?\s+@map\("materialization_contract_version"\)/u,
     );
+    expect(schema).toContain(C_TX_CONTRACT_SHA256);
+    expect(schema).toContain('canonicalGovernedSubjectType');
     for (const model of [
       'DiscoveryCompanyMaterializationAdmission',
       'DiscoveryCompanyMaterializationOutcome',

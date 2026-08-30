@@ -7,6 +7,10 @@ export const DISCOVERY_COMPANY_MATERIALIZATION_OUTCOMES = Object.freeze([
   'RESTRICTED_PROCESSING', 'SUPPRESSED', 'NOT_CANONICALIZABLE',
   'EXPIRED_BEFORE_CANONICALIZATION',
 ] as const);
+export const DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION =
+  'discovery-company-materialization/v1' as const;
+export const DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_SHA256 =
+  '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe' as const;
 
 const INVALID = 'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID';
 const HOLD = 'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD';
@@ -350,9 +354,11 @@ export function buildDiscoveryCompanyMaterializationBatchPlanV1(value: unknown):
 }> {
   const input = record(value, BATCH_KEYS);
   if (field(input, 'schemaVersion') !== 'discovery-company-materialization-builder-input/v1') fail();
+  const contractSha256 = sha(field(input, 'contractSha256'));
+  if (contractSha256 !== DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_SHA256) fail();
   const context = { workspaceId: uuid(field(input, 'workspaceId')), admissionId: uuid(field(input, 'admissionId')),
     runId: uuid(field(input, 'runId')), queryKey: sha(field(input, 'queryKey')),
-    contractSha256: sha(field(input, 'contractSha256')) };
+    contractSha256 };
   const batchOrdinal = integer(field(input, 'batchOrdinal'), 0, 1_000_000);
   const rawCandidates = array(field(input, 'items'), 128);
   if (rawCandidates.length === 0) fail();

@@ -354,16 +354,19 @@ model GovernedSubject {
   dsrSubjectId   String?  @map("dsr_subject_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  workspace        Workspace                 @relation("GovernedSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_workspace_fkey")
-  operationSubject ToolOperationSubject?     @relation("ToolOperationSubjectNode")
-  operationRoot    ToolOperationSubject[]    @relation("ToolOperationSubjectRoot")
-  parentRelations  GovernedSubjectRelation[] @relation("GovernedRelationParent")
-  childRelations   GovernedSubjectRelation[] @relation("GovernedRelationChild")
-  tombstone        GovernedSubjectTombstone?
+  workspace                               Workspace                                @relation("GovernedSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_workspace_fkey")
+  operationSubject                        ToolOperationSubject?                    @relation("ToolOperationSubjectNode")
+  operationRoot                           ToolOperationSubject[]                   @relation("ToolOperationSubjectRoot")
+  parentRelations                         GovernedSubjectRelation[]                @relation("GovernedRelationParent")
+  childRelations                          GovernedSubjectRelation[]                @relation("GovernedRelationChild")
+  rawCompanyMaterializationOutcomes       DiscoveryCompanyMaterializationOutcome[] @relation("CompanyMaterializationRawSubject")
+  canonicalCompanyMaterializationOutcomes DiscoveryCompanyMaterializationOutcome[] @relation("CompanyMaterializationCanonicalSubject")
+  tombstone                               GovernedSubjectTombstone?
 
   @@unique([workspaceId, subjectType, subjectId], map: "governed_subject_workspace_subject_key")
   @@unique([scopeKey, id], map: "governed_subject_scope_id_key")
   @@unique([workspaceId, id], map: "governed_subject_workspace_id_key")
+  @@unique([workspaceId, id, subjectType, subjectId], map: "governed_subject_materialization_exact_key")
   @@index([workspaceId, dsrSubjectType, dsrSubjectId], map: "governed_subject_workspace_dsr_idx")
   @@map("governed_subject")
 }
@@ -419,15 +422,18 @@ model GovernedSubjectRelation {
   contractSha256      String   @map("contract_sha256") @db.Char(64)
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  workspace        Workspace                @relation("GovernedSubjectRelationWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_workspace_fkey")
-  authority        ExecutionBudgetAuthority @relation("GovernedSubjectRelationAuthority", fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_authority_fkey")
-  account          ToolBudgetAccount        @relation("GovernedSubjectRelationAccount", fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_account_fkey")
-  operation        ToolBudgetOperation      @relation("GovernedSubjectRelationOperation", fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_fkey")
-  operationSubject ToolOperationSubject     @relation("GovernedRelationOperationSubject", fields: [workspaceId, operationSubjectId], references: [workspaceId, subjectId], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_subject_fkey")
-  parentSubject    GovernedSubject          @relation("GovernedRelationParent", fields: [workspaceId, parentSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_parent_fkey")
-  childSubject     GovernedSubject          @relation("GovernedRelationChild", fields: [workspaceId, childSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_child_fkey")
+  workspace                Workspace                                @relation("GovernedSubjectRelationWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_workspace_fkey")
+  authority                ExecutionBudgetAuthority                 @relation("GovernedSubjectRelationAuthority", fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_authority_fkey")
+  account                  ToolBudgetAccount                        @relation("GovernedSubjectRelationAccount", fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_account_fkey")
+  operation                ToolBudgetOperation                      @relation("GovernedSubjectRelationOperation", fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_fkey")
+  operationSubject         ToolOperationSubject                     @relation("GovernedRelationOperationSubject", fields: [workspaceId, operationSubjectId], references: [workspaceId, subjectId], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_operation_subject_fkey")
+  parentSubject            GovernedSubject                          @relation("GovernedRelationParent", fields: [workspaceId, parentSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_parent_fkey")
+  childSubject             GovernedSubject                          @relation("GovernedRelationChild", fields: [workspaceId, childSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "governed_subject_relation_child_fkey")
+  qMaterializationOutcomes DiscoveryCompanyMaterializationOutcome[] @relation("CompanyMaterializationQRelation")
+  cMaterializationOutcomes DiscoveryCompanyMaterializationOutcome[] @relation("CompanyMaterializationCRelation")
 
   @@unique([workspaceId, operationId, relationKey], map: "governed_subject_relation_workspace_operation_relation_key")
+  @@unique([workspaceId, id, operationId, relationKey], map: "governed_subject_relation_materialization_exact_key")
   @@index([workspaceId, operationId, parentSubjectId], map: "governed_subject_relation_operation_parent_idx")
   @@index([workspaceId, operationId, childSubjectId], map: "governed_subject_relation_operation_child_idx")
   @@map("governed_subject_relation")
@@ -1198,17 +1204,21 @@ model SignalIngest {
 
 /// 一次发现执行（对应一个 READY 的查询计划）。
 model DiscoveryRun {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  planId      String    @map("plan_id") @db.Uuid
-  icpId       String    @map("icp_id") @db.Uuid
-  status      String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
-  stats       Json? // 每源计数/成本/去重结果
-  createdAt   DateTime  @default(now()) @map("created_at")
-  completedAt DateTime? @map("completed_at")
+  id                             String    @id @default(uuid()) @db.Uuid
+  workspaceId                    String    @map("workspace_id") @db.Uuid
+  planId                         String    @map("plan_id") @db.Uuid
+  icpId                          String    @map("icp_id") @db.Uuid
+  status                         String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
+  stats                          Json? // 每源计数/成本/去重结果
+  /// SHA-256 contract: 558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe
+  materializationContractVersion String?   @map("materialization_contract_version") @db.VarChar(64)
+  createdAt                      DateTime  @default(now()) @map("created_at")
+  completedAt                    DateTime? @map("completed_at")
 
-  rawRecords    RawSourceRecord[]
-  queryReceipts DiscoveryQueryReceipt[]
+  rawRecords                RawSourceRecord[]
+  queryReceipts             DiscoveryQueryReceipt[]
+  materializationAdmission  DiscoveryCompanyMaterializationAdmission?
+  materializationRunReceipt DiscoveryCompanyMaterializationRunReceipt?
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
@@ -1284,9 +1294,11 @@ model DiscoveryQueryReceipt {
   contractSha256        String   @map("contract_sha256") @db.Char(64)
   createdAt             DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
 
-  run              DiscoveryRun                     @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_receipt_run_fkey")
-  attempts         DiscoveryQueryOperationAttempt[]
-  executionOutcome DiscoveryQueryExecutionOutcome?
+  run                    DiscoveryRun                                  @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_receipt_run_fkey")
+  attempts               DiscoveryQueryOperationAttempt[]
+  executionOutcome       DiscoveryQueryExecutionOutcome?
+  materializationBatches DiscoveryCompanyMaterializationBatchReceipt[]
+  materializationReceipt DiscoveryCompanyMaterializationQueryReceipt?
 
   @@id([workspaceId, runId, queryKey], map: "discovery_query_receipt_pkey")
   @@unique([workspaceId, runId, queryOrdinal], map: "discovery_query_receipt_workspace_run_ordinal_key")
@@ -1308,6 +1320,186 @@ model DiscoveryQueryExecutionOutcome {
   @@id([workspaceId, runId, queryKey], map: "discovery_query_execution_outcome_pkey")
   @@index([workspaceId, createdAt], map: "discovery_query_execution_outcome_workspace_created_idx")
   @@map("discovery_query_execution_outcome")
+}
+
+/// Immutable run ownership decision between pre-C legacy and governed C-TX.
+model DiscoveryCompanyMaterializationAdmission {
+  admissionId                    String   @id @default(dbgenerated("gen_random_uuid()")) @map("admission_id") @db.Uuid
+  workspaceId                    String   @map("workspace_id") @db.Uuid
+  runId                          String   @map("run_id") @db.Uuid
+  materializationContractVersion String?  @map("materialization_contract_version") @db.VarChar(64)
+  mode                           String   @db.VarChar(32)
+  reasonCode                     String   @map("reason_code") @db.VarChar(64)
+  qContractSha256                String?  @map("q_contract_sha256") @db.Char(64)
+  contractSha256                 String   @map("contract_sha256") @db.Char(64)
+  createdAt                      DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  run           DiscoveryRun                                  @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_admission_run_fkey")
+  outcomes      DiscoveryCompanyMaterializationOutcome[]
+  batches       DiscoveryCompanyMaterializationBatchReceipt[]
+  queryReceipts DiscoveryCompanyMaterializationQueryReceipt[]
+  runReceipt    DiscoveryCompanyMaterializationRunReceipt?
+
+  @@unique([workspaceId, admissionId], map: "discovery_company_materialization_admission_workspace_id_key")
+  @@unique([workspaceId, runId], map: "discovery_company_materialization_admission_workspace_run_key")
+  @@unique([workspaceId, admissionId, runId], map: "discovery_company_materialization_admission_exact_key")
+  @@index([workspaceId, createdAt], map: "discovery_company_materialization_admission_created_idx")
+  @@map("discovery_company_materialization_admission")
+}
+
+/// One exact, immutable outcome for one normalized Q item.
+model DiscoveryCompanyMaterializationOutcome {
+  workspaceId                  String    @map("workspace_id") @db.Uuid
+  admissionId                  String    @map("admission_id") @db.Uuid
+  runId                        String    @map("run_id") @db.Uuid
+  queryItemId                  String    @map("query_item_id") @db.Uuid
+  queryKey                     String    @map("query_key") @db.Char(64)
+  queryOrdinal                 Int       @map("query_ordinal")
+  providerKey                  String    @map("provider_key") @db.VarChar(128)
+  operationId                  String    @map("operation_id") @db.Uuid
+  recordIndex                  Int       @map("record_index")
+  rawRecordId                  String    @map("raw_record_id") @db.Uuid
+  rawGovernedSubjectId         String    @map("raw_governed_subject_id") @db.Uuid
+  qRelationId                  String    @map("q_relation_id") @db.Uuid
+  qIngestStatus                String    @map("q_ingest_status") @db.VarChar(32)
+  batchOrdinal                 Int       @map("batch_ordinal")
+  outcome                      String    @db.VarChar(64)
+  canonicalCompanyId           String?   @map("canonical_company_id") @db.Uuid
+  identityLinkId               String?   @map("identity_link_id") @db.Uuid
+  identityCanonicalType        String?   @map("identity_canonical_type") @db.VarChar(32)
+  canonicalGovernedSubjectId   String?   @map("canonical_governed_subject_id") @db.Uuid
+  canonicalGovernedSubjectType String?   @map("canonical_governed_subject_type") @db.VarChar(191)
+  cRelationId                  String?   @map("c_relation_id") @db.Uuid
+  cRelationKey                 String?   @map("c_relation_key") @db.VarChar(200)
+  matchRule                    String?   @map("match_rule") @db.VarChar(64)
+  confidence                   Float?
+  mutationClass                String?   @map("mutation_class") @db.VarChar(32)
+  evidenceCount                Int?      @map("evidence_count")
+  evidenceManifestSha256       String?   @map("evidence_manifest_sha256") @db.Char(64)
+  restrictedDispositionId      String?   @map("restricted_disposition_id") @db.Uuid
+  suppressionMatchSha256       String?   @map("suppression_match_sha256") @db.Char(64)
+  suppressionMatchCount        Int?      @map("suppression_match_count")
+  rawExpiredAt                 DateTime? @map("raw_expired_at") @db.Timestamptz(3)
+  notCanonicalizableReasonCode String?   @map("not_canonicalizable_reason_code") @db.VarChar(64)
+  contractSha256               String    @map("contract_sha256") @db.Char(64)
+  createdAt                    DateTime  @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  admission        DiscoveryCompanyMaterializationAdmission    @relation(fields: [workspaceId, admissionId, runId], references: [workspaceId, admissionId, runId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_admission_fkey")
+  batch            DiscoveryCompanyMaterializationBatchReceipt @relation(fields: [workspaceId, runId, queryKey, batchOrdinal], references: [workspaceId, runId, queryKey, batchOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_batch_fkey")
+  queryItem        DiscoveryQueryAttemptItem                   @relation(fields: [workspaceId, queryItemId, runId, queryKey, providerKey, operationId, recordIndex, rawRecordId, rawGovernedSubjectId, qRelationId], references: [workspaceId, id, runId, queryKey, providerKey, operationId, recordIndex, rawRecordId, childSubjectId, relationId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_q_item_fkey")
+  canonicalCompany CanonicalCompany?                           @relation(fields: [workspaceId, canonicalCompanyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_company_fkey")
+  identityLink     IdentityLink?                               @relation(fields: [workspaceId, identityLinkId, identityCanonicalType, canonicalCompanyId, rawRecordId], references: [workspaceId, id, canonicalType, canonicalId, rawRecordId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_identity_fkey")
+  rawSubject       GovernedSubject                             @relation("CompanyMaterializationRawSubject", fields: [workspaceId, rawGovernedSubjectId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_raw_subject_fkey")
+  canonicalSubject GovernedSubject?                            @relation("CompanyMaterializationCanonicalSubject", fields: [workspaceId, canonicalGovernedSubjectId, canonicalGovernedSubjectType, canonicalCompanyId], references: [workspaceId, id, subjectType, subjectId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_mat_outcome_canonical_subject_fkey")
+  qRelation        GovernedSubjectRelation                     @relation("CompanyMaterializationQRelation", fields: [qRelationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_q_relation_fkey")
+  cRelation        GovernedSubjectRelation?                    @relation("CompanyMaterializationCRelation", fields: [workspaceId, cRelationId, operationId, cRelationKey], references: [workspaceId, id, operationId, relationKey], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_c_relation_fkey")
+  disposition      RawSourceGovernanceDisposition?             @relation(fields: [workspaceId, restrictedDispositionId, rawRecordId], references: [workspaceId, id, rawRecordId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_outcome_disposition_fkey")
+
+  @@id([workspaceId, queryItemId], map: "discovery_company_materialization_outcome_pkey")
+  @@unique([workspaceId, runId, queryKey, providerKey, recordIndex], map: "discovery_company_materialization_outcome_provider_index_key")
+  @@unique([workspaceId, queryItemId, runId, queryKey, providerKey, operationId, recordIndex, rawRecordId, rawGovernedSubjectId, qRelationId], map: "discovery_company_materialization_outcome_exact_item_key")
+  @@index([workspaceId, runId, queryKey, batchOrdinal], map: "discovery_company_materialization_outcome_run_idx")
+  @@index([workspaceId, rawRecordId], map: "discovery_company_materialization_outcome_raw_idx")
+  @@map("discovery_company_materialization_outcome")
+}
+
+/// Immutable receipt covering one deterministic, at-most-128-item query batch.
+model DiscoveryCompanyMaterializationBatchReceipt {
+  workspaceId                               String   @map("workspace_id") @db.Uuid
+  admissionId                               String   @map("admission_id") @db.Uuid
+  runId                                     String   @map("run_id") @db.Uuid
+  queryKey                                  String   @map("query_key") @db.Char(64)
+  batchOrdinal                              Int      @map("batch_ordinal")
+  firstItemKey                              String   @map("first_item_key") @db.VarChar(512)
+  lastItemKey                               String   @map("last_item_key") @db.VarChar(512)
+  expectedItemCount                         Int      @map("expected_item_count")
+  itemSetSha256                             String   @map("item_set_sha256") @db.Char(64)
+  outcomeCanonicalizedCount                 BigInt   @map("outcome_canonicalized_count")
+  outcomeRawQuarantinedCount                BigInt   @map("outcome_raw_quarantined_count")
+  outcomeRawRejectedCount                   BigInt   @map("outcome_raw_rejected_count")
+  outcomeRestrictedProcessingCount          BigInt   @map("outcome_restricted_processing_count")
+  outcomeSuppressedCount                    BigInt   @map("outcome_suppressed_count")
+  outcomeNotCanonicalizableCount            BigInt   @map("outcome_not_canonicalizable_count")
+  outcomeExpiredBeforeCanonicalizationCount BigInt   @map("outcome_expired_before_canonicalization_count")
+  mutationCreatedCount                      BigInt   @map("mutation_created_count")
+  mutationUpdatedCount                      BigInt   @map("mutation_updated_count")
+  mutationLinkedCount                       BigInt   @map("mutation_linked_count")
+  mutationReusedCount                       BigInt   @map("mutation_reused_count")
+  evidenceManifestCount                     BigInt   @map("evidence_manifest_count")
+  evidenceManifestSha256                    String   @map("evidence_manifest_sha256") @db.Char(64)
+  contractSha256                            String   @map("contract_sha256") @db.Char(64)
+  createdAt                                 DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  admission DiscoveryCompanyMaterializationAdmission @relation(fields: [workspaceId, admissionId, runId], references: [workspaceId, admissionId, runId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_batch_receipt_admission_fkey")
+  query     DiscoveryQueryReceipt                    @relation(fields: [workspaceId, runId, queryKey], references: [workspaceId, runId, queryKey], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_batch_receipt_query_fkey")
+  outcomes  DiscoveryCompanyMaterializationOutcome[]
+
+  @@id([workspaceId, runId, queryKey, batchOrdinal], map: "discovery_company_materialization_batch_receipt_pkey")
+  @@map("discovery_company_materialization_batch_receipt")
+}
+
+/// Immutable aggregate proving every expected batch for one query is complete.
+model DiscoveryCompanyMaterializationQueryReceipt {
+  workspaceId                               String   @map("workspace_id") @db.Uuid
+  admissionId                               String   @map("admission_id") @db.Uuid
+  runId                                     String   @map("run_id") @db.Uuid
+  queryKey                                  String   @map("query_key") @db.Char(64)
+  batchCount                                Int      @map("batch_count")
+  itemCount                                 BigInt   @map("item_count")
+  outcomeCanonicalizedCount                 BigInt   @map("outcome_canonicalized_count")
+  outcomeRawQuarantinedCount                BigInt   @map("outcome_raw_quarantined_count")
+  outcomeRawRejectedCount                   BigInt   @map("outcome_raw_rejected_count")
+  outcomeRestrictedProcessingCount          BigInt   @map("outcome_restricted_processing_count")
+  outcomeSuppressedCount                    BigInt   @map("outcome_suppressed_count")
+  outcomeNotCanonicalizableCount            BigInt   @map("outcome_not_canonicalizable_count")
+  outcomeExpiredBeforeCanonicalizationCount BigInt   @map("outcome_expired_before_canonicalization_count")
+  mutationCreatedCount                      BigInt   @map("mutation_created_count")
+  mutationUpdatedCount                      BigInt   @map("mutation_updated_count")
+  mutationLinkedCount                       BigInt   @map("mutation_linked_count")
+  mutationReusedCount                       BigInt   @map("mutation_reused_count")
+  companiesCount                            BigInt   @map("companies_count")
+  contractSha256                            String   @map("contract_sha256") @db.Char(64)
+  createdAt                                 DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  admission DiscoveryCompanyMaterializationAdmission @relation(fields: [workspaceId, admissionId, runId], references: [workspaceId, admissionId, runId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_query_receipt_admission_fkey")
+  query     DiscoveryQueryReceipt                    @relation(fields: [workspaceId, runId, queryKey], references: [workspaceId, runId, queryKey], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_query_receipt_query_fkey")
+
+  @@id([workspaceId, runId, queryKey], map: "discovery_company_materialization_query_receipt_pkey")
+  @@map("discovery_company_materialization_query_receipt")
+}
+
+/// Immutable run aggregate and the sole governed canonicalizeRun response authority.
+model DiscoveryCompanyMaterializationRunReceipt {
+  workspaceId                               String   @map("workspace_id") @db.Uuid
+  admissionId                               String   @map("admission_id") @db.Uuid
+  runId                                     String   @map("run_id") @db.Uuid
+  expectedQueryCount                        Int      @map("expected_query_count")
+  completedQueryCount                       Int      @map("completed_query_count")
+  totalBatchCount                           BigInt   @map("total_batch_count")
+  totalItemCount                            BigInt   @map("total_item_count")
+  outcomeCanonicalizedCount                 BigInt   @map("outcome_canonicalized_count")
+  outcomeRawQuarantinedCount                BigInt   @map("outcome_raw_quarantined_count")
+  outcomeRawRejectedCount                   BigInt   @map("outcome_raw_rejected_count")
+  outcomeRestrictedProcessingCount          BigInt   @map("outcome_restricted_processing_count")
+  outcomeSuppressedCount                    BigInt   @map("outcome_suppressed_count")
+  outcomeNotCanonicalizableCount            BigInt   @map("outcome_not_canonicalizable_count")
+  outcomeExpiredBeforeCanonicalizationCount BigInt   @map("outcome_expired_before_canonicalization_count")
+  mutationCreatedCount                      BigInt   @map("mutation_created_count")
+  mutationUpdatedCount                      BigInt   @map("mutation_updated_count")
+  mutationLinkedCount                       BigInt   @map("mutation_linked_count")
+  mutationReusedCount                       BigInt   @map("mutation_reused_count")
+  companiesCount                            BigInt   @map("companies_count")
+  suppressedCount                           BigInt   @map("suppressed_count")
+  queryHeaderSetSha256                      String   @map("query_header_set_sha256") @db.Char(64)
+  contractSha256                            String   @map("contract_sha256") @db.Char(64)
+  createdAt                                 DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  admission DiscoveryCompanyMaterializationAdmission @relation(fields: [workspaceId, admissionId, runId], references: [workspaceId, admissionId, runId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_run_receipt_admission_fkey")
+  run       DiscoveryRun                             @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_company_materialization_run_receipt_run_fkey")
+
+  @@id([workspaceId, runId], map: "discovery_company_materialization_run_receipt_pkey")
+  @@unique([workspaceId, admissionId, runId], map: "discovery_company_materialization_run_receipt_admission_key")
+  @@map("discovery_company_materialization_run_receipt")
 }
 
 /// One settled company-producing physical operation participating in a query receipt.
@@ -1366,14 +1558,16 @@ model DiscoveryQueryAttemptItem {
   contractSha256     String   @map("contract_sha256") @db.Char(64)
   createdAt          DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
 
-  attempt    DiscoveryQueryOperationAttempt @relation(fields: [workspaceId, runId, queryKey, providerKey, operationId], references: [workspaceId, runId, queryKey, providerKey, operationId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_attempt_fkey")
-  rawRecord  RawSourceRecord                @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_raw_fkey")
-  sourceItem DiscoveryQueryAttemptItem?     @relation("DiscoveryQueryAttemptItemReuse", fields: [workspaceId, runId, queryKey, providerKey, sourceRecordIndex, rawRecordId], references: [workspaceId, runId, queryKey, providerKey, recordIndex, rawRecordId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_source_fkey")
-  reusedBy   DiscoveryQueryAttemptItem[]    @relation("DiscoveryQueryAttemptItemReuse")
+  attempt                DiscoveryQueryOperationAttempt          @relation(fields: [workspaceId, runId, queryKey, providerKey, operationId], references: [workspaceId, runId, queryKey, providerKey, operationId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_attempt_fkey")
+  rawRecord              RawSourceRecord                         @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_raw_fkey")
+  sourceItem             DiscoveryQueryAttemptItem?              @relation("DiscoveryQueryAttemptItemReuse", fields: [workspaceId, runId, queryKey, providerKey, sourceRecordIndex, rawRecordId], references: [workspaceId, runId, queryKey, providerKey, recordIndex, rawRecordId], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_attempt_item_source_fkey")
+  reusedBy               DiscoveryQueryAttemptItem[]             @relation("DiscoveryQueryAttemptItemReuse")
+  materializationOutcome DiscoveryCompanyMaterializationOutcome?
 
   @@unique([workspaceId, runId, queryKey, providerKey, recordIndex], map: "discovery_query_attempt_item_provider_index_key")
   @@unique([workspaceId, runId, queryKey, providerKey, recordIndex, rawRecordId], map: "discovery_query_attempt_item_provider_index_raw_key")
   @@unique([workspaceId, operationId, relationKey], map: "discovery_query_attempt_item_operation_relation_key")
+  @@unique([workspaceId, id, runId, queryKey, providerKey, operationId, recordIndex, rawRecordId, childSubjectId, relationId], map: "discovery_query_attempt_item_materialization_tuple_key")
   @@index([workspaceId, rawRecordId], map: "discovery_query_attempt_item_raw_idx")
   @@map("discovery_query_attempt_item")
 }
@@ -1397,9 +1591,11 @@ model RawSourceGovernanceDisposition {
   governanceVersion String   @map("governance_version") @db.VarChar(64)
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(3)
 
-  rawRecord RawSourceRecord @relation(fields: [rawRecordId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rawRecord               RawSourceRecord                          @relation(fields: [rawRecordId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
 
   @@unique([rawRecordId, effect, reasonCode, governanceVersion], map: "raw_source_governance_disposition_unique_decision")
+  @@unique([workspaceId, id, rawRecordId], map: "raw_source_governance_disposition_workspace_id_raw_key")
   @@index([workspaceId, runId, effect], map: "raw_source_governance_disposition_workspace_run_effect_idx")
   @@index([workspaceId, createdAt], map: "raw_source_governance_disposition_workspace_created_idx")
   @@map("raw_source_governance_disposition")
@@ -1435,10 +1631,12 @@ model CanonicalCompany {
   contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
   emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at") // 决策人邮箱猜测尝试（选项 B P0.4）
 
-  contacts CanonicalContact[]
-  leads    Lead[]
+  contacts                CanonicalContact[]
+  leads                   Lead[]
+  materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
 
   @@unique([workspaceId, dedupeKey])
+  @@unique([workspaceId, id], map: "canonical_company_workspace_id_id_key")
   @@index([workspaceId])
   // 下游阶段收缩集扫描：workspace + 水位列 null/过期范围（防 900+ 行 seq-scan）。
   // fit=match 现由 `leads: { some: { fitVerdict:'match' } }` 关联子查询过滤（fit 退出本表索引）。
@@ -1466,6 +1664,7 @@ model CanonicalContact {
   contactPoints ContactPoint[]
 
   @@unique([workspaceId, dedupeKey])
+  @@unique([workspaceId, id], map: "canonical_contact_workspace_id_id_key")
   @@index([workspaceId])
   @@index([companyId])
   @@map("canonical_contact")
@@ -1500,6 +1699,10 @@ model IdentityLink {
   confidence    Float    @default(1)
   createdAt     DateTime @default(now()) @map("created_at")
 
+  materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
+
+  @@unique([workspaceId, id], map: "identity_link_workspace_id_id_key")
+  @@unique([workspaceId, id, canonicalType, canonicalId, rawRecordId], map: "identity_link_exact_tuple_key")
   @@index([workspaceId])
   @@index([canonicalId])
   @@map("identity_link")

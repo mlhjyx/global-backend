@@ -21,7 +21,7 @@ const UUID = Object.freeze({
   cRelation: '53000000-0000-4000-8000-000000000001',
   disposition: '60000000-0000-4000-8000-000000000001',
 });
-const SHA = Object.freeze({ contract: 'a'.repeat(64), evidence: 'c'.repeat(64),
+const SHA = Object.freeze({ contract: '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe', evidence: 'c'.repeat(64),
   suppression: '8b89bd0745b48bd624a216a76f9109eef686746e21dffcbbc6e72ff6e2c93686' });
 
 type Module = Readonly<{
@@ -108,6 +108,10 @@ describe('C-TX pure Q-item batch builder', () => {
   it('exports the seven approved outcomes and no run admission or transaction fence API', async () => {
     const module = await load();
     expect(module.DISCOVERY_COMPANY_MATERIALIZATION_OUTCOMES).toEqual(OUTCOMES);
+    expect(module).toMatchObject({
+      DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION: 'discovery-company-materialization/v1',
+      DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_SHA256: SHA.contract,
+    });
     expect(Object.isFrozen(module.DISCOVERY_COMPANY_MATERIALIZATION_OUTCOMES)).toBe(true);
     expect(module).not.toHaveProperty('buildDiscoveryCompanyMaterializationAdmissionV1');
     expect(module).not.toHaveProperty('lockDiscoveryCompanyMaterializationTransaction');
@@ -138,6 +142,13 @@ describe('C-TX pure Q-item batch builder', () => {
     const module = await load();
     expect(() => module.buildDiscoveryCompanyMaterializationBatchPlanV1(batch([])))
       .toThrow('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
+  });
+
+  it('rejects a syntactically valid but non-contract digest before planning', async () => {
+    const module = await load();
+    expect(() => module.buildDiscoveryCompanyMaterializationBatchPlanV1(
+      batch([candidate()], { contractSha256: 'a'.repeat(64) }),
+    )).toThrow('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
   });
 
   it('sorts record index numerically so index 2 precedes index 10', async () => {
