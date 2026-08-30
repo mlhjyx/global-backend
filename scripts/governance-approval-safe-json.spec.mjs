@@ -361,7 +361,7 @@ test('approval receipt core renders optional merge authorization references in o
   assert.deepEqual(merged.envelope.core.merge_authorization_evidence, mergeAuthorizationEvidence);
   assert.match(
     merged.bytes.toString('utf8'),
-    /"merge_authorization_evidence": \{\n      "stage": "PROPOSAL_MERGE",\n      "grant_id":/,
+    /"merge_authorization_evidence": \{\n {6}"stage": "PROPOSAL_MERGE",\n {6}"grant_id":/,
   );
   assert.equal(Object.hasOwn(merged.envelope.core.merge_authorization_evidence, 'grant'), false);
   assert.equal(Object.hasOwn(merged.envelope.core.merge_authorization_evidence, 'consumption'), false);

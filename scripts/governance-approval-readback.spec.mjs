@@ -73,6 +73,14 @@ const authority = () => ({
   ],
 });
 
+const dualRoleAuthority = () => {
+  const value = authority();
+  value.roles[1].actor_id = value.roles[0].actor_id;
+  value.roles[1].actor_node_id = value.roles[0].actor_node_id;
+  value.roles[1].actor_login = value.roles[0].actor_login;
+  return value;
+};
+
 const review = (role, id, actorValue) => ({
   role,
   review_id: id,
@@ -419,8 +427,8 @@ test('review command grammar accepts only the canonical bounded single line', as
 });
 
 test('distinct and dual-role synthetic candidates validate with frozen bounded output', () => {
-  for (const value of [candidate(), dualRoleCandidate()]) {
-    const result = validateApprovalReadback(value, authority(), value.policy, NOW);
+  for (const [value, authorityValue] of [[candidate(), authority()], [dualRoleCandidate(), dualRoleAuthority()]]) {
+    const result = validateApprovalReadback(value, authorityValue, value.policy, NOW);
     assert.deepEqual(result, { valid: true, issues: [] });
     assert.ok(Object.isFrozen(result));
     assert.ok(Object.isFrozen(result.issues));
@@ -461,6 +469,8 @@ test('approval readback executes each required trust mutation exactly once', () 
     ['actions-run-head-mismatch', (v) => { v.machine_checks[0].actions_run_head_sha = BASE_SHA; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
     ['actions-run-conclusion', (v) => { v.machine_checks[0].actions_run_conclusion = 'failure'; }, 'APPROVAL_CHECK_REQUIRED'],
     ['signer-mismatch', (v) => { v.machine_checks[0].reusable_signer.workflow_sha = BASE_SHA; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
+    ['sidecar-path-not-allowlisted', (v) => { v.policy.pr_readable_paths = ['docs/governance/decisions/adr-042-r2.manifest.json']; }, 'APPROVAL_PROPOSED_SIDECAR_REQUIRED'],
+    ['machine-check-array-missing', (v) => { delete v.machine_checks; }, 'APPROVAL_CHECK_REQUIRED'],
   ];
   for (const [name, mutate, code] of cases) runMutation(name, candidate, mutate, validate, code);
 });
@@ -484,6 +494,7 @@ test('OWN-SECURITY remains a closed exact-head independent human evidence slot',
     ['security-wrong-state', (v) => { v.security_review.review_state = 'CHANGES_REQUESTED'; }, 'APPROVAL_SECURITY_REVIEW_REQUIRED'],
     ['security-wrong-commit', (v) => { v.security_review.review_commit_id = BASE_SHA; }, 'APPROVAL_SECURITY_REVIEW_HEAD_MISMATCH'],
     ['security-wrong-timestamp', (v) => { v.security_review.submitted_at = '2026-08-31T01:00:00.000Z'; }, 'APPROVAL_SECURITY_AUTHORITY_STALE'],
+    ['security-readback-outside-authority', (v) => { v.security_review.independently_read_at = '2026-08-31T01:00:00.000Z'; }, 'APPROVAL_SECURITY_AUTHORITY_STALE'],
     ['security-dismissed', (v) => { v.security_review.dismissed = true; }, 'APPROVAL_SECURITY_REVIEW_REQUIRED'],
     ['security-superseded', (v) => { v.security_review.superseded = true; }, 'APPROVAL_SECURITY_REVIEW_REQUIRED'],
     ['security-free-form-body', (v) => { v.security_review.review_body = 'secret candidate'; }, 'APPROVAL_SECURITY_REVIEW_REQUIRED'],
@@ -644,7 +655,7 @@ test('revocation and supersession validation returns append-only bound state fac
 });
 
 test('mutation inventory is unique and every declared mutation ran exactly once', () => {
-  assert.ok(mutationRuns.size >= 70);
+  assert.equal(mutationRuns.size, 77);
   assert.ok([...mutationRuns.values()].every((count) => count === 1));
 });
 
@@ -657,5 +668,14 @@ test('errors never reflect raw candidate values or non-canonical code aliases', 
   assert.doesNotMatch(JSON.stringify(result), /sensitive-raw-candidate-value/);
   for (const alias of ['READBACK_REVIEW_REQUIRED', 'RULESET_DRIFT', 'HOLD_REVIEW_REQUIRED']) {
     assert.equal(result.issues.some(({ stable_code: code }) => code === alias), false);
+  }
+});
+
+test('malformed normalized candidates fail closed instead of throwing', () => {
+  for (const value of [{}, { repository: clone(REPOSITORY) }, null, []]) {
+    assert.doesNotThrow(() => validateApprovalReadback(value, authority(), policy(), NOW));
+    const result = validateApprovalReadback(value, authority(), policy(), NOW);
+    assert.equal(result.valid, false);
+    assert.ok(result.issues.every(({ stable_code: code }) => code.startsWith('APPROVAL_')));
   }
 });

@@ -29,6 +29,15 @@ const CORE_KEYS = Object.freeze([
   'approved_at',
   'trust_class',
 ]);
+const MERGE_AUTHORIZATION_EVIDENCE_KEYS = Object.freeze([
+  'stage',
+  'grant_id',
+  'grant_raw_sha256',
+  'single_use_nonce',
+  'consumption_id',
+  'consumption_raw_sha256',
+  'reserved_ledger_revision',
+]);
 const ROLES = new Set([
   'OWN-PRODUCT',
   'OWN-DATA-PRIVACY',
@@ -239,7 +248,10 @@ const requireCanonicalInstant = (value) => {
 const unicodeCodePointLength = (value) => Array.from(value).length;
 
 const normalizeApprovalReceiptCore = (core) => {
-  requireClosedObject(core, CORE_KEYS, 'CORE_PROPERTY');
+  const coreKeys = Object.hasOwn(core ?? {}, 'merge_authorization_evidence')
+    ? [...CORE_KEYS, 'merge_authorization_evidence']
+    : CORE_KEYS;
+  requireClosedObject(core, coreKeys, 'CORE_PROPERTY');
   requireString(core.receipt_id, RECEIPT_ID_PATTERN, 'CORE_PROPERTY');
   requireClosedObject(core.repository, ['id', 'full_name'], 'CORE_PROPERTY');
   requireCondition(core.repository.id === 1291151138 && core.repository.full_name === 'mlhjyx/global-backend', 'CORE_PROPERTY');
@@ -262,7 +274,7 @@ const normalizeApprovalReceiptCore = (core) => {
   requireCanonicalInstant(core.approved_at);
   requireCondition(core.trust_class === 'TRUSTED_BASE_VERIFIED', 'CORE_PROPERTY');
 
-  return {
+  const normalized = {
     receipt_id: core.receipt_id,
     repository: { id: core.repository.id, full_name: core.repository.full_name },
     authority_revision: core.authority_revision,
@@ -279,6 +291,31 @@ const normalizeApprovalReceiptCore = (core) => {
     approved_at: core.approved_at,
     trust_class: core.trust_class,
   };
+  if (Object.hasOwn(core, 'merge_authorization_evidence')) {
+    const evidence = core.merge_authorization_evidence;
+    requireClosedObject(evidence, MERGE_AUTHORIZATION_EVIDENCE_KEYS, 'CORE_PROPERTY');
+    requireCondition(['PROPOSAL_MERGE', 'ACCEPTANCE_MERGE'].includes(evidence.stage), 'CORE_PROPERTY');
+    requireString(evidence.grant_id, RECEIPT_ID_PATTERN, 'CORE_PROPERTY');
+    requireString(evidence.grant_raw_sha256, DIGEST_PATTERN, 'CORE_PROPERTY');
+    requireString(evidence.single_use_nonce, /^nonce-program-c-[a-z0-9-]{4,96}$/, 'CORE_PROPERTY');
+    requireString(evidence.consumption_id, RECEIPT_ID_PATTERN, 'CORE_PROPERTY');
+    requireString(evidence.consumption_raw_sha256, DIGEST_PATTERN, 'CORE_PROPERTY');
+    requireCondition(
+      Number.isSafeInteger(evidence.reserved_ledger_revision)
+      && evidence.reserved_ledger_revision >= 0,
+      'CORE_PROPERTY',
+    );
+    normalized.merge_authorization_evidence = {
+      stage: evidence.stage,
+      grant_id: evidence.grant_id,
+      grant_raw_sha256: evidence.grant_raw_sha256,
+      single_use_nonce: evidence.single_use_nonce,
+      consumption_id: evidence.consumption_id,
+      consumption_raw_sha256: evidence.consumption_raw_sha256,
+      reserved_ledger_revision: evidence.reserved_ledger_revision,
+    };
+  }
+  return normalized;
 };
 
 const deepFreeze = (value) => {
