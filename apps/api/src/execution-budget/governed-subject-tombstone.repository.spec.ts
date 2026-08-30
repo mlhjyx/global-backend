@@ -134,6 +134,10 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
       outcome: 'FENCE_CREATED',
     });
     expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(exactClosed(result, [
+      'governedSubjectId', 'tombstonedAt', 'auditId', 'outcome',
+    ])).toBe(true);
     databaseRow.tombstoned_at.setUTCFullYear(2037);
     expect(result).toMatchObject({ tombstonedAt: '2026-08-30T00:00:00.000Z' });
     const query = database.queryRaw.mock.calls[0]?.[0] as {
@@ -162,16 +166,49 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
     Object.defineProperty(accessor, 'outcome', { enumerable: true, get: () => 'FENCE_CREATED' });
     const symbol = { ...row(), [Symbol('x')]: true };
     const invalidDate = new Date(Number.NaN);
+    const dateWithOwnKey = row().tombstoned_at;
+    Object.defineProperty(dateWithOwnKey, 'extra', {
+      configurable: true, enumerable: true, value: true,
+    });
+    const hostileDate = row().tombstoned_at;
+    Object.defineProperty(hostileDate, 'toISOString', {
+      configurable: true, enumerable: true,
+      get: () => { throw new Error('hostile-date-payload@example.test'); },
+    });
     for (const invalid of [[], [row(), row()], [{ ...row(), extra: true }],
       [{ governed_subject_id: IDS.subject, tombstoned_at: row().tombstoned_at,
         audit_id: IDS.audit }], [{ ...row(), outcome: 'CREATED' }],
       [{ ...row(), governed_subject_id: 'bad' }], [{ ...row(), audit_id: 'bad' }],
+      [{ ...row(), governed_subject_id: IDS.audit }],
       [{ ...row(), tombstoned_at: 'not-date' }], [{ ...row(), tombstoned_at: invalidDate }],
       [{ ...row(), tombstoned_at: new DateSubclass() }],
       [{ ...row(), tombstoned_at: new Proxy(row().tombstoned_at, {}) }],
+      [{ ...row(), tombstoned_at: dateWithOwnKey }],
+      [{ ...row(), tombstoned_at: hostileDate }],
       [new Proxy(row(), {})], [accessor], [symbol]]) {
-      await expect(repository.tombstoneSubjectV1(transaction(invalid).value, input()))
-        .rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+      const failure = repository.tombstoneSubjectV1(transaction(invalid).value, input());
+      await expect(failure).rejects.toThrow(module.GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+      await expect(failure).rejects.not.toThrow(/hostile-date|payload@example/iu);
+    }
+  });
+
+  it('uses the module-init Date intrinsic even after Date.prototype mutation', async () => {
+    const module = await load();
+    const descriptor = Object.getOwnPropertyDescriptor(Date.prototype, 'toISOString');
+    expect(descriptor).toBeDefined();
+    Object.defineProperty(Date.prototype, 'toISOString', {
+      configurable: true,
+      value: () => 'hostile-prototype-date@example.test',
+      writable: true,
+    });
+    try {
+      await expect(new module.GovernedSubjectRelationRepository().tombstoneSubjectV1(
+        transaction([row()]).value, input(),
+      )).resolves.toMatchObject({ tombstonedAt: '2026-08-30T00:00:00.000Z' });
+    } finally {
+      Object.defineProperty(Date.prototype, 'toISOString', descriptor ?? {
+        configurable: true, value: Date.prototype.toISOString, writable: true,
+      });
     }
   });
 
