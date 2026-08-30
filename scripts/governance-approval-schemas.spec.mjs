@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -9,6 +10,7 @@ import {
   validateApprovalSupersession,
   validateProgramCMergeAuthorizationGrant,
   validateProgramCMergeAuthorizationConsumption,
+  validateProgramCMergeAuthorizationConsumptionContext,
 } from './governance-approval-schema-validator.mjs';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -28,6 +30,14 @@ const ROLES = [
 ];
 
 const clone = (value) => structuredClone(value);
+const canonicalize = (value) => {
+  if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+const canonicalDigest = (value) => `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`;
 const expectValid = (validator, value) => assert.deepEqual(validator(value), { valid: true, issues: [] });
 const expectInvalid = (validator, value) => {
   const result = validator(value);
@@ -54,26 +64,30 @@ const assignedAuthorities = () => ({
   roles: ROLES.map((role, index) => ({ role, actor_id: index + 1, status: 'ASSIGNED' })),
 });
 
-const receipt = () => ({
-  schema_version: 'product-privacy-approval-readback-receipt/v1',
-  receipt_id: RECEIPT_ID,
-  repository: clone(REPOSITORY),
-  authority_revision: 'approval-authorities/r2',
-  authority_sha256: DIGEST,
-  role: 'OWN-PRODUCT',
-  actor_id: 1,
-  actor_login: 'product-owner',
-  decision_adr: 'ADR-042',
-  decision_revision: 'program-c/decision-r2',
-  policy_revision: 'program-c/policy-r2',
-  pr_number: 42,
-  base_sha: 'a'.repeat(40),
-  head_sha: 'b'.repeat(40),
-  approved_at: INSTANT,
-  independence: 'INDEPENDENT',
-  semantic_sha256: DIGEST,
-  raw_sha256: OTHER_DIGEST,
-});
+const receipt = () => {
+  const core = {
+    receipt_id: RECEIPT_ID,
+    repository: clone(REPOSITORY),
+    authority_revision: 'approval-authorities/r2',
+    authority_sha256: DIGEST,
+    role: 'OWN-PRODUCT',
+    actor_id: 1,
+    actor_login: 'product-owner',
+    decision_adr: 'ADR-042',
+    decision_revision: 'program-c/decision-r2',
+    policy_revision: 'program-c/policy-r2',
+    pr_number: 42,
+    base_sha: 'a'.repeat(40),
+    head_sha: 'b'.repeat(40),
+    approved_at: INSTANT,
+    trust_class: 'TRUSTED_BASE_VERIFIED',
+  };
+  return {
+    schema_version: 'product-privacy-approval-readback-receipt/v1',
+    core,
+    receipt_core_sha256: canonicalDigest(core),
+  };
+};
 
 const evidenceManifest = () => ({
   schema_version: 'trusted-approval-evidence-manifest/v1',
@@ -82,8 +96,8 @@ const evidenceManifest = () => ({
   receipt_raw_sha256: OTHER_DIGEST,
   attestation_subject_sha256: OTHER_DIGEST,
   files: [
-    { path: 'receipt.json', sha256: DIGEST },
-    { path: 'receipt.raw.json', sha256: OTHER_DIGEST },
+    { path: 'receipt-core.json', sha256: DIGEST },
+    { path: 'receipt.json', sha256: OTHER_DIGEST },
   ],
   attestation_bundle: { path: `sha256-${'b'.repeat(64)}.jsonl`, sha256: DIGEST },
   trusted_root: {
@@ -103,6 +117,7 @@ const revocation = () => ({
   receipt_raw_sha256: OTHER_DIGEST,
   authority_revision: 'approval-authorities/r2',
   authority_sha256: DIGEST,
+  authority_receipt_id: RECEIPT_ID,
   reason_code: 'AUTHORITY_REVOKED',
   revoking_role: 'OWN-SECURITY',
   revoking_actor_id: 4,
@@ -194,17 +209,20 @@ test('approval authorities are closed, exact, and honestly unassigned', () => {
 test('approval receipts bind distinct numeric actors and canonical approval context', () => {
   expectValid(validateApprovalReceipt, receipt());
   for (const mutate of [
-    (value) => { delete value.repository; },
-    (value) => { delete value.actor_id; },
-    (value) => { value.actor_id = 'product-owner'; },
-    (value) => { value.role = 'UNASSIGNED'; },
-    (value) => { value.decision_adr = 'adr-042'; },
-    (value) => { value.authority_revision = 'approval-authorities/stale'; },
-    (value) => { value.head_sha = 'A'.repeat(40); },
-    (value) => { value.approved_at = '2026-08-30T00:00:00Z'; },
-    (value) => { value.semantic_sha256 = `sha256:${'A'.repeat(64)}`; },
+    (value) => { delete value.core.repository; },
+    (value) => { delete value.core.actor_id; },
+    (value) => { value.core.actor_id = 'product-owner'; },
+    (value) => { value.core.role = 'UNASSIGNED'; },
+    (value) => { value.core.decision_adr = 'adr-042'; },
+    (value) => { value.core.authority_revision = 'approval-authorities/stale'; },
+    (value) => { value.core.head_sha = 'A'.repeat(40); },
+    (value) => { value.core.approved_at = '2026-08-30T00:00:00Z'; },
+    (value) => { value.semantic_sha256 = DIGEST; },
+    (value) => { value.raw_sha256 = OTHER_DIGEST; },
+    (value) => { value.receipt_raw_sha256 = OTHER_DIGEST; },
+    (value) => { value.receipt_core_sha256 = DIGEST; },
     (value) => { value.extra = true; },
-    (value) => { value.independence = 'EXTERNAL_INDEPENDENT'; value.base_sha = 'f'.repeat(40); },
+    (value) => { value.core.trust_class = 'INDEPENDENT_EXTERNAL_VERIFIED'; },
   ]) {
     const value = receipt(); mutate(value); expectInvalid(validateApprovalReceipt, value);
   }
@@ -214,6 +232,11 @@ test('evidence manifests cryptographically bind a closed receipt evidence set', 
   expectValid(validateApprovalEvidenceManifest, evidenceManifest());
   for (const mutate of [
     (value) => { value.files.push({ path: 'unexpected.txt', sha256: DIGEST }); },
+    (value) => { value.files.reverse(); },
+    (value) => { value.files[0].path = 'receipt-core.json/../receipt-core.json'; },
+    (value) => { value.files[1].path = 'receipt-core.json'; },
+    (value) => { value.files[0].sha256 = OTHER_DIGEST; },
+    (value) => { value.files[1].sha256 = DIGEST; },
     (value) => { value.attestation_subject_sha256 = DIGEST; },
     (value) => { value.attestation_bundle.path = 'sha256-not-the-raw-digest.jsonl'; },
     (value) => { value.trusted_root.path = 'root.jsonl'; },
@@ -279,5 +302,77 @@ test('program c consumption is an append-only independent fact that cannot chang
     (value) => { value.schema_version = 'program-c-merge-authorization/v1'; },
   ]) {
     const value = consumption(); mutate(value); expectInvalid(validateProgramCMergeAuthorizationConsumption, value);
+  }
+});
+
+test('review remediation requires bounded APPROVAL issues and a closed receipt envelope', () => {
+  const flatReceipt = {
+    schema_version: 'product-privacy-approval-readback-receipt/v1',
+    ...receipt().core,
+    semantic_sha256: DIGEST,
+    raw_sha256: OTHER_DIGEST,
+  };
+  expectInvalid(validateApprovalReceipt, flatReceipt);
+
+  const atLimit = receipt();
+  Object.assign(atLimit.core, Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`unknown_${index}`, true])));
+  const atLimitResult = validateApprovalReceipt(atLimit);
+  assert.equal(atLimitResult.valid, false);
+  assert.equal(atLimitResult.issues.length, 16);
+  assert.equal(atLimitResult.issues.some(({ stable_code }) => stable_code === 'APPROVAL_ISSUE_OVERFLOW'), false);
+  assert.ok(atLimitResult.issues.every(({ stable_code }) => stable_code.startsWith('APPROVAL_')));
+
+  const overLimit = receipt();
+  Object.assign(overLimit.core, Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`untrusted_${index}`, true])));
+  const overLimitResult = validateApprovalReceipt(overLimit);
+  assert.equal(overLimitResult.valid, false);
+  assert.equal(overLimitResult.issues.length, 16);
+  assert.equal(overLimitResult.issues.at(-1).stable_code, 'APPROVAL_ISSUE_OVERFLOW');
+  assert.ok(overLimitResult.issues.every(({ stable_code }) => stable_code.startsWith('APPROVAL_')));
+  assert.ok(overLimitResult.issues.every(({ instance_path, schema_path }) => instance_path.length <= 160 && schema_path.length <= 160));
+});
+
+test('program c cross-document seam binds grant, authority, revocation, expiry, and nonce reservation', () => {
+  const authoritiesValue = assignedAuthorities();
+  const authoritySha = canonicalDigest(authoritiesValue);
+  const grantValue = { ...grant(), authority_sha256: authoritySha };
+  const grantRawSha = canonicalDigest(grantValue);
+  const consumptionValue = { ...consumption(), grant_raw_sha256: grantRawSha };
+  const context = () => ({
+    grant: clone(grantValue),
+    grant_raw_sha256: grantRawSha,
+    consumption: clone(consumptionValue),
+    authorities: clone(authoritiesValue),
+    authority_sha256: authoritySha,
+    revoked_receipt_ids: [],
+    consumed_nonces: [],
+    nonce_reservations: [{
+      key: consumptionValue.nonce_ledger_key,
+      nonce: consumptionValue.single_use_nonce,
+      reserved_revision: consumptionValue.nonce_ledger_reserved_revision,
+      grant_id: grantValue.grant_id,
+      grant_raw_sha256: grantRawSha,
+    }],
+    now: '2026-08-30T00:30:00.000Z',
+  });
+  expectValid(validateProgramCMergeAuthorizationConsumptionContext, context());
+  for (const mutate of [
+    (value) => { value.consumption.grant_raw_sha256 = DIGEST; },
+    (value) => { value.consumption.single_use_nonce = 'nonce-program-c-other'; value.consumption.nonce_ledger_key = 'program-c-merge:nonce-program-c-other'; },
+    (value) => { value.consumption.stage = 'ACCEPTANCE_MERGE'; },
+    (value) => { value.consumption.decision_adr = 'ADR-999'; },
+    (value) => { value.consumption.policy_revision = 'program-c/policy-r9'; },
+    (value) => { value.consumption.pr_number = 99; },
+    (value) => { value.consumption.authorized_head_sha = 'e'.repeat(40); },
+    (value) => { value.consumption.observed_merge_method = 'REBASE'; },
+    (value) => { value.authorities.roles[5].actor_id = 99; },
+    (value) => { value.revoked_receipt_ids.push(RECEIPT_ID); },
+    (value) => { value.now = '2026-08-30T02:00:00.000Z'; },
+    (value) => { value.consumed_nonces.push(value.consumption.single_use_nonce); },
+    (value) => { value.nonce_reservations.push(clone(value.nonce_reservations[0])); },
+    (value) => { value.nonce_reservations[0].reserved_revision = 2; },
+    (value) => { value.grant.head_sha = 'e'.repeat(40); },
+  ]) {
+    const value = context(); mutate(value); expectInvalid(validateProgramCMergeAuthorizationConsumptionContext, value);
   }
 });
