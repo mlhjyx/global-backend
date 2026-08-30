@@ -56,8 +56,8 @@ const reviewedPrismaResidual = readFileSync(
 );
 
 function requireTopology() {
-  assert.equal(container, "codex-task6b-identity-resolver-pg-20260830-a");
-  assert.equal(port, "55440");
+  assert.equal(container, "codex-task6b-identity-authority-pg-20260830-a");
+  assert.equal(port, "55441");
 }
 
 function assertDatabase(database) {
@@ -290,6 +290,22 @@ function appCommand(database, value, options = {}) {
     .find((line) => line.startsWith("{"));
 }
 
+function twoIdAppCommand(database, workspaceId, rawRecordId, options = {}) {
+  const workspaceSetting =
+    options.workspaceSetting === false
+      ? ""
+      : `SELECT set_config('app.current_workspace_id','${options.workspaceSetting ?? workspaceId}',true);`;
+  return dockerPsql(
+    database,
+    `BEGIN;
+     ${options.setRole ? "SET ROLE app_user;" : ""}
+     ${workspaceSetting}
+     SELECT public.resolve_organization_identity_for_raw_v1('${workspaceId}', '${rawRecordId}');
+     ROLLBACK;`,
+    { appUser: options.appUser, rejects: options.rejects },
+  );
+}
+
 function runAppResolver(database, rawRecordId) {
   requireTopology();
   assertDatabase(database);
@@ -475,8 +491,8 @@ after(() => {
   if (resolverStage?.root)
     rmSync(resolverStage.root, { recursive: true, force: true });
   if (
-    container === "codex-task6b-identity-resolver-pg-20260830-a" &&
-    port === "55440"
+    container === "codex-task6b-identity-authority-pg-20260830-a" &&
+    port === "55441"
   ) {
     for (const database of Object.values(databases)) {
       dockerPsql(
@@ -493,7 +509,7 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
       image: "pgvector/pgvector:pg16",
       running: true,
       ports: {
-        "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55440" }],
+        "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55441" }],
       },
     });
   });
@@ -513,16 +529,58 @@ describe("Organization Identity resolver command on disposable PostgreSQL 16", (
     );
   });
 
-  it("keeps app_user non-owner/RLS-bound with command-only Identity writes", () => {
+  it("admits only the app_user two-ID principal without caller-injected timeouts", () => {
     assert.equal(
       dockerPsql(
         databases.fresh,
         `SELECT rolname||':'||rolsuper||':'||rolbypassrls FROM pg_roles WHERE rolname='app_user';
-         SELECT has_function_privilege('app_user','public.apply_organization_identity_resolution_v1(jsonb)','EXECUTE');
+         SELECT has_function_privilege('app_user','public.resolve_organization_identity_for_raw_v1(text,text)','EXECUTE');
+         SELECT has_function_privilege('public','public.resolve_organization_identity_for_raw_v1(text,text)','EXECUTE');
          SELECT has_table_privilege('app_user','organization_identifier','INSERT,UPDATE,DELETE');`,
       ),
-      ["app_user:false:false", "t", "f"].join("\n"),
+      ["app_user:false:false", "t", "f", "f"].join("\n"),
     );
+    assert.doesNotThrow(() =>
+      twoIdAppCommand(databases.fresh, WORKSPACE_A, RAW_BIND, {
+        appUser: true,
+      }),
+    );
+  });
+
+  it("denies owner, SET ROLE, unset, and wrong-workspace invocations", () => {
+    twoIdAppCommand(databases.fresh, WORKSPACE_A, RAW_BIND, {
+      rejects: /IDENTITY_RESOLUTION_COMMAND_DENIED/u,
+    });
+    twoIdAppCommand(databases.fresh, WORKSPACE_A, RAW_BIND, {
+      setRole: true,
+      rejects: /IDENTITY_RESOLUTION_COMMAND_DENIED/u,
+    });
+    twoIdAppCommand(databases.fresh, WORKSPACE_A, RAW_BIND, {
+      appUser: true,
+      workspaceSetting: false,
+      rejects: /IDENTITY_RESOLUTION_COMMAND_DENIED/u,
+    });
+    twoIdAppCommand(databases.fresh, WORKSPACE_A, RAW_BIND, {
+      appUser: true,
+      workspaceSetting: WORKSPACE_B,
+      rejects: /IDENTITY_RESOLUTION_COMMAND_DENIED/u,
+    });
+  });
+
+  it("removes the JSON signature and rejects malformed text UUIDs without echoing them", () => {
+    assert.equal(
+      dockerPsql(
+        databases.fresh,
+        `SELECT to_regprocedure('public.apply_organization_identity_resolution_v1(jsonb)') IS NULL;`,
+      ),
+      "t",
+    );
+    const marker = "not-a-uuid-task6b-marker";
+    const output = twoIdAppCommand(databases.fresh, WORKSPACE_A, marker, {
+      appUser: true,
+      rejects: /IDENTITY_RESOLUTION_INPUT_INVALID/u,
+    });
+    assert.doesNotMatch(output, new RegExp(marker, "u"));
   });
 
   it("persists bind, lazy, create and conflict variants with exact match rules", () => {

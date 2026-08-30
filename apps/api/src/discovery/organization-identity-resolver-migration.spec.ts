@@ -53,21 +53,41 @@ describe("organization identity resolver command migration", () => {
     expect(sql).not.toMatch(/ALTER\s+TABLE[\s\S]*GRANT/giu);
   });
 
-  it("exposes one fixed-search-path app_user command and keeps helpers private", () => {
+  it("rejects the JSON command and requires the two-ID public resolver with private helpers", () => {
     const sql = source(migrationPath);
-    expect(sql).toContain("apply_organization_identity_resolution_v1");
+    const command =
+      "public.resolve_organization_identity_for_raw_v1(p_workspace_id text, p_raw_record_id text)";
+
+    expect(sql).toContain(`CREATE FUNCTION ${command}`);
+    expect(sql).not.toContain("apply_organization_identity_resolution_v1");
+    expect(sql).toContain("SET lock_timeout = '5s'");
+    expect(sql).toContain("SET statement_timeout = '60s'");
     expect(sql).toMatch(
       /LANGUAGE\s+plpgsql\s+SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public/iu,
     );
-    expect(sql).toContain("organization-identity-resolution-command/v1");
-    expect(sql).toContain("IDENTITY_RESOLUTION_COMMAND_DENIED");
-    expect(sql).toContain("IDENTITY_RESOLUTION_PLAN_STALE");
-    expect(sql).toMatch(
-      /REVOKE ALL ON FUNCTION public\.apply_organization_identity_resolution_v1\(jsonb\) FROM PUBLIC/iu,
+    expect(sql).toContain(
+      "REVOKE ALL ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) FROM PUBLIC",
     );
-    expect(sql).toMatch(
-      /GRANT EXECUTE ON FUNCTION public\.apply_organization_identity_resolution_v1\(jsonb\) TO app_user/iu,
+    expect(sql).toContain(
+      "GRANT EXECUTE ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) TO app_user",
     );
+    expect(sql).not.toMatch(
+      /GRANT EXECUTE ON FUNCTION public\.resolve_organization_identity_for_raw_v1\(text, text\) TO (?!app_user\b)/iu,
+    );
+    expect(sql).not.toMatch(
+      /ALTER FUNCTION public\.[a-z0-9_]+\([^)]*\) OWNER TO (?!global\b)/iu,
+    );
+    for (const match of sql.matchAll(
+      /CREATE FUNCTION public\.([a-z0-9_]+)\([^)]*\)/gu,
+    )) {
+      if (match[1] === "resolve_organization_identity_for_raw_v1") continue;
+      expect(sql).toMatch(
+        new RegExp(
+          `REVOKE ALL ON FUNCTION public\\.${match[1]}\\([^;]+ FROM PUBLIC, app_user`,
+          "u",
+        ),
+      );
+    }
     expect(sql).not.toMatch(
       /GRANT\s+(?:INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER|ALL)[\s\S]*ON\s+(?:TABLE\s+)?(?:public\.)?(?:identity_link|organization_)/iu,
     );

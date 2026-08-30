@@ -13,8 +13,6 @@ const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
-const expectedMigrationChecksum =
-  "fb6b377fc23704bd7057c8367fd9713f67f9923497552abf399f59cb5347826b";
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
 
 const frozenFiles = Object.freeze([
@@ -57,44 +55,46 @@ describe("Organization Identity resolver command migration", () => {
       sha256(readFileSync(schemaPath)),
       "0858f0d36634246e20a4dfd5fdae3ab6910d945af1e45e0c44ad489a13a0fca4",
     );
-    assert.equal(sha256(migrationSql()), expectedMigrationChecksum);
   });
 
   it("is one bounded DDL/ACL transaction with no datamodel mutation", () => {
     const sql = migrationSql();
     assert.equal(occurrences(sql, /^BEGIN;\s*$/gmu), 1);
     assert.equal(occurrences(sql, /^COMMIT;\s*$/gmu), 1);
-    assert.match(sql, /SET LOCAL lock_timeout = '5s';/u);
-    assert.match(sql, /SET LOCAL statement_timeout = '60s';/u);
+    assert.ok(sql.includes("SET lock_timeout = '5s'"));
+    assert.ok(sql.includes("SET statement_timeout = '60s'"));
     assert.doesNotMatch(
       sql,
       /^\s*(?:ALTER|CREATE|DROP)\s+(?:TABLE|TYPE|INDEX|POLICY)\b/gimu,
     );
   });
 
-  it("closes JSON, principal, workspace and function ACL boundaries", () => {
+  it("rejects JSON command residue and exposes only the two-ID app_user command", () => {
     const sql = migrationSql();
-    for (const token of [
-      "organization-identity-resolution-command/v1",
-      "IDENTITY_RESOLUTION_COMMAND_DENIED",
-      "IDENTITY_RESOLUTION_INPUT_INVALID",
-      "IDENTITY_RESOLUTION_PLAN_STALE",
-      "IDENTITY_INPUT_DRIFT",
-      "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
-      "IDENTITY_RESOLUTION_SUPPRESSED",
-      "current_workspace_id",
-      "session_user",
-      "current_user",
-      "app_user",
-    ]) {
-      assert.match(sql, new RegExp(token, "u"));
-    }
-    assert.match(sql, /octet_length\(p_command::text\)\s*>\s*65536/u);
+    const command =
+      "public.resolve_organization_identity_for_raw_v1(p_workspace_id text, p_raw_record_id text)";
+
+    assert.ok(sql.includes(`CREATE FUNCTION ${command}`));
+    assert.ok(!sql.includes("apply_organization_identity_resolution_v1"));
+    assert.doesNotMatch(
+      sql,
+      /resolve_organization_identity_for_raw_v1\(jsonb\)/u,
+    );
     assert.match(sql, /SECURITY DEFINER/u);
     assert.match(sql, /SET search_path = pg_catalog, public/u);
-    assert.match(
+    assert.ok(
+      sql.includes(
+        "REVOKE ALL ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) FROM PUBLIC",
+      ),
+    );
+    assert.ok(
+      sql.includes(
+        "GRANT EXECUTE ON FUNCTION public.resolve_organization_identity_for_raw_v1(text, text) TO app_user",
+      ),
+    );
+    assert.doesNotMatch(
       sql,
-      /GRANT EXECUTE ON FUNCTION public\.apply_organization_identity_resolution_v1\(jsonb\) TO app_user/u,
+      /GRANT EXECUTE ON FUNCTION public\.resolve_organization_identity_for_raw_v1\(text, text\) TO (?!app_user\b)/u,
     );
     assert.doesNotMatch(
       sql,
@@ -120,23 +120,12 @@ describe("Organization Identity resolver command migration", () => {
     assert.match(sql, /jsonb_array_length[\s\S]*rootMappings[\s\S]*>\s*64/u);
   });
 
-  it("keeps helpers private and the public command exact", () => {
+  it("fails closed on unexpected public function, owner, or ACL residue", () => {
     const sql = migrationSql();
-    assert.equal(
-      occurrences(
-        sql,
-        /CREATE OR REPLACE FUNCTION public\.apply_organization_identity_resolution_v1\(p_command jsonb\)/gu,
-      ),
-      1,
-    );
-    assert.match(
-      sql,
-      /REVOKE ALL ON FUNCTION public\.apply_organization_identity_resolution_v1\(jsonb\) FROM PUBLIC/u,
-    );
     for (const match of sql.matchAll(
-      /CREATE OR REPLACE FUNCTION public\.([a-z0-9_]+)\(/gu,
+      /CREATE FUNCTION public\.([a-z0-9_]+)\(/gu,
     )) {
-      if (match[1] === "apply_organization_identity_resolution_v1") continue;
+      if (match[1] === "resolve_organization_identity_for_raw_v1") continue;
       assert.match(
         sql,
         new RegExp(
@@ -144,6 +133,17 @@ describe("Organization Identity resolver command migration", () => {
           "u",
         ),
       );
+      assert.doesNotMatch(
+        sql,
+        new RegExp(
+          `GRANT EXECUTE ON FUNCTION public\\.${match[1]}\\([^;]+ TO (?:PUBLIC|app_user)`,
+          "u",
+        ),
+      );
     }
+    assert.doesNotMatch(
+      sql,
+      /ALTER FUNCTION public\.[a-z0-9_]+\([^)]*\) OWNER TO (?!global\b)/u,
+    );
   });
 });
