@@ -592,17 +592,6 @@ test('FIX2D CODEOWNER actor sharing follows the 3.4 adjudication without evidenc
     ];
     assert.equal(new Set(ids).size, ids.length);
   });
-  mutation('round2-security-codeowner-actor-allowed', () => {
-    const value = candidate();
-    value.codeowner_review.actor = {
-      id: value.security_review.actor_id,
-      node_id: value.security_review.actor_node_id,
-      login: value.security_review.actor_login,
-      type: 'User',
-    };
-    assert.deepEqual(validateCandidate(value), { valid: true, issues: [] });
-    assert.notEqual(value.codeowner_review.review_id, value.security_review.review_id);
-  });
   mutation('round2-dual-coapprover-reused', () => {
     const value = candidate();
     const authorityValue = authority();
@@ -630,6 +619,82 @@ test('FIX2D CODEOWNER actor sharing follows the 3.4 adjudication without evidenc
     value.codeowner_review.review_id = value.privacy_review.review_id;
     expectIssue(validateCandidate(value), 'APPROVAL_EVIDENCE_SLOT_REUSE');
   });
+});
+
+test('FIX3 closed CODEOWNER actor-sharing policy contract governs role validation', async () => {
+  const mutationId = 'round3-codeowner-actor-sharing-policy-contract';
+  assert.equal(fixMutationRuns.has(mutationId), false);
+  fixMutationRuns.set(mutationId, 1);
+  try {
+    const roleModule = await import('./governance-approval-role-evidence.mjs');
+    const expectedContract = {
+      schema_version: 'codeowner-actor-sharing-policy/v1',
+      codeowner_actor_reuse: 'ALLOWED_WITH_DISTINCT_EVIDENCE_IDS',
+      evidence_id_uniqueness: 'ALL_HUMAN_AND_MACHINE_EVIDENCE_IDS_DISTINCT',
+      dual_role_coapprover: 'DISTINCT_LEGAL_OR_QA_REQUIRED',
+      minimum_distinct_humans: 2,
+      security_actor_isolation_roles: ['OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'OWN-QA-EVIDENCE'],
+    };
+    assert.deepEqual(roleModule.CODEOWNER_ACTOR_SHARING_POLICY, expectedContract);
+    assert.ok(Object.isFrozen(roleModule.CODEOWNER_ACTOR_SHARING_POLICY));
+    assert.ok(Object.isFrozen(roleModule.CODEOWNER_ACTOR_SHARING_POLICY.security_actor_isolation_roles));
+
+    const sharedSecurity = candidate();
+    sharedSecurity.codeowner_review.actor = {
+      id: sharedSecurity.security_review.actor_id,
+      node_id: sharedSecurity.security_review.actor_node_id,
+      login: sharedSecurity.security_review.actor_login,
+      type: 'User',
+    };
+    assert.deepEqual(validateCandidate(sharedSecurity), { valid: true, issues: [] });
+    assert.notEqual(sharedSecurity.codeowner_review.review_id, sharedSecurity.security_review.review_id);
+
+    const reusedId = candidate();
+    reusedId.codeowner_review.review_id = reusedId.security_review.review_id;
+    expectIssue(validateCandidate(reusedId), 'APPROVAL_EVIDENCE_SLOT_REUSE');
+
+    const reusedCoapprover = candidate();
+    const reusedAuthority = authority();
+    reusedCoapprover.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+    reusedCoapprover.policy.dual_role_exception = {
+      decision_adr: 'ADR-042',
+      valid_from: '2026-08-30T00:00:00.000Z',
+      valid_until: '2026-08-31T00:00:00.000Z',
+      coapprover_role: 'OWN-QA-EVIDENCE',
+      minimum_distinct_human_actors: 2,
+      cannot_authorize_merge: true,
+      cannot_authorize_release: true,
+    };
+    for (const index of [1, 2]) {
+      reusedAuthority.roles[index].actor_id = reusedCoapprover.product_review.actor.id;
+      reusedAuthority.roles[index].actor_node_id = reusedCoapprover.product_review.actor.node_id;
+      reusedAuthority.roles[index].actor_login = reusedCoapprover.product_review.actor.login;
+    }
+    reusedCoapprover.privacy_review.actor = clone(reusedCoapprover.product_review.actor);
+    reusedCoapprover.qa_review.actor = clone(reusedCoapprover.product_review.actor);
+    expectIssue(
+      validateCandidate(reusedCoapprover, reusedAuthority),
+      'APPROVAL_DISTINCT_ACTORS_REQUIRED',
+    );
+
+    const reusedSecurityRole = candidate();
+    const securityAuthority = authority();
+    securityAuthority.roles[3].actor_id = reusedSecurityRole.product_review.actor.id;
+    securityAuthority.roles[3].actor_node_id = reusedSecurityRole.product_review.actor.node_id;
+    securityAuthority.roles[3].actor_login = reusedSecurityRole.product_review.actor.login;
+    reusedSecurityRole.security_review.actor_id = reusedSecurityRole.product_review.actor.id;
+    reusedSecurityRole.security_review.actor_node_id = reusedSecurityRole.product_review.actor.node_id;
+    reusedSecurityRole.security_review.actor_login = reusedSecurityRole.product_review.actor.login;
+    expectIssue(
+      validateCandidate(reusedSecurityRole, securityAuthority),
+      'APPROVAL_SECURITY_REVIEW_REUSED',
+    );
+
+    const source = await readFile(new URL('./governance-approval-role-evidence.mjs', import.meta.url), 'utf8');
+    assert.ok((source.match(/CODEOWNER_ACTOR_SHARING_POLICY/g) ?? []).length >= 3);
+  } catch (error) {
+    fixMutationFailures.set(mutationId, error);
+  }
 });
 
 test('FIX2C importing the facade is filesystem-independent and the schema catalog is committed', async () => {

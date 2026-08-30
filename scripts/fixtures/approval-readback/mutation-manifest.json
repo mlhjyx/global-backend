@@ -216,10 +216,14 @@
       "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
       "mutation_ids": [
         "round2-dual-privacy-codeowner-actor-allowed",
-        "round2-security-codeowner-actor-allowed",
         "round2-dual-coapprover-reused",
         "round2-codeowner-review-id-reuse"
       ]
+    },
+    {
+      "requirement_id": "FIX3-CODEOWNER-ACTOR-SHARING-POLICY-PROVENANCE",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": ["round3-codeowner-actor-sharing-policy-contract"]
     }
   ],
   "implementation_files": [
