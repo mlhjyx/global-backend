@@ -291,7 +291,7 @@ const acceptanceEvidence = async () => {
     ruleset: { normalizedSha256: policy.liveRulesetSha256, bypassActors: [], observedAt: '2026-08-30T08:28:00.000Z' },
     machineChecks: policy.requiredMachineChecks.map((required) => ({
       ...clone(required), checkRunId: 7001, checkSuiteId: 7002, workflowRunId: 7003,
-      headSha: policy.currentHeadSha, status: 'COMPLETED', conclusion: 'SUCCESS',
+      headSha: policy.currentBaseSha, status: 'COMPLETED', conclusion: 'SUCCESS',
       checkRunSuiteAssociated: true, suiteRunAssociated: true, runHeadAssociated: true,
     })),
     receipt: {

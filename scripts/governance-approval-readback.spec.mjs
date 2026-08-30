@@ -188,7 +188,7 @@ const machineCheck = () => ({
   actions_run_id: 51001,
   actions_run_attempt: 1,
   actions_run_event: 'pull_request_target',
-  actions_run_head_sha: HEAD_SHA,
+  actions_run_head_sha: BASE_SHA,
   actions_run_conclusion: 'success',
   reusable_signer: {
     workflow_id: 61002,
@@ -513,6 +513,13 @@ test('ADR-027 and its QA dual-role coapproval do not consume ADR-026 Legal PENDI
   }
 });
 
+test('pull_request_target machine evidence binds its execution SHA to the trusted PR base', () => {
+  const value = candidate();
+  value.machine_checks[0].actions_run_head_sha = BASE_SHA;
+  const result = validateApprovalReadback(value, authority(), value.policy, NOW);
+  assert.deepEqual(result, { valid: true, issues: [] });
+});
+
 test('approval readback executes each required trust mutation exactly once', () => {
   const validate = (value) => validateApprovalReadback(value, authority(), value.policy, NOW);
   const cases = [
@@ -543,7 +550,7 @@ test('approval readback executes each required trust mutation exactly once', () 
     ['workflow-path-mismatch', (v) => { v.machine_checks[0].workflow_path = '.github/workflows/other.yml'; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
     ['workflow-blob-mismatch', (v) => { v.machine_checks[0].trusted_base_workflow_blob_sha = BASE_SHA; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
     ['actions-app-mismatch', (v) => { v.machine_checks[0].github_app_id = 1; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
-    ['actions-run-head-mismatch', (v) => { v.machine_checks[0].actions_run_head_sha = BASE_SHA; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
+    ['actions-run-head-mismatch', (v) => { v.machine_checks[0].actions_run_head_sha = HEAD_SHA; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
     ['actions-run-conclusion', (v) => { v.machine_checks[0].actions_run_conclusion = 'failure'; }, 'APPROVAL_CHECK_REQUIRED'],
     ['signer-mismatch', (v) => { v.machine_checks[0].reusable_signer.workflow_sha = BASE_SHA; }, 'APPROVAL_CHECK_WORKFLOW_MISMATCH'],
     ['sidecar-path-not-allowlisted', (v) => { v.policy.pr_readable_paths = ['docs/governance/decisions/adr-042-r2.manifest.json']; }, 'APPROVAL_PROPOSED_SIDECAR_REQUIRED'],

@@ -77,7 +77,7 @@ export const validateMachineChecks = (candidate, policy) => {
       || check.workflow_path !== required.workflow_path
       || check.trusted_base_workflow_blob_sha !== required.trusted_base_workflow_blob_sha
       || check.actions_run_event !== 'pull_request_target'
-      || check.actions_run_head_sha !== candidate.pull_request.head_sha
+      || check.actions_run_head_sha !== candidate.pull_request.base_sha
       || !signerMatches(check.reusable_signer, required.reusable_signer)
     ) codes.push('APPROVAL_CHECK_WORKFLOW_MISMATCH');
   }

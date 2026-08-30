@@ -146,7 +146,7 @@ const machineCheck = (overrides = {}) => ({
   actions_run_id: 51001,
   actions_run_attempt: 1,
   actions_run_event: 'pull_request_target',
-  actions_run_head_sha: HEAD_SHA,
+  actions_run_head_sha: BASE_SHA,
   actions_run_conclusion: 'success',
   reusable_signer: {
     workflow_id: 61002,

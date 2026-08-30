@@ -311,7 +311,7 @@ export const buildRound4AcceptedState = () => {
       checkRunId: 7001,
       checkSuiteId: 7002,
       workflowRunId: 7003,
-      headSha: policy.currentHeadSha,
+      headSha: policy.currentBaseSha,
       status: 'COMPLETED',
       conclusion: 'SUCCESS',
       checkRunSuiteAssociated: true,
