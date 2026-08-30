@@ -10,6 +10,9 @@ import {
   GOVERNED_SUBJECT_TOMBSTONED,
   type GovernedSubjectRelationInput,
   type GovernedSubjectRelationResult,
+  type GovernedSubjectTombstoneInput,
+  type GovernedSubjectTombstoneOutcome,
+  type GovernedSubjectTombstoneResult,
 } from './governed-subject-relation.types';
 
 export {
@@ -35,6 +38,17 @@ const RESULT_KEYS = [
   'operation_subject_id', 'parent_subject_id', 'child_subject_id', 'relation_id',
   'replay',
 ] as const;
+const TOMBSTONE_INPUT_KEYS = [
+  'workspaceId', 'governedSubjectId', 'deletionRequestId',
+] as const;
+const TOMBSTONE_RESULT_KEYS = [
+  'governed_subject_id', 'tombstoned_at', 'audit_id', 'outcome',
+] as const;
+const TOMBSTONE_OUTCOMES = new Set<GovernedSubjectTombstoneOutcome>([
+  'FENCE_CREATED', 'REPLAYED', 'AUDIT_APPENDED_WITH_EXISTING_FENCE',
+]);
+const DATE_GET_TIME = Date.prototype.getTime;
+const DATE_TO_ISO = Date.prototype.toISOString;
 const STABLE_ERRORS = new Set([
   GOVERNED_OPERATION_SUBJECT_INVALID,
   GOVERNED_SUBJECT_INVALID,
@@ -62,12 +76,23 @@ type RelationRow = Readonly<{
   replay: unknown;
 }>;
 
+type TombstoneRow = Readonly<{
+  governed_subject_id: unknown;
+  tombstoned_at: unknown;
+  audit_id: unknown;
+  outcome: unknown;
+}>;
+
 function invalid(): never {
   throw new Error(GOVERNED_SUBJECT_RELATION_INVALID);
 }
 
 function invalidOperation(): never {
   throw new Error(GOVERNED_OPERATION_SUBJECT_INVALID);
+}
+
+function invalidSubject(): never {
+  throw new Error(GOVERNED_SUBJECT_INVALID);
 }
 
 function closedRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -169,6 +194,19 @@ function snapshotInput(value: unknown): GovernedSubjectRelationInput {
   });
 }
 
+function snapshotTombstoneInput(value: unknown): GovernedSubjectTombstoneInput {
+  try {
+    const input = closedRecord(value, TOMBSTONE_INPUT_KEYS);
+    return Object.freeze({
+      workspaceId: uuid(input.workspaceId),
+      governedSubjectId: uuid(input.governedSubjectId),
+      deletionRequestId: uuid(input.deletionRequestId),
+    });
+  } catch {
+    return invalidSubject();
+  }
+}
+
 function parseResult(
   value: unknown,
   expectedReplay: true | null,
@@ -188,6 +226,37 @@ function parseResult(
       childSubjectId: uuid(row.child_subject_id),
       relationId: uuid(row.relation_id),
       replay: row.replay,
+    });
+  } catch {
+    throw new Error(GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
+  }
+}
+
+function parseTombstoneResult(
+  value: unknown,
+  input: GovernedSubjectTombstoneInput,
+): GovernedSubjectTombstoneResult {
+  try {
+    if (!Array.isArray(value) || value.length !== 1) throw new Error();
+    const row = closedRecord(value[0], TOMBSTONE_RESULT_KEYS) as TombstoneRow;
+    const governedSubjectId = uuid(row.governed_subject_id);
+    const auditId = uuid(row.audit_id);
+    if (
+      governedSubjectId !== input.governedSubjectId ||
+      auditId !== input.deletionRequestId ||
+      typeof row.outcome !== 'string' ||
+      !TOMBSTONE_OUTCOMES.has(row.outcome as GovernedSubjectTombstoneOutcome) ||
+      row.tombstoned_at === null || typeof row.tombstoned_at !== 'object' ||
+      nodeUtilTypes.isProxy(row.tombstoned_at) ||
+      Object.getPrototypeOf(row.tombstoned_at) !== Date.prototype ||
+      Reflect.ownKeys(row.tombstoned_at).length !== 0
+    ) throw new Error();
+    const milliseconds = Reflect.apply(DATE_GET_TIME, row.tombstoned_at, []) as number;
+    if (!Number.isFinite(milliseconds)) throw new Error();
+    const tombstonedAt = Reflect.apply(DATE_TO_ISO, row.tombstoned_at, []) as string;
+    return Object.freeze({
+      governedSubjectId, tombstonedAt, auditId,
+      outcome: row.outcome as GovernedSubjectTombstoneOutcome,
     });
   } catch {
     throw new Error(GOVERNED_SUBJECT_ATTESTATION_UNAVAILABLE);
@@ -235,6 +304,10 @@ function attestQuery(input: GovernedSubjectRelationInput): Prisma.Sql {
   return Prisma.sql`SELECT * FROM public.attest_workspace_governed_child_relation_v1(${input.workspaceId}::uuid,${input.authorityId}::uuid,${input.accountId}::uuid,${input.operationId}::uuid,${input.operationGeneration}::integer,${input.ackId}::char(64),${input.resultDigest}::char(64),${input.rootSubjectType}::varchar(191),${input.rootSubjectId}::uuid,${input.rootDataClass}::varchar(16),${input.rootDsrSubjectType}::varchar(191),${input.rootDsrSubjectId}::uuid,${input.parentGovernedSubjectId}::uuid,${input.childSubjectType}::varchar(191),${input.childSubjectId}::uuid,${input.childDataClass}::varchar(16),${input.childDsrSubjectType}::varchar(191),${input.childDsrSubjectId}::uuid,${input.relationKey}::varchar(200),${input.relationKind}::varchar(32),${input.sourceRef.namespace}::varchar(64),${input.sourceRef.uuid}::uuid,${input.sourceRef.sha256}::char(64),${input.contractSha256}::char(64))`;
 }
 
+function tombstoneQuery(input: GovernedSubjectTombstoneInput): Prisma.Sql {
+  return Prisma.sql`SELECT * FROM public.tombstone_workspace_governed_subject_v1(${input.workspaceId}::uuid,${input.governedSubjectId}::uuid,${input.deletionRequestId}::uuid)`;
+}
+
 export class GovernedSubjectRelationRepository {
   async appendChildRelationV1(
     transaction: Transaction,
@@ -261,6 +334,19 @@ export class GovernedSubjectRelationRepository {
         attestQuery(input),
       );
       return parseResult(rows, true);
+    } catch (error) {
+      throw mappedDatabaseError(error);
+    }
+  }
+
+  async tombstoneSubjectV1(
+    transaction: Transaction,
+    value: unknown,
+  ): Promise<GovernedSubjectTombstoneResult> {
+    const input = snapshotTombstoneInput(value);
+    try {
+      const rows = await transaction.$queryRaw(tombstoneQuery(input));
+      return parseTombstoneResult(rows, input);
     } catch (error) {
       throw mappedDatabaseError(error);
     }

@@ -52,3 +52,19 @@ export interface GovernedSubjectRelationResult {
   readonly relationId: string;
   readonly replay: boolean;
 }
+
+export type GovernedSubjectTombstoneOutcome =
+  'FENCE_CREATED' | 'REPLAYED' | 'AUDIT_APPENDED_WITH_EXISTING_FENCE';
+
+export interface GovernedSubjectTombstoneInput {
+  readonly workspaceId: string;
+  readonly governedSubjectId: string;
+  readonly deletionRequestId: string;
+}
+
+export interface GovernedSubjectTombstoneResult {
+  readonly governedSubjectId: string;
+  readonly tombstonedAt: string;
+  readonly auditId: string;
+  readonly outcome: GovernedSubjectTombstoneOutcome;
+}
