@@ -47,8 +47,10 @@ const TOMBSTONE_RESULT_KEYS = [
 const TOMBSTONE_OUTCOMES = new Set<GovernedSubjectTombstoneOutcome>([
   'FENCE_CREATED', 'REPLAYED', 'AUDIT_APPENDED_WITH_EXISTING_FENCE',
 ]);
-const DATE_GET_TIME = Date.prototype.getTime;
-const DATE_TO_ISO = Date.prototype.toISOString;
+const DATE_GET_TIME = Function.prototype.call.bind(Date.prototype.getTime) as
+  (value: Date) => number;
+const DATE_TO_ISO = Function.prototype.call.bind(Date.prototype.toISOString) as
+  (value: Date) => string;
 const STABLE_ERRORS = new Set([
   GOVERNED_OPERATION_SUBJECT_INVALID,
   GOVERNED_SUBJECT_INVALID,
@@ -251,9 +253,9 @@ function parseTombstoneResult(
       Object.getPrototypeOf(row.tombstoned_at) !== Date.prototype ||
       Reflect.ownKeys(row.tombstoned_at).length !== 0
     ) throw new Error();
-    const milliseconds = Reflect.apply(DATE_GET_TIME, row.tombstoned_at, []) as number;
+    const milliseconds = DATE_GET_TIME(row.tombstoned_at as Date);
     if (!Number.isFinite(milliseconds)) throw new Error();
-    const tombstonedAt = Reflect.apply(DATE_TO_ISO, row.tombstoned_at, []) as string;
+    const tombstonedAt = DATE_TO_ISO(row.tombstoned_at as Date);
     return Object.freeze({
       governedSubjectId, tombstonedAt, auditId,
       outcome: row.outcome as GovernedSubjectTombstoneOutcome,
