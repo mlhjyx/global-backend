@@ -158,7 +158,10 @@ describe("Discovery query lineage schema, RLS and upgrade parity", () => {
         "FOREIGN KEY (workspace_id, run_id, query_key, provider_key, source_record_index, raw_record_id) REFERENCES discovery_query_attempt_item(workspace_id, run_id, query_key, provider_key, record_index, raw_record_id)",
         "UNIQUE (workspace_id, run_id, query_ordinal)",
         "UNIQUE (workspace_id, operation_id, relation_key)",
-      ]) assert.match(definitions, new RegExp(anchor.replace(/[()]/g, "\\$&")));
+      ]) assert.match(
+        definitions,
+        new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      );
       assert.doesNotMatch(definitions, /canonical_company|identity_link|opportunity/i);
     }
   });
