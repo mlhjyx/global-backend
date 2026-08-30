@@ -349,6 +349,70 @@ test("governance extraction maps trusted approval contracts without promoting ho
           {
             role: "OWN-PRODUCT",
             status: "ASSIGNED",
+            actor_id: 101,
+            actor_node_id: "private-node-must-not-enter-graph",
+            actor_login: "private-user-must-not-enter-graph",
+            effective_from: "2026-08-30T00:00:00.000Z",
+            effective_until: "2026-09-30T00:00:00.000Z",
+            scope: {
+              repository_id: 1291151138,
+              decision_adr: "ADR-027",
+              policy_revision: "program-c/policy-r2",
+              purpose: "DECISION_REVIEW",
+            },
+            assignment_evidence: {
+              evidence_kind: "BASE_REGISTRY_ASSIGNMENT",
+              assignment_pr_number: 42,
+              assignment_head_sha: "a".repeat(40),
+              observed_at: "2026-08-30T00:00:00.000Z",
+              evidence_sha256: `sha256:${"b".repeat(64)}`,
+            },
+            revocation_status: "ACTIVE",
+            superseded_by: null,
+          },
+          { role: "OWN-DATA-PRIVACY", status: "UNASSIGNED" },
+          { role: "OWN-QA-EVIDENCE", status: "UNASSIGNED" },
+          { role: "OWN-SECURITY", status: "UNASSIGNED" },
+          { role: "LEGAL-REVIEW", status: "UNASSIGNED" },
+          { role: "MERGE-AUTHORIZER", status: "UNASSIGNED" },
+        ],
+      }),
+    );
+    const validAssignedBuilder = new GraphBuilder();
+    await extractGovernance(validAssignedBuilder, root);
+    const validAssignedGraph = validAssignedBuilder.finalize(EVIDENCE);
+    const assignedProduct = validAssignedGraph.nodes.find(
+      (node) => node.id === "governance:OWN-PRODUCT",
+    );
+    assert.ok(assignedProduct);
+    assert.equal(assignedProduct.attributes.assignmentStatus, "ASSIGNED");
+    assert.equal(assignedProduct.attributes.assignee, "ASSIGNED_REDACTED");
+    assert.ok(validAssignedGraph.nodes.some((node) => node.id === receiptId));
+    const assignedProjection = JSON.stringify(validAssignedGraph);
+    assert.equal(
+      assignedProjection.includes("private-user-must-not-enter-graph"),
+      false,
+    );
+    assert.equal(
+      assignedProjection.includes("private-node-must-not-enter-graph"),
+      false,
+    );
+    assert.equal(
+      assignedProjection.includes(`sha256:${"b".repeat(64)}`),
+      false,
+    );
+
+    await writeFile(
+      path.join(governanceRoot, "approval-authorities.json"),
+      JSON.stringify({
+        schema_version: "approval-authorities/v1",
+        repository: { id: 1291151138, full_name: "mlhjyx/global-backend" },
+        revision: "approval-authorities/r2",
+        actor_policy: "DISTINCT_ACTORS_REQUIRED",
+        roles: [
+          {
+            role: "OWN-PRODUCT",
+            status: "ASSIGNED",
             actor_login: "private-user-must-not-enter-graph",
           },
           { role: "OWN-DATA-PRIVACY", status: "UNASSIGNED" },

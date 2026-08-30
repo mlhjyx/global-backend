@@ -25,6 +25,19 @@ const APPROVAL_ROLE_IDS = [
   "MERGE-AUTHORIZER",
 ] as const;
 const DECISION_SUBJECT_IDS = ["ADR-026", "ADR-027"] as const;
+const AUTHORITY_PURPOSE_BY_ROLE = Object.freeze({
+  "OWN-PRODUCT": "DECISION_REVIEW",
+  "OWN-DATA-PRIVACY": "DECISION_REVIEW",
+  "OWN-QA-EVIDENCE": "QA_EVIDENCE_REVIEW",
+  "OWN-SECURITY": "SECURITY_REVIEW",
+  "LEGAL-REVIEW": "LEGAL_REVIEW",
+  "MERGE-AUTHORIZER": "MERGE_AUTHORIZATION",
+});
+const AUTHORITY_REVISION = /^approval-authorities\/r[1-9][0-9]*$/;
+const POLICY_REVISION = /^program-c\/policy-r[1-9][0-9]*$/;
+const GIT_SHA = /^[0-9a-f]{40}$/;
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
+const CANONICAL_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const APPROVAL_SCHEMA_VERSIONS = Object.freeze({
   authority: "approval-authorities/v1",
   receipt: "product-privacy-approval-readback-receipt/v1",
@@ -206,9 +219,95 @@ function hasExactKeys(value: JsonRecord, expected: readonly string[]): boolean {
   return sameOrderedStrings(Object.keys(value).sort(), [...expected].sort());
 }
 
+function canonicalInstant(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    CANONICAL_INSTANT.test(value) &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(Date.parse(value)).toISOString() === value
+  );
+}
+
+function assignedAuthorityRole(
+  candidate: JsonRecord,
+  expectedRole: (typeof APPROVAL_ROLE_IDS)[number],
+): boolean {
+  if (
+    !hasExactKeys(candidate, [
+      "role",
+      "status",
+      "actor_id",
+      "actor_node_id",
+      "actor_login",
+      "effective_from",
+      "effective_until",
+      "scope",
+      "assignment_evidence",
+      "revocation_status",
+      "superseded_by",
+    ]) ||
+    stringAt(candidate, "role") !== expectedRole ||
+    stringAt(candidate, "status") !== "ASSIGNED" ||
+    !Number.isSafeInteger(candidate.actor_id) ||
+    Number(candidate.actor_id) < 1 ||
+    typeof candidate.actor_node_id !== "string" ||
+    candidate.actor_node_id.length < 1 ||
+    candidate.actor_node_id.length > 256 ||
+    typeof candidate.actor_login !== "string" ||
+    candidate.actor_login.length < 1 ||
+    candidate.actor_login.length > 256 ||
+    !canonicalInstant(candidate.effective_from) ||
+    !canonicalInstant(candidate.effective_until) ||
+    Date.parse(candidate.effective_from) >=
+      Date.parse(candidate.effective_until) ||
+    !["ACTIVE", "REVOKED"].includes(String(candidate.revocation_status)) ||
+    !(
+      candidate.superseded_by === null ||
+      (typeof candidate.superseded_by === "string" &&
+        AUTHORITY_REVISION.test(candidate.superseded_by))
+    )
+  )
+    return false;
+  const scope = recordAt(candidate, "scope");
+  const evidence = recordAt(candidate, "assignment_evidence");
+  return Boolean(
+    scope &&
+    hasExactKeys(scope, [
+      "repository_id",
+      "decision_adr",
+      "policy_revision",
+      "purpose",
+    ]) &&
+    scope.repository_id === 1291151138 &&
+    DECISION_SUBJECT_IDS.includes(
+      String(scope.decision_adr) as (typeof DECISION_SUBJECT_IDS)[number],
+    ) &&
+    typeof scope.policy_revision === "string" &&
+    POLICY_REVISION.test(scope.policy_revision) &&
+    scope.purpose === AUTHORITY_PURPOSE_BY_ROLE[expectedRole] &&
+    evidence &&
+    hasExactKeys(evidence, [
+      "evidence_kind",
+      "assignment_pr_number",
+      "assignment_head_sha",
+      "observed_at",
+      "evidence_sha256",
+    ]) &&
+    evidence.evidence_kind === "BASE_REGISTRY_ASSIGNMENT" &&
+    Number.isSafeInteger(evidence.assignment_pr_number) &&
+    Number(evidence.assignment_pr_number) >= 1 &&
+    typeof evidence.assignment_head_sha === "string" &&
+    GIT_SHA.test(evidence.assignment_head_sha) &&
+    canonicalInstant(evidence.observed_at) &&
+    typeof evidence.evidence_sha256 === "string" &&
+    DIGEST.test(evidence.evidence_sha256),
+  );
+}
+
 function validatedAuthorityRoles(
   authority: JsonRecord,
-): Array<{ role: string; status: "UNASSIGNED" }> | undefined {
+): Array<{ role: string; status: "UNASSIGNED" | "ASSIGNED" }> | undefined {
+  const revision = stringAt(authority, "revision");
   if (
     !hasExactKeys(authority, [
       "schema_version",
@@ -219,8 +318,10 @@ function validatedAuthorityRoles(
     ]) ||
     stringAt(authority, "schema_version") !==
       APPROVAL_SCHEMA_VERSIONS.authority ||
-    stringAt(authority, "revision") !==
-      "approval-authorities/initial-unassigned" ||
+    !(
+      revision === "approval-authorities/initial-unassigned" ||
+      AUTHORITY_REVISION.test(revision ?? "")
+    ) ||
     stringAt(authority, "actor_policy") !== "DISTINCT_ACTORS_REQUIRED"
   )
     return undefined;
@@ -235,18 +336,35 @@ function validatedAuthorityRoles(
     candidates.length !== APPROVAL_ROLE_IDS.length
   )
     return undefined;
-  const roles: Array<{ role: string; status: "UNASSIGNED" }> = [];
+  const roles: Array<{ role: string; status: "UNASSIGNED" | "ASSIGNED" }> = [];
+  const assignedActorIds = new Set<number>();
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
-    if (
-      !isRecord(candidate) ||
-      !hasExactKeys(candidate, ["role", "status"]) ||
-      stringAt(candidate, "role") !== APPROVAL_ROLE_IDS[index] ||
-      stringAt(candidate, "status") !== "UNASSIGNED"
-    )
-      return undefined;
-    roles.push({ role: APPROVAL_ROLE_IDS[index], status: "UNASSIGNED" });
+    if (!isRecord(candidate)) return undefined;
+    const role = APPROVAL_ROLE_IDS[index];
+    const status = stringAt(candidate, "status");
+    if (status === "UNASSIGNED") {
+      if (
+        !hasExactKeys(candidate, ["role", "status"]) ||
+        stringAt(candidate, "role") !== role
+      )
+        return undefined;
+      roles.push({ role, status });
+      continue;
+    }
+    if (!assignedAuthorityRole(candidate, role)) return undefined;
+    const actorId = Number(candidate.actor_id);
+    if (assignedActorIds.has(actorId)) return undefined;
+    assignedActorIds.add(actorId);
+    roles.push({ role, status: "ASSIGNED" });
   }
+  if (
+    (roles.some(({ status }) => status === "ASSIGNED") &&
+      !AUTHORITY_REVISION.test(revision ?? "")) ||
+    (revision === "approval-authorities/initial-unassigned" &&
+      roles.some(({ status }) => status !== "UNASSIGNED"))
+  )
+    return undefined;
   return roles;
 }
 
@@ -509,7 +627,7 @@ async function extractTrustedApprovalContracts(
       label: role,
       attributes: approvalAttributes({
         assignmentStatus: status,
-        assignee: "UNASSIGNED",
+        assignee: status === "UNASSIGNED" ? "UNASSIGNED" : "ASSIGNED_REDACTED",
       }),
       location,
     });
