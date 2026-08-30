@@ -394,6 +394,60 @@ describe('IntentProjectionService — sitemap budget scope', () => {
     expect(budgetStore.open).not.toHaveBeenCalled();
     expect(budgetStore.close).not.toHaveBeenCalled();
     expect(order[0]).toBe('attest');
+    expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({
+      authorityId: WATCH_BINDING.authorityId,
+      scopeKey: WATCH_WORKSPACE,
+      accountKey: WATCH_BINDING.accountKey,
+    });
+  });
+
+  it('does not allow a budget scope override to replace the caller workspace', async () => {
+    const invoke = vi.fn(async () => ({
+      data: {
+        status: 404,
+        body: '',
+        headers: {},
+        url: 'https://acme.example/sitemap.xml',
+      },
+      costCents: 0,
+    }));
+    const budgetStore = {
+      attestAuthorized: vi.fn(async () => undefined),
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => unknown) => fn({
+        canonicalCompany: {
+          findUnique: vi.fn(async () => ({
+            id: 'company-1',
+            name: 'Acme',
+            domain: 'acme.example',
+            region: null,
+          })),
+        },
+        fieldEvidence: { findMany: vi.fn(async () => []) },
+      })),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'monitor-1' })),
+      },
+    };
+    const otherWorkspace = '10000000-0000-4000-8000-000000000099';
+    const service = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: { invoke } as never,
+      budgetStore: budgetStore as never,
+    });
+
+    await expect(service.registerWatch(WATCH_WORKSPACE, 'company-1', {
+      budgetKey: WATCH_BINDING.accountKey,
+      budgetWorkspaceId: otherWorkspace,
+      executionBudget: {
+        ...WATCH_BINDING,
+        scopeKey: otherWorkspace,
+      },
+    })).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_BINDING_INVALID' });
+    expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it('propagates replay loss and does not create a homepage-only monitor', async () => {
