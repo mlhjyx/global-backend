@@ -13,6 +13,7 @@ OWN-SECURITY -> security_review_for -> ADR-026 / ADR-027
 LEGAL-REVIEW -> legal_input_for -> ADR-026 only
 MERGE-AUTHORIZER -> merge_authorization_for -> ADR-026 / ADR-027
 decision subject -> verified_by -> receipt contract
+receipt -> has_attestation_contract -> trusted-approval-evidence-manifest/v1
 receipt contract -> attested_by -> independent verifier workflow contract
 receipt contract -> authorizes_provenance_for -> ADR/Release consumer contract
 ```
@@ -38,7 +39,7 @@ Task 6 的 injected offline attestation fixture 即使返回 synthetic PASS，�
 
 ## 本地确定性测试
 
-`packages/code-intelligence/src/extractors/governance-approval-extractor.spec.ts` 是必须提交并由 package glob 执行的 focused spec。它验证 11 条精确 role/decision/slot 关系、所有静态信任属性、Task 6 synthetic payload 隔离，以及以下零投影反例：ASSIGNED 缺 actor identity、空 verifier、receipt required 漂移、attestation closed-shape 漂移、ADR enum 漂移、Release closed-shape 漂移、duplicate key、fatal UTF-8、symlink、directory、oversize、missing 与 FIFO。每个反例同时证明既有 Markdown governance graph 继续被提取。
+`packages/code-intelligence/src/extractors/governance-approval-extractor.spec.ts` 是必须提交并由 package glob 执行的 focused spec。它直接覆盖承重的 role-slot/schema/fail-closed 关系、Task 6 synthetic payload 隔离，以及以下零投影反例：ASSIGNED 缺 actor identity、空 verifier、receipt required 漂移、attestation closed-shape 漂移、ADR enum 漂移、Release closed-shape 漂移、duplicate key、fatal UTF-8、symlink、directory、oversize、missing 与 FIFO。全部 trust marker 的穷尽性由 shared helper/source checks 与 exact ContractGraph readback 共同证明；focused spec 不声称逐一直接覆盖所有节点或边属性。每个反例同时证明既有 Markdown governance graph 继续被提取。
 
 ## 真实证据准入
 

@@ -10,4 +10,3 @@ consumption, revocation, supersession, and TOCTOU mutation matrix is generated
 in memory by `scripts/governance-approval-readback.spec.mjs`; it never performs
 filesystem, network, shell, or GitHub operations through the production
 validator.
-
