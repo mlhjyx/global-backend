@@ -13,6 +13,49 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
+  IF to_regrole('app_user') IS NULL
+    OR NOT EXISTS (
+      SELECT 1
+      FROM pg_roles AS r
+      WHERE r.rolname = 'global'
+        AND r.rolsuper
+        AND r.rolinherit
+        AND r.rolcreaterole
+        AND r.rolcreatedb
+        AND r.rolcanlogin
+        AND r.rolreplication
+        AND r.rolbypassrls
+    )
+    OR NOT EXISTS (
+      SELECT 1
+      FROM pg_roles AS r
+      WHERE r.rolname = 'app_user'
+        AND NOT r.rolsuper
+        AND r.rolinherit
+        AND NOT r.rolcreaterole
+        AND NOT r.rolcreatedb
+        AND r.rolcanlogin
+        AND NOT r.rolreplication
+        AND NOT r.rolbypassrls
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM pg_auth_members AS membership
+      WHERE membership.roleid = 'global'::regrole
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM pg_default_acl AS defaults
+      CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+      WHERE defaults.defaclrole = 'global'::regrole
+        AND defaults.defaclobjtype = 'f'
+        AND acl.grantee <> 'global'::regrole::oid
+    )
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
+      USING ERRCODE = 'P0001';
+  END IF;
+
   IF EXISTS (
     SELECT 1
     FROM pg_proc AS p
@@ -36,26 +79,121 @@ BEGIN
     'public.raw_source_canonical_json_v1(jsonb)'
   );
   IF canonical_json_oid IS NULL
-    OR pg_get_userbyid((
-      SELECT p.proowner FROM pg_proc AS p WHERE p.oid = canonical_json_oid
-    )) IS DISTINCT FROM 'global'
-    OR has_function_privilege('app_user', canonical_json_oid, 'EXECUTE')
-    OR has_function_privilege('public', canonical_json_oid, 'EXECUTE')
     OR NOT coalesce((
-      SELECT p.proconfig @> ARRAY['search_path=pg_catalog, public']::text[]
+      SELECT
+        n.nspname = 'public'
+        AND p.proname = 'raw_source_canonical_json_v1'
+        AND oidvectortypes(p.proargtypes) = 'jsonb'
+        AND p.pronargs = 1
+        AND NOT p.proretset
+        AND pg_get_function_result(p.oid) = 'text'
+        AND language.lanname = 'plpgsql'
+        AND pg_get_userbyid(p.proowner) = 'global'
+        AND NOT p.prosecdef
+        AND p.provolatile = 'i'
+        AND p.proparallel = 'u'
+        AND NOT p.proleakproof
+        AND p.proisstrict
+        AND p.prokind = 'f'
+        AND p.proconfig IS NOT DISTINCT FROM
+          ARRAY['search_path=pg_catalog, public']::text[]
+        AND p.proacl IS NOT NULL
+        AND (
+          SELECT count(*) = 1
+            AND bool_and(
+              acl.grantee = p.proowner
+              AND acl.grantor = p.proowner
+              AND acl.privilege_type = 'EXECUTE'
+              AND NOT acl.is_grantable
+            )
+          FROM aclexplode(p.proacl) AS acl
+        )
+        AND encode(
+          sha256(convert_to(pg_get_functiondef(p.oid), 'UTF8')),
+          'hex'
+        ) = 'e9e958c0823409435f4bc1aa093b9c6bd1851eb401b5f07278c224992317ca16'
       FROM pg_proc AS p
+      JOIN pg_namespace AS n ON n.oid = p.pronamespace
+      JOIN pg_language AS language ON language.oid = p.prolang
       WHERE p.oid = canonical_json_oid
     ), false)
-    OR position(
-      'ORDER BY item.key COLLATE "C"' IN
-      pg_get_functiondef(canonical_json_oid)
-    ) = 0
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
       USING ERRCODE = 'P0001';
   END IF;
 END
 $organization_identity_catalog_preflight$;
+
+CREATE FUNCTION public.organization_identity_canonical_suppression_value_v1(
+  p_type text,
+  p_value text
+)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = pg_catalog, public
+AS $organization_identity_suppression$
+DECLARE
+  canonical text;
+  labels text[];
+  label text;
+BEGIN
+  IF p_type IS NULL OR p_value IS NULL
+    OR octet_length(p_value) > 2048
+  THEN
+    RETURN NULL;
+  END IF;
+
+  IF p_type = 'company_name' THEN
+    IF p_value ~ '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]' THEN
+      RETURN NULL;
+    END IF;
+    canonical := lower(normalize(p_value, NFC));
+    canonical := btrim(regexp_replace(
+      canonical, '[[:space:]]+', ' ', 'g'
+    ));
+    IF canonical = '' OR char_length(canonical) > 256 THEN
+      RETURN NULL;
+    END IF;
+    RETURN canonical;
+  END IF;
+
+  IF p_type IS DISTINCT FROM 'domain' OR btrim(p_value) = '' THEN
+    RETURN NULL;
+  END IF;
+  canonical := lower(btrim(p_value));
+  canonical := regexp_replace(canonical, '^https?://', '');
+  canonical := regexp_replace(canonical, '^www\.', '');
+  canonical := split_part(
+    split_part(split_part(canonical, '/', 1), '?', 1), '#', 1
+  );
+  canonical := regexp_replace(canonical, '\.+$', '');
+  IF canonical = ''
+    OR char_length(canonical) > 253
+    OR canonical !~ '^[a-z0-9.-]+$'
+    OR position('.' IN canonical) = 0
+    OR canonical ~ '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
+  THEN
+    RETURN NULL;
+  END IF;
+  labels := string_to_array(canonical, '.');
+  IF cardinality(labels) NOT BETWEEN 2 AND 128 THEN
+    RETURN NULL;
+  END IF;
+  FOREACH label IN ARRAY labels LOOP
+    IF char_length(label) NOT BETWEEN 1 AND 63
+      OR label !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+    THEN
+      RETURN NULL;
+    END IF;
+  END LOOP;
+  RETURN canonical;
+END
+$organization_identity_suppression$;
+
+REVOKE ALL ON FUNCTION
+  public.organization_identity_canonical_suppression_value_v1(text, text)
+FROM PUBLIC, app_user;
 
 CREATE FUNCTION public.organization_identity_authority_from_raw_v1(
   p_provider_key text,
@@ -104,10 +242,12 @@ BEGIN
       RAISE EXCEPTION 'IDENTITY_IDENTIFIER_INVALID'
         USING ERRCODE = 'P0001';
     END IF;
-    domain_value := lower(p_raw->>'domain');
-    domain_value := regexp_replace(domain_value, '^www\.', '');
-    IF domain_value !~
-      '^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    domain_value :=
+      public.organization_identity_canonical_suppression_value_v1(
+        'domain', p_raw->>'domain'
+      );
+    IF domain_value IS NULL
+      OR domain_value IS DISTINCT FROM p_raw->>'domain'
     THEN
       RAISE EXCEPTION 'IDENTITY_IDENTIFIER_INVALID'
         USING ERRCODE = 'P0001';
@@ -267,77 +407,6 @@ REVOKE ALL ON FUNCTION public.organization_identity_authority_from_raw_v1(
   text, jsonb
 ) FROM PUBLIC, app_user;
 
-CREATE FUNCTION public.organization_identity_canonical_suppression_value_v1(
-  p_type text,
-  p_value text
-)
-RETURNS text
-LANGUAGE plpgsql
-IMMUTABLE
-SET search_path = pg_catalog, public
-AS $organization_identity_suppression$
-DECLARE
-  canonical text;
-  labels text[];
-  label text;
-BEGIN
-  IF p_type IS NULL OR p_value IS NULL
-    OR octet_length(p_value) > 2048
-  THEN
-    RETURN NULL;
-  END IF;
-
-  IF p_type = 'company_name' THEN
-    IF p_value ~ '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]' THEN
-      RETURN NULL;
-    END IF;
-    canonical := lower(normalize(p_value, NFC));
-    canonical := btrim(regexp_replace(
-      canonical, '[[:space:]]+', ' ', 'g'
-    ));
-    IF canonical = '' OR char_length(canonical) > 256 THEN
-      RETURN NULL;
-    END IF;
-    RETURN canonical;
-  END IF;
-
-  IF p_type IS DISTINCT FROM 'domain' OR btrim(p_value) = '' THEN
-    RETURN NULL;
-  END IF;
-  canonical := lower(btrim(p_value));
-  canonical := regexp_replace(canonical, '^https?://', '');
-  canonical := regexp_replace(canonical, '^www\.', '');
-  canonical := split_part(
-    split_part(split_part(canonical, '/', 1), '?', 1), '#', 1
-  );
-  canonical := regexp_replace(canonical, '\.+$', '');
-  IF canonical = ''
-    OR char_length(canonical) > 253
-    OR canonical !~ '^[a-z0-9.-]+$'
-    OR position('.' IN canonical) = 0
-    OR canonical ~ '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
-  THEN
-    RETURN NULL;
-  END IF;
-  labels := string_to_array(canonical, '.');
-  IF cardinality(labels) NOT BETWEEN 2 AND 128 THEN
-    RETURN NULL;
-  END IF;
-  FOREACH label IN ARRAY labels LOOP
-    IF char_length(label) NOT BETWEEN 1 AND 63
-      OR label !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
-    THEN
-      RETURN NULL;
-    END IF;
-  END LOOP;
-  RETURN canonical;
-END
-$organization_identity_suppression$;
-
-REVOKE ALL ON FUNCTION
-  public.organization_identity_canonical_suppression_value_v1(text, text)
-FROM PUBLIC, app_user;
-
 CREATE FUNCTION public.organization_identity_blocker_from_raw_v1(p_raw jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -348,6 +417,7 @@ DECLARE
   domain_value text;
   name_value text;
   country_value text;
+  blocker_key text;
 BEGIN
   IF jsonb_typeof(p_raw) IS DISTINCT FROM 'object'
     OR octet_length(p_raw::text) > 8192
@@ -356,6 +426,25 @@ BEGIN
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
       USING ERRCODE = 'P0001';
+  END IF;
+
+  IF p_raw ? 'country' THEN
+    IF jsonb_typeof(p_raw->'country') IS DISTINCT FROM 'string' THEN
+      RETURN jsonb_build_object(
+        'kind', 'HOLD',
+        'reason', 'IDENTITY_BLOCKER_INPUT_INVALID'
+      );
+    END IF;
+    country_value := p_raw->>'country';
+    IF country_value <> '' AND country_value !~ '^[A-Za-z]{2}$' THEN
+      RETURN jsonb_build_object(
+        'kind', 'HOLD',
+        'reason', 'IDENTITY_BLOCKER_INPUT_INVALID'
+      );
+    END IF;
+    country_value := lower(country_value);
+  ELSE
+    country_value := '';
   END IF;
 
   IF p_raw ? 'domain' THEN
@@ -367,12 +456,23 @@ BEGIN
       public.organization_identity_canonical_suppression_value_v1(
         'domain', p_raw->>'domain'
       );
-    IF domain_value IS NOT NULL THEN
+    IF domain_value IS NULL THEN
       RETURN jsonb_build_object(
-        'blockerKey', 'd:' || domain_value,
-        'matchRule', 'domain_exact'
+        'kind', 'HOLD',
+        'reason', 'IDENTITY_BLOCKER_INPUT_INVALID'
       );
     END IF;
+    blocker_key := 'd:' || domain_value;
+    IF octet_length(blocker_key) > 512 THEN
+      RETURN jsonb_build_object(
+        'kind', 'HOLD',
+        'reason', 'IDENTITY_BLOCKER_INPUT_INVALID'
+      );
+    END IF;
+    RETURN jsonb_build_object(
+      'blockerKey', blocker_key,
+      'matchRule', 'domain_exact'
+    );
   END IF;
 
   name_value := lower(normalize(p_raw->>'name', NFC));
@@ -392,19 +492,15 @@ BEGIN
       'reason', 'IDENTITY_BLOCKER_EMPTY_NORMALIZED_NAME'
     );
   END IF;
-  IF char_length(name_value) > 256 THEN
-    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
-      USING ERRCODE = 'P0001';
+  blocker_key := 'n:' || name_value || ':' || country_value;
+  IF octet_length(blocker_key) > 512 THEN
+    RETURN jsonb_build_object(
+      'kind', 'HOLD',
+      'reason', 'IDENTITY_BLOCKER_INPUT_INVALID'
+    );
   END IF;
-
-  country_value := CASE
-    WHEN jsonb_typeof(p_raw->'country') = 'string'
-      AND octet_length(p_raw->>'country') <= 2
-      THEN lower(p_raw->>'country')
-    ELSE ''
-  END;
   RETURN jsonb_build_object(
-    'blockerKey', 'n:' || name_value || ':' || country_value,
+    'blockerKey', blocker_key,
     'matchRule', 'name_country'
   );
 END
@@ -460,6 +556,7 @@ BEGIN
   FROM jsonb_object_keys(p_snapshot) AS key;
   IF snapshot_keys IS DISTINCT FROM
       'authorityIdentifiers,blocker,existingBindings,raw,resolverVersion,rootMappings'
+    OR jsonb_typeof(p_snapshot->'resolverVersion') IS DISTINCT FROM 'string'
     OR p_snapshot->>'resolverVersion' IS DISTINCT FROM
       'organization-identity-resolver/v1'
     OR jsonb_typeof(p_snapshot->'raw') IS DISTINCT FROM 'object'
@@ -485,11 +582,25 @@ BEGIN
   INTO raw_keys FROM jsonb_object_keys(raw_fact) AS key;
   IF raw_keys IS DISTINCT FROM
       'ingestVersion,payloadHash,providerKey,rawRecordId'
-    OR raw_fact->>'rawRecordId' !~
+    OR jsonb_typeof(raw_fact->'rawRecordId') IS DISTINCT FROM 'string'
+    OR jsonb_typeof(raw_fact->'providerKey') IS DISTINCT FROM 'string'
+    OR jsonb_typeof(raw_fact->'payloadHash') IS DISTINCT FROM 'string'
+    OR jsonb_typeof(raw_fact->'ingestVersion') IS DISTINCT FROM 'string'
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF raw_fact->>'rawRecordId' !~
       '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-    OR raw_fact->>'providerKey' NOT IN (
-      'registry', 'directory', 'wikidata', 'openstreetmap',
-      'trade_fair', 'ted', 'openfda', 'public_web'
+    OR (
+      raw_fact->>'providerKey' IS DISTINCT FROM 'registry'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'directory'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'wikidata'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'openstreetmap'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'trade_fair'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'ted'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'openfda'
+      AND raw_fact->>'providerKey' IS DISTINCT FROM 'public_web'
     )
     OR raw_fact->>'payloadHash' !~ '^[0-9a-f]{64}$'
     OR octet_length(raw_fact->>'ingestVersion') NOT BETWEEN 1 AND 128
@@ -507,17 +618,38 @@ BEGIN
 
   SELECT string_agg(key, ',' ORDER BY key COLLATE "C")
   INTO blocker_keys FROM jsonb_object_keys(blocker_fact) AS key;
-  IF blocker_keys NOT IN (
-      'blockerKey,legacyCandidateCompanyId,matchRule',
-      'blockerKey,matchRule'
+  IF (
+      blocker_keys IS DISTINCT FROM
+        'blockerKey,legacyCandidateCompanyId,matchRule'
+      AND blocker_keys IS DISTINCT FROM 'blockerKey,matchRule'
     )
-    OR octet_length(blocker_fact->>'blockerKey') NOT BETWEEN 1 AND 512
-    OR blocker_fact->>'matchRule' NOT IN ('domain_exact', 'name_country')
+    OR jsonb_typeof(blocker_fact->'blockerKey') IS DISTINCT FROM 'string'
+    OR jsonb_typeof(blocker_fact->'matchRule') IS DISTINCT FROM 'string'
+    OR (
+      blocker_fact ? 'legacyCandidateCompanyId'
+      AND jsonb_typeof(blocker_fact->'legacyCandidateCompanyId')
+        IS DISTINCT FROM 'string'
+      AND jsonb_typeof(blocker_fact->'legacyCandidateCompanyId')
+        IS DISTINCT FROM 'null'
+    )
   THEN
     RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
       USING ERRCODE = 'P0001';
   END IF;
-  legacy_company_id := blocker_fact->>'legacyCandidateCompanyId';
+  IF octet_length(blocker_fact->>'blockerKey') NOT BETWEEN 1 AND 512
+    OR (
+      blocker_fact->>'matchRule' IS DISTINCT FROM 'domain_exact'
+      AND blocker_fact->>'matchRule' IS DISTINCT FROM 'name_country'
+    )
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  legacy_company_id := CASE
+    WHEN jsonb_typeof(blocker_fact->'legacyCandidateCompanyId') = 'string'
+      THEN blocker_fact->>'legacyCandidateCompanyId'
+    ELSE NULL
+  END;
   IF legacy_company_id IS NOT NULL
     AND legacy_company_id !~
       '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -540,7 +672,21 @@ BEGIN
         FROM jsonb_object_keys(item.value) AS key
       ) IS DISTINCT FROM
         'jurisdiction,key,normalizedValue,normalizerVersion,providerKey,scheme,validatorVersion'
-      OR item.value->>'providerKey' IS DISTINCT FROM raw_fact->>'providerKey'
+      OR jsonb_typeof(item.value->'providerKey') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'scheme') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'jurisdiction') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'normalizedValue') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'validatorVersion') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'normalizerVersion') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'key') IS DISTINCT FROM 'string'
+  ) THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(authority_input) AS item(value)
+    WHERE item.value->>'providerKey' IS DISTINCT FROM raw_fact->>'providerKey'
       OR item.value->>'normalizerVersion' IS DISTINCT FROM
         'organization-identity-authority/v1'
       OR octet_length(item.value->>'key') NOT BETWEEN 1 AND 512
@@ -610,7 +756,16 @@ BEGIN
         SELECT string_agg(key, ',' ORDER BY key COLLATE "C")
         FROM jsonb_object_keys(item.value) AS key
       ) IS DISTINCT FROM 'companyId,identifierKey'
-      OR octet_length(item.value->>'identifierKey') NOT BETWEEN 1 AND 512
+      OR jsonb_typeof(item.value->'identifierKey') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'companyId') IS DISTINCT FROM 'string'
+  ) THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(bindings_input) AS item(value)
+    WHERE octet_length(item.value->>'identifierKey') NOT BETWEEN 1 AND 512
       OR item.value->>'companyId' !~
         '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
       OR NOT EXISTS (
@@ -645,7 +800,16 @@ BEGIN
         SELECT string_agg(key, ',' ORDER BY key COLLATE "C")
         FROM jsonb_object_keys(item.value) AS key
       ) IS DISTINCT FROM 'rootCompanyId,sourceCompanyId'
-      OR item.value->>'sourceCompanyId' !~
+      OR jsonb_typeof(item.value->'sourceCompanyId') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(item.value->'rootCompanyId') IS DISTINCT FROM 'string'
+  ) THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_INPUT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(mappings_input) AS item(value)
+    WHERE item.value->>'sourceCompanyId' !~
         '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
       OR item.value->>'rootCompanyId' !~
         '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -922,8 +1086,197 @@ $organization_identity_command$;
 REVOKE ALL ON FUNCTION
   public.resolve_organization_identity_for_raw_v1(text, text)
 FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION
+  public.resolve_organization_identity_for_raw_v1(text, text)
+FROM app_user;
 GRANT EXECUTE ON FUNCTION
   public.resolve_organization_identity_for_raw_v1(text, text)
 TO app_user;
+
+DO $organization_identity_final_catalog$
+DECLARE
+  expected record;
+  function_oid oid;
+  function_owner oid;
+  catalog_matches boolean;
+  acl_matches boolean;
+BEGIN
+  IF current_user IS DISTINCT FROM 'global'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM pg_roles AS r
+      WHERE r.rolname = 'global'
+        AND r.rolsuper
+        AND r.rolinherit
+        AND r.rolcreaterole
+        AND r.rolcreatedb
+        AND r.rolcanlogin
+        AND r.rolreplication
+        AND r.rolbypassrls
+    )
+    OR NOT EXISTS (
+      SELECT 1
+      FROM pg_roles AS r
+      WHERE r.rolname = 'app_user'
+        AND NOT r.rolsuper
+        AND r.rolinherit
+        AND NOT r.rolcreaterole
+        AND NOT r.rolcreatedb
+        AND r.rolcanlogin
+        AND NOT r.rolreplication
+        AND NOT r.rolbypassrls
+    )
+    OR EXISTS (
+      SELECT 1 FROM pg_auth_members AS membership
+      WHERE membership.roleid = 'global'::regrole
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM pg_default_acl AS defaults
+      CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+      WHERE defaults.defaclrole = 'global'::regrole
+        AND defaults.defaclobjtype = 'f'
+        AND acl.grantee <> 'global'::regrole::oid
+    )
+    OR to_regprocedure(
+      'public.apply_organization_identity_resolution_v1(jsonb)'
+    ) IS NOT NULL
+    OR (
+      SELECT count(*)
+      FROM pg_proc AS p
+      JOIN pg_namespace AS n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN (
+          'organization_identity_authority_from_raw_v1',
+          'organization_identity_blocker_from_raw_v1',
+          'organization_identity_canonical_suppression_value_v1',
+          'organization_identity_plan_from_snapshot_v1',
+          'organization_identity_acquire_advisory_until_v1',
+          'resolve_organization_identity_for_raw_v1'
+        )
+    ) IS DISTINCT FROM 6
+  THEN
+    RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  FOR expected IN
+    SELECT * FROM (VALUES
+      (
+        'organization_identity_authority_from_raw_v1',
+        'text, jsonb', 'jsonb', false, 'i'::"char",
+        false,
+        ARRAY['search_path=pg_catalog, public']::text[], false
+      ),
+      (
+        'organization_identity_blocker_from_raw_v1',
+        'jsonb', 'jsonb', false, 'i'::"char",
+        false,
+        ARRAY['search_path=pg_catalog, public']::text[], false
+      ),
+      (
+        'organization_identity_canonical_suppression_value_v1',
+        'text, text', 'text', false, 'i'::"char",
+        false,
+        ARRAY['search_path=pg_catalog, public']::text[], false
+      ),
+      (
+        'organization_identity_plan_from_snapshot_v1',
+        'jsonb', 'jsonb', false, 'i'::"char",
+        false,
+        ARRAY['search_path=pg_catalog, public']::text[], false
+      ),
+      (
+        'organization_identity_acquire_advisory_until_v1',
+        'bigint, timestamp with time zone', 'void', false, 'v'::"char",
+        false,
+        ARRAY['search_path=pg_catalog, public']::text[], false
+      ),
+      (
+        'resolve_organization_identity_for_raw_v1',
+        'text, text',
+        'TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)',
+        true, 'v'::"char",
+        true,
+        ARRAY[
+          'search_path=pg_catalog, public',
+          'lock_timeout=5s',
+          'statement_timeout=60s',
+          'row_security=off'
+        ]::text[],
+        true
+      )
+    ) AS contract(
+      function_name, identity_arguments, result_type, security_definer,
+      volatility, returns_set, function_config, app_user_execute
+    )
+  LOOP
+    SELECT
+      p.oid,
+      p.proowner,
+      language.lanname = 'plpgsql'
+        AND pg_get_userbyid(p.proowner) = 'global'
+        AND p.prosecdef = expected.security_definer
+        AND p.provolatile = expected.volatility
+        AND p.proretset = expected.returns_set
+        AND p.proparallel = 'u'
+        AND NOT p.proleakproof
+        AND NOT p.proisstrict
+        AND p.prokind = 'f'
+        AND p.proconfig IS NOT DISTINCT FROM expected.function_config
+        AND pg_get_function_result(p.oid) = expected.result_type
+        AND p.proacl IS NOT NULL
+    INTO function_oid, function_owner, catalog_matches
+    FROM pg_proc AS p
+    JOIN pg_namespace AS n ON n.oid = p.pronamespace
+    JOIN pg_language AS language ON language.oid = p.prolang
+    WHERE n.nspname = 'public'
+      AND p.proname = expected.function_name
+      AND oidvectortypes(p.proargtypes) = expected.identity_arguments;
+
+    IF NOT FOUND OR NOT coalesce(catalog_matches, false) THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT CASE
+      WHEN expected.app_user_execute THEN
+        count(*) = 2
+        AND bool_and(
+          acl.grantor = function_owner
+          AND acl.privilege_type = 'EXECUTE'
+          AND NOT acl.is_grantable
+          AND acl.grantee IN (
+            function_owner,
+            to_regrole('app_user')::oid
+          )
+        )
+        AND count(*) FILTER (
+          WHERE acl.grantee = function_owner
+        ) = 1
+        AND count(*) FILTER (
+          WHERE acl.grantee = to_regrole('app_user')::oid
+        ) = 1
+      ELSE
+        count(*) = 1
+        AND bool_and(
+          acl.grantee = function_owner
+          AND acl.grantor = function_owner
+          AND acl.privilege_type = 'EXECUTE'
+          AND NOT acl.is_grantable
+        )
+      END
+    INTO acl_matches
+    FROM pg_proc AS p
+    CROSS JOIN LATERAL aclexplode(p.proacl) AS acl
+    WHERE p.oid = function_oid;
+
+    IF NOT coalesce(acl_matches, false) THEN
+      RAISE EXCEPTION 'IDENTITY_RESOLUTION_CATALOG_RESIDUE'
+        USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+END
+$organization_identity_final_catalog$;
 
 COMMIT;

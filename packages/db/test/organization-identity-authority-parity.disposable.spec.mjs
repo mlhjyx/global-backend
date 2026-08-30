@@ -44,6 +44,21 @@ const catalogIdentity = Object.freeze({
   [signature.command]:
     "public|resolve_organization_identity_for_raw_v1|text, text",
 });
+const ownerOnlyAcl = "global:EXECUTE:false:global";
+const catalogContract = Object.freeze({
+  [signature.authority]:
+    `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.blocker]:
+    `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.suppression]:
+    `text|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.planner]:
+    `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.advisory]:
+    `void|plpgsql|global|false|v|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.command]:
+    "TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|true|v|u|true|false|false|f|search_path=pg_catalog, public,lock_timeout=5s,statement_timeout=60s,row_security=off|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
+});
 
 function docker(args, input = "") {
   const result = spawnSync("docker", args, {
@@ -310,6 +325,30 @@ const authorityErrorCases = Object.freeze([
     statement: `PERFORM public.organization_identity_authority_from_raw_v1('registry','{"externalId":"company-1","name":"Acme GmbH","domain":"acme.example","country":"DE","attributes":{"products":["pump"],"employee_band":"50-100"},"provenance":{"sourceUrl":"https://registry.example/companies/1","fetchedAt":"2026-08-25T12:00:00.000Z","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parserVersion":"registry/v1"},"identifier":{"scheme":"registry-id","value":"DE1234","key":"registry-id:DE:OTHER"}}'::jsonb);`,
     expectedError: "P0001|IDENTITY_IDENTIFIER_INVALID",
   },
+  {
+    name: "IPv4 literal cannot become domain authority",
+    signature: signature.authority,
+    statement: `PERFORM public.organization_identity_authority_from_raw_v1('directory','{"domain":"127.0.0.1"}'::jsonb);`,
+    expectedError: "P0001|IDENTITY_IDENTIFIER_INVALID",
+  },
+  {
+    name: "IPv6 literal cannot become domain authority",
+    signature: signature.authority,
+    statement: `PERFORM public.organization_identity_authority_from_raw_v1('directory','{"domain":"2001:db8::1"}'::jsonb);`,
+    expectedError: "P0001|IDENTITY_IDENTIFIER_INVALID",
+  },
+  {
+    name: "invalid leading-hyphen label cannot become domain authority",
+    signature: signature.authority,
+    statement: `PERFORM public.organization_identity_authority_from_raw_v1('directory','{"domain":"-invalid.example"}'::jsonb);`,
+    expectedError: "P0001|IDENTITY_IDENTIFIER_INVALID",
+  },
+  {
+    name: "overlong label cannot become domain authority",
+    signature: signature.authority,
+    statement: `PERFORM public.organization_identity_authority_from_raw_v1('directory',jsonb_build_object('domain',repeat('a',64)||'.example'));`,
+    expectedError: "P0001|IDENTITY_IDENTIFIER_INVALID",
+  },
 ]);
 
 const blockerCases = Object.freeze([
@@ -353,6 +392,42 @@ const blockerCases = Object.freeze([
     name: "provider identifier is excluded from the v2 fallback blocker",
     signature: signature.blocker,
     call: `SELECT (public.organization_identity_blocker_from_raw_v1('{"name":"Acme GmbH","country":"DE","identifier":{"scheme":"registry-id","value":"DE1234"}}'::jsonb)='{"blockerKey":"n:acme:de","matchRule":"name_country"}'::jsonb)::text;`,
+    expected: "true",
+  },
+  {
+    name: "empty country remains an admitted name-country blocker",
+    signature: signature.blocker,
+    call: `SELECT (public.organization_identity_blocker_from_raw_v1('{"name":"Acme GmbH","country":""}'::jsonb)='{"blockerKey":"n:acme:","matchRule":"name_country"}'::jsonb)::text;`,
+    expected: "true",
+  },
+  {
+    name: "one-byte country returns a fixed HOLD",
+    signature: signature.blocker,
+    call: `SELECT (public.organization_identity_blocker_from_raw_v1('{"name":"Acme GmbH","country":"D"}'::jsonb)='{"kind":"HOLD","reason":"IDENTITY_BLOCKER_INPUT_INVALID"}'::jsonb)::text;`,
+    expected: "true",
+  },
+  {
+    name: "punctuation country returns a fixed HOLD",
+    signature: signature.blocker,
+    call: `SELECT (public.organization_identity_blocker_from_raw_v1('{"name":"Acme GmbH","country":"D!"}'::jsonb)='{"kind":"HOLD","reason":"IDENTITY_BLOCKER_INPUT_INVALID"}'::jsonb)::text;`,
+    expected: "true",
+  },
+  {
+    name: "whitespace country returns a fixed HOLD",
+    signature: signature.blocker,
+    call: `SELECT (public.organization_identity_blocker_from_raw_v1('{"name":"Acme GmbH","country":" DE "}'::jsonb)='{"kind":"HOLD","reason":"IDENTITY_BLOCKER_INPUT_INVALID"}'::jsonb)::text;`,
+    expected: "true",
+  },
+  {
+    name: "JSON-null country returns a fixed HOLD",
+    signature: signature.blocker,
+    call: `SELECT (public.organization_identity_blocker_from_raw_v1('{"name":"Acme GmbH","country":null}'::jsonb)='{"kind":"HOLD","reason":"IDENTITY_BLOCKER_INPUT_INVALID"}'::jsonb)::text;`,
+    expected: "true",
+  },
+  {
+    name: "over-512-byte multibyte blocker key returns a fixed HOLD",
+    signature: signature.blocker,
+    call: `SELECT (public.organization_identity_blocker_from_raw_v1(jsonb_build_object('name',repeat('Ä',256),'country','DE'))='{"kind":"HOLD","reason":"IDENTITY_BLOCKER_INPUT_INVALID"}'::jsonb)::text;`,
     expected: "true",
   },
 ]);
@@ -504,6 +579,44 @@ const plannerErrorCases = Object.freeze([
   },
 ]);
 
+const plannerRequiredScalarBase =
+  '{"raw":{"rawRecordId":"11111111-1111-4111-8111-111111111111","providerKey":"registry","payloadHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ingestVersion":"raw-source/v1"},"resolverVersion":"organization-identity-resolver/v1","blocker":{"blockerKey":"d:acme.example","matchRule":"domain_exact","legacyCandidateCompanyId":null},"authorityIdentifiers":[{"providerKey":"registry","scheme":"registry-id","jurisdiction":"DE","normalizedValue":"DE1234","validatorVersion":"registry-id-v1","normalizerVersion":"organization-identity-authority/v1","key":"registry-id:DE:DE1234"}],"existingBindings":[{"identifierKey":"registry-id:DE:DE1234","companyId":"22222222-2222-4222-8222-222222222222"}],"rootMappings":[{"sourceCompanyId":"22222222-2222-4222-8222-222222222222","rootCompanyId":"44444444-4444-4444-8444-444444444444"}]}';
+
+const plannerRequiredScalarErrorCases = Object.freeze([
+  {
+    name: "empty blocker is rejected before nullable predicates",
+    expression: `jsonb_set('${plannerRequiredScalarBase}'::jsonb,'{blocker}','{}'::jsonb,false)`,
+  },
+  ...[
+    ["null resolver version", "{resolverVersion}"],
+    ["null Raw record ID", "{raw,rawRecordId}"],
+    ["null Raw provider", "{raw,providerKey}"],
+    ["null Raw payload hash", "{raw,payloadHash}"],
+    ["null Raw ingest version", "{raw,ingestVersion}"],
+    ["null blocker key", "{blocker,blockerKey}"],
+    ["null blocker match rule", "{blocker,matchRule}"],
+    ["null authority provider", "{authorityIdentifiers,0,providerKey}"],
+    ["null authority scheme", "{authorityIdentifiers,0,scheme}"],
+    ["null authority jurisdiction", "{authorityIdentifiers,0,jurisdiction}"],
+    ["null authority normalized value", "{authorityIdentifiers,0,normalizedValue}"],
+    ["null authority validator version", "{authorityIdentifiers,0,validatorVersion}"],
+    ["null authority normalizer version", "{authorityIdentifiers,0,normalizerVersion}"],
+    ["null authority key", "{authorityIdentifiers,0,key}"],
+    ["null binding identifier key", "{existingBindings,0,identifierKey}"],
+    ["null binding company ID", "{existingBindings,0,companyId}"],
+    ["null mapping source ID", "{rootMappings,0,sourceCompanyId}"],
+    ["null mapping root ID", "{rootMappings,0,rootCompanyId}"],
+  ].map(([name, path]) => ({
+    name: `${name} is rejected before nullable predicates`,
+    expression: `jsonb_set('${plannerRequiredScalarBase}'::jsonb,'${path}','null'::jsonb,false)`,
+  })),
+].map(({ name, expression }) => ({
+  name,
+  signature: signature.planner,
+  statement: `PERFORM public.organization_identity_plan_from_snapshot_v1(${expression});`,
+  expectedError: "P0001|IDENTITY_RESOLUTION_INPUT_INVALID",
+})));
+
 const advisoryCases = Object.freeze([
   {
     name: "uncontended advisory acquisition succeeds before its deadline",
@@ -606,6 +719,7 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
   describe("planner matrix", () => {
     for (const vector of plannerCases) valueCase(vector);
     for (const vector of plannerErrorCases) errorCase(vector);
+    for (const vector of plannerRequiredScalarErrorCases) errorCase(vector);
   });
 
   describe("advisory matrix", () => {
@@ -637,6 +751,127 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           "false|false",
         );
       }
+    });
+
+    it("binds the exact canonical-JSON predecessor catalog and definition", () => {
+      assert.equal(
+        sql(`SELECT
+          pg_get_function_result(p.oid)||'|'||
+          l.lanname||'|'||
+          pg_get_userbyid(p.proowner)||'|'||
+          p.prosecdef::text||'|'||p.provolatile::text||'|'||
+          p.proparallel::text||'|'||p.proretset::text||'|'||
+          p.proleakproof::text||'|'||p.proisstrict::text||'|'||
+          p.prokind::text||'|'||
+          coalesce(array_to_string(p.proconfig,','),'<NULL>')||'|'||
+          coalesce((
+            SELECT string_agg(
+              CASE WHEN acl.grantee=0 THEN 'PUBLIC'
+                ELSE pg_get_userbyid(acl.grantee) END||':'||
+              acl.privilege_type||':'||acl.is_grantable::text||':'||
+              pg_get_userbyid(acl.grantor),
+              ',' ORDER BY CASE WHEN acl.grantee=0 THEN 'PUBLIC'
+                ELSE pg_get_userbyid(acl.grantee) END COLLATE "C"
+            )
+            FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl
+          ),'')||'|'||
+          encode(public.digest(
+            convert_to(pg_get_functiondef(p.oid),'UTF8'),'sha256'
+          ),'hex')
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid=p.pronamespace
+        JOIN pg_language l ON l.oid=p.prolang
+        WHERE n.nspname='public'
+          AND p.proname='raw_source_canonical_json_v1'
+          AND oidvectortypes(p.proargtypes)='jsonb';`),
+        "text|plpgsql|global|false|i|u|false|false|true|f|search_path=pg_catalog, public|global:EXECUTE:false:global|e9e958c0823409435f4bc1aa093b9c6bd1851eb401b5f07278c224992317ca16",
+      );
+    });
+
+    it("binds every final helper and command to its complete catalog contract", () => {
+      assert.equal(
+        sql(`SELECT count(*)||'|'||
+          count(*) FILTER (WHERE oidvectortypes(p.proargtypes) IN (
+            'text, jsonb','jsonb','text, text',
+            'bigint, timestamp with time zone','text, text'
+          ))
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='public'
+          AND p.proname IN (
+            'organization_identity_authority_from_raw_v1',
+            'organization_identity_blocker_from_raw_v1',
+            'organization_identity_canonical_suppression_value_v1',
+            'organization_identity_plan_from_snapshot_v1',
+            'organization_identity_acquire_advisory_until_v1',
+            'resolve_organization_identity_for_raw_v1'
+          );`),
+        "6|6",
+      );
+      for (const helperSignature of Object.values(signature)) {
+        exactHelper("complete catalog matrix", helperSignature);
+        const [schema, functionName, argumentsText] =
+          catalogIdentity[helperSignature].split("|");
+        assert.equal(
+          sql(`SELECT
+            pg_get_function_result(p.oid)||'|'||
+            l.lanname||'|'||pg_get_userbyid(p.proowner)||'|'||
+            p.prosecdef::text||'|'||p.provolatile::text||'|'||
+            p.proparallel::text||'|'||p.proretset::text||'|'||
+            p.proleakproof::text||'|'||p.proisstrict::text||'|'||
+            p.prokind::text||'|'||
+            coalesce(array_to_string(p.proconfig,','),'<NULL>')||'|'||
+            coalesce((
+              SELECT string_agg(
+                CASE WHEN acl.grantee=0 THEN 'PUBLIC'
+                  ELSE pg_get_userbyid(acl.grantee) END||':'||
+                acl.privilege_type||':'||acl.is_grantable::text||':'||
+                pg_get_userbyid(acl.grantor),
+                ',' ORDER BY CASE WHEN acl.grantee=0 THEN 'PUBLIC'
+                  ELSE pg_get_userbyid(acl.grantee) END COLLATE "C"
+              )
+              FROM aclexplode(
+                coalesce(p.proacl,acldefault('f',p.proowner))
+              ) acl
+            ),'')
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid=p.pronamespace
+          JOIN pg_language l ON l.oid=p.prolang
+          WHERE n.nspname='${schema}'
+            AND p.proname='${functionName}'
+            AND oidvectortypes(p.proargtypes)='${argumentsText}';`),
+          catalogContract[helperSignature],
+        );
+      }
+    });
+
+    it("binds owner inheritance and default function ACL state", () => {
+      assert.equal(
+        sql(`SELECT rolname||'|'||rolsuper||'|'||rolinherit||'|'||
+          rolcreaterole||'|'||rolcreatedb||'|'||rolcanlogin||'|'||
+          rolreplication||'|'||rolbypassrls
+        FROM pg_roles
+        WHERE rolname IN ('app_user','global')
+        ORDER BY rolname COLLATE "C";
+        SELECT 'members='||count(*)
+        FROM pg_auth_members WHERE roleid='global'::regrole;
+        SELECT 'function_defaults='||coalesce(jsonb_agg(
+          jsonb_build_object(
+            'namespace',coalesce(n.nspname,'<GLOBAL>'),
+            'acl',d.defaclacl
+          ) ORDER BY d.oid
+        ),'[]'::jsonb)::text
+        FROM pg_default_acl d
+        LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace
+        WHERE d.defaclrole='global'::regrole
+          AND d.defaclobjtype='f';`),
+        [
+          "app_user|false|true|false|false|true|false|false",
+          "global|true|true|true|true|true|true|true",
+          "members=0",
+          "function_defaults=[]",
+        ].join("\n"),
+      );
     });
   });
 
