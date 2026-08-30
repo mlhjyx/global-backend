@@ -12,6 +12,7 @@ const ACCOUNT = "33000000-0000-4000-8000-000000000001";
 const OP = "43000000-0000-4000-8000-000000000001";
 const OP2 = "43000000-0000-4000-8000-000000000002";
 const CONTRACT = "c".repeat(64);
+const ATTEST_REQUEST = "75000000-0000-4000-8000-000000000001";
 let facts;
 let rootId;
 
@@ -54,6 +55,7 @@ function reset() {
     DELETE FROM tool_operation_subject; DELETE FROM governed_subject;
     DELETE FROM generic_operation_artifact_subject_tombstone_audit;
     DELETE FROM generic_operation_artifact_subject_tombstone;
+    DELETE FROM deletion_request WHERE workspace_id='${WS}';
     DELETE FROM execution_domain_ack; DELETE FROM tool_budget_operation;
     DELETE FROM tool_budget_account; DELETE FROM execution_budget_authority_revocation;
     DELETE FROM execution_budget_authority; DELETE FROM workspace WHERE id='${WS}';`);
@@ -486,6 +488,54 @@ describe("governed relation exact path lock ordering", () => {
       assert.match(result.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
       assert.equal(canonicalSnapshot(),afterDrift);
     } finally { await Promise.all([cleanup(graph,"roundb_attest_drift_graph"),cleanup(writer,"roundb_attest_drift")]); }
+  });
+
+  it("reports a governed Task3 fence committed during attest as tombstoned", async () => {
+    const path=seedPath(); const input={parentId:path.parent,relationKey:"roundb:attest-fence"};
+    psql(asApp(invocation(APPEND,input)));
+    psql(`INSERT INTO deletion_request(id,workspace_id,subject_type,subject_id,status,
+      requested_by,reason,created_at,updated_at) VALUES ('${ATTEST_REQUEST}','${WS}',
+      'company','${path.low}','RECEIVED','roundb-attest','erasure',now(),now());`);
+    const relationCount=psql(`SELECT count(*) FROM governed_subject_relation WHERE workspace_id='${WS}';`);
+    const fence=startConnection(`SET application_name='roundb_attest_task3_fence';
+      SET SESSION AUTHORIZATION app_user; BEGIN;
+      SELECT set_config('app.current_workspace_id','${WS}',true);
+      SELECT outcome FROM public.tombstone_workspace_governed_subject_v1(
+        '${WS}','${path.a}','${ATTEST_REQUEST}');
+      SELECT pg_backend_pid()::text||'|FENCE_READY';\n`,true);
+    let writer; try {
+      const ready=await fence.waitFor("FENCE_READY"); const pid=Number(ready.match(/(\d+)\|FENCE_READY/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_attest_task3_writer';${asApp(
+        invocation(ATTEST,input),true)}`);
+      await observeWait(pid,"roundb_attest_task3_writer",writer);
+      fence.write("COMMIT;\n"); fence.end(); const fenceResult=await fence.done;
+      const result=await writer.done; assert.equal(fenceResult.status,0,fenceResult.stderr);
+      assert.notEqual(result.status,0); assert.match(result.stderr,/GOVERNED_SUBJECT_TOMBSTONED/);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE workspace_id='${WS}';`),relationCount);
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone WHERE governed_subject_id='${path.a}';`),"1");
+      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone_audit
+        WHERE deletion_request_id='${ATTEST_REQUEST}';`),"1");
+    } finally { await Promise.all([cleanup(fence,"roundb_attest_task3_fence"),
+      cleanup(writer,"roundb_attest_task3_writer")]); }
+  });
+
+  it("reports an artifact fence committed during attest DSR wait as tombstoned", async () => {
+    const path=seedPath(); const input={parentId:path.parent,relationKey:"roundb:attest-artifact-fence"};
+    psql(asApp(invocation(APPEND,input))); const dsr=holder("roundb_attest_artifact_dsr",
+      `generic-operation-artifact-subject:${WS}:company:${path.low}`,"READY");
+    let writer; try {
+      const ready=await dsr.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      writer=startConnection(`SET application_name='roundb_attest_artifact_writer';${asApp(
+        invocation(ATTEST,input),true)}`);
+      await observeWait(pid,"roundb_attest_artifact_writer",writer);
+      psql(`INSERT INTO generic_operation_artifact_subject_tombstone(
+        workspace_id,subject_type,subject_id) VALUES ('${WS}','company','${path.low}');`);
+      const afterFence=canonicalSnapshot(); dsr.write("COMMIT;\n"); dsr.end();
+      const result=await writer.done; assert.notEqual(result.status,0);
+      assert.match(result.stderr,/GOVERNED_SUBJECT_TOMBSTONED/);
+      assert.equal(canonicalSnapshot(),afterFence);
+    } finally { await Promise.all([cleanup(dsr,"roundb_attest_artifact_dsr"),
+      cleanup(writer,"roundb_attest_artifact_writer")]); }
   });
 
   it("rejects nonpersonal ancestor drift for a pre-existing relation", async () => {
