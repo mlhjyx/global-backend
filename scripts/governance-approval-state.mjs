@@ -425,7 +425,7 @@ const reduceBoundApprovalDecisionState = (events, binding, now) => {
       state = {
         ...state,
         state: 'VERIFIED',
-        legalState: 'NO_BLOCKER_RECORDED',
+        legalState: state.decisionId === 'ADR-026' ? 'NO_BLOCKER_RECORDED' : 'PENDING',
         evidenceTrustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
         evidenceSlots: {
           product: 'VERIFIED',

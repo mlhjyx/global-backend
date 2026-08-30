@@ -394,6 +394,32 @@ test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED'
   );
 });
 
+test('ADR-027 acceptance preserves Legal PENDING with an unassigned Legal authority', async () => {
+  const { evidence, mergeAuthorization, policy } = await acceptanceEvidence();
+  const legalAuthority = evidence.task3.authority.roles.find(
+    ({ role }) => role === 'LEGAL-REVIEW',
+  );
+  legalAuthority.status = 'UNASSIGNED';
+  evidence.task3.candidate.legal_input.status = 'PENDING';
+  evidence.legal.status = 'PENDING';
+  evidence.legal.digest = digest(evidence.task3.candidate.legal_input);
+  policy.authorityRawSha256 = digest(evidence.task3.authority);
+  evidence.authority.rawSha256 = policy.authorityRawSha256;
+  refreshAcceptanceTransaction(evidence);
+
+  const verified = verifiedState(policy, mergeAuthorization);
+  assert.equal(verified.legalState, 'PENDING');
+  const validation = revalidateApprovalAtAcceptance(verified, evidence, NOW);
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+  assert.equal(validation.checkedAt, NOW.toISOString());
+  assert.match(validation.evidenceSha256, /^sha256:[0-9a-f]{64}$/);
+  const accepted = appendAcceptance(verified, evidence, policy, NOW);
+  assert.equal(accepted.state, 'ACCEPTED');
+  assert.equal(accepted.legalState, 'PENDING');
+  assert.equal(approvalStateModule.renderApprovalStatusReadModel(accepted).legalState, 'PENDING');
+});
+
 test('reviewer C1 counterexample cannot promote caller-declared receipt or validation booleans', async () => {
   const policy = approvalPolicy();
   const events = [
@@ -608,7 +634,7 @@ test('acceptance revalidation mutation matrix fails closed on every fresh-read r
     ['stale review', (v) => { v.reviews[0].submittedAt = '2026-08-29T08:00:00.000Z'; }, 'APPROVAL_REVIEW_STALE'],
     ['authority reassigned', (v) => { v.authority.reassigned = true; }, 'APPROVAL_ROLE_AUTHORITY_STALE'],
     ['authority revoked', (v) => { v.authority.revocationStatus = 'REVOKED'; }, 'APPROVAL_ROLE_AUTHORITY_STALE'],
-    ['expired legal', (v) => { v.legal.validUntil = '2026-08-30T08:00:00.000Z'; }, 'APPROVAL_LEGAL_INPUT_STALE'],
+    ['optional legal transaction drift', (v) => { v.legal.validUntil = '2026-08-30T08:00:00.000Z'; }, 'APPROVAL_TOCTOU_DETECTED'],
     ['free-form legal content', (v) => { v.legal.content = 'must never enter the acceptance boundary'; }, 'APPROVAL_ACCEPTANCE_FORBIDDEN_CONTENT'],
     ['ruleset drift', (v) => { v.ruleset.normalizedSha256 = 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; }, 'APPROVAL_RULESET_DRIFT'],
     ['ruleset bypass', (v) => { v.ruleset.bypassActors = [{ actorId: 1 }]; }, 'APPROVAL_RULESET_BYPASS_PRESENT'],

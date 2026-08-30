@@ -143,8 +143,16 @@ const rawReviewMatches = (review, raw, required) => (
   && (review.slot === 'CODEOWNER'
     || review.commandDigest === (raw.command?.command_sha256 ?? raw.review_command_sha256))
 );
-const authorityMatchesTask3 = (evidence, policy) => {
+const legalEvidenceRequired = (candidate) => (
+  candidate.decision?.adr === 'ADR-026'
+  || (
+    candidate.policy?.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
+    && candidate.policy?.dual_role_exception?.coapprover_role === 'LEGAL-REVIEW'
+  )
+);
+const authorityMatchesTask3 = (evidence, policy, candidate) => {
   const raw = evidence.task3.authority;
+  const legalRequired = legalEvidenceRequired(candidate);
   return evidence.authority.revision === raw.revision
     && evidence.authority.sha256 === raw.sha256
     && evidence.authority.rawSha256 === canonicalApprovalDigest(raw)
@@ -152,9 +160,18 @@ const authorityMatchesTask3 = (evidence, policy) => {
     && evidence.authority.sha256 === policy.authoritySha256
     && evidence.authority.rawSha256 === policy.authorityRawSha256
     && raw.roles?.length === 6
-    && raw.roles.every((role) => role.status === 'ASSIGNED'
-      && role.revocation_status === 'ACTIVE'
-      && role.superseded_by === null);
+    && new Set(raw.roles.map(({ role }) => role)).size === 6
+    && raw.roles.every((role) => {
+      if (role.role === 'LEGAL-REVIEW' && !legalRequired) {
+        return ['UNASSIGNED', 'ASSIGNED'].includes(role.status)
+          && (role.status === 'UNASSIGNED' || (
+            role.revocation_status === 'ACTIVE' && role.superseded_by === null
+          ));
+      }
+      return role.status === 'ASSIGNED'
+        && role.revocation_status === 'ACTIVE'
+        && role.superseded_by === null;
+    });
 };
 const machineMatchesTask3 = (check, raw, required, candidate) => (
   raw !== null
@@ -279,7 +296,7 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
     }
   }
 
-  if (!authorityMatchesTask3(evidence, policy)
+  if (!authorityMatchesTask3(evidence, policy, candidate)
     || evidence.authority.effectiveFrom !== policy.authorityEffectiveFrom
     || evidence.authority.effectiveUntil !== policy.authorityEffectiveUntil
     || Date.parse(evidence.authority.effectiveFrom) > now.getTime()
@@ -289,15 +306,24 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
     || evidence.authority.reassigned !== false) pushIssue(codes, 'APPROVAL_ROLE_AUTHORITY_STALE');
 
   const rawLegal = candidate.legal_input;
-  if (evidence.legal.status !== rawLegal?.status
-    || evidence.legal.scope !== policy.legalScope
+  if (legalEvidenceRequired(candidate)) {
+    if (evidence.legal.status !== rawLegal?.status
+      || evidence.legal.scope !== policy.legalScope
+      || evidence.legal.digest !== canonicalApprovalDigest(rawLegal)
+      || evidence.legal.digest !== policy.legalDigest
+      || evidence.legal.validFrom !== evidence.task3.authority.roles[4].effective_from
+      || evidence.legal.validUntil !== rawLegal?.valid_until
+      || Date.parse(evidence.legal.validFrom) > now.getTime()
+      || now.getTime() >= Date.parse(evidence.legal.validUntil)
+      || evidence.legal.revocationStatus !== 'ACTIVE') {
+      pushIssue(codes, 'APPROVAL_LEGAL_INPUT_STALE');
+    }
+  } else if (
+    evidence.legal.status !== rawLegal?.status
     || evidence.legal.digest !== canonicalApprovalDigest(rawLegal)
-    || evidence.legal.digest !== policy.legalDigest
-    || evidence.legal.validFrom !== evidence.task3.authority.roles[4].effective_from
-    || evidence.legal.validUntil !== rawLegal?.valid_until
-    || Date.parse(evidence.legal.validFrom) > now.getTime()
-    || now.getTime() >= Date.parse(evidence.legal.validUntil)
-    || evidence.legal.revocationStatus !== 'ACTIVE') pushIssue(codes, 'APPROVAL_LEGAL_INPUT_STALE');
+  ) {
+    pushIssue(codes, 'APPROVAL_LEGAL_INPUT_STALE');
+  }
 
   if (evidence.ruleset.normalizedSha256 !== policy.liveRulesetSha256
     || evidence.ruleset.normalizedSha256 !== candidate.ruleset?.normalized_sha256) {
