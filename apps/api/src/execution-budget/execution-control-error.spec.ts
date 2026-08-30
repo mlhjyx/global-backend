@@ -116,6 +116,70 @@ describe('isExecutionControlError', () => {
     expect(isExecutionControlError(control)).toBe(true);
   });
 
+  it('recognizes the bounded legacy Temporal 1.20.x Error/message encoding', () => {
+    const legacyApplicationFailure = ApplicationFailure.fromError(
+      new Error('EXECUTION_BUDGET_AUTHORITY_REVOKED'),
+    );
+    const legacyActivityFailure = new ActivityFailure(
+      'activity failed',
+      'mineDomain',
+      'activity-legacy',
+      'NON_RETRYABLE_FAILURE',
+      'worker-legacy',
+      legacyApplicationFailure,
+    );
+
+    expect(legacyApplicationFailure.type).toBe('Error');
+    expect(isExecutionControlError(legacyApplicationFailure)).toBe(true);
+    expect(isExecutionControlError(legacyActivityFailure)).toBe(true);
+    expect(
+      isExecutionControlError(
+        new ApplicationFailure(
+          'DOMAIN_ACK_RECEIPT_BINDING_MISMATCH',
+          '',
+          true,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not trust arbitrary Error messages or non-legacy Temporal types', () => {
+    expect(
+      isExecutionControlError(
+        new Error('EXECUTION_BUDGET_AUTHORITY_REVOKED'),
+      ),
+    ).toBe(false);
+    expect(
+      isExecutionControlError(
+        new ApplicationFailure(
+          'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+          'ProviderUnavailableError',
+          false,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it('never invokes a legacy Temporal message getter', () => {
+    let getterCalls = 0;
+    const failure = new ApplicationFailure(
+      'ordinary failure',
+      'Error',
+      false,
+    );
+    Object.defineProperty(failure, 'message', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        getterCalls += 1;
+        return 'EXECUTION_BUDGET_AUTHORITY_REVOKED';
+      },
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+    expect(getterCalls).toBe(0);
+  });
+
   it('recursively recognizes Temporal ActivityFailure cause/type/message fields', () => {
     const failure = {
       name: 'ActivityFailure',
