@@ -94,6 +94,7 @@ const approvalPolicy = () => ({
   decisionRawSha256: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
   decisionSemanticSha256: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
   sidecarRawSha256: 'sha256:8888888888888888888888888888888888888888888888888888888888888888',
+  proposalResultCommitSha: 'ffffffffffffffffffffffffffffffffffffffff',
   authorityRevision: 'approval-authorities/r1',
   authoritySha256: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
   authorityRawSha256: 'sha256:9999999999999999999999999999999999999999999999999999999999999999',
@@ -247,12 +248,11 @@ const acceptanceEvidence = async () => {
     receipt: {
       ...receiptSummary(), priorReceiptIds: [], revoked: false, superseded: false,
       lifecycleValidation: {
-        valid: true, issues: [], trustEligible: true,
-        externalCompletenessCapability: 'INDEPENDENT_EXTERNAL_READBACK',
+        valid: true, issues: [],
       },
     },
     proposalMain: {
-      proposalResultCommitSha: readback.resultCommitSha,
+      proposalResultCommitSha: policy.proposalResultCommitSha,
       currentMainSha: readback.currentMain.sha, resultReachableFromCurrentMain: true,
       approvedDecisionRawSha256: policy.decisionRawSha256,
       approvedDecisionSemanticSha256: policy.decisionSemanticSha256,
@@ -306,16 +306,23 @@ test('reducer exhaustively moves through every normative state without mutating 
     { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
     { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
     { type: 'RECEIPT_VERIFIED', headSha: policy.currentHeadSha, receipt: receiptSummary(), mergeAuthorization, observedAt: '2026-08-30T08:20:00.000Z' },
-    { type: 'RECEIPT_SUPERSEDED', predecessorReceiptId: receiptSummary().receiptId, successor, observedAt: '2026-08-30T08:21:00.000Z' },
+    {
+      type: 'RECEIPT_SUPERSEDED', predecessorReceiptId: receiptSummary().receiptId, successor,
+      validation: { valid: false, issues: [{ stable_code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN' }], trustEligible: false },
+      observedAt: '2026-08-30T08:21:00.000Z',
+    },
   ], policy, NOW);
   assert.equal(superseded.receipt.receiptId, successor.receiptId);
   assert.equal(superseded.receiptHistory[0].receiptId, receiptSummary().receiptId);
   assert.equal(superseded.receiptHistory[0].lifecycleState, 'SUPERSEDED');
   assert.equal(superseded.supersessionStatus, 'SUPERSEDED_WITH_CURRENT_SUCCESSOR');
+  assert.equal(superseded.state, 'STALE_AFTER_PUSH');
+  assert.equal(superseded.evidenceTrustState, 'EXTERNAL_UNVERIFIED');
+  assert.deepEqual(superseded.blockingCodes, ['APPROVAL_INDEPENDENCE_NOT_PROVEN']);
 
   const revoked = reduceApprovalDecisionState([
     ...verified.eventHistory,
-    { type: 'POLICY_REVOKED', observedAt: '2026-08-30T08:29:00.000Z' },
+    { type: 'RECEIPT_REVOKED', observedAt: '2026-08-30T08:29:00.000Z' },
   ], policy, NOW);
   assert.equal(revoked.state, 'REVOKED');
   assert.throws(
@@ -352,6 +359,7 @@ test('acceptance revalidation mutation matrix fails closed on every fresh-read r
     ['authority reassigned', (v) => { v.authority.reassigned = true; }, 'APPROVAL_ROLE_AUTHORITY_STALE'],
     ['authority revoked', (v) => { v.authority.revocationStatus = 'REVOKED'; }, 'APPROVAL_ROLE_AUTHORITY_STALE'],
     ['expired legal', (v) => { v.legal.validUntil = '2026-08-30T08:00:00.000Z'; }, 'APPROVAL_LEGAL_INPUT_STALE'],
+    ['free-form legal content', (v) => { v.legal.content = 'must never enter the acceptance boundary'; }, 'APPROVAL_ACCEPTANCE_FORBIDDEN_CONTENT'],
     ['ruleset drift', (v) => { v.ruleset.normalizedSha256 = 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; }, 'APPROVAL_RULESET_DRIFT'],
     ['ruleset bypass', (v) => { v.ruleset.bypassActors = [{ actorId: 1 }]; }, 'APPROVAL_RULESET_BYPASS_PRESENT'],
     ['diff outside allowlist', (v) => { v.acceptanceDiff.files.push({ path: 'apps/api/src/forbidden.ts', sha256: policy.decisionRawSha256 }); }, 'APPROVAL_ACCEPTANCE_DIFF_OUTSIDE_ALLOWLIST'],
@@ -361,10 +369,19 @@ test('acceptance revalidation mutation matrix fails closed on every fresh-read r
     ['receipt superseded', (v) => { v.receipt.superseded = true; }, 'APPROVAL_RECEIPT_SUPERSEDED'],
     ['pre post TOCTOU', (v) => { v.postRead.headSha = 'ffffffffffffffffffffffffffffffffffffffff'; }, 'APPROVAL_TOCTOU_DETECTED'],
     ['machine dynamic association', (v) => { v.machineChecks[0].runHeadAssociated = false; }, 'APPROVAL_CHECK_DYNAMIC_ASSOCIATION_MISMATCH'],
+    ['machine static identity', (v) => { v.machineChecks[0].appId += 1; }, 'APPROVAL_CHECK_IDENTITY_MISMATCH'],
     ['proposal result absent from main', (v) => { v.proposalMain.resultReachableFromCurrentMain = false; }, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED'],
+    ['decision bytes changed', (v) => { v.proposalMain.approvedDecisionRawSha256 = policy.sidecarRawSha256; }, 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'],
+    ['receipt expired', (v) => { v.receipt.validUntil = '2026-08-30T08:00:00.000Z'; }, 'APPROVAL_RECEIPT_EXPIRED'],
+    ['review evidence reused', (v) => { v.reviews[1].reviewId = v.reviews[0].reviewId; }, 'APPROVAL_EVIDENCE_SLOT_REUSE'],
+    ['acceptance readback stale', (v) => { v.readAt = '2026-08-29T08:00:00.000Z'; }, 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE'],
+    ['grant absent', (v) => { v.mergeAuthorization = null; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_REQUIRED'],
     ['consumption absent', (v) => { v.mergeAuthorization.consumption = null; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],
+    ['consumption digest changed', (v) => { v.mergeAuthorization.consumptionRawSha256 = policy.decisionRawSha256; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['ledger key stage-qualified', (v) => { v.mergeAuthorization.ledgerSnapshot.key.stage = 'ACCEPTANCE_MERGE'; }, 'APPROVAL_MERGE_AUTHORIZATION_NONCE_KEY_INVALID'],
-    ['synthetic lifecycle result', (v) => { v.receipt.lifecycleValidation.trustEligible = false; v.receipt.lifecycleValidation.externalCompletenessCapability = null; }, 'APPROVAL_INDEPENDENCE_NOT_PROVEN'],
+    ['ledger reservation binding changed', (v) => { v.mergeAuthorization.ledgerSnapshot.events[0].stage = 'PROPOSAL_MERGE'; }, 'APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT'],
+    ['ledger consumption absent', (v) => { v.mergeAuthorization.ledgerSnapshot.events.pop(); }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],
+    ['synthetic lifecycle result', (v) => { v.receipt.lifecycleValidation.valid = false; v.receipt.lifecycleValidation.issues.push({ stable_code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN' }); }, 'APPROVAL_INDEPENDENCE_NOT_PROVEN'],
   ];
   for (const [name, mutate, code] of cases) {
     const value = clone(evidence);
@@ -404,6 +421,7 @@ test('identical retry is readback-only and a successful reservation dispatches a
   const mergeRequester = {
     async requestMerge() {
       physicalRequests += 1;
+      assert.deepEqual(ledger.snapshot()[0].events.map(({ type }) => type), ['NONCE_RESERVED', 'MERGE_ACK_UNKNOWN']);
       return { acknowledgement: 'ACKNOWLEDGED' };
     },
   };
@@ -521,6 +539,10 @@ test('grant revocation before reservation denies; after reservation reconciles H
   assert.equal(result.outcome, 'HOLD');
   assert.equal(result.blockingCode, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
   assert.equal(ledger.snapshot()[0].events[0].type, 'NONCE_RESERVED');
+  const revision = ledger.snapshot()[0].committedRevision;
+  const repeated = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
+  assert.equal(repeated.outcome, 'HOLD');
+  assert.equal(ledger.snapshot()[0].committedRevision, revision);
 });
 
 test('restart snapshot preserves idempotency, consumption, and repository-wide nonce uniqueness', async () => {
@@ -552,6 +574,121 @@ test('missing, process-memory-only, workflow-artifact-only, and non-CAS ledgers 
   for (const ledger of invalid) {
     await assert.rejects(reserve(ledger, grant), /APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED/);
   }
+  const throwing = {
+    durabilityClass: 'SHARED_DURABLE_CAS',
+    read: async () => { throw new Error('do-not-reflect-ledger-detail'); },
+    compareAndSwap: async () => { throw new Error('do-not-reflect-ledger-detail'); },
+  };
+  await assert.rejects(reserve(throwing, grant), /APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED/);
+});
+
+test('reservation and execution boundary failures are stable, bounded, and pre-dispatch', async () => {
+  const grant = await readJson('valid-grant.json');
+  const validLedger = new SharedDurableCasLedgerHarness();
+  await assert.rejects(
+    reserveMergeAuthorizationNonce(grant, approvalPolicy().decisionRawSha256, requestFor(grant), 0, validLedger, NOW),
+    /APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH/,
+  );
+  const malformed = requestFor(grant);
+  delete malformed.requestId;
+  await assert.rejects(
+    reserveMergeAuthorizationNonce(grant, digest(grant), malformed, 0, validLedger, NOW),
+    /APPROVAL_MERGE_AUTHORIZATION_REQUEST_INVALID/,
+  );
+  await assert.rejects(
+    reserveMergeAuthorizationNonce(grant, digest(grant), requestFor(grant, { prNumber: 999 }), 0, validLedger, NOW),
+    /APPROVAL_MERGE_AUTHORIZATION_REQUEST_INVALID/,
+  );
+  await assert.rejects(
+    reserveMergeAuthorizationNonce(grant, digest(grant), requestFor(grant), 0, validLedger, new Date(grant.expires_at)),
+    /APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE/,
+  );
+
+  const corrupt = new SharedDurableCasLedgerHarness([{
+    key: { repositoryId: grant.repository.id, singleUseNonce: grant.single_use_nonce },
+    committedRevision: 1,
+    events: [{ type: 'UNBOUNDED_TEXT', ledgerRevision: 1 }],
+  }]);
+  await assert.rejects(reserve(corrupt, grant, requestFor(grant), 1), /APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED/);
+
+  const firstLedger = new SharedDurableCasLedgerHarness();
+  const fresh = await reserve(firstLedger, grant);
+  assert.equal((await executeReservedMerge(null, { requestMerge: async () => assert.fail('must not merge') }, firstLedger)).outcome, 'HOLD');
+  assert.equal((await executeReservedMerge(fresh.reservation, null, firstLedger)).outcome, 'HOLD');
+  const forged = clone(fresh.reservation);
+  forged.grantRawSha256 = approvalPolicy().decisionRawSha256;
+  assert.equal((await executeReservedMerge(forged, { requestMerge: async () => assert.fail('must not merge') }, firstLedger)).outcome, 'HOLD');
+
+  const contendedLedger = {
+    durabilityClass: 'SHARED_DURABLE_CAS',
+    read: (key) => firstLedger.read(key),
+    compareAndSwap: async () => ({ outcome: 'CONFLICT', currentRevision: 1 }),
+  };
+  assert.equal((await executeReservedMerge(fresh.reservation, { requestMerge: async () => assert.fail('must not merge') }, contendedLedger)).outcome, 'HOLD');
+
+  const unknownLedger = new SharedDurableCasLedgerHarness();
+  const unknown = await reserve(unknownLedger, grant);
+  assert.equal((await executeReservedMerge(unknown.reservation, { requestMerge: async () => ({ acknowledgement: 'MALFORMED' }) }, unknownLedger)).outcome, 'ACK_UNKNOWN');
+});
+
+test('reconciliation CAS races and corrupt consumption remain HOLD or fail closed', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+
+  const observedRaceLedger = new SharedDurableCasLedgerHarness();
+  const observedRace = await reserve(observedRaceLedger, grant);
+  const observedConflictPort = {
+    durabilityClass: 'SHARED_DURABLE_CAS',
+    read: (key) => observedRaceLedger.read(key),
+    compareAndSwap: async () => ({ outcome: 'CONFLICT', currentRevision: 1 }),
+  };
+  const observedResult = await reconcileMergeAuthorizationReservation(observedRace.reservation, readback, observedConflictPort, NOW);
+  assert.equal(observedResult.outcome, 'HOLD');
+  assert.equal(observedResult.blockingCode, 'APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT');
+
+  const consumptionRaceLedger = new SharedDurableCasLedgerHarness();
+  const consumptionRace = await reserve(consumptionRaceLedger, grant);
+  const consumptionConflictPort = {
+    durabilityClass: 'SHARED_DURABLE_CAS',
+    read: (key) => consumptionRaceLedger.read(key),
+    compareAndSwap: async (input) => (
+      input.event.type === 'CONSUMPTION_RECORDED'
+        ? { outcome: 'CONFLICT', currentRevision: 2 }
+        : consumptionRaceLedger.compareAndSwap(input)
+    ),
+  };
+  const consumptionResult = await reconcileMergeAuthorizationReservation(consumptionRace.reservation, readback, consumptionConflictPort, NOW);
+  assert.equal(consumptionResult.outcome, 'HOLD');
+
+  const completedLedger = new SharedDurableCasLedgerHarness();
+  const completed = await reserve(completedLedger, grant);
+  await reconcileMergeAuthorizationReservation(completed.reservation, readback, completedLedger, NOW);
+  const snapshot = completedLedger.snapshot();
+  snapshot[0].events.at(-1).consumptionRawSha256 = approvalPolicy().decisionRawSha256;
+  const corruptedRestart = new SharedDurableCasLedgerHarness(snapshot);
+  await assert.rejects(
+    reconcileMergeAuthorizationReservation(completed.reservation, readback, corruptedRestart, NOW),
+    /APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH/,
+  );
+
+  const verifierMismatch = clone(readback);
+  verifierMismatch.independentVerifier.repository.id = grant.repository.id;
+  const verifierLedger = new SharedDurableCasLedgerHarness();
+  const verifierReservation = await reserve(verifierLedger, grant);
+  const verifierResult = await reconcileMergeAuthorizationReservation(verifierReservation.reservation, verifierMismatch, verifierLedger, NOW);
+  assert.equal(verifierResult.blockingCode, 'APPROVAL_INDEPENDENCE_NOT_PROVEN');
+});
+
+test('reducer and acceptance validator reject malformed boundaries without transitions', async () => {
+  const policy = approvalPolicy();
+  assert.throws(() => reduceApprovalDecisionState(null, policy, NOW), /APPROVAL_STATE_INPUT_INVALID/);
+  assert.throws(
+    () => reduceApprovalDecisionState([{ type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha }], policy, NOW),
+    /APPROVAL_STATE_TRANSITION_INVALID/,
+  );
+  const result = revalidateApprovalAtAcceptance({ state: 'ACCEPTED' }, null, NOW);
+  assert.equal(result.valid, false);
+  assert.equal(result.issues[0].stable_code, 'APPROVAL_ACCEPTANCE_REVALIDATION_REQUIRED');
 });
 
 test('status read model is frozen, bounded, and redacts nonce and free-form facts', async () => {

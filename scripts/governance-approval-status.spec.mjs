@@ -79,6 +79,11 @@ test('CLI rejects unsupported decision IDs, formats, argument shapes, and missin
     assert.match(deps.stderr.join(''), /^APPROVAL_/);
     assert.equal(deps.stdout.length, 0);
   }
+  const failedRead = dependencies();
+  failedRead.value.loadDecisionState = async () => { throw new Error('do-not-reflect-adapter-detail'); };
+  assert.equal(await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], failedRead.value), 1);
+  assert.equal(failedRead.stderr.join(''), 'APPROVAL_STATUS_EVIDENCE_REQUIRED\n');
+  assert.equal(await runApprovalStatusCli(null, failedRead.value), 1);
 });
 
 test('CLI rejects free-form review or Legal content instead of silently redacting boundary input', async () => {
