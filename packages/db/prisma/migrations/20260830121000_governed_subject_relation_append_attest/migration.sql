@@ -400,6 +400,9 @@ BEGIN
   materialization_allowance:=CASE WHEN pre_snapshot->>'operationSubjectId' IS NULL THEN 1 ELSE 0 END
     + CASE WHEN pre_snapshot->>'childInternalId' IS NULL THEN 1 ELSE 0 END;
   IF post_snapshot IS DISTINCT FROM pre_snapshot THEN
+    IF post_snapshot->'governedFences' IS DISTINCT FROM pre_snapshot->'governedFences'
+      OR post_snapshot->'artifactFences' IS DISTINCT FROM pre_snapshot->'artifactFences' THEN
+      RAISE EXCEPTION 'GOVERNED_SUBJECT_TOMBSTONED' USING ERRCODE='P0001'; END IF;
     IF COALESCE((pre_snapshot->>'relationExists')::BOOLEAN,false)
       OR COALESCE((post_snapshot->>'relationExists')::BOOLEAN,false) IS NOT TRUE
       OR post_snapshot->'dsrKeys' IS DISTINCT FROM pre_snapshot->'dsrKeys'
