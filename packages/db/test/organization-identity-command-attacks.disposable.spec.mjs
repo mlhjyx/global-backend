@@ -2125,7 +2125,11 @@ async function runStatementScenario(scenario) {
       "statement caller process guard",
     );
     if (scenario.nativePreContext) {
-      assert.notEqual(result.code, 0, "native cancellation unexpectedly succeeded");
+      assert.notEqual(
+        result.code,
+        0,
+        "native cancellation unexpectedly succeeded",
+      );
       const diagnostics = parseVerboseDiagnostics(stderr, "57014");
       return {
         elapsedMs: Date.now() - startedAt,
@@ -2480,9 +2484,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       companyFull(COMPANY_C_SUPPRESSED),
     ],
     links: [fixtureLinkFullValue(legacyIdentifierLink, 0)],
-    mappings: [
-      mappingFullValue(mapping(COMPANY_A, COMPANY_C), 0),
-    ],
+    mappings: [mappingFullValue(mapping(COMPANY_A, COMPANY_C), 0)],
   });
   const v2ReplayFullPost = fullState({
     raws: [rawFull(RAW_CREATE)],
@@ -2544,11 +2546,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       name: "legacy identifier fallback rejects an A to B to C mapping chain",
       fixture: {
         raws: [RAW_LEGACY_IDENTIFIER],
-        companies: [
-          COMPANY_LEGACY_IDENTIFIER,
-          COMPANY_C_ROOT,
-          COMPANY_D_ROOT,
-        ],
+        companies: [COMPANY_LEGACY_IDENTIFIER, COMPANY_C_ROOT, COMPANY_D_ROOT],
         links: [legacyIdentifierLink],
         mappings: [
           mapping(COMPANY_A, COMPANY_C),
@@ -2558,11 +2556,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       },
       expectedPre: state({
         raws: [rawView(RAW_LEGACY_IDENTIFIER)],
-        companies: [
-          COMPANY_LEGACY_IDENTIFIER,
-          COMPANY_C_ROOT,
-          COMPANY_D_ROOT,
-        ],
+        companies: [COMPANY_LEGACY_IDENTIFIER, COMPANY_C_ROOT, COMPANY_D_ROOT],
         links: [legacyIdentifierLink],
         mappings: [
           mapping(COMPANY_A, COMPANY_C),
@@ -2572,11 +2566,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
       expectedPost: state({
         raws: [rawView(RAW_LEGACY_IDENTIFIER)],
-        companies: [
-          COMPANY_LEGACY_IDENTIFIER,
-          COMPANY_C_ROOT,
-          COMPANY_D_ROOT,
-        ],
+        companies: [COMPANY_LEGACY_IDENTIFIER, COMPANY_C_ROOT, COMPANY_D_ROOT],
         links: [legacyIdentifierLink],
         mappings: [
           mapping(COMPANY_A, COMPANY_C),

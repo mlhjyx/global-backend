@@ -156,26 +156,14 @@ describe("Organization Identity resolver command migration", () => {
     assert.match(command.header, /set row_security = off/u);
     assert.doesNotMatch(command.header, /set lock_timeout/u);
     assert.doesNotMatch(command.header, /set statement_timeout/u);
-    assert.match(
-      sql,
-      /current_setting\(\s*'lock_timeout',\s*true\s*\)/u,
-    );
-    assert.match(
-      sql,
-      /current_setting\(\s*'statement_timeout',\s*true\s*\)/u,
-    );
+    assert.match(sql, /current_setting\(\s*'lock_timeout',\s*true\s*\)/u);
+    assert.match(sql, /current_setting\(\s*'statement_timeout',\s*true\s*\)/u);
     assert.match(sql, /lock_timeout_seconds\s+NOT BETWEEN 0\.001 AND 5/u);
-    assert.match(
-      sql,
-      /statement_timeout_seconds\s+NOT BETWEEN 0\.001 AND 60/u,
-    );
+    assert.match(sql, /statement_timeout_seconds\s+NOT BETWEEN 0\.001 AND 60/u);
     assert.match(sql, /EXCEPTION WHEN query_canceled THEN/u);
     assert.match(sql, /WHEN assert_failure THEN/u);
     assert.equal(
-      occurrences(
-        sql,
-        /clock_timestamp\(\)\s*>=\s*statement_deadline/gu,
-      ),
+      occurrences(sql, /clock_timestamp\(\)\s*>=\s*statement_deadline/gu),
       1,
     );
     assert.match(

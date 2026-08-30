@@ -247,13 +247,13 @@ The rejected local checksums `7e101a1d...`, `8c5d07dc...`, `0c716f1d...`, and `f
 
 ### Deployment invariants
 
-| Point | Database | Code | Legacy INSERT | Validity |
-|---|---|---|---|---|
-| D0 | predecessor | old | available | current path |
-| D1 | Artifact A | old | available | DB expanded; old code safe |
-| D2 | Artifact A | mixed old/new | available | transition only; no final authority claim |
-| D3 | Artifact A | all Artifact B, old workers drained | temporarily available | ready for contract |
-| D4 | Artifact C | Artifact B or newer | revoked | final authority boundary |
+| Point | Database    | Code                                | Legacy INSERT         | Validity                                  |
+| ----- | ----------- | ----------------------------------- | --------------------- | ----------------------------------------- |
+| D0    | predecessor | old                                 | available             | current path                              |
+| D1    | Artifact A  | old                                 | available             | DB expanded; old code safe                |
+| D2    | Artifact A  | mixed old/new                       | available             | transition only; no final authority claim |
+| D3    | Artifact A  | all Artifact B, old workers drained | temporarily available | ready for contract                        |
+| D4    | Artifact C  | Artifact B or newer                 | revoked               | final authority boundary                  |
 
 Artifact C may not be merged/applied in the same deployment unit that first introduces Artifact B. There is no valid point where old code runs after revoke or new code runs before command readiness.
 

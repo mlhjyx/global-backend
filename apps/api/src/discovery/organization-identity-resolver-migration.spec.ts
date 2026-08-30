@@ -79,7 +79,10 @@ function publicFunctionDefinitions(sql: string): PublicFunctionDefinition[] {
   return definitions;
 }
 
-function functionGrantees(sql: string, definition: PublicFunctionDefinition): string[][] {
+function functionGrantees(
+  sql: string,
+  definition: PublicFunctionDefinition,
+): string[][] {
   const grants: string[][] = [];
   const grantPattern =
     /^\s*GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s+TO\s+([^;]+);/gimu;
@@ -94,7 +97,10 @@ function functionGrantees(sql: string, definition: PublicFunctionDefinition): st
   return grants;
 }
 
-function functionRevokes(sql: string, definition: PublicFunctionDefinition): string[][] {
+function functionRevokes(
+  sql: string,
+  definition: PublicFunctionDefinition,
+): string[][] {
   const revokes: string[][] = [];
   const revokePattern =
     /^\s*REVOKE\s+ALL\s+ON\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\(([^)]*)\)\s+FROM\s+([^;]+);/gimu;
@@ -147,9 +153,7 @@ describe("organization identity resolver command migration", () => {
     expect(command.header).toContain("set row_security = off");
     expect(command.header).not.toContain("set lock_timeout");
     expect(command.header).not.toContain("set statement_timeout");
-    expect(sql).toMatch(
-      /current_setting\(\s*'lock_timeout',\s*true\s*\)/u,
-    );
+    expect(sql).toMatch(/current_setting\(\s*'lock_timeout',\s*true\s*\)/u);
     expect(sql).toMatch(
       /current_setting\(\s*'statement_timeout',\s*true\s*\)/u,
     );
@@ -178,7 +182,9 @@ describe("organization identity resolver command migration", () => {
         /organization_identity_resolve_for_raw_worker_v1/gu,
       ),
     ).toHaveLength(1);
-    expect(command.definition).toMatch(/EXECUTE[\s\S]*USING[\s\S]*v_workspace_id/u);
+    expect(command.definition).toMatch(
+      /EXECUTE[\s\S]*USING[\s\S]*v_workspace_id/u,
+    );
     const workers = definitions.filter(
       (definition) =>
         definition.name === "organization_identity_resolve_for_raw_worker_v1" &&
@@ -198,7 +204,9 @@ describe("organization identity resolver command migration", () => {
     );
     for (const definition of definitions) {
       if (definition === command) continue;
-      expect(functionRevokes(sql, definition)).toEqual([["public", "app_user"]]);
+      expect(functionRevokes(sql, definition)).toEqual([
+        ["public", "app_user"],
+      ]);
       expect(functionGrantees(sql, definition)).toEqual([]);
     }
     expect(sql).not.toMatch(

@@ -8,7 +8,10 @@ import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs"
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
-const currentSchemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
+const currentSchemaPath = resolve(
+  repositoryRoot,
+  "packages/db/prisma/schema.prisma",
+);
 const currentMigrationPath = resolve(
   repositoryRoot,
   "packages/db/prisma/migrations/20260830090000_organization_identity_v2_resolver_command/migration.sql",
@@ -40,8 +43,7 @@ const signature = Object.freeze({
   planner: "public.organization_identity_plan_from_snapshot_v1(jsonb)",
   advisory:
     "public.organization_identity_acquire_advisory_until_v1(bigint,timestamptz)",
-  worker:
-    "public.organization_identity_resolve_for_raw_worker_v1(text,text)",
+  worker: "public.organization_identity_resolve_for_raw_worker_v1(text,text)",
   command: "public.resolve_organization_identity_for_raw_v1(text,text)",
 });
 const catalogIdentity = Object.freeze({
@@ -61,18 +63,12 @@ const catalogIdentity = Object.freeze({
 });
 const ownerOnlyAcl = "global:EXECUTE:false:global";
 const catalogContract = Object.freeze({
-  [signature.authority]:
-    `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
-  [signature.blocker]:
-    `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
-  [signature.suppression]:
-    `text|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
-  [signature.planner]:
-    `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
-  [signature.advisory]:
-    `void|plpgsql|global|false|v|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
-  [signature.worker]:
-    `TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|false|v|u|true|false|false|f|search_path=pg_catalog, public,row_security=off|${ownerOnlyAcl}`,
+  [signature.authority]: `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.blocker]: `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.suppression]: `text|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.planner]: `jsonb|plpgsql|global|false|i|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.advisory]: `void|plpgsql|global|false|v|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
+  [signature.worker]: `TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|false|v|u|true|false|false|f|search_path=pg_catalog, public,row_security=off|${ownerOnlyAcl}`,
   [signature.command]:
     "TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|true|v|u|true|false|false|f|search_path=pg_catalog, public,row_security=off|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
 });
@@ -136,7 +132,9 @@ function psql(statement) {
 
 function psqlDatabase(database, statement) {
   assert.ok(
-    database === "global" || database === "postgres" || admissionDatabaseSet.has(database),
+    database === "global" ||
+      database === "postgres" ||
+      admissionDatabaseSet.has(database),
     `database outside Task A3 admission scope: ${database}`,
   );
   return spawnSync(
@@ -358,8 +356,15 @@ function assertAdmissionSuccess(database) {
 }
 
 function assertAdmissionFailure(database) {
-  const result = psqlDatabase(database, readFileSync(currentMigrationPath, "utf8"));
-  assert.notEqual(result.status, 0, "migration admission unexpectedly succeeded");
+  const result = psqlDatabase(
+    database,
+    readFileSync(currentMigrationPath, "utf8"),
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "migration admission unexpectedly succeeded",
+  );
   assert.match(result.stderr, /IDENTITY_RESOLUTION_CATALOG_RESIDUE/u);
   assert.equal(
     sqlDatabase(
@@ -875,40 +880,51 @@ const plannerErrorCases = Object.freeze([
 const plannerRequiredScalarBase =
   '{"raw":{"rawRecordId":"11111111-1111-4111-8111-111111111111","providerKey":"registry","payloadHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ingestVersion":"raw-source/v1"},"resolverVersion":"organization-identity-resolver/v1","blocker":{"blockerKey":"d:acme.example","matchRule":"domain_exact","legacyCandidateCompanyId":null},"authorityIdentifiers":[{"providerKey":"registry","scheme":"registry-id","jurisdiction":"DE","normalizedValue":"DE1234","validatorVersion":"registry-id-v1","normalizerVersion":"organization-identity-authority/v1","key":"registry-id:DE:DE1234"}],"existingBindings":[{"identifierKey":"registry-id:DE:DE1234","companyId":"22222222-2222-4222-8222-222222222222"}],"rootMappings":[{"sourceCompanyId":"22222222-2222-4222-8222-222222222222","rootCompanyId":"44444444-4444-4444-8444-444444444444"}]}';
 
-const plannerRequiredScalarErrorCases = Object.freeze([
-  {
-    name: "empty blocker is rejected before nullable predicates",
-    expression: `jsonb_set('${plannerRequiredScalarBase}'::jsonb,'{blocker}','{}'::jsonb,false)`,
-  },
-  ...[
-    ["null resolver version", "{resolverVersion}"],
-    ["null Raw record ID", "{raw,rawRecordId}"],
-    ["null Raw provider", "{raw,providerKey}"],
-    ["null Raw payload hash", "{raw,payloadHash}"],
-    ["null Raw ingest version", "{raw,ingestVersion}"],
-    ["null blocker key", "{blocker,blockerKey}"],
-    ["null blocker match rule", "{blocker,matchRule}"],
-    ["null authority provider", "{authorityIdentifiers,0,providerKey}"],
-    ["null authority scheme", "{authorityIdentifiers,0,scheme}"],
-    ["null authority jurisdiction", "{authorityIdentifiers,0,jurisdiction}"],
-    ["null authority normalized value", "{authorityIdentifiers,0,normalizedValue}"],
-    ["null authority validator version", "{authorityIdentifiers,0,validatorVersion}"],
-    ["null authority normalizer version", "{authorityIdentifiers,0,normalizerVersion}"],
-    ["null authority key", "{authorityIdentifiers,0,key}"],
-    ["null binding identifier key", "{existingBindings,0,identifierKey}"],
-    ["null binding company ID", "{existingBindings,0,companyId}"],
-    ["null mapping source ID", "{rootMappings,0,sourceCompanyId}"],
-    ["null mapping root ID", "{rootMappings,0,rootCompanyId}"],
-  ].map(([name, path]) => ({
-    name: `${name} is rejected before nullable predicates`,
-    expression: `jsonb_set('${plannerRequiredScalarBase}'::jsonb,'${path}','null'::jsonb,false)`,
+const plannerRequiredScalarErrorCases = Object.freeze(
+  [
+    {
+      name: "empty blocker is rejected before nullable predicates",
+      expression: `jsonb_set('${plannerRequiredScalarBase}'::jsonb,'{blocker}','{}'::jsonb,false)`,
+    },
+    ...[
+      ["null resolver version", "{resolverVersion}"],
+      ["null Raw record ID", "{raw,rawRecordId}"],
+      ["null Raw provider", "{raw,providerKey}"],
+      ["null Raw payload hash", "{raw,payloadHash}"],
+      ["null Raw ingest version", "{raw,ingestVersion}"],
+      ["null blocker key", "{blocker,blockerKey}"],
+      ["null blocker match rule", "{blocker,matchRule}"],
+      ["null authority provider", "{authorityIdentifiers,0,providerKey}"],
+      ["null authority scheme", "{authorityIdentifiers,0,scheme}"],
+      ["null authority jurisdiction", "{authorityIdentifiers,0,jurisdiction}"],
+      [
+        "null authority normalized value",
+        "{authorityIdentifiers,0,normalizedValue}",
+      ],
+      [
+        "null authority validator version",
+        "{authorityIdentifiers,0,validatorVersion}",
+      ],
+      [
+        "null authority normalizer version",
+        "{authorityIdentifiers,0,normalizerVersion}",
+      ],
+      ["null authority key", "{authorityIdentifiers,0,key}"],
+      ["null binding identifier key", "{existingBindings,0,identifierKey}"],
+      ["null binding company ID", "{existingBindings,0,companyId}"],
+      ["null mapping source ID", "{rootMappings,0,sourceCompanyId}"],
+      ["null mapping root ID", "{rootMappings,0,rootCompanyId}"],
+    ].map(([name, path]) => ({
+      name: `${name} is rejected before nullable predicates`,
+      expression: `jsonb_set('${plannerRequiredScalarBase}'::jsonb,'${path}','null'::jsonb,false)`,
+    })),
+  ].map(({ name, expression }) => ({
+    name,
+    signature: signature.planner,
+    statement: `PERFORM public.organization_identity_plan_from_snapshot_v1(${expression});`,
+    expectedError: "P0001|IDENTITY_RESOLUTION_INPUT_INVALID",
   })),
-].map(({ name, expression }) => ({
-  name,
-  signature: signature.planner,
-  statement: `PERFORM public.organization_identity_plan_from_snapshot_v1(${expression});`,
-  expectedError: "P0001|IDENTITY_RESOLUTION_INPUT_INVALID",
-})));
+);
 
 const advisoryCases = Object.freeze([
   {
