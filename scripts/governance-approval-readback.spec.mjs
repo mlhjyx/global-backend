@@ -24,6 +24,9 @@ const WORKFLOW_SHA = '5'.repeat(40);
 const SIGNER_SHA = '6'.repeat(40);
 const NOW = '2026-08-30T12:00:00.000Z';
 const REPOSITORY = Object.freeze({ id: 1291151138, full_name: 'mlhjyx/global-backend' });
+const MUTATION_MANIFEST = JSON.parse(
+  await readFile(new URL('./fixtures/approval-readback/mutation-manifest.json', import.meta.url), 'utf8'),
+);
 
 const clone = (value) => structuredClone(value);
 
@@ -654,8 +657,12 @@ test('revocation and supersession validation returns append-only bound state fac
   );
 });
 
-test('mutation inventory is unique and every declared mutation ran exactly once', () => {
-  assert.equal(mutationRuns.size, 77);
+test('base mutation inventory exactly covers its external requirement manifest', () => {
+  const expected = MUTATION_MANIFEST.requirements
+    .filter(({ spec_file: specFile }) => specFile === 'scripts/governance-approval-readback.spec.mjs')
+    .flatMap(({ mutation_ids: mutationIds }) => mutationIds)
+    .sort();
+  assert.deepEqual([...mutationRuns.keys()].sort(), expected);
   assert.ok([...mutationRuns.values()].every((count) => count === 1));
 });
 
