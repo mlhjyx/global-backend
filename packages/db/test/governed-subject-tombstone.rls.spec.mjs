@@ -44,8 +44,18 @@ function appCall(workspaceId, subjectId, requestId) {
   return psql(asApp(call(workspaceId, subjectId, requestId), workspaceId));
 }
 
+function deletionSnapshot() {
+  return psql(`SELECT COALESCE(jsonb_agg(to_jsonb(request) ORDER BY request.id),'[]')::text
+    FROM deletion_request request WHERE request.id IN
+      ('${REQUEST_A}','${REQUEST_A2}','${REQUEST_B}','${REQUEST_DEEP}');`);
+}
+
+function task3Snapshot() {
+  return `${canonicalSnapshot()}\n${deletionSnapshot()}`;
+}
+
 function capture(workspaceId, subjectId, requestId, code, callerWorkspace = workspaceId) {
-  const before = canonicalSnapshot();
+  const before = task3Snapshot();
   const result = psql(asApp(`CREATE TEMP TABLE task3_error(state text,message text) ON COMMIT DROP;
     DO $capture$ DECLARE s text; m text; BEGIN BEGIN
       PERFORM * FROM public.${TOMBSTONE}('${workspaceId}'::uuid,'${subjectId}'::uuid,'${requestId}'::uuid);
@@ -56,7 +66,7 @@ function capture(workspaceId, subjectId, requestId, code, callerWorkspace = work
   assert.equal(result, `P0001|${code}`);
   assert.ok(result.length <= 96);
   assert.doesNotMatch(result, /email|phone|token|prompt|response|credential/i);
-  assert.equal(canonicalSnapshot(), before);
+  assert.equal(task3Snapshot(), before);
 }
 
 function seed() {
@@ -150,33 +160,51 @@ describe("governed subject Task 3 tombstone database contract", () => {
   });
 
   it("accepts every live/completed deletion status and rejects FAILED or missing requests", () => {
-    psql(`UPDATE deletion_request SET status='FAILED' WHERE id='${REQUEST_A2}';`);
     const statuses = ["RECEIVED", "FROZEN", "ERASING", "COMPLETED"];
     for (const [index, status] of statuses.entries()) {
+      if (index > 0) {
+        cleanup();
+        seed();
+      }
+      psql(`UPDATE deletion_request SET status='FAILED' WHERE id='${REQUEST_A2}';`);
       psql(`UPDATE deletion_request SET status='${status}',
         completed_at=CASE WHEN '${status}'='COMPLETED' THEN now() ELSE NULL END
         WHERE id='${REQUEST_A}';`);
+      const requestsBefore = deletionSnapshot();
       const result = appCall(WS_A, personalA[2], REQUEST_A).split("|");
-      assert.equal(result[3], index === 0 ? "FENCE_CREATED" : "REPLAYED");
+      assert.equal(result[3], "FENCE_CREATED");
+      assert.equal(deletionSnapshot(), requestsBefore);
+      const replay = appCall(WS_A, personalA[2], REQUEST_A).split("|");
+      assert.equal(replay[3], "REPLAYED");
+      assert.equal(deletionSnapshot(), requestsBefore);
     }
+    psql(`UPDATE deletion_request SET status='FAILED',completed_at=NULL WHERE id='${REQUEST_A}';`);
+    capture(WS_A, personalA[2], REQUEST_A, "GOVERNED_SUBJECT_INVALID");
+    cleanup();
+    seed();
+    psql(`UPDATE deletion_request SET status='FAILED' WHERE id='${REQUEST_A2}';`);
     capture(WS_A, personalA2[2], REQUEST_A2, "GOVERNED_SUBJECT_INVALID");
     capture(WS_A, personalA2[2], REQUEST_MISSING, "GOVERNED_SUBJECT_INVALID");
   });
 
   it("locks the three replay outcomes and keeps the first fence time immutable", () => {
+    const requestsBefore = deletionSnapshot();
     const created = appCall(WS_A, personalA[2], REQUEST_A).split("|");
     assert.equal(created[0], personalA[2]);
     assert.equal(created[2], REQUEST_A);
     assert.equal(created[3], "FENCE_CREATED");
+    assert.equal(deletionSnapshot(), requestsBefore);
     const firstTime = created[1];
     const replay = appCall(WS_A, personalA[2], REQUEST_A).split("|");
     assert.equal(replay[3], "REPLAYED");
     assert.equal(replay[2], REQUEST_A);
     assert.equal(replay[1], firstTime);
+    assert.equal(deletionSnapshot(), requestsBefore);
     const added = appCall(WS_A, personalA[2], REQUEST_A2).split("|");
     assert.equal(added[3], "AUDIT_APPENDED_WITH_EXISTING_FENCE");
     assert.equal(added[2], REQUEST_A2);
     assert.equal(added[1], firstTime);
+    assert.equal(deletionSnapshot(), requestsBefore);
     assert.equal(psql(`SELECT count(*)||':'||count(DISTINCT tombstoned_at)
       FROM governed_subject_tombstone_audit WHERE governed_subject_id='${personalA[2]}';`), "2:1");
     assert.equal(psql(`SELECT fence.governed_subject_id||'|'||fence.tombstoned_at||'|'||
