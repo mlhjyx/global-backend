@@ -68,7 +68,7 @@ const catalogContract = Object.freeze({
   [signature.advisory]:
     `void|plpgsql|global|false|v|u|false|false|false|f|search_path=pg_catalog, public|${ownerOnlyAcl}`,
   [signature.command]:
-    "TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|true|v|u|true|false|false|f|search_path=pg_catalog, public,lock_timeout=5s,statement_timeout=60s,row_security=off|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
+    "TABLE(outcome_kind text, raw_record_id uuid, company_id uuid, conflict_id uuid, match_rule text, input_hash text, conflict_fingerprint text, replayed boolean, company_created boolean, identifier_count integer, party_count integer)|plpgsql|global|true|v|u|true|false|false|f|search_path=pg_catalog, public,row_security=off|app_user:EXECUTE:false:global,global:EXECUTE:false:global",
 });
 const admissionDatabases = Object.freeze([
   "task_a3_fix3_unrelated_default_positive",
@@ -1528,6 +1528,8 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
           VALUES ('71000000-0000-4000-8000-000000000001','73000000-0000-4000-8000-000000000001','registry-id','DE','DE1234','registry','72000000-0000-4000-8000-000000000001',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000001","providerKey":"registry"}'::jsonb,'ACTIVE');
           SET SESSION AUTHORIZATION app_user;
+          SET LOCAL lock_timeout = '5s';
+          SET LOCAL statement_timeout = '60s';
           SET LOCAL app.current_workspace_id = '71000000-0000-4000-8000-000000000001';
           SELECT to_jsonb(result)::text AS command_result
           FROM public.resolve_organization_identity_for_raw_v1('71000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001') AS result
@@ -1659,6 +1661,8 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
           VALUES ('71000000-0000-4000-8000-000000000002','73000000-0000-4000-8000-000000000002','domain','GLOBAL','a2-secondary.example','directory','72000000-0000-4000-8000-000000000002',1,'organization-identity-authority/v1','domain-v1','{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000002","providerKey":"directory"}'::jsonb,'ACTIVE');
           SET SESSION AUTHORIZATION app_user;
+          SET LOCAL lock_timeout = '5s';
+          SET LOCAL statement_timeout = '60s';
           SET LOCAL app.current_workspace_id = '71000000-0000-4000-8000-000000000002';
           SELECT to_jsonb(result)::text AS command_result
           FROM public.resolve_organization_identity_for_raw_v1('71000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002') AS result
@@ -1780,6 +1784,8 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
         "P0001|IDENTITY_RESOLUTION_INPUT_INVALID",
         `BEGIN;
          SET SESSION AUTHORIZATION app_user;
+         SET LOCAL lock_timeout = '5s';
+         SET LOCAL statement_timeout = '60s';
          SET LOCAL app.current_workspace_id = '71000000-0000-4000-8000-000000000001';`,
         `RESET SESSION AUTHORIZATION;
          ROLLBACK;`,

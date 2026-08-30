@@ -257,7 +257,7 @@ function ensurePrerequisite() {
       "organization_identity_blocker_from_raw_v1|p_raw jsonb|global|false|search_path=pg_catalog, public|false|false",
       "organization_identity_canonical_suppression_value_v1|p_type text, p_value text|global|false|search_path=pg_catalog, public|false|false",
       "organization_identity_plan_from_snapshot_v1|p_snapshot jsonb|global|false|search_path=pg_catalog, public|false|false",
-      "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,lock_timeout=5s,statement_timeout=60s,row_security=off|true|false",
+      "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,row_security=off|true|false",
     ].join("\n"),
   );
   const boundary = prerequisiteSql(`SELECT
@@ -285,6 +285,7 @@ const RAW_CREATE = Object.freeze({
   },
 });
 const RAW_CREATE_B = Object.freeze({ ...RAW_CREATE, id: RAW_B });
+const RAW_LEGACY_IDENTIFIER = Object.freeze({ ...RAW_CREATE });
 const RAW_LAZY = Object.freeze({
   id: RAW_A,
   providerKey: "directory",
@@ -347,6 +348,15 @@ const COMPANY_LAZY = Object.freeze({
   ...COMPANY_A_BASE,
   name: "A4 Lazy GmbH",
   dedupeKey: "n:a4 lazy:de",
+});
+const COMPANY_LEGACY_IDENTIFIER = Object.freeze({
+  ...COMPANY_A_BASE,
+  name: "A4 Create GmbH",
+  dedupeKey: "id:registry-id:de1234",
+});
+const COMPANY_C_SUPPRESSED = Object.freeze({
+  ...COMPANY_C_ROOT,
+  status: "SUPPRESSED",
 });
 const COMPANY_CREATE_RESULT = Object.freeze({
   id: COMPANY_C,
@@ -1199,6 +1209,8 @@ function runScenario(scenario) {
     ) ON COMMIT DROP;
     GRANT SELECT,INSERT ON a4_observed TO app_user;
     SET SESSION AUTHORIZATION app_user;
+    SET LOCAL lock_timeout='${scenario.lockTimeout ?? "5s"}';
+    SET LOCAL statement_timeout='${scenario.statementTimeout ?? "60s"}';
     SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
     INSERT INTO a4_observed VALUES ('preA',${semanticStateSql(WORKSPACE_A)});
     INSERT INTO a4_observed VALUES ('preAFull',${fullStateSql(WORKSPACE_A)});
@@ -1691,6 +1703,34 @@ function afterStageFault(table, stageName, targetCount, sqlstate, message) {
   });
 }
 
+function afterStageAssertFailure(table, stageName, message) {
+  const stageLockKey = `a4-hidden-stage:${stageName}`;
+  return Object.freeze({
+    stageLockKey,
+    sql: `CREATE FUNCTION pg_temp.a4_after_assert_failure() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        PERFORM pg_advisory_lock(hashtextextended('${stageLockKey}',0));
+        ASSERT false, '${message}';
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER a4_after_${stageName}
+      AFTER INSERT ON ${table}
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.a4_after_assert_failure();`,
+    forbidden: [
+      "P0004",
+      message,
+      "CONTEXT:",
+      "DETAIL:",
+      "HINT:",
+      "a4_after_assert_failure",
+      "pg_temp",
+      WORKSPACE_A,
+      RAW_A,
+      COMPANY_A,
+    ],
+  });
+}
+
 function backendArtifactState(pid) {
   assert.ok(Number.isInteger(pid) && pid > 0, `invalid backend PID ${pid}`);
   return JSON.parse(
@@ -1738,6 +1778,57 @@ function assertApplicationCleanup(applicationName) {
         AND datname='${database}' AND usename='global';`),
     "0",
   );
+}
+
+function cleanupCommittedFixture() {
+  prerequisiteSql(`BEGIN;
+    SET LOCAL session_replication_role='replica';
+    DELETE FROM identity_link
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM organization_identifier
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM organization_identity_conflict_party
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM organization_identity_conflict
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM organization_canonical_mapping
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM suppression_record
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM raw_source_governance_disposition
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM raw_source_record
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM canonical_company
+      WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    DELETE FROM source_entity WHERE id='${ENTITY}';
+    DELETE FROM monitored_source WHERE id='${SOURCE}';
+    DELETE FROM workspace WHERE id IN ('${WORKSPACE_A}','${WORKSPACE_B}');
+    SET LOCAL session_replication_role='origin';
+    COMMIT;`);
+  assert.equal(
+    prerequisiteSql(`SELECT
+      (SELECT count(*) FROM workspace
+        WHERE id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+      (SELECT count(*) FROM raw_source_record
+        WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+      (SELECT count(*) FROM canonical_company
+        WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+      (SELECT count(*) FROM identity_link
+        WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'));`),
+    "0|0|0|0",
+  );
+}
+
+function seedCommittedFixture(fixture) {
+  cleanupCommittedFixture();
+  prerequisiteSql(`BEGIN;${fixtureSql(fixture)}COMMIT;`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, milliseconds);
+  });
 }
 
 function bounded(promise, milliseconds, label) {
@@ -1905,6 +1996,9 @@ function assertVerboseDiagnosticShape(diagnostics) {
 
 async function runStatementScenario(scenario) {
   ensurePrerequisite();
+  const stageReceipt = scenario.stageLockKey
+    ? `to_jsonb(pg_advisory_unlock(hashtextextended('${scenario.stageLockKey}',0)))`
+    : "'true'::jsonb";
   const child = spawn(
     "docker",
     [
@@ -1964,12 +2058,14 @@ async function runStatementScenario(scenario) {
     await bounded(pidReady, 5_000, "statement caller PID readiness");
     startedAt = Date.now();
     child.stdin.end(`BEGIN;
-      ${fixtureSql(scenario.fixture)}
+      ${scenario.skipFixture ? "" : fixtureSql(scenario.fixture)}
       CREATE TEMP TABLE a4_statement_observed(
         stage text PRIMARY KEY,value jsonb NOT NULL
       ) ON COMMIT DROP;
       GRANT SELECT,INSERT ON a4_statement_observed TO app_user;
       SET SESSION AUTHORIZATION app_user;
+      SET LOCAL lock_timeout='${scenario.lockTimeout ?? "5s"}';
+      SET LOCAL statement_timeout='${scenario.statementTimeout ?? "60s"}';
       SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
       INSERT INTO a4_statement_observed VALUES (
         'preA',${semanticStateSql(WORKSPACE_A)}
@@ -1992,9 +2088,7 @@ async function runStatementScenario(scenario) {
       \\set ON_ERROR_STOP on
       SET LOCAL client_min_messages='error';
       INSERT INTO a4_statement_observed VALUES (
-        'stageFired',to_jsonb(pg_advisory_unlock(
-          hashtextextended('${scenario.stageLockKey}',0)
-        ))
+        'stageFired',${stageReceipt}
       );
       INSERT INTO a4_statement_observed VALUES (
         'postA',${semanticStateSql(WORKSPACE_A)}
@@ -2047,6 +2141,39 @@ async function runStatementScenario(scenario) {
     if (callerPid !== null) assertBackendCleanup(callerPid);
     else assertApplicationCleanup("a4-statement-caller");
   }
+}
+
+function assertHardTimeoutResult(result, expectedPre, options = {}) {
+  assert.deepEqual(result.observed.preA, expectedPre);
+  assertFullColumns(result.observed.preAFull);
+  assertSentinel(result.observed.preBFull);
+  assert.deepEqual(result.observed.postAFull, result.observed.preAFull);
+  assert.deepEqual(result.observed.postBFull, result.observed.preBFull);
+  assert.equal(result.observed.stageFired, true);
+  assertVerboseDiagnosticShape(result.diagnostics);
+  assert.deepEqual(result.outcome, {
+    kind: "error",
+    sqlstate: "57014",
+    message: "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+  });
+  for (const forbidden of [
+    "canceling statement due to statement timeout",
+    "DETAIL:",
+    "HINT:",
+    "fixture.invalid",
+    "pg_sleep",
+    WORKSPACE_A,
+    RAW_A,
+    COMPANY_A,
+    ...(options.forbidden ?? []),
+  ]) {
+    assert.equal(result.output.includes(forbidden), false);
+  }
+  assert.ok(
+    result.elapsedMs >= (options.minimumMs ?? 400) &&
+      result.elapsedMs < (options.maximumMs ?? 4_000),
+    `caller-prearmed hard timeout was outside bounds: ${result.elapsedMs}`,
+  );
 }
 
 const CREATE_PRE = state({
@@ -2305,12 +2432,29 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
     resolverVersion: "identity-v1",
     inputHash: "legacy",
   });
+  const legacyIdentifierLink = link({
+    matchRule: "identifier_exact",
+    confidence: 1,
+    resolverVersion: "identity-v1",
+    inputHash: "legacy",
+  });
   const v2Link = link();
   const activeCompanyC = link({ canonicalId: COMPANY_C });
   const legacyFullPost = fullState({
     raws: [rawFull(RAW_LAZY)],
     companies: [companyFull(COMPANY_LAZY)],
     links: [fixtureLinkFullValue(legacyLink, 0)],
+  });
+  const mappedLegacySuppressedFullPost = fullState({
+    raws: [rawFull(RAW_LEGACY_IDENTIFIER)],
+    companies: [
+      companyFull(COMPANY_LEGACY_IDENTIFIER),
+      companyFull(COMPANY_C_SUPPRESSED),
+    ],
+    links: [fixtureLinkFullValue(legacyIdentifierLink, 0)],
+    mappings: [
+      mappingFullValue(mapping(COMPANY_A, COMPANY_C), 0),
+    ],
   });
   const v2ReplayFullPost = fullState({
     raws: [rawFull(RAW_CREATE)],
@@ -2341,6 +2485,98 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
         raws: [rawView(RAW_LAZY)],
         companies: [COMPANY_LAZY],
         links: [legacyLink],
+      }),
+    },
+    {
+      name: "legacy identifier fallback applies suppression to its mapped root",
+      fixture: {
+        raws: [RAW_LEGACY_IDENTIFIER],
+        companies: [COMPANY_LEGACY_IDENTIFIER, COMPANY_C_SUPPRESSED],
+        links: [legacyIdentifierLink],
+        mappings: [mapping(COMPANY_A, COMPANY_C)],
+        bypassTriggers: true,
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_LEGACY_IDENTIFIER)],
+        companies: [COMPANY_LEGACY_IDENTIFIER, COMPANY_C_SUPPRESSED],
+        links: [legacyIdentifierLink],
+        mappings: [mapping(COMPANY_A, COMPANY_C)],
+      }),
+      expectedOutcome: suppressedResult(),
+      expectNoWrite: true,
+      expectedPost: state({
+        raws: [rawView(RAW_LEGACY_IDENTIFIER)],
+        companies: [COMPANY_LEGACY_IDENTIFIER, COMPANY_C_SUPPRESSED],
+        links: [legacyIdentifierLink],
+        mappings: [mapping(COMPANY_A, COMPANY_C)],
+      }),
+      expectedFullPost: mappedLegacySuppressedFullPost,
+    },
+    {
+      name: "legacy identifier fallback rejects an A to B to C mapping chain",
+      fixture: {
+        raws: [RAW_LEGACY_IDENTIFIER],
+        companies: [
+          COMPANY_LEGACY_IDENTIFIER,
+          COMPANY_C_ROOT,
+          COMPANY_D_ROOT,
+        ],
+        links: [legacyIdentifierLink],
+        mappings: [
+          mapping(COMPANY_A, COMPANY_C),
+          mapping(COMPANY_C, COMPANY_D),
+        ],
+        bypassTriggers: true,
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_LEGACY_IDENTIFIER)],
+        companies: [
+          COMPANY_LEGACY_IDENTIFIER,
+          COMPANY_C_ROOT,
+          COMPANY_D_ROOT,
+        ],
+        links: [legacyIdentifierLink],
+        mappings: [
+          mapping(COMPANY_A, COMPANY_C),
+          mapping(COMPANY_C, COMPANY_D),
+        ],
+      }),
+      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+      expectedPost: state({
+        raws: [rawView(RAW_LEGACY_IDENTIFIER)],
+        companies: [
+          COMPANY_LEGACY_IDENTIFIER,
+          COMPANY_C_ROOT,
+          COMPANY_D_ROOT,
+        ],
+        links: [legacyIdentifierLink],
+        mappings: [
+          mapping(COMPANY_A, COMPANY_C),
+          mapping(COMPANY_C, COMPANY_D),
+        ],
+      }),
+    },
+    {
+      name: "legacy identifier fallback rejects a missing mapped root",
+      fixture: {
+        raws: [RAW_LEGACY_IDENTIFIER],
+        companies: [COMPANY_LEGACY_IDENTIFIER],
+        links: [legacyIdentifierLink],
+        mappings: [mapping(COMPANY_A, COMPANY_C)],
+        bypassTriggers: true,
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_LEGACY_IDENTIFIER)],
+        companies: [COMPANY_LEGACY_IDENTIFIER],
+        links: [legacyIdentifierLink],
+        mappings: [mapping(COMPANY_A, COMPANY_C)],
+      }),
+      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+      expectedPost: state({
+        raws: [rawView(RAW_LEGACY_IDENTIFIER)],
+        companies: [COMPANY_LEGACY_IDENTIFIER],
+        links: [legacyIdentifierLink],
+        mappings: [mapping(COMPANY_A, COMPANY_C)],
       }),
     },
     {
@@ -3064,6 +3300,29 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
       expectedFullPost: exactConflictFullPost,
     },
     {
+      name: "stored conflict owner with zero occurrence links is never repaired",
+      fixture: {
+        ...DISAGREEMENT_BASE,
+        conflicts: [DISAGREEMENT_CONFLICT],
+        parties: DISAGREEMENT_PARTIES,
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_CREATE)],
+        companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+        identifiers: [REGISTRY_IDENTIFIER_A],
+        conflicts: [DISAGREEMENT_CONFLICT],
+        parties: DISAGREEMENT_PARTIES,
+      }),
+      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+      expectedPost: state({
+        raws: [rawView(RAW_CREATE)],
+        companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+        identifiers: [REGISTRY_IDENTIFIER_A],
+        conflicts: [DISAGREEMENT_CONFLICT],
+        parties: DISAGREEMENT_PARTIES,
+      }),
+    },
+    {
       name: "equivalent second Raw reuses one conflict and adds exact links only",
       rawRecordId: RAW_B,
       fixture: {
@@ -3116,6 +3375,35 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
         ],
       }),
       expectedFullPost: secondRawFullPost,
+    },
+    {
+      name: "equivalent second Raw rejects a damaged owner occurrence receipt",
+      rawRecordId: RAW_B,
+      fixture: {
+        raws: [RAW_CREATE, RAW_CREATE_B],
+        companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+        identifiers: [REGISTRY_IDENTIFIER_A],
+        conflicts: [DISAGREEMENT_CONFLICT],
+        parties: DISAGREEMENT_PARTIES,
+        links: [DISAGREEMENT_LINKS_A[0]],
+      },
+      expectedPre: state({
+        raws: [rawView(RAW_CREATE), rawView(RAW_CREATE_B)],
+        companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+        identifiers: [REGISTRY_IDENTIFIER_A],
+        conflicts: [DISAGREEMENT_CONFLICT],
+        parties: DISAGREEMENT_PARTIES,
+        links: [DISAGREEMENT_LINKS_A[0]],
+      }),
+      expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
+      expectedPost: state({
+        raws: [rawView(RAW_CREATE), rawView(RAW_CREATE_B)],
+        companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+        identifiers: [REGISTRY_IDENTIFIER_A],
+        conflicts: [DISAGREEMENT_CONFLICT],
+        parties: DISAGREEMENT_PARTIES,
+        links: [DISAGREEMENT_LINKS_A[0]],
+      }),
     },
     {
       name: "same conflict fingerprint with facts drift is rejected exactly",
@@ -3291,7 +3579,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
   }
 });
 
-describe("Organization Identity function-owned timeout and fault rollback matrix", () => {
+describe("Organization Identity prearmed timeout and fault rollback matrix", () => {
   const createOnlyPreimage = state({ raws: [rawView(RAW_CREATE)] });
   const disagreementPreimage = state({
     raws: [rawView(RAW_CREATE)],
@@ -3299,12 +3587,46 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     identifiers: [REGISTRY_IDENTIFIER_A],
   });
   const multiIdentifierPreimage = state({ raws: [rawView(RAW_SPLIT)] });
+  const v2ReplayFixture = {
+    raws: [RAW_CREATE],
+    companies: [COMPANY_A_BASE],
+    identifiers: [REGISTRY_IDENTIFIER_A],
+    links: [link()],
+  };
+  const v2ReplayPreimage = state({
+    raws: [rawView(RAW_CREATE)],
+    companies: [COMPANY_A_BASE],
+    identifiers: [REGISTRY_IDENTIFIER_A],
+    links: [link()],
+  });
+  const cumulativeCompanyFixture = {
+    raws: [RAW_SPLIT],
+    companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+    identifiers: [DOMAIN_IDENTIFIER_A, REGISTRY_IDENTIFIER_B],
+  };
+  const cumulativeCompanyPreimage = state({
+    raws: [rawView(RAW_SPLIT)],
+    companies: [COMPANY_A_BASE, COMPANY_B_BLOCKER],
+    identifiers: [DOMAIN_IDENTIFIER_A, REGISTRY_IDENTIFIER_B],
+  });
   const companyAfter = afterStageFault(
     "canonical_company",
     "company_after",
     1,
     "ZX101",
     "A4_COMPANY_AFTER_FAULT",
+  );
+  const hiddenQueryCanceled = afterStageFault(
+    "canonical_company",
+    "hidden_query_canceled",
+    1,
+    "57014",
+    "A4_HIDDEN_QUERY_CANCELED",
+  );
+  const hiddenAssertFailure = afterStageAssertFailure(
+    "canonical_company",
+    "hidden_assert_failure",
+    "A4_HIDDEN_ASSERT_FAILURE",
   );
   const identifierFirst = afterStageFault(
     "organization_identifier",
@@ -3373,6 +3695,18 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
       companyAfter,
     ),
     fixedFault(
+      "hidden query_canceled before the deadline maps to fixed state invalid",
+      { raws: [RAW_CREATE] },
+      createOnlyPreimage,
+      hiddenQueryCanceled,
+    ),
+    fixedFault(
+      "hidden assert_failure maps to fixed state invalid",
+      { raws: [RAW_CREATE] },
+      createOnlyPreimage,
+      hiddenAssertFailure,
+    ),
+    fixedFault(
       "identifier first AFTER INSERT fault restores company and identifier preimage",
       { raws: [RAW_SPLIT] },
       multiIdentifierPreimage,
@@ -3419,7 +3753,7 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     it(scenario.name, () => assertScenario(scenario));
   }
 
-  it("function-owned lock deadline times out behind a real second connection", async () => {
+  it("prearmed lock bound times out behind a real second connection", async () => {
     const holder = startHolder(
       `SELECT pg_advisory_xact_lock(hashtextextended(
         'acquisition-suppression-policy:${WORKSPACE_A}',0
@@ -3443,7 +3777,103 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     }
   });
 
-  it("function-owned statement timeout returns a fixed no-leak token", async () => {
+  it("hard statement timer cancels a blocked pre-write table read", async () => {
+    const holder = startHolder(
+      "LOCK TABLE raw_source_governance_disposition IN ACCESS EXCLUSIVE MODE",
+    );
+    try {
+      await holder.ready;
+      const result = await runStatementScenario({
+        fixture: { raws: [RAW_CREATE] },
+        lockTimeout: "5s",
+        statementTimeout: "750ms",
+        processTimeout: 4_000,
+      });
+      assertHardTimeoutResult(result, createOnlyPreimage, {
+        minimumMs: 500,
+        maximumMs: 2_500,
+      });
+    } finally {
+      await holder.release();
+    }
+  });
+
+  it("hard statement timer cancels a blocked Raw row read", async () => {
+    seedCommittedFixture({ raws: [RAW_CREATE] });
+    const holder = startHolder(`SELECT 1 FROM raw_source_record
+      WHERE workspace_id='${WORKSPACE_A}' AND id='${RAW_A}' FOR UPDATE`);
+    try {
+      await holder.ready;
+      const result = await runStatementScenario({
+        skipFixture: true,
+        lockTimeout: "5s",
+        statementTimeout: "750ms",
+        processTimeout: 4_000,
+      });
+      assertHardTimeoutResult(result, createOnlyPreimage, {
+        minimumMs: 500,
+        maximumMs: 2_500,
+      });
+    } finally {
+      await holder.release();
+      cleanupCommittedFixture();
+    }
+  });
+
+  it("hard statement timer bounds cumulative UUID-ordered company locks", async () => {
+    seedCommittedFixture(cumulativeCompanyFixture);
+    const firstHolder = startHolder(`SELECT 1 FROM canonical_company
+      WHERE workspace_id='${WORKSPACE_A}' AND id='${COMPANY_A}' FOR UPDATE`);
+    const finalHolder = startHolder(`SELECT 1 FROM canonical_company
+      WHERE workspace_id='${WORKSPACE_A}' AND id='${COMPANY_B}' FOR UPDATE`);
+    let firstReleased = false;
+    try {
+      await Promise.all([firstHolder.ready, finalHolder.ready]);
+      const scenario = runStatementScenario({
+        skipFixture: true,
+        lockTimeout: "900ms",
+        statementTimeout: "1200ms",
+        processTimeout: 4_000,
+      });
+      await delay(650);
+      await firstHolder.release();
+      firstReleased = true;
+      const result = await scenario;
+      assertHardTimeoutResult(result, cumulativeCompanyPreimage, {
+        minimumMs: 950,
+        maximumMs: 3_000,
+      });
+    } finally {
+      if (!firstReleased) await firstHolder.release();
+      await finalHolder.release();
+      cleanupCommittedFixture();
+    }
+  });
+
+  it("hard statement timer cancels a blocked replay-return read", async () => {
+    seedCommittedFixture(v2ReplayFixture);
+    const holder = startHolder(`SELECT 1 FROM identity_link
+      WHERE workspace_id='${WORKSPACE_A}' AND raw_record_id='${RAW_A}'
+      FOR UPDATE`);
+    try {
+      await holder.ready;
+      const result = await runStatementScenario({
+        skipFixture: true,
+        lockTimeout: "5s",
+        statementTimeout: "750ms",
+        processTimeout: 4_000,
+      });
+      assertHardTimeoutResult(result, v2ReplayPreimage, {
+        minimumMs: 500,
+        maximumMs: 2_500,
+      });
+    } finally {
+      await holder.release();
+      cleanupCommittedFixture();
+    }
+  });
+
+  it("prearmed sixty-second hard timer returns a fixed no-leak token", async () => {
     const stageLockKey = "a4-hidden-stage:statement_timeout";
     const slowTrigger = `CREATE FUNCTION pg_temp.a4_slow_company()
       RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN

@@ -28,10 +28,7 @@ function sha256(value: string): string {
 }
 
 function withoutDollarQuotedBodies(sql: string): string {
-  return sql.replace(
-    /\$function\$[\s\S]*?\$function\$/gu,
-    "$function$$function$",
-  );
+  return sql.replace(/(\$[a-z0-9_]*\$)[\s\S]*?\1/giu, "$1$1");
 }
 
 type PublicFunctionDefinition = Readonly<{
@@ -145,8 +142,22 @@ describe("organization identity resolver command migration", () => {
     );
     expect(command.header).toContain("language plpgsql security definer");
     expect(command.header).toContain("set search_path = pg_catalog, public");
-    expect(command.header).toContain("set lock_timeout = '5s'");
-    expect(command.header).toContain("set statement_timeout = '60s'");
+    expect(command.header).toContain("set row_security = off");
+    expect(command.header).not.toContain("set lock_timeout");
+    expect(command.header).not.toContain("set statement_timeout");
+    expect(sql).toMatch(
+      /current_setting\(\s*'lock_timeout',\s*true\s*\)/u,
+    );
+    expect(sql).toMatch(
+      /current_setting\(\s*'statement_timeout',\s*true\s*\)/u,
+    );
+    expect(sql).toMatch(/lock_timeout_seconds\s+NOT BETWEEN 0\.001 AND 5/u);
+    expect(sql).toMatch(
+      /statement_timeout_seconds\s+NOT BETWEEN 0\.001 AND 60/u,
+    );
+    expect(sql).toMatch(/EXCEPTION WHEN query_canceled THEN/u);
+    expect(sql).toMatch(/WHEN assert_failure THEN/u);
+    expect(sql).not.toMatch(/clock_timestamp\(\)\s*>=\s*statement_deadline/u);
     expect(functionRevokes(sql, command)).toEqual([["public"]]);
     expect(functionGrantees(sql, command)).toEqual([["app_user"]]);
     expect(sql).not.toMatch(

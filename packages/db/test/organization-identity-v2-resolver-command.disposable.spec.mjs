@@ -103,15 +103,47 @@ function inspectJson(kind, name, format) {
   return JSON.parse(result.stdout.trim());
 }
 
-function appCallSql({ workspaceId, rawRecordId, workspaceSetting }) {
+function appCallSql({
+  workspaceId,
+  rawRecordId,
+  workspaceSetting,
+  lockTimeout = "5s",
+  statementTimeout = "60s",
+}) {
   const setting =
     workspaceSetting === null
       ? ""
       : `SELECT set_config('app.current_workspace_id','${workspaceSetting}',true);`;
+  const runtimeBounds = [
+    lockTimeout === null ? "" : `SET LOCAL lock_timeout='${lockTimeout}';`,
+    statementTimeout === null
+      ? ""
+      : `SET LOCAL statement_timeout='${statementTimeout}';`,
+  ].join("\n");
   return `BEGIN;
+${runtimeBounds}
 ${setting}
 SELECT * FROM public.resolve_organization_identity_for_raw_v1(
   '${workspaceId}', '${rawRecordId}'
+);
+ROLLBACK;`;
+}
+
+function timeoutAdmissionSql({ lockTimeout, statementTimeout }) {
+  const runtimeBounds = [
+    lockTimeout === null ? "" : `SET LOCAL lock_timeout='${lockTimeout}';`,
+    statementTimeout === null
+      ? ""
+      : `SET LOCAL statement_timeout='${statementTimeout}';`,
+  ].join("\n");
+  return `BEGIN;
+INSERT INTO workspace(id,name,created_at,updated_at)
+VALUES ('${WORKSPACE_A}','A5 timeout admission',now(),now());
+SET SESSION AUTHORIZATION app_user;
+${runtimeBounds}
+SET LOCAL app.current_workspace_id='${WORKSPACE_A}';
+SELECT * FROM public.resolve_organization_identity_for_raw_v1(
+  '${WORKSPACE_A}', '${RAW_A}'
 );
 ROLLBACK;`;
 }
@@ -259,7 +291,7 @@ describe("Organization Identity v2 direct command A3 boundary", () => {
         "organization_identity_blocker_from_raw_v1|p_raw jsonb|global|false|search_path=pg_catalog, public|false|false",
         "organization_identity_canonical_suppression_value_v1|p_type text, p_value text|global|false|search_path=pg_catalog, public|false|false",
         "organization_identity_plan_from_snapshot_v1|p_snapshot jsonb|global|false|search_path=pg_catalog, public|false|false",
-        "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,lock_timeout=5s,statement_timeout=60s,row_security=off|true|false",
+        "resolve_organization_identity_for_raw_v1|p_workspace_id text, p_raw_record_id text|global|true|search_path=pg_catalog, public,row_security=off|true|false",
       ].join("\n"),
     );
     assert.equal(
@@ -288,6 +320,8 @@ describe("Organization Identity v2 direct command A3 boundary", () => {
 
   it("denies SET ROLE app_user because it is not the app_user session", () => {
     const error = typedError(`BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='60s';
 SET ROLE app_user;
 SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
 SELECT * FROM public.resolve_organization_identity_for_raw_v1(
@@ -351,4 +385,36 @@ ROLLBACK;`);
       assert.equal(error.output.includes(marker), false);
     });
   }
+
+  for (const [name, lockTimeout, statementTimeout] of [
+    ["unarmed", null, null],
+    ["zero lock timeout", "0", "60s"],
+    ["zero statement timeout", "5s", "0"],
+    ["over-limit lock timeout", "5001ms", "60s"],
+    ["over-limit statement timeout", "5s", "60001ms"],
+  ]) {
+    it(`denies ${name} before the first database read`, () => {
+      const error = typedError(
+        timeoutAdmissionSql({ lockTimeout, statementTimeout }),
+      );
+      assert.deepEqual(
+        { sqlstate: error.sqlstate, message: error.message },
+        { sqlstate: "42501", message: "IDENTITY_RESOLUTION_COMMAND_DENIED" },
+      );
+      assert.equal(error.output.includes("A5 timeout admission"), false);
+    });
+  }
+
+  it("admits shorter non-zero caller-prearmed bounds", () => {
+    const error = typedError(
+      timeoutAdmissionSql({
+        lockTimeout: "250ms",
+        statementTimeout: "1s",
+      }),
+    );
+    assert.deepEqual(
+      { sqlstate: error.sqlstate, message: error.message },
+      { sqlstate: "40001", message: "IDENTITY_RESOLUTION_PLAN_STALE" },
+    );
+  });
 });

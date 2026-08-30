@@ -152,8 +152,28 @@ describe("Organization Identity resolver command migration", () => {
     );
     assert.match(command.header, /language plpgsql security definer/u);
     assert.match(command.header, /set search_path = pg_catalog, public/u);
-    assert.match(command.header, /set lock_timeout = '5s'/u);
-    assert.match(command.header, /set statement_timeout = '60s'/u);
+    assert.match(command.header, /set row_security = off/u);
+    assert.doesNotMatch(command.header, /set lock_timeout/u);
+    assert.doesNotMatch(command.header, /set statement_timeout/u);
+    assert.match(
+      sql,
+      /current_setting\(\s*'lock_timeout',\s*true\s*\)/u,
+    );
+    assert.match(
+      sql,
+      /current_setting\(\s*'statement_timeout',\s*true\s*\)/u,
+    );
+    assert.match(sql, /lock_timeout_seconds\s+NOT BETWEEN 0\.001 AND 5/u);
+    assert.match(
+      sql,
+      /statement_timeout_seconds\s+NOT BETWEEN 0\.001 AND 60/u,
+    );
+    assert.match(sql, /EXCEPTION WHEN query_canceled THEN/u);
+    assert.match(sql, /WHEN assert_failure THEN/u);
+    assert.doesNotMatch(
+      sql,
+      /clock_timestamp\(\)\s*>=\s*statement_deadline/u,
+    );
     assert.deepEqual(functionRevokes(sql, command), [["public"]]);
     assert.deepEqual(functionGrantees(sql, command), [["app_user"]]);
     assert.equal(
