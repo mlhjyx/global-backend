@@ -191,6 +191,36 @@
       "requirement_id": "FIX9-FOCUSED-MODULE-BOUNDS",
       "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
       "mutation_ids": ["implementation-module-bounds"]
+    },
+    {
+      "requirement_id": "FIX2A-MACHINE-POLICY-EXACT-SET",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": ["round2-machine-untrusted-extra"]
+    },
+    {
+      "requirement_id": "FIX2B-LIFECYCLE-SYNTHETIC-ONLY",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "round2-lifecycle-caller-snapshot-untrusted",
+        "round2-lifecycle-omitted-cycle-edge"
+      ]
+    },
+    {
+      "requirement_id": "FIX2C-PURE-IN-MEMORY-SCHEMAS",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "round2-facade-import-purity",
+        "round2-schema-catalog-present"
+      ]
+    },
+    {
+      "requirement_id": "FIX2D-CODEOWNER-ACTOR-ADJUDICATION",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "round2-dual-privacy-codeowner-actor-allowed",
+        "round2-dual-coapprover-reused",
+        "round2-codeowner-review-id-reuse"
+      ]
     }
   ],
   "implementation_files": [

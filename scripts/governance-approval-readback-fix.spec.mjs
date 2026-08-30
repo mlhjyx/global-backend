@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -521,6 +522,129 @@ test('FIX7 lifecycle validation uses current authority and authoritative edges',
       'APPROVAL_RECEIPT_LIFECYCLE_SNAPSHOT_INVALID',
     );
   });
+});
+
+test('FIX2A machine checks are an exact policy-declared context set', () => {
+  mutation('round2-machine-untrusted-extra', () => {
+    const value = candidate();
+    value.machine_checks.push(machineCheck({
+      context: 'approval/untrusted-extra',
+      check_run_id: 81099,
+      check_suite_id: 71099,
+      workflow_id: 61999,
+      workflow_path: '.github/workflows/untrusted-extra.yml',
+      actions_run_id: 51999,
+    }));
+    expectIssue(validateCandidate(value), 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
+    assert.throws(() => buildApprovalReceiptCore(value, authority(), verifier(), null, NOW));
+  });
+});
+
+test('FIX2B caller lifecycle snapshots remain synthetic and trust-ineligible', () => {
+  mutation('round2-lifecycle-caller-snapshot-untrusted', () => {
+    const { first, second } = receiptSet();
+    const result = validateReceiptSupersession(
+      supersessionFor(first, second),
+      lifecycleSnapshot(first, second),
+      authority(),
+      NOW,
+    );
+    expectIssue(result, 'APPROVAL_INDEPENDENCE_NOT_PROVEN');
+  });
+  mutation('round2-lifecycle-omitted-cycle-edge', () => {
+    const { first, second } = receiptSet();
+    const omittedReverseEdge = lifecycleSnapshot(first, second);
+    const result = validateReceiptSupersession(
+      supersessionFor(first, second),
+      omittedReverseEdge,
+      authority(),
+      NOW,
+    );
+    expectIssue(result, 'APPROVAL_INDEPENDENCE_NOT_PROVEN');
+    assert.equal(result.valid, false);
+  });
+});
+
+test('FIX2D CODEOWNER actor sharing follows the 3.4 adjudication without evidence-ID reuse', () => {
+  mutation('round2-dual-privacy-codeowner-actor-allowed', () => {
+    const value = candidate();
+    const authorityValue = authority();
+    value.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+    value.policy.dual_role_exception = {
+      decision_adr: 'ADR-042',
+      valid_from: '2026-08-30T00:00:00.000Z',
+      valid_until: '2026-08-31T00:00:00.000Z',
+      coapprover_role: 'OWN-QA-EVIDENCE',
+      minimum_distinct_human_actors: 2,
+      cannot_authorize_merge: true,
+      cannot_authorize_release: true,
+    };
+    authorityValue.roles[1].actor_id = value.codeowner_review.actor.id;
+    authorityValue.roles[1].actor_node_id = value.codeowner_review.actor.node_id;
+    authorityValue.roles[1].actor_login = value.codeowner_review.actor.login;
+    value.privacy_review.actor = clone(value.codeowner_review.actor);
+    const result = validateCandidate(value, authorityValue);
+    assert.deepEqual(result, { valid: true, issues: [] });
+    const ids = [
+      value.privacy_review.review_id,
+      value.codeowner_review.review_id,
+      value.qa_review.review_id,
+      value.security_review.review_id,
+    ];
+    assert.equal(new Set(ids).size, ids.length);
+  });
+  mutation('round2-dual-coapprover-reused', () => {
+    const value = candidate();
+    const authorityValue = authority();
+    value.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+    value.policy.dual_role_exception = {
+      decision_adr: 'ADR-042',
+      valid_from: '2026-08-30T00:00:00.000Z',
+      valid_until: '2026-08-31T00:00:00.000Z',
+      coapprover_role: 'OWN-QA-EVIDENCE',
+      minimum_distinct_human_actors: 2,
+      cannot_authorize_merge: true,
+      cannot_authorize_release: true,
+    };
+    for (const index of [1, 2]) {
+      authorityValue.roles[index].actor_id = value.product_review.actor.id;
+      authorityValue.roles[index].actor_node_id = value.product_review.actor.node_id;
+      authorityValue.roles[index].actor_login = value.product_review.actor.login;
+    }
+    value.privacy_review.actor = clone(value.product_review.actor);
+    value.qa_review.actor = clone(value.product_review.actor);
+    expectIssue(validateCandidate(value, authorityValue), 'APPROVAL_DISTINCT_ACTORS_REQUIRED');
+  });
+  mutation('round2-codeowner-review-id-reuse', () => {
+    const value = candidate();
+    value.codeowner_review.review_id = value.privacy_review.review_id;
+    expectIssue(validateCandidate(value), 'APPROVAL_EVIDENCE_SLOT_REUSE');
+  });
+});
+
+test('FIX2C importing the facade is filesystem-independent and the schema catalog is committed', async () => {
+  assert.equal(fixMutationRuns.has('round2-facade-import-purity'), false);
+  fixMutationRuns.set('round2-facade-import-purity', 1);
+  try {
+    const facadeUrl = new URL('./governance-approval-readback.mjs', import.meta.url).href;
+    execFileSync(process.execPath, ['--input-type=module', '--eval', `
+      import fs, { syncBuiltinESMExports } from 'node:fs';
+      fs.readFileSync = () => { throw new Error('EXPLICIT_FS_IO_DENIED'); };
+      syncBuiltinESMExports();
+      await import(${JSON.stringify(facadeUrl)});
+    `], { stdio: 'pipe' });
+  } catch (error) {
+    fixMutationFailures.set('round2-facade-import-purity', error);
+  }
+
+  assert.equal(fixMutationRuns.has('round2-schema-catalog-present'), false);
+  fixMutationRuns.set('round2-schema-catalog-present', 1);
+  try {
+    const catalog = await import('./governance-approval-schema-catalog.mjs');
+    assert.ok(Object.isFrozen(catalog.APPROVAL_SCHEMA_CATALOG));
+  } catch (error) {
+    fixMutationFailures.set('round2-schema-catalog-present', error);
+  }
 });
 
 test('FIX9 public facade and focused internal executable modules remain bounded', async () => {

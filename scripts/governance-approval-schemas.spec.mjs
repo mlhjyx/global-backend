@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -41,6 +42,15 @@ const canonicalize = (value) => {
   return JSON.stringify(value);
 };
 const canonicalDigest = (value) => `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`;
+const schemaCatalogFilenames = [
+  'approval-authorities.schema.json',
+  'trusted-approval-readback.schema.json',
+  'trusted-approval-evidence-manifest.schema.json',
+  'trusted-approval-revocation.schema.json',
+  'trusted-approval-supersession.schema.json',
+  'program-c-merge-authorization-grant.schema.json',
+  'program-c-merge-authorization-consumption.schema.json',
+];
 const expectValid = (validator, value) => assert.deepEqual(validator(value), { valid: true, issues: [] });
 const expectInvalid = (validator, value) => {
   const result = validator(value);
@@ -216,6 +226,16 @@ const consumption = () => ({
   current_main: { ref: 'refs/heads/main', sha: 'c'.repeat(40), read_at: LATER_INSTANT },
   pre_readback_sha256: DIGEST,
   post_readback_sha256: OTHER_DIGEST,
+});
+
+test('Task 1 in-memory catalog exactly mirrors authoritative JSON schemas and canonical digests', async () => {
+  const { APPROVAL_SCHEMA_CATALOG } = await import('./governance-approval-schema-catalog.mjs');
+  assert.deepEqual(Object.keys(APPROVAL_SCHEMA_CATALOG).sort(), schemaCatalogFilenames.toSorted());
+  for (const filename of schemaCatalogFilenames) {
+    const json = JSON.parse(await readFile(new URL(`../docs/governance/${filename}`, import.meta.url), 'utf8'));
+    assert.deepEqual(APPROVAL_SCHEMA_CATALOG[filename].schema, json, filename);
+    assert.equal(APPROVAL_SCHEMA_CATALOG[filename].canonical_sha256, canonicalDigest(json), filename);
+  }
 });
 
 test('approval authorities are closed, exact, and honestly unassigned', () => {
