@@ -357,6 +357,15 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
   });
   expectValid(validateProgramCMergeAuthorizationConsumptionContext, context());
   for (const mutate of [
+    (value) => { delete value.now; },
+    (value) => { value.now = '2026-08-30T00:30:00Z'; },
+    (value) => { delete value.authority_receipt; },
+    (value) => { delete value.authority_receipt_core_sha256; },
+    (value) => { delete value.authority_receipt_raw_sha256; },
+    (value) => { delete value.revocations; },
+    (value) => { delete value.supersessions; },
+    (value) => { delete value.ledger_snapshot; },
+    (value) => { value.untrusted_extra = true; },
     (value) => { value.consumption.grant_raw_sha256 = DIGEST; },
     (value) => { value.consumption.single_use_nonce = 'nonce-program-c-other'; value.consumption.nonce_ledger_key = 'program-c-merge:nonce-program-c-other'; },
     (value) => { value.consumption.stage = 'ACCEPTANCE_MERGE'; },
