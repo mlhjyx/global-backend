@@ -1,9 +1,7 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
-CREATE FUNCTION public._governed_relation_assert_caller_v1(
-  p_workspace_id UUID
-) RETURNS void
+CREATE FUNCTION public._governed_relation_assert_caller_v1(p_workspace_id UUID) RETURNS void
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
@@ -274,8 +272,7 @@ BEGIN
     'relationExact',stored_tuple IS NOT DISTINCT FROM caller_tuple);
 END $path$;
 CREATE FUNCTION public._governed_relation_lock_snapshot_dsr_v1(
-  p_workspace_id UUID,p_snapshot JSONB
-) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+  p_workspace_id UUID,p_snapshot JSONB) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public AS $locks$
 DECLARE key TEXT;
 BEGIN
@@ -706,6 +703,9 @@ BEGIN
     p_parent_governed_subject_id,p_child_subject_type,p_child_subject_id,p_child_data_class,
     p_child_dsr_subject_type,p_child_dsr_subject_id,caller_tuple);
   IF post_snapshot IS DISTINCT FROM pre_snapshot THEN
+    IF post_snapshot->'governedFences' IS DISTINCT FROM pre_snapshot->'governedFences'
+      OR post_snapshot->'artifactFences' IS DISTINCT FROM pre_snapshot->'artifactFences' THEN
+      RAISE EXCEPTION 'GOVERNED_SUBJECT_TOMBSTONED' USING ERRCODE='P0001'; END IF;
     RAISE EXCEPTION 'GOVERNED_SUBJECT_RELATION_INVALID' USING ERRCODE='P0001'; END IF;
   IF jsonb_array_length(pre_snapshot->'governedFences')>0
     OR jsonb_array_length(pre_snapshot->'artifactFences')>0 THEN
