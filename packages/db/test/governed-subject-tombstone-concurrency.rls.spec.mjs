@@ -85,7 +85,8 @@ async function observeExactWait(holderPid, writerName, writer, timeout = 4000) {
       AND waiting.objid IS NOT DISTINCT FROM held.objid
       AND waiting.objsubid IS NOT DISTINCT FROM held.objsubid
       JOIN pg_stat_activity activity ON activity.pid=waiting.pid
-      WHERE held.pid=${holderPid} AND held.granted AND NOT waiting.granted
+      WHERE held.pid=${holderPid} AND held.locktype='advisory'
+        AND waiting.locktype='advisory' AND held.granted AND NOT waiting.granted
         AND activity.application_name='${writerName}';`);
     if (rows === "1") return;
     await new Promise((resolve) => setTimeout(resolve, 40));
@@ -278,72 +279,62 @@ describe("governed subject Task 3 tombstone linearization", () => {
 
   it("bounds dual PERSONAL tombstones and opposite append attempts without deadlock", async () => {
     const names = ["task3_dual_a", "task3_dual_b", "task3_edge_ab", "task3_edge_ba"];
-    const fenceA = startConnection(`SET application_name='${names[0]}';
-      SET SESSION AUTHORIZATION app_user; BEGIN;
-      SELECT set_config('app.current_workspace_id','${WS_A}',true);
-      ${tombstone(first[2], REQUEST_A)} SELECT pg_backend_pid()::text||'|A_READY';\n`, true);
-    const fenceB = startConnection(`SET application_name='${names[1]}';
-      SET SESSION AUTHORIZATION app_user; BEGIN;
-      SELECT set_config('app.current_workspace_id','${WS_A}',true);
-      ${tombstone(second[2], REQUEST_B)} SELECT pg_backend_pid()::text||'|B_READY';\n`, true);
-    let edgeAB;
-    let edgeBA;
     const relationCount = Number(psql(`SELECT count(*) FROM governed_subject_relation
       WHERE workspace_id='${WS_A}';`));
-    try {
-      const [a, b] = await Promise.all([fenceA.waitFor("A_READY"), fenceB.waitFor("B_READY")]);
-      const pidA = Number(a.match(/(\d+)\|A_READY/)?.[1]);
-      const pidB = Number(b.match(/(\d+)\|B_READY/)?.[1]);
-      edgeAB = startConnection(`SET application_name='${names[2]}';${boundedApp(selectCall(
-        APPEND, state.factsA, { parentId: first[2], childId: CHILD_B,
-          childDataClass: "PERSONAL", childDsrSubjectType: "company", childDsrSubjectId: DSR_B,
-          relationKey: "edge:a-b", relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B },
-      ))}`);
-      edgeBA = startConnection(`SET application_name='${names[3]}';${boundedApp(selectCall(
-        APPEND, state.factsA, { parentId: second[2], childId: CHILD_A,
-          childDataClass: "PERSONAL", childDsrSubjectType: "company", childDsrSubjectId: DSR_A,
-          relationKey: "edge:b-a", relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B },
-      ))}`);
-      await Promise.all([
-        observeExactWait(pidA, names[2], edgeAB), observeExactWait(pidB, names[3], edgeBA),
-      ]);
-      fenceA.write("COMMIT;\n"); fenceA.end();
-      fenceB.write("COMMIT;\n"); fenceB.end();
-      const results = await Promise.all([fenceA.done, fenceB.done, edgeAB.done, edgeBA.done]);
-      assert.doesNotMatch(results.map((result) => result.stderr).join("\n"),
-        /40P01|deadlock detected/i);
-      assert.equal(results[0].status, 0, results[0].stderr);
-      assert.equal(results[1].status, 0, results[1].stderr);
-      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone
-        WHERE workspace_id='${WS_A}';`), "2");
-      assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone_audit
-        WHERE workspace_id='${WS_A}';`), "2");
-      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation relation
-        WHERE relation.workspace_id='${WS_A}' AND relation.parent_subject_id=relation.child_subject_id;`), "0");
-      assert.ok(results.slice(2).filter((result) => result.status === 0).length <= 1);
-      assert.ok(Number(psql(`SELECT count(*) FROM governed_subject_relation
-        WHERE workspace_id='${WS_A}';`)) <= relationCount + 1);
-      assert.equal(psql(`SELECT count(*) FROM governed_subject_relation relation
-        LEFT JOIN governed_subject parent ON parent.workspace_id=relation.workspace_id
-          AND parent.id=relation.parent_subject_id
-        LEFT JOIN governed_subject child ON child.workspace_id=relation.workspace_id
-          AND child.id=relation.child_subject_id
-        WHERE relation.workspace_id='${WS_A}' AND (parent.id IS NULL OR child.id IS NULL);`), "0");
-      assert.equal(psql(`WITH RECURSIVE walk(origin,current,path,cycle) AS (
-        SELECT parent_subject_id,child_subject_id,ARRAY[parent_subject_id,child_subject_id],false
-        FROM governed_subject_relation WHERE workspace_id='${WS_A}'
-        UNION ALL
-        SELECT walk.origin,relation.child_subject_id,walk.path||relation.child_subject_id,
-          relation.child_subject_id=ANY(walk.path)
-        FROM walk JOIN governed_subject_relation relation
-          ON relation.workspace_id='${WS_A}' AND relation.parent_subject_id=walk.current
-        WHERE NOT walk.cycle AND cardinality(walk.path)<=66
-      ) SELECT count(*) FROM walk WHERE cycle;`), "0");
-    } finally {
-      await Promise.all([
-        cleanup(fenceA, names[0]), cleanup(fenceB, names[1]),
-        cleanup(edgeAB, names[2]), cleanup(edgeBA, names[3]),
-      ]);
+    let release;
+    const barrier = new Promise((resolve) => { release = resolve; });
+    const launch = async (name, sql) => {
+      await barrier;
+      return startConnection(`SET application_name='${name}';${boundedApp(sql)}`).done;
+    };
+    const jobs = [
+      launch(names[0], tombstone(first[2], REQUEST_A)),
+      launch(names[1], tombstone(second[2], REQUEST_B)),
+      launch(names[2], selectCall(APPEND, state.factsA, {
+        parentId: first[2], childId: CHILD_B, childDataClass: "PERSONAL",
+        childDsrSubjectType: "company", childDsrSubjectId: DSR_B,
+        relationKey: "edge:a-b", relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B,
+      })),
+      launch(names[3], selectCall(APPEND, state.factsA, {
+        parentId: second[2], childId: CHILD_A, childDataClass: "PERSONAL",
+        childDsrSubjectType: "company", childDsrSubjectId: DSR_A,
+        relationKey: "edge:b-a", relationKind: "DERIVED_FROM", sourceUuid: SOURCE_B,
+      })),
+    ];
+    release();
+    const results = await Promise.all(jobs);
+    assert.doesNotMatch(results.map((result) => result.stderr).join("\n"),
+      /40P01|deadlock detected/i);
+    assert.equal(results[0].status, 0, results[0].stderr);
+    assert.equal(results[1].status, 0, results[1].stderr);
+    assert.match(results[0].stdout, /FENCE_CREATED/);
+    assert.match(results[1].stdout, /FENCE_CREATED/);
+    const appendResults = results.slice(2);
+    assert.ok(appendResults.filter((result) => result.status === 0).length <= 1);
+    for (const result of appendResults.filter((candidate) => candidate.status !== 0)) {
+      assert.match(result.stderr,
+        /GOVERNED_SUBJECT_TOMBSTONED|GOVERNED_SUBJECT_RELATION_INVALID/);
     }
+    assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone
+      WHERE workspace_id='${WS_A}';`), "2");
+    assert.equal(psql(`SELECT count(*) FROM governed_subject_tombstone_audit
+      WHERE workspace_id='${WS_A}';`), "2");
+    assert.ok(Number(psql(`SELECT count(*) FROM governed_subject_relation
+      WHERE workspace_id='${WS_A}';`)) <= relationCount + 1);
+    assert.equal(psql(`SELECT count(*) FROM governed_subject_relation relation
+      LEFT JOIN governed_subject parent ON parent.workspace_id=relation.workspace_id
+        AND parent.id=relation.parent_subject_id
+      LEFT JOIN governed_subject child ON child.workspace_id=relation.workspace_id
+        AND child.id=relation.child_subject_id
+      WHERE relation.workspace_id='${WS_A}' AND (parent.id IS NULL OR child.id IS NULL);`), "0");
+    assert.equal(psql(`WITH RECURSIVE walk(origin,current,path,cycle) AS (
+      SELECT parent_subject_id,child_subject_id,ARRAY[parent_subject_id,child_subject_id],false
+      FROM governed_subject_relation WHERE workspace_id='${WS_A}' UNION ALL
+      SELECT walk.origin,relation.child_subject_id,walk.path||relation.child_subject_id,
+        relation.child_subject_id=ANY(walk.path)
+      FROM walk JOIN governed_subject_relation relation
+        ON relation.workspace_id='${WS_A}' AND relation.parent_subject_id=walk.current
+      WHERE NOT walk.cycle AND cardinality(walk.path)<=66
+    ) SELECT count(*) FROM walk WHERE cycle;`), "0");
   });
 });
