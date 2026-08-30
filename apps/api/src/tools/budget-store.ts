@@ -705,12 +705,29 @@ function isTrustedArtifactDatabaseInvalid(error: unknown): boolean {
     'ERROR: GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID',
     'ERROR: GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED',
   ]);
-  return Boolean(
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2010' &&
-    error.meta?.code === 'P0001' &&
-    typeof error.meta?.message === 'string' && markers.has(error.meta.message),
-  );
+  try {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    const errorDescriptors = Object.getOwnPropertyDescriptors(error);
+    const code = errorDescriptors.code;
+    const meta = errorDescriptors.meta;
+    if (
+      !code || !('value' in code) || code.value !== 'P2010' ||
+      !meta || !('value' in meta) ||
+      !meta.value || typeof meta.value !== 'object'
+    ) {
+      return false;
+    }
+    const metaDescriptors = Object.getOwnPropertyDescriptors(meta.value);
+    const sqlState = metaDescriptors.code;
+    const message = metaDescriptors.message;
+    return Boolean(
+      sqlState && 'value' in sqlState && sqlState.value === 'P0001' &&
+      message && 'value' in message &&
+      typeof message.value === 'string' && markers.has(message.value),
+    );
+  } catch {
+    return false;
+  }
 }
 
 function authorityLifecycleUnavailable(): ExecutionBudgetGrantError {
@@ -1216,12 +1233,16 @@ export class PostgresBudgetStore implements BudgetStore {
         };
       });
     } catch (error) {
+      // A genuine Prisma P2010/P0001 marker is a bounded database contract,
+      // not an arbitrary message-only control error. Map it before the shared
+      // fail-closed classifier; the marker probe snapshots data descriptors
+      // and never invokes caller-controlled accessors.
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
       if (isExecutionControlError(error)) throw error;
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
-      }
-      if (isTrustedArtifactDatabaseInvalid(error)) {
-        return invalidGenericOperationArtifact();
       }
       if (
         error instanceof BudgetStoreUnavailableError ||
