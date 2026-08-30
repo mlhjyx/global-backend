@@ -13,6 +13,7 @@ import {
   validateProgramCMergeAuthorizationConsumptionContext,
   inspectSyntheticProgramCMergeAuthorizationConsumptionContext,
 } from './governance-approval-schema-validator.mjs';
+import { buildApprovalReceiptArtifact, renderApprovalReceiptCore, sha256Prefixed } from './governance-approval-safe-json.mjs';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const OTHER_DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -238,6 +239,21 @@ test('approval receipts bind distinct numeric actors and canonical approval cont
   ]) {
     const value = receipt(); mutate(value); expectInvalid(validateApprovalReceipt, value);
   }
+});
+
+test('Task 1 receipt validation uses the Task 2 schema-ordered renderer and accepts built artifacts', () => {
+  const core = receipt().core;
+  const artifact = buildApprovalReceiptArtifact(core);
+  assert.equal(artifact.receiptCoreSha256, sha256Prefixed(renderApprovalReceiptCore(core)));
+  expectValid(validateApprovalReceipt, artifact.envelope);
+});
+
+test('Task 1 receipt validation and Task 2 construction agree on actor_login Unicode code points', () => {
+  const envelope = buildApprovalReceiptArtifact({
+    ...receipt().core,
+    actor_login: '😀'.repeat(256),
+  }).envelope;
+  expectValid(validateApprovalReceipt, envelope);
 });
 
 test('evidence manifests cryptographically bind a closed receipt evidence set', () => {

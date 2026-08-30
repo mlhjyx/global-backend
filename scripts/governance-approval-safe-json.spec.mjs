@@ -13,6 +13,7 @@ import {
   readApprovalJson,
   renderApprovalReceiptCore,
   sha256Prefixed,
+  verifyApprovalReceiptRawSha256,
 } from './governance-approval-safe-json.mjs';
 
 const MAX_BYTES = 1_048_576;
@@ -90,6 +91,15 @@ test('parseApprovalJson permits only valid JSON values with finite safe numbers'
     { array: [true, null, 'ok', 0, 150] },
   );
   expectApprovalErrorSync(() => parseApprovalJson('{"value":9007199254740992}', 'approval'), 'NUMBER');
+});
+
+test('parseApprovalJson rejects non-canonical number lexemes before numeric normalization', () => {
+  for (const text of ['1.0', '1e0', '1E+0', '0.10', '1e+2', '1e02', '1e-0', '-0.1e+1']) {
+    expectApprovalErrorSync(() => parseApprovalJson(`{"value":${text}}`, 'approval'), 'NUMBER_LEXEME');
+  }
+  for (const [text, value] of [['0', 0], ['-1', -1], ['0.1', 0.1], ['1e2', 100], ['1e-2', 0.01], ['1234567890123456', 1234567890123456]]) {
+    assert.deepEqual(parseApprovalJson(`{"value":${text}}`, 'approval'), { value });
+  }
 });
 
 test('readApprovalJson decodes UTF-8 fatally and preserves bounded raw bytes', async () => {
@@ -204,6 +214,26 @@ test('buildApprovalReceiptArtifact binds a closed envelope to its schema-ordered
   assert.equal(parseApprovalJson(artifact.bytes.toString('utf8'), 'receipt').receipt_core_sha256, expectedCoreDigest);
 });
 
+test('receipt byte accessors return fresh copies that cannot desynchronize retained digests', async () => {
+  await withTempDirectory(async (directory) => {
+    const artifact = buildApprovalReceiptArtifact(approvalCore());
+    const originalArtifactBytes = artifact.bytes;
+    const mutatedArtifactBytes = artifact.bytes;
+    mutatedArtifactBytes[0] ^= 0x01;
+    assert.notDeepEqual(mutatedArtifactBytes, originalArtifactBytes);
+    assert.deepEqual(artifact.bytes, originalArtifactBytes);
+    assert.equal(sha256Prefixed(artifact.bytes), artifact.receiptRawSha256);
+    assert.equal(sha256Prefixed(renderApprovalReceiptCore(artifact.envelope.core)), artifact.receiptCoreSha256);
+
+    const receiptPath = join(directory, 'receipt.json');
+    await writeFile(receiptPath, originalArtifactBytes);
+    const read = await readApprovalJson(receiptPath, 'receipt');
+    const mutatedReadBytes = read.bytes;
+    mutatedReadBytes[0] ^= 0x01;
+    assert.deepEqual(read.bytes, originalArtifactBytes);
+  });
+});
+
 test('buildApprovalReceiptArtifact rejects core-digest drift and every recursive raw-hash field alias', () => {
   const core = approvalCore();
   const artifact = buildApprovalReceiptArtifact(core);
@@ -270,6 +300,36 @@ test('external raw digest is derived from final bytes and detects one-byte recei
     await writeFile(receiptPath, driftedBytes);
     await expectApprovalError(() => readApprovalJson(receiptPath, 'receipt'), 'CORE_DIGEST');
   });
+});
+
+test('verifyApprovalReceiptRawSha256 accepts only independently supplied exact lower-case final-byte SHA-256', () => {
+  const artifact = buildApprovalReceiptArtifact(approvalCore());
+  assert.deepEqual(verifyApprovalReceiptRawSha256(artifact.bytes, artifact.receiptRawSha256), { valid: true });
+
+  const drifted = artifact.bytes;
+  drifted[0] ^= 0x01;
+  expectApprovalErrorSync(
+    () => verifyApprovalReceiptRawSha256(drifted, artifact.receiptRawSha256),
+    'RECEIPT_RAW_DIGEST_MISMATCH',
+  );
+  expectApprovalErrorSync(
+    () => verifyApprovalReceiptRawSha256(artifact.bytes, artifact.receiptRawSha256.toUpperCase()),
+    'RECEIPT_RAW_DIGEST_INVALID',
+  );
+  expectApprovalErrorSync(
+    () => verifyApprovalReceiptRawSha256(artifact.bytes, 'sha256:not-a-digest'),
+    'RECEIPT_RAW_DIGEST_INVALID',
+  );
+});
+
+test('actor_login length follows Unicode code points and accepts one unpaired surrogate as one code point', () => {
+  const atLimit = approvalCore({ actor_login: '😀'.repeat(256) });
+  assert.doesNotThrow(() => buildApprovalReceiptArtifact(atLimit));
+  expectApprovalErrorSync(
+    () => buildApprovalReceiptArtifact(approvalCore({ actor_login: '😀'.repeat(257) })),
+    'CORE_PROPERTY',
+  );
+  assert.doesNotThrow(() => buildApprovalReceiptArtifact(approvalCore({ actor_login: '\ud800' })));
 });
 
 test('buildApprovalReceiptArtifact does not retain mutable caller objects', () => {
