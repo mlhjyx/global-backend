@@ -71,7 +71,12 @@ test('round4 initializer and append return new frozen admitted histories without
   assert.notEqual(accepted.eventHistory, verified.eventHistory);
   assert.equal(Object.isFrozen(accepted.eventHistory), true);
   assert.equal(accepted.eventHistory.every(Object.isFrozen), true);
-  assert.equal(historyOutcome(verified.eventHistory, policy).state, 'VERIFIED');
+  assert.deepEqual(historyOutcome(verified.eventHistory, policy), {
+    state: 'OWNER_ASSIGNMENT_REQUIRED',
+    evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+    blockingCodes: ['APPROVAL_STATE_HISTORY_CONSUMED'],
+    eventCount: 0,
+  });
 
   const projected = renderApprovalStatusReadModel(accepted);
   assert.equal(Object.hasOwn(projected, 'eventHistory'), false);

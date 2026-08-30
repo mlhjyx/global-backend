@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import * as approvalState from './governance-approval-state.mjs';
@@ -64,6 +68,10 @@ test('round5 admitted history is bound to one closed policy snapshot and mismatc
   );
   assert.deepEqual(holdSummary(reduced), expectedHold('APPROVAL_STATE_POLICY_MISMATCH'));
   assert.equal(reduced.policySnapshot.repository.fullName, policy.repository.fullName);
+  assert.equal(Object.isFrozen(accepted.policySnapshot), true);
+  assert.equal(Object.isFrozen(accepted.policySnapshot.repository), true);
+  assert.equal(Object.isFrozen(accepted.policySnapshot.acceptanceAllowlist), true);
+  assert.equal(accepted.policySnapshot.acceptanceAllowlist.every(Object.isFrozen), true);
   assert.equal(
     approvalState.renderApprovalStatusReadModel(reduced).repository.fullName,
     policy.repository.fullName,
@@ -144,6 +152,69 @@ test('round5 failed append leaves its parent active and each initializer mints a
   assert.deepEqual([firstProposed.state, secondProposed.state], ['PROPOSED', 'PROPOSED']);
 });
 
+test('round5 append rejects accessor reentry without invoking it or consuming the parent', () => {
+  const policy = approvalPolicy();
+  const rootTime = new Date('2026-08-30T07:05:00.000Z');
+  const root = approvalState.initializeApprovalDecisionState(policy, rootTime);
+  const accessorPolicy = clone(policy);
+  let accessorCalls = 0;
+  let reentrantState = null;
+  Object.defineProperty(accessorPolicy, 'decisionRevision', {
+    enumerable: true,
+    get() {
+      accessorCalls += 1;
+      reentrantState = append(root, {
+        type: 'AUTHORITIES_ASSIGNED',
+        observedAt: rootTime.toISOString(),
+      }, policy, rootTime);
+      return policy.decisionRevision;
+    },
+  });
+
+  const outer = append(root, {
+    type: 'AUTHORITIES_ASSIGNED',
+    observedAt: rootTime.toISOString(),
+  }, accessorPolicy, rootTime);
+  assert.deepEqual(holdSummary(outer), expectedHold('APPROVAL_STATE_POLICY_MISMATCH'));
+  assert.equal(accessorCalls, 0);
+  assert.equal(reentrantState, null);
+
+  const proposed = append(root, {
+    type: 'AUTHORITIES_ASSIGNED',
+    observedAt: rootTime.toISOString(),
+  }, policy, rootTime);
+  assert.equal(proposed.state, 'PROPOSED');
+});
+
+test('round5 in-progress capability prevents proxy reentry from minting a sibling', () => {
+  const policy = approvalPolicy();
+  const rootTime = new Date('2026-08-30T07:05:00.000Z');
+  const root = approvalState.initializeApprovalDecisionState(policy, rootTime);
+  const event = { type: 'AUTHORITIES_ASSIGNED', observedAt: rootTime.toISOString() };
+  let reentrantState = null;
+  let reentered = false;
+  const proxyPolicy = new Proxy(clone(policy), {
+    ownKeys(target) {
+      if (!reentered) {
+        reentered = true;
+        reentrantState = append(root, event, policy, rootTime);
+      }
+      return Reflect.ownKeys(target);
+    },
+  });
+
+  const proposed = append(root, event, proxyPolicy, rootTime);
+  assert.equal(proposed.state, 'PROPOSED');
+  assert.deepEqual(
+    holdSummary(reentrantState),
+    expectedHold('APPROVAL_STATE_HISTORY_CONSUMED'),
+  );
+  assert.deepEqual(
+    holdSummary(approvalState.reduceApprovalDecisionState(root.eventHistory, policy, rootTime)),
+    expectedHold('APPROVAL_STATE_HISTORY_CONSUMED'),
+  );
+});
+
 test('round5 initializer rejects unsafe, oversized, incomplete, and unknown policy before admission', () => {
   const cyclic = approvalPolicy();
   cyclic.untrusted = cyclic;
@@ -168,6 +239,18 @@ test('round5 initializer rejects unsafe, oversized, incomplete, and unknown poli
   const incomplete = approvalPolicy();
   delete incomplete.requiredMachineChecks;
 
+  const symbolUnknown = approvalPolicy();
+  symbolUnknown[Symbol('untrusted')] = true;
+
+  const hiddenUnknown = approvalPolicy();
+  Object.defineProperty(hiddenUnknown, 'untrusted', { value: true });
+
+  const arrayUnknown = approvalPolicy();
+  arrayUnknown.acceptanceAllowlist.untrusted = true;
+
+  const sparseArray = approvalPolicy();
+  delete sparseArray.acceptanceAllowlist[0];
+
   const asciiOversize = approvalPolicy();
   asciiOversize.repository.fullName = `owner/${'a'.repeat(33_000)}`;
 
@@ -181,6 +264,10 @@ test('round5 initializer rejects unsafe, oversized, incomplete, and unknown poli
     unknown: capturePolicyInitialization(unknown),
     nestedUnknown: capturePolicyInitialization(nestedUnknown),
     incomplete: capturePolicyInitialization(incomplete),
+    symbolUnknown: capturePolicyInitialization(symbolUnknown),
+    hiddenUnknown: capturePolicyInitialization(hiddenUnknown),
+    arrayUnknown: capturePolicyInitialization(arrayUnknown),
+    sparseArray: capturePolicyInitialization(sparseArray),
     asciiOversize: capturePolicyInitialization(asciiOversize),
     multibyteOversize: capturePolicyInitialization(multibyteOversize),
   }, {
@@ -190,6 +277,10 @@ test('round5 initializer rejects unsafe, oversized, incomplete, and unknown poli
     unknown: 'APPROVAL_STATE_POLICY_INVALID',
     nestedUnknown: 'APPROVAL_STATE_POLICY_INVALID',
     incomplete: 'APPROVAL_STATE_POLICY_INVALID',
+    symbolUnknown: 'APPROVAL_STATE_POLICY_INVALID',
+    hiddenUnknown: 'APPROVAL_STATE_POLICY_INVALID',
+    arrayUnknown: 'APPROVAL_STATE_POLICY_INVALID',
+    sparseArray: 'APPROVAL_STATE_POLICY_INVALID',
     asciiOversize: 'APPROVAL_STATE_POLICY_OVERSIZE',
     multibyteOversize: 'APPROVAL_STATE_POLICY_OVERSIZE',
   });
@@ -197,9 +288,6 @@ test('round5 initializer rejects unsafe, oversized, incomplete, and unknown poli
 
 test('round5 cloned, JSON, and duplicate-module histories still remain external HOLD', async () => {
   const { accepted, policy } = buildRound4AcceptedState();
-  const duplicateModule = await import(
-    new URL('./governance-approval-state.mjs?round5-duplicate-module', import.meta.url)
-  );
   const outcomes = [
     approvalState.reduceApprovalDecisionState(clone(accepted.eventHistory), policy, NOW),
     approvalState.reduceApprovalDecisionState(
@@ -207,10 +295,33 @@ test('round5 cloned, JSON, and duplicate-module histories still remain external 
       policy,
       NOW,
     ),
-    duplicateModule.reduceApprovalDecisionState(accepted.eventHistory, policy, NOW),
   ].map(holdSummary);
   assert.deepEqual(outcomes, Array.from(
-    { length: 3 },
+    { length: 2 },
     () => expectedHold('APPROVAL_STATE_HISTORY_NOT_ADMITTED'),
   ));
+
+  const stateUrl = new URL('./governance-approval-state.mjs', import.meta.url);
+  const duplicateDirectory = await mkdtemp(join(tmpdir(), 'approval-state-round5-'));
+  try {
+    const source = await readFile(stateUrl, 'utf8');
+    const duplicateSource = source.replace(
+      /from '(\.\/[^']+)'/g,
+      (_match, specifier) => `from ${JSON.stringify(new URL(specifier, stateUrl).href)}`,
+    );
+    const duplicatePath = join(duplicateDirectory, 'governance-approval-state-duplicate.mjs');
+    await writeFile(duplicatePath, duplicateSource, { encoding: 'utf8', flag: 'wx' });
+    const duplicateModule = await import(pathToFileURL(duplicatePath).href);
+    const duplicate = duplicateModule.reduceApprovalDecisionState(
+      accepted.eventHistory,
+      policy,
+      NOW,
+    );
+    assert.deepEqual(
+      holdSummary(duplicate),
+      expectedHold('APPROVAL_STATE_HISTORY_NOT_ADMITTED'),
+    );
+  } finally {
+    await rm(duplicateDirectory, { recursive: true });
+  }
 });

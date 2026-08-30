@@ -387,7 +387,11 @@ test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED'
   }), 0);
   assert.equal(JSON.parse(output.join('')).decisionId, 'ADR-027');
   const stale = { ...evidence, readAt: '2026-08-29T08:00:00.000Z' };
-  assert.throws(() => appendAcceptance(state, stale, policy, NOW), /APPROVAL_ACCEPTANCE_REVALIDATION_STALE/);
+  const staleParent = verifiedState(policy, mergeAuthorization);
+  assert.throws(
+    () => appendAcceptance(staleParent, stale, policy, NOW),
+    /APPROVAL_ACCEPTANCE_REVALIDATION_STALE/,
+  );
 });
 
 test('reviewer C1 counterexample cannot promote caller-declared receipt or validation booleans', async () => {
@@ -527,8 +531,6 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
       return `THREW:${error.message}`;
     }
   };
-  const revokedState = appendRevocation(accepted, policy, revocationEvent(), REVOCATION_NOW);
-  const revoked = outcome(revokedState.eventHistory);
   let future = 'UNSAFE_ACCEPT';
   try {
     approvalStateModule.appendApprovalDecisionEvent(accepted, {
@@ -540,6 +542,8 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
   } catch (error) {
     future = `THREW:${error.message}`;
   }
+  const revokedState = appendRevocation(accepted, policy, revocationEvent(), REVOCATION_NOW);
+  const revoked = outcome(revokedState.eventHistory);
   const nonmonotonic = clone(accepted.eventHistory);
   nonmonotonic[1].observedAt = '2026-08-30T06:00:00.000Z';
   const duplicate = [...accepted.eventHistory, clone(accepted.eventHistory.at(-1))];
@@ -548,10 +552,11 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
     { type: 'RECEIPT_REVOKED', observedAt: '2026-08-30T08:00:00.000Z' },
   ];
   let backdatedAppend = 'UNSAFE_ACCEPT';
+  const backdatedParent = verifiedState(policy, mergeAuthorization);
   try {
-    approvalStateModule.appendApprovalDecisionEvent(verified, {
+    approvalStateModule.appendApprovalDecisionEvent(backdatedParent, {
       schemaVersion: 'approval-event-append/v1',
-      expectedHistorySha256: digest(verified.eventHistory),
+      expectedHistorySha256: digest(backdatedParent.eventHistory),
       appendedAt: later.toISOString(),
       event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
     }, policy, later);

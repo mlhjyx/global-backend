@@ -1,4 +1,7 @@
 import {
+  AUTHORITY_REVISION_PATTERN,
+  DECISION_REVISION_PATTERN,
+  POLICY_REVISION_PATTERN,
   approvalError,
   deepFreeze,
   hasExactKeys,
@@ -78,13 +81,37 @@ const POLICY_KEYS = Object.freeze([
   'liveRulesetSha256', 'acceptanceAllowlist', 'requiredReviews',
   'requiredMachineChecks', 'freshnessMs',
 ]);
-const admittedApprovalHistories = new WeakSet();
+const POLICY_FILE_KEYS = Object.freeze(['path', 'sha256']);
+const POLICY_REVIEW_KEYS = Object.freeze(['slot', 'commandDigest']);
+const POLICY_MACHINE_CHECK_KEYS = Object.freeze([
+  'context', 'appId', 'workflowPath', 'workflowSha', 'baseBlobSha', 'signerIdentity',
+]);
+const POLICY_REVIEW_SLOTS = new Set(['PRODUCT', 'PRIVACY', 'CODEOWNER', 'QA', 'SECURITY']);
+const MAX_POLICY_BYTES = 32_768;
+const MAX_POLICY_NODES = 2_048;
+const MAX_POLICY_DEPTH = 32;
+const HISTORY_ACTIVE = 'ACTIVE';
+const HISTORY_APPENDING = 'APPENDING';
+const HISTORY_CONSUMED = 'CONSUMED';
+const approvalHistoryBindings = new WeakMap();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
-const admittedHistory = (events) => {
+const prepareApprovalHistory = (events) => {
   const history = events.map((event) => deepFreeze(clone(event)));
   deepFreeze(history);
-  admittedApprovalHistories.add(history);
+  return history;
+};
+const historyBinding = (policySnapshot, policySha256, capabilityState) => Object.freeze({
+  policySnapshot,
+  policySha256,
+  capabilityState,
+});
+const activateApprovalHistory = (history, binding) => {
+  approvalHistoryBindings.set(history, historyBinding(
+    binding.policySnapshot,
+    binding.policySha256,
+    HISTORY_ACTIVE,
+  ));
   return history;
 };
 const nowIso = (now) => {
@@ -141,16 +168,166 @@ const acceptanceEventEvidenceValid = (event) => {
     && Date.parse(event.observedAt) <= Date.parse(event.checkedAt)
   );
 };
-const policyBoundaryValid = (policy) => (
-  isPlainObject(policy)
-  && hasExactKeys(policy.repository, ['id', 'fullName'])
-  && isSafePositiveInteger(policy.repository.id)
-  && typeof policy.repository.fullName === 'string'
-  && DECISION_IDS.has(policy.decisionId)
+const boundedPolicyString = (value, maximumBytes, pattern) => (
+  typeof value === 'string'
+  && Buffer.byteLength(value, 'utf8') > 0
+  && Buffer.byteLength(value, 'utf8') <= maximumBytes
+  && (pattern === undefined || pattern.test(value))
 );
+const policyStringHasControlCharacter = (value) => [...value].some((character) => {
+  const codePoint = character.codePointAt(0);
+  return codePoint <= 31 || codePoint === 127;
+});
+const safePolicyPath = (value, maximumBytes = 512) => (
+  boundedPolicyString(value, maximumBytes)
+  && !value.startsWith('/')
+  && !value.includes('\\')
+  && !value.split('/').includes('..')
+  && !policyStringHasControlCharacter(value)
+);
+const hasExactPolicyKeys = (value, keys) => {
+  if (!isPlainObject(value)) return false;
+  try {
+    const ownKeys = Reflect.ownKeys(value);
+    return ownKeys.length === keys.length
+      && ownKeys.every((key) => typeof key === 'string' && keys.includes(key))
+      && keys.every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor !== undefined
+          && descriptor.enumerable === true
+          && Object.hasOwn(descriptor, 'value');
+      });
+  } catch {
+    return false;
+  }
+};
+const closedPolicyArray = (value, minimumLength, maximumLength) => {
+  if (!Array.isArray(value)
+    || value.length < minimumLength
+    || value.length > maximumLength) return false;
+  try {
+    const ownKeys = Reflect.ownKeys(value);
+    if (ownKeys.length !== value.length + 1 || !ownKeys.includes('length')) return false;
+    return Array.from({ length: value.length }, (_unused, index) => String(index))
+      .every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor !== undefined
+          && descriptor.enumerable === true
+          && Object.hasOwn(descriptor, 'value');
+      });
+  } catch {
+    return false;
+  }
+};
+const policyShapeValid = (policy) => {
+  if (!hasExactPolicyKeys(policy, POLICY_KEYS)
+    || !hasExactPolicyKeys(policy.repository, ['id', 'fullName'])
+    || !isSafePositiveInteger(policy.repository.id)
+    || !boundedPolicyString(
+      policy.repository.fullName,
+      256,
+      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+    )
+    || !DECISION_IDS.has(policy.decisionId)
+    || !DECISION_REVISION_PATTERN.test(policy.decisionRevision)
+    || !POLICY_REVISION_PATTERN.test(policy.policyRevision)
+    || !isGitSha(policy.currentBaseSha)
+    || !isGitSha(policy.currentHeadSha)
+    || !isDigest(policy.decisionRawSha256)
+    || !isDigest(policy.decisionSemanticSha256)
+    || !isDigest(policy.sidecarRawSha256)
+    || !isGitSha(policy.proposalResultCommitSha)
+    || !AUTHORITY_REVISION_PATTERN.test(policy.authorityRevision)
+    || !isDigest(policy.authoritySha256)
+    || !isDigest(policy.authorityRawSha256)
+    || !isCanonicalInstant(policy.authorityEffectiveFrom)
+    || !isCanonicalInstant(policy.authorityEffectiveUntil)
+    || Date.parse(policy.authorityEffectiveFrom) >= Date.parse(policy.authorityEffectiveUntil)
+    || !boundedPolicyString(policy.legalScope, 128, /^[A-Z][A-Z0-9_]*$/)
+    || !isDigest(policy.legalDigest)
+    || !isDigest(policy.liveRulesetSha256)
+    || !Number.isSafeInteger(policy.freshnessMs)
+    || policy.freshnessMs <= 0
+    || policy.freshnessMs > 86_400_000) return false;
+
+  if (!closedPolicyArray(policy.acceptanceAllowlist, 1, 32)
+    || !policy.acceptanceAllowlist.every((file) => (
+      hasExactPolicyKeys(file, POLICY_FILE_KEYS)
+      && safePolicyPath(file.path)
+      && isDigest(file.sha256)
+    ))
+    || new Set(policy.acceptanceAllowlist.map(({ path }) => path)).size
+      !== policy.acceptanceAllowlist.length) return false;
+
+  if (!closedPolicyArray(
+    policy.requiredReviews,
+    POLICY_REVIEW_SLOTS.size,
+    POLICY_REVIEW_SLOTS.size,
+  )
+    || !policy.requiredReviews.every((review) => (
+      hasExactPolicyKeys(review, POLICY_REVIEW_KEYS)
+      && POLICY_REVIEW_SLOTS.has(review.slot)
+      && isDigest(review.commandDigest)
+    ))
+    || new Set(policy.requiredReviews.map(({ slot }) => slot)).size
+      !== POLICY_REVIEW_SLOTS.size) return false;
+
+  return closedPolicyArray(policy.requiredMachineChecks, 1, 16)
+    && policy.requiredMachineChecks.every((check) => (
+      hasExactPolicyKeys(check, POLICY_MACHINE_CHECK_KEYS)
+      && boundedPolicyString(check.context, 128, /^[A-Za-z0-9][A-Za-z0-9_.:/-]*$/)
+      && isSafePositiveInteger(check.appId)
+      && safePolicyPath(check.workflowPath)
+      && isGitSha(check.workflowSha)
+      && isGitSha(check.baseBlobSha)
+      && boundedPolicyString(check.signerIdentity, 256, /^[A-Za-z0-9][A-Za-z0-9_.:/-]*$/)
+    ))
+    && new Set(policy.requiredMachineChecks.map(({ context }) => context)).size
+      === policy.requiredMachineChecks.length;
+};
+const policyValidationCode = (policy) => {
+  const inspection = inspectApprovalValueGraph(policy, {
+    maxNodes: MAX_POLICY_NODES,
+    maxDepth: MAX_POLICY_DEPTH,
+    maxBytes: MAX_POLICY_BYTES,
+  });
+  if (approvalGraphUnsafe(inspection)) return 'APPROVAL_STATE_POLICY_GRAPH_INVALID';
+  if (inspection.byteOverflow) return 'APPROVAL_STATE_POLICY_OVERSIZE';
+  try {
+    if (!policyShapeValid(policy)) return 'APPROVAL_STATE_POLICY_INVALID';
+    return Buffer.byteLength(JSON.stringify(policy), 'utf8') <= MAX_POLICY_BYTES
+      ? null
+      : 'APPROVAL_STATE_POLICY_OVERSIZE';
+  } catch {
+    return 'APPROVAL_STATE_POLICY_INVALID';
+  }
+};
+const createPolicyBinding = (policy) => {
+  const validationCode = policyValidationCode(policy);
+  if (validationCode !== null) throw approvalError(validationCode);
+  let policySnapshot;
+  try {
+    policySnapshot = frozenClone(policy);
+  } catch {
+    throw approvalError('APPROVAL_STATE_POLICY_INVALID');
+  }
+  return historyBinding(
+    policySnapshot,
+    canonicalApprovalDigest(policySnapshot),
+    HISTORY_ACTIVE,
+  );
+};
+const callerPolicyMatches = (policy, binding) => {
+  if (policyValidationCode(policy) !== null) return false;
+  try {
+    return canonicalApprovalDigest(policy) === binding.policySha256;
+  } catch {
+    return false;
+  }
+};
 const baseState = (policy, eventHistory = []) => ({
   schemaVersion: 'approval-decision-state/v1',
-  repository: clone(policy.repository),
+  repository: policy.repository,
   decisionId: policy.decisionId,
   decisionRevision: policy.decisionRevision,
   policyRevision: policy.policyRevision,
@@ -174,18 +351,17 @@ const baseState = (policy, eventHistory = []) => ({
   supersessionStatus: 'CURRENT',
   blockingCodes: ['APPROVAL_OWNER_ASSIGNMENT_REQUIRED'],
   eventHistory,
-  policySnapshot: clone(policy),
+  policySnapshot: policy,
   acceptanceCheckedAt: null,
 });
 
-const reduceAdmittedApprovalDecisionState = (events, policy, now) => {
+const reduceBoundApprovalDecisionState = (events, binding, now) => {
   const reductionNow = nowIso(now);
   if (!Array.isArray(events)
-    || events.length > 128
-    || !admittedApprovalHistories.has(events)
-    || !policyBoundaryValid(policy)) {
+    || events.length > 128) {
     throw approvalError('APPROVAL_STATE_INPUT_INVALID');
   }
+  const policy = binding.policySnapshot;
   let state = baseState(policy, events);
   let priorEventTime = null;
   const eventDigests = new Set();
@@ -345,71 +521,113 @@ const reduceAdmittedApprovalDecisionState = (events, policy, now) => {
   return deepFreeze({ ...state, eventHistory: events });
 };
 
+const boundHistoryHold = (binding, code) => deepFreeze({
+  ...baseState(binding.policySnapshot),
+  evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+  blockingCodes: [code],
+  eventHistory: [],
+});
+
 export const reduceApprovalDecisionState = (events, policy, now) => {
   nowIso(now);
-  if (!Array.isArray(events) || !policyBoundaryValid(policy)) {
-    throw approvalError('APPROVAL_STATE_INPUT_INVALID');
+  if (!Array.isArray(events)) throw approvalError('APPROVAL_STATE_INPUT_INVALID');
+  const binding = approvalHistoryBindings.get(events);
+  if (binding === undefined) {
+    return boundHistoryHold(
+      createPolicyBinding(policy),
+      'APPROVAL_STATE_HISTORY_NOT_ADMITTED',
+    );
   }
-  if (!admittedApprovalHistories.has(events)) {
-    return frozenClone({
-      ...baseState(policy),
-      evidenceTrustState: 'EXTERNAL_UNVERIFIED',
-      blockingCodes: ['APPROVAL_STATE_HISTORY_NOT_ADMITTED'],
-      eventHistory: [],
-    });
+  if (!callerPolicyMatches(policy, binding)) {
+    return boundHistoryHold(binding, 'APPROVAL_STATE_POLICY_MISMATCH');
   }
-  return reduceAdmittedApprovalDecisionState(events, policy, now);
+  const currentBinding = approvalHistoryBindings.get(events);
+  if (currentBinding?.capabilityState !== HISTORY_ACTIVE) {
+    return boundHistoryHold(currentBinding ?? binding, 'APPROVAL_STATE_HISTORY_CONSUMED');
+  }
+  return reduceBoundApprovalDecisionState(events, currentBinding, now);
 };
 
 export const initializeApprovalDecisionState = (policy, now) => {
   nowIso(now);
-  if (!policyBoundaryValid(policy)) throw approvalError('APPROVAL_STATE_INPUT_INVALID');
-  return reduceAdmittedApprovalDecisionState(admittedHistory([]), policy, now);
+  const binding = createPolicyBinding(policy);
+  const history = activateApprovalHistory(prepareApprovalHistory([]), binding);
+  return reduceBoundApprovalDecisionState(history, binding, now);
 };
 
 export const appendApprovalDecisionEvent = (state, append, policy, now) => {
   const appendedAt = nowIso(now);
   if (!isPlainObject(state)
     || !Array.isArray(state.eventHistory)
-    || !admittedApprovalHistories.has(state.eventHistory)
-    || !hasExactKeys(append, APPEND_KEYS)
-    || append.schemaVersion !== 'approval-event-append/v1'
-    || append.appendedAt !== appendedAt
-    || !isDigest(append.expectedHistorySha256)
-    || append.expectedHistorySha256 !== canonicalApprovalDigest(state.eventHistory)
-    || !isPlainObject(append.event)) transitionError('APPROVAL_STATE_APPEND_INVALID');
-  const inspection = inspectApprovalValueGraph(append.event);
-  if (approvalGraphUnsafe(inspection)) transitionError('APPROVAL_STATE_APPEND_INVALID');
-  const currentState = reduceAdmittedApprovalDecisionState(state.eventHistory, policy, now);
-  let event;
-  if (append.event.type === 'ACCEPTANCE_REVALIDATED') {
-    if (!hasExactKeys(append.event, ACCEPTANCE_LIVE_KEYS)
-      || !acceptanceEventEvidenceValid(append.event)
-      || append.event.observedAt !== append.event.evidence.readAt) {
-      transitionError('APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
-    }
-    const validation = revalidateApprovalAtAcceptance(currentState, append.event.evidence, now);
-    if (!validation.valid) {
-      transitionError(validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
-    }
-    event = {
-      ...clone(append.event),
-      checkedAt: validation.checkedAt,
-      evidenceSha256: canonicalApprovalDigest(append.event.evidence),
-    };
-  } else if (append.event.type === 'RECEIPT_REVOKED') {
-    event = buildStoredReceiptRevocationEvent(
-      append.event,
-      currentState,
-      policy,
-      appendedAt,
-    );
-  } else {
-    if (append.event.observedAt !== appendedAt) transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
-    event = clone(append.event);
+    || !approvalHistoryBindings.has(state.eventHistory)) {
+    transitionError('APPROVAL_STATE_APPEND_INVALID');
   }
-  const nextHistory = admittedHistory([...state.eventHistory, event]);
-  return reduceAdmittedApprovalDecisionState(nextHistory, policy, now);
+  const binding = approvalHistoryBindings.get(state.eventHistory);
+  if (binding.capabilityState !== HISTORY_ACTIVE) {
+    return boundHistoryHold(binding, 'APPROVAL_STATE_HISTORY_CONSUMED');
+  }
+  approvalHistoryBindings.set(state.eventHistory, historyBinding(
+    binding.policySnapshot,
+    binding.policySha256,
+    HISTORY_APPENDING,
+  ));
+  let committed = false;
+  try {
+    if (!callerPolicyMatches(policy, binding)) {
+      return boundHistoryHold(binding, 'APPROVAL_STATE_POLICY_MISMATCH');
+    }
+    if (!hasExactKeys(append, APPEND_KEYS)
+      || append.schemaVersion !== 'approval-event-append/v1'
+      || append.appendedAt !== appendedAt
+      || !isDigest(append.expectedHistorySha256)
+      || append.expectedHistorySha256 !== canonicalApprovalDigest(state.eventHistory)
+      || !isPlainObject(append.event)) transitionError('APPROVAL_STATE_APPEND_INVALID');
+    const inspection = inspectApprovalValueGraph(append.event);
+    if (approvalGraphUnsafe(inspection)) transitionError('APPROVAL_STATE_APPEND_INVALID');
+    const currentState = reduceBoundApprovalDecisionState(state.eventHistory, binding, now);
+    let event;
+    if (append.event.type === 'ACCEPTANCE_REVALIDATED') {
+      if (!hasExactKeys(append.event, ACCEPTANCE_LIVE_KEYS)
+        || !acceptanceEventEvidenceValid(append.event)
+        || append.event.observedAt !== append.event.evidence.readAt) {
+        transitionError('APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
+      }
+      const validation = revalidateApprovalAtAcceptance(currentState, append.event.evidence, now);
+      if (!validation.valid) {
+        transitionError(validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
+      }
+      event = {
+        ...clone(append.event),
+        checkedAt: validation.checkedAt,
+        evidenceSha256: canonicalApprovalDigest(append.event.evidence),
+      };
+    } else if (append.event.type === 'RECEIPT_REVOKED') {
+      event = buildStoredReceiptRevocationEvent(
+        append.event,
+        currentState,
+        binding.policySnapshot,
+        appendedAt,
+      );
+    } else {
+      if (append.event.observedAt !== appendedAt) transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
+      event = clone(append.event);
+    }
+    const nextHistory = prepareApprovalHistory([...state.eventHistory, event]);
+    const nextState = reduceBoundApprovalDecisionState(nextHistory, binding, now);
+    approvalHistoryBindings.set(state.eventHistory, historyBinding(
+      binding.policySnapshot,
+      binding.policySha256,
+      HISTORY_CONSUMED,
+    ));
+    activateApprovalHistory(nextHistory, binding);
+    committed = true;
+    return nextState;
+  } finally {
+    if (!committed
+      && approvalHistoryBindings.get(state.eventHistory)?.capabilityState === HISTORY_APPENDING) {
+      activateApprovalHistory(state.eventHistory, binding);
+    }
+  }
 };
 
 const STATUS_COPY = Object.freeze({
