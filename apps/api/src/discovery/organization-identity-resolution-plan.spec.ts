@@ -194,6 +194,41 @@ describe("deterministic organization identity resolution plan", () => {
     ).toThrow(resolutionError());
   });
 
+  it("keeps a fixed multi-root permutation and duplicate binding receipt invariant", () => {
+    // Production mutation: unordered database facts change the chosen roots or conflict receipt.
+    const second = identifier({ normalizedValue: "DE9999" });
+    const facts = {
+      authorityIdentifiers: [second, identifier(), { ...second }],
+      existingBindings: [
+        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+        { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+      ],
+      rootMappings: [
+        { sourceCompanyId: COMPANY_B, rootCompanyId: "55555555-5555-4555-8555-555555555555" },
+        { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+      ],
+    };
+    const first = plan(facts);
+    const reversed = plan({
+      authorityIdentifiers: [...facts.authorityIdentifiers].reverse(),
+      existingBindings: [...facts.existingBindings].reverse(),
+      rootMappings: [...facts.rootMappings].reverse(),
+    });
+    expect(first).toMatchObject({
+      kind: "conflict",
+      conflictType: "identifier_split",
+      companyIds: [COMPANY_ROOT, "55555555-5555-4555-8555-555555555555"],
+      identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
+      inputHash: "0e586afcfa62c7679a530d1d9439fc58f072117b3933a43e75701b293294bad2",
+      conflictFingerprint: "c104982be03334fde490c1345c27888aaa72595b1d8ae97665c129ee2ccbc6bc",
+    });
+    expect(reversed).toMatchObject({
+      inputHash: "0e586afcfa62c7679a530d1d9439fc58f072117b3933a43e75701b293294bad2",
+      conflictFingerprint: "c104982be03334fde490c1345c27888aaa72595b1d8ae97665c129ee2ccbc6bc",
+    });
+  });
+
   it("creates an immutable identity_v2 plan when authority identifiers are unbound", () => {
     const result = plan();
 

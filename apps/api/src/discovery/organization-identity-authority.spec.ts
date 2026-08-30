@@ -387,6 +387,45 @@ describe("governed Raw organization identity authority", () => {
     ).toBeNull();
   });
 
+  it("accepts the exact TED eighty-byte UTF-8 boundary with its full literal authority", () => {
+    // Production mutation: a SQL byte-length guard rejects the maximum valid identifier.
+    const value = "ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ";
+    expect(Buffer.byteLength(value, "utf8")).toBe(80);
+    expect(
+      extractOrganizationIdentityAuthority("ted", {
+        ...validPayloads().ted,
+        identifier: { scheme: "ted-natid:de", value },
+        attributes: {
+          ted: {
+            publication_number: "1",
+            publication_date: "2026-08-25",
+            notice_type: "award",
+            winner_identifier: value,
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        providerKey: "ted",
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "acme.example",
+        validatorVersion: "domain-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "domain:GLOBAL:acme.example",
+      },
+      {
+        providerKey: "ted",
+        scheme: "ted-natid",
+        jurisdiction: "DE",
+        normalizedValue: "ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ",
+        validatorVersion: "ted-natid-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "ted-natid:DE:ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ",
+      },
+    ]);
+  });
+
   it("parses only exact canonical authority output across every current producer path", () => {
     for (const providerKey of GOVERNED_RAW_SOURCE_PROVIDER_KEYS) {
       for (const produced of extractOrganizationIdentityAuthority(
