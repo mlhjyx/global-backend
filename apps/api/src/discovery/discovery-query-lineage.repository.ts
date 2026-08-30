@@ -22,11 +22,18 @@ const KEY_FIELDS = Object.freeze([
   'queryOrdinal', 'authorityId', 'accountKey', 'purpose', 'subjectType',
   'subjectId', 'requestSha256',
 ] as const);
-const COMMAND_FIELDS = Object.freeze([
+const COMMAND_FIELDS_V1 = Object.freeze([
   'schemaVersion', 'contractSha256', 'lookup', 'queryReceipt',
   'queryReceiptContractSha256', 'rawRelationContractSha256', 'attempts',
   'items', 'authorization',
 ] as const);
+const COMMAND_FIELDS_V2 = Object.freeze([
+  'schemaVersion', 'contractSha256', 'lookup', 'queryReceipt',
+  'queryReceiptContractSha256', 'rawRelationContractSha256', 'budgetTruncated', 'attempts',
+  'items', 'authorization',
+] as const);
+const DISCOVERY_QUERY_LINEAGE_CONTRACT_V1_SHA256 =
+  'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0';
 
 type RecordValue = Record<string, unknown>;
 export interface DiscoveryQueryLineageTransaction {
@@ -38,6 +45,14 @@ export type DiscoveryQueryLineageAppendResult = Readonly<{
 export type DiscoveryQueryLineageAttestResult = Readonly<{
   status: 'NOT_FOUND' | 'REPLAYED';
   queryReceipt: unknown;
+  attemptCount: number;
+  itemCount: number;
+  replay: boolean;
+}>;
+export type DiscoveryQueryLineageAttestV2Result = Readonly<{
+  status: 'NOT_FOUND' | 'REPLAYED';
+  queryReceipt: unknown;
+  budgetTruncated: boolean | null;
   attemptCount: number;
   itemCount: number;
   replay: boolean;
@@ -146,9 +161,15 @@ function snapshotJson(value: unknown, state = { nodes: 0 }, depth = 0): unknown 
   return Object.freeze(result);
 }
 
-function snapshotCommand(value: unknown): Readonly<RecordValue> {
-  const command = ownRecord(value, COMMAND_FIELDS);
-  if (field(command, 'schemaVersion') !== 'discovery-query-lineage-command/v1') fail();
+function snapshotCommand(
+  value: unknown,
+  version: 'v1' | 'v2',
+): Readonly<RecordValue> {
+  const command = ownRecord(
+    value,
+    version === 'v1' ? COMMAND_FIELDS_V1 : COMMAND_FIELDS_V2,
+  );
+  if (field(command, 'schemaVersion') !== `discovery-query-lineage-command/${version}`) fail();
   const lookupValue = field(command, 'lookup');
   const lookupRecord = ownRecord(lookupValue, [...KEY_FIELDS, 'sourceClass']);
   const lookup = snapshotKey(Object.fromEntries(KEY_FIELDS.map((key) => [key, field(lookupRecord, key)])));
@@ -163,8 +184,16 @@ function snapshotCommand(value: unknown): Readonly<RecordValue> {
     stringField(command, digest, SHA);
   }
   if (
-    field(command, 'contractSha256') !== DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256 ||
-    field(command, 'queryReceiptContractSha256') !== DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256 ||
+    field(command, 'contractSha256') !== (
+      version === 'v1'
+        ? DISCOVERY_QUERY_LINEAGE_CONTRACT_V1_SHA256
+        : DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256
+    ) ||
+    field(command, 'queryReceiptContractSha256') !== (
+      version === 'v1'
+        ? DISCOVERY_QUERY_LINEAGE_CONTRACT_V1_SHA256
+        : DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256
+    ) ||
     field(command, 'rawRelationContractSha256') !== DISCOVERY_QUERY_RAW_RELATION_SHA256
   ) fail();
   denseArray(field(command, 'attempts'), 128).forEach((item) => ownRecord(item));
@@ -203,6 +232,7 @@ function snapshotCommand(value: unknown): Readonly<RecordValue> {
   stringField(authorization, 'accountId', UUID);
   stringField(authorization, 'authorityId', UUID);
   const generation = field(authorization, 'generation');
+  if (version === 'v2' && typeof field(command, 'budgetTruncated') !== 'boolean') fail();
   if (!Number.isSafeInteger(generation) || Number(generation) < 1 || Number(generation) > 2_147_483_647) fail();
   return snapshotJson(command) as Readonly<RecordValue>;
 }
@@ -234,10 +264,33 @@ export async function appendQueryLineageV1(
   transaction: DiscoveryQueryLineageTransaction,
   value: unknown,
 ): Promise<DiscoveryQueryLineageAppendResult> {
-  const command = snapshotCommand(value);
+  const command = snapshotCommand(value, 'v1');
   try {
     const rows = await transaction.$queryRaw<unknown[]>(
       Prisma.sql`SELECT * FROM public.append_discovery_query_lineage_v1(${JSON.stringify(command)}::jsonb)`,
+    );
+    if (!Array.isArray(rows) || rows.length !== 1) fail();
+    const row = ownRecord(rows[0]);
+    if (field(row, 'status') !== 'APPLIED') fail();
+    const queryKey = stringField(row, 'query_key', SHA);
+    if (queryKey !== field(ownRecord(field(command, 'lookup')), 'queryKey')) fail();
+    const attemptCount = count(field(row, 'attempt_count'));
+    const itemCount = count(field(row, 'item_count'));
+    if (attemptCount > 128 || itemCount > 524_160) fail();
+    return Object.freeze({
+      status: 'APPLIED', attemptCount, itemCount, queryKey,
+    });
+  } catch (error) { return mapError(error); }
+}
+
+export async function appendQueryLineageV2(
+  transaction: DiscoveryQueryLineageTransaction,
+  value: unknown,
+): Promise<DiscoveryQueryLineageAppendResult> {
+  const command = snapshotCommand(value, 'v2');
+  try {
+    const rows = await transaction.$queryRaw<unknown[]>(
+      Prisma.sql`SELECT * FROM public.append_discovery_query_lineage_v2(${JSON.stringify(command)}::jsonb)`,
     );
     if (!Array.isArray(rows) || rows.length !== 1) fail();
     const row = ownRecord(rows[0]);
@@ -280,8 +333,47 @@ export async function attestQueryLineageV1(
     }
     const receipt = parseDiscoveryQueryReceipt(rawReceipt);
     if (receipt.queryKey !== key.queryKey || receipt.queryOrdinal !== key.queryOrdinal) fail();
+    return Object.freeze({ status, queryReceipt: receipt, attemptCount, itemCount, replay });
+  } catch (error) { return mapError(error); }
+}
+
+export async function attestQueryLineageV2(
+  transaction: DiscoveryQueryLineageTransaction,
+  value: unknown,
+): Promise<DiscoveryQueryLineageAttestV2Result> {
+  const key = snapshotKey(value);
+  try {
+    const rows = await transaction.$queryRaw<unknown[]>(
+      Prisma.sql`SELECT * FROM public.attest_discovery_query_lineage_v2(${JSON.stringify(key)}::jsonb)`,
+    );
+    if (!Array.isArray(rows) || rows.length !== 1) fail();
+    const row = ownRecord(rows[0]);
+    const status = field(row, 'status');
+    const replay = field(row, 'replay');
+    if (
+      (status !== 'NOT_FOUND' && status !== 'REPLAYED') ||
+      typeof replay !== 'boolean' || replay !== (status === 'REPLAYED')
+    ) fail();
+    const attemptCount = count(field(row, 'attempt_count'));
+    const itemCount = count(field(row, 'item_count'));
+    if (attemptCount > 128 || itemCount > 524_160) fail();
+    const rawReceipt = field(row, 'query_receipt');
+    const budgetTruncated = field(row, 'budget_truncated');
+    if (status === 'NOT_FOUND') {
+      if (
+        rawReceipt !== null || budgetTruncated !== null ||
+        attemptCount !== 0 || itemCount !== 0
+      ) fail();
+      return Object.freeze({
+        status, queryReceipt: null, budgetTruncated: null,
+        attemptCount, itemCount, replay,
+      });
+    }
+    if (typeof budgetTruncated !== 'boolean') fail();
+    const receipt = parseDiscoveryQueryReceipt(rawReceipt);
+    if (receipt.queryKey !== key.queryKey || receipt.queryOrdinal !== key.queryOrdinal) fail();
     return Object.freeze({
-      status, queryReceipt: receipt, attemptCount, itemCount, replay,
+      status, queryReceipt: receipt, budgetTruncated, attemptCount, itemCount, replay,
     });
   } catch (error) { return mapError(error); }
 }

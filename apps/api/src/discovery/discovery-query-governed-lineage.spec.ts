@@ -222,7 +222,7 @@ describe('pure governed Discovery Q-TX plan builders', () => {
   it('locks canonical lineage and raw-relation descriptor digests', async () => {
     const module = await load();
     expect(module.DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256).toBe(
-      'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+      'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
     );
     expect(module.DISCOVERY_QUERY_RAW_RELATION_SHA256).toBe(
       'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
@@ -379,9 +379,10 @@ describe('pure governed Discovery Q-TX plan builders', () => {
       ],
       budgetAuthorization: { accountId: IDS.account, authorityId: IDS.authority,
         authorizedCapMicrousd: 999999999999n, generation: 7 },
+      budgetTruncated: false,
       ackFacts: [ackFact()],
     });
-    expect(command).toMatchObject({ schemaVersion: 'discovery-query-lineage-command/v1' });
+    expect(command).toMatchObject({ schemaVersion: 'discovery-query-lineage-command/v2' });
     expect(command).not.toHaveProperty('authorizedCapMicrousd');
     expect(command).toMatchObject({
       queryReceipt: {
@@ -443,8 +444,10 @@ describe('pure governed Discovery Q-TX plan builders', () => {
       ],
       budgetAuthorization: { accountId: IDS.account, authorityId: IDS.authority,
         authorizedCapMicrousd: 5n, generation: 1 },
+      budgetTruncated: true,
       ackFacts: [ackFact(), ackFact(directoryOperation, {}, 'directory')],
     });
+    expect(command.budgetTruncated).toBe(true);
     const items = command.items as Array<Record<string, unknown>>;
     expect(items.map((item) => `${item.providerKey}:${item.recordIndex}`))
       .toEqual(['directory:0', 'public_web:0']);
@@ -463,6 +466,7 @@ describe('pure governed Discovery Q-TX plan builders', () => {
       resolutions: [], rawReceipts: [],
       budgetAuthorization: { accountId: IDS.account, authorityId: IDS.authority,
         authorizedCapMicrousd: 1n, generation: 1 },
+      budgetTruncated: false,
     };
     expect(() => module.finalizeDiscoveryQueryLineageCommand({ ...base, ackFacts: [] }))
       .toThrow('DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH');
@@ -536,6 +540,7 @@ describe('pure governed Discovery Q-TX plan builders', () => {
       rawReceipts: [],
       budgetAuthorization: { accountId: IDS.account, authorityId: IDS.authority,
         authorizedCapMicrousd: 1n, generation: 1 },
+      budgetTruncated: false,
       ackFacts: [ackFact()],
     })).toThrow('DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_INVALID');
     expect(traps).toBe(0);

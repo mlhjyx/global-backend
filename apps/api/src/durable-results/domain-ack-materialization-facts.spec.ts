@@ -87,7 +87,7 @@ async function expectedAck(value: ReturnType<typeof acknowledgement>): Promise<D
     consumer: value.producerId === 'discovery.extract_company'
       ? 'PublicWebDiscoveryProvider.mineDomain' : 'SearchDiscoveryProvider',
     domainAggregateType: value.producerId === 'discovery.extract_company'
-      ? 'CanonicalCompany' : 'SearchResultEvidence',
+      ? 'RawSourceRecord' : 'SearchResultEvidence',
     domainAckKey: value.domainAckKey,
     domainRevision: value.domainRevision,
   }, async () => undefined);
@@ -202,6 +202,41 @@ describe('exact Domain ACK materialization facts', () => {
       transaction: mixedCompany.transaction, companyAcknowledgements: company,
       auxiliaryAcknowledgements: auxiliary, apply: vi.fn(), readback: vi.fn(),
     })).rejects.toThrow('DOMAIN_ACK_MIXED_REPLAY_STATE');
+  });
+
+  it('uses readback for auxiliary-only replay and apply for a fresh auxiliary fact', async () => {
+    const module = await load();
+    const auxiliary = acknowledgement('searxng.search', OPS.b);
+    const ack = await expectedAck(auxiliary);
+    for (const status of ['REPLAYED', 'APPLIED'] as const) {
+      const database = await instrumentedTransaction([{ operationId: OPS.b, status, ack }]);
+      const apply = vi.fn(async () => 'applied');
+      const readback = vi.fn(async () => 'replayed');
+      const result = await module.applyPartitionedDomainAckConsumerTransactions({
+        transaction: database.transaction,
+        companyAcknowledgements: [],
+        auxiliaryAcknowledgements: [auxiliary],
+        apply,
+        readback,
+      });
+      expect(result.status).toBe(status);
+      expect(result.value).toBe(status === 'APPLIED' ? 'applied' : 'replayed');
+      expect(apply).toHaveBeenCalledTimes(status === 'APPLIED' ? 1 : 0);
+      expect(readback).toHaveBeenCalledTimes(status === 'REPLAYED' ? 1 : 0);
+    }
+  });
+
+  it('rejects a governed company producer in the auxiliary partition before SQL', async () => {
+    const module = await load();
+    const queryRaw = vi.fn();
+    await expect(module.applyPartitionedDomainAckConsumerTransactions({
+      transaction: { $queryRaw: queryRaw },
+      companyAcknowledgements: [],
+      auxiliaryAcknowledgements: [acknowledgement('discovery.extract_company', OPS.a)],
+      apply: vi.fn(),
+      readback: vi.fn(),
+    })).rejects.toThrow('DOMAIN_ACK_PARTITIONED_INPUT_INVALID');
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
   it('passes full exact ACK facts to APPLIED and REPLAYED closures in the same transaction', async () => {

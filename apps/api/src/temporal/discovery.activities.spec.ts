@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
@@ -20,6 +21,7 @@ import type {
   ProviderCompanyRecord,
 } from "../discovery/provider-contract";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
+import { DISCOVERY_COMPANY_RESULT_LINEAGE_V1 } from "../discovery/company-discovery-lineage";
 
 const acknowledgementMocks = vi.hoisted(() => ({
   apply: vi.fn(
@@ -45,6 +47,19 @@ vi.mock("../model-runtime/structured-task-runtime-bridge", () => ({
 
 vi.mock("../durable-results/domain-ack-consumer-bindings", () => ({
   applyDomainAckConsumerTransactions: acknowledgementMocks.apply,
+  applyPartitionedDomainAckConsumerTransactions: async (input: {
+    transaction: unknown;
+    apply: (
+      transaction: unknown,
+      companyFacts: readonly unknown[],
+      auxiliaryFacts: readonly unknown[],
+    ) => Promise<unknown>;
+  }) => ({
+    status: "APPLIED",
+    companyFacts: [],
+    auxiliaryFacts: [],
+    value: await input.apply(input.transaction, [], []),
+  }),
   applyDomainAckConsumerTransaction: async (input: {
     transaction: unknown;
     apply: (transaction: unknown) => Promise<unknown>;
@@ -111,7 +126,29 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
       strings?: readonly string[];
       values: readonly unknown[];
     }) => {
-      if (statement.strings?.join("?").includes("FROM discovery_run")) {
+      const sql = statement.strings?.join("?") ?? "";
+      if (sql.includes("attest_discovery_query_lineage_v2")) {
+        return [{
+          status: "NOT_FOUND",
+          query_receipt: null,
+          budget_truncated: null,
+          attempt_count: 0,
+          item_count: 0,
+          replay: false,
+        }];
+      }
+      if (sql.includes("append_discovery_query_lineage_v2")) {
+        const command = JSON.parse(String(statement.values[0])) as {
+          lookup: { queryKey: string };
+        };
+        return [{
+          status: "APPLIED",
+          attempt_count: 0,
+          item_count: 0,
+          query_key: command.lookup.queryKey,
+        }];
+      }
+      if (sql.includes("FROM discovery_run")) {
         return [
           {
             id: String(statement.values[0]),
@@ -253,10 +290,21 @@ function authorityBudgetStore(): BudgetStore {
   return store;
 }
 
+function testRunId(runId: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runId)) {
+    return runId;
+  }
+  const bytes = createHash("sha256").update(runId).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function discoveryArgs<T extends object>(runId: string, extra: T) {
   return {
     workspaceId: DISCOVERY_BINDING.scopeKey,
-    runId,
+    runId: testRunId(runId),
     planId: "50000000-0000-4000-8000-000000000001",
     queryOrdinal: 0,
     queryReceiptMode: QUERY_RECEIPT_MODE,
@@ -576,7 +624,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
 
     await acts.executeQuery({
       workspaceId: DISCOVERY_BINDING.scopeKey,
-      runId: "run-row-id",
+      runId: "40000000-0000-4000-8000-000000000099",
       planId: "50000000-0000-4000-8000-000000000001",
       queryOrdinal: 0,
       queryReceiptMode: QUERY_RECEIPT_MODE,
@@ -697,6 +745,16 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         values?: readonly unknown[];
       }) => {
         const sql = statement.strings?.join("?") ?? "";
+        if (sql.includes("attest_discovery_query_lineage_v2")) {
+          return [{
+            status: "NOT_FOUND",
+            query_receipt: null,
+            budget_truncated: null,
+            attempt_count: 0,
+            item_count: 0,
+            replay: false,
+          }];
+        }
         if (sql.includes("FROM discovery_run")) {
           return [
             {
@@ -871,6 +929,90 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       activities.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
     ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_READBACK_MISSING");
   });
+
+  it("executes one lineage-capable zero-result provider through Q-TX", async () => {
+    const discoverCompanies = vi.fn(async () => ({
+      records: [],
+      costCents: 0,
+      lineage: {
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 0,
+        attemptReceipts: [],
+        receiptCoverage: [],
+      },
+    }));
+    const activities = createDiscoveryActivities(makeDeps([{
+      key: "public_web",
+      classes: ["public_intelligence"],
+      companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      discoverCompanies,
+    }]));
+
+    await expect(activities.executeQuery(
+      discoveryArgs("run-qtx-zero", { query: QUERY }),
+    )).resolves.toMatchObject({
+      rawCount: 0,
+      queryReceipt: { providers: ["public_web"] },
+      budgetTruncated: false,
+    });
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a capable plus legacy provider batch entirely on the legacy path", async () => {
+    const capable = vi.fn(async () => ({
+      records: [],
+      costCents: 0,
+      lineage: {
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 0,
+        attemptReceipts: [],
+        receiptCoverage: [],
+      },
+    }));
+    const legacy = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const activities = createDiscoveryActivities(makeDeps([
+      {
+        key: "public_web",
+        classes: ["public_intelligence"],
+        companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        discoverCompanies: capable,
+      },
+      { ...okAdapter("wikidata", []), discoverCompanies: legacy },
+    ]));
+
+    await expect(activities.executeQuery(
+      discoveryArgs("run-mixed", { query: QUERY }),
+    )).resolves.toMatchObject({
+      rawCount: 0,
+      provider: "public_web+wikidata",
+    });
+    expect(capable).toHaveBeenCalledOnce();
+    expect(legacy).toHaveBeenCalledOnce();
+  });
+
+  it("rejects capable provider record-count drift before Raw persistence", async () => {
+    const activities = createDiscoveryActivities(makeDeps([{
+      key: "public_web",
+      classes: ["public_intelligence"],
+      companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      discoverCompanies: vi.fn(async () => ({
+        records: [REC],
+        costCents: 0,
+        lineage: {
+          schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+          recordCount: 0,
+          attemptReceipts: [],
+          receiptCoverage: [],
+        },
+      })),
+    }]));
+
+    await expect(activities.executeQuery(
+      discoveryArgs("run-lineage-drift", { query: QUERY }),
+    )).rejects.toMatchObject({
+      code: "DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH",
+    });
+  });
 });
 
 describe("canonicalizeRun —— suppression authority 线性化", () => {
@@ -932,7 +1074,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
 
     expect(rawFindMany).toHaveBeenCalledWith({
       where: {
-        runId: "run-legacy",
+        runId: testRunId("run-legacy"),
         ingestStatus: "ACCEPTED",
         ingestVersion: "raw-source/v2",
       },

@@ -1284,13 +1284,30 @@ model DiscoveryQueryReceipt {
   contractSha256        String   @map("contract_sha256") @db.Char(64)
   createdAt             DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
 
-  run      DiscoveryRun                     @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_receipt_run_fkey")
-  attempts DiscoveryQueryOperationAttempt[]
+  run              DiscoveryRun                     @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_receipt_run_fkey")
+  attempts         DiscoveryQueryOperationAttempt[]
+  executionOutcome DiscoveryQueryExecutionOutcome?
 
   @@id([workspaceId, runId, queryKey], map: "discovery_query_receipt_pkey")
   @@unique([workspaceId, runId, queryOrdinal], map: "discovery_query_receipt_workspace_run_ordinal_key")
   @@index([workspaceId, createdAt], map: "discovery_query_receipt_workspace_created_idx")
   @@map("discovery_query_receipt")
+}
+
+/// Append-only Activity result facts that are not part of the frozen v1 query receipt.
+model DiscoveryQueryExecutionOutcome {
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  runId           String   @map("run_id") @db.Uuid
+  queryKey        String   @map("query_key") @db.Char(64)
+  budgetTruncated Boolean  @map("budget_truncated")
+  contractSha256  String   @map("contract_sha256") @db.Char(64)
+  createdAt       DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  receipt DiscoveryQueryReceipt @relation(fields: [workspaceId, runId, queryKey], references: [workspaceId, runId, queryKey], onDelete: Restrict, onUpdate: Restrict, map: "discovery_query_execution_outcome_receipt_fkey")
+
+  @@id([workspaceId, runId, queryKey], map: "discovery_query_execution_outcome_pkey")
+  @@index([workspaceId, createdAt], map: "discovery_query_execution_outcome_workspace_created_idx")
+  @@map("discovery_query_execution_outcome")
 }
 
 /// One settled company-producing physical operation participating in a query receipt.

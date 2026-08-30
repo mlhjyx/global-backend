@@ -54,6 +54,30 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'taxonomy.normalize', consumer: 'TaxonomyResolver', domainAggregateType: 'TermAlias', identity: 'taxonomy-kind-and-normalized-term', resultStrategy: 'typed_projection', resultSchema: 'taxonomy-code/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 
+const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
+  { producerId: 'tradefair.algolia', consumer: 'TradeFairDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'tradefair-algolia/v1' },
+  { producerId: 'discovery.extract_company', consumer: 'PublicWebDiscoveryProvider.mineDomain', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-extract-company/v1' },
+  { producerId: 'discovery.extract_list', consumer: 'DirectoryDiscoveryProvider.extractList', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-extract-list/v1' },
+] as const satisfies readonly DomainAckProductConsumerBinding[]);
+
+function getDiscoveryGovernedCompanyAckBinding(
+  producerId: string,
+): DomainAckProductConsumerBinding {
+  const binding = DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS.find(
+    (entry) => entry.producerId === producerId,
+  );
+  if (!binding) {
+    throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+  }
+  return binding;
+}
+
+function isDiscoveryGovernedCompanyProducer(producerId: string): boolean {
+  return DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS.some(
+    (entry) => entry.producerId === producerId,
+  );
+}
+
 export function getDomainAckProductConsumerBinding(
   producerId: string,
 ): DomainAckProductConsumerBinding {
@@ -176,7 +200,10 @@ function denseArray(value: unknown, maximum: number): readonly unknown[] {
   }
 }
 
-function acknowledgementSnapshot(value: unknown): PartitionedAcknowledgement {
+function acknowledgementSnapshot(
+  value: unknown,
+  bindingFor: (producerId: string) => DomainAckProductConsumerBinding,
+): PartitionedAcknowledgement {
   const record = dataRecord(value, ACKNOWLEDGEMENT_KEYS);
   const producerId = recordValue(record, 'producerId');
   const domainAckKey = recordValue(record, 'domainAckKey');
@@ -188,7 +215,7 @@ function acknowledgementSnapshot(value: unknown): PartitionedAcknowledgement {
   const validDomainAckKey = validateDomainAckRawIdentity(domainAckKey);
   const validDomainRevision = validateDomainAckRawIdentity(domainRevision);
   const receipt = parseDurableExecutionReceipt(recordValue(record, 'receipt'));
-  const binding = getDomainAckProductConsumerBinding(producerId);
+  const binding = bindingFor(producerId);
   assertReceiptBinding(binding, receipt);
   return Object.freeze({
     producerId,
@@ -198,8 +225,13 @@ function acknowledgementSnapshot(value: unknown): PartitionedAcknowledgement {
   });
 }
 
-function partitionSnapshot(value: unknown): readonly PartitionedAcknowledgement[] {
-  return Object.freeze(denseArray(value, 640).map(acknowledgementSnapshot));
+function partitionSnapshot(
+  value: unknown,
+  bindingFor: (producerId: string) => DomainAckProductConsumerBinding,
+): readonly PartitionedAcknowledgement[] {
+  return Object.freeze(
+    denseArray(value, 640).map((item) => acknowledgementSnapshot(item, bindingFor)),
+  );
 }
 
 function assertReceiptBinding(
@@ -214,7 +246,7 @@ function assertReceiptBinding(
   }
 }
 
-export async function applyDomainAckConsumerTransaction<
+async function applyDomainAckConsumerTransactionWithBinding<
   TTransaction,
   TValue,
 >(input: {
@@ -225,8 +257,7 @@ export async function applyDomainAckConsumerTransaction<
   readonly domainAckKey: string;
   readonly domainRevision: string;
   readonly apply: (transaction: TTransaction) => Promise<TValue>;
-}): Promise<DomainAckConsumerApplyResult<TValue>> {
-  const binding = getDomainAckProductConsumerBinding(input.producerId);
+}, binding: DomainAckProductConsumerBinding): Promise<DomainAckConsumerApplyResult<TValue>> {
   if (!input.receipt) {
     if (!input.transaction) throw new ExecutionControlError('DOMAIN_ACK_TRANSACTION_REQUIRED');
     return Object.freeze({
@@ -250,6 +281,24 @@ export async function applyDomainAckConsumerTransaction<
     domainAckKey: input.domainAckKey,
     domainRevision: input.domainRevision,
   }, input.apply);
+}
+
+export async function applyDomainAckConsumerTransaction<
+  TTransaction,
+  TValue,
+>(input: {
+  readonly service?: DomainAckService<TTransaction>;
+  readonly transaction?: TTransaction;
+  readonly producerId: string;
+  readonly receipt?: DurableExecutionReceipt;
+  readonly domainAckKey: string;
+  readonly domainRevision: string;
+  readonly apply: (transaction: TTransaction) => Promise<TValue>;
+}): Promise<DomainAckConsumerApplyResult<TValue>> {
+  return applyDomainAckConsumerTransactionWithBinding(
+    input,
+    getDomainAckProductConsumerBinding(input.producerId),
+  );
 }
 
 export async function applyDomainAckConsumerTransactions<
@@ -342,8 +391,17 @@ export async function applyPartitionedDomainAckConsumerTransactions<
     !transaction || typeof transaction !== 'object' ||
     typeof apply !== 'function' || typeof readback !== 'function'
   ) invalidPartitionedInput();
-  const company = partitionSnapshot(recordValue(input, 'companyAcknowledgements'));
-  const auxiliary = partitionSnapshot(recordValue(input, 'auxiliaryAcknowledgements'));
+  const company = partitionSnapshot(
+    recordValue(input, 'companyAcknowledgements'),
+    getDiscoveryGovernedCompanyAckBinding,
+  );
+  const auxiliary = partitionSnapshot(
+    recordValue(input, 'auxiliaryAcknowledgements'),
+    getDomainAckProductConsumerBinding,
+  );
+  if (auxiliary.some(({ producerId }) => isDiscoveryGovernedCompanyProducer(producerId))) {
+    invalidPartitionedInput();
+  }
   const tagged = [
     ...company.map((acknowledgement) => Object.freeze({
       partition: 'company' as const, acknowledgement,
@@ -368,11 +426,14 @@ export async function applyPartitionedDomainAckConsumerTransactions<
   const companyFacts: DomainAckMaterializationFact[] = [];
   const auxiliaryFacts: DomainAckMaterializationFact[] = [];
   for (const item of tagged) {
-    const result = await applyDomainAckConsumerTransaction({
+    const binding = item.partition === 'company'
+      ? getDiscoveryGovernedCompanyAckBinding(item.acknowledgement.producerId)
+      : getDomainAckProductConsumerBinding(item.acknowledgement.producerId);
+    const result = await applyDomainAckConsumerTransactionWithBinding({
       transaction,
       ...item.acknowledgement,
       apply: async () => undefined,
-    });
+    }, binding);
     if (result.status === 'UNRECEIPTED') invalidPartitionedInput();
     const fact = Object.freeze({
       producerId: item.acknowledgement.producerId,
@@ -388,7 +449,12 @@ export async function applyPartitionedDomainAckConsumerTransactions<
   if (companyStatuses.size > 1) {
     throw new ExecutionControlError('DOMAIN_ACK_MIXED_REPLAY_STATE');
   }
-  const status = frozenCompany[0]?.status ?? 'APPLIED';
+  const status = frozenCompany[0]?.status ?? (
+    frozenAuxiliary.length > 0 &&
+    frozenAuxiliary.every((fact) => fact.status === 'REPLAYED')
+      ? 'REPLAYED'
+      : 'APPLIED'
+  );
   const callback = status === 'APPLIED' ? apply : readback;
   const resultValue = await (callback as (
     tx: TTransaction,

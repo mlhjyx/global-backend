@@ -1,6 +1,6 @@
 import assert from'node:assert/strict';import{createHash}from'node:crypto';import{spawn,spawnSync}from'node:child_process';import{before,describe,it}from'node:test';
 const C=process.env.DISCOVERY_QUERY_LINEAGE_FUNCTIONS_PG_CONTAINER,D=process.env.DISCOVERY_QUERY_LINEAGE_FUNCTIONS_PG_DATABASE??'dql_functions';
-const A='append_discovery_query_lineage_v1',T='attest_discovery_query_lineage_v1';
+const A='append_discovery_query_lineage_v2',T='attest_discovery_query_lineage_v2';
 const WS='10000000-0000-4000-8000-000000000001',RUN='20000000-0000-4000-8000-000000000002',PLAN='30000000-0000-4000-8000-000000000001';
 const AUTH='40000000-0000-4000-8000-000000000001',ACCOUNT='50000000-0000-4000-8000-000000000001',SHA='b'.repeat(64),QUERY='c'.repeat(64);
 const SHA_ITEM='3'.repeat(64);
@@ -95,9 +95,9 @@ function seedCompanyOperation(){
  return{domainKey,operationDigest,revision,ackId,rawHash};
 }
 describe('Discovery query lineage append and attest database contract',()=>{
- before(()=>{assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'121');
-  assert.equal(psql(`SELECT count(*) FROM information_schema.tables WHERE table_name IN('discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item');`),'3');
-  assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE migration_name='20260830130100_discovery_query_lineage_functions' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'1');});
+ before(()=>{assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'122');
+  assert.equal(psql(`SELECT count(*) FROM information_schema.tables WHERE table_name IN('discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item','discovery_query_execution_outcome');`),'4');
+  assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE migration_name='20260830130200_discovery_query_lineage_execution_outcome' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'1');});
  it('installs exact public signatures, security and app-only execute ACL',()=>{const rows=psql(`SELECT proname||'|'||pg_get_function_identity_arguments(oid)||'|'||provolatile::text||'|'||prosecdef::text||'|'||array_to_string(proconfig,',') FROM pg_proc WHERE proname IN('${A}','${T}') ORDER BY proname;`).split('\n');
   assert.deepEqual(rows,[`${A}|p_append_command jsonb|v|true|search_path=pg_catalog, public`,`${T}|p_attestation_key jsonb|v|true|search_path=pg_catalog, public`]);});
  it('rejects open, oversized and hostile JSON with stable bounded P0001 errors',()=>{for(const fn of[A,T])for(const value of[`'{}'::jsonb`,`'{"extra":true}'::jsonb`,`jsonb_build_object('attempts',to_jsonb(ARRAY(SELECT '{}'::jsonb FROM generate_series(1,129))))`]){
@@ -112,12 +112,12 @@ describe('Discovery query lineage append and attest database contract',()=>{
     planId:PLAN,queryKey:QUERY,queryOrdinal:0,authorityId:AUTH,
     accountKey:`discovery.run:discovery_run:request:${SHA}:${SHA}`,purpose:'discovery.run',
     subjectType:'discovery_run',subjectId:`request:${SHA}`,requestSha256:SHA};
-  const command={schemaVersion:'discovery-query-lineage-command/v1',contractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+  const command={schemaVersion:'discovery-query-lineage-command/v2',contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
     lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
       queryKey:QUERY,queryOrdinal:0,sourceClass:'public_intelligence',providers:[],accepted:0,
       quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:0,costCents:0},
-    queryReceiptContractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
-    attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
+    queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
+    budgetTruncated:true,attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
   const missingAuthority=raw(app(`SELECT * FROM ${A}('${JSON.stringify(command)}'::jsonb);`));
   assert.notEqual(missingAuthority.status,0);assert.match(missingAuthority.stderr,/QUERY_LINEAGE_INVALID/);
   seedZeroAuthority();
@@ -133,11 +133,40 @@ describe('Discovery query lineage append and attest database contract',()=>{
     queryReceipt:{...command.queryReceipt,providers}};const denied=raw(app(`SELECT * FROM ${A}('${JSON.stringify(invalid)}'::jsonb);`));
     assert.notEqual(denied.status,0);assert.match(denied.stderr,/QUERY_LINEAGE_INVALID/);}
   assert.equal(psql(app(`SELECT status,attempt_count,item_count,query_key FROM ${A}('${JSON.stringify(command)}'::jsonb);`)),`APPLIED|0|0|${QUERY}`);
+  assert.equal(psql(`SELECT budget_truncated::text FROM discovery_query_execution_outcome WHERE run_id='${RUN}';`),'true');
   assert.equal(psql(app(`SELECT status,replay FROM ${T}('${JSON.stringify(key)}'::jsonb);`,true)),'REPLAYED|t');
   const collision=raw(app(`SELECT * FROM ${T}('${JSON.stringify({...key,queryKey:'d'.repeat(64)})}'::jsonb);`,true));
   assert.notEqual(collision.status,0);assert.match(collision.stderr,/REPLAY_INTEGRITY_HOLD/);
   const replay=raw(app(`SELECT * FROM ${A}('${JSON.stringify(command)}'::jsonb);`));
   assert.notEqual(replay.status,0);assert.match(replay.stderr,/REPLAY_INTEGRITY_HOLD/);
+ });
+ it('preserves historical v1 attest but holds v2 when no execution outcome exists',()=>{
+  const run='20000000-0000-4000-8000-000000000006',query='6'.repeat(64),ordinal=6;
+  psql(`SET session_replication_role=replica;INSERT INTO discovery_run(id,workspace_id,plan_id,icp_id,status)
+    VALUES('${run}','${WS}','${PLAN}','61000000-0000-4000-8000-000000000006','RUNNING');
+    SET session_replication_role=origin;`);
+  const key={schemaVersion:'discovery-query-lineage-lookup/v1',workspaceId:WS,runId:run,
+    planId:PLAN,queryKey:query,queryOrdinal:ordinal,authorityId:AUTH,
+    accountKey:`discovery.run:discovery_run:request:${SHA}:${SHA}`,purpose:'discovery.run',
+    subjectType:'discovery_run',subjectId:`request:${SHA}`,requestSha256:SHA};
+  const command={schemaVersion:'discovery-query-lineage-command/v1',
+    contractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+    lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
+      queryKey:query,queryOrdinal:ordinal,sourceClass:'public_intelligence',providers:[],accepted:0,
+      quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:0,costCents:0},
+    queryReceiptContractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+    rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
+    attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
+  assert.equal(psql(app(`SELECT status FROM append_discovery_query_lineage_v1('${JSON.stringify(command)}'::jsonb);`)),'APPLIED');
+  assert.equal(psql(app(`SELECT status,replay FROM attest_discovery_query_lineage_v1('${JSON.stringify(key)}'::jsonb);`,true)),'REPLAYED|t');
+  assert.equal(psql(`SELECT count(*) FROM discovery_query_execution_outcome WHERE run_id='${run}';`),'0');
+  for(const sql of[`SELECT * FROM ${T}('${JSON.stringify(key)}'::jsonb);`,
+    `SELECT * FROM ${A}('${JSON.stringify({...command,schemaVersion:'discovery-query-lineage-command/v2',
+      contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+      queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',budgetTruncated:false})}'::jsonb);`]){
+    const denied=raw(app(sql,sql.includes(T)));assert.notEqual(denied.status,0);assert.match(denied.stderr,/REPLAY_INTEGRITY_HOLD/);
+  }
+  assert.equal(psql(`SELECT count(*) FROM discovery_query_execution_outcome WHERE run_id='${run}';`),'0');
  });
  it('atomically materializes one Raw v2 relation and attests it read-only',()=>{
   const facts=seedCompanyOperation();
@@ -145,12 +174,12 @@ describe('Discovery query lineage append and attest database contract',()=>{
     planId:PLAN,queryKey:QUERY_ITEM,queryOrdinal:1,authorityId:AUTH_ITEM,
     accountKey:`discovery.run:discovery_run:request:${SHA_ITEM}:${SHA_ITEM}`,purpose:'discovery.run',
     subjectType:'discovery_run',subjectId:`request:${SHA_ITEM}`,requestSha256:SHA_ITEM};
-  const command={schemaVersion:'discovery-query-lineage-command/v1',
-    contractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+  const command={schemaVersion:'discovery-query-lineage-command/v2',
+    contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
     lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
       queryKey:QUERY_ITEM,queryOrdinal:1,sourceClass:'public_intelligence',providers:['public_web'],
       accepted:1,quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:1,costCents:0},
-    queryReceiptContractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+    queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
     rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
     attempts:[{providerKey:'public_web',producerId:'discovery.extract_company',operationId:OP_ITEM,
       authorityId:AUTH_ITEM,accountId:ACCOUNT_ITEM,operationGeneration:1,ackId:facts.ackId,
@@ -158,13 +187,13 @@ describe('Discovery query lineage append and attest database contract',()=>{
       domainAckKey:facts.domainKey,domainRevision:facts.revision,resultDigest:facts.operationDigest,
       resultSchema:'discovery-extract-company/v1',lineageSchema:'discovery-company-result-lineage/v1',
       providerRecordCount:1,coveredItemCount:1,
-      contractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0'}],
+      contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c'}],
     items:[{id:'80000000-0000-4000-8000-000000000010',providerKey:'public_web',operationId:OP_ITEM,
       recordIndex:0,resolutionKind:'INSERTED',sourceRecordIndex:null,rawRecordId:RAW_ITEM,
       rawPayloadHash:facts.rawHash,rawIngestStatus:'ACCEPTED',relationKey:'discovery.raw_source_record:0',
       sourceRefNamespace:'discovery_query_attempt_item',sourceRefUuid:'80000000-0000-4000-8000-000000000010',
       ackId:facts.ackId,contractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1'}],
-    authorization:{accountId:ACCOUNT_ITEM,authorityId:AUTH_ITEM,generation:1}};
+    budgetTruncated:false,authorization:{accountId:ACCOUNT_ITEM,authorityId:AUTH_ITEM,generation:1}};
   const ackSql=`SELECT status FROM apply_execution_domain_ack_v1('${WS}','${OP_ITEM}',
     'PublicWebDiscoveryProvider.mineDomain','RawSourceRecord','${facts.domainKey}','${facts.revision}');`;
   psql(app(ackSql));
@@ -176,12 +205,14 @@ describe('Discovery query lineage append and attest database contract',()=>{
     {...command,attempts:[{...command.attempts[0],producerId:'discovery.extract_list'}]},
     {...command,attempts:[{...command.attempts[0],domainAckKey:'0'.repeat(64)}]},
     {...command,attempts:[{...command.attempts[0],coveredItemCount:0}]},
+    {...command,attempts:[{...command.attempts[0],contractSha256:'0'.repeat(64)}]},
     {...command,items:[{...command.items[0],recordIndex:1,relationKey:'discovery.raw_source_record:1'}]},
     {...command,items:[{...command.items[0],rawRecordId:RAW_BAD}]},
   ]){const denied=raw(app(`${ackSql}SELECT * FROM ${A}('${JSON.stringify(invalid)}'::jsonb);`));
     assert.notEqual(denied.status,0);assert.match(denied.stderr,/QUERY_LINEAGE/);}
   assert.equal(psql(`SELECT count(*) FROM discovery_query_receipt WHERE run_id='${RUN_ITEM}';`),'0');
   assert.equal(psql(app(`${ackSql}SELECT status,attempt_count,item_count FROM ${A}('${JSON.stringify(command)}'::jsonb);`)).split('\n').at(-1),'APPLIED|1|1');
+  assert.equal(psql(`SELECT budget_truncated::text FROM discovery_query_execution_outcome WHERE run_id='${RUN_ITEM}';`),'false');
   assert.equal(psql(`SELECT (SELECT count(*) FROM discovery_query_operation_attempt WHERE operation_id='${OP_ITEM}')||'|'||
     (SELECT count(*) FROM discovery_query_attempt_item WHERE operation_id='${OP_ITEM}')||'|'||
     (SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP_ITEM}');`),'1|1|1');
@@ -200,14 +231,14 @@ describe('Discovery query lineage append and attest database contract',()=>{
     planId:PLAN,queryKey:query,queryOrdinal:ordinal,authorityId:AUTH,
     accountKey:`discovery.run:discovery_run:request:${SHA}:${SHA}`,purpose:'discovery.run',
     subjectType:'discovery_run',subjectId:`request:${SHA}`,requestSha256:SHA};
-  const command={schemaVersion:'discovery-query-lineage-command/v1',
-    contractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+  const command={schemaVersion:'discovery-query-lineage-command/v2',
+    contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
     lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
       queryKey:query,queryOrdinal:ordinal,sourceClass:'public_intelligence',providers:[],accepted:0,
       quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:0,costCents:0},
-    queryReceiptContractSha256:'eb5f6f09da3e68694b43070eabf2f76340d2c84c8ff6712486495aa64d1630c0',
+    queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
     rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
-    attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
+    budgetTruncated:false,attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
   const sql=app(`SET LOCAL statement_timeout='8s';SELECT status FROM ${A}('${JSON.stringify(command)}'::jsonb);`);
   const results=await Promise.all([asyncRaw(sql),asyncRaw(sql)]);
   assert.deepEqual(results.map(result=>result.status).sort(),[0,3]);
@@ -226,6 +257,14 @@ describe('Discovery query lineage append and attest database contract',()=>{
   assert.notEqual(denied.status,0);assert.match(denied.stderr,/REPLAY_INTEGRITY_HOLD/);
   assert.equal(psql(`SELECT count(*) FROM discovery_query_receipt WHERE run_id='${RUN}';`),before);
  });
- it('fails closed for cross-workspace callers and never exposes direct DML',()=>{for(const fn of[A,T]){const r=raw(app(`SELECT * FROM ${fn}('{}'::jsonb);`));assert.notEqual(r.status,0);}for(const table of['discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item']){const r=raw(app(`DELETE FROM ${table};`));assert.notEqual(r.status,0);assert.match(r.stderr,/permission denied/);}});
- it('keeps attest persistently read-only and calls A attest rather than reading A tables',()=>{const def=psql(`SELECT pg_get_functiondef('${T}(jsonb)'::regprocedure);`);assert.doesNotMatch(def,/\bINSERT\b|\bUPDATE\b|\bDELETE\b/);assert.match(def,/attest_workspace_governed_child_relation_v1/);assert.doesNotMatch(def,/FROM\s+(?:public\.)?(?:governed_subject|governed_subject_relation|tool_operation_subject)/i);});
+ it('fails closed for cross-workspace callers and never exposes direct DML',()=>{for(const fn of[A,T]){const r=raw(app(`SELECT * FROM ${fn}('{}'::jsonb);`));assert.notEqual(r.status,0);}for(const table of['discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item','discovery_query_execution_outcome']){const r=raw(app(`DELETE FROM ${table};`));assert.notEqual(r.status,0);assert.match(r.stderr,/permission denied/);}});
+ it('enforces outcome FORCE RLS, SELECT-only ACL and owner immutability',()=>{
+  assert.equal(psql(`SELECT relrowsecurity::text||'|'||relforcerowsecurity::text FROM pg_class WHERE relname='discovery_query_execution_outcome';`),'true|true');
+  assert.equal(psql(`SELECT string_agg(CASE WHEN grantee=0 THEN 'PUBLIC' ELSE grantee::regrole::text END||':'||privilege_type,',' ORDER BY grantee,privilege_type) FROM aclexplode((SELECT relacl FROM pg_class WHERE relname='discovery_query_execution_outcome')) WHERE grantee=0 OR grantee::regrole::text IN('app_user','execution_budget_platform_writer','runtime_api','runtime_worker','runtime_outbox_relay');`),'app_user:SELECT');
+  const ownerUpdate=raw(`UPDATE discovery_query_execution_outcome SET budget_truncated=NOT budget_truncated WHERE run_id='${RUN}';`);
+  assert.notEqual(ownerUpdate.status,0);assert.match(ownerUpdate.stderr,/DISCOVERY_QUERY_LINEAGE_IMMUTABLE/);
+  const cross=raw(`SET SESSION AUTHORIZATION app_user;BEGIN READ ONLY;SET LOCAL app.current_workspace_id='10000000-0000-4000-8000-000000000002';SELECT count(*) FROM discovery_query_execution_outcome;COMMIT;`);
+  assert.equal(cross.status,0);assert.equal(cross.stdout.trim(),'0');
+ });
+ it('keeps attest persistently read-only and delegates to the frozen v1 graph attest',()=>{const def=psql(`SELECT pg_get_functiondef('${T}(jsonb)'::regprocedure);`);assert.doesNotMatch(def,/\bINSERT\b|\bUPDATE\b|\bDELETE\b/);assert.match(def,/attest_discovery_query_lineage_v1/);assert.doesNotMatch(def,/FROM\s+(?:public\.)?(?:governed_subject|governed_subject_relation|tool_operation_subject)/i);});
 });

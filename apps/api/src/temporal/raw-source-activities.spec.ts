@@ -7,8 +7,10 @@ import { createDiscoveryActivities } from "./discovery.activities";
 describe("Raw Source retention activities", () => {
   it("binds G2 company identity and all three governed providers to RawSourceRecord", () => {
     const activity = readFileSync(new URL('./discovery.activities.ts', import.meta.url), 'utf8');
+    const governed = readFileSync(new URL('./discovery-query-governed-execution.ts', import.meta.url), 'utf8');
     const bindings = readFileSync(new URL('../durable-results/domain-ack-consumer-bindings.ts', import.meta.url), 'utf8');
-    expect(activity).toContain('discoveryCompanyDomainAckIdentity');
+    expect(activity).toContain('commitGovernedDiscoveryQueryExecution');
+    expect(governed).toContain('discoveryCompanyDomainAckIdentity');
     for (const producer of ['tradefair.algolia', 'discovery.extract_company', 'discovery.extract_list']) {
       const escaped = producer.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
       expect(bindings).toMatch(new RegExp(
@@ -177,8 +179,19 @@ describe("executeQuery Raw Source v2 persistence", () => {
     const directCreateMany = vi.fn(async () => ({ count: 0 }));
     let runStats: Record<string, unknown> = {};
     const queryRaw = vi.fn(
-      async (statement: { strings?: readonly string[]; values: readonly unknown[] }) =>
-        statement.strings?.join("?").includes("FROM discovery_run")
+      async (statement: { strings?: readonly string[]; values: readonly unknown[] }) => {
+        const sql = statement.strings?.join("?") ?? "";
+        if (sql.includes("attest_discovery_query_lineage_v2")) {
+          return [{
+            status: "NOT_FOUND",
+            query_receipt: null,
+            budget_truncated: null,
+            attempt_count: 0,
+            item_count: 0,
+            replay: false,
+          }];
+        }
+        return sql.includes("FROM discovery_run")
           ? [
               {
                 id: "40000000-0000-4000-8000-000000000001",
@@ -186,7 +199,8 @@ describe("executeQuery Raw Source v2 persistence", () => {
                 stats: runStats,
               },
             ]
-          : writer(statement),
+          : writer(statement);
+      },
     );
     const tx = {
       $executeRaw: vi.fn(async () => 1),

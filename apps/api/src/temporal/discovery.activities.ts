@@ -17,6 +17,7 @@ import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import {
   BudgetExceededError,
+  type BudgetAccountAuthorization,
   type BudgetStore,
   UnavailableBudgetStore,
 } from '../tools/budget-store';
@@ -35,7 +36,9 @@ import {
   ExecutionControlError,
   isExecutionControlError,
 } from '../execution-budget/execution-control-error';
-import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import {
+  applyDomainAckConsumerTransactions,
+} from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import {
   prepareRawSourceBatch,
@@ -44,6 +47,15 @@ import {
   type RawSourceIngestLimits,
 } from '../discovery/raw-source-ingestion';
 import { persistPreparedRawSourceRecord } from '../discovery/raw-source-writer';
+import {
+  buildDiscoveryQueryLineageLookup,
+  projectDiscoveryQueryLineageAttestKey,
+} from '../discovery/discovery-query-governed-lineage';
+import { attestQueryLineageV2 } from '../discovery/discovery-query-lineage.repository';
+import {
+  buildGovernedDiscoveryQueryExecutionPlan,
+  commitGovernedDiscoveryQueryExecution,
+} from './discovery-query-governed-execution';
 import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
 import {
   discoveryQueryKey,
@@ -262,16 +274,77 @@ export function createDiscoveryActivities(deps: {
       queryOrdinal?: number;
       query: PlanQuery;
     }): Promise<DiscoveryQueryExecutionResult> {
-      const binding = await ensureRunBudget(args);
+      let binding: ExecutionBudgetBinding;
+      try {
+        if (args.executionContractVersion !== 2) throw new Error('invalid version');
+        binding = parseExecutionBudgetBinding(args.executionBudget, {
+          scopeKey: args.workspaceId,
+          purpose: 'discovery.run',
+          subjectType: 'discovery_run',
+        });
+      } catch {
+        throw ApplicationFailure.nonRetryable(
+          'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+          'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        );
+      }
       const receiptIdentity = parseDiscoveryQueryReceiptIdentity(args);
+      const normalizedLineageQuery: PlanQuery = {
+        source_class: args.query.source_class,
+        filters: args.query.filters ?? {},
+        keywords: args.query.keywords ?? [],
+        priority: args.query.priority ?? 99,
+      };
       const queryKey = receiptIdentity
         ? discoveryQueryKey({
             runId: args.runId,
             planId: receiptIdentity.planId,
             queryOrdinal: receiptIdentity.queryOrdinal,
-            query: args.query,
+            query: normalizedLineageQuery,
           })
         : null;
+      const lineageLookup = receiptIdentity && queryKey
+        ? buildDiscoveryQueryLineageLookup({
+            workspaceId: args.workspaceId,
+            runId: args.runId,
+            planId: receiptIdentity.planId,
+            queryKey,
+            queryOrdinal: receiptIdentity.queryOrdinal,
+            query: normalizedLineageQuery,
+            binding,
+          })
+        : null;
+      if (lineageLookup) {
+        const prior = await deps.prisma.withWorkspace(args.workspaceId, (transaction) =>
+          attestQueryLineageV2(
+            transaction,
+            projectDiscoveryQueryLineageAttestKey(lineageLookup),
+          ),
+        );
+        if (prior.status === 'REPLAYED') {
+          if (prior.budgetTruncated === null) {
+            throw new ExecutionControlError(
+              'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
+            );
+          }
+          return executionResult(
+            prior.queryReceipt as DiscoveryQueryReceipt,
+            prior.budgetTruncated,
+          );
+        }
+        if (prior.status === 'NOT_FOUND') {
+          // Fresh Q-TX execution continues to the authoritative budget attest.
+        } else {
+          throw new ExecutionControlError(
+            'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
+          );
+        }
+      }
+      const budgetAuthorization: BudgetAccountAuthorization = await budgets.attestAuthorized({
+        authorityId: binding.authorityId,
+        scopeKey: binding.scopeKey,
+        accountKey: binding.accountKey,
+      });
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -362,6 +435,8 @@ export function createDiscoveryActivities(deps: {
       );
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
+          // UNKNOWN physical-call/ACK state is a control failure: throw it and
+          // never issue another provider wire from this Activity.
           throw result.reason;
         }
         if (result.status !== 'fulfilled') continue;
@@ -373,12 +448,39 @@ export function createDiscoveryActivities(deps: {
           });
         }
       }
+      const governedExecutionPlan = buildGovernedDiscoveryQueryExecutionPlan({
+        lineageEnabled: lineageLookup !== null,
+        adapters,
+        settled,
+      });
       // 预算耗尽绝不被吞成假成功。**不能**靠「某源 reject」判断——provider 的 fail-safe catch 会把
       // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
       // 改由持久预算账户唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
       // wasExhausted=true → 显性上报截断，让 workflow 判 PARTIAL 而非假 DONE（各源 fail-safe 拿到的部分记录仍落库）。
       const budgetTruncated = (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted;
 
+      if (governedExecutionPlan.mode === 'governed') {
+        if (!lineageLookup || !receiptIdentity || !queryKey) {
+          throw new ExecutionControlError(
+            'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
+          );
+        }
+        return commitGovernedDiscoveryQueryExecution({
+          prisma: deps.prisma,
+          workspaceId: args.workspaceId,
+          runId: args.runId,
+          planId: receiptIdentity.planId,
+          queryKey,
+          sourceClass: q.sourceClass,
+          settled,
+          sourcePolicies,
+          rawIngestLimits: deps.rawIngestLimits,
+          lookup: lineageLookup,
+          plan: governedExecutionPlan,
+          budgetAuthorization,
+          budgetTruncated,
+        });
+      }
       // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const persisted = await applyDomainAckConsumerTransactions({

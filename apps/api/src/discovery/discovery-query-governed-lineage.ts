@@ -14,12 +14,12 @@ import {
 } from './company-discovery-lineage';
 import { discoveryQueryKey, parseDiscoveryQueryReceipt } from './discovery-query-receipt';
 
-export const DISCOVERY_QUERY_LINEAGE_COMMAND_V1 =
-  'discovery-query-lineage-command/v1' as const;
+export const DISCOVERY_QUERY_LINEAGE_COMMAND_V2 =
+  'discovery-query-lineage-command/v2' as const;
 export const DISCOVERY_QUERY_LINEAGE_LOOKUP_V1 =
   'discovery-query-lineage-lookup/v1' as const;
-export const DISCOVERY_QUERY_LINEAGE_CONTRACT_V1 =
-  'discovery-query-lineage-contract/v1' as const;
+export const DISCOVERY_QUERY_LINEAGE_CONTRACT_V2 =
+  'discovery-query-lineage-contract/v2' as const;
 export const DISCOVERY_QUERY_RAW_RELATION_V1 =
   'discovery-query-raw-relation/v1' as const;
 
@@ -42,7 +42,7 @@ const QUERY_KEYS = Object.freeze(['source_class', 'filters', 'keywords', 'priori
 const RECEIPT_KEYS = Object.freeze(['producerId', 'receipt'] as const);
 const FINAL_KEYS = Object.freeze([
   'lookup', 'providerPlan', 'resolutions', 'rawReceipts',
-  'budgetAuthorization', 'ackFacts',
+  'budgetAuthorization', 'budgetTruncated', 'ackFacts',
 ] as const);
 const AUTHORIZATION_KEYS = Object.freeze([
   'accountId', 'authorityId', 'authorizedCapMicrousd', 'generation',
@@ -81,14 +81,14 @@ const PROVIDER_CONTRACT = Object.freeze({
   producerId: string; resultSchema: string; consumer: string; classes: readonly string[];
 }>>);
 const LINEAGE_DESCRIPTOR = Object.freeze({
-  schemaVersion: DISCOVERY_QUERY_LINEAGE_CONTRACT_V1,
-  commandSchema: DISCOVERY_QUERY_LINEAGE_COMMAND_V1,
+  schemaVersion: DISCOVERY_QUERY_LINEAGE_CONTRACT_V2,
+  commandSchema: DISCOVERY_QUERY_LINEAGE_COMMAND_V2,
   lookupSchema: DISCOVERY_QUERY_LINEAGE_LOOKUP_V1,
   queryReceiptSchema: 'discovery-query-receipt/v1',
   commandFields: Object.freeze([
     'schemaVersion', 'contractSha256', 'lookup', 'queryReceipt',
     'queryReceiptContractSha256', 'rawRelationContractSha256',
-    'attempts', 'items', 'authorization',
+    'budgetTruncated', 'attempts', 'items', 'authorization',
   ]),
   lookupFields: Object.freeze([
     'workspaceId', 'runId', 'planId', 'queryKey', 'queryOrdinal',
@@ -423,6 +423,27 @@ export function buildDiscoveryQueryLineageLookup(value: unknown): Readonly<DataR
   }
 }
 
+export function projectDiscoveryQueryLineageAttestKey(
+  lookup: unknown,
+): Readonly<DataRecord> {
+  if (!lookup || typeof lookup !== 'object' || !BUILT_LOOKUPS.has(lookup)) fail();
+  const source = lookup as DataRecord;
+  return Object.freeze({
+    schemaVersion: DISCOVERY_QUERY_LINEAGE_LOOKUP_V1,
+    workspaceId: source.workspaceId,
+    runId: source.runId,
+    planId: source.planId,
+    queryKey: source.queryKey,
+    queryOrdinal: source.queryOrdinal,
+    authorityId: source.authorityId,
+    accountKey: source.accountKey,
+    purpose: source.purpose,
+    subjectType: source.subjectType,
+    subjectId: source.subjectId,
+    requestSha256: source.requestSha256,
+  });
+}
+
 export function buildDiscoveryQueryProviderPlan(value: unknown): GovernedPlan | Readonly<{ mode: 'legacy' }> {
   try {
     const input = ownRecord(value, PROVIDER_INPUT_KEYS);
@@ -581,6 +602,8 @@ export function finalizeDiscoveryQueryLineageCommand(value: unknown): Readonly<D
     if (plan.providers.some((key) =>
       !PROVIDER_CONTRACT[providerKey(key)].classes.includes(sourceClass))) fail(MISMATCH);
     const authorization = parseAuthorization(field(input, 'budgetAuthorization'));
+    const budgetTruncated = field(input, 'budgetTruncated');
+    if (typeof budgetTruncated !== 'boolean') fail();
     if (authorization.authorityId !== (lookup as DataRecord).authorityId) fail(MISMATCH);
     const facts = strictArray(field(input, 'ackFacts'), 128, MISMATCH).map(parseAckFact);
     if (facts.some((fact) => fact.status !== 'APPLIED')) fail(MISMATCH);
@@ -778,12 +801,13 @@ export function finalizeDiscoveryQueryLineageCommand(value: unknown): Readonly<D
       costCents: plan.costCents,
     });
     return Object.freeze({
-      schemaVersion: DISCOVERY_QUERY_LINEAGE_COMMAND_V1,
+      schemaVersion: DISCOVERY_QUERY_LINEAGE_COMMAND_V2,
       contractSha256: DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256,
       lookup,
       queryReceipt,
       queryReceiptContractSha256: DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256,
       rawRelationContractSha256: DISCOVERY_QUERY_RAW_RELATION_SHA256,
+      budgetTruncated,
       attempts: Object.freeze(attemptCommands),
       items,
       authorization: Object.freeze({
