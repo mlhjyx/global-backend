@@ -13,6 +13,7 @@ const OP = "43000000-0000-4000-8000-000000000001";
 const OP2 = "43000000-0000-4000-8000-000000000002";
 const CONTRACT = "c".repeat(64);
 const ATTEST_REQUEST = "75000000-0000-4000-8000-000000000001";
+const GUARD_REQUEST = "75000000-0000-4000-8000-000000000002";
 let facts;
 let rootId;
 
@@ -323,6 +324,34 @@ describe("governed relation exact path lock ordering", () => {
     assert.equal(canonicalSnapshot(),before);
     psql(asApp(`${invocation(APPEND,firstInput)} ${invocation(APPEND,{...secondInput,
       childDsrSubjectId:firstInput.childDsrSubjectId,relationKey:"guard:same-dsr"})}`));
+  });
+
+  it("breaks the two-append tombstone lock cycle before acquiring the second DSR", async () => {
+    const dsrA="73000000-0000-4000-8000-000000000081";
+    const dsrB="73000000-0000-4000-8000-000000000082";
+    const inputB={childId:"53000000-0000-4000-8000-000000000082",childDataClass:"PERSONAL",
+      childDsrSubjectType:"company",childDsrSubjectId:dsrB,relationKey:"guard:cycle-b"};
+    psql(asApp(invocation(APPEND,inputB))); const subjectB=psql(`SELECT child_subject_id::text
+      FROM governed_subject_relation WHERE relation_key='guard:cycle-b';`);
+    psql(`INSERT INTO deletion_request(id,workspace_id,subject_type,subject_id,status,
+      requested_by,reason,created_at,updated_at) VALUES ('${GUARD_REQUEST}','${WS}',
+      'company','${dsrB}','RECEIVED','guard-cycle','erasure',now(),now());`);
+    const holderName="guard_cycle_holder", tombName="guard_cycle_tombstone";
+    const tx=startConnection(`SET application_name='${holderName}';SET SESSION AUTHORIZATION app_user;
+      BEGIN;SELECT set_config('app.current_workspace_id','${WS}',true);
+      ${invocation(APPEND,{childId:"53000000-0000-4000-8000-000000000081",
+        childDataClass:"PERSONAL",childDsrSubjectType:"company",childDsrSubjectId:dsrA,
+        relationKey:"guard:cycle-a"})} SELECT pg_backend_pid()::text||'|READY';\n`,true);
+    let tomb; try {
+      const ready=await tx.waitFor("READY"); const pid=Number(ready.match(/(\d+)\|READY/)?.[1]);
+      tomb=startConnection(`SET application_name='${tombName}';${asApp(`SELECT outcome FROM
+        tombstone_workspace_governed_subject_v1('${WS}','${subjectB}','${GUARD_REQUEST}');`)}`);
+      await observeWait(pid,tombName,tomb); tx.write(`${invocation(APPEND,inputB)} COMMIT;\n`); tx.end();
+      const txResult=await tx.done, tombResult=await tomb.done;
+      assert.notEqual(txResult.status,0); assert.match(txResult.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
+      assert.doesNotMatch(`${txResult.stderr}${tombResult.stderr}`,/40P01|deadlock detected/i);
+      assert.equal(tombResult.status,0,tombResult.stderr);
+    } finally { await Promise.all([cleanup(tx,holderName),cleanup(tomb,tombName)]); }
   });
 
   it("rejects another operation PERSONAL parent before waiting on its DSR key", async () => {
