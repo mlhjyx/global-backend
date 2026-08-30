@@ -1,0 +1,20 @@
+import assert from'node:assert/strict';import{spawnSync}from'node:child_process';import{before,describe,it}from'node:test';
+const C=process.env.DISCOVERY_QUERY_LINEAGE_FUNCTIONS_PG_CONTAINER,D=process.env.DISCOVERY_QUERY_LINEAGE_FUNCTIONS_PG_DATABASE??'dql_functions';
+const A='append_discovery_query_lineage_v1',T='attest_discovery_query_lineage_v1';
+function args(){assert.match(C??'',/^codex-dql-functions-pg-[a-z0-9-]+$/);return['exec','-i',C,'psql','-U','global','-d',D,'-X','-qAt','-v','ON_ERROR_STOP=1'];}
+function raw(sql){return spawnSync('docker',args(),{input:sql,encoding:'utf8',maxBuffer:16*1024*1024});}
+function psql(sql){const r=raw(sql);assert.equal(r.status,0,`${r.stderr}\n${r.stdout}`);return r.stdout.trim();}
+function app(sql,ro=false){return`SET SESSION AUTHORIZATION app_user;BEGIN${ro?' READ ONLY':''};SELECT set_config('app.current_workspace_id','10000000-0000-4000-8000-000000000001',true);${sql}COMMIT;`;}
+describe('Discovery query lineage append and attest database contract',()=>{
+ before(()=>{assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'120');
+  assert.equal(psql(`SELECT count(*) FROM information_schema.tables WHERE table_name IN('discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item');`),'3');
+  assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE migration_name='20260830130100_discovery_query_lineage_functions';`),'0');});
+ it('installs exact public signatures, security and app-only execute ACL',()=>{const rows=psql(`SELECT proname||'|'||pg_get_function_identity_arguments(oid)||'|'||provolatile::text||'|'||prosecdef::text||'|'||array_to_string(proconfig,',') FROM pg_proc WHERE proname IN('${A}','${T}') ORDER BY proname;`).split('\n');
+  assert.deepEqual(rows,[`${A}|p_append_command jsonb|v|t|search_path=pg_catalog, public`,`${T}|p_attestation_key jsonb|v|t|search_path=pg_catalog, public`]);});
+ it('rejects open, oversized and hostile JSON with stable bounded P0001 errors',()=>{for(const fn of[A,T])for(const value of[`'{}'::jsonb`,`'{"extra":true}'::jsonb`,`jsonb_build_object('attempts',jsonb_build_array(${Array(129).fill("'{}'::jsonb").join(',')}))`]){
+   const r=raw(app(`SELECT * FROM ${fn}(${value});`,fn===T));assert.notEqual(r.status,0);assert.match(r.stderr,/P0001|DISCOVERY_QUERY_LINEAGE/);assert.doesNotMatch(r.stderr,/payload|company name|secret@example/i);}});
+ it('returns NOT_FOUND from identity-only attest without mutation',()=>{const before=psql(`SELECT count(*) FROM discovery_query_receipt;`);const key=JSON.stringify({schemaVersion:'discovery-query-lineage-lookup/v1',workspaceId:'10000000-0000-4000-8000-000000000001',runId:'20000000-0000-4000-8000-000000000001',planId:'30000000-0000-4000-8000-000000000001',queryKey:'a'.repeat(64),queryOrdinal:0,authorityId:'40000000-0000-4000-8000-000000000001',accountKey:`discovery.run:discovery_run:request:${'b'.repeat(64)}:${'b'.repeat(64)}`,purpose:'discovery.run',subjectType:'discovery_run',subjectId:`request:${'b'.repeat(64)}`,requestSha256:'b'.repeat(64)});
+  const out=psql(app(`SELECT status,replay FROM ${T}('${key}'::jsonb);`,true));assert.equal(out,'NOT_FOUND|f');assert.equal(psql(`SELECT count(*) FROM discovery_query_receipt;`),before);});
+ it('fails closed for cross-workspace callers and never exposes direct DML',()=>{for(const fn of[A,T]){const r=raw(app(`SELECT * FROM ${fn}('{}'::jsonb);`));assert.notEqual(r.status,0);}for(const table of['discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item']){const r=raw(app(`DELETE FROM ${table};`));assert.notEqual(r.status,0);assert.match(r.stderr,/permission denied/);}});
+ it('keeps attest persistently read-only and calls A attest rather than reading A tables',()=>{const def=psql(`SELECT pg_get_functiondef('${T}(jsonb)'::regprocedure);`);assert.doesNotMatch(def,/\bINSERT\b|\bUPDATE\b|\bDELETE\b/);assert.match(def,/attest_workspace_governed_child_relation_v1/);assert.doesNotMatch(def,/FROM\s+(?:public\.)?(?:governed_subject|governed_subject_relation|tool_operation_subject)/i);});
+});
