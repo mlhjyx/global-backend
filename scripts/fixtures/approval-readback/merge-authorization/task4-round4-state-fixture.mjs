@@ -2,11 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import * as approvalState from '../../../governance-approval-state.mjs';
-import {
-  buildApprovalReceiptArtifact,
-  buildApprovalReceiptCore,
-} from '../../../governance-approval-readback.mjs';
 import { buildTask3AcceptanceEvidence } from './task3-acceptance-evidence.mjs';
+import { buildSyntheticTrustedReceiptArtifact } from '../synthetic-trusted-receipt.mjs';
 
 export const NOW = new Date('2026-08-30T08:30:00.000Z');
 export const REVOCATION_NOW = new Date('2026-08-30T08:31:00.000Z');
@@ -36,14 +33,11 @@ const currentMainReadback = JSON.parse(
 
 const receiptSource = buildTask3AcceptanceEvidence();
 receiptSource.candidate.receipt_subject.phase = 'REVIEW';
-const receiptCore = buildApprovalReceiptCore(
+const receiptArtifact = buildSyntheticTrustedReceiptArtifact(
   receiptSource.candidate,
-  receiptSource.authority,
-  receiptSource.candidate.verifier,
   null,
   '2026-08-30T08:29:00.000Z',
 );
-const receiptArtifact = buildApprovalReceiptArtifact(receiptCore);
 const targetReceipt = Object.freeze({
   envelope: receiptArtifact.envelope,
   receipt_raw_sha256: receiptArtifact.receiptRawSha256,

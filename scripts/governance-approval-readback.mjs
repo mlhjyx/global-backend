@@ -40,6 +40,7 @@ const RECEIPT_SUBJECT_KEYS = Object.freeze([
 const RECEIPT_PHASES = new Set(['REVIEW', 'POST_MERGE', 'ACCEPTANCE_REVALIDATION']);
 const RECEIPT_ROLES = new Set(['OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'OWN-QA-EVIDENCE', 'OWN-SECURITY']);
 const issuedValidatedCores = new WeakSet();
+const trustedIssuanceCapabilities = new WeakSet();
 
 const snapshotsMatch = (candidate) => {
   if (!isPlainObject(candidate.pull_request) || !isPlainObject(candidate.ruleset) || !isPlainObject(candidate.decision)) {
@@ -179,7 +180,14 @@ const reviewForReceiptRole = (candidate) => {
   return undefined;
 };
 
-export const buildApprovalReceiptCore = (candidate, authority, verifier, mergeAuthorizationEvidence, now) => {
+export const buildApprovalReceiptCore = (
+  candidate,
+  authority,
+  verifier,
+  mergeAuthorizationEvidence,
+  now,
+  issuanceCapability,
+) => {
   const validation = validateApprovalReadback(candidate, authority, candidate?.policy, now);
   if (!validation.valid) throw approvalError(validation.issues[0].stable_code);
   if (!sameJson(verifier, candidate.verifier)) throw approvalError('APPROVAL_INDEPENDENCE_NOT_PROVEN');
@@ -193,6 +201,9 @@ export const buildApprovalReceiptCore = (candidate, authority, verifier, mergeAu
   if (stage !== null) {
     const mergeValidation = validateMergeAuthorizationEvidence(mergeAuthorizationEvidence, candidate, authority, now);
     if (!mergeValidation.valid) throw approvalError(mergeValidation.issues[0].stable_code);
+  }
+  if (!trustedIssuanceCapabilities.has(issuanceCapability)) {
+    throw approvalError('APPROVAL_INDEPENDENCE_NOT_PROVEN');
   }
   const review = reviewForReceiptRole(candidate);
   if (!review) throw approvalError('APPROVAL_REVIEW_REQUIRED');

@@ -18,6 +18,10 @@ import {
   validateProgramCMergeAuthorizationGrant,
 } from './governance-approval-schema-validator.mjs';
 import { buildApprovalReceiptArtifact as buildRawApprovalReceiptArtifact } from './governance-approval-safe-json.mjs';
+import {
+  buildSyntheticTrustedReceiptArtifact,
+  buildSyntheticTrustedReceiptCore,
+} from './fixtures/approval-readback/synthetic-trusted-receipt.mjs';
 
 const DIGEST_A = `sha256:${'a'.repeat(64)}`;
 const DIGEST_B = `sha256:${'b'.repeat(64)}`;
@@ -352,7 +356,7 @@ test('FIX1 merge path starts with Task 1 closed schemas and enforces causality',
 test('FIX2 receipt schema and renderer preserve deterministic machine evidence', () => {
   mutation('machine-receipt-preserved', () => {
     const value = candidate();
-    const core = buildApprovalReceiptCore(value, authority(), verifier(), null, NOW);
+    const core = buildSyntheticTrustedReceiptCore(value, null, NOW);
     assert.deepEqual(core.machine_check_evidence, value.machine_checks);
     assert.doesNotThrow(() => buildRawApprovalReceiptArtifact(core));
   });
@@ -364,11 +368,11 @@ test('FIX2 receipt schema and renderer preserve deterministic machine evidence',
     });
     value.machine_checks.push(second);
     value.policy.required_machine_checks.push(requiredCheck(second));
-    const core = buildApprovalReceiptCore(value, authority(), verifier(), null, NOW);
+    const core = buildSyntheticTrustedReceiptCore(value, null, NOW);
     assert.deepEqual(core.machine_check_evidence.map(({ context }) => context), ['approval/aaa', 'approval/readback']);
   });
   mutation('machine-receipt-partial', () => {
-    const core = buildApprovalReceiptCore(candidate(), authority(), verifier(), null, NOW);
+    const core = buildSyntheticTrustedReceiptCore(candidate(), null, NOW);
     const partial = clone(core);
     delete partial.machine_check_evidence;
     assert.throws(() => buildRawApprovalReceiptArtifact(partial));
@@ -377,7 +381,7 @@ test('FIX2 receipt schema and renderer preserve deterministic machine evidence',
     expectIssue(validateApprovalReceipt(invalidEnvelope), 'APPROVAL_SCHEMA_REQUIRED');
   });
   mutation('machine-receipt-alias', () => {
-    const core = buildApprovalReceiptCore(candidate(), authority(), verifier(), null, NOW);
+    const core = buildSyntheticTrustedReceiptCore(candidate(), null, NOW);
     const alias = clone(core);
     alias.machine_check_evidence = [{ check_run_url: 'https://example.invalid' }];
     assert.throws(() => buildRawApprovalReceiptArtifact(alias));
@@ -386,12 +390,17 @@ test('FIX2 receipt schema and renderer preserve deterministic machine evidence',
 
 test('FIX3 Task 3 artifact builder requires its opaque validated-core capability', () => {
   mutation('artifact-forged-core', () => {
-    const core = buildApprovalReceiptCore(candidate(), authority(), verifier(), null, NOW);
-    assert.doesNotThrow(() => buildApprovalReceiptArtifact(core));
+    const value = candidate();
+    const core = buildSyntheticTrustedReceiptCore(value, null, NOW);
     assert.throws(
-      () => buildApprovalReceiptArtifact(clone(core)),
+      () => buildApprovalReceiptCore(value, authority(), verifier(), null, NOW),
+      (error) => error.message === 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+    );
+    assert.throws(
+      () => buildApprovalReceiptArtifact(core),
       (error) => error.message === 'APPROVAL_RECEIPT_REQUIRED',
     );
+    assert.doesNotThrow(() => buildRawApprovalReceiptArtifact(core));
   });
 });
 
@@ -457,12 +466,10 @@ test('FIX6 receipt subject is closed and phase-to-merge mapping is exhaustive', 
 });
 
 const receiptSet = () => {
-  const firstCore = buildApprovalReceiptCore(candidate(), authority(), verifier(), null, NOW);
-  const firstArtifact = buildApprovalReceiptArtifact(firstCore);
+  const firstArtifact = buildSyntheticTrustedReceiptArtifact(candidate(), null, NOW);
   const secondCandidate = candidate();
   secondCandidate.receipt_subject.receipt_id = 'approval-receipt-0004';
-  const secondCore = buildApprovalReceiptCore(secondCandidate, authority(), verifier(), null, NOW);
-  const secondArtifact = buildApprovalReceiptArtifact(secondCore);
+  const secondArtifact = buildSyntheticTrustedReceiptArtifact(secondCandidate, null, NOW);
   const receipt = (artifact) => ({ envelope: artifact.envelope, receipt_raw_sha256: artifact.receiptRawSha256 });
   return { first: receipt(firstArtifact), second: receipt(secondArtifact) };
 };

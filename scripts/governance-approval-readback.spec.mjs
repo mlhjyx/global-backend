@@ -12,6 +12,10 @@ import {
   validateReceiptSupersession,
 } from './governance-approval-readback.mjs';
 import { buildApprovalReceiptArtifact as buildRawApprovalReceiptArtifact } from './governance-approval-safe-json.mjs';
+import {
+  buildSyntheticTrustedReceiptArtifact,
+  buildSyntheticTrustedReceiptCore,
+} from './fixtures/approval-readback/synthetic-trusted-receipt.mjs';
 
 const DIGEST_A = `sha256:${'a'.repeat(64)}`;
 const DIGEST_B = `sha256:${'b'.repeat(64)}`;
@@ -598,8 +602,8 @@ test('merge grant, separate consumption, and durable ledger evidence fail closed
 
 test('receipt core and Task 2 artifact keep raw digest external and merge evidence referential', () => {
   const value = candidate();
-  const core = buildApprovalReceiptCore(value, authority(), verifier(), null, NOW);
-  const artifact = buildApprovalReceiptArtifact(core);
+  const core = buildSyntheticTrustedReceiptCore(value, null, NOW);
+  const artifact = buildRawApprovalReceiptArtifact(core);
   assert.equal(Object.hasOwn(core, 'merge_authorization_evidence'), false);
   assert.equal(Object.hasOwn(artifact.envelope, 'receipt_raw_sha256'), false);
   assert.equal(Object.hasOwn(artifact.envelope.core, 'receipt_raw_sha256'), false);
@@ -610,7 +614,7 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
   const mergeValue = mergeEvidence();
   const mergeCandidate = candidate();
   mergeCandidate.receipt_subject.phase = 'POST_MERGE';
-  const mergeCore = buildApprovalReceiptCore(mergeCandidate, authority(), verifier(), mergeValue, NOW);
+  const mergeCore = buildSyntheticTrustedReceiptCore(mergeCandidate, mergeValue, NOW);
   assert.deepEqual(mergeCore.merge_authorization_evidence, {
     stage: 'PROPOSAL_MERGE',
     grant_id: 'program-c-grant-0001',
@@ -622,7 +626,7 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
   });
   assert.equal(Object.hasOwn(mergeCore.merge_authorization_evidence, 'grant'), false);
   assert.equal(Object.hasOwn(mergeCore.merge_authorization_evidence, 'consumption'), false);
-  assert.doesNotThrow(() => buildApprovalReceiptArtifact(mergeCore));
+  assert.doesNotThrow(() => buildRawApprovalReceiptArtifact(mergeCore));
 
   const mutatedGrant = mergeEvidence();
   mutatedGrant.grant.status = 'CONSUMED';
@@ -633,8 +637,8 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
 });
 
 test('revocation and supersession validation returns append-only bound state facts', () => {
-  const core = buildApprovalReceiptCore(candidate(), authority(), verifier(), null, NOW);
-  const artifact = buildApprovalReceiptArtifact(core);
+  const core = buildSyntheticTrustedReceiptCore(candidate(), null, NOW);
+  const artifact = buildRawApprovalReceiptArtifact(core);
   const receipt = { envelope: artifact.envelope, receipt_raw_sha256: artifact.receiptRawSha256 };
   const revocation = {
     schema_version: 'trusted-approval-revocation/v1',
@@ -660,9 +664,7 @@ test('revocation and supersession validation returns append-only bound state fac
 
   const successorCandidate = candidate();
   successorCandidate.receipt_subject.receipt_id = 'approval-receipt-0004';
-  const successorArtifact = buildApprovalReceiptArtifact(
-    buildApprovalReceiptCore(successorCandidate, authority(), verifier(), null, NOW),
-  );
+  const successorArtifact = buildSyntheticTrustedReceiptArtifact(successorCandidate, null, NOW);
   const successor = {
     envelope: successorArtifact.envelope,
     receipt_raw_sha256: successorArtifact.receiptRawSha256,
@@ -710,6 +712,26 @@ test('revocation and supersession validation returns append-only bound state fac
     (v) => { v.receipt_raw_sha256 = DIGEST_A; },
     (v) => validateReceiptRevocation(v, receipt, authority(), NOW),
     'APPROVAL_RECEIPT_DIGEST_MISMATCH',
+  );
+});
+
+test('local caller-owned verifier facts cannot issue a trusted approval receipt core', () => {
+  const value = candidate();
+  assert.equal(validateApprovalReadback(value, authority(), value.policy, NOW).valid, true);
+  assert.throws(
+    () => buildApprovalReceiptCore(
+      value,
+      authority(),
+      structuredClone(value.verifier),
+      null,
+      NOW,
+    ),
+    (error) => error.message === 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+  );
+  const syntheticCore = buildSyntheticTrustedReceiptCore(value, null, NOW);
+  assert.throws(
+    () => buildApprovalReceiptArtifact(syntheticCore),
+    (error) => error.message === 'APPROVAL_RECEIPT_REQUIRED',
   );
 });
 
