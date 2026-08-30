@@ -1,0 +1,30 @@
+{
+  "repositoryId": 1291151138,
+  "prNumber": 427,
+  "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authorizedHeadSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "prState": "MERGED",
+  "resultCommitSha": "cccccccccccccccccccccccccccccccccccccccc",
+  "observedMergeMethod": "SQUASH",
+  "resultAssociatedWithPr": true,
+  "headAssociatedWithResult": true,
+  "resultReachableFromCurrentMain": true,
+  "currentMain": {
+    "ref": "refs/heads/main",
+    "sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "readAt": "2026-08-30T08:20:00.000Z"
+  },
+  "independentVerifier": {
+    "repository": {
+      "id": 4270001,
+      "full_name": "mlhjyx/global-governance-verifier"
+    },
+    "path": ".github/workflows/verify-approval.yml",
+    "sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "runId": 42704,
+    "attempt": 1,
+    "identity": "github-app:427"
+  },
+  "preReadbackSha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "postReadbackSha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+}
