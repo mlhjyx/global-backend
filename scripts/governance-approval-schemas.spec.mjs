@@ -89,6 +89,15 @@ const receipt = () => {
   };
 };
 
+const mergeAuthorityReceipt = () => {
+  const value = receipt();
+  value.core.role = 'MERGE-AUTHORIZER';
+  value.core.actor_id = 6;
+  value.core.actor_login = 'merge-authorizer';
+  value.receipt_core_sha256 = canonicalDigest(value.core);
+  return value;
+};
+
 const evidenceManifest = () => ({
   schema_version: 'trusted-approval-evidence-manifest/v1',
   receipt_id: RECEIPT_ID,
@@ -152,6 +161,8 @@ const grant = () => ({
   authority_revision: 'approval-authorities/r2',
   authority_sha256: DIGEST,
   authority_receipt_id: RECEIPT_ID,
+  authority_receipt_core_sha256: mergeAuthorityReceipt().receipt_core_sha256,
+  authority_receipt_raw_sha256: OTHER_DIGEST,
   authorized_at: INSTANT,
   expires_at: LATER_INSTANT,
   single_use_nonce: 'nonce-program-c-0001',
@@ -335,7 +346,16 @@ test('review remediation requires bounded APPROVAL issues and a closed receipt e
 test('program c cross-document seam binds grant, authority, revocation, expiry, and nonce reservation', () => {
   const authoritiesValue = assignedAuthorities();
   const authoritySha = canonicalDigest(authoritiesValue);
-  const grantValue = { ...grant(), authority_sha256: authoritySha };
+  const authorityReceipt = mergeAuthorityReceipt();
+  authorityReceipt.core.authority_sha256 = authoritySha;
+  authorityReceipt.receipt_core_sha256 = canonicalDigest(authorityReceipt.core);
+  const grantValue = {
+    ...grant(),
+    authority_sha256: authoritySha,
+    authority_receipt_id: authorityReceipt.core.receipt_id,
+    authority_receipt_core_sha256: authorityReceipt.receipt_core_sha256,
+    authority_receipt_raw_sha256: OTHER_DIGEST,
+  };
   const grantRawSha = canonicalDigest(grantValue);
   const consumptionValue = { ...consumption(), grant_raw_sha256: grantRawSha };
   const context = () => ({
@@ -344,16 +364,35 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
     consumption: clone(consumptionValue),
     authorities: clone(authoritiesValue),
     authority_sha256: authoritySha,
-    revoked_receipt_ids: [],
-    consumed_nonces: [],
-    nonce_reservations: [{
-      key: consumptionValue.nonce_ledger_key,
-      nonce: consumptionValue.single_use_nonce,
-      reserved_revision: consumptionValue.nonce_ledger_reserved_revision,
-      grant_id: grantValue.grant_id,
-      grant_raw_sha256: grantRawSha,
-    }],
     now: '2026-08-30T00:30:00.000Z',
+    authority_receipt: clone(authorityReceipt),
+    authority_receipt_core_sha256: authorityReceipt.receipt_core_sha256,
+    authority_receipt_raw_sha256: OTHER_DIGEST,
+    approval_receipts: [{ receipt: clone(authorityReceipt), receipt_raw_sha256: OTHER_DIGEST }],
+    revocations: [],
+    supersessions: [],
+    ledger_snapshot: {
+      schema_version: 'approval-nonce-ledger-snapshot/v1',
+      durability_class: 'SHARED_DURABLE_CAS',
+      repository_id: REPOSITORY.id,
+      reservations: [{
+        key: consumptionValue.nonce_ledger_key,
+        single_use_nonce: consumptionValue.single_use_nonce,
+        reserved_revision: consumptionValue.nonce_ledger_reserved_revision,
+        grant_id: grantValue.grant_id,
+        grant_raw_sha256: grantRawSha,
+        request_binding: {
+          repository_id: REPOSITORY.id,
+          decision_adr: grantValue.decision_adr,
+          decision_revision: grantValue.decision_revision,
+          policy_revision: grantValue.policy_revision,
+          stage: grantValue.stage,
+          pr_number: grantValue.pr_number,
+          head_sha: grantValue.head_sha,
+        },
+        state: 'RESERVED',
+      }],
+    },
   });
   expectValid(validateProgramCMergeAuthorizationConsumptionContext, context());
   for (const mutate of [
@@ -375,11 +414,18 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
     (value) => { value.consumption.authorized_head_sha = 'e'.repeat(40); },
     (value) => { value.consumption.observed_merge_method = 'REBASE'; },
     (value) => { value.authorities.roles[5].actor_id = 99; },
-    (value) => { value.revoked_receipt_ids.push(RECEIPT_ID); },
+    (value) => { value.revocations.push({ ...revocation(), receipt_core_sha256: value.authority_receipt_core_sha256, receipt_raw_sha256: value.authority_receipt_raw_sha256 }); },
+    (value) => { value.supersessions.push({ ...supersession(), predecessor: { receipt_id: RECEIPT_ID, receipt_core_sha256: value.authority_receipt_core_sha256, receipt_raw_sha256: value.authority_receipt_raw_sha256 } }); },
     (value) => { value.now = '2026-08-30T02:00:00.000Z'; },
-    (value) => { value.consumed_nonces.push(value.consumption.single_use_nonce); },
-    (value) => { value.nonce_reservations.push(clone(value.nonce_reservations[0])); },
-    (value) => { value.nonce_reservations[0].reserved_revision = 2; },
+    (value) => { value.ledger_snapshot.reservations[0].state = 'CONSUMED'; },
+    (value) => { value.ledger_snapshot.reservations.push(clone(value.ledger_snapshot.reservations[0])); },
+    (value) => { value.ledger_snapshot.reservations[0].reserved_revision = 2; },
+    (value) => { value.ledger_snapshot.durability_class = 'PROCESS_MEMORY'; },
+    (value) => {
+      const duplicate = { ...value.authority_receipt, core: { ...value.authority_receipt.core, role: 'OWN-SECURITY' } };
+      duplicate.receipt_core_sha256 = canonicalDigest(duplicate.core);
+      value.approval_receipts.push({ receipt: duplicate, receipt_raw_sha256: OTHER_DIGEST });
+    },
     (value) => { value.grant.head_sha = 'e'.repeat(40); },
   ]) {
     const value = context(); mutate(value); expectInvalid(validateProgramCMergeAuthorizationConsumptionContext, value);

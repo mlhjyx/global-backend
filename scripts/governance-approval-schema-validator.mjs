@@ -141,16 +141,43 @@ const consumptionIssues = (value) => {
 
 const contextIssue = (code, path) => issue('#/cross-document-context', path, code);
 const same = (left, right) => canonicalize(left) === canonicalize(right);
+const hasExactKeys = (value, keys) => isObject(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+const isCanonicalInstant = (value) => (
+  typeof value === 'string'
+  && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+  && Number.isFinite(Date.parse(value))
+  && new Date(value).toISOString() === value
+);
+const receiptIdentityMatches = (record, receipt, rawDigest) => (
+  record.receipt_id === receipt.core.receipt_id
+  && record.receipt_core_sha256 === receipt.receipt_core_sha256
+  && record.receipt_raw_sha256 === rawDigest
+);
+const isLedgerReservation = (value) => hasExactKeys(value, [
+  'key', 'single_use_nonce', 'reserved_revision', 'grant_id', 'grant_raw_sha256', 'request_binding', 'state',
+]) && hasExactKeys(value.request_binding, [
+  'repository_id', 'decision_adr', 'decision_revision', 'policy_revision', 'stage', 'pr_number', 'head_sha',
+]);
 const contextIssues = (value) => {
-  if (!isObject(value)) return [contextIssue('APPROVAL_CONTEXT_INVALID', '')];
+  const required = [
+    'grant', 'grant_raw_sha256', 'consumption', 'authorities', 'authority_sha256', 'now',
+    'authority_receipt', 'authority_receipt_core_sha256', 'authority_receipt_raw_sha256',
+    'approval_receipts', 'revocations', 'supersessions', 'ledger_snapshot',
+  ];
+  if (!hasExactKeys(value, required)) return [contextIssue('APPROVAL_CONTEXT_SHAPE_INVALID', '')];
+  if (!isCanonicalInstant(value.now)) return [contextIssue('APPROVAL_CONTEXT_NOW_INVALID', '/now')];
   const { grant, consumption, authorities, authority_sha256: authoritySha, grant_raw_sha256: grantRawSha } = value;
   const basicResults = [
     validateProgramCMergeAuthorizationGrant(grant),
     validateProgramCMergeAuthorizationConsumption(consumption),
     validateApprovalAuthorities(authorities),
+    validateApprovalReceipt(value.authority_receipt),
   ];
   const failed = basicResults.find((result) => !result.valid);
   if (failed) return [...failed.issues];
+  if (!Array.isArray(value.approval_receipts) || value.approval_receipts.length < 1 || !Array.isArray(value.revocations) || !Array.isArray(value.supersessions)) {
+    return [contextIssue('APPROVAL_CONTEXT_TRUST_INPUT_INVALID', '')];
+  }
   const issues = [];
   const expectedGrantRaw = canonicalDigest(grant);
   if (grantRawSha !== expectedGrantRaw || consumption.grant_raw_sha256 !== expectedGrantRaw) {
@@ -159,51 +186,84 @@ const contextIssues = (value) => {
   if (grant.authority_sha256 !== authoritySha || authoritySha !== canonicalDigest(authorities)) {
     issues.push(contextIssue('APPROVAL_AUTHORITY_DIGEST_MISMATCH', '/authority_sha256'));
   }
+  const authorityReceipt = value.authority_receipt;
+  if (
+    value.authority_receipt_core_sha256 !== authorityReceipt.receipt_core_sha256
+    || grant.authority_receipt_id !== authorityReceipt.core.receipt_id
+    || grant.authority_receipt_core_sha256 !== authorityReceipt.receipt_core_sha256
+    || grant.authority_receipt_raw_sha256 !== value.authority_receipt_raw_sha256
+    || authorityReceipt.core.role !== 'MERGE-AUTHORIZER'
+    || authorityReceipt.core.actor_id !== grant.authority_actor_id
+    || !same(authorityReceipt.core.repository, grant.repository)
+    || authorityReceipt.core.decision_adr !== grant.decision_adr
+    || authorityReceipt.core.decision_revision !== grant.decision_revision
+    || authorityReceipt.core.policy_revision !== grant.policy_revision
+    || authorityReceipt.core.head_sha !== grant.head_sha
+    || authorityReceipt.core.authority_revision !== grant.authority_revision
+    || authorityReceipt.core.authority_sha256 !== grant.authority_sha256
+  ) {
+    issues.push(contextIssue('APPROVAL_AUTHORITY_RECEIPT_BINDING_MISMATCH', '/authority_receipt'));
+  }
   const mergeAuthority = authorities.roles.find(({ role }) => role === 'MERGE-AUTHORIZER');
   if (
     grant.authority_revision !== authorities.revision
     || grant.authority_role !== 'MERGE-AUTHORIZER'
     || mergeAuthority?.status !== 'ASSIGNED'
     || mergeAuthority.actor_id !== grant.authority_actor_id
-  ) {
-    issues.push(contextIssue('APPROVAL_AUTHORITY_BINDING_MISMATCH', '/authorities'));
+  ) issues.push(contextIssue('APPROVAL_AUTHORITY_BINDING_MISMATCH', '/authorities'));
+  const identities = new Map();
+  for (const entry of value.approval_receipts) {
+    if (!hasExactKeys(entry, ['receipt', 'receipt_raw_sha256'])) {
+      issues.push(contextIssue('APPROVAL_RECEIPT_SET_SHAPE_INVALID', '/approval_receipts'));
+      continue;
+    }
+    const result = validateApprovalReceipt(entry.receipt);
+    if (!result.valid) {
+      issues.push(contextIssue('APPROVAL_RECEIPT_SET_RECEIPT_INVALID', '/approval_receipts'));
+      continue;
+    }
+    const priorRole = identities.get(entry.receipt.core.receipt_id);
+    if (priorRole !== undefined && priorRole !== entry.receipt.core.role) issues.push(contextIssue('APPROVAL_RECEIPT_ROLE_REUSE', '/approval_receipts'));
+    identities.set(entry.receipt.core.receipt_id, entry.receipt.core.role);
   }
+  const authorityEntry = value.approval_receipts.find((entry) => (
+    hasExactKeys(entry, ['receipt', 'receipt_raw_sha256'])
+    && entry.receipt_raw_sha256 === value.authority_receipt_raw_sha256
+    && same(entry.receipt, authorityReceipt)
+  ));
+  if (!authorityEntry) issues.push(contextIssue('APPROVAL_AUTHORITY_RECEIPT_SET_MISSING', '/approval_receipts'));
   const pairs = [
-    ['grant_id', grant.grant_id, consumption.grant_id],
-    ['single_use_nonce', grant.single_use_nonce, consumption.single_use_nonce],
-    ['repository', grant.repository, consumption.repository],
-    ['decision_adr', grant.decision_adr, consumption.decision_adr],
-    ['decision_revision', grant.decision_revision, consumption.decision_revision],
-    ['policy_revision', grant.policy_revision, consumption.policy_revision],
-    ['stage', grant.stage, consumption.stage],
-    ['pr_number', grant.pr_number, consumption.pr_number],
-    ['head_sha', grant.head_sha, consumption.authorized_head_sha],
-    ['allowed_merge_method', grant.allowed_merge_method, consumption.observed_merge_method],
+    ['grant_id', grant.grant_id, consumption.grant_id], ['single_use_nonce', grant.single_use_nonce, consumption.single_use_nonce],
+    ['repository', grant.repository, consumption.repository], ['decision_adr', grant.decision_adr, consumption.decision_adr],
+    ['decision_revision', grant.decision_revision, consumption.decision_revision], ['policy_revision', grant.policy_revision, consumption.policy_revision],
+    ['stage', grant.stage, consumption.stage], ['pr_number', grant.pr_number, consumption.pr_number],
+    ['head_sha', grant.head_sha, consumption.authorized_head_sha], ['allowed_merge_method', grant.allowed_merge_method, consumption.observed_merge_method],
   ];
-  for (const [name, expected, actual] of pairs) {
-    if (!same(expected, actual)) issues.push(contextIssue('APPROVAL_GRANT_CONSUMPTION_BINDING_MISMATCH', `/consumption/${name}`));
+  for (const [name, expected, actual] of pairs) if (!same(expected, actual)) issues.push(contextIssue('APPROVAL_GRANT_CONSUMPTION_BINDING_MISMATCH', `/consumption/${name}`));
+  for (const revocation of value.revocations) {
+    const result = validateApprovalRevocation(revocation);
+    if (!result.valid || !receiptIdentityMatches(revocation, authorityReceipt, value.authority_receipt_raw_sha256)) issues.push(contextIssue('APPROVAL_REVOCATION_CONTEXT_INVALID', '/revocations'));
+    else issues.push(contextIssue('APPROVAL_REVOKED_RECEIPT_REUSED', '/revocations'));
   }
-  if (value.revoked_receipt_ids?.includes(grant.authority_receipt_id)) {
-    issues.push(contextIssue('APPROVAL_REVOKED_RECEIPT_REUSED', '/revoked_receipt_ids'));
+  for (const supersession of value.supersessions) {
+    const result = validateApprovalSupersession(supersession);
+    const predecessor = supersession.predecessor;
+    if (!result.valid || !receiptIdentityMatches(predecessor, authorityReceipt, value.authority_receipt_raw_sha256)) issues.push(contextIssue('APPROVAL_SUPERSESSION_CONTEXT_INVALID', '/supersessions'));
+    else issues.push(contextIssue('APPROVAL_SUPERSEDED_RECEIPT_REUSED', '/supersessions'));
   }
-  if (Date.parse(consumption.consumed_at) > Date.parse(grant.expires_at) || Date.parse(value.now) > Date.parse(grant.expires_at)) {
-    issues.push(contextIssue('APPROVAL_GRANT_EXPIRED', '/now'));
-  }
-  if (value.consumed_nonces?.includes(grant.single_use_nonce)) {
-    issues.push(contextIssue('APPROVAL_NONCE_REPLAY', '/consumed_nonces'));
-  }
-  const reservations = Array.isArray(value.nonce_reservations) ? value.nonce_reservations.filter((reservation) => (
-    isObject(reservation)
-    && reservation.key === consumption.nonce_ledger_key
-    && reservation.nonce === grant.single_use_nonce
-    && reservation.grant_id === grant.grant_id
-    && reservation.grant_raw_sha256 === expectedGrantRaw
-  )) : [];
-  if (
-    reservations.length !== 1
-    || reservations[0].reserved_revision !== consumption.nonce_ledger_reserved_revision
-  ) {
-    issues.push(contextIssue('APPROVAL_NONCE_RESERVATION_MISMATCH', '/nonce_reservations'));
+  if (Date.parse(consumption.consumed_at) > Date.parse(grant.expires_at) || Date.parse(value.now) > Date.parse(grant.expires_at)) issues.push(contextIssue('APPROVAL_GRANT_EXPIRED', '/now'));
+  const ledger = value.ledger_snapshot;
+  if (!hasExactKeys(ledger, ['schema_version', 'durability_class', 'repository_id', 'reservations']) || ledger.schema_version !== 'approval-nonce-ledger-snapshot/v1' || ledger.durability_class !== 'SHARED_DURABLE_CAS' || ledger.repository_id !== grant.repository.id || !Array.isArray(ledger.reservations) || ledger.reservations.some((reservation) => !isLedgerReservation(reservation))) {
+    issues.push(contextIssue('APPROVAL_LEDGER_SNAPSHOT_INVALID', '/ledger_snapshot'));
+  } else {
+    const reservations = ledger.reservations.filter((reservation) => reservation.key === consumption.nonce_ledger_key);
+    if (reservations.length !== 1) issues.push(contextIssue('APPROVAL_NONCE_RESERVATION_MISMATCH', '/ledger_snapshot/reservations'));
+    else {
+      const reservation = reservations[0];
+      const expectedBinding = { repository_id: grant.repository.id, decision_adr: grant.decision_adr, decision_revision: grant.decision_revision, policy_revision: grant.policy_revision, stage: grant.stage, pr_number: grant.pr_number, head_sha: grant.head_sha };
+      if (reservation.state !== 'RESERVED') issues.push(contextIssue('APPROVAL_NONCE_REPLAY', '/ledger_snapshot/reservations'));
+      if (reservation.single_use_nonce !== grant.single_use_nonce || reservation.reserved_revision !== consumption.nonce_ledger_reserved_revision || reservation.grant_id !== grant.grant_id || reservation.grant_raw_sha256 !== expectedGrantRaw || !same(reservation.request_binding, expectedBinding)) issues.push(contextIssue('APPROVAL_NONCE_RESERVATION_MISMATCH', '/ledger_snapshot/reservations'));
+    }
   }
   return issues;
 };
