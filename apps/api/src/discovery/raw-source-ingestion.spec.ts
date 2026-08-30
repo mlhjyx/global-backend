@@ -1669,6 +1669,46 @@ describe("Raw Source v2 ingestion boundary", () => {
       expect(Object.isFrozen(resolution.row.expiresAt)).toBe(true);
     });
 
+    it("preserves an own __proto__ JSON key without changing the snapshot prototype or hash", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const payload = JSON.parse(
+        '{"__proto__":{"polluted":true},"name":"Acme GmbH"}',
+      ) as Record<string, unknown>;
+      candidate.payload = payload;
+      candidate.payloadHash = rawPayloadHash(payload);
+      candidate.payloadBytes = Buffer.byteLength(JSON.stringify(payload));
+
+      const resolution = resolveRawSourceBatchByIndex([candidate], [])[0]!;
+      expect(resolution.kind).toBe("WRITE");
+      if (resolution.kind !== "WRITE") throw new Error("expected WRITE");
+      const snapshottedPayload = resolution.row.payload as Record<
+        string,
+        unknown
+      >;
+
+      expect(Object.getPrototypeOf(snapshottedPayload)).toBe(
+        Object.prototype,
+      );
+      expect(Object.hasOwn(snapshottedPayload, "__proto__")).toBe(true);
+      expect(Object.getOwnPropertyDescriptor(
+        snapshottedPayload,
+        "__proto__",
+      )).toMatchObject({
+        enumerable: true,
+        value: { polluted: true },
+      });
+      expect(rawPayloadHash(resolution.row.payload)).toBe(
+        candidate.payloadHash,
+      );
+      expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+    });
+
     it("rejects a Date with an own getTime accessor without invoking it", () => {
       const candidate = prepareRawSourceBatch({
         providerKey: "registry",
