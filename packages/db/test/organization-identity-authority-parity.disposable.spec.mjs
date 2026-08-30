@@ -176,19 +176,69 @@ function dropAdmissionDatabase(database) {
   sqlDatabase("global", `DROP DATABASE IF EXISTS ${database};`);
 }
 
+function parseAdmissionDatabaseUrl(input, database) {
+  const rejected = Object.freeze({
+    ok: false,
+    code: "TASK6B_A3_DATABASE_URL_INVALID",
+  });
+
+  if (
+    !admissionDatabaseSet.has(database) ||
+    typeof input !== "string" ||
+    input.length === 0 ||
+    input.length > 2048
+  ) {
+    return rejected;
+  }
+
+  try {
+    const parsed = new URL(input);
+    if (
+      parsed.protocol !== "postgresql:" ||
+      parsed.username !== "global" ||
+      parsed.password.length === 0 ||
+      parsed.hostname !== "127.0.0.1" ||
+      parsed.port !== "55441" ||
+      parsed.pathname !== "/postgres" ||
+      parsed.search !== "" ||
+      parsed.hash !== "" ||
+      !parsed.href.endsWith("/postgres")
+    ) {
+      return rejected;
+    }
+
+    const derived = new URL(parsed.href);
+    derived.pathname = `/${database}`;
+    derived.searchParams.set("schema", "public");
+    return Object.freeze({ ok: true, databaseUrl: derived.href });
+  } catch {
+    return rejected;
+  }
+}
+
+function sanitizeAdmissionChildFailure(result) {
+  const exit =
+    Number.isInteger(result?.status) &&
+    result.status >= 0 &&
+    result.status <= 255
+      ? result.status
+      : "UNKNOWN";
+  const signal = result?.signal == null ? "NONE" : "PRESENT";
+  return Object.freeze({
+    ok: false,
+    code: "TASK6B_A3_PRISMA_DEPLOY_FAILED",
+    exit,
+    signal,
+  });
+}
+
+function formatAdmissionChildFailure(outcome) {
+  return `${outcome.code}|exit=${outcome.exit}|signal=${outcome.signal}`;
+}
+
 function runPrisma(schemaPath, database) {
-  assert.ok(admissionDatabaseSet.has(database));
-  assert.ok(admissionBaseUrl, "TASK6B_A3_DATABASE_URL is required");
-  const databaseUrl = new URL(admissionBaseUrl);
-  assert.equal(databaseUrl.protocol, "postgresql:");
-  assert.equal(databaseUrl.username, "global");
-  assert.ok(databaseUrl.password, "disposable database password is required");
-  assert.equal(databaseUrl.hostname, "127.0.0.1");
-  assert.equal(databaseUrl.port, "55441");
-  assert.equal(databaseUrl.pathname, "/postgres");
-  databaseUrl.pathname = `/${database}`;
-  databaseUrl.search = "";
-  databaseUrl.searchParams.set("schema", "public");
+  const admission = parseAdmissionDatabaseUrl(admissionBaseUrl, database);
+  if (!admission.ok) assert.fail(admission.code);
   const result = spawnSync(
     "pnpm",
     [
@@ -206,14 +256,22 @@ function runPrisma(schemaPath, database) {
       encoding: "utf8",
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl.href,
+        DATABASE_URL: admission.databaseUrl,
         PRISMA_HIDE_UPDATE_MESSAGE: "true",
       },
       maxBuffer: 64 * 1024 * 1024,
     },
   );
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`.trim());
-  return `${result.stdout}\n${result.stderr}`;
+  if (result.status !== 0) {
+    const outcome = sanitizeAdmissionChildFailure(result);
+    assert.fail(formatAdmissionChildFailure(outcome));
+  }
+  return Object.freeze({
+    migrationObserved:
+      `${result.stdout ?? ""}\n${result.stderr ?? ""}`.includes(
+        "20260830090000_organization_identity_v2_resolver_command",
+      ),
+  });
 }
 
 function dropAdmissionRoles() {
@@ -244,10 +302,11 @@ function assertAdmissionSuccess(database) {
   const migrationHash = createHash("sha256")
     .update(readFileSync(currentMigrationPath))
     .digest("hex");
-  const deployOutput = runPrisma(currentSchemaPath, database);
-  assert.match(
-    deployOutput,
-    /20260830090000_organization_identity_v2_resolver_command/u,
+  const deployOutcome = runPrisma(currentSchemaPath, database);
+  assert.equal(
+    deployOutcome.migrationObserved,
+    true,
+    "TASK6B_A3_CURRENT_MIGRATION_NOT_OBSERVED",
   );
   assert.equal(
     sqlDatabase(
@@ -860,6 +919,146 @@ const advisoryErrorCases = Object.freeze([
   },
 ]);
 
+let syntheticAdmissionCredentialSequence = 0;
+
+function syntheticAdmissionCredential() {
+  syntheticAdmissionCredentialSequence += 1;
+  const password = [
+    "task-a3-synthetic",
+    process.pid,
+    Date.now(),
+    syntheticAdmissionCredentialSequence,
+    ":@/?#%",
+  ].join("-");
+  const encodedPassword = encodeURIComponent(password);
+  const originalUrl = `postgresql://global:${encodedPassword}@127.0.0.1:55441/postgres`;
+  const derivedUrl = `postgresql://global:${encodedPassword}@127.0.0.1:55441/task_a3_fix3_owner_defaults_positive?schema=public`;
+  const credentialEnvironment = `DATABASE_URL=${derivedUrl}`;
+
+  return Object.freeze({
+    password,
+    encodedPassword,
+    originalUrl,
+    derivedUrl,
+    credentialEnvironment,
+  });
+}
+
+function assertFixedAdmissionUrlRejection(input, sensitiveValues) {
+  const outcome = parseAdmissionDatabaseUrl(
+    input,
+    "task_a3_fix3_owner_defaults_positive",
+  );
+  assert.equal(outcome?.ok, false);
+  assert.equal(outcome?.code, "TASK6B_A3_DATABASE_URL_INVALID");
+  assert.equal(
+    Object.keys(outcome ?? {})
+      .sort()
+      .join(","),
+    "code,ok",
+  );
+  const rendered = JSON.stringify(outcome);
+  assert.equal(
+    sensitiveValues.every((value) => !rendered.includes(value)),
+    true,
+  );
+}
+
+describe("Task A3 admission diagnostics do not disclose credentials", () => {
+  it("rejects a malformed URL with only the fixed machine code", () => {
+    const fixture = syntheticAdmissionCredential();
+    const malformedUrl = `postgresql://global:${fixture.encodedPassword}@[`;
+    assertFixedAdmissionUrlRejection(malformedUrl, [
+      fixture.password,
+      fixture.encodedPassword,
+      fixture.originalUrl,
+      malformedUrl,
+    ]);
+  });
+
+  for (const vector of [
+    {
+      name: "unexpected principal",
+      rewrite: (url) => url.replace("global:", "unexpected-principal:"),
+    },
+    {
+      name: "unexpected host",
+      rewrite: (url) => url.replace("@127.0.0.1:", "@localhost:"),
+    },
+    {
+      name: "unexpected port",
+      rewrite: (url) => url.replace(":55441/", ":55442/"),
+    },
+    {
+      name: "unexpected path",
+      rewrite: (url) => url.replace("/postgres", "/global"),
+    },
+    {
+      name: "unexpected search",
+      rewrite: (url) => `${url}?`,
+    },
+    {
+      name: "unexpected hash",
+      rewrite: (url) => `${url}#`,
+    },
+  ]) {
+    it(`rejects ${vector.name} with only the fixed machine code`, () => {
+      const fixture = syntheticAdmissionCredential();
+      const input = vector.rewrite(fixture.originalUrl);
+      assertFixedAdmissionUrlRejection(input, [
+        fixture.password,
+        fixture.encodedPassword,
+        fixture.originalUrl,
+        input,
+      ]);
+    });
+  }
+
+  it("reduces child failure output to bounded non-secret machine fields", () => {
+    const fixture = syntheticAdmissionCredential();
+    const result = {
+      status: 17,
+      signal: null,
+      stdout: [
+        fixture.originalUrl,
+        fixture.derivedUrl,
+        fixture.credentialEnvironment,
+      ].join("\n"),
+      stderr: [fixture.password, fixture.encodedPassword].join("\n"),
+    };
+    const outcome = sanitizeAdmissionChildFailure(result);
+    const diagnostic = formatAdmissionChildFailure(outcome);
+
+    assert.equal(outcome?.ok, false);
+    assert.equal(outcome?.code, "TASK6B_A3_PRISMA_DEPLOY_FAILED");
+    assert.equal(outcome?.exit, 17);
+    assert.equal(outcome?.signal, "NONE");
+    assert.equal(
+      diagnostic,
+      "TASK6B_A3_PRISMA_DEPLOY_FAILED|exit=17|signal=NONE",
+    );
+    assert.equal(
+      Object.keys(outcome ?? {})
+        .sort()
+        .join(","),
+      "code,exit,ok,signal",
+    );
+    const rendered = JSON.stringify(outcome);
+    assert.equal(
+      [
+        fixture.password,
+        fixture.encodedPassword,
+        fixture.originalUrl,
+        fixture.derivedUrl,
+        fixture.credentialEnvironment,
+      ].every(
+        (value) => !rendered.includes(value) && !diagnostic.includes(value),
+      ),
+      true,
+    );
+  });
+});
+
 describe("Organization Identity literal TypeScript-SQL parity", () => {
   it("loads and verifies the frozen A1 receipt plus exact disposable topology", () => {
     receipt();
@@ -1304,7 +1503,10 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
       assert.match(migration, /membership\.set_option/u);
       assert.match(migration, /UNION\s+SELECT path\.start_role/u);
       assert.doesNotMatch(migration, /UNION ALL\s+SELECT path\.start_role/u);
-      assert.doesNotMatch(migration, /(?:INSERT|UPDATE|DELETE)\s+pg_auth_members/iu);
+      assert.doesNotMatch(
+        migration,
+        /(?:INSERT|UPDATE|DELETE)\s+pg_auth_members/iu,
+      );
     });
   });
 
