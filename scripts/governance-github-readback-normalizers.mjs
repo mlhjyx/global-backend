@@ -19,7 +19,7 @@ import {
   sha256,
   stableJson,
 } from './governance-github-readback-common.mjs';
-import { apiUrl, fetchJson } from './governance-github-readback-rest.mjs';
+import { apiUrl, fetchJson, paginate } from './governance-github-readback-rest.mjs';
 
 export const normalizeRepository = (value) => {
   requireCondition(
@@ -194,65 +194,83 @@ const getWorkflow = async (state, id, limits) => {
 
 export const normalizeMachineChecks = async (
   state,
-  checks,
   runs,
   baseEntries,
   policy,
   request,
   limits,
+  budget,
 ) => {
   const output = [];
   for (const context of policy.allowedCheckContexts) {
     const contextIndex = policy.allowedCheckContexts.indexOf(context);
-    const matches = checks.filter((check) => check?.name === context);
-    requireCondition(matches.length <= 1, 'APPROVAL_CHECK_AMBIGUOUS');
-    requireCondition(matches.length === 1, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
-    const check = matches[0];
+    const runMatches = runs.filter((run) => (
+      run?.event === 'pull_request_target'
+      && run?.head_sha === request.expectedBaseSha
+      && run?.workflow_id === policy.allowedWorkflowIds[contextIndex]
+      && run?.path === policy.allowedWorkflowPaths[contextIndex]
+      && Array.isArray(run?.pull_requests)
+      && run.pull_requests.some((pull) => (
+        pull?.number === request.prNumber
+        && pull?.head?.sha === request.expectedHeadSha
+        && pull?.base?.sha === request.expectedBaseSha
+      ))
+    ));
+    requireCondition(runMatches.length === 1, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
+    const run = runMatches[0];
     requireCondition(
-      isSafePositiveInteger(check.id)
-        && check.head_sha === request.expectedHeadSha
-        && check.status === 'completed'
-        && check.conclusion === 'success'
-        && isSafePositiveInteger(check.check_suite?.id)
-        && isSafePositiveInteger(check.app?.id)
-        && isSafeString(check.app?.slug, 128)
-        && policy.allowedActionsAppIds[contextIndex] === check.app.id,
+      isSafePositiveInteger(run.id)
+        && isSafePositiveInteger(run.run_attempt)
+        && run.status === 'completed'
+        && run.conclusion === 'success'
+        && isSafePositiveInteger(run.check_suite_id)
+        && isSafePositiveInteger(run.workflow_id)
+        && isWorkflowPath(run.path),
       'APPROVAL_CHECK_WORKFLOW_MISMATCH',
     );
     const suiteResponse = await fetchJson(
       state,
-      apiUrl([...REPOSITORY_SEGMENTS, 'check-suites', check.check_suite.id]),
+      apiUrl([...REPOSITORY_SEGMENTS, 'check-suites', run.check_suite_id]),
       limits,
     );
     const suite = suiteResponse.value;
     requireCondition(
       isPlainObject(suite)
-        && suite.id === check.check_suite.id
-        && suite.head_sha === request.expectedHeadSha
+        && suite.id === run.check_suite_id
+        && suite.head_sha === run.head_sha
         && suite.status === 'completed'
         && suite.conclusion === 'success'
-        && suite.app?.id === check.app.id
-        && suite.app?.slug === check.app.slug
+        && suite.app?.id === policy.allowedActionsAppIds[contextIndex]
+        && isSafeString(suite.app?.slug, 128)
         && Array.isArray(suite.pull_requests)
         && suite.pull_requests.some((pull) => (
           pull?.number === request.prNumber && pull?.head?.sha === request.expectedHeadSha
         )),
       'APPROVAL_CHECK_WORKFLOW_MISMATCH',
     );
-    const runMatches = runs.filter((run) => run?.check_suite_id === suite.id);
-    requireCondition(runMatches.length === 1, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
-    const run = runMatches[0];
+    const checks = await paginate(
+      state,
+      apiUrl(
+        [...REPOSITORY_SEGMENTS, 'check-suites', suite.id, 'check-runs'],
+        { filter: 'all', per_page: 100, page: 1 },
+      ),
+      limits,
+      budget,
+      (value) => value?.check_runs,
+      'total_count',
+    );
+    const matches = checks.filter((check) => check?.name === context);
+    requireCondition(matches.length <= 1, 'APPROVAL_CHECK_AMBIGUOUS');
+    requireCondition(matches.length === 1, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
+    const check = matches[0];
     requireCondition(
-      isSafePositiveInteger(run.id)
-        && isSafePositiveInteger(run.run_attempt)
-        && run.event === 'pull_request_target'
-        && run.status === 'completed'
-        && run.conclusion === 'success'
-        && run.head_sha === request.expectedHeadSha
-        && isSafePositiveInteger(run.workflow_id)
-        && isWorkflowPath(run.path)
-        && policy.allowedWorkflowIds[contextIndex] === run.workflow_id
-        && policy.allowedWorkflowPaths[contextIndex] === run.path,
+      isSafePositiveInteger(check.id)
+        && check.head_sha === run.head_sha
+        && check.status === 'completed'
+        && check.conclusion === 'success'
+        && check.check_suite?.id === suite.id
+        && check.app?.id === suite.app.id
+        && check.app?.slug === suite.app.slug,
       'APPROVAL_CHECK_WORKFLOW_MISMATCH',
     );
     const workflow = await getWorkflow(state, run.workflow_id, limits);

@@ -109,21 +109,9 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
     'APPROVAL_GITHUB_PR_ASSOCIATION_MISMATCH',
   );
 
-  const checks = await paginate(
-    state,
-    apiUrl(
-      [...REPOSITORY_SEGMENTS, 'commits', request.expectedHeadSha, 'check-runs'],
-      { filter: 'all', per_page: 100, page: 1 },
-    ),
-    limits,
-    budget,
-    (value) => value?.check_runs,
-    'total_count',
-  );
   const runs = await paginate(
     state,
     apiUrl([...REPOSITORY_SEGMENTS, 'actions', 'runs'], {
-      head_sha: request.expectedHeadSha,
       event: 'pull_request_target',
       per_page: 100,
       page: 1,
@@ -135,12 +123,12 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
   );
   const machineChecks = await normalizeMachineChecks(
     state,
-    checks,
     runs,
     baseEntryMap,
     policy,
     request,
     limits,
+    budget,
   );
   const allEvidenceIds = [
     ...reviewEvidence.reviewIds,

@@ -185,7 +185,7 @@ export const fixtureState = () => {
       id: 81001,
       node_id: 'CR_81001',
       name: 'approval/readback',
-      head_sha: HEAD_SHA,
+      head_sha: BASE_SHA,
       status: 'completed',
       conclusion: 'success',
       details_url: 'https://example.invalid/details-only-claim',
@@ -196,7 +196,7 @@ export const fixtureState = () => {
     checkSuites: new Map([[71001, {
       id: 71001,
       node_id: 'CS_71001',
-      head_sha: HEAD_SHA,
+      head_sha: BASE_SHA,
       status: 'completed',
       conclusion: 'success',
       app: { id: 15368, slug: 'github-actions' },
@@ -208,10 +208,15 @@ export const fixtureState = () => {
       event: 'pull_request_target',
       status: 'completed',
       conclusion: 'success',
-      head_sha: HEAD_SHA,
+      head_sha: BASE_SHA,
       workflow_id: 61001,
       path: WORKFLOW_PATH,
       check_suite_id: 71001,
+      pull_requests: [{
+        number: 427,
+        head: { sha: HEAD_SHA },
+        base: { sha: BASE_SHA },
+      }],
       referenced_workflows: [{ workflow_id: 61002, path: SIGNER_PATH, sha: SIGNER_BLOB_SHA }],
       display_title: 'untrusted free-form title',
     }]],
@@ -335,6 +340,16 @@ export const fixtureFetch = (state) => {
       );
     }
     if (url.pathname.startsWith(`${prefix}/check-suites/`)) {
+      if (url.pathname.endsWith('/check-runs')) {
+        const link = nextLink(url, state.checkPages, state);
+        return jsonResponse(
+          {
+            total_count: state.checkPages.flat().length,
+            check_runs: state.checkPages[pageNumber(url) - 1] ?? [],
+          },
+          { headers: link ? { link } : {} },
+        );
+      }
       return jsonResponse(state.checkSuites.get(Number(url.pathname.split('/').at(-1))));
     }
     if (url.pathname === `${prefix}/actions/runs`) {

@@ -265,7 +265,7 @@ test('F5 review pagination requires exact next page/query and globally unique ra
     await t.test(`check-runs ${name}`, async () => {
       const state = fixtureState();
       state.forced = {
-        predicate: (url) => url.pathname.endsWith(`/commits/${HEAD_SHA}/check-runs`),
+        predicate: (url) => url.pathname.endsWith('/check-suites/71001/check-runs'),
         response: (url) => {
           const next = new URL(url);
           next.searchParams.set('page', '2');

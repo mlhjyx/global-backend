@@ -8,7 +8,6 @@ import {
 import {
   API_VERSION,
   AUTH_SENTINEL,
-  HEAD_SHA,
   collect,
   expectCode,
   fixtureFetch,
@@ -104,7 +103,7 @@ test('round3 rejects encoded check-run filter key or value', async (t) => {
     await t.test(name, async () => {
       const state = fixtureState();
       state.forced = {
-        predicate: (url) => url.pathname.endsWith(`/commits/${HEAD_SHA}/check-runs`),
+        predicate: (url) => url.pathname.endsWith('/check-suites/71001/check-runs'),
         response: (url) => {
           const page = Number(url.searchParams.get('page'));
           if (page === 1) {

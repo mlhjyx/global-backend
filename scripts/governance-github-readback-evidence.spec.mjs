@@ -9,6 +9,8 @@ import {
 import {
   API_VERSION,
   AUTH_SENTINEL,
+  BASE_SHA,
+  HEAD_SHA,
   OTHER_SHA,
   PROPOSAL_MANIFEST_BLOB_SHA,
   SIGNER_BLOB_SHA,
@@ -27,6 +29,27 @@ import {
   request,
   review,
 } from './fixtures/approval-readback/task5-github-readback-fixture.mjs';
+
+test('pull_request_target binds the PR head separately from its trusted base execution', async () => {
+  const state = fixtureState();
+  state.actionRunPages[0][0].head_sha = BASE_SHA;
+  state.actionRunPages[0][0].pull_requests = [{
+    number: 427,
+    head: { sha: HEAD_SHA },
+    base: { sha: BASE_SHA },
+  }];
+  state.checkSuites.get(71001).head_sha = BASE_SHA;
+  state.checkPages[0][0].head_sha = BASE_SHA;
+
+  const { calls, evidence } = await collect(state);
+
+  assert.equal(evidence.machine_checks[0].actions_run_head_sha, BASE_SHA);
+  const runsRequest = calls.find(({ url }) => new URL(url).pathname.endsWith('/actions/runs'));
+  assert.equal(new URL(runsRequest.url).searchParams.has('head_sha'), false);
+  assert.equal(calls.some(({ url }) => (
+    new URL(url).pathname.endsWith('/check-suites/71001/check-runs')
+  )), true);
+});
 
 test('requires complete exact-head Product, Privacy, QA, and numeric OWN-SECURITY approvals', async (t) => {
   await t.test('missing page loses Security', async () => {
@@ -93,7 +116,10 @@ test('binds dynamic IDs to exact App, workflow, run, base blob, and signer ident
   for (const [name, mutate] of [
     ['App ID', (state) => { state.checkPages[0][0].app.id = 999; }],
     ['suite head', (state) => { state.checkSuites.get(71001).head_sha = OTHER_SHA; }],
-    ['run suite', (state) => { state.actionRunPages[0][0].check_suite_id = 999; }],
+    ['run suite', (state) => {
+      state.actionRunPages[0][0].check_suite_id = 999;
+      state.checkSuites.set(999, { ...structuredClone(state.checkSuites.get(71001)), id: 999 });
+    }],
     ['workflow ID/path', (state) => { state.workflows.get(61001).path = '.github/workflows/other.yml'; }],
     ['run event', (state) => { state.actionRunPages[0][0].event = 'pull_request'; }],
     ['run head', (state) => { state.actionRunPages[0][0].head_sha = OTHER_SHA; }],
