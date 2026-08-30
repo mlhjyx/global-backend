@@ -216,7 +216,12 @@ function snapshotJsonValue(
     for (const key of keys as string[]) {
       const item = descriptors[key];
       if (!item || !("value" in item)) invalidIndexedResolution();
-      snapshot[key] = snapshotJsonValue(item.value, state, depth + 1);
+      Object.defineProperty(snapshot, key, {
+        configurable: true,
+        enumerable: true,
+        value: snapshotJsonValue(item.value, state, depth + 1),
+        writable: true,
+      });
     }
     return Object.freeze(snapshot);
   } finally {
