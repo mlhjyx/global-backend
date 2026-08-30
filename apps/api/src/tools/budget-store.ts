@@ -730,6 +730,16 @@ function isTrustedArtifactDatabaseInvalid(error: unknown): boolean {
   }
 }
 
+function isPrismaKnownRequestError(
+  error: unknown,
+): error is Prisma.PrismaClientKnownRequestError {
+  try {
+    return error instanceof Prisma.PrismaClientKnownRequestError;
+  } catch {
+    return false;
+  }
+}
+
 function authorityLifecycleUnavailable(): ExecutionBudgetGrantError {
   return new ExecutionBudgetGrantError(
     'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
@@ -1240,10 +1250,15 @@ export class PostgresBudgetStore implements BudgetStore {
       if (isTrustedArtifactDatabaseInvalid(error)) {
         return invalidGenericOperationArtifact();
       }
-      if (isExecutionControlError(error)) throw error;
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
       }
+      if (isPrismaKnownRequestError(error)) {
+        throw new BudgetStoreUnavailableError(
+          'budget artifact settlement unavailable',
+        );
+      }
+      if (isExecutionControlError(error)) throw error;
       if (
         error instanceof BudgetStoreUnavailableError ||
         error instanceof ExecutionBudgetGrantError
