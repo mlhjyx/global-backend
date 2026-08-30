@@ -36,6 +36,7 @@
     "memoryctl": "node scripts/memoryctl.mjs",
     "memory:test": "node --test scripts/memoryctl.spec.mjs",
     "decision-card:test": "node --test scripts/pr-decision-card.spec.mjs",
+    "approval-readback:test": "node --test scripts/governance-approval-schemas.spec.mjs scripts/governance-approval-safe-json.spec.mjs scripts/governance-approval-readback.spec.mjs scripts/governance-approval-readback-fix.spec.mjs scripts/governance-approval-identity-review.spec.mjs scripts/governance-approval-state.spec.mjs scripts/governance-approval-state-review.spec.mjs scripts/governance-approval-state-round4.spec.mjs scripts/governance-approval-state-round5.spec.mjs scripts/governance-approval-status.spec.mjs scripts/governance-github-readback.spec.mjs scripts/governance-approval-attestation.spec.mjs scripts/governance-approval-test-entry.spec.mjs",
     "code-intelligence:scan": "pnpm --filter @global/code-intelligence scan",
     "code-intelligence:check": "pnpm --filter @global/code-intelligence check",
     "code-intelligence:test": "pnpm --filter @global/code-intelligence test",

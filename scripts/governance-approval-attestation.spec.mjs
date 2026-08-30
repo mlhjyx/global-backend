@@ -159,7 +159,7 @@ const runnerFor = (output, overrides = {}) => {
     if (overrides.verifyThrow) throw new Error('sensitive-attestation-error');
     return {
       exitCode: overrides.verifyExitCode ?? 0,
-      stdout: overrides.verifyStdout ?? JSON.stringify(output),
+      stdout: overrides.verifyStdout ?? JSON.stringify([output]),
       stderr: overrides.verifyStderr ?? '',
     };
   };
@@ -252,7 +252,40 @@ test('verification uses the exact execFile argv with no shell and returns a clos
   assert.equal(JSON.stringify(result).includes('must-never-be-projected'), false);
 });
 
+test('verification snapshots all caller-owned input before the first awaited command', async () => {
+  const state = fixture();
+  const injected = runnerFor(state.output);
+  let invoked = false;
+  const mutatingRunner = async (...args) => {
+    if (!invoked) {
+      invoked = true;
+      state.input.expected.repository = 'attacker/repository';
+      state.input.expected.signerWorkflow = 'attacker/repository/.github/workflows/attacker.yml';
+      state.input.bundlePath = '/evidence/caller-mutated.jsonl';
+      state.input.lifecycle.verifiedAt = '2026-08-30T12:59:59.999Z';
+    }
+    return injected.runner(...args);
+  };
+  const result = await verifyApprovalAttestation(state.input, mutatingRunner);
+  assert.equal(result.repository, REPOSITORY);
+  assert.equal(result.signerWorkflow, WORKFLOW);
+  assert.equal(result.verifiedAt, VERIFIED_AT);
+  assert.ok(injected.calls[2].args.includes(`/evidence/sha256-${result.receiptRawSha256.slice('sha256:'.length)}.jsonl`));
+  assert.equal(injected.calls[2].args.includes('/evidence/caller-mutated.jsonl'), false);
+});
+
 test('toolchain failure is stable and prevents attestation execution', async () => {
+  {
+    const state = fixture();
+    state.input.ghPath = '/usr/bin/gh';
+    const injected = runnerFor(state.output);
+    await expectCode(
+      state.input,
+      injected.runner,
+      'APPROVAL_ATTESTATION_TOOLCHAIN_UNAVAILABLE',
+    );
+    assert.equal(injected.calls.length, 0);
+  }
   for (const [name, overrides, code, expectedCalls] of [
     ['missing executable', { versionThrow: true }, 'APPROVAL_ATTESTATION_TOOLCHAIN_UNAVAILABLE', 1],
     ['wrong version', { versionOutput: 'gh version 2.88.1\n' }, 'APPROVAL_ATTESTATION_TOOLCHAIN_VERSION_MISMATCH', 1],
@@ -295,7 +328,7 @@ test('receipt raw bytes, internal core digest, bundle bytes, and raw-SHA filenam
   {
     const state = fixture();
     const receipt = structuredClone(state.artifact.envelope);
-    receipt.core.actor_login = 'one-byte-drift';
+    receipt.receipt_core_sha256 = digest('f');
     rebindReceiptBytes(state, Buffer.from(`${JSON.stringify(receipt)}\n`, 'utf8'));
     const injected = runnerFor(state.output);
     await expectCode(state.input, injected.runner, 'APPROVAL_RECEIPT_CORE_DIGEST_MISMATCH');
