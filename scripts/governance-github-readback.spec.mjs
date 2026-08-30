@@ -314,3 +314,4 @@ test('fails closed on malformed, looping, over-page, and over-item pagination', 
 
 await import('./governance-github-readback-evidence.spec.mjs');
 await import('./governance-github-readback-round1.spec.mjs');
+await import('./governance-github-readback-round2.spec.mjs');
