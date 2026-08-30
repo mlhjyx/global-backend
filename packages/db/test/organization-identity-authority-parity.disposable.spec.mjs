@@ -27,6 +27,8 @@ const signature = Object.freeze({
   suppression:
     "public.organization_identity_canonical_suppression_value_v1(text,text)",
   planner: "public.organization_identity_plan_from_snapshot_v1(jsonb)",
+  advisory:
+    "public.organization_identity_acquire_advisory_until_v1(bigint,timestamptz)",
   command: "public.resolve_organization_identity_for_raw_v1(text,text)",
 });
 const catalogIdentity = Object.freeze({
@@ -37,6 +39,8 @@ const catalogIdentity = Object.freeze({
     "public|organization_identity_canonical_suppression_value_v1|text, text",
   [signature.planner]:
     "public|organization_identity_plan_from_snapshot_v1|jsonb",
+  [signature.advisory]:
+    "public|organization_identity_acquire_advisory_until_v1|bigint, timestamp with time zone",
   [signature.command]:
     "public|resolve_organization_identity_for_raw_v1|text, text",
 });
@@ -118,12 +122,12 @@ function exactHelper(name, helperSignature) {
     catalogIdentity[helperSignature].split("|");
   assert.equal(
     sql(`SELECT coalesce((
-      SELECT n.nspname||'|'||p.proname||'|'||pg_get_function_identity_arguments(p.oid)
+      SELECT n.nspname||'|'||p.proname||'|'||oidvectortypes(p.proargtypes)
       FROM pg_proc AS p
       JOIN pg_namespace AS n ON n.oid=p.pronamespace
       WHERE n.nspname='${schema}'
         AND p.proname='${functionName}'
-        AND pg_get_function_identity_arguments(p.oid)='${argumentsText}'
+        AND oidvectortypes(p.proargtypes)='${argumentsText}'
     ),'<ABSENT>');`),
     catalogIdentity[helperSignature],
     `${name}: exact helper OID/namespace/name/identity arguments are absent`,
@@ -500,6 +504,24 @@ const plannerErrorCases = Object.freeze([
   },
 ]);
 
+const advisoryCases = Object.freeze([
+  {
+    name: "uncontended advisory acquisition succeeds before its deadline",
+    signature: signature.advisory,
+    call: `BEGIN; SELECT public.organization_identity_acquire_advisory_until_v1(721234567890123456,clock_timestamp()+interval '1 second'); ROLLBACK;`,
+    expected: "",
+  },
+]);
+
+const advisoryErrorCases = Object.freeze([
+  {
+    name: "expired advisory deadline returns the fixed lock-timeout code",
+    signature: signature.advisory,
+    statement: `PERFORM public.organization_identity_acquire_advisory_until_v1(721234567890123457,clock_timestamp()-interval '1 millisecond');`,
+    expectedError: "55P03|IDENTITY_RESOLUTION_LOCK_TIMEOUT",
+  },
+]);
+
 describe("Organization Identity literal TypeScript-SQL parity", () => {
   it("loads and verifies the frozen A1 receipt plus exact disposable topology", () => {
     receipt();
@@ -586,6 +608,38 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
     for (const vector of plannerErrorCases) errorCase(vector);
   });
 
+  describe("advisory matrix", () => {
+    for (const vector of advisoryCases) valueCase(vector);
+    for (const vector of advisoryErrorCases) errorCase(vector);
+  });
+
+  describe("private helper ACL matrix", () => {
+    it("denies every private helper to app_user and PUBLIC", () => {
+      for (const helperSignature of [
+        signature.authority,
+        signature.blocker,
+        signature.suppression,
+        signature.planner,
+        signature.advisory,
+      ]) {
+        exactHelper("private helper ACL", helperSignature);
+        const [schema, functionName, argumentsText] =
+          catalogIdentity[helperSignature].split("|");
+        assert.equal(
+          sql(`SELECT
+            has_function_privilege('app_user',p.oid,'EXECUTE')::text||'|'||
+            has_function_privilege('public',p.oid,'EXECUTE')::text
+          FROM pg_proc AS p
+          JOIN pg_namespace AS n ON n.oid=p.pronamespace
+          WHERE n.nspname='${schema}'
+            AND p.proname='${functionName}'
+            AND oidvectortypes(p.proargtypes)='${argumentsText}';`),
+          "false|false",
+        );
+      }
+    });
+  });
+
   describe("two-ID command matrix", () => {
     it("persists the exact registry-bound result from transaction-arranged workspace and Raw facts", () => {
       exactHelper("valid two-ID command", signature.command);
@@ -595,8 +649,12 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           VALUES ('71000000-0000-4000-8000-000000000001','Task A2 command',now());
           INSERT INTO canonical_company(id,workspace_id,name,domain,country,status,dedupe_key,version,created_at,updated_at)
           VALUES ('73000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','Bound Root','bound-root.example','DE','NEW','d:bound-root.example',1,now(),now());
-          INSERT INTO raw_source_record(id,workspace_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at)
-          VALUES ('72000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','registry','company_registry','{"externalId":"company-1","name":"Acme GmbH","domain":"a2-valid.example","country":"DE","attributes":{"products":["pump"],"employee_band":"50-100"},"provenance":{"sourceUrl":"https://registry.example/companies/1","fetchedAt":"2026-08-25T12:00:00.000Z","contentHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","parserVersion":"registry/v1"},"identifier":{"scheme":"registry-id","value":"de-12/34"}}'::jsonb,'https://registry.example/companies/1',now(),'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','registry/v1','task-a2:valid','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
+          INSERT INTO monitored_source(id,provider_key,source_key,label,config,status,created_at,updated_at)
+          VALUES ('74000000-0000-4000-8000-000000000001','registry','task-a2:registry-source','Task A2 registry source','{}'::jsonb,'ACTIVE',now(),now());
+          INSERT INTO source_entity(id,source_id,external_id,entity_kind,name,domain,country,cleaned,content_hash,created_at,updated_at)
+          VALUES ('75000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000001','company-1','company','Acme GmbH','a2-valid.example','DE','{}'::jsonb,'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',now(),now());
+          INSERT INTO raw_source_record(id,workspace_id,source_entity_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at)
+          VALUES ('72000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000001','registry','company_registry','{"externalId":"company-1","name":"Acme GmbH","domain":"a2-valid.example","country":"DE","attributes":{"products":["pump"],"employee_band":"50-100"},"provenance":{"sourceUrl":"https://registry.example/companies/1","fetchedAt":"2026-08-25T12:00:00.000Z","contentHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","parserVersion":"registry/v1"},"identifier":{"scheme":"registry-id","value":"de-12/34"}}'::jsonb,'https://registry.example/companies/1',now(),'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','registry/v1','task-a2:valid','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
           INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
           VALUES ('71000000-0000-4000-8000-000000000001','73000000-0000-4000-8000-000000000001','registry-id','DE','DE1234','registry','72000000-0000-4000-8000-000000000001',1,'organization-identity-authority/v1','registry-id-v1','{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000001","providerKey":"registry"}'::jsonb,'ACTIVE');
           SET SESSION AUTHORIZATION app_user;
@@ -722,8 +780,12 @@ describe("Organization Identity literal TypeScript-SQL parity", () => {
           VALUES ('71000000-0000-4000-8000-000000000002','Task A2 second command',now());
           INSERT INTO canonical_company(id,workspace_id,name,domain,country,status,dedupe_key,version,created_at,updated_at)
           VALUES ('73000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000002','Secondary Root','secondary-root.example','DE','NEW','d:secondary-root.example',1,now(),now());
-          INSERT INTO raw_source_record(id,workspace_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at)
-          VALUES ('72000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000002','directory','industry_data','{"externalId":"directory:a2-secondary.example","name":"Secondary GmbH","domain":"a2-secondary.example","country":"DE","attributes":{"source_kind":"directory","source_directory":"registry.example","detail_url":"https://registry.example/company/2","source_class":"industry_data"},"provenance":{"sourceUrl":"https://registry.example/companies/2","fetchedAt":"2026-08-26T12:00:00.000Z","contentHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parserVersion":"registry/v1"}}'::jsonb,'https://registry.example/companies/2',now(),'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd','registry/v1','task-a2:second-valid','cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
+          INSERT INTO monitored_source(id,provider_key,source_key,label,config,status,created_at,updated_at)
+          VALUES ('74000000-0000-4000-8000-000000000002','directory','task-a2:directory-source','Task A2 directory source','{}'::jsonb,'ACTIVE',now(),now());
+          INSERT INTO source_entity(id,source_id,external_id,entity_kind,name,domain,country,cleaned,content_hash,created_at,updated_at)
+          VALUES ('75000000-0000-4000-8000-000000000002','74000000-0000-4000-8000-000000000002','directory:a2-secondary.example','company','Secondary GmbH','a2-secondary.example','DE','{}'::jsonb,'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',now(),now());
+          INSERT INTO raw_source_record(id,workspace_id,source_entity_id,provider_key,source_class,payload,source_url,fetched_at,content_hash,parser_version,ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,retention_days,expires_at,source_policy_snapshot,created_at)
+          VALUES ('72000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000002','75000000-0000-4000-8000-000000000002','directory','industry_data','{"externalId":"directory:a2-secondary.example","name":"Secondary GmbH","domain":"a2-secondary.example","country":"DE","attributes":{"source_kind":"directory","source_directory":"registry.example","detail_url":"https://registry.example/company/2","source_class":"industry_data"},"provenance":{"sourceUrl":"https://registry.example/companies/2","fetchedAt":"2026-08-26T12:00:00.000Z","contentHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parserVersion":"registry/v1"}}'::jsonb,'https://registry.example/companies/2',now(),'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd','registry/v1','task-a2:second-valid','cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',1,'raw-source/v2','ACCEPTED',30,now()+interval '30 days','{}'::jsonb,now());
           INSERT INTO organization_identifier(workspace_id,company_id,scheme,jurisdiction,normalized_value,authority_provider_key,raw_record_id,confidence,normalizer_version,validator_version,provenance,status)
           VALUES ('71000000-0000-4000-8000-000000000002','73000000-0000-4000-8000-000000000002','domain','GLOBAL','a2-secondary.example','directory','72000000-0000-4000-8000-000000000002',1,'organization-identity-authority/v1','domain-v1','{"schemaVersion":"organization-identifier-provenance/v1","rawRecordId":"72000000-0000-4000-8000-000000000002","providerKey":"directory"}'::jsonb,'ACTIVE');
           SET SESSION AUTHORIZATION app_user;
