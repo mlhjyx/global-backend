@@ -596,6 +596,20 @@ describe("governed relation graph concurrency and DSR contract", () => {
     }
   });
 
+  it("uses one global lock order for concurrent account reopen and append", async () => {
+    const results=await concurrent([
+      asApp(invocation(APPEND)),
+      `BEGIN; SELECT set_config('app.current_workspace_id','${WS}',true);
+       SELECT account_id::text,generation FROM open_authorized_tool_budget_v1(
+        '${WS}','${AUTH}','graph-account',true); COMMIT;`,
+    ]);
+    assert.equal(results[0].status,0,results[0].stderr);
+    assert.equal(results[1].status,0,results[1].stderr);
+    assert.doesNotMatch(results.map((result)=>result.stderr).join("\n"),/40P01|deadlock detected/i);
+    assert.equal(psql(`SELECT ref_count FROM tool_budget_account WHERE id='${ACCOUNT}';`),"2");
+    assert.equal(psql(`SELECT count(*) FROM governed_subject_relation WHERE operation_id='${OP}';`),"1");
+  });
+
   it("replays the exact domain ACK concurrently with append and attest without deadlock", async () => {
     const ackReplay = asApp(`SELECT status||'|'||(ack_json->>'ackId')
       FROM apply_execution_domain_ack_v1('${WS}','${OP}','GraphConsumer',
