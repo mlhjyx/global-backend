@@ -547,6 +547,8 @@ Completed local commits:
 9. `4062a8a2` — unsafe PR identity is rejected before ledger read/CAS.
 10. `328fb26c` — machine-policy and acceptance consumers bind trusted run execution to PR base.
 11. `adbcaf67` — ContractGraph approval schema digests match the forward schema revisions.
+12. `262cb7be` — ADR-027 Acceptance/reducer/status preserve optional Legal `PENDING` and do not require Legal assignment.
+13. `2f01df11` — ContractGraph accepts complete ASSIGNED/mixed registries and projects only redacted assignment state.
 
 Fresh local verification on exact `adbcaf6734e805eff7b7a80645320db261c084f6` before this execution-record commit:
 
@@ -559,6 +561,16 @@ Fresh local verification on exact `adbcaf6734e805eff7b7a80645320db261c084f6` bef
 - Copy fixed-source: `12/12` PASS; exact 11-path `STALE_HOLD / NOT_AUTHORIZED / BLOCKED` remains unchanged.
 - ContractGraph: exact commit, clean, fresh, `11,476` nodes, `26,175` edges, `0` errors; business impact remains `UNKNOWN`.
 - RuntimeEvidence, Release Bundle, actual trusted receipt, independent external verifier, UAT, Pilot and GA remain absent/HOLD and were not upgraded.
+
+First independent integration-delta review returned `HOLD_EXACT_BASE` with two
+Medium consumer gaps: ADR-027 Legal semantics had not reached Acceptance/state,
+and ContractGraph rejected the new valid ASSIGNED registry. Commits `262cb7be`
+and `2f01df11` close those findings with end-to-end and privacy-redaction tests.
+The security review's assignment-provenance observation was subsequently
+classified as `KNOWN_EXTERNAL_HOLD / TRUSTED_RUNTIME_ADMISSION`, not a current
+source defect: the tracked registry remains all `UNASSIGNED`, no trusted
+issuance capability can be minted locally, and the missing hosted provenance
+must not be fabricated in this PR.
 
 Pending before any external update:
 
