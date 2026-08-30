@@ -37,7 +37,7 @@ function row(outcome: (typeof OUTCOMES)[number] = 'FENCE_CREATED') {
   return {
     governed_subject_id: IDS.subject,
     tombstoned_at: new Date('2026-08-30T00:00:00.000Z'),
-    audit_id: IDS.audit,
+    audit_id: IDS.request,
     outcome,
   };
 }
@@ -116,7 +116,8 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
     expect(exactClosed(accessor, inputKeys)).toBe(false);
     expect(exactClosed({ ...input(), [Symbol('x')]: true }, inputKeys)).toBe(false);
     expect(exactClosed({
-      governedSubjectId: IDS.subject, tombstonedAt: '2026-08-30T00:00:00.000Z', auditId: IDS.audit,
+      governedSubjectId: IDS.subject, tombstonedAt: '2026-08-30T00:00:00.000Z',
+      auditId: IDS.request,
       outcome: 'FENCE_CREATED',
     }, resultKeys)).toBe(true);
   });
@@ -130,7 +131,7 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
     expect(result).toEqual({
       governedSubjectId: IDS.subject,
       tombstonedAt: '2026-08-30T00:00:00.000Z',
-      auditId: IDS.audit,
+      auditId: IDS.request,
       outcome: 'FENCE_CREATED',
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -177,8 +178,9 @@ describe('GovernedSubjectRelationRepository Task 3 tombstone contract', () => {
     });
     for (const invalid of [[], [row(), row()], [{ ...row(), extra: true }],
       [{ governed_subject_id: IDS.subject, tombstoned_at: row().tombstoned_at,
-        audit_id: IDS.audit }], [{ ...row(), outcome: 'CREATED' }],
+        audit_id: IDS.request }], [{ ...row(), outcome: 'CREATED' }],
       [{ ...row(), governed_subject_id: 'bad' }], [{ ...row(), audit_id: 'bad' }],
+      [{ ...row(), audit_id: IDS.audit }],
       [{ ...row(), governed_subject_id: IDS.audit }],
       [{ ...row(), tombstoned_at: 'not-date' }], [{ ...row(), tombstoned_at: invalidDate }],
       [{ ...row(), tombstoned_at: new DateSubclass() }],
