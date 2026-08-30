@@ -13,7 +13,11 @@ import {
   isBoundedId,
   MERGE_CONSUMPTION_ID_PATTERN,
 } from './governance-approval-ledger-stream.mjs';
-import { revalidateApprovalAtAcceptance } from './governance-approval-acceptance.mjs';
+import {
+  approvalAcceptanceEvidenceHasForbiddenContent,
+  isClosedApprovalAcceptanceEvidence,
+  revalidateApprovalAtAcceptance,
+} from './governance-approval-acceptance.mjs';
 
 export {
   executeReservedMerge,
@@ -43,6 +47,11 @@ const STATE_KEYS = new Set([
   'evidenceSlots', 'receipt', 'receiptHistory', 'mergeAuthorization',
   'revocationStatus', 'supersessionStatus', 'blockingCodes', 'eventHistory',
   'policySnapshot', 'acceptanceCheckedAt',
+]);
+const MAX_ACCEPTANCE_EVENT_BYTES = 262_144;
+const ACCEPTANCE_LIVE_KEYS = Object.freeze(['type', 'evidence', 'observedAt']);
+const ACCEPTANCE_STORED_KEYS = Object.freeze([
+  'type', 'evidence', 'evidenceSha256', 'observedAt',
 ]);
 const POLICY_KEYS = Object.freeze([
   'repository', 'decisionId', 'decisionRevision', 'policyRevision', 'currentBaseSha',
@@ -88,11 +97,30 @@ const mergeSummaryValid = (summary, requireConsumed = false) => (
       && summary.consumptionRawSha256 === null)
   && (!requireConsumed || summary.ledgerState === 'CONSUMED')
 );
+const acceptanceEventEvidenceValid = (event) => {
+  const live = hasExactKeys(event, ACCEPTANCE_LIVE_KEYS);
+  const stored = hasExactKeys(event, ACCEPTANCE_STORED_KEYS);
+  if ((!live && !stored)
+    || !isClosedApprovalAcceptanceEvidence(event.evidence)
+    || approvalAcceptanceEvidenceHasForbiddenContent(event.evidence)) return false;
+  let bytes;
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(event.evidence), 'utf8');
+  } catch {
+    return false;
+  }
+  if (bytes > MAX_ACCEPTANCE_EVENT_BYTES) return false;
+  return !stored || (
+    isDigest(event.evidenceSha256)
+    && event.evidenceSha256 === canonicalApprovalDigest(event.evidence)
+  );
+};
 const safeEventRecord = (event) => {
   if (event.type === 'ACCEPTANCE_REVALIDATED') {
     return {
       type: event.type,
       observedAt: event.observedAt,
+      evidence: clone(event.evidence),
       evidenceSha256: canonicalApprovalDigest(event.evidence),
     };
   }
@@ -243,7 +271,7 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
         blockingCodes: ['APPROVAL_INDEPENDENCE_NOT_PROVEN'],
       };
     } else if (event.type === 'ACCEPTANCE_REVALIDATED') {
-      if (!hasExactKeys(event, ['type', 'evidence', 'observedAt'])
+      if (!acceptanceEventEvidenceValid(event)
         || state.state !== 'VERIFIED'
         || event.observedAt !== event.evidence?.readAt
         || !observedAtValid(event.observedAt, now)) {
@@ -298,6 +326,33 @@ const containsNonce = (value, seen = new Set()) => {
     /nonce/i.test(key) || containsNonce(child, seen)
   ));
 };
+const HISTORY_EVENT_KEYS = Object.freeze({
+  AUTHORITIES_ASSIGNED: ['type', 'observedAt'],
+  PROPOSAL_RENDERED: ['type', 'headSha', 'observedAt'],
+  PRODUCT_REVIEW_VERIFIED: ['type', 'headSha', 'observedAt'],
+  RECEIPT_VERIFIED: ['type', 'headSha', 'receipt', 'mergeAuthorization', 'observedAt'],
+  HEAD_CHANGED: ['type', 'headSha', 'observedAt'],
+  REVIEW_REJECTED: ['type', 'observedAt'],
+  RECEIPT_SUPERSEDED: ['type', 'predecessorReceiptId', 'successor', 'validation', 'observedAt'],
+  RECEIPT_REVOKED: ['type', 'observedAt'],
+});
+const eventHistoryValid = (events) => (
+  Array.isArray(events)
+  && events.length <= 128
+  && events.every((event) => {
+    if (event?.type === 'ACCEPTANCE_REVALIDATED') {
+      return hasExactKeys(event, ACCEPTANCE_STORED_KEYS)
+        && acceptanceEventEvidenceValid(event);
+    }
+    const keys = HISTORY_EVENT_KEYS[event?.type];
+    if (!keys || !hasExactKeys(event, keys) || containsNonce(event)) return false;
+    try {
+      return Buffer.byteLength(JSON.stringify(event), 'utf8') <= 32_768;
+    } catch {
+      return false;
+    }
+  })
+);
 const readStateClosed = (state) => (
   isPlainObject(state)
   && Object.keys(state).every((key) => STATE_KEYS.has(key))
@@ -323,8 +378,7 @@ const readStateClosed = (state) => (
   && Array.isArray(state.blockingCodes)
   && state.blockingCodes.length <= 16
   && state.blockingCodes.every((code) => /^APPROVAL_[A-Z0-9_]{1,120}$/.test(code))
-  && Array.isArray(state.eventHistory)
-  && state.eventHistory.length <= 128
+  && eventHistoryValid(state.eventHistory)
   && (state.policySnapshot === undefined
     || hasExactKeys(state.policySnapshot, POLICY_KEYS))
   && (state.acceptanceCheckedAt === undefined
@@ -332,7 +386,7 @@ const readStateClosed = (state) => (
     || isCanonicalInstant(state.acceptanceCheckedAt))
   && ['ACTIVE', 'REVOKED'].includes(state.revocationStatus)
   && ['CURRENT', 'SUPERSEDED_WITH_CURRENT_SUCCESSOR'].includes(state.supersessionStatus)
-  && !containsNonce(state)
+  && !containsNonce({ ...state, eventHistory: [] })
 );
 
 export const renderApprovalStatusReadModel = (state) => {
@@ -343,6 +397,9 @@ export const renderApprovalStatusReadModel = (state) => {
   }
   const [messageKey, message, recoveryAction] = STATUS_COPY[state.state];
   const blockingCodes = state.blockingCodes.slice();
+  const acceptanceEvidenceSha256 = [...state.eventHistory]
+    .reverse()
+    .find(({ type }) => type === 'ACCEPTANCE_REVALIDATED')?.evidenceSha256 ?? null;
   const model = frozenClone({
     schemaVersion: 'approval-status-read-model/v1',
     repository: { id: state.repository.id, fullName: state.repository.fullName },
@@ -375,6 +432,7 @@ export const renderApprovalStatusReadModel = (state) => {
     messageKey,
     message,
     recoveryAction,
+    acceptanceEvidenceSha256,
   });
   if (Buffer.byteLength(JSON.stringify(model), 'utf8') > 32_768) {
     throw approvalError('APPROVAL_STATUS_OUTPUT_OVERFLOW');

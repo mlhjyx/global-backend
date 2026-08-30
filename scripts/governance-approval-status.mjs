@@ -9,10 +9,13 @@ const containsForbiddenContent = (value, seen = new Set()) => {
   if (value === null || typeof value !== 'object') return false;
   if (seen.has(value)) return true;
   seen.add(value);
-  if (Array.isArray(value)) return value.some((entry) => containsForbiddenContent(entry, seen));
-  return Object.entries(value).some(([key, child]) => (
+  const forbidden = Array.isArray(value)
+    ? value.some((entry) => containsForbiddenContent(entry, seen))
+    : Object.entries(value).some(([key, child]) => (
     FORBIDDEN_KEYS.has(key.toLowerCase()) || containsForbiddenContent(child, seen)
   ));
+  seen.delete(value);
+  return forbidden;
 };
 
 const forceAcceptRequested = (argv) => {

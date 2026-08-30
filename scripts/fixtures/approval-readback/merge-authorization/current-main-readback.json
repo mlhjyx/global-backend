@@ -19,9 +19,9 @@
       "id": 4270001,
       "full_name": "mlhjyx/global-governance-verifier"
     },
-    "path": ".github/workflows/approval-readback.yml",
+    "path": ".github/workflows/verify-approval.yml",
     "sha": "dddddddddddddddddddddddddddddddddddddddd",
-    "runId": 42701,
+    "runId": 42704,
     "attempt": 1,
     "identity": "github-app:427"
   },

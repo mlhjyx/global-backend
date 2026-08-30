@@ -470,7 +470,7 @@ test('round2 I3 current-main readback stays closed and semantically bound after 
   const mismatchSummary = { ...mergeAuthorization, consumptionRawSha256 };
   const mismatchState = verifiedState(policy, mismatchSummary);
   const validation = revalidateApprovalAtAcceptance(mismatchState, mismatch, NOW);
-  let reducerAccepted = false;
+  let reducerAccepted;
   try {
     reducerAccepted = reduceApprovalDecisionState([
       ...mismatchState.eventHistory,
@@ -514,11 +514,13 @@ test('round2 I6 accepted canonical history replays revocation and rejects tamper
     return replay(history);
   });
   const stdout = [];
-  await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], {
+  const stderr = [];
+  const statusCode = await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], {
     loadDecisionState: async () => accepted,
     writeStdout: (value) => stdout.push(value),
-    writeStderr: () => {},
+    writeStderr: (value) => stderr.push(value),
   });
+  assert.equal(statusCode, 0, stderr.join(''));
   assert.deepEqual({
     acceptanceKeys: Object.keys(acceptanceEvent).sort(),
     replay: replay(accepted.eventHistory),
@@ -569,6 +571,9 @@ test('acceptance revalidation mutation matrix fails closed on every fresh-read r
     ['ledger revision duplicated', (v) => { v.mergeAuthorization.ledgerSnapshot.events[2].ledgerRevision = 2; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
     ['ledger revision gap', (v) => { v.mergeAuthorization.ledgerSnapshot.events[2].ledgerRevision = 7; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
     ['ledger events reordered', (v) => { [v.mergeAuthorization.ledgerSnapshot.events[2], v.mergeAuthorization.ledgerSnapshot.events[3]] = [v.mergeAuthorization.ledgerSnapshot.events[3], v.mergeAuthorization.ledgerSnapshot.events[2]]; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger ACK backdated', (v) => { v.mergeAuthorization.ledgerSnapshot.events[1].observedAt = '2026-08-30T08:09:00.000Z'; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger result backdated', (v) => { v.mergeAuthorization.ledgerSnapshot.events[2].observedAt = '2026-08-30T08:09:00.000Z'; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger consumption backdated', (v) => { v.mergeAuthorization.ledgerSnapshot.events[3].consumption.consumed_at = '2026-08-30T08:09:00.000Z'; v.mergeAuthorization.ledgerSnapshot.events[3].consumptionRawSha256 = digest(v.mergeAuthorization.ledgerSnapshot.events[3].consumption); }, 'APPROVAL_LEDGER_STREAM_INVALID'],
     ['ledger committed revision drift', (v) => { v.mergeAuthorization.ledgerSnapshot.committedRevision = 99; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
     ['ledger oversized', (v) => { for (let revision = 5; revision <= 65; revision += 1) v.mergeAuthorization.ledgerSnapshot.events.push({ type: 'BOUNDED_HOLD', reasonCode: 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED', observedAt: v.readAt, ledgerRevision: revision }); v.mergeAuthorization.ledgerSnapshot.committedRevision = 65; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
     ['ledger consumption absent', (v) => { v.mergeAuthorization.ledgerSnapshot.events.pop(); }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],

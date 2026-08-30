@@ -278,11 +278,12 @@ export const executeReservedMerge = async (reservation, mergeRequester, ledger, 
       : 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED';
     return holdExecution(code);
   }
-  freshDispatchCapabilities.delete(reservation);
-  if (Date.parse(reservation.grant.authorized_at) > Date.parse(dispatchAt)
+  if (Date.parse(reservation.grant.authorized_at) > Date.parse(reservation.reservedAt)
+    || Date.parse(reservation.reservedAt) > Date.parse(dispatchAt)
     || Date.parse(dispatchAt) >= Date.parse(reservation.grant.expires_at)) {
     return holdExecution('APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
   }
+  freshDispatchCapabilities.delete(reservation);
   const laterEvents = observed.stream.events.filter(
     ({ ledgerRevision }) => ledgerRevision > reservation.reservedLedgerRevision,
   );

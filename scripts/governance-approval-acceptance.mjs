@@ -16,6 +16,7 @@ import {
   canonicalApprovalDigest,
   validateApprovalLedgerStream,
 } from './governance-approval-ledger-stream.mjs';
+import { validateCurrentMainMergeReadback } from './governance-approval-current-main-readback.mjs';
 
 const EVIDENCE_KEYS = Object.freeze([
   'schemaVersion', 'task3', 'readAt', 'preAcceptanceRead', 'postAcceptanceRead',
@@ -85,6 +86,10 @@ const containsForbiddenContent = (value) => {
     || containsForbiddenContent(child)
   ));
 };
+export const isClosedApprovalAcceptanceEvidence = (value) => shapeValid(value);
+export const approvalAcceptanceEvidenceHasForbiddenContent = (value) => (
+  containsForbiddenContent(value)
+);
 const shapeValid = (evidence) => (
   hasExactKeys(evidence, EVIDENCE_KEYS)
   && evidence.schemaVersion === 'approval-acceptance-evidence/v1'
@@ -369,6 +374,13 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
   }
   const consumption = merge.consumption;
   const mergeReadback = merge.currentMainReadback;
+  const currentMainValidation = validateCurrentMainMergeReadback(mergeReadback, {
+    grant,
+    consumption,
+    task3Verifier: candidate.verifier,
+    now: checkedAt,
+  });
+  for (const issue of currentMainValidation.issues) pushIssue(codes, issue.stable_code);
   if (!isPlainObject(mergeReadback)
     || mergeReadback.repositoryId !== grant.repository.id
     || mergeReadback.prNumber !== grant.pr_number

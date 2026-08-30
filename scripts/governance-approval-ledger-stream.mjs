@@ -189,6 +189,8 @@ export const validateApprovalLedgerStream = (stream, context) => {
   const consumptionEvent = consumptions[0] ?? null;
   if ((acknowledgement || result || consumptionEvent) && reservation === null) return issueResult();
   if (acknowledgement && stream.events.indexOf(acknowledgement) <= reservationIndex) return issueResult();
+  if (acknowledgement
+    && Date.parse(acknowledgement.observedAt) < Date.parse(reservation.reservedAt)) return issueResult();
   if (result && (
     stream.events.indexOf(result) <= reservationIndex
     || result.observedMergeMethod !== context.grant.allowed_merge_method
