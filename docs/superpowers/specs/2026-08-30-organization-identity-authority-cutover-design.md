@@ -92,7 +92,9 @@ RETURNS TABLE (
 
 The parameters are `text`, not `uuid`, so malformed hostile values enter the function and can be rejected with a fixed `IDENTITY_RESOLUTION_INPUT_INVALID` token without PostgreSQL echoing the original value before function entry.
 
-The function is `SECURITY DEFINER`, fixes `search_path=pg_catalog,public`, verifies `session_user='app_user'`, rejects owner/PUBLIC/SET ROLE/wrong or unset workspace, and applies explicit workspace predicates to every read and write. The calling transaction must pre-arm `lock_timeout` to a non-zero value no greater than five seconds and `statement_timeout` to a non-zero value no greater than sixty seconds **before** issuing the resolver statement. The function must read back and enforce both bounds before its first database read or advisory lock; an unarmed, zero, malformed, or over-limit caller is denied with a fixed no-echo command-admission error. Function `proconfig` must not override those caller-prearmed values, because PostgreSQL 16 cannot asynchronously arm a new timer for the already-running statement from inside the function.
+The public function is a thin `SECURITY DEFINER` wrapper that fixes `search_path=pg_catalog,public`, verifies `session_user='app_user'`, rejects owner/PUBLIC/SET ROLE/wrong or unset workspace, and accepts no business facts beyond the two text IDs. The calling transaction must pre-arm `lock_timeout` to a non-zero value no greater than five seconds and `statement_timeout` to a non-zero value no greater than sixty seconds **before** issuing the resolver statement. The wrapper reads back and enforces both bounds before its first business-table read or advisory lock; an unarmed, zero, malformed, or over-limit caller is denied with a fixed no-echo command-admission error. Function `proconfig` must not override those caller-prearmed values, because PostgreSQL 16 cannot asynchronously arm a new timer for the already-running statement from inside the function.
+
+After admission, the wrapper executes one fixed, parameterized dynamic call to the owner-only private worker `organization_identity_resolve_for_raw_worker_v1(text,text)`. All Raw/Identity/Canonical/mapping/suppression reads, locks, replay validation, and mutation live only in that worker. The dynamic boundary ensures business-relation locks are acquired after the public wrapper and its explicit `query_canceled`/`assert_failure` handlers are active. The wrapper maps a caller-prearmed timer cancellation to the fixed statement-timeout contract and maps unowned assertions/cancellations to fixed state-invalid errors without detail, hint, private context, or caller-value echo.
 
 No public function accepts JSON plan facts. The rejected `apply_organization_identity_resolution_v1(jsonb)` signature must be absent in fresh and upgrade catalogs.
 
@@ -106,9 +108,22 @@ organization_identity_blocker_from_raw_v1(jsonb) RETURNS jsonb
 organization_identity_canonical_suppression_value_v1(text, text) RETURNS text
 organization_identity_plan_from_snapshot_v1(jsonb) RETURNS jsonb
 organization_identity_acquire_advisory_until_v1(bigint, timestamptz) RETURNS void
+organization_identity_resolve_for_raw_worker_v1(text, text) RETURNS TABLE (
+  outcome_kind text,
+  raw_record_id uuid,
+  company_id uuid,
+  conflict_id uuid,
+  match_rule text,
+  input_hash text,
+  conflict_fingerprint text,
+  replayed boolean,
+  company_created boolean,
+  identifier_count integer,
+  party_count integer
+)
 ```
 
-All helpers use fixed search paths and revoke all privileges from `PUBLIC` and `app_user`. They are implementation units for executable parity tests, not authorization receipts.
+All helpers and the worker use fixed search paths and revoke all privileges from `PUBLIC` and `app_user`. The worker is `SECURITY INVOKER`, is callable only by its exact owner, and is reached only from the admitted public wrapper; it is not a second public runtime path or authorization receipt. The five canonical helpers remain executable parity units, not authorization receipts.
 
 ### 4.3 Database-owned derivation sequence
 
