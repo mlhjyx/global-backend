@@ -435,7 +435,20 @@ test('FIX5 authority and evidence timestamps are current and causally ordered', 
   const cases = [
     ['review-future', (v) => { v.product_review.submitted_at = '2026-08-30T11:45:00.000Z'; v.product_review.independently_read_at = '2026-08-30T12:15:00.000Z'; }, 'APPROVAL_REVIEW_STALE'],
     ['review-causal-order', (v) => { v.product_review.submitted_at = '2026-08-30T11:00:00.000Z'; v.product_review.independently_read_at = '2026-08-30T10:00:00.000Z'; }, 'APPROVAL_REVIEW_STALE'],
-    ['legal-future', (v) => { v.legal_input.effective_at = '2026-08-30T12:30:00.000Z'; }, 'APPROVAL_LEGAL_INPUT_STALE'],
+    ['legal-future', (v) => {
+      v.policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+      v.policy.dual_role_exception = {
+        decision_adr: 'ADR-027',
+        valid_from: '2026-08-30T00:00:00.000Z',
+        valid_until: '2026-08-31T00:00:00.000Z',
+        coapprover_role: 'LEGAL-REVIEW',
+        minimum_distinct_human_actors: 2,
+        cannot_authorize_merge: true,
+        cannot_authorize_release: true,
+      };
+      v.privacy_review.actor = clone(v.product_review.actor);
+      v.legal_input.effective_at = '2026-08-30T12:30:00.000Z';
+    }, 'APPROVAL_LEGAL_INPUT_STALE'],
   ];
   for (const [name, mutate, code] of cases) mutation(name, () => {
     const value = candidate();

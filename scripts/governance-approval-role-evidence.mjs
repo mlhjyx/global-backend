@@ -144,7 +144,10 @@ const validateDualRolePolicy = (candidate, policy, now) => {
     || exception.minimum_distinct_human_actors !== CODEOWNER_ACTOR_SHARING_POLICY.minimum_distinct_humans
     || exception.cannot_authorize_merge !== true
     || exception.cannot_authorize_release !== true
-    || candidate.legal_input?.status !== 'NO_BLOCKER_RECORDED'
+    || (
+      exception.coapprover_role === 'LEGAL-REVIEW'
+      && candidate.legal_input?.status !== 'NO_BLOCKER_RECORDED'
+    )
     || (
       CODEOWNER_ACTOR_SHARING_POLICY.dual_role_coapprover === 'DISTINCT_LEGAL_OR_QA_REQUIRED'
       && productActor === privacyActor
@@ -250,6 +253,14 @@ const validateLegal = (candidate, authority, now) => {
   return [];
 };
 
+const legalEvidenceRequired = (candidate, policy) => (
+  candidate.decision?.adr === 'ADR-026'
+  || (
+    policy.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
+    && policy.dual_role_exception?.coapprover_role === 'LEGAL-REVIEW'
+  )
+);
+
 const validateGlobalIsolation = (candidate, _policy) => {
   const codes = [];
   const humanIds = [
@@ -311,7 +322,9 @@ export const validateRoleEvidence = (candidate, authority, policy, now) => {
   codes.push(...validateDualRolePolicy(candidate, policy, now));
   codes.push(...validateCodeowner(candidate, now));
   codes.push(...validateSecurity(candidate, authority, now));
-  codes.push(...validateLegal(candidate, authority, now));
+  if (legalEvidenceRequired(candidate, policy)) {
+    codes.push(...validateLegal(candidate, authority, now));
+  }
   codes.push(...validateGlobalIsolation(candidate, policy));
   const humanActors = new Set([
     candidate.product_review?.actor?.id,

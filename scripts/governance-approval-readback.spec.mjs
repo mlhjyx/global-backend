@@ -35,11 +35,13 @@ const MUTATION_MANIFEST = JSON.parse(
 
 const clone = (value) => structuredClone(value);
 
-const commandLine = (role, digest = DIGEST_A) => (
-  `APPROVE DECISION ADR-027 REV program-c/policy-r2 ROLE ${role} DIGEST ${digest}`
+const commandLine = (role, digest = DIGEST_A, adr = 'ADR-027') => (
+  `APPROVE DECISION ${adr} REV program-c/policy-r2 ROLE ${role} DIGEST ${digest}`
 );
 
-const parsedCommand = (role) => parseApprovalReviewCommand(commandLine(role));
+const parsedCommand = (role, adr = 'ADR-027') => parseApprovalReviewCommand(
+  commandLine(role, DIGEST_A, adr),
+);
 
 const actor = (id, login) => ({
   id,
@@ -48,7 +50,7 @@ const actor = (id, login) => ({
   type: 'User',
 });
 
-const authorityRole = (role, id, login, purpose) => ({
+const authorityRole = (role, id, login, purpose, adr = 'ADR-027') => ({
   role,
   status: 'ASSIGNED',
   actor_id: id,
@@ -58,7 +60,7 @@ const authorityRole = (role, id, login, purpose) => ({
   effective_until: '2026-08-31T00:00:00.000Z',
   scope: {
     repository_id: REPOSITORY.id,
-    decision_adr: 'ADR-027',
+    decision_adr: adr,
     policy_revision: 'program-c/policy-r2',
     purpose,
   },
@@ -73,18 +75,18 @@ const authorityRole = (role, id, login, purpose) => ({
   superseded_by: null,
 });
 
-const authority = () => ({
+const authority = (adr = 'ADR-027') => ({
   schema_version: 'approval-authority-readback/v1',
   repository: clone(REPOSITORY),
   revision: 'approval-authorities/r2',
   sha256: DIGEST_B,
   roles: [
-    authorityRole('OWN-PRODUCT', 101, 'product-owner', 'DECISION_REVIEW'),
-    authorityRole('OWN-DATA-PRIVACY', 102, 'privacy-owner', 'DECISION_REVIEW'),
-    authorityRole('OWN-QA-EVIDENCE', 103, 'qa-owner', 'QA_EVIDENCE_REVIEW'),
-    authorityRole('OWN-SECURITY', 104, 'security-owner', 'SECURITY_REVIEW'),
-    authorityRole('LEGAL-REVIEW', 105, 'legal-owner', 'LEGAL_REVIEW'),
-    authorityRole('MERGE-AUTHORIZER', 106, 'merge-authorizer', 'MERGE_AUTHORIZATION'),
+    authorityRole('OWN-PRODUCT', 101, 'product-owner', 'DECISION_REVIEW', adr),
+    authorityRole('OWN-DATA-PRIVACY', 102, 'privacy-owner', 'DECISION_REVIEW', adr),
+    authorityRole('OWN-QA-EVIDENCE', 103, 'qa-owner', 'QA_EVIDENCE_REVIEW', adr),
+    authorityRole('OWN-SECURITY', 104, 'security-owner', 'SECURITY_REVIEW', adr),
+    authorityRole('LEGAL-REVIEW', 105, 'legal-owner', 'LEGAL_REVIEW', adr),
+    authorityRole('MERGE-AUTHORIZER', 106, 'merge-authorizer', 'MERGE_AUTHORIZATION', adr),
   ],
 });
 
@@ -96,7 +98,7 @@ const dualRoleAuthority = () => {
   return value;
 };
 
-const review = (role, id, actorValue) => ({
+const review = (role, id, actorValue, adr = 'ADR-027') => ({
   role,
   review_id: id,
   review_state: 'APPROVED',
@@ -104,7 +106,7 @@ const review = (role, id, actorValue) => ({
   submitted_at: '2026-08-30T10:00:00.000Z',
   independently_read_at: '2026-08-30T11:00:00.000Z',
   actor: clone(actorValue),
-  command: parsedCommand(role),
+  command: parsedCommand(role, adr),
   dismissed: false,
   superseded: false,
   later_changes_requested: false,
@@ -123,12 +125,12 @@ const codeownerReview = () => ({
   later_changes_requested: false,
 });
 
-const securityEvidence = () => ({
+const securityEvidence = (adr = 'ADR-027') => ({
   schema_version: 'program-c-security-review-evidence/v1',
   evidence_id: 'security-evidence-0001',
   repository_id: REPOSITORY.id,
   repository_full_name: REPOSITORY.full_name,
-  decision_adr: 'ADR-027',
+  decision_adr: adr,
   decision_revision: 'program-c/decision-r2',
   policy_revision: 'program-c/policy-r2',
   proposal_pr_number: 427,
@@ -147,7 +149,7 @@ const securityEvidence = () => ({
   review_id: 2004,
   review_state: 'APPROVED',
   review_commit_id: HEAD_SHA,
-  review_command_sha256: parsedCommand('OWN-SECURITY').command_sha256,
+  review_command_sha256: parsedCommand('OWN-SECURITY', adr).command_sha256,
   submitted_at: '2026-08-30T10:00:00.000Z',
   independently_read_at: '2026-08-30T11:00:00.000Z',
   scope: 'SECURITY_REVIEW',
@@ -256,13 +258,13 @@ const readbackSnapshot = () => ({
   decision_semantic_sha256: DIGEST_C,
 });
 
-const candidate = () => {
+const candidate = (adr = 'ADR-027') => {
   const policyValue = policy();
   return {
     schema_version: 'trusted-approval-candidate/v1',
     repository: clone(REPOSITORY),
     decision: {
-      adr: 'ADR-027',
+      adr,
       revision: 'program-c/decision-r2',
       policy_revision: 'program-c/policy-r2',
       raw_sha256: DIGEST_A,
@@ -281,11 +283,11 @@ const candidate = () => {
     },
     authority_revision: 'approval-authorities/r2',
     authority_sha256: DIGEST_B,
-    product_review: review('OWN-PRODUCT', 2001, actor(101, 'product-owner')),
-    privacy_review: review('OWN-DATA-PRIVACY', 2002, actor(102, 'privacy-owner')),
-    qa_review: review('OWN-QA-EVIDENCE', 2003, actor(103, 'qa-owner')),
+    product_review: review('OWN-PRODUCT', 2001, actor(101, 'product-owner'), adr),
+    privacy_review: review('OWN-DATA-PRIVACY', 2002, actor(102, 'privacy-owner'), adr),
+    qa_review: review('OWN-QA-EVIDENCE', 2003, actor(103, 'qa-owner'), adr),
     codeowner_review: codeownerReview(),
-    security_review: securityEvidence(),
+    security_review: securityEvidence(adr),
     legal_input: legalInput(),
     review_pagination_complete: true,
     machine_checks: [machineCheck()],
@@ -497,6 +499,20 @@ test('distinct and dual-role synthetic candidates validate with frozen bounded o
   }
 });
 
+test('ADR-027 and its QA dual-role coapproval do not consume ADR-026 Legal PENDING', () => {
+  for (const [value, authorityValue] of [
+    [candidate(), authority()],
+    [dualRoleCandidate(), dualRoleAuthority()],
+  ]) {
+    value.legal_input.status = 'PENDING';
+    const result = validateApprovalReadback(value, authorityValue, value.policy, NOW);
+    assert.equal(result.valid, true);
+    assert.equal(result.issues.some(
+      ({ stable_code: code }) => code === 'APPROVAL_LEGAL_INPUT_REQUIRED',
+    ), false);
+  }
+});
+
 test('approval readback executes each required trust mutation exactly once', () => {
   const validate = (value) => validateApprovalReadback(value, authority(), value.policy, NOW);
   const cases = [
@@ -515,7 +531,6 @@ test('approval readback executes each required trust mutation exactly once', () 
     ['toctou-head', (v) => { v.post_read.head_sha = BASE_SHA; }, 'APPROVAL_TOCTOU_DETECTED'],
     ['decision-raw-drift', (v) => { v.post_read.decision_raw_sha256 = DIGEST_B; }, 'APPROVAL_TOCTOU_DETECTED'],
     ['decision-semantic-drift', (v) => { v.post_read.decision_semantic_sha256 = DIGEST_B; }, 'APPROVAL_TOCTOU_DETECTED'],
-    ['legal-pending', (v) => { v.legal_input.status = 'PENDING'; }, 'APPROVAL_LEGAL_INPUT_REQUIRED'],
     ['receipt-replay', (v) => { v.receipt_subject.prior_receipt_ids.push(v.receipt_subject.receipt_id); }, 'APPROVAL_RECEIPT_REPLAYED'],
     ['revoked-receipt', (v) => { v.receipt_subject.revoked_receipt_ids.push(v.receipt_subject.receipt_id); }, 'APPROVAL_POLICY_REVOKED'],
     ['independence-overclaim', (v) => { v.verifier.independently_governed = false; }, 'APPROVAL_INDEPENDENCE_NOT_PROVEN'],
@@ -535,6 +550,13 @@ test('approval readback executes each required trust mutation exactly once', () 
     ['machine-check-array-missing', (v) => { delete v.machine_checks; }, 'APPROVAL_CHECK_REQUIRED'],
   ];
   for (const [name, mutate, code] of cases) runMutation(name, candidate, mutate, validate, code);
+  runMutation(
+    'legal-pending',
+    () => candidate('ADR-026'),
+    (value) => { value.legal_input.status = 'PENDING'; },
+    (value) => validateApprovalReadback(value, authority('ADR-026'), value.policy, NOW),
+    'APPROVAL_LEGAL_INPUT_REQUIRED',
+  );
 });
 
 test('OWN-SECURITY remains a closed exact-head independent human evidence slot', () => {
