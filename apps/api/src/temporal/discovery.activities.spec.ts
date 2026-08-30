@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
@@ -20,6 +22,7 @@ import type {
   ProviderCompanyRecord,
 } from "../discovery/provider-contract";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
+import { DISCOVERY_COMPANY_RESULT_LINEAGE_V1 } from "../discovery/company-discovery-lineage";
 
 const acknowledgementMocks = vi.hoisted(() => ({
   apply: vi.fn(
@@ -39,12 +42,30 @@ const acknowledgementMocks = vi.hoisted(() => ({
 }));
 const fitRuntimeMocks = vi.hoisted(() => ({ execute: vi.fn() }));
 
+vi.mock("@temporalio/activity", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@temporalio/activity")>()),
+  heartbeat: vi.fn(),
+}));
+
 vi.mock("../model-runtime/structured-task-runtime-bridge", () => ({
   executeStructuredTaskWithRuntime: fitRuntimeMocks.execute,
 }));
 
 vi.mock("../durable-results/domain-ack-consumer-bindings", () => ({
   applyDomainAckConsumerTransactions: acknowledgementMocks.apply,
+  applyPartitionedDomainAckConsumerTransactions: async (input: {
+    transaction: unknown;
+    apply: (
+      transaction: unknown,
+      companyFacts: readonly unknown[],
+      auxiliaryFacts: readonly unknown[],
+    ) => Promise<unknown>;
+  }) => ({
+    status: "APPLIED",
+    companyFacts: [],
+    auxiliaryFacts: [],
+    value: await input.apply(input.transaction, [], []),
+  }),
   applyDomainAckConsumerTransaction: async (input: {
     transaction: unknown;
     apply: (transaction: unknown) => Promise<unknown>;
@@ -111,7 +132,29 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
       strings?: readonly string[];
       values: readonly unknown[];
     }) => {
-      if (statement.strings?.join("?").includes("FROM discovery_run")) {
+      const sql = statement.strings?.join("?") ?? "";
+      if (sql.includes("attest_discovery_query_lineage_v2")) {
+        return [{
+          status: "NOT_FOUND",
+          query_receipt: null,
+          budget_truncated: null,
+          attempt_count: 0,
+          item_count: 0,
+          replay: false,
+        }];
+      }
+      if (sql.includes("append_discovery_query_lineage_v2")) {
+        const command = JSON.parse(String(statement.values[0])) as {
+          lookup: { queryKey: string };
+        };
+        return [{
+          status: "APPLIED",
+          attempt_count: 0,
+          item_count: 0,
+          query_key: command.lookup.queryKey,
+        }];
+      }
+      if (sql.includes("FROM discovery_run")) {
         return [
           {
             id: String(statement.values[0]),
@@ -253,10 +296,21 @@ function authorityBudgetStore(): BudgetStore {
   return store;
 }
 
+function testRunId(runId: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runId)) {
+    return runId;
+  }
+  const bytes = createHash("sha256").update(runId).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function discoveryArgs<T extends object>(runId: string, extra: T) {
   return {
     workspaceId: DISCOVERY_BINDING.scopeKey,
-    runId,
+    runId: testRunId(runId),
     planId: "50000000-0000-4000-8000-000000000001",
     queryOrdinal: 0,
     queryReceiptMode: QUERY_RECEIPT_MODE,
@@ -264,6 +318,44 @@ function discoveryArgs<T extends object>(runId: string, extra: T) {
     executionBudget: DISCOVERY_BINDING,
     ...extra,
   };
+}
+
+function materializationSqlText(query: unknown): string {
+  if (Array.isArray(query)) return query.join(" ");
+  if (!query || typeof query !== "object") return "";
+  const strings = Object.getOwnPropertyDescriptor(query, "strings")?.value;
+  return Array.isArray(strings) ? strings.join(" ") : "";
+}
+
+function suppressionSnapshotDigest(
+  rows: readonly { id: string; type: string; value: string }[],
+): string {
+  const digest = createHash("sha256");
+  for (const row of rows) for (const value of [row.id, row.type, row.value]) {
+    digest.update(String(Buffer.byteLength(value, "utf8"))).update(":").update(value, "utf8");
+  }
+  return digest.digest("hex");
+}
+
+function legacyMaterializationQueryRaw(
+  onOther: () => unknown = () => [{ pg_advisory_xact_lock: null }],
+) {
+  return vi.fn(async (query: unknown) => {
+    if (
+      materializationSqlText(query).includes(
+        "admit_discovery_company_materialization_v1",
+      )
+    ) {
+      return [
+        {
+          status: "APPLIED",
+          admission_id: "60000000-0000-4000-8000-000000000006",
+          mode: "LEGACY",
+        },
+      ];
+    }
+    return onOther();
+  });
 }
 
 // executeQuery/enrichRun 不 close run 预算账户（finalizeRun 才 close）→ 测试自行 force-close，清打标防单例泄漏。
@@ -576,7 +668,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
 
     await acts.executeQuery({
       workspaceId: DISCOVERY_BINDING.scopeKey,
-      runId: "run-row-id",
+      runId: "40000000-0000-4000-8000-000000000099",
       planId: "50000000-0000-4000-8000-000000000001",
       queryOrdinal: 0,
       queryReceiptMode: QUERY_RECEIPT_MODE,
@@ -697,6 +789,16 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         values?: readonly unknown[];
       }) => {
         const sql = statement.strings?.join("?") ?? "";
+        if (sql.includes("attest_discovery_query_lineage_v2")) {
+          return [{
+            status: "NOT_FOUND",
+            query_receipt: null,
+            budget_truncated: null,
+            attempt_count: 0,
+            item_count: 0,
+            replay: false,
+          }];
+        }
         if (sql.includes("FROM discovery_run")) {
           return [
             {
@@ -871,13 +973,97 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       activities.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
     ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_READBACK_MISSING");
   });
+
+  it("executes one lineage-capable zero-result provider through Q-TX", async () => {
+    const discoverCompanies = vi.fn(async () => ({
+      records: [],
+      costCents: 0,
+      lineage: {
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 0,
+        attemptReceipts: [],
+        receiptCoverage: [],
+      },
+    }));
+    const activities = createDiscoveryActivities(makeDeps([{
+      key: "public_web",
+      classes: ["public_intelligence"],
+      companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      discoverCompanies,
+    }]));
+
+    await expect(activities.executeQuery(
+      discoveryArgs("run-qtx-zero", { query: QUERY }),
+    )).resolves.toMatchObject({
+      rawCount: 0,
+      queryReceipt: { providers: ["public_web"] },
+      budgetTruncated: false,
+    });
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a capable plus legacy provider batch entirely on the legacy path", async () => {
+    const capable = vi.fn(async () => ({
+      records: [],
+      costCents: 0,
+      lineage: {
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 0,
+        attemptReceipts: [],
+        receiptCoverage: [],
+      },
+    }));
+    const legacy = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const activities = createDiscoveryActivities(makeDeps([
+      {
+        key: "public_web",
+        classes: ["public_intelligence"],
+        companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        discoverCompanies: capable,
+      },
+      { ...okAdapter("wikidata", []), discoverCompanies: legacy },
+    ]));
+
+    await expect(activities.executeQuery(
+      discoveryArgs("run-mixed", { query: QUERY }),
+    )).resolves.toMatchObject({
+      rawCount: 0,
+      provider: "public_web+wikidata",
+    });
+    expect(capable).toHaveBeenCalledOnce();
+    expect(legacy).toHaveBeenCalledOnce();
+  });
+
+  it("rejects capable provider record-count drift before Raw persistence", async () => {
+    const activities = createDiscoveryActivities(makeDeps([{
+      key: "public_web",
+      classes: ["public_intelligence"],
+      companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      discoverCompanies: vi.fn(async () => ({
+        records: [REC],
+        costCents: 0,
+        lineage: {
+          schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+          recordCount: 0,
+          attemptReceipts: [],
+          receiptCoverage: [],
+        },
+      })),
+    }]));
+
+    await expect(activities.executeQuery(
+      discoveryArgs("run-lineage-drift", { query: QUERY }),
+    )).rejects.toMatchObject({
+      code: "DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH",
+    });
+  });
 });
 
 describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("skips an accepted Raw row that has no canonical company name", async () => {
     const canonicalUpsert = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: {
         findMany: vi.fn(async () => [
           {
@@ -910,7 +1096,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("excludes every legacy ingest version from downstream materialization", async () => {
     const rawFindMany = vi.fn(async () => []);
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: { findMany: rawFindMany },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
@@ -932,7 +1118,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
 
     expect(rawFindMany).toHaveBeenCalledWith({
       where: {
-        runId: "run-legacy",
+        runId: testRunId("run-legacy"),
         ingestStatus: "ACCEPTED",
         ingestVersion: "raw-source/v2",
       },
@@ -952,7 +1138,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       const identityCreate = vi.fn();
       const evidenceCreate = vi.fn();
       const tx = {
-        $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+        $queryRaw: legacyMaterializationQueryRaw(),
         rawSourceRecord: {
           findMany: async () => [{ id: "raw-synthetic", ...raw }],
         },
@@ -990,10 +1176,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("在读 suppression 和任何 canonical write 前先取 workspace policy lock", async () => {
     const order: string[] = [];
     const tx = {
-      $queryRaw: async () => {
+      $queryRaw: legacyMaterializationQueryRaw(() => {
         order.push("lock");
         return [{ pg_advisory_xact_lock: null }];
-      },
+      }),
       rawSourceRecord: {
         findMany: async () => [
           {
@@ -1019,7 +1205,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         },
       },
       identityLink: {
-        findFirst: async () => ({ id: "existing-link" }),
+        findFirst: async () => null,
         create: async () => ({}),
       },
       fieldEvidence: { create: async () => ({}) },
@@ -1039,7 +1225,44 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
 
     await activities.canonicalizeRun(discoveryArgs("run-1", {}));
 
-    expect(order).toEqual(["lock", "suppression-read", "canonical-write"]);
+    expect(order).toEqual([
+      "lock",
+      "suppression-read",
+      "lock",
+      "canonical-write",
+    ]);
+  });
+
+  it("maps a post-read company IdentityLink P2002 to the stable identity conflict", async () => {
+    const tx = {
+      $queryRaw: legacyMaterializationQueryRaw(),
+      rawSourceRecord: { findMany: vi.fn(async () => [{
+        id: "raw-p2002", providerKey: "registry", ingestStatus: "ACCEPTED",
+        ingestVersion: "raw-source/v2", payload: { name: "Race GmbH", domain: "race.example" },
+      }]) },
+      rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      canonicalCompany: {
+        findUnique: vi.fn(async () => null), updateMany: vi.fn(),
+        upsert: vi.fn(async () => ({ id: "company-race" })),
+      },
+      identityLink: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => {
+          throw new Prisma.PrismaClientKnownRequestError("unique", {
+            code: "P2002", clientVersion: "test",
+          });
+        }),
+      },
+      fieldEvidence: { create: vi.fn() },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: { withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)) },
+      providers: {}, gateway: {}, budgetStore: authorityBudgetStore(),
+    } as never);
+    await expect(activities.canonicalizeRun(
+      discoveryArgs("run-p2002", {}),
+    )).rejects.toMatchObject({ type: "DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT" });
   });
 
   it("ordinary discovery scrubs an existing Canonical to retained namespaces before linking current v2 Raw", async () => {
@@ -1055,7 +1278,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     );
     const linkCreate = vi.fn(async () => ({}));
     const tx = {
-      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: {
         findMany: async () => [
           {
@@ -1171,7 +1394,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const linkCreate = vi.fn();
     const evidenceCreate = vi.fn();
     const tx = {
-      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: {
         findMany: async () => [
           {
@@ -1279,7 +1502,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       },
     );
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: { findMany: vi.fn(async () => raws) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
@@ -1410,7 +1633,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       return { id: company.id };
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
@@ -1420,7 +1643,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         upsert,
       },
       identityLink: {
-        findFirst: vi.fn(async () => ({ id: "existing-link" })),
+        findFirst: vi.fn(async () => ({
+          id: "existing-link",
+          canonicalId: "company-repair",
+        })),
         create: vi.fn(),
       },
       fieldEvidence: { create: evidenceCreate },
@@ -1444,6 +1670,558 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(company.updatedAt).toEqual(originalUpdatedAt);
     expect(evidenceCreate).not.toHaveBeenCalled();
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("resumes a governed terminal-only batch through query and run finalization without BudgetStore", async () => {
+    const queryKey = "a".repeat(64);
+    const suppressionRows = [{
+      id: "60000000-0000-4000-8000-000000000099",
+      type: "domain", value: "canonical-reused-blocked.example",
+    }];
+    const suppressionSha = suppressionSnapshotDigest(suppressionRows);
+    let inspection = 0;
+    const attestAuthorized = vi.fn(async () => {
+      throw new Error("governed C-TX must not consult BudgetStore");
+    });
+    const tx = {
+      suppressionRecord: { findMany: vi.fn(async () => suppressionRows) },
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: "86000000-0000-4000-8000-000000000007",
+          dedupeKey: "id:registry:reused1", name: "Canonical Reused GmbH",
+          domain: "canonical-reused-blocked.example", country: "DE", region: null,
+          attributes: {}, status: "NEW", version: 1, updatedAt: new Date(),
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      $queryRaw: vi.fn(async (query: unknown) => {
+        const sql = materializationSqlText(query);
+        if (sql.includes("admit_discovery_company_materialization_v1")) {
+          return [{
+            status: "APPLIED",
+            admission_id: "60000000-0000-4000-8000-000000000006",
+            mode: "GOVERNED_C_TX",
+          }];
+        }
+        if (sql.includes("inspect_discovery_company_materialization_v1")) {
+          inspection += 1;
+          if (inspection === 1) {
+            return [{
+              status: "NOT_FOUND",
+              next_work: {
+                kind: "BATCH",
+                queryKey,
+                queryOrdinal: 0,
+                batchOrdinal: 0,
+              },
+              run_summary: null,
+            }];
+          }
+          if (inspection === 2) {
+            return [{
+              status: "PARTIAL_RESUMABLE",
+              next_work: { kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0 },
+              run_summary: null,
+            }];
+          }
+          return [{
+            status: "PARTIAL_RESUMABLE",
+            next_work: { kind: "FINALIZE_RUN" },
+            run_summary: null,
+          }];
+        }
+        if (sql.includes("lock_discovery_company_materialization_batch_facts_v1")) {
+          return [{
+            status: "APPLIED",
+            fence_id: "70000000-0000-4000-8000-000000000007",
+            snapshot_sha256: suppressionSha,
+            facts: [{
+              qItem: {
+                queryItemId: "71000000-0000-4000-8000-000000000007",
+                queryKey,
+                queryOrdinal: 0,
+                providerKey: "registry",
+                recordIndex: 0,
+                operationId: "72000000-0000-4000-8000-000000000007",
+                rawRecordId: "73000000-0000-4000-8000-000000000007",
+                rawGovernedSubjectId: "74000000-0000-4000-8000-000000000007",
+                qRelationId: "75000000-0000-4000-8000-000000000007",
+                qIngestStatus: "REJECTED",
+              },
+              lockedFacts: {
+                rawStatus: "REJECTED",
+                rawExpiredAt: null,
+                restrictedDispositionId: null,
+                suppressionSnapshotCount: 1,
+                suppressionSnapshotSha256: suppressionSha,
+                product: null,
+              },
+              exactExistingOutcome: null,
+              reusableIdentity: null,
+              reusableManifestCandidates: [],
+              companyParse: null,
+              canonicalWrite: null,
+            }, {
+              qItem: {
+                queryItemId: "81000000-0000-4000-8000-000000000007",
+                queryKey, queryOrdinal: 0, providerKey: "registry", recordIndex: 1,
+                operationId: "82000000-0000-4000-8000-000000000007",
+                rawRecordId: "83000000-0000-4000-8000-000000000007",
+                rawGovernedSubjectId: "84000000-0000-4000-8000-000000000007",
+                qRelationId: "85000000-0000-4000-8000-000000000007",
+                qIngestStatus: "ACCEPTED",
+              },
+              lockedFacts: {
+                rawStatus: "EXPIRED", rawExpiredAt: "2026-08-30T00:00:00.000Z",
+                restrictedDispositionId: null, suppressionSnapshotCount: 1,
+                suppressionSnapshotSha256: suppressionSha, product: null,
+              },
+              exactExistingOutcome: null,
+              reusableIdentity: {
+                canonicalCompanyId: "86000000-0000-4000-8000-000000000007",
+                identityLinkId: "87000000-0000-4000-8000-000000000007",
+                identityCanonicalType: "company",
+                canonicalGovernedSubjectId: "88000000-0000-4000-8000-000000000007",
+                cRelationId: null, cRelationKey: "discovery.canonical_company:1",
+                matchRule: "identifier_exact", confidence: 1, mutationClass: "REUSED",
+                evidenceCount: 1, evidenceManifestSha256: "9".repeat(64),
+              },
+              reusableManifestCandidates: [{
+                workspaceId: DISCOVERY_BINDING.scopeKey,
+                admissionId: "60000000-0000-4000-8000-000000000006",
+                runId: testRunId("run-governed-terminal"),
+                rawRecordId: "83000000-0000-4000-8000-000000000007",
+                identityLinkId: "87000000-0000-4000-8000-000000000007",
+                canonicalCompanyId: "86000000-0000-4000-8000-000000000007",
+                contractSha256: "558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe",
+                evidenceCount: 1, evidenceManifestSha256: "9".repeat(64),
+                queryItemId: "89000000-0000-4000-8000-000000000007",
+                operationId: "8a000000-0000-4000-8000-000000000007",
+                cRelationId: "8b000000-0000-4000-8000-000000000007",
+                cRelationKey: "discovery.canonical_company:0",
+                sourceRefUuid: "89000000-0000-4000-8000-000000000007",
+                recordIndex: 0, coveringBatchReceipt: true,
+              }],
+              companyParse: null, canonicalWrite: null,
+            }],
+          }];
+        }
+        if (sql.includes("append_discovery_company_materialization_batch_v1")) {
+          return [{ status: "APPLIED", batch_ordinal: 0 }];
+        }
+        if (sql.includes("finalize_discovery_company_materialization_query_v1")) {
+          return [{ status: "APPLIED", query_key: queryKey }];
+        }
+        if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+          return [{ status: "APPLIED", companies: 0, suppressed: 1 }];
+        }
+        if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+        throw new Error(`unexpected governed C-TX query: ${sql}`);
+      }),
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: { attestAuthorized } as never,
+    } as never);
+
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-governed-terminal", {})),
+    ).resolves.toEqual({ companies: 0, suppressed: 1 });
+    expect(attestAuthorized).not.toHaveBeenCalled();
+    expect(inspection).toBe(3);
+    const append = tx.$queryRaw.mock.calls.find(([query]) =>
+      materializationSqlText(query).includes("append_discovery_company_materialization_batch_v1"));
+    const appendValues = Object.getOwnPropertyDescriptor(append?.[0] as object, "values")?.value;
+    const command = JSON.parse(String(appendValues?.[0]));
+    expect(command.items.map((item: Record<string, unknown>) => item.mutationClass))
+      .toEqual([null, null]);
+    expect(command.items[1]).toMatchObject({
+      outcome: "SUPPRESSED",
+      suppressionRecordIds: [suppressionRows[0]!.id],
+      mutationClass: null,
+    });
+    expect(tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+      where: { id: "86000000-0000-4000-8000-000000000007", status: { not: "SUPPRESSED" } },
+      data: { status: "SUPPRESSED", version: { increment: 1 } },
+    });
+  });
+
+  it("returns the exact governed run receipt on response-loss replay", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async (query: unknown) => {
+        const sql = materializationSqlText(query);
+        if (sql.includes("admit_discovery_company_materialization_v1")) {
+          return [{ status: "REPLAYED", admission_id: "60000000-0000-4000-8000-000000000006", mode: "GOVERNED_C_TX" }];
+        }
+        if (sql.includes("inspect_discovery_company_materialization_v1")) {
+          return [{ status: "REPLAYED", next_work: null,
+            run_summary: { companies: 7, suppressed: 2 } }];
+        }
+        throw new Error(`unexpected replay query: ${sql}`);
+      }),
+    };
+    const activities = createDiscoveryActivities({
+      prisma: { withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)) },
+      providers: {}, gateway: {}, budgetStore: { attestAuthorized: vi.fn() } as never,
+    } as never);
+    await expect(activities.canonicalizeRun(
+      discoveryArgs("run-governed-replay", {}),
+    )).resolves.toEqual({ companies: 7, suppressed: 2 });
+  });
+
+  it.each([
+    "admit", "admitStatus", "admitMode", "inspect", "inspectReplayNext",
+    "inspectRunSummary", "inspectNextKind", "facts", "factsStatus", "factsEmpty",
+    "factsSnapshot", "factsProductNaN", "factsTooMany", "append", "appendStatus", "appendOrdinal",
+    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount",
+    "materializationDenied", "priorMissing", "existingLink", "identityP2002", "identityOther",
+  ])(
+    "fails closed on malformed %s database output",
+    async (malformedStage) => {
+      const queryKey = "2".repeat(64);
+      const emptySha = suppressionSnapshotDigest([]);
+      const canonicalStages = new Set([
+        "materializationDenied", "priorMissing", "existingLink", "identityP2002", "identityOther",
+      ]);
+      let canonicalRead = 0;
+      const tx = {
+        suppressionRecord: { findMany: vi.fn(async () => []) },
+        canonicalCompany: {
+          findUnique: vi.fn(async () => {
+            canonicalRead += 1;
+            if (malformedStage === "materializationDenied") return {
+              id: "76000000-0000-4000-8000-000000000007", name: "Denied GmbH",
+              domain: "denied.example", country: "DE", region: null, industry: null,
+              employeeCount: null, revenueUsd: null, dedupeKey: "d:denied.example",
+              attributes: {}, status: "SUPPRESSED", version: 1, updatedAt: new Date(),
+            };
+            if (malformedStage === "priorMissing") return canonicalRead === 1 ? {
+              id: "76000000-0000-4000-8000-000000000007", name: "Missing GmbH",
+              domain: "missing.example", country: "DE", region: null, industry: null,
+              employeeCount: null, revenueUsd: null, dedupeKey: "d:missing.example",
+              attributes: {}, status: "NEW", version: 1, updatedAt: new Date(),
+            } : null;
+            return null;
+          }),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+          upsert: vi.fn(async () => ({ id: "76000000-0000-4000-8000-000000000007" })),
+        },
+        identityLink: {
+          findFirst: vi.fn(async () => malformedStage === "existingLink"
+            ? { id: "77000000-0000-4000-8000-000000000007", canonicalId: "76000000-0000-4000-8000-000000000007" }
+            : null),
+          create: vi.fn(async () => {
+            if (malformedStage === "identityP2002") throw new Prisma.PrismaClientKnownRequestError("unique", {
+              code: "P2002", clientVersion: "test",
+            });
+            if (malformedStage === "identityOther") throw new Error("identity-other");
+            return { id: "77000000-0000-4000-8000-000000000007" };
+          }),
+        },
+        fieldEvidence: { create: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async (query: unknown) => {
+          const sql = materializationSqlText(query);
+          if (sql.includes("admit_discovery_company_materialization_v1")) {
+            return malformedStage === "admit" ? [{}] : [{
+              status: malformedStage === "admitStatus" ? "INVALID" : "APPLIED",
+              admission_id: "60000000-0000-4000-8000-000000000006",
+              mode: malformedStage === "admitMode" ? "INVALID" : "GOVERNED_C_TX",
+            }];
+          }
+          if (sql.includes("inspect_discovery_company_materialization_v1")) {
+            if (malformedStage === "inspect") return [{}];
+            if (malformedStage === "inspectReplayNext") return [{
+              status: "REPLAYED", next_work: { kind: "FINALIZE_RUN" },
+              run_summary: { companies: 0, suppressed: 0 },
+            }];
+            const next_work = malformedStage === "finalizeQuery"
+              || malformedStage === "finalizeQueryKey"
+              ? { kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0 }
+              : malformedStage === "finalizeRun" || malformedStage === "finalizeRunCount"
+                ? { kind: "FINALIZE_RUN" }
+                : malformedStage === "inspectNextKind" ? { kind: "INVALID" }
+                  : { kind: "BATCH", queryKey, queryOrdinal: 0, batchOrdinal: 0 };
+            return [{ status: "NOT_FOUND", next_work,
+              run_summary: malformedStage === "inspectRunSummary" ? {} : null }];
+          }
+          if (sql.includes("lock_discovery_company_materialization_batch_facts_v1")) {
+            if (malformedStage === "facts") return [{}];
+            return [{
+              status: malformedStage === "factsStatus" ? "REPLAYED" : "APPLIED",
+              fence_id: "70000000-0000-4000-8000-000000000007",
+              snapshot_sha256: malformedStage === "factsSnapshot" ? "3".repeat(64) : emptySha,
+              facts: malformedStage === "factsEmpty" ? [] : malformedStage === "factsTooMany"
+                ? Array.from({ length: 129 }, () => ({})) : [{
+                qItem: {
+                  queryItemId: "71000000-0000-4000-8000-000000000007",
+                  queryKey, queryOrdinal: 0, providerKey: "registry", recordIndex: 0,
+                  operationId: "72000000-0000-4000-8000-000000000007",
+                  rawRecordId: "73000000-0000-4000-8000-000000000007",
+                  rawGovernedSubjectId: "74000000-0000-4000-8000-000000000007",
+                  qRelationId: "75000000-0000-4000-8000-000000000007",
+                  qIngestStatus: malformedStage === "factsProductNaN" || canonicalStages.has(malformedStage)
+                    ? "ACCEPTED" : "REJECTED",
+                },
+                lockedFacts: {
+                  rawStatus: malformedStage === "factsProductNaN" || canonicalStages.has(malformedStage)
+                    ? "ACCEPTED" : "REJECTED",
+                  rawExpiredAt: null,
+                  restrictedDispositionId: null, suppressionSnapshotCount: 0,
+                  suppressionSnapshotSha256: emptySha,
+                  product: malformedStage === "factsProductNaN" ? { name: "Bad", score: Number.NaN }
+                    : canonicalStages.has(malformedStage) ? {
+                      name: malformedStage === "materializationDenied" ? "Denied GmbH"
+                        : malformedStage === "priorMissing" ? "Missing GmbH" : "Created GmbH",
+                      domain: malformedStage === "materializationDenied" ? "denied.example"
+                        : malformedStage === "priorMissing" ? "missing.example" : "created.example",
+                    } : null,
+                },
+                exactExistingOutcome: null, reusableIdentity: null,
+                reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
+              }],
+            }];
+          }
+          if (sql.includes("append_discovery_company_materialization_batch_v1")) {
+            return malformedStage === "append" ? [{}] : [{
+              status: malformedStage === "appendStatus" ? "INVALID" : "APPLIED",
+              batch_ordinal: malformedStage === "appendOrdinal" ? 1 : 0,
+            }];
+          }
+          if (sql.includes("finalize_discovery_company_materialization_query_v1")) {
+            return malformedStage === "finalizeQuery" ? [{}] : [{
+              status: "APPLIED", query_key: malformedStage === "finalizeQueryKey" ? "4".repeat(64) : queryKey,
+            }];
+          }
+          if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+            return malformedStage === "finalizeRun" ? [{}] : [{
+              status: "APPLIED", companies: malformedStage === "finalizeRunCount" ? -1 : 0,
+              suppressed: 0,
+            }];
+          }
+          if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+          throw new Error(`unexpected malformed-output query: ${sql}`);
+        }),
+      };
+      const activities = createDiscoveryActivities({
+        prisma: { withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)) },
+        providers: {}, gateway: {}, budgetStore: { attestAuthorized: vi.fn() } as never,
+      } as never);
+      const execution = activities.canonicalizeRun(discoveryArgs(`run-malformed-${malformedStage}`, {}));
+      if (malformedStage === "identityOther") {
+        await expect(execution).rejects.toThrow("identity-other");
+      } else {
+        const hold = ["factsSnapshot", "materializationDenied", "priorMissing"].includes(malformedStage);
+        const identity = ["existingLink", "identityP2002"].includes(malformedStage);
+        await expect(execution).rejects.toMatchObject({ type: identity
+          ? "DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT"
+          : hold ? "DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD"
+            : "DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID" });
+      }
+    },
+  );
+
+  it("materializes an accepted governed company and leaves A identity to the database append", async () => {
+    const queryKey = "d".repeat(64);
+    const canonicalCompanyId = "76000000-0000-4000-8000-000000000007";
+    const identityLinkId = "77000000-0000-4000-8000-000000000007";
+    let inspection = 0;
+    let appendCommand: Record<string, unknown> | null = null;
+    const suppressionRows = Array.from({ length: 130 }, (_, index) => ({
+      id: `${index.toString(16).padStart(8, "0")}-0000-4000-8000-000000000007`,
+      type: "domain",
+      value: `unmatched-${index}.example`,
+    }));
+    suppressionRows[7] = { ...suppressionRows[7]!, value: "bücher.example" };
+    suppressionRows[129] = {
+      ...suppressionRows[129]!, type: "company_name", value: "Mu\u0308ller GmbH",
+    };
+    suppressionRows[128] = { ...suppressionRows[128]!, value: "canonical-blocked.example" };
+    const suppressionSha = suppressionSnapshotDigest(suppressionRows);
+    const createdLinks = new Map<string, { id: string; canonicalId: string; matchRule: string; confidence: number }>();
+    const canonicalState: Record<string, unknown> = {
+      id: canonicalCompanyId, name: "Existing GmbH", dedupeKey: "id:registry:acme-1",
+      domain: null, country: null, region: null, industry: null,
+      employeeCount: null, revenueUsd: null, attributes: {}, status: "NEW",
+      version: 1, updatedAt: new Date("2026-08-30T00:00:00.000Z"),
+    };
+    const canonicalSuppressedState: Record<string, unknown> = {
+      ...canonicalState, id: "78000000-0000-4000-8000-000000000007",
+      name: "Canonical Blocked GmbH", dedupeKey: "id:registry:canonical1",
+      domain: "canonical-blocked.example", status: "NEW",
+    };
+    const governedFact = (index: number, product: Record<string, unknown>) => ({
+      qItem: {
+        queryItemId: `8${index}000000-0000-4000-8000-000000000007`,
+        queryKey, queryOrdinal: 0, providerKey: "registry", recordIndex: index,
+        operationId: `9${index}000000-0000-4000-8000-000000000007`,
+        rawRecordId: `f${9 - index}000000-0000-4000-8000-000000000007`,
+        rawGovernedSubjectId: `b${index}000000-0000-4000-8000-000000000007`,
+        qRelationId: `c${index}000000-0000-4000-8000-000000000007`,
+        qIngestStatus: "ACCEPTED",
+      },
+      lockedFacts: {
+        rawStatus: "ACCEPTED", rawExpiredAt: null,
+        restrictedDispositionId: null,
+        suppressionSnapshotCount: suppressionRows.length,
+        suppressionSnapshotSha256: suppressionSha,
+        product,
+      },
+      exactExistingOutcome: null, reusableIdentity: null,
+      reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
+    });
+    const tx = {
+      suppressionRecord: { findMany: vi.fn(async (args: {
+        take?: number; where?: { id?: { gt?: string } };
+      }) => args.take === 128
+        ? suppressionRows.filter((row) => !args.where?.id?.gt || row.id > args.where.id.gt).slice(0, 128)
+        : suppressionRows) },
+      canonicalCompany: {
+        findUnique: vi.fn(async (args: { where: {
+          id?: string; workspaceId_dedupeKey?: { dedupeKey: string };
+        } }) => {
+          const key = args.where.workspaceId_dedupeKey?.dedupeKey;
+          return key === "id:registry:canonical1" || args.where.id === canonicalSuppressedState.id
+            ? { ...canonicalSuppressedState } : { ...canonicalState };
+        }),
+        upsert: vi.fn(async ({ update }: { update: Record<string, unknown> }) => {
+          for (const scalar of ["domain", "country", "region", "industry", "employeeCount", "revenueUsd"]) {
+            const value = update[scalar] as { set?: unknown } | undefined;
+            if (value && Object.hasOwn(value, "set")) canonicalState[scalar] = value.set;
+          }
+          if (update.attributes) canonicalState.attributes = update.attributes;
+          canonicalState.version = Number(canonicalState.version) + 1;
+          return { id: canonicalCompanyId };
+        }),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      identityLink: {
+        findFirst: vi.fn(async ({ where }: { where: { rawRecordId: string } }) =>
+          createdLinks.get(where.rawRecordId) ?? null),
+        create: vi.fn(async ({ data }: { data: { rawRecordId: string; canonicalId: string;
+          matchRule: string; confidence: number } }) => {
+          const link = { id: identityLinkId, canonicalId: data.canonicalId,
+            matchRule: data.matchRule, confidence: data.confidence };
+          createdLinks.set(data.rawRecordId, link); return { id: identityLinkId };
+        }),
+      },
+      fieldEvidence: { create: vi.fn(async () => ({})) },
+      $queryRaw: vi.fn(async (query: unknown) => {
+        const sql = materializationSqlText(query);
+        const values = Object.getOwnPropertyDescriptor(query as object, "values")?.value;
+        if (sql.includes("admit_discovery_company_materialization_v1")) {
+          return [{ status: "APPLIED", admission_id: "60000000-0000-4000-8000-000000000006", mode: "GOVERNED_C_TX" }];
+        }
+        if (sql.includes("inspect_discovery_company_materialization_v1")) {
+          inspection += 1;
+          if (inspection === 1) return [{ status: "NOT_FOUND", next_work: {
+            kind: "BATCH", queryKey, queryOrdinal: 0, batchOrdinal: 0,
+          }, run_summary: null }];
+          if (inspection === 2) return [{ status: "PARTIAL_RESUMABLE", next_work: {
+            kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0,
+          }, run_summary: null }];
+          return [{ status: "PARTIAL_RESUMABLE", next_work: { kind: "FINALIZE_RUN" }, run_summary: null }];
+        }
+        if (sql.includes("lock_discovery_company_materialization_batch_facts_v1")) {
+          return [{
+            status: "APPLIED",
+            fence_id: "70000000-0000-4000-8000-000000000007",
+            snapshot_sha256: suppressionSha,
+            facts: [
+              governedFact(0, {
+                name: "Acme GmbH", domain: "acme.example", country: "DE",
+                region: "BE", industry: "industrial", employeeCount: 10,
+                revenueUsd: 1000, attributes: { products: ["pump"] }, license: "licensed",
+                identifier: { scheme: "registry", value: "acme-1" },
+              }),
+              governedFact(1, { domain: "missing.example" }),
+              governedFact(2, { name: "Synthetic GmbH", license: "sandbox" }),
+              governedFact(3, { name: "Broken GmbH", identifier: { scheme: 3, value: "x" } }),
+              governedFact(4, { name: "IDN GmbH", domain: "xn--bcher-kva.example" }),
+              governedFact(5, { name: "Müller GmbH" }),
+              (() => {
+                const duplicate = governedFact(6, {
+                name: "Conflicting GmbH", domain: "wrong.example", country: "US",
+                region: "CA", industry: "wrong", employeeCount: 99, revenueUsd: 9999,
+                attributes: { products: ["pump"] },
+                identifier: { scheme: "registry", value: "acme-1" },
+                });
+                duplicate.qItem.rawRecordId = "f9000000-0000-4000-8000-000000000007";
+                return duplicate;
+              })(),
+              governedFact(7, {
+                name: "Unmatched Source Alias",
+                identifier: { scheme: "registry", value: "canonical-1" },
+              }),
+            ].reverse(),
+          }];
+        }
+        if (sql.includes("FROM field_evidence evidence")) {
+          return [{ evidence_count: 8, evidence_manifest_sha256: "f".repeat(64) }];
+        }
+        if (sql.includes("append_discovery_company_materialization_batch_v1")) {
+          appendCommand = JSON.parse(String(values?.[0]));
+          return [{ status: "APPLIED", batch_ordinal: 0 }];
+        }
+        if (sql.includes("finalize_discovery_company_materialization_query_v1")) {
+          return [{ status: "APPLIED", query_key: queryKey }];
+        }
+        if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+          return [{ status: "APPLIED", companies: 1, suppressed: 3 }];
+        }
+        if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+        throw new Error(`unexpected governed canonical query: ${sql}`);
+      }),
+    };
+    const activities = createDiscoveryActivities({
+      prisma: { withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)) },
+      providers: {}, gateway: {},
+      budgetStore: { attestAuthorized: vi.fn() } as never,
+    } as never);
+
+    await expect(activities.canonicalizeRun(
+      discoveryArgs("run-governed-canonical", {}),
+    )).resolves.toEqual({ companies: 1, suppressed: 3 });
+    expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
+    expect(tx.identityLink.create).toHaveBeenCalledOnce();
+    expect(tx.fieldEvidence.create).toHaveBeenCalledTimes(8);
+    expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
+    expect(canonicalState).toMatchObject({
+      domain: "acme.example", country: "DE", region: "BE", industry: "industrial",
+      employeeCount: 10, revenueUsd: 1000, version: 2,
+    });
+    const item = (appendCommand?.items as Record<string, unknown>[])[0]!;
+    expect(item).toMatchObject({
+      outcome: "CANONICALIZED", canonicalCompanyId, identityLinkId,
+      canonicalGovernedSubjectId: null, cRelationId: null,
+      suppressionRecordIds: [],
+    });
+    const terminalReasons = (appendCommand?.items as Record<string, unknown>[])
+      .map((outcome) => outcome.notCanonicalizableReasonCode)
+      .filter((reason) => reason !== null);
+    expect(terminalReasons).toEqual([
+      "MISSING_NAME", "NON_PRODUCT_PROVENANCE", "COMPANY_IDENTITY_INVALID",
+    ]);
+    const suppressed = (appendCommand?.items as Record<string, unknown>[])
+      .filter((outcome) => outcome.outcome === "SUPPRESSED");
+    expect(suppressed.map((outcome) => outcome.suppressionRecordIds)).toEqual([
+      [suppressionRows[7]!.id],
+      [suppressionRows[129]!.id],
+      [suppressionRows[128]!.id],
+    ]);
+    expect(tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+      where: { id: canonicalSuppressedState.id, status: { not: "SUPPRESSED" } },
+      data: { status: "SUPPRESSED", version: { increment: 1 } },
+    });
+    const canonicalized = (appendCommand?.items as Record<string, unknown>[])
+      .filter((outcome) => outcome.outcome === "CANONICALIZED");
+    expect(canonicalized.map((outcome) => outcome.mutationClass)).toEqual(["UPDATED", "LINKED"]);
+    expect(tx.suppressionRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: { id: "asc" }, take: 128,
+    }));
   });
 });
 

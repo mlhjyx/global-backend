@@ -78,6 +78,8 @@ const MODEL_FIELD_NAMES = Object.freeze({
     'id', 'scopeKey', 'workspaceId', 'subjectType', 'subjectId', 'dataClass',
     'dsrSubjectType', 'dsrSubjectId', 'createdAt', 'workspace',
     'operationSubject', 'operationRoot', 'parentRelations', 'childRelations',
+    'rawCompanyMaterializationOutcomes',
+    'canonicalCompanyMaterializationOutcomes',
     'tombstone',
   ],
   ToolOperationSubject: [
@@ -92,7 +94,8 @@ const MODEL_FIELD_NAMES = Object.freeze({
     'childSubjectId', 'relationKey', 'relationKind', 'sourceRefNamespace',
     'sourceRefUuid', 'sourceRefSha256', 'contractSha256', 'createdAt',
     'workspace', 'authority', 'account', 'operation', 'operationSubject',
-    'parentSubject', 'childSubject',
+    'parentSubject', 'childSubject', 'qMaterializationOutcomes',
+    'cMaterializationOutcomes',
   ],
   GovernedSubjectTombstone: [
     'workspaceId', 'governedSubjectId', 'tombstonedAt', 'workspace',
@@ -109,6 +112,7 @@ const MODEL_ATTRIBUTES = Object.freeze({
     '@@unique([workspaceId, subjectType, subjectId], map: "governed_subject_workspace_subject_key")',
     '@@unique([scopeKey, id], map: "governed_subject_scope_id_key")',
     '@@unique([workspaceId, id], map: "governed_subject_workspace_id_key")',
+    '@@unique([workspaceId, id, subjectType, subjectId], map: "governed_subject_materialization_exact_key")',
     '@@index([workspaceId, dsrSubjectType, dsrSubjectId], map: "governed_subject_workspace_dsr_idx")',
     '@@map("governed_subject")',
   ],
@@ -122,6 +126,7 @@ const MODEL_ATTRIBUTES = Object.freeze({
   ],
   GovernedSubjectRelation: [
     '@@unique([workspaceId, operationId, relationKey], map: "governed_subject_relation_workspace_operation_relation_key")',
+    '@@unique([workspaceId, id, operationId, relationKey], map: "governed_subject_relation_materialization_exact_key")',
     '@@index([workspaceId, operationId, parentSubjectId], map: "governed_subject_relation_operation_parent_idx")',
     '@@index([workspaceId, operationId, childSubjectId], map: "governed_subject_relation_operation_child_idx")',
     '@@map("governed_subject_relation")',
