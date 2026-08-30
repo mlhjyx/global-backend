@@ -133,6 +133,260 @@ function authorityError(code: string) {
 }
 
 describe("governed Raw organization identity authority", () => {
+  it("keeps the literal SQL-parity authority vectors closed over realistic producer mutations", () => {
+    // A directory producer that starts manufacturing an identifier must stay domain-only.
+    expect(
+      extractOrganizationIdentityAuthority("directory", validPayloads().directory),
+    ).toEqual([
+      {
+        providerKey: "directory",
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "acme.example",
+        validatorVersion: "domain-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "domain:GLOBAL:acme.example",
+      },
+    ]);
+
+    // Registry normalization must not retain punctuation, relabel the scheme, or widen jurisdiction.
+    expect(
+      extractOrganizationIdentityAuthority(
+        "registry",
+        rawRecord({ identifier: { scheme: "registry-id", value: "de-12/34" } }),
+      ),
+    ).toEqual([
+      {
+        providerKey: "registry",
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "acme.example",
+        validatorVersion: "domain-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "domain:GLOBAL:acme.example",
+      },
+      {
+        providerKey: "registry",
+        scheme: "registry-id",
+        jurisdiction: "DE",
+        normalizedValue: "DE1234",
+        validatorVersion: "registry-id-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "registry-id:DE:DE1234",
+      },
+    ]);
+
+    // A bad LEI checksum must not turn a plausible looking identifier into GLOBAL authority.
+    expect(
+      extractOrganizationIdentityAuthority(
+        "registry",
+        rawRecord({ identifier: { scheme: "lei", value: "529900T8BM49AURSDO55" } }),
+      ),
+    ).toEqual([
+      {
+        providerKey: "registry",
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "acme.example",
+        validatorVersion: "domain-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "domain:GLOBAL:acme.example",
+      },
+      {
+        providerKey: "registry",
+        scheme: "lei",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "529900T8BM49AURSDO55",
+        validatorVersion: "lei-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "lei:GLOBAL:529900T8BM49AURSDO55",
+      },
+    ]);
+
+    // TED suffix jurisdiction is authoritative when country is absent; a contradictory country is rejected.
+    const { country: _country, ...tedWithoutCountry } = validPayloads().ted;
+    expect(
+      extractOrganizationIdentityAuthority("ted", tedWithoutCountry),
+    ).toEqual([
+      {
+        providerKey: "ted",
+        scheme: "domain",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "acme.example",
+        validatorVersion: "domain-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "domain:GLOBAL:acme.example",
+      },
+      {
+        providerKey: "ted",
+        scheme: "ted-natid",
+        jurisdiction: "DE",
+        normalizedValue: "DE291499156",
+        validatorVersion: "ted-natid-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "ted-natid:DE:DE291499156",
+      },
+    ]);
+    expect(() =>
+      extractOrganizationIdentityAuthority("ted", {
+        ...validPayloads().ted,
+        country: "FR",
+      }),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+
+    // FDA range changes must not accept zero-length, 33-digit, or non-US identifiers.
+    expect(
+      extractOrganizationIdentityAuthority("openfda", {
+        ...validPayloads().openfda,
+        externalId: "openfda:1",
+        identifier: { scheme: "fda-reg", value: "1" },
+        attributes: {
+          fda: { registration_number: "1", product_codes: ["LLZ"] },
+          products: ["LLZ"],
+        },
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          providerKey: "openfda",
+          scheme: "fda-reg",
+          jurisdiction: "US",
+          normalizedValue: "1",
+          validatorVersion: "fda-reg-v1",
+          normalizerVersion: "organization-identity-authority/v1",
+          key: "fda-reg:US:1",
+        },
+      ]),
+    );
+    expect(
+      extractOrganizationIdentityAuthority("openfda", {
+        ...validPayloads().openfda,
+        externalId: "openfda:12345678901234567890123456789012",
+        identifier: {
+          scheme: "fda-reg",
+          value: "12345678901234567890123456789012",
+        },
+        attributes: {
+          fda: {
+            registration_number: "12345678901234567890123456789012",
+            product_codes: ["LLZ"],
+          },
+          products: ["LLZ"],
+        },
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          providerKey: "openfda",
+          scheme: "fda-reg",
+          jurisdiction: "US",
+          normalizedValue: "12345678901234567890123456789012",
+          validatorVersion: "fda-reg-v1",
+          normalizerVersion: "organization-identity-authority/v1",
+          key: "fda-reg:US:12345678901234567890123456789012",
+        },
+      ]),
+    );
+    expect(() =>
+      extractOrganizationIdentityAuthority("openfda", {
+        ...validPayloads().openfda,
+        externalId: "openfda:123456789012345678901234567890123",
+        identifier: { scheme: "fda-reg", value: "123456789012345678901234567890123" },
+        attributes: {
+          fda: {
+            registration_number: "123456789012345678901234567890123",
+            product_codes: ["LLZ"],
+          },
+          products: ["LLZ"],
+        },
+      }),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+
+    // SQL varchar/byte-count drift must not admit 81 UTF-8 bytes after the TS 80-byte boundary.
+    const eightyBytes = "ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ";
+    const eightyOneBytes = "ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄA";
+    expect(Buffer.byteLength(eightyBytes, "utf8")).toBe(80);
+    expect(Buffer.byteLength(eightyOneBytes, "utf8")).toBe(81);
+    expect(() =>
+      extractOrganizationIdentityAuthority("ted", {
+        ...validPayloads().ted,
+        identifier: { scheme: "ted-natid:de", value: eightyOneBytes },
+        attributes: {
+          ted: {
+            publication_number: "1",
+            publication_date: "2026-08-25",
+            notice_type: "award",
+            winner_identifier: eightyOneBytes,
+          },
+        },
+      }),
+    ).toThrow(authorityError("IDENTITY_IDENTIFIER_INVALID"));
+
+    // Missing, extra, or relabelled output schemes must not cross the producer boundary.
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        providerKey: "registry",
+        scheme: "registry-id",
+        jurisdiction: "DE",
+        normalizedValue: "DE1234",
+        validatorVersion: "registry-id-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+      }),
+    ).toBeNull();
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        providerKey: "registry",
+        scheme: "registry-id",
+        jurisdiction: "DE",
+        normalizedValue: "DE1234",
+        validatorVersion: "registry-id-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "registry-id:DE:DE1234",
+        unexpected: "extra",
+      }),
+    ).toBeNull();
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        providerKey: "registry",
+        scheme: "ted-natid",
+        jurisdiction: "DE",
+        normalizedValue: "DE1234",
+        validatorVersion: "registry-id-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "ted-natid:DE:DE1234",
+      }),
+    ).toBeNull();
+    for (const forged of [
+      { providerKey: "directory" },
+      { validatorVersion: "registry-id-v2" },
+      { key: "registry-id:DE:OTHER" },
+    ]) {
+      expect(
+        parseOrganizationIdentityAuthorityIdentifier({
+          providerKey: "registry",
+          scheme: "registry-id",
+          jurisdiction: "DE",
+          normalizedValue: "DE1234",
+          validatorVersion: "registry-id-v1",
+          normalizerVersion: "organization-identity-authority/v1",
+          key: "registry-id:DE:DE1234",
+          ...forged,
+        }),
+      ).toBeNull();
+    }
+    expect(
+      parseOrganizationIdentityAuthorityIdentifier({
+        providerKey: "openfda",
+        scheme: "fda-reg",
+        jurisdiction: "GLOBAL",
+        normalizedValue: "1",
+        validatorVersion: "fda-reg-v1",
+        normalizerVersion: "organization-identity-authority/v1",
+        key: "fda-reg:GLOBAL:1",
+      }),
+    ).toBeNull();
+  });
+
   it("parses only exact canonical authority output across every current producer path", () => {
     for (const providerKey of GOVERNED_RAW_SOURCE_PROVIDER_KEYS) {
       for (const produced of extractOrganizationIdentityAuthority(

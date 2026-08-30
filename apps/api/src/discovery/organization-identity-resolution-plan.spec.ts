@@ -78,6 +78,122 @@ function expectRejected(value: unknown, marker?: string) {
 }
 
 describe("deterministic organization identity resolution plan", () => {
+  it("keeps literal SQL-parity plans invariant across realistic persistence ordering mutations", () => {
+    // An unbound authority occurrence must create an identity_v2 candidate.
+    expect(plan()).toMatchObject({
+      kind: "create_new",
+      matchRule: "identity_v2",
+      inputHash: "be8c1309ff19260a4b93dca3716d398535a5277067362c91ee01e368cc28aa94",
+    });
+
+    // A legacy-only candidate must remain a domain fallback rather than acquiring an identifier rule.
+    expect(
+      plan({
+        authorityIdentifiers: [],
+        blocker: {
+          blockerKey: "d:acme.example",
+          matchRule: "domain_exact",
+          legacyCandidateCompanyId: COMPANY_A,
+        },
+      }),
+    ).toMatchObject({
+      kind: "lazy_upgrade",
+      companyId: COMPANY_A,
+      matchRule: "domain_exact",
+      inputHash: "6952f0036ae5d335e55f536735844bc3e4a73ad3a138c60be5d5efb0db0a8a29",
+    });
+
+    // A one-hop mapping must bind its root, not retain the mapped source company.
+    expect(
+      plan({
+        existingBindings: [
+          { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+        ],
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_ROOT },
+        ],
+      }),
+    ).toMatchObject({
+      kind: "bind_existing",
+      companyId: COMPANY_ROOT,
+      matchRule: "identity_v2",
+      inputHash: "d8abe41e3201d05746f69cb4e444826451b9d8ff14d8e64eb8ea1077c7967b67",
+    });
+
+    const second = identifier({ normalizedValue: "DE9999" });
+    const splitInput = {
+      authorityIdentifiers: [second, identifier(), { ...second }],
+      existingBindings: [
+        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+        { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+        { identifierKey: "registry-id:DE:DE9999", companyId: COMPANY_B },
+      ],
+      rootMappings: [],
+    };
+    const split = plan(splitInput);
+    // Reverse/random SQL row order and duplicate rows must not change a two-root conflict receipt.
+    expect(split).toMatchObject({
+      kind: "conflict",
+      conflictType: "identifier_split",
+      companyIds: [COMPANY_A, COMPANY_B],
+      identifierKeys: ["registry-id:DE:DE1234", "registry-id:DE:DE9999"],
+      inputHash: "10783186050404c807d0d2aa4a4bb528de8c4e3f2c824db486ab9a59813c739d",
+      conflictFingerprint: "a1becc5d8cefb096ea5abb746a5c121d73b14761112fa1552077f376609ebd03",
+    });
+    expect(
+      plan({
+        authorityIdentifiers: [...splitInput.authorityIdentifiers].reverse(),
+        existingBindings: [...splitInput.existingBindings].reverse(),
+        rootMappings: [...splitInput.rootMappings].reverse(),
+      }),
+    ).toMatchObject({
+      inputHash: "10783186050404c807d0d2aa4a4bb528de8c4e3f2c824db486ab9a59813c739d",
+      conflictFingerprint: "a1becc5d8cefb096ea5abb746a5c121d73b14761112fa1552077f376609ebd03",
+    });
+
+    // A blocker bound to a different root must remain a disagreement, never a silent merge.
+    expect(
+      plan({
+        existingBindings: [
+          { identifierKey: "registry-id:DE:DE1234", companyId: COMPANY_A },
+        ],
+        blocker: {
+          blockerKey: "d:acme.example",
+          matchRule: "domain_exact",
+          legacyCandidateCompanyId: COMPANY_B,
+        },
+      }),
+    ).toMatchObject({
+      kind: "conflict",
+      conflictType: "blocking_key_disagreement",
+      companyIds: [COMPANY_A, COMPANY_B],
+      identifierKeys: ["registry-id:DE:DE1234"],
+      conflictFingerprint: "3d875a6549bdb9afe1dae5d9f3127554e194a1417a7c272ef79498dea303040d",
+    });
+
+    // A two-hop alias chain would make root selection non-deterministic and must be rejected.
+    expect(() =>
+      plan({
+        rootMappings: [
+          { sourceCompanyId: COMPANY_A, rootCompanyId: COMPANY_B },
+          { sourceCompanyId: COMPANY_B, rootCompanyId: COMPANY_ROOT },
+        ],
+      }),
+    ).toThrow(resolutionError());
+
+    // A legacy provider identifier is never a v2 fallback blocker; only domain/name rules are admissible.
+    expect(() =>
+      plan({
+        authorityIdentifiers: [],
+        blocker: {
+          blockerKey: "id:registry-id:DE1234",
+          matchRule: "identifier_exact",
+          legacyCandidateCompanyId: null,
+        },
+      }),
+    ).toThrow(resolutionError());
+  });
+
   it("creates an immutable identity_v2 plan when authority identifiers are unbound", () => {
     const result = plan();
 

@@ -40,4 +40,27 @@ describe('canonicalizeSuppressionValue', () => {
       { domain: 'example.com', name: 'Different Co' },
     )).toBe(true);
   });
+
+  it.each([
+    // A source that changes URL presentation must not bypass a stored ASCII domain suppression.
+    ['domain', 'example.com', 'example.com'],
+    ['domain', ' HTTPS://WWW.Example.COM./directory ', 'example.com'],
+    // IP, malformed, and unbounded domains must fail closed rather than become matching keys.
+    ['domain', '999.999.999.999', null],
+    ['domain', 'https://[2001:db8::1]/', null],
+    ['domain', `${'a'.repeat(64)}.example.com`, null],
+    // NFC and whitespace normalization must produce exactly one stored company-name key.
+    ['company_name', '  A\u0308cme\tGmbH  ', 'äcme gmbh'],
+  ])('keeps literal SQL-parity suppression value %s %j', (type, raw, expected) => {
+    expect(canonicalizeSuppressionValue(type, raw)).toBe(expected);
+  });
+
+  it('fails closed for legacy noncanonical company domains instead of treating raw stored text as a key', () => {
+    expect(
+      companyMatchesSuppression(
+        [{ type: 'domain', value: 'not a canonical domain' }],
+        { domain: 'example.com', name: 'Acme GmbH' },
+      ),
+    ).toBe(false);
+  });
 });
