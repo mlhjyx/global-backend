@@ -10,6 +10,8 @@ import {
   reserveMergeAuthorizationNonce,
   revalidateApprovalAtAcceptance,
 } from './governance-approval-state.mjs';
+import { runApprovalStatusCli } from './governance-approval-status.mjs';
+import { buildTask3AcceptanceEvidence } from './fixtures/approval-readback/merge-authorization/task3-acceptance-evidence.mjs';
 
 const NOW = new Date('2026-08-30T08:30:00.000Z');
 const ROOT = new URL('./fixtures/approval-readback/merge-authorization/', import.meta.url);
@@ -215,6 +217,7 @@ const acceptanceEvidence = async () => {
     legalDigest: policy.legalDigest, rulesetDigest: policy.liveRulesetSha256,
   };
   const evidence = {
+    task3: buildTask3AcceptanceEvidence(),
     readAt: '2026-08-30T08:29:00.000Z',
     preRead: clone(snapshot), postRead: clone(snapshot),
     currentPullRequest: {
@@ -264,6 +267,23 @@ const acceptanceEvidence = async () => {
       ledgerSnapshot,
     },
   };
+  const acceptanceTransaction = {
+    currentPullRequest: evidence.currentPullRequest,
+    acceptanceDiff: evidence.acceptanceDiff,
+    reviews: evidence.reviews,
+    authority: evidence.authority,
+    legal: evidence.legal,
+    ruleset: evidence.ruleset,
+    machineChecks: evidence.machineChecks,
+    receipt: evidence.receipt,
+    proposalMain: evidence.proposalMain,
+    mergeAuthorization: evidence.mergeAuthorization,
+    task3: evidence.task3,
+  };
+  evidence.preAcceptanceRead = clone(acceptanceTransaction);
+  evidence.postAcceptanceRead = clone(acceptanceTransaction);
+  evidence.preAcceptanceReadSha256 = digest(acceptanceTransaction);
+  evidence.postAcceptanceReadSha256 = digest(acceptanceTransaction);
   return { evidence, grant, mergeAuthorization, policy, readback };
 };
 
@@ -338,17 +358,64 @@ test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED'
   assert.equal(validation.valid, true);
   const accepted = reduceApprovalDecisionState([
     ...state.eventHistory,
-    { type: 'ACCEPTANCE_REVALIDATED', validation, observedAt: evidence.readAt },
+    { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
   ], policy, NOW);
   assert.equal(accepted.state, 'ACCEPTED');
   assert.equal(Object.isFrozen(accepted), true);
+  const output = [];
+  assert.equal(await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], {
+    loadDecisionState: async () => accepted,
+    writeStdout: (value) => output.push(value),
+    writeStderr: () => assert.fail('accepted ADR-027 state must render'),
+  }), 0);
+  assert.equal(JSON.parse(output.join('')).decisionId, 'ADR-027');
   assert.throws(
     () => reduceApprovalDecisionState([
       ...state.eventHistory,
-      { type: 'ACCEPTANCE_REVALIDATED', validation: { valid: false, issues: [{ stable_code: 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE' }] }, observedAt: evidence.readAt },
+      { type: 'ACCEPTANCE_REVALIDATED', evidence: { ...evidence, readAt: '2026-08-29T08:00:00.000Z' }, observedAt: evidence.readAt },
     ], policy, NOW),
     /APPROVAL_ACCEPTANCE_REVALIDATION_STALE/,
   );
+});
+
+test('reviewer C1 counterexample cannot promote caller-declared receipt or validation booleans', async () => {
+  const policy = approvalPolicy();
+  const events = [
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
+    { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
+    {
+      type: 'RECEIPT_VERIFIED', headSha: policy.currentHeadSha,
+      receipt: { ...receiptSummary(), trustState: 'CALLER_DECLARED' },
+      mergeAuthorization: null, observedAt: '1970-01-01T00:00:00.000Z',
+    },
+    {
+      type: 'ACCEPTANCE_REVALIDATED',
+      validation: { valid: true, issues: [] },
+      observedAt: '1970-01-01T00:00:00.000Z',
+    },
+  ];
+  let callerAccepted = false;
+  try {
+    callerAccepted = reduceApprovalDecisionState(events, policy, NOW).state === 'ACCEPTED';
+  } catch {
+    callerAccepted = false;
+  }
+  const { evidence, mergeAuthorization } = await acceptanceEvidence();
+  const state = verifiedState(policy, mergeAuthorization);
+  const clonedResult = clone(revalidateApprovalAtAcceptance(state, evidence, NOW));
+  assert.equal(clonedResult.valid, true);
+  let clonedAccepted = false;
+  try {
+    clonedAccepted = reduceApprovalDecisionState([
+      ...state.eventHistory,
+      { type: 'ACCEPTANCE_REVALIDATED', validation: clonedResult, observedAt: evidence.readAt },
+    ], policy, new Date('2026-08-30T10:31:00.000Z')).state === 'ACCEPTED';
+  } catch {
+    clonedAccepted = false;
+  }
+  assert.equal(callerAccepted, false);
+  assert.equal(clonedAccepted, false);
 });
 
 test('acceptance revalidation mutation matrix fails closed on every fresh-read requirement', async () => {
@@ -380,16 +447,31 @@ test('acceptance revalidation mutation matrix fails closed on every fresh-read r
     ['consumption digest changed', (v) => { v.mergeAuthorization.consumptionRawSha256 = policy.decisionRawSha256; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['ledger key stage-qualified', (v) => { v.mergeAuthorization.ledgerSnapshot.key.stage = 'ACCEPTANCE_MERGE'; }, 'APPROVAL_MERGE_AUTHORIZATION_NONCE_KEY_INVALID'],
     ['ledger reservation binding changed', (v) => { v.mergeAuthorization.ledgerSnapshot.events[0].stage = 'PROPOSAL_MERGE'; }, 'APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT'],
+    ['ledger reservation head changed', (v) => { v.mergeAuthorization.ledgerSnapshot.events[0].headSha = 'e'.repeat(40); }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger reservation base changed', (v) => { v.mergeAuthorization.ledgerSnapshot.events[0].baseSha = 'e'.repeat(40); }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger reservation method changed', (v) => { v.mergeAuthorization.ledgerSnapshot.events[0].mergeMethod = 'MERGE'; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger nested consumption changed', (v) => { v.mergeAuthorization.ledgerSnapshot.events[3].consumption.result_commit_sha = 'e'.repeat(40); }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger revision duplicated', (v) => { v.mergeAuthorization.ledgerSnapshot.events[2].ledgerRevision = 2; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger revision gap', (v) => { v.mergeAuthorization.ledgerSnapshot.events[2].ledgerRevision = 7; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger events reordered', (v) => { [v.mergeAuthorization.ledgerSnapshot.events[2], v.mergeAuthorization.ledgerSnapshot.events[3]] = [v.mergeAuthorization.ledgerSnapshot.events[3], v.mergeAuthorization.ledgerSnapshot.events[2]]; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger committed revision drift', (v) => { v.mergeAuthorization.ledgerSnapshot.committedRevision = 99; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
+    ['ledger oversized', (v) => { for (let revision = 5; revision <= 65; revision += 1) v.mergeAuthorization.ledgerSnapshot.events.push({ type: 'BOUNDED_HOLD', reasonCode: 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED', observedAt: v.readAt, ledgerRevision: revision }); v.mergeAuthorization.ledgerSnapshot.committedRevision = 65; }, 'APPROVAL_LEDGER_STREAM_INVALID'],
     ['ledger consumption absent', (v) => { v.mergeAuthorization.ledgerSnapshot.events.pop(); }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],
+    ['extra review slot', (v) => { v.reviews.push({ ...clone(v.reviews[0]), slot: 'OTHER', reviewId: 99991 }); }, 'APPROVAL_ACCEPTANCE_EVIDENCE_SHAPE_INVALID'],
+    ['extra machine check', (v) => { v.machineChecks.push({ ...clone(v.machineChecks[0]), context: 'other', checkRunId: 99992, checkSuiteId: 99993, workflowRunId: 99994 }); }, 'APPROVAL_ACCEPTANCE_EVIDENCE_SHAPE_INVALID'],
+    ['caller-declared task3 validation', (v) => { v.task3.candidate.decision.raw_sha256 = policy.sidecarRawSha256; }, 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'],
     ['synthetic lifecycle result', (v) => { v.receipt.lifecycleValidation.valid = false; v.receipt.lifecycleValidation.issues.push({ stable_code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN' }); }, 'APPROVAL_INDEPENDENCE_NOT_PROVEN'],
   ];
+  const failures = [];
   for (const [name, mutate, code] of cases) {
     const value = clone(evidence);
     mutate(value);
     const result = revalidateApprovalAtAcceptance(state, value, NOW);
-    assert.equal(result.valid, false, name);
-    assert.ok(result.issues.some((entry) => entry.stable_code === code), `${name}: ${code}`);
+    if (result.valid || !result.issues.some((entry) => entry.stable_code === code)) {
+      failures.push({ name, code, result });
+    }
   }
+  assert.deepEqual(failures, []);
 });
 
 test('concurrent nonce reservation has one fresh winner and key excludes stage', async () => {

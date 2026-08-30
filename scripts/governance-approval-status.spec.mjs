@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runApprovalStatusCli } from './governance-approval-status.mjs';
+import { renderApprovalStatusReadModel } from './governance-approval-state.mjs';
 
 const DIGEST = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const cliState = () => ({
@@ -30,7 +31,6 @@ const cliState = () => ({
     grantId: 'program-c-grant-task4-0001', grantRawSha256: DIGEST,
     consumptionId: null, consumptionRawSha256: null,
     reservedLedgerRevision: 1, ledgerState: 'RESERVED',
-    singleUseNonce: 'nonce-program-c-never-output',
   },
   revocationStatus: 'ACTIVE',
   supersessionStatus: 'CURRENT',
@@ -98,6 +98,31 @@ test('CLI rejects free-form review or Legal content instead of silently redactin
     assert.match(deps.stderr.join(''), /APPROVAL_STATUS_FORBIDDEN_CONTENT/);
     assert.equal(deps.stdout.length, 0);
   }
+});
+
+test('I5 renderer and CLI reject nested nonce, extra projected keys, and multibyte overflow', async () => {
+  const mutations = [
+    (state) => { state.repository.singleUseNonce = 'nonce-program-c-never-output'; },
+    (state) => { state.repository.extra = true; },
+    (state) => { state.evidenceSlots.extra = 'VERIFIED'; },
+    (state) => { state.evidenceSlots.product = 'nonce-program-c-never-output'; },
+  ];
+  for (const mutate of mutations) {
+    const state = cliState();
+    mutate(state);
+    assert.throws(() => renderApprovalStatusReadModel(state), /APPROVAL_STATUS_/);
+    const deps = dependencies(state);
+    assert.equal(await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], deps.value), 1);
+    assert.equal(deps.stdout.length, 0);
+  }
+
+  const multibyte = cliState();
+  multibyte.decisionRevision = `program-c/decision-${'界'.repeat(12_000)}`;
+  const deps = dependencies(multibyte);
+  assert.equal(await runApprovalStatusCli(['--decision', 'ADR-027', '--format', 'json'], deps.value), 1);
+  assert.equal(deps.stdout.length, 0);
+  const valid = renderApprovalStatusReadModel(cliState());
+  assert.ok(Buffer.byteLength(JSON.stringify(valid), 'utf8') <= 32_768);
 });
 
 test('CLI rejects every force-accept spelling and never loads decision evidence', async () => {
