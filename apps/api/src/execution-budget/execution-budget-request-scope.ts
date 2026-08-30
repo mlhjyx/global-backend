@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ExecutionControlError } from './execution-control-error';
 import type { WorkspaceExecutionBudgetScope } from './execution-budget-authority.service';
 
 type JsonPrimitive = string | number | boolean | null;
@@ -53,7 +54,7 @@ export interface VerifyContactPointHttpRequestBody {
 }
 
 function invalidRequest(): never {
-  throw new Error('EXECUTION_BUDGET_REQUEST_INVALID');
+  throw new ExecutionControlError('EXECUTION_BUDGET_REQUEST_INVALID');
 }
 
 function canonicalJson(value: unknown): string {

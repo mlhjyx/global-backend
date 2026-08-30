@@ -31,7 +31,10 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import {
@@ -349,7 +352,7 @@ export function createDiscoveryActivities(deps: {
             ...ctx,
             onDurableReceipt: (producerId, receipt) => {
               if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
-                throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+                throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
               }
               durableReceipts.push({ producerId, receipt });
             },

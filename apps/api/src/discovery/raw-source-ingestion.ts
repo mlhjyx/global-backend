@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import { validateRawSourceProviderPayload } from "./raw-source-provider-schema";
+import {
+  createRawSourceIndexedResolver,
+  type RawSourceIndexedResolution,
+} from "./raw-source-indexed-resolution";
+
+export type { RawSourceIndexedResolution } from "./raw-source-indexed-resolution";
 
 export const RAW_SOURCE_INGEST_VERSION = "raw-source/v2" as const;
 
@@ -605,6 +611,43 @@ function receiptHash(receipt: ExistingRawSourceReceipt): string {
   } catch {
     return receipt.payloadHash ?? sha256(diagnosticShape(receipt.payload));
   }
+}
+
+function driftRowForIndexedResolution(
+  candidate: PreparedRawSourceRow,
+  conflictWithRawId: string | undefined,
+): PreparedRawSourceRow {
+  const driftPayload = minimalReceipt(
+    "QUARANTINED",
+    "PROCESSING_KEY_DRIFT",
+    candidate.payloadHash,
+    candidate.payloadBytes,
+    conflictWithRawId,
+  );
+  const payloadHash = rawPayloadHash(driftPayload);
+  return {
+    ...candidate,
+    externalId: null,
+    ingestKey: ingestKeyFor(driftPayload, payloadHash),
+    ingestStatus: "QUARANTINED",
+    dispositionCode: "PROCESSING_KEY_DRIFT",
+    payload: driftPayload,
+    payloadHash,
+    payloadBytes: Buffer.byteLength(canonicalJson(driftPayload), "utf8"),
+  };
+}
+
+const resolveRawSourceBatchByIndexInternal = createRawSourceIndexedResolver({
+  rawPayloadHash,
+  receiptHash,
+  driftRow: driftRowForIndexedResolution,
+});
+
+export function resolveRawSourceBatchByIndex(
+  prepared: readonly PreparedRawSourceRow[],
+  existing: readonly ExistingRawSourceReceipt[],
+): readonly RawSourceIndexedResolution[] {
+  return resolveRawSourceBatchByIndexInternal(prepared, existing);
 }
 
 export function reconcileRawSourceBatch(

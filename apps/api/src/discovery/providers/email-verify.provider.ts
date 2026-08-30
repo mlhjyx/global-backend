@@ -6,7 +6,10 @@ import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext,
 import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
-import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../../execution-budget/execution-control-error';
 
 /**
  * ToolBroker 的最小面（供本 verifier 依赖 + 测试注入假实现）。SMTP 原始出网**只能**经此闸门：
@@ -24,7 +27,7 @@ function forwardDurableReceipt(
 ): void {
   if (!receipt) return;
   if (!ctx?.onDurableReceipt) {
-    throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+    throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   }
   ctx.onDurableReceipt(producerId, receipt);
 }

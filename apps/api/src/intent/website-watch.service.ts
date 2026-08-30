@@ -3,7 +3,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MISS_THRESHOLD, computeNextFetchAt } from '../acquisition/monitored-source.lifecycle';
 import { PageFetcher } from './page-fetcher';
 import { BudgetExceededError } from '../tools/budget-store';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageKind, PageSignals } from './page-signals';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -34,7 +37,7 @@ export interface WatchResult {
 
 function parseWatchResult(value: unknown): WatchResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    throw new ExecutionControlError('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
   }
   const row = value as Record<string, unknown>;
   if (
@@ -43,7 +46,7 @@ function parseWatchResult(value: unknown): WatchResult {
       (key) => Number.isSafeInteger(row[key]) && (row[key] as number) >= 0,
     )
   ) {
-    throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    throw new ExecutionControlError('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
   }
   return Object.freeze({
     sourceId: row.sourceId,
@@ -244,7 +247,7 @@ export class WebsiteWatchService {
       return persist(prisma as unknown as WebsiteWatchWriteDb);
     }
     if (!this.deps.platformWriter) {
-      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }
     return this.deps.platformWriter.$transaction(async (transaction) => {
       const result = await applyDomainAckConsumerTransactions({

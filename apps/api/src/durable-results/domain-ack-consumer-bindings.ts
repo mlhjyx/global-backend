@@ -1,4 +1,5 @@
 import type { DurableExecutionReceipt } from './durable-execution-receipt';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   DomainAckService,
   PostgresDomainAckRepository,
@@ -52,7 +53,7 @@ export function getDomainAckProductConsumerBinding(
   const binding = DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS.find(
     (entry) => entry.producerId === producerId,
   );
-  if (!binding) throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+  if (!binding) throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   return binding;
 }
 
@@ -93,7 +94,7 @@ function assertReceiptBinding(
     receipt.resultStrategy !== binding.resultStrategy ||
     receipt.resultSchema !== binding.resultSchema
   ) {
-    throw new Error('DOMAIN_ACK_RECEIPT_BINDING_MISMATCH');
+    throw new ExecutionControlError('DOMAIN_ACK_RECEIPT_BINDING_MISMATCH');
   }
 }
 
@@ -111,7 +112,7 @@ export async function applyDomainAckConsumerTransaction<
 }): Promise<DomainAckConsumerApplyResult<TValue>> {
   const binding = getDomainAckProductConsumerBinding(input.producerId);
   if (!input.receipt) {
-    if (!input.transaction) throw new Error('DOMAIN_ACK_TRANSACTION_REQUIRED');
+    if (!input.transaction) throw new ExecutionControlError('DOMAIN_ACK_TRANSACTION_REQUIRED');
     return Object.freeze({
       status: 'UNRECEIPTED' as const,
       value: await input.apply(input.transaction),
@@ -125,7 +126,7 @@ export async function applyDomainAckConsumerTransaction<
         ),
       ) as unknown as DomainAckService<TTransaction>
     : undefined);
-  if (!service) throw new Error('DOMAIN_ACK_TRANSACTION_REQUIRED');
+  if (!service) throw new ExecutionControlError('DOMAIN_ACK_TRANSACTION_REQUIRED');
   return service.applyWithAck({
     receipt: input.receipt,
     consumer: binding.consumer,
@@ -165,7 +166,7 @@ export async function applyDomainAckConsumerTransactions<
     receipted.length > 0 &&
     receipted.length !== input.acknowledgements.length
   ) {
-    throw new Error('DOMAIN_ACK_MIXED_RECEIPT_BATCH');
+    throw new ExecutionControlError('DOMAIN_ACK_MIXED_RECEIPT_BATCH');
   }
   if (!receipted.length) {
     return Object.freeze({
@@ -195,7 +196,7 @@ export async function applyDomainAckConsumerTransactions<
   }
   const statuses = new Set(states.map((state) => state.status));
   if (statuses.size !== 1) {
-    throw new Error('DOMAIN_ACK_MIXED_REPLAY_STATE');
+    throw new ExecutionControlError('DOMAIN_ACK_MIXED_REPLAY_STATE');
   }
   const status = states[0]!.status as 'APPLIED' | 'REPLAYED';
   const value = status === 'APPLIED'

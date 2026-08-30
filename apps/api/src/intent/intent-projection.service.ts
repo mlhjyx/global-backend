@@ -19,7 +19,10 @@ import {
 } from '../discovery/evidence-license';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { sanitizeStoredCompanyFieldEvidence } from '../discovery/canonical-company-attributes';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
@@ -151,7 +154,7 @@ export class IntentProjectionService {
     };
     if (!durableReceipts.length) return persist(prisma);
     if (!this.deps.platformWriter) {
-      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }
     return this.deps.platformWriter.$transaction(async (tx) => {
       const result = await applyDomainAckConsumerTransactions({
@@ -290,19 +293,22 @@ export class IntentProjectionService {
   ): Promise<{ url: string; kind: PageKind }[]> {
     if (!this.deps.broker) return discoverWatchPages(domain);
     if (!opts?.budgetKey) throw new Error('registerWatch requires budgetKey before sitemap discovery');
+    if (!opts.executionBudget) {
+      throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_REQUIRED');
+    }
     const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
+    if (budgetWorkspaceId !== workspaceId) {
+      throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_INVALID');
+    }
     const budgets = this.deps.budgetStore
       ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
-    if (!opts.executionBudget) {
-      throw new Error('EXECUTION_BUDGET_BINDING_REQUIRED');
-    }
     const binding = parseExecutionBudgetBinding(opts.executionBudget, {
-      scopeKey: budgetWorkspaceId,
+      scopeKey: workspaceId,
       purpose: 'discovery.run',
       subjectType: 'discovery_run',
     });
     if (opts.budgetKey !== binding.accountKey) {
-      throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
+      throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_INVALID');
     }
     await budgets.attestAuthorized({
       authorityId: binding.authorityId,
