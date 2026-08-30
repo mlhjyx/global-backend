@@ -275,7 +275,27 @@ export const validateApprovalRevocation = (value) => validate(compiled.revocatio
 export const validateApprovalSupersession = (value) => validate(compiled.supersession, value, supersessionIssues);
 export const validateProgramCMergeAuthorizationGrant = (value) => validate(compiled.grant, value, grantIssues);
 export const validateProgramCMergeAuthorizationConsumption = (value) => validate(compiled.consumption, value, consumptionIssues);
-export const validateProgramCMergeAuthorizationConsumptionContext = (value) => {
-  const issues = boundedIssues(contextIssues(value));
-  return issues.length === 0 ? success : Object.freeze({ valid: false, issues: freezeIssues(issues) });
+const syntheticInspectionIssues = (issues) => {
+  const independence = contextIssue('APPROVAL_INDEPENDENCE_NOT_PROVEN', '');
+  if (issues.length <= MAX_ISSUES - 1) return [...issues, independence];
+  return [...issues.slice(0, MAX_ISSUES - 2), issue('#/issues', '', 'APPROVAL_ISSUE_OVERFLOW'), independence];
 };
+
+/**
+ * Local fixture inspector only. It cannot observe external receipt bytes or a
+ * durable ledger readback, so it must never be used as an approval/merge gate.
+ */
+export const inspectSyntheticProgramCMergeAuthorizationConsumptionContext = (value) => {
+  const consistencyIssues = contextIssues(value);
+  return Object.freeze({
+    synthetic_consistent: consistencyIssues.length === 0,
+    evidence_trust_state: 'EXTERNAL_UNVERIFIED',
+    trust_eligible: false,
+    external_receipt_bytes_observed: false,
+    durable_ledger_readback_observed: false,
+    issues: freezeIssues(syntheticInspectionIssues(consistencyIssues)),
+  });
+};
+
+/** @deprecated Use the explicitly synthetic inspector; neither API proves trust. */
+export const validateProgramCMergeAuthorizationConsumptionContext = (value) => inspectSyntheticProgramCMergeAuthorizationConsumptionContext(value);

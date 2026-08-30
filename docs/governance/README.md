@@ -34,6 +34,8 @@
 
 Release Bundle 的 shape 检查不等于 authenticity 检查。`CHECK_RUN / GITHUB_REVIEW / SIGNED_AUTHORIZATION`、merge parent 和 `evidence_ref` 在 bundle 中都只是待回读的声明；仅改成 `VERIFIED` 或填入 URL 会被验证器拒绝。当前有效边界是 `EXTERNAL_UNVERIFIED`，而不是“schema 通过即可晋级”。
 
+Trusted Approval 的 isolated schema validators 与 `inspectSyntheticProgramCMergeAuthorizationConsumptionContext` 同样只检查本地输入形状或 fixture 内部一致性。Synthetic inspector 的输出固定为 `evidence_trust_state=EXTERNAL_UNVERIFIED`、`trust_eligible=false`、`external_receipt_bytes_observed=false`、`durable_ledger_readback_observed=false`，并带 `APPROVAL_INDEPENDENCE_NOT_PROVEN`；它不能授权 approval、merge、dispatch 或 Release。只有后续 Task 3/4 在注入并实际回读 receipt raw bytes、evidence manifest、independent verifier 与 durable ledger 后，才可构建 trusted consumer。
+
 ## 2. 唯一事实规则
 
 - Registry 只存索引和关系，不复制完整产品论证、实现细节或测试内容。
