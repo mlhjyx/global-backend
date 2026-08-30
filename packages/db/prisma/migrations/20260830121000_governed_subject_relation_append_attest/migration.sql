@@ -36,52 +36,57 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $operation$
 DECLARE
-  authority public.execution_budget_authority%ROWTYPE;
-  account public.tool_budget_account%ROWTYPE;
   operation public.tool_budget_operation%ROWTYPE;
+  account public.tool_budget_account%ROWTYPE;
+  authority public.execution_budget_authority%ROWTYPE;
   ack public.execution_domain_ack%ROWTYPE;
+  expected_strategy TEXT;
+  expected_artifact_id TEXT;
 BEGIN
-  SELECT target.* INTO authority
-  FROM public.execution_budget_authority target
-  WHERE target.scope_key = p_workspace_id::text
-    AND target.workspace_id = p_workspace_id
-    AND target.id = p_authority_id
-  FOR SHARE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
-  END IF;
-  IF authority.consumed_at IS NULL OR authority.revoked_at IS NOT NULL THEN
-    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
-  END IF;
-  PERFORM 1 FROM public.execution_budget_authority_revocation revocation
-  WHERE revocation.scope_key = authority.scope_key
-    AND revocation.authority_id = authority.id;
-  IF FOUND THEN
-    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
-  END IF;
-
-  SELECT target.* INTO account
-  FROM public.tool_budget_account target
-  WHERE target.scope_key = authority.scope_key
-    AND target.id = p_account_id
-    AND target.authority_id = authority.id
-    AND target.generation = p_operation_generation
-  FOR SHARE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
-  END IF;
-
   SELECT target.* INTO operation
   FROM public.tool_budget_operation target
-  WHERE target.scope_key = account.scope_key
+  WHERE target.scope_key = p_workspace_id::text
     AND target.id = p_operation_id
-    AND target.account_id = account.id
     AND target.generation = p_operation_generation
     AND target.status = 'SETTLED'
     AND target.result_digest = p_result_digest
   FOR SHARE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT target.* INTO account
+  FROM public.tool_budget_account target
+  WHERE target.scope_key = operation.scope_key
+    AND target.id = p_account_id
+    AND target.id = operation.account_id
+    AND target.generation = p_operation_generation
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT target.* INTO authority
+  FROM public.execution_budget_authority target
+  WHERE target.scope_key = account.scope_key
+    AND target.workspace_id = p_workspace_id
+    AND target.id = p_authority_id
+    AND target.id = account.authority_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+  IF authority.revoked_at IS NOT NULL THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
+  END IF;
+  IF authority.consumed_at IS NULL THEN
+    RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM 1 FROM public.execution_budget_authority_revocation revocation
+  WHERE revocation.scope_key = authority.scope_key
+    AND revocation.authority_id = authority.id;
+  IF FOUND THEN
+    RAISE EXCEPTION 'GOVERNED_SUBJECT_AUTHORITY_REVOKED' USING ERRCODE = 'P0001';
   END IF;
 
   SELECT target.* INTO ack
@@ -93,13 +98,26 @@ BEGIN
     AND target.authority_id = authority.id
     AND target.result_digest = p_result_digest
   FOR SHARE;
+  expected_strategy := CASE operation.result_schema_version
+    WHEN 'generic-operation-projection/v1' THEN 'typed_projection'
+    WHEN 'generic-operation-artifact-ref/v1' THEN 'artifact_reference'
+    ELSE NULL
+  END;
+  expected_artifact_id := CASE expected_strategy
+    WHEN 'artifact_reference' THEN operation.result_json->>'artifactId'
+    ELSE NULL
+  END;
   IF NOT FOUND
     OR ack.operation_key IS DISTINCT FROM operation.operation_key
     OR ack.result_schema IS DISTINCT FROM operation.result_schema
     OR ack.usage IS DISTINCT FROM operation.receipt_usage
     OR ack.cost_basis IS DISTINCT FROM operation.receipt_cost_basis
-    OR operation.result_json IS NOT NULL AND ack.result_strategy IS DISTINCT FROM 'typed_projection'
-    OR operation.result_json IS NULL AND ack.result_strategy IS DISTINCT FROM 'artifact_reference'
+    OR expected_strategy IS NULL
+    OR ack.result_strategy IS DISTINCT FROM expected_strategy
+    OR ack.artifact_id IS DISTINCT FROM expected_artifact_id
+    OR expected_strategy = 'artifact_reference' AND COALESCE(
+      expected_artifact_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', true
+    )
   THEN
     RAISE EXCEPTION 'GOVERNED_OPERATION_SUBJECT_INVALID' USING ERRCODE = 'P0001';
   END IF;
@@ -157,8 +175,18 @@ BEGIN
     AND ack.result_schema = operation.result_schema
     AND ack.usage = operation.receipt_usage
     AND ack.cost_basis = operation.receipt_cost_basis
-    AND ack.result_strategy = CASE WHEN operation.result_json IS NULL
-      THEN 'artifact_reference' ELSE 'typed_projection' END;
+    AND ack.result_strategy = CASE operation.result_schema_version
+      WHEN 'generic-operation-projection/v1' THEN 'typed_projection'
+      WHEN 'generic-operation-artifact-ref/v1' THEN 'artifact_reference'
+      ELSE NULL END
+    AND ack.artifact_id IS NOT DISTINCT FROM CASE operation.result_schema_version
+      WHEN 'generic-operation-artifact-ref/v1' THEN operation.result_json->>'artifactId'
+      ELSE NULL END
+    AND CASE operation.result_schema_version
+      WHEN 'generic-operation-projection/v1' THEN ack.artifact_id IS NULL
+      WHEN 'generic-operation-artifact-ref/v1' THEN
+        ack.artifact_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      ELSE false END;
   IF matched_count = 1 THEN
     RETURN;
   END IF;
