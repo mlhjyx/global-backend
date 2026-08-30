@@ -9,7 +9,10 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -438,13 +441,13 @@ export class TaxonomyResolver {
   ) {
     const budgets = this.budgetStore ?? new UnavailableBudgetStore('TaxonomyResolver requires an authoritative BudgetStore');
     if (!executionBudget) {
-      throw new Error('EXECUTION_BUDGET_BINDING_REQUIRED');
+      throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_REQUIRED');
     }
     const binding = parseExecutionBudgetBinding(executionBudget, {
       scopeKey: workspaceId,
     });
     if (runId !== binding.accountKey) {
-      throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
+      throw new ExecutionControlError('EXECUTION_BUDGET_BINDING_INVALID');
     }
     await budgets.attestAuthorized({
       authorityId: binding.authorityId,

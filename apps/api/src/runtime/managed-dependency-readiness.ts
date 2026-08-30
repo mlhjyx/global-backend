@@ -15,6 +15,7 @@ import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
 import { probeJwksDocument } from '../auth/jwks-readiness';
 import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
 import { ExecutionBudgetAuthorityRepository } from '../execution-budget/execution-budget-authority.repository';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   EXECUTION_BUDGET_PLATFORM_PURPOSES,
   type ExecutionBudgetPurpose,
@@ -170,7 +171,7 @@ function genericArtifactStorageConfig(
     secretAccessKey.length > 256 ||
     (forcePathStyleValue !== 'true' && forcePathStyleValue !== 'false')
   ) {
-    throw new Error('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
+    throw new ExecutionControlError('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
   }
   const endpoint = new URL(endpointValue);
   if (
@@ -181,7 +182,7 @@ function genericArtifactStorageConfig(
     (endpoint.protocol !== 'https:' &&
       !(endpoint.protocol === 'http:' && loopback(endpoint.hostname)))
   ) {
-    throw new Error('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
+    throw new ExecutionControlError('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
   }
   return Object.freeze({
     endpoint: endpoint.href,

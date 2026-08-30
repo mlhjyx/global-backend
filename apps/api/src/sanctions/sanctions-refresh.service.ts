@@ -7,7 +7,10 @@ import { normForMatch } from '../discovery/name-match';
 import { parseOfacXml, type ParsedSanctionsEntity, type ParsedSanctionsList } from '../adapters/ofac-xml';
 import { parseEuFsf } from '../adapters/eu-fsf-xml';
 import type { SanctionsDownloadInput, SanctionsDownloadOutput } from '../tools/source-tools';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 
 /**
@@ -267,7 +270,7 @@ export class SanctionsRefreshService {
     };
     if (!res.durableReceipt) return persist(this.deps.ownerDb);
     if (!this.deps.platformWriter) {
-      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }
     return this.deps.platformWriter.$transaction(async (tx) => {
       const applied = await applyDomainAckConsumerTransaction({
