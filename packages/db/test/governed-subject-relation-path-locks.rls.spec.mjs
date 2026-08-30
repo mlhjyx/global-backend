@@ -353,7 +353,8 @@ describe("governed relation exact path lock ordering", () => {
       `SELECT pg_advisory_xact_lock(${graph}); ${invocation(APPEND,personal)}`));
     assert.notEqual(denied.status,0); assert.match(denied.stderr,/GOVERNED_SUBJECT_RELATION_INVALID/);
     assert.equal(canonicalSnapshot(),before);
-    psql(asApp(`SELECT pg_advisory_xact_lock((${graph}>>32)::integer,${graph}::integer);
+    psql(asApp(`SELECT pg_advisory_xact_lock((${graph}>>32)::bit(32)::integer,
+      ${graph}::bit(32)::integer);
       ${invocation(APPEND,{...personal,relationKey:"guard:two-int"})}`));
   });
 
