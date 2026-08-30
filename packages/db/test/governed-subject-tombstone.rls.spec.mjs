@@ -12,6 +12,7 @@ const REQUEST_A = "71000000-0000-4000-8000-000000000001";
 const REQUEST_A2 = "71000000-0000-4000-8000-000000000002";
 const REQUEST_B = "71000000-0000-4000-8000-000000000003";
 const REQUEST_DEEP = "71000000-0000-4000-8000-000000000004";
+const REQUEST_MISSING = "71000000-0000-4000-8000-000000000099";
 const DSR_A = "72000000-0000-4000-8000-000000000001";
 const DSR_B = "72000000-0000-4000-8000-000000000002";
 let personalA;
@@ -43,7 +44,7 @@ function appCall(workspaceId, subjectId, requestId) {
   return psql(asApp(call(workspaceId, subjectId, requestId), workspaceId));
 }
 
-function capture(workspaceId, subjectId, requestId, code) {
+function capture(workspaceId, subjectId, requestId, code, callerWorkspace = workspaceId) {
   const before = canonicalSnapshot();
   const result = psql(asApp(`CREATE TEMP TABLE task3_error(state text,message text) ON COMMIT DROP;
     DO $capture$ DECLARE s text; m text; BEGIN BEGIN
@@ -51,7 +52,7 @@ function capture(workspaceId, subjectId, requestId, code) {
       INSERT INTO task3_error VALUES ('00000','NO_ERROR');
     EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS s=RETURNED_SQLSTATE,m=MESSAGE_TEXT;
       INSERT INTO task3_error VALUES(s,m); END; END $capture$;
-    SELECT state||'|'||message FROM task3_error;`, workspaceId)).split("\n").at(-1);
+    SELECT state||'|'||message FROM task3_error;`, callerWorkspace)).split("\n").at(-1);
   assert.equal(result, `P0001|${code}`);
   assert.ok(result.length <= 96);
   assert.doesNotMatch(result, /email|phone|token|prompt|response|credential/i);
@@ -120,6 +121,21 @@ describe("governed subject Task 3 tombstone database contract", () => {
         AND (x.grantee=0 OR x.grantee::regrole::text IN
           ('app_user','execution_budget_platform_writer','runtime_api','runtime_worker','runtime_outbox_relay'));`),
     "app_user:EXECUTE");
+    assert.equal(psql(`SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) x
+      WHERE n.nspname='public' AND p.proname LIKE '\\_%tombstone%' ESCAPE '\\'
+        AND p.proname<>'${TOMBSTONE}' AND
+        (x.grantee=0 OR x.grantee::regrole::text IN
+          ('app_user','execution_budget_platform_writer','runtime_api','runtime_worker','runtime_outbox_relay'));`), "0");
+  });
+
+  it("keeps both tombstone tables privilege-empty for every managed grantee", () => {
+    assert.equal(psql(`SELECT count(*) FROM pg_class c
+      CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) x
+      WHERE c.oid IN ('public.governed_subject_tombstone'::regclass,
+        'public.governed_subject_tombstone_audit'::regclass)
+        AND (x.grantee=0 OR x.grantee::regrole::text IN
+          ('app_user','execution_budget_platform_writer','runtime_api','runtime_worker','runtime_outbox_relay'));`), "0");
   });
 
   it("validates dynamic PERSONAL DSR identity and rejects NON_PERSONAL or mismatched requests", () => {
@@ -130,21 +146,46 @@ describe("governed subject Task 3 tombstone database contract", () => {
     psql(`UPDATE deletion_request SET subject_type='company',subject_id='${DSR_B}'
       WHERE id='${REQUEST_A}';`);
     capture(WS_A, personalA[2], REQUEST_A, "GOVERNED_SUBJECT_INVALID");
+    capture(WS_B, personalB[2], REQUEST_B, "GOVERNED_SUBJECT_INVALID", WS_A);
+  });
+
+  it("accepts every live/completed deletion status and rejects FAILED or missing requests", () => {
+    psql(`UPDATE deletion_request SET status='FAILED' WHERE id='${REQUEST_A2}';`);
+    const statuses = ["RECEIVED", "FROZEN", "ERASING", "COMPLETED"];
+    for (const [index, status] of statuses.entries()) {
+      psql(`UPDATE deletion_request SET status='${status}',
+        completed_at=CASE WHEN '${status}'='COMPLETED' THEN now() ELSE NULL END
+        WHERE id='${REQUEST_A}';`);
+      const result = appCall(WS_A, personalA[2], REQUEST_A).split("|");
+      assert.equal(result[3], index === 0 ? "FENCE_CREATED" : "REPLAYED");
+    }
+    capture(WS_A, personalA2[2], REQUEST_A2, "GOVERNED_SUBJECT_INVALID");
+    capture(WS_A, personalA2[2], REQUEST_MISSING, "GOVERNED_SUBJECT_INVALID");
   });
 
   it("locks the three replay outcomes and keeps the first fence time immutable", () => {
     const created = appCall(WS_A, personalA[2], REQUEST_A).split("|");
     assert.equal(created[0], personalA[2]);
+    assert.equal(created[2], REQUEST_A);
     assert.equal(created[3], "FENCE_CREATED");
     const firstTime = created[1];
     const replay = appCall(WS_A, personalA[2], REQUEST_A).split("|");
     assert.equal(replay[3], "REPLAYED");
+    assert.equal(replay[2], REQUEST_A);
     assert.equal(replay[1], firstTime);
     const added = appCall(WS_A, personalA[2], REQUEST_A2).split("|");
     assert.equal(added[3], "AUDIT_APPENDED_WITH_EXISTING_FENCE");
+    assert.equal(added[2], REQUEST_A2);
     assert.equal(added[1], firstTime);
     assert.equal(psql(`SELECT count(*)||':'||count(DISTINCT tombstoned_at)
       FROM governed_subject_tombstone_audit WHERE governed_subject_id='${personalA[2]}';`), "2:1");
+    assert.equal(psql(`SELECT fence.governed_subject_id||'|'||fence.tombstoned_at||'|'||
+      string_agg(audit.deletion_request_id::text,',' ORDER BY audit.deletion_request_id)
+      FROM governed_subject_tombstone fence JOIN governed_subject_tombstone_audit audit
+        USING(workspace_id,governed_subject_id)
+      WHERE fence.workspace_id='${WS_A}' AND fence.governed_subject_id='${personalA[2]}'
+      GROUP BY fence.governed_subject_id,fence.tombstoned_at;`),
+    `${personalA[2]}|${firstTime}|${REQUEST_A},${REQUEST_A2}`);
     capture(WS_A, personalA2[2], REQUEST_A, "GOVERNED_SUBJECT_RELATION_CONFLICT");
   });
 
@@ -168,6 +209,9 @@ describe("governed subject Task 3 tombstone database contract", () => {
       "INSERT INTO governed_subject_tombstone(workspace_id,governed_subject_id) VALUES ('11000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001')",
       "UPDATE governed_subject_tombstone SET tombstoned_at=now()",
       "DELETE FROM governed_subject_tombstone",
+      "SELECT * FROM governed_subject_tombstone_audit",
+      "UPDATE governed_subject_tombstone_audit SET tombstoned_at=now()",
+      "DELETE FROM governed_subject_tombstone_audit",
     ]) {
       const denied = rawPsql(asApp(`${statement};`, WS_A));
       assert.notEqual(denied.status, 0);
@@ -179,5 +223,46 @@ describe("governed subject Task 3 tombstone database contract", () => {
       const denied = rawPsql(`SET SESSION AUTHORIZATION ${role}; ${call(WS_A, personalA[2], REQUEST_A)}`);
       assert.notEqual(denied.status, 0);
     }
+  });
+
+  it("keeps cross-workspace rows invisible and unwritable even under temporary table grants", () => {
+    psql(`GRANT SELECT,INSERT,UPDATE,DELETE ON governed_subject_tombstone,
+      governed_subject_tombstone_audit TO app_user;`);
+    try {
+      assert.equal(psql(asApp(`SELECT count(*) FROM governed_subject_tombstone
+        WHERE workspace_id='${WS_B}';`, WS_A)).split("\n").at(-1), "0");
+      assert.equal(psql(asApp(`SELECT count(*) FROM governed_subject_tombstone_audit
+        WHERE workspace_id='${WS_B}';`, WS_A)).split("\n").at(-1), "0");
+      for (const statement of [
+        `INSERT INTO governed_subject_tombstone(workspace_id,governed_subject_id)
+          VALUES ('${WS_B}','${personalB[2]}')`,
+        `INSERT INTO governed_subject_tombstone_audit(
+          deletion_request_id,workspace_id,governed_subject_id,tombstoned_at)
+          VALUES ('${REQUEST_B}','${WS_B}','${personalB[2]}',now())`,
+      ]) {
+        const denied = rawPsql(asApp(`${statement};`, WS_A));
+        assert.notEqual(denied.status, 0);
+        assert.match(denied.stderr, /row-level security policy/);
+      }
+      assert.equal(psql(asApp(`UPDATE governed_subject_tombstone SET tombstoned_at=now()
+        WHERE workspace_id='${WS_B}'; SELECT count(*) FROM governed_subject_tombstone
+        WHERE workspace_id='${WS_B}';`, WS_A)).split("\n").at(-1), "0");
+      assert.equal(psql(asApp(`DELETE FROM governed_subject_tombstone_audit
+        WHERE workspace_id='${WS_B}'; SELECT count(*) FROM governed_subject_tombstone_audit
+        WHERE workspace_id='${WS_B}';`, WS_A)).split("\n").at(-1), "0");
+    } finally {
+      psql(`REVOKE SELECT,INSERT,UPDATE,DELETE ON governed_subject_tombstone,
+        governed_subject_tombstone_audit FROM app_user;`);
+    }
+  });
+
+  it("rejects SET ROLE and ignores temp shadows under the fixed public search path", () => {
+    const setRole = rawPsql(asApp(`SET ROLE app_user; ${call(WS_A, personalA[2], REQUEST_A)}`, WS_A));
+    assert.notEqual(setRole.status, 0);
+    assert.match(setRole.stderr, /GOVERNED_SUBJECT_INVALID/);
+    const shadowed = psql(asApp(`CREATE TEMP TABLE deletion_request(id uuid);
+      CREATE TEMP TABLE governed_subject_tombstone(governed_subject_id uuid);
+      ${call(WS_A, personalA[2], REQUEST_A)}`, WS_A));
+    assert.equal(shadowed.split("|").at(-1), "FENCE_CREATED");
   });
 });
