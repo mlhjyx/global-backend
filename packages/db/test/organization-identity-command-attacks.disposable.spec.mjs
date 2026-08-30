@@ -65,6 +65,9 @@ const COMMAND_LINK_B_A = "46100000-0000-4000-8000-000000000005";
 const COMMAND_LINK_B_B = "46100000-0000-4000-8000-000000000006";
 const FIXTURE_SQL_TIME = "2026-08-30 00:00:00.000";
 const COMMAND_SQL_TIME = "2026-08-30 01:00:00.000";
+const FIXTURE_JSON_TIME = "2026-08-30T00:00:00";
+const COMMAND_JSON_TIME = "2026-08-30T01:00:00";
+const EXPIRES_JSON_TIME = "2099-08-30T00:00:00+00:00";
 const SENTINEL_RAW = "42900000-0000-4000-8000-000000000001";
 const SENTINEL_COMPANY_A = "43900000-0000-4000-8000-000000000001";
 const SENTINEL_COMPANY_B = "43900000-0000-4000-8000-000000000002";
@@ -420,6 +423,309 @@ function state({
     mappings,
     suppressions,
   };
+}
+
+function fullState({
+  raws = [],
+  companies = [],
+  identifiers = [],
+  conflicts = [],
+  parties = [],
+  links = [],
+  mappings = [],
+  suppressions = [],
+} = {}) {
+  return {
+    raws,
+    companies,
+    identifiers,
+    conflicts,
+    parties,
+    links,
+    mappings,
+    suppressions,
+  };
+}
+
+function rawFull(raw) {
+  return {
+    id: raw.id,
+    workspace_id: WORKSPACE_A,
+    run_id: null,
+    provider_key: raw.providerKey,
+    source_class: "company_registry",
+    external_id: null,
+    payload: raw.payload,
+    cost_cents: 0,
+    created_at: FIXTURE_JSON_TIME,
+    content_hash: HASH_B,
+    fetched_at: FIXTURE_JSON_TIME,
+    parser_version: "a4/v1",
+    source_url: `https://fixture.invalid/${raw.id}`,
+    source_entity_id: ENTITY,
+    ingest_key: `a4:${raw.id}`,
+    payload_hash: raw.payloadHash,
+    payload_bytes: 1,
+    ingest_version: raw.ingestVersion,
+    ingest_status: raw.ingestStatus,
+    disposition_code: null,
+    retention_days: 30,
+    expires_at: EXPIRES_JSON_TIME,
+    expired_at: null,
+    source_policy_snapshot: {},
+  };
+}
+
+function companyFull(company, timestamp = FIXTURE_JSON_TIME) {
+  return {
+    id: company.id,
+    workspace_id: WORKSPACE_A,
+    name: company.name,
+    domain: company.domain,
+    country: company.country,
+    region: null,
+    industry: null,
+    employee_count: null,
+    revenue_usd: null,
+    attributes: null,
+    status: company.status,
+    dedupe_key: company.dedupeKey,
+    version: company.version,
+    created_at: timestamp,
+    updated_at: timestamp,
+    contact_discovery_attempted_at: null,
+    last_enriched_at: null,
+    last_signal_at: null,
+    last_watch_at: null,
+    email_guess_attempted_at: null,
+  };
+}
+
+function identifierFull(identifier, options) {
+  return {
+    id: options.id,
+    workspace_id: WORKSPACE_A,
+    company_id: identifier.companyId,
+    scheme: identifier.scheme,
+    jurisdiction: identifier.jurisdiction,
+    normalized_value: identifier.normalizedValue,
+    authority_provider_key: identifier.authorityProviderKey,
+    raw_record_id: identifier.rawRecordId,
+    conflict_id: identifier.conflictId,
+    confidence: identifier.confidence,
+    normalizer_version: identifier.normalizerVersion,
+    validator_version: identifier.validatorVersion,
+    provenance: identifier.provenance,
+    status: identifier.status,
+    first_seen_at: options.firstSeen,
+    last_seen_at: options.lastSeen,
+    created_at: options.createdAt,
+    revoked_at: null,
+  };
+}
+
+function conflictFull(conflict, timestamp = FIXTURE_JSON_TIME) {
+  return {
+    id: conflict.id,
+    workspace_id: WORKSPACE_A,
+    raw_record_id: conflict.rawRecordId,
+    conflict_type: conflict.conflictType,
+    fingerprint: conflict.fingerprint,
+    status: conflict.status,
+    revision: conflict.revision,
+    facts: conflict.facts,
+    created_at: timestamp,
+    resolved_at: conflict.status === "RESOLVED" ? timestamp : null,
+  };
+}
+
+function partyFullValue(value, id, timestamp = FIXTURE_JSON_TIME) {
+  return {
+    id,
+    workspace_id: WORKSPACE_A,
+    conflict_id: value.conflictId,
+    company_id: value.companyId,
+    role: value.role,
+    created_at: timestamp,
+  };
+}
+
+function linkFullValue(value, id, timestamp = FIXTURE_JSON_TIME) {
+  return {
+    id,
+    workspace_id: WORKSPACE_A,
+    canonical_type: "company",
+    canonical_id: value.canonicalId,
+    raw_record_id: value.rawRecordId,
+    match_rule: value.matchRule,
+    confidence: value.confidence,
+    created_at: timestamp,
+    status: value.status,
+    resolver_version: value.resolverVersion,
+    input_hash: value.inputHash,
+    conflict_id: value.conflictId,
+  };
+}
+
+function mappingFullValue(value, index) {
+  return {
+    id: `47000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    workspace_id: WORKSPACE_A,
+    source_company_id: value.sourceCompanyId,
+    canonical_company_id: value.canonicalCompanyId,
+    status: value.status,
+    revision: value.revision,
+    merge_decision_id: `48000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    split_decision_id: null,
+    created_at: FIXTURE_JSON_TIME,
+    revoked_at: null,
+  };
+}
+
+function suppressionFullValue(value, index) {
+  return {
+    id: `49000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    workspace_id: WORKSPACE_A,
+    type: value.type,
+    value: value.value,
+    reason: "a4-test",
+    created_at: FIXTURE_JSON_TIME,
+    protection_class: value.protectionClass,
+  };
+}
+
+function semanticFromFull(full) {
+  const ordered = (values, key) =>
+    [...values].sort((left, right) => key(left).localeCompare(key(right)));
+  return state({
+    raws: ordered(full.raws, (row) => row.id).map((row) => ({
+      id: row.id,
+      providerKey: row.provider_key,
+      payloadHash: row.payload_hash,
+      ingestVersion: row.ingest_version,
+      ingestStatus: row.ingest_status,
+    })),
+    companies: ordered(full.companies, (row) => row.id).map((row) => ({
+      id: row.id,
+      name: row.name,
+      domain: row.domain,
+      country: row.country,
+      status: row.status,
+      dedupeKey: row.dedupe_key,
+      version: row.version,
+    })),
+    identifiers: ordered(
+      full.identifiers,
+      (row) =>
+        `${row.scheme}|${row.jurisdiction}|${row.normalized_value}|${row.company_id}`,
+    ).map((row) => ({
+      companyId: row.company_id,
+      scheme: row.scheme,
+      jurisdiction: row.jurisdiction,
+      normalizedValue: row.normalized_value,
+      authorityProviderKey: row.authority_provider_key,
+      rawRecordId: row.raw_record_id,
+      conflictId: row.conflict_id,
+      confidence: row.confidence,
+      normalizerVersion: row.normalizer_version,
+      validatorVersion: row.validator_version,
+      provenance: row.provenance,
+      status: row.status,
+    })),
+    conflicts: ordered(full.conflicts, (row) => row.id).map((row) => ({
+      id: row.id,
+      rawRecordId: row.raw_record_id,
+      conflictType: row.conflict_type,
+      fingerprint: row.fingerprint,
+      status: row.status,
+      revision: row.revision,
+      facts: row.facts,
+    })),
+    parties: ordered(
+      full.parties,
+      (row) => `${row.conflict_id}|${row.company_id}|${row.role}`,
+    ).map((row) => ({
+      conflictId: row.conflict_id,
+      companyId: row.company_id,
+      role: row.role,
+    })),
+    links: ordered(
+      full.links,
+      (row) => `${row.raw_record_id}|${row.canonical_id}|${row.status}`,
+    ).map((row) => ({
+      canonicalId: row.canonical_id,
+      rawRecordId: row.raw_record_id,
+      matchRule: row.match_rule,
+      confidence: row.confidence,
+      status: row.status,
+      resolverVersion: row.resolver_version,
+      inputHash: row.input_hash,
+      conflictId: row.conflict_id,
+    })),
+    mappings: ordered(full.mappings, (row) => row.source_company_id).map(
+      (row) => ({
+        sourceCompanyId: row.source_company_id,
+        canonicalCompanyId: row.canonical_company_id,
+        status: row.status,
+        revision: row.revision,
+      }),
+    ),
+    suppressions: ordered(
+      full.suppressions,
+      (row) => `${row.type}|${row.value}`,
+    ).map((row) => ({
+      type: row.type,
+      value: row.value,
+      protectionClass: row.protection_class,
+    })),
+  });
+}
+
+function fixtureIdentifierFullValue(identifier) {
+  return identifierFull(identifier, {
+    id: fixtureIdentifierId(identifier),
+    firstSeen: FIXTURE_JSON_TIME,
+    lastSeen: FIXTURE_JSON_TIME,
+    createdAt: FIXTURE_JSON_TIME,
+  });
+}
+
+function refreshedIdentifierFullValue(identifier) {
+  return identifierFull(identifier, {
+    id: fixtureIdentifierId(identifier),
+    firstSeen: FIXTURE_JSON_TIME,
+    lastSeen: COMMAND_JSON_TIME,
+    createdAt: FIXTURE_JSON_TIME,
+  });
+}
+
+function commandIdentifierFullValue(identifier, id) {
+  return identifierFull(identifier, {
+    id,
+    firstSeen: COMMAND_JSON_TIME,
+    lastSeen: COMMAND_JSON_TIME,
+    createdAt: COMMAND_JSON_TIME,
+  });
+}
+
+function fixturePartyFullValue(value) {
+  return partyFullValue(value, fixturePartyId(value), FIXTURE_JSON_TIME);
+}
+
+function commandPartyFullValue(value) {
+  return partyFullValue(value, fixturePartyId(value), COMMAND_JSON_TIME);
+}
+
+function fixtureLinkFullValue(value, index) {
+  return linkFullValue(
+    value,
+    `46000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    FIXTURE_JSON_TIME,
+  );
+}
+
+function commandLinkFullValue(value, id) {
+  return linkFullValue(value, id, COMMAND_JSON_TIME);
 }
 
 function rawView(raw) {
@@ -809,37 +1115,6 @@ const FULL_COLUMNS = Object.freeze({
   suppressions:
     "created_at,id,protection_class,reason,type,value,workspace_id".split(","),
 });
-const FULL_ALLOWED_IDS = Object.freeze({
-  raws: [RAW_A, RAW_B],
-  companies: [COMPANY_A, COMPANY_B, COMPANY_C, COMPANY_D, COMPANY_FORGED],
-  identifiers: [
-    IDENTIFIER_A,
-    IDENTIFIER_DOMAIN_A,
-    IDENTIFIER_REGISTRY_B,
-    IDENTIFIER_CREATED,
-    IDENTIFIER_CREATED_DOMAIN,
-    IDENTIFIER_CREATED_SECOND,
-  ],
-  conflicts: [CONFLICT],
-  parties: [PARTY_A, PARTY_B, PARTY_C, PARTY_D],
-  links: [
-    "46000000-0000-4000-8000-000000000001",
-    "46000000-0000-4000-8000-000000000002",
-    "46000000-0000-4000-8000-000000000003",
-    "46000000-0000-4000-8000-000000000004",
-    COMMAND_LINK_A,
-    COMMAND_LINK_B,
-    COMMAND_LINK_C,
-    COMMAND_LINK_D,
-    COMMAND_LINK_B_A,
-    COMMAND_LINK_B_B,
-  ],
-  mappings: [
-    "47000000-0000-4000-8000-000000000001",
-    "47000000-0000-4000-8000-000000000002",
-  ],
-  suppressions: ["49000000-0000-4000-8000-000000000001"],
-});
 const UUID_TEXT =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
@@ -911,78 +1186,6 @@ function assertSentinel(fullState) {
   );
 }
 
-function assertFullSuccessInvariant(pre, post, semantic) {
-  assertFullColumns(post);
-  for (const table of Object.keys(FULL_COLUMNS)) {
-    assert.equal(post[table].length, semantic[table].length, table);
-    for (const row of post[table]) {
-      assert.equal(
-        FULL_ALLOWED_IDS[table].includes(row.id),
-        true,
-        `${table} used nondeterministic ID ${row.id}`,
-      );
-    }
-  }
-  for (const table of ["raws", "mappings", "suppressions"]) {
-    assert.deepEqual(post[table], pre[table], `${table} changed`);
-  }
-  const existing = (table) => new Map(pre[table].map((row) => [row.id, row]));
-  for (const table of ["companies", "conflicts", "parties", "links"]) {
-    const before = existing(table);
-    for (const row of post[table]) {
-      if (before.has(row.id)) assert.deepEqual(row, before.get(row.id));
-    }
-  }
-  const identifiersBefore = existing("identifiers");
-  for (const row of post.identifiers) {
-    const old = identifiersBefore.get(row.id);
-    if (!old) continue;
-    const { last_seen_at: oldLastSeen, ...oldStable } = old;
-    const { last_seen_at: newLastSeen, ...newStable } = row;
-    assert.deepEqual(newStable, oldStable);
-    assert.ok([oldLastSeen, "2026-08-30T01:00:00"].includes(newLastSeen));
-  }
-  for (const row of post.companies) {
-    for (const column of [
-      "attributes",
-      "contact_discovery_attempted_at",
-      "email_guess_attempted_at",
-      "employee_count",
-      "industry",
-      "last_enriched_at",
-      "last_signal_at",
-      "last_watch_at",
-      "region",
-      "revenue_usd",
-    ]) {
-      assert.equal(row[column], null, `company.${column}`);
-    }
-  }
-  for (const row of post.links) assert.equal(row.canonical_type, "company");
-  for (const table of [
-    "companies",
-    "identifiers",
-    "conflicts",
-    "parties",
-    "links",
-  ]) {
-    for (const row of post[table]) {
-      for (const column of Object.keys(row).filter((key) =>
-        key.endsWith("_at"),
-      )) {
-        if (row[column] !== null) {
-          assert.ok(
-            ["2026-08-30T00:00:00", "2026-08-30T01:00:00"].includes(
-              row[column],
-            ),
-            `${table}.${column} was not deterministic`,
-          );
-        }
-      }
-    }
-  }
-}
-
 function runScenario(scenario) {
   ensurePrerequisite();
   const stageReceipt = scenario.stageLockKey
@@ -1003,23 +1206,41 @@ function runScenario(scenario) {
     INSERT INTO a4_observed VALUES ('preBFull',${fullStateSql(WORKSPACE_B)});
     SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
     DO $a4_call$
-    DECLARE resolved jsonb;
+    DECLARE
+      resolved jsonb;
+      call_workspace text := '${WORKSPACE_A}';
+      call_raw text := '${scenario.rawRecordId ?? RAW_A}';
+      returned_sqlstate text;
+      message_text text;
+      exception_detail text;
+      exception_hint text;
+      exception_context text;
     BEGIN
       SELECT jsonb_agg(to_jsonb(row)) INTO resolved
       FROM public.resolve_organization_identity_for_raw_v1(
-        '${WORKSPACE_A}','${scenario.rawRecordId ?? RAW_A}'
+        call_workspace,call_raw
       ) AS row;
       INSERT INTO a4_observed VALUES (
         'outcome',jsonb_build_object('kind','result','rows',resolved)
       );
     EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS
+        returned_sqlstate = RETURNED_SQLSTATE,
+        message_text = MESSAGE_TEXT,
+        exception_detail = PG_EXCEPTION_DETAIL,
+        exception_hint = PG_EXCEPTION_HINT,
+        exception_context = PG_EXCEPTION_CONTEXT;
       INSERT INTO a4_observed VALUES (
         'outcome',jsonb_build_object(
-          'kind','error','sqlstate',SQLSTATE,'message',SQLERRM
+          'kind','error','sqlstate',returned_sqlstate,'message',message_text,
+          'detail',nullif(exception_detail,''),
+          'hint',nullif(exception_hint,''),
+          'context',nullif(exception_context,'')
         )
       );
     END
     $a4_call$;
+    SET LOCAL client_min_messages='error';
     INSERT INTO a4_observed VALUES ('stageFired',(${stageReceipt}));
     INSERT INTO a4_observed VALUES ('postA',${semanticStateSql(WORKSPACE_A)});
     INSERT INTO a4_observed VALUES ('postAFull',${fullStateSql(WORKSPACE_A)});
@@ -1085,22 +1306,63 @@ function resultRow(row) {
   return { kind: "result", rows: [row] };
 }
 
+function primaryOutcome(outcome) {
+  return outcome.kind === "error"
+    ? {
+        kind: "error",
+        sqlstate: outcome.sqlstate,
+        message: outcome.message,
+      }
+    : outcome;
+}
+
+function assertOrdinaryDiagnosticShape(outcome) {
+  if (outcome.kind !== "error") return;
+  assert.deepEqual(Object.keys(outcome).sort(), [
+    "context",
+    "detail",
+    "hint",
+    "kind",
+    "message",
+    "sqlstate",
+  ]);
+  assert.equal(outcome.detail, null);
+  assert.equal(outcome.hint, null);
+  assert.equal(typeof outcome.context, "string");
+  const normalized = outcome.context.replaceAll(/line [0-9]+/gu, "line <n>");
+  assert.match(
+    normalized,
+    /^PL\/pgSQL function resolve_organization_identity_for_raw_v1\(text,text\) line <n> at RAISE\nSQL statement "SELECT jsonb_agg\(to_jsonb\(row\)\)[\s\S]+call_workspace,call_raw[\s\S]+AS row"\nPL\/pgSQL function inline_code_block line <n> at SQL statement$/u,
+  );
+}
+
 function assertScenario(scenario) {
   const { observed, elapsedMs, processOutput } = runScenario(scenario);
+  const observedPrimary = primaryOutcome(observed.outcome);
   assert.deepEqual(observed.preA, scenario.expectedPre);
   assertFullColumns(observed.preAFull);
   assertSentinel(observed.preBFull);
   assert.deepEqual(observed.postBFull, observed.preBFull);
+  if (scenario.expectedOutcome.kind === "result") {
+    assert.ok(
+      scenario.expectedFullPost,
+      "successful scenario lacks full postimage",
+    );
+    assertFullColumns(scenario.expectedFullPost);
+    assert.deepEqual(
+      semanticFromFull(scenario.expectedFullPost),
+      scenario.expectedPost,
+    );
+    if (isDeepStrictEqual(observedPrimary, scenario.expectedOutcome)) {
+      assert.deepEqual(observed.postAFull, scenario.expectedFullPost);
+    }
+  }
   const noWrite =
     scenario.expectedOutcome.kind === "error" ||
     scenario.expectNoWrite === true;
   if (noWrite) assert.deepEqual(observed.postAFull, observed.preAFull);
-  else if (isDeepStrictEqual(observed.outcome, scenario.expectedOutcome)) {
-    assertFullSuccessInvariant(
-      observed.preAFull,
-      observed.postAFull,
-      observed.postA,
-    );
+  if (scenario.diagnosticShape === "public_fixed") {
+    assertOrdinaryDiagnosticShape(observed.outcome);
   }
   const publicSurface = `${JSON.stringify(observed.outcome)}\n${processOutput}`;
   for (const forbidden of scenario.forbiddenPublicFragments ?? []) {
@@ -1111,7 +1373,7 @@ function assertScenario(scenario) {
     );
   }
   const actual = {
-    outcome: observed.outcome,
+    outcome: observedPrimary,
     state: observed.postA,
     stageFired: observed.stageFired,
   };
@@ -1603,6 +1865,44 @@ function startHolder(statement) {
   };
 }
 
+function parseVerboseDiagnostics(stderr, expectedSqlstate) {
+  const lines = stderr.trim().split("\n");
+  const primary = lines[0]?.match(/^ERROR:\s+([0-9A-Z]{5}): (.+)$/u);
+  assert.ok(primary, `verbose error had no primary diagnostic:\n${stderr}`);
+  assert.equal(primary[1], expectedSqlstate);
+  const diagnostics = {
+    message: primary[2],
+    detail: null,
+    hint: null,
+    context: null,
+    location: null,
+  };
+  let active = null;
+  for (const line of lines.slice(1)) {
+    if (/^(ERROR|WARNING|NOTICE):/u.test(line)) break;
+    const field = line.match(/^(DETAIL|HINT|CONTEXT|LOCATION):\s*(.*)$/u);
+    if (field) {
+      active = field[1].toLowerCase();
+      diagnostics[active] = field[2];
+    } else if (active && line !== "") {
+      diagnostics[active] += `\n${line}`;
+    }
+  }
+  return diagnostics;
+}
+
+function assertVerboseDiagnosticShape(diagnostics) {
+  assert.equal(diagnostics.detail, null);
+  assert.equal(diagnostics.hint, null);
+  assert.equal(typeof diagnostics.context, "string");
+  assert.match(
+    diagnostics.context.replaceAll(/line [0-9]+/gu, "line <n>"),
+    /^PL\/pgSQL function resolve_organization_identity_for_raw_v1\(text,text\) line <n> at RAISE$/u,
+  );
+  assert.equal(typeof diagnostics.location, "string");
+  assert.match(diagnostics.location, /^exec_stmt_raise, pl_exec\.c:[0-9]+$/u);
+}
+
 async function runStatementScenario(scenario) {
   ensurePrerequisite();
   const child = spawn(
@@ -1657,7 +1957,7 @@ async function runStatementScenario(scenario) {
     });
   });
   child.stdin.write(
-    `\\set ON_ERROR_STOP on\n\\set VERBOSITY terse\nSELECT 'A4_STATEMENT_PID|'||pg_backend_pid();\n`,
+    `\\set ON_ERROR_STOP on\n\\set VERBOSITY verbose\nSELECT 'A4_STATEMENT_PID|'||pg_backend_pid();\n`,
   );
   let startedAt;
   try {
@@ -1690,6 +1990,7 @@ async function runStatementScenario(scenario) {
       \\echo A4_ERROR_SQLSTATE|:LAST_ERROR_SQLSTATE
       ROLLBACK TO SAVEPOINT a4_statement_call;
       \\set ON_ERROR_STOP on
+      SET LOCAL client_min_messages='error';
       INSERT INTO a4_statement_observed VALUES (
         'stageFired',to_jsonb(pg_advisory_unlock(
           hashtextextended('${scenario.stageLockKey}',0)
@@ -1715,23 +2016,20 @@ async function runStatementScenario(scenario) {
     );
     assert.equal(result.code, 0, `${stdout}\n${stderr}`);
     const stateMatch = stdout.match(/A4_ERROR_SQLSTATE\|([0-9A-Z]{5})/u);
-    const messageMatch = stderr.match(/^ERROR:\s+(.+)$/mu);
     const jsonLine = stdout
       .trim()
       .split("\n")
       .findLast((line) => line.startsWith("{"));
     assert.ok(stateMatch, `statement caller emitted no SQLSTATE:\n${stdout}`);
     assert.ok(
-      messageMatch,
-      `statement caller emitted no fixed error:\n${stderr}`,
-    );
-    assert.ok(
       jsonLine,
       `statement caller emitted no full readback:\n${stdout}`,
     );
+    const diagnostics = parseVerboseDiagnostics(stderr, stateMatch[1]);
     return {
       elapsedMs: Date.now() - startedAt,
-      outcome: error(stateMatch[1], messageMatch[1]),
+      outcome: error(stateMatch[1], diagnostics.message),
+      diagnostics,
       observed: JSON.parse(jsonLine),
       output: stderr,
       callerPid,
@@ -1785,6 +2083,83 @@ const BIND_POST = state({
   ...BIND_PRE,
   links: [link()],
 });
+const CREATE_FULL_POST = fullState({
+  raws: [rawFull(RAW_CREATE)],
+  companies: [
+    companyFull(COMPANY_CREATE_RESULT, COMMAND_JSON_TIME),
+    companyFull(COMPANY_FORGED_STATE),
+  ],
+  identifiers: [
+    commandIdentifierFullValue(
+      CREATED_REGISTRY_IDENTIFIER_C,
+      IDENTIFIER_CREATED,
+    ),
+  ],
+  links: [
+    commandLinkFullValue(
+      link({ canonicalId: COMPANY_C, inputHash: INPUT_CREATE }),
+      COMMAND_LINK_C,
+    ),
+  ],
+});
+const LAZY_FULL_POST = fullState({
+  raws: [rawFull(RAW_LAZY)],
+  companies: [companyFull(COMPANY_LAZY), companyFull(COMPANY_FORGED_STATE)],
+  links: [
+    commandLinkFullValue(
+      link({
+        matchRule: "name_country",
+        confidence: 0.8,
+        inputHash: INPUT_LAZY,
+      }),
+      COMMAND_LINK_A,
+    ),
+  ],
+});
+const BIND_FULL_POST = fullState({
+  raws: [rawFull(RAW_CREATE)],
+  companies: [companyFull(COMPANY_A_BASE), companyFull(COMPANY_FORGED_STATE)],
+  identifiers: [refreshedIdentifierFullValue(REGISTRY_IDENTIFIER_A)],
+  links: [commandLinkFullValue(link(), COMMAND_LINK_A)],
+});
+const DIRECT_CONFLICT_FULL_POST = fullState({
+  raws: [rawFull(RAW_CREATE)],
+  companies: [
+    companyFull(COMPANY_A_BASE),
+    companyFull(COMPANY_B_BLOCKER),
+    companyFull(COMPANY_FORGED_STATE),
+  ],
+  identifiers: [fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_A)],
+  conflicts: [conflictFull(conflictState(), COMMAND_JSON_TIME)],
+  parties: [
+    commandPartyFullValue(party(COMPANY_A)),
+    commandPartyFullValue(party(COMPANY_B)),
+  ],
+  links: [
+    commandLinkFullValue(
+      link({
+        canonicalId: COMPANY_A,
+        matchRule: "identity_conflict",
+        confidence: 0,
+        status: "PENDING_CONFLICT",
+        inputHash: INPUT_DISAGREEMENT_A,
+        conflictId: CONFLICT,
+      }),
+      COMMAND_LINK_A,
+    ),
+    commandLinkFullValue(
+      link({
+        canonicalId: COMPANY_B,
+        matchRule: "identity_conflict",
+        confidence: 0,
+        status: "PENDING_CONFLICT",
+        inputHash: INPUT_DISAGREEMENT_A,
+        conflictId: CONFLICT,
+      }),
+      COMMAND_LINK_B,
+    ),
+  ],
+});
 
 describe("Organization Identity direct-command malicious app_user matrix", () => {
   const directCases = [
@@ -1803,6 +2178,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
         identifierCount: 1,
       }),
       expectedPost: CREATE_POST,
+      expectedFullPost: CREATE_FULL_POST,
     },
     {
       name: "forged-plan lazy state derives the exact blocker target",
@@ -1818,6 +2194,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
         inputHash: INPUT_LAZY,
       }),
       expectedPost: LAZY_POST,
+      expectedFullPost: LAZY_FULL_POST,
     },
     {
       name: "forged-plan bind state derives the live authority target",
@@ -1835,6 +2212,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
         identifierCount: 1,
       }),
       expectedPost: BIND_POST,
+      expectedFullPost: BIND_FULL_POST,
     },
     {
       name: "forged-plan disagreement derives conflict rather than caller target",
@@ -1875,6 +2253,7 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
           }),
         ],
       }),
+      expectedFullPost: DIRECT_CONFLICT_FULL_POST,
     },
   ];
   for (const scenario of directCases) {
@@ -1928,6 +2307,17 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
   });
   const v2Link = link();
   const activeCompanyC = link({ canonicalId: COMPANY_C });
+  const legacyFullPost = fullState({
+    raws: [rawFull(RAW_LAZY)],
+    companies: [companyFull(COMPANY_LAZY)],
+    links: [fixtureLinkFullValue(legacyLink, 0)],
+  });
+  const v2ReplayFullPost = fullState({
+    raws: [rawFull(RAW_CREATE)],
+    companies: [companyFull(COMPANY_A_BASE)],
+    identifiers: [fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_A)],
+    links: [fixtureLinkFullValue(v2Link, 0)],
+  });
   const replayCases = [
     {
       name: "legacy replay returns the exact stored target and legacy facts",
@@ -1941,6 +2331,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
         companies: [COMPANY_LAZY],
         links: [legacyLink],
       }),
+      expectedFullPost: legacyFullPost,
       expectedOutcome: legacyBoundResult({
         companyId: COMPANY_A,
         matchRule: "name_country",
@@ -2082,6 +2473,21 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
           },
         ],
       }),
+      expectedFullPost: fullState({
+        raws: [rawFull(RAW_LAZY)],
+        companies: [companyFull(COMPANY_LAZY)],
+        links: [fixtureLinkFullValue(legacyLink, 0)],
+        suppressions: [
+          suppressionFullValue(
+            {
+              type: "company_name",
+              value: "a4 lazy gmbh",
+              protectionClass: "LEGAL",
+            },
+            0,
+          ),
+        ],
+      }),
     },
     {
       name: "v2 replay returns the exact current hash and target",
@@ -2097,6 +2503,7 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
         identifiers: [REGISTRY_IDENTIFIER_A],
         links: [v2Link],
       }),
+      expectedFullPost: v2ReplayFullPost,
       expectedOutcome: boundResult({
         companyId: COMPANY_A,
         matchRule: "identity_v2",
@@ -2360,6 +2767,22 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
           },
         ],
       }),
+      expectedFullPost: fullState({
+        raws: [rawFull(RAW_CREATE)],
+        companies: [companyFull(COMPANY_A_BASE)],
+        identifiers: [fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_A)],
+        links: [fixtureLinkFullValue(v2Link, 0)],
+        suppressions: [
+          suppressionFullValue(
+            {
+              type: "company_name",
+              value: "a4 create gmbh",
+              protectionClass: "LEGAL",
+            },
+            0,
+          ),
+        ],
+      }),
     },
   ];
   for (const scenario of replayCases) {
@@ -2434,6 +2857,109 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
     parties: DISAGREEMENT_PARTIES,
     links: DISAGREEMENT_LINKS_A,
   };
+  const rootSplitLinks = [
+    link({
+      canonicalId: COMPANY_C,
+      matchRule: "identity_conflict",
+      confidence: 0,
+      status: "PENDING_CONFLICT",
+      inputHash: INPUT_SPLIT_ROOTS,
+      conflictId: CONFLICT,
+    }),
+    link({
+      canonicalId: COMPANY_D,
+      matchRule: "identity_conflict",
+      confidence: 0,
+      status: "PENDING_CONFLICT",
+      inputHash: INPUT_SPLIT_ROOTS,
+      conflictId: CONFLICT,
+    }),
+  ];
+  const splitFullPost = fullState({
+    raws: [rawFull(RAW_SPLIT)],
+    companies: [companyFull(COMPANY_A_BASE), companyFull(COMPANY_B_BLOCKER)],
+    identifiers: [
+      fixtureIdentifierFullValue(DOMAIN_IDENTIFIER_A),
+      fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_B),
+    ],
+    conflicts: [conflictFull(SPLIT_CONFLICT, COMMAND_JSON_TIME)],
+    parties: [
+      commandPartyFullValue(party(COMPANY_A)),
+      commandPartyFullValue(party(COMPANY_B)),
+    ],
+    links: [
+      commandLinkFullValue(splitLinks[0], COMMAND_LINK_A),
+      commandLinkFullValue(splitLinks[1], COMMAND_LINK_B),
+    ],
+  });
+  const rootSplitFullPost = fullState({
+    raws: [rawFull(RAW_SPLIT)],
+    companies: [
+      companyFull(COMPANY_A_BASE),
+      companyFull(COMPANY_B_BLOCKER),
+      companyFull(COMPANY_C_ROOT),
+      companyFull(COMPANY_D_ROOT),
+    ],
+    identifiers: [
+      fixtureIdentifierFullValue(DOMAIN_IDENTIFIER_A),
+      fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_B),
+    ],
+    conflicts: [conflictFull(SPLIT_ROOT_CONFLICT, COMMAND_JSON_TIME)],
+    parties: [
+      commandPartyFullValue(party(COMPANY_C)),
+      commandPartyFullValue(party(COMPANY_D)),
+    ],
+    links: [
+      commandLinkFullValue(rootSplitLinks[0], COMMAND_LINK_C),
+      commandLinkFullValue(rootSplitLinks[1], COMMAND_LINK_D),
+    ],
+    mappings: [
+      mappingFullValue(mapping(COMPANY_A, COMPANY_C), 0),
+      mappingFullValue(mapping(COMPANY_B, COMPANY_D), 1),
+    ],
+  });
+  const exactConflictFullPost = fullState({
+    raws: [rawFull(RAW_CREATE)],
+    companies: [companyFull(COMPANY_A_BASE), companyFull(COMPANY_B_BLOCKER)],
+    identifiers: [fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_A)],
+    conflicts: [conflictFull(DISAGREEMENT_CONFLICT)],
+    parties: DISAGREEMENT_PARTIES.map(fixturePartyFullValue),
+    links: DISAGREEMENT_LINKS_A.map(fixtureLinkFullValue),
+  });
+  const secondRawFullPost = fullState({
+    raws: [rawFull(RAW_CREATE), rawFull(RAW_CREATE_B)],
+    companies: [companyFull(COMPANY_A_BASE), companyFull(COMPANY_B_BLOCKER)],
+    identifiers: [fixtureIdentifierFullValue(REGISTRY_IDENTIFIER_A)],
+    conflicts: [conflictFull(DISAGREEMENT_CONFLICT)],
+    parties: DISAGREEMENT_PARTIES.map(fixturePartyFullValue),
+    links: [
+      ...DISAGREEMENT_LINKS_A.map(fixtureLinkFullValue),
+      commandLinkFullValue(
+        link({
+          canonicalId: COMPANY_A,
+          rawRecordId: RAW_B,
+          matchRule: "identity_conflict",
+          confidence: 0,
+          status: "PENDING_CONFLICT",
+          inputHash: INPUT_DISAGREEMENT_B,
+          conflictId: CONFLICT,
+        }),
+        COMMAND_LINK_B_A,
+      ),
+      commandLinkFullValue(
+        link({
+          canonicalId: COMPANY_B,
+          rawRecordId: RAW_B,
+          matchRule: "identity_conflict",
+          confidence: 0,
+          status: "PENDING_CONFLICT",
+          inputHash: INPUT_DISAGREEMENT_B,
+          conflictId: CONFLICT,
+        }),
+        COMMAND_LINK_B_B,
+      ),
+    ],
+  });
   const conflictCases = [
     {
       name: "identifier split derives the exact facts, parties and links",
@@ -2454,6 +2980,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
         parties: DISAGREEMENT_PARTIES,
         links: splitLinks,
       }),
+      expectedFullPost: splitFullPost,
     },
     {
       name: "root-mapped identifier split derives only the exact root parties",
@@ -2487,6 +3014,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
           mapping(COMPANY_B, COMPANY_D),
         ],
       }),
+      expectedFullPost: rootSplitFullPost,
       expectedOutcome: conflictResult({
         inputHash: INPUT_SPLIT_ROOTS,
         fingerprint: FINGERPRINT_SPLIT_ROOTS,
@@ -2533,6 +3061,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
       expectedOutcome: conflictResult({ replayed: true }),
       expectNoWrite: true,
       expectedPost: DISAGREEMENT_REPLAY_PRE,
+      expectedFullPost: exactConflictFullPost,
     },
     {
       name: "equivalent second Raw reuses one conflict and adds exact links only",
@@ -2586,6 +3115,7 @@ describe("Organization Identity conflict facts, parties and reuse exactness", ()
           }),
         ],
       }),
+      expectedFullPost: secondRawFullPost,
     },
     {
       name: "same conflict fingerprint with facts drift is rejected exactly",
@@ -2804,12 +3334,12 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     "ZX105",
     "A4_PARTY_FIRST_FAULT",
   );
-  const partyMiddle = afterStageFault(
+  const partyFinal = afterStageFault(
     "organization_identity_conflict_party",
-    "party_middle",
+    "party_final",
     2,
     "ZX106",
-    "A4_PARTY_MIDDLE_FAULT",
+    "A4_PARTY_FINAL_FAULT",
   );
   const linkFirst = afterStageFault(
     "identity_link",
@@ -2832,6 +3362,7 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     expectedOutcome: error("P0001", "IDENTITY_RESOLUTION_STATE_INVALID"),
     expectedPost: preimage,
     stageLockKey: stage.stageLockKey,
+    diagnosticShape: "public_fixed",
     forbiddenPublicFragments: stage.forbidden,
   });
   const faultCases = [
@@ -2866,10 +3397,10 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
       partyFirst,
     ),
     fixedFault(
-      "party middle AFTER INSERT fault restores all prior party writes",
+      "party final AFTER INSERT fault restores the complete party set",
       DISAGREEMENT_BASE,
       disagreementPreimage,
-      partyMiddle,
+      partyFinal,
     ),
     fixedFault(
       "link first AFTER INSERT fault restores conflict parties and link preimage",
@@ -2932,16 +3463,15 @@ describe("Organization Identity function-owned timeout and fault rollback matrix
     assertSentinel(result.observed.preBFull);
     assert.deepEqual(result.observed.postAFull, result.observed.preAFull);
     assert.deepEqual(result.observed.postBFull, result.observed.preBFull);
+    assertVerboseDiagnosticShape(result.diagnostics);
     for (const forbidden of [
       "canceling statement due to statement timeout",
-      "CONTEXT:",
       "DETAIL:",
       "HINT:",
       "fixture.invalid",
       "A4_STATEMENT_HIDDEN_FAULT",
       "ZX109",
       "not-a-uuid-a4",
-      "PL/pgSQL function",
       "a4_slow_company",
       "pg_sleep",
       WORKSPACE_A,
