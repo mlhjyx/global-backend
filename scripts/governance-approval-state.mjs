@@ -389,7 +389,7 @@ const reduceBoundApprovalDecisionState = (events, binding, now) => {
     if (event.type === 'AUTHORITIES_ASSIGNED') {
       if (!hasExactKeys(event, ['type', 'observedAt'])
         || !observedAtValid(event.observedAt, eventClock)
-        || !['OWNER_ASSIGNMENT_REQUIRED', 'REVOKED', 'REJECTED'].includes(state.state)) transitionError();
+        || state.state !== 'OWNER_ASSIGNMENT_REQUIRED') transitionError();
       state = { ...state, state: 'PROPOSED', blockingCodes: [], revocationStatus: 'ACTIVE' };
     } else if (event.type === 'PROPOSAL_RENDERED') {
       if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])

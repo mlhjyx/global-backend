@@ -124,6 +124,73 @@ test('round5 successful append consumes exactly one parent and cannot mint contr
   );
 });
 
+test('round5 rejected and revoked revisions stay terminal until a replacement policy starts a new root', () => {
+  const policy = approvalPolicy();
+  const rejected = buildStateFromEvents([
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    {
+      type: 'PROPOSAL_RENDERED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:10:00.000Z',
+    },
+    { type: 'REVIEW_REJECTED', observedAt: '2026-08-30T07:11:00.000Z' },
+  ], policy, NOW);
+  const reassignment = {
+    type: 'AUTHORITIES_ASSIGNED',
+    observedAt: '2026-08-30T08:32:00.000Z',
+  };
+
+  assert.throws(
+    () => append(rejected, reassignment, policy, new Date(reassignment.observedAt)),
+    /APPROVAL_STATE_TRANSITION_INVALID/,
+  );
+  assert.equal(
+    approvalState.reduceApprovalDecisionState(rejected.eventHistory, policy, NOW).state,
+    'REJECTED',
+  );
+
+  const { accepted } = buildRound4AcceptedState();
+  const revoked = appendRevocation(accepted, policy, revocationEvent(), REVOCATION_NOW);
+  const retained = {
+    receipt: clone(revoked.receipt),
+    mergeAuthorization: clone(revoked.mergeAuthorization),
+    evidenceTrustState: revoked.evidenceTrustState,
+  };
+
+  assert.throws(
+    () => append(revoked, reassignment, policy, new Date(reassignment.observedAt)),
+    /APPROVAL_STATE_TRANSITION_INVALID/,
+  );
+  const replayed = approvalState.reduceApprovalDecisionState(
+    revoked.eventHistory,
+    policy,
+    new Date(reassignment.observedAt),
+  );
+  assert.deepEqual({
+    state: replayed.state,
+    revocationStatus: replayed.revocationStatus,
+    receipt: replayed.receipt,
+    mergeAuthorization: replayed.mergeAuthorization,
+    evidenceTrustState: replayed.evidenceTrustState,
+  }, {
+    state: 'REVOKED',
+    revocationStatus: 'REVOKED',
+    ...retained,
+  });
+
+  const replacementPolicy = clone(policy);
+  replacementPolicy.policyRevision = 'program-c/policy-r2';
+  const replacement = approvalState.initializeApprovalDecisionState(
+    replacementPolicy,
+    new Date(reassignment.observedAt),
+  );
+  assert.equal(replacement.state, 'OWNER_ASSIGNMENT_REQUIRED');
+  assert.equal(replacement.policySnapshot.policyRevision, 'program-c/policy-r2');
+  assert.equal(replacement.receipt, null);
+  assert.equal(replacement.mergeAuthorization, null);
+  assert.equal(replacement.evidenceTrustState, 'EXTERNAL_UNVERIFIED');
+});
+
 test('round5 failed append leaves its parent active and each initializer mints an independent root', () => {
   const policy = approvalPolicy();
   const rootTime = new Date('2026-08-30T07:05:00.000Z');
