@@ -28,6 +28,7 @@ const SCRIPT_NAME = 'approval-readback:test';
 const EXPECTED_COMMAND = `node --test ${TEST_FILES.join(' ')}`;
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_ROOTS = Object.freeze(['scripts', 'apps', 'packages', '.github/workflows']);
+const PRODUCT_SOURCE_ROOTS = new Set(['apps', 'packages']);
 const SCAN_FILES = Object.freeze([
   'package.json',
   'runtime-entrypoint.mjs',
@@ -35,13 +36,18 @@ const SCAN_FILES = Object.freeze([
   'docs/templates/release-bundle.template.json',
 ]);
 const SCANNED_EXTENSIONS = new Set([
-  '.astro', '.cjs', '.cts', '.js', '.json', '.mjs', '.mts', '.ts', '.tsx', '.yaml', '.yml',
+  '.astro', '.cjs', '.cts', '.js', '.json', '.jsx', '.mjs', '.mts', '.ts', '.tsx', '.yaml', '.yml',
 ]);
-const IMPORT_CAPABLE_PRODUCT_EXTENSIONS = new Set(['.astro', '.mdx', '.svelte', '.vue']);
+const NON_MODULE_PRODUCT_EXTENSIONS = new Set([
+  '.css', '.md', '.png', '.prisma', '.sql', '.svg', '.toml',
+]);
+const NON_MODULE_PRODUCT_FILE_NAMES = new Set(['.gitignore']);
+const NON_MODULE_PRODUCT_FILE_SUFFIXES = Object.freeze(['.env.example']);
 const SKIPPED_DIRECTORIES = new Set([
   '.code-intelligence', '.next', 'coverage', 'dist', 'node_modules',
 ]);
 const FIXTURE_ROOT = 'scripts/fixtures/approval-readback/';
+const SHIPPED_ASTRO_SOURCE = 'apps/site-renderer/src/pages/[...slug].astro';
 const DECLARED_TEST_SUPPORT_ROOTS = Object.freeze([FIXTURE_ROOT]);
 const KERNEL_POLICIES = Object.freeze({
   'governance-approval-state-kernel.mjs': Object.freeze({
@@ -77,17 +83,20 @@ const repositoryPath = (absolutePath, repositoryRoot) => relative(repositoryRoot
   .split(sep)
   .join('/');
 
-const scanDirectory = async (directory, files, repositoryRoot) => {
+const scanDirectory = async (directory, files, repositoryRoot, productSourceRoot) => {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isSymbolicLink() || SKIPPED_DIRECTORIES.has(entry.name)) continue;
     const absolutePath = resolve(directory, entry.name);
     if (entry.isDirectory()) {
-      await scanDirectory(absolutePath, files, repositoryRoot);
+      await scanDirectory(absolutePath, files, repositoryRoot, productSourceRoot);
     } else if (entry.isFile()) {
       const extension = extname(entry.name).toLowerCase();
-      if (IMPORT_CAPABLE_PRODUCT_EXTENSIONS.has(extension)
-        && !SCANNED_EXTENSIONS.has(extension)) {
+      if (productSourceRoot
+        && !SCANNED_EXTENSIONS.has(extension)
+        && !NON_MODULE_PRODUCT_EXTENSIONS.has(extension)
+        && !NON_MODULE_PRODUCT_FILE_NAMES.has(entry.name)
+        && !NON_MODULE_PRODUCT_FILE_SUFFIXES.some((suffix) => entry.name.endsWith(suffix))) {
         throw new Error('APPROVAL_IMPORT_CAPABLE_EXTENSION_UNSCANNED');
       }
       if (SCANNED_EXTENSIONS.has(extension)) {
@@ -100,7 +109,12 @@ const scanDirectory = async (directory, files, repositoryRoot) => {
 const loadBoundarySources = async (repositoryRoot = REPOSITORY_ROOT) => {
   const files = [...SCAN_FILES];
   for (const root of SCAN_ROOTS) {
-    await scanDirectory(resolve(repositoryRoot, root), files, repositoryRoot);
+    await scanDirectory(
+      resolve(repositoryRoot, root),
+      files,
+      repositoryRoot,
+      PRODUCT_SOURCE_ROOTS.has(root),
+    );
   }
   const uniqueFiles = [...new Set(files)].sort();
   return new Map(await Promise.all(uniqueFiles.map(async (path) => [
@@ -276,6 +290,7 @@ test('canonical approval entry enforces executable fixture and pure-kernel impor
 test('boundary loader includes the real OCI entrypoint and Astro product sources', async () => {
   const sources = await loadBoundarySources();
   assert.equal(sources.has('runtime-entrypoint.mjs'), true);
+  assert.equal(sources.has(SHIPPED_ASTRO_SOURCE), true);
   const astroProductSources = [...sources.keys()].filter(
     (path) => path.startsWith('apps/') && path.endsWith('.astro'),
   );
@@ -284,11 +299,8 @@ test('boundary loader includes the real OCI entrypoint and Astro product sources
 
 test('real OCI and Astro product importers cannot reference approval fixtures or kernels', async () => {
   const sources = await loadBoundarySources();
-  const astroProductPath = [...sources.keys()].find(
-    (path) => path.startsWith('apps/') && path.endsWith('.astro'),
-  );
-  assert.equal(typeof astroProductPath, 'string');
-  for (const importer of ['runtime-entrypoint.mjs', astroProductPath]) {
+  assert.equal(sources.has(SHIPPED_ASTRO_SOURCE), true);
+  for (const importer of ['runtime-entrypoint.mjs', SHIPPED_ASTRO_SOURCE]) {
     const fixtureMutation = new Map(sources);
     const fixtureSpecifier = relativeModuleSpecifier(
       importer,
@@ -322,6 +334,26 @@ test('boundary loader fails closed on unscanned import-capable product extension
       );
     });
   }
+});
+
+test('boundary loader scans JSX product modules and parses their real import edges', async () => {
+  await withSyntheticProductRepository('.jsx', async (repositoryRoot) => {
+    const sources = await loadBoundarySources(repositoryRoot);
+    assert.equal(sources.has('apps/product/Component.jsx'), true);
+    assert.deepEqual(
+      moduleEdges(sources).filter(({ importer }) => importer === 'apps/product/Component.jsx'),
+      [{ importer: 'apps/product/Component.jsx', target: 'apps/product/dependency.js' }],
+    );
+  });
+});
+
+test('boundary loader fails closed on every unclassified product extension', async () => {
+  await withSyntheticProductRepository('.futuremodule', async (repositoryRoot) => {
+    await assert.rejects(
+      loadBoundarySources(repositoryRoot),
+      /APPROVAL_IMPORT_CAPABLE_EXTENSION_UNSCANNED/u,
+    );
+  });
 });
 
 test('pure kernel plans are non-admitted values with no side-effect ports', async () => {
