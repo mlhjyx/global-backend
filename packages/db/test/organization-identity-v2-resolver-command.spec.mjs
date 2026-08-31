@@ -13,6 +13,19 @@ const migrationRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
+const migrationChecksum =
+  "3cb5fe7ca22b3067b92d71ac25198c7ff14d08c08a0907343d84130bb0b7a882";
+const forbiddenMigrationChecksums = Object.freeze([
+  "3bf6e58db819352ca0777380e9adb2fbf32ca9eeb311b91df696b569302da7af",
+  "098aa285a17cdc6e5ea2c092cbfb31a57cd0ec3ed6db83b0c1221e9d86f55c6a",
+  "6e4b5a3bf448c1debb2450eef648d81dcd4e468d6a4aa48adc409b2933e39d23",
+  "8423589e72a6bc6ef6914819063b5d76999fd2ab24f9ff5252ec2b68590e70be",
+  "18d5a9b535d79e7d92b0886379d240919fb9e8c40c039cb0efed3089100e3cd8",
+  "fb6b377fc23704bd7057c8367fd9713f67f9923497552abf399f59cb5347826b",
+  "0c716f1d5449b89d3ade64ce5cc1c7214a3b96303b3737a6e2681334581ba518",
+  "8c5d07dc1d8d7bc4befef71a8a26a0744232c2b176faaf1162a4aed761da6c66",
+  "7e101a1d13c31a2657ea84b19b82e3b855102db104393ee33a9bb8a6c5415972",
+]);
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
 const attackTestPath = resolve(
   repositoryRoot,
@@ -139,8 +152,15 @@ describe("Organization Identity resolver command migration", () => {
     }
     assert.equal(
       sha256(readFileSync(schemaPath)),
-      "0858f0d36634246e20a4dfd5fdae3ab6910d945af1e45e0c44ad489a13a0fca4",
+      "3db362c1c84f5f12ffa788eb54f2448a3b77d0dad410b96733acef1cc7337c3b",
     );
+  });
+
+  it("pins only the final resolver migration checksum", () => {
+    const observed = sha256(readFileSync(migrationPath));
+    assert.equal(observed, migrationChecksum);
+    assert.equal(new Set(forbiddenMigrationChecksums).size, 9);
+    assert.ok(!forbiddenMigrationChecksums.includes(observed));
   });
 
   it("is one bounded DDL/ACL transaction with no datamodel mutation", () => {

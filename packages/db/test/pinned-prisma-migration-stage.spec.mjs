@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -36,11 +37,15 @@ const resolverSuitePath = resolve(
   repositoryRoot,
   "packages/db/test/organization-identity-v2-resolver-command.disposable.spec.mjs",
 );
+const currentMigrationRoot = resolve(
+  repositoryRoot,
+  "packages/db/prisma/migrations",
+);
 const preExpandCommit = "e408ed0a95b8cbc098c3530fe7ae49b2036402f0";
 const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
 const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
-const resolverCommit = "94138fc2c516bd1a43cc4344ed7bb5876f52a14b";
+const resolverCommit = "7789b5dc94b4f79e3b0d08c0098add492f584219";
 const expandMigration = "20260829090000_organization_identity_v2_expand_ddl";
 const backfillMigration =
   "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
@@ -48,7 +53,33 @@ const contractMigration =
   "20260829092000_organization_identity_v2_contract_ddl";
 const resolverMigration =
   "20260830090000_organization_identity_v2_resolver_command";
+const resolverMigrationPath =
+  `packages/db/prisma/migrations/${resolverMigration}/migration.sql`;
+const resolverMigrationChecksum =
+  "3cb5fe7ca22b3067b92d71ac25198c7ff14d08c08a0907343d84130bb0b7a882";
+const forbiddenResolverMigrationChecksums = Object.freeze([
+  "3bf6e58db819352ca0777380e9adb2fbf32ca9eeb311b91df696b569302da7af",
+  "098aa285a17cdc6e5ea2c092cbfb31a57cd0ec3ed6db83b0c1221e9d86f55c6a",
+  "6e4b5a3bf448c1debb2450eef648d81dcd4e468d6a4aa48adc409b2933e39d23",
+  "8423589e72a6bc6ef6914819063b5d76999fd2ab24f9ff5252ec2b68590e70be",
+  "18d5a9b535d79e7d92b0886379d240919fb9e8c40c039cb0efed3089100e3cd8",
+  "fb6b377fc23704bd7057c8367fd9713f67f9923497552abf399f59cb5347826b",
+  "0c716f1d5449b89d3ade64ce5cc1c7214a3b96303b3737a6e2681334581ba518",
+  "8c5d07dc1d8d7bc4befef71a8a26a0744232c2b176faaf1162a4aed761da6c66",
+  "7e101a1d13c31a2657ea84b19b82e3b855102db104393ee33a9bb8a6c5415972",
+]);
 const futureMigration = "20260830091000_organization_identity_v2_future_guard";
+const currentMainLaterMigrations = Object.freeze([
+  "20260830120000_governed_subject_relation_schema",
+  "20260830121000_governed_subject_relation_append_attest",
+  "20260830121500_execution_domain_ack_authority_first_lock",
+  "20260830122000_governed_subject_relation_tombstone",
+  "20260830130000_discovery_query_lineage_schema",
+  "20260830130100_discovery_query_lineage_functions",
+  "20260830130200_discovery_query_lineage_execution_outcome",
+  "20260830130300_discovery_company_materialization_schema",
+  "20260830130400_discovery_company_materialization_functions",
+]);
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, {
@@ -62,6 +93,10 @@ function runGit(cwd, args) {
     `git ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`,
   );
   return result.stdout;
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function writeStage(repository, migrationName, schemaLabel) {
@@ -170,11 +205,66 @@ describe("pinned Prisma migration stages", () => {
       expandCommit,
       backfillCommit,
       contractCommit,
-      resolverCommit,
     ]) {
       assert.match(combined, new RegExp(commit, "u"));
     }
     assert.match(combined, /materializePinnedPrismaStage/u);
+  });
+
+  it("pins the final resolver bytes to their exact last-change commit and forbids every superseded checksum", () => {
+    assert.equal(
+      runGit(repositoryRoot, [
+        "log",
+        "-1",
+        "--format=%H",
+        "--",
+        resolverMigrationPath,
+      ]).trim(),
+      resolverCommit,
+    );
+    assert.equal(
+      sha256(readFileSync(resolve(repositoryRoot, resolverMigrationPath))),
+      resolverMigrationChecksum,
+    );
+    assert.equal(
+      sha256(
+        runGit(repositoryRoot, [
+          "show",
+          `${resolverCommit}:${resolverMigrationPath}`,
+        ]),
+      ),
+      resolverMigrationChecksum,
+    );
+
+    const migrationCommits = runGit(repositoryRoot, [
+      "log",
+      "--format=%H",
+      "--",
+      resolverMigrationPath,
+    ])
+      .trim()
+      .split(/\r?\n/u)
+      .filter(Boolean);
+    const historicalChecksums = [
+      ...new Set(
+        migrationCommits.map((commit) =>
+          sha256(
+            runGit(repositoryRoot, [
+              "show",
+              `${commit}:${resolverMigrationPath}`,
+            ]),
+          ),
+        ),
+      ),
+    ];
+    assert.equal(historicalChecksums[0], resolverMigrationChecksum);
+    assert.deepEqual(
+      historicalChecksums.slice(1).sort(),
+      [...forbiddenResolverMigrationChecksums].sort(),
+    );
+    assert.ok(
+      !forbiddenResolverMigrationChecksums.includes(resolverMigrationChecksum),
+    );
   });
 
   it("excludes an unknown future migration from every earlier stage and pairs schema with the same commit", async () => {
@@ -296,6 +386,15 @@ describe("pinned Prisma migration stages", () => {
       assert.ok(migrationNames(stages[4]).includes(backfillMigration));
       assert.ok(migrationNames(stages[4]).includes(contractMigration));
       assert.ok(migrationNames(stages[4]).includes(resolverMigration));
+      const mergedMigrationNames = readdirSync(currentMigrationRoot, {
+        withFileTypes: true,
+      })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+      for (const migration of currentMainLaterMigrations) {
+        assert.ok(mergedMigrationNames.includes(migration));
+        assert.ok(!migrationNames(stages[4]).includes(migration));
+      }
     } finally {
       for (const stage of stages) {
         rmSync(stage.root, { recursive: true, force: true });
