@@ -1,479 +1,416 @@
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   OrganizationIdentityResolverError,
   resolveOrganizationIdentityForRaw,
 } from "./organization-identity-resolver";
+import { lockWorkspaceSuppressionThenIdentity } from "./organization-identity-lock";
 
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const RAW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const COMPANY_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-const COMPANY_B = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-const NEW_COMPANY = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-const CONFLICT_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
-const PAYLOAD_HASH = "a".repeat(64);
+const COMPANY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CONFLICT_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const INPUT_HASH = "a".repeat(64);
+const CONFLICT_FINGERPRINT = "b".repeat(64);
+const NATIVE_TIMEOUT =
+  "canceling statement due to statement timeout: owner-password-marker";
 
-const PROVENANCE = Object.freeze({
-  sourceUrl: "https://registry.example/companies/1",
-  fetchedAt: "2026-08-25T12:00:00.000Z",
-  contentHash: "b".repeat(64),
-  parserVersion: "registry/v1",
-});
+const _RECEIPT_KEYS = [
+  "outcome_kind",
+  "raw_record_id",
+  "company_id",
+  "conflict_id",
+  "match_rule",
+  "input_hash",
+  "conflict_fingerprint",
+  "replayed",
+  "company_created",
+  "identifier_count",
+  "party_count",
+] as const;
 
-function registryPayload() {
-  return {
-    externalId: "company-1",
-    name: "Acme GmbH",
-    domain: "acme.example",
-    country: "DE",
-    attributes: { products: ["pump"] },
-    identifier: { scheme: "registry-id", value: "de-12/34" },
-    provenance: PROVENANCE,
-  };
-}
+type QueryEvent =
+  | "lock-timeout-prearm"
+  | "statement-timeout-prearm"
+  | "suppression-lock"
+  | "identity-lock"
+  | "resolver";
 
-function directoryPayload() {
-  return {
-    externalId: "directory:acme.example",
-    name: "Acme GmbH",
-    domain: "acme.example",
-    country: "DE",
-    attributes: {
-      source_kind: "directory",
-      source_directory: "registry.example",
-      detail_url: "https://registry.example/company/1",
-      source_class: "industry_data",
-    },
-    provenance: PROVENANCE,
-  };
-}
+type DbRow = Record<(typeof _RECEIPT_KEYS)[number], unknown>;
 
-type FixtureOptions = Readonly<{
-  payload?: Record<string, unknown>;
-  providerKey?: string;
-  legacyCompany?: null | {
-    id: string;
-    workspaceId: string;
-    name: string;
-    domain: string | null;
-    status: string;
-    dedupeKey: string;
-  };
-  identifierCompanyId?: string;
-  rootMappings?: readonly {
-    sourceCompanyId: string;
-    canonicalCompanyId: string;
-  }[];
-  companies?: readonly {
-    id: string;
-    workspaceId: string;
-    name: string;
-    domain: string | null;
-    status: string;
-    dedupeKey: string;
-  }[];
-  suppressions?: readonly { type: string; value: string }[];
-  rawRows?: readonly Record<string, unknown>[];
-  restricted?: boolean;
-  lockError?: unknown;
-  commandReceipt?: (
-    command: Record<string, unknown>,
-  ) => Record<string, unknown>;
-  commandError?: unknown;
-}>;
-
-function transactionFixture(options: FixtureOptions = {}) {
-  const events: string[] = [];
-  const payload = options.payload ?? registryPayload();
-  const providerKey = options.providerKey ?? "registry";
-  const legacyCompany =
-    options.legacyCompany === undefined ? null : options.legacyCompany;
-  const identifierCompanyId = options.identifierCompanyId;
-  const rootMappings = options.rootMappings ?? [];
-  const companies = options.companies ?? [
-    {
-      id: COMPANY_A,
-      workspaceId: WORKSPACE_ID,
-      name: "Acme GmbH",
-      domain: "acme.example",
-      status: "NEW",
-      dedupeKey: "d:acme.example",
-    },
-    {
-      id: COMPANY_B,
-      workspaceId: WORKSPACE_ID,
-      name: "Acme Legacy GmbH",
-      domain: "legacy.example",
-      status: "NEW",
-      dedupeKey: "d:legacy.example",
-    },
-  ];
-  let observedCommand: Record<string, unknown> | null = null;
-  let observedRawSql = "";
-  const queryRaw = vi.fn(async (...args: unknown[]) => {
-    const sql = (args[0] as TemplateStringsArray).join("?");
-    if (sql.includes("pg_advisory_xact_lock")) {
-      const key = args.slice(1).find((value) => typeof value === "string");
-      if (typeof key !== "string") throw new Error("missing lock key");
-      events.push(
-        key.startsWith("acquisition-suppression-policy:")
-          ? "suppression-lock"
-          : "identity-lock",
-      );
-      if (
-        key.startsWith("acquisition-suppression-policy:") &&
-        options.lockError !== undefined
-      ) {
-        throw options.lockError;
-      }
-      return [{ locked: "" }];
-    }
-    if (sql.includes('FROM "raw_source_record"')) {
-      observedRawSql = sql;
-      events.push("raw-read");
-      return (
-        options.rawRows ?? [
-          {
-            id: RAW_ID,
-            workspace_id: WORKSPACE_ID,
-            provider_key: providerKey,
-            payload,
-            payload_hash: PAYLOAD_HASH,
-            ingest_version: "raw-source/v2",
-            ingest_status: "ACCEPTED",
-            is_current: true,
-          },
-        ]
-      );
-    }
-    events.push("command");
-    const commandJson = args
-      .slice(1)
-      .find((value) => typeof value === "string");
-    if (typeof commandJson !== "string") throw new Error("missing command");
-    observedCommand = JSON.parse(commandJson) as Record<string, unknown>;
-    if (options.commandError !== undefined) throw options.commandError;
-    if (!options.commandReceipt) throw new Error("missing receipt fixture");
-    return [options.commandReceipt(observedCommand)];
-  });
-
-  const tx = {
-    $queryRaw: queryRaw,
-    rawSourceGovernanceDisposition: {
-      findFirst: vi.fn(async () => {
-        events.push("raw-disposition");
-        return options.restricted ? { id: "restricted" } : null;
-      }),
-    },
-    suppressionRecord: {
-      findMany: vi.fn(async () => {
-        events.push("suppression-read");
-        return options.suppressions ?? [];
-      }),
-    },
-    canonicalCompany: {
-      findUnique: vi.fn(async () => {
-        events.push("blocker-read");
-        return legacyCompany;
-      }),
-      findMany: vi.fn(
-        async ({ where }: { where: { id: { in: string[] } } }) => {
-          events.push("company-read");
-          return companies.filter((company) =>
-            where.id.in.includes(company.id),
-          );
-        },
-      ),
-      create: vi.fn(async () => {
-        events.push("company-create");
-        return {
-          id: NEW_COMPANY,
-          workspaceId: WORKSPACE_ID,
-          name: "Acme GmbH",
-          domain: "acme.example",
-          status: "NEW",
-          dedupeKey: "d:acme.example",
-        };
-      }),
-    },
-    organizationIdentifier: {
-      findMany: vi.fn(async () => {
-        events.push("identifier-read");
-        return identifierCompanyId
-          ? [
-              {
-                scheme: "registry-id",
-                jurisdiction: "DE",
-                normalizedValue: "DE1234",
-                companyId: identifierCompanyId,
-              },
-            ]
-          : [];
-      }),
-    },
-    organizationCanonicalMapping: {
-      findMany: vi.fn(async () => {
-        events.push("root-read");
-        return rootMappings;
-      }),
-    },
-  } as unknown as Prisma.TransactionClient;
-
-  return {
-    tx,
-    events,
-    get command() {
-      return observedCommand;
-    },
-    get rawSql() {
-      return observedRawSql;
-    },
-    create: (
-      tx as unknown as {
-        canonicalCompany: { create: ReturnType<typeof vi.fn> };
-      }
-    ).canonicalCompany.create,
-  };
-}
-
-function boundReceipt(command: Record<string, unknown>, companyId: string) {
-  const plan = command.plan as Record<string, unknown>;
+function boundRow(overrides: Partial<DbRow> = {}): DbRow {
   return {
     outcome_kind: "bound",
     raw_record_id: RAW_ID,
-    company_id: companyId,
+    company_id: COMPANY_ID,
     conflict_id: null,
-    match_rule: plan.matchRule,
-    input_hash: plan.inputHash,
+    match_rule: "identity_v2",
+    input_hash: INPUT_HASH,
     conflict_fingerprint: null,
     replayed: false,
-    identifier_count: Array.isArray(plan.identifiers)
-      ? plan.identifiers.length
-      : 0,
+    company_created: false,
+    identifier_count: 2,
     party_count: 0,
+    ...overrides,
   };
 }
 
-function conflictReceipt(command: Record<string, unknown>) {
-  const plan = command.plan as Record<string, unknown>;
+function createdRow(overrides: Partial<DbRow> = {}): DbRow {
+  return {
+    ...boundRow(),
+    outcome_kind: "created",
+    match_rule: "domain_exact",
+    replayed: false,
+    company_created: true,
+    identifier_count: 0,
+    ...overrides,
+  };
+}
+
+function conflictRow(overrides: Partial<DbRow> = {}): DbRow {
   return {
     outcome_kind: "conflict",
     raw_record_id: RAW_ID,
     company_id: null,
     conflict_id: CONFLICT_ID,
     match_rule: "identity_conflict",
-    input_hash: plan.inputHash,
-    conflict_fingerprint: plan.conflictFingerprint,
-    replayed: false,
+    input_hash: INPUT_HASH,
+    conflict_fingerprint: CONFLICT_FINGERPRINT,
+    replayed: true,
+    company_created: false,
     identifier_count: 0,
     party_count: 2,
+    ...overrides,
   };
 }
 
+function legacyBoundRow(overrides: Partial<DbRow> = {}): DbRow {
+  return {
+    outcome_kind: "legacy_bound",
+    raw_record_id: RAW_ID,
+    company_id: COMPANY_ID,
+    conflict_id: null,
+    match_rule: "identifier_exact",
+    input_hash: "legacy",
+    conflict_fingerprint: null,
+    replayed: true,
+    company_created: false,
+    identifier_count: 0,
+    party_count: 0,
+    ...overrides,
+  };
+}
+
+function suppressedRow(overrides: Partial<DbRow> = {}): DbRow {
+  return {
+    outcome_kind: "suppressed",
+    raw_record_id: RAW_ID,
+    company_id: null,
+    conflict_id: null,
+    match_rule: null,
+    input_hash: null,
+    conflict_fingerprint: null,
+    replayed: false,
+    company_created: false,
+    identifier_count: 0,
+    party_count: 0,
+    ...overrides,
+  };
+}
+
+function without(row: DbRow, key: keyof DbRow): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(row).filter(([candidate]) => candidate !== key),
+  );
+}
+
+function sqlText(args: readonly unknown[]): string {
+  return (args[0] as TemplateStringsArray).join("?");
+}
+
+function queryEvent(args: readonly unknown[]): QueryEvent {
+  const sql = sqlText(args);
+  if (sql.includes("set_config('lock_timeout'")) {
+    return "lock-timeout-prearm";
+  }
+  if (sql.includes("set_config('statement_timeout'")) {
+    return "statement-timeout-prearm";
+  }
+  const values = args.slice(1);
+  if (
+    values.some(
+      (value) =>
+        typeof value === "string" &&
+        value.startsWith("acquisition-suppression-policy:"),
+    )
+  ) {
+    return "suppression-lock";
+  }
+  if (
+    values.some(
+      (value) =>
+        typeof value === "string" && value.startsWith("organization-identity:"),
+    )
+  ) {
+    return "identity-lock";
+  }
+  if (sql.includes("resolve_organization_identity_for_raw_v1")) {
+    return "resolver";
+  }
+  throw new Error("unexpected organization identity SQL");
+}
+
+type FixtureOptions = Readonly<{
+  rows?: unknown;
+  errorAt?: QueryEvent;
+  error?: unknown;
+  resultAt?: Partial<Record<QueryEvent, unknown>>;
+}>;
+
+function transactionFixture(options: FixtureOptions = {}) {
+  const events: QueryEvent[] = [];
+  const calls: unknown[][] = [];
+  const queryRaw = vi.fn(async (...args: unknown[]) => {
+    calls.push(args);
+    const event = queryEvent(args);
+    events.push(event);
+    if (options.errorAt === event) throw options.error;
+    if (
+      options.resultAt &&
+      Object.prototype.hasOwnProperty.call(options.resultAt, event)
+    ) {
+      return options.resultAt[event];
+    }
+    if (event === "lock-timeout-prearm") {
+      return [{ lock_timeout: "5s" }];
+    }
+    if (event === "statement-timeout-prearm") {
+      return [{ statement_timeout: "1min" }];
+    }
+    if (event === "suppression-lock" || event === "identity-lock") {
+      return [{ locked: "" }];
+    }
+    return options.rows ?? [boundRow()];
+  });
+  const executeRaw = vi.fn(async () => {
+    throw new Error("official identity source uses one queryRaw route");
+  });
+  return {
+    tx: {
+      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
+    } as unknown as Prisma.TransactionClient,
+    events,
+    calls,
+    queryRaw,
+    executeRaw,
+  };
+}
+
+async function expectReceiptInvalid(rows: unknown): Promise<void> {
+  const fixture = transactionFixture({ rows });
+  await expect(
+    resolveOrganizationIdentityForRaw(fixture.tx, {
+      workspaceId: WORKSPACE_ID,
+      rawRecordId: RAW_ID,
+    }),
+  ).rejects.toMatchObject({
+    code: "IDENTITY_RESOLUTION_RECEIPT_INVALID",
+    message: "organization identity resolution failed",
+  });
+}
+
+async function expectDatabaseCode(
+  error: unknown,
+  expectedCode: string,
+  errorAt: QueryEvent = "resolver",
+): Promise<void> {
+  const fixture = transactionFixture({ errorAt, error });
+  await expect(
+    resolveOrganizationIdentityForRaw(fixture.tx, {
+      workspaceId: WORKSPACE_ID,
+      rawRecordId: RAW_ID,
+    }),
+  ).rejects.toMatchObject({
+    code: expectedCode,
+    message: "organization identity resolution failed",
+  });
+}
+
 describe("organization identity DB resolver source contract", () => {
-  it("binds an admitted strong identifier to its existing canonical root", async () => {
-    const fixture = transactionFixture({
-      identifierCompanyId: COMPANY_A,
-      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
-    });
-
-    const receipt = await resolveOrganizationIdentityForRaw(fixture.tx, {
-      workspaceId: WORKSPACE_ID,
-      rawRecordId: RAW_ID,
-    });
-
-    expect(receipt).toMatchObject({
-      schemaVersion: "organization-identity-resolution-receipt/v1",
-      kind: "bound",
-      companyId: COMPANY_A,
-      matchRule: "identity_v2",
-      rawRecordId: RAW_ID,
-      replayed: false,
-      identifierCount: 2,
-    });
-    expect(Object.isFrozen(receipt)).toBe(true);
-    expect(fixture.create).not.toHaveBeenCalled();
-    expect(fixture.events.indexOf("suppression-lock")).toBeLessThan(
-      fixture.events.indexOf("identity-lock"),
-    );
-    expect(fixture.events.indexOf("identity-lock")).toBeLessThan(
-      fixture.events.indexOf("raw-read"),
-    );
-    expect(fixture.rawSql).not.toMatch(/FOR\s+(?:KEY\s+)?SHARE|FOR\s+UPDATE/iu);
-    expect(fixture.events.at(-1)).toBe("command");
-  });
-
-  it("lazily upgrades an existing blocker candidate without changing its business facts", async () => {
-    const fixture = transactionFixture({
-      payload: directoryPayload(),
-      providerKey: "directory",
-      legacyCompany: {
-        id: COMPANY_A,
-        workspaceId: WORKSPACE_ID,
-        name: "Acme GmbH",
-        domain: "acme.example",
-        status: "NEW",
-        dedupeKey: "d:acme.example",
-      },
-      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
-    });
-
-    const receipt = await resolveOrganizationIdentityForRaw(fixture.tx, {
-      workspaceId: WORKSPACE_ID,
-      rawRecordId: RAW_ID,
-    });
-
-    expect(receipt).toMatchObject({
-      kind: "bound",
-      companyId: COMPANY_A,
-      matchRule: "identity_v2",
-      identifierCount: 1,
-    });
-    expect(fixture.create).not.toHaveBeenCalled();
-    expect((fixture.command?.plan as { kind: string }).kind).toBe(
-      "lazy_upgrade",
-    );
-  });
-
-  it("creates a minimal company only inside the locked transaction when no candidate exists", async () => {
-    const fixture = transactionFixture({
-      payload: directoryPayload(),
-      providerKey: "directory",
-      commandReceipt: (command) => boundReceipt(command, NEW_COMPANY),
-    });
-
-    const receipt = await resolveOrganizationIdentityForRaw(fixture.tx, {
-      workspaceId: WORKSPACE_ID,
-      rawRecordId: RAW_ID,
-    });
-
-    expect(receipt).toMatchObject({
-      kind: "bound",
-      companyId: NEW_COMPANY,
-      matchRule: "identity_v2",
-    });
-    expect(fixture.create).toHaveBeenCalledWith({
-      data: {
-        workspaceId: WORKSPACE_ID,
-        name: "Acme GmbH",
-        domain: "acme.example",
-        country: "DE",
-        status: "NEW",
-        dedupeKey: "d:acme.example",
-        attributes: Prisma.DbNull,
-      },
-      select: expect.objectContaining({ id: true }),
-    });
-    expect(fixture.events.indexOf("company-create")).toBeLessThan(
-      fixture.events.indexOf("command"),
-    );
-  });
-
-  it("persists a blocker disagreement as a conflict instead of guessing", async () => {
-    const fixture = transactionFixture({
-      identifierCompanyId: COMPANY_A,
-      legacyCompany: {
-        id: COMPANY_B,
-        workspaceId: WORKSPACE_ID,
-        name: "Other Acme GmbH",
-        domain: "acme.example",
-        status: "NEW",
-        dedupeKey: "d:acme.example",
-      },
-      commandReceipt: conflictReceipt,
-    });
-
-    const receipt = await resolveOrganizationIdentityForRaw(fixture.tx, {
-      workspaceId: WORKSPACE_ID,
-      rawRecordId: RAW_ID,
-    });
-
-    expect(receipt).toMatchObject({
-      kind: "conflict",
-      conflictId: CONFLICT_ID,
-      matchRule: "identity_conflict",
-      partyCount: 2,
-    });
-    const plan = fixture.command?.plan as {
-      kind: string;
-      conflictType: string;
-      companyIds: string[];
-    };
-    expect(plan).toMatchObject({
-      kind: "conflict",
-      conflictType: "blocking_key_disagreement",
-      companyIds: [COMPANY_A, COMPANY_B],
-    });
-  });
-
-  it("fails closed on current suppression before any company or identity command write", async () => {
-    const fixture = transactionFixture({
-      payload: directoryPayload(),
-      providerKey: "directory",
-      suppressions: [{ type: "domain", value: "acme.example" }],
-      commandReceipt: (command) => boundReceipt(command, NEW_COMPANY),
-    });
+  it("uses the official separate prearm, suppression, identity, two-ID resolver statement order", async () => {
+    const fixture = transactionFixture();
 
     await expect(
       resolveOrganizationIdentityForRaw(fixture.tx, {
         workspaceId: WORKSPACE_ID,
         rawRecordId: RAW_ID,
       }),
-    ).rejects.toMatchObject({
-      code: "IDENTITY_RESOLUTION_SUPPRESSED",
-      message: "organization identity resolution failed",
-    });
-    expect(fixture.create).not.toHaveBeenCalled();
-    expect(fixture.events).not.toContain("command");
+    ).resolves.toMatchObject({ kind: "bound", companyId: COMPANY_ID });
+
+    expect(fixture.events).toEqual([
+      "lock-timeout-prearm",
+      "statement-timeout-prearm",
+      "suppression-lock",
+      "identity-lock",
+      "resolver",
+    ]);
+    expect(fixture.executeRaw).not.toHaveBeenCalled();
+    const statements = fixture.calls.map(sqlText);
+    expect(statements[0]).toContain("set_config('lock_timeout', '5s', true)");
+    expect(statements[1]).toContain(
+      "set_config('statement_timeout', '60s', true)",
+    );
+    expect(statements[4]).toContain(
+      "public.resolve_organization_identity_for_raw_v1",
+    );
+    expect(statements[4]).not.toMatch(/\bWITH\b/iu);
+    expect(statements[4]).not.toContain(
+      "apply_organization_identity_resolution_v1",
+    );
+    expect(fixture.calls[0]?.slice(1)).toEqual([]);
+    expect(fixture.calls[1]?.slice(1)).toEqual([]);
+    expect(fixture.calls[2]?.slice(1)).toEqual([
+      `acquisition-suppression-policy:${WORKSPACE_ID}`,
+    ]);
+    expect(fixture.calls[3]?.slice(1)).toEqual([
+      `organization-identity:${WORKSPACE_ID}`,
+    ]);
+    expect(fixture.calls[4]?.slice(1)).toEqual([WORKSPACE_ID, RAW_ID]);
+    expect(JSON.stringify(fixture.calls)).not.toContain("authorityIdentifiers");
+    expect(JSON.stringify(fixture.calls)).not.toContain("targetCompanyId");
+    expect(JSON.stringify(fixture.calls)).not.toContain("blocker");
   });
 
-  it("rejects malformed input and malformed DB receipts without echoing attacker text", async () => {
-    const marker = "Bearer do-not-echo@example.test";
-    const noCall = transactionFixture({
-      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
-    });
-    await expect(
-      resolveOrganizationIdentityForRaw(noCall.tx, {
-        workspaceId: marker,
+  it.each([
+    [
+      "bound",
+      boundRow(),
+      {
+        schemaVersion: "organization-identity-resolution-receipt/v1",
+        kind: "bound",
         rawRecordId: RAW_ID,
-      }),
-    ).rejects.toEqual(
-      expect.objectContaining({
-        code: "IDENTITY_RESOLUTION_INPUT_INVALID",
-        message: "organization identity resolution failed",
-      }),
-    );
-    expect(noCall.events).toEqual([]);
-
-    const malformed = transactionFixture({
-      identifierCompanyId: COMPANY_A,
-      commandReceipt: () => ({
-        outcome_kind: "bound",
-        raw_record_id: RAW_ID,
-        company_id: COMPANY_A,
-        conflict_id: null,
-        match_rule: marker,
-        input_hash: "not-a-hash",
-        conflict_fingerprint: null,
+        companyId: COMPANY_ID,
+        matchRule: "identity_v2",
+        inputHash: INPUT_HASH,
         replayed: false,
-        identifier_count: 1,
-        party_count: 0,
-      }),
-    });
-    await expect(
-      resolveOrganizationIdentityForRaw(malformed.tx, {
+        identifierCount: 2,
+      },
+    ],
+    [
+      "created",
+      createdRow(),
+      {
+        schemaVersion: "organization-identity-resolution-receipt/v1",
+        kind: "created",
+        rawRecordId: RAW_ID,
+        companyId: COMPANY_ID,
+        matchRule: "domain_exact",
+        inputHash: INPUT_HASH,
+        replayed: false,
+        identifierCount: 0,
+      },
+    ],
+    [
+      "conflict",
+      conflictRow(),
+      {
+        schemaVersion: "organization-identity-resolution-receipt/v1",
+        kind: "conflict",
+        rawRecordId: RAW_ID,
+        conflictId: CONFLICT_ID,
+        matchRule: "identity_conflict",
+        inputHash: INPUT_HASH,
+        conflictFingerprint: CONFLICT_FINGERPRINT,
+        replayed: true,
+        partyCount: 2,
+      },
+    ],
+    [
+      "legacy_bound",
+      legacyBoundRow(),
+      {
+        schemaVersion: "organization-identity-resolution-receipt/v1",
+        kind: "legacy_bound",
+        rawRecordId: RAW_ID,
+        companyId: COMPANY_ID,
+        matchRule: "identifier_exact",
+        inputHash: "legacy",
+        replayed: true,
+      },
+    ],
+    [
+      "suppressed",
+      suppressedRow(),
+      {
+        schemaVersion: "organization-identity-resolution-receipt/v1",
+        kind: "suppressed",
+        rawRecordId: RAW_ID,
+        replayed: false,
+      },
+    ],
+  ])(
+    "parses and freezes the exact %s receipt",
+    async (_kind, row, expected) => {
+      const fixture = transactionFixture({ rows: [row] });
+      const receipt = await resolveOrganizationIdentityForRaw(fixture.tx, {
         workspaceId: WORKSPACE_ID,
         rawRecordId: RAW_ID,
-      }),
-    ).rejects.toEqual(
-      expect.objectContaining({
-        code: "IDENTITY_RESOLUTION_RECEIPT_INVALID",
-        message: "organization identity resolution failed",
-      }),
+      });
+
+      expect(receipt).toEqual(expected);
+      expect(Object.isFrozen(receipt)).toBe(true);
+    },
+  );
+
+  it("reuses one same-transaction composite receipt without prearming or reacquiring under another key", async () => {
+    const fixture = transactionFixture();
+    const lockReceipt = await lockWorkspaceSuppressionThenIdentity(
+      fixture.tx,
+      WORKSPACE_ID,
     );
+    const start = fixture.events.length;
+
+    await expect(
+      resolveOrganizationIdentityForRaw(
+        fixture.tx,
+        { workspaceId: WORKSPACE_ID, rawRecordId: RAW_ID },
+        lockReceipt,
+      ),
+    ).resolves.toMatchObject({ kind: "bound" });
+    expect(fixture.events.slice(start)).toEqual(["resolver"]);
+    expect(fixture.calls.at(-1)?.slice(1)).toEqual([WORKSPACE_ID, RAW_ID]);
   });
 
-  it("rejects hostile and non-exact resolver inputs before any transaction call", async () => {
+  it("rejects cross-transaction and cross-workspace composite receipts without silently reacquiring", async () => {
+    const owner = transactionFixture();
+    const receipt = await lockWorkspaceSuppressionThenIdentity(
+      owner.tx,
+      WORKSPACE_ID,
+    );
+    const other = transactionFixture();
+
+    await expect(
+      resolveOrganizationIdentityForRaw(
+        other.tx,
+        { workspaceId: WORKSPACE_ID, rawRecordId: RAW_ID },
+        receipt,
+      ),
+    ).rejects.toMatchObject({ code: "IDENTITY_RESOLUTION_STATE_INVALID" });
+    expect(other.events).toEqual([]);
+
+    await expect(
+      resolveOrganizationIdentityForRaw(
+        owner.tx,
+        { workspaceId: OTHER_WORKSPACE_ID, rawRecordId: RAW_ID },
+        receipt,
+      ),
+    ).rejects.toMatchObject({ code: "IDENTITY_RESOLUTION_STATE_INVALID" });
+    expect(owner.events).toHaveLength(4);
+  });
+
+  it("rejects hostile and non-exact two-ID inputs before prearm or command dispatch", async () => {
     const getter = vi.fn(() => WORKSPACE_ID);
     const accessor = Object.create(Object.prototype, {
       workspaceId: { enumerable: true, get: getter },
@@ -482,13 +419,15 @@ describe("organization identity DB resolver source contract", () => {
     const candidates: unknown[] = [
       null,
       [],
+      Object.create(null),
+      new Proxy({ workspaceId: WORKSPACE_ID, rawRecordId: RAW_ID }, {}),
       { workspaceId: WORKSPACE_ID, rawRecordId: RAW_ID, extra: true },
+      { workspaceId: WORKSPACE_ID, rawRecordId: RAW_ID.toUpperCase() },
       accessor,
     ];
+
     for (const candidate of candidates) {
-      const fixture = transactionFixture({
-        commandReceipt: (command) => boundReceipt(command, COMPANY_A),
-      });
+      const fixture = transactionFixture();
       await expect(
         resolveOrganizationIdentityForRaw(
           fixture.tx,
@@ -500,146 +439,317 @@ describe("organization identity DB resolver source contract", () => {
     expect(getter).not.toHaveBeenCalled();
   });
 
-  it("fails closed for absent and restricted Raw records", async () => {
-    const absent = transactionFixture({
-      rawRows: [],
-      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
-    });
-    await expect(
-      resolveOrganizationIdentityForRaw(absent.tx, {
-        workspaceId: WORKSPACE_ID,
-        rawRecordId: RAW_ID,
-      }),
-    ).rejects.toMatchObject({ code: "IDENTITY_RAW_NOT_RESOLVABLE" });
+  it("requires exactly one plain exact-key data row without invoking accessors or proxies", async () => {
+    await expectReceiptInvalid([]);
+    await expectReceiptInvalid([boundRow(), boundRow()]);
+    await expectReceiptInvalid(boundRow());
+    await expectReceiptInvalid(new Proxy([boundRow()], {}));
+    await expectReceiptInvalid([null]);
+    await expectReceiptInvalid([[boundRow()]]);
+    await expectReceiptInvalid([new Date()]);
+    await expectReceiptInvalid([
+      Object.assign(Object.create(null), boundRow()),
+    ]);
+    await expectReceiptInvalid([new Proxy(boundRow(), {})]);
+    await expectReceiptInvalid([{ ...boundRow(), extra: true }]);
+    await expectReceiptInvalid([
+      { ...boundRow(), [Symbol("unexpected")]: true },
+    ]);
+    await expectReceiptInvalid([without(boundRow(), "party_count")]);
 
-    const restricted = transactionFixture({
-      restricted: true,
-      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
+    const getter = vi.fn(() => COMPANY_ID);
+    const accessor = Object.defineProperty({ ...boundRow() }, "company_id", {
+      enumerable: true,
+      get: getter,
     });
-    await expect(
-      resolveOrganizationIdentityForRaw(restricted.tx, {
-        workspaceId: WORKSPACE_ID,
-        rawRecordId: RAW_ID,
-      }),
-    ).rejects.toMatchObject({
-      code: "IDENTITY_RAW_PROCESSING_RESTRICTED",
-    });
-    expect(restricted.events).not.toContain("command");
-  });
-
-  it("rejects a DB receipt that does not bind the requested Raw occurrence", async () => {
-    const fixture = transactionFixture({
-      identifierCompanyId: COMPANY_A,
-      commandReceipt: (command) => ({
-        ...boundReceipt(command, COMPANY_A),
-        raw_record_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-      }),
-    });
-    await expect(
-      resolveOrganizationIdentityForRaw(fixture.tx, {
-        workspaceId: WORKSPACE_ID,
-        rawRecordId: RAW_ID,
-      }),
-    ).rejects.toMatchObject({
-      code: "IDENTITY_RESOLUTION_RECEIPT_INVALID",
-    });
+    await expectReceiptInvalid([accessor]);
+    expect(getter).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["55P03", "lock wait", "IDENTITY_RESOLUTION_LOCK_TIMEOUT"],
-    ["57014", "statement timeout", "IDENTITY_RESOLUTION_LOCK_TIMEOUT"],
-    ["40001", "serialization", "IDENTITY_RESOLUTION_PLAN_STALE"],
-    ["P0001", "IDENTITY_INPUT_DRIFT", "IDENTITY_INPUT_DRIFT"],
+    ["unknown discriminator", boundRow({ outcome_kind: "BOUND" })],
+    ["malformed Raw UUID", boundRow({ raw_record_id: "not-a-uuid" })],
+    ["bound missing company", boundRow({ company_id: null })],
+    ["bound conflict ID", boundRow({ conflict_id: CONFLICT_ID })],
+    ["bound match rule", boundRow({ match_rule: "identifier_exact" })],
+    ["bound input hash", boundRow({ input_hash: "not-a-hash" })],
     [
-      "P0001",
-      "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
-      "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
+      "bound conflict fingerprint",
+      boundRow({ conflict_fingerprint: CONFLICT_FINGERPRINT }),
     ],
-  ])(
-    "maps PostgreSQL %s to the closed %s error",
-    async (code, message, expected) => {
-      const fixture = transactionFixture({
-        identifierCompanyId: COMPANY_A,
-        commandError: Object.assign(new Error(message), { code }),
-      });
-      await expect(
-        resolveOrganizationIdentityForRaw(fixture.tx, {
-          workspaceId: WORKSPACE_ID,
-          rawRecordId: RAW_ID,
-        }),
-      ).rejects.toMatchObject({ code: expected });
-    },
-  );
+    ["bound replay type", boundRow({ replayed: 0 })],
+    ["bound company-created mismatch", boundRow({ company_created: true })],
+    [
+      "bound unsafe identifier count",
+      boundRow({ identifier_count: Number.MAX_SAFE_INTEGER + 1 }),
+    ],
+    ["bound identifier count maximum", boundRow({ identifier_count: 33 })],
+    ["bound party count", boundRow({ party_count: 1 })],
+    ["created replay mismatch", createdRow({ replayed: true })],
+    [
+      "created company-created mismatch",
+      createdRow({ company_created: false }),
+    ],
+    ["created conflict ID", createdRow({ conflict_id: CONFLICT_ID })],
+    [
+      "created conflict fingerprint",
+      createdRow({ conflict_fingerprint: CONFLICT_FINGERPRINT }),
+    ],
+    ["conflict company ID", conflictRow({ company_id: COMPANY_ID })],
+    ["conflict missing ID", conflictRow({ conflict_id: null })],
+    ["conflict match rule", conflictRow({ match_rule: "identity_v2" })],
+    ["conflict input hash", conflictRow({ input_hash: null })],
+    ["conflict fingerprint", conflictRow({ conflict_fingerprint: null })],
+    ["conflict company-created", conflictRow({ company_created: true })],
+    ["conflict identifier count", conflictRow({ identifier_count: 1 })],
+    ["conflict party minimum", conflictRow({ party_count: 1 })],
+    ["conflict party maximum", conflictRow({ party_count: 65 })],
+    [
+      "conflict unsafe party count",
+      conflictRow({ party_count: Number.MAX_SAFE_INTEGER + 1 }),
+    ],
+    ["legacy match rule", legacyBoundRow({ match_rule: "identity_v2" })],
+    ["legacy input hash", legacyBoundRow({ input_hash: INPUT_HASH })],
+    ["legacy replay mismatch", legacyBoundRow({ replayed: false })],
+    [
+      "legacy company-created mismatch",
+      legacyBoundRow({ company_created: true }),
+    ],
+    ["legacy identifier count", legacyBoundRow({ identifier_count: 1 })],
+    ["legacy party count", legacyBoundRow({ party_count: 1 })],
+    ["suppressed company ID", suppressedRow({ company_id: COMPANY_ID })],
+    ["suppressed conflict ID", suppressedRow({ conflict_id: CONFLICT_ID })],
+    ["suppressed match rule", suppressedRow({ match_rule: "domain_exact" })],
+    ["suppressed input hash", suppressedRow({ input_hash: INPUT_HASH })],
+    [
+      "suppressed conflict fingerprint",
+      suppressedRow({ conflict_fingerprint: CONFLICT_FINGERPRINT }),
+    ],
+    ["suppressed replay mismatch", suppressedRow({ replayed: true })],
+    [
+      "suppressed company-created mismatch",
+      suppressedRow({ company_created: true }),
+    ],
+    ["suppressed identifier count", suppressedRow({ identifier_count: 1 })],
+    ["suppressed party count", suppressedRow({ party_count: 1 })],
+  ])("rejects malformed outcome matrix mutation: %s", async (_label, row) => {
+    await expectReceiptInvalid([row]);
+  });
 
-  it("maps only closed PostgreSQL failures and never exposes database details", async () => {
-    const marker = "postgresql://owner:secret@customer";
-    const fixture = transactionFixture({
-      identifierCompanyId: COMPANY_A,
-      commandError: Object.assign(new Error(marker), {
-        code: "42501",
+  it("rejects a valid-shaped row for a different Raw occurrence", async () => {
+    await expectReceiptInvalid([
+      boundRow({
+        raw_record_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       }),
-    });
+    ]);
+  });
 
-    await expect(
-      resolveOrganizationIdentityForRaw(fixture.tx, {
-        workspaceId: WORKSPACE_ID,
-        rawRecordId: RAW_ID,
+  it("maps direct and arbitrarily nested SQLSTATE 57014 to one statement-timeout error", async () => {
+    await expectDatabaseCode(
+      Object.assign(new Error(NATIVE_TIMEOUT), {
+        code: "57014",
+        detail: "private worker context",
+        hint: "database URL",
+        query: "SELECT secret",
       }),
-    ).rejects.toEqual(
-      expect.objectContaining({
-        code: "IDENTITY_RESOLUTION_COMMAND_DENIED",
-        message: "organization identity resolution failed",
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+    await expectDatabaseCode(
+      Object.assign(new Error("Prisma raw query failed"), {
+        code: "P2010",
+        meta: {
+          cause: {
+            originalError: {
+              driverError: Object.assign(new Error(NATIVE_TIMEOUT), {
+                sqlState: "57014",
+                context: "private worker",
+              }),
+            },
+          },
+        },
       }),
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+    await expectDatabaseCode(
+      Object.assign(new Error("Prisma proxied raw query failed"), {
+        code: "P2010",
+        meta: new Proxy({ code: "57014", message: NATIVE_TIMEOUT }, {}),
+      }),
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+    const deeplyNested = Array.from({ length: 600 }).reduce<unknown>(
+      (cause) => ({ cause }),
+      Object.assign(new Error(NATIVE_TIMEOUT), { code: "57014" }),
+    );
+    await expectDatabaseCode(
+      deeplyNested,
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
     );
   });
 
-  it("maps the nested SQLSTATE from a real Prisma raw-query error envelope", async () => {
+  it("maps pre-context prearm cancellation before any lock and never returns native database text", async () => {
     const fixture = transactionFixture({
-      identifierCompanyId: COMPANY_A,
-      commandError: Object.assign(new Error("raw query failed"), {
+      errorAt: "lock-timeout-prearm",
+      error: Object.assign(new Error(NATIVE_TIMEOUT), {
         code: "P2010",
-        meta: { code: "42501", message: "command denied" },
+        meta: {
+          code: "57014",
+          message: NATIVE_TIMEOUT,
+          detail: "private detail",
+          hint: "private hint",
+        },
       }),
     });
-    await expect(
-      resolveOrganizationIdentityForRaw(fixture.tx, {
+
+    let caught: unknown;
+    try {
+      await resolveOrganizationIdentityForRaw(fixture.tx, {
         workspaceId: WORKSPACE_ID,
         rawRecordId: RAW_ID,
-      }),
-    ).rejects.toMatchObject({
-      code: "IDENTITY_RESOLUTION_COMMAND_DENIED",
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(OrganizationIdentityResolverError);
+    expect(caught).toMatchObject({
+      code: "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
       message: "organization identity resolution failed",
     });
+    expect(String(caught)).not.toContain(NATIVE_TIMEOUT);
+    expect(JSON.stringify(caught)).not.toContain(NATIVE_TIMEOUT);
+    expect(caught).not.toHaveProperty("cause");
+    expect(fixture.events).toEqual(["lock-timeout-prearm"]);
   });
 
-  it("maps a Prisma lock failure before any resolver read to the typed timeout", async () => {
+  it("fails closed on malformed prearm evidence before resolver dispatch", async () => {
     const fixture = transactionFixture({
-      lockError: Object.assign(new Error("raw query failed"), {
-        code: "P2010",
-        meta: { code: "55P03", message: "lock unavailable" },
-      }),
-      commandReceipt: (command) => boundReceipt(command, COMPANY_A),
+      resultAt: { "statement-timeout-prearm": [] },
     });
+
     await expect(
       resolveOrganizationIdentityForRaw(fixture.tx, {
         workspaceId: WORKSPACE_ID,
         rawRecordId: RAW_ID,
       }),
     ).rejects.toMatchObject({
-      code: "IDENTITY_RESOLUTION_LOCK_TIMEOUT",
+      code: "IDENTITY_RESOLUTION_STATE_INVALID",
       message: "organization identity resolution failed",
     });
-    expect(fixture.events).toEqual(["suppression-lock"]);
+    expect(fixture.events).toEqual([
+      "lock-timeout-prearm",
+      "statement-timeout-prearm",
+    ]);
+  });
+
+  it.each([
+    [
+      Object.assign(new Error("lock unavailable"), { code: "55P03" }),
+      "IDENTITY_RESOLUTION_LOCK_TIMEOUT",
+    ],
+    [
+      Object.assign(new Error("serialization"), { code: "40001" }),
+      "IDENTITY_RESOLUTION_PLAN_STALE",
+    ],
+    [
+      Object.assign(new Error("raw query failed"), {
+        code: "P2010",
+        meta: { code: "42501", message: "IDENTITY_RESOLUTION_COMMAND_DENIED" },
+      }),
+      "IDENTITY_RESOLUTION_COMMAND_DENIED",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_RESOLUTION_INPUT_INVALID"), {
+        code: "P0001",
+      }),
+      "IDENTITY_RESOLUTION_INPUT_INVALID",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_RAW_NOT_RESOLVABLE"), {
+        code: "P0001",
+      }),
+      "IDENTITY_RAW_NOT_RESOLVABLE",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_RAW_PROCESSING_RESTRICTED"), {
+        code: "P0001",
+      }),
+      "IDENTITY_RAW_PROCESSING_RESTRICTED",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_INPUT_DRIFT"), {
+        code: "P0001",
+      }),
+      "IDENTITY_INPUT_DRIFT",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_LEGACY_LINK_ALREADY_RESOLVED"), {
+        code: "P0001",
+      }),
+      "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_RESOLUTION_SUPPRESSED"), {
+        code: "P0001",
+      }),
+      "IDENTITY_RESOLUTION_SUPPRESSED",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_RESOLUTION_STATE_INVALID"), {
+        code: "P0001",
+      }),
+      "IDENTITY_RESOLUTION_STATE_INVALID",
+    ],
+    [
+      Object.assign(new Error("ERROR: IDENTITY_INPUT_DRIFT_SUFFIX"), {
+        code: "P0001",
+      }),
+      "IDENTITY_RESOLUTION_STATE_INVALID",
+    ],
+    [
+      Object.assign(new Error("unreviewed native text"), { code: "XX000" }),
+      "IDENTITY_RESOLUTION_STATE_INVALID",
+    ],
+  ])(
+    "retains the reviewed closed database mapping",
+    async (error, expected) => {
+      await expectDatabaseCode(error, expected);
+    },
+  );
+
+  it("maps a lock failure before resolver dispatch without claiming hostile-direct SQL bounds", async () => {
+    const fixture = transactionFixture({
+      errorAt: "identity-lock",
+      error: Object.assign(new Error("lock unavailable"), {
+        code: "P2010",
+        meta: { code: "55P03", message: "IDENTITY_RESOLUTION_LOCK_TIMEOUT" },
+      }),
+    });
+
+    await expect(
+      resolveOrganizationIdentityForRaw(fixture.tx, {
+        workspaceId: WORKSPACE_ID,
+        rawRecordId: RAW_ID,
+      }),
+    ).rejects.toMatchObject({ code: "IDENTITY_RESOLUTION_LOCK_TIMEOUT" });
+    expect(fixture.events).toEqual([
+      "lock-timeout-prearm",
+      "statement-timeout-prearm",
+      "suppression-lock",
+      "identity-lock",
+    ]);
   });
 
   it("uses a closed generic error type", () => {
     const error = new OrganizationIdentityResolverError(
-      "IDENTITY_RESOLUTION_PLAN_STALE",
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
     );
-    expect(error).toMatchObject({
-      name: "OrganizationIdentityResolverError",
-      code: "IDENTITY_RESOLUTION_PLAN_STALE",
-      message: "organization identity resolution failed",
-    });
+    expect(error).toEqual(
+      expect.objectContaining({
+        name: "OrganizationIdentityResolverError",
+        code: "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+        message: "organization identity resolution failed",
+      }),
+    );
   });
 });
