@@ -92,6 +92,37 @@ if [ "$MINIO_ROOT_PASSWORD" = "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY" ] ||
 fi
 
 mc alias set deployment "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+
+# An empty PostgreSQL manifest ledger does not prove the predecessor S3 layout
+# is empty: a process can stop after promote but before database append. Inspect
+# every old-prefix version/delete marker before the first provisioning mutation.
+artifact_bucket_inventory=/tmp/generic-operation-artifact-buckets.list
+if ! mc ls deployment > "$artifact_bucket_inventory"; then
+  echo "GENERIC_OPERATION_ARTIFACT_STORAGE_PREFLIGHT_UNAVAILABLE" >&2
+  exit 4
+fi
+artifact_bucket_exists=false
+while IFS= read -r bucket_line; do
+  if [ "${bucket_line##* }" = "$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/" ]; then
+    artifact_bucket_exists=true
+    break
+  fi
+done < "$artifact_bucket_inventory"
+
+old_artifact_prefix="deployment/$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/"
+if [ "$artifact_bucket_exists" = true ]; then
+  old_layout_inventory=/tmp/generic-operation-artifact-old-layout.list
+  if ! mc ls --recursive --versions "$old_artifact_prefix" > "$old_layout_inventory"; then
+    echo "GENERIC_OPERATION_ARTIFACT_STORAGE_PREFLIGHT_UNAVAILABLE" >&2
+    exit 4
+  fi
+  IFS= read -r old_layout_first < "$old_layout_inventory" || old_layout_first=''
+  if [ -n "$old_layout_first" ]; then
+    echo "GENERIC_OPERATION_ARTIFACT_LAYOUT_MIGRATION_REQUIRED" >&2
+    exit 3
+  fi
+fi
+
 mc mb --ignore-existing "deployment/$S3_BUCKET"
 mc ilm rule import "deployment/$S3_BUCKET" < /config/site-builder-lifecycle.json
 
@@ -174,13 +205,13 @@ cat > "$runtime_policy" <<EOF
       "Resource": [
         "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/staging/*",
         "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/readiness/*",
-        "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"
+        "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/*"
       ]
     },
     {
       "Effect": "Allow",
       "Action": ["s3:GetObjectTagging"],
-      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"]
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/*"]
     },
     {
       "Effect": "Allow",
@@ -190,10 +221,7 @@ cat > "$runtime_policy" <<EOF
     {
       "Effect": "Allow",
       "Action": ["s3:PutObject"],
-      "Resource": [
-        "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/readiness/*",
-        "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"
-      ],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/readiness/*"],
       "Condition": {
         "ForAllValues:StringEquals": {
           "s3:RequestObjectTagKeys": ["artifact-privacy"]
@@ -209,11 +237,47 @@ cat > "$runtime_policy" <<EOF
     },
     {
       "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/public-organization/*"],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "s3:RequestObjectTagKeys": ["artifact-privacy"]
+        },
+        "StringEquals": {
+          "s3:RequestObjectTag/artifact-privacy": "PUBLIC_ORGANIZATION"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/confidential-tenant/*"],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "s3:RequestObjectTagKeys": ["artifact-privacy"]
+        },
+        "StringEquals": {
+          "s3:RequestObjectTag/artifact-privacy": "CONFIDENTIAL_TENANT"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/personal-data/*"],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "s3:RequestObjectTagKeys": ["artifact-privacy"]
+        },
+        "StringEquals": {
+          "s3:RequestObjectTag/artifact-privacy": "PERSONAL_DATA"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
       "Action": ["s3:PutObjectTagging"],
-      "Resource": [
-        "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/readiness/*",
-        "arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"
-      ],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/readiness/*"],
       "Condition": {
         "ForAllValues:StringEquals": {
           "s3:RequestObjectTagKeys": ["artifact-privacy"]
@@ -224,6 +288,54 @@ cat > "$runtime_policy" <<EOF
             "CONFIDENTIAL_TENANT",
             "PERSONAL_DATA"
           ]
+        },
+        "Null": {
+          "s3:ExistingObjectTag/artifact-privacy": "true"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObjectTagging"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/public-organization/*"],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "s3:RequestObjectTagKeys": ["artifact-privacy"]
+        },
+        "StringEquals": {
+          "s3:RequestObjectTag/artifact-privacy": "PUBLIC_ORGANIZATION"
+        },
+        "Null": {
+          "s3:ExistingObjectTag/artifact-privacy": "true"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObjectTagging"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/confidential-tenant/*"],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "s3:RequestObjectTagKeys": ["artifact-privacy"]
+        },
+        "StringEquals": {
+          "s3:RequestObjectTag/artifact-privacy": "CONFIDENTIAL_TENANT"
+        },
+        "Null": {
+          "s3:ExistingObjectTag/artifact-privacy": "true"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObjectTagging"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/personal-data/*"],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "s3:RequestObjectTagKeys": ["artifact-privacy"]
+        },
+        "StringEquals": {
+          "s3:RequestObjectTag/artifact-privacy": "PERSONAL_DATA"
         },
         "Null": {
           "s3:ExistingObjectTag/artifact-privacy": "true"
@@ -263,13 +375,17 @@ cat > "$cleanup_policy" <<EOF
     },
     {
       "Effect": "Allow",
-      "Action": ["s3:GetObjectVersion", "s3:DeleteObjectVersion"],
-      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"],
-      "Condition": {
-        "StringEquals": {
-          "s3:ExistingObjectTag/artifact-privacy": "PERSONAL_DATA"
-        }
-      }
+      "Action": [
+        "s3:GetObjectVersion",
+        "s3:GetObjectTagging",
+        "s3:GetObjectVersionTagging"
+      ],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/personal-data/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:DeleteObject", "s3:DeleteObjectVersion"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/personal-data/*"]
     }
   ]
 }
@@ -282,7 +398,7 @@ cat > "$personal_policy" <<EOF
     {
       "Effect": "Allow",
       "Action": ["s3:GetObject"],
-      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/final/personal-data/*"],
       "Condition": {
         "StringEquals": {
           "s3:ExistingObjectTag/artifact-privacy": "PERSONAL_DATA"

@@ -20,9 +20,12 @@ const repositoryFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('MinIO is pinned and provisioned by one idempotent deployment job', async () => {
-  const [compose, bootstrap, lifecycle, artifactLifecycle] = await Promise.all([
+  const [compose, bootstrap, cleanupAdapter, lifecycle, artifactLifecycle] = await Promise.all([
     repositoryFile('docker-compose.yml'),
     repositoryFile('infra/minio/bootstrap.sh'),
+    repositoryFile(
+      'apps/api/src/durable-results/artifact/personal-artifact-cleanup.store.ts',
+    ),
     repositoryFile('infra/minio/site-builder-lifecycle.json'),
     repositoryFile('infra/minio/generic-operation-artifact-lifecycle.json'),
   ]);
@@ -97,7 +100,7 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
         Expiration: { ExpiredObjectDeleteMarker: true },
         ID: 'generic-operation-artifact-final-delete-markers',
         Status: 'Enabled',
-        Filter: { Prefix: 'generic-operation-results/v1/sha256/' },
+        Filter: { Prefix: 'generic-operation-results/v1/final/' },
       },
       {
         Expiration: { ExpiredObjectDeleteMarker: true },
@@ -134,12 +137,56 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   );
   assert.match(bootstrap, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
   assert.match(bootstrap, /generic-operation-artifact-personal-cleanup/);
+  assert.match(
+    bootstrap,
+    /generic-operation-results\/v1\/final\/personal-data\/\*/,
+  );
   assert.match(bootstrap, /"s3:GetObjectVersion"/);
+  assert.match(bootstrap, /"s3:GetObjectVersionTagging"/);
+  assert.match(bootstrap, /"s3:GetObjectTagging"/);
   assert.match(bootstrap, /"s3:DeleteObjectVersion"/);
+  const cleanupPolicy = bootstrap.slice(
+    bootstrap.indexOf('cat > "$cleanup_policy"'),
+    bootstrap.indexOf('cat > "$personal_policy"'),
+  );
+  assert.doesNotMatch(
+    cleanupPolicy,
+    /DeleteObjectVersion[\s\S]*ExistingObjectTag/u,
+  );
+  assert.match(cleanupAdapter, /GetObjectTaggingCommand/);
+  assert.match(cleanupAdapter, /Value !== 'PERSONAL_DATA'/);
+  const runtimePolicy = bootstrap.slice(
+    bootstrap.indexOf('cat > "$runtime_policy"'),
+    bootstrap.indexOf('cat > "$cleanup_policy"'),
+  );
+  for (const [prefix, privacyClass] of [
+    ['public-organization', 'PUBLIC_ORGANIZATION'],
+    ['confidential-tenant', 'CONFIDENTIAL_TENANT'],
+    ['personal-data', 'PERSONAL_DATA'],
+  ]) {
+    for (const action of ['s3:PutObject', 's3:PutObjectTagging']) {
+      expectPolicyMapping(runtimePolicy, action, prefix, privacyClass);
+    }
+  }
   assert.match(bootstrap, /"s3:GetBucketLocation"/);
   assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
   assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY/);
 });
+
+function expectPolicyMapping(policy, action, prefix, privacyClass) {
+  const actionOffset = policy.indexOf(`"Action": ["${action}"]`);
+  assert.notEqual(actionOffset, -1);
+  const mapping = policy.slice(actionOffset);
+  const prefixOffset = mapping.indexOf(
+    `generic-operation-results/v1/final/${prefix}/*`,
+  );
+  assert.notEqual(prefixOffset, -1);
+  const statement = mapping.slice(prefixOffset, prefixOffset + 700);
+  assert.match(
+    statement,
+    new RegExp(`"s3:RequestObjectTag/artifact-privacy": "${privacyClass}"`),
+  );
+}
 
 test('MinIO bootstrap rejects merged principals before the first mc mutation', async () => {
   const directory = await mkdtemp(
@@ -180,6 +227,131 @@ test('MinIO bootstrap rejects merged principals before the first mc mutation', a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('MinIO bootstrap rejects any predecessor-layout version before provisioning mutation', async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), 'artifact-layout-preflight-'),
+  );
+  const calls = join(directory, 'mc-calls');
+  const fakeMc = join(directory, 'mc');
+  await writeFile(
+    fakeMc,
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$MC_CALLS"
+case "$*" in
+  'alias set '*) exit 0 ;;
+  'ls deployment') printf '%s\\n' '[date] 0B operation-artifacts-test/'; exit 0 ;;
+  'ls --recursive --versions '*) printf '%s\\n' '[old-version] DELETE sha256/aa/example'; exit 0 ;;
+  *) exit 0 ;;
+esac
+`,
+    'utf8',
+  );
+  await chmod(fakeMc, 0o700);
+  try {
+    await assert.rejects(
+      execFileAsync('/bin/sh', ['infra/minio/bootstrap.sh'], {
+        cwd: new URL('..', import.meta.url),
+        env: {
+          PATH: directory,
+          MC_CALLS: calls,
+          MINIO_ENDPOINT: 'http://minio:9000',
+          MINIO_ROOT_USER: 'root-principal',
+          MINIO_ROOT_PASSWORD: 'root-password-123',
+          S3_BUCKET: 'site-assets-test',
+          GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'operation-artifacts-test',
+          GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-principal',
+          GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'runtime-password-123',
+          GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY:
+            'personal-reader',
+          GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:
+            'personal-password-123',
+          GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:
+            'cleanup-writer',
+          GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:
+            'cleanup-password-123',
+        },
+      }),
+      /GENERIC_OPERATION_ARTIFACT_LAYOUT_MIGRATION_REQUIRED/,
+    );
+    const observed = await readFile(calls, 'utf8');
+    assert.match(observed, /ls --recursive --versions/);
+    assert.doesNotMatch(observed, /(^|\n)mb /);
+    assert.doesNotMatch(observed, /(^|\n)ilm /);
+    assert.doesNotMatch(observed, /(^|\n)admin /);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('MinIO bootstrap treats bucket or version inventory failure as unavailable before mutation', async () => {
+  for (const failureMode of ['bucket-inventory', 'version-inventory']) {
+    const directory = await mkdtemp(
+      join(tmpdir(), `artifact-layout-${failureMode}-`),
+    );
+    const calls = join(directory, 'mc-calls');
+    const fakeMc = join(directory, 'mc');
+    await writeFile(
+      fakeMc,
+      `#!/bin/sh
+printf '%s\\n' "$*" >> "$MC_CALLS"
+case "$*" in
+  'alias set '*) exit 0 ;;
+  'ls deployment')
+    if [ "$FAILURE_MODE" = bucket-inventory ]; then exit 7; fi
+    printf '%s\\n' '[date] 0B operation-artifacts-test/'
+    exit 0
+    ;;
+  'ls --recursive --versions '*)
+    if [ "$FAILURE_MODE" = version-inventory ]; then exit 8; fi
+    exit 0
+    ;;
+  *) exit 0 ;;
+esac
+`,
+      'utf8',
+    );
+    await chmod(fakeMc, 0o700);
+    try {
+      await assert.rejects(
+        execFileAsync('/bin/sh', ['infra/minio/bootstrap.sh'], {
+          cwd: new URL('..', import.meta.url),
+          env: minioBootstrapEnv(directory, calls, failureMode),
+        }),
+        /GENERIC_OPERATION_ARTIFACT_STORAGE_PREFLIGHT_UNAVAILABLE/,
+      );
+      const observed = await readFile(calls, 'utf8');
+      assert.doesNotMatch(observed, /(^|\n)mb /);
+      assert.doesNotMatch(observed, /(^|\n)ilm /);
+      assert.doesNotMatch(observed, /(^|\n)encrypt /);
+      assert.doesNotMatch(observed, /(^|\n)version /);
+      assert.doesNotMatch(observed, /(^|\n)admin /);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+function minioBootstrapEnv(directory, calls, failureMode) {
+  return {
+    PATH: directory,
+    MC_CALLS: calls,
+    FAILURE_MODE: failureMode,
+    MINIO_ENDPOINT: 'http://minio:9000',
+    MINIO_ROOT_USER: 'root-principal',
+    MINIO_ROOT_PASSWORD: 'root-password-123',
+    S3_BUCKET: 'site-assets-test',
+    GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'operation-artifacts-test',
+    GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-principal',
+    GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'runtime-password-123',
+    GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY: 'personal-reader',
+    GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:
+      'personal-password-123',
+    GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY: 'cleanup-writer',
+    GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:
+      'cleanup-password-123',
+  };
+}
 
 test('development API and Worker use one immutable image reference and wait for storage provisioning', async () => {
   const compose = await repositoryFile('infra/backend-runtime.compose.yml');

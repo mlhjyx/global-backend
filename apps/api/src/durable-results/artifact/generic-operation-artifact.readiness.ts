@@ -79,7 +79,7 @@ const EXPECTED_LIFECYCLE_RULES: readonly ExpectedLifecycleRule[] =
     Object.freeze({
       id: 'generic-operation-artifact-final-delete-markers',
       expiredDeleteMarker: true,
-      prefix: 'generic-operation-results/v1/sha256/',
+      prefix: 'generic-operation-results/v1/final/',
     }),
     Object.freeze({
       id: 'generic-operation-artifact-readiness-cleanup',

@@ -17,6 +17,7 @@ import {
   type GenericOperationArtifactReference,
 } from '../durable-results/artifact/artifact.types';
 import { projectGenericOperationResult } from './generic-operation-projection';
+import { contentAddressedObjectKey } from '../durable-results/artifact/artifact-key';
 
 const SAFE_PLATFORM_PRINCIPAL = Object.freeze({
   sessionUser: 'global_platform_writer',
@@ -59,7 +60,10 @@ const ARTIFACT_MANIFEST: GenericOperationArtifactManifest = Object.freeze({
   authorityId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
   operationId: ARTIFACT_REFERENCE.operationId,
   resultSchema: ARTIFACT_REFERENCE.resultSchema,
-  objectKey: `generic-operation-results/v1/sha256/${ARTIFACT_REFERENCE.sha256.slice(0, 2)}/${ARTIFACT_REFERENCE.sha256}`,
+  objectKey: contentAddressedObjectKey(
+    ARTIFACT_REFERENCE.sha256,
+    'CONFIDENTIAL_TENANT',
+  ),
   sha256: ARTIFACT_REFERENCE.sha256,
   sizeBytes: ARTIFACT_REFERENCE.sizeBytes,
   mediaType: ARTIFACT_REFERENCE.mediaType,
