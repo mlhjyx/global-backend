@@ -267,6 +267,52 @@ test('pure reconciliation kernel plans result, consumption, and idempotent repla
   assert.equal(Object.isFrozen(replay), true);
 });
 
+test('caller-owned current-main capability cannot authorize public durable reconciliation', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+  const fakeCapability = Object.freeze({ kind: 'caller-declared-admission' });
+  const callerOwnedCapabilities = [
+    fakeCapability,
+    structuredClone(fakeCapability),
+    JSON.parse(JSON.stringify(fakeCapability)),
+  ];
+
+  for (const capability of callerOwnedCapabilities) {
+    const ledger = new Ledger();
+    const fresh = await reserve(ledger, grant);
+    const result = await reconcileMergeAuthorizationReservation(
+      fresh.reservation,
+      structuredClone(readback),
+      ledger,
+      NOW,
+      capability,
+    );
+    assert.equal(result.outcome, 'HOLD');
+    assert.equal(result.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
+    const stream = await ledger.read(fresh.reservation.key);
+    assert.equal(stream.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+    assert.equal(stream.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
+
+    const repeated = await reconcileMergeAuthorizationReservation(
+      fresh.reservation,
+      structuredClone(readback),
+      ledger,
+      NOW,
+      capability,
+    );
+    assert.equal(repeated.outcome, 'HOLD');
+    assert.equal(repeated.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
+    const repeatedStream = await ledger.read(fresh.reservation.key);
+    assert.equal(
+      repeatedStream.events.filter(
+        ({ type, reasonCode }) => type === 'BOUNDED_HOLD'
+          && reasonCode === 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED',
+      ).length,
+      1,
+    );
+  }
+});
+
 test('I1 reconciliation accepts a merge result reachable from a later current-main descendant', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
