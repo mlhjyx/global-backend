@@ -297,6 +297,145 @@ test('pure reconciliation kernel plans result, consumption, and idempotent repla
   assert.equal(revoked.resultEvent, null);
 });
 
+// Mutation caught: weakening exact readback shape/binding checks or throwing on malformed kernel fields.
+test('pure reconciliation kernel returns stable HOLD plans for malformed and stale boundaries', async () => {
+  const { planMergeAuthorizationReconciliation } = await import(
+    './governance-approval-merge-reconciliation-kernel.mjs'
+  );
+  const exact = buildSyntheticMergeReconciliationKernelInput();
+  const missingReadbackKey = clone(exact);
+  delete missingReadbackKey.readback.preReadbackSha256;
+  const extraReadbackKey = clone(exact);
+  extraReadbackKey.readback.callerDeclaredAdmission = true;
+  const staleReservationBinding = clone(exact);
+  staleReservationBinding.reservation.grant.head_sha = 'e'.repeat(40);
+  const staleReadbackBinding = clone(exact);
+  staleReadbackBinding.readback.repositoryId += 1;
+  const malformedReservation = clone(exact);
+  malformedReservation.reservation = null;
+  const malformedReadback = clone(exact);
+  malformedReadback.readback = null;
+  const malformedStreamFacts = clone(exact);
+  malformedStreamFacts.streamFacts = null;
+  const malformedObservedAt = clone(exact);
+  malformedObservedAt.observedAt = 'not-a-canonical-instant';
+  const cases = [
+    [missingReadbackKey, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED'],
+    [extraReadbackKey, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED'],
+    [staleReservationBinding, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    [staleReadbackBinding, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    [malformedReservation, 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED'],
+    [malformedReadback, 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED'],
+    [malformedStreamFacts, 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED'],
+    [malformedObservedAt, 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED'],
+  ];
+  for (const [input, blockingCode] of cases) {
+    const plan = planMergeAuthorizationReconciliation(input);
+    assert.equal(plan.outcome, 'HOLD');
+    assert.equal(plan.blockingCode, blockingCode);
+    assert.equal(plan.resultEvent, null);
+    assert.equal(plan.consumption, null);
+  }
+});
+
+// Mutation caught: applying a result before a malformed derived consumption is rejected.
+test('pure reconciliation kernel isolates an invalid derived consumption as RESULT_READY_THEN_HOLD', async () => {
+  const { planMergeAuthorizationReconciliation } = await import(
+    './governance-approval-merge-reconciliation-kernel.mjs'
+  );
+  const input = clone(buildSyntheticMergeReconciliationKernelInput());
+  input.reservation.request.reservationId = 'caller-controlled-consumption-id';
+  const plan = planMergeAuthorizationReconciliation(input);
+  assert.equal(plan.outcome, 'RESULT_READY_THEN_HOLD');
+  assert.equal(
+    plan.blockingCode,
+    'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH',
+  );
+  assert.equal(plan.resultEvent.type, 'MERGE_RESULT_OBSERVED');
+  assert.equal(plan.consumption, null);
+  assert.equal(plan.consumptionRawSha256, null);
+});
+
+// Mutation caught: allowing durable read/stream validation failures to escape or append a write.
+test('public reconciliation returns stable no-write HOLDs for durable read and stream failures', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+  const sourceLedger = new Ledger();
+  const fresh = await reserve(sourceLedger, grant);
+  let readCalls = 0;
+  let casCalls = 0;
+  const readFailurePort = {
+    durabilityClass: 'SHARED_DURABLE_CAS',
+    read: async () => { readCalls += 1; throw new Error('untrusted durable read detail'); },
+    compareAndSwap: async () => { casCalls += 1; return { outcome: 'COMMITTED', committedRevision: 2 }; },
+  };
+  const readFailure = await reconcileMergeAuthorizationReservation(
+    fresh.reservation,
+    readback,
+    readFailurePort,
+    NOW,
+  );
+  assert.deepEqual(readFailure, {
+    outcome: 'HOLD',
+    blockingCode: 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED',
+    consumption: null,
+    consumptionRawSha256: null,
+    committedLedgerRevision: 0,
+  });
+  assert.deepEqual({ readCalls, casCalls }, { readCalls: 1, casCalls: 0 });
+
+  const malformedSnapshot = sourceLedger.snapshot();
+  malformedSnapshot[0].committedRevision += 1;
+  const malformedLedger = new Ledger(malformedSnapshot);
+  const malformedStream = await reconcileMergeAuthorizationReservation(
+    fresh.reservation,
+    readback,
+    malformedLedger,
+    NOW,
+  );
+  assert.equal(malformedStream.outcome, 'HOLD');
+  assert.equal(
+    malformedStream.blockingCode,
+    'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED',
+  );
+  assert.equal(malformedStream.committedLedgerRevision, 0);
+  assert.deepEqual(
+    { readCalls: malformedLedger.readCalls, casCalls: malformedLedger.casCalls },
+    { readCalls: 1, casCalls: 0 },
+  );
+});
+
+// Mutation caught: validating the clock before the mandatory durable read or leaking a native throw.
+test('invalid reconciliation clock reads durable state then returns a stable no-write HOLD', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+  const ledger = new Ledger();
+  const fresh = await reserve(ledger, grant);
+  const before = ledger.snapshot()[0];
+  const readCallsBefore = ledger.readCalls;
+  const casCallsBefore = ledger.casCalls;
+  const result = await reconcileMergeAuthorizationReservation(
+    fresh.reservation,
+    readback,
+    ledger,
+    new Date(Number.NaN),
+  );
+  assert.deepEqual(result, {
+    outcome: 'HOLD',
+    blockingCode: 'APPROVAL_NOW_INVALID',
+    consumption: null,
+    consumptionRawSha256: null,
+    committedLedgerRevision: before.committedRevision,
+  });
+  assert.equal(ledger.readCalls, readCallsBefore + 1);
+  assert.equal(ledger.casCalls, casCallsBefore);
+  const after = ledger.snapshot()[0];
+  assert.equal(after.committedRevision, before.committedRevision);
+  assert.equal(after.events.some(({ type }) => type === 'BOUNDED_HOLD'), false);
+  assert.equal(after.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+  assert.equal(after.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
+});
+
 test('caller-owned current-main capability cannot authorize public durable reconciliation', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
