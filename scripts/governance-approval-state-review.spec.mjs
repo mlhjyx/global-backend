@@ -239,6 +239,14 @@ test('pure reconciliation kernel plans result, consumption, and idempotent repla
   assert.equal(first.consumptionRawSha256, digest(first.consumption));
   assert.equal(Object.hasOwn(first, 'ledger'), false);
 
+  const descendantInput = clone(input);
+  descendantInput.readback.currentMain.sha = 'e'.repeat(40);
+  descendantInput.readback.resultReachableFromCurrentMain = true;
+  const descendant = planMergeAuthorizationReconciliation(descendantInput);
+  assert.equal(descendant.outcome, 'READY_TO_APPLY');
+  assert.equal(descendant.consumption.result_commit_sha, input.readback.resultCommitSha);
+  assert.equal(descendant.consumption.current_main.sha, descendantInput.readback.currentMain.sha);
+
   const resultEvent = { ...clone(first.resultEvent), ledgerRevision: 2 };
   const afterResult = planMergeAuthorizationReconciliation(
     buildSyntheticMergeReconciliationKernelInput({ streamFacts: { result: resultEvent } }),
@@ -265,6 +273,28 @@ test('pure reconciliation kernel plans result, consumption, and idempotent repla
   assert.deepEqual(replay.consumption, first.consumption);
   assert.equal(replay.consumptionRawSha256, first.consumptionRawSha256);
   assert.equal(Object.isFrozen(replay), true);
+
+  const conflictingResult = planMergeAuthorizationReconciliation(
+    buildSyntheticMergeReconciliationKernelInput({
+      streamFacts: {
+        result: { ...clone(resultEvent), resultCommitSha: 'e'.repeat(40) },
+      },
+    }),
+  );
+  assert.equal(conflictingResult.outcome, 'HOLD');
+  assert.equal(conflictingResult.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
+  assert.equal(conflictingResult.resultEvent, null);
+
+  const revoked = planMergeAuthorizationReconciliation(
+    buildSyntheticMergeReconciliationKernelInput({
+      streamFacts: {
+        revocations: [{ effectiveAt: '2026-08-30T08:25:00.000Z' }],
+      },
+    }),
+  );
+  assert.equal(revoked.outcome, 'HOLD');
+  assert.equal(revoked.blockingCode, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
+  assert.equal(revoked.resultEvent, null);
 });
 
 test('caller-owned current-main capability cannot authorize public durable reconciliation', async () => {
@@ -313,7 +343,7 @@ test('caller-owned current-main capability cannot authorize public durable recon
   }
 });
 
-test('I1 reconciliation accepts a merge result reachable from a later current-main descendant', async () => {
+test('public reconciliation denies a later current-main descendant without private admission', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
   readback.currentMain.sha = 'e'.repeat(40);
@@ -321,9 +351,11 @@ test('I1 reconciliation accepts a merge result reachable from a later current-ma
   const ledger = new Ledger();
   const fresh = await reserve(ledger, grant);
   const result = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
-  assert.equal(result.outcome, 'CONSUMPTION_RECORDED');
-  assert.equal(result.consumption.result_commit_sha, readback.resultCommitSha);
-  assert.equal(result.consumption.current_main.sha, readback.currentMain.sha);
+  assert.equal(result.outcome, 'HOLD');
+  assert.equal(result.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
+  const stream = await ledger.read(fresh.reservation.key);
+  assert.equal(stream.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+  assert.equal(stream.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
 });
 
 test('malformed verifier repository names HOLD without appending merge result or consumption', async () => {
@@ -349,7 +381,7 @@ test('malformed verifier repository names HOLD without appending merge result or
   }
 });
 
-test('I2 reconciliation HOLDs out-of-window readback and post-consumption revocation', async () => {
+test('public reconciliation prioritizes stale and revoked facts before private admission', async () => {
   const grant = await readJson('valid-grant.json');
   const lateReadback = await readJson('current-main-readback.json');
   lateReadback.currentMain.readAt = '2026-08-30T10:30:00.000Z';
@@ -364,7 +396,14 @@ test('I2 reconciliation HOLDs out-of-window readback and post-consumption revoca
   const readback = await readJson('current-main-readback.json');
   const ledger = new Ledger();
   const reservation = await reserve(ledger, grant);
-  assert.equal((await reconcileMergeAuthorizationReservation(reservation.reservation, readback, ledger, NOW)).outcome, 'CONSUMPTION_RECORDED');
+  const unadmitted = await reconcileMergeAuthorizationReservation(
+    reservation.reservation,
+    readback,
+    ledger,
+    NOW,
+  );
+  assert.equal(unadmitted.outcome, 'HOLD');
+  assert.equal(unadmitted.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
   const key = reservation.reservation.key;
   const revision = ledger.snapshot()[0].committedRevision;
   await ledger.compareAndSwap({
@@ -383,6 +422,9 @@ test('I2 reconciliation HOLDs out-of-window readback and post-consumption revoca
   assert.equal(late.blockingCode, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
   assert.equal(revoked.outcome, 'HOLD');
   assert.equal(revoked.blockingCode, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
+  const stream = await ledger.read(key);
+  assert.equal(stream.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+  assert.equal(stream.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
 });
 
 test('M1 request and reservation identifiers fail before the first durable append', async () => {

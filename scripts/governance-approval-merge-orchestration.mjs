@@ -32,6 +32,8 @@ const RESERVATION_KEYS = Object.freeze([
 ]);
 const KEY_KEYS = Object.freeze(['repositoryId', 'singleUseNonce']);
 const freshDispatchCapabilities = new WeakSet();
+// Intentionally uninhabited: this module exposes no mint or registration path.
+const trustedCurrentMainReadbackCapabilities = new WeakSet();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
 const nowIso = (now) => {
@@ -346,6 +348,7 @@ export const reconcileMergeAuthorizationReservation = async (
   readback,
   ledger,
   now,
+  currentMainReadbackCapability,
 ) => {
   const observedAt = nowIso(now);
   let observed;
@@ -359,6 +362,32 @@ export const reconcileMergeAuthorizationReservation = async (
   }
   let stream = observed.stream;
   let facts = observed.facts;
+  const diagnosticPlan = planMergeAuthorizationReconciliation({
+    reservation,
+    readback,
+    streamFacts: { ...facts, consumptionEvent: null },
+    observedAt,
+  });
+  if (diagnosticPlan.outcome === 'HOLD') {
+    return appendHold(
+      reservation,
+      stream,
+      facts,
+      ledger,
+      diagnosticPlan.blockingCode,
+      observedAt,
+    );
+  }
+  if (!trustedCurrentMainReadbackCapabilities.has(currentMainReadbackCapability)) {
+    return appendHold(
+      reservation,
+      stream,
+      facts,
+      ledger,
+      'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED',
+      observedAt,
+    );
+  }
   const plan = planMergeAuthorizationReconciliation({
     reservation,
     readback,

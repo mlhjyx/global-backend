@@ -947,21 +947,24 @@ test('response loss before or after provider ACK becomes durable ACK_UNKNOWN and
   }
 });
 
-test('ACK_UNKNOWN reconciles exact current-main facts into separate immutable consumption', async () => {
+test('ACK_UNKNOWN requires admitted current-main readback before durable result or consumption', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
   const ledger = new SharedDurableCasLedgerHarness();
   const fresh = await reserve(ledger, grant);
   await executeReservedMerge(fresh.reservation, { requestMerge: async () => { throw new Error('timeout'); } }, ledger, DISPATCH_NOW);
   const result = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
-  assert.equal(result.outcome, 'CONSUMPTION_RECORDED');
-  assert.equal(result.consumption.grant_id, grant.grant_id);
-  assert.equal(result.consumption.grant_raw_sha256, digest(grant));
-  assert.equal(result.consumption.nonce_ledger_reserved_revision, fresh.reservedLedgerRevision);
-  assert.equal(result.consumptionRawSha256, digest(result.consumption));
+  assert.equal(result.outcome, 'HOLD');
+  assert.equal(result.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
+  assert.equal(result.consumption, null);
+  assert.equal(result.consumptionRawSha256, null);
   const retried = await reconcileMergeAuthorizationReservation(fresh.reservation, readback, ledger, NOW);
-  assert.deepEqual(retried.consumption, result.consumption);
+  assert.deepEqual(retried, result);
   assert.equal(retried.committedLedgerRevision, result.committedLedgerRevision);
+  const stream = ledger.snapshot()[0];
+  assert.equal(stream.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+  assert.equal(stream.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
+  assert.equal(stream.events.filter(({ type }) => type === 'BOUNDED_HOLD').length, 1);
 });
 
 test('missing, process-memory-only, workflow-artifact-only, and non-CAS ledgers fail before merge', async () => {
