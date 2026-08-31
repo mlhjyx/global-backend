@@ -42,6 +42,19 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
       new Set([...(buildStatus.required ?? []), 'costSummary']),
     );
   }
+  const technicalBudgetQuote =
+    document.components?.schemas?.SiteBuildTechnicalBudgetQuoteResponseDto;
+  if (technicalBudgetQuote && !('$ref' in technicalBudgetQuote)) {
+    // Swagger DTO metadata does not emit a closed-object marker. The quote is
+    // a signed-authority input, so unknown commercial/balance fields must not
+    // become part of its public contract through permissive code generation.
+    technicalBudgetQuote.additionalProperties = false;
+  }
+  const workspaceTechnicalBudgetQuote =
+    document.components?.schemas?.WorkspaceTechnicalBudgetQuoteResponseDto;
+  if (workspaceTechnicalBudgetQuote && !('$ref' in workspaceTechnicalBudgetQuote)) {
+    workspaceTechnicalBudgetQuote.additionalProperties = false;
+  }
   return document;
 }
 

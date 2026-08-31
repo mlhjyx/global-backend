@@ -8,6 +8,8 @@ import {
   ExecutionContext,
   ProviderContactRecord,
 } from '../provider-contract';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { MAX_CONTACTS_PER_DISCOVERY_ADAPTER } from '../execution-envelope';
 import { pickBestByName } from '../name-match';
 import { normalizePersonName } from '../person-name';
 
@@ -16,7 +18,6 @@ const ANNUAIRE_BASE = 'https://annuaire-entreprises.data.gouv.fr/entreprise/';
 const ALIGN_MIN_SCORE = 0.9;
 const ALIGN_MIN_MARGIN = 0.1;
 // 每公司硬上限（按归一名去重后）——防大公司负责人爆量涌入。
-const MAX_DIRIGEANTS_PER_COMPANY = 25;
 
 /**
  * FR 判定（🔴 **country 优先**，防跨辖区挂错）：
@@ -128,11 +129,12 @@ export class InpiRneContactProvider implements ContactDiscoveryAdapter {
         if (!nameKey || seen.has(nameKey)) continue; // 归一名去重（同名负责人不重复采）
         seen.add(nameKey);
         contacts.push(rec);
-        if (contacts.length >= MAX_DIRIGEANTS_PER_COMPANY) break;
+        if (contacts.length >= MAX_CONTACTS_PER_DISCOVERY_ADAPTER) break;
       }
       this.log(`✓ ${company.name} → ${best.item.siren} (${best.score.toFixed(2)}): ${contacts.length} dirigeants`);
       return { contacts, costCents: 0 };
     } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
       this.log(`discover failed: ${String(err).slice(0, 150)}`);
       return { contacts: [], costCents: 0 };

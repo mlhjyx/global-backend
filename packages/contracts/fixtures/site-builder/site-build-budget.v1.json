@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "site-builder-budget-golden-vectors/v1",
+  "frozenNow": "2026-08-29T00:00:00.000Z",
+  "vectors": [
+    {
+      "id": "unicode-intake-no-site",
+      "request": {
+        "operation": "intake",
+        "workspaceId": "11111111-1111-4111-8111-111111111111",
+        "siteId": null,
+        "input": {
+          "company": {
+            "nameZh": "中和泵业有限公司",
+            "nameEn": "Zhonghe Pumps"
+          },
+          "industry": "isic-2813",
+          "products": [
+            "耐腐蚀离心泵",
+            "高压计量泵"
+          ],
+          "targetMarkets": [
+            "DE",
+            "JP"
+          ],
+          "hasWebsite": false,
+          "websiteUrl": null,
+          "businessEmail": "sales@zhonghe.example.test"
+        }
+      },
+      "expected": {
+        "requestSha256": "ed2df4d829fce25d38a2d3eff813952f92e8b9f87ea461c93a5a04995cd19e08",
+        "normalizedRequest": null,
+        "quote": {
+          "schemaVersion": "site-builder-technical-budget-quote/v1",
+          "operation": "intake",
+          "siteId": null,
+          "requestSha256": "ed2df4d829fce25d38a2d3eff813952f92e8b9f87ea461c93a5a04995cd19e08",
+          "currency": "USD",
+          "unit": "microusd",
+          "requiredCapMicrousd": "1",
+          "policyRevision": "532c9d257cbacc98b5d9fa0459fb83b2c8a707b5aa97dd06434eaef340c54f90",
+          "expiresAt": "2026-08-29T00:05:00.000Z"
+        },
+        "protectedHeader": {
+          "alg": "RS256",
+          "kid": "site-builder-golden-v1",
+          "typ": "site-build-budget-grant+jwt"
+        },
+        "claims": {
+          "iss": "https://saas.example.test/",
+          "aud": "global-backend:site-builder-budget",
+          "jti": "33333333-3333-4333-8333-333333333333",
+          "schema_version": "site-builder-budget-grant/v1",
+          "purpose": "site_builder.build_run",
+          "operation": "intake",
+          "workspace_id": "11111111-1111-4111-8111-111111111111",
+          "request_sha256": "ed2df4d829fce25d38a2d3eff813952f92e8b9f87ea461c93a5a04995cd19e08",
+          "currency": "USD",
+          "unit": "microusd",
+          "cap_microusd": "1",
+          "iat": 1787961600,
+          "nbf": 1787961600,
+          "exp": 1787961900
+        }
+      }
+    },
+    {
+      "id": "refurbish-canonical-locales",
+      "request": {
+        "operation": "refurbish",
+        "workspaceId": "11111111-1111-4111-8111-111111111111",
+        "siteId": "4c3c1f5a-8f41-4d78-9d61-5d4a59b05521",
+        "input": {
+          "scope": "site",
+          "options": {
+            "locales": [
+              "EN",
+              "de-de"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "requestSha256": "0d1cf50c2a48a9f5781ffa37bf3662ff2e5d5bf26c4604bc66f2ffc3bd7bc5ea",
+        "normalizedRequest": {
+          "scope": "site",
+          "options": {
+            "locales": [
+              "en",
+              "de-DE"
+            ]
+          }
+        },
+        "quote": {
+          "schemaVersion": "site-builder-technical-budget-quote/v1",
+          "operation": "refurbish",
+          "siteId": "4c3c1f5a-8f41-4d78-9d61-5d4a59b05521",
+          "requestSha256": "0d1cf50c2a48a9f5781ffa37bf3662ff2e5d5bf26c4604bc66f2ffc3bd7bc5ea",
+          "currency": "USD",
+          "unit": "microusd",
+          "requiredCapMicrousd": "4820000",
+          "policyRevision": "6b5d2933a294367c9eaf8abb4159e733466bab6a3b9a10022852e3e50f9f157b",
+          "expiresAt": "2026-08-29T00:05:00.000Z"
+        },
+        "protectedHeader": {
+          "alg": "RS256",
+          "kid": "site-builder-golden-v1",
+          "typ": "site-build-budget-grant+jwt"
+        },
+        "claims": {
+          "iss": "https://saas.example.test/",
+          "aud": "global-backend:site-builder-budget",
+          "jti": "44444444-4444-4444-8444-444444444444",
+          "schema_version": "site-builder-budget-grant/v1",
+          "purpose": "site_builder.build_run",
+          "operation": "refurbish",
+          "workspace_id": "11111111-1111-4111-8111-111111111111",
+          "site_id": "4c3c1f5a-8f41-4d78-9d61-5d4a59b05521",
+          "request_sha256": "0d1cf50c2a48a9f5781ffa37bf3662ff2e5d5bf26c4604bc66f2ffc3bd7bc5ea",
+          "currency": "USD",
+          "unit": "microusd",
+          "cap_microusd": "4820000",
+          "iat": 1787961600,
+          "nbf": 1787961600,
+          "exp": 1787961900
+        }
+      }
+    }
+  ]
+}

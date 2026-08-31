@@ -35,6 +35,8 @@ export interface ExecutionContext {
   workspaceId: string;
   runId?: string;
   correlationId?: string;
+  /** Auditable Art. 6 basis for a physical operation that processes personal data. */
+  lawfulBasis?: LawfulBasis;
   /**
    * Optional acquisition-only terminal authorization. Providers must thread it
    * into every ToolContext/AiContext so each physical external call rechecks

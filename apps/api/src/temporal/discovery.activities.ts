@@ -4,6 +4,12 @@ import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
+import {
+  MAX_COMPANY_DISCOVERY_ADAPTERS,
+  MAX_DISCOVERY_FIT_COMPANIES,
+  MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROVIDER_RECORDS,
+} from '../discovery/execution-envelope';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
@@ -256,8 +262,15 @@ function executionResult(
   };
 }
 
-const PER_SOURCE_LIMIT = 25; // sandbox 阶段每源上限；真源接入后由预算/配额驱动（PRD 7.4.8）
+const PER_SOURCE_LIMIT = MAX_DISCOVERY_PROVIDER_RECORDS;
+export const MAX_DISCOVERY_PROVIDER_ADAPTERS =
+  MAX_COMPANY_DISCOVERY_ADAPTERS;
 const ENRICH_LIMIT = 50; // 单 run 富集上限（护栏；GLEIF 限流）
+export {
+  MAX_DISCOVERY_FIT_COMPANIES,
+  MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROVIDER_RECORDS,
+};
 const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 const WATCH_REGISTER_LIMIT = 12; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
@@ -484,6 +497,12 @@ export function createDiscoveryActivities(deps: {
         deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
       );
       if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
+      if (adapters.length > MAX_DISCOVERY_PROVIDER_ADAPTERS) {
+        throw ApplicationFailure.nonRetryable(
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+        );
+      }
       for (const adapter of adapters) {
         assertProductDiscoveryProvenance({ providerKey: adapter.key });
       }
@@ -1019,6 +1038,12 @@ export function createDiscoveryActivities(deps: {
         }));
         return { icpBrief, companies };
       });
+      if (companies.length > MAX_DISCOVERY_FIT_COMPANIES) {
+        throw ApplicationFailure.nonRetryable(
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+        );
+      }
 
       const verdicts: Record<string, number> = {
         match: 0,

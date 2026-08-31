@@ -155,7 +155,11 @@ describe('DiscoveryService synthetic provenance read quarantine', () => {
     };
 
     await expect(
-      serviceWithTx(tx, { routeContactDiscovery }).discoverContacts(ctx, 'company-synthetic'),
+      serviceWithTx(tx, { routeContactDiscovery }).discoverContacts(
+        ctx,
+        'company-synthetic',
+        { lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42' } },
+      ),
     ).rejects.toMatchObject({
       response: { error: { code: 'SYNTHETIC_PROVENANCE_QUARANTINED' } },
     });
@@ -164,5 +168,28 @@ describe('DiscoveryService synthetic provenance read quarantine', () => {
       where: { entityType: 'company', entityId: 'company-synthetic' },
       select: { providerKey: true, license: true },
     });
+  });
+});
+
+describe('DiscoveryService technical execution envelope', () => {
+  it.each([
+    ['contact', { maxContacts: 26 }],
+    ['probe', { maxProbe: 9 }],
+  ])('rejects an internal email-guess request above the %s cap before grant consumption or database work', async (_kind, opts) => {
+    const consumeWorkspaceGrant = vi.fn();
+    const withWorkspace = vi.fn();
+    const service = new DiscoveryService(
+      { withWorkspace } as never,
+      {} as never,
+      { consumeWorkspaceGrant } as never,
+    );
+
+    await expect(
+      service.guessEmailsForCompany(ctx, 'company-1', opts),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
+    });
+    expect(consumeWorkspaceGrant).not.toHaveBeenCalled();
+    expect(withWorkspace).not.toHaveBeenCalled();
   });
 });

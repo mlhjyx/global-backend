@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,10 +7,16 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
 import { EmailGuesser, GuessResult } from './email-guesser';
 import { persistGuessedEmail, readbackGuessedEmail } from './email-guess-persist';
-import { buildGuessTargets } from './email-guess-targets';
+import {
+  assertContactDiscoveryAdapterFanout,
+  assertContactDiscoveryResultBound,
+  assertEmailGuessContactBound,
+  assertEmailProbeBound,
+  buildGuessTargets,
+} from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
-import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis,
+import { evaluateEmailGate, isValidLawfulBasis, resolveEmailVerificationPolicy, stampLawfulBasis,
 } from './compliance/email-verification-gate';
 import {
   canonicalizeSuppressionValue,
@@ -230,8 +236,22 @@ export class DiscoveryService {
   async discoverContacts(
     ctx: RequestContext,
     companyId: string,
+    opts?: { lawfulBasis?: LawfulBasis },
     compactJws?: string,
   ) {
+    if (!isValidLawfulBasis(opts?.lawfulBasis)) {
+      throw new ForbiddenException({
+        error: {
+          code: 'CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED',
+          message: 'an explicit lawful basis is required for named-contact discovery',
+        },
+      });
+    }
+    const recordedBasis = stampLawfulBasis(
+      opts.lawfulBasis,
+      ctx.userId,
+      new Date().toISOString(),
+    );
     const binding = await this.authority.consumeWorkspaceGrant({
       compactJws,
       identity: ctx,
@@ -277,6 +297,7 @@ export class DiscoveryService {
         });
       }
       const adapters = await this.providers.routeContactDiscovery(tx as never);
+      assertContactDiscoveryAdapterFanout(adapters.length);
       if (!adapters.length) {
         throw new ConflictException({
           error: {
@@ -341,10 +362,12 @@ export class DiscoveryService {
               workspaceId: binding.scopeKey,
               runId: accountKey,
               correlationId: companyId,
+              lawfulBasis: recordedBasis,
               authorizeExternalAction,
               onDurableReceipt: captureContactReceipt,
             },
           );
+          assertContactDiscoveryResultBound(result.contacts.length);
           perAdapter.push({
             key: adapter.key,
             contacts: result.contacts,
@@ -388,6 +411,7 @@ export class DiscoveryService {
               adapterKey: pa.key,
               contacts: pa.contacts,
               suppressedEmails: loaded.suppressedEmails,
+              lawfulBasis: recordedBasis,
             });
             skippedSuppressed += res.skippedSuppressed;
             skippedInvalid += res.skippedInvalid;
@@ -444,6 +468,9 @@ export class DiscoveryService {
     compactJws?: string,
     publicRequestBody?: GuessEmailsHttpRequestBody,
   ) {
+    // Controller DTO 不是唯一入口：内部调用也必须在 grant、DB 或 SMTP 之前接受同一上界。
+    assertEmailGuessContactBound(opts?.maxContacts);
+    assertEmailProbeBound(opts?.maxProbe);
     const binding = await this.authority.consumeWorkspaceGrant({
       compactJws,
       identity: ctx,

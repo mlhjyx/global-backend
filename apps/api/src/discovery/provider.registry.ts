@@ -27,6 +27,10 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { readPatentCache, enqueuePatentLookup } from '../adapters/patent-inventor-cache';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import providerSourceClassManifest from './provider-source-classes.json';
+import {
+  MAX_COMPANY_DISCOVERY_ADAPTERS,
+  MAX_CONTACT_DISCOVERY_ADAPTERS,
+} from './execution-envelope';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -131,6 +135,13 @@ export class DiscoveryProviderRegistry {
     //  → attributes.digital_footprint.* / .structured_harvest.*，喂 Intent/Reachability 打分。零付费。
     this.signalEnrichers.push(new DigitalFootprintProvider({ broker }));
     this.signalEnrichers.push(new StructuredHarvestProvider({ broker }));
+
+    if (this.discovery.length > MAX_COMPANY_DISCOVERY_ADAPTERS) {
+      throw new Error('company discovery adapter envelope drift');
+    }
+    if (this.contacts.length > MAX_CONTACT_DISCOVERY_ADAPTERS) {
+      throw new Error('contact discovery adapter envelope drift');
+    }
 
     this.assertDiscoverySourceClasses();
   }

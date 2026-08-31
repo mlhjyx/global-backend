@@ -5,9 +5,14 @@ import { ExecutionBudgetAuthorityService } from './execution-budget-authority.se
 import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
 import { PlatformExecutionBudgetAuthorityIngestionService } from './platform-authority-ingestion.service';
 import { ExecutionBudgetAuthorityReadinessContributors } from '../runtime/managed-dependency-readiness';
+import { AuthModule } from '../auth/auth.module';
+import { WorkspaceTechnicalBudgetQuoteController } from './workspace-technical-budget-quote.controller';
+import { WorkspaceTechnicalBudgetQuoteService } from './workspace-technical-budget-quote';
+import { resolveWorkspaceTechnicalBudgetEnvelope } from './workspace-technical-budget-envelope';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AuthModule],
+  controllers: [WorkspaceTechnicalBudgetQuoteController],
   providers: [
     {
       provide: ExecutionBudgetGrantVerifier,
@@ -17,10 +22,18 @@ import { ExecutionBudgetAuthorityReadinessContributors } from '../runtime/manage
     ExecutionBudgetAuthorityService,
     PlatformExecutionBudgetAuthorityIngestionService,
     ExecutionBudgetAuthorityReadinessContributors,
+    {
+      provide: WorkspaceTechnicalBudgetQuoteService,
+      useFactory: () =>
+        new WorkspaceTechnicalBudgetQuoteService({
+          resolveEnvelope: resolveWorkspaceTechnicalBudgetEnvelope,
+        }),
+    },
   ],
   exports: [
     ExecutionBudgetAuthorityService,
     PlatformExecutionBudgetAuthorityIngestionService,
+    WorkspaceTechnicalBudgetQuoteService,
   ],
 })
 export class ExecutionBudgetModule {}
