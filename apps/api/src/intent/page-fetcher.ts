@@ -2,7 +2,10 @@ import { isAllowedByRobots } from '../adapters/robots';
 import type { CrawlHtmlResult } from '../adapters/web-crawler';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { ToolContext } from '../tools/tool-contract';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 /**
@@ -31,7 +34,7 @@ function forwardPageReceipt(
 ): void {
   if (!receipt) return;
   if (!context?.onDurableReceipt) {
-    throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+    throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   }
   context.onDurableReceipt('crawl4ai.render', receipt);
 }

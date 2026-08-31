@@ -8,6 +8,7 @@ import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
 import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 
 const DUE_LIMIT = 50;
 
@@ -71,7 +72,7 @@ export function createAcquisitionActivities(deps: {
         receipt: DurableExecutionReceipt,
       ): void => {
         if (producerId !== 'tradefair.algolia' && producerId !== 'mapyourshow.fetch') {
-          throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+          throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
         }
         durableReceipts.push({ producerId, receipt });
       };

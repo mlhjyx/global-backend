@@ -134,11 +134,15 @@ function fakePrisma(rows: unknown[][]): PrismaService {
 
 function rawQueryMarkerError(
   marker: string,
+  options?: { prismaCode?: string; sqlState?: string; metaMessage?: string },
 ): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError("raw query failed", {
-    code: "P2010",
+    code: options?.prismaCode ?? "P2010",
     clientVersion: "test",
-    meta: { code: "P0001", message: `ERROR: ${marker}` },
+    meta: {
+      code: options?.sqlState ?? "P0001",
+      message: options?.metaMessage ?? `ERROR: ${marker}`,
+    },
   });
 }
 
@@ -342,7 +346,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
         fn({
           $queryRaw: vi.fn(async (query) => {
             queries.push(query);
-            if (queries.length === 2) {
+            if (queries.length === 3) {
               return [{ status: "APPLIED", ack_json: artifactAck(query.values ?? []) }];
             }
             return [
@@ -415,6 +419,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
       null,
       null,
     ]);
+    expect(queries[1]?.strings?.join("")).toContain(
+      "lock_execution_domain_ack_authority_first_v1",
+    );
+    expect(queries[2]?.strings?.join("")).toContain(
+      "apply_execution_domain_ack_v1",
+    );
   });
 
   it("rejects artifact receipts when the locked row omits or drifts from the submitted manifest reference", async () => {
@@ -587,6 +597,86 @@ describe("PostgresBudgetStore artifact recovery", () => {
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
+  });
+
+  it("never invokes accessors while deciding whether a Prisma rejection is trusted", async () => {
+    let metaGetterCalls = 0;
+    const hostile = rawQueryMarkerError("GENERIC_OPERATION_ARTIFACT_INVALID");
+    Object.defineProperty(hostile, "meta", {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        metaGetterCalls += 1;
+        return {
+          code: "P0001",
+          message: "ERROR: GENERIC_OPERATION_ARTIFACT_INVALID",
+        };
+      },
+    });
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) =>
+        fn({
+          $queryRaw: vi.fn(async () => {
+            throw hostile;
+          }),
+        } as never),
+      ),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.settleArtifactManifest(
+      {
+        workspaceId: TEST_WORKSPACE_ID,
+        accountKey: "artifact-account",
+        operationId: ARTIFACT_REFERENCE.operationId,
+        estimatedMicrousd: 170_000n,
+        replay: false,
+      },
+      130_000n,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+      ARTIFACT_DOMAIN_ACK,
+    )).rejects.toMatchObject({ code: "BUDGET_STORE_UNAVAILABLE" });
+    expect(metaGetterCalls).toBe(0);
+  });
+
+  it.each([
+    rawQueryMarkerError("GENERIC_OPERATION_ARTIFACT_INVALID", {
+      metaMessage: "ERROR: GENERIC_OPERATION_ARTIFACT_INVALID; raw SQL detail",
+    }),
+    rawQueryMarkerError("GENERIC_OPERATION_ARTIFACT_INVALID", {
+      prismaCode: "P2000",
+    }),
+    rawQueryMarkerError("SOME_OTHER_DATABASE_MARKER"),
+  ])("redacts non-whitelisted Prisma artifact failures", async (failure) => {
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) =>
+        fn({
+          $queryRaw: vi.fn(async () => {
+            throw failure;
+          }),
+        } as never),
+      ),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    const result = store.settleArtifactManifest(
+      {
+        workspaceId: TEST_WORKSPACE_ID,
+        accountKey: "artifact-account",
+        operationId: ARTIFACT_REFERENCE.operationId,
+        estimatedMicrousd: 170_000n,
+        replay: false,
+      },
+      130_000n,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+      ARTIFACT_DOMAIN_ACK,
+    );
+    await expect(result).rejects.toMatchObject({
+      code: "BUDGET_STORE_UNAVAILABLE",
+    });
+    await expect(result).rejects.not.toBe(failure);
   });
 
   it("redacts untrusted database details from artifact transitions", async () => {

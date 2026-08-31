@@ -1,7 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { isExecutionControlError } from './execution-control-error';
+import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from './execution-control-error';
 
 describe('isExecutionControlError', () => {
+  it('preserves a bounded structured code directly and through Temporal conversion', () => {
+    const direct = new ExecutionControlError(
+      'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+    );
+    const temporal = ApplicationFailure.fromError(direct);
+
+    expect(direct).toMatchObject({
+      code: 'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+      name: 'ExecutionControlError',
+      type: 'ExecutionControlError',
+      message: 'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+    });
+    expect(temporal.type).toBe('ExecutionControlError');
+    expect(isExecutionControlError(direct)).toBe(true);
+    expect(isExecutionControlError(temporal)).toBe(true);
+    expect(() => new ExecutionControlError('ordinary failure')).toThrow(
+      'EXECUTION_CONTROL_ERROR_CODE_INVALID',
+    );
+    const RuntimeConstructor = ExecutionControlError as unknown as new (
+      code: string,
+      customMessage: string,
+    ) => ExecutionControlError;
+    expect(
+      new RuntimeConstructor(
+        'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+        'Bearer custom-message-must-not-survive',
+      ).message,
+    ).toBe('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+  });
+
   it.each([
     'EXECUTION_BUDGET_GRANT_EXPIRED',
     'BUDGET_STORE_UNAVAILABLE',
@@ -27,6 +61,123 @@ describe('isExecutionControlError', () => {
       },
     };
     expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('classifies the actual Temporal 1.20.3 ActivityFailure/ApplicationFailure shapes', () => {
+    const ordinary = new ActivityFailure(
+      'activity failed',
+      'mineDomain',
+      'activity-1',
+      'NON_RETRYABLE_FAILURE',
+      'worker-1',
+      new ApplicationFailure(
+        'provider unavailable',
+        'ProviderUnavailableError',
+        false,
+        [{ sensitive: 'must-not-be-read' }],
+      ),
+    );
+    const control = new ActivityFailure(
+      'activity failed',
+      'mineDomain',
+      'activity-2',
+      'NON_RETRYABLE_FAILURE',
+      'worker-1',
+      new ApplicationFailure(
+        'control message is not classification input',
+        'BudgetOperationReplayError',
+        true,
+        [{ sensitive: 'must-not-be-read' }],
+      ),
+    );
+
+    expect(Reflect.ownKeys(ordinary)).toEqual([
+      'stack',
+      'message',
+      'cause',
+      'failure',
+      'activityType',
+      'activityId',
+      'retryState',
+      'identity',
+    ]);
+    expect(Reflect.ownKeys(ordinary.cause!)).toEqual([
+      'stack',
+      'message',
+      'cause',
+      'failure',
+      'type',
+      'nonRetryable',
+      'details',
+      'nextRetryDelay',
+      'category',
+    ]);
+    expect(isExecutionControlError(ordinary)).toBe(false);
+    expect(isExecutionControlError(control)).toBe(true);
+  });
+
+  it('recognizes the bounded legacy Temporal 1.20.x Error/message encoding', () => {
+    const legacyApplicationFailure = ApplicationFailure.fromError(
+      new Error('EXECUTION_BUDGET_AUTHORITY_REVOKED'),
+    );
+    const legacyActivityFailure = new ActivityFailure(
+      'activity failed',
+      'mineDomain',
+      'activity-legacy',
+      'NON_RETRYABLE_FAILURE',
+      'worker-legacy',
+      legacyApplicationFailure,
+    );
+
+    expect(legacyApplicationFailure.type).toBe('Error');
+    expect(isExecutionControlError(legacyApplicationFailure)).toBe(true);
+    expect(isExecutionControlError(legacyActivityFailure)).toBe(true);
+    expect(
+      isExecutionControlError(
+        new ApplicationFailure(
+          'DOMAIN_ACK_RECEIPT_BINDING_MISMATCH',
+          '',
+          true,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not trust arbitrary Error messages or non-legacy Temporal types', () => {
+    expect(
+      isExecutionControlError(
+        new Error('EXECUTION_BUDGET_AUTHORITY_REVOKED'),
+      ),
+    ).toBe(false);
+    expect(
+      isExecutionControlError(
+        new ApplicationFailure(
+          'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+          'ProviderUnavailableError',
+          false,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it('never invokes a legacy Temporal message getter', () => {
+    let getterCalls = 0;
+    const failure = new ApplicationFailure(
+      'ordinary failure',
+      'Error',
+      false,
+    );
+    Object.defineProperty(failure, 'message', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        getterCalls += 1;
+        return 'EXECUTION_BUDGET_AUTHORITY_REVOKED';
+      },
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+    expect(getterCalls).toBe(0);
   });
 
   it('recursively recognizes Temporal ActivityFailure cause/type/message fields', () => {
@@ -62,11 +213,52 @@ describe('isExecutionControlError', () => {
       message: 'provider returned 502',
       cause: { type: 'ProviderUnavailableError', message: 'upstream down' },
     })).toBe(false);
+    expect(isExecutionControlError(new Error('ordinary provider failure'))).toBe(
+      false,
+    );
   });
 
-  it('terminates safely on cyclic failure causes', () => {
+  it('never executes an own getter and requires the caller to pass the hostile shape through', () => {
+    let getterCalls = 0;
+    const failure = Object.defineProperty({}, 'code', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 'sensitive-getter-payload';
+      },
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+    expect(getterCalls).toBe(0);
+  });
+
+  it('contains Proxy descriptor traps and requires pass-through without leaking trap text', () => {
+    const failure = new Proxy(Object.create(null), {
+      ownKeys() {
+        throw new Error('sensitive-descriptor-trap-payload');
+      },
+    });
+
+    expect(() => isExecutionControlError(failure)).not.toThrow();
+    expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('requires pass-through on cyclic failure causes', () => {
     const failure: { message: string; cause?: unknown } = { message: 'ordinary failure' };
     failure.cause = failure;
-    expect(isExecutionControlError(failure)).toBe(false);
+    expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('requires pass-through when a safe cause chain exceeds the depth bound', () => {
+    const root: { name: string; cause?: unknown } = { name: 'ActivityFailure' };
+    let cursor = root;
+    for (let index = 0; index < 14; index += 1) {
+      const next: { name: string; cause?: unknown } = {
+        name: 'ProviderUnavailableError',
+      };
+      cursor.cause = next;
+      cursor = next;
+    }
+    expect(isExecutionControlError(root)).toBe(true);
   });
 });

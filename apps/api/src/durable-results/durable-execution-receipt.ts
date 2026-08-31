@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 
 export type DurableExecutionResultStrategy =
   | 'typed_projection'
@@ -115,7 +116,7 @@ const FORBIDDEN_PAYLOAD_KEYS = Object.freeze([
 type ReceiptRecord = Record<string, unknown>;
 
 function invalid(): never {
-  throw new Error('DURABLE_EXECUTION_RECEIPT_INVALID');
+  throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_INVALID');
 }
 
 function ownDataRecord(

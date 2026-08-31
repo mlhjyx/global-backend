@@ -16,9 +16,20 @@ import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
-import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
+import {
+  executeStructuredTaskWithRuntime,
+  type RuntimeStructuredModelResult,
+} from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyReceiptForwardingFailure,
+  isDiscoveryCompanyLineageInvalid,
+  type DiscoveryCompanyReceiptCollector,
+} from '../company-discovery-lineage';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -49,6 +60,16 @@ interface ExtractedList {
   has_next_page?: boolean;
 }
 
+type MinedDirectoryRecord = Readonly<{
+  record: ProviderCompanyRecord;
+  collector: DiscoveryCompanyReceiptCollector;
+}>;
+
+type MinedDirectoryListing = Readonly<{
+  records: readonly MinedDirectoryRecord[];
+  collectors: readonly DiscoveryCompanyReceiptCollector[];
+}>;
+
 /**
  * 名录/列表发现 Provider（PRD 7.4.11；行业协会会员名录 + 展会参展商名单 + 行业目录）。
  * 管线：SearXNG 定位名录页（意图词）→ 正向信号过滤 + robots → Crawl4AI 抓列表页
@@ -59,6 +80,7 @@ interface ExtractedList {
 export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'directory';
   readonly classes: SourceClass[] = ['industry_data'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
 
   constructor(private readonly deps: {
     gateway: ModelGateway;
@@ -85,7 +107,15 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
     if (!this.deps.broker) {
       this.log('skip: broker unavailable (fail-closed, no raw egress)');
-      return { records: [], costCents: 0 };
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'directory',
+          recordCount: 0,
+          observations: [],
+        }),
+      };
     }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildDirectorySearches(query);
@@ -103,23 +133,60 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       }
     }
     const urls = [...listingUrls.keys()].slice(0, MAX_LISTING_PAGES);
-    if (!urls.length) return { records: [], costCents: 0 };
+    if (!urls.length) {
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'directory',
+          recordCount: 0,
+          observations: [],
+        }),
+      };
+    }
 
     // 2) 抓每个名录页 + 列表抽取（有限并发），记录按 name+domain 去重
     const dedup = new Map<string, ProviderCompanyRecord>();
+    const collectors: DiscoveryCompanyReceiptCollector[] = [];
+    const collectorIndexes = new Map<DiscoveryCompanyReceiptCollector, readonly number[]>();
     for (let i = 0; i < urls.length; i += CRAWL_CONCURRENCY) {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query, ctx)));
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
+        if (s.status === 'rejected' && isDiscoveryCompanyReceiptForwardingFailure(s.reason)) throw s.reason;
+        if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
         if (s.status !== 'fulfilled') continue;
-        for (const rec of s.value) {
-          const key = rec.domain ?? `n:${rec.name.toLowerCase()}`;
-          if (!dedup.has(key)) dedup.set(key, rec);
+        collectors.push(...s.value.collectors);
+        for (const item of s.value.records) {
+          const key = item.record.domain ?? `n:${item.record.name.toLowerCase()}`;
+          if (!dedup.has(key)) {
+            const recordIndex = dedup.size;
+            dedup.set(key, item.record);
+            collectorIndexes.set(
+              item.collector,
+              Object.freeze([
+                ...(collectorIndexes.get(item.collector) ?? []),
+                recordIndex,
+              ]),
+            );
+          }
         }
       }
     }
-    return { records: [...dedup.values()], costCents: 0 };
+    const records = [...dedup.values()];
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'directory',
+      recordCount: records.length,
+      observations: collectors.map((collector) =>
+        collector.finish(collectorIndexes.get(collector) ?? []),
+      ),
+    });
+    return {
+      records,
+      costCents: 0,
+      ...(lineage ? { lineage } : {}),
+    };
   }
 
   /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
@@ -137,8 +204,9 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     listUrl: string,
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
-  ): Promise<ProviderCompanyRecord[]> {
-    const out: ProviderCompanyRecord[] = [];
+  ): Promise<MinedDirectoryListing> {
+    const out: MinedDirectoryRecord[] = [];
+    const collectors: DiscoveryCompanyReceiptCollector[] = [];
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
 
@@ -172,7 +240,9 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       }
       if (text.trim().length < 200) break;
 
-      const extracted = await this.extractList(pageUrl, text, query, ctx);
+      const extraction = await this.extractList(pageUrl, text, query, ctx);
+      collectors.push(extraction.collector);
+      const extracted = extraction.data;
       if (!extracted?.is_directory || !extracted.companies?.length) {
         if (page === 0) this.log(`${pageUrl}: not a directory (llm)`);
         break; // 首页就不是名录 → 放弃；翻页中途变样 → 停
@@ -193,12 +263,15 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           )
         )
           continue;
-        out.push(mapped);
+        out.push(Object.freeze({ record: mapped, collector: extraction.collector }));
       }
       this.log(`✓ ${pageUrl}: +${extracted.companies.length} companies (page ${page + 1})`);
       pageUrl = extracted.has_next_page ? nextPageLink(text, pageUrl) : null;
     }
-    return out;
+    return Object.freeze({
+      records: Object.freeze(out),
+      collectors: Object.freeze(collectors),
+    });
   }
 
   private async extractList(
@@ -206,10 +279,20 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     text: string,
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
-  ): Promise<ExtractedList | null> {
+  ): Promise<Readonly<{
+    data: ExtractedList | null;
+    collector: DiscoveryCompanyReceiptCollector;
+  }>> {
     const contract = getTask('discovery.extract_list');
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'directory',
+      producerId: 'discovery.extract_list',
+      parentOnDurableReceipt: ctx.onDurableReceipt,
+    });
+    collector.markExpectedInvocation();
     try {
-      const result = await executeStructuredTaskWithRuntime<ExtractedList>(
+      const result: RuntimeStructuredModelResult<ExtractedList> =
+        await executeStructuredTaskWithRuntime<ExtractedList>(
         this.deps.gateway,
         {
           task: contract?.id ?? 'discovery.extract_list',
@@ -224,14 +307,24 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { ...ctx, durableResultSchema: 'discovery-extract-list/v1' },
+        {
+          ...ctx,
+          durableResultSchema: 'discovery-extract-list/v1',
+          onDurableReceipt: collector.onDurableReceipt,
+        },
         { telemetry: this.deps.runtimeTelemetry },
       );
-      return result.data;
+      return Object.freeze({ data: result.data, collector });
     } catch (err) {
-      if (isExecutionControlError(err)) throw err;
+      if (
+        collector.isForwardingFailure(err) ||
+        isExecutionControlError(err) ||
+        isDiscoveryCompanyLineageInvalid(err)
+      ) {
+        throw err;
+      }
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
-      return null;
+      return Object.freeze({ data: null, collector });
     }
   }
 }

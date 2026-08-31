@@ -26,9 +26,21 @@ import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
-import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
+import {
+  executeStructuredTaskWithRuntime,
+  type RuntimeStructuredModelResult,
+} from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyReceiptForwardingFailure,
+  isDiscoveryCompanyLineageInvalid,
+  type DiscoveryCompanyReceiptCollector,
+  type DiscoveryCompanyReceiptObservation,
+} from '../company-discovery-lineage';
 
 const PARSER_VERSION = 'public_web/v1';
 
@@ -77,6 +89,7 @@ export class PublicWebDiscoveryProvider
 {
   readonly key = 'public_web';
   readonly classes: SourceClass[] = ['public_intelligence', 'industry_data'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
 
   constructor(private readonly deps: {
     gateway: ModelGateway;
@@ -103,7 +116,15 @@ export class PublicWebDiscoveryProvider
     // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
     if (!this.deps.broker) {
       this.log('skip: broker unavailable (fail-closed, no raw egress)');
-      return { records: [], costCents: 0 };
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'public_web',
+          recordCount: 0,
+          observations: [],
+        }),
+      };
     }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
@@ -121,7 +142,8 @@ export class PublicWebDiscoveryProvider
     }
 
     const domains = [...candidates.keys()].slice(0, MAX_DOMAINS_PER_QUERY);
-    const records: ProviderCompanyRecord[] = [];
+    const dedup = new Map<string, ProviderCompanyRecord>();
+    const observations: DiscoveryCompanyReceiptObservation[] = [];
 
     // 有限并发地：抓首页 → LLM 判站 + 抽取
     for (let i = 0; i < domains.length; i += CRAWL_CONCURRENCY) {
@@ -129,10 +151,33 @@ export class PublicWebDiscoveryProvider
       const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
-        if (s.status === 'fulfilled' && s.value) records.push(s.value);
+        if (s.status === 'rejected' && isDiscoveryCompanyReceiptForwardingFailure(s.reason)) throw s.reason;
+        if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
+        if (s.status !== 'fulfilled') continue;
+        const recordIndexes: number[] = [];
+        if (s.value.record) {
+          const key = s.value.record.domain ?? s.value.record.externalId;
+          if (!dedup.has(key)) {
+            recordIndexes.push(dedup.size);
+            dedup.set(key, s.value.record);
+          }
+        }
+        if (s.value.collector) {
+          observations.push(s.value.collector.finish(recordIndexes));
+        }
       }
     }
-    return { records, costCents: 0 };
+    const records = [...dedup.values()];
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount: records.length,
+      observations,
+    });
+    return {
+      records,
+      costCents: 0,
+      ...(lineage ? { lineage } : {}),
+    };
   }
 
   /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
@@ -149,14 +194,17 @@ export class PublicWebDiscoveryProvider
     domain: string,
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
-  ): Promise<ProviderCompanyRecord | null> {
+  ): Promise<Readonly<{
+    record: ProviderCompanyRecord | null;
+    collector?: DiscoveryCompanyReceiptCollector;
+  }>> {
     const homeUrl = `https://${domain}/`;
     // 合规闸门（DAT-011）：robots 禁抓则放弃，不换 UA 硬闯（robots.ts 有缓存；工具内亦权威强制）
     if (!(await isAllowedByRobots(homeUrl, {
         authorizeExternalAction: ctx.authorizeExternalAction,
       }))) {
       this.log(`skip ${domain}: robots disallow`);
-      return null;
+      return Object.freeze({ record: null });
     }
     let text: string;
     try {
@@ -173,45 +221,71 @@ export class PublicWebDiscoveryProvider
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
-      this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
-      return null; // 站点不可达/闸门拒绝 → 放弃该候选
+      this.log('skip: crawl failed (ERROR)');
+      return Object.freeze({ record: null }); // 站点不可达/闸门拒绝 → 放弃该候选
     }
     if (text.trim().length < 200) {
       this.log(`skip ${domain}: too little text (${text.trim().length})`);
-      return null;
+      return Object.freeze({ record: null });
     }
 
     const contract = getTask('discovery.extract_company');
-    const result = await executeStructuredTaskWithRuntime<ExtractedCompany>(
-      this.deps.gateway,
-      {
-        task: contract?.id ?? 'discovery.extract_company',
-        prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
-          filters: query.filters,
-          keywords: query.keywords,
-        }).slice(0, 1200)}\n\n网页文本（URL: ${homeUrl}）：\n${text}`,
-        system: contract?.description,
-        model: contract?.model,
-        schema: contract?.outputSchema ?? { required: ['is_company_site'] },
-      },
-      // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-      { ...ctx, durableResultSchema: 'discovery-extract-company/v1' },
-      { telemetry: this.deps.runtimeTelemetry },
-    );
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+      parentOnDurableReceipt: ctx.onDurableReceipt,
+    });
+    collector.markExpectedInvocation();
+    let result: RuntimeStructuredModelResult<ExtractedCompany>;
+    try {
+      result = await executeStructuredTaskWithRuntime<ExtractedCompany>(
+        this.deps.gateway,
+        {
+          task: contract?.id ?? 'discovery.extract_company',
+          prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
+            filters: query.filters,
+            keywords: query.keywords,
+          }).slice(0, 1200)}\n\n网页文本（URL: ${homeUrl}）：\n${text}`,
+          system: contract?.description,
+          model: contract?.model,
+          schema: contract?.outputSchema ?? { required: ['is_company_site'] },
+        },
+        // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
+        {
+          ...ctx,
+          durableResultSchema: 'discovery-extract-company/v1',
+          onDurableReceipt: collector.onDurableReceipt,
+        },
+        { telemetry: this.deps.runtimeTelemetry },
+      );
+    } catch (error) {
+      if (
+        collector.isForwardingFailure(error) ||
+        isExecutionControlError(error) ||
+        isDiscoveryCompanyLineageInvalid(error)
+      ) {
+        throw error;
+      }
+      this.log('skip: extract failed (ERROR)');
+      return Object.freeze({ record: null, collector });
+    }
     const out = result.data;
     if (!out?.is_company_site || !out.name?.trim()) {
       this.log(`skip ${domain}: not a company site (llm)`);
-      return null;
+      return Object.freeze({ record: null, collector });
     }
     this.log(`✓ ${domain}: ${out.name}`);
 
-    return mapPublicWebCompanyToRecord({
-      domain,
-      homeUrl,
-      sourceText: text,
-      extracted: out,
-      sourceClass: query.sourceClass,
-      fetchedAt: new Date().toISOString(),
+    return Object.freeze({
+      record: mapPublicWebCompanyToRecord({
+        domain,
+        homeUrl,
+        sourceText: text,
+        extracted: out,
+        sourceClass: query.sourceClass,
+        fetchedAt: new Date().toISOString(),
+      }),
+      collector,
     });
   }
 

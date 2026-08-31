@@ -6,8 +6,21 @@ import {
   rawPayloadHash,
   rawSourceIngestLimits,
   reconcileRawSourceBatch,
+  resolveRawSourceBatchByIndex,
   type RawSourcePolicySnapshot,
 } from "./raw-source-ingestion";
+
+function comparableRawRow(row: {
+  fetchedAt: Date | null;
+  expiresAt: Date;
+  [key: string]: unknown;
+}) {
+  return {
+    ...row,
+    fetchedAt: row.fetchedAt?.toISOString() ?? null,
+    expiresAt: row.expiresAt.toISOString(),
+  };
+}
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const LIMITS = Object.freeze({
@@ -1181,6 +1194,544 @@ describe("Raw Source v2 ingestion boundary", () => {
         ],
       ),
     ).toMatchObject({ rows: [], duplicateCount: 1 });
+  });
+
+  describe("index-preserving reconciliation", () => {
+    it("returns one frozen resolution per original accepted, quarantined, and rejected index", () => {
+      const accepted = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const quarantined = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: [{ ...POLICIES[0]!, reviewStatus: "SUSPENDED" }],
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const rejected = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ unknown: "not governed" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+
+      const resolutions = resolveRawSourceBatchByIndex(
+        [accepted, accepted, quarantined, rejected],
+        [],
+      );
+
+      expect(
+        resolutions.map((resolution) =>
+          resolution.kind === "WRITE"
+            ? { ...resolution, row: comparableRawRow(resolution.row) }
+            : resolution,
+        ),
+      ).toEqual([
+        { recordIndex: 0, kind: "WRITE", row: comparableRawRow(accepted) },
+        { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
+        {
+          recordIndex: 2,
+          kind: "WRITE",
+          row: comparableRawRow(quarantined),
+        },
+        { recordIndex: 3, kind: "WRITE", row: comparableRawRow(rejected) },
+      ]);
+      expect(Object.isFrozen(resolutions)).toBe(true);
+      expect(resolutions.every(Object.isFrozen)).toBe(true);
+    });
+
+    it("resolves an exact persisted replay to its exact Raw UUID", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const rawRecordId = "83000000-0000-4000-8000-000000000001";
+
+      expect(
+        resolveRawSourceBatchByIndex([candidate], [
+          {
+            id: rawRecordId,
+            externalId: candidate.externalId,
+            ingestKey: candidate.ingestKey,
+            payloadHash: candidate.payloadHash,
+            payload: candidate.payload,
+          },
+        ]),
+      ).toEqual([{ recordIndex: 0, kind: "EXISTING", rawRecordId }]);
+    });
+
+    it("treats the payload as canonical replay evidence when the stored PostgreSQL JSONB digest differs", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ revenueUsd: 1e-7 })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const rawRecordId = "83000000-0000-4000-8000-000000000001";
+
+      expect(
+        resolveRawSourceBatchByIndex([candidate], [
+          {
+            id: rawRecordId,
+            externalId: candidate.externalId,
+            ingestKey: candidate.ingestKey,
+            payloadHash: "b".repeat(64),
+            payload: candidate.payload,
+          },
+        ]),
+      ).toEqual([{ recordIndex: 0, kind: "EXISTING", rawRecordId }]);
+    });
+
+    it("matches legacy external-ID drift and reuses the first drift receipt by original index", () => {
+      const original = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const changed = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name: "Changed GmbH" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const existing = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: original.externalId,
+        ingestKey: original.ingestKey,
+        payloadHash: original.payloadHash,
+        payload: original.payload,
+      };
+      const legacyDrift = reconcileRawSourceBatch([changed], [existing]).rows[0]!;
+
+      const resolutions = resolveRawSourceBatchByIndex(
+        [changed, changed],
+        [existing],
+      );
+
+      expect(
+        resolutions.map((resolution) =>
+          resolution.kind === "WRITE"
+            ? { ...resolution, row: comparableRawRow(resolution.row) }
+            : resolution,
+        ),
+      ).toEqual([
+        {
+          recordIndex: 0,
+          kind: "WRITE",
+          row: comparableRawRow(legacyDrift),
+        },
+        { recordIndex: 1, kind: "REUSE_BATCH", sourceRecordIndex: 0 },
+      ]);
+      expect(resolutions[1]).toMatchObject({ sourceRecordIndex: 0 });
+    });
+
+    it("resolves repeated drift to an existing drift Raw UUID", () => {
+      const original = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const changed = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name: "Changed GmbH" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const originalReceipt = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: original.externalId,
+        ingestKey: original.ingestKey,
+        payloadHash: original.payloadHash,
+        payload: original.payload,
+      };
+      const drift = reconcileRawSourceBatch([changed], [originalReceipt]).rows[0]!;
+      const driftRecordId = "83000000-0000-4000-8000-000000000002";
+
+      expect(
+        resolveRawSourceBatchByIndex([changed], [
+          originalReceipt,
+          {
+            id: driftRecordId,
+            externalId: null,
+            ingestKey: drift.ingestKey,
+            payloadHash: drift.payloadHash,
+            payload: drift.payload,
+          },
+        ]),
+      ).toEqual([
+        { recordIndex: 0, kind: "EXISTING", rawRecordId: driftRecordId },
+      ]);
+    });
+
+    it.each([
+      [
+        "non-UUID id",
+        [
+          {
+            id: "raw-1",
+            externalId: "company-1",
+            ingestKey: "external:one",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "duplicate id",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-1",
+            ingestKey: "external:one",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-2",
+            ingestKey: "external:two",
+            payloadHash: "b".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "duplicate ingest key",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-1",
+            ingestKey: "external:same",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: "company-2",
+            ingestKey: "external:same",
+            payloadHash: "b".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "duplicate external id",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: "company-same",
+            ingestKey: "external:one",
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: "company-same",
+            ingestKey: "external:two",
+            payloadHash: "b".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+      [
+        "unaddressable receipt",
+        [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: null,
+            ingestKey: null,
+            payloadHash: "a".repeat(64),
+            payload: {},
+          },
+        ],
+      ],
+    ])("rejects an invalid existing fact: %s", (_label, existing) => {
+      expect(() => resolveRawSourceBatchByIndex([], existing)).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+    });
+
+    it("rejects a candidate whose ingest key and external ID resolve to different existing facts", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+
+      expect(() =>
+        resolveRawSourceBatchByIndex([candidate], [
+          {
+            id: "83000000-0000-4000-8000-000000000001",
+            externalId: candidate.externalId,
+            ingestKey: "external:different-key",
+            payloadHash: candidate.payloadHash,
+            payload: candidate.payload,
+          },
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: "different-company",
+            ingestKey: candidate.ingestKey,
+            payloadHash: candidate.payloadHash,
+            payload: candidate.payload,
+          },
+        ]),
+      ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
+
+    it("rejects an existing drift key whose payload does not match the expected drift receipt", () => {
+      const original = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const changed = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name: "Changed GmbH" })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const originalReceipt = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: original.externalId,
+        ingestKey: original.ingestKey,
+        payloadHash: original.payloadHash,
+        payload: original.payload,
+      };
+      const expectedDrift = reconcileRawSourceBatch(
+        [changed],
+        [originalReceipt],
+      ).rows[0]!;
+      const poisonedPayload = { poison: true };
+
+      expect(() =>
+        resolveRawSourceBatchByIndex([changed], [
+          originalReceipt,
+          {
+            id: "83000000-0000-4000-8000-000000000002",
+            externalId: null,
+            ingestKey: expectedDrift.ingestKey,
+            payloadHash: rawPayloadHash(poisonedPayload),
+            payload: poisonedPayload,
+          },
+        ]),
+      ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
+
+    it("rejects a stateful existing-array Proxy instead of validating one iteration and consuming another", () => {
+      const validReceipt = {
+        id: "83000000-0000-4000-8000-000000000001",
+        externalId: "company-1",
+        ingestKey: "external:one",
+        payloadHash: rawPayloadHash({ company: "Acme" }),
+        payload: { company: "Acme" },
+      };
+      let iterations = 0;
+      const stateful = new Proxy([validReceipt], {
+        get(target, property, receiver) {
+          if (property === Symbol.iterator) {
+            return function* iterator() {
+              iterations += 1;
+              yield iterations === 1
+                ? validReceipt
+                : { ...validReceipt, id: "not-a-uuid" };
+            };
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+
+      expect(() => resolveRawSourceBatchByIndex([], stateful)).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+    });
+
+    it("rejects a sparse existing array", () => {
+      const sparse = new Array(1) as Parameters<
+        typeof resolveRawSourceBatchByIndex
+      >[1];
+      expect(() => resolveRawSourceBatchByIndex([], sparse)).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+    });
+
+    it.each([
+      ["sparse", Object.assign(new Array(2), { 1: undefined })],
+      ["Proxy", new Proxy([], {})],
+    ])("rejects a %s prepared array", (_label, prepared) => {
+      expect(() =>
+        resolveRawSourceBatchByIndex(
+          prepared as unknown as Parameters<
+            typeof resolveRawSourceBatchByIndex
+          >[0],
+          [],
+        ),
+      ).toThrow("RAW_SOURCE_INDEXED_RESOLUTION_INVALID");
+    });
+
+    it("returns an owned deeply immutable WRITE snapshot without losing Date semantics", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const candidatePayload = candidate.payload as {
+        name: string;
+        attributes: { products: string[] };
+      };
+      const candidatePolicy = candidate.sourcePolicySnapshot as {
+        kind: string;
+        minimizedFields: string[];
+      };
+      const originalFetchedAt = candidate.fetchedAt!.getTime();
+      const originalExpiresAt = candidate.expiresAt.getTime();
+
+      const resolution = resolveRawSourceBatchByIndex([candidate], [])[0]!;
+      expect(resolution.kind).toBe("WRITE");
+      if (resolution.kind !== "WRITE") throw new Error("expected WRITE");
+
+      expect(resolution.row).not.toBe(candidate);
+      expect(resolution.row.payload).not.toBe(candidate.payload);
+      expect(resolution.row.sourcePolicySnapshot).not.toBe(
+        candidate.sourcePolicySnapshot,
+      );
+      expect(resolution.row.fetchedAt).toBeInstanceOf(Date);
+      expect(resolution.row.expiresAt).toBeInstanceOf(Date);
+
+      candidatePayload.name = "Mutated GmbH";
+      candidatePayload.attributes.products[0] = "mutated product";
+      candidatePolicy.kind = "mutated";
+      candidatePolicy.minimizedFields.push("mutated");
+      candidate.fetchedAt!.setTime(0);
+      candidate.expiresAt.setTime(0);
+
+      expect(resolution.row.payload).toMatchObject({
+        name: "Acme GmbH",
+        attributes: { products: ["pump"] },
+      });
+      expect(resolution.row.sourcePolicySnapshot).toMatchObject({
+        kind: "source_policy",
+        minimizedFields: [],
+      });
+      expect(resolution.row.fetchedAt!.getTime()).toBe(originalFetchedAt);
+      expect(resolution.row.expiresAt.getTime()).toBe(originalExpiresAt);
+      expect(resolution.row.fetchedAt!.toISOString()).toBe(
+        new Date(originalFetchedAt).toISOString(),
+      );
+      expect(resolution.row.expiresAt.valueOf()).toBe(originalExpiresAt);
+      expect(Object.isFrozen(resolution.row)).toBe(true);
+      expect(Object.isFrozen(resolution.row.payload)).toBe(true);
+      expect(
+        Object.isFrozen(
+          (resolution.row.payload as { attributes: unknown }).attributes,
+        ),
+      ).toBe(true);
+      expect(Object.isFrozen(resolution.row.sourcePolicySnapshot)).toBe(true);
+
+      expect(() => {
+        (
+          resolution.row.payload as {
+            attributes: { products: string[] };
+          }
+        ).attributes.products[0] = "returned mutation";
+      }).toThrow(TypeError);
+      expect(() => {
+        resolution.row.sourcePolicySnapshot.kind = "returned mutation";
+      }).toThrow(TypeError);
+      expect(() => resolution.row.fetchedAt!.setTime(0)).toThrow(TypeError);
+      expect(() => resolution.row.expiresAt.setTime(0)).toThrow(TypeError);
+      expect(() =>
+        Date.prototype.setTime.call(resolution.row.expiresAt, 0),
+      ).toThrow(TypeError);
+      expect(resolution.row.expiresAt.getTime()).toBe(originalExpiresAt);
+      expect(Object.isFrozen(resolution.row.fetchedAt)).toBe(true);
+      expect(Object.isFrozen(resolution.row.expiresAt)).toBe(true);
+    });
+
+    it("preserves an own __proto__ JSON key without changing the snapshot prototype or hash", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      const payload = JSON.parse(
+        '{"__proto__":{"polluted":true},"name":"Acme GmbH"}',
+      ) as Record<string, unknown>;
+      candidate.payload = payload;
+      candidate.payloadHash = rawPayloadHash(payload);
+      candidate.payloadBytes = Buffer.byteLength(JSON.stringify(payload));
+
+      const resolution = resolveRawSourceBatchByIndex([candidate], [])[0]!;
+      expect(resolution.kind).toBe("WRITE");
+      if (resolution.kind !== "WRITE") throw new Error("expected WRITE");
+      const snapshottedPayload = resolution.row.payload as Record<
+        string,
+        unknown
+      >;
+
+      expect(Object.getPrototypeOf(snapshottedPayload)).toBe(
+        Object.prototype,
+      );
+      expect(Object.hasOwn(snapshottedPayload, "__proto__")).toBe(true);
+      expect(Object.getOwnPropertyDescriptor(
+        snapshottedPayload,
+        "__proto__",
+      )).toMatchObject({
+        enumerable: true,
+        value: { polluted: true },
+      });
+      expect(rawPayloadHash(resolution.row.payload)).toBe(
+        candidate.payloadHash,
+      );
+      expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+    });
+
+    it("rejects a Date with an own getTime accessor without invoking it", () => {
+      const candidate = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord()],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      let getterCalls = 0;
+      Object.defineProperty(candidate.expiresAt, "getTime", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          getterCalls += 1;
+          return Date.prototype.getTime;
+        },
+      });
+
+      expect(() => resolveRawSourceBatchByIndex([candidate], [])).toThrow(
+        "RAW_SOURCE_INDEXED_RESOLUTION_INVALID",
+      );
+      expect(getterCalls).toBe(0);
+    });
   });
 
   it.each([

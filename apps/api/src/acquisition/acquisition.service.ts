@@ -5,7 +5,10 @@ import { cleanEntity, CleanedEntity } from './clean';
 import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
 import type { ToolContext } from '../tools/tool-contract';
 import { BudgetExceededError } from '../tools/budget-store';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -35,7 +38,7 @@ const ACQUISITION_RECEIPT_PRODUCERS = Object.freeze({
 
 function parseAcquireResult(value: unknown): AcquireResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    throw new ExecutionControlError('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
   }
   const row = value as Record<string, unknown>;
   if (
@@ -44,7 +47,7 @@ function parseAcquireResult(value: unknown): AcquireResult {
       (key) => Number.isSafeInteger(row[key]) && (row[key] as number) >= 0,
     )
   ) {
-    throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    throw new ExecutionControlError('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
   }
   return Object.freeze({
     sourceId: row.sourceId,
@@ -106,7 +109,7 @@ export class AcquisitionService {
             ...opts.context,
             onDurableReceipt: (producerId: string, receipt: DurableExecutionReceipt) => {
               if (!expectedProducer || producerId !== expectedProducer) {
-                throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+                throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
               }
               durableReceipts.push({ producerId, receipt });
             },
@@ -137,7 +140,7 @@ export class AcquisitionService {
       durableReceipts.some(({ producerId }) =>
         !expectedProducer || producerId !== expectedProducer)
     ) {
-      throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+      throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
     }
 
     const persist = async (database: AcquisitionWriteDb): Promise<AcquireResult> => {
@@ -235,7 +238,7 @@ export class AcquisitionService {
       return persist(prisma as unknown as AcquisitionWriteDb);
     }
     if (!this.deps.platformWriter) {
-      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }
     return this.deps.platformWriter.$transaction(async (transaction) => {
       const result = await applyDomainAckConsumerTransactions({

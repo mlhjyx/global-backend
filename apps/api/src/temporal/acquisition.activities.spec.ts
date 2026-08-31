@@ -72,6 +72,7 @@ describe('acquisition activities — platform authority lifecycle', () => {
         workspaceId: 'platform',
         runId: executionBudget.accountKey,
         correlationId: executionBudget.accountKey,
+        onDurableReceipt: expect.any(Function),
       });
       throw new Error('wire failed');
     });

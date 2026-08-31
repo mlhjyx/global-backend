@@ -17,7 +17,10 @@ import {
 import { MapOutcome, mapFdaClearance, mapSamSourcesSought, mapTedNotice } from './signal-mappers';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
 
 /**
  * 平台层信号摄取（收口⑤ ingest-once）：外部源 → source_signal 一等事实，**拉取一次服务所有租户**。
@@ -238,7 +241,7 @@ export class SignalIngestService {
     };
     if (fetched.durableReceipt) {
       if (!this.deps.platformWriter) {
-        throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+        throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
       }
       persisted = await this.deps.platformWriter.$transaction(async (tx) => {
         const applied = await applyDomainAckConsumerTransaction({
@@ -274,7 +277,7 @@ export class SignalIngestService {
           },
         });
         if (!ledger || ledger.status !== 'OK') {
-          throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+          throw new ExecutionControlError('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
         }
         return {
           upserted: ledger.signalsUpserted,

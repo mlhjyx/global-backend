@@ -135,12 +135,29 @@ export function isTrustedExecutionBudgetDatabaseMarker(
   error: unknown,
   marker: TrustedDatabaseMarker,
 ): boolean {
-  return Boolean(
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2010' &&
-    error.meta?.code === 'P0001' &&
-    error.meta?.message === `ERROR: ${marker}`,
-  );
+  try {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    const errorDescriptors = Object.getOwnPropertyDescriptors(error);
+    const code = errorDescriptors.code;
+    const meta = errorDescriptors.meta;
+    if (
+      !code || !('value' in code) || code.value !== 'P2010' ||
+      !meta || !('value' in meta) ||
+      !meta.value || typeof meta.value !== 'object'
+    ) {
+      return false;
+    }
+    const metaDescriptors = Object.getOwnPropertyDescriptors(meta.value);
+    const sqlState = metaDescriptors.code;
+    const message = metaDescriptors.message;
+    return Boolean(
+      sqlState && 'value' in sqlState && sqlState.value === 'P0001' &&
+      message && 'value' in message &&
+      message.value === `ERROR: ${marker}`,
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function assertExecutionBudgetAuthorityId(value: string): void {

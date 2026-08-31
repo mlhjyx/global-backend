@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   parseDurableExecutionReceipt,
   type DurableExecutionReceipt,
@@ -84,7 +85,7 @@ const REPLAY_CODES = new Set([
   'ARTIFACT_EXPIRED_UNACKED', 'GENERIC_OPERATION_DOMAIN_ACK_CONFLICT',
 ]);
 
-function ackInvalid(): never { throw new Error('DOMAIN_ACK_CONTRACT_INVALID'); }
+function ackInvalid(): never { throw new ExecutionControlError('DOMAIN_ACK_CONTRACT_INVALID'); }
 function dispositionInvalid(): never { throw new Error('EXECUTION_RESULT_DISPOSITION_INVALID'); }
 
 function ownDataRecord(

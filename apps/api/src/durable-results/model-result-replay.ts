@@ -1,4 +1,5 @@
 import type { ModelResult } from '../model-gateway/types';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   parseGenericOperationProjection,
   projectGenericOperationResult,
@@ -12,7 +13,7 @@ const registry = registerModelResultProjections(new TypedProjectionRegistry());
 registry.freeze();
 
 function invalid(): never {
-  throw new Error('MODEL_RESULT_REPLAY_INVALID');
+  throw new ExecutionControlError('MODEL_RESULT_REPLAY_INVALID');
 }
 
 function resultEnvelope(value: unknown): unknown {

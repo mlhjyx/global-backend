@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import { Prisma } from '@prisma/client';
 import {
   parseDurableExecutionReceipt,
@@ -60,7 +61,7 @@ const SAFE_TEXT = /^[A-Za-z0-9:._/-]{1,200}$/u;
 const PII_LIKE = /@|email|phone|address|credential|token|secret|prompt|reasoning|rawResponse|responseBody/i;
 
 function invalid(): never {
-  throw new Error('DOMAIN_ACK_INVALID');
+  throw new ExecutionControlError('DOMAIN_ACK_INVALID');
 }
 
 function safeText(value: string, options: { readonly rejectPayloadHints?: boolean } = {}): string {
@@ -102,7 +103,7 @@ function opaqueDomainIdentity(value: string): string {
   return createHash('sha256').update(value.normalize('NFC')).digest('hex');
 }
 
-function opaqueDomainIdentitySource(value: string): string {
+export function validateDomainAckRawIdentity(value: unknown): string {
   if (
     typeof value !== 'string' || value.length < 1 || value.length > 500 ||
     value.includes('\0') || value !== value.normalize('NFC') || PII_LIKE.test(value)
@@ -203,6 +204,11 @@ export class PostgresDomainAckRepository implements DomainAckRepository<DomainAc
     record: DomainAckRecord,
     apply: (transaction: DomainAckTransaction) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>> {
+    await this.transaction.$queryRaw(
+      Prisma.sql`SELECT public.lock_execution_domain_ack_authority_first_v1(
+        ${record.scopeKey}, ${record.authorityId}::uuid
+      )`,
+    );
     const locked = parseAckRow(
       await this.transaction.$queryRaw<PostgresDomainAckRow[]>(
         Prisma.sql`SELECT * FROM apply_execution_domain_ack_v1(
@@ -232,10 +238,10 @@ export class DomainAckService<TTransaction = unknown> {
     const consumer = safeText(input.consumer);
     const domainAggregateType = safeText(input.domainAggregateType);
     const domainAckKey = opaqueDomainIdentity(
-      opaqueDomainIdentitySource(input.domainAckKey),
+      validateDomainAckRawIdentity(input.domainAckKey),
     );
     const domainRevision = opaqueDomainIdentity(
-      opaqueDomainIdentitySource(input.domainRevision ?? '0'),
+      validateDomainAckRawIdentity(input.domainRevision ?? '0'),
     );
     const record = freezeRecord({
       schemaVersion: 'domain-ack/v1',

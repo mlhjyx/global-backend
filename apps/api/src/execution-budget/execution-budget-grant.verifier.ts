@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
+import { ExecutionControlError } from './execution-control-error';
 import {
   createRemoteJWKSet,
   compactVerify,
@@ -148,7 +149,7 @@ function requiredCanonical(
     value !== value.trim() ||
     value.length > maxLength
   ) {
-    throw new Error('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
+    throw new ExecutionControlError('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
   }
   return value;
 }
@@ -174,7 +175,7 @@ function trustedUrl(
     parsed.hash ||
     (parsed.protocol !== 'https:' && !developmentTrustRoot)
   ) {
-    throw new Error('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
+    throw new ExecutionControlError('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
   }
   return parsed;
 }
@@ -193,7 +194,7 @@ export function validateExecutionBudgetGrantVerifierConfiguration(
     requiredCanonical(env, 'EXECUTION_BUDGET_GRANT_AUDIENCE', 256) !==
     EXECUTION_BUDGET_GRANT_AUDIENCE
   ) {
-    throw new Error('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
+    throw new ExecutionControlError('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
   }
   const configuredAlgorithms = requiredCanonical(
     env,
@@ -210,7 +211,7 @@ export function validateExecutionBudgetGrantVerifierConfiguration(
     algorithms.length !== configuredAlgorithms.length ||
     new Set(algorithms).size !== algorithms.length
   ) {
-    throw new Error('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
+    throw new ExecutionControlError('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
   }
   return Object.freeze({
     jwks,
