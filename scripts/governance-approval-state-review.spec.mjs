@@ -230,6 +230,29 @@ test('I1 reconciliation accepts a merge result reachable from a later current-ma
   assert.equal(result.consumption.current_main.sha, readback.currentMain.sha);
 });
 
+test('malformed verifier repository names HOLD without appending merge result or consumption', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+  const malformedNames = [42, null, {}, [], '', 'x'.repeat(257), 'not-a-repository-name'];
+  for (const fullName of malformedNames) {
+    const changed = clone(readback);
+    changed.independentVerifier.repository.full_name = fullName;
+    const ledger = new Ledger();
+    const reservation = await reserve(ledger, grant);
+    const result = await reconcileMergeAuthorizationReservation(
+      reservation.reservation,
+      changed,
+      ledger,
+      NOW,
+    );
+    assert.equal(result.outcome, 'HOLD');
+    assert.equal(result.blockingCode, 'APPROVAL_INDEPENDENCE_NOT_PROVEN');
+    const stream = await ledger.read(reservation.reservation.key);
+    assert.equal(stream.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+    assert.equal(stream.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
+  }
+});
+
 test('I2 reconciliation HOLDs out-of-window readback and post-consumption revocation', async () => {
   const grant = await readJson('valid-grant.json');
   const lateReadback = await readJson('current-main-readback.json');
