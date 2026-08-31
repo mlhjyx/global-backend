@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
-import { dirname, extname, posix, relative, resolve, sep } from 'node:path';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, extname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
@@ -29,12 +30,14 @@ const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_ROOTS = Object.freeze(['scripts', 'apps', 'packages', '.github/workflows']);
 const SCAN_FILES = Object.freeze([
   'package.json',
+  'runtime-entrypoint.mjs',
   'docs/governance/release-bundle.schema.json',
   'docs/templates/release-bundle.template.json',
 ]);
 const SCANNED_EXTENSIONS = new Set([
-  '.cjs', '.cts', '.js', '.json', '.mjs', '.mts', '.ts', '.tsx', '.yaml', '.yml',
+  '.astro', '.cjs', '.cts', '.js', '.json', '.mjs', '.mts', '.ts', '.tsx', '.yaml', '.yml',
 ]);
+const IMPORT_CAPABLE_PRODUCT_EXTENSIONS = new Set(['.astro', '.mdx', '.svelte', '.vue']);
 const SKIPPED_DIRECTORIES = new Set([
   '.code-intelligence', '.next', 'coverage', 'dist', 'node_modules',
 ]);
@@ -70,30 +73,39 @@ const assertExactRootEntry = (scripts) => {
   assert.deepEqual(competing, []);
 };
 
-const repositoryPath = (absolutePath) => relative(REPOSITORY_ROOT, absolutePath)
+const repositoryPath = (absolutePath, repositoryRoot) => relative(repositoryRoot, absolutePath)
   .split(sep)
   .join('/');
 
-const scanDirectory = async (directory, files) => {
+const scanDirectory = async (directory, files, repositoryRoot) => {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isSymbolicLink() || SKIPPED_DIRECTORIES.has(entry.name)) continue;
     const absolutePath = resolve(directory, entry.name);
     if (entry.isDirectory()) {
-      await scanDirectory(absolutePath, files);
-    } else if (entry.isFile() && SCANNED_EXTENSIONS.has(extname(entry.name))) {
-      files.push(repositoryPath(absolutePath));
+      await scanDirectory(absolutePath, files, repositoryRoot);
+    } else if (entry.isFile()) {
+      const extension = extname(entry.name).toLowerCase();
+      if (IMPORT_CAPABLE_PRODUCT_EXTENSIONS.has(extension)
+        && !SCANNED_EXTENSIONS.has(extension)) {
+        throw new Error('APPROVAL_IMPORT_CAPABLE_EXTENSION_UNSCANNED');
+      }
+      if (SCANNED_EXTENSIONS.has(extension)) {
+        files.push(repositoryPath(absolutePath, repositoryRoot));
+      }
     }
   }
 };
 
-const loadBoundarySources = async () => {
+const loadBoundarySources = async (repositoryRoot = REPOSITORY_ROOT) => {
   const files = [...SCAN_FILES];
-  for (const root of SCAN_ROOTS) await scanDirectory(resolve(REPOSITORY_ROOT, root), files);
+  for (const root of SCAN_ROOTS) {
+    await scanDirectory(resolve(repositoryRoot, root), files, repositoryRoot);
+  }
   const uniqueFiles = [...new Set(files)].sort();
   return new Map(await Promise.all(uniqueFiles.map(async (path) => [
     path,
-    await readFile(resolve(REPOSITORY_ROOT, path), 'utf8'),
+    await readFile(resolve(repositoryRoot, path), 'utf8'),
   ])));
 };
 
@@ -185,6 +197,35 @@ const assertApprovalImportBoundaries = (sources) => {
   assertKernelBoundaries(sources, edges);
 };
 
+const relativeModuleSpecifier = (importer, target) => {
+  const specifier = posix.relative(posix.dirname(importer), target);
+  return specifier.startsWith('.') ? specifier : `./${specifier}`;
+};
+
+const withSyntheticProductRepository = async (extension, run) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'approval-import-boundary-'));
+  try {
+    for (const root of SCAN_ROOTS) {
+      await mkdir(resolve(repositoryRoot, root), { recursive: true });
+    }
+    const seedFiles = new Map([
+      ['package.json', '{}\n'],
+      ['runtime-entrypoint.mjs', 'export {};\n'],
+      ['docs/governance/release-bundle.schema.json', '{}\n'],
+      ['docs/templates/release-bundle.template.json', '{}\n'],
+      [`apps/product/Component${extension}`, "import './dependency.js';\n"],
+    ]);
+    for (const [path, source] of seedFiles) {
+      const absolutePath = resolve(repositoryRoot, path);
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, source, 'utf8');
+    }
+    await run(repositoryRoot);
+  } finally {
+    await rm(repositoryRoot, { recursive: true });
+  }
+};
+
 test('package exposes one exact ordered closed approval test entry', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assertExactRootEntry(packageJson.scripts);
@@ -229,6 +270,57 @@ test('canonical approval entry enforces executable fixture and pure-kernel impor
       () => assertApprovalImportBoundaries(kernelMutation),
       /APPROVAL_KERNEL_IMPORT_FORBIDDEN/u,
     );
+  }
+});
+
+test('boundary loader includes the real OCI entrypoint and Astro product sources', async () => {
+  const sources = await loadBoundarySources();
+  assert.equal(sources.has('runtime-entrypoint.mjs'), true);
+  const astroProductSources = [...sources.keys()].filter(
+    (path) => path.startsWith('apps/') && path.endsWith('.astro'),
+  );
+  assert.notEqual(astroProductSources.length, 0);
+});
+
+test('real OCI and Astro product importers cannot reference approval fixtures or kernels', async () => {
+  const sources = await loadBoundarySources();
+  const astroProductPath = [...sources.keys()].find(
+    (path) => path.startsWith('apps/') && path.endsWith('.astro'),
+  );
+  assert.equal(typeof astroProductPath, 'string');
+  for (const importer of ['runtime-entrypoint.mjs', astroProductPath]) {
+    const fixtureMutation = new Map(sources);
+    const fixtureSpecifier = relativeModuleSpecifier(
+      importer,
+      'scripts/fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs',
+    );
+    fixtureMutation.set(importer, `${sources.get(importer)}\nimport '${fixtureSpecifier}';\n`);
+    assert.throws(
+      () => assertApprovalImportBoundaries(fixtureMutation),
+      /APPROVAL_FIXTURE_IMPORT_FORBIDDEN/u,
+    );
+
+    const kernelMutation = new Map(sources);
+    const kernelSpecifier = relativeModuleSpecifier(
+      importer,
+      'scripts/governance-approval-state-kernel.mjs',
+    );
+    kernelMutation.set(importer, `${sources.get(importer)}\nimport '${kernelSpecifier}';\n`);
+    assert.throws(
+      () => assertApprovalImportBoundaries(kernelMutation),
+      /APPROVAL_KERNEL_IMPORT_FORBIDDEN/u,
+    );
+  }
+});
+
+test('boundary loader fails closed on unscanned import-capable product extensions', async () => {
+  for (const extension of ['.vue', '.svelte', '.mdx']) {
+    await withSyntheticProductRepository(extension, async (repositoryRoot) => {
+      await assert.rejects(
+        loadBoundarySources(repositoryRoot),
+        /APPROVAL_IMPORT_CAPABLE_EXTENSION_UNSCANNED/u,
+      );
+    });
   }
 });
 
