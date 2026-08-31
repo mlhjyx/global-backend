@@ -689,6 +689,10 @@ test('merge grant, separate consumption, and durable ledger evidence fail closed
     ['grant-authority-actor', (v) => { v.grant.authority_actor_id = 999; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
   ];
   for (const [name, mutate, code] of cases) runMutation(name, mergeEvidence, mutate, validate, code);
+  const consumedAtExpiry = mergeEvidence();
+  consumedAtExpiry.grant.expires_at = consumedAtExpiry.consumption.consumed_at;
+  rebindMergeGrantDigest(consumedAtExpiry);
+  expectIssue(validate(consumedAtExpiry), 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
 });
 
 test('synchronized grant mutation cannot reuse its caller-declared digest', () => {

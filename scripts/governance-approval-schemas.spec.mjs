@@ -623,6 +623,30 @@ test('program c cross-document seam binds grant, authority, revocation, expiry, 
   assert.equal(positive.issues.at(-1).stable_code, 'APPROVAL_INDEPENDENCE_NOT_PROVEN');
   const legacy = validateProgramCMergeAuthorizationConsumptionContext(context());
   assert.deepEqual(legacy, positive);
+
+  const rebindGrantDigest = (value) => {
+    const grantRawSha = canonicalDigest(value.grant);
+    value.grant_raw_sha256 = grantRawSha;
+    value.consumption.grant_raw_sha256 = grantRawSha;
+    value.ledger_snapshot.reservations[0].grant_raw_sha256 = grantRawSha;
+  };
+  const consumptionAtExpiry = context();
+  consumptionAtExpiry.consumption.consumed_at = '2026-08-30T00:15:00.000Z';
+  consumptionAtExpiry.grant.expires_at = consumptionAtExpiry.consumption.consumed_at;
+  consumptionAtExpiry.now = '2026-08-30T00:14:00.000Z';
+  rebindGrantDigest(consumptionAtExpiry);
+  const consumptionAtExpiryResult = inspectSyntheticProgramCMergeAuthorizationConsumptionContext(consumptionAtExpiry);
+  assert.equal(consumptionAtExpiryResult.synthetic_consistent, false);
+  assert.equal(consumptionAtExpiryResult.trust_eligible, false);
+  assert.ok(consumptionAtExpiryResult.issues.some(({ stable_code }) => stable_code === 'APPROVAL_GRANT_EXPIRED'));
+
+  const nowAtExpiry = context();
+  nowAtExpiry.now = nowAtExpiry.grant.expires_at;
+  const nowAtExpiryResult = inspectSyntheticProgramCMergeAuthorizationConsumptionContext(nowAtExpiry);
+  assert.equal(nowAtExpiryResult.synthetic_consistent, false);
+  assert.equal(nowAtExpiryResult.trust_eligible, false);
+  assert.ok(nowAtExpiryResult.issues.some(({ stable_code }) => stable_code === 'APPROVAL_GRANT_EXPIRED'));
+
   for (const mutate of [
     (value) => { delete value.now; },
     (value) => { value.now = '2026-08-30T00:30:00Z'; },
