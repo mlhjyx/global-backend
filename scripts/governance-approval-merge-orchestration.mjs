@@ -8,6 +8,7 @@ import {
   isPlainObject,
   isSafeNonNegativeInteger,
   isSafePositiveInteger,
+  verifierRepositoryNameValid,
 } from './governance-approval-readback-common.mjs';
 import {
   validateProgramCMergeAuthorizationConsumption,
@@ -367,7 +368,7 @@ const readbackCode = (reservation, readback, now) => {
   const verifier = readback.independentVerifier;
   if (verifier.repository.id === grant.repository.id
     || !isSafePositiveInteger(verifier.repository.id)
-    || Buffer.byteLength(verifier.repository.full_name, 'utf8') > 256
+    || !verifierRepositoryNameValid(verifier.repository.full_name)
     || !/^\.github\/workflows\/[a-zA-Z0-9._-]+\.ya?ml$/.test(verifier.path)
     || !isGitSha(verifier.sha)
     || !isSafePositiveInteger(verifier.runId)

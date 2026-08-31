@@ -6,6 +6,7 @@ import {
   isPlainObject,
   isSafePositiveInteger,
   resultFromCodes,
+  verifierRepositoryNameValid,
 } from './governance-approval-readback-common.mjs';
 
 const READBACK_KEYS = Object.freeze([
@@ -23,9 +24,7 @@ const verifierValueValid = (value) => (
   hasExactKeys(value, VERIFIER_KEYS)
   && hasExactKeys(value.repository, REPOSITORY_KEYS)
   && isSafePositiveInteger(value.repository.id)
-  && typeof value.repository.full_name === 'string'
-  && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repository.full_name)
-  && Buffer.byteLength(value.repository.full_name, 'utf8') <= 256
+  && verifierRepositoryNameValid(value.repository.full_name)
   && /^\.github\/workflows\/[a-zA-Z0-9._-]+\.ya?ml$/.test(value.path)
   && isGitSha(value.sha)
   && isSafePositiveInteger(value.runId)

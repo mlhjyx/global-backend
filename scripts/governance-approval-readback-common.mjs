@@ -29,6 +29,11 @@ export const isSafePositiveInteger = (value) => Number.isSafeInteger(value) && v
 export const isSafeNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 export const isDigest = (value) => typeof value === 'string' && DIGEST_PATTERN.test(value);
 export const isGitSha = (value) => typeof value === 'string' && GIT_SHA_PATTERN.test(value);
+export const verifierRepositoryNameValid = (value) => (
+  typeof value === 'string'
+  && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)
+  && Buffer.byteLength(value, 'utf8') <= 256
+);
 export const isId = (value) => typeof value === 'string' && ID_PATTERN.test(value);
 export const isCanonicalInstant = (value) => (
   typeof value === 'string'
