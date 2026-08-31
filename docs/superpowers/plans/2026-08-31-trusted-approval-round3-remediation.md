@@ -484,7 +484,25 @@ git log --oneline --decorate -8
 
 **Mandatory stop:** do not push, comment, resolve review threads, merge, deploy, mutate runtime, or claim external verification. Report the exact local head and ask for the next bounded authorization only after all local gates and independent reviews are complete.
 
-## 2. Local completion criteria
+## 2. Deferred security-contract card
+
+### `APPROVAL-R4-CONSUMPTION-RAW-001`
+
+- **Owner:** Security/Privacy + Approval Readback
+- **State:** `HOLD_CONTRACT / NOT_IMPLEMENTED`
+- **Due gate:** before external hosted admission, Acceptance consumption, or receipt construction can rely on original consumption bytes
+- **Acceptance:**
+  - a raw-byte-aware bounded reader observes the original consumption artifact;
+  - exact raw byte length and SHA-256 are computed from those observed bytes;
+  - the parsed closed-schema subject is bound to the same observed bytes;
+  - the evidence manifest and attestation bind the same artifact identity, byte length, digest, and parsed subject;
+  - one-byte, substitution, newline/whitespace, encoding, duplicate-key, and declared-digest mutation negatives fail closed;
+  - canonical JSON is never substituted for, or relabeled as, an original raw-byte digest;
+  - receipt construction remains blocked until every raw-byte and subject binding passes;
+  - an independent security/governance review accepts the exact implementation head and evidence.
+- **Non-goal for this final fix wave:** do not implement the raw-byte consumption architecture here; the unresolved boundary remains an explicit HOLD.
+
+## 3. Local completion criteria
 
 Round 3 is locally complete only when all of the following are true:
 

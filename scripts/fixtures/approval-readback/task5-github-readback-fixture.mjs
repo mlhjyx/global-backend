@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 import {
   collectGitHubApprovalEvidence,
-  createGitHubReadbackClient,
+  createGitHubReadbackTestClient,
 } from '../../governance-github-readback.mjs';
 
 export const REPOSITORY_ID = 1291151138;
@@ -23,6 +23,7 @@ export const PROPOSAL_SIDECAR_PATH = 'docs/governance/decisions/adr-027-r2.md';
 export const WORKFLOW_PATH = '.github/workflows/approval-readback.yml';
 export const SIGNER_PATH = '.github/workflows/approval-signer.yml';
 export const OBSERVED_AT = '2026-08-30T12:00:00.000Z';
+export const COLLECTOR_OBSERVED_AT = '2026-08-30T12:30:00.000Z';
 export const DECISION_RAW_SHA256 = `sha256:${'a'.repeat(64)}`;
 export const DECISION_SEMANTIC_SHA256 = `sha256:${'b'.repeat(64)}`;
 export const PROPOSAL_RENDERER_SOURCE_SHA256 = `sha256:${'c'.repeat(64)}`;
@@ -436,10 +437,12 @@ export const fixtureFetch = (state) => {
 
 export const collect = async (state, options = {}) => {
   const fixture = fixtureFetch(state);
-  const client = createGitHubReadbackClient({
+  const client = createGitHubReadbackTestClient({
     fetch: fixture.fetch,
     token: AUTH_SENTINEL,
     apiVersion: API_VERSION,
+  }, options.clock ?? {
+    now: () => options.collectorObservedAt ?? COLLECTOR_OBSERVED_AT,
   });
   const evidence = await collectGitHubApprovalEvidence(
     client,

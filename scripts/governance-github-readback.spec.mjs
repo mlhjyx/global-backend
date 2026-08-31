@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   collectGitHubApprovalEvidence,
   createGitHubReadbackClient,
+  createGitHubReadbackTestClient,
 } from './governance-github-readback.mjs';
 import {
   snapshotGitHubReadbackInputs,
@@ -15,6 +16,7 @@ import {
   AUTHORITY_PATH,
   AUTH_SENTINEL,
   BASE_SHA,
+  COLLECTOR_OBSERVED_AT,
   DECISION_RAW_SHA256,
   DECISION_SEMANTIC_SHA256,
   HEAD_SHA,
@@ -156,7 +158,7 @@ test('collects frozen bounded observed evidence without claiming complete approv
     ruleset_sha256: evidence.ruleset.normalized_sha256,
   });
   assert.deepEqual(evidence.readback.post, evidence.readback.pre);
-  assert.equal(evidence.observed_at, OBSERVED_AT);
+  assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
   assert.ok(Object.isFrozen(evidence));
   assert.ok(Object.isFrozen(evidence.machine_checks[0].reusable_signer));
   assert.ok(Object.isFrozen(evidence.proposal_files[0].trusted_renderer));
@@ -198,7 +200,7 @@ test('collects frozen bounded observed evidence without claiming complete approv
   }
 });
 
-test('requires each hosted role authority to cover its selected review and request observation', async (t) => {
+test('requires each hosted role authority to cover its selected review and collector readback', async (t) => {
   const reviewSubmittedAt = (state, role) => state.reviewPages
     .flat()
     .find((entry) => entry.user.id === state.actors[role].id)?.submitted_at;
@@ -228,8 +230,8 @@ test('requires each hosted role authority to cover its selected review and reque
       ['effective_from after selected review', (entry, submittedAt) => {
         entry.effective_from = new Date(Date.parse(submittedAt) + 1).toISOString();
       }],
-      ['effective_from after request observation', (entry) => {
-        entry.effective_from = new Date(Date.parse(OBSERVED_AT) + 1).toISOString();
+      ['effective_from after collector readback', (entry) => {
+        entry.effective_from = new Date(Date.parse(COLLECTOR_OBSERVED_AT) + 1).toISOString();
       }],
       ['effective_until equal to selected review', (entry, submittedAt) => {
         entry.effective_until = submittedAt;
@@ -237,11 +239,11 @@ test('requires each hosted role authority to cover its selected review and reque
       ['effective_until before selected review', (entry, submittedAt) => {
         entry.effective_until = new Date(Date.parse(submittedAt) - 1).toISOString();
       }],
-      ['effective_until equal to request observation', (entry) => {
-        entry.effective_until = OBSERVED_AT;
+      ['effective_until equal to collector readback', (entry) => {
+        entry.effective_until = COLLECTOR_OBSERVED_AT;
       }],
-      ['effective_until before request observation', (entry) => {
-        entry.effective_until = new Date(Date.parse(OBSERVED_AT) - 1).toISOString();
+      ['effective_until before collector readback', (entry) => {
+        entry.effective_until = new Date(Date.parse(COLLECTOR_OBSERVED_AT) - 1).toISOString();
       }],
       ['assignment observed after selected review', (entry, submittedAt) => {
         entry.assignment_evidence.observed_at = new Date(Date.parse(submittedAt) + 1).toISOString();
@@ -280,6 +282,46 @@ test('backdated request provenance cannot rescue authority expired at collector 
     }),
     'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
   );
+});
+
+test('rejects causal drift across review, request provenance, assignment observation, and collector time', async (t) => {
+  await t.test('request provenance predates the selected review', async () => {
+    const unsafeRequest = request();
+    unsafeRequest.observedAt = '2026-08-30T09:59:00.000Z';
+    await expectCode(
+      () => collect(fixtureState(), { request: unsafeRequest }),
+      'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+    );
+  });
+
+  await t.test('request provenance follows the collector readback', async () => {
+    const unsafeRequest = request();
+    unsafeRequest.observedAt = '2026-08-30T12:31:00.000Z';
+    await expectCode(
+      () => collect(fixtureState(), { request: unsafeRequest }),
+      'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+    );
+  });
+
+  await t.test('selected review follows the collector readback', async () => {
+    const state = fixtureState();
+    state.reviewPages[0][0].submitted_at = '2026-08-30T12:31:00.000Z';
+    await expectCode(
+      () => collect(state),
+      'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+    );
+  });
+
+  await t.test('assignment observation follows the collector readback', async () => {
+    const state = fixtureState();
+    mutateAuthorityRole(state, 'OWN-PRODUCT', (entry) => {
+      entry.assignment_evidence.observed_at = '2026-08-30T12:31:00.000Z';
+    });
+    await expectCode(
+      () => collect(state),
+      'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+    );
+  });
 });
 
 test('binds the proposal manifest identity and trusted renderer before reading Markdown', async (t) => {
@@ -335,6 +377,108 @@ test('requires the exact API version and injected fetch', () => {
     () => createGitHubReadbackClient({ fetch: async () => {}, token: '', apiVersion: API_VERSION }),
     { message: 'APPROVAL_GITHUB_CLIENT_INVALID' },
   );
+  assert.throws(
+    () => createGitHubReadbackClient({
+      fetch: async () => {},
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+      collectorClock: { now: () => COLLECTOR_OBSERVED_AT },
+    }),
+    { message: 'APPROVAL_GITHUB_CLIENT_INVALID' },
+  );
+});
+
+test('collector snapshots a closed trusted test clock before its first remote await', async () => {
+  const state = fixtureState();
+  const fixture = fixtureFetch(state);
+  let clockCaptured = false;
+  const sourceClock = {
+    now: () => {
+      clockCaptured = true;
+      return COLLECTOR_OBSERVED_AT;
+    },
+  };
+  const client = createGitHubReadbackTestClient({
+    fetch: async (...args) => {
+      assert.equal(clockCaptured, true);
+      return fixture.fetch(...args);
+    },
+    token: AUTH_SENTINEL,
+    apiVersion: API_VERSION,
+  }, sourceClock);
+  sourceClock.now = () => '2026-09-01T00:00:00.000Z';
+
+  const evidence = await collectGitHubApprovalEvidence(
+    client,
+    request(),
+    limits(),
+    policy(),
+  );
+
+  assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
+  assert.equal(Object.isFrozen(client), true);
+  assert.throws(
+    () => createGitHubReadbackTestClient({
+      fetch: fixture.fetch,
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+    }, { now: () => COLLECTOR_OBSERVED_AT, extra: true }),
+    { message: 'APPROVAL_GITHUB_CLIENT_INVALID' },
+  );
+});
+
+test('collector rejects invalid clock output and caller attempts to inject clock data', async (t) => {
+  await t.test('non-canonical clock output fails before the first remote read', async () => {
+    const state = fixtureState();
+    const fixture = fixtureFetch(state);
+    const client = createGitHubReadbackTestClient({
+      fetch: fixture.fetch,
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+    }, { now: () => '2026-08-30T12:30:00Z' });
+
+    await expectCode(
+      () => collectGitHubApprovalEvidence(client, request(), limits(), policy()),
+      'APPROVAL_GITHUB_CLOCK_INVALID',
+    );
+    assert.equal(fixture.calls.length, 0);
+  });
+
+  await t.test('request clock field is not an authorization surface', async () => {
+    const state = fixtureState();
+    const fixture = fixtureFetch(state);
+    const client = createGitHubReadbackTestClient({
+      fetch: fixture.fetch,
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+    }, { now: () => COLLECTOR_OBSERVED_AT });
+    const unsafeRequest = request();
+    unsafeRequest.collectorObservedAt = COLLECTOR_OBSERVED_AT;
+
+    await expectCode(
+      () => collectGitHubApprovalEvidence(client, unsafeRequest, limits(), policy()),
+      'APPROVAL_GITHUB_REQUEST_INVALID',
+    );
+    assert.equal(fixture.calls.length, 0);
+  });
+
+  await t.test('policy clock field is not an authorization surface', async () => {
+    const state = fixtureState();
+    const fixture = fixtureFetch(state);
+    const client = createGitHubReadbackTestClient({
+      fetch: fixture.fetch,
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+    }, { now: () => COLLECTOR_OBSERVED_AT });
+    const unsafePolicy = policy();
+    unsafePolicy.collectorClock = { now: () => COLLECTOR_OBSERVED_AT };
+
+    await expectCode(
+      () => collectGitHubApprovalEvidence(client, request(), limits(), unsafePolicy),
+      'APPROVAL_GITHUB_POLICY_INVALID',
+    );
+    assert.equal(fixture.calls.length, 0);
+  });
 });
 
 test('snapshots and deep-freezes the closed trusted proposal renderer policy before reads', () => {

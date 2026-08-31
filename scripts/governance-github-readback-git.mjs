@@ -153,9 +153,11 @@ export const authorityActors = (authorityFile) => {
   const schemaValidation = validateApprovalAuthorities(value);
   const hostedRepositoryScopeMismatch = (
     schemaValidation.valid === false
-    && schemaValidation.issues.length === 1
-    && schemaValidation.issues[0].stable_code === 'APPROVAL_SCHEMA_CONST'
-    && /^\/roles\/[0-3]\/scope\/repository_id$/.test(schemaValidation.issues[0].instance_path)
+    && schemaValidation.issues.length > 0
+    && schemaValidation.issues.every((issue) => (
+      issue.stable_code === 'APPROVAL_SCHEMA_CONST'
+      && /^\/roles\/[0-3]\/scope\/repository_id$/.test(issue.instance_path)
+    ))
   );
   requireCondition(!hostedRepositoryScopeMismatch, AUTHORITY_CURRENTNESS_CODE);
   requireCondition(
@@ -218,6 +220,7 @@ export const authorityEntryCurrentForReview = ({
   policyRevision,
   reviewSubmittedAt,
   requestObservedAt,
+  collectorObservedAt,
 }) => {
   const purpose = REVIEW_PURPOSE_BY_ROLE[role];
   const candidate = {
@@ -231,7 +234,7 @@ export const authorityEntryCurrentForReview = ({
     && repository?.full_name === REPOSITORY_FULL_NAME
     && authorityIsCurrent(
       entry,
-      [reviewSubmittedAt, requestObservedAt],
+      [reviewSubmittedAt, collectorObservedAt],
       purpose,
       candidate,
     )
@@ -240,6 +243,7 @@ export const authorityEntryCurrentForReview = ({
       entry.assignment_evidence?.observed_at,
       reviewSubmittedAt,
       requestObservedAt,
+      collectorObservedAt,
     )
   );
 };

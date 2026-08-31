@@ -357,6 +357,16 @@ ambiguous Security authority returns HOLD before `VERIFIED`; it never falls
 back to QA, CODEOWNER, Product, Privacy, Legal, repository administration, a bot,
 GitHub App, check run, workflow, or machine status.
 
+The verifier owns `readback_at`. It captures one canonical system-clock value
+synchronously before the first remote await and uses that value for authority
+currentness and the final evidence `observed_at`. A caller-supplied request
+observation timestamp remains closed, validated request provenance only; it
+cannot make an expired assignment current. The verifier rejects causal order
+drift across assignment observation, selected review, request provenance, and
+collector readback. A deterministic test clock may be injected only through a
+closed, snapshotted test-client capability; it is not a request or policy field,
+and the production client always uses its internal system clock.
+
 The closed `program-c-security-review-evidence/v1` object binds:
 
 ```text

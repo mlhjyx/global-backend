@@ -478,12 +478,18 @@ export function addStaticApprovalEdge(
     condition?: StaticApprovalConditionAttributes;
   },
 ): void {
+  const conditionAttributes: Record<string, boolean | string> = input.condition === undefined
+    ? {}
+    : {
+        conditional: input.condition.conditional,
+        requiredWhen: input.condition.requiredWhen,
+      };
   builder.addEdge({
     kind: "references",
     from: input.from,
     to: input.to,
     attributes: {
-      ...(input.condition ?? {}),
+      ...conditionAttributes,
       relation: input.relation,
       ...STATIC_APPROVAL_ATTRIBUTES,
     },

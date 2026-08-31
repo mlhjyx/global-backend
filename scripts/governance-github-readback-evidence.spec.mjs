@@ -181,6 +181,21 @@ test('classifies simultaneous hosted repository scope drift as authority current
   );
 });
 
+test('keeps mixed hosted scope and malformed registry issues on the generic authority code', async () => {
+  const state = fixtureState();
+  for (const role of ['OWN-PRODUCT', 'OWN-DATA-PRIVACY']) {
+    mutateAuthorityRole(state, role, (entry) => {
+      entry.scope.repository_id = REPOSITORY_ID + 1;
+      if (role === 'OWN-PRODUCT') entry.scope.untrusted_extra = true;
+    });
+  }
+
+  await expectCode(
+    () => collect(state),
+    'APPROVAL_GITHUB_AUTHORITY_MISMATCH',
+  );
+});
+
 test('rejects duplicate checks and weak name, URL, path, or slug-only claims', async (t) => {
   await t.test('duplicate context', async () => {
     const state = fixtureState();

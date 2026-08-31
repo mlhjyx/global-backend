@@ -81,7 +81,7 @@ const reviewOrder = (left, right) => {
   return time === 0 ? (left.review?.id ?? 0) - (right.review?.id ?? 0) : time;
 };
 
-const normalizeRoleReview = (parsed, role, authority, request) => {
+const normalizeRoleReview = (parsed, role, authority, request, collectorObservedAt) => {
   const expected = authority.get(role);
   const actorEvents = parsed
     .filter(({ review }) => review?.user?.id === expected.actor_id)
@@ -100,6 +100,7 @@ const normalizeRoleReview = (parsed, role, authority, request) => {
       policyRevision: request.policyRevision,
       reviewSubmittedAt: selected.review?.submitted_at,
       requestObservedAt: request.observedAt,
+      collectorObservedAt,
     }),
     AUTHORITY_CURRENTNESS_CODE,
   );
@@ -176,9 +177,11 @@ const normalizeCodeownerReview = (reviews, request) => {
   });
 };
 
-export const normalizeReviews = (reviews, authority, request) => {
+export const normalizeReviews = (reviews, authority, request, collectorObservedAt) => {
   const parsed = reviews.map(parsedReview);
-  const normalized = ROLES.map((role) => normalizeRoleReview(parsed, role, authority, request));
+  const normalized = ROLES.map((role) => (
+    normalizeRoleReview(parsed, role, authority, request, collectorObservedAt)
+  ));
   const codeowner = normalizeCodeownerReview(reviews, request);
   const reviewIds = [...normalized.map(({ review_id }) => review_id), codeowner.review_id];
   requireCondition(arrayIsUnique(reviewIds), 'APPROVAL_EVIDENCE_SLOT_REUSE');
