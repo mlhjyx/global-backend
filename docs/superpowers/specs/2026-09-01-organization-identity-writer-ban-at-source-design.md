@@ -31,7 +31,7 @@ apps/api/src/acquisition/tenant-projection.service.ts:230
   tx.identityLink.create
 
 apps/api/src/temporal/discovery.activities.ts:906
-  transaction.identityLink.create
+  tx.identityLink.create
 
 apps/api/src/temporal/discovery-company-materialization-canonical.ts:206
   transaction.identityLink.create
@@ -144,7 +144,18 @@ docs/governance/organization-identity-migration-authority.json
   commits, resolver/function/ACL authority records and prerequisite receipts.
 
 docs/governance/organization-identity-writer-stage.json
-  Current Artifact B stage and exact expected remaining delegate findings.
+  Current Artifact B stage enum and observation receipt only. Expected finding
+  sets come from the immutable accepted stage-machine definition, never from
+  mutable paths supplied by this file.
+
+docs/governance/organization-identity-writer-acceptance.json
+  First-add B0 acceptance anchor: reviewed implementation parent, scanner and
+  manifest Git blob IDs/digests, Artifact A Git object, review receipts and
+  immutable stage-machine definition.
+
+docs/governance/organization-identity-artifact-a-acceptance.json
+  Durable non-secret Artifact A head, migration, disposable/static gate and
+  independent-review receipt identities/digests consumed by B0.
 
 package.json
   Named scanner self-test, stage verification and zero verification commands.
@@ -334,7 +345,34 @@ The TypeScript project graph follows import/export aliases, direct arguments/par
 
 The initial B0 review must classify every current surface. A `FORBIDDEN_DYNAMIC_STRUCTURE` or unresolved surface blocks B0; it is not an allowlist entry.
 
-### 9.3 Drift rule during Artifact B
+“Structural hash” means one canonical dependency-closure commitment, not a call-expression shape. Each record commits, by digest without printing the bytes, all executable preimage that can change its SQL/capability behavior:
+
+- complete raw template/string token and literal bytes;
+- referenced `const` definitions;
+- finite object/map values used to choose SQL or function names;
+- local and imported helper-return definitions;
+- `Prisma.Sql`/join item definitions and their ordered arguments;
+- structural client/delegate/raw types and relevant union members;
+- wrapper ingress call arguments and the complete statically reachable dependency closure;
+- normalized source-file blob IDs for every closure member;
+- scanner implementation, build-surface contract, native-extractor, TypeScript/Prisma version and derivation-rule blob IDs.
+
+Changing only a SQL literal, referenced constant, map value, helper return, existing wrapper argument, imported type, scanner rule, or manifest therefore changes the commitment even when the outer callsite topology is unchanged.
+
+### 9.3 Immutable B0 acceptance anchor
+
+B0 uses a two-step checkpoint so the scanner/manifests cannot authorize same-task regeneration:
+
+1. `B0_IMPLEMENTATION` creates the scanner, baseline/migration/build manifests and green self/stage tests. It is committed and independently reviewed at one exact commit.
+2. `B0_ACCEPTANCE` is a separate child commit that first adds `organization-identity-writer-acceptance.json`. The record names the reviewed parent commit, exact Artifact A commit, scanner/test blob IDs and SHA-256 values, baseline/migration/build manifest blob IDs and SHA-256 values, stage-machine digest, independent review report digests, and the allowed later mutable stage path. The acceptance commit itself receives an independent scoped review.
+
+Every B1-B6 run locates the Git commit that first added the acceptance path, requires it to be the reviewed `B0_ACCEPTANCE` commit, and reads the authority values from that immutable Git object with `git show`. Current working-tree acceptance bytes, scanner derivation rules, baseline/migration/build manifests, native-extractor pin, and test implementation must equal their accepted Git blobs. Editing and regenerating any of them is drift before current-tree recomputation occurs.
+
+B1 must fork the exact reviewed B0 acceptance commit. If the first-add history is absent, duplicated, rewritten, unreachable from HEAD, has the wrong parent, or differs from the accepted record, the scanner returns `INTEGRITY_ERROR`; it does not accept a replacement anchor.
+
+On every run, the accepted scanner directly re-derives the current closure and also derives the Artifact A closure from exact Git object `2400bac28796bae44294114edc99eaccb1bd65b3`. Only the closed stage removals are permitted. A same-commit source change plus regenerated manifest cannot become clean because accepted manifest/scanner blobs and the Artifact A Git preimage remain immutable comparison subjects.
+
+### 9.4 Drift rule during Artifact B
 
 From B0 through B6:
 
@@ -345,7 +383,7 @@ From B0 through B6:
 - the existing `GOVERNED_IDENTITY_RESOLVER` raw command remains exact Artifact A bytes;
 - any other addition, deletion mismatch, structural change, call-graph change, dynamic origin, or manifest edit without a new independent review is `RAW_CAPABILITY_BASELINE_DRIFT`.
 
-B2/B4/B4M may change their caller files, but the normalized hashes are scoped to raw capability expressions and wrapper ingress edges. Unrelated business-logic edits do not rewrite the raw baseline. A changed raw expression cannot be hidden by regenerating the manifest in the same task; manifest changes require a separate spec/review decision.
+B2/B4/B4M may change their caller files, but the normalized hashes are scoped to raw capability expressions, executable dependency closures, and wrapper ingress edges. Unrelated business-logic edits do not rewrite the raw baseline. A changed raw expression cannot be hidden by regenerating the manifest: current manifest bytes must equal the accepted first-add Git blob, and the re-derived closure must match the immutable accepted/Artifact A subjects. Any future manifest evolution requires a new design with a different authority path; it is not an Artifact B stage update.
 
 This transition freeze, rather than literal SQL semantics, blocks new runtime concatenation, `U&` identifiers, `format('%I', ...)`, side-effecting raw function calls, imported raw binders, and structural fragments during Artifact B.
 
@@ -390,19 +428,27 @@ Absence of the substring proves nothing about dynamic SQL or semantic table effe
 
 ## 12. Resource bounds
 
-Each project scan uses one shared budget:
+Each project scan uses closed project-total and per-resolution budgets:
 
 ```text
 source files                 2,000
 AST nodes per file          20,000
 project symbol/call edges  200,000
+raw capability records       4,096
+wrapper ingress records      8,192
+dependency-closure members  16,384
 resolution depth                32
-assignment/key fanout            32
-candidate structures            256
-total candidate bytes     1,000,000
+per-symbol assignment fanout     32
+per-resolution alternatives     256
+candidate bytes per record 1,000,000
+project committed bytes    64,000,000
 ```
 
-Cycles are keyed by checker symbol plus operation. Candidate work is charged before allocation. Budgets do not reset across aliases, imports, helpers, wrappers, interpolation classification, ingress traversal, manifest comparison, or diagnostics.
+`raw capability records`, `wrapper ingress records`, and `dependency-closure members` count total unique canonical records in one project scan. `per-resolution alternatives` counts simultaneous possible values/structures for one resolution root; it is not charged once for every ordinary raw node in the project. `per-symbol assignment fanout` counts assignments/keys reached from one checker symbol.
+
+Cycles are keyed by checker symbol plus operation. Candidate work is charged before allocation. Budgets do not reset by recursively re-entering aliases, imports, helpers, wrappers, interpolation classification, ingress traversal, manifest comparison, or diagnostics.
+
+The B0 implementation measures and records exact Artifact A counts using the real project graph. Every project-total capacity must be at least twice the measured baseline and the baseline must consume no more than 50% of its hard limit. If any measured count violates that headroom, B0 stops for a spec revision rather than silently raising the limit. Tests prove the exact baseline fits and adversarial fanout/depth/cycle/record/byte cases exhaust deterministically.
 
 Budget exhaustion is `SCAN_BUDGET_EXHAUSTED` and exit 1. A TypeScript-program, filesystem, configuration, manifest-schema, or unexpected scanner failure is normalized to one closed integrity code and exit 2. Neither can yield a clean inventory.
 
@@ -416,6 +462,19 @@ Budget exhaustion is `SCAN_BUDGET_EXHAUSTED` and exit 1. A TypeScript-program, f
 - exact `app_user`/PUBLIC table- and column-privilege observations relevant to `identity_link`;
 - immutable references to Artifact A static and disposable review receipts.
 
+The durable prerequisite record is `docs/governance/organization-identity-artifact-a-acceptance.json`. Its B0 first revision must bind exact Artifact A head/range and these current non-secret source receipts before the B0 implementation review. Every table path is relative to exact source workspace `/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan/`:
+
+| Evidence class      | Source path in the closeout evidence workspace                                                               | SHA-256                                                            | Required verdict                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------- |
+| A7 implementation   | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-report.md`                      | `a7faa97ecca4bbc28f79cd4a8c77ff33eedcbc771273cea793bbfdd086b91cab` | local implementation GREEN at `2400bac…`      |
+| Whole-branch review | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/final-whole-branch-review.md`           | `0263be60a8c66a13ec36bd8d4c541c53c0ef91d2ab5c77bd1a771295cee067b4` | local technical PASS; bounded Artifact B only |
+| Code review         | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-code-review.md`     | `b473e15b84ef9d4db72de7b24f7844d905e913203043824d7741b663fbe269e0` | `0 Critical / 0 Important`                    |
+| DB review           | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-db-review.md`       | `9ee0be2034eaded1e532b6b7c7a2079c0917d2b684ea52a65111cb03945f0f13` | `0 Critical / 0 Important`; retained DB HOLD  |
+| Security review     | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-security-review.md` | `3debad7dc240981e5cb25be983c53a6e02b2234d2b57e1bd5e780355734d9989` | `0 Critical / 0 Important`; `TRANSITION_HOLD` |
+| Task review         | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-task-review.md`                 | `7fbcbb0582d344e4579b1887e5a16a2a49e7d1d3a0ab8e5eb4c791f74787426d` | Spec PASS / Quality Approved                  |
+
+The local ignored reports are source evidence for B0 intake, not durable authority by themselves. B0 verifies all six exact bytes and verdicts, then materializes their identities, hashes, Artifact A commit/range, migration checksums, and a no-secret schema into the tracked acceptance JSON. The B0 implementation review reads the six sources and the tracked record. The later B0 acceptance first-add commit immutably anchors that tracked blob. If any source report is absent or has a different digest before acceptance, B0 stops; after acceptance, later stages consume the immutable accepted Git blob and do not depend on mutable local report paths.
+
 Prerequisite commands are named exactly:
 
 ```bash
@@ -426,7 +485,7 @@ node --test \
 
 B0 also consumes the exact Artifact A disposable DB/ACL/function-residue report; it does not rerun or claim retained-database evidence without authorization.
 
-Any migration addition, removal, checksum change, last-change drift, relevant function/ACL digest drift, or manifest regeneration causes `MIGRATION_AUTHORITY_DRIFT`. Artifact B contains no migration task, so such drift is HOLD pending a separately reviewed current-main refresh. The scanner does not infer semantic non-writing from partial SQL grammar and never edits migration bytes or `_prisma_migrations`.
+Any migration addition, removal, checksum change, last-change drift, relevant function/ACL digest drift, current manifest edit, or mismatch with the accepted first-add Git blob causes `MIGRATION_AUTHORITY_DRIFT`. Artifact B contains no migration task, so such drift is HOLD pending a separately reviewed current-main refresh. The scanner does not infer semantic non-writing from partial SQL grammar and never edits migration bytes or `_prisma_migrations`.
 
 This complete directory freeze ensures a future second migration-installed writer cannot appear while the prerequisite remains green merely because an old historical-stage test did not include it.
 
@@ -434,7 +493,7 @@ This complete directory freeze ensures a future second migration-installed write
 
 Default scanner tests and stage verification are always green when the current stage has the exact expected inventory. There is no permanently failing test in the default suite.
 
-`organization-identity-writer-stage.json` uses this exact state machine:
+`organization-identity-writer-stage.json` may declare only the closed stage enum and a machine observation receipt. The scanner loads the stage-to-expected-set mapping from the immutable B0 acceptance Git blob and rejects extra expected paths/methods/counts in the mutable stage file. The accepted state machine is:
 
 | Stage                         | Expected remaining delegate writer       |
 | ----------------------------- | ---------------------------------------- |
@@ -465,7 +524,7 @@ governance:identity-writers:zero
 
 B0 wires the self-tests and current-stage command into the existing explicit governance test aggregator and `.github/workflows/governance.yml` path through `governance:verify`. Because the stage contract expects three findings at B0, governance remains green.
 
-B1–B4 update only the stage artifact in the same reviewed caller-cutover commit that changes the corresponding writer count. The scanner baseline cannot change in those commits.
+B1/B3 advance only the stage value while retaining the same expected writer set; their RED product tests may change as specified. B2/B4 atomically change caller source plus the closed stage value and expected set. The stage JSON is the only mutable governance manifest in B1-B4; scanner, acceptance, raw/build/migration baselines and their derivation rules cannot change.
 
 B4M changes the stage to zero. B5 adds `governance:identity-writers:zero` as a mandatory `governance:verify` subgate and proves the existing governance workflow invokes it. A nonzero or exit-2 result fails CI.
 
@@ -562,6 +621,7 @@ The written spec may advance to implementation planning only after:
 The later implementation may advance from B0 to B1 only after:
 
 - build/raw/migration baselines are complete and independently reviewed;
+- the separate B0 acceptance first-add commit and its parent implementation commit are independently reviewed, reachable, and byte-exact;
 - every current raw capability surface has a non-blocking reviewed disposition;
 - scanner tests, stage verification, Artifact A prerequisites, governance wiring, redaction, bounds, and runtime exclusion pass;
 - live stage verification reports exactly the three baseline delegate writers and no drift/ambiguity;
