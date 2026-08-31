@@ -222,14 +222,16 @@ Safe rollout requires three independently reviewable and deployable artifacts. T
 
 ### Artifact A — command expansion
 
+- User-approved pre-release reissue of `20260829090000_organization_identity_v2_expand_ddl`, only if retained/official inventory proves the old SHA `2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119` was never applied. The sole semantic change is renaming the temporary standalone `canonical_company(workspace_id,id)` unique index to `canonical_company_workspace_id_id_artifact_a_key`, avoiding the exact-main 130300 constraint namespace.
 - Final pre-release form of `20260830090000_organization_identity_v2_resolver_command`, only if retained inventory proves that no old checksum/name was applied.
+- New `20260830130500_organization_identity_mainline_constraint_adoption`, after exact-main 130300/130400, verifies the main-owned `canonical_company_workspace_id_id_key` UNIQUE constraint, rebinds the five Artifact A CanonicalCompany composite foreign keys, removes the temporary Artifact A index, and leaves no duplicate final unique index.
 - Replaces the rejected JSON command with the two-ID command and private helpers.
 - Old seven-column IdentityLink INSERT remains temporarily for old code compatibility.
 - State after deployment: `TRANSITION_HOLD`; no unique-authority claim.
 
 If any retained ledger contains the migration name or rejected checksum, do not rewrite it. Use a strictly later forward repair migration and preserve the existing ledger.
 
-The rejected local checksums `7e101a1d...`, `8c5d07dc...`, `0c716f1d...`, and `fb6b377f...` are forbidden in any future official inventory. Never edit `_prisma_migrations` or use `prisma migrate resolve` to disguise a mismatch.
+The rejected local checksums `7e101a1d...`, `8c5d07dc...`, `0c716f1d...`, `fb6b377f...`, and superseded 290900 checksum `2f6bab93...` are forbidden in any future official inventory. Never edit `_prisma_migrations` or use `prisma migrate resolve` to disguise a mismatch. If any retained/official ledger contains the old 290900 SHA, do not reissue it; stop and design a strictly later forward repair from that exact retained state.
 
 ### Artifact B — application caller cutover
 
