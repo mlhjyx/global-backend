@@ -13,6 +13,8 @@ import {
   HEAD_SHA,
   OTHER_SHA,
   PROPOSAL_MANIFEST_BLOB_SHA,
+  PROPOSAL_SIDECAR_BLOB_SHA,
+  canonicalProposalSidecarBytes,
   SIGNER_BLOB_SHA,
   SIGNER_PATH,
   WORKFLOW_BLOB_SHA,
@@ -20,6 +22,7 @@ import {
   actor,
   collect,
   commandLine,
+  digest,
   encodeBlob,
   expectCode,
   fixtureFetch,
@@ -29,6 +32,29 @@ import {
   request,
   review,
 } from './fixtures/approval-readback/task5-github-readback-fixture.mjs';
+
+const replaceProposalManifest = (state, mutate) => {
+  const blob = state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA);
+  const value = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+  mutate(value);
+  state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, {
+    sha: PROPOSAL_MANIFEST_BLOB_SHA,
+    ...encodeBlob(`${JSON.stringify(value)}\n`),
+  });
+};
+
+const replaceProposalSidecar = (state, bytes, { bindManifest = false } = {}) => {
+  state.blobs.set(PROPOSAL_SIDECAR_BLOB_SHA, {
+    sha: PROPOSAL_SIDECAR_BLOB_SHA,
+    ...encodeBlob(bytes),
+  });
+  if (bindManifest) {
+    replaceProposalManifest(state, (value) => {
+      value.proposed_sidecar_byte_length = bytes.length;
+      value.proposed_sidecar_raw_sha256 = digest(bytes);
+    });
+  }
+};
 
 test('pull_request_target binds the PR head separately from its trusted base execution', async () => {
   const state = fixtureState();
@@ -225,24 +251,21 @@ test('enforces blob identity, 1 MiB, LFS, fatal UTF-8, and strict JSON', async (
   });
   await t.test('Git LFS pointer', async () => {
     const state = fixtureState();
-    state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, {
-      sha: PROPOSAL_MANIFEST_BLOB_SHA,
-      ...encodeBlob('version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef\nsize 1\n'),
-    });
+    replaceProposalSidecar(
+      state,
+      Buffer.from('version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef\nsize 1\n', 'utf8'),
+    );
     await expectCode(() => collect(state), 'APPROVAL_GITHUB_LFS_POINTER_FORBIDDEN');
   });
   await t.test('one byte over 1 MiB', async () => {
     const state = fixtureState();
     const bytes = Buffer.alloc(1_048_577, 0x20);
-    state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, { sha: PROPOSAL_MANIFEST_BLOB_SHA, ...encodeBlob(bytes) });
+    replaceProposalSidecar(state, bytes);
     await expectCode(() => collect(state), 'APPROVAL_GITHUB_BLOB_TOO_LARGE');
   });
   await t.test('fatal UTF-8', async () => {
     const state = fixtureState();
-    state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, {
-      sha: PROPOSAL_MANIFEST_BLOB_SHA,
-      ...encodeBlob(Buffer.from([0x7b, 0xff, 0x7d])),
-    });
+    replaceProposalSidecar(state, Buffer.from([0x23, 0x20, 0xff, 0x0a]));
     await expectCode(() => collect(state), 'APPROVAL_GITHUB_BLOB_UTF8_INVALID');
   });
   await t.test('duplicate JSON key', async () => {
@@ -253,6 +276,36 @@ test('enforces blob identity, 1 MiB, LFS, fatal UTF-8, and strict JSON', async (
     });
     await expectCode(() => collect(state), 'APPROVAL_JSON_DUPLICATE_KEY');
   });
+});
+
+test('binds exact Markdown bytes and rejects non-canonical line endings', async (t) => {
+  const canonical = canonicalProposalSidecarBytes();
+  for (const [name, bytes, bindManifest, code] of [
+    ['one changed UTF-8 byte', Buffer.from(canonical).fill(0x58, 2, 3), false, 'APPROVAL_GITHUB_PROPOSAL_MISMATCH'],
+    ['one inserted space', Buffer.concat([canonical.subarray(0, -1), Buffer.from(' \n')]), false, 'APPROVAL_GITHUB_PROPOSAL_MISMATCH'],
+    ['CRLF instead of LF', Buffer.from(canonical.toString('utf8').replaceAll('\n', '\r\n')), true, 'APPROVAL_GITHUB_PROPOSAL_TEXT_INVALID'],
+    ['no terminal newline', canonical.subarray(0, -1), true, 'APPROVAL_GITHUB_PROPOSAL_TEXT_INVALID'],
+    ['two terminal newlines', Buffer.concat([canonical, Buffer.from('\n')]), true, 'APPROVAL_GITHUB_PROPOSAL_TEXT_INVALID'],
+  ]) {
+    await t.test(name, async () => {
+      const state = fixtureState();
+      replaceProposalSidecar(state, bytes, { bindManifest });
+      await expectCode(() => collect(state), code);
+    });
+  }
+});
+
+test('rejects manifest sidecar byte-length and raw-digest drift', async (t) => {
+  for (const [name, mutate] of [
+    ['byte length', (value) => { value.proposed_sidecar_byte_length += 1; }],
+    ['raw digest', (value) => { value.proposed_sidecar_raw_sha256 = `sha256:${'d'.repeat(64)}`; }],
+  ]) {
+    await t.test(name, async () => {
+      const state = fixtureState();
+      replaceProposalManifest(state, mutate);
+      await expectCode(() => collect(state), 'APPROVAL_GITHUB_PROPOSAL_MISMATCH');
+    });
+  }
 });
 
 test('detects PR, tree, trusted workflow, and ruleset pre/post drift', async (t) => {

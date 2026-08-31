@@ -7,7 +7,6 @@ import {
   ROLES,
   assertSafeParsedValue,
   deepFreeze,
-  hasExactKeys,
   isGitSha,
   isPlainObject,
   isSafePositiveInteger,
@@ -15,10 +14,12 @@ import {
   parseApprovalJson,
   requireCondition,
   sha256,
-  stableJson,
 } from './governance-github-readback-common.mjs';
 import { apiUrl, fetchJson } from './governance-github-readback-rest.mjs';
-import { validateApprovalAuthorities } from './governance-approval-schema-validator.mjs';
+import {
+  validateApprovalAuthorities,
+  validateApprovalProposalManifest,
+} from './governance-approval-schema-validator.mjs';
 
 const LFS_PREFIX = Buffer.from('version https://git-lfs.github.com/spec/v1', 'ascii');
 
@@ -113,6 +114,29 @@ export const readJsonFile = async (state, entry, commitSha, limits) => {
   });
 };
 
+export const readUtf8TextFile = async (state, entry, commitSha, limits) => {
+  const bytes = await readBlobBytes(state, entry, limits);
+  let text;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new Error('APPROVAL_GITHUB_BLOB_UTF8_INVALID');
+  }
+  requireCondition(
+    !text.includes('\r') && text.endsWith('\n') && !text.endsWith('\n\n'),
+    'APPROVAL_GITHUB_PROPOSAL_TEXT_INVALID',
+  );
+  return deepFreeze({
+    path: entry.path,
+    commit_sha: commitSha,
+    blob_sha: entry.sha,
+    mode: entry.mode,
+    size_bytes: bytes.length,
+    raw_sha256: sha256(bytes),
+    text,
+  });
+};
+
 export const authorityActors = (authorityFile) => {
   const value = authorityFile.value;
   const schemaValidation = validateApprovalAuthorities(value);
@@ -167,58 +191,50 @@ export const authorityActors = (authorityFile) => {
   };
 };
 
-export const assertProposalSubject = (files, request) => {
-  const manifestFile = files.find(({ path }) => path === request.proposalManifestPath);
-  const sidecarFile = files.find(({ path }) => path === request.proposalSidecarPath);
+export const assertProposalSubject = async (
+  manifestFile,
+  request,
+  policy,
+  readSidecar,
+) => {
   const manifest = manifestFile?.value;
-  const sidecar = sidecarFile?.value;
-  const manifestKeys = [
-    'schema_version',
-    'decision_id',
-    'policy_revision',
-    'decision_raw_sha256',
-    'decision_semantic_sha256',
-    'sidecar_path',
-  ];
-  const sidecarKeys = [
-    'schema_version',
-    'decision_id',
-    'policy_revision',
-    'decision_raw_sha256',
-    'decision_semantic_sha256',
-  ];
+  const validation = validateApprovalProposalManifest(manifest);
   requireCondition(
-    hasExactKeys(manifest, manifestKeys)
-      && hasExactKeys(sidecar, sidecarKeys)
-      && manifest.schema_version === 'approval-proposal-manifest/v1'
-      && sidecar.schema_version === 'approval-proposal-sidecar/v1'
+    validation.valid
+      && manifestFile.path === request.proposalManifestPath
       && manifest.decision_id === request.decisionId
-      && sidecar.decision_id === request.decisionId
       && manifest.policy_revision === request.policyRevision
-      && sidecar.policy_revision === request.policyRevision
       && manifest.decision_raw_sha256 === request.expectedDecisionRawSha256
-      && sidecar.decision_raw_sha256 === request.expectedDecisionRawSha256
       && manifest.decision_semantic_sha256 === request.expectedDecisionSemanticSha256
-      && sidecar.decision_semantic_sha256 === request.expectedDecisionSemanticSha256
-      && manifest.sidecar_path === request.proposalSidecarPath,
+      && manifest.proposed_sidecar_path === request.proposalSidecarPath
+      && manifest.renderer_schema_version === policy.proposalRenderer.schemaVersion
+      && manifest.renderer_source_sha256 === policy.proposalRenderer.sourceSha256,
     'APPROVAL_GITHUB_PROPOSAL_MISMATCH',
   );
+  const sidecarFile = await readSidecar(manifest.proposed_sidecar_path);
+  requireCondition(
+    sidecarFile.path === manifest.proposed_sidecar_path
+      && sidecarFile.size_bytes === manifest.proposed_sidecar_byte_length
+      && sidecarFile.raw_sha256 === manifest.proposed_sidecar_raw_sha256,
+    'APPROVAL_GITHUB_PROPOSAL_MISMATCH',
+  );
+  const trustedRenderer = {
+    schema_version: policy.proposalRenderer.schemaVersion,
+    source_sha256: policy.proposalRenderer.sourceSha256,
+  };
   return deepFreeze([
-    projectProposalFile(manifestFile, manifestKeys),
-    projectProposalFile(sidecarFile, sidecarKeys),
+    projectProposalFile(manifestFile, manifest.decision_semantic_sha256, trustedRenderer),
+    projectProposalFile(sidecarFile, manifest.decision_semantic_sha256, trustedRenderer),
   ]);
 };
 
-const projectProposalFile = (file, keys) => {
-  const subject = Object.fromEntries(keys.map((key) => [key, file.value[key]]));
-  return {
-    path: file.path,
-    commit_sha: file.commit_sha,
-    blob_sha: file.blob_sha,
-    mode: file.mode,
-    size_bytes: file.size_bytes,
-    raw_sha256: file.raw_sha256,
-    semantic_sha256: sha256(Buffer.from(stableJson(subject), 'utf8')),
-    subject,
-  };
-};
+const projectProposalFile = (file, semanticSha256, trustedRenderer) => ({
+  path: file.path,
+  commit_sha: file.commit_sha,
+  blob_sha: file.blob_sha,
+  mode: file.mode,
+  size_bytes: file.size_bytes,
+  raw_sha256: file.raw_sha256,
+  semantic_sha256: semanticSha256,
+  trusted_renderer: { ...trustedRenderer },
+});

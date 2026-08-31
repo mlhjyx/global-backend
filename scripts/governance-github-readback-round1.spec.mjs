@@ -11,7 +11,6 @@ import {
   HEAD_SHA,
   OTHER_SHA,
   PROPOSAL_MANIFEST_BLOB_SHA,
-  PROPOSAL_SIDECAR_BLOB_SHA,
   REPOSITORY_ID,
   collect,
   encodeBlob,
@@ -133,6 +132,7 @@ test('F1 snapshots closed request, policy tuples, and limits before the first aw
         callerPolicy.allowedActionsAppIds[0] = 999;
         callerPolicy.allowedWorkflowIds[0] = 999;
         callerPolicy.allowedWorkflowPaths[0] = OTHER_WORKFLOW_PATH;
+        callerPolicy.proposalRenderer.sourceSha256 = `sha256:${'d'.repeat(64)}`;
         callerLimits.maxItems = 1;
         return jsonResponse(state.repository);
       },
@@ -144,6 +144,10 @@ test('F1 snapshots closed request, policy tuples, and limits before the first aw
     });
     assert.equal(evidence.pull_request.head_sha, HEAD_SHA);
     assert.equal(evidence.machine_checks[0].context, 'approval/readback');
+    assert.equal(
+      evidence.proposal_files[1].trusted_renderer.source_sha256,
+      `sha256:${'c'.repeat(64)}`,
+    );
   });
 
   await t.test('post-validation limit elevation cannot widen response bytes', async () => {
@@ -281,17 +285,16 @@ test('F5 review pagination requires exact next page/query and globally unique ra
   }
 });
 
-test('F6 proposal schemas reject extra PR-controlled fields before public projection', async (t) => {
-  for (const blobSha of [PROPOSAL_MANIFEST_BLOB_SHA, PROPOSAL_SIDECAR_BLOB_SHA]) {
-    await t.test(blobSha === PROPOSAL_MANIFEST_BLOB_SHA ? 'manifest extra key' : 'sidecar extra key', async () => {
-      const state = fixtureState();
-      const blob = state.blobs.get(blobSha);
-      const value = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
-      value.padding = 'PR free-form must not escape';
-      state.blobs.set(blobSha, { sha: blobSha, ...encodeBlob(JSON.stringify(value)) });
-      await expectCode(() => collect(state), 'APPROVAL_GITHUB_PROPOSAL_MISMATCH');
-    });
-  }
+test('F6 proposal manifest schema rejects extra PR-controlled fields before public projection', async () => {
+  const state = fixtureState();
+  const blob = state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA);
+  const value = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+  value.padding = 'PR free-form must not escape';
+  state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, {
+    sha: PROPOSAL_MANIFEST_BLOB_SHA,
+    ...encodeBlob(`${JSON.stringify(value)}\n`),
+  });
+  await expectCode(() => collect(state), 'APPROVAL_GITHUB_PROPOSAL_MISMATCH');
 });
 
 test('F1 invalid caller objects stay rejected by the public facade', async () => {

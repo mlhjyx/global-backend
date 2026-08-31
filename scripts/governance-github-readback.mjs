@@ -17,6 +17,7 @@ import {
   exactBlobEntry,
   readBlobBytes,
   readJsonFile,
+  readUtf8TextFile,
   readTree,
 } from './governance-github-readback-git.mjs';
 import {
@@ -76,11 +77,18 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
 
   const rawAuthorityFile = await readJsonFile(state, authorityEntry, request.expectedBaseSha, limits);
   const { actors: authority, file: authorityFile } = authorityActors(rawAuthorityFile);
-  const rawProposalFiles = [];
-  for (const entry of proposalEntries) {
-    rawProposalFiles.push(await readJsonFile(state, entry, request.expectedHeadSha, limits));
-  }
-  const proposalFiles = assertProposalSubject(rawProposalFiles, request);
+  const manifestEntry = proposalEntries.find(({ path }) => path === request.proposalManifestPath);
+  const sidecarEntry = proposalEntries.find(({ path }) => path === request.proposalSidecarPath);
+  const manifestFile = await readJsonFile(state, manifestEntry, request.expectedHeadSha, limits);
+  const proposalFiles = await assertProposalSubject(
+    manifestFile,
+    request,
+    policy,
+    async (verifiedPath) => {
+      requireCondition(verifiedPath === sidecarEntry.path, 'APPROVAL_GITHUB_PROPOSAL_MISMATCH');
+      return readUtf8TextFile(state, sidecarEntry, request.expectedHeadSha, limits);
+    },
+  );
   for (const entry of machineEntries) await readBlobBytes(state, entry, limits);
 
   const reviews = await paginate(

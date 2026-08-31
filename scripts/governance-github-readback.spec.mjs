@@ -22,6 +22,7 @@ import {
   OBSERVED_AT,
   PROPOSAL_MANIFEST_BLOB_SHA,
   PROPOSAL_MANIFEST_PATH,
+  PROPOSAL_RENDERER_SOURCE_SHA256,
   PROPOSAL_SIDECAR_BLOB_SHA,
   PROPOSAL_SIDECAR_PATH,
   REPOSITORY_FULL_NAME,
@@ -34,6 +35,7 @@ import {
   actor,
   collect,
   digest,
+  encodeBlob,
   expectCode,
   fixtureFetch,
   fixtureState,
@@ -42,6 +44,16 @@ import {
   policy,
   request,
 } from './fixtures/approval-readback/task5-github-readback-fixture.mjs';
+
+const mutateProposalManifest = (state, mutate) => {
+  const blob = state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA);
+  const value = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+  mutate(value);
+  state.blobs.set(PROPOSAL_MANIFEST_BLOB_SHA, {
+    sha: PROPOSAL_MANIFEST_BLOB_SHA,
+    ...encodeBlob(`${JSON.stringify(value)}\n`),
+  });
+};
 
 test('collects frozen bounded observed evidence without claiming complete approval', async () => {
   const state = fixtureState();
@@ -100,23 +112,34 @@ test('collects frozen bounded observed evidence without claiming complete approv
     raw_sha256: digest(Buffer.from(state.blobs.get(AUTHORITY_BLOB_SHA).content, 'base64')),
     value: JSON.parse(Buffer.from(state.blobs.get(AUTHORITY_BLOB_SHA).content, 'base64').toString('utf8')),
   });
-  assert.deepEqual(
-    evidence.proposal_files.map(({ path, commit_sha, blob_sha, mode }) => ({ path, commit_sha, blob_sha, mode })),
-    [
-      { path: PROPOSAL_MANIFEST_PATH, commit_sha: HEAD_SHA, blob_sha: PROPOSAL_MANIFEST_BLOB_SHA, mode: '100644' },
-      { path: PROPOSAL_SIDECAR_PATH, commit_sha: HEAD_SHA, blob_sha: PROPOSAL_SIDECAR_BLOB_SHA, mode: '100644' },
-    ],
-  );
-  assert.equal(Object.hasOwn(evidence.proposal_files[0], 'value'), false);
-  assert.deepEqual(evidence.proposal_files[0].subject, {
-    schema_version: 'approval-proposal-manifest/v1',
-    decision_id: 'ADR-027',
-    policy_revision: 'program-c/policy-r2',
-    decision_raw_sha256: DECISION_RAW_SHA256,
-    decision_semantic_sha256: DECISION_SEMANTIC_SHA256,
-    sidecar_path: PROPOSAL_SIDECAR_PATH,
-  });
-  assert.match(evidence.proposal_files[0].semantic_sha256, /^sha256:[0-9a-f]{64}$/);
+  assert.deepEqual(evidence.proposal_files, [
+    {
+      path: PROPOSAL_MANIFEST_PATH,
+      commit_sha: HEAD_SHA,
+      blob_sha: PROPOSAL_MANIFEST_BLOB_SHA,
+      mode: '100644',
+      size_bytes: state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA).size,
+      raw_sha256: digest(Buffer.from(state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA).content, 'base64')),
+      semantic_sha256: DECISION_SEMANTIC_SHA256,
+      trusted_renderer: {
+        schema_version: 'approval-sidecar-renderer/v1',
+        source_sha256: PROPOSAL_RENDERER_SOURCE_SHA256,
+      },
+    },
+    {
+      path: PROPOSAL_SIDECAR_PATH,
+      commit_sha: HEAD_SHA,
+      blob_sha: PROPOSAL_SIDECAR_BLOB_SHA,
+      mode: '100644',
+      size_bytes: state.blobs.get(PROPOSAL_SIDECAR_BLOB_SHA).size,
+      raw_sha256: digest(Buffer.from(state.blobs.get(PROPOSAL_SIDECAR_BLOB_SHA).content, 'base64')),
+      semantic_sha256: DECISION_SEMANTIC_SHA256,
+      trusted_renderer: {
+        schema_version: 'approval-sidecar-renderer/v1',
+        source_sha256: PROPOSAL_RENDERER_SOURCE_SHA256,
+      },
+    },
+  ]);
   assert.equal(evidence.ruleset.id, 777);
   assert.deepEqual(evidence.ruleset.bypass_actors, []);
   assert.deepEqual(evidence.ruleset.required_status_checks, [{ context: 'approval/readback', integration_id: 15368 }]);
@@ -135,12 +158,19 @@ test('collects frozen bounded observed evidence without claiming complete approv
   assert.equal(evidence.observed_at, OBSERVED_AT);
   assert.ok(Object.isFrozen(evidence));
   assert.ok(Object.isFrozen(evidence.machine_checks[0].reusable_signer));
-  assert.ok(Object.isFrozen(evidence.proposal_files[0].subject));
+  assert.ok(Object.isFrozen(evidence.proposal_files[0].trusted_renderer));
   assert.ok(Object.isFrozen(client));
   assert.equal(Object.hasOwn(client, 'token'), false);
 
   const retained = JSON.stringify(evidence);
-  for (const forbidden of [AUTH_SENTINEL, 'free-form', 'untrusted PR', 'details-only-claim', 'external-id']) {
+  for (const forbidden of [
+    AUTH_SENTINEL,
+    'free-form',
+    'untrusted PR',
+    'details-only-claim',
+    'external-id',
+    'WORKSPACE_COMPLIANCE_HOLD',
+  ]) {
     assert.equal(retained.includes(forbidden), false, `retained forbidden value ${forbidden}`);
   }
   for (const forbiddenField of ['valid', 'verified', 'accepted', 'legal_input', 'verifier', 'receipt_subject']) {
@@ -165,6 +195,46 @@ test('collects frozen bounded observed evidence without claiming complete approv
     assert.equal(call.init.headers['X-GitHub-Api-Version'], API_VERSION);
     assert.ok(call.init.signal instanceof AbortSignal);
   }
+});
+
+test('binds the proposal manifest identity and trusted renderer before reading Markdown', async (t) => {
+  for (const [name, mutate] of [
+    ['decision ID', (value) => { value.decision_id = 'ADR-026'; }],
+    ['policy revision', (value) => { value.policy_revision = 'program-c/policy-r3'; }],
+    ['decision raw digest', (value) => { value.decision_raw_sha256 = `sha256:${'d'.repeat(64)}`; }],
+    ['decision semantic digest', (value) => { value.decision_semantic_sha256 = `sha256:${'d'.repeat(64)}`; }],
+    ['sidecar path allowlist', (value) => {
+      value.proposed_sidecar_path = 'docs/governance/decisions/adr-027-other.md';
+    }],
+    ['renderer schema', (value) => { value.renderer_schema_version = 'approval-sidecar-renderer/v2'; }],
+    ['renderer source', (value) => { value.renderer_source_sha256 = `sha256:${'d'.repeat(64)}`; }],
+  ]) {
+    await t.test(name, async () => {
+      const state = fixtureState();
+      mutateProposalManifest(state, mutate);
+      await expectCode(() => collect(state), 'APPROVAL_GITHUB_PROPOSAL_MISMATCH');
+    });
+  }
+
+  await t.test('sidecar path drift fails before the sidecar blob read', async () => {
+    const state = fixtureState();
+    mutateProposalManifest(state, (value) => {
+      value.proposed_sidecar_path = 'docs/governance/decisions/adr-027-other.md';
+    });
+    const fixture = fixtureFetch(state);
+    const client = createGitHubReadbackClient({
+      fetch: fixture.fetch,
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+    });
+    await expectCode(
+      () => collectGitHubApprovalEvidence(client, request(), limits(), policy()),
+      'APPROVAL_GITHUB_PROPOSAL_MISMATCH',
+    );
+    assert.equal(fixture.calls.some(({ url }) => (
+      new URL(url).pathname.endsWith(`/git/blobs/${PROPOSAL_SIDECAR_BLOB_SHA}`)
+    )), false);
+  });
 });
 
 test('requires the exact API version and injected fetch', () => {

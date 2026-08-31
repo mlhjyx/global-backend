@@ -19,12 +19,13 @@ export const SIGNER_BLOB_SHA = '8'.repeat(40);
 export const OTHER_SHA = '9'.repeat(40);
 export const AUTHORITY_PATH = 'docs/governance/approval-authorities.json';
 export const PROPOSAL_MANIFEST_PATH = 'docs/governance/decisions/adr-027-r2.manifest.json';
-export const PROPOSAL_SIDECAR_PATH = 'docs/governance/decisions/adr-027-r2.sidecar.json';
+export const PROPOSAL_SIDECAR_PATH = 'docs/governance/decisions/adr-027-r2.md';
 export const WORKFLOW_PATH = '.github/workflows/approval-readback.yml';
 export const SIGNER_PATH = '.github/workflows/approval-signer.yml';
 export const OBSERVED_AT = '2026-08-30T12:00:00.000Z';
 export const DECISION_RAW_SHA256 = `sha256:${'a'.repeat(64)}`;
 export const DECISION_SEMANTIC_SHA256 = `sha256:${'b'.repeat(64)}`;
+export const PROPOSAL_RENDERER_SOURCE_SHA256 = `sha256:${'c'.repeat(64)}`;
 export const AUTH_SENTINEL = 'fixture-auth-must-never-escape';
 export const API_ORIGIN = 'https://api.github.com';
 export const API_VERSION = '2026-03-10';
@@ -67,6 +68,11 @@ export const encodeBlob = (value) => {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
   return { content: bytes.toString('base64'), encoding: 'base64', size: bytes.length };
 };
+
+export const canonicalProposalSidecarBytes = () => Buffer.from(
+  '# ADR-027 proposed decision\n\nSelected strategy: `WORKSPACE_COMPLIANCE_HOLD`\n',
+  'utf8',
+);
 
 export const jsonResponse = (value, init = {}) => new Response(
   JSON.stringify(value),
@@ -115,24 +121,21 @@ export const fixtureState = () => {
       superseded_by: null,
     })),
   };
+  const sidecarBytes = canonicalProposalSidecarBytes();
   const manifestValue = {
     schema_version: 'approval-proposal-manifest/v1',
     decision_id: 'ADR-027',
     policy_revision: 'program-c/policy-r2',
     decision_raw_sha256: DECISION_RAW_SHA256,
     decision_semantic_sha256: DECISION_SEMANTIC_SHA256,
-    sidecar_path: PROPOSAL_SIDECAR_PATH,
-  };
-  const sidecarValue = {
-    schema_version: 'approval-proposal-sidecar/v1',
-    decision_id: 'ADR-027',
-    policy_revision: 'program-c/policy-r2',
-    decision_raw_sha256: DECISION_RAW_SHA256,
-    decision_semantic_sha256: DECISION_SEMANTIC_SHA256,
+    renderer_schema_version: 'approval-sidecar-renderer/v1',
+    renderer_source_sha256: PROPOSAL_RENDERER_SOURCE_SHA256,
+    proposed_sidecar_path: PROPOSAL_SIDECAR_PATH,
+    proposed_sidecar_byte_length: sidecarBytes.length,
+    proposed_sidecar_raw_sha256: digest(sidecarBytes),
   };
   const authorityBytes = Buffer.from(`${JSON.stringify(authorityValue)}\n`, 'utf8');
   const manifestBytes = Buffer.from(`${JSON.stringify(manifestValue)}\n`, 'utf8');
-  const sidecarBytes = Buffer.from(`${JSON.stringify(sidecarValue)}\n`, 'utf8');
   const workflowBytes = Buffer.from('name: approval readback\n', 'utf8');
   const signerBytes = Buffer.from('name: approval signer\n', 'utf8');
   const headTree = {
