@@ -8,6 +8,7 @@ import {
   reserveMergeAuthorizationNonce,
 } from './governance-approval-state.mjs';
 import { validateProgramCMergeAuthorizationGrant } from './governance-approval-schema-validator.mjs';
+import { buildSyntheticMergeReconciliationKernelInput } from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
 
 const NOW = new Date('2026-08-30T08:30:00.000Z');
 const RESERVATION_NOW = new Date('2026-08-30T08:10:00.000Z');
@@ -215,6 +216,55 @@ test('round2 I2 backdated dispatch cannot append a guard or consume fresh author
     replay: 'HOLD',
     physicalCalls: 1,
   });
+});
+
+test('pure reconciliation kernel plans result, consumption, and idempotent replay without a ledger port', async () => {
+  const { planMergeAuthorizationReconciliation } = await import(
+    './governance-approval-merge-reconciliation-kernel.mjs'
+  );
+  const input = buildSyntheticMergeReconciliationKernelInput();
+  const inputSnapshot = clone(input);
+  const first = planMergeAuthorizationReconciliation(input);
+  assert.deepEqual(input, inputSnapshot);
+  assert.equal(first.schemaVersion, 'merge-authorization-reconciliation-plan/v1');
+  assert.equal(first.outcome, 'READY_TO_APPLY');
+  assert.equal(first.blockingCode, null);
+  assert.deepEqual(first.resultEvent, {
+    type: 'MERGE_RESULT_OBSERVED',
+    resultCommitSha: input.readback.resultCommitSha,
+    observedMergeMethod: input.readback.observedMergeMethod,
+    observedAt: input.readback.currentMain.readAt,
+  });
+  assert.equal(first.consumption.result_commit_sha, input.readback.resultCommitSha);
+  assert.equal(first.consumptionRawSha256, digest(first.consumption));
+  assert.equal(Object.hasOwn(first, 'ledger'), false);
+
+  const resultEvent = { ...clone(first.resultEvent), ledgerRevision: 2 };
+  const afterResult = planMergeAuthorizationReconciliation(
+    buildSyntheticMergeReconciliationKernelInput({ streamFacts: { result: resultEvent } }),
+  );
+  assert.equal(afterResult.outcome, 'READY_TO_APPLY');
+  assert.equal(afterResult.resultEvent, null);
+  assert.deepEqual(afterResult.consumption, first.consumption);
+  assert.equal(afterResult.consumptionRawSha256, first.consumptionRawSha256);
+
+  const consumptionEvent = {
+    type: 'CONSUMPTION_RECORDED',
+    consumption: clone(first.consumption),
+    consumptionRawSha256: first.consumptionRawSha256,
+    recordedAt: input.observedAt,
+    ledgerRevision: 3,
+  };
+  const replay = planMergeAuthorizationReconciliation(
+    buildSyntheticMergeReconciliationKernelInput({
+      streamFacts: { result: resultEvent, consumptionEvent },
+    }),
+  );
+  assert.equal(replay.outcome, 'CONSUMPTION_ALREADY_RECORDED');
+  assert.equal(replay.resultEvent, null);
+  assert.deepEqual(replay.consumption, first.consumption);
+  assert.equal(replay.consumptionRawSha256, first.consumptionRawSha256);
+  assert.equal(Object.isFrozen(replay), true);
 });
 
 test('I1 reconciliation accepts a merge result reachable from a later current-main descendant', async () => {

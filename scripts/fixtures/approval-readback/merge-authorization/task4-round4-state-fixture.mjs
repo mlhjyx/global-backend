@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import * as approvalState from '../../../governance-approval-state.mjs';
+import { deepFreeze } from '../../../governance-approval-readback-common.mjs';
 import { buildTask3AcceptanceEvidence } from './task3-acceptance-evidence.mjs';
 import { buildSyntheticTrustedReceiptArtifact } from '../synthetic-trusted-receipt.mjs';
 
@@ -9,6 +10,7 @@ export const NOW = new Date('2026-08-30T08:30:00.000Z');
 export const REVOCATION_NOW = new Date('2026-08-30T08:31:00.000Z');
 
 const clone = (value) => structuredClone(value);
+const frozenClone = (value) => deepFreeze(clone(value));
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value) => {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -195,7 +197,7 @@ export const buildStateFromEvents = (events, policy, now = NOW) => {
   return state;
 };
 
-export const buildRound4AcceptedState = () => {
+const buildRound4Scenario = () => {
   const policy = approvalPolicy();
   const task3 = buildTask3AcceptanceEvidence();
   const grantRawSha256 = digest(grant);
@@ -344,7 +346,7 @@ export const buildRound4AcceptedState = () => {
       ledgerSnapshot,
     },
   });
-  const verified = buildStateFromEvents([
+  const verifiedEvents = [
     { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
     {
       type: 'PROPOSAL_RENDERED',
@@ -363,13 +365,146 @@ export const buildRound4AcceptedState = () => {
       mergeAuthorization,
       observedAt: '2026-08-30T08:25:00.000Z',
     },
-  ], policy);
+  ];
+  return { evidence, mergeAuthorization, policy, verifiedEvents };
+};
+
+export const buildRound4AcceptedState = () => {
+  const { evidence, policy, verifiedEvents } = buildRound4Scenario();
+  const verified = buildStateFromEvents(verifiedEvents, policy);
   const accepted = append(verified, {
     type: 'ACCEPTANCE_REVALIDATED',
     evidence,
     observedAt: evidence.readAt,
   }, policy, NOW);
   return { accepted, evidence, policy, verified };
+};
+
+const initialSyntheticProjection = (policy) => ({
+  schemaVersion: 'approval-decision-state/v1',
+  repository: clone(policy.repository),
+  decisionId: policy.decisionId,
+  decisionRevision: policy.decisionRevision,
+  policyRevision: policy.policyRevision,
+  state: 'OWNER_ASSIGNMENT_REQUIRED',
+  currentHeadSha: policy.currentHeadSha,
+  currentBaseSha: policy.currentBaseSha,
+  legalState: 'PENDING',
+  evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+  evidenceSlots: {
+    product: 'MISSING',
+    privacy: 'MISSING',
+    codeowner: 'MISSING',
+    qa: 'MISSING',
+    security: 'MISSING',
+    machine: 'MISSING',
+  },
+  receipt: null,
+  receiptHistory: [],
+  mergeAuthorization: null,
+  revocationStatus: 'ACTIVE',
+  supersessionStatus: 'CURRENT',
+  blockingCodes: ['APPROVAL_OWNER_ASSIGNMENT_REQUIRED'],
+  acceptanceCheckedAt: null,
+});
+
+const syntheticTransitionEvent = (transition, scenario) => {
+  const verifiedEvent = scenario.verifiedEvents.find(({ type }) => type === transition);
+  if (verifiedEvent) return verifiedEvent;
+  if (transition === 'ACCEPTANCE_REVALIDATED') {
+    return {
+      type: 'ACCEPTANCE_REVALIDATED',
+      evidence: scenario.evidence,
+      evidenceSha256: digest(scenario.evidence),
+      observedAt: scenario.evidence.readAt,
+      checkedAt: NOW.toISOString(),
+    };
+  }
+  if (transition === 'RECEIPT_SUPERSEDED') {
+    return {
+      type: 'RECEIPT_SUPERSEDED',
+      predecessorReceiptId: receiptSummary().receiptId,
+      successor: {
+        ...receiptSummary(),
+        receiptId: 'approval-receipt-task4-0002',
+      },
+      validation: {
+        valid: false,
+        issues: [{ stable_code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN' }],
+        trustEligible: false,
+      },
+      observedAt: '2026-08-30T08:26:00.000Z',
+    };
+  }
+  throw new Error('SYNTHETIC_APPROVAL_TRANSITION_UNKNOWN');
+};
+
+export const buildSyntheticApprovalStateKernelInput = ({
+  currentProjection = null,
+  event = null,
+  observedAt = NOW.toISOString(),
+  policySnapshot = null,
+  transition = 'AUTHORITIES_ASSIGNED',
+} = {}) => {
+  const scenario = buildRound4Scenario();
+  const closedPolicy = policySnapshot ?? scenario.policy;
+  return frozenClone({
+    currentProjection: currentProjection ?? initialSyntheticProjection(closedPolicy),
+    event: event ?? syntheticTransitionEvent(transition, scenario),
+    policySnapshot: closedPolicy,
+    observedAt,
+  });
+};
+
+export const buildSyntheticMergeReconciliationKernelInput = ({
+  observedAt = NOW.toISOString(),
+  streamFacts = {},
+} = {}) => {
+  const grantRawSha256 = digest(grant);
+  const request = requestFor(grant);
+  const reservationEvent = {
+    type: 'NONCE_RESERVED',
+    grantId: grant.grant_id,
+    grantRawSha256,
+    requestId: request.requestId,
+    reservationId: request.reservationId,
+    repositoryId: grant.repository.id,
+    decisionAdr: grant.decision_adr,
+    decisionRevision: grant.decision_revision,
+    policyRevision: grant.policy_revision,
+    stage: grant.stage,
+    prNumber: grant.pr_number,
+    baseSha: grant.base_sha,
+    headSha: grant.head_sha,
+    mergeMethod: grant.allowed_merge_method,
+    reservedAt: '2026-08-30T08:10:00.000Z',
+    ledgerRevision: 1,
+  };
+  return frozenClone({
+    reservation: {
+      schemaVersion: 'merge-authorization-reservation/v1',
+      key: {
+        repositoryId: grant.repository.id,
+        singleUseNonce: grant.single_use_nonce,
+      },
+      grant,
+      grantRawSha256,
+      request,
+      reservedLedgerRevision: 1,
+      reservedAt: reservationEvent.reservedAt,
+    },
+    readback: currentMainReadback,
+    streamFacts: {
+      reservation: reservationEvent,
+      acknowledgement: null,
+      result: null,
+      consumptionEvent: null,
+      revocations: [],
+      holds: [],
+      ...streamFacts,
+    },
+    observedAt,
+  });
 };
 
 export const revocationEvent = (overrides = {}) => {

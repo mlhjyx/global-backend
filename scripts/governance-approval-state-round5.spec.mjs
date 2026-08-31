@@ -13,6 +13,7 @@ import {
   approvalPolicy,
   buildRound4AcceptedState,
   buildStateFromEvents,
+  buildSyntheticApprovalStateKernelInput,
   digest,
   revocationEvent,
 } from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
@@ -55,6 +56,31 @@ const capturePolicyInitialization = (policy) => {
     return error instanceof RangeError ? 'RangeError' : error.message;
   }
 };
+
+test('round5 pure state plan is deterministic and cannot mint a privately admitted history', async () => {
+  const { planApprovalStateTransition } = await import('./governance-approval-state-kernel.mjs');
+  const input = buildSyntheticApprovalStateKernelInput();
+  const before = clone(input);
+  const first = planApprovalStateTransition(input);
+  const second = planApprovalStateTransition(clone(input));
+  assert.deepEqual(first, second);
+  assert.deepEqual(input, before);
+  assert.equal(first.schemaVersion, 'approval-state-transition-plan/v1');
+  assert.equal(Object.hasOwn(first, 'eventHistory'), false);
+  assert.equal(Object.hasOwn(first.nextProjection, 'eventHistory'), false);
+  assert.equal(Object.hasOwn(first.nextProjection, 'policySnapshot'), false);
+
+  const callerHistory = [clone(input.event)];
+  const publicResult = approvalState.reduceApprovalDecisionState(
+    callerHistory,
+    clone(input.policySnapshot),
+    NOW,
+  );
+  assert.deepEqual(
+    holdSummary(publicResult),
+    expectedHold('APPROVAL_STATE_HISTORY_NOT_ADMITTED'),
+  );
+});
 
 test('round5 admitted history is bound to one closed policy snapshot and mismatch cannot alter status', () => {
   const { accepted, policy } = buildRound4AcceptedState();

@@ -3,12 +3,16 @@ import test from 'node:test';
 
 import * as approvalState from './governance-approval-state.mjs';
 import { renderApprovalStatusReadModel } from './governance-approval-state.mjs';
-import { storedReceiptRevocationIssue } from './governance-approval-state-revocation.mjs';
+import {
+  buildStoredReceiptRevocationEvent,
+  storedReceiptRevocationIssue,
+} from './governance-approval-state-revocation.mjs';
 import {
   NOW,
   REVOCATION_NOW,
   appendRevocation,
   buildRound4AcceptedState,
+  buildSyntheticApprovalStateKernelInput,
   digest,
   revocationEvent,
 } from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
@@ -27,6 +31,56 @@ const historyOutcome = (events, policy, now = NOW) => {
     return { threw: error.message };
   }
 };
+
+test('pure state kernel plans supersession and revocation projections without private history', async () => {
+  const { planApprovalStateTransition } = await import('./governance-approval-state-kernel.mjs');
+  let currentProjection = null;
+  for (const transition of [
+    'AUTHORITIES_ASSIGNED',
+    'PROPOSAL_RENDERED',
+    'PRODUCT_REVIEW_VERIFIED',
+    'RECEIPT_VERIFIED',
+  ]) {
+    currentProjection = planApprovalStateTransition(
+      buildSyntheticApprovalStateKernelInput({ currentProjection, transition }),
+    ).nextProjection;
+  }
+  const verifiedProjection = currentProjection;
+  const supersession = planApprovalStateTransition(
+    buildSyntheticApprovalStateKernelInput({
+      currentProjection: verifiedProjection,
+      transition: 'RECEIPT_SUPERSEDED',
+    }),
+  );
+  assert.equal(supersession.nextProjection.state, 'STALE_AFTER_PUSH');
+  assert.equal(supersession.nextProjection.evidenceTrustState, 'EXTERNAL_UNVERIFIED');
+  assert.equal(supersession.nextProjection.supersessionStatus, 'SUPERSEDED_WITH_CURRENT_SUCCESSOR');
+  assert.equal(supersession.nextProjection.receiptHistory[0].lifecycleState, 'SUPERSEDED');
+
+  const acceptanceInput = buildSyntheticApprovalStateKernelInput({
+    currentProjection: verifiedProjection,
+    transition: 'ACCEPTANCE_REVALIDATED',
+  });
+  const acceptedProjection = planApprovalStateTransition(acceptanceInput).nextProjection;
+  const storedRevocation = buildStoredReceiptRevocationEvent(
+    revocationEvent(),
+    acceptedProjection,
+    acceptanceInput.policySnapshot,
+    REVOCATION_NOW.toISOString(),
+  );
+  const revocation = planApprovalStateTransition(
+    buildSyntheticApprovalStateKernelInput({
+      currentProjection: acceptedProjection,
+      event: storedRevocation,
+      observedAt: REVOCATION_NOW.toISOString(),
+      policySnapshot: acceptanceInput.policySnapshot,
+    }),
+  );
+  assert.equal(revocation.nextProjection.state, 'REVOKED');
+  assert.equal(revocation.nextProjection.revocationStatus, 'REVOKED');
+  assert.deepEqual(revocation.nextProjection.blockingCodes, ['APPROVAL_POLICY_REVOKED']);
+  assert.equal(Object.hasOwn(revocation.nextProjection, 'eventHistory'), false);
+});
 
 test('round4 plain, cloned, deserialized, and caller-built histories remain external HOLD', () => {
   const { accepted, policy } = buildRound4AcceptedState();

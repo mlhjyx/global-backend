@@ -16,6 +16,7 @@ import {
   REVOCATION_NOW,
   appendRevocation,
   buildStateFromEvents,
+  buildSyntheticApprovalStateKernelInput,
   revocationEvent,
 } from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
 const NOW = new Date('2026-08-30T08:30:00.000Z');
@@ -352,6 +353,42 @@ const acceptanceEvidence = async () => {
   refreshAcceptanceTransaction(evidence);
   return { evidence, grant, mergeAuthorization, policy, readback };
 };
+
+test('pure state kernel plans VERIFIED and ACCEPTED projections without admitting history', async () => {
+  const { planApprovalStateTransition } = await import('./governance-approval-state-kernel.mjs');
+  const transitions = [
+    'AUTHORITIES_ASSIGNED',
+    'PROPOSAL_RENDERED',
+    'PRODUCT_REVIEW_VERIFIED',
+    'RECEIPT_VERIFIED',
+    'ACCEPTANCE_REVALIDATED',
+  ];
+  const projectedStates = [];
+  let currentProjection = null;
+  let finalPlan = null;
+  for (const transition of transitions) {
+    const input = buildSyntheticApprovalStateKernelInput({ currentProjection, transition });
+    const inputSnapshot = clone(input);
+    finalPlan = planApprovalStateTransition(input);
+    currentProjection = finalPlan.nextProjection;
+    projectedStates.push(currentProjection.state);
+    assert.deepEqual(input, inputSnapshot);
+  }
+  assert.deepEqual(projectedStates, [
+    'PROPOSED',
+    'AWAITING_PRODUCT_REVIEW',
+    'AWAITING_PRIVACY_REVIEW',
+    'VERIFIED',
+    'ACCEPTED',
+  ]);
+  assert.equal(finalPlan.schemaVersion, 'approval-state-transition-plan/v1');
+  assert.equal(Object.hasOwn(finalPlan, 'eventHistory'), false);
+  assert.equal(Object.hasOwn(finalPlan.nextProjection, 'eventHistory'), false);
+  assert.equal(Object.hasOwn(finalPlan.nextProjection, 'policySnapshot'), false);
+  assert.equal(Object.isFrozen(finalPlan), true);
+  assert.equal(Object.isFrozen(finalPlan.nextProjection), true);
+});
+
 test('reducer exhaustively moves through every normative state without mutating prior receipt facts', async () => {
   const { mergeAuthorization, policy } = await acceptanceEvidence();
   const owner = buildStateFromEvents([], policy, NOW);
