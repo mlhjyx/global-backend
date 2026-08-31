@@ -15,6 +15,7 @@ import {
   resultFromCodes,
   sameJson,
 } from './governance-approval-readback-common.mjs';
+import { canonicalApprovalDigest } from './governance-approval-ledger-stream.mjs';
 
 const EVIDENCE_KEYS = Object.freeze([
   'grant', 'grant_raw_sha256', 'consumption', 'consumption_raw_sha256',
@@ -130,7 +131,7 @@ export const validateMergeAuthorizationEvidence = (evidence, candidate, authorit
     codes.push(schemaCode('consumption'));
   }
   if (codes.length > 0) return resultFromCodes(codes);
-
+  const expectedGrantRawSha256 = canonicalApprovalDigest(grant);
   const authorityReceipt = evidence.authority_receipt;
   if (
     !validateApprovalReceipt(authorityReceipt).valid
@@ -174,14 +175,22 @@ export const validateMergeAuthorizationEvidence = (evidence, candidate, authorit
     || instantValue(now) >= instantValue(grant.expires_at)
   ) codes.push('APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
   if (
+    !isDigest(evidence.grant_raw_sha256)
+    || evidence.grant_raw_sha256 !== expectedGrantRawSha256
+  ) {
+    if (codes.length === 0) {
+      return resultFromCodes(['APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH']);
+    }
+    codes.push('APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH');
+  }
+  if (
     grant.decision_raw_sha256 !== candidate.decision.raw_sha256
     || grant.decision_semantic_sha256 !== candidate.decision.semantic_sha256
-    || !isDigest(evidence.grant_raw_sha256)
   ) codes.push('APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH');
-  codes.push(...validateGrantRevocations(evidence.grant_revocations, grant, evidence.grant_raw_sha256, now));
+  codes.push(...validateGrantRevocations(evidence.grant_revocations, grant, expectedGrantRawSha256, now));
 
   if (consumption.grant_id !== grant.grant_id) codes.push('APPROVAL_MERGE_AUTHORIZATION_REPLAYED');
-  if (consumption.grant_raw_sha256 !== evidence.grant_raw_sha256) {
+  if (consumption.grant_raw_sha256 !== expectedGrantRawSha256) {
     codes.push('APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
   }
   if (
@@ -206,14 +215,14 @@ export const validateMergeAuthorizationEvidence = (evidence, candidate, authorit
     || !isCausalOrder(grant.authorized_at, consumption.consumed_at, consumption.current_main.read_at, now)
     || instantValue(consumption.consumed_at) > instantValue(grant.expires_at)
   ) codes.push('APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
-  codes.push(...validateLedger(evidence.ledger_snapshot, grant, evidence.grant_raw_sha256, consumption, candidate));
+  codes.push(...validateLedger(evidence.ledger_snapshot, grant, expectedGrantRawSha256, consumption, candidate));
   return resultFromCodes(codes);
 };
 
 export const mergeReceiptReference = (evidence) => ({
   stage: evidence.grant.stage,
   grant_id: evidence.grant.grant_id,
-  grant_raw_sha256: evidence.grant_raw_sha256,
+  grant_raw_sha256: canonicalApprovalDigest(evidence.grant),
   single_use_nonce: evidence.grant.single_use_nonce,
   consumption_id: evidence.consumption.consumption_id,
   consumption_raw_sha256: evidence.consumption_raw_sha256,

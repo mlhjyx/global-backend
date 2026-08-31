@@ -491,6 +491,23 @@ authorized_at and finite valid_until
 single_use_nonce
 ```
 
+`grant_raw_sha256` is the SHA-256 of the following repository-local normative
+canonical bytes; it is not a schema-order rendering:
+
+```text
+program-c-merge-authorization-grant/v1 normative digest bytes:
+- recursively sort every object key with the repository lexicographic comparator;
+- preserve array order;
+- serialize JSON primitives with JSON.stringify semantics;
+- emit no whitespace and no trailing newline;
+- hash the resulting UTF-8 bytes with SHA-256.
+```
+
+This canonical digest binds the immutable grant to its revocation, consumption,
+ledger, and receipt-reference admission. It is not evidence that an
+independently governed service observed an external file. External raw-artifact
+provenance remains a separate hosted-admission HOLD.
+
 The grant contains no merge-result commit, consumed timestamp, mutable status,
 revocation status/ref, ledger revision, verifier result, or current-main
 assertion. Once issued, its bytes are never modified. Expiry is evaluated from

@@ -456,6 +456,13 @@ const runMutation = (name, base, mutate, validate, expectedCode) => {
   expectIssue(validate(value), expectedCode);
 };
 
+const rebindMergeGrantDigest = (value) => {
+  const grantRawSha256 = canonicalApprovalDigest(value.grant);
+  value.grant_raw_sha256 = grantRawSha256;
+  value.consumption.grant_raw_sha256 = grantRawSha256;
+  value.ledger_snapshot.reservations[0].grant_raw_sha256 = grantRawSha256;
+};
+
 test('review command grammar accepts only the canonical bounded single line', async () => {
   const fixture = JSON.parse(await readFile(new URL('./fixtures/approval-readback/review-commands.json', import.meta.url), 'utf8'));
   const parsed = parseApprovalReviewCommand(fixture.canonical);
@@ -619,13 +626,13 @@ test('merge grant, separate consumption, and durable ledger evidence fail closed
   const cases = [
     ['grant-missing-authority', (v) => { v.grant.authority_role = 'OWN-PRODUCT'; }, 'APPROVAL_MERGE_AUTHORIZER_UNASSIGNED'],
     ['grant-stage', (v) => { v.grant.stage = 'ACCEPTANCE_MERGE'; }, 'APPROVAL_MERGE_AUTHORIZATION_STAGE_MISMATCH'],
-    ['grant-pr', (v) => { v.grant.pr_number = 1; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
-    ['grant-base', (v) => { v.grant.base_sha = MERGE_BASE_SHA; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
-    ['grant-head', (v) => { v.grant.head_sha = BASE_SHA; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
-    ['grant-decision-digest', (v) => { v.grant.decision_raw_sha256 = DIGEST_B; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH'],
-    ['grant-merge-method', (v) => { v.grant.allowed_merge_method = 'REBASE'; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
-    ['grant-authority-revision', (v) => { v.grant.authority_revision = 'approval-authorities/r9'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
-    ['grant-expired', (v) => { v.grant.expires_at = '2026-08-30T11:59:59.999Z'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['grant-pr', (v) => { v.grant.pr_number = 1; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['grant-base', (v) => { v.grant.base_sha = MERGE_BASE_SHA; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['grant-head', (v) => { v.grant.head_sha = BASE_SHA; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['grant-decision-digest', (v) => { v.grant.decision_raw_sha256 = DIGEST_B; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH'],
+    ['grant-merge-method', (v) => { v.grant.allowed_merge_method = 'REBASE'; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
+    ['grant-authority-revision', (v) => { v.grant.authority_revision = 'approval-authorities/r9'; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['grant-expired', (v) => { v.grant.expires_at = '2026-08-30T11:59:59.999Z'; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
     ['grant-revoked', (v) => { v.grant_revocations.push({ grant_id: v.grant.grant_id, grant_raw_sha256: v.grant_raw_sha256 }); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
     ['grant-nonce-mismatch', (v) => { v.consumption.single_use_nonce = 'nonce-program-c-0002'; }, 'APPROVAL_MERGE_AUTHORIZATION_REPLAYED'],
     ['grant-ledger-key', (v) => { v.consumption.nonce_ledger_key = 'program-c-merge:nonce-program-c-0002'; }, 'APPROVAL_MERGE_AUTHORIZATION_REPLAYED'],
@@ -633,7 +640,7 @@ test('merge grant, separate consumption, and durable ledger evidence fail closed
     ['grant-ledger-absent', (v) => { v.ledger_snapshot.reservations = []; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_REQUIRED'],
     ['grant-consumption-digest', (v) => { v.consumption.grant_raw_sha256 = DIGEST_D; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['grant-ledger-revision', (v) => { v.ledger_snapshot.reservations[0].reserved_revision = 18; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
-    ['grant-authority-actor', (v) => { v.grant.authority_actor_id = 999; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['grant-authority-actor', (v) => { v.grant.authority_actor_id = 999; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
   ];
   for (const [name, mutate, code] of cases) runMutation(name, mergeEvidence, mutate, validate, code);
 });

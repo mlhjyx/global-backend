@@ -336,13 +336,19 @@ const validateCandidate = (value, authorityValue = authority()) => (
 const validateMerge = (value, candidateValue = candidate(), authorityValue = authority()) => (
   validateMergeAuthorizationGrantForCandidate(value, candidateValue, authorityValue, NOW)
 );
+const rebindMergeGrantDigest = (value) => {
+  const grantRawSha256 = canonicalApprovalDigest(value.grant);
+  value.grant_raw_sha256 = grantRawSha256;
+  value.consumption.grant_raw_sha256 = grantRawSha256;
+  value.ledger_snapshot.reservations[0].grant_raw_sha256 = grantRawSha256;
+};
 
 test('FIX1 merge path starts with Task 1 closed schemas and enforces causality', () => {
   const cases = [
     ['critical-merge-grant-schema', (v) => { v.grant.authority_receipt_id = 'x'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH'],
     ['critical-merge-consumption-schema', (v) => { delete v.consumption.consumption_id; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['merge-invalid-method', (v) => { v.grant.allowed_merge_method = 'ROOT'; v.consumption.observed_merge_method = 'ROOT'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH'],
-    ['merge-future-authorized', (v) => { v.grant.authorized_at = '2026-08-30T12:30:00.000Z'; }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
+    ['merge-future-authorized', (v) => { v.grant.authorized_at = '2026-08-30T12:30:00.000Z'; rebindMergeGrantDigest(v); }, 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE'],
     ['merge-future-consumed', (v) => { v.consumption.consumed_at = '2026-08-30T12:30:00.000Z'; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['merge-future-readback', (v) => { v.consumption.current_main.read_at = '2026-08-30T12:30:00.000Z'; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
     ['merge-causal-order', (v) => { v.consumption.consumed_at = '2026-08-30T10:00:00.000Z'; }, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH'],
