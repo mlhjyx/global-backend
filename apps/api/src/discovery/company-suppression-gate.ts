@@ -16,6 +16,32 @@ import {
   sanitizeCanonicalCompanyAttributes,
 } from './canonical-company-attributes';
 
+export type PrecomputedCompanySuppressionDecision = Readonly<{
+  canonicalCompanyId: string | null;
+  sourceMatched: boolean;
+  canonicalMatched: boolean;
+  sourceSuppressionIds: readonly string[];
+  canonicalSuppressionIds: readonly string[];
+}>;
+
+function validatePrecomputedDecision(
+  decision: PrecomputedCompanySuppressionDecision,
+  prior: { id: string; status: string } | null,
+): void {
+  const validIds = (ids: readonly string[]) =>
+    Array.isArray(ids) && ids.length <= 64 && new Set(ids).size === ids.length &&
+    ids.every((id, index) => typeof id === 'string' && id.length > 0 &&
+      (index === 0 || ids[index - 1]! < id));
+  if (!validIds(decision.sourceSuppressionIds) || !validIds(decision.canonicalSuppressionIds) ||
+      decision.sourceMatched !== (decision.sourceSuppressionIds.length > 0) ||
+      decision.canonicalMatched !== (decision.canonicalSuppressionIds.length > 0) ||
+      decision.canonicalCompanyId !== (prior?.id ?? null) ||
+      (!prior && decision.canonicalMatched) ||
+      (prior?.status === 'SUPPRESSED' && !decision.sourceMatched && !decision.canonicalMatched)) {
+    throw new Error('COMPANY_SUPPRESSION_DECISION_INVALID');
+  }
+}
+
 /**
  * Final gate for writers that may create a canonical company from a platform
  * fact. The workspace advisory lock orders append-only suppression creation
@@ -52,6 +78,7 @@ export async function loadMaterializableCompanyState(
     sanitizeAttributes?: (
       attributes: Record<string, unknown>,
     ) => Record<string, unknown>;
+    precomputedSuppressionDecision?: PrecomputedCompanySuppressionDecision;
   },
 ) {
   if (options?.policyLock) assertWorkspaceSuppressionPolicyLock(options.policyLock, workspaceId);
@@ -71,14 +98,18 @@ export async function loadMaterializableCompanyState(
       updatedAt: true,
     },
   });
-  const suppressions =
-    options?.knownSuppressions ??
+  if (options?.precomputedSuppressionDecision && options.knownSuppressions) {
+    throw new Error('COMPANY_SUPPRESSION_DECISION_INVALID');
+  }
+  const decision = options?.precomputedSuppressionDecision;
+  if (decision) validatePrecomputedDecision(decision, prior);
+  const suppressions = decision ? null : options?.knownSuppressions ??
     (await tx.suppressionRecord.findMany({
       where: { type: { in: ['domain', 'company_name'] } },
       select: { type: true, value: true },
     }));
-  const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
-  const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
+  const sourceSuppressed = decision?.sourceMatched ?? companyMatchesSuppression(suppressions!, sourceCompany);
+  const canonicalSuppressed = decision?.canonicalMatched ?? (prior ? companyMatchesSuppression(suppressions!, prior) : false);
   const blocked = prior?.status === 'SUPPRESSED' || sourceSuppressed || canonicalSuppressed;
   const sanitizeAttributes = (attributes: Record<string, unknown>) => {
     const governed = sanitizeCanonicalCompanyAttributes(attributes);

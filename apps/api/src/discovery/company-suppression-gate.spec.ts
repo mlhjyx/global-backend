@@ -108,6 +108,51 @@ describe('company suppression terminal gate', () => {
     });
   });
 
+  it('uses a closed precomputed source/canonical decision and repairs canonical-side suppression without rereading values', async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const suppressionRead = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1', name: 'Canonical GmbH', domain: 'blocked.example',
+          country: 'DE', region: null, dedupeKey: 'id:registry:1',
+          attributes: {}, status: 'NEW', version: 1, updatedAt: new Date(),
+        })),
+        updateMany,
+      },
+      suppressionRecord: { findMany: suppressionRead },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(loadMaterializableCompanyState(
+      tx, 'ws-1', 'id:registry:1', { name: 'Source Alias' }, {
+        precomputedSuppressionDecision: {
+          canonicalCompanyId: 'co-1', sourceMatched: false, canonicalMatched: true,
+          sourceSuppressionIds: [], canonicalSuppressionIds: ['sup-1'],
+        },
+      },
+    )).resolves.toMatchObject({ allowed: false, prior: { id: 'co-1' } });
+    expect(suppressionRead).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'co-1', status: { not: 'SUPPRESSED' } },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+  });
+
+  it('fails closed on a precomputed decision that lacks exact canonical attribution', async () => {
+    const { tx } = fakeTx({
+      company: { id: 'co-1', name: 'Canonical GmbH', domain: 'blocked.example', status: 'SUPPRESSED' },
+    });
+    await expect(loadMaterializableCompanyState(
+      tx, 'ws-1', 'id:registry:1', { name: 'Alias' }, {
+        precomputedSuppressionDecision: {
+          canonicalCompanyId: 'co-1', sourceMatched: false, canonicalMatched: false,
+          sourceSuppressionIds: [], canonicalSuppressionIds: [],
+        },
+      },
+    )).rejects.toThrow('COMPANY_SUPPRESSION_DECISION_INVALID');
+  });
+
   it('removes a retained role mailbox even when the canonical company is already SUPPRESSED', async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
