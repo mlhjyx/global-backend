@@ -4,9 +4,9 @@
 
 **Goal:** Close all five valid current-head review findings without inventing hosted trust, weakening the external HOLD, or allowing caller-owned objects to promote approval state or durable merge consumption.
 
-**Architecture:** Keep structural validators pure and total, but separate structural consistency from trust admission. Canonically derive every in-process grant digest, require Legal clearance for every explicit dual-role exception, and keep both privileged public source boundaries unconditionally fail-closed after their specific diagnostics. The current source has no hosted admission boundary and no local admission capability, mint, or bridge. Synthetic positive states remain test-fixture-only and cannot enter product composition or release artifacts.
+**Architecture:** Keep structural validators pure and total, but separate structural consistency from trust admission. Canonically derive every in-process grant digest, require Legal clearance for every explicit dual-role exception, and keep both privileged public source boundaries unconditionally fail-closed after their specific diagnostics. The current source has no hosted admission boundary, and no local admission capability, mint, or bridge is consulted by or can admit either public path. Synthetic positive states remain test-fixture-only and cannot enter product composition or release artifacts.
 
-**Tech Stack:** Node.js ESM, `node:test`, repository approval governance scripts, JSON Schema, pure transition/reconciliation kernels, executable fixture/kernel import boundaries, ContractGraph, pnpm. No source-mode hosted admission capability exists.
+**Tech Stack:** Node.js ESM, `node:test`, repository approval governance scripts, JSON Schema, pure transition/reconciliation kernels, executable fixture/kernel import boundaries, ContractGraph, pnpm. No source-mode hosted admission capability exists for either privileged public path.
 
 **Spec:** `docs/governance/trusted-approval-readback-spec.md`
 
@@ -498,11 +498,12 @@ read existing durable stream
 → public source does not apply result/consumption plans
 ```
 
-Current source intentionally contains no local `WeakSet`, capability parameter,
-mint, factory, test hook, environment/config switch, or fixture bridge. A
-hosted issuer requires a separately governed change; absent that boundary,
-fixtures and pure kernels cannot append `MERGE_RESULT_OBSERVED` or
-`CONSUMPTION_RECORDED` through public reconciliation.
+No local `WeakSet`, capability parameter, mint, factory, test hook,
+environment/config switch, or fixture bridge is consulted by or can admit this
+public current-main reconciliation path. A hosted issuer requires a separately
+governed change; absent that boundary, fixtures and pure kernels cannot append
+`MERGE_RESULT_OBSERVED` or `CONSUMPTION_RECORDED` through public
+reconciliation.
 
 - [ ] **Step 4: Redirect positive semantic tests to the pure kernel**
 
@@ -552,11 +553,11 @@ node --test --test-name-pattern='caller-owned receipt capability|failed privileg
 
 After its existing append-shape and history diagnostics, public
 `RECEIPT_VERIFIED` always returns `APPROVAL_INDEPENDENCE_NOT_PROVEN` before it
-reaches the kernel. The rejected append preserves the active parent history;
-there is no local `WeakSet`, capability parameter, mint, factory, test hook,
-environment/config switch, or fixture bridge. A hosted issuer requires a
-separately governed future boundary and is not represented by a local source
-fallback.
+reaches the kernel. The rejected append preserves the active parent history; no
+local `WeakSet`, capability parameter, mint, factory, test hook,
+environment/config switch, or fixture bridge is consulted by or can admit this
+public receipt-append path. A hosted issuer requires a separately governed
+future boundary and is not represented by a local source fallback.
 
 - [ ] **Step 4: Keep synthetic state outside admission**
 
@@ -613,9 +614,9 @@ or returns APPROVAL_CURRENT_MAIN_READBACK_REQUIRED, and cannot append
 MERGE_RESULT_OBSERVED / CONSUMPTION_RECORDED.
 ```
 
-There is no local WeakSet/capability/mint parameter/factory/test/env/config/
-fixture bridge. Pure kernel output is neither a state, receipt, admission,
-ledger fact, nor external observation.
+No local WeakSet/capability/mint parameter/factory/test/env/config/fixture
+bridge is consulted by or can admit either public path. Pure kernel output is
+neither a state, receipt, admission, ledger fact, nor external observation.
 
 - [ ] **Step 2: Run root gates and unchanged Copy readback**
 
