@@ -115,6 +115,8 @@ const approvalPolicy = () => {
   authorityEffectiveUntil: '2026-08-30T10:00:00.000Z',
   legalScope: 'PROGRAM_C_SUPPRESSION',
   legalDigest: digest(task3.candidate.legal_input),
+  actorPolicy: task3.candidate.policy.actor_policy,
+  dualRoleExceptionSha256: null,
   liveRulesetSha256: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   acceptanceAllowlist: [
     { path: 'docs/adr/027-program-c-suppression.md', sha256: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' },
@@ -207,6 +209,42 @@ const refreshAcceptanceTransaction = (evidence) => {
   evidence.preAcceptanceReadSha256 = digest(acceptanceTransaction);
   evidence.postAcceptanceReadSha256 = digest(acceptanceTransaction);
   return evidence;
+};
+const configureDualRoleAcceptance = (evidence, policy, { bindState = true } = {}) => {
+  const exception = {
+    decision_adr: 'ADR-027',
+    valid_from: '2026-08-30T00:00:00.000Z',
+    valid_until: '2026-08-31T00:00:00.000Z',
+    coapprover_role: 'OWN-QA-EVIDENCE',
+    minimum_distinct_human_actors: 2,
+    cannot_authorize_merge: true,
+    cannot_authorize_release: true,
+  };
+  for (const task3Policy of [evidence.task3.candidate.policy, evidence.task3.policy]) {
+    task3Policy.actor_policy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+    task3Policy.dual_role_exception = clone(exception);
+  }
+  evidence.task3.candidate.privacy_review.actor = clone(
+    evidence.task3.candidate.product_review.actor,
+  );
+  const productAuthority = evidence.task3.authority.roles.find(
+    ({ role }) => role === 'OWN-PRODUCT',
+  );
+  const privacyAuthority = evidence.task3.authority.roles.find(
+    ({ role }) => role === 'OWN-DATA-PRIVACY',
+  );
+  privacyAuthority.actor_id = productAuthority.actor_id;
+  privacyAuthority.actor_node_id = productAuthority.actor_node_id;
+  privacyAuthority.actor_login = productAuthority.actor_login;
+  evidence.reviews.find(({ slot }) => slot === 'PRIVACY').actorId = productAuthority.actor_id;
+  policy.authorityRawSha256 = digest(evidence.task3.authority);
+  evidence.authority.rawSha256 = policy.authorityRawSha256;
+  if (bindState) {
+    policy.actorPolicy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+    policy.dualRoleExceptionSha256 = digest(exception);
+  }
+  refreshAcceptanceTransaction(evidence);
+  return exception;
 };
 const appendAcceptance = (state, evidence, policy, now) => {
   return approvalStateModule.appendApprovalDecisionEvent(state, {
@@ -418,6 +456,90 @@ test('ADR-027 acceptance preserves Legal PENDING with an unassigned Legal author
   assert.equal(accepted.state, 'ACCEPTED');
   assert.equal(accepted.legalState, 'PENDING');
   assert.equal(approvalStateModule.renderApprovalStatusReadModel(accepted).legalState, 'PENDING');
+});
+
+test('dual-role state cross-binding requires current Legal clearance and fails closed on actor-policy or exception-digest drift', async () => {
+  const current = await acceptanceEvidence();
+  configureDualRoleAcceptance(current.evidence, current.policy);
+  const verified = verifiedState(current.policy, current.mergeAuthorization);
+  assert.equal(verified.legalState, 'NO_BLOCKER_RECORDED');
+  assert.equal(revalidateApprovalAtAcceptance(verified, current.evidence, NOW).valid, true);
+  assert.equal(
+    appendAcceptance(verified, current.evidence, current.policy, NOW).legalState,
+    'NO_BLOCKER_RECORDED',
+  );
+
+  const pending = await acceptanceEvidence();
+  configureDualRoleAcceptance(pending.evidence, pending.policy);
+  pending.evidence.task3.candidate.legal_input.status = 'PENDING';
+  pending.evidence.legal.status = 'PENDING';
+  pending.policy.legalDigest = digest(pending.evidence.task3.candidate.legal_input);
+  pending.evidence.legal.digest = pending.policy.legalDigest;
+  refreshAcceptanceTransaction(pending.evidence);
+  const pendingValidation = revalidateApprovalAtAcceptance(
+    verifiedState(pending.policy, pending.mergeAuthorization),
+    pending.evidence,
+    NOW,
+  );
+  assert.equal(pendingValidation.valid, false);
+  assert.equal(
+    pendingValidation.issues.some(
+      ({ stable_code: code }) => code === 'APPROVAL_LEGAL_INPUT_REQUIRED',
+    ),
+    true,
+  );
+
+  const dualStateDistinctTask3 = await acceptanceEvidence();
+  dualStateDistinctTask3.policy.actorPolicy = 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER';
+  dualStateDistinctTask3.policy.dualRoleExceptionSha256 = digest({ explicit: true });
+  const actorModeMismatch = revalidateApprovalAtAcceptance(
+    verifiedState(dualStateDistinctTask3.policy, dualStateDistinctTask3.mergeAuthorization),
+    dualStateDistinctTask3.evidence,
+    NOW,
+  );
+  assert.equal(actorModeMismatch.valid, false);
+  assert.equal(actorModeMismatch.issues.some(
+    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'
+  ), true);
+
+  const distinctStateDualTask3 = await acceptanceEvidence();
+  configureDualRoleAcceptance(
+    distinctStateDualTask3.evidence,
+    distinctStateDualTask3.policy,
+    { bindState: false },
+  );
+  const reverseModeMismatch = revalidateApprovalAtAcceptance(
+    verifiedState(distinctStateDualTask3.policy, distinctStateDualTask3.mergeAuthorization),
+    distinctStateDualTask3.evidence,
+    NOW,
+  );
+  assert.equal(reverseModeMismatch.valid, false);
+  assert.equal(reverseModeMismatch.issues.some(
+    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'
+  ), true);
+
+  const exceptionDigestDrift = await acceptanceEvidence();
+  configureDualRoleAcceptance(exceptionDigestDrift.evidence, exceptionDigestDrift.policy);
+  exceptionDigestDrift.policy.dualRoleExceptionSha256 = exceptionDigestDrift.policy
+    .dualRoleExceptionSha256.replace(/.$/, '0');
+  const digestMismatch = revalidateApprovalAtAcceptance(
+    verifiedState(exceptionDigestDrift.policy, exceptionDigestDrift.mergeAuthorization),
+    exceptionDigestDrift.evidence,
+    NOW,
+  );
+  assert.equal(digestMismatch.valid, false);
+  assert.equal(digestMismatch.issues.some(
+    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'
+  ), true);
+
+  const invalidActorPolicy = {
+    ...approvalPolicy(),
+    actorPolicy: 'DISTINCT_ACTORS_REQUIREC',
+  };
+  assert.throws(
+    () => buildStateFromEvents([], invalidActorPolicy, NOW),
+    /APPROVAL_STATE_POLICY_INVALID/,
+  );
 });
 
 test('reviewer C1 counterexample cannot promote caller-declared receipt or validation booleans', async () => {

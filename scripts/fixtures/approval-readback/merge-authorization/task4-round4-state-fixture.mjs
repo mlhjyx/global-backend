@@ -75,6 +75,8 @@ export const approvalPolicy = () => {
     authorityEffectiveUntil: '2026-08-30T10:00:00.000Z',
     legalScope: 'PROGRAM_C_SUPPRESSION',
     legalDigest: digest(task3.candidate.legal_input),
+    actorPolicy: task3.candidate.policy.actor_policy,
+    dualRoleExceptionSha256: null,
     liveRulesetSha256: `sha256:${'b'.repeat(64)}`,
     acceptanceAllowlist: [
       {

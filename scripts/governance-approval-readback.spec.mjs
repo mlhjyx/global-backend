@@ -508,17 +508,63 @@ test('distinct and dual-role synthetic candidates validate with frozen bounded o
   }
 });
 
-test('ADR-027 and its QA dual-role coapproval do not consume ADR-026 Legal PENDING', () => {
-  for (const [value, authorityValue] of [
-    [candidate(), authority()],
-    [dualRoleCandidate(), dualRoleAuthority()],
-  ]) {
-    value.legal_input.status = 'PENDING';
-    const result = validateApprovalReadback(value, authorityValue, value.policy, NOW);
-    assert.equal(result.valid, true);
-    assert.equal(result.issues.some(
-      ({ stable_code: code }) => code === 'APPROVAL_LEGAL_INPUT_REQUIRED',
-    ), false);
+test('ordinary ADR-027 permits Legal PENDING while every dual-role exception requires current Legal clearance', () => {
+  const cases = [
+    {
+      name: 'ordinary ADR-027 + Legal PENDING',
+      value: candidate(),
+      authorityValue: authority(),
+      legalStatus: 'PENDING',
+      expectedValid: true,
+    },
+    {
+      name: 'ADR-027 dual-role + QA coapprover + Legal PENDING',
+      value: dualRoleCandidate(),
+      authorityValue: dualRoleAuthority(),
+      legalStatus: 'PENDING',
+      expectedValid: false,
+    },
+    {
+      name: 'ADR-027 dual-role + QA coapprover + current Legal NO_BLOCKER',
+      value: dualRoleCandidate(),
+      authorityValue: dualRoleAuthority(),
+      legalStatus: 'NO_BLOCKER_RECORDED',
+      expectedValid: true,
+    },
+    {
+      name: 'ADR-027 dual-role + Legal coapprover + Legal PENDING',
+      value: dualRoleCandidate(),
+      authorityValue: dualRoleAuthority(),
+      legalStatus: 'PENDING',
+      coapproverRole: 'LEGAL-REVIEW',
+      expectedValid: false,
+    },
+    {
+      name: 'ADR-026 + Legal PENDING',
+      value: candidate('ADR-026'),
+      authorityValue: authority('ADR-026'),
+      legalStatus: 'PENDING',
+      expectedValid: false,
+    },
+  ];
+
+  for (const testCase of cases) {
+    testCase.value.legal_input.status = testCase.legalStatus;
+    if (testCase.coapproverRole !== undefined) {
+      testCase.value.policy.dual_role_exception.coapprover_role = testCase.coapproverRole;
+    }
+    const result = validateApprovalReadback(
+      testCase.value,
+      testCase.authorityValue,
+      testCase.value.policy,
+      NOW,
+    );
+    assert.equal(result.valid, testCase.expectedValid, testCase.name);
+    assert.equal(
+      result.issues.some(({ stable_code: code }) => code === 'APPROVAL_LEGAL_INPUT_REQUIRED'),
+      !testCase.expectedValid,
+      testCase.name,
+    );
   }
 });
 
