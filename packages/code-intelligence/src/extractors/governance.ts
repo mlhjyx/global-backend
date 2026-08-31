@@ -468,7 +468,7 @@ function approvalAttributes(
   return { ...STATIC_APPROVAL_ATTRIBUTES, ...attributes };
 }
 
-function addStaticApprovalEdge(
+export function addStaticApprovalEdge(
   builder: GraphBuilder,
   input: {
     from: string;
@@ -483,8 +483,8 @@ function addStaticApprovalEdge(
     from: input.from,
     to: input.to,
     attributes: {
-      relation: input.relation,
       ...(input.condition ?? {}),
+      relation: input.relation,
       ...STATIC_APPROVAL_ATTRIBUTES,
     },
     location: input.location,

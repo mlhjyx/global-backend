@@ -15,7 +15,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { GraphBuilder } from "../graph";
 import { EvidenceRefV1 } from "../schema";
-import { extractGovernance } from "./governance";
+import { addStaticApprovalEdge, extractGovernance } from "./governance";
 
 const EVIDENCE: EvidenceRefV1 = {
   schemaVersion: "evidence-ref/v1",
@@ -70,6 +70,29 @@ async function approvalGraph(root: string) {
   await extractGovernance(builder, root);
   return builder.finalize(EVIDENCE);
 }
+
+test("static approval edge keeps its relation when condition carries a conflicting key", () => {
+  const conditionWithConflictingRelation = {
+    conditional: true as const,
+    requiredWhen: "actor_policy=DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER",
+    relation: "untrusted_relation",
+  };
+  const builder = new GraphBuilder();
+  addStaticApprovalEdge(builder, {
+    from: "governance:LEGAL-REVIEW",
+    to: "governance:ADR-027",
+    relation: "legal_input_for",
+    condition: conditionWithConflictingRelation,
+    location: { path: "test", line: 1 },
+  });
+
+  const edge = builder.finalize(EVIDENCE).edges[0];
+  assert.equal(edge?.attributes.relation, "legal_input_for");
+  assert.equal(edge?.attributes.evidenceClass, "STATIC_CONTRACT");
+  assert.equal(edge?.attributes.hostedReadback, "EXTERNAL_UNOBSERVED");
+  assert.equal(edge?.attributes.runtimeEvidence, false);
+  assert.equal(edge?.attributes.acceptance, false);
+});
 
 async function writeApprovalFixture(root: string): Promise<void> {
   await writeRealApprovalContracts(root);
