@@ -311,15 +311,22 @@ function inspectCompatCatalog(database) {
         WHERE index_row.indexrelid=
           'public.identity_link_company_raw_unique'::regclass;`,
     ),
-    "true|true|true|true|(canonical_type = 'company'::text) AND (status = 'ACTIVE'::identity_link_status)",
+    "true|true|true|true|canonical_type = 'company'::text AND status = 'ACTIVE'::identity_link_status",
   );
   assert.equal(
     psql(
       database,
       `SELECT p.prorettype::regtype::text||'|'||
               pg_get_userbyid(p.proowner)||'|'||p.prosecdef||'|'||
-              array_to_string(p.proconfig,',')||'|'||
-              has_function_privilege('PUBLIC',p.oid,'EXECUTE')||'|'||
+              array_to_string(p.proconfig,',')||'|'||(
+                NOT EXISTS (
+                  SELECT 1 FROM aclexplode(
+                    coalesce(p.proacl,acldefault('f',p.proowner))
+                  ) acl_row
+                  WHERE acl_row.grantee=0
+                    AND acl_row.privilege_type='EXECUTE'
+                )
+              )||'|'||
               has_function_privilege('app_user',p.oid,'EXECUTE')
          FROM pg_proc AS p
          JOIN pg_namespace AS n ON n.oid=p.pronamespace
@@ -328,7 +335,7 @@ function inspectCompatCatalog(database) {
             'validate_discovery_company_materialization_identity_link_v1'
           AND pg_get_function_identity_arguments(p.oid)='';`,
     ),
-    "trigger|global|false|search_path=pg_catalog, public|false|false",
+    "trigger|global|false|search_path=pg_catalog, public|true|false",
   );
   assert.equal(
     psql(
