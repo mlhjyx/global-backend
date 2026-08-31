@@ -257,6 +257,7 @@ test("governance extraction maps trusted approval contracts without promoting ho
       ["governance:OWN-SECURITY", "governance:ADR-026", "security_review_for"],
       ["governance:OWN-SECURITY", "governance:ADR-027", "security_review_for"],
       ["governance:LEGAL-REVIEW", "governance:ADR-026", "legal_input_for"],
+      ["governance:LEGAL-REVIEW", "governance:ADR-027", "legal_input_for"],
       [
         "governance:MERGE-AUTHORIZER",
         "governance:ADR-026",
@@ -321,6 +322,45 @@ test("governance extraction maps trusted approval contracts without promoting ho
         .map((edge) => [edge.from, edge.to, edge.attributes.relation])
         .sort(),
       expectedRoleEdges,
+    );
+    const legalReviewEdges = graph.edges.filter(
+      (edge) =>
+        edge.from === "governance:LEGAL-REVIEW" &&
+        edge.to.startsWith("governance:ADR-") &&
+        edge.attributes.relation === "legal_input_for",
+    );
+    const adr026LegalEdges = legalReviewEdges.filter(
+      (edge) => edge.to === "governance:ADR-026",
+    );
+    const adr027LegalEdges = legalReviewEdges.filter(
+      (edge) => edge.to === "governance:ADR-027",
+    );
+    assert.equal(adr026LegalEdges.length, 1);
+    assert.deepEqual(adr026LegalEdges[0]?.attributes, {
+      relation: "legal_input_for",
+      evidenceClass: "STATIC_CONTRACT",
+      hostedReadback: "EXTERNAL_UNOBSERVED",
+      runtimeEvidence: false,
+      acceptance: false,
+    });
+    assert.equal(adr027LegalEdges.length, 1);
+    assert.deepEqual(adr027LegalEdges[0]?.attributes, {
+      relation: "legal_input_for",
+      conditional: true,
+      requiredWhen: "actor_policy=DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER",
+      evidenceClass: "STATIC_CONTRACT",
+      hostedReadback: "EXTERNAL_UNOBSERVED",
+      runtimeEvidence: false,
+      acceptance: false,
+    });
+    assert.equal(
+      adr027LegalEdges.some(
+        (edge) =>
+          edge.attributes.conditional !== true ||
+          edge.attributes.requiredWhen !==
+            "actor_policy=DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER",
+      ),
+      false,
     );
     assert.equal(
       graph.edges.filter((edge) => edge.attributes.relation === "approves")

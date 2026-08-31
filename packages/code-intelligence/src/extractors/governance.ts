@@ -52,38 +52,48 @@ const APPROVAL_SCHEMA_CANONICAL_SHA256 = Object.freeze({
   verifier: "64aef09506fef75aa33f1cb038fd8607f383df468a4bf680773434433b8ac271",
   release: "3406f720c2dbac3b072f71a5805629f63dc6924072b0643cf573d235e716e3f1",
 });
-const AUTHORITY_RELATIONSHIPS = Object.freeze([
-  {
-    role: "OWN-PRODUCT",
-    decisions: DECISION_SUBJECT_IDS,
-    relation: "decision_approval_for",
-  },
-  {
-    role: "OWN-DATA-PRIVACY",
-    decisions: DECISION_SUBJECT_IDS,
-    relation: "decision_approval_for",
-  },
-  {
-    role: "OWN-QA-EVIDENCE",
-    decisions: DECISION_SUBJECT_IDS,
-    relation: "qa_evidence_review_for",
-  },
-  {
-    role: "OWN-SECURITY",
-    decisions: DECISION_SUBJECT_IDS,
-    relation: "security_review_for",
-  },
-  {
-    role: "LEGAL-REVIEW",
-    decisions: ["ADR-026"],
-    relation: "legal_input_for",
-  },
-  {
-    role: "MERGE-AUTHORIZER",
-    decisions: DECISION_SUBJECT_IDS,
-    relation: "merge_authorization_for",
-  },
-] as const);
+const AUTHORITY_RELATIONSHIPS: readonly StaticApprovalRelationship[] =
+  Object.freeze([
+    {
+      role: "OWN-PRODUCT",
+      decisions: DECISION_SUBJECT_IDS,
+      relation: "decision_approval_for",
+    },
+    {
+      role: "OWN-DATA-PRIVACY",
+      decisions: DECISION_SUBJECT_IDS,
+      relation: "decision_approval_for",
+    },
+    {
+      role: "OWN-QA-EVIDENCE",
+      decisions: DECISION_SUBJECT_IDS,
+      relation: "qa_evidence_review_for",
+    },
+    {
+      role: "OWN-SECURITY",
+      decisions: DECISION_SUBJECT_IDS,
+      relation: "security_review_for",
+    },
+    {
+      role: "LEGAL-REVIEW",
+      decisions: ["ADR-026"],
+      relation: "legal_input_for",
+    },
+    {
+      role: "LEGAL-REVIEW",
+      decisions: ["ADR-027"],
+      relation: "legal_input_for",
+      condition: {
+        conditional: true,
+        requiredWhen: "actor_policy=DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER",
+      },
+    },
+    {
+      role: "MERGE-AUTHORIZER",
+      decisions: DECISION_SUBJECT_IDS,
+      relation: "merge_authorization_for",
+    },
+  ]);
 const STATIC_APPROVAL_ATTRIBUTES = Object.freeze({
   evidenceClass: "STATIC_CONTRACT",
   hostedReadback: "EXTERNAL_UNOBSERVED",
@@ -92,6 +102,18 @@ const STATIC_APPROVAL_ATTRIBUTES = Object.freeze({
 });
 
 type JsonRecord = Record<string, unknown>;
+
+type StaticApprovalConditionAttributes = Readonly<{
+  conditional: true;
+  requiredWhen: string;
+}>;
+
+type StaticApprovalRelationship = Readonly<{
+  role: (typeof APPROVAL_ROLE_IDS)[number];
+  decisions: readonly (typeof DECISION_SUBJECT_IDS)[number][];
+  relation: string;
+  condition?: StaticApprovalConditionAttributes;
+}>;
 
 interface BoundedJson {
   text: string;
@@ -453,13 +475,18 @@ function addStaticApprovalEdge(
     to: string;
     relation: string;
     location: SourceLocationV1;
+    condition?: StaticApprovalConditionAttributes;
   },
 ): void {
   builder.addEdge({
     kind: "references",
     from: input.from,
     to: input.to,
-    attributes: approvalAttributes({ relation: input.relation }),
+    attributes: {
+      relation: input.relation,
+      ...(input.condition ?? {}),
+      ...STATIC_APPROVAL_ATTRIBUTES,
+    },
     location: input.location,
   });
 }
@@ -644,6 +671,7 @@ async function extractTrustedApprovalContracts(
         to: `governance:${decision}`,
         relation: relationship.relation,
         location,
+        condition: relationship.condition,
       });
     }
   }
