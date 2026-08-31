@@ -126,12 +126,10 @@ export class PrismaRuntimeProcessLeaseStore
       );
       this.registeredInstances.add(record.instanceId);
     }
-    await writer.$queryRawUnsafe<
-      Array<{ heartbeat_runtime_process_lease: null }>
-    >(
+    await writer.$queryRawUnsafe<Array<{ heartbeat: string }>>(
       `SELECT ${heartbeatFunction}(
         $1::uuid, $2::"runtime_process_state", $3::timestamptz
-      )`,
+      )::text AS "heartbeat"`,
       record.instanceId,
       record.state,
       record.lastSeenAt,

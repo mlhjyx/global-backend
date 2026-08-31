@@ -109,7 +109,7 @@ describe("RuntimeProcessLeaseService", () => {
         .mockResolvedValueOnce([
           { instance_id: "00000000-0000-4000-8000-000000000001" },
         ])
-        .mockResolvedValue([{ heartbeat_worker_runtime_process_lease: null }]),
+        .mockResolvedValue([{ heartbeat: "" }]),
     };
     const store = new PrismaRuntimeProcessLeaseStore(appReader as never, {
       writers: { WORKER: workerWriter as never },
@@ -130,12 +130,63 @@ describe("RuntimeProcessLeaseService", () => {
     expect(workerWriter.$queryRawUnsafe.mock.calls[3]?.[0]).toContain(
       "heartbeat_worker_runtime_process_lease",
     );
+    expect(workerWriter.$queryRawUnsafe.mock.calls[3]?.[0]).toContain(
+      ')::text AS "heartbeat"',
+    );
     expect(workerWriter.$queryRawUnsafe.mock.calls[3]?.slice(1)).toEqual([
       record.instanceId,
       "READY",
       expect.any(Date),
     ]);
   });
+
+  it.each([
+    ["API", "runtime_api", "heartbeat_api_runtime_process_lease"],
+    ["WORKER", "runtime_worker", "heartbeat_worker_runtime_process_lease"],
+    [
+      "OUTBOX_RELAY",
+      "runtime_outbox_relay",
+      "heartbeat_outbox_relay_runtime_process_lease",
+    ],
+  ] as const)(
+    "casts the %s heartbeat void result to a Prisma-supported scalar",
+    async (role, membership, heartbeatFunction) => {
+      const appReader = { $queryRawUnsafe: vi.fn(async () => []) };
+      const writer = {
+        $queryRawUnsafe: vi
+          .fn()
+          .mockResolvedValueOnce([
+            {
+              sessionUser: `ci_${membership}`,
+              superuser: false,
+              bypassRls: false,
+              createDb: false,
+              createRole: false,
+              replication: false,
+              memberships: [membership],
+            },
+          ])
+          .mockResolvedValueOnce([
+            { instance_id: "00000000-0000-4000-8000-000000000001" },
+          ])
+          .mockResolvedValueOnce([{ heartbeat: "" }]),
+      };
+      const store = new PrismaRuntimeProcessLeaseStore(appReader as never, {
+        writers: { [role]: writer as never },
+      });
+
+      await store.upsert(
+        lease({ role, taskQueue: role === "WORKER" ? "understanding" : null }),
+      );
+
+      expect(writer.$queryRawUnsafe.mock.calls[2]?.[0]).toContain(
+        heartbeatFunction,
+      );
+      expect(writer.$queryRawUnsafe.mock.calls[2]?.[0]).toContain(
+        ')::text AS "heartbeat"',
+      );
+    },
+  );
 
   it("fails closed without the dedicated writer for the requested runtime role", async () => {
     const appReader = { $queryRawUnsafe: vi.fn(async () => []) };

@@ -165,6 +165,7 @@ jobs:
           export RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL="postgresql://${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}:${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           bash infra/postgres/provision-runtime-lease-principals.sh
           bash infra/postgres/verify-runtime-lease-principal-permissions.sh
+          pnpm exec tsx apps/api/scripts/verify-runtime-lease-prisma-compatibility.mts
           EXPECT_APP_DATABASE_READINESS=ready \
             pnpm exec tsx apps/api/scripts/verify-app-database-principal.mts
           restore_app_role() {
