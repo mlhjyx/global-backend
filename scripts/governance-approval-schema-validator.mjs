@@ -251,7 +251,7 @@ const contextIssues = (value) => {
     if (!result.valid || !receiptIdentityMatches(predecessor, authorityReceipt, value.authority_receipt_raw_sha256)) issues.push(contextIssue('APPROVAL_SUPERSESSION_CONTEXT_INVALID', '/supersessions'));
     else issues.push(contextIssue('APPROVAL_SUPERSEDED_RECEIPT_REUSED', '/supersessions'));
   }
-  if (Date.parse(consumption.consumed_at) > Date.parse(grant.expires_at) || Date.parse(value.now) > Date.parse(grant.expires_at)) issues.push(contextIssue('APPROVAL_GRANT_EXPIRED', '/now'));
+  if (Date.parse(consumption.consumed_at) >= Date.parse(grant.expires_at) || Date.parse(value.now) >= Date.parse(grant.expires_at)) issues.push(contextIssue('APPROVAL_GRANT_EXPIRED', '/now'));
   const ledger = value.ledger_snapshot;
   if (!hasExactKeys(ledger, ['schema_version', 'durability_class', 'repository_id', 'reservations']) || ledger.schema_version !== 'approval-nonce-ledger-snapshot/v1' || ledger.durability_class !== 'SHARED_DURABLE_CAS' || ledger.repository_id !== grant.repository.id || !Array.isArray(ledger.reservations) || ledger.reservations.some((reservation) => !isLedgerReservation(reservation))) {
     issues.push(contextIssue('APPROVAL_LEDGER_SNAPSHOT_INVALID', '/ledger_snapshot'));

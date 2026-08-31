@@ -213,7 +213,7 @@ export const validateMergeAuthorizationEvidence = (evidence, candidate, authorit
     || consumption.independent_verifier.identity !== candidate.verifier.identity
     || !isDigest(evidence.consumption_raw_sha256)
     || !isCausalOrder(grant.authorized_at, consumption.consumed_at, consumption.current_main.read_at, now)
-    || instantValue(consumption.consumed_at) > instantValue(grant.expires_at)
+    || instantValue(consumption.consumed_at) >= instantValue(grant.expires_at)
   ) codes.push('APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
   codes.push(...validateLedger(evidence.ledger_snapshot, grant, expectedGrantRawSha256, consumption, candidate));
   return resultFromCodes(codes);
