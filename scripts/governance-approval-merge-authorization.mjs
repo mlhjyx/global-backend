@@ -216,6 +216,12 @@ export const validateMergeAuthorizationEvidence = (evidence, candidate, authorit
     || instantValue(consumption.consumed_at) >= instantValue(grant.expires_at)
   ) codes.push('APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
   codes.push(...validateLedger(evidence.ledger_snapshot, grant, expectedGrantRawSha256, consumption, candidate));
+  const consumptionFailureIndex = codes.indexOf('APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
+  const grantStaleIndex = codes.indexOf('APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
+  if (consumptionFailureIndex > grantStaleIndex && grantStaleIndex !== -1) {
+    codes.splice(consumptionFailureIndex, 1);
+    codes.splice(grantStaleIndex, 0, 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH');
+  }
   return resultFromCodes(codes);
 };
 
