@@ -99,8 +99,6 @@ const HISTORY_ACTIVE = 'ACTIVE';
 const HISTORY_APPENDING = 'APPENDING';
 const HISTORY_CONSUMED = 'CONSUMED';
 const approvalHistoryBindings = new WeakMap();
-// Intentionally uninhabited: this module exposes no mint or registration path.
-const trustedReceiptVerificationCapabilities = new WeakSet();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
 const prepareApprovalHistory = (events) => {
@@ -454,19 +452,19 @@ export const appendApprovalDecisionEvent = (
   append,
   policy,
   now,
-  receiptVerificationCapability,
 ) => {
   const appendedAt = nowIso(now);
-  if (!isPlainObject(state)
-    || !Array.isArray(state.eventHistory)
-    || !approvalHistoryBindings.has(state.eventHistory)) {
+  if (!isPlainObject(state)) transitionError('APPROVAL_STATE_APPEND_INVALID');
+  const history = state.eventHistory;
+  if (!Array.isArray(history)
+    || !approvalHistoryBindings.has(history)) {
     transitionError('APPROVAL_STATE_APPEND_INVALID');
   }
-  const binding = approvalHistoryBindings.get(state.eventHistory);
+  const binding = approvalHistoryBindings.get(history);
   if (binding.capabilityState !== HISTORY_ACTIVE) {
     return boundHistoryHold(binding, 'APPROVAL_STATE_HISTORY_CONSUMED');
   }
-  approvalHistoryBindings.set(state.eventHistory, historyBinding(
+  approvalHistoryBindings.set(history, historyBinding(
     binding.policySnapshot,
     binding.policySha256,
     HISTORY_APPENDING,
@@ -480,15 +478,14 @@ export const appendApprovalDecisionEvent = (
       || append.schemaVersion !== 'approval-event-append/v1'
       || append.appendedAt !== appendedAt
       || !isDigest(append.expectedHistorySha256)
-      || append.expectedHistorySha256 !== canonicalApprovalDigest(state.eventHistory)
+      || append.expectedHistorySha256 !== canonicalApprovalDigest(history)
       || !isPlainObject(append.event)) transitionError('APPROVAL_STATE_APPEND_INVALID');
     const inspection = inspectApprovalValueGraph(append.event);
     if (approvalGraphUnsafe(inspection)) transitionError('APPROVAL_STATE_APPEND_INVALID');
-    const currentState = reduceBoundApprovalDecisionState(state.eventHistory, binding, now);
-    if (append.event.type === 'RECEIPT_VERIFIED'
-      && !trustedReceiptVerificationCapabilities.has(receiptVerificationCapability)) {
+    if (append.event.type === 'RECEIPT_VERIFIED') {
       transitionError('APPROVAL_INDEPENDENCE_NOT_PROVEN');
     }
+    const currentState = reduceBoundApprovalDecisionState(history, binding, now);
     let event;
     if (append.event.type === 'ACCEPTANCE_REVALIDATED') {
       if (!hasExactKeys(append.event, ACCEPTANCE_LIVE_KEYS)
@@ -516,9 +513,9 @@ export const appendApprovalDecisionEvent = (
       if (append.event.observedAt !== appendedAt) transitionError('APPROVAL_STATE_EVENT_TIME_INVALID');
       event = clone(append.event);
     }
-    const nextHistory = prepareApprovalHistory([...state.eventHistory, event]);
+    const nextHistory = prepareApprovalHistory([...history, event]);
     const nextState = reduceBoundApprovalDecisionState(nextHistory, binding, now);
-    approvalHistoryBindings.set(state.eventHistory, historyBinding(
+    approvalHistoryBindings.set(history, historyBinding(
       binding.policySnapshot,
       binding.policySha256,
       HISTORY_CONSUMED,
@@ -528,8 +525,8 @@ export const appendApprovalDecisionEvent = (
     return nextState;
   } finally {
     if (!committed
-      && approvalHistoryBindings.get(state.eventHistory)?.capabilityState === HISTORY_APPENDING) {
-      activateApprovalHistory(state.eventHistory, binding);
+      && approvalHistoryBindings.get(history)?.capabilityState === HISTORY_APPENDING) {
+      activateApprovalHistory(history, binding);
     }
   }
 };
