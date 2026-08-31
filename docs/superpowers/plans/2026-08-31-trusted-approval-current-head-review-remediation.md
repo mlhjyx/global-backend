@@ -4,9 +4,9 @@
 
 **Goal:** Close all five valid current-head review findings without inventing hosted trust, weakening the external HOLD, or allowing caller-owned objects to promote approval state or durable merge consumption.
 
-**Architecture:** Keep structural validators pure and total, but separate structural consistency from trust admission. Canonically derive every in-process grant digest, require Legal clearance for every explicit dual-role exception, and fail closed at the two privileged source boundaries until an independently governed hosted issuer can supply a non-forgeable admission capability. Synthetic positive states remain test-fixture-only and cannot enter product composition or release artifacts.
+**Architecture:** Keep structural validators pure and total, but separate structural consistency from trust admission. Canonically derive every in-process grant digest, require Legal clearance for every explicit dual-role exception, and keep both privileged public source boundaries unconditionally fail-closed after their specific diagnostics. The current source has no hosted admission boundary and no local admission capability, mint, or bridge. Synthetic positive states remain test-fixture-only and cannot enter product composition or release artifacts.
 
-**Tech Stack:** Node.js ESM, `node:test`, repository approval governance scripts, JSON Schema, pure transition/reconciliation kernels, module-private `WeakSet` admission guards, ContractGraph, pnpm.
+**Tech Stack:** Node.js ESM, `node:test`, repository approval governance scripts, JSON Schema, pure transition/reconciliation kernels, executable fixture/kernel import boundaries, ContractGraph, pnpm. No source-mode hosted admission capability exists.
 
 **Spec:** `docs/governance/trusted-approval-readback-spec.md`
 
@@ -454,8 +454,8 @@ git commit -m "refactor(governance): separate approval admission kernels"
 - Test: `scripts/governance-approval-merge-reconciliation-kernel.mjs` through the existing root specs
 
 **Interfaces:**
-- Consumes: reservation, untrusted diagnostic readback, durable ledger, time, optional capability.
-- Produces: public wrapper HOLD without a private capability; pure kernel retains side-effect-free planning coverage.
+- Consumes: reservation, untrusted diagnostic readback, durable ledger, and time.
+- Produces: public wrapper HOLD after diagnostic validation; pure kernel retains side-effect-free planning coverage and cannot write a ledger.
 
 - [ ] **Step 1: Add the RED self-consistent synthetic-readback test**
 
@@ -485,26 +485,24 @@ node --test --test-name-pattern='caller-owned current-main capability' scripts/g
 
 Expected: FAIL because the public wrapper currently applies the kernel plan to the ledger.
 
-- [ ] **Step 3: Add the uninhabited private admission guard**
+- [ ] **Step 3: Close public current-main admission in source**
 
-```js
-const trustedCurrentMainReadbackCapabilities = new WeakSet();
-```
-
-Use this exact wrapper order:
+Use this exact public wrapper order:
 
 ```text
 read existing durable stream
 → run total diagnostic readback/kernel validation
 → malformed identity returns its specific APPROVAL_* HOLD
-→ structurally valid input reaches the private capability check
-→ missing capability returns APPROVAL_CURRENT_MAIN_READBACK_REQUIRED
-→ only recognized capability may apply result/consumption plan
+→ any other diagnostic failure returns its specific APPROVAL_* HOLD
+→ structurally valid input returns APPROVAL_CURRENT_MAIN_READBACK_REQUIRED
+→ public source does not apply result/consumption plans
 ```
 
-This preserves Task 1's `APPROVAL_INDEPENDENCE_NOT_PROVEN` for malformed verifier identity while denying every structurally valid but unadmitted readback. Missing capability may append one idempotent bounded HOLD only. There is no mint in this change.
-
-The empty set is an intentionally uninhabited source authority, not a deferred local API. A hosted mint requires a separate independently reviewed change; fixtures, test flags, environment/config switches, exported factories, and product composition may not bridge it.
+Current source intentionally contains no local `WeakSet`, capability parameter,
+mint, factory, test hook, environment/config switch, or fixture bridge. A
+hosted issuer requires a separately governed change; absent that boundary,
+fixtures and pure kernels cannot append `MERGE_RESULT_OBSERVED` or
+`CONSUMPTION_RECORDED` through public reconciliation.
 
 - [ ] **Step 4: Redirect positive semantic tests to the pure kernel**
 
@@ -537,7 +535,7 @@ git commit -m "fix(governance): require admitted current main readback"
 - Modify: `scripts/governance-approval-state-round5.spec.mjs`
 
 **Interfaces:**
-- Consumes: public append, closed event, optional receipt capability.
+- Consumes: public append and closed event.
 - Produces: caller-owned receipt rejection with active parent preserved; pure kernel retains transition semantics without admission provenance.
 
 - [ ] **Step 1: Add the RED public attack sequence**
@@ -550,13 +548,15 @@ Build `OWNER_ASSIGNMENT_REQUIRED -> PROPOSED -> AWAITING_PRODUCT_REVIEW -> AWAIT
 node --test --test-name-pattern='caller-owned receipt capability|failed privileged append preserves parent' scripts/governance-approval-state.spec.mjs scripts/governance-approval-state-round5.spec.mjs
 ```
 
-- [ ] **Step 3: Add the uninhabited private receipt guard**
+- [ ] **Step 3: Close public receipt admission in source**
 
-```js
-const trustedReceiptVerificationCapabilities = new WeakSet();
-```
-
-Before the public wrapper passes `RECEIPT_VERIFIED` to the kernel, require membership. The `finally` path must restore the parent history to ACTIVE on rejection. There is no mint in this change, and the same no-test/no-environment/no-factory rule from Task 5 applies.
+After its existing append-shape and history diagnostics, public
+`RECEIPT_VERIFIED` always returns `APPROVAL_INDEPENDENCE_NOT_PROVEN` before it
+reaches the kernel. The rejected append preserves the active parent history;
+there is no local `WeakSet`, capability parameter, mint, factory, test hook,
+environment/config switch, or fixture bridge. A hosted issuer requires a
+separately governed future boundary and is not represented by a local source
+fallback.
 
 - [ ] **Step 4: Keep synthetic state outside admission**
 
@@ -604,13 +604,18 @@ git commit -m "fix(governance): require admitted receipt transition"
 - [ ] **Step 1: Record the source-HOLD contract**
 
 ```text
-Structural validation and pure-kernel planning are diagnostic only. Until an
-independently governed hosted boundary supplies a non-forgeable capability,
-public source append/reconciliation returns APPROVAL_* HOLD and cannot enter
-VERIFIED or append MERGE_RESULT_OBSERVED / CONSUMPTION_RECORDED.
+Structural validation and pure-kernel planning are diagnostic only. Current
+source has no hosted admission boundary. Until an independently governed hosted
+boundary supplies a non-forgeable capability, public RECEIPT_VERIFIED append
+returns APPROVAL_INDEPENDENCE_NOT_PROVEN and cannot enter VERIFIED; public
+current-main reconciliation preserves its specific diagnostic APPROVAL_* HOLD
+or returns APPROVAL_CURRENT_MAIN_READBACK_REQUIRED, and cannot append
+MERGE_RESULT_OBSERVED / CONSUMPTION_RECORDED.
 ```
 
-Record that pure kernel output is neither a state, receipt, admission, ledger fact, nor external observation.
+There is no local WeakSet/capability/mint parameter/factory/test/env/config/
+fixture bridge. Pure kernel output is neither a state, receipt, admission,
+ledger fact, nor external observation.
 
 - [ ] **Step 2: Run root gates and unchanged Copy readback**
 
@@ -704,7 +709,7 @@ Record old remote head, new local head, exact path manifest/digest, tests, cover
 
 - Spec coverage: all five current-head review findings map to a GREEN task and a final independent review gate.
 - Trust boundary: the plan deliberately provides no source mint for either privileged capability because the hosted independently governed boundary is absent.
-- Testability: pure kernels return non-authoritative plans with no history binding or ledger port; only guarded wrappers can create admitted state or durable side effects.
+- Testability: pure kernels return non-authoritative plans with no history binding or ledger port; public wrappers cannot create admitted state or durable side effects while hosted admission is absent.
 - Fixture boundary: the whole `scripts/fixtures/approval-readback/**` root and both kernels have executable import allowlists, and serialized fixtures cannot regain provenance.
 - Ordinary ADR-027 remains Legal-optional; only ADR-026 and explicit dual-role policy require current Legal clearance.
 - Digest semantics: v1 grant raw digest uses the exact recursive lexicographic-key canonical JSON algorithm implemented by `canonicalApprovalDigest()`; independent observation of an external grant artifact remains a separate hosted-admission fact.

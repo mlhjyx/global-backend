@@ -595,6 +595,38 @@ Until the independent repository exists, a same-repository implementation may
 only emit `TRUSTED_BASE_VERIFIED`, never
 `INDEPENDENT_EXTERNAL_VERIFIED`.
 
+### 5.6.1 Current source admission HOLD
+
+The current repository source does not implement a hosted admission boundary.
+Structural validation and pure-kernel planning are diagnostic only. Until an
+independently governed hosted boundary supplies a non-forgeable admission
+capability, both privileged public source paths fail closed after their own
+specific diagnostics:
+
+```text
+public RECEIPT_VERIFIED append
+  -> APPROVAL_INDEPENDENCE_NOT_PROVEN
+  -> cannot enter VERIFIED
+
+public current-main reconciliation
+  -> preserves a specific diagnostic APPROVAL_* HOLD when validation fails
+  -> otherwise APPROVAL_CURRENT_MAIN_READBACK_REQUIRED
+  -> cannot append MERGE_RESULT_OBSERVED or CONSUMPTION_RECORDED
+```
+
+There is deliberately no local `WeakSet`, capability argument, mint parameter,
+factory, test hook, environment/config switch, or fixture bridge that can turn
+either public HOLD into an admission. A hosted issuer is a separately governed
+future boundary, not an unexercised source-mode option.
+
+`planApprovalStateTransition()` and
+`planMergeAuthorizationReconciliation()` return diagnostic, side-effect-free
+plans only. A kernel output is neither an approval state, receipt, admission,
+ledger fact, external observation, nor evidence that a hosted verifier or raw
+external artifact was observed. Fixtures remain synthetic test inputs and may
+exercise pure kernels or tests, but cannot regain provenance or enter either
+public admission path.
+
 Attestation verification must bind:
 
 ```text
