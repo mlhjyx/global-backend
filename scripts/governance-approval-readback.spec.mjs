@@ -747,6 +747,27 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
   assert.equal(Object.hasOwn(mergeCore.merge_authorization_evidence, 'consumption'), false);
   assert.doesNotThrow(() => buildRawApprovalReceiptArtifact(mergeCore));
 
+  const consumedAtExpiry = mergeEvidence();
+  consumedAtExpiry.grant.expires_at = consumedAtExpiry.consumption.consumed_at;
+  rebindMergeGrantDigest(consumedAtExpiry);
+  const consumedAtExpiryValidation = validateMergeAuthorizationGrantForCandidate(
+    consumedAtExpiry,
+    mergeCandidate,
+    authority(),
+    NOW,
+  );
+  assert.deepEqual(
+    consumedAtExpiryValidation.issues.map(({ stable_code: code }) => code),
+    [
+      'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH',
+      'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE',
+    ],
+  );
+  assert.throws(
+    () => buildApprovalReceiptCore(mergeCandidate, authority(), verifier(), consumedAtExpiry, NOW),
+    (error) => error.message === 'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH',
+  );
+
   const mutatedGrant = mergeEvidence();
   mutatedGrant.grant.status = 'CONSUMED';
   assert.throws(
