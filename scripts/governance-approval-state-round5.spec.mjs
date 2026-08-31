@@ -467,6 +467,61 @@ test('round5 alternating eventHistory proxy restores the exact appending history
   assert.deepEqual(historyB, historyBSnapshot);
 });
 
+test('round5 collection intrinsic mutation cannot admit caller-owned history', () => {
+  const { policy, verified } = buildRound4AcceptedState();
+  const history = verified.eventHistory;
+  const forgedBinding = Object.freeze({
+    policySnapshot: verified.policySnapshot,
+    policySha256: digest(policy),
+    capabilityState: 'ACTIVE',
+  });
+  const originalHas = WeakMap.prototype.has;
+  const originalGet = WeakMap.prototype.get;
+  const originalSet = WeakMap.prototype.set;
+  WeakMap.prototype.has = function controlledHas(key) {
+    if (key === history) return true;
+    return Reflect.apply(originalHas, this, [key]);
+  };
+  WeakMap.prototype.get = function controlledGet(key) {
+    if (key === history) return forgedBinding;
+    return Reflect.apply(originalGet, this, [key]);
+  };
+  WeakMap.prototype.set = function controlledSet(key, value) {
+    if (key === history) return this;
+    return Reflect.apply(originalSet, this, [key, value]);
+  };
+  let reduceOutcome;
+  let appendOutcome;
+  try {
+    const reduced = approvalState.reduceApprovalDecisionState(history, policy, NOW);
+    reduceOutcome = {
+      state: reduced.state,
+      blockingCodes: reduced.blockingCodes,
+    };
+    try {
+      appendOutcome = append(verified, {
+        type: 'HEAD_CHANGED',
+        headSha: 'c'.repeat(40),
+        observedAt: NOW.toISOString(),
+      }, policy, NOW).state;
+    } catch (error) {
+      appendOutcome = error.message;
+    }
+  } finally {
+    WeakMap.prototype.has = originalHas;
+    WeakMap.prototype.get = originalGet;
+    WeakMap.prototype.set = originalSet;
+  }
+
+  assert.deepEqual({ reduceOutcome, appendOutcome }, {
+    reduceOutcome: {
+      state: 'OWNER_ASSIGNMENT_REQUIRED',
+      blockingCodes: ['APPROVAL_STATE_HISTORY_NOT_ADMITTED'],
+    },
+    appendOutcome: 'APPROVAL_STATE_APPEND_INVALID',
+  });
+});
+
 test('round5 append rejects accessor reentry without invoking it or consuming the parent', () => {
   const policy = approvalPolicy();
   const rootTime = new Date('2026-08-30T07:05:00.000Z');
