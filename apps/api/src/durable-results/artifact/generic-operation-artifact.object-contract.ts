@@ -98,7 +98,10 @@ export function parseStoredArtifactContract(
     return null;
   }
   return Object.freeze({
-    objectKey: contentAddressedObjectKey(sha256),
+    objectKey: contentAddressedObjectKey(
+      sha256,
+      privacyClass as ArtifactPrivacyClass,
+    ),
     versionId,
     sha256,
     sizeBytes: metadata['size-bytes'],

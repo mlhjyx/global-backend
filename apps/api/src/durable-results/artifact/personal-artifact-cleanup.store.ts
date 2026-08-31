@@ -1,4 +1,9 @@
-import { DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetBucketLocationCommand,
+  GetObjectTaggingCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 import { types } from 'node:util';
 import { contentAddressedObjectKey } from './artifact-key';
 import { isCanonicalArtifactObjectVersionId } from './generic-operation-artifact.object-contract';
@@ -23,7 +28,13 @@ function unavailable(): Error {
   return new Error(PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE);
 }
 
-function isNotFound(error: unknown): boolean {
+function isExplicitObjectVersionAbsence(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  return record.name === 'NoSuchKey' || record.name === 'NoSuchVersion';
+}
+
+function isAmbiguousNotFound(error: unknown): boolean {
   if (error === null || typeof error !== 'object') return false;
   const record = error as Record<string, unknown>;
   const metadata =
@@ -33,9 +44,8 @@ function isNotFound(error: unknown): boolean {
   return (
     metadata?.httpStatusCode === 404 ||
     record.name === 'NotFound' ||
-    record.name === 'NoSuchKey' ||
-    record.name === 'NoSuchVersion' ||
-    record.name === '404'
+    record.name === '404' ||
+    record.name === 'NoSuchBucket'
   );
 }
 
@@ -107,7 +117,7 @@ export class S3PersonalArtifactCleanupAdapter
     const exact = parseInput(input);
     const target = Object.freeze({
       Bucket: this.bucket,
-      Key: contentAddressedObjectKey(exact.sha256),
+      Key: contentAddressedObjectKey(exact.sha256, 'PERSONAL_DATA'),
       VersionId: exact.versionId,
     });
     try {
@@ -120,7 +130,29 @@ export class S3PersonalArtifactCleanupAdapter
         throw unavailable();
       }
     } catch (error) {
-      if (isNotFound(error)) return 'ABSENT';
+      if (await this.isConfirmedAbsent(error)) return 'ABSENT';
+      throw unavailable();
+    }
+    try {
+      const tagging = await this.client.send(new GetObjectTaggingCommand(target));
+      if (
+        tagging === null ||
+        typeof tagging !== 'object' ||
+        (tagging as Record<string, unknown>).VersionId !== exact.versionId
+      ) {
+        throw unavailable();
+      }
+      const tagSet = (tagging as Record<string, unknown>).TagSet;
+      if (
+        !Array.isArray(tagSet) ||
+        tagSet.length !== 1 ||
+        tagSet[0]?.Key !== 'artifact-privacy' ||
+        tagSet[0]?.Value !== 'PERSONAL_DATA'
+      ) {
+        throw unavailable();
+      }
+    } catch (error) {
+      if (await this.isConfirmedAbsent(error)) return 'ABSENT';
       throw unavailable();
     }
     try {
@@ -134,8 +166,21 @@ export class S3PersonalArtifactCleanupAdapter
       }
       return 'DELETED';
     } catch (error) {
-      if (isNotFound(error)) return 'ABSENT';
+      if (await this.isConfirmedAbsent(error)) return 'ABSENT';
       throw unavailable();
+    }
+  }
+
+  private async isConfirmedAbsent(error: unknown): Promise<boolean> {
+    if (isExplicitObjectVersionAbsence(error)) return true;
+    if (!isAmbiguousNotFound(error)) return false;
+    try {
+      const location = await this.client.send(
+        new GetBucketLocationCommand({ Bucket: this.bucket }),
+      );
+      return location !== null && typeof location === 'object';
+    } catch {
+      return false;
     }
   }
 }

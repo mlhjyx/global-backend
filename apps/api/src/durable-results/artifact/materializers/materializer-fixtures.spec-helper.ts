@@ -46,7 +46,7 @@ export function manifestFor(
     authorityId: AUTHORITY_ID,
     operationId: OPERATION_ID,
     resultSchema,
-    objectKey: contentAddressedObjectKey(sha256),
+    objectKey: contentAddressedObjectKey(sha256, 'PERSONAL_DATA'),
     sha256,
     sizeBytes: String(bytes.byteLength),
     mediaType,

@@ -260,7 +260,10 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     });
     const stored = await result;
     expect(stored).toEqual({
-      objectKey: contentAddressedObjectKey(staged.sha256),
+      objectKey: contentAddressedObjectKey(
+        staged.sha256,
+        staged.privacyClass,
+      ),
       versionId: 'version-1',
       sha256: staged.sha256,
       sizeBytes: '3',
@@ -280,7 +283,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       .map((command) => (command as GetObjectCommand).input.Key);
     expect(getKeys).toEqual([
       staged.stagingKey,
-      contentAddressedObjectKey(staged.sha256),
+      contentAddressedObjectKey(staged.sha256, staged.privacyClass),
     ]);
     const finalPut = client.commands.find(
       (command) =>
@@ -307,15 +310,15 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       .filter((command) => command instanceof HeadObjectCommand)
       .map((command) => (command as HeadObjectCommand).input.Key);
     expect(headKeys).toEqual([
-      contentAddressedObjectKey(staged.sha256),
-      contentAddressedObjectKey(staged.sha256),
+      contentAddressedObjectKey(staged.sha256, staged.privacyClass),
+      contentAddressedObjectKey(staged.sha256, staged.privacyClass),
     ]);
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
       .map((command) => (command as GetObjectCommand).input.Key);
     expect(getKeys).toEqual([
       staged.stagingKey,
-      contentAddressedObjectKey(staged.sha256),
+      contentAddressedObjectKey(staged.sha256, staged.privacyClass),
     ]);
   });
 
@@ -372,7 +375,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   it('accepts an already-existing immutable target only when all metadata matches', async () => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(9, 10)], 2);
-    const key = contentAddressedObjectKey(staged.sha256);
+    const key = contentAddressedObjectKey(staged.sha256, staged.privacyClass);
     client.objects.set(key, {
       chunks: [bytes(9, 10)],
       contentType: staged.mediaType,
@@ -414,7 +417,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   ])('rejects an immutable target with %s', async (_label, tagSet) => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(31, 32)], 2);
-    const key = contentAddressedObjectKey(staged.sha256);
+    const key = contentAddressedObjectKey(staged.sha256, staged.privacyClass);
     client.objects.set(key, {
       chunks: [bytes(31, 32)],
       contentType: staged.mediaType,
@@ -438,7 +441,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   it('rejects an immutable target without per-object AES256 encryption evidence', async () => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(33, 34)], 2);
-    const key = contentAddressedObjectKey(staged.sha256);
+    const key = contentAddressedObjectKey(staged.sha256, staged.privacyClass);
     client.objects.set(key, {
       chunks: [bytes(33, 34)],
       contentType: staged.mediaType,
@@ -463,7 +466,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const client = new MemoryS3Client();
     const { store: target } = store(client);
     const staged = await stage(target, [bytes(9, 10)], 2);
-    const key = contentAddressedObjectKey(staged.sha256);
+    const key = contentAddressedObjectKey(staged.sha256, staged.privacyClass);
     client.objects.set(key, {
       chunks: [bytes(9, 11)],
       contentType: staged.mediaType,
@@ -522,7 +525,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   ])('rejects an immutable target with %s', async (_label, mutation) => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(11, 12)], 2);
-    const key = contentAddressedObjectKey(staged.sha256);
+    const key = contentAddressedObjectKey(staged.sha256, staged.privacyClass);
     client.objects.set(key, {
       chunks:
         mutation.contentLength === 3 ? [bytes(11, 12, 13)] : [bytes(11, 12)],
@@ -545,7 +548,9 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
 
   it('returns null only for an absent digest-derived object', async () => {
     const { store: target } = store();
-    await expect(target.inspect('cd'.repeat(32))).resolves.toBeNull();
+    await expect(
+      target.inspect('cd'.repeat(32), 'PERSONAL_DATA'),
+    ).resolves.toBeNull();
   });
 
   it('contains HEAD transport details and honors aborts', async () => {
@@ -554,7 +559,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       'endpoint=https://secret.invalid credential=secret',
     );
     const { store: target } = store(client);
-    const result = target.inspect('cd'.repeat(32));
+    const result = target.inspect('cd'.repeat(32), 'PERSONAL_DATA');
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
@@ -563,7 +568,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const abort = new AbortController();
     abort.abort();
     await expectStorageCode(
-      target.inspect('cd'.repeat(32), abort.signal),
+      target.inspect('cd'.repeat(32), 'PERSONAL_DATA', abort.signal),
       'GENERIC_OPERATION_ARTIFACT_ABORTED',
     );
   });
@@ -574,12 +579,14 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(1), bytes(2, 3)], 3);
     const stored = await target.promote(staged);
-    const body = await target.read(stored.sha256);
+    const body = await target.read(stored.sha256, stored.privacyClass);
     await expect(collect(body)).resolves.toEqual([bytes(1), bytes(2, 3)]);
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
       .map((command) => (command as GetObjectCommand).input.Key);
-    expect(getKeys.at(-1)).toBe(contentAddressedObjectKey(stored.sha256));
+    expect(getKeys.at(-1)).toBe(
+      contentAddressedObjectKey(stored.sha256, stored.privacyClass),
+    );
   });
 
   it('contains read transport details behind a fixed redacted code', async () => {
@@ -588,7 +595,7 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       'bucket=private endpoint=https://secret.invalid credential=secret',
     );
     const { store: target } = store(client);
-    const result = target.read('ef'.repeat(32));
+    const result = target.read('ef'.repeat(32), 'PERSONAL_DATA');
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
@@ -612,7 +619,7 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       bucket: BUCKET,
       client: firstClient,
     });
-    const failingBody = await firstStore.read(digest);
+    const failingBody = await firstStore.read(digest, 'PERSONAL_DATA');
     const failingIterator = failingBody[Symbol.asyncIterator]();
     await expect(failingIterator.next()).resolves.toEqual({
       done: false,
@@ -624,7 +631,11 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
     );
 
     const abort = new AbortController();
-    const abortingBody = await firstStore.read(digest, abort.signal);
+    const abortingBody = await firstStore.read(
+      digest,
+      'PERSONAL_DATA',
+      abort.signal,
+    );
     const abortingIterator = abortingBody[Symbol.asyncIterator]();
     await expect(abortingIterator.next()).resolves.toMatchObject({
       done: false,

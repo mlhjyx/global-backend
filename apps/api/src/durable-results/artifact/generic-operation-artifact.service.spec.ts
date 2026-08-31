@@ -9,6 +9,7 @@ import {
   type GenericOperationArtifactManifest,
 } from './artifact.types';
 import type { GenericOperationArtifactRepository } from './generic-operation-artifact.repository';
+import { contentAddressedObjectKey } from './artifact-key';
 import {
   ArtifactStorageError,
   type GenericOperationArtifactStore,
@@ -28,7 +29,7 @@ const CREATED_AT = '2026-08-21T12:00:00.000Z';
 const EXPIRES_AT = '2026-08-22T12:00:00.000Z';
 const BODY = new TextEncoder().encode('verified artifact bytes');
 const SHA256 = createHash('sha256').update(BODY).digest('hex');
-const OBJECT_KEY = `generic-operation-results/v1/sha256/${SHA256.slice(0, 2)}/${SHA256}`;
+const OBJECT_KEY = contentAddressedObjectKey(SHA256, 'CONFIDENTIAL_TENANT');
 
 const reservation: BudgetReservation = Object.freeze({
   workspaceId: WORKSPACE_ID,
@@ -466,7 +467,11 @@ describe('GenericOperationArtifactService', () => {
 
     expect(deps.store.stage).not.toHaveBeenCalled();
     expect(deps.store.promote).not.toHaveBeenCalled();
-    expect(deps.store.inspect).toHaveBeenCalledWith(SHA256, undefined);
+    expect(deps.store.inspect).toHaveBeenCalledWith(
+      SHA256,
+      'CONFIDENTIAL_TENANT',
+      undefined,
+    );
     expect(deps.order).toEqual([
       'load-expected',
       'inspect',
@@ -516,7 +521,11 @@ describe('GenericOperationArtifactService', () => {
       reference: { sha256: SHA256 },
       durableReceipt: ARTIFACT_RECEIPT,
     });
-    expect(deps.store.inspect).toHaveBeenCalledWith(SHA256, undefined);
+    expect(deps.store.inspect).toHaveBeenCalledWith(
+      SHA256,
+      'CONFIDENTIAL_TENANT',
+      undefined,
+    );
     expect(deps.store.inspect).not.toHaveBeenCalledWith('ff'.repeat(32), undefined);
   });
 
