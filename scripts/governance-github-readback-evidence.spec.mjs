@@ -167,6 +167,20 @@ test('rejects stale or wrongly scoped hosted authority for every exact review ro
   }
 });
 
+test('classifies simultaneous hosted repository scope drift as authority currentness', async () => {
+  const state = fixtureState();
+  for (const role of ['OWN-PRODUCT', 'OWN-DATA-PRIVACY']) {
+    mutateAuthorityRole(state, role, (entry) => {
+      entry.scope.repository_id = REPOSITORY_ID + 1;
+    });
+  }
+
+  await expectCode(
+    () => collect(state),
+    'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+  );
+});
+
 test('rejects duplicate checks and weak name, URL, path, or slug-only claims', async (t) => {
   await t.test('duplicate context', async () => {
     const state = fixtureState();

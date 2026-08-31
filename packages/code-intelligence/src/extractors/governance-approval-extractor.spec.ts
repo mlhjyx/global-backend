@@ -71,27 +71,36 @@ async function approvalGraph(root: string) {
   return builder.finalize(EVIDENCE);
 }
 
-test("static approval edge keeps its relation when condition carries a conflicting key", () => {
-  const conditionWithConflictingRelation = {
+test("static approval edge projects only the closed condition attributes", () => {
+  const conditionWithConflictingAttributes = {
     conditional: true as const,
     requiredWhen: "actor_policy=DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER",
     relation: "untrusted_relation",
+    evidenceClass: "UNTRUSTED_EVIDENCE_CLASS",
+    hostedReadback: "UNTRUSTED_HOSTED_READBACK",
+    runtimeEvidence: true,
+    acceptance: true,
+    untrustedExtra: "SURVIVES_IF_CONDITION_IS_SPREAD",
   };
   const builder = new GraphBuilder();
   addStaticApprovalEdge(builder, {
     from: "governance:LEGAL-REVIEW",
     to: "governance:ADR-027",
     relation: "legal_input_for",
-    condition: conditionWithConflictingRelation,
+    condition: conditionWithConflictingAttributes,
     location: { path: "test", line: 1 },
   });
 
   const edge = builder.finalize(EVIDENCE).edges[0];
-  assert.equal(edge?.attributes.relation, "legal_input_for");
-  assert.equal(edge?.attributes.evidenceClass, "STATIC_CONTRACT");
-  assert.equal(edge?.attributes.hostedReadback, "EXTERNAL_UNOBSERVED");
-  assert.equal(edge?.attributes.runtimeEvidence, false);
-  assert.equal(edge?.attributes.acceptance, false);
+  assert.deepEqual(edge?.attributes, {
+    conditional: true,
+    requiredWhen: "actor_policy=DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER",
+    relation: "legal_input_for",
+    evidenceClass: "STATIC_CONTRACT",
+    hostedReadback: "EXTERNAL_UNOBSERVED",
+    runtimeEvidence: false,
+    acceptance: false,
+  });
 });
 
 async function writeApprovalFixture(root: string): Promise<void> {

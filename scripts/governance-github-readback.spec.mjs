@@ -265,6 +265,23 @@ test('requires each hosted role authority to cover its selected review and reque
   }
 });
 
+test('backdated request provenance cannot rescue authority expired at collector readback', async () => {
+  const state = fixtureState();
+  for (const role of ROLES) {
+    mutateAuthorityRole(state, role, (entry) => {
+      entry.effective_until = '2026-08-31T00:00:00.000Z';
+    });
+  }
+
+  await expectCode(
+    () => collect(state, {
+      collectorObservedAt: '2026-08-31T17:44:00.691Z',
+      request: request(),
+    }),
+    'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+  );
+});
+
 test('binds the proposal manifest identity and trusted renderer before reading Markdown', async (t) => {
   for (const [name, mutate] of [
     ['decision ID', (value) => { value.decision_id = 'ADR-026'; }],
