@@ -3066,7 +3066,11 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -3916,7 +3920,11 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -4573,7 +4581,11 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -4867,7 +4879,11 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -5206,6 +5222,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverContactsDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "",
@@ -5260,7 +5286,7 @@
             }
           },
           "403": {
-            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED or CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
@@ -5279,7 +5305,12 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED",
+                            "CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -5480,7 +5511,11 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -5681,7 +5716,11 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -13503,6 +13542,36 @@
           "estimatedVolume",
           "version",
           "createdAt"
+        ]
+      },
+      "DiscoverContactsDto": {
+        "type": "object",
+        "properties": {
+          "lawfulBasis": {
+            "type": "string",
+            "enum": [
+              "legitimate_interest",
+              "consent",
+              "contract",
+              "legal_obligation"
+            ],
+            "description": "发现并持久化具名联系人的合法性基础（GDPR Art.6）"
+          },
+          "lawfulBasisRef": {
+            "type": "string",
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          },
+          "lawfulBasisNote": {
+            "type": "string",
+            "description": "有界审计备注",
+            "maxLength": 1000,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          }
+        },
+        "required": [
+          "lawfulBasis"
         ]
       },
       "VerifyContactPointDto": {

@@ -155,7 +155,11 @@ describe('DiscoveryService synthetic provenance read quarantine', () => {
     };
 
     await expect(
-      serviceWithTx(tx, { routeContactDiscovery }).discoverContacts(ctx, 'company-synthetic'),
+      serviceWithTx(tx, { routeContactDiscovery }).discoverContacts(
+        ctx,
+        'company-synthetic',
+        { lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42' } },
+      ),
     ).rejects.toMatchObject({
       response: { error: { code: 'SYNTHETIC_PROVENANCE_QUARANTINED' } },
     });

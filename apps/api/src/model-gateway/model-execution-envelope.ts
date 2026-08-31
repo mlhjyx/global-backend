@@ -4,4 +4,3 @@
  * quotes must consume this single machine contract.
  */
 export const MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND = 2 as const;
-

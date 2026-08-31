@@ -131,6 +131,42 @@ class VerifyContactPointDto {
 }
 
 /**
+ * Named-contact discovery processes personal data, so every product request
+ * must carry an explicit, auditable Art. 6 basis. There is deliberately no
+ * development or policy-override bypass on this endpoint.
+ */
+class DiscoverContactsDto {
+  @ApiProperty({
+    enum: LAWFUL_BASIS_KINDS,
+    description: '发现并持久化具名联系人的合法性基础（GDPR Art.6）',
+  })
+  @IsIn(LAWFUL_BASIS_KINDS as unknown as string[])
+  lawfulBasis!: LawfulBasisKind;
+
+  @ApiPropertyOptional({
+    description: 'LIA / 工单 / 合同 / 同意记录的引用（可审计）',
+    maxLength: 512,
+    pattern: NO_CONTROL_CHARS.source,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  @Matches(NO_CONTROL_CHARS)
+  lawfulBasisRef?: string;
+
+  @ApiPropertyOptional({
+    description: '有界审计备注',
+    maxLength: 1000,
+    pattern: NO_CONTROL_CHARS.source,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  @Matches(NO_CONTROL_CHARS)
+  lawfulBasisNote?: string;
+}
+
+/**
  * 决策人邮箱猜测的合规上下文（可选）。猜出的候选**都是人名邮箱**（个人数据），缺 lawfulBasis
  * 且未开 allowPersonalWithoutBasis → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
  */
@@ -331,7 +367,12 @@ export class DiscoveryController {
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）',
   })
-  @ApiExecutionBudgetGrant()
+  @ApiExecutionBudgetGrant({
+    additionalForbiddenCodes: [
+      'CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED',
+    ],
+  })
+  @ApiBody({ type: DiscoverContactsDto, required: true })
   @ApiEnvelope(
     { type: 'object', additionalProperties: true, description: '联系人发现结果（新建联系人/联系点计数）',
     },
@@ -340,11 +381,23 @@ export class DiscoveryController {
   async discoverContacts(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DiscoverContactsDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
       await asExecutionBudgetHttpBoundary(() =>
-        this.discovery.discoverContacts(ctx, id, compactJws),
+        this.discovery.discoverContacts(
+          ctx,
+          id,
+          {
+            lawfulBasis: {
+              basis: dto.lawfulBasis,
+              ref: dto.lawfulBasisRef,
+              note: dto.lawfulBasisNote,
+            },
+          },
+          compactJws,
+        ),
       ),
     );
   }

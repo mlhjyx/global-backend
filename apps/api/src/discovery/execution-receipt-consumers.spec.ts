@@ -36,6 +36,12 @@ const CTX: RequestContext = {
   userId: 'receipt-consumer-test',
   roles: [],
 };
+const CONTACT_DISCOVERY_OPTIONS = Object.freeze({
+  lawfulBasis: Object.freeze({
+    basis: 'legitimate_interest' as const,
+    ref: 'LIA-42',
+  }),
+});
 
 function receipt(
   operationId: string,
@@ -129,6 +135,31 @@ describe('actual discovery receipt consumers', () => {
     }));
   });
 
+  it('rejects contact discovery without a lawful basis before grant, DB, or provider work', async () => {
+    const consumeWorkspaceGrant = vi.fn();
+    const withWorkspace = vi.fn();
+    const routeContactDiscovery = vi.fn();
+    const service = new DiscoveryService(
+      { withWorkspace } as never,
+      { routeContactDiscovery } as never,
+      { consumeWorkspaceGrant } as never,
+      budgetStore() as never,
+    );
+
+    await expect(service.discoverContacts(CTX, COMPANY_ID, undefined, 'grant'))
+      .rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED',
+          },
+        },
+        status: 403,
+      });
+    expect(consumeWorkspaceGrant).not.toHaveBeenCalled();
+    expect(withWorkspace).not.toHaveBeenCalled();
+    expect(routeContactDiscovery).not.toHaveBeenCalled();
+  });
+
   it('captures contact Tool and Model receipts and ACKs the exact contact persistence transaction', async () => {
     const company = {
       id: COMPANY_ID,
@@ -186,7 +217,7 @@ describe('actual discovery receipt consumers', () => {
       budgetStore() as never,
     );
 
-    await service.discoverContacts(CTX, COMPANY_ID);
+    await service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS);
 
     expect(mocks.applyDomainAckConsumerTransactions).toHaveBeenCalledOnce();
     const acknowledgementInput = mocks.applyDomainAckConsumerTransactions.mock.calls[0]?.[0];
@@ -199,7 +230,26 @@ describe('actual discovery receipt consumers', () => {
     });
     expect(mocks.persistDiscoveredContacts).toHaveBeenCalledWith(
       tx,
-      expect.objectContaining({ adapterKey: 'decision_maker' }),
+      expect.objectContaining({
+        adapterKey: 'decision_maker',
+        lawfulBasis: expect.objectContaining({
+          basis: 'legitimate_interest',
+          ref: 'LIA-42',
+          recordedBy: CTX.userId,
+          recordedAt: expect.any(String),
+        }),
+      }),
+    );
+    expect(adapter.discoverContacts).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        lawfulBasis: expect.objectContaining({
+          basis: 'legitimate_interest',
+          ref: 'LIA-42',
+          recordedBy: CTX.userId,
+          recordedAt: expect.any(String),
+        }),
+      }),
     );
     expect(tx.usageLedger.create).toHaveBeenCalledOnce();
 
@@ -217,7 +267,7 @@ describe('actual discovery receipt consumers', () => {
         value: await input.readback(input.transaction),
       }),
     );
-    await expect(service.discoverContacts(CTX, COMPANY_ID)).resolves.toEqual({
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).resolves.toEqual({
       contacts: [],
       skippedSuppressed: 0,
       skippedInvalid: 0,
@@ -231,7 +281,7 @@ describe('actual discovery receipt consumers', () => {
       executionContext.onDurableReceipt?.('unexpected.tool', TOOL_RECEIPT);
       return { contacts: [], costCents: 0 };
     });
-    await expect(service.discoverContacts(CTX, COMPANY_ID)).rejects.toThrow(
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).rejects.toThrow(
       'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
     );
   });
@@ -264,7 +314,7 @@ describe('actual discovery receipt consumers', () => {
       budgetStore() as never,
     );
 
-    await expect(service.discoverContacts(CTX, COMPANY_ID)).rejects.toMatchObject({
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).rejects.toMatchObject({
       response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
     });
     expect(discoverContacts).not.toHaveBeenCalled();
@@ -301,7 +351,7 @@ describe('actual discovery receipt consumers', () => {
       budgetStore() as never,
     );
 
-    await expect(service.discoverContacts(CTX, COMPANY_ID)).rejects.toMatchObject({
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).rejects.toMatchObject({
       response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
     });
     expect(discoverContacts).toHaveBeenCalledOnce();

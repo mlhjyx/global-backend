@@ -21,6 +21,9 @@ const CTX = Object.freeze({
   userId: '77777777-7777-4777-8777-777777777777',
   roles: ['admin'],
 }) as RequestContext;
+const CONTACT_DISCOVERY_OPTIONS = Object.freeze({
+  lawfulBasis: Object.freeze({ basis: 'legitimate_interest' as const, ref: 'LIA-42' }),
+});
 
 function rejectingHarness(code: ExecutionBudgetGrantError['code']) {
   const withWorkspace = vi.fn();
@@ -76,7 +79,7 @@ describe('workspace HTTP authority cutover', () => {
       () => harness.icp.generateFromCompany(CTX, COMPANY_ID, 'grant'),
       () => harness.icp.generateQueryPlan(CTX, ICP_ID, 'grant'),
       () => harness.discovery.executePlan(CTX, PLAN_ID, 'grant'),
-      () => harness.discovery.discoverContacts(CTX, COMPANY_ID, 'grant'),
+      () => harness.discovery.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS, 'grant'),
       () => harness.discovery.guessEmailsForCompany(CTX, COMPANY_ID, undefined, 'grant'),
       () => harness.discovery.verifyContactPoint(CTX, POINT_ID, undefined, 'grant'),
     ];
@@ -115,7 +118,7 @@ describe('workspace HTTP authority cutover', () => {
     );
 
     await expect(
-      service.discoverContacts(CTX, COMPANY_ID, 'consumed-grant'),
+      service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS, 'consumed-grant'),
     ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_REUSED' });
     expect(withWorkspace).not.toHaveBeenCalled();
     expect(providers.routeContactDiscovery).not.toHaveBeenCalled();

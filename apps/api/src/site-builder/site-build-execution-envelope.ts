@@ -5,4 +5,3 @@
  * technical envelope must reserve for both attempts.
  */
 export const SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS = 2 as const;
-
