@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import * as approvalState from '../../../governance-approval-state.mjs';
+import { approvalVerifiedLegalState } from '../../../governance-approval-legal-policy.mjs';
 import { deepFreeze } from '../../../governance-approval-readback-common.mjs';
 import { buildTask3AcceptanceEvidence } from './task3-acceptance-evidence.mjs';
 import { buildSyntheticTrustedReceiptArtifact } from '../synthetic-trusted-receipt.mjs';
@@ -369,17 +370,6 @@ const buildRound4Scenario = () => {
   return { evidence, mergeAuthorization, policy, verifiedEvents };
 };
 
-export const buildRound4AcceptedState = () => {
-  const { evidence, policy, verifiedEvents } = buildRound4Scenario();
-  const verified = buildStateFromEvents(verifiedEvents, policy);
-  const accepted = append(verified, {
-    type: 'ACCEPTANCE_REVALIDATED',
-    evidence,
-    observedAt: evidence.readAt,
-  }, policy, NOW);
-  return { accepted, evidence, policy, verified };
-};
-
 const initialSyntheticProjection = (policy) => ({
   schemaVersion: 'approval-decision-state/v1',
   repository: clone(policy.repository),
@@ -454,6 +444,76 @@ export const buildSyntheticApprovalStateKernelInput = ({
     policySnapshot: closedPolicy,
     observedAt,
   });
+};
+
+const syntheticStateFromProjection = (projection, eventHistory, policySnapshot) => frozenClone({
+  ...projection,
+  eventHistory,
+  policySnapshot,
+});
+
+export const buildSyntheticVerifiedApprovalStateFixture = ({
+  mergeAuthorization = null,
+  policySnapshot = null,
+  receipt = null,
+} = {}) => {
+  const scenario = buildRound4Scenario();
+  const closedPolicy = policySnapshot ?? scenario.policy;
+  const receiptEvent = {
+    ...clone(scenario.verifiedEvents.at(-1)),
+    headSha: closedPolicy.currentHeadSha,
+    receipt: receipt ?? scenario.verifiedEvents.at(-1).receipt,
+    mergeAuthorization: mergeAuthorization ?? scenario.mergeAuthorization,
+  };
+  return syntheticStateFromProjection({
+    ...initialSyntheticProjection(closedPolicy),
+    state: 'VERIFIED',
+    legalState: approvalVerifiedLegalState({
+      decisionAdr: closedPolicy.decisionId,
+      actorPolicy: closedPolicy.actorPolicy,
+    }),
+    evidenceTrustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
+    evidenceSlots: {
+      product: 'VERIFIED',
+      privacy: 'VERIFIED',
+      codeowner: 'VERIFIED',
+      qa: 'VERIFIED',
+      security: 'VERIFIED',
+      machine: 'VERIFIED',
+    },
+    receipt: receiptEvent.receipt,
+    mergeAuthorization: receiptEvent.mergeAuthorization,
+    blockingCodes: ['APPROVAL_ACCEPTANCE_REVALIDATION_REQUIRED'],
+  }, [
+    ...scenario.verifiedEvents.slice(0, -1),
+    receiptEvent,
+  ], closedPolicy);
+};
+
+export const buildRound4AcceptedState = () => {
+  const { evidence, mergeAuthorization, policy } = buildRound4Scenario();
+  const verified = buildSyntheticVerifiedApprovalStateFixture({
+    mergeAuthorization,
+    policySnapshot: policy,
+  });
+  const acceptanceEvent = {
+    type: 'ACCEPTANCE_REVALIDATED',
+    evidence,
+    evidenceSha256: digest(evidence),
+    observedAt: evidence.readAt,
+    checkedAt: NOW.toISOString(),
+  };
+  const accepted = syntheticStateFromProjection(
+    {
+      ...verified,
+      state: 'ACCEPTED',
+      blockingCodes: [],
+      acceptanceCheckedAt: NOW.toISOString(),
+    },
+    [...verified.eventHistory, acceptanceEvent],
+    policy,
+  );
+  return { accepted, evidence, policy, synthetic: true, verified };
 };
 
 export const buildSyntheticMergeReconciliationKernelInput = ({
@@ -532,7 +592,3 @@ export const revocationEvent = (overrides = {}) => {
     ...overrides,
   };
 };
-
-export const appendRevocation = (state, policy, event, now = REVOCATION_NOW) => (
-  append(state, event, policy, now)
-);

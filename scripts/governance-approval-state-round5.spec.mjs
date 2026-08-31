@@ -6,10 +6,12 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import * as approvalState from './governance-approval-state.mjs';
+import { deepFreeze } from './governance-approval-readback-common.mjs';
+import { planApprovalStateTransition } from './governance-approval-state-kernel.mjs';
+import { buildStoredReceiptRevocationEvent } from './governance-approval-state-revocation.mjs';
 import {
   NOW,
   REVOCATION_NOW,
-  appendRevocation,
   approvalPolicy,
   buildRound4AcceptedState,
   buildStateFromEvents,
@@ -19,6 +21,30 @@ import {
 } from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
 
 const clone = (value) => structuredClone(value);
+const projectStateForKernel = ({
+  eventHistory: _eventHistory,
+  policySnapshot: _policySnapshot,
+  ...state
+}) => state;
+const appendRevocation = (state, policy, event, now = REVOCATION_NOW) => {
+  const storedEvent = buildStoredReceiptRevocationEvent(
+    event,
+    state,
+    policy,
+    now.toISOString(),
+  );
+  const plan = planApprovalStateTransition({
+    currentProjection: projectStateForKernel(state),
+    event: storedEvent,
+    policySnapshot: policy,
+    observedAt: now.toISOString(),
+  });
+  return deepFreeze({
+    ...plan.nextProjection,
+    eventHistory: [...state.eventHistory, storedEvent],
+    policySnapshot: clone(policy),
+  });
+};
 
 const append = (state, event, policy, now, receiptCapability) => (
   approvalState.appendApprovalDecisionEvent(
@@ -87,11 +113,24 @@ test('round5 pure state plan is deterministic and cannot mint a privately admitt
 
 test('round5 admitted history is bound to one closed policy snapshot and mismatch cannot alter status', () => {
   const { accepted, policy } = buildRound4AcceptedState();
+  const admitted = buildStateFromEvents([
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    {
+      type: 'PROPOSAL_RENDERED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:10:00.000Z',
+    },
+    {
+      type: 'PRODUCT_REVIEW_VERIFIED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:20:00.000Z',
+    },
+  ], policy, NOW);
   const replacement = clone(policy);
   replacement.repository.fullName = 'attacker/false-repository';
 
   const reduced = approvalState.reduceApprovalDecisionState(
-    accepted.eventHistory,
+    admitted.eventHistory,
     replacement,
     NOW,
   );
@@ -107,8 +146,8 @@ test('round5 admitted history is bound to one closed policy snapshot and mismatc
   );
 
   const appendMismatch = append(
-    accepted,
-    revocationEvent(),
+    admitted,
+    { type: 'HEAD_CHANGED', headSha: 'c'.repeat(40), observedAt: REVOCATION_NOW.toISOString() },
     replacement,
     REVOCATION_NOW,
   );
@@ -119,21 +158,32 @@ test('round5 admitted history is bound to one closed policy snapshot and mismatc
 
   const revoked = appendRevocation(accepted, clone(policy), revocationEvent());
   assert.equal(revoked.state, 'REVOKED');
-  assert.equal(
-    approvalState.reduceApprovalDecisionState(revoked.eventHistory, clone(policy), REVOCATION_NOW).state,
-    'REVOKED',
+  assert.deepEqual(
+    holdSummary(approvalState.reduceApprovalDecisionState(
+      revoked.eventHistory,
+      clone(policy),
+      REVOCATION_NOW,
+    )),
+    expectedHold('APPROVAL_STATE_HISTORY_NOT_ADMITTED'),
   );
 });
 
 test('round5 successful append consumes exactly one parent and cannot mint contradictory branches', () => {
-  const { evidence, policy, verified } = buildRound4AcceptedState();
-  const parent = buildStateFromEvents(verified.eventHistory, policy, NOW);
-  const accepted = append(parent, {
-    type: 'ACCEPTANCE_REVALIDATED',
-    evidence: clone(evidence),
-    observedAt: evidence.readAt,
-  }, policy, NOW);
-  assert.equal(accepted.state, 'ACCEPTED');
+  const policy = approvalPolicy();
+  const parent = buildStateFromEvents([
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    {
+      type: 'PROPOSAL_RENDERED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:10:00.000Z',
+    },
+  ], policy, NOW);
+  const privacyReview = append(parent, {
+    type: 'PRODUCT_REVIEW_VERIFIED',
+    headSha: policy.currentHeadSha,
+    observedAt: '2026-08-30T07:20:00.000Z',
+  }, policy, new Date('2026-08-30T07:20:00.000Z'));
+  assert.equal(privacyReview.state, 'AWAITING_PRIVACY_REVIEW');
 
   const rejectedBranch = append(parent, {
     type: 'REVIEW_REJECTED',
@@ -148,8 +198,8 @@ test('round5 successful append consumes exactly one parent and cannot mint contr
     expectedHold('APPROVAL_STATE_HISTORY_CONSUMED'),
   );
   assert.equal(
-    approvalState.reduceApprovalDecisionState(accepted.eventHistory, policy, NOW).state,
-    'ACCEPTED',
+    approvalState.reduceApprovalDecisionState(privacyReview.eventHistory, policy, NOW).state,
+    'AWAITING_PRIVACY_REVIEW',
   );
 });
 
@@ -187,20 +237,20 @@ test('round5 rejected and revoked revisions stay terminal until a replacement po
   };
 
   assert.throws(
-    () => append(revoked, reassignment, policy, new Date(reassignment.observedAt)),
+    () => planApprovalStateTransition({
+      currentProjection: projectStateForKernel(revoked),
+      event: reassignment,
+      policySnapshot: policy,
+      observedAt: reassignment.observedAt,
+    }),
     /APPROVAL_STATE_TRANSITION_INVALID/,
   );
-  const replayed = approvalState.reduceApprovalDecisionState(
-    revoked.eventHistory,
-    policy,
-    new Date(reassignment.observedAt),
-  );
   assert.deepEqual({
-    state: replayed.state,
-    revocationStatus: replayed.revocationStatus,
-    receipt: replayed.receipt,
-    mergeAuthorization: replayed.mergeAuthorization,
-    evidenceTrustState: replayed.evidenceTrustState,
+    state: revoked.state,
+    revocationStatus: revoked.revocationStatus,
+    receipt: revoked.receipt,
+    mergeAuthorization: revoked.mergeAuthorization,
+    evidenceTrustState: revoked.evidenceTrustState,
   }, {
     state: 'REVOKED',
     revocationStatus: 'REVOKED',

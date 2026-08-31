@@ -99,6 +99,8 @@ const HISTORY_ACTIVE = 'ACTIVE';
 const HISTORY_APPENDING = 'APPENDING';
 const HISTORY_CONSUMED = 'CONSUMED';
 const approvalHistoryBindings = new WeakMap();
+// Intentionally uninhabited: this module exposes no mint or registration path.
+const trustedReceiptVerificationCapabilities = new WeakSet();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
 const prepareApprovalHistory = (events) => {
@@ -447,7 +449,13 @@ export const initializeApprovalDecisionState = (policy, now) => {
   return reduceBoundApprovalDecisionState(history, binding, now);
 };
 
-export const appendApprovalDecisionEvent = (state, append, policy, now) => {
+export const appendApprovalDecisionEvent = (
+  state,
+  append,
+  policy,
+  now,
+  receiptVerificationCapability,
+) => {
   const appendedAt = nowIso(now);
   if (!isPlainObject(state)
     || !Array.isArray(state.eventHistory)
@@ -477,6 +485,10 @@ export const appendApprovalDecisionEvent = (state, append, policy, now) => {
     const inspection = inspectApprovalValueGraph(append.event);
     if (approvalGraphUnsafe(inspection)) transitionError('APPROVAL_STATE_APPEND_INVALID');
     const currentState = reduceBoundApprovalDecisionState(state.eventHistory, binding, now);
+    if (append.event.type === 'RECEIPT_VERIFIED'
+      && !trustedReceiptVerificationCapabilities.has(receiptVerificationCapability)) {
+      transitionError('APPROVAL_INDEPENDENCE_NOT_PROVEN');
+    }
     let event;
     if (append.event.type === 'ACCEPTANCE_REVALIDATED') {
       if (!hasExactKeys(append.event, ACCEPTANCE_LIVE_KEYS)

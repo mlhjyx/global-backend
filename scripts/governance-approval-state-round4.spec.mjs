@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import * as approvalState from './governance-approval-state.mjs';
+import { deepFreeze } from './governance-approval-readback-common.mjs';
 import { renderApprovalStatusReadModel } from './governance-approval-state.mjs';
+import { planApprovalStateTransition } from './governance-approval-state-kernel.mjs';
 import {
   buildStoredReceiptRevocationEvent,
   storedReceiptRevocationIssue,
@@ -10,14 +12,41 @@ import {
 import {
   NOW,
   REVOCATION_NOW,
-  appendRevocation,
+  approvalPolicy,
   buildRound4AcceptedState,
   buildSyntheticApprovalStateKernelInput,
   digest,
   revocationEvent,
 } from './fixtures/approval-readback/merge-authorization/task4-round4-state-fixture.mjs';
+import {
+  buildSyntheticVerifiedApprovalStateForTests,
+} from './fixtures/approval-readback/synthetic-verified-state.mjs';
 
 const clone = (value) => structuredClone(value);
+const projectStateForKernel = ({
+  eventHistory: _eventHistory,
+  policySnapshot: _policySnapshot,
+  ...state
+}) => state;
+const appendRevocation = (state, policy, event, now = REVOCATION_NOW) => {
+  const storedEvent = buildStoredReceiptRevocationEvent(
+    event,
+    state,
+    policy,
+    now.toISOString(),
+  );
+  const plan = planApprovalStateTransition({
+    currentProjection: projectStateForKernel(state),
+    event: storedEvent,
+    policySnapshot: policy,
+    observedAt: now.toISOString(),
+  });
+  return deepFreeze({
+    ...plan.nextProjection,
+    eventHistory: [...state.eventHistory, storedEvent],
+    policySnapshot: clone(policy),
+  });
+};
 const historyOutcome = (events, policy, now = NOW) => {
   try {
     const state = approvalState.reduceApprovalDecisionState(events, policy, now);
@@ -33,7 +62,6 @@ const historyOutcome = (events, policy, now = NOW) => {
 };
 
 test('pure state kernel plans supersession and revocation projections without private history', async () => {
-  const { planApprovalStateTransition } = await import('./governance-approval-state-kernel.mjs');
   let currentProjection = null;
   for (const transition of [
     'AUTHORITIES_ASSIGNED',
@@ -82,7 +110,7 @@ test('pure state kernel plans supersession and revocation projections without pr
   assert.equal(Object.hasOwn(revocation.nextProjection, 'eventHistory'), false);
 });
 
-test('round4 plain, cloned, deserialized, and caller-built histories remain external HOLD', () => {
+test('round4 synthetic, cloned, deserialized, and caller-built histories remain external HOLD', () => {
   const { accepted, policy } = buildRound4AcceptedState();
   const expectedHold = {
     state: 'OWNER_ASSIGNMENT_REQUIRED',
@@ -92,19 +120,14 @@ test('round4 plain, cloned, deserialized, and caller-built histories remain exte
   };
   const callerBuilt = accepted.eventHistory.map((event) => ({ ...clone(event) }));
   const outcomes = {
-    admitted: historyOutcome(accepted.eventHistory, policy),
+    synthetic: historyOutcome(accepted.eventHistory, policy),
     plain: historyOutcome([...accepted.eventHistory], policy),
     cloned: historyOutcome(clone(accepted.eventHistory), policy),
     deserialized: historyOutcome(JSON.parse(JSON.stringify(accepted.eventHistory)), policy),
     callerBuilt: historyOutcome(callerBuilt, policy),
   };
   assert.deepEqual(outcomes, {
-    admitted: {
-      state: 'ACCEPTED',
-      evidenceTrustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
-      blockingCodes: [],
-      eventCount: 5,
-    },
+    synthetic: expectedHold,
     plain: expectedHold,
     cloned: expectedHold,
     deserialized: expectedHold,
@@ -119,39 +142,53 @@ test('round4 plain, cloned, deserialized, and caller-built histories remain exte
   ), new RegExp(rawSentinel));
 });
 
-test('round4 initializer and append return new frozen admitted histories without projecting capability', () => {
+test('round4 public source histories stay admitted while synthetic verified state has no provenance', () => {
   assert.equal(typeof approvalState.initializeApprovalDecisionState, 'function');
-  const { accepted, policy, verified } = buildRound4AcceptedState();
-  assert.notEqual(accepted.eventHistory, verified.eventHistory);
-  assert.equal(Object.isFrozen(accepted.eventHistory), true);
-  assert.equal(accepted.eventHistory.every(Object.isFrozen), true);
-  assert.deepEqual(historyOutcome(verified.eventHistory, policy), {
+  const policy = approvalPolicy();
+  const root = approvalState.initializeApprovalDecisionState(
+    policy,
+    new Date('2026-08-30T07:05:00.000Z'),
+  );
+  const proposed = approvalState.appendApprovalDecisionEvent(root, {
+    schemaVersion: 'approval-event-append/v1',
+    expectedHistorySha256: digest(root.eventHistory),
+    appendedAt: '2026-08-30T07:05:00.000Z',
+    event: { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+  }, policy, new Date('2026-08-30T07:05:00.000Z'));
+  assert.equal(proposed.state, 'PROPOSED');
+  assert.equal(Object.isFrozen(proposed.eventHistory), true);
+  assert.equal(proposed.eventHistory.every(Object.isFrozen), true);
+  assert.deepEqual(historyOutcome(root.eventHistory, policy), {
     state: 'OWNER_ASSIGNMENT_REQUIRED',
     evidenceTrustState: 'EXTERNAL_UNVERIFIED',
     blockingCodes: ['APPROVAL_STATE_HISTORY_CONSUMED'],
     eventCount: 0,
   });
 
-  const projected = renderApprovalStatusReadModel(accepted);
+  const synthetic = buildSyntheticVerifiedApprovalStateForTests({ policySnapshot: policy });
+  assert.equal(synthetic.synthetic, true);
+  assert.deepEqual(Object.keys(synthetic).sort(), ['state', 'synthetic']);
+  const projected = renderApprovalStatusReadModel(synthetic.state);
   assert.equal(Object.hasOwn(projected, 'eventHistory'), false);
   assert.equal(Object.hasOwn(projected, 'historyBrand'), false);
   assert.equal(Object.hasOwn(projected, 'historyCapability'), false);
   assert.doesNotMatch(JSON.stringify(projected), /history.?brand|history.?capability/i);
 
-  const clonedState = { ...accepted, eventHistory: clone(accepted.eventHistory) };
-  assert.throws(
-    () => appendRevocation(clonedState, policy, revocationEvent()),
-    /APPROVAL_STATE_APPEND_INVALID/,
-  );
-  assert.throws(
-    () => approvalState.appendApprovalDecisionEvent(accepted, {
-      schemaVersion: 'approval-event-append/v1',
-      expectedHistorySha256: digest([]),
-      appendedAt: REVOCATION_NOW.toISOString(),
-      event: revocationEvent(),
-    }, policy, REVOCATION_NOW),
-    /APPROVAL_STATE_APPEND_INVALID/,
-  );
+  for (const state of [
+    synthetic.state,
+    clone(synthetic.state),
+    JSON.parse(JSON.stringify(synthetic.state)),
+  ]) {
+    assert.throws(
+      () => approvalState.appendApprovalDecisionEvent(state, {
+        schemaVersion: 'approval-event-append/v1',
+        expectedHistorySha256: digest(state.eventHistory),
+        appendedAt: REVOCATION_NOW.toISOString(),
+        event: { type: 'HEAD_CHANGED', headSha: 'c'.repeat(40), observedAt: REVOCATION_NOW.toISOString() },
+      }, policy, REVOCATION_NOW),
+      /APPROVAL_STATE_APPEND_INVALID/,
+    );
+  }
 });
 
 test('round4 revocation append validates Task1 receipt/revocation and Task3 current authority', () => {
@@ -180,7 +217,13 @@ test('round4 revocation append validates Task1 receipt/revocation and Task3 curr
     policy,
     new Date('2026-08-31T12:00:00.000Z'),
   );
-  assert.equal(replayedLater.state, 'REVOKED');
+  assert.deepEqual(historyOutcome(revoked.eventHistory, policy), {
+    state: 'OWNER_ASSIGNMENT_REQUIRED',
+    evidenceTrustState: 'EXTERNAL_UNVERIFIED',
+    blockingCodes: ['APPROVAL_STATE_HISTORY_NOT_ADMITTED'],
+    eventCount: 0,
+  });
+  assert.equal(replayedLater.state, 'OWNER_ASSIGNMENT_REQUIRED');
 });
 
 test('round4 accepted policy rejects QA, Security, and merge-authorizer revocation authority', () => {

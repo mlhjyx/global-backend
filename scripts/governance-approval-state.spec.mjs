@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as approvalStateModule from './governance-approval-state.mjs';
+import { deepFreeze } from './governance-approval-readback-common.mjs';
 import {
   executeReservedMerge,
   reconcileMergeAuthorizationReservation,
@@ -10,11 +11,15 @@ import {
   reserveMergeAuthorizationNonce,
   revalidateApprovalAtAcceptance,
 } from './governance-approval-state.mjs';
+import { planApprovalStateTransition } from './governance-approval-state-kernel.mjs';
+import { buildStoredReceiptRevocationEvent } from './governance-approval-state-revocation.mjs';
 import { runApprovalStatusCli } from './governance-approval-status.mjs';
+import {
+  buildSyntheticVerifiedApprovalStateForTests,
+} from './fixtures/approval-readback/synthetic-verified-state.mjs';
 import { buildTask3AcceptanceEvidence } from './fixtures/approval-readback/merge-authorization/task3-acceptance-evidence.mjs';
 import {
   REVOCATION_NOW,
-  appendRevocation,
   buildStateFromEvents,
   buildSyntheticApprovalStateKernelInput,
   revocationEvent,
@@ -24,6 +29,30 @@ const RESERVATION_NOW = new Date('2026-08-30T08:10:00.000Z');
 const DISPATCH_NOW = new Date('2026-08-30T08:11:00.000Z');
 const ROOT = new URL('./fixtures/approval-readback/merge-authorization/', import.meta.url);
 const clone = (value) => structuredClone(value);
+const projectStateForKernel = ({
+  eventHistory: _eventHistory,
+  policySnapshot: _policySnapshot,
+  ...state
+}) => state;
+const appendRevocation = (state, policy, event, now = REVOCATION_NOW) => {
+  const storedEvent = buildStoredReceiptRevocationEvent(
+    event,
+    state,
+    policy,
+    now.toISOString(),
+  );
+  const plan = planApprovalStateTransition({
+    currentProjection: projectStateForKernel(state),
+    event: storedEvent,
+    policySnapshot: policy,
+    observedAt: now.toISOString(),
+  });
+  return deepFreeze({
+    ...plan.nextProjection,
+    eventHistory: [...state.eventHistory, storedEvent],
+    policySnapshot: clone(policy),
+  });
+};
 const readJson = async (name) => JSON.parse(await readFile(new URL(name, ROOT), 'utf8'));
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value) => {
@@ -147,16 +176,11 @@ const receiptSummary = () => ({
   trustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
   validUntil: '2026-08-30T10:00:00.000Z',
 });
-const verifiedState = (policy, merge) => buildStateFromEvents([
-  { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
-  { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
-  { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
-  {
-    type: 'RECEIPT_VERIFIED', headSha: policy.currentHeadSha,
-    receipt: receiptSummary(), mergeAuthorization: merge,
-    observedAt: '2026-08-30T08:25:00.000Z',
-  },
-], policy, NOW);
+const verifiedState = (policy, merge) => buildSyntheticVerifiedApprovalStateForTests({
+  mergeAuthorization: merge,
+  policySnapshot: policy,
+  receipt: receiptSummary(),
+}).state;
 const consumptionFor = (grant, grantRawSha, readback, reservedRevision) => ({
   schema_version: 'program-c-merge-authorization-consumption/v1',
   consumption_id: 'program-c-consumption-task4-0001',
@@ -248,12 +272,30 @@ const configureDualRoleAcceptance = (evidence, policy, { bindState = true } = {}
   return exception;
 };
 const appendAcceptance = (state, evidence, policy, now) => {
-  return approvalStateModule.appendApprovalDecisionEvent(state, {
-    schemaVersion: 'approval-event-append/v1',
-    expectedHistorySha256: digest(state.eventHistory),
-    appendedAt: now.toISOString(),
-    event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-  }, policy, now);
+  const validation = revalidateApprovalAtAcceptance(state, evidence, now);
+  if (!validation.valid) {
+    throw new Error(
+      validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE',
+    );
+  }
+  const event = {
+    type: 'ACCEPTANCE_REVALIDATED',
+    evidence: clone(evidence),
+    evidenceSha256: validation.evidenceSha256,
+    observedAt: evidence.readAt,
+    checkedAt: validation.checkedAt,
+  };
+  const plan = planApprovalStateTransition({
+    currentProjection: projectStateForKernel(state),
+    event,
+    policySnapshot: policy,
+    observedAt: now.toISOString(),
+  });
+  return deepFreeze({
+    ...plan.nextProjection,
+    eventHistory: [...state.eventHistory, event],
+    policySnapshot: clone(policy),
+  });
 };
 const appendStateEvent = (state, event, policy, now, receiptCapability) => (
   approvalStateModule.appendApprovalDecisionEvent(state, {
@@ -413,8 +455,7 @@ test('caller-owned receipt capability cannot promote public approval state', asy
   );
 });
 
-test('pure state kernel plans VERIFIED and ACCEPTED projections without admitting history', async () => {
-  const { planApprovalStateTransition } = await import('./governance-approval-state-kernel.mjs');
+test('pure state kernel plans VERIFIED and ACCEPTED projections without admitting history', () => {
   const transitions = [
     'AUTHORITIES_ASSIGNED',
     'PROPOSAL_RENDERED',
@@ -448,7 +489,95 @@ test('pure state kernel plans VERIFIED and ACCEPTED projections without admittin
   assert.equal(Object.isFrozen(finalPlan.nextProjection), true);
 });
 
-test('reducer exhaustively moves through every normative state without mutating prior receipt facts', async () => {
+test('pure state kernel rejects reserved receipt summaries, invalid clocks, and unknown events', () => {
+  let privacyProjection = null;
+  for (const transition of [
+    'AUTHORITIES_ASSIGNED',
+    'PROPOSAL_RENDERED',
+    'PRODUCT_REVIEW_VERIFIED',
+  ]) {
+    privacyProjection = planApprovalStateTransition(
+      buildSyntheticApprovalStateKernelInput({
+        currentProjection: privacyProjection,
+        transition,
+      }),
+    ).nextProjection;
+  }
+
+  const reservedReceipt = clone(buildSyntheticApprovalStateKernelInput({
+    currentProjection: privacyProjection,
+    transition: 'RECEIPT_VERIFIED',
+  }));
+  reservedReceipt.event.mergeAuthorization.ledgerState = 'RESERVED';
+  reservedReceipt.event.mergeAuthorization.consumptionId = null;
+  reservedReceipt.event.mergeAuthorization.consumptionRawSha256 = null;
+  assert.throws(
+    () => planApprovalStateTransition(reservedReceipt),
+    /APPROVAL_RECEIPT_REQUIRED/,
+  );
+
+  const invalidClock = clone(buildSyntheticApprovalStateKernelInput());
+  invalidClock.observedAt = 'not-a-canonical-instant';
+  assert.throws(
+    () => planApprovalStateTransition(invalidClock),
+    /APPROVAL_STATE_EVENT_TIME_INVALID/,
+  );
+
+  const futureEvent = clone(buildSyntheticApprovalStateKernelInput());
+  futureEvent.event.observedAt = '2026-08-30T08:31:00.000Z';
+  assert.throws(
+    () => planApprovalStateTransition(futureEvent),
+    /APPROVAL_STATE_EVENT_TIME_INVALID/,
+  );
+
+  const unknownEvent = clone(buildSyntheticApprovalStateKernelInput());
+  unknownEvent.event = {
+    type: 'UNKNOWN_CALLER_EVENT',
+    observedAt: unknownEvent.observedAt,
+  };
+  assert.throws(
+    () => planApprovalStateTransition(unknownEvent),
+    /APPROVAL_STATE_EVENT_UNSUPPORTED/,
+  );
+});
+
+test('pure state kernel derives Legal projection from decision and actor policy', () => {
+  const basePolicy = clone(buildSyntheticApprovalStateKernelInput().policySnapshot);
+  const cases = [
+    ['ADR-027 distinct actors', basePolicy, 'PENDING'],
+    [
+      'ADR-027 dual role',
+      {
+        ...clone(basePolicy),
+        actorPolicy: 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER',
+        dualRoleExceptionSha256: `sha256:${'f'.repeat(64)}`,
+      },
+      'NO_BLOCKER_RECORDED',
+    ],
+    ['ADR-026', { ...clone(basePolicy), decisionId: 'ADR-026' }, 'NO_BLOCKER_RECORDED'],
+  ];
+
+  for (const [name, policySnapshot, expectedLegalState] of cases) {
+    let currentProjection = null;
+    for (const transition of [
+      'AUTHORITIES_ASSIGNED',
+      'PROPOSAL_RENDERED',
+      'PRODUCT_REVIEW_VERIFIED',
+      'RECEIPT_VERIFIED',
+    ]) {
+      currentProjection = planApprovalStateTransition(
+        buildSyntheticApprovalStateKernelInput({
+          currentProjection,
+          policySnapshot,
+          transition,
+        }),
+      ).nextProjection;
+    }
+    assert.equal(currentProjection.legalState, expectedLegalState, name);
+  }
+});
+
+test('public source states and pure kernel cover every normative state without mutating receipt facts', async () => {
   const { mergeAuthorization, policy } = await acceptanceEvidence();
   const owner = buildStateFromEvents([], policy, NOW);
   assert.equal(owner.state, 'OWNER_ASSIGNMENT_REQUIRED');
@@ -481,18 +610,14 @@ test('reducer exhaustively moves through every normative state without mutating 
   ], policy, NOW);
   assert.equal(rejected.state, 'REJECTED');
 
-  const successor = { ...receiptSummary(), receiptId: 'approval-receipt-task4-0002' };
-  const superseded = buildStateFromEvents([
-    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
-    { type: 'PROPOSAL_RENDERED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:10:00.000Z' },
-    { type: 'PRODUCT_REVIEW_VERIFIED', headSha: policy.currentHeadSha, observedAt: '2026-08-30T07:20:00.000Z' },
-    { type: 'RECEIPT_VERIFIED', headSha: policy.currentHeadSha, receipt: receiptSummary(), mergeAuthorization, observedAt: '2026-08-30T08:20:00.000Z' },
-    {
-      type: 'RECEIPT_SUPERSEDED', predecessorReceiptId: receiptSummary().receiptId, successor,
-      validation: { valid: false, issues: [{ stable_code: 'APPROVAL_INDEPENDENCE_NOT_PROVEN' }], trustEligible: false },
-      observedAt: '2026-08-30T08:21:00.000Z',
-    },
-  ], policy, NOW);
+  const superseded = planApprovalStateTransition(
+    buildSyntheticApprovalStateKernelInput({
+      currentProjection: projectStateForKernel(verified),
+      policySnapshot: policy,
+      transition: 'RECEIPT_SUPERSEDED',
+    }),
+  ).nextProjection;
+  const successor = superseded.receipt;
   assert.equal(superseded.receipt.receiptId, successor.receiptId);
   assert.equal(superseded.receiptHistory[0].receiptId, receiptSummary().receiptId);
   assert.equal(superseded.receiptHistory[0].lifecycleState, 'SUPERSEDED');
@@ -503,6 +628,20 @@ test('reducer exhaustively moves through every normative state without mutating 
 
   const revoked = appendRevocation(verified, policy, revocationEvent(), REVOCATION_NOW);
   assert.equal(revoked.state, 'REVOKED');
+
+  const driftedReceiptInput = clone(buildSyntheticApprovalStateKernelInput({
+    currentProjection: projectStateForKernel(privacy),
+    policySnapshot: policy,
+    transition: 'RECEIPT_VERIFIED',
+  }));
+  driftedReceiptInput.event.receipt.receiptRawSha256 = (
+    driftedReceiptInput.event.receipt.receiptRawSha256.slice(0, -1)
+    + 'g'
+  );
+  assert.throws(
+    () => planApprovalStateTransition(driftedReceiptInput),
+    /APPROVAL_RECEIPT_REQUIRED/,
+  );
 });
 
 test('fresh acceptance revalidation is the only route from VERIFIED to ACCEPTED', async () => {
@@ -731,7 +870,7 @@ test('round2 I3 current-main readback stays closed and semantically bound after 
   });
 });
 
-test('round2 I6 accepted canonical history replays revocation and rejects tampered persisted events', async () => {
+test('round2 I6 pure lifecycle projects revocation while synthetic histories remain unadmitted', async () => {
   const { evidence, mergeAuthorization, policy } = await acceptanceEvidence();
   const verified = verifiedState(policy, mergeAuthorization);
   const accepted = appendAcceptance(verified, evidence, policy, NOW);
@@ -768,18 +907,20 @@ test('round2 I6 accepted canonical history replays revocation and rejects tamper
   assert.equal(statusCode, 0, stderr.join(''));
   assert.deepEqual({
     acceptanceKeys: Object.keys(acceptanceEvent).sort(),
+    revokedState: revoked.state,
     replay: replay(revoked.eventHistory),
     variants,
     projectedDigest: JSON.parse(stdout.join('')).acceptanceEvidenceSha256,
   }, {
     acceptanceKeys: ['checkedAt', 'evidence', 'evidenceSha256', 'observedAt', 'type'],
-    replay: 'REVOKED',
+    revokedState: 'REVOKED',
+    replay: 'HOLD',
     variants: ['HOLD', 'HOLD', 'HOLD', 'HOLD', 'HOLD'],
     projectedDigest: acceptanceEvent.evidenceSha256,
   });
 });
 
-test('round3 historical acceptance replays after expiry while future, nonmonotonic, duplicate, and backdated append fail', async () => {
+test('round3 pure historical acceptance stays closed while synthetic public histories remain unadmitted', async () => {
   const { evidence, mergeAuthorization, policy } = await acceptanceEvidence();
   const verified = verifiedState(policy, mergeAuthorization);
   const accepted = appendAcceptance(verified, evidence, policy, NOW);
@@ -803,7 +944,7 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
     future = `THREW:${error.message}`;
   }
   const revokedState = appendRevocation(accepted, policy, revocationEvent(), REVOCATION_NOW);
-  const revoked = outcome(revokedState.eventHistory);
+  const revoked = revokedState.state;
   const nonmonotonic = clone(accepted.eventHistory);
   nonmonotonic[1].observedAt = '2026-08-30T06:00:00.000Z';
   const duplicate = [...accepted.eventHistory, clone(accepted.eventHistory.at(-1))];
@@ -814,12 +955,7 @@ test('round3 historical acceptance replays after expiry while future, nonmonoton
   let backdatedAppend = 'UNSAFE_ACCEPT';
   const backdatedParent = verifiedState(policy, mergeAuthorization);
   try {
-    approvalStateModule.appendApprovalDecisionEvent(backdatedParent, {
-      schemaVersion: 'approval-event-append/v1',
-      expectedHistorySha256: digest(backdatedParent.eventHistory),
-      appendedAt: later.toISOString(),
-      event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
-    }, policy, later);
+    appendAcceptance(backdatedParent, evidence, policy, later);
   } catch (error) {
     backdatedAppend = `THREW:${error.message}`;
   }
