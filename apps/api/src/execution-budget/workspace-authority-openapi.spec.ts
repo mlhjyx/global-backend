@@ -92,7 +92,7 @@ describe('workspace execution authority OpenAPI', () => {
     const operation =
       document.paths['/api/v1/canonical-companies/{id}/discover-contacts']
         ?.post;
-    expect(operation?.requestBody).toMatchObject({ required: true });
+    expect(operation?.requestBody).toMatchObject({ required: false });
     expect(
       document.components?.schemas?.DiscoverContactsDto?.required,
     ).toContain('lawfulBasis');

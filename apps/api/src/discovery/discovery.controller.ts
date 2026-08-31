@@ -372,7 +372,12 @@ export class DiscoveryController {
       'CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED',
     ],
   })
-  @ApiBody({ type: DiscoverContactsDto, required: true })
+  @ApiBody({
+    type: DiscoverContactsDto,
+    required: false,
+    description:
+      'Required for execution. An absent body is rejected before authority consumption with CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED.',
+  })
   @ApiEnvelope(
     { type: 'object', additionalProperties: true, description: '联系人发现结果（新建联系人/联系点计数）',
     },
@@ -381,7 +386,7 @@ export class DiscoveryController {
   async discoverContacts(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: DiscoverContactsDto,
+    @Body() dto?: DiscoverContactsDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
@@ -390,11 +395,13 @@ export class DiscoveryController {
           ctx,
           id,
           {
-            lawfulBasis: {
-              basis: dto.lawfulBasis,
-              ref: dto.lawfulBasisRef,
-              note: dto.lawfulBasisNote,
-            },
+            lawfulBasis: dto
+              ? {
+                  basis: dto.lawfulBasis,
+                  ref: dto.lawfulBasisRef,
+                  note: dto.lawfulBasisNote,
+                }
+              : undefined,
           },
           compactJws,
         ),

@@ -3066,11 +3066,7 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string",
-                          "enum": [
-                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
-                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
-                          ]
+                          "type": "string"
                         },
                         "message": {
                           "type": "string"
@@ -3920,11 +3916,7 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string",
-                          "enum": [
-                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
-                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
-                          ]
+                          "type": "string"
                         },
                         "message": {
                           "type": "string"
@@ -4581,11 +4573,7 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string",
-                          "enum": [
-                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
-                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
-                          ]
+                          "type": "string"
                         },
                         "message": {
                           "type": "string"
@@ -4879,11 +4867,7 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string",
-                          "enum": [
-                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
-                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
-                          ]
+                          "type": "string"
                         },
                         "message": {
                           "type": "string"
@@ -5223,7 +5207,8 @@
           }
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
+          "description": "Required for execution. An absent body is rejected before authority consumption with CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED.",
           "content": {
             "application/json": {
               "schema": {
@@ -5511,11 +5496,7 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string",
-                          "enum": [
-                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
-                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
-                          ]
+                          "type": "string"
                         },
                         "message": {
                           "type": "string"
@@ -5716,11 +5697,7 @@
                       ],
                       "properties": {
                         "code": {
-                          "type": "string",
-                          "enum": [
-                            "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
-                            "EXECUTION_BUDGET_AUTHORITY_REVOKED"
-                          ]
+                          "type": "string"
                         },
                         "message": {
                           "type": "string"
