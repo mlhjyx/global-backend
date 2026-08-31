@@ -7,6 +7,7 @@ import { renderApprovalReceiptCore, sha256Prefixed } from './governance-approval
 const catalogSchema = (filename) => APPROVAL_SCHEMA_CATALOG[filename].schema;
 const schemas = Object.freeze({
   authorities: catalogSchema('approval-authorities.schema.json'),
+  proposalManifest: catalogSchema('approval-proposal-manifest.schema.json'),
   receipt: catalogSchema('trusted-approval-readback.schema.json'),
   evidenceManifest: catalogSchema('trusted-approval-evidence-manifest.schema.json'),
   revocation: catalogSchema('trusted-approval-revocation.schema.json'),
@@ -28,6 +29,7 @@ ajv.addFormat('iso-instant', {
 
 const compiled = Object.freeze({
   authorities: ajv.compile(schemas.authorities),
+  proposalManifest: ajv.compile(schemas.proposalManifest),
   receipt: ajv.compile(schemas.receipt),
   evidenceManifest: ajv.compile(schemas.evidenceManifest),
   revocation: ajv.compile(schemas.revocation),
@@ -267,6 +269,7 @@ const contextIssues = (value) => {
 };
 
 export const validateApprovalAuthorities = (value) => validate(compiled.authorities, value, duplicateActorIssues);
+export const validateApprovalProposalManifest = (value) => validate(compiled.proposalManifest, value);
 export const validateApprovalReceipt = (value) => validate(compiled.receipt, value, receiptIssues);
 export const validateApprovalEvidenceManifest = (value) => validate(compiled.evidenceManifest, value, evidenceManifestIssues);
 export const validateApprovalRevocation = (value) => validate(compiled.revocation, value);

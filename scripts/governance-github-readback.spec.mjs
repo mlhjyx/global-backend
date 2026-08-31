@@ -6,6 +6,9 @@ import {
   createGitHubReadbackClient,
 } from './governance-github-readback.mjs';
 import {
+  snapshotGitHubReadbackInputs,
+} from './governance-github-readback-common.mjs';
+import {
   API_ORIGIN,
   API_VERSION,
   AUTHORITY_BLOB_SHA,
@@ -177,6 +180,33 @@ test('requires the exact API version and injected fetch', () => {
     () => createGitHubReadbackClient({ fetch: async () => {}, token: '', apiVersion: API_VERSION }),
     { message: 'APPROVAL_GITHUB_CLIENT_INVALID' },
   );
+});
+
+test('snapshots and deep-freezes the closed trusted proposal renderer policy before reads', () => {
+  const sourcePolicy = policy();
+  const snapshot = snapshotGitHubReadbackInputs(request(), limits(), sourcePolicy);
+
+  assert.deepEqual(snapshot.policy.proposalRenderer, {
+    schemaVersion: 'approval-sidecar-renderer/v1',
+    sourceSha256: `sha256:${'c'.repeat(64)}`,
+  });
+  assert.ok(Object.isFrozen(snapshot.policy.proposalRenderer));
+  sourcePolicy.proposalRenderer.sourceSha256 = `sha256:${'d'.repeat(64)}`;
+  assert.equal(snapshot.policy.proposalRenderer.sourceSha256, `sha256:${'c'.repeat(64)}`);
+
+  for (const mutate of [
+    (value) => { delete value.proposalRenderer; },
+    (value) => { delete value.proposalRenderer.schemaVersion; },
+    (value) => { value.proposalRenderer.extra = true; },
+    (value) => { value.proposalRenderer.sourceSha256 = `sha256:${'C'.repeat(64)}`; },
+  ]) {
+    const unsafe = policy();
+    mutate(unsafe);
+    assert.throws(
+      () => snapshotGitHubReadbackInputs(request(), limits(), unsafe),
+      { message: 'APPROVAL_GITHUB_POLICY_INVALID' },
+    );
+  }
 });
 
 test('rejects a non-allowlisted proposal path before the first request', async () => {

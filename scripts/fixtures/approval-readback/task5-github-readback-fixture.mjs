@@ -305,6 +305,10 @@ export const policy = () => ({
   allowedWorkflowPaths: [WORKFLOW_PATH],
   allowedReusableSignerWorkflowIds: [61002],
   allowedReusableSignerWorkflowPaths: [SIGNER_PATH],
+  proposalRenderer: {
+    schemaVersion: 'approval-sidecar-renderer/v1',
+    sourceSha256: `sha256:${'c'.repeat(64)}`,
+  },
   requiredRuleset: {
     doNotEnforceOnCreate: false,
     pullRequest: {

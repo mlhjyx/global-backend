@@ -33,8 +33,9 @@ const LIMIT_KEYS = Object.freeze([
 const POLICY_KEYS = Object.freeze([
   'repositoryId', 'allowedRepoPaths', 'allowedCheckContexts', 'allowedActionsAppIds',
   'allowedWorkflowIds', 'allowedWorkflowPaths', 'allowedReusableSignerWorkflowIds',
-  'allowedReusableSignerWorkflowPaths', 'requiredRuleset',
+  'allowedReusableSignerWorkflowPaths', 'requiredRuleset', 'proposalRenderer',
 ]);
+const PROPOSAL_RENDERER_KEYS = Object.freeze(['schemaVersion', 'sourceSha256']);
 const REQUIRED_RULESET_KEYS = Object.freeze([
   'doNotEnforceOnCreate', 'pullRequest', 'deletionProtection',
   'nonFastForwardProtection',
@@ -263,6 +264,11 @@ const validIdList = (values, maximum, allowEmpty = false) => (
   && values.every(isSafePositiveInteger)
   && arrayIsUnique(values)
 );
+const validProposalRenderer = (value) => (
+  hasExactKeys(value, PROPOSAL_RENDERER_KEYS)
+  && value.schemaVersion === 'approval-sidecar-renderer/v1'
+  && isDigest(value.sourceSha256)
+);
 
 const validRequiredRuleset = (value) => (
   hasExactKeys(value, REQUIRED_RULESET_KEYS)
@@ -301,6 +307,7 @@ export const validatePolicy = (policy) => {
       && validStringList(policy.allowedWorkflowPaths, isWorkflowPath, 16)
       && validIdList(policy.allowedReusableSignerWorkflowIds, 16, true)
       && validStringList(policy.allowedReusableSignerWorkflowPaths, isWorkflowPath, 16, true)
+      && validProposalRenderer(policy.proposalRenderer)
       && policy.allowedCheckContexts.length === policy.allowedActionsAppIds.length
       && policy.allowedWorkflowIds.length === policy.allowedWorkflowPaths.length
       && policy.allowedCheckContexts.length === policy.allowedWorkflowIds.length
@@ -399,6 +406,11 @@ const copyPolicy = (value) => {
     REQUIRED_PULL_REQUEST_KEYS,
     'APPROVAL_GITHUB_POLICY_INVALID',
   );
+  const proposalRenderer = copyDataRecord(
+    source.proposalRenderer,
+    PROPOSAL_RENDERER_KEYS,
+    'APPROVAL_GITHUB_POLICY_INVALID',
+  );
   return {
     repositoryId: source.repositoryId,
     allowedRepoPaths: copyDenseArray(source.allowedRepoPaths, 32, 'APPROVAL_GITHUB_POLICY_INVALID'),
@@ -416,6 +428,10 @@ const copyPolicy = (value) => {
       16,
       'APPROVAL_GITHUB_POLICY_INVALID',
     ),
+    proposalRenderer: {
+      schemaVersion: proposalRenderer.schemaVersion,
+      sourceSha256: proposalRenderer.sourceSha256,
+    },
     requiredRuleset: {
       doNotEnforceOnCreate: requiredRuleset.doNotEnforceOnCreate,
       pullRequest: {

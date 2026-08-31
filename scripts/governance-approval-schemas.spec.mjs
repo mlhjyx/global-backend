@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   validateApprovalAuthorities,
+  validateApprovalProposalManifest,
   validateApprovalReceipt,
   validateApprovalEvidenceManifest,
   validateApprovalRevocation,
@@ -45,6 +46,7 @@ const canonicalize = (value) => {
 const canonicalDigest = (value) => `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`;
 const schemaCatalogFilenames = [
   'approval-authorities.schema.json',
+  'approval-proposal-manifest.schema.json',
   'trusted-approval-readback.schema.json',
   'trusted-approval-evidence-manifest.schema.json',
   'trusted-approval-revocation.schema.json',
@@ -70,6 +72,19 @@ const authorities = () => ({
   revision: 'approval-authorities/initial-unassigned',
   actor_policy: 'DISTINCT_ACTORS_REQUIRED',
   roles: ROLES.map((role) => ({ role, status: 'UNASSIGNED' })),
+});
+
+const proposalManifest = () => ({
+  schema_version: 'approval-proposal-manifest/v1',
+  decision_id: 'ADR-027',
+  policy_revision: 'program-c/policy-r2',
+  decision_raw_sha256: DIGEST,
+  decision_semantic_sha256: OTHER_DIGEST,
+  renderer_schema_version: 'approval-sidecar-renderer/v1',
+  renderer_source_sha256: DIGEST,
+  proposed_sidecar_path: 'docs/governance/decisions/adr-027-r2.md',
+  proposed_sidecar_byte_length: 123,
+  proposed_sidecar_raw_sha256: OTHER_DIGEST,
 });
 
 const assignedAuthorities = () => ({
@@ -279,6 +294,27 @@ test('Task 1 in-memory catalog exactly mirrors authoritative JSON schemas and ca
     const json = JSON.parse(await readFile(new URL(`../docs/governance/${filename}`, import.meta.url), 'utf8'));
     assert.deepEqual(APPROVAL_SCHEMA_CATALOG[filename].schema, json, filename);
     assert.equal(APPROVAL_SCHEMA_CATALOG[filename].canonical_sha256, canonicalDigest(json), filename);
+  }
+});
+
+test('approval proposal manifest closes every renderer and raw-byte binding', () => {
+  expectValid(validateApprovalProposalManifest, proposalManifest());
+
+  for (const mutate of [
+    (value) => { delete value.decision_id; },
+    (value) => { delete value.policy_revision; },
+    (value) => { delete value.decision_raw_sha256; },
+    (value) => { delete value.renderer_schema_version; },
+    (value) => { value.renderer_source_sha256 = `sha256:${'A'.repeat(64)}`; },
+    (value) => { value.proposed_sidecar_byte_length = 0; },
+    (value) => { value.proposed_sidecar_path = '/docs/governance/decisions/adr-027-r2.md'; },
+    (value) => { value.proposed_sidecar_path = '../decisions/adr-027-r2.md'; },
+    (value) => { value.proposed_sidecar_path = 'docs/governance/decisions/adr-027-r2.json'; },
+    (value) => { value.untrusted = true; },
+  ]) {
+    const value = proposalManifest();
+    mutate(value);
+    expectInvalid(validateApprovalProposalManifest, value);
   }
 });
 

@@ -800,6 +800,25 @@ proposed_sidecar_raw_sha256
 decision_semantic_sha256
 ```
 
+The closed `approval-proposal-manifest/v1` also requires `decision_id`,
+`policy_revision`, and `decision_raw_sha256`. Each of those three fields must
+equal the trusted request identity exactly; `policy_revision` remains limited
+to the canonical `program-c/policy-rN` form. The manifest is
+`additionalProperties:false`; all renderer identity and raw-byte bindings are
+mandatory. It rejects non-canonical SHA-256 digests, non-positive byte length,
+absolute or traversal paths, and non-Markdown sidecar paths.
+
+The trusted hosted-readback policy independently pins the renderer as the
+closed tuple below before its first remote read. A PR-head manifest declaration
+alone never verifies renderer identity.
+
+```js
+proposalRenderer: {
+  schemaVersion: 'approval-sidecar-renderer/v1',
+  sourceSha256: 'sha256:<64 lowercase hex>',
+}
+```
+
 The renderer has byte fixtures and one-byte mutation tests. The Acceptance PR
 copies those exact proposed-sidecar bytes into the final `docs/adr/` path; it
 does not re-render from prose, normalize whitespace, or change the approved
