@@ -354,6 +354,119 @@ test('round5 failed privileged append preserves parent for a safe append', () =>
   assert.deepEqual(privacy, parentSnapshot);
 });
 
+test('round5 monkeypatched WeakSet intrinsic cannot authorize a caller receipt', () => {
+  const policy = approvalPolicy();
+  const privacy = buildStateFromEvents([
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    {
+      type: 'PROPOSAL_RENDERED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:10:00.000Z',
+    },
+    {
+      type: 'PRODUCT_REVIEW_VERIFIED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:20:00.000Z',
+    },
+  ], policy, NOW);
+  const receiptEvent = clone(buildSyntheticApprovalStateKernelInput({
+    transition: 'RECEIPT_VERIFIED',
+  }).event);
+  const receiptTime = new Date(receiptEvent.observedAt);
+  const fakeCapability = Object.freeze({ kind: 'caller-declared-receipt-verification' });
+  const originalWeakSetHas = WeakSet.prototype.has;
+  WeakSet.prototype.has = function monkeypatchedWeakSetHas(value) {
+    if (value === fakeCapability) return true;
+    return Reflect.apply(originalWeakSetHas, this, [value]);
+  };
+  try {
+    assert.throws(
+      () => append(privacy, receiptEvent, policy, receiptTime, fakeCapability),
+      /APPROVAL_INDEPENDENCE_NOT_PROVEN/,
+    );
+  } finally {
+    WeakSet.prototype.has = originalWeakSetHas;
+  }
+});
+
+test('round5 alternating eventHistory proxy restores the exact appending history', () => {
+  const policy = approvalPolicy();
+  const buildPrivacy = () => buildStateFromEvents([
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    {
+      type: 'PROPOSAL_RENDERED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:10:00.000Z',
+    },
+    {
+      type: 'PRODUCT_REVIEW_VERIFIED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:20:00.000Z',
+    },
+  ], clone(policy), NOW);
+  const privacyA = buildPrivacy();
+  const privacyB = buildPrivacy();
+  const historyA = privacyA.eventHistory;
+  const historyB = privacyB.eventHistory;
+  const historyASnapshot = clone(historyA);
+  const historyBSnapshot = clone(historyB);
+  let nextHistory = historyA;
+  const alternatingState = new Proxy({ ...privacyA }, {
+    get(target, property, receiver) {
+      if (property !== 'eventHistory') return Reflect.get(target, property, receiver);
+      const selected = nextHistory;
+      nextHistory = selected === historyA ? historyB : historyA;
+      return selected;
+    },
+  });
+  const receiptEvent = clone(buildSyntheticApprovalStateKernelInput({
+    transition: 'RECEIPT_VERIFIED',
+  }).event);
+  const receiptTime = new Date(receiptEvent.observedAt);
+  let privilegedOutcome;
+  try {
+    privilegedOutcome = append(
+      alternatingState,
+      receiptEvent,
+      policy,
+      receiptTime,
+      Object.freeze({ kind: 'caller-declared-receipt-verification' }),
+    ).state;
+  } catch (error) {
+    privilegedOutcome = error.message;
+  }
+  const historyAState = approvalState.reduceApprovalDecisionState(
+    historyA,
+    policy,
+    receiptTime,
+  ).state;
+  const historyBState = approvalState.reduceApprovalDecisionState(
+    historyB,
+    policy,
+    receiptTime,
+  ).state;
+  const headChangedAt = new Date('2026-08-30T08:26:00.000Z');
+  const safeAppend = append(privacyA, {
+    type: 'HEAD_CHANGED',
+    headSha: 'c'.repeat(40),
+    observedAt: headChangedAt.toISOString(),
+  }, policy, headChangedAt);
+
+  assert.deepEqual({
+    privilegedOutcome,
+    historyAState,
+    historyBState,
+    safeAppendState: safeAppend.state,
+  }, {
+    privilegedOutcome: 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+    historyAState: 'AWAITING_PRIVACY_REVIEW',
+    historyBState: 'AWAITING_PRIVACY_REVIEW',
+    safeAppendState: 'STALE_AFTER_PUSH',
+  });
+  assert.deepEqual(historyA, historyASnapshot);
+  assert.deepEqual(historyB, historyBSnapshot);
+});
+
 test('round5 append rejects accessor reentry without invoking it or consuming the parent', () => {
   const policy = approvalPolicy();
   const rootTime = new Date('2026-08-30T07:05:00.000Z');
