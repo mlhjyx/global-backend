@@ -21,6 +21,7 @@ import {
   approvalGraphUnsafe,
   inspectApprovalValueGraph,
 } from './governance-approval-safe-traversal.mjs';
+import { approvalLegalEvidenceRequired } from './governance-approval-legal-policy.mjs';
 
 const EVIDENCE_KEYS = Object.freeze([
   'schemaVersion', 'task3', 'readAt', 'preAcceptanceRead', 'postAcceptanceRead',
@@ -143,16 +144,12 @@ const rawReviewMatches = (review, raw, required) => (
   && (review.slot === 'CODEOWNER'
     || review.commandDigest === (raw.command?.command_sha256 ?? raw.review_command_sha256))
 );
-const legalEvidenceRequired = (candidate) => (
-  candidate.decision?.adr === 'ADR-026'
-  || (
-    candidate.policy?.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
-    && candidate.policy?.dual_role_exception?.coapprover_role === 'LEGAL-REVIEW'
-  )
-);
 const authorityMatchesTask3 = (evidence, policy, candidate) => {
   const raw = evidence.task3.authority;
-  const legalRequired = legalEvidenceRequired(candidate);
+  const legalRequired = approvalLegalEvidenceRequired({
+    decisionAdr: candidate.decision?.adr,
+    actorPolicy: candidate.policy?.actor_policy,
+  });
   return evidence.authority.revision === raw.revision
     && evidence.authority.sha256 === raw.sha256
     && evidence.authority.rawSha256 === canonicalApprovalDigest(raw)
@@ -244,7 +241,19 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
   );
   for (const issue of task3Result.issues) pushIssue(codes, issue.stable_code);
   const candidate = evidence.task3.candidate;
+  let task3ActorPolicyMatches = false;
+  try {
+    const actorPolicy = candidate.policy?.actor_policy;
+    const dualRoleExceptionSha256 = actorPolicy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
+      ? canonicalApprovalDigest(candidate.policy.dual_role_exception)
+      : null;
+    task3ActorPolicyMatches = policy.actorPolicy === actorPolicy
+      && policy.dualRoleExceptionSha256 === dualRoleExceptionSha256;
+  } catch {
+    task3ActorPolicyMatches = false;
+  }
   if (!approvalValuesEqual(candidate.policy, evidence.task3.policy)
+    || !task3ActorPolicyMatches
     || candidate.decision?.adr !== state.decisionId
     || candidate.decision?.revision !== state.decisionRevision
     || candidate.decision?.policy_revision !== state.policyRevision
@@ -280,7 +289,7 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
     pushIssue(codes, 'APPROVAL_ACCEPTANCE_EVIDENCE_SHAPE_INVALID');
   }
   const reviewIds = new Set();
-  const distinctRoleActors = new Set();
+  const roleByActor = new Map();
   for (const required of requiredReviews) {
     const matching = evidence.reviews.filter(({ slot }) => slot === required.slot);
     const review = matching[0];
@@ -291,8 +300,15 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
     if (reviewIds.has(review?.reviewId)) pushIssue(codes, 'APPROVAL_EVIDENCE_SLOT_REUSE');
     reviewIds.add(review?.reviewId);
     if (required.slot !== 'CODEOWNER') {
-      if (distinctRoleActors.has(review?.actorId)) pushIssue(codes, 'APPROVAL_DISTINCT_ACTORS_REQUIRED');
-      distinctRoleActors.add(review?.actorId);
+      const priorSlot = roleByActor.get(review?.actorId);
+      const explicitProductPrivacyDualRole = policy.actorPolicy
+          === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
+        && new Set([priorSlot, required.slot]).size === 2
+        && [priorSlot, required.slot].every((slot) => ['PRODUCT', 'PRIVACY'].includes(slot));
+      if (priorSlot !== undefined && !explicitProductPrivacyDualRole) {
+        pushIssue(codes, 'APPROVAL_DISTINCT_ACTORS_REQUIRED');
+      }
+      roleByActor.set(review?.actorId, required.slot);
     }
   }
 
@@ -306,7 +322,10 @@ export const revalidateApprovalAtAcceptance = (state, evidence, now) => {
     || evidence.authority.reassigned !== false) pushIssue(codes, 'APPROVAL_ROLE_AUTHORITY_STALE');
 
   const rawLegal = candidate.legal_input;
-  if (legalEvidenceRequired(candidate)) {
+  if (approvalLegalEvidenceRequired({
+    decisionAdr: candidate.decision?.adr,
+    actorPolicy: candidate.policy?.actor_policy,
+  })) {
     if (evidence.legal.status !== rawLegal?.status
       || evidence.legal.scope !== policy.legalScope
       || evidence.legal.digest !== canonicalApprovalDigest(rawLegal)

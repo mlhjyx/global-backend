@@ -499,7 +499,7 @@ test('dual-role state cross-binding requires current Legal clearance and fails c
   );
   assert.equal(actorModeMismatch.valid, false);
   assert.equal(actorModeMismatch.issues.some(
-    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'
+    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH',
   ), true);
 
   const distinctStateDualTask3 = await acceptanceEvidence();
@@ -515,13 +515,14 @@ test('dual-role state cross-binding requires current Legal clearance and fails c
   );
   assert.equal(reverseModeMismatch.valid, false);
   assert.equal(reverseModeMismatch.issues.some(
-    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'
+    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH',
   ), true);
 
   const exceptionDigestDrift = await acceptanceEvidence();
   configureDualRoleAcceptance(exceptionDigestDrift.evidence, exceptionDigestDrift.policy);
-  exceptionDigestDrift.policy.dualRoleExceptionSha256 = exceptionDigestDrift.policy
-    .dualRoleExceptionSha256.replace(/.$/, '0');
+  const originalExceptionDigest = exceptionDigestDrift.policy.dualRoleExceptionSha256;
+  exceptionDigestDrift.policy.dualRoleExceptionSha256 = originalExceptionDigest.slice(0, -1)
+    + (originalExceptionDigest.endsWith('0') ? '1' : '0');
   const digestMismatch = revalidateApprovalAtAcceptance(
     verifiedState(exceptionDigestDrift.policy, exceptionDigestDrift.mergeAuthorization),
     exceptionDigestDrift.evidence,
@@ -529,7 +530,7 @@ test('dual-role state cross-binding requires current Legal clearance and fails c
   );
   assert.equal(digestMismatch.valid, false);
   assert.equal(digestMismatch.issues.some(
-    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH'
+    ({ stable_code: code }) => code === 'APPROVAL_DECISION_SEMANTIC_DIGEST_MISMATCH',
   ), true);
 
   const invalidActorPolicy = {
@@ -538,6 +539,21 @@ test('dual-role state cross-binding requires current Legal clearance and fails c
   };
   assert.throws(
     () => buildStateFromEvents([], invalidActorPolicy, NOW),
+    /APPROVAL_STATE_POLICY_INVALID/,
+  );
+  assert.throws(
+    () => buildStateFromEvents([], {
+      ...approvalPolicy(),
+      dualRoleExceptionSha256: digest({ forbidden: true }),
+    }, NOW),
+    /APPROVAL_STATE_POLICY_INVALID/,
+  );
+  assert.throws(
+    () => buildStateFromEvents([], {
+      ...approvalPolicy(),
+      actorPolicy: 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER',
+      dualRoleExceptionSha256: null,
+    }, NOW),
     /APPROVAL_STATE_POLICY_INVALID/,
   );
 });

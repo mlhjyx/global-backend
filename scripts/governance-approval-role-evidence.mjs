@@ -12,6 +12,7 @@ import {
   isSafePositiveInteger,
   sha256,
 } from './governance-approval-readback-common.mjs';
+import { approvalLegalEvidenceRequired } from './governance-approval-legal-policy.mjs';
 
 const REVIEW_COMMAND_PATTERN = /^APPROVE DECISION (ADR-026|ADR-027) REV (program-c\/policy-r[1-9][0-9]*) ROLE (OWN-PRODUCT|OWN-DATA-PRIVACY|OWN-QA-EVIDENCE|OWN-SECURITY) DIGEST (sha256:[0-9a-f]{64})$/;
 const PARSED_COMMAND_KEYS = Object.freeze([
@@ -253,14 +254,6 @@ const validateLegal = (candidate, authority, now) => {
   return [];
 };
 
-const legalEvidenceRequired = (candidate, policy) => (
-  candidate.decision?.adr === 'ADR-026'
-  || (
-    policy.actor_policy === 'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER'
-    && policy.dual_role_exception?.coapprover_role === 'LEGAL-REVIEW'
-  )
-);
-
 const validateGlobalIsolation = (candidate, _policy) => {
   const codes = [];
   const humanIds = [
@@ -322,7 +315,10 @@ export const validateRoleEvidence = (candidate, authority, policy, now) => {
   codes.push(...validateDualRolePolicy(candidate, policy, now));
   codes.push(...validateCodeowner(candidate, now));
   codes.push(...validateSecurity(candidate, authority, now));
-  if (legalEvidenceRequired(candidate, policy)) {
+  if (approvalLegalEvidenceRequired({
+    decisionAdr: candidate.decision?.adr,
+    actorPolicy: policy.actor_policy,
+  })) {
     codes.push(...validateLegal(candidate, authority, now));
   }
   codes.push(...validateGlobalIsolation(candidate, policy));

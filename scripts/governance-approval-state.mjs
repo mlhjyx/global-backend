@@ -30,6 +30,7 @@ import {
   isClosedStoredReceiptRevocationEvent,
   storedReceiptRevocationIssue,
 } from './governance-approval-state-revocation.mjs';
+import { approvalVerifiedLegalState } from './governance-approval-legal-policy.mjs';
 
 export {
   executeReservedMerge,
@@ -50,6 +51,10 @@ const STATE_VALUES = new Set([
   'REVOKED', 'REJECTED',
 ]);
 const TRUST_VALUES = new Set(['EXTERNAL_UNVERIFIED', 'INDEPENDENT_EXTERNAL_VERIFIED']);
+const ACTOR_POLICIES = new Set([
+  'DISTINCT_ACTORS_REQUIRED',
+  'DUAL_ROLE_WITH_INDEPENDENT_COAPPROVER',
+]);
 const SLOT_KEYS = Object.freeze(['product', 'privacy', 'codeowner', 'qa', 'security', 'machine']);
 const RECEIPT_KEYS = Object.freeze([
   'receiptId', 'receiptCoreSha256', 'receiptRawSha256', 'trustState', 'validUntil',
@@ -78,6 +83,7 @@ const POLICY_KEYS = Object.freeze([
   'currentHeadSha', 'decisionRawSha256', 'decisionSemanticSha256', 'sidecarRawSha256',
   'proposalResultCommitSha', 'authorityRevision', 'authoritySha256', 'authorityRawSha256',
   'authorityEffectiveFrom', 'authorityEffectiveUntil', 'legalScope', 'legalDigest',
+  'actorPolicy', 'dualRoleExceptionSha256',
   'liveRulesetSha256', 'acceptanceAllowlist', 'requiredReviews',
   'requiredMachineChecks', 'freshnessMs',
 ]);
@@ -245,6 +251,10 @@ const policyShapeValid = (policy) => {
     || Date.parse(policy.authorityEffectiveFrom) >= Date.parse(policy.authorityEffectiveUntil)
     || !boundedPolicyString(policy.legalScope, 128, /^[A-Z][A-Z0-9_]*$/)
     || !isDigest(policy.legalDigest)
+    || !ACTOR_POLICIES.has(policy.actorPolicy)
+    || (policy.actorPolicy === 'DISTINCT_ACTORS_REQUIRED'
+      ? policy.dualRoleExceptionSha256 !== null
+      : !isDigest(policy.dualRoleExceptionSha256))
     || !isDigest(policy.liveRulesetSha256)
     || !Number.isSafeInteger(policy.freshnessMs)
     || policy.freshnessMs <= 0
@@ -425,7 +435,10 @@ const reduceBoundApprovalDecisionState = (events, binding, now) => {
       state = {
         ...state,
         state: 'VERIFIED',
-        legalState: state.decisionId === 'ADR-026' ? 'NO_BLOCKER_RECORDED' : 'PENDING',
+        legalState: approvalVerifiedLegalState({
+          decisionAdr: state.decisionId,
+          actorPolicy: policy.actorPolicy,
+        }),
         evidenceTrustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
         evidenceSlots: {
           product: 'VERIFIED',
@@ -700,8 +713,7 @@ const readStateClosed = (state) => (
   && state.blockingCodes.length <= 16
   && state.blockingCodes.every((code) => /^APPROVAL_[A-Z0-9_]{1,120}$/.test(code))
   && eventHistoryValid(state.eventHistory)
-  && (state.policySnapshot === undefined
-    || hasExactKeys(state.policySnapshot, POLICY_KEYS))
+  && (state.policySnapshot === undefined || policyShapeValid(state.policySnapshot))
   && (state.acceptanceCheckedAt === undefined
     || state.acceptanceCheckedAt === null
     || isCanonicalInstant(state.acceptanceCheckedAt))
