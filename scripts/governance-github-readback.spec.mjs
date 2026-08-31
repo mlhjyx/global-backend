@@ -209,6 +209,33 @@ test('snapshots and deep-freezes the closed trusted proposal renderer policy bef
   }
 });
 
+test('collector rejects every malformed proposal renderer policy before its first remote read', async (t) => {
+  for (const [name, mutate] of [
+    ['missing tuple', (value) => { delete value.proposalRenderer; }],
+    ['partial tuple', (value) => { delete value.proposalRenderer.sourceSha256; }],
+    ['extra tuple field', (value) => { value.proposalRenderer.extra = true; }],
+    ['non-canonical source digest', (value) => { value.proposalRenderer.sourceSha256 = `sha256:${'C'.repeat(64)}`; }],
+  ]) {
+    await t.test(name, async () => {
+      const state = fixtureState();
+      const fixture = fixtureFetch(state);
+      const client = createGitHubReadbackClient({
+        fetch: fixture.fetch,
+        token: AUTH_SENTINEL,
+        apiVersion: API_VERSION,
+      });
+      const unsafe = policy();
+      mutate(unsafe);
+
+      await expectCode(
+        () => collectGitHubApprovalEvidence(client, request(), limits(), unsafe),
+        'APPROVAL_GITHUB_POLICY_INVALID',
+      );
+      assert.equal(fixture.calls.length, 0);
+    });
+  }
+});
+
 test('rejects a non-allowlisted proposal path before the first request', async () => {
   const state = fixtureState();
   const fixture = fixtureFetch(state);
