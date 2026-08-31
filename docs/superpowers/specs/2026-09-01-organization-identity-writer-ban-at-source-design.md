@@ -359,18 +359,31 @@ The initial B0 review must classify every current surface. A `FORBIDDEN_DYNAMIC_
 
 Changing only a SQL literal, referenced constant, map value, helper return, existing wrapper argument, imported type, scanner rule, or manifest therefore changes the commitment even when the outer callsite topology is unchanged.
 
-### 9.3 Immutable B0 acceptance anchor
+### 9.3 B0 acceptance and protected-main trust anchor
 
 B0 uses a two-step checkpoint so the scanner/manifests cannot authorize same-task regeneration:
 
 1. `B0_IMPLEMENTATION` creates the scanner, baseline/migration/build manifests and green self/stage tests. It is committed and independently reviewed at one exact commit.
-2. `B0_ACCEPTANCE` is a separate child commit that first adds `organization-identity-writer-acceptance.json`. The record names the reviewed parent commit, exact Artifact A commit, scanner/test blob IDs and SHA-256 values, baseline/migration/build manifest blob IDs and SHA-256 values, stage-machine digest, independent review report digests, and the allowed later mutable stage path. The acceptance commit itself receives an independent scoped review.
+2. `B0_ACCEPTANCE` is a one-parent child of the exact reviewed `B0_IMPLEMENTATION` commit and first adds `organization-identity-writer-acceptance.json`. `git diff-tree` must prove that this commit changes exactly one path: the first addition of that JSON. The record names the parent implementation commit, exact Artifact A commit, scanner/test blob IDs and SHA-256 values, baseline/migration/build manifest blob IDs and SHA-256 values, stage-machine digest, implementation-review report digests, and the allowed later mutable stage path. Every controlled blob is read from the parent Git tree, never from the acceptance/current tree. The acceptance commit itself receives an independent scoped review.
 
-Every B1-B6 run locates the Git commit that first added the acceptance path, requires it to be the reviewed `B0_ACCEPTANCE` commit, and reads the authority values from that immutable Git object with `git show`. Current working-tree acceptance bytes, scanner derivation rules, baseline/migration/build manifests, native-extractor pin, and test implementation must equal their accepted Git blobs. Editing and regenerating any of them is drift before current-tree recomputation occurs.
+The acceptance commit cannot attest its own review. After its scoped review, B0 stops at `LOCAL_ACCEPTANCE_REVIEWED`. Starting B1 requires separate user authorizations to push the exact branch head, open/update the exact B0 PR, and merge it with a GitHub merge commit that preserves the reviewed `B0_IMPLEMENTATION` and `B0_ACCEPTANCE` commits. Squash, rebase, force-push, and history rewriting are forbidden for this anchor.
 
-B1 must fork the exact reviewed B0 acceptance commit. If the first-add history is absent, duplicated, rewritten, unreachable from HEAD, has the wrong parent, or differs from the accepted record, the scanner returns `INTEGRITY_ERROR`; it does not accept a replacement anchor.
+The non-self-referential trust root is protected GitHub `main` plus a controller-owned root-only readback receipt created only after the authorized merge:
 
-On every run, the accepted scanner directly re-derives the current closure and also derives the Artifact A closure from exact Git object `2400bac28796bae44294114edc99eaccb1bd65b3`. Only the closed stage removals are permitted. A same-commit source change plus regenerated manifest cannot become clean because accepted manifest/scanner blobs and the Artifact A Git preimage remain immutable comparison subjects.
+```text
+/global/backups/backend-root-reconciliation-20260826/successors/
+  identity-writer-b0-v2/protected-main-anchor.json
+```
+
+The `0700 root:root` receipt records the live GitHub main SHA, merge commit, exact reviewed acceptance commit SHA, acceptance-review report SHA-256, PR number/head/method, peeled ancestry proof, timestamp, and receipt-chain digest. It contains no source, SQL, secret, or credential values. Creation of this receipt and every remote action are future separate authorization gates; this spec does not authorize them.
+
+B1 uses a new branch/worktree from the exact protected-main merge commit, not from the pre-merge local v2 branch. Every B1-B6 local run requires the exact root-only receipt as a CLI input; every hosted run requires the GitHub event's protected base SHA plus exact accepted B0 SHA/review digest. The accepted scanner first verifies its own/current controlled blobs against the parent-tree values, then proves the reviewed acceptance commit is an ancestor of the externally supplied protected-main SHA. Missing network/readback input, absent receipt, receipt-chain mismatch, wrong merge method, non-ancestor history, or different accepted/review SHA is `INTEGRITY_ERROR`.
+
+The scanner may verify consistency against an externally fixed acceptance SHA; it never claims to infer “reviewed” or detect a replaced history from the current branch alone.
+
+Every B1-B6 run reads authority values from the externally fixed acceptance Git object with `git show`. Current working-tree acceptance bytes, scanner derivation rules, baseline/migration/build manifests, native-extractor pin, and test implementation must equal their accepted parent-tree blobs. Editing and regenerating any of them is drift before current-tree recomputation occurs.
+
+On every run, the accepted scanner directly re-derives the current closure and also derives the Artifact A closure from exact Git object `2400bac28796bae44294114edc99eaccb1bd65b3`. Only the closed stage removals are permitted. A same-commit source change plus regenerated manifest cannot become clean because protected-main ancestry, accepted parent-tree blobs, and the Artifact A Git preimage remain immutable comparison subjects.
 
 ### 9.4 Drift rule during Artifact B
 
@@ -464,14 +477,14 @@ Budget exhaustion is `SCAN_BUDGET_EXHAUSTED` and exit 1. A TypeScript-program, f
 
 The durable prerequisite record is `docs/governance/organization-identity-artifact-a-acceptance.json`. Its B0 first revision must bind exact Artifact A head/range and these current non-secret source receipts before the B0 implementation review. Every table path is relative to exact source workspace `/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan/`:
 
-| Evidence class      | Source path in the closeout evidence workspace                                                               | SHA-256                                                            | Required verdict                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------- |
-| A7 implementation   | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-report.md`                      | `a7faa97ecca4bbc28f79cd4a8c77ff33eedcbc771273cea793bbfdd086b91cab` | local implementation GREEN at `2400bac…`      |
-| Whole-branch review | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/final-whole-branch-review.md`           | `0263be60a8c66a13ec36bd8d4c541c53c0ef91d2ab5c77bd1a771295cee067b4` | local technical PASS; bounded Artifact B only |
-| Code review         | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-code-review.md`     | `b473e15b84ef9d4db72de7b24f7844d905e913203043824d7741b663fbe269e0` | `0 Critical / 0 Important`                    |
-| DB review           | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-db-review.md`       | `9ee0be2034eaded1e532b6b7c7a2079c0917d2b684ea52a65111cb03945f0f13` | `0 Critical / 0 Important`; retained DB HOLD  |
-| Security review     | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-security-review.md` | `3debad7dc240981e5cb25be983c53a6e02b2234d2b57e1bd5e780355734d9989` | `0 Critical / 0 Important`; `TRANSITION_HOLD` |
-| Task review         | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-task-review.md`                 | `7fbcbb0582d344e4579b1887e5a16a2a49e7d1d3a0ab8e5eb4c791f74787426d` | Spec PASS / Quality Approved                  |
+| Evidence class      | Source path in the closeout evidence workspace                                                               | SHA-256                                                            | Required verdict                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| A7 chronology       | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-report.md`                      | `a7faa97ecca4bbc28f79cd4a8c77ff33eedcbc771273cea793bbfdd086b91cab` | exact §11 `Final GREEN verification and receipt-bound cleanup`; stale top `BLOCKED` metadata is historical and is not a gate |
+| Whole-branch review | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/final-whole-branch-review.md`           | `0263be60a8c66a13ec36bd8d4c541c53c0ef91d2ab5c77bd1a771295cee067b4` | local technical PASS; bounded Artifact B only                                                                                |
+| Code review         | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-code-review.md`     | `b473e15b84ef9d4db72de7b24f7844d905e913203043824d7741b663fbe269e0` | `0 Critical / 0 Important`                                                                                                   |
+| DB review           | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-db-review.md`       | `9ee0be2034eaded1e532b6b7c7a2079c0917d2b684ea52a65111cb03945f0f13` | `0 Critical / 0 Important`; retained DB HOLD                                                                                 |
+| Security review     | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-independent-security-review.md` | `3debad7dc240981e5cb25be983c53a6e02b2234d2b57e1bd5e780355734d9989` | `0 Critical / 0 Important`; `TRANSITION_HOLD`                                                                                |
+| Task review         | `.superpowers/sdd/2026-08-30-organization-identity-command-expansion/task-A7-task-review.md`                 | `7fbcbb0582d344e4579b1887e5a16a2a49e7d1d3a0ab8e5eb4c791f74787426d` | Spec PASS / Quality Approved                                                                                                 |
 
 The local ignored reports are source evidence for B0 intake, not durable authority by themselves. B0 verifies all six exact bytes and verdicts, then materializes their identities, hashes, Artifact A commit/range, migration checksums, and a no-secret schema into the tracked acceptance JSON. The B0 implementation review reads the six sources and the tracked record. The later B0 acceptance first-add commit immutably anchors that tracked blob. If any source report is absent or has a different digest before acceptance, B0 stops; after acceptance, later stages consume the immutable accepted Git blob and do not depend on mutable local report paths.
 
@@ -482,8 +495,6 @@ node --test \
   packages/db/test/organization-identity-v2-resolver-command.spec.mjs \
   packages/db/test/pinned-prisma-migration-stage.spec.mjs
 ```
-
-B0 also consumes the exact Artifact A disposable DB/ACL/function-residue report; it does not rerun or claim retained-database evidence without authorization.
 
 Any migration addition, removal, checksum change, last-change drift, relevant function/ACL digest drift, current manifest edit, or mismatch with the accepted first-add Git blob causes `MIGRATION_AUTHORITY_DRIFT`. Artifact B contains no migration task, so such drift is HOLD pending a separately reviewed current-main refresh. The scanner does not infer semantic non-writing from partial SQL grammar and never edits migration bytes or `_prisma_migrations`.
 
@@ -531,6 +542,13 @@ B4M changes the stage to zero. B5 adds `governance:identity-writers:zero` as a m
 Runtime-artifact tests prove the governance script, tests, and manifests are absent from API/Worker compiled output, release artifact manifests, and OCI files. `scripts/` naming alone is not accepted as proof.
 
 ## 16. Artifact B caller sequence
+
+The v2 branch ends after the independently reviewed B0 acceptance PR is merged and protected-main readback is anchored. B1 starts from that exact protected-main merge commit in:
+
+```text
+branch:   codex/pr407-organization-identity-caller-cutover-v3
+worktree: /global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3
+```
 
 The implementation plan written after spec confirmation must contain these tasks:
 
@@ -622,6 +640,9 @@ The later implementation may advance from B0 to B1 only after:
 
 - build/raw/migration baselines are complete and independently reviewed;
 - the separate B0 acceptance first-add commit and its parent implementation commit are independently reviewed, reachable, and byte-exact;
+- the exact B0 PR is merged to protected `main` with a history-preserving merge commit under separate authorization;
+- live GitHub/main ancestry and the root-only protected-main anchor receipt bind the accepted B0 SHA and acceptance-review digest;
+- B1 starts from the exact protected-main merge commit in the v3 worktree;
 - every current raw capability surface has a non-blocking reviewed disposition;
 - scanner tests, stage verification, Artifact A prerequisites, governance wiring, redaction, bounds, and runtime exclusion pass;
 - live stage verification reports exactly the three baseline delegate writers and no drift/ambiguity;
