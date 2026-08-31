@@ -20,16 +20,19 @@ import {
 
 const clone = (value) => structuredClone(value);
 
-const append = (state, event, policy, now) => approvalState.appendApprovalDecisionEvent(
-  state,
-  {
-    schemaVersion: 'approval-event-append/v1',
-    expectedHistorySha256: digest(state.eventHistory),
-    appendedAt: now.toISOString(),
-    event,
-  },
-  policy,
-  now,
+const append = (state, event, policy, now, receiptCapability) => (
+  approvalState.appendApprovalDecisionEvent(
+    state,
+    {
+      schemaVersion: 'approval-event-append/v1',
+      expectedHistorySha256: digest(state.eventHistory),
+      appendedAt: now.toISOString(),
+      event,
+    },
+    policy,
+    now,
+    receiptCapability,
+  )
 );
 
 const holdSummary = (state) => ({
@@ -243,6 +246,62 @@ test('round5 failed append leaves its parent active and each initializer mints a
     observedAt: rootTime.toISOString(),
   }, clone(policy), rootTime);
   assert.deepEqual([firstProposed.state, secondProposed.state], ['PROPOSED', 'PROPOSED']);
+});
+
+test('round5 failed privileged append preserves parent for a safe append', () => {
+  const policy = approvalPolicy();
+  const privacy = buildStateFromEvents([
+    { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+    {
+      type: 'PROPOSAL_RENDERED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:10:00.000Z',
+    },
+    {
+      type: 'PRODUCT_REVIEW_VERIFIED',
+      headSha: policy.currentHeadSha,
+      observedAt: '2026-08-30T07:20:00.000Z',
+    },
+  ], policy, NOW);
+  const parentSnapshot = clone(privacy);
+  const receiptEvent = clone(buildSyntheticApprovalStateKernelInput({
+    transition: 'RECEIPT_VERIFIED',
+  }).event);
+  const receiptTime = new Date(receiptEvent.observedAt);
+  let privilegedOutcome;
+  try {
+    privilegedOutcome = append(
+      privacy,
+      receiptEvent,
+      policy,
+      receiptTime,
+      Object.freeze({ kind: 'caller-declared-receipt-verification' }),
+    ).state;
+  } catch (error) {
+    privilegedOutcome = error.message;
+  }
+  const parentStateAfterFailure = approvalState.reduceApprovalDecisionState(
+    privacy.eventHistory,
+    policy,
+    receiptTime,
+  ).state;
+  const headChangedAt = new Date('2026-08-30T08:26:00.000Z');
+  const safeAppend = append(privacy, {
+    type: 'HEAD_CHANGED',
+    headSha: 'c'.repeat(40),
+    observedAt: headChangedAt.toISOString(),
+  }, policy, headChangedAt);
+
+  assert.deepEqual({
+    privilegedOutcome,
+    parentStateAfterFailure,
+    safeAppendState: safeAppend.state,
+  }, {
+    privilegedOutcome: 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+    parentStateAfterFailure: 'AWAITING_PRIVACY_REVIEW',
+    safeAppendState: 'STALE_AFTER_PUSH',
+  });
+  assert.deepEqual(privacy, parentSnapshot);
 });
 
 test('round5 append rejects accessor reentry without invoking it or consuming the parent', () => {

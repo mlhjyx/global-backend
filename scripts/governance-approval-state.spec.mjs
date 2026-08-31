@@ -255,6 +255,33 @@ const appendAcceptance = (state, evidence, policy, now) => {
     event: { type: 'ACCEPTANCE_REVALIDATED', evidence, observedAt: evidence.readAt },
   }, policy, now);
 };
+const appendStateEvent = (state, event, policy, now, receiptCapability) => (
+  approvalStateModule.appendApprovalDecisionEvent(state, {
+    schemaVersion: 'approval-event-append/v1',
+    expectedHistorySha256: digest(state.eventHistory),
+    appendedAt: now.toISOString(),
+    event,
+  }, policy, now, receiptCapability)
+);
+const buildPublicPrivacyReviewState = (policy) => [
+  { type: 'AUTHORITIES_ASSIGNED', observedAt: '2026-08-30T07:05:00.000Z' },
+  {
+    type: 'PROPOSAL_RENDERED',
+    headSha: policy.currentHeadSha,
+    observedAt: '2026-08-30T07:10:00.000Z',
+  },
+  {
+    type: 'PRODUCT_REVIEW_VERIFIED',
+    headSha: policy.currentHeadSha,
+    observedAt: '2026-08-30T07:20:00.000Z',
+  },
+].reduce(
+  (state, event) => appendStateEvent(state, event, policy, new Date(event.observedAt)),
+  approvalStateModule.initializeApprovalDecisionState(
+    policy,
+    new Date('2026-08-30T07:05:00.000Z'),
+  ),
+);
 const acceptanceEvidence = async () => {
   const policy = approvalPolicy();
   const task3 = buildTask3AcceptanceEvidence();
@@ -353,6 +380,38 @@ const acceptanceEvidence = async () => {
   refreshAcceptanceTransaction(evidence);
   return { evidence, grant, mergeAuthorization, policy, readback };
 };
+
+test('caller-owned receipt capability cannot promote public approval state', async () => {
+  const { mergeAuthorization, policy } = await acceptanceEvidence();
+  const fakeCapability = Object.freeze({ kind: 'caller-declared-receipt-verification' });
+  const callerOwnedCapabilities = [
+    fakeCapability,
+    clone(fakeCapability),
+    JSON.parse(JSON.stringify(fakeCapability)),
+  ];
+  const outcomes = callerOwnedCapabilities.map((capability) => {
+    const privacy = buildPublicPrivacyReviewState(policy);
+    assert.equal(privacy.state, 'AWAITING_PRIVACY_REVIEW');
+    try {
+      return appendStateEvent(privacy, {
+        type: 'RECEIPT_VERIFIED',
+        headSha: policy.currentHeadSha,
+        receipt: receiptSummary(),
+        mergeAuthorization,
+        observedAt: '2026-08-30T08:25:00.000Z',
+      }, policy, new Date('2026-08-30T08:25:00.000Z'), capability).state;
+    } catch (error) {
+      return error.message;
+    }
+  });
+
+  assert.deepEqual(
+    outcomes,
+    Array.from({ length: callerOwnedCapabilities.length }, () => (
+      'APPROVAL_INDEPENDENCE_NOT_PROVEN'
+    )),
+  );
+});
 
 test('pure state kernel plans VERIFIED and ACCEPTED projections without admitting history', async () => {
   const { planApprovalStateTransition } = await import('./governance-approval-state-kernel.mjs');
