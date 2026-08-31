@@ -225,9 +225,9 @@ describe("Organization Identity v2 expand migration", () => {
     expect(migration).not.toMatch(/ON DELETE (?:CASCADE|SET NULL)/u);
   });
 
-  it("adds the current-main CanonicalCompany tenant key without changing Raw keys", () => {
+  it("adds the temporary Artifact A CanonicalCompany tenant key without changing Raw keys", () => {
     expect(migration).toContain(
-      'CREATE UNIQUE INDEX "canonical_company_workspace_id_id_key"',
+      'CREATE UNIQUE INDEX "canonical_company_workspace_id_id_artifact_a_key"',
     );
     expect(migration).not.toContain(
       'CREATE UNIQUE INDEX "raw_source_record_workspace_id_id_key"',

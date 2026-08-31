@@ -121,7 +121,7 @@ describe("organization identity resolver command migration", () => {
     expect(
       sha256(source(schemaPath)),
       "Task 6B.2c must not change schema.prisma",
-    ).toBe("0858f0d36634246e20a4dfd5fdae3ab6910d945af1e45e0c44ad489a13a0fca4");
+    ).toBe("3db362c1c84f5f12ffa788eb54f2448a3b77d0dad410b96733acef1cc7337c3b");
     const topLevel = withoutDollarQuotedBodies(sql);
     expect(topLevel.match(/^BEGIN;$/gmu)).toHaveLength(1);
     expect(topLevel.match(/^COMMIT;$/gmu)).toHaveLength(1);

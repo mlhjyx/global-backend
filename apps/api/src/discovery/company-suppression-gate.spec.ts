@@ -112,7 +112,7 @@ describe('company suppression terminal gate', () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const suppressionRead = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1', name: 'Canonical GmbH', domain: 'blocked.example',
