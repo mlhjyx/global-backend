@@ -482,6 +482,43 @@ test('caller-owned current-main capability cannot authorize public durable recon
   }
 });
 
+test('public current-main readback remains HOLD after controlled collection intrinsic mutation', async () => {
+  const grant = await readJson('valid-grant.json');
+  const readback = await readJson('current-main-readback.json');
+  const ledger = new Ledger();
+  const fresh = await reserve(ledger, grant);
+  const callerOwnedValue = Object.freeze({ kind: 'caller-owned-readback-value' });
+  const originalWeakSetHas = WeakSet.prototype.has;
+  let result;
+  WeakSet.prototype.has = function controlledWeakSetHas(value) {
+    if (value === callerOwnedValue) return true;
+    return Reflect.apply(originalWeakSetHas, this, [value]);
+  };
+  try {
+    result = await reconcileMergeAuthorizationReservation(
+      fresh.reservation,
+      structuredClone(readback),
+      ledger,
+      NOW,
+      callerOwnedValue,
+    );
+  } finally {
+    WeakSet.prototype.has = originalWeakSetHas;
+  }
+  assert.equal(result.outcome, 'HOLD');
+  assert.equal(result.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
+  const stream = await ledger.read(fresh.reservation.key);
+  assert.equal(stream.events.some(({ type }) => type === 'MERGE_RESULT_OBSERVED'), false);
+  assert.equal(stream.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
+  assert.equal(
+    stream.events.filter(
+      ({ type, reasonCode }) => type === 'BOUNDED_HOLD'
+        && reasonCode === 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED',
+    ).length,
+    1,
+  );
+});
+
 test('public reconciliation denies a later current-main descendant without private admission', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
