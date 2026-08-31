@@ -28,9 +28,8 @@ import {
 import {
   buildStoredReceiptRevocationEvent,
   isClosedStoredReceiptRevocationEvent,
-  storedReceiptRevocationIssue,
 } from './governance-approval-state-revocation.mjs';
-import { approvalVerifiedLegalState } from './governance-approval-legal-policy.mjs';
+import { planApprovalStateTransition } from './governance-approval-state-kernel.mjs';
 
 export {
   executeReservedMerge,
@@ -127,9 +126,6 @@ const nowIso = (now) => {
 const transitionError = (code = 'APPROVAL_STATE_TRANSITION_INVALID') => {
   throw approvalError(code);
 };
-const observedAtValid = (value, now) => (
-  isCanonicalInstant(value) && Date.parse(value) <= now.getTime()
-);
 const receiptSummaryShapeValid = (receipt) => (
   hasExactKeys(receipt, RECEIPT_KEYS)
   && isBoundedId(receipt.receiptId, /^[a-z][a-z0-9-]{7,127}$/)
@@ -137,9 +133,6 @@ const receiptSummaryShapeValid = (receipt) => (
   && isDigest(receipt.receiptRawSha256)
   && receipt.trustState === 'INDEPENDENT_EXTERNAL_VERIFIED'
   && isCanonicalInstant(receipt.validUntil)
-);
-const receiptSummaryValid = (receipt, now) => (
-  receiptSummaryShapeValid(receipt) && now.getTime() < Date.parse(receipt.validUntil)
 );
 const mergeSummaryValid = (summary, requireConsumed = false) => (
   hasExactKeys(summary, MERGE_SUMMARY_KEYS)
@@ -365,6 +358,20 @@ const baseState = (policy, eventHistory = []) => ({
   acceptanceCheckedAt: null,
 });
 
+const stateProjection = (state) => {
+  const {
+    eventHistory: _eventHistory,
+    policySnapshot: _policySnapshot,
+    ...projection
+  } = state;
+  return projection;
+};
+const admitTransitionPlan = (plan, eventHistory, policySnapshot) => deepFreeze({
+  ...plan.nextProjection,
+  eventHistory,
+  policySnapshot,
+});
+
 const reduceBoundApprovalDecisionState = (events, binding, now) => {
   const reductionNow = nowIso(now);
   if (!Array.isArray(events)
@@ -372,7 +379,7 @@ const reduceBoundApprovalDecisionState = (events, binding, now) => {
     throw approvalError('APPROVAL_STATE_INPUT_INVALID');
   }
   const policy = binding.policySnapshot;
-  let state = baseState(policy, events);
+  let state = deepFreeze(baseState(policy, events));
   let priorEventTime = null;
   const eventDigests = new Set();
   for (const rawEvent of events) {
@@ -395,143 +402,15 @@ const reduceBoundApprovalDecisionState = (events, binding, now) => {
     if (eventDigests.has(eventDigest)) transitionError('APPROVAL_STATE_EVENT_REPLAYED');
     eventDigests.add(eventDigest);
     priorEventTime = eventTime;
-    const eventClock = new Date(eventTime);
-    if (event.type === 'AUTHORITIES_ASSIGNED') {
-      if (!hasExactKeys(event, ['type', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
-        || state.state !== 'OWNER_ASSIGNMENT_REQUIRED') transitionError();
-      state = { ...state, state: 'PROPOSED', blockingCodes: [], revocationStatus: 'ACTIVE' };
-    } else if (event.type === 'PROPOSAL_RENDERED') {
-      if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
-        || !['PROPOSED', 'STALE_AFTER_PUSH'].includes(state.state)
-        || event.headSha !== policy.currentHeadSha) transitionError();
-      state = {
-        ...state,
-        state: 'AWAITING_PRODUCT_REVIEW',
-        currentHeadSha: event.headSha,
-        blockingCodes: ['APPROVAL_REVIEW_REQUIRED'],
-      };
-    } else if (event.type === 'PRODUCT_REVIEW_VERIFIED') {
-      if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
-        || state.state !== 'AWAITING_PRODUCT_REVIEW'
-        || event.headSha !== state.currentHeadSha) transitionError();
-      state = {
-        ...state,
-        state: 'AWAITING_PRIVACY_REVIEW',
-        evidenceSlots: { ...state.evidenceSlots, product: 'VERIFIED' },
-        blockingCodes: ['APPROVAL_REVIEW_REQUIRED'],
-      };
-    } else if (event.type === 'RECEIPT_VERIFIED') {
-      if (!hasExactKeys(event, ['type', 'headSha', 'receipt', 'mergeAuthorization', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
-        || state.state !== 'AWAITING_PRIVACY_REVIEW'
-        || event.headSha !== state.currentHeadSha
-        || !receiptSummaryValid(event.receipt, eventClock)
-        || !mergeSummaryValid(event.mergeAuthorization, true)) {
-        transitionError('APPROVAL_RECEIPT_REQUIRED');
-      }
-      state = {
-        ...state,
-        state: 'VERIFIED',
-        legalState: approvalVerifiedLegalState({
-          decisionAdr: state.decisionId,
-          actorPolicy: policy.actorPolicy,
-        }),
-        evidenceTrustState: 'INDEPENDENT_EXTERNAL_VERIFIED',
-        evidenceSlots: {
-          product: 'VERIFIED',
-          privacy: 'VERIFIED',
-          codeowner: 'VERIFIED',
-          qa: 'VERIFIED',
-          security: 'VERIFIED',
-          machine: 'VERIFIED',
-        },
-        receipt: clone(event.receipt),
-        mergeAuthorization: clone(event.mergeAuthorization),
-        blockingCodes: ['APPROVAL_ACCEPTANCE_REVALIDATION_REQUIRED'],
-      };
-    } else if (event.type === 'HEAD_CHANGED') {
-      if (!hasExactKeys(event, ['type', 'headSha', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
-        || !isGitSha(event.headSha)
-        || ['ACCEPTED', 'REVOKED'].includes(state.state)) transitionError();
-      state = {
-        ...state,
-        state: 'STALE_AFTER_PUSH',
-        currentHeadSha: event.headSha,
-        evidenceTrustState: 'EXTERNAL_UNVERIFIED',
-        receipt: null,
-        mergeAuthorization: null,
-        blockingCodes: ['APPROVAL_HEAD_MISMATCH'],
-      };
-    } else if (event.type === 'REVIEW_REJECTED') {
-      if (!hasExactKeys(event, ['type', 'observedAt'])
-        || !observedAtValid(event.observedAt, eventClock)
-        || !['AWAITING_PRODUCT_REVIEW', 'AWAITING_PRIVACY_REVIEW', 'VERIFIED'].includes(state.state)) {
-        transitionError();
-      }
-      state = { ...state, state: 'REJECTED', blockingCodes: ['APPROVAL_REVIEW_REJECTED'] };
-    } else if (event.type === 'RECEIPT_SUPERSEDED') {
-      if (!hasExactKeys(event, [
-        'type', 'predecessorReceiptId', 'successor', 'validation', 'observedAt',
-      ])
-        || !observedAtValid(event.observedAt, eventClock)
-        || !state.receipt
-        || state.receipt.receiptId !== event.predecessorReceiptId
-        || !receiptSummaryValid(event.successor, eventClock)
-        || event.validation?.valid !== false
-        || !event.validation?.issues?.some?.(
-          ({ stable_code: code }) => code === 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
-        )) transitionError();
-      state = {
-        ...state,
-        state: 'STALE_AFTER_PUSH',
-        receiptHistory: [
-          ...state.receiptHistory,
-          { ...clone(state.receipt), lifecycleState: 'SUPERSEDED' },
-        ],
-        receipt: clone(event.successor),
-        evidenceTrustState: 'EXTERNAL_UNVERIFIED',
-        mergeAuthorization: null,
-        supersessionStatus: 'SUPERSEDED_WITH_CURRENT_SUCCESSOR',
-        blockingCodes: ['APPROVAL_INDEPENDENCE_NOT_PROVEN'],
-      };
-    } else if (event.type === 'ACCEPTANCE_REVALIDATED') {
-      if (!acceptanceEventEvidenceValid(event)
-        || !hasExactKeys(event, ACCEPTANCE_STORED_KEYS)
-        || state.state !== 'VERIFIED'
-        || event.observedAt !== event.evidence?.readAt
-        || !observedAtValid(event.observedAt, eventClock)) {
-        transitionError('APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
-      }
-      const validation = revalidateApprovalAtAcceptance(state, event.evidence, eventClock);
-      if (!validation.valid || validation.checkedAt !== event.checkedAt) {
-        transitionError(validation.issues[0]?.stable_code ?? 'APPROVAL_ACCEPTANCE_REVALIDATION_STALE');
-      }
-      state = {
-        ...state,
-        state: 'ACCEPTED',
-        blockingCodes: [],
-        acceptanceCheckedAt: validation.checkedAt,
-      };
-    } else if (event.type === 'RECEIPT_REVOKED') {
-      const issue = storedReceiptRevocationIssue(event, state, policy);
-      if (issue) transitionError(issue);
-      if (!observedAtValid(event.observedAt, eventClock)
-        || !['VERIFIED', 'ACCEPTED'].includes(state.state)) transitionError();
-      state = {
-        ...state,
-        state: 'REVOKED',
-        revocationStatus: 'REVOKED',
-        blockingCodes: ['APPROVAL_POLICY_REVOKED'],
-      };
-    } else {
-      transitionError('APPROVAL_STATE_EVENT_UNSUPPORTED');
-    }
+    const plan = planApprovalStateTransition({
+      currentProjection: stateProjection(state),
+      event,
+      policySnapshot: policy,
+      observedAt: reductionNow,
+    });
+    state = admitTransitionPlan(plan, events, policy);
   }
-  return deepFreeze({ ...state, eventHistory: events });
+  return state;
 };
 
 const boundHistoryHold = (binding, code) => deepFreeze({

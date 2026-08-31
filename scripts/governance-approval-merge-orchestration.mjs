@@ -4,14 +4,11 @@ import {
   hasExactKeys,
   isCanonicalInstant,
   isDigest,
-  isGitSha,
   isPlainObject,
   isSafeNonNegativeInteger,
   isSafePositiveInteger,
-  verifierRepositoryNameValid,
 } from './governance-approval-readback-common.mjs';
 import {
-  validateProgramCMergeAuthorizationConsumption,
   validateProgramCMergeAuthorizationGrant,
 } from './governance-approval-schema-validator.mjs';
 import {
@@ -23,6 +20,7 @@ import {
   MERGE_RESERVATION_ID_PATTERN,
   validateApprovalLedgerStream,
 } from './governance-approval-ledger-stream.mjs';
+import { planMergeAuthorizationReconciliation } from './governance-approval-merge-reconciliation-kernel.mjs';
 
 const REQUEST_KEYS = Object.freeze([
   'requestId', 'reservationId', 'repositoryId', 'decisionAdr', 'decisionRevision',
@@ -33,15 +31,6 @@ const RESERVATION_KEYS = Object.freeze([
   'reservedLedgerRevision', 'reservedAt',
 ]);
 const KEY_KEYS = Object.freeze(['repositoryId', 'singleUseNonce']);
-const READBACK_KEYS = Object.freeze([
-  'repositoryId', 'prNumber', 'baseSha', 'authorizedHeadSha', 'prState',
-  'resultCommitSha', 'observedMergeMethod', 'resultAssociatedWithPr',
-  'headAssociatedWithResult', 'resultReachableFromCurrentMain', 'currentMain',
-  'independentVerifier', 'preReadbackSha256', 'postReadbackSha256',
-]);
-const CURRENT_MAIN_KEYS = Object.freeze(['ref', 'sha', 'readAt']);
-const VERIFIER_KEYS = Object.freeze(['repository', 'path', 'sha', 'runId', 'attempt', 'identity']);
-const VERIFIER_REPOSITORY_KEYS = Object.freeze(['id', 'full_name']);
 const freshDispatchCapabilities = new WeakSet();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
@@ -337,80 +326,6 @@ export const executeReservedMerge = async (reservation, mergeRequester, ledger, 
   }
 };
 
-const readbackCode = (reservation, readback, now) => {
-  const grant = reservation.grant;
-  if (!hasExactKeys(readback, READBACK_KEYS)
-    || !hasExactKeys(readback.currentMain, CURRENT_MAIN_KEYS)
-    || !hasExactKeys(readback.independentVerifier, VERIFIER_KEYS)
-    || !hasExactKeys(readback.independentVerifier.repository, VERIFIER_REPOSITORY_KEYS)) {
-    return 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED';
-  }
-  if (readback.repositoryId !== grant.repository.id
-    || readback.prNumber !== grant.pr_number
-    || readback.baseSha !== grant.base_sha
-    || readback.authorizedHeadSha !== grant.head_sha) return 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE';
-  if (!isCanonicalInstant(readback.currentMain?.readAt)
-    || Date.parse(readback.currentMain.readAt) < Date.parse(grant.authorized_at)
-    || Date.parse(readback.currentMain.readAt) >= Date.parse(grant.expires_at)) {
-    return 'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE';
-  }
-  if (readback.prState !== 'MERGED'
-    || !isGitSha(readback.resultCommitSha)
-    || readback.observedMergeMethod !== grant.allowed_merge_method
-    || readback.resultAssociatedWithPr !== true
-    || readback.headAssociatedWithResult !== true
-    || readback.resultReachableFromCurrentMain !== true
-    || readback.currentMain.ref !== 'refs/heads/main'
-    || !isGitSha(readback.currentMain.sha)
-    || Date.parse(readback.currentMain.readAt) > now.getTime()
-    || !isDigest(readback.preReadbackSha256)
-    || !isDigest(readback.postReadbackSha256)) return 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED';
-  const verifier = readback.independentVerifier;
-  if (verifier.repository.id === grant.repository.id
-    || !isSafePositiveInteger(verifier.repository.id)
-    || !verifierRepositoryNameValid(verifier.repository.full_name)
-    || !/^\.github\/workflows\/[a-zA-Z0-9._-]+\.ya?ml$/.test(verifier.path)
-    || !isGitSha(verifier.sha)
-    || !isSafePositiveInteger(verifier.runId)
-    || !isSafePositiveInteger(verifier.attempt)
-    || typeof verifier.identity !== 'string'
-    || Buffer.byteLength(verifier.identity, 'utf8') > 256) return 'APPROVAL_INDEPENDENCE_NOT_PROVEN';
-  return null;
-};
-const consumptionFrom = (reservation, readback) => ({
-  schema_version: 'program-c-merge-authorization-consumption/v1',
-  consumption_id: reservation.request.reservationId.replace(/^merge-reservation-/, 'program-c-consumption-'),
-  grant_id: reservation.grant.grant_id,
-  grant_raw_sha256: reservation.grantRawSha256,
-  single_use_nonce: reservation.grant.single_use_nonce,
-  repository: clone(reservation.grant.repository),
-  decision_adr: reservation.grant.decision_adr,
-  decision_revision: reservation.grant.decision_revision,
-  policy_revision: reservation.grant.policy_revision,
-  stage: reservation.grant.stage,
-  pr_number: reservation.grant.pr_number,
-  authorized_head_sha: reservation.grant.head_sha,
-  result_commit_sha: readback.resultCommitSha,
-  observed_merge_method: readback.observedMergeMethod,
-  consumed_at: readback.currentMain.readAt,
-  nonce_ledger_key: `program-c-merge:${reservation.grant.single_use_nonce}`,
-  nonce_ledger_reserved_revision: reservation.reservedLedgerRevision,
-  independent_verifier: {
-    repository: clone(readback.independentVerifier.repository),
-    path: readback.independentVerifier.path,
-    sha: readback.independentVerifier.sha,
-    run_id: readback.independentVerifier.runId,
-    attempt: readback.independentVerifier.attempt,
-    identity: readback.independentVerifier.identity,
-  },
-  current_main: {
-    ref: readback.currentMain.ref,
-    sha: readback.currentMain.sha,
-    read_at: readback.currentMain.readAt,
-  },
-  pre_readback_sha256: readback.preReadbackSha256,
-  post_readback_sha256: readback.postReadbackSha256,
-});
 const appendHold = async (reservation, stream, facts, ledger, code, observedAt) => {
   if (facts.holds.some(({ reasonCode }) => reasonCode === code)) {
     return holdReconciliation(code, stream.committedRevision);
@@ -442,47 +357,38 @@ export const reconcileMergeAuthorizationReservation = async (
       0,
     );
   }
-  const effectiveRevocation = observed.facts.revocations.find(
-    ({ effectiveAt }) => Date.parse(effectiveAt) <= Date.parse(observedAt),
-  );
-  if (effectiveRevocation) {
+  let stream = observed.stream;
+  let facts = observed.facts;
+  const plan = planMergeAuthorizationReconciliation({
+    reservation,
+    readback,
+    streamFacts: facts,
+    observedAt,
+  });
+  if (plan.outcome === 'HOLD') {
     return appendHold(
       reservation,
-      observed.stream,
-      observed.facts,
+      stream,
+      facts,
       ledger,
-      'APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE',
+      plan.blockingCode,
       observedAt,
     );
   }
-  if (observed.facts.consumptionEvent) {
-    const event = observed.facts.consumptionEvent;
+  if (plan.outcome === 'CONSUMPTION_ALREADY_RECORDED') {
     return frozenClone({
       outcome: 'CONSUMPTION_RECORDED',
-      consumption: event.consumption,
-      consumptionRawSha256: event.consumptionRawSha256,
-      committedLedgerRevision: observed.stream.committedRevision,
+      consumption: plan.consumption,
+      consumptionRawSha256: plan.consumptionRawSha256,
+      committedLedgerRevision: stream.committedRevision,
     });
   }
-  const code = readbackCode(reservation, readback, now);
-  if (code) return appendHold(reservation, observed.stream, observed.facts, ledger, code, observedAt);
-  let stream = observed.stream;
-  let facts = observed.facts;
-  if (facts.result && (
-    facts.result.resultCommitSha !== readback.resultCommitSha
-    || facts.result.observedMergeMethod !== readback.observedMergeMethod
-  )) return appendHold(reservation, stream, facts, ledger, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED', observedAt);
-  if (!facts.result) {
+  if (plan.resultEvent) {
     const nextRevision = stream.committedRevision + 1;
     const result = await ledgerCas(ledger, {
       expectedRevision: stream.committedRevision,
       key: reservation.key,
-      event: frozenClone({
-        type: 'MERGE_RESULT_OBSERVED',
-        resultCommitSha: readback.resultCommitSha,
-        observedMergeMethod: readback.observedMergeMethod,
-        observedAt: readback.currentMain.readAt,
-      }),
+      event: plan.resultEvent,
     });
     if (!committedAt(result, nextRevision)) {
       return holdReconciliation(
@@ -496,19 +402,18 @@ export const reconcileMergeAuthorizationReservation = async (
       return holdReconciliation('APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT', stream.committedRevision);
     }
   }
-  const consumption = consumptionFrom(reservation, readback);
-  if (!validateProgramCMergeAuthorizationConsumption(consumption).valid
-    || !isBoundedId(consumption.consumption_id, MERGE_CONSUMPTION_ID_PATTERN)) {
+  if (plan.outcome === 'RESULT_READY_THEN_HOLD') {
     return appendHold(
       reservation,
       stream,
       facts,
       ledger,
-      'APPROVAL_MERGE_AUTHORIZATION_CONSUMPTION_DIGEST_MISMATCH',
+      plan.blockingCode,
       observedAt,
     );
   }
-  const consumptionRawSha256 = canonicalApprovalDigest(consumption);
+  const consumption = plan.consumption;
+  const consumptionRawSha256 = plan.consumptionRawSha256;
   const nextRevision = stream.committedRevision + 1;
   const result = await ledgerCas(ledger, {
     expectedRevision: stream.committedRevision,
