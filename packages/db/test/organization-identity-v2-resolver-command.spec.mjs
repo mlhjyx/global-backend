@@ -14,6 +14,10 @@ const migrationName =
   "20260830090000_organization_identity_v2_resolver_command";
 const migrationPath = resolve(migrationRoot, migrationName, "migration.sql");
 const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
+const attackTestPath = resolve(
+  repositoryRoot,
+  "packages/db/test/organization-identity-command-attacks.disposable.spec.mjs",
+);
 
 const frozenFiles = Object.freeze([
   [
@@ -114,6 +118,18 @@ function functionRevokes(sql, definition) {
 }
 
 describe("Organization Identity resolver command migration", () => {
+  it("tracks hostile direct-SQL USERSET runtime as NOT_GUARANTEED", () => {
+    const attackTest = readFileSync(attackTestPath, "utf8");
+    assert.match(
+      attackTest,
+      /direct hostile SQL hard runtime is NOT_GUARANTEED under same-statement USERSET forgery/u,
+    );
+    assert.match(
+      attackTest,
+      /function runUsersetForgeryDiagnostic\(\)[\s\S]*WITH initial_runtime AS MATERIALIZED[\s\S]*forged_runtime AS MATERIALIZED[\s\S]*set_config\('statement_timeout','60s',true\)[\s\S]*set_config\('lock_timeout','5s',true\)[\s\S]*resolve_organization_identity_for_raw_v1/u,
+    );
+  });
+
   it("preserves every reviewed predecessor and the Prisma datamodel", () => {
     for (const [relativePath, expected] of frozenFiles) {
       assert.equal(
