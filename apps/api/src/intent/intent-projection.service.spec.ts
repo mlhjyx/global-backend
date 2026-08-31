@@ -150,7 +150,7 @@ describe('IntentProjectionService — suppression authority materialization gate
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const evidenceCreate = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'company-1',
@@ -314,7 +314,7 @@ describe('IntentProjectionService — synthetic projection quarantine', () => {
     const update = vi.fn();
     const evidenceCreate = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'company-synthetic',

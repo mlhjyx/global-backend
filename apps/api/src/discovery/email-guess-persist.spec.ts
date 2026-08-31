@@ -56,7 +56,17 @@ function fakeTx(
     ...currentSuppressedEmails.map((value) => ({ type: 'email', value })),
     ...(opts?.companySuppressions ?? []),
   ]);
-  const queryRaw = vi.fn(async () => [opts?.company ?? { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }]);
+  const queryRaw = vi.fn(async (
+    statement: TemplateStringsArray | { strings?: readonly string[] },
+  ) => {
+    const sql = Array.isArray(statement)
+      ? statement.join("?")
+      : statement.strings?.join("?") ?? "";
+    if (sql.includes("pg_advisory_xact_lock")) {
+      return [{ locked: "" }];
+    }
+    return [opts?.company ?? { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }];
+  });
   const updateMany = vi.fn(async () => ({ count: 1 }));
   return {
     tx: {

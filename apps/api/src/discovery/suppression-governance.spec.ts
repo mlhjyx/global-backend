@@ -47,7 +47,7 @@ function makeHarness(record: SuppressionRow, companyOverride?: Record<string, un
     ...data,
   }));
   const tx = {
-    $queryRaw: vi.fn(async () => [{ locked: true }]),
+    $queryRaw: vi.fn(async () => [{ locked: "" }]),
     suppressionRecord: {
       findUnique: vi.fn(async () => current),
       findMany: vi.fn(async () => [current]),
@@ -350,7 +350,7 @@ describe('Suppression governance', () => {
       throw Object.assign(new Error('unique constraint'), { code: 'P2002' });
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       suppressionRecord: { findUnique: vi.fn(async () => row('PREFERENCE')) },
       suppressionDecision: { findUnique: findDecision, createMany, create },
     };
@@ -382,7 +382,7 @@ describe('Suppression governance', () => {
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       suppressionRecord: { findUnique: vi.fn(async () => row('PREFERENCE')) },
       suppressionDecision: {
         createMany: vi.fn(async () => ({ count: 0 })),
@@ -415,7 +415,7 @@ describe('Suppression governance', () => {
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       suppressionRecord: { findUnique: vi.fn(async () => row('LEGAL')) },
       suppressionDecision: {
         createMany: vi.fn(async () => ({ count: 0 })),
@@ -467,7 +467,7 @@ describe('Suppression governance', () => {
       contact: { company },
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       contactPoint: {
         findUnique: vi.fn(async () => point),
         update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...point, ...data })),
@@ -521,7 +521,7 @@ describe('Suppression governance', () => {
     let suppressionRead = 0;
     const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...point, ...data }));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       contactPoint: { findUnique: vi.fn(async () => point), update },
       canonicalCompany: {
         update: vi.fn(async () => ({ ...company, status: 'SUPPRESSED' })),

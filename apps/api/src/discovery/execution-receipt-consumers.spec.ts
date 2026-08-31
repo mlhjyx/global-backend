@@ -156,7 +156,7 @@ describe('actual discovery receipt consumers', () => {
       }),
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => company),
         updateMany: vi.fn(async () => ({ count: 0 })),
@@ -255,7 +255,7 @@ describe('actual discovery receipt consumers', () => {
       ...data,
     }));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       contactPoint: {
         findUnique: vi.fn(async () => point),
         update,
@@ -369,7 +369,7 @@ describe('actual discovery receipt consumers', () => {
       company,
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => company),
         updateMany: vi.fn(async () => ({ count: 0 })),

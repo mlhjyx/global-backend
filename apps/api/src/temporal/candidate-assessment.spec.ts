@@ -118,7 +118,7 @@ function companyMatches(store: Store, c: FakeCompany, where: any): boolean {
 
 function makeTx(store: Store) {
   return {
-    $queryRaw: async () => [{ locked: true }],
+    $queryRaw: async () => [{ locked: "" }],
     icpDefinition: { findUnique: async () => ({ id: ICP_A, company: null }) },
     rawSourceRecord: {
       findMany: async ({ where }: { where: { runId: string } }) =>

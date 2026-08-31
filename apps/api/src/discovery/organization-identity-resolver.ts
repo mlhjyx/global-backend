@@ -5,6 +5,14 @@ import {
   lockWorkspaceSuppressionThenIdentity,
   type SuppressionThenIdentityLockReceipt,
 } from "./organization-identity-lock";
+import {
+  mapOrganizationIdentitySourceError,
+  throwOrganizationIdentityError,
+  type OrganizationIdentityResolverErrorCode,
+} from "./suppression-policy-lock";
+
+export { OrganizationIdentityResolverError } from "./suppression-policy-lock";
+export type { OrganizationIdentityResolverErrorCode } from "./suppression-policy-lock";
 
 const RECEIPT_VERSION = "organization-identity-resolution-receipt/v1" as const;
 const UUID =
@@ -23,41 +31,6 @@ const RECEIPT_KEYS = [
   "identifier_count",
   "party_count",
 ] as const;
-const ERROR_PROXY_KEYS = [
-  "code",
-  "sqlState",
-  "sqlstate",
-  "sql_state",
-  "message",
-  "meta",
-  "cause",
-  "error",
-  "original",
-  "originalError",
-  "driverError",
-] as const;
-
-export type OrganizationIdentityResolverErrorCode =
-  | "IDENTITY_RESOLUTION_INPUT_INVALID"
-  | "IDENTITY_RAW_NOT_RESOLVABLE"
-  | "IDENTITY_RAW_PROCESSING_RESTRICTED"
-  | "IDENTITY_RESOLUTION_SUPPRESSED"
-  | "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED"
-  | "IDENTITY_INPUT_DRIFT"
-  | "IDENTITY_RESOLUTION_STATE_INVALID"
-  | "IDENTITY_RESOLUTION_PLAN_STALE"
-  | "IDENTITY_RESOLUTION_LOCK_TIMEOUT"
-  | "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT"
-  | "IDENTITY_RESOLUTION_COMMAND_DENIED"
-  | "IDENTITY_RESOLUTION_RECEIPT_INVALID";
-
-export class OrganizationIdentityResolverError extends Error {
-  constructor(public readonly code: OrganizationIdentityResolverErrorCode) {
-    super("organization identity resolution failed");
-    this.name = "OrganizationIdentityResolverError";
-  }
-}
-
 export type ResolveOrganizationIdentityForRawInput = Readonly<{
   workspaceId: string;
   rawRecordId: string;
@@ -118,7 +91,7 @@ type DbReceiptRow = Readonly<Record<(typeof RECEIPT_KEYS)[number], unknown>>;
 type TransactionClient = Prisma.TransactionClient;
 
 function fail(code: OrganizationIdentityResolverErrorCode): never {
-  throw new OrganizationIdentityResolverError(code);
+  return throwOrganizationIdentityError(code);
 }
 
 function exactInput(value: unknown): ResolveOrganizationIdentityForRawInput {
@@ -389,109 +362,6 @@ function parseReceipt(
   });
 }
 
-type DatabaseErrorFacts = Readonly<{
-  codes: ReadonlySet<string>;
-  messages: readonly string[];
-}>;
-
-function dataDescriptors(value: object): readonly [PropertyKey, unknown][] {
-  if (!types.isProxy(value)) {
-    try {
-      const descriptors = Object.getOwnPropertyDescriptors(value);
-      return Reflect.ownKeys(descriptors).flatMap((key) => {
-        const descriptor = descriptors[key as keyof typeof descriptors];
-        return descriptor && "value" in descriptor
-          ? ([[key, descriptor.value]] as const)
-          : [];
-      });
-    } catch {
-      return [];
-    }
-  }
-  return ERROR_PROXY_KEYS.flatMap((key) => {
-    try {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      return descriptor && "value" in descriptor
-        ? ([[key, descriptor.value]] as const)
-        : [];
-    } catch {
-      return [];
-    }
-  });
-}
-
-function databaseErrorFacts(error: unknown): DatabaseErrorFacts {
-  const codes = new Set<string>();
-  const messages: string[] = [];
-  const seen = new WeakSet<object>();
-  const pending: unknown[] = [error];
-  let cursor = 0;
-  while (cursor < pending.length) {
-    const current = pending[cursor];
-    cursor += 1;
-    if (current === null || typeof current !== "object" || seen.has(current)) {
-      continue;
-    }
-    seen.add(current);
-    for (const [key, value] of dataDescriptors(current)) {
-      if (typeof key === "string" && typeof value === "string") {
-        const normalized = key.toLowerCase().replaceAll("_", "");
-        if (normalized === "code" || normalized === "sqlstate") {
-          codes.add(value);
-        }
-        if (normalized === "message") messages.push(value);
-      }
-      if (value !== null && typeof value === "object") pending.push(value);
-    }
-  }
-  return Object.freeze({
-    codes,
-    messages: Object.freeze([...messages]),
-  });
-}
-
-function hasMessageToken(
-  facts: DatabaseErrorFacts,
-  token: OrganizationIdentityResolverErrorCode,
-): boolean {
-  const exactToken = new RegExp(
-    `(?:^|[^A-Z0-9_])${token}(?:$|[^A-Z0-9_])`,
-    "u",
-  );
-  return facts.messages.some((message) => exactToken.test(message));
-}
-
-function mapDatabaseError(error: unknown): never {
-  if (error instanceof OrganizationIdentityResolverError) throw error;
-  const facts = databaseErrorFacts(error);
-  if (facts.codes.has("57014")) {
-    return fail("IDENTITY_RESOLUTION_STATEMENT_TIMEOUT");
-  }
-  if (facts.codes.has("55P03")) {
-    return fail("IDENTITY_RESOLUTION_LOCK_TIMEOUT");
-  }
-  if (facts.codes.has("42501")) {
-    return fail("IDENTITY_RESOLUTION_COMMAND_DENIED");
-  }
-  if (facts.codes.has("40001")) {
-    return fail("IDENTITY_RESOLUTION_PLAN_STALE");
-  }
-  for (const token of [
-    "IDENTITY_RESOLUTION_INPUT_INVALID",
-    "IDENTITY_RAW_NOT_RESOLVABLE",
-    "IDENTITY_RAW_PROCESSING_RESTRICTED",
-    "IDENTITY_INPUT_DRIFT",
-    "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
-    "IDENTITY_RESOLUTION_SUPPRESSED",
-    "IDENTITY_RESOLUTION_STATE_INVALID",
-  ] as const) {
-    if (facts.codes.has("P0001") && hasMessageToken(facts, token)) {
-      return fail(token);
-    }
-  }
-  return fail("IDENTITY_RESOLUTION_STATE_INVALID");
-}
-
 /**
  * Official source contract. The caller owns one app_user tenant transaction.
  * A supplied lock receipt must have been created by the same transaction and
@@ -532,6 +402,6 @@ export async function resolveOrganizationIdentityForRaw(
       )`;
     return parseReceipt(rows, input.rawRecordId);
   } catch (error) {
-    return mapDatabaseError(error);
+    return mapOrganizationIdentitySourceError(error);
   }
 }

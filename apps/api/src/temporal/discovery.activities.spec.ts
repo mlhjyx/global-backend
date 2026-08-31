@@ -292,7 +292,7 @@ const budgetSwallowingEnricher = {
 
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
-    $queryRaw: async () => [{ locked: true }],
+    $queryRaw: async () => [{ locked: "" }],
     rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
     identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
     canonicalCompany: {
@@ -877,7 +877,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("skips an accepted Raw row that has no canonical company name", async () => {
     const canonicalUpsert = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       rawSourceRecord: {
         findMany: vi.fn(async () => [
           {
@@ -910,7 +910,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("excludes every legacy ingest version from downstream materialization", async () => {
     const rawFindMany = vi.fn(async () => []);
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       rawSourceRecord: { findMany: rawFindMany },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
@@ -952,7 +952,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       const identityCreate = vi.fn();
       const evidenceCreate = vi.fn();
       const tx = {
-        $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+        $queryRaw: async () => [{ locked: "" }],
         rawSourceRecord: {
           findMany: async () => [{ id: "raw-synthetic", ...raw }],
         },
@@ -992,7 +992,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const tx = {
       $queryRaw: async () => {
         order.push("lock");
-        return [{ pg_advisory_xact_lock: null }];
+        return [{ locked: "" }];
       },
       rawSourceRecord: {
         findMany: async () => [
@@ -1055,7 +1055,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     );
     const linkCreate = vi.fn(async () => ({}));
     const tx = {
-      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      $queryRaw: async () => [{ locked: "" }],
       rawSourceRecord: {
         findMany: async () => [
           {
@@ -1171,7 +1171,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const linkCreate = vi.fn();
     const evidenceCreate = vi.fn();
     const tx = {
-      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      $queryRaw: async () => [{ locked: "" }],
       rawSourceRecord: {
         findMany: async () => [
           {
@@ -1279,7 +1279,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       },
     );
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       rawSourceRecord: { findMany: vi.fn(async () => raws) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
@@ -1410,7 +1410,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       return { id: company.id };
     });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },

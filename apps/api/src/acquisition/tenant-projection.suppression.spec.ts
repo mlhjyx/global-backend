@@ -58,7 +58,7 @@ function projectionHarness(
           },
         ];
       }
-      return [{ pg_advisory_xact_lock: null }];
+      return [{ locked: "" }];
     },
   );
   const tx = {

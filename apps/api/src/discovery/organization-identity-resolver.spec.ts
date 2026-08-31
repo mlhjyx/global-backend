@@ -15,6 +15,15 @@ const INPUT_HASH = "a".repeat(64);
 const CONFLICT_FINGERPRINT = "b".repeat(64);
 const NATIVE_TIMEOUT =
   "canceling statement due to statement timeout: owner-password-marker";
+const REVIEWED_P0001_TOKENS = [
+  "IDENTITY_RESOLUTION_INPUT_INVALID",
+  "IDENTITY_RAW_NOT_RESOLVABLE",
+  "IDENTITY_RAW_PROCESSING_RESTRICTED",
+  "IDENTITY_INPUT_DRIFT",
+  "IDENTITY_LEGACY_LINK_ALREADY_RESOLVED",
+  "IDENTITY_RESOLUTION_SUPPRESSED",
+  "IDENTITY_RESOLUTION_STATE_INVALID",
+] as const;
 
 const _RECEIPT_KEYS = [
   "outcome_kind",
@@ -227,15 +236,51 @@ async function expectDatabaseCode(
   errorAt: QueryEvent = "resolver",
 ): Promise<void> {
   const fixture = transactionFixture({ errorAt, error });
-  await expect(
-    resolveOrganizationIdentityForRaw(fixture.tx, {
+  let caught: unknown;
+  try {
+    await resolveOrganizationIdentityForRaw(fixture.tx, {
       workspaceId: WORKSPACE_ID,
       rawRecordId: RAW_ID,
-    }),
-  ).rejects.toMatchObject({
+    });
+  } catch (candidate) {
+    caught = candidate;
+  }
+  expect(caught).toBeInstanceOf(OrganizationIdentityResolverError);
+  expect(caught).toMatchObject({
+    name: "OrganizationIdentityResolverError",
     code: expectedCode,
     message: "organization identity resolution failed",
   });
+  expect(caught).not.toBe(error);
+  expect(Object.isFrozen(caught)).toBe(true);
+  expect(
+    Reflect.ownKeys(caught as object)
+      .map(String)
+      .sort(),
+  ).toEqual(["code", "message"]);
+  expect(String(caught)).not.toContain(NATIVE_TIMEOUT);
+  expect(JSON.stringify(caught)).not.toContain(NATIVE_TIMEOUT);
+  expect(caught).not.toHaveProperty("cause");
+  expect(caught).not.toHaveProperty("meta");
+  expect(caught).not.toHaveProperty("detail");
+  expect(caught).not.toHaveProperty("query");
+}
+
+function decoratedDomainError(
+  code: string,
+  cause: unknown,
+): OrganizationIdentityResolverError {
+  return Object.create(OrganizationIdentityResolverError.prototype, {
+    code: { enumerable: true, value: code },
+    message: { enumerable: false, value: NATIVE_TIMEOUT },
+    cause: { enumerable: true, value: cause },
+    meta: {
+      enumerable: true,
+      value: { detail: "private meta", query: "SELECT private" },
+    },
+    detail: { enumerable: true, value: "private detail" },
+    query: { enumerable: true, value: "SELECT private" },
+  }) as OrganizationIdentityResolverError;
 }
 
 describe("organization identity DB resolver source contract", () => {
@@ -470,6 +515,7 @@ describe("organization identity DB resolver source contract", () => {
     ["unknown discriminator", boundRow({ outcome_kind: "BOUND" })],
     ["malformed Raw UUID", boundRow({ raw_record_id: "not-a-uuid" })],
     ["bound missing company", boundRow({ company_id: null })],
+    ["bound malformed company UUID", boundRow({ company_id: "not-a-uuid" })],
     ["bound conflict ID", boundRow({ conflict_id: CONFLICT_ID })],
     ["bound match rule", boundRow({ match_rule: "identifier_exact" })],
     ["bound input hash", boundRow({ input_hash: "not-a-hash" })],
@@ -479,6 +525,10 @@ describe("organization identity DB resolver source contract", () => {
     ],
     ["bound replay type", boundRow({ replayed: 0 })],
     ["bound company-created mismatch", boundRow({ company_created: true })],
+    ["bound company-created type", boundRow({ company_created: 0 })],
+    ["bound negative identifier count", boundRow({ identifier_count: -1 })],
+    ["bound fractional identifier count", boundRow({ identifier_count: 1.5 })],
+    ["bound string identifier count", boundRow({ identifier_count: "1" })],
     [
       "bound unsafe identifier count",
       boundRow({ identifier_count: Number.MAX_SAFE_INTEGER + 1 }),
@@ -497,12 +547,27 @@ describe("organization identity DB resolver source contract", () => {
     ],
     ["conflict company ID", conflictRow({ company_id: COMPANY_ID })],
     ["conflict missing ID", conflictRow({ conflict_id: null })],
+    [
+      "conflict malformed conflict UUID",
+      conflictRow({ conflict_id: "not-a-uuid" }),
+    ],
     ["conflict match rule", conflictRow({ match_rule: "identity_v2" })],
     ["conflict input hash", conflictRow({ input_hash: null })],
     ["conflict fingerprint", conflictRow({ conflict_fingerprint: null })],
+    [
+      "conflict malformed fingerprint",
+      conflictRow({ conflict_fingerprint: "not-a-hash" }),
+    ],
     ["conflict company-created", conflictRow({ company_created: true })],
+    [
+      "conflict company-created type",
+      conflictRow({ company_created: "false" }),
+    ],
     ["conflict identifier count", conflictRow({ identifier_count: 1 })],
     ["conflict party minimum", conflictRow({ party_count: 1 })],
+    ["conflict negative party count", conflictRow({ party_count: -1 })],
+    ["conflict fractional party count", conflictRow({ party_count: 2.5 })],
+    ["conflict string party count", conflictRow({ party_count: "2" })],
     ["conflict party maximum", conflictRow({ party_count: 65 })],
     [
       "conflict unsafe party count",
@@ -585,6 +650,72 @@ describe("organization identity DB resolver source contract", () => {
       deeplyNested,
       "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
     );
+  });
+
+  it("inspects decorated domain errors for nested cancellation before trusting their class", async () => {
+    const decorated = decoratedDomainError(
+      "IDENTITY_RESOLUTION_STATE_INVALID",
+      {
+        cause: Object.assign(new Error(NATIVE_TIMEOUT), {
+          code: "57014",
+          detail: "private detail",
+          query: "SELECT private",
+        }),
+      },
+    );
+
+    await expectDatabaseCode(
+      decorated,
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+  });
+
+  it("replaces a decorated domain error with a fresh frozen fixed error", async () => {
+    const decorated = decoratedDomainError("IDENTITY_INPUT_DRIFT", {
+      code: "XX000",
+      message: "unreviewed native message",
+    });
+
+    await expectDatabaseCode(decorated, "IDENTITY_INPUT_DRIFT");
+  });
+
+  it.each(REVIEWED_P0001_TOKENS)(
+    "does not combine sibling P0001 code and %s message",
+    async (token) => {
+      await expectDatabaseCode(
+        {
+          codeEnvelope: { code: "P0001" },
+          messageEnvelope: { message: `ERROR: ${token}` },
+        },
+        "IDENTITY_RESOLUTION_STATE_INVALID",
+      );
+    },
+  );
+
+  it("does not combine AggregateError siblings into a reviewed P0001 pair", async () => {
+    const split = new AggregateError([
+      Object.assign(new Error("code only"), { code: "P0001" }),
+      new Error("ERROR: IDENTITY_INPUT_DRIFT"),
+    ]);
+
+    await expectDatabaseCode(split, "IDENTITY_RESOLUTION_STATE_INVALID");
+  });
+
+  it("does not combine cyclic sibling envelopes into a reviewed P0001 pair", async () => {
+    const codeEnvelope: Record<string, unknown> = { code: "P0001" };
+    const messageEnvelope: Record<string, unknown> = {
+      message: "ERROR: IDENTITY_INPUT_DRIFT",
+    };
+    Object.defineProperty(codeEnvelope, "peer", {
+      enumerable: true,
+      value: messageEnvelope,
+    });
+    Object.defineProperty(messageEnvelope, "peer", {
+      enumerable: true,
+      value: codeEnvelope,
+    });
+
+    await expectDatabaseCode(codeEnvelope, "IDENTITY_RESOLUTION_STATE_INVALID");
   });
 
   it("maps pre-context prearm cancellation before any lock and never returns native database text", async () => {
@@ -751,5 +882,10 @@ describe("organization identity DB resolver source contract", () => {
         message: "organization identity resolution failed",
       }),
     );
+    expect(Object.isFrozen(error)).toBe(true);
+    expect(Reflect.ownKeys(error).map(String).sort()).toEqual([
+      "code",
+      "message",
+    ]);
   });
 });

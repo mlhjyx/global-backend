@@ -39,7 +39,7 @@ describe("TenantProjectionService Raw Source bridge", () => {
             },
           ];
         }
-        return [{ pg_advisory_xact_lock: null }];
+        return [{ locked: "" }];
       },
     );
     const tx = {
@@ -202,7 +202,7 @@ describe("TenantProjectionService Raw Source bridge", () => {
         if (
           !statement.strings?.join("?").includes("write_raw_source_record_v2")
         ) {
-          return [{ pg_advisory_xact_lock: null }];
+          return [{ locked: "" }];
         }
         const command = JSON.parse(String(statement.values?.[0])) as Record<
           string,

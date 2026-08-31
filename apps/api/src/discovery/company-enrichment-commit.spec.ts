@@ -7,7 +7,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const create = vi.fn(async () => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -63,7 +63,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const create = vi.fn(async () => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -110,7 +110,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -177,7 +177,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -258,7 +258,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -306,7 +306,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -354,7 +354,7 @@ describe('company enrichment commit suppression boundary', () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',

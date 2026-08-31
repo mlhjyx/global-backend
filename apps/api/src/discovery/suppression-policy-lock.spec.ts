@@ -16,8 +16,14 @@ function transaction(rows: unknown = [{ locked: "" }]) {
   } as unknown as Prisma.TransactionClient;
 }
 
+async function expectInvalidScalarReceipt(rows: unknown): Promise<void> {
+  await expect(
+    lockWorkspaceSuppressionPolicy(transaction(rows), WORKSPACE_ID),
+  ).rejects.toThrow("database scalar receipt invalid");
+}
+
 describe("workspace suppression policy lock", () => {
-  it("uses one typed transaction-scoped advisory-lock read and binds the receipt to the transaction", async () => {
+  it("validates one exact scalar row before branding the receipt to the transaction", async () => {
     const tx = transaction();
     const receipt = await lockWorkspaceSuppressionPolicy(tx, WORKSPACE_ID);
     const queryRaw = tx.$queryRaw as ReturnType<typeof vi.fn>;
@@ -38,5 +44,52 @@ describe("workspace suppression policy lock", () => {
     expect(() =>
       assertWorkspaceSuppressionPolicyLock(receipt, otherTx, WORKSPACE_ID),
     ).toThrow("workspace suppression policy lock receipt mismatch");
+  });
+
+  it.each([
+    ["non-array", { locked: "" }],
+    ["zero rows", []],
+    ["sparse row", Array(1)],
+    ["extra rows", [{ locked: "" }, { locked: "" }]],
+    ["custom array key", Object.assign([{ locked: "" }], { extra: true })],
+    ["proxy array", new Proxy([{ locked: "" }], {})],
+    ["null row", [null]],
+    ["array row", [[""]]],
+    [
+      "null-prototype row",
+      [Object.assign(Object.create(null), { locked: "" })],
+    ],
+    ["proxy row", [new Proxy({ locked: "" }, {})]],
+    ["wrong key", [{ lock: "" }]],
+    ["extra row key", [{ locked: "", extra: true }]],
+    ["wrong scalar value", [{ locked: "true" }]],
+    ["wrong scalar type", [{ locked: 0 }]],
+  ])(
+    "rejects malformed scalar receipt without branding: %s",
+    async (_label, rows) => {
+      await expectInvalidScalarReceipt(rows);
+    },
+  );
+
+  it("rejects an accessor array element without invoking it", async () => {
+    const getter = vi.fn(() => ({ locked: "" }));
+    const rows = Object.defineProperty([], "0", {
+      enumerable: true,
+      get: getter,
+    });
+
+    await expectInvalidScalarReceipt(rows);
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it("rejects an accessor scalar without invoking it", async () => {
+    const getter = vi.fn(() => "");
+    const row = Object.defineProperty({}, "locked", {
+      enumerable: true,
+      get: getter,
+    });
+
+    await expectInvalidScalarReceipt([row]);
+    expect(getter).not.toHaveBeenCalled();
   });
 });
