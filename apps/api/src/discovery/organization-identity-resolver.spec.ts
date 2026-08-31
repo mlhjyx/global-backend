@@ -652,6 +652,87 @@ describe("organization identity DB resolver source contract", () => {
     );
   });
 
+  it("maps a 57014 beyond the 1024-node deep traversal budget to conservative timeout", async () => {
+    const beyondBudget = Array.from({ length: 1024 }).reduce<unknown>(
+      (cause) => ({ cause }),
+      Object.assign(new Error(NATIVE_TIMEOUT), { code: "57014" }),
+    );
+
+    await expectDatabaseCode(
+      beyondBudget,
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+  });
+
+  it("maps a wide graph whose 57014 is after the queue threshold to conservative timeout", async () => {
+    const errors = Array.from({ length: 1100 }, (_unused, index) =>
+      index === 1099
+        ? Object.assign(new Error(NATIVE_TIMEOUT), { code: "57014" })
+        : { message: `ordinary sibling ${index}` },
+    );
+
+    await expectDatabaseCode(
+      { errors },
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+  });
+
+  it("maps an over-budget graph with no observed 57014 to conservative timeout", async () => {
+    const errors = Array.from({ length: 1100 }, (_unused, index) => ({
+      message: `ordinary sibling ${index}`,
+    }));
+
+    await expectDatabaseCode(
+      { errors },
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+  });
+
+  it("bounds cyclic Proxy overflow without invoking accessors or leaking native fields", async () => {
+    const getter = vi.fn(() => ({ code: "57014" }));
+    const proxyDescriptor = vi.fn(
+      (
+        target: Record<string, unknown>,
+        key: PropertyKey,
+      ): PropertyDescriptor | undefined =>
+        Reflect.getOwnPropertyDescriptor(target, key),
+    );
+    const errors = Array.from({ length: 1100 }, (_unused, index) => ({
+      message: `ordinary sibling ${index}`,
+    }));
+    const envelope: Record<string, unknown> = { errors };
+    Object.defineProperty(envelope, "hiddenCancellation", {
+      enumerable: true,
+      get: getter,
+    });
+    const proxyTarget: Record<string, unknown> = {
+      cause: envelope,
+      message: NATIVE_TIMEOUT,
+    };
+    const proxy = new Proxy(proxyTarget, {
+      getOwnPropertyDescriptor: proxyDescriptor,
+    });
+    Object.defineProperty(envelope, "cycle", {
+      enumerable: true,
+      value: proxy,
+    });
+
+    await expectDatabaseCode(proxy, "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT");
+    expect(getter).not.toHaveBeenCalled();
+    expect(proxyDescriptor.mock.calls.length).toBeLessThanOrEqual(13);
+  });
+
+  it("keeps an exactly-1024-node exhaustive graph on its associated non-timeout mapping", async () => {
+    const exactlyAtLimit = Array.from({ length: 1023 }).reduce<unknown>(
+      (cause) => ({ cause }),
+      Object.assign(new Error("ERROR: IDENTITY_INPUT_DRIFT"), {
+        code: "P0001",
+      }),
+    );
+
+    await expectDatabaseCode(exactlyAtLimit, "IDENTITY_INPUT_DRIFT");
+  });
+
   it("inspects decorated domain errors for nested cancellation before trusting their class", async () => {
     const decorated = decoratedDomainError(
       "IDENTITY_RESOLUTION_STATE_INVALID",

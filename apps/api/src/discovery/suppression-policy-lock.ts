@@ -4,6 +4,9 @@ import { types } from "node:util";
 const POLICY_LOCK_RECEIPT = Symbol("workspace-suppression-policy-lock");
 const GENERIC_ERROR_MESSAGE = "organization identity resolution failed";
 const MAX_ERROR_GRAPH_NODES = 1024;
+const MAX_ERROR_GRAPH_DEPTH = 1023;
+const MAX_ERROR_GRAPH_QUEUE = 1024;
+const MAX_ERROR_PROPERTIES_PER_NODE = 2048;
 const ERROR_PROXY_KEYS = [
   "code",
   "sqlState",
@@ -79,31 +82,56 @@ type ErrorEnvelope = Readonly<{
 type ErrorGraph = Readonly<{
   codes: ReadonlySet<string>;
   envelopes: readonly ErrorEnvelope[];
+  truncated: boolean;
 }>;
 
-function dataDescriptors(value: object): readonly [PropertyKey, unknown][] {
+type DescriptorScan = Readonly<{
+  entries: readonly (readonly [PropertyKey, unknown])[];
+  truncated: boolean;
+}>;
+
+function dataDescriptors(value: object): DescriptorScan {
   if (!types.isProxy(value)) {
+    let keys: readonly PropertyKey[];
     try {
-      const descriptors = Object.getOwnPropertyDescriptors(value);
-      return Reflect.ownKeys(descriptors).flatMap((key) => {
-        const descriptor = descriptors[key as keyof typeof descriptors];
-        return descriptor && "value" in descriptor
-          ? ([[key, descriptor.value]] as const)
-          : [];
-      });
+      keys = Reflect.ownKeys(value);
     } catch {
-      return [];
+      return Object.freeze({ entries: Object.freeze([]), truncated: true });
     }
+    let truncated = keys.length > MAX_ERROR_PROPERTIES_PER_NODE;
+    const entries = keys
+      .slice(0, MAX_ERROR_PROPERTIES_PER_NODE)
+      .flatMap((key) => {
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          return descriptor && "value" in descriptor
+            ? ([[key, descriptor.value]] as const)
+            : [];
+        } catch {
+          truncated = true;
+          return [];
+        }
+      });
+    return Object.freeze({
+      entries: Object.freeze(entries),
+      truncated,
+    });
   }
-  return ERROR_PROXY_KEYS.flatMap((key) => {
+  let truncated = false;
+  const entries = ERROR_PROXY_KEYS.flatMap((key) => {
     try {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       return descriptor && "value" in descriptor
         ? ([[key, descriptor.value]] as const)
         : [];
     } catch {
+      truncated = true;
       return [];
     }
+  });
+  return Object.freeze({
+    entries: Object.freeze(entries),
+    truncated,
   });
 }
 
@@ -122,19 +150,33 @@ function isOrdinaryErrorEnvelope(value: object): boolean {
 function inspectErrorGraph(error: unknown): ErrorGraph {
   const codes = new Set<string>();
   const envelopes: ErrorEnvelope[] = [];
-  const seen = new WeakSet<object>();
-  const pending: unknown[] = [error];
+  const scheduled = new WeakSet<object>();
+  const pending: Array<Readonly<{ value: object; depth: number }>> = [];
+  if (error !== null && typeof error === "object") {
+    scheduled.add(error);
+    pending.push(Object.freeze({ value: error, depth: 0 }));
+  }
   let cursor = 0;
-  while (cursor < pending.length && cursor < MAX_ERROR_GRAPH_NODES) {
-    const current = pending[cursor];
-    cursor += 1;
-    if (current === null || typeof current !== "object" || seen.has(current)) {
-      continue;
+  let inspectedNodes = 0;
+  let truncated = false;
+  while (cursor < pending.length) {
+    if (inspectedNodes >= MAX_ERROR_GRAPH_NODES) {
+      truncated = true;
+      break;
     }
-    seen.add(current);
+    const currentNode = pending[cursor];
+    cursor += 1;
+    if (!currentNode) {
+      truncated = true;
+      break;
+    }
+    inspectedNodes += 1;
+    const current = currentNode.value;
     const nodeCodes: string[] = [];
     const nodeMessages: string[] = [];
-    for (const [key, value] of dataDescriptors(current)) {
+    const descriptorScan = dataDescriptors(current);
+    if (descriptorScan.truncated) truncated = true;
+    for (const [key, value] of descriptorScan.entries) {
       if (typeof key === "string" && typeof value === "string") {
         const normalized = key.toLowerCase().replaceAll("_", "");
         if (normalized === "code" || normalized === "sqlstate") {
@@ -143,7 +185,19 @@ function inspectErrorGraph(error: unknown): ErrorGraph {
         }
         if (normalized === "message") nodeMessages.push(value);
       }
-      if (value !== null && typeof value === "object") pending.push(value);
+      if (value === null || typeof value !== "object" || scheduled.has(value)) {
+        continue;
+      }
+      if (currentNode.depth >= MAX_ERROR_GRAPH_DEPTH) {
+        truncated = true;
+        continue;
+      }
+      if (pending.length >= MAX_ERROR_GRAPH_QUEUE) {
+        truncated = true;
+        continue;
+      }
+      scheduled.add(value);
+      pending.push(Object.freeze({ value, depth: currentNode.depth + 1 }));
     }
     envelopes.push(
       Object.freeze({
@@ -156,6 +210,7 @@ function inspectErrorGraph(error: unknown): ErrorGraph {
   return Object.freeze({
     codes,
     envelopes: Object.freeze([...envelopes]),
+    truncated,
   });
 }
 
@@ -199,6 +254,11 @@ export function throwOrganizationIdentityError(
 export function mapOrganizationIdentitySourceError(error: unknown): never {
   const graph = inspectErrorGraph(error);
   if (graph.codes.has("57014")) {
+    return throwOrganizationIdentityError(
+      "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
+    );
+  }
+  if (graph.truncated) {
     return throwOrganizationIdentityError(
       "IDENTITY_RESOLUTION_STATEMENT_TIMEOUT",
     );
