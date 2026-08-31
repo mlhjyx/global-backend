@@ -99,6 +99,9 @@ const HISTORY_ACTIVE = 'ACTIVE';
 const HISTORY_APPENDING = 'APPENDING';
 const HISTORY_CONSUMED = 'CONSUMED';
 const approvalHistoryBindings = new WeakMap();
+const hasApprovalHistoryBinding = WeakMap.prototype.has.bind(approvalHistoryBindings);
+const getApprovalHistoryBinding = WeakMap.prototype.get.bind(approvalHistoryBindings);
+const setApprovalHistoryBinding = WeakMap.prototype.set.bind(approvalHistoryBindings);
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
 const prepareApprovalHistory = (events) => {
@@ -112,7 +115,7 @@ const historyBinding = (policySnapshot, policySha256, capabilityState) => Object
   capabilityState,
 });
 const activateApprovalHistory = (history, binding) => {
-  approvalHistoryBindings.set(history, historyBinding(
+  setApprovalHistoryBinding(history, historyBinding(
     binding.policySnapshot,
     binding.policySha256,
     HISTORY_ACTIVE,
@@ -423,7 +426,7 @@ const boundHistoryHold = (binding, code) => deepFreeze({
 export const reduceApprovalDecisionState = (events, policy, now) => {
   nowIso(now);
   if (!Array.isArray(events)) throw approvalError('APPROVAL_STATE_INPUT_INVALID');
-  const binding = approvalHistoryBindings.get(events);
+  const binding = getApprovalHistoryBinding(events);
   if (binding === undefined) {
     return boundHistoryHold(
       createPolicyBinding(policy),
@@ -433,7 +436,7 @@ export const reduceApprovalDecisionState = (events, policy, now) => {
   if (!callerPolicyMatches(policy, binding)) {
     return boundHistoryHold(binding, 'APPROVAL_STATE_POLICY_MISMATCH');
   }
-  const currentBinding = approvalHistoryBindings.get(events);
+  const currentBinding = getApprovalHistoryBinding(events);
   if (currentBinding?.capabilityState !== HISTORY_ACTIVE) {
     return boundHistoryHold(currentBinding ?? binding, 'APPROVAL_STATE_HISTORY_CONSUMED');
   }
@@ -457,14 +460,14 @@ export const appendApprovalDecisionEvent = (
   if (!isPlainObject(state)) transitionError('APPROVAL_STATE_APPEND_INVALID');
   const history = state.eventHistory;
   if (!Array.isArray(history)
-    || !approvalHistoryBindings.has(history)) {
+    || !hasApprovalHistoryBinding(history)) {
     transitionError('APPROVAL_STATE_APPEND_INVALID');
   }
-  const binding = approvalHistoryBindings.get(history);
+  const binding = getApprovalHistoryBinding(history);
   if (binding.capabilityState !== HISTORY_ACTIVE) {
     return boundHistoryHold(binding, 'APPROVAL_STATE_HISTORY_CONSUMED');
   }
-  approvalHistoryBindings.set(history, historyBinding(
+  setApprovalHistoryBinding(history, historyBinding(
     binding.policySnapshot,
     binding.policySha256,
     HISTORY_APPENDING,
@@ -515,7 +518,7 @@ export const appendApprovalDecisionEvent = (
     }
     const nextHistory = prepareApprovalHistory([...history, event]);
     const nextState = reduceBoundApprovalDecisionState(nextHistory, binding, now);
-    approvalHistoryBindings.set(history, historyBinding(
+    setApprovalHistoryBinding(history, historyBinding(
       binding.policySnapshot,
       binding.policySha256,
       HISTORY_CONSUMED,
@@ -525,7 +528,7 @@ export const appendApprovalDecisionEvent = (
     return nextState;
   } finally {
     if (!committed
-      && approvalHistoryBindings.get(history)?.capabilityState === HISTORY_APPENDING) {
+      && getApprovalHistoryBinding(history)?.capabilityState === HISTORY_APPENDING) {
       activateApprovalHistory(history, binding);
     }
   }
