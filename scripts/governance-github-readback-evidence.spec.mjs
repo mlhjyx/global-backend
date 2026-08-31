@@ -14,6 +14,7 @@ import {
   OTHER_SHA,
   PROPOSAL_MANIFEST_BLOB_SHA,
   PROPOSAL_SIDECAR_BLOB_SHA,
+  REPOSITORY_ID,
   canonicalProposalSidecarBytes,
   SIGNER_BLOB_SHA,
   SIGNER_PATH,
@@ -28,6 +29,7 @@ import {
   fixtureFetch,
   fixtureState,
   limits,
+  mutateAuthorityRole,
   policy,
   request,
   review,
@@ -116,6 +118,39 @@ test('requires complete exact-head Product, Privacy, QA, and numeric OWN-SECURIT
     state.reviewPages[1][1].id = 2001;
     await expectCode(() => collect(state), 'APPROVAL_GITHUB_PAGINATION_INVALID');
   });
+});
+
+test('rejects stale or wrongly scoped hosted authority for every exact review role', async (t) => {
+  const wrongPurpose = {
+    'OWN-PRODUCT': 'SECURITY_REVIEW',
+    'OWN-DATA-PRIVACY': 'QA_EVIDENCE_REVIEW',
+    'OWN-QA-EVIDENCE': 'DECISION_REVIEW',
+    'OWN-SECURITY': 'DECISION_REVIEW',
+  };
+  for (const role of [
+    'OWN-PRODUCT',
+    'OWN-DATA-PRIVACY',
+    'OWN-QA-EVIDENCE',
+    'OWN-SECURITY',
+  ]) {
+    for (const [condition, mutate] of [
+      ['revoked', (entry) => { entry.revocation_status = 'REVOKED'; }],
+      ['superseded', (entry) => { entry.superseded_by = 'approval-authorities/r3'; }],
+      ['repository mismatch', (entry) => { entry.scope.repository_id = REPOSITORY_ID + 1; }],
+      ['decision mismatch', (entry) => { entry.scope.decision_adr = 'ADR-026'; }],
+      ['policy mismatch', (entry) => { entry.scope.policy_revision = 'program-c/policy-r3'; }],
+      ['purpose mismatch', (entry) => { entry.scope.purpose = wrongPurpose[role]; }],
+    ]) {
+      await t.test(`${role}: ${condition}`, async () => {
+        const state = fixtureState();
+        mutateAuthorityRole(state, role, mutate);
+        await expectCode(
+          () => collect(state),
+          'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+        );
+      });
+    }
+  }
 });
 
 test('rejects duplicate checks and weak name, URL, path, or slug-only claims', async (t) => {

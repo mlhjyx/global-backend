@@ -19,6 +19,10 @@ import {
   sha256,
   stableJson,
 } from './governance-github-readback-common.mjs';
+import {
+  AUTHORITY_CURRENTNESS_CODE,
+  authorityEntryCurrentForReview,
+} from './governance-github-readback-git.mjs';
 import { apiUrl, fetchJson, paginate } from './governance-github-readback-rest.mjs';
 
 export const normalizeRepository = (value) => {
@@ -87,6 +91,18 @@ const normalizeRoleReview = (parsed, role, authority, request) => {
     throw approvalError(wrongActorClaim ? 'APPROVAL_REVIEW_ACTOR_MISMATCH' : 'APPROVAL_REVIEW_REQUIRED');
   }
   const selected = actorEvents.at(-1);
+  requireCondition(
+    authorityEntryCurrentForReview({
+      entry: expected,
+      role,
+      repository: request.repository,
+      decisionId: request.decisionId,
+      policyRevision: request.policyRevision,
+      reviewSubmittedAt: selected.review?.submitted_at,
+      requestObservedAt: request.observedAt,
+    }),
+    AUTHORITY_CURRENTNESS_CODE,
+  );
   requireCondition(selected.command?.role === role, 'APPROVAL_REVIEW_COMMAND_INVALID');
   const review = selected.review;
   if (review.state === 'DISMISSED') throw approvalError('APPROVAL_REVIEW_DISMISSED');

@@ -15,6 +15,10 @@ import {
   requireCondition,
   sha256,
 } from './governance-github-readback-common.mjs';
+import {
+  authorityIsCurrent,
+  isCausalOrder,
+} from './governance-approval-readback-common.mjs';
 import { apiUrl, fetchJson } from './governance-github-readback-rest.mjs';
 import {
   validateApprovalAuthorities,
@@ -22,6 +26,13 @@ import {
 } from './governance-approval-schema-validator.mjs';
 
 const LFS_PREFIX = Buffer.from('version https://git-lfs.github.com/spec/v1', 'ascii');
+const REVIEW_PURPOSE_BY_ROLE = Object.freeze({
+  'OWN-PRODUCT': 'DECISION_REVIEW',
+  'OWN-DATA-PRIVACY': 'DECISION_REVIEW',
+  'OWN-QA-EVIDENCE': 'QA_EVIDENCE_REVIEW',
+  'OWN-SECURITY': 'SECURITY_REVIEW',
+});
+export const AUTHORITY_CURRENTNESS_CODE = 'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH';
 
 export const readTree = async (state, commitSha, limits, budget) => {
   const response = await fetchJson(
@@ -140,6 +151,13 @@ export const readUtf8TextFile = async (state, entry, commitSha, limits) => {
 export const authorityActors = (authorityFile) => {
   const value = authorityFile.value;
   const schemaValidation = validateApprovalAuthorities(value);
+  const hostedRepositoryScopeMismatch = (
+    schemaValidation.valid === false
+    && schemaValidation.issues.length === 1
+    && schemaValidation.issues[0].stable_code === 'APPROVAL_SCHEMA_CONST'
+    && /^\/roles\/[0-3]\/scope\/repository_id$/.test(schemaValidation.issues[0].instance_path)
+  );
+  requireCondition(!hostedRepositoryScopeMismatch, AUTHORITY_CURRENTNESS_CODE);
   requireCondition(
     schemaValidation.valid
       && isPlainObject(value)
@@ -189,6 +207,40 @@ export const authorityActors = (authorityFile) => {
       },
     }),
   };
+};
+
+export const authorityEntryCurrentForReview = ({
+  entry,
+  role,
+  repository,
+  decisionId,
+  policyRevision,
+  reviewSubmittedAt,
+  requestObservedAt,
+}) => {
+  const purpose = REVIEW_PURPOSE_BY_ROLE[role];
+  const candidate = {
+    repository,
+    decision: { adr: decisionId, policy_revision: policyRevision },
+  };
+  return (
+    purpose !== undefined
+    && entry?.role === role
+    && repository?.id === REPOSITORY_ID
+    && repository?.full_name === REPOSITORY_FULL_NAME
+    && authorityIsCurrent(
+      entry,
+      [reviewSubmittedAt, requestObservedAt],
+      purpose,
+      candidate,
+    )
+    && isCausalOrder(
+      entry.effective_from,
+      entry.assignment_evidence?.observed_at,
+      reviewSubmittedAt,
+      requestObservedAt,
+    )
+  );
 };
 
 export const assertProposalSubject = async (

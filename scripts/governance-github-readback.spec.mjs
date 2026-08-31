@@ -41,6 +41,7 @@ import {
   fixtureState,
   jsonResponse,
   limits,
+  mutateAuthorityRole,
   policy,
   request,
 } from './fixtures/approval-readback/task5-github-readback-fixture.mjs';
@@ -194,6 +195,73 @@ test('collects frozen bounded observed evidence without claiming complete approv
     assert.equal(call.init.headers.Accept, 'application/vnd.github+json');
     assert.equal(call.init.headers['X-GitHub-Api-Version'], API_VERSION);
     assert.ok(call.init.signal instanceof AbortSignal);
+  }
+});
+
+test('requires each hosted role authority to cover its selected review and request observation', async (t) => {
+  const reviewSubmittedAt = (state, role) => state.reviewPages
+    .flat()
+    .find((entry) => entry.user.id === state.actors[role].id)?.submitted_at;
+
+  await t.test('all four exact role assignments cover both observation boundaries', async () => {
+    const state = fixtureState();
+    for (const role of ROLES) {
+      mutateAuthorityRole(state, role, (entry) => {
+        entry.effective_from = reviewSubmittedAt(state, role);
+        entry.assignment_evidence.observed_at = reviewSubmittedAt(state, role);
+      });
+    }
+    const { evidence } = await collect(state);
+    assert.deepEqual(
+      [
+        evidence.product_review.role,
+        evidence.privacy_review.role,
+        evidence.qa_review.role,
+        evidence.security_review.role,
+      ],
+      ROLES,
+    );
+  });
+
+  for (const role of ROLES) {
+    for (const [boundary, mutate] of [
+      ['effective_from after selected review', (entry, submittedAt) => {
+        entry.effective_from = new Date(Date.parse(submittedAt) + 1).toISOString();
+      }],
+      ['effective_from after request observation', (entry) => {
+        entry.effective_from = new Date(Date.parse(OBSERVED_AT) + 1).toISOString();
+      }],
+      ['effective_until equal to selected review', (entry, submittedAt) => {
+        entry.effective_until = submittedAt;
+      }],
+      ['effective_until before selected review', (entry, submittedAt) => {
+        entry.effective_until = new Date(Date.parse(submittedAt) - 1).toISOString();
+      }],
+      ['effective_until equal to request observation', (entry) => {
+        entry.effective_until = OBSERVED_AT;
+      }],
+      ['effective_until before request observation', (entry) => {
+        entry.effective_until = new Date(Date.parse(OBSERVED_AT) - 1).toISOString();
+      }],
+      ['assignment observed after selected review', (entry, submittedAt) => {
+        entry.assignment_evidence.observed_at = new Date(Date.parse(submittedAt) + 1).toISOString();
+      }],
+      ['assignment observed after request observation', (entry) => {
+        entry.assignment_evidence.observed_at = new Date(Date.parse(OBSERVED_AT) + 1).toISOString();
+      }],
+      ['assignment observed before its effective interval', (entry) => {
+        entry.assignment_evidence.observed_at = new Date(Date.parse(entry.effective_from) - 1).toISOString();
+      }],
+    ]) {
+      await t.test(`${role}: ${boundary}`, async () => {
+        const state = fixtureState();
+        mutateAuthorityRole(state, role, (entry) => mutate(entry, reviewSubmittedAt(state, role)));
+        await expectCode(
+          () => collect(state),
+          'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+        );
+      });
+    }
   }
 });
 

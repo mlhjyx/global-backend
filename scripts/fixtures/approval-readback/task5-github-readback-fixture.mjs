@@ -69,6 +69,18 @@ export const encodeBlob = (value) => {
   return { content: bytes.toString('base64'), encoding: 'base64', size: bytes.length };
 };
 
+export const mutateAuthorityRole = (state, role, mutate) => {
+  const blob = state.blobs.get(AUTHORITY_BLOB_SHA);
+  const authority = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+  const matches = authority.roles.filter((entry) => entry.role === role);
+  assert.equal(matches.length, 1, `fixture authority role ${role}`);
+  mutate(matches[0]);
+  const encoded = encodeBlob(`${JSON.stringify(authority)}\n`);
+  state.blobs.set(AUTHORITY_BLOB_SHA, { sha: AUTHORITY_BLOB_SHA, ...encoded });
+  const treeEntry = state.baseTree.tree.find((entry) => entry.path === AUTHORITY_PATH);
+  treeEntry.size = encoded.size;
+};
+
 export const canonicalProposalSidecarBytes = () => Buffer.from(
   '# ADR-027 proposed decision\n\nSelected strategy: `WORKSPACE_COMPLIANCE_HOLD`\n',
   'utf8',
