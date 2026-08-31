@@ -350,7 +350,6 @@ export const reconcileMergeAuthorizationReservation = async (
   now,
   currentMainReadbackCapability,
 ) => {
-  const observedAt = nowIso(now);
   let observed;
   try {
     observed = await reservationStream(reservation, ledger);
@@ -358,6 +357,15 @@ export const reconcileMergeAuthorizationReservation = async (
     return holdReconciliation(
       error?.message?.startsWith('APPROVAL_') ? error.message : 'APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED',
       0,
+    );
+  }
+  let observedAt;
+  try {
+    observedAt = nowIso(now);
+  } catch {
+    return holdReconciliation(
+      'APPROVAL_NOW_INVALID',
+      observed.stream.committedRevision,
     );
   }
   let stream = observed.stream;
