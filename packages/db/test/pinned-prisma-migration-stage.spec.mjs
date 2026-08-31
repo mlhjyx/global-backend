@@ -46,6 +46,8 @@ const expandCommit = "3de138b66f9babb246173f1fcf04e94af49e632b";
 const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
 const resolverCommit = "7789b5dc94b4f79e3b0d08c0098add492f584219";
+const compatibilityCommit = "3ec8efb0a1091094d3f7185af6f67dac13528dcb";
+const linkCompatibilityCommit = "972f6554400ee5f0b92db84031b93cac131dea91";
 const expandMigration = "20260829090000_organization_identity_v2_expand_ddl";
 const backfillMigration =
   "20260829091000_organization_identity_v2_legacy_link_backfill_dml";
@@ -53,10 +55,30 @@ const contractMigration =
   "20260829092000_organization_identity_v2_contract_ddl";
 const resolverMigration =
   "20260830090000_organization_identity_v2_resolver_command";
+const adoptionMigration =
+  "20260830130500_organization_identity_mainline_constraint_adoption";
+const linkCompatibilityMigration =
+  "20260830130600_organization_identity_link_materialization_compat";
+const expandMigrationPath =
+  `packages/db/prisma/migrations/${expandMigration}/migration.sql`;
 const resolverMigrationPath =
   `packages/db/prisma/migrations/${resolverMigration}/migration.sql`;
+const adoptionMigrationPath =
+  `packages/db/prisma/migrations/${adoptionMigration}/migration.sql`;
+const linkCompatibilityMigrationPath =
+  `packages/db/prisma/migrations/${linkCompatibilityMigration}/migration.sql`;
+const expandMigrationChecksum =
+  "b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7";
+const forbiddenExpandMigrationChecksums = Object.freeze([
+  "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119",
+  "73929fdc1f3ee4cda303b2726c4918aba6621d93d2234d2a417c79e8cc671f44",
+]);
 const resolverMigrationChecksum =
   "3cb5fe7ca22b3067b92d71ac25198c7ff14d08c08a0907343d84130bb0b7a882";
+const adoptionMigrationChecksum =
+  "a143a1d88730ec70abc5d1cd957784c92ca98201ff4ba7e4a530c7edb5242004";
+const linkCompatibilityMigrationChecksum =
+  "0695319e648ce9938b419ae204ee0e279a54c74dbd850e70939ab8b6359a6b51";
 const forbiddenResolverMigrationChecksums = Object.freeze([
   "3bf6e58db819352ca0777380e9adb2fbf32ca9eeb311b91df696b569302da7af",
   "098aa285a17cdc6e5ea2c092cbfb31a57cd0ec3ed6db83b0c1221e9d86f55c6a",
@@ -79,6 +101,8 @@ const currentMainLaterMigrations = Object.freeze([
   "20260830130200_discovery_query_lineage_execution_outcome",
   "20260830130300_discovery_company_materialization_schema",
   "20260830130400_discovery_company_materialization_functions",
+  adoptionMigration,
+  linkCompatibilityMigration,
 ]);
 
 function runGit(cwd, args) {
@@ -264,6 +288,94 @@ describe("pinned Prisma migration stages", () => {
     );
     assert.ok(
       !forbiddenResolverMigrationChecksums.includes(resolverMigrationChecksum),
+    );
+  });
+
+  it("pins the reissued expand and mainline adoption bytes to their exact compatibility commit", () => {
+    for (const [migrationPath, expectedChecksum] of [
+      [expandMigrationPath, expandMigrationChecksum],
+      [adoptionMigrationPath, adoptionMigrationChecksum],
+    ]) {
+      assert.equal(
+        runGit(repositoryRoot, [
+          "log",
+          "-1",
+          "--format=%H",
+          "--",
+          migrationPath,
+        ]).trim(),
+        compatibilityCommit,
+      );
+      assert.equal(
+        sha256(readFileSync(resolve(repositoryRoot, migrationPath))),
+        expectedChecksum,
+      );
+      assert.equal(
+        sha256(
+          runGit(repositoryRoot, [
+            "show",
+            `${compatibilityCommit}:${migrationPath}`,
+          ]),
+        ),
+        expectedChecksum,
+      );
+    }
+
+    const expandHistory = [
+      ...new Set(
+        runGit(repositoryRoot, [
+          "log",
+          "--format=%H",
+          "--",
+          expandMigrationPath,
+        ])
+          .trim()
+          .split(/\r?\n/u)
+          .filter(Boolean)
+          .map((commit) =>
+            sha256(
+              runGit(repositoryRoot, [
+                "show",
+                `${commit}:${expandMigrationPath}`,
+              ]),
+            ),
+          ),
+      ),
+    ];
+    assert.deepEqual(expandHistory, [
+      expandMigrationChecksum,
+      ...forbiddenExpandMigrationChecksums,
+    ]);
+    assert.ok(
+      !forbiddenExpandMigrationChecksums.includes(expandMigrationChecksum),
+    );
+  });
+
+  it("pins link/materialization compatibility bytes to their exact last-change commit", () => {
+    assert.equal(
+      runGit(repositoryRoot, [
+        "log",
+        "-1",
+        "--format=%H",
+        "--",
+        linkCompatibilityMigrationPath,
+      ]).trim(),
+      linkCompatibilityCommit,
+    );
+    assert.equal(
+      sha256(
+        readFileSync(resolve(repositoryRoot, linkCompatibilityMigrationPath)),
+      ),
+      linkCompatibilityMigrationChecksum,
+    );
+    assert.equal(
+      sha256(
+        runGit(repositoryRoot, [
+          "show",
+          `${linkCompatibilityCommit}:${linkCompatibilityMigrationPath}`,
+        ]),
+      ),
+      linkCompatibilityMigrationChecksum,
     );
   });
 

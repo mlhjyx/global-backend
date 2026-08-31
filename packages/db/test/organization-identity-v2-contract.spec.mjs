@@ -43,7 +43,7 @@ const contractMigrationPath = resolve(
   "20260829092000_organization_identity_v2_contract_ddl/migration.sql",
 );
 const expectedExpandChecksum =
-  "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119";
+  "b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7";
 const expectedBackfillChecksum =
   "d897ab5c50dd038e2f4bb04b7d1b37bd404ce7f9c68ac7dc5a45a47272fc9426";
 

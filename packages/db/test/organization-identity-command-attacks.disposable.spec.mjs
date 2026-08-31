@@ -20,7 +20,7 @@ const networkId =
 const migrationChecksums = Object.freeze([
   [
     "20260829090000_organization_identity_v2_expand_ddl",
-    "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119",
+    "b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7",
   ],
   [
     "20260829091000_organization_identity_v2_legacy_link_backfill_dml",
@@ -33,6 +33,14 @@ const migrationChecksums = Object.freeze([
   [
     "20260830090000_organization_identity_v2_resolver_command",
     "3cb5fe7ca22b3067b92d71ac25198c7ff14d08c08a0907343d84130bb0b7a882",
+  ],
+  [
+    "20260830130500_organization_identity_mainline_constraint_adoption",
+    "a143a1d88730ec70abc5d1cd957784c92ca98201ff4ba7e4a530c7edb5242004",
+  ],
+  [
+    "20260830130600_organization_identity_link_materialization_compat",
+    "0695319e648ce9938b419ae204ee0e279a54c74dbd850e70939ab8b6359a6b51",
   ],
 ]);
 const WORKSPACE_A = "41000000-0000-4000-8000-000000000001";
@@ -1293,6 +1301,19 @@ function runScenario(scenario) {
   const callerPid = callerMatch ? Number(callerMatch[1]) : null;
   try {
     assert.equal(result.error, undefined, result.error?.message);
+    if (scenario.expectedFixtureError) {
+      assert.notEqual(result.status, 0, "fixture unexpectedly reached resolver");
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        scenario.expectedFixtureError,
+      );
+      return {
+        fixtureRejected: true,
+        elapsedMs: Date.now() - startedAt,
+        callerPid,
+        processOutput: result.stderr,
+      };
+    }
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     const line = result.stdout
       .trim()
@@ -1496,7 +1517,12 @@ function assertOrdinaryDiagnosticShape(outcome) {
 }
 
 function assertScenario(scenario) {
-  const { observed, elapsedMs, processOutput } = runScenario(scenario);
+  const execution = runScenario(scenario);
+  if (scenario.expectedFixtureError) {
+    assert.equal(execution.fixtureRejected, true);
+    return execution.elapsedMs;
+  }
+  const { observed, elapsedMs, processOutput } = execution;
   const observedPrimary = primaryOutcome(observed.outcome);
   assert.deepEqual(observed.preA, scenario.expectedPre);
   assertFullColumns(observed.preAFull);
@@ -2844,7 +2870,8 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       }),
     },
     {
-      name: "ambiguous multiple legacy links are rejected without arbitrary readback",
+      name: "database rejects ambiguous multiple legacy links before arbitrary readback",
+      expectedFixtureError: /identity_link_company_raw_unique/u,
       fixture: {
         raws: [RAW_LAZY],
         companies: [COMPANY_LAZY, COMPANY_C_ROOT],
@@ -2977,7 +3004,8 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       }),
     },
     {
-      name: "mixed legacy and v2 replay is rejected exactly",
+      name: "database rejects mixed legacy and active v2 links exactly",
+      expectedFixtureError: /identity_link_company_raw_unique/u,
       fixture: {
         raws: [RAW_CREATE],
         companies: [COMPANY_A_BASE, COMPANY_C_ROOT],
@@ -3032,7 +3060,8 @@ describe("Organization Identity legacy, v2, mixed and damaged replay matrix", ()
       }),
     },
     {
-      name: "multiple ACTIVE v2 links are rejected rather than selected",
+      name: "database rejects multiple ACTIVE v2 links rather than selecting one",
+      expectedFixtureError: /identity_link_company_raw_unique/u,
       fixture: {
         raws: [RAW_CREATE],
         companies: [COMPANY_A_BASE, COMPANY_C_ROOT],

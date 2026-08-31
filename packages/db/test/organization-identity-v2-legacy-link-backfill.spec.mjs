@@ -19,7 +19,7 @@ const backfillMigrationPath = resolve(
   "20260829091000_organization_identity_v2_legacy_link_backfill_dml/migration.sql",
 );
 const expectedExpandChecksum =
-  "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119";
+  "b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

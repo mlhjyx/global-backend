@@ -35,7 +35,7 @@ const attackTestPath = resolve(
 const frozenFiles = Object.freeze([
   [
     "20260829090000_organization_identity_v2_expand_ddl/migration.sql",
-    "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119",
+    "b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7",
   ],
   [
     "20260829091000_organization_identity_v2_legacy_link_backfill_dml/migration.sql",
@@ -44,6 +44,14 @@ const frozenFiles = Object.freeze([
   [
     "20260829092000_organization_identity_v2_contract_ddl/migration.sql",
     "1d8368c81f7af17dcb96999d23a4cd35d387436282935c20eb11befcb8c08396",
+  ],
+  [
+    "20260830130500_organization_identity_mainline_constraint_adoption/migration.sql",
+    "a143a1d88730ec70abc5d1cd957784c92ca98201ff4ba7e4a530c7edb5242004",
+  ],
+  [
+    "20260830130600_organization_identity_link_materialization_compat/migration.sql",
+    "0695319e648ce9938b419ae204ee0e279a54c74dbd850e70939ab8b6359a6b51",
   ],
 ]);
 

@@ -210,15 +210,21 @@ function inspectMigrationLedger(database) {
           '20260830130500_organization_identity_mainline_constraint_adoption'
         )
         ORDER BY migration_name;`,
-    ).split("\n").length,
-    2,
+    ),
+    [
+      "20260829090000_organization_identity_v2_expand_ddl|b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7|true|true",
+      "20260830130500_organization_identity_mainline_constraint_adoption|a143a1d88730ec70abc5d1cd957784c92ca98201ff4ba7e4a530c7edb5242004|true|true",
+    ].join("\n"),
   );
   assert.equal(
     psql(
       database,
       `SELECT count(*)
          FROM _prisma_migrations
-        WHERE checksum='2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119';`,
+        WHERE checksum IN (
+          '2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119',
+          '73929fdc1f3ee4cda303b2726c4918aba6621d93d2234d2a417c79e8cc671f44'
+        );`,
     ),
     "0",
   );

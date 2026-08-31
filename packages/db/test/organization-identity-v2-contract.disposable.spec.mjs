@@ -15,6 +15,10 @@ const backfillCommit = "c17385c4674782c15972f48fd6cda02730ccb299";
 const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
 const contractMigrationName =
   "20260829092000_organization_identity_v2_contract_ddl";
+// This suite materializes the exact pre-reissue historical stage. This checksum
+// is provenance-only and is forbidden from retained or official inventory.
+const supersededHistoricalExpandChecksum =
+  "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119";
 const container = process.env.TASK6B_PG_CONTAINER;
 const port = process.env.TASK6B_PG_PORT;
 const databases = Object.freeze({
@@ -1029,7 +1033,7 @@ describe("Organization Identity v2 contract on disposable PostgreSQL 16", () => 
          );`,
       ),
       [
-        "20260829090000_organization_identity_v2_expand_ddl:2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119",
+        `20260829090000_organization_identity_v2_expand_ddl:${supersededHistoricalExpandChecksum}`,
         "20260829091000_organization_identity_v2_legacy_link_backfill_dml:d897ab5c50dd038e2f4bb04b7d1b37bd404ce7f9c68ac7dc5a45a47272fc9426",
       ].join("\n"),
     );

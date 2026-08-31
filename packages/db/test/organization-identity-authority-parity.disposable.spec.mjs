@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { cpSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
-const contractCommit = "400caab2f8d827cc012ee5f928e7af4d6a1d6e08";
+const exactMain = "c998ca7f07af0fc8f3a1687c140aa8105c9567a0";
+const preResolverMigrations = Object.freeze([
+  "20260829090000_organization_identity_v2_expand_ddl",
+  "20260829091000_organization_identity_v2_legacy_link_backfill_dml",
+  "20260829092000_organization_identity_v2_contract_ddl",
+]);
 const currentSchemaPath = resolve(
   repositoryRoot,
   "packages/db/prisma/schema.prisma",
@@ -292,9 +297,16 @@ function withAdmissionDatabase(database, callback) {
   try {
     stage = materializePinnedPrismaStage({
       repositoryRoot,
-      commit: contractCommit,
+      commit: exactMain,
       prefix: "task-a3-fix3-admission-",
     });
+    for (const migration of preResolverMigrations) {
+      cpSync(
+        resolve(repositoryRoot, "packages/db/prisma/migrations", migration),
+        resolve(stage.migrationRoot, migration),
+        { recursive: true, errorOnExist: true },
+      );
+    }
     runPrisma(stage.schemaPath, database);
     callback();
   } finally {

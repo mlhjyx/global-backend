@@ -29,7 +29,7 @@ const migrationPath = resolve(
 const frozenMigrations = Object.freeze([
   [
     "20260829090000_organization_identity_v2_expand_ddl/migration.sql",
-    "2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119",
+    "b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7",
   ],
   [
     "20260829091000_organization_identity_v2_legacy_link_backfill_dml/migration.sql",
@@ -38,6 +38,14 @@ const frozenMigrations = Object.freeze([
   [
     "20260829092000_organization_identity_v2_contract_ddl/migration.sql",
     "1d8368c81f7af17dcb96999d23a4cd35d387436282935c20eb11befcb8c08396",
+  ],
+  [
+    "20260830130500_organization_identity_mainline_constraint_adoption/migration.sql",
+    "a143a1d88730ec70abc5d1cd957784c92ca98201ff4ba7e4a530c7edb5242004",
+  ],
+  [
+    "20260830130600_organization_identity_link_materialization_compat/migration.sql",
+    "0695319e648ce9938b419ae204ee0e279a54c74dbd850e70939ab8b6359a6b51",
   ],
 ]);
 const WORKSPACE_A = "31000000-0000-4000-8000-000000000001";
@@ -255,13 +263,17 @@ describe("Organization Identity v2 direct command A3 boundary", () => {
         '20260829090000_organization_identity_v2_expand_ddl',
         '20260829091000_organization_identity_v2_legacy_link_backfill_dml',
         '20260829092000_organization_identity_v2_contract_ddl',
-        '${migrationName}'
+        '${migrationName}',
+        '20260830130500_organization_identity_mainline_constraint_adoption',
+        '20260830130600_organization_identity_link_materialization_compat'
       ) ORDER BY migration_name;`),
       [
-        "20260829090000_organization_identity_v2_expand_ddl|2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119|true|true",
+        "20260829090000_organization_identity_v2_expand_ddl|b4e2a705efa3c1f60a75e2775e444cfd11fca995fb4b8dcd0ec26bd668dfc0d7|true|true",
         "20260829091000_organization_identity_v2_legacy_link_backfill_dml|d897ab5c50dd038e2f4bb04b7d1b37bd404ce7f9c68ac7dc5a45a47272fc9426|true|true",
         "20260829092000_organization_identity_v2_contract_ddl|1d8368c81f7af17dcb96999d23a4cd35d387436282935c20eb11befcb8c08396|true|true",
         `${migrationName}|${migrationChecksum}|true|true`,
+        "20260830130500_organization_identity_mainline_constraint_adoption|a143a1d88730ec70abc5d1cd957784c92ca98201ff4ba7e4a530c7edb5242004|true|true",
+        "20260830130600_organization_identity_link_materialization_compat|0695319e648ce9938b419ae204ee0e279a54c74dbd850e70939ab8b6359a6b51|true|true",
       ].join("\n"),
     );
   });
