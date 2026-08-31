@@ -101,8 +101,8 @@ export class SiteBuildTechnicalBudgetQuoteController {
   @ApiEnvelope(SiteBuildTechnicalBudgetQuoteResponseDto)
   @ApiResponse({
     status: 400,
-    description: '规范化后的 quote scope 非法',
-    schema: quoteErrorSchema(['SITE_BUILD_BUDGET_QUOTE_INVALID']),
+    description: 'intake 请求未通过 DTO 校验',
+    schema: quoteErrorSchema(['VALIDATION_ERROR']),
   })
   @ApiResponse({
     status: 503,
@@ -126,8 +126,13 @@ export class SiteBuildTechnicalBudgetQuoteController {
   @ApiEnvelope(SiteBuildTechnicalBudgetQuoteResponseDto)
   @ApiResponse({
     status: 400,
-    description: '规范化后的 quote scope 非法',
-    schema: quoteErrorSchema(['SITE_BUILD_BUDGET_QUOTE_INVALID']),
+    description: 'site id 或 refurbish 请求未通过边界校验',
+    schema: quoteErrorSchema(['VALIDATION_ERROR']),
+  })
+  @ApiResponse({
+    status: 422,
+    description: '请求包含当前构建路径不支持的 option 组合',
+    schema: quoteErrorSchema(['BUILD_OPTION_UNAVAILABLE']),
   })
   @ApiResponse({
     status: 503,

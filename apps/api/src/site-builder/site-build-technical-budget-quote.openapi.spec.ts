@@ -35,6 +35,28 @@ function document(): OpenApiDocument {
   ) as OpenApiDocument;
 }
 
+function errorCodes(path: string, status: string): string[] {
+  const response = document().paths[path]?.post?.responses[status] as
+    | {
+        content?: {
+          'application/json'?: {
+            schema?: {
+              properties?: {
+                error?: {
+                  properties?: { code?: { enum?: string[] } };
+                };
+              };
+            };
+          };
+        };
+      }
+    | undefined;
+  return (
+    response?.content?.['application/json']?.schema?.properties?.error
+      ?.properties?.code?.enum ?? []
+  );
+}
+
 describe('Site Build technical budget quote OpenAPI', () => {
   it.each([
     '/api/v1/site-builder/intake-budget-quote',
@@ -81,5 +103,20 @@ describe('Site Build technical budget quote OpenAPI', () => {
     expect(JSON.stringify(schema)).not.toMatch(
       /customer|balance|subscription|prepaid|invoice/i,
     );
+  });
+
+  it('publishes the real validation and unsupported-option errors at the HTTP boundary', () => {
+    const intakePath = '/api/v1/site-builder/intake-budget-quote';
+    const refurbishPath =
+      '/api/v1/site-builder/sites/{id}/build-budget-quote';
+
+    expect(errorCodes(intakePath, '400')).toEqual(['VALIDATION_ERROR']);
+    expect(document().paths[intakePath]?.post?.responses).not.toHaveProperty(
+      '422',
+    );
+    expect(errorCodes(refurbishPath, '400')).toEqual(['VALIDATION_ERROR']);
+    expect(errorCodes(refurbishPath, '422')).toEqual([
+      'BUILD_OPTION_UNAVAILABLE',
+    ]);
   });
 });

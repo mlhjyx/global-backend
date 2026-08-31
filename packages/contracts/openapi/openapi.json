@@ -12217,7 +12217,7 @@
             }
           },
           "400": {
-            "description": "规范化后的 quote scope 非法",
+            "description": "intake 请求未通过 DTO 校验",
             "content": {
               "application/json": {
                 "schema": {
@@ -12238,7 +12238,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "SITE_BUILD_BUDGET_QUOTE_INVALID"
+                            "VALIDATION_ERROR"
                           ]
                         },
                         "message": {
@@ -12345,7 +12345,7 @@
             }
           },
           "400": {
-            "description": "规范化后的 quote scope 非法",
+            "description": "site id 或 refurbish 请求未通过边界校验",
             "content": {
               "application/json": {
                 "schema": {
@@ -12366,7 +12366,42 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "SITE_BUILD_BUDGET_QUOTE_INVALID"
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求包含当前构建路径不支持的 option 组合",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "BUILD_OPTION_UNAVAILABLE"
                           ]
                         },
                         "message": {
