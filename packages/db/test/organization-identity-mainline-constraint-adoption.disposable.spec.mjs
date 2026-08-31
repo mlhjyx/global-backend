@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { materializePinnedPrismaStage } from "./helpers/pinned-prisma-stage.mjs";
@@ -10,6 +10,10 @@ const exactMain = "c998ca7f07af0fc8f3a1687c140aa8105c9567a0";
 const currentSchemaPath = resolve(
   repositoryRoot,
   "packages/db/prisma/schema.prisma",
+);
+const adoptionMigrationPath = resolve(
+  repositoryRoot,
+  "packages/db/prisma/migrations/20260830130500_organization_identity_mainline_constraint_adoption/migration.sql",
 );
 const topology = Object.freeze({
   container: "codex-task6b-identity-authority-pg-20260830-a",
@@ -23,10 +27,13 @@ const topology = Object.freeze({
 const databases = Object.freeze({
   fresh: "task_a7_identity_mainline_fresh",
   upgrade: "task_a7_identity_mainline_upgrade",
+  seventh: "task_a7_identity_mainline_seventh",
+  drift: "task_a7_identity_mainline_drift",
 });
 const databaseSet = new Set(Object.values(databases));
 const expectedFinalCatalog = [
   "canonical_company_workspace_id_id_key|canonical_company|u|true|true|UNIQUE (workspace_id, id)",
+  "discovery_company_materialization_outcome_company_fkey|discovery_company_materialization_outcome|f|true|true|FOREIGN KEY (workspace_id, canonical_company_id) REFERENCES canonical_company(workspace_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
   "organization_canonical_mapping_canonical_scope_fkey|organization_canonical_mapping|f|true|true|FOREIGN KEY (workspace_id, canonical_company_id) REFERENCES canonical_company(workspace_id, id) ON DELETE RESTRICT",
   "organization_canonical_mapping_source_scope_fkey|organization_canonical_mapping|f|true|true|FOREIGN KEY (workspace_id, source_company_id) REFERENCES canonical_company(workspace_id, id) ON DELETE RESTRICT",
   "organization_identifier_company_scope_fkey|organization_identifier|f|true|true|FOREIGN KEY (workspace_id, company_id) REFERENCES canonical_company(workspace_id, id) ON DELETE RESTRICT",
@@ -140,6 +147,7 @@ function inspectFinalCatalog(database) {
      ), expected(name) AS (
        VALUES
          ('canonical_company_workspace_id_id_key'::name),
+         ('discovery_company_materialization_outcome_company_fkey'::name),
          ('organization_canonical_mapping_canonical_scope_fkey'::name),
          ('organization_canonical_mapping_source_scope_fkey'::name),
          ('organization_identifier_company_scope_fkey'::name),
@@ -148,7 +156,7 @@ function inspectFinalCatalog(database) {
      )
      SELECT constraint_row.conname||'|'||
             constraint_row.conrelid::regclass::text||'|'||
-            constraint_row.contype||'|'||
+            constraint_row.contype::text||'|'||
             constraint_row.convalidated||'|'||
             CASE WHEN constraint_row.contype='u'
               THEN constraint_row.conindid=(SELECT conindid FROM main_unique)
@@ -213,6 +221,126 @@ function inspectMigrationLedger(database) {
         WHERE checksum='2f6bab93bd253dd7ec80d2c94c45f91e2c6bb1fae51127b94e15b0e11b85a119';`,
     ),
     "0",
+  );
+}
+
+function prepareMinimalAdoptionCatalog(
+  database,
+  { drift = false, seventh = false } = {},
+) {
+  createDatabase(database);
+  psql(
+    database,
+    `CREATE TABLE public.canonical_company (
+       workspace_id uuid NOT NULL,
+       id uuid NOT NULL
+     );
+     CREATE UNIQUE INDEX canonical_company_workspace_id_id_artifact_a_key
+       ON public.canonical_company(workspace_id,id);
+     ALTER TABLE public.canonical_company
+       ADD CONSTRAINT canonical_company_workspace_id_id_key
+       UNIQUE(workspace_id,id);
+
+     CREATE TABLE public.organization_identity_decision (
+       workspace_id uuid NOT NULL,
+       canonical_company_id uuid NOT NULL
+     );
+     CREATE TABLE public.organization_identifier (
+       workspace_id uuid NOT NULL,
+       company_id uuid NOT NULL
+     );
+     CREATE TABLE public.organization_canonical_mapping (
+       workspace_id uuid NOT NULL,
+       source_company_id uuid NOT NULL,
+       canonical_company_id uuid NOT NULL
+     );
+     CREATE TABLE public.organization_identity_conflict_party (
+       workspace_id uuid NOT NULL,
+       company_id uuid NOT NULL
+     );
+     CREATE TABLE public.discovery_company_materialization_outcome (
+       workspace_id uuid NOT NULL,
+       canonical_company_id uuid NOT NULL
+     );
+
+     ALTER TABLE public.organization_identity_decision
+       ADD CONSTRAINT organization_identity_decision_company_scope_fkey
+       FOREIGN KEY(workspace_id,canonical_company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON DELETE RESTRICT ON UPDATE NO ACTION;
+     ALTER TABLE public.organization_identifier
+       ADD CONSTRAINT organization_identifier_company_scope_fkey
+       FOREIGN KEY(workspace_id,company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON DELETE ${drift ? "CASCADE" : "RESTRICT"} ON UPDATE NO ACTION;
+     ALTER TABLE public.organization_canonical_mapping
+       ADD CONSTRAINT organization_canonical_mapping_source_scope_fkey
+       FOREIGN KEY(workspace_id,source_company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON DELETE RESTRICT ON UPDATE NO ACTION,
+       ADD CONSTRAINT organization_canonical_mapping_canonical_scope_fkey
+       FOREIGN KEY(workspace_id,canonical_company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON DELETE RESTRICT ON UPDATE NO ACTION;
+     ALTER TABLE public.organization_identity_conflict_party
+       ADD CONSTRAINT organization_identity_conflict_party_company_scope_fkey
+       FOREIGN KEY(workspace_id,company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON DELETE RESTRICT ON UPDATE NO ACTION;
+     ALTER TABLE public.discovery_company_materialization_outcome
+       ADD CONSTRAINT discovery_company_materialization_outcome_company_fkey
+       FOREIGN KEY(workspace_id,canonical_company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+     ${
+       seventh
+         ? `CREATE TABLE public.task_a7_unexpected_reference (
+       workspace_id uuid NOT NULL,
+       company_id uuid NOT NULL
+     );
+     ALTER TABLE public.task_a7_unexpected_reference
+       ADD CONSTRAINT task_a7_unexpected_reference_company_fkey
+       FOREIGN KEY(workspace_id,company_id)
+       REFERENCES public.canonical_company(workspace_id,id)
+       ON DELETE RESTRICT ON UPDATE NO ACTION;`
+         : ""
+     }`,
+  );
+}
+
+function adoptionFailure(database, expectedCode) {
+  const result = run(
+    "docker",
+    [
+      "exec",
+      "-i",
+      topology.container,
+      "psql",
+      "-U",
+      "global",
+      "-d",
+      database,
+      "--no-psqlrc",
+      "-X",
+      "-v",
+      "ON_ERROR_STOP=1",
+    ],
+    { input: readFileSync(adoptionMigrationPath, "utf8") },
+  );
+  assert.notEqual(result.status, 0, "adoption migration unexpectedly succeeded");
+  assert.match(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(expectedCode, "u"),
+  );
+  assert.equal(
+    psql(
+      database,
+      `SELECT to_regclass(
+        'public.canonical_company_workspace_id_id_artifact_a_key'
+      ) IS NOT NULL;`,
+    ),
+    "t",
   );
 }
 
@@ -302,5 +430,21 @@ describe("Organization Identity mainline constraint adoption", {
     );
     inspectFinalCatalog(databases.upgrade);
     inspectMigrationLedger(databases.upgrade);
+  });
+
+  it("rejects a seventh temporary-index FK dependency before any DDL", () => {
+    prepareMinimalAdoptionCatalog(databases.seventh, { seventh: true });
+    adoptionFailure(
+      databases.seventh,
+      "IDENTITY_ARTIFACT_A_TEMP_INDEX_DEPENDENCY_INVALID",
+    );
+  });
+
+  it("rejects an allowlisted FK definition drift before any DDL", () => {
+    prepareMinimalAdoptionCatalog(databases.drift, { drift: true });
+    adoptionFailure(
+      databases.drift,
+      "IDENTITY_ARTIFACT_A_FK_INVENTORY_INVALID",
+    );
   });
 });

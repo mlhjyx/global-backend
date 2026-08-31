@@ -10,7 +10,7 @@ CREATE TYPE "organization_canonical_mapping_status" AS ENUM ('ACTIVE', 'REVOKED'
 CREATE TYPE "organization_identity_replay_status" AS ENUM ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED');
 CREATE TYPE "identity_link_status" AS ENUM ('ACTIVE', 'PENDING_CONFLICT', 'REVOKED');
 
-CREATE UNIQUE INDEX "canonical_company_workspace_id_id_key"
+CREATE UNIQUE INDEX "canonical_company_workspace_id_id_artifact_a_key"
   ON "canonical_company"("workspace_id", "id");
 
 ALTER TABLE "identity_link"
