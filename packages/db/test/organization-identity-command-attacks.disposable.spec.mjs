@@ -1312,6 +1312,151 @@ function runScenario(scenario) {
   }
 }
 
+function runUsersetForgeryDiagnostic() {
+  ensurePrerequisite();
+  const sql = `SELECT 'A4_USERSET_PID|'||pg_backend_pid();
+    BEGIN;
+    ${fixtureSql({
+      raws: [RAW_CREATE],
+      companies: [COMPANY_FORGED_STATE],
+      extraSql: deterministicWritesSql(),
+    })}
+    CREATE TEMP TABLE a4_userset_observed(
+      stage text PRIMARY KEY,value jsonb NOT NULL
+    ) ON COMMIT DROP;
+    GRANT SELECT,INSERT ON a4_userset_observed TO app_user;
+    SET SESSION AUTHORIZATION app_user;
+    SET LOCAL statement_timeout='0';
+    SET LOCAL lock_timeout='0';
+    SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
+    INSERT INTO a4_userset_observed VALUES (
+      'preA',${semanticStateSql(WORKSPACE_A)}
+    );
+    INSERT INTO a4_userset_observed VALUES (
+      'preAFull',${fullStateSql(WORKSPACE_A)}
+    );
+    SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
+    INSERT INTO a4_userset_observed VALUES (
+      'preBFull',${fullStateSql(WORKSPACE_B)}
+    );
+    SELECT set_config('app.current_workspace_id','${WORKSPACE_A}',true);
+    WITH initial_runtime AS MATERIALIZED (
+      SELECT
+        current_setting('statement_timeout') AS initial_statement_timeout,
+        current_setting('lock_timeout') AS initial_lock_timeout
+    ),
+    forged_runtime AS MATERIALIZED (
+      SELECT initial_runtime.*,
+        set_config('statement_timeout','60s',true)
+          AS configured_statement_timeout,
+        set_config('lock_timeout','5s',true) AS configured_lock_timeout
+      FROM initial_runtime
+    ),
+    visible_runtime AS MATERIALIZED (
+      SELECT forged_runtime.*,
+        current_setting('statement_timeout') AS visible_statement_timeout,
+        current_setting('lock_timeout') AS visible_lock_timeout
+      FROM forged_runtime
+    ),
+    resolved AS MATERIALIZED (
+      SELECT to_jsonb(row) AS result
+      FROM visible_runtime
+      CROSS JOIN LATERAL public.resolve_organization_identity_for_raw_v1(
+        '${WORKSPACE_A}','${RAW_A}'
+      ) AS row
+    )
+    SELECT 'A4_USERSET_RECEIPT|'||jsonb_build_object(
+      'classification','NOT_GUARANTEED',
+      'initialStatementTimeout',
+        (SELECT initial_statement_timeout FROM initial_runtime),
+      'initialLockTimeout',(SELECT initial_lock_timeout FROM initial_runtime),
+      'configuredStatementTimeout',
+        (SELECT configured_statement_timeout FROM forged_runtime),
+      'configuredLockTimeout',
+        (SELECT configured_lock_timeout FROM forged_runtime),
+      'visibleStatementTimeout',
+        (SELECT visible_statement_timeout FROM visible_runtime),
+      'visibleLockTimeout',(SELECT visible_lock_timeout FROM visible_runtime),
+      'rows',(SELECT jsonb_agg(result) FROM resolved)
+    )::text;
+    INSERT INTO a4_userset_observed VALUES (
+      'postA',${semanticStateSql(WORKSPACE_A)}
+    );
+    INSERT INTO a4_userset_observed VALUES (
+      'postAFull',${fullStateSql(WORKSPACE_A)}
+    );
+    SELECT set_config('app.current_workspace_id','${WORKSPACE_B}',true);
+    INSERT INTO a4_userset_observed VALUES (
+      'postBFull',${fullStateSql(WORKSPACE_B)}
+    );
+    SELECT 'A4_USERSET_STATE|'||
+      jsonb_object_agg(stage,value ORDER BY stage)::text
+    FROM a4_userset_observed;
+    ROLLBACK;`;
+  const startedAt = Date.now();
+  const result = spawnSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      "-e",
+      "PGAPPNAME=a4-userset-forgery",
+      container,
+      "psql",
+      "-U",
+      "global",
+      "-d",
+      database,
+      "--no-psqlrc",
+      "-X",
+      "-qAt",
+      "-v",
+      "ON_ERROR_STOP=1",
+    ],
+    {
+      encoding: "utf8",
+      input: sql,
+      timeout: 5_000,
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
+  const callerMatch = result.stdout?.match(/^A4_USERSET_PID\|([0-9]+)$/mu);
+  const callerPid = callerMatch ? Number(callerMatch[1]) : null;
+  try {
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const lines = result.stdout.trim().split("\n");
+    const receiptLine = lines.find((line) =>
+      line.startsWith("A4_USERSET_RECEIPT|"),
+    );
+    const stateLine = lines.find((line) =>
+      line.startsWith("A4_USERSET_STATE|"),
+    );
+    assert.ok(
+      receiptLine,
+      `USERSET diagnostic emitted no receipt:\n${result.stdout}`,
+    );
+    assert.ok(
+      stateLine,
+      `USERSET diagnostic emitted no state:\n${result.stdout}`,
+    );
+    assert.ok(
+      callerPid,
+      `USERSET diagnostic emitted no PID:\n${result.stdout}`,
+    );
+    return {
+      receipt: JSON.parse(receiptLine.slice("A4_USERSET_RECEIPT|".length)),
+      observed: JSON.parse(stateLine.slice("A4_USERSET_STATE|".length)),
+      elapsedMs: Date.now() - startedAt,
+      callerPid,
+      processOutput: result.stderr,
+    };
+  } finally {
+    if (callerPid !== null) assertBackendCleanup(callerPid);
+    else assertApplicationCleanup("a4-userset-forgery");
+  }
+}
+
 function error(sqlstate, message) {
   return { kind: "error", sqlstate, message };
 }
@@ -2418,6 +2563,64 @@ describe("Organization Identity direct-command malicious app_user matrix", () =>
   for (const scenario of directCases) {
     it(scenario.name, () => assertScenario(scenario));
   }
+
+  it("direct hostile SQL hard runtime is NOT_GUARANTEED under same-statement USERSET forgery", () => {
+    const result = runUsersetForgeryDiagnostic();
+    assert.deepEqual(result.receipt, {
+      classification: "NOT_GUARANTEED",
+      initialStatementTimeout: "0",
+      initialLockTimeout: "0",
+      configuredStatementTimeout: "1min",
+      configuredLockTimeout: "5s",
+      visibleStatementTimeout: "1min",
+      visibleLockTimeout: "5s",
+      rows: createdResult({
+        companyId: COMPANY_C,
+        matchRule: "identity_v2",
+        inputHash: INPUT_CREATE,
+        identifierCount: 1,
+      }).rows,
+    });
+    assert.deepEqual(result.observed.preA, CREATE_PRE);
+    assertFullColumns(result.observed.preAFull);
+    assertSentinel(result.observed.preBFull);
+    assert.deepEqual(result.observed.postA, CREATE_POST);
+    assert.deepEqual(result.observed.postAFull, CREATE_FULL_POST);
+    assert.deepEqual(result.observed.postBFull, result.observed.preBFull);
+    assert.equal(result.processOutput, "");
+    assert.ok(
+      result.elapsedMs < 4_000,
+      `USERSET diagnostic must stay fast and bounded: ${result.elapsedMs}`,
+    );
+    assert.equal(
+      prerequisiteSql(`SELECT
+        (SELECT count(*) FROM workspace
+          WHERE id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM raw_source_record
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM canonical_company
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM organization_identifier
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM organization_identity_conflict
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM organization_identity_conflict_party
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM identity_link
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM organization_canonical_mapping
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'))||'|'||
+        (SELECT count(*) FROM suppression_record
+          WHERE workspace_id IN ('${WORKSPACE_A}','${WORKSPACE_B}'));`),
+      "0|0|0|0|0|0|0|0|0",
+    );
+    assert.deepEqual(backendArtifactState(result.callerPid), {
+      backend: 0,
+      transaction: 0,
+      locks: 0,
+      triggers: 0,
+    });
+  });
 });
 
 const DISAGREEMENT_CONFLICT = Object.freeze(conflictState());
