@@ -32,8 +32,6 @@ const RESERVATION_KEYS = Object.freeze([
 ]);
 const KEY_KEYS = Object.freeze(['repositoryId', 'singleUseNonce']);
 const freshDispatchCapabilities = new WeakSet();
-// Intentionally uninhabited: this module exposes no mint or registration path.
-const trustedCurrentMainReadbackCapabilities = new WeakSet();
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
 const nowIso = (now) => {
@@ -348,7 +346,6 @@ export const reconcileMergeAuthorizationReservation = async (
   readback,
   ledger,
   now,
-  currentMainReadbackCapability,
 ) => {
   let observed;
   try {
@@ -368,8 +365,8 @@ export const reconcileMergeAuthorizationReservation = async (
       observed.stream.committedRevision,
     );
   }
-  let stream = observed.stream;
-  let facts = observed.facts;
+  const stream = observed.stream;
+  const facts = observed.facts;
   const diagnosticPlan = planMergeAuthorizationReconciliation({
     reservation,
     readback,
@@ -386,110 +383,12 @@ export const reconcileMergeAuthorizationReservation = async (
       observedAt,
     );
   }
-  if (!trustedCurrentMainReadbackCapabilities.has(currentMainReadbackCapability)) {
-    return appendHold(
-      reservation,
-      stream,
-      facts,
-      ledger,
-      'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED',
-      observedAt,
-    );
-  }
-  const plan = planMergeAuthorizationReconciliation({
+  return appendHold(
     reservation,
-    readback,
-    streamFacts: facts,
+    stream,
+    facts,
+    ledger,
+    'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED',
     observedAt,
-  });
-  if (plan.outcome === 'HOLD') {
-    return appendHold(
-      reservation,
-      stream,
-      facts,
-      ledger,
-      plan.blockingCode,
-      observedAt,
-    );
-  }
-  if (plan.outcome === 'CONSUMPTION_ALREADY_RECORDED') {
-    return frozenClone({
-      outcome: 'CONSUMPTION_RECORDED',
-      consumption: plan.consumption,
-      consumptionRawSha256: plan.consumptionRawSha256,
-      committedLedgerRevision: stream.committedRevision,
-    });
-  }
-  if (plan.resultEvent) {
-    const nextRevision = stream.committedRevision + 1;
-    const result = await ledgerCas(ledger, {
-      expectedRevision: stream.committedRevision,
-      key: reservation.key,
-      event: plan.resultEvent,
-    });
-    if (!committedAt(result, nextRevision)) {
-      return holdReconciliation(
-        'APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT',
-        conflictRevision(result, stream.committedRevision),
-      );
-    }
-    stream = await ledgerRead(ledger, reservation.key);
-    facts = validStreamFacts(stream, streamContext(reservation));
-    if (facts.result?.ledgerRevision !== nextRevision) {
-      return holdReconciliation('APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT', stream.committedRevision);
-    }
-  }
-  if (plan.outcome === 'RESULT_READY_THEN_HOLD') {
-    return appendHold(
-      reservation,
-      stream,
-      facts,
-      ledger,
-      plan.blockingCode,
-      observedAt,
-    );
-  }
-  const consumption = plan.consumption;
-  const consumptionRawSha256 = plan.consumptionRawSha256;
-  const nextRevision = stream.committedRevision + 1;
-  const result = await ledgerCas(ledger, {
-    expectedRevision: stream.committedRevision,
-    key: reservation.key,
-    event: frozenClone({
-      type: 'CONSUMPTION_RECORDED', consumption, consumptionRawSha256, recordedAt: observedAt,
-    }),
-  });
-  if (!committedAt(result, nextRevision)) {
-    const refreshed = await ledgerRead(ledger, reservation.key);
-    const validation = validateApprovalLedgerStream(refreshed, streamContext(reservation, {
-      expectedConsumption: consumption,
-      expectedConsumptionRawSha256: consumptionRawSha256,
-    }));
-    if (validation.valid && validation.facts.consumptionEvent) {
-      return frozenClone({
-        outcome: 'CONSUMPTION_RECORDED',
-        consumption: validation.facts.consumptionEvent.consumption,
-        consumptionRawSha256: validation.facts.consumptionEvent.consumptionRawSha256,
-        committedLedgerRevision: refreshed.committedRevision,
-      });
-    }
-    return holdReconciliation(
-      'APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT',
-      conflictRevision(result, stream.committedRevision),
-    );
-  }
-  const committed = await ledgerRead(ledger, reservation.key);
-  const validation = validateApprovalLedgerStream(committed, streamContext(reservation, {
-    expectedConsumption: consumption,
-    expectedConsumptionRawSha256: consumptionRawSha256,
-  }));
-  if (!validation.valid || validation.facts.consumptionEvent?.ledgerRevision !== nextRevision) {
-    return holdReconciliation('APPROVAL_MERGE_AUTHORIZATION_LEDGER_REQUIRED', committed?.committedRevision ?? nextRevision);
-  }
-  return frozenClone({
-    outcome: 'CONSUMPTION_RECORDED',
-    consumption,
-    consumptionRawSha256,
-    committedLedgerRevision: nextRevision,
-  });
+  );
 };

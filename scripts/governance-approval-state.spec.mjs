@@ -1142,7 +1142,7 @@ test('response loss before or after provider ACK becomes durable ACK_UNKNOWN and
   }
 });
 
-test('ACK_UNKNOWN requires admitted current-main readback before durable result or consumption', async () => {
+test('ACK_UNKNOWN always HOLDs current-main readback before durable result or consumption', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
   const ledger = new SharedDurableCasLedgerHarness();

@@ -436,25 +436,23 @@ test('invalid reconciliation clock reads durable state then returns a stable no-
   assert.equal(after.events.some(({ type }) => type === 'CONSUMPTION_RECORDED'), false);
 });
 
-test('caller-owned current-main capability cannot authorize public durable reconciliation', async () => {
+test('caller-owned current-main readbacks cannot authorize public durable reconciliation', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
-  const fakeCapability = Object.freeze({ kind: 'caller-declared-admission' });
-  const callerOwnedCapabilities = [
-    fakeCapability,
-    structuredClone(fakeCapability),
-    JSON.parse(JSON.stringify(fakeCapability)),
+  const callerOwnedReadbacks = [
+    readback,
+    structuredClone(readback),
+    JSON.parse(JSON.stringify(readback)),
   ];
 
-  for (const capability of callerOwnedCapabilities) {
+  for (const callerOwnedReadback of callerOwnedReadbacks) {
     const ledger = new Ledger();
     const fresh = await reserve(ledger, grant);
     const result = await reconcileMergeAuthorizationReservation(
       fresh.reservation,
-      structuredClone(readback),
+      callerOwnedReadback,
       ledger,
       NOW,
-      capability,
     );
     assert.equal(result.outcome, 'HOLD');
     assert.equal(result.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
@@ -464,10 +462,9 @@ test('caller-owned current-main capability cannot authorize public durable recon
 
     const repeated = await reconcileMergeAuthorizationReservation(
       fresh.reservation,
-      structuredClone(readback),
+      callerOwnedReadback,
       ledger,
       NOW,
-      capability,
     );
     assert.equal(repeated.outcome, 'HOLD');
     assert.equal(repeated.blockingCode, 'APPROVAL_CURRENT_MAIN_READBACK_REQUIRED');
@@ -487,20 +484,15 @@ test('public current-main readback remains HOLD after controlled collection intr
   const readback = await readJson('current-main-readback.json');
   const ledger = new Ledger();
   const fresh = await reserve(ledger, grant);
-  const callerOwnedValue = Object.freeze({ kind: 'caller-owned-readback-value' });
   const originalWeakSetHas = WeakSet.prototype.has;
   let result;
-  WeakSet.prototype.has = function controlledWeakSetHas(value) {
-    if (value === callerOwnedValue) return true;
-    return Reflect.apply(originalWeakSetHas, this, [value]);
-  };
+  WeakSet.prototype.has = () => true;
   try {
     result = await reconcileMergeAuthorizationReservation(
       fresh.reservation,
       structuredClone(readback),
       ledger,
       NOW,
-      callerOwnedValue,
     );
   } finally {
     WeakSet.prototype.has = originalWeakSetHas;
@@ -519,7 +511,7 @@ test('public current-main readback remains HOLD after controlled collection intr
   );
 });
 
-test('public reconciliation denies a later current-main descendant without private admission', async () => {
+test('public reconciliation denies a later current-main descendant with unconditional HOLD', async () => {
   const grant = await readJson('valid-grant.json');
   const readback = await readJson('current-main-readback.json');
   readback.currentMain.sha = 'e'.repeat(40);
@@ -557,7 +549,7 @@ test('malformed verifier repository names HOLD without appending merge result or
   }
 });
 
-test('public reconciliation prioritizes stale and revoked facts before private admission', async () => {
+test('public reconciliation prioritizes stale and revoked facts before unconditional HOLD', async () => {
   const grant = await readJson('valid-grant.json');
   const lateReadback = await readJson('current-main-readback.json');
   lateReadback.currentMain.readAt = '2026-08-30T10:30:00.000Z';
