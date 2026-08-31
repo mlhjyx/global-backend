@@ -53,7 +53,7 @@ Binding path、binding bytes、artifact ID、fixed source commit 与 source bund
 | Dispatch authorization | `NOT_AUTHORIZED` |
 | Pilot eligibility | `BLOCKED` |
 | Required follow-up | `REBASE_FIXED_SOURCE_BEFORE_DISPATCH` |
-| Eligibility receipt SHA-256 | `4c2b6c54fae69a3f5b163ef30d6a6a3fff66f083452bc8fafcb56347b7663e2e` |
+| Eligibility receipt SHA-256 | `dac77b784956323fbfe35bf1a3f956f9387ce6f3ae48b8bb6dd78f24f14b9f55` |
 
 精确 drifted paths：
 
