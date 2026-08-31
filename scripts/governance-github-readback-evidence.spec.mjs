@@ -134,6 +134,20 @@ test('rejects stale or wrongly scoped hosted authority for every exact review ro
     'OWN-SECURITY',
   ]) {
     for (const [condition, mutate] of [
+      ['unassigned', (entry) => {
+        entry.status = 'UNASSIGNED';
+        for (const field of [
+          'actor_id',
+          'actor_node_id',
+          'actor_login',
+          'effective_from',
+          'effective_until',
+          'scope',
+          'assignment_evidence',
+          'revocation_status',
+          'superseded_by',
+        ]) delete entry[field];
+      }],
       ['revoked', (entry) => { entry.revocation_status = 'REVOKED'; }],
       ['superseded', (entry) => { entry.superseded_by = 'approval-authorities/r3'; }],
       ['repository mismatch', (entry) => { entry.scope.repository_id = REPOSITORY_ID + 1; }],

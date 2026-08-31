@@ -171,7 +171,8 @@ export const authorityActors = (authorityFile) => {
   const result = new Map();
   for (const role of ROLES) {
     const matches = value.roles.filter((entry) => entry?.role === role);
-    requireCondition(matches.length === 1 && matches[0].status === 'ASSIGNED', 'APPROVAL_GITHUB_AUTHORITY_MISMATCH');
+    requireCondition(matches.length === 1, 'APPROVAL_GITHUB_AUTHORITY_MISMATCH');
+    requireCondition(matches[0].status === 'ASSIGNED', AUTHORITY_CURRENTNESS_CODE);
     const entry = matches[0];
     requireCondition(
       isSafePositiveInteger(entry.actor_id)
