@@ -12,6 +12,7 @@ import {
   validateReceiptSupersession,
 } from './governance-approval-readback.mjs';
 import { buildApprovalReceiptArtifact as buildRawApprovalReceiptArtifact } from './governance-approval-safe-json.mjs';
+import { canonicalApprovalDigest } from './governance-approval-ledger-stream.mjs';
 import {
   buildSyntheticTrustedReceiptArtifact,
   buildSyntheticTrustedReceiptCore,
@@ -369,11 +370,12 @@ const mergeEvidence = () => {
     expires_at: '2026-08-30T13:00:00.000Z',
     single_use_nonce: 'nonce-program-c-0001',
   };
+  const grantRawSha256 = canonicalApprovalDigest(grant);
   const consumption = {
     schema_version: 'program-c-merge-authorization-consumption/v1',
     consumption_id: 'program-c-consumption-0001',
     grant_id: grant.grant_id,
-    grant_raw_sha256: DIGEST_A,
+    grant_raw_sha256: grantRawSha256,
     single_use_nonce: grant.single_use_nonce,
     repository: clone(REPOSITORY),
     decision_adr: grant.decision_adr,
@@ -401,7 +403,7 @@ const mergeEvidence = () => {
   };
   return {
     grant,
-    grant_raw_sha256: DIGEST_A,
+    grant_raw_sha256: grantRawSha256,
     consumption,
     consumption_raw_sha256: DIGEST_B,
     authority_receipt: authorityReceiptArtifact.envelope,
@@ -415,7 +417,7 @@ const mergeEvidence = () => {
       reservations: [{
         key: consumption.nonce_ledger_key,
         grant_id: grant.grant_id,
-        grant_raw_sha256: DIGEST_A,
+        grant_raw_sha256: grantRawSha256,
         single_use_nonce: grant.single_use_nonce,
         reserved_revision: 17,
         state: 'CONSUMED',
@@ -636,6 +638,30 @@ test('merge grant, separate consumption, and durable ledger evidence fail closed
   for (const [name, mutate, code] of cases) runMutation(name, mergeEvidence, mutate, validate, code);
 });
 
+test('synchronized grant mutation cannot reuse its caller-declared digest', () => {
+  const candidateValue = candidate();
+  candidateValue.receipt_subject.phase = 'POST_MERGE';
+  const changed = structuredClone(mergeEvidence());
+  const originalDigest = changed.grant_raw_sha256;
+  changed.grant.single_use_nonce = 'nonce-program-c-remediation-0002';
+  changed.grant.allowed_merge_method = 'MERGE';
+  changed.consumption.single_use_nonce = changed.grant.single_use_nonce;
+  changed.consumption.nonce_ledger_key = `program-c-merge:${changed.grant.single_use_nonce}`;
+  changed.consumption.observed_merge_method = changed.grant.allowed_merge_method;
+  changed.consumption_raw_sha256 = canonicalApprovalDigest(changed.consumption);
+  changed.ledger_snapshot.reservations[0].key = changed.consumption.nonce_ledger_key;
+  changed.ledger_snapshot.reservations[0].single_use_nonce = changed.grant.single_use_nonce;
+  assert.equal(changed.grant_raw_sha256, originalDigest);
+  assert.notEqual(changed.grant_raw_sha256, canonicalApprovalDigest(changed.grant));
+  assert.deepEqual(
+    validateMergeAuthorizationGrantForCandidate(changed, candidateValue, authority(), NOW),
+    {
+      valid: false,
+      issues: [{ stable_code: 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH' }],
+    },
+  );
+});
+
 test('receipt core and Task 2 artifact keep raw digest external and merge evidence referential', () => {
   const value = candidate();
   const core = buildSyntheticTrustedReceiptCore(value, null, NOW);
@@ -654,7 +680,7 @@ test('receipt core and Task 2 artifact keep raw digest external and merge eviden
   assert.deepEqual(mergeCore.merge_authorization_evidence, {
     stage: 'PROPOSAL_MERGE',
     grant_id: 'program-c-grant-0001',
-    grant_raw_sha256: DIGEST_A,
+    grant_raw_sha256: mergeValue.grant_raw_sha256,
     single_use_nonce: 'nonce-program-c-0001',
     consumption_id: 'program-c-consumption-0001',
     consumption_raw_sha256: DIGEST_B,

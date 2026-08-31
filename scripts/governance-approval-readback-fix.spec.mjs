@@ -18,6 +18,7 @@ import {
   validateProgramCMergeAuthorizationGrant,
 } from './governance-approval-schema-validator.mjs';
 import { buildApprovalReceiptArtifact as buildRawApprovalReceiptArtifact } from './governance-approval-safe-json.mjs';
+import { canonicalApprovalDigest } from './governance-approval-ledger-stream.mjs';
 import {
   buildSyntheticTrustedReceiptArtifact,
   buildSyntheticTrustedReceiptCore,
@@ -272,9 +273,10 @@ const mergeEvidence = () => {
     authorized_at: '2026-08-30T11:00:00.000Z',
     expires_at: '2026-08-30T13:00:00.000Z', single_use_nonce: 'nonce-program-c-0001',
   };
+  const grantRawSha256 = canonicalApprovalDigest(grant);
   const consumption = {
     schema_version: 'program-c-merge-authorization-consumption/v1', consumption_id: 'program-c-consumption-0001',
-    grant_id: grant.grant_id, grant_raw_sha256: DIGEST_A, single_use_nonce: grant.single_use_nonce,
+    grant_id: grant.grant_id, grant_raw_sha256: grantRawSha256, single_use_nonce: grant.single_use_nonce,
     repository: clone(REPOSITORY), decision_adr: grant.decision_adr, decision_revision: grant.decision_revision,
     policy_revision: grant.policy_revision, stage: grant.stage, pr_number: grant.pr_number,
     authorized_head_sha: grant.head_sha, result_commit_sha: RESULT_SHA, observed_merge_method: 'SQUASH',
@@ -290,7 +292,7 @@ const mergeEvidence = () => {
   };
   return {
     grant,
-    grant_raw_sha256: DIGEST_A,
+    grant_raw_sha256: grantRawSha256,
     consumption,
     consumption_raw_sha256: DIGEST_B,
     authority_receipt: authorityReceiptArtifact.envelope,
@@ -300,7 +302,7 @@ const mergeEvidence = () => {
       schema_version: 'approval-nonce-ledger-snapshot/v1', durability_class: 'SHARED_DURABLE_CAS',
       repository_id: REPOSITORY.id, committed_revision: 19,
       reservations: [{
-        key: consumption.nonce_ledger_key, grant_id: grant.grant_id, grant_raw_sha256: DIGEST_A,
+        key: consumption.nonce_ledger_key, grant_id: grant.grant_id, grant_raw_sha256: grantRawSha256,
         single_use_nonce: grant.single_use_nonce, reserved_revision: 17, state: 'CONSUMED',
         request_binding: {
           repository_id: REPOSITORY.id, decision_adr: grant.decision_adr,
@@ -358,6 +360,27 @@ test('FIX1 merge path starts with Task 1 closed schemas and enforces causality',
   });
   assert.equal(validateProgramCMergeAuthorizationGrant(mergeEvidence().grant).valid, true);
   assert.equal(validateProgramCMergeAuthorizationConsumption(mergeEvidence().consumption).valid, true);
+});
+
+test('synchronized grant mutation cannot reuse its caller-declared digest', () => {
+  const candidateValue = candidate();
+  candidateValue.receipt_subject.phase = 'POST_MERGE';
+  const changed = structuredClone(mergeEvidence());
+  const originalDigest = changed.grant_raw_sha256;
+  changed.grant.single_use_nonce = 'nonce-program-c-remediation-0002';
+  changed.grant.allowed_merge_method = 'MERGE';
+  changed.consumption.single_use_nonce = changed.grant.single_use_nonce;
+  changed.consumption.nonce_ledger_key = `program-c-merge:${changed.grant.single_use_nonce}`;
+  changed.consumption.observed_merge_method = changed.grant.allowed_merge_method;
+  changed.consumption_raw_sha256 = canonicalApprovalDigest(changed.consumption);
+  changed.ledger_snapshot.reservations[0].key = changed.consumption.nonce_ledger_key;
+  changed.ledger_snapshot.reservations[0].single_use_nonce = changed.grant.single_use_nonce;
+  assert.equal(changed.grant_raw_sha256, originalDigest);
+  assert.notEqual(changed.grant_raw_sha256, canonicalApprovalDigest(changed.grant));
+  assert.deepEqual(validateMerge(changed, candidateValue), {
+    valid: false,
+    issues: [{ stable_code: 'APPROVAL_MERGE_AUTHORIZATION_GRANT_DIGEST_MISMATCH' }],
+  });
 });
 
 test('FIX2 receipt schema and renderer preserve deterministic machine evidence', () => {
