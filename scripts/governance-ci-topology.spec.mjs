@@ -358,13 +358,14 @@ test("the required build verifies runtime lease roles against disposable Postgre
 
   assert.match(buildJob, /pgvector\/pgvector@sha256:[0-9a-f]{64}/);
   assert.match(permissionStep, /prisma migrate deploy/);
-  assert.match(
-    permissionStep,
-    /provision-runtime-lease-principals\.sh/,
-  );
+  assert.match(permissionStep, /provision-runtime-lease-principals\.sh/);
   assert.match(
     permissionStep,
     /verify-runtime-lease-principal-permissions\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-runtime-lease-prisma-compatibility\.mts/,
   );
   assert.match(permissionStep, /verify-app-database-principal\.mts/);
   assert.match(permissionStep, /ALTER ROLE app_user BYPASSRLS/);
