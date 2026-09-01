@@ -1,29 +1,30 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
-import { ModelGateway } from './model-gateway';
-import { ModelRouter } from './model-router';
-import { ModelProvider } from './model-provider';
-import { AiTraceSink } from './ai-trace.sink';
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { ModelGateway } from "./model-gateway";
+import { ModelRouter } from "./model-router";
+import { ModelProvider } from "./model-provider";
+import { AiTraceSink } from "./ai-trace.sink";
 import {
   assertModelOutputSchemaCompiles,
-  checkAgainstSchema } from './schema-validate';
-import { DEFAULT_LLM_EST_CENTS } from '../tools/budget';
+  checkAgainstSchema,
+} from "./schema-validate";
+import { DEFAULT_LLM_EST_CENTS } from "../tools/budget";
 import {
   BudgetExceededError,
   BudgetOperationReplayError,
   TOOL_BUDGET_STORE,
   UnavailableBudgetStore,
   type BudgetStore,
-} from '../tools/budget-store';
+} from "../tools/budget-store";
 import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
-} from '../durable-results/model-result-replay';
+} from "../durable-results/model-result-replay";
 import {
   ExternalActionDeniedError,
   ProviderIdentityError,
   ProviderOutputError,
   TaskOutputValidationError,
-} from './providers/provider-output-error';
+} from "./providers/provider-output-error";
 import {
   modelCostMeasurement,
   paidOperationKey,
@@ -32,10 +33,10 @@ import {
   type PaidCostMeasurement,
   type PaidOperationReservation,
   type SiteBuildCostLedger,
-} from '../site-builder/site-build-cost-ledger';
-import type { SiteBuildCostReconciliationCatalog } from '../site-builder/site-build-cost-reconciliation-resolver';
-import { modelExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
-import { centsToMicrousd, usdToMicrousdCeil } from '../tools/microusd';
+} from "../site-builder/site-build-cost-ledger";
+import type { SiteBuildCostReconciliationCatalog } from "../site-builder/site-build-cost-reconciliation-resolver";
+import { modelExecutionReceiptFacts } from "../durable-results/execution-receipt-facts";
+import { centsToMicrousd, usdToMicrousdCeil } from "../tools/microusd";
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -45,7 +46,8 @@ import { centsToMicrousd, usdToMicrousdCeil } from '../tools/microusd';
  */
 function centsFromTokens(usage?: {
   inputTokens?: number;
-  outputTokens?: number }): number | null {
+  outputTokens?: number;
+}): number | null {
   const tokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
   if (tokens <= 0) return null;
   const env = Number(process.env.LLM_CENTS_PER_MTOK);
@@ -69,7 +71,8 @@ function mergeStructuredUsage(a?: ModelUsage, b?: ModelUsage): ModelUsage {
     Number.isFinite(a?.costUsd) && Number.isFinite(b?.costUsd);
   const gatewaySettlements = [
     ...(a?.gatewaySettlements ?? []),
-    ...(b?.gatewaySettlements ?? [])];
+    ...(b?.gatewaySettlements ?? []),
+  ];
   return {
     inputTokens: (a?.inputTokens ?? 0) + (b?.inputTokens ?? 0),
     outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
@@ -88,11 +91,11 @@ import {
   ModelResult,
   ModelUsage,
   ReviewVisionInput,
-} from './types';
-import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from './model-execution-envelope';
-import { snapshotVisionReviewInput } from './vision-review-input';
-import { hasTrustedModelIdentity } from './model-identity';
-import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from './model-transports';
+} from "./types";
+import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from "./model-execution-envelope";
+import { snapshotVisionReviewInput } from "./vision-review-input";
+import { hasTrustedModelIdentity } from "./model-identity";
+import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from "./model-transports";
 
 /**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
@@ -105,7 +108,7 @@ import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from './model-transports';
 @Injectable()
 export class RouterModelGateway extends ModelGateway {
   private readonly unavailableBudgetStore = new UnavailableBudgetStore(
-    'RouterModelGateway requires an authoritative BudgetStore',
+    "RouterModelGateway requires an authoritative BudgetStore",
   );
   budgetStore: BudgetStore;
 
@@ -129,15 +132,18 @@ export class RouterModelGateway extends ModelGateway {
 
   generateText(
     input: GenerateTextInput,
-    ctx: AiContext): Promise<ModelResult<string>> {
-    return this.run('generateText', input, ctx, (p, runCtx) =>
-      p.generateText(input, runCtx));
+    ctx: AiContext,
+  ): Promise<ModelResult<string>> {
+    return this.run("generateText", input, ctx, (p, runCtx) =>
+      p.generateText(input, runCtx),
+    );
   }
 
   generateStructured<T = unknown>(
     input: GenerateStructuredInput,
-    ctx: AiContext): Promise<ModelResult<T>> {
-    return this.run('generateStructured', input, ctx, async (p, runCtx) => {
+    ctx: AiContext,
+  ): Promise<ModelResult<T>> {
+    return this.run("generateStructured", input, ctx, async (p, runCtx) => {
       const validateTaskOutput = (result: ModelResult<T>): ModelResult<T> => {
         try {
           input.validateOutput?.(result.data);
@@ -159,31 +165,34 @@ export class RouterModelGateway extends ModelGateway {
       };
       const first = await p.generateStructured<T>(input, runCtx);
       const initialSettlementUnknown = first.usage?.gatewaySettlements?.some(
-        (observation) => observation.status === 'unknown',
+        (observation) => observation.status === "unknown",
       );
       const check = checkAgainstSchema(input.schema, first.data);
       let repairReason: string;
-      let repairKind: 'JSON Schema' | '任务确定性硬门';
+      let repairKind: "JSON Schema" | "任务确定性硬门";
       if (check.valid) {
         try {
           return validateTaskOutput(first);
         } catch (error) {
-          if (!input.repairTaskOutput || !(error instanceof TaskOutputValidationError)) {
+          if (
+            !input.repairTaskOutput ||
+            !(error instanceof TaskOutputValidationError)
+          ) {
             throw error;
           }
-          repairKind = '任务确定性硬门';
+          repairKind = "任务确定性硬门";
           repairReason = error.message;
         }
       } else {
-        repairKind = 'JSON Schema';
-        repairReason = (check.errors ?? []).join('\n');
+        repairKind = "JSON Schema";
+        repairReason = (check.errors ?? []).join("\n");
       }
       if (initialSettlementUnknown) {
         // A valid output can proceed under an upper-bound charge. An unusable
         // output must not trigger a second physical request while the first
         // call's exact settlement remains unresolved.
         throw new ProviderOutputError(
-          'initial structured output is unusable and settlement is unresolved; repair suppressed',
+          "initial structured output is unusable and settlement is unresolved; repair suppressed",
           first.usage,
           {
             callCount: 1,
@@ -218,14 +227,26 @@ export class RouterModelGateway extends ModelGateway {
         // FIX 1：修复调用抛错也要带上首调已消耗的 token（否则网关 catch 只结算修复那次、漏首调，少记绕硬顶）。
         throw new ProviderOutputError(
           `repair call failed: ${String(err)}`,
-          mergeStructuredUsage(first.usage, err instanceof ProviderOutputError ? err.usage : undefined),
+          mergeStructuredUsage(
+            first.usage,
+            err instanceof ProviderOutputError ? err.usage : undefined,
+          ),
           {
             cause: err,
-            callCount: 1 + (err instanceof ProviderOutputError ? err.callCount : 1),
-            provider: err instanceof ProviderOutputError ? (err.provider ?? first.provider) : first.provider,
-            model: err instanceof ProviderOutputError ? (err.model ?? first.model) : first.model,
+            callCount:
+              1 + (err instanceof ProviderOutputError ? err.callCount : 1),
+            provider:
+              err instanceof ProviderOutputError
+                ? (err.provider ?? first.provider)
+                : first.provider,
+            model:
+              err instanceof ProviderOutputError
+                ? (err.model ?? first.model)
+                : first.model,
             reportedModel:
-              err instanceof ProviderOutputError ? (err.reportedModel ?? first.reportedModel) : first.reportedModel,
+              err instanceof ProviderOutputError
+                ? (err.reportedModel ?? first.reportedModel)
+                : first.reportedModel,
             modelResolutionSource:
               err instanceof ProviderOutputError
                 ? (err.modelResolutionSource ?? first.modelResolutionSource)
@@ -238,7 +259,7 @@ export class RouterModelGateway extends ModelGateway {
         // FIX 1：修复后仍不过 schema → 抛 ProviderOutputError 携首调+修复合并 usage（原为裸 Error →
         // 网关 catch 记 0¢，两次调用白烧、绕过硬预算上界）。
         throw new ProviderOutputError(
-          `structured output failed schema validation after repair: ${(recheck.errors ?? []).join('; ')}`,
+          `structured output failed schema validation after repair: ${(recheck.errors ?? []).join("; ")}`,
           mergeStructuredUsage(first.usage, repair.usage),
           {
             callCount: 2,
@@ -259,20 +280,25 @@ export class RouterModelGateway extends ModelGateway {
     });
   }
 
-  async reviewVision<T = unknown>(input: ReviewVisionInput, ctx: AiContext): Promise<ModelResult<T>> {
+  async reviewVision<T = unknown>(
+    input: ReviewVisionInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<T>> {
     const snapshot = snapshotVisionReviewInput(input);
     assertModelOutputSchemaCompiles(snapshot.schema);
     if (
       snapshot.images.some(
-        (image) => image.materialClass === 'workspace_site_screenshot' && image.workspaceId !== ctx.workspaceId,
+        (image) =>
+          image.materialClass === "workspace_site_screenshot" &&
+          image.workspaceId !== ctx.workspaceId,
       )
     ) {
-      throw new Error('VISION_REVIEW_WORKSPACE_MISMATCH');
+      throw new Error("VISION_REVIEW_WORKSPACE_MISMATCH");
     }
-    return this.run('reviewVision', snapshot, ctx, async (provider, runCtx) => {
+    return this.run("reviewVision", snapshot, ctx, async (provider, runCtx) => {
       const result = await provider.reviewVision<T>(snapshot, runCtx);
       if (
-        result.modelResolutionSource !== 'upstream_response' ||
+        result.modelResolutionSource !== "upstream_response" ||
         !hasTrustedModelIdentity({
           requestedModel: snapshot.model,
           reportedModel: result.reportedModel,
@@ -281,7 +307,7 @@ export class RouterModelGateway extends ModelGateway {
         })
       ) {
         throw new ProviderIdentityError(
-          `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${snapshot.model}, reported=${result.reportedModel ?? 'missing'}, resolved=${result.model}`,
+          `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${snapshot.model}, reported=${result.reportedModel ?? "missing"}, resolved=${result.model}`,
           result.usage,
           {
             provider: result.provider,
@@ -294,7 +320,7 @@ export class RouterModelGateway extends ModelGateway {
       const check = checkAgainstSchema(snapshot.schema, result.data);
       if (!check.valid) {
         throw new ProviderOutputError(
-          `VISION_REVIEW_SCHEMA_INVALID: ${(check.errors ?? []).join('; ')}`,
+          `VISION_REVIEW_SCHEMA_INVALID: ${(check.errors ?? []).join("; ")}`,
           result.usage,
           {
             provider: result.provider,
@@ -324,7 +350,7 @@ export class RouterModelGateway extends ModelGateway {
   }
 
   embed(input: EmbedInput, ctx: AiContext): Promise<ModelResult<number[][]>> {
-    return this.run('embed', input, ctx, (p, runCtx) => p.embed(input, runCtx));
+    return this.run("embed", input, ctx, (p, runCtx) => p.embed(input, runCtx));
   }
 
   private async run<T>(
@@ -343,33 +369,40 @@ export class RouterModelGateway extends ModelGateway {
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
     const chain = this.router.route(op, input.task);
-    if (chain.length === 0) throw new Error(`no model provider for ${op}/${input.task}`);
+    if (chain.length === 0)
+      throw new Error(`no model provider for ${op}/${input.task}`);
 
     // 预算门（收口② D）：task.maxCostCents 从纯声明变真闸——reserve-then-settle，
     // 账户（runId ?? workspaceId）超限即抛 BudgetExceededError（调用不发生=真拦截）。
     // settle 优先级：costUsd（按实）→ token 折算（centsFromTokens）→ est 兜底。
     const registeredTask =
-      input.maxCostCents === undefined ? (await import('../ai-tasks/task-registry')).getTask(input.task) : undefined;
-    const baseCents = input.maxCostCents ?? registeredTask?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
+      input.maxCostCents === undefined
+        ? (await import("../ai-tasks/task-registry")).getTask(input.task)
+        : undefined;
+    const baseCents =
+      input.maxCostCents ??
+      registeredTask?.maxCostCents ??
+      DEFAULT_LLM_EST_CENTS;
     // generateStructured 可能做一次校验-修复重试（第二次模型调用，见下）——预留**两次**上限，否则账户仅够
     // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
-    const reserveCents = op === 'generateStructured'
-      ? baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND
-      : baseCents;
+    const reserveCents =
+      op === "generateStructured"
+        ? baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND
+        : baseCents;
     if (ctx.paidCost) {
       return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }
     const accountKey = ctx.runId ?? ctx.workspaceId;
     const operationKey = paidOperationKey([
       accountKey,
-      'model-budget',
+      "model-budget",
       op,
       input.task,
-      input.model ?? '',
-      ctx.correlationId ?? '',
-      input.prompt ?? '',
-      input.system ?? '',
-      input.schema ? JSON.stringify(input.schema) : '',
+      input.model ?? "",
+      ctx.correlationId ?? "",
+      input.prompt ?? "",
+      input.system ?? "",
+      input.schema ? JSON.stringify(input.schema) : "",
     ]);
     let reservation;
     try {
@@ -380,12 +413,13 @@ export class RouterModelGateway extends ModelGateway {
         estimatedMicrousd: centsToMicrousd(reserveCents),
       });
       if (reservation.replay) {
-        const replay = reservation.replayResult?.resultStrategy === 'typed_projection'
-          ? reservation.replayResult.projection
-          : undefined;
+        const replay =
+          reservation.replayResult?.resultStrategy === "typed_projection"
+            ? reservation.replayResult.projection
+            : undefined;
         if (
           replay &&
-          replay.kind === 'model' &&
+          replay.kind === "model" &&
           ctx.durableResultSchema &&
           replay.schema === ctx.durableResultSchema
         ) {
@@ -414,9 +448,9 @@ export class RouterModelGateway extends ModelGateway {
           workspaceId: ctx.workspaceId,
           task: input.task,
           op,
-          provider: 'budget-gate',
-          model: input.model ?? 'n/a',
-          status: 'ERROR',
+          provider: "budget-gate",
+          model: input.model ?? "n/a",
+          status: "ERROR",
           errorMessage: `budget exceeded (DENIED before call): ${err.message.slice(0, 300)}`,
           latencyMs: 0,
           correlationId: ctx.correlationId,
@@ -434,7 +468,8 @@ export class RouterModelGateway extends ModelGateway {
       }
       result = await call(provider, ctx);
     } catch (err) {
-      const failedUsage = err instanceof ProviderOutputError ? err.usage : undefined;
+      const failedUsage =
+        err instanceof ProviderOutputError ? err.usage : undefined;
       if (
         err instanceof ExternalActionDeniedError &&
         err.callCount === 0 &&
@@ -447,7 +482,8 @@ export class RouterModelGateway extends ModelGateway {
         // second physical model request.
         const observedMicrousd =
           err instanceof ProviderOutputError
-            ? (providerReportedMicrousd(err.usage) ?? centsToMicrousd(
+            ? (providerReportedMicrousd(err.usage) ??
+              centsToMicrousd(
                 centsFromTokens(err.usage) ?? baseCents * err.callCount,
               ))
             : centsToMicrousd(reserveCents);
@@ -458,9 +494,9 @@ export class RouterModelGateway extends ModelGateway {
         task: input.task,
         op,
         provider: provider.id,
-        model: input.model ?? 'unknown',
-        status: 'ERROR',
-        errorMessage: err instanceof Error ? err.name : 'model call failed',
+        model: input.model ?? "unknown",
+        status: "ERROR",
+        errorMessage: err instanceof Error ? err.name : "model call failed",
         latencyMs: Date.now() - started,
         inputTokens: failedUsage?.inputTokens,
         outputTokens: failedUsage?.outputTokens,
@@ -486,25 +522,31 @@ export class RouterModelGateway extends ModelGateway {
     }
     const reservedMicrousd = reservation.estimatedMicrousd;
     const reportedMicrousd = providerReportedMicrousd(result.usage);
-    const tokenPricedCents = reportedMicrousd === null
-      ? centsFromTokens(result.usage)
-      : null;
-    const observedMicrousd = reportedMicrousd ?? centsToMicrousd(
-      tokenPricedCents ?? baseCents * (result.callCount ?? 1),
-    );
-    const chargedMicrousd = observedMicrousd < reservation.estimatedMicrousd
-      ? observedMicrousd
-      : reservation.estimatedMicrousd;
-    const receiptFacts = projection && ctx.durableResultSchema
-      ? modelExecutionReceiptFacts({
-          taskId: input.task,
-          resultSchema: ctx.durableResultSchema,
-          result: result as ModelResult<unknown>,
-          reservedMicrousd,
-          chargedMicrousd,
-        })
-      : undefined;
-    const settlement = [reservation, observedMicrousd, projection, receiptFacts] as const;
+    const tokenPricedCents =
+      reportedMicrousd === null ? centsFromTokens(result.usage) : null;
+    const observedMicrousd =
+      reportedMicrousd ??
+      centsToMicrousd(tokenPricedCents ?? baseCents * (result.callCount ?? 1));
+    const chargedMicrousd =
+      observedMicrousd < reservation.estimatedMicrousd
+        ? observedMicrousd
+        : reservation.estimatedMicrousd;
+    const receiptFacts =
+      projection && ctx.durableResultSchema
+        ? modelExecutionReceiptFacts({
+            taskId: input.task,
+            resultSchema: ctx.durableResultSchema,
+            result: result as ModelResult<unknown>,
+            reservedMicrousd,
+            chargedMicrousd,
+          })
+        : undefined;
+    const settlement = [
+      reservation,
+      observedMicrousd,
+      projection,
+      receiptFacts,
+    ] as const;
     let settled;
     try {
       settled = await this.budgetStore.settle(...settlement);
@@ -522,7 +564,7 @@ export class RouterModelGateway extends ModelGateway {
       op,
       provider: result.provider,
       model: result.model,
-      status: 'OK',
+      status: "OK",
       latencyMs: Date.now() - started,
       inputTokens: result.usage?.inputTokens,
       outputTokens: result.usage?.outputTokens,
@@ -550,15 +592,18 @@ export class RouterModelGateway extends ModelGateway {
     },
     ctx: AiContext,
     chain: readonly ModelProvider[],
-    call: (provider: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
+    call: (
+      provider: ModelProvider,
+      runCtx: AiContext,
+    ) => Promise<ModelResult<T>>,
     reserveCents: number,
   ): Promise<ModelResult<T>> {
     const paid = ctx.paidCost!;
     if (!this.paidLedger || !ctx.runId) {
-      throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
+      throw new PaidCallDeniedError("PERSISTENT_LEDGER_UNAVAILABLE");
     }
     for (const [providerIndex, provider] of chain.entries()) {
-      const requestedModel = input.model ?? 'provider-default';
+      const requestedModel = input.model ?? "provider-default";
       const settlementContext =
         this.costReconciliationCatalog?.resolveContext({
           providerId: provider.id,
@@ -568,7 +613,7 @@ export class RouterModelGateway extends ModelGateway {
         }) ?? null;
       if (this.costReconciliationCatalog && !settlementContext) {
         throw new PaidCallDeniedError(
-          'COST_RECONCILIATION_CONTEXT_UNAVAILABLE',
+          "COST_RECONCILIATION_CONTEXT_UNAVAILABLE",
         );
       }
       const scope: PaidOperationReservation = {
@@ -585,7 +630,7 @@ export class RouterModelGateway extends ModelGateway {
           String(providerIndex),
           requestedModel,
         ]),
-        kind: 'model',
+        kind: "model",
         taskId: input.task,
         subject: `${requestedModel}@${provider.id}`,
         reservationMicrousd: reserveCents * 10_000,
@@ -606,9 +651,9 @@ export class RouterModelGateway extends ModelGateway {
             workspaceId: ctx.workspaceId,
             task: input.task,
             op,
-            provider: 'budget-gate',
+            provider: "budget-gate",
             model: requestedModel,
-            status: 'ERROR',
+            status: "ERROR",
             errorMessage: `paid call denied before execution: ${error.decision}`,
             latencyMs: 0,
             correlationId: ctx.correlationId,
@@ -617,16 +662,19 @@ export class RouterModelGateway extends ModelGateway {
         }
         throw error;
       }
-      if (decision.kind === 'replay') {
+      if (decision.kind === "replay") {
         if (
-          decision.status === 'SUCCEEDED' &&
+          decision.status === "SUCCEEDED" &&
           decision.result &&
-          Object.prototype.hasOwnProperty.call(decision.result, 'data')
+          Object.prototype.hasOwnProperty.call(decision.result, "data")
         ) {
           return decision.result as unknown as ModelResult<T>;
         }
-        if (decision.status === 'SUCCEEDED') {
-          throw new PaidOperationUnknownError(scope.operationKey, 'DURABLE_REPLAY_UNAVAILABLE');
+        if (decision.status === "SUCCEEDED") {
+          throw new PaidOperationUnknownError(
+            scope.operationKey,
+            "DURABLE_REPLAY_UNAVAILABLE",
+          );
         }
         throw new PaidOperationUnknownError(
           scope.operationKey,
@@ -643,17 +691,24 @@ export class RouterModelGateway extends ModelGateway {
         }
         result = await call(provider, executionCtx);
       } catch (error) {
-        const providerError = error instanceof ProviderOutputError ? error : null;
-        if (error instanceof ExternalActionDeniedError && error.callCount === 0 && !error.usage) {
+        const providerError =
+          error instanceof ProviderOutputError ? error : null;
+        if (
+          error instanceof ExternalActionDeniedError &&
+          error.callCount === 0 &&
+          !error.usage
+        ) {
           await this.settlePersistentOperation({
             scope,
-            status: 'RELEASED',
-            measurement: this.notIncurredModelMeasurement('suppression_action_gate'),
+            status: "RELEASED",
+            measurement: this.notIncurredModelMeasurement(
+              "suppression_action_gate",
+            ),
             meta: {
               provider: provider.id,
               requestedModel,
             },
-            errorCode: 'SUPPRESSION_ACTION_GATE',
+            errorCode: "SUPPRESSION_ACTION_GATE",
           });
           this.trace?.record({
             workspaceId: ctx.workspaceId,
@@ -661,7 +716,7 @@ export class RouterModelGateway extends ModelGateway {
             op,
             provider: provider.id,
             model: requestedModel,
-            status: 'ERROR',
+            status: "ERROR",
             errorMessage: String(error),
             latencyMs: Date.now() - started,
             correlationId: ctx.correlationId,
@@ -671,7 +726,7 @@ export class RouterModelGateway extends ModelGateway {
         }
         const providerSettlementUnknown =
           providerError?.usage?.gatewaySettlements?.some(
-            (observation) => observation.status === 'unknown',
+            (observation) => observation.status === "unknown",
           );
         const measurement = providerSettlementUnknown
           ? this.unknownModelMeasurement(
@@ -695,13 +750,17 @@ export class RouterModelGateway extends ModelGateway {
               );
         await this.settlePersistentOperation({
           scope,
-          status: 'FAILED',
+          status: measurement.basis === "unknown" ? "UNKNOWN" : "FAILED",
           measurement,
           meta: {
             provider: providerError?.provider ?? provider.id,
             requestedModel,
-            ...(providerError?.model ? { resolvedModel: providerError.model } : {}),
-            ...(providerError?.reportedModel ? { reportedModel: providerError.reportedModel } : {}),
+            ...(providerError?.model
+              ? { resolvedModel: providerError.model }
+              : {}),
+            ...(providerError?.reportedModel
+              ? { reportedModel: providerError.reportedModel }
+              : {}),
             ...(providerError?.modelResolutionSource
               ? {
                   modelResolutionSource: providerError.modelResolutionSource,
@@ -710,12 +769,12 @@ export class RouterModelGateway extends ModelGateway {
           },
           errorCode:
             error instanceof ExternalActionDeniedError
-              ? 'SUPPRESSION_ACTION_GATE'
-              : measurement.basis === 'unknown'
-                ? 'MODEL_SETTLEMENT_UNKNOWN'
+              ? "SUPPRESSION_ACTION_GATE"
+              : measurement.basis === "unknown"
+                ? "MODEL_SETTLEMENT_UNKNOWN"
                 : providerError
-                  ? 'PROVIDER_OUTPUT_ERROR'
-                  : 'PROVIDER_CALL_ERROR',
+                  ? "PROVIDER_OUTPUT_ERROR"
+                  : "PROVIDER_CALL_ERROR",
         });
         this.trace?.record({
           workspaceId: ctx.workspaceId,
@@ -723,7 +782,7 @@ export class RouterModelGateway extends ModelGateway {
           op,
           provider: provider.id,
           model: requestedModel,
-          status: 'ERROR',
+          status: "ERROR",
           errorMessage: String(error),
           latencyMs: Date.now() - started,
           inputTokens: providerError?.usage?.inputTokens,
@@ -747,34 +806,44 @@ export class RouterModelGateway extends ModelGateway {
       });
       let durableResult: Record<string, unknown> | undefined;
       try {
-        durableResult = paid.durableReplayResult?.(result as unknown as Record<string, unknown>);
+        durableResult = paid.durableReplayResult?.(
+          result as unknown as Record<string, unknown>,
+        );
       } catch (error) {
         await this.settlePersistentOperation({
           scope,
-          status: 'FAILED',
+          status: "FAILED",
           measurement,
           meta: {
             provider: result.provider,
             requestedModel,
             resolvedModel: result.model,
-            ...(result.reportedModel ? { reportedModel: result.reportedModel } : {}),
-            ...(result.modelResolutionSource ? { modelResolutionSource: result.modelResolutionSource } : {}),
+            ...(result.reportedModel
+              ? { reportedModel: result.reportedModel }
+              : {}),
+            ...(result.modelResolutionSource
+              ? { modelResolutionSource: result.modelResolutionSource }
+              : {}),
           },
-          errorCode: 'DURABLE_REPLAY_REJECTED',
+          errorCode: "DURABLE_REPLAY_REJECTED",
         });
         throw error;
       }
       await this.settlePersistentOperation({
         scope,
-        status: 'SUCCEEDED',
+        status: "SUCCEEDED",
         measurement,
         result: durableResult,
         meta: {
           provider: result.provider,
           requestedModel,
           resolvedModel: result.model,
-          ...(result.reportedModel ? { reportedModel: result.reportedModel } : {}),
-          ...(result.modelResolutionSource ? { modelResolutionSource: result.modelResolutionSource } : {}),
+          ...(result.reportedModel
+            ? { reportedModel: result.reportedModel }
+            : {}),
+          ...(result.modelResolutionSource
+            ? { modelResolutionSource: result.modelResolutionSource }
+            : {}),
         },
       });
       this.trace?.record({
@@ -783,7 +852,7 @@ export class RouterModelGateway extends ModelGateway {
         op,
         provider: result.provider,
         model: result.model,
-        status: 'OK',
+        status: "OK",
         latencyMs: Date.now() - started,
         inputTokens: result.usage?.inputTokens,
         outputTokens: result.usage?.outputTokens,
@@ -804,7 +873,7 @@ export class RouterModelGateway extends ModelGateway {
       provider?: string;
       model?: string;
       reportedModel?: string;
-      modelResolutionSource?: ModelResult<unknown>['modelResolutionSource'];
+      modelResolutionSource?: ModelResult<unknown>["modelResolutionSource"];
     },
   ): Promise<void> {
     // Stable acquisition compliance decision: suppression_action_gate.
@@ -819,7 +888,7 @@ export class RouterModelGateway extends ModelGateway {
 
   private notIncurredModelMeasurement(reason: string): PaidCostMeasurement {
     return {
-      basis: 'not_incurred',
+      basis: "not_incurred",
       budgetChargeMicrousd: 0,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -837,7 +906,7 @@ export class RouterModelGateway extends ModelGateway {
     callCount = 1,
   ): PaidCostMeasurement {
     return {
-      basis: 'unknown',
+      basis: "unknown",
       budgetChargeMicrousd: reservationMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -850,10 +919,9 @@ export class RouterModelGateway extends ModelGateway {
         : null,
       callCount: Math.max(1, Math.floor(callCount)),
       meta: {
-        reason: 'model_output_or_ack_unavailable',
-        // 保留 provider 结算观测（含稳定 requestId/resolverId）：UNKNOWN
-        // spend 不进自动 sweep，后续只能按 requestId/operationKey/fence
-        // 做受控事实恢复，丢弃观测会让恢复无从定位物理调用。
+        reason: "model_output_or_ack_unavailable",
+        // 保留 provider 结算观测（含稳定 requestId/resolverId），供自动
+        // request-bound reconciliation 查询既有物理调用；绝不再次 dispatch。
         ...(usage?.gatewaySettlements?.length
           ? { gatewaySettlements: [...usage.gatewaySettlements] }
           : {}),
@@ -861,9 +929,13 @@ export class RouterModelGateway extends ModelGateway {
     };
   }
 
-  private async settlePersistentOperation(input: Parameters<SiteBuildCostLedger['settleOperation']>[0]): Promise<void> {
+  private async settlePersistentOperation(
+    input: Parameters<SiteBuildCostLedger["settleOperation"]>[0],
+  ): Promise<void> {
     const disablePaidCallsReason =
-      input.measurement.basis === 'unknown' ? (input.errorCode ?? 'MODEL_SETTLEMENT_UNKNOWN') : undefined;
+      input.measurement.basis === "unknown"
+        ? (input.errorCode ?? "MODEL_SETTLEMENT_UNKNOWN")
+        : undefined;
     let decision: string;
     try {
       decision = await this.paidLedger!.settleOperation({
@@ -873,27 +945,45 @@ export class RouterModelGateway extends ModelGateway {
     } catch (error) {
       return this.freezeUnknownSettlement(
         input.scope,
-        error instanceof PaidOperationUnknownError ? error.errorCode : 'SETTLEMENT_ACK_UNKNOWN',
+        error instanceof PaidOperationUnknownError
+          ? error.errorCode
+          : "SETTLEMENT_ACK_UNKNOWN",
       );
     }
     // Exact provider cost may exceed the admitted reservation while the
     // physical call and durable output are fully known. The database records
     // CAP_VARIANCE and disables further paid calls, but this is not an ACK
     // ambiguity and must not discard the valid output.
-    if (decision === 'OVER_RESERVATION') return;
-    if (decision !== 'SETTLED') {
-      return this.freezeUnknownSettlement(input.scope, `SETTLEMENT_${decision}`);
+    if (decision === "OVER_RESERVATION") return;
+    if (decision !== "SETTLED") {
+      return this.freezeUnknownSettlement(
+        input.scope,
+        `SETTLEMENT_${decision}`,
+      );
     }
     if (disablePaidCallsReason) {
-      throw new PaidOperationUnknownError(input.scope.operationKey, disablePaidCallsReason);
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        disablePaidCallsReason,
+      );
     }
   }
 
-  private async freezeUnknownSettlement(scope: PaidOperationReservation, errorCode: string): Promise<never> {
+  private async freezeUnknownSettlement(
+    scope: PaidOperationReservation,
+    errorCode: string,
+  ): Promise<never> {
     try {
-      await this.paidLedger!.disablePaidCalls(scope.workspaceId, scope.buildRunId, errorCode);
+      await this.paidLedger!.disablePaidCalls(
+        scope.workspaceId,
+        scope.buildRunId,
+        errorCode,
+      );
     } catch {
-      throw new PaidOperationUnknownError(scope.operationKey, 'UNKNOWN_FREEZE_ACK_UNKNOWN');
+      throw new PaidOperationUnknownError(
+        scope.operationKey,
+        "UNKNOWN_FREEZE_ACK_UNKNOWN",
+      );
     }
     throw new PaidOperationUnknownError(scope.operationKey, errorCode);
   }

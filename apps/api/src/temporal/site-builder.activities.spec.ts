@@ -142,6 +142,9 @@ describe("site build cost reconciliation sweep", () => {
     // 避免 `workspace_id ASC` 让 UUID 靠后的租户永久饥饿。
     expect(fairSql).toContain("NULLS FIRST");
     expect(fairSql).toContain("site_build_spend_reconciliation");
+    expect(fairSql).toContain(
+      "s.cost_basis IN ('estimated_upper_bound', 'unknown')",
+    );
     expect(fairQuery.values).toEqual([10]);
     expect(runReconciliationSweep).toHaveBeenCalledTimes(2);
     expect(runReconciliationSweep).toHaveBeenNthCalledWith(
@@ -178,23 +181,28 @@ describe("site build cost reconciliation sweep", () => {
       requestId: "req-cost-reconcile-001",
       receiptDigest: "a".repeat(64),
       costBasis: "token_pricing" as const,
-      exactCostMicrousd: '540',
+      exactCostMicrousd: "540",
       observedAt: new Date(),
     }));
-    const runReconciliationSweep = vi.fn(async (input: {
-      resolve: (candidate: {
-        spendId: string;
-        operationKey: string;
-        meta: Record<string, unknown> | null;
-      }) => Promise<{ status: string }>;
-    }) => {
-      const observation = await input.resolve({
-        spendId: "spend-1",
-        operationKey: "b".repeat(64),
-        meta: { settlementPreflight: {} },
-      });
-      return { attempted: 1, resolved: observation.status === "RESOLVED" ? 1 : 0 };
-    });
+    const runReconciliationSweep = vi.fn(
+      async (input: {
+        resolve: (candidate: {
+          spendId: string;
+          operationKey: string;
+          meta: Record<string, unknown> | null;
+        }) => Promise<{ status: string }>;
+      }) => {
+        const observation = await input.resolve({
+          spendId: "spend-1",
+          operationKey: "b".repeat(64),
+          meta: { settlementPreflight: {} },
+        });
+        return {
+          attempted: 1,
+          resolved: observation.status === "RESOLVED" ? 1 : 0,
+        };
+      },
+    );
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma({}),
       ownerDb: {
@@ -233,7 +241,10 @@ describe("site build cost reconciliation sweep", () => {
         lastAttempt: null,
       },
     ]);
-    const runReconciliationSweep = vi.fn(async () => ({ attempted: 1, resolved: 1 }));
+    const runReconciliationSweep = vi.fn(async () => ({
+      attempted: 1,
+      resolved: 1,
+    }));
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma({}),
       ownerDb: { $queryRaw: queryRaw } as unknown as PrismaClient,
@@ -278,7 +289,10 @@ describe("site build cost reconciliation sweep", () => {
       costLedger: {
         assertAuthorizedBudget: vi.fn(async () => undefined),
         closeAndSummarize: vi.fn(async () => undefined),
-        runReconciliationSweep: vi.fn(async () => ({ attempted: 0, resolved: 0 })),
+        runReconciliationSweep: vi.fn(async () => ({
+          attempted: 0,
+          resolved: 0,
+        })),
       } as never,
     });
     await expect(
