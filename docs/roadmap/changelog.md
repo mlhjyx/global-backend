@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-02 · Production Parity development capability cutover and UNKNOWN settlement correction
+
+- GrowthOS authority `541bcc63…` 的三个独立 RS256 signing domains、短期 Backend Access Token、零费用 Technical Budget Quote 与自动 Site Build Budget Grant 已装配到 Tenant Web；客户没有余额、充值、模型次数或固定金额门，technical cap 只作为平台执行安全包络。商业 Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`。
+- Backend PR #440/#441 合入后发布并部署 `main@da2f7aeb…` 的 exact OCI `sha256:66e2dbf8…`。API、Worker、Outbox Relay 三个 fresh lease 共用同一 image/artifact/migration；127 migrations、readiness、GrowthOS 三个 JWKS 与无 mixed queue digest 均已读回。
+- 同路径确定性 Intake BuildRun `84aa659f…` 成功并产生 READY Release。获授权的一次真实模型 refurbish BuildRun `81dcfe5a…` 没有 durable output/ACK；修复后的持久事实为 `UNKNOWN/unknown`、完整 reservation 保守扣减、paid-call kill switch 关闭，request-bound reconciliation attempt 1 为 `UNRESOLVED/log_unavailable`。只有一次物理模型调用，没有自动重发。
+- 新增 development RuntimeEvidence、脱敏 readback 与 `CANDIDATE` Release Bundle；它们明确不授权 Pilot/GA，不证明模型质量或公开发布。`platform_budget_authority` writer 仍不可用，但 Site Builder 使用的 workspace budget authority ready。
+
 ## 2026-09-01 · MinIO PERSONAL_DATA exact-version cleanup policy correction
 
 - Production Parity retained-development bootstrap 首次真实 provision dedicated artifact bucket 时，bucket、versioning、SSE-S3、lifecycle、runtime policy 和 personal-read policy 均成功，但 MinIO 对 cleanup policy 返回：`s3:ExistingObjectTag/artifact-privacy` 不支持 `s3:DeleteObjectVersion`。bootstrap 按设计失败关闭，没有创建 cleanup user，也没有启动 Backend runtime。

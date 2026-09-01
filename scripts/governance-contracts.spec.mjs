@@ -81,7 +81,8 @@ test("the discovery lineage successor is current-main based and the quarantined 
     assert.match(closeoutPlan, new RegExp(required));
   }
 
-  const expectedCard = "| `GPP-B-LINEAGE-001` | `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS` | `codex/discovery-query-materialization-successor` | initial base=`c7e39e050b2f30ed9ff155aec139ff206fb850d0`；PR #425 merge/readback=`d2c93dd6bea0348381286558896b395c84945171`；scope 仍仅为 Program B ACK identity、index-preserving Raw resolution 与 Provider-owned company lineage。旧 A mega-branch 继续 `NON_DEPLOYABLE / PROVENANCE_ONLY`；G0 ownership 已关闭，但本卡不授权 G2/G3 产品实现。 |";
+  const expectedCard =
+    "| `GPP-B-LINEAGE-001` | `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS` | `codex/discovery-query-materialization-successor` | initial base=`c7e39e050b2f30ed9ff155aec139ff206fb850d0`；PR #425 merge/readback=`d2c93dd6bea0348381286558896b395c84945171`；scope 仍仅为 Program B ACK identity、index-preserving Raw resolution 与 Provider-owned company lineage。旧 A mega-branch 继续 `NON_DEPLOYABLE / PROVENANCE_ONLY`；G0 ownership 已关闭，但本卡不授权 G2/G3 产品实现。 |";
   const assertUniqueDiscoveryLineageCard = (document) => {
     const rows = document
       .split("\n")
@@ -97,7 +98,10 @@ test("the discovery lineage successor is current-main based and the quarantined 
     ["ZERO_PRODUCT_CODE", "PRODUCT_CODE"],
     ["codex/discovery-query-materialization-successor", "codex/other-writer"],
     ["c7e39e050b2f30ed9ff155aec139ff206fb850d0", "b".repeat(40)],
-    ["scope 仍仅为 Program B ACK identity", "scope 扩大为 Program A ACK identity"],
+    [
+      "scope 仍仅为 Program B ACK identity",
+      "scope 扩大为 Program A ACK identity",
+    ],
     ["CURRENT_MAIN_READBACK_PASS", "IMPLEMENTATION_AUTHORIZED"],
     ["d2c93dd6bea0348381286558896b395c84945171", "d".repeat(40)],
   ]) {
@@ -111,26 +115,51 @@ test("the discovery lineage successor is current-main based and the quarantined 
     );
   }
 
-  const expectedProgramBRow = "| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | `GPP-B-LINEAGE-001` 已通过 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 由 current main admit 给唯一 writer `codex/discovery-query-materialization-successor`，状态 `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`。G0 ownership 已关闭；A 分支的 B-owned delta 仍非 accepted implementation，任何产品施工必须另过 G2/G3 计划与 review。 |";
-  const expectedG0Row = "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` | PR #424 已固定 ADR-025/`DEC-GPP-001` 与 mega-branch disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 已把唯一 `GPP-B-LINEAGE-001` card/writer 持久写入 current main。`CON-GPP-001=RESOLVED_WITH_REMEDIATION`、`BLK-GPP-001=RESOLVED`。此 PASS 只关闭 ownership/provenance；Program B implementation/TDD 仍属于 G2，DB/RLS/replay 与集成仍属于 G3，G1–G7 不由本门升级。 |";
+  const expectedProgramBRow =
+    "| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | `GPP-B-LINEAGE-001` 已通过 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 由 current main admit 给唯一 writer `codex/discovery-query-materialization-successor`，状态 `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`。G0 ownership 已关闭；A 分支的 B-owned delta 仍非 accepted implementation，任何产品施工必须另过 G2/G3 计划与 review。 |";
+  const expectedG0Row =
+    "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` | PR #424 已固定 ADR-025/`DEC-GPP-001` 与 mega-branch disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 已把唯一 `GPP-B-LINEAGE-001` card/writer 持久写入 current main。`CON-GPP-001=RESOLVED_WITH_REMEDIATION`、`BLK-GPP-001=RESOLVED`。此 PASS 只关闭 ownership/provenance；Program B implementation/TDD 仍属于 G2，DB/RLS/replay 与集成仍属于 G3，G1–G7 不由本门升级。 |";
+  const normalizeTableRow = (line) =>
+    line
+      .split("|")
+      .map((cell) => cell.trim())
+      .join(" | ");
+  const statusRowLabel = (prefix) => prefix.trimEnd().replace(/\s*\|$/, "");
   const assertUniqueStatusRow = (document, prefix, expected) => {
-    const rows = document.split("\n").filter((line) => line.startsWith(prefix));
-    assert.deepEqual(rows, [expected]);
+    const rows = document
+      .split("\n")
+      .filter((line) => line.startsWith(statusRowLabel(prefix)));
+    assert.deepEqual(rows.map(normalizeTableRow), [
+      normalizeTableRow(expected),
+    ]);
   };
+  const mutateStatusRow = (document, prefix, from, to) =>
+    document
+      .split("\n")
+      .map((line) =>
+        line.startsWith(statusRowLabel(prefix)) ? line.replace(from, to) : line,
+      )
+      .join("\n");
   assertUniqueStatusRow(
     status,
     "| B — Buyer Intelligence discovery |",
     expectedProgramBRow,
   );
   assertUniqueStatusRow(status, "| G0 — Truth & Ownership |", expectedG0Row);
-  const expectedProgramARow = "| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `OWNERSHIP_CLOSED_WITH_REMEDIATION`: writer inactivity、clean/no-`MERGE_HEAD` packet、post-`ed615d1b` delta classification 与 binding-ledger/provenance correction 已在 `91cae351795cceced59893bcf552c2b502a4ebaa` 完成。35 个 main ancestry commits 仍是 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`；`b57af498` 是 two-parent integration provenance；五个 B-owned deltas 仍不是 accepted A work；四个 Task 5.2 commits 继续 `QUARANTINED / HOLD_OWNERSHIP` 历史处置。PR #424 已将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，PR #425 readback `d2c93dd6bea0348381286558896b395c84945171` 已接受唯一 B card/writer。A 的 ownership gate 已关闭，但其 source/runtime/Release 能力仍按 G2–G5 单独验证。 |";
-  const expectedRootRow = "| `/global/backend` root `main` | `HEAD=d2c93dd6bea0348381286558896b395c84945171`; local `origin/main=d2c93dd6bea0348381286558896b395c84945171`; tracked/untracked clean at capture; 69 ignored status entries; status-entry digest `eb9d403efc501653cecc60be5af0de73d7ddf1e817fe568f1b385c352f7942f9` | Live local Git and `governance-main-worktree-sync` readback after PR #425. The digest binds porcelain path/state entries only；it does not prove ignored content byte identity or ignored-content cleanliness. This is source provenance only, not runtime/Release proof. |";
+  const expectedProgramARow =
+    "| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `OWNERSHIP_CLOSED_WITH_REMEDIATION`: writer inactivity、clean/no-`MERGE_HEAD` packet、post-`ed615d1b` delta classification 与 binding-ledger/provenance correction 已在 `91cae351795cceced59893bcf552c2b502a4ebaa` 完成。35 个 main ancestry commits 仍是 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`；`b57af498` 是 two-parent integration provenance；五个 B-owned deltas 仍不是 accepted A work；四个 Task 5.2 commits 继续 `QUARANTINED / HOLD_OWNERSHIP` 历史处置。PR #424 已将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，PR #425 readback `d2c93dd6bea0348381286558896b395c84945171` 已接受唯一 B card/writer。A 的 ownership gate 已关闭，但其 source/runtime/Release 能力仍按 G2–G5 单独验证。 |";
+  const expectedRootRow =
+    "| `/global/backend` root `main` | `HEAD=origin/main=da2f7aebafe87de3a5286d13e9d77864464dff7e`; protected local现场仅保留未跟踪 `.playwright-cli/` | PR #441 merge 后由受控 fast-forward 脚本同步；没有 stash/reset/clean，未跟踪现场未被删除。该 status 只绑定 path/state entries，不证明未跟踪内容字节身份。 |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
     expectedProgramARow,
   );
-  assertUniqueStatusRow(status, "| `/global/backend` root `main` |", expectedRootRow);
+  assertUniqueStatusRow(
+    status,
+    "| `/global/backend` root `main` |",
+    expectedRootRow,
+  );
   for (const [expected, prefix, mutations] of [
     [
       expectedProgramBRow,
@@ -138,7 +167,10 @@ test("the discovery lineage successor is current-main based and the quarantined 
       [
         ["ZERO_PRODUCT_CODE", "PRODUCT_CODE"],
         ["CURRENT_MAIN_READBACK_PASS", "IMPLEMENTATION_AUTHORIZED"],
-        ["codex/discovery-query-materialization-successor", "codex/other-writer"],
+        [
+          "codex/discovery-query-materialization-successor",
+          "codex/other-writer",
+        ],
       ],
     ],
     [
@@ -154,7 +186,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
     for (const [from, to] of mutations) {
       assert.throws(() =>
         assertUniqueStatusRow(
-          status.replace(expected, expected.replace(from, to)),
+          mutateStatusRow(status, prefix, from, to),
           prefix,
           expected,
         ),
@@ -162,33 +194,51 @@ test("the discovery lineage successor is current-main based and the quarantined 
     }
   }
   for (const [expected, prefix, mutation] of [
-    [expectedProgramARow, "| A — authority/runtime primitives |", ["OWNERSHIP_CLOSED_WITH_REMEDIATION", "HOLD_OWNERSHIP"]],
-    [expectedRootRow, "| `/global/backend` root `main` |", ["path/state entries only", "ignored content bytes"]],
+    [
+      expectedProgramARow,
+      "| A — authority/runtime primitives |",
+      ["OWNERSHIP_CLOSED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
+    ],
+    [
+      expectedRootRow,
+      "| `/global/backend` root `main` |",
+      ["只绑定 path/state entries", "证明 ignored content bytes"],
+    ],
   ]) {
     assert.throws(() =>
       assertUniqueStatusRow(
-        status.replace(expected, expected.replace(mutation[0], mutation[1])),
+        mutateStatusRow(status, prefix, mutation[0], mutation[1]),
         prefix,
         expected,
       ),
     );
   }
-  assert.match(status, /> 最后核验：2026-08-30T/);
+  assert.match(status, /> 最后核验：2026-09-02T/);
   assert.match(
     status,
-    /当前 source authority 是 `main@d2c93dd6bea0348381286558896b395c84945171`/,
+    /当前 Backend runtime source authority 为 `main@da2f7aebafe87de3a5286d13e9d77864464dff7e`/,
   );
   assert.match(
     status,
     /historical construction base 是 `23d111f7b400403deb7466abf34ab709685b8376`/,
   );
-  const expectedConflictRow = "| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | PR #424 固定 owner/seam 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 将唯一 `GPP-B-LINEAGE-001` card/writer 写入 current main。ownership collision 已关闭；四个 Task 5.2 commits 与五个 B-owned deltas 继续按 ADR-025 分类，G2/G3 产品实现仍未接纳。 |";
-  const expectedBlockerRow = "| `BLK-GPP-001` | Ownership/provenance collision 已由 PR #424 与 PR #425 current-main readback 关闭。 | `OWN-PRODUCT` | `RESOLVED` at `main@d2c93dd6bea0348381286558896b395c84945171`；若 Program A head/index/worktree/merge 移动、出现第二 writer/card、或隔离提交进入 successor/migration/deploy，则重新打开 G0。 | `RESOLVED`；不授权 Discovery 产品实现，后续仍受 G2/G3、费用、runtime 与发布门约束。 |";
+  const expectedConflictRow =
+    "| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | PR #424 固定 owner/seam 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 将唯一 `GPP-B-LINEAGE-001` card/writer 写入 current main。ownership collision 已关闭；四个 Task 5.2 commits 与五个 B-owned deltas 继续按 ADR-025 分类，G2/G3 产品实现仍未接纳。 |";
+  const expectedBlockerRow =
+    "| `BLK-GPP-001` | Ownership/provenance collision 已由 PR #424 与 PR #425 current-main readback 关闭。 | `OWN-PRODUCT` | `RESOLVED` at `main@d2c93dd6bea0348381286558896b395c84945171`；若 Program A head/index/worktree/merge 移动、出现第二 writer/card、或隔离提交进入 successor/migration/deploy，则重新打开 G0。 | `RESOLVED`；不授权 Discovery 产品实现，后续仍受 G2/G3、费用、runtime 与发布门约束。 |";
   assertUniqueStatusRow(conflicts, "| `CON-GPP-001` |", expectedConflictRow);
   assertUniqueStatusRow(conflicts, "| `BLK-GPP-001` |", expectedBlockerRow);
   for (const [expected, prefix, mutation] of [
-    [expectedConflictRow, "| `CON-GPP-001` |", ["RESOLVED_WITH_REMEDIATION", "HOLD_OWNERSHIP"]],
-    [expectedBlockerRow, "| `BLK-GPP-001` |", ["`RESOLVED`", "`HOLD_OWNERSHIP`"]],
+    [
+      expectedConflictRow,
+      "| `CON-GPP-001` |",
+      ["RESOLVED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
+    ],
+    [
+      expectedBlockerRow,
+      "| `BLK-GPP-001` |",
+      ["`RESOLVED`", "`HOLD_OWNERSHIP`"],
+    ],
   ]) {
     assert.throws(() =>
       assertUniqueStatusRow(
@@ -201,19 +251,23 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const phase0Rows = releasePlan
     .split("\n")
     .filter((line) => line.startsWith("1. **Phase 0:**"));
-  const expectedPhase0Row = "1. **Phase 0:** current truth、A/B interface、provenance 与 documentation 已完成；G0=`PASS / OWNERSHIP_CLOSED`，绑定 PR #424 与 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171`。这不升级 G1–G7；Program B source/TDD 从 G2 继续，DB/RLS/replay/integration 从 G3 继续。";
+  const expectedPhase0Row =
+    "1. **Phase 0:** current truth、A/B interface、provenance 与 documentation 已完成；G0=`PASS / OWNERSHIP_CLOSED`，绑定 PR #424 与 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171`。这不升级 G1–G7；Program B source/TDD 从 G2 继续，DB/RLS/replay/integration 从 G3 继续。";
   assert.deepEqual(phase0Rows, [expectedPhase0Row]);
   const releaseG0Rows = releasePlan
     .split("\n")
     .filter((line) => line.startsWith("| G0 — Truth & Ownership |"));
-  assert.deepEqual(releaseG0Rows, ["| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` |"]);
+  assert.deepEqual(releaseG0Rows, [
+    "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` |",
+  ]);
   const laterGateRows = status
     .split("\n")
     .filter((line) => /^\| G[1-7] —/.test(line))
+    .map(normalizeTableRow)
     .join("\n");
   assert.equal(
     createHash("sha256").update(laterGateRows).digest("hex"),
-    "9dc4f7064d1c966d5b94575c1defdc84aec28e32404459b3d481cdb684800497",
+    "a2d97a21d32732ae79ca46cd701aaaba1f7d781c0ef3d1d8bb8c7613808e22ea",
   );
 });
 
