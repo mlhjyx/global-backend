@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Exact starting branch head is `b20f41dabf4f4a939517900d6a8eff8a686b40fb`; exact current main and cached `origin/main` are both `8f3f615ea9d0494a55f67075c7eee0bb126b3386`.
+- Exact capability baseline is `b20f41dabf4f4a939517900d6a8eff8a686b40fb`; before merge, the only allowed descendant change is this tracked plan file. Exact current main and cached `origin/main` are both `8f3f615ea9d0494a55f67075c7eee0bb126b3386`.
 - Exact merge base is `c998ca7f07af0fc8f3a1687c140aa8105c9567a0`; current relation is `main-only=35 / branch-only=107`.
 - Use the existing isolated worktree `/global/backend/.codex/worktrees/trusted-approval-readback-integration`; do not touch the shared root's untracked `.playwright-cli/` directory.
 - The merge is local, non-rewriting, and two-parent. No rebase, squash, reset, cherry-pick reconstruction, push, PR update, comment, thread mutation, external workflow, deploy, restart, runtime mutation, or provider/paid action is authorized.
@@ -44,7 +44,9 @@
 - [ ] **Step 1: Re-run the exact pre-merge guard**
 
 ```bash
-test "$(git rev-parse HEAD)" = "b20f41dabf4f4a939517900d6a8eff8a686b40fb"
+git merge-base --is-ancestor b20f41dabf4f4a939517900d6a8eff8a686b40fb HEAD
+test "$(git diff --name-only b20f41dabf4f4a939517900d6a8eff8a686b40fb..HEAD)" = \
+  "docs/superpowers/plans/2026-09-01-approval-current-main-clock-closeout.md"
 test "$(git rev-parse main)" = "8f3f615ea9d0494a55f67075c7eee0bb126b3386"
 test "$(git rev-parse origin/main)" = "8f3f615ea9d0494a55f67075c7eee0bb126b3386"
 test "$(git merge-base main HEAD)" = "c998ca7f07af0fc8f3a1687c140aa8105c9567a0"
@@ -52,7 +54,7 @@ test -z "$(git status --porcelain=v1 --untracked-files=all)"
 git rev-list --left-right --count main...HEAD
 ```
 
-Expected: `35 107`; every command exits zero. Any head/main/status drift stops the task before merge.
+Expected: the only pre-merge descendant path is the plan; `main...HEAD` reports main-only 35 and branch-only 108 after the first plan commit (or a larger branch-only count only when additional commits modify that same plan file); every command exits zero. Any other head/main/status drift stops the task before merge.
 
 - [ ] **Step 2: Re-run the non-mutating merge conflict oracle**
 
@@ -111,6 +113,9 @@ Expected: Copy tests pass; readback is exactly `STALE_HOLD / NOT_AUTHORIZED / BL
 
 ```bash
 git commit -m "chore: integrate current main into approval readback"
+git merge-base --is-ancestor b20f41dabf4f4a939517900d6a8eff8a686b40fb HEAD^1
+test "$(git diff --name-only b20f41dabf4f4a939517900d6a8eff8a686b40fb..HEAD^1)" = \
+  "docs/superpowers/plans/2026-09-01-approval-current-main-clock-closeout.md"
 test "$(git rev-parse HEAD^2)" = "8f3f615ea9d0494a55f67075c7eee0bb126b3386"
 git status --short --branch
 ```
