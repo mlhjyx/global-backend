@@ -149,7 +149,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramARow =
     "| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `OWNERSHIP_CLOSED_WITH_REMEDIATION`: writer inactivity、clean/no-`MERGE_HEAD` packet、post-`ed615d1b` delta classification 与 binding-ledger/provenance correction 已在 `91cae351795cceced59893bcf552c2b502a4ebaa` 完成。35 个 main ancestry commits 仍是 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`；`b57af498` 是 two-parent integration provenance；五个 B-owned deltas 仍不是 accepted A work；四个 Task 5.2 commits 继续 `QUARANTINED / HOLD_OWNERSHIP` 历史处置。PR #424 已将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，PR #425 readback `d2c93dd6bea0348381286558896b395c84945171` 已接受唯一 B card/writer。A 的 ownership gate 已关闭，但其 source/runtime/Release 能力仍按 G2–G5 单独验证。 |";
   const expectedRootRow =
-    "| `/global/backend` root `main` | `HEAD=origin/main=da2f7aebafe87de3a5286d13e9d77864464dff7e`; protected local现场仅保留未跟踪 `.playwright-cli/` | PR #441 merge 后由受控 fast-forward 脚本同步；没有 stash/reset/clean，未跟踪现场未被删除。该 status 只绑定 path/state entries，不证明未跟踪内容字节身份。 |";
+    "| `/global/backend` root `main` | evidence packaging 前观察于 `2026-09-02T04:08:12+08:00`：`HEAD=origin/main=674ff12d4d768ce5599fc07b565fe21da37dc5fe`；protected local现场仅保留未跟踪 `.playwright-cli/` | PR #443 merge 后由受控 fast-forward 脚本同步；本 evidence/docs merge 会继续前进 main，因此本行是时间绑定的 pre-packaging observation，不冒充 post-merge HEAD。runtime source authority 仍由上文独立绑定。 |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
@@ -202,7 +202,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
     [
       expectedRootRow,
       "| `/global/backend` root `main` |",
-      ["只绑定 path/state entries", "证明 ignored content bytes"],
+      ["不冒充 post-merge HEAD", "冒充 post-merge HEAD"],
     ],
   ]) {
     assert.throws(() =>
@@ -216,7 +216,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   assert.match(status, /> 最后核验：2026-09-02T/);
   assert.match(
     status,
-    /当前 Backend runtime source authority 为 `main@da2f7aebafe87de3a5286d13e9d77864464dff7e`/,
+    /当前 Backend runtime source authority 为 `main@674ff12d4d768ce5599fc07b565fe21da37dc5fe`/,
   );
   assert.match(
     status,
@@ -267,7 +267,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
     .join("\n");
   assert.equal(
     createHash("sha256").update(laterGateRows).digest("hex"),
-    "a2d97a21d32732ae79ca46cd701aaaba1f7d781c0ef3d1d8bb8c7613808e22ea",
+    "0fc9d4fd4b538daabf8c0df1863e94a80720a43054e0082142b3cbe9df7fc187",
   );
 });
 
