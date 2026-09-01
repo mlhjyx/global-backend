@@ -104,10 +104,11 @@ Before any scanner implementation, one current-main admission task must:
 2. classify every main-only change that intersects build inputs, raw-capability sources, migrations, Prisma schema, governance, runtime artifact rules, the three writers, resolver/lock, or B1-B6 consumers;
 3. run a no-write three-way merge and enumerate every conflict;
 4. stop on any Identity authority semantic drift, migration/function/ACL interaction, new direct writer, unresolved owner, or conflict outside an exact disposition;
-5. only under the later implementation-plan authorization, merge the exact live-main commit with a normal two-parent merge commit—never rebase, squash, force, or blanket `ours/theirs`;
-6. resolve unrelated generated evidence conflicts from current main or the official generator output, never from stale feature bytes;
-7. regenerate and independently review current-main admission evidence, focused/full tests, migration-chain compatibility, governance/docs, Gitleaks, and exact ContractGraph;
-8. record the reviewed live-main SHA, merge commit, parents, path classifications, conflict resolutions, migration additions, raw/build delta and review digest in `organization-identity-current-main-admission.json`.
+5. stop after the read-only packet and request separate exact authorizations for any required fetch/ref update and for creation of the exact local two-parent refresh merge commit; spec reconfirmation, plan drafting/approval, and scanner implementation authority do not imply either action;
+6. only after the exact local-merge authorization, merge the admitted live-main commit with a normal two-parent merge commit—never rebase, squash, force, or blanket `ours/theirs`;
+7. resolve unrelated generated evidence conflicts from current main or the official generator output, never from stale feature bytes;
+8. regenerate and independently review current-main admission evidence, focused/full tests, migration-chain compatibility, governance/docs, Gitleaks, and exact ContractGraph;
+9. record the reviewed live-main SHA, merge commit, parents, path classifications, conflict resolutions, migration additions, raw/build delta and review digest in `organization-identity-current-main-admission.json`.
 
 The refresh admission record contains metadata/digests only. It does not claim retained migration application, deployment, runtime health, or secret validity.
 
@@ -147,11 +148,57 @@ codex/pr407-organization-identity-caller-cutover
 
 It is not rebased, reset, deleted, or used as the v2 implementation base.
 
+### 3.5 Closed current-main admission record
+
+`organization-identity-current-main-admission.json` has exact keys and no extra fields:
+
+```ts
+type CurrentMainAdmission = Readonly<{
+  schemaVersion: "organization-identity-current-main-admission/v1";
+  status: "ADMITTED" | "HOLD";
+  artifactACommit: "2400bac28796bae44294114edc99eaccb1bd65b3";
+  branchPreRefreshCommit: string;
+  liveMainCommit: string;
+  mergeBaseCommit: string;
+  refreshMergeCommit: string;
+  refreshParents: readonly [string, string];
+  mainOnlyRange: string;
+  mainOnlyPathCount: number;
+  mainOnlyPathSetSha256: string;
+  paths: readonly CurrentMainPathAdmission[];
+  conflicts: readonly CurrentMainConflictAdmission[];
+  migrations: readonly CurrentMainMigrationAdmission[];
+  rawDeltaSha256: string;
+  buildDeltaSha256: string;
+  schemaDeltaSha256: string;
+  callerDeltaSha256: string;
+  review: Readonly<{ reportSha256: string; verdict: "PASS" }>;
+}>;
+```
+
+Every `paths` record binds repository-relative path, base/branch/main/result Git blob IDs (nullable only when mechanically absent), closed classifications chosen from `BUILD | RAW_CAPABILITY | PRISMA_SCHEMA | MIGRATION | GOVERNANCE | RUNTIME_ARTIFACT | IDENTITY_CALLER | IDENTITY_AUTHORITY | GENERATED_EVIDENCE | OTHER`, owner, evidence digests, and disposition `ADMIT_IDENTITY_AUTHORITY_UNCHANGED | ADMIT_IDENTITY_IRRELEVANT | ADMIT_GENERATED_MAIN_BYTES | ADMIT_GENERATED_REBUILT | HOLD`.
+
+Every conflict record binds path, exact hunk count, base/ours/theirs/result blob IDs, and resolution source. `ADMIT_GENERATED_REBUILT` additionally requires generator source commit, closed command ID, input digest, output blob/digest, generated JSON schema/readback digest, and exact human-citation readback digest. Free-form commands or prose are forbidden.
+
+Every migration record binds name, path, result blob, SHA-256, last-change commit, main-only flag, Artifact A relationship, and disposition `IDENTITY_AUTHORITY_UNCHANGED | IDENTITY_IRRELEVANT | HOLD`.
+
+The validator computes the main-only path set from exact `mergeBaseCommit..liveMainCommit` with NUL-delimited Git plumbing and requires exact set equality with `paths`: no missing, duplicate, renamed, case-colliding, out-of-range, or extra record. Conflict paths/hunk counts must equal the no-write merge facts; migration records must equal the complete refreshed migration directory. Any record or top-level `HOLD` makes the entire admission non-admissible.
+
+The minimal current-main admission validator and its tests are the first separately reviewed implementation unit after plan approval and before any fetch/local merge authorization. After the exact refresh merge, it generates and validates the admission JSON. The later accepted writer scanner imports the same closed contracts, reruns the validator before scanner baseline generation and `B0_ACCEPTANCE`, and wires it into `governance:verify`. B0 acceptance binds the validated admission blob and review digest; prose review cannot substitute for set equality.
+
+### 3.6 Authorization partition for the refresh
+
+Exact amended-spec reconfirmation authorizes only implementation-plan drafting. Later approval of the implementation plan authorizes only the local code/document tasks explicitly placed before the refresh authorization gate; it does not imply fetch, ref update, or creation of a local merge commit.
+
+The live SHA/path/no-write merge audit uses `ls-remote`, local Git objects, and merge-tree analysis without fetch. If the admitted live-main object is not already available locally, fetching that exact object/ref requires a separate explicit authorization naming the remote/ref/SHA. After the read-only audit packet and validator review are complete, creation of the exact two-parent local refresh merge commit requires another separate authorization naming branch pre-refresh SHA, admitted live-main SHA, expected conflict paths, and resolution rules.
+
+Scanner/baseline implementation begins only from the separately authorized and independently reviewed refresh commit. Push, PR create/update, GitHub merge, protected-main readback, controller inputs, root-only receipt, v3 creation, disposable PostgreSQL, and every later remote/runtime action remain independent gates.
+
 ## 5. Approaches considered
 
 ### 5.1 Chosen: frozen raw authority surface plus conservative source admission
 
-The chosen design uses TypeScript project analysis for Prisma capability ownership, freezes every existing raw capability/callsite/wrapper ingress from Artifact A, and rejects structural drift during Artifact B. A simple literal mention detector is defense-in-depth only.
+The chosen design uses TypeScript project analysis for Prisma capability ownership, freezes every existing raw capability/callsite/wrapper ingress from exact `B0_REFRESH_BASE_COMMIT`, separately preserves Artifact A Identity resolver/function/ACL authority, and rejects structural drift during Artifact B. A simple literal mention detector is defense-in-depth only.
 
 Benefits:
 
@@ -184,6 +231,15 @@ Renaming a third parser fix loop would evade the completed breaker rather than c
 Artifact B v2 introduces repository-governance files outside product runtime:
 
 ```text
+scripts/governance-organization-identity-current-main-admission.mjs
+  Closed current-main admission schema, Git diff/conflict/migration completeness
+  validator and deterministic redacted receipt generator. Implemented and
+  independently reviewed before the local refresh merge.
+
+scripts/governance-organization-identity-current-main-admission.spec.mjs
+  Path-set, disposition, conflict/generator provenance, migration and HOLD
+  mutation tests for the pre-refresh validator.
+
 scripts/governance-organization-identity-writers.mjs
   Project/build-surface admission, TypeScript capability inventory,
   baseline/stage verification, deterministic redacted CLI.
@@ -202,8 +258,9 @@ docs/governance/organization-identity-current-main-admission.json
   conflict resolutions, migration/raw/build deltas and independent review.
 
 docs/governance/organization-identity-migration-authority.json
-  Exact Artifact A migration directory inventory, checksums, last-change
-  commits, resolver/function/ACL authority records and prerequisite receipts.
+  Exact admitted refresh migration directory inventory, checksums, last-change
+  commits and current-main dispositions, plus separately pinned Artifact A
+  resolver/function/ACL authority records and prerequisite receipts.
 
 docs/governance/organization-identity-writer-stage.json
   Current Artifact B stage enum and observation receipt only. Expected finding
@@ -432,6 +489,17 @@ The acceptance commit cannot attest its own review. After its scoped review, B0 
 
 If protected main no longer equals the admitted live-main SHA at the start of acceptance review or merge authorization, the acceptance sequence is invalid and cannot be merged; repeat the complete current-main admission/implementation/review/acceptance sequence on a new head.
 
+Merge authorization and actual GitHub merge execution are separate events. Immediately before the authorized merge call, read live PR head/base and require exact head=`B0_ACCEPTANCE` and exact base SHA=`admitted liveMainCommit`; auto-update, merge-queue rebasing, or any mechanism that silently changes the head/base is forbidden. Use expected-head/base preconditions when the GitHub API supports them; a mismatch stops without merging and invalidates the acceptance for this sequence.
+
+Immediately after the merge response, independently read back the merge commit and require exactly two parents in order:
+
+```text
+first parent  = exact admitted liveMainCommit
+second parent = exact reviewed B0 PR head containing B0_ACCEPTANCE
+```
+
+The root-only receipt binds both parent SHAs. If a base/head mismatch is observed before execution, do not merge. If GitHub nevertheless creates a commit with different parents, do not create the protected-main anchor or v3 worktree and do not treat it as valid B0 admission; stop for a separately authorized forward corrective plan. Ancestry alone is insufficient.
+
 The non-self-referential trust root is protected GitHub `main` plus a controller-owned root-only readback receipt created only after the authorized merge:
 
 ```text
@@ -525,7 +593,7 @@ project committed bytes    64,000,000
 
 Cycles are keyed by checker symbol plus operation. Candidate work is charged before allocation. Budgets do not reset by recursively re-entering aliases, imports, helpers, wrappers, interpolation classification, ingress traversal, manifest comparison, or diagnostics.
 
-The B0 implementation measures and records exact Artifact A counts using the real project graph. Every project-total capacity must be at least twice the measured baseline and the baseline must consume no more than 50% of its hard limit. If any measured count violates that headroom, B0 stops for a spec revision rather than silently raising the limit. Tests prove the exact baseline fits and adversarial fanout/depth/cycle/record/byte cases exhaust deterministically.
+The B0 implementation measures and records exact `B0_REFRESH_BASE_COMMIT` counts using the real project graph. Artifact A counts may be retained as comparative evidence, but every 50% admission/headroom threshold applies to the refreshed graph. Every project-total capacity must be at least twice the measured refreshed baseline and that baseline must consume no more than 50% of its hard limit. If any measured count violates that headroom, B0 stops for a spec revision rather than silently raising the limit. Tests prove the exact refreshed baseline fits and adversarial fanout/depth/cycle/record/byte cases exhaust deterministically.
 
 Budget exhaustion is `SCAN_BUDGET_EXHAUSTED` and exit 1. A TypeScript-program, filesystem, configuration, manifest-schema, or unexpected scanner failure is normalized to one closed integrity code and exit 2. Neither can yield a clean inventory.
 
@@ -703,10 +771,12 @@ The written spec may advance to implementation planning only after:
 The later implementation may advance from B0 to B1 only after:
 
 - exact live protected main is integrated through the independently reviewed current-main admission merge and remains unchanged through B0 acceptance/merge authorization;
+- any required fetch and the exact local two-parent refresh merge were separately authorized after read-only audit;
 - the admitted refresh commit retains exact live main and Artifact A as ancestors, with every build/raw/migration/schema/governance/caller delta classified;
 - build/raw/migration baselines are complete and independently reviewed;
 - the separate B0 acceptance first-add commit and its parent implementation commit are independently reviewed, reachable, and byte-exact;
 - the exact B0 PR is merged to protected `main` with a history-preserving merge commit under separate authorization;
+- actual merge preflight proves exact admitted base/reviewed head, and post-readback proves exact ordered parents rather than ancestry alone;
 - live GitHub/main ancestry and the root-only protected-main anchor receipt bind the accepted B0 SHA and acceptance-review digest;
 - B1 starts from the exact protected-main merge commit in the v3 worktree;
 - every current raw capability surface has a non-blocking reviewed disposition;
