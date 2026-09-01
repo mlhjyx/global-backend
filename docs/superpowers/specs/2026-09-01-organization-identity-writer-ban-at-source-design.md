@@ -256,6 +256,15 @@ scripts/governance-organization-identity-current-main-admission.spec.mjs
   Path-set, disposition, conflict/generator provenance, migration and HOLD
   mutation tests for the pre-refresh validator.
 
+scripts/governance-organization-identity-bootstrap.mjs
+  Stdlib-only post-launch preflight. It loads no TypeScript/Prisma/dependency
+  module until an external clean-environment launcher has pinned Node,
+  pnpm/Corepack, bootstrap, config and tool-execution bytes.
+
+scripts/governance-organization-identity-bootstrap.spec.mjs
+  Hostile preload/loader/path/config/hook/lifecycle/tool-byte and generated-
+  output ordering tests; no hostile executable is actually loaded.
+
 scripts/governance-organization-identity-writers.mjs
   Project/build-surface admission, TypeScript capability inventory,
   baseline/stage verification, deterministic redacted CLI.
@@ -375,11 +384,30 @@ pnpm 9.15.9/corepack launcher metadata needed to prove the frozen install/genera
 
 For both roots the scanner records logical package, lockfile integrity/resolution, normalized realpath, exact loaded/executed file set, content digest, pre/post TOCTOU metadata, and generated-output binding. Expected pnpm symlinks are resolved and must terminate inside the exact workspace dependency graph. Undeclared packages, unrecorded JS/native execution, postinstall drift, arbitrary `node_modules` traversal, source maps, caches and runtime application code are forbidden. No dependency/tool bytes are emitted.
 
-A fresh v2/v3 worktree must run `pnpm install --frozen-lockfile`, `pnpm --filter @global/db generate`, and verify the declaration/tool roots and generated schema/client/DMMF digests before scanner execution. Mutation tests change `.dockerignore`, add each absence-sentinel path/patch, redirect a pnpm symlink, and alter TypeScript compiler JS or Prisma generator/engine bytes; every case is `BUILD_SURFACE_DRIFT` or `INTEGRITY_ERROR` without executing the changed tool.
+A fresh v2/v3 worktree must use the clean bootstrap sequence below for frozen installation, Prisma generation, declaration/tool-root verification and generated schema/client/DMMF admission before scanner execution. Mutation tests change `.dockerignore`, add each absence-sentinel path/patch, redirect a pnpm symlink, and alter TypeScript compiler JS or Prisma generator/engine bytes; every case is `BUILD_SURFACE_DRIFT` or `INTEGRITY_ERROR` without executing the changed tool.
+
+### 7.2 Pre-execution bootstrap and clean launch environment
+
+No Node process can attest away code already executed through preload/loader options. Every local and hosted authority invocation therefore begins outside Node with a controller/base-owned launcher that uses `/usr/bin/env -i` and exact pinned absolute executables. The launcher receipt binds OS/architecture, `/usr/bin/env`, Node runtime, pnpm/Corepack launcher and bootstrap script paths/digests before starting Node. A mismatch stops before the governance process runs.
+
+The child environment has an exact allowlist. It sets fixed task-specific empty `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `COREPACK_HOME`, `PNPM_HOME`, `TMPDIR`, minimal `PATH`, `CI=1`, and fixed UTF-8 locale. It requires absent/empty `NODE_OPTIONS`, `NODE_PATH`, preload/import/loader/require flags, `BASH_ENV`, `ENV`, npm/pnpm user/global config selectors, alternate registry/config paths, hook selectors, lifecycle-enabling overrides and every unrecognized `NODE_*`, `NPM_*`, `npm_config_*`, `PNPM_*`, or `COREPACK_*` control variable. It emits names/codes only and never values.
+
+The closed bootstrap sequence is:
+
+1. the branch-external controller or protected-base workflow verifies the accepted bootstrap Git blob and exact Node/pnpm/Corepack executable digests;
+2. invoke exact pnpm 9.15.9 under the clean environment with `install --frozen-lockfile --ignore-scripts` and isolated empty config/cache homes; registry routing is fixed to the reviewed public registry contract, and credential-bearing inputs are unavailable to the authority process;
+3. invoke the stdlib-only bootstrap, which imports only `node:` built-ins and hashes the complete dependency declaration and tool-execution roots, repository/package-manager sentinels, lock integrity, symlink/realpath graph and effective non-secret configuration before loading any dependency module;
+4. only after preflight may the bootstrap spawn the exact accepted Prisma generator/engine under the same clean environment, then verify generated schema/client/DMMF digests and post-execution TOCTOU state;
+5. only after generation verification may the bootstrap dynamically import the exact accepted TypeScript compiler and scanner modules; static top-level `import "typescript"` in the bootstrap/CLI path is forbidden;
+6. every scanner/governance command and the protected-main workflow calls this bootstrap path; direct Node/pnpm/package-script invocation cannot satisfy an authority gate.
+
+If `--ignore-scripts` installation cannot provide the exact pinned Prisma generator/engine without executing lifecycle code, the task is `TOOL_BOOTSTRAP_UNAVAILABLE/HOLD`; it does not enable scripts or download a substitute. Network/cache provisioning, if later required, is a separately reviewed non-authority preparation step whose outputs still must satisfy the clean bootstrap digests.
+
+Hostile tests construct environment/config/tool fixtures for `--require`, `--import`, custom loaders, `NODE_PATH`, redirected npm/pnpm/Corepack homes/configs, pnpm hook/patch selection, lifecycle-before-preflight, symlink redirection and changed compiler/generator/engine bytes. They prove the external launcher/bootstrap rejects the metadata before any hostile module/tool executes and that stdout/stderr remain closed.
 
 Any configuration, entrypoint, Docker copy, extension, generated-source, Prisma-version, or native-extractor operation drift produces `BUILD_SURFACE_DRIFT` and a non-clean result before source findings are evaluated.
 
-### 7.2 Traversal and file safety
+### 7.3 Traversal and file safety
 
 The conservative TypeScript admission root is `apps/api/src/`, filtered by the exact reviewed build contract. Separately shipped first-party runtime entrypoints are included in the build-surface manifest and scanned for imports/references that could reach Prisma or database clients.
 
@@ -864,6 +892,8 @@ governance:identity-writers:stage
 governance:identity-writers:zero
 ```
 
+These package names are developer conveniences only; the authority gate verifies that their exact commands invoke the accepted clean-environment bootstrap and never treats an arbitrary current package script as trusted. Local/controller and protected workflows invoke the bootstrap directly with the external environment receipt, then verify the package aliases are byte-equal convenience routes.
+
 B0 wires the self-tests and current-stage command into the existing explicit governance test aggregator and `.github/workflows/governance.yml` path through `governance:verify`. Because the stage contract expects three findings at B0, governance remains green.
 
 That ordinary PR workflow is CI evidence only. It does not establish the external anchor. The separately reviewed `organization-identity-writer-anchor.yml` is inert as authority until its exact blob is merged into protected main. After the B0 merge it runs from protected main/base as specified in §10.3; B1 cannot begin until its initial exact-main run and root/GitHub readback are PASS. B1-B6 hosted anchor checks use only its base-owned `pull_request_target` execution and never trust a same-named PR-controlled job.
@@ -948,6 +978,7 @@ The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not f
 - internal/external symlink, special file, realpath escape, unsupported extension, duplicate/case-collision path, pre/post TOCTOU;
 - invalid manifests, duplicate records, wrong digests, absolute/`..` paths;
 - FS, TypeScript, resolver, budget, config, and unexpected exceptions containing credential-like and SQL text;
+- external clean-launch receipt, Node preload/import/loader/path, npm/pnpm/Corepack config/home/hook/lifecycle controls, bootstrap-before-tool ordering, exact tool executable bytes, and rejection before hostile execution;
 - absence of those bytes, absolute roots, messages, causes, stacks, and diagnostics from stdout and stderr;
 - exact planned compatibility migration definition/lock/fault/catalog tests and rejection of every other migration addition/removal/checksum/function/ACL drift;
 - runtime artifact exclusion.
@@ -957,7 +988,7 @@ Expectations are literal, hand-derived, exercise the real scanner, and name the 
 
 ## 19. Security, privacy, rollback, and external boundaries
 
-- The scanner reads only admitted repository files and never reads `.env`, credentials, customer data, runtime payloads, prompts, ignored caches, or unrelated worktrees.
+- The scanner reads only admitted repository files plus the exact declaration/tool-execution roots admitted by the clean bootstrap. It never reads `.env`, credential values, customer data, runtime payloads, prompts, any other ignored cache, or unrelated worktrees.
 - Findings and error output are metadata-only under the closed schemas above.
 - No clean result authorizes SQL execution, migration application, provider dispatch, paid calls, deployment, or runtime claims.
 - The failed v1 branch remains preserved/read-only. V2 rollback before merge is branch abandonment, never reset of Artifact A or shared main.
