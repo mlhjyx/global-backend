@@ -49,6 +49,32 @@ function startingLease(role: RuntimeProcessRole): RuntimeProcessLeaseRecord {
   });
 }
 
+function stoppedLease(
+  record: RuntimeProcessLeaseRecord,
+): RuntimeProcessLeaseRecord {
+  const stoppedAt = new Date();
+  return Object.freeze({
+    ...record,
+    state: "STOPPED",
+    lastSeenAt: stoppedAt,
+    stoppedAt,
+  });
+}
+
+async function readLeaseState(
+  instanceId: string,
+): Promise<{ state: string; stoppedAt: Date | null } | undefined> {
+  const rows = await reader.$queryRawUnsafe<
+    Array<{ state: string; stoppedAt: Date | null }>
+  >(
+    `SELECT "state"::text AS "state", "stopped_at" AS "stoppedAt"
+       FROM "runtime_process_lease"
+      WHERE "instance_id" = $1::uuid`,
+    instanceId,
+  );
+  return rows[0];
+}
+
 const reader = new PrismaClient({
   datasourceUrl: process.env.APP_DATABASE_URL,
 });
@@ -61,15 +87,7 @@ try {
     await store.upsert(
       Object.freeze({ ...starting, state: "READY", lastSeenAt: new Date() }),
     );
-    const stoppedAt = new Date();
-    await store.upsert(
-      Object.freeze({
-        ...starting,
-        state: "STOPPED",
-        lastSeenAt: stoppedAt,
-        stoppedAt,
-      }),
-    );
+    await store.terminalize(stoppedLease(starting));
 
     const rows = await reader.$queryRawUnsafe<
       Array<{
@@ -114,6 +132,61 @@ try {
     }
   }
 
+  const missing = startingLease("WORKER");
+  const missingStopped = stoppedLease(missing);
+  await store.terminalize(missingStopped);
+  await store.terminalize(missingStopped);
+  const missingObserved = await readLeaseState(missing.instanceId);
+  if (missingObserved?.state !== "STOPPED" || !missingObserved.stoppedAt) {
+    throw new Error("RUNTIME_LEASE_ATOMIC_MISSING_ROW_TERMINALIZATION_FAILED");
+  }
+  await store
+    .terminalize(
+      Object.freeze({
+        ...missingStopped,
+        buildSha: "d".repeat(40),
+      }),
+    )
+    .then(
+      () => {
+        throw new Error("RUNTIME_LEASE_ATOMIC_IDENTITY_MISMATCH_ACCEPTED");
+      },
+      () => undefined,
+    );
+
+  const registerFirst = startingLease("WORKER");
+  await store.upsert(registerFirst);
+  await store.terminalize(stoppedLease(registerFirst));
+  if ((await readLeaseState(registerFirst.instanceId))?.state !== "STOPPED") {
+    throw new Error("RUNTIME_LEASE_ATOMIC_REGISTER_FIRST_FAILED");
+  }
+
+  const terminalFirst = startingLease("WORKER");
+  await store.terminalize(stoppedLease(terminalFirst));
+  await store.upsert(terminalFirst).then(
+    () => {
+      throw new Error("RUNTIME_LEASE_ATOMIC_STOPPED_ROW_REOPENED");
+    },
+    () => undefined,
+  );
+  if ((await readLeaseState(terminalFirst.instanceId))?.state !== "STOPPED") {
+    throw new Error("RUNTIME_LEASE_ATOMIC_TERMINAL_FIRST_FAILED");
+  }
+
+  for (let index = 0; index < 20; index += 1) {
+    const concurrent = startingLease("WORKER");
+    const outcomes = await Promise.allSettled([
+      store.upsert(concurrent),
+      store.terminalize(stoppedLease(concurrent)),
+    ]);
+    if (
+      outcomes[1]?.status !== "fulfilled" ||
+      (await readLeaseState(concurrent.instanceId))?.state !== "STOPPED"
+    ) {
+      throw new Error("RUNTIME_LEASE_ATOMIC_CONCURRENT_TERMINALIZATION_FAILED");
+    }
+  }
+
   process.stdout.write(
     `${JSON.stringify({
       status: "RUNTIME_LEASE_PRISMA_COMPATIBILITY_VERIFIED",
@@ -121,6 +194,6 @@ try {
     })}\n`,
   );
 } finally {
-  await store.onApplicationShutdown();
+  await store.disconnectWriters();
   await reader.$disconnect();
 }

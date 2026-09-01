@@ -1,4 +1,4 @@
-import { Injectable, type OnApplicationShutdown } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import type { PrismaService } from "../prisma/prisma.service";
@@ -23,6 +23,7 @@ export interface RuntimeProcessLeaseRecord {
 
 export interface RuntimeProcessLeaseStore {
   upsert(record: RuntimeProcessLeaseRecord): Promise<void>;
+  terminalize(record: RuntimeProcessLeaseRecord): Promise<void>;
   listFresh(input: {
     role: RuntimeProcessRole;
     taskQueue: string | null;
@@ -32,6 +33,31 @@ export interface RuntimeProcessLeaseStore {
 
 type RuntimeLeaseQueryClient = Pick<PrismaClient, "$queryRawUnsafe"> &
   Partial<Pick<PrismaClient, "$disconnect">>;
+
+const RUNTIME_LEASE_STATEMENT_TIMEOUT_MS = 4_000;
+
+export function withRuntimeLeaseStatementTimeout(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("RUNTIME_PROCESS_LEASE_WRITER_URL_INVALID");
+  }
+  if (!new Set(["postgres:", "postgresql:"]).has(url.protocol)) {
+    throw new Error("RUNTIME_PROCESS_LEASE_WRITER_URL_INVALID");
+  }
+  const existingOptions = url.searchParams.get("options")?.trim();
+  url.searchParams.set(
+    "options",
+    [
+      existingOptions,
+      `-c statement_timeout=${RUNTIME_LEASE_STATEMENT_TIMEOUT_MS}`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  return url.toString();
+}
 
 export interface RuntimeProcessLeaseStoreOptions {
   env?: NodeJS.ProcessEnv;
@@ -53,6 +79,11 @@ const HEARTBEAT_FUNCTION: Readonly<Record<RuntimeProcessRole, string>> = {
   WORKER: "heartbeat_worker_runtime_process_lease",
   OUTBOX_RELAY: "heartbeat_outbox_relay_runtime_process_lease",
 };
+const TERMINALIZE_FUNCTION: Readonly<Record<RuntimeProcessRole, string>> = {
+  API: "terminalize_api_runtime_process_lease",
+  WORKER: "terminalize_worker_runtime_process_lease",
+  OUTBOX_RELAY: "terminalize_outbox_relay_runtime_process_lease",
+};
 const DATABASE_ROLE: Readonly<Record<RuntimeProcessRole, string>> = {
   API: "runtime_api",
   WORKER: "runtime_worker",
@@ -61,6 +92,7 @@ const DATABASE_ROLE: Readonly<Record<RuntimeProcessRole, string>> = {
 
 interface RuntimeLeasePrincipal {
   sessionUser: string;
+  statementTimeout: string;
   superuser: boolean;
   bypassRls: boolean;
   createDb: boolean;
@@ -81,21 +113,27 @@ function configuredWriters(
       continue;
     }
     const url = env[WRITER_URL_ENV[role]]?.trim();
-    if (url) writers.set(role, new PrismaClient({ datasourceUrl: url }));
+    if (url) {
+      writers.set(
+        role,
+        new PrismaClient({
+          datasourceUrl: withRuntimeLeaseStatementTimeout(url),
+        }),
+      );
+    }
   }
   return writers;
 }
 
 @Injectable()
-export class PrismaRuntimeProcessLeaseStore
-  implements RuntimeProcessLeaseStore, OnApplicationShutdown
-{
+export class PrismaRuntimeProcessLeaseStore implements RuntimeProcessLeaseStore {
   private readonly registeredInstances = new Set<string>();
   private readonly verifiedWriters = new Set<RuntimeProcessRole>();
   private readonly writers: ReadonlyMap<
     RuntimeProcessRole,
     RuntimeLeaseQueryClient
   >;
+  private disconnectPromise?: Promise<void>;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -110,6 +148,7 @@ export class PrismaRuntimeProcessLeaseStore
     await this.assertWriterIdentity(record.role, writer);
     const registerFunction = REGISTER_FUNCTION[record.role];
     const heartbeatFunction = HEARTBEAT_FUNCTION[record.role];
+    let registeredNow = false;
     if (!this.registeredInstances.has(record.instanceId)) {
       await writer.$queryRawUnsafe<Array<{ instance_id: string }>>(
         `SELECT ${registerFunction}(
@@ -125,7 +164,9 @@ export class PrismaRuntimeProcessLeaseStore
         record.startedAt,
       );
       this.registeredInstances.add(record.instanceId);
+      registeredNow = true;
     }
+    if (registeredNow && record.state === "STARTING") return;
     await writer.$queryRawUnsafe<Array<{ heartbeat: string }>>(
       `SELECT ${heartbeatFunction}(
         $1::uuid, $2::"runtime_process_state", $3::timestamptz
@@ -136,6 +177,31 @@ export class PrismaRuntimeProcessLeaseStore
     );
   }
 
+  async terminalize(record: RuntimeProcessLeaseRecord): Promise<void> {
+    if (record.state !== "STOPPED" || !record.stoppedAt) {
+      throw new Error("RUNTIME_PROCESS_LEASE_TERMINAL_STATE_REQUIRED");
+    }
+    const writer = this.writers.get(record.role);
+    if (!writer) throw new Error("RUNTIME_PROCESS_LEASE_WRITER_UNAVAILABLE");
+    await this.assertWriterIdentity(record.role, writer);
+    const terminalizeFunction = TERMINALIZE_FUNCTION[record.role];
+    await writer.$queryRawUnsafe<Array<{ instance_id: string }>>(
+      `SELECT ${terminalizeFunction}(
+        $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
+        $7::timestamptz, $8::timestamptz
+      ) AS instance_id`,
+      record.instanceId,
+      record.taskQueue,
+      record.buildSha,
+      record.imageDigest,
+      record.artifactDigest,
+      record.migrationRevision,
+      record.startedAt,
+      record.stoppedAt,
+    );
+    this.registeredInstances.add(record.instanceId);
+  }
+
   private async assertWriterIdentity(
     role: RuntimeProcessRole,
     writer: RuntimeLeaseQueryClient,
@@ -143,6 +209,7 @@ export class PrismaRuntimeProcessLeaseStore
     if (this.verifiedWriters.has(role)) return;
     const rows = await writer.$queryRawUnsafe<RuntimeLeasePrincipal[]>(
       `SELECT p.rolname::text AS "sessionUser",
+              current_setting('statement_timeout')::text AS "statementTimeout",
               p.rolsuper AS "superuser", p.rolbypassrls AS "bypassRls",
               p.rolcreatedb AS "createDb", p.rolcreaterole AS "createRole",
               p.rolreplication AS "replication",
@@ -161,6 +228,7 @@ export class PrismaRuntimeProcessLeaseStore
     if (
       rows.length !== 1 ||
       !principal ||
+      principal.statementTimeout !== "4s" ||
       principal.superuser ||
       principal.bypassRls ||
       principal.createDb ||
@@ -174,7 +242,12 @@ export class PrismaRuntimeProcessLeaseStore
     this.verifiedWriters.add(role);
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  disconnectWriters(): Promise<void> {
+    this.disconnectPromise ??= this.disconnectWriterClients();
+    return this.disconnectPromise;
+  }
+
+  private async disconnectWriterClients(): Promise<void> {
     const clients = new Set(this.writers.values());
     await Promise.all(
       [...clients].map((client) =>
@@ -293,6 +366,36 @@ export class RuntimeProcessLeaseService {
       startedAt,
       lastSeenAt: now,
       stoppedAt: state === "STOPPED" ? now : null,
+    });
+  }
+
+  async terminalize(
+    role: RuntimeProcessRole,
+    taskQueue: string | null,
+  ): Promise<void> {
+    const identity = this.options.identity;
+    if (!identity.attested) {
+      throw new Error("runtime release identity is unavailable");
+    }
+    const now = this.options.now!();
+    const instanceId = this.instanceIds.get(role);
+    if (!instanceId) {
+      throw new Error("runtime process role identity is unavailable");
+    }
+    const startedAt = this.startedAt.get(role) ?? now;
+    this.startedAt.set(role, startedAt);
+    await this.store.terminalize({
+      instanceId,
+      role,
+      state: "STOPPED",
+      taskQueue,
+      buildSha: identity.build_sha,
+      imageDigest: identity.image_digest,
+      artifactDigest: identity.artifact_digest,
+      migrationRevision: identity.migration_revision,
+      startedAt,
+      lastSeenAt: now,
+      stoppedAt: now,
     });
   }
 

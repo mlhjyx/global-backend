@@ -66,6 +66,7 @@ async function bootstrap(): Promise<void> {
     env: process.env,
   });
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.
   app.set('query parser', 'extended');

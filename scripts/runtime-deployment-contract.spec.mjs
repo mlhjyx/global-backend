@@ -462,14 +462,20 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(verify, /register_api_runtime_process_lease/);
   assert.match(verify, /register_worker_runtime_process_lease/);
   assert.match(verify, /register_outbox_relay_runtime_process_lease/);
+  assert.match(verify, /terminalize_api_runtime_process_lease/);
+  assert.match(verify, /terminalize_worker_runtime_process_lease/);
+  assert.match(verify, /terminalize_outbox_relay_runtime_process_lease/);
   assert.match(verify, /psql_denied/);
 });
 
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
-  const [api, worker, readme] = await Promise.all([
+  const [api, worker, readme, compose, main, temporalWorker] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),
     repositoryFile('infra/systemd/global-worker.service'),
     repositoryFile('infra/systemd/README.md'),
+    repositoryFile('infra/backend-runtime.compose.yml'),
+    repositoryFile('apps/api/src/main.ts'),
+    repositoryFile('apps/api/src/temporal/worker.ts'),
   ]);
   for (const unit of [api, worker]) {
     assert.doesNotMatch(unit, /node\s+dist\//);
@@ -498,7 +504,26 @@ test('legacy systemd units delegate to the immutable compose runtime instead of 
         /docker compose --env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env --env-file \/global\/backend\/\.secrets\/backend-runtime\.env/,
       );
     }
+    assert.match(unit, /^TimeoutStopSec=120s$/m);
   }
+  assert.match(compose, /^\s+stop_grace_period: 90s$/m);
+  assert.match(
+    main,
+    /app\.enableShutdownHooks\(\['SIGTERM', 'SIGINT'\]\)/,
+  );
+  assert.match(
+    temporalWorker,
+    /Runtime\.install\(\{ shutdownSignals: \[\] \}\)/,
+  );
+  assert.match(temporalWorker, /startWorkerProcessSignalCoordinator/);
+  assert.ok(
+    temporalWorker.indexOf('Runtime.install({ shutdownSignals: [] })') <
+      temporalWorker.indexOf('startWorkerProcessSignalCoordinator({'),
+  );
+  assert.match(
+    temporalWorker,
+    /await connection\.close\(\)\.catch\(\(\) => undefined\)/,
+  );
   assert.match(
     readme,
     /docker compose \\\n+  --env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env \\\n+  --env-file \/global\/backend\/\.secrets\/backend-runtime\.env/,
