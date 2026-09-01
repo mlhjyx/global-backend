@@ -9,8 +9,12 @@ const migration = new URL(
 describe('platform schedule authority database cutover', () => {
   it('admits or read-only reattests one exact run under the platform writer principal', async () => {
     const sql = await readFile(migration, 'utf8');
-    expect(sql).toContain('CREATE FUNCTION admit_platform_execution_budget_run_v1');
-    expect(sql).toContain('assert_execution_budget_platform_writer_principal()');
+    expect(sql).toContain(
+      'CREATE FUNCTION admit_platform_execution_budget_run_v1',
+    );
+    expect(sql).toContain(
+      'assert_execution_budget_platform_writer_principal()',
+    );
     expect(sql).toContain('attest_authorized_tool_budget_v1');
     expect(sql).toContain('open_authorized_tool_budget_v1');
     expect(sql).toContain('campaign_cap_microusd');
@@ -24,13 +28,25 @@ describe('platform schedule authority database cutover', () => {
   });
 
   it('requires a deployment-owned writer URL with no owner or app fallback', async () => {
-    const [worker, example] = await Promise.all([
+    const [worker, database, example] = await Promise.all([
       readFile(new URL('../temporal/worker.ts', import.meta.url), 'utf8'),
+      readFile(
+        new URL(
+          './execution-budget-platform-writer.database.ts',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
       readFile(new URL('../../.env.example', import.meta.url), 'utf8'),
     ]);
-    expect(worker).toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL');
-    expect(worker).toMatch(/new PostgresBudgetStore\(\s*prisma,\s*authorityWriter,?\s*\)/);
-    expect(worker).not.toMatch(/EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL[^\n]*(?:DATABASE_URL|APP_DATABASE_URL)/);
+    expect(worker).toContain('createExecutionBudgetPlatformWriterClient');
+    expect(database).toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL');
+    expect(worker).toMatch(
+      /new PostgresBudgetStore\(\s*prisma,\s*authorityWriter,?\s*\)/,
+    );
+    expect(database).not.toMatch(
+      /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL[^\n]*(?:DATABASE_URL|APP_DATABASE_URL)/,
+    );
     expect(example).toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL=');
   });
 });

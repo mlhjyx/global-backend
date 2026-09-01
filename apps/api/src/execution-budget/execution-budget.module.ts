@@ -9,9 +9,14 @@ import { AuthModule } from '../auth/auth.module';
 import { WorkspaceTechnicalBudgetQuoteController } from './workspace-technical-budget-quote.controller';
 import { WorkspaceTechnicalBudgetQuoteService } from './workspace-technical-budget-quote';
 import { resolveWorkspaceTechnicalBudgetEnvelope } from './workspace-technical-budget-envelope';
+import { ExecutionBudgetPlatformWriterDatabaseModule } from './execution-budget-platform-writer.database';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    ExecutionBudgetPlatformWriterDatabaseModule,
+  ],
   controllers: [WorkspaceTechnicalBudgetQuoteController],
   providers: [
     {
