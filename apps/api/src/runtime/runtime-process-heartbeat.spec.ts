@@ -15,25 +15,31 @@ function fixture(
   admitted = true,
 ) {
   const registry = new RuntimeReadinessContributorRegistry();
-  const service = new ApiRuntimeProcessHeartbeat(
+  const leaseStore = { disconnectWriters: vi.fn(async () => undefined) };
+  const terminalize = vi.fn(async () => undefined);
+  const Service = ApiRuntimeProcessHeartbeat as unknown as new (
+    ...args: unknown[]
+  ) => ApiRuntimeProcessHeartbeat;
+  const service = new Service(
     {
       $queryRawUnsafe: migrationQuery,
     } as never,
     { current: () => ({ admitted }) } as never,
     { current: () => identity } as never,
-    { heartbeat } as never,
+    { heartbeat, terminalize } as never,
     registry,
+    leaseStore,
   );
-  return { service, registry };
+  return { service, registry, leaseStore, terminalize };
 }
 
 async function shutdown(service: ApiRuntimeProcessHeartbeat): Promise<void> {
   const lifecycle = service as unknown as {
     onModuleDestroy?: () => Promise<void>;
-    beforeApplicationShutdown?: () => Promise<void>;
+    onApplicationShutdown?: () => Promise<void>;
   };
   await lifecycle.onModuleDestroy?.();
-  await lifecycle.beforeApplicationShutdown?.();
+  await lifecycle.onApplicationShutdown?.();
 }
 
 describe("ApiRuntimeProcessHeartbeat", () => {
@@ -41,7 +47,7 @@ describe("ApiRuntimeProcessHeartbeat", () => {
   afterEach(() => vi.useRealTimers());
 
   it("keeps API readiness closed when initial lease registration fails", async () => {
-    const { service, registry } = fixture(
+    const { service, registry, leaseStore, terminalize } = fixture(
       vi.fn(async () => {
         throw new Error("writer password must not leak");
       }),
@@ -53,6 +59,8 @@ describe("ApiRuntimeProcessHeartbeat", () => {
       code: "API_RUNTIME_LEASE_NOT_READY",
     });
     await shutdown(service);
+    expect(terminalize).toHaveBeenCalledWith("API", null);
+    expect(leaseStore.disconnectWriters).toHaveBeenCalledOnce();
   });
 
   it("never starts migration or lease retries when static managed admission is closed", async () => {
@@ -80,7 +88,7 @@ describe("ApiRuntimeProcessHeartbeat", () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("draining heartbeat unavailable"))
       .mockResolvedValueOnce(undefined);
-    const { service } = fixture(heartbeat);
+    const { service, leaseStore } = fixture(heartbeat);
 
     await service.onApplicationBootstrap();
     expect(service.getReadiness()).toEqual({ status: "ok" });
@@ -91,6 +99,73 @@ describe("ApiRuntimeProcessHeartbeat", () => {
     });
     expect(heartbeat).toHaveBeenNthCalledWith(3, "API", "DRAINING", null);
     expect(heartbeat).toHaveBeenNthCalledWith(4, "API", "STOPPED", null);
+    expect(leaseStore.disconnectWriters).toHaveBeenCalledOnce();
+  });
+
+  it("publishes STOPPED only in post-disposal application shutdown and closes writers last", async () => {
+    const events: string[] = [];
+    const heartbeat = vi.fn(async (_role: string, state: string) => {
+      events.push(state);
+    });
+    const { service, leaseStore } = fixture(heartbeat);
+    leaseStore.disconnectWriters.mockImplementation(async () => {
+      events.push("WRITERS_CLOSED");
+    });
+    await service.onApplicationBootstrap();
+    const lifecycle = service as unknown as {
+      onModuleDestroy(): Promise<void>;
+      onApplicationShutdown?: () => Promise<void>;
+    };
+
+    await lifecycle.onModuleDestroy();
+
+    expect(events).toEqual(["STARTING", "READY", "DRAINING"]);
+    expect(leaseStore.disconnectWriters).not.toHaveBeenCalled();
+    expect(lifecycle.onApplicationShutdown).toBeTypeOf("function");
+    await lifecycle.onApplicationShutdown?.();
+
+    expect(events).toEqual([
+      "STARTING",
+      "READY",
+      "DRAINING",
+      "STOPPED",
+      "WRITERS_CLOSED",
+    ]);
+  });
+
+  it("bounds both shutdown waits and leaves the API DRAINING when READY never settles", async () => {
+    let readyStarted!: () => void;
+    const readyInFlight = new Promise<void>((resolve) => {
+      readyStarted = resolve;
+    });
+    const heartbeat = vi.fn(async (_role: string, state: string) => {
+      if (state === "READY" && heartbeat.mock.calls.length === 3) {
+        readyStarted();
+        await new Promise<void>(() => undefined);
+      }
+    });
+    const { service, leaseStore } = fixture(heartbeat);
+    await service.onApplicationBootstrap();
+    vi.advanceTimersByTime(10_000);
+    await readyInFlight;
+    const lifecycle = service as unknown as {
+      onModuleDestroy(): Promise<void>;
+      onApplicationShutdown?: () => Promise<void>;
+    };
+
+    const draining = lifecycle.onModuleDestroy();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await draining;
+    expect(heartbeat).toHaveBeenCalledWith("API", "DRAINING", null);
+
+    const stopped = lifecycle.onApplicationShutdown?.();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await stopped;
+
+    expect(heartbeat.mock.calls.some(([, state]) => state === "STOPPED")).toBe(
+      false,
+    );
+    expect(leaseStore.disconnectWriters).toHaveBeenCalledOnce();
   });
 
   it("terminalizes a registered API even after a transient heartbeat closes readiness", async () => {

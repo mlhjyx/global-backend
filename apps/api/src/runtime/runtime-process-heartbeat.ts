@@ -1,14 +1,15 @@
 import {
-  BeforeApplicationShutdown,
   Injectable,
   Logger,
   OnApplicationBootstrap,
+  OnApplicationShutdown,
   OnModuleDestroy,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { RuntimeAdmissionService } from "./runtime-admission";
 import {
   assertMigrationCompatible,
+  PrismaRuntimeProcessLeaseStore,
   RuntimeProcessLeaseService,
 } from "./runtime-process-lease";
 import { RuntimeReleaseIdentityService } from "./runtime-release-identity";
@@ -16,15 +17,17 @@ import {
   RuntimeReadinessContributorRegistry,
   type RuntimeComponentStatus,
 } from "./runtime-readiness-registry";
+import { completesWithin, settlesWithin } from "./bounded-settlement";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
 @Injectable()
 export class ApiRuntimeProcessHeartbeat
-  implements OnApplicationBootstrap, OnModuleDestroy, BeforeApplicationShutdown
+  implements OnApplicationBootstrap, OnModuleDestroy, OnApplicationShutdown
 {
   private readonly logger = new Logger(ApiRuntimeProcessHeartbeat.name);
   private timer?: NodeJS.Timeout;
+  private startingAttempted = false;
   private startingPublished = false;
   private shuttingDown = false;
   private publishInFlight?: Promise<void>;
@@ -39,6 +42,7 @@ export class ApiRuntimeProcessHeartbeat
     private readonly releaseIdentity: RuntimeReleaseIdentityService,
     private readonly leases: RuntimeProcessLeaseService,
     registry: RuntimeReadinessContributorRegistry,
+    private readonly leaseStore: PrismaRuntimeProcessLeaseStore,
   ) {
     registry.register("api_runtime_lease", () => this.leaseReadiness);
   }
@@ -80,6 +84,7 @@ export class ApiRuntimeProcessHeartbeat
       );
       if (this.shuttingDown) return;
       if (!this.startingPublished) {
+        this.startingAttempted = true;
         await this.leases.heartbeat("API", "STARTING", null);
         this.startingPublished = true;
       }
@@ -112,17 +117,44 @@ export class ApiRuntimeProcessHeartbeat
       status: "failed",
       code: "API_RUNTIME_LEASE_NOT_READY",
     });
-    await this.publishInFlight?.catch(() => undefined);
+    if (this.publishInFlight) {
+      await completesWithin(this.publishInFlight);
+    }
     if (!this.startingPublished) return;
-    await this.leases
-      .heartbeat("API", "DRAINING", null)
-      .catch(() => this.logger.error("API runtime draining heartbeat failed"));
+    const drainingPublished = await settlesWithin(
+      this.leases.heartbeat("API", "DRAINING", null),
+    );
+    if (!drainingPublished) {
+      this.logger.error("API runtime draining heartbeat failed");
+    }
   }
 
-  async beforeApplicationShutdown(): Promise<void> {
-    if (!this.startingPublished) return;
-    await this.leases
-      .heartbeat("API", "STOPPED", null)
-      .catch(() => this.logger.error("API runtime stop heartbeat failed"));
+  async onApplicationShutdown(): Promise<void> {
+    try {
+      const inFlightSettled = this.publishInFlight
+        ? await completesWithin(this.publishInFlight)
+        : true;
+      if (!this.startingAttempted) return;
+      if (this.startingPublished && inFlightSettled) {
+        const stoppedPublished = await settlesWithin(
+          this.leases.heartbeat("API", "STOPPED", null),
+        );
+        if (stoppedPublished) return;
+        this.logger.error("API runtime stop heartbeat failed");
+      }
+      const terminalized = await settlesWithin(
+        this.leases.terminalize("API", null),
+      );
+      if (!terminalized) {
+        this.logger.error("API runtime atomic terminalization failed");
+      }
+    } finally {
+      const writersClosed = await completesWithin(
+        this.leaseStore.disconnectWriters(),
+      );
+      if (!writersClosed) {
+        this.logger.error("API runtime lease writer disconnect timed out");
+      }
+    }
   }
 }

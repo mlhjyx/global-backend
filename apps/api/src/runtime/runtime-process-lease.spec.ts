@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -7,6 +8,7 @@ import {
   type RuntimeProcessLeaseRecord,
   type RuntimeProcessLeaseStore,
 } from "./runtime-process-lease";
+import * as leaseModule from "./runtime-process-lease";
 
 const identity = {
   attested: true as const,
@@ -45,6 +47,7 @@ function lease(
 function fixture(records: RuntimeProcessLeaseRecord[] = []) {
   const store: RuntimeProcessLeaseStore = {
     upsert: vi.fn(async () => undefined),
+    terminalize: vi.fn(async () => undefined),
     listFresh: vi.fn(async () => records),
   };
   const service = new RuntimeProcessLeaseService(store, {
@@ -56,6 +59,199 @@ function fixture(records: RuntimeProcessLeaseRecord[] = []) {
 }
 
 describe("RuntimeProcessLeaseService", () => {
+  it("adds a server-side statement timeout without dropping existing connection options", () => {
+    const withRuntimeLeaseStatementTimeout = (
+      leaseModule as typeof leaseModule & {
+        withRuntimeLeaseStatementTimeout?: (value: string) => string;
+      }
+    ).withRuntimeLeaseStatementTimeout;
+    expect(withRuntimeLeaseStatementTimeout).toBeTypeOf("function");
+    if (!withRuntimeLeaseStatementTimeout) return;
+
+    const bounded = new URL(
+      withRuntimeLeaseStatementTimeout(
+        "postgresql://runtime@db/global?connect_timeout=9&options=-c%20search_path%3Dpublic",
+      ),
+    );
+
+    expect(bounded.searchParams.get("connect_timeout")).toBe("9");
+    expect(bounded.searchParams.get("options")).toContain(
+      "-c search_path=public",
+    );
+    expect(bounded.searchParams.get("options")).toContain(
+      "-c statement_timeout=4000",
+    );
+    expect(
+      new URL(
+        withRuntimeLeaseStatementTimeout("postgresql://runtime@db/global"),
+      ).searchParams.get("options"),
+    ).toBe("-c statement_timeout=4000");
+  });
+
+  it("rejects malformed or non-PostgreSQL writer URLs without retaining the secret input", () => {
+    const credentialMarker = "dummy-runtime-password-never-log";
+    const withRuntimeLeaseStatementTimeout = (
+      leaseModule as typeof leaseModule & {
+        withRuntimeLeaseStatementTimeout?: (value: string) => string;
+      }
+    ).withRuntimeLeaseStatementTimeout;
+    expect(withRuntimeLeaseStatementTimeout).toBeTypeOf("function");
+    if (!withRuntimeLeaseStatementTimeout) return;
+
+    for (const value of [
+      `not-a-url-${credentialMarker}`,
+      `mysql://runtime:${credentialMarker}@db/global`,
+    ]) {
+      let observed: unknown;
+      try {
+        withRuntimeLeaseStatementTimeout(value);
+      } catch (error) {
+        observed = error;
+      }
+      expect(observed).toBeInstanceOf(Error);
+      expect(String(observed)).toBe(
+        "Error: RUNTIME_PROCESS_LEASE_WRITER_URL_INVALID",
+      );
+      expect(JSON.stringify(observed)).not.toContain(credentialMarker);
+      expect(JSON.stringify(observed)).not.toContain(value);
+    }
+  });
+
+  it("ships role-scoped atomic terminalization wrappers with least privilege", () => {
+    const migrationPath = join(
+      import.meta.dirname,
+      "../../../../packages/db/prisma/migrations/20260901110000_runtime_process_lease_atomic_terminalization/migration.sql",
+    );
+    expect(existsSync(migrationPath)).toBe(true);
+    if (!existsSync(migrationPath)) return;
+    const migration = readFileSync(migrationPath, "utf8");
+
+    expect(migration).toContain("terminalize_api_runtime_process_lease");
+    expect(migration).toContain("terminalize_worker_runtime_process_lease");
+    expect(migration).toContain(
+      "terminalize_outbox_relay_runtime_process_lease",
+    );
+    expect(migration).toContain("FOR UPDATE");
+    expect(migration).toContain('ON CONFLICT ("instance_id") DO NOTHING');
+    expect(migration).toContain("RUNTIME_PROCESS_LEASE_IDENTITY_MISMATCH");
+    expect(migration).toMatch(
+      /GRANT EXECUTE ON FUNCTION terminalize_api_runtime_process_lease[\s\S]* TO runtime_api/,
+    );
+    expect(migration).toMatch(
+      /GRANT EXECUTE ON FUNCTION terminalize_worker_runtime_process_lease[\s\S]* TO runtime_worker/,
+    );
+    expect(migration).toMatch(
+      /GRANT EXECUTE ON FUNCTION terminalize_outbox_relay_runtime_process_lease[\s\S]* TO runtime_outbox_relay/,
+    );
+    expect(migration).toContain("REVOKE ALL ON FUNCTION");
+  });
+
+  it("atomically terminalizes an uncertain registration through the role wrapper", async () => {
+    const terminalize = (
+      PrismaRuntimeProcessLeaseStore.prototype as unknown as {
+        terminalize?: (record: RuntimeProcessLeaseRecord) => Promise<void>;
+      }
+    ).terminalize;
+    expect(terminalize).toBeTypeOf("function");
+    if (!terminalize) return;
+
+    const writer = {
+      $queryRawUnsafe: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            sessionUser: "ci_runtime_worker",
+            statementTimeout: "4s",
+            superuser: false,
+            bypassRls: false,
+            createDb: false,
+            createRole: false,
+            replication: false,
+            memberships: ["runtime_worker"],
+          },
+        ])
+        .mockResolvedValueOnce([
+          { instance_id: "00000000-0000-4000-8000-000000000001" },
+        ]),
+    };
+    const store = new PrismaRuntimeProcessLeaseStore(
+      { $queryRawUnsafe: vi.fn(async () => []) } as never,
+      { writers: { WORKER: writer as never } },
+    );
+    const stoppedAt = new Date("2026-09-01T02:00:00.000Z");
+
+    await store.terminalize({
+      ...lease({ state: "STOPPED" }),
+      lastSeenAt: stoppedAt,
+      stoppedAt,
+    });
+
+    expect(writer.$queryRawUnsafe.mock.calls[1]?.[0]).toContain(
+      "terminalize_worker_runtime_process_lease",
+    );
+  });
+
+  it("rejects non-terminal atomic records and a missing dedicated writer", async () => {
+    const appReader = { $queryRawUnsafe: vi.fn(async () => []) };
+    const missingWriter = new PrismaRuntimeProcessLeaseStore(
+      appReader as never,
+      { env: {}, writers: {} },
+    );
+
+    await expect(missingWriter.terminalize(lease())).rejects.toThrow(
+      "RUNTIME_PROCESS_LEASE_TERMINAL_STATE_REQUIRED",
+    );
+    await expect(
+      missingWriter.terminalize(
+        lease({
+          state: "STOPPED",
+          stoppedAt: new Date("2026-09-01T02:00:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("RUNTIME_PROCESS_LEASE_WRITER_UNAVAILABLE");
+  });
+
+  it("rejects a writer whose server-side statement timeout is not four seconds", async () => {
+    const writer = {
+      $queryRawUnsafe: vi.fn(async () => [
+        {
+          sessionUser: "ci_runtime_worker",
+          statementTimeout: "0",
+          superuser: false,
+          bypassRls: false,
+          createDb: false,
+          createRole: false,
+          replication: false,
+          memberships: ["runtime_worker"],
+        },
+      ]),
+    };
+    const store = new PrismaRuntimeProcessLeaseStore(
+      { $queryRawUnsafe: vi.fn(async () => []) } as never,
+      { writers: { WORKER: writer as never } },
+    );
+
+    await expect(store.upsert(lease())).rejects.toThrow(
+      "RUNTIME_PROCESS_LEASE_WRITER_IDENTITY_INVALID",
+    );
+    expect(writer.$queryRawUnsafe).toHaveBeenCalledOnce();
+  });
+
+  it("disconnects each dedicated writer once across repeated lifecycle calls", async () => {
+    const disconnect = vi.fn(async () => undefined);
+    const writer = {
+      $queryRawUnsafe: vi.fn(async () => []),
+      $disconnect: disconnect,
+    };
+    const store = new PrismaRuntimeProcessLeaseStore(
+      { $queryRawUnsafe: vi.fn(async () => []) } as never,
+      { writers: { WORKER: writer as never } },
+    );
+
+    await Promise.all([store.disconnectWriters(), store.disconnectWriters()]);
+
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
   it("uses the mapped PostgreSQL table, columns and enum names from the migration", () => {
     const source = readFileSync(
       join(import.meta.dirname, "runtime-process-lease.ts"),
@@ -98,6 +294,7 @@ describe("RuntimeProcessLeaseService", () => {
         .mockResolvedValueOnce([
           {
             sessionUser: "ci_runtime_worker",
+            statementTimeout: "4s",
             superuser: false,
             bypassRls: false,
             createDb: false,
@@ -158,6 +355,7 @@ describe("RuntimeProcessLeaseService", () => {
           .mockResolvedValueOnce([
             {
               sessionUser: `ci_${membership}`,
+              statementTimeout: "4s",
               superuser: false,
               bypassRls: false,
               createDb: false,
@@ -305,6 +503,7 @@ describe("RuntimeProcessLeaseService", () => {
   it("never permits an unattested process to publish a lease", async () => {
     const store: RuntimeProcessLeaseStore = {
       upsert: vi.fn(async () => undefined),
+      terminalize: vi.fn(async () => undefined),
       listFresh: vi.fn(async () => []),
     };
     const service = new RuntimeProcessLeaseService(store, {

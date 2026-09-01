@@ -1,4 +1,8 @@
 import type { RuntimeProcessLeaseService } from "./runtime-process-lease";
+import {
+  RUNTIME_LIFECYCLE_SETTLEMENT_TIMEOUT_MS,
+  settlesWithin,
+} from "./bounded-settlement";
 
 export interface WorkerLeaseHeartbeatHandle {
   stop(): void;
@@ -7,30 +11,6 @@ export interface WorkerLeaseHeartbeatHandle {
 interface WorkerSignalSource {
   on(signal: NodeJS.Signals, listener: () => void): unknown;
   off(signal: NodeJS.Signals, listener: () => void): unknown;
-}
-
-const DEFAULT_DRAIN_HEARTBEAT_TIMEOUT_MS = 5_000;
-
-async function settlesWithin(
-  operation: Promise<void>,
-  timeoutMs: number,
-): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), timeoutMs);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([
-      operation.then(
-        () => true,
-        () => false,
-      ),
-      timeout,
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 export interface IdempotentWorkerShutdown {
@@ -85,11 +65,12 @@ export function startWorkerProcessSignalCoordinator(input: {
   onEarlyCleanup?: () => Promise<void>;
   onEarlyExit(signal: NodeJS.Signals): void;
   onDrainLeaseFailure?: () => void;
+  terminalizeUncertainRegistration?: () => Promise<void>;
 }): WorkerProcessSignalCoordinator {
   const signals = input.signals ?? process;
   const drainTimeoutMs = Math.max(
     1,
-    input.drainTimeoutMs ?? DEFAULT_DRAIN_HEARTBEAT_TIMEOUT_MS,
+    input.drainTimeoutMs ?? RUNTIME_LIFECYCLE_SETTLEMENT_TIMEOUT_MS,
   );
   const handledSignals = Object.freeze<NodeJS.Signals[]>(["SIGTERM", "SIGINT"]);
   const registered = input.leases.heartbeat(
@@ -110,7 +91,18 @@ export function startWorkerProcessSignalCoordinator(input: {
   const drain = (signal: NodeJS.Signals): Promise<void> => {
     drainPromise ??= (async () => {
       attached?.stopHeartbeats();
-      const leaseRegistered = await settlesWithin(registered, drainTimeoutMs);
+      let leaseRegistered = await settlesWithin(registered, drainTimeoutMs);
+      if (!leaseRegistered) {
+        input.onDrainLeaseFailure?.();
+        if (input.terminalizeUncertainRegistration) {
+          const terminalized = await settlesWithin(
+            input.terminalizeUncertainRegistration(),
+            drainTimeoutMs,
+          );
+          if (!terminalized) input.onDrainLeaseFailure?.();
+          leaseRegistered = false;
+        }
+      }
       if (leaseRegistered) {
         const drainingPublished = await settlesWithin(
           input.leases.heartbeat("WORKER", "DRAINING", input.taskQueue),

@@ -362,7 +362,10 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
         publishedAt: null,
         payload:
           eventType === "CompanyProfileCreated"
-            ? { website: "https://acme.example/", executionBudget: EXECUTION_BUDGET }
+            ? {
+                website: "https://acme.example/",
+                executionBudget: EXECUTION_BUDGET,
+              }
             : eventType === "DiscoveryRunRequested"
               ? {
                   planId: "plan-1",
@@ -397,7 +400,10 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
       schemaVersion: 2,
       aggregateType: "Company",
       publishedAt: null,
-      payload: { website: "https://acme.example/", executionBudget: EXECUTION_BUDGET },
+      payload: {
+        website: "https://acme.example/",
+        executionBudget: EXECUTION_BUDGET,
+      },
     });
     const temporal = makeTemporal(async () => {
       throw new Error("temporal down");
@@ -476,18 +482,30 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
 
   it.each([
     ["CompanyProfileCreated", "Company", { website: "https://acme.example/" }],
-    ["DiscoveryRunRequested", "DiscoveryRun", { planId: "plan-1", icpId: "icp-1" }],
-  ])("%s parks the legacy command instead of retrying forever without authority", async (eventType, aggregateType, payload) => {
-    const ev = makeEvent({ eventType, aggregateType, schemaVersion: 1, payload });
-    const temporal = makeTemporal();
-    const { db } = makeDb([ev]);
+    [
+      "DiscoveryRunRequested",
+      "DiscoveryRun",
+      { planId: "plan-1", icpId: "icp-1" },
+    ],
+  ])(
+    "%s parks the legacy command instead of retrying forever without authority",
+    async (eventType, aggregateType, payload) => {
+      const ev = makeEvent({
+        eventType,
+        aggregateType,
+        schemaVersion: 1,
+        payload,
+      });
+      const temporal = makeTemporal();
+      const { db } = makeDb([ev]);
 
-    await makeService(db, temporal).routeEvent(ev);
+      await makeService(db, temporal).routeEvent(ev);
 
-    expect(temporal.client.workflow.start).not.toHaveBeenCalled();
-    expect(ev.publishedAt).toBeNull();
-    expect(ev.parkedAt).toBeInstanceOf(Date);
-  });
+      expect(temporal.client.workflow.start).not.toHaveBeenCalled();
+      expect(ev.publishedAt).toBeNull();
+      expect(ev.parkedAt).toBeInstanceOf(Date);
+    },
+  );
 
   it("internal command dispatch 失败 → 不标 published（下轮重试）", async () => {
     const ev = makeEvent({
@@ -579,8 +597,12 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
         args: [{ workspaceId: ev.workspaceId, deletionRequestId }],
       }),
     );
-    expect(Reflect.ownKeys(vi.mocked(temporal.client.workflow.start).mock.calls[0]?.[1]?.args?.[0] ?? {}))
-      .toEqual(["workspaceId", "deletionRequestId"]);
+    expect(
+      Reflect.ownKeys(
+        vi.mocked(temporal.client.workflow.start).mock.calls[0]?.[1]
+          ?.args?.[0] ?? {},
+      ),
+    ).toEqual(["workspaceId", "deletionRequestId"]);
     expect(ev.publishedAt).toBeInstanceOf(Date);
   });
 
@@ -675,7 +697,9 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     const db = {
       $connect: vi.fn(async () => undefined),
       $disconnect: vi.fn(async () => undefined),
-      $queryRawUnsafe: vi.fn(async () => [{ migration_name: "older_migration" }]),
+      $queryRawUnsafe: vi.fn(async () => [
+        { migration_name: "older_migration" },
+      ]),
       outboxEvent: { findMany: vi.fn(async () => []) },
     };
     const leases = { heartbeat: vi.fn(async () => undefined) };
@@ -685,7 +709,12 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
       vi.fn(),
       leases,
       { current: () => ({ admitted: true }) },
-      { current: () => ({ attested: true, migration_revision: "expected_migration" }) },
+      {
+        current: () => ({
+          attested: true,
+          migration_revision: "expected_migration",
+        }),
+      },
     );
 
     await service.onModuleInit();
@@ -699,6 +728,118 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
       code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
     });
     await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
+  it("atomically terminalizes an uncertain STARTING registration before disconnect", async () => {
+    vi.useFakeTimers();
+    const terminalize = vi.fn(async () => undefined);
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      {
+        $connect: vi.fn(async () => undefined),
+        $disconnect: vi.fn(async () => undefined),
+      } as never,
+      vi.fn(),
+      {
+        heartbeat: vi.fn(async () => {
+          throw new Error("registration ACK unavailable");
+        }),
+        terminalize,
+      } as never,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+
+    await service.onModuleInit();
+    await service.onModuleDestroy();
+
+    expect(terminalize).toHaveBeenCalledWith("OUTBOX_RELAY", null);
+    vi.useRealTimers();
+  });
+
+  it("does not seed or publish READY when a late STARTING returns after atomic shutdown", async () => {
+    vi.useFakeTimers();
+    let lateStartingBegan!: () => void;
+    let releaseLateStarting!: () => void;
+    const lateStartingInFlight = new Promise<void>((resolve) => {
+      lateStartingBegan = resolve;
+    });
+    const lateStartingBlocked = new Promise<void>((resolve) => {
+      releaseLateStarting = resolve;
+    });
+    const heartbeat = vi.fn(async (_role: string, state: string) => {
+      if (state !== "STARTING") return;
+      if (heartbeat.mock.calls.length === 1) {
+        throw new Error("initial registration ACK unavailable");
+      }
+      lateStartingBegan();
+      await lateStartingBlocked;
+    });
+    const terminalize = vi.fn(async () => undefined);
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      {
+        $connect: vi.fn(async () => undefined),
+        $disconnect: vi.fn(async () => undefined),
+      } as never,
+      vi.fn(),
+      { heartbeat, terminalize } as never,
+    );
+    const initialize = vi
+      .spyOn(service, "initializePlatformState")
+      .mockResolvedValue(undefined);
+    await service.onModuleInit();
+    vi.advanceTimersByTime(2_000);
+    await lateStartingInFlight;
+
+    const shutdown = service.onModuleDestroy();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await shutdown;
+    releaseLateStarting();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(terminalize).toHaveBeenCalledWith("OUTBOX_RELAY", null);
+    expect(initialize).not.toHaveBeenCalled();
+    expect(heartbeat.mock.calls.some(([, state]) => state === "READY")).toBe(
+      false,
+    );
+    vi.useRealTimers();
+  });
+
+  it("bounds draining, stop, atomic fallback, and disconnect failures without hanging shutdown", async () => {
+    vi.useFakeTimers();
+    const heartbeat = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("draining unavailable"))
+      .mockRejectedValueOnce(new Error("stopped unavailable"));
+    const terminalize = vi.fn(async () => {
+      throw new Error("atomic terminalization unavailable");
+    });
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      {
+        $connect: vi.fn(async () => undefined),
+        $disconnect: vi.fn(async () => new Promise<void>(() => undefined)),
+      } as never,
+      vi.fn(),
+      { heartbeat, terminalize } as never,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+    await service.onModuleInit();
+
+    let completed = false;
+    const shutdown = service.onModuleDestroy().then(() => {
+      completed = true;
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await shutdown;
+
+    expect(completed).toBe(true);
+    expect(heartbeat).toHaveBeenCalledWith("OUTBOX_RELAY", "DRAINING", null);
+    expect(terminalize).toHaveBeenCalledWith("OUTBOX_RELAY", null);
     vi.useRealTimers();
   });
 
@@ -716,9 +857,17 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     };
     const leases = { heartbeat: vi.fn(async () => undefined) };
     const service = new (OutboxRelayService as any)(
-      makeTemporal(), db, vi.fn(), leases,
+      makeTemporal(),
+      db,
+      vi.fn(),
+      leases,
       { current: () => ({ admitted: true }) },
-      { current: () => ({ attested: true, migration_revision: "expected_migration" }) },
+      {
+        current: () => ({
+          attested: true,
+          migration_revision: "expected_migration",
+        }),
+      },
     );
     vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
 
@@ -856,9 +1005,24 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     await vi.advanceTimersByTimeAsync(2_000);
 
     expect(leases.heartbeat).toHaveBeenCalledTimes(3);
-    expect(leases.heartbeat).toHaveBeenNthCalledWith(1, "OUTBOX_RELAY", "STARTING", null);
-    expect(leases.heartbeat).toHaveBeenNthCalledWith(2, "OUTBOX_RELAY", "READY", null);
-    expect(leases.heartbeat).toHaveBeenNthCalledWith(3, "OUTBOX_RELAY", "READY", null);
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(
+      1,
+      "OUTBOX_RELAY",
+      "STARTING",
+      null,
+    );
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(
+      2,
+      "OUTBOX_RELAY",
+      "READY",
+      null,
+    );
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(
+      3,
+      "OUTBOX_RELAY",
+      "READY",
+      null,
+    );
     await service.onModuleDestroy();
     vi.useRealTimers();
   });
@@ -897,6 +1061,12 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
 
     expect(leases.heartbeat).toHaveBeenNthCalledWith(
       4,
+      "OUTBOX_RELAY",
+      "DRAINING",
+      null,
+    );
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(
+      5,
       "OUTBOX_RELAY",
       "STOPPED",
       null,
@@ -966,6 +1136,49 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     vi.useRealTimers();
   });
 
+  it("bounds shutdown and leaves a stuck relay DRAINING instead of inventing STOPPED", async () => {
+    vi.useFakeTimers();
+    const heartbeat = vi.fn(async () => undefined);
+    let findStarted!: () => void;
+    const findInFlight = new Promise<void>((resolve) => {
+      findStarted = resolve;
+    });
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      {
+        $connect: vi.fn(async () => undefined),
+        $disconnect: vi.fn(async () => undefined),
+        outboxEvent: {
+          findMany: vi.fn(async () => {
+            findStarted();
+            return new Promise<never>(() => undefined);
+          }),
+        },
+      } as never,
+      vi.fn(),
+      { heartbeat } as never,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+    await service.onModuleInit();
+    vi.advanceTimersByTime(2_000);
+    await findInFlight;
+
+    let shutdownCompleted = false;
+    const shutdown = service.onModuleDestroy().then(() => {
+      shutdownCompleted = true;
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.resolve();
+
+    expect(shutdownCompleted).toBe(true);
+    await shutdown;
+    expect(heartbeat).toHaveBeenCalledWith("OUTBOX_RELAY", "DRAINING", null);
+    expect(heartbeat.mock.calls.some(([, state]) => state === "STOPPED")).toBe(
+      false,
+    );
+    vi.useRealTimers();
+  });
+
   it("does not regress a previously registered relay lease to STARTING after a transient READY heartbeat failure", async () => {
     vi.useFakeTimers();
     const db = {
@@ -994,7 +1207,9 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     await service.managedTick(); // reconnects without another STARTING transition
 
     expect(
-      leases.heartbeat.mock.calls.filter(([, state]: [string, string]) => state === "STARTING"),
+      leases.heartbeat.mock.calls.filter(
+        ([, state]: [string, string]) => state === "STARTING",
+      ),
     ).toHaveLength(1);
     expect(service.getReadiness()).toEqual({ status: "ready" });
     await service.onModuleDestroy();
@@ -1055,6 +1270,55 @@ describe("pumpWebhookDeliveries — 推送 + 指数退避 + DLQ", () => {
     expect(d.status).toBe("ACKED");
     expect(d.deliveredAt).toBeInstanceOf(Date);
     expect(d.ackedAt).toBeInstanceOf(Date);
+  });
+
+  it("shutdown aborts an in-flight webhook and terminalizes only after the tick exits", async () => {
+    vi.useFakeTimers();
+    const d = makeDelivery();
+    const { db } = makeDb([], [d]);
+    Object.assign(db, {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+    });
+    let abortObserved = false;
+    let fetchStarted!: () => void;
+    const fetchInFlight = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    const fetchMock = vi.fn(
+      async (_url: string, init: { signal: AbortSignal }) =>
+        new Promise<{ ok: boolean; status: number }>((_resolve, reject) => {
+          fetchStarted();
+          init.signal.addEventListener(
+            "abort",
+            () => {
+              abortObserved = true;
+              reject(new Error("shutdown aborted webhook"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const heartbeat = vi.fn(async () => undefined);
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      db as never,
+      fetchMock as never,
+      { heartbeat } as never,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+    await service.onModuleInit();
+    vi.advanceTimersByTime(2_000);
+    await fetchInFlight;
+
+    const shutdown = service.onModuleDestroy();
+    await Promise.resolve();
+
+    expect(abortObserved).toBe(true);
+    await shutdown;
+    expect(d.attempts).toBe(0);
+    expect(heartbeat).toHaveBeenLastCalledWith("OUTBOX_RELAY", "STOPPED", null);
+    vi.useRealTimers();
   });
 
   it("envelope 字段完整：snake_case + occurred_at ISO + 不泄漏 BigInt id", async () => {

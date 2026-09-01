@@ -462,6 +462,9 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(verify, /register_api_runtime_process_lease/);
   assert.match(verify, /register_worker_runtime_process_lease/);
   assert.match(verify, /register_outbox_relay_runtime_process_lease/);
+  assert.match(verify, /terminalize_api_runtime_process_lease/);
+  assert.match(verify, /terminalize_worker_runtime_process_lease/);
+  assert.match(verify, /terminalize_outbox_relay_runtime_process_lease/);
   assert.match(verify, /psql_denied/);
 });
 

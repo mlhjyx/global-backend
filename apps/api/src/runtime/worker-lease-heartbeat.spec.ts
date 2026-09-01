@@ -114,6 +114,42 @@ describe("controlled Worker process shutdown", () => {
     expect(signals.listenerCount("SIGINT")).toBe(0);
   });
 
+  it("waits for a late successful STARTING registration and terminalizes it before early exit", async () => {
+    const events: string[] = [];
+    const signals = new EventEmitter();
+    let atomicallyStopped = false;
+    const handle = startWorkerProcessSignalCoordinator({
+      leases: {
+        heartbeat: async (_role, state) => {
+          events.push(`start:${state}`);
+          if (state === "STARTING") {
+            await new Promise<void>((resolve) => setTimeout(resolve, 15));
+            if (atomicallyStopped) throw new Error("lease already stopped");
+          }
+          events.push(`end:${state}`);
+        },
+      },
+      taskQueue: "understanding",
+      signals,
+      drainTimeoutMs: 5,
+      terminalizeUncertainRegistration: async () => {
+        atomicallyStopped = true;
+        events.push("ATOMIC_STOPPED");
+      },
+      onEarlyExit: (signal) => events.push(`exit:${signal}`),
+    });
+
+    signals.emit("SIGTERM");
+    await handle.stop();
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(events).toEqual([
+      "start:STARTING",
+      "ATOMIC_STOPPED",
+      "exit:SIGTERM",
+    ]);
+  });
+
   it("persists one DRAINING transition before an attached idempotent shutdown", async () => {
     const events: string[] = [];
     const signals = new EventEmitter();
