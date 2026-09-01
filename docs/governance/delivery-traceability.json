@@ -135,6 +135,100 @@
       ],
       "required_evidence_kinds": ["unknown_settlement_containment"],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
+    },
+    {
+      "chain_id": "site-builder-development-intake-path-platform-writer",
+      "capability_id": "CAP-SITE-INTAKE-001",
+      "object_ids": ["OBJ-FE-003", "OBJ-FE-012", "OBJ-FE-015"],
+      "operation_ids": [
+        "IntakeController_create_v1",
+        "SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1"
+      ],
+      "code_paths": [
+        "apps/api/src/site-builder/intake.controller.ts",
+        "apps/api/src/site-builder/intake.service.ts",
+        "apps/api/src/site-builder/temporal-demo-launcher.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.controller.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.ts",
+        "apps/api/src/site-builder/site-build-budget-grant.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/site-builder/intake.controller.spec.ts",
+        "apps/api/src/site-builder/intake.service.spec.ts",
+        "apps/api/src/site-builder/temporal-demo-launcher.spec.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.controller.spec.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.spec.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.integrity.spec.ts",
+        "apps/api/src/site-builder/site-build-budget-grant.spec.ts"
+      ],
+      "scenario_ids": ["SCN-FE-SITE-001", "SCN-FE-SITE-002"],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [
+        "site-builder-deterministic-product-path-platform-writer-development-20260901"
+      ],
+      "required_evidence_kinds": ["deterministic_product_path"],
+      "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
+    },
+    {
+      "chain_id": "site-builder-development-build-containment-platform-writer",
+      "capability_id": "CAP-SITE-BUILD-001",
+      "object_ids": [
+        "OBJ-FE-012",
+        "OBJ-FE-013",
+        "OBJ-FE-015",
+        "OBJ-FE-016",
+        "OBJ-FE-017"
+      ],
+      "operation_ids": [
+        "BuildsController_create_v1",
+        "SiteBuildTechnicalBudgetQuoteController_quoteRefurbish_v1"
+      ],
+      "code_paths": [
+        "apps/api/src/site-builder/site-build-technical-budget-quote.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.controller.ts",
+        "apps/api/src/site-builder/site-build-budget-grant.ts",
+        "apps/api/src/site-builder/builds.controller.ts",
+        "apps/api/src/site-builder/builds.service.ts",
+        "apps/api/src/site-builder/site-build-cost-ledger.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/site-builder/site-build-technical-budget-quote.spec.ts",
+        "apps/api/src/site-builder/site-build-technical-budget-quote.controller.spec.ts",
+        "apps/api/src/site-builder/site-build-budget-grant.spec.ts",
+        "apps/api/src/site-builder/builds.controller.spec.ts",
+        "apps/api/src/site-builder/paid-execution-gates.spec.ts",
+        "apps/api/src/site-builder/site-build-cost-reconciliation-integrity.spec.ts"
+      ],
+      "scenario_ids": ["SCN-FE-SITE-011", "SCN-FE-SITE-012"],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [
+        "site-builder-unknown-containment-platform-writer-development-20260901"
+      ],
+      "required_evidence_kinds": ["unknown_settlement_containment_readback"],
+      "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
+    },
+    {
+      "chain_id": "site-builder-development-run-observation-platform-writer",
+      "capability_id": "CAP-SITE-RUN-001",
+      "object_ids": ["OBJ-FE-015", "OBJ-FE-016"],
+      "operation_ids": ["BuildsController_get_v1"],
+      "code_paths": [
+        "apps/api/src/site-builder/builds.controller.ts",
+        "apps/api/src/site-builder/site-build-cost-ledger.ts",
+        "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/site-builder/builds.controller.spec.ts",
+        "apps/api/src/site-builder/site-build-cost-ledger.spec.ts",
+        "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.spec.ts"
+      ],
+      "scenario_ids": ["SCN-FE-SITE-013"],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [
+        "site-builder-unknown-containment-platform-writer-development-20260901"
+      ],
+      "required_evidence_kinds": ["unknown_settlement_containment_readback"],
+      "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     }
   ]
 }

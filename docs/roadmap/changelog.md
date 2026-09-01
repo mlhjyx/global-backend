@@ -1,6 +1,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-02 · Platform writer API composition and exact-runtime successor
+
+- PR #443 修复 API Nest composition 漏装配：专用 `execution_budget_platform_writer` client 只来自唯一 deployment env，缺失/空白保持 fail-closed，owner/app URL 行为级负例禁止 fallback；API/Worker 复用同一工厂，API lifecycle 负责断连。完整 CI、CodeQL、安全与独立 review 通过。
+- exact main `674ff12d…` 发布为 `sha256:b70175a0…`，GitHub environment approval、registry attestation、非 root/entrypoint 与离线 image verifier 通过；API/Worker/Relay drain-and-swap 后共同绑定 artifact `sha256:f34128f5…`，127 migrations、READY、restart 0、mixed digest 0。
+- Platform capability 从 `WRITER_UNAVAILABLE` 变为 `PLATFORM_ACQUISITION_MISSING`，证明专用 writer/principal 可用但外部 Control Plane 仍未摄入 `platform.acquisition`、`platform.intent_watch`、`platform.sanctions`。没有 seed 假 authority；该缺口不阻塞 Site Builder workspace Grant。
+- 新 digest 上以 `DETERMINISTIC_ONLY=1` 运行 GrowthOS Session→Access Token→Technical Quote→Budget Grant→Intake→READY Release，BuildRun `034e4175…` 成功且模型调用为 0。历史 UNKNOWN Spend 在三次只读 reconciliation 后仍无 Gateway consume log；完整 reservation 与不重发语义保持。
+- 新增追加式 successor RuntimeEvidence、readback 与 development CANDIDATE；旧 evidence 不改写，Pilot/GA、成功 generative output、公开发布和客户 Billing/Credits 均未因此成立。
+
 ## 2026-09-02 · Production Parity development capability cutover and UNKNOWN settlement correction
 
 - GrowthOS authority `541bcc63…` 的三个独立 RS256 signing domains、短期 Backend Access Token、零费用 Technical Budget Quote 与自动 Site Build Budget Grant 已装配到 Tenant Web；客户没有余额、充值、模型次数或固定金额门，technical cap 只作为平台执行安全包络。商业 Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`。
