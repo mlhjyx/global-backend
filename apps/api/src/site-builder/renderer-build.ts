@@ -2,13 +2,18 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, existsSync } from "node:fs";
 import {
+  cp,
   mkdtemp,
+  mkdir,
+  lstat,
   open,
   opendir,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -45,6 +50,7 @@ export interface RendererOutputManifestV1 {
 export interface RendererBuildInput {
   specPath: string;
   outDir: string;
+  cacheRoot: string;
   basePath: string;
   siteOrigin: string;
   publicAssetDir?: string;
@@ -310,11 +316,132 @@ export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
     TZ: "UTC",
     SITESPEC_PATH: input.specPath,
     OUT_DIR: input.outDir,
+    RENDERER_CACHE_ROOT: input.cacheRoot,
     BASE_PATH: input.basePath,
     SITE_ORIGIN: siteOrigin,
     ...(input.publicAssetDir ? { PUBLIC_ASSET_DIR: input.publicAssetDir } : {}),
     ASTRO_TELEMETRY_DISABLED: "1",
   };
+}
+
+export async function prepareRendererCacheRoot(
+  workspace: string,
+): Promise<string> {
+  const cacheRoot = path.join(workspace, ".renderer-cache");
+  try {
+    const workspaceStat = await lstat(workspace);
+    if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink()) {
+      throw new Error("RENDERER_CACHE_PATH_INVALID");
+    }
+    await mkdir(cacheRoot, { mode: 0o700 });
+    const [workspaceReal, cacheReal, cacheStat] = await Promise.all([
+      realpath(workspace),
+      realpath(cacheRoot),
+      lstat(cacheRoot),
+    ]);
+    if (
+      !cacheStat.isDirectory() ||
+      cacheStat.isSymbolicLink() ||
+      path.relative(workspaceReal, cacheReal) !== ".renderer-cache"
+    ) {
+      throw new Error("RENDERER_CACHE_PATH_INVALID");
+    }
+    return cacheRoot;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "RENDERER_CACHE_PATH_INVALID"
+    ) {
+      throw error;
+    }
+    throw new Error("RENDERER_CACHE_PATH_INVALID", { cause: error });
+  }
+}
+
+export async function linkRendererDependencies(
+  cacheRoot: string,
+  rendererRoot: string,
+): Promise<void> {
+  try {
+    const [cacheReal, rendererReal] = await Promise.all([
+      realpath(cacheRoot),
+      realpath(rendererRoot),
+    ]);
+    const dependencyRoot = path.join(rendererRoot, "node_modules");
+    const [dependencyReal, dependencyStat] = await Promise.all([
+      realpath(dependencyRoot),
+      lstat(dependencyRoot),
+    ]);
+    if (
+      cacheReal !== cacheRoot ||
+      rendererReal !== rendererRoot ||
+      dependencyStat.isSymbolicLink() ||
+      !dependencyStat.isDirectory() ||
+      path.relative(rendererReal, dependencyReal) !== "node_modules"
+    ) {
+      throw new Error("RENDERER_DEPENDENCY_ROOT_INVALID");
+    }
+    await symlink(dependencyReal, path.join(cacheRoot, "node_modules"), "dir");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "RENDERER_DEPENDENCY_ROOT_INVALID"
+    ) {
+      throw error;
+    }
+    throw new Error("RENDERER_DEPENDENCY_ROOT_INVALID", { cause: error });
+  }
+}
+
+async function assertRendererSourceTreeHasNoSymlinks(
+  root: string,
+): Promise<void> {
+  const entries = await opendir(root);
+  for await (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error("RENDERER_SOURCE_SYMLINK_FORBIDDEN");
+    }
+    if (entry.isDirectory()) {
+      await assertRendererSourceTreeHasNoSymlinks(entryPath);
+    }
+  }
+}
+
+export async function prepareRendererBuildWorkspace(
+  cacheRoot: string,
+  rendererRoot: string,
+): Promise<void> {
+  try {
+    const [cacheReal, rendererReal] = await Promise.all([
+      realpath(cacheRoot),
+      realpath(rendererRoot),
+    ]);
+    if (cacheReal !== cacheRoot || rendererReal !== rendererRoot) {
+      throw new Error("RENDERER_BUILD_WORKSPACE_INVALID");
+    }
+    const sourceRoot = path.join(cacheRoot, "src");
+    await cp(path.join(rendererRoot, "src"), sourceRoot, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      dereference: false,
+    });
+    await assertRendererSourceTreeHasNoSymlinks(sourceRoot);
+    await linkRendererDependencies(cacheRoot, rendererRoot);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      [
+        "RENDERER_BUILD_WORKSPACE_INVALID",
+        "RENDERER_SOURCE_SYMLINK_FORBIDDEN",
+        "RENDERER_DEPENDENCY_ROOT_INVALID",
+      ].includes(error.message)
+    ) {
+      throw error;
+    }
+    throw new Error("RENDERER_BUILD_WORKSPACE_INVALID", { cause: error });
+  }
 }
 
 export function resolveRendererEntrypoint(cwd = process.cwd()): {
@@ -359,12 +486,25 @@ function resolveNodeExecutable(): string {
 /** 用已解析的 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
 export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   const { rendererRoot, astroCli } = resolveRendererEntrypoint();
-  await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
-    cwd: rendererRoot,
-    env: buildRendererEnv(input),
-    timeout: BUILD_TIMEOUT_MS,
-    maxBuffer: MAX_BUILD_OUTPUT_BYTES,
-  });
+  await prepareRendererBuildWorkspace(input.cacheRoot, rendererRoot);
+  await execFileAsync(
+    resolveNodeExecutable(),
+    [
+      astroCli,
+      "build",
+      "--config",
+      path.relative(
+        input.cacheRoot,
+        path.join(rendererRoot, "astro.config.mjs"),
+      ),
+    ],
+    {
+      cwd: input.cacheRoot,
+      env: buildRendererEnv(input),
+      timeout: BUILD_TIMEOUT_MS,
+      maxBuffer: MAX_BUILD_OUTPUT_BYTES,
+    },
+  );
   await assertRenderedOutboundDomains(
     input.outDir,
     input.allowedOutboundDomains ?? [],
@@ -488,6 +628,7 @@ export async function buildSiteSpecWithTemporaryFile(
   const manifestPath = path.join(output.outDir, RENDERER_OUTPUT_MANIFEST_FILE);
 
   try {
+    const cacheRoot = await prepareRendererCacheRoot(tempDir);
     await rm(manifestPath, { force: true });
     await rm(`${manifestPath}.tmp`, { force: true });
     await writeFile(specPath, JSON.stringify(spec), {
@@ -497,6 +638,7 @@ export async function buildSiteSpecWithTemporaryFile(
     await execute({
       specPath,
       outDir: output.outDir,
+      cacheRoot,
       basePath: output.basePath,
       siteOrigin: output.siteOrigin,
       publicAssetDir: output.publicAssetDir,
