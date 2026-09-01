@@ -1,6 +1,6 @@
 import { mock } from 'node:test';
 
-let fixedClockActive = false;
+import { acquireFixedClockOwner, releaseFixedClockOwner } from './github-readback-fixed-clock-state.mjs';
 
 export const withFixedSystemTime = async (instant, operation) => {
   if (typeof instant !== 'string') {
@@ -13,18 +13,17 @@ export const withFixedSystemTime = async (instant, operation) => {
   if (typeof operation !== 'function') {
     throw new Error('APPROVAL_TEST_CLOCK_OPERATION_REQUIRED');
   }
-  if (fixedClockActive) {
-    throw new Error('APPROVAL_TEST_CLOCK_CONCURRENT');
-  }
-  const tracker = mock.method(Date, 'now', () => millis);
-  fixedClockActive = true;
+  const ownerToken = Object.freeze(Object.create(null));
+  acquireFixedClockOwner(ownerToken);
+  let tracker;
   try {
+    tracker = mock.method(Date, 'now', () => millis);
     return await operation();
   } finally {
     try {
-      tracker.mock.restore();
+      if (tracker !== undefined) tracker.mock.restore();
     } finally {
-      fixedClockActive = false;
+      releaseFixedClockOwner(ownerToken);
     }
   }
 };

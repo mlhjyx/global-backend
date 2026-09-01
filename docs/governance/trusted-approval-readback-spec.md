@@ -363,9 +363,17 @@ currentness and the final evidence `observed_at`. A caller-supplied request
 observation timestamp remains closed, validated request provenance only; it
 cannot make an expired assignment current. The verifier rejects causal order
 drift across assignment observation, selected review, request provenance, and
-collector readback. A deterministic test clock may be injected only through a
-closed, snapshotted test-client capability; it is not a request or policy field,
-and the production client always uses its internal system clock.
+collector readback. Production exposes no test-clock client, clock injection
+field, or caller-selectable time through client options, request, policy, or
+evidence; the production client always uses its internal system clock.
+
+Deterministic time is fixture-only. An admitted test fixture temporarily mocks
+the system clock around the production collection entry and restores the clock
+before releasing its opaque operation ownership. A canonical, unqualified
+fixture-state module enforces process-wide exclusion across query-qualified ESM
+helper instances. The fixture helper and state module never enter product
+composition, package roots, OCI or Release artifacts, client options, request,
+policy, or evidence.
 
 The closed `program-c-security-review-evidence/v1` object binds:
 
