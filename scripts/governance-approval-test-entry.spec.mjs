@@ -48,6 +48,8 @@ const SKIPPED_DIRECTORIES = new Set([
 ]);
 const FIXTURE_ROOT = 'scripts/fixtures/approval-readback/';
 const FIXED_CLOCK_FIXTURE = `${FIXTURE_ROOT}github-readback-fixed-clock.mjs`;
+const FIXED_CLOCK_STATE_FIXTURE = `${FIXTURE_ROOT}github-readback-fixed-clock-state.mjs`;
+const FIXED_CLOCK_FIXTURES = Object.freeze([FIXED_CLOCK_FIXTURE, FIXED_CLOCK_STATE_FIXTURE]);
 const SHIPPED_ASTRO_SOURCE = 'apps/site-renderer/src/pages/[...slug].astro';
 const DECLARED_TEST_SUPPORT_ROOTS = Object.freeze([FIXTURE_ROOT]);
 const KERNEL_POLICIES = Object.freeze({
@@ -172,20 +174,25 @@ const assertFixtureBoundary = (references) => {
   assert.deepEqual([...new Set(forbidden)].sort(), [], 'APPROVAL_FIXTURE_IMPORT_FORBIDDEN');
 };
 
-const assertFixedClockFixtureBoundary = (sources, references) => {
-  assert.equal(
-    sources.has(FIXED_CLOCK_FIXTURE),
-    true,
-    'APPROVAL_TEST_CLOCK_FIXTURE_MISSING',
-  );
+const assertFixedClockFixtureBoundary = (sources, references, edges) => {
+  for (const fixture of FIXED_CLOCK_FIXTURES) {
+    assert.equal(sources.has(fixture), true, 'APPROVAL_TEST_CLOCK_FIXTURE_MISSING');
+  }
   const forbidden = references
-    .filter(({ target }) => target === FIXED_CLOCK_FIXTURE)
+    .filter(({ target }) => FIXED_CLOCK_FIXTURES.includes(target))
     .map(({ importer }) => importer)
     .filter((importer) => !isSpecImporter(importer) && !isDeclaredTestSupport(importer));
   assert.deepEqual(
     [...new Set(forbidden)].sort(),
     [],
     'APPROVAL_TEST_CLOCK_IMPORT_FORBIDDEN',
+  );
+  assert.deepEqual(
+    edges.filter(({ importer, target }) => (
+      importer === FIXED_CLOCK_FIXTURE && target === FIXED_CLOCK_STATE_FIXTURE
+    )),
+    [{ importer: FIXED_CLOCK_FIXTURE, target: FIXED_CLOCK_STATE_FIXTURE }],
+    'APPROVAL_TEST_CLOCK_STATE_IMPORT_INVALID',
   );
 };
 
@@ -227,7 +234,7 @@ const assertApprovalImportBoundaries = (sources) => {
   const edges = moduleEdges(sources);
   const references = fixtureReferences(sources, edges);
   assertFixtureBoundary(references);
-  assertFixedClockFixtureBoundary(sources, references);
+  assertFixedClockFixtureBoundary(sources, references, edges);
   assertKernelBoundaries(sources, edges);
 };
 
@@ -311,20 +318,44 @@ test('test-only fixed clock stays outside production and release import paths', 
   const sources = await loadBoundarySources();
   assertApprovalImportBoundaries(sources);
 
-  for (const importer of [
-    'scripts/governance-github-readback.mjs',
-    'runtime-entrypoint.mjs',
-    'infra/backend-runtime.compose.yml',
-    'docs/governance/release-bundle.schema.json',
-    'docs/templates/release-bundle.template.json',
-  ]) {
-    const mutation = new Map(sources);
-    mutation.set(importer, `${sources.get(importer)}\n${FIXED_CLOCK_FIXTURE}\n`);
-    assert.throws(
-      () => assertApprovalImportBoundaries(mutation),
-      /APPROVAL_(?:FIXTURE|TEST_CLOCK)_IMPORT_FORBIDDEN/u,
-    );
+  for (const fixture of FIXED_CLOCK_FIXTURES) {
+    for (const importer of [
+      'scripts/governance-github-readback.mjs',
+      'runtime-entrypoint.mjs',
+      'infra/backend-runtime.compose.yml',
+      'docs/governance/release-bundle.schema.json',
+      'docs/templates/release-bundle.template.json',
+    ]) {
+      const mutation = new Map(sources);
+      mutation.set(importer, `${sources.get(importer)}\n${fixture}\n`);
+      assert.throws(
+        () => assertApprovalImportBoundaries(mutation),
+        /APPROVAL_(?:FIXTURE|TEST_CLOCK)_IMPORT_FORBIDDEN/u,
+      );
+    }
   }
+});
+
+test('canonical fixed-clock state rejects overlapping ownership and mismatched release', async () => {
+  const state = await import('./fixtures/approval-readback/github-readback-fixed-clock-state.mjs');
+  const firstOwner = Object.freeze({});
+  const otherOwner = Object.freeze({});
+  state.acquireFixedClockOwner(firstOwner);
+  try {
+    assert.throws(() => state.acquireFixedClockOwner(otherOwner), {
+      message: 'APPROVAL_TEST_CLOCK_CONCURRENT',
+    });
+    assert.throws(() => state.releaseFixedClockOwner(otherOwner), {
+      message: 'APPROVAL_TEST_CLOCK_STATE_INVALID',
+    });
+    assert.throws(() => state.acquireFixedClockOwner(otherOwner), {
+      message: 'APPROVAL_TEST_CLOCK_CONCURRENT',
+    });
+  } finally {
+    state.releaseFixedClockOwner(firstOwner);
+  }
+  assert.doesNotThrow(() => state.acquireFixedClockOwner(otherOwner));
+  state.releaseFixedClockOwner(otherOwner);
 });
 
 test('boundary loader includes the real OCI entrypoint and Astro product sources', async () => {
