@@ -371,7 +371,7 @@ export class ExecutionBudgetAuthorityRepository {
     private readonly prisma: PrismaService,
     @Optional()
     @Inject(EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE)
-    private readonly platformWriter?: PrismaClient,
+    private readonly platformWriter?: PrismaClient | null,
   ) {}
 
   async consumeWorkspace(
