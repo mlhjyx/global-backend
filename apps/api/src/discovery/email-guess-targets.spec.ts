@@ -59,6 +59,17 @@ describe('buildGuessTargets', () => {
     expect(buildGuessTargets(contacts, 'acme.de').emailless).toHaveLength(DEFAULT_MAX_GUESS_CONTACTS);
   });
 
+  it('拒绝超过 25 的 service 旁路输入，而不是静默扩大每公司的 SMTP fan-out', () => {
+    try {
+      buildGuessTargets([], 'acme.de', DEFAULT_MAX_GUESS_CONTACTS + 1);
+      throw new Error('expected execution envelope rejection');
+    } catch (error) {
+      expect(error).toMatchObject({
+        response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
+      });
+    }
+  });
+
   it('空输入 → 空样本、空 emailless、总数 0', () => {
     const r = buildGuessTargets([], 'acme.de');
     expect(r).toEqual({ knownSamples: [], emailless: [], emaillessTotal: 0 });

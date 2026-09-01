@@ -8,6 +8,7 @@ import {
   type GenericOperationArtifactManifest,
   type GenericOperationArtifactReference,
 } from "../durable-results/artifact/artifact.types";
+import { contentAddressedObjectKey } from "../durable-results/artifact/artifact-key";
 
 const TEST_WORKSPACE_ID = "e03abddd-1307-47cb-a731-7e7a786615a0";
 const ARTIFACT_REFERENCE: GenericOperationArtifactReference = Object.freeze({
@@ -28,7 +29,10 @@ const ARTIFACT_MANIFEST: GenericOperationArtifactManifest = Object.freeze({
   authorityId: "89528818-13ab-4a46-9dfd-6fbcdba6943e",
   operationId: ARTIFACT_REFERENCE.operationId,
   resultSchema: ARTIFACT_REFERENCE.resultSchema,
-  objectKey: `generic-operation-results/v1/sha256/${ARTIFACT_REFERENCE.sha256.slice(0, 2)}/${ARTIFACT_REFERENCE.sha256}`,
+  objectKey: contentAddressedObjectKey(
+    ARTIFACT_REFERENCE.sha256,
+    "CONFIDENTIAL_TENANT",
+  ),
   sha256: ARTIFACT_REFERENCE.sha256,
   sizeBytes: ARTIFACT_REFERENCE.sizeBytes,
   mediaType: ARTIFACT_REFERENCE.mediaType,

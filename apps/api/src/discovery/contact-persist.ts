@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
-import { ProviderContactRecord } from './provider-contract';
+import { LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
 import { cleanEmail } from '../acquisition/clean';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
@@ -21,6 +21,7 @@ export interface PersistDiscoveredContactsArgs {
   adapterKey: string;
   contacts: ProviderContactRecord[];
   suppressedEmails: Set<string>;
+  lawfulBasis: LawfulBasis;
 }
 
 /**
@@ -201,6 +202,15 @@ export async function persistDiscoveredContacts(
             buying_role: c.buyingRole ?? null,
             is_target_role: c.isTargetRole ?? null,
             source_page: c.sourcePage ?? null,
+            lawful_basis: args.lawfulBasis
+              ? {
+                  basis: args.lawfulBasis.basis,
+                  ref: args.lawfulBasis.ref ?? null,
+                  note: args.lawfulBasis.note ?? null,
+                  recorded_by: args.lawfulBasis.recordedBy ?? null,
+                  recorded_at: args.lawfulBasis.recordedAt ?? null,
+                }
+              : null,
           } as unknown as Prisma.InputJsonValue,
           providerKey: args.adapterKey,
           // 身份源署名许可须落到 person.profile（归一名合并源如 inpi_rne=Licence-Ouverte-2.0 /

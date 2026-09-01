@@ -7,6 +7,24 @@
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./execution-budget": {
+      "types": "./dist/execution-budget.d.ts",
+      "default": "./dist/execution-budget.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "execution-budget": [
+        "dist/execution-budget.d.ts"
+      ]
+    }
+  },
   "dependencies": {
     "zod": "^3.23.8"
   },

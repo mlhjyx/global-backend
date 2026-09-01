@@ -12,11 +12,17 @@ describe('AI task registry personal-data boundaries', () => {
   });
 
   it('keeps acquisition decision-maker extraction explicitly enabled', () => {
-    const description = getTask('contact.find_decision_makers')?.description;
+    const task = getTask('contact.find_decision_makers');
+    const description = task?.description;
 
     expect(description).toMatch(/具名的人/);
     expect(description).toMatch(/人名.*职务.*邮箱.*电话/);
     expect(description).toMatch(/个人数据/);
+    expect(
+      (task?.outputSchema as {
+        properties?: { people?: { maxItems?: number } };
+      }).properties?.people?.maxItems,
+    ).toBe(25);
   });
 });
 
@@ -79,6 +85,8 @@ describe('AI task registry model execution policy invariants', () => {
         maxCostCents: task!.maxCostCents,
         timeoutMs: task!.timeoutMs,
       }).toEqual(policy);
+      expect(task!.maxOutputTokens).toBeGreaterThan(0);
+      expect(task!.maxOutputTokens).toBeLessThanOrEqual(16_000);
     }
   });
 });

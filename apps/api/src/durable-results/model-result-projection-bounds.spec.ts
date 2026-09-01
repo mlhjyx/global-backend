@@ -201,7 +201,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'contact-decision-makers/v1': {
-    'data.people': { maxItems: 64 },
+    'data.people': { maxItems: 25 },
     'data.people[].fullName': { maxLength: 500 },
     'data.people[].title': { maxLength: 500 },
     'data.people[].email': { maxLength: 320 },
@@ -345,7 +345,7 @@ describe('model result projection exact literal bound lock', () => {
     ['icp-query-plan/v1', 'data.queries', {
       sourceClass: 'public_intelligence', filterEntries: [], keywords: [], rationale: 'r', priority: 1,
     }, 64],
-    ['contact-decision-makers/v1', 'data.people', { fullName: 'Ada' }, 64],
+    ['contact-decision-makers/v1', 'data.people', { fullName: 'Ada' }, 25],
     ['understanding-offerings/v1', 'data.offerings', { name: 'Pump', confidence: 1 }, 128],
     ['discovery-extract-list/v1', 'data.companies', { name: 'Acme' }, 128],
   ] as const)(

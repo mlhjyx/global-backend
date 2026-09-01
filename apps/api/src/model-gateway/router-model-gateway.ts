@@ -89,6 +89,7 @@ import {
   ModelUsage,
   ReviewVisionInput,
 } from './types';
+import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from './model-execution-envelope';
 import { snapshotVisionReviewInput } from './vision-review-input';
 import { hasTrustedModelIdentity } from './model-identity';
 import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from './model-transports';
@@ -352,7 +353,9 @@ export class RouterModelGateway extends ModelGateway {
     const baseCents = input.maxCostCents ?? registeredTask?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
     // generateStructured 可能做一次校验-修复重试（第二次模型调用，见下）——预留**两次**上限，否则账户仅够
     // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
-    const reserveCents = op === 'generateStructured' ? baseCents * 2 : baseCents;
+    const reserveCents = op === 'generateStructured'
+      ? baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND
+      : baseCents;
     if (ctx.paidCost) {
       return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }

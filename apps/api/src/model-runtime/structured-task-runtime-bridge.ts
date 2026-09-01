@@ -9,9 +9,10 @@ import type {
 import { canonicalDigest, ContextEngine } from './context-engine';
 import { ModelExecutionRuntime, unwrapModelExecutionError } from './model-execution-runtime';
 import type { ModelExecutionState, ModelProtocol, ReasoningLevel, RuntimeTelemetry, TaskModelContract } from './types';
+import { getTask } from '../ai-tasks/task-registry';
 
 const STRUCTURED_CONTEXT_WINDOW = 128_000;
-const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
+const MAX_PROVIDER_OUTPUT_TOKENS = 16_000;
 
 export interface StructuredTaskRuntimeMetadata {
   contractVersion: string;
@@ -62,6 +63,22 @@ export async function executeStructuredTaskWithRuntime<Output>(
   context: AiContext,
   options: StructuredTaskRuntimeOptions = {},
 ): Promise<RuntimeStructuredModelResult<Output>> {
+  const registeredMaxOutputTokens = getTask(input.task)?.maxOutputTokens;
+  const maxOutputTokens = input.maxTokens ?? registeredMaxOutputTokens;
+  if (
+    registeredMaxOutputTokens === undefined ||
+    !Number.isSafeInteger(maxOutputTokens) ||
+    (maxOutputTokens ?? 0) < 1 ||
+    (maxOutputTokens ?? 0) > MAX_PROVIDER_OUTPUT_TOKENS ||
+    (registeredMaxOutputTokens !== undefined &&
+      (maxOutputTokens ?? 0) > registeredMaxOutputTokens)
+  ) {
+    throw new Error('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
+  }
+  const boundedInput = Object.freeze({
+    ...input,
+    maxTokens: maxOutputTokens as number,
+  });
   const contractVersion = options.contractVersion ?? `structured-task-contract/${input.task}/v1`;
   const protocol = options.protocol ?? 'openai_chat_completions';
   const requestedAlias = input.model ?? 'gateway-default';
@@ -71,6 +88,7 @@ export async function executeStructuredTaskWithRuntime<Output>(
     prompt: input.prompt,
     ...(input.system === undefined ? {} : { system: input.system }),
     ...(input.model === undefined ? {} : { model: input.model }),
+    maxOutputTokens: boundedInput.maxTokens,
   };
   const policy = {
     task: input.task,
@@ -79,6 +97,7 @@ export async function executeStructuredTaskWithRuntime<Output>(
     model: requestedAlias,
     protocol,
     gatewayRepair: 'single_closed_repair',
+    maxOutputTokens: boundedInput.maxTokens,
   };
   const refs = {
     policy: `task-policy:${input.task}@${contractVersion}`,
@@ -120,7 +139,7 @@ export async function executeStructuredTaskWithRuntime<Output>(
     segments,
     budget: {
       contextWindow: STRUCTURED_CONTEXT_WINDOW,
-      outputReserve: input.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+      outputReserve: boundedInput.maxTokens,
       reasoningReserve: reasoningReserve(effort),
     },
   });
@@ -153,7 +172,7 @@ export async function executeStructuredTaskWithRuntime<Output>(
     telemetry: options.telemetry,
     transport: {
       dispatch: async () => {
-        gatewayResult = await gateway.generateStructured<Output>(input, context);
+        gatewayResult = await gateway.generateStructured<Output>(boundedInput, context);
         return {
           output: gatewayResult.data,
           requestedAlias,

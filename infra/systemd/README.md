@@ -86,11 +86,19 @@ or `runtime_outbox_relay`; `app_user` remains read-only for the lease table.
 
 ```bash
 cd /global/backend
-docker compose -p global \
+docker compose \
+  --env-file /global/backend/.secrets/minio-bootstrap.env \
+  --env-file /global/backend/.secrets/backend-runtime.env \
+  -p global \
   -f docker-compose.yml \
   -f infra/backend-runtime.compose.yml \
   --profile managed-runtime config --quiet
 ```
+
+The bootstrap file participates in deployment-owner interpolation for MinIO
+provisioning and the Worker's dedicated cleanup credential. It is not an API or
+Worker service `env_file`: MinIO root, KMS, and personal-read credentials must
+not enter either runtime container, and cleanup credentials enter only Worker.
 
 ## Drain-and-swap
 
@@ -114,6 +122,33 @@ sudo systemctl daemon-reload
 Starting, enabling, stopping, or restarting these services is a deployment
 action and is deliberately not part of repository verification.
 
+### GrowthOS loopback relay
+
+When GrowthOS runs in a Docker bridge while Global Backend remains bound to
+host loopback, do not expose Backend on `0.0.0.0` or a Docker bridge address.
+Install the socket-activated AF_UNIX proxy instead:
+
+```bash
+sudo groupadd --system global-backend-growthos
+sudo ln -sf /global/backend/infra/systemd/global-backend-growthos-relay.socket \
+  /etc/systemd/system/global-backend-growthos-relay.socket
+sudo ln -sf /global/backend/infra/systemd/global-backend-growthos-relay.service \
+  /etc/systemd/system/global-backend-growthos-relay.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now global-backend-growthos-relay.socket
+```
+
+If the group already exists, do not recreate it. Read its numeric GID with
+`getent group global-backend-growthos` and configure only the GrowthOS relay
+container with that supplemental GID. The socket is group-owned and mode
+`0660`; ordinary host users and containers without that group cannot connect.
+
+The GrowthOS relay container mounts only
+`/run/global-backend-growthos/backend.sock` read-only and converts its own
+namespace-local `127.0.0.1:3000` to that Unix socket. No TCP listener is added
+to a Docker, LAN, Tailscale, or public interface. A container that does not
+receive the explicit socket mount has no Backend transport path.
+
 ## Exact readback
 
 Read back the running container configuration and both health contracts. Do not
@@ -122,8 +157,8 @@ infer identity from the source checkout or the local tag.
 ```bash
 docker inspect global-api global-worker \
   --format '{{.Name}} image={{.Config.Image}} id={{.Image}} user={{.Config.User}}'
-curl --fail --silent http://127.0.0.1:3000/health/build
-curl --fail --silent http://127.0.0.1:3000/health/ready
+curl --fail --silent http://127.0.0.1:3000/api/v1/health/build
+curl --fail --silent http://127.0.0.1:3000/api/v1/health/ready
 ```
 
 Acceptance requires:
@@ -131,9 +166,9 @@ Acceptance requires:
 - both container `.Config.Image` values equal the approved
   `GLOBAL_BACKEND_IMAGE` byte-for-byte;
 - both image IDs match and both containers run as UID/GID `10001`;
-- `/health/build` reports the expected commit, image, artifact, manifest, SBOM,
+- `/api/v1/health/build` reports the expected commit, image, artifact, manifest, SBOM,
   renderer, schema, and migration digests;
-- `/health/ready` reports every component ready and the API/Worker/Relay leases
+- `/api/v1/health/ready` reports every component ready and the API/Worker/Relay leases
   carry one matching release identity;
 - no second active digest exists on the same Temporal task queue.
 

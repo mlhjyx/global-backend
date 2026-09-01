@@ -12,6 +12,30 @@ import type { RequestContext } from '../auth/request-context';
 const CTX: RequestContext = { userId: 'u1', workspaceId: 'ws1', roles: ['admin'] };
 
 describe('DiscoveryController.guessEmails — DTO → service 入参透传', () => {
+  it('requires and forwards an auditable lawful basis for contact discovery', async () => {
+    const discoverContacts = vi.fn().mockResolvedValue({ ok: true });
+    const controller = new DiscoveryController({ discoverContacts } as unknown as DiscoveryService);
+
+    await controller.discoverContacts(CTX, 'company-1', {
+      lawfulBasis: 'legitimate_interest',
+      lawfulBasisRef: 'LIA-42',
+      lawfulBasisNote: 'decision-maker research',
+    }, 'grant');
+
+    expect(discoverContacts).toHaveBeenCalledWith(
+      CTX,
+      'company-1',
+      {
+        lawfulBasis: {
+          basis: 'legitimate_interest',
+          ref: 'LIA-42',
+          note: 'decision-maker research',
+        },
+      },
+      'grant',
+    );
+  });
+
   it('组装 lawfulBasis {basis,ref,note} + 透传 allowPersonalWithoutBasis/maxContacts/maxProbe', async () => {
     const guessEmailsForCompany = vi.fn().mockResolvedValue({ ok: true });
     const controller = new DiscoveryController({ guessEmailsForCompany } as unknown as DiscoveryService);

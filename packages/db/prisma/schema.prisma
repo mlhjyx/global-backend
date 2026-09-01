@@ -472,7 +472,7 @@ model GovernedSubjectTombstoneAudit {
 /// Physical metadata for one globally content-addressed immutable object.
 /// Source receipts and expiry remain per-operation manifest policy.
 model GenericOperationArtifactObject {
-  sha256          String   @id @db.Char(64)
+  sha256          String   @db.Char(64)
   objectKey       String   @unique(map: "generic_operation_artifact_object_key_key") @map("object_key") @db.VarChar(200)
   sizeBytes       BigInt   @map("size_bytes")
   mediaType       String   @map("media_type") @db.VarChar(160)
@@ -482,6 +482,7 @@ model GenericOperationArtifactObject {
 
   artifacts GenericOperationArtifact[]
 
+  @@id([sha256, privacyClass], map: "generic_operation_artifact_object_pkey")
   @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
   @@map("generic_operation_artifact_object")
 }

@@ -1,4 +1,18 @@
+import { ConflictException } from '@nestjs/common';
 import { KnownEmailSample } from './email-format-learning';
+import {
+  MAX_CONTACT_DISCOVERY_ADAPTERS,
+  MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+  MAX_EMAIL_GUESS_CONTACTS,
+  MAX_EMAIL_PROBE_CANDIDATES,
+} from './execution-envelope';
+
+export {
+  MAX_CONTACT_DISCOVERY_ADAPTERS,
+  MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+  MAX_EMAIL_PROBE_CANDIDATES,
+  MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET,
+} from './execution-envelope';
 
 /**
  * 从某公司联系人派生「邮箱猜测目标」的共享纯件（选项 B · P0.4 复审 MEDIUM）：
@@ -24,7 +38,53 @@ export interface GuessTargets {
 }
 
 /** 每公司最多补全的缺邮箱决策人数（SMTP 扇出护栏；手动路径与 backlog 阶段⑤b 共用）。 */
-export const DEFAULT_MAX_GUESS_CONTACTS = 25;
+export const DEFAULT_MAX_GUESS_CONTACTS = MAX_EMAIL_GUESS_CONTACTS;
+
+class ExecutionBudgetEnvelopeExceededException extends ConflictException {
+  readonly code = 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED';
+
+  constructor() {
+    super({
+      error: {
+        code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+        message: 'technical execution budget envelope exceeded',
+      },
+    });
+  }
+}
+
+function executionBudgetEnvelopeExceeded(): never {
+  throw new ExecutionBudgetEnvelopeExceededException();
+}
+
+function assertRequestedBound(value: number | undefined, maximum: number): void {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || value < 1 || value > maximum) executionBudgetEnvelopeExceeded();
+}
+
+/** 核心服务边界的联系人 adapter fan-out 闸门；必须在任何 adapter 外联前调用。 */
+export function assertContactDiscoveryAdapterFanout(adapterCount: number): void {
+  if (!Number.isInteger(adapterCount) || adapterCount < 0 || adapterCount > MAX_CONTACT_DISCOVERY_ADAPTERS) {
+    executionBudgetEnvelopeExceeded();
+  }
+}
+
+/** adapter 响应进入联系人持久化前的记录数闸门。 */
+export function assertContactDiscoveryResultBound(contactCount: number): void {
+  if (!Number.isInteger(contactCount) || contactCount < 0 || contactCount > MAX_CONTACTS_PER_DISCOVERY_ADAPTER) {
+    executionBudgetEnvelopeExceeded();
+  }
+}
+
+/** 供 service 旁路与纯 target 派生共同复用的每公司猜测联系人上界。 */
+export function assertEmailGuessContactBound(maxContacts: number | undefined): void {
+  assertRequestedBound(maxContacts, DEFAULT_MAX_GUESS_CONTACTS);
+}
+
+/** 供 service 旁路与 EmailGuesser 共同复用的每联系人 SMTP probe 上界。 */
+export function assertEmailProbeBound(maxProbe: number | undefined): void {
+  assertRequestedBound(maxProbe, MAX_EMAIL_PROBE_CANDIDATES);
+}
 
 /**
  * 从某公司联系人派生「格式学习样本（同域非-RISKY）+ 缺 email 决策人（有界）」。纯函数、可测。
@@ -37,6 +97,7 @@ export function buildGuessTargets(
   domain: string,
   maxContacts: number = DEFAULT_MAX_GUESS_CONTACTS,
 ): GuessTargets {
+  assertEmailGuessContactBound(maxContacts);
   const dom = domain.toLowerCase();
   const knownSamples: KnownEmailSample[] = contacts.flatMap((c) =>
     c.contactPoints

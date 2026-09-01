@@ -30,6 +30,7 @@ import {
   SuppressionDecisionRequest,
 } from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
+import { DEFAULT_MAX_GUESS_CONTACTS, MAX_EMAIL_PROBE_CANDIDATES } from './email-guess-targets';
 import { LawfulBasisKind } from './provider-contract';
 import { SUPPRESSION_TYPES } from './suppression-value';
 import {
@@ -130,6 +131,42 @@ class VerifyContactPointDto {
 }
 
 /**
+ * Named-contact discovery processes personal data, so every product request
+ * must carry an explicit, auditable Art. 6 basis. There is deliberately no
+ * development or policy-override bypass on this endpoint.
+ */
+class DiscoverContactsDto {
+  @ApiProperty({
+    enum: LAWFUL_BASIS_KINDS,
+    description: '发现并持久化具名联系人的合法性基础（GDPR Art.6）',
+  })
+  @IsIn(LAWFUL_BASIS_KINDS as unknown as string[])
+  lawfulBasis!: LawfulBasisKind;
+
+  @ApiPropertyOptional({
+    description: 'LIA / 工单 / 合同 / 同意记录的引用（可审计）',
+    maxLength: 512,
+    pattern: NO_CONTROL_CHARS.source,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  @Matches(NO_CONTROL_CHARS)
+  lawfulBasisRef?: string;
+
+  @ApiPropertyOptional({
+    description: '有界审计备注',
+    maxLength: 1000,
+    pattern: NO_CONTROL_CHARS.source,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  @Matches(NO_CONTROL_CHARS)
+  lawfulBasisNote?: string;
+}
+
+/**
  * 决策人邮箱猜测的合规上下文（可选）。猜出的候选**都是人名邮箱**（个人数据），缺 lawfulBasis
  * 且未开 allowPersonalWithoutBasis → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
  */
@@ -170,24 +207,24 @@ class GuessEmailsDto {
     type: 'integer',
     description: '最多补全几个缺邮箱决策人（有界护栏，默认 25）',
     minimum: 1,
-    maximum: 25,
+    maximum: DEFAULT_MAX_GUESS_CONTACTS,
   })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(25)
+  @Max(DEFAULT_MAX_GUESS_CONTACTS)
   maxContacts?: number;
 
   @ApiPropertyOptional({
     type: 'integer',
     description: '每人最多探测几个候选（有界护栏，默认 8）',
     minimum: 1,
-    maximum: 8,
+    maximum: MAX_EMAIL_PROBE_CANDIDATES,
   })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(8)
+  @Max(MAX_EMAIL_PROBE_CANDIDATES)
   maxProbe?: number;
 }
 
@@ -330,7 +367,17 @@ export class DiscoveryController {
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）',
   })
-  @ApiExecutionBudgetGrant()
+  @ApiExecutionBudgetGrant({
+    additionalForbiddenCodes: [
+      'CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED',
+    ],
+  })
+  @ApiBody({
+    type: DiscoverContactsDto,
+    required: false,
+    description:
+      'Required for execution. An absent body is rejected before authority consumption with CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED.',
+  })
   @ApiEnvelope(
     { type: 'object', additionalProperties: true, description: '联系人发现结果（新建联系人/联系点计数）',
     },
@@ -339,11 +386,25 @@ export class DiscoveryController {
   async discoverContacts(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto?: DiscoverContactsDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
       await asExecutionBudgetHttpBoundary(() =>
-        this.discovery.discoverContacts(ctx, id, compactJws),
+        this.discovery.discoverContacts(
+          ctx,
+          id,
+          {
+            lawfulBasis: dto
+              ? {
+                  basis: dto.lawfulBasis,
+                  ref: dto.lawfulBasisRef,
+                  note: dto.lawfulBasisNote,
+                }
+              : undefined,
+          },
+          compactJws,
+        ),
       ),
     );
   }

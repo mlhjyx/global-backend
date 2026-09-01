@@ -13,7 +13,7 @@ import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
 import { qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
-import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from '../discovery/icp-to-cpv';
+import { resolveIcpToCpv, buildTedQuery, boundedTargetCountries, collectIndustryTerms } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
@@ -567,7 +567,7 @@ export class IcpService {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
     // §8.7 稳健：从 company_attributes + planner 各查询双路采集行业词（拆逗号），防单字段缺失/合并串漏掉 TED 注入。
     const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
-    const targetCountries = splitTerms(icp.targetMarkets);
+    const targetCountries = boundedTargetCountries(icp.targetMarkets);
     try {
       const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry, this.budgetStore);
       const cpv = await resolveIcpToCpv(
@@ -609,7 +609,7 @@ export class IcpService {
           industryTerms,
           product: attrs.product ? String(attrs.product) : undefined,
           tradeSide: attrs.trade_side ? String(attrs.trade_side) : undefined,
-          targetCountries: splitTerms(icp.targetMarkets), // openFDA 仅美国市场门（非美国目标 → 不注入）
+          targetCountries: boundedTargetCountries(icp.targetMarkets), // openFDA 仅美国市场门（非美国目标 → 不注入）
         },
         {
           workspaceId: binding.scopeKey,

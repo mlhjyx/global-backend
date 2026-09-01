@@ -9,13 +9,14 @@ import type {
   createSiteBuilderActivities,
   RefurbishActivityInput,
 } from "./site-builder.activities";
+import { SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS } from "../site-builder/site-build-execution-envelope";
 
 type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
 const MAX_IMAGE_BATCHES_PER_BUILD = 256;
 
 const activities = proxyActivities<SiteBuilderActivities>({
   startToCloseTimeout: "10 minutes",
-  retry: { maximumAttempts: 2 },
+  retry: { maximumAttempts: SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 
 const kbActivities = proxyActivities<SiteBuilderActivities>({

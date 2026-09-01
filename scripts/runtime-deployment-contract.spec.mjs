@@ -20,9 +20,12 @@ const repositoryFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('MinIO is pinned and provisioned by one idempotent deployment job', async () => {
-  const [compose, bootstrap, lifecycle, artifactLifecycle] = await Promise.all([
+  const [compose, bootstrap, cleanupAdapter, lifecycle, artifactLifecycle] = await Promise.all([
     repositoryFile('docker-compose.yml'),
     repositoryFile('infra/minio/bootstrap.sh'),
+    repositoryFile(
+      'apps/api/src/durable-results/artifact/personal-artifact-cleanup.store.ts',
+    ),
     repositoryFile('infra/minio/site-builder-lifecycle.json'),
     repositoryFile('infra/minio/generic-operation-artifact-lifecycle.json'),
   ]);
@@ -97,7 +100,7 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
         Expiration: { ExpiredObjectDeleteMarker: true },
         ID: 'generic-operation-artifact-final-delete-markers',
         Status: 'Enabled',
-        Filter: { Prefix: 'generic-operation-results/v1/sha256/' },
+        Filter: { Prefix: 'generic-operation-results/v1/final/' },
       },
       {
         Expiration: { ExpiredObjectDeleteMarker: true },
@@ -134,12 +137,56 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   );
   assert.match(bootstrap, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
   assert.match(bootstrap, /generic-operation-artifact-personal-cleanup/);
+  assert.match(
+    bootstrap,
+    /generic-operation-results\/v1\/final\/personal-data\/\*/,
+  );
   assert.match(bootstrap, /"s3:GetObjectVersion"/);
+  assert.match(bootstrap, /"s3:GetObjectVersionTagging"/);
+  assert.match(bootstrap, /"s3:GetObjectTagging"/);
   assert.match(bootstrap, /"s3:DeleteObjectVersion"/);
+  const cleanupPolicy = bootstrap.slice(
+    bootstrap.indexOf('cat > "$cleanup_policy"'),
+    bootstrap.indexOf('cat > "$personal_policy"'),
+  );
+  assert.doesNotMatch(
+    cleanupPolicy,
+    /DeleteObjectVersion[\s\S]*ExistingObjectTag/u,
+  );
+  assert.match(cleanupAdapter, /GetObjectTaggingCommand/);
+  assert.match(cleanupAdapter, /Value !== 'PERSONAL_DATA'/);
+  const runtimePolicy = bootstrap.slice(
+    bootstrap.indexOf('cat > "$runtime_policy"'),
+    bootstrap.indexOf('cat > "$cleanup_policy"'),
+  );
+  for (const [prefix, privacyClass] of [
+    ['public-organization', 'PUBLIC_ORGANIZATION'],
+    ['confidential-tenant', 'CONFIDENTIAL_TENANT'],
+    ['personal-data', 'PERSONAL_DATA'],
+  ]) {
+    for (const action of ['s3:PutObject', 's3:PutObjectTagging']) {
+      expectPolicyMapping(runtimePolicy, action, prefix, privacyClass);
+    }
+  }
   assert.match(bootstrap, /"s3:GetBucketLocation"/);
   assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
   assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY/);
 });
+
+function expectPolicyMapping(policy, action, prefix, privacyClass) {
+  const actionOffset = policy.indexOf(`"Action": ["${action}"]`);
+  assert.notEqual(actionOffset, -1);
+  const mapping = policy.slice(actionOffset);
+  const prefixOffset = mapping.indexOf(
+    `generic-operation-results/v1/final/${prefix}/*`,
+  );
+  assert.notEqual(prefixOffset, -1);
+  const statement = mapping.slice(prefixOffset, prefixOffset + 700);
+  assert.match(
+    statement,
+    new RegExp(`"s3:RequestObjectTag/artifact-privacy": "${privacyClass}"`),
+  );
+}
 
 test('MinIO bootstrap rejects merged principals before the first mc mutation', async () => {
   const directory = await mkdtemp(
@@ -181,6 +228,131 @@ test('MinIO bootstrap rejects merged principals before the first mc mutation', a
   }
 });
 
+test('MinIO bootstrap rejects any predecessor-layout version before provisioning mutation', async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), 'artifact-layout-preflight-'),
+  );
+  const calls = join(directory, 'mc-calls');
+  const fakeMc = join(directory, 'mc');
+  await writeFile(
+    fakeMc,
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$MC_CALLS"
+case "$*" in
+  'alias set '*) exit 0 ;;
+  'ls deployment') printf '%s\\n' '[date] 0B operation-artifacts-test/'; exit 0 ;;
+  'ls --recursive --versions '*) printf '%s\\n' '[old-version] DELETE sha256/aa/example'; exit 0 ;;
+  *) exit 0 ;;
+esac
+`,
+    'utf8',
+  );
+  await chmod(fakeMc, 0o700);
+  try {
+    await assert.rejects(
+      execFileAsync('/bin/sh', ['infra/minio/bootstrap.sh'], {
+        cwd: new URL('..', import.meta.url),
+        env: {
+          PATH: directory,
+          MC_CALLS: calls,
+          MINIO_ENDPOINT: 'http://minio:9000',
+          MINIO_ROOT_USER: 'root-principal',
+          MINIO_ROOT_PASSWORD: 'root-password-123',
+          S3_BUCKET: 'site-assets-test',
+          GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'operation-artifacts-test',
+          GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-principal',
+          GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'runtime-password-123',
+          GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY:
+            'personal-reader',
+          GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:
+            'personal-password-123',
+          GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:
+            'cleanup-writer',
+          GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:
+            'cleanup-password-123',
+        },
+      }),
+      /GENERIC_OPERATION_ARTIFACT_LAYOUT_MIGRATION_REQUIRED/,
+    );
+    const observed = await readFile(calls, 'utf8');
+    assert.match(observed, /ls --recursive --versions/);
+    assert.doesNotMatch(observed, /(^|\n)mb /);
+    assert.doesNotMatch(observed, /(^|\n)ilm /);
+    assert.doesNotMatch(observed, /(^|\n)admin /);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('MinIO bootstrap treats bucket or version inventory failure as unavailable before mutation', async () => {
+  for (const failureMode of ['bucket-inventory', 'version-inventory']) {
+    const directory = await mkdtemp(
+      join(tmpdir(), `artifact-layout-${failureMode}-`),
+    );
+    const calls = join(directory, 'mc-calls');
+    const fakeMc = join(directory, 'mc');
+    await writeFile(
+      fakeMc,
+      `#!/bin/sh
+printf '%s\\n' "$*" >> "$MC_CALLS"
+case "$*" in
+  'alias set '*) exit 0 ;;
+  'ls deployment')
+    if [ "$FAILURE_MODE" = bucket-inventory ]; then exit 7; fi
+    printf '%s\\n' '[date] 0B operation-artifacts-test/'
+    exit 0
+    ;;
+  'ls --recursive --versions '*)
+    if [ "$FAILURE_MODE" = version-inventory ]; then exit 8; fi
+    exit 0
+    ;;
+  *) exit 0 ;;
+esac
+`,
+      'utf8',
+    );
+    await chmod(fakeMc, 0o700);
+    try {
+      await assert.rejects(
+        execFileAsync('/bin/sh', ['infra/minio/bootstrap.sh'], {
+          cwd: new URL('..', import.meta.url),
+          env: minioBootstrapEnv(directory, calls, failureMode),
+        }),
+        /GENERIC_OPERATION_ARTIFACT_STORAGE_PREFLIGHT_UNAVAILABLE/,
+      );
+      const observed = await readFile(calls, 'utf8');
+      assert.doesNotMatch(observed, /(^|\n)mb /);
+      assert.doesNotMatch(observed, /(^|\n)ilm /);
+      assert.doesNotMatch(observed, /(^|\n)encrypt /);
+      assert.doesNotMatch(observed, /(^|\n)version /);
+      assert.doesNotMatch(observed, /(^|\n)admin /);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+function minioBootstrapEnv(directory, calls, failureMode) {
+  return {
+    PATH: directory,
+    MC_CALLS: calls,
+    FAILURE_MODE: failureMode,
+    MINIO_ENDPOINT: 'http://minio:9000',
+    MINIO_ROOT_USER: 'root-principal',
+    MINIO_ROOT_PASSWORD: 'root-password-123',
+    S3_BUCKET: 'site-assets-test',
+    GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'operation-artifacts-test',
+    GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-principal',
+    GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'runtime-password-123',
+    GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY: 'personal-reader',
+    GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:
+      'personal-password-123',
+    GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY: 'cleanup-writer',
+    GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:
+      'cleanup-password-123',
+  };
+}
+
 test('development API and Worker use one immutable image reference and wait for storage provisioning', async () => {
   const compose = await repositoryFile('infra/backend-runtime.compose.yml');
   const immutableImageUses =
@@ -217,12 +389,40 @@ test('development API and Worker use one immutable image reference and wait for 
     assert.match(workerService, new RegExp(`${name}: \\$\\{${name}`));
     assert.doesNotMatch(apiService, new RegExp(`${name}:`));
   }
+  for (const name of [
+    'MINIO_ROOT_USER',
+    'MINIO_ROOT_PASSWORD',
+    'MINIO_KMS_SECRET_KEY',
+    'GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY',
+    'GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY',
+  ]) {
+    assert.doesNotMatch(compose, new RegExp(`${name}:`));
+  }
+  const apiService = compose.slice(
+    compose.indexOf('\n  api:'),
+    compose.indexOf('\n  worker:'),
+  );
+  const workerService = compose.slice(compose.indexOf('\n  worker:'));
+  const serviceEnvFiles = (section) =>
+    [...section.matchAll(/^\s+- (\.secrets\/[A-Za-z0-9._-]+\.env)$/gm)].map(
+      (match) => match[1],
+    );
+  assert.deepEqual(serviceEnvFiles(apiService), [
+    '.secrets/backend-runtime.env',
+    '.secrets/backend-api-runtime.env',
+  ]);
+  assert.deepEqual(serviceEnvFiles(workerService), [
+    '.secrets/backend-runtime.env',
+    '.secrets/backend-worker-runtime.env',
+  ]);
   assert.doesNotMatch(
     compose,
     /GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:\s+[^$\n]/,
   );
   assert.doesNotMatch(compose, /build:/);
   assert.doesNotMatch(compose, /node dist\//);
+  assert.match(compose, /x-backend-runtime:[\s\S]*\n  init: true\n/);
+  assert.equal(compose.match(/\n  init: true\n/g)?.length, 1);
   assert.match(compose, /pids_limit: 256/);
   assert.match(compose, /mem_limit: \$\{GLOBAL_BACKEND_MEMORY_LIMIT:-4g\}/);
   assert.match(compose, /cpus: \$\{GLOBAL_BACKEND_CPU_LIMIT:-2\.0\}/);
@@ -262,19 +462,105 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(verify, /register_api_runtime_process_lease/);
   assert.match(verify, /register_worker_runtime_process_lease/);
   assert.match(verify, /register_outbox_relay_runtime_process_lease/);
+  assert.match(verify, /terminalize_api_runtime_process_lease/);
+  assert.match(verify, /terminalize_worker_runtime_process_lease/);
+  assert.match(verify, /terminalize_outbox_relay_runtime_process_lease/);
   assert.match(verify, /psql_denied/);
 });
 
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
-  const [api, worker] = await Promise.all([
+  const [api, worker, readme, compose, main, temporalWorker] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),
     repositoryFile('infra/systemd/global-worker.service'),
+    repositoryFile('infra/systemd/README.md'),
+    repositoryFile('infra/backend-runtime.compose.yml'),
+    repositoryFile('apps/api/src/main.ts'),
+    repositoryFile('apps/api/src/temporal/worker.ts'),
   ]);
   for (const unit of [api, worker]) {
     assert.doesNotMatch(unit, /node\s+dist\//);
     assert.match(unit, /docker compose/);
     assert.match(unit, /backend-runtime\.compose\.yml/);
+    assert.equal(
+      unit.match(
+        /--env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env/g,
+      )?.length,
+      3,
+    );
+    assert.equal(
+      unit.match(
+        /--env-file \/global\/backend\/\.secrets\/backend-runtime\.env/g,
+      )?.length,
+      3,
+    );
+    assert.doesNotMatch(unit, /EnvironmentFile=.*minio-bootstrap\.env/);
+    for (const directive of ['ExecStartPre', 'ExecStart', 'ExecStop']) {
+      const line = unit
+        .split('\n')
+        .find((candidate) => candidate.startsWith(`${directive}=`));
+      assert.ok(line);
+      assert.match(
+        line,
+        /docker compose --env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env --env-file \/global\/backend\/\.secrets\/backend-runtime\.env/,
+      );
+    }
+    assert.match(unit, /^TimeoutStopSec=120s$/m);
   }
+  assert.match(compose, /^\s+stop_grace_period: 90s$/m);
+  assert.match(
+    main,
+    /app\.enableShutdownHooks\(\['SIGTERM', 'SIGINT'\]\)/,
+  );
+  assert.match(
+    temporalWorker,
+    /Runtime\.install\(\{ shutdownSignals: \[\] \}\)/,
+  );
+  assert.match(temporalWorker, /startWorkerProcessSignalCoordinator/);
+  assert.ok(
+    temporalWorker.indexOf('Runtime.install({ shutdownSignals: [] })') <
+      temporalWorker.indexOf('startWorkerProcessSignalCoordinator({'),
+  );
+  assert.match(
+    temporalWorker,
+    /await connection\.close\(\)\.catch\(\(\) => undefined\)/,
+  );
+  assert.match(
+    readme,
+    /docker compose \\\n+  --env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env \\\n+  --env-file \/global\/backend\/\.secrets\/backend-runtime\.env/,
+  );
+  assert.match(readme, /http:\/\/127\.0\.0\.1:3000\/api\/v1\/health\/build/);
+  assert.match(readme, /http:\/\/127\.0\.0\.1:3000\/api\/v1\/health\/ready/);
+});
+
+test('GrowthOS reaches the loopback backend only through an explicit Unix socket relay', async () => {
+  const [socket, service, readme] = await Promise.all([
+    repositoryFile('infra/systemd/global-backend-growthos-relay.socket'),
+    repositoryFile('infra/systemd/global-backend-growthos-relay.service'),
+    repositoryFile('infra/systemd/README.md'),
+  ]);
+  assert.match(
+    socket,
+    /ListenStream=\/run\/global-backend-growthos\/backend\.sock/,
+  );
+  assert.deepEqual(
+    [...socket.matchAll(/^ListenStream=(.+)$/gm)].map((match) => match[1]),
+    ['/run/global-backend-growthos/backend.sock'],
+  );
+  assert.match(socket, /SocketGroup=global-backend-growthos/);
+  assert.match(socket, /SocketMode=0660/);
+  assert.match(socket, /DirectoryMode=0711/);
+  assert.match(socket, /RemoveOnStop=true/);
+  assert.match(service, /Requires=global-api\.service/);
+  assert.match(service, /After=global-api\.service/);
+  assert.match(
+    service,
+    /ExecStart=\/usr\/lib\/systemd\/systemd-socket-proxyd 127\.0\.0\.1:3000/,
+  );
+  assert.match(service, /RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6/);
+  assert.doesNotMatch(service, /0\.0\.0\.0|172\.|host\.docker\.internal/);
+  assert.match(readme, /global-backend-growthos-relay\.socket/);
+  assert.match(readme, /global-backend-growthos/);
+  assert.match(readme, /AF_UNIX/);
 });
 
 function assertGhcrPublicationContract(workflow) {

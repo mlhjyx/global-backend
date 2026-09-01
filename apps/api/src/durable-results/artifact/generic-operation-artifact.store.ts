@@ -110,9 +110,14 @@ export type { ArtifactStorageReadiness };
 export interface GenericOperationArtifactStore {
   stage(input: StageArtifactInput): Promise<StagedArtifact>;
   promote(input: StagedArtifact): Promise<StoredArtifact>;
-  inspect(sha256: string, signal?: AbortSignal): Promise<StoredArtifact | null>;
+  inspect(
+    sha256: string,
+    privacyClass: ArtifactPrivacyClass,
+    signal?: AbortSignal,
+  ): Promise<StoredArtifact | null>;
   read(
     sha256: string,
+    privacyClass: ArtifactPrivacyClass,
     signal?: AbortSignal,
   ): Promise<AsyncIterable<Uint8Array>>;
   deleteStaging(artifactId: string): Promise<void>;
@@ -398,8 +403,11 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
 
   async promote(input: StagedArtifact): Promise<StoredArtifact> {
     const staged = snapshotStagedArtifact(input);
-    const objectKey = contentAddressedObjectKey(staged.sha256);
-    const existing = await this.inspect(staged.sha256);
+    const objectKey = contentAddressedObjectKey(
+      staged.sha256,
+      staged.privacyClass,
+    );
+    const existing = await this.inspect(staged.sha256, staged.privacyClass);
     if (existing) {
       if (!sameArtifact(existing, staged)) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
@@ -461,14 +469,16 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
 
   async inspect(
     sha256: string,
+    privacyClass: ArtifactPrivacyClass,
     signal?: AbortSignal,
   ): Promise<StoredArtifact | null> {
     if (!isCanonicalArtifactSha256(sha256)) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
+    assertPrivacyClass(privacyClass);
     assertNotAborted(signal);
     try {
-      const key = contentAddressedObjectKey(sha256);
+      const key = contentAddressedObjectKey(sha256, privacyClass);
       const [output, tags] = await Promise.all([
         this.client.send(
           new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
@@ -494,18 +504,20 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
 
   async read(
     sha256: string,
+    privacyClass: ArtifactPrivacyClass,
     signal?: AbortSignal,
   ): Promise<AsyncIterable<Uint8Array>> {
     if (!isCanonicalArtifactSha256(sha256)) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
+    assertPrivacyClass(privacyClass);
     assertNotAborted(signal);
     try {
       const result = asRecord(
         await this.client.send(
           new GetObjectCommand({
             Bucket: this.bucket,
-            Key: contentAddressedObjectKey(sha256),
+            Key: contentAddressedObjectKey(sha256, privacyClass),
           }),
           commandOptions(signal),
         ),
@@ -552,7 +564,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     preconditionFailed: boolean,
   ): Promise<StoredArtifact> {
     try {
-      const stored = await this.inspect(input.sha256);
+      const stored = await this.inspect(input.sha256, input.privacyClass);
       if (stored && sameArtifact(stored, input)) {
         await this.verifyFinalBody(input);
         return stored;
@@ -617,7 +629,10 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
   private async verifyFinalBody(staged: StagedArtifact): Promise<void> {
     let body: AsyncIterable<Uint8Array>;
     try {
-      const key = contentAddressedObjectKey(staged.sha256);
+      const key = contentAddressedObjectKey(
+        staged.sha256,
+        staged.privacyClass,
+      );
       const [rawResult, tags] = await Promise.all([
         this.client.send(
           new GetObjectCommand({

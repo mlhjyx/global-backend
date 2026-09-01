@@ -9,6 +9,10 @@ export const TED_COVERAGE: ReadonlySet<string> = new Set([
   'IRL', 'ISL', 'ITA', 'LIE', 'LTU', 'LUX', 'LVA', 'MLT', 'NLD', 'NOR', 'POL', 'PRT', 'ROU', 'SVK', 'SVN', 'SWE',
 ]);
 
+/** Technical execution envelope for request-bound query-plan taxonomy work. */
+export const MAX_QUERY_PLAN_INDUSTRY_TERMS = 64;
+export const MAX_QUERY_PLAN_TARGET_COUNTRIES = 8;
+
 /** resolveIcpToCpv 依赖的最小 taxonomy 面（结构化 —— 真 TaxonomyResolver 天然满足，便于单测替身）。 */
 export interface CpvTaxonomyPort {
   resolveMany(kind: TaxonomyKind, terms: string[], opts?: TaxonomyResolveOptions): Promise<CanonicalNode[]>;
@@ -102,7 +106,12 @@ export function collectIndustryTerms(companyAttributes: unknown, planned: PlanQu
     ...splitTerms(attrs.sub_industry),
     ...splitTerms(attrs.product),
     ...planned.flatMap((q) => [...splitTerms(q.filters?.industry), ...splitTerms(q.filters?.sub_industry)]),
-  ]);
+  ]).slice(0, MAX_QUERY_PLAN_INDUSTRY_TERMS);
+}
+
+/** Stable first-seen market set shared by CPV, FDA and scheduled intent consumers. */
+export function boundedTargetCountries(value: unknown): string[] {
+  return uniq(splitTerms(value)).slice(0, MAX_QUERY_PLAN_TARGET_COUNTRIES);
 }
 
 /** 查询计划条目形状（与 discovery.query_plan 输出的 queries[] 结构一致）。 */

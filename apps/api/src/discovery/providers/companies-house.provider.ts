@@ -9,6 +9,8 @@ import {
   ProviderContactRecord,
 } from '../provider-contract';
 import { pickBestByName } from '../name-match';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { MAX_CONTACTS_PER_DISCOVERY_ADAPTER } from '../execution-envelope';
 
 const CH_FIND_BASE = 'https://find-and-update.company-information.service.gov.uk/company/';
 const OFFICER_SCHEME = 'uk-ch-officer';
@@ -113,16 +115,23 @@ export class CompaniesHouseContactProvider implements ContactDiscoveryAdapter {
       // 2) 取 active director（officer_role='director' 且未卸任）→ ProviderContactRecord。
       const officersRes = await this.deps.broker.invoke<CompaniesHouseInput, CompaniesHouseOutput>(
         'companies_house.search',
-        { op: 'officers', companyNumber: best.item.companyNumber, limit: 50 },
+        {
+          op: 'officers',
+          companyNumber: best.item.companyNumber,
+          limit: MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+        },
         purposeCtx,
       );
       const directors = (officersRes.data.officers ?? []).filter((o) => o.officerRole === 'director' && !o.resignedOn);
-      const contacts = directors.map((o) => toContactRecord(o, best.item));
+      const contacts = directors
+        .slice(0, MAX_CONTACTS_PER_DISCOVERY_ADAPTER)
+        .map((o) => toContactRecord(o, best.item));
       this.log(
         `✓ ${company.name} → ${best.item.companyNumber} (${best.score.toFixed(2)}): ${contacts.length} active directors`,
       );
       return { contacts, costCents: 0 };
     } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
       this.log(`discover failed: ${String(err).slice(0, 150)}`);
       return { contacts: [], costCents: 0 };

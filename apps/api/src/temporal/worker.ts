@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { resolve } from "node:path";
-import { NativeConnection, Worker } from "@temporalio/worker";
+import { NativeConnection, Runtime, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
@@ -19,16 +19,16 @@ import { createIntentActivities } from "./intent.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
 import { createDeletionActivities } from "./deletion.activities";
-import { createPersonalArtifactCleanupActivities } from './personal-artifact-cleanup.activities';
-import { PersonalArtifactCleanupService } from '../durable-results/artifact/personal-artifact-cleanup.contract';
+import { createPersonalArtifactCleanupActivities } from "./personal-artifact-cleanup.activities";
+import { PersonalArtifactCleanupService } from "../durable-results/artifact/personal-artifact-cleanup.contract";
 import {
   personalArtifactCleanupPersistence,
   PrismaPersonalArtifactCleanupCommandRepository,
-} from '../durable-results/artifact/personal-artifact-cleanup.repository';
-import { createPersonalArtifactCleanupRuntime } from '../durable-results/artifact/personal-artifact-cleanup.runtime';
+} from "../durable-results/artifact/personal-artifact-cleanup.repository";
+import { createPersonalArtifactCleanupRuntime } from "../durable-results/artifact/personal-artifact-cleanup.runtime";
 import { createPatentsCacheActivities } from "./patents-cache.activities";
 import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities";
-import { createPlatformScheduleAuthorityActivities } from './platform-schedule-authority.activities';
+import { createPlatformScheduleAuthorityActivities } from "./platform-schedule-authority.activities";
 import { createSiteBuilderActivities } from "./site-builder.activities";
 import {
   createSiteBuildCostReconciliationCatalogFromEnv,
@@ -79,7 +79,11 @@ import {
   checkRedisReadiness,
   rendererRuntimeIdentity,
 } from "../runtime/managed-dependency-readiness";
-import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
+import {
+  createIdempotentWorkerShutdown,
+  startWorkerProcessSignalCoordinator,
+  startWorkerLeaseHeartbeat,
+} from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import {
   selectWorkerDependencyAdmissionBeforeAuthorityCutover,
@@ -111,6 +115,7 @@ async function holdWorkerNotReady(
  * directly — no Nest bootstrap — so it never starts HTTP or the relay.
  */
 async function main(): Promise<void> {
+  Runtime.install({ shutdownSignals: [] });
   const runtimeSettings = resolveRuntimeSettings(process.env);
   const releaseIdentity = await loadRuntimeReleaseIdentity({
     mode: runtimeSettings.mode,
@@ -142,22 +147,41 @@ async function main(): Promise<void> {
         await assertMigrationCompatible(prisma, releaseIdentity);
         return { status: "ok" } as const;
       } catch {
-        return { status: "failed", code: "MIGRATION_REVISION_MISMATCH" } as const;
+        return {
+          status: "failed",
+          code: "MIGRATION_REVISION_MISMATCH",
+        } as const;
       }
     },
     onBlocked: (code) =>
-      console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`),
+      console.error(
+        `[worker] not ready: ${code}; Temporal polling remains disabled`,
+      ),
   });
   const runtimeLeaseStore = new PrismaRuntimeProcessLeaseStore(prisma);
   const runtimeLeases = new RuntimeProcessLeaseService(runtimeLeaseStore, {
     identity: releaseIdentity,
   });
+  const controlledSignals = startWorkerProcessSignalCoordinator({
+    leases: runtimeLeases,
+    taskQueue: UNDERSTANDING_TASK_QUEUE,
+    onDrainLeaseFailure: () =>
+      console.error(
+        "[worker] draining lease unavailable; process exit continues fail-closed",
+      ),
+    terminalizeUncertainRegistration: () =>
+      runtimeLeases.terminalize("WORKER", UNDERSTANDING_TASK_QUEUE),
+    onEarlyCleanup: async () => {
+      await runtimeTelemetry.shutdown().catch(() => undefined);
+      await runtimeLeaseStore.disconnectWriters().catch(() => undefined);
+      await prisma.$disconnect().catch(() => undefined);
+    },
+    onEarlyExit: (signal) => {
+      process.kill(process.pid, signal);
+    },
+  });
   try {
-    await runtimeLeases.heartbeat(
-      "WORKER",
-      "STARTING",
-      UNDERSTANDING_TASK_QUEUE,
-    );
+    await controlledSignals.registered;
   } catch {
     await runtimeTelemetry.shutdown();
     await holdWorkerNotReady("RUNTIME_PROCESS_LEASE_PUBLISH_UNAVAILABLE");
@@ -180,7 +204,9 @@ async function main(): Promise<void> {
   const siteBuilderStorage = new StorageService();
   await siteBuilderStorage.onModuleInit();
   const dependencyBlocked = (code: string): void =>
-    console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`);
+    console.error(
+      `[worker] not ready: ${code}; Temporal polling remains disabled`,
+    );
   await waitForWorkerDependencyAdmission({
     check: () => siteBuilderStorage.checkReadiness(),
     onBlocked: dependencyBlocked,
@@ -211,7 +237,7 @@ async function main(): Promise<void> {
     } catch {
       await runtimeTelemetry.shutdown();
       return holdWorkerNotReady(
-        'PERSONAL_ARTIFACT_CLEANUP_CONFIG_INVALID',
+        "PERSONAL_ARTIFACT_CLEANUP_CONFIG_INVALID",
         runtimeLeases,
       );
     }
@@ -252,8 +278,11 @@ async function main(): Promise<void> {
   // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
   // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
   const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-  const platformWriterUrl = process.env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL?.trim();
-  const platformWriterDb = platformWriterUrl ? new PrismaClient({ datasourceUrl: platformWriterUrl }) : undefined;
+  const platformWriterUrl =
+    process.env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL?.trim();
+  const platformWriterDb = platformWriterUrl
+    ? new PrismaClient({ datasourceUrl: platformWriterUrl })
+    : undefined;
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
     personalArtifactCleanupRuntime.destroy();
@@ -267,10 +296,14 @@ async function main(): Promise<void> {
   } catch {
     await holdPlatformNotReady("OWNER_DATABASE_UNAVAILABLE");
   }
-  if (!platformWriterDb) return holdPlatformNotReady('PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE');
+  if (!platformWriterDb)
+    return holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
   const authorityWriter = platformWriterDb;
-  try { await authorityWriter.$connect(); }
-  catch { await holdPlatformNotReady('PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE'); }
+  try {
+    await authorityWriter.$connect();
+  } catch {
+    await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
+  }
   const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
 
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
@@ -431,7 +464,10 @@ async function main(): Promise<void> {
       }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({
-        ownerDb, broker, budgetStore, platformWriter: authorityWriter,
+        ownerDb,
+        broker,
+        budgetStore,
+        platformWriter: authorityWriter,
       }),
       // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
       ...createSanctionsRefreshActivities({
@@ -482,9 +518,14 @@ async function main(): Promise<void> {
     `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
   );
   clearInterval(startingHeartbeat);
+  const workerShutdown = createIdempotentWorkerShutdown(worker, () =>
+    console.error(
+      "[worker] duplicate or invalid shutdown request was contained",
+    ),
+  );
   const readyHeartbeat = await startWorkerLeaseHeartbeat({
     leases: runtimeLeases,
-    worker,
+    worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     onLeaseLost: () =>
       console.error(
@@ -500,7 +541,10 @@ async function main(): Promise<void> {
       try {
         await assertMigrationCompatible(prisma, releaseIdentity);
       } catch {
-        return { status: "failed", code: "MIGRATION_REVISION_MISMATCH" } as const;
+        return {
+          status: "failed",
+          code: "MIGRATION_REVISION_MISMATCH",
+        } as const;
       }
       const checks = await Promise.all([
         siteBuilderStorage.checkReadiness(),
@@ -517,18 +561,30 @@ async function main(): Promise<void> {
       });
     },
     leases: runtimeLeases,
-    worker,
+    worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     onBlocked: (code) =>
-      console.error(`[worker] dependency became unavailable: ${code}; polling is shutting down`),
+      console.error(
+        `[worker] dependency became unavailable: ${code}; polling is shutting down`,
+      ),
   });
   if (!dependencyHeartbeat.admitted) {
     readyHeartbeat.stop();
     await holdPlatformNotReady("WORKER_DEPENDENCY_UNAVAILABLE");
   }
+  controlledSignals.attach({
+    shutdown: workerShutdown,
+    stopHeartbeats: () => {
+      dependencyHeartbeat.stop();
+      readyHeartbeat.stop();
+    },
+  });
+  const runPromise = worker.run();
+  workerShutdown.markRunning();
   try {
-    await worker.run();
+    await runPromise;
   } finally {
+    await controlledSignals.stop();
     dependencyHeartbeat.stop();
     readyHeartbeat.stop();
     await runtimeLeases
@@ -536,9 +592,10 @@ async function main(): Promise<void> {
       .catch(() => undefined);
     await runtimeTelemetry.shutdown();
     personalArtifactCleanupRuntime.destroy();
+    await connection.close().catch(() => undefined);
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
-    await runtimeLeaseStore.onApplicationShutdown();
+    await runtimeLeaseStore.disconnectWriters();
     await prisma.$disconnect().catch(() => undefined);
   }
 }
