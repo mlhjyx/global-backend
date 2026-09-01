@@ -4,7 +4,7 @@
 
 **Goal:** Integrate exact current main into the trusted-approval branch without rewriting provenance, then remove the caller-selectable fixed-clock factory from every production surface so Round 3 can obtain two clean exact-head reviews.
 
-**Architecture:** Preserve the existing PR branch through a two-parent, non-rewriting local merge of `main@8f3f615ea9d0494a55f67075c7eee0bb126b3386`, resolve only the two pre-audited Copy derived-document conflicts to the exact main versions, and keep Copy fail-closed. The production GitHub readback module will expose only a system-clock client; deterministic time control moves into a test-only fixture that temporarily mocks `Date.now` and restores it in `finally`, so no request, policy, production option, package export, or production module can select a backdated clock.
+**Architecture:** Preserve the existing PR branch through a two-parent, non-rewriting local merge of `main@8f3f615ea9d0494a55f67075c7eee0bb126b3386`, use the exact main versions as the two Copy conflict-resolution inputs, then regenerate the merged tree's fail-closed Copy receipt and update only its derived human fingerprint/SHA fields. The production GitHub readback module will expose only a system-clock client; deterministic time control moves into a test-only fixture that temporarily mocks `Date.now` and restores it in `finally`, so no request, policy, production option, package export, or production module can select a backdated clock.
 
 **Tech Stack:** Git merge/worktrees, Node.js 22 ESM and `node:test`, TypeScript/tsx, ContractGraph, repository governance and Copy fixed-source verification.
 
@@ -17,7 +17,7 @@
 - Use the existing isolated worktree `/global/backend/.codex/worktrees/trusted-approval-readback-integration`; do not touch the shared root's untracked `.playwright-cli/` directory.
 - The merge is local, non-rewriting, and two-parent. No rebase, squash, reset, cherry-pick reconstruction, push, PR update, comment, thread mutation, external workflow, deploy, restart, runtime mutation, or provider/paid action is authorized.
 - The only allowed merge-conflict paths are `docs/evidence/site-builder/copy-runtime-eligibility.json` and `docs/implementation-records/copy-fixed-source-impact-governance.md`. Any other unmerged path is a hard stop.
-- Both Copy conflict paths resolve to their exact `main@8f3f615e` bytes. The merged tree must read back `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`, fingerprint `2ea4f9e2c6155c515272c9b192e235b18e5363f056eac5977fbdc96636953d21`, and eligibility receipt SHA-256 `7c9c96f10bcf9e8492c592fad60dc2eb711fd1da9edd741b685f53d51be4da4d`.
+- Both Copy conflict paths first resolve to their exact `main@8f3f615e` bytes, then the existing bounded receipt writer regenerates the merged-tree receipt. The final merged tree must read back `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`, fingerprint `51084d45cacd3dc98e10cebd1d42a55bb234ff13e4e257ee47add429d23cb5f0`, receipt SHA-256 `2b3a5756d9136eed9afb2ef7cdaed6fec6d1fcb7592b97f05e2bcc8589e3ae9b`, and the same reviewed 11-path stale scope `PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION`.
 - Copy must not be rebuilt, promoted, dispatched, or described as `CURRENT`.
 - Production readback time comes only from an internal system clock captured exactly once before the first remote await. `request.observedAt` remains provenance only and cannot authorize authority currentness.
 - No production export, production client option, request, policy, fixture leak, OCI/Release composition, or package root may expose caller-selectable clock injection.
@@ -39,7 +39,7 @@
 
 **Interfaces:**
 - Consumes: clean branch `b20f41da`, exact main `8f3f615e`, merge base `c998ca7f`, and the current Copy v22 binding.
-- Produces: a local two-parent merge commit whose first parent descends from `b20f41da`, second parent is exact `8f3f615e`, and whose Copy receipt remains `STALE_HOLD`.
+- Produces: a local two-parent merge commit whose first parent descends from `b20f41da`, second parent is exact `8f3f615e`, and whose regenerated Copy receipt remains `STALE_HOLD` with the exact merged-tree fingerprint/SHA above.
 
 - [ ] **Step 1: Re-run the exact pre-merge guard**
 
@@ -80,7 +80,7 @@ git diff --name-only --diff-filter=U
 
 Expected: the command stops for the exact two allowed Copy conflicts and no others. If the conflict set differs, run `git merge --abort` and stop.
 
-- [ ] **Step 4: Resolve only the two Copy files to exact current-main bytes**
+- [ ] **Step 4: Resolve only the two Copy files to exact current-main input bytes**
 
 ```bash
 git restore --source=8f3f615ea9d0494a55f67075c7eee0bb126b3386 --staged --worktree -- \
@@ -90,14 +90,62 @@ git add \
   docs/evidence/site-builder/copy-runtime-eligibility.json \
   docs/implementation-records/copy-fixed-source-impact-governance.md
 test -z "$(git diff --name-only --diff-filter=U)"
-git diff 8f3f615ea9d0494a55f67075c7eee0bb126b3386 -- \
-  docs/evidence/site-builder/copy-runtime-eligibility.json \
-  docs/implementation-records/copy-fixed-source-impact-governance.md
 ```
 
-Expected: the final diff command has no output.
+Expected: conflict resolution is complete. These main bytes are an input baseline, not the final merged-tree receipt.
 
-- [ ] **Step 5: Verify Copy and integration before committing**
+- [ ] **Step 5: Regenerate the merged-tree HOLD receipt and exact human binding**
+
+Run the existing bounded writer:
+
+```bash
+node --input-type=module - <<'NODE'
+import { writeCopyRuntimeEligibilityReceiptFromRepository } from './scripts/copy-fixed-source-impact.mjs';
+await writeCopyRuntimeEligibilityReceiptFromRepository(process.cwd());
+NODE
+```
+
+Then apply this exact human-document patch:
+
+```diff
+-| Current source fingerprint | `2ea4f9e2c6155c515272c9b192e235b18e5363f056eac5977fbdc96636953d21` |
++| Current source fingerprint | `51084d45cacd3dc98e10cebd1d42a55bb234ff13e4e257ee47add429d23cb5f0` |
+@@
+-| Eligibility receipt SHA-256 | `7c9c96f10bcf9e8492c592fad60dc2eb711fd1da9edd741b685f53d51be4da4d` |
++| Eligibility receipt SHA-256 | `2b3a5756d9136eed9afb2ef7cdaed6fec6d1fcb7592b97f05e2bcc8589e3ae9b` |
+```
+
+Stage both files and assert the machine receipt:
+
+```bash
+git add \
+  docs/evidence/site-builder/copy-runtime-eligibility.json \
+  docs/implementation-records/copy-fixed-source-impact-governance.md
+jq -e '
+  .status == "STALE_HOLD" and
+  .dispatch_authorization == "NOT_AUTHORIZED" and
+  .pilot_eligibility == "BLOCKED" and
+  .stale_scope == "PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION" and
+  .current_source_fingerprint == "51084d45cacd3dc98e10cebd1d42a55bb234ff13e4e257ee47add429d23cb5f0" and
+  (.drifted_paths == [
+    "apps/api/package.json",
+    "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+    "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+    "apps/api/src/site-builder/agents/ai-task.ts",
+    "apps/api/tsconfig.build.json",
+    "package.json",
+    "packages/contracts/package.json",
+    "packages/contracts/src/index.ts",
+    "packages/contracts/src/site-builder/component-qualification.ts",
+    "packages/db/prisma/schema.prisma",
+    "pnpm-lock.yaml"
+  ])
+' docs/evidence/site-builder/copy-runtime-eligibility.json
+test "$(sha256sum docs/evidence/site-builder/copy-runtime-eligibility.json | cut -d' ' -f1)" = \
+  "2b3a5756d9136eed9afb2ef7cdaed6fec6d1fcb7592b97f05e2bcc8589e3ae9b"
+```
+
+- [ ] **Step 6: Verify Copy and integration before committing**
 
 ```bash
 node --test scripts/copy-fixed-source-impact.spec.mjs
@@ -109,7 +157,7 @@ git diff --check --cached
 
 Expected: Copy tests pass; readback is exactly `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`; governance passes; no whitespace errors.
 
-- [ ] **Step 6: Create the local two-parent merge commit**
+- [ ] **Step 7: Create the local two-parent merge commit**
 
 ```bash
 git commit -m "chore: integrate current main into approval readback"
@@ -387,8 +435,8 @@ Report the exact local head, merge parents, tests, reviewer verdicts, residual M
 ## Local completion criteria
 
 - Exact current main `8f3f615e` is a parent of the local branch through a non-rewriting merge.
-- Only the two audited Copy documents conflicted and both equal exact current-main bytes after resolution.
-- Copy remains `STALE_HOLD / NOT_AUTHORIZED / BLOCKED` and its fingerprint/receipt SHA match current main.
+- Only the two audited Copy documents conflicted; exact current-main bytes were used as conflict-resolution inputs before regenerating the merged-tree receipt.
+- Copy remains `STALE_HOLD / NOT_AUTHORIZED / BLOCKED` and its fingerprint/receipt SHA match the exact merged tree (`51084d45...b5f0` / `2b3a5756...ae9b`).
 - The production readback module has no fixed/test clock export and accepts no caller clock through options, request, policy, or composition.
 - Deterministic time exists only in a fixture module, restores `Date.now` on every exit, and is absent from product/release imports.
 - The expired-authority/backdated-clock counterexample cannot pass through any production entry.
