@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto';
 
 import {
   collectGitHubApprovalEvidence,
-  createGitHubReadbackTestClient,
+  createGitHubReadbackClient,
 } from '../../governance-github-readback.mjs';
+import { withFixedSystemTime } from './github-readback-fixed-clock.mjs';
 
 export const REPOSITORY_ID = 1291151138;
 export const REPOSITORY_FULL_NAME = 'mlhjyx/global-backend';
@@ -437,18 +438,19 @@ export const fixtureFetch = (state) => {
 
 export const collect = async (state, options = {}) => {
   const fixture = fixtureFetch(state);
-  const client = createGitHubReadbackTestClient({
+  const client = createGitHubReadbackClient({
     fetch: fixture.fetch,
     token: AUTH_SENTINEL,
     apiVersion: API_VERSION,
-  }, options.clock ?? {
-    now: () => options.collectorObservedAt ?? COLLECTOR_OBSERVED_AT,
   });
-  const evidence = await collectGitHubApprovalEvidence(
-    client,
-    options.request ?? request(),
-    options.limits ?? limits(),
-    options.policy ?? policy(),
+  const evidence = await withFixedSystemTime(
+    options.collectorObservedAt ?? COLLECTOR_OBSERVED_AT,
+    () => collectGitHubApprovalEvidence(
+      client,
+      options.request ?? request(),
+      options.limits ?? limits(),
+      options.policy ?? policy(),
+    ),
   );
   return { evidence, ...fixture, client };
 };

@@ -5,7 +5,6 @@ import {
   REPOSITORY_SEGMENTS,
   arrayIsUnique,
   deepFreeze,
-  hasExactKeys,
   isCanonicalInstant,
   isFixedApprovalError,
   isGitSha,
@@ -37,33 +36,8 @@ import {
   paginate,
 } from './governance-github-readback-rest.mjs';
 
-const SYSTEM_CLOCK = Object.freeze({
-  now: () => new Date().toISOString(),
-});
-const collectorClocks = new WeakMap();
-
-const snapshotCollectorClock = (value) => {
-  const descriptor = Object.getOwnPropertyDescriptor(value ?? {}, 'now');
-  requireCondition(
-    hasExactKeys(value, ['now'])
-      && descriptor?.enumerable === true
-      && Object.hasOwn(descriptor, 'value')
-      && typeof descriptor.value === 'function',
-    'APPROVAL_GITHUB_CLIENT_INVALID',
-  );
-  return Object.freeze({ now: descriptor.value });
-};
-
-const createClientWithClock = (options, clock) => {
-  const client = createRestClient(options);
-  collectorClocks.set(client, clock);
-  return client;
-};
-
-const captureCollectorObservedAt = (client) => {
-  const clock = collectorClocks.get(client);
-  requireCondition(clock !== undefined, 'APPROVAL_GITHUB_CLIENT_INVALID');
-  const observedAt = clock.now();
+const captureCollectorObservedAt = () => {
+  const observedAt = new Date(Date.now()).toISOString();
   requireCondition(isCanonicalInstant(observedAt), 'APPROVAL_GITHUB_CLOCK_INVALID');
   return observedAt;
 };
@@ -75,7 +49,7 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
     limitValue,
     policyValue,
   );
-  const collectorObservedAt = captureCollectorObservedAt(client);
+  const collectorObservedAt = captureCollectorObservedAt();
   const budget = { items: 0, pages: 0 };
 
   const repositoryResponse = await fetchJson(
@@ -240,13 +214,7 @@ const collectImpl = async (client, requestValue, limitValue, policyValue) => {
   return deepFreeze(output);
 };
 
-export const createGitHubReadbackClient = (options) => (
-  createClientWithClock(options, SYSTEM_CLOCK)
-);
-
-export const createGitHubReadbackTestClient = (options, clock) => (
-  createClientWithClock(options, snapshotCollectorClock(clock))
-);
+export const createGitHubReadbackClient = (options) => createRestClient(options);
 
 export const collectGitHubApprovalEvidence = async (client, request, limits, trustedPolicy) => {
   try {

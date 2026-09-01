@@ -27,7 +27,7 @@ const TEST_FILES = Object.freeze([
 const SCRIPT_NAME = 'approval-readback:test';
 const EXPECTED_COMMAND = `node --test ${TEST_FILES.join(' ')}`;
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SCAN_ROOTS = Object.freeze(['scripts', 'apps', 'packages', '.github/workflows']);
+const SCAN_ROOTS = Object.freeze(['scripts', 'apps', 'packages', 'infra', '.github/workflows']);
 const PRODUCT_SOURCE_ROOTS = new Set(['apps', 'packages']);
 const SCAN_FILES = Object.freeze([
   'package.json',
@@ -47,6 +47,7 @@ const SKIPPED_DIRECTORIES = new Set([
   '.code-intelligence', '.next', 'coverage', 'dist', 'node_modules',
 ]);
 const FIXTURE_ROOT = 'scripts/fixtures/approval-readback/';
+const FIXED_CLOCK_FIXTURE = `${FIXTURE_ROOT}github-readback-fixed-clock.mjs`;
 const SHIPPED_ASTRO_SOURCE = 'apps/site-renderer/src/pages/[...slug].astro';
 const DECLARED_TEST_SUPPORT_ROOTS = Object.freeze([FIXTURE_ROOT]);
 const KERNEL_POLICIES = Object.freeze({
@@ -171,6 +172,23 @@ const assertFixtureBoundary = (references) => {
   assert.deepEqual([...new Set(forbidden)].sort(), [], 'APPROVAL_FIXTURE_IMPORT_FORBIDDEN');
 };
 
+const assertFixedClockFixtureBoundary = (sources, references) => {
+  assert.equal(
+    sources.has(FIXED_CLOCK_FIXTURE),
+    true,
+    'APPROVAL_TEST_CLOCK_FIXTURE_MISSING',
+  );
+  const forbidden = references
+    .filter(({ target }) => target === FIXED_CLOCK_FIXTURE)
+    .map(({ importer }) => importer)
+    .filter((importer) => !isSpecImporter(importer) && !isDeclaredTestSupport(importer));
+  assert.deepEqual(
+    [...new Set(forbidden)].sort(),
+    [],
+    'APPROVAL_TEST_CLOCK_IMPORT_FORBIDDEN',
+  );
+};
+
 const kernelImporters = (kernelName, edges) => {
   const importers = new Set(
   edges
@@ -207,7 +225,9 @@ const assertKernelBoundaries = (sources, edges) => {
 
 const assertApprovalImportBoundaries = (sources) => {
   const edges = moduleEdges(sources);
-  assertFixtureBoundary(fixtureReferences(sources, edges));
+  const references = fixtureReferences(sources, edges);
+  assertFixtureBoundary(references);
+  assertFixedClockFixtureBoundary(sources, references);
   assertKernelBoundaries(sources, edges);
 };
 
@@ -283,6 +303,26 @@ test('canonical approval entry enforces executable fixture and pure-kernel impor
     assert.throws(
       () => assertApprovalImportBoundaries(kernelMutation),
       /APPROVAL_KERNEL_IMPORT_FORBIDDEN/u,
+    );
+  }
+});
+
+test('test-only fixed clock stays outside production and release import paths', async () => {
+  const sources = await loadBoundarySources();
+  assertApprovalImportBoundaries(sources);
+
+  for (const importer of [
+    'scripts/governance-github-readback.mjs',
+    'runtime-entrypoint.mjs',
+    'infra/backend-runtime.compose.yml',
+    'docs/governance/release-bundle.schema.json',
+    'docs/templates/release-bundle.template.json',
+  ]) {
+    const mutation = new Map(sources);
+    mutation.set(importer, `${sources.get(importer)}\n${FIXED_CLOCK_FIXTURE}\n`);
+    assert.throws(
+      () => assertApprovalImportBoundaries(mutation),
+      /APPROVAL_(?:FIXTURE|TEST_CLOCK)_IMPORT_FORBIDDEN/u,
     );
   }
 });

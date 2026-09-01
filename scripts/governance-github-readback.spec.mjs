@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   collectGitHubApprovalEvidence,
   createGitHubReadbackClient,
-  createGitHubReadbackTestClient,
 } from './governance-github-readback.mjs';
 import {
   snapshotGitHubReadbackInputs,
@@ -48,6 +47,12 @@ import {
   request,
 } from './fixtures/approval-readback/task5-github-readback-fixture.mjs';
 
+const FIXED_CLOCK_MODULE = './fixtures/approval-readback/github-readback-fixed-clock.mjs';
+const AUTHORITY_EFFECTIVE_UNTIL = '2026-08-30T13:00:00.000Z';
+const OVERLAPPING_CLOCK_OBSERVED_AT = '2026-08-30T12:45:00.000Z';
+
+const loadFixedClock = () => import(FIXED_CLOCK_MODULE);
+
 const mutateProposalManifest = (state, mutate) => {
   const blob = state.blobs.get(PROPOSAL_MANIFEST_BLOB_SHA);
   const value = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
@@ -57,6 +62,139 @@ const mutateProposalManifest = (state, mutate) => {
     ...encodeBlob(`${JSON.stringify(value)}\n`),
   });
 };
+
+test('production readback exports no test-only clock surface', async () => {
+  const readbackModule = await import('./governance-github-readback.mjs');
+
+  assert.equal('createGitHubReadbackTestClient' in readbackModule, false);
+  assert.deepEqual(
+    Object.keys(readbackModule).filter((key) => /Clock|TestClient/u.test(key)),
+    [],
+  );
+});
+
+test('production clock cannot be backdated to rescue expired authority', async () => {
+  const readbackModule = await import('./governance-github-readback.mjs');
+  const state = fixtureState();
+  const fixture = fixtureFetch(state);
+  for (const role of ROLES) {
+    mutateAuthorityRole(state, role, (entry) => {
+      entry.effective_until = AUTHORITY_EFFECTIVE_UNTIL;
+    });
+  }
+  assert.equal(COLLECTOR_OBSERVED_AT, '2026-08-30T12:30:00.000Z');
+  assert.ok(Date.parse(COLLECTOR_OBSERVED_AT) < Date.parse(AUTHORITY_EFFECTIVE_UNTIL));
+  assert.ok(Date.now() >= Date.parse(AUTHORITY_EFFECTIVE_UNTIL));
+
+  const client = readbackModule.createGitHubReadbackClient({
+    fetch: fixture.fetch,
+    token: AUTH_SENTINEL,
+    apiVersion: API_VERSION,
+  });
+  await expectCode(
+    () => readbackModule.collectGitHubApprovalEvidence(
+      client,
+      request(),
+      limits(),
+      policy(),
+    ),
+    'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
+  );
+
+  assert.equal(
+    readbackModule.createGitHubReadbackTestClient,
+    undefined,
+    'production module exposes a public API that can backdate the collector clock',
+  );
+});
+
+test('test-only fixed clock observes the instant and restores Date.now after success', async () => {
+  const { withFixedSystemTime } = await loadFixedClock();
+  const originalNow = Date.now;
+
+  const result = await withFixedSystemTime(COLLECTOR_OBSERVED_AT, async () => {
+    assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+    return 'fixed-clock-result';
+  });
+
+  assert.equal(result, 'fixed-clock-result');
+  assert.equal(Date.now, originalNow);
+});
+
+test('test-only fixed clock restores Date.now after rejection', async () => {
+  const { withFixedSystemTime } = await loadFixedClock();
+  const originalNow = Date.now;
+  const expected = new Error('operation failed');
+
+  await assert.rejects(
+    () => withFixedSystemTime(COLLECTOR_OBSERVED_AT, async () => {
+      assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+      throw expected;
+    }),
+    (error) => error === expected,
+  );
+
+  assert.equal(Date.now, originalNow);
+});
+
+test('test-only fixed clock rejects nested and overlapping operations', async (t) => {
+  const { withFixedSystemTime } = await loadFixedClock();
+  const originalNow = Date.now;
+
+  await t.test('nested operation', async () => {
+    await assert.rejects(
+      () => withFixedSystemTime(COLLECTOR_OBSERVED_AT, () => (
+        withFixedSystemTime(OVERLAPPING_CLOCK_OBSERVED_AT, async () => {})
+      )),
+      { message: 'APPROVAL_TEST_CLOCK_CONCURRENT' },
+    );
+    assert.equal(Date.now, originalNow);
+  });
+
+  await t.test('overlapping operation', async () => {
+    let release;
+    let markEntered;
+    const entered = new Promise((resolve) => {
+      markEntered = resolve;
+    });
+    const pending = withFixedSystemTime(COLLECTOR_OBSERVED_AT, async () => {
+      markEntered();
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+      return 'released';
+    });
+
+    await entered;
+    try {
+      await assert.rejects(
+        () => withFixedSystemTime(OVERLAPPING_CLOCK_OBSERVED_AT, async () => {}),
+        { message: 'APPROVAL_TEST_CLOCK_CONCURRENT' },
+      );
+      assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+    } finally {
+      release();
+    }
+    assert.equal(await pending, 'released');
+    assert.equal(Date.now, originalNow);
+  });
+});
+
+test('test-only fixed clock rejects invalid inputs with stable fixture codes', async () => {
+  const { withFixedSystemTime } = await loadFixedClock();
+  const originalNow = Date.now;
+
+  await assert.rejects(
+    () => withFixedSystemTime('2026-08-30T12:30:00Z', async () => {}),
+    { message: 'APPROVAL_TEST_CLOCK_INVALID' },
+  );
+  await assert.rejects(
+    () => withFixedSystemTime(COLLECTOR_OBSERVED_AT, null),
+    { message: 'APPROVAL_TEST_CLOCK_OPERATION_REQUIRED' },
+  );
+  assert.equal(Date.now, originalNow);
+});
 
 test('collects frozen bounded observed evidence without claiming complete approval', async () => {
   const state = fixtureState();
@@ -159,6 +297,7 @@ test('collects frozen bounded observed evidence without claiming complete approv
   });
   assert.deepEqual(evidence.readback.post, evidence.readback.pre);
   assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
+  assert.equal(Object.keys(evidence).some((key) => /clock/iu.test(key)), false);
   assert.ok(Object.isFrozen(evidence));
   assert.ok(Object.isFrozen(evidence.machine_checks[0].reusable_signer));
   assert.ok(Object.isFrozen(evidence.proposal_files[0].trusted_renderer));
@@ -388,70 +527,47 @@ test('requires the exact API version and injected fetch', () => {
   );
 });
 
-test('collector snapshots a closed trusted test clock before its first remote await', async () => {
+test('test-only fixed clock drives the production collector before its first remote await', async () => {
+  const { withFixedSystemTime } = await loadFixedClock();
   const state = fixtureState();
   const fixture = fixtureFetch(state);
-  let clockCaptured = false;
-  const sourceClock = {
-    now: () => {
-      clockCaptured = true;
-      return COLLECTOR_OBSERVED_AT;
-    },
-  };
-  const client = createGitHubReadbackTestClient({
+  let firstRemoteReadObserved = false;
+  const client = createGitHubReadbackClient({
     fetch: async (...args) => {
-      assert.equal(clockCaptured, true);
+      if (!firstRemoteReadObserved) {
+        firstRemoteReadObserved = true;
+        assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+      }
       return fixture.fetch(...args);
     },
     token: AUTH_SENTINEL,
     apiVersion: API_VERSION,
-  }, sourceClock);
-  sourceClock.now = () => '2026-09-01T00:00:00.000Z';
-
-  const evidence = await collectGitHubApprovalEvidence(
-    client,
-    request(),
-    limits(),
-    policy(),
-  );
-
-  assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
-  assert.equal(Object.isFrozen(client), true);
-  assert.throws(
-    () => createGitHubReadbackTestClient({
-      fetch: fixture.fetch,
-      token: AUTH_SENTINEL,
-      apiVersion: API_VERSION,
-    }, { now: () => COLLECTOR_OBSERVED_AT, extra: true }),
-    { message: 'APPROVAL_GITHUB_CLIENT_INVALID' },
-  );
-});
-
-test('collector rejects invalid clock output and caller attempts to inject clock data', async (t) => {
-  await t.test('non-canonical clock output fails before the first remote read', async () => {
-    const state = fixtureState();
-    const fixture = fixtureFetch(state);
-    const client = createGitHubReadbackTestClient({
-      fetch: fixture.fetch,
-      token: AUTH_SENTINEL,
-      apiVersion: API_VERSION,
-    }, { now: () => '2026-08-30T12:30:00Z' });
-
-    await expectCode(
-      () => collectGitHubApprovalEvidence(client, request(), limits(), policy()),
-      'APPROVAL_GITHUB_CLOCK_INVALID',
-    );
-    assert.equal(fixture.calls.length, 0);
   });
 
+  const evidence = await withFixedSystemTime(
+    COLLECTOR_OBSERVED_AT,
+    () => collectGitHubApprovalEvidence(
+      client,
+      request(),
+      limits(),
+      policy(),
+    ),
+  );
+
+  assert.equal(firstRemoteReadObserved, true);
+  assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
+  assert.equal(Object.isFrozen(client), true);
+});
+
+test('collector rejects caller attempts to inject clock data', async (t) => {
   await t.test('request clock field is not an authorization surface', async () => {
     const state = fixtureState();
     const fixture = fixtureFetch(state);
-    const client = createGitHubReadbackTestClient({
+    const client = createGitHubReadbackClient({
       fetch: fixture.fetch,
       token: AUTH_SENTINEL,
       apiVersion: API_VERSION,
-    }, { now: () => COLLECTOR_OBSERVED_AT });
+    });
     const unsafeRequest = request();
     unsafeRequest.collectorObservedAt = COLLECTOR_OBSERVED_AT;
 
@@ -465,11 +581,11 @@ test('collector rejects invalid clock output and caller attempts to inject clock
   await t.test('policy clock field is not an authorization surface', async () => {
     const state = fixtureState();
     const fixture = fixtureFetch(state);
-    const client = createGitHubReadbackTestClient({
+    const client = createGitHubReadbackClient({
       fetch: fixture.fetch,
       token: AUTH_SENTINEL,
       apiVersion: API_VERSION,
-    }, { now: () => COLLECTOR_OBSERVED_AT });
+    });
     const unsafePolicy = policy();
     unsafePolicy.collectorClock = { now: () => COLLECTOR_OBSERVED_AT };
 
