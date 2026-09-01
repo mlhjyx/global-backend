@@ -1,6 +1,6 @@
 # Organization Identity Writer Ban-at-Source Design
 
-**Status:** revised after independent architecture/security review; pending scoped re-review and user written-spec confirmation. Implementation is not authorized by this document.
+**Status:** revised after user confirmation because live protected `main` advanced across B0 authority surfaces; pending renewed independent review and exact user reconfirmation. Implementation is not authorized by this document.
 
 **Branch/base:** `codex/pr407-organization-identity-caller-cutover-v2` from exact Artifact A head `2400bac28796bae44294114edc99eaccb1bd65b3`.
 
@@ -8,17 +8,18 @@
 
 ## 1. Objective and claim boundary
 
-Artifact B replaces exactly three product `IdentityLink` delegate writers with the Artifact A resolver while preventing Artifact B from introducing or changing another Prisma/raw database write surface unnoticed.
+Artifact B replaces exactly three product `IdentityLink` delegate writers with the Artifact A resolver while preventing Artifact B from introducing or changing another Prisma/raw database write surface unnoticed. Artifact A remains the Identity authority foundation, while the B0 working baseline must also admit exact live protected `main` before scanner construction.
 
 The design does **not** claim to parse arbitrary PostgreSQL or PL/pgSQL, infer every function's transitive database effects from SQL text, or prove final database authority. It establishes a transition admission contract from an exact reviewed Artifact A baseline:
 
 1. direct or possible Prisma `IdentityLink` delegate mutation is rejected;
-2. the complete product raw-capability surface and its statically reachable wrapper ingress graph are reviewed and structurally frozen;
-3. Artifact B may not add or structurally change a raw SQL capability, raw wrapper ingress, migration, or database-function authority surface;
-4. literal `identity_link` source mentions are a secondary conservative detector, not semantic SQL proof;
-5. the exact Artifact A migration/function/ACL inventory remains independently pinned;
-6. B2, B4, and B4M remove the three known delegate writers in a machine-checked `3 → 2 → 1 → 0` sequence;
-7. Artifact C remains the later database privilege revoke and final write-authority boundary.
+2. an exact current-main admission merge is independently reviewed before B0 implementation;
+3. the complete refreshed product raw-capability surface and its statically reachable wrapper ingress graph are reviewed and structurally frozen;
+4. Artifact B may not add or structurally change a raw SQL capability, raw wrapper ingress, migration, or database-function authority surface after that admitted baseline;
+5. literal `identity_link` source mentions are a secondary conservative detector, not semantic SQL proof;
+6. the exact Artifact A migration/function/ACL inventory remains independently pinned inside the refreshed baseline;
+7. B2, B4, and B4M remove the three known delegate writers in a machine-checked `3 → 2 → 1 → 0` sequence;
+8. Artifact C remains the later database privilege revoke and final write-authority boundary.
 
 This combination prevents a new dynamic command, Unicode-escaped identifier, side-effecting function call, imported raw wrapper, or future Prisma write method from receiving a clean result merely because a literal token scanner did not understand it.
 
@@ -68,7 +69,63 @@ node --test \
   packages/db/test/pinned-prisma-migration-stage.spec.mjs
 ```
 
-## 3. Why the previous parser design is rejected
+Live readback during implementation-plan self-review observed protected main at `8f3f615ea9d0494a55f67075c7eee0bb126b3386`, 35 commits after the `c998ca7f…` main already integrated into Artifact A. The live SHA is drift-prone and is not hardcoded as the future execution base. The observed delta includes `discovery.activities.ts`, runtime/governance files, Prisma schema, and two later migrations:
+
+```text
+20260901060000_generic_operation_artifact_privacy_prefix
+20260901110000_runtime_process_lease_atomic_terminalization
+```
+
+A read-only three-way merge reports three conflict hunks limited to generated Copy eligibility JSON/human citations; product source and schema auto-merge in that snapshot. This is current audit evidence only. Execution must repeat the complete live audit and may not assume the conflict set is stable.
+
+## 3. Current-main admission before B0
+
+### 3.1 Two authority subjects
+
+Artifact B uses two distinct immutable subjects:
+
+```text
+ARTIFACT_A_COMMIT
+  2400bac28796bae44294114edc99eaccb1bd65b3
+  Identity resolver/migration/function/ACL/review authority.
+
+B0_REFRESH_BASE_COMMIT
+  Produced later by a reviewed, non-rewriting merge of exact live protected
+  main into v2. Product build/raw/migration inventory subject for B0.
+```
+
+The refreshed subject must retain `ARTIFACT_A_COMMIT` and the exact live-main commit as ancestors. It does not replace or rewrite Artifact A evidence. Identity-specific resolver/migration/function/ACL bytes must remain equal to the reviewed Artifact A authority unless the refresh review explicitly stops for a new spec.
+
+### 3.2 Refresh admission task
+
+Before any scanner implementation, one current-main admission task must:
+
+1. read live GitHub protected-main SHA, cached refs, worktree inventory, ahead/behind, merge base, and exact changed paths without modifying the branch;
+2. classify every main-only change that intersects build inputs, raw-capability sources, migrations, Prisma schema, governance, runtime artifact rules, the three writers, resolver/lock, or B1-B6 consumers;
+3. run a no-write three-way merge and enumerate every conflict;
+4. stop on any Identity authority semantic drift, migration/function/ACL interaction, new direct writer, unresolved owner, or conflict outside an exact disposition;
+5. only under the later implementation-plan authorization, merge the exact live-main commit with a normal two-parent merge commit—never rebase, squash, force, or blanket `ours/theirs`;
+6. resolve unrelated generated evidence conflicts from current main or the official generator output, never from stale feature bytes;
+7. regenerate and independently review current-main admission evidence, focused/full tests, migration-chain compatibility, governance/docs, Gitleaks, and exact ContractGraph;
+8. record the reviewed live-main SHA, merge commit, parents, path classifications, conflict resolutions, migration additions, raw/build delta and review digest in `organization-identity-current-main-admission.json`.
+
+The refresh admission record contains metadata/digests only. It does not claim retained migration application, deployment, runtime health, or secret validity.
+
+### 3.3 Baseline derivation after refresh
+
+Product build, raw capability, wrapper ingress, current migration-directory, Prisma-version, native-extractor, and source-root baselines are derived from exact `B0_REFRESH_BASE_COMMIT`. Artifact A resolver/function/ACL authority is separately re-derived from `ARTIFACT_A_COMMIT` and checked byte-for-byte inside the refreshed tree.
+
+Every main-only migration is included in the refreshed migration-directory manifest and receives an explicit `IDENTITY_AUTHORITY_UNCHANGED` or `HOLD` disposition. A migration is never admitted merely because its name appears unrelated. The refresh is not allowed to edit migration bytes.
+
+### 3.4 Main drift after refresh
+
+Immediately before B0 whole review, immediately before `B0_ACCEPTANCE`, and immediately before the protected-main merge authorization, live main must still equal the admitted live-main SHA.
+
+If live main advances before `B0_ACCEPTANCE`, the implementation head may merge the new exact main only by repeating the complete refresh-admission task, regenerating baselines, rerunning all B0 gates, and obtaining a new whole review.
+
+If live main advances after `B0_ACCEPTANCE`, that acceptance is abandoned and must not be merged. Create a new reviewed refresh/implementation/acceptance sequence; never merge a newer main only in the GitHub merge commit because the accepted baseline would not cover it.
+
+## 4. Why the previous parser design is rejected
 
 The failed Artifact B branch attempted a repository-owned PostgreSQL/PLpgSQL subset parser. Independent reviews successively found raw alias, computed delegate, traversal-budget, quoted identifier, dollar literal, `MERGE`, `COPY`, SELECT-keyword, procedural-control, and cast type-modifier escapes.
 
@@ -90,9 +147,9 @@ codex/pr407-organization-identity-caller-cutover
 
 It is not rebased, reset, deleted, or used as the v2 implementation base.
 
-## 4. Approaches considered
+## 5. Approaches considered
 
-### 4.1 Chosen: frozen raw authority surface plus conservative source admission
+### 5.1 Chosen: frozen raw authority surface plus conservative source admission
 
 The chosen design uses TypeScript project analysis for Prisma capability ownership, freezes every existing raw capability/callsite/wrapper ingress from Artifact A, and rejects structural drift during Artifact B. A simple literal mention detector is defense-in-depth only.
 
@@ -110,19 +167,19 @@ Costs:
 - any raw-capability or migration drift during Artifact B requires explicit re-review;
 - manifest churn is intentional during the transition and is not a general permanent repository policy unless separately adopted.
 
-### 4.2 Rejected: maintained PostgreSQL parser dependency
+### 5.2 Rejected: maintained PostgreSQL parser dependency
 
 The repository currently has no PostgreSQL AST parser. Adding one would introduce supply-chain, version, native/WASM, build, and PL/pgSQL coverage obligations disproportionate to Artifact B. It may be reconsidered only as a separately approved repository-wide SQL-governance program.
 
-### 4.3 Rejected: literal token search as sole authority
+### 5.3 Rejected: literal token search as sole authority
 
 A contiguous token cannot see runtime command concatenation, `format('%I', ...)`, `U&"..."` identifiers, or side-effecting functions. Literal search remains useful for conservative blocking, but it cannot close the writer gate by itself.
 
-### 4.4 Rejected: another handcrafted parser recovery
+### 5.4 Rejected: another handcrafted parser recovery
 
 Renaming a third parser fix loop would evade the completed breaker rather than change the architecture.
 
-## 5. Tracked artifacts and file responsibilities
+## 6. Tracked artifacts and file responsibilities
 
 Artifact B v2 introduces repository-governance files outside product runtime:
 
@@ -136,8 +193,13 @@ scripts/governance-organization-identity-writers.spec.mjs
   resource-bound, source-root, and runtime-exclusion tests.
 
 docs/governance/organization-identity-writer-baseline.json
-  Exact Artifact A build surface, raw capability/callsite/wrapper-ingress graph,
-  direct delegate inventory, normalized structural hashes and dispositions.
+  Exact admitted current-main build surface, raw capability/callsite/wrapper-
+  ingress graph, direct delegate inventory, normalized structural hashes and
+  dispositions; Artifact A resolver authority remains separately pinned.
+
+docs/governance/organization-identity-current-main-admission.json
+  Exact live-main SHA, B0 refresh merge/parents, changed-path classifications,
+  conflict resolutions, migration/raw/build deltas and independent review.
 
 docs/governance/organization-identity-migration-authority.json
   Exact Artifact A migration directory inventory, checksums, last-change
@@ -150,8 +212,8 @@ docs/governance/organization-identity-writer-stage.json
 
 docs/governance/organization-identity-writer-acceptance.json
   First-add B0 acceptance anchor: reviewed implementation parent, scanner and
-  manifest Git blob IDs/digests, Artifact A Git object, review receipts and
-  immutable stage-machine definition.
+  manifest Git blob IDs/digests, Artifact A Git object, admitted current-main
+  and refresh merge, review receipts and immutable stage-machine definition.
 
 docs/governance/organization-identity-artifact-a-acceptance.json
   Durable non-secret Artifact A head, migration, disposable/static gate and
@@ -166,9 +228,9 @@ scripts/governance-verify.mjs
 
 The scanner and manifests are governed artifacts. They do not enter `apps/api/src`, API/Worker composition roots, compiled `apps/api/dist`, or the runtime OCI image.
 
-## 6. Product and shipped-source admission boundary
+## 7. Product and shipped-source admission boundary
 
-### 6.1 Pinned build inputs
+### 7.1 Pinned build inputs
 
 Before reporting any inventory, the scanner verifies exact reviewed hashes and semantics for:
 
@@ -194,7 +256,7 @@ The build manifest binds:
 
 Any configuration, entrypoint, Docker copy, extension, generated-source, Prisma-version, or native-extractor operation drift produces `BUILD_SURFACE_DRIFT` and a non-clean result before source findings are evaluated.
 
-### 6.2 Traversal and file safety
+### 7.2 Traversal and file safety
 
 The conservative TypeScript admission root is `apps/api/src/`, filtered by the exact reviewed build contract. Separately shipped first-party runtime entrypoints are included in the build-surface manifest and scanned for imports/references that could reach Prisma or database clients.
 
@@ -202,7 +264,7 @@ Traversal uses `lstat`, rejects every symlink and non-regular file in an admitte
 
 Build exclusions are machine-derived and pinned. The scanner may conservatively include additional non-shipped source, but it must label the root `CONSERVATIVE_ADMISSION_ROOT`; it may never call the larger root an exact runtime inventory. Skipping a compiled or shipped file is forbidden.
 
-## 7. Closed finding and output contract
+## 8. Closed finding and output contract
 
 ```ts
 type DelegateMethod =
@@ -260,9 +322,9 @@ exit 2  scanner/configuration/integrity execution failure
 
 Stdout for exits 0/1 contains only the closed JSON schema. Stderr is empty. Exit 2 emits one closed JSON integrity code to stdout and nothing to stderr. The top-level normalizer never prints exception messages, causes, stacks, TypeScript diagnostic text, source snippets, SQL, string literals, absolute paths, environment values, or OS errors.
 
-## 8. Prisma `IdentityLink` delegate admission
+## 9. Prisma `IdentityLink` delegate admission
 
-### 8.1 Closed read-only set
+### 9.1 Closed read-only set
 
 Safety is defined by a closed read-only set, not by an incomplete write list:
 
@@ -293,7 +355,7 @@ deleteMany
 
 The scanner verifies parity among the pinned Prisma version, generated delegate surface, and repository-native ContractGraph extractor. A new or unknown callable method on a possible `IdentityLink` delegate is `PRISMA_IDENTITY_LINK_MUTATION_AMBIGUOUS`, never safe.
 
-### 8.2 Conservative capability-boundary rule
+### 9.2 Conservative capability-boundary rule
 
 The scanner uses one TypeScript project and checker. It permits direct closed read calls, but rejects or marks ambiguous any possible `IdentityLink` capability that is:
 
@@ -310,9 +372,9 @@ This boundary ban deliberately avoids project-wide semantic propagation of an es
 
 Direct call-site aliases are resolved only when the capability remains in the same expression/symbol chain and no boundary above is crossed. `tx[unknownModel].create(...)` on a proved Prisma origin is ambiguous because the model may be `identityLink`.
 
-## 9. Raw capability baseline and transition freeze
+## 10. Raw capability baseline and transition freeze
 
-### 9.1 What is inventoried
+### 10.1 What is inventoried
 
 The scanner inventories every product raw capability surface, not only direct invocations:
 
@@ -326,7 +388,7 @@ The scanner inventories every product raw capability surface, not only direct in
 
 The TypeScript project graph follows import/export aliases, direct arguments/parameters/returns, finite object/map keys, and named wrapper call edges. When a capability or wrapper ingress cannot be completely classified, the baseline disposition is `RAW_STRUCTURE_AMBIGUOUS`; B0 cannot pass until that ambiguity is removed or the wrapper is replaced by an exact reviewed adapter contract.
 
-### 9.2 Artifact A baseline manifest
+### 10.2 Artifact A baseline manifest
 
 `organization-identity-writer-baseline.json` records for every surface:
 
@@ -359,14 +421,16 @@ The initial B0 review must classify every current surface. A `FORBIDDEN_DYNAMIC_
 
 Changing only a SQL literal, referenced constant, map value, helper return, existing wrapper argument, imported type, scanner rule, or manifest therefore changes the commitment even when the outer callsite topology is unchanged.
 
-### 9.3 B0 acceptance and protected-main trust anchor
+### 10.3 B0 acceptance and protected-main trust anchor
 
 B0 uses a two-step checkpoint so the scanner/manifests cannot authorize same-task regeneration:
 
-1. `B0_IMPLEMENTATION` creates the scanner, baseline/migration/build manifests and green self/stage tests. It is committed and independently reviewed at one exact commit.
-2. `B0_ACCEPTANCE` is a one-parent child of the exact reviewed `B0_IMPLEMENTATION` commit and first adds `organization-identity-writer-acceptance.json`. `git diff-tree` must prove that this commit changes exactly one path: the first addition of that JSON. The record names the parent implementation commit, exact Artifact A commit, scanner/test blob IDs and SHA-256 values, baseline/migration/build manifest blob IDs and SHA-256 values, stage-machine digest, implementation-review report digests, and the allowed later mutable stage path. Every controlled blob is read from the parent Git tree, never from the acceptance/current tree. The acceptance commit itself receives an independent scoped review.
+1. `B0_IMPLEMENTATION` descends from exact `B0_REFRESH_BASE_COMMIT`, creates the scanner, current-main admission/baseline/migration/build manifests and green self/stage tests, and is independently reviewed at one exact commit while live main still equals the admitted SHA.
+2. `B0_ACCEPTANCE` is a one-parent child of the exact reviewed `B0_IMPLEMENTATION` commit and first adds `organization-identity-writer-acceptance.json`. `git diff-tree` must prove that this commit changes exactly one path: the first addition of that JSON. The record names the parent implementation commit, exact Artifact A commit, admitted live-main SHA, refresh merge/parents, scanner/test blob IDs and SHA-256 values, current-main admission/baseline/migration/build manifest blob IDs and SHA-256 values, stage-machine digest, implementation-review report digests, and the allowed later mutable stage path. Every controlled blob is read from the parent Git tree, never from the acceptance/current tree. The acceptance commit itself receives an independent scoped review while live main remains unchanged.
 
 The acceptance commit cannot attest its own review. After its scoped review, B0 stops at `LOCAL_ACCEPTANCE_REVIEWED`. Starting B1 requires separate user authorizations to push the exact branch head, open/update the exact B0 PR, and merge it with a GitHub merge commit that preserves the reviewed `B0_IMPLEMENTATION` and `B0_ACCEPTANCE` commits. Squash, rebase, force-push, and history rewriting are forbidden for this anchor.
+
+If protected main no longer equals the admitted live-main SHA at the start of acceptance review or merge authorization, the acceptance sequence is invalid and cannot be merged; repeat the complete current-main admission/implementation/review/acceptance sequence on a new head.
 
 The non-self-referential trust root is protected GitHub `main` plus a controller-owned root-only readback receipt created only after the authorized merge:
 
@@ -383,9 +447,9 @@ The scanner may verify consistency against an externally fixed acceptance SHA; i
 
 Every B1-B6 run reads authority values from the externally fixed acceptance Git object with `git show`. Current working-tree acceptance bytes, scanner derivation rules, baseline/migration/build manifests, native-extractor pin, and test implementation must equal their accepted parent-tree blobs. Editing and regenerating any of them is drift before current-tree recomputation occurs.
 
-On every run, the accepted scanner directly re-derives the current closure and also derives the Artifact A closure from exact Git object `2400bac28796bae44294114edc99eaccb1bd65b3`. Only the closed stage removals are permitted. A same-commit source change plus regenerated manifest cannot become clean because protected-main ancestry, accepted parent-tree blobs, and the Artifact A Git preimage remain immutable comparison subjects.
+On every run, the accepted scanner directly re-derives the current closure from exact admitted `B0_REFRESH_BASE_COMMIT`, verifies its live-main/merge parents from the accepted current-main admission manifest, and also derives the Artifact A Identity authority closure from exact Git object `2400bac28796bae44294114edc99eaccb1bd65b3`. Only the closed stage removals are permitted. A same-commit source change plus regenerated manifest cannot become clean because protected-main ancestry, accepted parent-tree blobs, the admitted refresh subject, and the Artifact A Git preimage remain immutable comparison subjects.
 
-### 9.4 Drift rule during Artifact B
+### 10.4 Drift rule during Artifact B
 
 From B0 through B6:
 
@@ -400,7 +464,7 @@ B2/B4/B4M may change their caller files, but the normalized hashes are scoped to
 
 This transition freeze, rather than literal SQL semantics, blocks new runtime concatenation, `U&` identifiers, `format('%I', ...)`, side-effecting raw function calls, imported raw binders, and structural fragments during Artifact B.
 
-## 10. Parameter values versus SQL structure
+## 11. Parameter values versus SQL structure
 
 One interpolation classifier applies equally to direct Prisma raw tags and `Prisma.sql` tags.
 
@@ -431,7 +495,7 @@ tx.$executeRaw`DELETE FROM ${Prisma.raw("identity_link")}`;
 
 which is `RAW_STRUCTURE_AMBIGUOUS` plus baseline drift, never a parameterized safe call.
 
-## 11. Secondary literal-mention detector
+## 12. Secondary literal-mention detector
 
 The literal detector performs a bounded, ASCII-case-insensitive substring search for `identity_link` across every statically available raw template segment, string, nested finite `Prisma.Sql`, comment, quote, dollar body, cast text, and procedural body.
 
@@ -439,7 +503,7 @@ It intentionally has no identifier-boundary claim. It may conservatively flag lo
 
 Absence of the substring proves nothing about dynamic SQL or semantic table effects. `U&` identifiers, runtime concatenation, `format`, and side-effecting functions are controlled by the frozen raw/migration authority surfaces, not by this detector.
 
-## 12. Resource bounds
+## 13. Resource bounds
 
 Each project scan uses closed project-total and per-resolution budgets:
 
@@ -465,11 +529,11 @@ The B0 implementation measures and records exact Artifact A counts using the rea
 
 Budget exhaustion is `SCAN_BUDGET_EXHAUSTED` and exit 1. A TypeScript-program, filesystem, configuration, manifest-schema, or unexpected scanner failure is normalized to one closed integrity code and exit 2. Neither can yield a clean inventory.
 
-## 13. Migration and database-function authority manifest
+## 14. Migration and database-function authority manifest
 
-`organization-identity-migration-authority.json` binds the complete Artifact A migration directory inventory for Artifact B:
+`organization-identity-migration-authority.json` binds the complete admitted `B0_REFRESH_BASE_COMMIT` migration directory inventory for Artifact B while separately preserving the exact Artifact A Identity authority:
 
-- every migration directory name, migration.sql SHA-256, and last-change commit;
+- every refreshed migration directory name, migration.sql SHA-256, last-change commit, and current-main delta disposition;
 - the exact resolver migration and rejected/superseded checksum set;
 - exact public/private Organization Identity function signatures, owners, languages, volatility/security, search paths, proconfig, ACLs, and function-definition digests;
 - exact `app_user`/PUBLIC table- and column-privilege observations relevant to `identity_link`;
@@ -498,9 +562,9 @@ node --test \
 
 Any migration addition, removal, checksum change, last-change drift, relevant function/ACL digest drift, current manifest edit, or mismatch with the accepted first-add Git blob causes `MIGRATION_AUTHORITY_DRIFT`. Artifact B contains no migration task, so such drift is HOLD pending a separately reviewed current-main refresh. The scanner does not infer semantic non-writing from partial SQL grammar and never edits migration bytes or `_prisma_migrations`.
 
-This complete directory freeze ensures a future second migration-installed writer cannot appear while the prerequisite remains green merely because an old historical-stage test did not include it.
+This complete refreshed-directory freeze ensures a current-main or future second migration-installed writer cannot appear while the prerequisite remains green merely because an old historical-stage test did not include it.
 
-## 14. Stage matrix and test/CI behavior
+## 15. Stage matrix and test/CI behavior
 
 Default scanner tests and stage verification are always green when the current stage has the exact expected inventory. There is no permanently failing test in the default suite.
 
@@ -523,7 +587,7 @@ The immutable Artifact A baseline manifest and receipt preserve the original exa
 
 The explicit live-zero command is expected to exit 1 through B4 and is recorded as a diagnostic receipt, not run as a default success gate. It must exit 0 at B4M and later.
 
-## 15. Governance wiring and runtime exclusion
+## 16. Governance wiring and runtime exclusion
 
 B0 adds named root commands:
 
@@ -541,7 +605,7 @@ B4M changes the stage to zero. B5 adds `governance:identity-writers:zero` as a m
 
 Runtime-artifact tests prove the governance script, tests, and manifests are absent from API/Worker compiled output, release artifact manifests, and OCI files. `scripts/` naming alone is not accepted as proof.
 
-## 16. Artifact B caller sequence
+## 17. Artifact B caller sequence
 
 The v2 branch ends after the independently reviewed B0 acceptance PR is merged and protected-main readback is anchored. B1 starts from that exact protected-main merge commit in:
 
@@ -582,9 +646,9 @@ conflict       terminal conflict; zero contribution
 
 The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not final database authority, retained migration approval, deployment, RuntimeEvidence, PILOT, or GA.
 
-## 17. Test and independent-review requirements
+## 18. Test and independent-review requirements
 
-### 17.1 Delegate fixtures
+### 18.1 Delegate fixtures
 
 - all eight closed read operations;
 - all nine current write operations, including `createManyAndReturn` and `updateManyAndReturn`;
@@ -595,7 +659,7 @@ The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not f
 - `any`, `unknown`, generic, union, extension, and proxy-shaped origins;
 - Prisma-version/generated/native-extractor drift.
 
-### 17.2 Raw capability fixtures
+### 18.2 Raw capability fixtures
 
 - all four raw methods in tag/call/extracted/bound/wrapper forms;
 - direct tags and `Prisma.sql` with ordinary bound values;
@@ -607,7 +671,7 @@ The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not f
 - baseline addition/removal/hash/call-graph drift;
 - every shared budget and cycle.
 
-### 17.3 Build, filesystem, redaction, and manifest fixtures
+### 18.3 Build, filesystem, redaction, and manifest fixtures
 
 - config, entrypoint, Docker, extension, generated-source, Prisma-version, and extractor drift;
 - internal/external symlink, special file, realpath escape, unsupported extension, duplicate/case-collision path, pre/post TOCTOU;
@@ -619,7 +683,7 @@ The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not f
 
 Expectations are literal, hand-derived, exercise the real scanner, and name the mutation they catch. The independent reviewer must add counterexamples not copied from the implementer report.
 
-## 18. Security, privacy, rollback, and external boundaries
+## 19. Security, privacy, rollback, and external boundaries
 
 - The scanner reads only admitted repository files and never reads `.env`, credentials, customer data, runtime payloads, prompts, ignored caches, or unrelated worktrees.
 - Findings and error output are metadata-only under the closed schemas above.
@@ -629,7 +693,7 @@ Expectations are literal, hand-derived, exercise the real scanner, and name the 
 - Artifact C remains separately authorized after Artifact B deployment, old-worker drain, and rollback-floor proof; rollback never restores ambient INSERT.
 - This spec does not authorize push, PR creation/update, merge, retained migration, database mutation, deployment, restart, provider/credential action, remote branch action, PR #407 closure, or worktree deletion.
 
-## 19. Completion gates
+## 20. Completion gates
 
 The written spec may advance to implementation planning only after:
 
@@ -638,6 +702,8 @@ The written spec may advance to implementation planning only after:
 
 The later implementation may advance from B0 to B1 only after:
 
+- exact live protected main is integrated through the independently reviewed current-main admission merge and remains unchanged through B0 acceptance/merge authorization;
+- the admitted refresh commit retains exact live main and Artifact A as ancestors, with every build/raw/migration/schema/governance/caller delta classified;
 - build/raw/migration baselines are complete and independently reviewed;
 - the separate B0 acceptance first-add commit and its parent implementation commit are independently reviewed, reachable, and byte-exact;
 - the exact B0 PR is merged to protected `main` with a history-preserving merge commit under separate authorization;
