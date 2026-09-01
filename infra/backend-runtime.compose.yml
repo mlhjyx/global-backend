@@ -16,6 +16,7 @@ x-backend-runtime: &backend-runtime
   profiles: [managed-runtime]
   image: ${GLOBAL_BACKEND_IMAGE:?set GLOBAL_BACKEND_IMAGE to name@sha256:digest}
   user: "10001:10001"
+  init: true
   env_file:
     - .secrets/backend-runtime.env
   environment: *backend-environment

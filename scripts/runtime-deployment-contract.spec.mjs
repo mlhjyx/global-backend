@@ -389,12 +389,40 @@ test('development API and Worker use one immutable image reference and wait for 
     assert.match(workerService, new RegExp(`${name}: \\$\\{${name}`));
     assert.doesNotMatch(apiService, new RegExp(`${name}:`));
   }
+  for (const name of [
+    'MINIO_ROOT_USER',
+    'MINIO_ROOT_PASSWORD',
+    'MINIO_KMS_SECRET_KEY',
+    'GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY',
+    'GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY',
+  ]) {
+    assert.doesNotMatch(compose, new RegExp(`${name}:`));
+  }
+  const apiService = compose.slice(
+    compose.indexOf('\n  api:'),
+    compose.indexOf('\n  worker:'),
+  );
+  const workerService = compose.slice(compose.indexOf('\n  worker:'));
+  const serviceEnvFiles = (section) =>
+    [...section.matchAll(/^\s+- (\.secrets\/[A-Za-z0-9._-]+\.env)$/gm)].map(
+      (match) => match[1],
+    );
+  assert.deepEqual(serviceEnvFiles(apiService), [
+    '.secrets/backend-runtime.env',
+    '.secrets/backend-api-runtime.env',
+  ]);
+  assert.deepEqual(serviceEnvFiles(workerService), [
+    '.secrets/backend-runtime.env',
+    '.secrets/backend-worker-runtime.env',
+  ]);
   assert.doesNotMatch(
     compose,
     /GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:\s+[^$\n]/,
   );
   assert.doesNotMatch(compose, /build:/);
   assert.doesNotMatch(compose, /node dist\//);
+  assert.match(compose, /x-backend-runtime:[\s\S]*\n  init: true\n/);
+  assert.equal(compose.match(/\n  init: true\n/g)?.length, 1);
   assert.match(compose, /pids_limit: 256/);
   assert.match(compose, /mem_limit: \$\{GLOBAL_BACKEND_MEMORY_LIMIT:-4g\}/);
   assert.match(compose, /cpus: \$\{GLOBAL_BACKEND_CPU_LIMIT:-2\.0\}/);
@@ -438,15 +466,76 @@ test('runtime lease principals are provisioned without embedded credentials and 
 });
 
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
-  const [api, worker] = await Promise.all([
+  const [api, worker, readme] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),
     repositoryFile('infra/systemd/global-worker.service'),
+    repositoryFile('infra/systemd/README.md'),
   ]);
   for (const unit of [api, worker]) {
     assert.doesNotMatch(unit, /node\s+dist\//);
     assert.match(unit, /docker compose/);
     assert.match(unit, /backend-runtime\.compose\.yml/);
+    assert.equal(
+      unit.match(
+        /--env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env/g,
+      )?.length,
+      3,
+    );
+    assert.equal(
+      unit.match(
+        /--env-file \/global\/backend\/\.secrets\/backend-runtime\.env/g,
+      )?.length,
+      3,
+    );
+    assert.doesNotMatch(unit, /EnvironmentFile=.*minio-bootstrap\.env/);
+    for (const directive of ['ExecStartPre', 'ExecStart', 'ExecStop']) {
+      const line = unit
+        .split('\n')
+        .find((candidate) => candidate.startsWith(`${directive}=`));
+      assert.ok(line);
+      assert.match(
+        line,
+        /docker compose --env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env --env-file \/global\/backend\/\.secrets\/backend-runtime\.env/,
+      );
+    }
   }
+  assert.match(
+    readme,
+    /docker compose \\\n+  --env-file \/global\/backend\/\.secrets\/minio-bootstrap\.env \\\n+  --env-file \/global\/backend\/\.secrets\/backend-runtime\.env/,
+  );
+  assert.match(readme, /http:\/\/127\.0\.0\.1:3000\/api\/v1\/health\/build/);
+  assert.match(readme, /http:\/\/127\.0\.0\.1:3000\/api\/v1\/health\/ready/);
+});
+
+test('GrowthOS reaches the loopback backend only through an explicit Unix socket relay', async () => {
+  const [socket, service, readme] = await Promise.all([
+    repositoryFile('infra/systemd/global-backend-growthos-relay.socket'),
+    repositoryFile('infra/systemd/global-backend-growthos-relay.service'),
+    repositoryFile('infra/systemd/README.md'),
+  ]);
+  assert.match(
+    socket,
+    /ListenStream=\/run\/global-backend-growthos\/backend\.sock/,
+  );
+  assert.deepEqual(
+    [...socket.matchAll(/^ListenStream=(.+)$/gm)].map((match) => match[1]),
+    ['/run/global-backend-growthos/backend.sock'],
+  );
+  assert.match(socket, /SocketGroup=global-backend-growthos/);
+  assert.match(socket, /SocketMode=0660/);
+  assert.match(socket, /DirectoryMode=0711/);
+  assert.match(socket, /RemoveOnStop=true/);
+  assert.match(service, /Requires=global-api\.service/);
+  assert.match(service, /After=global-api\.service/);
+  assert.match(
+    service,
+    /ExecStart=\/usr\/lib\/systemd\/systemd-socket-proxyd 127\.0\.0\.1:3000/,
+  );
+  assert.match(service, /RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6/);
+  assert.doesNotMatch(service, /0\.0\.0\.0|172\.|host\.docker\.internal/);
+  assert.match(readme, /global-backend-growthos-relay\.socket/);
+  assert.match(readme, /global-backend-growthos/);
+  assert.match(readme, /AF_UNIX/);
 });
 
 function assertGhcrPublicationContract(workflow) {
