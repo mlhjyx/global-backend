@@ -9,11 +9,11 @@
 
 ## 1. 分类
 
-| 位置                               | 分类                           | 可证明                                                                            | 不可证明                                                         |
-| ---------------------------------- | ------------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE` | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance                | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
-| [`site-builder/`](site-builder/)   | `HISTORICAL / FROZEN_EVIDENCE` | M1-f/M1-g 的 manifest、fee card、decision card、stopped run 与历史执行 provenance | 当前授权、当前 runtime、自动 promotion、生产部署或可合并         |
-| `runtime/`（仅在有记录时创建）     | `CURRENT` 或 `HISTORICAL`      | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定 | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
+| 位置                               | 分类                                                                                    | 可证明                                                                            | 不可证明                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE`                                                          | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance                | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
+| [`site-builder/`](site-builder/)   | `HISTORICAL / FROZEN_EVIDENCE`，其中显式 successor readback 由对应 RuntimeEvidence 限定 | M1-f/M1-g 历史 provenance；2026-09-01 development runtime readback 的脱敏详细事实 | 超出 RuntimeEvidence 窗口的当前性、Pilot/GA、模型质量或公开发布  |
+| `runtime/`（仅在有记录时创建）     | `CURRENT` 或 `HISTORICAL`                                                               | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定 | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
 
 现有 model-routing 和 Site Builder 文件不会因被索引而升级为 current。判断当前运行证据只运行：
 
@@ -35,7 +35,7 @@ RuntimeEvidence 文件必须位于 `docs/evidence/runtime/`、使用 [RuntimeEvi
 
 ## 3. Release 与决策边界
 
-真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`，并由生成器产出同名 Markdown。当前目录没有 RuntimeEvidence，`docs/releases/` 也不存在；因此当前没有可晋级的 release。
+真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`。当前已有一个 development-only `CANDIDATE` 与 fresh RuntimeEvidence；其 external provenance、独立 reviewer 与 Pilot/GA 用户授权均未成立，因此不能晋级。
 
 Release Bundle 必须分别引用：
 
@@ -55,6 +55,7 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 
 ## 5. 常用索引
 
+- Production Parity development readback：[详细脱敏 receipt](site-builder/production-parity-development-runtime-readback-20260901.json)、[确定性产品路径 RuntimeEvidence](runtime/site-builder-deterministic-product-path-development-20260901.json)、[UNKNOWN containment RuntimeEvidence](runtime/site-builder-unknown-settlement-containment-development-20260901.json)与 [development CANDIDATE Release Bundle](../releases/site-builder-production-parity-development-20260901.release.json)。确定性 Intake/Release 通过；真实模型调用只证明 `UNKNOWN` containment 与 request-bound reconciliation，不证明有效模型输出、质量、Pilot 或 GA。
 - BrandProfile 最终历史证据说明：[`model1-brand-profile-20260719-v20/README.md`](model-routing/model1-brand-profile-20260719-v20/README.md)
 - design_spec manifest 准备决策卡：[`m1-g-design-spec-evaluation-manifest-prep-decision-card.md`](site-builder/m1-g-design-spec-evaluation-manifest-prep-decision-card.md)
 - M1-g 阶段收口基线：[`m1-g-stage-closeout-baseline.json`](site-builder/m1-g-stage-closeout-baseline.json)

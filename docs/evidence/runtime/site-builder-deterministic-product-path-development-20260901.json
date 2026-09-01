@@ -1,0 +1,12 @@
+{
+  "schema_version": "runtime-evidence/v1",
+  "evidence_id": "site-builder-deterministic-product-path-development-20260901",
+  "commit": "da2f7aebafe87de3a5286d13e9d77864464dff7e",
+  "environment": "development",
+  "verified_at": "2026-09-01T18:33:25.000Z",
+  "valid_until": "2026-09-02T17:33:25.000Z",
+  "evidence_kind": "deterministic_product_path",
+  "result": "PASS",
+  "artifact_digest": "sha256:169540c72f9c0bd3c020f8531093126361c2db55e42f34851d074c079c565da3",
+  "source": "docs/evidence/site-builder/production-parity-development-runtime-readback-20260901.json"
+}
