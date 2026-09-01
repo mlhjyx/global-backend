@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { resolve } from "node:path";
-import { NativeConnection, Worker } from "@temporalio/worker";
+import { NativeConnection, Runtime, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
@@ -79,7 +79,11 @@ import {
   checkRedisReadiness,
   rendererRuntimeIdentity,
 } from "../runtime/managed-dependency-readiness";
-import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
+import {
+  createIdempotentWorkerShutdown,
+  startWorkerProcessSignalCoordinator,
+  startWorkerLeaseHeartbeat,
+} from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import {
   selectWorkerDependencyAdmissionBeforeAuthorityCutover,
@@ -111,6 +115,7 @@ async function holdWorkerNotReady(
  * directly — no Nest bootstrap — so it never starts HTTP or the relay.
  */
 async function main(): Promise<void> {
+  Runtime.install({ shutdownSignals: [] });
   const runtimeSettings = resolveRuntimeSettings(process.env);
   const releaseIdentity = await loadRuntimeReleaseIdentity({
     mode: runtimeSettings.mode,
@@ -152,12 +157,24 @@ async function main(): Promise<void> {
   const runtimeLeases = new RuntimeProcessLeaseService(runtimeLeaseStore, {
     identity: releaseIdentity,
   });
+  const controlledSignals = startWorkerProcessSignalCoordinator({
+    leases: runtimeLeases,
+    taskQueue: UNDERSTANDING_TASK_QUEUE,
+    onDrainLeaseFailure: () =>
+      console.error(
+        "[worker] draining lease unavailable; process exit continues fail-closed",
+      ),
+    onEarlyCleanup: async () => {
+      await runtimeTelemetry.shutdown().catch(() => undefined);
+      await runtimeLeaseStore.onApplicationShutdown().catch(() => undefined);
+      await prisma.$disconnect().catch(() => undefined);
+    },
+    onEarlyExit: (signal) => {
+      process.kill(process.pid, signal);
+    },
+  });
   try {
-    await runtimeLeases.heartbeat(
-      "WORKER",
-      "STARTING",
-      UNDERSTANDING_TASK_QUEUE,
-    );
+    await controlledSignals.registered;
   } catch {
     await runtimeTelemetry.shutdown();
     await holdWorkerNotReady("RUNTIME_PROCESS_LEASE_PUBLISH_UNAVAILABLE");
@@ -482,9 +499,14 @@ async function main(): Promise<void> {
     `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
   );
   clearInterval(startingHeartbeat);
+  const workerShutdown = createIdempotentWorkerShutdown(worker, () =>
+    console.error(
+      "[worker] duplicate or invalid shutdown request was contained",
+    ),
+  );
   const readyHeartbeat = await startWorkerLeaseHeartbeat({
     leases: runtimeLeases,
-    worker,
+    worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     onLeaseLost: () =>
       console.error(
@@ -517,7 +539,7 @@ async function main(): Promise<void> {
       });
     },
     leases: runtimeLeases,
-    worker,
+    worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     onBlocked: (code) =>
       console.error(`[worker] dependency became unavailable: ${code}; polling is shutting down`),
@@ -526,9 +548,19 @@ async function main(): Promise<void> {
     readyHeartbeat.stop();
     await holdPlatformNotReady("WORKER_DEPENDENCY_UNAVAILABLE");
   }
+  controlledSignals.attach({
+    shutdown: workerShutdown,
+    stopHeartbeats: () => {
+      dependencyHeartbeat.stop();
+      readyHeartbeat.stop();
+    },
+  });
+  const runPromise = worker.run();
+  workerShutdown.markRunning();
   try {
-    await worker.run();
+    await runPromise;
   } finally {
+    await controlledSignals.stop();
     dependencyHeartbeat.stop();
     readyHeartbeat.stop();
     await runtimeLeases
@@ -536,6 +568,7 @@ async function main(): Promise<void> {
       .catch(() => undefined);
     await runtimeTelemetry.shutdown();
     personalArtifactCleanupRuntime.destroy();
+    await connection.close().catch(() => undefined);
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeLeaseStore.onApplicationShutdown();

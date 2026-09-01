@@ -830,6 +830,9 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
       "STOPPED",
       null,
     );
+    const heartbeatCount = leases.heartbeat.mock.calls.length;
+    await expect(service.reconnect()).resolves.toBe(false);
+    expect(leases.heartbeat).toHaveBeenCalledTimes(heartbeatCount);
     vi.useRealTimers();
   });
 
@@ -841,22 +844,125 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
       outboxEvent: { findMany: vi.fn(async () => []) },
     };
     const leases = { heartbeat: vi.fn(async () => undefined) };
-    const service = new (OutboxRelayService as any)(
+    const service = new OutboxRelayService(
       makeTemporal(),
-      db,
+      db as never,
       vi.fn(),
-      leases,
+      leases as never,
     );
     vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
 
     await service.onModuleInit();
-    await service.managedTick();
+    await vi.advanceTimersByTimeAsync(2_000);
 
     expect(leases.heartbeat).toHaveBeenCalledTimes(3);
     expect(leases.heartbeat).toHaveBeenNthCalledWith(1, "OUTBOX_RELAY", "STARTING", null);
     expect(leases.heartbeat).toHaveBeenNthCalledWith(2, "OUTBOX_RELAY", "READY", null);
     expect(leases.heartbeat).toHaveBeenNthCalledWith(3, "OUTBOX_RELAY", "READY", null);
     await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
+  it("terminalizes a registered relay after a transient heartbeat closes readiness", async () => {
+    vi.useFakeTimers();
+    const db = {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+      outboxEvent: { findMany: vi.fn(async () => []) },
+    };
+    const leases = {
+      heartbeat: vi
+        .fn<() => Promise<void>>()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("transient lease writer failure"))
+        .mockResolvedValueOnce(undefined),
+    };
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      db as never,
+      vi.fn(),
+      leases as never,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+
+    await service.onModuleInit();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(service.getReadiness()).toEqual({
+      status: "not_ready",
+      code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+    });
+
+    await service.onModuleDestroy();
+
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(
+      4,
+      "OUTBOX_RELAY",
+      "STOPPED",
+      null,
+    );
+    vi.useRealTimers();
+  });
+
+  it("waits for an in-flight managed heartbeat before publishing STOPPED", async () => {
+    vi.useFakeTimers();
+    let releaseReady!: () => void;
+    const readyBlocked = new Promise<void>((resolve) => {
+      releaseReady = resolve;
+    });
+    const events: string[] = [];
+    const heartbeat = vi.fn(async (_role: string, state: string) => {
+      events.push(`start:${state}`);
+      if (state === "READY" && heartbeat.mock.calls.length === 3) {
+        await readyBlocked;
+      }
+      events.push(`end:${state}`);
+    });
+    const service = new OutboxRelayService(
+      makeTemporal(),
+      {
+        $connect: vi.fn(async () => undefined),
+        $disconnect: vi.fn(async () => undefined),
+        outboxEvent: { findMany: vi.fn(async () => []) },
+      } as never,
+      vi.fn(),
+      { heartbeat } as never,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+    const tick = vi.spyOn(service, "tick");
+    await service.onModuleInit();
+
+    vi.advanceTimersByTime(2_000);
+    await Promise.resolve();
+    const scheduler = service as unknown as {
+      scheduleManagedTick(): Promise<void>;
+    };
+    const concurrentTick = scheduler.scheduleManagedTick();
+    const shutdownPromise = service
+      .onModuleDestroy()
+      .then(() => events.push("shutdown-complete"));
+    await Promise.resolve();
+
+    expect(service.getReadiness()).toEqual({
+      status: "not_ready",
+      code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+    });
+    expect(events).not.toContain("start:STOPPED");
+    expect(events).not.toContain("shutdown-complete");
+    releaseReady();
+    await concurrentTick;
+    await shutdownPromise;
+
+    expect(events.slice(-4)).toEqual([
+      "end:READY",
+      "start:STOPPED",
+      "end:STOPPED",
+      "shutdown-complete",
+    ]);
+    expect(tick).not.toHaveBeenCalled();
+    const terminalCallCount = heartbeat.mock.calls.length;
+    await scheduler.scheduleManagedTick();
+    expect(heartbeat).toHaveBeenCalledTimes(terminalCallCount);
     vi.useRealTimers();
   });
 

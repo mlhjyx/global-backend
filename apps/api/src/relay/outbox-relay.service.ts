@@ -115,6 +115,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private expireCounter = 0;
   private initialized = false;
   private leaseStartingPublished = false;
+  private shuttingDown = false;
+  private managedTickInFlight?: Promise<void>;
   private readiness:
     | Readonly<{ status: "ready" }>
     | Readonly<{
@@ -145,7 +147,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     await this.reconnect();
     this.timer = setInterval(() => {
-      void this.managedTick();
+      void this.scheduleManagedTick();
     }, 2000);
     this.timer.unref();
   }
@@ -163,6 +165,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reconnect(): Promise<boolean> {
+    if (this.shuttingDown) return false;
     if (this.admission && !this.admission.current().admitted) {
       this.readiness = {
         status: "not_ready",
@@ -174,6 +177,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.db.$connect();
       if (!(await this.migrationCompatible())) return false;
+      if (this.shuttingDown) return false;
       if (!this.leaseStartingPublished) {
         await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
         this.leaseStartingPublished = true;
@@ -213,8 +217,14 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
     if (this.timer) clearInterval(this.timer);
-    if (this.readiness.status === "ready") {
+    this.readiness = {
+      status: "not_ready",
+      code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+    };
+    await this.managedTickInFlight?.catch(() => undefined);
+    if (this.leaseStartingPublished) {
       await this.leases
         ?.heartbeat("OUTBOX_RELAY", "STOPPED", null)
         .catch(() => this.logger.error("outbox relay stop heartbeat failed"));
@@ -226,9 +236,23 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private scheduleManagedTick(): Promise<void> {
+    if (this.shuttingDown) return Promise.resolve();
+    if (this.managedTickInFlight) return this.managedTickInFlight;
+    const pending = this.managedTick().finally(() => {
+      if (this.managedTickInFlight === pending) {
+        this.managedTickInFlight = undefined;
+      }
+    });
+    this.managedTickInFlight = pending;
+    return pending;
+  }
+
   private async managedTick(): Promise<void> {
+    if (this.shuttingDown) return;
     if (this.readiness.status !== "ready" && !(await this.reconnect())) return;
     if (!(await this.migrationCompatible())) return;
+    if (this.shuttingDown) return;
     try {
       await this.leases?.heartbeat("OUTBOX_RELAY", "READY", null);
     } catch {
@@ -241,6 +265,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
+    if (this.shuttingDown) return;
     await this.tick();
   }
 
