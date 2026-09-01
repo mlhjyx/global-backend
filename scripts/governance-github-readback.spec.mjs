@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 
 import {
   collectGitHubApprovalEvidence,
@@ -183,17 +183,32 @@ test('test-only fixed clock rejects nested and overlapping operations', async (t
 
 test('test-only fixed clock rejects invalid inputs with stable fixture codes', async () => {
   const { withFixedSystemTime } = await loadFixedClock();
-  const originalNow = Date.now;
+  const nonCanonicalInstant = () => withFixedSystemTime('2026-08-30T12:30:00Z', async () => {});
+  await assert.rejects(nonCanonicalInstant, { message: 'APPROVAL_TEST_CLOCK_INVALID' });
+  await assert.rejects(() => withFixedSystemTime(COLLECTOR_OBSERVED_AT, null), { message: 'APPROVAL_TEST_CLOCK_OPERATION_REQUIRED' });
+  for (const hostileInstant of [
+    Symbol('invalid fixed clock'),
+    { toString: () => { throw new Error('HOSTILE_CLOCK_COERCION'); } },
+  ]) {
+    await assert.rejects(() => withFixedSystemTime(hostileInstant, async () => {}), {
+      message: 'APPROVAL_TEST_CLOCK_INVALID',
+    });
+  }
+});
 
-  await assert.rejects(
-    () => withFixedSystemTime('2026-08-30T12:30:00Z', async () => {}),
-    { message: 'APPROVAL_TEST_CLOCK_INVALID' },
-  );
-  await assert.rejects(
-    () => withFixedSystemTime(COLLECTOR_OBSERVED_AT, null),
-    { message: 'APPROVAL_TEST_CLOCK_OPERATION_REQUIRED' },
-  );
-  assert.equal(Date.now, originalNow);
+test('test-only fixed clock releases its guard when Date.now cannot be mocked', async () => {
+  const { withFixedSystemTime } = await import(`${FIXED_CLOCK_MODULE}?install-failure-guard`);
+  const originalDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
+  assert.equal(originalDescriptor?.configurable, true);
+  Object.defineProperty(Date, 'now', { ...originalDescriptor, value: null });
+  try {
+    await assert.rejects(() => withFixedSystemTime(COLLECTOR_OBSERVED_AT, async () => {}));
+  } finally {
+    Object.defineProperty(Date, 'now', originalDescriptor);
+  }
+  const recovered = await withFixedSystemTime(COLLECTOR_OBSERVED_AT, async () => 'recovered');
+  assert.equal(recovered, 'recovered');
+  assert.equal(Date.now, originalDescriptor.value);
 });
 
 test('collects frozen bounded observed evidence without claiming complete approval', async () => {
@@ -527,36 +542,30 @@ test('requires the exact API version and injected fetch', () => {
   );
 });
 
-test('test-only fixed clock drives the production collector before its first remote await', async () => {
-  const { withFixedSystemTime } = await loadFixedClock();
-  const state = fixtureState();
-  const fixture = fixtureFetch(state);
-  let firstRemoteReadObserved = false;
-  const client = createGitHubReadbackClient({
-    fetch: async (...args) => {
-      if (!firstRemoteReadObserved) {
-        firstRemoteReadObserved = true;
-        assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
-      }
-      return fixture.fetch(...args);
-    },
-    token: AUTH_SENTINEL,
-    apiVersion: API_VERSION,
-  });
-
-  const evidence = await withFixedSystemTime(
-    COLLECTOR_OBSERVED_AT,
-    () => collectGitHubApprovalEvidence(
-      client,
-      request(),
-      limits(),
-      policy(),
-    ),
-  );
-
-  assert.equal(firstRemoteReadObserved, true);
-  assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
-  assert.equal(Object.isFrozen(client), true);
+test('production clock snapshots mutable Date.now before the first transport await', async () => {
+  const fixture = fixtureFetch(fixtureState());
+  let currentMillis = Date.parse(COLLECTOR_OBSERVED_AT);
+  let transportCalls = 0;
+  const tracker = mock.method(Date, 'now', () => currentMillis);
+  try {
+    const client = createGitHubReadbackClient({
+      fetch: async (...args) => {
+        transportCalls += 1;
+        if (transportCalls === 1) {
+          assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+          currentMillis = Date.parse('2026-08-30T13:30:00.000Z');
+        }
+        return fixture.fetch(...args);
+      },
+      token: AUTH_SENTINEL,
+      apiVersion: API_VERSION,
+    });
+    const evidence = await collectGitHubApprovalEvidence(client, request(), limits(), policy());
+    assert.ok(transportCalls > 0);
+    assert.equal(evidence.observed_at, COLLECTOR_OBSERVED_AT);
+  } finally {
+    tracker.mock.restore();
+  }
 });
 
 test('collector rejects caller attempts to inject clock data', async (t) => {
