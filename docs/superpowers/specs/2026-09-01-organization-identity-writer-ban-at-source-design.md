@@ -15,7 +15,7 @@ The design does **not** claim to parse arbitrary PostgreSQL or PL/pgSQL, infer e
 1. direct or possible Prisma `IdentityLink` delegate mutation is rejected;
 2. an exact current-main admission merge is independently reviewed before B0 implementation;
 3. the complete refreshed product raw-capability surface and its statically reachable wrapper ingress graph are reviewed and structurally frozen;
-4. Artifact B may not add or structurally change a raw SQL capability, raw wrapper ingress, migration, or database-function authority surface after that admitted baseline;
+4. except for the one §14.1 compatibility migration created during B0M before `B0_ACCEPTANCE`, Artifact B may not add or structurally change a raw SQL capability, raw wrapper ingress, migration, or database-function authority surface after that admitted baseline; B1–B6 add zero migrations;
 5. literal `identity_link` source mentions are a secondary conservative detector, not semantic SQL proof;
 6. the exact Artifact A migration/function/ACL inventory remains independently pinned inside the refreshed baseline;
 7. B2, B4, and B4M remove the three known delegate writers in a machine-checked `3 → 2 → 1 → 0` sequence;
@@ -335,6 +335,7 @@ apps/api/package.json
 package.json
 pnpm-workspace.yaml
 Dockerfile
+.dockerignore
 runtime-entrypoint.mjs
 scripts/verify-runtime-image.mjs
 pnpm-lock.yaml and packageManager pnpm@9.15.9 resolution
@@ -350,8 +351,11 @@ The build manifest binds:
 - supported source extensions `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, and `.mjs`;
 - the two explicitly copied runtime scripts;
 - Prisma version `6.19.3` and the reviewed model-operation inventory.
+- exact absence sentinels for root `.npmrc`, `.pnpmfile.cjs`, `patches/`, and every pnpm patch/hook/config path recognized by pinned pnpm 9.15.9; later appearance is build drift.
 
-The TypeScript project necessarily reads dependency declarations after `pnpm install --frozen-lockfile` and `pnpm --filter @global/db generate`. This is a separate, exact read-only dependency-declaration admission root, not permission to scan ignored caches generally. It permits only:
+The TypeScript project necessarily reads dependency declarations after `pnpm install --frozen-lockfile` and `pnpm --filter @global/db generate`. Dependency authority is split into two exact roots, neither of which grants arbitrary ignored-cache access.
+
+`DEPENDENCY_DECLARATION_ROOT` permits only:
 
 ```text
 TypeScript 5.9.3 lib/*.d.ts and package metadata
@@ -360,7 +364,18 @@ generated .prisma/client declaration/DMMF/schema artifacts
 transitive declaration files actually resolved by the admitted Program
 ```
 
-The scanner records logical package, lockfile integrity/resolution, generated schema hash, generated client/DMMF digest, normalized realpath and content digest for every declaration dependency. Expected pnpm symlinks are resolved and must terminate inside the exact workspace dependency graph; unexpected links, JS/native executable loads, postinstall drift, undeclared packages, arbitrary `node_modules` traversal, source maps and runtime code are forbidden. Dependency declarations are never emitted. A fresh v2/v3 worktree must run and verify Prisma generation before scanner execution.
+`TOOL_EXECUTION_ROOT` permits and commits only the exact bytes actually executed to derive authority:
+
+```text
+TypeScript 5.9.3 compiler JavaScript/package files loaded by the scanner
+Prisma 6.19.3 generator CLI/runtime JavaScript and exact engine/native binary
+files loaded by `pnpm --filter @global/db generate`
+pnpm 9.15.9/corepack launcher metadata needed to prove the frozen install/generate commands
+```
+
+For both roots the scanner records logical package, lockfile integrity/resolution, normalized realpath, exact loaded/executed file set, content digest, pre/post TOCTOU metadata, and generated-output binding. Expected pnpm symlinks are resolved and must terminate inside the exact workspace dependency graph. Undeclared packages, unrecorded JS/native execution, postinstall drift, arbitrary `node_modules` traversal, source maps, caches and runtime application code are forbidden. No dependency/tool bytes are emitted.
+
+A fresh v2/v3 worktree must run `pnpm install --frozen-lockfile`, `pnpm --filter @global/db generate`, and verify the declaration/tool roots and generated schema/client/DMMF digests before scanner execution. Mutation tests change `.dockerignore`, add each absence-sentinel path/patch, redirect a pnpm symlink, and alter TypeScript compiler JS or Prisma generator/engine bytes; every case is `BUILD_SURFACE_DRIFT` or `INTEGRITY_ERROR` without executing the changed tool.
 
 Any configuration, entrypoint, Docker copy, extension, generated-source, Prisma-version, or native-extractor operation drift produces `BUILD_SURFACE_DRIFT` and a non-clean result before source findings are evaluated.
 
@@ -599,13 +614,15 @@ B1 uses a new branch/worktree from the exact protected-main merge commit, not fr
 
 The ordinary `pull_request` Governance workflow is PR-controlled and is never an anchor authority. After B0 is merged, the protected-main copy of `.github/workflows/organization-identity-writer-anchor.yml` becomes the hosted trust entrypoint:
 
-- a separately authorized `workflow_dispatch`/protected-main run at the exact B0 merge SHA creates the initial hosted anchor receipt;
+- the protected-main `push` event produced by the authorized B0 merge creates the initial hosted anchor receipt at exact `GITHUB_SHA`; the merge authorization packet explicitly discloses this automatic base-owned workflow side effect;
 - B1-B6 use `pull_request_target`, whose workflow bytes come from protected base main;
 - the workflow checks out/executes only the exact accepted scanner and verifier blobs from protected main;
 - the PR head SHA/tree is fetched/read only as a Git object input and no PR script, package command, action, generated binary, or workflow byte is executed;
 - repository/controller variables are mapped only by the protected-base workflow and the scanner verifies the exact protected workflow blob, event type, base/ref, run/repository identity, accepted B0/review/ordered-parent values and initial hosted-anchor run receipt;
 - permissions are read-only except the minimum checks/status permission required to publish the closed result; no secret is exposed to PR code;
 - a PR-supplied workflow, environment variable, artifact, job output, package script, or similarly named check cannot satisfy the anchor context.
+
+The initial anchor does not rely on `workflow_dispatch` accepting a naked commit SHA. The protected-base workflow requires `event_name='push'`, `ref='refs/heads/main'`, `GITHUB_SHA` equal to the exact read-back B0 merge commit, and the protected-main workflow blob at that commit. If the initial push run is cancelled or fails, a separately authorized GitHub re-run of that same immutable workflow run/SHA may recover it; dispatching a later moving `main` ref, creating a temporary tag/branch, or substituting another run is not an allowed fallback. If exact run/SHA identity cannot be recovered, B1 remains HOLD pending a new spec.
 
 The accepted scanner first verifies its own/current controlled blobs against the parent-tree values, then proves the reviewed acceptance commit and protected workflow blob are anchored by the externally supplied protected-main SHA. Missing network/readback input, absent receipt, receipt-chain mismatch, wrong event/workflow/ref/repository/run identity, wrong merge method, non-ancestor history, or different accepted/review SHA is `INTEGRITY_ERROR`.
 
@@ -744,17 +761,54 @@ Before creation, current-main admission proves the name is absent and its timest
 
 The migration is DDL-only and changes no Prisma schema. It must:
 
-1. set transaction-local `lock_timeout` to at most `5s` and `statement_timeout` to at most `60s` before the first table lock;
-2. exact-preflight the existing table, old `discovery_company_materialization_outcome_shape_check` definition, owner, current rows, dependent functions/triggers and absence of the temporary constraint;
-3. add `discovery_company_materialization_outcome_shape_artifact_b_check` as `NOT VALID`, with the old predicate byte-semantically preserved except:
+1. as the first executable statements after transaction start, before any table/catalog lock or preflight scan, set and read back `0ms < lock_timeout <= 5s`, `0ms < statement_timeout <= 60s`, and `lock_timeout < statement_timeout`; zero, malformed, missing, over-limit, or wrong ordering is a static/disposable failure;
+2. exact-preflight the closed catalog receipt in §14.2 and absence of the temporary constraint;
+3. read `SHOW max_identifier_length`, require at least `63`, and statically prove every new name's UTF-8 octet length is within that bound;
+4. add exact 58-byte `discovery_company_materialization_outcome_artifact_b_check` as `NOT VALID`, with the old predicate byte-semantically preserved except:
    - add `identity_v2` to the `CANONICALIZED` match-rule set;
    - add `IDENTITY_CONFLICT` to the `NOT_CANONICALIZABLE` reason set;
-4. validate the new constraint completely before removing the old constraint;
-5. drop the old constraint and rename the validated new constraint to the exact old name in the same transaction;
-6. leave one final constraint, no temporary constraint, no data changes, no privilege/function/trigger changes, and no residue after failure;
-7. be idempotent only through Prisma migration ledger semantics—running `prisma migrate deploy` twice is allowed, but the SQL does not silently accept an unrecorded pre-existing final state.
+5. validate the new constraint completely before removing the old constraint;
+6. drop the old constraint with `RESTRICT` semantics and rename the validated new constraint to the exact old name in the same transaction;
+7. leave one final constraint, no temporary constraint, no data changes, no privilege/function/trigger changes, and no catalog residue after direct-SQL fault rollback;
+8. be idempotent only through successful Prisma migration-ledger semantics—running `prisma migrate deploy` twice is allowed, but the SQL does not silently accept an unrecorded pre-existing final state.
 
-The old constraint remains active while the broader new constraint validates, so existing writers remain protected. The final drop/rename requires a short bounded lock; production-size timing and retained deployment remain HOLD.
+The design deliberately keeps one PostgreSQL transaction for atomic catalog rollback. `ADD CHECK ... NOT VALID` acquires `ACCESS EXCLUSIVE`, and that lock remains held through the complete `VALIDATE`, old drop, rename and commit. The old constraint remains active while the broader new constraint validates, so there is no unprotected write window, but the validation scan occurs inside the retained `ACCESS EXCLUSIVE` window. Production-size timing, maintenance window, lock budget, failed retained-deploy recovery and retained deployment remain HOLD; disposable success cannot promote them.
+
+### 14.2 Closed catalog preimage and postimage
+
+The migration/test authority binds these exact source subjects:
+
+```text
+20260830130300 schema migration SHA-256
+  f5692086951541f9c49606c16d8bd27ae3e1ce453e53ada9cbb59c98347fe515
+
+20260830130400 function migration SHA-256
+  b7706a1903dfc12e75c786ab3f0e9682d64154be9edad89ae9d178e20a6b4833
+
+20260830130600 active-link compatibility migration SHA-256
+  0695319e648ce9938b419ae204ee0e279a54c74dbd850e70939ab8b6359a6b51
+
+old CHECK source segment SHA-256
+  b25fb48850d832fcb78625036f929096e4bf6115da4d5e1cea3076abddbbad6c
+
+expanded CHECK source segment SHA-256
+  128db73caf587ba6b5ccf823e73ac5c5c73a5f88eb8633dd25ac803c6e33561b
+```
+
+The source-segment digest starts at the exact `CONSTRAINT discovery_company_materialization_outcome_shape_check CHECK(` token and ends at its balanced closing parenthesis with LF bytes. The expanded segment differs only by the two approved literals.
+
+`organization-identity-materialization-outcome-compat.spec.mjs` defines an exact-key catalog receipt containing:
+
+- schema `public`, table `discovery_company_materialization_outcome`, expected owner `global`, `relkind='r'`, not partitioned, no inheritance/children;
+- old/final name `discovery_company_materialization_outcome_shape_check` and temporary name `discovery_company_materialization_outcome_artifact_b_check`;
+- `contype='c'`, `convalidated=true` for old/final, nondeferrable, initially immediate, local, inheritance count zero, not `NO INHERIT`;
+- old source digest and a hand-reviewed PostgreSQL 16 normalized `pg_get_constraintdef(...,true)` digest fixed in the RED/static fixture before migration GREEN;
+- exact sorted `pg_depend` semantic records and dependency-set digest, derived from the accepted old source/columns and independently reviewed rather than copied from arbitrary runtime state;
+- exact materialization validator trigger/function identities, owners, security/volatility/search-path/ACL and definition digests derived from the three pinned migrations above;
+- temporary constraint expected absent in preimage; final expected source/catalog/dependency digests; exact one final canonical name and zero temporary names in postimage;
+- row count/table size as readiness observations only, never as authority values.
+
+The disposable test first proves the accepted refreshed-main database matches this closed preimage. It never turns a runtime-observed drifted definition into the expected value. Any owner/relkind/partition/inheritance/flag/definition/dependency/function/trigger/ACL mismatch raises one fixed no-echo admission error before DDL.
 
 Static and disposable PostgreSQL 16 tests must prove:
 
@@ -762,10 +816,16 @@ Static and disposable PostgreSQL 16 tests must prove:
 - fresh database, exact refreshed-main upgrade, second deploy, catalog definitions and zero Prisma residual drift;
 - existing old values and new `identity_v2`/`IDENTITY_CONFLICT` values succeed only in their correct outcome shapes;
 - wrong outcome/value combinations still fail;
-- concurrent lock contention times out with complete transaction rollback and the old constraint intact;
-- injected failure after add, after validate, after old drop and before rename leaves no partial state;
-- no DML, no existing migration edit, no `_prisma_migrations` manipulation and no `prisma migrate resolve`;
+- two-connection contention where connection A holds an ADD-conflicting lock and connection B executes the exact candidate, proving bounded `lock_timeout`, full transaction rollback, old constraint OID/definition/validated state intact, temporary constraint absent, and no row/function/trigger/ACL/schema-file residue;
+- a test-only observation transform proves the migration transaction holds `ACCESS EXCLUSIVE` after ADD and through validation; no observation hook enters production migration bytes;
+- direct-SQL fault transforms after add, after validate, after old drop and before rename leave the complete catalog preimage and `_prisma_migrations` byte/row state unchanged;
+- successful Prisma deploy tests cover fresh full chain, exact refreshed-main upgrade, exact checksum/finished ledger row, identical fresh/upgrade final catalog, and second deploy `No pending migrations to apply`;
+- no DML, no existing migration edit, no Prisma schema change, and no `_prisma_migrations` manipulation in production migration bytes;
 - exact disposable resources are receipt-bound and cleaned separately.
+
+Fault/rollback tests execute a closed test-only transform of the exact reviewed migration bytes directly through `psql`, inserting `RAISE EXCEPTION` only after predefined markers. They do not use `prisma migrate deploy`, do not modify the production migration file, and therefore make no claim about Prisma failed-ledger recovery.
+
+Failed retained `prisma migrate deploy` recovery remains `HOLD / NOT_VERIFIED`. A future retained-deploy spec must separately choose and authorize either exact `migrate resolve --rolled-back` only after proving PostgreSQL schema returned to the complete accepted preimage, or another controlled executor/recovery contract. This spec does not authorize either. A successfully applied row with `finished_at IS NOT NULL` and `rolled_back_at IS NULL` is permanently immutable; it is never resolved away, and semantic rollback uses a new forward migration.
 
 B0 migration authority records the refreshed directory plus this one planned delta, its SHA-256, last-change commit, exact definition digest and independent database/security reviews. `B0_ACCEPTANCE` freezes the resulting complete migration inventory. B1–B6 add no migration and compare against the accepted B0 inventory.
 
@@ -884,13 +944,14 @@ The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not f
 
 ### 18.3 Build, filesystem, redaction, and manifest fixtures
 
-- config, entrypoint, Docker, extension, generated-source, Prisma-version, and extractor drift;
+- config, entrypoint, Dockerfile/`.dockerignore`, package-manager absence sentinel/patch/hook, extension, generated-source, Prisma-version, declaration-root, TypeScript compiler tool-root, Prisma generator/engine tool-root, and extractor drift;
 - internal/external symlink, special file, realpath escape, unsupported extension, duplicate/case-collision path, pre/post TOCTOU;
 - invalid manifests, duplicate records, wrong digests, absolute/`..` paths;
 - FS, TypeScript, resolver, budget, config, and unexpected exceptions containing credential-like and SQL text;
 - absence of those bytes, absolute roots, messages, causes, stacks, and diagnostics from stdout and stderr;
 - exact planned compatibility migration definition/lock/fault/catalog tests and rejection of every other migration addition/removal/checksum/function/ACL drift;
 - runtime artifact exclusion.
+- protected-main initial `push` run exact SHA/workflow-blob identity, same-run re-run recovery, moving-main dispatch rejection, and base-owned `pull_request_target` rejection of every PR-controlled executable/input substitute.
 
 Expectations are literal, hand-derived, exercise the real scanner, and name the mutation they catch. The independent reviewer must add counterexamples not copied from the implementer report.
 
