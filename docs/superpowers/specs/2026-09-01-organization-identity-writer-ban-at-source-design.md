@@ -69,6 +69,22 @@ node --test \
   packages/db/test/pinned-prisma-migration-stage.spec.mjs
 ```
 
+Current C-TX machine contract `20260830130300_discovery_company_materialization_schema` rejects two exact Artifact A/B values required by B4M:
+
+```text
+CANONICALIZED match_rule allowed today:
+  domain_exact | identifier_exact | name_country
+
+NOT_CANONICALIZABLE reason allowed today:
+  MISSING_NAME | NON_PRODUCT_PROVENANCE | COMPANY_IDENTITY_INVALID
+
+Required by Artifact A/B:
+  match_rule identity_v2
+  reason IDENTITY_CONFLICT
+```
+
+The existing active-link equality validator does not widen the table CHECK. B4M therefore requires one additive forward compatibility migration; source-only changes cannot make the current database contract accept these values.
+
 Live readback during implementation-plan self-review observed protected main at `8f3f615ea9d0494a55f67075c7eee0bb126b3386`, 35 commits after the `c998ca7f…` main already integrated into Artifact A. The live SHA is drift-prone and is not hardcoded as the future execution base. The observed delta includes `discovery.activities.ts`, runtime/governance files, Prisma schema, and two later migrations:
 
 ```text
@@ -276,11 +292,30 @@ docs/governance/organization-identity-artifact-a-acceptance.json
   Durable non-secret Artifact A head, migration, disposable/static gate and
   independent-review receipt identities/digests consumed by B0.
 
+packages/db/prisma/migrations/
+  20260902090000_organization_identity_materialization_outcome_compat/
+  migration.sql
+  The only Artifact B migration: additive DDL-only C-TX CHECK compatibility
+  for `identity_v2` and `IDENTITY_CONFLICT`; no DML or Prisma schema edit.
+
+packages/db/test/
+  organization-identity-materialization-outcome-compat.spec.mjs
+  Static exact-definition, ordering, timeout, no-DML and provenance tests.
+
+packages/db/test/
+  organization-identity-materialization-outcome-compat.disposable.spec.mjs
+  PostgreSQL 16 fresh/upgrade/catalog/lock/fault/rollback/second-deploy proof.
+
 package.json
   Named scanner self-test, stage verification and zero verification commands.
 
 scripts/governance-verify.mjs
   B0 self-test/stage integration and B5 live-zero integration.
+
+.github/workflows/organization-identity-writer-anchor.yml
+  Protected-main/base-owned post-merge and pull-request-target verifier. It
+  executes only accepted scanner bytes from protected main and treats PR Git
+  objects as data; it never checks out or executes PR-controlled code.
 ```
 
 The scanner and manifests are governed artifacts. They do not enter `apps/api/src`, API/Worker composition roots, compiled `apps/api/dist`, or the runtime OCI image.
@@ -294,11 +329,15 @@ Before reporting any inventory, the scanner verifies exact reviewed hashes and s
 ```text
 apps/api/tsconfig.json
 apps/api/tsconfig.build.json
+tsconfig.base.json
+apps/api/nest-cli.json
 apps/api/package.json
+package.json
+pnpm-workspace.yaml
 Dockerfile
 runtime-entrypoint.mjs
 scripts/verify-runtime-image.mjs
-pnpm-lock.yaml Prisma/@prisma/client resolution
+pnpm-lock.yaml and packageManager pnpm@9.15.9 resolution
 packages/code-intelligence/src/extractors/typescript.ts Prisma operation set
 ```
 
@@ -307,9 +346,21 @@ The build manifest binds:
 - API `start` entrypoint `dist/main.js`;
 - Worker entrypoint `dist/temporal/worker.js`;
 - TypeScript include/exclude behavior;
+- the complete `extends` chain, Nest compiler/source-root/assets configuration, workspace package roots, package manager/version and dependency-resolution inputs;
 - supported source extensions `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, and `.mjs`;
 - the two explicitly copied runtime scripts;
 - Prisma version `6.19.3` and the reviewed model-operation inventory.
+
+The TypeScript project necessarily reads dependency declarations after `pnpm install --frozen-lockfile` and `pnpm --filter @global/db generate`. This is a separate, exact read-only dependency-declaration admission root, not permission to scan ignored caches generally. It permits only:
+
+```text
+TypeScript 5.9.3 lib/*.d.ts and package metadata
+@prisma/client 6.19.3 declaration/package files
+generated .prisma/client declaration/DMMF/schema artifacts
+transitive declaration files actually resolved by the admitted Program
+```
+
+The scanner records logical package, lockfile integrity/resolution, generated schema hash, generated client/DMMF digest, normalized realpath and content digest for every declaration dependency. Expected pnpm symlinks are resolved and must terminate inside the exact workspace dependency graph; unexpected links, JS/native executable loads, postinstall drift, undeclared packages, arbitrary `node_modules` traversal, source maps and runtime code are forbidden. Dependency declarations are never emitted. A fresh v2/v3 worktree must run and verify Prisma generation before scanner execution.
 
 Any configuration, entrypoint, Docker copy, extension, generated-source, Prisma-version, or native-extractor operation drift produces `BUILD_SURFACE_DRIFT` and a non-clean result before source findings are evaluated.
 
@@ -460,7 +511,42 @@ The TypeScript project graph follows import/export aliases, direct arguments/par
   - `GOVERNED_IDENTITY_RESOLVER`
   - `TYPE_ONLY_CAPABILITY`
   - `FORBIDDEN_DYNAMIC_STRUCTURE`
-- reviewer/evidence receipt identifiers without source or SQL text.
+- one exact closed raw-disposition review receipt without source or SQL text.
+
+The baseline uses exact-key machine records rather than open `Record<string, number>` or arbitrary receipt IDs:
+
+```ts
+type WriterBaselineMeasurements = Readonly<{
+  sourceFiles: number;
+  astNodesMaximumPerFile: number;
+  projectSymbolCallEdges: number;
+  rawCapabilityRecords: number;
+  wrapperIngressRecords: number;
+  dependencyClosureMembers: number;
+  maximumResolutionDepth: number;
+  maximumAssignmentFanout: number;
+  maximumResolutionAlternatives: number;
+  maximumCandidateBytesPerRecord: number;
+  projectCommittedBytes: number;
+}>;
+
+type RawDispositionReviewReceipt = Readonly<{
+  schemaVersion: "organization-identity-raw-disposition-review/v1";
+  sourceSubjectCommit: string;
+  rawRecordCount: number;
+  rawRecordSetSha256: string;
+  dispositionSetSha256: string;
+  dependencyClosureSetSha256: string;
+  counterexampleSetSha256: string;
+  reportSha256: string;
+  reviewerClass: "INDEPENDENT_RAW_AUTHORITY_REVIEW";
+  critical: 0;
+  important: 0;
+  verdict: "PASS";
+}>;
+```
+
+The scanner requires the measurement keys exactly once and rejects unknown/missing/duplicate metrics. The raw review record set must equal the complete refreshed baseline set; every record has one closed disposition, and the independent reviewer/counterexample digests are recomputed before B0 acceptance. A same-named free-form receipt or partial record set is invalid.
 
 The initial B0 review must classify every current surface. A `FORBIDDEN_DYNAMIC_STRUCTURE` or unresolved surface blocks B0; it is not an allowlist entry.
 
@@ -509,7 +595,19 @@ The non-self-referential trust root is protected GitHub `main` plus a controller
 
 The `0700 root:root` receipt records the live GitHub main SHA, merge commit, exact reviewed acceptance commit SHA, acceptance-review report SHA-256, PR number/head/method, peeled ancestry proof, timestamp, and receipt-chain digest. It contains no source, SQL, secret, or credential values. Creation of this receipt and every remote action are future separate authorization gates; this spec does not authorize them.
 
-B1 uses a new branch/worktree from the exact protected-main merge commit, not from the pre-merge local v2 branch. Every B1-B6 local run requires the exact root-only receipt as a CLI input; every hosted run requires the GitHub event's protected base SHA plus exact accepted B0 SHA/review digest. The accepted scanner first verifies its own/current controlled blobs against the parent-tree values, then proves the reviewed acceptance commit is an ancestor of the externally supplied protected-main SHA. Missing network/readback input, absent receipt, receipt-chain mismatch, wrong merge method, non-ancestor history, or different accepted/review SHA is `INTEGRITY_ERROR`.
+B1 uses a new branch/worktree from the exact protected-main merge commit, not from the pre-merge local v2 branch. Every B1-B6 local run requires the exact root-only receipt as a CLI input.
+
+The ordinary `pull_request` Governance workflow is PR-controlled and is never an anchor authority. After B0 is merged, the protected-main copy of `.github/workflows/organization-identity-writer-anchor.yml` becomes the hosted trust entrypoint:
+
+- a separately authorized `workflow_dispatch`/protected-main run at the exact B0 merge SHA creates the initial hosted anchor receipt;
+- B1-B6 use `pull_request_target`, whose workflow bytes come from protected base main;
+- the workflow checks out/executes only the exact accepted scanner and verifier blobs from protected main;
+- the PR head SHA/tree is fetched/read only as a Git object input and no PR script, package command, action, generated binary, or workflow byte is executed;
+- repository/controller variables are mapped only by the protected-base workflow and the scanner verifies the exact protected workflow blob, event type, base/ref, run/repository identity, accepted B0/review/ordered-parent values and initial hosted-anchor run receipt;
+- permissions are read-only except the minimum checks/status permission required to publish the closed result; no secret is exposed to PR code;
+- a PR-supplied workflow, environment variable, artifact, job output, package script, or similarly named check cannot satisfy the anchor context.
+
+The accepted scanner first verifies its own/current controlled blobs against the parent-tree values, then proves the reviewed acceptance commit and protected workflow blob are anchored by the externally supplied protected-main SHA. Missing network/readback input, absent receipt, receipt-chain mismatch, wrong event/workflow/ref/repository/run identity, wrong merge method, non-ancestor history, or different accepted/review SHA is `INTEGRITY_ERROR`.
 
 The scanner may verify consistency against an externally fixed acceptance SHA; it never claims to infer “reviewed” or detect a replaced history from the current branch alone.
 
@@ -628,9 +726,50 @@ node --test \
   packages/db/test/pinned-prisma-migration-stage.spec.mjs
 ```
 
-Any migration addition, removal, checksum change, last-change drift, relevant function/ACL digest drift, current manifest edit, or mismatch with the accepted first-add Git blob causes `MIGRATION_AUTHORITY_DRIFT`. Artifact B contains no migration task, so such drift is HOLD pending a separately reviewed current-main refresh. The scanner does not infer semantic non-writing from partial SQL grammar and never edits migration bytes or `_prisma_migrations`.
+Any migration addition, removal, checksum change, last-change drift, relevant function/ACL digest drift, current manifest edit, or mismatch with the accepted first-add Git blob causes `MIGRATION_AUTHORITY_DRIFT`, except for the one exact spec-authorized compatibility migration below during B0 implementation. The scanner does not infer semantic non-writing from partial SQL grammar and never edits existing migration bytes or `_prisma_migrations`.
 
 This complete refreshed-directory freeze ensures a current-main or future second migration-installed writer cannot appear while the prerequisite remains green merely because an old historical-stage test did not include it.
+
+### 14.1 Exact additive C-TX compatibility migration
+
+The sole Artifact B migration path is:
+
+```text
+packages/db/prisma/migrations/
+20260902090000_organization_identity_materialization_outcome_compat/
+migration.sql
+```
+
+Before creation, current-main admission proves the name is absent and its timestamp is strictly later than the then-live maximum migration. If that fact drifts, stop for a spec amendment; do not rename opportunistically.
+
+The migration is DDL-only and changes no Prisma schema. It must:
+
+1. set transaction-local `lock_timeout` to at most `5s` and `statement_timeout` to at most `60s` before the first table lock;
+2. exact-preflight the existing table, old `discovery_company_materialization_outcome_shape_check` definition, owner, current rows, dependent functions/triggers and absence of the temporary constraint;
+3. add `discovery_company_materialization_outcome_shape_artifact_b_check` as `NOT VALID`, with the old predicate byte-semantically preserved except:
+   - add `identity_v2` to the `CANONICALIZED` match-rule set;
+   - add `IDENTITY_CONFLICT` to the `NOT_CANONICALIZABLE` reason set;
+4. validate the new constraint completely before removing the old constraint;
+5. drop the old constraint and rename the validated new constraint to the exact old name in the same transaction;
+6. leave one final constraint, no temporary constraint, no data changes, no privilege/function/trigger changes, and no residue after failure;
+7. be idempotent only through Prisma migration ledger semantics—running `prisma migrate deploy` twice is allowed, but the SQL does not silently accept an unrecorded pre-existing final state.
+
+The old constraint remains active while the broader new constraint validates, so existing writers remain protected. The final drop/rename requires a short bounded lock; production-size timing and retained deployment remain HOLD.
+
+Static and disposable PostgreSQL 16 tests must prove:
+
+- exact old→expanded predicate delta and no unrelated relaxation;
+- fresh database, exact refreshed-main upgrade, second deploy, catalog definitions and zero Prisma residual drift;
+- existing old values and new `identity_v2`/`IDENTITY_CONFLICT` values succeed only in their correct outcome shapes;
+- wrong outcome/value combinations still fail;
+- concurrent lock contention times out with complete transaction rollback and the old constraint intact;
+- injected failure after add, after validate, after old drop and before rename leaves no partial state;
+- no DML, no existing migration edit, no `_prisma_migrations` manipulation and no `prisma migrate resolve`;
+- exact disposable resources are receipt-bound and cleaned separately.
+
+B0 migration authority records the refreshed directory plus this one planned delta, its SHA-256, last-change commit, exact definition digest and independent database/security reviews. `B0_ACCEPTANCE` freezes the resulting complete migration inventory. B1–B6 add no migration and compare against the accepted B0 inventory.
+
+The migration file, disposable PostgreSQL creation/use/deletion, retained application and deployment are separate authorization gates. Spec/plan approval does not apply it to any database. Once applied to a retained database, rollback is a new forward correction; the migration is never edited or resolved away.
 
 ## 15. Stage matrix and test/CI behavior
 
@@ -667,6 +806,8 @@ governance:identity-writers:zero
 
 B0 wires the self-tests and current-stage command into the existing explicit governance test aggregator and `.github/workflows/governance.yml` path through `governance:verify`. Because the stage contract expects three findings at B0, governance remains green.
 
+That ordinary PR workflow is CI evidence only. It does not establish the external anchor. The separately reviewed `organization-identity-writer-anchor.yml` is inert as authority until its exact blob is merged into protected main. After the B0 merge it runs from protected main/base as specified in §10.3; B1 cannot begin until its initial exact-main run and root/GitHub readback are PASS. B1-B6 hosted anchor checks use only its base-owned `pull_request_target` execution and never trust a same-named PR-controlled job.
+
 B1/B3 advance only the stage value while retaining the same expected writer set; their RED product tests may change as specified. B2/B4 atomically change caller source plus the closed stage value and expected set. The stage JSON is the only mutable governance manifest in B1-B4; scanner, acceptance, raw/build/migration baselines and their derivation rules cannot change.
 
 B4M changes the stage to zero. B5 adds `governance:identity-writers:zero` as a mandatory `governance:verify` subgate and proves the existing governance workflow invokes it. A nonzero or exit-2 result fails CI.
@@ -685,7 +826,9 @@ worktree: /global/backend/.codex/worktrees/pr407-organization-identity-caller-cu
 The implementation plan written after spec confirmation must contain these tasks:
 
 ```text
-B0   build-surface/raw/migration baseline, scanner, exact-three stage gate
+B0R  current-main validator/audit/authorized refresh/admission review
+B0M  additive C-TX compatibility migration, static/disposable/review gates
+B0   build-surface/raw/accepted-migration baseline, scanner, exact-three stage
 B1   Temporal five-outcome/replay RED without writer-count change
 B2   Temporal resolver cutover; stage 3 → 2
 B3   TenantProjection five-outcome/chunk/replay RED without count change
@@ -746,7 +889,7 @@ The final Artifact B terminal state is `CUTOVER_READY_FOR_CONTRACT`. It is not f
 - invalid manifests, duplicate records, wrong digests, absolute/`..` paths;
 - FS, TypeScript, resolver, budget, config, and unexpected exceptions containing credential-like and SQL text;
 - absence of those bytes, absolute roots, messages, causes, stacks, and diagnostics from stdout and stderr;
-- migration addition/removal/checksum/function/ACL drift;
+- exact planned compatibility migration definition/lock/fault/catalog tests and rejection of every other migration addition/removal/checksum/function/ACL drift;
 - runtime artifact exclusion.
 
 Expectations are literal, hand-derived, exercise the real scanner, and name the mutation they catch. The independent reviewer must add counterexamples not copied from the implementer report.
@@ -757,7 +900,7 @@ Expectations are literal, hand-derived, exercise the real scanner, and name the 
 - Findings and error output are metadata-only under the closed schemas above.
 - No clean result authorizes SQL execution, migration application, provider dispatch, paid calls, deployment, or runtime claims.
 - The failed v1 branch remains preserved/read-only. V2 rollback before merge is branch abandonment, never reset of Artifact A or shared main.
-- Artifact B contains no migration. Any migration need is a design stop.
+- Artifact B contains exactly the one additive compatibility migration in §14.1. Any second migration, DML, Prisma schema change, existing migration edit, or authority expansion is a design stop.
 - Artifact C remains separately authorized after Artifact B deployment, old-worker drain, and rollback-floor proof; rollback never restores ambient INSERT.
 - This spec does not authorize push, PR creation/update, merge, retained migration, database mutation, deployment, restart, provider/credential action, remote branch action, PR #407 closure, or worktree deletion.
 
@@ -774,6 +917,7 @@ The later implementation may advance from B0 to B1 only after:
 - any required fetch and the exact local two-parent refresh merge were separately authorized after read-only audit;
 - the admitted refresh commit retains exact live main and Artifact A as ancestors, with every build/raw/migration/schema/governance/caller delta classified;
 - build/raw/migration baselines are complete and independently reviewed;
+- the exact compatibility migration is DDL-only, independently database/security reviewed, accepted into the B0 migration authority, and proven on an authorized disposable PostgreSQL 16 topology; retained application remains unauthorized;
 - the separate B0 acceptance first-add commit and its parent implementation commit are independently reviewed, reachable, and byte-exact;
 - the exact B0 PR is merged to protected `main` with a history-preserving merge commit under separate authorization;
 - actual merge preflight proves exact admitted base/reviewed head, and post-readback proves exact ordered parents rather than ancestry alone;
