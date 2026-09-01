@@ -122,6 +122,33 @@ sudo systemctl daemon-reload
 Starting, enabling, stopping, or restarting these services is a deployment
 action and is deliberately not part of repository verification.
 
+### GrowthOS loopback relay
+
+When GrowthOS runs in a Docker bridge while Global Backend remains bound to
+host loopback, do not expose Backend on `0.0.0.0` or a Docker bridge address.
+Install the socket-activated AF_UNIX proxy instead:
+
+```bash
+sudo groupadd --system global-backend-growthos
+sudo ln -sf /global/backend/infra/systemd/global-backend-growthos-relay.socket \
+  /etc/systemd/system/global-backend-growthos-relay.socket
+sudo ln -sf /global/backend/infra/systemd/global-backend-growthos-relay.service \
+  /etc/systemd/system/global-backend-growthos-relay.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now global-backend-growthos-relay.socket
+```
+
+If the group already exists, do not recreate it. Read its numeric GID with
+`getent group global-backend-growthos` and configure only the GrowthOS relay
+container with that supplemental GID. The socket is group-owned and mode
+`0660`; ordinary host users and containers without that group cannot connect.
+
+The GrowthOS relay container mounts only
+`/run/global-backend-growthos/backend.sock` read-only and converts its own
+namespace-local `127.0.0.1:3000` to that Unix socket. No TCP listener is added
+to a Docker, LAN, Tailscale, or public interface. A container that does not
+receive the explicit socket mount has no Backend transport path.
+
 ## Exact readback
 
 Read back the running container configuration and both health contracts. Do not

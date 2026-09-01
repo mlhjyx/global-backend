@@ -507,6 +507,37 @@ test('legacy systemd units delegate to the immutable compose runtime instead of 
   assert.match(readme, /http:\/\/127\.0\.0\.1:3000\/api\/v1\/health\/ready/);
 });
 
+test('GrowthOS reaches the loopback backend only through an explicit Unix socket relay', async () => {
+  const [socket, service, readme] = await Promise.all([
+    repositoryFile('infra/systemd/global-backend-growthos-relay.socket'),
+    repositoryFile('infra/systemd/global-backend-growthos-relay.service'),
+    repositoryFile('infra/systemd/README.md'),
+  ]);
+  assert.match(
+    socket,
+    /ListenStream=\/run\/global-backend-growthos\/backend\.sock/,
+  );
+  assert.deepEqual(
+    [...socket.matchAll(/^ListenStream=(.+)$/gm)].map((match) => match[1]),
+    ['/run/global-backend-growthos/backend.sock'],
+  );
+  assert.match(socket, /SocketGroup=global-backend-growthos/);
+  assert.match(socket, /SocketMode=0660/);
+  assert.match(socket, /DirectoryMode=0711/);
+  assert.match(socket, /RemoveOnStop=true/);
+  assert.match(service, /Requires=global-api\.service/);
+  assert.match(service, /After=global-api\.service/);
+  assert.match(
+    service,
+    /ExecStart=\/usr\/lib\/systemd\/systemd-socket-proxyd 127\.0\.0\.1:3000/,
+  );
+  assert.match(service, /RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6/);
+  assert.doesNotMatch(service, /0\.0\.0\.0|172\.|host\.docker\.internal/);
+  assert.match(readme, /global-backend-growthos-relay\.socket/);
+  assert.match(readme, /global-backend-growthos/);
+  assert.match(readme, /AF_UNIX/);
+});
+
 function assertGhcrPublicationContract(workflow) {
   assert.match(workflow, /^name: Publish immutable runtime image$/m);
   assert.match(workflow, /^on:\n  workflow_dispatch:\s*$/m);
