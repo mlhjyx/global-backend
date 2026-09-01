@@ -5,9 +5,7 @@ import {
   collectGitHubApprovalEvidence,
   createGitHubReadbackClient,
 } from './governance-github-readback.mjs';
-import {
-  snapshotGitHubReadbackInputs,
-} from './governance-github-readback-common.mjs';
+import { snapshotGitHubReadbackInputs } from './governance-github-readback-common.mjs';
 import {
   API_ORIGIN,
   API_VERSION,
@@ -50,7 +48,6 @@ import {
 const FIXED_CLOCK_MODULE = './fixtures/approval-readback/github-readback-fixed-clock.mjs';
 const AUTHORITY_EFFECTIVE_UNTIL = '2026-08-30T13:00:00.000Z';
 const OVERLAPPING_CLOCK_OBSERVED_AT = '2026-08-30T12:45:00.000Z';
-
 const loadFixedClock = () => import(FIXED_CLOCK_MODULE);
 
 const mutateProposalManifest = (state, mutate) => {
@@ -67,10 +64,7 @@ test('production readback exports no test-only clock surface', async () => {
   const readbackModule = await import('./governance-github-readback.mjs');
 
   assert.equal('createGitHubReadbackTestClient' in readbackModule, false);
-  assert.deepEqual(
-    Object.keys(readbackModule).filter((key) => /Clock|TestClient/u.test(key)),
-    [],
-  );
+  assert.deepEqual(Object.keys(readbackModule).filter((key) => /Clock|TestClient/u.test(key)), []);
 });
 
 test('production clock cannot be backdated to rescue expired authority', async () => {
@@ -101,11 +95,8 @@ test('production clock cannot be backdated to rescue expired authority', async (
     'APPROVAL_GITHUB_AUTHORITY_CURRENTNESS_MISMATCH',
   );
 
-  assert.equal(
-    readbackModule.createGitHubReadbackTestClient,
-    undefined,
-    'production module exposes a public API that can backdate the collector clock',
-  );
+  assert.equal(readbackModule.createGitHubReadbackTestClient, undefined,
+    'production module exposes a public API that can backdate the collector clock');
 });
 
 test('test-only fixed clock observes the instant and restores Date.now after success', async () => {
@@ -137,8 +128,9 @@ test('test-only fixed clock restores Date.now after rejection', async () => {
   assert.equal(Date.now, originalNow);
 });
 
-test('test-only fixed clock rejects nested and overlapping operations', async (t) => {
+test('test-only fixed clock rejects nested, same-instance, and cross-instance overlap', async (t) => {
   const { withFixedSystemTime } = await loadFixedClock();
+  const originalDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
   const originalNow = Date.now;
 
   await t.test('nested operation', async () => {
@@ -151,33 +143,42 @@ test('test-only fixed clock rejects nested and overlapping operations', async (t
     assert.equal(Date.now, originalNow);
   });
 
-  await t.test('overlapping operation', async () => {
+  await t.test('same-instance and query-qualified cross-instance overlap', async () => {
+    const alias = await import(`${FIXED_CLOCK_MODULE}?cross-instance-overlap`);
     let release;
     let markEntered;
-    const entered = new Promise((resolve) => {
-      markEntered = resolve;
-    });
+    const entered = new Promise((resolve) => { markEntered = resolve; });
+    let observedAfterRelease;
     const pending = withFixedSystemTime(COLLECTOR_OBSERVED_AT, async () => {
       markEntered();
-      await new Promise((resolve) => {
-        release = resolve;
-      });
-      assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
+      await new Promise((resolve) => { release = resolve; });
+      observedAfterRelease = Date.now();
       return 'released';
     });
-
     await entered;
+    let aliasedOperationEntered = false;
+    let aliasedError;
     try {
-      await assert.rejects(
-        () => withFixedSystemTime(OVERLAPPING_CLOCK_OBSERVED_AT, async () => {}),
-        { message: 'APPROVAL_TEST_CLOCK_CONCURRENT' },
+      await alias.withFixedSystemTime(
+        OVERLAPPING_CLOCK_OBSERVED_AT,
+        async () => { aliasedOperationEntered = true; },
       );
-      assert.equal(Date.now(), Date.parse(COLLECTOR_OBSERVED_AT));
-    } finally {
-      release();
+    } catch (error) {
+      aliasedError = error;
     }
-    assert.equal(await pending, 'released');
-    assert.equal(Date.now, originalNow);
+    await assert.rejects(
+      () => withFixedSystemTime(OVERLAPPING_CLOCK_OBSERVED_AT, async () => {}),
+      { message: 'APPROVAL_TEST_CLOCK_CONCURRENT' },
+    );
+    release();
+    const result = await pending;
+    const originalIdentityRestored = Date.now === originalNow;
+    if (!originalIdentityRestored) Object.defineProperty(Date, 'now', originalDescriptor);
+    assert.equal(aliasedError?.message, 'APPROVAL_TEST_CLOCK_CONCURRENT');
+    assert.equal(aliasedOperationEntered, false);
+    assert.equal(observedAfterRelease, Date.parse(COLLECTOR_OBSERVED_AT));
+    assert.equal(result, 'released');
+    assert.equal(originalIdentityRestored, true);
   });
 });
 
