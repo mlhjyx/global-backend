@@ -13,12 +13,14 @@
 ## Global Constraints
 
 - Exact final-spec confirmation authorizes only this plan drafting. It does not authorize bootstrap/validator/scanner/workflow/migration implementation, dependency installation/generation, fetch/ref update, local merge/commit, push, PR, GitHub merge/readback, controller/root actions, v3, database/container/runtime/provider/credential/deployment, cleanup, or Artifact C.
-- After an independent review of this exact plan reaches zero Critical/Important, a future exact plan approval authorizes only Task 0L's tracked local launcher/controller design, non-authority development tests and review, plus Tasks 0P, 0A, and 0B local code/tests/documents/read-only audit. It does not authorize Task 0L root-directory/materialization writes, an authority-bearing bootstrap run before that separately authorized root materialization, pnpm authority installation outside reviewed hostile fixtures, fetch, local merge, Task 0M migration bytes, disposable PostgreSQL, scanner Tasks 1–8, or any remote action.
-- Root materialization of the exact reviewed Task 0L launcher/controller/contract into `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/` requires its own future exact authorization. The directory is `root:root` mode `0700`, executable launcher/wrapper bytes are `0500`, contract/materialization/review receipts are `0600`, and no approval of this plan or local Task 0L commit implies that root write.
+- After an independent review of this exact plan reaches zero Critical/Important, a future exact plan approval authorizes only Task 0L's tracked local launcher/external-controller contract design, non-authority development tests and review, plus Tasks 0P, 0A, and 0B local code/tests/documents/read-only audit. It does not authorize any local launcher or GitHub/Gitleaks/disposable/protected-base controller materialization, credential-handle access, authority-bearing bootstrap, fetch, local merge, Task 0M migration bytes, disposable PostgreSQL, scanner Tasks 1–8, or remote mutation.
+- Root materialization of the exact reviewed Task 0L local launcher/bootstrap/contract into `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/`, plus its request/output roots, requires its own future exact authorization. Exactly four controlled files are materialized first; their directory is `root:root` mode `0700`, executable bytes are `0500`, contract is `0600`, request/output roots are `0700`, and later report/receipts are `0600`. No approval of this plan or local Task 0L commit implies any root write.
+- The GitHub, Gitleaks, disposable PostgreSQL and protected-base launcher controllers each require a distinct exact contract/materialization authorization and independent controller security review before their first use. GitHub credential handles, synthetic disposable credentials and hosted event/controller inputs are typed opaque handles/records; no credential value may enter a request, log, receipt or repository file.
 - Task 0F requires a separate exact fetch-only authorization naming remote/ref/SHA and performs no merge. Task 0C requires a later, distinct authorization naming the reviewed PASS audit, branch preimage, admitted main, exact conflict set and resolution rules. Task 0M migration-file creation requires another exact authorization; its disposable PostgreSQL run requires a separate database/container authorization. Scanner Tasks 1–8 require a separate scanner implementation authorization after 0M reviews are accepted.
 - Fetching an absent exact object/ref requires a separate authorization naming remote, ref, and SHA. Creating exact `B0_REFRESH_BASE_COMMIT` as the local two-parent refresh merge and exact `CURRENT_MAIN_ADMISSION_COMMIT` as its one-parent admission child requires another separate authorization naming the branch pre-refresh SHA, admitted live-main SHA, expected conflict paths, and closed resolution rules.
 - Scanner/baseline Tasks 1–8 begin only after Task 0C produces the reviewed refresh/admission chain and Task 0M produces the reviewed `B0M_MIGRATION_COMMIT` plus authorized disposable PASS. Their execution HEAD descends from 0M, while product/raw/build baselines read `B0_REFRESH_BASE_COMMIT` and migration authority freezes the refresh directory plus the sole 0M delta. Push, PR create/update, GitHub merge/readback, hosted-run recovery, root receipt, v3 creation, and every later external action remain separate gates.
-- A direct current-shell `node`, `pnpm`, `jq`, package-script, or unreviewed branch-local bootstrap invocation is diagnostic/non-authoritative only. Every admission, bootstrap, migration, scanner, baseline, stage, zero, acceptance, review, governance, anchor, and B1–B6 result used as authority must be dispatched by the root-only accepted launcher with a closed command ID, exact `BootstrapContract`, fresh validated `BootstrapRunReceipt`, and—at B1 or later—the accepted protected-main anchor. The launcher itself executes through `/usr/bin/env -i` and the receipt-selected pinned absolute Node path; it accepts no arbitrary command, argv tail, shell fragment, environment key, or executable path.
+- A direct current-shell `node`, `pnpm`, `git`, `gh`, `gitleaks`, `docker`, `psql`, `jq`, package-script or unreviewed branch-local bootstrap invocation is diagnostic/non-authoritative only. Local bootstrap/scanner/test/static/migration-source authority uses only the root launcher and its exact local executable closure. Remote GitHub/fetch authority, Gitleaks and disposable PostgreSQL authority use only their matching branch-external controller receipts. Hosted B1–B6 authority uses only `ProtectedBaseLauncherReceipt`. The local launcher may verify those receipts as input data but cannot dispatch their tools or access credentials.
+- Every local closed command creates exactly one fresh `BootstrapRunReceipt`; tasks with multiple commands create the same number of receipts and may bind them with one sorted `BootstrapRunReceiptSet`. One receipt may never authorize or attest two request IDs, modes or command IDs.
 - Preserve exact Artifact A commit `2400bac28796bae44294114edc99eaccb1bd65b3`, the failed v1 branch `codex/pr407-organization-identity-caller-cutover@5adb69877501b240e89ae3d8617617d7bf81837f`, all applied migration bytes, all other worktrees, and all unique provenance.
 - V2 work occurs only in `/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2` on `codex/pr407-organization-identity-caller-cutover-v2`; B1–B6 must not be implemented in that worktree or branch.
 - V3 is exactly `/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3` on `codex/pr407-organization-identity-caller-cutover-v3`, created only from the exact live protected-main B0 merge commit after the external anchor exists.
@@ -41,7 +43,7 @@
 - Main-drift recovery has one and only one start: preserve the abandoned lineage and create a new successor branch/worktree from the exact pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT` whose tree lacks scanner helpers/manifests and 0M. Rerun 0B/0F/0C from that successor, rerun separately authorized 0M, then run Tasks 1–8 in initial-create mode. Even when the abandoned lineage already contains 0M or `B0_IMPLEMENTATION`, recovery never starts from either; the new lineage begins before 0M and recreates/reviews it. Only the admission JSON is an explicit initial `Create`/successor `Modify`; scanner/helpers/manifests/migration are absent in the recovery preimage. Generators write candidates below a fresh task root, compare exact predecessor/subject contracts, and atomically create only the enumerated outputs—no stale `wx` shortcut or arbitrary upsert.
 - After the acceptance scoped review, v2 stops at `LOCAL_ACCEPTANCE_REVIEWED`. Push, exact PR create/update, merge, protected-main readback, GitHub protected variables, and root-only receipt creation each require a separate future authorization.
 - The B0 GitHub merge must be a history-preserving merge commit whose actual pre-call PR head is the exact reviewed B0 acceptance head and whose actual base is the exact admitted live-main SHA. Auto-update, queue rebase, squash, rebase, force-push, force-update, and history rewriting are forbidden. Post-readback must prove exactly two ordered parents: admitted main first, reviewed PR head second.
-- B1–B6 local runs require `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json` as an explicit CLI input. Hosted authority comes only from protected-main `push` at the exact B0 merge SHA and base-owned `pull_request_target` workflow bytes; ordinary `pull_request` governance remains non-authoritative CI. Missing/wrong workflow/event/run/ref/repository/accepted identities or any PR-controlled executable/input substitution is `INTEGRITY_ERROR`.
+- B1–B6 local runs require `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json` as an explicit CLI input. Hosted authority requires protected-main `push` at the exact B0 merge SHA or base-owned `pull_request_target` plus exact `ProtectedBaseLauncherContract`/receipt/equivalence and GitHub-controller receipts; ordinary `pull_request` governance remains non-authoritative CI. Missing/wrong workflow/event/run/ref/repository/accepted/controller/materialization/tool identities or any PR-controlled executable/input substitution is `INTEGRITY_ERROR`.
 - Business data changes use immutable new objects. System boundaries are exact-key, prototype/proxy/accessor-safe, bounded, and fail closed.
 - Every committed implementation unit—including Tasks 1–6 and 11–17—follows RED → minimal GREEN → refactor → commit → independent scoped review/fix loop. The next task is blocked until its exact subject/range review receipt has unique `critical=0`, `important=0`, `verdict=PASS`, matching digests and counterexample set. Tasks 7 and 18 remain additional whole-range reviews. Default governance tests remain green at each declared stage; intentional B1/B3 RED commits are local intermediate checkpoints and still require scoped review of the RED contract.
 - Task execution order is `1 → 2/3 → 4 → 5 → 6`: Task 4 freezes every scanner/stage/derivation rule before Task 5 generates and independently reviews the raw/build/migration baseline. Any later change to scanner, source-view, closure, filesystem, redaction, stage, or derivation bytes invalidates Task 5 and requires complete baseline regeneration plus a new raw-disposition and scoped review before Task 6 or acceptance.
@@ -76,9 +78,17 @@ The final spec subject is committed v2 head `b060c5dd4afef9fe42dfe510b02f930f56c
 | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/governance-organization-identity-launcher.mjs`                                                           | Stdlib-only exact-key closed-command controller source; parses requests before dependency load and invokes only contract-bound command IDs through the accepted clean environment.                                               |
 | `scripts/governance-organization-identity-launcher.spec.mjs`                                                      | Non-authority development fixtures for arbitrary-command/env/path rejection, exact executable-closure hashing, hostile preload markers, permissions and TOCTOU.                                                                  |
+| `scripts/governance-organization-identity-controller-contracts.mjs`                                               | Exact-key GitHub/Gitleaks/disposable/protected-base contract, request, receipt and independent-review validators; contains no credential values or tool dispatch.                                                                |
+| `scripts/governance-organization-identity-controller-contracts.spec.mjs`                                          | Mutation fixtures for omitted executables, open operations/payloads, credential values, event drift, request replay and cross-controller receipt substitution.                                                                   |
+| `scripts/governance-organization-identity-github-controller.mjs`                                                  | Branch-external GitHub/remote-Git controller with the exact reviewed operation registry and opaque credential-handle ingestion.                                                                                                  |
+| `scripts/governance-organization-identity-github-controller.spec.mjs`                                             | Closed push/PR create/update/readback/rules/checks/merge/parent/workflow/variable/fetch controller fixtures.                                                                                                                     |
+| `scripts/governance-organization-identity-disposable-postgres-controller.mjs`                                     | Separately authorized Docker/psql/Prisma disposable controller enforcing loopback/no-egress/resources/caps/cleanup.                                                                                                              |
+| `scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs`                                | Exact executable/process-tree, synthetic-credential-handle, topology, scenario and cleanup mutation fixtures.                                                                                                                    |
+| `scripts/governance-organization-identity-gitleaks-controller.mjs`                                                | No-credential Gitleaks controller pinned to exact executable/config/source-tree/request/result schemas.                                                                                                                          |
+| `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`                                           | Executable/config/source/redaction/result and no-credential-ingress mutation fixtures.                                                                                                                                           |
 | `scripts/governance-organization-identity-bootstrap.mjs`                                                          | Stdlib-only accepted-subject/config/sentinel/declaration/tool/generated-output preflight, clean Prisma generation, dynamic TypeScript/scanner import and review-receipt validator.                                               |
 | `scripts/governance-organization-identity-bootstrap.spec.mjs`                                                     | Hostile env/preload/pnpmfile/lifecycle/config/store/tool/symlink/TOCTOU marker tests proving no hostile body loads or executes.                                                                                                  |
-| `docs/governance/organization-identity-bootstrap-contract.json`                                                   | Immutable accepted launcher/config/environment/tool/declaration/generation/normalization contract; run subjects, roots, inodes and timestamps are excluded.                                                                      |
+| `docs/governance/organization-identity-bootstrap-contract.json`                                                   | Immutable request/config-derivation/environment-schema/logical-tool/declaration/generation/comparator rules; subject config, roots, inodes, resolved paths and timestamps are excluded.                                          |
 | `scripts/governance-organization-identity-current-main-admission.mjs`                                             | Closed current-main schema, exact Git set/conflict/migration validator, deterministic metadata-only generator, and closed Copy command registry.                                                                                 |
 | `scripts/governance-organization-identity-current-main-admission.spec.mjs`                                        | Pre-refresh exact-set, rename/case collision, conflict/generator provenance, migration disposition, and HOLD mutation tests.                                                                                                     |
 | `docs/governance/organization-identity-current-main-admission.json`                                               | First-added or precisely refreshed only in `CURRENT_MAIN_ADMISSION_COMMIT`, the one-parent child of two-parent `B0_REFRESH_BASE_COMMIT`; binds admitted main, merge/parents, complete sets, deltas, and pre-merge review digest. |
@@ -97,10 +107,14 @@ The final spec subject is committed v2 head `b060c5dd4afef9fe42dfe510b02f930f56c
 | `packages/db/test/organization-identity-materialization-outcome-compat.spec.mjs`                                  | Static exact source/catalog/timeout/name/no-DML/migration-order/provenance tests.                                                                                                                                                |
 | `packages/db/test/organization-identity-materialization-outcome-compat.disposable.spec.mjs`                       | Separately authorized PostgreSQL 16 fresh/upgrade/lock/fault/catalog/Prisma-ledger/cleanup proof.                                                                                                                                |
 | `.github/workflows/organization-identity-writer-anchor.yml`                                                       | Protected-main `push` initial anchor and base-owned `pull_request_target` B1–B6 verifier; never executes PR-controlled bytes.                                                                                                    |
+| `scripts/governance-organization-identity-protected-base-launcher.mjs`                                            | Hosted protected-base materialization/event/runner/tool/request verifier and local-to-hosted equivalence checker; never executes PR bytes.                                                                                       |
+| `scripts/governance-organization-identity-protected-base-launcher.spec.mjs`                                       | Hosted path/uid/runner/event/controller-variable/TOCTOU/equivalence and PR-no-execution fixtures.                                                                                                                                |
 
 The flat helper filenames intentionally match the terminal CODEOWNERS pattern `/scripts/governance-*.mjs`; no unowned helper directory is introduced.
 
-The separately authorized branch-external materialization is not a repository-created file set. It contains exact reviewed copies at `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`, `identity-writer-launch.mjs`, `launcher-contract.json`, `launcher-materialization.json`, and `launcher-materialization-review.json` with the modes above. Repository plans/tests may name those future paths, but no tracked task silently creates or modifies them.
+The separately authorized local launcher materialization is not a repository-created file set. Its four controlled files are exact reviewed copies at `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`, `identity-writer-launch.mjs`, `identity-writer-bootstrap.mjs`, and `launcher-contract.json`. After those four are fsynced, the chronology separately creates `launcher-materialization-readback.json`, `launcher-materialization.json`, and `launcher-materialization-review.json`, each mode `0600`; none is included in the four-file inventory or hashes itself. Repository plans/tests may name these future paths, but no tracked task silently creates or modifies them.
+
+The GitHub, Gitleaks and disposable PostgreSQL controllers are separately materialized only under their own exact future authorizations beneath `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/{github,gitleaks,disposable-postgres}/`. Each directory has its own contract, executable/controller source, materialization receipt and review receipt; no controller shares an executable closure, environment, credential handle or authorization with the local launcher or another controller.
 
 Per-task closed requests live only below `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests/`, a separate root-controller-owned `0700` directory. Each canonical request is create-exclusive `root:root` mode `0600`, content-addressed in the corresponding `BootstrapRunReceipt`, rejected if reused for a different subject/task/anchor, and removed only by separately authorized controller cleanup after its receipt is durable. It is an external run input, never a tracked artifact or PR-controlled file.
 
@@ -133,18 +147,17 @@ type ScopedReviewReceipt = Readonly<{
 type ClosedCommandId =
   | "BOOTSTRAP_AUTHORITY_RUN_V1"
   | "SCOPED_REVIEW_VERIFY_V1"
-  | "CURRENT_MAIN_AUDIT_V1"
+  | "CURRENT_MAIN_AUDIT_LOCAL_V1"
   | "CURRENT_MAIN_VALIDATE_V1"
   | "CURRENT_MAIN_GENERATE_V1"
   | "COPY_WRITE_ELIGIBILITY_V1"
   | "COPY_SYNC_CITATIONS_V1"
-  | "GIT_FETCH_OBJECT_V1"
-  | "GIT_REFRESH_MERGE_V1"
+  | "GIT_REFRESH_START_V1"
+  | "GIT_REFRESH_COMMIT_V1"
   | "GIT_ADMISSION_COMMIT_V1"
   | "GIT_ACCEPTANCE_COMMIT_V1"
   | "REFRESH_VERIFY_V1"
   | "MIGRATION_STATIC_VERIFY_V1"
-  | "MIGRATION_DISPOSABLE_VERIFY_V1"
   | "PRISMA_GENERATE_V1"
   | "SCANNER_TEST_V1"
   | "SCANNER_BASELINE_V1"
@@ -156,12 +169,34 @@ type ClosedCommandId =
   | "API_VERIFY_V1"
   | "RUNTIME_ARTIFACT_VERIFY_V1"
   | "CONTRACT_GRAPH_VERIFY_V1"
-  | "GITLEAKS_VERIFY_V1"
-  | "GITHUB_PR_MERGE_V1"
-  | "GITHUB_COMMIT_READBACK_V1"
-  | "GIT_FETCH_MERGED_OBJECT_V1"
-  | "ROOT_ANCHOR_WRITE_V1"
   | "V3_WORKTREE_CREATE_V1";
+
+type TaskId =
+  | "0L"
+  | "0P"
+  | "0A"
+  | "0B"
+  | "0F"
+  | "0C"
+  | "0M"
+  | "1"
+  | "2"
+  | "3"
+  | "4"
+  | "5"
+  | "6"
+  | "7"
+  | "8"
+  | "9"
+  | "10"
+  | "11"
+  | "12"
+  | "13"
+  | "14"
+  | "15"
+  | "16"
+  | "17"
+  | "18";
 
 type ExecutableClosureEntry = Readonly<{
   role:
@@ -172,6 +207,7 @@ type ExecutableClosureEntry = Readonly<{
     | "COREPACK_LIB_COREPACK_CJS"
     | "PNPM_SHIM"
     | "PNPM_ENTRYPOINT";
+  logicalIdentity: string;
   executablePath: string;
   realpathSha256: string;
   sha256: string;
@@ -179,9 +215,30 @@ type ExecutableClosureEntry = Readonly<{
   mode: number;
 }>;
 
+type RootControlledFile<Name extends string, Mode extends number> = Readonly<{
+  basename: Name;
+  mode: Mode;
+  device: string;
+  inode: string;
+  realpathSha256: string;
+  sha256: string;
+  size: number;
+}>;
+
 type LauncherContract = Readonly<{
-  schemaVersion: "organization-identity-launcher-contract/v1";
+  schemaVersion: "organization-identity-launcher-contract/v2";
   rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher";
+  requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
+  outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
+  rootPolicy: Readonly<{
+    ownerUid: 0;
+    ownerGid: 0;
+    directoryMode: 0o700;
+    requestMode: 0o600;
+    outputMode: 0o600;
+    createExclusive: true;
+    rejectSymlink: true;
+  }>;
   approvedPlan: Readonly<{
     path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md";
     commit: string;
@@ -211,50 +268,394 @@ type LauncherContract = Readonly<{
   commandRegistrySha256: string;
   exactEnvironmentSchemaSha256: string;
   bootstrapContractSchemaSha256: string;
-  requestSchemaSha256: string;
+  requestUnionSchemaSha256: string;
+  requestInputDerivationSha256: string;
+  outputSchemaSetSha256: string;
+}>;
+
+type LauncherReadbackReport = Readonly<{
+  schemaVersion: "organization-identity-launcher-readback/v1";
+  launcherContractSha256: string;
+  fourFileObservationSetSha256: string;
+  requestRootObservationSha256: string;
+  outputRootObservationSha256: string;
+  executableClosureObservationSha256: string;
+  hostileCounterexampleSetSha256: string;
+  reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_READBACK";
+  observedAt: string;
 }>;
 
 type LauncherMaterializationReceipt = Readonly<{
-  schemaVersion: "organization-identity-launcher-materialization/v1";
+  schemaVersion: "organization-identity-launcher-materialization/v2";
   launcherContractSha256: string;
   ownerUid: 0;
   ownerGid: 0;
   directoryMode: 0o700;
-  files: readonly Readonly<{
-    basename:
-      | "identity-writer-launch"
-      | "identity-writer-launch.mjs"
-      | "identity-writer-bootstrap.mjs"
-      | "launcher-contract.json";
-    mode: 0o500 | 0o600;
+  files: readonly [
+    RootControlledFile<"identity-writer-launch", 0o500>,
+    RootControlledFile<"identity-writer-launch.mjs", 0o500>,
+    RootControlledFile<"identity-writer-bootstrap.mjs", 0o500>,
+    RootControlledFile<"launcher-contract.json", 0o600>,
+  ];
+  requestRoot: Readonly<{
+    mode: 0o700;
     device: string;
     inode: string;
     realpathSha256: string;
-    sha256: string;
-    size: number;
-  }>[];
+  }>;
+  outputRoot: Readonly<{
+    mode: 0o700;
+    device: string;
+    inode: string;
+    realpathSha256: string;
+  }>;
+  fourFileFsyncSha256: string;
+  directoryFsyncSha256: string;
+  readbackReportSha256: string;
   prePostToctouSha256: string;
   materializedAt: string;
-  independentReviewReceiptSha256: string;
   result: "PASS";
 }>;
 
-type ClosedCommandRequest = Readonly<{
-  schemaVersion: "organization-identity-closed-command-request/v1";
-  commandId: ClosedCommandId;
-  subjectCommit: string;
-  bootstrapContractSha256: string;
-  bootstrapRunReceiptSha256: string | null;
-  anchorReceiptSha256: string | null;
-  inputRecordSha256: string;
-}>;
-
-type ExternalLaunchReceipt = Readonly<{
-  schemaVersion: "organization-identity-external-launch/v2";
+type LauncherMaterializationReviewReceipt = Readonly<{
+  schemaVersion: "organization-identity-launcher-materialization-review/v1";
   launcherContractSha256: string;
   launcherMaterializationReceiptSha256: string;
-  controllerClass: "BRANCH_EXTERNAL_ROOT" | "PROTECTED_BASE_WORKFLOW";
+  readbackReportSha256: string;
+  reportSha256: string;
+  counterexampleSetSha256: string;
+  reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_REVIEW";
+  critical: 0;
+  important: 0;
+  verdict: "PASS";
+}>;
+
+type RequestInputBinding = Readonly<{
+  inputRecordPath: string;
+  inputRecordUri: string;
+  inputRecordSha256: string;
+  payloadSchemaSha256: string;
+  payloadSha256: string;
+  outputRecordPath: string;
+}>;
+
+type ClosedCommandRequestBase<
+  CommandId extends ClosedCommandId,
+  Mode extends string,
+  Parameters,
+> = Readonly<{
+  schemaVersion: "organization-identity-closed-command-request/v2";
+  requestId: string;
+  taskId: TaskId;
+  commandId: CommandId;
+  mode: Mode;
+  subjectCommit: string;
+  bootstrapContractSha256: string;
+  launcherMaterializationReceiptSha256: string;
+  launcherMaterializationReviewReceiptSha256: string;
+  authorizationReceiptSha256: string | null;
+  externalControllerReceiptSha256: string | null;
+  anchorReceiptSha256: string | null;
+  input: RequestInputBinding;
+  allowedArgvSha256: string;
+  parameters: Parameters;
+}>;
+
+type BootstrapAuthorityRequest = ClosedCommandRequestBase<
+  "BOOTSTRAP_AUTHORITY_RUN_V1",
+  "INSTALL_AND_PRISMA_GENERATE",
+  Readonly<{
+    frozenLockfile: true;
+    ignoreScripts: true;
+    ignorePnpmfile: true;
+    npmUserConfig: "/dev/null";
+  }>
+>;
+
+type ScopedReviewVerifyRequest = ClosedCommandRequestBase<
+  "SCOPED_REVIEW_VERIFY_V1",
+  "VERIFY",
+  Readonly<{
+    reportPath: string;
+    reportSha256: string;
+    receiptPath: string;
+    receiptSha256: string;
+    reviewedSubjectCommit: string;
+  }>
+>;
+
+type CurrentMainAuditLocalRequest = ClosedCommandRequestBase<
+  "CURRENT_MAIN_AUDIT_LOCAL_V1",
+  "COLLECT_LOCAL_FACTS",
+  Readonly<{
+    branchPreRefreshCommit: string;
+    advertisedLiveMainCommit: string;
+    githubControllerReceiptSha256: string;
+  }>
+>;
+
+type CurrentMainValidateRequest = ClosedCommandRequestBase<
+  "CURRENT_MAIN_VALIDATE_V1",
+  "VALIDATE",
+  Readonly<{
+    auditPacketSha256: string;
+    auditReviewReceiptSha256: string;
+    refreshMergeCommit: string | null;
+    admissionPath: "docs/governance/organization-identity-current-main-admission.json";
+  }>
+>;
+
+type CurrentMainGenerateRequest = ClosedCommandRequestBase<
+  "CURRENT_MAIN_GENERATE_V1",
+  "GENERATE",
+  Readonly<{
+    auditPacketSha256: string;
+    auditReviewReceiptSha256: string;
+    refreshMergeCommit: string;
+    admissionPath: "docs/governance/organization-identity-current-main-admission.json";
+  }>
+>;
+
+type CopyWriteEligibilityRequest = ClosedCommandRequestBase<
+  "COPY_WRITE_ELIGIBILITY_V1",
+  "WRITE_ELIGIBILITY",
+  Readonly<{
+    auditPacketSha256: string;
+    eligibilityPath: "docs/evidence/site-builder/copy-runtime-eligibility.json";
+  }>
+>;
+
+type CopySyncCitationsRequest = ClosedCommandRequestBase<
+  "COPY_SYNC_CITATIONS_V1",
+  "SYNC_CITATIONS",
+  Readonly<{
+    auditPacketSha256: string;
+    eligibilityPath: "docs/evidence/site-builder/copy-runtime-eligibility.json";
+    eligibilityInputSha256: string;
+    citationPath: "docs/implementation-records/copy-fixed-source-impact-governance.md";
+  }>
+>;
+
+type GitRefreshStartRequest = ClosedCommandRequestBase<
+  "GIT_REFRESH_START_V1",
+  "START_NO_COMMIT",
+  Readonly<{
+    expectedHead: string;
+    otherParent: string;
+    exactMergeResultPathSetSha256: string;
+  }>
+>;
+
+type GitRefreshCommitRequest = ClosedCommandRequestBase<
+  "GIT_REFRESH_COMMIT_V1",
+  "COMMIT_REFRESH",
+  Readonly<{
+    expectedFirstParent: string;
+    expectedSecondParent: string;
+    stagedPathSetSha256: string;
+    commitMessage: "chore: merge admitted main for identity writer baseline";
+  }>
+>;
+
+type GitAdmissionCommitRequest = ClosedCommandRequestBase<
+  "GIT_ADMISSION_COMMIT_V1",
+  "COMMIT_ADMISSION",
+  Readonly<{
+    expectedParent: string;
+    stagedPath: "docs/governance/organization-identity-current-main-admission.json";
+    stagedStatus: "ADD" | "MODIFY";
+    commitMessage: "chore: admit current main for identity writer baseline";
+  }>
+>;
+
+type GitAcceptanceCommitRequest = ClosedCommandRequestBase<
+  "GIT_ACCEPTANCE_COMMIT_V1",
+  "COMMIT_ACCEPTANCE",
+  Readonly<{
+    expectedParent: string;
+    stagedPath: "docs/governance/organization-identity-writer-acceptance.json";
+    stagedStatus: "ADD";
+    commitMessage: "chore: anchor organization identity writer baseline";
+  }>
+>;
+
+type ScannerCommonParameters = Readonly<{
+  baselineSubjectCommit: string;
+  currentMainAdmissionCommit: string;
+  b0mMigrationCommit: string;
+}>;
+
+type ScannerTestRequest = ClosedCommandRequestBase<
+  "SCANNER_TEST_V1",
+  "TEST",
+  ScannerCommonParameters &
+    Readonly<{
+      suiteId:
+        | "B0_SCANNER"
+        | "DELEGATE_ENGINE"
+        | "RAW_CLOSURE"
+        | "STAGE_SECURITY"
+        | "B0_BASELINE"
+        | "B0_ACCEPTANCE"
+        | "B1_TEMPORAL"
+        | "B2_TEMPORAL"
+        | "B3_PROJECTION"
+        | "B4_PROJECTION"
+        | "B4M_MATERIALIZATION"
+        | "B5_ZERO"
+        | "B6_CLOSEOUT";
+    }>
+>;
+
+type ScannerBaselineRequest = ClosedCommandRequestBase<
+  "SCANNER_BASELINE_V1",
+  "RAW_RECEIPT_ONLY" | "RAW_CANDIDATE" | "BASELINE_GENERATE" | "BASELINE_CHECK",
+  ScannerCommonParameters &
+    Readonly<{
+      artifactACommit: "2400bac28796bae44294114edc99eaccb1bd65b3";
+      dispositionReceiptSha256: string | null;
+      outputDirectory: "docs/governance" | null;
+    }>
+>;
+
+type ScannerStageRequest = ClosedCommandRequestBase<
+  "SCANNER_STAGE_V1",
+  "STAGE_GENERATE" | "STAGE_CHECK" | "ANCHOR_ONLY",
+  ScannerCommonParameters &
+    Readonly<{
+      stage:
+        | "B0_BASELINE"
+        | "B1_TEMPORAL_RED"
+        | "B2_TEMPORAL_CUTOVER"
+        | "B3_PROJECTION_RED"
+        | "B4_PROJECTION_CUTOVER"
+        | "B4M_MATERIALIZATION_CUTOVER"
+        | "B5_ZERO_GATE"
+        | "B6_CLOSEOUT";
+    }>
+>;
+
+type ScannerZeroRequest = ClosedCommandRequestBase<
+  "SCANNER_ZERO_V1",
+  "ZERO_CHECK",
+  ScannerCommonParameters & Readonly<{ expectedWriterCount: 3 | 2 | 1 | 0 }>
+>;
+
+type ScannerAcceptanceRequest = ClosedCommandRequestBase<
+  "SCANNER_ACCEPTANCE_V1",
+  "ACCEPTANCE_RED" | "ACCEPTANCE_GENERATE" | "ACCEPTANCE_CHECK",
+  ScannerCommonParameters &
+    Readonly<{
+      implementationParent: string;
+      implementationReviewSha256: string;
+      acceptancePath: "docs/governance/organization-identity-writer-acceptance.json";
+    }>
+>;
+
+type RefreshVerifyRequest = ClosedCommandRequestBase<
+  "REFRESH_VERIFY_V1",
+  "VERIFY",
+  Readonly<{ suiteId: "REFRESH_FULL"; refreshMergeCommit: string }>
+>;
+
+type MigrationStaticVerifyRequest = ClosedCommandRequestBase<
+  "MIGRATION_STATIC_VERIFY_V1",
+  "VERIFY",
+  Readonly<{ suiteId: "MIGRATION_0M_STATIC"; b0mMigrationCommit: string }>
+>;
+
+type PrismaGenerateRequest = ClosedCommandRequestBase<
+  "PRISMA_GENERATE_V1",
+  "VERIFY",
+  Readonly<{
+    suiteId: "PRISMA_GENERATE";
+    schemaPath: "packages/db/prisma/schema.prisma";
+  }>
+>;
+
+type GovernanceVerifyRequest = ClosedCommandRequestBase<
+  "GOVERNANCE_VERIFY_V1",
+  "VERIFY",
+  Readonly<{ suiteId: "GOVERNANCE_B0" | "GOVERNANCE_ZERO" }>
+>;
+
+type DocsVerifyRequest = ClosedCommandRequestBase<
+  "DOCS_VERIFY_V1",
+  "VERIFY",
+  Readonly<{ suiteId: "DOCS_FULL" }>
+>;
+
+type ApiVerifyRequest = ClosedCommandRequestBase<
+  "API_VERIFY_V1",
+  "VERIFY",
+  Readonly<{
+    suiteId:
+      | "API_FULL"
+      | "API_TEMPORAL"
+      | "API_PROJECTION"
+      | "API_MATERIALIZATION"
+      | "API_DOWNSTREAM"
+      | "API_MIXED_FLEET";
+  }>
+>;
+
+type RuntimeArtifactVerifyRequest = ClosedCommandRequestBase<
+  "RUNTIME_ARTIFACT_VERIFY_V1",
+  "VERIFY",
+  Readonly<{ suiteId: "RUNTIME_ARTIFACT" }>
+>;
+
+type ContractGraphVerifyRequest = ClosedCommandRequestBase<
+  "CONTRACT_GRAPH_VERIFY_V1",
+  "VERIFY",
+  Readonly<{ suiteId: "CONTRACT_GRAPH" }>
+>;
+type V3WorktreeRequest = ClosedCommandRequestBase<
+  "V3_WORKTREE_CREATE_V1",
+  "CREATE",
+  Readonly<{
+    mergeCommit: string;
+    branch: "codex/pr407-organization-identity-caller-cutover-v3";
+    worktreePath: "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3";
+  }>
+>;
+
+type ClosedCommandRequest =
+  | BootstrapAuthorityRequest
+  | ScopedReviewVerifyRequest
+  | CurrentMainAuditLocalRequest
+  | CurrentMainValidateRequest
+  | CurrentMainGenerateRequest
+  | CopyWriteEligibilityRequest
+  | CopySyncCitationsRequest
+  | GitRefreshStartRequest
+  | GitRefreshCommitRequest
+  | GitAdmissionCommitRequest
+  | GitAcceptanceCommitRequest
+  | ScannerTestRequest
+  | ScannerBaselineRequest
+  | ScannerStageRequest
+  | ScannerZeroRequest
+  | ScannerAcceptanceRequest
+  | RefreshVerifyRequest
+  | MigrationStaticVerifyRequest
+  | PrismaGenerateRequest
+  | GovernanceVerifyRequest
+  | DocsVerifyRequest
+  | ApiVerifyRequest
+  | RuntimeArtifactVerifyRequest
+  | ContractGraphVerifyRequest
+  | V3WorktreeRequest;
+
+type ExternalLaunchReceipt = Readonly<{
+  schemaVersion: "organization-identity-external-launch/v3";
+  launcherContractSha256: string;
+  launcherMaterializationReceiptSha256: string;
+  launcherMaterializationReviewReceiptSha256: string;
+  controllerClass: "BRANCH_EXTERNAL_ROOT";
   acceptedSubjectCommit: string;
+  requestId: string;
+  commandId: ClosedCommandId;
   executableClosureSetSha256: string;
   environment: Readonly<{
     PATH: string;
@@ -270,8 +671,17 @@ type ExternalLaunchReceipt = Readonly<{
     LC_ALL: "C.UTF-8";
   }>;
   cleanEnvironmentNameSetSha256: string;
+  environmentValueSetSha256: string;
   preDependencyVerificationSha256: string;
   result: "PASS";
+}>;
+
+type ToolLogicalExpectation = Readonly<{
+  logicalPackage: string;
+  version: string;
+  allowedRoles: readonly string[];
+  lockResolutionRuleSha256: string;
+  loadedFileDerivationSha256: string;
 }>;
 
 type ToolRootReceipt = Readonly<{
@@ -286,12 +696,11 @@ type ToolRootReceipt = Readonly<{
 }>;
 
 type BootstrapContract = Readonly<{
-  schemaVersion: "organization-identity-bootstrap-contract/v1";
+  schemaVersion: "organization-identity-bootstrap-contract/v2";
   launcherContractSha256: string;
   bootstrapSchemaSha256: string;
-  acceptedConfigurationSetSha256: string;
-  acceptedAbsenceSentinelSetSha256: string;
-  effectivePnpmArgsSha256: string;
+  closedRequestSchemaSha256: string;
+  effectivePnpmArgvRuleSha256: string;
   ignoreScripts: true;
   ignorePnpmfile: true;
   allowedEnvironmentNames: readonly [
@@ -307,31 +716,94 @@ type BootstrapContract = Readonly<{
     "LANG",
     "LC_ALL",
   ];
-  allowedEnvironmentValueSchemaSha256: string;
-  dependencyDeclarationContractSha256: string;
-  toolExecutionContractSha256: string;
+  allowedEnvironmentValueRuleSha256: string;
+  subjectConfigurationDerivationSha256: string;
+  subjectAbsenceSentinelDerivationSha256: string;
+  dependencyDeclarationRuleSha256: string;
+  toolLogicalExpectations: readonly ToolLogicalExpectation[];
+  toolExecutionRuleSha256: string;
   generatedOutputDerivationSha256: string;
-  normalization: Readonly<{
-    allowedRunFields: readonly [
-      "acceptedSubjectCommit",
-      "taskRoot",
-      "taskRootDevice",
-      "taskRootInode",
-      "startedAt",
-      "finishedAt",
-      "generatedOutputSetSha256",
-      "prePostToctouSha256",
-    ];
-    invariantComparisonSha256: string;
-  }>;
+  receiptExactKeySchemaSha256: string;
+  receiptComparatorSha256: string;
+  perRunVariableFieldPaths: readonly [
+    "/requestId",
+    "/taskId",
+    "/commandId",
+    "/mode",
+    "/closedCommandRequestSha256",
+    "/inputRecordPath",
+    "/inputRecordUri",
+    "/inputRecordSha256",
+    "/payloadSchemaSha256",
+    "/payloadSha256",
+    "/outputRecordPath",
+    "/outputRecordSha256",
+    "/authorizationReceiptSha256",
+    "/externalControllerReceiptSha256",
+    "/anchorReceiptSha256",
+    "/externalLaunchReceiptSha256",
+    "/acceptedSubjectCommit",
+    "/subjectConfigurationSetSha256",
+    "/subjectAbsenceSentinelSetSha256",
+    "/subjectGitClosureSha256",
+    "/environmentValueSetSha256",
+    "/taskRoot",
+    "/taskRootDevice",
+    "/taskRootInode",
+    "/fixedRootSetSha256",
+    "/postInstallBootstrapRehashSha256",
+    "/dependencyDeclarationRoots/*/lockIntegrity",
+    "/dependencyDeclarationRoots/*/rootRealpathSha256",
+    "/dependencyDeclarationRoots/*/loadedFileCount",
+    "/dependencyDeclarationRoots/*/loadedFileSetSha256",
+    "/dependencyDeclarationRoots/*/contentSetSha256",
+    "/dependencyDeclarationRoots/*/prePostToctouSha256",
+    "/toolExecutionRoots/*/lockIntegrity",
+    "/toolExecutionRoots/*/rootRealpathSha256",
+    "/toolExecutionRoots/*/loadedFileCount",
+    "/toolExecutionRoots/*/loadedFileSetSha256",
+    "/toolExecutionRoots/*/contentSetSha256",
+    "/toolExecutionRoots/*/prePostToctouSha256",
+    "/prismaSchemaSha256",
+    "/generatedClientSetSha256",
+    "/generatedDmmfSha256",
+    "/generatedDelegateSetSha256",
+    "/generatedOutputSetSha256",
+    "/typescriptDynamicImportSha256",
+    "/hostileMarkerSetSha256",
+    "/prePostToctouSha256",
+    "/startedAt",
+    "/finishedAt",
+  ];
 }>;
 
 type BootstrapRunReceipt = Readonly<{
-  schemaVersion: "organization-identity-bootstrap-run/v1";
+  schemaVersion: "organization-identity-bootstrap-run/v2";
+  receiptCardinality: "ONE_COMMAND_ONE_RECEIPT";
   bootstrapContractSha256: string;
   launcherMaterializationReceiptSha256: string;
+  launcherMaterializationReviewReceiptSha256: string;
+  requestId: string;
+  taskId: TaskId;
+  commandId: ClosedCommandId;
+  mode: string;
+  closedCommandRequestSha256: string;
+  inputRecordPath: string;
+  inputRecordUri: string;
+  inputRecordSha256: string;
+  payloadSchemaSha256: string;
+  payloadSha256: string;
+  outputRecordPath: string;
+  outputRecordSha256: string;
+  authorizationReceiptSha256: string | null;
+  externalControllerReceiptSha256: string | null;
+  anchorReceiptSha256: string | null;
   externalLaunchReceiptSha256: string;
   acceptedSubjectCommit: string;
+  subjectConfigurationSetSha256: string;
+  subjectAbsenceSentinelSetSha256: string;
+  subjectGitClosureSha256: string;
+  environmentValueSetSha256: string;
   taskRoot: string;
   taskRootDevice: string;
   taskRootInode: string;
@@ -352,24 +824,553 @@ type BootstrapRunReceipt = Readonly<{
   finishedAt: string;
   result: "PASS";
 }>;
+
+type BootstrapRunReceiptSet = Readonly<{
+  schemaVersion: "organization-identity-bootstrap-run-set/v1";
+  taskId: TaskId;
+  subjectCommit: string;
+  receiptCount: number;
+  receipts: readonly Readonly<{
+    requestId: string;
+    commandId: ClosedCommandId;
+    requestSha256: string;
+    receiptSha256: string;
+  }>[];
+  receiptSetSha256: string;
+}>;
 ```
 
-The root-only wrapper accepts exactly one path to a `ClosedCommandRequest` below the controller-owned task root. It performs no shell evaluation and gives the request to the pinned absolute Node executable as `/usr/bin/env -i <exact-environment> <pinned-node> <root-launcher.mjs> --request <path>`. The stdlib launcher rejects unknown/extra JSON keys, arbitrary argv, free-form commands, unregistered environment names, non-owned/symlinked paths and receipt drift before any non-`node:` dependency load. It rehashes the approved plan/spec/launcher/bootstrap blobs, the materialization receipt and the complete executable closure; the latter includes both the Corepack/pnpm shims and the exact `lib/corepack.cjs`/pnpm entrypoint bytes. A current interactive shell, `jq`, repository package script or PR-controlled workflow byte is never part of an authority claim.
+### Branch-external tool-specific controller contracts
 
-`SCOPED_REVIEW_VERIFY_V1` parses `ScopedReviewReceipt`, recomputes subject/range/path/report/counterexample digests, and rejects extra/missing keys, duplicate/conflicting severity fields, any nonzero Critical/Important, or a verdict other than PASS. For the launcher's own first review, the external reviewer also performs three separate exact assertions—`rg -qx 'Critical: 0'`, `rg -qx 'Important: 0'`, `rg -qx 'Verdict: PASS'`—and proves each label occurs exactly once before trusting the new verifier. Those direct assertions are bootstrap-of-trust checks only; every later machine review gate is dispatched as `SCOPED_REVIEW_VERIFY_V1`.
+The local root launcher never dispatches a credentialed/networked GitHub operation, Gitleaks, Docker, `psql`, a disposable database, a workflow rerun, controller-variable mutation, or a root-anchor write. It only validates the closed receipts from the independently authorized controllers below when a later local scanner/static command consumes them.
 
-The immutable `BootstrapContract` contains only accepted configuration, command/derivation schemas, invariant tool/declaration requirements and the explicit run-field normalization rule. `BootstrapRunReceipt` contains the subject, fresh task root, inode/device/time/TOCTOU state and generated results for one run. B0 acceptance freezes the contract schema/blob/digest and launcher materialization identity, never one run receipt. Each B0 or B1–B6 authority call creates a fresh receipt, requires `receipt.bootstrapContractSha256` to equal the accepted contract, compares every non-allowlisted field exactly, and permits differences only in the eight enumerated `normalization.allowedRunFields`. For B0 the run subject equals the reviewed current implementation candidate; after protected-main merge every v3/B1–B6 run subject equals the current candidate descendant and the accepted protected-main contract is immutable. The source/PR head remains scanned data, not executable bootstrap configuration.
+```ts
+type ExternalControllerExecutableEntry = Readonly<{
+  role:
+    | "NODE"
+    | "GIT"
+    | "GH"
+    | "GITLEAKS"
+    | "DOCKER"
+    | "PSQL"
+    | "COREPACK_SHIM"
+    | "COREPACK_LIB_COREPACK_CJS"
+    | "PNPM_SHIM"
+    | "PNPM_ENTRYPOINT"
+    | "PRISMA_CLI";
+  logicalIdentity: string;
+  executablePath: string;
+  realpathSha256: string;
+  sha256: string;
+  size: number;
+}>;
+
+type CredentialHandleBinding = Readonly<{
+  provider: "ROOT_SECRET_STORE" | "GITHUB_ACTIONS_SECRET";
+  handleSha256: string;
+  scopeSha256: string;
+  injectedByFileDescriptor: true;
+  valuePersisted: false;
+  valueEmitted: false;
+}>;
+
+type ExternalControllerMaterializationReceipt = Readonly<{
+  schemaVersion: "organization-identity-external-controller-materialization/v1";
+  controllerClass: "GITHUB" | "DISPOSABLE_POSTGRES" | "GITLEAKS";
+  contractSha256: string;
+  controllerSourceSha256: string;
+  rootDirectorySha256: string;
+  requestRootSha256: string;
+  outputRootSha256: string;
+  ownerUid: 0;
+  ownerGid: 0;
+  directoryMode: 0o700;
+  controllerMode: 0o500;
+  recordMode: 0o600;
+  executableClosureSetSha256: string;
+  environmentSchemaSha256: string;
+  prePostToctouSha256: string;
+  result: "PASS";
+}>;
+
+type ControllerReviewReceipt = Readonly<{
+  schemaVersion: "organization-identity-controller-review/v1";
+  controllerClass:
+    "GITHUB" | "DISPOSABLE_POSTGRES" | "GITLEAKS" | "PROTECTED_BASE_LAUNCHER";
+  contractSha256: string;
+  materializationReceiptSha256: string | null;
+  requestSchemaSha256: string;
+  reportSha256: string;
+  counterexampleSetSha256: string;
+  reviewerClass: "INDEPENDENT_CONTROLLER_SECURITY_REVIEW";
+  critical: 0;
+  important: 0;
+  verdict: "PASS";
+}>;
+
+type GitHubControllerOperation =
+  | "PROTECTED_MAIN_READBACK"
+  | "FETCH_EXACT_OBJECT"
+  | "PUSH_EXACT_BRANCH"
+  | "PR_CREATE"
+  | "PR_UPDATE_BODY"
+  | "PR_READBACK"
+  | "RULES_CHECKS_READBACK"
+  | "PR_MERGE"
+  | "COMMIT_BRANCH_PARENT_READBACK"
+  | "WORKFLOW_RUN_READBACK"
+  | "WORKFLOW_RERUN"
+  | "CONTROLLER_VARIABLES_WRITE";
+
+type GitHubControllerRequestBase<
+  Operation extends GitHubControllerOperation,
+  Payload,
+> = Readonly<{
+  schemaVersion: "organization-identity-github-controller-request/v1";
+  requestId: string;
+  operation: Operation;
+  contractSha256: string;
+  materializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  authorizationReceiptSha256: string | null;
+  credentialHandle: CredentialHandleBinding;
+  payloadSchemaSha256: string;
+  payloadSha256: string;
+  outputRecordPath: string;
+  payload: Payload;
+}>;
+
+type GitHubControllerRequest =
+  | GitHubControllerRequestBase<
+      "PROTECTED_MAIN_READBACK",
+      Readonly<{
+        repository: "mlhjyx/global-backend";
+        ref: "refs/heads/main";
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "FETCH_EXACT_OBJECT",
+      Readonly<{
+        remote: "origin";
+        ref: "refs/heads/main";
+        objectSha: string;
+        flags: readonly [
+          "--no-tags",
+          "--no-write-fetch-head",
+          "--no-auto-maintenance",
+          "--no-write-commit-graph",
+        ];
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "PUSH_EXACT_BRANCH",
+      Readonly<{
+        branch: "codex/pr407-organization-identity-caller-cutover-v2";
+        expectedHead: string;
+        setUpstream: true;
+        force: false;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "PR_CREATE",
+      Readonly<{
+        base: "main";
+        head: "codex/pr407-organization-identity-caller-cutover-v2";
+        title: "Organization Identity writer ban-at-source";
+        bodySha256: string;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "PR_UPDATE_BODY",
+      Readonly<{
+        number: number;
+        expectedBaseSha: string;
+        expectedHeadSha: string;
+        title: "Organization Identity writer ban-at-source";
+        bodySha256: string;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "PR_READBACK",
+      Readonly<{
+        number: number | null;
+        headBranch: "codex/pr407-organization-identity-caller-cutover-v2";
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "RULES_CHECKS_READBACK",
+      Readonly<{
+        number: number;
+        expectedBaseSha: string;
+        expectedHeadSha: string;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "PR_MERGE",
+      Readonly<{
+        number: number;
+        expectedBaseSha: string;
+        expectedHeadSha: string;
+        mergeMethod: "merge";
+        immediateReadbackReceiptSetSha256: string;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "COMMIT_BRANCH_PARENT_READBACK",
+      Readonly<{
+        mergeResponseSha: string;
+        expectedParents: readonly [string, string];
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "WORKFLOW_RUN_READBACK",
+      Readonly<{
+        workflowPath: ".github/workflows/organization-identity-writer-anchor.yml";
+        expectedHeadSha: string;
+        runId: number | null;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "WORKFLOW_RERUN",
+      Readonly<{
+        runId: number;
+        runAttempt: number;
+        expectedHeadSha: string;
+      }>
+    >
+  | GitHubControllerRequestBase<
+      "CONTROLLER_VARIABLES_WRITE",
+      Readonly<{
+        variableCount: 15;
+        variableNameSetSha256: string;
+        variableValueDigestSetSha256: string;
+      }>
+    >;
+
+type GitHubControllerContract = Readonly<{
+  schemaVersion: "organization-identity-github-controller-contract/v1";
+  rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github";
+  requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/requests";
+  outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/outputs";
+  controllerSourceBlobId: string;
+  controllerSourceSha256: string;
+  repository: "mlhjyx/global-backend";
+  remote: "origin";
+  protectedRef: "refs/heads/main";
+  executableClosure: readonly ExternalControllerExecutableEntry[];
+  requiredRoles: readonly ["NODE", "GIT", "GH"];
+  allowedEnvironmentNames: readonly [
+    "PATH",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "TMPDIR",
+    "GH_HOST",
+    "GITHUB_TOKEN_HANDLE",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_TERMINAL_PROMPT",
+  ];
+  credentialHandleSchemaSha256: string;
+  operationRequestSchemaSha256: Readonly<
+    Record<GitHubControllerOperation, string>
+  >;
+  operationResultSchemaSha256: Readonly<
+    Record<GitHubControllerOperation, string>
+  >;
+  noSecretPersistence: true;
+}>;
+
+type GitHubControllerReceipt = Readonly<{
+  schemaVersion: "organization-identity-github-controller-receipt/v1";
+  contractSha256: string;
+  controllerReviewReceiptSha256: string;
+  operation: GitHubControllerOperation;
+  requestId: string;
+  requestSha256: string;
+  payloadSchemaSha256: string;
+  payloadSha256: string;
+  authorizationReceiptSha256: string | null;
+  credentialHandleSha256: string | null;
+  repository: "mlhjyx/global-backend";
+  observedOrWrittenRef: string | null;
+  observedBaseSha: string | null;
+  observedHeadSha: string | null;
+  resultSchemaSha256: string;
+  resultSha256: string;
+  httpStatus: number | null;
+  executableClosureSetSha256: string;
+  prePostToctouSha256: string;
+  containsCredentialValue: false;
+  result: "PASS";
+}>;
+
+type DisposablePostgresControllerContract = Readonly<{
+  schemaVersion: "organization-identity-disposable-postgres-controller-contract/v1";
+  rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres";
+  requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/requests";
+  outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/outputs";
+  controllerSourceBlobId: string;
+  controllerSourceSha256: string;
+  executableClosure: readonly ExternalControllerExecutableEntry[];
+  requiredRoles: readonly [
+    "NODE",
+    "DOCKER",
+    "PSQL",
+    "COREPACK_SHIM",
+    "COREPACK_LIB_COREPACK_CJS",
+    "PNPM_SHIM",
+    "PNPM_ENTRYPOINT",
+    "PRISMA_CLI",
+  ];
+  allowedEnvironmentNames: readonly [
+    "PATH",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "TMPDIR",
+    "DOCKER_HOST_HANDLE",
+    "POSTGRES_CREDENTIAL_HANDLE",
+    "CI",
+    "LANG",
+    "LC_ALL",
+  ];
+  allowedOperations: readonly ["0M_COMPATIBILITY", "B6_MIXED_FLEET"];
+  topologySchemaSha256: string;
+  resourceLabelSchemaSha256: string;
+  imageDigestSchemaSha256: string;
+  timeAndSpaceCapSchemaSha256: string;
+  syntheticCredentialHandleSchemaSha256: string;
+  migrationInputSchemaSha256: string;
+  cleanupProofSchemaSha256: string;
+  loopbackOnly: true;
+  noEgress: true;
+  retainedResourceAllowed: false;
+}>;
+
+type DisposablePostgresControllerRequest = Readonly<{
+  schemaVersion: "organization-identity-disposable-postgres-controller-request/v1";
+  requestId: string;
+  operation: "0M_COMPATIBILITY" | "B6_MIXED_FLEET";
+  contractSha256: string;
+  materializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  authorizationReceiptSha256: string;
+  syntheticCredentialHandle: CredentialHandleBinding;
+  imageDigest: string;
+  topologySha256: string;
+  resourceLabelSetSha256: string;
+  timeAndSpaceCapSha256: string;
+  migrationInputSetSha256: string;
+  scenarioSetSha256: string;
+  cleanupPlanSha256: string;
+  outputRecordPath: string;
+}>;
+
+type DisposablePostgresControllerReceipt = Readonly<{
+  schemaVersion: "organization-identity-disposable-postgres-controller-receipt/v1";
+  contractSha256: string;
+  controllerReviewReceiptSha256: string;
+  operation: "0M_COMPATIBILITY" | "B6_MIXED_FLEET";
+  requestId: string;
+  requestSha256: string;
+  authorizationReceiptSha256: string;
+  imageDigest: string;
+  topologySha256: string;
+  resourceSetSha256: string;
+  migrationInputSetSha256: string;
+  syntheticCredentialHandleSha256: string;
+  scenarioResultSetSha256: string;
+  cleanupProofSha256: string;
+  executableClosureSetSha256: string;
+  prePostToctouSha256: string;
+  containsCredentialValue: false;
+  retainedResources: 0;
+  result: "PASS";
+}>;
+
+type GitleaksControllerContract = Readonly<{
+  schemaVersion: "organization-identity-gitleaks-controller-contract/v1";
+  rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks";
+  requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/requests";
+  outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/outputs";
+  controllerSourceBlobId: string;
+  controllerSourceSha256: string;
+  executableClosure: readonly ExternalControllerExecutableEntry[];
+  requiredRoles: readonly ["NODE", "GITLEAKS"];
+  allowedEnvironmentNames: readonly [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+  ];
+  configPath: ".gitleaks.toml";
+  configBlobId: string;
+  configSha256: string;
+  requestSchemaSha256: string;
+  resultSchemaSha256: string;
+  credentialIngressAllowed: false;
+}>;
+
+type GitleaksControllerRequest = Readonly<{
+  schemaVersion: "organization-identity-gitleaks-controller-request/v1";
+  requestId: string;
+  contractSha256: string;
+  materializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  authorizationReceiptSha256: string;
+  subjectCommit: string;
+  sourceTreeSha256: string;
+  configBlobId: string;
+  configSha256: string;
+  redact: true;
+  noBanner: true;
+  outputRecordPath: string;
+}>;
+
+type GitleaksControllerReceipt = Readonly<{
+  schemaVersion: "organization-identity-gitleaks-controller-receipt/v1";
+  contractSha256: string;
+  controllerReviewReceiptSha256: string;
+  requestId: string;
+  requestSha256: string;
+  authorizationReceiptSha256: string;
+  subjectCommit: string;
+  sourceTreeSha256: string;
+  configBlobId: string;
+  executableClosureSetSha256: string;
+  findingSetSha256: string;
+  redactionVerified: true;
+  result: "PASS";
+}>;
+
+type ProtectedBaseLauncherContract = Readonly<{
+  schemaVersion: "organization-identity-protected-base-launcher-contract/v1";
+  workflowPath: ".github/workflows/organization-identity-writer-anchor.yml";
+  workflowBlobId: string;
+  protectedBaseCommit: string;
+  launcherSourceBlobId: string;
+  bootstrapSourceBlobId: string;
+  commandRegistrySha256: string;
+  bootstrapContractSha256: string;
+  toolLogicalExpectationSetSha256: string;
+  runnerOs: "linux";
+  runnerArchitecture: string;
+  allowedEnvironmentNames: readonly [
+    "GITHUB_ACTIONS",
+    "GITHUB_EVENT_PATH",
+    "GITHUB_REPOSITORY",
+    "GITHUB_REF",
+    "GITHUB_SHA",
+    "GITHUB_RUN_ID",
+    "GITHUB_RUN_ATTEMPT",
+    "RUNNER_OS",
+    "RUNNER_ARCH",
+    "RUNNER_TEMP",
+    "GITHUB_TOKEN_HANDLE",
+  ];
+  hostedMaterializationSchemaSha256: string;
+  eventInputSchemaSha256: string;
+  controllerVariableNameSetSha256: string;
+  githubControllerContractSha256: string;
+  prBytesExecutable: false;
+}>;
+
+type ProtectedBaseLaunchRequest = Readonly<{
+  schemaVersion: "organization-identity-protected-base-launch-request/v1";
+  requestId: string;
+  contractSha256: string;
+  protectedBaseCommit: string;
+  workflowBlobId: string;
+  event: "push" | "pull_request_target";
+  eventInputPath: string;
+  eventInputSha256: string;
+  repository: "mlhjyx/global-backend";
+  ref: string;
+  headSha: string;
+  runId: number;
+  runAttempt: number;
+  controllerVariableSetSha256: string;
+  githubControllerReceiptSetSha256: string;
+  prTreeDataSha256: string | null;
+  localEquivalenceInputSha256: string;
+  outputRecordPath: string;
+}>;
+
+type ProtectedBaseLauncherReceipt = Readonly<{
+  schemaVersion: "organization-identity-protected-base-launcher-receipt/v1";
+  contractSha256: string;
+  contractReviewReceiptSha256: string;
+  workflowBlobId: string;
+  protectedBaseCommit: string;
+  event: "push" | "pull_request_target";
+  repository: "mlhjyx/global-backend";
+  ref: string;
+  runId: number;
+  runAttempt: number;
+  runnerOs: "linux";
+  runnerArchitecture: string;
+  runnerUid: number;
+  materializedTaskRootSha256: string;
+  materializedSourceBlobSetSha256: string;
+  executableClosureSetSha256: string;
+  toolLogicalIdentitySetSha256: string;
+  eventInputSha256: string;
+  controllerVariableSetSha256: string;
+  requestSetSha256: string;
+  outputReceiptSetSha256: string;
+  prePostToctouSha256: string;
+  prBytesExecuted: false;
+  result: "PASS";
+}>;
+
+type ProtectedBaseLauncherReceiptReview = Readonly<{
+  schemaVersion: "organization-identity-protected-base-launcher-receipt-review/v1";
+  contractSha256: string;
+  contractReviewReceiptSha256: string;
+  protectedBaseLauncherReceiptSha256: string;
+  reportSha256: string;
+  counterexampleSetSha256: string;
+  reviewerClass: "INDEPENDENT_HOSTED_LAUNCHER_REVIEW";
+  critical: 0;
+  important: 0;
+  verdict: "PASS";
+}>;
+```
+
+`ControllerReviewReceipt.materializationReceiptSha256` is non-null for the root-materialized GitHub/Gitleaks/disposable controllers. It is null only for Task 6's pre-run protected-base contract/source review; the first hosted materialization is instead bound by `ProtectedBaseLauncherReceipt` and its independent `ProtectedBaseLauncherReceiptReview` in Task 9. No null is accepted for a controller operation receipt.
+
+The root-only wrapper accepts exactly one path to a discriminated `ClosedCommandRequest` below `LauncherContract.requestRoot`. It performs no shell evaluation and gives the request to the pinned absolute Node executable as `/usr/bin/env -i <exact-local-environment> <pinned-node> <root-launcher.mjs> --request <path>`. Before dispatch, the stdlib launcher verifies request/root owner, mode, realpath, device, inode, create-exclusive provenance, canonical bytes, content-addressed URI, payload schema/digest and exact output path; it rejects unknown/extra JSON keys, filename-derived inputs, arbitrary argv, free-form commands, unregistered modes/environment names, reused request IDs, non-owned/symlinked paths and receipt drift before any non-`node:` dependency load.
+
+The local registry is deliberately limited to bootstrap, scanner, tests, static repository verification, local source Git transitions and v3 worktree creation using only the exact `ENV`/`NODE`/`GIT`/Corepack/pnpm closure. It contains no fetch/push/PR/GitHub/workflow/controller-variable, Gitleaks, Docker, `psql`, disposable PostgreSQL or root-anchor command. A current interactive shell, `jq`, repository package script, credential value, unlisted executable or PR-controlled workflow byte is never part of a local authority claim.
+
+`requestId` is the lowercase SHA-256 of canonical `(taskId, commandId, mode, subjectCommit, inputRecordSha256, payloadSchemaSha256, payloadSha256, authorizationReceiptSha256, externalControllerReceiptSha256, anchorReceiptSha256)`. `inputRecordUri` is exactly `sha256:<inputRecordSha256>`. Input and output basenames are exactly `<taskId>-<commandId-lowercase>-<requestId>.input.json` and `.output.json` below the contract roots; the validator rejects every alternate path or existing output. Each request variant's `parameters` is the complete canonical content of its typed input record, so no neighboring file, filename convention, hidden flag or ambient environment supplies an argument.
+
+`SCOPED_REVIEW_VERIFY_V1/VERIFY` parses `ScopedReviewReceipt`, recomputes subject/range/path/report/counterexample digests, and rejects extra/missing keys, duplicate/conflicting severity fields, any nonzero Critical/Important, or a verdict other than PASS. For the launcher's own first review, the external reviewer also performs three separate exact assertions—`rg -qx 'Critical: 0'`, `rg -qx 'Important: 0'`, `rg -qx 'Verdict: PASS'`—and proves each label occurs exactly once before trusting the new verifier. Those direct assertions are bootstrap-of-trust checks only; every later machine review gate uses the exact mode.
+
+The immutable `BootstrapContract` contains only exact-key schemas, derivation/comparison rules, local allowed environment names, pnpm argv policy and logical tool/version expectations. It contains no subject commit, subject configuration/absence digest, task root, realpath, inode, environment value, generated output or timestamp. `BootstrapRunReceipt` contains all of those per-command observations and binds exactly one request ID, command ID, mode, task ID, typed input/payload, output, subject, authorization/external-controller/anchor receipts and external launch. Reusing one receipt for a second command/request is `BOOTSTRAP_RECEIPT_REPLAY`; a task with multiple commands creates one receipt per command and a sorted `BootstrapRunReceiptSet` only for aggregation.
+
+Validation uses this fixed algorithm:
+
+1. Validate exact keys and schemas for contract, request, external launch and run receipt; reject any field path absent from the receipt schema or any purported variable path absent from `perRunVariableFieldPaths`.
+2. Recompute the contract/launcher/materialization/review digests, request canonical SHA, typed input URI/path/SHA, payload schema/SHA, internally derived argv SHA and create-exclusive output path before loading dependencies.
+3. Derive `subjectConfigurationSetSha256`, `subjectAbsenceSentinelSetSha256` and `subjectGitClosureSha256` from the exact run subject using the contract's invariant derivation rules. Compare them with the run receipt and the admitted current-main path dispositions; never compare them to an older B0 run.
+4. Resolve every subject lock entry against `toolLogicalExpectations`; logical package/version/role/derivation rules must be invariant, while lock integrity, resolved realpath, loaded file set and TOCTOU are fresh nested run fields validated from current bytes.
+5. Require the exact environment-name set; validate each fresh HOME/XDG/Corepack/pnpm/TMP/config value is below the current task root and hash it into `environmentValueSetSha256`. No unnamed environment or receipt field is normalizable.
+6. Recompute task-root containment, device/inode/mode, dependency/tool roots, Prisma/generated outputs, hostile-marker zero, pre/post TOCTOU and output receipt; then atomically issue exactly one `BootstrapRunReceipt` for that request.
+
+An admitted main change to package/config/sentinel bytes changes the subject-bound run digests and is either accepted by the unchanged derivation rules plus exact `CurrentMainAdmission` dispositions or returns `BUILD_SURFACE_DRIFT/HOLD`. It does not regenerate the immutable contract. A change to command/request schemas, derivation/comparator rules, allowed environment names, logical tool/version/role expectations or launcher/bootstrap source requires a separately reviewed new contract and new root materialization; no task silently evolves it.
 
 The authority pnpm invocation is exactly `install --frozen-lockfile --ignore-scripts --ignore-pnpmfile` with `ignorePnpmfile=true`, `NPM_CONFIG_USERCONFIG=/dev/null`, and fixed store/virtual-store/modules/cache/config roots under the fresh task root. Before pnpm, the root controller verifies accepted Git blobs and required absence for package/workspace/lock/bootstrap/test files, `.dockerignore`, `.npmrc`, every `.pnpmfile*`, `patches/`, hook/config-dependency inputs and all executable/config/storage selectors. After install it rehashes bootstrap inode/realpath/digest. Prisma generation precedes generated-output verification; TypeScript/scanner modules are loaded only by dynamic import after all preflight receipts pass.
 
-Every later reference to an “authority run” means this exact outer form, with the request bytes written create-exclusively by the root/base controller and already bound to its declared command ID, subject, contract, fresh run receipt and optional anchor:
+Every later reference to a local “authority run” means this exact outer form, with the request/input bytes written create-exclusively by the root controller and bound to the declared command ID/mode, subject, contract, authorization/external-controller receipt, optional anchor and one fresh command receipt:
 
 ```bash
 /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch \
   --request /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests/task-0a-current-main-validate.json
 ```
 
-The displayed Task 0A request is the concrete form; every task below names its exact `ClosedCommandId` and canonical request filename/digest in that task's receipt. Direct `node`, `pnpm`, `git`, `gh`, `jq`, `rg` or `gitleaks` blocks document either a non-authority development diagnostic or the internal closed-command expansion that the root launcher must reproduce; none alone can satisfy the named gate.
+The displayed Task 0A request is the concrete local form; every task below names its exact `ClosedCommandId`/mode, canonical request/input/output path and fresh receipt. Direct `node`, `pnpm`, local `git`, `jq` or `rg` blocks document non-authority diagnostics or internal local expansions. Direct `gh`, remote `git`, Gitleaks, Docker or `psql` blocks are diagnostics only: authority for those operations exists solely through the matching independently authorized `GitHubControllerReceipt`, `GitleaksControllerReceipt` or `DisposablePostgresControllerReceipt`, which the local launcher may verify as data but never execute.
+
+Each external controller contract/materialization and each state-changing request has its own exact authorization and independent zero-Critical/zero-Important/PASS `ControllerReviewReceipt`. Executable closure, request/payload/result schemas and credential-handle scope are fixed before execution. Credential receipts contain only handle/scope digests; secret values never enter requests, outputs, logs or durable receipts.
 
 ### Current-main admission contracts and validator API
 
@@ -378,6 +1379,10 @@ type AuditReviewReceipt = Readonly<{
   schemaVersion: "organization-identity-current-main-audit-review/v1";
   disposition: "PASS" | "FETCH_AUTH_REQUIRED";
   auditPacketSha256: string;
+  githubControllerContractSha256: string;
+  githubControllerReviewReceiptSha256: string;
+  protectedMainReadbackReceiptSha256: string;
+  localBootstrapRunReceiptSetSha256: string;
   branchPreRefreshCommit: string;
   advertisedLiveMainCommit: string;
   mergeBaseCommit: string | null;
@@ -783,8 +1788,9 @@ type WriterBaseline = Readonly<{
   artifactACommit: "2400bac28796bae44294114edc99eaccb1bd65b3";
   launcherContractSha256: string;
   launcherMaterializationReceiptSha256: string;
+  launcherMaterializationReviewReceiptSha256: string;
   bootstrapContract: BootstrapContract;
-  baselineBootstrapRunReceiptSha256: string;
+  baselineBootstrapRunReceiptSetSha256: string;
   admissionRoot: Readonly<{
     path: "apps/api/src";
     classification: "CONSERVATIVE_ADMISSION_ROOT";
@@ -927,6 +1933,7 @@ type B0Acceptance = Readonly<{
   bootstrap: Readonly<{
     launcherContractSha256: string;
     launcherMaterializationReceiptSha256: string;
+    launcherMaterializationReviewReceiptSha256: string;
     bootstrapContractSchemaSha256: string;
     bootstrapContractBlobId: string;
     bootstrapContractSha256: string;
@@ -935,8 +1942,22 @@ type B0Acceptance = Readonly<{
     bootstrapTestBlobId: string;
     bootstrapTestSha256: string;
     runReceiptSchemaSha256: string;
-    implementationRunReceiptSha256: string;
-    allowedRunFieldSetSha256: string;
+    taskRunReceiptSets: readonly Readonly<{
+      taskId: TaskId;
+      subjectCommit: string;
+      receiptSetSha256: string;
+    }>[];
+    perRunVariableFieldPathSetSha256: string;
+  }>;
+  externalControllers: Readonly<{
+    githubContractSha256: string;
+    githubControllerReviewReceiptSha256: string;
+    gitleaksContractSha256: string;
+    gitleaksControllerReviewReceiptSha256: string;
+    disposablePostgresContractSha256: string;
+    disposableControllerReviewReceiptSha256: string;
+    protectedBaseLauncherContractSha256: string;
+    protectedBaseContractReviewReceiptSha256: string;
   }>;
   b0m: MigrationAuthority["b0m"];
   protectedAnchorWorkflow: Readonly<{
@@ -987,10 +2008,26 @@ type ProtectedMainAnchor = Readonly<{
   reviewedImplementationSha: string;
   acceptedB0Sha: string;
   acceptanceReviewSha256: string;
-  launcherContractSha256: string;
-  launcherMaterializationReceiptSha256: string;
-  bootstrapContractSha256: string;
-  bootstrapContractSchemaSha256: string;
+  localLauncher: Readonly<{
+    contractSha256: string;
+    materializationReceiptSha256: string;
+    materializationReviewReceiptSha256: string;
+    bootstrapContractSha256: string;
+    bootstrapContractSchemaSha256: string;
+  }>;
+  hostedLauncher: Readonly<{
+    contractSha256: string;
+    receiptSha256: string;
+    contractReviewReceiptSha256: string;
+    receiptReviewSha256: string;
+    equivalenceProofSha256: string;
+  }>;
+  githubController: Readonly<{
+    contractSha256: string;
+    materializationReceiptSha256: string;
+    controllerReviewReceiptSha256: string;
+    mergeAndReadbackReceiptSetSha256: string;
+  }>;
   pullRequest: Readonly<{
     number: number;
     headSha: string;
@@ -1022,39 +2059,45 @@ type ProtectedMainAnchor = Readonly<{
 }>;
 ```
 
-Local admission accepts this record only from the exact root-owned `0700` successor directory supplied with the closed command request. The ordered `mergeParents` must be `[admittedLiveMainSha, acceptedB0Sha]`; ancestry without ordered-parent equality is insufficient. Every local B1–B6 request binds a fresh `BootstrapRunReceipt` whose contract digest equals this anchor's accepted bootstrap contract. Hosted admission accepts only `GITHUB_ACTIONS=true`, an exact pull-request/base or protected-main push event read from `GITHUB_EVENT_PATH`, and controller-owned repository variables for the admitted main, accepted/review/launcher/bootstrap identities, ordered parents, and merge method. The base-owned workflow runs the accepted launcher/bootstrap bytes from protected main or an equivalent root controller; a PR cannot supply executable bootstrap/launcher bytes, controller values, package scripts, artifacts, job output, or command requests.
+Local admission accepts this record only from the exact root-owned `0700` successor directory supplied with the closed command request. The ordered `mergeParents` must be `[admittedLiveMainSha, acceptedB0Sha]`; ancestry without ordered-parent equality is insufficient. Every local B1–B6 command has its own fresh `BootstrapRunReceipt`; a task review binds the sorted receipt-set digest.
+
+Hosted admission requires exact `ProtectedBaseLauncherContract` and `ProtectedBaseLauncherReceipt`; no unspecified hosted fallback is accepted. The equivalence verifier compares exact launcher/bootstrap source blobs, command registry digest, bootstrap contract digest/schema, request/output schema digests and logical tool/version/role expectation set. It deliberately does not compare the local Ubuntu root path, UID/GID, device/inode or absolute tool paths: the hosted receipt independently binds its runner UID, materialized task root, resolved executable closure, event/ref/repository/run/controller-variable inputs and TOCTOU. Any logical/source/schema mismatch is `PROTECTED_BASE_EQUIVALENCE_HOLD`.
+
+The base-owned workflow obtains remote/event facts only through the reviewed GitHub controller contract/receipt and executes only the protected-base materialization. A PR may be fetched as a Git tree below the fixed data root, but no PR action, script, package hook, generated executable, workflow, config, launcher, bootstrap, request or controller value may execute.
 
 ## Task Dependencies, Review Units, and Critical Path
 
-| Task | Produces                                                                                                | Consumed by         | Dependency                                                                  |
-| ---- | ------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------- |
-| 0L   | Reviewed tracked closed-command launcher; after 0P, separately authorized root-only materialization     | 0P, then 0A–18      | Exact approved plan; root phase separately requires 0P PASS and exact auth  |
-| 0P   | Reviewed immutable bootstrap contract/fresh-run engine and hostile no-exec tests                        | 0L root phase/0A–18 | 0L tracked launcher scoped review PASS                                      |
-| 0A   | Reviewed minimal current-main admission validator/contracts consuming launcher/bootstrap                | 0B/0F/0C and 1–8    | 0P PASS plus 0L root materialization/review PASS                            |
-| 0B   | Reviewed no-fetch packet with `PASS`, `HOLD`, or `FETCH_AUTH_REQUIRED`                                  | 0F or 0C            | 0A scoped review PASS                                                       |
-| 0F   | Exact fetch-only object receipt; no merge                                                               | 0B rerun only       | Independently reviewed `FETCH_AUTH_REQUIRED` plus exact fetch authorization |
-| 0C   | Exact two-parent refresh merge, one-parent admission commit, post-refresh review                        | 0M and 1–9          | Full rerun of 0B yields PASS plus separate local-merge authorization        |
-| 0M   | Sole compatibility migration, static/disposable receipts and independent DB/security reviews            | 1–8 and B4M         | 0C PASS plus migration-file and separate disposable authorizations          |
-| 1    | Closed scanner contracts, CLI shell, refreshed build/bootstrap-surface RED                              | 2–6                 | Separate scanner auth; HEAD descends from accepted `B0M_MIGRATION_COMMIT`   |
-| 2    | Delegate/capability-boundary engine                                                                     | 4–8 and every stage | 1                                                                           |
-| 3    | Raw/wrapper/dependency-closure engine                                                                   | 4–8 and every stage | 1                                                                           |
-| 4    | Final stage/derivation/resource/filesystem/redaction/anchor engine, reviewed before baseline generation | 5 and 6–8/B1–B6     | 2 and 3                                                                     |
-| 5    | Reviewed refreshed build/raw/migration baselines plus Artifact A Identity authority/six-receipt intake  | 6–8                 | 4 final scanner/derivation review PASS                                      |
-| 6    | Root package/governance/workflow/runtime-exclusion wiring                                               | 7 and 8             | 5                                                                           |
-| 7    | Exact `B0_IMPLEMENTATION` review head and independent whole-review digest                               | 8                   | 1–6                                                                         |
-| 8    | One-path accepted B0 commit and scoped acceptance review                                                | 9                   | 7                                                                           |
-| 9    | Authorized protected-main merge identity and branch-external anchor                                     | 10                  | 8 plus separate external authorizations                                     |
-| 10   | Exact v3 branch/worktree from protected-main merge                                                      | 11                  | 9 plus explicit local execution approval                                    |
-| 11   | B1 Temporal five-outcome/replay RED                                                                     | 12                  | 10                                                                          |
-| 12   | B2 Temporal resolver cutover, `3 → 2`                                                                   | 13                  | 11                                                                          |
-| 13   | B3 projection five-outcome/chunk/replay RED                                                             | 14                  | 12                                                                          |
-| 14   | B4 projection resolver cutover, `2 → 1`                                                                 | 15                  | 13                                                                          |
-| 15   | B4M materialization resolver cutover, `1 → 0`                                                           | 16                  | 14                                                                          |
-| 16   | B5 mandatory zero and downstream/governance promotion                                                   | 17                  | 15                                                                          |
-| 17   | B6 mixed-fleet/replay/race/disposable proof                                                             | 18                  | 16 plus separate disposable-resource authorization                          |
-| 18   | Independent whole Artifact B code/security/database review                                              | Handoff only        | 17                                                                          |
+| Task | Produces                                                                                                | Consumed by         | Dependency                                                                |
+| ---- | ------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------- |
+| 0L   | Reviewed local launcher plus external-controller contracts; separately authorized local materialization | 0P, then 0A–18      | Exact approved plan; local root phase requires 0P PASS and exact auth     |
+| 0P   | Reviewed immutable bootstrap contract/fresh-run engine and hostile no-exec tests                        | 0L root phase/0A–18 | 0L tracked launcher scoped review PASS                                    |
+| 0A   | Reviewed minimal current-main admission validator/contracts consuming launcher/bootstrap                | 0B/0F/0C and 1–8    | 0P PASS plus 0L root materialization/review PASS                          |
+| 0B   | Reviewed no-fetch packet with `PASS`, `HOLD`, or `FETCH_AUTH_REQUIRED`                                  | 0F or 0C            | 0A PASS plus separately reviewed GitHub controller/readback receipt       |
+| 0F   | Exact GitHub-controller fetch-only object receipt; no merge                                             | 0B rerun only       | Reviewed `FETCH_AUTH_REQUIRED` plus exact fetch request authorization     |
+| 0C   | Exact two-parent refresh/admission pair, external Gitleaks receipt and post-refresh review              | 0M and 1–9          | 0B PASS, Gitleaks controller PASS and separate local-merge/tool auth      |
+| 0M   | Sole migration, local static plus external disposable receipts and DB/security reviews                  | 1–8 and B4M         | 0C PASS plus migration-file/controller/disposable authorizations          |
+| 1    | Closed scanner contracts, CLI shell, refreshed build/bootstrap-surface RED                              | 2–6                 | Separate scanner auth; HEAD descends from accepted `B0M_MIGRATION_COMMIT` |
+| 2    | Delegate/capability-boundary engine                                                                     | 4–8 and every stage | 1                                                                         |
+| 3    | Raw/wrapper/dependency-closure engine                                                                   | 4–8 and every stage | 1                                                                         |
+| 4    | Final stage/derivation/resource/filesystem/redaction/anchor engine, reviewed before baseline generation | 5 and 6–8/B1–B6     | 2 and 3                                                                   |
+| 5    | Reviewed refreshed build/raw/migration baselines plus Artifact A Identity authority/six-receipt intake  | 6–8                 | 4 final scanner/derivation review PASS                                    |
+| 6    | Package/governance/runtime wiring plus reviewed protected-base launcher contract                        | 7 and 8             | 5                                                                         |
+| 7    | Exact `B0_IMPLEMENTATION` review head and independent whole-review digest                               | 8                   | 1–6                                                                       |
+| 8    | One-path accepted B0 commit and scoped acceptance review                                                | 9                   | 7                                                                         |
+| 9    | GitHub-controller operations, protected-base receipt and branch-external anchor                         | 10                  | 8 plus each separate external/controller/root authorization               |
+| 10   | Exact v3 branch/worktree from protected-main merge                                                      | 11                  | 9 plus explicit local execution approval                                  |
+| 11   | B1 Temporal five-outcome/replay RED                                                                     | 12                  | 10                                                                        |
+| 12   | B2 Temporal resolver cutover, `3 → 2`                                                                   | 13                  | 11                                                                        |
+| 13   | B3 projection five-outcome/chunk/replay RED                                                             | 14                  | 12                                                                        |
+| 14   | B4 projection resolver cutover, `2 → 1`                                                                 | 15                  | 13                                                                        |
+| 15   | B4M materialization resolver cutover, `1 → 0`                                                           | 16                  | 14                                                                        |
+| 16   | B5 mandatory zero and downstream/governance promotion                                                   | 17                  | 15                                                                        |
+| 17   | B6 mixed-fleet/replay/race/disposable proof                                                             | 18                  | 16 plus separate disposable-resource authorization                        |
+| 18   | Independent whole Artifact B code/security/database review                                              | Handoff only        | 17                                                                        |
 
-Critical path is `0L tracked RED/GREEN/commit/review → 0P bootstrap RED/GREEN/commit/review → separate root-materialization auth → 0L root materialization/review → 0A → 0B → [object missing: reviewed FETCH_AUTH_REQUIRED → exact fetch auth → 0F → full 0B rerun] → 0B PASS → separate local-merge auth → 0C → separate 0M migration-file auth → 0M static review → separate disposable auth → 0M disposable/DB/security reviews → separate scanner auth → 1 → 2/3 → 4 → 5 → 6 → live-main recheck → 7 → 8 → remote gates 9 → post-merge readback/fetch gates → 10 → 11–18`. Task 0B may parallelize only read-only classification after `ls-remote`; 0F never merges. Tasks 1–6 execute as descendants of `B0M_MIGRATION_COMMIT`, while product build/raw baselines read `B0_REFRESH_BASE_COMMIT` and migration authority reads the accepted refresh directory plus exact 0M delta. No scanner/derivation byte may change after Task 5's raw review without full Task 5 regeneration/review. Every committed unit ends at a scoped review/fix-loop barrier.
+Critical path is `0L tracked launcher/controller RED/GREEN/commit/review → 0P bootstrap review → separate local root-materialization auth/review → 0A → separate GitHub-controller materialization auth/review → 0B → [missing object: reviewed FETCH_AUTH_REQUIRED → exact GitHub-controller fetch auth → 0F → full 0B rerun] → 0B PASS → separate Gitleaks-controller materialization/request auth → separate local-merge auth → 0C → separate 0M migration-file auth → separate disposable-controller materialization/request auth → 0M reviews → separate scanner auth → 1 → 2/3 → 4 → 5 → 6 protected-base contract review → live-main controller readback → 7 → 8 → operation-by-operation GitHub/root gates in 9 → 10 → 11–18`. Read-only local classification may parallelize only after the exact remote readback receipt; 0F never merges. Tasks 1–6 execute as descendants of `B0M_MIGRATION_COMMIT`; baselines read `B0_REFRESH_BASE_COMMIT`. No scanner/derivation byte may change after Task 5 raw review without full regeneration/review. Every committed unit ends at a scoped review/fix-loop barrier.
+
+Receipt cardinality is part of every dependency edge: each local request/mode creates exactly one fresh `BootstrapRunReceipt`; the task review verifies `receiptCount === requestCount`, exact sorted request/receipt entries and `BootstrapRunReceiptSet.receiptSetSha256`. External controller operations create their own controller receipts and are referenced by digest, never counted as or substituted for local bootstrap receipts. A review/gate command itself is another local request and therefore has its own receipt.
 
 ## V2 Delivery: Current-Main Refresh, B0 Implementation, and Local Acceptance
 
@@ -1064,21 +2107,31 @@ Critical path is `0L tracked RED/GREEN/commit/review → 0P bootstrap RED/GREEN/
 
 - Create: `scripts/governance-organization-identity-launcher.mjs`
 - Create: `scripts/governance-organization-identity-launcher.spec.mjs`
+- Create: `scripts/governance-organization-identity-controller-contracts.mjs`
+- Create: `scripts/governance-organization-identity-controller-contracts.spec.mjs`
+- Create: `scripts/governance-organization-identity-github-controller.mjs`
+- Create: `scripts/governance-organization-identity-github-controller.spec.mjs`
+- Create: `scripts/governance-organization-identity-disposable-postgres-controller.mjs`
+- Create: `scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs`
+- Create: `scripts/governance-organization-identity-gitleaks-controller.mjs`
+- Create: `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`
 - Create local review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0l-launcher-review.md`
 - Create local review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0l-launcher-review.json`
 - Create only after separate root-write authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`
 - Create only after separate root-write authorization and Task 0P PASS: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch.mjs`
 - Create only after separate root-write authorization and Task 0P PASS: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-bootstrap.mjs`
 - Create only after separate root-write authorization and Task 0P PASS: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-contract.json`
-- Create only after separate root-write authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization.json`
-- Create only after separate root-write authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-review.json`
+- Create only after four-file fsync and independent readback: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-readback.json`
+- Create by the root materialization controller only after four-file fsync and readback report: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization.json`
+- Create by the independent reviewer only after verifying the materialization receipt: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-review.json`
 - Test: `scripts/governance-organization-identity-launcher.spec.mjs`
+- Test: all four `scripts/governance-organization-identity-*-controller.spec.mjs` files above.
 - Read-only: exact approved plan/spec Git blobs; `/usr/bin/env`; pinned absolute Node/Git/Corepack/pnpm executable closure; after Task 0P, exact reviewed bootstrap source/test/contract identities.
 
 **Interfaces:**
 
-- Consumes: exact approved plan commit/blob/SHA; final spec commit/blob/SHA; the `ClosedCommandId`, `ClosedCommandRequest`, `LauncherContract`, `LauncherMaterializationReceipt`, `BootstrapContract`, and `BootstrapRunReceipt` schemas. Its second phase additionally consumes final reviewed Task 0P bootstrap commit/report/receipt and a separate exact root-materialization authorization naming all source/target digests and modes.
-- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, a reviewed tracked launcher commit, and—only after the later root authorization—a root-owned exact launcher/bootstrap/contract materialization plus independent read-only receipt review. It never accepts arbitrary command strings or package executables.
+- Consumes: exact approved plan commit/blob/SHA; final spec commit/blob/SHA; local launcher/request/bootstrap schemas; GitHub/Gitleaks/disposable/protected-base controller contracts; final reviewed Task 0P bootstrap commit/report/receipt; and separate exact local/external materialization authorizations.
+- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateGitHubControllerReceipt`, `validateDisposablePostgresControllerReceipt`, `validateGitleaksControllerReceipt`, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four-file launcher materialization/readback/materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables or credentials.
 
 **Commit message:** `feat: add closed identity governance launcher`
 
@@ -1088,7 +2141,9 @@ Run only after this exact plan is independently approved and committed. Use `mkd
 
 - [ ] **Step 2: Write exact parser/closure/permission RED tests**
 
-Test every exact schema key and enum plus mutations for an extra argv, arbitrary command, shell metacharacter, unknown environment name, inherited `NODE_OPTIONS`/`NODE_PATH`, accessor/proxy JSON surrogate, relative/out-of-root request, symlink, wrong owner/mode, inode replacement and malformed canonical bytes. Assert complete executable closure equality, including separate entries for `COREPACK_SHIM`, `COREPACK_LIB_COREPACK_CJS`, `PNPM_SHIM`, and `PNPM_ENTRYPOINT`.
+Test every exact schema key and enum plus mutations for an extra argv, arbitrary command/mode, shell metacharacter, unknown environment name, inherited `NODE_OPTIONS`/`NODE_PATH`, accessor/proxy JSON surrogate, relative/out-of-request-root input/output, wrong content-addressed URI, payload-schema mismatch, request replay, receipt reuse, symlink, wrong owner/mode, inode replacement and malformed canonical bytes. Assert complete local executable closure equality, including separate entries for `COREPACK_SHIM`, `COREPACK_LIB_COREPACK_CJS`, `PNPM_SHIM`, and `PNPM_ENTRYPOINT`. Assert GitHub/Gitleaks/Docker/psql IDs are absent from the local registry.
+
+Add external-controller mutations for omitted GH/Git/Gitleaks/Docker/psql/Prisma/Corepack files, credential value in a durable record, open operation/payload/result, PR byte execution, unbound event/controller variable, non-loopback/egress disposable topology, resource-cap/cleanup omission and cross-controller receipt substitution.
 
 ```js
 test("rejects an executable-looking value outside the closed registry", async () => {
@@ -1108,6 +2163,11 @@ test("rejects an executable-looking value outside the closed registry", async ()
 
 ```bash
 node --test scripts/governance-organization-identity-launcher.spec.mjs
+node --test \
+  scripts/governance-organization-identity-controller-contracts.spec.mjs \
+  scripts/governance-organization-identity-github-controller.spec.mjs \
+  scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
 ```
 
 Expected: FAIL because the launcher module does not exist. This direct local Node run is development evidence only and cannot satisfy an authority gate.
@@ -1118,15 +2178,28 @@ Use only `node:` built-ins with no static/imported package dependency. Parse can
 
 - [ ] **Step 5: Implement the closed dispatcher and reviewed wrapper content contract**
 
-`dispatchClosedCommand` uses an exhaustive `switch` over the literal `ClosedCommandId` union and constructs each complete argv internally. The root wrapper content is fixed and reviewed: it accepts exactly `--request ABSOLUTE_REQUEST_PATH`, rejects every other argc/flag, and `exec`s `/usr/bin/env -i` with only the contract's eleven environment names, `NPM_CONFIG_USERCONFIG=/dev/null`, the contract-selected absolute Node, the root `identity-writer-launch.mjs`, and that request. It performs no `eval`, command substitution, PATH lookup, JSON parsing, `jq`, sourcing or package load.
+`dispatchClosedCommand` uses an exhaustive `switch` over the local-only `ClosedCommandId` and an exhaustive second switch over each variant's mode; `GIT_REFRESH_START_V1` and `GIT_REFRESH_COMMIT_V1` are separate. It opens the typed input record, validates that its canonical payload equals the request parameters/digests and constructs the complete argv internally. Scanner baseline/stage/acceptance and API test selections accept only their exact mode/suite unions. The root wrapper content is fixed and reviewed: it accepts exactly `--request ABSOLUTE_REQUEST_PATH`, rejects every other argc/flag, and `exec`s `/usr/bin/env -i` with only the contract's eleven environment names, `NPM_CONFIG_USERCONFIG=/dev/null`, the contract-selected absolute Node, the root `identity-writer-launch.mjs`, and that request. It performs no `eval`, command substitution, PATH lookup, JSON parsing, `jq`, sourcing or package load.
 
 - [ ] **Step 6: Run local GREEN, mutation tests, and diff check**
 
 ```bash
 node --test scripts/governance-organization-identity-launcher.spec.mjs
+node --test \
+  scripts/governance-organization-identity-controller-contracts.spec.mjs \
+  scripts/governance-organization-identity-github-controller.spec.mjs \
+  scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
 git diff --check -- \
   scripts/governance-organization-identity-launcher.mjs \
-  scripts/governance-organization-identity-launcher.spec.mjs
+  scripts/governance-organization-identity-launcher.spec.mjs \
+  scripts/governance-organization-identity-controller-contracts.mjs \
+  scripts/governance-organization-identity-controller-contracts.spec.mjs \
+  scripts/governance-organization-identity-github-controller.mjs \
+  scripts/governance-organization-identity-github-controller.spec.mjs \
+  scripts/governance-organization-identity-disposable-postgres-controller.mjs \
+  scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
+  scripts/governance-organization-identity-gitleaks-controller.mjs \
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
 ```
 
 Expected: PASS with zero dependency loads/hostile executions for every rejected request. These remain non-authority development tests because root materialization does not yet exist.
@@ -1135,28 +2208,40 @@ Expected: PASS with zero dependency loads/hostile executions for every rejected 
 
 ```bash
 git add scripts/governance-organization-identity-launcher.mjs \
-  scripts/governance-organization-identity-launcher.spec.mjs
+  scripts/governance-organization-identity-launcher.spec.mjs \
+  scripts/governance-organization-identity-controller-contracts.mjs \
+  scripts/governance-organization-identity-controller-contracts.spec.mjs \
+  scripts/governance-organization-identity-github-controller.mjs \
+  scripts/governance-organization-identity-github-controller.spec.mjs \
+  scripts/governance-organization-identity-disposable-postgres-controller.mjs \
+  scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
+  scripts/governance-organization-identity-gitleaks-controller.mjs \
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
 git commit -m "feat: add closed identity governance launcher"
 LAUNCHER_SOURCE_COMMIT="$(git rev-parse HEAD)"
 ```
 
-The independent reviewer fixes the two-file path set, plan/spec/launcher blob identities, command registry, executable closure, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
+The independent reviewer fixes the ten-file path set, plan/spec/launcher/controller blob identities, local-only command/mode/request registry, all three external controller operation/request/result/executable/credential-handle contracts, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
 
 - [ ] **Step 8: Complete Task 0P, then stop for separate exact root-materialization authorization**
 
-Task 0P now creates/reviews the immutable `BootstrapContract` and bootstrap runner. Return to this step only after its exact final commit/report/receipt exist. Produce a read-only materialization packet containing exact launcher/bootstrap/plan/spec blobs, absolute source/targets, owner/modes, environment, Node/Git/Corepack/pnpm closure (including `lib/corepack.cjs`), contract digest and expected receipt bytes. STOP and request authorization that names this packet digest. Plan approval, launcher review and Task 0P review do not imply this root write.
+Task 0P now creates/reviews the immutable `BootstrapContract` and bootstrap runner. Return to this step only after its exact final commit/report/receipt exist. Produce a read-only local materialization packet containing exact four launcher/bootstrap/plan/spec/contract blobs, request/output roots, owner/modes, environment, Node/Git/Corepack/pnpm closure (including `lib/corepack.cjs`), contract digest and expected chronology. STOP and request authorization that names this packet digest. Plan approval, launcher review and Task 0P review do not imply this root write or any external-controller materialization.
 
 - [ ] **Step 9: Materialize only the exact authorized bytes and modes**
 
-After that authorization, a root controller—not the feature shell—creates only the exact directory and six enumerated files. It uses create-exclusive temporary files inside the exact parent, verifies source Git blobs and SHA-256 before and after copy, `fsync`s file/directory state, atomically renames, then enforces `root:root`, directory `0700`, executable wrapper/launcher/bootstrap `0500`, and JSON receipts `0600`. Existing unexpected paths, links, devices, inode changes, broader modes or digest mismatches are `ROOT_LAUNCHER_MATERIALIZATION_HOLD`; never overwrite or recursively clean.
+After that authorization, the root materialization controller creates the launcher, request and output directories and exactly four controlled files—wrapper, launcher, bootstrap and contract. It uses create-exclusive temporary files inside the exact parent, verifies source Git blobs and SHA-256 before and after copy, `fsync`s each file and directory, atomically renames, then enforces `root:root`, directory/request/output roots `0700`, executable wrapper/launcher/bootstrap `0500`, and contract `0600`. It does not yet create either receipt. Existing unexpected paths, links, devices, inode changes, broader modes or digest mismatches are `ROOT_LAUNCHER_MATERIALIZATION_HOLD`; never overwrite or recursively clean.
 
 - [ ] **Step 10: Independently read back materialization and issue the root receipt**
 
-An independent root-capable reviewer opens every file without following symlinks, verifies owner/mode/device/inode/realpath/size/digest, recompares all approved Git blobs and executable closure entries, executes hostile closed-request counterexamples through the wrapper, and verifies no package dependency loaded before acceptance. It writes exact-key `LauncherMaterializationReceipt` and scoped receipt at mode `0600`; unique exact zero-Critical/zero-Important/PASS assertions are required. Findings abandon the materialization, preserve evidence, and require a new exact authorization before replacement; Task 0A remains blocked.
+An independent root-capable reviewer first opens only the four controlled files and request/output roots without following symlinks, verifies owner/mode/device/inode/realpath/size/digest, recompares approved Git blobs/executable closure, executes hostile closed-request counterexamples, and create-exclusively writes metadata-only `launcher-materialization-readback.json` at `0600`. The root materialization controller then creates `launcher-materialization.json` at `0600`, listing exactly the four controlled files and the two roots and binding the readback report; it does not list or hash itself and contains no review-receipt digest. The independent reviewer reopens/verifies that materialization receipt against the four files/readback report and finally create-exclusively writes `launcher-materialization-review.json`, binding materialization-receipt/report/counterexample digests and unique zero-Critical/zero-Important/PASS. This one-way chain—four files → readback report → materialization receipt → review receipt—has no circular or self digest. Findings abandon the materialization, preserve evidence, and require new exact authorization before replacement; Task 0A remains blocked.
 
 - [ ] **Step 11: Freeze the launcher trust-root inputs**
 
-Record `LAUNCHER_CONTRACT_SHA256`, `LAUNCHER_MATERIALIZATION_RECEIPT_SHA256`, pinned Node absolute path/digest, wrapper/launcher/bootstrap digests, Corepack shim plus `lib/corepack.cjs`, pnpm shim/entrypoint, and root review digest. From this point, every authority-bearing step uses the root wrapper with a canonical `ClosedCommandRequest`; a direct `node`/`pnpm` command shown later is explicitly diagnostic unless immediately labeled as a root-launcher closed-command expansion.
+Record `LAUNCHER_CONTRACT_SHA256`, `LAUNCHER_MATERIALIZATION_RECEIPT_SHA256`, `LAUNCHER_MATERIALIZATION_REVIEW_RECEIPT_SHA256`, pinned Node absolute path/digest, wrapper/launcher/bootstrap digests, request/output-root receipts, Corepack shim plus `lib/corepack.cjs`, pnpm shim/entrypoint and root review digest. From this point, every local authority command uses one canonical request/input/output and one fresh `BootstrapRunReceipt`; direct commands remain diagnostic.
+
+- [ ] **Step 12: Keep each external controller at its own authorization boundary**
+
+Prepare three separate materialization packets for the reviewed GitHub, Gitleaks and disposable PostgreSQL controller sources/contracts. Each packet names only that controller's exact executable closure, environment, opaque credential-handle policy, operation/request/result schemas, root target/modes and review procedure. Do not materialize any controller under Task 0L local-launcher authorization. Task 0B requests the GitHub controller authorization before its first remote readback; Task 0C separately requests Gitleaks controller authorization; Task 0M separately requests disposable controller authorization. Every controller materialization/review receipt is machine-verified before a request authorization is sought.
 
 ### Task 0P: Clean Pre-Execution Bootstrap, Review Contracts, and Independent Review
 
@@ -1203,7 +2288,7 @@ Use `apply_patch` to create `.superpowers/sdd/.gitignore` with exactly `*`, then
 
 - [ ] **Step 3: Write clean-launch and exact-config RED fixtures**
 
-Test exact-key `ExternalLaunchReceipt`, immutable `BootstrapContract`, per-run `BootstrapRunReceipt`, `ToolRootReceipt` and `ScopedReviewReceipt`; exact normalization that permits only the eight enumerated run fields to vary; accepted Git blob/absence verification for package/workspace/lock/bootstrap/test/`.dockerignore`/`.npmrc`/every `.pnpmfile*`/patch/config-dependency/hook input; immutable fresh materialization; fixed root containment; and rejection before a package manager or Node dependency module starts.
+Test exact-key `ExternalLaunchReceipt`, invariant `BootstrapContract`, one-command `BootstrapRunReceipt`, `BootstrapRunReceiptSet`, nested `ToolRootReceipt` and `ScopedReviewReceipt`. Mutate every enumerated `perRunVariableFieldPaths` entry and every unlisted top-level/nested field; require current-subject configuration/absence/lock/root/environment/TOCTOU/generated observations to validate by their invariant derivation rule rather than equality to an older receipt. Test accepted Git blob/absence verification for package/workspace/lock/bootstrap/test/`.dockerignore`/`.npmrc`/every `.pnpmfile*`/patch/config-dependency/hook input, request replay, receipt reuse, immutable fresh materialization, fixed root containment and rejection before a package manager or Node dependency module starts.
 
 - [ ] **Step 4: Write hostile no-execution RED fixtures**
 
@@ -1219,7 +2304,7 @@ Expected: FAIL because the bootstrap module, immutable contract and run-receipt 
 
 - [ ] **Step 6: Implement accepted-subject pre-pnpm verification and immutable materialization**
 
-Use only `node:` built-ins. Verify accepted Git blobs/required absence, `/usr/bin/env`, Node, Git, the Corepack shim and `lib/corepack.cjs`, the pnpm shim/entrypoint and bootstrap identities before constructing a fresh task root. Materialize only accepted package/workspace/lock/bootstrap/config inputs; mutable PR/current-tree bytes remain scanner data and never become installer configuration. Generate the canonical `BootstrapContract` from invariant inputs only; reject subject/time/root/generated-output fields in that contract.
+Use only `node:` built-ins. Verify accepted Git blobs/required absence, `/usr/bin/env`, Node, Git, the Corepack shim and `lib/corepack.cjs`, the pnpm shim/entrypoint and bootstrap identities before constructing a fresh task root. Materialize only accepted package/workspace/lock/bootstrap/config inputs; mutable PR/current-tree bytes remain scanner data and never become installer configuration. Generate the canonical `BootstrapContract` from exact-key/request/output schemas, derivation/comparator rules, allowed environment names and logical tool/version/role expectations only. Explicitly reject subject commits, subject configuration/absence digests, lock integrity, environment values, roots/realpaths/inodes, generated outputs, timestamps or other observations in the contract.
 
 - [ ] **Step 7: Implement the exact clean pnpm command and fixed roots**
 
@@ -1227,7 +2312,7 @@ The bootstrap returns a data-only closed argv/environment record; it never accep
 
 - [ ] **Step 8: Implement post-install rehash, Prisma generation and dynamic imports**
 
-After install, reverify bootstrap inode/device/realpath/digest. The stdlib bootstrap rehashes complete accepted config/sentinel/tool/declaration inputs, then expands exact `pnpm --filter @global/db generate` under the same clean environment, verifies generated schema/client/DMMF/delegate digests and TOCTOU state, and only then dynamically imports accepted TypeScript/compiler/scanner modules. It emits a fresh `BootstrapRunReceipt` whose contract digest is invariant and whose subject/root/inode/time/generated/TOCTOU fields are the only normalized per-run values. Static top-level `import "typescript"` is forbidden in bootstrap/CLI authority entrypoints.
+After install, reverify bootstrap inode/device/realpath/digest. The stdlib bootstrap rehashes the exact current-subject config/sentinel/lock/tool/declaration inputs, then expands exact `pnpm --filter @global/db generate` under the same clean environment, verifies generated schema/client/DMMF/delegate digests and TOCTOU state, and only then dynamically imports accepted TypeScript/compiler/scanner modules. It emits one fresh `BootstrapRunReceipt` for the exact request/command/mode; the receipt binds subject configuration/absence/Git closure, request/input/payload/output identities, environment-value digest and every nested root/TOCTOU observation. Static top-level `import "typescript"` is forbidden in bootstrap/CLI authority entrypoints.
 
 - [ ] **Step 9: Implement closed review-receipt verification**
 
@@ -1243,7 +2328,7 @@ git diff --check -- \
   docs/governance/organization-identity-bootstrap-contract.json
 ```
 
-Expected: PASS; every hostile loaded/executed marker count is exactly zero, contract bytes are deterministic across distinct task roots/times/subjects, only allowed run fields differ, and no untrusted value/path/body is printed. This direct run remains development evidence until 0L root materialization.
+Expected: PASS; every hostile loaded/executed marker count is exactly zero, contract bytes are deterministic across distinct task roots/times/subjects, current-subject receipts differ only at the fully enumerated run paths and still rederive correctly, a receipt cannot serve two commands, and no untrusted value/path/body is printed. This direct run remains development evidence until 0L root materialization.
 
 - [ ] **Step 11: Commit the bounded bootstrap unit**
 
@@ -1257,7 +2342,7 @@ BOOTSTRAP_CONTRACT_COMMIT="$(git rev-parse HEAD)"
 
 - [ ] **Step 12: Run the independent scoped review and fix loop**
 
-The reviewer fixes `BOOTSTRAP_CONTRACT_COMMIT`, its parent/range/path set and final spec hash; adds hostile pre-pnpm, TOCTOU, pnpm-hook, tool-byte, generated-output, dynamic-import and review-receipt counterexamples; and writes the narrative plus `ScopedReviewReceipt`. Because this is the verifier's first subject, require all three independent assertions and unique labels:
+The reviewer fixes `BOOTSTRAP_CONTRACT_COMMIT`, its parent/range/path set and final spec hash; adds hostile pre-pnpm, TOCTOU, pnpm-hook, tool-byte, generated-output, dynamic-import, request replay, one-receipt-two-command, nested variable-field, current-main config drift and review-receipt counterexamples; and writes the narrative plus `ScopedReviewReceipt`. Because this is the verifier's first subject, require all three independent assertions and unique labels:
 
 ```bash
 REPORT="$SDD_TASK/task-0p-bootstrap-review.md"
@@ -1288,7 +2373,7 @@ The direct verifier invocation here is an independently checked bootstrap-of-tru
 
 **Interfaces:**
 
-- Consumes: exact final spec commit/SHA-256; reviewed Task 0L launcher/root materialization and Task 0P bootstrap contract/review; fresh `BootstrapRunReceipt`; complete `CurrentMainAdmission`/`AuditReviewReceipt` contracts and command registry; local fixture Git repositories only.
+- Consumes: exact final spec commit/SHA-256; reviewed Task 0L launcher/root materialization and Task 0P bootstrap contract/review; one fresh receipt per Task 0A local command; complete `CurrentMainAdmission`/`AuditReviewReceipt` contracts and command registry; local fixture Git repositories only.
 - Produces: root-launcher-invoked `collectCurrentMainAuditFacts`, `validateCurrentMainAdmission`, `generateCurrentMainAdmission`, the two closed Copy command IDs, exact schema validation, one reviewed validator commit and closed scoped-review receipt. It does not produce the live admission JSON.
 
 **Commit message:** `feat: validate organization identity current-main admission`
@@ -1310,7 +2395,7 @@ Expected: PASS only in the future committed execution state. The current draftin
 
 - [ ] **Step 2: Verify the reviewed bootstrap and existing local review sink**
 
-Run `git check-ignore -v .superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-admission-validator-review.md` as a diagnostic. Then dispatch canonical request `task-0a-bootstrap-review-verify.json` with `SCOPED_REVIEW_VERIFY_V1`, exact launcher/materialization/contract digests and a fresh Task 0A `BootstrapRunReceipt`. Task 0A cannot substitute a direct Node/package-script path for this authority check.
+Run `git check-ignore -v .superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-admission-validator-review.md` as a diagnostic. Then dispatch canonical request `task-0a-bootstrap-review-verify.json` with `SCOPED_REVIEW_VERIFY_V1/VERIFY`, exact launcher/materialization/contract digests and its own fresh Task 0A receipt. The later validator-review request has a different request ID/receipt; the Task 0A review binds both via `BootstrapRunReceiptSet`. Task 0A cannot substitute a direct Node/package-script path for this authority check.
 
 - [ ] **Step 3: Write the closed-schema RED fixtures**
 
@@ -1404,7 +2489,7 @@ git check-ignore -v "$VALIDATOR_REVIEW"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
-The direct commands above are diagnostics. Authority requires canonical `task-0a-validator-review-verify.json` dispatched as `SCOPED_REVIEW_VERIFY_V1`, binding the same report/receipt/subject plus the current `BootstrapRunReceipt`. Expected: validator scoped review PASS with exact subject/range/digests. If it fails, fix Task 0A files, commit `fix: address Task 0A scoped review`, rerun RED/GREEN and repeat review. No fetch, ref update, merge, admission JSON, migration or scanner exists.
+The direct commands above are diagnostics. Authority requires canonical `task-0a-validator-review-verify.json` dispatched as `SCOPED_REVIEW_VERIFY_V1/VERIFY`, binding the same report/receipt/subject and creating its own receipt. The Task 0A gate verifies the exact two-receipt set. Expected: validator scoped review PASS with exact subject/range/digests. If it fails, fix Task 0A files, commit `fix: address Task 0A scoped review`, rerun RED/GREEN and repeat review. No fetch, ref update, merge, admission JSON, migration or scanner exists.
 
 ### Task 0B: Read-Only Live-Main Audit and Reviewed Authorization Packet
 
@@ -1414,14 +2499,17 @@ The direct commands above are diagnostics. Authority requires canonical `task-0a
 - Create local audit narrative: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-read-only-audit.md`
 - Create local independent review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-read-only-audit-review.md`
 - Create local dedicated audit review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-read-only-audit-review.json`
+- Create only after separate GitHub-controller materialization authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/github-controller-contract.json`
+- Create only after that controller's independent review: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/github-controller-materialization.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/github-controller-review.json`
+- Create local external-controller operation receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-github-readback-receipt.json`
 - Modify: none
 - Test: `scripts/governance-organization-identity-current-main-admission.spec.mjs`
 - Read-only: live `origin` main advertisement; cached refs/objects; exact branch; `.github/CODEOWNERS`; complete main-only path/migration sets; build/raw/schema/governance/runtime/caller/consumer/Identity authority source; no-write merge facts.
 
 **Interfaces:**
 
-- Consumes: exact reviewed Task 0A validator commit/report/receipt; accepted launcher/bootstrap contract; fresh Task 0B run receipt; branch pre-refresh SHA; live `ls-remote` SHA; locally available Git objects only.
-- Produces: reviewed metadata-only audit packet with `PASS | HOLD | FETCH_AUTH_REQUIRED`, exact live-main/branch/merge-base/ranges/set digests/classifications/conflicts/owners/migrations/deltas, exact expected conflict paths/hunks/resolution rules, distinct fetch/local-merge authorization requests, and dedicated `AuditReviewReceipt` binding the packet/set/authorization digests. It writes no Git object/ref or tracked file.
+- Consumes: exact reviewed Task 0A validator commit/report/receipt; accepted local launcher/bootstrap contract; separately authorized/materialized/reviewed `GitHubControllerContract`; one `GitHubControllerReceipt` for `PROTECTED_MAIN_READBACK`; one fresh local `BootstrapRunReceipt` for `CURRENT_MAIN_AUDIT_LOCAL_V1`; branch pre-refresh SHA and locally available Git objects only.
+- Produces: reviewed metadata-only audit packet with `PASS | HOLD | FETCH_AUTH_REQUIRED`, exact GitHub-receipt live-main/protection identity, local branch/merge-base/ranges/set digests/classifications/conflicts/owners/migrations/deltas, exact expected conflict paths/hunks/resolution rules, distinct fetch/local-merge authorization requests, local command receipt-set digest, and dedicated `AuditReviewReceipt` binding the packet/set/controller/authorization digests. It writes no Git object/ref or tracked file.
 
 **Commit message:** none; the audit packet is local review evidence and must not move the branch.
 
@@ -1436,13 +2524,15 @@ Expected: RED with nonzero status before the live audit.
 
 - [ ] **Step 2: Read the exact live protected-main advertisement without fetch**
 
+If the GitHub controller is not already materialized and independently reviewed at the exact Task 0L source/contract, stop and request its separate materialization authorization. Its receipt must prove exact `NODE`/`GIT`/`GH` closure, clean typed environment, opaque repository-scoped credential handle and no secret persistence. Then execute exactly one read-only `PROTECTED_MAIN_READBACK` controller request; plan/Task 0B approval does not authorize fetch or mutation. The block below is diagnostic only:
+
 ```bash
 git ls-remote --exit-code --refs origin refs/heads/main
 REPOSITORY="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 gh api "repos/$REPOSITORY/branches/main" --jq '{sha:.commit.sha,protected:.protected}'
 ```
 
-Require exactly one `<40-lowercase-hex><TAB>refs/heads/main` record, exact equality with the branch API SHA, and `protected=true`; store only SHA/ref/protected boolean in the metadata packet. These read-only network calls do not authorize `git fetch`, ref update, or merge. Missing permission/protection evidence is `HOLD`, not an assumption.
+Require one reviewed `GitHubControllerReceipt` whose typed result contains exactly one `<40-lowercase-hex><TAB>refs/heads/main` record, exact equality with the branch API SHA, and `protected=true`; store only its contract/review/request/result digests plus SHA/ref/protected boolean. The direct network commands cannot satisfy this gate. Missing controller review, credential-handle scope, permission/protection evidence or receipt equality is `HOLD`, not an assumption.
 
 - [ ] **Step 3: Record cached refs and object availability**
 
@@ -1497,11 +2587,11 @@ node scripts/governance-organization-identity-current-main-admission.mjs audit \
   --output .superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-read-only-audit.json
 ```
 
-The displayed direct Node command is the diagnostic expansion. Authority dispatches canonical request `task-0b-current-main-audit.json` as `CURRENT_MAIN_AUDIT_V1` with the fresh Task 0B run receipt. Render the companion narrative from that JSON only; it may include paths/enums/digests/counts but no diff hunk/source/SQL/secret text.
+The displayed direct Node command is the diagnostic expansion. Local authority dispatches canonical request `task-0b-current-main-audit.json` as `CURRENT_MAIN_AUDIT_LOCAL_V1/COLLECT_LOCAL_FACTS`, taking the reviewed GitHub receipt digest as typed input and producing its own fresh Task 0B `BootstrapRunReceipt`. Render the companion narrative from that JSON only; it may include paths/enums/digests/counts but no diff hunk/source/SQL/secret text.
 
 - [ ] **Step 10: Independently review and machine-gate the audit packet**
 
-The reviewer recomputes live/cached/object/ancestry/path/conflict/owner/migration facts, challenges every `ADMIT_*` disposition, and verifies the packet is `PASS`, `FETCH_AUTH_REQUIRED`, or an honest `HOLD`. The dedicated `AuditReviewReceipt` binds `auditPacketSha256`, branch preimage, advertised live main, merge base, exact path/conflict/migration/disposition set digests, authorization-request digest, optional fetch-receipt digest, report/counterexample digests and zero findings. Null set digests are permitted only for `FETCH_AUTH_REQUIRED` before the object exists. Run unique exact severity/verdict assertions and authority request `task-0b-audit-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; a `FETCH_AUTH_REQUIRED` packet can have a PASS review without pretending the full audit passed.
+The reviewer recomputes live/cached/object/ancestry/path/conflict/owner/migration facts, challenges every `ADMIT_*` disposition, and verifies the packet is `PASS`, `FETCH_AUTH_REQUIRED`, or an honest `HOLD`. The dedicated `AuditReviewReceipt` binds `auditPacketSha256`, GitHub controller contract/review/operation-receipt digests, local audit command receipt, branch preimage, advertised live main, merge base, exact path/conflict/migration/disposition set digests, authorization-request digest, optional fetch-receipt digest, report/counterexample digests and zero findings. Null set digests are permitted only for `FETCH_AUTH_REQUIRED` before the object exists. Run unique exact severity/verdict assertions and a second fresh local receipt for `task-0b-audit-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; aggregate the two local receipts in the Task 0B receipt set. A `FETCH_AUTH_REQUIRED` packet can have a PASS review without pretending the full audit passed.
 
 ```bash
 AUDIT_REVIEW=.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-read-only-audit-review.md
@@ -1535,8 +2625,8 @@ If status is `FETCH_AUTH_REQUIRED`, proceed only to Task 0F after its separate e
 
 **Interfaces:**
 
-- Consumes: independently reviewed Task 0B packet with status exactly `FETCH_AUTH_REQUIRED`; exact fetch authorization naming `origin`, `refs/heads/main`, and advertised 40-hex SHA.
-- Produces: exact object available locally, metadata-only fetch receipt and independent review; no branch/tracking ref update, merge, admission or merge authorization. Its sole successor is a complete Task 0B rerun.
+- Consumes: independently reviewed Task 0B packet with status exactly `FETCH_AUTH_REQUIRED`; reviewed GitHub controller contract/materialization/review; exact fetch authorization naming `origin`, `refs/heads/main`, advertised 40-hex SHA and `FETCH_EXACT_OBJECT` request digest.
+- Produces: reviewed `GitHubControllerReceipt` for `FETCH_EXACT_OBJECT`, exact object available locally, metadata-only fetch receipt and independent review; no branch/tracking ref update, merge, admission or merge authorization. Its sole successor is a complete Task 0B rerun.
 
 **Commit message:** none; fetch-only evidence never moves the branch.
 
@@ -1557,7 +2647,7 @@ git fetch --no-tags --no-write-fetch-head --no-auto-maintenance \
   --no-write-commit-graph origin "$LIVE_MAIN_COMMIT"
 ```
 
-The displayed Git command is the closed expansion. Authority dispatches canonical request `task-0f-fetch-object.json` as `GIT_FETCH_OBJECT_V1` with the reviewed `FETCH_AUTH_REQUIRED` packet/receipt and exact authorization. No refspec, tracking-ref update, merge, checkout, reset, rebase, commit, auto-maintenance, commit-graph write or additional object request is authorized.
+The displayed Git command is diagnostic expansion only. Authority invokes the separately reviewed GitHub controller with operation `FETCH_EXACT_OBJECT`; its typed request fixes remote/ref/SHA and the exact Git flags, credential-handle scope and expected before-state. The resulting `GitHubControllerReceipt` binds authorization, request/payload, executable closure, before/after refs and fetched object. The local root launcher has no fetch command or credential access. No refspec, tracking-ref update, merge, checkout, reset, rebase, commit, auto-maintenance, commit-graph write or additional object request is authorized.
 
 - [ ] **Step 3: Verify object identity and absence of merge/ref effects**
 
@@ -1572,7 +2662,7 @@ Write a closed receipt containing remote/ref/SHA, before/after branch/cached-ref
 
 - [ ] **Step 4: Independently review the fetch-only receipt**
 
-Use unique exact severity/verdict assertions plus canonical request `task-0f-fetch-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. The direct command below is diagnostic only. A finding repeats only Task 0F under a new exact authorization if network action must recur; it never upgrades the old Task 0B packet.
+Use unique exact severity/verdict assertions plus one fresh local receipt for canonical request `task-0f-fetch-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`, consuming the external GitHub receipt as data. The direct command below is diagnostic only. A finding repeats only Task 0F under a new exact authorization if network action must recur; it never upgrades the old Task 0B packet.
 
 ```bash
 node scripts/governance-organization-identity-bootstrap.mjs verify-review \
@@ -1589,9 +2679,11 @@ Repeat every live-protection, cached/object, ancestry, `--find-renames=100% --fi
 
 **Files:**
 
-- Create on the first refresh, or Modify on a pre-acceptance refresh repeat: `docs/governance/organization-identity-current-main-admission.json`
+- Create on the first refresh, or Modify only in a newly authorized successor that starts at the exact pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT`: `docs/governance/organization-identity-current-main-admission.json`
 - Create local independent review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-refresh-review.md`
 - Create local review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-refresh-review.json`
+- Create only after separate Gitleaks-controller materialization authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/gitleaks-controller-contract.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/gitleaks-controller-materialization.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/gitleaks-controller-review.json`
+- Create local Gitleaks operation receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-gitleaks-receipt.json`
 - Modify through exact Git merge only: the complete machine-recorded main-only/result path set from Task 0B
 - Modify if and only if present in the reviewed conflict set: `docs/evidence/site-builder/copy-runtime-eligibility.json`
 - Modify if and only if present in the reviewed conflict set: `docs/implementation-records/copy-fixed-source-impact-governance.md`
@@ -1599,8 +2691,8 @@ Repeat every live-protection, cached/object, ancestry, `--find-renames=100% --fi
 
 **Interfaces:**
 
-- Consumes: reviewed root launcher/materialization and Task 0P bootstrap contract; fresh Task 0C run receipt; final Task 0B packet with status exactly PASS and exact `AuditReviewReceipt`; already-local exact live-main object; separately authorized local merge/admission commits; closed Copy command IDs.
-- Produces: exact normal two-parent `REFRESH_MERGE_COMMIT == B0_REFRESH_BASE_COMMIT`; validated one-parent admission child `CURRENT_MAIN_ADMISSION_COMMIT`; full post-refresh verification; and an independent review digest over the exact range through the admission child. Tasks 1–6 execute from the admission child but derive product/raw/build/current-migration facts only from the refresh merge tree.
+- Consumes: reviewed root launcher/materialization and Task 0P bootstrap contract; one fresh receipt per local Task 0C command; final Task 0B packet with status exactly PASS and exact `AuditReviewReceipt`; already-local exact live-main object; separately authorized local merge/admission commits; reviewed/materialized Gitleaks controller and separately authorized Gitleaks request; closed Copy command IDs.
+- Produces: exact normal two-parent `REFRESH_MERGE_COMMIT == B0_REFRESH_BASE_COMMIT`; validated one-parent admission child `CURRENT_MAIN_ADMISSION_COMMIT`; reviewed `GitleaksControllerReceipt`; full post-refresh verification receipt set; and an independent review digest over the exact range through the admission child. Tasks 1–6 execute from the admission child but derive product/raw/build/current-migration facts only from the refresh merge tree.
 
 **Commit message:** two separately authorized commits—merge commit `chore: merge admitted main for identity writer baseline`; admission child `chore: admit current main for identity writer baseline`.
 
@@ -1621,7 +2713,7 @@ Expected: RED before authorized refresh because an initial admission JSON is abs
 
 - [ ] **Step 2: Verify exact local-merge authorization, 0B PASS and live main**
 
-Require a fresh complete Task 0B PASS packet plus dedicated `AuditReviewReceipt` and the distinct local merge/admission authorization. Re-run `git ls-remote --refs origin refs/heads/main`; it must equal Task 0B's admitted SHA. Immediately before the merge request, `CURRENT_MAIN_VALIDATE_V1` recomputes the canonical audit-packet SHA and exact branch/live-main/path/conflict/migration/disposition/authorization-request digests and requires equality with the receipt. The authorization itself names both packet and receipt SHA-256. Any drift returns to Task 0B and invalidates the merge authorization request; there is no mutable ignored-packet gap.
+Require a fresh complete Task 0B PASS packet plus dedicated `AuditReviewReceipt` and the distinct local merge/admission authorization. Invoke a new GitHub-controller `PROTECTED_MAIN_READBACK`; its receipt must equal Task 0B's admitted SHA/protected ref. Immediately before the merge request, local `CURRENT_MAIN_VALIDATE_V1/VALIDATE` consumes that external receipt, recomputes the canonical audit-packet SHA and exact branch/live-main/path/conflict/migration/disposition/authorization-request digests and requires equality. The authorization names packet, audit-review and latest GitHub-receipt SHA-256. Any drift returns to Task 0B and invalidates the merge authorization request; a direct `ls-remote` is diagnostic and there is no mutable ignored-packet gap.
 
 - [ ] **Step 3: Prove the object is already local and perform no fetch**
 
@@ -1649,7 +2741,7 @@ Expected: exact reviewed/authorized preimage and validator PASS. Task-local revi
 git merge --no-ff --no-commit "$LIVE_MAIN_COMMIT"
 ```
 
-The direct Git line is the closed expansion. Authority dispatches `task-0c-refresh-merge.json` as `GIT_REFRESH_MERGE_V1`; the launcher rechecks the packet/receipt digests in the same process immediately before Git. Do not use rebase, squash, force, auto-stash, or blanket `ours/theirs`. Compare actual conflicts/hunk counts/blob triplets to the reviewed Task 0B packet before editing any conflict. Unexpected facts stop the merge; preserve diagnostics and use only the explicitly authorized abort/recovery boundary.
+The direct Git line is the closed expansion. Local authority dispatches `task-0c-refresh-start.json` as `GIT_REFRESH_START_V1/START_NO_COMMIT`; the launcher rechecks packet/receipt digests immediately before Git and creates one command receipt. Do not use rebase, squash, force, auto-stash, or blanket `ours/theirs`. Compare actual conflicts/hunk counts/blob triplets to the reviewed Task 0B packet before editing any conflict. Unexpected facts stop the merge; preserve diagnostics and use only the explicitly authorized abort/recovery boundary.
 
 - [ ] **Step 6: Resolve generated Copy conflicts from main/generator provenance**
 
@@ -1696,7 +2788,7 @@ Use the validator to compare every result blob/path/owner/classification/conflic
 
 - [ ] **Step 8: Create the authorized two-parent refresh merge commit**
 
-Authority dispatches canonical request `task-0c-refresh-merge-commit.json` as `GIT_REFRESH_MERGE_V1`; it permits exactly the fixed commit message and verifies the staged result set before writing the commit. The direct Git lines below are diagnostic readback.
+Authority dispatches a different canonical request `task-0c-refresh-commit.json` as `GIT_REFRESH_COMMIT_V1/COMMIT_REFRESH`; it permits exactly the fixed commit message and verifies the staged result set before writing the commit. It has its own fresh command receipt. The direct Git lines below are diagnostic readback.
 
 ```bash
 git commit -m "chore: merge admitted main for identity writer baseline"
@@ -1712,7 +2804,7 @@ Expected: `REFRESH_MERGE_COMMIT` and `B0_REFRESH_BASE_COMMIT` are the same exact
 
 - [ ] **Step 9: Generate and validate the closed admission JSON**
 
-Immediately rehash the audit packet and dedicated audit receipt. Authority dispatches `task-0c-admission-generate.json` as `CURRENT_MAIN_GENERATE_V1`, then `task-0c-admission-validate.json` as `CURRENT_MAIN_VALIDATE_V1`. The generator embeds `auditPacketSha256`, `auditReviewReceiptSha256` and report digest; it cannot bind a changed ignored packet.
+Immediately rehash the audit packet and dedicated audit receipt. Authority dispatches `task-0c-admission-generate.json` as `CURRENT_MAIN_GENERATE_V1/GENERATE`, then `task-0c-admission-validate.json` as `CURRENT_MAIN_VALIDATE_V1/VALIDATE`, each with a distinct receipt. The generator embeds `auditPacketSha256`, `auditReviewReceiptSha256` and report digest; it cannot bind a changed ignored packet.
 
 ```bash
 node scripts/governance-organization-identity-current-main-admission.mjs generate \
@@ -1746,7 +2838,7 @@ git merge-base --is-ancestor "$LIVE_MAIN_COMMIT" "$B0_REFRESH_BASE_COMMIT"
 
 - [ ] **Step 11: Run focused and full post-refresh verification**
 
-Create fresh canonical requests for `CURRENT_MAIN_VALIDATE_V1`, `REFRESH_VERIFY_V1`, `PRISMA_GENERATE_V1`, `API_VERIFY_V1`, `GOVERNANCE_VERIFY_V1`, `DOCS_VERIFY_V1`, `GITLEAKS_VERIFY_V1`, and `CONTRACT_GRAPH_VERIFY_V1`, all binding `CURRENT_MAIN_ADMISSION_COMMIT`, the same `BootstrapContract`, a fresh Task 0C `BootstrapRunReceipt`, audit receipt and refresh pair. The command block below lists their closed internal expansions and diagnostic status checks; direct execution is not authority.
+Create separate canonical local requests for `CURRENT_MAIN_VALIDATE_V1/VALIDATE`, `REFRESH_VERIFY_V1/VERIFY`, `PRISMA_GENERATE_V1/VERIFY`, `API_VERIFY_V1/VERIFY`, `GOVERNANCE_VERIFY_V1/VERIFY`, `DOCS_VERIFY_V1/VERIFY`, and `CONTRACT_GRAPH_VERIFY_V1/VERIFY`, each binding `CURRENT_MAIN_ADMISSION_COMMIT`, the same `BootstrapContract`, audit receipt and refresh pair and each producing its own fresh command receipt. Before Gitleaks, separately materialize/review the Gitleaks controller if needed and obtain exact static-tool authorization; invoke its only request against the exact subject/config/tree and consume the resulting `GitleaksControllerReceipt` in `REFRESH_VERIFY_V1`. The local registry contains no Gitleaks ID or executable. The command block below lists diagnostic expansions only.
 
 ```bash
 node --test scripts/governance-organization-identity-current-main-admission.spec.mjs
@@ -1772,31 +2864,19 @@ pnpm --filter @global/contracts build
 pnpm --filter @global/api lint
 pnpm --filter @global/api build
 pnpm --filter @global/api test
-if git cat-file -e "$BRANCH_PRE_REFRESH_COMMIT:scripts/governance-organization-identity-writers.mjs" 2>/dev/null; then
-  REFRESH_CHECK_TMP="$(mktemp -d)"
-  set +e
-  pnpm governance:verify >"$REFRESH_CHECK_TMP/governance.log" 2>&1
-  GOVERNANCE_STATUS="$?"
-  pnpm docs:verify >"$REFRESH_CHECK_TMP/docs.log" 2>&1
-  DOCS_STATUS="$?"
-  set -e
-  test "$GOVERNANCE_STATUS" -ne 0
-  test "$DOCS_STATUS" -ne 0
-  rg -n 'IDENTITY_WRITER_CURRENT_MAIN_ADMISSION_DRIFT' \
-    "$REFRESH_CHECK_TMP/governance.log" "$REFRESH_CHECK_TMP/docs.log"
-  rm "$REFRESH_CHECK_TMP/governance.log" "$REFRESH_CHECK_TMP/docs.log"
-  rmdir "$REFRESH_CHECK_TMP"
-else
-  pnpm governance:verify
-  pnpm docs:verify
-fi
+test ! -e scripts/governance-organization-identity-writers.mjs
+test ! -e docs/governance/organization-identity-writer-baseline.json
+test ! -e docs/governance/organization-identity-writer-stage.json
+test ! -e packages/db/prisma/migrations/20260902090000_organization_identity_materialization_outcome_compat
+pnpm governance:verify
+pnpm docs:verify
 gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
 pnpm code-intelligence:scan
 pnpm code-intelligence:check
 pnpm --filter @global/code-intelligence exec tsx src/cli.ts status --repo ../..
 ```
 
-Expected: commands execute at `CURRENT_MAIN_ADMISSION_COMMIT`, while every product/raw/build/current-migration derivation explicitly opens `B0_REFRESH_BASE_COMMIT`; core admission, Copy, migration, API/build, Gitleaks, and ContractGraph gates PASS for that exact pair. The delta verifier proves complete build/raw/schema/migration/governance/runtime/caller/authority classification without claiming the later full writer scanner. On an initial pre-scanner refresh, governance/docs must also PASS. On a pre-acceptance repeat after Tasks 1–6 already exist, governance/docs may fail only with the exact prior identity-baseline/admission drift that Tasks 1–6 are about to regenerate; require full governance/docs PASS in Task 7 before acceptance.
+Expected: commands execute at the sole successor's `CURRENT_MAIN_ADMISSION_COMMIT`, while every product/raw/build/current-migration derivation explicitly opens `B0_REFRESH_BASE_COMMIT`; core admission, Copy, migration, API/build, external Gitleaks and ContractGraph gates all PASS for that exact pair. The delta verifier proves complete build/raw/schema/migration/governance/runtime/caller/authority classification without claiming the later full writer scanner. The only allowed Task 0C subject is pre-scanner: 0M/scanner/manifests are absent and governance/docs PASS. There is no in-place repeat after Tasks 1–6 and no permitted expected governance/docs drift.
 
 - [ ] **Step 12: Conduct the independent post-refresh review**
 
@@ -1823,7 +2903,7 @@ test "$REFRESH_MERGE_COMMIT" = "$B0_REFRESH_BASE_COMMIT"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
-The direct review command is diagnostic; authority dispatches `task-0c-refresh-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Expected: reviewed two-commit refresh/admission chain fixed. A finding in the merge result, either ordered parent, admission JSON/shape, or their review never produces a fix commit atop `CURRENT_MAIN_ADMISSION_COMMIT`: preserve and abandon both commits, return to the exact `BRANCH_PRE_REFRESH_COMMIT`, rerun full Task 0B for a fresh PASS packet/`AuditReviewReceipt`, obtain a new exact local-merge authorization, and recreate a new two-parent refresh merge plus one-parent admission child; then review the new exact pair. No amend, revert-as-substitute or forward admission fix is allowed. Task 0M—not Task 1—is the only successor. No push/PR/remote merge/root/v3 action is implied.
+The direct review command is diagnostic; authority dispatches `task-0c-refresh-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY` with its own fresh receipt. The Task 0C receipt set includes every local request exactly once plus the external Gitleaks receipt digest. Expected: reviewed two-commit refresh/admission chain fixed. A finding in the merge result, either ordered parent, admission JSON/shape, or their review never produces a fix commit atop `CURRENT_MAIN_ADMISSION_COMMIT`: preserve and abandon both commits, return to the exact `BRANCH_PRE_REFRESH_COMMIT`, rerun full Task 0B for a fresh PASS packet/`AuditReviewReceipt`, obtain a new exact local-merge authorization, and recreate a new two-parent refresh merge plus one-parent admission child; then review the new exact pair. No amend, revert-as-substitute or forward admission fix is allowed. Task 0M—not Task 1—is the only successor. No push/PR/remote merge/root/v3 action is implied.
 
 ### Task 0M: Sole C-TX Compatibility Migration, Static/Disposable Proof, and DB/Security Reviews
 
@@ -1837,13 +2917,14 @@ The direct review command is diagnostic; authority dispatches `task-0c-refresh-r
 - Create local security review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0m-security-review.md`
 - Create local scoped receipts: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0m-static-review.json`, `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0m-database-review.json`, `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0m-security-review.json`
 - Create local disposable receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0m-disposable-receipt.json`
+- Create only after separate disposable-controller materialization authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/disposable-controller-contract.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/disposable-controller-materialization.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/disposable-controller-review.json`
 - Test read-only preimage: exact `20260830130300`, `20260830130400`, `20260830130600` migration bytes and refreshed migration directory.
 - Test: both new 0M test files plus existing migration/static suites.
 
 **Interfaces:**
 
-- Consumes: reviewed `B0_REFRESH_BASE_COMMIT`/`CURRENT_MAIN_ADMISSION_COMMIT`, final Task 0C review, root launcher/materialization, immutable Task 0P bootstrap contract and fresh Task 0M run receipts, exact source digests `f5692086…`, `b7706a19…`, `0695319e…`, old CHECK segment `b25fb488…`, expanded segment `128db73c…`, and separate migration-file/disposable authorizations.
-- Produces: sole DDL-only migration; exact `MaterializationOutcomeCompatCatalogReceipt`; `B0M_MIGRATION_COMMIT`; static/code, DB and security scoped-review receipts; authorized PostgreSQL 16 disposable receipt; zero Prisma schema/DML/retained application.
+- Consumes: reviewed `B0_REFRESH_BASE_COMMIT`/`CURRENT_MAIN_ADMISSION_COMMIT`, final Task 0C review, root launcher/materialization, immutable Task 0P bootstrap contract, one fresh receipt per local Task 0M static/review command, exact source digests `f5692086…`, `b7706a19…`, `0695319e…`, old CHECK segment `b25fb488…`, expanded segment `128db73c…`, reviewed disposable-controller contract/materialization and separate migration-file/controller-request authorizations.
+- Produces: sole DDL-only migration; exact `MaterializationOutcomeCompatCatalogReceipt`; `B0M_MIGRATION_COMMIT`; static/code, DB and security scoped-review receipts; authorized `DisposablePostgresControllerReceipt`; Task 0M local receipt-set digest; zero Prisma schema/DML/retained application.
 
 **Commit message:** `fix: admit organization identity outcomes in materialization`
 
@@ -1853,7 +2934,7 @@ The authorization names the exact migration path/timestamp, allowed two-literal 
 
 - [ ] **Step 2: Verify name/timestamp/preimage absence under the clean bootstrap**
 
-Dispatch `task-0m-preimage-verify.json` as `MIGRATION_STATIC_VERIFY_V1`. Require current-main admission to prove `20260902090000_organization_identity_materialization_outcome_compat` absent and strictly later than the exact refreshed maximum. Verify `packages/db/prisma/schema.prisma` and all existing migration blobs clean. A drifted name/maximum/preimage stops for spec amendment rather than renaming.
+Dispatch `task-0m-preimage-verify.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY`. Require current-main admission to prove `20260902090000_organization_identity_materialization_outcome_compat` absent and strictly later than the exact refreshed maximum. Verify `packages/db/prisma/schema.prisma` and all existing migration blobs clean. A drifted name/maximum/preimage stops for spec amendment rather than renaming.
 
 - [ ] **Step 3: Write the static RED contract**
 
@@ -1917,7 +2998,7 @@ node --test \
 git diff --exit-code -- packages/db/prisma/schema.prisma
 ```
 
-The direct block is diagnostic. Authority dispatches `task-0m-static-verify.json` as `MIGRATION_STATIC_VERIFY_V1` with a fresh run receipt. Expected: PASS; migration directory delta is exactly the one 0M path, production SQL has no DML or Prisma-ledger manipulation.
+The direct block is diagnostic. Authority dispatches `task-0m-static-verify.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY` with its own fresh receipt. Expected: PASS; migration directory delta is exactly the one 0M path, production SQL has no DML or Prisma-ledger manipulation.
 
 - [ ] **Step 9: Commit migration plus static/disposable test code**
 
@@ -1932,11 +3013,11 @@ B0M_MIGRATION_COMMIT="$(git rev-parse HEAD)"
 
 - [ ] **Step 10: Run independent static/code review and fix loop**
 
-Review exact migration/test range, predicate delta, 58-byte name, timeout and retained `ACCESS EXCLUSIVE` lock chronology, no-DML/schema/authority scope and test separation. Machine-gate its narrative/receipt with canonical request `task-0m-static-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Findings produce a forward fix commit limited to 0M files, full static rerun and new review subject; never amend an already reviewed migration commit.
+Review exact migration/test range, predicate delta, 58-byte name, timeout and retained `ACCESS EXCLUSIVE` lock chronology, no-DML/schema/authority scope and test separation. Machine-gate its narrative/receipt with canonical request `task-0m-static-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`. Findings produce a forward fix commit limited to 0M files, full static rerun and new review subject; never amend an already reviewed migration commit.
 
 - [ ] **Step 11: Request the separate disposable PostgreSQL authorization**
 
-Present exact B0M subject, PostgreSQL 16 image digest, loopback/no-egress topology, unique resource labels, migration list, time/space caps, synthetic IDs/data, direct-psql fault transforms, Prisma commands and exact cleanup. Without authorization, 0M remains HOLD and Task 1 cannot start.
+If the disposable controller is not already materialized and independently reviewed, first request its separate materialization authorization naming exact Node/Docker/psql/Corepack/pnpm/Prisma closure, loopback/no-egress policy, request/result schemas and synthetic credential-handle policy. Then present exact B0M subject, PostgreSQL 16 image digest, loopback/no-egress topology, unique resource labels, migration list, time/space caps, synthetic IDs/data, direct-psql fault transforms, Prisma operations and exact cleanup as one `0M_COMPATIBILITY` request. Without both controller review and request authorization, 0M remains HOLD and Task 1 cannot start.
 
 - [ ] **Step 12: Run authorized disposable fresh/upgrade/lock/fault/ledger proof**
 
@@ -1945,15 +3026,15 @@ ORGANIZATION_IDENTITY_MATERIALIZATION_COMPAT_DISPOSABLE=1 \
   node --test packages/db/test/organization-identity-materialization-outcome-compat.disposable.spec.mjs
 ```
 
-The direct block is diagnostic documentation. After the separate disposable authorization, authority dispatches `task-0m-disposable-verify.json` as `MIGRATION_DISPOSABLE_VERIFY_V1`, with the exact image/topology/resource/time cap and fresh run receipt. Require old values and new values only in correct outcome shapes; wrong combinations fail; connection A/B lock contention hits bounded timeout and complete rollback; AX lock is observed after ADD through validation; all direct fault transforms restore exact preimage and unchanged ledger; Prisma fresh/upgrade catalog match, checksum/finished row is exact, and second deploy reports no pending migrations. Cleanup proves only task-created resources are gone.
+The direct block is diagnostic documentation. Authority invokes only the separately reviewed disposable controller with operation `0M_COMPATIBILITY`; the local root launcher has no Docker/psql/disposable command. The resulting `DisposablePostgresControllerReceipt` binds controller/review, exact authorization/request, executable process closure, opaque synthetic credential handle, image/topology/resources/caps/migration input, scenarios, cleanup and zero retained resources. Require old values and new values only in correct outcome shapes; wrong combinations fail; connection A/B lock contention hits bounded timeout and complete rollback; AX lock is observed after ADD through validation; all direct fault transforms restore exact preimage and unchanged ledger; Prisma fresh/upgrade catalog match, checksum/finished row is exact, and second deploy reports no pending migrations.
 
 - [ ] **Step 13: Run independent DB and security reviews**
 
-Each review fixes the final B0M subject, bootstrap contract/fresh-run receipt and disposable receipt, adds independent catalog/timeout/dependency/ledger/cross-shape counterexamples, and produces its own machine-gated `ScopedReviewReceipt`. Both must have unique exact zero-C/I/PASS fields and pass `SCOPED_REVIEW_VERIFY_V1`. Retained apply/timing/maintenance/recovery stays explicit HOLD.
+Each review fixes the final B0M subject, bootstrap contract/local static receipt set and external disposable controller contract/review/operation receipt, adds independent executable-closure/credential-handle/catalog/timeout/dependency/ledger/cross-shape/cleanup counterexamples, and produces its own machine-gated `ScopedReviewReceipt`. Each review verification has its own fresh local `SCOPED_REVIEW_VERIFY_V1/VERIFY` receipt. Both must have unique exact zero-C/I/PASS fields. Retained apply/timing/maintenance/recovery stays explicit HOLD.
 
 - [ ] **Step 14: Freeze 0M and open the scanner gate**
 
-Dispatch three canonical `SCOPED_REVIEW_VERIFY_V1` requests for static, DB and security receipts; rerun `MIGRATION_STATIC_VERIFY_V1`; recompute migration SHA/last-change; verify complete refreshed-directory-plus-one-delta inventory and clean status. The direct loop below is diagnostic only. Any review fix repeats static/disposable proof as affected. Only the final reviewed `B0M_MIGRATION_COMMIT` and receipts may be consumed by Task 1.
+Dispatch three canonical `SCOPED_REVIEW_VERIFY_V1/VERIFY` requests for static, DB and security receipts plus a separate `MIGRATION_STATIC_VERIFY_V1/VERIFY` request; each creates one fresh local receipt. Recompute migration SHA/last-change, verify complete refreshed-directory-plus-one-delta inventory and bind the external disposable receipt in the Task 0M receipt set. The direct loop below is diagnostic only. Any review fix repeats static or separately authorized disposable proof as affected. Only the final reviewed `B0M_MIGRATION_COMMIT`, controller receipt and local receipt set may be consumed by Task 1.
 
 ```bash
 for kind in static database security; do
@@ -1979,14 +3060,14 @@ done
 
 **Interfaces:**
 
-- Consumes: separately authorized scanner start at final reviewed `B0M_MIGRATION_COMMIT`; reviewed `CURRENT_MAIN_ADMISSION_COMMIT`/two-parent `B0_REFRESH_BASE_COMMIT`; accepted launcher/root materialization and immutable Task 0P `BootstrapContract`; fresh Task 1 `BootstrapRunReceipt`; 0M review/disposable receipts; final spec; Artifact A authority; complete build/dependency/tool closure.
+- Consumes: separately authorized scanner start at final reviewed `B0M_MIGRATION_COMMIT`; reviewed `CURRENT_MAIN_ADMISSION_COMMIT`/two-parent `B0_REFRESH_BASE_COMMIT`; latest `PROTECTED_MAIN_READBACK` GitHub-controller receipt; accepted launcher/root materialization and immutable Task 0P `BootstrapContract`; one fresh receipt per Task 1 local command; 0M review/disposable receipts; final spec; Artifact A authority; complete build/dependency/tool closure.
 - Produces: scanner contracts, source views, bootstrap-contract/fresh-run verification, `canonicalJson`, `verifyBuildSurface`, root-launcher-only authority CLI shell, and independently reviewed Task 1 commit.
 
 **Commit message:** `test: define organization identity scanner contracts`
 
 - [ ] **Step 1: Re-run the refreshed-base, admission, live-main, and ownership preflight**
 
-The root controller dispatches canonical `task-1-preflight.json` as `CURRENT_MAIN_VALIDATE_V1` and binds the exact launcher/materialization/bootstrap contract, a fresh Task 1 run receipt and the listed Git subjects. The block below is diagnostic readback only:
+The root controller dispatches canonical `task-1-preflight.json` as `CURRENT_MAIN_VALIDATE_V1/VALIDATE`, consuming a fresh GitHub-controller `PROTECTED_MAIN_READBACK` receipt and binding the exact launcher/materialization/bootstrap contract, its own fresh receipt and the listed Git subjects. Bootstrap authority, Prisma generation, scanner tests and scoped-review verification each create different receipts; the Task 1 review binds the complete sorted set plus the external receipt digest. The block below is diagnostic readback only:
 
 ```bash
 cd /global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2
@@ -2023,7 +3104,7 @@ Expected: execution HEAD is the final reviewed `B0M_MIGRATION_COMMIT`, which des
 
 - [ ] **Step 2: Materialize/install/generate only through the reviewed clean bootstrap**
 
-Dispatch canonical `task-1-bootstrap-authority-run.json` as `BOOTSTRAP_AUTHORITY_RUN_V1`. The root wrapper—not the current shell—invokes `/usr/bin/env -i`; its environment includes exact `NPM_CONFIG_USERCONFIG=/dev/null`, and the Node executable is the pinned absolute path from `LauncherContract`/`LauncherMaterializationReceipt`, never a hard-coded `/usr/bin/node`. The request produces a fresh `BootstrapRunReceipt` for exact subject `B0M_MIGRATION_COMMIT`, then `task-1-prisma-generate.json` as `PRISMA_GENERATE_V1`. The internal expansion is:
+Dispatch canonical `task-1-bootstrap-authority-run.json` as `BOOTSTRAP_AUTHORITY_RUN_V1/INSTALL_AND_PRISMA_GENERATE`. The root wrapper—not the current shell—invokes `/usr/bin/env -i`; its environment includes exact `NPM_CONFIG_USERCONFIG=/dev/null`, and the Node executable is the pinned absolute path from `LauncherContract`/`LauncherMaterializationReceipt`, never a hard-coded `/usr/bin/node`. That request produces one receipt for exact subject `B0M_MIGRATION_COMMIT`; the separate `task-1-prisma-generate.json` verification request uses `PRISMA_GENERATE_V1/VERIFY` and produces another. The internal expansion is:
 
 ```bash
 /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch \
@@ -2153,7 +3234,7 @@ git commit -m "test: define organization identity scanner contracts"
 
 - [ ] **Step 10: Run Task 1 independent scoped review/fix loop**
 
-Review complete build/bootstrap closure, launcher/materialization identities, immutable contract and fresh-run normalization, absence sentinels, clean install/generate order, source views, closed output and tests. Machine-gate the exact report/receipt with canonical `task-1-scanner-contract-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Findings produce a Task 1-only fix commit, complete clean-bootstrap/test rerun and new review subject. Task 2 is blocked until PASS.
+Review complete build/bootstrap closure, launcher/materialization identities, immutable contract and subject-bound run validation, absence sentinels, clean install/generate order, source views, closed output and tests. Machine-gate the exact report/receipt with canonical `task-1-scanner-contract-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`. Findings produce a Task 1-only fix commit, complete clean-bootstrap/test rerun and new review subject. Task 2 is blocked until PASS.
 
 ### Task 2: TypeScript Delegate and Capability-Boundary Engine
 
@@ -2256,7 +3337,7 @@ Line/column must be positive, but structural identity excludes line/column.
 
 - [ ] **Step 9: Run GREEN and commit**
 
-Dispatch canonical `task-2-scanner-test.json` as `SCANNER_TEST_V1` with the immutable contract and a fresh Task 2 run receipt. The direct block is diagnostic expansion:
+Dispatch canonical `task-2-scanner-test.json` as `SCANNER_TEST_V1/TEST` with the immutable contract and its own fresh receipt. The scoped-review command gets a second receipt; the Task 2 review binds both. The direct block is diagnostic expansion:
 
 ```bash
 node --test --test-name-pattern='delegate|capability boundary|ManyAndReturn|generated parity|exact three' scripts/governance-organization-identity-writers.spec.mjs
@@ -2268,7 +3349,7 @@ git commit -m "feat: detect identity delegate capability escapes"
 
 - [ ] **Step 10: Run Task 2 independent scoped review/fix loop**
 
-Review generated/native parity, all eight reads/nine writes, ManyAndReturn, dynamic models and every capability escape. Gate canonical `task-2-delegate-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Findings create a Task 2-only fix commit, focused/full rerun and new review. Task 3/4 integration is blocked until PASS.
+Review generated/native parity, all eight reads/nine writes, ManyAndReturn, dynamic models and every capability escape. Gate canonical `task-2-delegate-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`. Findings create a Task 2-only fix commit, focused/full rerun and new review. Task 3/4 integration is blocked until PASS.
 
 ### Task 3: Raw Capability, Wrapper Ingress, and Full Dependency Closure Engine
 
@@ -2341,7 +3422,7 @@ Cycle keys are checker symbol plus operation. Charge candidate bytes/records bef
 
 - [ ] **Step 10: Run GREEN and commit**
 
-Dispatch canonical `task-3-scanner-test.json` as `SCANNER_TEST_V1` with the immutable contract and a fresh Task 3 run receipt. The direct block is diagnostic expansion:
+Dispatch canonical `task-3-scanner-test.json` as `SCANNER_TEST_V1/TEST` with the immutable contract and its own fresh receipt. The scoped-review command gets a second receipt; the Task 3 review binds both. The direct block is diagnostic expansion:
 
 ```bash
 node --test --test-name-pattern='raw capability|wrapper ingress|dependency closure|interpolation|literal mention|budget|cycle' scripts/governance-organization-identity-writers.spec.mjs
@@ -2354,7 +3435,7 @@ git commit -m "feat: freeze raw database capability closure"
 
 - [ ] **Step 11: Run Task 3 independent scoped review/fix loop**
 
-Review all raw forms, interpolation classifier, cross-file wrappers/ingress, full executable preimage, literal detector and non-resetting budgets/cycles. Gate canonical `task-3-raw-closure-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Findings create Task 3-only fixes and complete reruns; Task 4 is blocked until PASS.
+Review all raw forms, interpolation classifier, cross-file wrappers/ingress, full executable preimage, literal detector and non-resetting budgets/cycles. Gate canonical `task-3-raw-closure-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`. Findings create Task 3-only fixes and complete reruns; Task 4 is blocked until PASS.
 
 ### Task 4: Stage Machine, Accepted-Blob Checks, Redaction, and Filesystem Hardening
 
@@ -2370,7 +3451,7 @@ Review all raw forms, interpolation classifier, cross-file wrappers/ingress, ful
 
 **Interfaces:**
 
-- Consumes: exact two-parent `B0_REFRESH_BASE_COMMIT`, its one-parent `CURRENT_MAIN_ADMISSION_COMMIT`, Task 0B+0C review identities, Task 2/3 final inventories, separate Artifact A authority contracts, future B0 acceptance Git-object shape fixtures, immutable bootstrap contract/fresh Task 4 run receipt, and optional external-anchor fixtures. It consumes no generated B0 baseline or stage file.
+- Consumes: exact two-parent `B0_REFRESH_BASE_COMMIT`, its one-parent `CURRENT_MAIN_ADMISSION_COMMIT`, Task 0B+0C review identities, Task 2/3 final inventories, separate Artifact A authority contracts, future B0 acceptance Git-object shape fixtures, immutable bootstrap contract and one fresh receipt per Task 4 local command, plus optional external-anchor fixtures. It consumes no generated B0 baseline or stage file.
 - Produces: final scanner/stage/derivation blobs and `verifyStage`, `verifyZero`, `verifyAcceptanceShape`, `loadExternalAnchor`, mandatory current-main admission revalidation, exact `3 → 2 → 1 → 0` expected-set evaluation, stable exits 0/1/2. Task 5 is the first task that generates/reviews real baseline/stage records from these final blobs.
 
 **Commit message:** `feat: harden identity writer stage scanner`
@@ -2419,7 +3500,7 @@ Local stage >= B1 requires `--anchor-receipt` and checks exact `0700 root:root` 
 
 - [ ] **Step 10: Run GREEN, full scanner-derivation suite, and commit**
 
-The direct block below is diagnostic. Authority dispatches canonical `task-4-scanner-test.json` as `SCANNER_TEST_V1` with the final Task 2/3 blobs, immutable bootstrap contract and fresh Task 4 run receipt. Pre-baseline `stage`/`zero` assertions use the immutable fixture adapter and may not read or create governance manifests.
+The direct block below is diagnostic. Authority dispatches canonical `task-4-scanner-test.json` as `SCANNER_TEST_V1/TEST` with the final Task 2/3 blobs, immutable bootstrap contract and its own fresh receipt. Fixture stage, fixture zero and scoped-review verification have separate request IDs/receipts; the Task 4 review binds the set. Pre-baseline assertions use the immutable fixture adapter and may not read or create governance manifests.
 
 ```bash
 node --test scripts/governance-organization-identity-writers.spec.mjs
@@ -2445,7 +3526,7 @@ git commit -m "feat: harden identity writer stage scanner"
 
 - [ ] **Step 11: Run Task 4 independent scoped review/fix loop**
 
-Review immutable expected sets, accepted-blob/refresh/0M/bootstrap bindings, external anchor inputs, redaction, budgets, symlink/TOCTOU, exit semantics and proof that no generated baseline was consumed. Gate canonical `task-4-stage-security-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; fix/retest/review until PASS before Task 5.
+Review immutable expected sets, accepted-blob/refresh/0M/bootstrap bindings, external anchor inputs, redaction, budgets, symlink/TOCTOU, exit semantics and proof that no generated baseline was consumed. Gate canonical `task-4-stage-security-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; fix/retest/review until PASS before Task 5.
 
 Expected: full derivation suite and fixture B0 stage PASS; fixture zero exits 1 because three exact writers remain. Capture stderr with an explicit shell redirection in the executor run and assert it is empty; delete only the executor-created temp directory after verification. The reviewed Task 4 commit is the final scanner/derivation blob set; any later edit to those bytes invalidates Task 5's eventual baseline/raw review.
 
@@ -2470,7 +3551,7 @@ Enter this task only after Task 4's final derivation commit and scoped review PA
 
 **Interfaces:**
 
-- Consumes: exact refresh/admission chain, accepted `B0M_MIGRATION_COMMIT`/migration SHA/static+DB+security+disposable receipts, immutable Task 0P bootstrap contract and fresh Task 5 run receipt, final reviewed Task 4 scanner/stage/derivation blobs, Task 2/3 refreshed inventory, and Artifact A resolver/function/ACL/six-receipt authority.
+- Consumes: exact refresh/admission chain, accepted `B0M_MIGRATION_COMMIT`/migration SHA/static+DB+security+disposable receipts, immutable Task 0P bootstrap contract and one fresh receipt per Task 5 local command, final reviewed Task 4 scanner/stage/derivation blobs, Task 2/3 refreshed inventory, and Artifact A resolver/function/ACL/six-receipt authority.
 - Produces: exact `WriterBaselineMeasurements`, complete `RawDispositionReviewReceipt`, immutable build/raw baseline, complete refresh-directory-plus-0M migration authority, Artifact A acceptance, initial stage and scoped review receipt.
 
 **Commit message:** `test: bind refreshed identity authority inputs`
@@ -2481,7 +3562,7 @@ Test exact keys, duplicate records, ordering, digest formats, absolute/parent pa
 
 - [ ] **Step 2: Run migration prerequisites before generation**
 
-Dispatch canonical `task-5-migration-prerequisites.json` as `MIGRATION_STATIC_VERIFY_V1` plus `API_VERIFY_V1`, binding the final Task 4 derivation blobs and a fresh Task 5 run receipt. The block below is diagnostic expansion:
+Dispatch separate canonical requests `task-5-migration-prerequisites.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY` and `task-5-api-prerequisites.json` as `API_VERIFY_V1/VERIFY`, binding the final Task 4 derivation blobs. Each gets its own fresh receipt; receipt-only/raw-candidate/baseline-generate/baseline-check/scanner-test/review requests likewise remain one-to-one and form the Task 5 receipt set. The block below is diagnostic expansion:
 
 ```bash
 node --test \
@@ -2496,7 +3577,7 @@ Expected: the Node prerequisite suite passes 15/15 and the focused Vitest suites
 
 - [ ] **Step 3: Verify all six source receipts byte-for-byte**
 
-Dispatch canonical `task-5-artifact-a-receipts.json` as `SCANNER_BASELINE_V1` in receipt-only mode. It reads only the six exact allowlisted paths and hard-coded digests below; the direct `sha256sum` block is diagnostic readback:
+Dispatch canonical `task-5-artifact-a-receipts.json` as `SCANNER_BASELINE_V1/RAW_RECEIPT_ONLY`. It reads only the six exact allowlisted paths and hard-coded digests below; the direct `sha256sum` block is diagnostic readback:
 
 ```bash
 RECEIPT_ROOT=/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan
@@ -2538,7 +3619,7 @@ node scripts/governance-organization-identity-writers.mjs baseline \
   --check-only
 ```
 
-Expected: diagnostic exit 2 with the closed `INTEGRITY_ERROR` record because the baseline generator/disposition receipt is absent; stderr is empty. The RED request is canonical `task-5-baseline-red.json` under `SCANNER_BASELINE_V1` and its expected non-PASS receipt is retained as TDD evidence, not authority acceptance.
+Expected: diagnostic exit 2 with the closed `INTEGRITY_ERROR` record because the baseline generator/disposition receipt is absent; stderr is empty. The RED request is canonical `task-5-baseline-red.json` under `SCANNER_BASELINE_V1/BASELINE_CHECK` and its expected non-PASS receipt is retained as TDD evidence, not authority acceptance.
 
 - [ ] **Step 5: Implement refreshed migration derivation and separate Artifact A function/ACL verification**
 
@@ -2548,7 +3629,7 @@ The seven exact function identities are `organization_identity_acquire_advisory_
 
 - [ ] **Step 6: Generate a candidate raw inventory for independent classification**
 
-Dispatch `task-5-raw-candidate.json` as `SCANNER_BASELINE_V1` against the real `B0_REFRESH_BASE_COMMIT` virtual Program and write a temporary closed candidate only below the fresh root-owned task root. The reviewer assigns one closed disposition to every refreshed record, rejects every dynamic/unresolved record, includes only record IDs/hashes/dispositions, and writes the exact ignored disposition receipt. The receipt contains no SQL/source text, absolute roots, or secrets.
+Dispatch `task-5-raw-candidate.json` as `SCANNER_BASELINE_V1/RAW_CANDIDATE` against the real `B0_REFRESH_BASE_COMMIT` virtual Program and write a temporary closed candidate only below the fresh root-owned task root. The reviewer assigns one closed disposition to every refreshed record, rejects every dynamic/unresolved record, includes only record IDs/hashes/dispositions, and writes the exact ignored disposition receipt. The receipt contains no SQL/source text, absolute roots, or secrets.
 
 - [ ] **Step 7: Independently review every raw capability and wrapper ingress**
 
@@ -2564,7 +3645,7 @@ Record actual `B0_REFRESH_BASE_COMMIT` counts for source files, symbol/call edge
 
 - [ ] **Step 10: Generate the tracked B0 records**
 
-Authority dispatches canonical `task-5-baseline-generate.json` as `SCANNER_BASELINE_V1`; the direct block documents its closed inputs:
+Authority dispatches canonical `task-5-baseline-generate.json` as `SCANNER_BASELINE_V1/BASELINE_GENERATE`; the direct block documents its closed inputs:
 
 ```bash
 node scripts/governance-organization-identity-writers.mjs baseline \
@@ -2582,7 +3663,7 @@ Expected: exit 0 closed JSON; the baseline has exactly three delegate writers an
 
 - [ ] **Step 11: Re-run generation in check-only mode and mutation tests**
 
-Authority dispatches canonical `task-5-baseline-check.json` as `SCANNER_BASELINE_V1` in check-only mode and `task-5-scanner-test.json` as `SCANNER_TEST_V1`. The direct block is diagnostic expansion:
+Authority dispatches canonical `task-5-baseline-check.json` as `SCANNER_BASELINE_V1/BASELINE_CHECK` and `task-5-scanner-test.json` as `SCANNER_TEST_V1/TEST`, with distinct receipts. The direct block is diagnostic expansion:
 
 ```bash
 node scripts/governance-organization-identity-writers.mjs baseline \
@@ -2615,7 +3696,7 @@ Do not add the ignored disposition review to Git; its digest and bounded identit
 
 - [ ] **Step 13: Run Task 5 independent scoped review/fix loop**
 
-Review exact measurements, 50% headroom, raw receipt/set equality, build/bootstrap closure, refresh+0M migration inventory, Artifact A authority and exact Task 4 derivation blob set. Machine-gate canonical `task-5-baseline-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Findings create a Task 5-only fix commit, regenerate all four candidates from the same subjects, rerun tests and repeat review. Task 6 is blocked until PASS.
+Review exact measurements, 50% headroom, raw receipt/set equality, build/bootstrap closure, refresh+0M migration inventory, Artifact A authority and exact Task 4 derivation blob set. Machine-gate canonical `task-5-baseline-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`. Findings create a Task 5-only fix commit, regenerate all four candidates from the same subjects, rerun tests and repeat review. Task 6 is blocked until PASS.
 
 ### Task 6: Package, Governance, Hosted Anchor, and Runtime-Exclusion Wiring
 
@@ -2630,6 +3711,8 @@ Review exact measurements, 50% headroom, raw receipt/set equality, build/bootstr
 - Modify: `.github/required-contexts.json`
 - Modify: `.github/CODEOWNERS`
 - Create: `.github/workflows/organization-identity-writer-anchor.yml`
+- Create: `scripts/governance-organization-identity-protected-base-launcher.mjs`
+- Create: `scripts/governance-organization-identity-protected-base-launcher.spec.mjs`
 - Create local scoped review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-6-governance-anchor-review.md`
 - Create local review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-6-governance-anchor-review.json`
 - Modify: `scripts/runtime-artifact-contract.spec.mjs:16-37,100-163,404-440`
@@ -2641,8 +3724,8 @@ Review exact measurements, 50% headroom, raw receipt/set equality, build/bootstr
 
 **Interfaces:**
 
-- Consumes: accepted launcher/root materialization, immutable bootstrap contract/fresh Task 6 run receipt, admission/scanner/final Task 5 baseline, B0M authority and protected-main workflow contract.
-- Produces: explicitly non-authority developer convenience aliases; root-launcher authority wiring; non-authoritative ordinary PR CI; accepted protected-main `push` initial anchor and base-owned `pull_request_target` verifier; minimal permissions; runtime exclusion proof.
+- Consumes: accepted local launcher/materialization, immutable bootstrap contract, one receipt per local Task 6 command, admission/scanner/final Task 5 baseline, B0M authority, reviewed GitHub controller contracts and `ProtectedBaseLauncherContract` schemas.
+- Produces: explicitly non-authority developer convenience aliases; local root-launcher authority wiring; reviewed `ProtectedBaseLauncherContract` implementation/equivalence verifier; non-authoritative ordinary PR CI; accepted protected-main `push` initial anchor and base-owned `pull_request_target` verifier; minimal permissions; runtime exclusion proof.
 
 **Commit message:** `ci: enforce identity writer governance boundary`
 
@@ -2683,15 +3766,21 @@ Expected: FAIL on missing root commands/import/runner wiring and runtime identit
 Modify only the root script map and add both exact imports:
 
 ```js
+import "./governance-organization-identity-launcher.spec.mjs";
+import "./governance-organization-identity-controller-contracts.spec.mjs";
+import "./governance-organization-identity-github-controller.spec.mjs";
+import "./governance-organization-identity-disposable-postgres-controller.spec.mjs";
+import "./governance-organization-identity-gitleaks-controller.spec.mjs";
 import "./governance-organization-identity-current-main-admission.spec.mjs";
 import "./governance-organization-identity-writers.spec.mjs";
+import "./governance-organization-identity-protected-base-launcher.spec.mjs";
 ```
 
-to `scripts/governance-contracts.spec.mjs`. Extend the independently rooted path test so removing that import fails.
+to `scripts/governance-contracts.spec.mjs`. Extend the independently rooted path test so removing any import fails. Runtime/release/OCI exclusion fixtures cover every launcher/controller source, spec, contract/request/output/receipt and governance manifest; no trust-controller byte enters product artifacts.
 
 - [ ] **Step 5: Wire current-main admission and current-stage verification into the governance runner**
 
-Import the reviewed validator and scanner only after `BootstrapContract` equality and fresh `BootstrapRunReceipt` PASS. Validate admission, refresh/0M/Artifact A/launcher/bootstrap identities before stage. Local stages require the root anchor at B1+. Ordinary PR workflows can report CI but set authority class `NON_AUTHORITATIVE_PR_CI`; only the base-owned anchor workflow may supply hosted authority.
+Import the reviewed validator and scanner only after `BootstrapContract` equality and the current command's fresh `BootstrapRunReceipt` PASS. Validate admission, refresh/0M/Artifact A/launcher/bootstrap identities before stage. Local stages require the root anchor at B1+. Ordinary PR workflows can report CI but set authority class `NON_AUTHORITATIVE_PR_CI`; only an accepted `ProtectedBaseLauncherReceipt` may supply hosted authority.
 
 ```js
 const identityWriters = await verifyOrganizationIdentityWriterRepository({
@@ -2708,7 +3797,9 @@ At B0, `identityWriterZeroRequired` is a literal `false`. Task 16 changes only t
 
 - [ ] **Step 6: Implement the protected-main/base-owned anchor workflow**
 
-`.github/workflows/organization-identity-writer-anchor.yml` has only `push` on `main` and `pull_request_target`. On the exact B0 merge push, base-owned workflow bytes require `GITHUB_SHA` equal the independently read-back merge SHA and create the initial hosted receipt; a failed/cancelled run can recover only via separately authorized re-run of the same immutable run/SHA. On `pull_request_target`, checkout/execute only the protected-main accepted launcher/bootstrap/scanner/workflow blobs or invoke a provenance-equivalent root controller whose launcher/materialization/contract digests equal the protected anchor. Fetch the PR head SHA/tree only as a Git object into a fixed data root and prohibit executing any PR action/script/package/generated binary/workflow/config. Bind event/ref/repository/run/workflow blob/accepted B0/review/launcher/bootstrap/ordered parents. Moving-main dispatch, temporary refs/tags, naked-SHA workflow dispatch and any PR-provided launcher/request bytes are rejected.
+`.github/workflows/organization-identity-writer-anchor.yml` has only `push` on `main` and `pull_request_target`. On the exact B0 merge push, base-owned workflow bytes require the independently read-back merge SHA and create the initial hosted receipt; failed/cancelled recovery requires a separately authorized GitHub-controller `WORKFLOW_RERUN` of that same immutable run/SHA. On `pull_request_target`, execute only the protected-main `ProtectedBaseLauncherContract` implementation and accepted launcher/bootstrap/scanner blobs. Fetch the PR head tree only as data through a GitHub-controller receipt and prohibit executing any PR action/script/package/generated binary/workflow/config.
+
+`scripts/governance-organization-identity-protected-base-launcher.mjs` validates hosted runner OS/architecture/UID, exact workflow/base/event/ref/repository/run/controller-variable input, immutable task-root materialization, executable closure and TOCTOU, then emits `ProtectedBaseLauncherReceipt`. Its equivalence function compares exact protected-base launcher/bootstrap source blobs, local command registry, bootstrap contract/request/output schemas and tool logical expectations; it does not pretend hosted paths/UID/inodes equal local Ubuntu values. There is no source-only or undefined “equivalent controller” escape. Any PR-provided launcher/request/controller byte is rejected before execution.
 
 Permissions are `contents: read` plus only the minimum checks/status write needed for the closed result; no secrets reach PR code. `required-contexts.json` keeps ordinary Governance CI separate from the new authority context. CODEOWNERS includes the anchor workflow and bootstrap.
 
@@ -2718,7 +3809,7 @@ Keep `Dockerfile`, `runtime-entrypoint.mjs`, `verify-runtime-artifact.mjs`, `ver
 
 - [ ] **Step 8: Run focused GREEN and root governance**
 
-The direct block is a non-authority developer diagnostic. Authority dispatches `task-6-scanner-test.json` as `SCANNER_TEST_V1`, `task-6-stage.json` as `SCANNER_STAGE_V1`, `task-6-governance.json` as `GOVERNANCE_VERIFY_V1`, and `task-6-runtime-artifact.json` as `RUNTIME_ARTIFACT_VERIFY_V1`, all with the immutable contract and a fresh Task 6 run receipt.
+The direct block is a non-authority developer diagnostic. Authority dispatches `task-6-scanner-test.json` as `SCANNER_TEST_V1/TEST`, `task-6-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK`, `task-6-governance.json` as `GOVERNANCE_VERIFY_V1/VERIFY`, and `task-6-runtime-artifact.json` as `RUNTIME_ARTIFACT_VERIFY_V1/VERIFY`; each command creates its own fresh receipt and the Task 6 review binds their sorted set.
 
 Run:
 
@@ -2734,7 +3825,7 @@ Expected: PASS at `B0_BASELINE` through the clean bootstrap; ordinary PR workflo
 
 - [ ] **Step 9: Run build, full API tests, docs, and static migration gates**
 
-Dispatch `task-6-prisma-generate.json` as `PRISMA_GENERATE_V1`, `task-6-api-verify.json` as `API_VERIFY_V1`, `task-6-docs-verify.json` as `DOCS_VERIFY_V1`, and `task-6-migration-static.json` as `MIGRATION_STATIC_VERIFY_V1`. The direct block is diagnostic expansion.
+Dispatch `task-6-prisma-generate.json` as `PRISMA_GENERATE_V1/VERIFY`, `task-6-api-verify.json` as `API_VERIFY_V1/VERIFY`, `task-6-docs-verify.json` as `DOCS_VERIFY_V1/VERIFY`, and `task-6-migration-static.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY`, each with its own receipt. The direct block is diagnostic expansion.
 
 Run:
 
@@ -2761,13 +3852,15 @@ git add package.json scripts/governance-verify.mjs \
   .github/workflows/governance.yml .github/workflows/ci.yml \
   .github/workflows/organization-identity-writer-anchor.yml \
   .github/required-contexts.json .github/CODEOWNERS \
-  scripts/runtime-artifact-contract.spec.mjs
+  scripts/runtime-artifact-contract.spec.mjs \
+  scripts/governance-organization-identity-protected-base-launcher.mjs \
+  scripts/governance-organization-identity-protected-base-launcher.spec.mjs
 git commit -m "ci: enforce identity writer governance boundary"
 ```
 
 - [ ] **Step 11: Run Task 6 independent scoped review/fix loop**
 
-Review ordinary-PR non-authority, protected-main push/base-owned `pull_request_target` workflow bytes, protected-base/root-equivalent accepted launcher/bootstrap invocation, minimal permissions, PR-as-data rule, runtime exclusion and governance wiring. Gate canonical `task-6-governance-anchor-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; Task 7 is blocked until PASS.
+Review ordinary-PR non-authority, protected-main push/base-owned `pull_request_target` workflow bytes, exact `ProtectedBaseLauncherContract`/receipt/equivalence algorithm, runner/event/materialization/tool/input TOCTOU, minimal permissions, PR-as-data rule, runtime exclusion and governance wiring. Gate canonical `task-6-governance-anchor-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY` with its own fresh receipt; Task 7 is blocked until PASS.
 
 ### Task 7: B0 Implementation Whole Review and Exact Parent Freeze
 
@@ -2780,7 +3873,7 @@ Review ordinary-PR non-authority, protected-main push/base-owned `pull_request_t
 
 **Interfaces:**
 
-- Consumes: clean B0 implementation descending from accepted B0M; every Task 1–6 scoped review receipt; launcher/materialization; immutable bootstrap contract plus fresh Task 7 run receipt; build/tool/raw/migration/Artifact A authority; and no writer acceptance JSON.
+- Consumes: clean B0 implementation descending from accepted B0M; every Task 1–6 scoped review receipt; latest GitHub-controller `PROTECTED_MAIN_READBACK` receipt; reviewed GitHub/Gitleaks/disposable/protected-base controller contracts and completed receipts; launcher/materialization; immutable bootstrap contract plus one fresh receipt for each Task 7 local command; build/tool/raw/migration/Artifact A authority; and no writer acceptance JSON.
 - Produces: immutable `B0_IMPLEMENTATION_SHA`; independent whole-review SHA-256 with `0 Critical / 0 Important`; bounded counterexample receipt; no tracked change.
 
 **Commit message:** none; the review must not move the reviewed implementation head.
@@ -2805,7 +3898,7 @@ test "$(git ls-remote --exit-code --refs origin refs/heads/main | cut -f1)" = "$
 node scripts/governance-organization-identity-current-main-admission.mjs validate --input "$ADMISSION"
 ```
 
-Expected: PASS. Drift before B0 whole review preserves the abandoned lineage and creates the exact recovery branch/worktree from the pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT` whose tree lacks 0M/scanner/manifests. Rerun Tasks 0B/0F/0C, separately authorize and rerun 0M, then Tasks 1–6 in initial-create mode and obtain a new whole review. Never start from `B0M_MIGRATION_COMMIT`, a Task 1–6 commit, or `B0_IMPLEMENTATION`; do not review an unadmitted subject.
+The direct network line is diagnostic. Authority uses a new GitHub-controller `PROTECTED_MAIN_READBACK` receipt and a separate local `CURRENT_MAIN_VALIDATE_V1/VALIDATE` receipt. Expected: PASS. Drift before B0 whole review preserves the abandoned lineage and creates the exact recovery branch/worktree from the pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT` whose tree lacks 0M/scanner/manifests. Rerun Tasks 0B/0F/0C, separately authorize and rerun 0M, then Tasks 1–6 in initial-create mode and obtain a new whole review. Never start from `B0M_MIGRATION_COMMIT`, a Task 1–6 commit, or `B0_IMPLEMENTATION`; do not review an unadmitted subject.
 
 - [ ] **Step 3: Freeze the implementation subject**
 
@@ -2822,7 +3915,7 @@ Expected: clean tracked/untracked state and one exact full SHA. The ignored `.su
 
 - [ ] **Step 4: Run the complete local B0 verification packet**
 
-Dispatch canonical requests `task-7-scanner-test.json` (`SCANNER_TEST_V1`), `task-7-stage.json` (`SCANNER_STAGE_V1`), `task-7-current-main.json` (`CURRENT_MAIN_VALIDATE_V1`), `task-7-governance.json` (`GOVERNANCE_VERIFY_V1`), `task-7-runtime.json` (`RUNTIME_ARTIFACT_VERIFY_V1`), `task-7-migration.json` (`MIGRATION_STATIC_VERIFY_V1`), `task-7-prisma.json` (`PRISMA_GENERATE_V1`), `task-7-api.json` (`API_VERIFY_V1`) and `task-7-docs.json` (`DOCS_VERIFY_V1`) with the exact implementation subject and one fresh Task 7 run receipt. The block below is diagnostic expansion:
+Dispatch canonical requests `task-7-scanner-test.json` (`SCANNER_TEST_V1/TEST`), `task-7-stage.json` (`SCANNER_STAGE_V1/STAGE_CHECK`), `task-7-current-main.json` (`CURRENT_MAIN_VALIDATE_V1/VALIDATE`), `task-7-governance.json` (`GOVERNANCE_VERIFY_V1/VERIFY`), `task-7-runtime.json` (`RUNTIME_ARTIFACT_VERIFY_V1/VERIFY`), `task-7-migration.json` (`MIGRATION_STATIC_VERIFY_V1/VERIFY`), `task-7-prisma.json` (`PRISMA_GENERATE_V1/VERIFY`), `task-7-api.json` (`API_VERIFY_V1/VERIFY`) and `task-7-docs.json` (`DOCS_VERIFY_V1/VERIFY`) with the exact implementation subject. These nine requests create nine fresh `BootstrapRunReceipt`s; the later whole-review verification creates a tenth, and `task-7-bootstrap-run-set.json` binds all ten sorted request/receipt entries. The block below is diagnostic expansion:
 
 ```bash
 pnpm governance:identity-writers:test
@@ -2861,7 +3954,7 @@ The review must state whether the scanner can read outside accepted repository/d
 
 - [ ] **Step 8: Write the bounded independent review report**
 
-The exact report must name the implementation SHA, two-parent `B0_REFRESH_BASE_COMMIT == REFRESH_MERGE_COMMIT`, one-parent `CURRENT_MAIN_ADMISSION_COMMIT`, admitted live-main/refresh parents, admission JSON and pre/post refresh review digests, amended spec SHA-256, commands/results, counterexamples, all reviewed manifests, six source receipt digests, limitations, and final finding counts. It must not claim runtime, database, deployment, remote merge, or final authority.
+The exact report must name the implementation SHA, two-parent `B0_REFRESH_BASE_COMMIT == REFRESH_MERGE_COMMIT`, one-parent `CURRENT_MAIN_ADMISSION_COMMIT`, admitted live-main/refresh parents, admission JSON and pre/post refresh review digests, amended spec SHA-256, local launcher/materialization/review, immutable bootstrap contract/task receipt sets, GitHub/Gitleaks/disposable/protected-base controller contracts/reviews/completed receipts, commands/results, counterexamples, all reviewed manifests, six source receipt digests, limitations, and final finding counts. It must not claim retained runtime/database, deployment, remote merge, or final authority.
 
 - [ ] **Step 9: Verify the review gate and digest without committing it**
 
@@ -2883,7 +3976,7 @@ node scripts/governance-organization-identity-bootstrap.mjs verify-review \
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
-The direct verifier is diagnostic. Authority dispatches `task-7-whole-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`, binding launcher/materialization, immutable bootstrap contract, Task 7 run receipt, implementation subject, report/path/counterexample digests and unique zero-C/I/PASS fields. Expected GREEN: report exists with exact subject and zero C/I; tracked/untracked Git state stays clean because the review path is ignored.
+The direct verifier is diagnostic. Authority dispatches `task-7-whole-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`, producing the tenth Task 7 receipt and binding launcher/materialization, immutable bootstrap contract, implementation subject, report/path/counterexample digests and unique zero-C/I/PASS fields. The report separately binds the complete Task 7 receipt-set digest. Expected GREEN: report exists with exact subject and zero C/I; tracked/untracked Git state stays clean because the review path is ignored.
 
 **Commit:** none. The reviewed implementation head must not move after this review. Any code/test/manifest change invalidates the review and restarts Task 7.
 
@@ -2899,7 +3992,7 @@ The direct verifier is diagnostic. Authority dispatches `task-7-whole-review-ver
 
 **Interfaces:**
 
-- Consumes: exact reviewed `B0_IMPLEMENTATION_SHA`; exact two-parent `B0_REFRESH_BASE_COMMIT`; exact one-parent `CURRENT_MAIN_ADMISSION_COMMIT`; admitted live-main/ordered refresh parents/admission JSON; Task 0B/0C/7 review digests; parent-tree controlled blobs; launcher/materialization and immutable bootstrap contract/schema/blob plus a fresh Task 8 run receipt; separate Artifact A Git authority; B0 baseline stage identities.
+- Consumes: exact reviewed `B0_IMPLEMENTATION_SHA`; exact two-parent `B0_REFRESH_BASE_COMMIT`; exact one-parent `CURRENT_MAIN_ADMISSION_COMMIT`; latest GitHub-controller `PROTECTED_MAIN_READBACK` receipt; admitted live-main/ordered refresh parents/admission JSON; Task 0B/0C/7 review digests; parent-tree controlled blobs; launcher/materialization and immutable bootstrap contract/schema/blob plus one fresh receipt per Task 8 local command; separate Artifact A Git authority; B0 baseline stage identities.
 - Produces: exact `B0_ACCEPTANCE_SHA`; one first-added tracked JSON blob binding all refresh/authority subjects; separate scoped-review digest not written back; terminal local state `LOCAL_ACCEPTANCE_REVIEWED` only while live main remains admitted.
 
 **Commit message:** `chore: anchor organization identity writer baseline`
@@ -2912,7 +4005,7 @@ Run:
 node scripts/governance-organization-identity-writers.mjs acceptance --check
 ```
 
-The direct command is diagnostic; canonical `task-8-acceptance-red.json` dispatches `SCANNER_ACCEPTANCE_V1` and must return the same expected RED. Expected: exit 1 with a closed policy result naming only the repository-relative acceptance path/kind; stderr empty. Exit 0 before first-add is forbidden.
+The direct command is diagnostic; canonical `task-8-acceptance-red.json` dispatches `SCANNER_ACCEPTANCE_V1/ACCEPTANCE_RED` and must return the same expected RED. Expected: exit 1 with a closed policy result naming only the repository-relative acceptance path/kind; stderr empty. Exit 0 before first-add is forbidden.
 
 - [ ] **Step 2: Reconfirm live main and the exact reviewed parent have not moved**
 
@@ -2929,11 +4022,11 @@ test -s "$REVIEW"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
-Compare `B0_IMPLEMENTATION_SHA` and all refresh/admission/review identities to the full subject printed inside the review report. Mismatch or live-main drift before acceptance preserves the old lineage and creates the one allowed recovery successor from its pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT`, never from `B0M_MIGRATION_COMMIT` or `B0_IMPLEMENTATION`. Rerun 0B/0F/0C, separately authorized 0M, Tasks 1–7 and whole review before a new acceptance.
+The direct `ls-remote` is diagnostic; authority uses a new GitHub-controller `PROTECTED_MAIN_READBACK` receipt plus a distinct local validation receipt. Compare `B0_IMPLEMENTATION_SHA` and all refresh/admission/review/controller identities to the full subject printed inside the review report. Mismatch or live-main drift before acceptance preserves the old lineage and creates the one allowed recovery successor from its pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT`, never from `B0M_MIGRATION_COMMIT` or `B0_IMPLEMENTATION`. Rerun 0B/0F/0C, separately authorized 0M, Tasks 1–7 and whole review before a new acceptance.
 
 - [ ] **Step 3: Generate only the acceptance JSON from parent-tree blobs**
 
-Authority dispatches canonical `task-8-acceptance-generate.json` as `SCANNER_ACCEPTANCE_V1`; the direct block documents the closed inputs. The acceptance freezes the immutable bootstrap contract/schema/blob/digest and launcher/materialization identities, not an opaque per-run receipt. It records the Task 8 implementation run receipt separately as non-invariant evidence.
+Authority dispatches canonical `task-8-acceptance-generate.json` as `SCANNER_ACCEPTANCE_V1/ACCEPTANCE_GENERATE`; the direct block documents the closed inputs. The acceptance freezes the immutable bootstrap contract/schema/blob/digest and launcher/materialization identities, never one opaque run receipt. It records the reviewed task-level `BootstrapRunReceiptSet` digests as non-invariant evidence, while each underlying receipt remains one-command/one-request.
 
 Run:
 
@@ -2944,7 +4037,7 @@ node scripts/governance-organization-identity-writers.mjs acceptance \
   --current-main-admission-commit "$(jq -er '.currentMainAdmissionCommit' docs/governance/organization-identity-writer-baseline.json)" \
   --b0m-migration-commit "$(jq -er '.b0mMigrationCommit' docs/governance/organization-identity-writer-baseline.json)" \
   --bootstrap-contract docs/governance/organization-identity-bootstrap-contract.json \
-  --implementation-run-receipt "$TASK_8_BOOTSTRAP_RUN_RECEIPT" \
+  --task-run-receipt-set "$TASK_8_BOOTSTRAP_RUN_RECEIPT_SET" \
   --anchor-workflow .github/workflows/organization-identity-writer-anchor.yml \
   --current-main-admission docs/governance/organization-identity-current-main-admission.json \
   --current-main-refresh-review .superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/current-main-refresh-review.md \
@@ -2953,7 +4046,7 @@ node scripts/governance-organization-identity-writers.mjs acceptance \
   --output docs/governance/organization-identity-writer-acceptance.json
 ```
 
-Expected: exit 0; exactly one untracked path exists. The generator gets refresh/admission, immutable bootstrap contract plus normalized run proof, complete config/declaration/tool roots, exact B0M migration/disposable/DB/security receipts, protected anchor workflow blob, scanner/raw-review/measurement/migration baselines, all Task 1–7 review receipts and stage machine from the implementation parent. No review self-attests.
+Expected: exit 0; exactly one untracked path exists. The generator gets refresh/admission, immutable bootstrap contract plus Task 0A–8 receipt-set digests, complete config/declaration/tool roots, exact GitHub/Gitleaks/disposable controller contracts/reviews/completed receipts, exact B0M migration/disposable/DB/security receipts, protected-base launcher/workflow blobs, scanner/raw-review/measurement/migration baselines, all Task 1–7 review receipts and stage machine from the implementation parent. No review self-attests.
 
 - [ ] **Step 4: Validate non-self-reference and parent-tree identities before commit**
 
@@ -3001,7 +4094,7 @@ Expected: all assertions pass; the parent lacks the path and the child first-add
 
 - [ ] **Step 7: Run acceptance-aware B0 verification**
 
-Dispatch canonical `task-8-acceptance-check.json` as `SCANNER_ACCEPTANCE_V1`, `task-8-current-main.json` as `CURRENT_MAIN_VALIDATE_V1`, `task-8-scanner-test.json` as `SCANNER_TEST_V1`, `task-8-stage.json` as `SCANNER_STAGE_V1`, and `task-8-governance.json` as `GOVERNANCE_VERIFY_V1`, all against `B0_ACCEPTANCE_SHA` with a fresh run receipt. The direct block is diagnostic expansion.
+Dispatch canonical `task-8-acceptance-check.json` as `SCANNER_ACCEPTANCE_V1/ACCEPTANCE_CHECK`, `task-8-current-main.json` as `CURRENT_MAIN_VALIDATE_V1/VALIDATE`, `task-8-scanner-test.json` as `SCANNER_TEST_V1/TEST`, `task-8-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK`, and `task-8-governance.json` as `GOVERNANCE_VERIFY_V1/VERIFY`, all against `B0_ACCEPTANCE_SHA`. These five requests create five distinct receipts. Acceptance RED, generation, working-file check, Git commit-shape write and scoped-review verification likewise each have their own request/receipt; the Task 8 review binds the complete sorted receipt set. The direct block is diagnostic expansion.
 
 Run:
 
@@ -3042,7 +4135,7 @@ test "$(git ls-remote --exit-code --refs origin refs/heads/main | cut -f1)" = "$
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
-The direct verifier is diagnostic; authority dispatches `task-8-acceptance-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`. Expected: `LOCAL_ACCEPTANCE_REVIEWED` only when live main is still the admitted SHA.
+The direct verifier is diagnostic; authority dispatches `task-8-acceptance-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY` with its own receipt. Expected: `LOCAL_ACCEPTANCE_REVIEWED` only when live main is still the admitted SHA.
 
 If live main advances after the acceptance commit, preserve the abandoned branch/head without amend/rebase/merge. Request exact authorization to create a successor v2 refresh worktree from the exact pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT` recorded by the abandoned acceptance—not from its `B0_IMPLEMENTATION_SHA`. The deterministic branch/path suffix is the first 12 hex characters of the newly advertised main SHA. That starting tree must lack 0M, scanner/manifests and acceptance; rerun 0B/0F/0C, separately authorized 0M and Tasks 1–8 in initial-create mode.
 
@@ -3053,14 +4146,17 @@ If the scoped acceptance review itself finds a shape/content/binding defect whil
 **Files:**
 
 - Create only after separate root-receipt authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json`
-- Modify only after separate controller-variable authorization: GitHub repository/controller variables `ORGANIZATION_IDENTITY_B0_ADMITTED_MAIN_SHA`, `ORGANIZATION_IDENTITY_B0_REFRESH_BASE_SHA`, `ORGANIZATION_IDENTITY_CURRENT_MAIN_ADMISSION_COMMIT_SHA`, `ORGANIZATION_IDENTITY_B0_ACCEPTED_SHA`, `ORGANIZATION_IDENTITY_B0_ACCEPTANCE_REVIEW_SHA256`, `ORGANIZATION_IDENTITY_B0_MERGE_SHA`, `ORGANIZATION_IDENTITY_B0_FIRST_PARENT_SHA`, `ORGANIZATION_IDENTITY_B0_SECOND_PARENT_SHA`, `ORGANIZATION_IDENTITY_B0_MERGE_METHOD`, `ORGANIZATION_IDENTITY_LAUNCHER_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_LAUNCHER_MATERIALIZATION_SHA256`, `ORGANIZATION_IDENTITY_BOOTSTRAP_CONTRACT_SHA256`
+- Modify only after separate controller-variable authorization: GitHub repository/controller variables `ORGANIZATION_IDENTITY_B0_ADMITTED_MAIN_SHA`, `ORGANIZATION_IDENTITY_B0_REFRESH_BASE_SHA`, `ORGANIZATION_IDENTITY_CURRENT_MAIN_ADMISSION_COMMIT_SHA`, `ORGANIZATION_IDENTITY_B0_ACCEPTED_SHA`, `ORGANIZATION_IDENTITY_B0_ACCEPTANCE_REVIEW_SHA256`, `ORGANIZATION_IDENTITY_B0_MERGE_SHA`, `ORGANIZATION_IDENTITY_B0_FIRST_PARENT_SHA`, `ORGANIZATION_IDENTITY_B0_SECOND_PARENT_SHA`, `ORGANIZATION_IDENTITY_B0_MERGE_METHOD`, `ORGANIZATION_IDENTITY_LAUNCHER_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_LAUNCHER_MATERIALIZATION_SHA256`, `ORGANIZATION_IDENTITY_LAUNCHER_MATERIALIZATION_REVIEW_SHA256`, `ORGANIZATION_IDENTITY_BOOTSTRAP_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_PROTECTED_BASE_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_GITHUB_CONTROLLER_CONTRACT_SHA256`
+- Create local controller receipt set: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-9-github-controller-receipts.json`
+- Create hosted receipt/readback: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-9-protected-base-launcher-receipt.json`
+- Create hosted receipt review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-9-protected-base-launcher-receipt-review.json`
 - Modify: no repository file
 - Test: local Git ancestry, live protected-main/PR/ruleset readback, root receipt ownership/mode/digest chain.
 
 **Interfaces:**
 
-- Consumes: exact admitted live-main SHA, two-parent refresh-base SHA, one-parent admission-commit SHA, admission/pre/post-review identities, exact reviewed v2 acceptance head, exact acceptance-review digest, accepted launcher/materialization/bootstrap-contract identities, fresh Task 9 run receipt, and separately authorized push/PR/merge/readback/controller/root actions.
-- Produces: GitHub merge whose pre-call head/base and post-call ordered parents are exact, externally fixed admitted/accepted/review/launcher/bootstrap identities, root-only anchor binding both parents; no repository commit.
+- Consumes: exact admitted live-main SHA, two-parent refresh-base SHA, one-parent admission-commit SHA, admission/pre/post-review identities, exact reviewed v2 acceptance head/review digest, accepted local launcher/materialization/bootstrap contract, reviewed GitHub and protected-base launcher contracts, opaque credential-handle binding, one local anchor-check receipt, and separately authorized push/PR-create-or-update/merge/readback/rerun/fetch/variable/root actions.
+- Produces: exact operation-specific `GitHubControllerReceipt` set including push, PR creation or update, PR/rules/check readbacks, merge, ordered-parent readback, workflow readback/rerun if any, exact-object fetch and variable writes; `ProtectedBaseLauncherReceipt`; root-only anchor binding local and hosted trust roots and both parents; no repository commit.
 
 **Commit message:** none; this task produces external readback/receipt state only after its separate authorizations.
 
@@ -3075,94 +4171,122 @@ test -f "$ANCHOR"
 
 Expected RED now: nonzero because no authorized future receipt exists. This is the correct HOLD state. Do not create it to make the check green.
 
-- [ ] **Step 2: Re-read admitted live main and obtain separate exact authorization for the push**
+- [ ] **Step 2: Re-read admitted live main and separately authorize the exact push**
 
-Before any network mutation, read `refs/heads/main` with `git ls-remote` and require exact equality to `CurrentMainAdmission.liveMainCommit`. Drift after acceptance abandons the sequence and uses the sole pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT` recovery start defined in Task 8; it reruns 0B/0F/0C, 0M and Tasks 1–8. When equal, present admitted main, refresh base/merge/parents, `B0_IMPLEMENTATION_SHA`, `B0_ACCEPTANCE_SHA`, branch name, acceptance-review SHA-256, launcher/bootstrap contract and clean status. Authorization for this step covers only:
+Invoke the reviewed GitHub controller operation `PROTECTED_MAIN_READBACK` and require its receipt to equal `CurrentMainAdmission.liveMainCommit`, protected ref and repository. Drift after acceptance abandons the sequence and uses the sole pre-scanner recovery start. When equal, present admitted main, refresh parents, `B0_IMPLEMENTATION_SHA`, `B0_ACCEPTANCE_SHA`, branch, review/controller/launcher/bootstrap digests and clean state. A separate push authorization names the exact `PUSH_EXACT_BRANCH` request/payload digest, forbids force and permits only this diagnostic expansion:
 
 ```bash
 git push -u origin codex/pr407-organization-identity-caller-cutover-v2
 ```
 
-It does not authorize a PR, merge, variables, readback receipt, v3 worktree, or B1.
+The GitHub controller—not the local launcher—executes exact Git from its reviewed closure with the opaque credential handle and emits a `GitHubControllerReceipt`. This authorization does not cover PR creation/update, merge, workflow rerun, variables, root anchor, v3 or B1.
 
-- [ ] **Step 3: Obtain separate exact authorization for PR create/update**
+- [ ] **Step 3: Separately authorize and execute exact PR create or update**
 
-The PR base branch is protected `main`; actual base SHA must equal admitted `liveMainCommit`; head SHA must equal `B0_ACCEPTANCE_SHA`; the body states refresh/admission/bootstrap/0M identities, exactly one Artifact B migration, `B0_IMPLEMENTATION`, `B0_ACCEPTANCE`, review digests and `LOCAL_ACCEPTANCE_REVIEWED`. Query the created PR and stop if either SHA differs:
+Create the canonical PR body file in the controller input root and bind its SHA-256. Its title is exactly `Organization Identity writer ban-at-source`; base is `main`; head is `codex/pr407-organization-identity-caller-cutover-v2`; body binds refresh/admission/bootstrap/0M/controller identities, exactly one Artifact B migration, `B0_IMPLEMENTATION`, `B0_ACCEPTANCE`, review digests and `LOCAL_ACCEPTANCE_REVIEWED`.
+
+First invoke `PR_READBACK` for the head branch. If no open PR exists, obtain a separate `PR_CREATE` authorization and execute only:
 
 ```bash
-gh pr view codex/pr407-organization-identity-caller-cutover-v2 \
-  --json number,baseRefName,baseRefOid,headRefName,headRefOid,state,url
+gh pr create --repo mlhjyx/global-backend \
+  --base main \
+  --head codex/pr407-organization-identity-caller-cutover-v2 \
+  --title "Organization Identity writer ban-at-source" \
+  --body-file /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/requests/task-9-pr-body.md
 ```
 
-- [ ] **Step 4: Read live rules/checks and request a separate merge authorization**
-
-Read only the exact PR checks, required review, branch protection/ruleset, allowed merge methods, auto-update/merge-queue settings, conversation state and protected-main anchor workflow blob. The merge authorization must name PR number, exact head/base/method and disclose that merging triggers the base-owned protected-main `push` anchor workflow automatically. Auto-update/queue rebase is forbidden.
-
-- [ ] **Step 5: Recheck exact head/base immediately before the authorized merge call**
-
-Immediately before the network mutation, read the PR again and require actual `headRefOid=B0_ACCEPTANCE_SHA` and `baseRefOid=ADMITTED_LIVE_MAIN_COMMIT`; require approvals/checks still green and no auto-update/queue transition. A mismatch stops without merge and invalidates this acceptance sequence.
-
-- [ ] **Step 6: Perform only the separately authorized expected-head merge call**
-
-Authority dispatches canonical `task-9-github-pr-merge.json` as `GITHUB_PR_MERGE_V1` only after the separate merge authorization and immediate head/base readback. The launcher derives the repository/PR from the reviewed packet and uses the API's expected-head precondition; the direct block is diagnostic expansion:
+If exactly one open PR already exists with the exact base/head, do not create another. Obtain a separate `PR_UPDATE_BODY` authorization before executing only:
 
 ```bash
-REPOSITORY="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-MERGE_RESPONSE="$(gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
+gh pr edit "$PR_NUMBER" --repo mlhjyx/global-backend \
+  --title "Organization Identity writer ban-at-source" \
+  --body-file /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/requests/task-9-pr-body.md
+```
+
+The direct commands are diagnostics. The GitHub controller has distinct closed request/result schemas for create and update; authorization of either cannot invoke the other. Afterward invoke a new `PR_READBACK` request and require exact PR number, URL, state, baseRefOid=`ADMITTED_LIVE_MAIN_COMMIT`, headRefOid=`B0_ACCEPTANCE_SHA`, title and body digest.
+
+- [ ] **Step 4: Read exact rules/checks/conversation/workflow state and request merge authorization**
+
+Invoke one `RULES_CHECKS_READBACK` request that binds the PR number/head/base, required checks/reviews, conversation resolution, protected branch/rulesets, allowed merge methods, auto-update/merge-queue state and exact protected-base workflow blob. The reviewed result schema forbids prose-only green status or omitted rule sets. Request separate merge authorization naming this receipt, exact PR/head/base, `MERGE_COMMIT` and disclosure that merge triggers the base-owned protected-main push workflow. Any missing review/check, auto-update, queue/rebase or workflow drift is HOLD.
+
+- [ ] **Step 5: Recheck exact head/base/rules immediately before merge**
+
+Immediately before the mutation, invoke a new `PR_READBACK` followed by `RULES_CHECKS_READBACK`; the merge request must bind both latest receipt digests. Require `headRefOid=B0_ACCEPTANCE_SHA`, `baseRefOid=ADMITTED_LIVE_MAIN_COMMIT`, green checks/reviews, resolved conversations and no auto-update/queue transition. A mismatch stops without merge and invalidates the merge authorization; an older readback cannot be reused.
+
+- [ ] **Step 6: Perform only the separately authorized expected-head merge**
+
+Invoke the GitHub controller operation `PR_MERGE` with the exact authorization and immediate readback receipts. Its fixed API payload is `PUT /repos/mlhjyx/global-backend/pulls/{number}/merge` with `merge_method=merge` and `sha=B0_ACCEPTANCE_SHA`. The direct diagnostic expansion is:
+
+```bash
+MERGE_RESPONSE="$(gh api --method PUT \
+  "repos/mlhjyx/global-backend/pulls/$PR_NUMBER/merge" \
   -f merge_method=merge -f sha="$B0_ACCEPTANCE_SHA")"
 PROTECTED_MAIN_MERGE_SHA="$(jq -er '.sha' <<<"$MERGE_RESPONSE")"
 ```
 
-The actual base equality was rechecked immediately before this call because this API has no independent expected-base parameter. Squash/rebase/force/update-branch/merge-queue calls are forbidden.
+The controller receipt binds request, authorization, credential handle, HTTP status and exact response SHA. Squash/rebase/force/update-branch/merge-queue calls are absent from the operation registry.
 
-- [ ] **Step 7: Perform separately authorized GitHub commit/branch parent readback**
+- [ ] **Step 7: Separately read back the GitHub commit, branch and ordered parents**
 
-Dispatch canonical `task-9-github-commit-readback.json` as `GITHUB_COMMIT_READBACK_V1`. Do not consult local `origin/main`. Read the exact merge-response SHA and protected-main branch through GitHub API; the direct block is diagnostic expansion:
+Invoke `COMMIT_BRANCH_PARENT_READBACK` with the merge-response SHA. The direct API diagnostics are:
 
 ```bash
-REMOTE_COMMIT="$(gh api "repos/$REPOSITORY/git/commits/$PROTECTED_MAIN_MERGE_SHA")"
-REMOTE_MAIN="$(gh api "repos/$REPOSITORY/branches/main")"
+REMOTE_COMMIT="$(gh api \
+  "repos/mlhjyx/global-backend/git/commits/$PROTECTED_MAIN_MERGE_SHA")"
+REMOTE_MAIN="$(gh api "repos/mlhjyx/global-backend/branches/main")"
 test "$(jq -er '.sha' <<<"$REMOTE_COMMIT")" = "$PROTECTED_MAIN_MERGE_SHA"
 test "$(jq -er '.commit.sha' <<<"$REMOTE_MAIN")" = "$PROTECTED_MAIN_MERGE_SHA"
 test "$(jq '.parents | length' <<<"$REMOTE_COMMIT")" -eq 2
-test "$(jq -er '.parents[0].sha' <<<"$REMOTE_COMMIT")" = "$ADMITTED_LIVE_MAIN_COMMIT"
+test "$(jq -er '.parents[0].sha' <<<"$REMOTE_COMMIT")" = \
+  "$ADMITTED_LIVE_MAIN_COMMIT"
 test "$(jq -er '.parents[1].sha' <<<"$REMOTE_COMMIT")" = "$B0_ACCEPTANCE_SHA"
 ```
 
-Expected: GitHub commit and protected-main APIs independently agree on response SHA and exact ordered parents. A mismatch produces no root/hosted anchor, fetch or v3.
+Only the typed GitHub controller receipt is authority. It must prove exact merge-response/branch equality and ordered parents `[admitted main, reviewed PR head]`. Mismatch produces no hosted/root anchor, fetch or v3.
 
-- [ ] **Step 8: Verify the automatic protected-main push anchor run**
+- [ ] **Step 8: Read back the automatic protected-main workflow and handle rerun separately**
 
-Read the workflow run created by the merge push and require exact workflow blob, event=`push`, ref=`refs/heads/main`, head SHA=`PROTECTED_MAIN_MERGE_SHA`, repository/run identity and PASS closed receipt. If failed/cancelled, request authorization only to re-run that same immutable run/SHA. Moving-main dispatch, temporary ref/tag or replacement run is forbidden.
+Invoke `WORKFLOW_RUN_READBACK` for the run triggered by the exact merge push. Require exact workflow/base blob, protected-base launcher contract/receipt, event=`push`, ref=`refs/heads/main`, head SHA=`PROTECTED_MAIN_MERGE_SHA`, repository/run identity, tool/materialization/event/request/output digests and PASS. An independent hosted-launcher reviewer recomputes the workflow/base/source/tool-logical/event/materialization/request/output/TOCTOU facts, executes PR-no-exec counterexamples, and writes `ProtectedBaseLauncherReceiptReview` with unique zero-C/I/PASS. If failed/cancelled, stop and request a distinct authorization for `WORKFLOW_RERUN` naming that immutable run ID/attempt/SHA. The only diagnostic mutation is:
 
-- [ ] **Step 9: Obtain separate authorization and fetch only the exact merge object**
+```bash
+gh run rerun "$RUN_ID" --repo mlhjyx/global-backend
+```
 
-After remote readback PASS, verify the pinned Git supports `--no-auto-maintenance` and `--no-write-commit-graph`; missing support is HOLD. Request exact fetch authorization for `PROTECTED_MAIN_MERGE_SHA`, then dispatch canonical `task-9-fetch-merged-object.json` as `GIT_FETCH_MERGED_OBJECT_V1`. The direct block is diagnostic expansion:
+After a rerun, invoke a new `WORKFLOW_RUN_READBACK`; moving-main dispatch, temporary ref/tag, replacement run or naked-SHA workflow dispatch is forbidden.
+
+- [ ] **Step 9: Separately authorize and fetch only the exact merge object**
+
+Verify the Git executable in the GitHub controller closure supports `--no-auto-maintenance` and `--no-write-commit-graph`; missing support is HOLD. Obtain exact `FETCH_EXACT_OBJECT` authorization for `PROTECTED_MAIN_MERGE_SHA`. The direct diagnostic expansion is:
 
 ```bash
 git fetch --no-tags --no-write-fetch-head --no-auto-maintenance \
   --no-write-commit-graph origin "$PROTECTED_MAIN_MERGE_SHA"
-test "$(git rev-parse "$PROTECTED_MAIN_MERGE_SHA^1")" = "$ADMITTED_LIVE_MAIN_COMMIT"
+test "$(git rev-parse "$PROTECTED_MAIN_MERGE_SHA^1")" = \
+  "$ADMITTED_LIVE_MAIN_COMMIT"
 test "$(git rev-parse "$PROTECTED_MAIN_MERGE_SHA^2")" = "$B0_ACCEPTANCE_SHA"
-git merge-base --is-ancestor "$B0_IMPLEMENTATION_SHA" "$PROTECTED_MAIN_MERGE_SHA"
+git merge-base --is-ancestor \
+  "$B0_IMPLEMENTATION_SHA" "$PROTECTED_MAIN_MERGE_SHA"
 ```
 
-This fetch does not update or treat `origin/main` as fresh authority.
+The GitHub controller receipt proves no tracking-ref/`FETCH_HEAD`/maintenance/commit-graph write. Local `origin/main` is never treated as fresh authority.
 
-- [ ] **Step 10: Obtain separate authorization for controller variables and root-only receipt**
+- [ ] **Step 10: Separately authorize controller-variable writes and root anchor creation**
 
-Set all twelve controller-owned values only after authorization and only to live readback identities. Then, under another separate root-receipt authorization, dispatch `task-9-root-anchor-write.json` as `ROOT_ANCHOR_WRITE_V1` to create the successor directory/receipt atomically with owner `root:root`, directory/receipt access no broader than `0700/0600`, exact schema above, admitted main, `B0_REFRESH_BASE_COMMIT`, `CURRENT_MAIN_ADMISSION_COMMIT`, reviewed PR head, both ordered GitHub parents, launcher/materialization/bootstrap contract identities, canonical RFC3339 UTC time, predecessor digest when one exists, and a recomputed receipt-chain SHA-256. Do not place credentials or source/SQL bytes in it.
+Prepare the exact fifteen-name/value-digest set. The GitHub controller `CONTROLLER_VARIABLES_WRITE` request is separately authorized and may write only those controller-owned variables to `mlhjyx/global-backend`; the operation result readbacks every variable name/value digest without storing raw credential values. The diagnostic command family is `gh variable set NAME --repo mlhjyx/global-backend --body VALUE`, generated from the closed fifteen-entry payload; no extra name is accepted.
 
-- [ ] **Step 11: Verify the external anchor from both local and hosted perspectives**
+After variable receipt PASS, request a different root-anchor authorization. The branch-external root anchor writer—not the local launcher—create-exclusively writes `protected-main-anchor.json` at `root:root 0600` below its `0700` directory. It verifies and binds local launcher contract/materialization/review, immutable bootstrap contract, GitHub controller contract/materialization/review plus operation-receipt set, protected-base launcher contract/receipt/receipt-review/equivalence proof, admitted/refresh/admission/implementation/acceptance/review identities, both ordered GitHub parents, workflow run, canonical RFC3339 time, predecessor digest and receipt-chain digest. The anchor contains no credential/source/SQL bytes and does not hash itself.
 
-Dispatch canonical `task-9-anchor-stage.json` as `SCANNER_STAGE_V1`, binding the fresh Task 9 run receipt and root anchor. The direct block is diagnostic expansion:
+- [ ] **Step 11: Verify local and hosted anchor perspectives**
+
+Dispatch one local `SCANNER_STAGE_V1/ANCHOR_ONLY` request with its own fresh `BootstrapRunReceipt`; it consumes the root anchor as data. Independently validate the hosted `ProtectedBaseLauncherReceipt` and local-to-hosted equivalence proof. The direct scanner command is diagnostic:
 
 ```bash
 node scripts/governance-organization-identity-writers.mjs stage \
-  --anchor-receipt /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
+  --anchor-receipt \
+  /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
 ```
 
-Verify the initial protected-main push receipt and later base-owned `pull_request_target` contract. The ordinary PR Governance context is explicitly rejected as authority. A PR-supplied artifact/env/job-output/package/workflow substitute must fail.
+Ordinary PR Governance remains non-authoritative. A PR-supplied artifact/env/job-output/package/workflow/launcher/request/controller substitute fails. The Task 9 evidence set binds every GitHub operation receipt and the one local anchor-check receipt; no receipt is reused across operations.
 
 - [ ] **Step 12: Record the task outcome without a repository commit**
 
@@ -3180,7 +4304,7 @@ Verify the initial protected-main push receipt and later base-owned `pull_reques
 **Interfaces:**
 
 - Consumes: root-only anchor's exact `mergeCommitSha`, `acceptedB0Sha`, launcher/materialization/bootstrap-contract identities; locally available protected-main merge Git object; separate v3 creation authorization.
-- Produces: clean v3 at the exact merge commit, a fresh v3 `BootstrapRunReceipt` whose subject is that merge, B0 stage passing with external anchor, live zero exit 1 with three writers.
+- Produces: clean v3 at the exact merge commit, one fresh receipt per worktree/bootstrap/Prisma/stage/zero command plus their v3 receipt-set digest, B0 stage passing with external anchor, live zero exit 1 with three writers.
 
 **Commit message:** none; worktree creation is not a repository content commit.
 
@@ -3194,7 +4318,7 @@ Expected RED before setup: nonzero. If the path or branch already exists, stop a
 
 - [ ] **Step 2: Read and validate the anchor without editing v2**
 
-Authority dispatches `task-10-anchor-validate.json` as `SCANNER_STAGE_V1` in anchor-only mode. The direct `jq`/Git block is diagnostic readback and cannot select authority inputs.
+Authority dispatches `task-10-anchor-validate.json` as `SCANNER_STAGE_V1/ANCHOR_ONLY`. The direct `jq`/Git block is diagnostic readback and cannot select authority inputs.
 
 ```bash
 ANCHOR=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
@@ -3238,7 +4362,7 @@ git -C /global/backend worktree add \
 
 - [ ] **Step 5: Verify the fresh base and run the accepted clean bootstrap**
 
-Dispatch canonical `task-10-bootstrap-authority-run.json` as `BOOTSTRAP_AUTHORITY_RUN_V1`. The accepted root wrapper supplies `/usr/bin/env -i`, exact `NPM_CONFIG_USERCONFIG=/dev/null`, and the absolute Node path from the accepted launcher receipt—not `/usr/bin/node`. It internally performs `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --config.ignore-pnpmfile=true`, then dispatches `PRISMA_GENERATE_V1` and verifies generated outputs before scanner load. The block below is diagnostic state readback plus the one authority launcher call:
+Dispatch canonical `task-10-bootstrap-authority-run.json` as `BOOTSTRAP_AUTHORITY_RUN_V1/INSTALL_AND_PRISMA_GENERATE`. The accepted root wrapper supplies `/usr/bin/env -i`, exact `NPM_CONFIG_USERCONFIG=/dev/null`, and the absolute Node path from the accepted launcher receipt—not `/usr/bin/node`. It internally performs the exact install/generate sequence; a separate `PRISMA_GENERATE_V1/VERIFY` request verifies generated outputs before scanner load. The block below is diagnostic state readback plus the one authority launcher call:
 
 ```bash
 cd /global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3
@@ -3261,13 +4385,13 @@ Expected: bootstrap proves exact `pnpm install --frozen-lockfile --ignore-script
   --request /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests/task-10-zero.json
 ```
 
-The requests use `SCANNER_STAGE_V1` and `SCANNER_ZERO_V1`, the fresh Task 10 run receipt and root anchor. Expected: stage exits 0 at `B0_BASELINE`; zero exits 1 with exactly the three accepted writer findings; stderr is empty.
+The requests use `SCANNER_STAGE_V1/STAGE_CHECK` and `SCANNER_ZERO_V1/ZERO_CHECK`, each with a distinct fresh Task 10 receipt and the same root anchor. Worktree creation, bootstrap, Prisma generation, stage and zero each have separate request IDs/receipts; the Task 10 setup evidence binds their receipt-set digest. Expected: stage exits 0 at `B0_BASELINE`; zero exits 1 with exactly the three accepted writer findings; stderr is empty.
 
 **Commit:** none. Worktree creation is the setup boundary; Task 11 owns the first v3 commit.
 
 ## V3 Delivery: B1–B6 Caller Cutover
 
-Every Task 11–18 authority gate first validates the protected anchor, exact accepted `BootstrapContract`, root launcher/materialization and a fresh `BootstrapRunReceipt` whose subject equals that task's candidate head. The direct pnpm/Node command blocks are diagnostic/TDD expansions. A GREEN/stage/zero/governance/review claim exists only when the named canonical root-launcher request for that task returns the closed receipt; intentional RED commands retain expected-failure receipts and are never promoted to PASS.
+Every Task 11–18 authority command first validates the protected anchor, exact accepted `BootstrapContract`, root launcher/materialization and creates its own fresh `BootstrapRunReceipt` whose subject equals that task's candidate head. The direct pnpm/Node command blocks are diagnostic/TDD expansions. A GREEN/stage/zero/governance/review claim exists only when every named canonical request has a distinct closed receipt and the task receipt-set count/digest passes; intentional RED commands retain expected-failure receipts and are never promoted to PASS.
 
 ### Task 11: B1 Temporal Five-Outcome and Replay RED Without Writer-Count Change
 
@@ -3289,7 +4413,7 @@ Every Task 11–18 authority gate first validates the protected anchor, exact ac
 
 - [ ] **Step 1: Advance only the mutable stage record**
 
-Dispatch `task-11-stage-generate.json` as `SCANNER_STAGE_V1` to generate `B1_TEMPORAL_RED` so the source-tree observation still names three exact writers. Do not edit expected sets, baseline, scanner, acceptance, build, raw, or migration manifests.
+Dispatch `task-11-stage-generate.json` as `SCANNER_STAGE_V1/STAGE_GENERATE` to generate `B1_TEMPORAL_RED` so the source-tree observation still names three exact writers. Do not edit expected sets, baseline, scanner, acceptance, build, raw, or migration manifests.
 
 - [ ] **Step 2: Write a focused resolver mock and transaction harness**
 
@@ -3340,11 +4464,11 @@ pnpm --filter @global/api exec vitest run \
   src/temporal/organization-identity-caller-cutover.spec.ts
 ```
 
-Expected: diagnostic FAIL because current Temporal code still calls `tx.identityLink.create` and does not call the resolver/composite lock. Canonical `task-11-api-red.json` under `API_VERIFY_V1` records this expected RED without claiming PASS.
+Expected: diagnostic FAIL because current Temporal code still calls `tx.identityLink.create` and does not call the resolver/composite lock. Canonical `task-11-api-red.json` under `API_VERIFY_V1/VERIFY` with suite `API_TEMPORAL` records this expected RED without claiming PASS.
 
 - [ ] **Step 7: Prove B1 governance remains green with three writers**
 
-Dispatch `task-11-stage.json` as `SCANNER_STAGE_V1` and `task-11-zero.json` as `SCANNER_ZERO_V1`; the direct block is diagnostic expansion.
+Dispatch `task-11-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK` and `task-11-zero.json` as `SCANNER_ZERO_V1/ZERO_CHECK`; each receives a separate receipt and the direct block is diagnostic expansion.
 
 Run:
 
@@ -3366,7 +4490,7 @@ git commit -m "test: specify temporal identity resolver cutover"
 
 - [ ] **Step 9: Run Task 11 independent scoped review/fix loop**
 
-Review five-outcome/replay/lock/provenance RED contract and unchanged writer count. Gate `task-11-temporal-red-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; findings fix only Task 11 tests/stage and repeat RED/review. Task 12 is blocked until PASS.
+Review five-outcome/replay/lock/provenance RED contract and unchanged writer count. Gate `task-11-temporal-red-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; findings fix only Task 11 tests/stage and repeat RED/review. Task 12 is blocked until PASS.
 
 ### Task 12: B2 Temporal Resolver Cutover and Stage `3 → 2`
 
@@ -3397,7 +4521,7 @@ pnpm --filter @global/api exec vitest run \
   src/temporal/organization-identity-caller-cutover.spec.ts
 ```
 
-Expected: diagnostic FAIL on the resolver/composite-receipt/direct-writer assertions. Canonical `task-12-api-red.json` under `API_VERIFY_V1` records the expected RED. If it passes before source changes, stop and inspect branch ownership or test weakness.
+Expected: diagnostic FAIL on the resolver/composite-receipt/direct-writer assertions. Canonical `task-12-api-red.json` under `API_VERIFY_V1/VERIFY` with suite `API_TEMPORAL` records the expected RED. If it passes before source changes, stop and inspect branch ownership or test weakness.
 
 - [ ] **Step 2: Import only the Artifact A public contracts**
 
@@ -3450,7 +4574,7 @@ Replace mocks that asserted direct `identityLink.create` with resolver receipts;
 
 - [ ] **Step 7: Run focused GREEN**
 
-Dispatch canonical `task-12-api-focused-green.json` as `API_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch canonical `task-12-api-focused-green.json` as `API_VERIFY_V1/VERIFY` with suite `API_TEMPORAL`; the direct block is diagnostic expansion.
 
 Run:
 
@@ -3470,7 +4594,7 @@ Generate `B2_TEMPORAL_CUTOVER` observation from the changed writer source. The a
 
 - [ ] **Step 9: Verify stage `3 → 2`, raw freeze, and zero diagnostic**
 
-Dispatch `task-12-stage.json` as `SCANNER_STAGE_V1` and `task-12-zero.json` as `SCANNER_ZERO_V1`, each binding the anchor and fresh Task 12 run receipt. The direct block is diagnostic expansion.
+Dispatch `task-12-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK` and `task-12-zero.json` as `SCANNER_ZERO_V1/ZERO_CHECK`; each command has a different fresh Task 12 receipt while binding the same anchor/subject. The direct block is diagnostic expansion.
 
 Run:
 
@@ -3484,7 +4608,7 @@ Expected: stage exit 0 with two expected writers; zero exit 1 with exactly those
 
 - [ ] **Step 10: Run proportional API/build checks and commit**
 
-Dispatch canonical `task-12-api-full.json` as `API_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch canonical `task-12-api-full.json` as `API_VERIFY_V1/VERIFY` with suite `API_FULL`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/api lint
@@ -3500,7 +4624,7 @@ git commit -m "feat: cut temporal identity writer over to resolver"
 
 - [ ] **Step 11: Run Task 12 independent scoped review/fix loop**
 
-Review resolver/lock receipt use, all outcomes, contribution ownership, replay/history compatibility and exact `3 → 2`. Gate `task-12-temporal-cutover-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; fix/retest/review until PASS before Task 13.
+Review resolver/lock receipt use, all outcomes, contribution ownership, replay/history compatibility and exact `3 → 2`. Gate `task-12-temporal-cutover-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; fix/retest/review until PASS before Task 13.
 
 ### Task 13: B3 TenantProjection Five-Outcome, Chunk, and Replay RED
 
@@ -3521,7 +4645,7 @@ Review resolver/lock receipt use, all outcomes, contribution ownership, replay/h
 
 - [ ] **Step 1: Advance only the stage to `B3_PROJECTION_RED`**
 
-Dispatch `task-13-stage-generate.json` as `SCANNER_STAGE_V1` against unchanged B2 source. Stage must still pass with TenantProjection and materialization writers.
+Dispatch `task-13-stage-generate.json` as `SCANNER_STAGE_V1/STAGE_GENERATE` against unchanged B2 source. Stage must still pass with TenantProjection and materialization writers.
 
 - [ ] **Step 2: Build the exact projection harness**
 
@@ -3548,11 +4672,11 @@ pnpm --filter @global/api exec vitest run \
   src/acquisition/tenant-projection.organization-identity.spec.ts
 ```
 
-Expected: diagnostic FAIL because current projection still calls `tx.identityLink.create` and does not use the resolver/composite receipt. Canonical `task-13-api-red.json` under `API_VERIFY_V1` records the expected RED.
+Expected: diagnostic FAIL because current projection still calls `tx.identityLink.create` and does not use the resolver/composite receipt. Canonical `task-13-api-red.json` under `API_VERIFY_V1/VERIFY` with suite `API_PROJECTION` records the expected RED.
 
 - [ ] **Step 7: Verify the unchanged two-writer stage and commit RED**
 
-Dispatch `task-13-stage.json` as `SCANNER_STAGE_V1`; the direct stage command is diagnostic expansion.
+Dispatch `task-13-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK`; the direct stage command is diagnostic expansion.
 
 ```bash
 ANCHOR=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
@@ -3566,7 +4690,7 @@ Expected: governance stage PASS with two writers; product RED remains intentiona
 
 - [ ] **Step 8: Run Task 13 independent scoped review/fix loop**
 
-Review five outcomes, Raw-before-resolver order, 101-row chunk lock refresh, replay stability and script result contract. Gate `task-13-projection-red-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; fix/retest/review until PASS before Task 14.
+Review five outcomes, Raw-before-resolver order, 101-row chunk lock refresh, replay stability and script result contract. Gate `task-13-projection-red-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; fix/retest/review until PASS before Task 14.
 
 ### Task 14: B4 TenantProjection Resolver Cutover and Stage `2 → 1`
 
@@ -3595,7 +4719,7 @@ pnpm --filter @global/api exec vitest run \
   src/acquisition/tenant-projection.organization-identity.spec.ts
 ```
 
-Expected: diagnostic FAIL on resolver/composite-receipt/direct-writer assertions. Canonical `task-14-api-red.json` under `API_VERIFY_V1` records the expected RED. Passing before source changes is a stop condition.
+Expected: diagnostic FAIL on resolver/composite-receipt/direct-writer assertions. Canonical `task-14-api-red.json` under `API_VERIFY_V1/VERIFY` with suite `API_PROJECTION` records the expected RED. Passing before source changes is a stop condition.
 
 - [ ] **Step 2: Replace the chunk's suppression-only receipt with the composite receipt**
 
@@ -3630,7 +4754,7 @@ Preserve `CHUNK=100`, platform reads outside tenant transactions, per-chunk fres
 
 - [ ] **Step 6: Run focused GREEN**
 
-Dispatch canonical `task-14-api-focused-green.json` as `API_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch canonical `task-14-api-focused-green.json` as `API_VERIFY_V1/VERIFY` with suite `API_PROJECTION`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/api exec vitest run \
@@ -3643,7 +4767,7 @@ Expected: PASS for five outcomes, 101-row chunk refresh, response loss, suppress
 
 - [ ] **Step 7: Generate and verify B4 stage**
 
-Dispatch `task-14-stage.json` as `SCANNER_STAGE_V1` and `task-14-zero.json` as `SCANNER_ZERO_V1`; the direct block is diagnostic expansion.
+Dispatch `task-14-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK` and `task-14-zero.json` as `SCANNER_ZERO_V1/ZERO_CHECK`; the direct block is diagnostic expansion.
 
 ```bash
 ANCHOR=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
@@ -3655,7 +4779,7 @@ Expected after generating `B4_PROJECTION_CUTOVER`: stage exit 0 with only the ma
 
 - [ ] **Step 8: Run API checks and commit**
 
-Dispatch canonical `task-14-api-full.json` as `API_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch canonical `task-14-api-full.json` as `API_VERIFY_V1/VERIFY` with suite `API_FULL`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/api lint
@@ -3672,7 +4796,7 @@ git commit -m "feat: cut tenant projection identity writer over to resolver"
 
 - [ ] **Step 9: Run Task 14 independent scoped review/fix loop**
 
-Review composite receipt per chunk, governed Raw persistence, outcome writes, no contact writer and exact `2 → 1`. Gate `task-14-projection-cutover-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; fix/retest/review before Task 15.
+Review composite receipt per chunk, governed Raw persistence, outcome writes, no contact writer and exact `2 → 1`. Gate `task-14-projection-cutover-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; fix/retest/review before Task 15.
 
 ### Task 15: B4M Governed Materialization Resolver Cutover and Stage `1 → 0`
 
@@ -3721,7 +4845,7 @@ pnpm --filter @global/api exec vitest run \
   src/discovery/discovery-company-materialization-ctx.spec.ts
 ```
 
-Expected: diagnostic FAIL on current `identityLink.create`, manual identity advisory lock, absent resolver call, and `identity_v2` rejection. Canonical `task-15-api-red.json` under `API_VERIFY_V1` records the expected RED.
+Expected: diagnostic FAIL on current `identityLink.create`, manual identity advisory lock, absent resolver call, and `identity_v2` rejection. Canonical `task-15-api-red.json` under `API_VERIFY_V1/VERIFY` with suite `API_MATERIALIZATION` records the expected RED.
 
 - [ ] **Step 3: Move composite lock acquisition before batch facts**
 
@@ -3764,7 +4888,7 @@ Keep admission, inspection, fence, batch order, suppression snapshot digest, res
 
 - [ ] **Step 8: Run focused GREEN and static DB function tests**
 
-Dispatch `task-15-api-focused-green.json` as `API_VERIFY_V1` and `task-15-migration-static.json` as `MIGRATION_STATIC_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-15-api-focused-green.json` as `API_VERIFY_V1/VERIFY` with suite `API_MATERIALIZATION` and `task-15-migration-static.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/api exec vitest run \
@@ -3780,7 +4904,7 @@ Expected: PASS; B4M creates/edits no migration beyond the already accepted 0M ba
 
 - [ ] **Step 9: Generate B4M stage and prove first live zero**
 
-Dispatch `task-15-stage.json` as `SCANNER_STAGE_V1` and `task-15-zero.json` as `SCANNER_ZERO_V1`; both bind the protected anchor and fresh Task 15 run receipt. The direct block is diagnostic expansion.
+Dispatch `task-15-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK` and `task-15-zero.json` as `SCANNER_ZERO_V1/ZERO_CHECK`; each has a distinct fresh Task 15 receipt and both bind the protected anchor. The direct block is diagnostic expansion.
 
 ```bash
 ANCHOR=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
@@ -3792,7 +4916,7 @@ Expected after generating `B4M_MATERIALIZATION_CUTOVER`: both commands exit 0, d
 
 - [ ] **Step 10: Run API/static migration checks and commit**
 
-Dispatch `task-15-api-full.json` as `API_VERIFY_V1` and `task-15-migration-full.json` as `MIGRATION_STATIC_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-15-api-full.json` as `API_VERIFY_V1/VERIFY` with suite `API_FULL` and `task-15-migration-full.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/api lint
@@ -3817,7 +4941,7 @@ git commit -m "feat: cut materialization identity writer over to resolver"
 
 - [ ] **Step 11: Run Task 15 independent scoped review/fix loop**
 
-Review accepted 0M dependency, `identity_v2`/`IDENTITY_CONFLICT` DB+application agreement, C-TX fences/replay/outcomes and exact `1 → 0`. Gate `task-15-materialization-cutover-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; fix/retest including 0M static tests and review before Task 16.
+Review accepted 0M dependency, `identity_v2`/`IDENTITY_CONFLICT` DB+application agreement, C-TX fences/replay/outcomes and exact `1 → 0`. Gate `task-15-materialization-cutover-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; fix/retest including 0M static tests and review before Task 16.
 
 ### Task 16: B5 Mandatory Zero, Downstream Consumers, and Governance Promotion
 
@@ -3858,7 +4982,7 @@ pnpm --filter @global/api exec vitest run \
   src/discovery/organization-identity-caller-cutover-downstream.spec.ts
 ```
 
-Expected: diagnostic governance test FAIL because current B0 wiring still selects stage rather than mandatory zero at B5. Canonical `task-16-governance-red.json` under `GOVERNANCE_VERIFY_V1` records the expected RED. The downstream test may already pass; if it fails, fix only test harness assumptions or a proven caller-consumer regression, never broaden a consumer to legacy IdentityLink writes.
+Expected: diagnostic governance test FAIL because current B0 wiring still selects stage rather than mandatory zero at B5. Canonical `task-16-governance-red.json` under `GOVERNANCE_VERIFY_V1/VERIFY` with suite `GOVERNANCE_ZERO` records the expected RED. The downstream test may already pass; if it fails, fix only test harness assumptions or a proven caller-consumer regression, never broaden a consumer to legacy IdentityLink writes.
 
 - [ ] **Step 4: Promote zero based on the closed stage**
 
@@ -3876,11 +5000,11 @@ One or more findings, scan budget exhaustion, drift, ambiguity, or integrity fai
 
 - [ ] **Step 5: Generate the B5 stage receipt**
 
-Dispatch `task-16-stage-generate.json` as `SCANNER_STAGE_V1` to generate `B5_ZERO_GATE` against the same zero source tree. The only governance manifest changed is the stage JSON; scanner, tests, baselines, acceptance, and derivation rules remain accepted-parent bytes.
+Dispatch `task-16-stage-generate.json` as `SCANNER_STAGE_V1/STAGE_GENERATE` to generate `B5_ZERO_GATE` against the same zero source tree. The only governance manifest changed is the stage JSON; scanner, tests, baselines, acceptance, and derivation rules remain accepted-parent bytes.
 
 - [ ] **Step 6: Run mandatory zero and governance GREEN locally**
 
-Dispatch `task-16-scanner-test.json` as `SCANNER_TEST_V1`, `task-16-stage.json` as `SCANNER_STAGE_V1`, `task-16-zero.json` as `SCANNER_ZERO_V1`, and `task-16-governance.json` as `GOVERNANCE_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-16-scanner-test.json` as `SCANNER_TEST_V1/TEST`, `task-16-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK`, `task-16-zero.json` as `SCANNER_ZERO_V1/ZERO_CHECK`, and `task-16-governance.json` as `GOVERNANCE_VERIFY_V1/VERIFY`; the direct block is diagnostic expansion.
 
 Run:
 
@@ -3898,7 +5022,7 @@ Expected: all PASS; governance now fails if a fixture or working source reintrod
 
 - [ ] **Step 7: Run the downstream continuity packet**
 
-Dispatch canonical `task-16-downstream-api.json` as `API_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch canonical `task-16-downstream-api.json` as `API_VERIFY_V1/VERIFY` with suite `API_DOWNSTREAM`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/api exec vitest run \
@@ -3915,7 +5039,7 @@ Expected: PASS using the same CanonicalCompany/FieldEvidence state and no new pr
 
 - [ ] **Step 8: Run hosted-topology/runtime-exclusion tests**
 
-Dispatch `task-16-governance-topology.json` as `GOVERNANCE_VERIFY_V1` and `task-16-runtime-artifact.json` as `RUNTIME_ARTIFACT_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-16-governance-topology.json` as `GOVERNANCE_VERIFY_V1/VERIFY` and `task-16-runtime-artifact.json` as `RUNTIME_ARTIFACT_VERIFY_V1/VERIFY`; the direct block is diagnostic expansion.
 
 ```bash
 node --test \
@@ -3928,7 +5052,7 @@ Expected: required Governance context still reaches mandatory zero; scanner/test
 
 - [ ] **Step 9: Run full local non-runtime verification and commit**
 
-Dispatch `task-16-prisma.json` as `PRISMA_GENERATE_V1`, `task-16-api-full.json` as `API_VERIFY_V1`, and `task-16-migration-static.json` as `MIGRATION_STATIC_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-16-prisma.json` as `PRISMA_GENERATE_V1/VERIFY`, `task-16-api-full.json` as `API_VERIFY_V1/VERIFY` with suite `API_FULL`, and `task-16-migration-static.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm --filter @global/db generate
@@ -3949,7 +5073,7 @@ git commit -m "ci: require zero organization identity delegate writers"
 
 - [ ] **Step 10: Run Task 16 independent scoped review/fix loop**
 
-Review mandatory zero non-downgrade, downstream continuity, base-owned anchor topology and runtime exclusion. Gate `task-16-zero-governance-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; fix/retest/review before Task 17.
+Review mandatory zero non-downgrade, downstream continuity, base-owned anchor topology and runtime exclusion. Gate `task-16-zero-governance-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY`; fix/retest/review before Task 17.
 
 ### Task 17: B6 Mixed-Fleet, Old/New Replay, Races, and Disposable PostgreSQL Proof
 
@@ -4007,7 +5131,7 @@ pnpm --filter @global/api exec vitest run \
   src/discovery/organization-identity-artifact-b-mixed-fleet.spec.ts
 ```
 
-Expected: diagnostic FAIL until the harness is connected to all three cutover callers and old/new replay contracts. Canonical `task-17-api-red.json` under `API_VERIFY_V1` records the expected RED.
+Expected: diagnostic FAIL until the harness is connected to all three cutover callers and old/new replay contracts. Canonical `task-17-api-red.json` under `API_VERIFY_V1/VERIFY` with suite `API_MIXED_FLEET` records the expected RED.
 
 - [ ] **Step 5: Implement the minimal pure harness and reach GREEN**
 
@@ -4019,18 +5143,18 @@ Before running the enabled test, present exact image digest, loopback port polic
 
 - [ ] **Step 7: Run the authorized disposable GREEN packet**
 
-Only after authorization, dispatch canonical `task-17-disposable.json` as `MIGRATION_DISPOSABLE_VERIFY_V1` with exact image/topology/resources/caps and the fresh Task 17 run receipt. The direct block is diagnostic expansion:
+Only after authorization, invoke the reviewed disposable PostgreSQL controller operation `B6_MIXED_FLEET` with exact image/topology/resources/caps/migration/scenario/cleanup payload. The local launcher has no Docker/psql/disposable ID. The direct block is diagnostic expansion:
 
 ```bash
 ORGANIZATION_IDENTITY_B6_DISPOSABLE=1 \
   node --test packages/db/test/organization-identity-artifact-b-cutover.disposable.spec.mjs
 ```
 
-Expected: all scenarios PASS; output contains no URLs, passwords, SQL bodies, customer data, or source text. The test's `after` cleanup confirms the unique container/network/volume no longer exist. If cleanup cannot be proven, report the exact resource IDs without deleting anything outside the receipt.
+Expected: the `DisposablePostgresControllerReceipt` proves all scenarios PASS, exact executable/process closure, opaque synthetic credential handle, no URLs/passwords/SQL/customer/source text, and cleanup of only the unique controller-created container/network/volume. If cleanup cannot be proven, the receipt is HOLD and reports only bounded resource IDs without deleting anything outside the request.
 
 - [ ] **Step 8: Generate B6 stage and rerun zero/governance**
 
-Dispatch `task-17-stage.json` as `SCANNER_STAGE_V1`, `task-17-zero.json` as `SCANNER_ZERO_V1`, and `task-17-governance.json` as `GOVERNANCE_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-17-stage.json` as `SCANNER_STAGE_V1/STAGE_CHECK`, `task-17-zero.json` as `SCANNER_ZERO_V1/ZERO_CHECK`, and `task-17-governance.json` as `GOVERNANCE_VERIFY_V1/VERIFY`; the direct block is diagnostic expansion.
 
 ```bash
 ANCHOR=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
@@ -4043,7 +5167,7 @@ Expected after generating `B6_CLOSEOUT`: all PASS with zero writers; exact raw/b
 
 - [ ] **Step 9: Run the complete final technical packet**
 
-Dispatch `task-17-scanner-test.json` as `SCANNER_TEST_V1`, `task-17-governance-full.json` as `GOVERNANCE_VERIFY_V1`, `task-17-runtime.json` as `RUNTIME_ARTIFACT_VERIFY_V1`, `task-17-migration.json` as `MIGRATION_STATIC_VERIFY_V1`, `task-17-prisma.json` as `PRISMA_GENERATE_V1`, and `task-17-api-full.json` as `API_VERIFY_V1`; the direct block is diagnostic expansion.
+Dispatch `task-17-scanner-test.json` as `SCANNER_TEST_V1/TEST`, `task-17-governance-full.json` as `GOVERNANCE_VERIFY_V1/VERIFY`, `task-17-runtime.json` as `RUNTIME_ARTIFACT_VERIFY_V1/VERIFY`, `task-17-migration.json` as `MIGRATION_STATIC_VERIFY_V1/VERIFY`, `task-17-prisma.json` as `PRISMA_GENERATE_V1/VERIFY`, and `task-17-api-full.json` as `API_VERIFY_V1/VERIFY` with suite `API_FULL`; the direct block is diagnostic expansion.
 
 ```bash
 pnpm governance:identity-writers:test
@@ -4075,7 +5199,7 @@ git commit -m "test: verify mixed-fleet identity caller cutover"
 
 - [ ] **Step 11: Run Task 17 independent scoped review/fix loop**
 
-Review mixed fleet, old/new replay, suppression/conflict/races, accepted 0M catalog and disposable cleanup. Gate `task-17-mixed-fleet-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1`; any fix reruns affected disposable/static/full packets and repeats review. Task 18 is blocked until PASS.
+Review mixed fleet, old/new replay, suppression/conflict/races, accepted 0M catalog, disposable controller closure/credential handle and cleanup. Gate `task-17-mixed-fleet-review-verify.json` as `SCOPED_REVIEW_VERIFY_V1/VERIFY` with its own fresh local receipt; any fix reruns affected separately authorized disposable/static/full packets and repeats review. Task 18 is blocked until PASS.
 
 ### Task 18: Final Independent Artifact B Whole Review
 
@@ -4090,7 +5214,7 @@ Review mixed fleet, old/new replay, suppression/conflict/races, accepted 0M cata
 
 **Interfaces:**
 
-- Consumes: clean exact B6 head, protected anchor, accepted launcher/materialization/immutable bootstrap contract, fresh Task 18 run receipt, and all preceding review/evidence identities.
+- Consumes: clean exact B6 head, protected anchor, accepted launcher/materialization/immutable bootstrap contract, one fresh receipt per Task 18 local command, and all preceding review/evidence identities.
 - Produces: independent zero-C/I code/security/database verdicts and a bounded `CUTOVER_READY_FOR_CONTRACT` implementation conclusion; no tracked change, no remote action, no deployment claim.
 
 **Commit message:** none; final independent reviews do not modify the reviewed head.
@@ -4126,11 +5250,11 @@ Recompute refreshed directory plus exact 0M delta and separate Artifact A functi
 
 - [ ] **Step 6: Run the final exact-head verification packet**
 
-Repeat Task 17's full technical packet through the same root-launcher closed commands at the exact review head, plus separately authorized `MIGRATION_DISPOSABLE_VERIFY_V1` when its prior receipt is not exact-head reusable. Do not start a retained service or database.
+Repeat Task 17's full local technical packet with one fresh receipt per root-launcher command at the exact review head, plus a separately authorized disposable-controller `B6_MIXED_FLEET` request when its prior external receipt is not exact-head reusable. Do not start a retained service or database.
 
 - [ ] **Step 7: Write and verify the three reports**
 
-Each narrative/receipt names exact subject/range/path/report/counterexample digests, launcher/bootstrap contract/fresh-run/refresh/0M/acceptance/anchor identities and limitations. Machine-gate each receipt separately through `SCOPED_REVIEW_VERIFY_V1`; a finding returns to the owning task, reruns affected proof and repeats all impacted reviews.
+Each narrative/receipt names exact subject/range/path/report/counterexample digests, launcher/bootstrap contract/task receipt-set/refresh/0M/acceptance/anchor/controller identities and limitations. Machine-gate each receipt separately through `SCOPED_REVIEW_VERIFY_V1/VERIFY`; a finding returns to the owning task, reruns affected proof and repeats all impacted reviews.
 
 - [ ] **Step 8: Confirm the local terminal state and stop**
 
@@ -4152,7 +5276,7 @@ done
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
-The direct verifier loop is diagnostic. Authority dispatches `task-18-code-review-verify.json`, `task-18-security-review-verify.json`, and `task-18-database-review-verify.json` as separate `SCOPED_REVIEW_VERIFY_V1` requests. Expected GREEN: clean exact B6 head and three zero-C/I reports. The correct conclusion is `CUTOVER_READY_FOR_CONTRACT` for the reviewed Artifact B implementation only. It is not final database authority, deployment, old-worker drain proof, retained migration approval, RuntimeEvidence, Release Bundle, PILOT, GA, Artifact C authorization, push, PR, merge, or worktree cleanup authorization.
+The direct verifier loop is diagnostic. Authority dispatches `task-18-code-review-verify.json`, `task-18-security-review-verify.json`, and `task-18-database-review-verify.json` as separate `SCOPED_REVIEW_VERIFY_V1/VERIFY` requests with three distinct receipts and a Task 18 receipt-set digest. Expected GREEN: clean exact B6 head and three zero-C/I reports. The correct conclusion is `CUTOVER_READY_FOR_CONTRACT` for the reviewed Artifact B implementation only. It is not final database authority, deployment, old-worker drain proof, retained migration approval, RuntimeEvidence, Release Bundle, PILOT, GA, Artifact C authorization, push, PR, merge, or worktree cleanup authorization.
 
 **Commit:** none. Any later tracked change requires renewed scoped review.
 
@@ -4161,15 +5285,15 @@ The direct verifier loop is diagnostic. Authority dispatches `task-18-code-revie
 Stop at the first applicable condition and report the exact evidence boundary:
 
 1. V2 does not descend from final spec `b060c5dd...`, the exact plan is not reviewed/approved/tracked for execution, v3 does not equal the anchored merge, a worktree is dirty, or ownership overlaps.
-2. Task 0L tracked launcher review fails; the separately authorized root directory/materialization is absent, non-root, too broadly permissioned, symlinked, TOCTOU-changed, or differs from exact reviewed plan/spec/launcher/bootstrap/contract/tool bytes; the Corepack/pnpm closure omits a shim, `lib/corepack.cjs`, or pnpm entrypoint; a free-form command/env/path is accepted; or current shell/`jq`/PR bytes are used for authority.
-3. Task 0P cannot verify accepted config/sentinels/bootstrap/tools before pnpm, cannot distinguish immutable `BootstrapContract` from fresh `BootstrapRunReceipt`, permits an unlisted run field to normalize, cannot use immutable materialization plus `--ignore-scripts --ignore-pnpmfile`/`NPM_CONFIG_USERCONFIG=/dev/null`/fixed roots, observes any hostile marker load/execute, cannot generate/verify Prisma before dynamic TypeScript import, or its scoped review is not PASS.
+2. Task 0L tracked launcher/controller review fails; the four-file → readback → materialization → review chronology, request/output roots, owner/modes/TOCTOU or no-self/circular-digest rule fails; the local closure omits a Corepack/pnpm file or includes GH/Gitleaks/Docker/psql; any external controller omits an executable/environment/credential-handle/request/result/review contract; a free-form command/mode/argv/input/output is accepted; or current shell/PR bytes are used for authority.
+3. Task 0P cannot distinguish invariant `BootstrapContract` rules/logical tools from current-subject `BootstrapRunReceipt` configuration/absence/lock/root/environment/TOCTOU/output observations; any schema field is unnamed, a nested variable path is omitted, one receipt serves two commands, request/receipt counts differ, current-main config is compared to an old B0 receipt, or clean bootstrap/generation/review fails.
 4. Task 0A validator review has any C/I, permits set/rename/copy/case/owner/conflict/migration/bootstrap drift, free-form command or HOLD to pass.
-5. Task 0B missing object yields reviewed `FETCH_AUTH_REQUIRED`; only exact-authorized Task 0F may fetch, then full Task 0B reruns. A missing-object packet never supports merge authorization.
-6. Task 0B live/cached/ancestry/path/status/conflict/owner/migration/build/raw/schema/governance/runtime/caller facts are incomplete; the exact harder-copy scan is missing; `AuditReviewReceipt` does not bind the packet/set/authorization digests; or its final packet/review is not PASS.
-7. Task 0F's pinned Git lacks `--no-auto-maintenance`/`--no-write-commit-graph`, or its exact fetch writes a ref, `FETCH_HEAD`, maintenance state or commit graph.
+5. Task 0B missing object yields reviewed `FETCH_AUTH_REQUIRED`; only exact-authorized GitHub-controller `FETCH_EXACT_OBJECT` may fetch in Task 0F, then full Task 0B reruns. A missing-object packet never supports merge authorization.
+6. GitHub controller materialization/review/credential-handle or `PROTECTED_MAIN_READBACK` receipt fails; Task 0B live/cached/ancestry/path/status/conflict/owner/migration/build/raw/schema/governance/runtime/caller facts are incomplete; the exact harder-copy scan is missing; `AuditReviewReceipt` does not bind controller/local-receipt/packet/set/authorization digests; or its final packet/review is not PASS.
+7. The Git executable in the GitHub controller closure lacks `--no-auto-maintenance`/`--no-write-commit-graph`, or its exact fetch writes a ref, `FETCH_HEAD`, maintenance state or commit graph.
 8. Task 0C lacks separate merge authorization, its immediately rehashed audit packet/receipt differs, live main drifted, conflicts differ, Copy resolution source is not exactly MAIN_BYTES/WRITE_ELIGIBILITY/SYNC_HUMAN_CITATIONS with required input order, or any stale feature/blanket ours/theirs bytes are used.
 9. Refresh/admission parent shapes or review fail, or Artifact A/admitted main ancestry fails. A Task 0C finding abandons/recreates the exact pair; it cannot be forward-fixed atop the admission child.
-10. Task 0M path/name/timestamp/preimage drifts, migration file authorization/disposable authorization is absent, timeout/58-byte/CHECK/catalog/dependency/AX/fault/Prisma-ledger/static/DB/security receipt fails, retained recovery is misrepresented as verified, or any second migration/schema/DML/authority change appears.
+10. Task 0M path/name/timestamp/preimage drifts; disposable controller closure/materialization/review/request authorization/opaque credential/topology/caps/scenarios/cleanup receipt fails; timeout/58-byte/CHECK/catalog/dependency/AX/fault/Prisma-ledger/static/DB/security receipt fails; retained recovery is misrepresented as verified; or any second migration/schema/DML/authority change appears.
 11. Live main advances before acceptance: abandon the scanner lineage, start only from exact pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT`, rerun 0B/0F/0C/0M and Tasks 1–8. Drift after acceptance abandons acceptance too; never start from 0M/implementation or regenerate existing outputs in place.
 12. Any accepted config/build/package/`.dockerignore`/absence-sentinel/declaration/tool/generated-output/native-extractor fact drifts or clean bootstrap no longer reproduces the accepted contracts/receipts.
 13. TypeScript cannot build one complete Program from accepted roots, a delegate/raw/wrapper origin is ambiguous, or any refreshed baseline surface lacks a closed disposition.
@@ -4178,10 +5302,10 @@ Stop at the first applicable condition and report the exact evidence boundary:
 16. A raw capability, wrapper ingress/caller, dependency closure, literal mention, admission/bootstrap/0M or controlled blob drifts outside a closed stage removal.
 17. Any scanner/derivation blob changes after Task 5 generation without full baseline/raw regeneration and review, or any refreshed/0M migration or Artifact A function/ACL/six-receipt record differs.
 18. B0 implementation/acceptance parent shape, controlled parent blobs or review receipts fail. An acceptance review finding abandons that one-path child, repairs from its exact parent in a dedicated successor, reruns whole review, and creates a new first-add acceptance; no amend or forward fix atop the rejected child.
-19. Any scoped review receipt for Tasks 1–6 or 11–17, whole review, acceptance review, 0M review or final review lacks exact unique zero-C/I/PASS fields, subject/range/path/report/counterexample digests, or an unresolved finding fix loop.
-20. Immediately pre-call PR head/base is wrong, auto-update/queue rebase active, merge response SHA/GitHub commit+branch ordered-parent readback mismatch, or exact postmerge fetch authorization/local parent verification is absent.
-21. Protected-main push initial anchor workflow or base-owned `pull_request_target` identity/receipt fails, ordinary PR CI is treated as authority, or PR-controlled executable/input is used.
-22. Any push/PR/merge/readback/re-run/controller/root/v3/disposable action lacks its own authorization; root/local/hosted anchor is missing/mismatched.
+19. Any scoped review receipt for Tasks 1–6 or 11–17, whole review, acceptance review, 0M review or final review lacks exact unique zero-C/I/PASS fields, subject/range/path/report/counterexample digests; any local request lacks its own receipt; task request/receipt set counts or digests differ; or a finding loop remains unresolved.
+20. Any GitHub operation lacks its exact controller receipt; PR create/update is omitted or conflated; immediate PR/rules/check head/base receipt is stale; auto-update/queue rebase is active; merge response/GitHub branch/ordered-parent/workflow readback differs; or exact postmerge fetch authorization/receipt/local verification is absent.
+21. `ProtectedBaseLauncherContract`/receipt/equivalence, protected-main push or base-owned `pull_request_target` identity/materialization/event/tool/TOCTOU fails; ordinary PR CI is treated as authority; or PR-controlled executable/input is used.
+22. Any push/PR/readback/merge/workflow rerun/controller-variable/GitHub-controller/Gitleaks-controller/disposable-controller/root-anchor/v3 action lacks its own authorization/review; root/local/hosted anchor is missing or mismatched.
 23. The stage set is not exactly `3/3/2/2/1/0/0/0`, or zero does not become exit 0 at B4M.
 24. A caller needs any migration beyond accepted 0M, generic legacy writer, identity-only lock, synthesized/cross-transaction/workspace receipt, second PrismaClient, provider/model call or new state.
 25. Any outcome writes Canonical/Evidence on terminal outcomes, replay changes bytes, B4M lacks accepted 0M, or application/DB disagree on `identity_v2`/`IDENTITY_CONFLICT`.
@@ -4190,6 +5314,7 @@ Stop at the first applicable condition and report the exact evidence boundary:
 ## Rollback and Cleanup
 
 - Task 0L local launcher changes are ordinary reviewed source commits. Root materialization is create-only under its separate authorization; on mismatch, preserve the failed receipt/materialization evidence and stop. Do not overwrite, recursively delete, chmod-widen or replace it without a new exact root authorization.
+- GitHub, Gitleaks and disposable controller materializations/requests are independently create-only and authorization-scoped. Preserve a failed contract/materialization/request/receipt; never fall back to the local launcher, a current shell, another controller's executable closure/credential handle or an unreviewed replacement.
 - Task 0B is read-only except its local ignored packets; it has no ref/merge rollback. Delete no packet or provenance to disguise a HOLD.
 - Task 0F fetches only the exact authorized object and changes no branch/tracking ref; a failed fetch remains a reviewed HOLD and never falls through to merge.
 - During an authorized but uncommitted Task 0C merge, unexpected conflict/path facts stop before resolution. Use only the abort/recovery action expressly included in the local-merge authorization and return to the exact clean `branchPreRefreshCommit`; never reset hard, rebase, or use blanket ours/theirs.
@@ -4200,6 +5325,7 @@ Stop at the first applicable condition and report the exact evidence boundary:
 - Before the B0 remote merge, rollback is preserving and abandoning the v2 branch/worktree after provenance capture. Do not reset Artifact A, admitted main, the failed v1 branch, or another writer's state.
 - Never amend/rewrite `B0_IMPLEMENTATION` or `B0_ACCEPTANCE` after review. Drift after acceptance abandons that sequence and creates a new reviewed refresh/implementation/acceptance lineage; it does not replace history.
 - After the protected-main merge, do not revert/delete the root-only anchor or controller identities to hide history. A correction is forward-only and separately reviewed.
+- A failed GitHub PR create does not authorize update/delete/close; a failed update does not authorize recreation. A failed workflow readback does not authorize rerun until the exact immutable run request is separately approved. Controller-variable rollback is a new exact fifteen-name operation, not an implicit consequence of merge failure.
 - B1–B6 rollback before any future merge is v3 branch abandonment or forward revert commits under review. Do not resume implementation on v2.
 - Artifact B has exactly one 0M forward migration. Before retained application there is only source/disposable rollback; once successfully applied, its migration row/bytes are immutable and semantic rollback is a later forward migration. Failed retained deploy recovery remains unverified; never improvise `migrate resolve` or edit ledger/migration bytes.
 - The B6 disposable harness removes only its uniquely labeled container/network/volume and temp directory. It never deletes a retained/shared `global-*` resource. If cleanup fails, report exact created resource IDs and request direction.
@@ -4213,19 +5339,19 @@ External review queues, authorization waits, GitHub checks, merge queues, and hu
 | Phase                                           | P50 active | P90 active | Included work; external waiting excluded                                                           |
 | ----------------------------------------------- | ---------: | ---------: | -------------------------------------------------------------------------------------------------- |
 | Final-spec/plan amendment and review-fix intake |       10 h |       24 h | spec deltas, prior/final 1C/9I/4M and 1C/5I/2M dispositions, plan correction/review rounds         |
-| 0L launcher/root trust materialization          |       16 h |       36 h | closed parser, wrapper/controller, executable closure, hostile tests, review/root readback fixes   |
+| 0L launcher/controller trust design             |       28 h |       60 h | local request union plus GitHub/Gitleaks/disposable contracts, hostile tests and review fixes      |
 | 0P bootstrap                                    |       12 h |       24 h | external receipt, immutable materialization, pnpm hooks, tool roots, hostile markers, review fixes |
-| 0A/0B/0F/0C refresh                             |       20 h |       44 h | validator, audit, optional fetch cycle, Copy resolutions, refresh review fixes                     |
-| 0M migration                                    |       20 h |       48 h | static migration, counterexample repair, authorized disposable, DB/security review fixes           |
-| Tasks 1–6 B0 scanner/governance                 |       52 h |      110 h | build closure, compiler/raw engines, per-task reviews and fixes, protected workflow                |
-| Tasks 7–10 acceptance/remote/v3                 |       14 h |       30 h | whole review, acceptance review, merge/readback/fetch run cards, v3 bootstrap                      |
+| 0A/0B/0F/0C refresh                             |       24 h |       52 h | validator, GitHub/Gitleaks controller gates, optional fetch, Copy and refresh reviews              |
+| 0M migration                                    |       24 h |       56 h | static migration, disposable controller, counterexamples and DB/security review fixes              |
+| Tasks 1–6 B0 scanner/governance                 |       56 h |      122 h | build/raw engines, receipt sets, per-task reviews and protected-base launcher                      |
+| Tasks 7–10 acceptance/remote/v3                 |       24 h |       54 h | reviews plus operation-specific push/PR/rules/merge/workflow/variable/fetch/root/v3 gates          |
 | Tasks 11–17 caller cutover                      |       48 h |      100 h | TDD, per-task review/fix rounds, authorized disposable reruns                                      |
 | Task 18 final whole reviews                     |       10 h |       24 h | independent code/security/DB counterexamples and repair reruns                                     |
 | One main-drift full rebuild contingency         |       36 h |       80 h | successor, 0B/0F/0C/0M, regenerated baselines and reviews                                          |
-| **Total active excluding external waits**       |  **238 h** |  **520 h** | Arithmetic sum; P90 includes one drift rebuild and two substantive counterexample/fix rounds       |
+| **Total active excluding external waits**       |  **272 h** |  **596 h** | Arithmetic sum; P90 includes one drift rebuild and two substantive counterexample/fix rounds       |
 
 ## Execution Completion Boundary
 
-Execution is complete only when all 25 task gates (`0L`, `0P`, `0A`, `0B`, `0F`, `0C`, `0M`, and `1`–`18`) and scoped/whole reviews PASS at one clean B6 head; accepted launcher/root materialization, immutable bootstrap contract plus fresh-run receipts, refresh/admission, 0M migration/disposable, scanner/raw/build/tool roots, B0 acceptance, local/root/hosted anchors and stage zero all agree. Handoff lists every commit, ordered parent, workflow/run, receipt, migration/catalog, bootstrap/tool/raw measurement and review identity plus retained/deployment/Artifact C HOLDs.
+Execution is complete only when all 25 task gates (`0L`, `0P`, `0A`, `0B`, `0F`, `0C`, `0M`, and `1`–`18`) and scoped/whole reviews PASS at one clean B6 head; accepted four-file local launcher materialization/review, immutable bootstrap contract and one-command receipt sets, GitHub/Gitleaks/disposable/protected-base controller contracts/materializations/reviews/operation receipts, refresh/admission, 0M migration/disposable, scanner/raw/build/tool roots, B0 acceptance, local/root/hosted anchors and stage zero all agree. Handoff lists every commit, ordered parent, PR/rules/check/workflow operation, controller/credential-handle digest, receipt, migration/catalog, bootstrap/tool/raw measurement and review identity plus retained/deployment/Artifact C HOLDs.
 
 This plan's completion/review authorizes no implementation. Future plan approval covers only Task 0L tracked local design/tests/review plus 0P/0A/0B; it does not authorize 0L root materialization. Root launcher materialization, Task 0F fetch, 0C merge/admission, 0M migration file, 0M disposable, Tasks 1–8 scanner, push, PR, GitHub merge/readback/re-run, postmerge fetch, controller/root anchor receipt, v3 and later disposable/runtime actions each retain separate exact gates.
