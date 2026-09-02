@@ -15,11 +15,11 @@
 - Exact final-spec confirmation authorizes only this plan drafting. It does not authorize bootstrap/validator/scanner/workflow/migration implementation, dependency installation/generation, fetch/ref update, local merge/commit, push, PR, GitHub merge/readback, controller/root actions, v3, database/container/runtime/provider/credential/deployment, cleanup, or Artifact C.
 - After an independent review of this exact plan reaches zero Critical/Important, a future exact plan approval authorizes only Task 0L's tracked local launcher/external-controller contract design, non-authority development tests and review, plus Tasks 0P, 0A, and 0B local code/tests/documents/read-only audit. It does not authorize any local launcher or GitHub/Gitleaks/disposable/protected-base controller materialization, credential-handle access, authority-bearing bootstrap, fetch, local merge, Task 0M migration bytes, disposable PostgreSQL, scanner Tasks 1–8, or remote mutation.
 - Root materialization of the exact reviewed Task 0L local launcher/bootstrap/contract into `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/`, plus its request/output roots, requires its own future exact authorization. Exactly four controlled files are materialized first; their directory is `root:root` mode `0700`, executable bytes are `0500`, contract is `0600`, request/output roots are `0700`, and later report/receipts are `0600`. No approval of this plan or local Task 0L commit implies any root write.
-- The GitHub, Gitleaks, disposable PostgreSQL and protected-base launcher controllers each require a distinct exact contract/materialization authorization and independent controller security review before their first use. GitHub credential handles, synthetic disposable credentials and hosted event/controller inputs are typed opaque handles/records; no credential value may enter a request, log, receipt or repository file.
+- The GitHub, Gitleaks, disposable PostgreSQL, root-anchor and protected-base launcher controllers each require a distinct exact contract/materialization authorization and independent controller security review before their first use. GitHub credential handles, synthetic disposable credentials and hosted event/controller inputs are typed opaque handles/records; no credential value may enter a request, log, receipt or repository file. The root-anchor controller accepts no credential ingress at all.
 - Task 0F requires a separate exact fetch-only authorization naming remote/ref/SHA and performs no merge. Task 0C requires a later, distinct authorization naming the reviewed PASS audit, branch preimage, admitted main, exact conflict set and resolution rules. Task 0M migration-file creation requires another exact authorization; its disposable PostgreSQL run requires a separate database/container authorization. Scanner Tasks 1–8 require a separate scanner implementation authorization after 0M reviews are accepted.
 - Fetching an absent exact object/ref requires a separate authorization naming remote, ref, and SHA. Creating exact `B0_REFRESH_BASE_COMMIT` as the local two-parent refresh merge and exact `CURRENT_MAIN_ADMISSION_COMMIT` as its one-parent admission child requires another separate authorization naming the branch pre-refresh SHA, admitted live-main SHA, expected conflict paths, and closed resolution rules.
 - Scanner/baseline Tasks 1–8 begin only after Task 0C produces the reviewed refresh/admission chain and Task 0M produces the reviewed `B0M_MIGRATION_COMMIT` plus authorized disposable PASS. Their execution HEAD descends from 0M, while product/raw/build baselines read `B0_REFRESH_BASE_COMMIT` and migration authority freezes the refresh directory plus the sole 0M delta. Push, PR create/update, GitHub merge/readback, hosted-run recovery, root receipt, v3 creation, and every later external action remain separate gates.
-- A direct current-shell `node`, `pnpm`, `git`, `gh`, `gitleaks`, `docker`, `psql`, `jq`, package-script or unreviewed branch-local bootstrap invocation is diagnostic/non-authoritative only. Local bootstrap/scanner/test/static/migration-source authority uses only the root launcher and its exact local executable closure. Remote GitHub/fetch authority, Gitleaks and disposable PostgreSQL authority use only their matching branch-external controller receipts. Hosted B1–B6 authority uses only `ProtectedBaseLauncherReceipt`. The local launcher may verify those receipts as input data but cannot dispatch their tools or access credentials.
+- A direct current-shell `node`, `pnpm`, `git`, `gh`, `gitleaks`, `docker`, `psql`, `jq`, package-script or unreviewed branch-local bootstrap invocation is diagnostic/non-authoritative only. Local bootstrap/scanner/test/static/migration-source authority uses only the root launcher and its exact local executable closure. Remote GitHub/fetch authority, Gitleaks, disposable PostgreSQL and root-anchor creation use only their matching branch-external controller receipts. Hosted B1–B6 authority uses only `ProtectedBaseLauncherReceipt`. Neither the local launcher nor the GitHub controller may write the anchor; they may only verify the completed root-anchor evidence as typed input data.
 - Every local closed command creates exactly one fresh `BootstrapRunReceipt`; tasks with multiple commands create the same number of receipts and may bind them with one sorted `BootstrapRunReceiptSet`. One receipt may never authorize or attest two request IDs, modes or command IDs.
 - Preserve exact Artifact A commit `2400bac28796bae44294114edc99eaccb1bd65b3`, the failed v1 branch `codex/pr407-organization-identity-caller-cutover@5adb69877501b240e89ae3d8617617d7bf81837f`, all applied migration bytes, all other worktrees, and all unique provenance.
 - V2 work occurs only in `/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2` on `codex/pr407-organization-identity-caller-cutover-v2`; B1–B6 must not be implemented in that worktree or branch.
@@ -43,7 +43,7 @@
 - Main-drift recovery has one and only one start: preserve the abandoned lineage and create a new successor branch/worktree from the exact pre-scanner `CURRENT_MAIN_ADMISSION_COMMIT` whose tree lacks scanner helpers/manifests and 0M. Rerun 0B/0F/0C from that successor, rerun separately authorized 0M, then run Tasks 1–8 in initial-create mode. Even when the abandoned lineage already contains 0M or `B0_IMPLEMENTATION`, recovery never starts from either; the new lineage begins before 0M and recreates/reviews it. Only the admission JSON is an explicit initial `Create`/successor `Modify`; scanner/helpers/manifests/migration are absent in the recovery preimage. Generators write candidates below a fresh task root, compare exact predecessor/subject contracts, and atomically create only the enumerated outputs—no stale `wx` shortcut or arbitrary upsert.
 - After the acceptance scoped review, v2 stops at `LOCAL_ACCEPTANCE_REVIEWED`. Push, exact PR create/update, merge, protected-main readback, GitHub protected variables, and root-only receipt creation each require a separate future authorization.
 - The B0 GitHub merge must be a history-preserving merge commit whose actual pre-call PR head is the exact reviewed B0 acceptance head and whose actual base is the exact admitted live-main SHA. Auto-update, queue rebase, squash, rebase, force-push, force-update, and history rewriting are forbidden. Post-readback must prove exactly two ordered parents: admitted main first, reviewed PR head second.
-- B1–B6 local runs require `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json` as an explicit CLI input. Hosted authority requires protected-main `push` at the exact B0 merge SHA or base-owned `pull_request_target` plus exact `ProtectedBaseLauncherContract`/receipt/equivalence and GitHub-controller receipts; ordinary `pull_request` governance remains non-authoritative CI. Missing/wrong workflow/event/run/ref/repository/accepted/controller/materialization/tool identities or any PR-controlled executable/input substitution is `INTEGRITY_ERROR`.
+- B1–B6 local runs require both `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json` and the external `root-anchor-operation-review.json` as explicit CLI inputs. `ANCHOR_ONLY` reopens the anchor and verifies the full root-anchor controller contract/materialization/review/request/write/readback/operation-review chain before accepting its SHA. Hosted authority requires protected-main `push` at the exact B0 merge SHA or base-owned `pull_request_target` plus exact `ProtectedBaseLauncherContract`/receipt/equivalence and GitHub-controller receipts; ordinary `pull_request` governance remains non-authoritative CI.
 - Business data changes use immutable new objects. System boundaries are exact-key, prototype/proxy/accessor-safe, bounded, and fail closed.
 - Every committed implementation unit—including Tasks 1–6 and 11–17—follows RED → minimal GREEN → refactor → commit → independent scoped review/fix loop. The next task is blocked until its exact subject/range review receipt has unique `critical=0`, `important=0`, `verdict=PASS`, matching digests and counterexample set. Tasks 7 and 18 remain additional whole-range reviews. Default governance tests remain green at each declared stage; intentional B1/B3 RED commits are local intermediate checkpoints and still require scoped review of the RED contract.
 - Task execution order is `1 → 2/3 → 4 → 5 → 6`: Task 4 freezes every scanner/stage/derivation rule before Task 5 generates and independently reviews the raw/build/migration baseline. Any later change to scanner, source-view, closure, filesystem, redaction, stage, or derivation bytes invalidates Task 5 and requires complete baseline regeneration plus a new raw-disposition and scoped review before Task 6 or acceptance.
@@ -86,6 +86,8 @@ The final spec subject is committed v2 head `b060c5dd4afef9fe42dfe510b02f930f56c
 | `scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs`                                | Exact executable/process-tree, synthetic-credential-handle, topology, scenario and cleanup mutation fixtures.                                                                                                                    |
 | `scripts/governance-organization-identity-gitleaks-controller.mjs`                                                | No-credential Gitleaks controller pinned to exact executable/config/source-tree/request/result schemas.                                                                                                                          |
 | `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`                                           | Executable/config/source/redaction/result and no-credential-ingress mutation fixtures.                                                                                                                                           |
+| `scripts/governance-organization-identity-root-anchor-controller.mjs`                                             | No-credential branch-external anchor writer enforcing typed genesis input, canonical payload, create-exclusive write/fsync and non-self-hashing evidence.                                                                        |
+| `scripts/governance-organization-identity-root-anchor-controller.spec.mjs`                                        | Extra-path/overwrite/symlink/predecessor/receipt-parent/mode/fsync/TOCTOU/self-hash/replay/current-shell hostile fixtures.                                                                                                       |
 | `scripts/governance-organization-identity-bootstrap.mjs`                                                          | Stdlib-only accepted-subject/config/sentinel/declaration/tool/generated-output preflight, clean Prisma generation, dynamic TypeScript/scanner import and review-receipt validator.                                               |
 | `scripts/governance-organization-identity-bootstrap.spec.mjs`                                                     | Hostile env/preload/pnpmfile/lifecycle/config/store/tool/symlink/TOCTOU marker tests proving no hostile body loads or executes.                                                                                                  |
 | `docs/governance/organization-identity-bootstrap-contract.json`                                                   | Immutable request/config-derivation/environment-schema/logical-tool/declaration/generation/comparator rules; subject config, roots, inodes, resolved paths and timestamps are excluded.                                          |
@@ -114,7 +116,7 @@ The flat helper filenames intentionally match the terminal CODEOWNERS pattern `/
 
 The separately authorized local launcher materialization is not a repository-created file set. Its four controlled files are exact reviewed copies at `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`, `identity-writer-launch.mjs`, `identity-writer-bootstrap.mjs`, and `launcher-contract.json`. After those four are fsynced, the chronology separately creates `launcher-materialization-readback.json`, `launcher-materialization.json`, and `launcher-materialization-review.json`, each mode `0600`; none is included in the four-file inventory or hashes itself. Repository plans/tests may name these future paths, but no tracked task silently creates or modifies them.
 
-The GitHub, Gitleaks and disposable PostgreSQL controllers are separately materialized only under their own exact future authorizations beneath `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/{github,gitleaks,disposable-postgres}/`. Each directory has its own contract, executable/controller source, materialization receipt and review receipt; no controller shares an executable closure, environment, credential handle or authorization with the local launcher or another controller.
+The GitHub, Gitleaks, disposable PostgreSQL and root-anchor controllers are separately materialized only under their own exact future authorizations beneath `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/{github,gitleaks,disposable-postgres,root-anchor}/`. Each directory has its own contract, executable/controller source, request/output roots, materialization receipt and review receipt; no controller shares an executable closure, environment, credential handle or authorization with the local launcher or another controller.
 
 Per-task closed requests live only below `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests/`, a separate root-controller-owned `0700` directory. Each canonical request is create-exclusive `root:root` mode `0600`, content-addressed in the corresponding `BootstrapRunReceipt`, rejected if reused for a different subject/task/anchor, and removed only by separately authorized controller cleanup after its receipt is durable. It is an external run input, never a tracked artifact or PR-controlled file.
 
@@ -847,6 +849,7 @@ The local root launcher never dispatches a credentialed/networked GitHub operati
 ```ts
 type ExternalControllerExecutableEntry = Readonly<{
   role:
+    | "ENV"
     | "NODE"
     | "GIT"
     | "GH"
@@ -876,7 +879,8 @@ type CredentialHandleBinding = Readonly<{
 
 type ExternalControllerMaterializationReceipt = Readonly<{
   schemaVersion: "organization-identity-external-controller-materialization/v1";
-  controllerClass: "GITHUB" | "DISPOSABLE_POSTGRES" | "GITLEAKS";
+  controllerClass:
+    "GITHUB" | "DISPOSABLE_POSTGRES" | "GITLEAKS" | "ROOT_ANCHOR";
   contractSha256: string;
   controllerSourceSha256: string;
   rootDirectorySha256: string;
@@ -896,7 +900,11 @@ type ExternalControllerMaterializationReceipt = Readonly<{
 type ControllerReviewReceipt = Readonly<{
   schemaVersion: "organization-identity-controller-review/v1";
   controllerClass:
-    "GITHUB" | "DISPOSABLE_POSTGRES" | "GITLEAKS" | "PROTECTED_BASE_LAUNCHER";
+    | "GITHUB"
+    | "DISPOSABLE_POSTGRES"
+    | "GITLEAKS"
+    | "ROOT_ANCHOR"
+    | "PROTECTED_BASE_LAUNCHER";
   contractSha256: string;
   materializationReceiptSha256: string | null;
   requestSchemaSha256: string;
@@ -1240,6 +1248,151 @@ type GitleaksControllerReceipt = Readonly<{
   findingSetSha256: string;
   redactionVerified: true;
   result: "PASS";
+}>;
+
+type RootAnchorControllerContract = Readonly<{
+  schemaVersion: "organization-identity-root-anchor-controller-contract/v1";
+  rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor";
+  requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/requests";
+  outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs";
+  anchorDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2";
+  anchorPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
+  controllerSource: Readonly<{
+    path: "scripts/governance-organization-identity-root-anchor-controller.mjs";
+    blobId: string;
+    sha256: string;
+  }>;
+  controllerTest: Readonly<{
+    path: "scripts/governance-organization-identity-root-anchor-controller.spec.mjs";
+    blobId: string;
+    sha256: string;
+  }>;
+  executableClosure: readonly ExternalControllerExecutableEntry[];
+  requiredRoles: readonly ["ENV", "NODE"];
+  allowedEnvironmentNames: readonly [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+  ];
+  environmentValueRuleSha256: string;
+  anchorSchemaSha256: string;
+  requestSchemaSha256: string;
+  writeReceiptSchemaSha256: string;
+  readbackReceiptSchemaSha256: string;
+  operationReviewSchemaSha256: string;
+  canonicalizationRuleSha256: string;
+  rootPolicy: Readonly<{
+    ownerUid: 0;
+    ownerGid: 0;
+    directoryMode: 0o700;
+    controllerMode: 0o500;
+    recordMode: 0o600;
+    anchorMode: 0o600;
+    noFollow: true;
+    createExclusive: true;
+    overwriteAllowed: false;
+    fileFsyncRequired: true;
+    directoryFsyncRequired: true;
+  }>;
+  predecessorPolicy: Readonly<{
+    mode: "GENESIS_ONLY";
+    requiredPredecessorSha256: null;
+    targetMustBeAbsent: true;
+  }>;
+  credentialIngressAllowed: false;
+  anchorSelfHashFieldAllowed: false;
+}>;
+
+type RootAnchorWriteRequest = Readonly<{
+  schemaVersion: "organization-identity-root-anchor-write-request/v1";
+  requestId: string;
+  contractSha256: string;
+  materializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  authorizationReceiptSha256: string;
+  targetPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
+  targetMode: 0o600;
+  predecessor: Readonly<{
+    mode: "GENESIS_ONLY";
+    sha256: null;
+    targetMustBeAbsent: true;
+  }>;
+  localLauncherEvidenceSha256: string;
+  bootstrapContractSha256: string;
+  githubControllerEvidenceSha256: string;
+  protectedBaseEvidenceSha256: string;
+  admittedRefreshAcceptanceEvidenceSha256: string;
+  orderedMergeParents: readonly [string, string];
+  workflowRunEvidenceSha256: string;
+  controllerVariableWriteReceiptSha256: string;
+  canonicalAnchorPayloadSha256: string;
+  canonicalAnchorPayloadSize: number;
+  writeReceiptPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-write-receipt.json";
+}>;
+
+type RootAnchorWriteReceipt = Readonly<{
+  schemaVersion: "organization-identity-root-anchor-write-receipt/v1";
+  contractSha256: string;
+  materializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  requestSha256: string;
+  authorizationReceiptSha256: string;
+  targetPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
+  anchorSha256: string;
+  anchorSize: number;
+  ownerUid: 0;
+  ownerGid: 0;
+  mode: 0o600;
+  device: string;
+  inode: string;
+  predecessorSha256: null;
+  fileFsyncSha256: string;
+  directoryFsyncSha256: string;
+  prePostToctouSha256: string;
+  anchorContainsSelfHash: false;
+  result: "PASS";
+}>;
+
+type RootAnchorReadbackReceipt = Readonly<{
+  schemaVersion: "organization-identity-root-anchor-readback/v1";
+  contractSha256: string;
+  requestSha256: string;
+  writeReceiptSha256: string;
+  targetPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
+  noFollowVerified: true;
+  ownerUid: 0;
+  ownerGid: 0;
+  mode: 0o600;
+  device: string;
+  inode: string;
+  anchorSha256: string;
+  anchorSize: number;
+  canonicalSchemaSha256: string;
+  inputEvidenceSetSha256: string;
+  predecessorSha256: null;
+  anchorContainsSelfHash: false;
+  prePostToctouSha256: string;
+  reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK";
+  result: "PASS";
+}>;
+
+type RootAnchorOperationReviewReceipt = Readonly<{
+  schemaVersion: "organization-identity-root-anchor-operation-review/v1";
+  controllerContractSha256: string;
+  controllerMaterializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  writeRequestSha256: string;
+  writeReceiptSha256: string;
+  readbackReceiptSha256: string;
+  anchorSha256: string;
+  reportSha256: string;
+  counterexampleSetSha256: string;
+  reviewerClass: "INDEPENDENT_ROOT_ANCHOR_OPERATION_REVIEW";
+  critical: 0;
+  important: 0;
+  verdict: "PASS";
 }>;
 
 type ProtectedBaseLauncherContract = Readonly<{
@@ -1958,6 +2111,11 @@ type B0Acceptance = Readonly<{
     disposableControllerReviewReceiptSha256: string;
     protectedBaseLauncherContractSha256: string;
     protectedBaseContractReviewReceiptSha256: string;
+    rootAnchorControllerSourceBlobId: string;
+    rootAnchorControllerSourceSha256: string;
+    rootAnchorControllerTestBlobId: string;
+    rootAnchorControllerTestSha256: string;
+    rootAnchorControllerContractSchemaSha256: string;
   }>;
   b0m: MigrationAuthority["b0m"];
   protectedAnchorWorkflow: Readonly<{
@@ -2028,6 +2186,11 @@ type ProtectedMainAnchor = Readonly<{
     controllerReviewReceiptSha256: string;
     mergeAndReadbackReceiptSetSha256: string;
   }>;
+  rootAnchorController: Readonly<{
+    contractSha256: string;
+    materializationReceiptSha256: string;
+    controllerReviewReceiptSha256: string;
+  }>;
   pullRequest: Readonly<{
     number: number;
     headSha: string;
@@ -2053,13 +2216,16 @@ type ProtectedMainAnchor = Readonly<{
     conclusion: "success";
   }>;
   observedAt: string;
-  predecessorReceiptSha256: string | null;
-  receiptChainSha256: string;
+  predecessorReceiptSha256: null;
+  inputReceiptChainSha256: string;
+  containsAnchorSelfHash: false;
   containsSecrets: false;
 }>;
 ```
 
-Local admission accepts this record only from the exact root-owned `0700` successor directory supplied with the closed command request. The ordered `mergeParents` must be `[admittedLiveMainSha, acceptedB0Sha]`; ancestry without ordered-parent equality is insufficient. Every local B1–B6 command has its own fresh `BootstrapRunReceipt`; a task review binds the sorted receipt-set digest.
+The anchor payload binds only evidence that does not depend on its own bytes: controller contract/materialization/review plus admitted/merge/hosted inputs. It contains no request SHA, expected-payload SHA, anchor SHA, write receipt, readback receipt or operation-review digest and never hashes itself. The authorized request externally binds the canonical anchor payload SHA; later receipts live only in the external evidence chain.
+
+Local admission accepts the pair `(ProtectedMainAnchor, RootAnchorOperationReviewReceipt)` only from the exact root-owned evidence paths supplied to `ANCHOR_ONLY`. It reopens contract/materialization/review/request/write/readback/operation-review records, recomputes the anchor SHA and requires equality across the entire chain. The ordered `mergeParents` must be `[admittedLiveMainSha, acceptedB0Sha]`; ancestry without ordered-parent equality is insufficient. Every local B1–B6 command has its own fresh `BootstrapRunReceipt`; a task review binds the sorted receipt-set digest.
 
 Hosted admission requires exact `ProtectedBaseLauncherContract` and `ProtectedBaseLauncherReceipt`; no unspecified hosted fallback is accepted. The equivalence verifier compares exact launcher/bootstrap source blobs, command registry digest, bootstrap contract digest/schema, request/output schema digests and logical tool/version/role expectation set. It deliberately does not compare the local Ubuntu root path, UID/GID, device/inode or absolute tool paths: the hosted receipt independently binds its runner UID, materialized task root, resolved executable closure, event/ref/repository/run/controller-variable inputs and TOCTOU. Any logical/source/schema mismatch is `PROTECTED_BASE_EQUIVALENCE_HOLD`.
 
@@ -2069,7 +2235,7 @@ The base-owned workflow obtains remote/event facts only through the reviewed Git
 
 | Task | Produces                                                                                                | Consumed by         | Dependency                                                                |
 | ---- | ------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------- |
-| 0L   | Reviewed local launcher plus external-controller contracts; separately authorized local materialization | 0P, then 0A–18      | Exact approved plan; local root phase requires 0P PASS and exact auth     |
+| 0L   | Reviewed local launcher plus four external-controller contracts; authorized local materialization       | 0P, then 0A–18      | Exact approved plan; each materialization retains its own exact auth      |
 | 0P   | Reviewed immutable bootstrap contract/fresh-run engine and hostile no-exec tests                        | 0L root phase/0A–18 | 0L tracked launcher scoped review PASS                                    |
 | 0A   | Reviewed minimal current-main admission validator/contracts consuming launcher/bootstrap                | 0B/0F/0C and 1–8    | 0P PASS plus 0L root materialization/review PASS                          |
 | 0B   | Reviewed no-fetch packet with `PASS`, `HOLD`, or `FETCH_AUTH_REQUIRED`                                  | 0F or 0C            | 0A PASS plus separately reviewed GitHub controller/readback receipt       |
@@ -2084,7 +2250,7 @@ The base-owned workflow obtains remote/event facts only through the reviewed Git
 | 6    | Package/governance/runtime wiring plus reviewed protected-base launcher contract                        | 7 and 8             | 5                                                                         |
 | 7    | Exact `B0_IMPLEMENTATION` review head and independent whole-review digest                               | 8                   | 1–6                                                                       |
 | 8    | One-path accepted B0 commit and scoped acceptance review                                                | 9                   | 7                                                                         |
-| 9    | GitHub-controller operations, protected-base receipt and branch-external anchor                         | 10                  | 8 plus each separate external/controller/root authorization               |
+| 9    | GitHub/hosted receipts plus root-anchor write/readback/operation-review chain                           | 10                  | 8 plus separate GitHub/root-controller/write authorizations and reviews   |
 | 10   | Exact v3 branch/worktree from protected-main merge                                                      | 11                  | 9 plus explicit local execution approval                                  |
 | 11   | B1 Temporal five-outcome/replay RED                                                                     | 12                  | 10                                                                        |
 | 12   | B2 Temporal resolver cutover, `3 → 2`                                                                   | 13                  | 11                                                                        |
@@ -2095,7 +2261,7 @@ The base-owned workflow obtains remote/event facts only through the reviewed Git
 | 17   | B6 mixed-fleet/replay/race/disposable proof                                                             | 18                  | 16 plus separate disposable-resource authorization                        |
 | 18   | Independent whole Artifact B code/security/database review                                              | Handoff only        | 17                                                                        |
 
-Critical path is `0L tracked launcher/controller RED/GREEN/commit/review → 0P bootstrap review → separate local root-materialization auth/review → 0A → separate GitHub-controller materialization auth/review → 0B → [missing object: reviewed FETCH_AUTH_REQUIRED → exact GitHub-controller fetch auth → 0F → full 0B rerun] → 0B PASS → separate Gitleaks-controller materialization/request auth → separate local-merge auth → 0C → separate 0M migration-file auth → separate disposable-controller materialization/request auth → 0M reviews → separate scanner auth → 1 → 2/3 → 4 → 5 → 6 protected-base contract review → live-main controller readback → 7 → 8 → operation-by-operation GitHub/root gates in 9 → 10 → 11–18`. Read-only local classification may parallelize only after the exact remote readback receipt; 0F never merges. Tasks 1–6 execute as descendants of `B0M_MIGRATION_COMMIT`; baselines read `B0_REFRESH_BASE_COMMIT`. No scanner/derivation byte may change after Task 5 raw review without full regeneration/review. Every committed unit ends at a scoped review/fix-loop barrier.
+Critical path is `0L tracked launcher/four-controller RED/GREEN/commit/review → 0P → local launcher materialization → 0A → GitHub controller → 0B/0F → Gitleaks controller + 0C → disposable controller + 0M → scanner 1–5 → protected-base 6 → whole review/acceptance 7–8 → operation-specific GitHub gates 9 → root-anchor controller materialization/review → separate write authorization → anchor create-exclusive write/fsync → independent readback → operation review → local ANCHOR_ONLY → 10 → 11–18`. Read-only local classification may parallelize only after exact remote readback; 0F never merges. Baselines read `B0_REFRESH_BASE_COMMIT`; no scanner/derivation byte may change after Task 5 raw review without regeneration/review. Every committed unit ends at a scoped review/fix-loop barrier.
 
 Receipt cardinality is part of every dependency edge: each local request/mode creates exactly one fresh `BootstrapRunReceipt`; the task review verifies `receiptCount === requestCount`, exact sorted request/receipt entries and `BootstrapRunReceiptSet.receiptSetSha256`. External controller operations create their own controller receipts and are referenced by digest, never counted as or substituted for local bootstrap receipts. A review/gate command itself is another local request and therefore has its own receipt.
 
@@ -2115,6 +2281,8 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Create: `scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs`
 - Create: `scripts/governance-organization-identity-gitleaks-controller.mjs`
 - Create: `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`
+- Create: `scripts/governance-organization-identity-root-anchor-controller.mjs`
+- Create: `scripts/governance-organization-identity-root-anchor-controller.spec.mjs`
 - Create local review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0l-launcher-review.md`
 - Create local review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0l-launcher-review.json`
 - Create only after separate root-write authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`
@@ -2125,13 +2293,13 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Create by the root materialization controller only after four-file fsync and readback report: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization.json`
 - Create by the independent reviewer only after verifying the materialization receipt: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-review.json`
 - Test: `scripts/governance-organization-identity-launcher.spec.mjs`
-- Test: all four `scripts/governance-organization-identity-*-controller.spec.mjs` files above.
+- Test: all five `scripts/governance-organization-identity-*-controller.spec.mjs` files above.
 - Read-only: exact approved plan/spec Git blobs; `/usr/bin/env`; pinned absolute Node/Git/Corepack/pnpm executable closure; after Task 0P, exact reviewed bootstrap source/test/contract identities.
 
 **Interfaces:**
 
 - Consumes: exact approved plan commit/blob/SHA; final spec commit/blob/SHA; local launcher/request/bootstrap schemas; GitHub/Gitleaks/disposable/protected-base controller contracts; final reviewed Task 0P bootstrap commit/report/receipt; and separate exact local/external materialization authorizations.
-- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateGitHubControllerReceipt`, `validateDisposablePostgresControllerReceipt`, `validateGitleaksControllerReceipt`, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four-file launcher materialization/readback/materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables or credentials.
+- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, validators for GitHub/disposable/Gitleaks/root-anchor receipts, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four-file launcher materialization/readback/materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables or credentials.
 
 **Commit message:** `feat: add closed identity governance launcher`
 
@@ -2144,6 +2312,8 @@ Run only after this exact plan is independently approved and committed. Use `mkd
 Test every exact schema key and enum plus mutations for an extra argv, arbitrary command/mode, shell metacharacter, unknown environment name, inherited `NODE_OPTIONS`/`NODE_PATH`, accessor/proxy JSON surrogate, relative/out-of-request-root input/output, wrong content-addressed URI, payload-schema mismatch, request replay, receipt reuse, symlink, wrong owner/mode, inode replacement and malformed canonical bytes. Assert complete local executable closure equality, including separate entries for `COREPACK_SHIM`, `COREPACK_LIB_COREPACK_CJS`, `PNPM_SHIM`, and `PNPM_ENTRYPOINT`. Assert GitHub/Gitleaks/Docker/psql IDs are absent from the local registry.
 
 Add external-controller mutations for omitted GH/Git/Gitleaks/Docker/psql/Prisma/Corepack files, credential value in a durable record, open operation/payload/result, PR byte execution, unbound event/controller variable, non-loopback/egress disposable topology, resource-cap/cleanup omission and cross-controller receipt substitution.
+
+Add root-anchor controller mutations for extra target/path/file, pre-existing target, overwrite/truncate/rename-over-existing, symlink/hardlink/nonregular target, non-root owner, broader mode, stale/non-null predecessor, missing/wrong authorization, reordered parents/input receipts, partial file/directory fsync, pre/post inode swap, canonical payload mismatch, anchor self-hash/circular receipt, reused request and current-shell/GitHub/local-launcher substitution.
 
 ```js
 test("rejects an executable-looking value outside the closed registry", async () => {
@@ -2167,7 +2337,8 @@ node --test \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.spec.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
-  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
 ```
 
 Expected: FAIL because the launcher module does not exist. This direct local Node run is development evidence only and cannot satisfy an authority gate.
@@ -2188,7 +2359,8 @@ node --test \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.spec.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
-  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
 git diff --check -- \
   scripts/governance-organization-identity-launcher.mjs \
   scripts/governance-organization-identity-launcher.spec.mjs \
@@ -2199,7 +2371,9 @@ git diff --check -- \
   scripts/governance-organization-identity-disposable-postgres-controller.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
   scripts/governance-organization-identity-gitleaks-controller.mjs \
-  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-controller.mjs \
+  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
 ```
 
 Expected: PASS with zero dependency loads/hostile executions for every rejected request. These remain non-authority development tests because root materialization does not yet exist.
@@ -2216,12 +2390,14 @@ git add scripts/governance-organization-identity-launcher.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
   scripts/governance-organization-identity-gitleaks-controller.mjs \
-  scripts/governance-organization-identity-gitleaks-controller.spec.mjs
+  scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-controller.mjs \
+  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
 git commit -m "feat: add closed identity governance launcher"
 LAUNCHER_SOURCE_COMMIT="$(git rev-parse HEAD)"
 ```
 
-The independent reviewer fixes the ten-file path set, plan/spec/launcher/controller blob identities, local-only command/mode/request registry, all three external controller operation/request/result/executable/credential-handle contracts, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
+The independent reviewer fixes the twelve-file path set, plan/spec/launcher/controller blob identities, local-only command/mode/request registry, GitHub/disposable/Gitleaks/root-anchor controller operation/request/result/executable/environment/credential contracts, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
 
 - [ ] **Step 8: Complete Task 0P, then stop for separate exact root-materialization authorization**
 
@@ -2241,7 +2417,7 @@ Record `LAUNCHER_CONTRACT_SHA256`, `LAUNCHER_MATERIALIZATION_RECEIPT_SHA256`, `L
 
 - [ ] **Step 12: Keep each external controller at its own authorization boundary**
 
-Prepare three separate materialization packets for the reviewed GitHub, Gitleaks and disposable PostgreSQL controller sources/contracts. Each packet names only that controller's exact executable closure, environment, opaque credential-handle policy, operation/request/result schemas, root target/modes and review procedure. Do not materialize any controller under Task 0L local-launcher authorization. Task 0B requests the GitHub controller authorization before its first remote readback; Task 0C separately requests Gitleaks controller authorization; Task 0M separately requests disposable controller authorization. Every controller materialization/review receipt is machine-verified before a request authorization is sought.
+Prepare four separate materialization packets for the reviewed GitHub, Gitleaks, disposable PostgreSQL and root-anchor controller sources/contracts. Each packet names only that controller's exact executable closure, environment, credential policy, operation/request/result schemas, root target/modes and review procedure. Do not materialize any controller under Task 0L local-launcher authorization. Task 0B requests the GitHub controller authorization before its first remote readback; Task 0C separately requests Gitleaks controller authorization; Task 0M separately requests disposable controller authorization; Task 9 separately requests root-anchor controller materialization before anchor-write authorization. Every controller materialization/review receipt is machine-verified before a request authorization is sought.
 
 ### Task 0P: Clean Pre-Execution Bootstrap, Review Contracts, and Independent Review
 
@@ -3771,6 +3947,7 @@ import "./governance-organization-identity-controller-contracts.spec.mjs";
 import "./governance-organization-identity-github-controller.spec.mjs";
 import "./governance-organization-identity-disposable-postgres-controller.spec.mjs";
 import "./governance-organization-identity-gitleaks-controller.spec.mjs";
+import "./governance-organization-identity-root-anchor-controller.spec.mjs";
 import "./governance-organization-identity-current-main-admission.spec.mjs";
 import "./governance-organization-identity-writers.spec.mjs";
 import "./governance-organization-identity-protected-base-launcher.spec.mjs";
@@ -4046,7 +4223,7 @@ node scripts/governance-organization-identity-writers.mjs acceptance \
   --output docs/governance/organization-identity-writer-acceptance.json
 ```
 
-Expected: exit 0; exactly one untracked path exists. The generator gets refresh/admission, immutable bootstrap contract plus Task 0A–8 receipt-set digests, complete config/declaration/tool roots, exact GitHub/Gitleaks/disposable controller contracts/reviews/completed receipts, exact B0M migration/disposable/DB/security receipts, protected-base launcher/workflow blobs, scanner/raw-review/measurement/migration baselines, all Task 1–7 review receipts and stage machine from the implementation parent. No review self-attests.
+Expected: exit 0; exactly one untracked path exists. The generator gets refresh/admission, immutable bootstrap contract plus Task 0A–8 receipt-set digests, complete config/declaration/tool roots, exact GitHub/Gitleaks/disposable controller contracts/reviews/completed receipts, reviewed root-anchor controller source/test/contract-schema blobs, exact B0M receipts, protected-base launcher/workflow blobs, scanner/raw-review/measurement/migration baselines, all Task 1–7 reviews and stage machine from the implementation parent. No review self-attests.
 
 - [ ] **Step 4: Validate non-self-reference and parent-tree identities before commit**
 
@@ -4146,6 +4323,9 @@ If the scoped acceptance review itself finds a shape/content/binding defect whil
 **Files:**
 
 - Create only after separate root-receipt authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json`
+- Create only after separate root-anchor-controller materialization authorization/review: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/root-anchor-controller-contract.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/root-anchor-controller-materialization.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/root-anchor-controller-review.json`
+- Create only after separate anchor-write authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/requests/task-9-root-anchor-write.json`
+- Create in one-way order after the anchor write: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-write-receipt.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-readback-receipt.json`, `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-operation-review.json`
 - Modify only after separate controller-variable authorization: GitHub repository/controller variables `ORGANIZATION_IDENTITY_B0_ADMITTED_MAIN_SHA`, `ORGANIZATION_IDENTITY_B0_REFRESH_BASE_SHA`, `ORGANIZATION_IDENTITY_CURRENT_MAIN_ADMISSION_COMMIT_SHA`, `ORGANIZATION_IDENTITY_B0_ACCEPTED_SHA`, `ORGANIZATION_IDENTITY_B0_ACCEPTANCE_REVIEW_SHA256`, `ORGANIZATION_IDENTITY_B0_MERGE_SHA`, `ORGANIZATION_IDENTITY_B0_FIRST_PARENT_SHA`, `ORGANIZATION_IDENTITY_B0_SECOND_PARENT_SHA`, `ORGANIZATION_IDENTITY_B0_MERGE_METHOD`, `ORGANIZATION_IDENTITY_LAUNCHER_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_LAUNCHER_MATERIALIZATION_SHA256`, `ORGANIZATION_IDENTITY_LAUNCHER_MATERIALIZATION_REVIEW_SHA256`, `ORGANIZATION_IDENTITY_BOOTSTRAP_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_PROTECTED_BASE_CONTRACT_SHA256`, `ORGANIZATION_IDENTITY_GITHUB_CONTROLLER_CONTRACT_SHA256`
 - Create local controller receipt set: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-9-github-controller-receipts.json`
 - Create hosted receipt/readback: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-9-protected-base-launcher-receipt.json`
@@ -4155,8 +4335,8 @@ If the scoped acceptance review itself finds a shape/content/binding defect whil
 
 **Interfaces:**
 
-- Consumes: exact admitted live-main SHA, two-parent refresh-base SHA, one-parent admission-commit SHA, admission/pre/post-review identities, exact reviewed v2 acceptance head/review digest, accepted local launcher/materialization/bootstrap contract, reviewed GitHub and protected-base launcher contracts, opaque credential-handle binding, one local anchor-check receipt, and separately authorized push/PR-create-or-update/merge/readback/rerun/fetch/variable/root actions.
-- Produces: exact operation-specific `GitHubControllerReceipt` set including push, PR creation or update, PR/rules/check readbacks, merge, ordered-parent readback, workflow readback/rerun if any, exact-object fetch and variable writes; `ProtectedBaseLauncherReceipt`; root-only anchor binding local and hosted trust roots and both parents; no repository commit.
+- Consumes: exact admitted live-main SHA, refresh/admission/implementation/acceptance/review identities, accepted local launcher/bootstrap, reviewed GitHub/protected-base/root-anchor controller contracts/materializations/reviews, opaque GitHub credential-handle binding, and separately authorized push/PR/merge/readback/rerun/fetch/variable/root-anchor-controller materialization/anchor-write actions.
+- Produces: exact operation-specific GitHub receipt set; protected-base receipt/review; root-anchor controller materialization/review; separately authorized `RootAnchorWriteRequest`; create-exclusive anchor/write receipt; independent readback; independent operation review; one local `ANCHOR_ONLY` receipt consuming the anchor plus the completed external chain; no repository commit.
 
 **Commit message:** none; this task produces external readback/receipt state only after its separate authorizations.
 
@@ -4270,23 +4450,49 @@ git merge-base --is-ancestor \
 
 The GitHub controller receipt proves no tracking-ref/`FETCH_HEAD`/maintenance/commit-graph write. Local `origin/main` is never treated as fresh authority.
 
-- [ ] **Step 10: Separately authorize controller-variable writes and root anchor creation**
+- [ ] **Step 10: Authorize variables, root-anchor controller, write, readback and operation review in one-way order**
 
-Prepare the exact fifteen-name/value-digest set. The GitHub controller `CONTROLLER_VARIABLES_WRITE` request is separately authorized and may write only those controller-owned variables to `mlhjyx/global-backend`; the operation result readbacks every variable name/value digest without storing raw credential values. The diagnostic command family is `gh variable set NAME --repo mlhjyx/global-backend --body VALUE`, generated from the closed fifteen-entry payload; no extra name is accepted.
+Prepare the exact fifteen-name/value-digest set. The GitHub controller `CONTROLLER_VARIABLES_WRITE` request is separately authorized and may write only those controller-owned variables to `mlhjyx/global-backend`; its receipt readbacks every variable digest. That GitHub receipt grants no filesystem authority.
 
-After variable receipt PASS, request a different root-anchor authorization. The branch-external root anchor writer—not the local launcher—create-exclusively writes `protected-main-anchor.json` at `root:root 0600` below its `0700` directory. It verifies and binds local launcher contract/materialization/review, immutable bootstrap contract, GitHub controller contract/materialization/review plus operation-receipt set, protected-base launcher contract/receipt/receipt-review/equivalence proof, admitted/refresh/admission/implementation/acceptance/review identities, both ordered GitHub parents, workflow run, canonical RFC3339 time, predecessor digest and receipt-chain digest. The anchor contains no credential/source/SQL bytes and does not hash itself.
+If the root-anchor controller is not already materialized and independently reviewed, stop and request a separate materialization authorization naming its exact tracked source/test blobs, `ENV`/Node closure, no-credential clean environment, contract/request/output roots, anchor target, owner/modes, no-follow/create-exclusive/no-overwrite/fsync/TOCTOU/genesis-predecessor rules and schemas. The root materializer creates only the controller/contract/request/output roots and emits `ExternalControllerMaterializationReceipt{controllerClass:"ROOT_ANCHOR"}`; an independent security review produces `ControllerReviewReceipt{controllerClass:"ROOT_ANCHOR"}`. Neither receipt writes the anchor.
 
-- [ ] **Step 11: Verify local and hosted anchor perspectives**
+Construct canonical `RootAnchorWriteRequest` binding a new separate authorization, exact target/mode, `GENESIS_ONLY` null predecessor and absent-target proof, local launcher/materialization/review, bootstrap contract, GitHub controller contract/review/complete operation set, protected-base contract/receipt/receipt-review/equivalence, admitted/refresh/admission/implementation/acceptance/review identities, ordered parents, workflow run, variable-write receipt and expected canonical anchor payload digest/size. The authorization names the request SHA exactly; controller materialization, GitHub authorization or root ownership cannot imply this write.
 
-Dispatch one local `SCANNER_STAGE_V1/ANCHOR_ONLY` request with its own fresh `BootstrapRunReceipt`; it consumes the root anchor as data. Independently validate the hosted `ProtectedBaseLauncherReceipt` and local-to-hosted equivalence proof. The direct scanner command is diagnostic:
+After authorization, the root-anchor controller:
+
+1. revalidates its contract/materialization/review, request/authorization and every input digest under `/usr/bin/env -i` with exact `ENV`/Node closure;
+2. opens the `0700 root:root` parent without following links and requires the target absent, predecessor null and no sibling/temp collision;
+3. canonicalizes the anchor payload, proves it has no anchor-SHA/write/readback/operation-review/self-hash field and matches the request digest/size;
+4. create-exclusively writes a same-directory `0600 root:root` temporary file, fsyncs it, links it to the absent target with no-replace semantics, unlinks only its own temporary name, and fsyncs the parent directory;
+5. reopens the target no-follow, verifies owner/mode/device/inode/size/SHA/TOCTOU, then writes and fsyncs `RootAnchorWriteReceipt` below the controller output root. It never overwrites, truncates, renames over or cleans an existing target.
+
+An independent root-capable reviewer then reopens the anchor, request and write receipt without following links, recomputes canonical schema/input evidence/ordered parents/predecessor/owner/mode/inode/SHA/TOCTOU/fsync facts and create-exclusively writes `RootAnchorReadbackReceipt`. A separate independent operation review challenges extra path/file, overwrite, symlink/hardlink/nonregular target, stale predecessor, wrong receipt/parent/order, missing authorization, broader mode, partial fsync, inode swap, self-hash/circular evidence, replay and current-shell/local-launcher/GitHub-controller substitution. Only zero Critical/Important and PASS creates `RootAnchorOperationReviewReceipt`.
+
+The evidence direction is exactly:
+
+```text
+controller contract/materialization/review
+  -> separately authorized RootAnchorWriteRequest
+  -> create-exclusive anchor write + fsync + RootAnchorWriteReceipt
+  -> independent RootAnchorReadbackReceipt
+  -> independent RootAnchorOperationReviewReceipt
+```
+
+No earlier object binds a later digest. The anchor does not hash itself; the external operation-review receipt binds the anchor SHA and every controller/request/write/readback/review digest.
+
+- [ ] **Step 11: Verify local and hosted anchor perspectives through external evidence**
+
+Dispatch one local `SCANNER_STAGE_V1/ANCHOR_ONLY` request with its own fresh `BootstrapRunReceipt`. Its typed input contains both exact paths and digests:
 
 ```bash
 node scripts/governance-organization-identity-writers.mjs stage \
   --anchor-receipt \
-  /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
+  /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json \
+  --anchor-operation-review \
+  /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-operation-review.json
 ```
 
-Ordinary PR Governance remains non-authoritative. A PR-supplied artifact/env/job-output/package/workflow/launcher/request/controller substitute fails. The Task 9 evidence set binds every GitHub operation receipt and the one local anchor-check receipt; no receipt is reused across operations.
+The direct command is diagnostic. `ANCHOR_ONLY` reopens the controller contract/materialization/review, authorized request, write receipt, readback receipt and operation review; recomputes anchor SHA; verifies the pre-write controller/request identities embedded in the anchor; and separately validates hosted `ProtectedBaseLauncherReceipt` plus equivalence proof. A missing, reordered, replayed or mismatched external digest is `INTEGRITY_ERROR`. Ordinary PR Governance remains non-authoritative, and no local launcher/GitHub controller may substitute for the accepted root-anchor controller. The Task 9 evidence set binds every GitHub receipt, protected-base receipt/review, complete root-anchor chain and the one local consumption receipt.
 
 - [ ] **Step 12: Record the task outcome without a repository commit**
 
@@ -4299,11 +4505,11 @@ Ordinary PR Governance remains non-authoritative. A PR-supplied artifact/env/job
 - Create after Task 9 and explicit local execution approval: worktree `/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3`
 - Create: branch `codex/pr407-organization-identity-caller-cutover-v3`
 - Modify: no v2 file
-- Test: worktree inventory, exact head/branch/status, anchor-aware stage/zero diagnostics.
+- Test: worktree inventory, exact head/branch/status, root-anchor controller operation-review chain, hosted equivalence and anchor-aware stage/zero diagnostics.
 
 **Interfaces:**
 
-- Consumes: root-only anchor's exact `mergeCommitSha`, `acceptedB0Sha`, launcher/materialization/bootstrap-contract identities; locally available protected-main merge Git object; separate v3 creation authorization.
+- Consumes: root-only anchor plus `RootAnchorOperationReviewReceipt`, exact `mergeCommitSha`, `acceptedB0Sha`, root-anchor/local/hosted/GitHub controller and launcher/bootstrap identities; locally available protected-main merge Git object; separate v3 creation authorization.
 - Produces: clean v3 at the exact merge commit, one fresh receipt per worktree/bootstrap/Prisma/stage/zero command plus their v3 receipt-set digest, B0 stage passing with external anchor, live zero exit 1 with three writers.
 
 **Commit message:** none; worktree creation is not a repository content commit.
@@ -4322,6 +4528,7 @@ Authority dispatches `task-10-anchor-validate.json` as `SCANNER_STAGE_V1/ANCHOR_
 
 ```bash
 ANCHOR=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json
+ANCHOR_OPERATION_REVIEW=/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-operation-review.json
 PROTECTED_MAIN_MERGE_SHA="$(jq -er '.mergeCommitSha' "$ANCHOR")"
 ACCEPTED_B0_SHA="$(jq -er '.acceptedB0Sha' "$ANCHOR")"
 ADMITTED_LIVE_MAIN_SHA="$(jq -er '.admittedLiveMainSha' "$ANCHOR")"
@@ -4337,7 +4544,7 @@ test "$(git -C /global/backend rev-parse "$PROTECTED_MAIN_MERGE_SHA^2")" = "$ACC
 git -C /global/backend merge-base --is-ancestor "$ACCEPTED_B0_SHA" "$PROTECTED_MAIN_MERGE_SHA"
 ```
 
-Expected: exact local commit exists, both ordered parents match the root receipt, and ancestry passes. Missing object or parent mismatch remains HOLD; do not fetch without separate network authorization.
+Expected: exact local commit exists, both ordered parents match the anchor, the external operation review recomputes the same anchor SHA and complete root-controller evidence chain, and ancestry passes. Missing controller/request/write/readback/review object or parent mismatch remains HOLD; do not fetch without separate network authorization.
 
 - [ ] **Step 3: Re-run inventory and collision checks**
 
@@ -4385,13 +4592,13 @@ Expected: bootstrap proves exact `pnpm install --frozen-lockfile --ignore-script
   --request /global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests/task-10-zero.json
 ```
 
-The requests use `SCANNER_STAGE_V1/STAGE_CHECK` and `SCANNER_ZERO_V1/ZERO_CHECK`, each with a distinct fresh Task 10 receipt and the same root anchor. Worktree creation, bootstrap, Prisma generation, stage and zero each have separate request IDs/receipts; the Task 10 setup evidence binds their receipt-set digest. Expected: stage exits 0 at `B0_BASELINE`; zero exits 1 with exactly the three accepted writer findings; stderr is empty.
+The typed stage/zero requests bind both `ANCHOR` and `ANCHOR_OPERATION_REVIEW` digests and use `SCANNER_STAGE_V1/STAGE_CHECK` and `SCANNER_ZERO_V1/ZERO_CHECK`, each with a distinct fresh Task 10 receipt. Worktree creation, bootstrap, Prisma generation, stage and zero each have separate request IDs/receipts; the Task 10 setup evidence binds their receipt-set digest. Expected: stage exits 0 at `B0_BASELINE`; zero exits 1 with exactly the three accepted writer findings; stderr is empty.
 
 **Commit:** none. Worktree creation is the setup boundary; Task 11 owns the first v3 commit.
 
 ## V3 Delivery: B1–B6 Caller Cutover
 
-Every Task 11–18 authority command first validates the protected anchor, exact accepted `BootstrapContract`, root launcher/materialization and creates its own fresh `BootstrapRunReceipt` whose subject equals that task's candidate head. The direct pnpm/Node command blocks are diagnostic/TDD expansions. A GREEN/stage/zero/governance/review claim exists only when every named canonical request has a distinct closed receipt and the task receipt-set count/digest passes; intentional RED commands retain expected-failure receipts and are never promoted to PASS.
+Every Task 11–18 authority command binds both the protected anchor SHA and `RootAnchorOperationReviewReceipt` digest, revalidates the complete root-anchor controller evidence chain, validates the accepted `BootstrapContract`/launcher and creates its own fresh `BootstrapRunReceipt` for that candidate head. The direct pnpm/Node command blocks are diagnostic/TDD expansions. A GREEN/stage/zero/governance/review claim exists only when every named request has a distinct receipt, the task receipt-set passes and the external anchor evidence remains byte-identical; intentional RED receipts are never promoted to PASS.
 
 ### Task 11: B1 Temporal Five-Outcome and Replay RED Without Writer-Count Change
 
@@ -5285,7 +5492,7 @@ The direct verifier loop is diagnostic. Authority dispatches `task-18-code-revie
 Stop at the first applicable condition and report the exact evidence boundary:
 
 1. V2 does not descend from final spec `b060c5dd...`, the exact plan is not reviewed/approved/tracked for execution, v3 does not equal the anchored merge, a worktree is dirty, or ownership overlaps.
-2. Task 0L tracked launcher/controller review fails; the four-file → readback → materialization → review chronology, request/output roots, owner/modes/TOCTOU or no-self/circular-digest rule fails; the local closure omits a Corepack/pnpm file or includes GH/Gitleaks/Docker/psql; any external controller omits an executable/environment/credential-handle/request/result/review contract; a free-form command/mode/argv/input/output is accepted; or current shell/PR bytes are used for authority.
+2. Task 0L tracked launcher/controller review fails; the four-file → readback → materialization → review chronology, request/output roots, owner/modes/TOCTOU or no-self/circular-digest rule fails; the local closure omits a Corepack/pnpm file or includes an external tool; any GitHub/Gitleaks/disposable/root-anchor controller omits source/test/blob/executable/environment/request/result/materialization/review contracts; a free-form command/mode/argv/input/output is accepted; or current shell/PR bytes are used for authority.
 3. Task 0P cannot distinguish invariant `BootstrapContract` rules/logical tools from current-subject `BootstrapRunReceipt` configuration/absence/lock/root/environment/TOCTOU/output observations; any schema field is unnamed, a nested variable path is omitted, one receipt serves two commands, request/receipt counts differ, current-main config is compared to an old B0 receipt, or clean bootstrap/generation/review fails.
 4. Task 0A validator review has any C/I, permits set/rename/copy/case/owner/conflict/migration/bootstrap drift, free-form command or HOLD to pass.
 5. Task 0B missing object yields reviewed `FETCH_AUTH_REQUIRED`; only exact-authorized GitHub-controller `FETCH_EXACT_OBJECT` may fetch in Task 0F, then full Task 0B reruns. A missing-object packet never supports merge authorization.
@@ -5305,7 +5512,7 @@ Stop at the first applicable condition and report the exact evidence boundary:
 19. Any scoped review receipt for Tasks 1–6 or 11–17, whole review, acceptance review, 0M review or final review lacks exact unique zero-C/I/PASS fields, subject/range/path/report/counterexample digests; any local request lacks its own receipt; task request/receipt set counts or digests differ; or a finding loop remains unresolved.
 20. Any GitHub operation lacks its exact controller receipt; PR create/update is omitted or conflated; immediate PR/rules/check head/base receipt is stale; auto-update/queue rebase is active; merge response/GitHub branch/ordered-parent/workflow readback differs; or exact postmerge fetch authorization/receipt/local verification is absent.
 21. `ProtectedBaseLauncherContract`/receipt/equivalence, protected-main push or base-owned `pull_request_target` identity/materialization/event/tool/TOCTOU fails; ordinary PR CI is treated as authority; or PR-controlled executable/input is used.
-22. Any push/PR/readback/merge/workflow rerun/controller-variable/GitHub-controller/Gitleaks-controller/disposable-controller/root-anchor/v3 action lacks its own authorization/review; root/local/hosted anchor is missing or mismatched.
+22. Any push/PR/readback/merge/workflow rerun/controller-variable/GitHub/Gitleaks/disposable/root-anchor/v3 action lacks its own authorization/review; or the root-anchor contract/materialization/review → authorized request → create-exclusive write/fsync → write receipt → independent readback → operation-review chain is missing, circular, self-hashing, replayed, overwritten or mismatched at `ANCHOR_ONLY`.
 23. The stage set is not exactly `3/3/2/2/1/0/0/0`, or zero does not become exit 0 at B4M.
 24. A caller needs any migration beyond accepted 0M, generic legacy writer, identity-only lock, synthesized/cross-transaction/workspace receipt, second PrismaClient, provider/model call or new state.
 25. Any outcome writes Canonical/Evidence on terminal outcomes, replay changes bytes, B4M lacks accepted 0M, or application/DB disagree on `identity_v2`/`IDENTITY_CONFLICT`.
@@ -5315,6 +5522,7 @@ Stop at the first applicable condition and report the exact evidence boundary:
 
 - Task 0L local launcher changes are ordinary reviewed source commits. Root materialization is create-only under its separate authorization; on mismatch, preserve the failed receipt/materialization evidence and stop. Do not overwrite, recursively delete, chmod-widen or replace it without a new exact root authorization.
 - GitHub, Gitleaks and disposable controller materializations/requests are independently create-only and authorization-scoped. Preserve a failed contract/materialization/request/receipt; never fall back to the local launcher, a current shell, another controller's executable closure/credential handle or an unreviewed replacement.
+- Root-anchor controller materialization and anchor-write authorization are separate. If the target already exists, predecessor is stale, fsync/readback fails or a partial/hostile file is observed, preserve the target and all receipts as HOLD; do not overwrite, truncate, unlink, rename over, chmod-repair or ask another controller to recreate it. A correction requires a new reviewed successor-path/predecessor design and exact authorization outside this genesis-only write.
 - Task 0B is read-only except its local ignored packets; it has no ref/merge rollback. Delete no packet or provenance to disguise a HOLD.
 - Task 0F fetches only the exact authorized object and changes no branch/tracking ref; a failed fetch remains a reviewed HOLD and never falls through to merge.
 - During an authorized but uncommitted Task 0C merge, unexpected conflict/path facts stop before resolution. Use only the abort/recovery action expressly included in the local-merge authorization and return to the exact clean `branchPreRefreshCommit`; never reset hard, rebase, or use blanket ours/theirs.
@@ -5339,19 +5547,19 @@ External review queues, authorization waits, GitHub checks, merge queues, and hu
 | Phase                                           | P50 active | P90 active | Included work; external waiting excluded                                                           |
 | ----------------------------------------------- | ---------: | ---------: | -------------------------------------------------------------------------------------------------- |
 | Final-spec/plan amendment and review-fix intake |       10 h |       24 h | spec deltas, prior/final 1C/9I/4M and 1C/5I/2M dispositions, plan correction/review rounds         |
-| 0L launcher/controller trust design             |       28 h |       60 h | local request union plus GitHub/Gitleaks/disposable contracts, hostile tests and review fixes      |
+| 0L launcher/controller trust design             |       34 h |       72 h | local requests plus GitHub/Gitleaks/disposable/root-anchor contracts, hostile tests and reviews    |
 | 0P bootstrap                                    |       12 h |       24 h | external receipt, immutable materialization, pnpm hooks, tool roots, hostile markers, review fixes |
 | 0A/0B/0F/0C refresh                             |       24 h |       52 h | validator, GitHub/Gitleaks controller gates, optional fetch, Copy and refresh reviews              |
 | 0M migration                                    |       24 h |       56 h | static migration, disposable controller, counterexamples and DB/security review fixes              |
 | Tasks 1–6 B0 scanner/governance                 |       56 h |      122 h | build/raw engines, receipt sets, per-task reviews and protected-base launcher                      |
-| Tasks 7–10 acceptance/remote/v3                 |       24 h |       54 h | reviews plus operation-specific push/PR/rules/merge/workflow/variable/fetch/root/v3 gates          |
+| Tasks 7–10 acceptance/remote/v3                 |       28 h |       62 h | reviews, GitHub gates, root-anchor materialize/write/readback/review, external consumption and v3  |
 | Tasks 11–17 caller cutover                      |       48 h |      100 h | TDD, per-task review/fix rounds, authorized disposable reruns                                      |
 | Task 18 final whole reviews                     |       10 h |       24 h | independent code/security/DB counterexamples and repair reruns                                     |
 | One main-drift full rebuild contingency         |       36 h |       80 h | successor, 0B/0F/0C/0M, regenerated baselines and reviews                                          |
-| **Total active excluding external waits**       |  **272 h** |  **596 h** | Arithmetic sum; P90 includes one drift rebuild and two substantive counterexample/fix rounds       |
+| **Total active excluding external waits**       |  **282 h** |  **616 h** | Arithmetic sum; P90 includes one drift rebuild and two substantive counterexample/fix rounds       |
 
 ## Execution Completion Boundary
 
-Execution is complete only when all 25 task gates (`0L`, `0P`, `0A`, `0B`, `0F`, `0C`, `0M`, and `1`–`18`) and scoped/whole reviews PASS at one clean B6 head; accepted four-file local launcher materialization/review, immutable bootstrap contract and one-command receipt sets, GitHub/Gitleaks/disposable/protected-base controller contracts/materializations/reviews/operation receipts, refresh/admission, 0M migration/disposable, scanner/raw/build/tool roots, B0 acceptance, local/root/hosted anchors and stage zero all agree. Handoff lists every commit, ordered parent, PR/rules/check/workflow operation, controller/credential-handle digest, receipt, migration/catalog, bootstrap/tool/raw measurement and review identity plus retained/deployment/Artifact C HOLDs.
+Execution is complete only when all 25 task gates and reviews PASS at one clean B6 head; accepted local launcher, immutable bootstrap receipt sets, GitHub/Gitleaks/disposable/protected-base controllers, and the full root-anchor controller contract/materialization/review/request/write/readback/operation-review chain must agree with refresh/admission/0M/scanner/B0 acceptance and stage zero. Handoff lists every commit, ordered parent, PR/rules/check/workflow operation, controller/evidence digest, receipt, migration/catalog, measurement and retained/deployment/Artifact C HOLD.
 
 This plan's completion/review authorizes no implementation. Future plan approval covers only Task 0L tracked local design/tests/review plus 0P/0A/0B; it does not authorize 0L root materialization. Root launcher materialization, Task 0F fetch, 0C merge/admission, 0M migration file, 0M disposable, Tasks 1–8 scanner, push, PR, GitHub merge/readback/re-run, postmerge fetch, controller/root anchor receipt, v3 and later disposable/runtime actions each retain separate exact gates.
