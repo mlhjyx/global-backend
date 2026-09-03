@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
+  isPassivePlainData,
   validateControllerReviewReceipt,
   validateCredentialHandleBinding,
   validateExternalControllerMaterializationReceipt,
@@ -17,6 +22,39 @@ const entry = (role) => ({
   realpathSha256: SHA,
   sha256: SHA,
   size: 1,
+});
+
+test("passive JSON rejects symbol-keyed and accessor-bearing arrays", () => {
+  const withSymbol = [];
+  withSymbol[Symbol("hidden")] = true;
+  const withAccessor = [];
+  Object.defineProperty(withAccessor, "hidden", {
+    get() {
+      throw new Error("must not run");
+    },
+  });
+  assert.equal(isPassivePlainData(withSymbol), false);
+  assert.equal(isPassivePlainData(withAccessor), false);
+});
+
+test("each external controller is a self-contained materializable module", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-controller-source-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  for (const basename of [
+    "governance-organization-identity-github-controller.mjs",
+    "governance-organization-identity-disposable-postgres-controller.mjs",
+    "governance-organization-identity-gitleaks-controller.mjs",
+    "governance-organization-identity-root-anchor-controller.mjs",
+  ]) {
+    const source = path.join(process.cwd(), "scripts", basename);
+    const isolated = path.join(fixtureRoot, basename);
+    await copyFile(source, isolated);
+    await assert.doesNotReject(
+      import(`${pathToFileURL(isolated).href}?isolated=1`),
+    );
+  }
 });
 
 test("external executable closure requires every exact role and rejects unlisted tools", () => {

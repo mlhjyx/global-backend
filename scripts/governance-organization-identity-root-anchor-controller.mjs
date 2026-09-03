@@ -1,13 +1,91 @@
-import {
-  hasExactKeys,
-  integrity,
-  isGitObjectId,
-  isSha256,
-  pass,
-  validateExactEnvironmentNames,
-  validateExternalExecutableClosure,
-  valuesEqual,
-} from "./governance-organization-identity-controller-contracts.mjs";
+import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
+import path from "node:path";
+
+const pass = (extra = {}) => ({ status: "PASS", ...extra });
+const integrity = (code) => ({ status: "INTEGRITY_ERROR", code });
+const canonicalJson = (value) => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+    .join(",")}}`;
+};
+const canonicalJsonBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const isSha256 = (value) =>
+  typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+const isGitObjectId = (value) =>
+  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+function isPassivePlainData(value, seen = new Set()) {
+  if (value === null) return true;
+  if (typeof value === "string") return value.normalize("NFC") === value;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  try {
+    if (Object.getOwnPropertySymbols(value).length) return false;
+    const proto = Object.getPrototypeOf(value);
+    if (!Array.isArray(value) && proto !== Object.prototype && proto !== null)
+      return false;
+    for (const [key, descriptor] of Object.entries(
+      Object.getOwnPropertyDescriptors(value),
+    )) {
+      if (Array.isArray(value) && key === "length") continue;
+      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
+      if (
+        !("value" in descriptor) ||
+        descriptor.get ||
+        descriptor.set ||
+        !isPassivePlainData(descriptor.value, seen)
+      )
+        return false;
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    seen.delete(value);
+  }
+}
+const hasExactKeys = (value, keys) =>
+  isPassivePlainData(value) &&
+  !Array.isArray(value) &&
+  Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+const valuesEqual = (left, right) =>
+  canonicalJson(left) === canonicalJson(right);
+function validateExternalExecutableClosure(entries, roles) {
+  if (!Array.isArray(entries) || entries.length !== roles.length)
+    return integrity("EXECUTABLE_CLOSURE_INVALID");
+  for (let index = 0; index < roles.length; index += 1) {
+    const entry = entries[index];
+    if (
+      !hasExactKeys(entry, [
+        "role",
+        "logicalIdentity",
+        "executablePath",
+        "realpathSha256",
+        "sha256",
+        "size",
+      ]) ||
+      entry.role !== roles[index] ||
+      !path.posix.isAbsolute(entry.executablePath) ||
+      !isSha256(entry.realpathSha256) ||
+      !isSha256(entry.sha256) ||
+      !Number.isSafeInteger(entry.size) ||
+      entry.size < 0
+    )
+      return integrity("EXECUTABLE_CLOSURE_INVALID");
+  }
+  return pass();
+}
+const validateExactEnvironmentNames = (actual, expected) =>
+  valuesEqual(actual, expected)
+    ? pass()
+    : integrity("ENVIRONMENT_NAME_SET_INVALID");
 
 const ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor";
@@ -174,18 +252,23 @@ const REQUEST_KEYS = [
   "writeReceiptPath",
 ];
 
-export function validateRootAnchorWriteRequest(
-  request,
-  contract,
-  expected = {},
-) {
+export function validateRootAnchorWriteRequest(request, contract, expected) {
+  if (
+    !hasExactKeys(expected, [
+      "orderedMergeParents",
+      "canonicalAnchorPayloadSha256",
+      "canonicalAnchorPayloadSize",
+    ])
+  ) {
+    return integrity("ROOT_ANCHOR_EXPECTED_INPUT_REQUIRED");
+  }
   if (
     validateRootAnchorContract(contract).status !== "PASS" ||
     !hasExactKeys(request, REQUEST_KEYS) ||
     request.schemaVersion !==
       "organization-identity-root-anchor-write-request/v1" ||
     !isSha256(request.requestId) ||
-    !isSha256(request.contractSha256) ||
+    request.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
     !isSha256(request.materializationReceiptSha256) ||
     !isSha256(request.controllerReviewReceiptSha256) ||
     !isSha256(request.authorizationReceiptSha256) ||
@@ -222,21 +305,16 @@ export function validateRootAnchorWriteRequest(
     if (!isSha256(request[key]))
       return integrity("ROOT_ANCHOR_REQUEST_INVALID");
   }
-  if (
-    expected.orderedMergeParents !== undefined &&
-    !valuesEqual(request.orderedMergeParents, expected.orderedMergeParents)
-  ) {
+  if (!valuesEqual(request.orderedMergeParents, expected.orderedMergeParents)) {
     return integrity("ROOT_ANCHOR_PARENT_ORDER_INVALID");
   }
   if (
-    expected.canonicalAnchorPayloadSha256 !== undefined &&
     request.canonicalAnchorPayloadSha256 !==
-      expected.canonicalAnchorPayloadSha256
+    expected.canonicalAnchorPayloadSha256
   ) {
     return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
   }
   if (
-    expected.canonicalAnchorPayloadSize !== undefined &&
     request.canonicalAnchorPayloadSize !== expected.canonicalAnchorPayloadSize
   ) {
     return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
@@ -244,9 +322,10 @@ export function validateRootAnchorWriteRequest(
   return pass();
 }
 
-export function planRootAnchorWrite(request, contract, observation) {
+export function planRootAnchorWrite(request, contract, observation, expected) {
   if (
-    validateRootAnchorWriteRequest(request, contract).status !== "PASS" ||
+    validateRootAnchorWriteRequest(request, contract, expected).status !==
+      "PASS" ||
     !hasExactKeys(observation, [
       "targetExists",
       "targetKind",
@@ -277,6 +356,291 @@ export function planRootAnchorWrite(request, contract, observation) {
     fileFsyncRequired: true,
     directoryFsyncRequired: true,
   };
+}
+
+function modeOf(stat) {
+  return Number(stat.mode & 0o777n);
+}
+
+async function verifyFixtureRoot(fixture) {
+  if (
+    !fixture ||
+    !path.isAbsolute(fixture.rootDirectory) ||
+    !path.isAbsolute(fixture.targetPath) ||
+    path.dirname(fixture.targetPath) !== fixture.rootDirectory ||
+    !fixture.targetPath.startsWith(`${fixture.rootDirectory}/`) ||
+    fixture.rootDirectory === ANCHOR_DIRECTORY
+  ) {
+    return integrity("ROOT_ANCHOR_FIXTURE_INVALID");
+  }
+  try {
+    const [stat, resolved] = await Promise.all([
+      lstat(fixture.rootDirectory, { bigint: true }),
+      realpath(fixture.rootDirectory),
+    ]);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      resolved !== fixture.rootDirectory ||
+      modeOf(stat) !== 0o700 ||
+      Number(stat.uid) !== fixture.expectedUid ||
+      Number(stat.gid) !== fixture.expectedGid
+    ) {
+      return integrity("ROOT_ANCHOR_FIXTURE_ROOT_INVALID");
+    }
+    return pass({ stat });
+  } catch {
+    return integrity("ROOT_ANCHOR_FIXTURE_ROOT_INVALID");
+  }
+}
+
+async function targetAbsent(targetPath) {
+  try {
+    await lstat(targetPath, { bigint: true });
+    return false;
+  } catch (error) {
+    return error?.code === "ENOENT";
+  }
+}
+
+async function fsyncDirectory(directoryPath) {
+  const handle = await open(directoryPath, fsConstants.O_RDONLY);
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writeExclusiveCanonical(filePath, bytes, fixture) {
+  let handle;
+  try {
+    handle = await open(
+      filePath,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600,
+    );
+    await handle.chmod(0o600);
+    await handle.chown(fixture.expectedUid, fixture.expectedGid);
+    await handle.writeFile(bytes);
+    await handle.sync();
+    const stat = await handle.stat({ bigint: true });
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1n ||
+      modeOf(stat) !== 0o600 ||
+      Number(stat.uid) !== fixture.expectedUid ||
+      Number(stat.gid) !== fixture.expectedGid ||
+      Number(stat.size) !== bytes.length
+    ) {
+      return integrity("ROOT_ANCHOR_WRITE_METADATA_INVALID");
+    }
+    return pass({ stat });
+  } catch {
+    return integrity("ROOT_ANCHOR_CREATE_EXCLUSIVE_FAILED");
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function readbackFile(filePath, expected, fixture) {
+  let handle;
+  try {
+    const before = await lstat(filePath, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {
+      return integrity("ROOT_ANCHOR_READBACK_INVALID");
+    }
+    handle = await open(
+      filePath,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+    );
+    const opened = await handle.stat({ bigint: true });
+    const bytes = await handle.readFile();
+    const after = await handle.stat({ bigint: true });
+    const afterPath = await lstat(filePath, { bigint: true });
+    if (
+      before.dev !== opened.dev ||
+      before.ino !== opened.ino ||
+      opened.dev !== after.dev ||
+      opened.ino !== after.ino ||
+      opened.dev !== afterPath.dev ||
+      opened.ino !== afterPath.ino ||
+      modeOf(opened) !== 0o600 ||
+      Number(opened.uid) !== fixture.expectedUid ||
+      Number(opened.gid) !== fixture.expectedGid ||
+      bytes.length !== expected.size ||
+      sha256(bytes) !== expected.sha256
+    ) {
+      return integrity("ROOT_ANCHOR_READBACK_INVALID");
+    }
+    return pass({ bytes, stat: opened });
+  } catch {
+    return integrity("ROOT_ANCHOR_READBACK_INVALID");
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+export async function materializeRootAnchor({
+  request,
+  contract,
+  expected,
+  payloadBytes,
+  fixture,
+}) {
+  if (!fixture) {
+    return {
+      status: "ROOT_ANCHOR_WRITE_HOLD",
+      code: "PRODUCTION_ROOT_AUTHORIZATION_REQUIRED",
+    };
+  }
+  if (
+    validateRootAnchorWriteRequest(request, contract, expected).status !==
+      "PASS" ||
+    !Buffer.isBuffer(payloadBytes) ||
+    payloadBytes.length !== request.canonicalAnchorPayloadSize ||
+    sha256(payloadBytes) !== request.canonicalAnchorPayloadSha256
+  ) {
+    return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
+  }
+  try {
+    const parsed = JSON.parse(payloadBytes.toString("utf8"));
+    if (
+      !isPassivePlainData(parsed) ||
+      !payloadBytes.equals(canonicalJsonBytes(parsed)) ||
+      Object.hasOwn(parsed, "anchorSha256") ||
+      Object.hasOwn(parsed, "selfSha256")
+    ) {
+      return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
+    }
+  } catch {
+    return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
+  }
+  const root = await verifyFixtureRoot(fixture);
+  if (root.status !== "PASS" || !(await targetAbsent(fixture.targetPath))) {
+    return {
+      status: "ROOT_ANCHOR_WRITE_HOLD",
+      code: "ROOT_ANCHOR_TARGET_INVALID",
+    };
+  }
+  const written = await writeExclusiveCanonical(
+    fixture.targetPath,
+    payloadBytes,
+    fixture,
+  );
+  if (written.status !== "PASS") {
+    return { status: "ROOT_ANCHOR_WRITE_HOLD", code: written.code };
+  }
+  await fsyncDirectory(fixture.rootDirectory);
+  const readback = await readbackFile(
+    fixture.targetPath,
+    { sha256: request.canonicalAnchorPayloadSha256, size: payloadBytes.length },
+    fixture,
+  );
+  if (readback.status !== "PASS") {
+    return { status: "ROOT_ANCHOR_WRITE_HOLD", code: readback.code };
+  }
+  const writeReceipt = {
+    schemaVersion: "organization-identity-root-anchor-write-receipt/v1",
+    contractSha256: request.contractSha256,
+    materializationReceiptSha256: request.materializationReceiptSha256,
+    controllerReviewReceiptSha256: request.controllerReviewReceiptSha256,
+    requestSha256: sha256(canonicalJsonBytes(request)),
+    authorizationReceiptSha256: request.authorizationReceiptSha256,
+    targetPath: ANCHOR_PATH,
+    anchorSha256: request.canonicalAnchorPayloadSha256,
+    anchorSize: payloadBytes.length,
+    ownerUid: 0,
+    ownerGid: 0,
+    mode: 0o600,
+    device: String(readback.stat.dev),
+    inode: String(readback.stat.ino),
+    predecessorSha256: null,
+    fileFsyncSha256: sha256(
+      canonicalJsonBytes({ inode: String(readback.stat.ino), synced: true }),
+    ),
+    directoryFsyncSha256: sha256(
+      canonicalJsonBytes({ directory: fixture.rootDirectory, synced: true }),
+    ),
+    prePostToctouSha256: sha256(
+      canonicalJsonBytes({
+        device: String(readback.stat.dev),
+        inode: String(readback.stat.ino),
+      }),
+    ),
+    anchorContainsSelfHash: false,
+    result: "PASS",
+  };
+  const receiptWrite = await writeExclusiveCanonical(
+    fixture.writeReceiptPath,
+    canonicalJsonBytes(writeReceipt),
+    fixture,
+  );
+  if (receiptWrite.status !== "PASS") {
+    return { status: "ROOT_ANCHOR_WRITE_HOLD", code: receiptWrite.code };
+  }
+  await fsyncDirectory(path.dirname(fixture.writeReceiptPath));
+  return pass({ writeReceipt });
+}
+
+export async function readbackRootAnchor({
+  request,
+  contract,
+  writeReceipt,
+  fixture,
+}) {
+  if (
+    !fixture ||
+    validateRootAnchorWriteReceipt(writeReceipt, request).status !== "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_WRITE_RECEIPT_INVALID");
+  }
+  const root = await verifyFixtureRoot(fixture);
+  if (root.status !== "PASS") return root;
+  const observed = await readbackFile(
+    fixture.targetPath,
+    { sha256: writeReceipt.anchorSha256, size: writeReceipt.anchorSize },
+    fixture,
+  );
+  if (observed.status !== "PASS") return observed;
+  const readbackReceipt = {
+    schemaVersion: "organization-identity-root-anchor-readback/v1",
+    contractSha256: writeReceipt.contractSha256,
+    requestSha256: writeReceipt.requestSha256,
+    writeReceiptSha256: sha256(canonicalJsonBytes(writeReceipt)),
+    targetPath: ANCHOR_PATH,
+    noFollowVerified: true,
+    ownerUid: 0,
+    ownerGid: 0,
+    mode: 0o600,
+    device: String(observed.stat.dev),
+    inode: String(observed.stat.ino),
+    anchorSha256: observed.status === "PASS" ? sha256(observed.bytes) : "",
+    anchorSize: observed.bytes.length,
+    canonicalSchemaSha256: contract.anchorSchemaSha256,
+    inputEvidenceSetSha256: sha256(
+      canonicalJsonBytes({
+        requestSha256: writeReceipt.requestSha256,
+        writeReceiptSha256: sha256(canonicalJsonBytes(writeReceipt)),
+      }),
+    ),
+    predecessorSha256: null,
+    anchorContainsSelfHash: false,
+    prePostToctouSha256: writeReceipt.prePostToctouSha256,
+    reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK",
+    result: "PASS",
+  };
+  const receiptWrite = await writeExclusiveCanonical(
+    fixture.readbackReceiptPath,
+    canonicalJsonBytes(readbackReceipt),
+    fixture,
+  );
+  if (receiptWrite.status !== "PASS") return receiptWrite;
+  await fsyncDirectory(path.dirname(fixture.readbackReceiptPath));
+  return pass({ readbackReceipt });
 }
 
 const WRITE_RECEIPT_KEYS = [
@@ -313,6 +677,7 @@ export function validateRootAnchorWriteReceipt(receipt, request) {
     receipt.controllerReviewReceiptSha256 !==
       request.controllerReviewReceiptSha256 ||
     receipt.authorizationReceiptSha256 !== request.authorizationReceiptSha256 ||
+    receipt.requestSha256 !== sha256(canonicalJsonBytes(request)) ||
     receipt.targetPath !== ANCHOR_PATH ||
     !isSha256(receipt.requestSha256) ||
     !isSha256(receipt.anchorSha256) ||
@@ -368,7 +733,7 @@ export function validateRootAnchorReadbackReceipt(receipt, writeReceipt) {
     receipt.schemaVersion !== "organization-identity-root-anchor-readback/v1" ||
     receipt.contractSha256 !== writeReceipt.contractSha256 ||
     receipt.requestSha256 !== writeReceipt.requestSha256 ||
-    !isSha256(receipt.writeReceiptSha256) ||
+    receipt.writeReceiptSha256 !== sha256(canonicalJsonBytes(writeReceipt)) ||
     receipt.targetPath !== writeReceipt.targetPath ||
     receipt.noFollowVerified !== true ||
     receipt.ownerUid !== writeReceipt.ownerUid ||
@@ -408,8 +773,20 @@ const REVIEW_KEYS = [
   "verdict",
 ];
 
-export function validateRootAnchorOperationReviewReceipt(receipt) {
+export function validateRootAnchorOperationReviewReceipt(receipt, records) {
   if (
+    !records ||
+    !hasExactKeys(records, [
+      "writeRequest",
+      "writeReceipt",
+      "readbackReceipt",
+    ]) ||
+    validateRootAnchorWriteReceipt(records.writeReceipt, records.writeRequest)
+      .status !== "PASS" ||
+    validateRootAnchorReadbackReceipt(
+      records.readbackReceipt,
+      records.writeReceipt,
+    ).status !== "PASS" ||
     !hasExactKeys(receipt, REVIEW_KEYS) ||
     receipt.schemaVersion !==
       "organization-identity-root-anchor-operation-review/v1" ||
@@ -419,6 +796,13 @@ export function validateRootAnchorOperationReviewReceipt(receipt) {
     receipt.writeReceiptSha256 === receipt.readbackReceiptSha256 ||
     receipt.writeReceiptSha256 === receipt.anchorSha256 ||
     receipt.readbackReceiptSha256 === receipt.anchorSha256 ||
+    receipt.writeRequestSha256 !==
+      sha256(canonicalJsonBytes(records.writeRequest)) ||
+    receipt.writeReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.writeReceipt)) ||
+    receipt.readbackReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.readbackReceipt)) ||
+    receipt.anchorSha256 !== records.writeReceipt.anchorSha256 ||
     receipt.reviewerClass !== "INDEPENDENT_ROOT_ANCHOR_OPERATION_REVIEW" ||
     receipt.critical !== 0 ||
     receipt.important !== 0 ||

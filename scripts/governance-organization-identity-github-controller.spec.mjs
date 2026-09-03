@@ -86,12 +86,37 @@ function contract(overrides = {}) {
   };
 }
 
+function evidence(operation = "PROTECTED_MAIN_READBACK") {
+  const materializationReceipt = {
+    schemaVersion:
+      "organization-identity-external-controller-materialization/v1",
+    controllerClass: "GITHUB",
+    contractSha256: sha(`${canonical(contract())}\n`),
+  };
+  const controllerReviewReceipt = {
+    schemaVersion: "organization-identity-controller-review/v1",
+    controllerClass: "GITHUB",
+    materializationReceiptSha256: sha(`${canonical(materializationReceipt)}\n`),
+  };
+  const authorizationReceipt = {
+    schemaVersion: "organization-identity-controller-authorization/v1",
+    controllerClass: "GITHUB",
+    requestId: SHA,
+    operation,
+  };
+  return {
+    materializationReceipt,
+    controllerReviewReceipt,
+    authorizationReceipt,
+  };
+}
+
 function request(overrides = {}) {
   const result = {
     schemaVersion: "organization-identity-github-controller-request/v1",
     requestId: SHA,
     operation: "PROTECTED_MAIN_READBACK",
-    contractSha256: SHA,
+    contractSha256: sha(`${canonical(contract())}\n`),
     materializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
     authorizationReceiptSha256: SHA,
@@ -112,6 +137,23 @@ function request(overrides = {}) {
   };
   if (!("payloadSha256" in overrides)) {
     result.payloadSha256 = sha(`${canonical(result.payload)}\n`);
+  }
+  const records = evidence(result.operation);
+  result.materializationReceiptSha256 = sha(
+    `${canonical(records.materializationReceipt)}\n`,
+  );
+  result.controllerReviewReceiptSha256 = sha(
+    `${canonical(records.controllerReviewReceipt)}\n`,
+  );
+  result.authorizationReceiptSha256 = sha(
+    `${canonical(records.authorizationReceipt)}\n`,
+  );
+  for (const key of [
+    "materializationReceiptSha256",
+    "controllerReviewReceiptSha256",
+    "authorizationReceiptSha256",
+  ]) {
+    if (key in overrides) result[key] = overrides[key];
   }
   return result;
 }
@@ -139,12 +181,11 @@ test("GitHub contract requires the exact GH/Git/Node closure and environment", (
 
 test("GitHub requests enforce exact operation payloads and authorization", () => {
   assert.equal(
-    validateGitHubControllerRequest(request(), contract()).status,
+    validateGitHubControllerRequest(request(), contract(), evidence()).status,
     "PASS",
   );
   const merge = request({
     operation: "PR_MERGE",
-    authorizationReceiptSha256: SHA,
     payload: {
       number: 407,
       expectedBaseSha: COMMIT,
@@ -154,17 +195,20 @@ test("GitHub requests enforce exact operation payloads and authorization", () =>
     },
   });
   assert.equal(
-    validateGitHubControllerRequest(merge, contract()).status,
+    validateGitHubControllerRequest(merge, contract(), evidence("PR_MERGE"))
+      .status,
     "PASS",
   );
   assert.equal(
     validateGitHubControllerRequest(
       request({ authorizationReceiptSha256: null }),
       contract(),
+      evidence(),
     ).status,
     "INTEGRITY_ERROR",
   );
   for (const mutation of [
+    { ...merge, contractSha256: SHA },
     { ...merge, authorizationReceiptSha256: null },
     { ...merge, payloadSha256: "b".repeat(64) },
     { ...merge, payload: { ...merge.payload, mergeMethod: "squash" } },
@@ -176,14 +220,22 @@ test("GitHub requests enforce exact operation payloads and authorization", () =>
     },
   ]) {
     assert.equal(
-      validateGitHubControllerRequest(mutation, contract()).status,
+      validateGitHubControllerRequest(
+        mutation,
+        contract(),
+        evidence("PR_MERGE"),
+      ).status,
       "INTEGRITY_ERROR",
     );
   }
 });
 
 test("GitHub invocation is closed and carries only a credential handle", () => {
-  const result = buildGitHubControllerInvocation(request(), contract());
+  const result = buildGitHubControllerInvocation(
+    request(),
+    contract(),
+    evidence(),
+  );
   assert.equal(result.status, "PASS");
   assert.deepEqual(result.argv, [
     "api",
@@ -296,25 +348,64 @@ test("every GitHub operation has one exact closed payload and invocation branch"
   for (const [operation, payload] of cases) {
     const operationRequest = request({ operation, payload });
     assert.equal(
-      validateGitHubControllerRequest(operationRequest, contract()).status,
+      validateGitHubControllerRequest(
+        operationRequest,
+        contract(),
+        evidence(operation),
+      ).status,
       "PASS",
     );
-    assert.equal(
-      buildGitHubControllerInvocation(operationRequest, contract()).status,
-      "PASS",
+    const invocation = buildGitHubControllerInvocation(
+      operationRequest,
+      contract(),
+      evidence(operation),
     );
+    assert.equal(invocation.status, "PASS");
+    assert.equal(invocation.argv.includes("--closed-operation"), false);
+    assert.equal(JSON.stringify(invocation).includes(operation), true);
   }
+});
+
+test("GitHub push uses the immutable expected-head refspec", () => {
+  const push = request({
+    operation: "PUSH_EXACT_BRANCH",
+    payload: {
+      branch: "codex/pr407-organization-identity-caller-cutover-v2",
+      expectedHead: COMMIT,
+      setUpstream: true,
+      force: false,
+    },
+  });
+  const invocation = buildGitHubControllerInvocation(
+    push,
+    contract(),
+    evidence("PUSH_EXACT_BRANCH"),
+  );
+  assert.deepEqual(invocation.argv, [
+    "push",
+    "--set-upstream",
+    "origin",
+    `${COMMIT}:refs/heads/codex/pr407-organization-identity-caller-cutover-v2`,
+  ]);
+  assert.equal(invocation.preconditions.expectedHead, COMMIT);
 });
 
 test("GitHub receipts are operation-bound and reject cross-controller or credential records", () => {
   const protectedMainRequest = request();
+  const controllerContract = contract();
+  const resultRecord = {
+    schemaVersion: "github-result-fixture/v1",
+    operation: protectedMainRequest.operation,
+    observedHeadSha: COMMIT,
+  };
   const receipt = {
     schemaVersion: "organization-identity-github-controller-receipt/v1",
-    contractSha256: SHA,
-    controllerReviewReceiptSha256: SHA,
+    contractSha256: protectedMainRequest.contractSha256,
+    controllerReviewReceiptSha256:
+      protectedMainRequest.controllerReviewReceiptSha256,
     operation: "PROTECTED_MAIN_READBACK",
     requestId: SHA,
-    requestSha256: SHA,
+    requestSha256: sha(`${canonical(protectedMainRequest)}\n`),
     payloadSchemaSha256: protectedMainRequest.payloadSchemaSha256,
     payloadSha256: protectedMainRequest.payloadSha256,
     authorizationReceiptSha256: protectedMainRequest.authorizationReceiptSha256,
@@ -324,16 +415,28 @@ test("GitHub receipts are operation-bound and reject cross-controller or credent
     observedBaseSha: null,
     observedHeadSha: COMMIT,
     resultSchemaSha256: SHA,
-    resultSha256: SHA,
+    resultSha256: sha(`${canonical(resultRecord)}\n`),
     httpStatus: 200,
-    executableClosureSetSha256: SHA,
+    executableClosureSetSha256: sha(
+      `${canonical(controllerContract.executableClosure)}\n`,
+    ),
     prePostToctouSha256: SHA,
     containsCredentialValue: false,
     result: "PASS",
   };
   assert.equal(
-    validateGitHubControllerReceipt(receipt, protectedMainRequest).status,
+    validateGitHubControllerReceipt(
+      receipt,
+      protectedMainRequest,
+      controllerContract,
+      resultRecord,
+      evidence(),
+    ).status,
     "PASS",
+  );
+  assert.equal(
+    validateGitHubControllerReceipt(receipt, protectedMainRequest).status,
+    "INTEGRITY_ERROR",
   );
   for (const mutation of [
     { ...receipt, operation: "PR_READBACK" },
@@ -346,8 +449,24 @@ test("GitHub receipts are operation-bound and reject cross-controller or credent
     },
   ]) {
     assert.equal(
-      validateGitHubControllerReceipt(mutation, protectedMainRequest).status,
+      validateGitHubControllerReceipt(
+        mutation,
+        protectedMainRequest,
+        controllerContract,
+        resultRecord,
+        evidence(),
+      ).status,
       "INTEGRITY_ERROR",
     );
   }
+  assert.equal(
+    validateGitHubControllerReceipt(
+      receipt,
+      protectedMainRequest,
+      controllerContract,
+      { ...resultRecord, observedHeadSha: "2".repeat(40) },
+      evidence(),
+    ).status,
+    "INTEGRITY_ERROR",
+  );
 });

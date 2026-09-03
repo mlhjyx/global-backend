@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  materializeRootAnchor,
   planRootAnchorWrite,
+  readbackRootAnchor,
   validateRootAnchorContract,
   validateRootAnchorOperationReviewReceipt,
   validateRootAnchorReadbackReceipt,
@@ -23,6 +37,23 @@ const closure = ["ENV", "NODE"].map((role) => ({
   sha256: SHA,
   size: 1,
 }));
+
+function canonical(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
+    .join(",")}}`;
+}
+
+function canonicalBytes(value) {
+  return Buffer.from(`${canonical(value)}\n`);
+}
+
+function digest(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
 
 function contract(overrides = {}) {
   return {
@@ -84,7 +115,7 @@ function request(overrides = {}) {
   return {
     schemaVersion: "organization-identity-root-anchor-write-request/v1",
     requestId: SHA,
-    contractSha256: SHA,
+    contractSha256: digest(canonicalBytes(contract())),
     materializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
     authorizationReceiptSha256: SHA,
@@ -144,6 +175,7 @@ test("root-anchor requests reject extra targets, stale predecessors, missing aut
     "PASS",
   );
   for (const mutation of [
+    { contractSha256: SHA },
     { targetPath: `${ANCHOR}.other` },
     { targetMode: 0o644 },
     { authorizationReceiptSha256: null },
@@ -167,6 +199,11 @@ test("root-anchor requests reject extra targets, stale predecessors, missing aut
 });
 
 test("root-anchor planner holds before any write on pre-existing, linked, nonregular, or inode-swapped targets", () => {
+  const expected = {
+    orderedMergeParents: ["1".repeat(40), "2".repeat(40)],
+    canonicalAnchorPayloadSha256: "b".repeat(64),
+    canonicalAnchorPayloadSize: 42,
+  };
   const observations = [
     { targetExists: true, targetKind: "file", hardlinkCount: 1 },
     { targetExists: false, targetKind: "symlink", hardlinkCount: 1 },
@@ -180,21 +217,29 @@ test("root-anchor planner holds before any write on pre-existing, linked, nonreg
     },
   ];
   for (const observation of observations) {
-    assert.deepEqual(planRootAnchorWrite(request(), contract(), observation), {
-      status: "ROOT_ANCHOR_WRITE_HOLD",
-      code: "ROOT_ANCHOR_TARGET_INVALID",
-    });
+    assert.deepEqual(
+      planRootAnchorWrite(request(), contract(), observation, expected),
+      {
+        status: "ROOT_ANCHOR_WRITE_HOLD",
+        code: "ROOT_ANCHOR_TARGET_INVALID",
+      },
+    );
   }
   assert.deepEqual(
-    planRootAnchorWrite(request(), contract(), {
-      targetExists: false,
-      targetKind: "absent",
-      hardlinkCount: 0,
-      inodeStable: true,
-      ownerUid: 0,
-      ownerGid: 0,
-      directoryMode: 0o700,
-    }),
+    planRootAnchorWrite(
+      request(),
+      contract(),
+      {
+        targetExists: false,
+        targetKind: "absent",
+        hardlinkCount: 0,
+        inodeStable: true,
+        ownerUid: 0,
+        ownerGid: 0,
+        directoryMode: 0o700,
+      },
+      expected,
+    ),
     {
       status: "PASS",
       writeMode: "CREATE_EXCLUSIVE_NOFOLLOW",
@@ -206,13 +251,139 @@ test("root-anchor planner holds before any write on pre-existing, linked, nonreg
   );
 });
 
+test("root-anchor controller writes and reads back a canonical anchor in a bounded fixture", async (t) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "identity-anchor-"));
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  await chmod(fixtureRoot, 0o700);
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await mkdir(outputRoot, { mode: 0o700 });
+  const targetPath = path.join(fixtureRoot, "protected-main-anchor.json");
+  const writeReceiptPath = path.join(outputRoot, "write.json");
+  const readbackReceiptPath = path.join(outputRoot, "readback.json");
+  const payload = {
+    schemaVersion: "organization-identity-protected-main-anchor/v1",
+    acceptedCommit: "3".repeat(40),
+    orderedMergeParents: ["1".repeat(40), "2".repeat(40)],
+    predecessorSha256: null,
+  };
+  const payloadBytes = canonicalBytes(payload);
+  const writeRequest = request({
+    canonicalAnchorPayloadSha256: digest(payloadBytes),
+    canonicalAnchorPayloadSize: payloadBytes.length,
+  });
+  const expected = {
+    orderedMergeParents: writeRequest.orderedMergeParents,
+    canonicalAnchorPayloadSha256: writeRequest.canonicalAnchorPayloadSha256,
+    canonicalAnchorPayloadSize: writeRequest.canonicalAnchorPayloadSize,
+  };
+  const written = await materializeRootAnchor({
+    request: writeRequest,
+    contract: contract(),
+    expected,
+    payloadBytes,
+    fixture: {
+      rootDirectory: fixtureRoot,
+      targetPath,
+      writeReceiptPath,
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+  });
+  assert.equal(written.status, "PASS");
+  assert.deepEqual(await readFile(targetPath), payloadBytes);
+  assert.equal(
+    JSON.parse(await readFile(writeReceiptPath, "utf8")).anchorSha256,
+    digest(payloadBytes),
+  );
+  const readback = await readbackRootAnchor({
+    request: writeRequest,
+    contract: contract(),
+    writeReceipt: written.writeReceipt,
+    fixture: {
+      rootDirectory: fixtureRoot,
+      targetPath,
+      readbackReceiptPath,
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+  });
+  assert.equal(readback.status, "PASS");
+  assert.equal(
+    JSON.parse(await readFile(readbackReceiptPath, "utf8")).anchorSha256,
+    digest(payloadBytes),
+  );
+  assert.equal(
+    (
+      await materializeRootAnchor({
+        request: writeRequest,
+        contract: contract(),
+        expected,
+        payloadBytes,
+        fixture: {
+          rootDirectory: fixtureRoot,
+          targetPath,
+          writeReceiptPath: path.join(outputRoot, "second-write.json"),
+          expectedUid: process.getuid(),
+          expectedGid: process.getgid(),
+        },
+      })
+    ).status,
+    "ROOT_ANCHOR_WRITE_HOLD",
+  );
+});
+
+test("root-anchor fixture refuses symlink targets and broader parent mode", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-anchor-hostile-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const payloadBytes = canonicalBytes({ safe: true });
+  const writeRequest = request({
+    canonicalAnchorPayloadSha256: digest(payloadBytes),
+    canonicalAnchorPayloadSize: payloadBytes.length,
+  });
+  const expected = {
+    orderedMergeParents: writeRequest.orderedMergeParents,
+    canonicalAnchorPayloadSha256: writeRequest.canonicalAnchorPayloadSha256,
+    canonicalAnchorPayloadSize: writeRequest.canonicalAnchorPayloadSize,
+  };
+  const targetPath = path.join(fixtureRoot, "anchor.json");
+  const outside = path.join(fixtureRoot, "outside.json");
+  await writeFile(outside, "outside");
+  await symlink(outside, targetPath);
+  const base = {
+    request: writeRequest,
+    contract: contract(),
+    expected,
+    payloadBytes,
+    fixture: {
+      rootDirectory: fixtureRoot,
+      targetPath,
+      writeReceiptPath: path.join(fixtureRoot, "write.json"),
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+  };
+  assert.equal(
+    (await materializeRootAnchor(base)).status,
+    "ROOT_ANCHOR_WRITE_HOLD",
+  );
+  await rm(targetPath);
+  await chmod(fixtureRoot, 0o755);
+  assert.equal(
+    (await materializeRootAnchor(base)).status,
+    "ROOT_ANCHOR_WRITE_HOLD",
+  );
+});
+
 function writeReceipt(overrides = {}) {
+  const writeRequest = request();
   return {
     schemaVersion: "organization-identity-root-anchor-write-receipt/v1",
-    contractSha256: SHA,
+    contractSha256: writeRequest.contractSha256,
     materializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
-    requestSha256: SHA,
+    requestSha256: digest(canonicalBytes(writeRequest)),
     authorizationReceiptSha256: SHA,
     targetPath: ANCHOR,
     anchorSha256: "b".repeat(64),
@@ -239,6 +410,7 @@ test("root-anchor write and readback receipts bind fsync, inode, canonical bytes
     "PASS",
   );
   for (const mutation of [
+    { ...written, requestSha256: SHA },
     { ...written, anchorSha256: "c".repeat(64) },
     { ...written, fileFsyncSha256: null },
     { ...written, directoryFsyncSha256: null },
@@ -255,9 +427,9 @@ test("root-anchor write and readback receipts bind fsync, inode, canonical bytes
 
   const readback = {
     schemaVersion: "organization-identity-root-anchor-readback/v1",
-    contractSha256: SHA,
-    requestSha256: SHA,
-    writeReceiptSha256: SHA,
+    contractSha256: written.contractSha256,
+    requestSha256: written.requestSha256,
+    writeReceiptSha256: digest(canonicalBytes(written)),
     targetPath: ANCHOR,
     noFollowVerified: true,
     ownerUid: 0,
@@ -275,11 +447,13 @@ test("root-anchor write and readback receipts bind fsync, inode, canonical bytes
     reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK",
     result: "PASS",
   };
-  assert.equal(
-    validateRootAnchorReadbackReceipt(readback, written).status,
-    "PASS",
+  const validatedReadback = validateRootAnchorReadbackReceipt(
+    readback,
+    written,
   );
+  assert.equal(validatedReadback.status, "PASS", validatedReadback.code);
   for (const mutation of [
+    { ...readback, writeReceiptSha256: SHA },
     { ...readback, inode: "3" },
     { ...readback, noFollowVerified: false },
     { ...readback, anchorSha256: SHA },
@@ -293,15 +467,39 @@ test("root-anchor write and readback receipts bind fsync, inode, canonical bytes
 });
 
 test("root-anchor operation review rejects circular, substituted, or non-independent receipts", () => {
+  const writeRequest = request();
+  const written = writeReceipt();
+  const readback = {
+    schemaVersion: "organization-identity-root-anchor-readback/v1",
+    contractSha256: written.contractSha256,
+    requestSha256: written.requestSha256,
+    writeReceiptSha256: digest(canonicalBytes(written)),
+    targetPath: ANCHOR,
+    noFollowVerified: true,
+    ownerUid: 0,
+    ownerGid: 0,
+    mode: 0o600,
+    device: written.device,
+    inode: written.inode,
+    anchorSha256: written.anchorSha256,
+    anchorSize: written.anchorSize,
+    canonicalSchemaSha256: SHA,
+    inputEvidenceSetSha256: SHA,
+    predecessorSha256: null,
+    anchorContainsSelfHash: false,
+    prePostToctouSha256: SHA,
+    reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK",
+    result: "PASS",
+  };
   const receipt = {
     schemaVersion: "organization-identity-root-anchor-operation-review/v1",
     controllerContractSha256: SHA,
     controllerMaterializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
-    writeRequestSha256: SHA,
-    writeReceiptSha256: SHA,
-    readbackReceiptSha256: "b".repeat(64),
-    anchorSha256: "c".repeat(64),
+    writeRequestSha256: digest(canonicalBytes(writeRequest)),
+    writeReceiptSha256: digest(canonicalBytes(written)),
+    readbackReceiptSha256: digest(canonicalBytes(readback)),
+    anchorSha256: written.anchorSha256,
     reportSha256: SHA,
     counterexampleSetSha256: SHA,
     reviewerClass: "INDEPENDENT_ROOT_ANCHOR_OPERATION_REVIEW",
@@ -309,9 +507,18 @@ test("root-anchor operation review rejects circular, substituted, or non-indepen
     important: 0,
     verdict: "PASS",
   };
+  const records = {
+    writeRequest,
+    writeReceipt: written,
+    readbackReceipt: readback,
+  };
+  assert.equal(
+    validateRootAnchorOperationReviewReceipt(receipt, records).status,
+    "PASS",
+  );
   assert.equal(
     validateRootAnchorOperationReviewReceipt(receipt).status,
-    "PASS",
+    "INTEGRITY_ERROR",
   );
   for (const mutation of [
     { ...receipt, anchorSha256: receipt.writeReceiptSha256 },
@@ -321,7 +528,7 @@ test("root-anchor operation review rejects circular, substituted, or non-indepen
     { ...receipt, verdict: "FAIL" },
   ]) {
     assert.equal(
-      validateRootAnchorOperationReviewReceipt(mutation).status,
+      validateRootAnchorOperationReviewReceipt(mutation, records).status,
       "INTEGRITY_ERROR",
     );
   }

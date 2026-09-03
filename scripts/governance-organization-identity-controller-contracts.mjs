@@ -86,9 +86,11 @@ export function isPassivePlainData(value, seen = new Set()) {
   seen.add(value);
   try {
     if (Array.isArray(value)) {
+      if (Object.getOwnPropertySymbols(value).length !== 0) return false;
       const descriptors = Object.getOwnPropertyDescriptors(value);
       for (const [key, descriptor] of Object.entries(descriptors)) {
         if (key === "length") continue;
+        if (!/^(0|[1-9][0-9]*)$/.test(key)) return false;
         if (!("value" in descriptor) || descriptor.get || descriptor.set)
           return false;
         if (!isPassivePlainData(descriptor.value, seen)) return false;

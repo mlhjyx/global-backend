@@ -1,15 +1,117 @@
-import {
-  hasExactKeys,
-  integrity,
-  isGitObjectId,
-  isSha256,
-  pass,
-  validateCredentialHandleBinding,
-  validateExactEnvironmentNames,
-  validateExternalExecutableClosure,
-  validateOutputPath,
-  valuesEqual,
-} from "./governance-organization-identity-controller-contracts.mjs";
+import { createHash } from "node:crypto";
+import path from "node:path";
+
+const pass = (extra = {}) => ({ status: "PASS", ...extra });
+const integrity = (code) => ({ status: "INTEGRITY_ERROR", code });
+const canonicalJson = (value) => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+    .join(",")}}`;
+};
+const canonicalJsonBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const isSha256 = (value) =>
+  typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+const isGitObjectId = (value) =>
+  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+const isAbsoluteNormalizedPath = (value) =>
+  typeof value === "string" &&
+  path.posix.isAbsolute(value) &&
+  path.posix.normalize(value) === value;
+function isPassivePlainData(value, seen = new Set()) {
+  if (value === null) return true;
+  if (typeof value === "string") return value.normalize("NFC") === value;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  try {
+    if (Object.getOwnPropertySymbols(value).length) return false;
+    const proto = Object.getPrototypeOf(value);
+    if (!Array.isArray(value) && proto !== Object.prototype && proto !== null)
+      return false;
+    for (const [key, descriptor] of Object.entries(
+      Object.getOwnPropertyDescriptors(value),
+    )) {
+      if (Array.isArray(value) && key === "length") continue;
+      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
+      if (
+        !("value" in descriptor) ||
+        descriptor.get ||
+        descriptor.set ||
+        !isPassivePlainData(descriptor.value, seen)
+      )
+        return false;
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    seen.delete(value);
+  }
+}
+const hasExactKeys = (value, keys) =>
+  isPassivePlainData(value) &&
+  !Array.isArray(value) &&
+  Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+const valuesEqual = (left, right) =>
+  canonicalJson(left) === canonicalJson(right);
+function validateExternalExecutableClosure(entries, roles) {
+  if (!Array.isArray(entries) || entries.length !== roles.length)
+    return integrity("EXECUTABLE_CLOSURE_INVALID");
+  for (let index = 0; index < roles.length; index += 1) {
+    const entry = entries[index];
+    if (
+      !hasExactKeys(entry, [
+        "role",
+        "logicalIdentity",
+        "executablePath",
+        "realpathSha256",
+        "sha256",
+        "size",
+      ]) ||
+      entry.role !== roles[index] ||
+      !isAbsoluteNormalizedPath(entry.executablePath) ||
+      !isSha256(entry.realpathSha256) ||
+      !isSha256(entry.sha256) ||
+      !Number.isSafeInteger(entry.size) ||
+      entry.size < 0
+    )
+      return integrity("EXECUTABLE_CLOSURE_INVALID");
+  }
+  return pass();
+}
+const validateExactEnvironmentNames = (actual, expected) =>
+  valuesEqual(actual, expected)
+    ? pass()
+    : integrity("ENVIRONMENT_NAME_SET_INVALID");
+function validateCredentialHandleBinding(binding) {
+  return hasExactKeys(binding, [
+    "provider",
+    "handleSha256",
+    "scopeSha256",
+    "injectedByFileDescriptor",
+    "valuePersisted",
+    "valueEmitted",
+  ]) &&
+    ["ROOT_SECRET_STORE", "GITHUB_ACTIONS_SECRET"].includes(binding.provider) &&
+    isSha256(binding.handleSha256) &&
+    isSha256(binding.scopeSha256) &&
+    binding.injectedByFileDescriptor === true &&
+    binding.valuePersisted === false &&
+    binding.valueEmitted === false
+    ? pass()
+    : integrity("CREDENTIAL_HANDLE_INVALID");
+}
+const validateOutputPath = (value, root) =>
+  isAbsoluteNormalizedPath(value) &&
+  path.posix.dirname(value) === root &&
+  value.endsWith(".json")
+    ? pass()
+    : integrity("OUTPUT_PATH_INVALID");
 
 const ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres";
@@ -122,7 +224,57 @@ const REQUEST_KEYS = [
   "outputRecordPath",
 ];
 
-export function validateDisposablePostgresRequest(request, contract) {
+function validateControllerEvidence(request, contract, evidence) {
+  const records = evidence;
+  if (
+    !hasExactKeys(records, [
+      "materializationReceipt",
+      "controllerReviewReceipt",
+      "authorizationReceipt",
+    ]) ||
+    !hasExactKeys(records.materializationReceipt, [
+      "schemaVersion",
+      "controllerClass",
+      "contractSha256",
+    ]) ||
+    records.materializationReceipt.schemaVersion !==
+      "organization-identity-external-controller-materialization/v1" ||
+    records.materializationReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
+    records.materializationReceipt.contractSha256 !==
+      sha256(canonicalJsonBytes(contract)) ||
+    request.materializationReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.materializationReceipt)) ||
+    !hasExactKeys(records.controllerReviewReceipt, [
+      "schemaVersion",
+      "controllerClass",
+      "materializationReceiptSha256",
+    ]) ||
+    records.controllerReviewReceipt.schemaVersion !==
+      "organization-identity-controller-review/v1" ||
+    records.controllerReviewReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
+    records.controllerReviewReceipt.materializationReceiptSha256 !==
+      request.materializationReceiptSha256 ||
+    request.controllerReviewReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.controllerReviewReceipt)) ||
+    !hasExactKeys(records.authorizationReceipt, [
+      "schemaVersion",
+      "controllerClass",
+      "requestId",
+      "operation",
+    ]) ||
+    records.authorizationReceipt.schemaVersion !==
+      "organization-identity-controller-authorization/v1" ||
+    records.authorizationReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
+    records.authorizationReceipt.requestId !== request.requestId ||
+    records.authorizationReceipt.operation !== request.operation ||
+    request.authorizationReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.authorizationReceipt))
+  )
+    return integrity("DISPOSABLE_POSTGRES_EVIDENCE_INVALID");
+  return pass();
+}
+
+export function validateDisposablePostgresRequest(request, contract, evidence) {
   if (
     validateDisposablePostgresContract(contract).status !== "PASS" ||
     !hasExactKeys(request, REQUEST_KEYS) ||
@@ -130,7 +282,7 @@ export function validateDisposablePostgresRequest(request, contract) {
       "organization-identity-disposable-postgres-controller-request/v1" ||
     !OPERATIONS.includes(request.operation) ||
     !isSha256(request.requestId) ||
-    !isSha256(request.contractSha256) ||
+    request.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
     !isSha256(request.materializationReceiptSha256) ||
     !isSha256(request.controllerReviewReceiptSha256) ||
     !isSha256(request.authorizationReceiptSha256) ||
@@ -145,26 +297,103 @@ export function validateDisposablePostgresRequest(request, contract) {
     !isSha256(request.scenarioSetSha256) ||
     !isSha256(request.cleanupPlanSha256) ||
     validateOutputPath(request.outputRecordPath, contract.outputRoot).status !==
-      "PASS"
+      "PASS" ||
+    validateControllerEvidence(request, contract, evidence).status !== "PASS"
   ) {
     return integrity("DISPOSABLE_POSTGRES_REQUEST_INVALID");
   }
   return pass();
 }
 
-export function buildDisposablePostgresInvocation(request, contract) {
-  const validated = validateDisposablePostgresRequest(request, contract);
+export function buildDisposablePostgresInvocation(request, contract, evidence) {
+  const validated = validateDisposablePostgresRequest(
+    request,
+    contract,
+    evidence,
+  );
   if (validated.status !== "PASS") return validated;
   const scenarioOperation =
     request.operation === "0M_COMPATIBILITY"
       ? "RUN_0M_COMPATIBILITY"
       : "RUN_B6_MIXED_FLEET";
+  const suffix = request.requestId.slice(0, 12);
+  const network = `identity-${suffix}-net`;
+  const database = `identity-${suffix}-pg`;
   return pass({
     executableRoles: REQUIRED_ROLES,
+    preconditions: {
+      loopbackOnly: contract.loopbackOnly,
+      noEgress: contract.noEgress,
+      topologySha256: request.topologySha256,
+      resourceLabelSetSha256: request.resourceLabelSetSha256,
+      timeAndSpaceCapSha256: request.timeAndSpaceCapSha256,
+      cleanupPlanSha256: request.cleanupPlanSha256,
+    },
     operationPlan: [
-      "CREATE_NO_EGRESS_LOOPBACK_RESOURCE",
-      scenarioOperation,
-      "PROVE_CLEANUP",
+      {
+        phase: "CREATE_NETWORK",
+        executableRole: "DOCKER",
+        argv: [
+          "network",
+          "create",
+          "--internal",
+          "--label",
+          `organization-identity-request=${request.requestId}`,
+          network,
+        ],
+      },
+      {
+        phase: "CREATE_DATABASE",
+        executableRole: "DOCKER",
+        argv: [
+          "run",
+          "--detach",
+          "--rm",
+          "--network",
+          network,
+          "--publish",
+          "127.0.0.1:0:5432",
+          "--label",
+          `organization-identity-request=${request.requestId}`,
+          "--name",
+          database,
+          request.imageDigest,
+        ],
+      },
+      {
+        phase: "VERIFY_TOPOLOGY",
+        executableRole: "DOCKER",
+        argv: ["inspect", database, network],
+        expectedTopologySha256: request.topologySha256,
+        expectedResourceLabelSetSha256: request.resourceLabelSetSha256,
+        expectedTimeAndSpaceCapSha256: request.timeAndSpaceCapSha256,
+      },
+      {
+        phase: scenarioOperation,
+        executableRole: "NODE",
+        argv: [
+          "--disposable-operation",
+          request.operation,
+          "--migration-input-set-sha256",
+          request.migrationInputSetSha256,
+          "--scenario-set-sha256",
+          request.scenarioSetSha256,
+        ],
+      },
+      {
+        phase: "CLEANUP",
+        executableRole: "DOCKER",
+        argv: ["rm", "--force", database],
+        thenArgv: ["network", "rm", network],
+      },
+      {
+        phase: "VERIFY_CLEANUP",
+        executableRole: "DOCKER",
+        argv: ["container", "inspect", database],
+        thenArgv: ["network", "inspect", network],
+        expectedAbsent: true,
+        cleanupPlanSha256: request.cleanupPlanSha256,
+      },
     ],
   });
 }
@@ -191,8 +420,20 @@ const RECEIPT_KEYS = [
   "result",
 ];
 
-export function validateDisposablePostgresReceipt(receipt, request) {
+export function validateDisposablePostgresReceipt(
+  receipt,
+  request,
+  contract,
+  resultRecord,
+  evidence,
+) {
   if (
+    !contract ||
+    !resultRecord ||
+    validateDisposablePostgresContract(contract).status !== "PASS" ||
+    validateDisposablePostgresRequest(request, contract, evidence).status !==
+      "PASS" ||
+    !isPassivePlainData(resultRecord) ||
     !hasExactKeys(receipt, RECEIPT_KEYS) ||
     receipt.schemaVersion !==
       "organization-identity-disposable-postgres-controller-receipt/v1" ||
@@ -207,6 +448,11 @@ export function validateDisposablePostgresReceipt(receipt, request) {
     receipt.migrationInputSetSha256 !== request.migrationInputSetSha256 ||
     receipt.syntheticCredentialHandleSha256 !==
       request.syntheticCredentialHandle.handleSha256 ||
+    receipt.requestSha256 !== sha256(canonicalJsonBytes(request)) ||
+    receipt.scenarioResultSetSha256 !==
+      sha256(canonicalJsonBytes(resultRecord)) ||
+    receipt.executableClosureSetSha256 !==
+      sha256(canonicalJsonBytes(contract.executableClosure)) ||
     receipt.containsCredentialValue !== false ||
     receipt.retainedResources !== 0 ||
     receipt.result !== "PASS"
@@ -214,11 +460,8 @@ export function validateDisposablePostgresReceipt(receipt, request) {
     return integrity("DISPOSABLE_POSTGRES_RECEIPT_INVALID");
   }
   for (const key of [
-    "requestSha256",
     "resourceSetSha256",
-    "scenarioResultSetSha256",
     "cleanupProofSha256",
-    "executableClosureSetSha256",
     "prePostToctouSha256",
   ]) {
     if (!isSha256(receipt[key])) {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -9,6 +10,18 @@ import {
 } from "./governance-organization-identity-disposable-postgres-controller.mjs";
 
 const SHA = "a".repeat(64);
+function canonical(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
+    .join(",")}}`;
+}
+const digest = (value) =>
+  createHash("sha256")
+    .update(`${canonical(value)}\n`)
+    .digest("hex");
 const roles = [
   "NODE",
   "DOCKER",
@@ -68,13 +81,38 @@ function contract(overrides = {}) {
   };
 }
 
-function request(overrides = {}) {
+function evidence(operation = "0M_COMPATIBILITY") {
+  const materializationReceipt = {
+    schemaVersion:
+      "organization-identity-external-controller-materialization/v1",
+    controllerClass: "DISPOSABLE_POSTGRES",
+    contractSha256: digest(contract()),
+  };
+  const controllerReviewReceipt = {
+    schemaVersion: "organization-identity-controller-review/v1",
+    controllerClass: "DISPOSABLE_POSTGRES",
+    materializationReceiptSha256: digest(materializationReceipt),
+  };
+  const authorizationReceipt = {
+    schemaVersion: "organization-identity-controller-authorization/v1",
+    controllerClass: "DISPOSABLE_POSTGRES",
+    requestId: SHA,
+    operation,
+  };
   return {
+    materializationReceipt,
+    controllerReviewReceipt,
+    authorizationReceipt,
+  };
+}
+
+function request(overrides = {}) {
+  const result = {
     schemaVersion:
       "organization-identity-disposable-postgres-controller-request/v1",
     requestId: SHA,
     operation: "0M_COMPATIBILITY",
-    contractSha256: SHA,
+    contractSha256: digest(contract()),
     materializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
     authorizationReceiptSha256: SHA,
@@ -97,6 +135,15 @@ function request(overrides = {}) {
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/outputs/result.json",
     ...overrides,
   };
+  const records = evidence(result.operation);
+  for (const [key, record] of [
+    ["materializationReceiptSha256", records.materializationReceipt],
+    ["controllerReviewReceiptSha256", records.controllerReviewReceipt],
+    ["authorizationReceiptSha256", records.authorizationReceipt],
+  ]) {
+    if (!(key in overrides)) result[key] = digest(record);
+  }
+  return result;
 }
 
 test("disposable contract requires the full Docker/psql/Prisma/Corepack closure", () => {
@@ -121,10 +168,11 @@ test("disposable contract requires the full Docker/psql/Prisma/Corepack closure"
 
 test("disposable requests require authorization, content-addressed image, caps, labels, and cleanup", () => {
   assert.equal(
-    validateDisposablePostgresRequest(request(), contract()).status,
+    validateDisposablePostgresRequest(request(), contract(), evidence()).status,
     "PASS",
   );
   for (const mutation of [
+    { contractSha256: SHA },
     { authorizationReceiptSha256: null },
     { imageDigest: "postgres:16" },
     { topologySha256: null },
@@ -134,49 +182,97 @@ test("disposable requests require authorization, content-addressed image, caps, 
     { command: "docker run" },
   ]) {
     assert.equal(
-      validateDisposablePostgresRequest(request(mutation), contract()).status,
+      validateDisposablePostgresRequest(
+        request(mutation),
+        contract(),
+        evidence(),
+      ).status,
       "INTEGRITY_ERROR",
     );
   }
 });
 
 test("disposable invocation remains a closed controller operation", () => {
-  const result = buildDisposablePostgresInvocation(request(), contract());
+  const result = buildDisposablePostgresInvocation(
+    request(),
+    contract(),
+    evidence(),
+  );
   assert.equal(result.status, "PASS");
-  assert.deepEqual(result.operationPlan, [
-    "CREATE_NO_EGRESS_LOOPBACK_RESOURCE",
-    "RUN_0M_COMPATIBILITY",
-    "PROVE_CLEANUP",
-  ]);
+  assert.deepEqual(
+    result.operationPlan.map(({ phase }) => phase),
+    [
+      "CREATE_NETWORK",
+      "CREATE_DATABASE",
+      "VERIFY_TOPOLOGY",
+      "RUN_0M_COMPATIBILITY",
+      "CLEANUP",
+      "VERIFY_CLEANUP",
+    ],
+  );
+  assert.equal(
+    result.operationPlan.some(({ argv }) => argv?.includes("--internal")),
+    true,
+  );
+  assert.equal(
+    result.operationPlan.some(({ argv }) =>
+      argv?.some((value) => value.startsWith("127.0.0.1:")),
+    ),
+    true,
+  );
+  assert.equal(result.preconditions.noEgress, true);
+  assert.equal(result.preconditions.loopbackOnly, true);
+  assert.equal(
+    result.preconditions.cleanupPlanSha256,
+    request().cleanupPlanSha256,
+  );
   assert.equal(JSON.stringify(result).includes("password"), false);
 });
 
 test("disposable receipts require zero retained resources and matching controller identity", () => {
+  const operationRequest = request();
+  const controllerContract = contract();
+  const resultRecord = {
+    schemaVersion: "disposable-result-fixture/v1",
+    scenarios: [],
+    cleanup: "PASS",
+  };
   const receipt = {
     schemaVersion:
       "organization-identity-disposable-postgres-controller-receipt/v1",
-    contractSha256: SHA,
-    controllerReviewReceiptSha256: SHA,
+    contractSha256: operationRequest.contractSha256,
+    controllerReviewReceiptSha256:
+      operationRequest.controllerReviewReceiptSha256,
     operation: "0M_COMPATIBILITY",
     requestId: SHA,
-    requestSha256: SHA,
-    authorizationReceiptSha256: SHA,
+    requestSha256: digest(operationRequest),
+    authorizationReceiptSha256: operationRequest.authorizationReceiptSha256,
     imageDigest: `sha256:${SHA}`,
     topologySha256: SHA,
     resourceSetSha256: SHA,
     migrationInputSetSha256: SHA,
     syntheticCredentialHandleSha256: SHA,
-    scenarioResultSetSha256: SHA,
+    scenarioResultSetSha256: digest(resultRecord),
     cleanupProofSha256: SHA,
-    executableClosureSetSha256: SHA,
+    executableClosureSetSha256: digest(controllerContract.executableClosure),
     prePostToctouSha256: SHA,
     containsCredentialValue: false,
     retainedResources: 0,
     result: "PASS",
   };
   assert.equal(
-    validateDisposablePostgresReceipt(receipt, request()).status,
+    validateDisposablePostgresReceipt(
+      receipt,
+      operationRequest,
+      controllerContract,
+      resultRecord,
+      evidence(),
+    ).status,
     "PASS",
+  );
+  assert.equal(
+    validateDisposablePostgresReceipt(receipt, operationRequest).status,
+    "INTEGRITY_ERROR",
   );
   for (const mutation of [
     { ...receipt, retainedResources: 1 },
@@ -189,8 +285,24 @@ test("disposable receipts require zero retained resources and matching controlle
     },
   ]) {
     assert.equal(
-      validateDisposablePostgresReceipt(mutation, request()).status,
+      validateDisposablePostgresReceipt(
+        mutation,
+        operationRequest,
+        controllerContract,
+        resultRecord,
+        evidence(),
+      ).status,
       "INTEGRITY_ERROR",
     );
   }
+  assert.equal(
+    validateDisposablePostgresReceipt(
+      receipt,
+      operationRequest,
+      controllerContract,
+      { ...resultRecord, cleanup: "FAIL" },
+      evidence(),
+    ).status,
+    "INTEGRITY_ERROR",
+  );
 });

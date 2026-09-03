@@ -1,17 +1,117 @@
-import {
-  canonicalJsonBytes,
-  hasExactKeys,
-  integrity,
-  isGitObjectId,
-  isSha256,
-  pass,
-  sha256,
-  validateCredentialHandleBinding,
-  validateExactEnvironmentNames,
-  validateExternalExecutableClosure,
-  validateOutputPath,
-  valuesEqual,
-} from "./governance-organization-identity-controller-contracts.mjs";
+import { createHash } from "node:crypto";
+import path from "node:path";
+
+const pass = (extra = {}) => ({ status: "PASS", ...extra });
+const integrity = (code) => ({ status: "INTEGRITY_ERROR", code });
+const canonicalJson = (value) => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+    .join(",")}}`;
+};
+const canonicalJsonBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const isSha256 = (value) =>
+  typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+const isGitObjectId = (value) =>
+  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+const isAbsoluteNormalizedPath = (value) =>
+  typeof value === "string" &&
+  path.posix.isAbsolute(value) &&
+  path.posix.normalize(value) === value;
+function isPassivePlainData(value, seen = new Set()) {
+  if (value === null) return true;
+  if (typeof value === "string") return value.normalize("NFC") === value;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  try {
+    if (Object.getOwnPropertySymbols(value).length) return false;
+    const proto = Object.getPrototypeOf(value);
+    if (!Array.isArray(value) && proto !== Object.prototype && proto !== null)
+      return false;
+    for (const [key, descriptor] of Object.entries(
+      Object.getOwnPropertyDescriptors(value),
+    )) {
+      if (Array.isArray(value) && key === "length") continue;
+      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
+      if (
+        !("value" in descriptor) ||
+        descriptor.get ||
+        descriptor.set ||
+        !isPassivePlainData(descriptor.value, seen)
+      )
+        return false;
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    seen.delete(value);
+  }
+}
+const hasExactKeys = (value, keys) =>
+  isPassivePlainData(value) &&
+  !Array.isArray(value) &&
+  Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+const valuesEqual = (left, right) =>
+  canonicalJson(left) === canonicalJson(right);
+function validateExternalExecutableClosure(entries, roles) {
+  if (!Array.isArray(entries) || entries.length !== roles.length)
+    return integrity("EXECUTABLE_CLOSURE_INVALID");
+  for (let index = 0; index < roles.length; index += 1) {
+    const entry = entries[index];
+    if (
+      !hasExactKeys(entry, [
+        "role",
+        "logicalIdentity",
+        "executablePath",
+        "realpathSha256",
+        "sha256",
+        "size",
+      ]) ||
+      entry.role !== roles[index] ||
+      !isAbsoluteNormalizedPath(entry.executablePath) ||
+      !isSha256(entry.realpathSha256) ||
+      !isSha256(entry.sha256) ||
+      !Number.isSafeInteger(entry.size) ||
+      entry.size < 0
+    )
+      return integrity("EXECUTABLE_CLOSURE_INVALID");
+  }
+  return pass();
+}
+const validateExactEnvironmentNames = (actual, expected) =>
+  valuesEqual(actual, expected)
+    ? pass()
+    : integrity("ENVIRONMENT_NAME_SET_INVALID");
+function validateCredentialHandleBinding(binding) {
+  return hasExactKeys(binding, [
+    "provider",
+    "handleSha256",
+    "scopeSha256",
+    "injectedByFileDescriptor",
+    "valuePersisted",
+    "valueEmitted",
+  ]) &&
+    ["ROOT_SECRET_STORE", "GITHUB_ACTIONS_SECRET"].includes(binding.provider) &&
+    isSha256(binding.handleSha256) &&
+    isSha256(binding.scopeSha256) &&
+    binding.injectedByFileDescriptor === true &&
+    binding.valuePersisted === false &&
+    binding.valueEmitted === false
+    ? pass()
+    : integrity("CREDENTIAL_HANDLE_INVALID");
+}
+const validateOutputPath = (value, root) =>
+  isAbsoluteNormalizedPath(value) &&
+  path.posix.dirname(value) === root &&
+  value.endsWith(".json")
+    ? pass()
+    : integrity("OUTPUT_PATH_INVALID");
 
 export const GITHUB_CONTROLLER_OPERATIONS = Object.freeze([
   "PROTECTED_MAIN_READBACK",
@@ -246,7 +346,57 @@ const REQUEST_KEYS = [
   "payload",
 ];
 
-export function validateGitHubControllerRequest(request, contract) {
+function validateGitHubEvidence(request, contract, evidence) {
+  if (
+    !hasExactKeys(evidence, [
+      "materializationReceipt",
+      "controllerReviewReceipt",
+      "authorizationReceipt",
+    ]) ||
+    !hasExactKeys(evidence.materializationReceipt, [
+      "schemaVersion",
+      "controllerClass",
+      "contractSha256",
+    ]) ||
+    evidence.materializationReceipt.schemaVersion !==
+      "organization-identity-external-controller-materialization/v1" ||
+    evidence.materializationReceipt.controllerClass !== "GITHUB" ||
+    evidence.materializationReceipt.contractSha256 !==
+      sha256(canonicalJsonBytes(contract)) ||
+    request.materializationReceiptSha256 !==
+      sha256(canonicalJsonBytes(evidence.materializationReceipt)) ||
+    !hasExactKeys(evidence.controllerReviewReceipt, [
+      "schemaVersion",
+      "controllerClass",
+      "materializationReceiptSha256",
+    ]) ||
+    evidence.controllerReviewReceipt.schemaVersion !==
+      "organization-identity-controller-review/v1" ||
+    evidence.controllerReviewReceipt.controllerClass !== "GITHUB" ||
+    evidence.controllerReviewReceipt.materializationReceiptSha256 !==
+      request.materializationReceiptSha256 ||
+    request.controllerReviewReceiptSha256 !==
+      sha256(canonicalJsonBytes(evidence.controllerReviewReceipt)) ||
+    !hasExactKeys(evidence.authorizationReceipt, [
+      "schemaVersion",
+      "controllerClass",
+      "requestId",
+      "operation",
+    ]) ||
+    evidence.authorizationReceipt.schemaVersion !==
+      "organization-identity-controller-authorization/v1" ||
+    evidence.authorizationReceipt.controllerClass !== "GITHUB" ||
+    evidence.authorizationReceipt.requestId !== request.requestId ||
+    evidence.authorizationReceipt.operation !== request.operation ||
+    request.authorizationReceiptSha256 !==
+      sha256(canonicalJsonBytes(evidence.authorizationReceipt))
+  ) {
+    return integrity("GITHUB_CONTROLLER_EVIDENCE_INVALID");
+  }
+  return pass();
+}
+
+export function validateGitHubControllerRequest(request, contract, evidence) {
   if (
     validateGitHubControllerContract(contract).status !== "PASS" ||
     !hasExactKeys(request, REQUEST_KEYS) ||
@@ -254,7 +404,7 @@ export function validateGitHubControllerRequest(request, contract) {
       "organization-identity-github-controller-request/v1" ||
     !GITHUB_CONTROLLER_OPERATIONS.includes(request.operation) ||
     !isSha256(request.requestId) ||
-    !isSha256(request.contractSha256) ||
+    request.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
     !isSha256(request.materializationReceiptSha256) ||
     !isSha256(request.controllerReviewReceiptSha256) ||
     !isSha256(request.payloadSchemaSha256) ||
@@ -267,7 +417,8 @@ export function validateGitHubControllerRequest(request, contract) {
     validateOutputPath(request.outputRecordPath, contract.outputRoot).status !==
       "PASS" ||
     typeof operationPayloadValid[request.operation] !== "function" ||
-    !operationPayloadValid[request.operation](request.payload)
+    !operationPayloadValid[request.operation](request.payload) ||
+    validateGitHubEvidence(request, contract, evidence).status !== "PASS"
   ) {
     return integrity("GITHUB_CONTROLLER_REQUEST_INVALID");
   }
@@ -277,12 +428,23 @@ export function validateGitHubControllerRequest(request, contract) {
   return pass();
 }
 
-export function buildGitHubControllerInvocation(request, contract) {
-  const validated = validateGitHubControllerRequest(request, contract);
+export function buildGitHubControllerInvocation(request, contract, evidence) {
+  const validated = validateGitHubControllerRequest(
+    request,
+    contract,
+    evidence,
+  );
   if (validated.status !== "PASS") return validated;
+  const common = {
+    operation: request.operation,
+    preconditions: request.payload,
+    resultSchemaSha256: contract.operationResultSchemaSha256[request.operation],
+  };
+  const inputPath = `${contract.requestRoot}/${request.requestId}-${request.operation.toLowerCase()}.payload.json`;
   switch (request.operation) {
     case "PROTECTED_MAIN_READBACK":
       return pass({
+        ...common,
         executableRole: "GH",
         argv: [
           "api",
@@ -293,6 +455,7 @@ export function buildGitHubControllerInvocation(request, contract) {
       });
     case "FETCH_EXACT_OBJECT":
       return pass({
+        ...common,
         executableRole: "GIT",
         argv: [
           "fetch",
@@ -303,21 +466,149 @@ export function buildGitHubControllerInvocation(request, contract) {
       });
     case "PUSH_EXACT_BRANCH":
       return pass({
+        ...common,
         executableRole: "GIT",
-        argv: ["push", "--set-upstream", "origin", request.payload.branch],
+        argv: [
+          "push",
+          "--set-upstream",
+          "origin",
+          `${request.payload.expectedHead}:refs/heads/${request.payload.branch}`,
+        ],
       });
     case "PR_CREATE":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "api",
+          "repos/mlhjyx/global-backend/pulls",
+          "--method",
+          "POST",
+          "--input",
+          inputPath,
+        ],
+        inputPath,
+      });
     case "PR_UPDATE_BODY":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "api",
+          `repos/mlhjyx/global-backend/pulls/${request.payload.number}`,
+          "--method",
+          "PATCH",
+          "--input",
+          inputPath,
+        ],
+        inputPath,
+      });
     case "PR_READBACK":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "pr",
+          "view",
+          String(request.payload.number ?? request.payload.headBranch),
+          "--repo",
+          "mlhjyx/global-backend",
+          "--json",
+          "number,baseRefName,headRefName,baseRefOid,headRefOid,title,body,state,mergeStateStatus",
+        ],
+      });
     case "RULES_CHECKS_READBACK":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "pr",
+          "checks",
+          String(request.payload.number),
+          "--repo",
+          "mlhjyx/global-backend",
+          "--json",
+          "name,state,workflow,bucket,link",
+        ],
+      });
     case "PR_MERGE":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "api",
+          `repos/mlhjyx/global-backend/pulls/${request.payload.number}/merge`,
+          "--method",
+          "PUT",
+          "--input",
+          inputPath,
+        ],
+        inputPath,
+      });
     case "COMMIT_BRANCH_PARENT_READBACK":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "api",
+          `repos/mlhjyx/global-backend/commits/${request.payload.mergeResponseSha}`,
+          "--method",
+          "GET",
+        ],
+      });
     case "WORKFLOW_RUN_READBACK":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv:
+          request.payload.runId === null
+            ? [
+                "run",
+                "list",
+                "--repo",
+                "mlhjyx/global-backend",
+                "--workflow",
+                request.payload.workflowPath,
+                "--commit",
+                request.payload.expectedHeadSha,
+                "--json",
+                "databaseId,headSha,status,conclusion,attempt,workflowName",
+              ]
+            : [
+                "run",
+                "view",
+                String(request.payload.runId),
+                "--repo",
+                "mlhjyx/global-backend",
+                "--json",
+                "databaseId,headSha,status,conclusion,attempt,workflowName",
+              ],
+      });
     case "WORKFLOW_RERUN":
+      return pass({
+        ...common,
+        executableRole: "GH",
+        argv: [
+          "run",
+          "rerun",
+          String(request.payload.runId),
+          "--repo",
+          "mlhjyx/global-backend",
+        ],
+      });
     case "CONTROLLER_VARIABLES_WRITE":
       return pass({
+        ...common,
         executableRole: "GH",
-        argv: ["api", "--closed-operation", request.operation],
+        argv: [
+          "api",
+          "repos/mlhjyx/global-backend/actions/variables",
+          "--method",
+          "POST",
+          "--input",
+          inputPath,
+        ],
+        inputPath,
       });
     default:
       return integrity("GITHUB_CONTROLLER_OPERATION_INVALID");
@@ -348,8 +639,20 @@ const RECEIPT_KEYS = [
   "result",
 ];
 
-export function validateGitHubControllerReceipt(receipt, request) {
+export function validateGitHubControllerReceipt(
+  receipt,
+  request,
+  contract,
+  resultRecord,
+  evidence,
+) {
   if (
+    !contract ||
+    !resultRecord ||
+    validateGitHubControllerContract(contract).status !== "PASS" ||
+    validateGitHubControllerRequest(request, contract, evidence).status !==
+      "PASS" ||
+    !isPassivePlainData(resultRecord) ||
     !hasExactKeys(receipt, RECEIPT_KEYS) ||
     receipt.schemaVersion !==
       "organization-identity-github-controller-receipt/v1" ||
@@ -364,13 +667,14 @@ export function validateGitHubControllerReceipt(receipt, request) {
     receipt.repository !== "mlhjyx/global-backend" ||
     receipt.containsCredentialValue !== false ||
     receipt.result !== "PASS" ||
-    !isSha256(receipt.requestSha256) ||
-    !isSha256(receipt.resultSchemaSha256) ||
-    !isSha256(receipt.resultSha256) ||
-    !isSha256(receipt.executableClosureSetSha256) ||
+    receipt.requestSha256 !== sha256(canonicalJsonBytes(request)) ||
+    receipt.resultSchemaSha256 !==
+      contract.operationResultSchemaSha256[request.operation] ||
+    receipt.resultSha256 !== sha256(canonicalJsonBytes(resultRecord)) ||
+    receipt.executableClosureSetSha256 !==
+      sha256(canonicalJsonBytes(contract.executableClosure)) ||
     !isSha256(receipt.prePostToctouSha256) ||
-    (receipt.credentialHandleSha256 !== null &&
-      !isSha256(receipt.credentialHandleSha256)) ||
+    receipt.credentialHandleSha256 !== request.credentialHandle.handleSha256 ||
     (receipt.observedBaseSha !== null &&
       !isGitObjectId(receipt.observedBaseSha)) ||
     (receipt.observedHeadSha !== null &&

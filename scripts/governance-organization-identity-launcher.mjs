@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const REQUEST_SCHEMA_VERSION =
   "organization-identity-closed-command-request/v2";
@@ -157,9 +161,11 @@ function passivePlain(value, seen = new Set()) {
   seen.add(value);
   try {
     if (Array.isArray(value)) {
+      if (Object.getOwnPropertySymbols(value).length !== 0) return false;
       const descriptors = Object.getOwnPropertyDescriptors(value);
       for (const [key, descriptor] of Object.entries(descriptors)) {
         if (key === "length") continue;
+        if (!/^(0|[1-9][0-9]*)$/.test(key)) return false;
         if (!("value" in descriptor) || descriptor.get || descriptor.set)
           return false;
         if (!passivePlain(descriptor.value, seen)) return false;
@@ -421,6 +427,65 @@ const COMMAND_REGISTRY = Object.freeze({
   }),
 });
 
+export function computeLauncherContractDigests() {
+  const requestUnion = Object.entries(COMMAND_REGISTRY).map(
+    ([commandId, entry]) => ({
+      commandId,
+      modes: entry.modes,
+      parameterKeys: [...entry.keys].sort(),
+    }),
+  );
+  return {
+    commandRegistrySha256: sha256(
+      canonicalJsonBytes({
+        ruleVersion: "closed-command-descriptor/v2",
+        commandIds: LOCAL_COMMAND_IDS,
+        requestUnion,
+      }),
+    ),
+    exactEnvironmentSchemaSha256: sha256(
+      canonicalJsonBytes({
+        names: ALLOWED_ENVIRONMENT_NAMES,
+        npmUserConfig: "/dev/null",
+        cleanEnvironment: true,
+      }),
+    ),
+    bootstrapContractSchemaSha256: sha256(
+      canonicalJsonBytes({
+        schemaVersion: "organization-identity-bootstrap-contract/v2",
+        receiptSchemaVersion: "organization-identity-bootstrap-run/v2",
+      }),
+    ),
+    requestUnionSchemaSha256: sha256(canonicalJsonBytes(requestUnion)),
+    requestInputDerivationSha256: sha256(
+      canonicalJsonBytes({
+        requestIdTuple: [
+          "taskId",
+          "commandId",
+          "mode",
+          "subjectCommit",
+          "inputRecordSha256",
+          "payloadSchemaSha256",
+          "payloadSha256",
+          "authorizationReceiptSha256",
+          "externalControllerReceiptSha256",
+          "anchorReceiptSha256",
+        ],
+        inputRecordUri: "sha256:<inputRecordSha256>",
+        basenameRule:
+          "<taskId>-<commandId-lowercase>-<requestId>.(input|output).json",
+      }),
+    ),
+    outputSchemaSetSha256: sha256(
+      canonicalJsonBytes([
+        "organization-identity-closed-command-output/v1",
+        "organization-identity-bootstrap-run/v2",
+        "organization-identity-bootstrap-run-set/v1",
+      ]),
+    ),
+  };
+}
+
 function validateParameters(commandId, mode, parameters) {
   const entry = COMMAND_REGISTRY[commandId];
   if (!entry) return integrity("CLOSED_COMMAND_ID_INVALID");
@@ -432,43 +497,57 @@ function validateParameters(commandId, mode, parameters) {
   return pass();
 }
 
-function invocationDescriptor(commandId, mode, parameters) {
+const ROOT_BOOTSTRAP_PATH = `${ROOT_DIRECTORY}/identity-writer-bootstrap.mjs`;
+
+function nodeDescriptor(request) {
+  return {
+    executableRole: "NODE",
+    argv: [
+      ROOT_BOOTSTRAP_PATH,
+      "--command",
+      request.commandId,
+      "--mode",
+      request.mode,
+      "--subject",
+      request.subjectCommit,
+      "--input",
+      request.input.inputRecordPath,
+      "--output",
+      request.input.outputRecordPath,
+    ],
+    subjectCommit: request.subjectCommit,
+    inputRecordPath: request.input.inputRecordPath,
+    outputRecordPath: request.input.outputRecordPath,
+    parameters: request.parameters,
+    preconditions: request.parameters,
+    outputSchemaVersion: "organization-identity-bootstrap-run/v2",
+  };
+}
+
+function gitDescriptor(request, argv, readbacks) {
+  return {
+    executableRole: "GIT",
+    argv,
+    subjectCommit: request.subjectCommit,
+    inputRecordPath: request.input.inputRecordPath,
+    outputRecordPath: request.input.outputRecordPath,
+    parameters: request.parameters,
+    preconditions: request.parameters,
+    readbacks,
+    outputSchemaVersion: "organization-identity-bootstrap-run/v2",
+  };
+}
+
+function invocationDescriptor(request) {
+  const { commandId, mode, parameters } = request;
   switch (commandId) {
     case "BOOTSTRAP_AUTHORITY_RUN_V1":
-      return {
-        executableRole: "PNPM_ENTRYPOINT",
-        argv: [
-          "install",
-          "--frozen-lockfile",
-          "--ignore-scripts",
-          "--ignore-pnpmfile",
-          "--config.ignore-pnpmfile=true",
-        ],
-      };
-    case "GIT_REFRESH_START_V1":
-      return {
-        executableRole: "GIT",
-        argv: ["merge", "--no-commit", "--no-ff", parameters.otherParent],
-      };
-    case "GIT_REFRESH_COMMIT_V1":
-    case "GIT_ADMISSION_COMMIT_V1":
-    case "GIT_ACCEPTANCE_COMMIT_V1":
-      return {
-        executableRole: "GIT",
-        argv: ["commit", "--message", parameters.commitMessage],
-      };
-    case "V3_WORKTREE_CREATE_V1":
-      return {
-        executableRole: "GIT",
-        argv: [
-          "worktree",
-          "add",
-          "-b",
-          parameters.branch,
-          parameters.worktreePath,
-          parameters.mergeCommit,
-        ],
-      };
+      switch (mode) {
+        case "INSTALL_AND_PRISMA_GENERATE":
+          return nodeDescriptor(request);
+        default:
+          return null;
+      }
     case "SCOPED_REVIEW_VERIFY_V1":
     case "CURRENT_MAIN_AUDIT_LOCAL_V1":
     case "CURRENT_MAIN_VALIDATE_V1":
@@ -479,19 +558,157 @@ function invocationDescriptor(commandId, mode, parameters) {
     case "MIGRATION_STATIC_VERIFY_V1":
     case "PRISMA_GENERATE_V1":
     case "SCANNER_TEST_V1":
-    case "SCANNER_BASELINE_V1":
-    case "SCANNER_STAGE_V1":
     case "SCANNER_ZERO_V1":
-    case "SCANNER_ACCEPTANCE_V1":
     case "GOVERNANCE_VERIFY_V1":
     case "DOCS_VERIFY_V1":
     case "API_VERIFY_V1":
     case "RUNTIME_ARTIFACT_VERIFY_V1":
     case "CONTRACT_GRAPH_VERIFY_V1":
-      return {
-        executableRole: "NODE",
-        argv: ["--closed-command", commandId, "--mode", mode],
-      };
+      switch (mode) {
+        case "VERIFY":
+        case "COLLECT_LOCAL_FACTS":
+        case "VALIDATE":
+        case "GENERATE":
+        case "WRITE_ELIGIBILITY":
+        case "SYNC_CITATIONS":
+        case "TEST":
+        case "ZERO_CHECK":
+          return nodeDescriptor(request);
+        default:
+          return null;
+      }
+    case "SCANNER_BASELINE_V1":
+      switch (mode) {
+        case "RAW_RECEIPT_ONLY":
+        case "RAW_CANDIDATE":
+        case "BASELINE_GENERATE":
+        case "BASELINE_CHECK":
+          return nodeDescriptor(request);
+        default:
+          return null;
+      }
+    case "SCANNER_STAGE_V1":
+      switch (mode) {
+        case "STAGE_GENERATE":
+        case "STAGE_CHECK":
+        case "ANCHOR_ONLY":
+          return nodeDescriptor(request);
+        default:
+          return null;
+      }
+    case "SCANNER_ACCEPTANCE_V1":
+      switch (mode) {
+        case "ACCEPTANCE_RED":
+        case "ACCEPTANCE_GENERATE":
+        case "ACCEPTANCE_CHECK":
+          return nodeDescriptor(request);
+        default:
+          return null;
+      }
+    case "GIT_REFRESH_START_V1":
+      switch (mode) {
+        case "START_NO_COMMIT":
+          return gitDescriptor(
+            request,
+            ["merge", "--no-commit", "--no-ff", parameters.otherParent],
+            [
+              {
+                phase: "BEFORE",
+                argv: ["rev-parse", "HEAD"],
+                expected: parameters.expectedHead,
+              },
+              {
+                phase: "AFTER",
+                argv: ["diff", "--name-only", "--cached"],
+                expectedSetSha256: parameters.exactMergeResultPathSetSha256,
+              },
+            ],
+          );
+        default:
+          return null;
+      }
+    case "GIT_REFRESH_COMMIT_V1":
+      switch (mode) {
+        case "COMMIT_REFRESH":
+          return gitDescriptor(
+            request,
+            ["commit", "--message", parameters.commitMessage],
+            [
+              {
+                phase: "AFTER",
+                argv: ["rev-parse", "HEAD^1"],
+                expected: parameters.expectedFirstParent,
+              },
+              {
+                phase: "AFTER",
+                argv: ["rev-parse", "HEAD^2"],
+                expected: parameters.expectedSecondParent,
+              },
+              {
+                phase: "BEFORE",
+                argv: ["diff", "--name-only", "--cached"],
+                expectedSetSha256: parameters.stagedPathSetSha256,
+              },
+            ],
+          );
+        default:
+          return null;
+      }
+    case "GIT_ADMISSION_COMMIT_V1":
+    case "GIT_ACCEPTANCE_COMMIT_V1":
+      switch (mode) {
+        case "COMMIT_ADMISSION":
+        case "COMMIT_ACCEPTANCE":
+          return gitDescriptor(
+            request,
+            ["commit", "--message", parameters.commitMessage],
+            [
+              {
+                phase: "AFTER",
+                argv: ["rev-parse", "HEAD^"],
+                expected: parameters.expectedParent,
+              },
+              {
+                phase: "BEFORE",
+                argv: [
+                  "diff",
+                  "--cached",
+                  "--name-status",
+                  "--",
+                  parameters.stagedPath,
+                ],
+                expectedStatus: parameters.stagedStatus,
+                expectedPath: parameters.stagedPath,
+              },
+            ],
+          );
+        default:
+          return null;
+      }
+    case "V3_WORKTREE_CREATE_V1":
+      switch (mode) {
+        case "CREATE":
+          return gitDescriptor(
+            request,
+            [
+              "worktree",
+              "add",
+              "-b",
+              parameters.branch,
+              parameters.worktreePath,
+              parameters.mergeCommit,
+            ],
+            [
+              {
+                phase: "AFTER",
+                argv: ["-C", parameters.worktreePath, "rev-parse", "HEAD"],
+                expected: parameters.mergeCommit,
+              },
+            ],
+          );
+        default:
+          return null;
+      }
     default:
       return null;
   }
@@ -596,11 +813,7 @@ function validateRequestObject(request, roots) {
   const parameterBytes = canonicalJsonBytes(request.parameters);
   const parameterSha = sha256(parameterBytes);
   const expectedSchemaSha = payloadSchemaSha(request.commandId);
-  const descriptor = invocationDescriptor(
-    request.commandId,
-    request.mode,
-    request.parameters,
-  );
+  const descriptor = invocationDescriptor(request);
   const expectedArgvSha = sha256(canonicalJsonBytes(descriptor));
   if (
     !isAbsoluteNormalized(request.input.inputRecordPath) ||
@@ -630,11 +843,6 @@ export function buildClosedCommandRequest({
   const parameters = cloneNullPrototype(fields.parameters);
   const inputRecordSha256 = sha256(canonicalJsonBytes(parameters));
   const payloadSchemaSha256 = payloadSchemaSha(fields.commandId);
-  const descriptor = invocationDescriptor(
-    fields.commandId,
-    fields.mode,
-    parameters,
-  );
   const partial = {
     schemaVersion: REQUEST_SCHEMA_VERSION,
     requestId: "0".repeat(64),
@@ -648,12 +856,15 @@ export function buildClosedCommandRequest({
       payloadSha256: inputRecordSha256,
       outputRecordPath: "",
     },
-    allowedArgvSha256: sha256(canonicalJsonBytes(descriptor)),
+    allowedArgvSha256: "0".repeat(64),
   };
   partial.requestId = deriveRequestId(partial);
   const stem = `${partial.taskId}-${partial.commandId.toLowerCase()}-${partial.requestId}`;
   partial.input.inputRecordPath = `${requestRoot}/${stem}.input.json`;
   partial.input.outputRecordPath = `${outputRoot}/${stem}.output.json`;
+  partial.allowedArgvSha256 = sha256(
+    canonicalJsonBytes(invocationDescriptor(partial)),
+  );
   return cloneNullPrototype(partial);
 }
 
@@ -702,14 +913,15 @@ export async function dispatchClosedCommand(request, verifiedContext = {}) {
   if (verifiedContext.outputExists === true)
     return integrity("OUTPUT_ALREADY_EXISTS");
   const replaySet = verifiedContext.requestReplaySet;
-  if (replaySet instanceof Set && replaySet.has(request.requestId)) {
+  if (!(replaySet instanceof Set)) return integrity("REPLAY_GUARD_REQUIRED");
+  if (replaySet.has(request.requestId)) {
     return integrity("REQUEST_REPLAY");
   }
   if (typeof verifiedContext.preDispatchReverify === "function") {
     const reverified = await verifiedContext.preDispatchReverify(request);
     if (reverified?.status !== "PASS") return integrity("PRE_DISPATCH_TOCTOU");
   }
-  if (replaySet instanceof Set) replaySet.add(request.requestId);
+  replaySet.add(request.requestId);
   const invocation = {
     commandId: request.commandId,
     mode: request.mode,
@@ -871,6 +1083,7 @@ export function verifyLauncherContract(contract, observed) {
   if (canonicalJson(contract.commandIds) !== canonicalJson(LOCAL_COMMAND_IDS)) {
     return integrity("LAUNCHER_CONTRACT_COMMANDS_INVALID");
   }
+  const contractDigests = computeLauncherContractDigests();
   for (const digestKey of [
     "commandRegistrySha256",
     "exactEnvironmentSchemaSha256",
@@ -879,7 +1092,10 @@ export function verifyLauncherContract(contract, observed) {
     "requestInputDerivationSha256",
     "outputSchemaSetSha256",
   ]) {
-    if (!isSha(contract[digestKey]))
+    if (
+      !isSha(contract[digestKey]) ||
+      contract[digestKey] !== contractDigests[digestKey]
+    )
       return integrity("LAUNCHER_CONTRACT_INVALID");
   }
   if (
@@ -1269,6 +1485,7 @@ export function validateLauncherMaterializationReceipt(
   receipt,
   readbackReport,
 ) {
+  if (!readbackReport) return integrity("LAUNCHER_READBACK_REQUIRED");
   if (
     !exactKeys(receipt, [
       "schemaVersion",
@@ -1328,12 +1545,9 @@ export function validateLauncherMaterializationReceipt(
     return integrity("LAUNCHER_MATERIALIZATION_INVALID");
   }
   if (
-    readbackReport &&
-    (validateLauncherReadbackReport(readbackReport).status !== "PASS" ||
-      receipt.launcherContractSha256 !==
-        readbackReport.launcherContractSha256 ||
-      receipt.readbackReportSha256 !==
-        sha256(canonicalJsonBytes(readbackReport)))
+    validateLauncherReadbackReport(readbackReport).status !== "PASS" ||
+    receipt.launcherContractSha256 !== readbackReport.launcherContractSha256 ||
+    receipt.readbackReportSha256 !== sha256(canonicalJsonBytes(readbackReport))
   ) {
     return integrity("LAUNCHER_MATERIALIZATION_READBACK_INVALID");
   }
@@ -1345,6 +1559,9 @@ export function validateLauncherMaterializationReviewReceipt(
   materializationReceipt,
   readbackReport,
 ) {
+  if (!materializationReceipt || !readbackReport) {
+    return integrity("LAUNCHER_MATERIALIZATION_PREDECESSOR_REQUIRED");
+  }
   if (
     !exactKeys(receipt, [
       "schemaVersion",
@@ -1381,19 +1598,598 @@ export function validateLauncherMaterializationReviewReceipt(
     }
   }
   if (
-    materializationReceipt &&
-    (receipt.launcherContractSha256 !==
+    receipt.launcherContractSha256 !==
       materializationReceipt.launcherContractSha256 ||
-      receipt.launcherMaterializationReceiptSha256 !==
-        sha256(canonicalJsonBytes(materializationReceipt)))
+    receipt.launcherMaterializationReceiptSha256 !==
+      sha256(canonicalJsonBytes(materializationReceipt))
   ) {
     return integrity("LAUNCHER_MATERIALIZATION_REVIEW_BINDING_INVALID");
   }
   if (
-    readbackReport &&
     receipt.readbackReportSha256 !== sha256(canonicalJsonBytes(readbackReport))
   ) {
     return integrity("LAUNCHER_MATERIALIZATION_REVIEW_BINDING_INVALID");
   }
   return pass();
+}
+
+function statMode(stat) {
+  return Number(stat.mode & 0o777n);
+}
+
+function sameFileIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.uid === right.uid &&
+    left.gid === right.gid &&
+    statMode(left) === statMode(right)
+  );
+}
+
+export async function verifyControlledFile(
+  filePath,
+  expected = {},
+  adapters = {},
+) {
+  if (!isAbsoluteNormalized(filePath)) {
+    return integrity("CONTROLLED_FILE_PATH_INVALID");
+  }
+  const fileLstat = adapters.lstat ?? lstat;
+  const fileOpen = adapters.open ?? open;
+  const fileRealpath = adapters.realpath ?? realpath;
+  let before;
+  let handle;
+  try {
+    before = await fileLstat(filePath, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {
+      return integrity("CONTROLLED_FILE_LINK_INVALID");
+    }
+    if (
+      (expected.expectedMode !== undefined &&
+        statMode(before) !== expected.expectedMode) ||
+      (expected.expectedUid !== undefined &&
+        Number(before.uid) !== expected.expectedUid) ||
+      (expected.expectedGid !== undefined &&
+        Number(before.gid) !== expected.expectedGid)
+    ) {
+      return integrity("CONTROLLED_FILE_PERMISSION_INVALID");
+    }
+    const resolved = await fileRealpath(filePath);
+    if (
+      resolved !== filePath ||
+      (expected.expectedRealpath !== undefined &&
+        resolved !== expected.expectedRealpath)
+    ) {
+      return integrity("CONTROLLED_FILE_REALPATH_INVALID");
+    }
+    handle = await fileOpen(
+      filePath,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+    );
+    const opened = await handle.stat({ bigint: true });
+    if (!sameFileIdentity(before, opened)) {
+      return integrity("CONTROLLED_FILE_TOCTOU");
+    }
+    const bytes = await handle.readFile();
+    if (typeof adapters.afterRead === "function") {
+      await adapters.afterRead({ bytes, before, opened });
+    }
+    const afterHandle = await handle.stat({ bigint: true });
+    const afterPath = await fileLstat(filePath, { bigint: true });
+    if (
+      !sameFileIdentity(opened, afterHandle) ||
+      !sameFileIdentity(opened, afterPath) ||
+      afterPath.nlink !== 1n
+    ) {
+      return integrity("CONTROLLED_FILE_TOCTOU");
+    }
+    const digest = sha256(bytes);
+    if (
+      expected.expectedSha256 !== undefined &&
+      digest !== expected.expectedSha256
+    ) {
+      return integrity("CONTROLLED_FILE_DIGEST_INVALID");
+    }
+    return pass({
+      bytes,
+      observation: {
+        path: filePath,
+        device: String(opened.dev),
+        inode: String(opened.ino),
+        ownerUid: Number(opened.uid),
+        ownerGid: Number(opened.gid),
+        mode: statMode(opened),
+        size: Number(opened.size),
+        realpathSha256: sha256(Buffer.from(resolved, "utf8")),
+        sha256: digest,
+      },
+    });
+  } catch {
+    return integrity("CONTROLLED_FILE_UNAVAILABLE");
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+export async function verifyControlledDirectory(directoryPath, expected = {}) {
+  if (!isAbsoluteNormalized(directoryPath)) {
+    return integrity("CONTROLLED_DIRECTORY_PATH_INVALID");
+  }
+  try {
+    const [stat, resolved] = await Promise.all([
+      lstat(directoryPath, { bigint: true }),
+      realpath(directoryPath),
+    ]);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      resolved !== directoryPath ||
+      (expected.expectedMode !== undefined &&
+        statMode(stat) !== expected.expectedMode) ||
+      (expected.expectedUid !== undefined &&
+        Number(stat.uid) !== expected.expectedUid) ||
+      (expected.expectedGid !== undefined &&
+        Number(stat.gid) !== expected.expectedGid)
+    ) {
+      return integrity("CONTROLLED_DIRECTORY_INVALID");
+    }
+    return pass({
+      observation: {
+        mode: statMode(stat),
+        device: String(stat.dev),
+        inode: String(stat.ino),
+        realpathSha256: sha256(Buffer.from(resolved, "utf8")),
+      },
+    });
+  } catch {
+    return integrity("CONTROLLED_DIRECTORY_UNAVAILABLE");
+  }
+}
+
+async function readCanonicalRecord(filePath, expected) {
+  const verified = await verifyControlledFile(filePath, expected);
+  if (verified.status !== "PASS") return verified;
+  try {
+    const value = JSON.parse(verified.bytes.toString("utf8"));
+    if (
+      !passivePlain(value) ||
+      !verified.bytes.equals(canonicalJsonBytes(value))
+    ) {
+      return integrity("CANONICAL_RECORD_INVALID");
+    }
+    return pass({ value: cloneNullPrototype(value), verified });
+  } catch {
+    return integrity("CANONICAL_RECORD_INVALID");
+  }
+}
+
+async function verifyFixedLauncherTrust(request, options) {
+  const expectedOwner = {
+    expectedUid: options.expectedUid ?? 0,
+    expectedGid: options.expectedGid ?? 0,
+  };
+  const contractRecord = await readCanonicalRecord(
+    `${ROOT_DIRECTORY}/launcher-contract.json`,
+    { ...expectedOwner, expectedMode: 0o600 },
+  );
+  if (contractRecord.status !== "PASS") return contractRecord;
+  const materializationRecord = await readCanonicalRecord(
+    `${ROOT_DIRECTORY}/launcher-materialization.json`,
+    {
+      ...expectedOwner,
+      expectedMode: 0o600,
+      expectedSha256: request.launcherMaterializationReceiptSha256,
+    },
+  );
+  if (materializationRecord.status !== "PASS") return materializationRecord;
+  const readbackRecord = await readCanonicalRecord(
+    `${ROOT_DIRECTORY}/launcher-materialization-readback.json`,
+    {
+      ...expectedOwner,
+      expectedMode: 0o600,
+      expectedSha256: materializationRecord.value.readbackReportSha256,
+    },
+  );
+  if (readbackRecord.status !== "PASS") return readbackRecord;
+  const reviewRecord = await readCanonicalRecord(
+    `${ROOT_DIRECTORY}/launcher-materialization-review.json`,
+    {
+      ...expectedOwner,
+      expectedMode: 0o600,
+      expectedSha256: request.launcherMaterializationReviewReceiptSha256,
+    },
+  );
+  if (reviewRecord.status !== "PASS") return reviewRecord;
+  if (
+    materializationRecord.value.launcherContractSha256 !==
+      contractRecord.verified.observation.sha256 ||
+    validateLauncherMaterializationReceipt(
+      materializationRecord.value,
+      readbackRecord.value,
+    ).status !== "PASS" ||
+    validateLauncherMaterializationReviewReceipt(
+      reviewRecord.value,
+      materializationRecord.value,
+      readbackRecord.value,
+    ).status !== "PASS"
+  ) {
+    return integrity("LAUNCHER_TRUST_CHAIN_INVALID");
+  }
+  const verificationFiles = [
+    {
+      path: `${ROOT_DIRECTORY}/identity-writer-launch.mjs`,
+      expectedSha256: contractRecord.value.approvedLauncher.sha256,
+      expectedMode: 0o500,
+    },
+    {
+      path: `${ROOT_DIRECTORY}/identity-writer-bootstrap.mjs`,
+      expectedSha256: contractRecord.value.approvedBootstrap.sha256,
+      expectedMode: 0o500,
+    },
+    ...contractRecord.value.executableClosure.map((entry) => ({
+      path: entry.executablePath,
+      expectedSha256: entry.sha256,
+      expectedMode: entry.mode,
+    })),
+  ];
+  for (const entry of verificationFiles) {
+    const verified = await verifyControlledFile(entry.path, {
+      ...expectedOwner,
+      ...entry,
+    });
+    if (verified.status !== "PASS") return verified;
+  }
+  return pass({
+    contract: contractRecord.value,
+    verificationFiles,
+    executableByRole: Object.fromEntries(
+      contractRecord.value.executableClosure.map((entry) => [
+        entry.role,
+        entry.executablePath,
+      ]),
+    ),
+  });
+}
+
+async function createExclusiveOutput(outputPath, owner) {
+  let handle;
+  try {
+    handle = await open(
+      outputPath,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600,
+    );
+    await handle.chmod(0o600);
+    const stat = await handle.stat({ bigint: true });
+    if (
+      Number(stat.uid) !== owner.expectedUid ||
+      Number(stat.gid) !== owner.expectedGid ||
+      statMode(stat) !== 0o600 ||
+      stat.nlink !== 1n
+    ) {
+      await handle.close();
+      return integrity("OUTPUT_PERMISSION_INVALID");
+    }
+    return pass({ handle });
+  } catch {
+    await handle?.close().catch(() => undefined);
+    return integrity("OUTPUT_CREATE_EXCLUSIVE_FAILED");
+  }
+}
+
+async function finalizeOutput(handle, outputPath, value) {
+  try {
+    const bytes = canonicalJsonBytes(value);
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.close();
+    const directory = await open(
+      path.posix.dirname(outputPath),
+      fsConstants.O_RDONLY,
+    );
+    await directory.sync();
+    await directory.close();
+    const verified = await verifyControlledFile(outputPath, {
+      expectedSha256: sha256(bytes),
+      expectedMode: 0o600,
+      expectedUid: process.getuid?.() ?? 0,
+      expectedGid: process.getgid?.() ?? 0,
+    });
+    return verified.status === "PASS" ? pass({ bytes }) : verified;
+  } catch {
+    await handle.close().catch(() => undefined);
+    return integrity("OUTPUT_FINALIZATION_FAILED");
+  }
+}
+
+function runClosedProcess(executablePath, argv, environment) {
+  const result = spawnSync(executablePath, argv, {
+    env: environment,
+    encoding: "utf8",
+    shell: false,
+    timeout: 60_000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error || result.signal || result.status !== 0) {
+    return integrity("CLOSED_PROCESS_FAILED");
+  }
+  return pass({
+    stdout: result.stdout,
+    resultSha256: sha256(
+      canonicalJsonBytes({
+        exitCode: result.status,
+        stderrSha256: sha256(Buffer.from(result.stderr, "utf8")),
+        stdoutSha256: sha256(Buffer.from(result.stdout, "utf8")),
+      }),
+    ),
+  });
+}
+
+function verifyReadback(readback, executablePath, environment) {
+  const result = runClosedProcess(executablePath, readback.argv, environment);
+  if (result.status !== "PASS") return result;
+  const normalized = result.stdout.trim();
+  if (readback.expected !== undefined && normalized !== readback.expected) {
+    return integrity("CLOSED_PROCESS_READBACK_MISMATCH");
+  }
+  if (readback.expectedSetSha256 !== undefined) {
+    const normalizedSet = result.stdout
+      .split("\n")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .sort();
+    if (
+      sha256(canonicalJsonBytes(normalizedSet)) !== readback.expectedSetSha256
+    ) {
+      return integrity("CLOSED_PROCESS_READBACK_MISMATCH");
+    }
+  }
+  if (readback.expectedStatus !== undefined) {
+    const [status, observedPath] = normalized.split(/\s+/, 2);
+    if (
+      status !== readback.expectedStatus ||
+      observedPath !== readback.expectedPath
+    ) {
+      return integrity("CLOSED_PROCESS_READBACK_MISMATCH");
+    }
+  }
+  return pass({ resultSha256: result.resultSha256 });
+}
+
+export async function executeClosedInvocation(invocation, trust, environment) {
+  if (
+    !exactKeys(environment, ALLOWED_ENVIRONMENT_NAMES) ||
+    environment.NPM_CONFIG_USERCONFIG !== "/dev/null" ||
+    environment.CI !== "1" ||
+    environment.LANG !== "C.UTF-8" ||
+    environment.LC_ALL !== "C.UTF-8"
+  ) {
+    return integrity("EXECUTION_ENVIRONMENT_INVALID");
+  }
+  const executablePath = trust?.executableByRole?.[invocation.executableRole];
+  if (
+    !isAbsoluteNormalized(executablePath) ||
+    !Array.isArray(invocation.argv)
+  ) {
+    return integrity("EXECUTABLE_ROLE_UNAVAILABLE");
+  }
+  const readbacks = Array.isArray(invocation.readbacks)
+    ? invocation.readbacks
+    : [];
+  for (const readback of readbacks.filter(({ phase }) => phase === "BEFORE")) {
+    const checked = verifyReadback(readback, executablePath, environment);
+    if (checked.status !== "PASS") return checked;
+  }
+  const executed = runClosedProcess(
+    executablePath,
+    invocation.argv,
+    environment,
+  );
+  if (executed.status !== "PASS") return executed;
+  for (const readback of readbacks.filter(({ phase }) => phase === "AFTER")) {
+    const checked = verifyReadback(readback, executablePath, environment);
+    if (checked.status !== "PASS") return checked;
+  }
+  return pass({ outputRecordSha256: executed.resultSha256 });
+}
+
+export async function runLauncherCli(argv, options = {}) {
+  if (
+    !Array.isArray(argv) ||
+    argv.length !== 2 ||
+    argv[0] !== "--request" ||
+    !isAbsoluteNormalized(argv[1])
+  ) {
+    return { exitCode: 64, result: integrity("CLI_ARGUMENTS_INVALID") };
+  }
+  const requestRoot = options.requestRoot ?? DEFAULT_REQUEST_ROOT;
+  const outputRoot = options.outputRoot ?? DEFAULT_OUTPUT_ROOT;
+  const expectedUid = options.expectedUid ?? 0;
+  const expectedGid = options.expectedGid ?? 0;
+  if (path.posix.dirname(argv[1]) !== requestRoot) {
+    return { exitCode: 65, result: integrity("REQUEST_PATH_INVALID") };
+  }
+  const roots = await Promise.all([
+    verifyControlledDirectory(requestRoot, {
+      expectedMode: 0o700,
+      expectedUid,
+      expectedGid,
+    }),
+    verifyControlledDirectory(outputRoot, {
+      expectedMode: 0o700,
+      expectedUid,
+      expectedGid,
+    }),
+  ]);
+  if (roots.some(({ status }) => status !== "PASS")) {
+    return { exitCode: 66, result: integrity("ROOT_PERMISSION_INVALID") };
+  }
+  const requestFile = await verifyControlledFile(argv[1], {
+    expectedMode: 0o600,
+    expectedUid,
+    expectedGid,
+  });
+  if (requestFile.status !== "PASS")
+    return { exitCode: 67, result: requestFile };
+  const parsed = parseClosedCommandRequest(requestFile.bytes, {
+    requestRoot,
+    outputRoot,
+  });
+  if (parsed.status !== "PASS") return { exitCode: 68, result: parsed };
+  const request = parsed.request;
+  const inputFile = await verifyControlledFile(request.input.inputRecordPath, {
+    expectedSha256: request.input.inputRecordSha256,
+    expectedMode: 0o600,
+    expectedUid,
+    expectedGid,
+  });
+  if (inputFile.status !== "PASS") return { exitCode: 69, result: inputFile };
+  const verifyTrust = options.verifyTrust ?? verifyFixedLauncherTrust;
+  const trust = await verifyTrust(request, {
+    ...options,
+    expectedUid,
+    expectedGid,
+  });
+  if (trust.status !== "PASS") return { exitCode: 70, result: trust };
+  const evidenceFiles = [];
+  for (const field of [
+    "authorizationReceiptSha256",
+    "externalControllerReceiptSha256",
+    "anchorReceiptSha256",
+  ]) {
+    const expectedSha256 = request[field];
+    if (expectedSha256 === null) continue;
+    const evidencePath =
+      options.evidencePaths?.[field] ??
+      (field === "anchorReceiptSha256"
+        ? "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json"
+        : undefined);
+    if (!isAbsoluteNormalized(evidencePath)) {
+      return {
+        exitCode: 70,
+        result: integrity("EVIDENCE_PATH_UNAVAILABLE"),
+      };
+    }
+    const evidence = await verifyControlledFile(evidencePath, {
+      expectedSha256,
+      expectedMode: 0o600,
+      expectedUid,
+      expectedGid,
+    });
+    if (evidence.status !== "PASS") return { exitCode: 70, result: evidence };
+    evidenceFiles.push({
+      path: evidencePath,
+      expectedSha256,
+      expectedMode: 0o600,
+    });
+  }
+  const reservation = await createExclusiveOutput(
+    request.input.outputRecordPath,
+    {
+      expectedUid,
+      expectedGid,
+    },
+  );
+  if (reservation.status !== "PASS")
+    return { exitCode: 71, result: reservation };
+  const executeInvocation =
+    options.executeInvocation ??
+    ((invocation) =>
+      executeClosedInvocation(invocation, trust, {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+        XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+        COREPACK_HOME: process.env.COREPACK_HOME,
+        PNPM_HOME: process.env.PNPM_HOME,
+        TMPDIR: process.env.TMPDIR,
+        NPM_CONFIG_USERCONFIG: process.env.NPM_CONFIG_USERCONFIG,
+        CI: process.env.CI,
+        LANG: process.env.LANG,
+        LC_ALL: process.env.LC_ALL,
+      }));
+  const replaySet = new Set();
+  const dispatched = await dispatchClosedCommand(request, {
+    requestRoot,
+    outputRoot,
+    inputRecordBytes: inputFile.bytes,
+    outputExists: false,
+    requestReplaySet: replaySet,
+    preDispatchReverify: async () => {
+      const [requestAgain, inputAgain] = await Promise.all([
+        verifyControlledFile(argv[1], {
+          expectedSha256: requestFile.observation.sha256,
+          expectedMode: 0o600,
+          expectedUid,
+          expectedGid,
+        }),
+        verifyControlledFile(request.input.inputRecordPath, {
+          expectedSha256: request.input.inputRecordSha256,
+          expectedMode: 0o600,
+          expectedUid,
+          expectedGid,
+        }),
+      ]);
+      if (requestAgain.status !== "PASS" || inputAgain.status !== "PASS") {
+        return integrity("PRE_DISPATCH_TOCTOU");
+      }
+      const reverifyFiles = [
+        ...(Array.isArray(trust.verificationFiles)
+          ? trust.verificationFiles
+          : []),
+        ...evidenceFiles,
+      ];
+      for (const entry of reverifyFiles) {
+        const verified = await verifyControlledFile(entry.path, {
+          expectedSha256: entry.expectedSha256,
+          expectedMode: entry.expectedMode,
+          expectedUid,
+          expectedGid,
+        });
+        if (verified.status !== "PASS") return verified;
+      }
+      return pass();
+    },
+    loadDependency: executeInvocation,
+  });
+  const output = {
+    schemaVersion: "organization-identity-closed-command-output/v1",
+    requestId: request.requestId,
+    commandId: request.commandId,
+    mode: request.mode,
+    invocationSha256:
+      dispatched.status === "PASS"
+        ? sha256(canonicalJsonBytes(dispatched.invocation))
+        : null,
+    result: dispatched.status === "PASS" ? "PASS" : "HOLD",
+  };
+  const finalized = await finalizeOutput(
+    reservation.handle,
+    request.input.outputRecordPath,
+    output,
+  );
+  if (finalized.status !== "PASS") return { exitCode: 72, result: finalized };
+  return {
+    exitCode: dispatched.status === "PASS" ? 0 : 73,
+    result: dispatched,
+  };
+}
+
+const IS_DIRECT_EXECUTION =
+  typeof process.argv[1] === "string" &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (IS_DIRECT_EXECUTION) {
+  runLauncherCli(process.argv.slice(2))
+    .then(({ exitCode }) => {
+      process.exitCode = exitCode;
+    })
+    .catch(() => {
+      process.exitCode = 74;
+    });
 }
