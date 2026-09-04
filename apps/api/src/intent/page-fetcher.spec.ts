@@ -18,7 +18,7 @@ describe('Crawl4aiPageFetcher — durable budget binding', () => {
     expect(invoke).toHaveBeenCalledWith('crawl4ai.render', { url: 'https://example.com/' }, context);
   });
 
-  it('passes both authorization and physical-wire fences into the robots preflight', async () => {
+  it('keeps robots wires inside the durable Tool operation instead of preflighting out of ledger', async () => {
     const authorizeExternalAction = vi.fn(async () => true);
     const beforePhysicalWire = vi.fn(async () => undefined);
     const fetcher = new Crawl4aiPageFetcher({
@@ -36,26 +36,7 @@ describe('Crawl4aiPageFetcher — durable budget binding', () => {
       beforePhysicalWire,
     });
 
-    expect(isAllowedByRobots).toHaveBeenCalledWith('https://example.com/', {
-      authorizeExternalAction,
-      beforePhysicalWire,
-    });
-  });
-
-  it('does not swallow a robots physical-wire fence rejection as an ordinary miss', async () => {
-    const physicalFence = Object.assign(new Error('wire denied'), {
-      name: 'ExternalHttpPhysicalWireDeniedError',
-    });
-    vi.mocked(isAllowedByRobots).mockRejectedValueOnce(physicalFence);
-    const invoke = vi.fn();
-    const fetcher = new Crawl4aiPageFetcher({ invoke } as never);
-
-    await expect(fetcher.fetch('https://physical-fence.example/', {
-      workspaceId: 'platform', runId: 'intent-watch:source-1',
-      correlationId: 'intent-watch:source-1',
-      beforePhysicalWire: vi.fn(),
-    })).rejects.toBe(physicalFence);
-    expect(invoke).not.toHaveBeenCalled();
+    expect(isAllowedByRobots).not.toHaveBeenCalled();
   });
 
   it('does not downgrade replay loss to an ordinary page miss', async () => {
