@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -296,6 +297,82 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
       schemaVersion: "platform-execution-provider-snapshot/v1",
       scheduleId: "acq-sweep",
       providers: [provider],
+    })).toThrow("PLATFORM_EXECUTION_CONTRACT_INVALID");
+    expect(reads).toBe(0);
+  });
+
+  it("never invokes an input-owned providers.map implementation", () => {
+    let mapCalls = 0;
+    const providers = [CORPUS.vectors[0]!.provider_snapshot.providers[0]!];
+    Object.defineProperty(providers, "map", {
+      configurable: true,
+      value: () => {
+        mapCalls += 1;
+        return [];
+      },
+    });
+
+    expect(() => createPlatformExecutionProviderSnapshotV1({
+      ...CORPUS.vectors[0]!.provider_snapshot,
+      providers,
+    })).toThrow("PLATFORM_EXECUTION_CONTRACT_INVALID");
+    expect(mapCalls).toBe(0);
+  });
+
+  it.each([
+    ["sparse", (() => { const value = new Array(1); return value; })()],
+    ["extra string key", Object.assign([
+      CORPUS.vectors[0]!.provider_snapshot.providers[0]!,
+    ], { extra: "forbidden" })],
+    ["extra symbol key", (() => {
+      const value = [CORPUS.vectors[0]!.provider_snapshot.providers[0]!];
+      Object.defineProperty(value, Symbol.iterator, { value: () => [] });
+      return value;
+    })()],
+    ["cross-realm", runInNewContext(`[{providerId:"tradefair.algolia",providerVersion:"1.0.0",enablement:"ENABLED",bytePriceCatalogRevision:null}]`)],
+  ])("rejects a %s provider array", (_label, providers) => {
+    expect(() => createPlatformExecutionProviderSnapshotV1({
+      schemaVersion: "platform-execution-provider-snapshot/v1",
+      scheduleId: "acq-sweep",
+      providers,
+    })).toThrow("PLATFORM_EXECUTION_CONTRACT_INVALID");
+  });
+
+  it("rejects a provider-array Proxy without invoking its get trap", () => {
+    let getCalls = 0;
+    const providers = new Proxy(
+      [CORPUS.vectors[0]!.provider_snapshot.providers[0]!],
+      {
+        get(target, property, receiver) {
+          getCalls += 1;
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+
+    expect(() => createPlatformExecutionProviderSnapshotV1({
+      ...CORPUS.vectors[0]!.provider_snapshot,
+      providers,
+    })).toThrow("PLATFORM_EXECUTION_CONTRACT_INVALID");
+    expect(getCalls).toBe(0);
+  });
+
+  it("rejects an accessor-backed provider array index without reading it", () => {
+    let reads = 0;
+    const providers: unknown[] = [];
+    Object.defineProperty(providers, "0", {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return CORPUS.vectors[0]!.provider_snapshot.providers[0]!;
+      },
+    });
+    Object.defineProperty(providers, "length", { value: 1 });
+
+    expect(() => createPlatformExecutionProviderSnapshotV1({
+      ...CORPUS.vectors[0]!.provider_snapshot,
+      providers,
     })).toThrow("PLATFORM_EXECUTION_CONTRACT_INVALID");
     expect(reads).toBe(0);
   });
