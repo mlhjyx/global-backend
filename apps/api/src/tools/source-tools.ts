@@ -1104,15 +1104,26 @@ export const sanctionsDownloadTool: Tool<
   },
   healthCheck: async () => ({ healthy: true, detail: "sanctions" }),
   execute: async (input, ctx) => {
-    const res = await requestPublicHttp(input.url, {
-      headers: { "user-agent": input.userAgent ?? DEFAULT_SANCTIONS_UA },
-      timeoutMs: 30_000,
-      maxBytes: MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
-      maxRedirects: PLATFORM_ROBOTS_REDIRECT_MAX,
-    }, {
-      authorizeExternalAction: ctx.authorizeExternalAction,
-      beforePhysicalWire: ctx.beforePhysicalWire,
-    });
+    let res;
+    try {
+      res = await requestPublicHttp(input.url, {
+        headers: { "user-agent": input.userAgent ?? DEFAULT_SANCTIONS_UA },
+        timeoutMs: 30_000,
+        maxBytes: MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
+        maxRedirects: PLATFORM_ROBOTS_REDIRECT_MAX,
+      }, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+        beforePhysicalWire: ctx.beforePhysicalWire,
+      });
+    } catch (error) {
+      if (
+        error instanceof EgressBlockedError &&
+        error.code === "response_too_large"
+      ) {
+        throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE");
+      }
+      throw error;
+    }
     if (!res.ok)
       throw new Error(`sanctions.download HTTP ${res.status} for ${input.url}`);
     const contentType = canonicalSanctionsMediaType(
