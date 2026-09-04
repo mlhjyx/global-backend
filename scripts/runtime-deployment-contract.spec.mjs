@@ -484,7 +484,9 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD/);
   assert.match(provision, /\\getenv platform_writer_password/);
   assert.match(provision, /execution_budget_platform_writer/);
-  assert.match(provision, /unexpected direct membership/);
+  assert.match(provision, /pg_shdepend/);
+  assert.match(provision, /membership\.admin_option/);
+  assert.match(provision, /membership\.roleid = principal\.oid/);
   assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL/);
   assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
   assert.match(verify, /new URL\(value\)/);

@@ -42,6 +42,7 @@ done <<< "${connection}"
 
 psql --no-psqlrc --set ON_ERROR_STOP=1 --set platform_writer_login="${login}" <<'SQL'
 \getenv platform_writer_password EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD
+BEGIN;
 -- The migration-owned group is never repaired here: topology drift is a hard stop.
 SELECT 1 / ((EXISTS (
   SELECT 1 FROM pg_roles group_role
@@ -61,15 +62,48 @@ SELECT 1 / ((EXISTS (
     AND NOT nested_member.rolcanlogin
 ))::integer);
 
--- An existing login may already have the one intended membership, but any
--- unexpected direct membership is an operator-reviewed failure, never auto-revoked.
-SELECT 1 / ((NOT EXISTS (
-  SELECT 1 FROM pg_auth_members membership
-  JOIN pg_roles granted ON granted.oid = membership.roleid
-  JOIN pg_roles principal ON principal.oid = membership.member
-  WHERE principal.rolname = :'platform_writer_login'
-    AND granted.rolname <> 'execution_budget_platform_writer'
-))::integer);
+-- A pre-existing identity is reused only when it is already a dedicated,
+-- unprivileged service login. Ownership and ACL dependencies are checked
+-- cluster-wide through pg_shdepend before any password or attribute mutation.
+SELECT 1 / ((
+  NOT EXISTS (
+    SELECT 1 FROM pg_roles principal
+    WHERE principal.rolname = :'platform_writer_login'
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_roles principal
+    WHERE principal.rolname = :'platform_writer_login'
+      AND principal.rolcanlogin
+      AND principal.rolinherit
+      AND NOT principal.rolsuper
+      AND NOT principal.rolbypassrls
+      AND NOT principal.rolcreatedb
+      AND NOT principal.rolcreaterole
+      AND NOT principal.rolreplication
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_auth_members membership
+        JOIN pg_roles granted ON granted.oid = membership.roleid
+        WHERE membership.member = principal.oid
+          AND (
+            granted.rolname <> 'execution_budget_platform_writer'
+            OR membership.admin_option
+            OR NOT membership.inherit_option
+          )
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_auth_members membership
+        WHERE membership.roleid = principal.oid
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_shdepend dependency
+        WHERE dependency.refclassid = 'pg_authid'::regclass
+          AND dependency.refobjid = principal.oid
+      )
+  )
+)::integer);
 
 SELECT format(
   'CREATE ROLE %I LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
@@ -81,6 +115,7 @@ SELECT format(
 ) \gexec
 SELECT format('GRANT execution_budget_platform_writer TO %I', :'platform_writer_login')
 WHERE NOT pg_has_role(:'platform_writer_login', 'execution_budget_platform_writer', 'member') \gexec
+COMMIT;
 SQL
 
 echo "platform writer principal provisioned with exclusive membership"
