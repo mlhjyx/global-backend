@@ -1956,6 +1956,86 @@ async function verifyFixedLauncherTrust(request, options) {
   });
 }
 
+async function deriveVerifiedWorktreeReceipt(request, trust, options) {
+  if (invocationDescriptor(request)?.executableRole !== "GIT") {
+    return pass({ verifiedWorktreeReceipt: trust.verifiedWorktreeReceipt });
+  }
+  const gitPath = trust.executableByRole?.GIT;
+  if (!isAbsoluteNormalized(gitPath))
+    return integrity("GIT_EXECUTABLE_REQUIRED");
+  const gitInvocation = {
+    executableRole: "GIT",
+    executablePath: gitPath,
+    subjectCommit: request.subjectCommit,
+    mode: request.mode,
+  };
+  let facts;
+  if (typeof options.deriveWorktreeReceipt === "function") {
+    facts = await options.deriveWorktreeReceipt(gitInvocation);
+  } else {
+    const cwd = options.worktreePath ?? process.cwd();
+    const run = (argv) =>
+      runClosedProcess(gitPath, argv, options.environment ?? {}, cwd);
+    const root = run(["rev-parse", "--show-toplevel"]);
+    const gitDir = run(["rev-parse", "--git-dir"]);
+    const commonDir = run(["rev-parse", "--git-common-dir"]);
+    const branch = run(["branch", "--show-current"]);
+    const head = run(["rev-parse", "HEAD"]);
+    const status = run(["status", "--porcelain=v1"]);
+    const worktrees = run(["worktree", "list", "--porcelain"]);
+    if (
+      [root, gitDir, commonDir, branch, head, status, worktrees].some(
+        (r) => r.status !== "PASS",
+      )
+    ) {
+      return integrity("VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+    }
+    facts = {
+      repositoryRoot: root.stdout.trim(),
+      worktreePath: cwd,
+      gitDirRealpath: path.posix.normalize(
+        path.posix.resolve(cwd, gitDir.stdout.trim()),
+      ),
+      commonDirRealpath: path.posix.normalize(
+        path.posix.resolve(cwd, commonDir.stdout.trim()),
+      ),
+      branch: branch.stdout.trim(),
+      headCommit: head.stdout.trim(),
+      statusPorcelain: status.stdout,
+      worktreeListEntry: worktrees.stdout,
+    };
+  }
+  const receipt = {
+    schemaVersion: "organization-identity-verified-worktree/v1",
+    repositoryRoot: facts.repositoryRoot,
+    worktreePath: facts.worktreePath,
+    gitDirRealpathSha256: sha256(Buffer.from(facts.gitDirRealpath, "utf8")),
+    commonDirRealpathSha256: sha256(
+      Buffer.from(facts.commonDirRealpath, "utf8"),
+    ),
+    branch: facts.branch,
+    headCommit: facts.headCommit,
+    subjectCommit: facts.subjectCommit ?? request.subjectCommit,
+    statusPorcelainSha256: sha256(
+      Buffer.from(facts.statusPorcelain ?? "", "utf8"),
+    ),
+    worktreeListEntrySha256: sha256(
+      Buffer.from(facts.worktreeListEntry ?? "", "utf8"),
+    ),
+    expectedMode: facts.expectedMode ?? request.mode,
+    verifiedByExecutableClosureSha256:
+      facts.verifiedByExecutableClosureSha256 ??
+      sha256(canonicalJsonBytes(trust.verificationFiles ?? [])),
+    prePostToctouSha256:
+      facts.prePostToctouSha256 ?? sha256(canonicalJsonBytes(gitInvocation)),
+    result: "PASS",
+  };
+  const validated = validateVerifiedWorktreeReceipt(receipt, request);
+  return validated.status === "PASS"
+    ? pass({ verifiedWorktreeReceipt: receipt })
+    : validated;
+}
+
 async function createExclusiveOutput(outputPath, owner) {
   let handle;
   try {
@@ -2226,13 +2306,21 @@ export async function runLauncherCli(argv, options = {}) {
     options.executeInvocation ??
     (() => integrity("AUTHORITY_EXECUTOR_REQUIRED"));
   const replaySet = new Set();
+  const worktreeReceipt = await deriveVerifiedWorktreeReceipt(
+    request,
+    trust,
+    options,
+  );
+  if (worktreeReceipt.status !== "PASS") {
+    return { exitCode: 70, result: worktreeReceipt };
+  }
   const dispatched = await dispatchClosedCommand(request, {
     requestRoot,
     outputRoot,
     inputRecordBytes: inputFile.bytes,
     outputExists: false,
     requestReplaySet: replaySet,
-    verifiedWorktreeReceipt: trust.verifiedWorktreeReceipt,
+    verifiedWorktreeReceipt: worktreeReceipt.verifiedWorktreeReceipt,
     preDispatchReverify: async () => {
       const [requestAgain, inputAgain] = await Promise.all([
         verifyControlledFile(argv[1], {

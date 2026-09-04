@@ -11,6 +11,7 @@ import {
 
 const SHA = "a".repeat(64);
 const COMMIT = "1".repeat(40);
+const SOURCE_CLOSURE = "e".repeat(64);
 
 function canonical(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -50,7 +51,7 @@ function contract(overrides = {}) {
     "CONTROLLER_VARIABLES_WRITE",
   ];
   return {
-    schemaVersion: "organization-identity-github-controller-contract/v1",
+    schemaVersion: "organization-identity-github-controller-contract/v2",
     rootDirectory:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github",
     requestRoot:
@@ -59,6 +60,7 @@ function contract(overrides = {}) {
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/outputs",
     controllerSourceBlobId: "1".repeat(40),
     controllerSourceSha256: SHA,
+    controllerSourceClosureSha256: SOURCE_CLOSURE,
     repository: "mlhjyx/global-backend",
     remote: "origin",
     protectedRef: "refs/heads/main",
@@ -90,10 +92,12 @@ function evidence(operation = "PROTECTED_MAIN_READBACK") {
   const controllerContract = contract();
   const materializationReceipt = {
     schemaVersion:
-      "organization-identity-external-controller-materialization/v1",
+      "organization-identity-external-controller-materialization/v2",
     controllerClass: "GITHUB",
     contractSha256: sha(`${canonical(controllerContract)}\n`),
     controllerSourceSha256: controllerContract.controllerSourceSha256,
+    controllerSourceClosureSha256:
+      controllerContract.controllerSourceClosureSha256,
     rootDirectorySha256: SHA,
     requestRootSha256: SHA,
     outputRootSha256: SHA,
@@ -110,10 +114,12 @@ function evidence(operation = "PROTECTED_MAIN_READBACK") {
     result: "PASS",
   };
   const controllerReviewReceipt = {
-    schemaVersion: "organization-identity-controller-review/v1",
+    schemaVersion: "organization-identity-controller-review/v2",
     controllerClass: "GITHUB",
     contractSha256: materializationReceipt.contractSha256,
     materializationReceiptSha256: sha(`${canonical(materializationReceipt)}\n`),
+    controllerSourceClosureSha256:
+      controllerContract.controllerSourceClosureSha256,
     requestSchemaSha256: SHA,
     reportSha256: SHA,
     counterexampleSetSha256: SHA,
@@ -121,6 +127,7 @@ function evidence(operation = "PROTECTED_MAIN_READBACK") {
     critical: 0,
     important: 0,
     verdict: "PASS",
+    containsCredentialValue: false,
   };
   const authorizationReceiptCanonicalBytes = `${canonical({
     controllerClass: "GITHUB",
@@ -137,12 +144,13 @@ function evidence(operation = "PROTECTED_MAIN_READBACK") {
 
 function request(overrides = {}) {
   const result = {
-    schemaVersion: "organization-identity-github-controller-request/v1",
+    schemaVersion: "organization-identity-github-controller-request/v2",
     requestId: SHA,
     operation: "PROTECTED_MAIN_READBACK",
     contractSha256: sha(`${canonical(contract())}\n`),
     materializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
+    controllerSourceClosureSha256: SOURCE_CLOSURE,
     authorizationReceiptSha256: SHA,
     credentialHandle: {
       provider: "ROOT_SECRET_STORE",
@@ -232,6 +240,10 @@ test("GitHub contract requires the exact GH/Git/Node closure and environment", (
     },
     { repository: "other/repo" },
     { noSecretPersistence: false },
+    {
+      schemaVersion: "organization-identity-github-controller-contract/v1",
+    },
+    { controllerSourceClosureSha256: SHA },
   ]) {
     assert.equal(
       validateGitHubControllerContract(contract(mutation)).status,
@@ -416,9 +428,10 @@ test("GitHub workflow and variable writes require result readbacks, not caller s
     },
   });
   const receipt = {
-    schemaVersion: "organization-identity-github-controller-receipt/v1",
+    schemaVersion: "organization-identity-github-controller-receipt/v2",
     contractSha256: workflow.contractSha256,
     controllerReviewReceiptSha256: workflow.controllerReviewReceiptSha256,
+    controllerSourceClosureSha256: workflow.controllerSourceClosureSha256,
     operation: workflow.operation,
     requestId: workflow.requestId,
     requestSha256: sha(`${canonical(workflow)}\n`),
@@ -645,10 +658,12 @@ test("GitHub receipts are operation-bound and reject cross-controller or credent
     observedHeadSha: COMMIT,
   };
   const receipt = {
-    schemaVersion: "organization-identity-github-controller-receipt/v1",
+    schemaVersion: "organization-identity-github-controller-receipt/v2",
     contractSha256: protectedMainRequest.contractSha256,
     controllerReviewReceiptSha256:
       protectedMainRequest.controllerReviewReceiptSha256,
+    controllerSourceClosureSha256:
+      protectedMainRequest.controllerSourceClosureSha256,
     operation: "PROTECTED_MAIN_READBACK",
     requestId: SHA,
     requestSha256: sha(`${canonical(protectedMainRequest)}\n`),
@@ -689,6 +704,11 @@ test("GitHub receipts are operation-bound and reject cross-controller or credent
     { ...receipt, repository: "other/repo" },
     { ...receipt, containsCredentialValue: true },
     { ...receipt, credentialValue: "secret" },
+    {
+      ...receipt,
+      schemaVersion: "organization-identity-github-controller-receipt/v1",
+    },
+    { ...receipt, controllerSourceClosureSha256: SHA },
     {
       ...receipt,
       schemaVersion: "organization-identity-gitleaks-controller-receipt/v1",

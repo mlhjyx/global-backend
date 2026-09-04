@@ -1,28 +1,19 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-export const EXTERNAL_EXECUTABLE_ROLES = Object.freeze([
-  "ENV",
-  "NODE",
-  "GIT",
-  "GH",
-  "GITLEAKS",
-  "DOCKER",
-  "PSQL",
-  "COREPACK_SHIM",
-  "COREPACK_LIB_COREPACK_CJS",
-  "PNPM_SHIM",
-  "PNPM_ENTRYPOINT",
-  "PRISMA_CLI",
-]);
+const keyList = (value) => value.split(" ");
 
-export const CONTROLLER_CLASSES = Object.freeze([
-  "GITHUB",
-  "DISPOSABLE_POSTGRES",
-  "GITLEAKS",
-  "ROOT_ANCHOR",
-  "PROTECTED_BASE_LAUNCHER",
-]);
+export const EXTERNAL_EXECUTABLE_ROLES = Object.freeze(
+  keyList(
+    "ENV NODE GIT GH GITLEAKS DOCKER PSQL COREPACK_SHIM COREPACK_LIB_COREPACK_CJS PNPM_SHIM PNPM_ENTRYPOINT PRISMA_CLI",
+  ),
+);
+
+export const CONTROLLER_CLASSES = Object.freeze(
+  keyList(
+    "GITHUB DISPOSABLE_POSTGRES GITLEAKS ROOT_ANCHOR PROTECTED_BASE_LAUNCHER",
+  ),
+);
 
 export function pass(extra = {}) {
   return { status: "PASS", ...extra };
@@ -129,14 +120,9 @@ export function validateExternalExecutableClosure(entries, expectedRoles) {
   ) {
     return integrity("EXECUTABLE_CLOSURE_INVALID");
   }
-  const keys = [
-    "role",
-    "logicalIdentity",
-    "executablePath",
-    "realpathSha256",
-    "sha256",
-    "size",
-  ];
+  const keys = keyList(
+    "role logicalIdentity executablePath realpathSha256 sha256 size",
+  );
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
     if (
@@ -160,14 +146,12 @@ export function validateExternalExecutableClosure(entries, expectedRoles) {
 
 export function validateCredentialHandleBinding(binding) {
   if (
-    !hasExactKeys(binding, [
-      "provider",
-      "handleSha256",
-      "scopeSha256",
-      "injectedByFileDescriptor",
-      "valuePersisted",
-      "valueEmitted",
-    ]) ||
+    !hasExactKeys(
+      binding,
+      keyList(
+        "provider handleSha256 scopeSha256 injectedByFileDescriptor valuePersisted valueEmitted",
+      ),
+    ) ||
     !["ROOT_SECRET_STORE", "GITHUB_ACTIONS_SECRET"].includes(
       binding.provider,
     ) ||
@@ -179,95 +163,6 @@ export function validateCredentialHandleBinding(binding) {
   ) {
     return integrity("CREDENTIAL_HANDLE_INVALID");
   }
-  return pass();
-}
-
-export function validateExternalControllerMaterializationReceipt(
-  receipt,
-  expectedClass,
-) {
-  if (
-    !hasExactKeys(receipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-      "controllerSourceSha256",
-      "rootDirectorySha256",
-      "requestRootSha256",
-      "outputRootSha256",
-      "ownerUid",
-      "ownerGid",
-      "directoryMode",
-      "controllerMode",
-      "recordMode",
-      "executableClosureSetSha256",
-      "environmentSchemaSha256",
-      "prePostToctouSha256",
-      "result",
-    ]) ||
-    receipt.schemaVersion !==
-      "organization-identity-external-controller-materialization/v1" ||
-    !CONTROLLER_CLASSES.slice(0, 4).includes(expectedClass) ||
-    receipt.controllerClass !== expectedClass ||
-    receipt.ownerUid !== 0 ||
-    receipt.ownerGid !== 0 ||
-    receipt.directoryMode !== 0o700 ||
-    receipt.controllerMode !== 0o500 ||
-    receipt.recordMode !== 0o600 ||
-    receipt.result !== "PASS"
-  ) {
-    return integrity("CONTROLLER_MATERIALIZATION_INVALID");
-  }
-  for (const key of [
-    "contractSha256",
-    "controllerSourceSha256",
-    "rootDirectorySha256",
-    "requestRootSha256",
-    "outputRootSha256",
-    "executableClosureSetSha256",
-    "environmentSchemaSha256",
-    "prePostToctouSha256",
-  ]) {
-    if (!isSha256(receipt[key])) {
-      return integrity("CONTROLLER_MATERIALIZATION_INVALID");
-    }
-  }
-  return pass();
-}
-
-export function validateControllerReviewReceipt(receipt, expectedClass) {
-  if (
-    !hasExactKeys(receipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-      "materializationReceiptSha256",
-      "requestSchemaSha256",
-      "reportSha256",
-      "counterexampleSetSha256",
-      "reviewerClass",
-      "critical",
-      "important",
-      "verdict",
-    ]) ||
-    receipt.schemaVersion !== "organization-identity-controller-review/v1" ||
-    receipt.controllerClass !== expectedClass ||
-    receipt.reviewerClass !== "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
-    receipt.critical !== 0 ||
-    receipt.important !== 0 ||
-    receipt.verdict !== "PASS" ||
-    !isSha256(receipt.contractSha256) ||
-    !isSha256(receipt.requestSchemaSha256) ||
-    !isSha256(receipt.reportSha256) ||
-    !isSha256(receipt.counterexampleSetSha256)
-  ) {
-    return integrity("CONTROLLER_REVIEW_INVALID");
-  }
-  const materializationAllowed =
-    expectedClass === "PROTECTED_BASE_LAUNCHER"
-      ? receipt.materializationReceiptSha256 === null
-      : isSha256(receipt.materializationReceiptSha256);
-  if (!materializationAllowed) return integrity("CONTROLLER_REVIEW_INVALID");
   return pass();
 }
 
@@ -316,39 +211,43 @@ export function buildControllerReceiptSetSha256(records) {
   return sha256(canonicalJsonBytes(records));
 }
 
+const sourcePath = (name) => `scripts/governance-organization-identity-${name}`;
+// prettier-ignore
+const SOURCE_REQUIREMENTS = Object.freeze(Object.fromEntries([["GITHUB", "github-controller.mjs", "controller-contracts.mjs", "github-controller.spec.mjs"], ["DISPOSABLE_POSTGRES", "disposable-postgres-controller.mjs", "controller-contracts.mjs", "disposable-postgres-controller.spec.mjs"], ["GITLEAKS", "gitleaks-controller.mjs", "controller-contracts.mjs", "gitleaks-controller.spec.mjs"], ["ROOT_ANCHOR", "root-anchor-controller.mjs", "controller-contracts.mjs root-anchor-filesystem.mjs", "root-anchor-closure.spec.mjs root-anchor-filesystem.spec.mjs"], ["PROTECTED_BASE_LAUNCHER", "protected-base-launcher.mjs", "controller-contracts.mjs", ""]].map(([klass, primary, shared, tests]) => [klass, { primary: sourcePath(primary), shared: keyList(shared).map(sourcePath), tests: tests ? keyList(tests).map(sourcePath) : [] }])));
+
+function validateExactSourceEntries(entries, paths) {
+  return (
+    Array.isArray(entries) &&
+    valuesEqual(
+      entries.map((entry) => entry.path),
+      paths,
+    ) &&
+    entries.every(validateSourceEntry) &&
+    entries.length === new Set(entries.map((entry) => entry.path)).size
+  );
+}
+
 export function validateControllerSourceClosureV1(closure) {
-  const classPathToken = {
-    GITHUB: "github",
-    DISPOSABLE_POSTGRES: "disposable-postgres",
-    GITLEAKS: "gitleaks",
-    ROOT_ANCHOR: "root-anchor",
-    PROTECTED_BASE_LAUNCHER: "protected-base",
-  }[closure?.controllerClass];
+  const required = SOURCE_REQUIREMENTS[closure?.controllerClass];
   if (
-    !hasExactKeys(closure, [
-      "schemaVersion",
-      "controllerClass",
-      "primarySourcePath",
-      "primarySourceBlobId",
-      "primarySourceSha256",
-      "sharedSourceEntries",
-      "testSourceEntries",
-      "sourceSetSha256",
-    ]) ||
+    !hasExactKeys(
+      closure,
+      keyList(
+        "schemaVersion controllerClass primarySourcePath primarySourceBlobId primarySourceSha256 sharedSourceEntries testSourceEntries sourceSetSha256",
+      ),
+    ) ||
     closure.schemaVersion !==
       "organization-identity-controller-source-closure/v1" ||
     !CONTROLLER_CLASSES.includes(closure.controllerClass) ||
-    !classPathToken ||
-    !closure.primarySourcePath.includes(classPathToken) ||
+    !required ||
+    closure.primarySourcePath !== required.primary ||
     !validateSourceEntry({
       path: closure.primarySourcePath,
       blobId: closure.primarySourceBlobId,
       sha256: closure.primarySourceSha256,
     }) ||
-    !Array.isArray(closure.sharedSourceEntries) ||
-    !closure.sharedSourceEntries.every(validateSourceEntry) ||
-    !Array.isArray(closure.testSourceEntries) ||
-    !closure.testSourceEntries.every(validateSourceEntry)
+    !validateExactSourceEntries(closure.sharedSourceEntries, required.shared) ||
+    !validateExactSourceEntries(closure.testSourceEntries, required.tests)
   ) {
     return integrity("CONTROLLER_SOURCE_CLOSURE_INVALID");
   }
@@ -415,30 +314,17 @@ export function validateVerifiedWorktreeReceiptV1(receipt) {
 
 export function validateLauncherMaterializationReviewReceiptV2(receipt) {
   if (
-    !hasExactKeys(receipt, [
-      "schemaVersion",
-      "launcherContractSha256",
-      "launcherMaterializationReceiptSha256",
-      "launcherMaterializationReviewReceiptSha256",
-      "readbackReportSha256",
-      "reportSha256",
-      "counterexampleSetSha256",
-      "reviewerClass",
-      "critical",
-      "important",
-      "verdict",
-      "containsCredentialValue",
-    ]) ||
+    !hasExactKeys(
+      receipt,
+      keyList(
+        "schemaVersion launcherContractSha256 launcherMaterializationReceiptSha256 launcherMaterializationReviewReceiptSha256 readbackReportSha256 reportSha256 counterexampleSetSha256 reviewerClass critical important verdict containsCredentialValue",
+      ),
+    ) ||
     receipt.schemaVersion !==
       "organization-identity-launcher-materialization-review/v2" ||
-    ![
-      "launcherContractSha256",
-      "launcherMaterializationReceiptSha256",
-      "launcherMaterializationReviewReceiptSha256",
-      "readbackReportSha256",
-      "reportSha256",
-      "counterexampleSetSha256",
-    ].every((key) => isSha256(receipt[key])) ||
+    !keyList(
+      "launcherContractSha256 launcherMaterializationReceiptSha256 launcherMaterializationReviewReceiptSha256 readbackReportSha256 reportSha256 counterexampleSetSha256",
+    ).every((key) => isSha256(receipt[key])) ||
     receipt.reviewerClass !== "INDEPENDENT_ROOT_LAUNCHER_REVIEW" ||
     receipt.critical !== 0 ||
     receipt.important !== 0 ||
@@ -452,24 +338,16 @@ export function validateLauncherMaterializationReviewReceiptV2(receipt) {
 
 export function validateBootstrapContractV2(contract) {
   if (
-    !hasExactKeys(contract, [
-      "schemaVersion",
-      "launcherContractSha256",
-      "bootstrapSchemaSha256",
-      "closedRequestSchemaSha256",
-      "effectivePnpmArgvRuleSha256",
-      "receiptComparatorSha256",
-      "toolLogicalExpectations",
-      "allowedEnvironmentNames",
-    ]) ||
+    !hasExactKeys(
+      contract,
+      keyList(
+        "schemaVersion launcherContractSha256 bootstrapSchemaSha256 closedRequestSchemaSha256 effectivePnpmArgvRuleSha256 receiptComparatorSha256 toolLogicalExpectations allowedEnvironmentNames",
+      ),
+    ) ||
     contract.schemaVersion !== "organization-identity-bootstrap-contract/v2" ||
-    ![
-      "launcherContractSha256",
-      "bootstrapSchemaSha256",
-      "closedRequestSchemaSha256",
-      "effectivePnpmArgvRuleSha256",
-      "receiptComparatorSha256",
-    ].every((key) => isSha256(contract[key])) ||
+    !keyList(
+      "launcherContractSha256 bootstrapSchemaSha256 closedRequestSchemaSha256 effectivePnpmArgvRuleSha256 receiptComparatorSha256",
+    ).every((key) => isSha256(contract[key])) ||
     !Array.isArray(contract.toolLogicalExpectations) ||
     !Array.isArray(contract.allowedEnvironmentNames)
   ) {
@@ -516,14 +394,12 @@ export function validateGitHubControllerReceiptV2(receipt, operation) {
 
 export function validateProtectedBaseLauncherReceiptV2(receipt) {
   if (
-    !hasExactKeys(receipt, [
-      "schemaVersion",
-      "repository",
-      "protectedBaseCommit",
-      "controllerVariableSetSha256",
-      "containsCredentialValue",
-      "result",
-    ]) ||
+    !hasExactKeys(
+      receipt,
+      keyList(
+        "schemaVersion repository protectedBaseCommit controllerVariableSetSha256 containsCredentialValue result",
+      ),
+    ) ||
     receipt.schemaVersion !==
       "organization-identity-protected-base-launcher-receipt/v2" ||
     receipt.repository !== "mlhjyx/global-backend" ||
@@ -539,13 +415,12 @@ export function validateProtectedBaseLauncherReceiptV2(receipt) {
 
 export function validateAdmittedRefreshAcceptanceEvidenceV1(evidence) {
   if (
-    !hasExactKeys(evidence, [
-      "schemaVersion",
-      "currentMainAdmissionCommit",
-      "reviewedImplementationCommit",
-      "stageMapSha256",
-      "result",
-    ]) ||
+    !hasExactKeys(
+      evidence,
+      keyList(
+        "schemaVersion currentMainAdmissionCommit reviewedImplementationCommit stageMapSha256 result",
+      ),
+    ) ||
     evidence.schemaVersion !== "organization-identity-writer-acceptance/v1" ||
     !isGitObjectId(evidence.currentMainAdmissionCommit) ||
     !isGitObjectId(evidence.reviewedImplementationCommit) ||
@@ -559,19 +434,12 @@ export function validateAdmittedRefreshAcceptanceEvidenceV1(evidence) {
 
 export function validateWorkflowRunEvidenceV1(evidence) {
   if (
-    !hasExactKeys(evidence, [
-      "schemaVersion",
-      "repository",
-      "workflowPath",
-      "event",
-      "ref",
-      "headSha",
-      "runId",
-      "runAttempt",
-      "conclusion",
-      "containsCredentialValue",
-      "result",
-    ]) ||
+    !hasExactKeys(
+      evidence,
+      keyList(
+        "schemaVersion repository workflowPath event ref headSha runId runAttempt conclusion containsCredentialValue result",
+      ),
+    ) ||
     evidence.schemaVersion !==
       "organization-identity-workflow-run-evidence/v1" ||
     evidence.repository !== "mlhjyx/global-backend" ||
@@ -602,13 +470,12 @@ export function validateControllerVariableWriteReceiptV2(receipt) {
 
 function validateExternalControllerMaterializationReceiptV2(receipt) {
   if (
-    !hasExactKeys(receipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-      "controllerSourceClosureSha256",
-      "result",
-    ]) ||
+    !hasExactKeys(
+      receipt,
+      keyList(
+        "schemaVersion controllerClass contractSha256 controllerSourceClosureSha256 result",
+      ),
+    ) ||
     receipt.schemaVersion !==
       "organization-identity-external-controller-materialization/v2" ||
     receipt.controllerClass !== "ROOT_ANCHOR" ||
@@ -623,17 +490,12 @@ function validateExternalControllerMaterializationReceiptV2(receipt) {
 
 function validateControllerReviewReceiptV2(receipt) {
   if (
-    !hasExactKeys(receipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-      "materializationReceiptSha256",
-      "controllerSourceClosureSha256",
-      "critical",
-      "important",
-      "verdict",
-      "containsCredentialValue",
-    ]) ||
+    !hasExactKeys(
+      receipt,
+      keyList(
+        "schemaVersion controllerClass contractSha256 materializationReceiptSha256 controllerSourceClosureSha256 critical important verdict containsCredentialValue",
+      ),
+    ) ||
     receipt.schemaVersion !== "organization-identity-controller-review/v2" ||
     receipt.controllerClass !== "ROOT_ANCHOR" ||
     !isSha256(receipt.contractSha256) ||
@@ -645,6 +507,156 @@ function validateControllerReviewReceiptV2(receipt) {
     receipt.containsCredentialValue !== false
   ) {
     return integrity("CONTROLLER_REVIEW_INVALID");
+  }
+  return pass();
+}
+
+const ROOT_ANCHOR_TARGET =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
+const ROOT_ANCHOR_WRITE_RECEIPT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-write-receipt.json";
+// prettier-ignore
+const ROOT_REQUEST_SHA_FIELDS = keyList("requestId contractSha256 materializationReceiptSha256 controllerReviewReceiptSha256 authorizationReceiptSha256 localLauncherEvidenceSha256 bootstrapContractSha256 githubControllerEvidenceSha256 protectedBaseEvidenceSha256 admittedRefreshAcceptanceEvidenceSha256 workflowRunEvidenceSha256 controllerVariableWriteReceiptSha256 canonicalAnchorPayloadSha256");
+// prettier-ignore
+const ROOT_WRITE_REQUEST_KEYS = ["schemaVersion", ...ROOT_REQUEST_SHA_FIELDS, ...keyList("targetPath targetMode predecessor orderedMergeParents canonicalAnchorPayloadSize writeReceiptPath")];
+// prettier-ignore
+const ROOT_WRITE_RECEIPT_KEYS = keyList("schemaVersion contractSha256 materializationReceiptSha256 controllerReviewReceiptSha256 requestSha256 authorizationReceiptSha256 targetPath anchorSha256 anchorSize ownerUid ownerGid mode device inode predecessorSha256 fileFsyncSha256 directoryFsyncSha256 prePostToctouSha256 anchorContainsSelfHash result");
+// prettier-ignore
+const ROOT_READBACK_KEYS = keyList("schemaVersion contractSha256 requestSha256 writeReceiptSha256 targetPath noFollowVerified ownerUid ownerGid mode device inode anchorSha256 anchorSize canonicalSchemaSha256 inputEvidenceSetSha256 predecessorSha256 anchorContainsSelfHash prePostToctouSha256 reviewerClass result");
+// prettier-ignore
+const ROOT_REVIEW_KEYS = keyList("schemaVersion controllerContractSha256 controllerMaterializationReceiptSha256 controllerReviewReceiptSha256 writeRequestSha256 writeReceiptSha256 readbackReceiptSha256 anchorSha256 reportSha256 counterexampleSetSha256 reviewerClass critical important verdict");
+
+export function validateRootAnchorWriteRequestV2(request) {
+  if (
+    !hasExactKeys(request, ROOT_WRITE_REQUEST_KEYS) ||
+    request.schemaVersion !==
+      "organization-identity-root-anchor-write-request/v1" ||
+    !ROOT_REQUEST_SHA_FIELDS.every((key) => isSha256(request[key])) ||
+    request.targetPath !== ROOT_ANCHOR_TARGET ||
+    request.targetMode !== 0o600 ||
+    !hasExactKeys(
+      request.predecessor,
+      keyList("mode sha256 targetMustBeAbsent"),
+    ) ||
+    request.predecessor.mode !== "GENESIS_ONLY" ||
+    request.predecessor.sha256 !== null ||
+    request.predecessor.targetMustBeAbsent !== true ||
+    !Array.isArray(request.orderedMergeParents) ||
+    request.orderedMergeParents.length !== 2 ||
+    !request.orderedMergeParents.every(isGitObjectId) ||
+    request.orderedMergeParents[0] === request.orderedMergeParents[1] ||
+    !Number.isSafeInteger(request.canonicalAnchorPayloadSize) ||
+    request.canonicalAnchorPayloadSize <= 0 ||
+    request.writeReceiptPath !== ROOT_ANCHOR_WRITE_RECEIPT
+  ) {
+    return integrity("ROOT_ANCHOR_REQUEST_INVALID");
+  }
+  return pass();
+}
+
+export function validateRootAnchorWriteReceiptV2(receipt, request) {
+  const equalToRequest = [
+    "contractSha256",
+    "materializationReceiptSha256",
+    "controllerReviewReceiptSha256",
+    "authorizationReceiptSha256",
+    "targetPath",
+  ].every((key) => receipt?.[key] === request?.[key]);
+  if (
+    validateRootAnchorWriteRequestV2(request).status !== "PASS" ||
+    !hasExactKeys(receipt, ROOT_WRITE_RECEIPT_KEYS) ||
+    receipt.schemaVersion !==
+      "organization-identity-root-anchor-write-receipt/v1" ||
+    !equalToRequest ||
+    receipt.requestSha256 !== sha256(canonicalJsonBytes(request)) ||
+    receipt.anchorSha256 !== request.canonicalAnchorPayloadSha256 ||
+    receipt.anchorSize !== request.canonicalAnchorPayloadSize ||
+    receipt.ownerUid !== 0 ||
+    receipt.ownerGid !== 0 ||
+    receipt.mode !== 0o600 ||
+    !["device", "inode"].every(
+      (key) => typeof receipt[key] === "string" && receipt[key],
+    ) ||
+    receipt.predecessorSha256 !== null ||
+    !["fileFsyncSha256", "directoryFsyncSha256", "prePostToctouSha256"].every(
+      (key) => isSha256(receipt[key]),
+    ) ||
+    receipt.anchorContainsSelfHash !== false ||
+    receipt.result !== "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_WRITE_RECEIPT_INVALID");
+  }
+  return pass();
+}
+
+export function validateRootAnchorReadbackReceiptV2(receipt, writeReceipt) {
+  const copied = keyList(
+    "contractSha256 requestSha256 targetPath ownerUid ownerGid mode device inode anchorSha256 anchorSize",
+  ).every((key) => receipt?.[key] === writeReceipt?.[key]);
+  if (
+    !hasExactKeys(receipt, ROOT_READBACK_KEYS) ||
+    receipt.schemaVersion !== "organization-identity-root-anchor-readback/v1" ||
+    !copied ||
+    receipt.writeReceiptSha256 !== sha256(canonicalJsonBytes(writeReceipt)) ||
+    receipt.noFollowVerified !== true ||
+    !isSha256(receipt.canonicalSchemaSha256) ||
+    !isSha256(receipt.inputEvidenceSetSha256) ||
+    receipt.predecessorSha256 !== null ||
+    receipt.anchorContainsSelfHash !== false ||
+    !isSha256(receipt.prePostToctouSha256) ||
+    receipt.reviewerClass !== "INDEPENDENT_ROOT_ANCHOR_READBACK" ||
+    receipt.result !== "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_READBACK_INVALID");
+  }
+  return pass();
+}
+
+export function validateRootAnchorOperationReviewReceiptV2(receipt, records) {
+  const requestDigests = [
+    ["controllerContractSha256", "contractSha256"],
+    ["controllerMaterializationReceiptSha256", "materializationReceiptSha256"],
+    ["controllerReviewReceiptSha256", "controllerReviewReceiptSha256"],
+  ].every(
+    ([left, right]) => receipt?.[left] === records?.writeRequest?.[right],
+  );
+  if (
+    !hasExactKeys(records, [
+      "writeRequest",
+      "writeReceipt",
+      "readbackReceipt",
+    ]) ||
+    validateRootAnchorWriteReceiptV2(records.writeReceipt, records.writeRequest)
+      .status !== "PASS" ||
+    validateRootAnchorReadbackReceiptV2(
+      records.readbackReceipt,
+      records.writeReceipt,
+    ).status !== "PASS" ||
+    !hasExactKeys(receipt, ROOT_REVIEW_KEYS) ||
+    receipt.schemaVersion !==
+      "organization-identity-root-anchor-operation-review/v1" ||
+    Object.keys(receipt).some(
+      (key) => key.endsWith("Sha256") && !isSha256(receipt[key]),
+    ) ||
+    !requestDigests ||
+    receipt.writeRequestSha256 !==
+      sha256(canonicalJsonBytes(records.writeRequest)) ||
+    receipt.writeReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.writeReceipt)) ||
+    receipt.readbackReceiptSha256 !==
+      sha256(canonicalJsonBytes(records.readbackReceipt)) ||
+    new Set([
+      receipt.writeReceiptSha256,
+      receipt.readbackReceiptSha256,
+      receipt.anchorSha256,
+    ]).size !== 3 ||
+    receipt.anchorSha256 !== records.writeReceipt.anchorSha256 ||
+    receipt.reviewerClass !== "INDEPENDENT_ROOT_ANCHOR_OPERATION_REVIEW" ||
+    receipt.critical !== 0 ||
+    receipt.important !== 0 ||
+    receipt.verdict !== "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_OPERATION_REVIEW_INVALID");
   }
   return pass();
 }
@@ -751,11 +763,33 @@ export function validateRootAnchorOperationReviewClosureV2(records) {
       writeRequest.materializationReceiptSha256 ||
     operationReviewReceipt.controllerReviewReceiptSha256 !==
       writeRequest.controllerReviewReceiptSha256 ||
-    writeReceipt.contractSha256 !== writeRequest.contractSha256 ||
-    writeReceipt.materializationReceiptSha256 !==
-      writeRequest.materializationReceiptSha256 ||
+    validateRootAnchorWriteReceiptV2(writeReceipt, writeRequest).status !==
+      "PASS" ||
+    validateRootAnchorReadbackReceiptV2(readbackReceipt, writeReceipt)
+      .status !== "PASS" ||
+    validateRootAnchorOperationReviewReceiptV2(operationReviewReceipt, {
+      writeRequest,
+      writeReceipt,
+      readbackReceipt,
+    }).status !== "PASS" ||
+    writeRequest.materializationReceiptSha256 !==
+      sha256(
+        canonicalJsonBytes(
+          records.upstreamEvidence.rootAnchorControllerMaterialization,
+        ),
+      ) ||
+    writeRequest.controllerReviewReceiptSha256 !==
+      sha256(
+        canonicalJsonBytes(records.upstreamEvidence.rootAnchorControllerReview),
+      ) ||
+    writeRequest.authorizationReceiptSha256 !==
+      sha256(
+        canonicalJsonBytes(records.upstreamEvidence.rootAnchorAuthorization),
+      ) ||
+    records.upstreamEvidence.rootAnchorAuthorization.requestId !==
+      writeRequest.requestId ||
     readbackReceipt.writeReceiptSha256 !==
-      buildControllerReceiptSetSha256([writeReceipt])
+      sha256(canonicalJsonBytes(writeReceipt))
   ) {
     return integrity("ROOT_ANCHOR_OPERATION_REVIEW_INVALID");
   }

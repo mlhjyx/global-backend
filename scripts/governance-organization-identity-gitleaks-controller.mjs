@@ -115,6 +115,7 @@ const CONTRACT_KEYS = [
   "outputRoot",
   "controllerSourceBlobId",
   "controllerSourceSha256",
+  "controllerSourceClosureSha256",
   "executableClosure",
   "requiredRoles",
   "allowedEnvironmentNames",
@@ -130,12 +131,15 @@ export function validateGitleaksContract(contract) {
   if (
     !hasExactKeys(contract, CONTRACT_KEYS) ||
     contract.schemaVersion !==
-      "organization-identity-gitleaks-controller-contract/v1" ||
+      "organization-identity-gitleaks-controller-contract/v2" ||
     contract.rootDirectory !== ROOT ||
     contract.requestRoot !== REQUEST_ROOT ||
     contract.outputRoot !== OUTPUT_ROOT ||
     !isGitObjectId(contract.controllerSourceBlobId) ||
     !isSha256(contract.controllerSourceSha256) ||
+    !isSha256(contract.controllerSourceClosureSha256) ||
+    contract.controllerSourceClosureSha256 ===
+      contract.controllerSourceSha256 ||
     !valuesEqual(contract.requiredRoles, REQUIRED_ROLES) ||
     validateExternalExecutableClosure(
       contract.executableClosure,
@@ -163,6 +167,7 @@ const REQUEST_KEYS = [
   "contractSha256",
   "materializationReceiptSha256",
   "controllerReviewReceiptSha256",
+  "controllerSourceClosureSha256",
   "authorizationReceiptSha256",
   "subjectCommit",
   "sourceTreeSha256",
@@ -201,6 +206,7 @@ function validateControllerEvidence(request, contract, records) {
     "controllerClass",
     "contractSha256",
     "controllerSourceSha256",
+    "controllerSourceClosureSha256",
     "rootDirectorySha256",
     "requestRootSha256",
     "outputRootSha256",
@@ -219,6 +225,7 @@ function validateControllerEvidence(request, contract, records) {
     "controllerClass",
     "contractSha256",
     "materializationReceiptSha256",
+    "controllerSourceClosureSha256",
     "requestSchemaSha256",
     "reportSha256",
     "counterexampleSetSha256",
@@ -226,6 +233,7 @@ function validateControllerEvidence(request, contract, records) {
     "critical",
     "important",
     "verdict",
+    "containsCredentialValue",
   ];
   if (
     !hasExactKeys(records, [
@@ -235,12 +243,14 @@ function validateControllerEvidence(request, contract, records) {
     ]) ||
     !hasExactKeys(records.materializationReceipt, materializationKeys) ||
     records.materializationReceipt.schemaVersion !==
-      "organization-identity-external-controller-materialization/v1" ||
+      "organization-identity-external-controller-materialization/v2" ||
     records.materializationReceipt.controllerClass !== "GITLEAKS" ||
     records.materializationReceipt.contractSha256 !==
       sha256(canonicalJsonBytes(contract)) ||
     records.materializationReceipt.controllerSourceSha256 !==
       contract.controllerSourceSha256 ||
+    records.materializationReceipt.controllerSourceClosureSha256 !==
+      contract.controllerSourceClosureSha256 ||
     records.materializationReceipt.ownerUid !== 0 ||
     records.materializationReceipt.ownerGid !== 0 ||
     records.materializationReceipt.directoryMode !== 0o700 ||
@@ -253,16 +263,19 @@ function validateControllerEvidence(request, contract, records) {
       sha256(canonicalJsonBytes(records.materializationReceipt)) ||
     !hasExactKeys(records.controllerReviewReceipt, reviewKeys) ||
     records.controllerReviewReceipt.schemaVersion !==
-      "organization-identity-controller-review/v1" ||
+      "organization-identity-controller-review/v2" ||
     records.controllerReviewReceipt.controllerClass !== "GITLEAKS" ||
     records.controllerReviewReceipt.contractSha256 !== request.contractSha256 ||
     records.controllerReviewReceipt.materializationReceiptSha256 !==
       request.materializationReceiptSha256 ||
+    records.controllerReviewReceipt.controllerSourceClosureSha256 !==
+      request.controllerSourceClosureSha256 ||
     records.controllerReviewReceipt.reviewerClass !==
       "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
     records.controllerReviewReceipt.critical !== 0 ||
     records.controllerReviewReceipt.important !== 0 ||
     records.controllerReviewReceipt.verdict !== "PASS" ||
+    records.controllerReviewReceipt.containsCredentialValue !== false ||
     request.controllerReviewReceiptSha256 !==
       sha256(canonicalJsonBytes(records.controllerReviewReceipt)) ||
     !validateAuthorizationReceipt(
@@ -281,9 +294,11 @@ export function validateGitleaksRequest(request, contract, evidence) {
     validateGitleaksContract(contract).status !== "PASS" ||
     !hasExactKeys(request, REQUEST_KEYS) ||
     request.schemaVersion !==
-      "organization-identity-gitleaks-controller-request/v1" ||
+      "organization-identity-gitleaks-controller-request/v2" ||
     !isSha256(request.requestId) ||
     request.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
+    request.controllerSourceClosureSha256 !==
+      contract.controllerSourceClosureSha256 ||
     !isSha256(request.materializationReceiptSha256) ||
     !isSha256(request.controllerReviewReceiptSha256) ||
     !isSha256(request.authorizationReceiptSha256) ||
@@ -336,6 +351,7 @@ const RECEIPT_KEYS = [
   "schemaVersion",
   "contractSha256",
   "controllerReviewReceiptSha256",
+  "controllerSourceClosureSha256",
   "requestId",
   "requestSha256",
   "authorizationReceiptSha256",
@@ -363,10 +379,12 @@ export function validateGitleaksReceipt(
     !isPassivePlainData(resultRecord) ||
     !hasExactKeys(receipt, RECEIPT_KEYS) ||
     receipt.schemaVersion !==
-      "organization-identity-gitleaks-controller-receipt/v1" ||
+      "organization-identity-gitleaks-controller-receipt/v2" ||
     receipt.contractSha256 !== request.contractSha256 ||
     receipt.controllerReviewReceiptSha256 !==
       request.controllerReviewReceiptSha256 ||
+    receipt.controllerSourceClosureSha256 !==
+      request.controllerSourceClosureSha256 ||
     receipt.requestId !== request.requestId ||
     receipt.authorizationReceiptSha256 !== request.authorizationReceiptSha256 ||
     receipt.subjectCommit !== request.subjectCommit ||
@@ -431,9 +449,35 @@ export async function runGitleaksControllerCli(argv, adapters, contract) {
   if (unredacted) {
     return integrity("GITLEAKS_REDACTION_INVALID");
   }
+  const receipt = {
+    schemaVersion: "organization-identity-gitleaks-controller-receipt/v2",
+    contractSha256: request.contractSha256,
+    controllerReviewReceiptSha256: request.controllerReviewReceiptSha256,
+    controllerSourceClosureSha256: request.controllerSourceClosureSha256,
+    requestId: request.requestId,
+    requestSha256: sha256(canonicalJsonBytes(request)),
+    authorizationReceiptSha256: request.authorizationReceiptSha256,
+    subjectCommit: request.subjectCommit,
+    sourceTreeSha256: request.sourceTreeSha256,
+    configBlobId: request.configBlobId,
+    executableClosureSetSha256: sha256(
+      canonicalJsonBytes(contract.executableClosure),
+    ),
+    findingSetSha256: sha256(canonicalJsonBytes(runResult.resultRecord)),
+    redactionVerified: true,
+    result: "PASS",
+  };
+  const validated = validateGitleaksReceipt(
+    receipt,
+    request,
+    contract,
+    runResult.resultRecord,
+    evidence,
+  );
+  if (validated.status !== "PASS") return validated;
   await adapters.writeFileExclusive(
     request.outputRecordPath,
-    canonicalJsonBytes(runResult.resultRecord),
+    canonicalJsonBytes(receipt),
   );
-  return pass({ resultRecord: runResult.resultRecord });
+  return pass({ receipt, resultRecord: runResult.resultRecord });
 }

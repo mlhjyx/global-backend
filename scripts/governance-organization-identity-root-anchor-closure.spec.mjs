@@ -483,9 +483,10 @@ test("root-anchor operation review rejects circular, substituted, or non-indepen
   };
   const receipt = {
     schemaVersion: "organization-identity-root-anchor-operation-review/v1",
-    controllerContractSha256: SHA,
-    controllerMaterializationReceiptSha256: SHA,
-    controllerReviewReceiptSha256: SHA,
+    controllerContractSha256: writeRequest.contractSha256,
+    controllerMaterializationReceiptSha256:
+      writeRequest.materializationReceiptSha256,
+    controllerReviewReceiptSha256: writeRequest.controllerReviewReceiptSha256,
     writeRequestSha256: digest(canonicalBytes(writeRequest)),
     writeReceiptSha256: digest(canonicalBytes(written)),
     readbackReceiptSha256: digest(canonicalBytes(readback)),
@@ -504,6 +505,13 @@ test("root-anchor operation review rejects circular, substituted, or non-indepen
   };
   assert.equal(
     validateRootAnchorOperationReviewReceipt(receipt, records).status,
+    "PASS",
+  );
+  assert.equal(
+    validateRootAnchorOperationReviewReceipt(receipt, {
+      ...records,
+      upstreamEvidence: upstreamEvidence(),
+    }).status,
     "PASS",
   );
   assert.equal(

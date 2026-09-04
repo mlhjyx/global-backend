@@ -9,9 +9,7 @@ import {
   buildControllerReceiptSetSha256,
   isPassivePlainData,
   validateControllerSourceClosureV1,
-  validateControllerReviewReceipt,
   validateCredentialHandleBinding,
-  validateExternalControllerMaterializationReceipt,
   validateExternalExecutableClosure,
   validateRootAnchorOperationReviewClosureV2,
   validateRootAnchorUpstreamEvidenceClosureV2,
@@ -19,6 +17,8 @@ import {
 } from "./governance-organization-identity-controller-contracts.mjs";
 
 const SHA = "a".repeat(64);
+const ANCHOR =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
 
 const entry = (role) => ({
   role,
@@ -115,77 +115,6 @@ test("credential handles are references only and reject durable values", () => {
   }
 });
 
-test("controller materialization receipts are exact, root-owned, and class-bound", () => {
-  const receipt = {
-    schemaVersion:
-      "organization-identity-external-controller-materialization/v1",
-    controllerClass: "GITHUB",
-    contractSha256: SHA,
-    controllerSourceSha256: SHA,
-    rootDirectorySha256: SHA,
-    requestRootSha256: SHA,
-    outputRootSha256: SHA,
-    ownerUid: 0,
-    ownerGid: 0,
-    directoryMode: 0o700,
-    controllerMode: 0o500,
-    recordMode: 0o600,
-    executableClosureSetSha256: SHA,
-    environmentSchemaSha256: SHA,
-    prePostToctouSha256: SHA,
-    result: "PASS",
-  };
-  assert.equal(
-    validateExternalControllerMaterializationReceipt(receipt, "GITHUB").status,
-    "PASS",
-  );
-  for (const mutation of [
-    { ...receipt, controllerClass: "GITLEAKS" },
-    { ...receipt, ownerUid: 1000 },
-    { ...receipt, controllerMode: 0o755 },
-    { ...receipt, result: "HOLD" },
-    { ...receipt, credential: "secret" },
-  ]) {
-    assert.equal(
-      validateExternalControllerMaterializationReceipt(mutation, "GITHUB")
-        .status,
-      "INTEGRITY_ERROR",
-    );
-  }
-});
-
-test("controller review receipts require non-null materialization and zero-gate PASS", () => {
-  const receipt = {
-    schemaVersion: "organization-identity-controller-review/v1",
-    controllerClass: "GITLEAKS",
-    contractSha256: SHA,
-    materializationReceiptSha256: SHA,
-    requestSchemaSha256: SHA,
-    reportSha256: SHA,
-    counterexampleSetSha256: SHA,
-    reviewerClass: "INDEPENDENT_CONTROLLER_SECURITY_REVIEW",
-    critical: 0,
-    important: 0,
-    verdict: "PASS",
-  };
-  assert.equal(
-    validateControllerReviewReceipt(receipt, "GITLEAKS").status,
-    "PASS",
-  );
-  for (const mutation of [
-    { ...receipt, materializationReceiptSha256: null },
-    { ...receipt, critical: 1 },
-    { ...receipt, important: 1 },
-    { ...receipt, verdict: "FAIL" },
-    { ...receipt, controllerClass: "GITHUB" },
-  ]) {
-    assert.equal(
-      validateControllerReviewReceipt(mutation, "GITLEAKS").status,
-      "INTEGRITY_ERROR",
-    );
-  }
-});
-
 test("ControllerSourceClosureV1 is exact, class-bound, and digest-bound", () => {
   const closure = {
     schemaVersion: "organization-identity-controller-source-closure/v1",
@@ -200,12 +129,22 @@ test("ControllerSourceClosureV1 is exact, class-bound, and digest-bound", () => 
         blobId: "2".repeat(40),
         sha256: "b".repeat(64),
       },
+      {
+        path: "scripts/governance-organization-identity-root-anchor-filesystem.mjs",
+        blobId: "3".repeat(40),
+        sha256: "c".repeat(64),
+      },
     ],
     testSourceEntries: [
       {
         path: "scripts/governance-organization-identity-root-anchor-closure.spec.mjs",
-        blobId: "3".repeat(40),
-        sha256: "c".repeat(64),
+        blobId: "4".repeat(40),
+        sha256: "d".repeat(64),
+      },
+      {
+        path: "scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs",
+        blobId: "5".repeat(40),
+        sha256: "e".repeat(64),
       },
     ],
     sourceSetSha256: "",
@@ -225,6 +164,14 @@ test("ControllerSourceClosureV1 is exact, class-bound, and digest-bound", () => 
     { ...closure, primarySourcePath: "/tmp/controller.mjs" },
     { ...closure, sourceSetSha256: SHA },
     { ...closure, credential: "secret" },
+    {
+      ...closure,
+      sharedSourceEntries: closure.sharedSourceEntries.slice(0, 1),
+    },
+    {
+      ...closure,
+      testSourceEntries: [...closure.testSourceEntries].reverse(),
+    },
     {
       ...closure,
       sharedSourceEntries: [
@@ -410,6 +357,126 @@ test("root-anchor shared closure rejects cross-record and final review substitut
       writeReceipt,
       readbackReceipt,
       operationReviewReceipt,
+      upstreamEvidence,
+    }).status,
+    "INTEGRITY_ERROR",
+  );
+  const fullWriteRequest = {
+    schemaVersion: "organization-identity-root-anchor-write-request/v1",
+    requestId: SHA,
+    contractSha256: "e".repeat(64),
+    materializationReceiptSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.rootAnchorControllerMaterialization,
+    ),
+    controllerReviewReceiptSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.rootAnchorControllerReview,
+    ),
+    authorizationReceiptSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.rootAnchorAuthorization,
+    ),
+    targetPath: ANCHOR,
+    targetMode: 0o600,
+    predecessor: {
+      mode: "GENESIS_ONLY",
+      sha256: null,
+      targetMustBeAbsent: true,
+    },
+    localLauncherEvidenceSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.localLauncherReview,
+    ),
+    bootstrapContractSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.bootstrapContract,
+    ),
+    githubControllerEvidenceSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.githubProtectedMainReadback,
+    ),
+    protectedBaseEvidenceSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.protectedBaseLaunch,
+    ),
+    admittedRefreshAcceptanceEvidenceSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.admittedRefreshAcceptance,
+    ),
+    orderedMergeParents: ["1".repeat(40), "2".repeat(40)],
+    workflowRunEvidenceSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.workflowRun,
+    ),
+    controllerVariableWriteReceiptSha256: buildControllerReceiptSetSha256(
+      upstreamEvidence.githubControllerVariableWrite,
+    ),
+    canonicalAnchorPayloadSha256: "9".repeat(64),
+    canonicalAnchorPayloadSize: 42,
+    writeReceiptPath:
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-write-receipt.json",
+  };
+  const fullWriteReceipt = {
+    schemaVersion: "organization-identity-root-anchor-write-receipt/v1",
+    contractSha256: fullWriteRequest.contractSha256,
+    materializationReceiptSha256: fullWriteRequest.materializationReceiptSha256,
+    controllerReviewReceiptSha256:
+      fullWriteRequest.controllerReviewReceiptSha256,
+    requestSha256: buildControllerReceiptSetSha256(fullWriteRequest),
+    authorizationReceiptSha256: fullWriteRequest.authorizationReceiptSha256,
+    targetPath: ANCHOR,
+    anchorSha256: fullWriteRequest.canonicalAnchorPayloadSha256,
+    anchorSize: 42,
+    ownerUid: 0,
+    ownerGid: 0,
+    mode: 0o600,
+    device: "1",
+    inode: "2",
+    predecessorSha256: null,
+    fileFsyncSha256: SHA,
+    directoryFsyncSha256: SHA,
+    prePostToctouSha256: SHA,
+    anchorContainsSelfHash: false,
+    result: "PASS",
+  };
+  const fullReadbackReceipt = {
+    schemaVersion: "organization-identity-root-anchor-readback/v1",
+    contractSha256: fullWriteReceipt.contractSha256,
+    requestSha256: fullWriteReceipt.requestSha256,
+    writeReceiptSha256: buildControllerReceiptSetSha256(fullWriteReceipt),
+    targetPath: ANCHOR,
+    noFollowVerified: true,
+    ownerUid: 0,
+    ownerGid: 0,
+    mode: 0o600,
+    device: "1",
+    inode: "2",
+    anchorSha256: fullWriteReceipt.anchorSha256,
+    anchorSize: 42,
+    canonicalSchemaSha256: SHA,
+    inputEvidenceSetSha256: SHA,
+    predecessorSha256: null,
+    anchorContainsSelfHash: false,
+    prePostToctouSha256: SHA,
+    reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK",
+    result: "PASS",
+  };
+  const fullOperationReviewReceipt = {
+    schemaVersion: "organization-identity-root-anchor-operation-review/v1",
+    controllerContractSha256: fullWriteRequest.contractSha256,
+    controllerMaterializationReceiptSha256:
+      fullWriteRequest.materializationReceiptSha256,
+    controllerReviewReceiptSha256:
+      fullWriteRequest.controllerReviewReceiptSha256,
+    writeRequestSha256: buildControllerReceiptSetSha256(fullWriteRequest),
+    writeReceiptSha256: buildControllerReceiptSetSha256(fullWriteReceipt),
+    readbackReceiptSha256: buildControllerReceiptSetSha256(fullReadbackReceipt),
+    anchorSha256: fullWriteReceipt.anchorSha256,
+    reportSha256: SHA,
+    counterexampleSetSha256: SHA,
+    reviewerClass: "INDEPENDENT_ROOT_ANCHOR_OPERATION_REVIEW",
+    critical: 0,
+    important: 0,
+    verdict: "PASS",
+  };
+  assert.equal(
+    validateRootAnchorOperationReviewClosureV2({
+      writeRequest: fullWriteRequest,
+      writeReceipt: fullWriteReceipt,
+      readbackReceipt: fullReadbackReceipt,
+      operationReviewReceipt: fullOperationReviewReceipt,
       upstreamEvidence,
     }).status,
     "PASS",

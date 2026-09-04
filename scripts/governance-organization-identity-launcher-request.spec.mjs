@@ -438,6 +438,83 @@ test("launcher CLI reads canonical request/input, reserves output once, and disp
   assert.equal(executionCount, 1);
 });
 
+test("launcher CLI derives a verified worktree receipt for Git-backed commands", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-cli-git-worktree-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const requestRoot = path.join(fixtureRoot, "requests");
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await import("node:fs/promises").then(({ mkdir }) =>
+    Promise.all([
+      mkdir(requestRoot, { mode: 0o700 }),
+      mkdir(outputRoot, { mode: 0o700 }),
+    ]),
+  );
+  const request = validRequest({
+    commandId: "GIT_REFRESH_START_V1",
+    mode: "START_NO_COMMIT",
+    parameters: {
+      expectedHead: COMMIT,
+      otherParent: "2".repeat(40),
+      exactMergeResultPathSetSha256: SHA,
+    },
+    requestRoot,
+    outputRoot,
+  });
+  await writeFile(
+    request.input.inputRecordPath,
+    canonicalJsonBytes(request.parameters),
+    { mode: 0o600 },
+  );
+  const requestPath = path.join(requestRoot, "request.json");
+  await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
+  let invocationSeen;
+  const result = await runLauncherCli(["--request", requestPath], {
+    requestRoot,
+    outputRoot,
+    expectedUid: process.getuid(),
+    expectedGid: process.getgid(),
+    verifyTrust: async () => ({
+      status: "PASS",
+      executableByRole: { GIT: "/controlled/bin/git" },
+      verificationFiles: [],
+    }),
+    deriveWorktreeReceipt: async (gitInvocation) => ({
+      repositoryRoot: "/global/backend",
+      worktreePath:
+        "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+      gitDirRealpath: "/global/backend/.git/worktrees/pr407",
+      commonDirRealpath: "/global/backend/.git",
+      branch: "codex/pr407-organization-identity-caller-cutover-v2",
+      headCommit: request.subjectCommit,
+      statusPorcelain: "",
+      worktreeListEntry:
+        "worktree pr407\nHEAD 1111\nbranch refs/heads/codex/pr407\n",
+      expectedMode: request.mode,
+      verifiedByExecutableClosureSha256: SHA,
+      prePostToctouSha256: SHA,
+      gitInvocation,
+    }),
+    executeInvocation: async (invocation) => {
+      invocationSeen = invocation;
+      const receipt = bootstrapReceipt({}, request);
+      const receiptBytes = canonicalJsonBytes(receipt);
+      await writeFile(request.input.outputRecordPath, receiptBytes, {
+        mode: 0o600,
+        flag: "wx",
+      });
+      return { status: "PASS", receiptSha256: sha(receiptBytes) };
+    },
+  });
+  assert.equal(result.exitCode, 0, result.result?.code);
+  assert.equal(
+    invocationSeen.cwd,
+    "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+  );
+  assert.equal(invocationSeen.executableRole, "GIT");
+});
+
 test("dispatcher and CLI propagate returned and thrown executor failures without PASS output", async (t) => {
   const request = validRequest();
   const baseContext = {

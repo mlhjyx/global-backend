@@ -12,6 +12,7 @@ import {
 
 const SHA = "a".repeat(64);
 const COMMIT = "1".repeat(40);
+const SOURCE_CLOSURE = "e".repeat(64);
 function canonical(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -35,7 +36,7 @@ const executableClosure = ["NODE", "GITLEAKS"].map((role) => ({
 
 function contract(overrides = {}) {
   return {
-    schemaVersion: "organization-identity-gitleaks-controller-contract/v1",
+    schemaVersion: "organization-identity-gitleaks-controller-contract/v2",
     rootDirectory:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks",
     requestRoot:
@@ -44,6 +45,7 @@ function contract(overrides = {}) {
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/outputs",
     controllerSourceBlobId: "1".repeat(40),
     controllerSourceSha256: SHA,
+    controllerSourceClosureSha256: SOURCE_CLOSURE,
     executableClosure,
     requiredRoles: ["NODE", "GITLEAKS"],
     allowedEnvironmentNames: ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"],
@@ -61,10 +63,12 @@ function evidence() {
   const controllerContract = contract();
   const materializationReceipt = {
     schemaVersion:
-      "organization-identity-external-controller-materialization/v1",
+      "organization-identity-external-controller-materialization/v2",
     controllerClass: "GITLEAKS",
     contractSha256: digest(controllerContract),
     controllerSourceSha256: controllerContract.controllerSourceSha256,
+    controllerSourceClosureSha256:
+      controllerContract.controllerSourceClosureSha256,
     rootDirectorySha256: SHA,
     requestRootSha256: SHA,
     outputRootSha256: SHA,
@@ -79,10 +83,12 @@ function evidence() {
     result: "PASS",
   };
   const controllerReviewReceipt = {
-    schemaVersion: "organization-identity-controller-review/v1",
+    schemaVersion: "organization-identity-controller-review/v2",
     controllerClass: "GITLEAKS",
     contractSha256: materializationReceipt.contractSha256,
     materializationReceiptSha256: digest(materializationReceipt),
+    controllerSourceClosureSha256:
+      controllerContract.controllerSourceClosureSha256,
     requestSchemaSha256: SHA,
     reportSha256: SHA,
     counterexampleSetSha256: SHA,
@@ -90,6 +96,7 @@ function evidence() {
     critical: 0,
     important: 0,
     verdict: "PASS",
+    containsCredentialValue: false,
   };
   const authorizationReceiptCanonicalBytes = `${canonical({
     controllerClass: "GITLEAKS",
@@ -106,11 +113,12 @@ function evidence() {
 
 function request(overrides = {}) {
   const result = {
-    schemaVersion: "organization-identity-gitleaks-controller-request/v1",
+    schemaVersion: "organization-identity-gitleaks-controller-request/v2",
     requestId: SHA,
     contractSha256: digest(contract()),
     materializationReceiptSha256: SHA,
     controllerReviewReceiptSha256: SHA,
+    controllerSourceClosureSha256: SOURCE_CLOSURE,
     authorizationReceiptSha256: SHA,
     subjectCommit: COMMIT,
     sourceTreeSha256: SHA,
@@ -144,6 +152,8 @@ test("Gitleaks contract requires only Node/Gitleaks and forbids credential ingre
     { executableClosure: executableClosure.slice(0, 1) },
     { requiredRoles: ["NODE", "GITLEAKS", "GIT"] },
     { credentialIngressAllowed: true },
+    { schemaVersion: "organization-identity-gitleaks-controller-contract/v1" },
+    { controllerSourceClosureSha256: SHA },
     {
       allowedEnvironmentNames: [
         ...contract().allowedEnvironmentNames,
@@ -208,9 +218,10 @@ test("Gitleaks receipts reject cross-controller substitution and unredacted evid
     findings: [],
   };
   const receipt = {
-    schemaVersion: "organization-identity-gitleaks-controller-receipt/v1",
+    schemaVersion: "organization-identity-gitleaks-controller-receipt/v2",
     contractSha256: scanRequest.contractSha256,
     controllerReviewReceiptSha256: scanRequest.controllerReviewReceiptSha256,
+    controllerSourceClosureSha256: scanRequest.controllerSourceClosureSha256,
     requestId: SHA,
     requestSha256: digest(scanRequest),
     authorizationReceiptSha256: scanRequest.authorizationReceiptSha256,
@@ -241,6 +252,11 @@ test("Gitleaks receipts reject cross-controller substitution and unredacted evid
     { ...receipt, subjectCommit: "2".repeat(40) },
     { ...receipt, result: "FAIL" },
     { ...receipt, secret: "value" },
+    {
+      ...receipt,
+      schemaVersion: "organization-identity-gitleaks-controller-receipt/v1",
+    },
+    { ...receipt, controllerSourceClosureSha256: SHA },
     {
       ...receipt,
       schemaVersion: "organization-identity-github-controller-receipt/v1",
@@ -329,4 +345,50 @@ test("Gitleaks CLI owns source/config readback, redaction, and output creation",
   );
   assert.equal(mismatch.status, "INTEGRITY_ERROR");
   assert.equal(mismatch.code, "GITLEAKS_SOURCE_CLOSURE_INVALID");
+});
+
+test("Gitleaks CLI writes and returns a validated receipt, not a result record", async () => {
+  const scanRequest = request();
+  const resultRecord = {
+    schemaVersion: "gitleaks-result-fixture/v1",
+    findings: [],
+  };
+  const writes = new Map();
+  const adapters = {
+    readCanonicalRequest: () => scanRequest,
+    readEvidence: () => evidence(),
+    readSourceClosure: () => ({
+      sourceTreeSha256: SHA,
+      configBlobId: "2".repeat(40),
+      configSha256: SHA,
+    }),
+    runGitleaks: () => ({ status: "PASS", resultRecord }),
+    writeFileExclusive(outputPath, bytes) {
+      assert.equal(outputPath, scanRequest.outputRecordPath);
+      writes.set(outputPath, bytes);
+    },
+  };
+  const result = await runGitleaksControllerCli(
+    ["--request", "/tmp/gitleaks-request.json"],
+    adapters,
+    contract(),
+  );
+  assert.equal(result.status, "PASS", result.code);
+  assert.equal(
+    result.receipt.schemaVersion,
+    "organization-identity-gitleaks-controller-receipt/v2",
+  );
+  const written = JSON.parse(writes.get(scanRequest.outputRecordPath));
+  assert.deepEqual(written, result.receipt);
+  assert.equal("findings" in written, false);
+  assert.equal(
+    validateGitleaksReceipt(
+      written,
+      scanRequest,
+      contract(),
+      resultRecord,
+      evidence(),
+    ).status,
+    "PASS",
+  );
 });

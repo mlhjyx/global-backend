@@ -51,6 +51,7 @@ const CONTRACT_KEYS = [
   "outputRoot",
   "controllerSourceBlobId",
   "controllerSourceSha256",
+  "controllerSourceClosureSha256",
   "repository",
   "remote",
   "protectedRef",
@@ -67,7 +68,7 @@ export function validateGitHubControllerContract(contract) {
   if (
     !hasExactKeys(contract, CONTRACT_KEYS) ||
     contract.schemaVersion !==
-      "organization-identity-github-controller-contract/v1" ||
+      "organization-identity-github-controller-contract/v2" ||
     contract.rootDirectory !== ROOT ||
     contract.requestRoot !== REQUEST_ROOT ||
     contract.outputRoot !== OUTPUT_ROOT ||
@@ -76,6 +77,9 @@ export function validateGitHubControllerContract(contract) {
     contract.protectedRef !== "refs/heads/main" ||
     !isGitObjectId(contract.controllerSourceBlobId) ||
     !isSha256(contract.controllerSourceSha256) ||
+    !isSha256(contract.controllerSourceClosureSha256) ||
+    contract.controllerSourceClosureSha256 ===
+      contract.controllerSourceSha256 ||
     !isSha256(contract.credentialHandleSchemaSha256) ||
     contract.noSecretPersistence !== true ||
     !valuesEqual(contract.requiredRoles, REQUIRED_ROLES) ||
@@ -309,6 +313,7 @@ const REQUEST_KEYS = [
   "contractSha256",
   "materializationReceiptSha256",
   "controllerReviewReceiptSha256",
+  "controllerSourceClosureSha256",
   "authorizationReceiptSha256",
   "credentialHandle",
   "payloadSchemaSha256",
@@ -326,6 +331,7 @@ function validateGitHubEvidence(request, contract, evidence) {
     "controllerClass",
     "contractSha256",
     "controllerSourceSha256",
+    "controllerSourceClosureSha256",
     "rootDirectorySha256",
     "requestRootSha256",
     "outputRootSha256",
@@ -344,6 +350,7 @@ function validateGitHubEvidence(request, contract, evidence) {
     "controllerClass",
     "contractSha256",
     "materializationReceiptSha256",
+    "controllerSourceClosureSha256",
     "requestSchemaSha256",
     "reportSha256",
     "counterexampleSetSha256",
@@ -351,6 +358,7 @@ function validateGitHubEvidence(request, contract, evidence) {
     "critical",
     "important",
     "verdict",
+    "containsCredentialValue",
   ];
   let authorization;
   try {
@@ -372,12 +380,14 @@ function validateGitHubEvidence(request, contract, evidence) {
     ]) ||
     !hasExactKeys(evidence.materializationReceipt, materializationKeys) ||
     evidence.materializationReceipt.schemaVersion !==
-      "organization-identity-external-controller-materialization/v1" ||
+      "organization-identity-external-controller-materialization/v2" ||
     evidence.materializationReceipt.controllerClass !== "GITHUB" ||
     evidence.materializationReceipt.contractSha256 !==
       sha256(canonicalJsonBytes(contract)) ||
     evidence.materializationReceipt.controllerSourceSha256 !==
       contract.controllerSourceSha256 ||
+    evidence.materializationReceipt.controllerSourceClosureSha256 !==
+      contract.controllerSourceClosureSha256 ||
     evidence.materializationReceipt.ownerUid !== 0 ||
     evidence.materializationReceipt.ownerGid !== 0 ||
     evidence.materializationReceipt.directoryMode !== 0o700 ||
@@ -390,12 +400,14 @@ function validateGitHubEvidence(request, contract, evidence) {
       sha256(canonicalJsonBytes(evidence.materializationReceipt)) ||
     !hasExactKeys(evidence.controllerReviewReceipt, reviewKeys) ||
     evidence.controllerReviewReceipt.schemaVersion !==
-      "organization-identity-controller-review/v1" ||
+      "organization-identity-controller-review/v2" ||
     evidence.controllerReviewReceipt.controllerClass !== "GITHUB" ||
     evidence.controllerReviewReceipt.contractSha256 !==
       request.contractSha256 ||
     evidence.controllerReviewReceipt.materializationReceiptSha256 !==
       request.materializationReceiptSha256 ||
+    evidence.controllerReviewReceipt.controllerSourceClosureSha256 !==
+      request.controllerSourceClosureSha256 ||
     request.controllerReviewReceiptSha256 !==
       sha256(canonicalJsonBytes(evidence.controllerReviewReceipt)) ||
     evidence.controllerReviewReceipt.reviewerClass !==
@@ -403,6 +415,7 @@ function validateGitHubEvidence(request, contract, evidence) {
     evidence.controllerReviewReceipt.critical !== 0 ||
     evidence.controllerReviewReceipt.important !== 0 ||
     evidence.controllerReviewReceipt.verdict !== "PASS" ||
+    evidence.controllerReviewReceipt.containsCredentialValue !== false ||
     !hasExactKeys(authorization, [
       "controllerClass",
       "requestId",
@@ -426,10 +439,12 @@ export function validateGitHubControllerRequest(request, contract, evidence) {
     validateGitHubControllerContract(contract).status !== "PASS" ||
     !hasExactKeys(request, REQUEST_KEYS) ||
     request.schemaVersion !==
-      "organization-identity-github-controller-request/v1" ||
+      "organization-identity-github-controller-request/v2" ||
     !GITHUB_CONTROLLER_OPERATIONS.includes(request.operation) ||
     !isSha256(request.requestId) ||
     request.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
+    request.controllerSourceClosureSha256 !==
+      contract.controllerSourceClosureSha256 ||
     !isSha256(request.materializationReceiptSha256) ||
     !isSha256(request.controllerReviewReceiptSha256) ||
     !isSha256(request.payloadSchemaSha256) ||
@@ -666,6 +681,7 @@ const RECEIPT_KEYS = [
   "schemaVersion",
   "contractSha256",
   "controllerReviewReceiptSha256",
+  "controllerSourceClosureSha256",
   "operation",
   "requestId",
   "requestSha256",
@@ -702,12 +718,14 @@ export function validateGitHubControllerReceipt(
     !isPassivePlainData(resultRecord) ||
     !hasExactKeys(receipt, RECEIPT_KEYS) ||
     receipt.schemaVersion !==
-      "organization-identity-github-controller-receipt/v1" ||
+      "organization-identity-github-controller-receipt/v2" ||
     receipt.operation !== request.operation ||
     receipt.requestId !== request.requestId ||
     receipt.contractSha256 !== request.contractSha256 ||
     receipt.controllerReviewReceiptSha256 !==
       request.controllerReviewReceiptSha256 ||
+    receipt.controllerSourceClosureSha256 !==
+      request.controllerSourceClosureSha256 ||
     receipt.payloadSchemaSha256 !== request.payloadSchemaSha256 ||
     receipt.payloadSha256 !== request.payloadSha256 ||
     receipt.authorizationReceiptSha256 !== request.authorizationReceiptSha256 ||
