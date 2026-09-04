@@ -12,13 +12,15 @@ run(){ local w="$1" q="$2";(export PGHOST="${c[$w:PGHOST]}" PGPORT="${c[$w:PGPOR
 cleanup(){ local rc=0 i; for((i=${#ledger[@]}-1;i>=0;i--));do run ADMIN "${ledger[i]}"||rc=1;done;((rc==0))||{ echo DISPOSABLE_CLEANUP_FAILED >&2;return 1;}; }
 trap 'cleanup || exit 1' EXIT;trap 'exit 1' INT TERM
 deny(){ if run "$1" "$2" 2>/dev/null;then echo DISPOSABLE_DENY_FAILED >&2;exit 1;fi; }
-drift(){ run ADMIN "$1";ledger+=("$2"); if bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null 2>&1;then echo DRIFT_NOT_REJECTED >&2;exit 1;fi; }
+drift(){ run ADMIN "$1";ledger+=("$2"); if bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null 2>&1;then echo DRIFT_NOT_REJECTED >&2;exit 1;fi; run ADMIN "$2" || { echo DISPOSABLE_CLEANUP_FAILED >&2;exit 1; }; unset "ledger[$((${#ledger[@]}-1))]"; bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null || { echo DRIFT_RESTORE_FAILED >&2;exit 1; }; }
 deny ADMIN "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM revoke_platform_execution_authority_v1('00000000-0000-4000-8000-000000000001','x',clock_timestamp())"
 drift "GRANT pg_monitor TO ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}" "REVOKE pg_monitor FROM ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}"
 drift "GRANT pg_read_all_data TO execution_budget_platform_writer" "REVOKE pg_read_all_data FROM execution_budget_platform_writer"
 drift "CREATE ROLE task3_nested NOLOGIN; GRANT task3_nested TO execution_budget_platform_writer" "REVOKE task3_nested FROM execution_budget_platform_writer"
+if [[ "${EXECUTION_BUDGET_PLATFORM_WRITER_FAILURE_INJECT_AFTER_DRIFT:-}" == superuser ]]; then
+  run ADMIN "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER"; ledger+=("ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER"); exit 42
+fi
 drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER"
-[[ "${EXECUTION_BUDGET_PLATFORM_WRITER_FAILURE_INJECT_AFTER_DRIFT:-}" != superuser ]] || exit 42
 drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} BYPASSRLS" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOBYPASSRLS"
 drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} CREATEROLE" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOCREATEROLE"
 echo "disposable platform writer drift checks passed"
