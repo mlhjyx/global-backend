@@ -174,6 +174,67 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /pnpm --filter @global\/site-renderer deploy --prod --frozen-lockfile \/tmp\/renderer-runtime-deploy/,
   );
+  const aptSources = dockerfile
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("'deb [check-valid-until=no] "))
+    .map((line) => {
+      const match = line.match(
+        /^'deb \[check-valid-until=no\] (\S+) (\S+) main' \\$/,
+      );
+      assert.ok(match);
+      const source = new URL(match[1]);
+      return {
+        protocol: source.protocol,
+        hostname: source.hostname,
+        pathname: source.pathname,
+        suite: match[2],
+      };
+    });
+  assert.deepEqual(aptSources, [
+    {
+      protocol: 'https:',
+      hostname: 'snapshot.debian.org',
+      pathname: '/archive/debian/20260826T000000Z/',
+      suite: 'bookworm',
+    },
+    {
+      protocol: 'https:',
+      hostname: 'snapshot.debian.org',
+      pathname: '/archive/debian/20260826T000000Z/',
+      suite: 'bookworm-updates',
+    },
+    {
+      protocol: 'https:',
+      hostname: 'snapshot.debian.org',
+      pathname: '/archive/debian-security/20260826T000000Z/',
+      suite: 'bookworm-security',
+    },
+  ]);
+  assert.match(dockerfile, /check-valid-until=no/);
+  assert.match(
+    dockerfile,
+    /FROM alpine:3\.23\.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS ca-bootstrap/,
+  );
+  assert.match(
+    dockerfile,
+    /766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/,
+  );
+  assert.equal(
+    dockerfile.match(/766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/g)?.length,
+    2,
+  );
+  assert.match(
+    dockerfile,
+    /COPY --from=ca-bootstrap \/etc\/ssl\/certs\/ca-certificates\.crt \/etc\/ssl\/certs\/ca-certificates\.crt/,
+  );
+  assert.doesNotMatch(dockerfile, /trusted\s*=\s*yes/i);
+  assert.match(
+    dockerfile,
+    /test -z "\$\(find \/etc\/apt\/sources\.list\.d -maxdepth 1 -type f -print -quit\)"/,
+  );
+  assert.match(dockerfile, /apt-get -o Acquire::Retries=3 update/);
+  assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*.*apt-get/s);
   assert.match(dockerfile, /chromium=151\.0\.7922\.173-1~deb12u1/);
   assert.match(dockerfile, /util-linux=2\.38\.1-5\+deb12u3/);
   assert.match(dockerfile, /dpkg-query -W/);
