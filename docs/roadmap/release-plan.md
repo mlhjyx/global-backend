@@ -24,16 +24,16 @@ The first Job is evidence-backed overseas importer/procurement discovery for Chi
 
 The G0–G7 meanings below are stable. Their current verdicts are intentionally absent from this roadmap and must be read from [current status](../status/current.md).
 
-| Gate                     | Stable proof                                                                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| G0 — Truth & Ownership   | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit.                    |
-| G1 — Product/UX/Contract | Persona, journey, source of record, state, permission, error, API/event contract and UAT criteria are reviewable.                          |
-| G2 — Source/TDD/Security | RED/GREEN evidence, relevant coverage, negative/mutation checks and independent correctness/security review are bound to the exact source. |
-| G3 — Integration/Data    | Disposable-database/RLS proof, migration parity, Temporal replay, golden vectors and idempotent producer-consumer integration pass.        |
-| G4 — Release Candidate   | Clean exact commits, hosted CI, reproducible artifacts/images, SBOM and a tested rollback input form one candidate.                        |
-| G5 — Runtime Observed    | Exact runtime identity, migrations, leases/readiness and fresh RuntimeEvidence prove the candidate running in the named environment.       |
-| G6 — UAT Accepted        | Critical user journeys pass three consecutive times, including controlled restart/recovery, and the product owner accepts the user result. |
-| G7 — Pilot/GA Authorized | A current Release Bundle, trusted external readback, explicit user authorization, monitoring and rollback are all present.                 |
+| Gate                     | Stable proof                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| G0 — Truth & Ownership   | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit.                                      |
+| G1 — Product/UX/Contract | Persona, journey, source of record, state, permission, error, API/event contract and UAT criteria are reviewable.                                            |
+| G2 — Source/TDD/Security | RED/GREEN evidence, relevant coverage, negative/mutation checks and independent correctness/security review are bound to the exact source.                   |
+| G3 — Integration/Data    | Disposable-database/RLS proof, migration parity, Temporal replay, golden vectors and idempotent producer-consumer integration are verified.                  |
+| G4 — Release Candidate   | Clean exact commits, hosted CI, reproducible artifacts/images, SBOM and a tested rollback input form one candidate.                                          |
+| G5 — Runtime Observed    | Exact runtime identity, migrations, leases/readiness and fresh RuntimeEvidence prove the candidate running in the named environment.                         |
+| G6 — UAT Accepted        | Critical user journeys execute successfully in three consecutive runs, including controlled restart/recovery, and the product owner accepts the user result. |
+| G7 — Pilot/GA Authorized | A current Release Bundle, trusted external readback, explicit user authorization, monitoring and rollback are all present.                                   |
 
 ### Ordered delivery
 

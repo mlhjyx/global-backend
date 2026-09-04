@@ -75,14 +75,20 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
       document,
       /\b(?:origin\/main|main)@[0-9a-f]{7,40}\b|\bPR\s*#\d+\b|\bREADY_FOR_[A-Z_]+\b|\bNOT_AUTHORIZED\b|\bcurrentRoute\b|\bcurrent-source\b|下一门/i,
     );
+    assert.doesNotMatch(
+      document,
+      /\b(?:current|live)\s+(?:G[0-7]\s+)?(?:gate\s+)?(?:verdict|status)\b[\s\S]{0,80}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/i,
+    );
 
-    const tableHeaders = lines
-      .map(parseMarkdownRow)
-      .filter((cells) => cells?.[0]?.toLowerCase() === "gate");
+    const markdownRows = lines.map(parseMarkdownRow).filter(Boolean);
+    assert.equal(markdownRows.length, 10);
+    const tableHeaders = markdownRows.filter(
+      (cells) => cells?.[0]?.toLowerCase() === "gate",
+    );
     assert.deepEqual(tableHeaders, [["Gate", "Stable proof"]]);
-    const gateRows = lines
-      .map(parseMarkdownRow)
-      .filter((cells) => /^G[0-7] —/.test(cells?.[0] ?? ""));
+    const gateRows = markdownRows.filter((cells) =>
+      /^G[0-7] —/.test(cells?.[0] ?? ""),
+    );
     assert.equal(gateRows.length, 8);
     assert.deepEqual(
       gateRows.map(([gate]) => gate.slice(0, 2)),
@@ -96,7 +102,7 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
       );
       assert.doesNotMatch(
         proofWithoutTddTerms,
-        /\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/,
+        /\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/i,
       );
     }
 
@@ -142,6 +148,14 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     const historyStart = document.indexOf("## Historical supersession index");
     assert.ok(historyStart > boundaryStart);
     const historicalSection = document.slice(historyStart);
+    const historicalEntries = historicalSection
+      .split("\n")
+      .slice(1)
+      .filter((line) => line.length > 0);
+    assert.equal(historicalEntries.length, 2);
+    for (const entry of historicalEntries) {
+      assert.match(entry, /^- /);
+    }
     assert.match(historicalSection, /HISTORICAL \/ SUPERSEDED/);
     assert.match(historicalSection, /MVP-1[^\n]*Opportunity[^\n]*human QGO/);
     assert.match(historicalSection, /MVP-2[^\n]*email/);
@@ -174,6 +188,12 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     ),
     `${releasePlan}\nCampaign → email → QGO.\n`,
     `${releasePlan}\n### Active fast follow\nCampaign\n→ email\n→ QGO\n`,
+    `${releasePlan}\nG4 current verdict is PASS.\n`,
+    releasePlan.replace(
+      "Disposable-database/RLS proof",
+      "`Pass / Done` — Disposable-database/RLS proof",
+    ),
+    `${releasePlan}\n| Capability | Current status |\n| ---------- | -------------- |\n| Runtime    | BLOCKED        |\n`,
   ]) {
     assert.throws(() => assertStableRoadmap(mutation));
   }
