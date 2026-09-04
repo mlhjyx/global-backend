@@ -225,50 +225,80 @@ const REQUEST_KEYS = [
 ];
 
 function validateControllerEvidence(request, contract, evidence) {
-  const records = evidence;
+  const materializationKeys = [
+    "schemaVersion",
+    "controllerClass",
+    "contractSha256",
+    "controllerSourceSha256",
+    "rootDirectorySha256",
+    "requestRootSha256",
+    "outputRootSha256",
+    "ownerUid",
+    "ownerGid",
+    "directoryMode",
+    "controllerMode",
+    "recordMode",
+    "executableClosureSetSha256",
+    "environmentSchemaSha256",
+    "prePostToctouSha256",
+    "result",
+  ];
+  const reviewKeys = [
+    "schemaVersion",
+    "controllerClass",
+    "contractSha256",
+    "materializationReceiptSha256",
+    "requestSchemaSha256",
+    "reportSha256",
+    "counterexampleSetSha256",
+    "reviewerClass",
+    "critical",
+    "important",
+    "verdict",
+  ];
   if (
-    !hasExactKeys(records, [
+    !hasExactKeys(evidence, [
       "materializationReceipt",
       "controllerReviewReceipt",
-      "authorizationReceipt",
+      "authorizationReceiptCanonicalBytes",
     ]) ||
-    !hasExactKeys(records.materializationReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-    ]) ||
-    records.materializationReceipt.schemaVersion !==
+    !hasExactKeys(evidence.materializationReceipt, materializationKeys) ||
+    evidence.materializationReceipt.schemaVersion !==
       "organization-identity-external-controller-materialization/v1" ||
-    records.materializationReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
-    records.materializationReceipt.contractSha256 !==
+    evidence.materializationReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
+    evidence.materializationReceipt.contractSha256 !==
       sha256(canonicalJsonBytes(contract)) ||
+    evidence.materializationReceipt.controllerSourceSha256 !==
+      contract.controllerSourceSha256 ||
+    evidence.materializationReceipt.ownerUid !== 0 ||
+    evidence.materializationReceipt.ownerGid !== 0 ||
+    evidence.materializationReceipt.directoryMode !== 0o700 ||
+    evidence.materializationReceipt.controllerMode !== 0o500 ||
+    evidence.materializationReceipt.recordMode !== 0o600 ||
+    evidence.materializationReceipt.executableClosureSetSha256 !==
+      sha256(canonicalJsonBytes(contract.executableClosure)) ||
+    evidence.materializationReceipt.result !== "PASS" ||
     request.materializationReceiptSha256 !==
-      sha256(canonicalJsonBytes(records.materializationReceipt)) ||
-    !hasExactKeys(records.controllerReviewReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "materializationReceiptSha256",
-    ]) ||
-    records.controllerReviewReceipt.schemaVersion !==
+      sha256(canonicalJsonBytes(evidence.materializationReceipt)) ||
+    !hasExactKeys(evidence.controllerReviewReceipt, reviewKeys) ||
+    evidence.controllerReviewReceipt.schemaVersion !==
       "organization-identity-controller-review/v1" ||
-    records.controllerReviewReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
-    records.controllerReviewReceipt.materializationReceiptSha256 !==
+    evidence.controllerReviewReceipt.controllerClass !==
+      "DISPOSABLE_POSTGRES" ||
+    evidence.controllerReviewReceipt.contractSha256 !==
+      request.contractSha256 ||
+    evidence.controllerReviewReceipt.materializationReceiptSha256 !==
       request.materializationReceiptSha256 ||
+    evidence.controllerReviewReceipt.reviewerClass !==
+      "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
+    evidence.controllerReviewReceipt.critical !== 0 ||
+    evidence.controllerReviewReceipt.important !== 0 ||
+    evidence.controllerReviewReceipt.verdict !== "PASS" ||
     request.controllerReviewReceiptSha256 !==
-      sha256(canonicalJsonBytes(records.controllerReviewReceipt)) ||
-    !hasExactKeys(records.authorizationReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "requestId",
-      "operation",
-    ]) ||
-    records.authorizationReceipt.schemaVersion !==
-      "organization-identity-controller-authorization/v1" ||
-    records.authorizationReceipt.controllerClass !== "DISPOSABLE_POSTGRES" ||
-    records.authorizationReceipt.requestId !== request.requestId ||
-    records.authorizationReceipt.operation !== request.operation ||
+      sha256(canonicalJsonBytes(evidence.controllerReviewReceipt)) ||
+    typeof evidence.authorizationReceiptCanonicalBytes !== "string" ||
     request.authorizationReceiptSha256 !==
-      sha256(canonicalJsonBytes(records.authorizationReceipt))
+      sha256(Buffer.from(evidence.authorizationReceiptCanonicalBytes, "utf8"))
   )
     return integrity("DISPOSABLE_POSTGRES_EVIDENCE_INVALID");
   return pass();
@@ -353,6 +383,15 @@ export function buildDisposablePostgresInvocation(request, contract, evidence) {
           network,
           "--publish",
           "127.0.0.1:0:5432",
+          "--cpus",
+          "1",
+          "--memory",
+          "512m",
+          "--pids-limit",
+          "128",
+          "--read-only",
+          "--tmpfs",
+          "/tmp:rw,noexec,nosuid,size=64m",
           "--label",
           `organization-identity-request=${request.requestId}`,
           "--name",
@@ -372,6 +411,7 @@ export function buildDisposablePostgresInvocation(request, contract, evidence) {
         phase: scenarioOperation,
         executableRole: "NODE",
         argv: [
+          "/controller/governance-organization-identity-disposable-postgres-controller.mjs",
           "--disposable-operation",
           request.operation,
           "--migration-input-set-sha256",
@@ -379,7 +419,46 @@ export function buildDisposablePostgresInvocation(request, contract, evidence) {
           "--scenario-set-sha256",
           request.scenarioSetSha256,
         ],
+        toolSteps: [
+          {
+            executableRole: "PSQL",
+            argv: ["--no-psqlrc", "--set", "ON_ERROR_STOP=1"],
+          },
+          { executableRole: "COREPACK_SHIM", argv: ["pnpm", "--version"] },
+          {
+            executableRole: "COREPACK_LIB_COREPACK_CJS",
+            argv: ["--identity-check"],
+          },
+          {
+            executableRole: "PNPM_SHIM",
+            argv: ["--offline", "--ignore-scripts"],
+          },
+          {
+            executableRole: "PNPM_ENTRYPOINT",
+            argv: ["--offline", "--ignore-scripts"],
+          },
+          {
+            executableRole: "PRISMA_CLI",
+            argv: ["generate", "--schema", "packages/db/prisma/schema.prisma"],
+          },
+        ],
       },
+      {
+        phase: "CLEANUP",
+        executableRole: "DOCKER",
+        argv: ["rm", "--force", database],
+        thenArgv: ["network", "rm", network],
+      },
+      {
+        phase: "VERIFY_CLEANUP",
+        executableRole: "DOCKER",
+        argv: ["container", "inspect", database],
+        thenArgv: ["network", "inspect", network],
+        expectedAbsent: true,
+        cleanupPlanSha256: request.cleanupPlanSha256,
+      },
+    ],
+    finallyPlan: [
       {
         phase: "CLEANUP",
         executableRole: "DOCKER",

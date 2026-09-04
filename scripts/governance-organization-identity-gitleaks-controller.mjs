@@ -174,49 +174,78 @@ const REQUEST_KEYS = [
 ];
 
 function validateControllerEvidence(request, contract, records) {
+  const materializationKeys = [
+    "schemaVersion",
+    "controllerClass",
+    "contractSha256",
+    "controllerSourceSha256",
+    "rootDirectorySha256",
+    "requestRootSha256",
+    "outputRootSha256",
+    "ownerUid",
+    "ownerGid",
+    "directoryMode",
+    "controllerMode",
+    "recordMode",
+    "executableClosureSetSha256",
+    "environmentSchemaSha256",
+    "prePostToctouSha256",
+    "result",
+  ];
+  const reviewKeys = [
+    "schemaVersion",
+    "controllerClass",
+    "contractSha256",
+    "materializationReceiptSha256",
+    "requestSchemaSha256",
+    "reportSha256",
+    "counterexampleSetSha256",
+    "reviewerClass",
+    "critical",
+    "important",
+    "verdict",
+  ];
   if (
     !hasExactKeys(records, [
       "materializationReceipt",
       "controllerReviewReceipt",
-      "authorizationReceipt",
+      "authorizationReceiptCanonicalBytes",
     ]) ||
-    !hasExactKeys(records.materializationReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-    ]) ||
+    !hasExactKeys(records.materializationReceipt, materializationKeys) ||
     records.materializationReceipt.schemaVersion !==
       "organization-identity-external-controller-materialization/v1" ||
     records.materializationReceipt.controllerClass !== "GITLEAKS" ||
     records.materializationReceipt.contractSha256 !==
       sha256(canonicalJsonBytes(contract)) ||
+    records.materializationReceipt.controllerSourceSha256 !==
+      contract.controllerSourceSha256 ||
+    records.materializationReceipt.ownerUid !== 0 ||
+    records.materializationReceipt.ownerGid !== 0 ||
+    records.materializationReceipt.directoryMode !== 0o700 ||
+    records.materializationReceipt.controllerMode !== 0o500 ||
+    records.materializationReceipt.recordMode !== 0o600 ||
+    records.materializationReceipt.executableClosureSetSha256 !==
+      sha256(canonicalJsonBytes(contract.executableClosure)) ||
+    records.materializationReceipt.result !== "PASS" ||
     request.materializationReceiptSha256 !==
       sha256(canonicalJsonBytes(records.materializationReceipt)) ||
-    !hasExactKeys(records.controllerReviewReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "materializationReceiptSha256",
-    ]) ||
+    !hasExactKeys(records.controllerReviewReceipt, reviewKeys) ||
     records.controllerReviewReceipt.schemaVersion !==
       "organization-identity-controller-review/v1" ||
     records.controllerReviewReceipt.controllerClass !== "GITLEAKS" ||
+    records.controllerReviewReceipt.contractSha256 !== request.contractSha256 ||
     records.controllerReviewReceipt.materializationReceiptSha256 !==
       request.materializationReceiptSha256 ||
+    records.controllerReviewReceipt.reviewerClass !==
+      "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
+    records.controllerReviewReceipt.critical !== 0 ||
+    records.controllerReviewReceipt.important !== 0 ||
+    records.controllerReviewReceipt.verdict !== "PASS" ||
     request.controllerReviewReceiptSha256 !==
       sha256(canonicalJsonBytes(records.controllerReviewReceipt)) ||
-    !hasExactKeys(records.authorizationReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "requestId",
-      "operation",
-    ]) ||
-    records.authorizationReceipt.schemaVersion !==
-      "organization-identity-controller-authorization/v1" ||
-    records.authorizationReceipt.controllerClass !== "GITLEAKS" ||
-    records.authorizationReceipt.requestId !== request.requestId ||
-    records.authorizationReceipt.operation !== "SCAN" ||
+    typeof records.authorizationReceiptCanonicalBytes !== "string" ||
     request.authorizationReceiptSha256 !==
-      sha256(canonicalJsonBytes(records.authorizationReceipt))
+      sha256(Buffer.from(records.authorizationReceiptCanonicalBytes, "utf8"))
   )
     return integrity("GITLEAKS_EVIDENCE_INVALID");
   return pass();

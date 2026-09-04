@@ -252,7 +252,81 @@ const REQUEST_KEYS = [
   "writeReceiptPath",
 ];
 
-export function validateRootAnchorWriteRequest(request, contract, expected) {
+function validateRootUpstreamEvidence(request, contract, records) {
+  if (!records || typeof records !== "object")
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  const bindings = {
+    materializationReceiptSha256: "materializationReceipt",
+    controllerReviewReceiptSha256: "controllerReviewReceipt",
+    authorizationReceiptSha256: "authorizationReceipt",
+    localLauncherEvidenceSha256: "localLauncherEvidence",
+    bootstrapContractSha256: "bootstrapContract",
+    githubControllerEvidenceSha256: "githubControllerEvidence",
+    protectedBaseEvidenceSha256: "protectedBaseEvidence",
+    admittedRefreshAcceptanceEvidenceSha256:
+      "admittedRefreshAcceptanceEvidence",
+    workflowRunEvidenceSha256: "workflowRunEvidence",
+    controllerVariableWriteReceiptSha256: "controllerVariableWriteReceipt",
+  };
+  if (!hasExactKeys(records, Object.values(bindings))) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  }
+  for (const [field, recordKey] of Object.entries(bindings)) {
+    if (request[field] !== sha256(canonicalJsonBytes(records[recordKey]))) {
+      return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+    }
+  }
+  const materialization = records.materializationReceipt;
+  const review = records.controllerReviewReceipt;
+  if (
+    materialization.schemaVersion !==
+      "organization-identity-external-controller-materialization/v1" ||
+    materialization.controllerClass !== "ROOT_ANCHOR" ||
+    materialization.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
+    materialization.controllerSourceSha256 !==
+      contract.controllerSource.sha256 ||
+    materialization.executableClosureSetSha256 !==
+      sha256(canonicalJsonBytes(contract.executableClosure)) ||
+    materialization.ownerUid !== 0 ||
+    materialization.ownerGid !== 0 ||
+    materialization.directoryMode !== 0o700 ||
+    materialization.controllerMode !== 0o500 ||
+    materialization.recordMode !== 0o600 ||
+    materialization.result !== "PASS" ||
+    review.schemaVersion !== "organization-identity-controller-review/v1" ||
+    review.controllerClass !== "ROOT_ANCHOR" ||
+    review.contractSha256 !== request.contractSha256 ||
+    review.materializationReceiptSha256 !==
+      request.materializationReceiptSha256 ||
+    review.reviewerClass !== "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
+    review.critical !== 0 ||
+    review.important !== 0 ||
+    review.verdict !== "PASS" ||
+    records.authorizationReceipt.controllerClass !== "ROOT_ANCHOR" ||
+    records.authorizationReceipt.requestId !== request.requestId ||
+    records.authorizationReceipt.scope !== "EXACT_REQUEST_ONLY" ||
+    records.localLauncherEvidence.schemaVersion !==
+      "organization-identity-launcher-materialization-review/v1" ||
+    records.bootstrapContract.schemaVersion !==
+      "organization-identity-bootstrap-contract/v2" ||
+    records.githubControllerEvidence.schemaVersion !==
+      "organization-identity-github-controller-receipt/v1" ||
+    records.protectedBaseEvidence.schemaVersion !==
+      "organization-identity-protected-base-launcher-receipt/v1" ||
+    records.controllerVariableWriteReceipt.operation !==
+      "CONTROLLER_VARIABLES_WRITE"
+  ) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  }
+  return pass();
+}
+
+export function validateRootAnchorWriteRequest(
+  request,
+  contract,
+  expected,
+  upstreamEvidence,
+) {
   if (
     !hasExactKeys(expected, [
       "orderedMergeParents",
@@ -261,6 +335,12 @@ export function validateRootAnchorWriteRequest(request, contract, expected) {
     ])
   ) {
     return integrity("ROOT_ANCHOR_EXPECTED_INPUT_REQUIRED");
+  }
+  if (
+    validateRootUpstreamEvidence(request, contract, upstreamEvidence).status !==
+    "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
   }
   if (
     validateRootAnchorContract(contract).status !== "PASS" ||
@@ -322,10 +402,20 @@ export function validateRootAnchorWriteRequest(request, contract, expected) {
   return pass();
 }
 
-export function planRootAnchorWrite(request, contract, observation, expected) {
+export function planRootAnchorWrite(
+  request,
+  contract,
+  observation,
+  expected,
+  upstreamEvidence,
+) {
   if (
-    validateRootAnchorWriteRequest(request, contract, expected).status !==
-      "PASS" ||
+    validateRootAnchorWriteRequest(
+      request,
+      contract,
+      expected,
+      upstreamEvidence,
+    ).status !== "PASS" ||
     !hasExactKeys(observation, [
       "targetExists",
       "targetKind",
@@ -362,33 +452,54 @@ function modeOf(stat) {
   return Number(stat.mode & 0o777n);
 }
 
-async function verifyFixtureRoot(fixture) {
+async function verifiedFixtureDirectory(directoryPath, fixture) {
+  const [stat, resolved] = await Promise.all([
+    lstat(directoryPath, { bigint: true }),
+    realpath(directoryPath),
+  ]);
+  return (
+    stat.isDirectory() &&
+    !stat.isSymbolicLink() &&
+    resolved === directoryPath &&
+    modeOf(stat) === 0o700 &&
+    Number(stat.uid) === fixture.expectedUid &&
+    Number(stat.gid) === fixture.expectedGid
+  );
+}
+
+async function verifyFixtureRoot(fixture, receiptField) {
+  const fixtureKeys = [
+    "rootDirectory",
+    "outputRoot",
+    "targetPath",
+    receiptField,
+    "expectedUid",
+    "expectedGid",
+  ];
   if (
-    !fixture ||
+    !hasExactKeys(fixture, fixtureKeys) ||
     !path.isAbsolute(fixture.rootDirectory) ||
+    !path.isAbsolute(fixture.outputRoot) ||
     !path.isAbsolute(fixture.targetPath) ||
+    !path.isAbsolute(fixture[receiptField]) ||
     path.dirname(fixture.targetPath) !== fixture.rootDirectory ||
     !fixture.targetPath.startsWith(`${fixture.rootDirectory}/`) ||
+    path.dirname(fixture.outputRoot) !== fixture.rootDirectory ||
+    path.dirname(fixture[receiptField]) !== fixture.outputRoot ||
+    !fixture[receiptField].startsWith(`${fixture.outputRoot}/`) ||
     fixture.rootDirectory === ANCHOR_DIRECTORY
   ) {
     return integrity("ROOT_ANCHOR_FIXTURE_INVALID");
   }
   try {
-    const [stat, resolved] = await Promise.all([
-      lstat(fixture.rootDirectory, { bigint: true }),
-      realpath(fixture.rootDirectory),
+    const [rootValid, outputValid] = await Promise.all([
+      verifiedFixtureDirectory(fixture.rootDirectory, fixture),
+      verifiedFixtureDirectory(fixture.outputRoot, fixture),
     ]);
-    if (
-      !stat.isDirectory() ||
-      stat.isSymbolicLink() ||
-      resolved !== fixture.rootDirectory ||
-      modeOf(stat) !== 0o700 ||
-      Number(stat.uid) !== fixture.expectedUid ||
-      Number(stat.gid) !== fixture.expectedGid
-    ) {
+    if (!rootValid || !outputValid) {
       return integrity("ROOT_ANCHOR_FIXTURE_ROOT_INVALID");
     }
-    return pass({ stat });
+    return pass();
   } catch {
     return integrity("ROOT_ANCHOR_FIXTURE_ROOT_INVALID");
   }
@@ -488,6 +599,7 @@ export async function materializeRootAnchor({
   request,
   contract,
   expected,
+  upstreamEvidence,
   payloadBytes,
   fixture,
 }) {
@@ -498,8 +610,12 @@ export async function materializeRootAnchor({
     };
   }
   if (
-    validateRootAnchorWriteRequest(request, contract, expected).status !==
-      "PASS" ||
+    validateRootAnchorWriteRequest(
+      request,
+      contract,
+      expected,
+      upstreamEvidence,
+    ).status !== "PASS" ||
     !Buffer.isBuffer(payloadBytes) ||
     payloadBytes.length !== request.canonicalAnchorPayloadSize ||
     sha256(payloadBytes) !== request.canonicalAnchorPayloadSha256
@@ -519,7 +635,7 @@ export async function materializeRootAnchor({
   } catch {
     return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
   }
-  const root = await verifyFixtureRoot(fixture);
+  const root = await verifyFixtureRoot(fixture, "writeReceiptPath");
   if (root.status !== "PASS" || !(await targetAbsent(fixture.targetPath))) {
     return {
       status: "ROOT_ANCHOR_WRITE_HOLD",
@@ -598,7 +714,7 @@ export async function readbackRootAnchor({
   ) {
     return integrity("ROOT_ANCHOR_WRITE_RECEIPT_INVALID");
   }
-  const root = await verifyFixtureRoot(fixture);
+  const root = await verifyFixtureRoot(fixture, "readbackReceiptPath");
   if (root.status !== "PASS") return root;
   const observed = await readbackFile(
     fixture.targetPath,

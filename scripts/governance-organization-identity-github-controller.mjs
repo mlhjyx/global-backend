@@ -347,49 +347,100 @@ const REQUEST_KEYS = [
 ];
 
 function validateGitHubEvidence(request, contract, evidence) {
+  const materializationKeys = [
+    "schemaVersion",
+    "controllerClass",
+    "contractSha256",
+    "controllerSourceSha256",
+    "rootDirectorySha256",
+    "requestRootSha256",
+    "outputRootSha256",
+    "ownerUid",
+    "ownerGid",
+    "directoryMode",
+    "controllerMode",
+    "recordMode",
+    "executableClosureSetSha256",
+    "environmentSchemaSha256",
+    "prePostToctouSha256",
+    "result",
+  ];
+  const reviewKeys = [
+    "schemaVersion",
+    "controllerClass",
+    "contractSha256",
+    "materializationReceiptSha256",
+    "requestSchemaSha256",
+    "reportSha256",
+    "counterexampleSetSha256",
+    "reviewerClass",
+    "critical",
+    "important",
+    "verdict",
+  ];
+  let authorization;
+  try {
+    authorization = JSON.parse(evidence?.authorizationReceiptCanonicalBytes);
+    if (
+      evidence.authorizationReceiptCanonicalBytes !==
+      canonicalJsonBytes(authorization).toString("utf8")
+    ) {
+      return integrity("GITHUB_CONTROLLER_EVIDENCE_INVALID");
+    }
+  } catch {
+    return integrity("GITHUB_CONTROLLER_EVIDENCE_INVALID");
+  }
   if (
     !hasExactKeys(evidence, [
       "materializationReceipt",
       "controllerReviewReceipt",
-      "authorizationReceipt",
+      "authorizationReceiptCanonicalBytes",
     ]) ||
-    !hasExactKeys(evidence.materializationReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-    ]) ||
+    !hasExactKeys(evidence.materializationReceipt, materializationKeys) ||
     evidence.materializationReceipt.schemaVersion !==
       "organization-identity-external-controller-materialization/v1" ||
     evidence.materializationReceipt.controllerClass !== "GITHUB" ||
     evidence.materializationReceipt.contractSha256 !==
       sha256(canonicalJsonBytes(contract)) ||
+    evidence.materializationReceipt.controllerSourceSha256 !==
+      contract.controllerSourceSha256 ||
+    evidence.materializationReceipt.ownerUid !== 0 ||
+    evidence.materializationReceipt.ownerGid !== 0 ||
+    evidence.materializationReceipt.directoryMode !== 0o700 ||
+    evidence.materializationReceipt.controllerMode !== 0o500 ||
+    evidence.materializationReceipt.recordMode !== 0o600 ||
+    evidence.materializationReceipt.executableClosureSetSha256 !==
+      sha256(canonicalJsonBytes(contract.executableClosure)) ||
+    evidence.materializationReceipt.result !== "PASS" ||
     request.materializationReceiptSha256 !==
       sha256(canonicalJsonBytes(evidence.materializationReceipt)) ||
-    !hasExactKeys(evidence.controllerReviewReceipt, [
-      "schemaVersion",
-      "controllerClass",
-      "materializationReceiptSha256",
-    ]) ||
+    !hasExactKeys(evidence.controllerReviewReceipt, reviewKeys) ||
     evidence.controllerReviewReceipt.schemaVersion !==
       "organization-identity-controller-review/v1" ||
     evidence.controllerReviewReceipt.controllerClass !== "GITHUB" ||
+    evidence.controllerReviewReceipt.contractSha256 !==
+      request.contractSha256 ||
     evidence.controllerReviewReceipt.materializationReceiptSha256 !==
       request.materializationReceiptSha256 ||
     request.controllerReviewReceiptSha256 !==
       sha256(canonicalJsonBytes(evidence.controllerReviewReceipt)) ||
-    !hasExactKeys(evidence.authorizationReceipt, [
-      "schemaVersion",
+    evidence.controllerReviewReceipt.reviewerClass !==
+      "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
+    evidence.controllerReviewReceipt.critical !== 0 ||
+    evidence.controllerReviewReceipt.important !== 0 ||
+    evidence.controllerReviewReceipt.verdict !== "PASS" ||
+    !hasExactKeys(authorization, [
       "controllerClass",
       "requestId",
       "operation",
+      "scope",
     ]) ||
-    evidence.authorizationReceipt.schemaVersion !==
-      "organization-identity-controller-authorization/v1" ||
-    evidence.authorizationReceipt.controllerClass !== "GITHUB" ||
-    evidence.authorizationReceipt.requestId !== request.requestId ||
-    evidence.authorizationReceipt.operation !== request.operation ||
+    authorization.controllerClass !== "GITHUB" ||
+    authorization.requestId !== request.requestId ||
+    authorization.operation !== request.operation ||
+    authorization.scope !== "EXACT_REQUEST_ONLY" ||
     request.authorizationReceiptSha256 !==
-      sha256(canonicalJsonBytes(evidence.authorizationReceipt))
+      sha256(Buffer.from(evidence.authorizationReceiptCanonicalBytes, "utf8"))
   ) {
     return integrity("GITHUB_CONTROLLER_EVIDENCE_INVALID");
   }
@@ -488,6 +539,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
+        inputRecordBytes: canonicalJsonBytes(request.payload),
       });
     case "PR_UPDATE_BODY":
       return pass({
@@ -502,6 +554,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
+        inputRecordBytes: canonicalJsonBytes(request.payload),
       });
     case "PR_READBACK":
       return pass({
@@ -544,6 +597,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
+        inputRecordBytes: canonicalJsonBytes(request.payload),
       });
     case "COMMIT_BRANCH_PARENT_READBACK":
       return pass({
@@ -588,6 +642,23 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
       return pass({
         ...common,
         executableRole: "GH",
+        preReadbacks: [
+          {
+            argv: [
+              "run",
+              "view",
+              String(request.payload.runId),
+              "--repo",
+              "mlhjyx/global-backend",
+              "--json",
+              "attempt,headSha",
+            ],
+            expected: {
+              runAttempt: request.payload.runAttempt,
+              headSha: request.payload.expectedHeadSha,
+            },
+          },
+        ],
         argv: [
           "run",
           "rerun",
@@ -609,6 +680,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
+        inputRecordBytes: canonicalJsonBytes(request.payload),
       });
     default:
       return integrity("GITHUB_CONTROLLER_OPERATION_INVALID");

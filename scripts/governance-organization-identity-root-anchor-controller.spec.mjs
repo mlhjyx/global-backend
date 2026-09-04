@@ -111,8 +111,84 @@ function contract(overrides = {}) {
   };
 }
 
-function request(overrides = {}) {
+function upstreamEvidence() {
+  const controllerContract = contract();
+  const materializationReceipt = {
+    schemaVersion:
+      "organization-identity-external-controller-materialization/v1",
+    controllerClass: "ROOT_ANCHOR",
+    contractSha256: digest(canonicalBytes(controllerContract)),
+    controllerSourceSha256: controllerContract.controllerSource.sha256,
+    rootDirectorySha256: SHA,
+    requestRootSha256: SHA,
+    outputRootSha256: SHA,
+    ownerUid: 0,
+    ownerGid: 0,
+    directoryMode: 0o700,
+    controllerMode: 0o500,
+    recordMode: 0o600,
+    executableClosureSetSha256: digest(
+      canonicalBytes(controllerContract.executableClosure),
+    ),
+    environmentSchemaSha256: SHA,
+    prePostToctouSha256: SHA,
+    result: "PASS",
+  };
+  const controllerReviewReceipt = {
+    schemaVersion: "organization-identity-controller-review/v1",
+    controllerClass: "ROOT_ANCHOR",
+    contractSha256: materializationReceipt.contractSha256,
+    materializationReceiptSha256: digest(
+      canonicalBytes(materializationReceipt),
+    ),
+    requestSchemaSha256: SHA,
+    reportSha256: SHA,
+    counterexampleSetSha256: SHA,
+    reviewerClass: "INDEPENDENT_CONTROLLER_SECURITY_REVIEW",
+    critical: 0,
+    important: 0,
+    verdict: "PASS",
+  };
   return {
+    materializationReceipt,
+    controllerReviewReceipt,
+    authorizationReceipt: {
+      controllerClass: "ROOT_ANCHOR",
+      requestId: SHA,
+      scope: "EXACT_REQUEST_ONLY",
+    },
+    localLauncherEvidence: {
+      schemaVersion: "organization-identity-launcher-materialization-review/v1",
+      verdict: "PASS",
+    },
+    bootstrapContract: {
+      schemaVersion: "organization-identity-bootstrap-contract/v2",
+    },
+    githubControllerEvidence: {
+      schemaVersion: "organization-identity-github-controller-receipt/v1",
+      result: "PASS",
+    },
+    protectedBaseEvidence: {
+      schemaVersion: "organization-identity-protected-base-launcher-receipt/v1",
+      result: "PASS",
+    },
+    admittedRefreshAcceptanceEvidence: {
+      schemaVersion: "organization-identity-writer-acceptance/v1",
+    },
+    workflowRunEvidence: {
+      schemaVersion: "organization-identity-workflow-run-evidence/v1",
+      result: "PASS",
+    },
+    controllerVariableWriteReceipt: {
+      schemaVersion: "organization-identity-github-controller-receipt/v1",
+      operation: "CONTROLLER_VARIABLES_WRITE",
+      result: "PASS",
+    },
+  };
+}
+
+function request(overrides = {}) {
+  const result = {
     schemaVersion: "organization-identity-root-anchor-write-request/v1",
     requestId: SHA,
     contractSha256: digest(canonicalBytes(contract())),
@@ -139,6 +215,25 @@ function request(overrides = {}) {
     writeReceiptPath: WRITE_RECEIPT,
     ...overrides,
   };
+  const evidence = upstreamEvidence();
+  const bindings = {
+    materializationReceiptSha256: "materializationReceipt",
+    controllerReviewReceiptSha256: "controllerReviewReceipt",
+    authorizationReceiptSha256: "authorizationReceipt",
+    localLauncherEvidenceSha256: "localLauncherEvidence",
+    bootstrapContractSha256: "bootstrapContract",
+    githubControllerEvidenceSha256: "githubControllerEvidence",
+    protectedBaseEvidenceSha256: "protectedBaseEvidence",
+    admittedRefreshAcceptanceEvidenceSha256:
+      "admittedRefreshAcceptanceEvidence",
+    workflowRunEvidenceSha256: "workflowRunEvidence",
+    controllerVariableWriteReceiptSha256: "controllerVariableWriteReceipt",
+  };
+  for (const [field, record] of Object.entries(bindings)) {
+    if (!(field in overrides))
+      result[field] = digest(canonicalBytes(evidence[record]));
+  }
+  return result;
 }
 
 test("root-anchor contract fixes one genesis target and create-exclusive fsync policy", () => {
@@ -171,7 +266,12 @@ test("root-anchor requests reject extra targets, stale predecessors, missing aut
     canonicalAnchorPayloadSize: 42,
   };
   assert.equal(
-    validateRootAnchorWriteRequest(request(), contract(), expected).status,
+    validateRootAnchorWriteRequest(
+      request(),
+      contract(),
+      expected,
+      upstreamEvidence(),
+    ).status,
     "PASS",
   );
   for (const mutation of [
@@ -191,8 +291,12 @@ test("root-anchor requests reject extra targets, stale predecessors, missing aut
     { extraFile: "/tmp/other" },
   ]) {
     assert.equal(
-      validateRootAnchorWriteRequest(request(mutation), contract(), expected)
-        .status,
+      validateRootAnchorWriteRequest(
+        request(mutation),
+        contract(),
+        expected,
+        upstreamEvidence(),
+      ).status,
       "INTEGRITY_ERROR",
     );
   }
@@ -218,7 +322,13 @@ test("root-anchor planner holds before any write on pre-existing, linked, nonreg
   ];
   for (const observation of observations) {
     assert.deepEqual(
-      planRootAnchorWrite(request(), contract(), observation, expected),
+      planRootAnchorWrite(
+        request(),
+        contract(),
+        observation,
+        expected,
+        upstreamEvidence(),
+      ),
       {
         status: "ROOT_ANCHOR_WRITE_HOLD",
         code: "ROOT_ANCHOR_TARGET_INVALID",
@@ -239,6 +349,7 @@ test("root-anchor planner holds before any write on pre-existing, linked, nonreg
         directoryMode: 0o700,
       },
       expected,
+      upstreamEvidence(),
     ),
     {
       status: "PASS",
@@ -280,9 +391,11 @@ test("root-anchor controller writes and reads back a canonical anchor in a bound
     request: writeRequest,
     contract: contract(),
     expected,
+    upstreamEvidence: upstreamEvidence(),
     payloadBytes,
     fixture: {
       rootDirectory: fixtureRoot,
+      outputRoot,
       targetPath,
       writeReceiptPath,
       expectedUid: process.getuid(),
@@ -301,6 +414,7 @@ test("root-anchor controller writes and reads back a canonical anchor in a bound
     writeReceipt: written.writeReceipt,
     fixture: {
       rootDirectory: fixtureRoot,
+      outputRoot,
       targetPath,
       readbackReceiptPath,
       expectedUid: process.getuid(),
@@ -318,9 +432,11 @@ test("root-anchor controller writes and reads back a canonical anchor in a bound
         request: writeRequest,
         contract: contract(),
         expected,
+        upstreamEvidence: upstreamEvidence(),
         payloadBytes,
         fixture: {
           rootDirectory: fixtureRoot,
+          outputRoot,
           targetPath,
           writeReceiptPath: path.join(outputRoot, "second-write.json"),
           expectedUid: process.getuid(),
@@ -355,9 +471,11 @@ test("root-anchor fixture refuses symlink targets and broader parent mode", asyn
     request: writeRequest,
     contract: contract(),
     expected,
+    upstreamEvidence: upstreamEvidence(),
     payloadBytes,
     fixture: {
       rootDirectory: fixtureRoot,
+      outputRoot: fixtureRoot,
       targetPath,
       writeReceiptPath: path.join(fixtureRoot, "write.json"),
       expectedUid: process.getuid(),
@@ -376,15 +494,81 @@ test("root-anchor fixture refuses symlink targets and broader parent mode", asyn
   );
 });
 
+test("root-anchor fixture confines write and readback receipts beneath its verified output root", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-anchor-confine-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  await chmod(fixtureRoot, 0o700);
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await mkdir(outputRoot, { mode: 0o700 });
+  const payloadBytes = canonicalBytes({ fixture: "confined" });
+  const writeRequest = request({
+    canonicalAnchorPayloadSha256: digest(payloadBytes),
+    canonicalAnchorPayloadSize: payloadBytes.length,
+  });
+  const expected = {
+    orderedMergeParents: writeRequest.orderedMergeParents,
+    canonicalAnchorPayloadSha256: writeRequest.canonicalAnchorPayloadSha256,
+    canonicalAnchorPayloadSize: writeRequest.canonicalAnchorPayloadSize,
+  };
+  const escaped = path.join(
+    os.tmpdir(),
+    `escaped-${writeRequest.requestId}.json`,
+  );
+  t.after(() => rm(escaped, { force: true }));
+  const result = await materializeRootAnchor({
+    request: writeRequest,
+    contract: contract(),
+    expected,
+    upstreamEvidence: upstreamEvidence(),
+    payloadBytes,
+    fixture: {
+      rootDirectory: fixtureRoot,
+      outputRoot,
+      targetPath: path.join(fixtureRoot, "anchor.json"),
+      writeReceiptPath: escaped,
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+  });
+  assert.equal(result.status, "ROOT_ANCHOR_WRITE_HOLD");
+  await assert.rejects(readFile(escaped));
+
+  const outside = await mkdtemp(
+    path.join(os.tmpdir(), "identity-anchor-outside-"),
+  );
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const linkedOutput = path.join(fixtureRoot, "linked-output");
+  await symlink(outside, linkedOutput);
+  const linked = await materializeRootAnchor({
+    request: writeRequest,
+    contract: contract(),
+    expected,
+    upstreamEvidence: upstreamEvidence(),
+    payloadBytes,
+    fixture: {
+      rootDirectory: fixtureRoot,
+      outputRoot: linkedOutput,
+      targetPath: path.join(fixtureRoot, "second-anchor.json"),
+      writeReceiptPath: path.join(linkedOutput, "write.json"),
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+  });
+  assert.equal(linked.status, "ROOT_ANCHOR_WRITE_HOLD");
+  await assert.rejects(readFile(path.join(outside, "write.json")));
+});
+
 function writeReceipt(overrides = {}) {
   const writeRequest = request();
   return {
     schemaVersion: "organization-identity-root-anchor-write-receipt/v1",
     contractSha256: writeRequest.contractSha256,
-    materializationReceiptSha256: SHA,
-    controllerReviewReceiptSha256: SHA,
+    materializationReceiptSha256: writeRequest.materializationReceiptSha256,
+    controllerReviewReceiptSha256: writeRequest.controllerReviewReceiptSha256,
     requestSha256: digest(canonicalBytes(writeRequest)),
-    authorizationReceiptSha256: SHA,
+    authorizationReceiptSha256: writeRequest.authorizationReceiptSha256,
     targetPath: ANCHOR,
     anchorSha256: "b".repeat(64),
     anchorSize: 42,

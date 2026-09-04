@@ -15,9 +15,9 @@ const DEFAULT_OUTPUT_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
 export const APPROVED_PLAN = Object.freeze({
   path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-  commit: "543c9416b4bc18be4bde37825f4fcd74a78c229c",
-  blobId: "ff6a8dd57f90b2a95b6a32e4ea2bd4ca8f6bcf8c",
-  sha256: "05bf739511871466a57a002031930da1166fa4f40c71390bafb2f38421b811f9",
+  commit: "e8a2b2aa08ed5933b3228cc5dd24c468d0f417c2",
+  blobId: "6e6234913f00c9bf496ccdeb3eb60bad88fc9691",
+  sha256: "3bd1c56dff6c2f284b5f34a7ee16c8d14ba0a44069abf0c3aa8ab4c47b78555f",
 });
 export const APPROVED_SPEC = Object.freeze({
   path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -635,6 +635,16 @@ function invocationDescriptor(request) {
             ["commit", "--message", parameters.commitMessage],
             [
               {
+                phase: "BEFORE",
+                argv: ["rev-parse", "HEAD"],
+                expected: parameters.expectedFirstParent,
+              },
+              {
+                phase: "BEFORE",
+                argv: ["rev-parse", "MERGE_HEAD"],
+                expected: parameters.expectedSecondParent,
+              },
+              {
                 phase: "AFTER",
                 argv: ["rev-parse", "HEAD^1"],
                 expected: parameters.expectedFirstParent,
@@ -663,6 +673,11 @@ function invocationDescriptor(request) {
             request,
             ["commit", "--message", parameters.commitMessage],
             [
+              {
+                phase: "BEFORE",
+                argv: ["rev-parse", "HEAD"],
+                expected: parameters.expectedParent,
+              },
               {
                 phase: "AFTER",
                 argv: ["rev-parse", "HEAD^"],
@@ -699,6 +714,16 @@ function invocationDescriptor(request) {
               parameters.mergeCommit,
             ],
             [
+              {
+                phase: "BEFORE",
+                argv: ["rev-parse", "HEAD"],
+                expected: request.subjectCommit,
+              },
+              {
+                phase: "BEFORE",
+                argv: ["worktree", "list", "--porcelain"],
+                expectedAbsentPath: parameters.worktreePath,
+              },
               {
                 phase: "AFTER",
                 argv: ["-C", parameters.worktreePath, "rev-parse", "HEAD"],
@@ -927,10 +952,31 @@ export async function dispatchClosedCommand(request, verifiedContext = {}) {
     mode: request.mode,
     ...validation.invocation,
   };
-  if (typeof verifiedContext.loadDependency === "function") {
-    await verifiedContext.loadDependency(invocation);
+  if (invocation.executableRole === "GIT") {
+    const worktree = verifiedContext.verifiedWorktree;
+    if (
+      !exactKeys(worktree, ["path", "subjectCommit"]) ||
+      !isAbsoluteNormalized(worktree.path) ||
+      worktree.subjectCommit !== request.subjectCommit
+    ) {
+      return integrity("VERIFIED_WORKTREE_REQUIRED");
+    }
+    invocation.cwd = worktree.path;
   }
-  return pass({ invocation });
+  let executionResult = null;
+  if (typeof verifiedContext.loadDependency === "function") {
+    try {
+      executionResult = await verifiedContext.loadDependency(invocation);
+    } catch {
+      return integrity("EXECUTOR_THROWN");
+    }
+    if (executionResult?.status !== "PASS") {
+      return executionResult?.status === "INTEGRITY_ERROR"
+        ? executionResult
+        : integrity("EXECUTOR_RESULT_INVALID");
+    }
+  }
+  return pass({ invocation, executionResult });
 }
 
 export function verifyExecutableClosure(expectedEntries, observedEntries) {
@@ -1256,6 +1302,7 @@ function validateToolRootReceipt(receipt) {
 }
 
 export function validateBootstrapRunReceipt(receipt, request) {
+  if (!request) return integrity("BOOTSTRAP_RECEIPT_PREDECESSOR_REQUIRED");
   if (
     !exactKeys(receipt, BOOTSTRAP_RECEIPT_KEYS) ||
     receipt.schemaVersion !== "organization-identity-bootstrap-run/v2" ||
@@ -1321,45 +1368,44 @@ export function validateBootstrapRunReceipt(receipt, request) {
   ) {
     return integrity("BOOTSTRAP_RECEIPT_INVALID");
   }
-  if (request) {
-    const pairs = [
-      [receipt.bootstrapContractSha256, request.bootstrapContractSha256],
-      [
-        receipt.launcherMaterializationReceiptSha256,
-        request.launcherMaterializationReceiptSha256,
-      ],
-      [
-        receipt.launcherMaterializationReviewReceiptSha256,
-        request.launcherMaterializationReviewReceiptSha256,
-      ],
-      [receipt.requestId, request.requestId],
-      [receipt.taskId, request.taskId],
-      [receipt.commandId, request.commandId],
-      [receipt.mode, request.mode],
-      [receipt.inputRecordPath, request.input.inputRecordPath],
-      [receipt.inputRecordUri, request.input.inputRecordUri],
-      [receipt.inputRecordSha256, request.input.inputRecordSha256],
-      [receipt.payloadSchemaSha256, request.input.payloadSchemaSha256],
-      [receipt.payloadSha256, request.input.payloadSha256],
-      [receipt.outputRecordPath, request.input.outputRecordPath],
-      [receipt.authorizationReceiptSha256, request.authorizationReceiptSha256],
-      [
-        receipt.externalControllerReceiptSha256,
-        request.externalControllerReceiptSha256,
-      ],
-      [receipt.anchorReceiptSha256, request.anchorReceiptSha256],
-      [receipt.acceptedSubjectCommit, request.subjectCommit],
-      [receipt.closedCommandRequestSha256, sha256(canonicalJsonBytes(request))],
-    ];
-    if (pairs.some(([actual, expected]) => actual !== expected)) {
-      return integrity("BOOTSTRAP_RECEIPT_BINDING_INVALID");
-    }
+  const pairs = [
+    [receipt.bootstrapContractSha256, request.bootstrapContractSha256],
+    [
+      receipt.launcherMaterializationReceiptSha256,
+      request.launcherMaterializationReceiptSha256,
+    ],
+    [
+      receipt.launcherMaterializationReviewReceiptSha256,
+      request.launcherMaterializationReviewReceiptSha256,
+    ],
+    [receipt.requestId, request.requestId],
+    [receipt.taskId, request.taskId],
+    [receipt.commandId, request.commandId],
+    [receipt.mode, request.mode],
+    [receipt.inputRecordPath, request.input.inputRecordPath],
+    [receipt.inputRecordUri, request.input.inputRecordUri],
+    [receipt.inputRecordSha256, request.input.inputRecordSha256],
+    [receipt.payloadSchemaSha256, request.input.payloadSchemaSha256],
+    [receipt.payloadSha256, request.input.payloadSha256],
+    [receipt.outputRecordPath, request.input.outputRecordPath],
+    [receipt.authorizationReceiptSha256, request.authorizationReceiptSha256],
+    [
+      receipt.externalControllerReceiptSha256,
+      request.externalControllerReceiptSha256,
+    ],
+    [receipt.anchorReceiptSha256, request.anchorReceiptSha256],
+    [receipt.acceptedSubjectCommit, request.subjectCommit],
+    [receipt.closedCommandRequestSha256, sha256(canonicalJsonBytes(request))],
+  ];
+  if (pairs.some(([actual, expected]) => actual !== expected)) {
+    return integrity("BOOTSTRAP_RECEIPT_BINDING_INVALID");
   }
   return pass();
 }
 
-export function validateBootstrapRunReceiptSet(receiptSet) {
+export function validateBootstrapRunReceiptSet(receiptSet, records) {
   if (
+    !Array.isArray(records) ||
     !exactKeys(receiptSet, [
       "schemaVersion",
       "taskId",
@@ -1374,6 +1420,7 @@ export function validateBootstrapRunReceiptSet(receiptSet) {
     !Number.isSafeInteger(receiptSet.receiptCount) ||
     !Array.isArray(receiptSet.receipts) ||
     receiptSet.receiptCount !== receiptSet.receipts.length ||
+    records.length !== receiptSet.receiptCount ||
     !isSha(receiptSet.receiptSetSha256)
   ) {
     return integrity("BOOTSTRAP_RECEIPT_SET_INVALID");
@@ -1388,6 +1435,21 @@ export function validateBootstrapRunReceiptSet(receiptSet) {
       !isSha(entry.receiptSha256)
     ) {
       return integrity("BOOTSTRAP_RECEIPT_SET_INVALID");
+    }
+  }
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    const entry = receiptSet.receipts[index];
+    if (
+      !exactKeys(record, ["request", "receipt"]) ||
+      validateBootstrapRunReceipt(record.receipt, record.request).status !==
+        "PASS" ||
+      entry.requestId !== record.request.requestId ||
+      entry.commandId !== record.request.commandId ||
+      entry.requestSha256 !== sha256(canonicalJsonBytes(record.request)) ||
+      entry.receiptSha256 !== sha256(canonicalJsonBytes(record.receipt))
+    ) {
+      return integrity("BOOTSTRAP_RECEIPT_SET_BINDING_INVALID");
     }
   }
   const requestIds = receiptSet.receipts.map(({ requestId }) => requestId);
@@ -1907,9 +1969,10 @@ async function finalizeOutput(handle, outputPath, value) {
   }
 }
 
-function runClosedProcess(executablePath, argv, environment) {
+function runClosedProcess(executablePath, argv, environment, cwd) {
   const result = spawnSync(executablePath, argv, {
     env: environment,
+    cwd,
     encoding: "utf8",
     shell: false,
     timeout: 60_000,
@@ -1930,8 +1993,13 @@ function runClosedProcess(executablePath, argv, environment) {
   });
 }
 
-function verifyReadback(readback, executablePath, environment) {
-  const result = runClosedProcess(executablePath, readback.argv, environment);
+function verifyReadback(readback, executablePath, environment, cwd) {
+  const result = runClosedProcess(
+    executablePath,
+    readback.argv,
+    environment,
+    cwd,
+  );
   if (result.status !== "PASS") return result;
   const normalized = result.stdout.trim();
   if (readback.expected !== undefined && normalized !== readback.expected) {
@@ -1958,6 +2026,12 @@ function verifyReadback(readback, executablePath, environment) {
       return integrity("CLOSED_PROCESS_READBACK_MISMATCH");
     }
   }
+  if (
+    readback.expectedAbsentPath !== undefined &&
+    result.stdout.includes(readback.expectedAbsentPath)
+  ) {
+    return integrity("CLOSED_PROCESS_READBACK_MISMATCH");
+  }
   return pass({ resultSha256: result.resultSha256 });
 }
 
@@ -1982,17 +2056,28 @@ export async function executeClosedInvocation(invocation, trust, environment) {
     ? invocation.readbacks
     : [];
   for (const readback of readbacks.filter(({ phase }) => phase === "BEFORE")) {
-    const checked = verifyReadback(readback, executablePath, environment);
+    const checked = verifyReadback(
+      readback,
+      executablePath,
+      environment,
+      invocation.cwd,
+    );
     if (checked.status !== "PASS") return checked;
   }
   const executed = runClosedProcess(
     executablePath,
     invocation.argv,
     environment,
+    invocation.cwd,
   );
   if (executed.status !== "PASS") return executed;
   for (const readback of readbacks.filter(({ phase }) => phase === "AFTER")) {
-    const checked = verifyReadback(readback, executablePath, environment);
+    const checked = verifyReadback(
+      readback,
+      executablePath,
+      environment,
+      invocation.cwd,
+    );
     if (checked.status !== "PASS") return checked;
   }
   return pass({ outputRecordSha256: executed.resultSha256 });
@@ -2088,15 +2173,14 @@ export async function runLauncherCli(argv, options = {}) {
       expectedMode: 0o600,
     });
   }
-  const reservation = await createExclusiveOutput(
-    request.input.outputRecordPath,
-    {
-      expectedUid,
-      expectedGid,
-    },
-  );
-  if (reservation.status !== "PASS")
-    return { exitCode: 71, result: reservation };
+  try {
+    await lstat(request.input.outputRecordPath, { bigint: true });
+    return { exitCode: 71, result: integrity("OUTPUT_ALREADY_EXISTS") };
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      return { exitCode: 71, result: integrity("OUTPUT_STATE_UNAVAILABLE") };
+    }
+  }
   const executeInvocation =
     options.executeInvocation ??
     ((invocation) =>
@@ -2120,6 +2204,7 @@ export async function runLauncherCli(argv, options = {}) {
     inputRecordBytes: inputFile.bytes,
     outputExists: false,
     requestReplaySet: replaySet,
+    verifiedWorktree: trust.verifiedWorktree ?? options.verifiedWorktree,
     preDispatchReverify: async () => {
       const [requestAgain, inputAgain] = await Promise.all([
         verifyControlledFile(argv[1], {
@@ -2157,26 +2242,36 @@ export async function runLauncherCli(argv, options = {}) {
     },
     loadDependency: executeInvocation,
   });
-  const output = {
-    schemaVersion: "organization-identity-closed-command-output/v1",
-    requestId: request.requestId,
-    commandId: request.commandId,
-    mode: request.mode,
-    invocationSha256:
-      dispatched.status === "PASS"
-        ? sha256(canonicalJsonBytes(dispatched.invocation))
-        : null,
-    result: dispatched.status === "PASS" ? "PASS" : "HOLD",
-  };
-  const finalized = await finalizeOutput(
-    reservation.handle,
+  if (dispatched.status !== "PASS") {
+    return { exitCode: 73, result: dispatched };
+  }
+  const receiptFile = await verifyControlledFile(
     request.input.outputRecordPath,
-    output,
+    {
+      expectedSha256: dispatched.executionResult?.receiptSha256,
+      expectedMode: 0o600,
+      expectedUid,
+      expectedGid,
+    },
   );
-  if (finalized.status !== "PASS") return { exitCode: 72, result: finalized };
+  if (receiptFile.status !== "PASS") {
+    return { exitCode: 72, result: receiptFile };
+  }
+  let receipt;
+  try {
+    receipt = JSON.parse(receiptFile.bytes.toString("utf8"));
+  } catch {
+    return { exitCode: 72, result: integrity("BOOTSTRAP_RECEIPT_INVALID") };
+  }
+  if (
+    !receiptFile.bytes.equals(canonicalJsonBytes(receipt)) ||
+    validateBootstrapRunReceipt(receipt, request).status !== "PASS"
+  ) {
+    return { exitCode: 72, result: integrity("BOOTSTRAP_RECEIPT_INVALID") };
+  }
   return {
-    exitCode: dispatched.status === "PASS" ? 0 : 73,
-    result: dispatched,
+    exitCode: 0,
+    result: pass({ receipt }),
   };
 }
 

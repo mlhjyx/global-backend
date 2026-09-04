@@ -370,6 +370,10 @@ test("every local command builds a complete executable descriptor from typed inp
       requestReplaySet: new Set(),
       outputExists: false,
       preDispatchReverify: async () => ({ status: "PASS" }),
+      verifiedWorktree: {
+        path: "/controlled/worktree",
+        subjectCommit: request.subjectCommit,
+      },
     });
     assert.equal(result.status, "PASS", commandId);
     assert.equal(result.invocation.argv.length > 2, true, commandId);
@@ -405,12 +409,21 @@ test("Git descriptors retain exact state preconditions and immutable targets", a
       requestReplaySet: new Set(),
       outputExists: false,
       preDispatchReverify: async () => ({ status: "PASS" }),
+      verifiedWorktree: {
+        path: "/controlled/worktree",
+        subjectCommit: request.subjectCommit,
+      },
     });
     assert.equal(result.status, "PASS");
     assert.equal(
       canonical(result.invocation.preconditions),
       canonical(parameters),
     );
+    assert.equal(result.invocation.cwd, "/controlled/worktree");
+    const beforeReadbacks = result.invocation.readbacks.filter(
+      ({ phase }) => phase === "BEFORE",
+    );
+    assert.equal(beforeReadbacks.length > 0, true);
     assert.equal(canonical(result.invocation).includes(COMMIT), true);
     if (commandId === "GIT_REFRESH_START_V1") {
       assert.equal(
@@ -421,6 +434,33 @@ test("Git descriptors retain exact state preconditions and immutable targets", a
       );
     }
   }
+});
+
+test("Git dispatch rejects an unverified caller CWD before loading", async () => {
+  const [mode, parameters] = commandFixture("GIT_ACCEPTANCE_COMMIT_V1");
+  const request = validRequest({
+    commandId: "GIT_ACCEPTANCE_COMMIT_V1",
+    mode,
+    parameters,
+  });
+  let loads = 0;
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    requestReplaySet: new Set(),
+    outputExists: false,
+    preDispatchReverify: async () => ({ status: "PASS" }),
+    loadDependency: async () => {
+      loads += 1;
+      return { status: "PASS" };
+    },
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "VERIFIED_WORKTREE_REQUIRED",
+  });
+  assert.equal(loads, 0);
 });
 
 test("parses a canonical request into a null-prototype record", () => {
@@ -645,10 +685,10 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
     },
     approvedPlan: {
       path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-      commit: "543c9416b4bc18be4bde37825f4fcd74a78c229c",
-      blobId: "ff6a8dd57f90b2a95b6a32e4ea2bd4ca8f6bcf8c",
+      commit: "e8a2b2aa08ed5933b3228cc5dd24c468d0f417c2",
+      blobId: "6e6234913f00c9bf496ccdeb3eb60bad88fc9691",
       sha256:
-        "05bf739511871466a57a002031930da1166fa4f40c71390bafb2f38421b811f9",
+        "3bd1c56dff6c2f284b5f34a7ee16c8d14ba0a44069abf0c3aa8ab4c47b78555f",
     },
     approvedSpec: {
       path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -683,6 +723,19 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
   };
   const verified = verifyLauncherContract(contract, observed);
   assert.equal(verified.status, "PASS", verified.code);
+  assert.equal(
+    verifyLauncherContract(
+      {
+        ...contract,
+        approvedPlan: {
+          ...contract.approvedPlan,
+          commit: "543c9416b4bc18be4bde37825f4fcd74a78c229c",
+        },
+      },
+      observed,
+    ).status,
+    "INTEGRITY_ERROR",
+  );
   assert.equal(
     verifyLauncherContract(
       { ...contract, commandRegistrySha256: SHA },
@@ -740,13 +793,18 @@ test("dispatch revalidates typed input and TOCTOU before one dependency load", a
     inputRecordBytes: canonicalJsonBytes(request.parameters),
     requestReplaySet: new Set(),
     outputExists: false,
+    verifiedWorktree: { path: process.cwd(), subjectCommit: COMMIT },
     preDispatchReverify: async () => {
       reverifyCount += 1;
       return { status: "PASS" };
     },
     loadDependency: async (invocation) => {
       dependencyLoadCount += 1;
-      return invocation;
+      return {
+        status: "PASS",
+        invocation,
+        executionResult: { status: "PASS" },
+      };
     },
   };
   const result = await dispatchClosedCommand(request, context);
@@ -882,6 +940,12 @@ test("launcher CLI reads canonical request/input, reserves output once, and disp
   );
   const requestPath = path.join(requestRoot, "request.json");
   await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
+  const candidateReceipt = bootstrapReceipt({}, request);
+  const candidateValidation = validateBootstrapRunReceipt(
+    candidateReceipt,
+    request,
+  );
+  assert.equal(candidateValidation.status, "PASS", candidateValidation.code);
   let executionCount = 0;
   const options = {
     requestRoot,
@@ -894,7 +958,13 @@ test("launcher CLI reads canonical request/input, reserves output once, and disp
     },
     executeInvocation: async () => {
       executionCount += 1;
-      return { status: "PASS", outputRecordSha256: SHA };
+      const receipt = candidateReceipt;
+      const receiptBytes = canonicalJsonBytes(receipt);
+      await writeFile(request.input.outputRecordPath, receiptBytes, {
+        mode: 0o600,
+        flag: "wx",
+      });
+      return { status: "PASS", receiptSha256: sha(receiptBytes) };
     },
   };
   assert.notEqual(
@@ -907,21 +977,124 @@ test("launcher CLI reads canonical request/input, reserves output once, and disp
     0,
   );
   assert.equal(executionCount, 0);
-  assert.equal(
-    (await runLauncherCli(["--request", requestPath], options)).exitCode,
-    0,
-  );
+  const launched = await runLauncherCli(["--request", requestPath], options);
+  assert.equal(launched.exitCode, 0, launched.result?.code);
   const output = JSON.parse(
     await readFile(request.input.outputRecordPath, "utf8"),
   );
   assert.equal(output.requestId, request.requestId);
   assert.equal(output.result, "PASS");
+  assert.equal(output.schemaVersion, "organization-identity-bootstrap-run/v2");
   assert.equal(executionCount, 1);
   assert.notEqual(
     (await runLauncherCli(["--request", requestPath], options)).exitCode,
     0,
   );
   assert.equal(executionCount, 1);
+});
+
+test("dispatcher and CLI propagate returned and thrown executor failures without PASS output", async (t) => {
+  const request = validRequest();
+  const baseContext = {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    requestReplaySet: new Set(),
+    outputExists: false,
+    preDispatchReverify: async () => ({ status: "PASS" }),
+  };
+  assert.deepEqual(
+    await dispatchClosedCommand(request, {
+      ...baseContext,
+      loadDependency: async () => ({
+        status: "INTEGRITY_ERROR",
+        code: "PROCESS_FAILED",
+      }),
+    }),
+    { status: "INTEGRITY_ERROR", code: "PROCESS_FAILED" },
+  );
+  assert.deepEqual(
+    await dispatchClosedCommand(request, {
+      ...baseContext,
+      requestReplaySet: new Set(),
+      loadDependency: async () => {
+        throw new Error("hostile executor failure");
+      },
+    }),
+    { status: "INTEGRITY_ERROR", code: "EXECUTOR_THROWN" },
+  );
+
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-cli-fail-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const requestRoot = path.join(fixtureRoot, "requests");
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(requestRoot, { mode: 0o700 });
+  await mkdir(outputRoot, { mode: 0o700 });
+  const failedRequest = validRequest({ requestRoot, outputRoot });
+  await writeFile(
+    failedRequest.input.inputRecordPath,
+    canonicalJsonBytes(failedRequest.parameters),
+    { mode: 0o600 },
+  );
+  const requestPath = path.join(requestRoot, "request.json");
+  await writeFile(requestPath, canonicalJsonBytes(failedRequest), {
+    mode: 0o600,
+  });
+  const result = await runLauncherCli(["--request", requestPath], {
+    requestRoot,
+    outputRoot,
+    expectedUid: process.getuid(),
+    expectedGid: process.getgid(),
+    verifyTrust: async () => ({ status: "PASS" }),
+    executeInvocation: async () => ({
+      status: "INTEGRITY_ERROR",
+      code: "PROCESS_FAILED",
+    }),
+  });
+  assert.notEqual(result.exitCode, 0);
+  await assert.rejects(readFile(failedRequest.input.outputRecordPath));
+});
+
+test("launcher rejects executor PASS without exactly one bound BootstrapRunReceipt", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-cli-receipt-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const requestRoot = path.join(fixtureRoot, "requests");
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(requestRoot, { mode: 0o700 });
+  await mkdir(outputRoot, { mode: 0o700 });
+  const request = validRequest({ requestRoot, outputRoot });
+  await writeFile(
+    request.input.inputRecordPath,
+    canonicalJsonBytes(request.parameters),
+    { mode: 0o600 },
+  );
+  const requestPath = path.join(requestRoot, "request.json");
+  await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
+  const options = {
+    requestRoot,
+    outputRoot,
+    expectedUid: process.getuid(),
+    expectedGid: process.getgid(),
+    verifyTrust: async () => ({ status: "PASS" }),
+    executeInvocation: async () => ({ status: "PASS" }),
+  };
+  const missing = await runLauncherCli(["--request", requestPath], options);
+  assert.notEqual(missing.exitCode, 0);
+
+  const wrongReceipt = bootstrapReceipt({ requestId: "f".repeat(64) }, request);
+  await writeFile(
+    request.input.outputRecordPath,
+    canonicalJsonBytes(wrongReceipt),
+    { mode: 0o600, flag: "wx" },
+  );
+  const reused = await runLauncherCli(["--request", requestPath], options);
+  assert.notEqual(reused.exitCode, 0);
 });
 
 test("closed executor rejects inherited loader names before hostile marker execution", async (t) => {
@@ -1043,8 +1216,7 @@ test("renders a wrapper that accepts one absolute request and clears inherited N
   );
 });
 
-function bootstrapReceipt(overrides = {}) {
-  const request = validRequest();
+function bootstrapReceipt(overrides = {}, request = validRequest()) {
   return {
     schemaVersion: "organization-identity-bootstrap-run/v2",
     receiptCardinality: "ONE_COMMAND_ONE_RECEIPT",
@@ -1065,11 +1237,11 @@ function bootstrapReceipt(overrides = {}) {
     payloadSha256: request.input.payloadSha256,
     outputRecordPath: request.input.outputRecordPath,
     outputRecordSha256: SHA,
-    authorizationReceiptSha256: null,
-    externalControllerReceiptSha256: null,
-    anchorReceiptSha256: null,
+    authorizationReceiptSha256: request.authorizationReceiptSha256,
+    externalControllerReceiptSha256: request.externalControllerReceiptSha256,
+    anchorReceiptSha256: request.anchorReceiptSha256,
     externalLaunchReceiptSha256: SHA,
-    acceptedSubjectCommit: COMMIT,
+    acceptedSubjectCommit: request.subjectCommit,
     subjectConfigurationSetSha256: SHA,
     subjectAbsenceSentinelSetSha256: SHA,
     subjectGitClosureSha256: SHA,
@@ -1101,6 +1273,7 @@ test("validates one-command bootstrap receipts and rejects receipt reuse", () =>
   const request = validRequest();
   const receipt = bootstrapReceipt();
   assert.equal(validateBootstrapRunReceipt(receipt, request).status, "PASS");
+  assert.equal(validateBootstrapRunReceipt(receipt).status, "INTEGRITY_ERROR");
   assert.equal(
     validateBootstrapRunReceipt(
       { ...receipt, hostileMarkerExecutionCount: 1 },
@@ -1130,17 +1303,30 @@ test("validates one-command bootstrap receipts and rejects receipt reuse", () =>
     receipts: [entry],
     receiptSetSha256: sha(canonicalJsonBytes([entry])),
   };
-  assert.equal(validateBootstrapRunReceiptSet(receiptSet).status, "PASS");
+  assert.equal(
+    validateBootstrapRunReceiptSet(receiptSet, [{ request, receipt }]).status,
+    "PASS",
+  );
+  assert.equal(
+    validateBootstrapRunReceiptSet(receiptSet).status,
+    "INTEGRITY_ERROR",
+  );
   const reused = {
     ...receiptSet,
     receiptCount: 2,
     receipts: [entry, entry],
     receiptSetSha256: sha(canonicalJsonBytes([entry, entry])),
   };
-  assert.deepEqual(validateBootstrapRunReceiptSet(reused), {
-    status: "INTEGRITY_ERROR",
-    code: "BOOTSTRAP_RECEIPT_REPLAY",
-  });
+  assert.deepEqual(
+    validateBootstrapRunReceiptSet(reused, [
+      { request, receipt },
+      { request, receipt },
+    ]),
+    {
+      status: "INTEGRITY_ERROR",
+      code: "BOOTSTRAP_RECEIPT_REPLAY",
+    },
+  );
 });
 
 test("validates the one-way four-file launcher materialization receipt chain", () => {

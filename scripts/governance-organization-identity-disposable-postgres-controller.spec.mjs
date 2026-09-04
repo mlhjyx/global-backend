@@ -82,27 +82,49 @@ function contract(overrides = {}) {
 }
 
 function evidence(operation = "0M_COMPATIBILITY") {
+  const controllerContract = contract();
   const materializationReceipt = {
     schemaVersion:
       "organization-identity-external-controller-materialization/v1",
     controllerClass: "DISPOSABLE_POSTGRES",
-    contractSha256: digest(contract()),
+    contractSha256: digest(controllerContract),
+    controllerSourceSha256: controllerContract.controllerSourceSha256,
+    rootDirectorySha256: SHA,
+    requestRootSha256: SHA,
+    outputRootSha256: SHA,
+    ownerUid: 0,
+    ownerGid: 0,
+    directoryMode: 0o700,
+    controllerMode: 0o500,
+    recordMode: 0o600,
+    executableClosureSetSha256: digest(controllerContract.executableClosure),
+    environmentSchemaSha256: SHA,
+    prePostToctouSha256: SHA,
+    result: "PASS",
   };
   const controllerReviewReceipt = {
     schemaVersion: "organization-identity-controller-review/v1",
     controllerClass: "DISPOSABLE_POSTGRES",
+    contractSha256: materializationReceipt.contractSha256,
     materializationReceiptSha256: digest(materializationReceipt),
+    requestSchemaSha256: SHA,
+    reportSha256: SHA,
+    counterexampleSetSha256: SHA,
+    reviewerClass: "INDEPENDENT_CONTROLLER_SECURITY_REVIEW",
+    critical: 0,
+    important: 0,
+    verdict: "PASS",
   };
-  const authorizationReceipt = {
-    schemaVersion: "organization-identity-controller-authorization/v1",
+  const authorizationReceiptCanonicalBytes = `${canonical({
     controllerClass: "DISPOSABLE_POSTGRES",
     requestId: SHA,
     operation,
-  };
+    scope: "EXACT_REQUEST_ONLY",
+  })}\n`;
   return {
     materializationReceipt,
     controllerReviewReceipt,
-    authorizationReceipt,
+    authorizationReceiptCanonicalBytes,
   };
 }
 
@@ -139,9 +161,14 @@ function request(overrides = {}) {
   for (const [key, record] of [
     ["materializationReceiptSha256", records.materializationReceipt],
     ["controllerReviewReceiptSha256", records.controllerReviewReceipt],
-    ["authorizationReceiptSha256", records.authorizationReceipt],
+    ["authorizationReceiptSha256", records.authorizationReceiptCanonicalBytes],
   ]) {
-    if (!(key in overrides)) result[key] = digest(record);
+    if (!(key in overrides)) {
+      result[key] =
+        typeof record === "string"
+          ? createHash("sha256").update(record).digest("hex")
+          : digest(record);
+    }
   }
   return result;
 }
@@ -225,6 +252,23 @@ test("disposable invocation remains a closed controller operation", () => {
   assert.equal(
     result.preconditions.cleanupPlanSha256,
     request().cleanupPlanSha256,
+  );
+  const serialized = JSON.stringify(result.operationPlan);
+  for (const flag of [
+    "--cpus",
+    "--memory",
+    "--pids-limit",
+    "--read-only",
+    "--tmpfs",
+  ]) {
+    assert.equal(serialized.includes(flag), true);
+  }
+  for (const role of roles) {
+    assert.equal(serialized.includes(`\"executableRole\":\"${role}\"`), true);
+  }
+  assert.deepEqual(
+    result.finallyPlan.map(({ phase }) => phase),
+    ["CLEANUP", "VERIFY_CLEANUP"],
   );
   assert.equal(JSON.stringify(result).includes("password"), false);
 });

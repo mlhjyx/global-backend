@@ -87,27 +87,51 @@ function contract(overrides = {}) {
 }
 
 function evidence(operation = "PROTECTED_MAIN_READBACK") {
+  const controllerContract = contract();
   const materializationReceipt = {
     schemaVersion:
       "organization-identity-external-controller-materialization/v1",
     controllerClass: "GITHUB",
-    contractSha256: sha(`${canonical(contract())}\n`),
+    contractSha256: sha(`${canonical(controllerContract)}\n`),
+    controllerSourceSha256: controllerContract.controllerSourceSha256,
+    rootDirectorySha256: SHA,
+    requestRootSha256: SHA,
+    outputRootSha256: SHA,
+    ownerUid: 0,
+    ownerGid: 0,
+    directoryMode: 0o700,
+    controllerMode: 0o500,
+    recordMode: 0o600,
+    executableClosureSetSha256: sha(
+      `${canonical(controllerContract.executableClosure)}\n`,
+    ),
+    environmentSchemaSha256: SHA,
+    prePostToctouSha256: SHA,
+    result: "PASS",
   };
   const controllerReviewReceipt = {
     schemaVersion: "organization-identity-controller-review/v1",
     controllerClass: "GITHUB",
+    contractSha256: materializationReceipt.contractSha256,
     materializationReceiptSha256: sha(`${canonical(materializationReceipt)}\n`),
+    requestSchemaSha256: SHA,
+    reportSha256: SHA,
+    counterexampleSetSha256: SHA,
+    reviewerClass: "INDEPENDENT_CONTROLLER_SECURITY_REVIEW",
+    critical: 0,
+    important: 0,
+    verdict: "PASS",
   };
-  const authorizationReceipt = {
-    schemaVersion: "organization-identity-controller-authorization/v1",
+  const authorizationReceiptCanonicalBytes = `${canonical({
     controllerClass: "GITHUB",
     requestId: SHA,
     operation,
-  };
+    scope: "EXACT_REQUEST_ONLY",
+  })}\n`;
   return {
     materializationReceipt,
     controllerReviewReceipt,
-    authorizationReceipt,
+    authorizationReceiptCanonicalBytes,
   };
 }
 
@@ -146,7 +170,7 @@ function request(overrides = {}) {
     `${canonical(records.controllerReviewReceipt)}\n`,
   );
   result.authorizationReceiptSha256 = sha(
-    `${canonical(records.authorizationReceipt)}\n`,
+    records.authorizationReceiptCanonicalBytes,
   );
   for (const key of [
     "materializationReceiptSha256",
@@ -363,6 +387,19 @@ test("every GitHub operation has one exact closed payload and invocation branch"
     assert.equal(invocation.status, "PASS");
     assert.equal(invocation.argv.includes("--closed-operation"), false);
     assert.equal(JSON.stringify(invocation).includes(operation), true);
+    if (invocation.inputPath) {
+      assert.equal(
+        sha(invocation.inputRecordBytes),
+        operationRequest.payloadSha256,
+      );
+      assert.equal(invocation.argv.includes(invocation.inputPath), true);
+    }
+    if (operation === "WORKFLOW_RERUN") {
+      assert.deepEqual(invocation.preReadbacks[0].expected, {
+        runAttempt: payload.runAttempt,
+        headSha: payload.expectedHeadSha,
+      });
+    }
   }
 });
 
