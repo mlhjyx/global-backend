@@ -42,6 +42,22 @@ describe('Crawl4aiPageFetcher — durable budget binding', () => {
     });
   });
 
+  it('does not swallow a robots physical-wire fence rejection as an ordinary miss', async () => {
+    const physicalFence = Object.assign(new Error('wire denied'), {
+      name: 'ExternalHttpPhysicalWireDeniedError',
+    });
+    vi.mocked(isAllowedByRobots).mockRejectedValueOnce(physicalFence);
+    const invoke = vi.fn();
+    const fetcher = new Crawl4aiPageFetcher({ invoke } as never);
+
+    await expect(fetcher.fetch('https://physical-fence.example/', {
+      workspaceId: 'platform', runId: 'intent-watch:source-1',
+      correlationId: 'intent-watch:source-1',
+      beforePhysicalWire: vi.fn(),
+    })).rejects.toBe(physicalFence);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it('does not downgrade replay loss to an ordinary page miss', async () => {
     const replayError = new BudgetOperationReplayError('crawl-op');
     const fetcher = new Crawl4aiPageFetcher({ invoke: vi.fn(async () => { throw replayError; }) } as never);
