@@ -21,9 +21,9 @@ const APPROVED_V2_BRANCH =
 const CLEAN_STATUS_SHA256 = sha256(Buffer.from("", "utf8"));
 export const APPROVED_PLAN = Object.freeze({
   path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-  commit: "e8a2b2aa08ed5933b3228cc5dd24c468d0f417c2",
-  blobId: "6e6234913f00c9bf496ccdeb3eb60bad88fc9691",
-  sha256: "3bd1c56dff6c2f284b5f34a7ee16c8d14ba0a44069abf0c3aa8ab4c47b78555f",
+  commit: "33ddcee4e6cb31c107b7ffe4fd5b2ba427e927c3",
+  blobId: "599cd7f7769e0ad40fc42f8a3ea8d26cf6741a10",
+  sha256: "7a0aee3b3533373330ae02d4a4db84779411d6624b48d4d7dc10a91a269fabb5",
 });
 export const APPROVED_SPEC = Object.freeze({
   path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
