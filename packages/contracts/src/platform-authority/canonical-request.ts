@@ -190,12 +190,8 @@ function copyBoundedRawBody(value: unknown): Uint8Array {
   let backingBuffer: ArrayBufferLike;
   let byteLength: number;
   try {
-    backingBuffer = Reflect.apply(
-      TYPED_ARRAY_BUFFER,
-      value,
-      [],
-    ) as ArrayBufferLike;
-    byteLength = Reflect.apply(TYPED_ARRAY_BYTE_LENGTH, value, []) as number;
+    backingBuffer = TYPED_ARRAY_BUFFER.call(value) as ArrayBufferLike;
+    byteLength = TYPED_ARRAY_BYTE_LENGTH.call(value) as number;
   } catch {
     return requestInvalid();
   }
