@@ -486,6 +486,14 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(provision, /execution_budget_platform_writer/);
   assert.match(provision, /unexpected direct membership/);
   assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL/);
+  assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
+  assert.match(verify, /new URL\(value\)/);
+  assert.match(verify, /parse_url ADMIN/);
+  assert.match(verify, /parse_url WRITER/);
+  assert.doesNotMatch(
+    verify,
+    /psql "\$\{EXECUTION_BUDGET_PLATFORM_WRITER_(?:PROVISION_)?DATABASE_URL\}"/,
+  );
   assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
   assert.match(verify, /ingest_platform_execution_authority/);
   assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
