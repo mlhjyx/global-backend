@@ -8,6 +8,7 @@ COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-ce
 # both snapshot TLS and Debian Release signatures; trust-bypass options are forbidden.
 RUN echo '766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  /etc/ssl/certs/ca-certificates.crt' | sha256sum -c - && \
     rm -f /etc/apt/sources.list.d/debian.sources && \
+    test -z "$(find /etc/apt/sources.list.d -maxdepth 1 -type f -print -quit)" && \
     rm -rf /var/lib/apt/lists/* && \
     printf '%s\n' \
       'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260826T000000Z/ bookworm main' \
