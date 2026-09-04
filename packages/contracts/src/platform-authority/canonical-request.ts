@@ -118,6 +118,14 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 const CODE_OWNED_SCHEMAS = new WeakSet<object>();
 
 function defineCodeOwnedSchema(
@@ -304,8 +312,11 @@ function decimalWithin(
   maximum: string,
 ): boolean {
   if (!CANONICAL_DECIMAL.test(value)) return false;
-  const number = BigInt(value);
-  return number >= BigInt(minimum) && number <= BigInt(maximum);
+  const compare = (left: string, right: string): number =>
+    left.length === right.length
+      ? left.localeCompare(right)
+      : left.length - right.length;
+  return compare(value, minimum) >= 0 && compare(value, maximum) <= 0;
 }
 
 function validField(field: Field, value: string): boolean {
@@ -338,6 +349,7 @@ export function canonicalizePlatformAuthorityRequestBodyV1(input: {
   readonly schema: PlatformAuthorityCanonicalSchemaV1;
 }): CanonicalizedPlatformAuthorityRequestBodyV1 {
   if (
+    !isPlainRecord(input) ||
     input.schema === null ||
     typeof input.schema !== "object" ||
     !CODE_OWNED_SCHEMAS.has(input.schema)
@@ -399,19 +411,20 @@ function validNormalizedPath(value: string): boolean {
 export function buildPlatformAuthorityRequestHmacPreimageV1(
   input: PlatformAuthorityRequestHmacPreimageV1Input,
 ): string {
+  const keys = [
+    "canonical_body_sha256",
+    "environment_id",
+    "growthos_audience",
+    "key_id",
+    "method",
+    "nonce",
+    "normalized_path",
+    "numeric_date",
+  ] as const;
   if (
-    input === null ||
-    typeof input !== "object" ||
-    !exactInputKeys(input, [
-      "canonical_body_sha256",
-      "environment_id",
-      "growthos_audience",
-      "key_id",
-      "method",
-      "nonce",
-      "normalized_path",
-      "numeric_date",
-    ]) ||
+    !isPlainRecord(input) ||
+    !exactInputKeys(input, keys) ||
+    !keys.every((key) => typeof input[key] === "string") ||
     !METHOD.test(input.method) ||
     !validNormalizedPath(input.normalized_path) ||
     !AUDIENCE.test(input.growthos_audience) ||
