@@ -37,8 +37,12 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
   const buildJob = jobBlock(ciWorkflow, "build-test");
 
   assert.equal(
+    rendererPackage.scripts.test,
+    "vitest run --exclude scripts/run-with-temporary-cache.spec.mjs && node --test scripts/run-with-temporary-cache.spec.mjs",
+  );
+  assert.equal(
     rendererPackage.scripts["test:contracts"],
-    "vitest run --exclude src/components/fixture-build.spec.ts",
+    "vitest run --exclude src/components/fixture-build.spec.ts --exclude scripts/run-with-temporary-cache.spec.mjs && node --test scripts/run-with-temporary-cache.spec.mjs",
   );
   assert.equal(
     rendererPackage.scripts["test:fixtures"],
@@ -63,10 +67,6 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
       "Renderer qualified component visual regression（375 · 768 · 1440）",
       "pnpm --filter @global/site-renderer test:visual",
     ],
-    [
-      "Renderer multilingual smoke build",
-      "pnpm --filter @global/site-renderer build",
-    ],
   ]) {
     const step = namedStepBlock(buildJob, stepName);
     assert.deepEqual(
@@ -79,6 +79,18 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
       `${stepName} must run ${command}`,
     );
   }
+  const multilingualStep = namedStepBlock(
+    buildJob,
+    "Renderer multilingual smoke build",
+  );
+  assert.deepEqual(multilingualStep.match(/^        if:.*$/gm), [
+    "        if: needs.renderer-visual-scope.outputs.run_visual == 'true'",
+  ]);
+  assert.match(
+    multilingualStep,
+    /apps\/api\/dist\/site-builder\/renderer-build\.js/,
+  );
+  assert.match(multilingualStep, /multilingual-spec\.json/);
 });
 
 test("renderer scope changes and periodic runs execute every heavy renderer gate", async () => {

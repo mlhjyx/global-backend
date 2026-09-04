@@ -317,6 +317,29 @@ jobs:
             exit 1
           fi
 
+      - name: Renderer read-only OCI smoke
+        shell: bash
+        env:
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+            --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
+            --mount type=bind,src="${GITHUB_WORKSPACE}/apps/site-renderer/fixtures/demo-spec.json",dst=/run/renderer-demo-spec.json,readonly \
+            --entrypoint node "${OCI_IMAGE}" -e '
+              const fs=require("node:fs");
+              const renderer=require("/app/apps/api/dist/site-builder/renderer-build.js");
+              const spec=JSON.parse(fs.readFileSync("/run/renderer-demo-spec.json","utf8"));
+              (async()=>{
+                await renderer.buildSiteSpecWithTemporaryFile(spec,{outDir:"/tmp/rendered",basePath:"/",siteOrigin:"http://127.0.0.1"});
+                const leaked=fs.readdirSync("/tmp").filter((name)=>name.startsWith("global-site-renderer-"));
+                if(leaked.length)throw new Error("renderer build workspace leaked");
+                for(const target of ["/app/apps/site-renderer/node_modules/.vite","/app/apps/site-renderer/.astro"]){
+                  if(fs.existsSync(target))throw new Error(`read-only renderer mutated ${target}`);
+                }
+              })().catch((error)=>{console.error(error);process.exit(1)});'
+
       - name: Renderer contract tests
         run: pnpm --filter @global/site-renderer test:contracts
 
@@ -330,11 +353,22 @@ jobs:
 
       - name: Renderer multilingual smoke build
         if: needs.renderer-visual-scope.outputs.run_visual == 'true'
-        run: pnpm --filter @global/site-renderer build
-        env:
-          SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json
-          OUT_DIR: ${{ runner.temp }}/site-renderer-multilingual
-          SITE_ORIGIN: https://preview.example.test
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const renderer = require('./apps/api/dist/site-builder/renderer-build.js');
+          const spec = JSON.parse(fs.readFileSync('./apps/site-renderer/fixtures/multilingual-spec.json', 'utf8'));
+          const outDir = process.env.RUNNER_TEMP + '/site-renderer-multilingual';
+          fs.mkdirSync(outDir, { recursive: true });
+          renderer.buildSiteSpecWithTemporaryFile(spec, {
+            outDir,
+            basePath: '/',
+            siteOrigin: 'https://preview.example.test',
+          }).catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
 
   contracts:
     name: contracts · drift · lint · breaking

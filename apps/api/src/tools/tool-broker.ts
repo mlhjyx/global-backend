@@ -1,26 +1,30 @@
-import { ExecutionBroker,
+import {
+  ExecutionBroker,
   ExternalToolActionDeniedError,
-  SourcePolicyDenyReason, Tool, ToolContext, ToolResult,
-} from './tool-contract';
-import { ToolRegistry } from './tool-registry';
-import type { RateLimitStore } from './rate-limiter';
+  SourcePolicyDenyReason,
+  Tool,
+  ToolContext,
+  ToolResult,
+} from "./tool-contract";
+import { ToolRegistry } from "./tool-registry";
+import type { RateLimitStore } from "./rate-limiter";
 import {
   BudgetOperationReplayError,
   BudgetExceededError,
   type BudgetReservation,
   type BudgetStore,
   UnavailableBudgetStore,
-} from './budget-store';
-import { UnavailableRateLimitStore } from './redis-rate-limit-store';
+} from "./budget-store";
+import { UnavailableRateLimitStore } from "./redis-rate-limit-store";
 import {
   projectGenericOperationResult,
   type GenericOperationProjection,
-} from './generic-operation-projection';
-import { TypedProjectionRegistry } from '../durable-results/typed-projection.registry';
-import { registerCatalogResultProjections } from '../durable-results/catalog-result-projections';
-import { registerSourceResultProjections } from '../durable-results/source-result-projections';
-import { toolExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
-import { getTask } from '../ai-tasks/task-registry';
+} from "./generic-operation-projection";
+import { TypedProjectionRegistry } from "../durable-results/typed-projection.registry";
+import { registerCatalogResultProjections } from "../durable-results/catalog-result-projections";
+import { registerSourceResultProjections } from "../durable-results/source-result-projections";
+import { toolExecutionReceiptFacts } from "../durable-results/execution-receipt-facts";
+import { getTask } from "../ai-tasks/task-registry";
 import {
   legacyToolCostMeasurement,
   paidOperationKey,
@@ -29,7 +33,7 @@ import {
   type PaidCostMeasurement,
   type PaidOperationReservation,
   type SiteBuildCostLedger,
-} from '../site-builder/site-build-cost-ledger';
+} from "../site-builder/site-build-cost-ledger";
 
 /**
  * These schemas require the GenericOperationArtifactService plus a Task 5
@@ -40,10 +44,10 @@ import {
  * through to the small inline projection path.
  */
 const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
-  'crawl4ai-fetch/v1',
-  'crawl4ai-render/v1',
-  'http-get/v1',
-  'sanctions-download/v1',
+  "crawl4ai-fetch/v1",
+  "crawl4ai-render/v1",
+  "http-get/v1",
+  "sanctions-download/v1",
 ]);
 
 /**
@@ -62,7 +66,7 @@ export class ToolPolicyDenied extends Error {
     public readonly reason: string,
   ) {
     super(`tool ${toolId} denied: ${reason}`);
-    this.name = 'ToolPolicyDenied';
+    this.name = "ToolPolicyDenied";
   }
 }
 
@@ -71,7 +75,9 @@ export interface BrokerDeps {
   budgetStore?: BudgetStore;
   limiter?: RateLimitStore;
   /** 查某域名的 source_policy（返回 null=未登记；{suspended, allowedPurpose,...}）。 */
-  sourcePolicyReader?: (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+  sourcePolicyReader?: (
+    domain: string,
+  ) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
   /** 记一条工具调用 Trace（成本/延迟/合规决策）。fire-and-forget。 */
   traceRecorder?: (t: ToolTrace) => void;
   /** now() 注入，便于测试。 */
@@ -85,7 +91,7 @@ export interface ToolTrace {
   toolId: string;
   toolVersion: string;
   taskContractId?: string;
-  status: 'OK' | 'DENIED' | 'ERROR';
+  status: "OK" | "DENIED" | "ERROR";
   reason?: string;
   costCents: number;
   latencyMs: number;
@@ -99,8 +105,8 @@ function extractDomain(input: unknown): string | null {
   const raw = v?.url ?? v?.domain;
   if (!raw) return null;
   try {
-    const u = raw.includes('://') ? new URL(raw) : new URL(`https://${raw}`);
-    return u.hostname.replace(/^www\./, '');
+    const u = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    return u.hostname.replace(/^www\./, "");
   } catch {
     return null;
   }
@@ -120,16 +126,24 @@ export class ToolBroker implements ExecutionBroker {
     this.registry = deps.registry;
     this.budget =
       deps.budgetStore ??
-      new UnavailableBudgetStore('ToolBroker was created without an authoritative BudgetStore');
+      new UnavailableBudgetStore(
+        "ToolBroker was created without an authoritative BudgetStore",
+      );
     this.limiter =
-      deps.limiter ?? new UnavailableRateLimitStore('ToolBroker was created without an authoritative RateLimitStore');
-    for (const t of this.registry.all()) this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
+      deps.limiter ??
+      new UnavailableRateLimitStore(
+        "ToolBroker was created without an authoritative RateLimitStore",
+      );
+    for (const t of this.registry.all())
+      this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
   }
 
   /**
    * 查某域名的 source_policy（无 reader 或未登记 → null）。checkSourcePolicy 与调用方按需取用。
    */
-  async sourcePolicy(domain: string): Promise<{ suspended: boolean; allowedPurpose?: string[] } | null> {
+  async sourcePolicy(
+    domain: string,
+  ): Promise<{ suspended: boolean; allowedPurpose?: string[] } | null> {
     if (!this.deps.sourcePolicyReader) return null;
     return this.deps.sourcePolicyReader(domain);
   }
@@ -151,43 +165,65 @@ export class ToolBroker implements ExecutionBroker {
     purpose?: string | string[],
   ): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }> {
     const tool = this.registry.get(toolId);
-    const mode = tool?.compliance.sourcePolicy ?? 'none';
-    if (mode === 'none') return { allowed: true };
+    const mode = tool?.compliance.sourcePolicy ?? "none";
+    if (mode === "none") return { allowed: true };
     // 调用用途（可多值）先与工具声明集求交——工具不得被用于未声明的用途；交集为调用的有效用途集
     let effective = tool?.compliance.allowedPurpose ?? [];
     if (purpose) {
       const callPurposes = Array.isArray(purpose) ? purpose : [purpose];
       effective = callPurposes.filter((p) => effective.includes(p));
-      if (!effective.length) return { allowed: false, reason: 'purpose_not_allowed' };
+      if (!effective.length)
+        return { allowed: false, reason: "purpose_not_allowed" };
     }
     if (!this.deps.sourcePolicyReader) {
-      return mode === 'required' ? { allowed: false, reason: 'policy_unavailable' } : { allowed: true };
+      return mode === "required"
+        ? { allowed: false, reason: "policy_unavailable" }
+        : { allowed: true };
     }
     const policy = await this.sourcePolicy(domain);
     if (!policy) {
-      return mode === 'required' ? { allowed: false, reason: 'unregistered' } : { allowed: true };
+      return mode === "required"
+        ? { allowed: false, reason: "unregistered" }
+        : { allowed: true };
     }
-    if (policy.suspended) return { allowed: false, reason: 'suspended' };
-    if (policy.allowedPurpose && !policy.allowedPurpose.some((p) => effective.includes(p))) {
-      return { allowed: false, reason: 'purpose_not_allowed' };
+    if (policy.suspended) return { allowed: false, reason: "suspended" };
+    if (
+      policy.allowedPurpose &&
+      !policy.allowedPurpose.some((p) => effective.includes(p))
+    ) {
+      return { allowed: false, reason: "purpose_not_allowed" };
     }
     return { allowed: true };
   }
 
   /** 唯一执行入口。所有闸门在此强制。 */
-  async invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>> {
+  async invoke<I, O>(
+    toolId: string,
+    input: I,
+    ctx: ToolContext,
+  ): Promise<ToolResult<O>> {
     const now = this.deps.now ?? Date.now;
     const started = now();
     const tool = this.registry.get(toolId) as Tool<I, O> | undefined;
-    if (!tool) throw new ToolPolicyDenied(toolId, 'not registered');
+    if (!tool) throw new ToolPolicyDenied(toolId, "not registered");
 
     // 1) allowedTools 白名单（有界工具的代码强制，PRD 9.11）
     if (ctx.taskContractId) {
       const task = getTask(ctx.taskContractId);
       const allowed = task?.allowedTools ?? [];
       if (!allowed.includes(toolId)) {
-        this.trace(ctx, tool, 'DENIED', 'not in task allowedTools', 0, now() - started);
-        throw new ToolPolicyDenied(toolId, `not in allowedTools of ${ctx.taskContractId}`);
+        this.trace(
+          ctx,
+          tool,
+          "DENIED",
+          "not in task allowedTools",
+          0,
+          now() - started,
+        );
+        throw new ToolPolicyDenied(
+          toolId,
+          `not in allowedTools of ${ctx.taskContractId}`,
+        );
       }
     }
 
@@ -195,25 +231,40 @@ export class ToolBroker implements ExecutionBroker {
     //    checkSourcePolicy（单点判定）。治理域优先取工具声明的 policyDomain（API 类固定域），
     //    缺省从 input 提取；required 工具提不出域 = 拒（不再静默跳过合规门）。
     const mode = tool.compliance.sourcePolicy;
-    if (mode !== 'none') {
+    if (mode !== "none") {
       const domain = tool.compliance.policyDomain ?? extractDomain(input);
       if (!domain) {
-        if (mode === 'required') {
-          this.trace(ctx, tool, 'DENIED', 'no governable domain for required source_policy', 0, now() - started);
-          throw new ToolPolicyDenied(toolId, 'no governable domain (required source_policy)');
+        if (mode === "required") {
+          this.trace(
+            ctx,
+            tool,
+            "DENIED",
+            "no governable domain for required source_policy",
+            0,
+            now() - started,
+          );
+          throw new ToolPolicyDenied(
+            toolId,
+            "no governable domain (required source_policy)",
+          );
         }
         // advisory：无域可查 → 交给工具自己的 robots/DAT-011 合规处理；这不构成 SSRF 兜底。
       } else {
         const chk = await this.checkSourcePolicy(toolId, domain, ctx.purpose);
         if (!chk.allowed) {
           const detail =
-            chk.reason === 'suspended'
+            chk.reason === "suspended"
               ? `source_policy SUSPENDED: ${domain}`
-              : chk.reason === 'purpose_not_allowed'
+              : chk.reason === "purpose_not_allowed"
                 ? `purpose not allowed for ${domain}`
                 : `source_policy ${chk.reason}: ${domain}`;
-          this.trace(ctx, tool, 'DENIED', detail, 0, now() - started);
-          throw new ToolPolicyDenied(toolId, chk.reason === 'suspended' ? `domain ${domain} is SUSPENDED` : detail);
+          this.trace(ctx, tool, "DENIED", detail, 0, now() - started);
+          throw new ToolPolicyDenied(
+            toolId,
+            chk.reason === "suspended"
+              ? `domain ${domain} is SUSPENDED`
+              : detail,
+          );
         }
       }
     }
@@ -226,8 +277,15 @@ export class ToolBroker implements ExecutionBroker {
     let paidScope: PaidOperationReservation | undefined;
     if (ctx.paidCost) {
       if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
-        this.trace(ctx, tool, 'DENIED', 'persistent paid ledger unavailable', 0, now() - started);
-        throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
+        this.trace(
+          ctx,
+          tool,
+          "DENIED",
+          "persistent paid ledger unavailable",
+          0,
+          now() - started,
+        );
+        throw new PaidCallDeniedError("PERSISTENT_LEDGER_UNAVAILABLE");
       }
       paidScope = {
         workspaceId: ctx.workspaceId,
@@ -238,13 +296,13 @@ export class ToolBroker implements ExecutionBroker {
         operationKey: paidOperationKey([
           ctx.runId,
           ctx.paidCost.scopeKey,
-          'tool',
+          "tool",
           tool.id,
           tool.version,
           tool.idempotencyKey(input),
         ]),
-        kind: 'tool',
-        taskId: ctx.taskContractId ?? 'internal',
+        kind: "tool",
+        taskId: ctx.taskContractId ?? "internal",
         subject: `${tool.id}@${tool.version}`,
         reservationMicrousd: tool.cost.estimatedCents * 10_000,
         meta: {
@@ -253,21 +311,27 @@ export class ToolBroker implements ExecutionBroker {
           idempotencyKey: tool.idempotencyKey(input),
         },
       };
-      const paidDecision = await this.deps.paidLedger.reserveOperation(paidScope);
-      if (paidDecision.kind === 'replay') {
+      const paidDecision =
+        await this.deps.paidLedger.reserveOperation(paidScope);
+      if (paidDecision.kind === "replay") {
         if (
-          paidDecision.status === 'SUCCEEDED' &&
+          paidDecision.status === "SUCCEEDED" &&
           paidDecision.result &&
-          Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
+          Object.prototype.hasOwnProperty.call(paidDecision.result, "data")
         ) {
-          const replay = tool.durableReplayResult?.(paidDecision.result as unknown as ToolResult<O>);
+          const replay = tool.durableReplayResult?.(
+            paidDecision.result as unknown as ToolResult<O>,
+          );
           if (replay) {
             return replay;
           }
-          throw new PaidOperationUnknownError(paidScope.operationKey, 'REPLAY_PAYLOAD_UNAVAILABLE');
+          throw new PaidOperationUnknownError(
+            paidScope.operationKey,
+            "REPLAY_PAYLOAD_UNAVAILABLE",
+          );
         }
         throw new Error(
-          `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? 'recorded_failure'}`,
+          `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? "recorded_failure"}`,
         );
       }
     } else {
@@ -277,7 +341,7 @@ export class ToolBroker implements ExecutionBroker {
           accountKey: runId,
           operationKey: paidOperationKey([
             runId,
-            'tool-budget',
+            "tool-budget",
             tool.id,
             tool.version,
             tool.idempotencyKey(input),
@@ -289,7 +353,7 @@ export class ToolBroker implements ExecutionBroker {
           try {
             replay = this.replayGenericToolProjection(
               tool,
-              reservation.replayResult?.resultStrategy === 'typed_projection'
+              reservation.replayResult?.resultStrategy === "typed_projection"
                 ? reservation.replayResult.projection
                 : undefined,
             );
@@ -310,9 +374,18 @@ export class ToolBroker implements ExecutionBroker {
       } catch (err) {
         if (
           err instanceof BudgetExceededError ||
-          (err instanceof Error && 'code' in err && err.code === 'BUDGET_EXCEEDED')
+          (err instanceof Error &&
+            "code" in err &&
+            err.code === "BUDGET_EXCEEDED")
         ) {
-          this.trace(ctx, tool, 'DENIED', `budget exceeded: ${err.message.slice(0, 150)}`, 0, now() - started);
+          this.trace(
+            ctx,
+            tool,
+            "DENIED",
+            `budget exceeded: ${err.message.slice(0, 150)}`,
+            0,
+            now() - started,
+          );
         }
         throw err;
       }
@@ -328,21 +401,21 @@ export class ToolBroker implements ExecutionBroker {
     if (
       !ctx.paidCost &&
       reservation &&
-      tool.durableResultStrategy.kind === 'artifact_reference' &&
+      tool.durableResultStrategy.kind === "artifact_reference" &&
       SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS.has(tool.durableResultStrategy.schema)
     ) {
       await this.budget.release(reservation);
       this.trace(
         ctx,
         tool,
-        'DENIED',
-        'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+        "DENIED",
+        "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
         0,
         now() - started,
       );
       throw new ToolPolicyDenied(
         toolId,
-        'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+        "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
       );
     }
 
@@ -354,9 +427,9 @@ export class ToolBroker implements ExecutionBroker {
       if (paidScope) {
         await this.settlePersistentOperation({
           scope: paidScope,
-          status: 'RELEASED',
+          status: "RELEASED",
           measurement: this.notIncurredMeasurement(),
-          errorCode: 'NOT_EXECUTED',
+          errorCode: "NOT_EXECUTED",
         });
       } else if (reservation) {
         await this.budget.release(reservation);
@@ -366,15 +439,19 @@ export class ToolBroker implements ExecutionBroker {
     const domain = extractDomain(input);
     if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
       try {
-        await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+        await this.limiter.respectDomainDelay(
+          domain,
+          tool.rateLimit.perDomainCrawlDelayMs,
+          now(),
+        );
       } catch (error) {
         try {
           if (paidScope) {
             await this.settlePersistentOperation({
               scope: paidScope,
-              status: 'RELEASED',
+              status: "RELEASED",
               measurement: this.notIncurredMeasurement(),
-              errorCode: 'NOT_EXECUTED',
+              errorCode: "NOT_EXECUTED",
             });
           } else if (reservation) {
             await this.budget.release(reservation);
@@ -403,15 +480,22 @@ export class ToolBroker implements ExecutionBroker {
           if (paidScope) {
             await this.settlePersistentOperation({
               scope: paidScope,
-              status: 'RELEASED',
+              status: "RELEASED",
               measurement: this.notIncurredMeasurement(),
-              errorCode: 'SUPPRESSION_ACTION_GATE',
+              errorCode: "SUPPRESSION_ACTION_GATE",
             });
           } else if (reservation) {
             await this.budget.release(reservation);
           }
-          this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
-          throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
+          this.trace(
+            ctx,
+            tool,
+            "DENIED",
+            "suppression_action_gate",
+            0,
+            now() - started,
+          );
+          throw new ToolPolicyDenied(toolId, "suppression_action_gate");
         }
       }
       let result: ToolResult<O>;
@@ -422,30 +506,45 @@ export class ToolBroker implements ExecutionBroker {
           if (paidScope) {
             await this.settlePersistentOperation({
               scope: paidScope,
-              status: 'RELEASED',
+              status: "RELEASED",
               measurement: this.notIncurredMeasurement(),
-              errorCode: 'SUPPRESSION_ACTION_GATE',
+              errorCode: "SUPPRESSION_ACTION_GATE",
             });
           } else if (reservation) {
             await this.budget.release(reservation);
           }
-          this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
-          throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
+          this.trace(
+            ctx,
+            tool,
+            "DENIED",
+            "suppression_action_gate",
+            0,
+            now() - started,
+          );
+          throw new ToolPolicyDenied(toolId, "suppression_action_gate");
         }
         if (paidScope) {
           await this.settlePersistentOperation({
             scope: paidScope,
-            status: 'FAILED',
+            status: "UNKNOWN",
             // Once execute() starts, an upstream may have consumed quota even if
             // no response arrived. Charge the reservation but keep cost unknown.
             measurement: this.unknownMeasurement(paidScope.reservationMicrousd),
-            errorCode: 'TOOL_CALL_ERROR',
+            errorCode: "TOOL_CALL_UNKNOWN",
+            disablePaidCallsReason: "TOOL_CALL_UNKNOWN",
           });
         }
         // For the generic BudgetStore, once execute() starts an upstream request
         // may have happened even when no result arrived. The reservation therefore
         // remains RESERVED; releasing it would allow another physical request.
-        this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
+        this.trace(
+          ctx,
+          tool,
+          "ERROR",
+          String(err).slice(0, 200),
+          0,
+          now() - started,
+        );
         throw err;
       }
 
@@ -455,8 +554,11 @@ export class ToolBroker implements ExecutionBroker {
         const durableReplay = tool.durableReplayResult?.(result) ?? null;
         await this.settlePersistentOperation({
           scope: paidScope,
-          status: 'SUCCEEDED',
-          measurement: legacyToolCostMeasurement(result.costCents, paidScope.reservationMicrousd),
+          status: "SUCCEEDED",
+          measurement: legacyToolCostMeasurement(
+            result.costCents,
+            paidScope.reservationMicrousd,
+          ),
           ...(durableReplay
             ? {
                 result: durableReplay as unknown as Record<string, unknown>,
@@ -466,20 +568,22 @@ export class ToolBroker implements ExecutionBroker {
             toolId: tool.id,
             toolVersion: tool.version,
             degraded: result.degraded ?? false,
-            replayPayload: durableReplay ? 'scrubbed' : 'omitted',
+            replayPayload: durableReplay ? "scrubbed" : "omitted",
           },
         });
       } else if (reservation) {
         let projection: GenericOperationProjection | undefined;
         try {
-          const durableReplay = tool.durableResultStrategy.kind === 'typed_projection'
-            ? result
-            : tool.durableReplayResult?.(result) ?? null;
+          const durableReplay =
+            tool.durableResultStrategy.kind === "typed_projection"
+              ? result
+              : (tool.durableReplayResult?.(result) ?? null);
           if (
-            tool.durableResultStrategy.kind !== 'typed_projection' &&
-            tool.durableReplayResult && !durableReplay
+            tool.durableResultStrategy.kind !== "typed_projection" &&
+            tool.durableReplayResult &&
+            !durableReplay
           ) {
-            throw new Error('approved durable replay hook returned no result');
+            throw new Error("approved durable replay hook returned no result");
           }
           projection = durableReplay
             ? this.projectToolDurableResult(tool, durableReplay)
@@ -494,17 +598,18 @@ export class ToolBroker implements ExecutionBroker {
         const receiptFacts = projection
           ? toolExecutionReceiptFacts({
               toolId: tool.id,
-              resultSchema: tool.durableResultStrategy.kind === 'no_physical_call'
-                ? projection.schema
-                : tool.durableResultStrategy.schema,
+              resultSchema:
+                tool.durableResultStrategy.kind === "no_physical_call"
+                  ? projection.schema
+                  : tool.durableResultStrategy.schema,
               result: result as ToolResult<unknown>,
-               reservedMicrousd: reservation.estimatedMicrousd,
+              reservedMicrousd: reservation.estimatedMicrousd,
               chargedMicrousd: BigInt(result.costCents) * 10_000n,
             })
           : undefined;
         const settlement = [
           reservation,
-           BigInt(result.costCents) * 10_000n,
+          BigInt(result.costCents) * 10_000n,
           projection,
           receiptFacts,
         ] as const;
@@ -527,7 +632,7 @@ export class ToolBroker implements ExecutionBroker {
       this.trace(
         ctx,
         tool,
-        'OK',
+        "OK",
         undefined,
         result.costCents,
         now() - started,
@@ -549,19 +654,22 @@ export class ToolBroker implements ExecutionBroker {
   ): ToolResult<O> | null {
     if (
       !projection ||
-      projection.kind !== 'tool' ||
-      tool.durableResultStrategy.kind === 'no_physical_call' ||
+      projection.kind !== "tool" ||
+      tool.durableResultStrategy.kind === "no_physical_call" ||
       projection.schema !== tool.durableResultStrategy.schema ||
       !projection.data ||
-      typeof projection.data !== 'object' ||
+      typeof projection.data !== "object" ||
       Array.isArray(projection.data)
-    ) return null;
-    const restored = tool.durableResultStrategy.kind === 'typed_projection'
-      ? this.projectionRegistry.restore(projection.data)
-      : projection.data;
-    const replay = tool.durableResultStrategy.kind === 'typed_projection'
-      ? restored as ToolResult<O>
-      : tool.durableReplayResult?.(restored as ToolResult<O>) ?? null;
+    )
+      return null;
+    const restored =
+      tool.durableResultStrategy.kind === "typed_projection"
+        ? this.projectionRegistry.restore(projection.data)
+        : projection.data;
+    const replay =
+      tool.durableResultStrategy.kind === "typed_projection"
+        ? (restored as ToolResult<O>)
+        : (tool.durableReplayResult?.(restored as ToolResult<O>) ?? null);
     if (!replay) return null;
     const verified = this.projectToolDurableResult(tool, replay);
     return verified.digest === projection.digest ? replay : null;
@@ -571,21 +679,25 @@ export class ToolBroker implements ExecutionBroker {
     tool: Tool<I, O>,
     result: ToolResult<O>,
   ): GenericOperationProjection {
-    if (tool.durableResultStrategy.kind === 'typed_projection') {
+    if (tool.durableResultStrategy.kind === "typed_projection") {
       return projectGenericOperationResult({
-        kind: 'tool',
+        kind: "tool",
         schema: tool.durableResultStrategy.schema,
-        data: JSON.parse(JSON.stringify(this.projectionRegistry.project(
-          tool.durableResultStrategy.schema,
-          result,
-        ))),
+        data: JSON.parse(
+          JSON.stringify(
+            this.projectionRegistry.project(
+              tool.durableResultStrategy.schema,
+              result,
+            ),
+          ),
+        ),
       });
     }
-    if (tool.durableResultStrategy.kind === 'no_physical_call') {
-      throw new Error('TOOL_DURABLE_RESULT_STRATEGY_MISSING');
+    if (tool.durableResultStrategy.kind === "no_physical_call") {
+      throw new Error("TOOL_DURABLE_RESULT_STRATEGY_MISSING");
     }
     return projectGenericOperationResult({
-      kind: 'tool',
+      kind: "tool",
       schema: tool.durableResultStrategy.schema,
       data: result,
     });
@@ -593,7 +705,7 @@ export class ToolBroker implements ExecutionBroker {
 
   private notIncurredMeasurement(): PaidCostMeasurement {
     return {
-      basis: 'not_incurred',
+      basis: "not_incurred",
       budgetChargeMicrousd: 0,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -601,26 +713,34 @@ export class ToolBroker implements ExecutionBroker {
       inputTokens: null,
       outputTokens: null,
       callCount: 1,
-      meta: { reason: 'execution_not_started' },
+      meta: { reason: "execution_not_started" },
     };
   }
 
-  private async settlePersistentOperation(input: Parameters<SiteBuildCostLedger['settleOperation']>[0]): Promise<void> {
+  private async settlePersistentOperation(
+    input: Parameters<SiteBuildCostLedger["settleOperation"]>[0],
+  ): Promise<void> {
     let decision: string;
     try {
       decision = await this.deps.paidLedger!.settleOperation(input);
     } catch (error) {
       if (error instanceof PaidOperationUnknownError) throw error;
-      throw new PaidOperationUnknownError(input.scope.operationKey, 'SETTLEMENT_ACK_UNKNOWN');
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        "SETTLEMENT_ACK_UNKNOWN",
+      );
     }
-    if (decision !== 'SETTLED') {
-      throw new PaidOperationUnknownError(input.scope.operationKey, `SETTLEMENT_${decision}`);
+    if (decision !== "SETTLED") {
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        `SETTLEMENT_${decision}`,
+      );
     }
   }
 
   private unknownMeasurement(reservationMicrousd: number): PaidCostMeasurement {
     return {
-      basis: 'unknown',
+      basis: "unknown",
       budgetChargeMicrousd: reservationMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -628,14 +748,14 @@ export class ToolBroker implements ExecutionBroker {
       inputTokens: null,
       outputTokens: null,
       callCount: 1,
-      meta: { reason: 'tool_failed_after_execution_started' },
+      meta: { reason: "tool_failed_after_execution_started" },
     };
   }
 
   private trace(
     ctx: ToolContext,
     tool: Tool,
-    status: ToolTrace['status'],
+    status: ToolTrace["status"],
     reason: string | undefined,
     costCents: number,
     latencyMs: number,

@@ -70,7 +70,9 @@ function fakeTool(
 
 function makeBroker(
   tool: Tool,
-  extra?: Partial<ConstructorParameters<typeof ToolBroker>[0]> & { budget?: BudgetLedger },
+  extra?: Partial<ConstructorParameters<typeof ToolBroker>[0]> & {
+    budget?: BudgetLedger;
+  },
 ) {
   const registry = new ToolRegistry();
   registry.register(tool);
@@ -106,6 +108,44 @@ function durableArtifactTool(
 }
 
 describe("ToolBroker — allowedTools 白名单（无超级 Agent 的代码强制）", () => {
+  it("persists an already-started tool call with an unavailable result as UNKNOWN and never retries it", async () => {
+    const physicalError = new Error("upstream acknowledgement unavailable");
+    const execute = vi.fn(async () => {
+      throw physicalError;
+    });
+    const tool = fakeTool("searxng.search", 5, execute);
+    const settleOperation = vi.fn(async () => "SETTLED");
+    const paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
+      settleOperation,
+    };
+    const { broker } = makeBroker(tool, { paidLedger: paidLedger as never });
+
+    await expect(
+      broker.invoke(
+        tool.id,
+        { q: "industrial pumps" },
+        {
+          workspaceId: "00000000-0000-4000-8000-000000000001",
+          siteId: "00000000-0000-4000-8000-000000000002",
+          runId: "00000000-0000-4000-8000-000000000003",
+          taskContractId: "site_builder.brand_profile",
+          paidCost: { scopeKey: "brand-profile-research" },
+        },
+      ),
+    ).rejects.toBe(physicalError);
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "UNKNOWN",
+        errorCode: "TOOL_CALL_UNKNOWN",
+        disablePaidCallsReason: "TOOL_CALL_UNKNOWN",
+        measurement: expect.objectContaining({ basis: "unknown" }),
+      }),
+    );
+  });
+
   it("holds product artifact Tools before execute when no governed subject-bound persistence path exists", async () => {
     const execute = vi.fn(async () => ({
       status: 200,
@@ -272,7 +312,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedMicrousd: BigInt(1) * 10_000n,
         replay: true,
-        replayResult: { resultStrategy: 'typed_projection', projection },
+        replayResult: { resultStrategy: "typed_projection", projection },
         receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
@@ -307,7 +347,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: "op" }),
-       10_000n,
+      10_000n,
       expect.objectContaining({
         kind: "tool",
         schema: "test-tool/v1",
@@ -315,7 +355,9 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       }),
       {
         usage: {
-          currency: "USD", unit: "microusd", callCount: 1,
+          currency: "USD",
+          unit: "microusd",
+          callCount: 1,
           upperBoundMicrousd: "10000",
         },
         costBasis: "estimated_upper_bound",
@@ -327,7 +369,10 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     const tool = fakeTool("searxng.search", 1, async () => ({
       results: [{ url: "https://example.com/result", title: "Example" }],
     }));
-    tool.durableResultStrategy = { kind: "typed_projection", schema: "searxng-search/v1" };
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "searxng-search/v1",
+    };
     tool.durableReplayResult = (result) => result;
     const settle = vi.fn(async () => ({
       chargedMicrousd: BigInt(1) * 10_000n,
@@ -350,14 +395,18 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: "op" }),
-       10_000n,
+      10_000n,
       expect.objectContaining({
         kind: "tool",
         schema: "searxng-search/v1",
         data: expect.objectContaining({
           schema: "searxng-search/v1",
           data: {
-            data: { results: [{ url: "https://example.com/result", title: "Example" }] },
+            data: {
+              results: [
+                { url: "https://example.com/result", title: "Example" },
+              ],
+            },
             costCents: 1,
           },
         }),
@@ -390,18 +439,21 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       capVariance: false,
       replay: false,
     }));
-    const reserve = vi.fn()
-      .mockResolvedValueOnce({
-        workspaceId: "w",
-        accountKey: "run",
-        operationId: "op",
-        estimatedMicrousd: BigInt(1) * 10_000n,
-        replay: false,
-      });
+    const reserve = vi.fn().mockResolvedValueOnce({
+      workspaceId: "w",
+      accountKey: "run",
+      operationId: "op",
+      estimatedMicrousd: BigInt(1) * 10_000n,
+      replay: false,
+    });
     const budgetStore = { reserve, settle } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
 
-    const live = await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    const live = await broker.invoke(
+      tool.id,
+      {},
+      { workspaceId: "w", runId: "run" },
+    );
     const projection = settle.mock.calls[0]?.[2];
     expect(projection).toMatchObject({
       kind: "tool",
@@ -415,7 +467,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       operationId: "op",
       estimatedMicrousd: BigInt(1) * 10_000n,
       replay: true,
-      replayResult: { resultStrategy: 'typed_projection', projection },
+      replayResult: { resultStrategy: "typed_projection", projection },
       receipt: {
         ...DURABLE_RECEIPT,
         resultSchema: "searxng-search/v1",
@@ -437,11 +489,13 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
 
   it("projects the exact Google Patents result and canonical cost facts without a replay hook", async () => {
     const tool = fakeTool("google_patents.search", 2, async () => ({
-      patents: [{
-        publicationNumber: "US-123-A1",
-        applicants: [{ name: "Example GmbH", country: "DE" }],
-        inventors: [{ name: "Ada Example" }],
-      }],
+      patents: [
+        {
+          publicationNumber: "US-123-A1",
+          applicants: [{ name: "Example GmbH", country: "DE" }],
+          inventors: [{ name: "Ada Example" }],
+        },
+      ],
       costFacts: {
         costBasis: "provider_reported",
         maximumBytesBilled: "214748364800",
@@ -475,14 +529,16 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: "op" }),
-       20_000n,
+      20_000n,
       expect.objectContaining({
         kind: "tool",
         schema: "google-patents-search/v1",
         data: expect.objectContaining({
           data: expect.objectContaining({
             data: expect.objectContaining({
-              patents: [expect.objectContaining({ publicationNumber: "US-123-A1" })],
+              patents: [
+                expect.objectContaining({ publicationNumber: "US-123-A1" }),
+              ],
               costFacts: {
                 costBasis: "provider_reported",
                 maximumBytesBilled: "214748364800",
@@ -511,14 +567,20 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
   it("replays typed Tool projections through the Tool strategy without a generic envelope", async () => {
     const execute = vi.fn(async () => ({ mustNotRun: true }));
     const tool = fakeTool("searxng.search", 1, execute);
-    tool.durableResultStrategy = { kind: "typed_projection", schema: "searxng-search/v1" };
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "searxng-search/v1",
+    };
     tool.durableReplayResult = (result) => result;
     const projectedResult = {
-      data: { results: [{ url: "https://example.com/result", title: "Cached" }] },
+      data: {
+        results: [{ url: "https://example.com/result", title: "Cached" }],
+      },
       costCents: 1,
     };
-    const typedProjection = registerCatalogResultProjections(new TypedProjectionRegistry())
-      .project("searxng-search/v1", projectedResult);
+    const typedProjection = registerCatalogResultProjections(
+      new TypedProjectionRegistry(),
+    ).project("searxng-search/v1", projectedResult);
     const projection = projectGenericOperationResult({
       kind: "tool",
       schema: "searxng-search/v1",
@@ -531,8 +593,12 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedMicrousd: BigInt(1) * 10_000n,
         replay: true,
-        replayResult: { resultStrategy: 'typed_projection', projection },
-        receipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
+        replayResult: { resultStrategy: "typed_projection", projection },
+        receipt: {
+          ...DURABLE_RECEIPT,
+          resultSchema: "searxng-search/v1",
+          resultDigest: projection.digest,
+        },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
@@ -541,7 +607,11 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
     ).resolves.toEqual({
       ...projectedResult,
-      durableReceipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
+      durableReceipt: {
+        ...DURABLE_RECEIPT,
+        resultSchema: "searxng-search/v1",
+        resultDigest: projection.digest,
+      },
     });
     expect(execute).not.toHaveBeenCalled();
   });
@@ -568,9 +638,15 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     const onDurableReceipt = vi.fn();
 
     await expect(
-      broker.invoke(tool.id, {}, {
-        workspaceId: "w", runId: "run", onDurableReceipt,
-      }),
+      broker.invoke(
+        tool.id,
+        {},
+        {
+          workspaceId: "w",
+          runId: "run",
+          onDurableReceipt,
+        },
+      ),
     ).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
     expect(onDurableReceipt).toHaveBeenCalledWith(tool.id, DURABLE_RECEIPT);
   });
@@ -652,7 +728,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedMicrousd: BigInt(1) * 10_000n,
         replay: true,
-        replayResult: { resultStrategy: 'typed_projection', projection },
+        replayResult: { resultStrategy: "typed_projection", projection },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
@@ -680,7 +756,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedMicrousd: BigInt(1) * 10_000n,
         replay: true,
-        replayResult: { resultStrategy: 'typed_projection', projection },
+        replayResult: { resultStrategy: "typed_projection", projection },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });

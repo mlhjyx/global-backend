@@ -822,7 +822,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     // PREVIEW_DIR. New histories never emit this field.
     const legacyRoot = candidate.root;
     const expectedLegacyRoot = previewStagingDir(candidate.buildRunId);
-    if (!legacyRoot || path.resolve(legacyRoot) !== path.resolve(expectedLegacyRoot)) {
+    if (
+      !legacyRoot ||
+      path.resolve(legacyRoot) !== path.resolve(expectedLegacyRoot)
+    ) {
       throw new Error("QUALITY_CANDIDATE_ARTIFACT_INVALID");
     }
     return run(legacyRoot);
@@ -834,7 +837,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     buildRunId: string,
   ): Promise<void> => {
     if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
-    await costLedger.assertAuthorizedBudget({ workspaceId, siteId, buildRunId });
+    await costLedger.assertAuthorizedBudget({
+      workspaceId,
+      siteId,
+      buildRunId,
+    });
   };
 
   const terminalCostSummary = async (
@@ -844,7 +851,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     reason: "run_succeeded" | "run_failed" | "run_cancelled",
   ) => {
     if (!costLedger) return undefined;
-    await costLedger.assertAuthorizedBudget({ workspaceId, siteId, buildRunId });
+    await costLedger.assertAuthorizedBudget({
+      workspaceId,
+      siteId,
+      buildRunId,
+    });
     return costLedger.closeAndSummarize({
       workspaceId,
       siteId,
@@ -2261,7 +2272,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           FROM site_build_spend_reconciliation r
           WHERE r.spend_id = s.id
         ) att ON TRUE
-        WHERE s.cost_basis = 'estimated_upper_bound'
+        WHERE s.cost_basis IN ('estimated_upper_bound', 'unknown')
           AND NOT EXISTS (
             SELECT 1
             FROM site_build_spend_reconciliation rx
@@ -2283,7 +2294,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           // spend per workspace keeps the whole ten-workspace page safely
           // inside the two-minute Activity deadline.
           limit: 1,
-          resolve: async (candidate): Promise<SiteBuildReconciliationObservation> =>
+          resolve: async (
+            candidate,
+          ): Promise<SiteBuildReconciliationObservation> =>
             costReconciliationResolver
               ? costReconciliationResolver.resolve(candidate)
               : {
@@ -2302,7 +2315,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         workspaceRows.length === 0
           ? null
           : {
-              lastAttempt: workspaceRows.at(-1)?.lastAttempt?.toISOString() ?? null,
+              lastAttempt:
+                workspaceRows.at(-1)?.lastAttempt?.toISOString() ?? null,
               workspaceId: workspaceRows.at(-1)?.workspaceId ?? "",
             };
       if (nextCursor && nextCursor.workspaceId.length === 0) {
@@ -3304,17 +3318,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             designBrief: input.qualityCandidate.designBrief,
             materializedRoot,
             quality: {
-            round: input.round,
-            artifactPrefix: `${qualityCandidatePrefix(
-              input.siteId,
-              input.buildRunId,
-            )}/quality/round-${input.round}`,
-            validation: {
-              designBrief: input.qualityCandidate.designBrief,
-              catalog: STATIC_DESIGN_CATALOG_V2,
-              claimSnapshot: context.claimSnapshot,
-              copySlots: context.copySlots,
-            },
+              round: input.round,
+              artifactPrefix: `${qualityCandidatePrefix(
+                input.siteId,
+                input.buildRunId,
+              )}/quality/round-${input.round}`,
+              validation: {
+                designBrief: input.qualityCandidate.designBrief,
+                catalog: STATIC_DESIGN_CATALOG_V2,
+                claimSnapshot: context.claimSnapshot,
+                copySlots: context.copySlots,
+              },
               signal: activityCancellationSignal(),
             },
           }),
@@ -3441,7 +3455,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }
           const artifact = await persistQualityCandidateArtifact({
             root: materializedRoot,
-            objectPrefix: qualityCandidatePrefix(input.siteId, input.buildRunId),
+            objectPrefix: qualityCandidatePrefix(
+              input.siteId,
+              input.buildRunId,
+            ),
             rendererOutputDigest: applied.identity.rendererOutputDigest,
             storage,
             signal: activityCancellationSignal(),

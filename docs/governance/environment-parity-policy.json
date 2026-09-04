@@ -175,7 +175,7 @@
       "id": "renderer-child-production-runtime",
       "rule": "ENVIRONMENT_BRANCH",
       "path": "apps/api/src/site-builder/renderer-build.ts",
-      "match_sha256": "sha256:3f227ca065daa60275d40b7e8a6b19ff9471b56b99d31fac67730c64caf36f74",
+      "match_sha256": "sha256:2120ea4610aa57c694af9fd1fca6b88d7901c95a3569f10bdca221275c0cc212",
       "category": "deployment",
       "reason": "The product renderer child is always launched with production runtime semantics from the pinned renderer identity."
     }

@@ -1,21 +1,21 @@
-import { createHash, randomUUID as nodeRandomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
-import type { PrismaService } from '../prisma/prisma.service';
-import type { PaidModelPreflightEvidence } from '../model-gateway/paid-model-settlement';
-import type { ModelUsage } from '../model-gateway/types';
-import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from './agents/model-policy.registry';
+import { createHash, randomUUID as nodeRandomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import type { PrismaService } from "../prisma/prisma.service";
+import type { PaidModelPreflightEvidence } from "../model-gateway/paid-model-settlement";
+import type { ModelUsage } from "../model-gateway/types";
+import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from "./agents/model-policy.registry";
 
 export const SITE_BUILD_COST_SUMMARY_VERSION =
-  'site-builder-cost-summary/v2' as const;
+  "site-builder-cost-summary/v2" as const;
 
 export type PaidCostBasis =
-  | 'provider_reported'
-  | 'token_pricing'
-  | 'tool_reported'
-  | 'legacy_estimate'
-  | 'estimated_upper_bound'
-  | 'unknown'
-  | 'not_incurred';
+  | "provider_reported"
+  | "token_pricing"
+  | "tool_reported"
+  | "legacy_estimate"
+  | "estimated_upper_bound"
+  | "unknown"
+  | "not_incurred";
 
 export interface PaidCostMeasurement {
   basis: PaidCostBasis;
@@ -68,7 +68,7 @@ export function modelCostMeasurement(
   const gatewaySettlements = input.usage?.gatewaySettlements ?? [];
   if (input.settlementPreflight) {
     const settled = gatewaySettlements.filter(
-      (observation) => observation.status === 'settled',
+      (observation) => observation.status === "settled",
     );
     const calculatedCostMicrousd = settled.reduce(
       (sum, observation) => sum + observation.costMicrousd,
@@ -100,13 +100,13 @@ export function modelCostMeasurement(
           observation.protocol === input.settlementPreflight!.protocol &&
           observation.channelId ===
             input.settlementPreflight!.expectedChannelId &&
-          observation.basis === 'openox_catalog_token_pricing' &&
+          observation.basis === "openox_catalog_token_pricing" &&
           observation.outputTokens <=
             input.settlementPreflight!.maxOutputTokensPerCall,
       );
     if (complete) {
       return {
-        basis: 'token_pricing',
+        basis: "token_pricing",
         budgetChargeMicrousd: calculatedCostMicrousd,
         reportedCostMicrousd: null,
         calculatedCostMicrousd,
@@ -121,7 +121,7 @@ export function modelCostMeasurement(
       };
     }
     return {
-      basis: 'estimated_upper_bound',
+      basis: "estimated_upper_bound",
       budgetChargeMicrousd: input.reservationMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -130,7 +130,7 @@ export function modelCostMeasurement(
       outputTokens,
       callCount,
       meta: {
-        reason: 'gateway_settlement_incomplete_or_mismatched',
+        reason: "gateway_settlement_incomplete_or_mismatched",
         requestedModel: input.requestedModel,
         ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
         settlementPreflight: input.settlementPreflight,
@@ -139,10 +139,10 @@ export function modelCostMeasurement(
     };
   }
   if (
-    gatewaySettlements.some((observation) => observation.status === 'unknown')
+    gatewaySettlements.some((observation) => observation.status === "unknown")
   ) {
     return {
-      basis: 'estimated_upper_bound',
+      basis: "estimated_upper_bound",
       budgetChargeMicrousd: input.reservationMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -151,7 +151,7 @@ export function modelCostMeasurement(
       outputTokens,
       callCount,
       meta: {
-        reason: 'gateway_exact_cost_unavailable',
+        reason: "gateway_exact_cost_unavailable",
         requestedModel: input.requestedModel,
         ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
         gatewaySettlements,
@@ -161,7 +161,7 @@ export function modelCostMeasurement(
   if (Number.isFinite(costUsd) && costUsd! >= 0) {
     const reportedCostMicrousd = Math.round(costUsd! * 1_000_000);
     return {
-      basis: 'provider_reported',
+      basis: "provider_reported",
       budgetChargeMicrousd: reportedCostMicrousd,
       reportedCostMicrousd,
       calculatedCostMicrousd: null,
@@ -174,7 +174,7 @@ export function modelCostMeasurement(
   }
 
   const rate =
-    input.taskId === 'site_builder.brand_profile' &&
+    input.taskId === "site_builder.brand_profile" &&
     (!input.resolvedModel || input.resolvedModel === input.requestedModel)
       ? knownBrandProfileRate(input.requestedModel)
       : null;
@@ -184,7 +184,7 @@ export function modelCostMeasurement(
       inputTokens * rate.input + outputTokens * rate.output,
     );
     return {
-      basis: 'token_pricing',
+      basis: "token_pricing",
       budgetChargeMicrousd: calculatedCostMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd,
@@ -207,7 +207,7 @@ export function modelCostMeasurement(
   }
 
   return {
-    basis: 'estimated_upper_bound',
+    basis: "estimated_upper_bound",
     budgetChargeMicrousd: input.reservationMicrousd,
     reportedCostMicrousd: null,
     calculatedCostMicrousd: null,
@@ -216,7 +216,7 @@ export function modelCostMeasurement(
     outputTokens,
     callCount,
     meta: {
-      reason: rate ? 'token_usage_incomplete' : 'no_verified_price',
+      reason: rate ? "token_usage_incomplete" : "no_verified_price",
       requestedModel: input.requestedModel,
       ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
       ...(gatewaySettlements.length > 0 ? { gatewaySettlements } : {}),
@@ -231,7 +231,7 @@ export function legacyToolCostMeasurement(
 ): PaidCostMeasurement {
   if (!Number.isFinite(costCents) || costCents < 0) {
     return {
-      basis: 'unknown',
+      basis: "unknown",
       budgetChargeMicrousd: reservationMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
@@ -239,12 +239,12 @@ export function legacyToolCostMeasurement(
       inputTokens: null,
       outputTokens: null,
       callCount: 1,
-      meta: { reason: 'invalid_legacy_cost' },
+      meta: { reason: "invalid_legacy_cost" },
     };
   }
   const estimatedCostMicrousd = Math.round(costCents * 10_000);
   return {
-    basis: 'legacy_estimate',
+    basis: "legacy_estimate",
     budgetChargeMicrousd: Math.min(reservationMicrousd, estimatedCostMicrousd),
     reportedCostMicrousd: null,
     calculatedCostMicrousd: null,
@@ -257,9 +257,9 @@ export function legacyToolCostMeasurement(
 }
 
 export function paidOperationKey(parts: readonly string[]): string {
-  return createHash('sha256')
-    .update(parts.map((part) => `${part.length}:${part}`).join('|'), 'utf8')
-    .digest('hex');
+  return createHash("sha256")
+    .update(parts.map((part) => `${part.length}:${part}`).join("|"), "utf8")
+    .digest("hex");
 }
 
 interface SummaryBudgetRow {
@@ -294,7 +294,7 @@ interface SummaryReconciliationRow {
 
 function jsonMicrousd(value: bigint): string {
   if (value < 0n) {
-    throw new Error('site build cost cannot be negative');
+    throw new Error("site build cost cannot be negative");
   }
   return value.toString(10);
 }
@@ -319,7 +319,7 @@ export function buildSiteBuildCostSummary(
   const resolvedBySpend = new Map(
     reconciliations
       .filter(
-        (row) => row.status === 'RESOLVED' && row.exactCostMicrousd !== null,
+        (row) => row.status === "RESOLVED" && row.exactCostMicrousd !== null,
       )
       .map((row) => [row.spendId, row.exactCostMicrousd!] as const),
   );
@@ -328,34 +328,43 @@ export function buildSiteBuildCostSummary(
       const reconciled = row.id ? resolvedBySpend.get(row.id) : undefined;
       return (
         sum +
-        (reconciled ?? row.reportedCostMicrousd ?? row.calculatedCostMicrousd ?? 0n)
+        (reconciled ??
+          row.reportedCostMicrousd ??
+          row.calculatedCostMicrousd ??
+          0n)
       );
     }, 0n),
   );
   const upperBoundCostMicrousd = sumBigInt((row) =>
-    row.costBasis === 'estimated_upper_bound'
+    row.costBasis === "estimated_upper_bound"
       ? row.estimatedCostMicrousd
       : null,
   );
-  const upperBoundSpendIds = new Set(
+  const reconcilableSpendIds = new Set(
     spends
-      .filter((row) => row.id && row.costBasis === 'estimated_upper_bound')
+      .filter(
+        (row) =>
+          row.id &&
+          (row.costBasis === "estimated_upper_bound" ||
+            row.costBasis === "unknown"),
+      )
       .map((row) => row.id!),
   );
-  const resolvedUpperBounds = new Set(
+  const terminalReconciliations = new Set(
     reconciliations
-      .filter((row) => row.status === 'RESOLVED')
+      .filter((row) => ["RESOLVED", "CONFLICT", "EXPIRED"].includes(row.status))
       .map((row) => row.spendId),
   );
   const asOf = reconciliations.reduce<Date | null>(
-    (latest, row) => (!latest || row.createdAt > latest ? row.createdAt : latest),
+    (latest, row) =>
+      !latest || row.createdAt > latest ? row.createdAt : latest,
     null,
   );
 
   return {
     schemaVersion: SITE_BUILD_COST_SUMMARY_VERSION,
-    currency: 'USD' as const,
-    unit: 'microusd' as const,
+    currency: "USD" as const,
+    unit: "microusd" as const,
     budget: {
       authorizedCapMicrousd: cap,
       conservativeChargedMicrousd: charged,
@@ -363,9 +372,7 @@ export function buildSiteBuildCostSummary(
       reservedMicrousd: reserved,
       chargedMicrousd: charged,
       remainingMicrousd: jsonMicrousd(
-        budget.capMicrousd -
-          budget.reservedMicrousd -
-          budget.chargedMicrousd,
+        budget.capMicrousd - budget.reservedMicrousd - budget.chargedMicrousd,
       ),
       paidCallsEnabled: budget.paidCallsEnabled,
       disabledReason: budget.disabledReason,
@@ -376,7 +383,7 @@ export function buildSiteBuildCostSummary(
       calculatedCostMicrousd: sumBigInt((row) => row.calculatedCostMicrousd),
       estimatedCostMicrousd: sumBigInt((row) => row.estimatedCostMicrousd),
       unknownOperations: spends.filter(
-        (row) => row.costBasis === 'unknown' || row.status === 'UNKNOWN',
+        (row) => row.costBasis === "unknown" || row.status === "UNKNOWN",
       ).length,
       exactCostMicrousd,
       upperBoundCostMicrousd,
@@ -387,24 +394,24 @@ export function buildSiteBuildCostSummary(
         (sum, row) => sum + (row.outputTokens ?? 0),
         0,
       ),
-      modelCalls: calls('model'),
-      toolCalls: calls('tool'),
+      modelCalls: calls("model"),
+      toolCalls: calls("tool"),
     },
     operations: {
-      succeeded: operationCount('SUCCEEDED'),
-      failed: operationCount('FAILED'),
-      unknown: operationCount('UNKNOWN'),
-      released: operationCount('RELEASED'),
+      succeeded: operationCount("SUCCEEDED"),
+      failed: operationCount("FAILED"),
+      unknown: operationCount("UNKNOWN"),
+      released: operationCount("RELEASED"),
     },
     reconciliation: {
-      pendingOperations: [...upperBoundSpendIds].filter(
-        (spendId) => !resolvedUpperBounds.has(spendId),
+      pendingOperations: [...reconcilableSpendIds].filter(
+        (spendId) => !terminalReconciliations.has(spendId),
       ).length,
       resolvedOperations: reconciliations.filter(
-        (row) => row.status === 'RESOLVED',
+        (row) => row.status === "RESOLVED",
       ).length,
       conflictOperations: reconciliations.filter(
-        (row) => row.status === 'CONFLICT',
+        (row) => row.status === "CONFLICT",
       ).length,
       asOf: asOf?.toISOString() ?? null,
       revision: reconciliations.length,
@@ -415,11 +422,11 @@ export function buildSiteBuildCostSummary(
 export type SiteBuildCostSummary = ReturnType<typeof buildSiteBuildCostSummary>;
 
 export interface SiteBuildReconciliationObservation {
-  status: 'UNRESOLVED' | 'RESOLVED' | 'CONFLICT' | 'EXPIRED';
+  status: "UNRESOLVED" | "RESOLVED" | "CONFLICT" | "EXPIRED";
   resolverId: string;
   requestId?: string | null;
   receiptDigest?: string | null;
-  costBasis?: 'provider_reported' | 'token_pricing';
+  costBasis?: "provider_reported" | "token_pricing";
   exactCostMicrousd?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -443,24 +450,24 @@ export function reconciliationDueAction(input: {
   now: Date;
   spendCreatedAt: Date;
   observations: ReadonlyArray<{ status: string; observedAt: Date }>;
-}): 'WAIT' | 'RESOLVE' | 'EXPIRE' | 'TERMINAL' {
+}): "WAIT" | "RESOLVE" | "EXPIRE" | "TERMINAL" {
   if (
     input.observations.some((row) =>
-      ['RESOLVED', 'CONFLICT', 'EXPIRED'].includes(row.status),
+      ["RESOLVED", "CONFLICT", "EXPIRED"].includes(row.status),
     )
   ) {
-    return 'TERMINAL';
+    return "TERMINAL";
   }
   if (
     input.now.getTime() - input.spendCreatedAt.getTime() >=
     RECONCILIATION_EXPIRY_MS
   ) {
-    return 'EXPIRE';
+    return "EXPIRE";
   }
   const attempts = input.observations.filter(
-    (row) => row.status === 'UNRESOLVED',
+    (row) => row.status === "UNRESOLVED",
   );
-  if (attempts.length >= RECONCILIATION_RETRY_DELAYS_MS.length) return 'WAIT';
+  if (attempts.length >= RECONCILIATION_RETRY_DELAYS_MS.length) return "WAIT";
   const base =
     attempts.length === 0
       ? input.spendCreatedAt
@@ -470,8 +477,8 @@ export function reconciliationDueAction(input: {
         );
   return input.now.getTime() - base.getTime() >=
     RECONCILIATION_RETRY_DELAYS_MS[attempts.length]!
-    ? 'RESOLVE'
-    : 'WAIT';
+    ? "RESOLVE"
+    : "WAIT";
 }
 
 export function boundedReconciliationMeta(
@@ -481,21 +488,24 @@ export function boundedReconciliationMeta(
   let nodes = 0;
   const visit = (value: unknown, depth: number): void => {
     nodes += 1;
-    if (nodes > 128 || depth > 4) throw new Error('reconciliation meta is too complex');
-    if (typeof value === 'string' && value.length > 512) {
-      throw new Error('reconciliation meta string is too long');
+    if (nodes > 128 || depth > 4)
+      throw new Error("reconciliation meta is too complex");
+    if (typeof value === "string" && value.length > 512) {
+      throw new Error("reconciliation meta string is too long");
     }
     if (Array.isArray(value)) {
-      if (value.length > 32) throw new Error('reconciliation meta array is too large');
+      if (value.length > 32)
+        throw new Error("reconciliation meta array is too large");
       value.forEach((item) => visit(item, depth + 1));
       return;
     }
-    if (value && typeof value === 'object') {
+    if (value && typeof value === "object") {
       const entries = Object.entries(value as Record<string, unknown>);
-      if (entries.length > 32) throw new Error('reconciliation meta has too many keys');
+      if (entries.length > 32)
+        throw new Error("reconciliation meta has too many keys");
       for (const [key, item] of entries) {
         if (key.length > 64 || FORBIDDEN_RECONCILIATION_META_KEY.test(key)) {
-          throw new Error('reconciliation meta contains a forbidden key');
+          throw new Error("reconciliation meta contains a forbidden key");
         }
         visit(item, depth + 1);
       }
@@ -503,8 +513,11 @@ export function boundedReconciliationMeta(
   };
   const canonical = jsonObject(meta);
   visit(canonical, 0);
-  if (Buffer.byteLength(JSON.stringify(canonical), 'utf8') > RECONCILIATION_META_MAX_BYTES) {
-    throw new Error('reconciliation meta exceeds the size limit');
+  if (
+    Buffer.byteLength(JSON.stringify(canonical), "utf8") >
+    RECONCILIATION_META_MAX_BYTES
+  ) {
+    throw new Error("reconciliation meta exceeds the size limit");
   }
   return canonical as Prisma.InputJsonObject;
 }
@@ -512,31 +525,31 @@ export function boundedReconciliationMeta(
 export class PaidCallDeniedError extends Error {
   constructor(public readonly decision: string) {
     super(`paid call denied: ${decision}`);
-    this.name = 'PaidCallDeniedError';
+    this.name = "PaidCallDeniedError";
   }
 }
 
 export class PaidOperationUnknownError extends Error {
   constructor(
     public readonly operationKey: string,
-    public readonly errorCode = 'ACK_UNKNOWN',
+    public readonly errorCode = "ACK_UNKNOWN",
   ) {
     super(`paid operation ${operationKey} has ambiguous acknowledgement`);
-    this.name = 'PaidOperationUnknownError';
+    this.name = "PaidOperationUnknownError";
   }
 }
 
 export class PaidTaskBusyError extends Error {
   constructor(public readonly taskId: string) {
     super(`paid task ${taskId} already has a live fenced attempt`);
-    this.name = 'PaidTaskBusyError';
+    this.name = "PaidTaskBusyError";
   }
 }
 
 export class PaidTaskFenceError extends Error {
   constructor() {
-    super('paid task fence is stale or expired');
-    this.name = 'PaidTaskFenceError';
+    super("paid task fence is stale or expired");
+    this.name = "PaidTaskFenceError";
   }
 }
 
@@ -567,7 +580,7 @@ export interface PaidCostContext {
 
 export interface PaidOperationReservation extends PaidOperationScope {
   operationKey: string;
-  kind: 'model' | 'tool';
+  kind: "model" | "tool";
   taskId: string;
   subject: string;
   reservationMicrousd: number;
@@ -575,9 +588,9 @@ export interface PaidOperationReservation extends PaidOperationScope {
 }
 
 export type PaidOperationDecision =
-  | { kind: 'execute' }
+  | { kind: "execute" }
   | {
-      kind: 'replay';
+      kind: "replay";
       status: string;
       result: Record<string, unknown> | null;
       meta: Record<string, unknown> | null;
@@ -618,7 +631,7 @@ const TASK_LEASE_MS = 10 * 60 * 1_000;
 
 function canonicalJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => canonicalJson(item));
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, item]) => item !== undefined)
@@ -631,8 +644,8 @@ function canonicalJson(value: unknown): unknown {
 
 function jsonObject(value: unknown): Record<string, unknown> {
   const canonical = canonicalJson(value);
-  if (!canonical || typeof canonical !== 'object' || Array.isArray(canonical)) {
-    throw new Error('paid task payload must be a JSON object');
+  if (!canonical || typeof canonical !== "object" || Array.isArray(canonical)) {
+    throw new Error("paid task payload must be a JSON object");
   }
   return canonical as Record<string, unknown>;
 }
@@ -662,7 +675,7 @@ export class SiteBuildCostLedger {
     input: PaidOperationReservation,
   ): Promise<PaidOperationDecision> {
     if (!/^[0-9a-f]{64}$/.test(input.operationKey)) {
-      throw new Error('paid operation key must be a lowercase SHA-256');
+      throw new Error("paid operation key must be a lowercase SHA-256");
     }
     const rows = await this.prisma.withWorkspace(
       input.workspaceId,
@@ -683,27 +696,27 @@ export class SiteBuildCostLedger {
       `,
     );
     const row = rows[0];
-    if (!row) throw new PaidCallDeniedError('EMPTY_RESERVE_RESULT');
-    if (row.decision === 'EXECUTE') return { kind: 'execute' };
-    if (row.decision === 'REPLAY') {
-      if (row.spend_status === 'UNKNOWN') {
+    if (!row) throw new PaidCallDeniedError("EMPTY_RESERVE_RESULT");
+    if (row.decision === "EXECUTE") return { kind: "execute" };
+    if (row.decision === "REPLAY") {
+      if (row.spend_status === "UNKNOWN") {
         throw new PaidOperationUnknownError(
           input.operationKey,
-          row.cached_error_code ?? 'RECORDED_UNKNOWN',
+          row.cached_error_code ?? "RECORDED_UNKNOWN",
         );
       }
       return {
-        kind: 'replay',
-        status: row.spend_status ?? 'UNKNOWN',
+        kind: "replay",
+        status: row.spend_status ?? "UNKNOWN",
         result: row.cached_result,
         meta: row.cached_meta,
         errorCode: row.cached_error_code,
       };
     }
-    if (row.decision === 'UNKNOWN') {
+    if (row.decision === "UNKNOWN") {
       throw new PaidOperationUnknownError(
         input.operationKey,
-        row.cached_error_code ?? 'ACK_UNKNOWN',
+        row.cached_error_code ?? "ACK_UNKNOWN",
       );
     }
     throw new PaidCallDeniedError(row.decision);
@@ -711,7 +724,7 @@ export class SiteBuildCostLedger {
 
   async settleOperation(input: {
     scope: PaidOperationReservation;
-    status: 'SUCCEEDED' | 'FAILED' | 'RELEASED';
+    status: "SUCCEEDED" | "FAILED" | "UNKNOWN" | "RELEASED";
     measurement: PaidCostMeasurement;
     result?: Record<string, unknown> | null;
     meta?: Record<string, unknown>;
@@ -725,14 +738,39 @@ export class SiteBuildCostLedger {
   }): Promise<string> {
     const { scope, measurement } = input;
     const disableReason = input.disablePaidCallsReason?.trim().slice(0, 80);
+    if ((input.status === "UNKNOWN") !== (measurement.basis === "unknown")) {
+      throw new Error("UNKNOWN spend status and cost basis must be paired");
+    }
+    if (input.status === "UNKNOWN" && (input.result || !disableReason)) {
+      throw new Error(
+        "UNKNOWN settlement requires no result and an atomic paid-call disable",
+      );
+    }
     if (
       input.disablePaidCallsReason !== undefined &&
-      (!disableReason || measurement.basis !== 'unknown')
+      (!disableReason || measurement.basis !== "unknown")
     ) {
-      throw new Error('atomic paid-call disable requires unknown settlement');
+      throw new Error("atomic paid-call disable requires unknown settlement");
     }
     return this.prisma.withWorkspace(scope.workspaceId, async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ decision: string }>>`
+      const rows =
+        input.status === "UNKNOWN"
+          ? await tx.$queryRaw<Array<{ decision: string }>>`
+        SELECT settle_unknown_site_build_spend(
+          ${scope.workspaceId}::uuid,
+          ${scope.buildRunId}::uuid,
+          ${scope.operationKey}::varchar,
+          ${scope.fenceToken ?? null}::uuid,
+          ${BigInt(measurement.budgetChargeMicrousd)}::bigint,
+          ${measurement.inputTokens}::integer,
+          ${measurement.outputTokens}::integer,
+          ${measurement.callCount}::integer,
+          ${asJsonText({ ...scope.meta, ...measurement.meta, ...input.meta })}::jsonb,
+          ${input.errorCode ?? null}::text,
+          ${disableReason!}::text
+        ) AS decision
+      `
+          : await tx.$queryRaw<Array<{ decision: string }>>`
         SELECT settle_site_build_spend(
           ${scope.workspaceId}::uuid,
           ${scope.buildRunId}::uuid,
@@ -752,8 +790,8 @@ export class SiteBuildCostLedger {
           ${input.errorCode ?? null}::text
         ) AS decision
       `;
-      const decision = rows[0]?.decision ?? 'MISSING';
-      if (decision === 'OVER_RESERVATION') {
+      const decision = rows[0]?.decision ?? "MISSING";
+      if (decision === "OVER_RESERVATION") {
         const [budget, spends, reconciliations] = await Promise.all([
           tx.siteBuildBudget.findUnique({
             where: { buildRunId: scope.buildRunId },
@@ -792,7 +830,7 @@ export class SiteBuildCostLedger {
             },
           }),
         ]);
-        if (!budget) throw new PaidCallDeniedError('DENIED_NO_BUDGET');
+        if (!budget) throw new PaidCallDeniedError("DENIED_NO_BUDGET");
         const summary = buildSiteBuildCostSummary(
           budget,
           spends,
@@ -805,19 +843,19 @@ export class SiteBuildCostLedger {
         await tx.outboxEvent.create({
           data: {
             workspaceId: scope.workspaceId,
-            eventType: 'SiteBuildCostSummaryUpdated',
+            eventType: "SiteBuildCostSummaryUpdated",
             schemaVersion: 1,
-            aggregateType: 'SiteBuildRun',
+            aggregateType: "SiteBuildRun",
             aggregateId: scope.buildRunId,
-            privacyClassification: 'INTERNAL',
+            privacyClassification: "INTERNAL",
             payload: {
               workspaceId: scope.workspaceId,
               siteId: scope.siteId,
               buildRunId: scope.buildRunId,
               revision: summary.reconciliation.revision,
-              summaryDigest: createHash('sha256')
+              summaryDigest: createHash("sha256")
                 .update(JSON.stringify(summary))
-                .digest('hex'),
+                .digest("hex"),
               budget: summary.budget,
               totals: summary.totals,
               reconciliation: summary.reconciliation,
@@ -825,7 +863,11 @@ export class SiteBuildCostLedger {
           },
         });
       }
-      if (decision === 'SETTLED' && disableReason) {
+      if (
+        decision === "SETTLED" &&
+        disableReason &&
+        input.status !== "UNKNOWN"
+      ) {
         const disabled = await tx.$queryRaw<Array<{ count: number }>>`
           SELECT disable_site_build_paid_calls(
             ${scope.workspaceId}::uuid,
@@ -834,7 +876,7 @@ export class SiteBuildCostLedger {
           ) AS count
         `;
         if (disabled[0]?.count !== 1) {
-          throw new Error('atomic paid-call disable target missing');
+          throw new Error("atomic paid-call disable target missing");
         }
       }
       return decision;
@@ -895,7 +937,7 @@ export class SiteBuildCostLedger {
     reason: string;
   }): Promise<SiteBuildCostSummary> {
     const reason = input.reason.trim().slice(0, 80);
-    if (!reason) throw new Error('terminal paid-call reason is required');
+    if (!reason) throw new Error("terminal paid-call reason is required");
 
     return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
       await tx.$queryRaw<Array<{ reconciled: number }>>`
@@ -938,7 +980,7 @@ export class SiteBuildCostLedger {
             outputTokens: true,
             callCount: true,
           },
-          orderBy: { operationKey: 'asc' },
+          orderBy: { operationKey: "asc" },
         }),
         tx.siteBuildSpendReconciliation.findMany({
           where: { buildRunId: input.buildRunId },
@@ -948,11 +990,11 @@ export class SiteBuildCostLedger {
             exactCostMicrousd: true,
             createdAt: true,
           },
-          orderBy: [{ spendId: 'asc' }, { attemptNo: 'asc' }],
+          orderBy: [{ spendId: "asc" }, { attemptNo: "asc" }],
         }),
       ]);
       if (!budget) {
-        throw new PaidCallDeniedError('DENIED_NO_BUDGET');
+        throw new PaidCallDeniedError("DENIED_NO_BUDGET");
       }
       return buildSiteBuildCostSummary(budget, spends, reconciliations);
     });
@@ -969,7 +1011,7 @@ export class SiteBuildCostLedger {
       spendId: string;
       operationKey: string;
       meta: Record<string, unknown> | null;
-      action: 'RESOLVE' | 'EXPIRE';
+      action: "RESOLVE" | "EXPIRE";
     }>
   > {
     const take = Math.max(1, Math.min(100, Math.floor(limit)));
@@ -977,9 +1019,9 @@ export class SiteBuildCostLedger {
       const rows = await tx.siteBuildSpend.findMany({
         where: {
           workspaceId,
-          costBasis: 'estimated_upper_bound',
+          costBasis: { in: ["estimated_upper_bound", "unknown"] },
           reconciliations: {
-            none: { status: { in: ['RESOLVED', 'CONFLICT', 'EXPIRED'] } },
+            none: { status: { in: ["RESOLVED", "CONFLICT", "EXPIRED"] } },
           },
         },
         select: {
@@ -992,10 +1034,10 @@ export class SiteBuildCostLedger {
           createdAt: true,
           reconciliations: {
             select: { status: true, observedAt: true },
-            orderBy: { attemptNo: 'asc' },
+            orderBy: { attemptNo: "asc" },
           },
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: "asc" },
         take,
       });
       return rows.flatMap((row) => {
@@ -1004,7 +1046,7 @@ export class SiteBuildCostLedger {
           spendCreatedAt: row.createdAt,
           observations: row.reconciliations,
         });
-        if (action !== 'RESOLVE' && action !== 'EXPIRE') return [];
+        if (action !== "RESOLVE" && action !== "EXPIRE") return [];
         return [
           {
             workspaceId: row.workspaceId,
@@ -1012,7 +1054,9 @@ export class SiteBuildCostLedger {
             buildRunId: row.buildRunId,
             operationKey: row.operationKey,
             meta:
-              row.meta && typeof row.meta === 'object' && !Array.isArray(row.meta)
+              row.meta &&
+              typeof row.meta === "object" &&
+              !Array.isArray(row.meta)
                 ? (row.meta as Record<string, unknown>)
                 : null,
             spendId: row.id,
@@ -1041,27 +1085,27 @@ export class SiteBuildCostLedger {
       let observation: SiteBuildReconciliationObservation;
       try {
         observation =
-          candidate.action === 'EXPIRE'
+          candidate.action === "EXPIRE"
             ? {
-                status: 'EXPIRED',
-                resolverId: 'reconciliation-sweep-v1',
+                status: "EXPIRED",
+                resolverId: "reconciliation-sweep-v1",
                 observedAt: this.now(),
-                meta: { reason: 'reconciliation_window_expired' },
+                meta: { reason: "reconciliation_window_expired" },
               }
             : await input.resolve(candidate);
       } catch {
         observation = {
-          status: 'UNRESOLVED',
-          resolverId: 'reconciliation-sweep-v1',
+          status: "UNRESOLVED",
+          resolverId: "reconciliation-sweep-v1",
           observedAt: this.now(),
-          meta: { reason: 'resolver_unavailable' },
+          meta: { reason: "resolver_unavailable" },
         };
       }
       await this.appendReconciliation({
         ...candidate,
         observation,
       });
-      if (observation.status === 'RESOLVED') resolved += 1;
+      if (observation.status === "RESOLVED") resolved += 1;
     }
     return { attempted: candidates.length, resolved };
   }
@@ -1076,23 +1120,23 @@ export class SiteBuildCostLedger {
     const { observation } = input;
     const resolverId = observation.resolverId.trim();
     if (!resolverId || resolverId.length > 191) {
-      throw new Error('reconciliation resolver id is invalid');
+      throw new Error("reconciliation resolver id is invalid");
     }
     const receiptDigest = observation.receiptDigest ?? null;
     if (receiptDigest !== null && !/^[0-9a-f]{64}$/.test(receiptDigest)) {
-      throw new Error('reconciliation receipt digest is invalid');
+      throw new Error("reconciliation receipt digest is invalid");
     }
     const exact = observation.exactCostMicrousd;
     if (
-      observation.status === 'RESOLVED'
+      observation.status === "RESOLVED"
         ? !receiptDigest ||
           !observation.costBasis ||
-          typeof exact !== 'string' ||
+          typeof exact !== "string" ||
           !/^(0|[1-9][0-9]*)$/.test(exact) ||
           BigInt(exact) > 9_223_372_036_854_775_807n
         : exact !== undefined || observation.costBasis !== undefined
     ) {
-      throw new Error('reconciliation observation shape is invalid');
+      throw new Error("reconciliation observation shape is invalid");
     }
     const safeMeta = boundedReconciliationMeta(observation.meta);
 
@@ -1107,7 +1151,7 @@ export class SiteBuildCostLedger {
         },
         select: { id: true, reservationMicrousd: true },
       });
-      if (!spend) throw new Error('reconciliation spend scope is invalid');
+      if (!spend) throw new Error("reconciliation spend scope is invalid");
       const prior = receiptDigest
         ? await tx.siteBuildSpendReconciliation.findFirst({
             where: { spendId: input.spendId, receiptDigest },
@@ -1115,9 +1159,9 @@ export class SiteBuildCostLedger {
         : null;
       if (!prior) {
         const existingResolved =
-          observation.status === 'RESOLVED'
+          observation.status === "RESOLVED"
             ? await tx.siteBuildSpendReconciliation.findFirst({
-                where: { spendId: input.spendId, status: 'RESOLVED' },
+                where: { spendId: input.spendId, status: "RESOLVED" },
                 select: { receiptDigest: true },
               })
             : null;
@@ -1125,18 +1169,18 @@ export class SiteBuildCostLedger {
           existingResolved &&
           existingResolved.receiptDigest !== observation.receiptDigest
             ? {
-                status: 'CONFLICT',
+                status: "CONFLICT",
                 resolverId,
                 requestId: observation.requestId,
                 receiptDigest: observation.receiptDigest,
                 observedAt: observation.observedAt,
-                meta: { reason: 'conflicting_resolved_receipt' },
+                meta: { reason: "conflicting_resolved_receipt" },
               }
             : observation;
         const last = await tx.siteBuildSpendReconciliation.findFirst({
           where: { spendId: input.spendId },
           select: { attemptNo: true },
-          orderBy: { attemptNo: 'desc' },
+          orderBy: { attemptNo: "desc" },
         });
         await tx.siteBuildSpendReconciliation.create({
           data: {
@@ -1160,11 +1204,13 @@ export class SiteBuildCostLedger {
             meta:
               effectiveObservation === observation
                 ? safeMeta
-                : ({ reason: 'conflicting_resolved_receipt' } as Prisma.InputJsonObject),
+                : ({
+                    reason: "conflicting_resolved_receipt",
+                  } as Prisma.InputJsonObject),
           },
         });
         if (
-          effectiveObservation.status === 'RESOLVED' &&
+          effectiveObservation.status === "RESOLVED" &&
           BigInt(effectiveObservation.exactCostMicrousd!) >
             spend.reservationMicrousd
         ) {
@@ -1175,8 +1221,8 @@ export class SiteBuildCostLedger {
               buildRunId: input.buildRunId,
               spendId: input.spendId,
               attemptNo: (last?.attemptNo ?? 0) + 2,
-              status: 'CONFLICT',
-              resolverId: 'site-build-cap-variance-v1',
+              status: "CONFLICT",
+              resolverId: "site-build-cap-variance-v1",
               requestId: effectiveObservation.requestId ?? null,
               receiptDigest: null,
               costBasis: null,
@@ -1185,9 +1231,8 @@ export class SiteBuildCostLedger {
               outputTokens: null,
               observedAt: effectiveObservation.observedAt,
               meta: {
-                reason: 'CAP_VARIANCE',
-                observedMicrousd:
-                  effectiveObservation.exactCostMicrousd!,
+                reason: "CAP_VARIANCE",
+                observedMicrousd: effectiveObservation.exactCostMicrousd!,
                 authorizedMicrousd: spend.reservationMicrousd.toString(10),
               },
             },
@@ -1196,7 +1241,7 @@ export class SiteBuildCostLedger {
             SELECT disable_site_build_paid_calls(
               ${input.workspaceId}::uuid,
               ${input.buildRunId}::uuid,
-              ${'reconciliation_cap_variance'}::text
+              ${"reconciliation_cap_variance"}::text
             )
           `;
         }
@@ -1240,7 +1285,7 @@ export class SiteBuildCostLedger {
           },
         }),
       ]);
-      if (!budget) throw new PaidCallDeniedError('DENIED_NO_BUDGET');
+      if (!budget) throw new PaidCallDeniedError("DENIED_NO_BUDGET");
       const summary = buildSiteBuildCostSummary(
         budget,
         spends,
@@ -1255,19 +1300,19 @@ export class SiteBuildCostLedger {
       await tx.outboxEvent.create({
         data: {
           workspaceId: input.workspaceId,
-          eventType: 'SiteBuildCostSummaryUpdated',
+          eventType: "SiteBuildCostSummaryUpdated",
           schemaVersion: 1,
-          aggregateType: 'SiteBuildRun',
+          aggregateType: "SiteBuildRun",
           aggregateId: input.buildRunId,
-          privacyClassification: 'INTERNAL',
+          privacyClassification: "INTERNAL",
           payload: {
             workspaceId: input.workspaceId,
             siteId: input.siteId,
             buildRunId: input.buildRunId,
             revision: summary.reconciliation.revision,
-            summaryDigest: createHash('sha256')
+            summaryDigest: createHash("sha256")
               .update(JSON.stringify(summary))
-              .digest('hex'),
+              .digest("hex"),
             budget: summary.budget,
             totals: summary.totals,
             reconciliation: summary.reconciliation,
@@ -1284,8 +1329,8 @@ export class SiteBuildCostLedger {
     buildRunId: string;
     taskId: string;
   }): Promise<
-    | { kind: 'completed'; result: Record<string, unknown> }
-    | { kind: 'claimed'; attempt: ClaimedTaskAttempt }
+    | { kind: "completed"; result: Record<string, unknown> }
+    | { kind: "claimed"; attempt: ClaimedTaskAttempt }
   > {
     return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-task-${input.buildRunId}-${input.taskId}`}))`;
@@ -1297,16 +1342,16 @@ export class SiteBuildCostLedger {
           },
         },
       });
-      if (existing?.status === 'SUCCEEDED') {
+      if (existing?.status === "SUCCEEDED") {
         if (
           !existing.resultJson ||
-          typeof existing.resultJson !== 'object' ||
+          typeof existing.resultJson !== "object" ||
           Array.isArray(existing.resultJson)
         ) {
-          throw new Error('completed paid task has no stable result');
+          throw new Error("completed paid task has no stable result");
         }
         return {
-          kind: 'completed',
+          kind: "completed",
           result: existing.resultJson as Record<string, unknown>,
         };
       }
@@ -1325,11 +1370,11 @@ export class SiteBuildCostLedger {
           select: { paidCallsEnabled: true },
         }),
       ]);
-      if (!run || run.status !== 'running') {
-        throw new PaidCallDeniedError('DENIED_STATE');
+      if (!run || run.status !== "running") {
+        throw new PaidCallDeniedError("DENIED_STATE");
       }
-      if (!budget?.paidCallsEnabled && existing?.status !== 'MODEL_SUCCEEDED') {
-        throw new PaidCallDeniedError('DENIED_KILL_SWITCH');
+      if (!budget?.paidCallsEnabled && existing?.status !== "MODEL_SUCCEEDED") {
+        throw new PaidCallDeniedError("DENIED_KILL_SWITCH");
       }
 
       const fenceToken = this.randomUUID();
@@ -1354,7 +1399,7 @@ export class SiteBuildCostLedger {
             },
           });
       return {
-        kind: 'claimed',
+        kind: "claimed",
         attempt: attempt as ClaimedTaskAttempt,
       };
     });
@@ -1384,9 +1429,9 @@ export class SiteBuildCostLedger {
         };
       }
       const input = jsonObject(candidate) as T;
-      const inputHash = createHash('sha256')
-        .update(JSON.stringify(input), 'utf8')
-        .digest('hex');
+      const inputHash = createHash("sha256")
+        .update(JSON.stringify(input), "utf8")
+        .digest("hex");
       const written = await tx.siteBuildTaskAttempt.updateMany({
         where: {
           id: fence.attemptId,
@@ -1397,7 +1442,7 @@ export class SiteBuildCostLedger {
         data: {
           inputHash,
           inputJson: input as Prisma.InputJsonObject,
-          status: 'INPUT_READY',
+          status: "INPUT_READY",
         },
       });
       if (written.count !== 1) throw new PaidTaskFenceError();
@@ -1411,7 +1456,7 @@ export class SiteBuildCostLedger {
   ): Promise<void> {
     await this.updateFencedTask(fence, {
       outputJson: jsonObject(output) as Prisma.InputJsonObject,
-      status: 'MODEL_SUCCEEDED',
+      status: "MODEL_SUCCEEDED",
     });
   }
 
@@ -1421,7 +1466,7 @@ export class SiteBuildCostLedger {
   ): Promise<void> {
     await this.updateFencedTask(fence, {
       resultJson: jsonObject(result) as Prisma.InputJsonObject,
-      status: 'SUCCEEDED',
+      status: "SUCCEEDED",
       leaseUntil: this.now(),
     });
   }

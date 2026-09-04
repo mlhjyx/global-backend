@@ -3,6 +3,7 @@ import "dotenv/config";
 import { resolve } from "node:path";
 import { NativeConnection, Runtime, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
+import { createExecutionBudgetPlatformWriterClient } from "../execution-budget/execution-budget-platform-writer.database";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
 import { ModelRouter } from "../model-gateway/model-router";
@@ -278,11 +279,9 @@ async function main(): Promise<void> {
   // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
   // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
   const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-  const platformWriterUrl =
-    process.env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL?.trim();
-  const platformWriterDb = platformWriterUrl
-    ? new PrismaClient({ datasourceUrl: platformWriterUrl })
-    : undefined;
+  const platformWriterDb = createExecutionBudgetPlatformWriterClient(
+    process.env,
+  );
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
     personalArtifactCleanupRuntime.destroy();

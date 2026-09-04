@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { PrismaService } from '../prisma/prisma.service';
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaService } from "../prisma/prisma.service";
 import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
   PaidTaskBusyError,
   SiteBuildCostLedger,
-} from './site-build-cost-ledger';
+} from "./site-build-cost-ledger";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function fakePrisma(tx: any): PrismaService {
@@ -15,38 +15,38 @@ function fakePrisma(tx: any): PrismaService {
 }
 
 const SCOPE = {
-  workspaceId: '11111111-1111-4111-8111-111111111111',
-  siteId: '22222222-2222-4222-8222-222222222222',
-  buildRunId: '33333333-3333-4333-8333-333333333333',
+  workspaceId: "11111111-1111-4111-8111-111111111111",
+  siteId: "22222222-2222-4222-8222-222222222222",
+  buildRunId: "33333333-3333-4333-8333-333333333333",
 };
 
-describe('SiteBuildCostLedger paid-operation replay gate', () => {
-  it('projects CAP_VARIANCE and emits one outbox event without relabelling known output UNKNOWN', async () => {
+describe("SiteBuildCostLedger paid-operation replay gate", () => {
+  it("projects CAP_VARIANCE and emits one outbox event without relabelling known output UNKNOWN", async () => {
     const updateRun = vi.fn(async () => ({ id: SCOPE.buildRunId }));
-    const createOutbox = vi.fn(async () => ({ id: 'outbox-1' }));
+    const createOutbox = vi.fn(async () => ({ id: "outbox-1" }));
     const ledger = new SiteBuildCostLedger(
       fakePrisma({
         $queryRaw: vi
           .fn()
-          .mockResolvedValueOnce([{ decision: 'OVER_RESERVATION' }])
-          .mockResolvedValueOnce([{ decision: 'REPLAY' }]),
+          .mockResolvedValueOnce([{ decision: "OVER_RESERVATION" }])
+          .mockResolvedValueOnce([{ decision: "REPLAY" }]),
         siteBuildBudget: {
           findUnique: vi.fn(async () => ({
             capMicrousd: 100n,
             reservedMicrousd: 0n,
             chargedMicrousd: 40n,
             paidCallsEnabled: false,
-            disabledReason: 'settlement_exceeded_reservation',
-            exhaustedAt: new Date('2026-08-16T00:00:00.000Z'),
+            disabledReason: "settlement_exceeded_reservation",
+            exhaustedAt: new Date("2026-08-16T00:00:00.000Z"),
           })),
         },
         siteBuildSpend: {
           findMany: vi.fn(async () => [
             {
-              id: '44444444-4444-4444-8444-444444444444',
-              kind: 'model',
-              status: 'SUCCEEDED',
-              costBasis: 'provider_reported',
+              id: "44444444-4444-4444-8444-444444444444",
+              kind: "model",
+              status: "SUCCEEDED",
+              costBasis: "provider_reported",
               budgetChargeMicrousd: 40n,
               reportedCostMicrousd: 80n,
               calculatedCostMicrousd: null,
@@ -60,10 +60,10 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
         siteBuildSpendReconciliation: {
           findMany: vi.fn(async () => [
             {
-              spendId: '44444444-4444-4444-8444-444444444444',
-              status: 'CONFLICT',
+              spendId: "44444444-4444-4444-8444-444444444444",
+              status: "CONFLICT",
               exactCostMicrousd: null,
-              createdAt: new Date('2026-08-16T00:00:00.000Z'),
+              createdAt: new Date("2026-08-16T00:00:00.000Z"),
             },
           ]),
         },
@@ -76,16 +76,16 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
       ledger.settleOperation({
         scope: {
           ...SCOPE,
-          operationKey: 'e'.repeat(64),
-          kind: 'model',
-          taskId: 'site_builder.copy',
-          subject: 'gpt-5.6-terra@gateway',
+          operationKey: "e".repeat(64),
+          kind: "model",
+          taskId: "site_builder.copy",
+          subject: "gpt-5.6-terra@gateway",
           reservationMicrousd: 40,
         },
-        status: 'SUCCEEDED',
+        status: "SUCCEEDED",
         result: { data: { ok: true } },
         measurement: {
-          basis: 'provider_reported',
+          basis: "provider_reported",
           budgetChargeMicrousd: 80,
           reportedCostMicrousd: 80,
           calculatedCostMicrousd: null,
@@ -96,21 +96,21 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
           meta: {},
         },
       }),
-    ).resolves.toBe('OVER_RESERVATION');
+    ).resolves.toBe("OVER_RESERVATION");
     await expect(
       ledger.settleOperation({
         scope: {
           ...SCOPE,
-          operationKey: 'e'.repeat(64),
-          kind: 'model',
-          taskId: 'site_builder.copy',
-          subject: 'gpt-5.6-terra@gateway',
+          operationKey: "e".repeat(64),
+          kind: "model",
+          taskId: "site_builder.copy",
+          subject: "gpt-5.6-terra@gateway",
           reservationMicrousd: 40,
         },
-        status: 'SUCCEEDED',
+        status: "SUCCEEDED",
         result: { data: { ok: true } },
         measurement: {
-          basis: 'provider_reported',
+          basis: "provider_reported",
           budgetChargeMicrousd: 80,
           reportedCostMicrousd: 80,
           calculatedCostMicrousd: null,
@@ -121,23 +121,20 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
           meta: {},
         },
       }),
-    ).resolves.toBe('REPLAY');
+    ).resolves.toBe("REPLAY");
     expect(updateRun).toHaveBeenCalledOnce();
     expect(createOutbox).toHaveBeenCalledOnce();
     expect(createOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventType: 'SiteBuildCostSummaryUpdated',
+          eventType: "SiteBuildCostSummaryUpdated",
         }),
       }),
     );
   });
 
-  it('commits unknown settlement and the BuildRun kill switch in one workspace transaction', async () => {
-    const queryRaw = vi
-      .fn()
-      .mockResolvedValueOnce([{ decision: 'SETTLED' }])
-      .mockResolvedValueOnce([{ count: 1 }]);
+  it("commits unknown settlement and the BuildRun kill switch in one workspace transaction", async () => {
+    const queryRaw = vi.fn().mockResolvedValueOnce([{ decision: "SETTLED" }]);
     const ledger = new SiteBuildCostLedger(
       fakePrisma({
         $queryRaw: queryRaw,
@@ -148,15 +145,15 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
       ledger.settleOperation({
         scope: {
           ...SCOPE,
-          operationKey: 'f'.repeat(64),
-          kind: 'model',
-          taskId: 'site_builder.copy',
-          subject: 'deepseek-v4-pro@gateway',
+          operationKey: "f".repeat(64),
+          kind: "model",
+          taskId: "site_builder.copy",
+          subject: "deepseek-v4-pro@gateway",
           reservationMicrousd: 400_000,
         },
-        status: 'FAILED',
+        status: "UNKNOWN",
         measurement: {
-          basis: 'unknown',
+          basis: "unknown",
           budgetChargeMicrousd: 400_000,
           reportedCostMicrousd: null,
           calculatedCostMicrousd: null,
@@ -164,16 +161,63 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
           inputTokens: 10,
           outputTokens: 5,
           callCount: 1,
-          meta: { reason: 'gateway_settlement_incomplete_or_mismatched' },
+          meta: { reason: "gateway_settlement_incomplete_or_mismatched" },
         },
-        errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
-        disablePaidCallsReason: 'MODEL_SETTLEMENT_UNKNOWN',
+        errorCode: "MODEL_SETTLEMENT_UNKNOWN",
+        disablePaidCallsReason: "MODEL_SETTLEMENT_UNKNOWN",
       }),
-    ).resolves.toBe('SETTLED');
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    ).resolves.toBe("SETTLED");
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(
+      (queryRaw.mock.calls[0]?.[0] as readonly string[]).join(" "),
+    ).toContain("settle_unknown_site_build_spend");
   });
 
-  it('serializes a manual kill switch with final pointer publication', async () => {
+  it.each([
+    ["FAILED", "unknown"],
+    ["SUCCEEDED", "unknown"],
+    ["UNKNOWN", "estimated_upper_bound"],
+  ] as const)(
+    "rejects the contradictory settlement pair %s + %s before SQL",
+    async (status, basis) => {
+      const queryRaw = vi.fn();
+      const ledger = new SiteBuildCostLedger(
+        fakePrisma({ $queryRaw: queryRaw }),
+      );
+
+      await expect(
+        ledger.settleOperation({
+          scope: {
+            ...SCOPE,
+            operationKey: "e".repeat(64),
+            kind: "model",
+            taskId: "site_builder.brand_profile",
+            subject: "gpt-5.6-terra@gateway",
+            reservationMicrousd: 800_000,
+          },
+          status,
+          measurement: {
+            basis,
+            budgetChargeMicrousd: 800_000,
+            reportedCostMicrousd: null,
+            calculatedCostMicrousd: null,
+            estimatedCostMicrousd:
+              basis === "estimated_upper_bound" ? 800_000 : null,
+            inputTokens: null,
+            outputTokens: null,
+            callCount: 1,
+            meta: {},
+          },
+          ...(status === "UNKNOWN"
+            ? { disablePaidCallsReason: "MODEL_SETTLEMENT_UNKNOWN" }
+            : {}),
+        }),
+      ).rejects.toThrow("UNKNOWN spend status and cost basis must be paired");
+      expect(queryRaw).not.toHaveBeenCalled();
+    },
+  );
+
+  it("serializes a manual kill switch with final pointer publication", async () => {
     const executeRaw = vi.fn(async () => 0);
     const queryRaw = vi.fn(async () => [{ count: 1 }]);
     const ledger = new SiteBuildCostLedger(
@@ -186,7 +230,7 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     await ledger.disablePaidCalls(
       SCOPE.workspaceId,
       SCOPE.buildRunId,
-      'manual_kill_switch',
+      "manual_kill_switch",
     );
 
     expect(executeRaw).toHaveBeenCalledOnce();
@@ -196,15 +240,15 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     );
   });
 
-  it('returns an already-settled success without authorizing another execution', async () => {
+  it("returns an already-settled success without authorizing another execution", async () => {
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
-          decision: 'REPLAY',
-          spend_id: '44444444-4444-4444-8444-444444444444',
-          spend_status: 'SUCCEEDED',
+          decision: "REPLAY",
+          spend_id: "44444444-4444-4444-8444-444444444444",
+          spend_status: "SUCCEEDED",
           cached_result: { data: { ok: true } },
-          cached_meta: { provider: 'gateway' },
+          cached_meta: { provider: "gateway" },
           cached_error_code: null,
         },
       ]),
@@ -214,32 +258,32 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     await expect(
       ledger.reserveOperation({
         ...SCOPE,
-        operationKey: 'a'.repeat(64),
-        kind: 'model',
-        taskId: 'site_builder.brand_profile',
-        subject: 'gpt-5.6-terra',
+        operationKey: "a".repeat(64),
+        kind: "model",
+        taskId: "site_builder.brand_profile",
+        subject: "gpt-5.6-terra",
         reservationMicrousd: 800_000,
       }),
     ).resolves.toEqual({
-      kind: 'replay',
-      status: 'SUCCEEDED',
+      kind: "replay",
+      status: "SUCCEEDED",
       result: { data: { ok: true } },
-      meta: { provider: 'gateway' },
+      meta: { provider: "gateway" },
       errorCode: null,
     });
     expect(tx.$queryRaw).toHaveBeenCalledOnce();
   });
 
-  it('turns an ambiguous reserved row into a terminal unknown error instead of spending twice', async () => {
+  it("turns an ambiguous reserved row into a terminal unknown error instead of spending twice", async () => {
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
-          decision: 'UNKNOWN',
-          spend_id: '44444444-4444-4444-8444-444444444444',
-          spend_status: 'UNKNOWN',
+          decision: "UNKNOWN",
+          spend_id: "44444444-4444-4444-8444-444444444444",
+          spend_status: "UNKNOWN",
           cached_result: null,
           cached_meta: null,
-          cached_error_code: 'ACK_UNKNOWN',
+          cached_error_code: "ACK_UNKNOWN",
         },
       ]),
     };
@@ -248,25 +292,25 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     await expect(
       ledger.reserveOperation({
         ...SCOPE,
-        operationKey: 'b'.repeat(64),
-        kind: 'tool',
-        taskId: 'site_builder.brand_profile',
-        subject: 'crawl4ai.fetch',
+        operationKey: "b".repeat(64),
+        kind: "tool",
+        taskId: "site_builder.brand_profile",
+        subject: "crawl4ai.fetch",
         reservationMicrousd: 10_000,
       }),
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
   });
 
-  it('rejects a terminal UNKNOWN replay instead of authorizing a fallback provider', async () => {
+  it("rejects a terminal UNKNOWN replay instead of authorizing a fallback provider", async () => {
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
-          decision: 'REPLAY',
-          spend_id: '44444444-4444-4444-8444-444444444444',
-          spend_status: 'UNKNOWN',
+          decision: "REPLAY",
+          spend_id: "44444444-4444-4444-8444-444444444444",
+          spend_status: "UNKNOWN",
           cached_result: null,
           cached_meta: { reportedCostMicrousd: 900_000 },
-          cached_error_code: 'ACTUAL_EXCEEDED_RESERVATION',
+          cached_error_code: "ACTUAL_EXCEEDED_RESERVATION",
         },
       ]),
     };
@@ -275,26 +319,26 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     const error = await ledger
       .reserveOperation({
         ...SCOPE,
-        operationKey: 'd'.repeat(64),
-        kind: 'model',
-        taskId: 'site_builder.brand_profile',
-        subject: 'gpt-5.6-terra',
+        operationKey: "d".repeat(64),
+        kind: "model",
+        taskId: "site_builder.brand_profile",
+        subject: "gpt-5.6-terra",
         reservationMicrousd: 800_000,
       })
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(PaidOperationUnknownError);
     expect((error as PaidOperationUnknownError).errorCode).toBe(
-      'ACTUAL_EXCEEDED_RESERVATION',
+      "ACTUAL_EXCEEDED_RESERVATION",
     );
   });
 
-  it('maps budget exhaustion and invalid run state to a fail-closed denial', async () => {
+  it("maps budget exhaustion and invalid run state to a fail-closed denial", async () => {
     for (const decision of [
-      'DENIED_BUDGET_EXHAUSTED',
-      'DENIED_STATE',
-      'DENIED_NO_BUDGET',
-      'DENIED_STALE_FENCE',
+      "DENIED_BUDGET_EXHAUSTED",
+      "DENIED_STATE",
+      "DENIED_NO_BUDGET",
+      "DENIED_STALE_FENCE",
     ]) {
       const tx = {
         $queryRaw: vi.fn(async () => [
@@ -312,10 +356,10 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
       const error = await ledger
         .reserveOperation({
           ...SCOPE,
-          operationKey: 'c'.repeat(64),
-          kind: 'model',
-          taskId: 'site_builder.brand_profile',
-          subject: 'gpt-5.6-terra',
+          operationKey: "c".repeat(64),
+          kind: "model",
+          taskId: "site_builder.brand_profile",
+          subject: "gpt-5.6-terra",
           reservationMicrousd: 800_000,
         })
         .catch((caught: unknown) => caught);
@@ -325,14 +369,14 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
   });
 });
 
-describe('SiteBuildCostLedger BrandProfile task attempt fencing', () => {
-  it('replays a completed logical task even after the BuildRun became terminal', async () => {
+describe("SiteBuildCostLedger BrandProfile task attempt fencing", () => {
+  it("replays a completed logical task even after the BuildRun became terminal", async () => {
     const tx = {
       $executeRaw: vi.fn(async () => 0),
       siteBuildTaskAttempt: {
         findUnique: vi.fn(async () => ({
-          id: '44444444-4444-4444-8444-444444444444',
-          status: 'SUCCEEDED',
+          id: "44444444-4444-4444-8444-444444444444",
+          status: "SUCCEEDED",
           resultJson: { version: 3, factCount: 2 },
         })),
       },
@@ -344,49 +388,49 @@ describe('SiteBuildCostLedger BrandProfile task attempt fencing', () => {
     await expect(
       ledger.claimTaskAttempt({
         ...SCOPE,
-        taskId: 'site_builder.brand_profile',
+        taskId: "site_builder.brand_profile",
       }),
     ).resolves.toEqual({
-      kind: 'completed',
+      kind: "completed",
       result: { version: 3, factCount: 2 },
     });
     expect(tx.siteBuildRun.findUnique).not.toHaveBeenCalled();
   });
 
-  it('rejects an overlapping Activity while the prior lease is live', async () => {
-    const now = new Date('2026-07-19T10:00:00.000Z');
+  it("rejects an overlapping Activity while the prior lease is live", async () => {
+    const now = new Date("2026-07-19T10:00:00.000Z");
     const tx = {
       $executeRaw: vi.fn(async () => 0),
       siteBuildTaskAttempt: {
         findUnique: vi.fn(async () => ({
-          id: '44444444-4444-4444-8444-444444444444',
-          status: 'CLAIMED',
-          leaseUntil: new Date('2026-07-19T10:01:00.000Z'),
+          id: "44444444-4444-4444-8444-444444444444",
+          status: "CLAIMED",
+          leaseUntil: new Date("2026-07-19T10:01:00.000Z"),
         })),
       },
     };
     const ledger = new SiteBuildCostLedger(fakePrisma(tx), {
       now: () => now,
-      randomUUID: () => '55555555-5555-4555-8555-555555555555',
+      randomUUID: () => "55555555-5555-4555-8555-555555555555",
     });
 
     await expect(
       ledger.claimTaskAttempt({
         ...SCOPE,
-        taskId: 'site_builder.brand_profile',
+        taskId: "site_builder.brand_profile",
       }),
     ).rejects.toBeInstanceOf(PaidTaskBusyError);
   });
 
-  it('takes over an expired attempt with a new monotonic fence and preserves prior output state', async () => {
-    const now = new Date('2026-07-19T10:00:00.000Z');
+  it("takes over an expired attempt with a new monotonic fence and preserves prior output state", async () => {
+    const now = new Date("2026-07-19T10:00:00.000Z");
     const update = vi.fn(async ({ data }) => ({
-      id: '44444444-4444-4444-8444-444444444444',
+      id: "44444444-4444-4444-8444-444444444444",
       workspaceId: SCOPE.workspaceId,
       siteId: SCOPE.siteId,
       buildRunId: SCOPE.buildRunId,
-      taskId: 'site_builder.brand_profile',
-      status: 'MODEL_SUCCEEDED',
+      taskId: "site_builder.brand_profile",
+      status: "MODEL_SUCCEEDED",
       attemptNo: 3,
       ...data,
     }));
@@ -394,15 +438,15 @@ describe('SiteBuildCostLedger BrandProfile task attempt fencing', () => {
       $executeRaw: vi.fn(async () => 0),
       siteBuildTaskAttempt: {
         findUnique: vi.fn(async () => ({
-          id: '44444444-4444-4444-8444-444444444444',
-          status: 'MODEL_SUCCEEDED',
+          id: "44444444-4444-4444-8444-444444444444",
+          status: "MODEL_SUCCEEDED",
           attemptNo: 2,
-          leaseUntil: new Date('2026-07-19T09:59:59.000Z'),
+          leaseUntil: new Date("2026-07-19T09:59:59.000Z"),
         })),
         update,
       },
       siteBuildRun: {
-        findUnique: vi.fn(async () => ({ status: 'running' })),
+        findUnique: vi.fn(async () => ({ status: "running" })),
       },
       siteBuildBudget: {
         findUnique: vi.fn(async () => ({ paidCallsEnabled: true })),
@@ -410,89 +454,89 @@ describe('SiteBuildCostLedger BrandProfile task attempt fencing', () => {
     };
     const ledger = new SiteBuildCostLedger(fakePrisma(tx), {
       now: () => now,
-      randomUUID: () => '55555555-5555-4555-8555-555555555555',
+      randomUUID: () => "55555555-5555-4555-8555-555555555555",
     });
 
     const claimed = await ledger.claimTaskAttempt({
       ...SCOPE,
-      taskId: 'site_builder.brand_profile',
+      taskId: "site_builder.brand_profile",
     });
 
     expect(claimed).toMatchObject({
-      kind: 'claimed',
+      kind: "claimed",
       attempt: {
-        status: 'MODEL_SUCCEEDED',
+        status: "MODEL_SUCCEEDED",
         attemptNo: 3,
-        fenceToken: '55555555-5555-4555-8555-555555555555',
+        fenceToken: "55555555-5555-4555-8555-555555555555",
       },
     });
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           attemptNo: 3,
-          fenceToken: '55555555-5555-4555-8555-555555555555',
+          fenceToken: "55555555-5555-4555-8555-555555555555",
         }),
       }),
     );
-    expect(update.mock.calls[0]![0].data).not.toHaveProperty('status');
-    expect(update.mock.calls[0]![0].data).not.toHaveProperty('outputJson');
+    expect(update.mock.calls[0]![0].data).not.toHaveProperty("status");
+    expect(update.mock.calls[0]![0].data).not.toHaveProperty("outputJson");
   });
 
-  it('freezes the first canonical task input and returns it on replay instead of accepting drift', async () => {
+  it("freezes the first canonical task input and returns it on replay instead of accepting drift", async () => {
     const findUnique = vi
       .fn()
       .mockResolvedValueOnce({
-        id: '44444444-4444-4444-8444-444444444444',
-        fenceToken: '55555555-5555-4555-8555-555555555555',
-        leaseUntil: new Date('2026-07-19T10:10:00.000Z'),
+        id: "44444444-4444-4444-8444-444444444444",
+        fenceToken: "55555555-5555-4555-8555-555555555555",
+        leaseUntil: new Date("2026-07-19T10:10:00.000Z"),
         inputHash: null,
         inputJson: null,
       })
       .mockResolvedValueOnce({
-        id: '44444444-4444-4444-8444-444444444444',
-        fenceToken: '55555555-5555-4555-8555-555555555555',
-        leaseUntil: new Date('2026-07-19T10:10:00.000Z'),
-        inputHash: 'a'.repeat(64),
-        inputJson: { companyName: 'Frozen Co' },
+        id: "44444444-4444-4444-8444-444444444444",
+        fenceToken: "55555555-5555-4555-8555-555555555555",
+        leaseUntil: new Date("2026-07-19T10:10:00.000Z"),
+        inputHash: "a".repeat(64),
+        inputJson: { companyName: "Frozen Co" },
       });
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
       siteBuildTaskAttempt: { findUnique, updateMany },
     };
     const ledger = new SiteBuildCostLedger(fakePrisma(tx), {
-      now: () => new Date('2026-07-19T10:00:00.000Z'),
-      randomUUID: () => 'unused',
+      now: () => new Date("2026-07-19T10:00:00.000Z"),
+      randomUUID: () => "unused",
     });
     const attempt = {
       workspaceId: SCOPE.workspaceId,
-      attemptId: '44444444-4444-4444-8444-444444444444',
-      fenceToken: '55555555-5555-4555-8555-555555555555',
+      attemptId: "44444444-4444-4444-8444-444444444444",
+      fenceToken: "55555555-5555-4555-8555-555555555555",
     };
 
     const first = await ledger.freezeTaskInput(attempt, {
-      companyName: 'First Co',
+      companyName: "First Co",
       nested: { z: 1, a: 2 },
     });
     const replay = await ledger.freezeTaskInput(attempt, {
-      companyName: 'Drifted Co',
+      companyName: "Drifted Co",
     });
 
     expect(first.input).toEqual({
-      companyName: 'First Co',
+      companyName: "First Co",
       nested: { z: 1, a: 2 },
     });
     expect(first.inputHash).toMatch(/^[0-9a-f]{64}$/);
     expect(updateMany).toHaveBeenCalledOnce();
     expect(replay).toEqual({
-      inputHash: 'a'.repeat(64),
-      input: { companyName: 'Frozen Co' },
+      inputHash: "a".repeat(64),
+      input: { companyName: "Frozen Co" },
       replayed: true,
     });
   });
 });
 
-describe('SiteBuildCostLedger terminal cost summary', () => {
-  it('reconciles ambiguous reservations, closes paid calls and returns the stable v2 summary', async () => {
+describe("SiteBuildCostLedger terminal cost summary", () => {
+  it("reconciles ambiguous reservations, closes paid calls and returns the stable v2 summary", async () => {
     const reconcile = vi.fn(async () => [{ reconciled: 1 }]);
     const tx = {
       $queryRaw: reconcile,
@@ -502,16 +546,16 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
           reservedMicrousd: 0n,
           chargedMicrousd: 820_000n,
           paidCallsEnabled: false,
-          disabledReason: 'run_succeeded',
+          disabledReason: "run_succeeded",
           exhaustedAt: null,
         })),
       },
       siteBuildSpend: {
         findMany: vi.fn(async () => [
           {
-            kind: 'model',
-            status: 'SUCCEEDED',
-            costBasis: 'token_pricing',
+            kind: "model",
+            status: "SUCCEEDED",
+            costBasis: "token_pricing",
             budgetChargeMicrousd: 20_000n,
             reportedCostMicrousd: null,
             calculatedCostMicrousd: 20_000n,
@@ -521,9 +565,9 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
             callCount: 1,
           },
           {
-            kind: 'tool',
-            status: 'UNKNOWN',
-            costBasis: 'unknown',
+            kind: "tool",
+            status: "UNKNOWN",
+            costBasis: "unknown",
             budgetChargeMicrousd: 800_000n,
             reportedCostMicrousd: null,
             calculatedCostMicrousd: null,
@@ -541,17 +585,17 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
     await expect(
       ledger.closeAndSummarize({
         ...SCOPE,
-        reason: 'run_succeeded',
+        reason: "run_succeeded",
       }),
     ).resolves.toMatchObject({
-      schemaVersion: 'site-builder-cost-summary/v2',
+      schemaVersion: "site-builder-cost-summary/v2",
       budget: {
-        chargedMicrousd: '820000',
+        chargedMicrousd: "820000",
         paidCallsEnabled: false,
-        disabledReason: 'run_succeeded',
+        disabledReason: "run_succeeded",
       },
       totals: {
-        calculatedCostMicrousd: '20000',
+        calculatedCostMicrousd: "20000",
         unknownOperations: 1,
       },
       usage: { modelCalls: 1, toolCalls: 0 },
@@ -559,7 +603,7 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
     expect(reconcile).toHaveBeenCalledTimes(2);
   });
 
-  it('corrects a provisional success reason when publication falls into failed compensation', async () => {
+  it("corrects a provisional success reason when publication falls into failed compensation", async () => {
     const tx = {
       $queryRaw: vi.fn(async () => [{ reconciled: 0 }]),
       siteBuildBudget: {
@@ -568,7 +612,7 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
           reservedMicrousd: 0n,
           chargedMicrousd: 0n,
           paidCallsEnabled: false,
-          disabledReason: 'run_failed',
+          disabledReason: "run_failed",
           exhaustedAt: null,
         })),
       },
@@ -577,7 +621,7 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
     };
     const ledger = new SiteBuildCostLedger(fakePrisma(tx));
 
-    await ledger.closeAndSummarize({ ...SCOPE, reason: 'run_failed' });
+    await ledger.closeAndSummarize({ ...SCOPE, reason: "run_failed" });
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
   });
