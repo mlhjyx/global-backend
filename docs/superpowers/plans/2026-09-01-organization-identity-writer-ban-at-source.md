@@ -98,6 +98,7 @@ The final spec subject is committed v2 head `b060c5dd4afef9fe42dfe510b02f930f56c
 | `scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs`                                        | Root-anchor path, no-follow, create-exclusive, fsync, inode/device/mode and TOCTOU hostile fixtures; kept below 800 lines.                                                                                                              |
 | `scripts/governance-organization-identity-bootstrap.mjs`                                                          | Stdlib-only accepted-subject/config/sentinel/declaration/tool/generated-output preflight, clean Prisma generation, dynamic TypeScript/scanner import and review-receipt validator.                                                      |
 | `scripts/governance-organization-identity-bootstrap.spec.mjs`                                                     | Hostile env/preload/pnpmfile/lifecycle/config/store/tool/symlink/TOCTOU marker tests proving no hostile body loads or executes.                                                                                                         |
+| `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`                                        | Bounded `<800` Task 0P supplemental hostile/coverage suite for bootstrap-only assertions already split out of the main bootstrap spec; it does not absorb launcher trust, canonical-output, or default-Git launcher coverage.           |
 | `docs/governance/organization-identity-bootstrap-contract.json`                                                   | Immutable request/config-derivation/environment-schema/logical-tool/declaration/generation/comparator rules; subject config, roots, inodes, resolved paths and timestamps are excluded.                                                 |
 | `scripts/governance-organization-identity-current-main-admission.mjs`                                             | Closed current-main schema, exact Git set/conflict/migration validator, deterministic metadata-only generator, and closed Copy command registry.                                                                                        |
 | `scripts/governance-organization-identity-current-main-admission.spec.mjs`                                        | Pre-refresh exact-set, rename/case collision, conflict/generator provenance, migration disposition, and HOLD mutation tests.                                                                                                            |
@@ -2696,6 +2697,16 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 
 **Commit message:** `feat: add closed identity governance launcher`
 
+**Coverage amendment (2026-09-04):**
+
+- Keep `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs` bounded to Task 0P bootstrap-only hostile/coverage cases; it must not become the place where launcher root-bound trust/output/default-Git coverage is padded in.
+- If the normalized aggregate for `scripts/governance-organization-identity-launcher.mjs` plus `scripts/governance-organization-identity-bootstrap.mjs` remains below `>=80%` lines and `>=80%` functions after the bounded Task 0P bootstrap suite, close the remaining launcher spans only in the existing `scripts/governance-organization-identity-launcher-request.spec.mjs` and `scripts/governance-organization-identity-launcher-execution.spec.mjs`, both still below 800 lines.
+- Authorize exactly two development-only stdlib launcher seams for that coverage work:
+  1. `export async function verifyFixedLauncherTrust(request, { rootDirectory, fixtureMode } = {})`, where production uses the fixed default `ROOT_DIRECTORY`, and any non-default `rootDirectory` is allowed only when `fixtureMode` explicitly selects a local fixture path for non-authority testing.
+  2. `export async function writeCanonicalOutputRecord(outputPath, value, owner, { fixtureRoot } = {})`, implemented only as `createExclusiveOutput(...)` followed by `finalizeOutput(...)`, and rejecting any path outside the explicit fixture root.
+- `scripts/governance-organization-identity-launcher-request.spec.mjs` owns the temp-root trust-chain coverage for `readCanonicalRecord(...)` and `verifyFixedLauncherTrust(...)`, including a meaningful PASS plus canonical/digest drift failures; `scripts/governance-organization-identity-launcher-execution.spec.mjs` owns canonical output/readback and default Git snapshot coverage through closed launcher entrypoints, with zero root writes.
+- Reviewers reject no-op coverage padding. The gate closes only when those launcher/bootstrap percentages are reached by meaningful execution of the remaining root-bound behaviors under the allowed seams.
+
 - [ ] **Step 1: Verify the future approved/committed local execution state and create the ignored review parent**
 
 Run only after this exact plan is independently approved and committed. Use `mkdir -p .superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source`, create `.superpowers/sdd/.gitignore` with exact content `*` by `apply_patch` if absent, verify `git check-ignore`, and require a clean tracked/untracked worktree. This local phase is authorized by exact plan approval; no root path may exist or be written yet.
@@ -2855,17 +2866,19 @@ Prepare four separate materialization packets for the reviewed GitHub, Gitleaks,
 
 - Create: `scripts/governance-organization-identity-bootstrap.mjs`
 - Create: `scripts/governance-organization-identity-bootstrap.spec.mjs`
+- Create: `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`
 - Create: `docs/governance/organization-identity-bootstrap-contract.json`
 - Create local review parent/exclusion: `.superpowers/sdd/.gitignore`
 - Create local review narrative: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0p-bootstrap-review.md`
 - Create local review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0p-bootstrap-review.json`
 - Test: `scripts/governance-organization-identity-bootstrap.spec.mjs`
+- Test: `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`
 - Read-only: final spec/reviews; `package.json`, `apps/api/package.json`, `packages/db/package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `tsconfig.base.json`, API tsconfigs/Nest config, `.dockerignore`, `.gitignore`, Docker/runtime inputs, current absence of `.npmrc`, `.pnpmfile*`, and `patches/`.
 
 **Interfaces:**
 
 - Consumes: exact final spec commit/hash, reviewed Task 0L tracked launcher/review, pinned Node/Git/Corepack/pnpm/Prisma/TypeScript identities, accepted Git package/config/sentinel subjects, and the clean-launch/bootstrap/review schemas above.
-- Produces: stdlib-only bootstrap CLI; exact immutable `docs/governance/organization-identity-bootstrap-contract.json`; `validateExternalLaunchReceipt`; `validateBootstrapContract`; `validateBootstrapRunReceipt`; `compareRunToAcceptedContract`; `materializeAcceptedInstallInputs`; `verifyBootstrapPreimage`; `verifyDependencyAndToolRoots`; `runAcceptedPrismaGenerate`; `loadAcceptedScanner`; `verify-review`; hostile no-exec marker fixtures; independently reviewed `BOOTSTRAP_CONTRACT_COMMIT`. Actual authority begins only after Task 0L's separately authorized root materialization of these reviewed bytes.
+- Produces: stdlib-only bootstrap CLI; exact immutable `docs/governance/organization-identity-bootstrap-contract.json`; `validateExternalLaunchReceipt`; `validateBootstrapContract`; `validateBootstrapRunReceipt`; `compareRunToAcceptedContract`; `materializeAcceptedInstallInputs`; `verifyBootstrapPreimage`; `verifyDependencyAndToolRoots`; `runAcceptedPrismaGenerate`; `loadAcceptedScanner`; `verify-review`; hostile no-exec marker fixtures; the bounded `<800` `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs` bootstrap-only coverage suite; independently reviewed `BOOTSTRAP_CONTRACT_COMMIT`. Actual authority begins only after Task 0L's separately authorized root materialization of these reviewed bytes.
 
 **Commit message:** `feat: add clean identity governance bootstrap`
 
@@ -2903,7 +2916,9 @@ Create marker-bearing fake local/global pnpmfiles, lifecycle scripts, config dep
 - [ ] **Step 5: Run RED**
 
 ```bash
-node --test scripts/governance-organization-identity-bootstrap.spec.mjs
+node --test \
+  scripts/governance-organization-identity-bootstrap.spec.mjs \
+  scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs
 ```
 
 Expected: FAIL because the bootstrap module, immutable contract and run-receipt validators do not exist. This direct Node run is non-authority development evidence.
@@ -2927,10 +2942,13 @@ After install, reverify bootstrap inode/device/realpath/digest. The stdlib boots
 - [ ] **Step 10: Run GREEN and hostile marker proof**
 
 ```bash
-node --test scripts/governance-organization-identity-bootstrap.spec.mjs
+node --test \
+  scripts/governance-organization-identity-bootstrap.spec.mjs \
+  scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs
 git diff --check -- \
   scripts/governance-organization-identity-bootstrap.mjs \
   scripts/governance-organization-identity-bootstrap.spec.mjs \
+  scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs \
   docs/governance/organization-identity-bootstrap-contract.json
 ```
 
@@ -2941,6 +2959,7 @@ Expected: PASS; every hostile loaded/executed marker count is exactly zero, cont
 ```bash
 git add scripts/governance-organization-identity-bootstrap.mjs \
   scripts/governance-organization-identity-bootstrap.spec.mjs \
+  scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs \
   docs/governance/organization-identity-bootstrap-contract.json
 git commit -m "feat: add clean identity governance bootstrap"
 BOOTSTRAP_CONTRACT_COMMIT="$(git rev-parse HEAD)"
