@@ -35,6 +35,69 @@ const SHA_D = "d".repeat(40);
 const DIGEST = `sha256:${"e".repeat(64)}`;
 const NOW = new Date("2026-08-07T12:00:00.000Z");
 
+test("the stable roadmap and ADR registry reject live-status and superseded product drift", () => {
+  const releasePlan = readFileSync(
+    new URL("../docs/roadmap/release-plan.md", import.meta.url),
+    "utf8",
+  );
+  const decisions = readFileSync(
+    new URL("../docs/adr/registry.md", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    releasePlan,
+    /Live gate verdicts and time-bound execution facts are maintained only in \[current status\]\(\.\.\/status\/current\.md\)\./,
+  );
+  assert.doesNotMatch(releasePlan, /\| Gate \| Current verdict \|/);
+  assert.match(releasePlan, /\| Gate \| Stable proof \|/);
+  for (const gate of ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7"]) {
+    assert.match(releasePlan, new RegExp(`\\| ${gate} —`));
+  }
+
+  const historicalSequenceStart = releasePlan.indexOf("## 2. R0-R3");
+  assert.notEqual(historicalSequenceStart, -1);
+  const historicalSequence = releasePlan.slice(historicalSequenceStart);
+  assert.match(
+    historicalSequence.slice(0, 1_500),
+    /HISTORICAL \/ SUPERSEDED/,
+  );
+  assert.match(
+    historicalSequence.slice(0, 1_500),
+    /MVP-1[^\n]*Opportunity[^\n]*human QGO/,
+  );
+  assert.match(
+    historicalSequence.slice(0, 1_500),
+    /MVP-2[^\n]*email/,
+  );
+
+  for (const document of [releasePlan, decisions]) {
+    assert.doesNotMatch(document, /QualifiedLeadHandoff/);
+    assert.match(document, /LeadQualifiedPackage/);
+  }
+  assert.match(
+    decisions,
+    /\| PDR-003 \|[^\n]+\| SUPERSEDED BY PDR-004\s+\|/,
+  );
+  assert.match(
+    decisions,
+    /\| PDR-004 \|[^\n]*LeadQualifiedPackage[^\n]*Opportunity[^\n]*Human QGO[^\n]*MVP-2[^\n]*email[^\n]*\| ACCEPTED\s+\|/,
+  );
+  assert.match(
+    decisions,
+    /`LeadQualified` only names the integration event; it is not a second canonical product object\./,
+  );
+  for (const preservedQualifier of [
+    "| PDR-001 |",
+    "| PDR-002 |",
+  ]) {
+    const row = decisions
+      .split("\n")
+      .find((line) => line.startsWith(preservedQualifier));
+    assert.match(row ?? "", /ACCEPTED ⚠待 A\/B 会签/);
+  }
+});
+
 test("the discovery lineage successor is current-main based and the quarantined mega-branch is provenance only", () => {
   const plan = readFileSync(
     new URL(
@@ -252,13 +315,13 @@ test("the discovery lineage successor is current-main based and the quarantined 
     .split("\n")
     .filter((line) => line.startsWith("1. **Phase 0:**"));
   const expectedPhase0Row =
-    "1. **Phase 0:** current truth、A/B interface、provenance 与 documentation 已完成；G0=`PASS / OWNERSHIP_CLOSED`，绑定 PR #424 与 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171`。这不升级 G1–G7；Program B source/TDD 从 G2 继续，DB/RLS/replay/integration 从 G3 继续。";
+    "1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](../status/current.md).";
   assert.deepEqual(phase0Rows, [expectedPhase0Row]);
   const releaseG0Rows = releasePlan
     .split("\n")
     .filter((line) => line.startsWith("| G0 — Truth & Ownership |"));
   assert.deepEqual(releaseG0Rows, [
-    "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` |",
+    "| G0 — Truth & Ownership | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit. |",
   ]);
   const laterGateRows = status
     .split("\n")
