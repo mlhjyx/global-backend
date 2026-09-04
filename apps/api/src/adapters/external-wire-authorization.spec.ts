@@ -66,4 +66,51 @@ describe('adapter internal physical-wire authorization', () => {
     expect(beforeRequest).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it('bounds one 10,000-item Algolia source to ten physical pages and fences every page', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (fetchMock.mock.calls.length > 10) {
+        throw new Error('unbounded Algolia page fan-out');
+      }
+      return new Response(JSON.stringify({
+        hits: [{ objectID: 'same', companyName: 'Same GmbH' }],
+        nbPages: 999,
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const authorize = vi.fn(async () => undefined);
+    const beforePhysicalWire = vi.fn(async () => undefined);
+
+    await expect(queryAlgoliaExhibitors(
+      {
+        appId: 'APP', apiKey: 'public-key', indexName: 'exhibitors',
+        eventEditionId: 'edition',
+      },
+      10_000,
+      authorize,
+      beforePhysicalWire,
+    )).resolves.toHaveLength(1);
+
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(authorize).toHaveBeenCalledTimes(10);
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(10);
+  });
+
+  it('rejects an oversized Algolia page before parsing JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ hits: [], nbPages: 1 }),
+      {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': '5000001',
+        },
+      },
+    )));
+
+    await expect(queryAlgoliaExhibitors({
+      appId: 'APP', apiKey: 'public-key', indexName: 'exhibitors',
+      eventEditionId: 'edition',
+    })).rejects.toThrow('ALGOLIA_RESPONSE_TOO_LARGE');
+  });
 });

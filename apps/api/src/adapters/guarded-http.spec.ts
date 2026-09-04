@@ -53,6 +53,34 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
     expect(executePinned).toHaveBeenCalledTimes(1);
   });
 
+  it('runs the physical-wire fence exactly once immediately before each redirect wire', async () => {
+    const beforePhysicalWire = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce(new Error('wire counter exhausted'));
+    const resolver: PublicUrlResolver = vi.fn(async (raw) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4,
+      addresses: [{ address: '93.184.216.34', family: 4 }],
+    }));
+    const executePinned = vi.fn(async () => ({
+      status: 302,
+      headers: { location: 'https://second.example/final' },
+      body: Buffer.alloc(0),
+      text: '',
+    }));
+
+    await expect(requestPublicHttp(
+      'https://first.example/start',
+      { maxRedirects: 3 },
+      { resolver, executePinned, beforePhysicalWire },
+    )).rejects.toThrow('wire counter exhausted');
+
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(2);
+    expect(executePinned).toHaveBeenCalledTimes(1);
+  });
+
   it('连接固定到校验所得 IP，不对原始 hostname 做第二次 DNS 解析', async () => {
     const server = createServer((req, res) => {
       expect(req.headers.host).toMatch(/^rebind\.example:/);

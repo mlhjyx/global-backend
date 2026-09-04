@@ -70,6 +70,51 @@ describe("Crawl4AI adapter 的 API 侧入口闸", () => {
 });
 
 describe("Crawl4AI artifact-result boundaries", () => {
+  it("fences the physical Crawl4AI request exactly once", async () => {
+    const beforePhysicalWire = vi.fn(async () => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        results: [{ html: "<main>ok</main>", response_headers: {} }],
+      }), { status: 200 })),
+    );
+
+    await crawlHtml(
+      "https://company.example/",
+      undefined,
+      vi.fn(async (raw: string) => ({
+        url: new URL(raw),
+        ip: "203.0.113.10",
+        family: 4 as const,
+        addresses: [{ address: "203.0.113.10", family: 4 as const }],
+      })),
+      beforePhysicalWire,
+    );
+
+    expect(beforePhysicalWire).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an oversized raw Crawl4AI response before parsing JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(
+        JSON.stringify({ results: [{ html: "ok" }] }),
+        { status: 200, headers: { "content-length": "5000001" } },
+      )),
+    );
+
+    await expect(crawlHtml(
+      "https://company.example/",
+      undefined,
+      vi.fn(async (raw: string) => ({
+        url: new URL(raw),
+        ip: "203.0.113.10",
+        family: 4 as const,
+        addresses: [{ address: "203.0.113.10", family: 4 as const }],
+      })),
+    )).rejects.toThrow("CRAWL4AI_RESPONSE_TOO_LARGE");
+  });
+
   it("rejects rendered HTML over the approved artifact byte cap instead of truncating it", async () => {
     vi.stubGlobal(
       "fetch",
