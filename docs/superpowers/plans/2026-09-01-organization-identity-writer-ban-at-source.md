@@ -22,6 +22,8 @@
 - A direct current-shell `node`, `pnpm`, `git`, `gh`, `gitleaks`, `docker`, `psql`, `jq`, package-script or unreviewed branch-local bootstrap invocation is diagnostic/non-authoritative only. Local bootstrap/scanner/test/static/migration-source authority uses only the root launcher and its exact local executable closure. Remote GitHub/fetch authority, Gitleaks, disposable PostgreSQL and root-anchor creation use only their matching branch-external controller receipts. Hosted B1–B6 authority uses only `ProtectedBaseLauncherReceipt`. Neither the local launcher nor the GitHub controller may write the anchor; they may only verify the completed root-anchor evidence as typed input data.
 - Every local closed command creates exactly one fresh `BootstrapRunReceipt`; tasks with multiple commands create the same number of receipts and may bind them with one sorted `BootstrapRunReceiptSet`. One receipt may never authorize or attest two request IDs, modes or command IDs.
 - Narrow style exception: the single `scripts/governance-organization-identity-launcher.mjs` trust-root artifact may exceed the repository's ordinary 800-line ceiling only while it remains one self-contained `node:`-only launcher whose complete source is independently hashed, reviewed for cohesion/function size and hostile coverage, and materialized as the exact four-file root trust set. This exception is not transferable to controller modules, tests, or later scanner code; an unreviewed helper split, package import, or unrelated growth invalidates the exception and is a plan stop.
+- Task 0L has no accepted root/external compatibility assumption. Because no accepted root launcher, external controller or anchor materialization exists yet, the shared controller contract, controller materialization, controller review, GitHub request/receipt, root-anchor upstream and root-operation schemas may and must bump cleanly to `/v2` where that removes an ambiguous `/v1` shape. Future validators may read historical `/v1` review reports only as non-authority diagnostics; an authority receipt must validate the exact `/v2` schema named by the current reviewed controller contract.
+- Every Task 0L file except `scripts/governance-organization-identity-launcher.mjs` must remain below 800 lines at commit time. Shared fixtures, launcher specs, root-anchor closure specs and root-anchor filesystem helpers are split before the next review if needed; exceeding the ceiling is a plan stop, not a reviewer preference.
 - Preserve exact Artifact A commit `2400bac28796bae44294114edc99eaccb1bd65b3`, the failed v1 branch `codex/pr407-organization-identity-caller-cutover@5adb69877501b240e89ae3d8617617d7bf81837f`, all applied migration bytes, all other worktrees, and all unique provenance.
 - V2 work occurs only in `/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2` on `codex/pr407-organization-identity-caller-cutover-v2`; B1–B6 must not be implemented in that worktree or branch.
 - V3 is exactly `/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3` on `codex/pr407-organization-identity-caller-cutover-v3`, created only from the exact live protected-main B0 merge commit after the external anchor exists.
@@ -75,43 +77,48 @@ The final spec subject is committed v2 head `b060c5dd4afef9fe42dfe510b02f930f56c
 
 ### Files created before or during B0
 
-| File                                                                                                              | Responsibility                                                                                                                                                                                                                   |
-| ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/governance-organization-identity-launcher.mjs`                                                           | Stdlib-only exact-key closed-command controller source; parses requests before dependency load and invokes only contract-bound command IDs through the accepted clean environment.                                               |
-| `scripts/governance-organization-identity-launcher.spec.mjs`                                                      | Non-authority development fixtures for arbitrary-command/env/path rejection, exact executable-closure hashing, hostile preload markers, permissions and TOCTOU.                                                                  |
-| `scripts/governance-organization-identity-controller-contracts.mjs`                                               | Exact-key GitHub/Gitleaks/disposable/protected-base contract, request, receipt and independent-review validators; contains no credential values or tool dispatch.                                                                |
-| `scripts/governance-organization-identity-controller-contracts.spec.mjs`                                          | Mutation fixtures for omitted executables, open operations/payloads, credential values, event drift, request replay and cross-controller receipt substitution.                                                                   |
-| `scripts/governance-organization-identity-github-controller.mjs`                                                  | Branch-external GitHub/remote-Git controller with the exact reviewed operation registry and opaque credential-handle ingestion.                                                                                                  |
-| `scripts/governance-organization-identity-github-controller.spec.mjs`                                             | Closed push/PR create/update/readback/rules/checks/merge/parent/workflow/variable/fetch controller fixtures.                                                                                                                     |
-| `scripts/governance-organization-identity-disposable-postgres-controller.mjs`                                     | Separately authorized Docker/psql/Prisma disposable controller enforcing loopback/no-egress/resources/caps/cleanup.                                                                                                              |
-| `scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs`                                | Exact executable/process-tree, synthetic-credential-handle, topology, scenario and cleanup mutation fixtures.                                                                                                                    |
-| `scripts/governance-organization-identity-gitleaks-controller.mjs`                                                | No-credential Gitleaks controller pinned to exact executable/config/source-tree/request/result schemas.                                                                                                                          |
-| `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`                                           | Executable/config/source/redaction/result and no-credential-ingress mutation fixtures.                                                                                                                                           |
-| `scripts/governance-organization-identity-root-anchor-controller.mjs`                                             | No-credential branch-external anchor writer enforcing typed genesis input, canonical payload, create-exclusive write/fsync and non-self-hashing evidence.                                                                        |
-| `scripts/governance-organization-identity-root-anchor-controller.spec.mjs`                                        | Extra-path/overwrite/symlink/predecessor/receipt-parent/mode/fsync/TOCTOU/self-hash/replay/current-shell hostile fixtures.                                                                                                       |
-| `scripts/governance-organization-identity-bootstrap.mjs`                                                          | Stdlib-only accepted-subject/config/sentinel/declaration/tool/generated-output preflight, clean Prisma generation, dynamic TypeScript/scanner import and review-receipt validator.                                               |
-| `scripts/governance-organization-identity-bootstrap.spec.mjs`                                                     | Hostile env/preload/pnpmfile/lifecycle/config/store/tool/symlink/TOCTOU marker tests proving no hostile body loads or executes.                                                                                                  |
-| `docs/governance/organization-identity-bootstrap-contract.json`                                                   | Immutable request/config-derivation/environment-schema/logical-tool/declaration/generation/comparator rules; subject config, roots, inodes, resolved paths and timestamps are excluded.                                          |
-| `scripts/governance-organization-identity-current-main-admission.mjs`                                             | Closed current-main schema, exact Git set/conflict/migration validator, deterministic metadata-only generator, and closed Copy command registry.                                                                                 |
-| `scripts/governance-organization-identity-current-main-admission.spec.mjs`                                        | Pre-refresh exact-set, rename/case collision, conflict/generator provenance, migration disposition, and HOLD mutation tests.                                                                                                     |
-| `docs/governance/organization-identity-current-main-admission.json`                                               | First-added or precisely refreshed only in `CURRENT_MAIN_ADMISSION_COMMIT`, the one-parent child of two-parent `B0_REFRESH_BASE_COMMIT`; binds admitted main, merge/parents, complete sets, deltas, and pre-merge review digest. |
-| `scripts/governance-organization-identity-writers.mjs`                                                            | CLI, command routing, external-anchor admission, deterministic closed output.                                                                                                                                                    |
-| `scripts/governance-organization-identity-writers-contracts.mjs`                                                  | Closed enums, schemas, canonical JSON, budgets, result normalization.                                                                                                                                                            |
-| `scripts/governance-organization-identity-writers-files.mjs`                                                      | Git-object reader, build-surface pinning, lstat/realpath/symlink/TOCTOU protections.                                                                                                                                             |
-| `scripts/governance-organization-identity-writers-typescript.mjs`                                                 | One-program/one-checker delegate, raw-capability, wrapper-ingress, and dependency-closure engine.                                                                                                                                |
-| `scripts/governance-organization-identity-writers-baseline.mjs`                                                   | Refreshed build/raw/current-migration baseline generation plus separate Artifact A resolver/function/ACL/six-receipt verification.                                                                                               |
-| `scripts/governance-organization-identity-writers.spec.mjs`                                                       | Literal scanner fixtures, mutation tests, hostile filesystem tests, manifest tests, bounds, redaction, stage, anchor, and runtime exclusion.                                                                                     |
-| `docs/governance/organization-identity-writer-baseline.json`                                                      | Exact `B0_REFRESH_BASE_COMMIT` build/raw closure/wrapper ingress/delegate inventory, refreshed budget measurements, hashes, and dispositions.                                                                                    |
-| `docs/governance/organization-identity-migration-authority.json`                                                  | Complete refreshed migration directory/checksums/last-change/current-main dispositions plus Artifact A resolver/function/ACL/table privilege authority.                                                                          |
-| `docs/governance/organization-identity-artifact-a-acceptance.json`                                                | Durable, non-secret exact Artifact A head/range and six source-receipt identities.                                                                                                                                               |
-| `docs/governance/organization-identity-writer-stage.json`                                                         | Closed stage plus scan-result observation digest only.                                                                                                                                                                           |
-| `docs/governance/organization-identity-writer-acceptance.json`                                                    | Created later in the one-path `B0_ACCEPTANCE` commit; absent from every B0 implementation commit.                                                                                                                                |
-| `packages/db/prisma/migrations/20260902090000_organization_identity_materialization_outcome_compat/migration.sql` | Sole Artifact B DDL-only migration expanding the exact C-TX CHECK for `identity_v2` and `IDENTITY_CONFLICT`.                                                                                                                     |
-| `packages/db/test/organization-identity-materialization-outcome-compat.spec.mjs`                                  | Static exact source/catalog/timeout/name/no-DML/migration-order/provenance tests.                                                                                                                                                |
-| `packages/db/test/organization-identity-materialization-outcome-compat.disposable.spec.mjs`                       | Separately authorized PostgreSQL 16 fresh/upgrade/lock/fault/catalog/Prisma-ledger/cleanup proof.                                                                                                                                |
-| `.github/workflows/organization-identity-writer-anchor.yml`                                                       | Protected-main `push` initial anchor and base-owned `pull_request_target` B1–B6 verifier; never executes PR-controlled bytes.                                                                                                    |
-| `scripts/governance-organization-identity-protected-base-launcher.mjs`                                            | Hosted protected-base materialization/event/runner/tool/request verifier and local-to-hosted equivalence checker; never executes PR bytes.                                                                                       |
-| `scripts/governance-organization-identity-protected-base-launcher.spec.mjs`                                       | Hosted path/uid/runner/event/controller-variable/TOCTOU/equivalence and PR-no-execution fixtures.                                                                                                                                |
+| File                                                                                                              | Responsibility                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/governance-organization-identity-launcher.mjs`                                                           | Stdlib-only exact-key closed-command controller source; parses requests before dependency load and invokes only contract-bound command IDs through the accepted clean environment.                                                      |
+| `scripts/governance-organization-identity-launcher-request.spec.mjs`                                              | Closed request/parser/payload/input/output/path/replay hostile fixtures; created by splitting the old launcher spec before the next Task 0L review.                                                                                     |
+| `scripts/governance-organization-identity-launcher-trust.spec.mjs`                                                | Launcher trust-root, executable closure, materialization readback and `VerifiedWorktreeReceiptV1` hostile fixtures; kept below 800 lines.                                                                                               |
+| `scripts/governance-organization-identity-launcher-execution.spec.mjs`                                            | Local dispatcher, argv expansion, no external executable, no dependency preload and controller-owned execution-loop fixtures; kept below 800 lines.                                                                                     |
+| `scripts/governance-organization-identity-test-fixtures.mjs`                                                      | Shared null-prototype canonical JSON, digest, temp-root, fake adapter and receipt builders used by all Task 0L specs; contains no authority logic or controller dispatch.                                                               |
+| `scripts/governance-organization-identity-controller-contracts.mjs`                                               | Single stdlib-only exact-key GitHub/Gitleaks/disposable/protected-base/root-anchor contract, request, receipt, source-closure, upstream-closure and independent-review validator layer; contains no credential values or tool dispatch. |
+| `scripts/governance-organization-identity-controller-contracts.spec.mjs`                                          | Mutation fixtures for omitted executables, open operations/payloads, credential values, event drift, request replay and cross-controller receipt substitution.                                                                          |
+| `scripts/governance-organization-identity-github-controller.mjs`                                                  | Branch-external GitHub/remote-Git controller with the exact reviewed operation registry and opaque credential-handle ingestion.                                                                                                         |
+| `scripts/governance-organization-identity-github-controller.spec.mjs`                                             | Closed push/PR create/update/readback/rules/checks/merge/parent/workflow/variable/fetch controller fixtures.                                                                                                                            |
+| `scripts/governance-organization-identity-disposable-postgres-controller.mjs`                                     | Separately authorized Docker/psql/Prisma disposable controller enforcing loopback/no-egress/resources/caps/cleanup.                                                                                                                     |
+| `scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs`                                | Exact executable/process-tree, synthetic-credential-handle, topology, scenario and cleanup mutation fixtures.                                                                                                                           |
+| `scripts/governance-organization-identity-gitleaks-controller.mjs`                                                | No-credential Gitleaks controller pinned to exact executable/config/source-tree/request/result schemas.                                                                                                                                 |
+| `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`                                           | Executable/config/source/redaction/result and no-credential-ingress mutation fixtures.                                                                                                                                                  |
+| `scripts/governance-organization-identity-root-anchor-controller.mjs`                                             | No-credential branch-external anchor writer enforcing typed genesis input, canonical payload, create-exclusive write/fsync and non-self-hashing evidence; delegates all upstream-closure validation to shared contracts.                |
+| `scripts/governance-organization-identity-root-anchor-filesystem.mjs`                                             | Optional root-anchor filesystem-only helper if removing duplicated validators does not bring the entry module below 800 lines; owns no schema decisions.                                                                                |
+| `scripts/governance-organization-identity-root-anchor-closure.spec.mjs`                                           | Root-anchor upstream-closure, cross-record invariant, final controller digest and same-shape substitution hostile fixtures; kept below 800 lines.                                                                                       |
+| `scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs`                                        | Root-anchor path, no-follow, create-exclusive, fsync, inode/device/mode and TOCTOU hostile fixtures; kept below 800 lines.                                                                                                              |
+| `scripts/governance-organization-identity-bootstrap.mjs`                                                          | Stdlib-only accepted-subject/config/sentinel/declaration/tool/generated-output preflight, clean Prisma generation, dynamic TypeScript/scanner import and review-receipt validator.                                                      |
+| `scripts/governance-organization-identity-bootstrap.spec.mjs`                                                     | Hostile env/preload/pnpmfile/lifecycle/config/store/tool/symlink/TOCTOU marker tests proving no hostile body loads or executes.                                                                                                         |
+| `docs/governance/organization-identity-bootstrap-contract.json`                                                   | Immutable request/config-derivation/environment-schema/logical-tool/declaration/generation/comparator rules; subject config, roots, inodes, resolved paths and timestamps are excluded.                                                 |
+| `scripts/governance-organization-identity-current-main-admission.mjs`                                             | Closed current-main schema, exact Git set/conflict/migration validator, deterministic metadata-only generator, and closed Copy command registry.                                                                                        |
+| `scripts/governance-organization-identity-current-main-admission.spec.mjs`                                        | Pre-refresh exact-set, rename/case collision, conflict/generator provenance, migration disposition, and HOLD mutation tests.                                                                                                            |
+| `docs/governance/organization-identity-current-main-admission.json`                                               | First-added or precisely refreshed only in `CURRENT_MAIN_ADMISSION_COMMIT`, the one-parent child of two-parent `B0_REFRESH_BASE_COMMIT`; binds admitted main, merge/parents, complete sets, deltas, and pre-merge review digest.        |
+| `scripts/governance-organization-identity-writers.mjs`                                                            | CLI, command routing, external-anchor admission, deterministic closed output.                                                                                                                                                           |
+| `scripts/governance-organization-identity-writers-contracts.mjs`                                                  | Closed enums, schemas, canonical JSON, budgets, result normalization.                                                                                                                                                                   |
+| `scripts/governance-organization-identity-writers-files.mjs`                                                      | Git-object reader, build-surface pinning, lstat/realpath/symlink/TOCTOU protections.                                                                                                                                                    |
+| `scripts/governance-organization-identity-writers-typescript.mjs`                                                 | One-program/one-checker delegate, raw-capability, wrapper-ingress, and dependency-closure engine.                                                                                                                                       |
+| `scripts/governance-organization-identity-writers-baseline.mjs`                                                   | Refreshed build/raw/current-migration baseline generation plus separate Artifact A resolver/function/ACL/six-receipt verification.                                                                                                      |
+| `scripts/governance-organization-identity-writers.spec.mjs`                                                       | Literal scanner fixtures, mutation tests, hostile filesystem tests, manifest tests, bounds, redaction, stage, anchor, and runtime exclusion.                                                                                            |
+| `docs/governance/organization-identity-writer-baseline.json`                                                      | Exact `B0_REFRESH_BASE_COMMIT` build/raw closure/wrapper ingress/delegate inventory, refreshed budget measurements, hashes, and dispositions.                                                                                           |
+| `docs/governance/organization-identity-migration-authority.json`                                                  | Complete refreshed migration directory/checksums/last-change/current-main dispositions plus Artifact A resolver/function/ACL/table privilege authority.                                                                                 |
+| `docs/governance/organization-identity-artifact-a-acceptance.json`                                                | Durable, non-secret exact Artifact A head/range and six source-receipt identities.                                                                                                                                                      |
+| `docs/governance/organization-identity-writer-stage.json`                                                         | Closed stage plus scan-result observation digest only.                                                                                                                                                                                  |
+| `docs/governance/organization-identity-writer-acceptance.json`                                                    | Created later in the one-path `B0_ACCEPTANCE` commit; absent from every B0 implementation commit.                                                                                                                                       |
+| `packages/db/prisma/migrations/20260902090000_organization_identity_materialization_outcome_compat/migration.sql` | Sole Artifact B DDL-only migration expanding the exact C-TX CHECK for `identity_v2` and `IDENTITY_CONFLICT`.                                                                                                                            |
+| `packages/db/test/organization-identity-materialization-outcome-compat.spec.mjs`                                  | Static exact source/catalog/timeout/name/no-DML/migration-order/provenance tests.                                                                                                                                                       |
+| `packages/db/test/organization-identity-materialization-outcome-compat.disposable.spec.mjs`                       | Separately authorized PostgreSQL 16 fresh/upgrade/lock/fault/catalog/Prisma-ledger/cleanup proof.                                                                                                                                       |
+| `.github/workflows/organization-identity-writer-anchor.yml`                                                       | Protected-main `push` initial anchor and base-owned `pull_request_target` B1–B6 verifier; never executes PR-controlled bytes.                                                                                                           |
+| `scripts/governance-organization-identity-protected-base-launcher.mjs`                                            | Hosted protected-base materialization/event/runner/tool/request verifier and local-to-hosted equivalence checker; never executes PR bytes.                                                                                              |
+| `scripts/governance-organization-identity-protected-base-launcher.spec.mjs`                                       | Hosted path/uid/runner/event/controller-variable/TOCTOU/equivalence and PR-no-execution fixtures.                                                                                                                                       |
 
 The flat helper filenames intentionally match the terminal CODEOWNERS pattern `/scripts/governance-*.mjs`; no unowned helper directory is introduced.
 
@@ -321,7 +328,7 @@ type LauncherMaterializationReceipt = Readonly<{
 }>;
 
 type LauncherMaterializationReviewReceipt = Readonly<{
-  schemaVersion: "organization-identity-launcher-materialization-review/v1";
+  schemaVersion: "organization-identity-launcher-materialization-review/v2";
   launcherContractSha256: string;
   launcherMaterializationReceiptSha256: string;
   readbackReportSha256: string;
@@ -331,6 +338,29 @@ type LauncherMaterializationReviewReceipt = Readonly<{
   critical: 0;
   important: 0;
   verdict: "PASS";
+}>;
+
+type VerifiedWorktreeReceiptV1 = Readonly<{
+  schemaVersion: "organization-identity-verified-worktree/v1";
+  repositoryRoot: string;
+  worktreePath: string;
+  gitDirRealpathSha256: string;
+  commonDirRealpathSha256: string;
+  branch: string;
+  headCommit: string;
+  subjectCommit: string;
+  statusPorcelainSha256: string;
+  worktreeListEntrySha256: string;
+  expectedMode:
+    | "CURRENT_MAIN_AUDIT_LOCAL"
+    | "GIT_REFRESH_START"
+    | "GIT_REFRESH_COMMIT"
+    | "GIT_ADMISSION_COMMIT"
+    | "GIT_ACCEPTANCE_COMMIT"
+    | "V3_WORKTREE_CREATE";
+  verifiedByExecutableClosureSha256: string;
+  prePostToctouSha256: string;
+  result: "PASS";
 }>;
 
 type RequestInputBinding = Readonly<{
@@ -359,10 +389,21 @@ type ClosedCommandRequestBase<
   authorizationReceiptSha256: string | null;
   externalControllerReceiptSha256: string | null;
   anchorReceiptSha256: string | null;
+  verifiedWorktreeReceiptSha256: string | null;
   input: RequestInputBinding;
   allowedArgvSha256: string;
   parameters: Parameters;
 }>;
+
+// Only Git-backed local request variants may set a non-null
+// verifiedWorktreeReceiptSha256. Bootstrap, scanner, review, docs, API,
+// runtime and governance requests must keep it null. The launcher rejects null
+// for CURRENT_MAIN_AUDIT_LOCAL_V1, GIT_REFRESH_START_V1,
+// GIT_REFRESH_COMMIT_V1, GIT_ADMISSION_COMMIT_V1,
+// GIT_ACCEPTANCE_COMMIT_V1 and V3_WORKTREE_CREATE_V1. The receipt is derived
+// by the launcher-controlled Git closure or by a validated root/hosted receipt
+// digest explicitly named in the request; caller-provided worktree objects are
+// never accepted.
 
 type BootstrapAuthorityRequest = ClosedCommandRequestBase<
   "BOOTSTRAP_AUTHORITY_RUN_V1",
@@ -878,12 +919,37 @@ type CredentialHandleBinding = Readonly<{
   valueEmitted: false;
 }>;
 
+type ControllerSourceClosureV1 = Readonly<{
+  schemaVersion: "organization-identity-controller-source-closure/v1";
+  controllerClass:
+    | "GITHUB"
+    | "DISPOSABLE_POSTGRES"
+    | "GITLEAKS"
+    | "ROOT_ANCHOR"
+    | "PROTECTED_BASE_LAUNCHER";
+  primarySourcePath: string;
+  primarySourceBlobId: string;
+  primarySourceSha256: string;
+  sharedSourceEntries: readonly Readonly<{
+    path: string;
+    blobId: string;
+    sha256: string;
+  }>[];
+  testSourceEntries: readonly Readonly<{
+    path: string;
+    blobId: string;
+    sha256: string;
+  }>[];
+  sourceSetSha256: string;
+}>;
+
 type ExternalControllerMaterializationReceipt = Readonly<{
-  schemaVersion: "organization-identity-external-controller-materialization/v1";
+  schemaVersion: "organization-identity-external-controller-materialization/v2";
   controllerClass:
     "GITHUB" | "DISPOSABLE_POSTGRES" | "GITLEAKS" | "ROOT_ANCHOR";
   contractSha256: string;
   controllerSourceSha256: string;
+  controllerSourceClosureSha256: string;
   rootDirectorySha256: string;
   requestRootSha256: string;
   outputRootSha256: string;
@@ -899,7 +965,7 @@ type ExternalControllerMaterializationReceipt = Readonly<{
 }>;
 
 type ControllerReviewReceipt = Readonly<{
-  schemaVersion: "organization-identity-controller-review/v1";
+  schemaVersion: "organization-identity-controller-review/v2";
   controllerClass:
     | "GITHUB"
     | "DISPOSABLE_POSTGRES"
@@ -908,6 +974,7 @@ type ControllerReviewReceipt = Readonly<{
     | "PROTECTED_BASE_LAUNCHER";
   contractSha256: string;
   materializationReceiptSha256: string | null;
+  controllerSourceClosureSha256: string;
   requestSchemaSha256: string;
   reportSha256: string;
   counterexampleSetSha256: string;
@@ -931,11 +998,29 @@ type GitHubControllerOperation =
   | "WORKFLOW_RERUN"
   | "CONTROLLER_VARIABLES_WRITE";
 
+type GitHubVariableMutationBody = Readonly<{
+  name: string;
+  value: string;
+}>;
+
+type GitHubControllerApiRequestBody =
+  | null
+  | Readonly<{ base: "main"; head: string; title: string; body: string }>
+  | Readonly<{ title: string; body: string }>
+  | Readonly<{ body: string }>
+  | Readonly<{
+      merge_method: "merge";
+      sha: string;
+      commit_title?: string;
+      commit_message?: string;
+    }>
+  | GitHubVariableMutationBody;
+
 type GitHubControllerRequestBase<
   Operation extends GitHubControllerOperation,
   Payload,
 > = Readonly<{
-  schemaVersion: "organization-identity-github-controller-request/v1";
+  schemaVersion: "organization-identity-github-controller-request/v2";
   requestId: string;
   operation: Operation;
   contractSha256: string;
@@ -945,6 +1030,9 @@ type GitHubControllerRequestBase<
   credentialHandle: CredentialHandleBinding;
   payloadSchemaSha256: string;
   payloadSha256: string;
+  apiRequestBodySchemaSha256: string | null;
+  apiRequestBodySha256: string | null;
+  apiRequestBody: GitHubControllerApiRequestBody;
   outputRecordPath: string;
   payload: Payload;
 }>;
@@ -1056,13 +1144,26 @@ type GitHubControllerRequest =
       }>
     >;
 
+// GitHub request payloads are controller authorization/control records only.
+// For mutation operations, apiRequestBody is the exact object passed to
+// `gh api --input`. PR_CREATE is exactly { base, head, title, body };
+// PR_UPDATE_BODY is exactly { title, body } or { body }; PR_MERGE is exactly
+// { merge_method: "merge", sha: expectedHeadSha } plus only contracted commit
+// title/message fields. CONTROLLER_VARIABLES_WRITE materializes fifteen exact
+// variable create/update bodies or fifteen separate requests; a digest-only
+// variable-count record is never an executable API body. PR create/update/merge,
+// workflow readback and rerun operations produce mechanical pre/post readback
+// receipts from observed API results, not passive caller metadata.
+
 type GitHubControllerContract = Readonly<{
-  schemaVersion: "organization-identity-github-controller-contract/v1";
+  schemaVersion: "organization-identity-github-controller-contract/v2";
   rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github";
   requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/requests";
   outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/outputs";
   controllerSourceBlobId: string;
   controllerSourceSha256: string;
+  controllerSourceClosure: ControllerSourceClosureV1;
+  controllerSourceClosureSha256: string;
   repository: "mlhjyx/global-backend";
   remote: "origin";
   protectedRef: "refs/heads/main";
@@ -1089,14 +1190,17 @@ type GitHubControllerContract = Readonly<{
 }>;
 
 type GitHubControllerReceipt = Readonly<{
-  schemaVersion: "organization-identity-github-controller-receipt/v1";
+  schemaVersion: "organization-identity-github-controller-receipt/v2";
   contractSha256: string;
   controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   operation: GitHubControllerOperation;
   requestId: string;
   requestSha256: string;
   payloadSchemaSha256: string;
   payloadSha256: string;
+  apiRequestBodySchemaSha256: string | null;
+  apiRequestBodySha256: string | null;
   authorizationReceiptSha256: string | null;
   credentialHandleSha256: string | null;
   repository: "mlhjyx/global-backend";
@@ -1113,12 +1217,14 @@ type GitHubControllerReceipt = Readonly<{
 }>;
 
 type DisposablePostgresControllerContract = Readonly<{
-  schemaVersion: "organization-identity-disposable-postgres-controller-contract/v1";
+  schemaVersion: "organization-identity-disposable-postgres-controller-contract/v2";
   rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres";
   requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/requests";
   outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/disposable-postgres/outputs";
   controllerSourceBlobId: string;
   controllerSourceSha256: string;
+  controllerSourceClosure: ControllerSourceClosureV1;
+  controllerSourceClosureSha256: string;
   executableClosure: readonly ExternalControllerExecutableEntry[];
   requiredRoles: readonly [
     "NODE",
@@ -1155,7 +1261,7 @@ type DisposablePostgresControllerContract = Readonly<{
 }>;
 
 type DisposablePostgresControllerRequest = Readonly<{
-  schemaVersion: "organization-identity-disposable-postgres-controller-request/v1";
+  schemaVersion: "organization-identity-disposable-postgres-controller-request/v2";
   requestId: string;
   operation: "0M_COMPATIBILITY" | "B6_MIXED_FLEET";
   contractSha256: string;
@@ -1174,9 +1280,10 @@ type DisposablePostgresControllerRequest = Readonly<{
 }>;
 
 type DisposablePostgresControllerReceipt = Readonly<{
-  schemaVersion: "organization-identity-disposable-postgres-controller-receipt/v1";
+  schemaVersion: "organization-identity-disposable-postgres-controller-receipt/v2";
   contractSha256: string;
   controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   operation: "0M_COMPATIBILITY" | "B6_MIXED_FLEET";
   requestId: string;
   requestSha256: string;
@@ -1196,12 +1303,14 @@ type DisposablePostgresControllerReceipt = Readonly<{
 }>;
 
 type GitleaksControllerContract = Readonly<{
-  schemaVersion: "organization-identity-gitleaks-controller-contract/v1";
+  schemaVersion: "organization-identity-gitleaks-controller-contract/v2";
   rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks";
   requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/requests";
   outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/gitleaks/outputs";
   controllerSourceBlobId: string;
   controllerSourceSha256: string;
+  controllerSourceClosure: ControllerSourceClosureV1;
+  controllerSourceClosureSha256: string;
   executableClosure: readonly ExternalControllerExecutableEntry[];
   requiredRoles: readonly ["NODE", "GITLEAKS"];
   allowedEnvironmentNames: readonly [
@@ -1220,7 +1329,7 @@ type GitleaksControllerContract = Readonly<{
 }>;
 
 type GitleaksControllerRequest = Readonly<{
-  schemaVersion: "organization-identity-gitleaks-controller-request/v1";
+  schemaVersion: "organization-identity-gitleaks-controller-request/v2";
   requestId: string;
   contractSha256: string;
   materializationReceiptSha256: string;
@@ -1236,9 +1345,10 @@ type GitleaksControllerRequest = Readonly<{
 }>;
 
 type GitleaksControllerReceipt = Readonly<{
-  schemaVersion: "organization-identity-gitleaks-controller-receipt/v1";
+  schemaVersion: "organization-identity-gitleaks-controller-receipt/v2";
   contractSha256: string;
   controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   requestId: string;
   requestSha256: string;
   authorizationReceiptSha256: string;
@@ -1252,7 +1362,7 @@ type GitleaksControllerReceipt = Readonly<{
 }>;
 
 type RootAnchorControllerContract = Readonly<{
-  schemaVersion: "organization-identity-root-anchor-controller-contract/v1";
+  schemaVersion: "organization-identity-root-anchor-controller-contract/v2";
   rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor";
   requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/requests";
   outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs";
@@ -1263,11 +1373,15 @@ type RootAnchorControllerContract = Readonly<{
     blobId: string;
     sha256: string;
   }>;
-  controllerTest: Readonly<{
-    path: "scripts/governance-organization-identity-root-anchor-controller.spec.mjs";
+  controllerSourceClosure: ControllerSourceClosureV1;
+  controllerSourceClosureSha256: string;
+  controllerTests: readonly Readonly<{
+    path:
+      | "scripts/governance-organization-identity-root-anchor-closure.spec.mjs"
+      | "scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs";
     blobId: string;
     sha256: string;
-  }>;
+  }>[];
   executableClosure: readonly ExternalControllerExecutableEntry[];
   requiredRoles: readonly ["ENV", "NODE"];
   allowedEnvironmentNames: readonly [
@@ -1306,12 +1420,73 @@ type RootAnchorControllerContract = Readonly<{
   anchorSelfHashFieldAllowed: false;
 }>;
 
+type AdmittedRefreshAcceptanceEvidenceV1 = Readonly<{
+  schemaVersion: "organization-identity-admitted-refresh-acceptance-evidence/v1";
+  artifactACommit: "2400bac28796bae44294114edc99eaccb1bd65b3";
+  admittedLiveMainSha: string;
+  refreshMergeCommit: string;
+  refreshParents: readonly [string, string];
+  currentMainAdmissionCommit: string;
+  b0ImplementationSha: string;
+  b0AcceptanceSha: string;
+  acceptanceReviewSha256: string;
+  result: "PASS";
+}>;
+
+type WorkflowRunEvidenceV1 = Readonly<{
+  schemaVersion: "organization-identity-workflow-run-evidence/v1";
+  repository: "mlhjyx/global-backend";
+  workflowPath: ".github/workflows/organization-identity-writer-anchor.yml";
+  workflowBlobId: string;
+  event: "push" | "pull_request_target";
+  ref: "refs/heads/main" | string;
+  headSha: string;
+  runId: number;
+  runAttempt: number;
+  conclusion: "success";
+  result: "PASS";
+}>;
+
+type ExactAuthorizationReceiptV1 = Readonly<{
+  schemaVersion: "organization-identity-exact-authorization/v1";
+  authorizationClass:
+    | "LOCAL_ROOT_MATERIALIZATION"
+    | "GITHUB_CONTROLLER_OPERATION"
+    | "GITLEAKS_CONTROLLER_OPERATION"
+    | "DISPOSABLE_POSTGRES_CONTROLLER_OPERATION"
+    | "ROOT_ANCHOR_CONTROLLER_MATERIALIZATION"
+    | "ROOT_ANCHOR_WRITE"
+    | "V3_WORKTREE_CREATE";
+  authorizedRequestSha256: string;
+  authorizedSubjectSha256: string;
+  grantedBySha256: string;
+  grantedAt: string;
+  expiresAt: string;
+  scopeSha256: string;
+  containsCredentialValue: false;
+  result: "PASS";
+}>;
+
+type RootAnchorUpstreamEvidenceClosureV2 = Readonly<{
+  localLauncherReview: LauncherMaterializationReviewReceipt;
+  bootstrapContract: BootstrapContract;
+  githubProtectedMainReadback: GitHubControllerReceipt;
+  githubControllerVariableWrite: GitHubControllerReceipt;
+  protectedBaseLaunch: ProtectedBaseLauncherReceipt;
+  admittedRefreshAcceptance: AdmittedRefreshAcceptanceEvidenceV1;
+  workflowRun: WorkflowRunEvidenceV1;
+  rootAnchorControllerMaterialization: ExternalControllerMaterializationReceipt;
+  rootAnchorControllerReview: ControllerReviewReceipt;
+  rootAnchorAuthorization: ExactAuthorizationReceiptV1;
+}>;
+
 type RootAnchorWriteRequest = Readonly<{
   schemaVersion: "organization-identity-root-anchor-write-request/v1";
   requestId: string;
   contractSha256: string;
   materializationReceiptSha256: string;
   controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   authorizationReceiptSha256: string;
   targetPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
   targetMode: 0o600;
@@ -1328,16 +1503,18 @@ type RootAnchorWriteRequest = Readonly<{
   orderedMergeParents: readonly [string, string];
   workflowRunEvidenceSha256: string;
   controllerVariableWriteReceiptSha256: string;
+  upstreamEvidenceClosureSha256: string;
   canonicalAnchorPayloadSha256: string;
   canonicalAnchorPayloadSize: number;
   writeReceiptPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor/outputs/root-anchor-write-receipt.json";
 }>;
 
 type RootAnchorWriteReceipt = Readonly<{
-  schemaVersion: "organization-identity-root-anchor-write-receipt/v1";
+  schemaVersion: "organization-identity-root-anchor-write-receipt/v2";
   contractSha256: string;
   materializationReceiptSha256: string;
   controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   requestSha256: string;
   authorizationReceiptSha256: string;
   targetPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
@@ -1357,8 +1534,11 @@ type RootAnchorWriteReceipt = Readonly<{
 }>;
 
 type RootAnchorReadbackReceipt = Readonly<{
-  schemaVersion: "organization-identity-root-anchor-readback/v1";
+  schemaVersion: "organization-identity-root-anchor-readback/v2";
   contractSha256: string;
+  materializationReceiptSha256: string;
+  controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   requestSha256: string;
   writeReceiptSha256: string;
   targetPath: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/protected-main-anchor.json";
@@ -1380,10 +1560,11 @@ type RootAnchorReadbackReceipt = Readonly<{
 }>;
 
 type RootAnchorOperationReviewReceipt = Readonly<{
-  schemaVersion: "organization-identity-root-anchor-operation-review/v1";
+  schemaVersion: "organization-identity-root-anchor-operation-review/v2";
   controllerContractSha256: string;
   controllerMaterializationReceiptSha256: string;
   controllerReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   writeRequestSha256: string;
   writeReceiptSha256: string;
   readbackReceiptSha256: string;
@@ -1396,13 +1577,42 @@ type RootAnchorOperationReviewReceipt = Readonly<{
   verdict: "PASS";
 }>;
 
+// validateRootAnchorUpstreamEvidenceClosureV2 rejects unknown or missing keys
+// at every level and validates every nested SHA, Git ID, count, path, enum,
+// array and literal predicate. It also enforces:
+// - githubProtectedMainReadback.repository === protectedBaseLaunch.repository;
+// - workflowRun.repository equals the same repository if present in the record;
+// - protected-main readback head, protectedBaseCommit, workflow headSha and
+//   accepted merge SHA agree;
+// - ordered parents in the write request are exactly
+//   [admittedLiveMainSha, reviewedB0AcceptanceSha];
+// - controller-variable write uses the same GitHub controller contract, review
+//   and ControllerSourceClosureV1 as protected-main readback;
+// - protectedBaseLaunch.controllerVariableSetSha256 equals the variable-write
+//   result digest set;
+// - root-anchor materialization/review digests match the write request and
+//   final operation review;
+// - localLauncherReview.launcherContractSha256 equals
+//   bootstrapContract.launcherContractSha256;
+// - every operation receipt has containsCredentialValue === false.
+// validateRootAnchorOperationReviewClosureV2 additionally recomputes
+// writeRequest/writeReceipt/readback/operation-review canonical digests and
+// requires operationReviewReceipt.controllerContractSha256,
+// controllerMaterializationReceiptSha256, controllerReviewReceiptSha256 and
+// controllerSourceClosureSha256 to equal the request/upstream records; requires
+// writeReceipt contract/materialization/review/source-closure digests to equal
+// the write request; and requires
+// readbackReceipt.writeReceiptSha256 === sha256(writeReceipt).
+
 type ProtectedBaseLauncherContract = Readonly<{
-  schemaVersion: "organization-identity-protected-base-launcher-contract/v1";
+  schemaVersion: "organization-identity-protected-base-launcher-contract/v2";
   workflowPath: ".github/workflows/organization-identity-writer-anchor.yml";
   workflowBlobId: string;
   protectedBaseCommit: string;
   launcherSourceBlobId: string;
   bootstrapSourceBlobId: string;
+  controllerSourceClosure: ControllerSourceClosureV1;
+  controllerSourceClosureSha256: string;
   commandRegistrySha256: string;
   bootstrapContractSha256: string;
   toolLogicalExpectationSetSha256: string;
@@ -1450,9 +1660,10 @@ type ProtectedBaseLaunchRequest = Readonly<{
 }>;
 
 type ProtectedBaseLauncherReceipt = Readonly<{
-  schemaVersion: "organization-identity-protected-base-launcher-receipt/v1";
+  schemaVersion: "organization-identity-protected-base-launcher-receipt/v2";
   contractSha256: string;
   contractReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   workflowBlobId: string;
   protectedBaseCommit: string;
   event: "push" | "pull_request_target";
@@ -1477,9 +1688,10 @@ type ProtectedBaseLauncherReceipt = Readonly<{
 }>;
 
 type ProtectedBaseLauncherReceiptReview = Readonly<{
-  schemaVersion: "organization-identity-protected-base-launcher-receipt-review/v1";
+  schemaVersion: "organization-identity-protected-base-launcher-receipt-review/v2";
   contractSha256: string;
   contractReviewReceiptSha256: string;
+  controllerSourceClosureSha256: string;
   protectedBaseLauncherReceiptSha256: string;
   reportSha256: string;
   counterexampleSetSha256: string;
@@ -2273,7 +2485,10 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 **Files:**
 
 - Create: `scripts/governance-organization-identity-launcher.mjs`
-- Create: `scripts/governance-organization-identity-launcher.spec.mjs`
+- Create: `scripts/governance-organization-identity-launcher-request.spec.mjs`
+- Create: `scripts/governance-organization-identity-launcher-trust.spec.mjs`
+- Create: `scripts/governance-organization-identity-launcher-execution.spec.mjs`
+- Create: `scripts/governance-organization-identity-test-fixtures.mjs`
 - Create: `scripts/governance-organization-identity-controller-contracts.mjs`
 - Create: `scripts/governance-organization-identity-controller-contracts.spec.mjs`
 - Create: `scripts/governance-organization-identity-github-controller.mjs`
@@ -2283,7 +2498,9 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Create: `scripts/governance-organization-identity-gitleaks-controller.mjs`
 - Create: `scripts/governance-organization-identity-gitleaks-controller.spec.mjs`
 - Create: `scripts/governance-organization-identity-root-anchor-controller.mjs`
-- Create: `scripts/governance-organization-identity-root-anchor-controller.spec.mjs`
+- Create if needed to keep the entry module below 800 lines: `scripts/governance-organization-identity-root-anchor-filesystem.mjs`
+- Create: `scripts/governance-organization-identity-root-anchor-closure.spec.mjs`
+- Create: `scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs`
 - Create local review: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0l-launcher-review.md`
 - Create local review receipt: `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0l-launcher-review.json`
 - Create only after separate root-write authorization: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`
@@ -2293,14 +2510,13 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Create only after four-file fsync and independent readback: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-readback.json`
 - Create by the root materialization controller only after four-file fsync and readback report: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization.json`
 - Create by the independent reviewer only after verifying the materialization receipt: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-review.json`
-- Test: `scripts/governance-organization-identity-launcher.spec.mjs`
-- Test: all five `scripts/governance-organization-identity-*-controller.spec.mjs` files above.
+- Test: the three launcher split specs, the controller-contracts spec, GitHub/disposable/Gitleaks controller specs, and both root-anchor split specs.
 - Read-only: exact approved plan/spec Git blobs; `/usr/bin/env`; pinned absolute Node/Git/Corepack/pnpm executable closure; after Task 0P, exact reviewed bootstrap source/test/contract identities.
 
 **Interfaces:**
 
 - Consumes: exact approved plan commit/blob/SHA; final spec commit/blob/SHA; local launcher/request/bootstrap schemas; GitHub/Gitleaks/disposable/protected-base controller contracts; final reviewed Task 0P bootstrap commit/report/receipt; and separate exact local/external materialization authorizations.
-- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, validators for GitHub/disposable/Gitleaks/root-anchor receipts, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four-file launcher materialization/readback/materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables or credentials.
+- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateLauncherMaterializationReviewReceiptV2`, `validateBootstrapContractV2`, `validateGitHubControllerReceiptV2`, `validateProtectedBaseLauncherReceiptV2`, `validateAdmittedRefreshAcceptanceEvidenceV1`, `validateWorkflowRunEvidenceV1`, `validateControllerVariableWriteReceiptV2`, `validateRootAnchorUpstreamEvidenceClosureV2`, `validateRootAnchorOperationReviewClosureV2`, `validateVerifiedWorktreeReceiptV1`, `validateControllerSourceClosureV1`, `buildControllerReceiptSetSha256`, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four-file launcher materialization/readback/materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables, caller-asserted worktrees or credentials.
 
 **Commit message:** `feat: add closed identity governance launcher`
 
@@ -2308,13 +2524,23 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 
 Run only after this exact plan is independently approved and committed. Use `mkdir -p .superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source`, create `.superpowers/sdd/.gitignore` with exact content `*` by `apply_patch` if absent, verify `git check-ignore`, and require a clean tracked/untracked worktree. This local phase is authorized by exact plan approval; no root path may exist or be written yet.
 
-- [ ] **Step 2: Write exact parser/closure/permission RED tests**
+- [ ] **Step 2: Split Task 0L tests and write RED fixtures**
 
-Test every exact schema key and enum plus mutations for an extra argv, arbitrary command/mode, shell metacharacter, unknown environment name, inherited `NODE_OPTIONS`/`NODE_PATH`, accessor/proxy JSON surrogate, relative/out-of-request-root input/output, wrong content-addressed URI, payload-schema mismatch, request replay, receipt reuse, symlink, wrong owner/mode, inode replacement and malformed canonical bytes. Assert complete local executable closure equality, including separate entries for `COREPACK_SHIM`, `COREPACK_LIB_COREPACK_CJS`, `PNPM_SHIM`, and `PNPM_ENTRYPOINT`. Assert GitHub/Gitleaks/Docker/psql IDs are absent from the local registry.
+First split the old launcher/root-anchor spec shape into the exact file map above. Move shared fixture builders only to `scripts/governance-organization-identity-test-fixtures.mjs`; no production validator or controller execution logic may move there. Run a line-count check and stop if any non-exempt Task 0L file is still at or above 800 lines after the split.
 
-Add external-controller mutations for omitted GH/Git/Gitleaks/Docker/psql/Prisma/Corepack files, credential value in a durable record, open operation/payload/result, PR byte execution, unbound event/controller variable, non-loopback/egress disposable topology, resource-cap/cleanup omission and cross-controller receipt substitution.
+`scripts/governance-organization-identity-launcher-request.spec.mjs` tests every exact schema key and enum plus mutations for an extra argv, arbitrary command/mode, shell metacharacter, unknown environment name, inherited `NODE_OPTIONS`/`NODE_PATH`, accessor/proxy JSON surrogate, relative/out-of-request-root input/output, wrong content-addressed URI, payload-schema mismatch, request replay, receipt reuse, malformed canonical bytes and non-null `verifiedWorktreeReceiptSha256` on non-Git modes.
 
-Add root-anchor controller mutations for extra target/path/file, pre-existing target, overwrite/truncate/rename-over-existing, symlink/hardlink/nonregular target, non-root owner, broader mode, stale/non-null predecessor, missing/wrong authorization, reordered parents/input receipts, partial file/directory fsync, pre/post inode swap, canonical payload mismatch, anchor self-hash/circular receipt, reused request and current-shell/GitHub/local-launcher substitution.
+`scripts/governance-organization-identity-launcher-trust.spec.mjs` asserts complete local executable closure equality, including separate entries for `COREPACK_SHIM`, `COREPACK_LIB_COREPACK_CJS`, `PNPM_SHIM`, and `PNPM_ENTRYPOINT`; rehashes approved plan/spec, wrapper, launcher, bootstrap, contract, materialization readback, materialization receipt, review receipt, request/output roots and every executable entry; and rejects caller-provided worktree objects unless `VerifiedWorktreeReceiptV1` is derived by the launcher-controlled Git closure and matches branch, clean status, head, subject and repository realpaths.
+
+`scripts/governance-organization-identity-launcher-execution.spec.mjs` asserts GitHub/Gitleaks/Docker/psql IDs are absent from the local registry, every local argv is built internally, no generic executor can run a controller operation, and every rejected request performs zero dependency loads and zero hostile-marker executions.
+
+`scripts/governance-organization-identity-controller-contracts.spec.mjs` owns shared validator RED fixtures for `ControllerSourceClosureV1`, controller materialization/review `/v2`, `VerifiedWorktreeReceiptV1`, `RootAnchorUpstreamEvidenceClosureV2`, `RootAnchorOperationReviewClosureV2`, canonical digest sets, exact-key rejection, passive credential-like fields, same-shape cross-controller substitution and every declared cross-record invariant.
+
+`scripts/governance-organization-identity-github-controller.spec.mjs` adds RED fixtures proving controller control payloads are never written as API bodies: PR create rejects `{ expectedBaseSha, expectedHeadSha }` inside the body, PR update rejects `expectedBaseSha`/`expectedHeadSha`, PR merge rejects missing body `sha`, workflow readback rejects caller success metadata when returned workflow/head/run/blob facts mismatch, rerun requires successor readback before PASS, and controller-variable write rejects a digest-only record as an executable mutation.
+
+`scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs` and `scripts/governance-organization-identity-gitleaks-controller.spec.mjs` add RED fixtures for controller-owned CLI execution loops using local adapters only: no caller executor or argv substitution, exact materialization/review/authorization preflight before execution, fixed phase grammar, one create-exclusive output record, digest-bound receipt, cleanup `finallyPlan` on failure, retained resource count zero for disposable, source/config mismatch fail-before-exec for Gitleaks, and redaction false or unredacted result rejected.
+
+`scripts/governance-organization-identity-root-anchor-closure.spec.mjs` tests extra target/path/file, wrong authorization, reordered parents/input receipts, incomplete upstream records, inconsistent protected-main/protected-base/workflow/acceptance commits, controller-variable source-closure mismatch, root materialization/review digest mismatch, wrong final controller contract/materialization/review/source-closure digest binding and current-shell/GitHub/local-launcher substitution. `scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs` tests pre-existing target, overwrite/truncate/rename-over-existing, symlink/hardlink/nonregular target, non-root owner, broader mode, stale/non-null predecessor, partial file/directory fsync, pre/post inode swap, canonical payload mismatch, anchor self-hash/circular receipt and reused request.
 
 ```js
 test("rejects an executable-looking value outside the closed registry", async () => {
@@ -2333,38 +2559,57 @@ test("rejects an executable-looking value outside the closed registry", async ()
 - [ ] **Step 3: Run the non-authority development RED**
 
 ```bash
-node --test scripts/governance-organization-identity-launcher.spec.mjs
 node --test \
+  scripts/governance-organization-identity-launcher-request.spec.mjs \
+  scripts/governance-organization-identity-launcher-trust.spec.mjs \
+  scripts/governance-organization-identity-launcher-execution.spec.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.spec.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
   scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
-  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
+  scripts/governance-organization-identity-root-anchor-closure.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs
 ```
 
 Expected: FAIL because the launcher module does not exist. This direct local Node run is development evidence only and cannot satisfy an authority gate.
 
 - [ ] **Step 4: Implement the stdlib-only exact parser and predependency verifier**
 
-Use only `node:` built-ins with no static/imported package dependency. Parse canonical JSON into a null-prototype plain record; reject extra/missing keys, accessors/proxies exposed by test adapters, non-NFC strings and non-absolute controller paths. Before dispatch, lstat/open/fstat/realpath/hash the approved plan/spec/launcher/bootstrap bytes, root materialization receipt, request, environment schema and every executable-closure entry; repeat the inode/device/digest readback immediately before dependency loading.
+Use only `node:` built-ins with no static/imported package dependency. Parse canonical JSON into a null-prototype plain record; reject extra/missing keys, accessors/proxies exposed by test adapters, non-NFC strings and non-absolute controller paths. Promote `scripts/governance-organization-identity-controller-contracts.mjs` into the single shared exact-key validator layer and add the exported validators named in the Task 0L interface list. Its validators own `ControllerSourceClosureV1`, controller materialization/review `/v2`, GitHub `/v2` request/receipt shape, protected-base `/v2` shape, `VerifiedWorktreeReceiptV1`, `RootAnchorUpstreamEvidenceClosureV2`, `RootAnchorOperationReviewClosureV2`, credential-like passive-field rejection and canonical receipt-set hashing.
+
+Before dispatch, lstat/open/fstat/realpath/hash the approved plan/spec/wrapper/launcher/bootstrap bytes, launcher contract, materialization readback, materialization receipt, materialization review, request root, output root, environment schema and every executable-closure entry; repeat the inode/device/digest readback immediately before dependency loading. For Git-backed local commands, derive `VerifiedWorktreeReceiptV1` inside the launcher-controlled Git closure and compare worktree path, branch, clean status digest, head, subject commit, `.git` realpath and common-dir realpath before setting `invocation.cwd`. `dispatchClosedCommand` must not accept `verifiedContext.verifiedWorktree` or any caller-built worktree surrogate.
 
 - [ ] **Step 5: Implement the closed dispatcher and reviewed wrapper content contract**
 
 `dispatchClosedCommand` uses an exhaustive `switch` over the local-only `ClosedCommandId` and an exhaustive second switch over each variant's mode; `GIT_REFRESH_START_V1` and `GIT_REFRESH_COMMIT_V1` are separate. It opens the typed input record, validates that its canonical payload equals the request parameters/digests and constructs the complete argv internally. Scanner baseline/stage/acceptance and API test selections accept only their exact mode/suite unions. The root wrapper content is fixed and reviewed: it accepts exactly `--request ABSOLUTE_REQUEST_PATH`, rejects every other argc/flag, and `exec`s `/usr/bin/env -i` with only the contract's eleven environment names, `NPM_CONFIG_USERCONFIG=/dev/null`, the contract-selected absolute Node, the root `identity-writer-launch.mjs`, and that request. It performs no `eval`, command substitution, PATH lookup, JSON parsing, `jq`, sourcing or package load.
 
+The GitHub controller separates authorization/control payloads from actual REST API bodies. It validates `GitHubControllerRequestV2.payload` as a closed precondition record, validates `apiRequestBody` as the exact object sent to `gh api --input`, and records `apiRequestBodySha256` independently. PR create/update performs immediate post-readback of base/head/title/body digest; merge performs immediate pre-readback of PR head/base and allowed merge method, sends exactly `{ merge_method: "merge", sha: expectedHeadSha }` plus only contracted commit title/message fields, then reads merge response, branch head and ordered parents. Workflow readback validates the returned workflow path/blob/event/ref/head/run/attempt/conclusion. Rerun only records the rerun request and cannot claim PASS until a successor readback receipt validates the new run attempt. Controller variables are fifteen exact GitHub variable create/update API bodies or fifteen separate request records, never one digest-only executable mutation.
+
+The disposable PostgreSQL and Gitleaks controllers each own a closed CLI execution loop tested only with local adapters. `runDisposablePostgresControllerCli(argv, adapters)` and `runGitleaksControllerCli(argv, adapters)` open one canonical request, validate materialization/review/authorization/source closure, execute only the fixed phase grammar for their controller class, write exactly one output record create-exclusively, and validate/return one receipt. Disposable always runs a `finallyPlan` and proves retained resources are zero. Gitleaks verifies exact source/config readback and redaction before the receipt can pass.
+
+The root-anchor entry module deletes duplicated upstream schema fragments and delegates to `validateRootAnchorUpstreamEvidenceClosureV2`. It keeps only root-anchor-specific canonical payload planning, no-follow/create-exclusive filesystem write, fsync, readback and operation-review entrypoints. If removing upstream validators does not bring the entry module below 800 lines, move only filesystem helpers into `scripts/governance-organization-identity-root-anchor-filesystem.mjs`; the entry module remains the public controller surface.
+
+The GREEN order is fixed: shared controller-contract validators first, launcher request parser second, launcher trust/worktree receipt third, launcher execution dispatcher fourth, GitHub API-body/readback controller fifth, disposable controller loop sixth, Gitleaks controller loop seventh, root-anchor closure/filesystem eighth, line-count/diff checks ninth. A later phase may not mask an earlier RED; every failing fixture either turns green in that phase or remains an explicit HOLD before review.
+
 - [ ] **Step 6: Run local GREEN, mutation tests, and diff check**
 
 ```bash
-node --test scripts/governance-organization-identity-launcher.spec.mjs
 node --test \
+  scripts/governance-organization-identity-launcher-request.spec.mjs \
+  scripts/governance-organization-identity-launcher-trust.spec.mjs \
+  scripts/governance-organization-identity-launcher-execution.spec.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.spec.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
   scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
-  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
+  scripts/governance-organization-identity-root-anchor-closure.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs
 git diff --check -- \
   scripts/governance-organization-identity-launcher.mjs \
-  scripts/governance-organization-identity-launcher.spec.mjs \
+  scripts/governance-organization-identity-launcher-request.spec.mjs \
+  scripts/governance-organization-identity-launcher-trust.spec.mjs \
+  scripts/governance-organization-identity-launcher-execution.spec.mjs \
+  scripts/governance-organization-identity-test-fixtures.mjs \
   scripts/governance-organization-identity-controller-contracts.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.mjs \
@@ -2374,7 +2619,9 @@ git diff --check -- \
   scripts/governance-organization-identity-gitleaks-controller.mjs \
   scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
   scripts/governance-organization-identity-root-anchor-controller.mjs \
-  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
+  scripts/governance-organization-identity-root-anchor-filesystem.mjs \
+  scripts/governance-organization-identity-root-anchor-closure.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs
 ```
 
 Expected: PASS with zero dependency loads/hostile executions for every rejected request. These remain non-authority development tests because root materialization does not yet exist.
@@ -2383,7 +2630,10 @@ Expected: PASS with zero dependency loads/hostile executions for every rejected 
 
 ```bash
 git add scripts/governance-organization-identity-launcher.mjs \
-  scripts/governance-organization-identity-launcher.spec.mjs \
+  scripts/governance-organization-identity-launcher-request.spec.mjs \
+  scripts/governance-organization-identity-launcher-trust.spec.mjs \
+  scripts/governance-organization-identity-launcher-execution.spec.mjs \
+  scripts/governance-organization-identity-test-fixtures.mjs \
   scripts/governance-organization-identity-controller-contracts.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.mjs \
@@ -2393,12 +2643,15 @@ git add scripts/governance-organization-identity-launcher.mjs \
   scripts/governance-organization-identity-gitleaks-controller.mjs \
   scripts/governance-organization-identity-gitleaks-controller.spec.mjs \
   scripts/governance-organization-identity-root-anchor-controller.mjs \
-  scripts/governance-organization-identity-root-anchor-controller.spec.mjs
+  scripts/governance-organization-identity-root-anchor-closure.spec.mjs \
+  scripts/governance-organization-identity-root-anchor-filesystem.spec.mjs
+test ! -e scripts/governance-organization-identity-root-anchor-filesystem.mjs || \
+  git add scripts/governance-organization-identity-root-anchor-filesystem.mjs
 git commit -m "feat: add closed identity governance launcher"
 LAUNCHER_SOURCE_COMMIT="$(git rev-parse HEAD)"
 ```
 
-The independent reviewer fixes the twelve-file path set, plan/spec/launcher/controller blob identities, local-only command/mode/request registry, GitHub/disposable/Gitleaks/root-anchor controller operation/request/result/executable/environment/credential contracts, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
+The independent reviewer fixes the exact Task 0L path set, plan/spec/launcher/controller blob identities, local-only command/mode/request registry, shared validator exports, `ControllerSourceClosureV1`, `VerifiedWorktreeReceiptV1`, GitHub/disposable/Gitleaks/root-anchor controller operation/request/result/executable/environment/credential contracts, exact GitHub API body separation, controller-owned execution loops, root-anchor upstream/operation-review closure, all non-exempt line counts, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
 
 - [ ] **Step 8: Complete Task 0P, then stop for separate exact root-materialization authorization**
 
@@ -3943,12 +4196,15 @@ Expected: FAIL on missing root commands/import/runner wiring and runtime identit
 Modify only the root script map and add both exact imports:
 
 ```js
-import "./governance-organization-identity-launcher.spec.mjs";
+import "./governance-organization-identity-launcher-request.spec.mjs";
+import "./governance-organization-identity-launcher-trust.spec.mjs";
+import "./governance-organization-identity-launcher-execution.spec.mjs";
 import "./governance-organization-identity-controller-contracts.spec.mjs";
 import "./governance-organization-identity-github-controller.spec.mjs";
 import "./governance-organization-identity-disposable-postgres-controller.spec.mjs";
 import "./governance-organization-identity-gitleaks-controller.spec.mjs";
-import "./governance-organization-identity-root-anchor-controller.spec.mjs";
+import "./governance-organization-identity-root-anchor-closure.spec.mjs";
+import "./governance-organization-identity-root-anchor-filesystem.spec.mjs";
 import "./governance-organization-identity-current-main-admission.spec.mjs";
 import "./governance-organization-identity-writers.spec.mjs";
 import "./governance-organization-identity-protected-base-launcher.spec.mjs";
@@ -4467,7 +4723,7 @@ After authorization, the root-anchor controller:
 4. create-exclusively writes a same-directory `0600 root:root` temporary file, fsyncs it, links it to the absent target with no-replace semantics, unlinks only its own temporary name, and fsyncs the parent directory;
 5. reopens the target no-follow, verifies owner/mode/device/inode/size/SHA/TOCTOU, then writes and fsyncs `RootAnchorWriteReceipt` below the controller output root. It never overwrites, truncates, renames over or cleans an existing target.
 
-An independent root-capable reviewer then reopens the anchor, request and write receipt without following links, recomputes canonical schema/input evidence/ordered parents/predecessor/owner/mode/inode/SHA/TOCTOU/fsync facts and create-exclusively writes `RootAnchorReadbackReceipt`. A separate independent operation review challenges extra path/file, overwrite, symlink/hardlink/nonregular target, stale predecessor, wrong receipt/parent/order, missing authorization, broader mode, partial fsync, inode swap, self-hash/circular evidence, replay and current-shell/local-launcher/GitHub-controller substitution. Only zero Critical/Important and PASS creates `RootAnchorOperationReviewReceipt`.
+An independent root-capable reviewer then reopens the anchor, request and write receipt without following links, recomputes canonical schema/input evidence/ordered parents/predecessor/owner/mode/inode/SHA/TOCTOU/fsync facts and create-exclusively writes `RootAnchorReadbackReceipt`. A separate independent operation review challenges extra path/file, overwrite, symlink/hardlink/nonregular target, stale predecessor, wrong receipt/parent/order, missing authorization, broader mode, partial fsync, inode swap, self-hash/circular evidence, replay and current-shell/local-launcher/GitHub-controller substitution. The operation review must validate `RootAnchorUpstreamEvidenceClosureV2`, recompute the canonical write request/write receipt/readback receipt digests, and compare `controllerContractSha256`, `controllerMaterializationReceiptSha256`, `controllerReviewReceiptSha256`, `controllerSourceClosureSha256`, `writeReceiptSha256`, `readbackReceiptSha256`, ordered parents, anchor SHA/size and no-credential flags across the request, write receipt, readback receipt, operation-review receipt and upstream controller records. Only zero Critical/Important and PASS creates `RootAnchorOperationReviewReceipt`.
 
 The evidence direction is exactly:
 
@@ -5493,7 +5749,7 @@ The direct verifier loop is diagnostic. Authority dispatches `task-18-code-revie
 Stop at the first applicable condition and report the exact evidence boundary:
 
 1. V2 does not descend from final spec `b060c5dd...`, the exact plan is not reviewed/approved/tracked for execution, v3 does not equal the anchored merge, a worktree is dirty, or ownership overlaps.
-2. Task 0L tracked launcher/controller review fails; the four-file → readback → materialization → review chronology, request/output roots, owner/modes/TOCTOU or no-self/circular-digest rule fails; the local closure omits a Corepack/pnpm file or includes an external tool; any GitHub/Gitleaks/disposable/root-anchor controller omits source/test/blob/executable/environment/request/result/materialization/review contracts; a free-form command/mode/argv/input/output is accepted; or current shell/PR bytes are used for authority.
+2. Task 0L tracked launcher/controller review fails; the four-file → readback → materialization → review chronology, request/output roots, owner/modes/TOCTOU or no-self/circular-digest rule fails; the local closure omits a Corepack/pnpm file or includes an external tool; any GitHub/Gitleaks/disposable/root-anchor controller omits source/test/blob/executable/environment/request/result/materialization/review contracts; shared source-closure/root-upstream/operation-review validators omit an exact cross-record invariant; GitHub control payloads are usable as API bodies; controller execution is delegated to a caller executor; a Git-backed command accepts caller-asserted worktree trust; a free-form command/mode/argv/input/output is accepted; or current shell/PR bytes are used for authority.
 3. Task 0P cannot distinguish invariant `BootstrapContract` rules/logical tools from current-subject `BootstrapRunReceipt` configuration/absence/lock/root/environment/TOCTOU/output observations; any schema field is unnamed, a nested variable path is omitted, one receipt serves two commands, request/receipt counts differ, current-main config is compared to an old B0 receipt, or clean bootstrap/generation/review fails.
 4. Task 0A validator review has any C/I, permits set/rename/copy/case/owner/conflict/migration/bootstrap drift, free-form command or HOLD to pass.
 5. Task 0B missing object yields reviewed `FETCH_AUTH_REQUIRED`; only exact-authorized GitHub-controller `FETCH_EXACT_OBJECT` may fetch in Task 0F, then full Task 0B reruns. A missing-object packet never supports merge authorization.
@@ -5545,19 +5801,19 @@ Stop at the first applicable condition and report the exact evidence boundary:
 
 External review queues, authorization waits, GitHub checks, merge queues, and human response time are not included.
 
-| Phase                                           | P50 active | P90 active | Included work; external waiting excluded                                                           |
-| ----------------------------------------------- | ---------: | ---------: | -------------------------------------------------------------------------------------------------- |
-| Final-spec/plan amendment and review-fix intake |       10 h |       24 h | spec deltas, prior/final 1C/9I/4M and 1C/5I/2M dispositions, plan correction/review rounds         |
-| 0L launcher/controller trust design             |       34 h |       72 h | local requests plus GitHub/Gitleaks/disposable/root-anchor contracts, hostile tests and reviews    |
-| 0P bootstrap                                    |       12 h |       24 h | external receipt, immutable materialization, pnpm hooks, tool roots, hostile markers, review fixes |
-| 0A/0B/0F/0C refresh                             |       24 h |       52 h | validator, GitHub/Gitleaks controller gates, optional fetch, Copy and refresh reviews              |
-| 0M migration                                    |       24 h |       56 h | static migration, disposable controller, counterexamples and DB/security review fixes              |
-| Tasks 1–6 B0 scanner/governance                 |       56 h |      122 h | build/raw engines, receipt sets, per-task reviews and protected-base launcher                      |
-| Tasks 7–10 acceptance/remote/v3                 |       28 h |       62 h | reviews, GitHub gates, root-anchor materialize/write/readback/review, external consumption and v3  |
-| Tasks 11–17 caller cutover                      |       48 h |      100 h | TDD, per-task review/fix rounds, authorized disposable reruns                                      |
-| Task 18 final whole reviews                     |       10 h |       24 h | independent code/security/DB counterexamples and repair reruns                                     |
-| One main-drift full rebuild contingency         |       36 h |       80 h | successor, 0B/0F/0C/0M, regenerated baselines and reviews                                          |
-| **Total active excluding external waits**       |  **282 h** |  **616 h** | Arithmetic sum; P90 includes one drift rebuild and two substantive counterexample/fix rounds       |
+| Phase                                           | P50 active | P90 active | Included work; external waiting excluded                                                                                                           |
+| ----------------------------------------------- | ---------: | ---------: | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Final-spec/plan amendment and review-fix intake |       10 h |       24 h | spec deltas, prior/final 1C/9I/4M and 1C/5I/2M dispositions, plan correction/review rounds                                                         |
+| 0L launcher/controller trust design             |       44 h |       96 h | shared validator/source-closure refactor, split specs, local requests, GitHub/Gitleaks/disposable/root-anchor contracts, hostile tests and reviews |
+| 0P bootstrap                                    |       12 h |       24 h | external receipt, immutable materialization, pnpm hooks, tool roots, hostile markers, review fixes                                                 |
+| 0A/0B/0F/0C refresh                             |       24 h |       52 h | validator, GitHub/Gitleaks controller gates, optional fetch, Copy and refresh reviews                                                              |
+| 0M migration                                    |       24 h |       56 h | static migration, disposable controller, counterexamples and DB/security review fixes                                                              |
+| Tasks 1–6 B0 scanner/governance                 |       56 h |      122 h | build/raw engines, receipt sets, per-task reviews and protected-base launcher                                                                      |
+| Tasks 7–10 acceptance/remote/v3                 |       28 h |       62 h | reviews, GitHub gates, root-anchor materialize/write/readback/review, external consumption and v3                                                  |
+| Tasks 11–17 caller cutover                      |       48 h |      100 h | TDD, per-task review/fix rounds, authorized disposable reruns                                                                                      |
+| Task 18 final whole reviews                     |       10 h |       24 h | independent code/security/DB counterexamples and repair reruns                                                                                     |
+| One main-drift full rebuild contingency         |       36 h |       80 h | successor, 0B/0F/0C/0M, regenerated baselines and reviews                                                                                          |
+| **Total active excluding external waits**       |  **292 h** |  **640 h** | Arithmetic sum; P90 includes one drift rebuild and two substantive counterexample/fix rounds                                                       |
 
 ## Execution Completion Boundary
 
