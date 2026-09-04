@@ -481,6 +481,42 @@ test("root-anchor shared closure rejects cross-record and final review substitut
     }).status,
     "PASS",
   );
+  const rebindParents = (orderedMergeParents) => {
+    const reboundRequest = { ...fullWriteRequest, orderedMergeParents };
+    const reboundWrite = {
+      ...fullWriteReceipt,
+      requestSha256: buildControllerReceiptSetSha256(reboundRequest),
+    };
+    const reboundReadback = {
+      ...fullReadbackReceipt,
+      requestSha256: reboundWrite.requestSha256,
+      writeReceiptSha256: buildControllerReceiptSetSha256(reboundWrite),
+    };
+    const reboundReview = {
+      ...fullOperationReviewReceipt,
+      writeRequestSha256: buildControllerReceiptSetSha256(reboundRequest),
+      writeReceiptSha256: buildControllerReceiptSetSha256(reboundWrite),
+      readbackReceiptSha256: buildControllerReceiptSetSha256(reboundReadback),
+    };
+    return {
+      writeRequest: reboundRequest,
+      writeReceipt: reboundWrite,
+      readbackReceipt: reboundReadback,
+      operationReviewReceipt: reboundReview,
+      upstreamEvidence,
+    };
+  };
+  for (const wrongParents of [
+    ["2".repeat(40), "1".repeat(40)],
+    ["3".repeat(40), "2".repeat(40)],
+    ["1".repeat(40), "3".repeat(40)],
+  ]) {
+    assert.equal(
+      validateRootAnchorOperationReviewClosureV2(rebindParents(wrongParents))
+        .status,
+      "INTEGRITY_ERROR",
+    );
+  }
   assert.equal(
     validateRootAnchorOperationReviewClosureV2({
       writeRequest,

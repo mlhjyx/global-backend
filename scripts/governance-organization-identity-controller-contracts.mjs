@@ -750,12 +750,10 @@ export function validateRootAnchorOperationReviewClosureV2(records) {
   ) {
     return integrity("ROOT_ANCHOR_OPERATION_REVIEW_INVALID");
   }
-  const {
-    writeRequest,
-    writeReceipt,
-    readbackReceipt,
-    operationReviewReceipt,
-  } = records;
+  // prettier-ignore
+  const { writeRequest, writeReceipt, readbackReceipt, operationReviewReceipt } = records;
+  const upstream = records.upstreamEvidence;
+  const parents = writeRequest.orderedMergeParents ?? [];
   if (
     operationReviewReceipt.controllerContractSha256 !==
       writeRequest.contractSha256 ||
@@ -774,20 +772,20 @@ export function validateRootAnchorOperationReviewClosureV2(records) {
     }).status !== "PASS" ||
     writeRequest.materializationReceiptSha256 !==
       sha256(
-        canonicalJsonBytes(
-          records.upstreamEvidence.rootAnchorControllerMaterialization,
-        ),
+        canonicalJsonBytes(upstream.rootAnchorControllerMaterialization),
       ) ||
     writeRequest.controllerReviewReceiptSha256 !==
-      sha256(
-        canonicalJsonBytes(records.upstreamEvidence.rootAnchorControllerReview),
-      ) ||
+      sha256(canonicalJsonBytes(upstream.rootAnchorControllerReview)) ||
     writeRequest.authorizationReceiptSha256 !==
-      sha256(
-        canonicalJsonBytes(records.upstreamEvidence.rootAnchorAuthorization),
-      ) ||
-    records.upstreamEvidence.rootAnchorAuthorization.requestId !==
-      writeRequest.requestId ||
+      sha256(canonicalJsonBytes(upstream.rootAnchorAuthorization)) ||
+    upstream.rootAnchorAuthorization.requestId !== writeRequest.requestId ||
+    parents[0] !==
+      upstream.admittedRefreshAcceptance.currentMainAdmissionCommit ||
+    parents[0] !== upstream.githubProtectedMainReadback.observedHeadSha ||
+    parents[0] !== upstream.protectedBaseLaunch.protectedBaseCommit ||
+    parents[0] !== upstream.workflowRun.headSha ||
+    parents[1] !==
+      upstream.admittedRefreshAcceptance.reviewedImplementationCommit ||
     readbackReceipt.writeReceiptSha256 !==
       sha256(canonicalJsonBytes(writeReceipt))
   ) {

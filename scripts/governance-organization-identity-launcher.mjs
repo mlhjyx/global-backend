@@ -13,6 +13,12 @@ const DEFAULT_REQUEST_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
 const DEFAULT_OUTPUT_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
+const APPROVED_REPOSITORY_ROOT = "/global/backend";
+const APPROVED_V2_WORKTREE_PATH =
+  "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2";
+const APPROVED_V2_BRANCH =
+  "codex/pr407-organization-identity-caller-cutover-v2";
+const CLEAN_STATUS_SHA256 = sha256(Buffer.from("", "utf8"));
 export const APPROVED_PLAN = Object.freeze({
   path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
   commit: "e8a2b2aa08ed5933b3228cc5dd24c468d0f417c2",
@@ -1960,6 +1966,8 @@ async function deriveVerifiedWorktreeReceipt(request, trust, options) {
   if (invocationDescriptor(request)?.executableRole !== "GIT") {
     return pass({ verifiedWorktreeReceipt: trust.verifiedWorktreeReceipt });
   }
+  const expected = gitWorktreeExpectation(request);
+  if (expected.status !== "PASS") return expected;
   const gitPath = trust.executableByRole?.GIT;
   if (!isAbsoluteNormalized(gitPath))
     return integrity("GIT_EXECUTABLE_REQUIRED");
@@ -1968,41 +1976,52 @@ async function deriveVerifiedWorktreeReceipt(request, trust, options) {
     executablePath: gitPath,
     subjectCommit: request.subjectCommit,
     mode: request.mode,
+    repositoryRoot: expected.repositoryRoot,
+    worktreePath: expected.worktreePath,
+    branch: expected.branch,
+    cleanStatusSha256: expected.statusPorcelainSha256,
   };
   let facts;
   if (typeof options.deriveWorktreeReceipt === "function") {
     facts = await options.deriveWorktreeReceipt(gitInvocation);
   } else {
-    const cwd = options.worktreePath ?? process.cwd();
+    const cwd = expected.worktreePath;
     const run = (argv) =>
       runClosedProcess(gitPath, argv, options.environment ?? {}, cwd);
-    const root = run(["rev-parse", "--show-toplevel"]);
-    const gitDir = run(["rev-parse", "--git-dir"]);
-    const commonDir = run(["rev-parse", "--git-common-dir"]);
-    const branch = run(["branch", "--show-current"]);
-    const head = run(["rev-parse", "HEAD"]);
-    const status = run(["status", "--porcelain=v1"]);
-    const worktrees = run(["worktree", "list", "--porcelain"]);
+    const readSnapshot = () => ({
+      root: run(["rev-parse", "--show-toplevel"]),
+      gitDir: run(["rev-parse", "--git-dir"]),
+      commonDir: run(["rev-parse", "--git-common-dir"]),
+      branch: run(["branch", "--show-current"]),
+      head: run(["rev-parse", "HEAD"]),
+      status: run(["status", "--porcelain=v1"]),
+      worktrees: run(["worktree", "list", "--porcelain"]),
+    });
+    const before = readSnapshot();
+    const after = readSnapshot();
+    const failed = (snapshot) =>
+      Object.values(snapshot).some((result) => result.status !== "PASS");
     if (
-      [root, gitDir, commonDir, branch, head, status, worktrees].some(
-        (r) => r.status !== "PASS",
-      )
+      failed(before) ||
+      failed(after) ||
+      canonicalJson(before) !== canonicalJson(after)
     ) {
       return integrity("VERIFIED_WORKTREE_RECEIPT_REQUIRED");
     }
     facts = {
-      repositoryRoot: root.stdout.trim(),
+      repositoryRoot: after.root.stdout.trim(),
       worktreePath: cwd,
       gitDirRealpath: path.posix.normalize(
-        path.posix.resolve(cwd, gitDir.stdout.trim()),
+        path.posix.resolve(cwd, after.gitDir.stdout.trim()),
       ),
       commonDirRealpath: path.posix.normalize(
-        path.posix.resolve(cwd, commonDir.stdout.trim()),
+        path.posix.resolve(cwd, after.commonDir.stdout.trim()),
       ),
-      branch: branch.stdout.trim(),
-      headCommit: head.stdout.trim(),
-      statusPorcelain: status.stdout,
-      worktreeListEntry: worktrees.stdout,
+      branch: after.branch.stdout.trim(),
+      headCommit: after.head.stdout.trim(),
+      statusPorcelain: after.status.stdout,
+      worktreeListEntry: after.worktrees.stdout,
+      prePostToctouSha256: sha256(canonicalJsonBytes({ before, after })),
     };
   }
   const receipt = {
@@ -2031,9 +2050,53 @@ async function deriveVerifiedWorktreeReceipt(request, trust, options) {
     result: "PASS",
   };
   const validated = validateVerifiedWorktreeReceipt(receipt, request);
+  if (
+    validated.status === "PASS" &&
+    validateWorktreeExpectation(receipt, expected).status !== "PASS"
+  ) {
+    return integrity("VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+  }
   return validated.status === "PASS"
     ? pass({ verifiedWorktreeReceipt: receipt })
     : validated;
+}
+
+function gitWorktreeExpectation(request) {
+  const base = {
+    status: "PASS",
+    repositoryRoot: APPROVED_REPOSITORY_ROOT,
+    worktreePath: APPROVED_V2_WORKTREE_PATH,
+    branch: APPROVED_V2_BRANCH,
+    expectedMode: request.mode,
+    subjectCommit: request.subjectCommit,
+    statusPorcelainSha256: CLEAN_STATUS_SHA256,
+  };
+  switch (request.commandId) {
+    case "GIT_REFRESH_START_V1":
+    case "GIT_REFRESH_COMMIT_V1":
+    case "GIT_ADMISSION_COMMIT_V1":
+    case "GIT_ACCEPTANCE_COMMIT_V1":
+    case "V3_WORKTREE_CREATE_V1":
+      return base;
+    default:
+      return integrity("VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+  }
+}
+
+function validateWorktreeExpectation(receipt, expected) {
+  for (const key of [
+    "repositoryRoot",
+    "worktreePath",
+    "branch",
+    "expectedMode",
+    "subjectCommit",
+    "statusPorcelainSha256",
+  ]) {
+    if (receipt[key] !== expected[key]) {
+      return integrity("VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+    }
+  }
+  return pass();
 }
 
 async function createExclusiveOutput(outputPath, owner) {

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   chmod,
   link,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -506,6 +507,90 @@ test("Git dispatch rejects caller-asserted worktree surrogates even when shape m
     status: "INTEGRITY_ERROR",
     code: "VERIFIED_WORKTREE_RECEIPT_REQUIRED",
   });
+});
+
+test("Git-backed CLI rejects ambient worktree, branch, and mode substitutions", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-git-cli-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const requestRoot = path.join(fixtureRoot, "requests");
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await Promise.all([
+    mkdir(requestRoot, { mode: 0o700 }),
+    mkdir(outputRoot, { mode: 0o700 }),
+  ]);
+  const [mode, parameters] = commandFixture("GIT_REFRESH_START_V1");
+  const request = validRequest({
+    commandId: "GIT_REFRESH_START_V1",
+    mode,
+    parameters,
+    requestRoot,
+    outputRoot,
+  });
+  await writeFile(
+    request.input.inputRecordPath,
+    canonicalJsonBytes(request.parameters),
+    { mode: 0o600 },
+  );
+  const requestPath = path.join(requestRoot, "request.json");
+  await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
+  const validFacts = {
+    repositoryRoot: "/global/backend",
+    worktreePath:
+      "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+    gitDirRealpath: "/global/backend/.git/worktrees/pr407",
+    commonDirRealpath: "/global/backend/.git",
+    branch: "codex/pr407-organization-identity-caller-cutover-v2",
+    headCommit: request.subjectCommit,
+    statusPorcelain: "",
+    worktreeListEntry:
+      "worktree pr407\nHEAD 1111\nbranch refs/heads/codex/pr407\n",
+    expectedMode: request.mode,
+    verifiedByExecutableClosureSha256: SHA,
+    prePostToctouSha256: SHA,
+  };
+  for (const facts of [
+    {
+      ...validFacts,
+      worktreePath:
+        "/global/backend/.codex/worktrees/ambient-same-head-worktree",
+    },
+    {
+      ...validFacts,
+      branch: "codex/pr407-organization-identity-caller-cutover-v3",
+    },
+    { ...validFacts, expectedMode: "COMMIT_REFRESH" },
+    { ...validFacts, statusPorcelain: " M package.json\n" },
+  ]) {
+    let loads = 0;
+    const result = await runLauncherCli(["--request", requestPath], {
+      requestRoot,
+      outputRoot,
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+      worktreePath: facts.worktreePath,
+      verifyTrust: async () => ({
+        status: "PASS",
+        executableByRole: { GIT: "/controlled/bin/git" },
+        verificationFiles: [],
+      }),
+      deriveWorktreeReceipt: async (gitInvocation) => {
+        assert.equal(
+          gitInvocation.worktreePath,
+          "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+        );
+        return facts;
+      },
+      executeInvocation: async () => {
+        loads += 1;
+        return { status: "PASS" };
+      },
+    });
+    assert.equal(result.exitCode, 70);
+    assert.equal(result.result.code, "VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+    assert.equal(loads, 0);
+  }
 });
 
 test("rejects an executable-looking value before dependency loading", async () => {
