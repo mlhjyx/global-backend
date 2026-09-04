@@ -1,0 +1,168 @@
+# Release Bundle — site-builder-production-parity-platform-writer-development-20260904
+
+> Release ID：`site-builder-production-parity-platform-writer-development-20260904`
+> 状态：`CANDIDATE`
+> 环境：`development`
+> Release Owner：`OWN-SITE-BE`
+> 实现提交：`674ff12d4d768ce5599fc07b565fe21da37dc5fe`
+> 发布时间：`2026-09-04T04:49:25.000Z`
+
+## Identity
+
+- `CAP-SITE-INTAKE-001`
+- `CAP-SITE-BUILD-001`
+- `CAP-SITE-RUN-001`
+
+### Traceability bindings
+
+- `site-builder-development-intake-path-platform-writer-expired-evidence` → `CAP-SITE-INTAKE-001` → `site-builder-deterministic-product-path-platform-writer-development-20260904`
+- `site-builder-development-build-terminalization-platform-writer` → `CAP-SITE-BUILD-001` → `site-builder-reconciliation-terminal-platform-writer-development-20260904`
+- `site-builder-development-run-terminalization-platform-writer` → `CAP-SITE-RUN-001` → `site-builder-reconciliation-terminal-platform-writer-development-20260904`
+
+## Scope
+
+```json
+{
+  "included": [
+    "Exact-digest API, Worker, Relay, migration and readiness identity",
+    "Zero-model GrowthOS Session, Access Token, Technical Quote, signed Budget Grant, Intake and READY Release",
+    "Readback of the historical UNKNOWN operation after attempts 1-5 UNRESOLVED and terminal attempt 6 EXPIRED without redispatch"
+  ],
+  "excluded": [
+    "Pilot, GA, or UAT promotion",
+    "successful generative refurbish output or exact settlement",
+    "platform acquisition, intent-watch, or sanctions authority ingestion",
+    "customer Billing or Credits",
+    "public site publication"
+  ]
+}
+```
+
+## Promise
+
+```json
+{
+  "user_outcome": "A legitimate development tenant can complete the same deterministic product authorization and Build path on the exact Backend runtime without a customer balance or manual paid-call attestation.",
+  "non_guarantees": [
+    "The candidate does not claim generative success or exact settlement for the historical UNKNOWN operation.",
+    "EXPIRED terminalizes reconciliation without changing UNKNOWN execution truth or dispatching a second physical model call.",
+    "The candidate is not a Pilot, GA, UAT, or public publishing release."
+  ]
+}
+```
+
+## Source
+
+```json
+{
+  "repository": "mlhjyx/global-backend",
+  "base_commit": "0f72cc104e47128778f2392283a380bc1297f76d",
+  "source_head": "674ff12d4d768ce5599fc07b565fe21da37dc5fe"
+}
+```
+
+## Evidence
+
+- `site-builder-deterministic-product-path-platform-writer-development-20260904`
+- `site-builder-reconciliation-terminal-platform-writer-development-20260904`
+
+## External provenance
+
+```json
+{
+  "status": "EXTERNAL_UNVERIFIED",
+  "verifier": "NONE",
+  "verification_ref": "NONE"
+}
+```
+
+## Operations
+
+```json
+{
+  "runtime_identity_endpoint": "/api/v1/health/build",
+  "readiness_endpoint": "/api/v1/health/ready",
+  "temporal_task_queue": "understanding",
+  "platform_authority_state": "writer admitted; platform.acquisition missing",
+  "reconciliation": "request-bound accounting lookup terminalized at EXPIRED; never a second generation request"
+}
+```
+
+## Data
+
+```json
+{
+  "classification": "development synthetic tenant; no raw tokens, prompts, model response bodies, credentials, cookies, private keys, or original provider request ID retained",
+  "retention": "RuntimeEvidence expires after its exclusive valid_until; receipts remain historical provenance."
+}
+```
+
+## Rollback and exit
+
+```json
+{
+  "trigger": "API, Worker, or Relay identity mismatch; readiness failure; or duplicate active Worker digest on one queue",
+  "procedure": "Pause new BuildRuns and use the saved exact N-1 OCI digest only when schema-compatible; otherwise forward-fix without destructive database rollback."
+}
+```
+
+## Guides
+
+- docs/architecture/current.md
+- docs/adr/registry.md
+- docs/evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json
+
+## Approval
+
+```json
+{
+  "machine": {
+    "status": "NOT_VERIFIED",
+    "provenance": "NONE",
+    "evidence_ref": "CROSS_REPOSITORY_SCOPE_NOT_COVERED_BY_ONE_CHECK_RUN",
+    "verified_at": "2026-09-04T04:49:25.000Z"
+  },
+  "reviewer": {
+    "status": "NOT_REVIEWED",
+    "provenance": "NONE",
+    "evidence_ref": "NONE",
+    "actor": "NONE",
+    "reviewed_at": "2026-09-04T04:49:25.000Z"
+  },
+  "user_authorization": {
+    "status": "NOT_AUTHORIZED",
+    "provenance": "NONE",
+    "evidence_ref": "NONE_FOR_PILOT_OR_GA",
+    "actor": "product-owner",
+    "authorized_at": "2026-09-04T04:49:25.000Z"
+  }
+}
+```
+
+### Merge evidence
+
+```json
+{
+  "method": "SQUASH",
+  "base_commit": "87a77520c16e00d47e201924e2c23e38bb1333a6",
+  "source_head": "decb0bba0c90b3f1c2e16feba9fe5638dbb53637",
+  "pull_request": "https://github.com/mlhjyx/global-backend/pull/443",
+  "parent_commits": [
+    "87a77520c16e00d47e201924e2c23e38bb1333a6"
+  ],
+  "merged_at": "2026-09-01T19:24:27.000Z",
+  "result_commit": "674ff12d4d768ce5599fc07b565fe21da37dc5fe",
+  "status": "DOCUMENTARY_EXTERNAL_UNVERIFIED",
+  "evidence_packaging": "UNMERGED_SUCCESSOR_DOCUMENTATION_ONLY"
+}
+```
+
+## Learning
+
+```json
+{
+  "owner": "OWN-SITE-BE",
+  "review_at": "2026-09-05T03:49:25.000Z",
+  "success_measure": "Fresh deterministic evidence and terminal reconciliation facts remain development-only until a separate generative validation and promotion gates are authorized."
+}
+```

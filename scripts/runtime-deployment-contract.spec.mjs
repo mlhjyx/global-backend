@@ -468,6 +468,77 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(verify, /psql_denied/);
 });
 
+test('platform writer principal provisioning is exclusive, fail-closed, and secret-safe', async () => {
+  const [provision, verify] = await Promise.all([
+    repositoryFile('infra/postgres/provision-execution-budget-platform-writer.sh'),
+    repositoryFile('infra/postgres/verify-execution-budget-platform-writer.sh'),
+  ]);
+  for (const script of [provision, verify]) {
+    assert.match(script, /^#!\/usr\/bin\/env bash\nset -euo pipefail/m);
+    assert.doesNotMatch(script, /set -x/);
+    assert.doesNotMatch(script, /DROP ROLE/);
+    assert.doesNotMatch(script, /\bDATABASE_URL\b|\bAPP_DATABASE_URL\b/);
+  }
+  assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
+  assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN/);
+  assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD/);
+  assert.match(provision, /\\getenv platform_writer_password/);
+  assert.match(provision, /execution_budget_platform_writer/);
+  assert.match(provision, /pg_shdepend/);
+  assert.match(provision, /membership\.admin_option/);
+  assert.match(provision, /membership\.roleid = principal\.oid/);
+  assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL/);
+  assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
+  assert.match(verify, /new URL\(value\)/);
+  assert.match(verify, /parse_url ADMIN/);
+  assert.match(verify, /parse_url WRITER/);
+  assert.doesNotMatch(
+    verify,
+    /psql "\$\{EXECUTION_BUDGET_PLATFORM_WRITER_(?:PROVISION_)?DATABASE_URL\}"/,
+  );
+  assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
+  assert.match(verify, /ingest_platform_execution_authority/);
+  assert.match(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
+  assert.match(verify, /execution_budget_authority_revocation/);
+  assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
+  assert.match(verify, /has_table_privilege\(session_user,'execution_budget_authority','INSERT'\)/);
+  assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
+});
+
+test('disposable platform writer drift harness keeps every database URL out of argv and records cleanup inverses', async () => {
+  const harness = await repositoryFile('infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh');
+  assert.match(harness, /parse ADMIN/);
+  assert.match(harness, /parse WRITER/);
+  assert.match(harness, /parse APP/);
+  assert.match(harness, /new URL\(v\)/);
+  assert.doesNotMatch(harness, /psql "\$/);
+  assert.match(harness, /ledger=\(\)/);
+  assert.match(harness, /DISPOSABLE_CLEANUP_FAILED/);
+  assert.match(harness, /trap 'cleanup \|\| exit 1' EXIT/);
+  assert.match(harness, /DRIFT_RESTORE_FAILED/);
+  assert.match(harness, /unset "ledger\[/);
+  assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
+  assert.match(harness, /DROP ROLE task3_nested/);
+  assert.match(harness, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
+  assert.match(harness, /REVOKE EXECUTE ON FUNCTION revoke_platform_execution_authority_v1/);
+  assert.match(harness, /SET SESSION AUTHORIZATION runtime_api/);
+});
+
+test('disposable platform writer provisioning safety exercises identity reuse against PostgreSQL', async () => {
+  const harness = await repositoryFile('infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh');
+  assert.match(harness, /EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST/);
+  assert.match(harness, /assert_rejected_before_password_change/);
+  assert.match(harness, /SUPERUSER BYPASSRLS CREATEDB CREATEROLE REPLICATION/);
+  assert.match(harness, /OWNERSHIP/);
+  assert.match(harness, /UNEXPECTED_MEMBERSHIP/);
+  assert.match(harness, /OUTBOUND_MEMBERSHIP/);
+  assert.match(harness, /DIRECT_ACL/);
+  assert.match(harness, /DEFAULT_ACL/);
+  assert.match(harness, /authenticate_probe/);
+  assert.match(harness, /DROP ROLE/);
+  assert.doesNotMatch(harness, /psql "\$/);
+});
+
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
   const [api, worker, readme, compose, main, temporalWorker] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),
