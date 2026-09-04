@@ -501,6 +501,19 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
 });
 
+test('disposable platform writer drift harness keeps every database URL out of argv and records cleanup inverses', async () => {
+  const harness = await repositoryFile('infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh');
+  assert.match(harness, /parse ADMIN/);
+  assert.match(harness, /parse WRITER/);
+  assert.match(harness, /parse APP/);
+  assert.match(harness, /new URL\(v\)/);
+  assert.doesNotMatch(harness, /psql "\$/);
+  assert.match(harness, /ledger=\(\)/);
+  assert.match(harness, /DISPOSABLE_CLEANUP_FAILED/);
+  assert.match(harness, /trap 'cleanup \|\| exit 1' EXIT/);
+  assert.doesNotMatch(harness, /DROP ROLE/);
+});
+
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
   const [api, worker, readme, compose, main, temporalWorker] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),

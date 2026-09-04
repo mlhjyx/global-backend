@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "${EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST:-}" == "1" ]] || { echo "disposable platform writer drift test marker required" >&2; exit 1; }
-[[ "${EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL:-}" == *"/global_test" ]] || { echo "disposable platform writer drift test requires global_test" >&2; exit 1; }
-admin="${EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL}"
-writer="${EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL}"
-app="${EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL:-}"
-[[ -n "$app" ]] || { echo "disposable platform writer app URL required" >&2; exit 1; }
-ok(){ psql "$1" --no-psqlrc --set ON_ERROR_STOP=1 --quiet --command "$2" >/dev/null; }
-denied(){ if ok "$1" "$2"; then echo "disposable platform writer drift unexpectedly allowed operation" >&2; exit 1; fi; }
-expect_verify_fail(){ if bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null 2>&1; then echo "drift unexpectedly verified" >&2; exit 1; fi; }
-denied "$admin" "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp());"
-denied "$app" "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp());"
-denied "$app" "SELECT * FROM ingest_platform_execution_authority('x','x','00000000-0000-4000-8000-000000000001','a','x','platform.acquisition','schedule','x','x','USD','microusd',1,1,1,clock_timestamp(),clock_timestamp(),clock_timestamp());"
-denied "$app" "SELECT * FROM revoke_platform_execution_authority_v1('00000000-0000-4000-8000-000000000001','x',clock_timestamp());"
-for drift in "GRANT pg_monitor TO ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}" "GRANT pg_read_all_data TO execution_budget_platform_writer" "CREATE ROLE task3_nested NOLOGIN; GRANT task3_nested TO execution_budget_platform_writer" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} BYPASSRLS" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} CREATEROLE"; do
-  ok "$admin" "$drift"; expect_verify_fail
-  ok "$admin" "REVOKE pg_monitor FROM ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}; REVOKE pg_read_all_data FROM execution_budget_platform_writer; REVOKE task3_nested FROM execution_budget_platform_writer; ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER NOBYPASSRLS NOCREATEROLE;"
-done
+[[ "${EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST:-}" == 1 ]] || { echo DISPOSABLE_MARKER_REQUIRED >&2; exit 1; }
+[[ "${EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL:-}" == *'/global_test' ]] || { echo DISPOSABLE_DATABASE_REQUIRED >&2; exit 1; }
+declare -A c; ledger=()
+parse(){ local p="$1" n="$2" o; o="$(node - "$n" <<'NODE'
+const v=process.env[process.argv[2]];let u;try{u=new URL(v)}catch{process.exit(1)}if(!['postgres:','postgresql:'].includes(u.protocol)||!u.hostname||!u.username||!u.password||!u.pathname||u.search||u.hash)process.exit(1);for(const[k,x]of Object.entries({PGHOST:u.hostname,PGPORT:u.port||'5432',PGDATABASE:decodeURIComponent(u.pathname.slice(1)),PGUSER:decodeURIComponent(u.username),PGPASSWORD:decodeURIComponent(u.password)})){if(!x||/[\0\r\n]/.test(x))process.exit(1);process.stdout.write(`${k}=${x}\n`)}
+NODE
+)" || { echo DISPOSABLE_URL_INVALID >&2; exit 1; }; while IFS= read -r x;do [[ "$x" =~ ^PG(HOST|PORT|DATABASE|USER|PASSWORD)= ]]||exit 1;c["$p:${x%%=*}"]="${x#*=}";done<<<"$o"; }
+parse ADMIN EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL;parse WRITER EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL;parse APP EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL
+run(){ local w="$1" q="$2";(export PGHOST="${c[$w:PGHOST]}" PGPORT="${c[$w:PGPORT]}" PGDATABASE="${c[$w:PGDATABASE]}" PGUSER="${c[$w:PGUSER]}" PGPASSWORD="${c[$w:PGPASSWORD]}";psql --no-psqlrc --set ON_ERROR_STOP=1 --quiet --command "$q" >/dev/null); }
+cleanup(){ local rc=0 i; for((i=${#ledger[@]}-1;i>=0;i--));do run ADMIN "${ledger[i]}"||rc=1;done;((rc==0))||{ echo DISPOSABLE_CLEANUP_FAILED >&2;return 1;}; }
+trap 'cleanup || exit 1' EXIT;trap 'exit 1' INT TERM
+deny(){ if run "$1" "$2" 2>/dev/null;then echo DISPOSABLE_DENY_FAILED >&2;exit 1;fi; }
+drift(){ run ADMIN "$1";ledger+=("$2"); if bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null 2>&1;then echo DRIFT_NOT_REJECTED >&2;exit 1;fi; }
+deny ADMIN "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM revoke_platform_execution_authority_v1('00000000-0000-4000-8000-000000000001','x',clock_timestamp())"
+drift "GRANT pg_monitor TO ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}" "REVOKE pg_monitor FROM ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}"
+drift "GRANT pg_read_all_data TO execution_budget_platform_writer" "REVOKE pg_read_all_data FROM execution_budget_platform_writer"
+drift "CREATE ROLE task3_nested NOLOGIN; GRANT task3_nested TO execution_budget_platform_writer" "REVOKE task3_nested FROM execution_budget_platform_writer"
+drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER"
+drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} BYPASSRLS" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOBYPASSRLS"
+drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} CREATEROLE" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOCREATEROLE"
 echo "disposable platform writer drift checks passed"
