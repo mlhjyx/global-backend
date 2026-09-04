@@ -7,6 +7,11 @@ export const PLATFORM_ACQUISITION_DUE_SOURCE_MAX = 50 as const;
 export const PLATFORM_ACQUISITION_SOURCE_FETCH_ITEM_MAX = 10_000 as const;
 export const PLATFORM_INTENT_DUE_SOURCE_MAX = 50 as const;
 export const PLATFORM_INTENT_PAGES_PER_SOURCE_MAX = 20 as const;
+export const PLATFORM_SANCTIONS_SCHEDULED_SOURCE_KEYS = Object.freeze([
+  "ofac_sdn",
+  "eu_fsf",
+] as const);
+export const PLATFORM_SANCTIONS_SOURCE_MAX = 2 as const;
 
 export class PlatformExecutionContractError extends Error {
   readonly code = "PLATFORM_EXECUTION_CONTRACT_INVALID" as const;

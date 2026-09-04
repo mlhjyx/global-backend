@@ -36,7 +36,7 @@ export function createSanctionsRefreshActivities(deps: {
       const binding = await attestPlatformScheduleActivity({
         args, budgetStore: budgets, scheduleId: SANCTIONS_REFRESH_SCHEDULE_ID, activityRunId: deps.activityRunId,
       });
-      const summaries = await service.refreshAll(binding.accountKey);
+      const summaries = await service.refreshScheduled(binding.accountKey);
       await deps.sanctionsScreening?.rebuildIndex().catch(() => undefined);
       return { sources: summaries.length, summaries };
     },
