@@ -76,13 +76,8 @@ const RECEIPT_SET_KEYS = list(`schemaVersion taskId subjectCommit receiptCount r
 const RECEIPT_SET_ENTRY_KEYS = list(`requestId commandId requestSha256 receiptSha256`);
 const REVIEW_RECEIPT_KEYS = list(`schemaVersion reviewerClass subjectCommit subjectParentCommit range pathSetSha256 reportSha256 counterexampleSetSha256 finalSpecSha256 critical important verdict containsCredentialValue`);
 
-function pass(extra = {}) {
-  return { status: "PASS", ...extra };
-}
-
-function integrity(code, extra = {}) {
-  return { status: "INTEGRITY_ERROR", code, ...extra };
-}
+function pass(extra = {}) { return { status: "PASS", ...extra }; }
+function integrity(code, extra = {}) { return { status: "INTEGRITY_ERROR", code, ...extra }; }
 
 export function canonicalJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -96,19 +91,15 @@ export function canonicalJson(value) {
 export function canonicalJsonBytes(value) {
   return Buffer.from(`${canonicalJson(value)}\n`, "utf8");
 }
-
 export function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
-
 function isSha(value) {
   return typeof value === "string" && SHA256.test(value);
 }
-
 function isCommit(value) {
   return typeof value === "string" && GIT_ID.test(value);
 }
-
 function nullableSha(value) {
   return value === null || isSha(value);
 }
@@ -513,6 +504,16 @@ function assertInside(root, target) {
   }
 }
 
+function rejectSymlinkAncestors(root, target) {
+  const dirs = [];
+  for (let current = path.dirname(target); current !== root; current = path.dirname(current)) {
+    if (current === path.dirname(current)) throw new Error("ROOT_CONTAINMENT_INVALID");
+    dirs.push(current);
+  }
+  for (const dir of dirs.reverse())
+    if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) throw new Error("MATERIALIZATION_SYMLINK_ANCESTOR");
+}
+
 export async function verifyBootstrapPreimage({
   repoRoot,
   subjectCommit,
@@ -574,6 +575,7 @@ export async function materializeAcceptedInstallInputs({
       const bytes = gitBytes(repoRoot, subjectCommit, repoPath);
       const target = path.join(taskRoot, repoPath);
       assertInside(taskReal, target);
+      rejectSymlinkAncestors(taskReal, target);
       mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
       writeFileSync(target, bytes, { mode: 0o600, flag: "wx" });
     }
@@ -639,6 +641,8 @@ export function verifyDependencyAndToolRoots({ taskRoot, roots = cleanRoots(task
 }
 
 export function planAcceptedBootstrapCommand({ taskRoot, pnpmEntrypoint } = {}) {
+  if (!isAbsoluteNormalized(taskRoot) || !isAbsoluteNormalized(pnpmEntrypoint))
+    throw new Error("BOOTSTRAP_COMMAND_REQUEST_INVALID");
   const roots = cleanRoots(taskRoot);
   const environment = cleanEnvironment(taskRoot);
   for (const root of Object.values(roots)) mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -660,6 +664,8 @@ export function planAcceptedBootstrapCommand({ taskRoot, pnpmEntrypoint } = {}) 
 }
 
 export function runAcceptedPrismaGenerate({ taskRoot, pnpmEntrypoint } = {}) {
+  if (!isAbsoluteNormalized(taskRoot) || !isAbsoluteNormalized(pnpmEntrypoint))
+    throw new Error("PRISMA_GENERATE_REQUEST_INVALID");
   const environment = cleanEnvironment(taskRoot);
   return {
     command: "PRISMA_GENERATE_V1",

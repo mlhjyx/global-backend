@@ -279,6 +279,19 @@ test("verifies accepted Git blobs and absences before immutable materialization"
   for (const [name, content] of files) {
     assert.equal(await readFile(path.join(taskRoot, name), "utf8"), content);
   }
+  const attackRoot = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-task-"));
+  t.after(() => rm(attackRoot, { recursive: true, force: true }));
+  await symlink(os.tmpdir(), path.join(attackRoot, "scripts"));
+  assert.equal(
+    (
+      await materializeAcceptedInstallInputs({
+        repoRoot: root,
+        subjectCommit: commit,
+        taskRoot: attackRoot,
+      })
+    ).status,
+    "INTEGRITY_ERROR",
+  );
   assert.equal(
     (
       await writeFile(
@@ -326,6 +339,10 @@ test("plans exact clean pnpm and Prisma commands without loading hostile hooks",
   assert.equal(Object.hasOwn(planned.environment, "NODE_OPTIONS"), false);
   assert.equal(Object.hasOwn(planned.environment, "NODE_PATH"), false);
   assert.equal(planned.hostileMarkerExecutionCount, 0);
+  assert.throws(
+    () => planAcceptedBootstrapCommand({ taskRoot: "relative", pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs" }),
+    /BOOTSTRAP_COMMAND_REQUEST_INVALID/,
+  );
   const checked = verifyDependencyAndToolRoots({
     taskRoot: root,
     roots: planned.roots,
