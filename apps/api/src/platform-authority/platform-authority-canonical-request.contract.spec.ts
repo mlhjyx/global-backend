@@ -156,6 +156,12 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
     }
   });
 
+  it("fails closed with a stable schema error for a non-object codec input", () => {
+    expect(() =>
+      canonicalizePlatformAuthorityRequestBodyV1(null as never),
+    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_SCHEMA_INVALID");
+  });
+
   it.each(CORPUS.positive_hmac_preimages)(
     "builds literal HMAC vector $id without a terminal newline",
     (vector) => {
@@ -185,4 +191,21 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
       ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
     },
   );
+
+  it("rejects non-string and non-plain HMAC input before string coercion", () => {
+    expect(() =>
+      buildPlatformAuthorityRequestHmacPreimageV1({
+        ...HMAC_BASE,
+        numeric_date: 1786800000,
+      } as never),
+    ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
+
+    const inherited = Object.assign(
+      Object.create({ inherited: "must-not-be-accepted" }) as object,
+      HMAC_BASE,
+    );
+    expect(() =>
+      buildPlatformAuthorityRequestHmacPreimageV1(inherited as never),
+    ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
+  });
 });
