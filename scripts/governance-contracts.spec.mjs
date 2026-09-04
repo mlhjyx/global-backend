@@ -265,6 +265,39 @@ test("dynamic currentness documents separate source, runtime, program, and relea
   );
 
   const assertCurrentStatus = (document) => {
+    const uniqueTableRow = (prefix) => {
+      const rows = document
+        .split("\n")
+        .filter((line) => line.startsWith(`| ${prefix}`));
+      assert.equal(rows.length, 1, `${prefix} must have one canonical row`);
+      return rows[0];
+    };
+    const growthOsCurrentRows = document.split("\n").filter((line) => {
+      if (!line.startsWith("|")) return false;
+      const subject = line.split("|")[1]?.trim() ?? "";
+      return /^GrowthOS (?:current )?(?:authority|source)$/iu.test(subject);
+    });
+    assert.equal(
+      growthOsCurrentRows.length,
+      1,
+      "GrowthOS must have one canonical current authority/source row",
+    );
+    assert.match(
+      growthOsCurrentRows[0],
+      /\| GrowthOS source\s*\|[^\n]*`290c6f9f6a41c7c39dfe071683252982536937d8`[^\n]*54 patches[^\n]*no remote/u,
+    );
+    const g5SiteRow = uniqueTableRow("G5-Site — Runtime Observed");
+    assert.match(
+      g5SiteRow,
+      /`AMBER \/ TIME_LIMITED`[^\n]*2 current Site-only[^\n]*`2026-09-05T03:49:25\.000Z`/u,
+    );
+    const g5AcquisitionRow = uniqueTableRow(
+      "G5-Acquisition — Runtime Observed",
+    );
+    assert.match(
+      g5AcquisitionRow,
+      /`RED \/ NOT_READY`[^\n]*PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING[^\n]*evidence count=0/u,
+    );
     assert.match(document, /> 最后核验：2026-09-04T18:/u);
     assert.match(
       document,
@@ -337,7 +370,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.doesNotMatch(
       document,
-      /(?:No|无) accepted A\/B (?:end-to-end )?seam/u,
+      /(?:No|无) accepted A\/B (?:end-to-end )?(?:source )?seam/u,
     );
     assert.match(
       document,
@@ -359,6 +392,52 @@ test("dynamic currentness documents separate source, runtime, program, and relea
   };
 
   assertCurrentStatus(status);
+  assert.throws(() =>
+    assertCurrentStatus(
+      status.replace(
+        "An accepted A/B source seam exists",
+        "No accepted A/B source seam exists",
+      ),
+    ),
+  );
+  assert.throws(() =>
+    assertCurrentStatus(
+      `${status}\n| GrowthOS current authority | \`541bcc63c3486296ab4e2461d4d005e6cd43710b\` | conflicting current source |\n`,
+    ),
+  );
+  const mutateCurrentStatusRow = (document, prefix, from, to) =>
+    document
+      .split("\n")
+      .map((line) =>
+        line.startsWith(`| ${prefix}`) ? line.replace(from, to) : line,
+      )
+      .join("\n");
+  for (const [prefix, from, to] of [
+    [
+      "G5-Site — Runtime Observed",
+      "2 current Site-only",
+      "3 current Site-only",
+    ],
+    [
+      "G5-Site — Runtime Observed",
+      "2026-09-05T03:49:25.000Z",
+      "2026-09-06T03:49:25.000Z",
+    ],
+    [
+      "G5-Acquisition — Runtime Observed",
+      "evidence count=0",
+      "evidence count=1",
+    ],
+    [
+      "G5-Acquisition — Runtime Observed",
+      "PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING",
+      "ok",
+    ],
+  ]) {
+    assert.throws(() =>
+      assertCurrentStatus(mutateCurrentStatusRow(status, prefix, from, to)),
+    );
+  }
   for (const [from, to] of [
     [
       "0679a0bc510a980f65ebd33eb88b3215a97c20ba",
@@ -527,7 +606,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramARow =
     "| A — authority/runtime primitives | AMBER | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and RuntimeEvidence/Release；does not own Raw/Identity/Provider/Opportunity | Accepted main slices 与 historical mega branch 分离；platform R2 owner/manifest 和 current exact-head review 尚未闭合。 |";
   const expectedRootRow =
-    "| `/global/backend` root `main` | observed `2026-09-04T18:48:40+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity。 |";
+    "| `/global/backend` root `main` | observed `2026-09-04T18:58:19+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity。 |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
