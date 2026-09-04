@@ -1119,6 +1119,35 @@ test("launcher rejects executor PASS without exactly one bound BootstrapRunRecei
   assert.notEqual(reused.exitCode, 0);
 });
 
+test("launcher refuses the default path without an authority executor", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-cli-no-executor-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const requestRoot = path.join(fixtureRoot, "requests");
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(requestRoot, { mode: 0o700 });
+  await mkdir(outputRoot, { mode: 0o700 });
+  const request = validRequest({ requestRoot, outputRoot });
+  await writeFile(
+    request.input.inputRecordPath,
+    canonicalJsonBytes(request.parameters),
+    { mode: 0o600 },
+  );
+  const requestPath = path.join(requestRoot, "request.json");
+  await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
+  const result = await runLauncherCli(["--request", requestPath], {
+    requestRoot,
+    outputRoot,
+    expectedUid: process.getuid(),
+    expectedGid: process.getgid(),
+    verifyTrust: async () => ({ status: "PASS" }),
+  });
+  assert.equal(result.exitCode, 73);
+  await assert.rejects(readFile(request.input.outputRecordPath));
+});
+
 test("closed executor rejects inherited loader names before hostile marker execution", async (t) => {
   const fixtureRoot = await mkdtemp(
     path.join(os.tmpdir(), "identity-executor-"),

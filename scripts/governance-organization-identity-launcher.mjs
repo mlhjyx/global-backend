@@ -2184,20 +2184,7 @@ export async function runLauncherCli(argv, options = {}) {
   }
   const executeInvocation =
     options.executeInvocation ??
-    ((invocation) =>
-      executeClosedInvocation(invocation, trust, {
-        PATH: process.env.PATH,
-        HOME: process.env.HOME,
-        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-        XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
-        COREPACK_HOME: process.env.COREPACK_HOME,
-        PNPM_HOME: process.env.PNPM_HOME,
-        TMPDIR: process.env.TMPDIR,
-        NPM_CONFIG_USERCONFIG: process.env.NPM_CONFIG_USERCONFIG,
-        CI: process.env.CI,
-        LANG: process.env.LANG,
-        LC_ALL: process.env.LC_ALL,
-      }));
+    (() => integrity("AUTHORITY_EXECUTOR_REQUIRED"));
   const replaySet = new Set();
   const dispatched = await dispatchClosedCommand(request, {
     requestRoot,
