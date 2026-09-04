@@ -5,10 +5,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const COMPILED_ROOT = resolve(
-  ROOT,
-  "apps/api/dist/platform-authority",
-);
+const COMPILED_ROOT = resolve(ROOT, "apps/api/dist/platform-authority");
 
 test("compiled API retains and loads the exact GrowthOS policy bytes", async () => {
   const bytes = await readFile(

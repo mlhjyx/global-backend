@@ -112,7 +112,9 @@ describe("GrowthOS-owned platform authority policy asset", () => {
       },
     ],
   ])("rejects %s mutation", (_label, mutate) => {
-    const mutated = Buffer.from(mutate(importedArtifactBytes().toString("utf8")));
+    const mutated = Buffer.from(
+      mutate(importedArtifactBytes().toString("utf8")),
+    );
 
     expect(() =>
       verifyPlatformAuthorityPolicyAsset({
