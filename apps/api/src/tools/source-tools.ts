@@ -1120,7 +1120,7 @@ export const sanctionsDownloadTool: Tool<
         error instanceof EgressBlockedError &&
         error.code === "response_too_large"
       ) {
-        throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE");
+        throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE", { cause: error });
       }
       throw error;
     }

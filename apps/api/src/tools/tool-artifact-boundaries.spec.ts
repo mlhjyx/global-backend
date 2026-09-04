@@ -9,7 +9,6 @@ import {
   MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES,
 } from "./builtin-tools";
 import {
-  MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
   sanctionsDownloadTool,
 } from "./source-tools";
 
