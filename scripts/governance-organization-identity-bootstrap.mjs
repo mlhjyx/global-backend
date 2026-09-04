@@ -31,6 +31,8 @@ const TOOL_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
 const RUNTIME_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
+const ACCEPTED_LAUNCHER_CONTRACT_SHA256 =
+  "3c71df7989da6312f0498bc8908ff07a581121fb24d03ab1e6ed36b0e2342292";
 
 const list = (text) => Object.freeze(text.trim().split(/\s+/));
 
@@ -205,49 +207,7 @@ function digestRule(name, value) {
 
 export const BOOTSTRAP_CONTRACT = Object.freeze({
   schemaVersion: "organization-identity-bootstrap-contract/v2",
-  launcherContractSha256: digestRule("launcher-contract", {
-    schemaVersion: "organization-identity-launcher-contract/v2",
-    approvedPlan: {
-      path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-      commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
-      blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
-      sha256:
-        "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
-    },
-    rootDirectory: ROOT_DIRECTORY,
-    requestRoot: REQUEST_ROOT,
-    outputRoot: OUTPUT_ROOT,
-    toolRoot: TOOL_ROOT,
-    runtimeRoot: RUNTIME_ROOT,
-    toolRootFiles: [
-      ["ENV", "bin/env", 0o500],
-      ["NODE", "bin/node", 0o500],
-      ["GIT", "bin/git", 0o500],
-      ["COREPACK_SHIM", "lib/corepack/dist/corepack.js", 0o400],
-      [
-        "COREPACK_LIB_COREPACK_CJS",
-        "lib/corepack/dist/lib/corepack.cjs",
-        0o400,
-      ],
-      ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
-      ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
-    ],
-    runtimeEnvironment: {
-      PATH: `${TOOL_ROOT}/bin`,
-      HOME: `${RUNTIME_ROOT}/home`,
-      XDG_CONFIG_HOME: `${RUNTIME_ROOT}/xdg-config`,
-      XDG_CACHE_HOME: `${RUNTIME_ROOT}/xdg-cache`,
-      COREPACK_HOME: `${RUNTIME_ROOT}/corepack-home`,
-      PNPM_HOME: `${RUNTIME_ROOT}/pnpm-home`,
-      TMPDIR: `${RUNTIME_ROOT}/tmp`,
-      NPM_CONFIG_USERCONFIG: "/dev/null",
-      CI: "1",
-      LANG: "C.UTF-8",
-      LC_ALL: "C.UTF-8",
-    },
-    materializationReviewSchemaVersion:
-      "organization-identity-launcher-materialization-review/v2",
-  }),
+  launcherContractSha256: ACCEPTED_LAUNCHER_CONTRACT_SHA256,
   bootstrapSchemaSha256: digestRule("bootstrap-schema", {
     receiptKeys: BOOTSTRAP_RECEIPT_KEYS,
     externalLaunchReceipt: "exact-key/v1",
@@ -329,6 +289,7 @@ export function validateBootstrapContract(contract) {
   if (
     !exactKeys(contract, CONTRACT_KEYS) ||
     contract.schemaVersion !== "organization-identity-bootstrap-contract/v2" ||
+    canonicalJson(contract) !== canonicalJson(BOOTSTRAP_CONTRACT) ||
     !CONTRACT_DIGEST_KEYS.every((key) => isSha(contract[key])) ||
     !Array.isArray(contract.toolLogicalExpectations) ||
     contract.toolLogicalExpectations.length !==

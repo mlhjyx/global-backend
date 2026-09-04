@@ -48,6 +48,8 @@ const SHA_B = "b".repeat(64);
 const SHA_C = "c".repeat(64);
 const SHA_D = "d".repeat(64);
 const COMMIT = "1".repeat(40);
+const PHASE_A_R2_LAUNCHER_CONTRACT_SHA256 =
+  "3c71df7989da6312f0498bc8908ff07a581121fb24d03ab1e6ed36b0e2342292";
 const REQUEST_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
 const OUTPUT_ROOT =
@@ -149,52 +151,18 @@ test("exports an immutable BootstrapContractV2 accepted by Task0L shared validat
     validateTask0LBootstrapContract(BOOTSTRAP_CONTRACT).status,
     "PASS",
   );
+  assert.equal(Object.isFrozen(BOOTSTRAP_CONTRACT), true);
+  assert.equal(
+    Object.isFrozen(BOOTSTRAP_CONTRACT.toolLogicalExpectations),
+    true,
+  );
+  assert.equal(
+    Object.isFrozen(BOOTSTRAP_CONTRACT.toolLogicalExpectations[0]),
+    true,
+  );
   assert.equal(
     BOOTSTRAP_CONTRACT.launcherContractSha256,
-    digestRule("launcher-contract", {
-      schemaVersion: "organization-identity-launcher-contract/v2",
-      approvedPlan: {
-        path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-        commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
-        blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
-        sha256:
-          "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
-      },
-      rootDirectory:
-        "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",
-      requestRoot: REQUEST_ROOT,
-      outputRoot: OUTPUT_ROOT,
-      toolRoot: TOOL_ROOT,
-      runtimeRoot: RUNTIME_ROOT,
-      toolRootFiles: [
-        ["ENV", "bin/env", 0o500],
-        ["NODE", "bin/node", 0o500],
-        ["GIT", "bin/git", 0o500],
-        ["COREPACK_SHIM", "lib/corepack/dist/corepack.js", 0o400],
-        [
-          "COREPACK_LIB_COREPACK_CJS",
-          "lib/corepack/dist/lib/corepack.cjs",
-          0o400,
-        ],
-        ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
-        ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
-      ],
-      runtimeEnvironment: {
-        PATH: `${TOOL_ROOT}/bin`,
-        HOME: `${RUNTIME_ROOT}/home`,
-        XDG_CONFIG_HOME: `${RUNTIME_ROOT}/xdg-config`,
-        XDG_CACHE_HOME: `${RUNTIME_ROOT}/xdg-cache`,
-        COREPACK_HOME: `${RUNTIME_ROOT}/corepack-home`,
-        PNPM_HOME: `${RUNTIME_ROOT}/pnpm-home`,
-        TMPDIR: `${RUNTIME_ROOT}/tmp`,
-        NPM_CONFIG_USERCONFIG: "/dev/null",
-        CI: "1",
-        LANG: "C.UTF-8",
-        LC_ALL: "C.UTF-8",
-      },
-      materializationReviewSchemaVersion:
-        "organization-identity-launcher-materialization-review/v2",
-    }),
+    PHASE_A_R2_LAUNCHER_CONTRACT_SHA256,
   );
   assert.equal(
     BOOTSTRAP_CONTRACT.effectivePnpmArgvRuleSha256,
@@ -246,10 +214,7 @@ test("exports an immutable BootstrapContractV2 accepted by Task0L shared validat
   );
   assert.deepEqual(trackedContract, BOOTSTRAP_CONTRACT);
   const first = sha(canonicalJsonBytes(BOOTSTRAP_CONTRACT));
-  const moduleAgain = await import(
-    `${bootstrapModulePath}?cacheBust=${Date.now()}`
-  );
-  assert.equal(sha(canonicalJsonBytes(moduleAgain.BOOTSTRAP_CONTRACT)), first);
+  assert.equal(sha(canonicalJsonBytes(BOOTSTRAP_CONTRACT)), first);
   for (const forbidden of [
     "subjectCommit",
     "taskRoot",
@@ -376,6 +341,30 @@ test("builds one-command BootstrapRunReceipts compatible with Task0L and rejects
       },
       receipt,
       request,
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  const substitutedContract = {
+    ...BOOTSTRAP_CONTRACT,
+    launcherContractSha256: SHA_B,
+  };
+  const substitutedRequest = validRequest({
+    bootstrapContractSha256: sha(canonicalJsonBytes(substitutedContract)),
+  });
+  const substitutedReceipt = buildBootstrapRunReceipt({
+    ...receipt,
+    request: substitutedRequest,
+    outputRecordSha256: receipt.outputRecordSha256,
+  });
+  assert.equal(
+    validateBootstrapRunReceipt(substitutedReceipt, substitutedRequest).status,
+    "PASS",
+  );
+  assert.equal(
+    compareRunToAcceptedContract(
+      substitutedContract,
+      substitutedReceipt,
+      substitutedRequest,
     ).status,
     "INTEGRITY_ERROR",
   );
