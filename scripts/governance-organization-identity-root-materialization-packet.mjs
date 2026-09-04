@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   APPROVED_PLAN,
   APPROVED_SPEC,
   canonicalJsonBytes,
   computeLauncherContractDigests,
+  LOCAL_COMMAND_IDS,
   verifyLauncherContract,
 } from "./governance-organization-identity-launcher.mjs";
 
@@ -28,6 +32,7 @@ const GENERATOR_PATH =
   "scripts/governance-organization-identity-root-materialization-packet.mjs";
 const GENERATOR_SPEC_PATH =
   "scripts/governance-organization-identity-root-materialization-packet.spec.mjs";
+const words = (value) => Object.freeze(value.split(" "));
 const ROLES = Object.freeze([
   ["ENV", "bin/env", 0o500],
   ["NODE", "bin/node", 0o500],
@@ -37,47 +42,12 @@ const ROLES = Object.freeze([
   ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
   ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
 ]);
-const CHRONOLOGY = Object.freeze([
-  "VERIFY_SOURCE_TOOL_CLOSURE",
-  "COPY_AND_FSYNC_LAUNCHER_FILES",
-  "COPY_AND_FSYNC_MATERIALIZED_EXECUTABLE_CLOSURE",
-  "CREATE_AND_FSYNC_RUNTIME_ROOTS",
-  "CREATE_AND_FSYNC_REQUEST_OUTPUT_ROOTS",
-  "INDEPENDENT_READBACK",
-  "MATERIALIZATION_RECEIPT",
-  "MATERIALIZATION_REVIEW",
-]);
-const PACKET_KEYS = Object.freeze([
-  "schemaVersion",
-  "subjectCommit",
-  "launcherContract",
-  "launcherContractSha256",
-  "approvedArtifacts",
-  "launcherFileCount",
-  "toolRootFileCount",
-  "runtimeRootCount",
-  "requestRootCount",
-  "outputRootCount",
-  "launcherRoot",
-  "toolRoot",
-  "runtimeRoot",
-  "requestRoot",
-  "outputRoot",
-  "sourceToolClosure",
-  "materializedExecutableClosure",
-  "launcherFilePlan",
-  "bootstrapFilePlan",
-  "contractFilePlan",
-  "runtimeRootPlan",
-  "runtimeEnvironment",
-  "rootPreflight",
-  "reviewIdentities",
-  "chronology",
-  "symlinkPolicy",
-  "rollbackPolicy",
-  "compatibilityStatus",
-  "result",
-]);
+const CHRONOLOGY = words(
+  "VERIFY_SOURCE_TOOL_CLOSURE COPY_AND_FSYNC_LAUNCHER_FILES COPY_AND_FSYNC_MATERIALIZED_EXECUTABLE_CLOSURE CREATE_AND_FSYNC_RUNTIME_ROOTS CREATE_AND_FSYNC_REQUEST_OUTPUT_ROOTS INDEPENDENT_READBACK MATERIALIZATION_RECEIPT MATERIALIZATION_REVIEW",
+);
+const PACKET_KEYS = words(
+  "schemaVersion subjectCommit launcherContract launcherContractSha256 approvedArtifacts launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot sourceToolClosure materializedExecutableClosure launcherFilePlan bootstrapFilePlan contractFilePlan runtimeRootPlan runtimeEnvironment rootPreflight reviewIdentities chronology symlinkPolicy rollbackPolicy compatibilityStatus result",
+);
 
 function pass(extra = {}) {
   return { status: "PASS", ...extra };
@@ -112,8 +82,49 @@ function pathSha(value) {
   return sha256(Buffer.from(value, "utf8"));
 }
 
+function canonicalEqual(left, right) {
+  return sha256(canonicalJsonBytes(left)) === sha256(canonicalJsonBytes(right));
+}
+
+function isAbsoluteNormalizedPath(value) {
+  return (
+    typeof value === "string" &&
+    path.isAbsolute(value) &&
+    path.normalize(value) === value
+  );
+}
+
 function hex(index) {
   return "123456789abcdef"[index].repeat(64);
+}
+
+function gitFileIdentity(commit, filePath) {
+  if (!isCommit(commit)) return null;
+  const objectName = `${commit}:${filePath}`;
+  try {
+    const blobId = execFileSync("git", ["rev-parse", objectName], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const bytes = execFileSync("git", ["cat-file", "blob", objectName], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return GIT_ID.test(blobId)
+      ? { commit, blobId, sha256: sha256(bytes), size: bytes.length }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function artifactFields(prefix, identity) {
+  if (!identity) return null;
+  return {
+    [`${prefix}Commit`]: identity.commit,
+    [`${prefix}BlobId`]: identity.blobId,
+    [`${prefix}Sha256`]: identity.sha256,
+    [`${prefix}Size`]: identity.size,
+  };
 }
 
 function plannedFile(basename, mode, sha = hex(0), size = 1) {
@@ -176,6 +187,7 @@ function sourceToolClosure(overrides = {}) {
     sourceSize: 100 + index,
     sourceMode: index < 3 ? 0o755 : 0o644,
     sourcePathPolicy: "RESOLVED_REGULAR_FILE_ONLY",
+    sourcePathKind: "REGULAR_FILE",
     ...overrides[role],
   }));
 }
@@ -199,39 +211,26 @@ function materializedExecutableClosure(sourceClosure = sourceToolClosure()) {
 }
 
 function approvedArtifacts(subjectCommit) {
-  return {
-    planCommit: APPROVED_PLAN.commit,
-    planBlobId: APPROVED_PLAN.blobId,
-    planSha256: APPROVED_PLAN.sha256,
-    planSize: 1,
-    specCommit: APPROVED_SPEC.commit,
-    specBlobId: APPROVED_SPEC.blobId,
-    specSha256: APPROVED_SPEC.sha256,
-    specSize: 1,
-    launcherCommit: subjectCommit,
-    launcherBlobId: "4".repeat(40),
-    launcherSha256: hex(9),
-    launcherSize: 1,
-    bootstrapCommit: subjectCommit,
-    bootstrapBlobId: "5".repeat(40),
-    bootstrapSha256: hex(10),
-    bootstrapSize: 1,
-    bootstrapContractCommit: subjectCommit,
-    bootstrapContractBlobId: "6".repeat(40),
-    bootstrapContractSha256: hex(11),
-    bootstrapContractSize: 1,
-    generatorCommit: subjectCommit,
-    generatorBlobId: "7".repeat(40),
-    generatorSha256: hex(12),
-    generatorSize: 1,
-    generatorSpecCommit: subjectCommit,
-    generatorSpecBlobId: "8".repeat(40),
-    generatorSpecSha256: hex(13),
-    generatorSpecSize: 1,
-  };
+  const identities = [
+    artifactFields("plan", gitFileIdentity(APPROVED_PLAN.commit, PLAN_PATH)),
+    artifactFields("spec", gitFileIdentity(APPROVED_SPEC.commit, SPEC_PATH)),
+    artifactFields("launcher", gitFileIdentity(subjectCommit, LAUNCHER_PATH)),
+    artifactFields("bootstrap", gitFileIdentity(subjectCommit, BOOTSTRAP_PATH)),
+    artifactFields(
+      "bootstrapContract",
+      gitFileIdentity(subjectCommit, BOOTSTRAP_CONTRACT_PATH),
+    ),
+    artifactFields("generator", gitFileIdentity(subjectCommit, GENERATOR_PATH)),
+    artifactFields(
+      "generatorSpec",
+      gitFileIdentity(subjectCommit, GENERATOR_SPEC_PATH),
+    ),
+  ];
+  return identities.every(Boolean) ? Object.assign({}, ...identities) : null;
 }
 
 function launcherContract(subjectCommit, sourceClosure) {
+  const artifacts = approvedArtifacts(subjectCommit);
   return {
     schemaVersion: "organization-identity-launcher-contract/v3",
     rootDirectory: LAUNCHER_ROOT,
@@ -274,9 +273,9 @@ function launcherContract(subjectCommit, sourceClosure) {
     approvedSpec: { ...APPROVED_SPEC },
     approvedLauncher: {
       path: LAUNCHER_PATH,
-      commit: subjectCommit,
-      blobId: "4".repeat(40),
-      sha256: hex(9),
+      commit: artifacts.launcherCommit,
+      blobId: artifacts.launcherBlobId,
+      sha256: artifacts.launcherSha256,
     },
     launcherFilePlan: [
       plannedFile("identity-writer-launch", 0o500, hex(8)),
@@ -292,33 +291,7 @@ function launcherContract(subjectCommit, sourceClosure) {
     materializedExecutableClosure: materializedExecutableClosure(sourceClosure),
     runtimeEnvironment: runtimeEnvironment(),
     runtimeRootPlan: runtimeRootPlan(),
-    commandIds: [
-      "BOOTSTRAP_AUTHORITY_RUN_V1",
-      "SCOPED_REVIEW_VERIFY_V1",
-      "CURRENT_MAIN_AUDIT_LOCAL_V1",
-      "CURRENT_MAIN_VALIDATE_V1",
-      "CURRENT_MAIN_GENERATE_V1",
-      "COPY_WRITE_ELIGIBILITY_V1",
-      "COPY_SYNC_CITATIONS_V1",
-      "GIT_REFRESH_START_V1",
-      "GIT_REFRESH_COMMIT_V1",
-      "GIT_ADMISSION_COMMIT_V1",
-      "GIT_ACCEPTANCE_COMMIT_V1",
-      "REFRESH_VERIFY_V1",
-      "MIGRATION_STATIC_VERIFY_V1",
-      "PRISMA_GENERATE_V1",
-      "SCANNER_TEST_V1",
-      "SCANNER_BASELINE_V1",
-      "SCANNER_STAGE_V1",
-      "SCANNER_ZERO_V1",
-      "SCANNER_ACCEPTANCE_V1",
-      "GOVERNANCE_VERIFY_V1",
-      "DOCS_VERIFY_V1",
-      "API_VERIFY_V1",
-      "RUNTIME_ARTIFACT_VERIFY_V1",
-      "CONTRACT_GRAPH_VERIFY_V1",
-      "V3_WORKTREE_CREATE_V1",
-    ],
+    commandIds: [...LOCAL_COMMAND_IDS],
     ...computeLauncherContractDigests(),
   };
 }
@@ -386,38 +359,12 @@ export function buildLauncherMaterializationPacket(options = {}) {
   return packet;
 }
 
-function validateApprovedArtifacts(artifacts) {
-  const keys = [
-    "planCommit",
-    "planBlobId",
-    "planSha256",
-    "planSize",
-    "specCommit",
-    "specBlobId",
-    "specSha256",
-    "specSize",
-    "launcherCommit",
-    "launcherBlobId",
-    "launcherSha256",
-    "launcherSize",
-    "bootstrapCommit",
-    "bootstrapBlobId",
-    "bootstrapSha256",
-    "bootstrapSize",
-    "bootstrapContractCommit",
-    "bootstrapContractBlobId",
-    "bootstrapContractSha256",
-    "bootstrapContractSize",
-    "generatorCommit",
-    "generatorBlobId",
-    "generatorSha256",
-    "generatorSize",
-    "generatorSpecCommit",
-    "generatorSpecBlobId",
-    "generatorSpecSha256",
-    "generatorSpecSize",
-  ];
+function validateApprovedArtifacts(artifacts, packet) {
+  const keys = words(
+    "planCommit planBlobId planSha256 planSize specCommit specBlobId specSha256 specSize launcherCommit launcherBlobId launcherSha256 launcherSize bootstrapCommit bootstrapBlobId bootstrapSha256 bootstrapSize bootstrapContractCommit bootstrapContractBlobId bootstrapContractSha256 bootstrapContractSize generatorCommit generatorBlobId generatorSha256 generatorSize generatorSpecCommit generatorSpecBlobId generatorSpecSha256 generatorSpecSize",
+  );
   if (!exactKeys(artifacts, keys)) return false;
+  const expected = approvedArtifacts(packet.subjectCommit);
   for (const key of keys.filter((key) => key.endsWith("Commit"))) {
     if (!isCommit(artifacts[key])) return false;
   }
@@ -428,12 +375,24 @@ function validateApprovedArtifacts(artifacts) {
     if (!isSha(artifacts[key])) return false;
   }
   return (
+    canonicalEqual(artifacts, expected) &&
     artifacts.planCommit === APPROVED_PLAN.commit &&
     artifacts.planBlobId === APPROVED_PLAN.blobId &&
     artifacts.planSha256 === APPROVED_PLAN.sha256 &&
     artifacts.specCommit === APPROVED_SPEC.commit &&
     artifacts.specBlobId === APPROVED_SPEC.blobId &&
     artifacts.specSha256 === APPROVED_SPEC.sha256 &&
+    artifacts.launcherCommit === packet.subjectCommit &&
+    artifacts.generatorCommit === packet.subjectCommit &&
+    artifacts.generatorSpecCommit === packet.subjectCommit &&
+    artifacts.bootstrapCommit === packet.subjectCommit &&
+    artifacts.bootstrapContractCommit === packet.subjectCommit &&
+    artifacts.launcherCommit ===
+      packet.launcherContract?.approvedLauncher?.commit &&
+    artifacts.launcherBlobId ===
+      packet.launcherContract?.approvedLauncher?.blobId &&
+    artifacts.launcherSha256 ===
+      packet.launcherContract?.approvedLauncher?.sha256 &&
     keys
       .filter((key) => key.endsWith("Size"))
       .every(
@@ -459,18 +418,22 @@ function validateSourceClosure(sourceClosure, destinationClosure) {
         "sourceSize",
         "sourceMode",
         "sourcePathPolicy",
+        "sourcePathKind",
       ]) &&
       source.role === role &&
       source.role === destination?.role &&
       source.logicalIdentity === destination.logicalIdentity &&
       source.sourceSha256 === destination.sha256 &&
       source.sourceSize === destination.size &&
-      isSha(source.sourceExecutablePathSha256) &&
+      isAbsoluteNormalizedPath(source.sourceExecutablePath) &&
+      source.sourceExecutablePathSha256 ===
+        pathSha(source.sourceExecutablePath) &&
       isSha(source.sourceRealpathSha256) &&
       isSha(source.sourceSha256) &&
       Number.isSafeInteger(source.sourceSize) &&
       Number.isSafeInteger(source.sourceMode) &&
       source.sourcePathPolicy === "RESOLVED_REGULAR_FILE_ONLY" &&
+      source.sourcePathKind === "REGULAR_FILE" &&
       !source.sourceExecutablePath.startsWith(TOOL_ROOT)
     );
   });
@@ -487,7 +450,7 @@ export function validateLauncherMaterializationPacket(packet) {
     packet.contractFilePlan?.sha256 !== contractSha ||
     packet.contractFilePlan?.size !==
       canonicalJsonBytes(packet.launcherContract).length ||
-    !validateApprovedArtifacts(packet.approvedArtifacts) ||
+    !validateApprovedArtifacts(packet.approvedArtifacts, packet) ||
     packet.launcherFileCount !== 4 ||
     packet.toolRootFileCount !== 7 ||
     packet.runtimeRootCount !== 7 ||
@@ -502,9 +465,18 @@ export function validateLauncherMaterializationPacket(packet) {
       packet.sourceToolClosure,
       packet.materializedExecutableClosure,
     ) ||
-    packet.launcherFilePlan !== packet.launcherContract.launcherFilePlan ||
-    packet.runtimeRootPlan !== packet.launcherContract.runtimeRootPlan ||
-    packet.runtimeEnvironment !== packet.launcherContract.runtimeEnvironment ||
+    !canonicalEqual(
+      packet.launcherFilePlan,
+      packet.launcherContract.launcherFilePlan,
+    ) ||
+    !canonicalEqual(
+      packet.runtimeRootPlan,
+      packet.launcherContract.runtimeRootPlan,
+    ) ||
+    !canonicalEqual(
+      packet.runtimeEnvironment,
+      packet.launcherContract.runtimeEnvironment,
+    ) ||
     packet.symlinkPolicy !== "NO_LIVE_SYMLINK_RUNTIME_DEPENDENCE" ||
     packet.rollbackPolicy !== "CREATE_ONLY_PRESERVE_EVIDENCE_AND_REAUTHORIZE" ||
     packet.compatibilityStatus !==
@@ -534,6 +506,32 @@ export function validateLauncherMaterializationPacket(packet) {
   });
 }
 
+export async function writeLauncherMaterializationPacketFile({
+  outputPath,
+  packet,
+}) {
+  if (!isAbsoluteNormalizedPath(outputPath)) {
+    return integrity("PACKET_OUTPUT_PATH_INVALID");
+  }
+  const packetValidation = validateLauncherMaterializationPacket(packet);
+  if (packetValidation.status !== "PASS") return packetValidation;
+  try {
+    await writeFile(outputPath, canonicalJsonBytes(packet), {
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    return error?.code === "EEXIST"
+      ? integrity("PACKET_OUTPUT_REUSE")
+      : integrity("PACKET_OUTPUT_WRITE_FAILED");
+  }
+  return pass({
+    outputPath,
+    launcherMaterializationPacketSha256:
+      packetValidation.launcherMaterializationPacketSha256,
+  });
+}
+
 export function buildLauncherMaterializationPacketReviewReceipt(fields) {
   return {
     schemaVersion:
@@ -555,7 +553,10 @@ export function buildLauncherMaterializationPacketReviewReceipt(fields) {
   };
 }
 
-export function validateLauncherMaterializationPacketReviewReceipt(receipt) {
+export function validateLauncherMaterializationPacketReviewReceipt(
+  receipt,
+  packet = null,
+) {
   const keys = [
     "schemaVersion",
     "launcherMaterializationPacketSha256",
@@ -580,7 +581,8 @@ export function validateLauncherMaterializationPacketReviewReceipt(receipt) {
       "INDEPENDENT_ROOT_MATERIALIZATION_PACKET_REVIEW" ||
     receipt.critical !== 0 ||
     receipt.important !== 0 ||
-    receipt.verdict !== "PASS"
+    receipt.verdict !== "PASS" ||
+    receipt.reportSha256 === receipt.counterexampleSetSha256
   )
     return integrity("PACKET_REVIEW_INVALID");
   for (const key of keys.filter((key) => key.endsWith("Sha256"))) {
@@ -594,6 +596,25 @@ export function validateLauncherMaterializationPacketReviewReceipt(receipt) {
     !GIT_ID.test(receipt.generatorSpecBlobId)
   ) {
     return integrity("PACKET_REVIEW_INVALID");
+  }
+  if (packet) {
+    const packetValidation = validateLauncherMaterializationPacket(packet);
+    if (
+      packetValidation.status !== "PASS" ||
+      receipt.launcherMaterializationPacketSha256 !==
+        packetValidation.launcherMaterializationPacketSha256 ||
+      receipt.generatorCommit !== packet.approvedArtifacts.generatorCommit ||
+      receipt.generatorBlobId !== packet.approvedArtifacts.generatorBlobId ||
+      receipt.generatorSha256 !== packet.approvedArtifacts.generatorSha256 ||
+      receipt.generatorSpecCommit !==
+        packet.approvedArtifacts.generatorSpecCommit ||
+      receipt.generatorSpecBlobId !==
+        packet.approvedArtifacts.generatorSpecBlobId ||
+      receipt.generatorSpecSha256 !==
+        packet.approvedArtifacts.generatorSpecSha256
+    ) {
+      return integrity("PACKET_REVIEW_INVALID");
+    }
   }
   return pass();
 }
