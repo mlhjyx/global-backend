@@ -23,15 +23,78 @@ import {
   buildLauncherMaterializationPacket,
   buildLauncherMaterializationPacketReviewReceipt,
   buildLauncherRootMaterializationRequest,
+  ROOT_MATERIALIZATION_PACKET_PATHS,
   validateLauncherMaterializationPacket,
   validateLauncherMaterializationPacketReviewReceipt,
   validateLauncherRootMaterializationRequest,
   writeLauncherMaterializationPacketFile,
 } from "./governance-organization-identity-root-materialization-packet.mjs";
 
-const SUBJECT = execFileSync("git", ["rev-parse", "HEAD"], {
-  encoding: "utf8",
-}).trim();
+const PHASE_A_SUBJECT = "61384076273feddcb4c5b5309d4b46902dc50e5c";
+const PHASE_B_SUBJECT = "56fde9df9448377f3ce6454ae12e332d2ccde946";
+const LAUNCHER_CONTRACT_SHA256 =
+  "3c71df7989da6312f0498bc8908ff07a581121fb24d03ab1e6ed36b0e2342292";
+
+function gitIdentity(commit, filePath) {
+  const objectName = `${commit}:${filePath}`;
+  const blobId = execFileSync("git", ["rev-parse", objectName], {
+    encoding: "utf8",
+  }).trim();
+  const bytes = execFileSync("git", ["cat-file", "blob", objectName]);
+  return {
+    path: filePath,
+    commit,
+    blobId,
+    sha256: shaBuffer(bytes),
+    size: bytes.length,
+  };
+}
+
+function shaBuffer(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function artifactHandoff(overrides = {}) {
+  const handoff = {
+    plan: gitIdentity(
+      APPROVED_PLAN.commit,
+      ROOT_MATERIALIZATION_PACKET_PATHS.plan,
+    ),
+    spec: gitIdentity(
+      "b060c5dd4afef9fe42dfe510b02f930f56cdf7fe",
+      ROOT_MATERIALIZATION_PACKET_PATHS.spec,
+    ),
+    launcher: gitIdentity(
+      PHASE_A_SUBJECT,
+      ROOT_MATERIALIZATION_PACKET_PATHS.launcher,
+    ),
+    bootstrap: gitIdentity(
+      PHASE_B_SUBJECT,
+      ROOT_MATERIALIZATION_PACKET_PATHS.bootstrap,
+    ),
+    bootstrapContract: gitIdentity(
+      PHASE_B_SUBJECT,
+      ROOT_MATERIALIZATION_PACKET_PATHS.bootstrapContract,
+    ),
+    generator: gitIdentity(
+      PHASE_A_SUBJECT,
+      ROOT_MATERIALIZATION_PACKET_PATHS.generator,
+    ),
+    generatorSpec: gitIdentity(
+      PHASE_A_SUBJECT,
+      ROOT_MATERIALIZATION_PACKET_PATHS.generatorSpec,
+    ),
+    ...overrides,
+  };
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(handoff).map(([key, value]) => [
+        key,
+        Object.freeze(value),
+      ]),
+    ),
+  );
+}
 
 function roundTrip(value) {
   return JSON.parse(canonicalJsonBytes(value));
@@ -39,7 +102,10 @@ function roundTrip(value) {
 
 function validPacket(overrides = {}) {
   return buildLauncherMaterializationPacket({
-    subjectCommit: SUBJECT,
+    subjectCommit: PHASE_A_SUBJECT,
+    phaseASubjectCommit: PHASE_A_SUBJECT,
+    phaseBSubjectCommit: PHASE_B_SUBJECT,
+    artifactHandoff: artifactHandoff(),
     outputPath: "/tmp/task-0L-root-materialization-packet-v4.json",
     ...overrides,
   });
@@ -111,6 +177,10 @@ test("packet current schemas reject historical versions and bind the current pla
     packet.schemaVersion,
     "organization-identity-launcher-materialization-packet/v4",
   );
+  assert.equal(packet.subjectCommit, PHASE_A_SUBJECT);
+  assert.equal(packet.phaseASubjectCommit, PHASE_A_SUBJECT);
+  assert.equal(packet.phaseBSubjectCommit, PHASE_B_SUBJECT);
+  assert.equal(packet.launcherContractSha256, LAUNCHER_CONTRACT_SHA256);
   assert.equal(packet.approvedArtifacts.planCommit, APPROVED_PLAN.commit);
   assert.equal(packet.approvedArtifacts.planBlobId, APPROVED_PLAN.blobId);
   assert.equal(packet.approvedArtifacts.planSha256, APPROVED_PLAN.sha256);
@@ -131,10 +201,47 @@ test("packet current schemas reject historical versions and bind the current pla
   );
 });
 
+test("packet artifact provenance separates Phase A launcher/generator from reviewed Phase B bootstrap", () => {
+  const packet = validPacket();
+  const expected = artifactHandoff();
+  assert.equal(packet.approvedArtifacts.launcherCommit, PHASE_A_SUBJECT);
+  assert.equal(packet.approvedArtifacts.generatorCommit, PHASE_A_SUBJECT);
+  assert.equal(packet.approvedArtifacts.generatorSpecCommit, PHASE_A_SUBJECT);
+  assert.equal(packet.approvedArtifacts.bootstrapCommit, PHASE_B_SUBJECT);
+  assert.equal(
+    packet.approvedArtifacts.bootstrapContractCommit,
+    PHASE_B_SUBJECT,
+  );
+  for (const [prefix, identity] of Object.entries(expected)) {
+    assert.equal(packet.approvedArtifacts[`${prefix}Commit`], identity.commit);
+    assert.equal(packet.approvedArtifacts[`${prefix}BlobId`], identity.blobId);
+    assert.equal(packet.approvedArtifacts[`${prefix}Sha256`], identity.sha256);
+    assert.equal(packet.approvedArtifacts[`${prefix}Size`], identity.size);
+  }
+  assert.equal(
+    packet.launcherContract.approvedLauncher.commit,
+    packet.approvedArtifacts.launcherCommit,
+  );
+  assert.equal(
+    packet.launcherContract.approvedLauncher.blobId,
+    packet.approvedArtifacts.launcherBlobId,
+  );
+  assert.equal(
+    validateLauncherMaterializationPacket(roundTrip(packet)).status,
+    "PASS",
+  );
+});
+
 test("packet rejects subject, source identity, root, and duplicated subtree drift", () => {
   const packet = validPacket();
+  const phaseABootstrap = gitIdentity(
+    PHASE_A_SUBJECT,
+    ROOT_MATERIALIZATION_PACKET_PATHS.bootstrap,
+  );
   const invalidPackets = [
     { ...packet, subjectCommit: "9".repeat(40) },
+    { ...packet, phaseASubjectCommit: PHASE_B_SUBJECT },
+    { ...packet, phaseBSubjectCommit: PHASE_A_SUBJECT },
     {
       ...packet,
       approvedArtifacts: {
@@ -160,14 +267,24 @@ test("packet rejects subject, source identity, root, and duplicated subtree drif
       ...packet,
       approvedArtifacts: {
         ...packet.approvedArtifacts,
-        bootstrapCommit: "9".repeat(40),
+        bootstrapCommit: PHASE_A_SUBJECT,
+        bootstrapBlobId: phaseABootstrap.blobId,
+        bootstrapSha256: phaseABootstrap.sha256,
+        bootstrapSize: phaseABootstrap.size,
       },
     },
     {
       ...packet,
       approvedArtifacts: {
         ...packet.approvedArtifacts,
-        bootstrapContractCommit: "9".repeat(40),
+        bootstrapBlobId: phaseABootstrap.blobId,
+      },
+    },
+    {
+      ...packet,
+      approvedArtifacts: {
+        ...packet.approvedArtifacts,
+        bootstrapContractCommit: PHASE_A_SUBJECT,
       },
     },
     rehashPacket({
@@ -199,6 +316,34 @@ test("packet rejects subject, source identity, root, and duplicated subtree drif
       },
     },
     { ...packet, launcherRoot: "/tmp/other-launcher" },
+    buildLauncherMaterializationPacket({
+      subjectCommit: PHASE_A_SUBJECT,
+      phaseASubjectCommit: PHASE_A_SUBJECT,
+      phaseBSubjectCommit: PHASE_B_SUBJECT,
+      artifactHandoff: artifactHandoff({
+        bootstrap: {
+          ...gitIdentity(
+            PHASE_B_SUBJECT,
+            ROOT_MATERIALIZATION_PACKET_PATHS.bootstrap,
+          ),
+          path: ROOT_MATERIALIZATION_PACKET_PATHS.launcher,
+        },
+      }),
+    }),
+    buildLauncherMaterializationPacket({
+      subjectCommit: PHASE_A_SUBJECT,
+      phaseASubjectCommit: PHASE_A_SUBJECT,
+      phaseBSubjectCommit: PHASE_B_SUBJECT,
+      artifactHandoff: artifactHandoff({
+        generator: {
+          ...gitIdentity(
+            PHASE_A_SUBJECT,
+            ROOT_MATERIALIZATION_PACKET_PATHS.generator,
+          ),
+          sha256: SHA_C,
+        },
+      }),
+    }),
   ];
   for (const candidate of invalidPackets) {
     assert.equal(
@@ -302,7 +447,7 @@ test("packet review and root request are non-circular, exact-key, and substituti
     );
   }
   const request = buildLauncherRootMaterializationRequest({
-    subjectCommit: SUBJECT,
+    subjectCommit: PHASE_A_SUBJECT,
     launcherMaterializationPacketPath:
       "/tmp/task-0L-root-materialization-packet-v4.json",
     launcherMaterializationPacketSha256: packetSha256,

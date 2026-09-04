@@ -32,6 +32,10 @@ const GENERATOR_PATH =
   "scripts/governance-organization-identity-root-materialization-packet.mjs";
 const GENERATOR_SPEC_PATH =
   "scripts/governance-organization-identity-root-materialization-packet.spec.mjs";
+const FROZEN_PHASE_A_SUBJECT_COMMIT =
+  "61384076273feddcb4c5b5309d4b46902dc50e5c";
+const REVIEWED_PHASE_B_SUBJECT_COMMIT =
+  "56fde9df9448377f3ce6454ae12e332d2ccde946";
 const words = (value) => Object.freeze(value.split(" "));
 const ROLES = Object.freeze([
   ["ENV", "bin/env", 0o500],
@@ -46,7 +50,7 @@ const CHRONOLOGY = words(
   "VERIFY_SOURCE_TOOL_CLOSURE COPY_AND_FSYNC_LAUNCHER_FILES COPY_AND_FSYNC_MATERIALIZED_EXECUTABLE_CLOSURE CREATE_AND_FSYNC_RUNTIME_ROOTS CREATE_AND_FSYNC_REQUEST_OUTPUT_ROOTS INDEPENDENT_READBACK MATERIALIZATION_RECEIPT MATERIALIZATION_REVIEW",
 );
 const PACKET_KEYS = words(
-  "schemaVersion subjectCommit launcherContract launcherContractSha256 approvedArtifacts launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot sourceToolClosure sourceToolClosureSha256 materializedExecutableClosure materializedExecutableClosureSha256 launcherFilePlan bootstrapFilePlan contractFilePlan runtimeRootPlan runtimeEnvironment rootPreflight reviewIdentities chronology symlinkPolicy rollbackPolicy compatibilityStatus result",
+  "schemaVersion subjectCommit phaseASubjectCommit phaseBSubjectCommit launcherContract launcherContractSha256 approvedArtifacts launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot sourceToolClosure sourceToolClosureSha256 materializedExecutableClosure materializedExecutableClosureSha256 launcherFilePlan bootstrapFilePlan contractFilePlan runtimeRootPlan runtimeEnvironment rootPreflight reviewIdentities chronology symlinkPolicy rollbackPolicy compatibilityStatus result",
 );
 
 function pass(extra = {}) {
@@ -214,27 +218,53 @@ function materializedExecutableClosure(sourceClosure = sourceToolClosure()) {
   });
 }
 
-function approvedArtifacts(subjectCommit) {
+function artifactRecord(record, commit, filePath) {
+  const actual = gitFileIdentity(commit, filePath);
+  if (!actual) return null;
+  if (!record) return actual;
+  const keys = words("path commit blobId sha256 size");
+  return Object.isFrozen(record) &&
+    exactKeys(record, keys) &&
+    record.path === filePath &&
+    record.commit === commit &&
+    canonicalEqual(record, { path: filePath, ...actual })
+    ? actual
+    : null;
+}
+
+function approvedArtifacts({
+  phaseASubjectCommit,
+  phaseBSubjectCommit,
+  artifactHandoff = null,
+}) {
+  if (
+    phaseASubjectCommit !== FROZEN_PHASE_A_SUBJECT_COMMIT ||
+    phaseBSubjectCommit !== REVIEWED_PHASE_B_SUBJECT_COMMIT ||
+    (artifactHandoff &&
+      (!Object.isFrozen(artifactHandoff) ||
+        Object.values(artifactHandoff).some(
+          (record) => !Object.isFrozen(record),
+        )))
+  )
+    return null;
   const identities = [
-    artifactFields("plan", gitFileIdentity(APPROVED_PLAN.commit, PLAN_PATH)),
-    artifactFields("spec", gitFileIdentity(APPROVED_SPEC.commit, SPEC_PATH)),
-    artifactFields("launcher", gitFileIdentity(subjectCommit, LAUNCHER_PATH)),
-    artifactFields("bootstrap", gitFileIdentity(subjectCommit, BOOTSTRAP_PATH)),
+    ["plan", APPROVED_PLAN.commit, PLAN_PATH],
+    ["spec", APPROVED_SPEC.commit, SPEC_PATH],
+    ["launcher", phaseASubjectCommit, LAUNCHER_PATH],
+    ["bootstrap", phaseBSubjectCommit, BOOTSTRAP_PATH],
+    ["bootstrapContract", phaseBSubjectCommit, BOOTSTRAP_CONTRACT_PATH],
+    ["generator", phaseASubjectCommit, GENERATOR_PATH],
+    ["generatorSpec", phaseASubjectCommit, GENERATOR_SPEC_PATH],
+  ].map(([prefix, commit, filePath]) =>
     artifactFields(
-      "bootstrapContract",
-      gitFileIdentity(subjectCommit, BOOTSTRAP_CONTRACT_PATH),
+      prefix,
+      artifactRecord(artifactHandoff?.[prefix], commit, filePath),
     ),
-    artifactFields("generator", gitFileIdentity(subjectCommit, GENERATOR_PATH)),
-    artifactFields(
-      "generatorSpec",
-      gitFileIdentity(subjectCommit, GENERATOR_SPEC_PATH),
-    ),
-  ];
+  );
   return identities.every(Boolean) ? Object.assign({}, ...identities) : null;
 }
 
-function launcherContract(subjectCommit, sourceClosure) {
-  const artifacts = approvedArtifacts(subjectCommit);
+function launcherContract(sourceClosure, artifacts) {
   return {
     schemaVersion: "organization-identity-launcher-contract/v3",
     rootDirectory: LAUNCHER_ROOT,
@@ -277,9 +307,9 @@ function launcherContract(subjectCommit, sourceClosure) {
     approvedSpec: { ...APPROVED_SPEC },
     approvedLauncher: {
       path: LAUNCHER_PATH,
-      commit: artifacts.launcherCommit,
-      blobId: artifacts.launcherBlobId,
-      sha256: artifacts.launcherSha256,
+      commit: artifacts?.launcherCommit,
+      blobId: artifacts?.launcherBlobId,
+      sha256: artifacts?.launcherSha256,
     },
     launcherFilePlan: [
       plannedFile("identity-writer-launch", 0o500, hex(8)),
@@ -301,19 +331,29 @@ function launcherContract(subjectCommit, sourceClosure) {
 }
 
 export function buildLauncherMaterializationPacket(options = {}) {
-  const subjectCommit = options.subjectCommit ?? "1".repeat(40);
+  const phaseASubjectCommit =
+    options.phaseASubjectCommit ?? options.subjectCommit ?? "1".repeat(40);
+  const phaseBSubjectCommit = options.phaseBSubjectCommit ?? "1".repeat(40);
+  const subjectCommit = options.subjectCommit ?? phaseASubjectCommit;
   const sources = options.sourceToolClosure ?? sourceToolClosure();
+  const artifacts = approvedArtifacts({
+    phaseASubjectCommit,
+    phaseBSubjectCommit,
+    artifactHandoff: options.artifactHandoff,
+  });
   const contract =
-    options.launcherContract ?? launcherContract(subjectCommit, sources);
+    options.launcherContract ?? launcherContract(sources, artifacts);
   const contractBytes = canonicalJsonBytes(contract);
   const contractSha = sha256(contractBytes);
   const materialized = contract.materializedExecutableClosure;
   const packet = {
     schemaVersion: "organization-identity-launcher-materialization-packet/v4",
     subjectCommit,
+    phaseASubjectCommit,
+    phaseBSubjectCommit,
     launcherContract: contract,
     launcherContractSha256: contractSha,
-    approvedArtifacts: approvedArtifacts(subjectCommit),
+    approvedArtifacts: artifacts,
     launcherFileCount: 4,
     toolRootFileCount: 7,
     runtimeRootCount: 7,
@@ -371,7 +411,10 @@ function validateApprovedArtifacts(artifacts, packet) {
     "planCommit planBlobId planSha256 planSize specCommit specBlobId specSha256 specSize launcherCommit launcherBlobId launcherSha256 launcherSize bootstrapCommit bootstrapBlobId bootstrapSha256 bootstrapSize bootstrapContractCommit bootstrapContractBlobId bootstrapContractSha256 bootstrapContractSize generatorCommit generatorBlobId generatorSha256 generatorSize generatorSpecCommit generatorSpecBlobId generatorSpecSha256 generatorSpecSize",
   );
   if (!exactKeys(artifacts, keys)) return false;
-  const expected = approvedArtifacts(packet.subjectCommit);
+  const expected = approvedArtifacts({
+    phaseASubjectCommit: packet.phaseASubjectCommit,
+    phaseBSubjectCommit: packet.phaseBSubjectCommit,
+  });
   for (const key of keys.filter((key) => key.endsWith("Commit"))) {
     if (!isCommit(artifacts[key])) return false;
   }
@@ -389,11 +432,14 @@ function validateApprovedArtifacts(artifacts, packet) {
     artifacts.specCommit === APPROVED_SPEC.commit &&
     artifacts.specBlobId === APPROVED_SPEC.blobId &&
     artifacts.specSha256 === APPROVED_SPEC.sha256 &&
-    artifacts.launcherCommit === packet.subjectCommit &&
-    artifacts.generatorCommit === packet.subjectCommit &&
-    artifacts.generatorSpecCommit === packet.subjectCommit &&
-    artifacts.bootstrapCommit === packet.subjectCommit &&
-    artifacts.bootstrapContractCommit === packet.subjectCommit &&
+    packet.subjectCommit === packet.phaseASubjectCommit &&
+    packet.phaseASubjectCommit === FROZEN_PHASE_A_SUBJECT_COMMIT &&
+    packet.phaseBSubjectCommit === REVIEWED_PHASE_B_SUBJECT_COMMIT &&
+    artifacts.launcherCommit === packet.phaseASubjectCommit &&
+    artifacts.generatorCommit === packet.phaseASubjectCommit &&
+    artifacts.generatorSpecCommit === packet.phaseASubjectCommit &&
+    artifacts.bootstrapCommit === packet.phaseBSubjectCommit &&
+    artifacts.bootstrapContractCommit === packet.phaseBSubjectCommit &&
     artifacts.launcherCommit ===
       packet.launcherContract?.approvedLauncher?.commit &&
     artifacts.launcherBlobId ===
@@ -415,18 +461,12 @@ function validateSourceClosure(sourceClosure, destinationClosure) {
     const [role] = ROLES[index];
     const destination = destinationClosure?.[index];
     return (
-      exactKeys(source, [
-        "role",
-        "logicalIdentity",
-        "sourceExecutablePath",
-        "sourceExecutablePathSha256",
-        "sourceRealpathSha256",
-        "sourceSha256",
-        "sourceSize",
-        "sourceMode",
-        "sourcePathPolicy",
-        "sourcePathKind",
-      ]) &&
+      exactKeys(
+        source,
+        words(
+          "role logicalIdentity sourceExecutablePath sourceExecutablePathSha256 sourceRealpathSha256 sourceSha256 sourceSize sourceMode sourcePathPolicy sourcePathKind",
+        ),
+      ) &&
       source.role === role &&
       source.role === destination?.role &&
       source.logicalIdentity === destination.logicalIdentity &&
@@ -457,6 +497,8 @@ export function validateLauncherMaterializationPacket(packet) {
     packet.schemaVersion !==
       "organization-identity-launcher-materialization-packet/v4" ||
     !isCommit(packet.subjectCommit) ||
+    packet.phaseASubjectCommit !== packet.subjectCommit ||
+    packet.phaseBSubjectCommit === packet.phaseASubjectCommit ||
     packet.launcherContractSha256 !== contractSha ||
     packet.contractFilePlan?.sha256 !== contractSha ||
     packet.contractFilePlan?.size !==
@@ -570,22 +612,9 @@ export function validateLauncherMaterializationPacketReviewReceipt(
   receipt,
   packet = null,
 ) {
-  const keys = [
-    "schemaVersion",
-    "launcherMaterializationPacketSha256",
-    "generatorCommit",
-    "generatorBlobId",
-    "generatorSha256",
-    "generatorSpecCommit",
-    "generatorSpecBlobId",
-    "generatorSpecSha256",
-    "reportSha256",
-    "counterexampleSetSha256",
-    "reviewerClass",
-    "critical",
-    "important",
-    "verdict",
-  ];
+  const keys = words(
+    "schemaVersion launcherMaterializationPacketSha256 generatorCommit generatorBlobId generatorSha256 generatorSpecCommit generatorSpecBlobId generatorSpecSha256 reportSha256 counterexampleSetSha256 reviewerClass critical important verdict",
+  );
   if (!exactKeys(receipt, keys)) return integrity("PACKET_REVIEW_INVALID");
   if (
     receipt.schemaVersion !==
@@ -709,33 +738,9 @@ export function validateLauncherRootMaterializationRequest(
   request,
   packet = null,
 ) {
-  const keys = [
-    "schemaVersion",
-    "requestId",
-    "authorizationClass",
-    "subjectCommit",
-    "launcherMaterializationPacketPath",
-    "launcherMaterializationPacketSha256",
-    "launcherMaterializationPacketReviewReceiptPath",
-    "launcherMaterializationPacketReviewReceiptSha256",
-    "launcherContractSha256",
-    "sourceToolClosureSha256",
-    "materializedExecutableClosureSha256",
-    "launcherFileCount",
-    "toolRootFileCount",
-    "runtimeRootCount",
-    "requestRootCount",
-    "outputRootCount",
-    "launcherRoot",
-    "toolRoot",
-    "runtimeRoot",
-    "requestRoot",
-    "outputRoot",
-    "chronology",
-    "targetMustBeAbsent",
-    "containsCredentialValue",
-    "scopeSha256",
-  ];
+  const keys = words(
+    "schemaVersion requestId authorizationClass subjectCommit launcherMaterializationPacketPath launcherMaterializationPacketSha256 launcherMaterializationPacketReviewReceiptPath launcherMaterializationPacketReviewReceiptSha256 launcherContractSha256 sourceToolClosureSha256 materializedExecutableClosureSha256 launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot chronology targetMustBeAbsent containsCredentialValue scopeSha256",
+  );
   if (!exactKeys(request, keys)) return integrity("ROOT_REQUEST_INVALID");
   const packetValidation = validateLauncherMaterializationPacket(packet);
   if (packetValidation.status !== "PASS") {
