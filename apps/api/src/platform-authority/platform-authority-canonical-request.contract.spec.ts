@@ -266,6 +266,37 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
     }
   });
 
+  it("maps hostile Proxy and typed-view traps to stable closed errors", () => {
+    const poisonedEnvelope = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error("POISONED_ENVELOPE_TRAP");
+        },
+      },
+    );
+    expect(() =>
+      canonicalizePlatformAuthorityRequestBodyV1(poisonedEnvelope as never),
+    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
+
+    const poisonedView = new Proxy(new Uint8Array([0x7b, 0x7d]), {
+      getPrototypeOf() {
+        throw new Error("POISONED_VIEW_TRAP");
+      },
+    });
+    expect(() =>
+      canonicalizePlatformAuthorityRequestBodyV1({
+        contentType: "application/json",
+        rawBody: poisonedView as never,
+        schema: PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+      }),
+    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
+
+    expect(() =>
+      buildPlatformAuthorityRequestHmacPreimageV1(poisonedEnvelope as never),
+    ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
+  });
+
   it.each(CORPUS.positive_hmac_preimages)(
     "builds literal HMAC vector $id without a terminal newline",
     (vector) => {
