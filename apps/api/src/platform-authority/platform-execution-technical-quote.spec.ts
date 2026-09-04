@@ -267,4 +267,41 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
     );
     expect(CORPUS.vectors).toHaveLength(4);
   });
+
+  it("rejects accessor-backed provider facts before invoking a switching getter", () => {
+    let reads = 0;
+    const provider = Object.defineProperties({}, {
+      providerId: { enumerable: true, value: "tradefair.algolia" },
+      providerVersion: {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return reads === 1 ? "1.0.0" : "forged";
+        },
+      },
+      enablement: { enumerable: true, value: "ENABLED" },
+      bytePriceCatalogRevision: { enumerable: true, value: null },
+    });
+
+    expect(() => createPlatformExecutionProviderSnapshotV1({
+      schemaVersion: "platform-execution-provider-snapshot/v1",
+      scheduleId: "acq-sweep",
+      providers: [provider],
+    })).toThrow("PLATFORM_EXECUTION_CONTRACT_INVALID");
+    expect(reads).toBe(0);
+  });
+
+  it("rejects a Date subclass before an overridden clock can switch values", () => {
+    class SwitchingDate extends Date {
+      override getTime(): number {
+        return Number(CORPUS.vectors[0]!.input.now_epoch_seconds) * 1_000;
+      }
+    }
+
+    expect(() =>
+      quote(CORPUS.vectors[0]!, {
+        now: new SwitchingDate("invalid"),
+      }),
+    ).toThrow("PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID");
+  });
 });
