@@ -178,28 +178,32 @@ const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
   TYPED_ARRAY_PROTOTYPE,
   "byteLength",
 )!.get!;
+const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "length",
+)!.get!;
+const ARRAY_BUFFER_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  ArrayBuffer.prototype,
+  "byteLength",
+)!.get!;
 
 function copyBoundedRawBody(value: unknown): Uint8Array {
-  let isUint8View: boolean;
-  try {
-    isUint8View = value instanceof Uint8Array && ArrayBuffer.isView(value);
-  } catch {
-    return requestInvalid();
-  }
-  if (!isUint8View) requestInvalid();
   let backingBuffer: ArrayBufferLike;
   let byteLength: number;
+  let elementLength: number;
   try {
+    if (!ArrayBuffer.isView(value)) return requestInvalid();
     backingBuffer = TYPED_ARRAY_BUFFER.call(value) as ArrayBufferLike;
     byteLength = TYPED_ARRAY_BYTE_LENGTH.call(value) as number;
+    elementLength = TYPED_ARRAY_LENGTH.call(value) as number;
+    ARRAY_BUFFER_BYTE_LENGTH.call(backingBuffer);
   } catch {
     return requestInvalid();
   }
   if (
     byteLength < 1 ||
     byteLength > MAX_RAW_BODY_BYTES ||
-    (typeof SharedArrayBuffer !== "undefined" &&
-      backingBuffer instanceof SharedArrayBuffer)
+    byteLength !== elementLength
   ) {
     requestInvalid();
   }
