@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-04 · Global dynamic currentness successor
+
+- 18:42 +08:00 source/worktree 与 18:32 runtime readback 固定 repository source `0679a0bc510a980f65ebd33eb88b3215a97c20ba` 和 development runtime source `674ff12d4d768ce5599fc07b565fe21da37dc5fe` 为分离身份；后者落后 main 4 commits。服务/探针健康不等于 current main 已部署，3001 与 legacy 8080 wildcard 风险仍开放。
+- 全局 G5 拆为 `G5-Site=AMBER / TIME_LIMITED` 与 `G5-Acquisition=RED / NOT_READY`：6 条 RuntimeEvidence 中 current 2 / historical 4，current 2 仅属 Site 且到期 `2026-09-05T03:49:25.000Z`；Acquisition evidence 为空，platform readiness 报 `PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING`。
+- Program B 已进入现有 owner 的 active fix，但 authoritative implementation review 仍为 C3/H3 且 coverage <80%；Program C durable consumer/Opportunity/commit-before-ACK 尚未实现。current-main Supply Chain Canary run `33855198691` 因 advisory baseline stale 失败，不能称 main CI 全绿。
+- 本 successor 只更新 currentness 合同和导航；不改写 RuntimeEvidence/Release Bundle，不执行 push、PR、merge、retained migration、部署、listener 调整、provider/model dispatch、UAT 或 Pilot。
+
 ## 2026-09-04 · Platform writer terminal reconciliation and fresh zero-model evidence
 
 - 追加 platform-writer development successor evidence。fresh deterministic smoke 在同一 exact runtime 上完成且 model calls 为 0；历史 Spend 保持 `UNKNOWN/unknown`、reservation/conservative charge 均为 `800000`。

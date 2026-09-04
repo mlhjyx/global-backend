@@ -286,6 +286,10 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       document,
       /Program B[\s\S]{0,260}`9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63`[\s\S]{0,220}`NEEDS_FIXES`[\s\S]{0,160}`C3 \/ H3`[\s\S]{0,180}76\.77%[\s\S]{0,80}78\.92%/u,
     );
+    assert.match(
+      document,
+      /Program B[\s\S]{0,1000}accepted main slices[\s\S]{0,160}#427[\s\S]{0,80}#431[\s\S]{0,80}#432[\s\S]{0,220}Task0L[\s\S]{0,220}`C3 \/ H3`/u,
+    );
     assert.doesNotMatch(document, /ZERO_PRODUCT_CODE/u);
     assert.match(
       document,
@@ -318,6 +322,14 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     assert.match(
       document,
       /G5-Acquisition — Runtime Observed[^\n]*`RED \/ NOT_READY`/u,
+    );
+    assert.match(
+      document,
+      /G3 — Integration\/Data[^\n]*`RED \/ NOT_INTEGRATED`[^\n]*accepted A\/B source seam[^\n]*no current-data runtime E2E[^\n]*Program C/u,
+    );
+    assert.doesNotMatch(
+      document,
+      /(?:No|无) accepted A\/B (?:end-to-end )?seam/u,
     );
     assert.match(
       document,
@@ -455,9 +467,9 @@ test("the discovery lineage successor is current-main based and the quarantined 
   }
 
   const expectedProgramBRow =
-    "| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | `GPP-B-LINEAGE-001` 已通过 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 由 current main admit 给唯一 writer `codex/discovery-query-materialization-successor`，状态 `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`。G0 ownership 已关闭；A 分支的 B-owned delta 仍非 accepted implementation，任何产品施工必须另过 G2/G3 计划与 review。 |";
+    "| B — Buyer Intelligence discovery | RED | Owns QueryReceipt、RawSourceRecord、Identity/Canonical、Provider/transport、Discovery workflow 和 immutable `LeadQualifiedPackage`；does not own SaaS Opportunity or runtime deploy | #427/#431/#432 accepted source slices 与 active Task0L 分开；Task0L implementation review 仍为 `NEEDS_FIXES`，coverage 未到 80%，active writer 正在修复。 |";
   const expectedG0Row =
-    "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` | PR #424 已固定 ADR-025/`DEC-GPP-001` 与 mega-branch disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 已把唯一 `GPP-B-LINEAGE-001` card/writer 持久写入 current main。`CON-GPP-001=RESOLVED_WITH_REMEDIATION`、`BLK-GPP-001=RESOLVED`。此 PASS 只关闭 ownership/provenance；Program B implementation/TDD 仍属于 G2，DB/RLS/replay 与集成仍属于 G3，G1–G7 不由本门升级。 |";
+    "| G0 — Truth & Ownership | `AMBER / PARTIAL / HOLD` | A/B ownership seam 已关闭；platform R2 writer/migration manifest 与 Program C 产品选择、owner、manifest 仍未闭合。 |";
   const normalizeTableRow = (line) =>
     line
       .split("|")
@@ -486,9 +498,9 @@ test("the discovery lineage successor is current-main based and the quarantined 
   );
   assertUniqueStatusRow(status, "| G0 — Truth & Ownership |", expectedG0Row);
   const expectedProgramARow =
-    "| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `OWNERSHIP_CLOSED_WITH_REMEDIATION`: writer inactivity、clean/no-`MERGE_HEAD` packet、post-`ed615d1b` delta classification 与 binding-ledger/provenance correction 已在 `91cae351795cceced59893bcf552c2b502a4ebaa` 完成。35 个 main ancestry commits 仍是 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`；`b57af498` 是 two-parent integration provenance；五个 B-owned deltas 仍不是 accepted A work；四个 Task 5.2 commits 继续 `QUARANTINED / HOLD_OWNERSHIP` 历史处置。PR #424 已将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，PR #425 readback `d2c93dd6bea0348381286558896b395c84945171` 已接受唯一 B card/writer。A 的 ownership gate 已关闭，但其 source/runtime/Release 能力仍按 G2–G5 单独验证。 |";
+    "| A — authority/runtime primitives | AMBER | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and RuntimeEvidence/Release；does not own Raw/Identity/Provider/Opportunity | Accepted main slices 与 historical mega branch 分离；platform R2 owner/manifest 和 current exact-head review 尚未闭合。 |";
   const expectedRootRow =
-    "| `/global/backend` root `main` | evidence packaging 前观察于 `2026-09-04T12:49:25+08:00`：`HEAD=origin/main=0f72cc104e47128778f2392283a380bc1297f76d`；protected local现场仅保留未跟踪 `.playwright-cli/` | 本行是时间绑定的 pre-packaging observation，不预测本 evidence/docs merge 的 eventual commit。runtime source authority 仍由上文独立绑定。 |";
+    "| `/global/backend` root `main` | observed `2026-09-04T18:42:30+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity。 |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
@@ -504,21 +516,18 @@ test("the discovery lineage successor is current-main based and the quarantined 
       expectedProgramBRow,
       "| B — Buyer Intelligence discovery |",
       [
-        ["ZERO_PRODUCT_CODE", "PRODUCT_CODE"],
-        ["CURRENT_MAIN_READBACK_PASS", "IMPLEMENTATION_AUTHORIZED"],
-        [
-          "codex/discovery-query-materialization-successor",
-          "codex/other-writer",
-        ],
+        ["`NEEDS_FIXES`", "`ACCEPTED`"],
+        ["coverage 未到 80%", "coverage 已到 80%"],
+        ["active writer 正在修复", "implementation complete"],
       ],
     ],
     [
       expectedG0Row,
       "| G0 — Truth & Ownership |",
       [
-        ["`PASS / OWNERSHIP_CLOSED`", "`PASS / IMPLEMENTATION_COMPLETE`"],
-        ["RESOLVED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
-        ["G1–G7 不由本门升级", "G1–G7 PASS"],
+        ["`AMBER / PARTIAL / HOLD`", "`PASS / OWNERSHIP_CLOSED`"],
+        ["platform R2 writer/migration manifest", "platform R2 complete"],
+        ["Program C 产品选择", "Program C implementation complete"],
       ],
     ],
   ]) {
@@ -536,14 +545,14 @@ test("the discovery lineage successor is current-main based and the quarantined 
     [
       expectedProgramARow,
       "| A — authority/runtime primitives |",
-      ["OWNERSHIP_CLOSED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
+      ["historical mega branch", "accepted mega branch"],
     ],
     [
       expectedRootRow,
       "| `/global/backend` root `main` |",
       [
-        "不预测本 evidence/docs merge 的 eventual commit",
-        "预测本 evidence/docs merge 的 eventual commit",
+        "0679a0bc510a980f65ebd33eb88b3215a97c20ba",
+        "0f72cc104e47128778f2392283a380bc1297f76d",
       ],
     ],
   ]) {
@@ -558,11 +567,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   assert.match(status, /> 最后核验：2026-09-04T/);
   assert.match(
     status,
-    /当前 Backend runtime source authority 为 `main@674ff12d4d768ce5599fc07b565fe21da37dc5fe`/,
-  );
-  assert.match(
-    status,
-    /historical construction base 是 `23d111f7b400403deb7466abf34ab709685b8376`/,
+    /Development runtime identity is `674ff12d4d768ce5599fc07b565fe21da37dc5fe`, 4 commits behind repository source/,
   );
   const expectedConflictRow =
     "| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | PR #424 固定 owner/seam 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 将唯一 `GPP-B-LINEAGE-001` card/writer 写入 current main。ownership collision 已关闭；四个 Task 5.2 commits 与五个 B-owned deltas 继续按 ADR-025 分类，G2/G3 产品实现仍未接纳。 |";
@@ -607,12 +612,18 @@ test("the discovery lineage successor is current-main based and the quarantined 
   ]);
   const laterGateRows = status
     .split("\n")
-    .filter((line) => /^\| G[1-7] —/.test(line))
-    .map(normalizeTableRow)
-    .join("\n");
-  assert.equal(
-    createHash("sha256").update(laterGateRows).digest("hex"),
-    "02e23f8245c69b8934bd6248584b6883551ce91e99dbbfae540483fc154321eb",
+    .filter((line) =>
+      /^\| G(?:[1-4]|5-(?:Site|Acquisition)|[6-7]) —/.test(line),
+    );
+  assert.equal(laterGateRows.length, 8);
+  assert.match(laterGateRows.join("\n"), /G3[^\n]*`RED \/ NOT_INTEGRATED`/);
+  assert.match(
+    laterGateRows.join("\n"),
+    /G5-Site[^\n]*`AMBER \/ TIME_LIMITED`/,
+  );
+  assert.match(
+    laterGateRows.join("\n"),
+    /G5-Acquisition[^\n]*`RED \/ NOT_READY`/,
   );
 });
 
