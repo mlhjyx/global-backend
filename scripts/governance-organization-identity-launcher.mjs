@@ -964,17 +964,18 @@ export async function dispatchClosedCommand(request, verifiedContext = {}) {
     invocation.cwd = worktree.path;
   }
   let executionResult = null;
-  if (typeof verifiedContext.loadDependency === "function") {
-    try {
-      executionResult = await verifiedContext.loadDependency(invocation);
-    } catch {
-      return integrity("EXECUTOR_THROWN");
-    }
-    if (executionResult?.status !== "PASS") {
-      return executionResult?.status === "INTEGRITY_ERROR"
-        ? executionResult
-        : integrity("EXECUTOR_RESULT_INVALID");
-    }
+  if (typeof verifiedContext.loadDependency !== "function") {
+    return integrity("EXECUTOR_REQUIRED");
+  }
+  try {
+    executionResult = await verifiedContext.loadDependency(invocation);
+  } catch {
+    return integrity("EXECUTOR_THROWN");
+  }
+  if (executionResult?.status !== "PASS") {
+    return executionResult?.status === "INTEGRITY_ERROR"
+      ? executionResult
+      : integrity("EXECUTOR_RESULT_INVALID");
   }
   return pass({ invocation, executionResult });
 }

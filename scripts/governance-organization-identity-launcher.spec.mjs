@@ -374,6 +374,7 @@ test("every local command builds a complete executable descriptor from typed inp
         path: "/controlled/worktree",
         subjectCommit: request.subjectCommit,
       },
+      loadDependency: async () => ({ status: "PASS" }),
     });
     assert.equal(result.status, "PASS", commandId);
     assert.equal(result.invocation.argv.length > 2, true, commandId);
@@ -413,6 +414,7 @@ test("Git descriptors retain exact state preconditions and immutable targets", a
         path: "/controlled/worktree",
         subjectCommit: request.subjectCommit,
       },
+      loadDependency: async () => ({ status: "PASS" }),
     });
     assert.equal(result.status, "PASS");
     assert.equal(
@@ -832,6 +834,26 @@ test("dispatch requires a controller-owned replay set", async () => {
   assert.deepEqual(result, {
     status: "INTEGRITY_ERROR",
     code: "REPLAY_GUARD_REQUIRED",
+  });
+});
+
+test("dispatch refuses authority when no verified executor is supplied", async () => {
+  const request = validRequest();
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    requestReplaySet: new Set(),
+    outputExists: false,
+    verifiedWorktree: {
+      path: process.cwd(),
+      subjectCommit: request.subjectCommit,
+    },
+    preDispatchReverify: async () => ({ status: "PASS" }),
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "EXECUTOR_REQUIRED",
   });
 });
 

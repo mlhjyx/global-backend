@@ -173,6 +173,28 @@ const REQUEST_KEYS = [
   "outputRecordPath",
 ];
 
+function validateAuthorizationReceipt(bytes, request) {
+  if (typeof bytes !== "string") return false;
+  try {
+    const parsed = JSON.parse(bytes);
+    return (
+      hasExactKeys(parsed, [
+        "controllerClass",
+        "requestId",
+        "operation",
+        "scope",
+      ]) &&
+      bytes === canonicalJsonBytes(parsed).toString("utf8") &&
+      parsed.controllerClass === "GITLEAKS" &&
+      parsed.requestId === request.requestId &&
+      parsed.operation === "SCAN" &&
+      parsed.scope === "EXACT_REQUEST_ONLY"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function validateControllerEvidence(request, contract, records) {
   const materializationKeys = [
     "schemaVersion",
@@ -243,7 +265,10 @@ function validateControllerEvidence(request, contract, records) {
     records.controllerReviewReceipt.verdict !== "PASS" ||
     request.controllerReviewReceiptSha256 !==
       sha256(canonicalJsonBytes(records.controllerReviewReceipt)) ||
-    typeof records.authorizationReceiptCanonicalBytes !== "string" ||
+    !validateAuthorizationReceipt(
+      records.authorizationReceiptCanonicalBytes,
+      request,
+    ) ||
     request.authorizationReceiptSha256 !==
       sha256(Buffer.from(records.authorizationReceiptCanonicalBytes, "utf8"))
   )

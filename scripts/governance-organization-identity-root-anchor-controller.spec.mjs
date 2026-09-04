@@ -155,6 +155,7 @@ function upstreamEvidence() {
     authorizationReceipt: {
       controllerClass: "ROOT_ANCHOR",
       requestId: SHA,
+      operation: "ROOT_ANCHOR_WRITE",
       scope: "EXACT_REQUEST_ONLY",
     },
     localLauncherEvidence: {

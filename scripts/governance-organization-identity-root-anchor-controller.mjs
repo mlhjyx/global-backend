@@ -279,6 +279,43 @@ function validateRootUpstreamEvidence(request, contract, records) {
   const materialization = records.materializationReceipt;
   const review = records.controllerReviewReceipt;
   if (
+    !hasExactKeys(materialization, [
+      "schemaVersion",
+      "controllerClass",
+      "contractSha256",
+      "controllerSourceSha256",
+      "rootDirectorySha256",
+      "requestRootSha256",
+      "outputRootSha256",
+      "ownerUid",
+      "ownerGid",
+      "directoryMode",
+      "controllerMode",
+      "recordMode",
+      "executableClosureSetSha256",
+      "environmentSchemaSha256",
+      "prePostToctouSha256",
+      "result",
+    ]) ||
+    !hasExactKeys(review, [
+      "schemaVersion",
+      "controllerClass",
+      "contractSha256",
+      "materializationReceiptSha256",
+      "requestSchemaSha256",
+      "reportSha256",
+      "counterexampleSetSha256",
+      "reviewerClass",
+      "critical",
+      "important",
+      "verdict",
+    ]) ||
+    !hasExactKeys(records.authorizationReceipt, [
+      "controllerClass",
+      "requestId",
+      "scope",
+      "operation",
+    ]) ||
     materialization.schemaVersion !==
       "organization-identity-external-controller-materialization/v1" ||
     materialization.controllerClass !== "ROOT_ANCHOR" ||
@@ -523,6 +560,34 @@ async function fsyncDirectory(directoryPath) {
   }
 }
 
+async function openVerifiedDirectory(directoryPath, fixture) {
+  const handle = await open(
+    directoryPath,
+    fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+  );
+  try {
+    const stat = await handle.stat({ bigint: true });
+    const resolved = await realpath(directoryPath);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      modeOf(stat) !== 0o700 ||
+      Number(stat.uid) !== fixture.expectedUid ||
+      Number(stat.gid) !== fixture.expectedGid ||
+      resolved !== directoryPath
+    ) {
+      throw new Error("ROOT_ANCHOR_DIRECTORY_INVALID");
+    }
+    return {
+      handle,
+      stablePath: `/proc/self/fd/${handle.fd}`,
+    };
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 async function writeExclusiveCanonical(filePath, bytes, fixture) {
   let handle;
   try {
@@ -642,64 +707,90 @@ export async function materializeRootAnchor({
       code: "ROOT_ANCHOR_TARGET_INVALID",
     };
   }
-  const written = await writeExclusiveCanonical(
-    fixture.targetPath,
-    payloadBytes,
-    fixture,
-  );
-  if (written.status !== "PASS") {
-    return { status: "ROOT_ANCHOR_WRITE_HOLD", code: written.code };
+  let rootDirectory;
+  let outputDirectory;
+  try {
+    rootDirectory = await openVerifiedDirectory(fixture.rootDirectory, fixture);
+    outputDirectory = await openVerifiedDirectory(fixture.outputRoot, fixture);
+    const stableTargetPath = path.join(
+      rootDirectory.stablePath,
+      path.basename(fixture.targetPath),
+    );
+    const stableWriteReceiptPath = path.join(
+      outputDirectory.stablePath,
+      path.basename(fixture.writeReceiptPath),
+    );
+    if (!(await targetAbsent(stableTargetPath))) {
+      return {
+        status: "ROOT_ANCHOR_WRITE_HOLD",
+        code: "ROOT_ANCHOR_TARGET_INVALID",
+      };
+    }
+    const written = await writeExclusiveCanonical(
+      stableTargetPath,
+      payloadBytes,
+      fixture,
+    );
+    if (written.status !== "PASS") {
+      return { status: "ROOT_ANCHOR_WRITE_HOLD", code: written.code };
+    }
+    await rootDirectory.handle.sync();
+    const readback = await readbackFile(
+      stableTargetPath,
+      {
+        sha256: request.canonicalAnchorPayloadSha256,
+        size: payloadBytes.length,
+      },
+      fixture,
+    );
+    if (readback.status !== "PASS") {
+      return { status: "ROOT_ANCHOR_WRITE_HOLD", code: readback.code };
+    }
+    const writeReceipt = {
+      schemaVersion: "organization-identity-root-anchor-write-receipt/v1",
+      contractSha256: request.contractSha256,
+      materializationReceiptSha256: request.materializationReceiptSha256,
+      controllerReviewReceiptSha256: request.controllerReviewReceiptSha256,
+      requestSha256: sha256(canonicalJsonBytes(request)),
+      authorizationReceiptSha256: request.authorizationReceiptSha256,
+      targetPath: ANCHOR_PATH,
+      anchorSha256: request.canonicalAnchorPayloadSha256,
+      anchorSize: payloadBytes.length,
+      ownerUid: 0,
+      ownerGid: 0,
+      mode: 0o600,
+      device: String(readback.stat.dev),
+      inode: String(readback.stat.ino),
+      predecessorSha256: null,
+      fileFsyncSha256: sha256(
+        canonicalJsonBytes({ inode: String(readback.stat.ino), synced: true }),
+      ),
+      directoryFsyncSha256: sha256(
+        canonicalJsonBytes({ directory: fixture.rootDirectory, synced: true }),
+      ),
+      prePostToctouSha256: sha256(
+        canonicalJsonBytes({
+          device: String(readback.stat.dev),
+          inode: String(readback.stat.ino),
+        }),
+      ),
+      anchorContainsSelfHash: false,
+      result: "PASS",
+    };
+    const receiptWrite = await writeExclusiveCanonical(
+      stableWriteReceiptPath,
+      canonicalJsonBytes(writeReceipt),
+      fixture,
+    );
+    if (receiptWrite.status !== "PASS") {
+      return { status: "ROOT_ANCHOR_WRITE_HOLD", code: receiptWrite.code };
+    }
+    await outputDirectory.handle.sync();
+    return pass({ writeReceipt });
+  } finally {
+    await outputDirectory?.handle.close().catch(() => undefined);
+    await rootDirectory?.handle.close().catch(() => undefined);
   }
-  await fsyncDirectory(fixture.rootDirectory);
-  const readback = await readbackFile(
-    fixture.targetPath,
-    { sha256: request.canonicalAnchorPayloadSha256, size: payloadBytes.length },
-    fixture,
-  );
-  if (readback.status !== "PASS") {
-    return { status: "ROOT_ANCHOR_WRITE_HOLD", code: readback.code };
-  }
-  const writeReceipt = {
-    schemaVersion: "organization-identity-root-anchor-write-receipt/v1",
-    contractSha256: request.contractSha256,
-    materializationReceiptSha256: request.materializationReceiptSha256,
-    controllerReviewReceiptSha256: request.controllerReviewReceiptSha256,
-    requestSha256: sha256(canonicalJsonBytes(request)),
-    authorizationReceiptSha256: request.authorizationReceiptSha256,
-    targetPath: ANCHOR_PATH,
-    anchorSha256: request.canonicalAnchorPayloadSha256,
-    anchorSize: payloadBytes.length,
-    ownerUid: 0,
-    ownerGid: 0,
-    mode: 0o600,
-    device: String(readback.stat.dev),
-    inode: String(readback.stat.ino),
-    predecessorSha256: null,
-    fileFsyncSha256: sha256(
-      canonicalJsonBytes({ inode: String(readback.stat.ino), synced: true }),
-    ),
-    directoryFsyncSha256: sha256(
-      canonicalJsonBytes({ directory: fixture.rootDirectory, synced: true }),
-    ),
-    prePostToctouSha256: sha256(
-      canonicalJsonBytes({
-        device: String(readback.stat.dev),
-        inode: String(readback.stat.ino),
-      }),
-    ),
-    anchorContainsSelfHash: false,
-    result: "PASS",
-  };
-  const receiptWrite = await writeExclusiveCanonical(
-    fixture.writeReceiptPath,
-    canonicalJsonBytes(writeReceipt),
-    fixture,
-  );
-  if (receiptWrite.status !== "PASS") {
-    return { status: "ROOT_ANCHOR_WRITE_HOLD", code: receiptWrite.code };
-  }
-  await fsyncDirectory(path.dirname(fixture.writeReceiptPath));
-  return pass({ writeReceipt });
 }
 
 export async function readbackRootAnchor({
@@ -716,47 +807,64 @@ export async function readbackRootAnchor({
   }
   const root = await verifyFixtureRoot(fixture, "readbackReceiptPath");
   if (root.status !== "PASS") return root;
-  const observed = await readbackFile(
-    fixture.targetPath,
-    { sha256: writeReceipt.anchorSha256, size: writeReceipt.anchorSize },
-    fixture,
-  );
-  if (observed.status !== "PASS") return observed;
-  const readbackReceipt = {
-    schemaVersion: "organization-identity-root-anchor-readback/v1",
-    contractSha256: writeReceipt.contractSha256,
-    requestSha256: writeReceipt.requestSha256,
-    writeReceiptSha256: sha256(canonicalJsonBytes(writeReceipt)),
-    targetPath: ANCHOR_PATH,
-    noFollowVerified: true,
-    ownerUid: 0,
-    ownerGid: 0,
-    mode: 0o600,
-    device: String(observed.stat.dev),
-    inode: String(observed.stat.ino),
-    anchorSha256: observed.status === "PASS" ? sha256(observed.bytes) : "",
-    anchorSize: observed.bytes.length,
-    canonicalSchemaSha256: contract.anchorSchemaSha256,
-    inputEvidenceSetSha256: sha256(
-      canonicalJsonBytes({
-        requestSha256: writeReceipt.requestSha256,
-        writeReceiptSha256: sha256(canonicalJsonBytes(writeReceipt)),
-      }),
-    ),
-    predecessorSha256: null,
-    anchorContainsSelfHash: false,
-    prePostToctouSha256: writeReceipt.prePostToctouSha256,
-    reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK",
-    result: "PASS",
-  };
-  const receiptWrite = await writeExclusiveCanonical(
-    fixture.readbackReceiptPath,
-    canonicalJsonBytes(readbackReceipt),
-    fixture,
-  );
-  if (receiptWrite.status !== "PASS") return receiptWrite;
-  await fsyncDirectory(path.dirname(fixture.readbackReceiptPath));
-  return pass({ readbackReceipt });
+  let rootDirectory;
+  let outputDirectory;
+  try {
+    rootDirectory = await openVerifiedDirectory(fixture.rootDirectory, fixture);
+    outputDirectory = await openVerifiedDirectory(fixture.outputRoot, fixture);
+    const stableTargetPath = path.join(
+      rootDirectory.stablePath,
+      path.basename(fixture.targetPath),
+    );
+    const stableReadbackReceiptPath = path.join(
+      outputDirectory.stablePath,
+      path.basename(fixture.readbackReceiptPath),
+    );
+    const observed = await readbackFile(
+      stableTargetPath,
+      { sha256: writeReceipt.anchorSha256, size: writeReceipt.anchorSize },
+      fixture,
+    );
+    if (observed.status !== "PASS") return observed;
+    const readbackReceipt = {
+      schemaVersion: "organization-identity-root-anchor-readback/v1",
+      contractSha256: writeReceipt.contractSha256,
+      requestSha256: writeReceipt.requestSha256,
+      writeReceiptSha256: sha256(canonicalJsonBytes(writeReceipt)),
+      targetPath: ANCHOR_PATH,
+      noFollowVerified: true,
+      ownerUid: 0,
+      ownerGid: 0,
+      mode: 0o600,
+      device: String(observed.stat.dev),
+      inode: String(observed.stat.ino),
+      anchorSha256: observed.status === "PASS" ? sha256(observed.bytes) : "",
+      anchorSize: observed.bytes.length,
+      canonicalSchemaSha256: contract.anchorSchemaSha256,
+      inputEvidenceSetSha256: sha256(
+        canonicalJsonBytes({
+          requestSha256: writeReceipt.requestSha256,
+          writeReceiptSha256: sha256(canonicalJsonBytes(writeReceipt)),
+        }),
+      ),
+      predecessorSha256: null,
+      anchorContainsSelfHash: false,
+      prePostToctouSha256: writeReceipt.prePostToctouSha256,
+      reviewerClass: "INDEPENDENT_ROOT_ANCHOR_READBACK",
+      result: "PASS",
+    };
+    const receiptWrite = await writeExclusiveCanonical(
+      stableReadbackReceiptPath,
+      canonicalJsonBytes(readbackReceipt),
+      fixture,
+    );
+    if (receiptWrite.status !== "PASS") return receiptWrite;
+    await outputDirectory.handle.sync();
+    return pass({ readbackReceipt });
+  } finally {
+    await outputDirectory?.handle.close().catch(() => undefined);
+    await rootDirectory?.handle.close().catch(() => undefined);
+  }
 }
 
 const WRITE_RECEIPT_KEYS = [

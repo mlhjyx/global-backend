@@ -224,6 +224,28 @@ const REQUEST_KEYS = [
   "outputRecordPath",
 ];
 
+function validateAuthorizationReceipt(bytes, request) {
+  if (typeof bytes !== "string") return false;
+  try {
+    const parsed = JSON.parse(bytes);
+    return (
+      hasExactKeys(parsed, [
+        "controllerClass",
+        "requestId",
+        "operation",
+        "scope",
+      ]) &&
+      bytes === canonicalJsonBytes(parsed).toString("utf8") &&
+      parsed.controllerClass === "DISPOSABLE_POSTGRES" &&
+      parsed.requestId === request.requestId &&
+      parsed.operation === request.operation &&
+      parsed.scope === "EXACT_REQUEST_ONLY"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function validateControllerEvidence(request, contract, evidence) {
   const materializationKeys = [
     "schemaVersion",
@@ -296,7 +318,10 @@ function validateControllerEvidence(request, contract, evidence) {
     evidence.controllerReviewReceipt.verdict !== "PASS" ||
     request.controllerReviewReceiptSha256 !==
       sha256(canonicalJsonBytes(evidence.controllerReviewReceipt)) ||
-    typeof evidence.authorizationReceiptCanonicalBytes !== "string" ||
+    !validateAuthorizationReceipt(
+      evidence.authorizationReceiptCanonicalBytes,
+      request,
+    ) ||
     request.authorizationReceiptSha256 !==
       sha256(Buffer.from(evidence.authorizationReceiptCanonicalBytes, "utf8"))
   )
