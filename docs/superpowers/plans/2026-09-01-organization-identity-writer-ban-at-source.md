@@ -123,7 +123,7 @@ The final spec subject is committed v2 head `b060c5dd4afef9fe42dfe510b02f930f56c
 
 The flat helper filenames intentionally match the terminal CODEOWNERS pattern `/scripts/governance-*.mjs`; no unowned helper directory is introduced.
 
-The separately authorized local launcher materialization is not a repository-created file set. Its launcher subtree contains four controlled files at `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`, `identity-writer-launch.mjs`, `identity-writer-bootstrap.mjs`, and `launcher-contract.json`. Its immutable tool-root subtree contains exactly seven controller-owned regular files: `tool-root/bin/env`, `tool-root/bin/node`, `tool-root/bin/git`, `tool-root/lib/corepack/dist/corepack.js`, `tool-root/lib/corepack/dist/lib/corepack.cjs`, `tool-root/lib/pnpm/9.15.9/bin/pnpm.cjs`, and `tool-root/lib/pnpm/9.15.9/dist/pnpm.cjs`. Its runtime subtree contains one `0700` parent plus the six exact wrapper environment roots `home`, `xdg-config`, `xdg-cache`, `corepack-home`, `pnpm-home`, and `tmp`. After the launcher files, tool-root files, runtime roots, and request/output roots are fsynced and read back, the chronology separately creates `launcher-materialization-readback.json`, `launcher-materialization.json`, and `launcher-materialization-review.json`, each mode `0600`; none is included in the materialized file inventory or hashes itself. Repository plans/tests may name these future paths, but no tracked task silently creates or modifies them.
+The separately authorized local launcher materialization is not a repository-created file set. Its launcher subtree contains four controlled files at `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch`, `identity-writer-launch.mjs`, `identity-writer-bootstrap.mjs`, and `launcher-contract.json`. Its immutable tool-root subtree contains exactly seven controller-owned regular files: `tool-root/bin/env`, `tool-root/bin/node`, `tool-root/bin/git`, `tool-root/lib/corepack/dist/corepack.js`, `tool-root/lib/corepack/dist/lib/corepack.cjs`, `tool-root/lib/pnpm/9.15.9/bin/pnpm.cjs`, and `tool-root/lib/pnpm/9.15.9/dist/pnpm.cjs`. Its runtime subtree contains one `0700` parent plus the six exact wrapper environment roots `home`, `xdg-config`, `xdg-cache`, `corepack-home`, `pnpm-home`, and `tmp`. Authority now splits immutable pre-materialization plan data from post-write observations: the reviewed `LauncherContract/v3` defines only wrapper/launcher destination plan, contract self-path policy, fixed destination closure layout, exact path digests, modes, sizes and chronology, and explicitly excludes bootstrap identity so `launcherContractSha256` is the real SHA-256 of canonical `LauncherContract/v3` bytes rather than a projection digest. Exact bootstrap bytes live only in `LauncherMaterializationPacket/v4` and the later post-write readback/materialization/review chain, while device/inode observations appear only in `LauncherReadbackReport/v2` and `LauncherMaterializationReceipt/v3` after write/fsync/readback. Historical `LauncherContract/v2`, `LauncherMaterializationPacket/v2` and `/v3`, `LauncherReadbackReport/v1`, `LauncherMaterializationReceipt/v2`, and `LauncherMaterializationReviewReceipt/v2` remain `HISTORICAL/HOLD` diagnostics only and are not authority-compatible.
 
 The GitHub, Gitleaks, disposable PostgreSQL and root-anchor controllers are separately materialized only under their own exact future authorizations beneath `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/{github,gitleaks,disposable-postgres,root-anchor}/`. Each directory has its own contract, executable/controller source, request/output roots, materialization receipt and review receipt; no controller shares an executable closure, environment, credential handle or authorization with the local launcher or another controller.
 
@@ -274,8 +274,84 @@ type ToolRootMaterializedFile<
   destinationPathKind: "REGULAR_FILE";
 }>;
 
+type RootControlledPlannedFile<
+  Name extends string,
+  RelativePath extends string,
+  Mode extends number,
+> = Readonly<{
+  basename: Name;
+  relativePath: RelativePath;
+  mode: Mode;
+  realpathPathSha256: string;
+  sha256: string;
+  size: number;
+}>;
+
+type RootControlledPlannedDirectory<
+  Name extends string,
+  AbsolutePath extends string,
+  Mode extends number,
+> = Readonly<{
+  basename: Name;
+  absolutePath: AbsolutePath;
+  mode: Mode;
+  realpathPathSha256: string;
+}>;
+
+type RootControlledSelfFilePlan<
+  Name extends string,
+  RelativePath extends string,
+  Mode extends number,
+> = Readonly<{
+  basename: Name;
+  relativePath: RelativePath;
+  mode: Mode;
+  realpathPathSha256: string;
+  selfDigestExcluded: true;
+}>;
+
+type SourceToolClosureEntry<Role extends ExecutableClosureEntry["role"]> =
+  Readonly<{
+    role: Role;
+    logicalIdentity: string;
+    sourceExecutablePath: string;
+    sourceExecutablePathSha256: string;
+    sourceRealpathSha256: string;
+    sourceSha256: string;
+    sourceSize: number;
+    sourceMode: number;
+    sourcePathPolicy: "RESOLVED_REGULAR_FILE_ONLY";
+  }>;
+
+type MaterializedExecutableClosureEntry<
+  Role extends ExecutableClosureEntry["role"],
+  AbsolutePath extends string,
+  Mode extends number,
+> = Readonly<{
+  role: Role;
+  logicalIdentity: string;
+  destinationExecutablePath: AbsolutePath;
+  destinationExecutablePathSha256: string;
+  mode: Mode;
+  sha256: string;
+  size: number;
+  destinationRoot: "TOOL_ROOT";
+  destinationPathKind: "REGULAR_FILE";
+}>;
+
+type ObservedMaterializedExecutableFile<
+  Role extends ExecutableClosureEntry["role"],
+  AbsolutePath extends string,
+  Mode extends number,
+> = MaterializedExecutableClosureEntry<Role, AbsolutePath, Mode> &
+  Readonly<{
+    device: string;
+    inode: string;
+    realpathSha256: string;
+  }>;
+
 type LauncherContract = Readonly<{
-  schemaVersion: "organization-identity-launcher-contract/v2";
+  schemaVersion: "organization-identity-launcher-contract/v3";
   rootDirectory: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher";
   requestRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
   outputRoot: "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
@@ -330,35 +406,57 @@ type LauncherContract = Readonly<{
     blobId: string;
     sha256: string;
   }>;
-  approvedBootstrap: Readonly<{
-    path: "scripts/governance-organization-identity-bootstrap.mjs";
-    commit: string;
-    blobId: string;
-    sha256: string;
-  }>;
-  executableClosure: readonly ExecutableClosureEntry[];
-  toolRootFiles: readonly [
-    ToolRootMaterializedFile<"ENV", "bin/env", 0o500>,
-    ToolRootMaterializedFile<"NODE", "bin/node", 0o500>,
-    ToolRootMaterializedFile<"GIT", "bin/git", 0o500>,
-    ToolRootMaterializedFile<
+  launcherFilePlan: readonly [
+    RootControlledPlannedFile<
+      "identity-writer-launch",
+      "identity-writer-launch",
+      0o500
+    >,
+    RootControlledPlannedFile<
+      "identity-writer-launch.mjs",
+      "identity-writer-launch.mjs",
+      0o500
+    >,
+  ];
+  contractFilePlan: RootControlledSelfFilePlan<
+    "launcher-contract.json",
+    "launcher-contract.json",
+    0o600
+  >;
+  materializedExecutableClosure: readonly [
+    MaterializedExecutableClosureEntry<
+      "ENV",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/bin/env",
+      0o500
+    >,
+    MaterializedExecutableClosureEntry<
+      "NODE",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/bin/node",
+      0o500
+    >,
+    MaterializedExecutableClosureEntry<
+      "GIT",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/bin/git",
+      0o500
+    >,
+    MaterializedExecutableClosureEntry<
       "COREPACK_SHIM",
-      "lib/corepack/dist/corepack.js",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/corepack/dist/corepack.js",
       0o400
     >,
-    ToolRootMaterializedFile<
+    MaterializedExecutableClosureEntry<
       "COREPACK_LIB_COREPACK_CJS",
-      "lib/corepack/dist/lib/corepack.cjs",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/corepack/dist/lib/corepack.cjs",
       0o400
     >,
-    ToolRootMaterializedFile<
+    MaterializedExecutableClosureEntry<
       "PNPM_SHIM",
-      "lib/pnpm/9.15.9/bin/pnpm.cjs",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/pnpm/9.15.9/bin/pnpm.cjs",
       0o400
     >,
-    ToolRootMaterializedFile<
+    MaterializedExecutableClosureEntry<
       "PNPM_ENTRYPOINT",
-      "lib/pnpm/9.15.9/dist/pnpm.cjs",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/pnpm/9.15.9/dist/pnpm.cjs",
       0o400
     >,
   ];
@@ -375,14 +473,42 @@ type LauncherContract = Readonly<{
     LANG: "C.UTF-8";
     LC_ALL: "C.UTF-8";
   }>;
-  runtimeRoots: readonly [
-    RootControlledDirectory<"runtime", 0o700>,
-    RootControlledDirectory<"home", 0o700>,
-    RootControlledDirectory<"xdg-config", 0o700>,
-    RootControlledDirectory<"xdg-cache", 0o700>,
-    RootControlledDirectory<"corepack-home", 0o700>,
-    RootControlledDirectory<"pnpm-home", 0o700>,
-    RootControlledDirectory<"tmp", 0o700>,
+  runtimeRootPlan: readonly [
+    RootControlledPlannedDirectory<
+      "runtime",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime",
+      0o700
+    >,
+    RootControlledPlannedDirectory<
+      "home",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/home",
+      0o700
+    >,
+    RootControlledPlannedDirectory<
+      "xdg-config",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/xdg-config",
+      0o700
+    >,
+    RootControlledPlannedDirectory<
+      "xdg-cache",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/xdg-cache",
+      0o700
+    >,
+    RootControlledPlannedDirectory<
+      "corepack-home",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/corepack-home",
+      0o700
+    >,
+    RootControlledPlannedDirectory<
+      "pnpm-home",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/pnpm-home",
+      0o700
+    >,
+    RootControlledPlannedDirectory<
+      "tmp",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/tmp",
+      0o700
+    >,
   ];
   commandIds: readonly ClosedCommandId[];
   commandRegistrySha256: string;
@@ -395,8 +521,9 @@ type LauncherContract = Readonly<{
 }>;
 
 type LauncherMaterializationPacket = Readonly<{
-  schemaVersion: "organization-identity-launcher-materialization-packet/v3";
+  schemaVersion: "organization-identity-launcher-materialization-packet/v4";
   subjectCommit: string;
+  launcherContract: LauncherContract;
   launcherContractSha256: string;
   approvedArtifacts: Readonly<{
     planBlobId: string;
@@ -420,12 +547,47 @@ type LauncherMaterializationPacket = Readonly<{
   runtimeRoot: LauncherContract["runtimeRoot"];
   requestRoot: LauncherContract["requestRoot"];
   outputRoot: LauncherContract["outputRoot"];
-  toolRootFiles: LauncherContract["toolRootFiles"];
+  sourceToolClosure: readonly [
+    SourceToolClosureEntry<"ENV">,
+    SourceToolClosureEntry<"NODE">,
+    SourceToolClosureEntry<"GIT">,
+    SourceToolClosureEntry<"COREPACK_SHIM">,
+    SourceToolClosureEntry<"COREPACK_LIB_COREPACK_CJS">,
+    SourceToolClosureEntry<"PNPM_SHIM">,
+    SourceToolClosureEntry<"PNPM_ENTRYPOINT">,
+  ];
+  materializedExecutableClosure: LauncherContract["materializedExecutableClosure"];
+  launcherFilePlan: LauncherContract["launcherFilePlan"];
+  bootstrapFilePlan: RootControlledPlannedFile<
+    "identity-writer-bootstrap.mjs",
+    "identity-writer-bootstrap.mjs",
+    0o500
+  >;
+  contractFilePlan: LauncherContract["contractFilePlan"] &
+    Readonly<{
+      sha256: string;
+      size: number;
+    }>;
+  runtimeRootPlan: LauncherContract["runtimeRootPlan"];
   runtimeEnvironment: LauncherContract["runtimeEnvironment"];
-  executableClosure: readonly ExecutableClosureEntry[];
+  rootPreflight: Readonly<{
+    launcherRootState: "ABSENT";
+    toolRootState: "ABSENT";
+    runtimeRootState: "ABSENT";
+    requestRootState: "ABSENT";
+    outputRootState: "ABSENT";
+    ownerUid: 0;
+    ownerGid: 0;
+  }>;
+  reviewIdentities: Readonly<{
+    authorityModelPlanReviewSha256: string;
+    task0LFinalCodeReviewSha256: string;
+    task0PFinalReviewSha256: string;
+  }>;
   chronology: readonly [
+    "VERIFY_SOURCE_TOOL_CLOSURE",
     "COPY_AND_FSYNC_LAUNCHER_FILES",
-    "COPY_AND_FSYNC_TOOL_ROOT_FILES",
+    "COPY_AND_FSYNC_MATERIALIZED_EXECUTABLE_CLOSURE",
     "CREATE_AND_FSYNC_RUNTIME_ROOTS",
     "CREATE_AND_FSYNC_REQUEST_OUTPUT_ROOTS",
     "INDEPENDENT_READBACK",
@@ -434,18 +596,21 @@ type LauncherMaterializationPacket = Readonly<{
   ];
   symlinkPolicy: "NO_LIVE_SYMLINK_RUNTIME_DEPENDENCE";
   rollbackPolicy: "CREATE_ONLY_PRESERVE_EVIDENCE_AND_REAUTHORIZE";
+  compatibilityStatus: "HISTORICAL_V2_V3_PACKET_MODELS_HOLD_NOT_AUTHORITY_COMPATIBLE";
   result: "AUTH_REQUIRED";
 }>;
 
 type LauncherReadbackReport = Readonly<{
-  schemaVersion: "organization-identity-launcher-readback/v1";
+  schemaVersion: "organization-identity-launcher-readback/v2";
   launcherContractSha256: string;
-  fourFileObservationSetSha256: string;
+  launcherMaterializationPacketSha256: string;
+  sourceToolClosureSha256: string;
+  materializedExecutableClosureSha256: string;
+  launcherFileObservationSetSha256: string;
   toolRootObservationSetSha256: string;
   runtimeRootObservationSetSha256: string;
   requestRootObservationSha256: string;
   outputRootObservationSha256: string;
-  executableClosureObservationSha256: string;
   environmentValueSetSha256: string;
   hostileCounterexampleSetSha256: string;
   reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_READBACK";
@@ -453,8 +618,12 @@ type LauncherReadbackReport = Readonly<{
 }>;
 
 type LauncherMaterializationReceipt = Readonly<{
-  schemaVersion: "organization-identity-launcher-materialization/v2";
+  schemaVersion: "organization-identity-launcher-materialization/v3";
   launcherContractSha256: string;
+  launcherMaterializationPacketSha256: string;
+  authorizationReceiptSha256: string;
+  sourceToolClosureSha256: string;
+  materializedExecutableClosureSha256: string;
   ownerUid: 0;
   ownerGid: 0;
   directoryMode: 0o700;
@@ -464,14 +633,53 @@ type LauncherMaterializationReceipt = Readonly<{
     RootControlledFile<"identity-writer-bootstrap.mjs", 0o500>,
     RootControlledFile<"launcher-contract.json", 0o600>,
   ];
-  toolRoot: Readonly<{
-    mode: 0o700;
-    device: string;
-    inode: string;
-    realpathSha256: string;
-  }>;
-  toolRootFiles: LauncherContract["toolRootFiles"];
-  runtimeRoots: LauncherContract["runtimeRoots"];
+  toolRoot: RootControlledDirectory<"tool-root", 0o700>;
+  toolRootFiles: readonly [
+    ObservedMaterializedExecutableFile<
+      "ENV",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/bin/env",
+      0o500
+    >,
+    ObservedMaterializedExecutableFile<
+      "NODE",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/bin/node",
+      0o500
+    >,
+    ObservedMaterializedExecutableFile<
+      "GIT",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/bin/git",
+      0o500
+    >,
+    ObservedMaterializedExecutableFile<
+      "COREPACK_SHIM",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/corepack/dist/corepack.js",
+      0o400
+    >,
+    ObservedMaterializedExecutableFile<
+      "COREPACK_LIB_COREPACK_CJS",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/corepack/dist/lib/corepack.cjs",
+      0o400
+    >,
+    ObservedMaterializedExecutableFile<
+      "PNPM_SHIM",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/pnpm/9.15.9/bin/pnpm.cjs",
+      0o400
+    >,
+    ObservedMaterializedExecutableFile<
+      "PNPM_ENTRYPOINT",
+      "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/lib/pnpm/9.15.9/dist/pnpm.cjs",
+      0o400
+    >,
+  ];
+  runtimeRoots: readonly [
+    RootControlledDirectory<"runtime", 0o700>,
+    RootControlledDirectory<"home", 0o700>,
+    RootControlledDirectory<"xdg-config", 0o700>,
+    RootControlledDirectory<"xdg-cache", 0o700>,
+    RootControlledDirectory<"corepack-home", 0o700>,
+    RootControlledDirectory<"pnpm-home", 0o700>,
+    RootControlledDirectory<"tmp", 0o700>,
+  ];
   requestRoot: Readonly<{
     mode: 0o700;
     device: string;
@@ -497,8 +705,9 @@ type LauncherMaterializationReceipt = Readonly<{
 }>;
 
 type LauncherMaterializationReviewReceipt = Readonly<{
-  schemaVersion: "organization-identity-launcher-materialization-review/v2";
+  schemaVersion: "organization-identity-launcher-materialization-review/v3";
   launcherContractSha256: string;
+  launcherMaterializationPacketSha256: string;
   launcherMaterializationReceiptSha256: string;
   readbackReportSha256: string;
   reportSha256: string;
@@ -2658,6 +2867,8 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Create: `scripts/governance-organization-identity-launcher-trust.spec.mjs`
 - Create: `scripts/governance-organization-identity-launcher-execution.spec.mjs`
 - Create: `scripts/governance-organization-identity-test-fixtures.mjs`
+- Create: `scripts/governance-organization-identity-root-materialization-packet.mjs`
+- Create: `scripts/governance-organization-identity-root-materialization-packet.spec.mjs`
 - Create: `scripts/governance-organization-identity-controller-contracts.mjs`
 - Create: `scripts/governance-organization-identity-controller-contracts.spec.mjs`
 - Create: `scripts/governance-organization-identity-github-controller.mjs`
@@ -2687,13 +2898,13 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Create only after launcher/tool/runtime/request/output fsync and independent readback: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-readback.json`
 - Create by the root materialization controller only after launcher/tool/runtime/request/output fsync and readback report: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization.json`
 - Create by the independent reviewer only after verifying the materialization receipt: `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/launcher-materialization-review.json`
-- Test: the three launcher split specs, the controller-contracts spec, GitHub/disposable/Gitleaks controller specs, and both root-anchor split specs.
+- Test: the three launcher split specs, the root-materialization-packet spec, the controller-contracts spec, GitHub/disposable/Gitleaks controller specs, and both root-anchor split specs.
 - Read-only: exact approved plan/spec Git blobs; resolved realpath of `/usr/bin/env`; resolved Node/Git binaries; resolved Corepack `corepack.js` + `lib/corepack.cjs`; resolved pnpm 9.15.9 `bin/pnpm.cjs` + `dist/pnpm.cjs`; after Task 0P, exact reviewed bootstrap source/test/contract identities.
 
 **Interfaces:**
 
 - Consumes: exact approved plan commit/blob/SHA; final spec commit/blob/SHA; local launcher/request/bootstrap schemas; GitHub/Gitleaks/disposable/protected-base controller contracts; final reviewed Task 0P bootstrap commit/report/receipt; and separate exact local/external materialization authorizations.
-- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateLauncherMaterializationReviewReceiptV2`, `validateBootstrapContractV2`, `validateGitHubControllerReceiptV2`, `validateProtectedBaseLauncherReceiptV2`, `validateAdmittedRefreshAcceptanceEvidenceV1`, `validateWorkflowRunEvidenceV1`, `validateControllerVariableWriteReceiptV2`, `validateRootAnchorUpstreamEvidenceClosureV2`, `validateRootAnchorOperationReviewClosureV2`, `validateVerifiedWorktreeReceiptV1`, `validateControllerSourceClosureV1`, `buildControllerReceiptSetSha256`, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four launcher files, seven tool-root regular files, runtime roots, request/output roots, readback, materialization and materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables, caller-asserted worktrees or credentials.
+- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateLauncherReadbackReportV2`, `validateLauncherMaterializationReceiptV3`, `validateLauncherMaterializationReviewReceiptV3`, `validateBootstrapContractV2`, `validateGitHubControllerReceiptV2`, `validateProtectedBaseLauncherReceiptV2`, `validateAdmittedRefreshAcceptanceEvidenceV1`, `validateWorkflowRunEvidenceV1`, `validateControllerVariableWriteReceiptV2`, `validateRootAnchorUpstreamEvidenceClosureV2`, `validateRootAnchorOperationReviewClosureV2`, `validateVerifiedWorktreeReceiptV1`, `validateControllerSourceClosureV1`, `buildControllerReceiptSetSha256`, the tracked local-only ignored-packet generator `scripts/governance-organization-identity-root-materialization-packet.mjs`, its spec, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four launcher files, seven tool-root regular files, runtime roots, request/output roots, readback, materialization and materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables, caller-asserted worktrees or credentials.
 
 **Commit message:** `feat: add closed identity governance launcher`
 
@@ -2705,6 +2916,10 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
   1. `export async function verifyFixedLauncherTrust(request, { rootDirectory, fixtureMode } = {})`, where production uses the fixed default `ROOT_DIRECTORY`, and any non-default `rootDirectory` is allowed only when `fixtureMode` explicitly selects a local fixture path for non-authority testing.
   2. `export async function writeCanonicalOutputRecord(outputPath, value, owner, { fixtureRoot } = {})`, implemented only as `createExclusiveOutput(...)` followed by `finalizeOutput(...)`, and rejecting any path outside the explicit fixture root.
 - `scripts/governance-organization-identity-launcher-request.spec.mjs` owns the temp-root trust-chain coverage for `readCanonicalRecord(...)` and `verifyFixedLauncherTrust(...)`, including a meaningful PASS plus canonical/digest drift failures; `scripts/governance-organization-identity-launcher-execution.spec.mjs` owns canonical output/readback and default Git snapshot coverage through closed launcher entrypoints, with zero root writes.
+- Any authority-model version change to `LauncherContract`, `LauncherMaterializationPacket`, readback/materialization/review receipts, source/destination closure schemas, or generator output shape requires a fresh bootstrap digest rebind and a new whole review before any later root authorization can rely on it.
+- Cross-hash cycle boundary is two-phase and commit-sensitive: Phase A freezes `LAUNCHER_SOURCE_COMMIT` by committing only launcher/validator/generator/tests and forbidding any `Hc`-bearing bootstrap bytes in that same commit; `LauncherContract/v3` and later `launcherContractSha256=Hc` may reference only that completed Phase A commit. Phase B is a later, distinct Task 0P commit that writes `Hc` into bootstrap source and `organization-identity-bootstrap-contract.json`. After Phase B, launcher bytes are frozen. If launcher bytes ever change again, the plan restarts from Phase A then repeats Phase B. A single commit that both changes launcher bytes and writes/updates bootstrap bytes carrying `Hc` is forbidden and must fail review.
+- Exact commit scopes are fixed: Phase A may modify only Task 0L launcher/generator/test paths and may not include `scripts/governance-organization-identity-bootstrap.mjs`, `scripts/governance-organization-identity-bootstrap.spec.mjs`, `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`, or `docs/governance/organization-identity-bootstrap-contract.json`. Phase B may modify only those Task 0P bootstrap paths and may not include launcher/generator/request/execution/trust/controller files. `Hc` is exactly `sha256(canonicalJsonBytes(LauncherContract/v3))`; any `digestRule` or projection surrogate is forbidden for current authority.
+- Historical `LauncherContract/v2`, `LauncherMaterializationPacket/v2` and `/v3`, `LauncherReadbackReport/v1`, `LauncherMaterializationReceipt/v2`, and `LauncherMaterializationReviewReceipt/v2` are retained only as historical `HOLD` diagnostics and are never accepted as current authority inputs.
 - Reviewers reject no-op coverage padding. The gate closes only when those launcher/bootstrap percentages are reached by meaningful execution of the remaining root-bound behaviors under the allowed seams.
 
 - [ ] **Step 1: Verify the future approved/committed local execution state and create the ignored review parent**
@@ -2750,6 +2965,7 @@ node --test \
   scripts/governance-organization-identity-launcher-request.spec.mjs \
   scripts/governance-organization-identity-launcher-trust.spec.mjs \
   scripts/governance-organization-identity-launcher-execution.spec.mjs \
+  scripts/governance-organization-identity-root-materialization-packet.spec.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.spec.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
@@ -2785,6 +3001,7 @@ node --test \
   scripts/governance-organization-identity-launcher-request.spec.mjs \
   scripts/governance-organization-identity-launcher-trust.spec.mjs \
   scripts/governance-organization-identity-launcher-execution.spec.mjs \
+  scripts/governance-organization-identity-root-materialization-packet.spec.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.spec.mjs \
   scripts/governance-organization-identity-disposable-postgres-controller.spec.mjs \
@@ -2797,6 +3014,8 @@ git diff --check -- \
   scripts/governance-organization-identity-launcher-trust.spec.mjs \
   scripts/governance-organization-identity-launcher-execution.spec.mjs \
   scripts/governance-organization-identity-test-fixtures.mjs \
+  scripts/governance-organization-identity-root-materialization-packet.mjs \
+  scripts/governance-organization-identity-root-materialization-packet.spec.mjs \
   scripts/governance-organization-identity-controller-contracts.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.mjs \
@@ -2821,6 +3040,8 @@ git add scripts/governance-organization-identity-launcher.mjs \
   scripts/governance-organization-identity-launcher-trust.spec.mjs \
   scripts/governance-organization-identity-launcher-execution.spec.mjs \
   scripts/governance-organization-identity-test-fixtures.mjs \
+  scripts/governance-organization-identity-root-materialization-packet.mjs \
+  scripts/governance-organization-identity-root-materialization-packet.spec.mjs \
   scripts/governance-organization-identity-controller-contracts.mjs \
   scripts/governance-organization-identity-controller-contracts.spec.mjs \
   scripts/governance-organization-identity-github-controller.mjs \
@@ -2839,26 +3060,63 @@ LAUNCHER_SOURCE_COMMIT="$(git rev-parse HEAD)"
 ```
 
 The independent reviewer fixes the exact Task 0L path set, plan/spec/launcher/controller blob identities, local-only command/mode/request registry, shared validator exports, `ControllerSourceClosureV1`, `VerifiedWorktreeReceiptV1`, GitHub/disposable/Gitleaks/root-anchor controller operation/request/result/executable/environment/credential contracts, exact GitHub API body separation, controller-owned execution loops, root-anchor upstream/operation-review closure, all non-exempt line counts, exact wrapper content, permission matrix, redaction and hostile counterexamples. Before the new review verifier is trusted, require unique exact `Critical: 0`, `Important: 0`, `Verdict: PASS` lines using separate `rg -qx` commands and record their report/path/counterexample digests in the local Task 0L receipt. Findings produce a forward Task 0L-only fix commit and complete rerun/re-review; no amend.
+The Task 0L review also verifies the Phase A boundary: this commit may freeze launcher/validator/generator/tests and compute `Hc=sha256(canonicalJsonBytes(LauncherContract/v3))`, but it must not modify `scripts/governance-organization-identity-bootstrap.mjs`, `scripts/governance-organization-identity-bootstrap.spec.mjs`, `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`, or `docs/governance/organization-identity-bootstrap-contract.json`.
 
-- [ ] **Step 8: Complete Task 0P, then stop for separate exact root-materialization authorization**
+- [ ] **Step 8: Complete Task 0P, generate the ignored packet, and stop for separate exact root authorization**
 
-Task 0P now creates/reviews the immutable `BootstrapContract` and bootstrap runner. Return to this step only after its exact final commit/report/receipt exist. Produce a read-only local `LauncherMaterializationPacket` containing exact four launcher/bootstrap/plan/spec/contract blobs; the seven tool-root regular files; the runtime root plus the six runtime environment subroots; request/output roots; exact owner/modes; exact wrapper environment values `PATH=<tool-root>/bin`, `HOME=<runtime>/home`, `XDG_CONFIG_HOME=<runtime>/xdg-config`, `XDG_CACHE_HOME=<runtime>/xdg-cache`, `COREPACK_HOME=<runtime>/corepack-home`, `PNPM_HOME=<runtime>/pnpm-home`, `TMPDIR=<runtime>/tmp`, `NPM_CONFIG_USERCONFIG=/dev/null`, `CI=1`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`; source and destination digests for resolved `/usr/bin/env`, Node, Git, Corepack `corepack.js` + `lib/corepack.cjs`, and pnpm 9.15.9 `bin/pnpm.cjs` + `dist/pnpm.cjs`; and the expected chronology. STOP and request authorization that names this packet digest. Plan approval, launcher review and Task 0P review do not imply this root write or any external-controller materialization.
+Task 0P now creates/reviews the immutable `BootstrapContract` and bootstrap runner. Return to this step only after its exact final commit/report/receipt exist. Then generate the ignored packet only through the tracked local-only generator `scripts/governance-organization-identity-root-materialization-packet.mjs`, which:
 
-- [ ] **Step 9: Materialize only the exact authorized bytes and modes**
+- reads only the exact approved plan/spec/bootstrap/launcher Git objects and the current resolved source tool closure under `O_NOFOLLOW`;
+- rejects source drift, plan/spec drift, review drift, worktree dirtiness, historical packet schema reuse, unexpected existing output, and any source executable that is not a resolved live regular file;
+- writes one create-exclusive ignored `LauncherMaterializationPacket/v4`, recommended path `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0L-root-materialization-packet-v4.json`;
+- emits a packet whose `launcherContract/v3` contains only immutable pre-write wrapper/launcher destination plan plus contract self-path policy, whose `sourceToolClosure` contains only resolved source facts, whose `materializedExecutableClosure` contains only fixed `TOOL_ROOT` absolute destination paths plus destination path digests/hashes/sizes/modes, and whose bootstrap exact bytes are external to the contract and present only in the packet/materialization chain.
 
-After that authorization, the root materialization controller creates the launcher root, tool root, runtime root, six runtime subroots, request root and output root; then materializes exactly four launcher files and seven tool-root regular files. It resolves `/usr/bin/env`, Node, Git, Corepack `corepack.js` + `lib/corepack.cjs`, and pnpm 9.15.9 `bin/pnpm.cjs` + `dist/pnpm.cjs` to regular-file sources before copy, rejects every live symlink/hardlink/nonregular destination, uses create-exclusive temporary files inside the exact parent, verifies source Git blobs and SHA-256 before and after copy, `fsync`s each file and directory, atomically renames, then enforces `root:root`, every directory `0700`, executable wrapper/launcher/bootstrap and copied `env`/`node`/`git` `0500`, copied JavaScript tool files `0400`, and contract `0600`. The wrapper uses only copied `tool-root/bin/env` and `tool-root/bin/node`; authority never depends on `~/.fnm`, `/root/.cache/node/corepack`, or another mutable cache path after materialization. It does not yet create either receipt. Existing unexpected paths, links, devices, inode changes, broader modes, digest mismatches or any source that cannot be re-materialized as the exact reviewed regular-file destination are `ROOT_LAUNCHER_MATERIALIZATION_HOLD`; never overwrite or recursively clean.
+The packet must carry exact `launcherFileCount=4`, `toolRootFileCount=7`, `runtimeRootCount=7`, `requestRootCount=1`, and `outputRootCount=1`; exact five absolute roots; exact `LauncherContract` object plus `launcherContractSha256`; source closure digest; destination closure digest; the three packet-safe review identities `authorityModelPlanReviewSha256`, `task0LFinalCodeReviewSha256`, and `task0PFinalReviewSha256`; root preflight; chronology; and `compatibilityStatus="HISTORICAL_V2_V3_PACKET_MODELS_HOLD_NOT_AUTHORITY_COMPATIBLE"`. The packet must not embed its own later packet-independent review digest, because that would be circular. Historical `task-0L-root-materialization-packet-v2.json` and any `/v2` or `/v3` packet schema remain historical HOLD diagnostics only. STOP and request separate root authorization that names the exact `/v4` packet digest and the external `packetIndependentReviewSha256`. Plan approval, launcher review, Task 0P review, or ignored packet generation do not imply any root write.
 
-- [ ] **Step 10: Independently read back materialization and issue the root receipt**
+- [ ] **Step 9: Independently review the ignored packet before any root write**
 
-An independent root-capable reviewer first opens only the four launcher files, seven tool-root files, runtime root plus its six environment subroots, and request/output roots without following symlinks, verifies owner/mode/device/inode/realpath/size/digest, recompares approved Git blobs/executable closure, confirms the wrapper environment values equal the reviewed packet, executes hostile closed-request counterexamples, and create-exclusively writes metadata-only `launcher-materialization-readback.json` at `0600`. The root materialization controller then creates `launcher-materialization.json` at `0600`, listing exactly the four launcher files, seven tool-root files, runtime roots, and request/output roots and binding the readback report; it does not list or hash itself and contains no review-receipt digest. The independent reviewer reopens/verifies that materialization receipt against the materialized file/root set and readback report and finally create-exclusively writes `launcher-materialization-review.json`, binding materialization-receipt/report/counterexample digests and unique zero-Critical/zero-Important/PASS. This one-way chain—launcher files + tool-root files + runtime roots + request/output roots → readback report → materialization receipt → review receipt—has no circular or self digest. Findings abandon the materialization, preserve evidence, and require new exact authorization before replacement; Task 0A remains blocked.
+Before any root authorization request is usable, conduct an independent local review of the ignored packet and its generator/spec. The review must explicitly challenge:
 
-- [ ] **Step 11: Freeze the launcher trust-root inputs**
+- pre-materialization immutable plan versus post-write observation separation;
+- `sourceToolClosure` versus `materializedExecutableClosure` separation;
+- exact `TOOL_ROOT` absolute destination path enforcement and mechanical rejection of `/controlled/bin`, `~/.fnm`, `/root/.cache/node/corepack`, or any non-fixed authority destination;
+- self/circular hash exclusion, including contract-file self-digest exclusion;
+- create-exclusive ignored output, source/root/HEAD/review drift, and historical packet HOLD compatibility.
 
-Record `LAUNCHER_CONTRACT_SHA256`, `LAUNCHER_MATERIALIZATION_RECEIPT_SHA256`, `LAUNCHER_MATERIALIZATION_REVIEW_RECEIPT_SHA256`, exact tool-root receipt digest, exact runtime-environment value-set digest, copied `env`/`node`/`git` paths and digests, wrapper/launcher/bootstrap digests, request/output-root receipts, copied Corepack `corepack.js` plus `lib/corepack.cjs`, copied pnpm `bin/pnpm.cjs`/`dist/pnpm.cjs`, and root review digest. From this point, every local authority command uses one canonical request/input/output and one fresh `BootstrapRunReceipt`; direct commands remain diagnostic.
+Only a zero-Critical/zero-Important/PASS review may authorize the packet for the later root write. Its digest is external to the packet and is later bound by the authorization receipt and `LauncherMaterializationReceipt/v3`; it never appears inside the packet itself. Any packet or generator schema change after this review requires a fresh bootstrap digest rebind and a new whole review before authorization.
+The Task 0P review also verifies the Phase B boundary: the bootstrap commit may write `Hc` into bootstrap source and tracked bootstrap contract JSON only after the launcher Phase A commit is frozen, and this Task 0P commit may modify only `scripts/governance-organization-identity-bootstrap.mjs`, `scripts/governance-organization-identity-bootstrap.spec.mjs`, `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`, and `docs/governance/organization-identity-bootstrap-contract.json`. It must not modify launcher/generator files. Any launcher change after this point restarts the A→B sequence from scratch and requires a new whole review plus coverage rerun on the then-current sources.
 
-- [ ] **Step 12: Keep each external controller at its own authorization boundary**
+- [ ] **Step 10: Materialize only the exact authorized bytes and bind packet + receipt + readback + review**
 
-Prepare four separate materialization packets for the reviewed GitHub, Gitleaks, disposable PostgreSQL and root-anchor controller sources/contracts. Each packet names only that controller's exact executable closure, environment, credential policy, operation/request/result schemas, root target/modes and review procedure. Do not materialize any controller under Task 0L local-launcher authorization. Task 0B requests the GitHub controller authorization before its first remote readback; Task 0C separately requests Gitleaks controller authorization; Task 0M separately requests disposable controller authorization; Task 9 separately requests root-anchor controller materialization before anchor-write authorization. Every controller materialization/review receipt is machine-verified before a request authorization is sought.
+After separate exact root authorization naming the `/v4` packet digest and reviewed authorization receipt, the root materialization controller creates the launcher root, tool root, runtime root, six runtime subroots, request root, and output root; then materializes exactly four launcher files and seven tool-root regular files. It resolves `/usr/bin/env`, Node, Git, Corepack `corepack.js` + `lib/corepack.cjs`, and pnpm 9.15.9 `bin/pnpm.cjs` + `dist/pnpm.cjs` to regular-file sources before copy, rejects every live symlink/hardlink/nonregular destination, uses create-exclusive temporary files inside the exact parent, verifies source Git blobs and SHA-256 before and after copy, `fsync`s each file and directory, atomically renames, then enforces `root:root`, every directory `0700`, executable wrapper/launcher/bootstrap and copied `env`/`node`/`git` `0500`, copied JavaScript tool files `0400`, and contract `0600`.
+
+The resulting `LauncherMaterializationReceipt/v3` must bind packet + contract + authorization + source + destination in one direction only:
+
+- `launcherMaterializationPacketSha256`;
+- `authorizationReceiptSha256`;
+- `launcherContractSha256`;
+- `sourceToolClosureSha256`;
+- `materializedExecutableClosureSha256`;
+- the observed launcher/tool/runtime/request/output roots and files;
+- the readback report digest and environment value-set digest.
+
+Existing unexpected paths, links, devices, inode changes, broader modes, digest mismatches, destination-path drift, or any source that cannot be re-materialized as the exact reviewed regular-file destination are `ROOT_LAUNCHER_MATERIALIZATION_HOLD`; never overwrite or recursively clean.
+
+- [ ] **Step 11: Independently read back materialization and issue the review receipt**
+
+An independent root-capable reviewer first opens only the four launcher files, seven tool-root files, runtime root plus its six environment subroots, and request/output roots without following symlinks, verifies owner/mode/device/inode/realpath/size/digest, recompares approved Git blobs, confirms the wrapper environment values equal the reviewed packet, recomputes the source and destination closure digests, and create-exclusively writes `LauncherReadbackReport/v2`. The root materialization controller then writes `LauncherMaterializationReceipt/v3`. The independent reviewer finally reopens/verifies packet + contract + authorization receipt + source closure + destination closure + readback + materialization receipt and create-exclusively writes `LauncherMaterializationReviewReceipt/v3`. Actual device/inode values are accepted only here, post-write; they are not part of `LauncherContract/v3` or `LauncherMaterializationPacket/v4`.
+
+This one-way chain is exact and non-circular:
+
+`LauncherContract/v3 + LauncherMaterializationPacket/v4 + authorization receipt -> write/fsync -> LauncherReadbackReport/v2 -> LauncherMaterializationReceipt/v3 -> LauncherMaterializationReviewReceipt/v3`
+
+Historical `LauncherReadbackReport/v1`, `LauncherMaterializationReceipt/v2`, and `LauncherMaterializationReviewReceipt/v2` remain HOLD diagnostics only and are never accepted as current authority inputs.
+
+- [ ] **Step 12: Freeze current trust-root identities and keep external controllers independently authorized**
+
+Record `LAUNCHER_CONTRACT_SHA256`, `LAUNCHER_MATERIALIZATION_PACKET_SHA256`, `LAUNCHER_MATERIALIZATION_RECEIPT_SHA256`, `LAUNCHER_MATERIALIZATION_REVIEW_RECEIPT_SHA256`, `SOURCE_TOOL_CLOSURE_SHA256`, `MATERIALIZED_EXECUTABLE_CLOSURE_SHA256`, exact runtime-environment value-set digest, copied `env`/`node`/`git` destination paths and digests, wrapper/launcher/bootstrap digests, request/output-root receipts, copied Corepack `corepack.js` plus `lib/corepack.cjs`, copied pnpm `bin/pnpm.cjs`/`dist/pnpm.cjs`, and the final packet/review digests. From this point, every local authority command uses one canonical request/input/output and one fresh `BootstrapRunReceipt`; any future launcher/materialization schema version change rebinds bootstrap digests and repeats whole review.
+
+Prepare four separate materialization packets for the reviewed GitHub, Gitleaks, disposable PostgreSQL, and root-anchor controller sources/contracts. Each packet names only that controller's exact executable closure, environment, credential policy, operation/request/result schemas, root target/modes, and review procedure. Do not materialize any controller under Task 0L local-launcher authorization. Task 0B requests the GitHub controller authorization before its first remote readback; Task 0C separately requests Gitleaks controller authorization; Task 0M separately requests disposable controller authorization; Task 9 separately requests root-anchor controller materialization before anchor-write authorization. Every controller materialization/review receipt is machine-verified before a request authorization is sought.
 
 ### Task 0P: Clean Pre-Execution Bootstrap, Review Contracts, and Independent Review
 
