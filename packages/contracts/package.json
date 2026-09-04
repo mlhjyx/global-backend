@@ -16,12 +16,19 @@
       "types": "./dist/execution-budget.d.ts",
       "default": "./dist/execution-budget.js"
     },
+    "./platform-authority": {
+      "types": "./dist/platform-authority/canonical-request.d.ts",
+      "default": "./dist/platform-authority/canonical-request.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "execution-budget": [
         "dist/execution-budget.d.ts"
+      ],
+      "platform-authority": [
+        "dist/platform-authority/canonical-request.d.ts"
       ]
     }
   },

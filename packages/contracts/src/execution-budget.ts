@@ -40,5 +40,3 @@ export interface PlatformExecutionBudgetAuthorityUpsertedV1Claims {
   readonly campaign_cap_microusd: string;
   readonly max_runs: string;
 }
-
-export * from "./platform-authority/canonical-request";
