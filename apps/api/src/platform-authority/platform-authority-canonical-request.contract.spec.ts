@@ -57,8 +57,8 @@ type Corpus = Readonly<{
 const CORPUS = JSON.parse(
   readFileSync(
     resolve(
-      process.cwd(),
-      "../../packages/contracts/fixtures/platform-authority/platform-authority-canonical-request-v1.json",
+      __dirname,
+      "../../../../packages/contracts/fixtures/platform-authority/platform-authority-canonical-request-v1.json",
     ),
     "utf8",
   ),
@@ -145,6 +145,7 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
       undefined,
       structuredClone(PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1),
       { schemaId: "platform-authority-canonical-reference/v1" },
+      { schemaId: "unknown-schema/v1", fields: [] },
     ]) {
       expect(() =>
         canonicalizePlatformAuthorityRequestBodyV1({

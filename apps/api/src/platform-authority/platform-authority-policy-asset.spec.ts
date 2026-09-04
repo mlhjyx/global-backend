@@ -88,6 +88,26 @@ describe("GrowthOS-owned platform authority policy asset", () => {
     ).toThrow("PLATFORM_AUTHORITY_POLICY_DRIFT");
   });
 
+  it("rejects provenance schema changes and unknown fields", () => {
+    const changedSchema = {
+      ...structuredClone(PLATFORM_AUTHORITY_POLICY_PROVENANCE),
+      schema_version: "growthos-platform-authority-policy-provenance/v2",
+    };
+    const unknownField = {
+      ...structuredClone(PLATFORM_AUTHORITY_POLICY_PROVENANCE),
+      extra: "must-not-be-accepted",
+    };
+
+    for (const provenance of [changedSchema, unknownField]) {
+      expect(() =>
+        verifyPlatformAuthorityPolicyAsset({
+          artifactBytes: importedArtifactBytes(),
+          provenance,
+        }),
+      ).toThrow("PLATFORM_AUTHORITY_POLICY_DRIFT");
+    }
+  });
+
   it.each([
     [
       "one artifact byte",

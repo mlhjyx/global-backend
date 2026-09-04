@@ -313,9 +313,13 @@ function decimalWithin(
 ): boolean {
   if (!CANONICAL_DECIMAL.test(value)) return false;
   const compare = (left: string, right: string): number =>
-    left.length === right.length
-      ? left.localeCompare(right)
-      : left.length - right.length;
+    left.length !== right.length
+      ? left.length - right.length
+      : left === right
+        ? 0
+        : left < right
+          ? -1
+          : 1;
   return compare(value, minimum) >= 0 && compare(value, maximum) <= 0;
 }
 
