@@ -12,6 +12,36 @@ run(){ local w="$1" q="$2";(export PGHOST="${c[$w:PGHOST]}" PGPORT="${c[$w:PGPOR
 cleanup(){ local rc=0 i; for((i=${#ledger[@]}-1;i>=0;i--));do run ADMIN "${ledger[i]}"||rc=1;done;((rc==0))||{ echo DISPOSABLE_CLEANUP_FAILED >&2;return 1;}; }
 trap 'cleanup || exit 1' EXIT;trap 'exit 1' INT TERM
 deny(){ if run "$1" "$2" 2>/dev/null;then echo DISPOSABLE_DENY_FAILED >&2;exit 1;fi; }
+expect_verifier_rejected(){
+  local label="$1"; shift
+  if env "$@" bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null 2>&1; then
+    echo "PLATFORM_WRITER_VERIFIER_ACCEPTED_${label}" >&2
+    return 1
+  fi
+}
+binding_failures=0
+expect_verifier_rejected WRONG_LOGIN \
+  EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN=task3_wrong_expected || binding_failures=$((binding_failures + 1))
+mismatched_host_url="$(node - <<'NODE'
+const url = new URL(process.env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL);
+url.hostname = url.hostname === '127.0.0.1' ? 'localhost' : '127.0.0.1';
+process.stdout.write(url.toString());
+NODE
+)"
+expect_verifier_rejected WRONG_HOST \
+  EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL="${mismatched_host_url}" || binding_failures=$((binding_failures + 1))
+run ADMIN "DROP DATABASE IF EXISTS task3_writer_other_database"
+run ADMIN "CREATE DATABASE task3_writer_other_database TEMPLATE global_test"
+ledger+=("DROP DATABASE IF EXISTS task3_writer_other_database")
+mismatched_database_url="$(node - <<'NODE'
+const url = new URL(process.env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL);
+url.pathname = '/task3_writer_other_database';
+process.stdout.write(url.toString());
+NODE
+)"
+expect_verifier_rejected WRONG_DATABASE \
+  EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL="${mismatched_database_url}" || binding_failures=$((binding_failures + 1))
+((binding_failures == 0)) || exit 1
 drift(){ run ADMIN "$1";ledger+=("$2"); if bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null 2>&1;then echo DRIFT_NOT_REJECTED >&2;exit 1;fi; run ADMIN "$2" || { echo DISPOSABLE_CLEANUP_FAILED >&2;exit 1; }; unset "ledger[$((${#ledger[@]}-1))]"; bash infra/postgres/verify-execution-budget-platform-writer.sh >/dev/null || { echo DRIFT_RESTORE_FAILED >&2;exit 1; }; }
 deny ADMIN "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM revoke_platform_execution_authority_v1('00000000-0000-4000-8000-000000000001','x',clock_timestamp())"
 drift "GRANT pg_monitor TO ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}" "REVOKE pg_monitor FROM ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}"
