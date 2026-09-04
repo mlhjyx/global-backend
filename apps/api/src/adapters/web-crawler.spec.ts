@@ -70,6 +70,54 @@ describe("Crawl4AI adapter 的 API 侧入口闸", () => {
 });
 
 describe("Crawl4AI artifact-result boundaries", () => {
+  it("bounds and fences a successful markdown response", async () => {
+    const beforePhysicalWire = vi.fn(async () => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(
+        JSON.stringify({ markdown: "bounded markdown", success: true }),
+        { status: 200 },
+      )),
+    );
+
+    await expect(crawlUrl(
+      "https://company.example/",
+      undefined,
+      vi.fn(async (raw: string) => ({
+        url: new URL(raw),
+        ip: "203.0.113.10",
+        family: 4 as const,
+        addresses: [{ address: "203.0.113.10", family: 4 as const }],
+      })),
+      beforePhysicalWire,
+    )).resolves.toEqual({
+      url: "https://company.example/",
+      text: "bounded markdown",
+    });
+    expect(beforePhysicalWire).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an oversized raw markdown response before JSON parsing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", {
+        status: 200,
+        headers: { "content-length": "5000001" },
+      })),
+    );
+
+    await expect(crawlUrl(
+      "https://company.example/",
+      undefined,
+      vi.fn(async (raw: string) => ({
+        url: new URL(raw),
+        ip: "203.0.113.10",
+        family: 4 as const,
+        addresses: [{ address: "203.0.113.10", family: 4 as const }],
+      })),
+    )).rejects.toThrow("CRAWL4AI_RESPONSE_TOO_LARGE");
+  });
+
   it("fences the physical Crawl4AI request exactly once", async () => {
     const beforePhysicalWire = vi.fn(async () => undefined);
     vi.stubGlobal(

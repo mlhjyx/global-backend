@@ -18,6 +18,18 @@ describe('Crawl4aiPageFetcher — durable budget binding', () => {
     expect(invoke).toHaveBeenCalledWith('crawl4ai.render', { url: 'https://example.com/' }, context);
   });
 
+  it.each(['file:///etc/passwd', 'not-a-url'])(
+    'rejects a non-HTTP target before invoking the broker: %s',
+    async (url) => {
+      const invoke = vi.fn();
+      const fetcher = new Crawl4aiPageFetcher({ invoke } as never);
+      await expect(fetcher.fetch(url, {
+        workspaceId: 'platform', runId: 'intent-watch:source-1',
+      })).resolves.toBeNull();
+      expect(invoke).not.toHaveBeenCalled();
+    },
+  );
+
   it('keeps robots wires inside the durable Tool operation instead of preflighting out of ledger', async () => {
     const authorizeExternalAction = vi.fn(async () => true);
     const beforePhysicalWire = vi.fn(async () => undefined);
