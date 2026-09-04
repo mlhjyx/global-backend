@@ -220,11 +220,16 @@ describe("renderer output candidate binding", () => {
 });
 
 describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
+  const processOwnedTempPrefix = `global-site-renderer-${process.pid}-`;
+
   it("构建期间使用 0600 随机临时文件，成功后删除整个临时目录", async () => {
     let observedPath = "";
     const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
+      expect(path.basename(path.dirname(input.specPath)).startsWith(
+        processOwnedTempPrefix,
+      )).toBe(true);
       expect(input.cacheRoot).toBe(
         path.join(path.dirname(input.specPath), ".renderer-cache"),
       );
@@ -297,9 +302,15 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         "utf8",
       ),
     ) as unknown;
+    const foreignTempDir = await mkdtemp(
+      path.join(tmpdir(), "global-site-renderer-foreign-"),
+    );
+    expect(path.basename(foreignTempDir).startsWith(processOwnedTempPrefix)).toBe(
+      false,
+    );
     const before = new Set(
       (await readdir(tmpdir())).filter((name) =>
-        name.startsWith("global-site-renderer-"),
+        name.startsWith(processOwnedTempPrefix),
       ),
     );
     const outDirs = await Promise.all(
@@ -318,13 +329,16 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         ),
       );
       expect(manifests.every((manifest) => manifest.fileCount > 0)).toBe(true);
+      expect((await stat(foreignTempDir)).isDirectory()).toBe(true);
       const after = (await readdir(tmpdir())).filter((name) =>
-        name.startsWith("global-site-renderer-"),
+        name.startsWith(processOwnedTempPrefix),
       );
       expect(after.filter((name) => !before.has(name))).toEqual([]);
     } finally {
       await Promise.all(
-        outDirs.map((outDir) => rm(outDir, { recursive: true, force: true })),
+        [foreignTempDir, ...outDirs].map((directory) =>
+          rm(directory, { recursive: true, force: true }),
+        ),
       );
     }
   }, 60_000);
