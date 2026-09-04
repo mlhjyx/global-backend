@@ -111,6 +111,7 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
         actual.required_cap_per_run_microusd,
       );
       expect(actual.required_max_runs).toBe("1");
+      expect(Number(actual.expires_at) - Number(actual.issued_at)).toBe(300);
       expect(Object.isFrozen(actual)).toBe(true);
     },
   );
@@ -216,6 +217,14 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
       (row.toolContracts as Array<Record<string, unknown>>)[0]!.estimatedCents = "2";
     }],
     ["activity retry", (row: Record<string, unknown>) => delete row.maximumActivityAttempts],
+    ["unbounded fan-out", (row: Record<string, unknown>) => {
+      (row.hardBounds as Record<string, unknown>).maximumPhysicalInvocations =
+        "9223372036854775807";
+    }],
+    ["overflowing price envelope", (row: Record<string, unknown>) => {
+      (row.toolContracts as Array<Record<string, unknown>>)[0]!.estimatedCents =
+        "9223372036854775807";
+    }],
     ...[
       "maximumPhysicalInvocations",
       "maximumDueSources",
