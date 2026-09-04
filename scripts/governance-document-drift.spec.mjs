@@ -47,11 +47,32 @@ test("governance changes preserve the active Copy fixed-source boundary", () => 
   );
 });
 
-test("the Platform Writer successor evidence records terminal reconciliation without rewriting UNKNOWN execution truth", () => {
+test("current Platform Writer documentation records terminal reconciliation and points to its successor receipt", () => {
   const status = read("docs/status/current.md");
   const architecture = read("docs/architecture/current.md");
   const evidenceIndex = read("docs/evidence/README.md");
   const changelog = read("docs/roadmap/changelog.md");
+
+  for (const document of [status, architecture, evidenceIndex, changelog]) {
+    assert.match(document, /attempts 1–5[\s\S]{0,120}6[\s\S]{0,120}EXPIRED/u);
+    assert.match(document, /UNKNOWN/u);
+    assert.match(
+      document,
+      /no (?:second )?(?:physical )?(?:call|redispatch)|不重发|没有[\s\S]{0,80}(?:redispatch|第二次物理调用)/u,
+    );
+  }
+  assert.match(status, /reservation\/conservative charge 均为 `800000`/u);
+  assert.match(
+    status,
+    /完整脱敏字段见 \[2026-09-04 platform-writer successor runtime readback\]\(\.\.\/evidence\/site-builder\/production-parity-platform-writer-runtime-readback-20260904\.json\)/u,
+  );
+  assert.match(
+    status,
+    /20260901[^\n]*historical provenance/u,
+  );
+});
+
+test("the Platform Writer successor evidence records terminal reconciliation without rewriting UNKNOWN execution truth", () => {
   const receipt = JSON.parse(
     read(
       "docs/evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json",
@@ -107,14 +128,6 @@ test("the Platform Writer successor evidence records terminal reconciliation wit
   assert.equal(release.approval.reviewer.status, "NOT_REVIEWED");
   assert.equal(release.approval.user_authorization.status, "NOT_AUTHORIZED");
 
-  for (const document of [status, architecture, evidenceIndex, changelog]) {
-    assert.match(document, /attempts 1–5[\s\S]{0,120}6[\s\S]{0,120}EXPIRED/u);
-    assert.match(document, /UNKNOWN/u);
-    assert.match(
-      document,
-      /no (?:second )?(?:physical )?(?:call|redispatch)|不重发|没有[\s\S]{0,80}(?:redispatch|第二次物理调用)/u,
-    );
-  }
 });
 
 test("the Authority closeout coverage preserves the complete budget and readiness denominator", () => {

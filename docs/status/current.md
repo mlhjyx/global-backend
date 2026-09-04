@@ -53,7 +53,7 @@ Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → 
 
 ## 3. Runtime observation — development only
 
-下表由 exact-digest drain-and-swap 后的 `/health/build`、`/health/ready`、PostgreSQL lease/migration 以及 GrowthOS JWKS readback 取得；完整脱敏字段见 [platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260901.json)。
+下表由 exact-digest drain-and-swap 后的 `/health/build`、`/health/ready`、PostgreSQL lease/migration 以及 GrowthOS JWKS readback 取得；完整脱敏字段见 [2026-09-04 platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json)。[20260901 platform-writer receipt](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260901.json) 保留为明确的 historical provenance。
 
 | Surface               | Observation                                                                                                           | Meaning and limitation                                                                                                |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
