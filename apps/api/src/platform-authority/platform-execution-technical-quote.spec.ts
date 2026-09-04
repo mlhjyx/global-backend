@@ -310,6 +310,49 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
     } as never)).toThrow("PLATFORM_EXECUTION_BUDGET_POLICY_DRIFT");
   });
 
+  it.each([
+    ["Algolia pages", 0, 0, "maximumWiresPerOperation", "11"],
+    ["Algolia items per page", 0, 0, "maximumItemsPerWire", "1001"],
+    ["Algolia raw response bytes", 0, 0, "maximumTransportResponseBytes", "5000001"],
+    ["MapYourShow one-wire bound", 0, 1, "maximumWiresPerOperation", "2"],
+    ["MapYourShow output items", 0, 1, "maximumItemsPerWire", "9999"],
+    ["robots redirect hops", 2, 0, "maximumRedirectsPerOperation", "4"],
+    ["robots physical wires", 2, 0, "maximumPhysicalInvocations", "4001"],
+    ["Crawl4AI dispatch wires", 2, 1, "maximumPhysicalInvocations", "1001"],
+    ["Crawl4AI raw response bytes", 2, 1, "maximumTransportResponseBytes", "5000001"],
+    ["sanctions redirect hops", 3, 0, "maximumRedirectsPerOperation", "4"],
+    ["sanctions physical wires", 3, 0, "maximumPhysicalInvocations", "9"],
+  ] as const)(
+    "detects source-specific physical-wire drift: %s",
+    (_label, rowIndex, wireIndex, field, value) => {
+      const contract = structuredClone(
+        PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
+      ) as unknown as {
+        rows: Array<{
+          physicalWireContracts: Array<Record<string, unknown>>;
+        }>;
+      };
+      contract.rows[rowIndex]!.physicalWireContracts[wireIndex]![field] = value;
+      const service = new PlatformExecutionTechnicalQuoteService({
+        policyAsset: loadVerifiedPlatformAuthorityPolicyAsset(),
+        technicalContract:
+          contract as unknown as PlatformExecutionTechnicalContractV1,
+      });
+      const vector = CORPUS.vectors[rowIndex]!;
+
+      expect(() => service.quote({
+        purpose: vector.input.purpose,
+        scheduleId: vector.input.schedule_id,
+        workflowType: vector.input.workflow_type,
+        workflowId: vector.input.workflow_id,
+        workflowRunId: vector.input.workflow_run_id,
+        scheduleRequestSha256: vector.input.schedule_request_sha256,
+        now: new Date(Number(vector.input.now_epoch_seconds) * 1_000),
+        providerSnapshot: snapshot(vector.provider_snapshot),
+      } as never)).toThrow("PLATFORM_EXECUTION_BUDGET_POLICY_DRIFT");
+    },
+  );
+
   it("binds the independently frozen technical contract digest", () => {
     expect(CORPUS.technical_contract_sha256).toBe(
       "230c0252403f401f35003d3cd3e7d99912ae5689fb84c37bbd50ed624cd9325b",
