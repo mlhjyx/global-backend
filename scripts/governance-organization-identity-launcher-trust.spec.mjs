@@ -48,6 +48,10 @@ const REQUEST_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
 const OUTPUT_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
+const TOOL_ROOT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
+const RUNTIME_ROOT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
 
 const expectedCommandIds = [
   "BOOTSTRAP_AUTHORITY_RUN_V1",
@@ -90,6 +94,20 @@ const expectedEnvironmentNames = [
   "LANG",
   "LC_ALL",
 ];
+const HEX = Object.freeze([
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "a",
+  "b",
+  "c",
+]);
 
 function canonical(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -121,6 +139,73 @@ function closure() {
     sha256: String(index + 2).repeat(64),
     size: 100 + index,
     mode: 0o500,
+  }));
+}
+
+function runtimeEnvironment() {
+  return {
+    PATH: `${TOOL_ROOT}/bin`,
+    HOME: `${RUNTIME_ROOT}/home`,
+    XDG_CONFIG_HOME: `${RUNTIME_ROOT}/xdg-config`,
+    XDG_CACHE_HOME: `${RUNTIME_ROOT}/xdg-cache`,
+    COREPACK_HOME: `${RUNTIME_ROOT}/corepack-home`,
+    PNPM_HOME: `${RUNTIME_ROOT}/pnpm-home`,
+    TMPDIR: `${RUNTIME_ROOT}/tmp`,
+    NPM_CONFIG_USERCONFIG: "/dev/null",
+    CI: "1",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+  };
+}
+
+function toolRootFiles(executableClosure = closure()) {
+  const closureByRole = Object.fromEntries(
+    executableClosure.map((entry) => [entry.role, entry]),
+  );
+  return [
+    ["ENV", "bin/env", 0o500],
+    ["NODE", "bin/node", 0o500],
+    ["GIT", "bin/git", 0o500],
+    ["COREPACK_SHIM", "lib/corepack/dist/corepack.js", 0o400],
+    ["COREPACK_LIB_COREPACK_CJS", "lib/corepack/dist/lib/corepack.cjs", 0o400],
+    ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
+    ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
+  ].map(([role, relativePath, mode], index) => {
+    const source = closureByRole[role];
+    return {
+      role,
+      relativePath,
+      mode,
+      device: "2",
+      inode: String(index + 21),
+      realpathSha256: HEX[index + 2].repeat(64),
+      sha256: HEX[index + 3].repeat(64),
+      size: 200 + index,
+      sourceExecutablePath: source.executablePath,
+      sourceRealpathSha256: source.realpathSha256,
+      sourceSha256: source.sha256,
+      sourceMode: source.mode,
+      sourcePathPolicy: "RESOLVED_REGULAR_FILE_COPY_ONLY",
+      destinationPathKind: "REGULAR_FILE",
+    };
+  });
+}
+
+function runtimeRoots() {
+  return [
+    "runtime",
+    "home",
+    "xdg-config",
+    "xdg-cache",
+    "corepack-home",
+    "pnpm-home",
+    "tmp",
+  ].map((basename, index) => ({
+    basename,
+    mode: 0o700,
+    device: "3",
+    inode: String(index + 31),
+    realpathSha256: HEX[index + 4].repeat(64),
   }));
 }
 
@@ -181,27 +266,52 @@ test("verifies the complete executable closure and rejects omissions, extras, re
 
 test("verifies the immutable launcher trust roots and permission matrix", () => {
   const contractDigests = computeLauncherContractDigests();
+  const executableClosure = closure();
   const contract = {
     schemaVersion: "organization-identity-launcher-contract/v2",
     rootDirectory:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",
     requestRoot: REQUEST_ROOT,
     outputRoot: OUTPUT_ROOT,
+    toolRoot: TOOL_ROOT,
+    runtimeRoot: RUNTIME_ROOT,
     rootPolicy: {
       ownerUid: 0,
       ownerGid: 0,
-      directoryMode: 0o700,
-      requestMode: 0o600,
-      outputMode: 0o600,
+      launcherDirectoryMode: 0o700,
+      requestRootMode: 0o700,
+      outputRootMode: 0o700,
+      runtimeRootMode: 0o700,
+      requestRecordMode: 0o600,
+      outputRecordMode: 0o600,
       createExclusive: true,
       rejectSymlink: true,
     },
+    toolRootPolicy: {
+      ownerUid: 0,
+      ownerGid: 0,
+      directoryMode: 0o700,
+      binaryMode: 0o500,
+      javascriptMode: 0o400,
+      createExclusive: true,
+      rejectSymlink: true,
+      rejectHardlink: true,
+      copyResolvedRegularFilesOnly: true,
+    },
+    runtimeRootPolicy: {
+      ownerUid: 0,
+      ownerGid: 0,
+      directoryMode: 0o700,
+      createExclusive: true,
+      rejectSymlink: true,
+      rejectHardlink: true,
+    },
     approvedPlan: {
       path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-      commit: "33ddcee4e6cb31c107b7ffe4fd5b2ba427e927c3",
-      blobId: "599cd7f7769e0ad40fc42f8a3ea8d26cf6741a10",
+      commit: "9228673d8bd7277c3132ac461cb7d9e41666782f",
+      blobId: "481430567129f74f489c694c73b6e298503d15b5",
       sha256:
-        "7a0aee3b3533373330ae02d4a4db84779411d6624b48d4d7dc10a91a269fabb5",
+        "ee653539f745a06dbc379b74425792513a348e3f541f48e8e6eae7cd43db5718",
     },
     approvedSpec: {
       path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -222,7 +332,10 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
       blobId: "5".repeat(40),
       sha256: SHA_B,
     },
-    executableClosure: closure(),
+    executableClosure,
+    toolRootFiles: toolRootFiles(executableClosure),
+    runtimeEnvironment: runtimeEnvironment(),
+    runtimeRoots: runtimeRoots(),
     commandIds: expectedCommandIds,
     ...contractDigests,
   };
@@ -230,9 +343,11 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
     rootDirectory: { ownerUid: 0, ownerGid: 0, mode: 0o700, symlink: false },
     requestRoot: { ownerUid: 0, ownerGid: 0, mode: 0o700, symlink: false },
     outputRoot: { ownerUid: 0, ownerGid: 0, mode: 0o700, symlink: false },
+    toolRoot: { ownerUid: 0, ownerGid: 0, mode: 0o700, symlink: false },
+    runtimeRoot: { ownerUid: 0, ownerGid: 0, mode: 0o700, symlink: false },
     approvedPlan: contract.approvedPlan,
     approvedSpec: contract.approvedSpec,
-    executableClosure: closure(),
+    executableClosure,
   };
   const verified = verifyLauncherContract(contract, observed);
   assert.equal(verified.status, "PASS", verified.code);
@@ -275,14 +390,33 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
   for (const mutation of [
     { ...observed, requestRoot: { ...observed.requestRoot, mode: 0o755 } },
     { ...observed, outputRoot: { ...observed.outputRoot, ownerUid: 1000 } },
+    { ...observed, toolRoot: { ...observed.toolRoot, symlink: true } },
     {
       ...observed,
       rootDirectory: { ...observed.rootDirectory, symlink: true },
     },
     { ...observed, approvedSpec: { ...observed.approvedSpec, sha256: SHA } },
+    {
+      ...contract,
+      runtimeEnvironment: {
+        ...contract.runtimeEnvironment,
+        PATH: "/usr/bin:/bin",
+      },
+    },
+    {
+      ...contract,
+      toolRootFiles: contract.toolRootFiles.slice(0, -1),
+    },
+    {
+      ...contract,
+      runtimeRoots: [...contract.runtimeRoots].reverse(),
+    },
   ]) {
     assert.equal(
-      verifyLauncherContract(contract, mutation).status,
+      verifyLauncherContract(
+        mutation.runtimeEnvironment ? mutation : contract,
+        mutation.runtimeEnvironment ? observed : mutation,
+      ).status,
       "INTEGRITY_ERROR",
     );
   }
@@ -345,26 +479,17 @@ test("controlled-file preflight rejects symlinks, hardlinks, broad modes, and in
 });
 
 test("renders a wrapper that accepts one absolute request and clears inherited Node loaders", () => {
-  const environment = Object.fromEntries(
-    expectedEnvironmentNames.map((name) => [
-      name,
-      name === "NPM_CONFIG_USERCONFIG"
-        ? "/dev/null"
-        : name === "CI"
-          ? "1"
-          : name === "LANG" || name === "LC_ALL"
-            ? "C.UTF-8"
-            : `/controlled/${name.toLowerCase()}`,
-    ]),
-  );
+  const environment = runtimeEnvironment();
   const wrapper = renderRootWrapper({
+    envPath: `${TOOL_ROOT}/bin/env`,
     environment,
-    nodePath: "/controlled/bin/node",
+    nodePath: `${TOOL_ROOT}/bin/node`,
     launcherPath:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch.mjs",
   });
   assert.match(wrapper, /^#!\/bin\/sh\n/);
-  assert.match(wrapper, /exec \/usr\/bin\/env -i/);
+  assert.match(wrapper, new RegExp(`exec ${TOOL_ROOT}/bin/env -i`));
+  assert.match(wrapper, new RegExp(`PATH=${TOOL_ROOT}/bin`));
   assert.match(wrapper, /NPM_CONFIG_USERCONFIG=\/dev\/null/);
   assert.match(wrapper, /--request "\$2"/);
   assert.equal(wrapper.includes("NODE_OPTIONS"), false);
@@ -376,10 +501,22 @@ test("renders a wrapper that accepts one absolute request and clears inherited N
     () =>
       renderRootWrapper({
         environment: { ...environment, NODE_OPTIONS: "--require=/tmp/hostile" },
-        nodePath: "/controlled/bin/node",
+        envPath: `${TOOL_ROOT}/bin/env`,
+        nodePath: `${TOOL_ROOT}/bin/node`,
         launcherPath: "/controlled/launcher.mjs",
       }),
     /ENVIRONMENT_NAME_SET_INVALID/,
+  );
+  assert.throws(
+    () =>
+      renderRootWrapper({
+        environment: { ...environment, PATH: "/usr/bin:/bin" },
+        envPath: `${TOOL_ROOT}/bin/env`,
+        nodePath: `${TOOL_ROOT}/bin/node`,
+        launcherPath:
+          "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-launch.mjs",
+      }),
+    /WRAPPER_VALUE_INVALID/,
   );
 });
 
@@ -497,13 +634,19 @@ test("validates one-command bootstrap receipts and rejects receipt reuse", () =>
 });
 
 test("validates the one-way four-file launcher materialization receipt chain", () => {
+  const environmentValueSetSha256 = sha(
+    canonicalJsonBytes(runtimeEnvironment()),
+  );
   const readback = {
     schemaVersion: "organization-identity-launcher-readback/v1",
     launcherContractSha256: SHA,
     fourFileObservationSetSha256: SHA,
+    toolRootObservationSetSha256: SHA_B,
+    runtimeRootObservationSetSha256: SHA_C,
     requestRootObservationSha256: SHA,
     outputRootObservationSha256: SHA,
     executableClosureObservationSha256: SHA,
+    environmentValueSetSha256,
     hostileCounterexampleSetSha256: SHA,
     reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_READBACK",
     observedAt: "2026-09-03T00:00:00.000Z",
@@ -530,6 +673,7 @@ test("validates the one-way four-file launcher materialization receipt chain", (
     sha256: String(index + 2).repeat(64),
     size: 100 + index,
   }));
+  const toolFiles = toolRootFiles();
   const materialization = {
     schemaVersion: "organization-identity-launcher-materialization/v2",
     launcherContractSha256: SHA,
@@ -537,6 +681,14 @@ test("validates the one-way four-file launcher materialization receipt chain", (
     ownerGid: 0,
     directoryMode: 0o700,
     files,
+    toolRoot: {
+      mode: 0o700,
+      device: "1",
+      inode: "12",
+      realpathSha256: SHA_B,
+    },
+    toolRootFiles: toolFiles,
+    runtimeRoots: runtimeRoots(),
     requestRoot: {
       mode: 0o700,
       device: "1",
@@ -549,9 +701,13 @@ test("validates the one-way four-file launcher materialization receipt chain", (
       inode: "11",
       realpathSha256: SHA,
     },
+    runtimeEnvironment: runtimeEnvironment(),
     fourFileFsyncSha256: SHA,
+    toolRootFsyncSha256: SHA_B,
+    runtimeRootFsyncSha256: SHA_C,
     directoryFsyncSha256: SHA,
     readbackReportSha256: readbackSha,
+    environmentValueSetSha256,
     prePostToctouSha256: SHA,
     materializedAt: "2026-09-03T00:00:01.000Z",
     result: "PASS",
@@ -572,7 +728,17 @@ test("validates the one-way four-file launcher materialization receipt chain", (
         index === 0 ? { ...file, mode: 0o755 } : file,
       ),
     },
+    { ...materialization, toolRootFiles: toolFiles.slice(0, -1) },
+    { ...materialization, runtimeRoots: runtimeRoots().slice(1) },
+    {
+      ...materialization,
+      runtimeEnvironment: {
+        ...materialization.runtimeEnvironment,
+        COREPACK_HOME: `${RUNTIME_ROOT}/cache/corepack`,
+      },
+    },
     { ...materialization, directoryFsyncSha256: null },
+    { ...materialization, toolRootFsyncSha256: null },
     { ...materialization, ownerUid: 1000 },
     { ...materialization, result: "HOLD" },
   ]) {
@@ -583,14 +749,14 @@ test("validates the one-way four-file launcher materialization receipt chain", (
   }
 
   const review = {
-    schemaVersion: "organization-identity-launcher-materialization-review/v1",
+    schemaVersion: "organization-identity-launcher-materialization-review/v2",
     launcherContractSha256: SHA,
     launcherMaterializationReceiptSha256: sha(
       canonicalJsonBytes(materialization),
     ),
     readbackReportSha256: readbackSha,
     reportSha256: SHA,
-    counterexampleSetSha256: SHA,
+    counterexampleSetSha256: SHA_B,
     reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_REVIEW",
     critical: 0,
     important: 0,
@@ -613,6 +779,7 @@ test("validates the one-way four-file launcher materialization receipt chain", (
       ...review,
       launcherMaterializationReceiptSha256: review.readbackReportSha256,
     },
+    { ...review, readbackReportSha256: review.reportSha256 },
     { ...review, critical: 1 },
     { ...review, important: 1 },
     { ...review, reviewerClass: "LOCAL_LAUNCHER" },

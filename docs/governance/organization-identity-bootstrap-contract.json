@@ -1,9 +1,9 @@
 {
   "schemaVersion": "organization-identity-bootstrap-contract/v2",
-  "launcherContractSha256": "a4fe783adf5f55bd01f3d500c3bb4475b684b79f9dcf8c351ef223825969b13f",
+  "launcherContractSha256": "d0387ef57ab9b23a8b7eaa7856dd5be72387de958ed108c181ced0cda246ad42",
   "bootstrapSchemaSha256": "22bd080b957071ff11f00deb523176b223abe467c545b10b0c54a7ce80112858",
   "closedRequestSchemaSha256": "86bdbb58bc85ec897847563a94b544086172aa12b155317eca391bbda491130f",
-  "effectivePnpmArgvRuleSha256": "16f9d328d3ec4bab7aaa63ed808ce69c4434f2f441a453654b1431b51a7e9c8f",
+  "effectivePnpmArgvRuleSha256": "c38f8dfb7481c24859339f7f2f648afd0ffc0713f8298b6a5ce9c4985b592202",
   "receiptComparatorSha256": "8e440a465d22d2a8efedfd6efe7e840f32e89dd066ffcc7b9510643c885dcf6f",
   "toolLogicalExpectations": [
     {

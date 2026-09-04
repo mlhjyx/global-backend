@@ -51,6 +51,10 @@ const REQUEST_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
 const OUTPUT_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
+const TOOL_ROOT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
+const RUNTIME_ROOT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
 
 const bootstrapModulePath = fileURLToPath(
   new URL("./governance-organization-identity-bootstrap.mjs", import.meta.url),
@@ -58,6 +62,10 @@ const bootstrapModulePath = fileURLToPath(
 
 function sha(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function digestRule(name, value) {
+  return sha(canonicalJsonBytes({ name, value }));
 }
 
 function validRequest(overrides = {}) {
@@ -140,6 +148,102 @@ test("exports an immutable BootstrapContractV2 accepted by Task0L shared validat
     validateTask0LBootstrapContract(BOOTSTRAP_CONTRACT).status,
     "PASS",
   );
+  assert.equal(
+    BOOTSTRAP_CONTRACT.launcherContractSha256,
+    digestRule("launcher-contract", {
+      schemaVersion: "organization-identity-launcher-contract/v2",
+      approvedPlan: {
+        path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
+        commit: "9228673d8bd7277c3132ac461cb7d9e41666782f",
+        blobId: "481430567129f74f489c694c73b6e298503d15b5",
+        sha256:
+          "ee653539f745a06dbc379b74425792513a348e3f541f48e8e6eae7cd43db5718",
+      },
+      rootDirectory:
+        "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",
+      requestRoot: REQUEST_ROOT,
+      outputRoot: OUTPUT_ROOT,
+      toolRoot: TOOL_ROOT,
+      runtimeRoot: RUNTIME_ROOT,
+      toolRootFiles: [
+        ["ENV", "bin/env", 0o500],
+        ["NODE", "bin/node", 0o500],
+        ["GIT", "bin/git", 0o500],
+        ["COREPACK_SHIM", "lib/corepack/dist/corepack.js", 0o400],
+        [
+          "COREPACK_LIB_COREPACK_CJS",
+          "lib/corepack/dist/lib/corepack.cjs",
+          0o400,
+        ],
+        ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
+        ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
+      ],
+      runtimeEnvironment: {
+        PATH: `${TOOL_ROOT}/bin`,
+        HOME: `${RUNTIME_ROOT}/home`,
+        XDG_CONFIG_HOME: `${RUNTIME_ROOT}/xdg-config`,
+        XDG_CACHE_HOME: `${RUNTIME_ROOT}/xdg-cache`,
+        COREPACK_HOME: `${RUNTIME_ROOT}/corepack-home`,
+        PNPM_HOME: `${RUNTIME_ROOT}/pnpm-home`,
+        TMPDIR: `${RUNTIME_ROOT}/tmp`,
+        NPM_CONFIG_USERCONFIG: "/dev/null",
+        CI: "1",
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+      },
+      materializationReviewSchemaVersion:
+        "organization-identity-launcher-materialization-review/v2",
+    }),
+  );
+  assert.equal(
+    BOOTSTRAP_CONTRACT.effectivePnpmArgvRuleSha256,
+    digestRule("effective-pnpm-argv-rule", {
+      cwd: "<taskRoot>",
+      install: [
+        "install",
+        "--frozen-lockfile",
+        "--ignore-scripts",
+        "--ignore-pnpmfile",
+        "--config.ignore-pnpmfile=true",
+        "--config.store-dir",
+        "<roots.store>",
+        "--config.virtual-store-dir",
+        "<roots.virtualStore>",
+        "--config.modules-dir",
+        "<roots.modules>",
+        "--config.cache-dir",
+        "<roots.cache>",
+        "--config.globalconfig",
+        "<roots.config>/globalrc",
+        "--config.userconfig",
+        "/dev/null",
+      ],
+      environment: {
+        PATH: "/usr/bin:/bin",
+        HOME: "<roots.taskHome>",
+        XDG_CONFIG_HOME: "<roots.config>",
+        XDG_CACHE_HOME: "<roots.cache>",
+        COREPACK_HOME: "<roots.cache>/corepack",
+        PNPM_HOME: "<roots.cache>/pnpm-home",
+        TMPDIR: "<roots.tmp>",
+        NPM_CONFIG_USERCONFIG: "/dev/null",
+        CI: "1",
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+      },
+      prismaGenerate: ["--filter", "@global/db", "generate"],
+    }),
+  );
+  const trackedContract = JSON.parse(
+    await readFile(
+      path.join(
+        process.cwd(),
+        "docs/governance/organization-identity-bootstrap-contract.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(trackedContract, BOOTSTRAP_CONTRACT);
   const first = sha(canonicalJsonBytes(BOOTSTRAP_CONTRACT));
   const moduleAgain = await import(
     `${bootstrapModulePath}?cacheBust=${Date.now()}`
