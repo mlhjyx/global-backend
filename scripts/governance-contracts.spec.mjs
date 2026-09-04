@@ -246,6 +246,134 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
   }
 });
 
+test("dynamic currentness documents separate source, runtime, program, and release truth", () => {
+  const status = readFileSync(
+    new URL("../docs/status/current.md", import.meta.url),
+    "utf8",
+  );
+  const architecture = readFileSync(
+    new URL("../docs/architecture/current.md", import.meta.url),
+    "utf8",
+  );
+  const evidenceIndex = readFileSync(
+    new URL("../docs/evidence/README.md", import.meta.url),
+    "utf8",
+  );
+  const changelog = readFileSync(
+    new URL("../docs/roadmap/changelog.md", import.meta.url),
+    "utf8",
+  );
+
+  const assertCurrentStatus = (document) => {
+    assert.match(document, /> 最后核验：2026-09-04T18:/u);
+    assert.match(
+      document,
+      /`HEAD=origin\/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`/u,
+    );
+    assert.match(
+      document,
+      /source identity[\s\S]{0,160}`0679a0bc510a980f65ebd33eb88b3215a97c20ba`/u,
+    );
+    assert.match(
+      document,
+      /runtime identity[\s\S]{0,220}`674ff12d4d768ce5599fc07b565fe21da37dc5fe`[\s\S]{0,160}4 commits behind/u,
+    );
+    assert.match(
+      document,
+      /GrowthOS[\s\S]{0,220}`290c6f9f6a41c7c39dfe071683252982536937d8`[\s\S]{0,160}54 patches[\s\S]{0,120}no remote/u,
+    );
+    assert.match(
+      document,
+      /Program B[\s\S]{0,260}`9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63`[\s\S]{0,220}`NEEDS_FIXES`[\s\S]{0,160}`C3 \/ H3`[\s\S]{0,180}76\.77%[\s\S]{0,80}78\.92%/u,
+    );
+    assert.doesNotMatch(document, /ZERO_PRODUCT_CODE/u);
+    assert.match(
+      document,
+      /A\/B ownership seam[\s\S]{0,160}(?:closed|CLOSED)[\s\S]{0,220}platform R2[\s\S]{0,220}Program C/u,
+    );
+    assert.match(
+      document,
+      /Program C[\s\S]{0,500}durable server consumer[\s\S]{0,160}handoff receipt[\s\S]{0,160}QualificationSnapshot[\s\S]{0,160}Opportunity aggregate[\s\S]{0,160}commit-before-ACK[\s\S]{0,160}ACK_PENDING[\s\S]{0,220}QGO\/SAO\/Outcome/u,
+    );
+    assert.match(
+      document,
+      /browser ACK[\s\S]{0,180}Conversation shell[\s\S]{0,160}(?:cannot|不能)[\s\S]{0,120}Opportunity/u,
+    );
+    assert.match(
+      document,
+      /33855198691[\s\S]{0,180}`FAIL`[\s\S]{0,180}18 advisories[\s\S]{0,120}baseline 10[\s\S]{0,180}`qs` 2[\s\S]{0,120}`fast-uri` 4[\s\S]{0,120}`browserslist` 2/u,
+    );
+    assert.match(
+      document,
+      /`0\.0\.0\.0:3001`[\s\S]{0,100}`\[::\]:3001`[\s\S]{0,160}`\*:8080`/u,
+    );
+    assert.match(
+      document,
+      /G0 — Truth & Ownership[^\n]*`AMBER \/ PARTIAL \/ HOLD`/u,
+    );
+    assert.match(
+      document,
+      /G5-Site — Runtime Observed[^\n]*`AMBER \/ TIME_LIMITED`/u,
+    );
+    assert.match(
+      document,
+      /G5-Acquisition — Runtime Observed[^\n]*`RED \/ NOT_READY`/u,
+    );
+    assert.match(
+      document,
+      /PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING/u,
+    );
+    assert.match(
+      document,
+      /RuntimeEvidence[\s\S]{0,180}6 total[\s\S]{0,120}2 current[\s\S]{0,120}4 historical/u,
+    );
+    assert.match(document, /2026-09-05T03:49:25\.000Z/u);
+    assert.match(
+      document,
+      /3 Release Bundles[\s\S]{0,180}development[\s\S]{0,100}`CANDIDATE`[\s\S]{0,220}`EXTERNAL_UNVERIFIED`[\s\S]{0,160}`NOT_VERIFIED`[\s\S]{0,160}`NOT_REVIEWED`[\s\S]{0,160}`NOT_AUTHORIZED`/u,
+    );
+    assert.match(
+      document,
+      /Billing\/Credits[\s\S]{0,120}`DEFERRED \/ NOT_IMPLEMENTED`[\s\S]{0,180}`cap_microusd`[\s\S]{0,160}(?:not|不是)[\s\S]{0,100}(?:balance|余额)/u,
+    );
+  };
+
+  assertCurrentStatus(status);
+  for (const [from, to] of [
+    [
+      "0679a0bc510a980f65ebd33eb88b3215a97c20ba",
+      "0f72cc104e47128778f2392283a380bc1297f76d",
+    ],
+    [
+      "290c6f9f6a41c7c39dfe071683252982536937d8",
+      "541bcc63c3486296ab4e2461d4d005e6cd43710b",
+    ],
+    ["4 commits behind", "current with main"],
+    ["`AMBER / TIME_LIMITED`", "`PASS / CURRENT`"],
+    ["`RED / NOT_READY`", "`AMBER / PARTIAL`"],
+    ["18 advisories", "10 advisories"],
+  ]) {
+    assert.throws(() => assertCurrentStatus(status.replaceAll(from, to)));
+  }
+
+  assert.match(
+    architecture,
+    /2026-09-04 as-built\/current caveat[\s\S]{0,1000}source identity[\s\S]{0,240}runtime identity[\s\S]{0,500}Program C[\s\S]{0,500}browser ACK[\s\S]{0,300}`0\.0\.0\.0:3001`[\s\S]{0,180}`\*:8080`/u,
+  );
+  assert.match(
+    evidenceIndex,
+    /Inventory observed at `2026-09-04T18:[^`]+`[\s\S]{0,240}`6 total \/ 2 current \/ 4 historical`[\s\S]{0,240}`2026-09-05T03:49:25\.000Z`[\s\S]{0,300}Site Builder only[\s\S]{0,220}Acquisition[\s\S]{0,120}0/u,
+  );
+  assert.match(
+    evidenceIndex,
+    /3 Release Bundles[\s\S]{0,260}development[\s\S]{0,120}`CANDIDATE`[\s\S]{0,260}`EXTERNAL_UNVERIFIED`/u,
+  );
+  assert.match(
+    changelog,
+    /## 2026-09-04 · Global dynamic currentness successor[\s\S]{0,1500}0679a0bc510a980f65ebd33eb88b3215a97c20ba[\s\S]{0,500}G5-Site[\s\S]{0,240}G5-Acquisition/u,
+  );
+});
+
 test("the discovery lineage successor is current-main based and the quarantined mega-branch is provenance only", () => {
   const plan = readFileSync(
     new URL(
