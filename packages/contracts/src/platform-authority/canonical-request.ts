@@ -126,6 +126,92 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function snapshotOwnDataProperties(
+  value: unknown,
+  expectedKeys: readonly string[],
+  invalid: () => never,
+): Readonly<Record<string, unknown>> {
+  if (!isPlainRecord(value)) invalid();
+  let descriptors: PropertyDescriptorMap;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return invalid();
+  }
+  const descriptorKeys = Reflect.ownKeys(descriptors);
+  if (
+    descriptorKeys.some((key) => typeof key !== "string") ||
+    descriptorKeys.length !== expectedKeys.length ||
+    [...descriptorKeys].sort().join("\0") !==
+      [...expectedKeys].sort().join("\0")
+  ) {
+    invalid();
+  }
+  const snapshot: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  for (const key of expectedKeys) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      descriptor.enumerable !== true ||
+      !Object.hasOwn(descriptor, "value") ||
+      descriptor.get !== undefined ||
+      descriptor.set !== undefined
+    ) {
+      invalid();
+    }
+    snapshot[key] = descriptor.value;
+  }
+  return Object.freeze(snapshot);
+}
+
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(
+  Uint8Array.prototype,
+) as object;
+const TYPED_ARRAY_BUFFER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "buffer",
+)!.get!;
+const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "byteLength",
+)!.get!;
+
+function copyBoundedRawBody(value: unknown): Uint8Array {
+  if (!(value instanceof Uint8Array) || !ArrayBuffer.isView(value)) {
+    requestInvalid();
+  }
+  let backingBuffer: ArrayBufferLike;
+  let byteLength: number;
+  try {
+    backingBuffer = Reflect.apply(
+      TYPED_ARRAY_BUFFER,
+      value,
+      [],
+    ) as ArrayBufferLike;
+    byteLength = Reflect.apply(TYPED_ARRAY_BYTE_LENGTH, value, []) as number;
+  } catch {
+    return requestInvalid();
+  }
+  if (
+    byteLength < 1 ||
+    byteLength > MAX_RAW_BODY_BYTES ||
+    (typeof SharedArrayBuffer !== "undefined" &&
+      backingBuffer instanceof SharedArrayBuffer)
+  ) {
+    requestInvalid();
+  }
+  const bytes = new Uint8Array(byteLength);
+  try {
+    Uint8Array.prototype.set.call(bytes, value);
+  } catch {
+    return requestInvalid();
+  }
+  return bytes;
+}
+
 const CODE_OWNED_SCHEMAS = new WeakSet<object>();
 
 function defineCodeOwnedSchema(
@@ -352,49 +438,49 @@ export function canonicalizePlatformAuthorityRequestBodyV1(input: {
   readonly rawBody: Uint8Array;
   readonly schema: PlatformAuthorityCanonicalSchemaV1;
 }): CanonicalizedPlatformAuthorityRequestBodyV1 {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    schemaInvalid();
+  }
+  const envelope = snapshotOwnDataProperties(
+    input,
+    ["contentType", "rawBody", "schema"],
+    requestInvalid,
+  );
+  const schema = envelope.schema;
   if (
-    !isPlainRecord(input) ||
-    input.schema === null ||
-    typeof input.schema !== "object" ||
-    !CODE_OWNED_SCHEMAS.has(input.schema)
+    schema === null ||
+    typeof schema !== "object" ||
+    !CODE_OWNED_SCHEMAS.has(schema)
   ) {
     schemaInvalid();
   }
-  if (
-    input.contentType !== "application/json" ||
-    !(input.rawBody instanceof Uint8Array) ||
-    input.rawBody.byteLength < 1 ||
-    input.rawBody.byteLength > MAX_RAW_BODY_BYTES
-  ) {
-    requestInvalid();
-  }
+  const approvedSchema = schema as PlatformAuthorityCanonicalSchemaV1;
+  const contentType = envelope.contentType;
+  if (contentType !== "application/json") requestInvalid();
+  const rawBody = copyBoundedRawBody(envelope.rawBody);
   let source: string;
   try {
     source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-      input.rawBody,
+      rawBody,
     );
   } catch {
     return requestInvalid();
   }
   if (source.charCodeAt(0) === 0xfeff) requestInvalid();
   const values = parseClosedStringObject(source);
-  const expectedKeys = input.schema.fields.map((field) => field.name).sort();
+  const expectedKeys = approvedSchema.fields.map((field) => field.name).sort();
   const actualKeys = Object.keys(values).sort();
   if (actualKeys.join("\0") !== expectedKeys.join("\0")) requestInvalid();
-  for (const field of input.schema.fields) {
+  for (const field of approvedSchema.fields) {
     if (!validField(field, values[field.name]!)) requestInvalid();
   }
   const canonicalBodyUtf8 = canonicalJson(values);
   return deepFreeze({
-    schemaId: input.schema.schemaId,
+    schemaId: approvedSchema.schemaId,
     values: { ...values },
     canonicalBodyUtf8,
     canonicalBodyByteLength: Buffer.byteLength(canonicalBodyUtf8, "utf8"),
   });
-}
-
-function exactInputKeys(value: object, keys: readonly string[]): boolean {
-  return Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
 }
 
 function validNormalizedPath(value: string): boolean {
@@ -425,30 +511,44 @@ export function buildPlatformAuthorityRequestHmacPreimageV1(
     "normalized_path",
     "numeric_date",
   ] as const;
+  const fields = snapshotOwnDataProperties(input, keys, preimageInvalid);
+  const canonicalBodySha256 = fields.canonical_body_sha256;
+  const environmentId = fields.environment_id;
+  const growthosAudience = fields.growthos_audience;
+  const keyId = fields.key_id;
+  const method = fields.method;
+  const nonce = fields.nonce;
+  const normalizedPath = fields.normalized_path;
+  const numericDate = fields.numeric_date;
   if (
-    !isPlainRecord(input) ||
-    !exactInputKeys(input, keys) ||
-    !keys.every((key) => typeof input[key] === "string") ||
-    !METHOD.test(input.method) ||
-    !validNormalizedPath(input.normalized_path) ||
-    !AUDIENCE.test(input.growthos_audience) ||
-    !ENVIRONMENT_ID.test(input.environment_id) ||
-    !decimalWithin(input.numeric_date, "0", MAX_NUMERIC_DATE) ||
-    !KEY_ID.test(input.key_id) ||
-    !LOWERCASE_UUID.test(input.nonce) ||
-    !SHA256.test(input.canonical_body_sha256)
+    typeof canonicalBodySha256 !== "string" ||
+    typeof environmentId !== "string" ||
+    typeof growthosAudience !== "string" ||
+    typeof keyId !== "string" ||
+    typeof method !== "string" ||
+    typeof nonce !== "string" ||
+    typeof normalizedPath !== "string" ||
+    typeof numericDate !== "string" ||
+    !METHOD.test(method) ||
+    !validNormalizedPath(normalizedPath) ||
+    !AUDIENCE.test(growthosAudience) ||
+    !ENVIRONMENT_ID.test(environmentId) ||
+    !decimalWithin(numericDate, "0", MAX_NUMERIC_DATE) ||
+    !KEY_ID.test(keyId) ||
+    !LOWERCASE_UUID.test(nonce) ||
+    !SHA256.test(canonicalBodySha256)
   ) {
     preimageInvalid();
   }
   return [
     PLATFORM_AUTHORITY_REQUEST_HMAC_VERSION,
-    input.method,
-    input.normalized_path,
-    input.growthos_audience,
-    input.environment_id,
-    input.numeric_date,
-    input.key_id,
-    input.nonce,
-    input.canonical_body_sha256,
+    method,
+    normalizedPath,
+    growthosAudience,
+    environmentId,
+    numericDate,
+    keyId,
+    nonce,
+    canonicalBodySha256,
   ].join("\n");
 }

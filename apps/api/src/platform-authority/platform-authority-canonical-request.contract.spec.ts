@@ -196,7 +196,7 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
 
     expect(() =>
       canonicalizePlatformAuthorityRequestBodyV1(input as never),
-    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_SCHEMA_INVALID");
+    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
   });
 
   it("snapshots Proxy-backed data descriptors without invoking switching get traps", () => {
