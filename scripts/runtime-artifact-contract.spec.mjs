@@ -174,16 +174,43 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /pnpm --filter @global\/site-renderer deploy --prod --frozen-lockfile \/tmp\/renderer-runtime-deploy/,
   );
-  assert.ok(
-    dockerfile.includes(
-      'https://snapshot.debian.org/archive/debian/20260826T000000Z/',
-    ),
-  );
-  assert.ok(
-    dockerfile.includes(
-      'https://snapshot.debian.org/archive/debian-security/20260826T000000Z/',
-    ),
-  );
+  const aptSources = dockerfile
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("'deb [check-valid-until=no] "))
+    .map((line) => {
+      const match = line.match(
+        /^'deb \[check-valid-until=no\] (\S+) (\S+) main' \\$/,
+      );
+      assert.ok(match);
+      const source = new URL(match[1]);
+      return {
+        protocol: source.protocol,
+        hostname: source.hostname,
+        pathname: source.pathname,
+        suite: match[2],
+      };
+    });
+  assert.deepEqual(aptSources, [
+    {
+      protocol: 'https:',
+      hostname: 'snapshot.debian.org',
+      pathname: '/archive/debian/20260826T000000Z/',
+      suite: 'bookworm',
+    },
+    {
+      protocol: 'https:',
+      hostname: 'snapshot.debian.org',
+      pathname: '/archive/debian/20260826T000000Z/',
+      suite: 'bookworm-updates',
+    },
+    {
+      protocol: 'https:',
+      hostname: 'snapshot.debian.org',
+      pathname: '/archive/debian-security/20260826T000000Z/',
+      suite: 'bookworm-security',
+    },
+  ]);
   assert.match(dockerfile, /check-valid-until=no/);
   assert.match(
     dockerfile,
@@ -201,10 +228,6 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /COPY --from=ca-bootstrap \/etc\/ssl\/certs\/ca-certificates\.crt \/etc\/ssl\/certs\/ca-certificates\.crt/,
   );
-  assert.ok(!dockerfile.includes('http://snapshot.debian.org'));
-  assert.ok(!dockerfile.includes('deb.debian.org'));
-  assert.ok(!dockerfile.includes('security.debian.org'));
-  assert.ok(!dockerfile.includes('ftp.debian.org'));
   assert.doesNotMatch(dockerfile, /trusted\s*=\s*yes/i);
   assert.match(
     dockerfile,
