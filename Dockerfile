@@ -1,6 +1,21 @@
-FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d48494586f60ffce1fc708e0e AS runtime-base
+FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS ca-bootstrap
+RUN echo '766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  /etc/ssl/certs/ca-certificates.crt' | sha256sum -c -
 
-RUN apt-get update && \
+FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d48494586f60ffce1fc708e0e AS runtime-base
+COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# Bootstrap CA bytes come from the digest-pinned stage above. APT then verifies
+# both snapshot TLS and Debian Release signatures; trust-bypass options are forbidden.
+RUN echo '766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  /etc/ssl/certs/ca-certificates.crt' | sha256sum -c - && \
+    rm -f /etc/apt/sources.list.d/debian.sources && \
+    test -z "$(find /etc/apt/sources.list.d -maxdepth 1 -type f -print -quit)" && \
+    rm -rf /var/lib/apt/lists/* && \
+    printf '%s\n' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260826T000000Z/ bookworm main' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260826T000000Z/ bookworm-updates main' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20260826T000000Z/ bookworm-security main' \
+      > /etc/apt/sources.list && \
+    apt-get -o Acquire::Retries=3 update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       chromium=151.0.7922.173-1~deb12u1 \
