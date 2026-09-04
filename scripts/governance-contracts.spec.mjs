@@ -50,35 +50,26 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     /Live gate verdicts and time-bound execution facts are maintained only in \[current status\]\(\.\.\/status\/current\.md\)\./,
   );
   assert.doesNotMatch(releasePlan, /\| Gate \| Current verdict \|/);
-  assert.match(releasePlan, /\| Gate \| Stable proof \|/);
+  assert.match(releasePlan, /\| Gate\s+\| Stable proof\s+\|/);
   for (const gate of ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7"]) {
-    assert.match(releasePlan, new RegExp(`\\| ${gate} —`));
+    assert.match(releasePlan, new RegExp(`\\|\\s*${gate} —`));
   }
 
   const historicalSequenceStart = releasePlan.indexOf("## 2. R0-R3");
   assert.notEqual(historicalSequenceStart, -1);
   const historicalSequence = releasePlan.slice(historicalSequenceStart);
-  assert.match(
-    historicalSequence.slice(0, 1_500),
-    /HISTORICAL \/ SUPERSEDED/,
-  );
+  assert.match(historicalSequence.slice(0, 1_500), /HISTORICAL \/ SUPERSEDED/);
   assert.match(
     historicalSequence.slice(0, 1_500),
     /MVP-1[^\n]*Opportunity[^\n]*human QGO/,
   );
-  assert.match(
-    historicalSequence.slice(0, 1_500),
-    /MVP-2[^\n]*email/,
-  );
+  assert.match(historicalSequence.slice(0, 1_500), /MVP-2[^\n]*email/);
 
   for (const document of [releasePlan, decisions]) {
     assert.doesNotMatch(document, /QualifiedLeadHandoff/);
     assert.match(document, /LeadQualifiedPackage/);
   }
-  assert.match(
-    decisions,
-    /\| PDR-003 \|[^\n]+\| SUPERSEDED BY PDR-004\s+\|/,
-  );
+  assert.match(decisions, /\| PDR-003 \|[^\n]+\| SUPERSEDED BY PDR-004\s+\|/);
   assert.match(
     decisions,
     /\| PDR-004 \|[^\n]*LeadQualifiedPackage[^\n]*Opportunity[^\n]*Human QGO[^\n]*MVP-2[^\n]*email[^\n]*\| ACCEPTED\s+\|/,
@@ -87,10 +78,7 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     decisions,
     /`LeadQualified` only names the integration event; it is not a second canonical product object\./,
   );
-  for (const preservedQualifier of [
-    "| PDR-001 |",
-    "| PDR-002 |",
-  ]) {
+  for (const preservedQualifier of ["| PDR-001 |", "| PDR-002 |"]) {
     const row = decisions
       .split("\n")
       .find((line) => line.startsWith(preservedQualifier));
@@ -265,7 +253,10 @@ test("the discovery lineage successor is current-main based and the quarantined 
     [
       expectedRootRow,
       "| `/global/backend` root `main` |",
-      ["不预测本 evidence/docs merge 的 eventual commit", "预测本 evidence/docs merge 的 eventual commit"],
+      [
+        "不预测本 evidence/docs merge 的 eventual commit",
+        "预测本 evidence/docs merge 的 eventual commit",
+      ],
     ],
   ]) {
     assert.throws(() =>
@@ -313,15 +304,18 @@ test("the discovery lineage successor is current-main based and the quarantined 
   }
   const phase0Rows = releasePlan
     .split("\n")
-    .filter((line) => line.startsWith("1. **Phase 0:**"));
+    .filter((line) => line.startsWith("1. **Phase 0"));
   const expectedPhase0Row =
     "1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](../status/current.md).";
   assert.deepEqual(phase0Rows, [expectedPhase0Row]);
   const releaseG0Rows = releasePlan
     .split("\n")
-    .filter((line) => line.startsWith("| G0 — Truth & Ownership |"));
+    .filter((line) => /^\|\s*G0 — Truth & Ownership\s*\|/.test(line))
+    .map(normalizeTableRow);
   assert.deepEqual(releaseG0Rows, [
-    "| G0 — Truth & Ownership | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit. |",
+    normalizeTableRow(
+      "| G0 — Truth & Ownership | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit. |",
+    ),
   ]);
   const laterGateRows = status
     .split("\n")

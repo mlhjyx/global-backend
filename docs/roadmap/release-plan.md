@@ -1,13 +1,15 @@
-# roadmap/release-plan —— 当前主线与获客封版路线（L2）
+# roadmap/release-plan —— 稳定产品主线与发布门（L2）
 
 > 文档 ID：`DOC-ROADMAP-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md)。
-> 2026-07-10 v2（获客合流定稿）；**2026-07-27 模型候选重基线更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；2026-07-27 模型候选重基线更新；2026-09-04 产品顺序与 currentness 分离更新。历史实施日志见 [changelog.md](changelog.md)。
 
-## 2026-08-29 current execution override
+## Stable product sequence
 
-**This is the active delivery sequence.** Product stage is `SOURCE_INTEGRATED_ALPHA / CROSS_REPO_PRODUCT_ASSEMBLY / USER_JOURNEY_NOT_VALIDATED / COMMERCIAL_LOOP_NOT_CLOSED / PRODUCTION_READINESS_BLOCKED`. The product spine is `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`; the parallel Site spine `Quote → Grant → Build → Preview` does not replace QGO.
+This document owns the stable product sequence and gate definitions; it does not own a live phase verdict, branch/PR head, runtime observation or authorization state. Live gate verdicts and time-bound execution facts are maintained only in [current status](../status/current.md).
+
+The stable product spine is `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`; the parallel Site spine `Quote → Grant → Build → Preview` does not replace QGO.
 
 The first Job is evidence-backed overseas importer/procurement discovery for Chinese B2B manufacturing, trade-integrated and high-ticket exporters. Human QGO is the north star. Dealer recruitment, Campaign, social/publishing, analytics, Agent auto-send, Site Publish/Domain/Inquiry/Analytics and customer Billing/Credits are outside this critical path. Billing/Credits is `DEFERRED / NOT_IMPLEMENTED`; `cap_microusd` is an execution safety envelope, not customer billing.
 
@@ -16,24 +18,24 @@ The first Job is evidence-backed overseas importer/procurement discovery for Chi
 - The binding Program A technical plan is `/root/.codex/attachments/87cc329a-8441-47cb-bcfe-834e918ed20b/pasted-text.txt`: ability-priority plan.
 - The predecessor is `/root/.codex/attachments/40238abb-37c2-482a-aa4d-2d226e0680ca/pasted-text.txt`: `PREDECESSOR / PARTIALLY_IMPLEMENTED / SUPERSEDED_FOR_CURRENT_EXECUTION`; its stable Production Parity principles remain valid.
 - The derived GovernedSubject plan is a safety prerequisite, not Discovery ownership. Program ownership and the fixed interface are defined by [ADR-025](../adr/registry.md) and [`DEC-GPP-001`](../governance/conflict-register.md), not restated here.
-- Program A Task 5.2 is `RED_CAPTURED / POST_RED_QUARANTINED / HOLD_OWNERSHIP / REQUIRES_CLEAN_KNOWN_HEAD_AND_INTERFACE_HANDOFF`.
+- Task-level disposition, exact commits, merge/readback facts and live blockers belong to [current status](../status/current.md), the [conflict register](../governance/conflict-register.md) and append-only history; they are not duplicated here.
 
-The fixed G0–G7 meanings and current verdicts are exactly those in [current status](../status/current.md):
+The G0–G7 meanings below are stable. Their current verdicts are intentionally absent from this roadmap and must be read from [current status](../status/current.md).
 
-| Gate | Current verdict |
-| --- | --- |
-| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` |
-| G1 — Product/UX/Contract | `AMBER / SPEC_ALIGNED / MACHINE_CONTRACT_AND_IMPLEMENTATION_PENDING` |
-| G2 — Source/TDD/Security | `AMBER / SOURCE_REVIEWED_NOT_ACCEPTED` |
-| G3 — Integration/Data | `RED / NOT_INTEGRATED` |
-| G4 — Release Candidate | `RED / NO_RELEASE_CANDIDATE` |
-| G5 — Runtime Observed | `RED / DEGRADED_NO_CURRENT_EVIDENCE` |
-| G6 — UAT Accepted | `RED / NOT_VALIDATED` |
-| G7 — Pilot/GA Authorized | `RED / NOT_AUTHORIZED` |
+| Gate                     | Stable proof                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| G0 — Truth & Ownership   | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit.                    |
+| G1 — Product/UX/Contract | Persona, journey, source of record, state, permission, error, API/event contract and UAT criteria are reviewable.                          |
+| G2 — Source/TDD/Security | RED/GREEN evidence, relevant coverage, negative/mutation checks and independent correctness/security review are bound to the exact source. |
+| G3 — Integration/Data    | Disposable-database/RLS proof, migration parity, Temporal replay, golden vectors and idempotent producer-consumer integration pass.        |
+| G4 — Release Candidate   | Clean exact commits, hosted CI, reproducible artifacts/images, SBOM and a tested rollback input form one candidate.                        |
+| G5 — Runtime Observed    | Exact runtime identity, migrations, leases/readiness and fresh RuntimeEvidence prove the candidate running in the named environment.       |
+| G6 — UAT Accepted        | Critical user journeys pass three consecutive times, including controlled restart/recovery, and the product owner accepts the user result. |
+| G7 — Pilot/GA Authorized | A current Release Bundle, trusted external readback, explicit user authorization, monitoring and rollback are all present.                 |
 
 ### Active sequence and boundaries
 
-1. **Phase 0:** current truth、A/B interface、provenance 与 documentation 已完成；G0=`PASS / OWNERSHIP_CLOSED`，绑定 PR #424 与 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171`。这不升级 G1–G7；Program B source/TDD 从 G2 继续，DB/RLS/replay/integration 从 G3 继续。
+1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](../status/current.md).
 2. **MVP-0:** Program A current-main slices; formal GrowthOS source/Builder/remote/CI; Backend runtime recovery; and authentic capability availability/onboarding.
 3. **MVP-1, Program C:** C1 service principal plus durable handoff/commit-before-ACK; C2 Opportunity aggregate; C3 human QGO; C4 SalesAcceptance/Outcome feedback; C5 Conversation linkage.
 4. **Pilot 3-A:** one internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.
@@ -43,7 +45,7 @@ The fixed G0–G7 meanings and current verdicts are exactly those in [current st
 
 No more than two implementation programs may run in parallel. Program C contract/spec may proceed while G0 holds, but cross-repo integration waits for accepted A/B interfaces; the Site vertical may parallel B. No Discovery GREEN, runtime mutation or Pilot may proceed while its corresponding gate is red. Push, PR, merge, deploy, restart, retained migration, provider/model/paid/OAuth/email/credential actions each require separate exact authorization.
 
-See [current status](../status/current.md), [ADR-025](../adr/registry.md), the [conflict register](../governance/conflict-register.md), and the [Phase 0 plan](../superpowers/plans/2026-08-29-global-product-program-phase0.md). The dated long sections below are historical or capability-specific inputs where they conflict with this override; they do not replace the active sequence.
+See [current status](../status/current.md), [ADR-025](../adr/registry.md), the [conflict register](../governance/conflict-register.md), and the [Phase 0 plan](../superpowers/plans/2026-08-29-global-product-program-phase0.md). Every dated block below is a historical or capability-specific provenance snapshot. Words such as “current” inside an original dated record apply only to that snapshot; none of those blocks replaces the stable sequence above or supplies a live verdict.
 
 > **2026-08-12 Copy Sonnet native capability（当前覆盖顺序）**：基于 `origin/main@d5e53eca8fdb1b67492536f0788c9593482c4845`，用户授权启用 New API channel #20 并仅以 `claude-sonnet-5 × Anthropic Messages × special` 运行 1 execution / 最多 2 wires / 最多 1 repair。实际首调被当前 Copy 合同以 `MARKDOWN_CODE_FENCE` 拒绝；唯一 repair 通过事实槽位和生产 validator 硬门，随后 purpose-specific token 被禁用。结果见 [native capability evidence](../evidence/site-builder/m1-g-copy-sonnet-native-capability-2026-08-12.json) 与其 [Git-review acceptance](../evidence/site-builder/m1-g-copy-sonnet-native-capability-git-review-acceptance-2026-08-12.json)。它只证明一个 factual fixture 的 gateway capability，不证明全量 quality matrix、模型 promotion 或生产 route adoption；三道门仍为 `NOT_AUTHORIZED`，不得由本记录自动开启。MiniMax/Doubao 继续 retired。
 
@@ -164,7 +166,7 @@ See [current status](../status/current.md), [ADR-025](../adr/registry.md), the [
 | --- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | ✅① | **CandidateAssessment（完成，PR #43）**              | Fit/原因/评分特征/水位从 canonical_company 迁到 ICP×公司维（演进现有 Lead 表或新表 + migration）                                                                                                                          | 同 workspace 两个 ACTIVE ICP 各自独立 Fit 不互相覆盖（回归测试）；backlog sweep 按 ICP 维取件                                                                                                                                                                                                                                                                                                                                                                                        |
 | ✅② | **ExecutionContext + Broker 真收口（完成，PR #51）** | ExecutionContext 贯穿；发现/富集/intent 主链全经 Broker；source_policy 未登记 fail-closed；BudgetLedger 真开账；allowedTools 填实；修伪 workspace trace 静默失败                                                          | ✅ provider 无直连 HTTP（13 工具收编 22 处出网，业务层 grep 清零；例外四类登记：robots/DNS/模型网关/outbox webhook）；预算超限真拦截（Broker 工具门 + LLM 网关门真库实证；settle 按 token 折算，截断显性化 run 转 PARTIAL）；AI trace 写入成功（真库 15 断言：真写入 + 伪 workspace 负向对照 0 行；TED E2E 全绿；对抗复审 11 findings 全修）                                                                                                                                         |
-| ✅③ | **LeadQualifiedPackage 真实交付（完成，PR #46）**    | 快照 schema（v1，demand_proof 可空）入 contracts；`outbox_delivery` 按 sink 投递/重试/ACK/DLQ；`GET /events?cursor`（B 出端点）；**禁止无 handler 事件标 published**                                                      | ✅ 未注册事件 parked 不标 published；游标=交付账本行 id、任意重放 + ACK 幂等（真库 RLS 实测 24 断言）；LeadQualified 有 ajv Consumer Test（单测 + 真库端到端）                                                                                                                                                                                                                                                                                                                       |
+| ✅③ | **LeadQualifiedPackage 真实交付（完成，PR #46）**    | 快照 schema（v1，demand_proof 可空）入 contracts；`outbox_delivery` 按 sink 投递/重试/ACK/DLQ；`GET /events?cursor`（B 出端点）；**禁止无 handler 事件标 published**                                                      | ✅ 未注册事件 parked 不标 published；游标=交付账本行 id、任意重放 + ACK 幂等（真库 RLS 实测 24 断言）；`LeadQualified` event 有 ajv Consumer Test（单测 + 真库端到端）                                                                                                                                                                                                                                                                                                               |
 | ✅④ | **OpenAPI 单一真值 + 统一信封（完成，PR #48）**      | 删旧 YAML；contracts 脚本改读 openapi.json；CI：导出+lint+oasdiff；contracts README 改 code-first；统一返回信封定稿                                                                                                       | ✅ 双源消失（YAML 删、5 脚本读 JSON）；破坏性变更 CI 拦截（contracts job：drift+spectral+oasdiff，`breaking-change-approved` label 放行，首跑即绿）；B 读路径 38 业务操作全套 `{data}`/`{data,page:{next_cursor,has_more}}` 信封（真库 18 断言 + 契约 ajv 校验）                                                                                                                                                                                                                     |
 | ✅⑤ | **一等 Signal + ingest-once（完成，PR #56）**        | `source_signal`（平台级零个人数据）+ 租户投影两层 + 状态机；TED/FDA 写 Signal；attributes.intent 降为投影；快照 scores 升 v2 填 demand_proof                                                                              | ✅ 同一外部源同一时间窗跨 workspace 只拉取一次（`signal_ingest` 账本：指纹×6h UTC 桶唯一键；真库实测 24 条真招标一次拉取、双 workspace 各投 18 家且投影零出网）；✅ 可过期（EXPIRED/REVOKED 投影与复算剔除 + 撤即脱敏）/可复算（recompute surfaces=与增量同过滤面，重建后 unchanged 不动点）/可 backtest（双时间轴 occurred/observed 落库）；✅ demand_proof 真值进快照（v1 槽位零破坏填充，rule→additive-6dim-v2；乘法门仍待 R2 backtest）。对抗复审 3 维 21 agent 14 缺陷全修/记档 |
 | ✅⑥ | **存储合规收口（完成，PR-A #60 + PR-B）**            | DataRightsService.evaluate() + 7 动作词表 + policy_decision_log + LIA 记录 + Art.14 通知义务判定；deletion_request/receipt + deletionWorkflow；dataClass 列；PII 列级加密；DB 角色拆分；jurisdiction_policy（含 PIPL 行） | ✅ DSR 全链演练通过（真库 31 断言：contact/company 主体擦除 + 幂等 + 无 PII 残留 + 并发去重 + 部分失败忠实回执 + append-only 护证 + 擦除完整性；PR-A/B 各一轮对抗复审全修）；✅ 删除编排建成=满足「删除编排先于任何发送上线」时序门前置（R1 发送上线时联合校验）；✅ 具名决策人字段加密落库（PR-A）                                                                                                                                                                                  |
@@ -182,11 +184,15 @@ See [current status](../status/current.md), [ADR-025](../adr/registry.md), the [
 - **P1**（免费绿源）：专利 inventor · 公司注册处董事 · 商标代表。
 - **P2**（灰/谨慎）：LinkedIn 经搜索 · 新闻 PR · 展会演讲者。
 
-## 2. R0-R3 路线（与交付包 R0-R5 映射：其 R0=本 R0，R1 获客 Pilot=本 R0/R1 封版，R2 Campaign=本 R1 SaaS 侧，R3 QGO Pilot=本 R1 末~R2，R4/R5=本 R3+）
+## 2. R0-R3 路线（HISTORICAL / SUPERSEDED）
+
+> **HISTORICAL / SUPERSEDED.** This dated R0-R3 table preserves the 2026-07 execution proposal and must not be scheduled as an active Campaign/email-first plan. The stable successor above makes MVP-1 establish durable Opportunity and human QGO before outbound execution; MVP-2 introduces one approved email provider only after MVP-0/MVP-1 and separate OAuth/send authorization. Live phase verdicts remain solely in [current status](../status/current.md).
+
+原交付包映射仅作 provenance：其 R0=本 R0，R1 获客 Pilot=本 R0/R1 封版，R2 Campaign=本 R1 SaaS 侧，R3 QGO Pilot=本 R1 末~R2，R4/R5=本 R3+。
 
 | 阶段                            | 本仓领域层（历史计划）                                                                                                                                                               | B                                                               | A / SaaS 侧                                                                                            | 退出条件（标注归属）                                                                                                   |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| **R0 握手+收口**（2-4 周）      | 收口①-④ + 删除编排启动 + 文档迁移；保持 sweep 运转                                                                                                                                   | 读路径 OpenAPI（套统一信封）+ `GET /events` + roles→scopes 映射 | JWKS+claim；登录/Workspace；Lead 队列查看页                                                            | A 真 token 经 B 读到真实 lead（A+B+C）；LeadQualified 可被拉取并 ACK（B+C）                                            |
+| **R0 握手+收口**（2-4 周）      | 收口①-④ + 删除编排启动 + 文档迁移；保持 sweep 运转                                                                                                                                   | 读路径 OpenAPI（套统一信封）+ `GET /events` + roles→scopes 映射 | JWKS+claim；登录/Workspace；Lead 队列查看页                                                            | A 真 token 经 B 读到真实 lead（A+B+C）；`LeadQualified` event 可被拉取并 ACK（B+C）                                    |
 | **R1 单渠道最小闭环**（6-8 周） | 收口⑤⑥完成；QualificationDecision 定版；快照 scores 升 v2                                                                                                                            | 写路径 API + 审批校验最小版                                     | **Campaign 最小对象 + 邮件受控发送 + 收件箱 + QGO 手工确认**（SaaS 侧建设，参照 product-scope 附录 A） | 内部账号全链走通一次（发送段=A/SaaS，供给段=C）；0 未授权动作（A+C）；**删除编排（C）先于发送（A）上线**（联合时序门） |
 | **R2 真实试点**（8-12 周）      | 游标饿死根治验收（缺口 8）+ Golden Set 三任务（fit 门/抽取/CPV·FDA 映射，各 30-50 例离线集进 CI）+ ADR-007 身份图最小版 + 乘法门 backtest 基建（启用以人工确认 QGO 标签 ≥50 条为门） | 归因报表 API                                                    | 2-3 家 Design Partner 运营                                                                             | 3 家中 ≥2 激活、≥1 家 30 天内出人工确认 QGO（A+C）；数据权利/Suppression 100%（C）                                     |
 | **R3 补域**                     | 研究域最小 4 层版（可选提前）；新 provider（SAM/专利/提单）——**前置：ADR-007 最小版就位 + DLP 核实完成**                                                                             | 发布 API                                                        | AiToEarn 1-2 平台 / Pack 内容 / SAO 回流                                                               | 试点续约/付费意向                                                                                                      |
