@@ -37,6 +37,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "verify:platform-authority-policy-import": "node ../../scripts/verify-platform-authority-policy-import.mjs",
     "lint": "spectral lint openapi/openapi.json",
     "bundle": "redocly bundle openapi/openapi.json -o dist/openapi.bundled.yaml",
     "docs": "redocly build-docs openapi/openapi.json -o dist/docs.html",
