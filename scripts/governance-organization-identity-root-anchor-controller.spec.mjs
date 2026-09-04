@@ -160,29 +160,105 @@ function upstreamEvidence() {
     },
     localLauncherEvidence: {
       schemaVersion: "organization-identity-launcher-materialization-review/v1",
+      launcherContractSha256: SHA,
+      launcherMaterializationReceiptSha256: SHA,
+      readbackReportSha256: SHA,
+      reportSha256: SHA,
+      counterexampleSetSha256: SHA,
+      reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_REVIEW",
+      critical: 0,
+      important: 0,
       verdict: "PASS",
     },
     bootstrapContract: {
       schemaVersion: "organization-identity-bootstrap-contract/v2",
+      launcherContractSha256: SHA,
+      bootstrapSchemaSha256: SHA,
+      closedRequestSchemaSha256: SHA,
+      effectivePnpmArgvRuleSha256: SHA,
+      receiptComparatorSha256: SHA,
+      toolLogicalExpectations: [],
+      allowedEnvironmentNames: [],
     },
     githubControllerEvidence: {
       schemaVersion: "organization-identity-github-controller-receipt/v1",
+      contractSha256: SHA,
+      controllerReviewReceiptSha256: SHA,
+      operation: "PR_READBACK",
+      requestId: SHA,
+      requestSha256: SHA,
+      payloadSchemaSha256: SHA,
+      payloadSha256: SHA,
+      authorizationReceiptSha256: SHA,
+      repository: "mlhjyx/global-backend",
+      resultSchemaSha256: SHA,
+      resultSha256: SHA,
+      executableClosureSetSha256: SHA,
+      prePostToctouSha256: SHA,
+      containsCredentialValue: false,
       result: "PASS",
     },
     protectedBaseEvidence: {
       schemaVersion: "organization-identity-protected-base-launcher-receipt/v1",
+      contractSha256: SHA,
+      contractReviewReceiptSha256: SHA,
+      workflowBlobId: "3".repeat(40),
+      protectedBaseCommit: "4".repeat(40),
+      event: "push",
+      repository: "mlhjyx/global-backend",
+      ref: "refs/heads/main",
+      runId: 1,
+      runAttempt: 1,
+      runnerOs: "linux",
+      runnerArchitecture: "x64",
+      runnerUid: 0,
+      materializedTaskRootSha256: SHA,
+      materializedSourceBlobSetSha256: SHA,
+      executableClosureSetSha256: SHA,
+      toolLogicalIdentitySetSha256: SHA,
+      eventInputSha256: SHA,
+      controllerVariableSetSha256: SHA,
+      requestSetSha256: SHA,
+      outputReceiptSetSha256: SHA,
+      prePostToctouSha256: SHA,
+      prBytesExecuted: false,
       result: "PASS",
     },
     admittedRefreshAcceptanceEvidence: {
       schemaVersion: "organization-identity-writer-acceptance/v1",
+      refreshBaseCommit: "5".repeat(40),
+      refreshMergeCommit: "6".repeat(40),
+      currentMainAdmissionCommit: "7".repeat(40),
+      reviewedImplementationCommit: "8".repeat(40),
+      stageMapSha256: SHA,
     },
     workflowRunEvidence: {
       schemaVersion: "organization-identity-workflow-run-evidence/v1",
+      workflowPath: ".github/workflows/organization-identity-writer-anchor.yml",
+      event: "push",
+      ref: "refs/heads/main",
+      headSha: "9".repeat(40),
+      runId: 1,
+      runAttempt: 1,
+      conclusion: "success",
       result: "PASS",
     },
     controllerVariableWriteReceipt: {
       schemaVersion: "organization-identity-github-controller-receipt/v1",
+      contractSha256: SHA,
+      controllerReviewReceiptSha256: SHA,
       operation: "CONTROLLER_VARIABLES_WRITE",
+      requestId: SHA,
+      requestSha256: SHA,
+      payloadSchemaSha256: SHA,
+      payloadSha256: SHA,
+      authorizationReceiptSha256: SHA,
+      repository: "mlhjyx/global-backend",
+      resultSchemaSha256: SHA,
+      resultSha256: SHA,
+      executableClosureSetSha256: SHA,
+      prePostToctouSha256: SHA,
+      containsCredentialValue: false,
       result: "PASS",
     },
   };
@@ -299,6 +375,36 @@ test("root-anchor requests reject extra targets, stale predecessors, missing aut
         upstreamEvidence(),
       ).status,
       "INTEGRITY_ERROR",
+    );
+  }
+});
+
+test("root-anchor rejects shallow upstream authority surrogates", () => {
+  const valid = request();
+  const expected = {
+    orderedMergeParents: valid.orderedMergeParents,
+    canonicalAnchorPayloadSha256: valid.canonicalAnchorPayloadSha256,
+    canonicalAnchorPayloadSize: valid.canonicalAnchorPayloadSize,
+  };
+  const evidence = upstreamEvidence();
+  for (const recordKey of [
+    "localLauncherEvidence",
+    "bootstrapContract",
+    "githubControllerEvidence",
+    "protectedBaseEvidence",
+    "admittedRefreshAcceptanceEvidence",
+    "workflowRunEvidence",
+    "controllerVariableWriteReceipt",
+  ]) {
+    const shallow = {
+      ...evidence,
+      [recordKey]: { schemaVersion: evidence[recordKey].schemaVersion },
+    };
+    assert.equal(
+      validateRootAnchorWriteRequest(valid, contract(), expected, shallow)
+        .status,
+      "INTEGRITY_ERROR",
+      recordKey,
     );
   }
 });

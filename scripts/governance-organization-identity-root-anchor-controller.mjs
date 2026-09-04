@@ -278,6 +278,119 @@ function validateRootUpstreamEvidence(request, contract, records) {
   }
   const materialization = records.materializationReceipt;
   const review = records.controllerReviewReceipt;
+  const requiredFields = {
+    localLauncherEvidence: [
+      "schemaVersion",
+      "launcherContractSha256",
+      "launcherMaterializationReceiptSha256",
+      "readbackReportSha256",
+      "reportSha256",
+      "counterexampleSetSha256",
+      "reviewerClass",
+      "critical",
+      "important",
+      "verdict",
+    ],
+    bootstrapContract: [
+      "schemaVersion",
+      "launcherContractSha256",
+      "bootstrapSchemaSha256",
+      "closedRequestSchemaSha256",
+      "effectivePnpmArgvRuleSha256",
+      "receiptComparatorSha256",
+      "toolLogicalExpectations",
+      "allowedEnvironmentNames",
+    ],
+    githubControllerEvidence: [
+      "schemaVersion",
+      "contractSha256",
+      "controllerReviewReceiptSha256",
+      "operation",
+      "requestId",
+      "requestSha256",
+      "payloadSchemaSha256",
+      "payloadSha256",
+      "authorizationReceiptSha256",
+      "repository",
+      "resultSchemaSha256",
+      "resultSha256",
+      "executableClosureSetSha256",
+      "prePostToctouSha256",
+      "containsCredentialValue",
+      "result",
+    ],
+    protectedBaseEvidence: [
+      "schemaVersion",
+      "contractSha256",
+      "contractReviewReceiptSha256",
+      "workflowBlobId",
+      "protectedBaseCommit",
+      "event",
+      "repository",
+      "ref",
+      "runId",
+      "runAttempt",
+      "runnerOs",
+      "runnerArchitecture",
+      "runnerUid",
+      "materializedTaskRootSha256",
+      "materializedSourceBlobSetSha256",
+      "executableClosureSetSha256",
+      "toolLogicalIdentitySetSha256",
+      "eventInputSha256",
+      "controllerVariableSetSha256",
+      "requestSetSha256",
+      "outputReceiptSetSha256",
+      "prePostToctouSha256",
+      "prBytesExecuted",
+      "result",
+    ],
+    admittedRefreshAcceptanceEvidence: [
+      "schemaVersion",
+      "refreshBaseCommit",
+      "refreshMergeCommit",
+      "currentMainAdmissionCommit",
+      "reviewedImplementationCommit",
+      "stageMapSha256",
+    ],
+    workflowRunEvidence: [
+      "schemaVersion",
+      "workflowPath",
+      "event",
+      "ref",
+      "headSha",
+      "runId",
+      "runAttempt",
+      "conclusion",
+    ],
+    controllerVariableWriteReceipt: [
+      "schemaVersion",
+      "contractSha256",
+      "controllerReviewReceiptSha256",
+      "operation",
+      "requestId",
+      "requestSha256",
+      "payloadSchemaSha256",
+      "payloadSha256",
+      "authorizationReceiptSha256",
+      "repository",
+      "resultSchemaSha256",
+      "resultSha256",
+      "executableClosureSetSha256",
+      "prePostToctouSha256",
+      "containsCredentialValue",
+      "result",
+    ],
+  };
+  for (const [recordKey, fields] of Object.entries(requiredFields)) {
+    const record = records[recordKey];
+    if (
+      !isPassivePlainData(record) ||
+      fields.some((field) => !Object.hasOwn(record, field))
+    ) {
+      return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+    }
+  }
   if (
     !hasExactKeys(materialization, [
       "schemaVersion",
