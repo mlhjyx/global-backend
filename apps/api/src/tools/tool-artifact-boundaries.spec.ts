@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EgressBlockedError,
+  requestPublicHttp,
+  type PublicHttpResponse,
+} from "../adapters/guarded-http";
+import {
   createCrawl4aiFetchTool,
   MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES,
 } from "./builtin-tools";
@@ -8,7 +13,28 @@ import {
   sanctionsDownloadTool,
 } from "./source-tools";
 
+vi.mock("../adapters/guarded-http", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../adapters/guarded-http")>();
+  return { ...actual, requestPublicHttp: vi.fn() };
+});
+
+const mockedRequestPublicHttp = vi.mocked(requestPublicHttp);
+
+function publicResponse(input: Partial<PublicHttpResponse>): PublicHttpResponse {
+  return {
+    status: 200,
+    ok: true,
+    headers: {},
+    body: Buffer.alloc(0),
+    text: "",
+    finalUrl: "https://sanctions.example/list",
+    ...input,
+  };
+}
+
 afterEach(() => {
+  mockedRequestPublicHttp.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -53,16 +79,10 @@ describe("artifact-producing Tool current-result boundaries", () => {
   });
 
   it("rejects a sanctions response whose canonical media type is not XML", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response('{"entities":[]}', {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          }),
-      ),
-    );
+    mockedRequestPublicHttp.mockResolvedValueOnce(publicResponse({
+      headers: { "content-type": "application/json" },
+      body: Buffer.from('{"entities":[]}'),
+    }));
 
     await expect(
       sanctionsDownloadTool.execute(
@@ -73,25 +93,8 @@ describe("artifact-producing Tool current-result boundaries", () => {
   });
 
   it("rejects an over-cap sanctions response before reading its body", async () => {
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.error(new Error("body must not be consumed"));
-      },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(body, {
-            status: 200,
-            headers: {
-              "content-type": "application/xml; charset=utf-8",
-              "content-length": String(
-                MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES + 1,
-              ),
-            },
-          }),
-      ),
+    mockedRequestPublicHttp.mockRejectedValueOnce(
+      new EgressBlockedError("response_too_large"),
     );
 
     await expect(
