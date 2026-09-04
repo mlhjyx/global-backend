@@ -165,6 +165,13 @@ jobs:
           export RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL="postgresql://${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}:${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           bash infra/postgres/provision-runtime-lease-principals.sh
           bash infra/postgres/verify-runtime-lease-principal-permissions.sh
+          export EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL="${DATABASE_URL}"
+          export EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN=ci_execution_budget_platform_writer
+          export EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD="$(openssl rand -hex 24)"
+          export EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL="postgresql://${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}:${EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD}@127.0.0.1:5432/global_test"
+          bash infra/postgres/provision-execution-budget-platform-writer.sh
+          bash infra/postgres/provision-execution-budget-platform-writer.sh
+          bash infra/postgres/verify-execution-budget-platform-writer.sh
           pnpm exec tsx apps/api/scripts/verify-runtime-lease-prisma-compatibility.mts
           EXPECT_APP_DATABASE_READINESS=ready \
             pnpm exec tsx apps/api/scripts/verify-app-database-principal.mts

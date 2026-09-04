@@ -477,7 +477,7 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
     assert.match(script, /^#!\/usr\/bin\/env bash\nset -euo pipefail/m);
     assert.doesNotMatch(script, /set -x/);
     assert.doesNotMatch(script, /DROP ROLE/);
-    assert.doesNotMatch(script, /DATABASE_URL|APP_DATABASE_URL/);
+    assert.doesNotMatch(script, /\bDATABASE_URL\b|\bAPP_DATABASE_URL\b/);
   }
   assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
   assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN/);
