@@ -526,16 +526,34 @@ type LauncherMaterializationPacket = Readonly<{
   launcherContract: LauncherContract;
   launcherContractSha256: string;
   approvedArtifacts: Readonly<{
+    planCommit: string;
     planBlobId: string;
     planSha256: string;
+    planSize: number;
+    specCommit: string;
     specBlobId: string;
     specSha256: string;
+    specSize: number;
+    launcherCommit: string;
     launcherBlobId: string;
     launcherSha256: string;
+    launcherSize: number;
+    bootstrapCommit: string;
     bootstrapBlobId: string;
     bootstrapSha256: string;
+    bootstrapSize: number;
+    bootstrapContractCommit: string;
     bootstrapContractBlobId: string;
     bootstrapContractSha256: string;
+    bootstrapContractSize: number;
+    generatorCommit: string;
+    generatorBlobId: string;
+    generatorSha256: string;
+    generatorSize: number;
+    generatorSpecCommit: string;
+    generatorSpecBlobId: string;
+    generatorSpecSha256: string;
+    generatorSpecSize: number;
   }>;
   launcherFileCount: 4;
   toolRootFileCount: 7;
@@ -598,6 +616,23 @@ type LauncherMaterializationPacket = Readonly<{
   rollbackPolicy: "CREATE_ONLY_PRESERVE_EVIDENCE_AND_REAUTHORIZE";
   compatibilityStatus: "HISTORICAL_V2_V3_PACKET_MODELS_HOLD_NOT_AUTHORITY_COMPATIBLE";
   result: "AUTH_REQUIRED";
+}>;
+
+type LauncherMaterializationPacketReviewReceipt = Readonly<{
+  schemaVersion: "organization-identity-launcher-materialization-packet-review/v1";
+  launcherMaterializationPacketSha256: string;
+  generatorCommit: string;
+  generatorBlobId: string;
+  generatorSha256: string;
+  generatorSpecCommit: string;
+  generatorSpecBlobId: string;
+  generatorSpecSha256: string;
+  reportSha256: string;
+  counterexampleSetSha256: string;
+  reviewerClass: "INDEPENDENT_ROOT_MATERIALIZATION_PACKET_REVIEW";
+  critical: 0;
+  important: 0;
+  verdict: "PASS";
 }>;
 
 type LauncherReadbackReport = Readonly<{
@@ -716,6 +751,34 @@ type LauncherMaterializationReviewReceipt = Readonly<{
   critical: 0;
   important: 0;
   verdict: "PASS";
+}>;
+
+type LauncherRootMaterializationRequest = Readonly<{
+  schemaVersion: "organization-identity-root-materialization-request/v1";
+  requestId: string;
+  authorizationClass: "LOCAL_ROOT_MATERIALIZATION";
+  subjectCommit: string;
+  launcherMaterializationPacketPath: string;
+  launcherMaterializationPacketSha256: string;
+  launcherMaterializationPacketReviewReceiptPath: string;
+  launcherMaterializationPacketReviewReceiptSha256: string;
+  launcherContractSha256: string;
+  sourceToolClosureSha256: string;
+  materializedExecutableClosureSha256: string;
+  launcherFileCount: 4;
+  toolRootFileCount: 7;
+  runtimeRootCount: 7;
+  requestRootCount: 1;
+  outputRootCount: 1;
+  launcherRoot: LauncherContract["rootDirectory"];
+  toolRoot: LauncherContract["toolRoot"];
+  runtimeRoot: LauncherContract["runtimeRoot"];
+  requestRoot: LauncherContract["requestRoot"];
+  outputRoot: LauncherContract["outputRoot"];
+  chronology: LauncherMaterializationPacket["chronology"];
+  targetMustBeAbsent: true;
+  containsCredentialValue: false;
+  scopeSha256: string;
 }>;
 
 type VerifiedWorktreeReceiptV1 = Readonly<{
@@ -2905,6 +2968,7 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 
 - Consumes: exact approved plan commit/blob/SHA; final spec commit/blob/SHA; local launcher/request/bootstrap schemas; GitHub/Gitleaks/disposable/protected-base controller contracts; final reviewed Task 0P bootstrap commit/report/receipt; and separate exact local/external materialization authorizations.
 - Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateLauncherReadbackReportV2`, `validateLauncherMaterializationReceiptV3`, `validateLauncherMaterializationReviewReceiptV3`, `validateBootstrapContractV2`, `validateGitHubControllerReceiptV2`, `validateProtectedBaseLauncherReceiptV2`, `validateAdmittedRefreshAcceptanceEvidenceV1`, `validateWorkflowRunEvidenceV1`, `validateControllerVariableWriteReceiptV2`, `validateRootAnchorUpstreamEvidenceClosureV2`, `validateRootAnchorOperationReviewClosureV2`, `validateVerifiedWorktreeReceiptV1`, `validateControllerSourceClosureV1`, `buildControllerReceiptSetSha256`, the tracked local-only ignored-packet generator `scripts/governance-organization-identity-root-materialization-packet.mjs`, its spec, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four launcher files, seven tool-root regular files, runtime roots, request/output roots, readback, materialization and materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables, caller-asserted worktrees or credentials.
+- Produces: `parseClosedCommandRequest(bytes)`, `verifyLauncherContract(contract, observed)`, `verifyExecutableClosure(entries)`, `dispatchClosedCommand(request, verifiedContext)`, `validateBootstrapRunReceipt`, `validateBootstrapRunReceiptSet`, `validateLauncherReadbackReportV2`, `validateLauncherMaterializationReceiptV3`, `validateLauncherMaterializationReviewReceiptV3`, `validateLauncherMaterializationPacketV4`, `validateLauncherMaterializationPacketReviewReceiptV1`, `validateLauncherRootMaterializationRequestV1`, `validateBootstrapContractV2`, `validateGitHubControllerReceiptV2`, `validateProtectedBaseLauncherReceiptV2`, `validateAdmittedRefreshAcceptanceEvidenceV1`, `validateWorkflowRunEvidenceV1`, `validateControllerVariableWriteReceiptV2`, `validateRootAnchorUpstreamEvidenceClosureV2`, `validateRootAnchorOperationReviewClosureV2`, `validateVerifiedWorktreeReceiptV1`, `validateControllerSourceClosureV1`, `buildControllerReceiptSetSha256`, the tracked local-only ignored-packet generator `scripts/governance-organization-identity-root-materialization-packet.mjs`, its spec, independently reviewed tracked controller sources/contracts, and—only after the later local root authorization—the exact four launcher files, seven tool-root regular files, runtime roots, request/output roots, readback, materialization and materialization-review receipt chain. The local dispatcher never accepts arbitrary commands, external executables, caller-asserted worktrees or credentials.
 
 **Commit message:** `feat: add closed identity governance launcher`
 
@@ -2919,6 +2983,7 @@ Receipt cardinality is part of every dependency edge: each local request/mode cr
 - Any authority-model version change to `LauncherContract`, `LauncherMaterializationPacket`, readback/materialization/review receipts, source/destination closure schemas, or generator output shape requires a fresh bootstrap digest rebind and a new whole review before any later root authorization can rely on it.
 - Cross-hash cycle boundary is two-phase and commit-sensitive: Phase A freezes `LAUNCHER_SOURCE_COMMIT` by committing only launcher/validator/generator/tests and forbidding any `Hc`-bearing bootstrap bytes in that same commit; `LauncherContract/v3` and later `launcherContractSha256=Hc` may reference only that completed Phase A commit. Phase B is a later, distinct Task 0P commit that writes `Hc` into bootstrap source and `organization-identity-bootstrap-contract.json`. After Phase B, launcher bytes are frozen. If launcher bytes ever change again, the plan restarts from Phase A then repeats Phase B. A single commit that both changes launcher bytes and writes/updates bootstrap bytes carrying `Hc` is forbidden and must fail review.
 - Exact commit scopes are fixed: Phase A may modify only Task 0L launcher/generator/test paths and may not include `scripts/governance-organization-identity-bootstrap.mjs`, `scripts/governance-organization-identity-bootstrap.spec.mjs`, `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`, or `docs/governance/organization-identity-bootstrap-contract.json`. Phase B may modify only those Task 0P bootstrap paths and may not include launcher/generator/request/execution/trust/controller files. `Hc` is exactly `sha256(canonicalJsonBytes(LauncherContract/v3))`; any `digestRule` or projection surrogate is forbidden for current authority.
+- Source-to-destination tool copy invariants are mechanical and ordered: the fixed seven-role order is `ENV`, `NODE`, `GIT`, `COREPACK_SHIM`, `COREPACK_LIB_COREPACK_CJS`, `PNPM_SHIM`, `PNPM_ENTRYPOINT`. For each position, `logicalIdentity`, `sourceSha256`, and `sourceSize` must equal the corresponding destination entry's `logicalIdentity`, `sha256`, and `size`; destination path must be the exact fixed `TOOL_ROOT` absolute path and path digest for that role; destination mode must equal the policy-fixed `0500` or `0400`; source mode is provenance only and is not required to equal destination mode.
 - Historical `LauncherContract/v2`, `LauncherMaterializationPacket/v2` and `/v3`, `LauncherReadbackReport/v1`, `LauncherMaterializationReceipt/v2`, and `LauncherMaterializationReviewReceipt/v2` are retained only as historical `HOLD` diagnostics and are never accepted as current authority inputs.
 - Reviewers reject no-op coverage padding. The gate closes only when those launcher/bootstrap percentages are reached by meaningful execution of the remaining root-bound behaviors under the allowed seams.
 
@@ -3068,10 +3133,12 @@ Task 0P now creates/reviews the immutable `BootstrapContract` and bootstrap runn
 
 - reads only the exact approved plan/spec/bootstrap/launcher Git objects and the current resolved source tool closure under `O_NOFOLLOW`;
 - rejects source drift, plan/spec drift, review drift, worktree dirtiness, historical packet schema reuse, unexpected existing output, and any source executable that is not a resolved live regular file;
+- rejects any `sourceToolClosure`/`materializedExecutableClosure` mismatch in fixed seven-role order, including `logicalIdentity` drift, `sourceSha256 != destination.sha256`, `sourceSize != destination.size`, destination path drift from the exact `TOOL_ROOT` absolute path/digest, destination mode drift from policy, review substitution, reuse, or generator drift;
 - writes one create-exclusive ignored `LauncherMaterializationPacket/v4`, recommended path `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0L-root-materialization-packet-v4.json`;
+- writes one create-exclusive ignored `LauncherRootMaterializationRequest/v1` only after the packet has already received its own independent review, recommended path `.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source/task-0L-root-materialization-request-v1.json`;
 - emits a packet whose `launcherContract/v3` contains only immutable pre-write wrapper/launcher destination plan plus contract self-path policy, whose `sourceToolClosure` contains only resolved source facts, whose `materializedExecutableClosure` contains only fixed `TOOL_ROOT` absolute destination paths plus destination path digests/hashes/sizes/modes, and whose bootstrap exact bytes are external to the contract and present only in the packet/materialization chain.
 
-The packet must carry exact `launcherFileCount=4`, `toolRootFileCount=7`, `runtimeRootCount=7`, `requestRootCount=1`, and `outputRootCount=1`; exact five absolute roots; exact `LauncherContract` object plus `launcherContractSha256`; source closure digest; destination closure digest; the three packet-safe review identities `authorityModelPlanReviewSha256`, `task0LFinalCodeReviewSha256`, and `task0PFinalReviewSha256`; root preflight; chronology; and `compatibilityStatus="HISTORICAL_V2_V3_PACKET_MODELS_HOLD_NOT_AUTHORITY_COMPATIBLE"`. The packet must not embed its own later packet-independent review digest, because that would be circular. Historical `task-0L-root-materialization-packet-v2.json` and any `/v2` or `/v3` packet schema remain historical HOLD diagnostics only. STOP and request separate root authorization that names the exact `/v4` packet digest and the external `packetIndependentReviewSha256`. Plan approval, launcher review, Task 0P review, or ignored packet generation do not imply any root write.
+The packet must carry exact `launcherFileCount=4`, `toolRootFileCount=7`, `runtimeRootCount=7`, `requestRootCount=1`, and `outputRootCount=1`; exact five absolute roots; exact `LauncherContract` object plus `launcherContractSha256`; first-class `approvedArtifacts` identities for plan/spec/launcher/bootstrap/bootstrap-contract/generator/generator-spec including commit/blobId/sha256/size; source closure digest; destination closure digest; the three packet-safe review identities `authorityModelPlanReviewSha256`, `task0LFinalCodeReviewSha256`, and `task0PFinalReviewSha256`; root preflight; chronology; and `compatibilityStatus="HISTORICAL_V2_V3_PACKET_MODELS_HOLD_NOT_AUTHORITY_COMPATIBLE"`. The packet must not embed its own later packet-independent review digest, because that would be circular. Historical `task-0L-root-materialization-packet-v2.json` and any `/v2` or `/v3` packet schema remain historical HOLD diagnostics only. STOP and request separate root authorization that names the exact `/v4` packet digest and the external `packetIndependentReviewSha256`. Plan approval, launcher review, Task 0P review, or ignored packet generation do not imply any root write.
 
 - [ ] **Step 9: Independently review the ignored packet before any root write**
 
@@ -3083,16 +3150,27 @@ Before any root authorization request is usable, conduct an independent local re
 - self/circular hash exclusion, including contract-file self-digest exclusion;
 - create-exclusive ignored output, source/root/HEAD/review drift, and historical packet HOLD compatibility.
 
-Only a zero-Critical/zero-Important/PASS review may authorize the packet for the later root write. Its digest is external to the packet and is later bound by the authorization receipt and `LauncherMaterializationReceipt/v3`; it never appears inside the packet itself. Any packet or generator schema change after this review requires a fresh bootstrap digest rebind and a new whole review before authorization.
+Only a zero-Critical/zero-Important/PASS review may authorize the packet for the later root write. Its digest is external to the packet and is later bound by the authorization receipt and `LauncherMaterializationReceipt/v3`; it never appears inside the packet itself. The next create-exclusive object is canonical `LauncherRootMaterializationRequest/v1`, whose `scopeSha256` is `sha256(canonicalJsonBytes(scopeProjection))` for the fixed scope projection `{authorizationClass, subjectCommit, launcherMaterializationPacketSha256, launcherMaterializationPacketReviewReceiptSha256, launcherContractSha256, sourceToolClosureSha256, materializedExecutableClosureSha256, launcherFileCount, toolRootFileCount, runtimeRootCount, requestRootCount, outputRootCount, launcherRoot, toolRoot, runtimeRoot, requestRoot, outputRoot, chronology, targetMustBeAbsent, containsCredentialValue}` and whose `requestId` is `sha256(canonicalJsonBytes(requestTupleWithoutRequestId))`, where `requestTupleWithoutRequestId` is the full canonical request record with the `requestId` field omitted but including `scopeSha256`. Any packet or generator schema change after this review requires a fresh bootstrap digest rebind and a new whole review before authorization.
 The Task 0P review also verifies the Phase B boundary: the bootstrap commit may write `Hc` into bootstrap source and tracked bootstrap contract JSON only after the launcher Phase A commit is frozen, and this Task 0P commit may modify only `scripts/governance-organization-identity-bootstrap.mjs`, `scripts/governance-organization-identity-bootstrap.spec.mjs`, `scripts/governance-organization-identity-bootstrap-supplemental.spec.mjs`, and `docs/governance/organization-identity-bootstrap-contract.json`. It must not modify launcher/generator files. Any launcher change after this point restarts the A→B sequence from scratch and requires a new whole review plus coverage rerun on the then-current sources.
 
 - [ ] **Step 10: Materialize only the exact authorized bytes and bind packet + receipt + readback + review**
 
-After separate exact root authorization naming the `/v4` packet digest and reviewed authorization receipt, the root materialization controller creates the launcher root, tool root, runtime root, six runtime subroots, request root, and output root; then materializes exactly four launcher files and seven tool-root regular files. It resolves `/usr/bin/env`, Node, Git, Corepack `corepack.js` + `lib/corepack.cjs`, and pnpm 9.15.9 `bin/pnpm.cjs` + `dist/pnpm.cjs` to regular-file sources before copy, rejects every live symlink/hardlink/nonregular destination, uses create-exclusive temporary files inside the exact parent, verifies source Git blobs and SHA-256 before and after copy, `fsync`s each file and directory, atomically renames, then enforces `root:root`, every directory `0700`, executable wrapper/launcher/bootstrap and copied `env`/`node`/`git` `0500`, copied JavaScript tool files `0400`, and contract `0600`.
+After separate exact root authorization naming the canonical `LauncherRootMaterializationRequest/v1` SHA and reviewed authorization receipt, the root materialization controller first reopens and cross-validates request + packet + packet-review receipt + authorization receipt. `ExactAuthorizationReceipt` must satisfy all of the following before any write:
+
+- `authorizationClass === LOCAL_ROOT_MATERIALIZATION`;
+- `authorizedRequestSha256 === sha256(canonicalJsonBytes(LauncherRootMaterializationRequest/v1))`;
+- `authorizedSubjectSha256 === launcherMaterializationPacketSha256`;
+- `scopeSha256 === request.scopeSha256`;
+- `containsCredentialValue === false`;
+- `result === PASS`;
+- `grantedAt <= now < expiresAt`.
+
+Only then does it create the launcher root, tool root, runtime root, six runtime subroots, request root, and output root; then materialize exactly four launcher files and seven tool-root regular files. It resolves `/usr/bin/env`, Node, Git, Corepack `corepack.js` + `lib/corepack.cjs`, and pnpm 9.15.9 `bin/pnpm.cjs` + `dist/pnpm.cjs` to regular-file sources before copy, rejects every live symlink/hardlink/nonregular destination, uses create-exclusive temporary files inside the exact parent, verifies source Git blobs and SHA-256 before and after copy, `fsync`s each file and directory, atomically renames, then enforces `root:root`, every directory `0700`, executable wrapper/launcher/bootstrap and copied `env`/`node`/`git` `0500`, copied JavaScript tool files `0400`, and contract `0600`.
 
 The resulting `LauncherMaterializationReceipt/v3` must bind packet + contract + authorization + source + destination in one direction only:
 
 - `launcherMaterializationPacketSha256`;
+- `rootMaterializationRequestSha256`;
 - `authorizationReceiptSha256`;
 - `launcherContractSha256`;
 - `sourceToolClosureSha256`;
