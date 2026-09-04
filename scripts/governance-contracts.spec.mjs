@@ -71,6 +71,9 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
         "### Concurrency and authorization boundaries",
       ],
     );
+    const historyStart = document.indexOf("## Historical supersession index");
+    assert.ok(historyStart > 0);
+    const activeSection = document.slice(0, historyStart);
     assert.doesNotMatch(
       document,
       /\b(?:origin\/main|main)@[0-9a-f]{7,40}\b|\bPR\s*#\d+\b|\bREADY_FOR_[A-Z_]+\b|\bNOT_AUTHORIZED\b|\bcurrentRoute\b|\bcurrent-source\b|下一门/i,
@@ -78,6 +81,18 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     assert.doesNotMatch(
       document,
       /\b(?:current|live)\s+(?:G[0-7]\s+)?(?:gate\s+)?(?:verdict|status)\b[\s\S]{0,80}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/i,
+    );
+    assert.doesNotMatch(
+      activeSection,
+      /\bG[0-7]\b[^\n.]{0,40}(?:=|:|\bis\b)[^\n.]{0,20}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|FAILED?|COMPLETE(?:D)?|RELEASE_CANDIDATE)\b/i,
+    );
+    assert.doesNotMatch(
+      activeSection,
+      /\bPhase\s+\d+(?:-[A-Z])?\b[^\n.]{0,100}(?:\bis\b|=|:)[^\n.]{0,20}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|FAILED?|COMPLETE(?:D)?)\b/i,
+    );
+    assert.doesNotMatch(
+      activeSection,
+      /\b(?:SOURCE_INTEGRATED_ALPHA|CROSS_REPO_PRODUCT_ASSEMBLY|USER_JOURNEY_[A-Z0-9_]+|COMMERCIAL_LOOP_[A-Z0-9_]+|PRODUCTION_READINESS_[A-Z0-9_]+|RELEASE_[A-Z0-9_]+|RUNTIME_[A-Z0-9_]+|PILOT_[A-Z0-9_]+|GA_[A-Z0-9_]+)\b/,
     );
 
     const markdownRows = lines.map(parseMarkdownRow).filter(Boolean);
@@ -145,7 +160,6 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     }
     assert.match(orderedSteps[5], /Campaign[^\n]*email/);
 
-    const historyStart = document.indexOf("## Historical supersession index");
     assert.ok(historyStart > boundaryStart);
     const historicalSection = document.slice(historyStart);
     const historicalEntries = historicalSection
@@ -194,6 +208,18 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
       "`Pass / Done` — Disposable-database/RLS proof",
     ),
     `${releasePlan}\n| Capability | Current status |\n| ---------- | -------------- |\n| Runtime    | BLOCKED        |\n`,
+    releasePlan.replace(
+      "## Historical supersession index",
+      "G4 = PASS / RELEASE_CANDIDATE.\n\n## Historical supersession index",
+    ),
+    releasePlan.replace(
+      "## Historical supersession index",
+      "Phase 0 is complete; G0=`PASS / OWNERSHIP_CLOSED`.\n\n## Historical supersession index",
+    ),
+    releasePlan.replace(
+      "## Historical supersession index",
+      "Product stage: `SOURCE_INTEGRATED_ALPHA / PRODUCTION_READINESS_BLOCKED`.\n\n## Historical supersession index",
+    ),
   ]) {
     assert.throws(() => assertStableRoadmap(mutation));
   }
