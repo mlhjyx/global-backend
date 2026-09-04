@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -264,6 +265,36 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
         canonicalizePlatformAuthorityRequestBodyV1(input as never),
       ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
     }
+  });
+
+  it("rejects a foreign-realm SharedArrayBuffer but accepts a foreign-realm ArrayBuffer", () => {
+    const valid = rawBody(CORPUS.positive_bodies[0]!);
+    const foreignShared = runInNewContext(
+      `new SharedArrayBuffer(${valid.byteLength})`,
+    ) as SharedArrayBuffer;
+    const sharedView = new Uint8Array(foreignShared);
+    sharedView.set(valid);
+
+    expect(() =>
+      canonicalizePlatformAuthorityRequestBodyV1({
+        contentType: "application/json",
+        rawBody: sharedView,
+        schema: PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+      }),
+    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
+
+    const foreignUnshared = runInNewContext(
+      `new ArrayBuffer(${valid.byteLength})`,
+    ) as ArrayBuffer;
+    const unsharedView = new Uint8Array(foreignUnshared);
+    unsharedView.set(valid);
+    expect(
+      canonicalizePlatformAuthorityRequestBodyV1({
+        contentType: "application/json",
+        rawBody: unsharedView,
+        schema: PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+      }).canonicalBodyUtf8,
+    ).toBe(CORPUS.positive_bodies[0]!.expected_canonical_utf8);
   });
 
   it("maps hostile Proxy and typed-view traps to stable closed errors", () => {
