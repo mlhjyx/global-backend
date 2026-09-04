@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { validateMergeEvidence } from "./governance-contracts.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,6 +95,7 @@ test("the Platform Writer successor evidence records terminal reconciliation wit
       "docs/releases/site-builder-production-parity-platform-writer-development-20260904.release.json",
     ),
   );
+  assert.deepEqual(validateMergeEvidence(release.merge_evidence).issues, []);
 
   assert.equal(receipt.persisted_unknown_containment.spend_status, "UNKNOWN");
   assert.equal(receipt.persisted_unknown_containment.cost_basis, "unknown");
@@ -120,7 +122,7 @@ test("the Platform Writer successor evidence records terminal reconciliation wit
   );
   assert.deepEqual(receipt.persisted_unknown_containment.attempts.slice(0, 5).map((attempt) => attempt.resolver_id), Array(5).fill("new-api-request-bound-reconciliation-v1"));
   assert.equal(receipt.persisted_unknown_containment.attempts[5].resolver_id, "reconciliation-sweep-v1");
-  assert.equal(release.merge_evidence.method, "squash");
+  assert.equal(release.merge_evidence.method, "SQUASH");
   assert.equal(deterministicEvidence.result, "PASS");
   assert.equal(deterministicEvidence.evidence_kind, "deterministic_product_path");
   assert.equal(terminalEvidence.result, "PASS");

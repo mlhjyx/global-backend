@@ -143,9 +143,13 @@
 
 ```json
 {
-  "method": "squash",
+  "method": "SQUASH",
+  "base_commit": "87a77520c16e00d47e201924e2c23e38bb1333a6",
+  "source_head": "decb0bba0c90b3f1c2e16feba9fe5638dbb53637",
   "pull_request": "https://github.com/mlhjyx/global-backend/pull/443",
-  "parent_commit": "87a77520c16e00d47e201924e2c23e38bb1333a6",
+  "parent_commits": [
+    "87a77520c16e00d47e201924e2c23e38bb1333a6"
+  ],
   "merged_at": "2026-09-01T19:24:27.000Z",
   "result_commit": "674ff12d4d768ce5599fc07b565fe21da37dc5fe",
   "status": "DOCUMENTARY_EXTERNAL_UNVERIFIED",
