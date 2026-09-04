@@ -163,6 +163,109 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
     ).toThrow("PLATFORM_AUTHORITY_CANONICAL_SCHEMA_INVALID");
   });
 
+  it("rejects accessor fields before they can switch schema or raw bytes after validation", () => {
+    const benignBody = rawBody(CORPUS.positive_bodies[0]!);
+    const oversizedBody = Buffer.from(`{}${" ".repeat(20_000)}`, "utf8");
+    let schemaReads = 0;
+    let bodyReads = 0;
+    const input = Object.defineProperties(
+      {},
+      {
+        contentType: {
+          enumerable: true,
+          get: () => "application/json",
+        },
+        rawBody: {
+          enumerable: true,
+          get: () => {
+            bodyReads += 1;
+            return bodyReads <= 3 ? benignBody : oversizedBody;
+          },
+        },
+        schema: {
+          enumerable: true,
+          get: () => {
+            schemaReads += 1;
+            return schemaReads <= 3
+              ? PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1
+              : { schemaId: "forged-after-check", fields: [] };
+          },
+        },
+      },
+    );
+
+    expect(() =>
+      canonicalizePlatformAuthorityRequestBodyV1(input as never),
+    ).toThrow("PLATFORM_AUTHORITY_CANONICAL_SCHEMA_INVALID");
+  });
+
+  it("snapshots Proxy-backed data descriptors without invoking switching get traps", () => {
+    const benignBody = rawBody(CORPUS.positive_bodies[0]!);
+    let getterCalls = 0;
+    let schemaReads = 0;
+    let bodyReads = 0;
+    const target = {
+      contentType: "application/json",
+      rawBody: benignBody,
+      schema: PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+    };
+    const input = new Proxy(target, {
+      get(object, property, receiver) {
+        getterCalls += 1;
+        if (property === "rawBody") {
+          bodyReads += 1;
+          return bodyReads <= 3
+            ? benignBody
+            : Buffer.from(`{}${" ".repeat(20_000)}`, "utf8");
+        }
+        if (property === "schema") {
+          schemaReads += 1;
+          return schemaReads <= 3
+            ? PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1
+            : { schemaId: "forged-after-check", fields: [] };
+        }
+        return Reflect.get(object, property, receiver);
+      },
+    });
+
+    const result = canonicalizePlatformAuthorityRequestBodyV1(input);
+
+    expect(result.canonicalBodyUtf8).toBe(
+      CORPUS.positive_bodies[0]!.expected_canonical_utf8,
+    );
+    expect(getterCalls).toBe(0);
+  });
+
+  it("rejects symbol, non-enumerable, inherited and SharedArrayBuffer input surfaces", () => {
+    const valid = {
+      contentType: "application/json",
+      rawBody: rawBody(CORPUS.positive_bodies[0]!),
+      schema: PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+    };
+    const symbolExtra = { ...valid, [Symbol("hidden")]: "x" };
+    const nonEnumerableExtra = { ...valid };
+    Object.defineProperty(nonEnumerableExtra, "hidden", { value: "x" });
+    const inherited = Object.assign(
+      Object.create({ inherited: "x" }) as object,
+      valid,
+    );
+    const sharedBytes = new Uint8Array(
+      new SharedArrayBuffer(valid.rawBody.byteLength),
+    );
+    sharedBytes.set(valid.rawBody);
+
+    for (const input of [
+      symbolExtra,
+      nonEnumerableExtra,
+      inherited,
+      { ...valid, rawBody: sharedBytes },
+    ]) {
+      expect(() =>
+        canonicalizePlatformAuthorityRequestBodyV1(input as never),
+      ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
+    }
+  });
+
   it.each(CORPUS.positive_hmac_preimages)(
     "builds literal HMAC vector $id without a terminal newline",
     (vector) => {
@@ -208,5 +311,33 @@ describe("platform-authority-canonical-request/v1 shared corpus", () => {
     expect(() =>
       buildPlatformAuthorityRequestHmacPreimageV1(inherited as never),
     ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
+  });
+
+  it("rejects accessor preimage fields before a later read can inject a line", () => {
+    let methodReads = 0;
+    const input = { ...HMAC_BASE } as Record<string, unknown>;
+    Object.defineProperty(input, "method", {
+      enumerable: true,
+      get: () => {
+        methodReads += 1;
+        return methodReads <= 2 ? "POST" : "POST\nINJECT";
+      },
+    });
+
+    expect(() =>
+      buildPlatformAuthorityRequestHmacPreimageV1(input as never),
+    ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
+  });
+
+  it("rejects symbol and non-enumerable preimage properties", () => {
+    const symbolExtra = { ...HMAC_BASE, [Symbol("hidden")]: "x" };
+    const nonEnumerableExtra = { ...HMAC_BASE } as Record<string, unknown>;
+    Object.defineProperty(nonEnumerableExtra, "hidden", { value: "x" });
+
+    for (const input of [symbolExtra, nonEnumerableExtra]) {
+      expect(() =>
+        buildPlatformAuthorityRequestHmacPreimageV1(input as never),
+      ).toThrow("PLATFORM_AUTHORITY_HMAC_PREIMAGE_INVALID");
+    }
   });
 });
