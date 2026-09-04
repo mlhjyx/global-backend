@@ -36,6 +36,14 @@ const FROZEN_PHASE_A_SUBJECT_COMMIT =
   "61384076273feddcb4c5b5309d4b46902dc50e5c";
 const REVIEWED_PHASE_B_SUBJECT_COMMIT =
   "56fde9df9448377f3ce6454ae12e332d2ccde946";
+const REVIEW_IDENTITIES = Object.freeze({
+  authorityModelPlanReviewSha256:
+    "f9af1e54d25128b50e7e408dd356e0da28c17eb258e10c745938906f35a91440",
+  task0LFinalCodeReviewSha256:
+    "02592427cf4936abbfa9bbb724c4f8cdcc4df9c64d9510513786d04fa27e8672",
+  task0PFinalReviewSha256:
+    "11fa00bad480b888c3a09970a4c52474c1db4754ca8558502403f8990f59dd47",
+});
 const words = (value) => Object.freeze(value.split(" "));
 const ROLES = Object.freeze([
   ["ENV", "bin/env", 0o500],
@@ -391,9 +399,7 @@ export function buildLauncherMaterializationPacket(options = {}) {
       ownerGid: 0,
     },
     reviewIdentities: {
-      authorityModelPlanReviewSha256: hex(1),
-      task0LFinalCodeReviewSha256: hex(2),
-      task0PFinalReviewSha256: hex(3),
+      ...REVIEW_IDENTITIES,
     },
     chronology: CHRONOLOGY,
     symlinkPolicy: "NO_LIVE_SYMLINK_RUNTIME_DEPENDENCE",
@@ -488,6 +494,8 @@ function validateSourceClosure(sourceClosure, destinationClosure) {
 
 export function validateLauncherMaterializationPacket(packet) {
   if (!exactKeys(packet, PACKET_KEYS)) return integrity("PACKET_KEYS_INVALID");
+  if (!canonicalEqual(packet.reviewIdentities, REVIEW_IDENTITIES))
+    return integrity("PACKET_REVIEW_IDENTITIES_INVALID");
   const contractSha = sha256(canonicalJsonBytes(packet.launcherContract));
   const sourceClosureSha = canonicalDigest(packet.sourceToolClosure);
   const materializedClosureSha = canonicalDigest(
