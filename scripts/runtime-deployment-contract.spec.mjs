@@ -498,6 +498,8 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   );
   assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
   assert.match(verify, /ingest_platform_execution_authority/);
+  assert.match(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
+  assert.match(verify, /execution_budget_authority_revocation/);
   assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
   assert.match(verify, /has_table_privilege\(session_user,'execution_budget_authority','INSERT'\)/);
   assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
@@ -518,6 +520,8 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
   assert.match(harness, /DROP ROLE task3_nested/);
   assert.match(harness, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
+  assert.match(harness, /REVOKE EXECUTE ON FUNCTION revoke_platform_execution_authority_v1/);
+  assert.match(harness, /SET SESSION AUTHORIZATION runtime_api/);
 });
 
 test('disposable platform writer provisioning safety exercises identity reuse against PostgreSQL', async () => {
