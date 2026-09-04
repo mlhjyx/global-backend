@@ -972,8 +972,13 @@ export const mapYourShowFetchTool: Tool<
     const json = decodeJsonBytes<{
       DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } };
     }>(res.body, "MAPYOURSHOW_RESPONSE_INVALID");
+    const hits = json?.DATA?.results?.exhibitor?.hit ?? [];
+    if (!Array.isArray(hits)) throw new Error("MAPYOURSHOW_RESPONSE_INVALID");
+    if (hits.length > limit) {
+      throw new Error("MAPYOURSHOW_RESPONSE_ITEM_BOUND_EXCEEDED");
+    }
     return {
-      data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] },
+      data: { hits },
       costCents: 0,
     };
   },

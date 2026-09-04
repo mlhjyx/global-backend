@@ -118,7 +118,17 @@ export async function queryAlgoliaExhibitors(
       hits?: AlgoliaHit[];
       nbPages?: number;
     }>(responseBytes, 'ALGOLIA_RESPONSE_INVALID');
+    if (
+      (json.hits !== undefined && !Array.isArray(json.hits)) ||
+      (json.nbPages !== undefined &&
+        (!Number.isSafeInteger(json.nbPages) || json.nbPages < 0))
+    ) {
+      throw new Error('ALGOLIA_RESPONSE_INVALID');
+    }
     const hits = json.hits ?? [];
+    if (hits.length > perPage) {
+      throw new Error('ALGOLIA_RESPONSE_ITEM_BOUND_EXCEEDED');
+    }
     for (const h of hits) {
       const rec = mapHit(h);
       if (!rec || seen.has(rec.externalId)) continue;

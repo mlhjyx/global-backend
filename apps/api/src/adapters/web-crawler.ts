@@ -114,6 +114,9 @@ export async function crawlHtml(
     results?: { html?: string; response_headers?: Record<string, string> }[];
     detail?: unknown;
   }>(responseBytes, "CRAWL4AI_RESPONSE_INVALID");
+  if (Array.isArray(data.results) && data.results.length > 1) {
+    throw new Error("CRAWL4AI_RESPONSE_ITEM_BOUND_EXCEEDED");
+  }
   const r = Array.isArray(data.results) ? data.results[0] : undefined;
   if (!r)
     throw new Error(
