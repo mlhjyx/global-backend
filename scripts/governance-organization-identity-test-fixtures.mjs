@@ -16,6 +16,10 @@ export const REQUEST_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
 export const OUTPUT_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
+export const TOOL_ROOT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
+export const RUNTIME_ROOT =
+  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
 export const EXPECTED_COMMAND_IDS = Object.freeze([
   "BOOTSTRAP_AUTHORITY_RUN_V1",
   "SCOPED_REVIEW_VERIFY_V1",
@@ -58,9 +62,9 @@ export const EXPECTED_ENVIRONMENT_NAMES = Object.freeze([
 ]);
 export const PLAN_ARTIFACT = Object.freeze({
   path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-  commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
-  blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
-  sha256: "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
+  commit: "0a6d0a3362dd927bc3c4893b2228488328cbcf95",
+  blobId: "bc27bcd728bffa8ddfedf8a264b4687a0dc128b7",
+  sha256: "6a1712d635f028b406ff00d84b88ea4ad749d004a4d946478a8b0d508df7bfcd",
 });
 export const SPEC_ARTIFACT = Object.freeze({
   path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -145,7 +149,10 @@ export function buildValidRequest(overrides = {}) {
   });
 }
 
-export function buildBootstrapReceipt(request = buildValidRequest(), overrides = {}) {
+export function buildBootstrapReceipt(
+  request = buildValidRequest(),
+  overrides = {},
+) {
   return {
     schemaVersion: "organization-identity-bootstrap-run/v2",
     receiptCardinality: "ONE_COMMAND_ONE_RECEIPT",
@@ -213,6 +220,116 @@ export function buildExactEnvironment(fixtureValue = "/tmp/fixture") {
   );
 }
 
+function toolLayouts() {
+  return [
+    ["ENV", "bin/env", 0o500],
+    ["NODE", "bin/node", 0o500],
+    ["GIT", "bin/git", 0o500],
+    ["COREPACK_SHIM", "lib/corepack/dist/corepack.js", 0o400],
+    ["COREPACK_LIB_COREPACK_CJS", "lib/corepack/dist/lib/corepack.cjs", 0o400],
+    ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
+    ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
+  ];
+}
+
+export function buildLauncherRuntimeEnvironment() {
+  return {
+    PATH: `${TOOL_ROOT}/bin`,
+    HOME: `${RUNTIME_ROOT}/home`,
+    XDG_CONFIG_HOME: `${RUNTIME_ROOT}/xdg-config`,
+    XDG_CACHE_HOME: `${RUNTIME_ROOT}/xdg-cache`,
+    COREPACK_HOME: `${RUNTIME_ROOT}/corepack-home`,
+    PNPM_HOME: `${RUNTIME_ROOT}/pnpm-home`,
+    TMPDIR: `${RUNTIME_ROOT}/tmp`,
+    NPM_CONFIG_USERCONFIG: "/dev/null",
+    CI: "1",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+  };
+}
+
+export function buildToolRootFiles(executableClosure = buildClosure()) {
+  const closureByRole = Object.fromEntries(
+    executableClosure.map((entry) => [entry.role, entry]),
+  );
+  return toolLayouts().map(([role, relativePath, mode]) => {
+    const source = closureByRole[role];
+    const destinationExecutablePath = `${TOOL_ROOT}/${relativePath}`;
+    return {
+      role,
+      logicalIdentity: source.logicalIdentity,
+      destinationExecutablePath,
+      destinationExecutablePathSha256: sha256Of(
+        Buffer.from(destinationExecutablePath, "utf8"),
+      ),
+      mode,
+      sha256: source.sha256,
+      size: source.size,
+      destinationRoot: "TOOL_ROOT",
+      destinationPathKind: "REGULAR_FILE",
+    };
+  });
+}
+
+export function buildObservedToolRootFiles(executableClosure = buildClosure()) {
+  return buildToolRootFiles(executableClosure).map((file, index) => ({
+    ...file,
+    device: "2",
+    inode: String(index + 21),
+    realpathSha256: HEX[index + 3].repeat(64),
+  }));
+}
+
+export function buildRuntimeRootNames() {
+  return [
+    "runtime",
+    "home",
+    "xdg-config",
+    "xdg-cache",
+    "corepack-home",
+    "pnpm-home",
+    "tmp",
+  ];
+}
+
+export function buildRuntimeRootObservations() {
+  return buildRuntimeRootNames().map((basename, index) => ({
+    basename,
+    mode: 0o700,
+    device: "3",
+    inode: String(index + 31),
+    realpathSha256: HEX[index + 4].repeat(64),
+  }));
+}
+
+export function buildRuntimeRootPlan() {
+  return buildRuntimeRootNames().map((basename) => {
+    const absolutePath =
+      basename === "runtime" ? RUNTIME_ROOT : `${RUNTIME_ROOT}/${basename}`;
+    return {
+      basename,
+      absolutePath,
+      mode: 0o700,
+      realpathPathSha256: sha256Of(Buffer.from(absolutePath, "utf8")),
+    };
+  });
+}
+
+export function buildLauncherFilePlan() {
+  return ["identity-writer-launch", "identity-writer-launch.mjs"].map(
+    (basename) => ({
+      basename,
+      relativePath: basename,
+      mode: 0o500,
+      realpathPathSha256: sha256Of(
+        Buffer.from(`${REQUEST_ROOT}/../launcher/${basename}`, "utf8"),
+      ),
+      sha256: SHA,
+      size: 1,
+    }),
+  );
+}
+
 export async function createLauncherTrustFixture() {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "identity-trust-"));
   const launcherRoot = path.join(fixtureRoot, "launcher");
@@ -255,52 +372,73 @@ export async function createLauncherTrustFixture() {
     realpathSha256: HEX[index].repeat(64),
   }));
   const executableClosure = buildClosure(toolRoot).map((entry, index) => {
-    const executablePath = path.join(toolRoot, `file-${index}`);
+    const [, relativePath, mode] = toolLayouts()[index];
+    const executablePath = path.join(toolRoot, relativePath);
     const bytes = Buffer.from(`file-${index}\n`, "utf8");
     return {
       ...entry,
       executablePath,
+      mode,
       sha256: sha256Of(bytes),
       realpathSha256: sha256Of(Buffer.from(executablePath, "utf8")),
     };
   });
-  const toolRootFiles = executableClosure.map((entry, index) => ({
-    role: entry.role,
-    relativePath: [
-      "bin/env",
-      "bin/node",
-      "bin/git",
-      "lib/corepack/dist/corepack.js",
-      "lib/corepack/dist/lib/corepack.cjs",
-      "lib/pnpm/9.15.9/bin/pnpm.cjs",
-      "lib/pnpm/9.15.9/dist/pnpm.cjs",
-    ][index],
-    mode: index < 3 ? 0o500 : 0o400,
+  const materializedExecutableClosure = executableClosure.map(
+    (entry, index) => {
+      const [, relativePath, mode] = toolLayouts()[index];
+      const destinationExecutablePath =
+        "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root/" +
+        relativePath;
+      return {
+        role: entry.role,
+        logicalIdentity: entry.logicalIdentity,
+        destinationExecutablePath,
+        destinationExecutablePathSha256: sha256Of(
+          Buffer.from(destinationExecutablePath, "utf8"),
+        ),
+        mode,
+        sha256: entry.sha256,
+        size: entry.size,
+        destinationRoot: "TOOL_ROOT",
+        destinationPathKind: "REGULAR_FILE",
+      };
+    },
+  );
+  const toolRootFiles = materializedExecutableClosure.map((entry, index) => ({
+    ...entry,
     device: "2",
     inode: String(index + 21),
     realpathSha256: HEX[index + 3].repeat(64),
-    sha256: HEX[index + 4].repeat(64),
-    size: 200 + index,
-    sourceExecutablePath: entry.executablePath,
-    sourceRealpathSha256: entry.realpathSha256,
-    sourceSha256: entry.sha256,
-    sourceMode: entry.mode,
-    sourcePathPolicy: "RESOLVED_REGULAR_FILE_COPY_ONLY",
-    destinationPathKind: "REGULAR_FILE",
   }));
   const launcherBytes = canonicalJsonBytes({ source: "launcher" });
   const bootstrapBytes = canonicalJsonBytes({ source: "bootstrap" });
   await Promise.all([
-    writeFile(path.join(launcherRoot, "identity-writer-launch.mjs"), launcherBytes, { mode: 0o500 }),
-    writeFile(path.join(launcherRoot, "identity-writer-bootstrap.mjs"), bootstrapBytes, { mode: 0o500 }),
-    ...executableClosure.map((entry, index) =>
-      writeFile(entry.executablePath, Buffer.from(`file-${index}\n`, "utf8"), {
-        mode: 0o500,
-      }),
+    writeFile(
+      path.join(launcherRoot, "identity-writer-launch.mjs"),
+      launcherBytes,
+      { mode: 0o500 },
     ),
+    writeFile(
+      path.join(launcherRoot, "identity-writer-bootstrap.mjs"),
+      bootstrapBytes,
+      { mode: 0o500 },
+    ),
+    ...executableClosure.map(async (entry, index) => {
+      await mkdir(path.dirname(entry.executablePath), {
+        recursive: true,
+        mode: 0o700,
+      });
+      await writeFile(
+        entry.executablePath,
+        Buffer.from(`file-${index}\n`, "utf8"),
+        {
+          mode: entry.mode,
+        },
+      );
+    }),
   ]);
   const contract = {
-    schemaVersion: "organization-identity-launcher-contract/v2",
+    schemaVersion: "organization-identity-launcher-contract/v3",
     rootDirectory:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",
     requestRoot: REQUEST_ROOT,
@@ -348,39 +486,74 @@ export async function createLauncherTrustFixture() {
       blobId: "4".repeat(40),
       sha256: sha256Of(launcherBytes),
     },
-    approvedBootstrap: {
-      path: "scripts/governance-organization-identity-bootstrap.mjs",
-      commit: COMMIT,
-      blobId: "5".repeat(40),
-      sha256: sha256Of(bootstrapBytes),
+    launcherFilePlan: [
+      "identity-writer-launch",
+      "identity-writer-launch.mjs",
+    ].map((basename) => ({
+      basename,
+      relativePath: basename,
+      mode: 0o500,
+      realpathPathSha256: sha256Of(
+        Buffer.from(path.join(launcherRoot, basename), "utf8"),
+      ),
+      sha256: sha256Of(launcherBytes),
+      size: launcherBytes.byteLength,
+    })),
+    contractFilePlan: {
+      basename: "launcher-contract.json",
+      relativePath: "launcher-contract.json",
+      mode: 0o600,
+      realpathPathSha256: sha256Of(
+        Buffer.from(path.join(launcherRoot, "launcher-contract.json"), "utf8"),
+      ),
+      selfDigestExcluded: true,
     },
-    executableClosure,
-    toolRootFiles,
+    materializedExecutableClosure,
     runtimeEnvironment,
-    runtimeRoots,
+    runtimeRootPlan: runtimeRoots.map((entry) => {
+      const absolutePath =
+        entry.basename === "runtime"
+          ? "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime"
+          : `/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime/${entry.basename}`;
+      return {
+        basename: entry.basename,
+        absolutePath,
+        mode: 0o700,
+        realpathPathSha256: sha256Of(Buffer.from(absolutePath, "utf8")),
+      };
+    }),
     commandIds: EXPECTED_COMMAND_IDS,
     ...computeLauncherContractDigests(),
   };
   const contractBytes = canonicalJsonBytes(contract);
   const readback = {
-    schemaVersion: "organization-identity-launcher-readback/v1",
+    schemaVersion: "organization-identity-launcher-readback/v2",
     launcherContractSha256: sha256Of(contractBytes),
-    fourFileObservationSetSha256: SHA,
+    launcherMaterializationPacketSha256: SHA_B,
+    sourceToolClosureSha256: SHA,
+    materializedExecutableClosureSha256: SHA_C,
+    launcherFileObservationSetSha256: SHA,
     toolRootObservationSetSha256: SHA_B,
     runtimeRootObservationSetSha256: SHA_C,
     requestRootObservationSha256: SHA,
     outputRootObservationSha256: SHA,
-    executableClosureObservationSha256: SHA,
     environmentValueSetSha256: sha256Of(canonicalJsonBytes(runtimeEnvironment)),
     hostileCounterexampleSetSha256: SHA,
     reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_READBACK",
     observedAt: "2026-09-03T00:00:00.000Z",
   };
   const materialization = {
-    schemaVersion: "organization-identity-launcher-materialization/v2",
+    schemaVersion: "organization-identity-launcher-materialization/v3",
     launcherContractSha256: sha256Of(contractBytes),
-    ownerUid: process.getuid(),
-    ownerGid: process.getgid(),
+    launcherMaterializationPacketSha256:
+      readback.launcherMaterializationPacketSha256,
+    rootMaterializationRequestSha256: SHA_C,
+    authorizationReceiptSha256: "d".repeat(64),
+    sourceToolClosureSha256: readback.sourceToolClosureSha256,
+    materializedExecutableClosureSha256:
+      readback.materializedExecutableClosureSha256,
+    ownerUid: 0,
+    ownerGid: 0,
     directoryMode: 0o700,
     files: [
       ["identity-writer-launch", 0o500],
@@ -393,14 +566,22 @@ export async function createLauncherTrustFixture() {
       device: "1",
       inode: String(index + 1),
       realpathSha256: HEX[index + 1].repeat(64),
-      sha256: HEX[index + 2].repeat(64),
+      sha256:
+        basename === "identity-writer-bootstrap.mjs"
+          ? sha256Of(bootstrapBytes)
+          : HEX[index + 2].repeat(64),
       size: 100 + index,
     })),
     toolRoot: { mode: 0o700, device: "1", inode: "12", realpathSha256: SHA_B },
     toolRootFiles,
     runtimeRoots,
     requestRoot: { mode: 0o700, device: "1", inode: "10", realpathSha256: SHA },
-    outputRoot: { mode: 0o700, device: "1", inode: "11", realpathSha256: SHA_C },
+    outputRoot: {
+      mode: 0o700,
+      device: "1",
+      inode: "11",
+      realpathSha256: SHA_C,
+    },
     runtimeEnvironment,
     fourFileFsyncSha256: SHA,
     toolRootFsyncSha256: SHA_B,
@@ -413,10 +594,13 @@ export async function createLauncherTrustFixture() {
     result: "PASS",
   };
   const review = {
-    schemaVersion: "organization-identity-launcher-materialization-review/v2",
+    schemaVersion: "organization-identity-launcher-materialization-review/v3",
     launcherContractSha256: materialization.launcherContractSha256,
-    launcherMaterializationReceiptSha256:
-      sha256Of(canonicalJsonBytes(materialization)),
+    launcherMaterializationPacketSha256:
+      readback.launcherMaterializationPacketSha256,
+    launcherMaterializationReceiptSha256: sha256Of(
+      canonicalJsonBytes(materialization),
+    ),
     readbackReportSha256: materialization.readbackReportSha256,
     reportSha256: SHA,
     counterexampleSetSha256: SHA_B,
@@ -426,19 +610,37 @@ export async function createLauncherTrustFixture() {
     verdict: "PASS",
   };
   await Promise.all([
-    writeFile(path.join(launcherRoot, "launcher-contract.json"), contractBytes, { mode: 0o600 }),
-    writeFile(path.join(launcherRoot, "launcher-materialization-readback.json"), canonicalJsonBytes(readback), { mode: 0o600 }),
-    writeFile(path.join(launcherRoot, "launcher-materialization.json"), canonicalJsonBytes(materialization), { mode: 0o600 }),
-    writeFile(path.join(launcherRoot, "launcher-materialization-review.json"), canonicalJsonBytes(review), { mode: 0o600 }),
+    writeFile(
+      path.join(launcherRoot, "launcher-contract.json"),
+      contractBytes,
+      { mode: 0o600 },
+    ),
+    writeFile(
+      path.join(launcherRoot, "launcher-materialization-readback.json"),
+      canonicalJsonBytes(readback),
+      { mode: 0o600 },
+    ),
+    writeFile(
+      path.join(launcherRoot, "launcher-materialization.json"),
+      canonicalJsonBytes(materialization),
+      { mode: 0o600 },
+    ),
+    writeFile(
+      path.join(launcherRoot, "launcher-materialization-review.json"),
+      canonicalJsonBytes(review),
+      { mode: 0o600 },
+    ),
   ]);
   return {
     fixtureRoot,
     launcherRoot,
     request: buildValidRequest({
-      launcherMaterializationReceiptSha256:
-        sha256Of(canonicalJsonBytes(materialization)),
-      launcherMaterializationReviewReceiptSha256:
-        sha256Of(canonicalJsonBytes(review)),
+      launcherMaterializationReceiptSha256: sha256Of(
+        canonicalJsonBytes(materialization),
+      ),
+      launcherMaterializationReviewReceiptSha256: sha256Of(
+        canonicalJsonBytes(review),
+      ),
     }),
   };
 }

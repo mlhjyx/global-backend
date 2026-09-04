@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmod,
   link,
@@ -16,9 +15,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  ALLOWED_ENVIRONMENT_NAMES,
-  LOCAL_COMMAND_IDS,
-  buildClosedCommandRequest,
   canonicalJsonBytes,
   computeLauncherContractDigests,
   dispatchClosedCommand,
@@ -35,203 +31,32 @@ import {
   verifyControlledFile,
   verifyLauncherContract,
 } from "./governance-organization-identity-launcher.mjs";
+import {
+  COMMIT,
+  EXPECTED_COMMAND_IDS as expectedCommandIds,
+  OUTPUT_ROOT,
+  REQUEST_ROOT,
+  RUNTIME_ROOT,
+  SHA,
+  SHA_B,
+  SHA_C,
+  TOOL_ROOT,
+  buildBootstrapReceipt as bootstrapReceipt,
+  buildClosure as closure,
+  buildLauncherFilePlan as launcherFilePlan,
+  buildLauncherRuntimeEnvironment as runtimeEnvironment,
+  buildObservedToolRootFiles as observedToolRootFiles,
+  buildRuntimeRootObservations as runtimeRoots,
+  buildRuntimeRootPlan as runtimeRootPlan,
+  buildToolRootFiles as toolRootFiles,
+  buildValidRequest as validRequest,
+  canonicalJson as canonical,
+  sha256Of as sha,
+} from "./governance-organization-identity-test-fixtures.mjs";
 
 const launcherModulePath = fileURLToPath(
   new URL("./governance-organization-identity-launcher.mjs", import.meta.url),
 );
-
-const SHA = "a".repeat(64);
-const SHA_B = "b".repeat(64);
-const SHA_C = "c".repeat(64);
-const COMMIT = "1".repeat(40);
-const REQUEST_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
-const OUTPUT_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
-const TOOL_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
-const RUNTIME_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
-
-const expectedCommandIds = [
-  "BOOTSTRAP_AUTHORITY_RUN_V1",
-  "SCOPED_REVIEW_VERIFY_V1",
-  "CURRENT_MAIN_AUDIT_LOCAL_V1",
-  "CURRENT_MAIN_VALIDATE_V1",
-  "CURRENT_MAIN_GENERATE_V1",
-  "COPY_WRITE_ELIGIBILITY_V1",
-  "COPY_SYNC_CITATIONS_V1",
-  "GIT_REFRESH_START_V1",
-  "GIT_REFRESH_COMMIT_V1",
-  "GIT_ADMISSION_COMMIT_V1",
-  "GIT_ACCEPTANCE_COMMIT_V1",
-  "REFRESH_VERIFY_V1",
-  "MIGRATION_STATIC_VERIFY_V1",
-  "PRISMA_GENERATE_V1",
-  "SCANNER_TEST_V1",
-  "SCANNER_BASELINE_V1",
-  "SCANNER_STAGE_V1",
-  "SCANNER_ZERO_V1",
-  "SCANNER_ACCEPTANCE_V1",
-  "GOVERNANCE_VERIFY_V1",
-  "DOCS_VERIFY_V1",
-  "API_VERIFY_V1",
-  "RUNTIME_ARTIFACT_VERIFY_V1",
-  "CONTRACT_GRAPH_VERIFY_V1",
-  "V3_WORKTREE_CREATE_V1",
-];
-
-const expectedEnvironmentNames = [
-  "PATH",
-  "HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-  "COREPACK_HOME",
-  "PNPM_HOME",
-  "TMPDIR",
-  "NPM_CONFIG_USERCONFIG",
-  "CI",
-  "LANG",
-  "LC_ALL",
-];
-const HEX = Object.freeze([
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "a",
-  "b",
-  "c",
-]);
-
-function canonical(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-    .join(",")}}`;
-}
-
-function sha(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function closure() {
-  return [
-    "ENV",
-    "NODE",
-    "GIT",
-    "COREPACK_SHIM",
-    "COREPACK_LIB_COREPACK_CJS",
-    "PNPM_SHIM",
-    "PNPM_ENTRYPOINT",
-  ].map((role, index) => ({
-    role,
-    logicalIdentity: `${role.toLowerCase()}@test`,
-    executablePath: `/controlled/bin/${role.toLowerCase()}`,
-    realpathSha256: String(index + 1).repeat(64),
-    sha256: String(index + 2).repeat(64),
-    size: 100 + index,
-    mode: 0o500,
-  }));
-}
-
-function runtimeEnvironment() {
-  return {
-    PATH: `${TOOL_ROOT}/bin`,
-    HOME: `${RUNTIME_ROOT}/home`,
-    XDG_CONFIG_HOME: `${RUNTIME_ROOT}/xdg-config`,
-    XDG_CACHE_HOME: `${RUNTIME_ROOT}/xdg-cache`,
-    COREPACK_HOME: `${RUNTIME_ROOT}/corepack-home`,
-    PNPM_HOME: `${RUNTIME_ROOT}/pnpm-home`,
-    TMPDIR: `${RUNTIME_ROOT}/tmp`,
-    NPM_CONFIG_USERCONFIG: "/dev/null",
-    CI: "1",
-    LANG: "C.UTF-8",
-    LC_ALL: "C.UTF-8",
-  };
-}
-
-function toolRootFiles(executableClosure = closure()) {
-  const closureByRole = Object.fromEntries(
-    executableClosure.map((entry) => [entry.role, entry]),
-  );
-  return [
-    ["ENV", "bin/env", 0o500],
-    ["NODE", "bin/node", 0o500],
-    ["GIT", "bin/git", 0o500],
-    ["COREPACK_SHIM", "lib/corepack/dist/corepack.js", 0o400],
-    ["COREPACK_LIB_COREPACK_CJS", "lib/corepack/dist/lib/corepack.cjs", 0o400],
-    ["PNPM_SHIM", "lib/pnpm/9.15.9/bin/pnpm.cjs", 0o400],
-    ["PNPM_ENTRYPOINT", "lib/pnpm/9.15.9/dist/pnpm.cjs", 0o400],
-  ].map(([role, relativePath, mode], index) => {
-    const source = closureByRole[role];
-    return {
-      role,
-      relativePath,
-      mode,
-      device: "2",
-      inode: String(index + 21),
-      realpathSha256: HEX[index + 2].repeat(64),
-      sha256: HEX[index + 3].repeat(64),
-      size: 200 + index,
-      sourceExecutablePath: source.executablePath,
-      sourceRealpathSha256: source.realpathSha256,
-      sourceSha256: source.sha256,
-      sourceMode: source.mode,
-      sourcePathPolicy: "RESOLVED_REGULAR_FILE_COPY_ONLY",
-      destinationPathKind: "REGULAR_FILE",
-    };
-  });
-}
-
-function runtimeRoots() {
-  return [
-    "runtime",
-    "home",
-    "xdg-config",
-    "xdg-cache",
-    "corepack-home",
-    "pnpm-home",
-    "tmp",
-  ].map((basename, index) => ({
-    basename,
-    mode: 0o700,
-    device: "3",
-    inode: String(index + 31),
-    realpathSha256: HEX[index + 4].repeat(64),
-  }));
-}
-
-function validRequest(overrides = {}) {
-  return buildClosedCommandRequest({
-    taskId: "2",
-    commandId: "SCANNER_TEST_V1",
-    mode: "TEST",
-    subjectCommit: COMMIT,
-    bootstrapContractSha256: SHA,
-    launcherMaterializationReceiptSha256: SHA_B,
-    launcherMaterializationReviewReceiptSha256: SHA_C,
-    authorizationReceiptSha256: null,
-    externalControllerReceiptSha256: null,
-    anchorReceiptSha256: null,
-    parameters: {
-      baselineSubjectCommit: COMMIT,
-      currentMainAdmissionCommit: "2".repeat(40),
-      b0mMigrationCommit: "3".repeat(40),
-      suiteId: "B0_SCANNER",
-    },
-    requestRoot: REQUEST_ROOT,
-    outputRoot: OUTPUT_ROOT,
-    ...overrides,
-  });
-}
 
 function parse(request, options = {}) {
   return parseClosedCommandRequest(canonicalJsonBytes(request), {
@@ -245,7 +70,9 @@ test("verifies the complete executable closure and rejects omissions, extras, re
   const entries = closure();
   assert.deepEqual(verifyExecutableClosure(entries, entries), {
     status: "PASS",
-    executableClosureSetSha256: sha(`${canonical(entries)}\n`),
+    executableClosureSetSha256: sha(
+      Buffer.from(`${canonical(entries)}\n`, "utf8"),
+    ),
   });
   for (const candidate of [
     entries.slice(0, -1),
@@ -268,7 +95,7 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
   const contractDigests = computeLauncherContractDigests();
   const executableClosure = closure();
   const contract = {
-    schemaVersion: "organization-identity-launcher-contract/v2",
+    schemaVersion: "organization-identity-launcher-contract/v3",
     rootDirectory:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",
     requestRoot: REQUEST_ROOT,
@@ -308,10 +135,10 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
     },
     approvedPlan: {
       path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-      commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
-      blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
+      commit: "0a6d0a3362dd927bc3c4893b2228488328cbcf95",
+      blobId: "bc27bcd728bffa8ddfedf8a264b4687a0dc128b7",
       sha256:
-        "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
+        "6a1712d635f028b406ff00d84b88ea4ad749d004a4d946478a8b0d508df7bfcd",
     },
     approvedSpec: {
       path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -326,16 +153,17 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
       blobId: "4".repeat(40),
       sha256: SHA,
     },
-    approvedBootstrap: {
-      path: "scripts/governance-organization-identity-bootstrap.mjs",
-      commit: COMMIT,
-      blobId: "5".repeat(40),
-      sha256: SHA_B,
+    launcherFilePlan: launcherFilePlan(),
+    contractFilePlan: {
+      basename: "launcher-contract.json",
+      relativePath: "launcher-contract.json",
+      mode: 0o600,
+      realpathPathSha256: SHA,
+      selfDigestExcluded: true,
     },
-    executableClosure,
-    toolRootFiles: toolRootFiles(executableClosure),
+    materializedExecutableClosure: toolRootFiles(executableClosure),
     runtimeEnvironment: runtimeEnvironment(),
-    runtimeRoots: runtimeRoots(),
+    runtimeRootPlan: runtimeRootPlan(),
     commandIds: expectedCommandIds,
     ...contractDigests,
   };
@@ -347,7 +175,7 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
     runtimeRoot: { ownerUid: 0, ownerGid: 0, mode: 0o700, symlink: false },
     approvedPlan: contract.approvedPlan,
     approvedSpec: contract.approvedSpec,
-    executableClosure,
+    materializedExecutableClosure: contract.materializedExecutableClosure,
   };
   const verified = verifyLauncherContract(contract, observed);
   assert.equal(verified.status, "PASS", verified.code);
@@ -357,10 +185,25 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
         ...contract,
         approvedPlan: {
           ...contract.approvedPlan,
-          commit: "9228673d8bd7277c3132ac461cb7d9e41666782f",
-          blobId: "481430567129f74f489c694c73b6e298503d15b5",
+          commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
+          blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
           sha256:
-            "ee653539f745a06dbc379b74425792513a348e3f541f48e8e6eae7cd43db5718",
+            "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
+        },
+      },
+      observed,
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  assert.equal(
+    verifyLauncherContract(
+      {
+        ...contract,
+        approvedBootstrap: {
+          path: "scripts/governance-organization-identity-bootstrap.mjs",
+          commit: COMMIT,
+          blobId: "5".repeat(40),
+          sha256: SHA_B,
         },
       },
       observed,
@@ -405,11 +248,12 @@ test("verifies the immutable launcher trust roots and permission matrix", () => 
     },
     {
       ...contract,
-      toolRootFiles: contract.toolRootFiles.slice(0, -1),
+      materializedExecutableClosure:
+        contract.materializedExecutableClosure.slice(0, -1),
     },
     {
       ...contract,
-      runtimeRoots: [...contract.runtimeRoots].reverse(),
+      runtimeRootPlan: [...contract.runtimeRootPlan].reverse(),
     },
   ]) {
     assert.equal(
@@ -520,59 +364,6 @@ test("renders a wrapper that accepts one absolute request and clears inherited N
   );
 });
 
-function bootstrapReceipt(overrides = {}, request = validRequest()) {
-  return {
-    schemaVersion: "organization-identity-bootstrap-run/v2",
-    receiptCardinality: "ONE_COMMAND_ONE_RECEIPT",
-    bootstrapContractSha256: request.bootstrapContractSha256,
-    launcherMaterializationReceiptSha256:
-      request.launcherMaterializationReceiptSha256,
-    launcherMaterializationReviewReceiptSha256:
-      request.launcherMaterializationReviewReceiptSha256,
-    requestId: request.requestId,
-    taskId: request.taskId,
-    commandId: request.commandId,
-    mode: request.mode,
-    closedCommandRequestSha256: sha(canonicalJsonBytes(request)),
-    inputRecordPath: request.input.inputRecordPath,
-    inputRecordUri: request.input.inputRecordUri,
-    inputRecordSha256: request.input.inputRecordSha256,
-    payloadSchemaSha256: request.input.payloadSchemaSha256,
-    payloadSha256: request.input.payloadSha256,
-    outputRecordPath: request.input.outputRecordPath,
-    outputRecordSha256: SHA,
-    authorizationReceiptSha256: request.authorizationReceiptSha256,
-    externalControllerReceiptSha256: request.externalControllerReceiptSha256,
-    anchorReceiptSha256: request.anchorReceiptSha256,
-    externalLaunchReceiptSha256: SHA,
-    acceptedSubjectCommit: request.subjectCommit,
-    subjectConfigurationSetSha256: SHA,
-    subjectAbsenceSentinelSetSha256: SHA,
-    subjectGitClosureSha256: SHA,
-    environmentValueSetSha256: SHA,
-    taskRoot: "/controlled/task-root",
-    taskRootDevice: "1",
-    taskRootInode: "2",
-    fixedRootSetSha256: SHA,
-    postInstallBootstrapRehashSha256: SHA,
-    dependencyDeclarationRoots: [],
-    toolExecutionRoots: [],
-    prismaSchemaSha256: SHA,
-    generatedClientSetSha256: SHA,
-    generatedDmmfSha256: SHA,
-    generatedDelegateSetSha256: SHA,
-    generatedOutputSetSha256: SHA,
-    typescriptDynamicImportSha256: SHA,
-    hostileMarkerSetSha256: SHA,
-    hostileMarkerExecutionCount: 0,
-    prePostToctouSha256: SHA,
-    startedAt: "2026-09-03T00:00:00.000Z",
-    finishedAt: "2026-09-03T00:00:01.000Z",
-    result: "PASS",
-    ...overrides,
-  };
-}
-
 test("validates one-command bootstrap receipts and rejects receipt reuse", () => {
   const request = validRequest();
   const receipt = bootstrapReceipt();
@@ -637,15 +428,19 @@ test("validates the one-way four-file launcher materialization receipt chain", (
   const environmentValueSetSha256 = sha(
     canonicalJsonBytes(runtimeEnvironment()),
   );
+  const sourceToolClosureSha256 = SHA_B;
+  const materializedExecutableClosureSha256 = SHA_C;
   const readback = {
-    schemaVersion: "organization-identity-launcher-readback/v1",
+    schemaVersion: "organization-identity-launcher-readback/v2",
     launcherContractSha256: SHA,
-    fourFileObservationSetSha256: SHA,
+    launcherMaterializationPacketSha256: SHA_B,
+    sourceToolClosureSha256,
+    materializedExecutableClosureSha256,
+    launcherFileObservationSetSha256: SHA,
     toolRootObservationSetSha256: SHA_B,
     runtimeRootObservationSetSha256: SHA_C,
     requestRootObservationSha256: SHA,
     outputRootObservationSha256: SHA,
-    executableClosureObservationSha256: SHA,
     environmentValueSetSha256,
     hostileCounterexampleSetSha256: SHA,
     reviewerClass: "INDEPENDENT_ROOT_LAUNCHER_READBACK",
@@ -673,10 +468,15 @@ test("validates the one-way four-file launcher materialization receipt chain", (
     sha256: String(index + 2).repeat(64),
     size: 100 + index,
   }));
-  const toolFiles = toolRootFiles();
+  const toolFiles = observedToolRootFiles();
   const materialization = {
-    schemaVersion: "organization-identity-launcher-materialization/v2",
+    schemaVersion: "organization-identity-launcher-materialization/v3",
     launcherContractSha256: SHA,
+    launcherMaterializationPacketSha256: SHA_B,
+    rootMaterializationRequestSha256: SHA_C,
+    authorizationReceiptSha256: "d".repeat(64),
+    sourceToolClosureSha256,
+    materializedExecutableClosureSha256,
     ownerUid: 0,
     ownerGid: 0,
     directoryMode: 0o700,
@@ -749,8 +549,9 @@ test("validates the one-way four-file launcher materialization receipt chain", (
   }
 
   const review = {
-    schemaVersion: "organization-identity-launcher-materialization-review/v2",
+    schemaVersion: "organization-identity-launcher-materialization-review/v3",
     launcherContractSha256: SHA,
+    launcherMaterializationPacketSha256: SHA_B,
     launcherMaterializationReceiptSha256: sha(
       canonicalJsonBytes(materialization),
     ),

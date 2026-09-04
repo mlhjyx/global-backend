@@ -25,9 +25,9 @@ const APPROVED_V2_BRANCH =
 const CLEAN_STATUS_SHA256 = sha256(Buffer.from("", "utf8"));
 export const APPROVED_PLAN = Object.freeze({
   path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-  commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
-  blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
-  sha256: "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
+  commit: "0a6d0a3362dd927bc3c4893b2228488328cbcf95",
+  blobId: "bc27bcd728bffa8ddfedf8a264b4687a0dc128b7",
+  sha256: "6a1712d635f028b406ff00d84b88ea4ad749d004a4d946478a8b0d508df7bfcd",
 });
 export const APPROVED_SPEC = Object.freeze({
   path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -588,63 +588,156 @@ function validateRuntimeEnvironment(environment) {
   );
 }
 
-function validateToolRootFile(file, layout, executableClosure) {
-  const [role, relativePath, mode] = layout;
-  const source = executableClosure.find((entry) => entry.role === role);
+function materializedExecutablePath(relativePath) {
+  return `${TOOL_ROOT}/${relativePath}`;
+}
+
+function validatePlannedFile(file, basename, relativePath, mode) {
   return (
-    source &&
     exactKeys(file, [
-      "role",
+      "basename",
       "relativePath",
       "mode",
-      "device",
-      "inode",
-      "realpathSha256",
+      "realpathPathSha256",
       "sha256",
       "size",
-      "sourceExecutablePath",
-      "sourceRealpathSha256",
-      "sourceSha256",
-      "sourceMode",
-      "sourcePathPolicy",
-      "destinationPathKind",
     ]) &&
-    file.role === role &&
+    file.basename === basename &&
     file.relativePath === relativePath &&
     file.mode === mode &&
-    typeof file.device === "string" &&
-    file.device.length > 0 &&
-    typeof file.inode === "string" &&
-    file.inode.length > 0 &&
-    isSha(file.realpathSha256) &&
+    isSha(file.realpathPathSha256) &&
     isSha(file.sha256) &&
     Number.isSafeInteger(file.size) &&
-    file.size >= 0 &&
-    file.sourceExecutablePath === source.executablePath &&
-    file.sourceRealpathSha256 === source.realpathSha256 &&
-    file.sourceSha256 === source.sha256 &&
-    file.sourceMode === source.mode &&
-    file.sourcePathPolicy === "RESOLVED_REGULAR_FILE_COPY_ONLY" &&
-    file.destinationPathKind === "REGULAR_FILE"
+    file.size >= 0
   );
 }
 
-function validateToolRootFiles(files, executableClosure) {
+function validateLauncherFilePlan(files) {
+  return (
+    Array.isArray(files) &&
+    files.length === 2 &&
+    validatePlannedFile(
+      files[0],
+      "identity-writer-launch",
+      "identity-writer-launch",
+      0o500,
+    ) &&
+    validatePlannedFile(
+      files[1],
+      "identity-writer-launch.mjs",
+      "identity-writer-launch.mjs",
+      0o500,
+    )
+  );
+}
+
+function validateContractFilePlan(file) {
+  return (
+    exactKeys(file, [
+      "basename",
+      "relativePath",
+      "mode",
+      "realpathPathSha256",
+      "selfDigestExcluded",
+    ]) &&
+    file.basename === "launcher-contract.json" &&
+    file.relativePath === "launcher-contract.json" &&
+    file.mode === 0o600 &&
+    isSha(file.realpathPathSha256) &&
+    file.selfDigestExcluded === true
+  );
+}
+
+function validateMaterializedClosureEntry(file, layout, requireObservation) {
+  const [role, relativePath, mode] = layout;
+  const keys = [
+    "role",
+    "logicalIdentity",
+    "destinationExecutablePath",
+    "destinationExecutablePathSha256",
+    "mode",
+    "sha256",
+    "size",
+    "destinationRoot",
+    "destinationPathKind",
+  ];
+  if (requireObservation) keys.push("device", "inode", "realpathSha256");
+  const destinationExecutablePath = materializedExecutablePath(relativePath);
+  return (
+    exactKeys(file, keys) &&
+    file.role === role &&
+    typeof file.logicalIdentity === "string" &&
+    file.logicalIdentity.length > 0 &&
+    file.destinationExecutablePath === destinationExecutablePath &&
+    file.destinationExecutablePathSha256 ===
+      sha256(Buffer.from(destinationExecutablePath, "utf8")) &&
+    file.mode === mode &&
+    isSha(file.sha256) &&
+    Number.isSafeInteger(file.size) &&
+    file.size >= 0 &&
+    file.destinationRoot === "TOOL_ROOT" &&
+    file.destinationPathKind === "REGULAR_FILE" &&
+    (!requireObservation ||
+      (typeof file.device === "string" &&
+        file.device.length > 0 &&
+        typeof file.inode === "string" &&
+        file.inode.length > 0 &&
+        isSha(file.realpathSha256)))
+  );
+}
+
+function validateMaterializedExecutableClosure(
+  files,
+  requireObservation = false,
+) {
   return (
     Array.isArray(files) &&
     files.length === TOOL_ROOT_FILE_LAYOUT.length &&
     files.every((file, index) =>
-      validateToolRootFile(
+      validateMaterializedClosureEntry(
         file,
         TOOL_ROOT_FILE_LAYOUT[index],
-        executableClosure,
+        requireObservation,
       ),
     ) &&
-    new Set(files.map(({ inode }) => inode)).size === files.length
+    (!requireObservation ||
+      new Set(files.map(({ inode }) => inode)).size === files.length)
   );
 }
 
-function validateRuntimeRootDirectory(root, basename) {
+function validateRuntimeRootPlanDirectory(root, [basename, absolutePath]) {
+  return (
+    exactKeys(root, [
+      "basename",
+      "absolutePath",
+      "mode",
+      "realpathPathSha256",
+    ]) &&
+    root.basename === basename &&
+    root.absolutePath === absolutePath &&
+    root.mode === 0o700 &&
+    isSha(root.realpathPathSha256)
+  );
+}
+
+function runtimeRootPlanLayout() {
+  return RUNTIME_ROOT_NAMES.map((basename) => [
+    basename,
+    basename === "runtime" ? RUNTIME_ROOT : `${RUNTIME_ROOT}/${basename}`,
+  ]);
+}
+
+function validateRuntimeRootPlan(roots) {
+  return (
+    Array.isArray(roots) &&
+    roots.length === RUNTIME_ROOT_NAMES.length &&
+    roots.every((root, index) =>
+      validateRuntimeRootPlanDirectory(root, runtimeRootPlanLayout()[index]),
+    )
+  );
+}
+
+function validateObservedRuntimeRootDirectory(root, basename) {
   return (
     exactKeys(root, [
       "basename",
@@ -663,12 +756,12 @@ function validateRuntimeRootDirectory(root, basename) {
   );
 }
 
-function validateRuntimeRoots(roots) {
+function validateObservedRuntimeRoots(roots) {
   return (
     Array.isArray(roots) &&
     roots.length === RUNTIME_ROOT_NAMES.length &&
     roots.every((root, index) =>
-      validateRuntimeRootDirectory(root, RUNTIME_ROOT_NAMES[index]),
+      validateObservedRuntimeRootDirectory(root, RUNTIME_ROOT_NAMES[index]),
     ) &&
     new Set(roots.map(({ inode }) => inode)).size === roots.length
   );
@@ -1247,11 +1340,11 @@ export function verifyLauncherContract(contract, observed) {
     "approvedPlan",
     "approvedSpec",
     "approvedLauncher",
-    "approvedBootstrap",
-    "executableClosure",
-    "toolRootFiles",
+    "launcherFilePlan",
+    "contractFilePlan",
+    "materializedExecutableClosure",
     "runtimeEnvironment",
-    "runtimeRoots",
+    "runtimeRootPlan",
     "commandIds",
     "commandRegistrySha256",
     "exactEnvironmentSchemaSha256",
@@ -1265,7 +1358,7 @@ export function verifyLauncherContract(contract, observed) {
     return integrity("LAUNCHER_CONTRACT_KEYS_INVALID");
   }
   if (
-    contract.schemaVersion !== "organization-identity-launcher-contract/v2" ||
+    contract.schemaVersion !== "organization-identity-launcher-contract/v3" ||
     contract.rootDirectory !== ROOT_DIRECTORY ||
     contract.requestRoot !== DEFAULT_REQUEST_ROOT ||
     contract.outputRoot !== DEFAULT_OUTPUT_ROOT ||
@@ -1366,13 +1459,6 @@ export function verifyLauncherContract(contract, observed) {
         path: "scripts/governance-organization-identity-launcher.mjs",
       },
       true,
-    ) ||
-    !validateApprovedSource(
-      contract.approvedBootstrap,
-      {
-        path: "scripts/governance-organization-identity-bootstrap.mjs",
-      },
-      true,
     )
   ) {
     return integrity("LAUNCHER_CONTRACT_SOURCE_INVALID");
@@ -1397,12 +1483,14 @@ export function verifyLauncherContract(contract, observed) {
       return integrity("LAUNCHER_CONTRACT_INVALID");
   }
   if (
-    !validateToolRootFiles(
-      contract.toolRootFiles,
-      contract.executableClosure,
+    !validateLauncherFilePlan(contract.launcherFilePlan) ||
+    !validateContractFilePlan(contract.contractFilePlan) ||
+    !validateMaterializedExecutableClosure(
+      contract.materializedExecutableClosure,
+      false,
     ) ||
     !validateRuntimeEnvironment(contract.runtimeEnvironment) ||
-    !validateRuntimeRoots(contract.runtimeRoots)
+    !validateRuntimeRootPlan(contract.runtimeRootPlan)
   ) {
     return integrity("LAUNCHER_CONTRACT_INVALID");
   }
@@ -1415,7 +1503,7 @@ export function verifyLauncherContract(contract, observed) {
       "runtimeRoot",
       "approvedPlan",
       "approvedSpec",
-      "executableClosure",
+      "materializedExecutableClosure",
     ])
   ) {
     return integrity("LAUNCHER_OBSERVATION_INVALID");
@@ -1439,10 +1527,17 @@ export function verifyLauncherContract(contract, observed) {
   ) {
     return integrity("LAUNCHER_SOURCE_DRIFT");
   }
-  return verifyExecutableClosure(
-    contract.executableClosure,
-    observed.executableClosure,
-  );
+  if (
+    canonicalJson(observed.materializedExecutableClosure) !==
+    canonicalJson(contract.materializedExecutableClosure)
+  ) {
+    return integrity("EXECUTABLE_CLOSURE_INVALID");
+  }
+  return pass({
+    executableClosureSetSha256: sha256(
+      canonicalJsonBytes(observed.materializedExecutableClosure),
+    ),
+  });
 }
 
 function shellToken(value) {
@@ -1752,18 +1847,20 @@ export function validateLauncherReadbackReport(report) {
     !exactKeys(report, [
       "schemaVersion",
       "launcherContractSha256",
-      "fourFileObservationSetSha256",
+      "launcherMaterializationPacketSha256",
+      "sourceToolClosureSha256",
+      "materializedExecutableClosureSha256",
+      "launcherFileObservationSetSha256",
       "toolRootObservationSetSha256",
       "runtimeRootObservationSetSha256",
       "requestRootObservationSha256",
       "outputRootObservationSha256",
-      "executableClosureObservationSha256",
       "environmentValueSetSha256",
       "hostileCounterexampleSetSha256",
       "reviewerClass",
       "observedAt",
     ]) ||
-    report.schemaVersion !== "organization-identity-launcher-readback/v1" ||
+    report.schemaVersion !== "organization-identity-launcher-readback/v2" ||
     report.reviewerClass !== "INDEPENDENT_ROOT_LAUNCHER_READBACK" ||
     !Number.isFinite(Date.parse(report.observedAt))
   ) {
@@ -1771,12 +1868,14 @@ export function validateLauncherReadbackReport(report) {
   }
   for (const key of [
     "launcherContractSha256",
-    "fourFileObservationSetSha256",
+    "launcherMaterializationPacketSha256",
+    "sourceToolClosureSha256",
+    "materializedExecutableClosureSha256",
+    "launcherFileObservationSetSha256",
     "toolRootObservationSetSha256",
     "runtimeRootObservationSetSha256",
     "requestRootObservationSha256",
     "outputRootObservationSha256",
-    "executableClosureObservationSha256",
     "environmentValueSetSha256",
     "hostileCounterexampleSetSha256",
   ]) {
@@ -1830,6 +1929,11 @@ export function validateLauncherMaterializationReceipt(
     !exactKeys(receipt, [
       "schemaVersion",
       "launcherContractSha256",
+      "launcherMaterializationPacketSha256",
+      "rootMaterializationRequestSha256",
+      "authorizationReceiptSha256",
+      "sourceToolClosureSha256",
+      "materializedExecutableClosureSha256",
       "ownerUid",
       "ownerGid",
       "directoryMode",
@@ -1851,7 +1955,7 @@ export function validateLauncherMaterializationReceipt(
       "result",
     ]) ||
     receipt.schemaVersion !==
-      "organization-identity-launcher-materialization/v2" ||
+      "organization-identity-launcher-materialization/v3" ||
     receipt.ownerUid !== 0 ||
     receipt.ownerGid !== 0 ||
     receipt.directoryMode !== 0o700 ||
@@ -1879,27 +1983,8 @@ export function validateLauncherMaterializationReceipt(
     ) ||
     new Set(receipt.files.map(({ inode }) => inode)).size !== 4 ||
     !validateMaterializedRoot(receipt.toolRoot) ||
-    !validateToolRootFiles(
-      receipt.toolRootFiles,
-      receipt.toolRootFiles.map(
-        ({
-          role,
-          sourceExecutablePath,
-          sourceMode,
-          sourceRealpathSha256,
-          sourceSha256,
-        }) => ({
-          role,
-          logicalIdentity: role.toLowerCase(),
-          executablePath: sourceExecutablePath,
-          realpathSha256: sourceRealpathSha256,
-          sha256: sourceSha256,
-          size: 0,
-          mode: sourceMode,
-        }),
-      ),
-    ) ||
-    !validateRuntimeRoots(receipt.runtimeRoots) ||
+    !validateMaterializedExecutableClosure(receipt.toolRootFiles, true) ||
+    !validateObservedRuntimeRoots(receipt.runtimeRoots) ||
     !validateMaterializedRoot(receipt.requestRoot) ||
     !validateMaterializedRoot(receipt.outputRoot) ||
     !validateRuntimeEnvironment(receipt.runtimeEnvironment) ||
@@ -1910,6 +1995,11 @@ export function validateLauncherMaterializationReceipt(
       receipt.outputRoot.inode,
     ]).size !== 10 ||
     !isSha(receipt.launcherContractSha256) ||
+    !isSha(receipt.launcherMaterializationPacketSha256) ||
+    !isSha(receipt.rootMaterializationRequestSha256) ||
+    !isSha(receipt.authorizationReceiptSha256) ||
+    !isSha(receipt.sourceToolClosureSha256) ||
+    !isSha(receipt.materializedExecutableClosureSha256) ||
     !isSha(receipt.fourFileFsyncSha256) ||
     !isSha(receipt.toolRootFsyncSha256) ||
     !isSha(receipt.runtimeRootFsyncSha256) ||
@@ -1925,6 +2015,12 @@ export function validateLauncherMaterializationReceipt(
   if (
     validateLauncherReadbackReport(readbackReport).status !== "PASS" ||
     receipt.launcherContractSha256 !== readbackReport.launcherContractSha256 ||
+    receipt.launcherMaterializationPacketSha256 !==
+      readbackReport.launcherMaterializationPacketSha256 ||
+    receipt.sourceToolClosureSha256 !==
+      readbackReport.sourceToolClosureSha256 ||
+    receipt.materializedExecutableClosureSha256 !==
+      readbackReport.materializedExecutableClosureSha256 ||
     receipt.environmentValueSetSha256 !==
       sha256(canonicalJsonBytes(receipt.runtimeEnvironment)) ||
     receipt.environmentValueSetSha256 !==
@@ -1948,6 +2044,7 @@ export function validateLauncherMaterializationReviewReceipt(
     !exactKeys(receipt, [
       "schemaVersion",
       "launcherContractSha256",
+      "launcherMaterializationPacketSha256",
       "launcherMaterializationReceiptSha256",
       "readbackReportSha256",
       "reportSha256",
@@ -1958,7 +2055,7 @@ export function validateLauncherMaterializationReviewReceipt(
       "verdict",
     ]) ||
     receipt.schemaVersion !==
-      "organization-identity-launcher-materialization-review/v2" ||
+      "organization-identity-launcher-materialization-review/v3" ||
     receipt.reviewerClass !== "INDEPENDENT_ROOT_LAUNCHER_REVIEW" ||
     receipt.critical !== 0 ||
     receipt.important !== 0 ||
@@ -1974,6 +2071,7 @@ export function validateLauncherMaterializationReviewReceipt(
   }
   for (const key of [
     "launcherContractSha256",
+    "launcherMaterializationPacketSha256",
     "launcherMaterializationReceiptSha256",
     "readbackReportSha256",
     "reportSha256",
@@ -1986,6 +2084,8 @@ export function validateLauncherMaterializationReviewReceipt(
   if (
     receipt.launcherContractSha256 !==
       materializationReceipt.launcherContractSha256 ||
+    receipt.launcherMaterializationPacketSha256 !==
+      materializationReceipt.launcherMaterializationPacketSha256 ||
     receipt.launcherMaterializationReceiptSha256 !==
       sha256(canonicalJsonBytes(materializationReceipt))
   ) {
@@ -2177,6 +2277,14 @@ export async function verifyFixedLauncherTrust(request, options = {}) {
     return resolvedRootDirectory;
   }
   const rootDirectory = resolvedRootDirectory.rootDirectory;
+  const fixtureToolRoot =
+    rootDirectory === ROOT_DIRECTORY
+      ? TOOL_ROOT
+      : path.join(path.dirname(rootDirectory), "tool-root");
+  const verificationPath = (targetPath) =>
+    targetPath.startsWith(`${TOOL_ROOT}/`)
+      ? `${fixtureToolRoot}${targetPath.slice(TOOL_ROOT.length)}`
+      : targetPath;
   const expectedOwner = {
     expectedUid: options.expectedUid ?? 0,
     expectedGid: options.expectedGid ?? 0,
@@ -2236,11 +2344,11 @@ export async function verifyFixedLauncherTrust(request, options = {}) {
     },
     {
       path: `${rootDirectory}/identity-writer-bootstrap.mjs`,
-      expectedSha256: contractRecord.value.approvedBootstrap.sha256,
+      expectedSha256: materializationRecord.value.files[2].sha256,
       expectedMode: 0o500,
     },
-    ...contractRecord.value.executableClosure.map((entry) => ({
-      path: entry.executablePath,
+    ...contractRecord.value.materializedExecutableClosure.map((entry) => ({
+      path: verificationPath(entry.destinationExecutablePath),
       expectedSha256: entry.sha256,
       expectedMode: entry.mode,
     })),
@@ -2256,9 +2364,9 @@ export async function verifyFixedLauncherTrust(request, options = {}) {
     contract: contractRecord.value,
     verificationFiles,
     executableByRole: Object.fromEntries(
-      contractRecord.value.executableClosure.map((entry) => [
+      contractRecord.value.materializedExecutableClosure.map((entry) => [
         entry.role,
-        entry.executablePath,
+        entry.destinationExecutablePath,
       ]),
     ),
   });
