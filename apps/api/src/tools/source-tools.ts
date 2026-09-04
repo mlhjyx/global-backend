@@ -69,9 +69,14 @@ import {
 } from "../adapters/sam-api";
 import {
   PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
+  PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+  PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX,
+  PLATFORM_ROBOTS_REDIRECT_MAX,
   PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES,
+  boundedPlatformAcquisitionFetchLimit,
   platformExecutionToolContract,
 } from "../platform-authority/platform-execution-contract";
+import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -149,6 +154,7 @@ export const crawl4aiRenderTool: Tool<
     if (
       !(await isAllowedByRobots(input.url, {
         authorizeExternalAction: ctx.authorizeExternalAction,
+        beforePhysicalWire: ctx.beforePhysicalWire,
       }))
     ) {
       // robots 禁抓 → 合规放弃（不换 UA）。空 HTML 返回，不计费。
@@ -159,6 +165,8 @@ export const crawl4aiRenderTool: Tool<
     }
     const r = await crawlHtml(input.url, () =>
       assertToolExternalActionAuthorized(ctx),
+      undefined,
+      ctx.beforePhysicalWire,
     );
     return {
       data: r,
@@ -302,6 +310,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
         },
         {
           authorizeExternalAction: ctx.authorizeExternalAction,
+          beforePhysicalWire: ctx.beforePhysicalWire,
         },
       );
       // gzip 魔数透明解压（sitemap.xml.gz 常见；与原 fetchText 实现对齐）
@@ -918,6 +927,7 @@ export const tradeFairAlgoliaTool: Tool<
         input.cfg,
         input.limit,
         beforeExternalRequest(ctx),
+        ctx.beforePhysicalWire,
       ),
     },
     costCents: 0,
@@ -971,11 +981,14 @@ export const mapYourShowFetchTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["mapyourshow.fetch"],
   },
   healthCheck: async () => ({ healthy: true, detail: "mapyourshow" }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     const base = `https://${input.host}/8_0`;
-    const url = `${base}/ajax/remote-proxy.cfm?action=search&searchtype=exhibitor&searchterm=&pageID=1&perpage=${input.limit ?? 5000}`;
+    const limit = input.limit === undefined
+      ? PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX
+      : boundedPlatformAcquisitionFetchLimit(input.limit);
+    const url = `${base}/ajax/remote-proxy.cfm?action=search&searchtype=exhibitor&searchterm=&pageID=1&perpage=${limit}`;
     // IIS 对裸请求 403：带浏览器 UA + XHR 头 + 同源 Referer（与站点前端一致的公开端点访问方式）。
-    const res = await fetch(url, {
+    const res = await requestPublicHttp(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -983,15 +996,18 @@ export const mapYourShowFetchTool: Tool<
         "X-Requested-With": "XMLHttpRequest",
         Referer: `${base}/explore/exhibitor-gallery.cfm`,
       },
-      signal: AbortSignal.timeout(30_000),
+      timeoutMs: 30_000,
+      maxBytes: PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+      maxRedirects: 0,
+    }, {
+      authorizeExternalAction: ctx.authorizeExternalAction,
+      beforePhysicalWire: ctx.beforePhysicalWire,
     });
     if (!res.ok)
-      throw new Error(
-        `mapyourshow ${res.status}: ${(await res.text()).slice(0, 160)}`,
-      );
-    const json = (await res.json()) as {
+      throw new Error(`mapyourshow ${res.status}: ${res.text.slice(0, 160)}`);
+    const json = decodeJsonBytes<{
       DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } };
-    };
+    }>(res.body, "MAPYOURSHOW_RESPONSE_INVALID");
     return {
       data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] },
       costCents: 0,
@@ -1118,24 +1134,33 @@ export const sanctionsDownloadTool: Tool<
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "sanctions" }),
-  execute: async (input) => {
-    const res = await fetch(input.url, {
-      redirect: "follow",
+  execute: async (input, ctx) => {
+    const res = await requestPublicHttp(input.url, {
       headers: { "user-agent": input.userAgent ?? DEFAULT_SANCTIONS_UA },
-      signal: AbortSignal.timeout(30_000),
+      timeoutMs: 30_000,
+      maxBytes: MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
+      maxRedirects: PLATFORM_ROBOTS_REDIRECT_MAX,
+    }, {
+      authorizeExternalAction: ctx.authorizeExternalAction,
+      beforePhysicalWire: ctx.beforePhysicalWire,
     });
     if (!res.ok)
       throw new Error(`sanctions.download HTTP ${res.status} for ${input.url}`);
     const contentType = canonicalSanctionsMediaType(
-      res.headers.get("content-type"),
+      res.headers["content-type"] ?? null,
     );
     if (!contentType) throw new Error("SANCTIONS_DOWNLOAD_MEDIA_TYPE_INVALID");
-    const body = await readSanctionsBodyBounded(res);
+    let body: string;
+    try {
+      body = new TextDecoder("utf-8", { fatal: true }).decode(res.body);
+    } catch {
+      throw new Error("SANCTIONS_DOWNLOAD_UTF8_INVALID");
+    }
     return {
       data: {
         body,
         contentType,
-        lastModified: res.headers.get("last-modified"),
+        lastModified: res.headers["last-modified"] ?? null,
       },
       costCents: 0,
       provenance: {

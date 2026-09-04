@@ -46,7 +46,10 @@ export class Crawl4aiPageFetcher implements PageFetcher {
 
   async fetch(url: string, context?: ToolContext): Promise<FetchedPage | null> {
     if (!/^https?:\/\//i.test(url)) return null;
-    if (!(await isAllowedByRobots(url).catch(() => true))) return null; // 被 robots 禁 → 放弃（不硬闯）
+    if (!(await isAllowedByRobots(url, {
+      authorizeExternalAction: context?.authorizeExternalAction,
+      beforePhysicalWire: context?.beforePhysicalWire,
+    }).catch(() => true))) return null; // 被 robots 禁 → 放弃（不硬闯）
     if (!this.broker) {
       // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 视同抓取失败降级（fail-closed），只警一次。
       if (!this.warnedNoBroker) {
