@@ -88,7 +88,7 @@ describe("rendered outbound-domain gate", () => {
       await writeFile(
         path.join(dir, "index.html"),
         '<!-- vendored license: https://remixicon.com --><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg"></svg><a href="/contact">local</a><style>@font-face{src:url(data:font/woff2;base64,abc//+v6p4f1u9glr58yni)}</style><img src="data:image/png;base64,x"><a href="https://docs.example.com/x">docs</a>',
-      ),
+      );
       await expect(
         assertRenderedOutboundDomains(dir, ["docs.example.com"]),
       ).resolves.toBeUndefined();
