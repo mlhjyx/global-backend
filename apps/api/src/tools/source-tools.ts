@@ -67,6 +67,11 @@ import {
   SamSourcesSought,
   SamSearchParams,
 } from "../adapters/sam-api";
+import {
+  PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
+  PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES,
+  platformExecutionToolContract,
+} from "../platform-authority/platform-execution-contract";
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -83,6 +88,16 @@ import {
 const hash = (s: string): string =>
   createHash("sha256").update(s).digest("hex").slice(0, 24);
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
+const platformCrawl4aiContract =
+  platformExecutionToolContract("crawl4ai.render");
+const platformGooglePatentsContract =
+  platformExecutionToolContract("google_patents.search");
+const platformTradeFairContract =
+  platformExecutionToolContract("tradefair.algolia");
+const platformMapYourShowContract =
+  platformExecutionToolContract("mapyourshow.fetch");
+const platformSanctionsContract =
+  platformExecutionToolContract("sanctions.download");
 
 function beforeExternalRequest(
   ctx: ToolContext,
@@ -97,11 +112,15 @@ export const crawl4aiRenderTool: Tool<
   { url: string },
   CrawlHtmlResult & { robotsBlocked?: boolean }
 > = {
-  id: "crawl4ai.render",
-  version: "1.0.0",
+  id: platformCrawl4aiContract.toolId,
+  version: platformCrawl4aiContract.version,
   category: "fetch",
   sourceClass: "public_intelligence",
-  cost: { unit: "page", estimatedCents: 1, external: false },
+  cost: {
+    unit: platformCrawl4aiContract.costUnit,
+    estimatedCents: Number(platformCrawl4aiContract.estimatedCents),
+    external: false,
+  },
   rateLimit: { rps: 1, concurrency: 3, perDomainCrawlDelayMs: 2000 },
   compliance: {
     sourcePolicy: "advisory",
@@ -119,8 +138,8 @@ export const crawl4aiRenderTool: Tool<
   idempotencyKey: (i) => `crawl4ai.render:${hash(i.url)}`,
   durableResultStrategy: {
     kind: "artifact_reference",
-    schema: "crawl4ai-render/v1",
-    maxBytes: 3_000_000,
+    schema: platformCrawl4aiContract.resultSchema,
+    maxBytes: PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
     mediaTypes: ["text/html"],
     privacyClass: "PERSONAL_DATA",
     ttlSeconds: 86_400,
@@ -178,7 +197,8 @@ const HTTP_GET_UA = "Mozilla/5.0 (compatible; GlobalBot/1.0)";
 const MAX_REDIRECT_HOPS = 3;
 const MAX_HTTP_GET_ARTIFACT_BYTES = 3_000_000;
 export const HTTP_GET_ARTIFACT_MEDIA_TYPE = "text/plain" as const;
-export const MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES = 33_554_432;
+export const MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES =
+  PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES;
 const SANCTIONS_DOWNLOAD_MEDIA_TYPES = new Set(["application/xml", "text/xml"]);
 
 function canonicalSanctionsMediaType(value: string | null): string | null {
@@ -786,11 +806,15 @@ export const googlePatentsSearchTool: Tool<
   GooglePatentsInput,
   GooglePatentsOutput
 > = {
-  id: "google_patents.search",
-  version: "1.0.0",
+  id: platformGooglePatentsContract.toolId,
+  version: platformGooglePatentsContract.version,
   category: "structured_source",
   sourceClass: "public_intelligence",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformGooglePatentsContract.costUnit,
+    estimatedCents: Number(platformGooglePatentsContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 1 },
   // personalData:true —— inventors 是具名发明人（GDPR）；数据最小化（只 name）在 adapter 层强制。
   compliance: {
@@ -859,11 +883,15 @@ export const tradeFairAlgoliaTool: Tool<
   TradeFairAlgoliaInput,
   { exhibitors: FairExhibitor[] }
 > = {
-  id: "tradefair.algolia",
-  version: "1.0.0",
+  id: platformTradeFairContract.toolId,
+  version: platformTradeFairContract.version,
   category: "structured_source",
   sourceClass: "industry_data",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformTradeFairContract.costUnit,
+    estimatedCents: Number(platformTradeFairContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 2 },
   // personalData:true —— 参展商记录可内联联系人邮箱/电话。
   compliance: {
@@ -916,11 +944,15 @@ export const mapYourShowFetchTool: Tool<
   MapYourShowFetchInput,
   { hits: MysRawHit[] }
 > = {
-  id: "mapyourshow.fetch",
-  version: "1.0.0",
+  id: platformMapYourShowContract.toolId,
+  version: platformMapYourShowContract.version,
   category: "structured_source",
   sourceClass: "industry_data",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformMapYourShowContract.costUnit,
+    estimatedCents: Number(platformMapYourShowContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 2 },
   compliance: {
     sourcePolicy: "required",
@@ -1056,11 +1088,15 @@ export const sanctionsDownloadTool: Tool<
   SanctionsDownloadInput,
   SanctionsDownloadOutput
 > = {
-  id: "sanctions.download",
-  version: "1.0.0",
+  id: platformSanctionsContract.toolId,
+  version: platformSanctionsContract.version,
   category: "fetch",
   sourceClass: "public_intelligence",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformSanctionsContract.costUnit,
+    estimatedCents: Number(platformSanctionsContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 1 },
   compliance: {
     sourcePolicy: "required",
@@ -1075,7 +1111,7 @@ export const sanctionsDownloadTool: Tool<
   idempotencyKey: (i) => `sanctions.download:${hash(i.url)}`,
   durableResultStrategy: {
     kind: "artifact_reference",
-    schema: "sanctions-download/v1",
+    schema: platformSanctionsContract.resultSchema,
     maxBytes: MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
     mediaTypes: ["application/xml", "text/xml"],
     privacyClass: "PERSONAL_DATA",

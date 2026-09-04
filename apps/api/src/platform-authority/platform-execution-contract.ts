@@ -18,6 +18,9 @@ export const PLATFORM_PATENTS_MAXIMUM_BYTES_PER_ANCHOR =
 export const PLATFORM_TYPED_PROJECTION_MAX_BYTES = 120 * 1024;
 export const PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES = 3_000_000 as const;
 export const PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES = 33_554_432 as const;
+export const PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX = 2_000 as const;
+export const PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX = 5_000 as const;
+export const PLATFORM_PATENTS_OUTPUT_ITEM_MAX = 50 as const;
 
 export type PlatformExecutionScheduleId =
   | "acq-sweep"
@@ -437,6 +440,23 @@ export function isCodeOwnedPlatformExecutionProviderSnapshotV1(
       typeof input === "object" &&
       CODE_OWNED_PROVIDER_SNAPSHOTS.has(input),
   );
+}
+
+export type PlatformExecutionToolId =
+  | "tradefair.algolia"
+  | "mapyourshow.fetch"
+  | "google_patents.search"
+  | "crawl4ai.render"
+  | "sanctions.download";
+
+export function platformExecutionToolContract(
+  toolId: PlatformExecutionToolId,
+): PlatformExecutionToolContractV1 {
+  const matches = PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.flatMap(
+    (row) => row.toolContracts.filter((tool) => tool.toolId === toolId),
+  );
+  if (matches.length !== 1) throw new PlatformExecutionContractError();
+  return matches[0]!;
 }
 
 export class PlatformExecutionContractError extends Error {

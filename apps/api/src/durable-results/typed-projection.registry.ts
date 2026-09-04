@@ -11,8 +11,9 @@ import {
   type TypedProjectionDefinition,
   type TypedProjectionEnvelope,
 } from './typed-projection.types';
+import { PLATFORM_TYPED_PROJECTION_MAX_BYTES } from '../platform-authority/platform-execution-contract';
 
-const APPLICATION_MAX_BYTES = 120 * 1024;
+const APPLICATION_MAX_BYTES = PLATFORM_TYPED_PROJECTION_MAX_BYTES;
 const POSTGRES_JSONB_MAX_BYTES = 128 * 1024;
 const MAX_JSON_DEPTH = 32;
 const MAX_JSON_ARRAY_LENGTH = 65_536;
