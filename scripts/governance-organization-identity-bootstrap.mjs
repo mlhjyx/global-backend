@@ -2,11 +2,15 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
+  readFileSync,
   realpathSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -596,6 +600,22 @@ function rejectSymlinkAncestors(root, target) {
       throw new Error("MATERIALIZATION_SYMLINK_ANCESTOR");
 }
 
+function rejectAbsoluteSymlinkAncestors(target) {
+  const resolvedTarget = path.resolve(target);
+  const { root } = path.parse(resolvedTarget);
+  const dirs = [];
+  for (
+    let current = path.dirname(resolvedTarget);
+    current !== root;
+    current = path.dirname(current)
+  ) {
+    dirs.push(current);
+  }
+  for (const dir of dirs.reverse())
+    if (existsSync(dir) && lstatSync(dir).isSymbolicLink())
+      throw new Error("PATH_SYMLINK_ANCESTOR");
+}
+
 export async function verifyBootstrapPreimage({
   repoRoot,
   subjectCommit,
@@ -688,6 +708,10 @@ function cleanRoots(taskRoot) {
     cache: path.join(taskRoot, ".bootstrap", "cache"),
     config: path.join(taskRoot, ".bootstrap", "config"),
     taskHome: path.join(taskRoot, ".bootstrap", "home"),
+    tmp: path.join(taskRoot, ".bootstrap", "tmp"),
+    declarations: path.join(taskRoot, ".bootstrap", "declarations"),
+    tools: path.join(taskRoot, ".bootstrap", "tools"),
+    outputs: path.join(taskRoot, ".bootstrap", "outputs"),
   };
 }
 
@@ -700,7 +724,7 @@ function cleanEnvironment(taskRoot) {
     XDG_CACHE_HOME: roots.cache,
     COREPACK_HOME: path.join(roots.cache, "corepack"),
     PNPM_HOME: path.join(roots.cache, "pnpm-home"),
-    TMPDIR: path.join(taskRoot, ".bootstrap", "tmp"),
+    TMPDIR: roots.tmp,
     NPM_CONFIG_USERCONFIG: "/dev/null",
     CI: "1",
     LANG: "C.UTF-8",
@@ -716,6 +740,11 @@ export function verifyDependencyAndToolRoots({
   if (!isAbsoluteNormalized(taskRoot)) return integrity("TASK_ROOT_INVALID");
   try {
     const realTaskRoot = realpathSync(taskRoot);
+    const expectedRoots = cleanRoots(realTaskRoot);
+    if (canonicalJson(roots) !== canonicalJson(expectedRoots)) {
+      return integrity("FIXED_ROOT_DRIFT");
+    }
+    const expectedEnvironment = cleanEnvironment(realTaskRoot);
     if (
       ["NODE_OPTIONS", "NODE_PATH"].some((name) =>
         Object.hasOwn(environment, name),
@@ -723,10 +752,25 @@ export function verifyDependencyAndToolRoots({
     ) {
       return integrity("NODE_LOADER_ENVIRONMENT_FORBIDDEN");
     }
+    for (const name of [
+      "HOME",
+      "XDG_CONFIG_HOME",
+      "XDG_CACHE_HOME",
+      "TMPDIR",
+      "NPM_CONFIG_USERCONFIG",
+    ]) {
+      if (
+        Object.hasOwn(environment, name) &&
+        environment[name] !== expectedEnvironment[name]
+      ) {
+        return integrity("FIXED_ENVIRONMENT_DRIFT", { name });
+      }
+    }
     for (const [name, root] of Object.entries(roots)) {
       if (!isAbsoluteNormalized(root))
         return integrity("FIXED_ROOT_INVALID", { name });
       assertInside(realTaskRoot, root);
+      rejectSymlinkAncestors(realTaskRoot, root);
       if (existsSync(root)) {
         const lst = lstatSync(root);
         if (lst.isSymbolicLink())
@@ -749,12 +793,20 @@ export function planAcceptedBootstrapCommand({
 } = {}) {
   if (!isAbsoluteNormalized(taskRoot) || !isAbsoluteNormalized(pnpmEntrypoint))
     throw new Error("BOOTSTRAP_COMMAND_REQUEST_INVALID");
-  const roots = cleanRoots(taskRoot);
-  const environment = cleanEnvironment(taskRoot);
+  const realTaskRoot = realpathSync(taskRoot);
+  const roots = cleanRoots(realTaskRoot);
+  const environment = cleanEnvironment(realTaskRoot);
+  const verified = verifyDependencyAndToolRoots({
+    taskRoot: realTaskRoot,
+    roots,
+    environment,
+  });
+  if (verified.status !== "PASS") throw new Error(verified.code);
   for (const root of Object.values(roots))
     mkdirSync(root, { recursive: true, mode: 0o700 });
   return {
     command: "BOOTSTRAP_AUTHORITY_RUN_V1",
+    cwd: realTaskRoot,
     argv: [
       pnpmEntrypoint,
       "install",
@@ -762,6 +814,18 @@ export function planAcceptedBootstrapCommand({
       "--ignore-scripts",
       "--ignore-pnpmfile",
       "--config.ignore-pnpmfile=true",
+      "--config.store-dir",
+      roots.store,
+      "--config.virtual-store-dir",
+      roots.virtualStore,
+      "--config.modules-dir",
+      roots.modules,
+      "--config.cache-dir",
+      roots.cache,
+      "--config.globalconfig",
+      path.join(roots.config, "globalrc"),
+      "--config.userconfig",
+      "/dev/null",
     ],
     environment,
     roots,
@@ -773,12 +837,14 @@ export function planAcceptedBootstrapCommand({
 export function runAcceptedPrismaGenerate({ taskRoot, pnpmEntrypoint } = {}) {
   if (!isAbsoluteNormalized(taskRoot) || !isAbsoluteNormalized(pnpmEntrypoint))
     throw new Error("PRISMA_GENERATE_REQUEST_INVALID");
-  const environment = cleanEnvironment(taskRoot);
+  const realTaskRoot = realpathSync(taskRoot);
+  const environment = cleanEnvironment(realTaskRoot);
   return {
     command: "PRISMA_GENERATE_V1",
+    cwd: realTaskRoot,
     argv: [pnpmEntrypoint, "--filter", "@global/db", "generate"],
     environment,
-    roots: cleanRoots(taskRoot),
+    roots: cleanRoots(realTaskRoot),
     hostileMarkerExecutionCount: 0,
     execution: "DATA_ONLY_NOT_EXECUTED",
   };
@@ -791,20 +857,44 @@ export async function verifyPostInstallBootstrapRehash({
   if (!isAbsoluteNormalized(bootstrapPath) || !isSha(expectedSha256)) {
     return integrity("BOOTSTRAP_REHASH_REQUEST_INVALID");
   }
+  let fd;
   try {
-    const before = statSync(bootstrapPath);
-    const bytes = await readFile(bootstrapPath);
-    const after = statSync(bootstrapPath);
+    rejectAbsoluteSymlinkAncestors(bootstrapPath);
+    const beforeLink = lstatSync(bootstrapPath);
+    if (beforeLink.isSymbolicLink()) {
+      return integrity("BOOTSTRAP_REHASH_SYMLINK");
+    }
+    const beforeRealpath = realpathSync(bootstrapPath);
+    fd = openSync(bootstrapPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const before = fstatSync(fd);
+    if (before.dev !== beforeLink.dev || before.ino !== beforeLink.ino) {
+      return integrity("BOOTSTRAP_REHASH_TOCTOU");
+    }
+    const bytes = readFileSync(fd);
+    const after = fstatSync(fd);
+    const afterLink = lstatSync(bootstrapPath);
+    const afterRealpath = realpathSync(bootstrapPath);
     const digest = sha256(bytes);
-    if (before.dev !== after.dev || before.ino !== after.ino) {
+    if (
+      before.dev !== after.dev ||
+      before.ino !== after.ino ||
+      before.dev !== afterLink.dev ||
+      before.ino !== afterLink.ino ||
+      beforeRealpath !== afterRealpath
+    ) {
       return integrity("BOOTSTRAP_REHASH_TOCTOU");
     }
     if (digest !== expectedSha256) return integrity("BOOTSTRAP_REHASH_DRIFT");
+    const bootstrapRealpathSha256 = sha256(Buffer.from(afterRealpath, "utf8"));
     return pass({
       bootstrapSha256: digest,
+      bootstrapRealpathSha256,
+      bootstrapDevice: String(after.dev),
+      bootstrapInode: String(after.ino),
       postInstallBootstrapRehashSha256: sha256(
         canonicalJsonBytes({
           path: bootstrapPath,
+          realpathSha256: bootstrapRealpathSha256,
           dev: String(after.dev),
           ino: String(after.ino),
           sha256: digest,
@@ -813,6 +903,8 @@ export async function verifyPostInstallBootstrapRehash({
     });
   } catch (error) {
     return integrity("BOOTSTRAP_REHASH_UNAVAILABLE", { reason: error.message });
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 

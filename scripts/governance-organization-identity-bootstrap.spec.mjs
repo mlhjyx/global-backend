@@ -335,6 +335,61 @@ test("verifies accepted Git blobs and absences before immutable materialization"
     }).status,
     "INTEGRITY_ERROR",
   );
+  const symlinkAncestorRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-root-ancestor-"),
+  );
+  t.after(() => rm(symlinkAncestorRoot, { recursive: true, force: true }));
+  const escaped = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-escaped-"),
+  );
+  t.after(() => rm(escaped, { recursive: true, force: true }));
+  await symlink(escaped, path.join(symlinkAncestorRoot, ".bootstrap"));
+  assert.equal(
+    verifyDependencyAndToolRoots({
+      taskRoot: symlinkAncestorRoot,
+      environment: {},
+    }).status,
+    "INTEGRITY_ERROR",
+  );
+  const modulesAncestorRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-modules-ancestor-"),
+  );
+  t.after(() => rm(modulesAncestorRoot, { recursive: true, force: true }));
+  await symlink(escaped, path.join(modulesAncestorRoot, "node_modules"));
+  assert.equal(
+    verifyDependencyAndToolRoots({
+      taskRoot: modulesAncestorRoot,
+      environment: {},
+    }).status,
+    "INTEGRITY_ERROR",
+  );
+  for (const rootName of [
+    "store",
+    "virtualStore",
+    "modules",
+    "cache",
+    "config",
+    "taskHome",
+    "tmp",
+    "declarations",
+    "tools",
+    "outputs",
+  ]) {
+    const rootWithSymlink = await mkdtemp(
+      path.join(os.tmpdir(), `identity-bootstrap-${rootName}-`),
+    );
+    t.after(() => rm(rootWithSymlink, { recursive: true, force: true }));
+    await symlink(escaped, path.join(rootWithSymlink, "linked"));
+    assert.equal(
+      verifyDependencyAndToolRoots({
+        taskRoot: rootWithSymlink,
+        roots: { [rootName]: path.join(rootWithSymlink, "linked", rootName) },
+        environment: {},
+      }).status,
+      "INTEGRITY_ERROR",
+      rootName,
+    );
+  }
 });
 
 test("plans exact clean pnpm and Prisma commands without loading hostile hooks", async (t) => {
@@ -362,11 +417,55 @@ test("plans exact clean pnpm and Prisma commands without loading hostile hooks",
     "--ignore-scripts",
     "--ignore-pnpmfile",
     "--config.ignore-pnpmfile=true",
+    "--config.store-dir",
+    planned.roots.store,
+    "--config.virtual-store-dir",
+    planned.roots.virtualStore,
+    "--config.modules-dir",
+    planned.roots.modules,
+    "--config.cache-dir",
+    planned.roots.cache,
+    "--config.globalconfig",
+    path.join(planned.roots.config, "globalrc"),
+    "--config.userconfig",
+    "/dev/null",
   ]);
+  assert.equal(planned.cwd, root);
+  assert.equal(planned.environment.HOME, planned.roots.taskHome);
+  assert.equal(planned.environment.XDG_CONFIG_HOME, planned.roots.config);
+  assert.equal(planned.environment.XDG_CACHE_HOME, planned.roots.cache);
+  assert.equal(planned.environment.TMPDIR, planned.roots.tmp);
   assert.equal(planned.environment.NPM_CONFIG_USERCONFIG, "/dev/null");
   assert.equal(Object.hasOwn(planned.environment, "NODE_OPTIONS"), false);
   assert.equal(Object.hasOwn(planned.environment, "NODE_PATH"), false);
   assert.equal(planned.hostileMarkerExecutionCount, 0);
+  planned.roots.store = path.join(root, ".bootstrap", "store-drift");
+  assert.equal(
+    verifyDependencyAndToolRoots({
+      taskRoot: root,
+      roots: planned.roots,
+      environment: planned.environment,
+    }).status,
+    "INTEGRITY_ERROR",
+  );
+  const driftedEnvironment = {
+    ...planAcceptedBootstrapCommand({
+      taskRoot: root,
+      pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs",
+    }).environment,
+    TMPDIR: path.join(root, ".bootstrap", "tmp-drift"),
+  };
+  assert.equal(
+    verifyDependencyAndToolRoots({
+      taskRoot: root,
+      roots: planAcceptedBootstrapCommand({
+        taskRoot: root,
+        pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs",
+      }).roots,
+      environment: driftedEnvironment,
+    }).status,
+    "INTEGRITY_ERROR",
+  );
   assert.throws(
     () =>
       planAcceptedBootstrapCommand({
@@ -410,12 +509,45 @@ test("rehashes bootstrap after install before dynamic TypeScript scanner import"
     expectedSha256: sha(await readFile(bootstrap)),
   });
   assert.equal(first.status, "PASS", first.code);
+  assert.equal(first.bootstrapRealpathSha256, sha(Buffer.from(bootstrap)));
   await writeFile(bootstrap, "export const ok = false;\n");
   const drift = await verifyPostInstallBootstrapRehash({
     bootstrapPath: bootstrap,
     expectedSha256: first.bootstrapSha256,
   });
   assert.equal(drift.status, "INTEGRITY_ERROR");
+  const linked = path.join(root, "bootstrap-link.mjs");
+  await symlink(bootstrap, linked);
+  assert.equal(
+    (
+      await verifyPostInstallBootstrapRehash({
+        bootstrapPath: linked,
+        expectedSha256: first.bootstrapSha256,
+      })
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  const ancestorTarget = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-rehash-target-"),
+  );
+  t.after(() => rm(ancestorTarget, { recursive: true, force: true }));
+  const ancestorRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-rehash-ancestor-"),
+  );
+  t.after(() => rm(ancestorRoot, { recursive: true, force: true }));
+  await writeFile(path.join(ancestorTarget, "bootstrap.mjs"), "export {};\n");
+  await symlink(ancestorTarget, path.join(ancestorRoot, "linked"));
+  assert.equal(
+    (
+      await verifyPostInstallBootstrapRehash({
+        bootstrapPath: path.join(ancestorRoot, "linked", "bootstrap.mjs"),
+        expectedSha256: sha(
+          await readFile(path.join(ancestorTarget, "bootstrap.mjs")),
+        ),
+      })
+    ).status,
+    "INTEGRITY_ERROR",
+  );
 });
 
 test("closed review verification rejects drift, duplicate severities, and failing verdicts", async (t) => {
