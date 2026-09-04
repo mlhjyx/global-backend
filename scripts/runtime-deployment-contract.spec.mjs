@@ -517,6 +517,21 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.doesNotMatch(harness, /DROP ROLE/);
 });
 
+test('disposable platform writer provisioning safety exercises identity reuse against PostgreSQL', async () => {
+  const harness = await repositoryFile('infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh');
+  assert.match(harness, /EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST/);
+  assert.match(harness, /assert_rejected_before_password_change/);
+  assert.match(harness, /SUPERUSER BYPASSRLS CREATEDB CREATEROLE REPLICATION/);
+  assert.match(harness, /OWNERSHIP/);
+  assert.match(harness, /UNEXPECTED_MEMBERSHIP/);
+  assert.match(harness, /OUTBOUND_MEMBERSHIP/);
+  assert.match(harness, /DIRECT_ACL/);
+  assert.match(harness, /DEFAULT_ACL/);
+  assert.match(harness, /authenticate_probe/);
+  assert.match(harness, /DROP ROLE/);
+  assert.doesNotMatch(harness, /psql "\$/);
+});
+
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
   const [api, worker, readme, compose, main, temporalWorker] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),

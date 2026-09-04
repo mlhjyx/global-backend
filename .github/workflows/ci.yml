@@ -173,6 +173,8 @@ jobs:
           bash infra/postgres/provision-execution-budget-platform-writer.sh
           bash infra/postgres/verify-execution-budget-platform-writer.sh
           EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
+            bash infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh
+          EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
           EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL="${APP_DATABASE_URL}" \
             bash infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh
           if EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
