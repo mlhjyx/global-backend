@@ -3,6 +3,8 @@
  * technical quote. This module deliberately has no Node, Nest, database,
  * Temporal, Provider, or network import.
  */
+import { types } from "node:util";
+
 export const PLATFORM_ACQUISITION_DUE_SOURCE_MAX = 50 as const;
 export const PLATFORM_ACQUISITION_SOURCE_FETCH_ITEM_MAX = 10_000 as const;
 export const PLATFORM_INTENT_DUE_SOURCE_MAX = 50 as const;
@@ -147,11 +149,14 @@ function ownDataSnapshot(
       value === null ||
       typeof value !== "object" ||
       Array.isArray(value) ||
+      types.isProxy(value) ||
       Object.getPrototypeOf(value) !== Object.prototype
     ) {
       return null;
     }
-    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const descriptors = Object.getOwnPropertyDescriptors(
+      value,
+    ) as unknown as PropertyDescriptorMap;
     if (
       Reflect.ownKeys(descriptors).some((key) => typeof key !== "string") ||
       Object.keys(descriptors).sort().join("\0") !==
@@ -174,6 +179,55 @@ function ownDataSnapshot(
         return null;
       }
       snapshot[key] = descriptor.value;
+    }
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
+}
+
+function exactArraySnapshot(
+  value: unknown,
+  minimumLength: number,
+  maximumLength: number,
+): readonly unknown[] | null {
+  try {
+    if (
+      !Array.isArray(value) ||
+      types.isProxy(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype
+    ) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(
+      value,
+    ) as unknown as PropertyDescriptorMap;
+    const ownKeys = Reflect.ownKeys(descriptors);
+    if (ownKeys.some((key) => typeof key !== "string")) return null;
+    const lengthDescriptor = descriptors.length;
+    if (
+      !lengthDescriptor ||
+      lengthDescriptor.enumerable ||
+      !Object.hasOwn(lengthDescriptor, "value") ||
+      !Number.isSafeInteger(lengthDescriptor.value) ||
+      lengthDescriptor.value < minimumLength ||
+      lengthDescriptor.value > maximumLength ||
+      ownKeys.length !== lengthDescriptor.value + 1
+    ) {
+      return null;
+    }
+    const snapshot: unknown[] = [];
+    for (let index = 0; index < lengthDescriptor.value; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (
+        !descriptor?.enumerable ||
+        !Object.hasOwn(descriptor, "value") ||
+        descriptor.get !== undefined ||
+        descriptor.set !== undefined
+      ) {
+        return null;
+      }
+      snapshot.push(descriptor.value);
     }
     return Object.freeze(snapshot);
   } catch {
@@ -430,13 +484,13 @@ export function createPlatformExecutionProviderSnapshotV1(
     !PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.some(
       (row) => row.scheduleId === snapshot.scheduleId,
     ) ||
-    !Array.isArray(snapshot.providers) ||
-    snapshot.providers.length < 1 ||
-    snapshot.providers.length > 4
+    !exactArraySnapshot(snapshot.providers, 1, 4)
   ) {
     throw new PlatformExecutionContractError();
   }
-  const providers = snapshot.providers.map((raw) => {
+  const providerInputs = exactArraySnapshot(snapshot.providers, 1, 4)!;
+  const providers: PlatformExecutionProviderSnapshotEntryV1[] = [];
+  for (const raw of providerInputs) {
     const provider = ownDataSnapshot(raw, SNAPSHOT_PROVIDER_KEYS);
     if (!provider) {
       throw new PlatformExecutionContractError();
@@ -446,22 +500,27 @@ export function createPlatformExecutionProviderSnapshotV1(
       !PROVIDER_ID.test(provider.providerId) ||
       typeof provider.providerVersion !== "string" ||
       !VERSION.test(provider.providerVersion) ||
-      !["ENABLED", "DISABLED"].includes(String(provider.enablement)) ||
+      (provider.enablement !== "ENABLED" &&
+        provider.enablement !== "DISABLED") ||
       (provider.bytePriceCatalogRevision !== null &&
         (typeof provider.bytePriceCatalogRevision !== "string" ||
           !SHA256.test(provider.bytePriceCatalogRevision)))
     ) {
       throw new PlatformExecutionContractError();
     }
-    return {
+    providers.push({
       providerId: provider.providerId,
       providerVersion: provider.providerVersion,
       enablement: provider.enablement,
       bytePriceCatalogRevision: provider.bytePriceCatalogRevision,
-    } as PlatformExecutionProviderSnapshotEntryV1;
-  });
-  if (new Set(providers.map(({ providerId }) => providerId)).size !== providers.length) {
-    throw new PlatformExecutionContractError();
+    } as PlatformExecutionProviderSnapshotEntryV1);
+  }
+  for (let left = 0; left < providers.length; left += 1) {
+    for (let right = left + 1; right < providers.length; right += 1) {
+      if (providers[left]!.providerId === providers[right]!.providerId) {
+        throw new PlatformExecutionContractError();
+      }
+    }
   }
   const result = deepFreeze({
     schemaVersion: "platform-execution-provider-snapshot/v1" as const,
