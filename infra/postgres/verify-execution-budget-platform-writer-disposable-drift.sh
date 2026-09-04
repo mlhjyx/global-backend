@@ -46,9 +46,9 @@ drift(){ run ADMIN "$1";ledger+=("$2"); if bash infra/postgres/verify-execution-
 deny ADMIN "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())";deny APP "SELECT * FROM revoke_platform_execution_authority_v1('00000000-0000-4000-8000-000000000001','x',clock_timestamp())"
 drift "GRANT pg_monitor TO ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}" "REVOKE pg_monitor FROM ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}"
 drift "GRANT pg_read_all_data TO execution_budget_platform_writer" "REVOKE pg_read_all_data FROM execution_budget_platform_writer"
-drift "CREATE ROLE task3_nested NOLOGIN; GRANT task3_nested TO execution_budget_platform_writer" "REVOKE task3_nested FROM execution_budget_platform_writer"
+drift "CREATE ROLE task3_nested NOLOGIN; GRANT task3_nested TO execution_budget_platform_writer" "REVOKE task3_nested FROM execution_budget_platform_writer; DROP ROLE task3_nested"
 if [[ "${EXECUTION_BUDGET_PLATFORM_WRITER_FAILURE_INJECT_AFTER_DRIFT:-}" == superuser ]]; then
-  run ADMIN "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER"; ledger+=("ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER"); exit 42
+  run ADMIN "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER"; ledger+=("ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER"); echo 'PLATFORM_WRITER_FAILURE_INJECTED:superuser' >&2; exit 42
 fi
 drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} SUPERUSER" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOSUPERUSER"
 drift "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} BYPASSRLS" "ALTER ROLE ${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN} NOBYPASSRLS"
