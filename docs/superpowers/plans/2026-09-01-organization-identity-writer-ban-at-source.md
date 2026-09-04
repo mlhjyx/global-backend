@@ -656,6 +656,7 @@ type LauncherMaterializationReceipt = Readonly<{
   schemaVersion: "organization-identity-launcher-materialization/v3";
   launcherContractSha256: string;
   launcherMaterializationPacketSha256: string;
+  rootMaterializationRequestSha256: string;
   authorizationReceiptSha256: string;
   sourceToolClosureSha256: string;
   materializedExecutableClosureSha256: string;
