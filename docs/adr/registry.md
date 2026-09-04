@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
-> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（按各批追加日期拍板/收敛），标注 ⚠ 者待 A/B 会签。
+> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。每条决策以本表行内状态为准；标注 ⚠ 者待 A/B 会签，SUPERSEDED 条目只保留历史 provenance。
 > 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**，2026-07-27 追加 **ADR-021**，2026-07-29 追加 **ADR-022**，2026-08-04 追加 **ADR-023**，2026-08-16 追加 **ADR-024**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档与用户拍板的单一产品运行路径），2026-08-29 追加 **ADR-025**，2026-09-04 追加 **PDR-004** 作为 PDR-003 的 forward supersession。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
 
 ## PDR（产品决策）

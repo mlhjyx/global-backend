@@ -45,30 +45,144 @@ test("the stable roadmap and ADR registry reject live-status and superseded prod
     "utf8",
   );
 
-  assert.match(
-    releasePlan,
-    /Live gate verdicts and time-bound execution facts are maintained only in \[current status\]\(\.\.\/status\/current\.md\)\./,
-  );
-  assert.doesNotMatch(releasePlan, /\| Gate \| Current verdict \|/);
-  assert.match(releasePlan, /\| Gate\s+\| Stable proof\s+\|/);
-  for (const gate of ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7"]) {
-    assert.match(releasePlan, new RegExp(`\\|\\s*${gate} —`));
-  }
+  const parseMarkdownRow = (line) => {
+    if (!/^\|.*\|$/.test(line)) return null;
+    return line
+      .slice(1, -1)
+      .split("|")
+      .map((cell) => cell.trim());
+  };
+  const assertStableRoadmap = (document) => {
+    const lines = document.split("\n");
+    assert.match(
+      document,
+      /Live gate verdicts and time-bound execution facts are maintained only in \[current status\]\(\.\.\/status\/current\.md\)\./,
+    );
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("## ")),
+      ["## Stable product sequence", "## Historical supersession index"],
+    );
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("### ")),
+      [
+        "### Program boundaries",
+        "### Stable G0-G7 definitions",
+        "### Ordered delivery",
+        "### Concurrency and authorization boundaries",
+      ],
+    );
+    assert.doesNotMatch(
+      document,
+      /\b(?:origin\/main|main)@[0-9a-f]{7,40}\b|\bPR\s*#\d+\b|\bREADY_FOR_[A-Z_]+\b|\bNOT_AUTHORIZED\b|\bcurrentRoute\b|\bcurrent-source\b|下一门/i,
+    );
 
-  const historicalSequenceStart = releasePlan.indexOf("## 2. R0-R3");
-  assert.notEqual(historicalSequenceStart, -1);
-  const historicalSequence = releasePlan.slice(historicalSequenceStart);
-  assert.match(historicalSequence.slice(0, 1_500), /HISTORICAL \/ SUPERSEDED/);
-  assert.match(
-    historicalSequence.slice(0, 1_500),
-    /MVP-1[^\n]*Opportunity[^\n]*human QGO/,
-  );
-  assert.match(historicalSequence.slice(0, 1_500), /MVP-2[^\n]*email/);
+    const tableHeaders = lines
+      .map(parseMarkdownRow)
+      .filter((cells) => cells?.[0]?.toLowerCase() === "gate");
+    assert.deepEqual(tableHeaders, [["Gate", "Stable proof"]]);
+    const gateRows = lines
+      .map(parseMarkdownRow)
+      .filter((cells) => /^G[0-7] —/.test(cells?.[0] ?? ""));
+    assert.equal(gateRows.length, 8);
+    assert.deepEqual(
+      gateRows.map(([gate]) => gate.slice(0, 2)),
+      ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7"],
+    );
+    for (const cells of gateRows) {
+      assert.equal(cells.length, 2);
+      const proofWithoutTddTerms = cells[1].replace(
+        "RED/GREEN evidence",
+        "TDD evidence",
+      );
+      assert.doesNotMatch(
+        proofWithoutTddTerms,
+        /\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/,
+      );
+    }
+
+    const spine = /The stable product spine is `([^`]+)`/.exec(document)?.[1];
+    assert.deepEqual(spine?.split(" → "), [
+      "Onboarding",
+      "ICP",
+      "LeadQualifiedPackage",
+      "Opportunity",
+      "Human QGO",
+      "Feedback",
+    ]);
+    const orderedStart = document.indexOf("### Ordered delivery");
+    const boundaryStart = document.indexOf(
+      "### Concurrency and authorization boundaries",
+    );
+    assert.ok(orderedStart >= 0 && boundaryStart > orderedStart);
+    const orderedSteps = document
+      .slice(orderedStart, boundaryStart)
+      .split("\n")
+      .filter((line) => /^\d+\. \*\*/.test(line));
+    assert.equal(orderedSteps.length, 7);
+    for (const [index, label] of [
+      "Phase 0",
+      "MVP-0",
+      "MVP-1",
+      "Pilot 3-A",
+      "Site 3-B",
+      "MVP-2",
+      "Later",
+    ].entries()) {
+      assert.match(
+        orderedSteps[index],
+        new RegExp(`^${index + 1}\\. \\*\\*${label}`),
+      );
+    }
+    assert.match(orderedSteps[2], /Opportunity[^\n]*Human QGO/);
+    for (const preMvp2Step of orderedSteps.slice(0, 5)) {
+      assert.doesNotMatch(preMvp2Step, /\bCampaign\b|\bemail\b|邮件/i);
+    }
+    assert.match(orderedSteps[5], /Campaign[^\n]*email/);
+
+    const historyStart = document.indexOf("## Historical supersession index");
+    assert.ok(historyStart > boundaryStart);
+    const historicalSection = document.slice(historyStart);
+    assert.match(historicalSection, /HISTORICAL \/ SUPERSEDED/);
+    assert.match(historicalSection, /MVP-1[^\n]*Opportunity[^\n]*human QGO/);
+    assert.match(historicalSection, /MVP-2[^\n]*email/);
+    const campaignFirstLines = lines.filter((line) =>
+      /Campaign[^\n]*email[^\n]*QGO/i.test(line),
+    );
+    assert.ok(campaignFirstLines.length >= 1);
+    for (const line of campaignFirstLines) {
+      assert.match(line, /HISTORICAL \/ SUPERSEDED/);
+    }
+    const unmarkedCampaignContent = lines
+      .filter((line) => !line.includes("HISTORICAL / SUPERSEDED"))
+      .join("\n");
+    assert.doesNotMatch(
+      unmarkedCampaignContent,
+      /Campaign[\s\S]{0,160}(?:email|邮件)[\s\S]{0,160}QGO/i,
+    );
+  };
+
+  assertStableRoadmap(releasePlan);
+  for (const mutation of [
+    `${releasePlan}\n| Gate                     | Current verdict |\n| ------------------------ | --------------- |\n| G0 — Truth & Ownership   | \`PASS\`          |\n`,
+    releasePlan.replace(
+      "Binding plans, current authority",
+      "`PASS / DONE` — Binding plans, current authority",
+    ),
+    releasePlan.replace(
+      "4. **Pilot 3-A:**",
+      "4. **Campaign/email:** Campaign → email → QGO.\n4. **Pilot 3-A:**",
+    ),
+    `${releasePlan}\nCampaign → email → QGO.\n`,
+    `${releasePlan}\n### Active fast follow\nCampaign\n→ email\n→ QGO\n`,
+  ]) {
+    assert.throws(() => assertStableRoadmap(mutation));
+  }
 
   for (const document of [releasePlan, decisions]) {
     assert.doesNotMatch(document, /QualifiedLeadHandoff/);
     assert.match(document, /LeadQualifiedPackage/);
   }
+  assert.doesNotMatch(decisions, /以下均 ACCEPTED/);
   assert.match(decisions, /\| PDR-003 \|[^\n]+\| SUPERSEDED BY PDR-004\s+\|/);
   assert.match(
     decisions,
