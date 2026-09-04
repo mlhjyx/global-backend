@@ -66,6 +66,40 @@ function pathDigest(value) {
   return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
 }
 
+function requestScopeDigest(request) {
+  return createPacketDigest({
+    authorizationClass: request.authorizationClass,
+    subjectCommit: request.subjectCommit,
+    launcherMaterializationPacketSha256:
+      request.launcherMaterializationPacketSha256,
+    launcherMaterializationPacketReviewReceiptSha256:
+      request.launcherMaterializationPacketReviewReceiptSha256,
+    launcherContractSha256: request.launcherContractSha256,
+    sourceToolClosureSha256: request.sourceToolClosureSha256,
+    materializedExecutableClosureSha256:
+      request.materializedExecutableClosureSha256,
+    launcherFileCount: request.launcherFileCount,
+    toolRootFileCount: request.toolRootFileCount,
+    runtimeRootCount: request.runtimeRootCount,
+    requestRootCount: request.requestRootCount,
+    outputRootCount: request.outputRootCount,
+    launcherRoot: request.launcherRoot,
+    toolRoot: request.toolRoot,
+    runtimeRoot: request.runtimeRoot,
+    requestRoot: request.requestRoot,
+    outputRoot: request.outputRoot,
+    chronology: request.chronology,
+    targetMustBeAbsent: request.targetMustBeAbsent,
+    containsCredentialValue: request.containsCredentialValue,
+  });
+}
+
+function rehashRequest(request) {
+  const scoped = { ...request, scopeSha256: requestScopeDigest(request) };
+  const { requestId, ...withoutRequestId } = scoped;
+  return { ...scoped, requestId: createPacketDigest(withoutRequestId) };
+}
+
 test("packet current schemas reject historical versions and bind the current plan tuple", () => {
   const packet = validPacket();
   assert.equal(validateLauncherMaterializationPacket(packet).status, "PASS");
@@ -80,6 +114,14 @@ test("packet current schemas reject historical versions and bind the current pla
   assert.equal(packet.approvedArtifacts.planCommit, APPROVED_PLAN.commit);
   assert.equal(packet.approvedArtifacts.planBlobId, APPROVED_PLAN.blobId);
   assert.equal(packet.approvedArtifacts.planSha256, APPROVED_PLAN.sha256);
+  assert.equal(
+    packet.sourceToolClosureSha256,
+    createPacketDigest(packet.sourceToolClosure),
+  );
+  assert.equal(
+    packet.materializedExecutableClosureSha256,
+    createPacketDigest(packet.materializedExecutableClosure),
+  );
   assert.equal(
     validateLauncherMaterializationPacket({
       ...packet,
@@ -203,6 +245,8 @@ test("packet source tool closure rejects ambient paths and seven-role mismatches
   invalidPackets.push(
     { ...packet, sourceToolClosure: source.slice(0, -1) },
     { ...packet, sourceToolClosure: [...source].reverse() },
+    { ...packet, sourceToolClosureSha256: SHA_C },
+    { ...packet, materializedExecutableClosureSha256: SHA_C },
     {
       ...packet,
       materializedExecutableClosure: [
@@ -265,9 +309,7 @@ test("packet review and root request are non-circular, exact-key, and substituti
     launcherMaterializationPacketReviewReceiptPath:
       "/tmp/task-0L-root-materialization-packet-v4-review.json",
     launcherMaterializationPacketReviewReceiptSha256: SHA_B,
-    launcherContractSha256: SHA_C,
-    sourceToolClosureSha256: SHA,
-    materializedExecutableClosureSha256: SHA_B,
+    launcherMaterializationPacket: packet,
     launcherRoot:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",
     toolRoot:
@@ -277,9 +319,26 @@ test("packet review and root request are non-circular, exact-key, and substituti
     requestRoot: REQUEST_ROOT,
     outputRoot: OUTPUT_ROOT,
   });
+  assert.equal(request.launcherContractSha256, packet.launcherContractSha256);
+  assert.equal(request.sourceToolClosureSha256, packet.sourceToolClosureSha256);
   assert.equal(
-    validateLauncherRootMaterializationRequest(request).status,
+    request.materializedExecutableClosureSha256,
+    packet.materializedExecutableClosureSha256,
+  );
+  assert.equal(
+    validateLauncherRootMaterializationRequest(request, packet).status,
     "PASS",
+  );
+  assert.equal(
+    validateLauncherRootMaterializationRequest(
+      rehashRequest({
+        ...request,
+        sourceToolClosureSha256: SHA,
+        materializedExecutableClosureSha256: SHA_C,
+      }),
+      packet,
+    ).status,
+    "INTEGRITY_ERROR",
   );
   for (const candidate of [
     { ...request, scopeSha256: null },
@@ -291,7 +350,7 @@ test("packet review and root request are non-circular, exact-key, and substituti
     { ...request, extra: "field" },
   ]) {
     assert.equal(
-      validateLauncherRootMaterializationRequest(candidate).status,
+      validateLauncherRootMaterializationRequest(candidate, packet).status,
       "INTEGRITY_ERROR",
     );
   }

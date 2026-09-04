@@ -46,7 +46,7 @@ const CHRONOLOGY = words(
   "VERIFY_SOURCE_TOOL_CLOSURE COPY_AND_FSYNC_LAUNCHER_FILES COPY_AND_FSYNC_MATERIALIZED_EXECUTABLE_CLOSURE CREATE_AND_FSYNC_RUNTIME_ROOTS CREATE_AND_FSYNC_REQUEST_OUTPUT_ROOTS INDEPENDENT_READBACK MATERIALIZATION_RECEIPT MATERIALIZATION_REVIEW",
 );
 const PACKET_KEYS = words(
-  "schemaVersion subjectCommit launcherContract launcherContractSha256 approvedArtifacts launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot sourceToolClosure materializedExecutableClosure launcherFilePlan bootstrapFilePlan contractFilePlan runtimeRootPlan runtimeEnvironment rootPreflight reviewIdentities chronology symlinkPolicy rollbackPolicy compatibilityStatus result",
+  "schemaVersion subjectCommit launcherContract launcherContractSha256 approvedArtifacts launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot sourceToolClosure sourceToolClosureSha256 materializedExecutableClosure materializedExecutableClosureSha256 launcherFilePlan bootstrapFilePlan contractFilePlan runtimeRootPlan runtimeEnvironment rootPreflight reviewIdentities chronology symlinkPolicy rollbackPolicy compatibilityStatus result",
 );
 
 function pass(extra = {}) {
@@ -83,7 +83,11 @@ function pathSha(value) {
 }
 
 function canonicalEqual(left, right) {
-  return sha256(canonicalJsonBytes(left)) === sha256(canonicalJsonBytes(right));
+  return canonicalDigest(left) === canonicalDigest(right);
+}
+
+function canonicalDigest(value) {
+  return sha256(canonicalJsonBytes(value));
 }
 
 function isAbsoluteNormalizedPath(value) {
@@ -303,6 +307,7 @@ export function buildLauncherMaterializationPacket(options = {}) {
     options.launcherContract ?? launcherContract(subjectCommit, sources);
   const contractBytes = canonicalJsonBytes(contract);
   const contractSha = sha256(contractBytes);
+  const materialized = contract.materializedExecutableClosure;
   const packet = {
     schemaVersion: "organization-identity-launcher-materialization-packet/v4",
     subjectCommit,
@@ -320,7 +325,9 @@ export function buildLauncherMaterializationPacket(options = {}) {
     requestRoot: REQUEST_ROOT,
     outputRoot: OUTPUT_ROOT,
     sourceToolClosure: sources,
-    materializedExecutableClosure: contract.materializedExecutableClosure,
+    sourceToolClosureSha256: canonicalDigest(sources),
+    materializedExecutableClosure: materialized,
+    materializedExecutableClosureSha256: canonicalDigest(materialized),
     launcherFilePlan: contract.launcherFilePlan,
     bootstrapFilePlan: plannedFile(
       "identity-writer-bootstrap.mjs",
@@ -442,6 +449,10 @@ function validateSourceClosure(sourceClosure, destinationClosure) {
 export function validateLauncherMaterializationPacket(packet) {
   if (!exactKeys(packet, PACKET_KEYS)) return integrity("PACKET_KEYS_INVALID");
   const contractSha = sha256(canonicalJsonBytes(packet.launcherContract));
+  const sourceClosureSha = canonicalDigest(packet.sourceToolClosure);
+  const materializedClosureSha = canonicalDigest(
+    packet.materializedExecutableClosure,
+  );
   if (
     packet.schemaVersion !==
       "organization-identity-launcher-materialization-packet/v4" ||
@@ -450,6 +461,8 @@ export function validateLauncherMaterializationPacket(packet) {
     packet.contractFilePlan?.sha256 !== contractSha ||
     packet.contractFilePlan?.size !==
       canonicalJsonBytes(packet.launcherContract).length ||
+    packet.sourceToolClosureSha256 !== sourceClosureSha ||
+    packet.materializedExecutableClosureSha256 !== materializedClosureSha ||
     !validateApprovedArtifacts(packet.approvedArtifacts, packet) ||
     packet.launcherFileCount !== 4 ||
     packet.toolRootFileCount !== 7 ||
@@ -653,22 +666,25 @@ function requestIdFor(request) {
 }
 
 export function buildLauncherRootMaterializationRequest(fields) {
+  const packet = fields.launcherMaterializationPacket;
+  const packetValidation = validateLauncherMaterializationPacket(packet);
+  const validPacket = packetValidation.status === "PASS" ? packet : null;
   const request = {
     schemaVersion: "organization-identity-root-materialization-request/v1",
     requestId: "",
     authorizationClass: "LOCAL_ROOT_MATERIALIZATION",
-    subjectCommit: fields.subjectCommit,
+    subjectCommit: validPacket?.subjectCommit,
     launcherMaterializationPacketPath: fields.launcherMaterializationPacketPath,
     launcherMaterializationPacketSha256:
-      fields.launcherMaterializationPacketSha256,
+      packetValidation.launcherMaterializationPacketSha256,
     launcherMaterializationPacketReviewReceiptPath:
       fields.launcherMaterializationPacketReviewReceiptPath,
     launcherMaterializationPacketReviewReceiptSha256:
       fields.launcherMaterializationPacketReviewReceiptSha256,
-    launcherContractSha256: fields.launcherContractSha256,
-    sourceToolClosureSha256: fields.sourceToolClosureSha256,
+    launcherContractSha256: validPacket?.launcherContractSha256,
+    sourceToolClosureSha256: validPacket?.sourceToolClosureSha256,
     materializedExecutableClosureSha256:
-      fields.materializedExecutableClosureSha256,
+      validPacket?.materializedExecutableClosureSha256,
     launcherFileCount: 4,
     toolRootFileCount: 7,
     runtimeRootCount: 7,
@@ -689,7 +705,10 @@ export function buildLauncherRootMaterializationRequest(fields) {
   return request;
 }
 
-export function validateLauncherRootMaterializationRequest(request) {
+export function validateLauncherRootMaterializationRequest(
+  request,
+  packet = null,
+) {
   const keys = [
     "schemaVersion",
     "requestId",
@@ -718,6 +737,10 @@ export function validateLauncherRootMaterializationRequest(request) {
     "scopeSha256",
   ];
   if (!exactKeys(request, keys)) return integrity("ROOT_REQUEST_INVALID");
+  const packetValidation = validateLauncherMaterializationPacket(packet);
+  if (packetValidation.status !== "PASS") {
+    return integrity("ROOT_REQUEST_PACKET_INVALID");
+  }
   const expectedScope = sha256(canonicalJsonBytes(rootScope(request)));
   if (
     request.schemaVersion !==
@@ -732,6 +755,13 @@ export function validateLauncherRootMaterializationRequest(request) {
     request.requestRootCount !== 1 ||
     request.outputRootCount !== 1 ||
     request.launcherRoot !== LAUNCHER_ROOT ||
+    request.subjectCommit !== packet.subjectCommit ||
+    request.launcherMaterializationPacketSha256 !==
+      packetValidation.launcherMaterializationPacketSha256 ||
+    request.launcherContractSha256 !== packet.launcherContractSha256 ||
+    request.sourceToolClosureSha256 !== packet.sourceToolClosureSha256 ||
+    request.materializedExecutableClosureSha256 !==
+      packet.materializedExecutableClosureSha256 ||
     request.toolRoot !== TOOL_ROOT ||
     request.runtimeRoot !== RUNTIME_ROOT ||
     request.requestRoot !== REQUEST_ROOT ||
