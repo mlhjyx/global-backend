@@ -516,7 +516,8 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.match(harness, /DRIFT_RESTORE_FAILED/);
   assert.match(harness, /unset "ledger\[/);
   assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
-  assert.doesNotMatch(harness, /DROP ROLE/);
+  assert.match(harness, /DROP ROLE task3_nested/);
+  assert.match(harness, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
 });
 
 test('disposable platform writer provisioning safety exercises identity reuse against PostgreSQL', async () => {
