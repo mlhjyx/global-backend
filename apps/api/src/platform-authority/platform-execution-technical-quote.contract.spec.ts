@@ -101,6 +101,7 @@ describe("platform-execution-technical-quote/v1 body contract", () => {
       "policy_revision",
       "provider_snapshot_sha256",
       "price_catalog_revision",
+      "maximum_activity_attempts",
       "maximum_physical_invocations",
       "maximum_repair_wires",
       "maximum_fallback_wires",
