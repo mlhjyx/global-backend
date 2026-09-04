@@ -16,23 +16,25 @@ describe("clean @global/contracts platform-authority build", () => {
     try {
       const packageRoot = resolve(temporary, "packages/contracts");
       await mkdir(packageRoot, { recursive: true });
-      await Promise.all([
-        cp(resolve(SOURCE_PACKAGE, "src"), resolve(packageRoot, "src"), {
-          recursive: true,
-        }),
-        cp(
-          resolve(SOURCE_PACKAGE, "package.json"),
-          resolve(packageRoot, "package.json"),
-        ),
-        cp(
-          resolve(SOURCE_PACKAGE, "tsconfig.json"),
-          resolve(packageRoot, "tsconfig.json"),
-        ),
-        cp(
-          resolve(REPOSITORY_ROOT, "tsconfig.base.json"),
-          resolve(temporary, "tsconfig.base.json"),
-        ),
-      ]);
+      await cp(resolve(SOURCE_PACKAGE, "src"), resolve(packageRoot, "src"), {
+        recursive: true,
+      });
+      await cp(
+        resolve(SOURCE_PACKAGE, "package.json"),
+        resolve(packageRoot, "package.json"),
+      );
+      await cp(
+        resolve(SOURCE_PACKAGE, "tsconfig.json"),
+        resolve(packageRoot, "tsconfig.json"),
+      );
+      await cp(
+        resolve(SOURCE_PACKAGE, "tsconfig.platform-authority.json"),
+        resolve(packageRoot, "tsconfig.platform-authority.json"),
+      );
+      await cp(
+        resolve(REPOSITORY_ROOT, "tsconfig.base.json"),
+        resolve(temporary, "tsconfig.base.json"),
+      );
       await symlink(
         resolve(SOURCE_PACKAGE, "node_modules"),
         resolve(packageRoot, "node_modules"),
