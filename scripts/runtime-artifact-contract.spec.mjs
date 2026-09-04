@@ -174,13 +174,15 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /pnpm --filter @global\/site-renderer deploy --prod --frozen-lockfile \/tmp\/renderer-runtime-deploy/,
   );
-  assert.match(
-    dockerfile,
-    /snapshot\.debian\.org\/archive\/debian\/20260826T000000Z/,
+  assert.ok(
+    dockerfile.includes(
+      'https://snapshot.debian.org/archive/debian/20260826T000000Z/',
+    ),
   );
-  assert.match(
-    dockerfile,
-    /snapshot\.debian\.org\/archive\/debian-security\/20260826T000000Z/,
+  assert.ok(
+    dockerfile.includes(
+      'https://snapshot.debian.org/archive/debian-security/20260826T000000Z/',
+    ),
   );
   assert.match(dockerfile, /check-valid-until=no/);
   assert.match(
@@ -199,9 +201,10 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /COPY --from=ca-bootstrap \/etc\/ssl\/certs\/ca-certificates\.crt \/etc\/ssl\/certs\/ca-certificates\.crt/,
   );
-  assert.doesNotMatch(dockerfile, /http:\/\/snapshot\.debian\.org/);
-  assert.doesNotMatch(dockerfile, /deb\.debian\.org/);
-  assert.doesNotMatch(dockerfile, /security\.debian\.org|ftp\.debian\.org/);
+  assert.ok(!dockerfile.includes('http://snapshot.debian.org'));
+  assert.ok(!dockerfile.includes('deb.debian.org'));
+  assert.ok(!dockerfile.includes('security.debian.org'));
+  assert.ok(!dockerfile.includes('ftp.debian.org'));
   assert.doesNotMatch(dockerfile, /trusted\s*=\s*yes/i);
   assert.match(
     dockerfile,
