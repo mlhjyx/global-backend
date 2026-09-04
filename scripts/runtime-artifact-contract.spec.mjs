@@ -191,6 +191,10 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/,
   );
+  assert.equal(
+    dockerfile.match(/766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/g)?.length,
+    2,
+  );
   assert.match(
     dockerfile,
     /COPY --from=ca-bootstrap \/etc\/ssl\/certs\/ca-certificates\.crt \/etc\/ssl\/certs\/ca-certificates\.crt/,
