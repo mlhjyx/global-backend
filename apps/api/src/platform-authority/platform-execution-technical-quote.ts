@@ -12,12 +12,12 @@ import {
   type VerifiedPlatformAuthorityPolicyAsset,
 } from "./platform-authority-policy-asset";
 import {
-  isCodeOwnedPlatformExecutionProviderSnapshotV1,
   type PlatformExecutionHardBoundsV1,
   type PlatformExecutionProviderSnapshotV1,
   type PlatformExecutionTechnicalContractV1,
   type PlatformExecutionTechnicalRowV1,
 } from "./platform-execution-contract";
+import { isCodeOwnedPlatformExecutionProviderSnapshotV1 } from "./platform-execution-provider-snapshot";
 
 export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_SCHEMA =
   "platform-execution-technical-quote/v1" as const;

@@ -13,8 +13,8 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
  * 经浏览器 pinning proxy 再校验，Ubuntu 仅保留 fake-IP-only 窄回退。
  * 抽象成注入点（PageFetcher）：WebsiteWatchService 依赖此接口，测试可注入假实现（不触网）。
  * fail-safe：robots 禁止 / 抓取失败 / 空内容 → 返回 null（单页失败不阻断其余页与其余源）。
- * 收口②：原始出网改经 ExecutionBroker 的 crawl4ai.render 工具（robots 在工具内权威强制，
- * 此处 isAllowedByRobots 仅作省一次工具调用的前置快查）；无 broker = 不允许直连（fail-closed 不出网）。
+ * 收口②：原始出网改经 ExecutionBroker 的 crawl4ai.render 工具；robots 只在该
+ * 持久幂等 Tool operation 内强制，不作账本外前置出网；无 broker 则 fail closed。
  */
 export interface FetchedPage {
   url: string;

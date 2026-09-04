@@ -12,9 +12,9 @@ import {
 import { loadVerifiedPlatformAuthorityPolicyAsset } from "./platform-authority-policy-asset";
 import {
   PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
-  createPlatformExecutionProviderSnapshotV1,
   type PlatformExecutionTechnicalContractV1,
 } from "./platform-execution-contract";
+import { createPlatformExecutionProviderSnapshotV1 } from "./platform-execution-provider-snapshot";
 import {
   PlatformExecutionTechnicalQuoteService,
   type PlatformExecutionTechnicalQuoteV1,
