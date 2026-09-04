@@ -1,22 +1,28 @@
-import { createHash } from 'node:crypto';
+import { createHash } from "node:crypto";
 import {
   NEW_API_REQUEST_BOUND_RESOLVER_ID,
   NewApiRequestBoundSettlementResolver,
   type NewApiRequestBoundSettlementInput,
   type NewApiRequestBoundSettlement,
-} from '../model-gateway/new-api-request-bound-settlement';
-import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
-import type { SiteBuildReconciliationObservation } from './site-build-cost-ledger';
+} from "../model-gateway/new-api-request-bound-settlement";
+import {
+  loadSettlementDerivationKeyring,
+  settlementWireNonce,
+  type DurableSettlementWireIdentity,
+  type SettlementDerivationKeyring,
+} from "../model-gateway/settlement-wire-identity";
+import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from "../model-gateway/model-transports";
+import type { SiteBuildReconciliationObservation } from "./site-build-cost-ledger";
 
-const CATALOG_SCHEMA = 'site-build-cost-reconciliation-catalog/v1' as const;
+const CATALOG_SCHEMA = "site-build-cost-reconciliation-catalog/v1" as const;
 const MAX_CATALOG_BYTES = 64 * 1024;
 const MAX_CATALOG_ENTRIES = 256;
 const BOUNDED_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,190}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const PROTOCOLS = new Set([
-  'openai-chat-completions',
-  'openai-responses',
-  'anthropic-messages',
+  "openai-chat-completions",
+  "openai-responses",
+  "anthropic-messages",
 ]);
 
 export interface SiteBuildReconciliationCandidate {
@@ -41,10 +47,10 @@ export interface SiteBuildSettlementContext {
   schemaVersion: typeof CATALOG_SCHEMA;
   catalogId: string;
   catalogSha256: string;
-  pricingAuthority: 'openox_model_marketplace';
+  pricingAuthority: "openox_model_marketplace";
   pricingSnapshotSha256: string;
-  pricingCurrency: 'USD';
-  providerId: 'gateway';
+  pricingCurrency: "USD";
+  providerId: "gateway";
   taskId: string;
   resolverId: string;
   alias: string;
@@ -61,6 +67,7 @@ type StoredSiteBuildSettlementContext = SiteBuildSettlementContext;
 
 interface TrustedContext extends SiteBuildSettlementContext {
   requestId: string;
+  wireIdentity: DurableSettlementWireIdentity;
 }
 
 export interface SiteBuildCostReconciliationCatalog {
@@ -81,7 +88,7 @@ function nonNegativeSafeInteger(value: unknown): value is number {
 }
 
 function record(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
@@ -91,11 +98,13 @@ function trustedContext(
 ): TrustedContext | null {
   const preflight = meta?.settlementContext;
   const settlements = meta?.gatewaySettlements;
+  const wireIdentities = meta?.settlementWireIdentities;
   if (
     !preflight ||
-    typeof preflight !== 'object' ||
+    typeof preflight !== "object" ||
     Array.isArray(preflight) ||
-    !Array.isArray(settlements)
+    !Array.isArray(settlements) ||
+    !Array.isArray(wireIdentities)
   ) {
     return null;
   }
@@ -103,11 +112,20 @@ function trustedContext(
   const pending = settlements.find(
     (value) =>
       value != null &&
-      typeof value === 'object' &&
+      typeof value === "object" &&
       !Array.isArray(value) &&
-      (value as Record<string, unknown>).status === 'unknown',
+      (value as Record<string, unknown>).status === "unknown",
   ) as Record<string, unknown> | undefined;
   const requestId = pending?.requestId;
+  const physicalWireAttempt = pending?.physicalWireAttempt;
+  const wireIdentity = wireIdentities.find(
+    (value) =>
+      value != null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      (value as Record<string, unknown>).physicalWireAttempt ===
+        physicalWireAttempt,
+  ) as Record<string, unknown> | undefined;
   const resolverId = proof.resolverId;
   const alias = proof.alias;
   const protocol = proof.protocol;
@@ -117,27 +135,47 @@ function trustedContext(
   const taskId = proof.taskId;
   if (
     proof.schemaVersion !== CATALOG_SCHEMA ||
-    typeof catalogId !== 'string' ||
+    typeof catalogId !== "string" ||
     !BOUNDED_ID.test(catalogId) ||
-    typeof catalogSha256 !== 'string' ||
+    typeof catalogSha256 !== "string" ||
     !SHA256.test(catalogSha256) ||
-    proof.pricingAuthority !== 'openox_model_marketplace' ||
-    typeof pricingSnapshotSha256 !== 'string' ||
+    proof.pricingAuthority !== "openox_model_marketplace" ||
+    typeof pricingSnapshotSha256 !== "string" ||
     !SHA256.test(pricingSnapshotSha256) ||
-    proof.pricingCurrency !== 'USD' ||
-    proof.providerId !== 'gateway' ||
-    typeof taskId !== 'string' ||
+    proof.pricingCurrency !== "USD" ||
+    proof.providerId !== "gateway" ||
+    typeof taskId !== "string" ||
     !BOUNDED_ID.test(taskId) ||
-    typeof requestId !== 'string' ||
-    typeof resolverId !== 'string' ||
+    typeof requestId !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(requestId) ||
+    !positiveSafeInteger(physicalWireAttempt) ||
+    physicalWireAttempt > 2 ||
+    !wireIdentity ||
+    wireIdentity.schemaVersion !== "site-build-settlement-wire-identity/v1" ||
+    wireIdentity.physicalWireAttempt !== physicalWireAttempt ||
+    typeof wireIdentity.derivationKeyId !== "string" ||
+    !BOUNDED_ID.test(wireIdentity.derivationKeyId) ||
+    wireIdentity.requestId !== requestId ||
+    typeof wireIdentity.nonceSha256 !== "string" ||
+    !SHA256.test(wireIdentity.nonceSha256) ||
+    Object.keys(wireIdentity).some(
+      (key) =>
+        ![
+          "schemaVersion",
+          "physicalWireAttempt",
+          "derivationKeyId",
+          "requestId",
+          "nonceSha256",
+        ].includes(key),
+    ) ||
+    typeof resolverId !== "string" ||
     pending?.resolverId !== resolverId ||
-    typeof alias !== 'string' ||
+    typeof alias !== "string" ||
     !BOUNDED_ID.test(alias) ||
-    typeof protocol !== 'string' ||
+    typeof protocol !== "string" ||
     !PROTOCOLS.has(protocol) ||
     protocol !==
-      (VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ??
-        'openai-chat-completions') ||
+      (VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? "openai-chat-completions") ||
     !positiveSafeInteger(proof.expectedChannelId) ||
     !positiveSafeInteger(proof.maxOutputTokensPerCall) ||
     !positiveSafeInteger(proof.gatewayCredentialQuotaCapPoints) ||
@@ -151,19 +189,25 @@ function trustedContext(
     schemaVersion: CATALOG_SCHEMA,
     catalogId,
     catalogSha256,
-    pricingAuthority: 'openox_model_marketplace',
+    pricingAuthority: "openox_model_marketplace",
     pricingSnapshotSha256,
-    pricingCurrency: 'USD',
-    providerId: 'gateway',
+    pricingCurrency: "USD",
+    providerId: "gateway",
     taskId,
     requestId,
+    wireIdentity: {
+      schemaVersion: "site-build-settlement-wire-identity/v1",
+      physicalWireAttempt,
+      derivationKeyId: wireIdentity.derivationKeyId,
+      requestId,
+      nonceSha256: wireIdentity.nonceSha256,
+    },
     resolverId,
     alias,
     protocol,
     expectedChannelId: proof.expectedChannelId,
     maxOutputTokensPerCall: proof.maxOutputTokensPerCall,
-    gatewayCredentialQuotaCapPoints:
-      proof.gatewayCredentialQuotaCapPoints,
+    gatewayCredentialQuotaCapPoints: proof.gatewayCredentialQuotaCapPoints,
     inputPriceMicrounitsPerMillionTokens:
       proof.inputPriceMicrounitsPerMillionTokens,
     outputPriceMicrounitsPerMillionTokens:
@@ -178,8 +222,7 @@ function pricedCostMicrousd(
   outputTokens: number,
 ): string | null {
   const numerator =
-    BigInt(inputTokens) *
-      BigInt(context.inputPriceMicrounitsPerMillionTokens) +
+    BigInt(inputTokens) * BigInt(context.inputPriceMicrounitsPerMillionTokens) +
     BigInt(outputTokens) *
       BigInt(context.outputPriceMicrounitsPerMillionTokens);
   const denominator = 1_000_000_000_000n;
@@ -196,7 +239,7 @@ function parseCatalog(
 ): SiteBuildCostReconciliationCatalog | undefined {
   if (
     raw !== raw.trim() ||
-    Buffer.byteLength(raw, 'utf8') > MAX_CATALOG_BYTES
+    Buffer.byteLength(raw, "utf8") > MAX_CATALOG_BYTES
   ) {
     return undefined;
   }
@@ -215,23 +258,23 @@ function parseCatalog(
     !Array.isArray(entries) ||
     entries.length < 1 ||
     entries.length > MAX_CATALOG_ENTRIES ||
-    typeof catalogId !== 'string' ||
+    typeof catalogId !== "string" ||
     !BOUNDED_ID.test(catalogId) ||
-    typeof resolverId !== 'string' ||
+    typeof resolverId !== "string" ||
     !BOUNDED_ID.test(resolverId) ||
     // 目录声明的 resolver 身份必须就是 provider 写入 unknown 观测、且
     // sweep resolver 使用的同一身份；否则 trustedContext 会永久拒绝
     // spend meta，对账只能在 24 小时后 EXPIRED——部署期 fail closed。
     resolverId !== NEW_API_REQUEST_BOUND_RESOLVER_ID ||
-    parsed.pricingAuthority !== 'openox_model_marketplace' ||
-    parsed.pricingCurrency !== 'USD' ||
-    typeof pricingSnapshotSha256 !== 'string' ||
+    parsed.pricingAuthority !== "openox_model_marketplace" ||
+    parsed.pricingCurrency !== "USD" ||
+    typeof pricingSnapshotSha256 !== "string" ||
     !SHA256.test(pricingSnapshotSha256) ||
     parsed.ledgerMicrousdPerPricingUnit !== 1_000_000
   ) {
     return undefined;
   }
-  const catalogSha256 = createHash('sha256').update(raw).digest('hex');
+  const catalogSha256 = createHash("sha256").update(raw).digest("hex");
   const contexts = new Map<string, StoredSiteBuildSettlementContext>();
   for (const value of entries) {
     const entry = record(value);
@@ -241,16 +284,16 @@ function parseCatalog(
     const alias = entry?.alias;
     const protocol = entry?.protocol;
     if (
-      providerId !== 'gateway' ||
-      typeof taskId !== 'string' ||
+      providerId !== "gateway" ||
+      typeof taskId !== "string" ||
       !BOUNDED_ID.test(taskId) ||
-      typeof alias !== 'string' ||
+      typeof alias !== "string" ||
       !BOUNDED_ID.test(alias) ||
-      typeof protocol !== 'string' ||
+      typeof protocol !== "string" ||
       !PROTOCOLS.has(protocol) ||
       protocol !==
         (VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ??
-          'openai-chat-completions') ||
+          "openai-chat-completions") ||
       !positiveSafeInteger(entry.expectedChannelId) ||
       !positiveSafeInteger(entry.maxOutputTokensPerCall) ||
       !positiveSafeInteger(entry.gatewayCredentialQuotaCapPoints) ||
@@ -267,9 +310,9 @@ function parseCatalog(
         schemaVersion: CATALOG_SCHEMA,
         catalogId,
         catalogSha256,
-        pricingAuthority: 'openox_model_marketplace' as const,
+        pricingAuthority: "openox_model_marketplace" as const,
         pricingSnapshotSha256,
-        pricingCurrency: 'USD' as const,
+        pricingCurrency: "USD" as const,
         providerId,
         taskId,
         resolverId,
@@ -277,8 +320,7 @@ function parseCatalog(
         protocol,
         expectedChannelId: entry.expectedChannelId,
         maxOutputTokensPerCall: entry.maxOutputTokensPerCall,
-        gatewayCredentialQuotaCapPoints:
-          entry.gatewayCredentialQuotaCapPoints,
+        gatewayCredentialQuotaCapPoints: entry.gatewayCredentialQuotaCapPoints,
         inputPriceMicrounitsPerMillionTokens:
           entry.inputPriceMicrounitsPerMillionTokens,
         outputPriceMicrounitsPerMillionTokens:
@@ -298,10 +340,7 @@ function parseCatalog(
       const context = contexts.get(
         `${input.providerId}\0${input.taskId}\0${input.alias}`,
       );
-      if (
-        !context ||
-        input.maxOutputTokens > context.maxOutputTokensPerCall
-      ) {
+      if (!context || input.maxOutputTokens > context.maxOutputTokensPerCall) {
         return null;
       }
       return context;
@@ -317,10 +356,11 @@ export function createSiteBuildCostReconciliationCatalogFromEnv(
   return raw ? parseCatalog(raw) : undefined;
 }
 
-export class NewApiSiteBuildCostReconciliationResolver
-  implements SiteBuildCostReconciliationResolver
-{
-  constructor(private readonly resolver: RequestBoundResolver) {}
+export class NewApiSiteBuildCostReconciliationResolver implements SiteBuildCostReconciliationResolver {
+  constructor(
+    private readonly resolver: RequestBoundResolver,
+    private readonly keyring: SettlementDerivationKeyring,
+  ) {}
 
   async resolve(
     candidate: SiteBuildReconciliationCandidate,
@@ -328,36 +368,55 @@ export class NewApiSiteBuildCostReconciliationResolver
     const context = trustedContext(candidate.meta);
     if (!context) {
       return {
-        status: 'UNRESOLVED',
+        status: "UNRESOLVED",
         resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
         observedAt: new Date(),
-        meta: { reason: 'trusted_settlement_context_unavailable' },
+        meta: { reason: "trusted_settlement_context_unavailable" },
+      };
+    }
+    const nonce = settlementWireNonce(this.keyring, {
+      operationKey: candidate.operationKey,
+      physicalWireAttempt: context.wireIdentity.physicalWireAttempt,
+      derivationKeyId: context.wireIdentity.derivationKeyId,
+      nonceSha256: context.wireIdentity.nonceSha256,
+    });
+    if (!nonce) {
+      return {
+        status: "UNRESOLVED",
+        resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+        requestId: context.requestId,
+        observedAt: new Date(),
+        meta: { reason: "settlement_nonce_unavailable" },
       };
     }
     const settlement = await this.resolver.resolve({
       requestId: context.requestId,
+      nonce,
       alias: context.alias,
       protocol: context.protocol,
       expectedChannelId: context.expectedChannelId,
       maxOutputTokens: context.maxOutputTokensPerCall,
       maximumQuotaPoints: context.gatewayCredentialQuotaCapPoints,
     });
-    if (settlement.status === 'unknown') {
+    if (settlement.status === "unknown") {
       return {
-        status: 'UNRESOLVED',
+        status: "UNRESOLVED",
         resolverId: settlement.resolverId,
         requestId: settlement.requestId ?? undefined,
         observedAt: new Date(),
-        meta: { reason: settlement.reason },
+        meta: {
+          reason: settlement.reason,
+          readbackProbes: settlement.readbackProbes,
+        },
       };
     }
     if (settlement.resolverId !== context.resolverId) {
       return {
-        status: 'UNRESOLVED',
+        status: "UNRESOLVED",
         resolverId: context.resolverId,
         requestId: context.requestId,
         observedAt: new Date(),
-        meta: { reason: 'resolver_identity_mismatch' },
+        meta: { reason: "resolver_identity_mismatch" },
       };
     }
     const exactCostMicrousd = pricedCostMicrousd(
@@ -367,19 +426,19 @@ export class NewApiSiteBuildCostReconciliationResolver
     );
     if (exactCostMicrousd === null) {
       return {
-        status: 'UNRESOLVED',
+        status: "UNRESOLVED",
         resolverId: context.resolverId,
         requestId: context.requestId,
         observedAt: new Date(),
-        meta: { reason: 'trusted_price_mapping_invalid' },
+        meta: { reason: "trusted_price_mapping_invalid" },
       };
     }
     return {
-      status: 'RESOLVED',
+      status: "RESOLVED",
       resolverId: settlement.resolverId,
       requestId: settlement.requestId,
       receiptDigest: settlement.receiptDigest,
-      costBasis: 'token_pricing',
+      costBasis: "token_pricing",
       exactCostMicrousd,
       inputTokens: settlement.inputTokens,
       outputTokens: settlement.outputTokens,
@@ -389,6 +448,8 @@ export class NewApiSiteBuildCostReconciliationResolver
         protocol: settlement.protocol,
         channelId: settlement.channelId,
         quota: settlement.quota,
+        upstreamIdState: settlement.upstreamIdState,
+        readbackProbes: settlement.readbackProbes,
       },
     };
   }
@@ -398,21 +459,24 @@ export function createSiteBuildCostReconciliationResolverFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): SiteBuildCostReconciliationResolver | undefined {
   const gatewayUrl = env.MODEL_GATEWAY_URL;
-  const apiKey = env.MODEL_GATEWAY_KEY;
-  if (!gatewayUrl || !apiKey) return undefined;
+  const readerCredential = env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL;
+  const keyringPath = env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE;
+  if (!gatewayUrl || !readerCredential || !keyringPath) return undefined;
   try {
     const origin = new URL(gatewayUrl).origin;
     const rawPoll = Number(env.SITE_BUILD_COST_RECONCILIATION_POLL_MS ?? 5_000);
-    const maximumPollDurationMs = Number.isSafeInteger(rawPoll)
+    const maximumProbeDurationMs = Number.isSafeInteger(rawPoll)
       ? Math.max(1, Math.min(30_000, rawPoll))
       : 5_000;
+    const keyring = loadSettlementDerivationKeyring(keyringPath);
     return new NewApiSiteBuildCostReconciliationResolver(
       new NewApiRequestBoundSettlementResolver({
         gatewayOrigin: origin,
-        apiKey,
+        readerCredential,
         resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-        maximumPollDurationMs,
+        maximumProbeDurationMs,
       }),
+      keyring,
     );
   } catch {
     return undefined;
