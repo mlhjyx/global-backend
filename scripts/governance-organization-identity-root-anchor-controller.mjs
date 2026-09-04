@@ -391,6 +391,119 @@ function validateRootUpstreamEvidence(request, contract, records) {
       return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
     }
   }
+  const shaFields = {
+    localLauncherEvidence: [
+      "launcherContractSha256",
+      "launcherMaterializationReceiptSha256",
+      "readbackReportSha256",
+      "reportSha256",
+      "counterexampleSetSha256",
+    ],
+    bootstrapContract: [
+      "launcherContractSha256",
+      "bootstrapSchemaSha256",
+      "closedRequestSchemaSha256",
+      "effectivePnpmArgvRuleSha256",
+      "receiptComparatorSha256",
+    ],
+    githubControllerEvidence: [
+      "contractSha256",
+      "controllerReviewReceiptSha256",
+      "requestSha256",
+      "payloadSchemaSha256",
+      "payloadSha256",
+      "authorizationReceiptSha256",
+      "resultSchemaSha256",
+      "resultSha256",
+      "executableClosureSetSha256",
+      "prePostToctouSha256",
+    ],
+    protectedBaseEvidence: [
+      "contractSha256",
+      "contractReviewReceiptSha256",
+      "materializedTaskRootSha256",
+      "materializedSourceBlobSetSha256",
+      "executableClosureSetSha256",
+      "toolLogicalIdentitySetSha256",
+      "eventInputSha256",
+      "controllerVariableSetSha256",
+      "requestSetSha256",
+      "outputReceiptSetSha256",
+      "prePostToctouSha256",
+    ],
+    admittedRefreshAcceptanceEvidence: ["stageMapSha256"],
+    controllerVariableWriteReceipt: [
+      "contractSha256",
+      "controllerReviewReceiptSha256",
+      "requestSha256",
+      "payloadSchemaSha256",
+      "payloadSha256",
+      "authorizationReceiptSha256",
+      "resultSchemaSha256",
+      "resultSha256",
+      "executableClosureSetSha256",
+      "prePostToctouSha256",
+    ],
+  };
+  for (const [recordKey, fields] of Object.entries(shaFields)) {
+    if (fields.some((field) => !isSha256(records[recordKey][field]))) {
+      return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+    }
+  }
+  const github = records.githubControllerEvidence;
+  const variables = records.controllerVariableWriteReceipt;
+  if (
+    github.repository !== "mlhjyx/global-backend" ||
+    github.containsCredentialValue !== false ||
+    github.result !== "PASS" ||
+    variables.operation !== "CONTROLLER_VARIABLES_WRITE" ||
+    variables.repository !== "mlhjyx/global-backend" ||
+    variables.containsCredentialValue !== false ||
+    variables.result !== "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  }
+  const hosted = records.protectedBaseEvidence;
+  if (
+    hosted.repository !== "mlhjyx/global-backend" ||
+    hosted.event !== "push" ||
+    hosted.ref !== "refs/heads/main" ||
+    hosted.runnerOs !== "linux" ||
+    hosted.prBytesExecuted !== false ||
+    hosted.result !== "PASS" ||
+    !isGitObjectId(hosted.protectedBaseCommit) ||
+    !isGitObjectId(hosted.workflowBlobId) ||
+    !Number.isSafeInteger(hosted.runId) ||
+    hosted.runId <= 0 ||
+    !Number.isSafeInteger(hosted.runAttempt) ||
+    hosted.runAttempt <= 0
+  ) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  }
+  const acceptance = records.admittedRefreshAcceptanceEvidence;
+  if (
+    !isGitObjectId(acceptance.refreshBaseCommit) ||
+    !isGitObjectId(acceptance.refreshMergeCommit) ||
+    !isGitObjectId(acceptance.currentMainAdmissionCommit) ||
+    !isGitObjectId(acceptance.reviewedImplementationCommit)
+  ) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  }
+  const workflow = records.workflowRunEvidence;
+  if (
+    workflow.workflowPath !==
+      ".github/workflows/organization-identity-writer-anchor.yml" ||
+    workflow.event !== "push" ||
+    workflow.ref !== "refs/heads/main" ||
+    !isGitObjectId(workflow.headSha) ||
+    !Number.isSafeInteger(workflow.runId) ||
+    workflow.runId <= 0 ||
+    !Number.isSafeInteger(workflow.runAttempt) ||
+    workflow.runAttempt <= 0 ||
+    workflow.conclusion !== "success"
+  ) {
+    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
+  }
   if (
     !hasExactKeys(materialization, [
       "schemaVersion",
