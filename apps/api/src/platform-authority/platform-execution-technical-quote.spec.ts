@@ -126,6 +126,40 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
   });
 
   it.each([
+    ["acq-sweep", "500", "50", "10000", "5000000", "122880", "0", "one_source_provider_per_due_source"],
+    ["patents-cache-refresh", "0", "0", "50", "0", "122880", "0", "disabled_no_egress"],
+    ["intent-sweep", "5000", "1000", "0", "5000000", "3000000", "3", "all_declared_wires"],
+    ["sanctions-refresh", "8", "2", "0", "33554432", "33554432", "3", "all_declared_wires"],
+  ] as const)(
+    "counts exact physical wires, costed operations and byte domains for %s",
+    (
+      scheduleId,
+      physical,
+      costed,
+      outputItems,
+      transportBytes,
+      durableBytes,
+      redirects,
+      selection,
+    ) => {
+      const vector = CORPUS.vectors.find((candidate) => candidate.id === scheduleId)!;
+      const actual = quote(vector) as unknown as Record<string, string>;
+
+      expect(actual.maximum_physical_invocations).toBe(physical);
+      expect(actual.maximum_costed_invocations).toBe(costed);
+      expect(actual.maximum_output_items_per_wire).toBe(outputItems);
+      expect(actual.maximum_transport_response_bytes_per_wire).toBe(
+        transportBytes,
+      );
+      expect(actual.maximum_durable_result_bytes).toBe(durableBytes);
+      expect(actual.maximum_redirects_per_operation).toBe(redirects);
+      expect(actual.physical_wire_selection).toBe(selection);
+      expect(actual.physical_wire_contracts_sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(actual).not.toHaveProperty("maximum_output_bytes_per_wire");
+    },
+  );
+
+  it.each([
     ["purpose", { purpose: "platform.sanctions" }],
     ["workflow type", { workflowType: "otherWorkflow" }],
     ["workflow id", { workflowId: "contains newline\n" }],

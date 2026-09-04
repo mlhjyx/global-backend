@@ -120,4 +120,33 @@ describe("platform-execution-technical-quote/v1 body contract", () => {
       ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
     }
   });
+
+  it("uses separate physical-wire, transport-byte and durable-result fields", () => {
+    const legacy = JSON.parse(VECTOR.positive_body.raw_body_utf8) as Record<
+      string,
+      string
+    >;
+    delete legacy.maximum_output_bytes_per_wire;
+    const bounded = {
+      ...legacy,
+      maximum_costed_invocations: "1000",
+      maximum_transport_response_bytes_per_wire: "5000000",
+      maximum_durable_result_bytes: "3000000",
+      maximum_redirects_per_operation: "3",
+      physical_wire_contracts_sha256: "1".repeat(64),
+      physical_wire_selection: "all_declared_wires",
+    };
+
+    expect(() => canonicalizePlatformAuthorityRequestBodyV1({
+      contentType: "application/json",
+      rawBody: Buffer.from(JSON.stringify(bounded), "utf8"),
+      schema: PLATFORM_EXECUTION_TECHNICAL_QUOTE_SCHEMA_V1,
+    })).not.toThrow();
+
+    expect(() => canonicalizePlatformAuthorityRequestBodyV1({
+      contentType: "application/json",
+      rawBody: Buffer.from(JSON.stringify(legacy), "utf8"),
+      schema: PLATFORM_EXECUTION_TECHNICAL_QUOTE_SCHEMA_V1,
+    })).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
+  });
 });
