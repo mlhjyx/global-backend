@@ -3,12 +3,6 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true,
-    "assets": [
-      {
-        "include": "platform-authority/*.json",
-        "outDir": "dist"
-      }
-    ]
+    "deleteOutDir": true
   }
 }

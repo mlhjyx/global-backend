@@ -10,7 +10,6 @@
 export const CONTRACTS_PACKAGE = "@global/contracts";
 
 export * from "./execution-budget";
-export * from "./platform-authority/canonical-request";
 
 /**
  * Site Builder 契约（DQ-1）：SiteSpec 顶层信封 + Puck 兼容页面形状。
