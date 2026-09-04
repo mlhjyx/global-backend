@@ -24,15 +24,24 @@ export const ACCEPTED_INSTALL_INPUT_PATHS = list(`
 package.json apps/api/package.json packages/db/package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json
 scripts/governance-organization-identity-bootstrap.mjs scripts/governance-organization-identity-bootstrap.spec.mjs .dockerignore .gitignore
 `);
-export const DEFAULT_ABSENCE_SENTINELS = list(`.npmrc .pnpmfile.cjs .pnpmfile.js pnpmfile.cjs pnpmfile.js patches`);
-export const ALLOWED_ENVIRONMENT_NAMES = list(`PATH HOME XDG_CONFIG_HOME XDG_CACHE_HOME COREPACK_HOME PNPM_HOME TMPDIR NPM_CONFIG_USERCONFIG CI LANG LC_ALL`);
+export const DEFAULT_ABSENCE_SENTINELS = list(
+  `.npmrc .pnpmfile.cjs .pnpmfile.js pnpmfile.cjs pnpmfile.js patches`,
+);
+export const ALLOWED_ENVIRONMENT_NAMES = list(
+  `PATH HOME XDG_CONFIG_HOME XDG_CACHE_HOME COREPACK_HOME PNPM_HOME TMPDIR NPM_CONFIG_USERCONFIG CI LANG LC_ALL`,
+);
 export const TOOL_LOGICAL_EXPECTATIONS = Object.freeze(
   [
     ["ENV", "posix-env", "EXEC_ONLY", "PINNED_ABSOLUTE_EXECUTABLE"],
     ["NODE", "node", "EXEC_ONLY", "PINNED_ABSOLUTE_EXECUTABLE"],
     ["GIT", "git", "EXEC_ONLY", "PINNED_ABSOLUTE_EXECUTABLE"],
     ["COREPACK_SHIM", "corepack", "HASH_BEFORE_EXEC", "PINNED_SHIM"],
-    ["COREPACK_LIB_COREPACK_CJS", "corepack", "HASH_BEFORE_EXEC", "PINNED_ENTRYPOINT"],
+    [
+      "COREPACK_LIB_COREPACK_CJS",
+      "corepack",
+      "HASH_BEFORE_EXEC",
+      "PINNED_ENTRYPOINT",
+    ],
     ["PNPM_SHIM", "pnpm", "HASH_BEFORE_EXEC", "PINNED_SHIM"],
     ["PNPM_ENTRYPOINT", "pnpm", "HASH_BEFORE_EXEC", "PINNED_ENTRYPOINT"],
   ].map(([role, packageName, loadPolicy, authority]) =>
@@ -53,17 +62,27 @@ fixedRootSetSha256 postInstallBootstrapRehashSha256 dependencyDeclarationRoots t
 generatedDmmfSha256 generatedDelegateSetSha256 generatedOutputSetSha256 typescriptDynamicImportSha256 hostileMarkerSetSha256 hostileMarkerExecutionCount
 prePostToctouSha256 startedAt finishedAt result
 `);
-const TASK_IDS = list(`0L 0P 0A 0B 0F 0C 0M 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18`);
+const TASK_IDS = list(
+  `0L 0P 0A 0B 0F 0C 0M 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18`,
+);
 const LOCAL_COMMAND_IDS = list(`
 BOOTSTRAP_AUTHORITY_RUN_V1 SCOPED_REVIEW_VERIFY_V1 CURRENT_MAIN_AUDIT_LOCAL_V1 CURRENT_MAIN_VALIDATE_V1 CURRENT_MAIN_GENERATE_V1
 COPY_WRITE_ELIGIBILITY_V1 COPY_SYNC_CITATIONS_V1 GIT_REFRESH_START_V1 GIT_REFRESH_COMMIT_V1 GIT_ADMISSION_COMMIT_V1 GIT_ACCEPTANCE_COMMIT_V1
 REFRESH_VERIFY_V1 MIGRATION_STATIC_VERIFY_V1 PRISMA_GENERATE_V1 SCANNER_TEST_V1 SCANNER_BASELINE_V1 SCANNER_STAGE_V1 SCANNER_ZERO_V1
 SCANNER_ACCEPTANCE_V1 GOVERNANCE_VERIFY_V1 DOCS_VERIFY_V1 API_VERIFY_V1 RUNTIME_ARTIFACT_VERIFY_V1 CONTRACT_GRAPH_VERIFY_V1 V3_WORKTREE_CREATE_V1
 `);
-const CONTRACT_KEYS = list(`schemaVersion launcherContractSha256 bootstrapSchemaSha256 closedRequestSchemaSha256 effectivePnpmArgvRuleSha256 receiptComparatorSha256 toolLogicalExpectations allowedEnvironmentNames`);
-const CONTRACT_DIGEST_KEYS = list(`launcherContractSha256 bootstrapSchemaSha256 closedRequestSchemaSha256 effectivePnpmArgvRuleSha256 receiptComparatorSha256`);
-const EXTERNAL_LAUNCH_KEYS = list(`schemaVersion requestId commandId mode subjectCommit invocationDescriptorSha256 launcherContractSha256 launchedByExecutableClosureSha256 acceptedAt result`);
-const TOOL_ROOT_KEYS = list(`logicalPackage version lockIntegrity rootRealpathSha256 loadedFileCount loadedFileSetSha256 contentSetSha256 prePostToctouSha256`);
+const CONTRACT_KEYS = list(
+  `schemaVersion launcherContractSha256 bootstrapSchemaSha256 closedRequestSchemaSha256 effectivePnpmArgvRuleSha256 receiptComparatorSha256 toolLogicalExpectations allowedEnvironmentNames`,
+);
+const CONTRACT_DIGEST_KEYS = list(
+  `launcherContractSha256 bootstrapSchemaSha256 closedRequestSchemaSha256 effectivePnpmArgvRuleSha256 receiptComparatorSha256`,
+);
+const EXTERNAL_LAUNCH_KEYS = list(
+  `schemaVersion requestId commandId mode subjectCommit invocationDescriptorSha256 launcherContractSha256 launchedByExecutableClosureSha256 acceptedAt result`,
+);
+const TOOL_ROOT_KEYS = list(
+  `logicalPackage version lockIntegrity rootRealpathSha256 loadedFileCount loadedFileSetSha256 contentSetSha256 prePostToctouSha256`,
+);
 const RECEIPT_SHA_KEYS = list(`
 bootstrapContractSha256 launcherMaterializationReceiptSha256 launcherMaterializationReviewReceiptSha256 requestId closedCommandRequestSha256
 inputRecordSha256 payloadSchemaSha256 payloadSha256 outputRecordSha256 externalLaunchReceiptSha256 subjectConfigurationSetSha256
@@ -71,13 +90,25 @@ subjectAbsenceSentinelSetSha256 subjectGitClosureSha256 environmentValueSetSha25
 prismaSchemaSha256 generatedClientSetSha256 generatedDmmfSha256 generatedDelegateSetSha256 generatedOutputSetSha256 typescriptDynamicImportSha256
 hostileMarkerSetSha256 prePostToctouSha256
 `);
-const NULLABLE_RECEIPT_SHA_KEYS = list(`authorizationReceiptSha256 externalControllerReceiptSha256 anchorReceiptSha256`);
-const RECEIPT_SET_KEYS = list(`schemaVersion taskId subjectCommit receiptCount receipts receiptSetSha256`);
-const RECEIPT_SET_ENTRY_KEYS = list(`requestId commandId requestSha256 receiptSha256`);
-const REVIEW_RECEIPT_KEYS = list(`schemaVersion reviewerClass subjectCommit subjectParentCommit range pathSetSha256 reportSha256 counterexampleSetSha256 finalSpecSha256 critical important verdict containsCredentialValue`);
+const NULLABLE_RECEIPT_SHA_KEYS = list(
+  `authorizationReceiptSha256 externalControllerReceiptSha256 anchorReceiptSha256`,
+);
+const RECEIPT_SET_KEYS = list(
+  `schemaVersion taskId subjectCommit receiptCount receipts receiptSetSha256`,
+);
+const RECEIPT_SET_ENTRY_KEYS = list(
+  `requestId commandId requestSha256 receiptSha256`,
+);
+const REVIEW_RECEIPT_KEYS = list(
+  `schemaVersion reviewerClass subjectCommit subjectParentCommit range pathSetSha256 reportSha256 counterexampleSetSha256 finalSpecSha256 critical important verdict containsCredentialValue`,
+);
 
-function pass(extra = {}) { return { status: "PASS", ...extra }; }
-function integrity(code, extra = {}) { return { status: "INTEGRITY_ERROR", code, ...extra }; }
+function pass(extra = {}) {
+  return { status: "PASS", ...extra };
+}
+function integrity(code, extra = {}) {
+  return { status: "INTEGRITY_ERROR", code, ...extra };
+}
 
 export function canonicalJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -114,11 +145,18 @@ function passivePlain(value, seen = new Set()) {
   seen.add(value);
   try {
     const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null && !Array.isArray(value))
+    if (
+      prototype !== Object.prototype &&
+      prototype !== null &&
+      !Array.isArray(value)
+    )
       return false;
     if (Object.getOwnPropertySymbols(value).length !== 0) return false;
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-      if (!("value" in descriptor) || descriptor.get || descriptor.set) return false;
+    for (const descriptor of Object.values(
+      Object.getOwnPropertyDescriptors(value),
+    )) {
+      if (!("value" in descriptor) || descriptor.get || descriptor.set)
+        return false;
       if (!passivePlain(descriptor.value, seen)) return false;
     }
     return true;
@@ -128,10 +166,14 @@ function passivePlain(value, seen = new Set()) {
 }
 
 function exactKeys(value, keys) {
-  if (!passivePlain(value) || value === null || Array.isArray(value)) return false;
+  if (!passivePlain(value) || value === null || Array.isArray(value))
+    return false;
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+  return (
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
+  );
 }
 
 function isAbsoluteNormalized(value) {
@@ -149,7 +191,10 @@ function digestRule(name, value) {
 
 export const BOOTSTRAP_CONTRACT = Object.freeze({
   schemaVersion: "organization-identity-bootstrap-contract/v2",
-  launcherContractSha256: digestRule("launcher-contract", "task-0l-compatible-v2"),
+  launcherContractSha256: digestRule(
+    "launcher-contract",
+    "task-0l-compatible-v2",
+  ),
   bootstrapSchemaSha256: digestRule("bootstrap-schema", {
     receiptKeys: BOOTSTRAP_RECEIPT_KEYS,
     externalLaunchReceipt: "exact-key/v1",
@@ -207,22 +252,27 @@ export function validateBootstrapContract(contract) {
     contract.schemaVersion !== "organization-identity-bootstrap-contract/v2" ||
     !CONTRACT_DIGEST_KEYS.every((key) => isSha(contract[key])) ||
     !Array.isArray(contract.toolLogicalExpectations) ||
-    contract.toolLogicalExpectations.length !== TOOL_LOGICAL_EXPECTATIONS.length ||
+    contract.toolLogicalExpectations.length !==
+      TOOL_LOGICAL_EXPECTATIONS.length ||
     !contract.toolLogicalExpectations.every((entry, index) =>
       exactToolExpectation(entry, TOOL_LOGICAL_EXPECTATIONS[index]),
     ) ||
     !Array.isArray(contract.allowedEnvironmentNames) ||
-    canonicalJson(contract.allowedEnvironmentNames) !== canonicalJson(ALLOWED_ENVIRONMENT_NAMES)
+    canonicalJson(contract.allowedEnvironmentNames) !==
+      canonicalJson(ALLOWED_ENVIRONMENT_NAMES)
   ) {
     return integrity("BOOTSTRAP_CONTRACT_INVALID");
   }
-  return pass({ bootstrapContractSha256: sha256(canonicalJsonBytes(contract)) });
+  return pass({
+    bootstrapContractSha256: sha256(canonicalJsonBytes(contract)),
+  });
 }
 
 export function validateExternalLaunchReceipt(receipt, request) {
   if (
     !exactKeys(receipt, EXTERNAL_LAUNCH_KEYS) ||
-    receipt.schemaVersion !== "organization-identity-external-launch-receipt/v1" ||
+    receipt.schemaVersion !==
+      "organization-identity-external-launch-receipt/v1" ||
     !isSha(receipt.requestId) ||
     !LOCAL_COMMAND_IDS.includes(receipt.commandId) ||
     !isCommit(receipt.subjectCommit) ||
@@ -244,7 +294,9 @@ export function validateExternalLaunchReceipt(receipt, request) {
   ) {
     return integrity("EXTERNAL_LAUNCH_RECEIPT_BINDING_INVALID");
   }
-  return pass({ externalLaunchReceiptSha256: sha256(canonicalJsonBytes(receipt)) });
+  return pass({
+    externalLaunchReceiptSha256: sha256(canonicalJsonBytes(receipt)),
+  });
 }
 
 function validateToolRootReceipt(receipt) {
@@ -273,7 +325,8 @@ export function buildBootstrapRunReceipt(input) {
     schemaVersion: "organization-identity-bootstrap-run/v2",
     receiptCardinality: "ONE_COMMAND_ONE_RECEIPT",
     bootstrapContractSha256: request.bootstrapContractSha256,
-    launcherMaterializationReceiptSha256: request.launcherMaterializationReceiptSha256,
+    launcherMaterializationReceiptSha256:
+      request.launcherMaterializationReceiptSha256,
     launcherMaterializationReviewReceiptSha256:
       request.launcherMaterializationReviewReceiptSha256,
     requestId: request.requestId,
@@ -338,7 +391,8 @@ export function validateBootstrapRunReceipt(receipt, request) {
     if (!isSha(receipt[key])) return integrity("BOOTSTRAP_RECEIPT_INVALID");
   }
   for (const key of NULLABLE_RECEIPT_SHA_KEYS) {
-    if (!nullableSha(receipt[key])) return integrity("BOOTSTRAP_RECEIPT_INVALID");
+    if (!nullableSha(receipt[key]))
+      return integrity("BOOTSTRAP_RECEIPT_INVALID");
   }
   if (
     !isCommit(receipt.acceptedSubjectCommit) ||
@@ -358,7 +412,10 @@ export function validateBootstrapRunReceipt(receipt, request) {
   }
   const pairs = [
     [receipt.bootstrapContractSha256, request.bootstrapContractSha256],
-    [receipt.launcherMaterializationReceiptSha256, request.launcherMaterializationReceiptSha256],
+    [
+      receipt.launcherMaterializationReceiptSha256,
+      request.launcherMaterializationReceiptSha256,
+    ],
     [
       receipt.launcherMaterializationReviewReceiptSha256,
       request.launcherMaterializationReviewReceiptSha256,
@@ -374,7 +431,10 @@ export function validateBootstrapRunReceipt(receipt, request) {
     [receipt.payloadSha256, request.input.payloadSha256],
     [receipt.outputRecordPath, request.input.outputRecordPath],
     [receipt.authorizationReceiptSha256, request.authorizationReceiptSha256],
-    [receipt.externalControllerReceiptSha256, request.externalControllerReceiptSha256],
+    [
+      receipt.externalControllerReceiptSha256,
+      request.externalControllerReceiptSha256,
+    ],
     [receipt.anchorReceiptSha256, request.anchorReceiptSha256],
     [receipt.acceptedSubjectCommit, request.subjectCommit],
     [receipt.closedCommandRequestSha256, sha256(canonicalJsonBytes(request))],
@@ -385,7 +445,11 @@ export function validateBootstrapRunReceipt(receipt, request) {
   return pass();
 }
 
-export function materializeBootstrapRunReceiptSet(taskId, subjectCommit, records) {
+export function materializeBootstrapRunReceiptSet(
+  taskId,
+  subjectCommit,
+  records,
+) {
   const receipts = records
     .map(({ request, receipt }) => ({
       requestId: request.requestId,
@@ -426,7 +490,8 @@ export function validateBootstrapRunReceiptSet(receiptSet, records) {
     const record = records[index];
     if (
       !exactKeys(entry, RECEIPT_SET_ENTRY_KEYS) ||
-      validateBootstrapRunReceipt(record.receipt, record.request).status !== "PASS" ||
+      validateBootstrapRunReceipt(record.receipt, record.request).status !==
+        "PASS" ||
       entry.requestId !== record.request.requestId ||
       entry.commandId !== record.request.commandId ||
       entry.requestSha256 !== sha256(canonicalJsonBytes(record.request)) ||
@@ -437,7 +502,10 @@ export function validateBootstrapRunReceiptSet(receiptSet, records) {
     requestIds.push(entry.requestId);
     receiptIds.push(entry.receiptSha256);
   }
-  if (new Set(requestIds).size !== requestIds.length || new Set(receiptIds).size !== receiptIds.length) {
+  if (
+    new Set(requestIds).size !== requestIds.length ||
+    new Set(receiptIds).size !== receiptIds.length
+  ) {
     return integrity("BOOTSTRAP_RECEIPT_REPLAY");
   }
   const sorted = [...receiptSet.receipts].sort((left, right) =>
@@ -445,7 +513,8 @@ export function validateBootstrapRunReceiptSet(receiptSet, records) {
   );
   if (
     canonicalJson(sorted) !== canonicalJson(receiptSet.receipts) ||
-    receiptSet.receiptSetSha256 !== sha256(canonicalJsonBytes(receiptSet.receipts))
+    receiptSet.receiptSetSha256 !==
+      sha256(canonicalJsonBytes(receiptSet.receipts))
   ) {
     return integrity("BOOTSTRAP_RECEIPT_SET_INVALID");
   }
@@ -490,28 +559,41 @@ function gitBytes(repoRoot, subjectCommit, repoPath) {
 
 function gitHasPath(repoRoot, subjectCommit, repoPath) {
   rejectUnsafeRelative(repoPath);
-  const result = spawnSync("git", ["-C", repoRoot, "cat-file", "-e", `${subjectCommit}:${repoPath}`], {
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    "git",
+    ["-C", repoRoot, "cat-file", "-e", `${subjectCommit}:${repoPath}`],
+    {
+      encoding: "utf8",
+    },
+  );
   return result.status === 0;
 }
 
 function assertInside(root, target) {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
-  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) {
+  if (
+    resolvedTarget !== resolvedRoot &&
+    !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)
+  ) {
     throw new Error("ROOT_CONTAINMENT_INVALID");
   }
 }
 
 function rejectSymlinkAncestors(root, target) {
   const dirs = [];
-  for (let current = path.dirname(target); current !== root; current = path.dirname(current)) {
-    if (current === path.dirname(current)) throw new Error("ROOT_CONTAINMENT_INVALID");
+  for (
+    let current = path.dirname(target);
+    current !== root;
+    current = path.dirname(current)
+  ) {
+    if (current === path.dirname(current))
+      throw new Error("ROOT_CONTAINMENT_INVALID");
     dirs.push(current);
   }
   for (const dir of dirs.reverse())
-    if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) throw new Error("MATERIALIZATION_SYMLINK_ANCESTOR");
+    if (existsSync(dir) && lstatSync(dir).isSymbolicLink())
+      throw new Error("MATERIALIZATION_SYMLINK_ANCESTOR");
 }
 
 export async function verifyBootstrapPreimage({
@@ -531,13 +613,17 @@ export async function verifyBootstrapPreimage({
       const current = path.join(repoRoot, repoPath);
       if (existsSync(current)) {
         const lst = lstatSync(current);
-        if (lst.isSymbolicLink()) return integrity("ACCEPTED_INPUT_SYMLINK", { repoPath });
+        if (lst.isSymbolicLink())
+          return integrity("ACCEPTED_INPUT_SYMLINK", { repoPath });
       }
       tracked.push({ path: repoPath, sha256: sha256(bytes) });
     }
     const absent = [];
     for (const repoPath of acceptedAbsentPaths) {
-      if (gitHasPath(repoRoot, subjectCommit, repoPath) || existsSync(path.join(repoRoot, repoPath))) {
+      if (
+        gitHasPath(repoRoot, subjectCommit, repoPath) ||
+        existsSync(path.join(repoRoot, repoPath))
+      ) {
         return integrity("ACCEPTED_ABSENCE_SENTINEL_PRESENT", { repoPath });
       }
       absent.push(repoPath);
@@ -545,10 +631,14 @@ export async function verifyBootstrapPreimage({
     return pass({
       subjectConfigurationSetSha256: sha256(canonicalJsonBytes(tracked)),
       subjectAbsenceSentinelSetSha256: sha256(canonicalJsonBytes(absent)),
-      subjectGitClosureSha256: sha256(canonicalJsonBytes({ subjectCommit, tracked, absent })),
+      subjectGitClosureSha256: sha256(
+        canonicalJsonBytes({ subjectCommit, tracked, absent }),
+      ),
     });
   } catch (error) {
-    return integrity("BOOTSTRAP_PREIMAGE_UNAVAILABLE", { reason: error.message });
+    return integrity("BOOTSTRAP_PREIMAGE_UNAVAILABLE", {
+      reason: error.message,
+    });
   }
 }
 
@@ -570,7 +660,8 @@ export async function materializeAcceptedInstallInputs({
   try {
     mkdirSync(taskRoot, { recursive: true, mode: 0o700 });
     const taskReal = realpathSync(taskRoot);
-    if (lstatSync(taskRoot).isSymbolicLink()) return integrity("TASK_ROOT_SYMLINK");
+    if (lstatSync(taskRoot).isSymbolicLink())
+      return integrity("TASK_ROOT_SYMLINK");
     for (const repoPath of acceptedInputPaths) {
       const bytes = gitBytes(repoRoot, subjectCommit, repoPath);
       const target = path.join(taskRoot, repoPath);
@@ -617,35 +708,51 @@ function cleanEnvironment(taskRoot) {
   };
 }
 
-export function verifyDependencyAndToolRoots({ taskRoot, roots = cleanRoots(taskRoot), environment = {} } = {}) {
+export function verifyDependencyAndToolRoots({
+  taskRoot,
+  roots = cleanRoots(taskRoot),
+  environment = {},
+} = {}) {
   if (!isAbsoluteNormalized(taskRoot)) return integrity("TASK_ROOT_INVALID");
   try {
     const realTaskRoot = realpathSync(taskRoot);
-    if (["NODE_OPTIONS", "NODE_PATH"].some((name) => Object.hasOwn(environment, name))) {
+    if (
+      ["NODE_OPTIONS", "NODE_PATH"].some((name) =>
+        Object.hasOwn(environment, name),
+      )
+    ) {
       return integrity("NODE_LOADER_ENVIRONMENT_FORBIDDEN");
     }
     for (const [name, root] of Object.entries(roots)) {
-      if (!isAbsoluteNormalized(root)) return integrity("FIXED_ROOT_INVALID", { name });
+      if (!isAbsoluteNormalized(root))
+        return integrity("FIXED_ROOT_INVALID", { name });
       assertInside(realTaskRoot, root);
       if (existsSync(root)) {
         const lst = lstatSync(root);
-        if (lst.isSymbolicLink()) return integrity("FIXED_ROOT_SYMLINK", { name });
+        if (lst.isSymbolicLink())
+          return integrity("FIXED_ROOT_SYMLINK", { name });
       }
     }
     return pass({
-      fixedRootSetSha256: sha256(canonicalJsonBytes({ taskRoot: realTaskRoot, roots })),
+      fixedRootSetSha256: sha256(
+        canonicalJsonBytes({ taskRoot: realTaskRoot, roots }),
+      ),
     });
   } catch (error) {
     return integrity("FIXED_ROOT_INVALID", { reason: error.message });
   }
 }
 
-export function planAcceptedBootstrapCommand({ taskRoot, pnpmEntrypoint } = {}) {
+export function planAcceptedBootstrapCommand({
+  taskRoot,
+  pnpmEntrypoint,
+} = {}) {
   if (!isAbsoluteNormalized(taskRoot) || !isAbsoluteNormalized(pnpmEntrypoint))
     throw new Error("BOOTSTRAP_COMMAND_REQUEST_INVALID");
   const roots = cleanRoots(taskRoot);
   const environment = cleanEnvironment(taskRoot);
-  for (const root of Object.values(roots)) mkdirSync(root, { recursive: true, mode: 0o700 });
+  for (const root of Object.values(roots))
+    mkdirSync(root, { recursive: true, mode: 0o700 });
   return {
     command: "BOOTSTRAP_AUTHORITY_RUN_V1",
     argv: [
@@ -677,7 +784,10 @@ export function runAcceptedPrismaGenerate({ taskRoot, pnpmEntrypoint } = {}) {
   };
 }
 
-export async function verifyPostInstallBootstrapRehash({ bootstrapPath, expectedSha256 } = {}) {
+export async function verifyPostInstallBootstrapRehash({
+  bootstrapPath,
+  expectedSha256,
+} = {}) {
   if (!isAbsoluteNormalized(bootstrapPath) || !isSha(expectedSha256)) {
     return integrity("BOOTSTRAP_REHASH_REQUEST_INVALID");
   }
@@ -693,7 +803,12 @@ export async function verifyPostInstallBootstrapRehash({ bootstrapPath, expected
     return pass({
       bootstrapSha256: digest,
       postInstallBootstrapRehashSha256: sha256(
-        canonicalJsonBytes({ path: bootstrapPath, dev: String(after.dev), ino: String(after.ino), sha256: digest }),
+        canonicalJsonBytes({
+          path: bootstrapPath,
+          dev: String(after.dev),
+          ino: String(after.ino),
+          sha256: digest,
+        }),
       ),
     });
   } catch (error) {
@@ -701,7 +816,11 @@ export async function verifyPostInstallBootstrapRehash({ bootstrapPath, expected
   }
 }
 
-export async function loadAcceptedScanner({ modulePath, expectedSha256, importer } = {}) {
+export async function loadAcceptedScanner({
+  modulePath,
+  expectedSha256,
+  importer,
+} = {}) {
   if (!isAbsoluteNormalized(modulePath) || !isSha(expectedSha256)) {
     return integrity("SCANNER_IMPORT_REQUEST_INVALID");
   }
@@ -712,7 +831,9 @@ export async function loadAcceptedScanner({ modulePath, expectedSha256, importer
   const module = await dynamicImporter(pathToFileURL(modulePath).href);
   return pass({
     module,
-    typescriptDynamicImportSha256: sha256(canonicalJsonBytes({ modulePath, sha256: digest })),
+    typescriptDynamicImportSha256: sha256(
+      canonicalJsonBytes({ modulePath, sha256: digest }),
+    ),
   });
 }
 
@@ -731,17 +852,23 @@ function parseSeverityLines(reportBytes) {
   };
 }
 
-export async function verifyReviewReceipt({ reportPath, receipt, subjectCommit } = {}) {
+export async function verifyReviewReceipt({
+  reportPath,
+  receipt,
+  subjectCommit,
+} = {}) {
   if (!isAbsoluteNormalized(reportPath) || !isCommit(subjectCommit)) {
     return integrity("REVIEW_REQUEST_INVALID");
   }
   if (
     !exactKeys(receipt, REVIEW_RECEIPT_KEYS) ||
-    receipt.schemaVersion !== "organization-identity-bootstrap-scoped-review/v1" ||
+    receipt.schemaVersion !==
+      "organization-identity-bootstrap-scoped-review/v1" ||
     receipt.reviewerClass !== "INDEPENDENT_BOOTSTRAP_REVIEW" ||
     receipt.subjectCommit !== subjectCommit ||
     !isCommit(receipt.subjectParentCommit) ||
-    receipt.range !== `${receipt.subjectParentCommit}..${receipt.subjectCommit}` ||
+    receipt.range !==
+      `${receipt.subjectParentCommit}..${receipt.subjectCommit}` ||
     !isSha(receipt.pathSetSha256) ||
     !isSha(receipt.reportSha256) ||
     !isSha(receipt.counterexampleSetSha256) ||
@@ -779,13 +906,17 @@ async function cli(argv) {
   const receiptPath = args.get("--receipt");
   const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
   return verifyReviewReceipt({
-    reportPath: args.get("--report"),
+    reportPath: path.resolve(args.get("--report")),
     receipt,
     subjectCommit: args.get("--subject"),
   });
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(new URL(import.meta.url).pathname)) {
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) ===
+    realpathSync(new URL(import.meta.url).pathname)
+) {
   const result = await cli(process.argv.slice(2));
   if (result.status === "PASS") {
     process.stdout.write(`${JSON.stringify(result)}\n`);

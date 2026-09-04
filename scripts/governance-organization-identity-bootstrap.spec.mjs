@@ -99,7 +99,9 @@ function fixtureToolRoot(overrides = {}) {
 }
 
 async function createFixtureRepo(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-repo-"));
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-repo-"),
+  );
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const dir of ["apps/api", "packages/db", "scripts"]) {
     await mkdir(path.join(root, dir), { recursive: true });
@@ -112,15 +114,17 @@ async function createFixtureRepo(t) {
     ["pnpm-lock.yaml", "lockfileVersion: '9.0'\n"],
     ["tsconfig.base.json", '{"compilerOptions":{}}\n'],
     ["scripts/governance-organization-identity-bootstrap.mjs", "export {}\n"],
-    ["scripts/governance-organization-identity-bootstrap.spec.mjs", "import 'node:test';\n"],
+    [
+      "scripts/governance-organization-identity-bootstrap.spec.mjs",
+      "import 'node:test';\n",
+    ],
     [".dockerignore", "node_modules\n"],
     [".gitignore", "node_modules\n"],
   ]);
   for (const [name, content] of files) {
     await writeFile(path.join(root, name), content);
   }
-  const git = (args) =>
-    spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
   assert.equal(git(["init"]).status, 0);
   assert.equal(git(["config", "user.email", "test@example.invalid"]).status, 0);
   assert.equal(git(["config", "user.name", "Task0P Test"]).status, 0);
@@ -132,7 +136,10 @@ async function createFixtureRepo(t) {
 
 test("exports an immutable BootstrapContractV2 accepted by Task0L shared validators", async () => {
   assert.equal(validateBootstrapContract(BOOTSTRAP_CONTRACT).status, "PASS");
-  assert.equal(validateTask0LBootstrapContract(BOOTSTRAP_CONTRACT).status, "PASS");
+  assert.equal(
+    validateTask0LBootstrapContract(BOOTSTRAP_CONTRACT).status,
+    "PASS",
+  );
   const first = sha(canonicalJsonBytes(BOOTSTRAP_CONTRACT));
   const moduleAgain = await import(
     `${bootstrapModulePath}?cacheBust=${Date.now()}`
@@ -184,8 +191,10 @@ test("validates exact-key external launch receipts", () => {
     "INTEGRITY_ERROR",
   );
   assert.equal(
-    validateExternalLaunchReceipt({ ...receipt, commandId: "SCANNER_TEST_V1" }, request)
-      .status,
+    validateExternalLaunchReceipt(
+      { ...receipt, commandId: "SCANNER_TEST_V1" },
+      request,
+    ).status,
     "INTEGRITY_ERROR",
   );
 });
@@ -223,16 +232,25 @@ test("builds one-command BootstrapRunReceipts compatible with Task0L and rejects
     validateTask0LBootstrapRunReceipt(receipt, request).status,
     "PASS",
   );
-  assert.equal(compareRunToAcceptedContract(BOOTSTRAP_CONTRACT, receipt, request).status, "PASS");
+  assert.equal(
+    compareRunToAcceptedContract(BOOTSTRAP_CONTRACT, receipt, request).status,
+    "PASS",
+  );
   for (const fieldPath of PER_RUN_VARIABLE_FIELD_PATHS) {
     const clone = structuredClone(receipt);
     const finalKey = fieldPath.split(".").at(-1);
     let target = clone;
     for (const key of fieldPath.split(".").slice(0, -1)) target = target[key];
-    if (typeof target[finalKey] === "string" && /^[0-9a-f]{64}$/.test(target[finalKey])) {
+    if (
+      typeof target[finalKey] === "string" &&
+      /^[0-9a-f]{64}$/.test(target[finalKey])
+    ) {
       target[finalKey] = SHA_B;
     }
-    assert.equal(compareRunToAcceptedContract(BOOTSTRAP_CONTRACT, clone, request).status, "PASS");
+    assert.equal(
+      compareRunToAcceptedContract(BOOTSTRAP_CONTRACT, clone, request).status,
+      "PASS",
+    );
   }
   assert.equal(
     validateBootstrapRunReceipt({ ...receipt, unlisted: true }, request).status,
@@ -263,7 +281,9 @@ test("builds one-command BootstrapRunReceipts compatible with Task0L and rejects
 
 test("verifies accepted Git blobs and absences before immutable materialization", async (t) => {
   const { root, commit, files } = await createFixtureRepo(t);
-  const taskRoot = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-task-"));
+  const taskRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-task-"),
+  );
   t.after(() => rm(taskRoot, { recursive: true, force: true }));
   const verified = await verifyBootstrapPreimage({
     repoRoot: root,
@@ -279,7 +299,9 @@ test("verifies accepted Git blobs and absences before immutable materialization"
   for (const [name, content] of files) {
     assert.equal(await readFile(path.join(taskRoot, name), "utf8"), content);
   }
-  const attackRoot = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-task-"));
+  const attackRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-task-"),
+  );
   t.after(() => rm(attackRoot, { recursive: true, force: true }));
   await symlink(os.tmpdir(), path.join(attackRoot, "scripts"));
   assert.equal(
@@ -293,17 +315,15 @@ test("verifies accepted Git blobs and absences before immutable materialization"
     "INTEGRITY_ERROR",
   );
   assert.equal(
-    (
-      await writeFile(
-        path.join(root, ".pnpmfile.cjs"),
-        "require('node:fs').writeFileSync(process.env.HOSTILE_MARKER, 'loaded')\n",
-      ),
-      await verifyBootstrapPreimage({
-        repoRoot: root,
-        subjectCommit: commit,
-        acceptedAbsentPaths: [".pnpmfile.cjs"],
-      })
-    ).status,
+    (await writeFile(
+      path.join(root, ".pnpmfile.cjs"),
+      "require('node:fs').writeFileSync(process.env.HOSTILE_MARKER, 'loaded')\n",
+    ),
+    await verifyBootstrapPreimage({
+      repoRoot: root,
+      subjectCommit: commit,
+      acceptedAbsentPaths: [".pnpmfile.cjs"],
+    })).status,
     "INTEGRITY_ERROR",
   );
   await symlink("/tmp", path.join(taskRoot, "linked-store"));
@@ -318,11 +338,19 @@ test("verifies accepted Git blobs and absences before immutable materialization"
 });
 
 test("plans exact clean pnpm and Prisma commands without loading hostile hooks", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-hostile-"));
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-hostile-"),
+  );
   t.after(() => rm(root, { recursive: true, force: true }));
   const marker = path.join(root, "marker");
-  await writeFile(path.join(root, ".pnpmfile.cjs"), `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'loaded')\n`);
-  await writeFile(path.join(root, "preload.cjs"), `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'preload')\n`);
+  await writeFile(
+    path.join(root, ".pnpmfile.cjs"),
+    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'loaded')\n`,
+  );
+  await writeFile(
+    path.join(root, "preload.cjs"),
+    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'preload')\n`,
+  );
   const planned = planAcceptedBootstrapCommand({
     taskRoot: root,
     pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs",
@@ -340,7 +368,11 @@ test("plans exact clean pnpm and Prisma commands without loading hostile hooks",
   assert.equal(Object.hasOwn(planned.environment, "NODE_PATH"), false);
   assert.equal(planned.hostileMarkerExecutionCount, 0);
   assert.throws(
-    () => planAcceptedBootstrapCommand({ taskRoot: "relative", pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs" }),
+    () =>
+      planAcceptedBootstrapCommand({
+        taskRoot: "relative",
+        pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs",
+      }),
     /BOOTSTRAP_COMMAND_REQUEST_INVALID/,
   );
   const checked = verifyDependencyAndToolRoots({
@@ -366,7 +398,9 @@ test("plans exact clean pnpm and Prisma commands without loading hostile hooks",
 });
 
 test("rehashes bootstrap after install before dynamic TypeScript scanner import", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-rehash-"));
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-rehash-"),
+  );
   t.after(() => rm(root, { recursive: true, force: true }));
   const bootstrap = path.join(root, "bootstrap.mjs");
   await writeFile(bootstrap, "export const ok = true;\n");
@@ -385,7 +419,9 @@ test("rehashes bootstrap after install before dynamic TypeScript scanner import"
 });
 
 test("closed review verification rejects drift, duplicate severities, and failing verdicts", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "identity-bootstrap-review-"));
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "identity-bootstrap-review-"),
+  );
   t.after(() => rm(root, { recursive: true, force: true }));
   const reportPath = path.join(root, "review.md");
   await writeFile(reportPath, "Critical: 0\nImportant: 0\nVerdict: PASS\n");
@@ -407,20 +443,41 @@ test("closed review verification rejects drift, duplicate severities, and failin
     containsCredentialValue: false,
   };
   assert.equal(
-    (await verifyReviewReceipt({ reportPath, receipt, subjectCommit: COMMIT })).status,
+    (await verifyReviewReceipt({ reportPath, receipt, subjectCommit: COMMIT }))
+      .status,
     "PASS",
   );
+  await writeFile(path.join(root, "receipt.json"), JSON.stringify(receipt));
   assert.equal(
-    (await verifyReviewReceipt({
-      reportPath,
-      receipt: { ...receipt, extra: true },
-      subjectCommit: COMMIT,
-    })).status,
+    spawnSync(process.execPath, [
+      bootstrapModulePath,
+      "verify-review",
+      "--report",
+      path.relative(process.cwd(), reportPath),
+      "--receipt",
+      path.relative(process.cwd(), path.join(root, "receipt.json")),
+      "--subject",
+      COMMIT,
+    ]).status,
+    0,
+  );
+  assert.equal(
+    (
+      await verifyReviewReceipt({
+        reportPath,
+        receipt: { ...receipt, extra: true },
+        subjectCommit: COMMIT,
+      })
+    ).status,
     "INTEGRITY_ERROR",
   );
-  await writeFile(reportPath, "Critical: 0\nCritical: 0\nImportant: 0\nVerdict: PASS\n");
+  await writeFile(
+    reportPath,
+    "Critical: 0\nCritical: 0\nImportant: 0\nVerdict: PASS\n",
+  );
   assert.equal(
-    (await verifyReviewReceipt({ reportPath, receipt, subjectCommit: COMMIT })).status,
+    (await verifyReviewReceipt({ reportPath, receipt, subjectCommit: COMMIT }))
+      .status,
     "INTEGRITY_ERROR",
   );
 });
