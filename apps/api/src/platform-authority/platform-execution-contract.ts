@@ -21,6 +21,8 @@ export const PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES = 33_554_432 as const;
 export const PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX = 2_000 as const;
 export const PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX = 5_000 as const;
 export const PLATFORM_PATENTS_OUTPUT_ITEM_MAX = 50 as const;
+export const PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS = 2 as const;
+const PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT = "2" as const;
 
 export type PlatformExecutionScheduleId =
   | "acq-sweep"
@@ -173,7 +175,7 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
       taskQueue: "understanding",
       scheduleRequestSha256:
         "5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e",
-      maximumActivityAttempts: "2",
+      maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "zero_paid_dispatch",
       providerRequirements: [
         {
@@ -237,7 +239,7 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
       taskQueue: "understanding",
       scheduleRequestSha256:
         "3fbcd9326937d66243f1395d3f0c4f098c6748977d00ae90017d0f8f04202db6",
-      maximumActivityAttempts: "2",
+      maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "disabled_no_egress",
       providerRequirements: [
         {
@@ -283,7 +285,7 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
       taskQueue: "understanding",
       scheduleRequestSha256:
         "9ef4afce408c36472e00db01a80b6e3a3e461a2b13af7f456d9ce31a7676c34a",
-      maximumActivityAttempts: "2",
+      maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "tool_estimated_cents",
       providerRequirements: [
         {
@@ -329,7 +331,7 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
       taskQueue: "understanding",
       scheduleRequestSha256:
         "50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe",
-      maximumActivityAttempts: "2",
+      maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "zero_paid_dispatch",
       providerRequirements: [
         {
@@ -457,6 +459,16 @@ export function platformExecutionToolContract(
   );
   if (matches.length !== 1) throw new PlatformExecutionContractError();
   return matches[0]!;
+}
+
+export function platformExecutionTechnicalRow(
+  scheduleId: PlatformExecutionScheduleId,
+): PlatformExecutionTechnicalRowV1 {
+  const row = PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.find(
+    (candidate) => candidate.scheduleId === scheduleId,
+  );
+  if (!row) throw new PlatformExecutionContractError();
+  return row;
 }
 
 export class PlatformExecutionContractError extends Error {

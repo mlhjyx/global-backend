@@ -4,12 +4,16 @@ import type { PlatformScheduleAuthorityActivities } from './platform-schedule-au
 import type { PlatformScheduleWorkflowInput } from './platform-schedule-authority';
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { SANCTIONS_REFRESH_SCHEDULE_ID } from './understanding.constants';
+import { PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS } from '../platform-authority/platform-execution-contract';
 
 const { refreshSanctionsLists } = proxyActivities<SanctionsRefreshActivities>({
   startToCloseTimeout: '15 minutes',
-  retry: { maximumAttempts: 2 },
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
-const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({ startToCloseTimeout: '1 minute', retry: { maximumAttempts: 2 } });
+const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({
+  startToCloseTimeout: '1 minute',
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
+});
 
 /**
  * 制裁名单每日刷新（Qualify 第五门，Schedule 驱动）：刷新全部 ENABLED 源（OFAC SDN/Consolidated + EU FSF）

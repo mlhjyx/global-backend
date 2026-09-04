@@ -6,14 +6,18 @@ import type { PlatformScheduleAuthorityActivities } from './platform-schedule-au
 import type { PlatformScheduleWorkflowInput } from './platform-schedule-authority';
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
-import { boundedPlatformIntentDueSourceLimit } from '../platform-authority/platform-execution-contract';
+import {
+  PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS,
+  boundedPlatformIntentDueSourceLimit,
+} from '../platform-authority/platform-execution-contract';
 
 const acts = proxyActivities<IntentActivities>({
   startToCloseTimeout: '10 minutes', // 一个源可能有多页 × crawl4ai 渲染（每页可达数十秒）
-  retry: { maximumAttempts: 2 },
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({
-  startToCloseTimeout: '1 minute', retry: { maximumAttempts: 2 },
+  startToCloseTimeout: '1 minute',
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 
 export interface IntentSweepResult {

@@ -6,14 +6,18 @@ import type { PlatformScheduleAuthorityActivities } from './platform-schedule-au
 import type { PlatformScheduleWorkflowInput } from './platform-schedule-authority';
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
-import { boundedPlatformDueSourceLimit } from '../platform-authority/platform-execution-contract';
+import {
+  PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS,
+  boundedPlatformDueSourceLimit,
+} from '../platform-authority/platform-execution-contract';
 
 const acts = proxyActivities<AcquisitionActivities>({
   startToCloseTimeout: '5 minutes',
-  retry: { maximumAttempts: 2 },
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({
-  startToCloseTimeout: '1 minute', retry: { maximumAttempts: 2 },
+  startToCloseTimeout: '1 minute',
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 
 export interface AcquisitionSweepResult {

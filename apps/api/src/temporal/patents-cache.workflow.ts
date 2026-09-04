@@ -4,13 +4,17 @@ import type { PlatformScheduleAuthorityActivities } from './platform-schedule-au
 import type { PlatformScheduleWorkflowInput } from './platform-schedule-authority';
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { PATENTS_CACHE_REFRESH_SCHEDULE_ID } from './understanding.constants';
+import { PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS } from '../platform-authority/platform-execution-contract';
 
 const acts = proxyActivities<PatentsCacheActivities>({
   // 一次共享大扫 + 批量落库：BigQuery 全表扫可数十秒~分钟，给足 headroom（overlap=SKIP 已防叠跑）。
   startToCloseTimeout: '15 minutes',
-  retry: { maximumAttempts: 2 },
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
-const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({ startToCloseTimeout: '1 minute', retry: { maximumAttempts: 2 } });
+const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({
+  startToCloseTimeout: '1 minute',
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
+});
 
 /**
  * **专利发明人缓存刷新 sweep**（scale-safe #89，第 5 个周期 Schedule）——一次共享大扫落 postgres，
