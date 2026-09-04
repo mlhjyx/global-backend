@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { cp, lstat, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../..");
@@ -60,7 +61,7 @@ describe("clean @global/contracts platform-authority build", () => {
       await expect(lstat(resolve(packageRoot, "dist"))).rejects.toMatchObject({
         code: "ENOENT",
       });
-      execFileSync("pnpm", ["run", "build"], {
+      const build = spawnSync("pnpm", ["run", "build"], {
         cwd: packageRoot,
         encoding: "utf8",
         env: {
@@ -69,13 +70,23 @@ describe("clean @global/contracts platform-authority build", () => {
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
+      expect(
+        build.status,
+        [build.stdout, build.stderr].filter(Boolean).join("\n"),
+      ).toBe(0);
 
       const requireFromCleanConsumer = createRequire(
         resolve(temporary, "consumer.cjs"),
       );
       const platformAuthority = requireFromCleanConsumer(
         "@global/contracts/platform-authority",
-      ) as Record<string, unknown>;
+      ) as {
+        PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1: unknown;
+        canonicalizePlatformAuthorityRequestBodyV1(input: unknown): {
+          canonicalBodyUtf8: string;
+        };
+        buildPlatformAuthorityRequestHmacPreimageV1: unknown;
+      };
       expect(
         platformAuthority.canonicalizePlatformAuthorityRequestBodyV1,
       ).toBeTypeOf("function");
@@ -90,6 +101,38 @@ describe("clean @global/contracts platform-authority build", () => {
           ),
         ),
       ).toMatchObject({ size: expect.any(Number) });
+
+      const rawBody = Buffer.from(
+        `{"amount_microusd":"1","count":"0","digest_sha256":"${"a".repeat(64)}","label":"fresh-build","numeric_date":"0","padding":"","schema_version":"platform-authority-canonical-reference/v1","workflow_run_id":"11111111-1111-4111-8111-111111111111"}`,
+        "utf8",
+      );
+      const foreignShared = runInNewContext(
+        `new SharedArrayBuffer(${rawBody.byteLength})`,
+      ) as SharedArrayBuffer;
+      const sharedView = new Uint8Array(foreignShared);
+      sharedView.set(rawBody);
+      expect(() =>
+        platformAuthority.canonicalizePlatformAuthorityRequestBodyV1({
+          contentType: "application/json",
+          rawBody: sharedView,
+          schema:
+            platformAuthority.PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+        }),
+      ).toThrow("PLATFORM_AUTHORITY_CANONICAL_REQUEST_INVALID");
+
+      const foreignUnshared = runInNewContext(
+        `new ArrayBuffer(${rawBody.byteLength})`,
+      ) as ArrayBuffer;
+      const unsharedView = new Uint8Array(foreignUnshared);
+      unsharedView.set(rawBody);
+      expect(
+        platformAuthority.canonicalizePlatformAuthorityRequestBodyV1({
+          contentType: "application/json",
+          rawBody: unsharedView,
+          schema:
+            platformAuthority.PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1,
+        }).canonicalBodyUtf8,
+      ).toBe(rawBody.toString("utf8"));
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

@@ -209,7 +209,7 @@ function copyBoundedRawBody(value: unknown): Uint8Array {
   }
   const bytes = new Uint8Array(byteLength);
   try {
-    Uint8Array.prototype.set.call(bytes, value);
+    Uint8Array.prototype.set.call(bytes, value as unknown as ArrayLike<number>);
   } catch {
     return requestInvalid();
   }
