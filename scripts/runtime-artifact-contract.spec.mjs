@@ -174,6 +174,16 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /pnpm --filter @global\/site-renderer deploy --prod --frozen-lockfile \/tmp\/renderer-runtime-deploy/,
   );
+  assert.match(
+    dockerfile,
+    /snapshot\.debian\.org\/archive\/debian\/20260826T000000Z/,
+  );
+  assert.match(
+    dockerfile,
+    /snapshot\.debian\.org\/archive\/debian-security\/20260826T000000Z/,
+  );
+  assert.match(dockerfile, /check-valid-until=no/);
+  assert.doesNotMatch(dockerfile, /deb\.debian\.org/);
   assert.match(dockerfile, /chromium=151\.0\.7922\.173-1~deb12u1/);
   assert.match(dockerfile, /util-linux=2\.38\.1-5\+deb12u3/);
   assert.match(dockerfile, /dpkg-query -W/);
