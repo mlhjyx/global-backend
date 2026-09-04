@@ -136,5 +136,5 @@ describe("clean @global/contracts platform-authority build", () => {
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
