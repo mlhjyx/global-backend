@@ -52,13 +52,18 @@ export interface PlatformExecutionHardBoundsV1 {
 }
 
 export interface PlatformExecutionToolContractV1 {
-  readonly toolId: string;
+  readonly toolId: PlatformExecutionToolId;
   readonly version: string;
   readonly estimatedCents: string;
-  readonly costUnit: string;
+  readonly costUnit: "call" | "page";
   readonly maximumPhysicalInvocations: string;
   readonly resultStrategy: "typed_projection" | "artifact_reference";
-  readonly resultSchema: string;
+  readonly resultSchema:
+    | "tradefair-algolia/v1"
+    | "mapyourshow-fetch/v1"
+    | "google-patents-search/v1"
+    | "crawl4ai-render/v1"
+    | "sanctions-download/v1";
   readonly maximumOutputItems: string;
   readonly maximumOutputBytes: string;
 }
@@ -133,19 +138,52 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function exactKeys(value: unknown, expected: readonly string[]): boolean {
-  return Boolean(
-    value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.getPrototypeOf(value) === Object.prototype &&
-      Object.keys(value).sort().join("\0") === [...expected].sort().join("\0"),
-  );
+function ownDataSnapshot(
+  value: unknown,
+  expected: readonly string[],
+): Readonly<Record<string, unknown>> | null {
+  try {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype
+    ) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (
+      Reflect.ownKeys(descriptors).some((key) => typeof key !== "string") ||
+      Object.keys(descriptors).sort().join("\0") !==
+        [...expected].sort().join("\0")
+    ) {
+      return null;
+    }
+    const snapshot: Record<string, unknown> = Object.create(null) as Record<
+      string,
+      unknown
+    >;
+    for (const key of expected) {
+      const descriptor = descriptors[key];
+      if (
+        !descriptor?.enumerable ||
+        !Object.hasOwn(descriptor, "value") ||
+        descriptor.get !== undefined ||
+        descriptor.set !== undefined
+      ) {
+        return null;
+      }
+      snapshot[key] = descriptor.value;
+    }
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
 }
 
-function technicalRow(
-  value: PlatformExecutionTechnicalRowV1,
-): PlatformExecutionTechnicalRowV1 {
+function technicalRow<const T extends PlatformExecutionTechnicalRowV1>(
+  value: T,
+): T {
   return deepFreeze(value);
 }
 
@@ -383,10 +421,10 @@ const CODE_OWNED_PROVIDER_SNAPSHOTS = new WeakSet<object>();
 export function createPlatformExecutionProviderSnapshotV1(
   input: unknown,
 ): PlatformExecutionProviderSnapshotV1 {
-  if (!exactKeys(input, SNAPSHOT_KEYS)) {
+  const snapshot = ownDataSnapshot(input, SNAPSHOT_KEYS);
+  if (!snapshot) {
     throw new PlatformExecutionContractError();
   }
-  const snapshot = input as Record<string, unknown>;
   if (
     snapshot.schemaVersion !== "platform-execution-provider-snapshot/v1" ||
     !PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.some(
@@ -399,10 +437,10 @@ export function createPlatformExecutionProviderSnapshotV1(
     throw new PlatformExecutionContractError();
   }
   const providers = snapshot.providers.map((raw) => {
-    if (!exactKeys(raw, SNAPSHOT_PROVIDER_KEYS)) {
+    const provider = ownDataSnapshot(raw, SNAPSHOT_PROVIDER_KEYS);
+    if (!provider) {
       throw new PlatformExecutionContractError();
     }
-    const provider = raw as Record<string, unknown>;
     if (
       typeof provider.providerId !== "string" ||
       !PROVIDER_ID.test(provider.providerId) ||
@@ -451,14 +489,20 @@ export type PlatformExecutionToolId =
   | "crawl4ai.render"
   | "sanctions.download";
 
-export function platformExecutionToolContract(
-  toolId: PlatformExecutionToolId,
-): PlatformExecutionToolContractV1 {
+export function platformExecutionToolContract<const T extends PlatformExecutionToolId>(
+  toolId: T,
+): Extract<
+  (typeof PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows)[number]["toolContracts"][number],
+  { readonly toolId: T }
+> {
   const matches = PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.flatMap(
     (row) => row.toolContracts.filter((tool) => tool.toolId === toolId),
   );
   if (matches.length !== 1) throw new PlatformExecutionContractError();
-  return matches[0]!;
+  return matches[0]! as Extract<
+    (typeof PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows)[number]["toolContracts"][number],
+    { readonly toolId: T }
+  >;
 }
 
 export function platformExecutionTechnicalRow(

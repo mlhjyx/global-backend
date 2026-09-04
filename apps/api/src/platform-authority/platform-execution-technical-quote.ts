@@ -31,6 +31,7 @@ const LOWERCASE_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const CONTROL_CHARACTER = /\p{Cc}/u;
+const DATE_GET_TIME = Date.prototype.getTime;
 const INPUT_KEYS = [
   "purpose",
   "scheduleId",
@@ -393,10 +394,17 @@ export class PlatformExecutionTechnicalQuoteService {
       return invalid();
     }
     const now = input.now;
-    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    let nowMilliseconds: number;
+    try {
+      if (Object.getPrototypeOf(now) !== Date.prototype) return invalid();
+      nowMilliseconds = DATE_GET_TIME.call(now) as number;
+    } catch {
       return invalid();
     }
-    const issuedAt = Math.floor(now.getTime() / 1_000);
+    if (!Number.isFinite(nowMilliseconds)) {
+      return invalid();
+    }
+    const issuedAt = Math.floor(nowMilliseconds / 1_000);
     const expiresAt = issuedAt + Number(technicalContract.quoteTtlSeconds);
     if (
       issuedAt < 0 ||
