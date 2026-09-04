@@ -7,7 +7,7 @@
 
 本页是证据导航，不是第二份 current 状态。原始 artifact 保持追加式/不可改写；当前能力、路由、运行健康和发布状态仍分别由权威文档、机器合同、fresh RuntimeEvidence 与 Release Bundle 决定。
 
-Inventory observed at `2026-09-04T18:42:30+08:00`: RuntimeEvidence is `6 total / 2 current / 4 historical`. 两条 current 记录共同到期于 `2026-09-05T03:49:25.000Z`，均为 Site Builder only；Acquisition evidence IDs count is 0。仓内另有 3 Release Bundles，全部是 development `CANDIDATE` 且保持 `EXTERNAL_UNVERIFIED`；它们的 machine/reviewer/user lanes 分别仍为 `NOT_VERIFIED`、`NOT_REVIEWED`、`NOT_AUTHORIZED`。这是时间绑定的索引计数，不延长 evidence 窗口，也不把 development candidate 升级为 Pilot/GA。
+Inventory observed at `2026-09-04T18:48:40+08:00`: RuntimeEvidence is `6 total / 2 current / 4 historical`. 两条 current 记录共同到期于 `2026-09-05T03:49:25.000Z`，均为 Site Builder only；Acquisition evidence IDs count is 0。仓内另有 3 Release Bundles，全部是 development `CANDIDATE` 且保持 `EXTERNAL_UNVERIFIED`；它们的 machine/reviewer/user lanes 分别仍为 `NOT_VERIFIED`、`NOT_REVIEWED`、`NOT_AUTHORIZED`。这是时间绑定的索引计数，不延长 evidence 窗口，也不把 development candidate 升级为 Pilot/GA。
 
 ## 1. 分类
 

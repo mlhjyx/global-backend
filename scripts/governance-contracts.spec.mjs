@@ -317,6 +317,14 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
+      /G0 — Truth & Ownership[^\n]*Program B root\/launcher authority\/materialization gate[^\n]*(?:open|未闭合)/u,
+    );
+    assert.match(
+      document,
+      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ CURRENT_MAIN_CI_RED \/ HIGH_REMEDIATION_REQUIRED`[^\n]*33855198691[^\n]*18 advisories[^\n]*baseline 10[^\n]*PR #445\/#446 exact-head checks[^\n]*(?:separate|分离)/u,
+    );
+    assert.match(
+      document,
       /G5-Site — Runtime Observed[^\n]*`AMBER \/ TIME_LIMITED`/u,
     );
     assert.match(
@@ -364,6 +372,11 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     ["`AMBER / TIME_LIMITED`", "`PASS / CURRENT`"],
     ["`RED / NOT_READY`", "`AMBER / PARTIAL`"],
     ["18 advisories", "10 advisories"],
+    [
+      "Program B root/launcher authority/materialization gate",
+      "Program B gate closed",
+    ],
+    ["CURRENT_MAIN_CI_RED", "CURRENT_MAIN_CI_GREEN"],
   ]) {
     assert.throws(() => assertCurrentStatus(status.replaceAll(from, to)));
   }
@@ -380,10 +393,24 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     evidenceIndex,
     /3 Release Bundles[\s\S]{0,260}development[\s\S]{0,120}`CANDIDATE`[\s\S]{0,260}`EXTERNAL_UNVERIFIED`/u,
   );
-  assert.match(
-    changelog,
-    /## 2026-09-04 · Global dynamic currentness successor[\s\S]{0,1500}0679a0bc510a980f65ebd33eb88b3215a97c20ba[\s\S]{0,500}G5-Site[\s\S]{0,240}G5-Acquisition/u,
-  );
+  const assertCurrentChangelog = (document) => {
+    assert.match(
+      document,
+      /## 2026-09-04 · Global dynamic currentness successor[\s\S]{0,1500}0679a0bc510a980f65ebd33eb88b3215a97c20ba[\s\S]{0,500}G5-Site[\s\S]{0,240}G5-Acquisition/u,
+    );
+    assert.match(
+      document,
+      /Global dynamic currentness successor[\s\S]{0,1800}accepted source slices #427\/#431\/#432[\s\S]{0,240}active Task0L[\s\S]{0,200}`C3 \/ H3`/u,
+    );
+  };
+  assertCurrentChangelog(changelog);
+  for (const [from, to] of [
+    ["accepted source slices #427/#431/#432", "unreviewed source slices"],
+    ["active Task0L", "completed Task0L"],
+    ["`C3 / H3`", "`PASS`"],
+  ]) {
+    assert.throws(() => assertCurrentChangelog(changelog.replace(from, to)));
+  }
 });
 
 test("the discovery lineage successor is current-main based and the quarantined mega-branch is provenance only", () => {
@@ -469,7 +496,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramBRow =
     "| B — Buyer Intelligence discovery | RED | Owns QueryReceipt、RawSourceRecord、Identity/Canonical、Provider/transport、Discovery workflow 和 immutable `LeadQualifiedPackage`；does not own SaaS Opportunity or runtime deploy | #427/#431/#432 accepted source slices 与 active Task0L 分开；Task0L implementation review 仍为 `NEEDS_FIXES`，coverage 未到 80%，active writer 正在修复。 |";
   const expectedG0Row =
-    "| G0 — Truth & Ownership | `AMBER / PARTIAL / HOLD` | A/B ownership seam 已关闭；platform R2 writer/migration manifest 与 Program C 产品选择、owner、manifest 仍未闭合。 |";
+    "| G0 — Truth & Ownership | `AMBER / PARTIAL / HOLD` | A/B ownership seam 已关闭；Program B root/launcher authority/materialization gate、platform R2 writer/migration manifest 与 Program C 产品选择/owner/manifest 仍未闭合。 |";
   const normalizeTableRow = (line) =>
     line
       .split("|")
@@ -500,7 +527,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramARow =
     "| A — authority/runtime primitives | AMBER | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and RuntimeEvidence/Release；does not own Raw/Identity/Provider/Opportunity | Accepted main slices 与 historical mega branch 分离；platform R2 owner/manifest 和 current exact-head review 尚未闭合。 |";
   const expectedRootRow =
-    "| `/global/backend` root `main` | observed `2026-09-04T18:42:30+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity。 |";
+    "| `/global/backend` root `main` | observed `2026-09-04T18:48:40+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity。 |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
@@ -526,8 +553,12 @@ test("the discovery lineage successor is current-main based and the quarantined 
       "| G0 — Truth & Ownership |",
       [
         ["`AMBER / PARTIAL / HOLD`", "`PASS / OWNERSHIP_CLOSED`"],
+        [
+          "Program B root/launcher authority/materialization gate",
+          "Program B gate closed",
+        ],
         ["platform R2 writer/migration manifest", "platform R2 complete"],
-        ["Program C 产品选择", "Program C implementation complete"],
+        ["Program C 产品选择/owner/manifest", "Program C complete"],
       ],
     ],
   ]) {
