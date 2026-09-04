@@ -131,9 +131,9 @@ function snapshotOwnDataProperties(
   expectedKeys: readonly string[],
   invalid: () => never,
 ): Readonly<Record<string, unknown>> {
-  if (!isPlainRecord(value)) invalid();
   let descriptors: PropertyDescriptorMap;
   try {
+    if (!isPlainRecord(value)) return invalid();
     descriptors = Object.getOwnPropertyDescriptors(value);
   } catch {
     return invalid();
@@ -180,9 +180,13 @@ const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
 )!.get!;
 
 function copyBoundedRawBody(value: unknown): Uint8Array {
-  if (!(value instanceof Uint8Array) || !ArrayBuffer.isView(value)) {
-    requestInvalid();
+  let isUint8View: boolean;
+  try {
+    isUint8View = value instanceof Uint8Array && ArrayBuffer.isView(value);
+  } catch {
+    return requestInvalid();
   }
+  if (!isUint8View) requestInvalid();
   let backingBuffer: ArrayBufferLike;
   let byteLength: number;
   try {
