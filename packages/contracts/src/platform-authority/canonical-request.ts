@@ -293,6 +293,12 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS = Object.freeze([
     maximum: MAX_NUMERIC_DATE,
   },
   {
+    name: "maximum_activity_attempts",
+    kind: "decimal",
+    minimum: "1",
+    maximum: MAX_SIGNED_64,
+  },
+  {
     name: "maximum_bytes_per_patent_anchor",
     kind: "decimal",
     minimum: "0",
