@@ -66,6 +66,24 @@ export class ExternalHttpActionDeniedError extends Error {
   }
 }
 
+export class ExternalHttpPhysicalWireDeniedError extends Error {
+  readonly decision = 'physical_wire_gate';
+
+  constructor(options?: { cause?: unknown }) {
+    super('external physical wire denied', options);
+    this.name = 'ExternalHttpPhysicalWireDeniedError';
+  }
+}
+
+export function isExternalHttpPhysicalWireDeniedError(
+  error: unknown,
+): boolean {
+  return error instanceof ExternalHttpPhysicalWireDeniedError || Boolean(
+    error && typeof error === 'object' &&
+      (error as { name?: unknown }).name === 'ExternalHttpPhysicalWireDeniedError',
+  );
+}
+
 async function assertExternalHttpActionAuthorized(authorizeExternalAction?: () => Promise<boolean>): Promise<void> {
   if (!authorizeExternalAction) return;
   try {
@@ -74,6 +92,17 @@ async function assertExternalHttpActionAuthorized(authorizeExternalAction?: () =
     throw new ExternalHttpActionDeniedError({ cause });
   }
   throw new ExternalHttpActionDeniedError();
+}
+
+async function assertPhysicalWireAuthorized(
+  beforePhysicalWire?: () => Promise<void>,
+): Promise<void> {
+  if (!beforePhysicalWire) return;
+  try {
+    await beforePhysicalWire();
+  } catch (cause) {
+    throw new ExternalHttpPhysicalWireDeniedError({ cause });
+  }
 }
 
 function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
@@ -209,7 +238,7 @@ export async function requestPublicHttp(
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     const target = await resolver(current);
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
-    await dependencies.beforePhysicalWire?.();
+    await assertPhysicalWireAuthorized(dependencies.beforePhysicalWire);
     const response = await execute(target, {
       ...effective,
       headers: currentHeaders,

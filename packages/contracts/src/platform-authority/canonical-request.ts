@@ -323,7 +323,13 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS = Object.freeze([
     maximum: MAX_SIGNED_64,
   },
   {
-    name: "maximum_output_bytes_per_wire",
+    name: "maximum_costed_invocations",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_durable_result_bytes",
     kind: "decimal",
     minimum: "0",
     maximum: MAX_SIGNED_64,
@@ -359,6 +365,12 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS = Object.freeze([
     maximum: MAX_SIGNED_64,
   },
   {
+    name: "maximum_redirects_per_operation",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
     name: "maximum_repair_wires",
     kind: "decimal",
     minimum: "0",
@@ -375,6 +387,19 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS = Object.freeze([
     kind: "decimal",
     minimum: "0",
     maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_transport_response_bytes_per_wire",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  { name: "physical_wire_contracts_sha256", kind: "sha256" },
+  {
+    name: "physical_wire_selection",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 100,
   },
   {
     name: "policy_artifact_id",

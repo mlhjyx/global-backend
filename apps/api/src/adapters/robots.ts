@@ -10,7 +10,12 @@
  * 复杂 robots（Allow 覆盖、按 UA 细分）从严处理为不可抓。结果带 TTL 缓存。
  */
 
-import { EgressBlockedError, ExternalHttpActionDeniedError, requestPublicHttp } from './guarded-http';
+import {
+  EgressBlockedError,
+  ExternalHttpActionDeniedError,
+  isExternalHttpPhysicalWireDeniedError,
+  requestPublicHttp,
+} from './guarded-http';
 import { resolvePublicHttpUrl, type PublicUrlResolver } from './url-guard';
 import {
   PLATFORM_ROBOTS_REDIRECT_MAX,
@@ -50,6 +55,7 @@ async function loadRobots(
     }
     // 4xx/无 robots → 视为无限制（RFC 惯例）
   } catch (error) {
+    if (isExternalHttpPhysicalWireDeniedError(error)) throw error;
     const workspaceActionDenied =
       error instanceof ExternalHttpActionDeniedError ||
       (error instanceof Error && error.name === 'ExternalHttpActionDeniedError');

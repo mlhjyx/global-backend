@@ -20,8 +20,8 @@ export const PLATFORM_PATENTS_MAXIMUM_BYTES_PER_ANCHOR =
 export const PLATFORM_TYPED_PROJECTION_MAX_BYTES = 120 * 1024;
 export const PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES = 3_000_000 as const;
 export const PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES = 33_554_432 as const;
-export const PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX = 2_000 as const;
-export const PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX = 5_000 as const;
+export const PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX = 10_000 as const;
+export const PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX = 10_000 as const;
 export const PLATFORM_PATENTS_OUTPUT_ITEM_MAX = 50 as const;
 export const PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS = 2 as const;
 export const PLATFORM_ALGOLIA_ITEMS_PER_PAGE_MAX = 1_000 as const;
@@ -31,6 +31,23 @@ export const PLATFORM_ROBOTS_REDIRECT_MAX = 3 as const;
 export const PLATFORM_ROBOTS_RESPONSE_MAX_BYTES = 100_000 as const;
 export const PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES = 5_000_000 as const;
 export const PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES = 33_554_432 as const;
+export const PLATFORM_ACQUISITION_ALGOLIA_PHYSICAL_WIRE_MAX =
+  PLATFORM_ACQUISITION_DUE_SOURCE_MAX *
+  PLATFORM_ALGOLIA_PAGES_PER_SOURCE_MAX;
+export const PLATFORM_ACQUISITION_MAPYOURSHOW_PHYSICAL_WIRE_MAX =
+  PLATFORM_ACQUISITION_DUE_SOURCE_MAX *
+  PLATFORM_MAPYOURSHOW_WIRES_PER_SOURCE_MAX;
+export const PLATFORM_INTENT_PAGE_OPERATION_MAX =
+  PLATFORM_INTENT_DUE_SOURCE_MAX * PLATFORM_INTENT_PAGES_PER_SOURCE_MAX;
+export const PLATFORM_INTENT_ROBOTS_PHYSICAL_WIRE_MAX =
+  PLATFORM_INTENT_PAGE_OPERATION_MAX * (PLATFORM_ROBOTS_REDIRECT_MAX + 1);
+export const PLATFORM_INTENT_CRAWL_PHYSICAL_WIRE_MAX =
+  PLATFORM_INTENT_PAGE_OPERATION_MAX;
+export const PLATFORM_INTENT_TOTAL_PHYSICAL_WIRE_MAX =
+  PLATFORM_INTENT_ROBOTS_PHYSICAL_WIRE_MAX +
+  PLATFORM_INTENT_CRAWL_PHYSICAL_WIRE_MAX;
+export const PLATFORM_SANCTIONS_TOTAL_PHYSICAL_WIRE_MAX =
+  PLATFORM_SANCTIONS_SOURCE_MAX * (PLATFORM_ROBOTS_REDIRECT_MAX + 1);
 const PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT = "2" as const;
 
 export type PlatformExecutionScheduleId =
@@ -46,6 +63,7 @@ export type PlatformExecutionPurpose =
 
 export interface PlatformExecutionHardBoundsV1 {
   readonly maximumPhysicalInvocations: string;
+  readonly maximumCostedInvocations: string;
   readonly maximumDueSources: string;
   readonly maximumSourceFetchItems: string;
   readonly maximumPagesPerSource: string;
@@ -53,7 +71,9 @@ export interface PlatformExecutionHardBoundsV1 {
   readonly maximumPatentAnchors: string;
   readonly maximumBytesPerPatentAnchor: string;
   readonly maximumOutputItemsPerWire: string;
-  readonly maximumOutputBytesPerWire: string;
+  readonly maximumTransportResponseBytesPerWire: string;
+  readonly maximumDurableResultBytes: string;
+  readonly maximumRedirectsPerOperation: string;
   readonly maximumRepairWires: string;
   readonly maximumFallbackWires: string;
   readonly maximumInputTokens: string;
@@ -66,6 +86,7 @@ export interface PlatformExecutionToolContractV1 {
   readonly estimatedCents: string;
   readonly costUnit: "call" | "page";
   readonly maximumPhysicalInvocations: string;
+  readonly maximumCostedInvocations: string;
   readonly resultStrategy: "typed_projection" | "artifact_reference";
   readonly resultSchema:
     | "tradefair-algolia/v1"
@@ -74,7 +95,18 @@ export interface PlatformExecutionToolContractV1 {
     | "crawl4ai-render/v1"
     | "sanctions-download/v1";
   readonly maximumOutputItems: string;
-  readonly maximumOutputBytes: string;
+  readonly maximumTransportResponseBytes: string;
+  readonly maximumDurableResultBytes: string;
+}
+
+export interface PlatformExecutionPhysicalWireContractV1 {
+  readonly wireId: string;
+  readonly maximumParentOperations: string;
+  readonly maximumWiresPerOperation: string;
+  readonly maximumPhysicalInvocations: string;
+  readonly maximumRedirectsPerOperation: string;
+  readonly maximumItemsPerWire: string;
+  readonly maximumTransportResponseBytes: string;
 }
 
 export interface PlatformExecutionProviderRequirementV1 {
@@ -98,6 +130,11 @@ export interface PlatformExecutionTechnicalRowV1 {
     | "zero_paid_dispatch"
     | "tool_estimated_cents"
     | "disabled_no_egress";
+  readonly physicalWireSelection:
+    | "one_source_provider_per_due_source"
+    | "all_declared_wires"
+    | "disabled_no_egress";
+  readonly physicalWireContracts: readonly PlatformExecutionPhysicalWireContractV1[];
   readonly providerRequirements: readonly PlatformExecutionProviderRequirementV1[];
   readonly toolContracts: readonly PlatformExecutionToolContractV1[];
   readonly hardBounds: PlatformExecutionHardBoundsV1;
@@ -276,6 +313,27 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         "5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e",
       maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "zero_paid_dispatch",
+      physicalWireSelection: "one_source_provider_per_due_source",
+      physicalWireContracts: [
+        {
+          wireId: "tradefair.algolia.page",
+          maximumParentOperations: "50",
+          maximumWiresPerOperation: "10",
+          maximumPhysicalInvocations: "500",
+          maximumRedirectsPerOperation: "0",
+          maximumItemsPerWire: "1000",
+          maximumTransportResponseBytes: "5000000",
+        },
+        {
+          wireId: "mapyourshow.fetch",
+          maximumParentOperations: "50",
+          maximumWiresPerOperation: "1",
+          maximumPhysicalInvocations: "50",
+          maximumRedirectsPerOperation: "0",
+          maximumItemsPerWire: "10000",
+          maximumTransportResponseBytes: "5000000",
+        },
+      ],
       providerRequirements: [
         {
           providerId: "tradefair.algolia",
@@ -298,11 +356,13 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
           version: "1.0.0",
           estimatedCents: "0",
           costUnit: "call",
-          maximumPhysicalInvocations: "50",
+          maximumPhysicalInvocations: "500",
+          maximumCostedInvocations: "50",
           resultStrategy: "typed_projection",
           resultSchema: "tradefair-algolia/v1",
-          maximumOutputItems: "2000",
-          maximumOutputBytes: "122880",
+          maximumOutputItems: "10000",
+          maximumTransportResponseBytes: "5000000",
+          maximumDurableResultBytes: "122880",
         },
         {
           toolId: "mapyourshow.fetch",
@@ -310,23 +370,28 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
           estimatedCents: "0",
           costUnit: "call",
           maximumPhysicalInvocations: "50",
+          maximumCostedInvocations: "50",
           resultStrategy: "typed_projection",
           resultSchema: "mapyourshow-fetch/v1",
-          maximumOutputItems: "5000",
-          maximumOutputBytes: "122880",
+          maximumOutputItems: "10000",
+          maximumTransportResponseBytes: "5000000",
+          maximumDurableResultBytes: "122880",
         },
       ],
       hardBounds: {
         ...ZERO_NON_APPLICABLE_BOUNDS,
-        maximumPhysicalInvocations: "50",
+        maximumPhysicalInvocations: "500",
+        maximumCostedInvocations: "50",
         maximumDueSources: "50",
         maximumSourceFetchItems: "10000",
         maximumPagesPerSource: "0",
         maximumSanctionsSources: "0",
         maximumPatentAnchors: "0",
         maximumBytesPerPatentAnchor: "0",
-        maximumOutputItemsPerWire: "5000",
-        maximumOutputBytesPerWire: "122880",
+        maximumOutputItemsPerWire: "10000",
+        maximumTransportResponseBytesPerWire: "5000000",
+        maximumDurableResultBytes: "122880",
+        maximumRedirectsPerOperation: "0",
       },
     }),
     technicalRow({
@@ -340,6 +405,18 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         "3fbcd9326937d66243f1395d3f0c4f098c6748977d00ae90017d0f8f04202db6",
       maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "disabled_no_egress",
+      physicalWireSelection: "disabled_no_egress",
+      physicalWireContracts: [
+        {
+          wireId: "google_patents.bigquery",
+          maximumParentOperations: "0",
+          maximumWiresPerOperation: "0",
+          maximumPhysicalInvocations: "0",
+          maximumRedirectsPerOperation: "0",
+          maximumItemsPerWire: "0",
+          maximumTransportResponseBytes: "0",
+        },
+      ],
       providerRequirements: [
         {
           providerId: "google_patents",
@@ -355,16 +432,19 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
           version: "1.0.0",
           estimatedCents: "0",
           costUnit: "call",
-          maximumPhysicalInvocations: "25",
+          maximumPhysicalInvocations: "0",
+          maximumCostedInvocations: "0",
           resultStrategy: "typed_projection",
           resultSchema: "google-patents-search/v1",
           maximumOutputItems: "50",
-          maximumOutputBytes: "122880",
+          maximumTransportResponseBytes: "0",
+          maximumDurableResultBytes: "122880",
         },
       ],
       hardBounds: {
         ...ZERO_NON_APPLICABLE_BOUNDS,
         maximumPhysicalInvocations: "0",
+        maximumCostedInvocations: "0",
         maximumDueSources: "0",
         maximumSourceFetchItems: "0",
         maximumPagesPerSource: "0",
@@ -372,7 +452,9 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         maximumPatentAnchors: "25",
         maximumBytesPerPatentAnchor: "214748364800",
         maximumOutputItemsPerWire: "50",
-        maximumOutputBytesPerWire: "122880",
+        maximumTransportResponseBytesPerWire: "0",
+        maximumDurableResultBytes: "122880",
+        maximumRedirectsPerOperation: "0",
       },
     }),
     technicalRow({
@@ -386,6 +468,27 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         "9ef4afce408c36472e00db01a80b6e3a3e461a2b13af7f456d9ce31a7676c34a",
       maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "tool_estimated_cents",
+      physicalWireSelection: "all_declared_wires",
+      physicalWireContracts: [
+        {
+          wireId: "robots.public_http",
+          maximumParentOperations: "1000",
+          maximumWiresPerOperation: "4",
+          maximumPhysicalInvocations: "4000",
+          maximumRedirectsPerOperation: "3",
+          maximumItemsPerWire: "0",
+          maximumTransportResponseBytes: "100000",
+        },
+        {
+          wireId: "crawl4ai.render.dispatch",
+          maximumParentOperations: "1000",
+          maximumWiresPerOperation: "1",
+          maximumPhysicalInvocations: "1000",
+          maximumRedirectsPerOperation: "0",
+          maximumItemsPerWire: "0",
+          maximumTransportResponseBytes: "5000000",
+        },
+      ],
       providerRequirements: [
         {
           providerId: "crawl4ai.render",
@@ -401,16 +504,19 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
           version: "1.0.0",
           estimatedCents: "1",
           costUnit: "page",
-          maximumPhysicalInvocations: "1000",
+          maximumPhysicalInvocations: "5000",
+          maximumCostedInvocations: "1000",
           resultStrategy: "artifact_reference",
           resultSchema: "crawl4ai-render/v1",
           maximumOutputItems: "0",
-          maximumOutputBytes: "3000000",
+          maximumTransportResponseBytes: "5000000",
+          maximumDurableResultBytes: "3000000",
         },
       ],
       hardBounds: {
         ...ZERO_NON_APPLICABLE_BOUNDS,
-        maximumPhysicalInvocations: "1000",
+        maximumPhysicalInvocations: "5000",
+        maximumCostedInvocations: "1000",
         maximumDueSources: "50",
         maximumSourceFetchItems: "0",
         maximumPagesPerSource: "20",
@@ -418,7 +524,9 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         maximumPatentAnchors: "0",
         maximumBytesPerPatentAnchor: "0",
         maximumOutputItemsPerWire: "0",
-        maximumOutputBytesPerWire: "3000000",
+        maximumTransportResponseBytesPerWire: "5000000",
+        maximumDurableResultBytes: "3000000",
+        maximumRedirectsPerOperation: "3",
       },
     }),
     technicalRow({
@@ -432,6 +540,18 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         "50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe",
       maximumActivityAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS_TEXT,
       costMode: "zero_paid_dispatch",
+      physicalWireSelection: "all_declared_wires",
+      physicalWireContracts: [
+        {
+          wireId: "sanctions.public_http",
+          maximumParentOperations: "2",
+          maximumWiresPerOperation: "4",
+          maximumPhysicalInvocations: "8",
+          maximumRedirectsPerOperation: "3",
+          maximumItemsPerWire: "0",
+          maximumTransportResponseBytes: "33554432",
+        },
+      ],
       providerRequirements: [
         {
           providerId: "ofac_sdn",
@@ -454,16 +574,19 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
           version: "1.0.0",
           estimatedCents: "0",
           costUnit: "call",
-          maximumPhysicalInvocations: "2",
+          maximumPhysicalInvocations: "8",
+          maximumCostedInvocations: "2",
           resultStrategy: "artifact_reference",
           resultSchema: "sanctions-download/v1",
           maximumOutputItems: "0",
-          maximumOutputBytes: "33554432",
+          maximumTransportResponseBytes: "33554432",
+          maximumDurableResultBytes: "33554432",
         },
       ],
       hardBounds: {
         ...ZERO_NON_APPLICABLE_BOUNDS,
-        maximumPhysicalInvocations: "2",
+        maximumPhysicalInvocations: "8",
+        maximumCostedInvocations: "2",
         maximumDueSources: "0",
         maximumSourceFetchItems: "0",
         maximumPagesPerSource: "0",
@@ -471,7 +594,9 @@ export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({
         maximumPatentAnchors: "0",
         maximumBytesPerPatentAnchor: "0",
         maximumOutputItemsPerWire: "0",
-        maximumOutputBytesPerWire: "33554432",
+        maximumTransportResponseBytesPerWire: "33554432",
+        maximumDurableResultBytes: "33554432",
+        maximumRedirectsPerOperation: "3",
       },
     }),
   ],

@@ -107,7 +107,12 @@ describe("platform-execution-technical-quote/v1 body contract", () => {
       "maximum_fallback_wires",
       "maximum_input_tokens",
       "maximum_output_tokens",
-      "maximum_output_bytes_per_wire",
+      "maximum_costed_invocations",
+      "maximum_transport_response_bytes_per_wire",
+      "maximum_durable_result_bytes",
+      "maximum_redirects_per_operation",
+      "physical_wire_contracts_sha256",
+      "physical_wire_selection",
     ]) {
       const changed = { ...values };
       delete changed[field];
@@ -122,20 +127,19 @@ describe("platform-execution-technical-quote/v1 body contract", () => {
   });
 
   it("uses separate physical-wire, transport-byte and durable-result fields", () => {
-    const legacy = JSON.parse(VECTOR.positive_body.raw_body_utf8) as Record<
+    const bounded = JSON.parse(VECTOR.positive_body.raw_body_utf8) as Record<
       string,
       string
     >;
-    delete legacy.maximum_output_bytes_per_wire;
-    const bounded = {
-      ...legacy,
-      maximum_costed_invocations: "1000",
-      maximum_transport_response_bytes_per_wire: "5000000",
-      maximum_durable_result_bytes: "3000000",
-      maximum_redirects_per_operation: "3",
-      physical_wire_contracts_sha256: "1".repeat(64),
-      physical_wire_selection: "all_declared_wires",
-    };
+    const legacy = { ...bounded, maximum_output_bytes_per_wire: "3000000" };
+    for (const field of [
+      "maximum_costed_invocations",
+      "maximum_transport_response_bytes_per_wire",
+      "maximum_durable_result_bytes",
+      "maximum_redirects_per_operation",
+      "physical_wire_contracts_sha256",
+      "physical_wire_selection",
+    ]) delete legacy[field];
 
     expect(() => canonicalizePlatformAuthorityRequestBodyV1({
       contentType: "application/json",

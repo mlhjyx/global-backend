@@ -22,7 +22,7 @@ import {
 export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_SCHEMA =
   "platform-execution-technical-quote/v1" as const;
 export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_SHA256 =
-  "dfe00c8a31eff1f10399f789841ddb268bce9162842814bfa105e57a668162b4" as const;
+  "230c0252403f401f35003d3cd3e7d99912ae5689fb84c37bbd50ed624cd9325b" as const;
 
 const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 const MAX_NUMERIC_DATE = 253_402_300_799;
@@ -95,6 +95,7 @@ export interface PlatformExecutionTechnicalQuoteV1 {
   readonly hard_bounds_sha256: string;
   readonly maximum_activity_attempts: string;
   readonly maximum_physical_invocations: string;
+  readonly maximum_costed_invocations: string;
   readonly maximum_due_sources: string;
   readonly maximum_source_fetch_items: string;
   readonly maximum_pages_per_source: string;
@@ -102,11 +103,15 @@ export interface PlatformExecutionTechnicalQuoteV1 {
   readonly maximum_patent_anchors: string;
   readonly maximum_bytes_per_patent_anchor: string;
   readonly maximum_output_items_per_wire: string;
-  readonly maximum_output_bytes_per_wire: string;
+  readonly maximum_transport_response_bytes_per_wire: string;
+  readonly maximum_durable_result_bytes: string;
+  readonly maximum_redirects_per_operation: string;
   readonly maximum_repair_wires: string;
   readonly maximum_fallback_wires: string;
   readonly maximum_input_tokens: string;
   readonly maximum_output_tokens: string;
+  readonly physical_wire_contracts_sha256: string;
+  readonly physical_wire_selection: string;
 }
 
 interface QuoteDependencies {
@@ -325,7 +330,7 @@ function requiredCapMicrousd(row: PlatformExecutionTechnicalRowV1): string {
     for (const tool of row.toolContracts) {
       cents +=
         BigInt(tool.estimatedCents) *
-        BigInt(tool.maximumPhysicalInvocations);
+        BigInt(tool.maximumCostedInvocations);
     }
   }
   if (
@@ -343,6 +348,7 @@ function requiredCapMicrousd(row: PlatformExecutionTechnicalRowV1): string {
 function quoteBounds(bounds: PlatformExecutionHardBoundsV1) {
   return {
     maximum_physical_invocations: bounds.maximumPhysicalInvocations,
+    maximum_costed_invocations: bounds.maximumCostedInvocations,
     maximum_due_sources: bounds.maximumDueSources,
     maximum_source_fetch_items: bounds.maximumSourceFetchItems,
     maximum_pages_per_source: bounds.maximumPagesPerSource,
@@ -350,7 +356,10 @@ function quoteBounds(bounds: PlatformExecutionHardBoundsV1) {
     maximum_patent_anchors: bounds.maximumPatentAnchors,
     maximum_bytes_per_patent_anchor: bounds.maximumBytesPerPatentAnchor,
     maximum_output_items_per_wire: bounds.maximumOutputItemsPerWire,
-    maximum_output_bytes_per_wire: bounds.maximumOutputBytesPerWire,
+    maximum_transport_response_bytes_per_wire:
+      bounds.maximumTransportResponseBytesPerWire,
+    maximum_durable_result_bytes: bounds.maximumDurableResultBytes,
+    maximum_redirects_per_operation: bounds.maximumRedirectsPerOperation,
     maximum_repair_wires: bounds.maximumRepairWires,
     maximum_fallback_wires: bounds.maximumFallbackWires,
     maximum_input_tokens: bounds.maximumInputTokens,
@@ -439,6 +448,7 @@ export class PlatformExecutionTechnicalQuoteService {
     const toolContractsSha256 = digest(row.toolContracts);
     const providerSnapshotSha256 = digest(providerSnapshot);
     const hardBoundsSha256 = digest(row.hardBounds);
+    const physicalWireContractsSha256 = digest(row.physicalWireContracts);
     const priceCatalog = {
       schemaVersion: "platform-execution-price-catalog/v1",
       toolPrices: row.toolContracts.map((tool) => ({
@@ -523,6 +533,8 @@ export class PlatformExecutionTechnicalQuoteService {
       provider_snapshot_sha256: providerSnapshotSha256,
       price_catalog_revision: priceCatalogRevision,
       hard_bounds_sha256: hardBoundsSha256,
+      physical_wire_contracts_sha256: physicalWireContractsSha256,
+      physical_wire_selection: row.physicalWireSelection,
       maximum_activity_attempts: row.maximumActivityAttempts,
       ...quoteBounds(row.hardBounds),
     });

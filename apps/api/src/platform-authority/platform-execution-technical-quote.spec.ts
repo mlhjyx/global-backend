@@ -252,6 +252,8 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
       (row.toolContracts as Array<Record<string, unknown>>)[0]!.estimatedCents = "2";
     }],
     ["activity retry", (row: Record<string, unknown>) => delete row.maximumActivityAttempts],
+    ["physical wire contracts", (row: Record<string, unknown>) => delete row.physicalWireContracts],
+    ["source mix selection", (row: Record<string, unknown>) => delete row.physicalWireSelection],
     ["unbounded fan-out", (row: Record<string, unknown>) => {
       (row.hardBounds as Record<string, unknown>).maximumPhysicalInvocations =
         "9223372036854775807";
@@ -269,7 +271,10 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
       "maximumPatentAnchors",
       "maximumBytesPerPatentAnchor",
       "maximumOutputItemsPerWire",
-      "maximumOutputBytesPerWire",
+      "maximumCostedInvocations",
+      "maximumTransportResponseBytesPerWire",
+      "maximumDurableResultBytes",
+      "maximumRedirectsPerOperation",
       "maximumRepairWires",
       "maximumFallbackWires",
       "maximumInputTokens",
@@ -307,7 +312,7 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
 
   it("binds the independently frozen technical contract digest", () => {
     expect(CORPUS.technical_contract_sha256).toBe(
-      "dfe00c8a31eff1f10399f789841ddb268bce9162842814bfa105e57a668162b4",
+      "230c0252403f401f35003d3cd3e7d99912ae5689fb84c37bbd50ed624cd9325b",
     );
     expect(CORPUS.vectors).toHaveLength(4);
   });

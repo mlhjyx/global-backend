@@ -215,42 +215,6 @@ function canonicalSanctionsMediaType(value: string | null): string | null {
   return SANCTIONS_DOWNLOAD_MEDIA_TYPES.has(canonical) ? canonical : null;
 }
 
-async function readSanctionsBodyBounded(response: Response): Promise<string> {
-  const declared = response.headers.get("content-length");
-  if (declared !== null) {
-    const bytes = Number(declared);
-    if (
-      declared.trim() === "" ||
-      !Number.isSafeInteger(bytes) ||
-      bytes < 0 ||
-      bytes > MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES
-    ) {
-      throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE");
-    }
-  }
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      bytes += next.value.byteLength;
-      if (bytes > MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES) {
-        await reader.cancel();
-        throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE");
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return new TextDecoder("utf-8", { fatal: true }).decode(
-    Buffer.concat(chunks),
-  );
-}
-
 function decodeHttpGetArtifactText(body: Buffer): string {
   let text: string;
   try {

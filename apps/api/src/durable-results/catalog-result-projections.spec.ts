@@ -675,7 +675,7 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
   },
   'tradefair-algolia/v1': {
     ...COMMON_RESULT_BOUNDS,
-    '$.data.exhibitors.maxItems': 2000,
+    '$.data.exhibitors.maxItems': 10000,
     '$.data.exhibitors[].externalId.maxLength': 200,
     '$.data.exhibitors[].companyName.maxLength': 500,
     '$.data.exhibitors[].website.maxLength': 2048,
@@ -689,7 +689,7 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
   },
   'mapyourshow-fetch/v1': {
     ...COMMON_RESULT_BOUNDS,
-    '$.data.hits.maxItems': 5000,
+    '$.data.hits.maxItems': 10000,
     '$.data.hits[].fields.exhid.maxLength': 200,
     '$.data.hits[].fields.name.maxLength': 500,
     '$.data.hits[].fields.description.maxLength': 4000,

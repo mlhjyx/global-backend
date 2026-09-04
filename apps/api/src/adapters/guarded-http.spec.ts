@@ -75,7 +75,11 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
       'https://first.example/start',
       { maxRedirects: 3 },
       { resolver, executePinned, beforePhysicalWire },
-    )).rejects.toThrow('wire counter exhausted');
+    )).rejects.toMatchObject({
+      name: 'ExternalHttpPhysicalWireDeniedError',
+      decision: 'physical_wire_gate',
+      cause: expect.objectContaining({ message: 'wire counter exhausted' }),
+    });
 
     expect(beforePhysicalWire).toHaveBeenCalledTimes(2);
     expect(executePinned).toHaveBeenCalledTimes(1);
