@@ -64,6 +64,27 @@ describe('acquisition activities — platform authority lifecycle', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
+  it('enforces the 50-source due-query bound when invoked outside the workflow wrapper', async () => {
+    const findMany = vi.fn(async () => []);
+    const activities = createAcquisitionActivities({
+      prisma: { monitoredSource: { findMany } } as never,
+      registry: new SourceAdapterRegistry(),
+      budgetStore: {
+        attestAuthorized: vi.fn(async () => undefined),
+      } as never,
+      activityRunId: () => 'workflow-run-1',
+    });
+
+    await expect(activities.listDueSources({
+      limit: 5_000,
+      executionContractVersion: 1,
+      executionBudget,
+    })).resolves.toEqual({ sourceIds: [] });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 50 }),
+    );
+  });
+
   it('read-only attests before the adapter call and never reopens or closes the admitted account', async () => {
     const order: string[] = [];
     const fetch = vi.fn(async (_config, _limit, context) => {
