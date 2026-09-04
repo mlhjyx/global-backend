@@ -48,12 +48,12 @@ Binding path、binding bytes、artifact ID、fixed source commit 与 source bund
 | 字段 | 精确值 |
 | --- | --- |
 | Status | `STALE_HOLD` |
-| Current source fingerprint | `2ea4f9e2c6155c515272c9b192e235b18e5363f056eac5977fbdc96636953d21` |
+| Current source fingerprint | `b91574f07c84d95cf0430e4e6d2f147ef522cc80fdede02df8f2db2b7cdcfcbf` |
 | Stale scope | `PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION` |
 | Dispatch authorization | `NOT_AUTHORIZED` |
 | Pilot eligibility | `BLOCKED` |
 | Required follow-up | `REBASE_FIXED_SOURCE_BEFORE_DISPATCH` |
-| Eligibility receipt SHA-256 | `7c9c96f10bcf9e8492c592fad60dc2eb711fd1da9edd741b685f53d51be4da4d` |
+| Eligibility receipt SHA-256 | `2e5618fee8942d280a4d288e6eac09646f7203c249e8dd30f33ea8b7d85d984e` |
 
 精确 drifted paths：
 
@@ -70,6 +70,8 @@ Binding path、binding bytes、artifact ID、fixed source commit 与 source bund
 11. `pnpm-lock.yaml`
 
 `packages/contracts/src/index.ts` 是相对 predecessor exact set 新增的 Authority contract export 漂移；其余十项来自已审查的 Production Parity/security successor。当前 receipt 没有改 active binding，也没有生成新的 Copy artifact。
+
+Platform Authority canonical codec 通过 `packages/contracts/package.json` 的隔离 subpath 暴露；该 manifest 已属于上述 11-path stale set，因此只重算 current fingerprint，不扩大 path set。真实编译图验证 root `@global/contracts` 不加载该 codec；这次 receipt 更新仍不构成 Copy rebaseline、CURRENT 或 dispatch 授权。
 
 ## 4. 安全边界
 
