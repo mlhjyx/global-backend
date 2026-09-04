@@ -10,6 +10,7 @@ import {
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageKind, PageSignals } from './page-signals';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { PLATFORM_INTENT_PAGES_PER_SOURCE_MAX } from '../platform-authority/platform-execution-contract';
 
 const PARSER_VERSION = 'web-watch/v1';
 const WEB_WATCH_KEY = 'web_watch';
@@ -312,7 +313,8 @@ function parseConfig(raw: unknown): WebWatchConfig | null {
   const cleanPages = pages
     .map((p) => (p && typeof p === 'object' ? (p as Record<string, unknown>) : null))
     .filter((p): p is Record<string, unknown> => !!p && typeof p.url === 'string')
-    .map((p) => ({ url: String(p.url), kind: typeof p.kind === 'string' ? (p.kind as PageKind) : undefined }));
+    .map((p) => ({ url: String(p.url), kind: typeof p.kind === 'string' ? (p.kind as PageKind) : undefined }))
+    .slice(0, PLATFORM_INTENT_PAGES_PER_SOURCE_MAX);
   return { company: { name: String(company.name ?? ''), domain: String(company.domain ?? '') }, pages: cleanPages };
 }
 

@@ -6,6 +6,7 @@ import type { PlatformScheduleAuthorityActivities } from './platform-schedule-au
 import type { PlatformScheduleWorkflowInput } from './platform-schedule-authority';
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
+import { boundedPlatformIntentDueSourceLimit } from '../platform-authority/platform-execution-contract';
 
 const acts = proxyActivities<IntentActivities>({
   startToCloseTimeout: '10 minutes', // 一个源可能有多页 × crawl4ai 渲染（每页可达数十秒）
@@ -34,7 +35,10 @@ export async function intentSweepWorkflow(input: ({ limit?: number } & PlatformS
   try { await acts.purgeStaleIntentEvents({ ...authorityArgs }); }
   catch (error) { if (isExecutionControlError(error)) throw error; }
 
-  const { sourceIds } = await acts.listDueWatches({ limit: input.limit ?? 50, ...authorityArgs });
+  const { sourceIds } = await acts.listDueWatches({
+    limit: boundedPlatformIntentDueSourceLimit(input.limit),
+    ...authorityArgs,
+  });
   const results: (WatchResult & { error?: string })[] = [];
   for (const sourceId of sourceIds) {
     try {
