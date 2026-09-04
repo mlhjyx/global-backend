@@ -47,6 +47,73 @@ test("governance changes preserve the active Copy fixed-source boundary", () => 
   );
 });
 
+test("the Platform Writer successor evidence records terminal reconciliation without rewriting UNKNOWN execution truth", () => {
+  const status = read("docs/status/current.md");
+  const architecture = read("docs/architecture/current.md");
+  const evidenceIndex = read("docs/evidence/README.md");
+  const changelog = read("docs/roadmap/changelog.md");
+  const receipt = JSON.parse(
+    read(
+      "docs/evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json",
+    ),
+  );
+  const deterministicEvidence = JSON.parse(
+    read(
+      "docs/evidence/runtime/site-builder-deterministic-product-path-platform-writer-development-20260904.json",
+    ),
+  );
+  const terminalEvidence = JSON.parse(
+    read(
+      "docs/evidence/runtime/site-builder-reconciliation-terminal-platform-writer-development-20260904.json",
+    ),
+  );
+  const release = JSON.parse(
+    read(
+      "docs/releases/site-builder-production-parity-platform-writer-development-20260904.release.json",
+    ),
+  );
+
+  assert.equal(receipt.persisted_unknown_containment.spend_status, "UNKNOWN");
+  assert.equal(receipt.persisted_unknown_containment.cost_basis, "unknown");
+  assert.equal(receipt.persisted_unknown_containment.reservation_microusd, "800000");
+  assert.equal(
+    receipt.persisted_unknown_containment.conservative_charge_microusd,
+    "800000",
+  );
+  assert.equal(receipt.persisted_unknown_containment.physical_model_calls, 1);
+  assert.equal(
+    receipt.persisted_unknown_containment.automatic_second_physical_call,
+    false,
+  );
+  assert.equal(receipt.persisted_unknown_containment.reconciliation_attempts, 6);
+  assert.equal(
+    receipt.persisted_unknown_containment.latest_reconciliation_status,
+    "EXPIRED",
+  );
+  assert.deepEqual(
+    receipt.persisted_unknown_containment.attempts.map((attempt) => attempt.status),
+    ["UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "EXPIRED"],
+  );
+  assert.equal(deterministicEvidence.result, "PASS");
+  assert.equal(deterministicEvidence.evidence_kind, "deterministic_product_path");
+  assert.equal(terminalEvidence.result, "PASS");
+  assert.equal(
+    terminalEvidence.evidence_kind,
+    "reconciliation_terminalization_readback",
+  );
+  assert.equal(release.release_status, "CANDIDATE");
+  assert.equal(release.external_provenance.status, "EXTERNAL_UNVERIFIED");
+  assert.equal(release.approval.machine.status, "NOT_VERIFIED");
+  assert.equal(release.approval.reviewer.status, "NOT_REVIEWED");
+  assert.equal(release.approval.user_authorization.status, "NOT_AUTHORIZED");
+
+  for (const document of [status, architecture, evidenceIndex, changelog]) {
+    assert.match(document, /attempts 1–5[\s\S]{0,120}6[\s\S]{0,120}EXPIRED/u);
+    assert.match(document, /UNKNOWN/u);
+    assert.match(document, /no (?:second )?(?:physical )?(?:call|redispatch)|不重发/u);
+  }
+});
+
 test("the Authority closeout coverage preserves the complete budget and readiness denominator", () => {
   const record = read(
     "docs/implementation-records/execution-budget-authority-contract.md",
