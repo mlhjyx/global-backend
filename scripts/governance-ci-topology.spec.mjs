@@ -385,6 +385,8 @@ test("the required build verifies runtime lease roles against disposable Postgre
     /verify-execution-budget-platform-writer-disposable-drift\.sh/,
   );
   assert.match(permissionStep, /EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1/);
+  assert.match(permissionStep, /EXECUTION_BUDGET_PLATFORM_WRITER_FAILURE_INJECT_AFTER_DRIFT=superuser/);
+  assert.match(permissionStep, /if EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1/);
   assert.match(
     permissionStep,
     /verify-runtime-lease-prisma-compatibility\.mts/,

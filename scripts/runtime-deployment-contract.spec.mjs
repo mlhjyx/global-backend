@@ -511,6 +511,7 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.match(harness, /ledger=\(\)/);
   assert.match(harness, /DISPOSABLE_CLEANUP_FAILED/);
   assert.match(harness, /trap 'cleanup \|\| exit 1' EXIT/);
+  assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
   assert.doesNotMatch(harness, /DROP ROLE/);
 });
 
