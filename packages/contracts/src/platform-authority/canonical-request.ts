@@ -272,6 +272,195 @@ export const PLATFORM_AUTHORITY_CANONICAL_REFERENCE_SCHEMA_V1 =
     { name: "workflow_run_id", kind: "lowercase-uuid" },
   ]);
 
+const PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS = Object.freeze([
+  {
+    name: "execution_envelope_schema_version",
+    kind: "exact",
+    value: "platform-execution-envelope/v1",
+  },
+  { name: "execution_envelope_sha256", kind: "sha256" },
+  {
+    name: "expires_at",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_NUMERIC_DATE,
+  },
+  { name: "hard_bounds_sha256", kind: "sha256" },
+  {
+    name: "issued_at",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_NUMERIC_DATE,
+  },
+  {
+    name: "maximum_bytes_per_patent_anchor",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_due_sources",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_fallback_wires",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_input_tokens",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_output_bytes_per_wire",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_output_items_per_wire",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_output_tokens",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_pages_per_source",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_patent_anchors",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_physical_invocations",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_repair_wires",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_sanctions_sources",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "maximum_source_fetch_items",
+    kind: "decimal",
+    minimum: "0",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "policy_artifact_id",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 200,
+  },
+  { name: "policy_artifact_sha256", kind: "sha256" },
+  {
+    name: "policy_matrix_revision",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 100,
+  },
+  { name: "policy_revision", kind: "sha256" },
+  { name: "price_catalog_revision", kind: "sha256" },
+  { name: "provider_snapshot_sha256", kind: "sha256" },
+  {
+    name: "purpose",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 100,
+  },
+  { name: "quote_id", kind: "lowercase-uuid" },
+  {
+    name: "request_contract_version",
+    kind: "exact",
+    value: "platform-schedule-authority-v1",
+  },
+  {
+    name: "required_campaign_cap_microusd",
+    kind: "decimal",
+    minimum: "1",
+    maximum: MAX_SIGNED_64,
+  },
+  {
+    name: "required_cap_per_run_microusd",
+    kind: "decimal",
+    minimum: "1",
+    maximum: MAX_SIGNED_64,
+  },
+  { name: "required_max_runs", kind: "exact", value: "1" },
+  {
+    name: "schedule_id",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 100,
+  },
+  { name: "schedule_request_sha256", kind: "sha256" },
+  {
+    name: "schema_version",
+    kind: "exact",
+    value: "platform-execution-technical-quote/v1",
+  },
+  {
+    name: "temporal_namespace",
+    kind: "exact",
+    value: "platform-automation",
+  },
+  { name: "tool_contracts_sha256", kind: "sha256" },
+  {
+    name: "workflow_id",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 200,
+  },
+  { name: "workflow_run_id", kind: "lowercase-uuid" },
+  {
+    name: "workflow_type",
+    kind: "text",
+    minimumBytes: 1,
+    maximumBytes: 120,
+  },
+] satisfies readonly Field[]);
+
+/**
+ * Product quote hash preimage. `quote_sha256` is deliberately absent so the
+ * digest is non-self-referential and independently reproducible in GrowthOS.
+ */
+export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_HASH_PREIMAGE_SCHEMA_V1 =
+  defineCodeOwnedSchema(
+    "platform-execution-technical-quote-hash-preimage/v1",
+    PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS,
+  );
+
+/** Exact closed wire body returned by the Platform technical quote reader. */
+export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_SCHEMA_V1 =
+  defineCodeOwnedSchema("platform-execution-technical-quote/v1", [
+    ...PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS,
+    { name: "quote_sha256", kind: "sha256" },
+  ]);
+
 function skipWhitespace(source: string, start: number): number {
   let index = start;
   while (
