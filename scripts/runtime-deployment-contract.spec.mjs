@@ -497,6 +497,8 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
   assert.match(verify, /ingest_platform_execution_authority/);
   assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
+  assert.match(verify, /has_table_privilege\(session_user,'execution_budget_authority','INSERT'\)/);
+  assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
 });
 
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
