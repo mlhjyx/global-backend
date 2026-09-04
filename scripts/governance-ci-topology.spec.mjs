@@ -373,8 +373,13 @@ test("the required build verifies runtime lease roles against disposable Postgre
   assert.match(permissionStep, /provision-runtime-lease-principals\.sh/);
   assert.match(
     permissionStep,
+    /provision-execution-budget-platform-writer\.sh/,
+  );
+  assert.match(
+    permissionStep,
     /verify-runtime-lease-principal-permissions\.sh/,
   );
+  assert.match(permissionStep, /verify-execution-budget-platform-writer\.sh/);
   assert.match(
     permissionStep,
     /verify-runtime-lease-prisma-compatibility\.mts/,

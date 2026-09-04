@@ -468,6 +468,29 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(verify, /psql_denied/);
 });
 
+test('platform writer principal provisioning is exclusive, fail-closed, and secret-safe', async () => {
+  const [provision, verify] = await Promise.all([
+    repositoryFile('infra/postgres/provision-execution-budget-platform-writer.sh'),
+    repositoryFile('infra/postgres/verify-execution-budget-platform-writer.sh'),
+  ]);
+  for (const script of [provision, verify]) {
+    assert.match(script, /^#!\/usr\/bin\/env bash\nset -euo pipefail/m);
+    assert.doesNotMatch(script, /set -x/);
+    assert.doesNotMatch(script, /DROP ROLE/);
+    assert.doesNotMatch(script, /DATABASE_URL|APP_DATABASE_URL/);
+  }
+  assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
+  assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN/);
+  assert.match(provision, /EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD/);
+  assert.match(provision, /\\getenv platform_writer_password/);
+  assert.match(provision, /execution_budget_platform_writer/);
+  assert.match(provision, /unexpected direct membership/);
+  assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL/);
+  assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
+  assert.match(verify, /ingest_platform_execution_authority/);
+  assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
+});
+
 test('legacy systemd units delegate to the immutable compose runtime instead of mutable checkout dist', async () => {
   const [api, worker, readme, compose, main, temporalWorker] = await Promise.all([
     repositoryFile('infra/systemd/global-api.service'),
