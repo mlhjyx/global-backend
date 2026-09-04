@@ -383,3 +383,57 @@ export function validateGitleaksReceipt(
   }
   return pass();
 }
+
+export async function runGitleaksControllerCli(argv, adapters, contract) {
+  if (
+    !Array.isArray(argv) ||
+    argv.length !== 2 ||
+    argv[0] !== "--request" ||
+    !path.posix.isAbsolute(argv[1]) ||
+    typeof adapters?.readCanonicalRequest !== "function" ||
+    typeof adapters?.readEvidence !== "function" ||
+    typeof adapters?.readSourceClosure !== "function" ||
+    typeof adapters?.runGitleaks !== "function" ||
+    typeof adapters?.writeFileExclusive !== "function"
+  ) {
+    return integrity("GITLEAKS_CLI_INVALID");
+  }
+  const request = await adapters.readCanonicalRequest(argv[1]);
+  const evidence = await adapters.readEvidence(request);
+  const invocation = buildGitleaksInvocation(request, contract, evidence);
+  if (invocation.status !== "PASS") return invocation;
+  const sourceClosure = await adapters.readSourceClosure(request);
+  if (
+    sourceClosure?.sourceTreeSha256 !== request.sourceTreeSha256 ||
+    sourceClosure?.configBlobId !== request.configBlobId ||
+    sourceClosure?.configSha256 !== request.configSha256
+  ) {
+    return integrity("GITLEAKS_SOURCE_CLOSURE_INVALID");
+  }
+  let runResult;
+  try {
+    runResult = await adapters.runGitleaks(invocation.argv, invocation);
+  } catch {
+    return integrity("GITLEAKS_EXECUTION_FAILED");
+  }
+  if (
+    runResult?.status !== "PASS" ||
+    !isPassivePlainData(runResult.resultRecord)
+  ) {
+    return integrity("GITLEAKS_EXECUTION_FAILED");
+  }
+  const serialized = JSON.stringify(runResult.resultRecord);
+  const unredacted =
+    serialized.includes('"redacted":false') ||
+    serialized.includes('"secret"') ||
+    serialized.includes('"password"') ||
+    serialized.includes('"token"');
+  if (unredacted) {
+    return integrity("GITLEAKS_REDACTION_INVALID");
+  }
+  await adapters.writeFileExclusive(
+    request.outputRecordPath,
+    canonicalJsonBytes(runResult.resultRecord),
+  );
+  return pass({ resultRecord: runResult.resultRecord });
+}

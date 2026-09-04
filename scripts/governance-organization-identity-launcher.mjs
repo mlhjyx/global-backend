@@ -201,6 +201,48 @@ function exactKeys(value, keys) {
   );
 }
 
+function validateVerifiedWorktreeReceipt(receipt, request) {
+  if (
+    !exactKeys(receipt, [
+      "schemaVersion",
+      "repositoryRoot",
+      "worktreePath",
+      "gitDirRealpathSha256",
+      "commonDirRealpathSha256",
+      "branch",
+      "headCommit",
+      "subjectCommit",
+      "statusPorcelainSha256",
+      "worktreeListEntrySha256",
+      "expectedMode",
+      "verifiedByExecutableClosureSha256",
+      "prePostToctouSha256",
+      "result",
+    ]) ||
+    receipt.schemaVersion !== "organization-identity-verified-worktree/v1" ||
+    !isAbsoluteNormalized(receipt.repositoryRoot) ||
+    !isAbsoluteNormalized(receipt.worktreePath) ||
+    !receipt.worktreePath.startsWith(`${receipt.repositoryRoot}/`) ||
+    !isSha(receipt.gitDirRealpathSha256) ||
+    !isSha(receipt.commonDirRealpathSha256) ||
+    typeof receipt.branch !== "string" ||
+    receipt.branch.length === 0 ||
+    !isCommit(receipt.headCommit) ||
+    !isCommit(receipt.subjectCommit) ||
+    receipt.headCommit !== request.subjectCommit ||
+    receipt.subjectCommit !== request.subjectCommit ||
+    !isSha(receipt.statusPorcelainSha256) ||
+    !isSha(receipt.worktreeListEntrySha256) ||
+    receipt.expectedMode !== request.mode ||
+    !isSha(receipt.verifiedByExecutableClosureSha256) ||
+    !isSha(receipt.prePostToctouSha256) ||
+    receipt.result !== "PASS"
+  ) {
+    return integrity("VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+  }
+  return pass();
+}
+
 function cloneNullPrototype(value) {
   if (Array.isArray(value)) return value.map(cloneNullPrototype);
   if (value === null || typeof value !== "object") return value;
@@ -953,15 +995,13 @@ export async function dispatchClosedCommand(request, verifiedContext = {}) {
     ...validation.invocation,
   };
   if (invocation.executableRole === "GIT") {
-    const worktree = verifiedContext.verifiedWorktree;
-    if (
-      !exactKeys(worktree, ["path", "subjectCommit"]) ||
-      !isAbsoluteNormalized(worktree.path) ||
-      worktree.subjectCommit !== request.subjectCommit
-    ) {
-      return integrity("VERIFIED_WORKTREE_REQUIRED");
-    }
-    invocation.cwd = worktree.path;
+    const worktreeReceipt = verifiedContext.verifiedWorktreeReceipt;
+    const verifiedWorktree = validateVerifiedWorktreeReceipt(
+      worktreeReceipt,
+      request,
+    );
+    if (verifiedWorktree.status !== "PASS") return verifiedWorktree;
+    invocation.cwd = worktreeReceipt.worktreePath;
   }
   let executionResult = null;
   if (typeof verifiedContext.loadDependency !== "function") {
@@ -2192,7 +2232,7 @@ export async function runLauncherCli(argv, options = {}) {
     inputRecordBytes: inputFile.bytes,
     outputExists: false,
     requestReplaySet: replaySet,
-    verifiedWorktree: trust.verifiedWorktree ?? options.verifiedWorktree,
+    verifiedWorktreeReceipt: trust.verifiedWorktreeReceipt,
     preDispatchReverify: async () => {
       const [requestAgain, inputAgain] = await Promise.all([
         verifyControlledFile(argv[1], {

@@ -1,92 +1,27 @@
-import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 
-const pass = (extra = {}) => ({ status: "PASS", ...extra });
-const integrity = (code) => ({ status: "INTEGRITY_ERROR", code });
-const canonicalJson = (value) => {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-    .join(",")}}`;
-};
-const canonicalJsonBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const isSha256 = (value) =>
-  typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
-const isGitObjectId = (value) =>
-  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
-function isPassivePlainData(value, seen = new Set()) {
-  if (value === null) return true;
-  if (typeof value === "string") return value.normalize("NFC") === value;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value === "boolean") return true;
-  if (typeof value !== "object" || seen.has(value)) return false;
-  seen.add(value);
-  try {
-    if (Object.getOwnPropertySymbols(value).length) return false;
-    const proto = Object.getPrototypeOf(value);
-    if (!Array.isArray(value) && proto !== Object.prototype && proto !== null)
-      return false;
-    for (const [key, descriptor] of Object.entries(
-      Object.getOwnPropertyDescriptors(value),
-    )) {
-      if (Array.isArray(value) && key === "length") continue;
-      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
-      if (
-        !("value" in descriptor) ||
-        descriptor.get ||
-        descriptor.set ||
-        !isPassivePlainData(descriptor.value, seen)
-      )
-        return false;
-    }
-    return true;
-  } catch {
-    return false;
-  } finally {
-    seen.delete(value);
-  }
-}
-const hasExactKeys = (value, keys) =>
-  isPassivePlainData(value) &&
-  !Array.isArray(value) &&
-  Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-const valuesEqual = (left, right) =>
-  canonicalJson(left) === canonicalJson(right);
-function validateExternalExecutableClosure(entries, roles) {
-  if (!Array.isArray(entries) || entries.length !== roles.length)
-    return integrity("EXECUTABLE_CLOSURE_INVALID");
-  for (let index = 0; index < roles.length; index += 1) {
-    const entry = entries[index];
-    if (
-      !hasExactKeys(entry, [
-        "role",
-        "logicalIdentity",
-        "executablePath",
-        "realpathSha256",
-        "sha256",
-        "size",
-      ]) ||
-      entry.role !== roles[index] ||
-      !path.posix.isAbsolute(entry.executablePath) ||
-      !isSha256(entry.realpathSha256) ||
-      !isSha256(entry.sha256) ||
-      !Number.isSafeInteger(entry.size) ||
-      entry.size < 0
-    )
-      return integrity("EXECUTABLE_CLOSURE_INVALID");
-  }
-  return pass();
-}
-const validateExactEnvironmentNames = (actual, expected) =>
-  valuesEqual(actual, expected)
-    ? pass()
-    : integrity("ENVIRONMENT_NAME_SET_INVALID");
-
+import {
+  openVerifiedDirectory,
+  readbackFile,
+  targetAbsent,
+  verifyFixtureRoot,
+  writeExclusiveCanonical,
+} from "./governance-organization-identity-root-anchor-filesystem.mjs";
+import {
+  canonicalJsonBytes,
+  hasExactKeys,
+  integrity,
+  isGitObjectId,
+  isPassivePlainData,
+  isSha256,
+  pass,
+  sha256,
+  validateExactEnvironmentNames,
+  validateExternalExecutableClosure,
+  validateRootAnchorOperationReviewClosureV2,
+  validateRootAnchorUpstreamEvidenceClosureV2,
+  valuesEqual,
+} from "./governance-organization-identity-controller-contracts.mjs";
 const ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/root-anchor";
 const REQUEST_ROOT = `${ROOT}/requests`;
@@ -196,7 +131,7 @@ export function validateRootAnchorContract(contract) {
     ) ||
     !validSource(
       contract.controllerTest,
-      "scripts/governance-organization-identity-root-anchor-controller.spec.mjs",
+      "scripts/governance-organization-identity-root-anchor-closure.spec.mjs",
     ) ||
     !valuesEqual(contract.requiredRoles, REQUIRED_ROLES) ||
     validateExternalExecutableClosure(
@@ -253,333 +188,32 @@ const REQUEST_KEYS = [
 ];
 
 function validateRootUpstreamEvidence(request, contract, records) {
-  if (!records || typeof records !== "object")
-    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
   const bindings = {
-    materializationReceiptSha256: "materializationReceipt",
-    controllerReviewReceiptSha256: "controllerReviewReceipt",
-    authorizationReceiptSha256: "authorizationReceipt",
-    localLauncherEvidenceSha256: "localLauncherEvidence",
+    materializationReceiptSha256: "rootAnchorControllerMaterialization",
+    controllerReviewReceiptSha256: "rootAnchorControllerReview",
+    authorizationReceiptSha256: "rootAnchorAuthorization",
+    localLauncherEvidenceSha256: "localLauncherReview",
     bootstrapContractSha256: "bootstrapContract",
-    githubControllerEvidenceSha256: "githubControllerEvidence",
-    protectedBaseEvidenceSha256: "protectedBaseEvidence",
-    admittedRefreshAcceptanceEvidenceSha256:
-      "admittedRefreshAcceptanceEvidence",
-    workflowRunEvidenceSha256: "workflowRunEvidence",
-    controllerVariableWriteReceiptSha256: "controllerVariableWriteReceipt",
+    githubControllerEvidenceSha256: "githubProtectedMainReadback",
+    protectedBaseEvidenceSha256: "protectedBaseLaunch",
+    admittedRefreshAcceptanceEvidenceSha256: "admittedRefreshAcceptance",
+    workflowRunEvidenceSha256: "workflowRun",
+    controllerVariableWriteReceiptSha256: "githubControllerVariableWrite",
   };
-  if (!hasExactKeys(records, Object.values(bindings))) {
+  if (
+    validateRootAnchorUpstreamEvidenceClosureV2(records).status !== "PASS" ||
+    records.rootAnchorControllerMaterialization.contractSha256 !==
+      sha256(canonicalJsonBytes(contract)) ||
+    records.rootAnchorControllerReview.contractSha256 !==
+      request.contractSha256 ||
+    records.rootAnchorAuthorization.requestId !== request.requestId
+  ) {
     return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
   }
   for (const [field, recordKey] of Object.entries(bindings)) {
     if (request[field] !== sha256(canonicalJsonBytes(records[recordKey]))) {
       return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
     }
-  }
-  const materialization = records.materializationReceipt;
-  const review = records.controllerReviewReceipt;
-  const requiredFields = {
-    localLauncherEvidence: [
-      "schemaVersion",
-      "launcherContractSha256",
-      "launcherMaterializationReceiptSha256",
-      "readbackReportSha256",
-      "reportSha256",
-      "counterexampleSetSha256",
-      "reviewerClass",
-      "critical",
-      "important",
-      "verdict",
-    ],
-    bootstrapContract: [
-      "schemaVersion",
-      "launcherContractSha256",
-      "bootstrapSchemaSha256",
-      "closedRequestSchemaSha256",
-      "effectivePnpmArgvRuleSha256",
-      "receiptComparatorSha256",
-      "toolLogicalExpectations",
-      "allowedEnvironmentNames",
-    ],
-    githubControllerEvidence: [
-      "schemaVersion",
-      "contractSha256",
-      "controllerReviewReceiptSha256",
-      "operation",
-      "requestId",
-      "requestSha256",
-      "payloadSchemaSha256",
-      "payloadSha256",
-      "authorizationReceiptSha256",
-      "repository",
-      "resultSchemaSha256",
-      "resultSha256",
-      "executableClosureSetSha256",
-      "prePostToctouSha256",
-      "containsCredentialValue",
-      "result",
-    ],
-    protectedBaseEvidence: [
-      "schemaVersion",
-      "contractSha256",
-      "contractReviewReceiptSha256",
-      "workflowBlobId",
-      "protectedBaseCommit",
-      "event",
-      "repository",
-      "ref",
-      "runId",
-      "runAttempt",
-      "runnerOs",
-      "runnerArchitecture",
-      "runnerUid",
-      "materializedTaskRootSha256",
-      "materializedSourceBlobSetSha256",
-      "executableClosureSetSha256",
-      "toolLogicalIdentitySetSha256",
-      "eventInputSha256",
-      "controllerVariableSetSha256",
-      "requestSetSha256",
-      "outputReceiptSetSha256",
-      "prePostToctouSha256",
-      "prBytesExecuted",
-      "result",
-    ],
-    admittedRefreshAcceptanceEvidence: [
-      "schemaVersion",
-      "refreshBaseCommit",
-      "refreshMergeCommit",
-      "currentMainAdmissionCommit",
-      "reviewedImplementationCommit",
-      "stageMapSha256",
-    ],
-    workflowRunEvidence: [
-      "schemaVersion",
-      "workflowPath",
-      "event",
-      "ref",
-      "headSha",
-      "runId",
-      "runAttempt",
-      "conclusion",
-    ],
-    controllerVariableWriteReceipt: [
-      "schemaVersion",
-      "contractSha256",
-      "controllerReviewReceiptSha256",
-      "operation",
-      "requestId",
-      "requestSha256",
-      "payloadSchemaSha256",
-      "payloadSha256",
-      "authorizationReceiptSha256",
-      "repository",
-      "resultSchemaSha256",
-      "resultSha256",
-      "executableClosureSetSha256",
-      "prePostToctouSha256",
-      "containsCredentialValue",
-      "result",
-    ],
-  };
-  for (const [recordKey, fields] of Object.entries(requiredFields)) {
-    const record = records[recordKey];
-    if (
-      !isPassivePlainData(record) ||
-      fields.some((field) => !Object.hasOwn(record, field))
-    ) {
-      return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
-    }
-  }
-  const shaFields = {
-    localLauncherEvidence: [
-      "launcherContractSha256",
-      "launcherMaterializationReceiptSha256",
-      "readbackReportSha256",
-      "reportSha256",
-      "counterexampleSetSha256",
-    ],
-    bootstrapContract: [
-      "launcherContractSha256",
-      "bootstrapSchemaSha256",
-      "closedRequestSchemaSha256",
-      "effectivePnpmArgvRuleSha256",
-      "receiptComparatorSha256",
-    ],
-    githubControllerEvidence: [
-      "contractSha256",
-      "controllerReviewReceiptSha256",
-      "requestSha256",
-      "payloadSchemaSha256",
-      "payloadSha256",
-      "authorizationReceiptSha256",
-      "resultSchemaSha256",
-      "resultSha256",
-      "executableClosureSetSha256",
-      "prePostToctouSha256",
-    ],
-    protectedBaseEvidence: [
-      "contractSha256",
-      "contractReviewReceiptSha256",
-      "materializedTaskRootSha256",
-      "materializedSourceBlobSetSha256",
-      "executableClosureSetSha256",
-      "toolLogicalIdentitySetSha256",
-      "eventInputSha256",
-      "controllerVariableSetSha256",
-      "requestSetSha256",
-      "outputReceiptSetSha256",
-      "prePostToctouSha256",
-    ],
-    admittedRefreshAcceptanceEvidence: ["stageMapSha256"],
-    controllerVariableWriteReceipt: [
-      "contractSha256",
-      "controllerReviewReceiptSha256",
-      "requestSha256",
-      "payloadSchemaSha256",
-      "payloadSha256",
-      "authorizationReceiptSha256",
-      "resultSchemaSha256",
-      "resultSha256",
-      "executableClosureSetSha256",
-      "prePostToctouSha256",
-    ],
-  };
-  for (const [recordKey, fields] of Object.entries(shaFields)) {
-    if (fields.some((field) => !isSha256(records[recordKey][field]))) {
-      return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
-    }
-  }
-  const github = records.githubControllerEvidence;
-  const variables = records.controllerVariableWriteReceipt;
-  if (
-    github.repository !== "mlhjyx/global-backend" ||
-    github.containsCredentialValue !== false ||
-    github.result !== "PASS" ||
-    variables.operation !== "CONTROLLER_VARIABLES_WRITE" ||
-    variables.repository !== "mlhjyx/global-backend" ||
-    variables.containsCredentialValue !== false ||
-    variables.result !== "PASS"
-  ) {
-    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
-  }
-  const hosted = records.protectedBaseEvidence;
-  if (
-    hosted.repository !== "mlhjyx/global-backend" ||
-    hosted.event !== "push" ||
-    hosted.ref !== "refs/heads/main" ||
-    hosted.runnerOs !== "linux" ||
-    hosted.prBytesExecuted !== false ||
-    hosted.result !== "PASS" ||
-    !isGitObjectId(hosted.protectedBaseCommit) ||
-    !isGitObjectId(hosted.workflowBlobId) ||
-    !Number.isSafeInteger(hosted.runId) ||
-    hosted.runId <= 0 ||
-    !Number.isSafeInteger(hosted.runAttempt) ||
-    hosted.runAttempt <= 0
-  ) {
-    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
-  }
-  const acceptance = records.admittedRefreshAcceptanceEvidence;
-  if (
-    !isGitObjectId(acceptance.refreshBaseCommit) ||
-    !isGitObjectId(acceptance.refreshMergeCommit) ||
-    !isGitObjectId(acceptance.currentMainAdmissionCommit) ||
-    !isGitObjectId(acceptance.reviewedImplementationCommit)
-  ) {
-    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
-  }
-  const workflow = records.workflowRunEvidence;
-  if (
-    workflow.workflowPath !==
-      ".github/workflows/organization-identity-writer-anchor.yml" ||
-    workflow.event !== "push" ||
-    workflow.ref !== "refs/heads/main" ||
-    !isGitObjectId(workflow.headSha) ||
-    !Number.isSafeInteger(workflow.runId) ||
-    workflow.runId <= 0 ||
-    !Number.isSafeInteger(workflow.runAttempt) ||
-    workflow.runAttempt <= 0 ||
-    workflow.conclusion !== "success"
-  ) {
-    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
-  }
-  if (
-    !hasExactKeys(materialization, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-      "controllerSourceSha256",
-      "rootDirectorySha256",
-      "requestRootSha256",
-      "outputRootSha256",
-      "ownerUid",
-      "ownerGid",
-      "directoryMode",
-      "controllerMode",
-      "recordMode",
-      "executableClosureSetSha256",
-      "environmentSchemaSha256",
-      "prePostToctouSha256",
-      "result",
-    ]) ||
-    !hasExactKeys(review, [
-      "schemaVersion",
-      "controllerClass",
-      "contractSha256",
-      "materializationReceiptSha256",
-      "requestSchemaSha256",
-      "reportSha256",
-      "counterexampleSetSha256",
-      "reviewerClass",
-      "critical",
-      "important",
-      "verdict",
-    ]) ||
-    !hasExactKeys(records.authorizationReceipt, [
-      "controllerClass",
-      "requestId",
-      "scope",
-      "operation",
-    ]) ||
-    materialization.schemaVersion !==
-      "organization-identity-external-controller-materialization/v1" ||
-    materialization.controllerClass !== "ROOT_ANCHOR" ||
-    materialization.contractSha256 !== sha256(canonicalJsonBytes(contract)) ||
-    materialization.controllerSourceSha256 !==
-      contract.controllerSource.sha256 ||
-    materialization.executableClosureSetSha256 !==
-      sha256(canonicalJsonBytes(contract.executableClosure)) ||
-    materialization.ownerUid !== 0 ||
-    materialization.ownerGid !== 0 ||
-    materialization.directoryMode !== 0o700 ||
-    materialization.controllerMode !== 0o500 ||
-    materialization.recordMode !== 0o600 ||
-    materialization.result !== "PASS" ||
-    review.schemaVersion !== "organization-identity-controller-review/v1" ||
-    review.controllerClass !== "ROOT_ANCHOR" ||
-    review.contractSha256 !== request.contractSha256 ||
-    review.materializationReceiptSha256 !==
-      request.materializationReceiptSha256 ||
-    review.reviewerClass !== "INDEPENDENT_CONTROLLER_SECURITY_REVIEW" ||
-    review.critical !== 0 ||
-    review.important !== 0 ||
-    review.verdict !== "PASS" ||
-    records.authorizationReceipt.controllerClass !== "ROOT_ANCHOR" ||
-    records.authorizationReceipt.requestId !== request.requestId ||
-    records.authorizationReceipt.scope !== "EXACT_REQUEST_ONLY" ||
-    records.localLauncherEvidence.schemaVersion !==
-      "organization-identity-launcher-materialization-review/v1" ||
-    records.bootstrapContract.schemaVersion !==
-      "organization-identity-bootstrap-contract/v2" ||
-    records.githubControllerEvidence.schemaVersion !==
-      "organization-identity-github-controller-receipt/v1" ||
-    records.protectedBaseEvidence.schemaVersion !==
-      "organization-identity-protected-base-launcher-receipt/v1" ||
-    records.controllerVariableWriteReceipt.operation !==
-      "CONTROLLER_VARIABLES_WRITE"
-  ) {
-    return integrity("ROOT_ANCHOR_UPSTREAM_EVIDENCE_INVALID");
   }
   return pass();
 }
@@ -711,181 +345,6 @@ export function planRootAnchorWrite(
   };
 }
 
-function modeOf(stat) {
-  return Number(stat.mode & 0o777n);
-}
-
-async function verifiedFixtureDirectory(directoryPath, fixture) {
-  const [stat, resolved] = await Promise.all([
-    lstat(directoryPath, { bigint: true }),
-    realpath(directoryPath),
-  ]);
-  return (
-    stat.isDirectory() &&
-    !stat.isSymbolicLink() &&
-    resolved === directoryPath &&
-    modeOf(stat) === 0o700 &&
-    Number(stat.uid) === fixture.expectedUid &&
-    Number(stat.gid) === fixture.expectedGid
-  );
-}
-
-async function verifyFixtureRoot(fixture, receiptField) {
-  const fixtureKeys = [
-    "rootDirectory",
-    "outputRoot",
-    "targetPath",
-    receiptField,
-    "expectedUid",
-    "expectedGid",
-  ];
-  if (
-    !hasExactKeys(fixture, fixtureKeys) ||
-    !path.isAbsolute(fixture.rootDirectory) ||
-    !path.isAbsolute(fixture.outputRoot) ||
-    !path.isAbsolute(fixture.targetPath) ||
-    !path.isAbsolute(fixture[receiptField]) ||
-    path.dirname(fixture.targetPath) !== fixture.rootDirectory ||
-    !fixture.targetPath.startsWith(`${fixture.rootDirectory}/`) ||
-    path.dirname(fixture.outputRoot) !== fixture.rootDirectory ||
-    path.dirname(fixture[receiptField]) !== fixture.outputRoot ||
-    !fixture[receiptField].startsWith(`${fixture.outputRoot}/`) ||
-    fixture.rootDirectory === ANCHOR_DIRECTORY
-  ) {
-    return integrity("ROOT_ANCHOR_FIXTURE_INVALID");
-  }
-  try {
-    const [rootValid, outputValid] = await Promise.all([
-      verifiedFixtureDirectory(fixture.rootDirectory, fixture),
-      verifiedFixtureDirectory(fixture.outputRoot, fixture),
-    ]);
-    if (!rootValid || !outputValid) {
-      return integrity("ROOT_ANCHOR_FIXTURE_ROOT_INVALID");
-    }
-    return pass();
-  } catch {
-    return integrity("ROOT_ANCHOR_FIXTURE_ROOT_INVALID");
-  }
-}
-
-async function targetAbsent(targetPath) {
-  try {
-    await lstat(targetPath, { bigint: true });
-    return false;
-  } catch (error) {
-    return error?.code === "ENOENT";
-  }
-}
-
-async function fsyncDirectory(directoryPath) {
-  const handle = await open(directoryPath, fsConstants.O_RDONLY);
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-async function openVerifiedDirectory(directoryPath, fixture) {
-  const handle = await open(
-    directoryPath,
-    fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
-  );
-  try {
-    const stat = await handle.stat({ bigint: true });
-    const resolved = await realpath(directoryPath);
-    if (
-      !stat.isDirectory() ||
-      stat.isSymbolicLink() ||
-      modeOf(stat) !== 0o700 ||
-      Number(stat.uid) !== fixture.expectedUid ||
-      Number(stat.gid) !== fixture.expectedGid ||
-      resolved !== directoryPath
-    ) {
-      throw new Error("ROOT_ANCHOR_DIRECTORY_INVALID");
-    }
-    return {
-      handle,
-      stablePath: `/proc/self/fd/${handle.fd}`,
-    };
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    throw error;
-  }
-}
-
-async function writeExclusiveCanonical(filePath, bytes, fixture) {
-  let handle;
-  try {
-    handle = await open(
-      filePath,
-      fsConstants.O_WRONLY |
-        fsConstants.O_CREAT |
-        fsConstants.O_EXCL |
-        fsConstants.O_NOFOLLOW,
-      0o600,
-    );
-    await handle.chmod(0o600);
-    await handle.chown(fixture.expectedUid, fixture.expectedGid);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    const stat = await handle.stat({ bigint: true });
-    if (
-      !stat.isFile() ||
-      stat.nlink !== 1n ||
-      modeOf(stat) !== 0o600 ||
-      Number(stat.uid) !== fixture.expectedUid ||
-      Number(stat.gid) !== fixture.expectedGid ||
-      Number(stat.size) !== bytes.length
-    ) {
-      return integrity("ROOT_ANCHOR_WRITE_METADATA_INVALID");
-    }
-    return pass({ stat });
-  } catch {
-    return integrity("ROOT_ANCHOR_CREATE_EXCLUSIVE_FAILED");
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-async function readbackFile(filePath, expected, fixture) {
-  let handle;
-  try {
-    const before = await lstat(filePath, { bigint: true });
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {
-      return integrity("ROOT_ANCHOR_READBACK_INVALID");
-    }
-    handle = await open(
-      filePath,
-      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
-    );
-    const opened = await handle.stat({ bigint: true });
-    const bytes = await handle.readFile();
-    const after = await handle.stat({ bigint: true });
-    const afterPath = await lstat(filePath, { bigint: true });
-    if (
-      before.dev !== opened.dev ||
-      before.ino !== opened.ino ||
-      opened.dev !== after.dev ||
-      opened.ino !== after.ino ||
-      opened.dev !== afterPath.dev ||
-      opened.ino !== afterPath.ino ||
-      modeOf(opened) !== 0o600 ||
-      Number(opened.uid) !== fixture.expectedUid ||
-      Number(opened.gid) !== fixture.expectedGid ||
-      bytes.length !== expected.size ||
-      sha256(bytes) !== expected.sha256
-    ) {
-      return integrity("ROOT_ANCHOR_READBACK_INVALID");
-    }
-    return pass({ bytes, stat: opened });
-  } catch {
-    return integrity("ROOT_ANCHOR_READBACK_INVALID");
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
 export async function materializeRootAnchor({
   request,
   contract,
@@ -926,7 +385,11 @@ export async function materializeRootAnchor({
   } catch {
     return integrity("ROOT_ANCHOR_CANONICAL_PAYLOAD_INVALID");
   }
-  const root = await verifyFixtureRoot(fixture, "writeReceiptPath");
+  const root = await verifyFixtureRoot(
+    fixture,
+    "writeReceiptPath",
+    ANCHOR_DIRECTORY,
+  );
   if (root.status !== "PASS" || !(await targetAbsent(fixture.targetPath))) {
     return {
       status: "ROOT_ANCHOR_WRITE_HOLD",
@@ -968,6 +431,7 @@ export async function materializeRootAnchor({
         size: payloadBytes.length,
       },
       fixture,
+      sha256,
     );
     if (readback.status !== "PASS") {
       return { status: "ROOT_ANCHOR_WRITE_HOLD", code: readback.code };
@@ -1031,7 +495,11 @@ export async function readbackRootAnchor({
   ) {
     return integrity("ROOT_ANCHOR_WRITE_RECEIPT_INVALID");
   }
-  const root = await verifyFixtureRoot(fixture, "readbackReceiptPath");
+  const root = await verifyFixtureRoot(
+    fixture,
+    "readbackReceiptPath",
+    ANCHOR_DIRECTORY,
+  );
   if (root.status !== "PASS") return root;
   let rootDirectory;
   let outputDirectory;
@@ -1050,6 +518,7 @@ export async function readbackRootAnchor({
       stableTargetPath,
       { sha256: writeReceipt.anchorSha256, size: writeReceipt.anchorSize },
       fixture,
+      sha256,
     );
     if (observed.status !== "PASS") return observed;
     const readbackReceipt = {
@@ -1224,13 +693,20 @@ const REVIEW_KEYS = [
 ];
 
 export function validateRootAnchorOperationReviewReceipt(receipt, records) {
-  if (
-    !records ||
-    !hasExactKeys(records, [
+  const recordsValid =
+    hasExactKeys(records, [
       "writeRequest",
       "writeReceipt",
       "readbackReceipt",
     ]) ||
+    hasExactKeys(records, [
+      "writeRequest",
+      "writeReceipt",
+      "readbackReceipt",
+      "upstreamEvidence",
+    ]);
+  if (
+    !recordsValid ||
     validateRootAnchorWriteReceipt(records.writeReceipt, records.writeRequest)
       .status !== "PASS" ||
     validateRootAnchorReadbackReceipt(
@@ -1260,5 +736,14 @@ export function validateRootAnchorOperationReviewReceipt(receipt, records) {
   ) {
     return integrity("ROOT_ANCHOR_OPERATION_REVIEW_INVALID");
   }
-  return pass();
+  if (
+    records.upstreamEvidence &&
+    validateRootAnchorOperationReviewClosureV2({
+      ...records,
+      operationReviewReceipt: receipt,
+    }).status !== "PASS"
+  ) {
+    return integrity("ROOT_ANCHOR_OPERATION_REVIEW_INVALID");
+  }
+  return { status: "PASS" };
 }

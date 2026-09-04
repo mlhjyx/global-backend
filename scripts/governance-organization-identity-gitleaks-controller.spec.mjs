@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   buildGitleaksInvocation,
+  runGitleaksControllerCli,
   validateGitleaksContract,
   validateGitleaksReceipt,
   validateGitleaksRequest,
@@ -266,4 +267,66 @@ test("Gitleaks receipts reject cross-controller substitution and unredacted evid
     ).status,
     "INTEGRITY_ERROR",
   );
+});
+
+test("Gitleaks CLI owns source/config readback, redaction, and output creation", async () => {
+  const scanRequest = request();
+  let gitleaksExecuted = false;
+  const adapters = {
+    readCanonicalRequest(requestPath) {
+      assert.equal(requestPath, "/tmp/gitleaks-request.json");
+      return scanRequest;
+    },
+    readEvidence() {
+      return evidence();
+    },
+    readSourceClosure() {
+      return {
+        sourceTreeSha256: SHA,
+        configBlobId: "2".repeat(40),
+        configSha256: SHA,
+      };
+    },
+    runGitleaks(argv) {
+      gitleaksExecuted = true;
+      assert.equal(argv.includes("--no-redact"), false);
+      return {
+        status: "PASS",
+        resultRecord: { findings: [{ redacted: false }] },
+      };
+    },
+    writeFileExclusive() {
+      throw new Error("unredacted result must not be written");
+    },
+    callerExecutor() {
+      throw new Error("caller executor must not run");
+    },
+  };
+  const result = await runGitleaksControllerCli(
+    ["--request", "/tmp/gitleaks-request.json"],
+    adapters,
+    contract(),
+  );
+  assert.equal(gitleaksExecuted, true);
+  assert.equal(result.status, "INTEGRITY_ERROR");
+  assert.equal(result.code, "GITLEAKS_REDACTION_INVALID");
+  const mismatch = await runGitleaksControllerCli(
+    ["--request", "/tmp/gitleaks-request.json"],
+    {
+      ...adapters,
+      readSourceClosure() {
+        return {
+          sourceTreeSha256: "b".repeat(64),
+          configBlobId: "2".repeat(40),
+          configSha256: SHA,
+        };
+      },
+      runGitleaks() {
+        throw new Error("must fail before execution");
+      },
+    },
+    contract(),
+  );
+  assert.equal(mismatch.status, "INTEGRITY_ERROR");
+  assert.equal(mismatch.code, "GITLEAKS_SOURCE_CLOSURE_INVALID");
 });

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   buildDisposablePostgresInvocation,
+  runDisposablePostgresControllerCli,
   validateDisposablePostgresContract,
   validateDisposablePostgresReceipt,
   validateDisposablePostgresRequest,
@@ -349,4 +350,51 @@ test("disposable receipts require zero retained resources and matching controlle
     ).status,
     "INTEGRITY_ERROR",
   );
+});
+
+test("disposable CLI owns phase execution, cleanup, exclusive output, and receipt binding", async () => {
+  const operationRequest = request();
+  let callerExecutorUsed = false;
+  const writes = new Map();
+  const adapters = {
+    readCanonicalRequest(requestPath) {
+      assert.equal(requestPath, "/tmp/disposable-request.json");
+      return operationRequest;
+    },
+    readEvidence() {
+      return evidence();
+    },
+    runPhase(phase) {
+      assert.notEqual(phase.argv?.[0], "caller-substituted");
+      if (phase.phase === "RUN_0M_COMPATIBILITY") {
+        throw new Error("scenario failed");
+      }
+      return { status: "PASS" };
+    },
+    runFinallyPlan(finallyPlan) {
+      assert.deepEqual(
+        finallyPlan.map(({ phase }) => phase),
+        ["CLEANUP", "VERIFY_CLEANUP"],
+      );
+      return { status: "PASS", retainedResources: 0, cleanupProofSha256: SHA };
+    },
+    writeFileExclusive(outputPath, bytes) {
+      assert.equal(outputPath, operationRequest.outputRecordPath);
+      assert.equal(writes.has(outputPath), false);
+      writes.set(outputPath, bytes);
+    },
+    callerExecutor() {
+      callerExecutorUsed = true;
+    },
+  };
+  const result = await runDisposablePostgresControllerCli(
+    ["--request", "/tmp/disposable-request.json"],
+    adapters,
+    contract(),
+  );
+  assert.equal(result.status, "INTEGRITY_ERROR");
+  assert.equal(result.code, "DISPOSABLE_POSTGRES_PHASE_FAILED");
+  assert.equal(callerExecutorUsed, false);
+  assert.equal(result.finally.retainedResources, 0);
+  assert.equal(writes.size, 1);
 });

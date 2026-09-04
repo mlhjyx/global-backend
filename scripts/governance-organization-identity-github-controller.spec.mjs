@@ -154,6 +154,9 @@ function request(overrides = {}) {
     },
     payloadSchemaSha256: SHA,
     payloadSha256: "",
+    apiRequestBodySchemaSha256: null,
+    apiRequestBodySha256: null,
+    apiRequestBody: null,
     outputRecordPath:
       "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/controllers/github/outputs/readback.json",
     payload: { repository: "mlhjyx/global-backend", ref: "refs/heads/main" },
@@ -161,6 +164,40 @@ function request(overrides = {}) {
   };
   if (!("payloadSha256" in overrides)) {
     result.payloadSha256 = sha(`${canonical(result.payload)}\n`);
+  }
+  if (
+    result.apiRequestBody !== null &&
+    !("apiRequestBodySha256" in overrides)
+  ) {
+    result.apiRequestBodySha256 = sha(`${canonical(result.apiRequestBody)}\n`);
+  }
+  if (
+    result.apiRequestBody === null &&
+    !("apiRequestBody" in overrides) &&
+    ["PR_CREATE", "PR_UPDATE_BODY", "PR_MERGE"].includes(result.operation)
+  ) {
+    if (result.operation === "PR_CREATE") {
+      result.apiRequestBody = {
+        base: result.payload.base,
+        head: result.payload.head,
+        title: result.payload.title,
+        body: "body text",
+      };
+    }
+    if (result.operation === "PR_UPDATE_BODY") {
+      result.apiRequestBody = {
+        title: result.payload.title,
+        body: "body text",
+      };
+    }
+    if (result.operation === "PR_MERGE") {
+      result.apiRequestBody = {
+        merge_method: "merge",
+        sha: result.payload.expectedHeadSha,
+      };
+    }
+    result.apiRequestBodySchemaSha256 = SHA;
+    result.apiRequestBodySha256 = sha(`${canonical(result.apiRequestBody)}\n`);
   }
   const records = evidence(result.operation);
   result.materializationReceiptSha256 = sha(
@@ -270,6 +307,177 @@ test("GitHub invocation is closed and carries only a credential handle", () => {
   assert.equal(JSON.stringify(result).includes("secret"), false);
 });
 
+test("GitHub mutation control payloads are separated from exact API bodies", () => {
+  const create = request({
+    operation: "PR_CREATE",
+    payload: {
+      base: "main",
+      head: "codex/pr407-organization-identity-caller-cutover-v2",
+      title: "Organization Identity writer ban-at-source",
+      bodySha256: SHA,
+      expectedBaseSha: COMMIT,
+      expectedHeadSha: "2".repeat(40),
+    },
+    apiRequestBodySchemaSha256: SHA,
+    apiRequestBody: {
+      base: "main",
+      head: "codex/pr407-organization-identity-caller-cutover-v2",
+      title: "Organization Identity writer ban-at-source",
+      body: "body text",
+    },
+  });
+  assert.equal(
+    validateGitHubControllerRequest(create, contract(), evidence("PR_CREATE"))
+      .status,
+    "PASS",
+  );
+  const createInvocation = buildGitHubControllerInvocation(
+    create,
+    contract(),
+    evidence("PR_CREATE"),
+  );
+  assert.equal(createInvocation.status, "PASS");
+  assert.equal(
+    sha(createInvocation.inputRecordBytes),
+    create.apiRequestBodySha256,
+  );
+  assert.equal(
+    JSON.stringify(JSON.parse(createInvocation.inputRecordBytes)).includes(
+      "expectedHeadSha",
+    ),
+    false,
+  );
+  for (const mutation of [
+    {
+      ...create,
+      apiRequestBody: {
+        ...create.apiRequestBody,
+        expectedBaseSha: COMMIT,
+      },
+      apiRequestBodySha256: sha(
+        `${canonical({ ...create.apiRequestBody, expectedBaseSha: COMMIT })}\n`,
+      ),
+    },
+    {
+      ...create,
+      operation: "PR_UPDATE_BODY",
+      payload: {
+        number: 407,
+        expectedBaseSha: COMMIT,
+        expectedHeadSha: "2".repeat(40),
+        title: "Organization Identity writer ban-at-source",
+        bodySha256: SHA,
+      },
+      apiRequestBody: {
+        title: "Organization Identity writer ban-at-source",
+        body: "body text",
+        expectedHeadSha: "2".repeat(40),
+      },
+      apiRequestBodySha256: sha(
+        `${canonical({
+          title: "Organization Identity writer ban-at-source",
+          body: "body text",
+          expectedHeadSha: "2".repeat(40),
+        })}\n`,
+      ),
+    },
+    {
+      ...create,
+      operation: "PR_MERGE",
+      payload: {
+        number: 407,
+        expectedBaseSha: COMMIT,
+        expectedHeadSha: "2".repeat(40),
+        mergeMethod: "merge",
+        immediateReadbackReceiptSetSha256: SHA,
+      },
+      apiRequestBody: { merge_method: "merge" },
+      apiRequestBodySha256: sha(`${canonical({ merge_method: "merge" })}\n`),
+    },
+  ]) {
+    assert.equal(
+      validateGitHubControllerRequest(
+        mutation,
+        contract(),
+        evidence(mutation.operation),
+      ).status,
+      "INTEGRITY_ERROR",
+    );
+  }
+});
+
+test("GitHub workflow and variable writes require result readbacks, not caller success metadata", () => {
+  const workflow = request({
+    operation: "WORKFLOW_RUN_READBACK",
+    payload: {
+      workflowPath: ".github/workflows/organization-identity-writer-anchor.yml",
+      expectedHeadSha: COMMIT,
+      runId: 123,
+    },
+  });
+  const receipt = {
+    schemaVersion: "organization-identity-github-controller-receipt/v1",
+    contractSha256: workflow.contractSha256,
+    controllerReviewReceiptSha256: workflow.controllerReviewReceiptSha256,
+    operation: workflow.operation,
+    requestId: workflow.requestId,
+    requestSha256: sha(`${canonical(workflow)}\n`),
+    payloadSchemaSha256: workflow.payloadSchemaSha256,
+    payloadSha256: workflow.payloadSha256,
+    authorizationReceiptSha256: workflow.authorizationReceiptSha256,
+    credentialHandleSha256: SHA,
+    repository: "mlhjyx/global-backend",
+    observedOrWrittenRef: "refs/heads/main",
+    observedBaseSha: null,
+    observedHeadSha: COMMIT,
+    resultSchemaSha256:
+      contract().operationResultSchemaSha256[workflow.operation],
+    resultSha256: SHA,
+    httpStatus: 200,
+    executableClosureSetSha256: sha(
+      `${canonical(contract().executableClosure)}\n`,
+    ),
+    prePostToctouSha256: SHA,
+    containsCredentialValue: false,
+    result: "PASS",
+  };
+  assert.equal(
+    validateGitHubControllerReceipt(
+      {
+        ...receipt,
+        resultSha256: sha(
+          `${canonical({ headSha: COMMIT, runId: 123, workflowBlobId: "3".repeat(40), conclusion: "success" })}\n`,
+        ),
+      },
+      workflow,
+      contract(),
+      {
+        headSha: "2".repeat(40),
+        runId: 123,
+        workflowBlobId: "3".repeat(40),
+        conclusion: "success",
+      },
+      evidence("WORKFLOW_RUN_READBACK"),
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  assert.equal(
+    validateGitHubControllerRequest(
+      request({
+        operation: "CONTROLLER_VARIABLES_WRITE",
+        payload: {
+          variableCount: 15,
+          variableNameSetSha256: SHA,
+          variableValueDigestSetSha256: "b".repeat(64),
+        },
+      }),
+      contract(),
+      evidence("CONTROLLER_VARIABLES_WRITE"),
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+});
+
 test("every GitHub operation has one exact closed payload and invocation branch", () => {
   const cases = [
     [
@@ -363,9 +571,11 @@ test("every GitHub operation has one exact closed payload and invocation branch"
     [
       "CONTROLLER_VARIABLES_WRITE",
       {
-        variableCount: 15,
-        variableNameSetSha256: SHA,
-        variableValueDigestSetSha256: "b".repeat(64),
+        variables: Array.from({ length: 15 }, (_, index) => ({
+          name: `IDENTITY_WRITER_VAR_${index}`,
+          valueSha256: index === 0 ? SHA : "b".repeat(64),
+          apiRequestBodySha256: index === 0 ? "c".repeat(64) : "d".repeat(64),
+        })),
       },
     ],
   ];
@@ -388,10 +598,9 @@ test("every GitHub operation has one exact closed payload and invocation branch"
     assert.equal(invocation.argv.includes("--closed-operation"), false);
     assert.equal(JSON.stringify(invocation).includes(operation), true);
     if (invocation.inputPath) {
-      assert.equal(
-        sha(invocation.inputRecordBytes),
-        operationRequest.payloadSha256,
-      );
+      const expectedInputSha =
+        operationRequest.apiRequestBodySha256 ?? operationRequest.payloadSha256;
+      assert.equal(sha(invocation.inputRecordBytes), expectedInputSha);
       assert.equal(invocation.argv.includes(invocation.inputPath), true);
     }
     if (operation === "WORKFLOW_RERUN") {

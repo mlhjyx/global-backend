@@ -1,117 +1,18 @@
-import { createHash } from "node:crypto";
-import path from "node:path";
-
-const pass = (extra = {}) => ({ status: "PASS", ...extra });
-const integrity = (code) => ({ status: "INTEGRITY_ERROR", code });
-const canonicalJson = (value) => {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-    .join(",")}}`;
-};
-const canonicalJsonBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const isSha256 = (value) =>
-  typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
-const isGitObjectId = (value) =>
-  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
-const isAbsoluteNormalizedPath = (value) =>
-  typeof value === "string" &&
-  path.posix.isAbsolute(value) &&
-  path.posix.normalize(value) === value;
-function isPassivePlainData(value, seen = new Set()) {
-  if (value === null) return true;
-  if (typeof value === "string") return value.normalize("NFC") === value;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value === "boolean") return true;
-  if (typeof value !== "object" || seen.has(value)) return false;
-  seen.add(value);
-  try {
-    if (Object.getOwnPropertySymbols(value).length) return false;
-    const proto = Object.getPrototypeOf(value);
-    if (!Array.isArray(value) && proto !== Object.prototype && proto !== null)
-      return false;
-    for (const [key, descriptor] of Object.entries(
-      Object.getOwnPropertyDescriptors(value),
-    )) {
-      if (Array.isArray(value) && key === "length") continue;
-      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
-      if (
-        !("value" in descriptor) ||
-        descriptor.get ||
-        descriptor.set ||
-        !isPassivePlainData(descriptor.value, seen)
-      )
-        return false;
-    }
-    return true;
-  } catch {
-    return false;
-  } finally {
-    seen.delete(value);
-  }
-}
-const hasExactKeys = (value, keys) =>
-  isPassivePlainData(value) &&
-  !Array.isArray(value) &&
-  Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-const valuesEqual = (left, right) =>
-  canonicalJson(left) === canonicalJson(right);
-function validateExternalExecutableClosure(entries, roles) {
-  if (!Array.isArray(entries) || entries.length !== roles.length)
-    return integrity("EXECUTABLE_CLOSURE_INVALID");
-  for (let index = 0; index < roles.length; index += 1) {
-    const entry = entries[index];
-    if (
-      !hasExactKeys(entry, [
-        "role",
-        "logicalIdentity",
-        "executablePath",
-        "realpathSha256",
-        "sha256",
-        "size",
-      ]) ||
-      entry.role !== roles[index] ||
-      !isAbsoluteNormalizedPath(entry.executablePath) ||
-      !isSha256(entry.realpathSha256) ||
-      !isSha256(entry.sha256) ||
-      !Number.isSafeInteger(entry.size) ||
-      entry.size < 0
-    )
-      return integrity("EXECUTABLE_CLOSURE_INVALID");
-  }
-  return pass();
-}
-const validateExactEnvironmentNames = (actual, expected) =>
-  valuesEqual(actual, expected)
-    ? pass()
-    : integrity("ENVIRONMENT_NAME_SET_INVALID");
-function validateCredentialHandleBinding(binding) {
-  return hasExactKeys(binding, [
-    "provider",
-    "handleSha256",
-    "scopeSha256",
-    "injectedByFileDescriptor",
-    "valuePersisted",
-    "valueEmitted",
-  ]) &&
-    ["ROOT_SECRET_STORE", "GITHUB_ACTIONS_SECRET"].includes(binding.provider) &&
-    isSha256(binding.handleSha256) &&
-    isSha256(binding.scopeSha256) &&
-    binding.injectedByFileDescriptor === true &&
-    binding.valuePersisted === false &&
-    binding.valueEmitted === false
-    ? pass()
-    : integrity("CREDENTIAL_HANDLE_INVALID");
-}
-const validateOutputPath = (value, root) =>
-  isAbsoluteNormalizedPath(value) &&
-  path.posix.dirname(value) === root &&
-  value.endsWith(".json")
-    ? pass()
-    : integrity("OUTPUT_PATH_INVALID");
+import {
+  canonicalJsonBytes,
+  hasExactKeys,
+  integrity,
+  isGitObjectId,
+  isPassivePlainData,
+  isSha256,
+  pass,
+  sha256,
+  validateCredentialHandleBinding,
+  validateExactEnvironmentNames,
+  validateExternalExecutableClosure,
+  validateOutputPath,
+  valuesEqual,
+} from "./governance-organization-identity-controller-contracts.mjs";
 
 export const GITHUB_CONTROLLER_OPERATIONS = Object.freeze([
   "PROTECTED_MAIN_READBACK",
@@ -218,6 +119,58 @@ function exactPayload(payload, keys, predicates) {
 const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
 const branch = (value) =>
   value === "codex/pr407-organization-identity-caller-cutover-v2";
+
+function apiBodyValid(operation, body) {
+  switch (operation) {
+    case "PR_CREATE":
+      return exactPayload(body, ["base", "head", "title", "body"], {
+        base: (value) => value === "main",
+        head: branch,
+        title: (value) =>
+          value === "Organization Identity writer ban-at-source",
+        body: (value) => typeof value === "string",
+      });
+    case "PR_UPDATE_BODY":
+      return (
+        exactPayload(body, ["title", "body"], {
+          title: (value) =>
+            value === "Organization Identity writer ban-at-source",
+          body: (value) => typeof value === "string",
+        }) ||
+        exactPayload(body, ["body"], {
+          body: (value) => typeof value === "string",
+        })
+      );
+    case "PR_MERGE":
+      return exactPayload(body, ["merge_method", "sha"], {
+        merge_method: (value) => value === "merge",
+        sha: isGitObjectId,
+      });
+    default:
+      return body === null;
+  }
+}
+
+function validateGitHubApiRequestBody(request) {
+  const requiresBody = ["PR_CREATE", "PR_UPDATE_BODY", "PR_MERGE"].includes(
+    request.operation,
+  );
+  if (!requiresBody) {
+    return (
+      request.apiRequestBody === null &&
+      request.apiRequestBodySha256 === null &&
+      request.apiRequestBodySchemaSha256 === null
+    );
+  }
+  return (
+    isSha256(request.apiRequestBodySchemaSha256) &&
+    isSha256(request.apiRequestBodySha256) &&
+    apiBodyValid(request.operation, request.apiRequestBody) &&
+    request.apiRequestBodySha256 ===
+      sha256(canonicalJsonBytes(request.apiRequestBody))
+  );
+}
+
 const operationPayloadValid = {
   PROTECTED_MAIN_READBACK: (payload) =>
     exactPayload(payload, ["repository", "ref"], {
@@ -250,7 +203,27 @@ const operationPayloadValid = {
       head: branch,
       title: (value) => value === "Organization Identity writer ban-at-source",
       bodySha256: isSha256,
-    }),
+    }) ||
+    exactPayload(
+      payload,
+      [
+        "base",
+        "head",
+        "title",
+        "bodySha256",
+        "expectedBaseSha",
+        "expectedHeadSha",
+      ],
+      {
+        base: (value) => value === "main",
+        head: branch,
+        title: (value) =>
+          value === "Organization Identity writer ban-at-source",
+        bodySha256: isSha256,
+        expectedBaseSha: isGitObjectId,
+        expectedHeadSha: isGitObjectId,
+      },
+    ),
   PR_UPDATE_BODY: (payload) =>
     exactPayload(
       payload,
@@ -316,18 +289,16 @@ const operationPayloadValid = {
       expectedHeadSha: isGitObjectId,
     }),
   CONTROLLER_VARIABLES_WRITE: (payload) =>
-    exactPayload(
-      payload,
-      [
-        "variableCount",
-        "variableNameSetSha256",
-        "variableValueDigestSetSha256",
-      ],
-      {
-        variableCount: (value) => value === 15,
-        variableNameSetSha256: isSha256,
-        variableValueDigestSetSha256: isSha256,
-      },
+    Array.isArray(payload?.variables) &&
+    hasExactKeys(payload, ["variables"]) &&
+    payload.variables.length === 15 &&
+    payload.variables.every((entry) =>
+      exactPayload(entry, ["name", "valueSha256", "apiRequestBodySha256"], {
+        name: (value) =>
+          typeof value === "string" && /^[A-Z0-9_]+$/.test(value),
+        valueSha256: isSha256,
+        apiRequestBodySha256: isSha256,
+      }),
     ),
 };
 
@@ -342,6 +313,9 @@ const REQUEST_KEYS = [
   "credentialHandle",
   "payloadSchemaSha256",
   "payloadSha256",
+  "apiRequestBodySchemaSha256",
+  "apiRequestBodySha256",
+  "apiRequestBody",
   "outputRecordPath",
   "payload",
 ];
@@ -463,6 +437,7 @@ export function validateGitHubControllerRequest(request, contract, evidence) {
     request.payloadSchemaSha256 !==
       contract.operationRequestSchemaSha256[request.operation] ||
     request.payloadSha256 !== sha256(canonicalJsonBytes(request.payload)) ||
+    !validateGitHubApiRequestBody(request) ||
     validateCredentialHandleBinding(request.credentialHandle).status !==
       "PASS" ||
     validateOutputPath(request.outputRecordPath, contract.outputRoot).status !==
@@ -539,7 +514,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
-        inputRecordBytes: canonicalJsonBytes(request.payload),
+        inputRecordBytes: canonicalJsonBytes(request.apiRequestBody),
       });
     case "PR_UPDATE_BODY":
       return pass({
@@ -554,7 +529,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
-        inputRecordBytes: canonicalJsonBytes(request.payload),
+        inputRecordBytes: canonicalJsonBytes(request.apiRequestBody),
       });
     case "PR_READBACK":
       return pass({
@@ -597,7 +572,7 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
           inputPath,
         ],
         inputPath,
-        inputRecordBytes: canonicalJsonBytes(request.payload),
+        inputRecordBytes: canonicalJsonBytes(request.apiRequestBody),
       });
     case "COMMIT_BRANCH_PARENT_READBACK":
       return pass({

@@ -574,3 +574,69 @@ export function validateDisposablePostgresReceipt(
   }
   return pass();
 }
+
+export async function runDisposablePostgresControllerCli(
+  argv,
+  adapters,
+  contract,
+) {
+  if (
+    !Array.isArray(argv) ||
+    argv.length !== 2 ||
+    argv[0] !== "--request" ||
+    !path.posix.isAbsolute(argv[1]) ||
+    typeof adapters?.readCanonicalRequest !== "function" ||
+    typeof adapters?.readEvidence !== "function" ||
+    typeof adapters?.runPhase !== "function" ||
+    typeof adapters?.runFinallyPlan !== "function" ||
+    typeof adapters?.writeFileExclusive !== "function"
+  ) {
+    return integrity("DISPOSABLE_POSTGRES_CLI_INVALID");
+  }
+  const request = await adapters.readCanonicalRequest(argv[1]);
+  const evidence = await adapters.readEvidence(request);
+  const invocation = buildDisposablePostgresInvocation(
+    request,
+    contract,
+    evidence,
+  );
+  if (invocation.status !== "PASS") return invocation;
+  let finallyResult = { status: "INTEGRITY_ERROR", retainedResources: null };
+  let failed = null;
+  try {
+    for (const phase of invocation.operationPlan) {
+      if (invocation.finallyPlan.some((entry) => entry.phase === phase.phase)) {
+        continue;
+      }
+      const phaseResult = await adapters.runPhase(phase);
+      if (phaseResult?.status !== "PASS") {
+        failed = integrity("DISPOSABLE_POSTGRES_PHASE_FAILED");
+        break;
+      }
+    }
+  } catch {
+    failed = integrity("DISPOSABLE_POSTGRES_PHASE_FAILED");
+  } finally {
+    finallyResult = await adapters.runFinallyPlan(invocation.finallyPlan);
+  }
+  if (
+    finallyResult?.status !== "PASS" ||
+    finallyResult.retainedResources !== 0 ||
+    !isSha256(finallyResult.cleanupProofSha256)
+  ) {
+    return integrity("DISPOSABLE_POSTGRES_CLEANUP_INVALID");
+  }
+  const resultRecord = {
+    schemaVersion: "disposable-controller-result/v1",
+    operation: request.operation,
+    cleanupProofSha256: finallyResult.cleanupProofSha256,
+    retainedResources: 0,
+    result: failed ? "FAIL" : "PASS",
+  };
+  await adapters.writeFileExclusive(
+    request.outputRecordPath,
+    canonicalJsonBytes(resultRecord),
+  );
+  if (failed) return { ...failed, finally: finallyResult };
+  return pass({ resultRecord, finally: finallyResult });
+}
