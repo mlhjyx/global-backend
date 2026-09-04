@@ -88,7 +88,7 @@ describe("rendered outbound-domain gate", () => {
       await writeFile(
         path.join(dir, "index.html"),
         '<!-- vendored license: https://remixicon.com --><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg"></svg><a href="/contact">local</a><style>@font-face{src:url(data:font/woff2;base64,abc//+v6p4f1u9glr58yni)}</style><img src="data:image/png;base64,x"><a href="https://docs.example.com/x">docs</a>',
-      );
+      ),
       await expect(
         assertRenderedOutboundDomains(dir, ["docs.example.com"]),
       ).resolves.toBeUndefined();
@@ -302,23 +302,25 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         "utf8",
       ),
     ) as unknown;
-    const foreignTempDir = await mkdtemp(
-      path.join(tmpdir(), "global-site-renderer-foreign-"),
-    );
-    expect(path.basename(foreignTempDir).startsWith(processOwnedTempPrefix)).toBe(
-      false,
-    );
     const before = new Set(
       (await readdir(tmpdir())).filter((name) =>
         name.startsWith(processOwnedTempPrefix),
       ),
     );
-    const outDirs = await Promise.all(
-      ["one", "two"].map(() =>
-        mkdtemp(path.join(tmpdir(), "renderer-real-concurrent-")),
-      ),
-    );
+    let foreignTempDir: string | undefined;
+    let outDirs: string[] = [];
     try {
+      foreignTempDir = await mkdtemp(
+        path.join(tmpdir(), "global-site-renderer-foreign-"),
+      );
+      expect(
+        path.basename(foreignTempDir).startsWith(processOwnedTempPrefix),
+      ).toBe(false);
+      outDirs = await Promise.all(
+        ["one", "two"].map(() =>
+          mkdtemp(path.join(tmpdir(), "renderer-real-concurrent-")),
+        ),
+      );
       const manifests = await Promise.all(
         outDirs.map((outDir) =>
           buildSiteSpecWithTemporaryFile(spec, {
@@ -336,9 +338,14 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
       expect(after.filter((name) => !before.has(name))).toEqual([]);
     } finally {
       await Promise.all(
-        [foreignTempDir, ...outDirs].map((directory) =>
-          rm(directory, { recursive: true, force: true }),
-        ),
+        [
+          ...outDirs.map((directory) =>
+            rm(directory, { recursive: true, force: true }),
+          ),
+          ...(foreignTempDir
+            ? [rm(foreignTempDir, { recursive: true, force: true })]
+            : []),
+        ],
       );
     }
   }, 60_000);
