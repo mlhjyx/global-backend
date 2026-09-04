@@ -369,7 +369,8 @@ export function validateExternalLaunchReceipt(receipt, request) {
       receipt.commandId !== request.commandId ||
       receipt.mode !== request.mode ||
       receipt.subjectCommit !== request.subjectCommit ||
-      receipt.launcherContractSha256 !== request.bootstrapContractSha256)
+      receipt.launcherContractSha256 !==
+        BOOTSTRAP_CONTRACT.launcherContractSha256)
   ) {
     return integrity("EXTERNAL_LAUNCH_RECEIPT_BINDING_INVALID");
   }
@@ -601,11 +602,20 @@ export function validateBootstrapRunReceiptSet(receiptSet, records) {
 }
 
 export function compareRunToAcceptedContract(contract, receipt, request) {
-  if (validateBootstrapContract(contract).status !== "PASS") {
+  const validatedContract = validateBootstrapContract(contract);
+  if (validatedContract.status !== "PASS") {
     return integrity("BOOTSTRAP_CONTRACT_INVALID");
   }
   if (validateBootstrapRunReceipt(receipt, request).status !== "PASS") {
     return integrity("BOOTSTRAP_RECEIPT_INVALID");
+  }
+  if (
+    validatedContract.bootstrapContractSha256 !==
+      request.bootstrapContractSha256 ||
+    validatedContract.bootstrapContractSha256 !==
+      receipt.bootstrapContractSha256
+  ) {
+    return integrity("BOOTSTRAP_CONTRACT_BINDING_INVALID");
   }
   if (receipt.hostileMarkerExecutionCount !== 0) {
     return integrity("BOOTSTRAP_HOSTILE_MARKER_EXECUTED");

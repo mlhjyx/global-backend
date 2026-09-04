@@ -30,6 +30,7 @@ import {
   compareRunToAcceptedContract,
   materializeAcceptedInstallInputs,
   materializeBootstrapRunReceiptSet,
+  loadAcceptedScanner,
   planAcceptedBootstrapCommand,
   runAcceptedPrismaGenerate,
   validateBootstrapContract,
@@ -284,7 +285,7 @@ test("validates exact-key external launch receipts", () => {
     mode: request.mode,
     subjectCommit: request.subjectCommit,
     invocationDescriptorSha256: SHA,
-    launcherContractSha256: request.bootstrapContractSha256,
+    launcherContractSha256: BOOTSTRAP_CONTRACT.launcherContractSha256,
     launchedByExecutableClosureSha256: SHA_B,
     acceptedAt: "2026-09-04T00:00:00.000Z",
     result: "PASS",
@@ -297,6 +298,13 @@ test("validates exact-key external launch receipts", () => {
   assert.equal(
     validateExternalLaunchReceipt(
       { ...receipt, commandId: "SCANNER_TEST_V1" },
+      request,
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  assert.equal(
+    validateExternalLaunchReceipt(
+      { ...receipt, launcherContractSha256: request.bootstrapContractSha256 },
       request,
     ).status,
     "INTEGRITY_ERROR",
@@ -360,6 +368,17 @@ test("builds one-command BootstrapRunReceipts compatible with Task0L and rejects
     validateBootstrapRunReceipt({ ...receipt, unlisted: true }, request).status,
     "INTEGRITY_ERROR",
   );
+  assert.equal(
+    compareRunToAcceptedContract(
+      {
+        ...BOOTSTRAP_CONTRACT,
+        launcherContractSha256: SHA_B,
+      },
+      receipt,
+      request,
+    ).status,
+    "INTEGRITY_ERROR",
+  );
   const set = materializeBootstrapRunReceiptSet("0P", COMMIT, [
     { request, receipt },
   ]);
@@ -414,6 +433,16 @@ test("verifies accepted Git blobs and absences before immutable materialization"
         repoRoot: root,
         subjectCommit: commit,
         taskRoot: attackRoot,
+      })
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  assert.equal(
+    (
+      await materializeAcceptedInstallInputs({
+        repoRoot: root,
+        subjectCommit: commit,
+        taskRoot: "relative",
       })
     ).status,
     "INTEGRITY_ERROR",
@@ -598,6 +627,14 @@ test("plans exact clean pnpm and Prisma commands without loading hostile hooks",
     "generate",
   ]);
   assert.equal(prisma.hostileMarkerExecutionCount, 0);
+  assert.throws(
+    () =>
+      runAcceptedPrismaGenerate({
+        taskRoot: "relative",
+        pnpmEntrypoint: "/opt/pnpm/bin/pnpm.cjs",
+      }),
+    /PRISMA_GENERATE_REQUEST_INVALID/,
+  );
 });
 
 test("rehashes bootstrap after install before dynamic TypeScript scanner import", async (t) => {
@@ -648,6 +685,32 @@ test("rehashes bootstrap after install before dynamic TypeScript scanner import"
         expectedSha256: sha(
           await readFile(path.join(ancestorTarget, "bootstrap.mjs")),
         ),
+      })
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  const scanner = path.join(root, "scanner.mjs");
+  await writeFile(scanner, "export const loaded = 'scanner';\n");
+  const loaded = await loadAcceptedScanner({
+    modulePath: scanner,
+    expectedSha256: sha(await readFile(scanner)),
+  });
+  assert.equal(loaded.status, "PASS", loaded.code);
+  assert.equal(loaded.module.loaded, "scanner");
+  assert.equal(
+    (
+      await loadAcceptedScanner({
+        modulePath: scanner,
+        expectedSha256: SHA,
+      })
+    ).status,
+    "INTEGRITY_ERROR",
+  );
+  assert.equal(
+    (
+      await loadAcceptedScanner({
+        modulePath: "relative",
+        expectedSha256: SHA,
       })
     ).status,
     "INTEGRITY_ERROR",
@@ -715,5 +778,10 @@ test("closed review verification rejects drift, duplicate severities, and failin
     (await verifyReviewReceipt({ reportPath, receipt, subjectCommit: COMMIT }))
       .status,
     "INTEGRITY_ERROR",
+  );
+  assert.equal(
+    spawnSync(process.execPath, [bootstrapModulePath, "unknown-command"])
+      .status,
+    1,
   );
 });
