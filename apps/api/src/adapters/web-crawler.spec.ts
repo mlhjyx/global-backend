@@ -115,6 +115,26 @@ describe("Crawl4AI artifact-result boundaries", () => {
     )).rejects.toThrow("CRAWL4AI_RESPONSE_TOO_LARGE");
   });
 
+  it("rejects multiple Crawl4AI results instead of silently selecting one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        results: [{ html: "first" }, { html: "second" }],
+      }), { status: 200 })),
+    );
+
+    await expect(crawlHtml(
+      "https://company.example/",
+      undefined,
+      vi.fn(async (raw: string) => ({
+        url: new URL(raw),
+        ip: "203.0.113.10",
+        family: 4 as const,
+        addresses: [{ address: "203.0.113.10", family: 4 as const }],
+      })),
+    )).rejects.toThrow("CRAWL4AI_RESPONSE_ITEM_BOUND_EXCEEDED");
+  });
+
   it("rejects rendered HTML over the approved artifact byte cap instead of truncating it", async () => {
     vi.stubGlobal(
       "fetch",

@@ -113,4 +113,18 @@ describe('adapter internal physical-wire authorization', () => {
       eventEditionId: 'edition',
     })).rejects.toThrow('ALGOLIA_RESPONSE_TOO_LARGE');
   });
+
+  it('rejects an Algolia page that exceeds the requested per-page item bound', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      hits: Array.from({ length: 1_001 }, (_unused, index) => ({
+        objectID: String(index), companyName: `Company ${index}`,
+      })),
+      nbPages: 1,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+
+    await expect(queryAlgoliaExhibitors({
+      appId: 'APP', apiKey: 'public-key', indexName: 'exhibitors',
+      eventEditionId: 'edition',
+    }, 10_000)).rejects.toThrow('ALGOLIA_RESPONSE_ITEM_BOUND_EXCEEDED');
+  });
 });

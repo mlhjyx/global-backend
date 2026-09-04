@@ -67,6 +67,25 @@ describe("Platform source physical-wire contracts", () => {
     );
   });
 
+  it("rejects a MapYourShow response exceeding the requested output item cap", async () => {
+    const json = JSON.stringify({
+      DATA: {
+        results: {
+          exhibitor: { hit: Array.from({ length: 10_001 }, () => ({})) },
+        },
+      },
+    });
+    request.mockResolvedValueOnce(response({
+      body: Buffer.from(json),
+      text: json,
+    }));
+
+    await expect(mapYourShowFetchTool.execute(
+      { host: "show.mapyourshow.com", limit: 10_000 },
+      context,
+    )).rejects.toThrow("MAPYOURSHOW_RESPONSE_ITEM_BOUND_EXCEEDED");
+  });
+
   it("bounds each sanctions redirect wire and preserves the 32 MiB artifact ceiling", async () => {
     const xml = "<sdnList></sdnList>";
     request.mockResolvedValueOnce(response({
