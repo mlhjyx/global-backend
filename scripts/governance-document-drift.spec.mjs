@@ -110,7 +110,10 @@ test("the Platform Writer successor evidence records terminal reconciliation wit
   for (const document of [status, architecture, evidenceIndex, changelog]) {
     assert.match(document, /attempts 1–5[\s\S]{0,120}6[\s\S]{0,120}EXPIRED/u);
     assert.match(document, /UNKNOWN/u);
-    assert.match(document, /no (?:second )?(?:physical )?(?:call|redispatch)|不重发/u);
+    assert.match(
+      document,
+      /no (?:second )?(?:physical )?(?:call|redispatch)|不重发|没有[\s\S]{0,80}(?:redispatch|第二次物理调用)/u,
+    );
   }
 });
 

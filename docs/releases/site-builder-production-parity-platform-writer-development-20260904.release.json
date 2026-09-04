@@ -1,0 +1,125 @@
+{
+  "schema_version": "release-bundle/v1",
+  "release_id": "site-builder-production-parity-platform-writer-development-20260904",
+  "release_status": "CANDIDATE",
+  "environment": "development",
+  "release_owner": "OWN-SITE-BE",
+  "implementation_commit": "674ff12d4d768ce5599fc07b565fe21da37dc5fe",
+  "released_at": "2026-09-04T04:49:25.000Z",
+  "capability_ids": [
+    "CAP-SITE-INTAKE-001",
+    "CAP-SITE-BUILD-001",
+    "CAP-SITE-RUN-001"
+  ],
+  "external_provenance": {
+    "status": "EXTERNAL_UNVERIFIED",
+    "verifier": "NONE",
+    "verification_ref": "NONE"
+  },
+  "traceability_bindings": [
+    {
+      "chain_id": "site-builder-development-intake-path-platform-writer-expired-evidence",
+      "capability_id": "CAP-SITE-INTAKE-001",
+      "evidence_ids": [
+        "site-builder-deterministic-product-path-platform-writer-development-20260904"
+      ]
+    },
+    {
+      "chain_id": "site-builder-development-build-terminalization-platform-writer",
+      "capability_id": "CAP-SITE-BUILD-001",
+      "evidence_ids": [
+        "site-builder-reconciliation-terminal-platform-writer-development-20260904"
+      ]
+    },
+    {
+      "chain_id": "site-builder-development-run-terminalization-platform-writer",
+      "capability_id": "CAP-SITE-RUN-001",
+      "evidence_ids": [
+        "site-builder-reconciliation-terminal-platform-writer-development-20260904"
+      ]
+    }
+  ],
+  "scope": {
+    "included": [
+      "Exact-digest API, Worker, Relay, migration and readiness identity",
+      "Zero-model GrowthOS Session, Access Token, Technical Quote, signed Budget Grant, Intake and READY Release",
+      "Readback of the historical UNKNOWN operation after attempts 1-5 UNRESOLVED and terminal attempt 6 EXPIRED without redispatch"
+    ],
+    "excluded": [
+      "Pilot, GA, or UAT promotion",
+      "successful generative refurbish output or exact settlement",
+      "platform acquisition, intent-watch, or sanctions authority ingestion",
+      "customer Billing or Credits",
+      "public site publication"
+    ]
+  },
+  "promise": {
+    "user_outcome": "A legitimate development tenant can complete the same deterministic product authorization and Build path on the exact Backend runtime without a customer balance or manual paid-call attestation.",
+    "non_guarantees": [
+      "The candidate does not claim generative success or exact settlement for the historical UNKNOWN operation.",
+      "EXPIRED terminalizes reconciliation without changing UNKNOWN execution truth or dispatching a second physical model call.",
+      "The candidate is not a Pilot, GA, UAT, or public publishing release."
+    ]
+  },
+  "source": {
+    "repository": "mlhjyx/global-backend",
+    "base_commit": "0f72cc104e47128778f2392283a380bc1297f76d",
+    "source_head": "674ff12d4d768ce5599fc07b565fe21da37dc5fe"
+  },
+  "evidence_ids": [
+    "site-builder-deterministic-product-path-platform-writer-development-20260904",
+    "site-builder-reconciliation-terminal-platform-writer-development-20260904"
+  ],
+  "operations": {
+    "runtime_identity_endpoint": "/api/v1/health/build",
+    "readiness_endpoint": "/api/v1/health/ready",
+    "temporal_task_queue": "understanding",
+    "platform_authority_state": "writer admitted; platform.acquisition missing",
+    "reconciliation": "request-bound accounting lookup terminalized at EXPIRED; never a second generation request"
+  },
+  "data": {
+    "classification": "development synthetic tenant; no raw tokens, prompts, model response bodies, credentials, cookies, private keys, or original provider request ID retained",
+    "retention": "RuntimeEvidence expires after its exclusive valid_until; receipts remain historical provenance."
+  },
+  "rollback_and_exit": {
+    "trigger": "API, Worker, or Relay identity mismatch; readiness failure; or duplicate active Worker digest on one queue",
+    "procedure": "Pause new BuildRuns and use the saved exact N-1 OCI digest only when schema-compatible; otherwise forward-fix without destructive database rollback."
+  },
+  "guides": [
+    "docs/architecture/current.md",
+    "docs/adr/registry.md",
+    "docs/evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json"
+  ],
+  "approval": {
+    "machine": {
+      "status": "NOT_VERIFIED",
+      "provenance": "NONE",
+      "evidence_ref": "CROSS_REPOSITORY_SCOPE_NOT_COVERED_BY_ONE_CHECK_RUN",
+      "verified_at": "2026-09-04T04:49:25.000Z"
+    },
+    "reviewer": {
+      "status": "NOT_REVIEWED",
+      "provenance": "NONE",
+      "evidence_ref": "NONE",
+      "actor": "NONE",
+      "reviewed_at": "2026-09-04T04:49:25.000Z"
+    },
+    "user_authorization": {
+      "status": "NOT_AUTHORIZED",
+      "provenance": "NONE",
+      "evidence_ref": "NONE_FOR_PILOT_OR_GA",
+      "actor": "product-owner",
+      "authorized_at": "2026-09-04T04:49:25.000Z"
+    }
+  },
+  "merge_evidence": {
+    "method": "UNMERGED_EVIDENCE_SUCCESSOR",
+    "result_commit": "674ff12d4d768ce5599fc07b565fe21da37dc5fe",
+    "status": "DOCUMENTARY_EXTERNAL_UNVERIFIED"
+  },
+  "learning": {
+    "owner": "OWN-SITE-BE",
+    "review_at": "2026-09-05T03:49:25.000Z",
+    "success_measure": "Fresh deterministic evidence and terminal reconciliation facts remain development-only until a separate generative validation and promotion gates are authorized."
+  }
+}
