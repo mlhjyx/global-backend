@@ -102,6 +102,8 @@ test("the Platform Writer successor evidence records terminal reconciliation wit
     "800000",
   );
   assert.equal(receipt.persisted_unknown_containment.physical_model_calls, 1);
+  assert.equal(receipt.persisted_unknown_containment.build_run_id, "81dcfe5a-b510-42fa-bbf8-317835bb2b52");
+  assert.match(receipt.persisted_unknown_containment.request_identity_digest, /^sha256:[0-9a-f]{64}$/);
   assert.equal(
     receipt.persisted_unknown_containment.automatic_second_physical_call,
     false,
@@ -115,6 +117,9 @@ test("the Platform Writer successor evidence records terminal reconciliation wit
     receipt.persisted_unknown_containment.attempts.map((attempt) => attempt.status),
     ["UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "EXPIRED"],
   );
+  assert.deepEqual(receipt.persisted_unknown_containment.attempts.slice(0, 5).map((attempt) => attempt.resolver_id), Array(5).fill("new-api-request-bound-reconciliation-v1"));
+  assert.equal(receipt.persisted_unknown_containment.attempts[5].resolver_id, "reconciliation-sweep-v1");
+  assert.equal(release.merge_evidence.method, "squash");
   assert.equal(deterministicEvidence.result, "PASS");
   assert.equal(deterministicEvidence.evidence_kind, "deterministic_product_path");
   assert.equal(terminalEvidence.result, "PASS");
