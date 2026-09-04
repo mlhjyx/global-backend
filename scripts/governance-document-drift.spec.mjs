@@ -70,6 +70,7 @@ test("current Platform Writer documentation records terminal reconciliation and 
     status,
     /20260901[^\n]*historical provenance/u,
   );
+  assert.match(status, /GrowthOS[\s\S]{0,160}2026-09-01 historical provenance/u);
 });
 
 test("the Platform Writer successor evidence records terminal reconciliation without rewriting UNKNOWN execution truth", () => {
