@@ -155,10 +155,10 @@ test("exports an immutable BootstrapContractV2 accepted by Task0L shared validat
       schemaVersion: "organization-identity-launcher-contract/v2",
       approvedPlan: {
         path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-        commit: "9228673d8bd7277c3132ac461cb7d9e41666782f",
-        blobId: "481430567129f74f489c694c73b6e298503d15b5",
+        commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
+        blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
         sha256:
-          "ee653539f745a06dbc379b74425792513a348e3f541f48e8e6eae7cd43db5718",
+          "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
       },
       rootDirectory:
         "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher",

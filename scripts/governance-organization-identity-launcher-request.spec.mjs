@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmod,
   link,
@@ -16,11 +15,23 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  ALLOWED_ENVIRONMENT_NAMES,
-  LOCAL_COMMAND_IDS,
-  buildClosedCommandRequest,
+  COMMIT,
+  EXPECTED_ENVIRONMENT_NAMES as expectedEnvironmentNames,
+  OUTPUT_ROOT,
+  REQUEST_ROOT,
+  SHA,
+  SHA_B,
+  SHA_C,
+  buildBootstrapReceipt as bootstrapReceipt,
+  buildClosure as closure,
+  buildValidRequest as validRequest,
+  canonicalJson as canonical,
+  createLauncherTrustFixture,
+  removeFixtureRoot,
+  sha256Of as sha,
+} from "./governance-organization-identity-test-fixtures.mjs";
+import {
   canonicalJsonBytes,
-  computeLauncherContractDigests,
   dispatchClosedCommand,
   executeClosedInvocation,
   parseClosedCommandRequest,
@@ -33,120 +44,14 @@ import {
   validateLauncherReadbackReport,
   verifyExecutableClosure,
   verifyControlledFile,
+  verifyFixedLauncherTrust,
   verifyLauncherContract,
+  writeCanonicalOutputRecord,
 } from "./governance-organization-identity-launcher.mjs";
 
 const launcherModulePath = fileURLToPath(
   new URL("./governance-organization-identity-launcher.mjs", import.meta.url),
 );
-
-const SHA = "a".repeat(64);
-const SHA_B = "b".repeat(64);
-const SHA_C = "c".repeat(64);
-const COMMIT = "1".repeat(40);
-const REQUEST_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
-const OUTPUT_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
-
-const expectedCommandIds = [
-  "BOOTSTRAP_AUTHORITY_RUN_V1",
-  "SCOPED_REVIEW_VERIFY_V1",
-  "CURRENT_MAIN_AUDIT_LOCAL_V1",
-  "CURRENT_MAIN_VALIDATE_V1",
-  "CURRENT_MAIN_GENERATE_V1",
-  "COPY_WRITE_ELIGIBILITY_V1",
-  "COPY_SYNC_CITATIONS_V1",
-  "GIT_REFRESH_START_V1",
-  "GIT_REFRESH_COMMIT_V1",
-  "GIT_ADMISSION_COMMIT_V1",
-  "GIT_ACCEPTANCE_COMMIT_V1",
-  "REFRESH_VERIFY_V1",
-  "MIGRATION_STATIC_VERIFY_V1",
-  "PRISMA_GENERATE_V1",
-  "SCANNER_TEST_V1",
-  "SCANNER_BASELINE_V1",
-  "SCANNER_STAGE_V1",
-  "SCANNER_ZERO_V1",
-  "SCANNER_ACCEPTANCE_V1",
-  "GOVERNANCE_VERIFY_V1",
-  "DOCS_VERIFY_V1",
-  "API_VERIFY_V1",
-  "RUNTIME_ARTIFACT_VERIFY_V1",
-  "CONTRACT_GRAPH_VERIFY_V1",
-  "V3_WORKTREE_CREATE_V1",
-];
-
-const expectedEnvironmentNames = [
-  "PATH",
-  "HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-  "COREPACK_HOME",
-  "PNPM_HOME",
-  "TMPDIR",
-  "NPM_CONFIG_USERCONFIG",
-  "CI",
-  "LANG",
-  "LC_ALL",
-];
-
-function canonical(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-    .join(",")}}`;
-}
-
-function sha(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function closure() {
-  return [
-    "ENV",
-    "NODE",
-    "GIT",
-    "COREPACK_SHIM",
-    "COREPACK_LIB_COREPACK_CJS",
-    "PNPM_SHIM",
-    "PNPM_ENTRYPOINT",
-  ].map((role, index) => ({
-    role,
-    logicalIdentity: `${role.toLowerCase()}@test`,
-    executablePath: `/controlled/bin/${role.toLowerCase()}`,
-    realpathSha256: String(index + 1).repeat(64),
-    sha256: String(index + 2).repeat(64),
-    size: 100 + index,
-    mode: 0o500,
-  }));
-}
-
-function validRequest(overrides = {}) {
-  return buildClosedCommandRequest({
-    taskId: "2",
-    commandId: "SCANNER_TEST_V1",
-    mode: "TEST",
-    subjectCommit: COMMIT,
-    bootstrapContractSha256: SHA,
-    launcherMaterializationReceiptSha256: SHA_B,
-    launcherMaterializationReviewReceiptSha256: SHA_C,
-    authorizationReceiptSha256: null,
-    externalControllerReceiptSha256: null,
-    anchorReceiptSha256: null,
-    parameters: {
-      baselineSubjectCommit: COMMIT,
-      currentMainAdmissionCommit: "2".repeat(40),
-      b0mMigrationCommit: "3".repeat(40),
-      suiteId: "B0_SCANNER",
-    },
-    requestRoot: REQUEST_ROOT,
-    outputRoot: OUTPUT_ROOT,
-    ...overrides,
-  });
-}
 
 function parse(request, options = {}) {
   return parseClosedCommandRequest(canonicalJsonBytes(request), {
@@ -385,7 +290,7 @@ test("launcher CLI reads canonical request/input, reserves output once, and disp
   );
   const requestPath = path.join(requestRoot, "request.json");
   await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
-  const candidateReceipt = bootstrapReceipt({}, request);
+  const candidateReceipt = bootstrapReceipt(request);
   const candidateValidation = validateBootstrapRunReceipt(
     candidateReceipt,
     request,
@@ -498,7 +403,7 @@ test("launcher CLI derives a verified worktree receipt for Git-backed commands",
     }),
     executeInvocation: async (invocation) => {
       invocationSeen = invocation;
-      const receipt = bootstrapReceipt({}, request);
+      const receipt = bootstrapReceipt(request);
       const receiptBytes = canonicalJsonBytes(receipt);
       await writeFile(request.input.outputRecordPath, receiptBytes, {
         mode: 0o600,
@@ -609,7 +514,7 @@ test("launcher rejects executor PASS without exactly one bound BootstrapRunRecei
   const missing = await runLauncherCli(["--request", requestPath], options);
   assert.notEqual(missing.exitCode, 0);
 
-  const wrongReceipt = bootstrapReceipt({ requestId: "f".repeat(64) }, request);
+  const wrongReceipt = bootstrapReceipt(request, { requestId: "f".repeat(64) });
   await writeFile(
     request.input.outputRecordPath,
     canonicalJsonBytes(wrongReceipt),
@@ -646,6 +551,58 @@ test("launcher refuses the default path without an authority executor", async (t
   });
   assert.equal(result.exitCode, 73);
   await assert.rejects(readFile(request.input.outputRecordPath));
+});
+
+test("fixture trust-chain verification requires explicit fixtureMode and rejects digest drift", async (t) => {
+  const { fixtureRoot, launcherRoot, request } =
+    await createLauncherTrustFixture();
+  t.after(() => removeFixtureRoot(fixtureRoot));
+  assert.notEqual(
+    (
+      await verifyFixedLauncherTrust(request, {
+        expectedUid: process.getuid(),
+        expectedGid: process.getgid(),
+      })
+    ).status,
+    "PASS",
+  );
+  assert.equal(
+    (
+      await verifyFixedLauncherTrust(request, {
+        rootDirectory: launcherRoot,
+        expectedUid: process.getuid(),
+        expectedGid: process.getgid(),
+      })
+    ).code,
+    "LAUNCHER_FIXTURE_MODE_REQUIRED",
+  );
+  assert.equal(
+    (
+      await verifyFixedLauncherTrust(request, {
+        rootDirectory: launcherRoot,
+        fixtureMode: launcherRoot,
+        expectedUid: process.getuid(),
+        expectedGid: process.getgid(),
+      })
+    ).status,
+    "PASS",
+  );
+  await writeFile(
+    path.join(launcherRoot, "launcher-materialization-readback.json"),
+    Buffer.from('{"z":1,"a":2}\n', "utf8"),
+    { mode: 0o600 },
+  );
+  assert.equal(
+    (
+      await verifyFixedLauncherTrust(request, {
+        rootDirectory: launcherRoot,
+        fixtureMode: launcherRoot,
+        expectedUid: process.getuid(),
+        expectedGid: process.getgid(),
+      })
+    ).code,
+    "CONTROLLED_FILE_DIGEST_INVALID",
+  );
 });
 
 test("closed executor rejects inherited loader names before hostile marker execution", async (t) => {
@@ -696,56 +653,3 @@ test("closed executor rejects inherited loader names before hostile marker execu
     "PASS",
   );
 });
-
-function bootstrapReceipt(overrides = {}, request = validRequest()) {
-  return {
-    schemaVersion: "organization-identity-bootstrap-run/v2",
-    receiptCardinality: "ONE_COMMAND_ONE_RECEIPT",
-    bootstrapContractSha256: request.bootstrapContractSha256,
-    launcherMaterializationReceiptSha256:
-      request.launcherMaterializationReceiptSha256,
-    launcherMaterializationReviewReceiptSha256:
-      request.launcherMaterializationReviewReceiptSha256,
-    requestId: request.requestId,
-    taskId: request.taskId,
-    commandId: request.commandId,
-    mode: request.mode,
-    closedCommandRequestSha256: sha(canonicalJsonBytes(request)),
-    inputRecordPath: request.input.inputRecordPath,
-    inputRecordUri: request.input.inputRecordUri,
-    inputRecordSha256: request.input.inputRecordSha256,
-    payloadSchemaSha256: request.input.payloadSchemaSha256,
-    payloadSha256: request.input.payloadSha256,
-    outputRecordPath: request.input.outputRecordPath,
-    outputRecordSha256: SHA,
-    authorizationReceiptSha256: request.authorizationReceiptSha256,
-    externalControllerReceiptSha256: request.externalControllerReceiptSha256,
-    anchorReceiptSha256: request.anchorReceiptSha256,
-    externalLaunchReceiptSha256: SHA,
-    acceptedSubjectCommit: request.subjectCommit,
-    subjectConfigurationSetSha256: SHA,
-    subjectAbsenceSentinelSetSha256: SHA,
-    subjectGitClosureSha256: SHA,
-    environmentValueSetSha256: SHA,
-    taskRoot: "/controlled/task-root",
-    taskRootDevice: "1",
-    taskRootInode: "2",
-    fixedRootSetSha256: SHA,
-    postInstallBootstrapRehashSha256: SHA,
-    dependencyDeclarationRoots: [],
-    toolExecutionRoots: [],
-    prismaSchemaSha256: SHA,
-    generatedClientSetSha256: SHA,
-    generatedDmmfSha256: SHA,
-    generatedDelegateSetSha256: SHA,
-    generatedOutputSetSha256: SHA,
-    typescriptDynamicImportSha256: SHA,
-    hostileMarkerSetSha256: SHA,
-    hostileMarkerExecutionCount: 0,
-    prePostToctouSha256: SHA,
-    startedAt: "2026-09-03T00:00:00.000Z",
-    finishedAt: "2026-09-03T00:00:01.000Z",
-    result: "PASS",
-    ...overrides,
-  };
-}

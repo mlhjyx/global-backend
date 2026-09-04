@@ -25,9 +25,9 @@ const APPROVED_V2_BRANCH =
 const CLEAN_STATUS_SHA256 = sha256(Buffer.from("", "utf8"));
 export const APPROVED_PLAN = Object.freeze({
   path: "docs/superpowers/plans/2026-09-01-organization-identity-writer-ban-at-source.md",
-  commit: "9228673d8bd7277c3132ac461cb7d9e41666782f",
-  blobId: "481430567129f74f489c694c73b6e298503d15b5",
-  sha256: "ee653539f745a06dbc379b74425792513a348e3f541f48e8e6eae7cd43db5718",
+  commit: "9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63",
+  blobId: "d2c0d7a75f4bdf8f76edb90c7ba20653f455fc43",
+  sha256: "3fe4aeb5a11e5ab08b9f4040cfdf1242c6d211c346e5bb9b6038890e4d0a2dbe",
 });
 export const APPROVED_SPEC = Object.freeze({
   path: "docs/superpowers/specs/2026-09-01-organization-identity-writer-ban-at-source-design.md",
@@ -2151,18 +2151,43 @@ async function readCanonicalRecord(filePath, expected) {
   }
 }
 
-async function verifyFixedLauncherTrust(request, options) {
+function resolveFixtureRootDirectory(rootDirectory, fixtureMode) {
+  const resolvedRootDirectory = rootDirectory ?? ROOT_DIRECTORY;
+  if (!isAbsoluteNormalized(resolvedRootDirectory)) {
+    return integrity("LAUNCHER_ROOT_DIRECTORY_INVALID");
+  }
+  if (resolvedRootDirectory === ROOT_DIRECTORY) {
+    return pass({ rootDirectory: resolvedRootDirectory });
+  }
+  if (
+    !isAbsoluteNormalized(fixtureMode) ||
+    fixtureMode !== resolvedRootDirectory
+  ) {
+    return integrity("LAUNCHER_FIXTURE_MODE_REQUIRED");
+  }
+  return pass({ rootDirectory: resolvedRootDirectory });
+}
+
+export async function verifyFixedLauncherTrust(request, options = {}) {
+  const resolvedRootDirectory = resolveFixtureRootDirectory(
+    options.rootDirectory,
+    options.fixtureMode,
+  );
+  if (resolvedRootDirectory.status !== "PASS") {
+    return resolvedRootDirectory;
+  }
+  const rootDirectory = resolvedRootDirectory.rootDirectory;
   const expectedOwner = {
     expectedUid: options.expectedUid ?? 0,
     expectedGid: options.expectedGid ?? 0,
   };
   const contractRecord = await readCanonicalRecord(
-    `${ROOT_DIRECTORY}/launcher-contract.json`,
+    `${rootDirectory}/launcher-contract.json`,
     { ...expectedOwner, expectedMode: 0o600 },
   );
   if (contractRecord.status !== "PASS") return contractRecord;
   const materializationRecord = await readCanonicalRecord(
-    `${ROOT_DIRECTORY}/launcher-materialization.json`,
+    `${rootDirectory}/launcher-materialization.json`,
     {
       ...expectedOwner,
       expectedMode: 0o600,
@@ -2171,7 +2196,7 @@ async function verifyFixedLauncherTrust(request, options) {
   );
   if (materializationRecord.status !== "PASS") return materializationRecord;
   const readbackRecord = await readCanonicalRecord(
-    `${ROOT_DIRECTORY}/launcher-materialization-readback.json`,
+    `${rootDirectory}/launcher-materialization-readback.json`,
     {
       ...expectedOwner,
       expectedMode: 0o600,
@@ -2180,7 +2205,7 @@ async function verifyFixedLauncherTrust(request, options) {
   );
   if (readbackRecord.status !== "PASS") return readbackRecord;
   const reviewRecord = await readCanonicalRecord(
-    `${ROOT_DIRECTORY}/launcher-materialization-review.json`,
+    `${rootDirectory}/launcher-materialization-review.json`,
     {
       ...expectedOwner,
       expectedMode: 0o600,
@@ -2205,12 +2230,12 @@ async function verifyFixedLauncherTrust(request, options) {
   }
   const verificationFiles = [
     {
-      path: `${ROOT_DIRECTORY}/identity-writer-launch.mjs`,
+      path: `${rootDirectory}/identity-writer-launch.mjs`,
       expectedSha256: contractRecord.value.approvedLauncher.sha256,
       expectedMode: 0o500,
     },
     {
-      path: `${ROOT_DIRECTORY}/identity-writer-bootstrap.mjs`,
+      path: `${rootDirectory}/identity-writer-bootstrap.mjs`,
       expectedSha256: contractRecord.value.approvedBootstrap.sha256,
       expectedMode: 0o500,
     },
@@ -2428,6 +2453,35 @@ async function finalizeOutput(handle, outputPath, value) {
     await handle.close().catch(() => undefined);
     return integrity("OUTPUT_FINALIZATION_FAILED");
   }
+}
+
+export async function writeCanonicalOutputRecord(
+  outputPath,
+  value,
+  owner,
+  options = {},
+) {
+  const fixtureRoot = options.fixtureRoot;
+  if (
+    !isAbsoluteNormalized(outputPath) ||
+    !isAbsoluteNormalized(fixtureRoot) ||
+    path.posix.dirname(outputPath) !== fixtureRoot
+  ) {
+    return integrity("OUTPUT_PATH_INVALID");
+  }
+  const fixtureDirectory = await verifyControlledDirectory(fixtureRoot, {
+    expectedMode: 0o700,
+    expectedUid: owner.expectedUid,
+    expectedGid: owner.expectedGid,
+  });
+  if (fixtureDirectory.status !== "PASS") {
+    return fixtureDirectory;
+  }
+  const created = await createExclusiveOutput(outputPath, owner);
+  if (created.status !== "PASS") {
+    return created;
+  }
+  return finalizeOutput(created.handle, outputPath, value);
 }
 
 function runClosedProcess(executablePath, argv, environment, cwd) {

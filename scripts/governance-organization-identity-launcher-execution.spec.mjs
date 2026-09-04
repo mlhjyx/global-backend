@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmod,
   link,
@@ -17,11 +16,23 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  ALLOWED_ENVIRONMENT_NAMES,
+  COMMIT,
+  EXPECTED_COMMAND_IDS as expectedCommandIds,
+  EXPECTED_ENVIRONMENT_NAMES as expectedEnvironmentNames,
+  OUTPUT_ROOT,
+  REQUEST_ROOT,
+  SHA,
+  SHA_B,
+  SHA_C,
+  buildClosure as closure,
+  buildExactEnvironment,
+  buildValidRequest as validRequest,
+  canonicalJson as canonical,
+  sha256Of as sha,
+} from "./governance-organization-identity-test-fixtures.mjs";
+import {
   LOCAL_COMMAND_IDS,
-  buildClosedCommandRequest,
   canonicalJsonBytes,
-  computeLauncherContractDigests,
   dispatchClosedCommand,
   executeClosedInvocation,
   parseClosedCommandRequest,
@@ -35,119 +46,12 @@ import {
   verifyExecutableClosure,
   verifyControlledFile,
   verifyLauncherContract,
+  writeCanonicalOutputRecord,
 } from "./governance-organization-identity-launcher.mjs";
 
 const launcherModulePath = fileURLToPath(
   new URL("./governance-organization-identity-launcher.mjs", import.meta.url),
 );
-
-const SHA = "a".repeat(64);
-const SHA_B = "b".repeat(64);
-const SHA_C = "c".repeat(64);
-const COMMIT = "1".repeat(40);
-const REQUEST_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
-const OUTPUT_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
-
-const expectedCommandIds = [
-  "BOOTSTRAP_AUTHORITY_RUN_V1",
-  "SCOPED_REVIEW_VERIFY_V1",
-  "CURRENT_MAIN_AUDIT_LOCAL_V1",
-  "CURRENT_MAIN_VALIDATE_V1",
-  "CURRENT_MAIN_GENERATE_V1",
-  "COPY_WRITE_ELIGIBILITY_V1",
-  "COPY_SYNC_CITATIONS_V1",
-  "GIT_REFRESH_START_V1",
-  "GIT_REFRESH_COMMIT_V1",
-  "GIT_ADMISSION_COMMIT_V1",
-  "GIT_ACCEPTANCE_COMMIT_V1",
-  "REFRESH_VERIFY_V1",
-  "MIGRATION_STATIC_VERIFY_V1",
-  "PRISMA_GENERATE_V1",
-  "SCANNER_TEST_V1",
-  "SCANNER_BASELINE_V1",
-  "SCANNER_STAGE_V1",
-  "SCANNER_ZERO_V1",
-  "SCANNER_ACCEPTANCE_V1",
-  "GOVERNANCE_VERIFY_V1",
-  "DOCS_VERIFY_V1",
-  "API_VERIFY_V1",
-  "RUNTIME_ARTIFACT_VERIFY_V1",
-  "CONTRACT_GRAPH_VERIFY_V1",
-  "V3_WORKTREE_CREATE_V1",
-];
-
-const expectedEnvironmentNames = [
-  "PATH",
-  "HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-  "COREPACK_HOME",
-  "PNPM_HOME",
-  "TMPDIR",
-  "NPM_CONFIG_USERCONFIG",
-  "CI",
-  "LANG",
-  "LC_ALL",
-];
-
-function canonical(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-    .join(",")}}`;
-}
-
-function sha(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function closure() {
-  return [
-    "ENV",
-    "NODE",
-    "GIT",
-    "COREPACK_SHIM",
-    "COREPACK_LIB_COREPACK_CJS",
-    "PNPM_SHIM",
-    "PNPM_ENTRYPOINT",
-  ].map((role, index) => ({
-    role,
-    logicalIdentity: `${role.toLowerCase()}@test`,
-    executablePath: `/controlled/bin/${role.toLowerCase()}`,
-    realpathSha256: String(index + 1).repeat(64),
-    sha256: String(index + 2).repeat(64),
-    size: 100 + index,
-    mode: 0o500,
-  }));
-}
-
-function validRequest(overrides = {}) {
-  return buildClosedCommandRequest({
-    taskId: "2",
-    commandId: "SCANNER_TEST_V1",
-    mode: "TEST",
-    subjectCommit: COMMIT,
-    bootstrapContractSha256: SHA,
-    launcherMaterializationReceiptSha256: SHA_B,
-    launcherMaterializationReviewReceiptSha256: SHA_C,
-    authorizationReceiptSha256: null,
-    externalControllerReceiptSha256: null,
-    anchorReceiptSha256: null,
-    parameters: {
-      baselineSubjectCommit: COMMIT,
-      currentMainAdmissionCommit: "2".repeat(40),
-      b0mMigrationCommit: "3".repeat(40),
-      suiteId: "B0_SCANNER",
-    },
-    requestRoot: REQUEST_ROOT,
-    outputRoot: OUTPUT_ROOT,
-    ...overrides,
-  });
-}
 
 function parse(request, options = {}) {
   return parseClosedCommandRequest(canonicalJsonBytes(request), {
@@ -179,7 +83,10 @@ function verifiedWorktreeReceipt(request, expectedMode = request.mode) {
 
 test("the local command registry is exhaustive and excludes every external controller", () => {
   assert.deepEqual(LOCAL_COMMAND_IDS, expectedCommandIds);
-  assert.deepEqual(ALLOWED_ENVIRONMENT_NAMES, expectedEnvironmentNames);
+  assert.deepEqual(
+    Object.keys(buildExactEnvironment()),
+    expectedEnvironmentNames,
+  );
   const serialized = LOCAL_COMMAND_IDS.join("\n");
   for (const forbidden of [
     "GH",
@@ -591,6 +498,134 @@ test("Git-backed CLI rejects ambient worktree, branch, and mode substitutions", 
     assert.equal(result.result.code, "VERIFIED_WORKTREE_RECEIPT_REQUIRED");
     assert.equal(loads, 0);
   }
+});
+
+test("canonical output records are fixture-bounded and reject duplicate or symlink targets", async (t) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "identity-output-"));
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await mkdir(outputRoot, { mode: 0o700 });
+  const owner = {
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+    value = { schemaVersion: "fixture/v1", ok: true },
+    outputPath = path.join(outputRoot, "result.json");
+  assert.equal(
+    (
+      await writeCanonicalOutputRecord(outputPath, value, owner, {
+        fixtureRoot: outputRoot,
+      })
+    ).status,
+    "PASS",
+  );
+  assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), value);
+  const linkedPath = path.join(outputRoot, "linked.json");
+  await symlink(outputPath, linkedPath);
+  for (const [candidatePath, expected] of [
+    [outputPath, "OUTPUT_CREATE_EXCLUSIVE_FAILED"],
+    [linkedPath, "OUTPUT_CREATE_EXCLUSIVE_FAILED"],
+    [path.join(fixtureRoot, "other.json"), "OUTPUT_PATH_INVALID"],
+  ]) {
+    const result = await writeCanonicalOutputRecord(
+      candidatePath,
+      value,
+      owner,
+      {
+        fixtureRoot: outputRoot,
+      },
+    );
+    assert.equal(result.code ?? result.status, expected);
+  }
+});
+
+test("closed executor covers exact, set, status, and absent-path readbacks", async () => {
+  const trust = { executableByRole: { NODE: process.execPath } };
+  const successInvocation = {
+    executableRole: "NODE",
+    argv: ["-e", ""],
+    cwd: process.cwd(),
+    readbacks: [
+      {
+        phase: "BEFORE",
+        argv: ["-e", "process.stdout.write('alpha\\n')"],
+        expected: "alpha",
+      },
+      {
+        phase: "BEFORE",
+        argv: ["-e", "process.stdout.write('b\\na\\n')"],
+        expectedSetSha256: sha(canonicalJsonBytes(["a", "b"])),
+      },
+      {
+        phase: "AFTER",
+        argv: ["-e", "process.stdout.write('ADD docs/test.json\\n')"],
+        expectedStatus: "ADD",
+        expectedPath: "docs/test.json",
+      },
+      {
+        phase: "AFTER",
+        argv: ["-e", "process.stdout.write('safe\\n')"],
+        expectedAbsentPath: "hostile",
+      },
+    ],
+  };
+  assert.equal(
+    (
+      await executeClosedInvocation(
+        successInvocation,
+        trust,
+        buildExactEnvironment(),
+      )
+    ).status,
+    "PASS",
+  );
+  const failureInvocation = {
+      executableRole: "NODE",
+      argv: ["-e", ""],
+      cwd: process.cwd(),
+      readbacks: [
+        {
+          phase: "BEFORE",
+          argv: ["-e", "process.stdout.write('alpha\\n')"],
+          expected: "alpha",
+        },
+        {
+          phase: "BEFORE",
+          argv: ["-e", "process.stdout.write('b\\na\\n')"],
+          expectedSetSha256: sha(canonicalJsonBytes(["a", "b"])),
+        },
+        {
+          phase: "AFTER",
+          argv: ["-e", "process.stdout.write('ADD docs/test.json\\n')"],
+          expectedStatus: "ADD",
+          expectedPath: "docs/test.json",
+        },
+        {
+          phase: "AFTER",
+          argv: ["-e", "process.stdout.write('safe\\n')"],
+          expectedAbsentPath: "hostile",
+        },
+      ],
+    };
+  assert.equal(
+    (
+      await executeClosedInvocation(
+        {
+          ...failureInvocation,
+          readbacks: [
+            {
+              phase: "BEFORE",
+              argv: ["-e", "process.stdout.write('hostile\\n')"],
+              expectedAbsentPath: "hostile",
+            },
+          ],
+        },
+        trust,
+        buildExactEnvironment(),
+      )
+    ).code,
+    "CLOSED_PROCESS_READBACK_MISMATCH",
+  );
 });
 
 test("rejects an executable-looking value before dependency loading", async () => {
