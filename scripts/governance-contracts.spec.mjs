@@ -284,12 +284,12 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       growthOsCurrentRows[0],
-      /\| GrowthOS source\s*\|[^\n]*`290c6f9f6a41c7c39dfe071683252982536937d8`[^\n]*54 patches[^\n]*no remote/u,
+      /\| GrowthOS source\s*\|[^\n]*`79e53f391477063404a313d8f8d3f501bcbf40fc`[^\n]*`C0\/H5\/M3`[^\n]*`17e68953ff2e26ac8433db5aa49689e5f9283659`[^\n]*unreviewed/u,
     );
     const g5SiteRow = uniqueTableRow("G5-Site — Runtime Observed");
     assert.match(
       g5SiteRow,
-      /`AMBER \/ TIME_LIMITED`[^\n]*2 current Site-only[^\n]*`2026-09-05T03:49:25\.000Z`/u,
+      /`RED \/ HISTORICAL_ONLY`[^\n]*0 current[^\n]*6 historical[^\n]*`2026-09-05T03:49:25\.000Z`/u,
     );
     const g5AcquisitionRow = uniqueTableRow(
       "G5-Acquisition — Runtime Observed",
@@ -298,7 +298,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       g5AcquisitionRow,
       /`RED \/ NOT_READY`[^\n]*PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING[^\n]*evidence count=0/u,
     );
-    assert.match(document, /> 最后核验：2026-09-04T18:/u);
+    assert.match(document, /> 最后核验：2026-09-05T18:/u);
     assert.match(
       document,
       /`HEAD=origin\/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`/u,
@@ -313,15 +313,15 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /GrowthOS[\s\S]{0,220}`290c6f9f6a41c7c39dfe071683252982536937d8`[\s\S]{0,160}54 patches[\s\S]{0,120}no remote/u,
+      /GrowthOS[\s\S]{0,320}`79e53f391477063404a313d8f8d3f501bcbf40fc`[\s\S]{0,160}`C0\/H5\/M3`[\s\S]{0,220}`17e68953ff2e26ac8433db5aa49689e5f9283659`[\s\S]{0,120}unreviewed/u,
     );
     assert.match(
       document,
-      /Program B[\s\S]{0,260}`9d52a27e611b99329b8eb5fc80b27cc6f5a3ae63`[\s\S]{0,220}`NEEDS_FIXES`[\s\S]{0,160}`C3 \/ H3`[\s\S]{0,180}76\.77%[\s\S]{0,80}78\.92%/u,
+      /Program B[\s\S]{0,320}`f3e5bc1946805f5ac84e98339efaf16008cb25aa`[\s\S]{0,160}`C6\/H5`[\s\S]{0,220}`7b983959bd93376a7f14fe90a87433d76974d035`[\s\S]{0,180}same committed tree[\s\S]{0,160}2 modified[\s\S]{0,80}2 untracked/u,
     );
     assert.match(
       document,
-      /Program B[\s\S]{0,1000}accepted main slices[\s\S]{0,160}#427[\s\S]{0,80}#431[\s\S]{0,80}#432[\s\S]{0,220}Task0L[\s\S]{0,220}`C3 \/ H3`/u,
+      /Program B[\s\S]{0,380}`C6\/H5`[\s\S]{0,500}[Aa]ccepted main slices #427\/#431\/#432[\s\S]{0,180}Task0L/u,
     );
     assert.doesNotMatch(document, /ZERO_PRODUCT_CODE/u);
     assert.match(
@@ -342,6 +342,10 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
+      /PR #448[\s\S]{0,220}`2e1f12b445b83ca36ea198d2f0252d0aa7c1fd49`[\s\S]{0,160}`DRAFT \/ CHECKS_COMPLETE \/ SOURCE_CANDIDATE`[\s\S]{0,180}10 success \/ 1 expected skip[\s\S]{0,180}(?:not|未)[\s\S]{0,100}(?:merge|合并)/u,
+    );
+    assert.match(
+      document,
       /`0\.0\.0\.0:3001`[\s\S]{0,100}`\[::\]:3001`[\s\S]{0,160}`\*:8080`/u,
     );
     assert.match(
@@ -354,11 +358,11 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ CURRENT_MAIN_CI_RED \/ HIGH_REMEDIATION_REQUIRED`[^\n]*33855198691[^\n]*18 advisories[^\n]*baseline 10[^\n]*PR #445\/#446 exact-head checks[^\n]*(?:separate|分离)/u,
+      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ CURRENT_MAIN_RED \/ SECURITY_SOURCE_CANDIDATE`[^\n]*33855198691[^\n]*PR #448[^\n]*10 success \/ 1 expected skip/u,
     );
     assert.match(
       document,
-      /G5-Site — Runtime Observed[^\n]*`AMBER \/ TIME_LIMITED`/u,
+      /G5-Site — Runtime Observed[^\n]*`RED \/ HISTORICAL_ONLY`/u,
     );
     assert.match(
       document,
@@ -378,9 +382,29 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /RuntimeEvidence[\s\S]{0,180}6 total[\s\S]{0,120}2 current[\s\S]{0,120}4 historical/u,
+      /RuntimeEvidence[\s\S]{0,180}6 total[\s\S]{0,120}0 current[\s\S]{0,120}6 historical/u,
     );
     assert.match(document, /2026-09-05T03:49:25\.000Z/u);
+    assert.match(
+      document,
+      /2026-09-05T17:37:15\+08:00[\s\S]{0,300}2 GiB[\s\S]{0,180}23,545[\s\S]{0,220}`503`[\s\S]{0,160}`BROWSER_RUNTIME_UNAVAILABLE`/u,
+    );
+    assert.match(
+      document,
+      /Browser readiness remediation[\s\S]{0,260}`browser-readiness-lifecycle-20260905`[\s\S]{0,160}`0679a0bc510a980f65ebd33eb88b3215a97c20ba`[\s\S]{0,320}browser-readiness-probe\.ts[\s\S]{0,180}browser-readiness-probe\.spec\.ts[\s\S]{0,180}browser-readiness-probe\.smoke\.spec\.ts[\s\S]{0,220}shared wiring[\s\S]{0,180}settlement author[\s\S]{0,180}(?:not deployed|未部署)/u,
+    );
+    assert.match(
+      document,
+      /New API[\s\S]{0,260}`65bfc4bff91d2418bd592ff06bf4a2aadbf634a7`[\s\S]{0,120}`C0\/H3\/M1`[\s\S]{0,220}`02c046d76421009b8dd1640a644f597f3d3a009c`[\s\S]{0,120}unreviewed/u,
+    );
+    assert.match(
+      document,
+      /Backend settlement consumer[\s\S]{0,260}`c7f6baa58645e5b542da62e85d98fd0584ccf909`[\s\S]{0,140}clean[\s\S]{0,180}82 files[\s\S]{0,180}(?:unreviewed|未独立复核)/u,
+    );
+    assert.match(
+      document,
+      /Program C[\s\S]{0,320}A\/B[\s\S]{0,120}(?:pending|待)[\s\S]{0,200}C1-COMPANY first[\s\S]{0,120}(?:recommended|推荐)[\s\S]{0,160}(?:not approved|未批准|未选择)/u,
+    );
     assert.match(
       document,
       /3 Release Bundles[\s\S]{0,180}development[\s\S]{0,100}`CANDIDATE`[\s\S]{0,220}`EXTERNAL_UNVERIFIED`[\s\S]{0,160}`NOT_VERIFIED`[\s\S]{0,160}`NOT_REVIEWED`[\s\S]{0,160}`NOT_AUTHORIZED`/u,
@@ -388,6 +412,10 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     assert.match(
       document,
       /Billing\/Credits[\s\S]{0,120}`DEFERRED \/ NOT_IMPLEMENTED`[\s\S]{0,180}`cap_microusd`[\s\S]{0,160}(?:not|不是)[\s\S]{0,100}(?:balance|余额)/u,
+    );
+    assert.match(
+      document,
+      /authorizations remain valid[\s\S]{0,160}original (?:scope|boundaries)[\s\S]{0,220}ordinary local[\s\S]{0,180}Browser helper[\s\S]{0,240}[Nn]ew scope[\s\S]{0,180}merge[\s\S]{0,180}deployment[\s\S]{0,220}(?:corresponding|对应)[\s\S]{0,180}release gate/u,
     );
   };
 
@@ -413,11 +441,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       )
       .join("\n");
   for (const [prefix, from, to] of [
-    [
-      "G5-Site — Runtime Observed",
-      "2 current Site-only",
-      "3 current Site-only",
-    ],
+    ["G5-Site — Runtime Observed", "0 current", "1 current"],
     [
       "G5-Site — Runtime Observed",
       "2026-09-05T03:49:25.000Z",
@@ -444,18 +468,23 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       "0f72cc104e47128778f2392283a380bc1297f76d",
     ],
     [
-      "290c6f9f6a41c7c39dfe071683252982536937d8",
+      "79e53f391477063404a313d8f8d3f501bcbf40fc",
+      "541bcc63c3486296ab4e2461d4d005e6cd43710b",
+    ],
+    [
+      "17e68953ff2e26ac8433db5aa49689e5f9283659",
       "541bcc63c3486296ab4e2461d4d005e6cd43710b",
     ],
     ["4 commits behind", "current with main"],
-    ["`AMBER / TIME_LIMITED`", "`PASS / CURRENT`"],
+    ["`RED / HISTORICAL_ONLY`", "`PASS / CURRENT`"],
     ["`RED / NOT_READY`", "`AMBER / PARTIAL`"],
     ["18 advisories", "10 advisories"],
     [
       "Program B root/launcher authority/materialization gate",
       "Program B gate closed",
     ],
-    ["CURRENT_MAIN_CI_RED", "CURRENT_MAIN_CI_GREEN"],
+    ["CURRENT_MAIN_RED", "CURRENT_MAIN_GREEN"],
+    ["SECURITY_SOURCE_CANDIDATE", "SECURITY_MERGED"],
   ]) {
     assert.throws(() => assertCurrentStatus(status.replaceAll(from, to)));
   }
@@ -573,7 +602,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   }
 
   const expectedProgramBRow =
-    "| B — Buyer Intelligence discovery | RED | Owns QueryReceipt、RawSourceRecord、Identity/Canonical、Provider/transport、Discovery workflow 和 immutable `LeadQualifiedPackage`；does not own SaaS Opportunity or runtime deploy | #427/#431/#432 accepted source slices 与 active Task0L 分开；Task0L implementation review 仍为 `NEEDS_FIXES`，coverage 未到 80%，active writer 正在修复。 |";
+    "| B — Buyer Intelligence discovery | RED | Owns QueryReceipt、RawSourceRecord、Identity/Canonical、Provider/transport、Discovery workflow 和 immutable `LeadQualifiedPackage`；does not own SaaS Opportunity or runtime deploy | #427/#431/#432 accepted main slices 与 active Task0L 分开；latest reviewed `f3e5bc19…` remains `C6/H5`，live `7b983959…` is dirty/unreviewed，Task 0P、Phase A/B、packet/root/0A are closed. |";
   const expectedG0Row =
     "| G0 — Truth & Ownership | `AMBER / PARTIAL / HOLD` | A/B ownership seam 已关闭；Program B root/launcher authority/materialization gate、platform R2 writer/migration manifest 与 Program C 产品选择/owner/manifest 仍未闭合。 |";
   const normalizeTableRow = (line) =>
@@ -606,7 +635,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramARow =
     "| A — authority/runtime primitives | AMBER | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and RuntimeEvidence/Release；does not own Raw/Identity/Provider/Opportunity | Accepted main slices 与 historical mega branch 分离；platform R2 owner/manifest 和 current exact-head review 尚未闭合。 |";
   const expectedRootRow =
-    "| `/global/backend` root `main` | observed `2026-09-04T18:58:19+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity。 |";
+    "| `/global/backend` root `main` | observed `2026-09-05T18:19:59+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity；PR #448 checks complete does not change main. |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
@@ -622,9 +651,8 @@ test("the discovery lineage successor is current-main based and the quarantined 
       expectedProgramBRow,
       "| B — Buyer Intelligence discovery |",
       [
-        ["`NEEDS_FIXES`", "`ACCEPTED`"],
-        ["coverage 未到 80%", "coverage 已到 80%"],
-        ["active writer 正在修复", "implementation complete"],
+        ["`C6/H5`", "`C0/H0`"],
+        ["dirty/unreviewed", "clean/accepted"],
       ],
     ],
     [
@@ -674,7 +702,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
       ),
     );
   }
-  assert.match(status, /> 最后核验：2026-09-04T/);
+  assert.match(status, /> 最后核验：2026-09-05T/);
   assert.match(
     status,
     /Development runtime identity is `674ff12d4d768ce5599fc07b565fe21da37dc5fe`, 4 commits behind repository source/,
@@ -729,7 +757,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   assert.match(laterGateRows.join("\n"), /G3[^\n]*`RED \/ NOT_INTEGRATED`/);
   assert.match(
     laterGateRows.join("\n"),
-    /G5-Site[^\n]*`AMBER \/ TIME_LIMITED`/,
+    /G5-Site[^\n]*`RED \/ HISTORICAL_ONLY`/,
   );
   assert.match(
     laterGateRows.join("\n"),
