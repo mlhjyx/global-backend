@@ -114,22 +114,23 @@ Authority foundation 的后续独立 review 发现两个跨层/生命周期残�
   - `execution_budget_authority_time_state(...)`（内部 60 秒合同）
   - `execution_budget_authority_campaign_remaining_microusd(...)`（内部 overflow-safe numeric）
   - `consume_workspace_execution_authority(...)`
-  - `ingest_platform_execution_authority(...)`
+  - `ingest_platform_execution_authority(...)`（历史入口；run-bound successor 后不再向 Platform writer 开放）
+  - `ingest_and_admit_platform_execution_budget_run_v2(...)`（签名 claims 写入与 exact run account admission 原子完成）
   - `open_authorized_tool_budget_v1(scope_key, authority_id, account_key, replay_scope)`
   - `revoke_platform_execution_authority_v1(authority_id, reason, revoked_at)`
   - `inspect_platform_execution_authority_freshness_v1(verification_time)`
   - trigger function `mark_execution_budget_authority_revoked()`
-- legacy `open_tool_budget`、`reserve_tool_budget`、`settle_tool_budget`、`release_tool_budget`、`tool_budget_status`、`close_tool_budget` 保留签名和 unbound 行为，但在本未保留迁移内以 `CREATE OR REPLACE` 加入 bound-account fence；没有删除旧函数或开放 microusd→cents 换算。
+- 本 foundation 最初保留的 caller-authored cents 签名随后已由 authority cutover migration 删除并替换为 microusd/authority-first 签名；run-bound successor 又撤销 Platform writer 对通用 `open_tool_budget` wrapper 的执行权，避免借包装函数绕过 exact run admission。
 
-Repository 以参数化 Prisma SQL 调用以上函数。Verified time claims 是 immutable NumericDate seconds，只在 DB boundary 新建 timestamp 对象。Workspace verify→consume→authorized-open 由 `consumeWorkspaceAndOpen` 在同一个 `withWorkspace` transaction 内完成；Platform ingest/open/revoke/freshness 只接受单独注入的 `EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE`，在同一 transaction 先做 repository principal readback，再由 DB primitive 重做不可绕过的 attestation；缺失或不精确时稳定 fail closed，不回退到 owner、app-user 或 Workspace connection。
+Repository 以参数化 Prisma SQL 调用以上函数。Verified time claims 是 immutable NumericDate seconds，只在 DB boundary 新建 timestamp 对象。Workspace verify→consume→authorized-open 由 `consumeWorkspaceAndOpen` 在同一个 `withWorkspace` transaction 内完成；Platform successor 把 verified Grant 的 schedule request、workflow、run 与 technical policy claims 和独立 runtime expectation 一并交给 `ingest_and_admit_platform_execution_budget_run_v2`，在同一 platform-writer transaction 中完成 JTI/run/account 锁、逐项比较、写入与开账。ACK 丢失重放只读返回，不增加 `runs_consumed` 或 `ref_count`；旧 ingest/admit/open 入口均不能再由 Platform writer 执行。Platform revoke/freshness 仍只接受单独注入的 `EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE`；缺失或不精确时稳定 fail closed，不回退到 owner、app-user 或 Workspace connection。
 
 ## 5. 公开契约与代码入口
 
 | 契约/入口 | 路径与状态 |
 | --- | --- |
 | 共享 claim/command types | [`packages/contracts/src/execution-budget.ts`](../../packages/contracts/src/execution-budget.ts)，由 [`packages/contracts/src/index.ts`](../../packages/contracts/src/index.ts) 导出 |
-| Platform signed claims schema | [`platform-execution-budget-authority-upserted.v1.schema.json`](../../packages/contracts/events/payloads/platform-execution-budget-authority-upserted.v1.schema.json)，SHA-256 `36038e1ca8dcd4b83e807d6ae71593c3d2c097f689f5d2caa23a4ed13ea2252b` |
-| 公共 conformance fixture | [`platform-execution-budget-authority-upserted.v1.valid.json`](../../packages/contracts/events/fixtures/platform-execution-budget-authority-upserted.v1.valid.json)，SHA-256 `4ec3376c39d329738d49cb7282c251fa7b80e9be5bd8f7af78376dba05f1a733`；含固定 verification time、public JWK/claims/expected，不是私钥或运行 token |
+| Platform signed claims schema | [`platform-execution-budget-authority-upserted.v1.schema.json`](../../packages/contracts/events/payloads/platform-execution-budget-authority-upserted.v1.schema.json)，SHA-256 `fcb679d74edbba0d92577fe2e9b6e88471fa3c068b4ba4b0da4c7c8d03b6fd54` |
+| 公共 conformance fixture | [`platform-execution-budget-authority-upserted.v1.valid.json`](../../packages/contracts/events/fixtures/platform-execution-budget-authority-upserted.v1.valid.json)，SHA-256 `e95b3c364d4a84c461db499551bc1db782510b669d864d0eab58b9f658aa0a61`；含固定 verification time、public JWK/claims/expected，不是私钥或运行 token |
 | Command identity | `PlatformExecutionBudgetAuthorityUpserted/v1`；signed payload schema 为 `execution-budget-grant/v1` |
 | 固定 audience | `global-backend:execution-budget` |
 | Platform purposes | `platform.acquisition`、`platform.intent_watch`、`platform.sanctions` |
@@ -137,7 +138,7 @@ Repository 以参数化 Prisma SQL 调用以上函数。Verified time claims 是
 | Workspace request header design | `X-Execution-Budget-Grant`；本 additive phase 尚未让现有 controller 强制要求该 header |
 | Readiness OpenAPI | `GET /api/v1/health/ready` 的 `capabilities` 包含三个 exact closed component status；code-first artifact 为 [`openapi.json`](../../packages/contracts/openapi/openapi.json) |
 
-Platform command 是外部 transport 注册身份，不是 outbound `DomainEventEnvelope`，也不进入 Backend→SaaS 的 `INTEGRATION_EVENTS`。`PlatformExecutionBudgetAuthorityIngestionService.ingest` 只接受 compact JWS 字符串；JSON wrapper 或自行增加的 command/type 字段不是当前合同。
+Platform command 是外部 transport 注册身份，不是 outbound `DomainEventEnvelope`，也不进入 Backend→SaaS 的 `INTEGRATION_EVENTS`。`PlatformExecutionBudgetAuthorityIngestionService.ingestAndAdmit` 只把 raw compact JWS 交给 verifier；持久化边界只接收裁剪后的 verified claims 与独立 expected run facts。JSON wrapper、自行增加的 command/type 字段或未绑定 run/workflow/policy 的 Platform Grant 不是当前合同。
 
 Verifier 固定配置合同：
 

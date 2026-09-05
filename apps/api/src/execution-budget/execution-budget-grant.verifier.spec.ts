@@ -27,6 +27,9 @@ const COMPANY_ID = '22222222-2222-4222-8222-222222222222';
 const JTI = '33333333-3333-4333-8333-333333333333';
 const REQUEST_HASH = 'a'.repeat(64);
 const SCHEDULE_ID = 'platform-acquisition-schedule-1';
+const WORKFLOW_ID = 'platform-acquisition-schedule-1-2026-09-05';
+const WORKFLOW_RUN_ID = '44444444-4444-4444-8444-444444444444';
+const TECHNICAL_POLICY_REVISION = 'b'.repeat(64);
 
 const PRIVATE_JWKS = [
   {
@@ -84,6 +87,10 @@ const PLATFORM_SCOPE: ExecutionBudgetGrantExpectedScope = {
   subjectType: 'schedule',
   subjectId: SCHEDULE_ID,
   scheduleId: SCHEDULE_ID,
+  scheduleRequestSha256: REQUEST_HASH,
+  workflowId: WORKFLOW_ID,
+  workflowRunId: WORKFLOW_RUN_ID,
+  technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
 };
 
 const TEST_ENV = {
@@ -164,8 +171,12 @@ async function platformToken(
       schedule_id: SCHEDULE_ID,
       cap_microusd: undefined,
       cap_per_run_microusd: '1000000',
-      campaign_cap_microusd: '10000000',
-      max_runs: '10',
+      campaign_cap_microusd: '1000000',
+      max_runs: '1',
+      schedule_request_sha256: REQUEST_HASH,
+      workflow_id: WORKFLOW_ID,
+      workflow_run_id: WORKFLOW_RUN_ID,
+      technical_policy_revision: TECHNICAL_POLICY_REVISION,
       ...claims,
     },
   });
@@ -216,6 +227,50 @@ function remoteVerifier(
 }
 
 describe('ExecutionBudgetGrantVerifier', () => {
+  it('verifies all four platform invocation claims as signed immutable facts', async () => {
+    await expect(
+      verifier().verifyPlatform(await platformToken()),
+    ).resolves.toMatchObject({
+      scheduleRequestSha256: REQUEST_HASH,
+      workflowId: WORKFLOW_ID,
+      workflowRunId: WORKFLOW_RUN_ID,
+      technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
+      maxRuns: 1n,
+      capPerRunMicrousd: 1_000_000n,
+      campaignCapMicrousd: 1_000_000n,
+    });
+  });
+
+  it.each([
+    'schedule_request_sha256',
+    'workflow_id',
+    'workflow_run_id',
+    'technical_policy_revision',
+  ])(
+    'rejects a workspace grant carrying platform-only %s even when null',
+    async (claim) => {
+      await expect(
+        verifier().verify(
+          await signedToken({ claims: { [claim]: null } }),
+          EXPECTED_SCOPE,
+        ),
+      ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    },
+  );
+
+  it.each([
+    { scheduleRequestSha256: 'c'.repeat(64) },
+    { workflowId: 'another-workflow' },
+    { workflowRunId: '55555555-5555-4555-8555-555555555555' },
+    { technicalPolicyRevision: 'd'.repeat(64) },
+  ])('rejects cross-invocation substitution case %#', async (mismatch) => {
+    await expect(
+      verifier().verify(await platformToken(), {
+        ...PLATFORM_SCOPE,
+        ...mismatch,
+      }),
+    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH' });
+  });
   it.each(['RS256', 'ES256', 'EdDSA'] as const)(
     'verifies a valid deterministic %s workspace grant into a fresh immutable claim',
     async (algorithm) => {
@@ -256,13 +311,16 @@ describe('ExecutionBudgetGrantVerifier', () => {
   );
 
   it('uses one bounded redirect-free remote JWKS contract for real verification', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
     );
 
     await expect(
       remoteVerifier(fetcher).verify(await signedToken(), EXPECTED_SCOPE),
-    ).resolves.toMatchObject({ workspaceId: WORKSPACE_ID });
+    ).resolves.toMatchObject({
+      workspaceId: WORKSPACE_ID,
+    });
     expect(fetcher).toHaveBeenCalledWith(
       TEST_ENV.EXECUTION_BUDGET_GRANT_JWKS_URI,
       expect.objectContaining({ method: 'GET', redirect: 'error' }),
@@ -317,14 +375,15 @@ describe('ExecutionBudgetGrantVerifier', () => {
   );
 
   it('rejects an oversized remote JWKS before JOSE parses it', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          keys: PUBLIC_JWKS,
-          padding: 'x'.repeat(64 * 1024),
-        }),
-        { status: 200 },
-      ),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            keys: PUBLIC_JWKS,
+            padding: 'x'.repeat(64 * 1024),
+          }),
+          { status: 200 },
+        ),
     );
 
     await expect(
@@ -339,11 +398,11 @@ describe('ExecutionBudgetGrantVerifier', () => {
       ...PUBLIC_JWKS[1],
       kid: `execution-es256-extra-${index}`,
     }));
-    const fetcher = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ keys: [PUBLIC_JWKS[0], ...extraKeys] }),
-        { status: 200 },
-      ),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: [PUBLIC_JWKS[0], ...extraKeys] }), {
+          status: 200,
+        }),
     );
 
     await expect(
@@ -354,8 +413,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
   });
 
   it('keeps unknown remote kid failures unavailable for safe key rotation', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
     );
 
     await expect(
@@ -369,8 +429,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
   });
 
   it('keeps a bad signature classified as an invalid grant', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
     );
     const compactJws = await signedToken();
     const [header, payload, signature] = compactJws.split('.');
@@ -379,7 +440,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
 
     await expect(
       remoteVerifier(fetcher).verify(tampered, EXPECTED_SCOPE),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
   });
 
   it('verifies a deterministic platform grant with canonical campaign limits', async () => {
@@ -395,8 +458,8 @@ describe('ExecutionBudgetGrantVerifier', () => {
       scheduleId: SCHEDULE_ID,
       capMicrousd: null,
       capPerRunMicrousd: 1_000_000n,
-      campaignCapMicrousd: 10_000_000n,
-      maxRuns: 10n,
+      campaignCapMicrousd: 1_000_000n,
+      maxRuns: 1n,
     });
   });
 
@@ -415,11 +478,14 @@ describe('ExecutionBudgetGrantVerifier', () => {
   it('accepts the exact iat equals nbf and 300-second TTL boundaries', async () => {
     await expect(
       verifier().verifyPlatform(
-        await platformToken({}, {
-          issuedAt: NOW_SECONDS,
-          notBefore: NOW_SECONDS,
-          expiresAt: NOW_SECONDS + 300,
-        }),
+        await platformToken(
+          {},
+          {
+            issuedAt: NOW_SECONDS,
+            notBefore: NOW_SECONDS,
+            expiresAt: NOW_SECONDS + 300,
+          },
+        ),
       ),
     ).resolves.toMatchObject({
       issuedAt: NOW_SECONDS,
@@ -504,11 +570,14 @@ describe('ExecutionBudgetGrantVerifier', () => {
 
     await expect(
       verifier().verifyPlatform(
-        await platformToken({}, {
-          issuedAt: sameFutureSecond,
-          notBefore: sameFutureSecond,
-          expiresAt: sameFutureSecond,
-        }),
+        await platformToken(
+          {},
+          {
+            issuedAt: sameFutureSecond,
+            notBefore: sameFutureSecond,
+            expiresAt: sameFutureSecond,
+          },
+        ),
       ),
     ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
   });
@@ -586,17 +655,32 @@ describe('ExecutionBudgetGrantVerifier', () => {
   );
 
   it.each([
-    ['missing schedule', { schedule_id: undefined }],
-    ['workspace id', { workspace_id: WORKSPACE_ID }],
-    ['request hash', { request_sha256: REQUEST_HASH }],
-    ['workspace cap', { cap_microusd: '1' }],
-  ])('rejects a platform grant with prohibited or %s claims', async (_name, claims) => {
-    await expect(
-      verifier().verify(await platformToken(claims), PLATFORM_SCOPE),
-    ).rejects.toMatchObject({
-      code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
-    });
-  });
+    [
+      'missing schedule',
+      { schedule_id: undefined },
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    ],
+    [
+      'workspace id',
+      { workspace_id: WORKSPACE_ID },
+      'EXECUTION_BUDGET_GRANT_INVALID',
+    ],
+    [
+      'request hash',
+      { request_sha256: REQUEST_HASH },
+      'EXECUTION_BUDGET_GRANT_INVALID',
+    ],
+    ['workspace cap', { cap_microusd: '1' }, 'EXECUTION_BUDGET_GRANT_INVALID'],
+  ] as const)(
+    'rejects a platform grant with prohibited or %s claims',
+    async (_name, claims, code) => {
+      await expect(
+        verifier().verify(await platformToken(claims), PLATFORM_SCOPE),
+      ).rejects.toMatchObject({
+        code,
+      });
+    },
+  );
 
   it.each([
     ['cap_per_run_microusd', { cap_per_run_microusd: '01' }],
@@ -605,7 +689,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
   ])('rejects a non-canonical platform %s', async (_name, claims) => {
     await expect(
       verifier().verify(await platformToken(claims), PLATFORM_SCOPE),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
   });
 
   it('enforces configured algorithm subsets without weakening the fixed set', async () => {
@@ -613,7 +699,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
 
     await expect(
       verifier(rsOnly).verify(await signedToken(), EXPECTED_SCOPE),
-    ).resolves.toMatchObject({ workspaceId: WORKSPACE_ID });
+    ).resolves.toMatchObject({
+      workspaceId: WORKSPACE_ID,
+    });
     await expect(
       verifier(rsOnly).verify(
         await signedToken({ algorithm: 'ES256' }),
@@ -623,8 +711,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
   });
 
   it('selects configured-algorithm keys from a mixed remote JWKS', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: PUBLIC_JWKS }), { status: 200 }),
     );
     const rsOnly = { ...TEST_ENV, EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256' };
 
@@ -633,7 +722,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
         await signedToken(),
         EXPECTED_SCOPE,
       ),
-    ).resolves.toMatchObject({ workspaceId: WORKSPACE_ID });
+    ).resolves.toMatchObject({
+      workspaceId: WORKSPACE_ID,
+    });
   });
 
   it.each(['RS256,RS256', 'RS256,HS256'])(
@@ -705,7 +796,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
         compactJws,
         EXPECTED_SCOPE,
       ),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
     expect(keyResolver).not.toHaveBeenCalled();
   });
 
@@ -715,7 +808,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
   ] as const)('rejects a protected header with %s', async (_name, options) => {
     await expect(
       verifier().verify(await signedToken(options), EXPECTED_SCOPE),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
   });
 
   it.each([
@@ -725,13 +820,31 @@ describe('ExecutionBudgetGrantVerifier', () => {
   ] as const)('rejects a signed token with %s', async (_name, options) => {
     await expect(
       verifier().verify(await signedToken(options), EXPECTED_SCOPE),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
   });
 
   it.each([
-    ['a TTL over 300 seconds', { expiresAt: NOW_SECONDS + 301 }, 'EXECUTION_BUDGET_GRANT_INVALID'],
-    ['an iat beyond clock tolerance', { issuedAt: NOW_SECONDS + 61, notBefore: NOW_SECONDS }, 'EXECUTION_BUDGET_GRANT_INVALID'],
-    ['an expired exp', { issuedAt: NOW_SECONDS - 400, notBefore: NOW_SECONDS - 400, expiresAt: NOW_SECONDS - 61 }, 'EXECUTION_BUDGET_GRANT_EXPIRED'],
+    [
+      'a TTL over 300 seconds',
+      { expiresAt: NOW_SECONDS + 301 },
+      'EXECUTION_BUDGET_GRANT_INVALID',
+    ],
+    [
+      'an iat beyond clock tolerance',
+      { issuedAt: NOW_SECONDS + 61, notBefore: NOW_SECONDS },
+      'EXECUTION_BUDGET_GRANT_INVALID',
+    ],
+    [
+      'an expired exp',
+      {
+        issuedAt: NOW_SECONDS - 400,
+        notBefore: NOW_SECONDS - 400,
+        expiresAt: NOW_SECONDS - 61,
+      },
+      'EXECUTION_BUDGET_GRANT_EXPIRED',
+    ],
   ] as const)(
     'rejects a signed token with %s',
     async (_name, options, code) => {
@@ -747,11 +860,16 @@ describe('ExecutionBudgetGrantVerifier', () => {
     ['subject type', { subjectType: 'icp' }],
     ['subject id', { subjectId: '55555555-5555-4555-8555-555555555555' }],
     ['request hash', { requestSha256: 'b'.repeat(64) }],
-  ] as const)('rejects a verified grant with mismatched %s scope', async (_name, scope) => {
-    await expect(
-      verifier().verify(await signedToken(), { ...EXPECTED_SCOPE, ...scope }),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH' });
-  });
+  ] as const)(
+    'rejects a verified grant with mismatched %s scope',
+    async (_name, scope) => {
+      await expect(
+        verifier().verify(await signedToken(), { ...EXPECTED_SCOPE, ...scope }),
+      ).rejects.toMatchObject({
+        code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+      });
+    },
+  );
 
   it('rejects a compact JWS over 16 KiB before key resolution', async () => {
     const keyResolver = vi.fn();
@@ -762,7 +880,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
         oversized,
         EXPECTED_SCOPE,
       ),
-    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
     expect(keyResolver).not.toHaveBeenCalled();
   });
 

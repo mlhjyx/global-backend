@@ -18,6 +18,10 @@
     "subject_type",
     "subject_id",
     "schedule_id",
+    "schedule_request_sha256",
+    "workflow_id",
+    "workflow_run_id",
+    "technical_policy_revision",
     "currency",
     "unit",
     "cap_per_run_microusd",
@@ -26,7 +30,12 @@
   ],
   "properties": {
     "schema_version": { "const": "execution-budget-grant/v1" },
-    "iss": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 512 },
+    "iss": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1,
+      "maxLength": 512
+    },
     "aud": { "const": "global-backend:execution-budget" },
     "jti": {
       "type": "string",
@@ -50,11 +59,31 @@
       "$ref": "#/$defs/boundedIdentifier",
       "description": "Must equal subject_id; equality is enforced after signature verification."
     },
+    "schedule_request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+    },
+    "workflow_run_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "technical_policy_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "currency": { "const": "USD" },
     "unit": { "const": "microusd" },
     "cap_per_run_microusd": { "$ref": "#/$defs/positiveDecimal" },
-    "campaign_cap_microusd": { "$ref": "#/$defs/positiveDecimal" },
-    "max_runs": { "$ref": "#/$defs/positiveDecimal" }
+    "campaign_cap_microusd": {
+      "$ref": "#/$defs/positiveDecimal",
+      "description": "Must equal cap_per_run_microusd; equality is enforced after signature verification."
+    },
+    "max_runs": { "const": "1" }
   },
   "$defs": {
     "numericDate": {

@@ -164,6 +164,10 @@ model ExecutionBudgetAuthority {
   subjectId           String                       @map("subject_id") @db.VarChar(191)
   requestSha256       String?                      @map("request_sha256") @db.VarChar(64)
   scheduleId          String?                      @map("schedule_id") @db.VarChar(191)
+  scheduleRequestSha256 String?                    @map("schedule_request_sha256") @db.VarChar(64)
+  workflowId          String?                      @map("workflow_id") @db.VarChar(200)
+  workflowRunId       String?                      @map("workflow_run_id") @db.VarChar(36)
+  technicalPolicyRevision String?                  @map("technical_policy_revision") @db.VarChar(64)
   currency            String                       @db.VarChar(3)
   unit                String                       @db.VarChar(16)
   capMicrousd         BigInt?                      @map("cap_microusd")
@@ -189,6 +193,7 @@ model ExecutionBudgetAuthority {
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
   @@index([workspaceId, purpose, expiresAt], map: "execution_budget_authority_workspace_purpose_expiry_idx")
   @@index([scheduleId, purpose, expiresAt], map: "execution_budget_authority_schedule_purpose_expiry_idx")
+  @@index([workflowRunId], map: "execution_budget_authority_workflow_run_idx")
   @@map("execution_budget_authority")
 }
 
