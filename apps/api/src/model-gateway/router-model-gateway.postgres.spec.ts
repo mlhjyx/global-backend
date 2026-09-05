@@ -10,7 +10,10 @@ import {
 } from "../site-builder/site-build-provider-wire.database";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import { createSiteBuildCostReconciliationCatalogFromEnv } from "../site-builder/site-build-cost-reconciliation-resolver";
-import { parseSettlementDerivationKeyring } from "./settlement-wire-identity";
+import {
+  parseSettlementDerivationKeyring,
+  settlementWireIdentities,
+} from "./settlement-wire-identity";
 
 const OWNER_DATABASE_URL = process.env.DATABASE_URL?.trim();
 const EXPECTED_MIGRATION =
@@ -142,9 +145,10 @@ describe("RouterModelGateway provider-wire PostgreSQL composition", () => {
     const gateway = new RouterModelGateway({
       route: () => [provider],
     } as unknown as ModelRouter);
-    gateway.paidLedger = new SiteBuildCostLedger({} as never, {
+    const executionLedger = new SiteBuildCostLedger({} as never, {
       providerWireDatabase,
     });
+    gateway.paidLedger = executionLedger;
     gateway.costReconciliationCatalog =
       createSiteBuildCostReconciliationCatalogFromEnv({
         SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON: JSON.stringify({
@@ -170,12 +174,13 @@ describe("RouterModelGateway provider-wire PostgreSQL composition", () => {
           ],
         }),
       });
-    gateway.settlementDerivationKeyring = parseSettlementDerivationKeyring(
+    const keyring = parseSettlementDerivationKeyring(
       Buffer.from(
         `schema=site-build-settlement-derivation-keyring/v1\n` +
           `settlement-test ACTIVE ${"A".repeat(43)}\n`,
       ),
     );
+    gateway.settlementDerivationKeyring = keyring;
     gateway.settlementReadbackResolver = { resolve: vi.fn() } as never;
 
     await expect(
@@ -239,9 +244,8 @@ describe("RouterModelGateway provider-wire PostgreSQL composition", () => {
       },
     ]);
 
-    // Simulate a process crash after RELEASED committed but before the
-    // reconciliation append. The positive wire remains enumerable and the
-    // next sweep can append summary/outbox state without another provider call.
+    // A normal pre-dispatch release is terminal exact zero and needs no
+    // reconciliation row. Recovery-only error codes are selected separately.
     const recoveryNow = new Date(Date.now() + 61_000);
     const recoveryLedger = new SiteBuildCostLedger(
       providerWireDatabase as never,
@@ -252,9 +256,76 @@ describe("RouterModelGateway provider-wire PostgreSQL composition", () => {
     );
     await expect(
       recoveryLedger.listPendingReconciliations(workspaceId),
+    ).resolves.toEqual([]);
+
+    // Simulate the distinct recovery crash window: the Spend transition
+    // commits, then the process stops before appendReconciliation. Only the
+    // recovery-specific error code remains selectable.
+    const recoveryOperationKey = randomBytes(32).toString("hex");
+    const recoveryIdentity = settlementWireIdentities(
+      keyring,
+      recoveryOperationKey,
+      1,
+    )[0]!;
+    const recoveryScope = {
+      workspaceId,
+      siteId,
+      buildRunId,
+      taskAttemptId,
+      fenceToken,
+      operationKey: recoveryOperationKey,
+      kind: "model" as const,
+      taskId: "site_builder.copy",
+      subject: "gpt-5.6-terra@gateway",
+      reservationMicrousd: 800_000,
+    };
+    const recoveryReservation = await executionLedger.reserveModelOperation({
+      ...recoveryScope,
+      wire: {
+        wireIdentity: recoveryIdentity,
+        protocol: "openai-responses",
+        requestedAlias: "gpt-5.6-terra",
+        expectedChannelId: 72,
+        promptUtf8Bytes: 100,
+        maximumWireCalls: 2,
+        actualMaxOutputTokens: 1_000,
+        catalogMaxOutputTokens: 4_000,
+        maximumQuotaPoints: 2_000_000,
+        catalogId: "router-zero-call-integration",
+        catalogSha256: "b".repeat(64),
+        pricingSnapshotSha256: "a".repeat(64),
+        inputPriceMicrounitsPerMillionTokens: 2_000_000,
+        outputPriceMicrounitsPerMillionTokens: 10_000_000,
+        ledgerMicrousdPerPricingUnit: 1_000_000,
+      },
+    });
+    if (recoveryReservation.kind !== "execute") {
+      throw new Error("recovery reservation did not execute");
+    }
+    await executionLedger.finalizeModelPhysicalWireNotDispatched({
+      workspaceId,
+      wireAttemptId: recoveryReservation.wireAttemptId,
+    });
+    await expect(
+      executionLedger.completeProviderSpendReconciliation({
+        workspaceId,
+        siteId,
+        buildRunId,
+        spendId: recoveryReservation.spendId,
+        resolverId: "new-api-request-bound-reconciliation-v1",
+        observedAt: new Date(),
+      }),
+    ).resolves.toMatchObject({
+      status: "RESOLVED",
+      costBasis: "not_incurred",
+      exactCostMicrousd: "0",
+    });
+
+    await expect(
+      recoveryLedger.listPendingReconciliations(workspaceId),
     ).resolves.toEqual([
       expect.objectContaining({
-        buildRunId,
+        operationKey: recoveryOperationKey,
         wireState: "NOT_DISPATCHED",
         action: "RESOLVE",
       }),
@@ -262,14 +333,17 @@ describe("RouterModelGateway provider-wire PostgreSQL composition", () => {
     await expect(
       recoveryLedger.runReconciliationSweep({
         workspaceId,
-        resolve: async (candidate) => ({
-          status: "UNRESOLVED",
-          resolverId: candidate.resolverId,
-          observedAt: recoveryNow,
-          meta: { reason: "provider_wire_not_dispatched" },
-        }),
+        resolve: (candidate) =>
+          recoveryLedger.completeProviderSpendReconciliation({
+            workspaceId: candidate.workspaceId,
+            siteId: candidate.siteId,
+            buildRunId: candidate.buildRunId,
+            spendId: candidate.spendId,
+            resolverId: candidate.resolverId,
+            observedAt: recoveryNow,
+          }),
       }),
-    ).resolves.toEqual({ attempted: 1, resolved: 0 });
+    ).resolves.toEqual({ attempted: 1, resolved: 1 });
     const [recovered] = await owner.$queryRaw<
       Array<{ reconciliations: number; summaryEvents: number }>
     >`SELECT

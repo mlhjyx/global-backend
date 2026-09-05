@@ -79,6 +79,22 @@ describe("R4-B cost truth classification", () => {
     });
   });
 
+  it("drops provider token counters wider than the durable integer boundary", () => {
+    expect(
+      modelCostMeasurement({
+        taskId: "site_builder.brand_profile",
+        requestedModel: "operator-override-without-price",
+        usage: { inputTokens: 3_000_000_000, outputTokens: 3_000_000_000 },
+        reservationMicrousd: 800_000,
+      }),
+    ).toMatchObject({
+      basis: "estimated_upper_bound",
+      budgetChargeMicrousd: 800_000,
+      inputTokens: null,
+      outputTokens: null,
+    });
+  });
+
   it("accepts request-bound new-api settlement for every active model dispatch", () => {
     for (const taskId of SITE_BUILDER_TASK_IDS) {
       const target = resolveTaskExecutionTarget(taskId);
@@ -661,6 +677,7 @@ describe("R4-B stable BuildRun cost summary", () => {
           // committed FAILED/token_pricing but before appendReconciliation.
           status: "FAILED",
           costBasis: "token_pricing",
+          errorCode: "MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY",
           createdAt: new Date("2026-08-16T00:00:00.000Z"),
           reconciliations: [],
         },
@@ -698,7 +715,14 @@ describe("R4-B stable BuildRun cost summary", () => {
           spend: expect.objectContaining({
             OR: [
               { status: "RESERVED" },
-              { status: { in: ["FAILED", "RELEASED"] } },
+              {
+                status: "FAILED",
+                errorCode: "MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY",
+              },
+              {
+                status: "RELEASED",
+                errorCode: "MODEL_WIRE_NOT_DISPATCHED",
+              },
               { costBasis: { in: ["estimated_upper_bound", "unknown"] } },
             ],
           }),
@@ -752,12 +776,11 @@ describe("R4-B stable BuildRun cost summary", () => {
         receipt: null,
       },
     ]);
-    const prisma =
-      {
-        withWorkspace: vi.fn(async (_workspaceId, fn) =>
-          fn({ siteBuildProviderWireAttempt: { findMany } }),
-        ),
-      } as never;
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) =>
+        fn({ siteBuildProviderWireAttempt: { findMany } }),
+      ),
+    } as never;
 
     await expect(
       new SiteBuildCostLedger(prisma, {
@@ -875,8 +898,17 @@ describe("R4-B stable BuildRun cost summary", () => {
         observedAt: new Date("2026-08-17T00:00:00.000Z"),
       }),
     ).resolves.toMatchObject({
-      status: "UNRESOLVED",
-      meta: { reason: "provider_wire_not_dispatched" },
+      status: "RESOLVED",
+      receiptDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      costBasis: "not_incurred",
+      exactCostMicrousd: "0",
+      inputTokens: 0,
+      outputTokens: 0,
+      meta: {
+        reason: "provider_wire_not_dispatched",
+        physicalWireCount: 0,
+        notDispatchedCount: 1,
+      },
     });
     expect(queryRaw.mock.calls[0]).toEqual(
       expect.arrayContaining([

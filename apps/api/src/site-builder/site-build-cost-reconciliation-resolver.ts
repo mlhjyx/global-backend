@@ -124,14 +124,38 @@ export interface SiteBuildCostReconciliationCatalog {
   }): StoredSiteBuildSettlementContext | null;
 }
 
+export interface SiteBuildCostReconciliationRouteRequirement {
+  readonly taskId: string;
+  readonly alias: string;
+  readonly maxOutputTokens: number;
+}
+
+export function costReconciliationCatalogCoversRoutes(
+  catalog: SiteBuildCostReconciliationCatalog | undefined,
+  requirements: readonly SiteBuildCostReconciliationRouteRequirement[],
+): boolean {
+  return (
+    catalog !== undefined &&
+    requirements.length > 0 &&
+    requirements.every(
+      (requirement) =>
+        catalog.resolveContext({
+          providerId: "gateway",
+          taskId: requirement.taskId,
+          alias: requirement.alias,
+          maxOutputTokens: requirement.maxOutputTokens,
+        }) !== null,
+    )
+  );
+}
+
 function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 function positiveDurableModelInteger(value: unknown): value is number {
   return (
-    positiveSafeInteger(value) &&
-    Number(value) <= DURABLE_MODEL_NUMERIC_MAXIMUM
+    positiveSafeInteger(value) && Number(value) <= DURABLE_MODEL_NUMERIC_MAXIMUM
   );
 }
 
@@ -321,9 +345,7 @@ export class NewApiSiteBuildCostReconciliationResolver implements SiteBuildCostR
       !positiveDurableModelInteger(candidate.actualMaxOutputTokens) ||
       !positiveDurableModelInteger(candidate.maximumQuotaPoints) ||
       !boundedPrice(candidate.inputPriceMicrounitsPerMillionTokens) ||
-      !boundedPrice(
-        candidate.outputPriceMicrounitsPerMillionTokens,
-      ) ||
+      !boundedPrice(candidate.outputPriceMicrounitsPerMillionTokens) ||
       candidate.ledgerMicrousdPerPricingUnit !== 1_000_000 ||
       !new Set([
         "ALLOCATED",

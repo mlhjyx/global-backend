@@ -10,6 +10,7 @@ import type { SettlementWireIdentity } from "../model-gateway/settlement-wire-id
 import type { NewApiSettlementReadbackProbe } from "../model-gateway/new-api-request-bound-settlement";
 import { createProviderTransportObservation } from "../model-gateway/provider-transport-observation";
 import type { ModelUsage } from "../model-gateway/types";
+import { boundedModelTokenCount, MODEL_USAGE_TOKEN_MAXIMUM } from "../model-gateway/model-usage-boundary";
 import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from "./agents/model-policy.registry";
 import type { SiteBuildProviderWireWorkspaceDatabase } from "./site-build-provider-wire.database";
 
@@ -49,8 +50,10 @@ interface ModelMeasurementInput {
 
 type FrozenRate = { input: number; output: number };
 
+export const SITE_BUILD_DURABLE_TOKEN_MAXIMUM = MODEL_USAGE_TOKEN_MAXIMUM;
+
 function nonNegativeInt(value: number | undefined): number | null {
-  return Number.isInteger(value) && (value ?? -1) >= 0 ? value! : null;
+  return boundedModelTokenCount(value) ?? null;
 }
 
 function knownBrandProfileRate(model: string): FrozenRate | null {
@@ -483,7 +486,7 @@ export interface SiteBuildReconciliationObservation {
   resolverId: string;
   requestId?: string | null;
   receiptDigest?: string | null;
-  costBasis?: "provider_reported" | "token_pricing";
+  costBasis?: "provider_reported" | "token_pricing" | "not_incurred";
   exactCostMicrousd?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -1265,9 +1268,7 @@ export class SiteBuildCostLedger {
       throw new Error("atomic paid-call disable requires unknown settlement");
     }
     const database =
-      scope.kind === "model"
-        ? this.requireProviderWireDatabase()
-        : this.prisma;
+      scope.kind === "model" ? this.requireProviderWireDatabase() : this.prisma;
     const persistedCallCount =
       measurement.basis === "not_incurred" ? null : measurement.callCount;
     return database.withWorkspace(scope.workspaceId, async (tx) => {
@@ -1704,11 +1705,33 @@ export class SiteBuildCostLedger {
           }
         }
         if (physicalWires.length === 0) {
+          const receiptDigest = createHash("sha256")
+            .update(
+              JSON.stringify(
+                wires.map((wire) => ({
+                  id: wire.id,
+                  physicalWireAttempt: wire.physicalWireAttempt,
+                  state: wire.state,
+                })),
+              ),
+            )
+            .digest("hex");
           return {
-            status: "UNRESOLVED",
+            status: "RESOLVED",
             resolverId: input.resolverId,
+            receiptDigest,
+            costBasis: "not_incurred",
+            exactCostMicrousd: "0",
+            inputTokens: 0,
+            outputTokens: 0,
             observedAt: input.observedAt,
-            meta: { reason: "provider_wire_not_dispatched" },
+            meta: {
+              schemaVersion: "site-build-provider-wire-reconciliation/v1",
+              reason: "provider_wire_not_dispatched",
+              physicalWireCount: 0,
+              notDispatchedCount: wires.length,
+              resolvedWireCount: 0,
+            },
           };
         }
         if (!receiptsComplete) {
@@ -1778,7 +1801,14 @@ export class SiteBuildCostLedger {
           spend: {
             OR: [
               { status: "RESERVED" },
-              { status: { in: ["FAILED", "RELEASED"] } },
+              {
+                status: "FAILED",
+                errorCode: "MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY",
+              },
+              {
+                status: "RELEASED",
+                errorCode: "MODEL_WIRE_NOT_DISPATCHED",
+              },
               { costBasis: { in: ["estimated_upper_bound", "unknown"] } },
             ],
             reconciliations: {

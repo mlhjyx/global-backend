@@ -68,9 +68,9 @@ const CONTEXT = {
   },
 };
 
-function exactReadback(
-  input: { requestId: string },
-): NewApiRequestBoundSettlement {
+function exactReadback(input: {
+  requestId: string;
+}): NewApiRequestBoundSettlement {
   return {
     status: "settled",
     requestId: input.requestId,
@@ -103,8 +103,8 @@ function ledger() {
       physicalWireAttempt: 2 as const,
     })),
     beginModelPhysicalWire: vi.fn(async () => "DISPATCH" as const),
-    claimModelReadbackProbe: vi.fn(async () =>
-      "99999999-9999-4999-8999-999999999999"
+    claimModelReadbackProbe: vi.fn(
+      async () => "99999999-9999-4999-8999-999999999999",
     ),
     recordModelReadbackProbe: vi.fn(async () => undefined),
     recordModelPhysicalWireReceipt: vi.fn(async () => undefined),
@@ -115,7 +115,10 @@ function ledger() {
   };
 }
 
-function model(output: (attempt: 1 | 2) => unknown): ModelProvider {
+function model(
+  output: (attempt: 1 | 2) => unknown,
+  bodyUsage = { inputTokens: 120, outputTokens: 30 },
+): ModelProvider {
   return {
     id: "gateway",
     supports: () => true,
@@ -126,7 +129,7 @@ function model(output: (attempt: 1 | 2) => unknown): ModelProvider {
       const begin = await runtime.begin();
       if (begin !== "DISPATCH") throw new Error("unexpected replay");
       const observation = await runtime.resolve({
-        usage: { inputTokens: 120, outputTokens: 30 },
+        usage: bodyUsage,
         payloadState: "available",
         gatewayIdState: "observed",
         upstreamAckUnknown: false,
@@ -138,8 +141,7 @@ function model(output: (attempt: 1 | 2) => unknown): ModelProvider {
         reportedModel: "gpt-5.6-terra",
         modelResolutionSource: "upstream_response" as const,
         usage: {
-          inputTokens: 120,
-          outputTokens: 30,
+          ...bodyUsage,
           gatewaySettlements: [observation],
         },
       };
@@ -153,12 +155,17 @@ function model(output: (attempt: 1 | 2) => unknown): ModelProvider {
 function gateway(input: {
   provider: ModelProvider;
   paidLedger: ReturnType<typeof ledger>;
-  resolve?: (input: { requestId: string }) => Promise<NewApiRequestBoundSettlement>;
+  resolve?: (input: {
+    requestId: string;
+  }) => Promise<NewApiRequestBoundSettlement>;
   trace?: Pick<AiTraceSink, "record">;
 }) {
-  const instance = new RouterModelGateway({
-    route: () => [input.provider],
-  } as unknown as ModelRouter, input.trace as AiTraceSink | undefined);
+  const instance = new RouterModelGateway(
+    {
+      route: () => [input.provider],
+    } as unknown as ModelRouter,
+    input.trace as AiTraceSink | undefined,
+  );
   instance.paidLedger = input.paidLedger as unknown as SiteBuildCostLedger;
   instance.costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv({
@@ -176,23 +183,24 @@ function gateway(input: {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("RouterModelGateway settlement-readback/v1", () => {
-  it("keeps invalid model content out of trace and Spend metadata", async () => {
+  it.each(["content", "model", "status"] as const)("keeps invalid model %s out of trace and Spend metadata", async (field) => {
     const sentinel = "invalid-model-output-sentinel";
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            status: "completed",
-            model: "gpt-5.6-terra",
-            output: [{ content: [{ type: "output_text", text: sentinel }] }],
-            usage: { input_tokens: 120, output_tokens: 30 },
-          }),
-          {
-            status: 200,
-            headers: { "x-oneapi-request-id": "gateway-observed" },
-          },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+            status: field === "status" ? sentinel : "completed",
+            model: field === "model" ? sentinel : "gpt-5.6-terra",
+            output: [{ content: [{ type: "output_text", text: field === "content" ? sentinel : '{"ok":true}' }] }],
+              usage: { input_tokens: 120, output_tokens: 30 },
+            }),
+            {
+              status: 200,
+              headers: { "x-oneapi-request-id": "gateway-observed" },
+            },
+          ),
       ),
     );
     const paidLedger = ledger();
@@ -220,7 +228,7 @@ describe("RouterModelGateway settlement-readback/v1", () => {
       )
       .catch((cause: unknown) => cause);
 
-    expect(error).toMatchObject({ name: "ProviderOutputError" });
+    expect(error).toBeInstanceOf(Error);
     expect((error as Error).cause).toBeUndefined();
     expect(String(error)).not.toContain(sentinel);
     const traceEntry = trace.record.mock.calls.at(-1)?.[0];
@@ -352,7 +360,8 @@ describe("RouterModelGateway settlement-readback/v1", () => {
       wireAttemptId: WIRE_ID_1,
     });
     expect(
-      paidLedger.finalizeModelPhysicalWireNotDispatched.mock.invocationCallOrder[0],
+      paidLedger.finalizeModelPhysicalWireNotDispatched.mock
+        .invocationCallOrder[0],
     ).toBeLessThan(paidLedger.settleOperation.mock.invocationCallOrder[0]!);
     expect(paidLedger.settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -430,7 +439,10 @@ describe("RouterModelGateway settlement-readback/v1", () => {
 
   it("keeps a valid payload successful at the upper bound when readback is unavailable", async () => {
     const paidLedger = ledger();
-    const provider = model(() => ({ ok: true }));
+    const provider = model(() => ({ ok: true }), {
+      inputTokens: 3_000_000_000,
+      outputTokens: 3_000_000_000,
+    });
     const instance = gateway({
       provider,
       paidLedger,
@@ -444,6 +456,12 @@ describe("RouterModelGateway settlement-readback/v1", () => {
       }),
     });
 
+    const durableReplayResult = vi.fn((result: Record<string, unknown>) => {
+      const usage = result.usage as { inputTokens?: number; outputTokens?: number };
+      expect(usage.inputTokens).toBeUndefined();
+      expect(usage.outputTokens).toBeUndefined();
+      return result;
+    });
     await expect(
       instance.generateStructured(
         {
@@ -454,7 +472,7 @@ describe("RouterModelGateway settlement-readback/v1", () => {
           maxCostCents: 40,
           maxTokens: 1_000,
         },
-        CONTEXT,
+        { ...CONTEXT, paidCost: { ...CONTEXT.paidCost, durableReplayResult } },
       ),
     ).resolves.toMatchObject({ data: { ok: true } });
     expect(paidLedger.settleOperation).toHaveBeenCalledWith(
@@ -463,9 +481,13 @@ describe("RouterModelGateway settlement-readback/v1", () => {
         measurement: expect.objectContaining({
           basis: "estimated_upper_bound",
           budgetChargeMicrousd: 800_000,
+          inputTokens: null,
+          outputTokens: null,
         }),
       }),
     );
+    expect(paidLedger.disablePaidCalls).not.toHaveBeenCalled();
+    expect(durableReplayResult).toHaveBeenCalledOnce();
     expect(paidLedger.allocateModelPhysicalWire).not.toHaveBeenCalled();
   });
 

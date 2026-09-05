@@ -338,7 +338,7 @@ describe("OpenAICompatibleProvider — request-bound settlement observation", ()
 });
 
 describe("OpenAICompatibleProvider — 空输出显式失败", () => {
-  it("content 为空 + finish_reason=length → 抛 ProviderOutputError（含 finish_reason/模型名，携带 usage）", async () => {
+  it("content 为空 + finish_reason=length → 抛稳定 ProviderOutputError 并携带 usage", async () => {
     mockChatResponse({
       choices: [{ message: { content: "" }, finish_reason: "length" }],
       usage: { prompt_tokens: 300, completion_tokens: 2000 },
@@ -353,9 +353,7 @@ describe("OpenAICompatibleProvider — 空输出显式失败", () => {
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
-    expect((err as Error).message).toMatch(
-      /empty content.*finish_reason=length/s,
-    );
+    expect((err as Error).message).toBe("STRUCTURED_OUTPUT_EMPTY_TRUNCATED");
     // 🔴 改动 2：花了 token 却失败必须带 usage，供网关 catch 结算（否则绕过硬预算上界）
     expect((err as ProviderOutputError).usage).toEqual({
       inputTokens: 300,
@@ -378,9 +376,7 @@ describe("OpenAICompatibleProvider — 空输出显式失败", () => {
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
-    expect((err as Error).message).toMatch(
-      /empty content.*finish_reason=stop.*no visible message content/s,
-    );
+    expect((err as Error).message).toBe("STRUCTURED_OUTPUT_EMPTY");
     expect((err as Error).message).not.toMatch(/output truncated/);
     expect((err as ProviderOutputError).usage).toEqual({
       inputTokens: 300,
@@ -403,7 +399,7 @@ describe("OpenAICompatibleProvider — 空输出显式失败", () => {
 
   it("new-api 返回已解析模型时，保留该模型用于可重放 trace", async () => {
     mockChatResponse({
-      model: "upstream/claude-sonnet-5-2026-07-18",
+      model: "default-model",
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: {},
     });
@@ -413,8 +409,8 @@ describe("OpenAICompatibleProvider — 空输出显式失败", () => {
       schema: {},
     });
     expect(r).toMatchObject({
-      model: "upstream/claude-sonnet-5-2026-07-18",
-      reportedModel: "upstream/claude-sonnet-5-2026-07-18",
+      model: "default-model",
+      reportedModel: "default-model",
       modelResolutionSource: "upstream_response",
     });
   });
@@ -441,7 +437,10 @@ describe("OpenAICompatibleProvider — 空输出显式失败", () => {
     const sentinel = "pump-output-sentinel";
     mockChatResponse({
       choices: [
-        { message: { content: `{"facts": ["${sentinel}` }, finish_reason: "length" },
+        {
+          message: { content: `{"facts": ["${sentinel}` },
+          finish_reason: "length",
+        },
       ],
       usage: { prompt_tokens: 120, completion_tokens: 800 },
     });
@@ -450,7 +449,7 @@ describe("OpenAICompatibleProvider — 空输出显式失败", () => {
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
-    expect((err as Error).message).toMatch(/output truncated at max_tokens/);
+    expect((err as Error).message).toBe("STRUCTURED_OUTPUT_TRUNCATED");
     expect((err as Error).message).not.toContain(sentinel);
     expect((err as Error).cause).toBeUndefined();
     expect((err as ProviderOutputError).usage).toEqual({
@@ -513,7 +512,7 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
       modelTransports: { "gpt-5.6-terra": "openai-responses" },
     });
     mockChatResponse({
-      model: "gpt-5.6-terra-2026-07-18",
+      model: "gpt-5.6-terra",
       status: "completed",
       output_text: "",
       output: [
@@ -536,7 +535,7 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
 
     expect(result).toMatchObject({
       data: { ok: true },
-      model: "gpt-5.6-terra-2026-07-18",
+      model: "gpt-5.6-terra",
       usage: { inputTokens: 101, outputTokens: 45 },
     });
     expect(lastRequestUrl()).toBe("http://gw.test/v1/responses");
@@ -581,7 +580,7 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
       })
       .catch((err: unknown) => err);
     expect(error).toBeInstanceOf(ProviderOutputError);
-    expect((error as Error).message).toContain("status=incomplete");
+    expect((error as Error).message).toBe("RESPONSES_STATUS_INVALID");
     expect((error as ProviderOutputError).usage).toEqual({
       inputTokens: 101,
       outputTokens: 456,
@@ -594,6 +593,76 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
     });
   });
 
+  it("rejects an untrusted reported-model discriminator without persisting it", async () => {
+    const sentinel = "model identity contains private response material";
+    const responses = new OpenAICompatibleProvider({
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "gpt-5.6-terra",
+      modelTransports: { "gpt-5.6-terra": "openai-responses" },
+    });
+    mockChatResponse({
+      model: sentinel,
+      status: "completed",
+      output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+
+    const error = await responses
+      .generateStructured({
+        task: "t",
+        prompt: "p",
+        schema: {},
+        maxTokens: 100,
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ProviderIdentityError);
+    expect((error as Error).message).toBe("MODEL_IDENTITY_MISMATCH");
+    expect(JSON.stringify(error)).not.toContain(sentinel);
+    expect(String(error)).not.toContain(sentinel);
+  });
+
+  it.each([
+    ["openai-responses", { status: "private status material" }],
+    ["anthropic-messages", { stop_reason: "private stop material" }],
+  ])(
+    "redacts an untrusted %s completion discriminator",
+    async (transport, override) => {
+      const sentinel = Object.values(override)[0]!;
+      const model =
+        transport === "openai-responses" ? "gpt-5.6-terra" : "claude-sonnet-5";
+      const native = new OpenAICompatibleProvider({
+        id: "gateway",
+        baseUrl: "http://gw.test/v1",
+        apiKey: "k",
+        model,
+        modelTransports: { [model]: transport as GatewayModelTransport },
+      });
+      mockChatResponse({
+        model,
+        status: "completed",
+        stop_reason: "end_turn",
+        output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }],
+        content: [{ type: "tool_use", name: "json", input: { ok: true } }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+        ...override,
+      });
+
+      const error = await native
+        .generateStructured({
+          task: "t",
+          prompt: "p",
+          schema: {},
+          maxTokens: 100,
+        })
+        .catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect(String(error)).not.toContain(sentinel);
+    },
+  );
+
   it("Claude Messages sends the evaluated native schema/reasoning shape and excludes thinking from output", async () => {
     const messages = new OpenAICompatibleProvider({
       id: "gateway",
@@ -603,7 +672,7 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
       modelTransports: { "claude-sonnet-5": "anthropic-messages" },
     });
     mockChatResponse({
-      model: "claude-sonnet-5-2026-07-18",
+      model: "claude-sonnet-5",
       stop_reason: "end_turn",
       content: [
         {
@@ -625,7 +694,7 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
 
     expect(result).toMatchObject({
       data: { ok: true },
-      model: "claude-sonnet-5-2026-07-18",
+      model: "claude-sonnet-5",
       usage: { inputTokens: 99, outputTokens: 55 },
     });
     expect(lastRequestUrl()).toBe("http://gw.test/v1/messages");
@@ -704,7 +773,7 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
         })
         .catch((err: unknown) => err);
       expect(error).toBeInstanceOf(ProviderOutputError);
-      expect((error as Error).message).toContain(`stop_reason=${stopReason}`);
+      expect((error as Error).message).toBe("ANTHROPIC_OUTPUT_TRUNCATED");
       expect((error as ProviderOutputError).usage).toEqual({
         inputTokens: 99,
         outputTokens: 456,
@@ -762,7 +831,10 @@ describe("OpenAICompatibleProvider — bounded vision review", () => {
       response: {
         model: "gemini-3.5-flash",
         choices: [
-          { message: { content: "vision-output-sentinel" }, finish_reason: "stop" },
+          {
+            message: { content: "vision-output-sentinel" },
+            finish_reason: "stop",
+          },
         ],
       },
     },
@@ -773,7 +845,9 @@ describe("OpenAICompatibleProvider — bounded vision review", () => {
         model: "gpt-5.6-sol",
         status: "completed",
         output: [
-          { content: [{ type: "output_text", text: "vision-output-sentinel" }] },
+          {
+            content: [{ type: "output_text", text: "vision-output-sentinel" }],
+          },
         ],
       },
     },
@@ -1440,6 +1514,67 @@ describe("OpenAICompatibleProvider — bounded vision review", () => {
       model: "gemini-3.5-flash",
     });
     expect((error as Error).message).not.toContain(sentinel);
+  });
+});
+
+describe("provider response discriminator redaction", () => {
+  const variants = [
+    { mode: 'text', protocol: 'openai-chat-completions', model: 'gpt-5.6-terra' },
+    { mode: 'text', protocol: 'openai-responses', model: 'gpt-5.6-terra' },
+    { mode: 'text', protocol: 'anthropic-messages', model: 'claude-sonnet-5' },
+    { mode: 'vision', protocol: 'openai-chat-completions', model: 'gemini-3.5-flash' },
+    { mode: 'vision', protocol: 'openai-responses', model: 'gpt-5.6-sol' },
+    { mode: 'vision', protocol: 'anthropic-messages', model: 'claude-sonnet-5' },
+    { mode: 'vision', protocol: 'google-generate-content', model: 'gemini-3.5-flash' },
+  ] as const;
+  it.each(variants.flatMap((variant) => ['model', 'finish'].map((field) => ({ ...variant, field }))))(
+    'redacts $mode $protocol $field from errors and provenance',
+    async ({ mode, protocol, model, field }) => {
+      const sentinel = 'private-response-discriminator-sentinel';
+      const reported = field === 'model' ? sentinel : model;
+      const finish = (normal: string) => field === 'finish' ? sentinel : normal;
+      mockChatResponse({
+        model: reported,
+        modelVersion: reported,
+        choices: [{ message: { content: '{"ok":true}' }, finish_reason: finish('stop') }],
+        status: finish('completed'),
+        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+        stop_reason: finish('end_turn'),
+        content: [{ type: mode === 'text' ? 'tool_use' : 'text', name: 'json', input: { ok: true }, text: '{"ok":true}' }],
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: finish('STOP') }],
+        usage: {},
+      });
+      const native = new OpenAICompatibleProvider({
+        id: 'gateway', baseUrl: 'http://gw.test/v1', apiKey: 'k', model,
+        ...(mode === 'text' ? { modelTransports: { [model]: protocol as GatewayModelTransport } } : { visionModelTransports: { [model]: protocol } }),
+        visionEvalFixtureDigests: Object.fromEntries(visionInput().images.map((image) => [image.artifactId, image.sha256])),
+      });
+      const error = await (mode === 'vision'
+        ? native.reviewVision({ ...visionInput(), model, maxTokens: 4_000 })
+        : native.generateStructured({ task: 't', prompt: 'p', schema: {}, model, maxTokens: 4_000 }))
+        .catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect(String(error)).not.toContain(sentinel);
+      expect(JSON.stringify(error)).not.toContain(sentinel);
+      expect((error as Error).cause).toBeUndefined();
+    },
+  );
+
+  it.each(['embed', 'google-vision'] as const)('cancels %s HTTP body without reading it', async (mode) => {
+    const text = vi.fn(async () => 'private-http-body-sentinel');
+    const cancel = vi.fn(async () => undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 502, text, body: { cancel } })));
+    const native = new OpenAICompatibleProvider({
+      id: 'gateway', baseUrl: 'http://gw.test/v1', apiKey: 'k', model: 'gemini-3.5-flash', embedModel: 'embed-model',
+      visionModelTransports: { 'gemini-3.5-flash': 'google-generate-content' },
+      visionEvalFixtureDigests: Object.fromEntries(visionInput().images.map((image) => [image.artifactId, image.sha256])),
+    });
+    const error = await (mode === 'embed' ? native.embed({ task: 't', input: ['p'] }) : native.reviewVision(visionInput()))
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ProviderHttpError);
+    expect(text).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(String(error)).not.toContain('private-http-body-sentinel');
   });
 });
 

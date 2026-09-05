@@ -20,8 +20,12 @@ import {
   ReviewVisionInput,
   VISION_REVIEW_MATERIAL_CLASSES,
 } from "../types";
-import { resolveReportedModelIdentity } from "../model-identity";
+import {
+  canonicalReportedModelIdentifier,
+  resolveReportedModelIdentity,
+} from "../model-identity";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
+import { boundedModelUsage } from "../model-usage-boundary";
 import {
   createProviderTransportObservation,
   modelSettlementErrorCode,
@@ -80,33 +84,28 @@ export function stripJsonFence(content: string): string {
 
 function resolutionProvenance(
   requestedModel: string,
-  reportedModel?: string,
+  reportedModel?: unknown,
   transport?: GatewayVisionTransport,
 ): {
   model: string;
   reportedModel?: string;
   modelResolutionSource: ModelResolutionSource;
 } {
+  const reported = canonicalReportedModelIdentifier(reportedModel);
   const canonical = resolveReportedModelIdentity(
     requestedModel,
-    reportedModel,
+    reported,
     transport,
   );
   if (!canonical) {
-    return reportedModel
-      ? {
-          model: reportedModel,
-          reportedModel,
-          modelResolutionSource: "upstream_response",
-        }
-      : {
-          model: requestedModel,
-          modelResolutionSource: "requested_fallback",
-        };
+    return {
+      model: requestedModel,
+      modelResolutionSource: "requested_fallback",
+    };
   }
   return {
     model: canonical,
-    reportedModel,
+    reportedModel: reported,
     modelResolutionSource: "upstream_response",
   };
 }
@@ -357,12 +356,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
       // finish instead means the OpenAI-compatible response exposed no visible
       // content despite completing, which is a distinct gateway/model issue.
       // 🔴 改动 2：携带 usage——空输出仍消耗了 token，网关 catch 据此结算（否则绕过硬预算上界）。
-      const cause =
-        finishReason === "length"
-          ? "reasoning budget exhausted or output truncated; check maxTokens/reasoningEffort"
-          : "upstream returned no visible message content; inspect OpenAI-compatible content/reasoning mapping";
       throw new ProviderOutputError(
-        `${this.id} ${model}: empty content (finish_reason=${finishReason ?? "unknown"}) — ${cause}`,
+        finishReason === "length"
+          ? "STRUCTURED_OUTPUT_EMPTY_TRUNCATED"
+          : "STRUCTURED_OUTPUT_EMPTY",
         usage,
         {
           provider: this.id,
@@ -383,14 +380,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
       // JSON 解析失败三种同根因（都花了 token → 均带 usage 供网关结算，改动 2）：
       // ① finish_reason=length = 输出中途截断（真机实证：v4-pro「Unterminated string」）——显式指向 maxTokens。
       if (finishReason === "length") {
-        throw new ProviderOutputError(
-          `${this.id} ${model}: output truncated at max_tokens (finish_reason=length), JSON incomplete — raise maxTokens`,
-          usage,
-          {
-            provider: this.id,
-            ...resolutionProvenance(model, resolvedModel),
-          },
-        );
+        throw new ProviderOutputError("STRUCTURED_OUTPUT_TRUNCATED", usage, {
+          provider: this.id,
+          ...resolutionProvenance(model, resolvedModel),
+        });
       }
       // ② 非截断的解析失败（模型返回非 JSON 文本）。原始文本和
       // SyntaxError 都可能包含模型内容，不能进入 trace/cause。
@@ -444,8 +437,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
       headers: this.headers(),
       body: JSON.stringify({ model: this.cfg.embedModel, input: input.input }),
     });
-    if (!res.ok)
-      throw new Error(`${this.id} embed ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new ProviderHttpError({
+        status: res.status,
+        provider: this.id,
+        model: this.cfg.embedModel,
+      });
+    }
     const json = (await res.json()) as { data: { embedding: number[] }[] };
     return {
       data: json.data.map((d) => d.embedding),
@@ -460,6 +459,32 @@ export class OpenAICompatibleProvider implements ModelProvider {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.cfg.apiKey}`,
     };
+  }
+
+  private trustedReportedModel(
+    requestedModel: string,
+    value: unknown,
+    transport: GatewayVisionTransport,
+    usage: ModelUsage | undefined,
+    required: boolean,
+    errorCode = "MODEL_IDENTITY_MISMATCH",
+  ): string | undefined {
+    const absent = value === undefined || value === null || value === "";
+    if (absent && !required) return undefined;
+    const reportedModel = canonicalReportedModelIdentifier(value);
+    const resolvedModel = resolveReportedModelIdentity(
+      requestedModel,
+      reportedModel,
+      transport,
+    );
+    if (!reportedModel || !resolvedModel) {
+      throw new ProviderIdentityError(errorCode, usage, {
+        provider: this.id,
+        model: requestedModel,
+        modelResolutionSource: "requested_fallback",
+      });
+    }
+    return reportedModel;
   }
 
   private async complete(
@@ -631,7 +656,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     bodyUsage: Pick<ModelUsage, "inputTokens" | "outputTokens">,
   ): ModelUsage {
     const observations = settlementUsage?.gatewaySettlements;
-    if (!observations) return bodyUsage;
+    if (!observations) return boundedModelUsage(bodyUsage);
     const settled = observations.filter(
       (observation) => observation.status === "settled",
     );
@@ -652,7 +677,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         bodyUsage.inputTokens !== settledInputTokens) ||
         (bodyUsage.outputTokens !== undefined &&
           bodyUsage.outputTokens !== settledOutputTokens));
-    return {
+    return boundedModelUsage({
       inputTokens:
         settled.length === observations.length
           ? settledInputTokens
@@ -677,7 +702,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             }),
           }))
         : observations,
-    };
+    });
   }
 
   private async parseResponseJson<T>(
@@ -796,11 +821,37 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    const reportedModel = this.trustedReportedModel(
+      opts.model,
+      json.model,
+      "openai-chat-completions",
+      usage,
+      false,
+    );
+    const finishReason = json.choices?.[0]?.finish_reason;
+    if (
+      finishReason !== undefined &&
+      finishReason !== "stop" &&
+      finishReason !== "length"
+    ) {
+      throw new ProviderOutputError(
+        "CHAT_COMPLETIONS_FINISH_REASON_INVALID",
+        usage,
+        {
+          provider: this.id,
+          ...resolutionProvenance(
+            opts.model,
+            reportedModel,
+            "openai-chat-completions",
+          ),
+        },
+      );
+    }
     return {
       content: json.choices?.[0]?.message?.content ?? "",
       usage,
-      finishReason: json.choices?.[0]?.finish_reason,
-      model: json.model?.trim() || undefined,
+      finishReason,
+      model: reportedModel,
     };
   }
 
@@ -863,7 +914,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    const reportedModel = json.model?.trim() || undefined;
+    const reportedModel = this.trustedReportedModel(
+      input.model,
+      json.model,
+      "openai-chat-completions",
+      usage,
+      true,
+      "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
+    );
     const resolvedModel = resolveReportedModelIdentity(
       input.model,
       reportedModel,
@@ -874,14 +932,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
       reportedModel,
       "openai-chat-completions",
     );
-    if (!reportedModel || !resolvedModel) {
+    if (!resolvedModel) {
       throw new ProviderIdentityError(
-        `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? "missing"}`,
+        "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     const finishReason = json.choices?.[0]?.finish_reason;
@@ -894,12 +949,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
     if (finishReason !== "stop") {
       throw new ProviderOutputError(
-        `VISION_REVIEW_FINISH_REASON_INVALID: ${finishReason ?? "missing"}`,
+        "VISION_REVIEW_FINISH_REASON_INVALID",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     if (!raw.trim()) {
@@ -920,14 +972,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
       };
     } catch {
-      throw new ProviderOutputError(
-        "VISION_REVIEW_OUTPUT_NOT_JSON",
-        usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
-      );
+      throw new ProviderOutputError("VISION_REVIEW_OUTPUT_NOT_JSON", usage, {
+        provider: this.id,
+        ...provenance,
+      });
     }
   }
 
@@ -1000,7 +1048,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    const reportedModel = json.model?.trim() || undefined;
+    const reportedModel = this.trustedReportedModel(
+      input.model,
+      json.model,
+      "openai-responses",
+      usage,
+      true,
+      "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
+    );
     const resolvedModel = resolveReportedModelIdentity(
       input.model,
       reportedModel,
@@ -1011,24 +1066,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
       reportedModel,
       "openai-responses",
     );
-    if (!reportedModel || !resolvedModel) {
+    if (!resolvedModel) {
       throw new ProviderIdentityError(
-        `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? "missing"}`,
+        "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     if (json.status !== "completed") {
       throw new ProviderOutputError(
-        `VISION_REVIEW_FINISH_REASON_INVALID: ${json.status ?? "missing"}`,
+        "VISION_REVIEW_FINISH_REASON_INVALID",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     const raw =
@@ -1060,14 +1109,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
       };
     } catch {
-      throw new ProviderOutputError(
-        "VISION_REVIEW_OUTPUT_NOT_JSON",
-        usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
-      );
+      throw new ProviderOutputError("VISION_REVIEW_OUTPUT_NOT_JSON", usage, {
+        provider: this.id,
+        ...provenance,
+      });
     }
   }
 
@@ -1146,7 +1191,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    const reportedModel = json.model?.trim() || undefined;
+    const reportedModel = this.trustedReportedModel(
+      input.model,
+      json.model,
+      "anthropic-messages",
+      usage,
+      true,
+      "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
+    );
     const resolvedModel = resolveReportedModelIdentity(
       input.model,
       reportedModel,
@@ -1157,14 +1209,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
       reportedModel,
       "anthropic-messages",
     );
-    if (!reportedModel || !resolvedModel) {
+    if (!resolvedModel) {
       throw new ProviderIdentityError(
-        `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? "missing"}`,
+        "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     if (json.stop_reason === "max_tokens") {
@@ -1175,12 +1224,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
     if (json.stop_reason !== "end_turn") {
       throw new ProviderOutputError(
-        `VISION_REVIEW_FINISH_REASON_INVALID: ${json.stop_reason ?? "missing"}`,
+        "VISION_REVIEW_FINISH_REASON_INVALID",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     const raw = (json.content ?? [])
@@ -1205,14 +1251,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
       };
     } catch {
-      throw new ProviderOutputError(
-        "VISION_REVIEW_OUTPUT_NOT_JSON",
-        usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
-      );
+      throw new ProviderOutputError("VISION_REVIEW_OUTPUT_NOT_JSON", usage, {
+        provider: this.id,
+        ...provenance,
+      });
     }
   }
 
@@ -1269,11 +1311,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
       },
     );
     if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined);
       throw new ProviderHttpError({
         status: res.status,
         provider: this.id,
         model: input.model,
-        responseExcerpt: (await res.text()).slice(0, 300),
       });
     }
     const json = (await res.json()) as {
@@ -1299,7 +1341,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
         (json.usageMetadata?.candidatesTokenCount ?? 0) +
         (json.usageMetadata?.thoughtsTokenCount ?? 0),
     };
-    const reportedModel = json.modelVersion?.trim() || undefined;
+    const reportedModel = this.trustedReportedModel(
+      input.model,
+      json.modelVersion,
+      "google-generate-content",
+      usage,
+      true,
+      "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
+    );
     const resolvedModel = resolveReportedModelIdentity(
       input.model,
       reportedModel,
@@ -1310,14 +1359,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
       reportedModel,
       "google-generate-content",
     );
-    if (!reportedModel || !resolvedModel) {
+    if (!resolvedModel) {
       throw new ProviderIdentityError(
-        `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? "missing"}`,
+        "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     const finishReason = json.candidates?.[0]?.finishReason;
@@ -1329,12 +1375,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
     if (finishReason !== "STOP") {
       throw new ProviderOutputError(
-        `VISION_REVIEW_FINISH_REASON_INVALID: ${finishReason ?? "missing"}`,
+        "VISION_REVIEW_FINISH_REASON_INVALID",
         usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
+        { provider: this.id, ...provenance },
       );
     }
     const raw = (json.candidates?.[0]?.content?.parts ?? [])
@@ -1359,14 +1402,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
       };
     } catch {
-      throw new ProviderOutputError(
-        "VISION_REVIEW_OUTPUT_NOT_JSON",
-        usage,
-        {
-          provider: this.id,
-          ...provenance,
-        },
-      );
+      throw new ProviderOutputError("VISION_REVIEW_OUTPUT_NOT_JSON", usage, {
+        provider: this.id,
+        ...provenance,
+      });
     }
   }
 
@@ -1438,22 +1477,25 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    const reportedModel = this.trustedReportedModel(
+      opts.model,
+      json.model,
+      "openai-responses",
+      usage,
+      false,
+    );
     if (json.status !== "completed") {
-      throw new ProviderOutputError(
-        `${this.id} ${opts.model}: Responses request did not complete (status=${json.status ?? "unknown"})`,
-        usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(opts.model, json.model?.trim() || undefined),
-        },
-      );
+      throw new ProviderOutputError("RESPONSES_STATUS_INVALID", usage, {
+        provider: this.id,
+        ...resolutionProvenance(opts.model, reportedModel, "openai-responses"),
+      });
     }
     return {
       content: nestedContent || json.output_text || "",
       usage,
       // Preserve the existing ProviderOutputError branch vocabulary.
       finishReason: "stop",
-      model: json.model?.trim() || undefined,
+      model: reportedModel,
     };
   }
 
@@ -1557,18 +1599,39 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    const reportedModel = this.trustedReportedModel(
+      opts.model,
+      json.model,
+      "anthropic-messages",
+      usage,
+      false,
+    );
     if (
       json.stop_reason === "max_tokens" ||
       json.stop_reason === "model_context_window_exceeded"
     ) {
-      throw new ProviderOutputError(
-        `${this.id} ${opts.model}: Claude response truncated (stop_reason=${json.stop_reason})`,
-        usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(opts.model, json.model?.trim() || undefined),
-        },
-      );
+      throw new ProviderOutputError("ANTHROPIC_OUTPUT_TRUNCATED", usage, {
+        provider: this.id,
+        ...resolutionProvenance(
+          opts.model,
+          reportedModel,
+          "anthropic-messages",
+        ),
+      });
+    }
+    if (
+      json.stop_reason !== undefined &&
+      json.stop_reason !== "end_turn" &&
+      !(opts.outputSchema && json.stop_reason === "tool_use")
+    ) {
+      throw new ProviderOutputError("ANTHROPIC_STOP_REASON_INVALID", usage, {
+        provider: this.id,
+        ...resolutionProvenance(
+          opts.model,
+          reportedModel,
+          "anthropic-messages",
+        ),
+      });
     }
     const toolOutput = (json.content ?? [])
       .filter((item) => item.type === "tool_use" && item.name === "json")
@@ -1580,7 +1643,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
         {
           provider: this.id,
-          ...resolutionProvenance(opts.model, json.model?.trim() || undefined),
+          ...resolutionProvenance(
+            opts.model,
+            reportedModel,
+            "anthropic-messages",
+          ),
         },
       );
     }
@@ -1594,8 +1661,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
           .map((item) => item.text ?? "")
           .join(""),
       usage,
-      finishReason: json.stop_reason === "end_turn" ? "stop" : json.stop_reason,
-      model: json.model?.trim() || undefined,
+      finishReason:
+        json.stop_reason === "end_turn" || json.stop_reason === "tool_use"
+          ? "stop"
+          : undefined,
+      model: reportedModel,
     };
   }
 }

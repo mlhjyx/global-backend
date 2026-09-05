@@ -134,10 +134,29 @@ SQL
 
 run_psql ADMIN --quiet <<'SQL'
 SELECT 1 / ((
-  NOT has_function_privilege('runtime_api', 'reserve_site_build_model_spend_v1(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,BIGINT,JSONB,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,INTEGER,INTEGER,INTEGER,INTEGER,INTEGER,BIGINT,VARCHAR,VARCHAR,VARCHAR,BIGINT,BIGINT,BIGINT)', 'EXECUTE')
-  AND NOT has_function_privilege('runtime_outbox_relay', 'reserve_site_build_model_spend_v1(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,BIGINT,JSONB,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,INTEGER,INTEGER,INTEGER,INTEGER,INTEGER,BIGINT,VARCHAR,VARCHAR,VARCHAR,BIGINT,BIGINT,BIGINT)', 'EXECUTE')
-  AND NOT has_function_privilege('runtime_api', 'finalize_site_build_provider_wire_not_dispatched_v1(UUID,UUID)', 'EXECUTE')
-  AND NOT has_function_privilege('runtime_outbox_relay', 'finalize_site_build_provider_wire_not_dispatched_v1(UUID,UUID)', 'EXECUTE')
+  NOT EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('runtime_api'),
+      ('runtime_outbox_relay')
+    ) AS denied_roles(role_name)
+    CROSS JOIN (VALUES
+      ('reserve_site_build_model_spend_v1(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,BIGINT,JSONB,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,INTEGER,INTEGER,INTEGER,INTEGER,INTEGER,BIGINT,VARCHAR,VARCHAR,VARCHAR,BIGINT,BIGINT,BIGINT)'),
+      ('allocate_site_build_provider_wire_v1(UUID,UUID,UUID,VARCHAR,UUID,VARCHAR,VARCHAR,VARCHAR)'),
+      ('begin_site_build_provider_wire_v1(UUID,UUID,UUID)'),
+      ('claim_site_build_provider_readback_probe_v1(UUID,UUID,INTEGER)'),
+      ('record_site_build_provider_readback_probe_v1(UUID,UUID,VARCHAR,INTEGER,TIMESTAMPTZ)'),
+      ('record_site_build_provider_wire_receipt_v1(UUID,UUID,VARCHAR,VARCHAR,VARCHAR,INTEGER,BIGINT,INTEGER,INTEGER,BIGINT,VARCHAR,TIMESTAMPTZ)'),
+      ('finalize_site_build_provider_wire_v1(UUID,UUID,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,TIMESTAMPTZ)'),
+      ('finalize_site_build_provider_wire_from_receipt_v1(UUID,UUID)'),
+      ('finalize_site_build_provider_wire_not_dispatched_v1(UUID,UUID)')
+    ) AS worker_functions(signature)
+    WHERE has_function_privilege(
+      denied_roles.role_name,
+      worker_functions.signature,
+      'EXECUTE'
+    )
+  )
 ))::integer;
 SQL
 

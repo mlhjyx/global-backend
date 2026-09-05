@@ -2261,7 +2261,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         ) att ON TRUE
         WHERE (
             s.status = 'RESERVED'
-            OR s.status IN ('FAILED', 'RELEASED')
+            OR (
+              s.status = 'FAILED'
+              AND s.error_code = 'MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY'
+            )
+            OR (
+              s.status = 'RELEASED'
+              AND s.error_code = 'MODEL_WIRE_NOT_DISPATCHED'
+            )
             OR s.cost_basis IN ('estimated_upper_bound', 'unknown')
           )
           AND (

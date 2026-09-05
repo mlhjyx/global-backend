@@ -1137,7 +1137,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     expect(model.generateStructured).not.toHaveBeenCalled();
   });
 
-  it("turns a success-settlement ACK loss into a non-fallback paid-operation error", async () => {
+  it("replays an identical success settlement after ACK loss without another provider call", async () => {
     const execute = vi.fn(async () => ({
       data: { ok: true },
       provider: "gateway",
@@ -1146,14 +1146,16 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     }));
     const model = provider(execute);
     const disablePaidCalls = vi.fn(async () => undefined);
+    const settleOperation = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("database response lost"))
+      .mockResolvedValueOnce("REPLAY");
     const gateway = new RouterModelGateway({
       route: () => [model],
     } as unknown as ModelRouter);
     gateway.paidLedger = {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
-      settleOperation: vi.fn(async () => {
-        throw new Error("database response lost");
-      }),
+      settleOperation,
       disablePaidCalls,
     } as never;
     installSettlementV1(gateway);
@@ -1170,13 +1172,11 @@ describe("RouterModelGateway persistent paid-call gate", () => {
         },
         paidModelContext,
       ),
-    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+    ).resolves.toMatchObject({ data: { ok: true } });
     expect(execute).toHaveBeenCalledOnce();
-    expect(disablePaidCalls).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      RUN_ID,
-      "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
-    );
+    expect(settleOperation).toHaveBeenCalledTimes(2);
+    expect(settleOperation.mock.calls[1]).toEqual(settleOperation.mock.calls[0]);
+    expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
   it("freezes the BuildRun when settlement returns a non-SETTLED decision", async () => {

@@ -6,15 +6,19 @@ export class SiteBuildRuntimeGuard {
   constructor(private readonly readiness: RuntimeReadinessService) {}
 
   async assertReady(input: { paidReachable: boolean }): Promise<void> {
-    const report = await this.readiness.checkHardComponents();
+    // Paid admission uses one report that refreshes hard components and the
+    // settlement capability together. Two separate reports create a TOCTOU
+    // window when a dependency changes between probes.
+    const report = input.paidReachable
+      ? await this.readiness.checkSiteBuilderPaidCapability()
+      : await this.readiness.checkHardComponents();
     const failedComponents = Object.entries(report.components)
       .filter(([, component]) => component.status !== "ok")
       .map(([component, status]) => ({ component, code: status.code }));
     let failedCapabilities: Array<{ capability: string; code: string }> = [];
-    if (report.status === "ready" && input.paidReachable) {
-      const paid = await this.readiness.checkSiteBuilderPaidCapability();
+    if (input.paidReachable) {
       const settlement =
-        paid.capabilities.site_builder_model_settlement_readback;
+        report.capabilities.site_builder_model_settlement_readback;
       if (settlement.status !== "ok") {
         failedCapabilities = [
           {

@@ -1,10 +1,7 @@
 import Ajv from 'ajv';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  MODEL_RESULT_PROJECTION_DEFINITIONS,
-  registerModelResultProjections,
-} from './model-result-projections';
+import { MODEL_RESULT_PROJECTION_DEFINITIONS, registerModelResultProjections } from './model-result-projections';
 import type { TypedProjectionSchema } from './durable-result-strategy';
 import { projectModelResultForReplay } from './model-result-replay';
 import { TypedProjectionRegistry } from './typed-projection.registry';
@@ -25,48 +22,96 @@ const COMMON_MODEL_METADATA_BOUNDS: Readonly<Record<string, NumericBounds>> = {
   'usage.costUsd': { minimum: 0, maximum: 1_000_000_000 },
   'usage.gatewaySettlements': { maxItems: 2 },
   'usage.gatewaySettlements[].oneOf[0].status': { maxLength: 16 },
-  'usage.gatewaySettlements[].oneOf[0].physicalWireAttempt': { minimum: 1, maximum: 2 },
+  'usage.gatewaySettlements[].oneOf[0].physicalWireAttempt': {
+    minimum: 1,
+    maximum: 2,
+  },
   'usage.gatewaySettlements[].oneOf[0].resolverId': { maxLength: 120 },
   'usage.gatewaySettlements[].oneOf[0].alias': { maxLength: 120 },
   'usage.gatewaySettlements[].oneOf[0].protocol': { maxLength: 40 },
-  'usage.gatewaySettlements[].oneOf[0].channelId': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].channelId': {
+    minimum: 0,
+    maximum: 1_000_000_000,
+  },
   'usage.gatewaySettlements[].oneOf[0].basis': { maxLength: 40 },
-  'usage.gatewaySettlements[].oneOf[0].quota': { minimum: 0, maximum: 1_000_000_000 },
-  'usage.gatewaySettlements[].oneOf[0].costMicrousd': { minimum: 0, maximum: 1_000_000_000_000_000 },
-  'usage.gatewaySettlements[].oneOf[0].inputTokens': { minimum: 0, maximum: 1_000_000_000 },
-  'usage.gatewaySettlements[].oneOf[0].outputTokens': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].quota': {
+    minimum: 0,
+    maximum: 1_000_000_000,
+  },
+  'usage.gatewaySettlements[].oneOf[0].costMicrousd': {
+    minimum: 0,
+    maximum: 1_000_000_000_000_000,
+  },
+  'usage.gatewaySettlements[].oneOf[0].inputTokens': {
+    minimum: 0,
+    maximum: 1_000_000_000,
+  },
+  'usage.gatewaySettlements[].oneOf[0].outputTokens': {
+    minimum: 0,
+    maximum: 1_000_000_000,
+  },
   'usage.gatewaySettlements[].oneOf[0].upstreamIdState': { maxLength: 16 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.schemaVersion': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.schemaVersion': {
+    maxLength: 64,
+  },
   'usage.gatewaySettlements[].oneOf[0].transportObservation.physicalWireAttempt': { minimum: 1, maximum: 2 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.finalPhase': { maxLength: 64 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.gatewayIdState': { maxLength: 32 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.upstreamIdState': { maxLength: 32 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.payloadState': { maxLength: 32 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes': { maxItems: 2 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.finalPhase': {
+    maxLength: 64,
+  },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.gatewayIdState': {
+    maxLength: 32,
+  },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.upstreamIdState': {
+    maxLength: 32,
+  },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.payloadState': {
+    maxLength: 32,
+  },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes': {
+    maxItems: 2,
+  },
   'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].sequence': { minimum: 1, maximum: 2 },
   'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].phase': { maxLength: 64 },
-  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].httpStatusClass.oneOf[0]': { minimum: 2, maximum: 5 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].httpStatusClass.oneOf[0]': {
+    minimum: 2,
+    maximum: 5,
+  },
   'usage.gatewaySettlements[].oneOf[1].status': { maxLength: 16 },
-  'usage.gatewaySettlements[].oneOf[1].physicalWireAttempt': { minimum: 1, maximum: 2 },
+  'usage.gatewaySettlements[].oneOf[1].physicalWireAttempt': {
+    minimum: 1,
+    maximum: 2,
+  },
   'usage.gatewaySettlements[].oneOf[1].resolverId': { maxLength: 120 },
   'usage.gatewaySettlements[].oneOf[1].reason': { maxLength: 40 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.schemaVersion': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.schemaVersion': {
+    maxLength: 64,
+  },
   'usage.gatewaySettlements[].oneOf[1].transportObservation.physicalWireAttempt': { minimum: 1, maximum: 2 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.finalPhase': { maxLength: 64 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.gatewayIdState': { maxLength: 32 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.upstreamIdState': { maxLength: 32 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.payloadState': { maxLength: 32 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes': { maxItems: 2 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.finalPhase': {
+    maxLength: 64,
+  },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.gatewayIdState': {
+    maxLength: 32,
+  },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.upstreamIdState': {
+    maxLength: 32,
+  },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.payloadState': {
+    maxLength: 32,
+  },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes': {
+    maxItems: 2,
+  },
   'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].sequence': { minimum: 1, maximum: 2 },
   'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].phase': { maxLength: 64 },
-  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].httpStatusClass.oneOf[0]': { minimum: 2, maximum: 5 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].httpStatusClass.oneOf[0]': {
+    minimum: 2,
+    maximum: 5,
+  },
   callCount: { minimum: 0, maximum: 100 },
 };
 
-const EXPECTED_BOUNDS: Readonly<Partial<Record<
-  TypedProjectionSchema,
-  Readonly<Record<string, NumericBounds>>
->>> = {
+const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<Record<string, NumericBounds>>>>> = {
   'understanding-claims/v1': {
     'data.claims': { maxItems: 64 },
     'data.claims[].type': { maxLength: 80 },
@@ -92,12 +137,16 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.offerings[].factEntries[].key': { maxLength: 120 },
     'data.offerings[].factEntries[].value.oneOf[0]': { maxLength: 1000 },
     'data.offerings[].factEntries[].value.oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.offerings[].factEntries[].value.oneOf[4]': { maxItems: 32 },
-    'data.offerings[].factEntries[].value.oneOf[4][].oneOf[0]': { maxLength: 1000 },
+    'data.offerings[].factEntries[].value.oneOf[4][].oneOf[0]': {
+      maxLength: 1000,
+    },
     'data.offerings[].factEntries[].value.oneOf[4][].oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.offerings[].evidence': { maxLength: 2000 },
     'data.offerings[].confidence': { minimum: 0, maximum: 1 },
@@ -111,12 +160,16 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.companyAttributeEntries[].key': { maxLength: 120 },
     'data.companyAttributeEntries[].value.oneOf[0]': { maxLength: 2000 },
     'data.companyAttributeEntries[].value.oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.companyAttributeEntries[].value.oneOf[4]': { maxItems: 32 },
-    'data.companyAttributeEntries[].value.oneOf[4][].oneOf[0]': { maxLength: 2000 },
+    'data.companyAttributeEntries[].value.oneOf[4][].oneOf[0]': {
+      maxLength: 2000,
+    },
     'data.companyAttributeEntries[].value.oneOf[4][].oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.painPoints': { maxItems: 8 },
     'data.painPoints[]': { maxLength: 2000 },
@@ -145,12 +198,14 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.qualificationRules[].operator': { maxLength: 80 },
     'data.qualificationRules[].value.oneOf[0]': { maxLength: 1000 },
     'data.qualificationRules[].value.oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.qualificationRules[].value.oneOf[4]': { maxItems: 32 },
     'data.qualificationRules[].value.oneOf[4][].oneOf[0]': { maxLength: 1000 },
     'data.qualificationRules[].value.oneOf[4][].oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.qualificationRules[].weight': { minimum: 0, maximum: 100 },
     'data.qualificationRules[].rationale': { maxLength: 2000 },
@@ -165,12 +220,16 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.queries[].filterEntries[].key': { maxLength: 120 },
     'data.queries[].filterEntries[].value.oneOf[0]': { maxLength: 1000 },
     'data.queries[].filterEntries[].value.oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.queries[].filterEntries[].value.oneOf[4]': { maxItems: 32 },
-    'data.queries[].filterEntries[].value.oneOf[4][].oneOf[0]': { maxLength: 1000 },
+    'data.queries[].filterEntries[].value.oneOf[4][].oneOf[0]': {
+      maxLength: 1000,
+    },
     'data.queries[].filterEntries[].value.oneOf[4][].oneOf[1]': {
-      minimum: -1_000_000_000_000_000, maximum: 1_000_000_000_000_000,
+      minimum: -1_000_000_000_000_000,
+      maximum: 1_000_000_000_000_000,
     },
     'data.queries[].keywords': { maxItems: 32 },
     'data.queries[].keywords[]': { maxLength: 200 },
@@ -241,11 +300,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
   },
 };
 
-function collectBounds(
-  node: JsonRecord,
-  path = '',
-  result: Record<string, NumericBounds> = {},
-): Record<string, NumericBounds> {
+function collectBounds(node: JsonRecord, path = '', result: Record<string, NumericBounds> = {}): Record<string, NumericBounds> {
   const bounds: Record<string, number> = {};
   for (const key of ['maxLength', 'maxItems', 'minimum', 'maximum']) {
     if (typeof node[key] === 'number') bounds[key] = node[key] as number;
@@ -296,15 +351,9 @@ function validates(schema: TypedProjectionSchema, path: string, value: unknown):
   return new Ajv({ strict: false }).compile(schemaNode(schema, path))(value) as boolean;
 }
 
-function maximalDomainValue(
-  node: JsonRecord,
-  path = '',
-  itemIndex = 0,
-): unknown {
+function maximalDomainValue(node: JsonRecord, path = '', itemIndex = 0): unknown {
   if (Array.isArray(node.oneOf)) {
-    const branch = (node.oneOf as JsonRecord[]).find(
-      (candidate) => candidate.type !== 'null',
-    );
+    const branch = (node.oneOf as JsonRecord[]).find((candidate) => candidate.type !== 'null');
     if (!branch) return null;
     return maximalDomainValue(branch, path, itemIndex);
   }
@@ -315,30 +364,17 @@ function maximalDomainValue(
   if (type === 'object') {
     const properties = (node.properties ?? {}) as JsonRecord;
     const required = new Set((node.required ?? []) as string[]);
-    const rootOptionalMetadata = new Set([
-      'reportedModel',
-      'modelResolutionSource',
-      'usage',
-      'callCount',
-    ]);
+    const rootOptionalMetadata = new Set(['reportedModel', 'modelResolutionSource', 'usage', 'callCount']);
     return Object.fromEntries(
       Object.entries(properties)
         .filter(([key]) => path !== '' || required.has(key) || !rootOptionalMetadata.has(key))
-        .map(([key, child]) => [
-          key,
-          maximalDomainValue(child as JsonRecord, path ? `${path}.${key}` : key),
-        ]),
+        .map(([key, child]) => [key, maximalDomainValue(child as JsonRecord, path ? `${path}.${key}` : key)]),
     );
   }
   if (type === 'array') {
     const item = node.items as JsonRecord;
     const maximum = Number(node.maxItems ?? 0);
-    const keyValues = [
-      ...(
-      ((item.properties as JsonRecord | undefined)?.key as JsonRecord | undefined)
-        ?.enum ?? []
-      ),
-    ].sort((left, right) => String(left).localeCompare(String(right)));
+    const keyValues = [...(((item.properties as JsonRecord | undefined)?.key as JsonRecord | undefined)?.enum ?? [])].sort((left, right) => String(left).localeCompare(String(right)));
     const sequence = (item.properties as JsonRecord | undefined)?.sequence;
     const count = keyValues.length > 0 ? Math.min(maximum, keyValues.length) : maximum;
     return Array.from({ length: count }, (_, index) => {
@@ -357,73 +393,61 @@ function maximalDomainValue(
   return null;
 }
 
-describe('model result projection exact literal bound lock', () => {
-  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
-    '$schema carries its maximum legal domain structure through the full replay envelope',
-    (projection) => {
-      const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
-      const validate = new Ajv({ strict: false }).compile(projection.jsonSchema);
-      expect(validate(projected), JSON.stringify(validate.errors)).toBe(true);
-      const raw = projection.restore(projected);
-
-      expect(() => projectModelResultForReplay(projection.schema, raw as never)).not.toThrow();
-    },
-  );
-
-  it('reserves outer-envelope bytes for the largest legal typed result', () => {
-    const registry = registerModelResultProjections(new TypedProjectionRegistry());
-    let lower = 1;
-    let upper = 4_000;
-    let best:
-      | { raw: Record<string, unknown>; typedBytes: number }
-      | undefined;
-    while (lower <= upper) {
-      const length = Math.floor((lower + upper) / 2);
-      const raw = {
-        data: {
-          claims: Array.from({ length: 64 }, () => ({
-            type: 'capability',
-            statement: 's'.repeat(length),
-            confidence: 1,
-          })),
-        },
-        provider: 'p',
-        model: 'm',
-      };
-      try {
-        const envelope = registry.project('understanding-claims/v1', raw);
-        best = {
-          raw,
-          typedBytes: Buffer.byteLength(JSON.stringify(envelope), 'utf8'),
-        };
-        lower = length + 1;
-      } catch (error) {
-        expect(error).toMatchObject({ message: 'TYPED_PROJECTION_TOO_LARGE' });
-        upper = length - 1;
-      }
+function nearLimitReplayEnvelope(): Record<string, unknown> {
+  const registry = registerModelResultProjections(new TypedProjectionRegistry());
+  let lower = 1;
+  let upper = 4_000;
+  let best: Record<string, unknown> | undefined;
+  while (lower <= upper) {
+    const length = Math.floor((lower + upper) / 2);
+    const raw = {
+      data: {
+        claims: Array.from({ length: 64 }, () => ({
+          type: 'capability',
+          statement: 's'.repeat(length),
+          confidence: 1,
+        })),
+      },
+      provider: 'p',
+      model: 'm',
+    };
+    try {
+      registry.project('understanding-claims/v1', raw);
+      best = raw;
+      lower = length + 1;
+    } catch {
+      upper = length - 1;
     }
-    expect(best?.typedBytes).toBeGreaterThan(118 * 1024);
-    expect(() =>
-      projectModelResultForReplay('understanding-claims/v1', best?.raw as never),
-    ).not.toThrow();
+  }
+  if (!best) throw new Error('near-limit replay envelope unavailable');
+  return projectModelResultForReplay('understanding-claims/v1', best as never) as unknown as Record<string, unknown>;
+}
+
+describe('model result projection exact literal bound lock', () => {
+  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema carries its maximum legal domain structure through the full replay envelope', (projection) => {
+    const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
+    const validate = new Ajv({ strict: false }).compile(projection.jsonSchema);
+    expect(validate(projected), JSON.stringify(validate.errors)).toBe(true);
+    const raw = projection.restore(projected);
+
+    expect(() => projectModelResultForReplay(projection.schema, raw as never)).not.toThrow();
   });
 
-  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
-    '$schema matches every independently enumerated maxLength/maxItems/minimum/maximum',
-    ({ schema, jsonSchema }) => {
-      expect(collectBounds(jsonSchema as JsonRecord)).toEqual(EXPECTED_BOUNDS[schema]);
-    },
-  );
+  it('reserves outer-envelope bytes for the largest legal typed result', () => {
+    const envelope = nearLimitReplayEnvelope();
+    expect(Buffer.byteLength(JSON.stringify(envelope), 'utf8')).toBeGreaterThan(118 * 1024);
+  });
 
-  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
-    '$schema accepts provider/model length 120 and rejects 121',
-    ({ schema }) => {
-      for (const path of ['provider', 'model']) {
-        expect(validates(schema, path, 'x'.repeat(120)), path).toBe(true);
-        expect(validates(schema, path, 'x'.repeat(121)), path).toBe(false);
-      }
-    },
-  );
+  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema matches every independently enumerated maxLength/maxItems/minimum/maximum', ({ schema, jsonSchema }) => {
+    expect(collectBounds(jsonSchema as JsonRecord)).toEqual(EXPECTED_BOUNDS[schema]);
+  });
+
+  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema accepts provider/model length 120 and rejects 121', ({ schema }) => {
+    for (const path of ['provider', 'model']) {
+      expect(validates(schema, path, 'x'.repeat(120)), path).toBe(true);
+      expect(validates(schema, path, 'x'.repeat(121)), path).toBe(false);
+    }
+  });
 
   it.each([
     ['fit-judgment/v1', 'data.verdict', 'mismatch', 'x'.repeat(9)],
@@ -439,13 +463,10 @@ describe('model result projection exact literal bound lock', () => {
     ['discovery-extract-list/v1', 'data.companies[].website', 'x'.repeat(2048), 'x'.repeat(2049)],
     ['understanding-claims/v1', 'data.claims[].statement', 'x'.repeat(4000), 'x'.repeat(4001)],
     ['understanding-profile/v1', 'data.summary', 'x'.repeat(8000), 'x'.repeat(8001)],
-  ] as const)(
-    '%s %s accepts its exact legal string boundary and rejects max + 1',
-    (schema, path, legal, over) => {
-      expect(validates(schema, path, legal)).toBe(true);
-      expect(validates(schema, path, over)).toBe(false);
-    },
-  );
+  ] as const)('%s %s accepts its exact legal string boundary and rejects max + 1', (schema, path, legal, over) => {
+    expect(validates(schema, path, legal)).toBe(true);
+    expect(validates(schema, path, over)).toBe(false);
+  });
 
   it.each([
     ['icp-design/v1', 'data.personas[].goals', 'goal', 4],
@@ -454,43 +475,86 @@ describe('model result projection exact literal bound lock', () => {
     ['icp-design/v1', 'data.painPoints', 'pain', 8],
     ['fit-judgment/v1', 'data.reasons', 'reason', 16],
     ['icp-design/v1', 'data.companyAttributeEntries[].value.oneOf[4]', 'value', 32],
-  ] as const)(
-    '%s %s accepts exact scalar-list count %i and rejects count + 1',
-    (schema, path, item, maximum) => {
-      expect(validates(schema, path, Array.from({ length: maximum }, () => item))).toBe(true);
-      expect(validates(schema, path, Array.from({ length: maximum + 1 }, () => item))).toBe(false);
-    },
-  );
+  ] as const)('%s %s accepts exact scalar-list count %i and rejects count + 1', (schema, path, item, maximum) => {
+    expect(
+      validates(
+        schema,
+        path,
+        Array.from({ length: maximum }, () => item),
+      ),
+    ).toBe(true);
+    expect(
+      validates(
+        schema,
+        path,
+        Array.from({ length: maximum + 1 }, () => item),
+      ),
+    ).toBe(false);
+  });
 
   it('locks the fact-entry structural max at 32 while restore separately enforces unique sorted keys', () => {
     const path = 'data.offerings[].factEntries';
     const entry = { key: 'moq', value: '100' };
-    expect(validates(
-      'understanding-offerings/v1', path, Array.from({ length: 32 }, () => entry),
-    )).toBe(true);
-    expect(validates(
-      'understanding-offerings/v1', path, Array.from({ length: 33 }, () => entry),
-    )).toBe(false);
+    expect(
+      validates(
+        'understanding-offerings/v1',
+        path,
+        Array.from({ length: 32 }, () => entry),
+      ),
+    ).toBe(true);
+    expect(
+      validates(
+        'understanding-offerings/v1',
+        path,
+        Array.from({ length: 33 }, () => entry),
+      ),
+    ).toBe(false);
   });
 
   it.each([
     ['understanding-claims/v1', 'data.claims', { type: 'capability', statement: 's', confidence: 1 }, 64],
-    ['icp-design/v1', 'data.qualificationRules', {
-      kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'pump',
-    }, 64],
-    ['icp-query-plan/v1', 'data.queries', {
-      sourceClass: 'public_intelligence', filterEntries: [], keywords: [], rationale: 'r', priority: 1,
-    }, 64],
+    [
+      'icp-design/v1',
+      'data.qualificationRules',
+      {
+        kind: 'MUST_HAVE',
+        field: 'industry',
+        operator: 'eq',
+        value: 'pump',
+      },
+      64,
+    ],
+    [
+      'icp-query-plan/v1',
+      'data.queries',
+      {
+        sourceClass: 'public_intelligence',
+        filterEntries: [],
+        keywords: [],
+        rationale: 'r',
+        priority: 1,
+      },
+      64,
+    ],
     ['contact-decision-makers/v1', 'data.people', { fullName: 'Ada' }, 25],
     ['understanding-offerings/v1', 'data.offerings', { name: 'Pump', confidence: 1 }, 128],
     ['discovery-extract-list/v1', 'data.companies', { name: 'Acme' }, 128],
-  ] as const)(
-    '%s %s accepts exact object-array count %i and rejects count + 1',
-    (schema, path, item, maximum) => {
-      expect(validates(schema, path, Array.from({ length: maximum }, () => item))).toBe(true);
-      expect(validates(schema, path, Array.from({ length: maximum + 1 }, () => item))).toBe(false);
-    },
-  );
+  ] as const)('%s %s accepts exact object-array count %i and rejects count + 1', (schema, path, item, maximum) => {
+    expect(
+      validates(
+        schema,
+        path,
+        Array.from({ length: maximum }, () => item),
+      ),
+    ).toBe(true);
+    expect(
+      validates(
+        schema,
+        path,
+        Array.from({ length: maximum + 1 }, () => item),
+      ),
+    ).toBe(false);
+  });
 
   it.each([
     ['icp-design/v1', 'data.companyAttributeEntries[].value.oneOf[1]', -1_000_000_000_000_000, 1_000_000_000_000_000, 1],
@@ -499,15 +563,12 @@ describe('model result projection exact literal bound lock', () => {
     ['icp-query-plan/v1', 'data.queries[].priority', 1, 10_000, 1],
     ['icp-query-plan/v1', 'data.estimatedVolume', 0, 1_000_000_000, 1],
     ['discovery-extract-company/v1', 'data.employeeCount', 0, 1_000_000_000, 1],
-  ] as const)(
-    '%s %s accepts exact numeric endpoints and rejects both sides',
-    (schema, path, minimum, maximum, delta) => {
-      expect(validates(schema, path, minimum)).toBe(true);
-      expect(validates(schema, path, maximum)).toBe(true);
-      expect(validates(schema, path, minimum - delta)).toBe(false);
-      expect(validates(schema, path, maximum + delta)).toBe(false);
-    },
-  );
+  ] as const)('%s %s accepts exact numeric endpoints and rejects both sides', (schema, path, minimum, maximum, delta) => {
+    expect(validates(schema, path, minimum)).toBe(true);
+    expect(validates(schema, path, maximum)).toBe(true);
+    expect(validates(schema, path, minimum - delta)).toBe(false);
+    expect(validates(schema, path, maximum + delta)).toBe(false);
+  });
 
   it.each([
     ['icp-query-plan/v1', 'data.queries[].priority'],
@@ -526,26 +587,29 @@ describe('full model replay envelope PostgreSQL JSONB bound', () => {
 
   beforeAll(async () => {
     if (!APP_DATABASE_URL) return;
-    database = new PrismaClient({ datasources: { db: { url: APP_DATABASE_URL } } });
+    database = new PrismaClient({
+      datasources: { db: { url: APP_DATABASE_URL } },
+    });
     await database.$connect();
   });
 
   afterAll(async () => database?.$disconnect());
 
-  liveDatabaseIt.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
-    '$schema maximum legal domain structure stays within real jsonb::text bytes',
-    async (projection) => {
-      if (!database) throw new Error('APP_DATABASE_URL is unavailable');
-      const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
-      const raw = projection.restore(projected);
-      const envelope = projectModelResultForReplay(projection.schema, raw as never);
-      const rows = await database.$queryRawUnsafe<Array<{ bytes: bigint }>>(
-        'SELECT octet_length($1::jsonb::text)::bigint AS bytes',
-        JSON.stringify(envelope),
-      );
-      expect(Number(rows[0]?.bytes), projection.schema).toBeLessThanOrEqual(
-        128 * 1024,
-      );
-    },
-  );
+  liveDatabaseIt.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema representative legal domain structure stays within real jsonb::text bytes', async (projection) => {
+    if (!database) throw new Error('APP_DATABASE_URL is unavailable');
+    const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
+    const raw = projection.restore(projected);
+    const envelope = projectModelResultForReplay(projection.schema, raw as never);
+    const rows = await database.$queryRawUnsafe<Array<{ bytes: bigint }>>('SELECT octet_length($1::jsonb::text)::bigint AS bytes', JSON.stringify(envelope));
+    expect(Number(rows[0]?.bytes), projection.schema).toBeLessThanOrEqual(128 * 1024);
+  });
+
+  liveDatabaseIt('persists a near-119-KiB full replay envelope through real PostgreSQL jsonb', async () => {
+    if (!database) throw new Error('APP_DATABASE_URL is unavailable');
+    const envelope = nearLimitReplayEnvelope();
+    const serialized = JSON.stringify(envelope);
+    expect(Buffer.byteLength(serialized, 'utf8')).toBeGreaterThan(118 * 1024);
+    const rows = await database.$queryRawUnsafe<Array<{ bytes: bigint }>>('SELECT octet_length($1::jsonb::text)::bigint AS bytes', serialized);
+    expect(Number(rows[0]?.bytes)).toBeLessThanOrEqual(128 * 1024);
+  });
 });

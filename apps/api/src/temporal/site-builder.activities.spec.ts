@@ -143,7 +143,12 @@ describe("site build cost reconciliation sweep", () => {
     expect(fairSql).toContain("NULLS FIRST");
     expect(fairSql).toContain("site_build_spend_reconciliation");
     expect(fairSql).toContain("s.status = 'RESERVED'");
-    expect(fairSql).toContain("s.status IN ('FAILED', 'RELEASED')");
+    expect(fairSql).toContain("s.status = 'FAILED'");
+    expect(fairSql).toContain(
+      "s.error_code = 'MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY'",
+    );
+    expect(fairSql).toContain("s.status = 'RELEASED'");
+    expect(fairSql).toContain("s.error_code = 'MODEL_WIRE_NOT_DISPATCHED'");
     expect(fairSql).toContain(
       "s.cost_basis IN ('estimated_upper_bound', 'unknown')",
     );

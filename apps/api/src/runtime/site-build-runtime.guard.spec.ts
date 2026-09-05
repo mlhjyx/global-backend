@@ -11,6 +11,8 @@ describe("SiteBuildRuntimeGuard", () => {
         components: {},
       })),
       checkSiteBuilderPaidCapability: vi.fn(async () => ({
+        status: "ready",
+        components: {},
         capabilities: {
           site_builder_model_settlement_readback: { status: "ok" },
         },
@@ -21,6 +23,43 @@ describe("SiteBuildRuntimeGuard", () => {
         paidReachable: true,
       }),
     ).resolves.toBeUndefined();
+    expect(readiness.checkHardComponents).not.toHaveBeenCalled();
+  });
+
+  it("uses the paid report as the single hard-readiness snapshot", async () => {
+    const readiness = {
+      checkHardComponents: vi.fn(async () => ({
+        status: "ready",
+        components: {},
+      })),
+      checkSiteBuilderPaidCapability: vi.fn(async () => ({
+        status: "not_ready",
+        components: {
+          worker: { status: "failed", code: "MATCHING_WORKER_NOT_READY" },
+        },
+        capabilities: {
+          site_builder_model_settlement_readback: { status: "ok" },
+        },
+      })),
+    };
+    const error = await new SiteBuildRuntimeGuard(readiness as never)
+      .assertReady({ paidReachable: true })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    expect(readiness.checkHardComponents).not.toHaveBeenCalled();
+    expect(
+      (error as ServiceUnavailableException).getResponse(),
+    ).toMatchObject({
+      error: {
+        details: {
+          failedComponents: [
+            { component: "worker", code: "MATCHING_WORKER_NOT_READY" },
+          ],
+          failedCapabilities: [],
+        },
+      },
+    });
   });
 
   it("returns the stable public error without leaking dependency diagnostics", async () => {
@@ -38,7 +77,7 @@ describe("SiteBuildRuntimeGuard", () => {
 
     let error: unknown;
     try {
-      await guard.assertReady({ paidReachable: true });
+      await guard.assertReady({ paidReachable: false });
     } catch (caught) {
       error = caught;
     }
@@ -149,6 +188,8 @@ describe("SiteBuildRuntimeGuard", () => {
         components: {},
       })),
       checkSiteBuilderPaidCapability: vi.fn(async () => ({
+        status: "ready",
+        components: {},
         capabilities: {
           site_builder_model_settlement_readback: {
             status: "failed",

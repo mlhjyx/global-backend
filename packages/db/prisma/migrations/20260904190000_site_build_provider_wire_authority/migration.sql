@@ -2,6 +2,38 @@
 -- Historical SiteBuildSpend rows are deliberately not backfilled: only rows in
 -- site_build_provider_wire_attempt participate in the v1 readback path.
 
+ALTER TABLE "site_build_spend_reconciliation"
+  DROP CONSTRAINT "site_build_spend_reconciliation_shape_check";
+ALTER TABLE "site_build_spend_reconciliation"
+  ADD CONSTRAINT "site_build_spend_reconciliation_shape_check" CHECK (
+    "attempt_no" >= 1
+    AND ("receipt_digest" IS NULL OR "receipt_digest" ~ '^[0-9a-f]{64}$')
+    AND ("exact_cost_microusd" IS NULL OR "exact_cost_microusd" >= 0)
+    AND ("input_tokens" IS NULL OR "input_tokens" >= 0)
+    AND ("output_tokens" IS NULL OR "output_tokens" >= 0)
+    AND ("meta" IS NULL OR jsonb_typeof("meta") = 'object')
+    AND (
+      ("status" = 'RESOLVED'
+        AND "receipt_digest" IS NOT NULL
+        AND "exact_cost_microusd" IS NOT NULL
+        AND (
+          "cost_basis" IN ('provider_reported', 'token_pricing')
+          OR (
+            "cost_basis" = 'not_incurred'
+            AND "exact_cost_microusd" = 0
+            AND "input_tokens" = 0
+            AND "output_tokens" = 0
+          )
+        )
+      )
+      OR (
+        "status" <> 'RESOLVED'
+        AND "exact_cost_microusd" IS NULL
+        AND "cost_basis" IS NULL
+      )
+    )
+  );
+
 CREATE TABLE "site_build_provider_wire_attempt" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "workspace_id" UUID NOT NULL,

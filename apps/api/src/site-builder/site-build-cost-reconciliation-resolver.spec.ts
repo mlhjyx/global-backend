@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../model-gateway/new-api-request-bound-settlement";
 import {
+  costReconciliationCatalogCoversRoutes,
   createSiteBuildCostReconciliationCatalogFromEnv,
   createSiteBuildCostReconciliationResolverFromEnv,
   createSiteBuildSettlementReadbackRuntimeFromEnv,
@@ -87,6 +88,36 @@ describe("createSiteBuildCostReconciliationCatalogFromEnv", () => {
         maxOutputTokens: 4_001,
       }),
     ).toBeNull();
+  });
+
+  it("rejects a partial catalog that cannot price every active route alias", () => {
+    const catalog = createSiteBuildCostReconciliationCatalogFromEnv({
+      SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON: CATALOG_JSON,
+    });
+
+    expect(
+      costReconciliationCatalogCoversRoutes(catalog, [
+        {
+          taskId: "site_builder.brand_profile",
+          alias: "gpt-5.6-terra",
+          maxOutputTokens: 4_000,
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      costReconciliationCatalogCoversRoutes(catalog, [
+        {
+          taskId: "site_builder.brand_profile",
+          alias: "gpt-5.6-terra",
+          maxOutputTokens: 4_000,
+        },
+        {
+          taskId: "site_builder.copy",
+          alias: "claude-sonnet-5",
+          maxOutputTokens: 4_000,
+        },
+      ]),
+    ).toBe(false);
   });
 
   it.each([

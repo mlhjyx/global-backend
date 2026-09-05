@@ -32,6 +32,7 @@ import {
   paidOperationKey,
   PaidCallDeniedError,
   PaidOperationUnknownError,
+  SITE_BUILD_DURABLE_TOKEN_MAXIMUM,
   type PaidCostMeasurement,
   type PaidOperationReservation,
   type SiteBuildCostLedger,
@@ -115,8 +116,13 @@ import {
 } from "./types";
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from "./model-execution-envelope";
 import { snapshotVisionReviewInput } from "./vision-review-input";
-import { hasTrustedModelIdentity } from "./model-identity";
+import {
+  canonicalReportedModelIdentifier,
+  hasTrustedModelIdentity,
+  resolveReportedModelIdentity,
+} from "./model-identity";
 import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from "./model-transports";
+import { boundedModelUsage } from "./model-usage-boundary";
 
 type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
@@ -341,7 +347,7 @@ export class RouterModelGateway extends ModelGateway {
         })
       ) {
         throw new ProviderIdentityError(
-          `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${snapshot.model}, reported=${result.reportedModel ?? "missing"}, resolved=${result.model}`,
+          "VISION_REVIEW_MODEL_IDENTITY_MISMATCH",
           result.usage,
           {
             provider: result.provider,
@@ -1033,6 +1039,40 @@ export class RouterModelGateway extends ModelGateway {
           await this.assertExternalActionAuthorized(executionCtx);
         }
         result = await call(provider, executionCtx);
+        result = result.usage
+          ? { ...result, usage: boundedModelUsage(result.usage) }
+          : result;
+        const safeReportedModel = canonicalReportedModelIdentifier(
+          result.reportedModel,
+        );
+        const trustedReportedModel = safeReportedModel
+          ? resolveReportedModelIdentity(
+              requestedModel,
+              safeReportedModel,
+              settlementContext.protocol,
+            )
+          : undefined;
+        if (
+          result.provider !== provider.id ||
+          result.model !== requestedModel ||
+          (result.reportedModel !== undefined &&
+            trustedReportedModel !== requestedModel) ||
+          (result.modelResolutionSource === "upstream_response" &&
+            trustedReportedModel !== requestedModel)
+        ) {
+          throw new ProviderIdentityError(
+            "MODEL_IDENTITY_MISMATCH",
+            result.usage,
+            {
+              provider: provider.id,
+              model: requestedModel,
+              ...(trustedReportedModel === requestedModel && safeReportedModel
+                ? { reportedModel: safeReportedModel }
+                : {}),
+              modelResolutionSource: "requested_fallback",
+            },
+          );
+        }
       } catch (error) {
         if (error instanceof ProviderWireInFlightError) {
           this.trace?.record({
@@ -1054,10 +1094,7 @@ export class RouterModelGateway extends ModelGateway {
         }
         const providerError =
           error instanceof ProviderOutputError ? error : null;
-        if (
-          providerError?.callCount === 0 &&
-          !providerError.usage
-        ) {
+        if (providerError?.callCount === 0 && !providerError.usage) {
           await this.paidLedger.finalizeModelPhysicalWireNotDispatched({
             workspaceId: scope.workspaceId,
             wireAttemptId: decision.wireAttemptId,
@@ -1088,7 +1125,7 @@ export class RouterModelGateway extends ModelGateway {
             provider: provider.id,
             model: requestedModel,
             status: "ERROR",
-            errorMessage: String(error),
+            errorMessage: this.safeProviderErrorCode(error),
             latencyMs: Date.now() - started,
             correlationId: ctx.correlationId,
             modelPolicy: ctx.modelPolicy,
@@ -1128,20 +1165,34 @@ export class RouterModelGateway extends ModelGateway {
                 undefined,
                 providerError?.callCount,
               );
+        const safeReportedModel = canonicalReportedModelIdentifier(
+          providerError?.reportedModel,
+        );
+        const trustedReportedModel =
+          safeReportedModel &&
+          resolveReportedModelIdentity(
+            requestedModel,
+            safeReportedModel,
+            settlementContext.protocol,
+          ) === requestedModel
+            ? safeReportedModel
+            : undefined;
+        const trustedResolvedModel =
+          providerError?.model === requestedModel ? requestedModel : undefined;
         await this.settlePersistentOperation({
           scope,
           status: measurement.basis === "unknown" ? "UNKNOWN" : "FAILED",
           measurement,
           meta: {
-            provider: providerError?.provider ?? provider.id,
+            provider: provider.id,
             requestedModel,
-            ...(providerError?.model
-              ? { resolvedModel: providerError.model }
+            ...(trustedResolvedModel
+              ? { resolvedModel: trustedResolvedModel }
               : {}),
-            ...(providerError?.reportedModel
-              ? { reportedModel: providerError.reportedModel }
+            ...(trustedReportedModel
+              ? { reportedModel: trustedReportedModel }
               : {}),
-            ...(providerError?.modelResolutionSource
+            ...(trustedResolvedModel && providerError?.modelResolutionSource
               ? {
                   modelResolutionSource: providerError.modelResolutionSource,
                 }
@@ -1165,7 +1216,7 @@ export class RouterModelGateway extends ModelGateway {
           provider: provider.id,
           model: requestedModel,
           status: "ERROR",
-          errorMessage: String(error),
+          errorMessage: this.safeProviderErrorCode(error),
           latencyMs: Date.now() - started,
           inputTokens: providerError?.usage?.inputTokens,
           outputTokens: providerError?.usage?.outputTokens,
@@ -1282,6 +1333,18 @@ export class RouterModelGateway extends ModelGateway {
     };
   }
 
+  private safeProviderErrorCode(error: unknown): string {
+    if (error instanceof ProviderSettlementError) return error.errorCode;
+    if (error instanceof ProviderWireInFlightError) return error.errorCode;
+    if (error instanceof ExternalActionDeniedError) {
+      return "SUPPRESSION_ACTION_GATE";
+    }
+    if (error instanceof ProviderIdentityError)
+      return "MODEL_IDENTITY_MISMATCH";
+    if (error instanceof ProviderOutputError) return "PROVIDER_OUTPUT_ERROR";
+    return "PROVIDER_CALL_ERROR";
+  }
+
   private unknownModelMeasurement(
     reservationMicrousd: number,
     usage?: ModelUsage,
@@ -1293,12 +1356,18 @@ export class RouterModelGateway extends ModelGateway {
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
       estimatedCostMicrousd: null,
-      inputTokens: Number.isInteger(usage?.inputTokens)
-        ? usage!.inputTokens!
-        : null,
-      outputTokens: Number.isInteger(usage?.outputTokens)
-        ? usage!.outputTokens!
-        : null,
+      inputTokens:
+        Number.isSafeInteger(usage?.inputTokens) &&
+        usage!.inputTokens! >= 0 &&
+        usage!.inputTokens! <= SITE_BUILD_DURABLE_TOKEN_MAXIMUM
+          ? usage!.inputTokens!
+          : null,
+      outputTokens:
+        Number.isSafeInteger(usage?.outputTokens) &&
+        usage!.outputTokens! >= 0 &&
+        usage!.outputTokens! <= SITE_BUILD_DURABLE_TOKEN_MAXIMUM
+          ? usage!.outputTokens!
+          : null,
       callCount: Math.max(1, Math.floor(callCount)),
       meta: {
         reason: "model_output_or_ack_unavailable",
@@ -1318,37 +1387,47 @@ export class RouterModelGateway extends ModelGateway {
       input.measurement.basis === "unknown"
         ? (input.errorCode ?? "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE")
         : undefined;
-    let decision: string;
-    try {
-      decision = await this.paidLedger!.settleOperation({
+    const settle = () =>
+      this.paidLedger!.settleOperation({
         ...input,
         ...(disablePaidCallsReason ? { disablePaidCallsReason } : {}),
       });
-    } catch (error) {
-      return this.freezeUnknownSettlement(
-        input.scope,
-        error instanceof PaidOperationUnknownError
-          ? error.errorCode
-          : "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
-      );
+    let decision: string;
+    try {
+      decision = await settle();
+    } catch {
+      try {
+        // The operation key and every settlement byte are unchanged. A second
+        // database-only call recovers commit-before-ACK without another model
+        // wire; the SQL function returns REPLAY for the identical terminal row.
+        decision = await settle();
+      } catch (error) {
+        return this.freezeUnknownSettlement(
+          input.scope,
+          error instanceof PaidOperationUnknownError
+            ? error.errorCode
+            : "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
+        );
+      }
     }
     // Exact provider cost may exceed the admitted reservation while the
     // physical call and durable output are fully known. The database records
     // CAP_VARIANCE and disables further paid calls, but this is not an ACK
     // ambiguity and must not discard the valid output.
-    if (decision === "OVER_RESERVATION") return;
-    if (decision !== "SETTLED") {
-      return this.freezeUnknownSettlement(
-        input.scope,
-        `SETTLEMENT_${decision}`,
-      );
+    if (
+      decision === "OVER_RESERVATION" ||
+      decision === "SETTLED" ||
+      decision === "REPLAY"
+    ) {
+      if (disablePaidCallsReason) {
+        throw new PaidOperationUnknownError(
+          input.scope.operationKey,
+          disablePaidCallsReason,
+        );
+      }
+      return;
     }
-    if (disablePaidCallsReason) {
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        disablePaidCallsReason,
-      );
-    }
+    return this.freezeUnknownSettlement(input.scope, `SETTLEMENT_${decision}`);
   }
 
   private async freezeUnknownSettlement(

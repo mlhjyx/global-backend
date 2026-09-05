@@ -30,6 +30,8 @@ describe("site build cost reconciliation worker wiring", () => {
     );
     expect(worker).toContain("createSiteBuildSettlementReadbackRuntimeFromEnv");
     expect(worker).toContain("createSiteBuildCostReconciliationCatalogFromEnv");
+    expect(worker).toContain("costReconciliationCatalogCoversRoutes");
+    expect(worker).toContain("SITE_BUILDER_GENERATIVE_TASK_IDS");
     expect(worker).toContain(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
     );

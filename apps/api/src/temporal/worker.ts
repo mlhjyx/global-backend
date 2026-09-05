@@ -32,9 +32,14 @@ import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities
 import { createPlatformScheduleAuthorityActivities } from "./platform-schedule-authority.activities";
 import { createSiteBuilderActivities } from "./site-builder.activities";
 import {
+  costReconciliationCatalogCoversRoutes,
   createSiteBuildCostReconciliationCatalogFromEnv,
   createSiteBuildSettlementReadbackRuntimeFromEnv,
 } from "../site-builder/site-build-cost-reconciliation-resolver";
+import {
+  resolveTaskRoute,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
+} from "../site-builder/agents/task-routes";
 import { createAssetCleanupActivities } from "./asset-cleanup.activities";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import { SanctionsScreeningService } from "../sanctions/sanctions-screening.service";
@@ -146,7 +151,9 @@ async function main(): Promise<void> {
       return createSiteBuildProviderWireDatabaseFromEnv(
         process.env,
         undefined,
-        releaseIdentity.attested ? releaseIdentity.migration_revision : undefined,
+        releaseIdentity.attested
+          ? releaseIdentity.migration_revision
+          : undefined,
       );
     } catch {
       return undefined;
@@ -386,7 +393,29 @@ async function main(): Promise<void> {
   gateway.paidLedger = costLedger;
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
-  if (!costReconciliationCatalog) {
+  const activeSettlementRoutes = (() => {
+    try {
+      return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
+        const route = resolveTaskRoute(taskId, process.env);
+        return [route.primary, ...route.fallbacks].map((alias) =>
+          Object.freeze({
+            taskId,
+            alias,
+            maxOutputTokens: route.maxTokens,
+          }),
+        );
+      });
+    } catch {
+      return undefined;
+    }
+  })();
+  if (
+    !activeSettlementRoutes ||
+    !costReconciliationCatalogCoversRoutes(
+      costReconciliationCatalog,
+      activeSettlementRoutes,
+    )
+  ) {
     await holdPlatformNotReady(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
     );
