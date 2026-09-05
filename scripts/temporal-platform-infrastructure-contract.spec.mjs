@@ -45,6 +45,14 @@ test("platform Temporal images are official exact-digest releases", async () => 
         linuxAmd64Digest:
           "sha256:d8c17a862962def15cde69863a3a463f25a2664942eafd7bdbf050e9c3116b83",
       },
+      testNodeClient: {
+        source: "docker.io/library/node",
+        tag: "22.23.1-trixie-slim",
+        indexDigest:
+          "sha256:e6d9a389d34ff9678438af985c9913fbd1eb6ed36e80fea56644f4b4f6dd70ba",
+        linuxAmd64Digest:
+          "sha256:4653dc205e772d0200f195ff333fe45157c5aa19385eab098f2af0517f982498",
+      },
     },
   });
 });
@@ -61,9 +69,18 @@ test("production config requires TLS and the default JWT authorization stack", a
   assert.match(config, /databaseName: "temporal_platform"/);
   assert.match(config, /databaseName: "temporal_platform_visibility"/);
   assert.match(config, /tls:[\s\S]*internode:[\s\S]*frontend:/);
-  assert.match(config, /certFile: "\/run\/secrets\/temporal-platform\/server\.crt"/);
-  assert.match(config, /keyFile: "\/run\/secrets\/temporal-platform\/server\.key"/);
-  assert.match(config, /rootCaFiles:[\s\S]*\/run\/secrets\/temporal-platform\/ca\.crt/);
+  assert.match(
+    config,
+    /certFile: "\/run\/secrets\/temporal-platform\/server\.crt"/,
+  );
+  assert.match(
+    config,
+    /keyFile: "\/run\/secrets\/temporal-platform\/server\.key"/,
+  );
+  assert.match(
+    config,
+    /rootCaFiles:[\s\S]*\/run\/secrets\/temporal-platform\/ca\.crt/,
+  );
   assert.match(config, /authorization:[\s\S]*authorizer: "default"/);
   assert.match(config, /authorization:[\s\S]*claimMapper: "default"/);
   assert.match(config, /permissionsClaimName: "permissions"/);
@@ -76,9 +93,7 @@ test("production config requires TLS and the default JWT authorization stack", a
 });
 
 test("managed compose uses independent persistence and no development server path", async () => {
-  const compose = await repositoryFile(
-    "infra/temporal-platform/compose.yml",
-  );
+  const compose = await repositoryFile("infra/temporal-platform/compose.yml");
   const productFiles = [
     compose,
     await repositoryFile("infra/temporal-platform/provision.sh"),
@@ -99,12 +114,25 @@ test("managed compose uses independent persistence and no development server pat
   );
   assert.match(compose, /temporal-platform-postgres-data:/);
   assert.match(compose, /internal:\s*true/);
+  assert.match(
+    compose,
+    /name: \$\{TEMPORAL_PLATFORM_NETWORK_NAME:-global-temporal-platform\}/,
+  );
   assert.match(compose, /TEMPORAL_ALLOW_NO_AUTH:\s*"false"/);
   assert.match(compose, /frontend,internal-frontend,history,matching,worker/);
-  assert.match(compose, /\/run\/secrets\/temporal-platform[\s\S]*read_only: true/);
+  assert.match(
+    compose,
+    /\/run\/secrets\/temporal-platform[\s\S]*read_only: true/,
+  );
   assert.doesNotMatch(productFiles, /start-dev/);
-  assert.doesNotMatch(productFiles, /noopAuthorizer|allow-no-auth|ALLOW_NO_AUTH:\s*"true"/i);
-  assert.doesNotMatch(productFiles, /generateKeyPair|openssl\s+(?:gen|req)|BEGIN PRIVATE KEY/);
+  assert.doesNotMatch(
+    productFiles,
+    /noopAuthorizer|allow-no-auth|ALLOW_NO_AUTH:\s*"true"/i,
+  );
+  assert.doesNotMatch(
+    productFiles,
+    /generateKeyPair|openssl\s+(?:gen|req)|BEGIN PRIVATE KEY/,
+  );
   assert.doesNotMatch(productFiles, /temporal-dev\.service/);
 });
 
@@ -123,7 +151,10 @@ test("provisioning roles and verification remain separated and fail closed", asy
     roles: {
       growthosReader: ["platform-automation:read"],
       backendScheduleWriter: ["platform-automation:write"],
-      backendWorker: ["platform-automation:worker"],
+      backendWorker: [
+        "platform-automation:worker",
+        "platform-automation:write",
+      ],
       provisionAdmin: ["temporal-system:admin"],
     },
   });
@@ -135,22 +166,33 @@ test("provisioning roles and verification remain separated and fail closed", asy
   assert.match(verify, /workflow describe/);
   assert.match(verify, /workflow show/);
   assert.match(verify, /PERMISSION_DENIED/);
+  assert.match(verify, /no-token/);
+  assert.match(verify, /reader-write-denied/);
+  assert.match(verify, /reader-cross-namespace-denied/);
   assert.match(verify, /platform-automation-denied/);
-  assert.doesNotMatch(`${provision}\n${verify}`, /cat .*TOKEN.*(?:echo|printf)/i);
+  assert.doesNotMatch(
+    `${provision}\n${verify}`,
+    /cat .*TOKEN.*(?:echo|printf)/i,
+  );
 });
 
 test("disposable proof is isolated and product config never owns test keys", async () => {
-  const [compose, runner, fixtureGenerator] = await Promise.all([
-    repositoryFile(
-      "infra/temporal-platform/test-support/compose.disposable.yml",
-    ),
-    repositoryFile(
-      "infra/temporal-platform/test-support/verify-disposable.sh",
-    ),
-    repositoryFile(
-      "infra/temporal-platform/test-support/generate-fixtures.mjs",
-    ),
-  ]);
+  const [compose, runner, fixtureGenerator, workerProbe, caddy] =
+    await Promise.all([
+      repositoryFile(
+        "infra/temporal-platform/test-support/compose.disposable.yml",
+      ),
+      repositoryFile(
+        "infra/temporal-platform/test-support/verify-disposable.sh",
+      ),
+      repositoryFile(
+        "infra/temporal-platform/test-support/generate-fixtures.mjs",
+      ),
+      repositoryFile(
+        "infra/temporal-platform/test-support/worker-poll-probe.mjs",
+      ),
+      repositoryFile("infra/temporal-platform/test-support/Caddyfile"),
+    ]);
 
   assert.match(compose, /codex-task4c-platform-temporal/);
   assert.match(compose, /internal:\s*true/);
@@ -159,23 +201,58 @@ test("disposable proof is isolated and product config never owns test keys", asy
     compose,
     /caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d/,
   );
+  assert.match(
+    compose,
+    /node@sha256:e6d9a389d34ff9678438af985c9913fbd1eb6ed36e80fea56644f4b4f6dd70ba/,
+  );
   assert.match(runner, /docker compose -p global/);
+  assert.doesNotMatch(runner, /--remove-orphans/);
   assert.match(runner, /generate-fixtures\.mjs/);
-  assert.match(runner, /no-token/);
-  assert.match(runner, /reader-write-denied/);
-  assert.match(runner, /reader-cross-namespace-denied/);
+  assert.match(runner, /verify\.sh/);
+  assert.match(runner, /worker-poll-probe\.mjs/);
+  assert.match(runner, /worker-cross-namespace-denied/);
+  assert.match(runner, /AUTHORITY_DIRECTORY=.*\/authority/);
+  assert.match(runner, /SERVER_SECRET_DIRECTORY=.*\/server/);
+  assert.match(runner, /JWKS_DIRECTORY=.*\/jwks/);
+  assert.match(runner, /JWKS_TLS_DIRECTORY=.*\/jwks-tls/);
+  assert.match(runner, /CLIENT_SECRET_DIRECTORY=.*\/client/);
+  assert.match(compose, /TEMPORAL_PLATFORM_TEST_SERVER_SECRET_DIRECTORY/);
+  assert.match(compose, /TEMPORAL_PLATFORM_TEST_JWKS_DIRECTORY/);
+  assert.match(compose, /TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY/);
+  assert.match(compose, /TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY/);
+  assert.match(compose, /TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY/);
+  assert.match(compose, /@temporalio\+client@1\.20\.3/);
+  assert.match(compose, /@temporalio\+common@1\.20\.3/);
+  assert.match(compose, /@temporalio\+proto@1\.20\.3/);
+  assert.doesNotMatch(compose, /TEMPORAL_PLATFORM_TEST_FIXTURES/);
+  assert.doesNotMatch(runner, /(?:pnpm|npm|yarn|bun)\s+(?:add|install)/);
   assert.match(fixtureGenerator, /generateKeyPairSync\("rsa"/);
   assert.match(fixtureGenerator, /platform-automation:read/);
   assert.match(fixtureGenerator, /platform-automation:write/);
   assert.match(fixtureGenerator, /platform-automation:worker/);
+  assert.match(fixtureGenerator, /platform-automation:write/);
   assert.match(fixtureGenerator, /temporal-system:admin/);
-  assert.doesNotMatch(compose, /global-(?:postgres|api|worker|redis|temporal)(?:\s|$)/m);
+  assert.match(fixtureGenerator, /task4c-growthos-reader/);
+  assert.match(fixtureGenerator, /task4c-backend-schedule-writer/);
+  assert.match(fixtureGenerator, /task4c-backend-worker/);
+  assert.match(fixtureGenerator, /task4c-provision-admin/);
+  assert.doesNotMatch(fixtureGenerator, /privateKey\.export/);
+  assert.match(workerProbe, /pollWorkflowTaskQueue/);
+  assert.match(workerProbe, /respondWorkflowTaskFailed/);
+  assert.match(caddy, /root \* \/srv\/jwks/);
+  assert.match(
+    caddy,
+    /tls \/run\/secrets\/task4c-jwks\/server\.crt \/run\/secrets\/task4c-jwks\/server\.key/,
+  );
+  assert.doesNotMatch(caddy, /root \* \/fixtures/);
+  assert.doesNotMatch(
+    compose,
+    /global-(?:postgres|api|worker|redis|temporal)(?:\s|$)/m,
+  );
 });
 
 test("runbook records the namespace isolation and current lease limitation", async () => {
-  const runbook = await repositoryFile(
-    "infra/temporal-platform/runbook.md",
-  );
+  const runbook = await repositoryFile("infra/temporal-platform/runbook.md");
 
   assert.match(runbook, /platform-automation/);
   assert.match(runbook, /accepted residual read scope/i);

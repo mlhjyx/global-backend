@@ -1,0 +1,230 @@
+services:
+  codex-task4c-platform-temporal-postgres:
+    image: docker.io/library/postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-postgres
+    environment:
+      POSTGRES_USER: temporal_platform
+      POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set disposable password}
+      POSTGRES_DB: temporal_platform
+    volumes:
+      - codex-task4c-platform-temporal-postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ../postgres/init.sql
+        target: /docker-entrypoint-initdb.d/10-temporal-platform.sql
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [codex-task4c-platform-temporal]
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U temporal_platform -d temporal_platform"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  codex-task4c-platform-temporal-schema:
+    image: docker.io/temporalio/admin-tools@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
+    container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-schema
+    user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+    entrypoint: ["/bin/sh"]
+    command: ["/opt/temporal-platform/schema-provision.sh"]
+    environment:
+      TEMPORAL_PLATFORM_POSTGRES_HOST: codex-task4c-platform-temporal-postgres
+      TEMPORAL_PLATFORM_POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set disposable password}
+    volumes:
+      - type: bind
+        source: ../schema-provision.sh
+        target: /opt/temporal-platform/schema-provision.sh
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [codex-task4c-platform-temporal]
+    depends_on:
+      codex-task4c-platform-temporal-postgres:
+        condition: service_healthy
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=16m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+
+  codex-task4c-platform-temporal-jwks:
+    image: docker.io/library/caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-jwks
+    hostname: task4c-jwks
+    user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_JWKS_DIRECTORY:?set JWKS fixture directory}
+        target: /srv/jwks
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY:?set JWKS TLS fixture directory}
+        target: /run/secrets/task4c-jwks
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      codex-task4c-platform-temporal:
+        aliases: [task4c-jwks]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-check-certificate",
+          "--spider",
+          "-q",
+          "https://task4c-jwks:8443/jwks.json",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # The official Caddy binary carries cap_net_bind_service as a file
+    # capability; retaining this one capability is required for exec under
+    # no-new-privileges even though the isolated fixture listens on 8443.
+    cap_add: [NET_BIND_SERVICE]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=16m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+      - "/data:rw,noexec,nosuid,nodev,size=16m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+      - "/config:rw,noexec,nosuid,nodev,size=16m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+
+  codex-task4c-platform-temporal-server:
+    image: docker.io/temporalio/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da
+    container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-server
+    hostname: task4c-temporal
+    user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+    environment:
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal-platform/temporal.yaml
+      TEMPORAL_ALLOW_NO_AUTH: "false"
+      TEMPORAL_SERVICES: frontend,internal-frontend,history,matching,worker
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_PLATFORM_POSTGRES_HOST: codex-task4c-platform-temporal-postgres
+      TEMPORAL_PLATFORM_POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set disposable password}
+      TEMPORAL_PLATFORM_JWKS_URI: https://task4c-jwks:8443/jwks.json
+      TEMPORAL_PLATFORM_JWT_AUDIENCE: ${TEMPORAL_PLATFORM_JWT_AUDIENCE:?set audience}
+      TEMPORAL_PLATFORM_TLS_SERVER_NAME: task4c-temporal
+      SSL_CERT_FILE: /run/secrets/temporal-platform/jwks-ca-bundle.crt
+    volumes:
+      - type: bind
+        source: ../config/temporal.yaml
+        target: /etc/temporal-platform/temporal.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../config/dynamicconfig.yaml
+        target: /etc/temporal-platform/dynamicconfig.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_SERVER_SECRET_DIRECTORY:?set server fixture directory}
+        target: /run/secrets/temporal-platform
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      codex-task4c-platform-temporal:
+        aliases: [task4c-temporal]
+    depends_on:
+      codex-task4c-platform-temporal-schema:
+        condition: service_completed_successfully
+      codex-task4c-platform-temporal-jwks:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "7233"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=64m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+
+  codex-task4c-platform-temporal-admin:
+    image: docker.io/temporalio/admin-tools@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
+    container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-admin
+    user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+    environment:
+      TEMPORAL_PLATFORM_ADDRESS: task4c-temporal:7233
+      TEMPORAL_PLATFORM_TLS_SERVER_NAME: task4c-temporal
+    volumes:
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY:?set client fixture directory}
+        target: /run/secrets/temporal-platform-client
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [codex-task4c-platform-temporal]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=16m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+
+  codex-task4c-platform-temporal-worker-probe:
+    image: docker.io/library/node@sha256:e6d9a389d34ff9678438af985c9913fbd1eb6ed36e80fea56644f4b4f6dd70ba
+    container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-worker-probe
+    user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+    working_dir: /repo/apps/api
+    volumes:
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_REPOSITORY_ROOT:?set repository root}
+        target: /repo
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY:?set client fixture directory}
+        target: /run/secrets/temporal-platform-client
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/client
+        target: /repo/node_modules/.pnpm/@temporalio+client@1.20.3/node_modules/@temporalio/client
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/common
+        target: /repo/node_modules/.pnpm/@temporalio+common@1.20.3/node_modules/@temporalio/common
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/proto
+        target: /repo/node_modules/.pnpm/@temporalio+proto@1.20.3/node_modules/@temporalio/proto
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [codex-task4c-platform-temporal]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=16m,uid=${TEMPORAL_PLATFORM_TEST_UID:?set test uid},gid=${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
+
+volumes:
+  codex-task4c-platform-temporal-postgres-data:
+    name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-postgres-data
+
+networks:
+  codex-task4c-platform-temporal:
+    name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-network
+    internal: true
