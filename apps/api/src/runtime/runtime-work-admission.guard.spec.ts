@@ -2,18 +2,36 @@ import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
 
 import { RuntimeWorkAdmissionGuard } from './runtime-work-admission.guard';
 import { RuntimeAdmissionService } from './runtime-admission';
 import { RuntimeReadinessService } from '../health/runtime-readiness.service';
+import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
+import { READ_ONLY_CONTROL_PLANE_METADATA } from './read-only-control-plane.decorator';
 
 const readySnapshot = Object.freeze({ status: 'ready' as const });
 
-function context(method: string): ExecutionContext {
+class OrdinaryController {
+  mutate(): void {}
+}
+
+function context(
+  method: string,
+  input: Readonly<{
+    handler?: (...args: never[]) => unknown;
+    controller?: object;
+    request?: Readonly<Record<string, unknown>>;
+  }> = {},
+): ExecutionContext {
   return {
     getType: () => 'http',
-    switchToHttp: () => ({ getRequest: () => ({ method }) }),
+    getHandler: () => input.handler ?? OrdinaryController.prototype.mutate,
+    getClass: () => input.controller ?? OrdinaryController,
+    switchToHttp: () => ({
+      getRequest: () => ({ method, ...(input.request ?? {}) }),
+    }),
   } as unknown as ExecutionContext;
 }
 
@@ -21,7 +39,7 @@ describe('RuntimeWorkAdmissionGuard', () => {
   it('keeps concrete Nest injection metadata for the dynamic readiness snapshot', () => {
     expect(
       Reflect.getMetadata('design:paramtypes', RuntimeWorkAdmissionGuard),
-    ).toEqual([RuntimeAdmissionService, RuntimeReadinessService]);
+    ).toEqual([RuntimeAdmissionService, RuntimeReadinessService, Reflector]);
   });
 
   it('keeps diagnostics readable but rejects every HTTP mutation while managed admission is closed', () => {
@@ -30,6 +48,7 @@ describe('RuntimeWorkAdmissionGuard', () => {
         current: () => ({ admitted: false }),
       } as never,
       { current: () => readySnapshot } as never,
+      new Reflector(),
     );
 
     expect(guard.canActivate(context('GET'))).toBe(true);
@@ -57,6 +76,7 @@ describe('RuntimeWorkAdmissionGuard', () => {
           },
         }),
       } as never,
+      new Reflector(),
     );
     expect(guard.canActivate(context('POST'))).toBe(true);
   });
@@ -65,8 +85,44 @@ describe('RuntimeWorkAdmissionGuard', () => {
     const guard = new RuntimeWorkAdmissionGuard(
       { current: () => ({ admitted: true }) } as never,
       { current: () => ({ status: 'not_ready' }) } as never,
+      new Reflector(),
     );
 
+    expect(() => guard.canActivate(context('POST'))).toThrow(
+      'RUNTIME_ADMISSION_CLOSED',
+    );
+  });
+
+  it('admits only code-owned read-only control-plane metadata while ordinary work stays closed', () => {
+    const reflector = new Reflector();
+    const guard = new RuntimeWorkAdmissionGuard(
+      { current: () => ({ admitted: false }) } as never,
+      { current: () => ({ status: 'not_ready' }) } as never,
+      reflector,
+    );
+    const quoteHandler = PlatformExecutionTechnicalQuoteController.prototype.read;
+
+    expect(
+      reflector.get<boolean>(READ_ONLY_CONTROL_PLANE_METADATA, quoteHandler),
+    ).toBe(true);
+    expect(
+      guard.canActivate(
+        context('POST', {
+          handler: quoteHandler,
+          controller: PlatformExecutionTechnicalQuoteController,
+        }),
+      ),
+    ).toBe(true);
+    expect(() =>
+      guard.canActivate(
+        context('POST', {
+          request: {
+            readOnlyControlPlane: true,
+            headers: { 'x-read-only-control-plane': 'true' },
+          },
+        }),
+      ),
+    ).toThrow('RUNTIME_ADMISSION_CLOSED');
     expect(() => guard.canActivate(context('POST'))).toThrow(
       'RUNTIME_ADMISSION_CLOSED',
     );

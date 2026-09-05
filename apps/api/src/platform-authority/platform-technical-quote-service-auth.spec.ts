@@ -2,11 +2,14 @@ import type { ExecutionContext } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
+  PlatformTechnicalQuoteAuthenticationReadinessContributor,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
   UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
 } from "./platform-technical-quote-service-auth";
+import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
 
 const PATH = "/api/v1/platform-authority/technical-quote";
 
@@ -164,8 +167,13 @@ describe("PlatformTechnicalQuoteServiceAuthenticationGuard", () => {
       headers: { "x-service": "x".repeat(16_385) },
     });
     const query = context({ originalUrl: `${PATH}?token=forbidden` });
+    const sixtyFiveHeaders = Array.from({ length: 65 }, (_, index) => [
+      `X-Bounded-${index}`,
+      "value",
+    ]).flat();
+    const tooMany = context({ rawHeaders: sixtyFiveHeaders });
 
-    for (const request of [duplicate, oversized, query]) {
+    for (const request of [duplicate, oversized, query, tooMany]) {
       await expect(guard.canActivate(request)).rejects.toMatchObject({
         status: 401,
         response: {
@@ -201,5 +209,101 @@ describe("PlatformTechnicalQuoteServiceAuthenticationGuard", () => {
     });
     expect(JSON.stringify(caught)).not.toContain("secret header detail");
     expect(verify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["null", () => null],
+    ["extra field", () => ({
+      status: "ready",
+      code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY",
+      extra: "forbidden",
+    })],
+    ["proxy", () => new Proxy(
+      {
+        status: "ready",
+        code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY",
+      },
+      {
+        get: () => {
+          throw new Error("secret readiness proxy detail");
+        },
+      },
+    )],
+    ["throwing getter", () => {
+      const value: Record<string, unknown> = {
+        code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY",
+      };
+      Object.defineProperty(value, "status", {
+        enumerable: true,
+        get: () => {
+          throw new Error("secret readiness getter detail");
+        },
+      });
+      return value;
+    }],
+  ])("maps a malformed %s readiness result to stable unavailable", async (_label, make) => {
+    const verify = vi.fn();
+    const guard = new PlatformTechnicalQuoteServiceAuthenticationGuard({
+      readiness: make as never,
+      verify,
+    } as PlatformTechnicalQuoteServiceAuthenticationVerifier);
+
+    const caught = await guard
+      .canActivate(context())
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    expect(caught).toMatchObject({
+      status: 503,
+      response: {
+        error: {
+          code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
+        },
+      },
+    });
+    expect(JSON.stringify(caught)).not.toContain("secret readiness");
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("registers an independently consumable quote-auth readiness fact", async () => {
+    const unavailableRegistry = new RuntimeReadinessContributorRegistry();
+    const unavailable = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
+      new UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier(),
+      unavailableRegistry,
+    );
+    unavailable.onModuleInit();
+    await expect(
+      unavailableRegistry.check(
+        PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+      ),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
+    });
+    unavailable.onModuleDestroy();
+
+    const readyRegistry = new RuntimeReadinessContributorRegistry();
+    const ready = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
+      verifier(async () => ({
+        authenticationMode: "SERVICE_ONLY",
+        principalId: "growthos-platform-authority",
+        scopes: [PLATFORM_TECHNICAL_QUOTE_READ_SCOPE],
+      })),
+      readyRegistry,
+    );
+    ready.onModuleInit();
+    await expect(
+      readyRegistry.check(
+        PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+      ),
+    ).resolves.toEqual({ status: "ok" });
+    ready.onModuleDestroy();
+    await expect(
+      readyRegistry.check(
+        PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+      ),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "READINESS_CONTRIBUTOR_MISSING",
+    });
   });
 });

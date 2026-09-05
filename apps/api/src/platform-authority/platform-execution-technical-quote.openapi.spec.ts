@@ -59,6 +59,7 @@ describe("Platform technical quote service-only OpenAPI", () => {
     expect(operation["x-maximum-request-header-bytes"]).toBe(16_384);
     expect(operation["x-maximum-request-header-count"]).toBe(64);
     expect(operation["x-maximum-response-body-bytes"]).toBe(16_384);
+    expect(operation["x-content-encoding"]).toBe("identity-only");
     expect(Object.keys(operation.requestBody.content)).toEqual([
       "application/json",
     ]);
@@ -103,6 +104,7 @@ describe("Platform technical quote service-only OpenAPI", () => {
       "200",
       "400",
       "401",
+      "429",
       "503",
     ]);
     const codes = (status: string) =>
@@ -113,6 +115,9 @@ describe("Platform technical quote service-only OpenAPI", () => {
     ]);
     expect(codes("401")).toEqual([
       "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_DENIED",
+    ]);
+    expect(codes("429")).toEqual([
+      "PLATFORM_TECHNICAL_QUOTE_RATE_LIMITED",
     ]);
     expect(codes("503")).toEqual([
       "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",

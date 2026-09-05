@@ -2,11 +2,12 @@ import "reflect-metadata";
 
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import { gzipSync } from "node:zlib";
 import { Module, VersioningType } from "@nestjs/common";
 import { MODULE_METADATA } from "@nestjs/common/constants";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { GlobalHttpExceptionFilter } from "../common/http-exception.filter";
 import { loadVerifiedPlatformAuthorityPolicyAsset } from "./platform-authority-policy-asset";
@@ -94,12 +95,16 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
     await app?.close();
   });
 
-  async function post(body: string, contentType = "application/json") {
+  async function post(
+    body: string | Uint8Array,
+    contentType = "application/json",
+    extraHeaders: Readonly<Record<string, string>> = {},
+  ) {
     return fetch(`${baseUrl}/api/v1/platform-authority/technical-quote`, {
       method: "POST",
       redirect: "manual",
-      headers: { "content-type": contentType },
-      body,
+      headers: { "content-type": contentType, ...extraHeaders },
+      body: body as BodyInit,
     });
   }
 
@@ -180,6 +185,51 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
       },
     });
   });
+
+  it.each([
+    [
+      "gzip content encoding",
+      gzipSync(Buffer.from(VALID_BODY, "utf8")),
+      "application/json",
+      { "content-encoding": "gzip" },
+    ],
+    [
+      "unsupported content encoding",
+      VALID_BODY,
+      "application/json",
+      { "content-encoding": "compress" },
+    ],
+    [
+      "non-UTF-8 charset",
+      VALID_BODY,
+      "application/json; charset=iso-8859-1",
+      {},
+    ],
+    [
+      "global parser size overflow",
+      `{"padding":"${"x".repeat(110_000)}"}`,
+      "application/json",
+      {},
+    ],
+  ] as const)(
+    "rejects %s as one raw-wire error without invoking the quote service",
+    async (_label, body, contentType, headers) => {
+      const read = vi.spyOn(quoteReader, "read");
+      try {
+        const response = await post(body, contentType, headers);
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: {
+            code: "PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID",
+            message: "platform technical quote request is invalid",
+          },
+        });
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
 
   it("composes only an unavailable service verifier in the product module", async () => {
     const [moduleSource, mainSource, appModuleSource] = await Promise.all([
