@@ -90,6 +90,7 @@ describe('layered health OpenAPI contract', () => {
         'execution_budget_jwks',
         'workspace_budget_authority',
         'platform_budget_authority',
+        'site_builder_model_settlement_readback',
         'platform_technical_quote_authentication',
       ],
     });
@@ -120,6 +121,8 @@ describe('layered health OpenAPI contract', () => {
     const candidates = [
       response?.properties?.components?.properties?.database,
       response?.properties?.capabilities?.properties?.execution_budget_jwks,
+      response?.properties?.capabilities?.properties?.site_builder_model_settlement_readback,
+      response?.properties?.capabilities?.properties?.platform_technical_quote_authentication,
     ];
 
     for (const candidate of candidates) {

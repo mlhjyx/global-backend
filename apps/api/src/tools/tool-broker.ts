@@ -34,6 +34,7 @@ import {
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from "../site-builder/site-build-cost-ledger";
+import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
 
 /**
  * These schemas require the GenericOperationArtifactService plus a Task 5
@@ -202,6 +203,7 @@ export class ToolBroker implements ExecutionBroker {
     input: I,
     ctx: ToolContext,
   ): Promise<ToolResult<O>> {
+    assertPlatformEgressFenceAvailable(ctx);
     const now = this.deps.now ?? Date.now;
     const started = now();
     const tool = this.registry.get(toolId) as Tool<I, O> | undefined;

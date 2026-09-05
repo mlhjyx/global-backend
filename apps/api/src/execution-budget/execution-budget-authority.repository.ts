@@ -83,6 +83,10 @@ export type ExecutionBudgetPlatformAuthorityFreshness =
       rows: readonly ExecutionBudgetPlatformAuthorityFreshnessRow[];
     }>;
 
+export type ExecutionBudgetPlatformWriterCapability =
+  | Readonly<{ status: 'available' }>
+  | Readonly<{ status: 'writer_unavailable' }>;
+
 type PlatformWriterPrincipal = Readonly<{
   sessionUser: string;
   currentUser: string;
@@ -603,6 +607,26 @@ export class ExecutionBudgetAuthorityRepository {
       return rows;
     } catch {
       return Object.freeze({ status: 'unavailable' });
+    }
+  }
+
+  async inspectPlatformWriterCapability(): Promise<ExecutionBudgetPlatformWriterCapability> {
+    if (!this.platformWriter) {
+      return Object.freeze({ status: 'writer_unavailable' });
+    }
+    try {
+      return await this.platformWriter.$transaction(
+        async (transaction) => {
+          await transaction.$executeRawUnsafe(
+            'SET LOCAL statement_timeout = 2000',
+          );
+          await attestExecutionBudgetPlatformWriterTransaction(transaction);
+          return Object.freeze({ status: 'available' as const });
+        },
+        { maxWait: 1_000, timeout: 2_500 },
+      );
+    } catch {
+      return Object.freeze({ status: 'writer_unavailable' });
     }
   }
 

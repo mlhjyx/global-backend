@@ -17,10 +17,6 @@ import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verif
 import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
-  EXECUTION_BUDGET_PLATFORM_PURPOSES,
-  type ExecutionBudgetPurpose,
-} from "../execution-budget/execution-budget-authority.types";
-import {
   loadExecutionBudgetJwks,
   validateExecutionBudgetGrantVerifierConfiguration,
   type ExecutionBudgetJwksFetch,
@@ -36,6 +32,18 @@ import {
   gatewayCredentialsAreDistinct,
 } from "../model-gateway/gateway-credential-boundary";
 import { loadSettlementDerivationKeyring } from "../model-gateway/settlement-wire-identity";
+import { loadVerifiedPlatformAuthorityPolicyAsset } from "../platform-authority/platform-authority-policy-asset";
+import {
+  PlatformAutomationReadinessService,
+  platformAutomationReadinessFactName,
+  type PlatformAutomationReadinessIdentity,
+  type PlatformAutomationReadinessReport,
+} from "../platform-authority/platform-automation-readiness";
+import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "../platform-authority/platform-execution-contract";
+import { resolveCurrentPlatformExecutionProviderSnapshotV1 } from "../platform-authority/platform-execution-provider-snapshot";
+import { PlatformExecutionTechnicalQuoteService } from "../platform-authority/platform-execution-technical-quote";
+import { PLATFORM_EGRESS_FENCE_UNAVAILABLE } from "../platform-authority/platform-egress-fence";
+import { PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR } from "../platform-authority/platform-technical-quote-service-auth";
 
 interface RedisProbeClient {
   readonly status: string;
@@ -80,20 +88,6 @@ type GenericArtifactStorageProbeFactory = (
   config: GenericArtifactStorageConfig,
 ) => GenericArtifactStorageProbe;
 
-type PlatformAuthorityReadinessState =
-  | "active"
-  | "missing"
-  | "expired"
-  | "revoked"
-  | "exhausted"
-  | "not_yet_valid"
-  | "invalid";
-
-type PlatformAuthorityReadinessRow = Readonly<{
-  purpose: string;
-  state: string;
-}>;
-
 const execFileAsync = promisify(execFile);
 const BROWSER_PATHS = new Set(["/usr/bin/google-chrome", "/usr/bin/chromium"]);
 const BROWSER_PROBE_ARGS = Object.freeze([
@@ -107,15 +101,6 @@ const BROWSER_PROBE_ARGS = Object.freeze([
   "--no-default-browser-check",
   "--dump-dom",
   "data:text/html,<title>runtime-readiness</title>",
-]);
-const PLATFORM_AUTHORITY_STATES = new Set<PlatformAuthorityReadinessState>([
-  "active",
-  "missing",
-  "expired",
-  "revoked",
-  "exhausted",
-  "not_yet_valid",
-  "invalid",
 ]);
 
 async function defaultExecutableProbe(executable: string): Promise<boolean> {
@@ -330,81 +315,106 @@ export async function checkExecutionBudgetJwksReadiness(
   }
 }
 
-function platformAuthorityCode(
-  purpose: ExecutionBudgetPurpose,
-  state: Exclude<PlatformAuthorityReadinessState, "active">,
-): string {
-  const purposeCode = purpose.replaceAll(".", "_").toUpperCase();
-  return `PLATFORM_BUDGET_AUTHORITY_${purposeCode}_${state.toUpperCase()}`;
+const PLATFORM_READINESS_WORKFLOW_RUN_IDS = Object.freeze({
+  "acq-sweep": "11111111-1111-4111-8111-111111111111",
+  "patents-cache-refresh": "22222222-2222-4222-8222-222222222222",
+  "intent-sweep": "33333333-3333-4333-8333-333333333333",
+  "sanctions-refresh": "44444444-4444-4444-8444-444444444444",
+} as const);
+
+function failed(code: string): RuntimeComponentStatus {
+  return Object.freeze({ status: "failed", code });
+}
+
+export async function inspectPlatformBudgetAuthorityReadiness(
+  repository:
+    | Pick<ExecutionBudgetAuthorityRepository, "inspectPlatformWriterCapability">
+    | undefined,
+  registry: RuntimeReadinessContributorRegistry,
+): Promise<PlatformAutomationReadinessReport> {
+  const policyAsset = loadVerifiedPlatformAuthorityPolicyAsset();
+  const quoteService = new PlatformExecutionTechnicalQuoteService({
+    policyAsset,
+    technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
+  });
+  const registryProbe =
+    (fact: "temporal_proof" | "issuer" | "revocation_delivery") =>
+    (identity: PlatformAutomationReadinessIdentity) =>
+      registry.check(
+        platformAutomationReadinessFactName(fact, identity.scheduleId),
+      );
+
+  return new PlatformAutomationReadinessService({
+    technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
+    policyAsset,
+    quote: async (identity) => {
+      const authentication = await registry.check(
+        PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+      );
+      if (authentication.status !== "ok") return authentication;
+      const row = PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.find(
+        (candidate) => candidate.scheduleId === identity.scheduleId,
+      );
+      if (!row) return failed("PLATFORM_EXECUTION_BUDGET_POLICY_DRIFT");
+      try {
+        quoteService.quote({
+          purpose: row.purpose,
+          scheduleId: row.scheduleId,
+          workflowType: row.workflowType,
+          workflowId: `readiness-${row.scheduleId}`,
+          workflowRunId: PLATFORM_READINESS_WORKFLOW_RUN_IDS[row.scheduleId],
+          scheduleRequestSha256: row.scheduleRequestSha256,
+          now: new Date(0),
+          providerSnapshot:
+            resolveCurrentPlatformExecutionProviderSnapshotV1(row.scheduleId),
+        });
+        return { status: "ok" } as const;
+      } catch {
+        return failed("PLATFORM_EXECUTION_BUDGET_QUOTE_UNAVAILABLE");
+      }
+    },
+    temporalProof: registryProbe("temporal_proof"),
+    issuer: registryProbe("issuer"),
+    writer: async () => {
+      if (!repository) {
+        return failed("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
+      }
+      try {
+        const result = await repository.inspectPlatformWriterCapability();
+        return result.status === "available"
+          ? ({ status: "ok" } as const)
+          : failed("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
+      } catch {
+        return failed("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
+      }
+    },
+    revocationDelivery: registryProbe("revocation_delivery"),
+    // 4D must replace this source-owned fail-closed fact with the real
+    // linearizable authorization-and-send fence. No environment flag opens it.
+    egressFence: async () => failed(PLATFORM_EGRESS_FENCE_UNAVAILABLE),
+  }).inspect();
 }
 
 export async function checkPlatformBudgetAuthorityReadiness(
   repository:
-    | Pick<
-        ExecutionBudgetAuthorityRepository,
-        "inspectPlatformAuthorityFreshness"
-      >
+    | Pick<ExecutionBudgetAuthorityRepository, "inspectPlatformWriterCapability">
     | undefined,
-  now: Date = new Date(),
+  registry: RuntimeReadinessContributorRegistry,
 ): Promise<RuntimeComponentStatus> {
-  if (!repository) {
-    return {
-      status: "failed",
-      code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
-    };
-  }
   try {
-    const freshness = await repository.inspectPlatformAuthorityFreshness(now);
-    if (freshness.status === "writer_unavailable") {
-      return {
-        status: "failed",
-        code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
-      };
-    }
-    if (freshness.status !== "available") {
-      return {
-        status: "failed",
-        code: "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE",
-      };
-    }
-    const rows: readonly PlatformAuthorityReadinessRow[] = freshness.rows;
-    if (rows.length !== EXECUTION_BUDGET_PLATFORM_PURPOSES.length) {
-      throw new Error("PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID");
-    }
-    const states = new Map<
-      ExecutionBudgetPurpose,
-      PlatformAuthorityReadinessState
-    >();
-    for (const row of rows) {
-      if (
-        !EXECUTION_BUDGET_PLATFORM_PURPOSES.includes(
-          row.purpose as (typeof EXECUTION_BUDGET_PLATFORM_PURPOSES)[number],
-        ) ||
-        !PLATFORM_AUTHORITY_STATES.has(
-          row.state as PlatformAuthorityReadinessState,
-        ) ||
-        states.has(row.purpose as ExecutionBudgetPurpose)
-      ) {
-        throw new Error("PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID");
-      }
-      states.set(
-        row.purpose as ExecutionBudgetPurpose,
-        row.state as PlatformAuthorityReadinessState,
-      );
-    }
-    for (const purpose of EXECUTION_BUDGET_PLATFORM_PURPOSES) {
-      const state = states.get(purpose);
-      if (!state) throw new Error("PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID");
-      if (state !== "active") {
-        return {
-          status: "failed",
-          code: platformAuthorityCode(purpose, state),
-        };
-      }
-    }
-    return { status: "ok" };
+    const report = await inspectPlatformBudgetAuthorityReadiness(
+      repository,
+      registry,
+    );
+    if (report.status === "ready") return { status: "ok" };
+    const closed = report.rows.find((row) =>
+      row.desiredMode === "ENABLED"
+        ? row.state !== "ISSUABLE"
+        : row.state !== "INTENTIONALLY_DISABLED_NO_EGRESS",
+    );
+    return failed(closed?.code ?? "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE");
   } catch {
-    return { status: "failed", code: "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE" };
+    return failed("PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE");
   }
 }
 
@@ -603,7 +613,7 @@ export class ExecutionBudgetAuthorityReadinessContributors
 
   onModuleInit(): void {
     this.unregister = this.registry.register("platform_budget_authority", () =>
-      checkPlatformBudgetAuthorityReadiness(this.repository),
+      checkPlatformBudgetAuthorityReadiness(this.repository, this.registry),
     );
   }
 

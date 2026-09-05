@@ -882,6 +882,53 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
   });
 
+  it('attests the deployment-owned platform writer without reading any authority row', async () => {
+    const { writer, transactionClient } = platformFreshnessWriter(
+      [safePlatformPrincipal],
+      [],
+    );
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => []),
+      writer,
+    );
+
+    await expect(repository.inspectPlatformWriterCapability()).resolves.toEqual({
+      status: 'available',
+    });
+    expect(transactionClient.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SET LOCAL statement_timeout = 2000',
+    );
+    expect(transactionClient.$queryRaw).toHaveBeenCalledOnce();
+    expect(
+      (
+        transactionClient.$queryRaw.mock.calls[0]?.[0] as {
+          strings?: readonly string[];
+        }
+      ).strings?.join(''),
+    ).toContain('session_user');
+  });
+
+  it.each([
+    ['missing binding', undefined],
+    ['wrong principal', [{ ...safePlatformPrincipal, memberships: ['runtime_worker'] }]],
+  ] as const)(
+    'fails writer capability closed for %s without using the app principal',
+    async (_label, principalRows) => {
+      const prisma = fakeWorkspacePrisma(async () => {
+        throw new Error('app principal must not be used');
+      });
+      const source = principalRows
+        ? platformFreshnessWriter(principalRows, []).writer
+        : undefined;
+      const repository = new ExecutionBudgetAuthorityRepository(prisma, source);
+
+      await expect(repository.inspectPlatformWriterCapability()).resolves.toEqual({
+        status: 'writer_unavailable',
+      });
+      expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    },
+  );
+
   it('queries only bounded platform authority lifecycle state through the platform writer', async () => {
     const rows = [
       { purpose: 'platform.acquisition', state: 'active' },

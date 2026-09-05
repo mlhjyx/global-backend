@@ -82,6 +82,10 @@ const PROVIDER_SETTLEMENT_READBACK_STALE_PATHS = Object.freeze([
   "packages/db/prisma/schema.prisma",
   "pnpm-lock.yaml",
 ]);
+const PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS = Object.freeze([
+  "apps/api/nest-cli.json",
+  ...PROVIDER_SETTLEMENT_READBACK_STALE_PATHS,
+]);
 
 function regularStat(overrides = {}) {
   return {
@@ -491,6 +495,36 @@ test("Copy impact admits only the exact provider settlement-readback successor s
         ),
       }),
     /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
+  );
+});
+
+test("Copy impact admits only the exact Platform Authority v2 successor scope", () => {
+  const policyBinding = bindingWithPaths(
+    PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS,
+  );
+  const currentFiles = PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS.map((path) => ({
+    path,
+    sha256: SHA_C,
+  }));
+  const receipt = buildCopyRuntimeEligibilityReceipt({
+    binding: policyBinding,
+    currentFiles,
+  });
+
+  assert.equal(
+    receipt.stale_scope,
+    "PRODUCTION_PARITY_PLATFORM_AUTHORITY_POLICY_V2",
+  );
+  assert.deepEqual(receipt.drifted_paths, PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS);
+  assert.equal(receipt.dispatch_authorization, "NOT_AUTHORIZED");
+  assert.equal(receipt.pilot_eligibility, "BLOCKED");
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: policyBinding,
+        currentFiles: currentFiles.slice(1),
+      }),
+    /COPY_FIXED_SOURCE_CURRENT_FILES_INVALID/u,
   );
 });
 

@@ -10,10 +10,14 @@ import {
 } from './testing/temporal-workflow.mock';
 import { acquisitionSweepWorkflow } from './acquisition.workflow';
 import { intentSweepWorkflow } from './intent.workflow';
-import { patentsCacheRefreshWorkflow } from './patents-cache.workflow';
+import {
+  PATENTS_INTENTIONALLY_DISABLED_NO_EGRESS_PATCH,
+  patentsCacheRefreshWorkflow,
+} from './patents-cache.workflow';
 import { sanctionsRefreshWorkflow } from './sanctions-refresh.workflow';
 import {
   PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+  PLATFORM_SCHEDULE_AUTHORITY_PATCH,
   PLATFORM_SCHEDULE_AUTHORITY_SCOPES,
   type PlatformExecutionBudgetBinding,
   type PlatformScheduleId,
@@ -41,7 +45,6 @@ describe('platform schedule workflow authority matrix', () => {
     ['acq-sweep', acquisitionSweepWorkflow, 'listDueSources'],
     ['intent-sweep', intentSweepWorkflow, 'purgeStaleIntentEvents'],
     ['sanctions-refresh', sanctionsRefreshWorkflow, 'refreshSanctionsLists'],
-    ['patents-cache-refresh', patentsCacheRefreshWorkflow, 'refreshPatentCacheActivity'],
   ] as const)('admits %s before its first domain activity and propagates the exact binding', async (
     scheduleId,
     workflow,
@@ -54,10 +57,6 @@ describe('platform schedule workflow authority matrix', () => {
     acts.listDueWatches.mockResolvedValue({ sourceIds: [] });
     acts.projectIntentAllWorkspaces.mockResolvedValue({ workspaces: 0, companiesTouched: 0, eventsProjected: 0 });
     acts.refreshSanctionsLists.mockResolvedValue({ sources: 0, summaries: [] });
-    acts.refreshPatentCacheActivity.mockResolvedValue({
-      status: 'SKIPPED_EMPTY', anchorCount: 0, rowCount: 0, bytesScanned: null,
-      purged: 0, cached: 0, empty: 0,
-    });
 
     await workflow({
       executionContractVersion: PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
@@ -76,6 +75,54 @@ describe('platform schedule workflow authority matrix', () => {
     expect(acts.admitPlatformSchedule.mock.invocationCallOrder[0]).toBeLessThan(
       acts[firstDomainActivity].mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('keeps new patents histories deterministically disabled without grant admission or domain activity', async () => {
+    await expect(
+      patentsCacheRefreshWorkflow({
+        executionContractVersion: PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+        executionScope: PLATFORM_SCHEDULE_AUTHORITY_SCOPES['patents-cache-refresh'],
+        maxAnchors: 11,
+      }),
+    ).resolves.toEqual({
+      status: 'DISABLED',
+      anchorCount: 0,
+      rowCount: 0,
+      bytesScanned: null,
+      purged: 0,
+      cached: 0,
+      empty: 0,
+      detail: 'INTENTIONALLY_DISABLED_NO_EGRESS',
+    });
+    expect(acts.admitPlatformSchedule).not.toHaveBeenCalled();
+    expect(acts.refreshPatentCacheActivity).not.toHaveBeenCalled();
+  });
+
+  it('replays patents histories created after authority admission but before the no-egress patch', async () => {
+    setPatched(
+      (patchId) =>
+        patchId === PLATFORM_SCHEDULE_AUTHORITY_PATCH &&
+        patchId !== PATENTS_INTENTIONALLY_DISABLED_NO_EGRESS_PATCH,
+    );
+    const admitted = binding('patents-cache-refresh');
+    acts.admitPlatformSchedule.mockResolvedValue(admitted);
+    acts.refreshPatentCacheActivity.mockResolvedValue({
+      status: 'SKIPPED_EMPTY', anchorCount: 0, rowCount: 0, bytesScanned: null,
+      purged: 0, cached: 0, empty: 0,
+    });
+
+    await patentsCacheRefreshWorkflow({
+      executionContractVersion: PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+      executionScope: PLATFORM_SCHEDULE_AUTHORITY_SCOPES['patents-cache-refresh'],
+      maxAnchors: 11,
+    });
+
+    expect(acts.admitPlatformSchedule).toHaveBeenCalledOnce();
+    expect(acts.refreshPatentCacheActivity).toHaveBeenCalledWith({
+      maxAnchors: 11,
+      executionContractVersion: PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+      executionBudget: admitted,
+    });
   });
 
   it('does not convert a wrapped authority failure into a successful intent sweep', async () => {

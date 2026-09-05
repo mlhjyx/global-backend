@@ -298,6 +298,7 @@
                         "execution_budget_jwks",
                         "workspace_budget_authority",
                         "platform_budget_authority",
+                        "site_builder_model_settlement_readback",
                         "platform_technical_quote_authentication"
                       ],
                       "properties": {
@@ -428,6 +429,69 @@
                           ]
                         },
                         "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "site_builder_model_settlement_readback": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -1503,6 +1567,7 @@
                         "execution_budget_jwks",
                         "workspace_budget_authority",
                         "platform_budget_authority",
+                        "site_builder_model_settlement_readback",
                         "platform_technical_quote_authentication"
                       ],
                       "properties": {
@@ -1633,6 +1698,69 @@
                           ]
                         },
                         "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "site_builder_model_settlement_readback": {
                           "oneOf": [
                             {
                               "type": "object",

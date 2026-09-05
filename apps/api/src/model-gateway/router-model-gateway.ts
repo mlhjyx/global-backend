@@ -125,6 +125,7 @@ import {
 } from "./model-identity";
 import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from "./model-transports";
 import { boundedModelUsage } from "./model-usage-boundary";
+import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
 
 type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
@@ -430,6 +431,7 @@ export class RouterModelGateway extends ModelGateway {
     ctx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
+    assertPlatformEgressFenceAvailable(ctx);
     const chain = this.router.route(op, input.task);
     if (chain.length === 0)
       throw new Error(`no model provider for ${op}/${input.task}`);
