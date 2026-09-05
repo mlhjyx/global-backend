@@ -49,7 +49,7 @@ const SHA_C = "c".repeat(64);
 const SHA_D = "d".repeat(64);
 const COMMIT = "1".repeat(40);
 const PHASE_A_R2_LAUNCHER_CONTRACT_SHA256 =
-  "3c71df7989da6312f0498bc8908ff07a581121fb24d03ab1e6ed36b0e2342292";
+  "7f4ebcb725bf6f87bb32c0ef6da98933c77e0d5de69341e0a5f93171c45bc5a3";
 const REQUEST_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
 const OUTPUT_ROOT =
