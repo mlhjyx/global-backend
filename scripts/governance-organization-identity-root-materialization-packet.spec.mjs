@@ -19,7 +19,11 @@ import {
   canonicalJsonBytes,
   renderRootWrapper,
 } from "./governance-organization-identity-launcher.mjs";
-import { inspectMaterializationPacketFacts } from "./governance-organization-identity-materialization-preflight.mjs";
+import {
+  inspectMaterializationPacketFacts,
+  MATERIALIZATION_RUNNING_ROOT,
+  verifyMaterializationOutput,
+} from "./governance-organization-identity-materialization-preflight.mjs";
 
 import {
   buildDiagnosticLauncherMaterializationPacket as buildLauncherMaterializationPacket,
@@ -648,4 +652,30 @@ test("ordinary packet writer rejects historical synthetic diagnostics without cr
     ).status,
     "INTEGRITY_ERROR",
   );
+});
+
+test("ordinary writer passes the real ignored-output gate then rejects synthetic source readiness", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(
+      MATERIALIZATION_RUNNING_ROOT,
+      ".superpowers/sdd/materialization-writer-regression-",
+    ),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const outputPath = path.join(fixtureRoot, "new-packet.json");
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
+  assert.equal(
+    verifyMaterializationOutput(MATERIALIZATION_RUNNING_ROOT, outputPath)
+      .status,
+    "LOCAL_FACTS_VERIFIED",
+  );
+  const written = await writeLauncherMaterializationPacketFile({
+    outputPath,
+    packet: validPacket(),
+  });
+  assert.deepEqual(written, {
+    status: "HOLD",
+    code: "SOURCE_UNAVAILABLE_OR_UNSAFE",
+  });
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
 });
