@@ -1,32 +1,41 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { S3Client } from '@aws-sdk/client-s3';
-import Redis from 'ioredis';
-import { execFile } from 'node:child_process';
-import { constants } from 'node:fs';
-import { access } from 'node:fs/promises';
-import { promisify } from 'node:util';
-import type { RuntimeComponentStatus } from './runtime-readiness-registry';
-import { RuntimeReadinessContributorRegistry } from './runtime-readiness-registry';
+import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { S3Client } from "@aws-sdk/client-s3";
+import Redis from "ioredis";
+import { execFile } from "node:child_process";
+import { constants } from "node:fs";
+import { access } from "node:fs/promises";
+import { promisify } from "node:util";
+import type { RuntimeComponentStatus } from "./runtime-readiness-registry";
+import { RuntimeReadinessContributorRegistry } from "./runtime-readiness-registry";
 import {
   RuntimeReleaseIdentityService,
   type RuntimeReleaseIdentity,
-} from './runtime-release-identity';
-import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
-import { probeJwksDocument } from '../auth/jwks-readiness';
-import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
-import { ExecutionBudgetAuthorityRepository } from '../execution-budget/execution-budget-authority.repository';
-import { ExecutionControlError } from '../execution-budget/execution-control-error';
+} from "./runtime-release-identity";
+import { validateRedisConnectionUrl } from "../tools/redis-rate-limit-store";
+import { probeJwksDocument } from "../auth/jwks-readiness";
+import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
+import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
+import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
   EXECUTION_BUDGET_PLATFORM_PURPOSES,
   type ExecutionBudgetPurpose,
-} from '../execution-budget/execution-budget-authority.types';
+} from "../execution-budget/execution-budget-authority.types";
 import {
   loadExecutionBudgetJwks,
   validateExecutionBudgetGrantVerifierConfiguration,
   type ExecutionBudgetJwksFetch,
-} from '../execution-budget/execution-budget-grant.verifier';
-import { S3GenericOperationArtifactStore } from '../durable-results/artifact/generic-operation-artifact.store';
-import { checkMinioAllVersionLifecycle } from '../durable-results/artifact/generic-operation-artifact.minio-lifecycle';
+} from "../execution-budget/execution-budget-grant.verifier";
+import { S3GenericOperationArtifactStore } from "../durable-results/artifact/generic-operation-artifact.store";
+import { checkMinioAllVersionLifecycle } from "../durable-results/artifact/generic-operation-artifact.minio-lifecycle";
+import {
+  NEW_API_REQUEST_BOUND_RESOLVER_ID,
+  NewApiRequestBoundSettlementResolver,
+} from "../model-gateway/new-api-request-bound-settlement";
+import {
+  canonicalGatewayCredential,
+  gatewayCredentialsAreDistinct,
+} from "../model-gateway/gateway-credential-boundary";
+import { loadSettlementDerivationKeyring } from "../model-gateway/settlement-wire-identity";
 
 interface RedisProbeClient {
   readonly status: string;
@@ -39,7 +48,7 @@ type RedisProbeFactory = (url: string) => RedisProbeClient;
 type GatewayProbeFetch = (
   input: string,
   init: RequestInit,
-) => Promise<Pick<Response, 'ok' | 'body'>>;
+) => Promise<Pick<Response, "ok" | "body">>;
 type BrowserProbe = (
   executable: string,
   args: readonly string[],
@@ -57,10 +66,10 @@ type GenericArtifactStorageConfig = Readonly<{
 
 interface GenericArtifactStorageProbe {
   checkReadiness(): Promise<
-    | Readonly<{ status: 'ready' }>
+    | Readonly<{ status: "ready" }>
     | Readonly<{
-        status: 'not_ready';
-        code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE';
+        status: "not_ready";
+        code: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE";
       }>
   >;
   checkLifecycleExtension(): Promise<boolean>;
@@ -72,13 +81,13 @@ type GenericArtifactStorageProbeFactory = (
 ) => GenericArtifactStorageProbe;
 
 type PlatformAuthorityReadinessState =
-  | 'active'
-  | 'missing'
-  | 'expired'
-  | 'revoked'
-  | 'exhausted'
-  | 'not_yet_valid'
-  | 'invalid';
+  | "active"
+  | "missing"
+  | "expired"
+  | "revoked"
+  | "exhausted"
+  | "not_yet_valid"
+  | "invalid";
 
 type PlatformAuthorityReadinessRow = Readonly<{
   purpose: string;
@@ -86,27 +95,27 @@ type PlatformAuthorityReadinessRow = Readonly<{
 }>;
 
 const execFileAsync = promisify(execFile);
-const BROWSER_PATHS = new Set(['/usr/bin/google-chrome', '/usr/bin/chromium']);
+const BROWSER_PATHS = new Set(["/usr/bin/google-chrome", "/usr/bin/chromium"]);
 const BROWSER_PROBE_ARGS = Object.freeze([
-  '--headless=new',
-  '--no-sandbox',
-  '--disable-gpu',
-  '--disable-dev-shm-usage',
-  '--disable-background-networking',
-  '--disable-component-update',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--dump-dom',
-  'data:text/html,<title>runtime-readiness</title>',
+  "--headless=new",
+  "--no-sandbox",
+  "--disable-gpu",
+  "--disable-dev-shm-usage",
+  "--disable-background-networking",
+  "--disable-component-update",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--dump-dom",
+  "data:text/html,<title>runtime-readiness</title>",
 ]);
 const PLATFORM_AUTHORITY_STATES = new Set<PlatformAuthorityReadinessState>([
-  'active',
-  'missing',
-  'expired',
-  'revoked',
-  'exhausted',
-  'not_yet_valid',
-  'invalid',
+  "active",
+  "missing",
+  "expired",
+  "revoked",
+  "exhausted",
+  "not_yet_valid",
+  "invalid",
 ]);
 
 async function defaultExecutableProbe(executable: string): Promise<boolean> {
@@ -122,10 +131,10 @@ export async function checkImagePipelineIsolationReadiness(
   platform: NodeJS.Platform = process.platform,
   probe: ExecutableProbe = defaultExecutableProbe,
 ): Promise<RuntimeComponentStatus> {
-  if (platform !== 'linux') return { status: 'ok' };
-  return (await probe('/usr/bin/prlimit'))
-    ? { status: 'ok' }
-    : { status: 'failed', code: 'IMAGE_PIPELINE_ISOLATION_UNAVAILABLE' };
+  if (platform !== "linux") return { status: "ok" };
+  return (await probe("/usr/bin/prlimit"))
+    ? { status: "ok" }
+    : { status: "failed", code: "IMAGE_PIPELINE_ISOLATION_UNAVAILABLE" };
 }
 
 async function defaultBrowserProbe(
@@ -135,16 +144,16 @@ async function defaultBrowserProbe(
   await execFileAsync(executable, [...args], {
     timeout: 5_000,
     maxBuffer: 128 * 1024,
-    env: { PATH: '/usr/bin:/bin', HOME: '/tmp', LANG: 'C.UTF-8' },
+    env: { PATH: "/usr/bin:/bin", HOME: "/tmp", LANG: "C.UTF-8" },
   });
 }
 
 function loopback(hostname: string): boolean {
   return (
-    hostname === '127.0.0.1' ||
-    hostname === 'localhost' ||
-    hostname === '[::1]' ||
-    hostname === '::1'
+    hostname === "127.0.0.1" ||
+    hostname === "localhost" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
   );
 }
 
@@ -169,9 +178,11 @@ function genericArtifactStorageConfig(
     accessKeyId.length > 128 ||
     !secretAccessKey ||
     secretAccessKey.length > 256 ||
-    (forcePathStyleValue !== 'true' && forcePathStyleValue !== 'false')
+    (forcePathStyleValue !== "true" && forcePathStyleValue !== "false")
   ) {
-    throw new ExecutionControlError('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
+    throw new ExecutionControlError(
+      "GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID",
+    );
   }
   const endpoint = new URL(endpointValue);
   if (
@@ -179,10 +190,12 @@ function genericArtifactStorageConfig(
     endpoint.password ||
     endpoint.search ||
     endpoint.hash ||
-    (endpoint.protocol !== 'https:' &&
-      !(endpoint.protocol === 'http:' && loopback(endpoint.hostname)))
+    (endpoint.protocol !== "https:" &&
+      !(endpoint.protocol === "http:" && loopback(endpoint.hostname)))
   ) {
-    throw new ExecutionControlError('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
+    throw new ExecutionControlError(
+      "GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID",
+    );
   }
   return Object.freeze({
     endpoint: endpoint.href,
@@ -190,7 +203,7 @@ function genericArtifactStorageConfig(
     region,
     accessKeyId,
     secretAccessKey,
-    forcePathStyle: forcePathStyleValue === 'true',
+    forcePathStyle: forcePathStyleValue === "true",
   });
 }
 
@@ -206,7 +219,7 @@ function defaultGenericArtifactStorageProbe(
       secretAccessKey: config.secretAccessKey,
     },
     maxAttempts: 1,
-    requestChecksumCalculation: 'WHEN_REQUIRED',
+    requestChecksumCalculation: "WHEN_REQUIRED",
     requestHandler: {
       connectionTimeout: 1_500,
       requestTimeout: 2_500,
@@ -232,17 +245,17 @@ export async function checkGenericArtifactStorageReadiness(
     probe = factory(genericArtifactStorageConfig(env));
     const result = await probe.checkReadiness();
     const lifecycleExtensionReady =
-      result.status === 'ready' && (await probe.checkLifecycleExtension());
+      result.status === "ready" && (await probe.checkLifecycleExtension());
     return lifecycleExtensionReady
-      ? { status: 'ok' }
+      ? { status: "ok" }
       : {
-          status: 'failed',
-          code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+          status: "failed",
+          code: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE",
         };
   } catch {
     return {
-      status: 'failed',
-      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+      status: "failed",
+      code: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE",
     };
   } finally {
     probe?.destroy();
@@ -265,24 +278,24 @@ export async function checkRedisReadiness(
 ): Promise<RuntimeComponentStatus> {
   const raw = env.TOOL_RATE_LIMIT_REDIS_URL ?? env.REDIS_URL;
   if (!raw?.trim()) {
-    return { status: 'failed', code: 'REDIS_CONFIG_REQUIRED' };
+    return { status: "failed", code: "REDIS_CONFIG_REQUIRED" };
   }
   let configured: string;
   try {
     configured = validateRedisConnectionUrl(raw);
   } catch {
-    return { status: 'failed', code: 'REDIS_CONFIG_INVALID' };
+    return { status: "failed", code: "REDIS_CONFIG_INVALID" };
   }
   let client: RedisProbeClient | undefined;
   try {
     client = factory(configured);
-    if (client.status === 'wait' || client.status === 'end')
+    if (client.status === "wait" || client.status === "end")
       await client.connect();
-    return (await client.ping()) === 'PONG'
-      ? { status: 'ok' }
-      : { status: 'failed', code: 'REDIS_UNAVAILABLE' };
+    return (await client.ping()) === "PONG"
+      ? { status: "ok" }
+      : { status: "failed", code: "REDIS_UNAVAILABLE" };
   } catch {
-    return { status: 'failed', code: 'REDIS_UNAVAILABLE' };
+    return { status: "failed", code: "REDIS_UNAVAILABLE" };
   } finally {
     client?.disconnect();
   }
@@ -294,10 +307,10 @@ export async function checkAuthJwksReadiness(
   try {
     const config = validateJwksTokenVerifierConfiguration(env);
     return (await probeJwksDocument(config.jwks.href))
-      ? { status: 'ok' }
-      : { status: 'failed', code: 'AUTH_JWKS_UNAVAILABLE' };
+      ? { status: "ok" }
+      : { status: "failed", code: "AUTH_JWKS_UNAVAILABLE" };
   } catch {
-    return { status: 'failed', code: 'AUTH_JWKS_UNAVAILABLE' };
+    return { status: "failed", code: "AUTH_JWKS_UNAVAILABLE" };
   }
 }
 
@@ -308,20 +321,20 @@ export async function checkExecutionBudgetJwksReadiness(
   try {
     const config = validateExecutionBudgetGrantVerifierConfiguration(env);
     await loadExecutionBudgetJwks(config, fetcher);
-    return { status: 'ok' };
+    return { status: "ok" };
   } catch {
     return {
-      status: 'failed',
-      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      status: "failed",
+      code: "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
     };
   }
 }
 
 function platformAuthorityCode(
   purpose: ExecutionBudgetPurpose,
-  state: Exclude<PlatformAuthorityReadinessState, 'active'>,
+  state: Exclude<PlatformAuthorityReadinessState, "active">,
 ): string {
-  const purposeCode = purpose.replaceAll('.', '_').toUpperCase();
+  const purposeCode = purpose.replaceAll(".", "_").toUpperCase();
   return `PLATFORM_BUDGET_AUTHORITY_${purposeCode}_${state.toUpperCase()}`;
 }
 
@@ -329,34 +342,34 @@ export async function checkPlatformBudgetAuthorityReadiness(
   repository:
     | Pick<
         ExecutionBudgetAuthorityRepository,
-        'inspectPlatformAuthorityFreshness'
+        "inspectPlatformAuthorityFreshness"
       >
     | undefined,
   now: Date = new Date(),
 ): Promise<RuntimeComponentStatus> {
   if (!repository) {
     return {
-      status: 'failed',
-      code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+      status: "failed",
+      code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
     };
   }
   try {
     const freshness = await repository.inspectPlatformAuthorityFreshness(now);
-    if (freshness.status === 'writer_unavailable') {
+    if (freshness.status === "writer_unavailable") {
       return {
-        status: 'failed',
-        code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+        status: "failed",
+        code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
       };
     }
-    if (freshness.status !== 'available') {
+    if (freshness.status !== "available") {
       return {
-        status: 'failed',
-        code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE',
+        status: "failed",
+        code: "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE",
       };
     }
     const rows: readonly PlatformAuthorityReadinessRow[] = freshness.rows;
     if (rows.length !== EXECUTION_BUDGET_PLATFORM_PURPOSES.length) {
-      throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
+      throw new Error("PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID");
     }
     const states = new Map<
       ExecutionBudgetPurpose,
@@ -372,7 +385,7 @@ export async function checkPlatformBudgetAuthorityReadiness(
         ) ||
         states.has(row.purpose as ExecutionBudgetPurpose)
       ) {
-        throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
+        throw new Error("PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID");
       }
       states.set(
         row.purpose as ExecutionBudgetPurpose,
@@ -381,17 +394,17 @@ export async function checkPlatformBudgetAuthorityReadiness(
     }
     for (const purpose of EXECUTION_BUDGET_PLATFORM_PURPOSES) {
       const state = states.get(purpose);
-      if (!state) throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
-      if (state !== 'active') {
+      if (!state) throw new Error("PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID");
+      if (state !== "active") {
         return {
-          status: 'failed',
+          status: "failed",
           code: platformAuthorityCode(purpose, state),
         };
       }
     }
-    return { status: 'ok' };
+    return { status: "ok" };
   } catch {
-    return { status: 'failed', code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE' };
+    return { status: "failed", code: "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE" };
   }
 }
 
@@ -401,7 +414,7 @@ export async function checkModelGatewayReadiness(
 ): Promise<RuntimeComponentStatus> {
   const configured = env.MODEL_GATEWAY_URL?.trim();
   if (!configured || !env.MODEL_GATEWAY_KEY?.trim()) {
-    return { status: 'failed', code: 'MODEL_GATEWAY_CONFIG_REQUIRED' };
+    return { status: "failed", code: "MODEL_GATEWAY_CONFIG_REQUIRED" };
   }
   let endpoint: URL;
   try {
@@ -411,36 +424,89 @@ export async function checkModelGatewayReadiness(
       base.password ||
       base.search ||
       base.hash ||
-      (base.protocol !== 'https:' &&
-        !(base.protocol === 'http:' && loopback(base.hostname)))
+      (base.protocol !== "https:" &&
+        !(base.protocol === "http:" && loopback(base.hostname)))
     ) {
-      return { status: 'failed', code: 'MODEL_GATEWAY_CONFIG_INVALID' };
+      return { status: "failed", code: "MODEL_GATEWAY_CONFIG_INVALID" };
     }
     endpoint = new URL(
-      `${base.pathname.replace(/\/$/, '')}/models`,
+      `${base.pathname.replace(/\/$/, "")}/models`,
       base.origin,
     );
   } catch {
-    return { status: 'failed', code: 'MODEL_GATEWAY_CONFIG_INVALID' };
+    return { status: "failed", code: "MODEL_GATEWAY_CONFIG_INVALID" };
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_000);
   timeout.unref();
   try {
     const response = await fetcher(endpoint.href, {
-      method: 'GET',
+      method: "GET",
       headers: { Authorization: `Bearer ${env.MODEL_GATEWAY_KEY}` },
-      redirect: 'error',
+      redirect: "error",
       signal: controller.signal,
     });
     await response.body?.cancel().catch(() => undefined);
     return response.ok
-      ? { status: 'ok' }
-      : { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
+      ? { status: "ok" }
+      : { status: "failed", code: "MODEL_GATEWAY_UNAVAILABLE" };
   } catch {
-    return { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
+    return { status: "failed", code: "MODEL_GATEWAY_UNAVAILABLE" };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+export async function checkSiteBuildSettlementReadbackReadiness(
+  env: NodeJS.ProcessEnv,
+  fetcher: typeof fetch = fetch,
+  keyringLoader: typeof loadSettlementDerivationKeyring = loadSettlementDerivationKeyring,
+): Promise<RuntimeComponentStatus> {
+  const configured = env.MODEL_GATEWAY_URL?.trim();
+  const readerCredential = canonicalGatewayCredential(
+    env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
+  );
+  const dispatchCredential =
+    env.MODEL_GATEWAY_KEY === undefined
+      ? undefined
+      : canonicalGatewayCredential(env.MODEL_GATEWAY_KEY);
+  const keyringPath = env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE?.trim();
+  if (
+    !configured ||
+    !readerCredential ||
+    !keyringPath ||
+    (env.MODEL_GATEWAY_KEY !== undefined && !dispatchCredential) ||
+    (dispatchCredential !== undefined &&
+      !gatewayCredentialsAreDistinct(dispatchCredential, readerCredential))
+  ) {
+    return {
+      status: "failed",
+      code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_CONFIG_REQUIRED",
+    };
+  }
+  try {
+    keyringLoader(keyringPath);
+    const resolver = new NewApiRequestBoundSettlementResolver(
+      {
+        gatewayOrigin: new URL(configured).origin,
+        readerCredential,
+        resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+        maximumProbeDurationMs: 2_000,
+      },
+      { fetch: fetcher },
+    );
+    const capability = await resolver.checkCapability();
+    return capability.ready
+      ? { status: "ok" }
+      : {
+          status: "failed",
+          code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+        };
+  } catch {
+    return {
+      status: "failed",
+      code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+    };
   }
 }
 
@@ -451,7 +517,7 @@ export function rendererRuntimeIdentity(
     !identity.attested ||
     !/^sha256:[0-9a-f]{64}$/.test(identity.renderer_digest)
   ) {
-    throw new Error('RENDERER_IDENTITY_NOT_PROVEN');
+    throw new Error("RENDERER_IDENTITY_NOT_PROVEN");
   }
   return `site-renderer@${identity.renderer_digest}`;
 }
@@ -460,15 +526,15 @@ export async function checkBrowserReadiness(
   env: NodeJS.ProcessEnv,
   probe: BrowserProbe = defaultBrowserProbe,
 ): Promise<RuntimeComponentStatus> {
-  const executable = env.CHROME_PATH?.trim() || '/usr/bin/chromium';
+  const executable = env.CHROME_PATH?.trim() || "/usr/bin/chromium";
   if (!BROWSER_PATHS.has(executable)) {
-    return { status: 'failed', code: 'BROWSER_RUNTIME_CONFIG_INVALID' };
+    return { status: "failed", code: "BROWSER_RUNTIME_CONFIG_INVALID" };
   }
   try {
     await probe(executable, BROWSER_PROBE_ARGS);
-    return { status: 'ok' };
+    return { status: "ok" };
   } catch {
-    return { status: 'failed', code: 'BROWSER_RUNTIME_UNAVAILABLE' };
+    return { status: "failed", code: "BROWSER_RUNTIME_UNAVAILABLE" };
   }
 }
 
@@ -485,30 +551,33 @@ export class ManagedDependencyReadinessContributors
 
   onModuleInit(): void {
     this.unregister = Object.freeze([
-      this.registry.register('redis', () => checkRedisReadiness(process.env)),
-      this.registry.register('auth_jwks', () =>
+      this.registry.register("redis", () => checkRedisReadiness(process.env)),
+      this.registry.register("auth_jwks", () =>
         checkAuthJwksReadiness(process.env),
       ),
-      this.registry.register('execution_budget_jwks', () =>
+      this.registry.register("execution_budget_jwks", () =>
         checkExecutionBudgetJwksReadiness(process.env),
       ),
-      this.registry.register('generic_artifact_storage', () =>
+      this.registry.register("generic_artifact_storage", () =>
         checkGenericArtifactStorageReadiness(process.env),
       ),
-      this.registry.register('model_gateway', () =>
+      this.registry.register("model_gateway", () =>
         checkModelGatewayReadiness(process.env),
       ),
-      this.registry.register('browser', () =>
+      this.registry.register("site_builder_model_settlement_readback", () =>
+        checkSiteBuildSettlementReadbackReadiness(process.env),
+      ),
+      this.registry.register("browser", () =>
         checkBrowserReadiness(process.env),
       ),
-      this.registry.register('renderer', () => {
+      this.registry.register("renderer", () => {
         try {
           rendererRuntimeIdentity(this.releaseIdentity.current());
-          return { status: 'ok' } as const;
+          return { status: "ok" } as const;
         } catch {
           return {
-            status: 'not_proven',
-            code: 'RENDERER_IDENTITY_NOT_PROVEN',
+            status: "not_proven",
+            code: "RENDERER_IDENTITY_NOT_PROVEN",
           } as const;
         }
       }),
@@ -533,7 +602,7 @@ export class ExecutionBudgetAuthorityReadinessContributors
   ) {}
 
   onModuleInit(): void {
-    this.unregister = this.registry.register('platform_budget_authority', () =>
+    this.unregister = this.registry.register("platform_budget_authority", () =>
       checkPlatformBudgetAuthorityReadiness(this.repository),
     );
   }

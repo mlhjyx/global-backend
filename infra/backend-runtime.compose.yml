@@ -5,6 +5,7 @@ x-backend-environment: &backend-environment
   NODE_ENV: production
   APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
   RUNTIME_IMAGE_REFERENCE: ${GLOBAL_BACKEND_IMAGE}
+  SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: /run/secrets/site-build-settlement/derivation.keyring
   GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: ${GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT:?set the artifact S3 endpoint}
   GENERIC_OPERATION_ARTIFACT_S3_BUCKET: ${GENERIC_OPERATION_ARTIFACT_S3_BUCKET:?set the artifact S3 bucket}
   GENERIC_OPERATION_ARTIFACT_S3_REGION: ${GENERIC_OPERATION_ARTIFACT_S3_REGION:-us-east-1}
@@ -22,6 +23,13 @@ x-backend-runtime: &backend-runtime
   environment: *backend-environment
   network_mode: host
   read_only: true
+  volumes:
+    - type: bind
+      source: ${SITE_BUILD_SETTLEMENT_SECRET_DIRECTORY:-./.secrets/site-build-settlement}
+      target: /run/secrets/site-build-settlement
+      read_only: true
+      bind:
+        create_host_path: false
   security_opt:
     - no-new-privileges:true
   cap_drop:
