@@ -135,6 +135,8 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
       /}$/,
       `,"padding":"${"x".repeat(16_384)}"}`,
     ), "application/json"],
+    ["malformed JSON", '{"schema_version":', "application/json"],
+    ["trailing non-whitespace bytes", `${VALID_BODY}x`, "application/json"],
   ])("rejects a raw %s before quote calculation", async (_label, body, type) => {
     const response = await post(body, type);
     expect(response.status).toBe(400);
