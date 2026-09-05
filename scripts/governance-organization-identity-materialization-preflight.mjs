@@ -4,10 +4,12 @@ import {
   closeSync,
   constants,
   fstatSync,
+  fsyncSync,
   lstatSync,
   openSync,
   readSync,
   realpathSync,
+  writeSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,12 +29,20 @@ const normalized = (p) =>
 const inside = (root, p) =>
   normalized(root) && root !== "/" && p.startsWith(`${root}/`);
 const same = (a, b) =>
-  ["dev", "ino", "mode", "nlink", "size", "mtimeNs", "ctimeNs"].every(
-    (key) => a[key] === b[key],
-  );
+  [
+    "dev",
+    "ino",
+    "uid",
+    "gid",
+    "mode",
+    "nlink",
+    "size",
+    "mtimeNs",
+    "ctimeNs",
+  ].every((key) => a[key] === b[key]);
 
 // This is a bounded observation, not a lease over subsequent filesystem use.
-function observe(filePath, roots) {
+export function observeMaterializationBytes(filePath, roots, role = null) {
   if (
     !normalized(filePath) ||
     !Array.isArray(roots) ||
@@ -47,9 +57,32 @@ function observe(filePath, roots) {
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     const before = fstatSync(fd, { bigint: true });
+    const systemEnv =
+      role === "ENV" &&
+      filePath === "/usr/lib/cargo/bin/coreutils/env" &&
+      roots.includes("/usr/lib/cargo/bin/coreutils") &&
+      before.uid === 0n &&
+      before.gid === 0n &&
+      (before.mode & 0o022n) === 0n;
+    if (systemEnv) {
+      for (
+        let parent = path.dirname(filePath);
+        parent !== "/";
+        parent = path.dirname(parent)
+      ) {
+        const stat = lstatSync(parent);
+        if (
+          !stat.isDirectory() ||
+          stat.uid !== 0 ||
+          stat.gid !== 0 ||
+          stat.mode & 0o022
+        )
+          throw Error("SOURCE_PARENT_UNSAFE");
+      }
+    }
     if (
       !before.isFile() ||
-      before.nlink !== 1n ||
+      (before.nlink !== 1n && !systemEnv) ||
       before.size <= 0n ||
       before.size > BigInt(LIMIT)
     )
@@ -74,11 +107,26 @@ function observe(filePath, roots) {
       sha256: hash(bytes),
       size: bytes.length,
       mode: Number(before.mode & 0o7777n),
+      observation: Object.fromEntries(
+        [
+          "dev",
+          "ino",
+          "uid",
+          "gid",
+          "nlink",
+          "size",
+          "mode",
+          "mtimeNs",
+          "ctimeNs",
+        ].map((key) => [key, String(before[key])]),
+      ),
     };
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
 }
+
+const observe = observeMaterializationBytes;
 
 export function verifyMaterializationFile(filePath, expected, roots) {
   try {
@@ -104,7 +152,7 @@ export function verifyMaterializationFile(filePath, expected, roots) {
   }
 }
 
-function git(repo, args) {
+export function materializationGit(repo, args) {
   return execFileSync(
     "git",
     ["--no-pager", "--no-replace-objects", "-C", repo, ...args],
@@ -121,6 +169,8 @@ function git(repo, args) {
     },
   );
 }
+
+const git = materializationGit;
 
 export function verifyMaterializationGitIdentity(repo, relativePath, identity) {
   try {
@@ -442,6 +492,86 @@ export function inspectMaterializationPacketFacts(packet) {
 }
 
 export const MATERIALIZATION_RUNNING_ROOT = RUNNING_ROOT;
+
+// Linux directory-fd anchored creation prevents a replaced path parent from
+// redirecting the write. Drift after creation retains the failed evidence.
+export function writeExclusiveMaterializationOutput(
+  repo,
+  outputPath,
+  value,
+  revalidate,
+) {
+  const requireFact = (ok, code) => {
+    if (!ok) throw Error(code);
+  };
+  requireFact(
+    verifyMaterializationOutput(repo, outputPath).status ===
+      "LOCAL_FACTS_VERIFIED",
+    "OUTPUT_NOT_ABSENT_IGNORED",
+  );
+  const parentPath = path.dirname(outputPath);
+  const fd = openSync(
+    parentPath,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  let output;
+  try {
+    const before = fstatSync(fd, { bigint: true });
+    const parentStable = () => {
+      const after = lstatSync(parentPath, { bigint: true });
+      requireFact(
+        realpathSync(parentPath) === parentPath &&
+          ["dev", "ino", "mode", "uid", "gid"].every(
+            (key) => before[key] === after[key],
+          ),
+        "OUTPUT_PARENT_DRIFT",
+      );
+    };
+    revalidate();
+    parentStable();
+    output = openSync(
+      `/proc/self/fd/${fd}/${path.basename(outputPath)}`,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    parentStable();
+    const bytes = canonicalJsonBytes(value);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = writeSync(output, bytes, offset, bytes.length - offset);
+      requireFact(written > 0, "OUTPUT_WRITE_FAILED");
+      offset += written;
+    }
+    fsyncSync(output);
+    const st = fstatSync(output);
+    requireFact(
+      st.isFile() &&
+        st.nlink === 1 &&
+        st.uid === process.getuid() &&
+        st.gid === process.getgid() &&
+        (st.mode & 0o7777) === 0o600,
+      "OUTPUT_METADATA_INVALID",
+    );
+    fsyncSync(fd);
+    parentStable();
+    const readback = observeMaterializationBytes(outputPath, [repo]);
+    requireFact(
+      readback.sha256 === hash(bytes) &&
+        readback.observation.ino === String(st.ino) &&
+        readback.observation.dev === String(st.dev),
+      "OUTPUT_READBACK_MISMATCH",
+    );
+    revalidate();
+    parentStable();
+    return { outputPath, sha256: hash(bytes), size: bytes.length, mode: 0o600 };
+  } finally {
+    if (output !== undefined) closeSync(output);
+    closeSync(fd);
+  }
+}
 
 export function buildDiagnosticLauncherMaterializationPacketReviewReceipt(
   fields,

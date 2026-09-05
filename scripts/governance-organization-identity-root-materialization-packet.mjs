@@ -1,11 +1,8 @@
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  inspectMaterializationPacketFacts,
   MATERIALIZATION_RUNNING_ROOT,
-  verifyMaterializationOutput,
+  materializationGit,
   rootScope,
   requestIdFor,
   buildDiagnosticRootRequest,
@@ -40,10 +37,6 @@ const GENERATOR_PATH =
   "scripts/governance-organization-identity-root-materialization-packet.mjs";
 const GENERATOR_SPEC_PATH =
   "scripts/governance-organization-identity-root-materialization-packet.spec.mjs";
-const FROZEN_PHASE_A_SUBJECT_COMMIT =
-  "61384076273feddcb4c5b5309d4b46902dc50e5c";
-const REVIEWED_PHASE_B_SUBJECT_COMMIT =
-  "56fde9df9448377f3ce6454ae12e332d2ccde946";
 const REVIEW_IDENTITIES = Object.freeze({
   authorityModelPlanReviewSha256:
     "f9af1e54d25128b50e7e408dd356e0da28c17eb258e10c745938906f35a91440",
@@ -130,13 +123,17 @@ function gitFileIdentity(commit, filePath) {
   if (!isCommit(commit)) return null;
   const objectName = `${commit}:${filePath}`;
   try {
-    const blobId = execFileSync("git", ["rev-parse", objectName], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const bytes = execFileSync("git", ["cat-file", "blob", objectName], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    const blobId = materializationGit(MATERIALIZATION_RUNNING_ROOT, [
+      "rev-parse",
+      objectName,
+    ])
+      .toString()
+      .trim();
+    const bytes = materializationGit(MATERIALIZATION_RUNNING_ROOT, [
+      "cat-file",
+      "blob",
+      objectName,
+    ]);
     return GIT_ID.test(blobId)
       ? { commit, blobId, sha256: sha256(bytes), size: bytes.length }
       : null;
@@ -258,8 +255,8 @@ function approvedArtifacts({
   artifactHandoff = null,
 }) {
   if (
-    phaseASubjectCommit !== FROZEN_PHASE_A_SUBJECT_COMMIT ||
-    phaseBSubjectCommit !== REVIEWED_PHASE_B_SUBJECT_COMMIT ||
+    !isCommit(phaseASubjectCommit) ||
+    !isCommit(phaseBSubjectCommit) ||
     (artifactHandoff &&
       (!Object.isFrozen(artifactHandoff) ||
         Object.values(artifactHandoff).some(
@@ -452,8 +449,6 @@ function validateApprovedArtifacts(artifacts, packet) {
     artifacts.specBlobId === APPROVED_SPEC.blobId &&
     artifacts.specSha256 === APPROVED_SPEC.sha256 &&
     packet.subjectCommit === packet.phaseASubjectCommit &&
-    packet.phaseASubjectCommit === FROZEN_PHASE_A_SUBJECT_COMMIT &&
-    packet.phaseBSubjectCommit === REVIEWED_PHASE_B_SUBJECT_COMMIT &&
     artifacts.launcherCommit === packet.phaseASubjectCommit &&
     artifacts.generatorCommit === packet.phaseASubjectCommit &&
     artifacts.generatorSpecCommit === packet.phaseASubjectCommit &&
@@ -507,7 +502,10 @@ function validateSourceClosure(sourceClosure, destinationClosure) {
 
 export function validateLauncherMaterializationPacketStructure(packet) {
   if (!exactKeys(packet, PACKET_KEYS)) return integrity("PACKET_KEYS_INVALID");
-  if (!canonicalEqual(packet.reviewIdentities, REVIEW_IDENTITIES))
+  if (
+    !exactKeys(packet.reviewIdentities, Object.keys(REVIEW_IDENTITIES)) ||
+    !Object.values(packet.reviewIdentities).every(isSha)
+  )
     return integrity("PACKET_REVIEW_IDENTITIES_INVALID");
   const contractSha = sha256(canonicalJsonBytes(packet.launcherContract));
   const sourceClosureSha = canonicalDigest(packet.sourceToolClosure);
@@ -582,50 +580,16 @@ export function validateLauncherMaterializationPacketStructure(packet) {
   });
 }
 
-export function validateLauncherMaterializationPacket(packet) {
-  const structure = validateLauncherMaterializationPacketStructure(packet);
-  if (structure.status !== "PASS") return structure;
-  return inspectMaterializationPacketFacts(packet);
-}
-
-export function buildLauncherMaterializationPacket(options = {}) {
-  if (!Array.isArray(options.sourceToolClosure))
-    return { status: "HOLD", code: "SOURCE_FACTS_REQUIRED" };
-  const packet = buildDiagnosticLauncherMaterializationPacket(options);
-  const readiness = validateLauncherMaterializationPacket(packet);
-  return readiness.status === "PASS" ? packet : readiness;
-}
-
-export async function writeLauncherMaterializationPacketFile({
-  outputPath,
-  packet,
-}) {
-  if (!isAbsoluteNormalizedPath(outputPath)) {
-    return integrity("PACKET_OUTPUT_PATH_INVALID");
-  }
-  const output = verifyMaterializationOutput(
-    MATERIALIZATION_RUNNING_ROOT,
-    outputPath,
-  );
-  if (output.status !== "LOCAL_FACTS_VERIFIED") return output;
-  const packetValidation = validateLauncherMaterializationPacket(packet);
-  if (packetValidation.status !== "PASS") return packetValidation;
-  try {
-    await writeFile(outputPath, canonicalJsonBytes(packet), {
-      flag: "wx",
-      mode: 0o600,
-    });
-  } catch (error) {
-    return error?.code === "EEXIST"
-      ? integrity("PACKET_OUTPUT_REUSE")
-      : integrity("PACKET_OUTPUT_WRITE_FAILED");
-  }
-  return pass({
-    outputPath,
-    launcherMaterializationPacketSha256:
-      packetValidation.launcherMaterializationPacketSha256,
-  });
-}
+export {
+  prepareLauncherMaterialization,
+  observeMaterializationSource,
+  buildLauncherMaterializationPacket,
+  validateLauncherMaterializationPacket,
+  writeLauncherMaterializationPacketFile,
+  buildLauncherRootMaterializationRequest,
+  validateLauncherRootMaterializationRequest,
+  writeLauncherRootMaterializationRequestFile,
+} from "./governance-organization-identity-materialization-handoff.mjs";
 
 export { buildDiagnosticLauncherMaterializationPacketReviewReceipt } from "./governance-organization-identity-materialization-preflight.mjs";
 
@@ -762,28 +726,6 @@ export function validateLauncherRootMaterializationRequestStructure(
     diagnosticRequestSha256: sha256(canonicalJsonBytes(request)),
     scopeSha256: expectedScope,
   });
-}
-
-export function buildLauncherRootMaterializationRequest(fields) {
-  const readiness = validateLauncherMaterializationPacket(
-    fields?.launcherMaterializationPacket,
-  );
-  if (readiness.status !== "PASS") return readiness;
-  return { status: "HOLD", code: "FULL_REVIEW_BYTE_REFERENCES_REQUIRED" };
-}
-
-export function validateLauncherRootMaterializationRequest(
-  request,
-  packet = null,
-) {
-  const structure = validateLauncherRootMaterializationRequestStructure(
-    request,
-    packet,
-  );
-  if (structure.status !== "PASS") return structure;
-  const readiness = validateLauncherMaterializationPacket(packet);
-  if (readiness.status !== "PASS") return readiness;
-  return { status: "HOLD", code: "FULL_REVIEW_BYTE_REFERENCES_REQUIRED" };
 }
 
 export const ROOT_MATERIALIZATION_PACKET_PATHS = Object.freeze({

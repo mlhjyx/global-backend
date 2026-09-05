@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -21,6 +23,7 @@ import {
   verifyMaterializationDestinations,
   verifyMaterializationOutput,
   verifyMaterializationPlannedFile,
+  writeExclusiveMaterializationOutput,
 } from "./governance-organization-identity-materialization-preflight.mjs";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -182,6 +185,46 @@ test("only absent ignored local outputs and absent destinations pass observation
     "LOCAL_FACTS_VERIFIED",
   );
   assert.equal(verifyMaterializationDestinations([file]).status, "HOLD");
+});
+
+test("exclusive writer revalidates the opened parent and creates no file after parent replacement", (t) => {
+  const { root } = gitFixture(t);
+  const parent = path.join(root, "evidence");
+  const moved = path.join(root, "original-evidence");
+  mkdirSync(parent);
+  const output = path.join(parent, "candidate.json");
+  assert.throws(
+    () =>
+      writeExclusiveMaterializationOutput(
+        root,
+        output,
+        { fixture: "NOT_AUTHORITY" },
+        () => {
+          renameSync(parent, moved);
+          mkdirSync(parent);
+        },
+      ),
+    /OUTPUT_PARENT_DRIFT/,
+  );
+  assert.equal(existsSync(output), false);
+  assert.equal(existsSync(path.join(moved, "candidate.json")), false);
+  const result = writeExclusiveMaterializationOutput(
+    root,
+    output,
+    { fixture: "NOT_AUTHORITY" },
+    () => {},
+  );
+  assert.equal(result.sha256, hash(readFileSync(output)));
+  assert.throws(
+    () =>
+      writeExclusiveMaterializationOutput(
+        root,
+        output,
+        { fixture: "NOT_AUTHORITY" },
+        () => {},
+      ),
+    /OUTPUT_NOT_ABSENT_IGNORED/,
+  );
 });
 
 test("review bytes bind exact scope and subjects; narrow, missing and forged declarations HOLD", (t) => {
