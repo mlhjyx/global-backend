@@ -428,6 +428,18 @@ test("packet review and root request are non-circular, exact-key, and substituti
     reportSha256: SHA,
     counterexampleSetSha256: SHA_B,
   });
+  const substitutedReviewIdentityPacket = {
+    ...packet,
+    reviewIdentities: {
+      ...packet.reviewIdentities,
+      task0PFinalReviewSha256: SHA_C,
+    },
+  };
+  assert.equal(
+    validateLauncherMaterializationPacket(substitutedReviewIdentityPacket)
+      .status,
+    "INTEGRITY_ERROR",
+  );
   assert.equal(
     validateLauncherMaterializationPacketReviewReceipt(review, packet).status,
     "PASS",
