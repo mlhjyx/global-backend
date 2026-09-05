@@ -1,16 +1,16 @@
 {
   "schema_version": "production-dependency-audit-baseline/v1",
   "source": {
-    "base_commit": "866ede782579815dd3cd46bcaffb0c1d9626cf46",
-    "lockfile_digest": "sha256:ce3b20115af81ad419abb71fe6817cac7fb8bccece9881caf5940cdf36b2f0ea",
+    "base_commit": "ec57a5e2fe0c5de05d4c6bd19ef079a4d7cd7a92",
+    "lockfile_digest": "sha256:5a3160aa6102f2a4b9ce925d17bd3d7cca2da64fc323a3956c1fbbd8b6c960e0",
     "registry": "https://registry.npmjs.org/",
     "package_manager": "pnpm@9.15.9",
     "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
-    "captured_at": "2026-08-24T14:34:20.899Z"
+    "captured_at": "2026-09-04T10:53:11.000Z"
   },
   "bootstrap": {
     "mode": "INITIAL_BASELINE",
-    "base_commit": "866ede782579815dd3cd46bcaffb0c1d9626cf46"
+    "base_commit": "ec57a5e2fe0c5de05d4c6bd19ef079a4d7cd7a92"
   },
   "governance": {
     "owner": "OWN-SECURITY",
