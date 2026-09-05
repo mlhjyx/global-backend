@@ -38,6 +38,11 @@
     },
     "companies_suppressed": { "type": "integer", "minimum": 0 },
     "leads_rescore_requested": { "type": "integer", "minimum": 0 },
+    "patent_cache_erased": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows erased from the patent-inventor cache for this subject; optional for historical v1 payloads"
+    },
     "rule_version": { "type": "string" },
     "erased_at": { "type": "string", "format": "date-time" }
   }
