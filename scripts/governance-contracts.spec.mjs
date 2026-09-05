@@ -340,9 +340,10 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       document,
       /33855198691[\s\S]{0,180}`FAIL`[\s\S]{0,180}18 advisories[\s\S]{0,120}baseline 10[\s\S]{0,180}`qs` 2[\s\S]{0,120}`fast-uri` 4[\s\S]{0,120}`browserslist` 2/u,
     );
+    const securitySuccessorRow = uniqueTableRow("Security successor PR");
     assert.match(
-      document,
-      /PR #448[\s\S]{0,220}`2e1f12b445b83ca36ea198d2f0252d0aa7c1fd49`[\s\S]{0,180}`MERGED \/ MAIN_ADOPTED_SOURCE`[\s\S]{0,180}`f80105736c1058a6c1d8378877c8c70b7712f287`[\s\S]{0,180}10 success \/ 1 expected skip[\s\S]{0,220}(?:not|不是)[\s\S]{0,120}(?:deployment|部署|runtime)/u,
+      securitySuccessorRow,
+      /PR #448[^\n]*`2e1f12b445b83ca36ea198d2f0252d0aa7c1fd49`[^\n]*`MERGED \/ MAIN_ADOPTED_SOURCE`[^\n]*`f80105736c1058a6c1d8378877c8c70b7712f287`[^\n]*10 success \/ 1 expected skip[^\n]*(?:not|不是)[^\n]*(?:deployment|部署|runtime)/u,
     );
     assert.match(
       document,
@@ -362,7 +363,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ SECURITY_MERGED \/ CURRENT_MAIN_CI_RUNNING`[^\n]*33855198691[^\n]*PR #448[^\n]*`main@f8010573…`[^\n]*33962575495/u,
+      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ SECURITY_MERGED \/ CURRENT_MAIN_CI_SUCCESS`[^\n]*33855198691[^\n]*PR #448[^\n]*`main@f8010573…`[^\n]*33962575495[^\n]*33962575454[^\n]*33962575466[^\n]*33962575504[^\n]*33962575535[^\n]*`SUCCESS`/u,
     );
     assert.match(
       document,
@@ -400,7 +401,11 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       browserReadinessRow,
-      /PR #452[^\n]*`99e3c25a…`[^\n]*[Ss]hared wiring[^\n]*settlement author[^\n]*(?:not|不是)[^\n]*(?:deployment|部署|runtime)/u,
+      /`b41c97c7…`[^\n]*`C0\/H0\/M0`[^\n]*PR #452[^\n]*`99e3c25a…`[^\n]*9 checks \/ 2 expected skips[^\n]*(?:accepted|通过)[^\n]*[Ss]hared wiring[^\n]*settlement author[^\n]*(?:deployment|部署|runtime)[^\n]*(?:not proven|未证明)/u,
+    );
+    assert.match(
+      document,
+      /Current-main \/ security PR[^\n]*PR #448[^\n]*`MERGED \/ MAIN_ADOPTED_SOURCE`[^\n]*`f8010573…`[^\n]*2026-09-05T19:42:48\+08:00[^\n]*current-main CI[^\n]*Security[^\n]*Supply Chain[^\n]*Governance[^\n]*CodeQL[^\n]*`SUCCESS`[^\n]*(?:does not|不)[^\n]*(?:deployment|部署|runtime)/u,
     );
     assert.match(
       document,
@@ -500,11 +505,13 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     ["`RED / HISTORICAL_ONLY`", "`PASS / CURRENT`"],
     ["`RED / NOT_READY`", "`AMBER / PARTIAL`"],
     ["18 advisories", "10 advisories"],
+    ["`C0/H0/M0`", "`C0/H1/M0`"],
+    ["9 checks / 2 expected skips", "8 checks / 3 expected skips"],
     [
       "Program B root/launcher authority/materialization gate",
       "Program B gate closed",
     ],
-    ["CURRENT_MAIN_CI_RUNNING", "CURRENT_MAIN_CI_GREEN"],
+    ["CURRENT_MAIN_CI_SUCCESS", "CURRENT_MAIN_CI_FAILURE"],
     ["SECURITY_MERGED", "SECURITY_DEPLOYED"],
   ]) {
     assert.throws(() => assertCurrentStatus(status.replaceAll(from, to)));
