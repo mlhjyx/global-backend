@@ -23,7 +23,7 @@ test("reports a missing external authority as EXTERNAL_UNVERIFIED and exits non-
   assert.equal(result.status, 2);
   assert.equal(result.stderr, "");
   assert.deepEqual(JSON.parse(result.stdout), {
-    schemaVersion: "platform-authority-policy-import-verification/v1",
+    schemaVersion: "platform-authority-policy-import-verification/v2",
     status: "EXTERNAL_UNVERIFIED",
     reason: "AUTHORITY_CHECKOUT_UNAVAILABLE",
   });
@@ -39,7 +39,7 @@ test("rejects unknown CLI arguments instead of silently choosing a checkout", ()
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "");
   assert.deepEqual(JSON.parse(result.stdout), {
-    schemaVersion: "platform-authority-policy-import-verification/v1",
+    schemaVersion: "platform-authority-policy-import-verification/v2",
     status: "FAILED",
     reason: "VERIFIER_INPUT_INVALID",
   });

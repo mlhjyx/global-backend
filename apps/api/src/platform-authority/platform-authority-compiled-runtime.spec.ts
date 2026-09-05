@@ -66,9 +66,21 @@ describe("compiled platform authority runtime boundary", () => {
     };
 
     expect(runtime.loadVerifiedPlatformAuthorityPolicyAsset()).toMatchObject({
-      byteLength: 3121,
+      byteLength: 15_583,
       sha256:
-        "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1",
+        "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
     });
+    const { createHash } = await import("node:crypto");
+    const { readFile } = await import("node:fs/promises");
+    const emitted = await readFile(
+      resolve(
+        REPOSITORY_ROOT,
+        "apps/api/dist/platform-authority/platform-authority-policy-matrix-v2.json",
+      ),
+    );
+    expect(emitted.byteLength).toBe(15_583);
+    expect(createHash("sha256").update(emitted).digest("hex")).toBe(
+      "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+    );
   });
 });

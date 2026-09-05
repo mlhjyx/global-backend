@@ -3,7 +3,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const SCHEMA_VERSION = "platform-authority-policy-import-verification/v1";
+const SCHEMA_VERSION = "platform-authority-policy-import-verification/v2";
 const BACKEND_ROOT = resolve(import.meta.dirname, "..");
 const CROSS_REPO_TEST = resolve(
   BACKEND_ROOT,
@@ -68,9 +68,11 @@ export async function verifyPlatformAuthorityPolicyImport(argv) {
     return 1;
   }
   report("VERIFIED", "EXACT_AUTHORITY_MATERIALIZED", {
-    authorityCommit: "290c6f9f6a41c7c39dfe071683252982536937d8",
+    reviewedAuthorityCommit:
+      "17e68953ff2e26ac8433db5aa49689e5f9283659",
+    artifactCommit: "cb572a149d44ab402d5cfcdaaa0aeb21c053ad9e",
     artifactSha256:
-      "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1",
+      "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
   });
   return 0;
 }

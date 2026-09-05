@@ -23,7 +23,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "45e39e48-75c6-5e89-b0a8-9d19c9ba45b3",
+        "quote_id": "c196478a-0a30-5fd1-99cf-5f0c02f2b1c1",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.acquisition",
@@ -36,10 +36,10 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "65ea2cd1c4c42c32e0d378940f65ee6a2530090a3077c54597432da7905337ba",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-candidate-v1",
-        "policy_artifact_sha256": "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1",
-        "policy_matrix_revision": "candidate-v1",
+        "policy_revision": "ce564b6a96f73ea485efb936d9a7a18c460ee11d535d52b4ab16708df6433649",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        "policy_matrix_revision": "reviewed-v2",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "73a3bfea34b90f0c0916cd55a051cbfd3ce704656431362aacb9e6d012f1c44f",
@@ -66,7 +66,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "f0aedefc939d9af7de8eaca63db3cdbe37a8978f12781b8d56d594836bfe7255"
+        "quote_sha256": "7875c1f1613ddd4d2cddd0c214a36121c6916e8658815f59ef15905d771cfa6a"
       }
     },
     {
@@ -89,7 +89,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "31d35b1c-2387-5bc5-9e26-4383f568deeb",
+        "quote_id": "03efc08d-57d6-5068-ada8-8b3a667f0770",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.acquisition",
@@ -102,10 +102,10 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "80f162b59e73983b7a782dda2c3c4386b4f257f435e0a0af19f66784c2ea395b",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-candidate-v1",
-        "policy_artifact_sha256": "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1",
-        "policy_matrix_revision": "candidate-v1",
+        "policy_revision": "6a6bf0c295f9116a919ab1fbd67b47942a3e5b7c20de1f7a56421b170c9e442a",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        "policy_matrix_revision": "reviewed-v2",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "5988e194df7c1a3b911964b5d6e9ee3cb5a0e18b38aecff247a7d8017da65caf",
@@ -132,7 +132,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "08112d1f7045208b0331a2cec2fb8473a4950b5fe13aafdfe0ad224a86163ed3"
+        "quote_sha256": "ec8317a07ffeaacf31bfb6b140ab9a05396fe4b24e34227895a5d843dc7ab09c"
       }
     },
     {
@@ -155,7 +155,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "e1acb8e8-eec7-5dd0-ab18-a7b56eaa3686",
+        "quote_id": "2e34d134-63c1-5800-addd-3267a9e2a06f",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.intent_watch",
@@ -168,10 +168,10 @@
         "required_cap_per_run_microusd": "10000000",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "10000000",
-        "policy_revision": "e88b535dc86ed81cdc9d039560930c358c8da7b286ac00334dfa9538d4e39c9e",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-candidate-v1",
-        "policy_artifact_sha256": "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1",
-        "policy_matrix_revision": "candidate-v1",
+        "policy_revision": "7977ae59f9df0c6dc48587bcc8468d02fe986d47f24f09ca5d6f770722aa3265",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        "policy_matrix_revision": "reviewed-v2",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "9d41fe91658a834aec03ee3f235b92494c5171ed5c877f2e7b7f75b3923d6688",
@@ -198,7 +198,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "5b26e9542ce80f592973c86df7494a71a3cd160c3ce428460b161145a5201a21"
+        "quote_sha256": "a384fc3f9d96690879fd8e889fa4316368560fb8f155e95a3bb802d5bf502d15"
       }
     },
     {
@@ -222,7 +222,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "ecd23ad1-d502-570e-ba90-a8d5b0f3aa58",
+        "quote_id": "85f4c113-4290-5ba9-9e66-44a427f1f3ab",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.sanctions",
@@ -235,10 +235,10 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "aab35ebce334c8e8bcbef2dd8ffb8f78ee29a846678493e207f243818f969eb3",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-candidate-v1",
-        "policy_artifact_sha256": "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1",
-        "policy_matrix_revision": "candidate-v1",
+        "policy_revision": "975287015c37953b1b42d92565808c125bbaa6666f0a9e6f34c6ff16fbfae5c4",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        "policy_matrix_revision": "reviewed-v2",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "c9e22f1fdad8d91f459dc084aa779c195c38dc3f018f158fd8b4987a0f088e64",
@@ -265,7 +265,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "a85f6232db887b001e46d8a79caa6bb3738fa890ea36334f2248d07c04b27417"
+        "quote_sha256": "44ab1b2355490623db24468259ead8879db5abdd2c5ff6606a838fcea0429ef6"
       }
     }
   ]

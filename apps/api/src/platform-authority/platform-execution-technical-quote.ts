@@ -367,6 +367,69 @@ function quoteBounds(bounds: PlatformExecutionHardBoundsV1) {
   } as const;
 }
 
+function reviewedPolicyExecutionEnvelope(input: {
+  readonly row: PlatformExecutionTechnicalRowV1;
+  readonly providerSnapshot: PlatformExecutionProviderSnapshotV1;
+  readonly executionEnvelopeSha256: string;
+  readonly toolContractsSha256: string;
+  readonly providerSnapshotSha256: string;
+  readonly priceCatalogRevision: string;
+  readonly hardBoundsSha256: string;
+  readonly physicalWireContractsSha256: string;
+  readonly requiredCapMicrousd: string;
+  readonly executionEnvelopeSchemaVersion: "platform-execution-envelope/v1";
+}) {
+  const row = input.row;
+  return {
+    cost_mode: row.costMode,
+    execution_envelope_schema_version:
+      input.executionEnvelopeSchemaVersion,
+    execution_envelope_sha256: input.executionEnvelopeSha256,
+    hard_bounds: quoteBounds(row.hardBounds),
+    hard_bounds_sha256: input.hardBoundsSha256,
+    maximum_activity_attempts: row.maximumActivityAttempts,
+    physical_wire_contracts: row.physicalWireContracts.map((wire) => ({
+      maximum_items_per_wire: wire.maximumItemsPerWire,
+      maximum_parent_operations: wire.maximumParentOperations,
+      maximum_physical_invocations: wire.maximumPhysicalInvocations,
+      maximum_redirects_per_operation: wire.maximumRedirectsPerOperation,
+      maximum_transport_response_bytes: wire.maximumTransportResponseBytes,
+      maximum_wires_per_operation: wire.maximumWiresPerOperation,
+      wire_id: wire.wireId,
+    })),
+    physical_wire_contracts_sha256: input.physicalWireContractsSha256,
+    physical_wire_selection: row.physicalWireSelection,
+    price_catalog_revision: input.priceCatalogRevision,
+    provider_requirements: row.providerRequirements.map((provider, index) => ({
+      byte_price_catalog_required: provider.bytePriceCatalogRequired,
+      byte_price_catalog_revision:
+        input.providerSnapshot.providers[index]!.bytePriceCatalogRevision,
+      metering: provider.metering,
+      provider_id: provider.providerId,
+      provider_version: provider.providerVersion,
+      required_enablement: provider.requiredEnablement,
+    })),
+    provider_snapshot_sha256: input.providerSnapshotSha256,
+    required_campaign_cap_microusd: input.requiredCapMicrousd,
+    required_cap_per_run_microusd: input.requiredCapMicrousd,
+    required_max_runs: "1",
+    tool_contracts: row.toolContracts.map((tool) => ({
+      cost_unit: tool.costUnit,
+      estimated_cents: tool.estimatedCents,
+      maximum_costed_invocations: tool.maximumCostedInvocations,
+      maximum_durable_result_bytes: tool.maximumDurableResultBytes,
+      maximum_output_items: tool.maximumOutputItems,
+      maximum_physical_invocations: tool.maximumPhysicalInvocations,
+      maximum_transport_response_bytes: tool.maximumTransportResponseBytes,
+      result_schema: tool.resultSchema,
+      result_strategy: tool.resultStrategy,
+      tool_id: tool.toolId,
+      version: tool.version,
+    })),
+    tool_contracts_sha256: input.toolContractsSha256,
+  } as const;
+}
+
 /**
  * Pure Platform quote projection: all inputs are immutable in-memory facts and
  * the implementation has no database, Temporal, storage, Provider, billing,
@@ -424,19 +487,20 @@ export class PlatformExecutionTechnicalQuoteService {
     }
 
     const policyRow = policyAsset.policy.rows.find(
-      (candidate) => candidate.backend_source_anchor.schedule_id === row.scheduleId,
+      (candidate) => candidate.schedule_id === row.scheduleId,
     );
     if (
       !policyRow ||
       policyRow.row_id !== row.rowId ||
-      policyRow.backend_source_anchor.request_sha256 !==
-        row.scheduleRequestSha256 ||
-      policyRow.backend_source_anchor.workflow_type_symbol !== row.workflowType ||
-      policyRow.backend_source_anchor.task_queue_symbol !== row.taskQueue ||
-      policyRow.desired_growthos_policy.namespace !== row.temporalNamespace ||
-      policyRow.desired_growthos_policy.schedule_id !== row.scheduleId ||
-      policyRow.desired_growthos_policy.workflow_type !== row.workflowType ||
-      policyRow.desired_growthos_policy.task_queue !== row.taskQueue
+      policyRow.purpose !== row.purpose ||
+      policyRow.schedule_request_sha256 !== row.scheduleRequestSha256 ||
+      policyRow.workflow_type !== row.workflowType ||
+      policyRow.task_queue !== row.taskQueue ||
+      policyRow.temporal_namespace !== row.temporalNamespace ||
+      policyRow.desired_mode !==
+        (row.costMode === "disabled_no_egress"
+          ? "INTENTIONALLY_DISABLED_NO_EGRESS"
+          : "ENABLED")
     ) {
       return policyDrift();
     }
@@ -473,6 +537,23 @@ export class PlatformExecutionTechnicalQuoteService {
       priceCatalogRevision,
     } as const;
     const executionEnvelopeSha256 = digest(executionEnvelope);
+    const requiredCap = requiredCapMicrousd(row);
+    const reviewedEnvelope = reviewedPolicyExecutionEnvelope({
+      row,
+      providerSnapshot,
+      executionEnvelopeSha256,
+      toolContractsSha256,
+      providerSnapshotSha256,
+      priceCatalogRevision,
+      hardBoundsSha256,
+      physicalWireContractsSha256,
+      requiredCapMicrousd: requiredCap,
+      executionEnvelopeSchemaVersion:
+        technicalContract.executionEnvelopeSchemaVersion,
+    });
+    if (digest(policyRow.execution_envelope) !== digest(reviewedEnvelope)) {
+      return policyDrift();
+    }
     const artifact = {
       id: policyAsset.policy.artifact_id,
       sha: policyAsset.sha256,
@@ -505,7 +586,6 @@ export class PlatformExecutionTechnicalQuoteService {
         workflowRunId,
       }),
     );
-    const requiredCap = requiredCapMicrousd(row);
     const preimage = Object.freeze({
       schema_version: PLATFORM_EXECUTION_TECHNICAL_QUOTE_SCHEMA,
       quote_id: quoteId,

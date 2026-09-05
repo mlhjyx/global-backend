@@ -176,10 +176,9 @@ describe("PlatformExecutionTechnicalQuoteService", () => {
     const policyAsset = structuredClone(
       loadVerifiedPlatformAuthorityPolicyAsset(),
     ) as unknown as {
-      policy: { rows: Array<{ backend_source_anchor: { request_sha256: string } }> };
+      policy: { rows: Array<{ schedule_request_sha256: string }> };
     };
-    policyAsset.policy.rows[0]!.backend_source_anchor.request_sha256 =
-      "0".repeat(64);
+    policyAsset.policy.rows[0]!.schedule_request_sha256 = "0".repeat(64);
     const service = new PlatformExecutionTechnicalQuoteService({
       policyAsset: policyAsset as never,
       technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,

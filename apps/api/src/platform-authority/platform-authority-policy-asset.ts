@@ -1,83 +1,96 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { types } from "node:util";
 
-const ARTIFACT_BYTE_LENGTH = 3121;
-const ARTIFACT_SHA256 =
-  "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1";
-const ARTIFACT_UTF8 = `{"artifact_id":"platform-authority-policy-matrix/2026-09-04-candidate-v1","matrix_revision":"candidate-v1","rows":[{"backend_source_anchor":{"request_sha256":"5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e","schedule_id":"acq-sweep","task_queue_symbol":"understanding","workflow_type_symbol":"acquisitionSweepWorkflow"},"candidate":{"mode":"candidate_deny","reason":"unverified_required_fields","unresolved_fields":["cap_derivation","provider_enablement","provider_version","schedule_action_input","temporal_namespace","workflow_id"]},"desired_growthos_policy":{"namespace":"platform-automation","schedule_id":"acq-sweep","status":"desired_unverified","task_queue":"understanding","workflow_type":"acquisitionSweepWorkflow"},"row_id":"platform.acquisition/acq-sweep","temporal_observation":{"status":"UNKNOWN"}},{"backend_source_anchor":{"request_sha256":"3fbcd9326937d66243f1395d3f0c4f098c6748977d00ae90017d0f8f04202db6","schedule_id":"patents-cache-refresh","task_queue_symbol":"understanding","workflow_type_symbol":"patentsCacheRefreshWorkflow"},"candidate":{"mode":"candidate_deny","reason":"disabled_no_egress","unresolved_fields":["byte_price_catalog","provider_enablement","provider_version","schedule_action_input","temporal_namespace","workflow_id"]},"desired_growthos_policy":{"namespace":"platform-automation","schedule_id":"patents-cache-refresh","status":"desired_unverified","task_queue":"understanding","workflow_type":"patentsCacheRefreshWorkflow"},"row_id":"platform.acquisition/patents-cache-refresh","temporal_observation":{"status":"UNKNOWN"}},{"backend_source_anchor":{"request_sha256":"9ef4afce408c36472e00db01a80b6e3a3e461a2b13af7f456d9ce31a7676c34a","schedule_id":"intent-sweep","task_queue_symbol":"understanding","workflow_type_symbol":"intentSweepWorkflow"},"candidate":{"mode":"candidate_deny","reason":"unverified_required_fields","unresolved_fields":["cap_derivation","page_bound","provider_enablement","provider_version","schedule_action_input","temporal_namespace","workflow_id"]},"desired_growthos_policy":{"namespace":"platform-automation","schedule_id":"intent-sweep","status":"desired_unverified","task_queue":"understanding","workflow_type":"intentSweepWorkflow"},"row_id":"platform.intent_watch/intent-sweep","temporal_observation":{"status":"UNKNOWN"}},{"backend_source_anchor":{"request_sha256":"50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe","schedule_id":"sanctions-refresh","task_queue_symbol":"understanding","workflow_type_symbol":"sanctionsRefreshWorkflow"},"candidate":{"mode":"candidate_deny","reason":"unverified_required_fields","unresolved_fields":["cap_derivation","provider_enablement","provider_version","schedule_action_input","source_filter","temporal_namespace","workflow_id"]},"desired_growthos_policy":{"namespace":"platform-automation","schedule_id":"sanctions-refresh","status":"desired_unverified","task_queue":"understanding","workflow_type":"sanctionsRefreshWorkflow"},"row_id":"platform.sanctions/sanctions-refresh","temporal_observation":{"status":"UNKNOWN"}}],"schema_version":"platform-authority-policy-matrix/v1"}
-`;
-const ROW_IDS = [
+export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES = 15_583 as const;
+export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256 =
+  "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b" as const;
+export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID =
+  "platform-authority-policy-matrix/2026-09-04-reviewed-v2" as const;
+export const PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION = "reviewed-v2" as const;
+
+const EXPECTED_ROW_IDS = Object.freeze([
   "platform.acquisition/acq-sweep",
   "platform.acquisition/patents-cache-refresh",
   "platform.intent_watch/intent-sweep",
   "platform.sanctions/sanctions-refresh",
-] as const;
-const EXPECTED_AUTHORITY = Object.freeze({
-  commit_sha: "290c6f9f6a41c7c39dfe071683252982536937d8",
-  tree_sha: "3d04b799ed8f87fa5d9b71ff003f2cd2eb822289",
-  patch_blob_sha: "40dc2fe631470827fdf9ea5ddc9d6fdbcaf144d2",
-});
-const EXPECTED_SOURCE = Object.freeze({
-  archive_sha256:
-    "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a",
-  patch_stack_sha256:
-    "ced29b101ad1ff88b875f41a726fc988160eccc6d36526034be271f77f500fff",
-});
-const SHA256 = /^[0-9a-f]{64}$/;
-const ASCII_KEY = /^[A-Za-z][A-Za-z0-9_]*$/;
-const CONTROL_CHARACTER = /\p{Cc}/u;
+] as const);
 
-export interface PlatformAuthorityPolicyProvenanceV1 {
-  readonly schema_version: "growthos-platform-authority-policy-provenance/v1";
+export interface PlatformAuthorityPolicySuccessorRowV2 {
+  readonly row_id: (typeof EXPECTED_ROW_IDS)[number];
+  readonly purpose:
+    | "platform.acquisition"
+    | "platform.intent_watch"
+    | "platform.sanctions";
+  readonly temporal_namespace: "platform-automation";
+  readonly schedule_id:
+    | "acq-sweep"
+    | "patents-cache-refresh"
+    | "intent-sweep"
+    | "sanctions-refresh";
+  readonly workflow_type: string;
+  readonly task_queue: "understanding";
+  readonly schedule_request_sha256: string;
+  readonly desired_mode: "ENABLED" | "INTENTIONALLY_DISABLED_NO_EGRESS";
+  readonly default_issuance_state: "DENIED";
+  readonly execution_envelope: Readonly<Record<string, unknown>>;
+  readonly reviewed_predecessor_quote_vector: Readonly<Record<string, unknown>>;
+}
+
+export interface PlatformAuthorityPolicySuccessorV2 {
+  readonly schema_version: "platform-authority-policy-matrix/v2";
+  readonly artifact_id: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID;
+  readonly matrix_revision: typeof PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION;
+  readonly currency: "USD";
+  readonly unit: "microusd";
+  readonly predecessor: Readonly<{
+    readonly artifact_id: "platform-authority-policy-matrix/2026-09-04-candidate-v1";
+    readonly artifact_sha256: "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1";
+    readonly matrix_revision: "candidate-v1";
+  }>;
+  readonly backend_review: Readonly<{
+    readonly exact_commit: "061892b0159c9eb01b589465e60605ffa6591244";
+    readonly review_kind: "independent_read_only_source_review";
+    readonly review_scope_base_commit: "50267cb505379ed3658798e7c381c9614364808f";
+    readonly review_scope_head_commit: "061892b0159c9eb01b589465e60605ffa6591244";
+    readonly review_verdict: "APPROVE";
+    readonly technical_contract_sha256: "230c0252403f401f35003d3cd3e7d99912ae5689fb84c37bbd50ed624cd9325b";
+  }>;
+  readonly policy_revision_contract: Readonly<{
+    readonly mode: "RECOMPUTE_ACTUAL_RUN_WITH_SUCCESSOR_IDENTITY";
+    readonly sample_values_authoritative: false;
+    readonly schema_version: "platform-execution-technical-policy/v1";
+  }>;
+  readonly issuability_requirements: readonly string[];
+  readonly rows: readonly PlatformAuthorityPolicySuccessorRowV2[];
+}
+
+export interface PlatformAuthorityPolicyProvenanceV2 {
+  readonly schema_version: "growthos-platform-authority-policy-provenance/v2";
   readonly artifact: Readonly<{
-    readonly path: string;
-    readonly sha256: string;
+    readonly materialized_path: "ops/policy/platform-authority-policy-matrix-v2.json";
+    readonly byte_length: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES;
+    readonly sha256: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256;
   }>;
-  readonly authority: Readonly<{
-    readonly commit_sha: string;
-    readonly tree_sha: string;
-    readonly patch_blob_sha: string;
+  readonly growthos_authority: Readonly<{
+    readonly reviewed_head_commit: "17e68953ff2e26ac8433db5aa49689e5f9283659";
+    readonly reviewed_head_tree: "46832215fc8189b4c2c71dc56b653d2eac401d7c";
+    readonly artifact_commit: "cb572a149d44ab402d5cfcdaaa0aeb21c053ad9e";
+    readonly artifact_commit_tree: "953a4345900b8aeabc64ee582e02a86873d1be52";
+    readonly patch_path: "patches/0057-platform-authority-policy-successor.patch";
+    readonly patch_blob_sha1: "ba5ffc2642cca2d95167c22574d76be425f5d1b4";
+    readonly patch_sha256: "2a6943a17bc6c31d76b9266b98834fb0dd5e2cf2abf67f5f74d0ea358bf37fd9";
+    readonly artifact_commit_patch_stack_sha256: "a660488367c5197f84469c39524ae322cdb50973493ba9c3066e8346156143ce";
+    readonly source_archive_sha256: "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a";
   }>;
-  readonly source: Readonly<{
-    readonly archive_sha256: string;
-    readonly patch_stack_sha256: string;
-  }>;
-}
-
-export interface PlatformAuthorityCandidatePolicyRow {
-  readonly row_id: (typeof ROW_IDS)[number];
-  readonly backend_source_anchor: Readonly<{
-    readonly request_sha256: string;
-    readonly schedule_id: string;
-    readonly task_queue_symbol: string;
-    readonly workflow_type_symbol: string;
-  }>;
-  readonly candidate: Readonly<{
-    readonly mode: "candidate_deny";
-    readonly reason: "unverified_required_fields" | "disabled_no_egress";
-    readonly unresolved_fields: readonly string[];
-  }>;
-  readonly desired_growthos_policy: Readonly<{
-    readonly namespace: "platform-automation";
-    readonly schedule_id: string;
-    readonly status: "desired_unverified";
-    readonly task_queue: "understanding";
-    readonly workflow_type: string;
-  }>;
-  readonly temporal_observation: Readonly<{ readonly status: "UNKNOWN" }>;
-}
-
-export interface PlatformAuthorityCandidatePolicyV1 {
-  readonly artifact_id: "platform-authority-policy-matrix/2026-09-04-candidate-v1";
-  readonly matrix_revision: "candidate-v1";
-  readonly rows: readonly PlatformAuthorityCandidatePolicyRow[];
-  readonly schema_version: "platform-authority-policy-matrix/v1";
 }
 
 export interface VerifiedPlatformAuthorityPolicyAsset {
-  readonly byteLength: 3121;
-  readonly sha256: typeof ARTIFACT_SHA256;
-  readonly policy: PlatformAuthorityCandidatePolicyV1;
-  readonly provenance: PlatformAuthorityPolicyProvenanceV1;
+  readonly byteLength: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES;
+  readonly sha256: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256;
+  readonly policy: PlatformAuthorityPolicySuccessorV2;
+  readonly provenance: PlatformAuthorityPolicyProvenanceV2;
 }
 
 export class PlatformAuthorityPolicyDriftError extends Error {
@@ -93,13 +106,74 @@ function drift(): never {
   throw new PlatformAuthorityPolicyDriftError();
 }
 
-function exactKeys(value: unknown, keys: readonly string[]): value is object {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value).sort().join("\0") === [...keys].sort().join("\0")
-  );
+function canonicalJson(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet<object>(),
+): string {
+  if (value === null || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "string") {
+    if (value !== value.normalize("NFC") || /\p{Cc}/u.test(value)) drift();
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && !Object.is(value, -0)
+      ? JSON.stringify(value)
+      : drift();
+  }
+  if (typeof value !== "object" || types.isProxy(value) || seen.has(value)) {
+    return drift();
+  }
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) drift();
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      if (
+        Reflect.ownKeys(descriptors).some(
+          (key) =>
+            typeof key !== "string" ||
+            (key !== "length" && !/^(?:0|[1-9][0-9]*)$/.test(key)),
+        )
+      ) {
+        drift();
+      }
+      const items: string[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (!descriptor?.enumerable || !Object.hasOwn(descriptor, "value")) {
+          drift();
+        }
+        items.push(canonicalJson(descriptor.value, seen));
+      }
+      return `[${items.join(",")}]`;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) drift();
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (Reflect.ownKeys(descriptors).some((key) => typeof key !== "string")) {
+      drift();
+    }
+    const entries: string[] = [];
+    for (const key of Object.keys(descriptors).sort()) {
+      const descriptor = descriptors[key];
+      if (
+        !descriptor?.enumerable ||
+        !Object.hasOwn(descriptor, "value") ||
+        descriptor.get !== undefined ||
+        descriptor.set !== undefined ||
+        key !== key.normalize("NFC") ||
+        /\p{Cc}/u.test(key)
+      ) {
+        drift();
+      }
+      entries.push(
+        `${JSON.stringify(key)}:${canonicalJson(descriptor.value, seen)}`,
+      );
+    }
+    return `{${entries.join(",")}}`;
+  } finally {
+    seen.delete(value);
+  }
 }
 
 function deepFreeze<T>(value: T): T {
@@ -110,201 +184,99 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function canonicalJson(value: unknown): string {
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (!exactKeys(value, Object.keys(value as object))) drift();
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-    .join(",")}}`;
-}
-
-function validateStrings(value: unknown): void {
-  if (typeof value === "string") {
-    if (value !== value.normalize("NFC") || CONTROL_CHARACTER.test(value))
-      drift();
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const child of value) validateStrings(child);
-    return;
-  }
-  if (value === null || typeof value !== "object") drift();
-  for (const [key, child] of Object.entries(value)) {
-    if (!ASCII_KEY.test(key)) drift();
-    validateStrings(child);
-  }
-}
-
-function validateRow(
-  value: unknown,
-  expectedRowId: (typeof ROW_IDS)[number],
-): asserts value is PlatformAuthorityCandidatePolicyRow {
-  if (
-    !exactKeys(value, [
-      "backend_source_anchor",
-      "candidate",
-      "desired_growthos_policy",
-      "row_id",
-      "temporal_observation",
-    ])
-  ) {
-    drift();
-  }
-  const row = value as unknown as Record<string, unknown>;
-  const anchor = row.backend_source_anchor as Record<string, unknown>;
-  const candidate = row.candidate as Record<string, unknown>;
-  const desired = row.desired_growthos_policy as Record<string, unknown>;
-  const observation = row.temporal_observation as Record<string, unknown>;
-  if (
-    row.row_id !== expectedRowId ||
-    !exactKeys(anchor, [
-      "request_sha256",
-      "schedule_id",
-      "task_queue_symbol",
-      "workflow_type_symbol",
-    ]) ||
-    !SHA256.test(String(anchor.request_sha256 ?? "")) ||
-    !exactKeys(candidate, ["mode", "reason", "unresolved_fields"]) ||
-    candidate.mode !== "candidate_deny" ||
-    !Array.isArray(candidate.unresolved_fields) ||
-    candidate.unresolved_fields.length < 1 ||
-    new Set(candidate.unresolved_fields).size !==
-      candidate.unresolved_fields.length ||
-    !exactKeys(desired, [
-      "namespace",
-      "schedule_id",
-      "status",
-      "task_queue",
-      "workflow_type",
-    ]) ||
-    desired.namespace !== "platform-automation" ||
-    desired.status !== "desired_unverified" ||
-    desired.task_queue !== "understanding" ||
-    anchor.schedule_id !== desired.schedule_id ||
-    anchor.task_queue_symbol !== desired.task_queue ||
-    anchor.workflow_type_symbol !== desired.workflow_type ||
-    !exactKeys(observation, ["status"]) ||
-    observation.status !== "UNKNOWN" ||
-    (expectedRowId.includes("patents-cache-refresh")
-      ? candidate.reason !== "disabled_no_egress"
-      : candidate.reason !== "unverified_required_fields")
-  ) {
-    drift();
-  }
-}
-
-function validatePolicy(
-  value: unknown,
-): asserts value is PlatformAuthorityCandidatePolicyV1 {
-  if (
-    !exactKeys(value, [
-      "artifact_id",
-      "matrix_revision",
-      "rows",
-      "schema_version",
-    ])
-  ) {
-    drift();
-  }
-  const policy = value as unknown as Record<string, unknown>;
-  if (
-    policy.schema_version !== "platform-authority-policy-matrix/v1" ||
-    policy.artifact_id !==
-      "platform-authority-policy-matrix/2026-09-04-candidate-v1" ||
-    policy.matrix_revision !== "candidate-v1" ||
-    !Array.isArray(policy.rows) ||
-    policy.rows.length !== ROW_IDS.length
-  ) {
-    drift();
-  }
-  policy.rows.forEach((row, index) => validateRow(row, ROW_IDS[index]!));
-  validateStrings(policy);
-}
-
-function validateProvenance(
-  value: unknown,
-): asserts value is PlatformAuthorityPolicyProvenanceV1 {
-  if (
-    !exactKeys(value, ["schema_version", "artifact", "authority", "source"])
-  ) {
-    drift();
-  }
-  const receipt = value as unknown as Record<string, unknown>;
-  const artifact = receipt.artifact as Record<string, unknown>;
-  const authority = receipt.authority as Record<string, unknown>;
-  const source = receipt.source as Record<string, unknown>;
-  if (
-    receipt.schema_version !==
-      "growthos-platform-authority-policy-provenance/v1" ||
-    !exactKeys(artifact, ["path", "sha256"]) ||
-    artifact.path !== "ops/policy/platform-authority-policy-matrix-v1.json" ||
-    artifact.sha256 !== ARTIFACT_SHA256 ||
-    !exactKeys(authority, ["commit_sha", "tree_sha", "patch_blob_sha"]) ||
-    authority.commit_sha !== EXPECTED_AUTHORITY.commit_sha ||
-    authority.tree_sha !== EXPECTED_AUTHORITY.tree_sha ||
-    authority.patch_blob_sha !== EXPECTED_AUTHORITY.patch_blob_sha ||
-    !exactKeys(source, ["archive_sha256", "patch_stack_sha256"]) ||
-    source.archive_sha256 !== EXPECTED_SOURCE.archive_sha256 ||
-    source.patch_stack_sha256 !== EXPECTED_SOURCE.patch_stack_sha256
-  ) {
-    drift();
-  }
-}
-
 const FROZEN_PROVENANCE = deepFreeze({
-  schema_version: "growthos-platform-authority-policy-provenance/v1",
+  schema_version: "growthos-platform-authority-policy-provenance/v2",
   artifact: {
-    path: "ops/policy/platform-authority-policy-matrix-v1.json",
-    sha256: ARTIFACT_SHA256,
+    materialized_path:
+      "ops/policy/platform-authority-policy-matrix-v2.json",
+    byte_length: PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES,
+    sha256: PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256,
   },
-  authority: { ...EXPECTED_AUTHORITY },
-  source: { ...EXPECTED_SOURCE },
-} as unknown);
-validateProvenance(FROZEN_PROVENANCE);
+  growthos_authority: {
+    reviewed_head_commit: "17e68953ff2e26ac8433db5aa49689e5f9283659",
+    reviewed_head_tree: "46832215fc8189b4c2c71dc56b653d2eac401d7c",
+    artifact_commit: "cb572a149d44ab402d5cfcdaaa0aeb21c053ad9e",
+    artifact_commit_tree: "953a4345900b8aeabc64ee582e02a86873d1be52",
+    patch_path: "patches/0057-platform-authority-policy-successor.patch",
+    patch_blob_sha1: "ba5ffc2642cca2d95167c22574d76be425f5d1b4",
+    patch_sha256:
+      "2a6943a17bc6c31d76b9266b98834fb0dd5e2cf2abf67f5f74d0ea358bf37fd9",
+    artifact_commit_patch_stack_sha256:
+      "a660488367c5197f84469c39524ae322cdb50973493ba9c3066e8346156143ce",
+    source_archive_sha256:
+      "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a",
+  },
+} as const);
 
 export const PLATFORM_AUTHORITY_POLICY_PROVENANCE =
-  FROZEN_PROVENANCE as PlatformAuthorityPolicyProvenanceV1;
+  FROZEN_PROVENANCE as PlatformAuthorityPolicyProvenanceV2;
 
-export function verifyPlatformAuthorityPolicyAsset(input: {
-  readonly artifactBytes: Uint8Array;
-  readonly provenance: unknown;
-}): VerifiedPlatformAuthorityPolicyAsset {
-  if (!(input.artifactBytes instanceof Uint8Array)) drift();
-  const bytes = Buffer.from(input.artifactBytes);
+function exactProvenance(value: unknown): boolean {
+  try {
+    return canonicalJson(value) === canonicalJson(FROZEN_PROVENANCE);
+  } catch {
+    return false;
+  }
+}
+
+function exactPolicy(value: unknown): PlatformAuthorityPolicySuccessorV2 {
+  const canonical = canonicalJson(value);
+  const bytes = Buffer.from(`${canonical}\n`, "utf8");
   if (
-    bytes.byteLength !== ARTIFACT_BYTE_LENGTH ||
-    createHash("sha256").update(bytes).digest("hex") !== ARTIFACT_SHA256
+    bytes.byteLength !== PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES ||
+    createHash("sha256").update(bytes).digest("hex") !==
+      PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256
   ) {
     drift();
   }
-  validateProvenance(input.provenance);
-  let decoded: string;
-  let parsed: unknown;
-  try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    if (decoded.charCodeAt(0) === 0xfeff) drift();
-    parsed = JSON.parse(decoded);
-  } catch {
-    return drift();
-  }
-  validatePolicy(parsed);
-  if (`${canonicalJson(parsed)}\n` !== decoded) {
+  const parsed = JSON.parse(canonical) as PlatformAuthorityPolicySuccessorV2;
+  if (
+    parsed.schema_version !== "platform-authority-policy-matrix/v2" ||
+    parsed.artifact_id !== PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID ||
+    parsed.matrix_revision !== PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION ||
+    parsed.rows.length !== EXPECTED_ROW_IDS.length ||
+    !parsed.rows.every((row, index) => row.row_id === EXPECTED_ROW_IDS[index])
+  ) {
     drift();
   }
+  return deepFreeze(parsed);
+}
+
+function bundledJson(path: string, maximumBytes: number): unknown {
+  try {
+    const bytes = readFileSync(resolve(__dirname, path));
+    if (bytes.byteLength === 0 || bytes.byteLength > maximumBytes) drift();
+    const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    if (source.charCodeAt(0) === 0xfeff || !source.endsWith("\n")) drift();
+    return JSON.parse(source) as unknown;
+  } catch (error) {
+    if (error instanceof PlatformAuthorityPolicyDriftError) throw error;
+    return drift();
+  }
+}
+
+export function verifyPlatformAuthorityPolicyAsset(input: {
+  readonly artifact: unknown;
+  readonly provenance: unknown;
+}): VerifiedPlatformAuthorityPolicyAsset {
+  if (!exactProvenance(input.provenance)) drift();
   return deepFreeze({
-    byteLength: ARTIFACT_BYTE_LENGTH,
-    sha256: ARTIFACT_SHA256,
-    policy: parsed,
-    provenance: structuredClone(input.provenance),
+    byteLength: PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES,
+    sha256: PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256,
+    policy: exactPolicy(input.artifact),
+    provenance: PLATFORM_AUTHORITY_POLICY_PROVENANCE,
   });
 }
 
+const CURRENT_POLICY = verifyPlatformAuthorityPolicyAsset({
+  artifact: bundledJson(
+    "platform-authority-policy-matrix-v2.json",
+    PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES,
+  ),
+  provenance: bundledJson("platform-authority-policy-provenance-v2.json", 2048),
+});
+
+/** The unique current product policy. Candidate-v1 remains historical data only. */
 export function loadVerifiedPlatformAuthorityPolicyAsset(): VerifiedPlatformAuthorityPolicyAsset {
-  return verifyPlatformAuthorityPolicyAsset({
-    artifactBytes: Buffer.from(ARTIFACT_UTF8, "utf8"),
-    provenance: PLATFORM_AUTHORITY_POLICY_PROVENANCE,
-  });
+  return CURRENT_POLICY;
 }
