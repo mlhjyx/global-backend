@@ -1,11 +1,4 @@
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-} from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { isAbsolute } from "node:path";
 
@@ -158,37 +151,52 @@ export function loadSettlementDerivationKeyring(
   path: string,
 ): SettlementDerivationKeyring {
   if (!path || path !== path.trim() || !isAbsolute(path)) invalidKeyring();
-  let before;
-  try {
-    before = lstatSync(path);
-  } catch {
-    return invalidKeyring();
-  }
-  if (
-    !before.isFile() ||
-    before.isSymbolicLink() ||
-    (before.mode & 0o077) !== 0 ||
-    before.size < 1 ||
-    before.size > MAXIMUM_KEYRING_BYTES
-  ) {
-    invalidKeyring();
-  }
   let descriptor: number | undefined;
   try {
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const after = fstatSync(descriptor);
+    // Open exactly once. NOFOLLOW rejects a symlink atomically; NONBLOCK lets
+    // fstat reject a FIFO without waiting for an attacker-controlled writer.
+    descriptor = openSync(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const before = fstatSync(descriptor, { bigint: true });
     if (
-      !after.isFile() ||
-      after.dev !== before.dev ||
-      after.ino !== before.ino ||
-      after.size !== before.size ||
-      (after.mode & 0o077) !== 0
+      !before.isFile() ||
+      (before.mode & 0o077n) !== 0n ||
+      before.size < 1n ||
+      before.size > BigInt(MAXIMUM_KEYRING_BYTES)
     ) {
       invalidKeyring();
     }
-    const raw = readFileSync(descriptor);
-    if (raw.byteLength !== after.size) invalidKeyring();
-    return parseSettlementDerivationKeyring(raw);
+    const raw = Buffer.alloc(MAXIMUM_KEYRING_BYTES + 1);
+    let length = 0;
+    while (length < raw.byteLength) {
+      const count = readSync(
+        descriptor,
+        raw,
+        length,
+        raw.byteLength - length,
+        null,
+      );
+      if (count === 0) break;
+      length += count;
+    }
+    const after = fstatSync(descriptor, { bigint: true });
+    if (
+      length > MAXIMUM_KEYRING_BYTES ||
+      BigInt(length) !== before.size ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.size !== before.size ||
+      after.mode !== before.mode ||
+      after.uid !== before.uid ||
+      after.gid !== before.gid ||
+      after.mtimeNs !== before.mtimeNs ||
+      after.ctimeNs !== before.ctimeNs
+    ) {
+      invalidKeyring();
+    }
+    return parseSettlementDerivationKeyring(raw.subarray(0, length));
   } catch {
     return invalidKeyring();
   } finally {
