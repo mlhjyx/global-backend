@@ -162,6 +162,25 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
     expect(JSON.stringify(await response.json())).not.toContain("forbidden");
   });
 
+  it("redacts parser diagnostics even when a query is present", async () => {
+    const response = await fetch(
+      `${baseUrl}/api/v1/platform-authority/technical-quote?token=forbidden`,
+      {
+        method: "POST",
+        redirect: "manual",
+        headers: { "content-type": "application/json" },
+        body: '{"schema_version":',
+      },
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID",
+        message: "platform technical quote request is invalid",
+      },
+    });
+  });
+
   it("composes only an unavailable service verifier in the product module", async () => {
     const [moduleSource, mainSource, appModuleSource] = await Promise.all([
       readFile(new URL("./platform-authority.module.ts", import.meta.url), "utf8"),

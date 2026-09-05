@@ -6,11 +6,12 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { types } from "node:util";
+import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from "@global/contracts/platform-authority";
 
 export const PLATFORM_TECHNICAL_QUOTE_READ_SCOPE =
   "platform-technical-quote.read" as const;
 export const PLATFORM_TECHNICAL_QUOTE_PATH =
-  "/api/v1/platform-authority/technical-quote" as const;
+  PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH;
 
 export const PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_BYTES = 16 * 1024;
 export const PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT = 64;

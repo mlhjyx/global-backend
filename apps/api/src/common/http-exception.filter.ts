@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Response } from 'express';
+import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from '@global/contracts/platform-authority';
 
 /**
  * 统一错误模型（PRD 11.15 / packages/contracts README）：
@@ -13,10 +14,30 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const res = host.switchToHttp().getResponse<Response>();
+    const req = host.switchToHttp().getRequest<{ originalUrl?: unknown }>();
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();
+      const originalUrl = req?.originalUrl;
+      const requestPath =
+        typeof originalUrl === 'string' ? originalUrl.split('?', 1)[0] : null;
+      // JSON parsing happens before controller guards/pipes. Collapse parser
+      // syntax/size detail for this raw canonical endpoint into its one closed
+      // request error instead of reflecting token positions or input snippets.
+      if (
+        requestPath === PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH &&
+        (status === HttpStatus.BAD_REQUEST ||
+          status === HttpStatus.PAYLOAD_TOO_LARGE)
+      ) {
+        res.status(HttpStatus.BAD_REQUEST).json({
+          error: {
+            code: 'PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID',
+            message: 'platform technical quote request is invalid',
+          },
+        });
+        return;
+      }
       // 已按契约构造（error 是对象）→ 透传；class-validator 的 error 是字符串 → 归一
       if (
         typeof body === 'object' &&

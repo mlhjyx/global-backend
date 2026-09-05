@@ -2,6 +2,8 @@ export const PLATFORM_AUTHORITY_CANONICAL_REQUEST_VERSION =
   "platform-authority-canonical-request/v1" as const;
 export const PLATFORM_AUTHORITY_REQUEST_HMAC_VERSION =
   "platform-authority-request-hmac/v1" as const;
+export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH =
+  "/api/v1/platform-authority/technical-quote" as const;
 
 export const PLATFORM_AUTHORITY_MAX_RAW_BODY_BYTES = 16 * 1024;
 const MAX_SIGNED_64 = "9223372036854775807";
