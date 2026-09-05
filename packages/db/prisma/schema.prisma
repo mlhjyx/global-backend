@@ -193,7 +193,6 @@ model ExecutionBudgetAuthority {
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
   @@index([workspaceId, purpose, expiresAt], map: "execution_budget_authority_workspace_purpose_expiry_idx")
   @@index([scheduleId, purpose, expiresAt], map: "execution_budget_authority_schedule_purpose_expiry_idx")
-  @@index([workflowRunId], map: "execution_budget_authority_workflow_run_idx")
   @@map("execution_budget_authority")
 }
 

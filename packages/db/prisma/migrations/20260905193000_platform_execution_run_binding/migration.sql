@@ -45,8 +45,10 @@ ALTER TABLE "execution_budget_authority"
     )
   );
 
-CREATE INDEX "execution_budget_authority_workflow_run_idx"
-  ON "execution_budget_authority"("workflow_run_id");
+CREATE UNIQUE INDEX "execution_budget_authority_platform_workflow_run_key"
+  ON "execution_budget_authority"("workflow_run_id")
+  WHERE "authority_kind" = 'PLATFORM_GRANT'
+    AND "workflow_run_id" IS NOT NULL;
 
 CREATE FUNCTION ingest_and_admit_platform_execution_budget_run_v2(
   p_issuer TEXT,
@@ -176,8 +178,9 @@ BEGIN
   END IF;
 
   -- Keep the established authority-first order: JTI/authority, then the
-  -- deterministic account identity. A second JTI for the same run can never
-  -- commit because the account collision rolls the new authority row back.
+  -- workflow run and deterministic account identity. Advisory locks serialize
+  -- the normal path; the partial unique index remains the final fence even
+  -- when a REPEATABLE READ transaction holds a stale snapshot.
   PERFORM pg_advisory_xact_lock(
     hashtextextended('execution-budget-jti:' || p_issuer || ':' || p_jti::text, 0)
   );
@@ -295,23 +298,29 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
 
-    INSERT INTO "execution_budget_authority"(
-      "scope_key", "authority_kind", "issuer", "audience", "jti",
-      "token_sha256", "schema_version", "purpose", "subject_type",
-      "subject_id", "schedule_id", "schedule_request_sha256",
-      "workflow_id", "workflow_run_id", "technical_policy_revision",
-      "currency", "unit", "cap_per_run_microusd",
-      "campaign_cap_microusd", "max_runs", "issued_at", "not_before",
-      "expires_at"
-    ) VALUES (
-      'platform', 'PLATFORM_GRANT', p_issuer, p_audience, p_jti,
-      p_token_sha256, p_schema_version, p_purpose, p_subject_type,
-      p_subject_id, p_schedule_id, p_schedule_request_sha256,
-      p_workflow_id, p_workflow_run_id, p_technical_policy_revision,
-      p_currency, p_unit, p_cap_per_run_microusd,
-      p_campaign_cap_microusd, p_max_runs, p_issued_at, p_not_before,
-      p_expires_at
-    ) RETURNING * INTO authority;
+    BEGIN
+      INSERT INTO "execution_budget_authority"(
+        "scope_key", "authority_kind", "issuer", "audience", "jti",
+        "token_sha256", "schema_version", "purpose", "subject_type",
+        "subject_id", "schedule_id", "schedule_request_sha256",
+        "workflow_id", "workflow_run_id", "technical_policy_revision",
+        "currency", "unit", "cap_per_run_microusd",
+        "campaign_cap_microusd", "max_runs", "issued_at", "not_before",
+        "expires_at"
+      ) VALUES (
+        'platform', 'PLATFORM_GRANT', p_issuer, p_audience, p_jti,
+        p_token_sha256, p_schema_version, p_purpose, p_subject_type,
+        p_subject_id, p_schedule_id, p_schedule_request_sha256,
+        p_workflow_id, p_workflow_run_id, p_technical_policy_revision,
+        p_currency, p_unit, p_cap_per_run_microusd,
+        p_campaign_cap_microusd, p_max_runs, p_issued_at, p_not_before,
+        p_expires_at
+      ) RETURNING * INTO authority;
+    EXCEPTION
+      WHEN unique_violation THEN
+        RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_REUSED'
+          USING ERRCODE = 'P0001';
+    END;
   END IF;
 
   -- The independently reconstructed runtime scope is compared even on exact

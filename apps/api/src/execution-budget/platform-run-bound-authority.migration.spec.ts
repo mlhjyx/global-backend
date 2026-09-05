@@ -49,6 +49,20 @@ describe('platform execution run-bound authority migration', () => {
     );
   });
 
+  it('enforces global Platform workflow-run uniqueness below transaction snapshot semantics', async () => {
+    const sql = await readFile(migration, 'utf8');
+
+    expect(sql).toMatch(
+      /CREATE UNIQUE INDEX "execution_budget_authority_platform_workflow_run_key"\s+ON "execution_budget_authority"\("workflow_run_id"\)\s+WHERE "authority_kind" = 'PLATFORM_GRANT'\s+AND "workflow_run_id" IS NOT NULL;/,
+    );
+    expect(sql).toMatch(
+      /EXCEPTION\s+WHEN unique_violation THEN\s+RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_REUSED'\s+USING ERRCODE = 'P0001';/,
+    );
+    expect(sql).not.toContain(
+      'CREATE INDEX "execution_budget_authority_workflow_run_idx"',
+    );
+  });
+
   it('removes every legacy platform writer path that could create or admit an unbound run', async () => {
     const sql = await readFile(migration, 'utf8');
 

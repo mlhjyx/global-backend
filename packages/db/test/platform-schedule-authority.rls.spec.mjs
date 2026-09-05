@@ -337,6 +337,86 @@ describe("platform run-bound authority PostgreSQL admission", () => {
     assert.equal(first.replay, false);
   });
 
+  it("rejects a different schedule and JTI for the same run even from a stale REPEATABLE READ snapshot", async () => {
+    const workflowRunId = randomUUID();
+    const firstGrant = grantInput({
+      workflowId: `platform-acquisition-stale-snapshot-${randomUUID()}`,
+      workflowRunId,
+    });
+    const staleGrant = grantInput({
+      purpose: "platform.intent_watch",
+      subjectId: "intent-sweep",
+      scheduleId: "intent-sweep",
+      scheduleRequestSha256:
+        "9ef4afce408c36472e00db01a80b6e3a3e461a2b13af7f456d9ce31a7676c34a",
+      workflowId: `platform-intent-stale-snapshot-${randomUUID()}`,
+      workflowRunId,
+      capPerRunMicrousd: 10_000_000n,
+      campaignCapMicrousd: 10_000_000n,
+    });
+    const firstClient = client(roleUrl(PLATFORM_LOGIN, PLATFORM_PASSWORD));
+    let markSnapshotReady;
+    let releaseStaleSnapshot;
+    const snapshotReady = new Promise((resolve) => {
+      markSnapshotReady = resolve;
+    });
+    const firstCommitReady = new Promise((resolve) => {
+      releaseStaleSnapshot = resolve;
+    });
+
+    const staleOutcome = platform
+      .$transaction(
+        async (transaction) => {
+          const [snapshot] = await transaction.$queryRawUnsafe(
+            `SELECT current_setting('transaction_isolation') AS isolation,
+                    count(*)::int AS visible_authorities
+               FROM execution_budget_authority`,
+          );
+          assert.equal(snapshot.isolation, "repeatable read");
+          markSnapshotReady();
+          await firstCommitReady;
+          return ingestAndAdmit(transaction, staleGrant);
+        },
+        { isolationLevel: "RepeatableRead", timeout: 10_000 },
+      )
+      .then(
+        (rows) => ({ rows }),
+        (error) => ({ error }),
+      );
+
+    try {
+      await snapshotReady;
+      const [first] = await ingestAndAdmit(firstClient, firstGrant);
+      assert.equal(first.replay, false);
+    } finally {
+      releaseStaleSnapshot();
+      await firstClient.$disconnect();
+    }
+
+    const outcome = await staleOutcome;
+    assert.ok("error" in outcome, "stale transaction must fail closed");
+    assert.match(
+      String(outcome.error?.message),
+      /EXECUTION_BUDGET_GRANT_REUSED/,
+    );
+
+    const [{ authorities, accounts, staleJtiRows }] =
+      await owner.$queryRawUnsafe(
+        `SELECT count(DISTINCT authority.id)::int AS authorities,
+                count(DISTINCT account.id)::int AS accounts,
+                count(*) FILTER (WHERE authority.jti=$2::uuid)::int AS "staleJtiRows"
+           FROM execution_budget_authority authority
+           LEFT JOIN tool_budget_account account ON account.authority_id=authority.id
+          WHERE authority.workflow_run_id=$1`,
+        workflowRunId,
+        staleGrant.jti,
+      );
+    assert.deepEqual(
+      { authorities, accounts, staleJtiRows },
+      { authorities: 1, accounts: 1, staleJtiRows: 0 },
+    );
+  });
+
   it("linearizes 20 concurrent exact deliveries into one consumption and nineteen replays", async () => {
     const grant = grantInput();
     const raceClients = Array.from({ length: 20 }, () =>
