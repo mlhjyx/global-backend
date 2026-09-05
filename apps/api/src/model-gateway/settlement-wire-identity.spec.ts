@@ -11,7 +11,9 @@ import { describe, expect, it } from "vitest";
 import {
   loadSettlementDerivationKeyring,
   parseSettlementDerivationKeyring,
+  restoreSettlementWireIdentity,
   settlementWireIdentities,
+  settlementWireIdentityForKey,
   settlementWireNonce,
   toDurableSettlementWireIdentity,
 } from "./settlement-wire-identity";
@@ -87,6 +89,63 @@ describe("settlement wire identity keyring", () => {
     });
     expect(JSON.stringify(durable)).not.toContain(identity.nonce);
     expect(JSON.stringify(durable)).not.toContain(ACTIVE_KEY);
+  });
+
+  it("restores a persisted identity with a VERIFY_ONLY rotation key", () => {
+    const rotated = parseSettlementDerivationKeyring(Buffer.from(keyring()));
+    const original = settlementWireIdentityForKey(rotated, {
+      operationKey: OPERATION_KEY,
+      physicalWireAttempt: 1,
+      derivationKeyId: "settlement-2026-08",
+    });
+    expect(original).not.toBeNull();
+    const durable = toDurableSettlementWireIdentity(original!);
+
+    expect(
+      restoreSettlementWireIdentity(rotated, OPERATION_KEY, durable),
+    ).toEqual(original);
+    expect(
+      settlementWireIdentityForKey(rotated, {
+        operationKey: OPERATION_KEY,
+        physicalWireAttempt: 2,
+        derivationKeyId: durable.derivationKeyId,
+      }),
+    ).toMatchObject({
+      physicalWireAttempt: 2,
+      derivationKeyId: "settlement-2026-08",
+    });
+  });
+
+  it("fails closed when a persisted identity key is missing or altered", () => {
+    const rotated = parseSettlementDerivationKeyring(Buffer.from(keyring()));
+    const original = settlementWireIdentityForKey(rotated, {
+      operationKey: OPERATION_KEY,
+      physicalWireAttempt: 1,
+      derivationKeyId: "settlement-2026-08",
+    })!;
+    const durable = toDurableSettlementWireIdentity(original);
+    const withoutOldKey = parseSettlementDerivationKeyring(
+      Buffer.from(keyring([`settlement-2026-09 ACTIVE ${ACTIVE_KEY}`])),
+    );
+
+    expect(
+      restoreSettlementWireIdentity(withoutOldKey, OPERATION_KEY, durable),
+    ).toBeNull();
+    expect(
+      restoreSettlementWireIdentity(rotated, OPERATION_KEY, undefined),
+    ).toBeNull();
+    expect(
+      restoreSettlementWireIdentity(rotated, OPERATION_KEY, {
+        ...durable,
+        requestId: `${durable.requestId[0] === "A" ? "B" : "A"}${durable.requestId.slice(1)}`,
+      }),
+    ).toBeNull();
+    expect(
+      restoreSettlementWireIdentity(rotated, OPERATION_KEY, {
+        ...durable,
+        nonceSha256: "0".repeat(64),
+      }),
+    ).toBeNull();
   });
 
   it.each([

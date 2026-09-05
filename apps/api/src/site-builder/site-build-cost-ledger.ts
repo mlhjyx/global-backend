@@ -6,11 +6,17 @@ import type {
   PaidModelPhysicalWireRuntime,
   PaidModelPreflightEvidence,
 } from "../model-gateway/paid-model-settlement";
-import type { SettlementWireIdentity } from "../model-gateway/settlement-wire-identity";
+import type {
+  DurableSettlementWireIdentity,
+  SettlementWireIdentity,
+} from "../model-gateway/settlement-wire-identity";
 import type { NewApiSettlementReadbackProbe } from "../model-gateway/new-api-request-bound-settlement";
 import { createProviderTransportObservation } from "../model-gateway/provider-transport-observation";
 import type { ModelUsage } from "../model-gateway/types";
-import { boundedModelTokenCount, MODEL_USAGE_TOKEN_MAXIMUM } from "../model-gateway/model-usage-boundary";
+import {
+  boundedModelTokenCount,
+  MODEL_USAGE_TOKEN_MAXIMUM,
+} from "../model-gateway/model-usage-boundary";
 import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from "./agents/model-policy.registry";
 import type { SiteBuildProviderWireWorkspaceDatabase } from "./site-build-provider-wire.database";
 
@@ -722,6 +728,7 @@ export interface PaidModelExecuteDecision {
   spendId: string;
   wireAttemptId: string;
   physicalWireAttempt: 1 | 2;
+  wireIdentity: DurableSettlementWireIdentity;
 }
 
 interface ReserveRow {
@@ -737,6 +744,39 @@ interface ModelReserveRow extends ReserveRow {
   wire_attempt_id: string | null;
   physical_wire_attempt: number | null;
   wire_state: string | null;
+  wire_derivation_key_id: string | null;
+  wire_settlement_request_id: string | null;
+  wire_settlement_nonce_sha256: string | null;
+}
+
+function durableWireIdentityFromRow(
+  row: Pick<
+    ModelReserveRow,
+    | "physical_wire_attempt"
+    | "wire_derivation_key_id"
+    | "wire_settlement_request_id"
+    | "wire_settlement_nonce_sha256"
+  >,
+  expectedAttempt: 1 | 2,
+): DurableSettlementWireIdentity | null {
+  if (
+    row.physical_wire_attempt !== expectedAttempt ||
+    !row.wire_derivation_key_id ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u.test(row.wire_derivation_key_id) ||
+    !row.wire_settlement_request_id ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(row.wire_settlement_request_id) ||
+    !row.wire_settlement_nonce_sha256 ||
+    !/^[0-9a-f]{64}$/u.test(row.wire_settlement_nonce_sha256)
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    schemaVersion: "site-build-settlement-wire-identity/v1" as const,
+    physicalWireAttempt: expectedAttempt,
+    derivationKeyId: row.wire_derivation_key_id,
+    requestId: row.wire_settlement_request_id,
+    nonceSha256: row.wire_settlement_nonce_sha256,
+  });
 }
 
 interface LedgerRuntimeDeps {
@@ -916,11 +956,8 @@ export class SiteBuildCostLedger {
     const row = rows[0];
     if (!row) throw new PaidCallDeniedError("EMPTY_MODEL_RESERVE_RESULT");
     if (row.decision === "EXECUTE") {
-      if (
-        !row.spend_id ||
-        !row.wire_attempt_id ||
-        row.physical_wire_attempt !== 1
-      ) {
+      const wireIdentity = durableWireIdentityFromRow(row, 1);
+      if (!row.spend_id || !row.wire_attempt_id || !wireIdentity) {
         throw new PaidCallDeniedError("MODEL_WIRE_RESERVE_RESULT_INVALID");
       }
       return {
@@ -928,6 +965,7 @@ export class SiteBuildCostLedger {
         spendId: row.spend_id,
         wireAttemptId: row.wire_attempt_id,
         physicalWireAttempt: 1,
+        wireIdentity,
       };
     }
     if (row.decision === "REPLAY") {
@@ -938,11 +976,16 @@ export class SiteBuildCostLedger {
         row.physical_wire_attempt === 1 &&
         row.wire_state === "ALLOCATED"
       ) {
+        const wireIdentity = durableWireIdentityFromRow(row, 1);
+        if (!wireIdentity) {
+          throw new PaidCallDeniedError("MODEL_WIRE_RESERVE_RESULT_INVALID");
+        }
         return {
           kind: "execute",
           spendId: row.spend_id,
           wireAttemptId: row.wire_attempt_id,
           physicalWireAttempt: 1,
+          wireIdentity,
         };
       }
       if (row.spend_status === "UNKNOWN" || row.spend_status === "RESERVED") {
@@ -978,6 +1021,9 @@ export class SiteBuildCostLedger {
       wire_attempt_id: string | null;
       physical_wire_attempt: number | null;
       wire_state: string | null;
+      wire_derivation_key_id: string | null;
+      wire_settlement_request_id: string | null;
+      wire_settlement_nonce_sha256: string | null;
     };
     const execute = () =>
       this.requireProviderWireDatabase().withWorkspace(
@@ -1003,10 +1049,11 @@ export class SiteBuildCostLedger {
       rows = await execute();
     }
     const row = rows[0];
+    const wireIdentity = row ? durableWireIdentityFromRow(row, 2) : null;
     if (
       (row?.decision !== "EXECUTE" && row?.decision !== "REPLAY") ||
       !row.wire_attempt_id ||
-      row.physical_wire_attempt !== 2 ||
+      !wireIdentity ||
       row.wire_state !== "ALLOCATED"
     ) {
       throw new PaidOperationUnknownError(
@@ -1019,6 +1066,7 @@ export class SiteBuildCostLedger {
       spendId: input.spendId,
       wireAttemptId: row.wire_attempt_id,
       physicalWireAttempt: 2,
+      wireIdentity,
     };
   }
 

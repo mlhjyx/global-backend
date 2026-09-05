@@ -429,7 +429,10 @@ RETURNS TABLE (
   cached_error_code TEXT,
   wire_attempt_id UUID,
   physical_wire_attempt INTEGER,
-  wire_state TEXT
+  wire_state TEXT,
+  wire_derivation_key_id TEXT,
+  wire_settlement_request_id TEXT,
+  wire_settlement_nonce_sha256 TEXT
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -490,13 +493,11 @@ BEGIN
       RETURN QUERY SELECT
         'LEGACY_MODEL_SPEND', v_existing."id", v_existing."status",
         v_existing."result_json", v_existing."meta", v_existing."error_code",
-        NULL::UUID, NULL::INTEGER, NULL::TEXT;
+        NULL::UUID, NULL::INTEGER, NULL::TEXT,
+        NULL::TEXT, NULL::TEXT, NULL::TEXT;
       RETURN;
     END IF;
     IF v_wire."operation_key" IS DISTINCT FROM p_operation_key
-      OR v_wire."derivation_key_id" IS DISTINCT FROM p_derivation_key_id
-      OR v_wire."settlement_request_id" IS DISTINCT FROM p_settlement_request_id
-      OR v_wire."settlement_nonce_sha256" IS DISTINCT FROM p_settlement_nonce_sha256
       OR v_wire."resolver_id" IS DISTINCT FROM p_resolver_id
       OR v_wire."protocol" IS DISTINCT FROM p_protocol
       OR v_wire."requested_alias" IS DISTINCT FROM p_requested_alias
@@ -518,7 +519,9 @@ BEGIN
     RETURN QUERY SELECT
       'REPLAY', v_existing."id", v_existing."status",
       v_existing."result_json", v_existing."meta", v_existing."error_code",
-      v_wire."id", v_wire."physical_wire_attempt", v_wire."state"::TEXT;
+      v_wire."id", v_wire."physical_wire_attempt", v_wire."state"::TEXT,
+      v_wire."derivation_key_id"::TEXT, v_wire."settlement_request_id"::TEXT,
+      v_wire."settlement_nonce_sha256"::TEXT;
     RETURN;
   END IF;
 
@@ -568,14 +571,12 @@ BEGIN
         'LEGACY_MODEL_SPEND', v_reserve.spend_id,
         v_reserve.spend_status, v_reserve.cached_result,
         v_reserve.cached_meta, v_reserve.cached_error_code,
-        NULL::UUID, NULL::INTEGER, NULL::TEXT;
+        NULL::UUID, NULL::INTEGER, NULL::TEXT,
+        NULL::TEXT, NULL::TEXT, NULL::TEXT;
       RETURN;
     END IF;
     IF v_wire."id" IS NOT NULL AND (
       v_wire."operation_key" IS DISTINCT FROM p_operation_key
-      OR v_wire."derivation_key_id" IS DISTINCT FROM p_derivation_key_id
-      OR v_wire."settlement_request_id" IS DISTINCT FROM p_settlement_request_id
-      OR v_wire."settlement_nonce_sha256" IS DISTINCT FROM p_settlement_nonce_sha256
       OR v_wire."resolver_id" IS DISTINCT FROM p_resolver_id
       OR v_wire."protocol" IS DISTINCT FROM p_protocol
       OR v_wire."requested_alias" IS DISTINCT FROM p_requested_alias
@@ -600,7 +601,9 @@ BEGIN
     v_reserve.decision, v_reserve.spend_id, v_reserve.spend_status,
     v_reserve.cached_result, v_reserve.cached_meta,
     v_reserve.cached_error_code, v_wire."id",
-    v_wire."physical_wire_attempt", v_wire."state"::TEXT;
+    v_wire."physical_wire_attempt", v_wire."state"::TEXT,
+    v_wire."derivation_key_id"::TEXT, v_wire."settlement_request_id"::TEXT,
+    v_wire."settlement_nonce_sha256"::TEXT;
 END
 $$;
 
@@ -618,7 +621,10 @@ RETURNS TABLE (
   decision TEXT,
   wire_attempt_id UUID,
   physical_wire_attempt INTEGER,
-  wire_state TEXT
+  wire_state TEXT,
+  wire_derivation_key_id TEXT,
+  wire_settlement_request_id TEXT,
+  wire_settlement_nonce_sha256 TEXT
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -661,19 +667,18 @@ BEGIN
     RAISE EXCEPTION 'SITE_BUILD_PROVIDER_WIRE_ALLOCATION_DENIED' USING ERRCODE = 'P0001';
   END IF;
   IF v_second."id" IS NOT NULL THEN
-    IF v_second."derivation_key_id" IS DISTINCT FROM p_derivation_key_id
-      OR v_second."settlement_request_id" IS DISTINCT FROM p_settlement_request_id
-      OR v_second."settlement_nonce_sha256" IS DISTINCT FROM p_settlement_nonce_sha256
-    THEN
-      RAISE EXCEPTION 'immutable provider wire context mismatch' USING ERRCODE = 'P0001';
-    END IF;
-    RETURN QUERY SELECT 'REPLAY', v_second."id", 2, v_second."state"::TEXT;
+    RETURN QUERY SELECT
+      'REPLAY', v_second."id", 2, v_second."state"::TEXT,
+      v_second."derivation_key_id"::TEXT,
+      v_second."settlement_request_id"::TEXT,
+      v_second."settlement_nonce_sha256"::TEXT;
     RETURN;
   END IF;
   IF v_first."maximum_wire_calls" <> 2
     OR v_first."state" <> 'OBSERVED'
     OR v_first."settlement_status" <> 'SETTLED'
     OR v_first."payload_state" <> 'available'
+    OR p_derivation_key_id IS DISTINCT FROM v_first."derivation_key_id"
   THEN
     RAISE EXCEPTION 'SITE_BUILD_PROVIDER_REPAIR_NOT_AUTHORIZED' USING ERRCODE = 'P0001';
   END IF;
@@ -703,7 +708,11 @@ BEGIN
     v_first."output_price_microunits_per_million",
     v_first."ledger_microusd_per_pricing_unit"
   ) RETURNING * INTO v_second;
-  RETURN QUERY SELECT 'EXECUTE', v_second."id", 2, v_second."state"::TEXT;
+  RETURN QUERY SELECT
+    'EXECUTE', v_second."id", 2, v_second."state"::TEXT,
+    v_second."derivation_key_id"::TEXT,
+    v_second."settlement_request_id"::TEXT,
+    v_second."settlement_nonce_sha256"::TEXT;
 END
 $$;
 

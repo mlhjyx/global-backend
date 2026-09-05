@@ -43,7 +43,9 @@ import {
   type NewApiRequestBoundSettlementResolver,
 } from "./new-api-request-bound-settlement";
 import {
+  restoreSettlementWireIdentity,
   settlementWireIdentities,
+  settlementWireIdentityForKey,
   type SettlementDerivationKeyring,
   type SettlementWireIdentity,
 } from "./settlement-wire-identity";
@@ -242,6 +244,7 @@ export class RouterModelGateway extends ModelGateway {
       }
       // 修复重试：schema 或任务硬门只共享这唯一一次调用，绝不形成开放循环。
       let repair: ModelResult<T>;
+      let repairCtx: AiContext;
       try {
         if (runCtx.authorizeExternalAction) {
           await this.assertExternalActionAuthorized(runCtx, first.usage, {
@@ -252,12 +255,31 @@ export class RouterModelGateway extends ModelGateway {
             modelResolutionSource: first.modelResolutionSource,
           });
         }
+        repairCtx = await this.withPhysicalWire(runCtx, 2);
+      } catch (err) {
+        if (err instanceof ExternalActionDeniedError) throw err;
+        // Allocation precedes Provider invocation. Even if the allocation DB
+        // commit/ACK is ambiguous, there is still exactly one known physical
+        // Provider call and this execution must never send attempt two.
+        throw new ProviderOutputError(
+          "repair preparation failed before provider dispatch",
+          first.usage,
+          {
+            callCount: 1,
+            provider: first.provider,
+            model: first.model,
+            reportedModel: first.reportedModel,
+            modelResolutionSource: first.modelResolutionSource,
+          },
+        );
+      }
+      try {
         repair = await p.generateStructured<T>(
           {
             ...input,
             prompt: `${input.prompt}\n\n上一次输出未通过${repairKind}校验，错误：\n${repairReason}\n请只修正被拒字段，不得新增、猜测或放宽任何事实；重新只输出同时通过 JSON Schema 和任务硬门的合法 JSON。`,
           },
-          await this.withPhysicalWire(runCtx, 2),
+          repairCtx,
         );
       } catch (err) {
         if (err instanceof ExternalActionDeniedError) throw err;
@@ -908,7 +930,7 @@ export class RouterModelGateway extends ModelGateway {
         op === "generateStructured"
           ? (MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND as 2)
           : (1 as const);
-      const firstIdentity = settlementWireIdentities(
+      const candidateFirstIdentity = settlementWireIdentities(
         this.settlementDerivationKeyring,
         operationKey,
         1,
@@ -943,7 +965,7 @@ export class RouterModelGateway extends ModelGateway {
           ...scope,
           kind: "model",
           wire: {
-            wireIdentity: firstIdentity,
+            wireIdentity: candidateFirstIdentity,
             protocol: settlementContext.protocol,
             requestedAlias: settlementContext.alias,
             expectedChannelId: settlementContext.expectedChannelId,
@@ -1003,6 +1025,14 @@ export class RouterModelGateway extends ModelGateway {
 
       const started = Date.now();
       let result: ModelResult<T>;
+      const firstIdentity = restoreSettlementWireIdentity(
+        this.settlementDerivationKeyring,
+        operationKey,
+        decision.wireIdentity,
+      );
+      if (!firstIdentity || firstIdentity.physicalWireAttempt !== 1) {
+        throw new PaidCallDeniedError("MODEL_WIRE_IDENTITY_UNAVAILABLE");
+      }
       const firstRuntime = await this.physicalWireRuntime({
         scope,
         wireAttemptId: decision.wireAttemptId,
@@ -1015,16 +1045,34 @@ export class RouterModelGateway extends ModelGateway {
           ...paid,
           settlementPhysicalWire: firstRuntime,
           allocateSettlementRepairWire: async () => {
-            const secondIdentity = settlementWireIdentities(
+            const candidateSecondIdentity = settlementWireIdentityForKey(
               this.settlementDerivationKeyring!,
-              operationKey,
-              2,
-            )[1]!;
+              {
+                operationKey,
+                physicalWireAttempt: 2,
+                derivationKeyId: firstIdentity.derivationKeyId,
+              },
+            );
+            if (!candidateSecondIdentity) {
+              throw new PaidCallDeniedError("MODEL_WIRE_IDENTITY_UNAVAILABLE");
+            }
             const allocated = await this.paidLedger!.allocateModelPhysicalWire({
               scope,
               spendId: decision.spendId,
-              wireIdentity: secondIdentity,
+              wireIdentity: candidateSecondIdentity,
             });
+            const secondIdentity = restoreSettlementWireIdentity(
+              this.settlementDerivationKeyring!,
+              operationKey,
+              allocated.wireIdentity,
+            );
+            if (
+              !secondIdentity ||
+              secondIdentity.physicalWireAttempt !== 2 ||
+              secondIdentity.derivationKeyId !== firstIdentity.derivationKeyId
+            ) {
+              throw new PaidCallDeniedError("MODEL_WIRE_IDENTITY_UNAVAILABLE");
+            }
             return this.physicalWireRuntime({
               scope,
               wireAttemptId: allocated.wireAttemptId,

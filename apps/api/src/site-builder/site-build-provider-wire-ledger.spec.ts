@@ -52,6 +52,15 @@ const wire: PaidModelWireReservationContext = {
   ledgerMicrousdPerPricingUnit: 1_000_000,
 };
 
+function durableWireColumns(physicalWireAttempt: 1 | 2) {
+  return {
+    physical_wire_attempt: physicalWireAttempt,
+    wire_derivation_key_id: wire.wireIdentity.derivationKeyId,
+    wire_settlement_request_id: wire.wireIdentity.requestId,
+    wire_settlement_nonce_sha256: wire.wireIdentity.nonceSha256,
+  };
+}
+
 function databaseWithResponses(...responses: unknown[]) {
   const queue = [...responses];
   const queryRaw = vi.fn(async () => {
@@ -164,7 +173,7 @@ describe("provider-wire ledger database boundary", () => {
           decision: "EXECUTE",
           spend_id: SPEND_ID,
           wire_attempt_id: WIRE_ID,
-          physical_wire_attempt: 1,
+          ...durableWireColumns(1),
         },
       ]).ledger.reserveModelOperation({ ...scope, kind: "model", wire }),
     ).resolves.toEqual({
@@ -172,6 +181,13 @@ describe("provider-wire ledger database boundary", () => {
       spendId: SPEND_ID,
       wireAttemptId: WIRE_ID,
       physicalWireAttempt: 1,
+      wireIdentity: {
+        schemaVersion: "site-build-settlement-wire-identity/v1",
+        physicalWireAttempt: 1,
+        derivationKeyId: wire.wireIdentity.derivationKeyId,
+        requestId: wire.wireIdentity.requestId,
+        nonceSha256: wire.wireIdentity.nonceSha256,
+      },
     });
 
     await expect(
@@ -207,6 +223,66 @@ describe("provider-wire ledger database boundary", () => {
       result: { ok: true },
       meta: { basis: "exact" },
       errorCode: null,
+    });
+  });
+
+  it("returns the persisted identity for a pre-send replay after rotation", async () => {
+    const persisted = {
+      wire_derivation_key_id: "settlement-old",
+      wire_settlement_request_id: "Q".repeat(43),
+      wire_settlement_nonce_sha256: "e".repeat(64),
+    };
+
+    await expect(
+      ledgerWithResponses([
+        {
+          decision: "REPLAY",
+          spend_id: SPEND_ID,
+          spend_status: "RESERVED",
+          cached_result: null,
+          cached_meta: null,
+          cached_error_code: null,
+          wire_attempt_id: WIRE_ID,
+          physical_wire_attempt: 1,
+          wire_state: "ALLOCATED",
+          ...persisted,
+        },
+      ]).ledger.reserveModelOperation({ ...scope, kind: "model", wire }),
+    ).resolves.toMatchObject({
+      kind: "execute",
+      wireIdentity: {
+        physicalWireAttempt: 1,
+        derivationKeyId: "settlement-old",
+        requestId: "Q".repeat(43),
+        nonceSha256: "e".repeat(64),
+      },
+    });
+
+    await expect(
+      ledgerWithResponses([
+        {
+          decision: "REPLAY",
+          wire_attempt_id: WIRE_ID,
+          physical_wire_attempt: 2,
+          wire_state: "ALLOCATED",
+          ...persisted,
+        },
+      ]).ledger.allocateModelPhysicalWire({
+        scope,
+        spendId: SPEND_ID,
+        wireIdentity: {
+          ...wire.wireIdentity,
+          physicalWireAttempt: 2,
+          derivationKeyId: "settlement-new",
+        },
+      }),
+    ).resolves.toMatchObject({
+      wireIdentity: {
+        physicalWireAttempt: 2,
+        derivationKeyId: "settlement-old",
+        requestId: "Q".repeat(43),
+        nonceSha256: "e".repeat(64),
+      },
     });
   });
 
@@ -246,17 +322,14 @@ describe("provider-wire ledger database boundary", () => {
   });
 
   it("retries an allocation ACK once and accepts only attempt-two ALLOCATED", async () => {
-    const { ledger, queryRaw } = ledgerWithResponses(
-      new Error("ack lost"),
-      [
-        {
-          decision: "REPLAY",
-          wire_attempt_id: WIRE_ID,
-          physical_wire_attempt: 2,
-          wire_state: "ALLOCATED",
-        },
-      ],
-    );
+    const { ledger, queryRaw } = ledgerWithResponses(new Error("ack lost"), [
+      {
+        decision: "REPLAY",
+        wire_attempt_id: WIRE_ID,
+        ...durableWireColumns(2),
+        wire_state: "ALLOCATED",
+      },
+    ]);
     await expect(
       ledger.allocateModelPhysicalWire({
         scope,
@@ -267,6 +340,10 @@ describe("provider-wire ledger database boundary", () => {
       spendId: SPEND_ID,
       wireAttemptId: WIRE_ID,
       physicalWireAttempt: 2,
+      wireIdentity: expect.objectContaining({
+        physicalWireAttempt: 2,
+        derivationKeyId: wire.wireIdentity.derivationKeyId,
+      }),
     });
     expect(queryRaw).toHaveBeenCalledTimes(2);
 
@@ -336,10 +413,9 @@ describe("provider-wire ledger database boundary", () => {
       phase: "gateway_log_observed" as const,
       httpStatusClass: 2 as const,
     };
-    const { ledger, queryRaw } = ledgerWithResponses(
-      new Error("ack lost"),
-      [{ decision: "REPLAY" }],
-    );
+    const { ledger, queryRaw } = ledgerWithResponses(new Error("ack lost"), [
+      { decision: "REPLAY" },
+    ]);
     await expect(
       ledger.recordModelReadbackProbe({
         workspaceId: WORKSPACE_ID,
@@ -351,14 +427,14 @@ describe("provider-wire ledger database boundary", () => {
     expect(queryRaw).toHaveBeenCalledTimes(2);
 
     await expect(
-      ledgerWithResponses([{ decision: "DENIED" }]).ledger.recordModelReadbackProbe(
-        {
-          workspaceId: WORKSPACE_ID,
-          probeId: PROBE_ID,
-          probe,
-          observedAt: new Date("2026-09-04T00:00:00.000Z"),
-        },
-      ),
+      ledgerWithResponses([
+        { decision: "DENIED" },
+      ]).ledger.recordModelReadbackProbe({
+        workspaceId: WORKSPACE_ID,
+        probeId: PROBE_ID,
+        probe,
+        observedAt: new Date("2026-09-04T00:00:00.000Z"),
+      }),
     ).rejects.toMatchObject({
       errorCode: "MODEL_READBACK_PROBE_ACK_UNKNOWN",
     });
@@ -366,59 +442,58 @@ describe("provider-wire ledger database boundary", () => {
 
   it("persists both exact and UNKNOWN terminal wire observations", async () => {
     await expect(
-      ledgerWithResponses([{ decision: "FINALIZED" }]).ledger.finalizeModelPhysicalWire(
-        {
-          workspaceId: WORKSPACE_ID,
-          wireAttemptId: WIRE_ID,
-          observation: settledObservation(),
-          observedAt: new Date("2026-09-04T00:00:00.000Z"),
-        },
-      ),
+      ledgerWithResponses([
+        { decision: "FINALIZED" },
+      ]).ledger.finalizeModelPhysicalWire({
+        workspaceId: WORKSPACE_ID,
+        wireAttemptId: WIRE_ID,
+        observation: settledObservation(),
+        observedAt: new Date("2026-09-04T00:00:00.000Z"),
+      }),
     ).resolves.toBeUndefined();
 
     await expect(
-      ledgerWithResponses([{ decision: "REPLAY" }]).ledger.finalizeModelPhysicalWire(
-        {
-          workspaceId: WORKSPACE_ID,
-          wireAttemptId: WIRE_ID,
-          observation: {
-            status: "unknown",
+      ledgerWithResponses([
+        { decision: "REPLAY" },
+      ]).ledger.finalizeModelPhysicalWire({
+        workspaceId: WORKSPACE_ID,
+        wireAttemptId: WIRE_ID,
+        observation: {
+          status: "unknown",
+          physicalWireAttempt: 1,
+          resolverId: "new-api-request-bound-reconciliation-v1",
+          reason: "gateway_log_missing",
+          transportObservation: createProviderTransportObservation({
             physicalWireAttempt: 1,
-            resolverId: "new-api-request-bound-reconciliation-v1",
-            reason: "gateway_log_missing",
-            transportObservation: createProviderTransportObservation({
-              physicalWireAttempt: 1,
-              finalPhase: "gateway_log_missing",
-              gatewayIdState: "not_observable",
-              upstreamIdState: "unknown",
-              payloadState: "unavailable",
-              readbackProbes: [],
-            }),
-          },
-          observedAt: new Date("2026-09-04T00:00:00.000Z"),
+            finalPhase: "gateway_log_missing",
+            gatewayIdState: "not_observable",
+            upstreamIdState: "unknown",
+            payloadState: "unavailable",
+            readbackProbes: [],
+          }),
         },
-      ),
+        observedAt: new Date("2026-09-04T00:00:00.000Z"),
+      }),
     ).resolves.toBeUndefined();
 
     await expect(
-      ledgerWithResponses([{ decision: "DENIED" }]).ledger.finalizeModelPhysicalWire(
-        {
-          workspaceId: WORKSPACE_ID,
-          wireAttemptId: WIRE_ID,
-          observation: settledObservation(),
-          observedAt: new Date("2026-09-04T00:00:00.000Z"),
-        },
-      ),
+      ledgerWithResponses([
+        { decision: "DENIED" },
+      ]).ledger.finalizeModelPhysicalWire({
+        workspaceId: WORKSPACE_ID,
+        wireAttemptId: WIRE_ID,
+        observation: settledObservation(),
+        observedAt: new Date("2026-09-04T00:00:00.000Z"),
+      }),
     ).rejects.toMatchObject({
       errorCode: "MODEL_WIRE_OBSERVATION_ACK_UNKNOWN",
     });
   });
 
   it("persists exact receipts with bounded ACK recovery", async () => {
-    const { ledger, queryRaw } = ledgerWithResponses(
-      new Error("ack lost"),
-      [{ decision: "RECORDED" }],
-    );
+    const { ledger, queryRaw } = ledgerWithResponses(new Error("ack lost"), [
+      { decision: "RECORDED" },
+    ]);
     await expect(
       ledger.recordModelPhysicalWireReceipt({
         workspaceId: WORKSPACE_ID,
@@ -431,28 +506,33 @@ describe("provider-wire ledger database boundary", () => {
     expect(queryRaw).toHaveBeenCalledTimes(2);
 
     await expect(
-      ledgerWithResponses([{ decision: "DENIED" }]).ledger.recordModelPhysicalWireReceipt(
-        {
-          workspaceId: WORKSPACE_ID,
-          wireAttemptId: WIRE_ID,
-          observation: settledObservation(),
-          receiptDigest: "e".repeat(64),
-          observedAt: new Date("2026-09-04T00:00:00.000Z"),
-        },
-      ),
+      ledgerWithResponses([
+        { decision: "DENIED" },
+      ]).ledger.recordModelPhysicalWireReceipt({
+        workspaceId: WORKSPACE_ID,
+        wireAttemptId: WIRE_ID,
+        observation: settledObservation(),
+        receiptDigest: "e".repeat(64),
+        observedAt: new Date("2026-09-04T00:00:00.000Z"),
+      }),
     ).rejects.toMatchObject({
       errorCode: "MODEL_WIRE_RECEIPT_ACK_UNKNOWN",
     });
   });
 
   it.each([
-    ["finalizeModelPhysicalWireFromReceipt", "MODEL_WIRE_OBSERVATION_ACK_UNKNOWN"],
-    ["finalizeModelPhysicalWireNotDispatched", "MODEL_WIRE_NOT_DISPATCHED_ACK_UNKNOWN"],
+    [
+      "finalizeModelPhysicalWireFromReceipt",
+      "MODEL_WIRE_OBSERVATION_ACK_UNKNOWN",
+    ],
+    [
+      "finalizeModelPhysicalWireNotDispatched",
+      "MODEL_WIRE_NOT_DISPATCHED_ACK_UNKNOWN",
+    ],
   ] as const)("bounds ACK recovery for %s", async (method, errorCode) => {
-    const successful = ledgerWithResponses(
-      new Error("ack lost"),
-      [{ decision: "REPLAY" }],
-    );
+    const successful = ledgerWithResponses(new Error("ack lost"), [
+      { decision: "REPLAY" },
+    ]);
     await expect(
       successful.ledger[method]({
         workspaceId: WORKSPACE_ID,

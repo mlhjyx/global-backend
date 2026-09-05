@@ -51,6 +51,36 @@ describe("site build provider physical-wire authority migration", () => {
     );
   });
 
+  it("returns persisted wire identity across active-key rotation", () => {
+    const sql = readFileSync(MIGRATION, "utf8");
+    const reserve = sql.slice(
+      sql.indexOf("CREATE FUNCTION reserve_site_build_model_spend_v1("),
+      sql.indexOf("CREATE FUNCTION allocate_site_build_provider_wire_v1("),
+    );
+    const allocate = sql.slice(
+      sql.indexOf("CREATE FUNCTION allocate_site_build_provider_wire_v1("),
+      sql.indexOf("CREATE FUNCTION begin_site_build_provider_wire_v1("),
+    );
+
+    for (const column of [
+      "wire_derivation_key_id",
+      "wire_settlement_request_id",
+      "wire_settlement_nonce_sha256",
+    ]) {
+      expect(reserve).toContain(column);
+      expect(allocate).toContain(column);
+    }
+    expect(reserve).not.toMatch(
+      /v_wire\."(?:derivation_key_id|settlement_request_id|settlement_nonce_sha256)"\s+IS DISTINCT FROM\s+p_/u,
+    );
+    expect(allocate).not.toMatch(
+      /v_second\."(?:derivation_key_id|settlement_request_id|settlement_nonce_sha256)"\s+IS DISTINCT FROM\s+p_/u,
+    );
+    expect(allocate).toContain(
+      'p_derivation_key_id IS DISTINCT FROM v_first."derivation_key_id"',
+    );
+  });
+
   it("uses worker-only security-definer functions for send CAS, probe claim, and observation", () => {
     const sql = readFileSync(MIGRATION, "utf8");
 
@@ -99,15 +129,23 @@ describe("site build provider physical-wire authority migration", () => {
     expect(sql).toContain("NEW_MODEL_SETTLEMENT_CODE_REQUIRED");
     expect(sql).toContain("physical wire observation count exceeds call count");
     expect(sql).toContain("provider Spend settlement requires runtime_worker");
-    expect(sql).toContain("NEW.\"meta\"::text ~*");
+    expect(sql).toContain('NEW."meta"::text ~*');
     expect(sql).toContain("request[^a-z0-9]*id");
-    expect(sql).toContain("requested_alias\" ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$'");
-    expect(sql).toContain("maximum_quota_points\" BETWEEN 1 AND 1000000000");
-    expect(sql).toContain("input_price_microunits_per_million\" BETWEEN 0 AND 500000000000");
+    expect(sql).toContain(
+      "requested_alias\" ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$'",
+    );
+    expect(sql).toContain('maximum_quota_points" BETWEEN 1 AND 1000000000');
+    expect(sql).toContain(
+      'input_price_microunits_per_million" BETWEEN 0 AND 500000000000',
+    );
     expect(sql).toContain("readback probe count exceeds two");
     expect(sql).toContain("immutable provider wire context mismatch");
     expect(sql).toContain("provider receipt recovery cannot claim payload");
-    expect(sql).toContain("RENAME TO reconcile_site_build_spend_legacy_20260904");
-    expect(sql).toContain("NOT EXISTS (\n      SELECT 1 FROM \"site_build_provider_wire_attempt\"");
+    expect(sql).toContain(
+      "RENAME TO reconcile_site_build_spend_legacy_20260904",
+    );
+    expect(sql).toContain(
+      'NOT EXISTS (\n      SELECT 1 FROM "site_build_provider_wire_attempt"',
+    );
   });
 });

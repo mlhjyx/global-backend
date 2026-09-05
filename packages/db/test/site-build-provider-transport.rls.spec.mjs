@@ -17,8 +17,10 @@ const FENCE_TOKEN = randomUUID();
 const OPERATION_KEY = randomBytes(32).toString("hex");
 const REQUEST_ID_1 = randomBytes(32).toString("base64url");
 const REQUEST_ID_2 = randomBytes(32).toString("base64url");
+const ROTATED_REQUEST_ID = randomBytes(32).toString("base64url");
 const NONCE_SHA_1 = "1".repeat(64);
 const NONCE_SHA_2 = "2".repeat(64);
+const ROTATED_NONCE_SHA = "3".repeat(64);
 const RECEIPT_DIGEST = randomBytes(32).toString("hex");
 const RECEIPT_DIGEST_2 = randomBytes(32).toString("hex");
 const OBSERVED_AT = new Date();
@@ -53,6 +55,7 @@ async function reserve(
   database,
   {
     operationKey = OPERATION_KEY,
+    derivationKeyId = "settlement-test",
     requestId = REQUEST_ID_1,
     nonceSha256 = NONCE_SHA_1,
   } = {},
@@ -75,7 +78,7 @@ async function reserve(
       "gpt-5.6-terra@gateway",
       800_000n,
       JSON.stringify({ provider: "gateway" }),
-      "settlement-test",
+      derivationKeyId,
       requestId,
       nonceSha256,
       "new-api-request-bound-reconciliation-v1",
@@ -208,6 +211,7 @@ describe("site build physical provider wire PostgreSQL authority", () => {
   let spendId;
   let firstWireId;
   let secondWireId;
+  let firstDerivationKeyId;
 
   before(async () => {
     owner = client(requireOwnerUrl());
@@ -315,15 +319,43 @@ describe("site build physical provider wire PostgreSQL authority", () => {
 
   it("atomically creates one Spend and one first wire under concurrency", async () => {
     const outcomes = await Promise.all(
-      Array.from({ length: 12 }, () => reserve(worker)),
+      Array.from({ length: 12 }, (_, index) =>
+        reserve(
+          worker,
+          index % 2 === 0
+            ? undefined
+            : {
+                derivationKeyId: "settlement-rotated",
+                requestId: ROTATED_REQUEST_ID,
+                nonceSha256: ROTATED_NONCE_SHA,
+              },
+        ),
+      ),
     );
     const rows = outcomes.map(([row]) => row);
     assert.equal(rows.filter((row) => row.decision === "EXECUTE").length, 1);
     assert.equal(rows.filter((row) => row.decision === "REPLAY").length, 11);
     assert.equal(new Set(rows.map((row) => row.spend_id)).size, 1);
     assert.equal(new Set(rows.map((row) => row.wire_attempt_id)).size, 1);
+    assert.equal(
+      new Set(rows.map((row) => row.wire_derivation_key_id)).size,
+      1,
+    );
+    assert.equal(
+      new Set(rows.map((row) => row.wire_settlement_request_id)).size,
+      1,
+    );
+    assert.equal(
+      new Set(rows.map((row) => row.wire_settlement_nonce_sha256)).size,
+      1,
+    );
     spendId = rows[0].spend_id;
     firstWireId = rows[0].wire_attempt_id;
+    firstDerivationKeyId = rows[0].wire_derivation_key_id;
+    assert.ok(
+      firstDerivationKeyId === "settlement-test" ||
+        firstDerivationKeyId === "settlement-rotated",
+    );
 
     const [fact] = await owner.$queryRawUnsafe(
       `SELECT s.status,count(w.id)::int AS wires
@@ -337,6 +369,15 @@ describe("site build physical provider wire PostgreSQL authority", () => {
     assert.equal(replay.decision, "REPLAY");
     assert.equal(replay.wire_attempt_id, firstWireId);
     assert.equal(replay.wire_state, "ALLOCATED");
+    assert.equal(replay.wire_derivation_key_id, firstDerivationKeyId);
+    assert.equal(
+      replay.wire_settlement_request_id,
+      rows[0].wire_settlement_request_id,
+    );
+    assert.equal(
+      replay.wire_settlement_nonce_sha256,
+      rows[0].wire_settlement_nonce_sha256,
+    );
   });
 
   it("closes a provably unsent wire as not incurred", async () => {
@@ -354,15 +395,12 @@ describe("site build physical provider wire PostgreSQL authority", () => {
       await finalizeWireNotDispatched(worker, reserved.wire_attempt_id),
       "REPLAY",
     );
-    const [bulk] = await inWorkspace(
-      worker,
-      WORKSPACE_ID,
-      (transaction) =>
-        transaction.$queryRawUnsafe(
-          "SELECT reconcile_site_build_spend($1::uuid,$2::uuid) AS reconciled",
-          WORKSPACE_ID,
-          BUILD_RUN_ID,
-        ),
+    const [bulk] = await inWorkspace(worker, WORKSPACE_ID, (transaction) =>
+      transaction.$queryRawUnsafe(
+        "SELECT reconcile_site_build_spend($1::uuid,$2::uuid) AS reconciled",
+        WORKSPACE_ID,
+        BUILD_RUN_ID,
+      ),
     );
     assert.equal(bulk.reconciled, 0);
     const [beforeSettlement] = await owner.$queryRawUnsafe(
@@ -419,15 +457,12 @@ describe("site build physical provider wire PostgreSQL authority", () => {
       decisions.filter((value) => value === "READBACK_ONLY").length,
       11,
     );
-    const [bulk] = await inWorkspace(
-      worker,
-      WORKSPACE_ID,
-      (transaction) =>
-        transaction.$queryRawUnsafe(
-          "SELECT reconcile_site_build_spend($1::uuid,$2::uuid) AS reconciled",
-          WORKSPACE_ID,
-          BUILD_RUN_ID,
-        ),
+    const [bulk] = await inWorkspace(worker, WORKSPACE_ID, (transaction) =>
+      transaction.$queryRawUnsafe(
+        "SELECT reconcile_site_build_spend($1::uuid,$2::uuid) AS reconciled",
+        WORKSPACE_ID,
+        BUILD_RUN_ID,
+      ),
     );
     assert.equal(bulk.reconciled, 0);
     const [spend] = await owner.$queryRawUnsafe(
@@ -522,7 +557,13 @@ describe("site build physical provider wire PostgreSQL authority", () => {
       }),
       "FINALIZED",
     );
-    const allocate = () =>
+    const allocate = (
+      identity = {
+        derivationKeyId: firstDerivationKeyId,
+        requestId: REQUEST_ID_2,
+        nonceSha256: NONCE_SHA_2,
+      },
+    ) =>
       inWorkspace(worker, WORKSPACE_ID, (transaction) =>
         transaction.$queryRawUnsafe(
           `SELECT * FROM allocate_site_build_provider_wire_v1(
@@ -534,9 +575,9 @@ describe("site build physical provider wire PostgreSQL authority", () => {
           spendId,
           OPERATION_KEY,
           FENCE_TOKEN,
-          "settlement-test",
-          REQUEST_ID_2,
-          NONCE_SHA_2,
+          identity.derivationKeyId,
+          identity.requestId,
+          identity.nonceSha256,
         ),
       );
     const outcomes = await Promise.all(
@@ -545,11 +586,29 @@ describe("site build physical provider wire PostgreSQL authority", () => {
     const rows = outcomes.map(([row]) => row);
     assert.equal(rows.filter((row) => row.decision === "EXECUTE").length, 1);
     assert.equal(rows.filter((row) => row.decision === "REPLAY").length, 7);
+    assert.equal(
+      new Set(rows.map((row) => row.wire_derivation_key_id)).size,
+      1,
+    );
+    assert.equal(rows[0].wire_derivation_key_id, firstDerivationKeyId);
     secondWireId = rows[0].wire_attempt_id;
-    const [replay] = await allocate();
+    const [replay] = await allocate({
+      derivationKeyId: "settlement-another-active",
+      requestId: ROTATED_REQUEST_ID,
+      nonceSha256: ROTATED_NONCE_SHA,
+    });
     assert.equal(replay.decision, "REPLAY");
     assert.equal(replay.wire_attempt_id, secondWireId);
     assert.equal(replay.wire_state, "ALLOCATED");
+    assert.equal(replay.wire_derivation_key_id, firstDerivationKeyId);
+    assert.equal(
+      replay.wire_settlement_request_id,
+      rows[0].wire_settlement_request_id,
+    );
+    assert.equal(
+      replay.wire_settlement_nonce_sha256,
+      rows[0].wire_settlement_nonce_sha256,
+    );
     assert.equal(await beginWire(worker, secondWireId), "DISPATCH");
     assert.equal(await beginWire(worker, secondWireId), "READBACK_ONLY");
   });
@@ -622,10 +681,7 @@ describe("site build physical provider wire PostgreSQL authority", () => {
       await finalizeWireFromReceipt(worker, secondWireId),
       "FINALIZED",
     );
-    assert.equal(
-      await finalizeWireFromReceipt(worker, secondWireId),
-      "REPLAY",
-    );
+    assert.equal(await finalizeWireFromReceipt(worker, secondWireId), "REPLAY");
 
     const [wire] = await owner.$queryRawUnsafe(
       `SELECT state,settlement_status,final_phase,gateway_id_state,

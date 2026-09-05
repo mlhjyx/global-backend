@@ -377,6 +377,20 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(verify, /psql_denied/);
 });
 
+test('every keyring reader inherits the dedicated read-only secret directory', async () => {
+  const compose = await repositoryFile('infra/backend-runtime.compose.yml');
+  const common = compose.slice(compose.indexOf('x-backend-runtime:'), compose.indexOf('\nservices:'));
+  assert.match(common, /volumes:[\s\S]*type: bind/);
+  assert.match(common, /source: \$\{SITE_BUILD_SETTLEMENT_SECRET_DIRECTORY:-\.\/\.secrets\/site-build-settlement\}/);
+  assert.match(common, /target: \/run\/secrets\/site-build-settlement/);
+  assert.match(common, /read_only: true[\s\S]*bind:\n\s+create_host_path: false/);
+  assert.match(compose, /SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: \/run\/secrets\/site-build-settlement\/derivation\.keyring/);
+  const services = compose.slice(compose.indexOf('\nservices:'));
+  assert.equal(services.match(/<<: \*backend-runtime/g)?.length, 2);
+  assert.doesNotMatch(services, /\n\s+volumes:/);
+  assert.doesNotMatch(common, /source: \.\/?\.secrets\s*$/m);
+});
+
 test('platform writer principal provisioning is exclusive, fail-closed, and secret-safe', async () => {
   const [provision, verify] = await Promise.all([
     repositoryFile('infra/postgres/provision-execution-budget-platform-writer.sh'),

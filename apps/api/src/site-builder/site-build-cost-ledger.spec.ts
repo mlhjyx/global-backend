@@ -1008,6 +1008,9 @@ describe("R4-B stable BuildRun cost summary", () => {
           wire_attempt_id: "00000000-0000-4000-8000-000000000006",
           physical_wire_attempt: 1,
           wire_state: "ALLOCATED",
+          wire_derivation_key_id: "settlement-test",
+          wire_settlement_request_id: "R".repeat(43),
+          wire_settlement_nonce_sha256: "b".repeat(64),
         },
       ]),
     };
@@ -1058,6 +1061,13 @@ describe("R4-B stable BuildRun cost summary", () => {
       spendId: "00000000-0000-4000-8000-000000000005",
       wireAttemptId: "00000000-0000-4000-8000-000000000006",
       physicalWireAttempt: 1,
+      wireIdentity: {
+        schemaVersion: "site-build-settlement-wire-identity/v1",
+        physicalWireAttempt: 1,
+        derivationKeyId: "settlement-test",
+        requestId: "R".repeat(43),
+        nonceSha256: "b".repeat(64),
+      },
     });
   });
 

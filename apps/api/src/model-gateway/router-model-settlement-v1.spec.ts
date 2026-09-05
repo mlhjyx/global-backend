@@ -6,9 +6,15 @@ import {
   type NewApiRequestBoundSettlement,
 } from "./new-api-request-bound-settlement";
 import { RouterModelGateway } from "./router-model-gateway";
-import { parseSettlementDerivationKeyring } from "./settlement-wire-identity";
+import {
+  parseSettlementDerivationKeyring,
+  settlementWireIdentities,
+  toDurableSettlementWireIdentity,
+  type SettlementWireIdentity,
+} from "./settlement-wire-identity";
 import {
   PaidOperationUnknownError,
+  paidOperationKey,
   type SiteBuildCostLedger,
 } from "../site-builder/site-build-cost-ledger";
 import { createSiteBuildCostReconciliationCatalogFromEnv } from "../site-builder/site-build-cost-reconciliation-resolver";
@@ -90,18 +96,24 @@ function exactReadback(input: {
 
 function ledger() {
   return {
-    reserveModelOperation: vi.fn(async () => ({
-      kind: "execute" as const,
-      spendId: "88888888-8888-4888-8888-888888888888",
-      wireAttemptId: WIRE_ID_1,
-      physicalWireAttempt: 1 as const,
-    })),
-    allocateModelPhysicalWire: vi.fn(async () => ({
-      kind: "execute" as const,
-      spendId: "88888888-8888-4888-8888-888888888888",
-      wireAttemptId: WIRE_ID_2,
-      physicalWireAttempt: 2 as const,
-    })),
+    reserveModelOperation: vi.fn(
+      async (input: { wire: { wireIdentity: SettlementWireIdentity } }) => ({
+        kind: "execute" as const,
+        spendId: "88888888-8888-4888-8888-888888888888",
+        wireAttemptId: WIRE_ID_1,
+        physicalWireAttempt: 1 as const,
+        wireIdentity: toDurableSettlementWireIdentity(input.wire.wireIdentity),
+      }),
+    ),
+    allocateModelPhysicalWire: vi.fn(
+      async (input: { wireIdentity: SettlementWireIdentity }) => ({
+        kind: "execute" as const,
+        spendId: "88888888-8888-4888-8888-888888888888",
+        wireAttemptId: WIRE_ID_2,
+        physicalWireAttempt: 2 as const,
+        wireIdentity: toDurableSettlementWireIdentity(input.wireIdentity),
+      }),
+    ),
     beginModelPhysicalWire: vi.fn(async () => "DISPATCH" as const),
     claimModelReadbackProbe: vi.fn(
       async () => "99999999-9999-4999-8999-999999999999",
@@ -118,6 +130,7 @@ function ledger() {
 function model(
   output: (attempt: 1 | 2) => unknown,
   bodyUsage = { inputTokens: 120, outputTokens: 30 },
+  observeIdentity?: (identity: SettlementWireIdentity) => void,
 ): ModelProvider {
   return {
     id: "gateway",
@@ -126,6 +139,7 @@ function model(
     generateStructured: vi.fn(async (_input, ctx) => {
       const runtime = ctx.paidCost?.settlementPhysicalWire;
       if (!runtime) throw new Error("missing settlement runtime");
+      observeIdentity?.(runtime.identity);
       const begin = await runtime.begin();
       if (begin !== "DISPATCH") throw new Error("unexpected replay");
       const observation = await runtime.resolve({
@@ -183,60 +197,72 @@ function gateway(input: {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("RouterModelGateway settlement-readback/v1", () => {
-  it.each(["content", "model", "status"] as const)("keeps invalid model %s out of trace and Spend metadata", async (field) => {
-    const sentinel = "invalid-model-output-sentinel";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-            status: field === "status" ? sentinel : "completed",
-            model: field === "model" ? sentinel : "gpt-5.6-terra",
-            output: [{ content: [{ type: "output_text", text: field === "content" ? sentinel : '{"ok":true}' }] }],
-              usage: { input_tokens: 120, output_tokens: 30 },
-            }),
-            {
-              status: 200,
-              headers: { "x-oneapi-request-id": "gateway-observed" },
-            },
-          ),
-      ),
-    );
-    const paidLedger = ledger();
-    const trace = { record: vi.fn() };
-    const provider = new OpenAICompatibleProvider({
-      id: "gateway",
-      baseUrl: "http://127.0.0.1:3001/v1",
-      apiKey: "k",
-      model: "gpt-5.6-terra",
-      modelTransports: { "gpt-5.6-terra": "openai-responses" },
-    });
-    const instance = gateway({ provider, paidLedger, trace });
+  it.each(["content", "model", "status"] as const)(
+    "keeps invalid model %s out of trace and Spend metadata",
+    async (field) => {
+      const sentinel = "invalid-model-output-sentinel";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                status: field === "status" ? sentinel : "completed",
+                model: field === "model" ? sentinel : "gpt-5.6-terra",
+                output: [
+                  {
+                    content: [
+                      {
+                        type: "output_text",
+                        text: field === "content" ? sentinel : '{"ok":true}',
+                      },
+                    ],
+                  },
+                ],
+                usage: { input_tokens: 120, output_tokens: 30 },
+              }),
+              {
+                status: 200,
+                headers: { "x-oneapi-request-id": "gateway-observed" },
+              },
+            ),
+        ),
+      );
+      const paidLedger = ledger();
+      const trace = { record: vi.fn() };
+      const provider = new OpenAICompatibleProvider({
+        id: "gateway",
+        baseUrl: "http://127.0.0.1:3001/v1",
+        apiKey: "k",
+        model: "gpt-5.6-terra",
+        modelTransports: { "gpt-5.6-terra": "openai-responses" },
+      });
+      const instance = gateway({ provider, paidLedger, trace });
 
-    const error = await instance
-      .generateStructured(
-        {
-          task: "site_builder.copy",
-          prompt: "bounded",
-          schema: { type: "object" },
-          model: "gpt-5.6-terra",
-          maxCostCents: 40,
-          maxTokens: 1_000,
-        },
-        CONTEXT,
-      )
-      .catch((cause: unknown) => cause);
+      const error = await instance
+        .generateStructured(
+          {
+            task: "site_builder.copy",
+            prompt: "bounded",
+            schema: { type: "object" },
+            model: "gpt-5.6-terra",
+            maxCostCents: 40,
+            maxTokens: 1_000,
+          },
+          CONTEXT,
+        )
+        .catch((cause: unknown) => cause);
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).cause).toBeUndefined();
-    expect(String(error)).not.toContain(sentinel);
-    const traceEntry = trace.record.mock.calls.at(-1)?.[0];
-    expect(traceEntry).toMatchObject({ status: "ERROR" });
-    expect(JSON.stringify(traceEntry)).not.toContain(sentinel);
-    const settlement = paidLedger.settleOperation.mock.calls.at(-1)?.[0];
-    expect(JSON.stringify(settlement?.meta)).not.toContain(sentinel);
-  });
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).cause).toBeUndefined();
+      expect(String(error)).not.toContain(sentinel);
+      const traceEntry = trace.record.mock.calls.at(-1)?.[0];
+      expect(traceEntry).toMatchObject({ status: "ERROR" });
+      expect(JSON.stringify(traceEntry)).not.toContain(sentinel);
+      const settlement = paidLedger.settleOperation.mock.calls.at(-1)?.[0];
+      expect(JSON.stringify(settlement?.meta)).not.toContain(sentinel);
+    },
+  );
 
   it("does not let a READBACK_ONLY replay seize a live dispatch terminal state", async () => {
     let releaseWinner!: () => void;
@@ -437,6 +463,216 @@ describe("RouterModelGateway settlement-readback/v1", () => {
     );
   });
 
+  it("uses the persisted first-wire identity after the active key rotates", async () => {
+    const oldKeyring = parseSettlementDerivationKeyring(
+      Buffer.from(
+        `schema=site-build-settlement-derivation-keyring/v1\n` +
+          `settlement-old ACTIVE ${"E".repeat(43)}\n`,
+      ),
+    );
+    const rotatedKeyring = parseSettlementDerivationKeyring(
+      Buffer.from(
+        `schema=site-build-settlement-derivation-keyring/v1\n` +
+          `settlement-new ACTIVE ${"A".repeat(43)}\n` +
+          `settlement-old VERIFY_ONLY ${"E".repeat(43)}\n`,
+      ),
+    );
+    const operationKey = paidOperationKey([
+      RUN_ID,
+      CONTEXT.paidCost.scopeKey,
+      "generateStructured",
+      "gateway",
+      "0",
+      "gpt-5.6-terra",
+    ]);
+    const persistedIdentity = settlementWireIdentities(
+      oldKeyring,
+      operationKey,
+      1,
+    )[0]!;
+    let observedIdentity: SettlementWireIdentity | undefined;
+    const paidLedger = ledger();
+    paidLedger.reserveModelOperation.mockResolvedValueOnce({
+      kind: "execute",
+      spendId: "88888888-8888-4888-8888-888888888888",
+      wireAttemptId: WIRE_ID_1,
+      physicalWireAttempt: 1,
+      wireIdentity: toDurableSettlementWireIdentity(persistedIdentity),
+    } as never);
+    const provider = model(
+      () => ({ ok: true }),
+      undefined,
+      (identity) => {
+        observedIdentity = identity;
+      },
+    );
+    const instance = gateway({ provider, paidLedger });
+    instance.settlementDerivationKeyring = rotatedKeyring;
+
+    await expect(
+      instance.generateStructured(
+        {
+          task: "site_builder.copy",
+          prompt: "bounded",
+          schema: { type: "object" },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        CONTEXT,
+      ),
+    ).resolves.toMatchObject({ data: { ok: true } });
+
+    expect(
+      paidLedger.reserveModelOperation.mock.calls[0]?.[0].wire.wireIdentity
+        .derivationKeyId,
+    ).toBe("settlement-new");
+    expect(observedIdentity).toEqual(persistedIdentity);
+  });
+
+  it("fails closed before dispatch when a persisted pre-send key is unavailable", async () => {
+    const paidLedger = ledger();
+    paidLedger.reserveModelOperation.mockResolvedValueOnce({
+      kind: "execute",
+      spendId: "88888888-8888-4888-8888-888888888888",
+      wireAttemptId: WIRE_ID_1,
+      physicalWireAttempt: 1,
+      wireIdentity: {
+        schemaVersion: "site-build-settlement-wire-identity/v1",
+        physicalWireAttempt: 1,
+        derivationKeyId: "settlement-retired",
+        requestId: "Q".repeat(43),
+        nonceSha256: "e".repeat(64),
+      },
+    } as never);
+    const provider = model(() => ({ ok: true }));
+    const instance = gateway({ provider, paidLedger });
+
+    await expect(
+      instance.generateStructured(
+        {
+          task: "site_builder.copy",
+          prompt: "bounded",
+          schema: { type: "object" },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        CONTEXT,
+      ),
+    ).rejects.toMatchObject({
+      name: "PaidCallDeniedError",
+      decision: "MODEL_WIRE_IDENTITY_UNAVAILABLE",
+    });
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    expect(paidLedger.beginModelPhysicalWire).not.toHaveBeenCalled();
+  });
+
+  it("replays a terminal cached result without reconstructing a retired key", async () => {
+    const paidLedger = ledger();
+    paidLedger.reserveModelOperation.mockResolvedValueOnce({
+      kind: "replay",
+      status: "SUCCEEDED",
+      result: { data: { ok: true }, provider: "gateway", model: "cached" },
+      meta: { basis: "token_pricing" },
+      errorCode: null,
+    } as never);
+    const provider = model(() => ({ ok: false }));
+    const instance = gateway({ provider, paidLedger });
+
+    await expect(
+      instance.generateStructured(
+        {
+          task: "site_builder.copy",
+          prompt: "bounded",
+          schema: { type: "object" },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        CONTEXT,
+      ),
+    ).resolves.toEqual({
+      data: { ok: true },
+      provider: "gateway",
+      model: "cached",
+    });
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    expect(paidLedger.beginModelPhysicalWire).not.toHaveBeenCalled();
+  });
+
+  it("derives and restores a repair wire with the persisted first-wire key", async () => {
+    const oldKeyring = parseSettlementDerivationKeyring(
+      Buffer.from(
+        `schema=site-build-settlement-derivation-keyring/v1\n` +
+          `settlement-old ACTIVE ${"E".repeat(43)}\n`,
+      ),
+    );
+    const rotatedKeyring = parseSettlementDerivationKeyring(
+      Buffer.from(
+        `schema=site-build-settlement-derivation-keyring/v1\n` +
+          `settlement-new ACTIVE ${"A".repeat(43)}\n` +
+          `settlement-old VERIFY_ONLY ${"E".repeat(43)}\n`,
+      ),
+    );
+    const operationKey = paidOperationKey([
+      RUN_ID,
+      CONTEXT.paidCost.scopeKey,
+      "generateStructured",
+      "gateway",
+      "0",
+      "gpt-5.6-terra",
+    ]);
+    const persisted = settlementWireIdentities(oldKeyring, operationKey, 2);
+    const observed: SettlementWireIdentity[] = [];
+    const paidLedger = ledger();
+    paidLedger.reserveModelOperation.mockResolvedValueOnce({
+      kind: "execute",
+      spendId: "88888888-8888-4888-8888-888888888888",
+      wireAttemptId: WIRE_ID_1,
+      physicalWireAttempt: 1,
+      wireIdentity: toDurableSettlementWireIdentity(persisted[0]!),
+    } as never);
+    paidLedger.allocateModelPhysicalWire.mockResolvedValueOnce({
+      kind: "execute",
+      spendId: "88888888-8888-4888-8888-888888888888",
+      wireAttemptId: WIRE_ID_2,
+      physicalWireAttempt: 2,
+      wireIdentity: toDurableSettlementWireIdentity(persisted[1]!),
+    } as never);
+    const provider = model(
+      (attempt) => (attempt === 1 ? { wrong: true } : { ok: true }),
+      undefined,
+      (identity) => observed.push(identity),
+    );
+    const instance = gateway({ provider, paidLedger });
+    instance.settlementDerivationKeyring = rotatedKeyring;
+
+    await expect(
+      instance.generateStructured(
+        {
+          task: "site_builder.copy",
+          prompt: "bounded",
+          schema: {
+            type: "object",
+            required: ["ok"],
+            properties: { ok: { type: "boolean" } },
+          },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        CONTEXT,
+      ),
+    ).resolves.toMatchObject({ data: { ok: true }, callCount: 2 });
+
+    expect(observed).toEqual(persisted);
+    expect(
+      paidLedger.allocateModelPhysicalWire.mock.calls[0]?.[0].wireIdentity
+        .derivationKeyId,
+    ).toBe("settlement-old");
+  });
+
   it("keeps a valid payload successful at the upper bound when readback is unavailable", async () => {
     const paidLedger = ledger();
     const provider = model(() => ({ ok: true }), {
@@ -457,7 +693,10 @@ describe("RouterModelGateway settlement-readback/v1", () => {
     });
 
     const durableReplayResult = vi.fn((result: Record<string, unknown>) => {
-      const usage = result.usage as { inputTokens?: number; outputTokens?: number };
+      const usage = result.usage as {
+        inputTokens?: number;
+        outputTokens?: number;
+      };
       expect(usage.inputTokens).toBeUndefined();
       expect(usage.outputTokens).toBeUndefined();
       return result;
@@ -567,6 +806,49 @@ describe("RouterModelGateway settlement-readback/v1", () => {
           basis: "token_pricing",
           callCount: 2,
           calculatedCostMicrousd: 1_080,
+        }),
+      }),
+    );
+  });
+
+  it("counts only the first physical call when repair-wire allocation fails", async () => {
+    const paidLedger = ledger();
+    paidLedger.allocateModelPhysicalWire.mockRejectedValueOnce(
+      new Error("repair allocation unavailable"),
+    );
+    const provider = model(() => ({ wrong: true }));
+    const instance = gateway({ provider, paidLedger });
+
+    const error = await instance
+      .generateStructured(
+        {
+          task: "site_builder.copy",
+          prompt: "bounded",
+          schema: {
+            type: "object",
+            required: ["ok"],
+            properties: { ok: { type: "boolean" } },
+          },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        CONTEXT,
+      )
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ callCount: 1 });
+    expect(String(error)).not.toContain("repair allocation unavailable");
+
+    expect(provider.generateStructured).toHaveBeenCalledTimes(1);
+    expect(paidLedger.beginModelPhysicalWire).toHaveBeenCalledTimes(1);
+    expect(paidLedger.settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "FAILED",
+        measurement: expect.objectContaining({
+          basis: "token_pricing",
+          callCount: 1,
+          calculatedCostMicrousd: 540,
         }),
       }),
     );

@@ -230,31 +230,54 @@ export function settlementWireIdentities(
     physicalWireAttempt <= maximumWireCalls;
     physicalWireAttempt += 1
   ) {
-    const requestId = keyring.deriveOpaque({
-      keyId: keyring.activeKeyId,
-      label: "request-id",
+    const identity = settlementWireIdentityForKey(keyring, {
       operationKey,
       physicalWireAttempt,
+      derivationKeyId: keyring.activeKeyId,
     });
-    const nonce = keyring.deriveOpaque({
-      keyId: keyring.activeKeyId,
-      label: "nonce",
-      operationKey,
-      physicalWireAttempt,
-    });
-    if (!requestId || !nonce) invalidWireIdentity();
-    identities.push(
-      Object.freeze({
-        schemaVersion: "site-build-settlement-wire-identity/v1" as const,
-        physicalWireAttempt: physicalWireAttempt as 1 | 2,
-        derivationKeyId: keyring.activeKeyId,
-        requestId,
-        nonce,
-        nonceSha256: createHash("sha256").update(nonce).digest("hex"),
-      }),
-    );
+    if (!identity) invalidWireIdentity();
+    identities.push(identity);
   }
   return Object.freeze(identities);
+}
+
+/**
+ * Derives a wire identity under an explicitly selected key. Existing logical
+ * operations use the key id persisted with attempt one, even after another
+ * key becomes ACTIVE. A missing retired key fails closed and never falls back
+ * to the current active key.
+ */
+export function settlementWireIdentityForKey(
+  keyring: SettlementDerivationKeyring,
+  input: {
+    operationKey: string;
+    physicalWireAttempt: number;
+    derivationKeyId: string;
+  },
+): SettlementWireIdentity | null {
+  assertWireInput(input.operationKey, input.physicalWireAttempt);
+  if (!KEY_ID.test(input.derivationKeyId)) return null;
+  const requestId = keyring.deriveOpaque({
+    keyId: input.derivationKeyId,
+    label: "request-id",
+    operationKey: input.operationKey,
+    physicalWireAttempt: input.physicalWireAttempt,
+  });
+  const nonce = keyring.deriveOpaque({
+    keyId: input.derivationKeyId,
+    label: "nonce",
+    operationKey: input.operationKey,
+    physicalWireAttempt: input.physicalWireAttempt,
+  });
+  if (!requestId || !nonce) return null;
+  return Object.freeze({
+    schemaVersion: "site-build-settlement-wire-identity/v1" as const,
+    physicalWireAttempt: input.physicalWireAttempt as 1 | 2,
+    derivationKeyId: input.derivationKeyId,
+    requestId,
+    nonce,
+    nonceSha256: createHash("sha256").update(nonce).digest("hex"),
+  });
 }
 
 export function toDurableSettlementWireIdentity(
@@ -267,6 +290,43 @@ export function toDurableSettlementWireIdentity(
     requestId: identity.requestId,
     nonceSha256: identity.nonceSha256,
   });
+}
+
+/** Reconstructs and authenticates the complete transient identity from DB data. */
+export function restoreSettlementWireIdentity(
+  keyring: SettlementDerivationKeyring,
+  operationKey: string,
+  durable: DurableSettlementWireIdentity | null | undefined,
+): SettlementWireIdentity | null {
+  if (
+    !durable ||
+    durable.schemaVersion !== "site-build-settlement-wire-identity/v1" ||
+    (durable.physicalWireAttempt !== 1 && durable.physicalWireAttempt !== 2) ||
+    !KEY_ID.test(durable.derivationKeyId) ||
+    !KEY_MATERIAL.test(durable.requestId) ||
+    !SHA256.test(durable.nonceSha256)
+  ) {
+    return null;
+  }
+  const derived = settlementWireIdentityForKey(keyring, {
+    operationKey,
+    physicalWireAttempt: durable.physicalWireAttempt,
+    derivationKeyId: durable.derivationKeyId,
+  });
+  if (!derived) return null;
+  const expectedRequestId = Buffer.from(durable.requestId, "utf8");
+  const actualRequestId = Buffer.from(derived.requestId, "utf8");
+  const expectedNonceDigest = Buffer.from(durable.nonceSha256, "hex");
+  const actualNonceDigest = Buffer.from(derived.nonceSha256, "hex");
+  if (
+    expectedRequestId.byteLength !== actualRequestId.byteLength ||
+    expectedNonceDigest.byteLength !== actualNonceDigest.byteLength ||
+    !timingSafeEqual(actualRequestId, expectedRequestId) ||
+    !timingSafeEqual(actualNonceDigest, expectedNonceDigest)
+  ) {
+    return null;
+  }
+  return derived;
 }
 
 export function settlementWireNonce(

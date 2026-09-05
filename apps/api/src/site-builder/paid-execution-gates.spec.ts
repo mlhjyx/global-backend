@@ -5,7 +5,11 @@ import type { ModelRouter } from "../model-gateway/model-router";
 import type { ModelResult } from "../model-gateway/types";
 import { ProviderOutputError } from "../model-gateway/providers/provider-output-error";
 import { createProviderTransportObservation } from "../model-gateway/provider-transport-observation";
-import { parseSettlementDerivationKeyring } from "../model-gateway/settlement-wire-identity";
+import {
+  parseSettlementDerivationKeyring,
+  toDurableSettlementWireIdentity,
+  type SettlementWireIdentity,
+} from "../model-gateway/settlement-wire-identity";
 import { ToolBroker } from "../tools/tool-broker";
 import { ToolRegistry } from "../tools/tool-registry";
 import { RateLimiter } from "../tools/rate-limiter";
@@ -162,21 +166,35 @@ function installSettlementV1(gateway: RouterModelGateway): void {
   ) => Promise<{ kind: string; [key: string]: unknown }>;
   paidLedger.reserveModelOperation ??= async (input: unknown) => {
     const decision = await legacyReserve(input);
+    const wireIdentity = (
+      input as {
+        wire: { wireIdentity: SettlementWireIdentity };
+      }
+    ).wire.wireIdentity;
     return decision.kind === "execute"
       ? {
           kind: "execute",
           spendId: "66666666-6666-4666-8666-666666666666",
           wireAttemptId: "77777777-7777-4777-8777-777777777777",
           physicalWireAttempt: 1,
+          wireIdentity: toDurableSettlementWireIdentity(wireIdentity),
         }
       : decision;
   };
-  paidLedger.allocateModelPhysicalWire ??= async () => ({
-    kind: "execute",
-    spendId: "66666666-6666-4666-8666-666666666666",
-    wireAttemptId: "88888888-8888-4888-8888-888888888888",
-    physicalWireAttempt: 2,
-  });
+  paidLedger.allocateModelPhysicalWire ??= async (input: unknown) => {
+    const wireIdentity = (
+      input as {
+        wireIdentity: SettlementWireIdentity;
+      }
+    ).wireIdentity;
+    return {
+      kind: "execute",
+      spendId: "66666666-6666-4666-8666-666666666666",
+      wireAttemptId: "88888888-8888-4888-8888-888888888888",
+      physicalWireAttempt: 2,
+      wireIdentity: toDurableSettlementWireIdentity(wireIdentity),
+    };
+  };
   paidLedger.beginModelPhysicalWire ??= async () => "DISPATCH";
   paidLedger.claimModelReadbackProbe ??= async () => null;
   paidLedger.recordModelReadbackProbe ??= async () => undefined;
@@ -1175,7 +1193,9 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     ).resolves.toMatchObject({ data: { ok: true } });
     expect(execute).toHaveBeenCalledOnce();
     expect(settleOperation).toHaveBeenCalledTimes(2);
-    expect(settleOperation.mock.calls[1]).toEqual(settleOperation.mock.calls[0]);
+    expect(settleOperation.mock.calls[1]).toEqual(
+      settleOperation.mock.calls[0],
+    );
     expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
