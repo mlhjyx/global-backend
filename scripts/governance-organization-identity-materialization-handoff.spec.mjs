@@ -381,6 +381,20 @@ test("actual seven-source Phase A to B to candidate then whole-review request is
   assert.equal(existsSync(prematurePath), false);
   const wholeReview = fixtureReview(out, "whole", built.wholeReviewSubjects);
   const completeFields = { ...fields, wholeReview };
+  for (const reviewReceiptPath of [
+    "relative.json",
+    `${out}/../receipt.json`,
+    candidatePath,
+    `${repo}-outside/receipt.json`,
+  ]) {
+    assert.equal(
+      api.buildLauncherRootMaterializationRequest({
+        ...completeFields,
+        reviewReceiptPath,
+      }).status,
+      "HOLD",
+    );
+  }
   const request = api.buildLauncherRootMaterializationRequest(completeFields);
   assert.equal(
     request.status,

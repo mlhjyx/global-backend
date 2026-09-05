@@ -635,6 +635,16 @@ function requestFields(fields) {
     exact(fields, ["handoff", "candidate", "wholeReview", "reviewReceiptPath"]),
     "REQUEST_FIELDS_INVALID",
   );
+  const receiptPath = fields.reviewReceiptPath;
+  requireFact(
+    typeof receiptPath === "string" &&
+      path.isAbsolute(receiptPath) &&
+      path.normalize(receiptPath) === receiptPath &&
+      receiptPath.startsWith(`${REPO}/`) &&
+      receiptPath !== fields.candidate?.path &&
+      realpathSync(path.dirname(receiptPath)) === path.dirname(receiptPath),
+    "REVIEW_RECEIPT_PATH_INVALID",
+  );
   const built = candidate(fields.handoff);
   const bytes = readDescriptor(fields.candidate, [REPO]);
   requireFact(
