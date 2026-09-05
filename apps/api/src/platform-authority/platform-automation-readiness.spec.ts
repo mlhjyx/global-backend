@@ -9,6 +9,7 @@ import {
   PlatformAutomationReadinessService,
   type PlatformAutomationReadinessDependencies,
 } from "./platform-automation-readiness";
+import { projectPlatformAutomationReadinessForHealth } from "./platform-automation-readiness-health";
 
 const OK = Object.freeze({ status: "ok" as const });
 
@@ -264,5 +265,76 @@ describe("PlatformAutomationReadinessService", () => {
     await new PlatformAutomationReadinessService(deps).inspect();
 
     expect(seen).toEqual(["acq-sweep", "intent-sweep", "sanctions-refresh"]);
+  });
+
+  it("projects the same four rows into a strict public health shape", async () => {
+    const report = await new PlatformAutomationReadinessService(
+      dependencies({
+        temporalProof: vi.fn(async (identity) =>
+          identity.scheduleId === "acq-sweep"
+            ? failed("TEMPORAL_PROOF_UNAVAILABLE")
+            : OK,
+        ),
+      }),
+    ).inspect();
+
+    expect(projectPlatformAutomationReadinessForHealth(report)).toEqual({
+      schemaVersion: "platform-automation-readiness/v1",
+      rows: [
+        expect.objectContaining({
+          identity: expect.objectContaining({
+            scheduleId: "acq-sweep",
+            purpose: "platform.acquisition",
+          }),
+          desiredMode: "ENABLED",
+          state: "TEMPORAL_PROOF_UNAVAILABLE",
+          code: "PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE",
+        }),
+        expect.objectContaining({
+          identity: expect.objectContaining({
+            scheduleId: "patents-cache-refresh",
+            purpose: "platform.acquisition",
+          }),
+          desiredMode: "INTENTIONALLY_DISABLED_NO_EGRESS",
+          state: "INTENTIONALLY_DISABLED_NO_EGRESS",
+        }),
+        expect.objectContaining({
+          identity: expect.objectContaining({ scheduleId: "intent-sweep" }),
+        }),
+        expect.objectContaining({
+          identity: expect.objectContaining({
+            scheduleId: "sanctions-refresh",
+          }),
+        }),
+      ],
+    });
+  });
+
+  it("replaces malformed or accessor-backed reports with four bounded BLOCKED rows without reading hostile data", () => {
+    let getterCalls = 0;
+    const hostile = {
+      status: "not_ready",
+      rows: [
+        Object.defineProperty({}, "identity", {
+          enumerable: true,
+          get() {
+            getterCalls += 1;
+            return { opaquePayload: "sensitive-value-must-never-leak" };
+          },
+        }),
+      ],
+      rawRegistryPayload: "sensitive-value-must-never-leak",
+    };
+
+    const projection = projectPlatformAutomationReadinessForHealth(hostile);
+
+    expect(projection.rows).toHaveLength(4);
+    expect(projection.rows.map((row) => row.state)).toEqual(
+      Array(4).fill("BLOCKED"),
+    );
+    expect(getterCalls).toBe(0);
+    expect(JSON.stringify(projection)).not.toContain(
+      "sensitive-value-must-never-leak",
+    );
   });
 });

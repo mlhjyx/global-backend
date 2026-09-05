@@ -1,5 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeReadinessService } from "./runtime-readiness.service";
+import { projectPlatformAutomationReadinessForHealth } from "../platform-authority/platform-automation-readiness-health";
+import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "../platform-authority/platform-execution-contract";
+
+function platformAutomationProjection() {
+  return projectPlatformAutomationReadinessForHealth({
+    status: "not_ready",
+    rows: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows.map((row) => ({
+      identity: {
+        temporalNamespace: row.temporalNamespace,
+        scheduleId: row.scheduleId,
+        purpose: row.purpose,
+        workflowType: row.workflowType,
+        taskQueue: row.taskQueue,
+      },
+      desiredMode:
+        row.costMode === "disabled_no_egress"
+          ? "INTENTIONALLY_DISABLED_NO_EGRESS"
+          : "ENABLED",
+      state:
+        row.costMode === "disabled_no_egress"
+          ? "INTENTIONALLY_DISABLED_NO_EGRESS"
+          : "BLOCKED",
+      code: `PLATFORM_AUTOMATION_${row.scheduleId.replaceAll("-", "_").toUpperCase()}_${
+        row.costMode === "disabled_no_egress"
+          ? "INTENTIONALLY_DISABLED_NO_EGRESS"
+          : "BLOCKED"
+      }`,
+    })),
+  });
+}
 
 function dependencies(overrides: Record<string, unknown> = {}) {
   const transactionClient = {
@@ -304,6 +334,51 @@ describe("RuntimeReadinessService", () => {
         migration: { status: "ok" },
       },
     });
+  });
+
+  it("publishes aggregate and all four schedule rows from one platform contributor snapshot", async () => {
+    const checkPlatformAutomation = vi.fn(async () => ({
+      component: {
+        status: "failed" as const,
+        code: "PLATFORM_AUTOMATION_ACQ_SWEEP_BLOCKED",
+      },
+      platformAutomation: platformAutomationProjection(),
+    }));
+    const check = vi.fn(async (name: string) => {
+      if (name === "platform_budget_authority") {
+        throw new Error("must not perform a second platform probe");
+      }
+      return { status: "ok" as const };
+    });
+    const deps = dependencies({
+      contributors: { check, checkPlatformAutomation },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+
+    const report = await service.check();
+
+    expect(checkPlatformAutomation).toHaveBeenCalledOnce();
+    expect(check).not.toHaveBeenCalledWith("platform_budget_authority");
+    expect(report.capabilities.platform_budget_authority).toEqual({
+      status: "failed",
+      code: "PLATFORM_AUTOMATION_ACQ_SWEEP_BLOCKED",
+    });
+    expect(report.capabilities.platform_automation.rows).toHaveLength(4);
+    expect(
+      report.capabilities.platform_automation.rows
+        .filter((row) => row.identity.purpose === "platform.acquisition")
+        .map((row) => [row.identity.scheduleId, row.state]),
+    ).toEqual([
+      ["acq-sweep", "BLOCKED"],
+      ["patents-cache-refresh", "INTENTIONALLY_DISABLED_NO_EGRESS"],
+    ]);
   });
 
   it('publishes quote service authentication as an additive non-recursive capability fact', async () => {

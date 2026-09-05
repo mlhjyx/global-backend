@@ -401,20 +401,44 @@ export async function checkPlatformBudgetAuthorityReadiness(
     | undefined,
   registry: RuntimeReadinessContributorRegistry,
 ): Promise<RuntimeComponentStatus> {
+  return (
+    await checkPlatformBudgetAuthorityReadinessSnapshot(repository, registry)
+  ).component;
+}
+
+export async function checkPlatformBudgetAuthorityReadinessSnapshot(
+  repository:
+    | Pick<ExecutionBudgetAuthorityRepository, "inspectPlatformWriterCapability">
+    | undefined,
+  registry: RuntimeReadinessContributorRegistry,
+) {
   try {
     const report = await inspectPlatformBudgetAuthorityReadiness(
       repository,
       registry,
     );
-    if (report.status === "ready") return { status: "ok" };
+    if (report.status === "ready") {
+      return Object.freeze({
+        component: { status: "ok" as const },
+        platformAutomationReport: report,
+      });
+    }
     const closed = report.rows.find((row) =>
       row.desiredMode === "ENABLED"
         ? row.state !== "ISSUABLE"
         : row.state !== "INTENTIONALLY_DISABLED_NO_EGRESS",
     );
-    return failed(closed?.code ?? "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE");
+    return Object.freeze({
+      component: failed(
+        closed?.code ?? "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE",
+      ),
+      platformAutomationReport: report,
+    });
   } catch {
-    return failed("PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE");
+    return Object.freeze({
+      component: failed("PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE"),
+      platformAutomationReport: undefined,
+    });
   }
 }
 
@@ -613,7 +637,13 @@ export class ExecutionBudgetAuthorityReadinessContributors
 
   onModuleInit(): void {
     this.unregister = this.registry.register("platform_budget_authority", () =>
-      checkPlatformBudgetAuthorityReadiness(this.repository, this.registry),
+      checkPlatformBudgetAuthorityReadinessSnapshot(
+        this.repository,
+        this.registry,
+      ).then((snapshot) => ({
+        ...snapshot.component,
+        platformAutomation: snapshot.platformAutomationReport,
+      })),
     );
   }
 

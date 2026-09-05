@@ -9,6 +9,10 @@ import { RuntimeProcessLeaseService } from "../runtime/runtime-process-lease";
 import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { TemporalClient } from "../temporal/temporal.client";
+import {
+  projectPlatformAutomationReadinessForHealth,
+  type PlatformAutomationHealthProjection,
+} from "../platform-authority/platform-automation-readiness-health";
 
 export type ComponentStatus =
   | { status: "ok"; code?: never }
@@ -23,6 +27,7 @@ export interface RuntimeReadinessReport {
     execution_budget_jwks: ComponentStatus;
     workspace_budget_authority: ComponentStatus;
     platform_budget_authority: ComponentStatus;
+    platform_automation: PlatformAutomationHealthProjection;
     site_builder_model_settlement_readback: ComponentStatus;
     platform_technical_quote_authentication: ComponentStatus;
   };
@@ -66,6 +71,8 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
       execution_budget_jwks: unavailableComponent(),
       workspace_budget_authority: unavailableComponent(),
       platform_budget_authority: unavailableComponent(),
+      platform_automation:
+        projectPlatformAutomationReadinessForHealth(undefined),
       site_builder_model_settlement_readback: unavailableComponent(),
       platform_technical_quote_authentication: unavailableComponent(),
     }),
@@ -166,12 +173,12 @@ export class RuntimeReadinessService
     const hard = await this.refreshHardComponents();
     const [
       executionBudgetJwks,
-      platformBudgetAuthority,
+      platformBudgetAuthoritySnapshot,
       settlementReadback,
       platformTechnicalQuoteAuthentication,
     ] = await Promise.all([
       this.contributors.check("execution_budget_jwks"),
-      this.contributors.check("platform_budget_authority"),
+      this.checkPlatformAutomationSnapshot(),
       this.contributors.check("site_builder_model_settlement_readback"),
       this.contributors.check("platform_technical_quote_authentication"),
     ]);
@@ -195,10 +202,30 @@ export class RuntimeReadinessService
     return this.report(hard, {
       execution_budget_jwks: executionBudgetJwks,
       workspace_budget_authority: workspaceBudgetAuthority,
-      platform_budget_authority: platformBudgetAuthority,
+      platform_budget_authority: platformBudgetAuthoritySnapshot.component,
+      platform_automation:
+        platformBudgetAuthoritySnapshot.platformAutomation,
       site_builder_model_settlement_readback: settlementReadback,
       platform_technical_quote_authentication:
         platformTechnicalQuoteAuthentication,
+    });
+  }
+
+  private async checkPlatformAutomationSnapshot() {
+    const contributor = this.contributors as RuntimeReadinessContributorRegistry &
+      Partial<
+        Pick<
+          RuntimeReadinessContributorRegistry,
+          "checkPlatformAutomation"
+        >
+      >;
+    if (typeof contributor.checkPlatformAutomation === "function") {
+      return contributor.checkPlatformAutomation("platform_budget_authority");
+    }
+    return Object.freeze({
+      component: await this.contributors.check("platform_budget_authority"),
+      platformAutomation:
+        projectPlatformAutomationReadinessForHealth(undefined),
     });
   }
 

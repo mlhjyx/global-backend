@@ -90,6 +90,7 @@ describe('layered health OpenAPI contract', () => {
         'execution_budget_jwks',
         'workspace_budget_authority',
         'platform_budget_authority',
+        'platform_automation',
         'site_builder_model_settlement_readback',
         'platform_technical_quote_authentication',
       ],
@@ -105,6 +106,7 @@ describe('layered health OpenAPI contract', () => {
         'outbox_relay',
         'api_runtime',
         'storage',
+        'generic_artifact_storage',
         'redis',
         'model_gateway',
         'renderer',
@@ -113,6 +115,23 @@ describe('layered health OpenAPI contract', () => {
         'auth_jwks',
         'admission',
       ],
+    });
+    expect(success?.properties?.capabilities?.properties?.platform_automation).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['schemaVersion', 'rows'],
+      properties: {
+        rows: {
+          type: 'array',
+          minItems: 4,
+          maxItems: 4,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['identity', 'desiredMode', 'state', 'code'],
+          },
+        },
+      },
     });
   });
 
