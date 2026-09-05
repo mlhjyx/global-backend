@@ -298,18 +298,18 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       g5AcquisitionRow,
       /`RED \/ NOT_READY`[^\n]*PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING[^\n]*evidence count=0/u,
     );
-    assert.match(document, /> 最后核验：2026-09-05T18:/u);
+    assert.match(document, /> 最后核验：2026-09-05T19:/u);
     assert.match(
       document,
-      /`HEAD=origin\/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`/u,
+      /`HEAD=origin\/main=f80105736c1058a6c1d8378877c8c70b7712f287`/u,
     );
     assert.match(
       document,
-      /source identity[\s\S]{0,160}`0679a0bc510a980f65ebd33eb88b3215a97c20ba`/u,
+      /source identity[\s\S]{0,160}`f80105736c1058a6c1d8378877c8c70b7712f287`/u,
     );
     assert.match(
       document,
-      /runtime identity[\s\S]{0,220}`674ff12d4d768ce5599fc07b565fe21da37dc5fe`[\s\S]{0,160}4 commits behind/u,
+      /runtime identity[\s\S]{0,220}`674ff12d4d768ce5599fc07b565fe21da37dc5fe`[\s\S]{0,160}7 commits behind/u,
     );
     assert.match(
       document,
@@ -342,7 +342,11 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /PR #448[\s\S]{0,220}`2e1f12b445b83ca36ea198d2f0252d0aa7c1fd49`[\s\S]{0,160}`DRAFT \/ CHECKS_COMPLETE \/ SOURCE_CANDIDATE`[\s\S]{0,180}10 success \/ 1 expected skip[\s\S]{0,180}(?:not|未)[\s\S]{0,100}(?:merge|合并)/u,
+      /PR #448[\s\S]{0,220}`2e1f12b445b83ca36ea198d2f0252d0aa7c1fd49`[\s\S]{0,180}`MERGED \/ MAIN_ADOPTED_SOURCE`[\s\S]{0,180}`f80105736c1058a6c1d8378877c8c70b7712f287`[\s\S]{0,180}10 success \/ 1 expected skip[\s\S]{0,220}(?:not|不是)[\s\S]{0,120}(?:deployment|部署|runtime)/u,
+    );
+    assert.match(
+      document,
+      /PR #451[\s\S]{0,180}`fe5753134c8bccfdd282beabc72bfdb943f46630`[\s\S]{0,180}PR #452[\s\S]{0,180}`99e3c25a0fc8b4c54a17ce96600ca2784b69ec27`[\s\S]{0,180}`baseRefName=main`[\s\S]{0,140}`BEHIND`/u,
     );
     assert.match(
       document,
@@ -358,7 +362,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ CURRENT_MAIN_RED \/ SECURITY_SOURCE_CANDIDATE`[^\n]*33855198691[^\n]*PR #448[^\n]*10 success \/ 1 expected skip/u,
+      /G2 — Source\/TDD\/Security[^\n]*`AMBER \/ PARTIAL \/ SECURITY_MERGED \/ CURRENT_MAIN_CI_RUNNING`[^\n]*33855198691[^\n]*PR #448[^\n]*`main@f8010573…`[^\n]*33962575495/u,
     );
     assert.match(
       document,
@@ -389,21 +393,34 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       document,
       /2026-09-05T17:37:15\+08:00[\s\S]{0,300}2 GiB[\s\S]{0,180}23,545[\s\S]{0,220}`503`[\s\S]{0,160}`BROWSER_RUNTIME_UNAVAILABLE`/u,
     );
+    const browserReadinessRow = uniqueTableRow("Browser readiness remediation");
     assert.match(
-      document,
-      /Browser readiness remediation[\s\S]{0,260}`browser-readiness-lifecycle-20260905`[\s\S]{0,160}`0679a0bc510a980f65ebd33eb88b3215a97c20ba`[\s\S]{0,320}browser-readiness-probe\.ts[\s\S]{0,180}browser-readiness-probe\.spec\.ts[\s\S]{0,180}browser-readiness-probe\.smoke\.spec\.ts[\s\S]{0,220}shared wiring[\s\S]{0,180}settlement author[\s\S]{0,180}(?:not deployed|未部署)/u,
+      browserReadinessRow,
+      /`browser-readiness-lifecycle-20260905`[^\n]*then-main `0679a0bc…`[^\n]*browser-readiness-probe\.ts[^\n]*browser-readiness-probe\.spec\.ts[^\n]*browser-readiness-probe\.smoke\.spec\.ts/u,
+    );
+    assert.match(
+      browserReadinessRow,
+      /PR #452[^\n]*`99e3c25a…`[^\n]*[Ss]hared wiring[^\n]*settlement author[^\n]*(?:not|不是)[^\n]*(?:deployment|部署|runtime)/u,
     );
     assert.match(
       document,
       /New API[\s\S]{0,260}`65bfc4bff91d2418bd592ff06bf4a2aadbf634a7`[\s\S]{0,120}`C0\/H3\/M1`[\s\S]{0,220}`02c046d76421009b8dd1640a644f597f3d3a009c`[\s\S]{0,120}unreviewed/u,
     );
+    const settlementCurrentRows = document
+      .split("\n")
+      .filter((line) => line.startsWith("| Backend settlement consumer   |"));
+    assert.equal(
+      settlementCurrentRows.length,
+      1,
+      "Backend settlement consumer must have one exact-current row",
+    );
     assert.match(
-      document,
-      /Backend settlement consumer[\s\S]{0,260}`c7f6baa58645e5b542da62e85d98fd0584ccf909`[\s\S]{0,140}clean[\s\S]{0,180}82 files[\s\S]{0,180}(?:unreviewed|未独立复核)/u,
+      settlementCurrentRows[0],
+      /`c7f6baa58645e5b542da62e85d98fd0584ccf909`[^\n]*clean[^\n]*82 files[^\n]*(?:unreviewed|未独立复核)/u,
     );
     assert.match(
       document,
-      /Program C[\s\S]{0,320}A\/B[\s\S]{0,120}(?:pending|待)[\s\S]{0,200}C1-COMPANY first[\s\S]{0,120}(?:recommended|推荐)[\s\S]{0,160}(?:not approved|未批准|未选择)/u,
+      /Program C[\s\S]{0,280}(?:完整 C1–C5|full-C1)[\s\S]{0,180}(?:已批准|FULL_ORIGINAL_SCOPE_ACTIVE)[\s\S]{0,220}company-first[\s\S]{0,180}(?:未选择|不阻塞)/u,
     );
     assert.match(
       document,
@@ -415,7 +432,11 @@ test("dynamic currentness documents separate source, runtime, program, and relea
     );
     assert.match(
       document,
-      /authorizations remain valid[\s\S]{0,160}original (?:scope|boundaries)[\s\S]{0,220}ordinary local[\s\S]{0,180}Browser helper[\s\S]{0,240}[Nn]ew scope[\s\S]{0,180}merge[\s\S]{0,180}deployment[\s\S]{0,220}(?:corresponding|对应)[\s\S]{0,180}release gate/u,
+      /authorizations remain valid[\s\S]{0,160}original (?:scope|boundaries)[\s\S]{0,220}ordinary local[\s\S]{0,180}Browser helper/u,
+    );
+    assert.match(
+      document,
+      /PR #448[^\n]{0,180}push\/PR\/merge[^\n]{0,160}(?:consumed|消费)[^\n]{0,220}(?:不能|cannot)[^\n]{0,180}(?:deployment|runtime cleanup)[^\n]{0,260}New scope[^\n]{0,220}(?:corresponding|对应)[^\n]{0,180}release gate/u,
     );
   };
 
@@ -464,7 +485,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
   }
   for (const [from, to] of [
     [
-      "0679a0bc510a980f65ebd33eb88b3215a97c20ba",
+      "f80105736c1058a6c1d8378877c8c70b7712f287",
       "0f72cc104e47128778f2392283a380bc1297f76d",
     ],
     [
@@ -475,7 +496,7 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       "17e68953ff2e26ac8433db5aa49689e5f9283659",
       "541bcc63c3486296ab4e2461d4d005e6cd43710b",
     ],
-    ["4 commits behind", "current with main"],
+    ["7 commits behind", "current with main"],
     ["`RED / HISTORICAL_ONLY`", "`PASS / CURRENT`"],
     ["`RED / NOT_READY`", "`AMBER / PARTIAL`"],
     ["18 advisories", "10 advisories"],
@@ -483,8 +504,8 @@ test("dynamic currentness documents separate source, runtime, program, and relea
       "Program B root/launcher authority/materialization gate",
       "Program B gate closed",
     ],
-    ["CURRENT_MAIN_RED", "CURRENT_MAIN_GREEN"],
-    ["SECURITY_SOURCE_CANDIDATE", "SECURITY_MERGED"],
+    ["CURRENT_MAIN_CI_RUNNING", "CURRENT_MAIN_CI_GREEN"],
+    ["SECURITY_MERGED", "SECURITY_DEPLOYED"],
   ]) {
     assert.throws(() => assertCurrentStatus(status.replaceAll(from, to)));
   }
@@ -604,7 +625,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramBRow =
     "| B — Buyer Intelligence discovery | RED | Owns QueryReceipt、RawSourceRecord、Identity/Canonical、Provider/transport、Discovery workflow 和 immutable `LeadQualifiedPackage`；does not own SaaS Opportunity or runtime deploy | #427/#431/#432 accepted main slices 与 active Task0L 分开；latest reviewed `f3e5bc19…` remains `C6/H5`，live `7b983959…` is dirty/unreviewed，Task 0P、Phase A/B、packet/root/0A are closed. |";
   const expectedG0Row =
-    "| G0 — Truth & Ownership | `AMBER / PARTIAL / HOLD` | A/B ownership seam 已关闭；Program B root/launcher authority/materialization gate、platform R2 writer/migration manifest 与 Program C 产品选择/owner/manifest 仍未闭合。 |";
+    "| G0 — Truth & Ownership | `AMBER / PARTIAL / HOLD` | A/B ownership seam 已关闭；Program B root/launcher authority/materialization gate、platform R2 writer/migration manifest，以及 Program C source/migration owner 与 GrowthOS handoff 仍未闭合。 |";
   const normalizeTableRow = (line) =>
     line
       .split("|")
@@ -635,7 +656,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   const expectedProgramARow =
     "| A — authority/runtime primitives | AMBER | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and RuntimeEvidence/Release；does not own Raw/Identity/Provider/Opportunity | Accepted main slices 与 historical mega branch 分离；platform R2 owner/manifest 和 current exact-head review 尚未闭合。 |";
   const expectedRootRow =
-    "| `/global/backend` root `main` | observed `2026-09-05T18:19:59+08:00`：`HEAD=origin/main=0679a0bc510a980f65ebd33eb88b3215a97c20ba`；仅保留既有未跟踪 `.playwright-cli/` | Git source observation；不是 runtime identity；PR #448 checks complete does not change main. |";
+    "| `/global/backend` root `main` | observed `2026-09-05T19:14:20+08:00`：`HEAD=origin/main=f80105736c1058a6c1d8378877c8c70b7712f287`；controlled apply readback is `UP_TO_DATE` with `statusPreserved=true`，且既有未跟踪 `.playwright-cli/` 保留不动 | Git source observation；不是 runtime identity；PR #448 source is now adopted by main but not deployed. |";
   assertUniqueStatusRow(
     status,
     "| A — authority/runtime primitives |",
@@ -665,7 +686,10 @@ test("the discovery lineage successor is current-main based and the quarantined 
           "Program B gate closed",
         ],
         ["platform R2 writer/migration manifest", "platform R2 complete"],
-        ["Program C 产品选择/owner/manifest", "Program C complete"],
+        [
+          "Program C source/migration owner 与 GrowthOS handoff",
+          "Program C complete",
+        ],
       ],
     ],
   ]) {
@@ -689,7 +713,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
       expectedRootRow,
       "| `/global/backend` root `main` |",
       [
-        "0679a0bc510a980f65ebd33eb88b3215a97c20ba",
+        "f80105736c1058a6c1d8378877c8c70b7712f287",
         "0f72cc104e47128778f2392283a380bc1297f76d",
       ],
     ],
@@ -705,7 +729,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
   assert.match(status, /> 最后核验：2026-09-05T/);
   assert.match(
     status,
-    /Development runtime identity is `674ff12d4d768ce5599fc07b565fe21da37dc5fe`, 4 commits behind repository source/,
+    /Development runtime identity is `674ff12d4d768ce5599fc07b565fe21da37dc5fe`, 7 commits behind repository source/,
   );
   const expectedConflictRow =
     "| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | PR #424 固定 owner/seam 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 将唯一 `GPP-B-LINEAGE-001` card/writer 写入 current main。ownership collision 已关闭；四个 Task 5.2 commits 与五个 B-owned deltas 继续按 ADR-025 分类，G2/G3 产品实现仍未接纳。 |";
