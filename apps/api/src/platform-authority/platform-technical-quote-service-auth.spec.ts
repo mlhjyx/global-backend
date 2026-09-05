@@ -175,4 +175,31 @@ describe("PlatformTechnicalQuoteServiceAuthenticationGuard", () => {
     }
     expect(verify).not.toHaveBeenCalled();
   });
+
+  it("maps hostile raw-header accessors to denial without leaking their error", async () => {
+    const verify = vi.fn();
+    const guard = new PlatformTechnicalQuoteServiceAuthenticationGuard(
+      verifier(verify),
+    );
+    const rawHeaders = ["X-Service", "value"];
+    Object.defineProperty(rawHeaders, "0", {
+      enumerable: true,
+      get: () => {
+        throw new Error("secret header detail");
+      },
+    });
+
+    const caught = await guard
+      .canActivate(context({ rawHeaders }))
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    expect(caught).toMatchObject({
+      status: 401,
+      response: {
+        error: { code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_DENIED" },
+      },
+    });
+    expect(JSON.stringify(caught)).not.toContain("secret header detail");
+    expect(verify).not.toHaveBeenCalled();
+  });
 });
