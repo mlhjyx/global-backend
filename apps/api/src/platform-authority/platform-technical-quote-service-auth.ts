@@ -2,11 +2,14 @@ import {
   type CanActivate,
   type ExecutionContext,
   Injectable,
+  type OnModuleDestroy,
+  type OnModuleInit,
   ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { types } from "node:util";
 import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from "@global/contracts/platform-authority";
+import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
 
 export const PLATFORM_TECHNICAL_QUOTE_READ_SCOPE =
   "platform-technical-quote.read" as const;
@@ -15,6 +18,8 @@ export const PLATFORM_TECHNICAL_QUOTE_PATH =
 
 export const PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_BYTES = 16 * 1024;
 export const PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT = 64;
+export const PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR =
+  "platform_technical_quote_authentication" as const;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const PRINCIPAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
@@ -108,7 +113,7 @@ function headersFromRaw(value: unknown): Readonly<Record<string, string>> {
       types.isProxy(value) ||
       Object.getPrototypeOf(value) !== Array.prototype ||
       value.length % 2 !== 0 ||
-    value.length / 2 > PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT
+      value.length / 2 > PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT
     ) {
       return authenticationDenied();
     }
@@ -214,6 +219,92 @@ function validIdentity(
   }
 }
 
+function verifierReadiness(
+  verifier: PlatformTechnicalQuoteServiceAuthenticationVerifier,
+): PlatformTechnicalQuoteServiceAuthenticationReadiness {
+  try {
+    const value: unknown = verifier.readiness();
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      types.isProxy(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype
+    ) {
+      return PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_NOT_READY;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (
+      Reflect.ownKeys(descriptors).some((key) => typeof key !== "string") ||
+      Object.keys(descriptors).sort().join("\0") !==
+        ["code", "status"].join("\0")
+    ) {
+      return PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_NOT_READY;
+    }
+    const status = descriptors.status;
+    const code = descriptors.code;
+    if (
+      !status?.enumerable ||
+      !code?.enumerable ||
+      !Object.hasOwn(status, "value") ||
+      !Object.hasOwn(code, "value") ||
+      status.get !== undefined ||
+      status.set !== undefined ||
+      code.get !== undefined ||
+      code.set !== undefined
+    ) {
+      return PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_NOT_READY;
+    }
+    if (
+      status.value === "ready" &&
+      code.value === "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY"
+    ) {
+      return Object.freeze({
+        status: "ready",
+        code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY",
+      });
+    }
+    if (
+      status.value === "not_ready" &&
+      code.value === "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE"
+    ) {
+      return PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_NOT_READY;
+    }
+  } catch {
+    // Verifier failures and hostile accessors collapse to one bounded fact.
+  }
+  return PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_NOT_READY;
+}
+
+@Injectable()
+export class PlatformTechnicalQuoteAuthenticationReadinessContributor
+  implements OnModuleInit, OnModuleDestroy
+{
+  private unregister?: () => void;
+
+  constructor(
+    private readonly verifier: PlatformTechnicalQuoteServiceAuthenticationVerifier,
+    private readonly registry: RuntimeReadinessContributorRegistry,
+  ) {}
+
+  onModuleInit(): void {
+    this.unregister = this.registry.register(
+      PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+      () => {
+        const readiness = verifierReadiness(this.verifier);
+        return readiness.status === "ready"
+          ? ({ status: "ok" } as const)
+          : ({ status: "failed", code: readiness.code } as const);
+      },
+    );
+  }
+
+  onModuleDestroy(): void {
+    this.unregister?.();
+    this.unregister = undefined;
+  }
+}
+
 @Injectable()
 export class PlatformTechnicalQuoteServiceAuthenticationGuard
   implements CanActivate
@@ -223,12 +314,7 @@ export class PlatformTechnicalQuoteServiceAuthenticationGuard
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    let readiness: PlatformTechnicalQuoteServiceAuthenticationReadiness;
-    try {
-      readiness = this.verifier.readiness();
-    } catch {
-      return authenticationUnavailable();
-    }
+    const readiness = verifierReadiness(this.verifier);
     if (
       readiness.status !== "ready" ||
       readiness.code !== "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY"

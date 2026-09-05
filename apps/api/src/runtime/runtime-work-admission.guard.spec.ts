@@ -1,6 +1,6 @@
 import 'reflect-metadata';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
@@ -33,6 +33,18 @@ function context(
       getRequest: () => ({ method, ...(input.request ?? {}) }),
     }),
   } as unknown as ExecutionContext;
+}
+
+function productionTypescript(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return productionTypescript(path);
+    return entry.isFile() &&
+      entry.name.endsWith('.ts') &&
+      !entry.name.endsWith('.spec.ts')
+      ? [path]
+      : [];
+  });
 }
 
 describe('RuntimeWorkAdmissionGuard', () => {
@@ -134,5 +146,15 @@ describe('RuntimeWorkAdmissionGuard', () => {
       'utf8',
     );
     expect(source).toContain('useClass: RuntimeWorkAdmissionGuard');
+  });
+
+  it('admits the read-only metadata on exactly one code-owned product handler', () => {
+    const sourceRoot = resolve(import.meta.dirname, '..');
+    const uses = productionTypescript(sourceRoot)
+      .filter((path) => readFileSync(path, 'utf8').includes('@ReadOnlyControlPlane()'))
+      .map((path) => relative(sourceRoot, path));
+    expect(uses).toEqual([
+      'platform-authority/platform-execution-technical-quote.controller.ts',
+    ]);
   });
 });

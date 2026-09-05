@@ -20,6 +20,7 @@ import type { Request } from "express";
 import { PLATFORM_AUTHORITY_MAX_RAW_BODY_BYTES } from "@global/contracts/platform-authority";
 
 import { envelope, type Enveloped } from "../common/envelope";
+import { ReadOnlyControlPlane } from "../runtime/read-only-control-plane.decorator";
 import {
   PLATFORM_EXECUTION_TECHNICAL_QUOTE_REQUEST_OPENAPI_SCHEMA,
   PLATFORM_EXECUTION_TECHNICAL_QUOTE_RESPONSE_OPENAPI_SCHEMA,
@@ -63,6 +64,7 @@ export class PlatformExecutionTechnicalQuoteController {
   ) {}
 
   @Post("technical-quote")
+  @ReadOnlyControlPlane()
   @HttpCode(200)
   @ApiConsumes("application/json")
   @ApiExtension("x-required-service-scope", "platform-technical-quote.read")
@@ -88,6 +90,7 @@ export class PlatformExecutionTechnicalQuoteController {
     "x-maximum-response-body-bytes",
     PLATFORM_AUTHORITY_MAX_RAW_BODY_BYTES,
   )
+  @ApiExtension("x-content-encoding", "identity-only")
   @ApiOperation({
     operationId: "readPlatformExecutionTechnicalQuote",
     summary: "Read one pure Platform execution technical quote",
@@ -122,6 +125,12 @@ export class PlatformExecutionTechnicalQuoteController {
     ]),
   })
   @ApiResponse({
+    status: 429,
+    schema: platformTechnicalQuoteErrorSchema([
+      "PLATFORM_TECHNICAL_QUOTE_RATE_LIMITED",
+    ]),
+  })
+  @ApiResponse({
     status: 503,
     schema: platformTechnicalQuoteErrorSchema([
       "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
@@ -133,7 +142,12 @@ export class PlatformExecutionTechnicalQuoteController {
     @Req() request: RawBodyRequest<Request>,
   ): Enveloped<PlatformExecutionTechnicalQuoteV1> {
     const contentType = request.headers["content-type"];
-    if (typeof contentType !== "string" || !request.rawBody) {
+    const contentEncoding = request.headers["content-encoding"];
+    if (
+      typeof contentType !== "string" ||
+      contentEncoding !== undefined ||
+      !request.rawBody
+    ) {
       return requestInvalid();
     }
     try {

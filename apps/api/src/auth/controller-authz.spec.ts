@@ -100,6 +100,7 @@ describe('controller authorization guard topology', () => {
         discoveredServiceProtected.add(path);
         for (const required of [
           '@UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)',
+          '@ReadOnlyControlPlane()',
           '@ApiExtension("x-required-service-scope", "platform-technical-quote.read")',
         ]) {
           if (!source.includes(required)) offenders.push(`${path}: ${required}`);

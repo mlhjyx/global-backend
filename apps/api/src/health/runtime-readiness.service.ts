@@ -23,6 +23,7 @@ export interface RuntimeReadinessReport {
     execution_budget_jwks: ComponentStatus;
     workspace_budget_authority: ComponentStatus;
     platform_budget_authority: ComponentStatus;
+    platform_technical_quote_authentication: ComponentStatus;
   };
   components: {
     database: ComponentStatus;
@@ -64,6 +65,7 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
       execution_budget_jwks: unavailableComponent(),
       workspace_budget_authority: unavailableComponent(),
       platform_budget_authority: unavailableComponent(),
+      platform_technical_quote_authentication: unavailableComponent(),
     }),
     components: Object.freeze({
       database: unavailableComponent(),
@@ -147,9 +149,14 @@ export class RuntimeReadinessService
 
   private async calculate(): Promise<RuntimeReadinessReport> {
     const hard = await this.refreshHardComponents();
-    const [executionBudgetJwks, platformBudgetAuthority] = await Promise.all([
+    const [
+      executionBudgetJwks,
+      platformBudgetAuthority,
+      platformTechnicalQuoteAuthentication,
+    ] = await Promise.all([
       this.contributors.check('execution_budget_jwks'),
       this.contributors.check('platform_budget_authority'),
+      this.contributors.check('platform_technical_quote_authentication'),
     ]);
     const workspaceBudgetAuthority: ComponentStatus =
       executionBudgetJwks.status !== 'ok'
@@ -172,6 +179,8 @@ export class RuntimeReadinessService
       execution_budget_jwks: executionBudgetJwks,
       workspace_budget_authority: workspaceBudgetAuthority,
       platform_budget_authority: platformBudgetAuthority,
+      platform_technical_quote_authentication:
+        platformTechnicalQuoteAuthentication,
     });
   }
 

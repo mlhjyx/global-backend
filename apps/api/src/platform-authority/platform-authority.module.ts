@@ -8,6 +8,7 @@ import { PlatformExecutionTechnicalQuoteReaderService } from "./platform-executi
 import { PlatformExecutionTechnicalQuoteService } from "./platform-execution-technical-quote";
 import {
   PlatformTechnicalQuoteServiceAuthenticationGuard,
+  PlatformTechnicalQuoteAuthenticationReadinessContributor,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
   UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
 } from "./platform-technical-quote-service-auth";
@@ -33,6 +34,7 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_READER = {
       useClass: UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
     },
     PlatformTechnicalQuoteServiceAuthenticationGuard,
+    PlatformTechnicalQuoteAuthenticationReadinessContributor,
     PLATFORM_EXECUTION_TECHNICAL_QUOTE_READER,
   ],
 })

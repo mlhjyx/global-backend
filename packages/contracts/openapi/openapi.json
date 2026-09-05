@@ -297,7 +297,8 @@
                       "required": [
                         "execution_budget_jwks",
                         "workspace_budget_authority",
-                        "platform_budget_authority"
+                        "platform_budget_authority",
+                        "platform_technical_quote_authentication"
                       ],
                       "properties": {
                         "execution_budget_jwks": {
@@ -427,6 +428,69 @@
                           ]
                         },
                         "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_technical_quote_authentication": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -1438,7 +1502,8 @@
                       "required": [
                         "execution_budget_jwks",
                         "workspace_budget_authority",
-                        "platform_budget_authority"
+                        "platform_budget_authority",
+                        "platform_technical_quote_authentication"
                       ],
                       "properties": {
                         "execution_budget_jwks": {
@@ -1568,6 +1633,69 @@
                           ]
                         },
                         "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_technical_quote_authentication": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -3345,6 +3473,41 @@
               }
             }
           },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_TECHNICAL_QUOTE_RATE_LIMITED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "503": {
             "description": "",
             "content": {
@@ -3387,6 +3550,7 @@
         "tags": [
           "PlatformAuthority"
         ],
+        "x-content-encoding": "identity-only",
         "x-maximum-request-body-bytes": 16384,
         "x-maximum-request-header-bytes": 16384,
         "x-maximum-request-header-count": 64,
