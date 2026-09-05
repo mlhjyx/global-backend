@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,16 +17,23 @@ import {
 import {
   APPROVED_PLAN,
   canonicalJsonBytes,
+  renderRootWrapper,
 } from "./governance-organization-identity-launcher.mjs";
+import { inspectMaterializationPacketFacts } from "./governance-organization-identity-materialization-preflight.mjs";
 
 import {
-  buildLauncherMaterializationPacket,
-  buildLauncherMaterializationPacketReviewReceipt,
-  buildLauncherRootMaterializationRequest,
+  buildDiagnosticLauncherMaterializationPacket as buildLauncherMaterializationPacket,
+  buildDiagnosticLauncherMaterializationPacketReviewReceipt as buildLauncherMaterializationPacketReviewReceipt,
+  buildDiagnosticLauncherRootMaterializationRequest as buildLauncherRootMaterializationRequest,
   ROOT_MATERIALIZATION_PACKET_PATHS,
-  validateLauncherMaterializationPacket,
-  validateLauncherMaterializationPacketReviewReceipt,
-  validateLauncherRootMaterializationRequest,
+  validateLauncherMaterializationPacketStructure as validateLauncherMaterializationPacket,
+  validateLauncherMaterializationPacketReviewReceiptStructure as validateLauncherMaterializationPacketReviewReceipt,
+  validateLauncherRootMaterializationRequestStructure as validateLauncherRootMaterializationRequest,
+  validateLauncherMaterializationPacket as executableReadiness,
+  validateLauncherMaterializationPacketReviewReceipt as executableReviewReadiness,
+  validateLauncherRootMaterializationRequest as executableRequestReadiness,
+  buildLauncherMaterializationPacket as ordinaryPacketBuilder,
+  buildLauncherRootMaterializationRequest as ordinaryRequestBuilder,
   writeLauncherMaterializationPacketFile,
 } from "./governance-organization-identity-root-materialization-packet.mjs";
 
@@ -165,6 +172,113 @@ function rehashRequest(request) {
   const { requestId, ...withoutRequestId } = scoped;
   return { ...scoped, requestId: createPacketDigest(withoutRequestId) };
 }
+
+test("recovery: synthetic packet cannot obtain executable readiness or a written packet", async (t) => {
+  const packet = validPacket();
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-recovery-red-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  assert.equal(
+    executableReadiness(packet).code,
+    "SOURCE_UNAVAILABLE_OR_UNSAFE",
+  );
+  assert.notEqual(
+    ordinaryPacketBuilder({
+      subjectCommit: PHASE_A_SUBJECT,
+      phaseBSubjectCommit: PHASE_B_SUBJECT,
+    }).schemaVersion,
+    packet.schemaVersion,
+  );
+  assert.notEqual(
+    ordinaryRequestBuilder({ launcherMaterializationPacket: packet }).status,
+    "PASS",
+  );
+  assert.notEqual(
+    (
+      await writeLauncherMaterializationPacketFile({
+        outputPath: path.join(fixtureRoot, "packet.json"),
+        packet,
+      })
+    ).status,
+    "PASS",
+  );
+});
+
+test("recovery: a fabricated receipt cannot claim independent review", () => {
+  const packet = validPacket();
+  const receipt = buildLauncherMaterializationPacketReviewReceipt({
+    launcherMaterializationPacketSha256: createPacketDigest(packet),
+    ...packet.approvedArtifacts,
+    reportSha256: SHA,
+    counterexampleSetSha256: SHA_B,
+  });
+  assert.equal(
+    executableReviewReadiness(receipt, packet).code,
+    "FULL_REVIEW_BYTE_REFERENCES_REQUIRED",
+  );
+});
+
+test("recovery: actual source and planned bytes still reject the stale executing generator", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-real-packet-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const historical = validPacket();
+  const sources = await Promise.all(
+    historical.sourceToolClosure.map(async (source, index) => {
+      const sourceExecutablePath = path.join(root, `tool-${index}`);
+      const bytes = Buffer.from(`real local executable fixture ${index}\n`);
+      await writeFile(sourceExecutablePath, bytes, { mode: source.sourceMode });
+      return {
+        ...source,
+        sourceExecutablePath,
+        sourceExecutablePathSha256: pathDigest(sourceExecutablePath),
+        sourceRealpathSha256: pathDigest(sourceExecutablePath),
+        sourceSha256: shaBuffer(bytes),
+        sourceSize: bytes.length,
+      };
+    }),
+  );
+  const candidate = validPacket({ sourceToolClosure: sources });
+  assert.equal(executableReadiness(candidate).code, "PLANNED_BYTES_MISMATCH");
+  const wrapper = Buffer.from(
+    renderRootWrapper({
+      envPath: `${candidate.toolRoot}/bin/env`,
+      environment: candidate.runtimeEnvironment,
+      nodePath: `${candidate.toolRoot}/bin/node`,
+      launcherPath: `${candidate.launcherRoot}/identity-writer-launch.mjs`,
+    }),
+  );
+  const launcher = execFileSync("git", [
+    "cat-file",
+    "blob",
+    `${PHASE_A_SUBJECT}:${ROOT_MATERIALIZATION_PACKET_PATHS.launcher}`,
+  ]);
+  const bootstrap = execFileSync("git", [
+    "cat-file",
+    "blob",
+    `${PHASE_B_SUBJECT}:${ROOT_MATERIALIZATION_PACKET_PATHS.bootstrap}`,
+  ]);
+  const planned = (entry, bytes) => ({
+    ...entry,
+    sha256: shaBuffer(bytes),
+    size: bytes.length,
+  });
+  const launcherFilePlan = [
+    planned(candidate.launcherFilePlan[0], wrapper),
+    planned(candidate.launcherFilePlan[1], launcher),
+  ];
+  const packet = rehashPacket({
+    ...candidate,
+    launcherFilePlan,
+    launcherContract: { ...candidate.launcherContract, launcherFilePlan },
+    bootstrapFilePlan: planned(candidate.bootstrapFilePlan, bootstrap),
+  });
+  assert.equal(
+    inspectMaterializationPacketFacts(packet).code,
+    "EXECUTING_GENERATOR_MISMATCH",
+  );
+  assert.notEqual(executableReadiness(packet).status, "PASS");
+});
 
 test("packet current schemas reject historical versions and bind the current plan tuple", () => {
   const packet = validPacket();
@@ -474,6 +588,10 @@ test("packet review and root request are non-circular, exact-key, and substituti
     validateLauncherRootMaterializationRequest(request, packet).status,
     "PASS",
   );
+  assert.notEqual(
+    executableRequestReadiness(roundTrip(request), roundTrip(packet)).status,
+    "PASS",
+  );
   assert.equal(
     validateLauncherRootMaterializationRequest(
       rehashRequest({
@@ -501,7 +619,7 @@ test("packet review and root request are non-circular, exact-key, and substituti
   }
 });
 
-test("packet output writer is canonical and create-exclusive", async (t) => {
+test("ordinary packet writer rejects historical synthetic diagnostics without creating output", async (t) => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "identity-packet-"));
   t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
   const outputPath = path.join(fixtureRoot, "packet-v4.json");
@@ -510,11 +628,8 @@ test("packet output writer is canonical and create-exclusive", async (t) => {
     outputPath,
     packet,
   });
-  assert.equal(written.status, "PASS");
-  assert.deepEqual(
-    JSON.parse(await readFile(outputPath, "utf8")),
-    roundTrip(packet),
-  );
+  assert.notEqual(written.status, "PASS");
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
   assert.equal(
     (
       await writeLauncherMaterializationPacketFile({
@@ -522,7 +637,7 @@ test("packet output writer is canonical and create-exclusive", async (t) => {
         packet,
       })
     ).status,
-    "INTEGRITY_ERROR",
+    "HOLD",
   );
   assert.equal(
     (

@@ -3,6 +3,14 @@ import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  inspectMaterializationPacketFacts,
+  MATERIALIZATION_RUNNING_ROOT,
+  verifyMaterializationOutput,
+  rootScope,
+  requestIdFor,
+  buildDiagnosticRootRequest,
+} from "./governance-organization-identity-materialization-preflight.mjs";
+import {
   APPROVED_PLAN,
   APPROVED_SPEC,
   canonicalJsonBytes,
@@ -62,7 +70,11 @@ const PACKET_KEYS = words(
 );
 
 function pass(extra = {}) {
-  return { status: "PASS", ...extra };
+  return {
+    status: "PASS",
+    evidenceClass: "STRUCTURE_ONLY_NOT_AUTHORITY",
+    ...extra,
+  };
 }
 
 function integrity(code) {
@@ -338,7 +350,8 @@ function launcherContract(sourceClosure, artifacts) {
   };
 }
 
-export function buildLauncherMaterializationPacket(options = {}) {
+// Historical fixture construction is deliberately named as non-authority.
+export function buildDiagnosticLauncherMaterializationPacket(options = {}) {
   const phaseASubjectCommit =
     options.phaseASubjectCommit ?? options.subjectCommit ?? "1".repeat(40);
   const phaseBSubjectCommit = options.phaseBSubjectCommit ?? "1".repeat(40);
@@ -492,7 +505,7 @@ function validateSourceClosure(sourceClosure, destinationClosure) {
   });
 }
 
-export function validateLauncherMaterializationPacket(packet) {
+export function validateLauncherMaterializationPacketStructure(packet) {
   if (!exactKeys(packet, PACKET_KEYS)) return integrity("PACKET_KEYS_INVALID");
   if (!canonicalEqual(packet.reviewIdentities, REVIEW_IDENTITIES))
     return integrity("PACKET_REVIEW_IDENTITIES_INVALID");
@@ -569,6 +582,20 @@ export function validateLauncherMaterializationPacket(packet) {
   });
 }
 
+export function validateLauncherMaterializationPacket(packet) {
+  const structure = validateLauncherMaterializationPacketStructure(packet);
+  if (structure.status !== "PASS") return structure;
+  return inspectMaterializationPacketFacts(packet);
+}
+
+export function buildLauncherMaterializationPacket(options = {}) {
+  if (!Array.isArray(options.sourceToolClosure))
+    return { status: "HOLD", code: "SOURCE_FACTS_REQUIRED" };
+  const packet = buildDiagnosticLauncherMaterializationPacket(options);
+  const readiness = validateLauncherMaterializationPacket(packet);
+  return readiness.status === "PASS" ? packet : readiness;
+}
+
 export async function writeLauncherMaterializationPacketFile({
   outputPath,
   packet,
@@ -576,6 +603,11 @@ export async function writeLauncherMaterializationPacketFile({
   if (!isAbsoluteNormalizedPath(outputPath)) {
     return integrity("PACKET_OUTPUT_PATH_INVALID");
   }
+  const output = verifyMaterializationOutput(
+    MATERIALIZATION_RUNNING_ROOT,
+    outputPath,
+  );
+  if (output.status !== "LOCAL_FACTS_VERIFIED") return output;
   const packetValidation = validateLauncherMaterializationPacket(packet);
   if (packetValidation.status !== "PASS") return packetValidation;
   try {
@@ -595,28 +627,9 @@ export async function writeLauncherMaterializationPacketFile({
   });
 }
 
-export function buildLauncherMaterializationPacketReviewReceipt(fields) {
-  return {
-    schemaVersion:
-      "organization-identity-launcher-materialization-packet-review/v1",
-    launcherMaterializationPacketSha256:
-      fields.launcherMaterializationPacketSha256,
-    generatorCommit: fields.generatorCommit,
-    generatorBlobId: fields.generatorBlobId,
-    generatorSha256: fields.generatorSha256,
-    generatorSpecCommit: fields.generatorSpecCommit,
-    generatorSpecBlobId: fields.generatorSpecBlobId,
-    generatorSpecSha256: fields.generatorSpecSha256,
-    reportSha256: fields.reportSha256,
-    counterexampleSetSha256: fields.counterexampleSetSha256,
-    reviewerClass: "INDEPENDENT_ROOT_MATERIALIZATION_PACKET_REVIEW",
-    critical: 0,
-    important: 0,
-    verdict: "PASS",
-  };
-}
+export { buildDiagnosticLauncherMaterializationPacketReviewReceipt } from "./governance-organization-identity-materialization-preflight.mjs";
 
-export function validateLauncherMaterializationPacketReviewReceipt(
+export function validateLauncherMaterializationPacketReviewReceiptStructure(
   receipt,
   packet = null,
 ) {
@@ -648,7 +661,8 @@ export function validateLauncherMaterializationPacketReviewReceipt(
     return integrity("PACKET_REVIEW_INVALID");
   }
   if (packet) {
-    const packetValidation = validateLauncherMaterializationPacket(packet);
+    const packetValidation =
+      validateLauncherMaterializationPacketStructure(packet);
     if (
       packetValidation.status !== "PASS" ||
       receipt.launcherMaterializationPacketSha256 !==
@@ -669,80 +683,36 @@ export function validateLauncherMaterializationPacketReviewReceipt(
   return pass();
 }
 
-function rootScope(request) {
+export function buildLauncherMaterializationPacketReviewReceipt() {
   return {
-    authorizationClass: request.authorizationClass,
-    subjectCommit: request.subjectCommit,
-    launcherMaterializationPacketSha256:
-      request.launcherMaterializationPacketSha256,
-    launcherMaterializationPacketReviewReceiptSha256:
-      request.launcherMaterializationPacketReviewReceiptSha256,
-    launcherContractSha256: request.launcherContractSha256,
-    sourceToolClosureSha256: request.sourceToolClosureSha256,
-    materializedExecutableClosureSha256:
-      request.materializedExecutableClosureSha256,
-    launcherFileCount: request.launcherFileCount,
-    toolRootFileCount: request.toolRootFileCount,
-    runtimeRootCount: request.runtimeRootCount,
-    requestRootCount: request.requestRootCount,
-    outputRootCount: request.outputRootCount,
-    launcherRoot: request.launcherRoot,
-    toolRoot: request.toolRoot,
-    runtimeRoot: request.runtimeRoot,
-    requestRoot: request.requestRoot,
-    outputRoot: request.outputRoot,
-    chronology: request.chronology,
-    targetMustBeAbsent: request.targetMustBeAbsent,
-    containsCredentialValue: request.containsCredentialValue,
+    status: "HOLD",
+    code: "INDEPENDENT_REVIEW_RECEIPT_CANNOT_BE_SYNTHESIZED",
   };
 }
 
-function requestIdFor(request) {
-  const { requestId, ...withoutRequestId } = request;
-  return sha256(canonicalJsonBytes(withoutRequestId));
+export function validateLauncherMaterializationPacketReviewReceipt(
+  receipt,
+  packet = null,
+) {
+  const structure = validateLauncherMaterializationPacketReviewReceiptStructure(
+    receipt,
+    packet,
+  );
+  if (structure.status !== "PASS") return structure;
+  return { status: "HOLD", code: "FULL_REVIEW_BYTE_REFERENCES_REQUIRED" };
 }
 
-export function buildLauncherRootMaterializationRequest(fields) {
-  const packet = fields.launcherMaterializationPacket;
-  const packetValidation = validateLauncherMaterializationPacket(packet);
-  const validPacket = packetValidation.status === "PASS" ? packet : null;
-  const request = {
-    schemaVersion: "organization-identity-root-materialization-request/v1",
-    requestId: "",
-    authorizationClass: "LOCAL_ROOT_MATERIALIZATION",
-    subjectCommit: validPacket?.subjectCommit,
-    launcherMaterializationPacketPath: fields.launcherMaterializationPacketPath,
-    launcherMaterializationPacketSha256:
-      packetValidation.launcherMaterializationPacketSha256,
-    launcherMaterializationPacketReviewReceiptPath:
-      fields.launcherMaterializationPacketReviewReceiptPath,
-    launcherMaterializationPacketReviewReceiptSha256:
-      fields.launcherMaterializationPacketReviewReceiptSha256,
-    launcherContractSha256: validPacket?.launcherContractSha256,
-    sourceToolClosureSha256: validPacket?.sourceToolClosureSha256,
-    materializedExecutableClosureSha256:
-      validPacket?.materializedExecutableClosureSha256,
-    launcherFileCount: 4,
-    toolRootFileCount: 7,
-    runtimeRootCount: 7,
-    requestRootCount: 1,
-    outputRootCount: 1,
-    launcherRoot: fields.launcherRoot,
-    toolRoot: fields.toolRoot,
-    runtimeRoot: fields.runtimeRoot,
-    requestRoot: fields.requestRoot,
-    outputRoot: fields.outputRoot,
-    chronology: CHRONOLOGY,
-    targetMustBeAbsent: true,
-    containsCredentialValue: false,
-    scopeSha256: "",
-  };
-  request.scopeSha256 = sha256(canonicalJsonBytes(rootScope(request)));
-  request.requestId = requestIdFor(request);
-  return request;
+export function buildDiagnosticLauncherRootMaterializationRequest(fields) {
+  return buildDiagnosticRootRequest(
+    fields,
+    validateLauncherMaterializationPacketStructure(
+      fields.launcherMaterializationPacket,
+    ),
+    CHRONOLOGY,
+  );
 }
 
-export function validateLauncherRootMaterializationRequest(
+export function validateLauncherRootMaterializationRequestStructure(
   request,
   packet = null,
 ) {
@@ -750,7 +720,8 @@ export function validateLauncherRootMaterializationRequest(
     "schemaVersion requestId authorizationClass subjectCommit launcherMaterializationPacketPath launcherMaterializationPacketSha256 launcherMaterializationPacketReviewReceiptPath launcherMaterializationPacketReviewReceiptSha256 launcherContractSha256 sourceToolClosureSha256 materializedExecutableClosureSha256 launcherFileCount toolRootFileCount runtimeRootCount requestRootCount outputRootCount launcherRoot toolRoot runtimeRoot requestRoot outputRoot chronology targetMustBeAbsent containsCredentialValue scopeSha256",
   );
   if (!exactKeys(request, keys)) return integrity("ROOT_REQUEST_INVALID");
-  const packetValidation = validateLauncherMaterializationPacket(packet);
+  const packetValidation =
+    validateLauncherMaterializationPacketStructure(packet);
   if (packetValidation.status !== "PASS") {
     return integrity("ROOT_REQUEST_PACKET_INVALID");
   }
@@ -788,9 +759,31 @@ export function validateLauncherRootMaterializationRequest(
     if (!isSha(request[key])) return integrity("ROOT_REQUEST_INVALID");
   }
   return pass({
-    authorizedRequestSha256: sha256(canonicalJsonBytes(request)),
+    diagnosticRequestSha256: sha256(canonicalJsonBytes(request)),
     scopeSha256: expectedScope,
   });
+}
+
+export function buildLauncherRootMaterializationRequest(fields) {
+  const readiness = validateLauncherMaterializationPacket(
+    fields?.launcherMaterializationPacket,
+  );
+  if (readiness.status !== "PASS") return readiness;
+  return { status: "HOLD", code: "FULL_REVIEW_BYTE_REFERENCES_REQUIRED" };
+}
+
+export function validateLauncherRootMaterializationRequest(
+  request,
+  packet = null,
+) {
+  const structure = validateLauncherRootMaterializationRequestStructure(
+    request,
+    packet,
+  );
+  if (structure.status !== "PASS") return structure;
+  const readiness = validateLauncherMaterializationPacket(packet);
+  if (readiness.status !== "PASS") return readiness;
+  return { status: "HOLD", code: "FULL_REVIEW_BYTE_REFERENCES_REQUIRED" };
 }
 
 export const ROOT_MATERIALIZATION_PACKET_PATHS = Object.freeze({
