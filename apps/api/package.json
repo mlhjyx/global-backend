@@ -18,8 +18,8 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.29",
     "@ai-sdk/openai": "^4.0.29",
-    "@aws-sdk/client-s3": "^3.1091.0",
-    "@aws-sdk/s3-request-presigner": "^3.1091.0",
+    "@aws-sdk/client-s3": "^3.1124.0",
+    "@aws-sdk/s3-request-presigner": "^3.1124.0",
     "@global/contracts": "workspace:*",
     "@google-cloud/bigquery": "^8.3.1",
     "@langfuse/otel": "^5.10.0",
