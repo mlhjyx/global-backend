@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   access,
@@ -18,6 +18,111 @@ import test from "node:test";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const repositoryFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+function namespaceFixture() {
+  return {
+    namespaceInfo: {
+      name: "platform-automation",
+      state: "Registered",
+      description: "Dedicated non-tenant platform automation workflows",
+      data: { platform_non_tenant: "true", platform_contract: "1" },
+    },
+    config: { workflowExecutionRetentionTtl: "604800s" },
+    isGlobalNamespace: false,
+  };
+}
+
+test("required governance executes the platform infrastructure contract suite", async () => {
+  const rootedSuite = await repositoryFile(
+    "scripts/governance-contracts.spec.mjs",
+  );
+  assert.match(
+    rootedSuite,
+    /import "\.\/temporal-platform-infrastructure-contract\.spec\.mjs";/,
+  );
+});
+
+test("namespace admission validates active isolated ownership and exact retention", async () => {
+  const { validatePlatformNamespace } =
+    await import("../infra/temporal-platform/namespace-contract.mjs");
+  const current = namespaceFixture();
+  assert.equal(validatePlatformNamespace(JSON.stringify(current)), true);
+  for (const mutate of [
+    (v) => {
+      v.namespaceInfo.state = "Deprecated";
+    },
+    (v) => {
+      v.namespaceInfo.name = "default";
+    },
+    (v) => {
+      v.namespaceInfo.description = "tenant workflows";
+    },
+    (v) => {
+      v.namespaceInfo.data = {};
+    },
+    (v) => {
+      v.namespaceInfo.data.platform_non_tenant = "false";
+    },
+    (v) => {
+      v.namespaceInfo.data.tenant_id = "tenant";
+    },
+    (v) => {
+      v.config.workflowExecutionRetentionTtl = "86400s";
+    },
+    (v) => {
+      v.isGlobalNamespace = true;
+    },
+  ]) {
+    const changed = structuredClone(current);
+    mutate(changed);
+    assert.throws(
+      () => validatePlatformNamespace(JSON.stringify(changed)),
+      /PLATFORM_TEMPORAL_NAMESPACE_DRIFT/,
+    );
+  }
+  assert.throws(
+    () => validatePlatformNamespace("null"),
+    /PLATFORM_TEMPORAL_NAMESPACE_DRIFT/,
+  );
+  assert.throws(
+    () => validatePlatformNamespace("{"),
+    /PLATFORM_TEMPORAL_NAMESPACE_DRIFT/,
+  );
+  assert.throws(
+    () => validatePlatformNamespace(" ".repeat(65537)),
+    /PLATFORM_TEMPORAL_NAMESPACE_DRIFT/,
+  );
+});
+
+test("namespace CLI bounds input and emits only safe contract diagnostics", () => {
+  const validator = join(
+    repositoryRoot,
+    "infra/temporal-platform/namespace-contract.mjs",
+  );
+  for (const [input, success] of [
+    [JSON.stringify(namespaceFixture()), true],
+    ["", false],
+    ["untrusted-private-diagnostic", false],
+    [Buffer.from([0xff]), false],
+    ["x".repeat(65537), false],
+  ]) {
+    const result = spawnSync(process.execPath, [validator], {
+      input,
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 4096,
+    });
+    assert.equal(result.status, success ? 0 : 1);
+    assert.equal(
+      result.stderr,
+      success ? "" : "PLATFORM_TEMPORAL_NAMESPACE_DRIFT\n",
+    );
+    assert.equal(
+      result.stdout,
+      success ? "platform-automation namespace contract verified\n" : "",
+    );
+  }
+});
 
 test("platform Temporal images are official exact-digest releases", async () => {
   const lock = JSON.parse(

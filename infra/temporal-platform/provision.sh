@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 export COMPOSE_IGNORE_ORPHANS=true
+command -v node >/dev/null || { echo "Node is required for namespace contract validation" >&2; exit 1; }
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 COMPOSE_FILE=${TEMPORAL_PLATFORM_COMPOSE_FILE:-${SCRIPT_DIR}/compose.yml}
@@ -67,10 +68,11 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
         --tls-server-name "${TEMPORAL_PLATFORM_TLS_SERVER_NAME}" \
         --api-key "${token}" \
         --command-timeout 15s \
-        --output none
+        --output json
     }
     error_file=/tmp/namespace-describe.error
-    if cli operator namespace describe --namespace "platform-automation" 2>"${error_file}"; then
+    if cli operator namespace describe --namespace "platform-automation" >/tmp/namespace-describe.json 2>"${error_file}"; then
+      cat /tmp/namespace-describe.json
       exit 0
     fi
     if ! grep -Eiq "namespace.*not found|not found.*namespace" "${error_file}"; then
@@ -84,8 +86,10 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
     cli operator namespace create \
       --namespace "platform-automation" \
       --retention 7d \
+      --data platform_non_tenant=true \
+      --data platform_contract=1 \
       --description "Dedicated non-tenant platform automation workflows"
     cli operator namespace describe --namespace "platform-automation"
-  ' -- "${ADMIN_TOKEN_FILE}"
+  ' -- "${ADMIN_TOKEN_FILE}" | node "${SCRIPT_DIR}/namespace-contract.mjs"
 
 echo "platform-automation namespace is provisioned; authorization verification remains a separate gate"

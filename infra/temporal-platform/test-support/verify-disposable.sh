@@ -314,6 +314,37 @@ fi
 "${PLATFORM_DIR}/provision.sh"
 "${PLATFORM_DIR}/provision.sh"
 
+change_namespace_fixture() {
+  "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
+    codex-task4c-platform-temporal-admin -eu -c '
+      token=$(cat /run/secrets/temporal-platform-client/admin.jwt)
+      temporal operator namespace update --namespace platform-automation "$@" \
+        --address "${TEMPORAL_PLATFORM_ADDRESS}" --tls \
+        --tls-ca-path /run/secrets/temporal-platform-client/ca.crt \
+        --tls-server-name "${TEMPORAL_PLATFORM_TLS_SERVER_NAME}" \
+        --api-key "${token}" --command-timeout 15s --output none
+    ' -- "$@"
+}
+assert_namespace_drift_rejected() {
+  if "${PLATFORM_DIR}/provision.sh" >"${FIXTURE_DIRECTORY}/namespace-drift.log" 2>&1; then
+    echo "namespace drift was accepted" >&2
+    exit 1
+  fi
+  if ! grep -Fxq PLATFORM_TEMPORAL_NAMESPACE_DRIFT "${FIXTURE_DIRECTORY}/namespace-drift.log"; then
+    echo "namespace drift did not fail with the expected contract reason" >&2
+    exit 1
+  fi
+}
+change_namespace_fixture --retention 1d
+assert_namespace_drift_rejected
+change_namespace_fixture --retention 7d
+"${PLATFORM_DIR}/provision.sh"
+change_namespace_fixture --data platform_non_tenant=false
+assert_namespace_drift_rejected
+change_namespace_fixture --data platform_non_tenant=true
+"${PLATFORM_DIR}/provision.sh"
+echo "namespace retention and ownership drift rejected"
+
 SCHEDULE_ID=task4c-proof-${RUN_ID}
 WORKFLOW_ID=task4c-proof-workflow-${RUN_ID}
 TASK_QUEUE=task4c-proof-queue

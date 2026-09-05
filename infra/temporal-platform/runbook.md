@@ -6,6 +6,24 @@ replace it, or derive authority from it. The existing development service
 remains an integration probe and is not an independently authenticated managed
 runtime.
 
+## Namespace admission on every provision
+
+`provision.sh` requires the repository's Node runtime on the operator host.
+Both a newly created namespace and an existing namespace must pass bounded
+DescribeNamespace JSON validation: registered state, exactly seven-day
+retention, the fixed non-tenant description, local (not global) namespace,
+and exactly two ownership data markers (`platform_non_tenant=true` and
+`platform_contract=1`). Missing markers, deprecated state, changed retention,
+or another ownership claim returns `PLATFORM_TEMPORAL_NAMESPACE_DRIFT`.
+An existing namespace is never silently adopted or automatically repaired.
+The markers are ownership declarations, not proof that historical workflow
+payloads contain no tenant data; pre-cutover inventory and the dedicated
+credential boundary remain required. Unknown historical state stays on hold.
+
+The infrastructure contract suite is imported by the rooted governance test
+entry, so required CI executes it. The disposable harness also changes
+namespace settings deliberately and requires re-provisioning to reject drift.
+
 ## Fixed security boundary
 
 - The only product namespace admitted by this slice is `platform-automation`.
