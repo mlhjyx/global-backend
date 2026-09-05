@@ -50,7 +50,12 @@ describe("Platform technical quote service-only OpenAPI", () => {
       "platform-technical-quote.read",
     );
     expect(operation["x-service-authentication"]).toEqual({
-      kind: "injected-dedicated-service-verifier",
+      kind: "growthos-identity-jwks-service-token",
+      algorithm: "RS256",
+      type: "platform-technical-quote-access+jwt",
+      audience: "global-backend:platform-technical-quote",
+      principal: "growthos:platform-technical-quote-reader",
+      scope: "platform-technical-quote.read",
       identity_token_fallback: false,
       workspace_token_fallback: false,
       unsigned_fallback: false,
