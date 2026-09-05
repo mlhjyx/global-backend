@@ -58,7 +58,7 @@ const bPaths = [
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const digest = (obj) => hash(canonicalJsonBytes(obj));
 const runGit = (repo, ...args) =>
-  execFileSync("git", ["-C", repo, ...args], {
+  execFileSync("git", ["-C", repo, "-c", "core.fsmonitor=false", ...args], {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
@@ -207,6 +207,7 @@ async function fixture() {
   const observedPaths = useInstalled
     ? installedPaths.map((file) => realpathSync(file))
     : installedPaths.map((_, index) => {
+        if (index === 2) return realpathSync("/usr/bin/git");
         const file = path.join(root, `non-authority-tool-${index}`);
         writeFileSync(
           file,
@@ -245,7 +246,13 @@ async function fixture() {
     reviewRoots: [out],
     reviews: { plan: null, phaseA: null, phaseB: null },
   };
-  return { root, repo, out, api, handoff, useInstalled };
+  const helperMarker = path.join(out, "fsmonitor-ran");
+  const helper = path.join(out, "fsmonitor.sh");
+  writeFileSync(helper, `#!/bin/sh\nprintf ran > '${helperMarker}'\nexit 0\n`, {
+    mode: 0o500,
+  });
+  runGit(repo, "config", "core.fsmonitor", helper);
+  return { root, repo, out, api, handoff, useInstalled, helperMarker };
 }
 
 test("ordinary generation exposes acyclic preparation and request writing", () => {
@@ -593,6 +600,11 @@ test("actual seven-source Phase A to B to candidate then whole-review request is
   );
   deny(badB);
   assert.equal(existsSync(built.packet.launcherRoot), false);
+  assert.equal(
+    existsSync(f.helperMarker),
+    false,
+    "normal preparation/candidate/request must never run repo fsmonitor",
+  );
 });
 
 test("only explicit approved system ENV source permits hard links; destinations and generic files remain strict", (t) => {

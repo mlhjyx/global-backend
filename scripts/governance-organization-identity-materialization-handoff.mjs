@@ -10,6 +10,7 @@ import {
 import {
   observeMaterializationBytes,
   materializationGit,
+  materializationGitSource,
   verifyMaterializationGitIdentity,
   inspectMaterializationPacketFacts,
   verifyMaterializationDestinations,
@@ -227,6 +228,11 @@ function inspectHandoff(handoff, phaseB) {
   requireFact(
     exact(handoff.reviews, ["plan", "phaseA", "phaseB"]),
     "PREREQUISITE_REVIEW_KEYS_INVALID",
+  );
+  requireFact(
+    Array.isArray(handoff.sources) &&
+      equal(handoff.sources[2], materializationGitSource()),
+    "GIT_SOURCE_BINDING_MISMATCH",
   );
   const head = textGit(["rev-parse", "HEAD"]);
   requireFact(

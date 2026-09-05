@@ -152,22 +152,127 @@ export function verifyMaterializationFile(filePath, expected, roots) {
   }
 }
 
+// Explicit local bootstrap executable, observed before any Git operation. The
+// handoff GIT role must bind this same identity; PATH is never a selector.
+const GIT_PATH = realpathSync("/usr/bin/git");
+const GIT_ROOTS = [path.dirname(GIT_PATH)];
+const gitObservation = () => {
+  const observed = observeMaterializationBytes(GIT_PATH, GIT_ROOTS);
+  if (
+    observed.observation.uid !== "0" ||
+    observed.observation.gid !== "0" ||
+    observed.mode & 0o022 ||
+    !(observed.mode & 0o111)
+  )
+    throw Error("GIT_SOURCE_UNSAFE");
+  return {
+    role: "GIT",
+    path: GIT_PATH,
+    observation: { ...observed.observation, sha256: observed.sha256 },
+  };
+};
+const GIT_SOURCE_AT_START = gitObservation();
+export function materializationGitSource() {
+  const source = gitObservation();
+  if (
+    !canonicalJsonBytes(source).equals(canonicalJsonBytes(GIT_SOURCE_AT_START))
+  )
+    throw Error("GIT_SOURCE_DRIFT");
+  return source;
+}
+const GIT_COMMANDS = new Set([
+  "rev-parse",
+  "cat-file",
+  "ls-tree",
+  "status",
+  "check-ignore",
+  "merge-base",
+  "rev-list",
+  "diff-tree",
+  "diff",
+]);
 export function materializationGit(repo, args) {
-  return execFileSync(
-    "git",
-    ["--no-pager", "--no-replace-objects", "-C", repo, ...args],
-    {
-      env: {
-        PATH: process.env.PATH,
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_OPTIONAL_LOCKS: "0",
-      },
-      timeout: 10000,
-      maxBuffer: LIMIT,
-      stdio: ["ignore", "pipe", "ignore"],
+  if (
+    !Array.isArray(args) ||
+    !GIT_COMMANDS.has(args[0]) ||
+    args.some(
+      (arg) =>
+        typeof arg !== "string" || ["--ext-diff", "--textconv"].includes(arg),
+    )
+  )
+    throw Error("GIT_COMMAND_FORBIDDEN");
+  materializationGitSource();
+  const prefix = [
+    "--no-pager",
+    "--no-replace-objects",
+    "-C",
+    repo,
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.attributesFile=/dev/null",
+    "-c",
+    "submodule.recurse=false",
+    "-c",
+    "diff.ignoreSubmodules=all",
+    "-c",
+    "status.submoduleSummary=false",
+    "-c",
+    "protocol.allow=never",
+  ];
+  const options = {
+    env: {
+      PATH: "/usr/bin:/bin",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_NO_LAZY_FETCH: "1",
     },
+    timeout: 10000,
+    maxBuffer: LIMIT,
+    stdio: ["ignore", "pipe", "ignore"],
+  };
+  // Config enumeration itself does not run filters/diff drivers. Reject these
+  // before any operation that might refresh the index or compare file bytes.
+  const config = execFileSync(
+    GIT_PATH,
+    [...prefix, "config", "--null", "--name-only", "--list"],
+    options,
+  ).toString();
+  if (
+    config
+      .split("\0")
+      .some((entry) =>
+        /^(remote\..*\.promisor|extensions\.partialclone)$/i.test(entry),
+      )
+  )
+    throw Error("GIT_LAZY_FETCH_FORBIDDEN");
+  if (
+    config
+      .split("\0")
+      .some((entry) =>
+        /^(filter\..*\.(clean|smudge|process)|diff\.(external|.*\.(command|textconv))|merge\..*\.driver)$/i.test(
+          entry,
+        ),
+      )
+  )
+    throw Error("GIT_EXECUTABLE_CONFIG_FORBIDDEN");
+  materializationGitSource();
+  const flags = ["diff", "diff-tree"].includes(args[0])
+    ? ["--no-ext-diff", "--no-textconv"]
+    : args[0] === "status"
+      ? ["--ignore-submodules=all"]
+      : [];
+  const output = execFileSync(
+    GIT_PATH,
+    [...prefix, args[0], ...flags, ...args.slice(1)],
+    options,
   );
+  materializationGitSource();
+  return output;
 }
 
 const git = materializationGit;

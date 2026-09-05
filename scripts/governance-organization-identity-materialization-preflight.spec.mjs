@@ -24,6 +24,7 @@ import {
   verifyMaterializationOutput,
   verifyMaterializationPlannedFile,
   writeExclusiveMaterializationOutput,
+  materializationGit,
 } from "./governance-organization-identity-materialization-preflight.mjs";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -143,6 +144,78 @@ function gitFixture(t) {
     },
   };
 }
+
+test("Git observations ignore PATH substitutes and disable real repo fsmonitor helpers", (t) => {
+  const { root, git } = gitFixture(t);
+  const marker = path.join(root, "helper-ran");
+  const bin = path.join(root, "hostile-bin");
+  mkdirSync(bin);
+  const helper = `#!/bin/sh\nprintf ran > '${marker}'\nexit 0\n`;
+  writeFileSync(path.join(bin, "git"), helper, { mode: 0o755 });
+  const fsmonitor = path.join(bin, "fsmonitor");
+  writeFileSync(fsmonitor, helper, { mode: 0o755 });
+  git("config", "core.fsmonitor", fsmonitor);
+  const previous = process.env.PATH;
+  try {
+    process.env.PATH = bin;
+    assert.equal(
+      materializationGit(root, ["rev-parse", "--is-inside-work-tree"])
+        .toString()
+        .trim(),
+      "true",
+    );
+    materializationGit(root, [
+      "status",
+      "--porcelain=v1",
+      "--",
+      "executable.mjs",
+    ]);
+    mkdirSync(path.join(root, "evidence"));
+    assert.equal(
+      verifyMaterializationOutput(root, path.join(root, "evidence/new.json"))
+        .status,
+      "LOCAL_FACTS_VERIFIED",
+    );
+    assert.equal(existsSync(marker), false);
+  } finally {
+    process.env.PATH = previous;
+  }
+  git("config", "filter.hostile.clean", fsmonitor);
+  writeFileSync(path.join(root, ".gitattributes"), "*.mjs filter=hostile\n");
+  assert.throws(
+    () => materializationGit(root, ["status", "--porcelain=v1"]),
+    /GIT_EXECUTABLE_CONFIG_FORBIDDEN/,
+  );
+  assert.equal(existsSync(marker), false);
+  git("config", "--unset", "filter.hostile.clean");
+  for (const key of [
+    "filter.hostile.process",
+    "filter.hostile.smudge",
+    "diff.external",
+    "diff.hostile.textconv",
+    "diff.hostile.command",
+    "merge.hostile.driver",
+  ]) {
+    git("config", key, fsmonitor);
+    assert.throws(
+      () => materializationGit(root, ["diff", "--name-only"]),
+      /GIT_EXECUTABLE_CONFIG_FORBIDDEN/,
+    );
+    assert.equal(existsSync(marker), false);
+    git("config", "--unset", key);
+  }
+  assert.throws(
+    () => materializationGit(root, ["fetch"]),
+    /GIT_COMMAND_FORBIDDEN/,
+  );
+  git("config", "remote.fixture.promisor", "true");
+  git("config", "remote.fixture.url", `ext::${fsmonitor}`);
+  assert.throws(
+    () => materializationGit(root, ["cat-file", "blob", "0".repeat(40)]),
+    /GIT_LAZY_FETCH_FORBIDDEN/,
+  );
+  assert.equal(existsSync(marker), false);
+});
 
 test("clean temporary Git bytes match tuple; wrong generator and dirty bytes HOLD", (t) => {
   const { root, file, identity } = gitFixture(t);
