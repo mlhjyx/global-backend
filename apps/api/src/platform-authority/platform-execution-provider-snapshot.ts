@@ -6,6 +6,7 @@ import {
   type PlatformExecutionProviderSnapshotEntryV1,
   type PlatformExecutionProviderSnapshotV1,
   type PlatformExecutionScheduleId,
+  platformExecutionTechnicalRow,
 } from "./platform-execution-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -186,4 +187,25 @@ export function isCodeOwnedPlatformExecutionProviderSnapshotV1(
       typeof input === "object" &&
       CODE_OWNED_PROVIDER_SNAPSHOTS.has(input),
   );
+}
+
+/**
+ * Project the immutable provider state carried by the current source contract.
+ * This performs no storage, Provider or network read and cannot widen through
+ * environment configuration.
+ */
+export function resolveCurrentPlatformExecutionProviderSnapshotV1(
+  scheduleId: PlatformExecutionScheduleId,
+): PlatformExecutionProviderSnapshotV1 {
+  const row = platformExecutionTechnicalRow(scheduleId);
+  return createPlatformExecutionProviderSnapshotV1({
+    schemaVersion: "platform-execution-provider-snapshot/v1",
+    scheduleId: row.scheduleId,
+    providers: row.providerRequirements.map((provider) => ({
+      providerId: provider.providerId,
+      providerVersion: provider.providerVersion,
+      enablement: provider.requiredEnablement,
+      bytePriceCatalogRevision: null,
+    })),
+  });
 }

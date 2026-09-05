@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -22,6 +23,12 @@ type QuoteVector = Readonly<{
   expected_quote: PlatformExecutionTechnicalQuoteV1;
 }>;
 
+type RequestVector = Readonly<{
+  id: string;
+  raw_body_utf8: string;
+  expected_sha256: string;
+}>;
+
 const VECTORS = (
   JSON.parse(
     await readFile(
@@ -34,17 +41,21 @@ const VECTORS = (
   ) as Readonly<{ vectors: readonly QuoteVector[] }>
 ).vectors;
 
+const REQUEST_VECTORS = (
+  JSON.parse(
+    await readFile(
+      resolve(
+        import.meta.dirname,
+        "../../../../packages/contracts/fixtures/platform-authority/platform-execution-technical-quote-request-v1.json",
+      ),
+      "utf8",
+    ),
+  ) as Readonly<{ vectors: readonly RequestVector[] }>
+).vectors;
+
 function requestBody(quote: PlatformExecutionTechnicalQuoteV1): string {
-  return JSON.stringify({
-    schema_version: "platform-execution-technical-quote-request/v1",
-    purpose: quote.purpose,
-    temporal_namespace: quote.temporal_namespace,
-    schedule_id: quote.schedule_id,
-    workflow_type: quote.workflow_type,
-    workflow_id: quote.workflow_id,
-    workflow_run_id: quote.workflow_run_id,
-    schedule_request_sha256: quote.schedule_request_sha256,
-  });
+  return REQUEST_VECTORS.find((vector) => vector.id === quote.schedule_id)!
+    .raw_body_utf8;
 }
 
 function reader(nowEpochSeconds = VECTORS[0]!.input.now_epoch_seconds) {
@@ -70,6 +81,15 @@ describe("PlatformExecutionTechnicalQuoteReaderService", () => {
       });
 
       expect(parsed.values).toEqual(JSON.parse(rawBody.toString("utf8")));
+      expect(parsed.canonicalBodyUtf8).toBe(rawBody.toString("utf8"));
+      expect(
+        createHash("sha256")
+          .update(parsed.canonicalBodyUtf8, "utf8")
+          .digest("hex"),
+      ).toBe(
+        REQUEST_VECTORS.find((candidate) => candidate.id === vector.id)!
+          .expected_sha256,
+      );
       expect(
         reader(vector.input.now_epoch_seconds).read({
           contentType: "application/json",

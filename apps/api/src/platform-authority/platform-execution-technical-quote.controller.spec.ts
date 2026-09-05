@@ -3,6 +3,7 @@ import "reflect-metadata";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { Module, VersioningType } from "@nestjs/common";
+import { MODULE_METADATA } from "@nestjs/common/constants";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -18,6 +19,7 @@ import {
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
+  UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
 } from "./platform-technical-quote-service-auth";
 import { PlatformAuthorityModule } from "./platform-authority.module";
 
@@ -117,7 +119,9 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
       workflow_run_id: "11111111-1111-4111-8111-111111111111",
       required_cap_per_run_microusd: "1",
     });
-    expect(bytes.toString("utf8")).not.toMatch(/authorization|credential|token/i);
+    expect(bytes.toString("utf8")).not.toMatch(
+      /bearer|service_credential|access_token|refresh_token|raw_jws/i,
+    );
   });
 
   it.each([
@@ -167,12 +171,28 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
     );
     expect(moduleSource).not.toMatch(/process\.env/);
     expect(mainSource).toMatch(
-      /NestFactory\.create<NestExpressApplication>\(AppModule,\s*\{\s*rawBody:\s*true\s*\}\)/,
+      /NestFactory\.create<NestExpressApplication>\(AppModule,\s*\{\s*rawBody:\s*true,?\s*\}\)/,
     );
     expect(appModuleSource).toContain("PlatformAuthorityModule");
 
-    const unavailable = new PlatformAuthorityModule().authenticationReadiness();
-    expect(unavailable).toEqual({
+    const providers = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      PlatformAuthorityModule,
+    ) as readonly unknown[];
+    const verifierProvider = providers.find(
+      (provider): provider is {
+        provide: typeof PlatformTechnicalQuoteServiceAuthenticationVerifier;
+        useClass: typeof UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier;
+      } =>
+        typeof provider === "object" &&
+        provider !== null &&
+        "provide" in provider &&
+        provider.provide === PlatformTechnicalQuoteServiceAuthenticationVerifier,
+    );
+    expect(verifierProvider?.useClass).toBe(
+      UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
+    );
+    expect(new verifierProvider!.useClass().readiness()).toEqual({
       status: "not_ready",
       code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
     });

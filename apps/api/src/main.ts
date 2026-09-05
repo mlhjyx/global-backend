@@ -30,6 +30,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Leads')
     .addTag('Events')
     .addTag('System')
+    .addTag('PlatformAuthority')
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
@@ -65,7 +66,9 @@ async function bootstrap(): Promise<void> {
     artifactRoot: resolve(__dirname),
     env: process.env,
   });
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.

@@ -3,7 +3,7 @@ export const PLATFORM_AUTHORITY_CANONICAL_REQUEST_VERSION =
 export const PLATFORM_AUTHORITY_REQUEST_HMAC_VERSION =
   "platform-authority-request-hmac/v1" as const;
 
-const MAX_RAW_BODY_BYTES = 16 * 1024;
+export const PLATFORM_AUTHORITY_MAX_RAW_BODY_BYTES = 16 * 1024;
 const MAX_SIGNED_64 = "9223372036854775807";
 const MAX_REFERENCE_COUNT = "1000000";
 const MAX_NUMERIC_DATE = "253402300799";
@@ -202,7 +202,7 @@ function copyBoundedRawBody(value: unknown): Uint8Array {
   }
   if (
     byteLength < 1 ||
-    byteLength > MAX_RAW_BODY_BYTES ||
+    byteLength > PLATFORM_AUTHORITY_MAX_RAW_BODY_BYTES ||
     byteLength !== elementLength
   ) {
     requestInvalid();
@@ -474,6 +474,51 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_COMMON_FIELDS = Object.freeze([
     maximumBytes: 120,
   },
 ] satisfies readonly Field[]);
+
+/**
+ * Exact request accepted by the service-only Platform quote reader. Amounts,
+ * provider state and customer identity are deliberately absent: the Backend
+ * derives the technical envelope from its own immutable contracts.
+ */
+export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_REQUEST_SCHEMA_V1 =
+  defineCodeOwnedSchema("platform-execution-technical-quote-request/v1", [
+    {
+      name: "schema_version",
+      kind: "exact",
+      value: "platform-execution-technical-quote-request/v1",
+    },
+    {
+      name: "purpose",
+      kind: "text",
+      minimumBytes: 1,
+      maximumBytes: 100,
+    },
+    {
+      name: "temporal_namespace",
+      kind: "exact",
+      value: "platform-automation",
+    },
+    {
+      name: "schedule_id",
+      kind: "text",
+      minimumBytes: 1,
+      maximumBytes: 100,
+    },
+    {
+      name: "workflow_type",
+      kind: "text",
+      minimumBytes: 1,
+      maximumBytes: 120,
+    },
+    {
+      name: "workflow_id",
+      kind: "text",
+      minimumBytes: 1,
+      maximumBytes: 200,
+    },
+    { name: "workflow_run_id", kind: "lowercase-uuid" },
+    { name: "schedule_request_sha256", kind: "sha256" },
+  ]);
 
 /**
  * Product quote hash preimage. `quote_sha256` is deliberately absent so the
