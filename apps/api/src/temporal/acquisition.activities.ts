@@ -9,8 +9,7 @@ import { attestPlatformScheduleActivity } from './platform-schedule-authority.ac
 import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
-
-const DUE_LIMIT = 50;
+import { boundedPlatformDueSourceLimit } from '../platform-authority/platform-execution-contract';
 
 /**
  * 采集活动（平台级、源无关）。listDueSources 找到期的自动源、acquireSource 跑一次增量。
@@ -42,7 +41,7 @@ export function createAcquisitionActivities(deps: {
     async listDueSources(args: ({ limit?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ sourceIds: string[] }> {
       await attest(args);
       const now = new Date();
-      const limit = args?.limit ?? DUE_LIMIT;
+      const limit = boundedPlatformDueSourceLimit(args?.limit);
       const rows = await deps.prisma.monitoredSource.findMany({
         where: {
           status: 'ACTIVE',

@@ -147,11 +147,13 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         "execution_budget_jwks",
         "workspace_budget_authority",
         "platform_budget_authority",
+        "platform_technical_quote_authentication",
       ],
       properties: {
         execution_budget_jwks: COMPONENT_SCHEMA,
         workspace_budget_authority: COMPONENT_SCHEMA,
         platform_budget_authority: COMPONENT_SCHEMA,
+        platform_technical_quote_authentication: COMPONENT_SCHEMA,
       },
     },
     components: {

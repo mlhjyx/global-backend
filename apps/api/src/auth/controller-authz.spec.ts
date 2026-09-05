@@ -10,6 +10,8 @@ import { DiscoveryController } from '../discovery/discovery.controller';
 import { EventsController } from '../events/events.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
+import { PlatformTechnicalQuoteServiceAuthenticationGuard } from '../platform-authority/platform-technical-quote-service-auth';
 import { AssetsController } from '../site-builder/assets.controller';
 import { BuildsController } from '../site-builder/builds.controller';
 import { IntakeController } from '../site-builder/intake.controller';
@@ -42,6 +44,14 @@ const PUBLIC_CONTROLLER_FILES = new Set([
   'site-builder/site-preview.controller.ts',
 ]);
 
+const SERVICE_PROTECTED_CONTROLLERS = [
+  PlatformExecutionTechnicalQuoteController,
+] as const;
+
+const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
+  'platform-authority/platform-execution-technical-quote.controller.ts',
+]);
+
 function controllerFiles(root: string): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -63,10 +73,21 @@ describe('controller authorization guard topology', () => {
     },
   );
 
+  it.each(SERVICE_PROTECTED_CONTROLLERS)(
+    '%s uses only the dedicated service authentication guard',
+    (controller) => {
+      const guards = (Reflect.getMetadata(GUARDS_METADATA, controller) ?? []) as unknown[];
+      expect(guards).toEqual([
+        PlatformTechnicalQuoteServiceAuthenticationGuard,
+      ]);
+    },
+  );
+
   it('fails closed when a new non-public controller omits the authz topology', () => {
     const sourceRoot = resolve(process.cwd(), 'src');
     const offenders: string[] = [];
     const discoveredPublic = new Set<string>();
+    const discoveredServiceProtected = new Set<string>();
 
     for (const absolute of controllerFiles(sourceRoot)) {
       const path = relative(sourceRoot, absolute);
@@ -75,6 +96,24 @@ describe('controller authorization guard topology', () => {
         continue;
       }
       const source = readFileSync(absolute, 'utf8');
+      if (SERVICE_PROTECTED_CONTROLLER_FILES.has(path)) {
+        discoveredServiceProtected.add(path);
+        for (const required of [
+          '@UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)',
+          '@ReadOnlyControlPlane()',
+          '@ApiExtension("x-required-service-scope", "platform-technical-quote.read")',
+        ]) {
+          if (!source.includes(required)) offenders.push(`${path}: ${required}`);
+        }
+        for (const forbidden of [
+          '@ApiBearerAuth()',
+          '@UseGuards(AuthGuard, ScopesGuard)',
+          '@RequireScopes(',
+        ]) {
+          if (source.includes(forbidden)) offenders.push(`${path}: forbidden ${forbidden}`);
+        }
+        continue;
+      }
       for (const required of [
         '@ApiBearerAuth()',
         '@UseGuards(AuthGuard, ScopesGuard)',
@@ -86,6 +125,9 @@ describe('controller authorization guard topology', () => {
 
     expect([...discoveredPublic].sort()).toEqual(
       [...PUBLIC_CONTROLLER_FILES].sort(),
+    );
+    expect([...discoveredServiceProtected].sort()).toEqual(
+      [...SERVICE_PROTECTED_CONTROLLER_FILES].sort(),
     );
     expect(offenders).toEqual([]);
   });

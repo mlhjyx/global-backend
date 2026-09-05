@@ -24,6 +24,7 @@ export interface RuntimeReadinessReport {
     workspace_budget_authority: ComponentStatus;
     platform_budget_authority: ComponentStatus;
     site_builder_model_settlement_readback: ComponentStatus;
+    platform_technical_quote_authentication: ComponentStatus;
   };
   components: {
     database: ComponentStatus;
@@ -66,6 +67,7 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
       workspace_budget_authority: unavailableComponent(),
       platform_budget_authority: unavailableComponent(),
       site_builder_model_settlement_readback: unavailableComponent(),
+      platform_technical_quote_authentication: unavailableComponent(),
     }),
     components: Object.freeze({
       database: unavailableComponent(),
@@ -162,12 +164,17 @@ export class RuntimeReadinessService
 
   private async calculate(): Promise<RuntimeReadinessReport> {
     const hard = await this.refreshHardComponents();
-    const [executionBudgetJwks, platformBudgetAuthority, settlementReadback] =
-      await Promise.all([
-        this.contributors.check("execution_budget_jwks"),
-        this.contributors.check("platform_budget_authority"),
-        this.contributors.check("site_builder_model_settlement_readback"),
-      ]);
+    const [
+      executionBudgetJwks,
+      platformBudgetAuthority,
+      settlementReadback,
+      platformTechnicalQuoteAuthentication,
+    ] = await Promise.all([
+      this.contributors.check("execution_budget_jwks"),
+      this.contributors.check("platform_budget_authority"),
+      this.contributors.check("site_builder_model_settlement_readback"),
+      this.contributors.check("platform_technical_quote_authentication"),
+    ]);
     const workspaceBudgetAuthority: ComponentStatus =
       executionBudgetJwks.status !== "ok"
         ? {
@@ -190,6 +197,8 @@ export class RuntimeReadinessService
       workspace_budget_authority: workspaceBudgetAuthority,
       platform_budget_authority: platformBudgetAuthority,
       site_builder_model_settlement_readback: settlementReadback,
+      platform_technical_quote_authentication:
+        platformTechnicalQuoteAuthentication,
     });
   }
 

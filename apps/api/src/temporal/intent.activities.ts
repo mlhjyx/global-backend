@@ -11,8 +11,8 @@ import { attestPlatformScheduleActivity } from './platform-schedule-authority.ac
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
+import { boundedPlatformIntentDueSourceLimit } from '../platform-authority/platform-execution-contract';
 
-const DUE_LIMIT = 50;
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000; // web_watch intent 事件保留 90 天（可 arg 覆盖）
 
 /**
@@ -54,7 +54,7 @@ export function createIntentActivities(deps: {
         },
         select: { id: true },
         orderBy: [{ nextFetchAt: { sort: 'asc', nulls: 'first' } }],
-        take: args?.limit ?? DUE_LIMIT,
+        take: boundedPlatformIntentDueSourceLimit(args?.limit),
       });
       return { sourceIds: rows.map((r) => r.id) };
     },

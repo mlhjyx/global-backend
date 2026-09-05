@@ -140,7 +140,7 @@ describe("RuntimeReadinessService", () => {
     releaseProbe?.();
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
     expect(deps.prisma.$transaction).toHaveBeenCalledOnce();
-    expect(deps.contributors.check).toHaveBeenCalledTimes(12);
+    expect(deps.contributors.check).toHaveBeenCalledTimes(13);
   });
 
   it("starts fail-closed and publishes a dynamic worker failure into the mutation snapshot", async () => {
@@ -304,6 +304,92 @@ describe("RuntimeReadinessService", () => {
         migration: { status: "ok" },
       },
     });
+  });
+
+  it('publishes quote service authentication as an additive non-recursive capability fact', async () => {
+    const deps = dependencies({
+      contributors: {
+        check: vi.fn(async (name: string) =>
+          name === 'platform_technical_quote_authentication'
+            ? {
+                status: 'failed',
+                code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+              }
+            : { status: 'ok' },
+        ),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+
+    await expect(service.check()).resolves.toMatchObject({
+      status: 'ready',
+      capabilities: {
+        platform_technical_quote_authentication: {
+          status: 'failed',
+          code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+        },
+      },
+    });
+    expect(deps.contributors.check).toHaveBeenCalledWith(
+      'platform_technical_quote_authentication',
+    );
+  });
+
+  it('publishes quote authentication and model settlement readback as independent capability facts', async () => {
+    const deps = dependencies({
+      contributors: {
+        check: vi.fn(async (name: string) => {
+          if (name === 'platform_technical_quote_authentication') {
+            return {
+              status: 'failed',
+              code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+            };
+          }
+          if (name === 'site_builder_model_settlement_readback') {
+            return {
+              status: 'failed',
+              code: 'MODEL_PROVIDER_SETTLEMENT_READBACK_UNAVAILABLE',
+            };
+          }
+          return { status: 'ok' };
+        }),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+
+    await expect(service.check()).resolves.toMatchObject({
+      status: 'ready',
+      capabilities: {
+        platform_technical_quote_authentication: {
+          status: 'failed',
+          code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+        },
+        site_builder_model_settlement_readback: {
+          status: 'failed',
+          code: 'MODEL_PROVIDER_SETTLEMENT_READBACK_UNAVAILABLE',
+        },
+      },
+    });
+    expect(deps.contributors.check).toHaveBeenCalledWith(
+      'platform_technical_quote_authentication',
+    );
+    expect(deps.contributors.check).toHaveBeenCalledWith(
+      'site_builder_model_settlement_readback',
+    );
   });
 
   it.each([

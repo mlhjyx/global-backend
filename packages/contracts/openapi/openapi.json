@@ -297,7 +297,8 @@
                       "required": [
                         "execution_budget_jwks",
                         "workspace_budget_authority",
-                        "platform_budget_authority"
+                        "platform_budget_authority",
+                        "platform_technical_quote_authentication"
                       ],
                       "properties": {
                         "execution_budget_jwks": {
@@ -427,6 +428,69 @@
                           ]
                         },
                         "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_technical_quote_authentication": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -1438,7 +1502,8 @@
                       "required": [
                         "execution_budget_jwks",
                         "workspace_budget_authority",
-                        "platform_budget_authority"
+                        "platform_budget_authority",
+                        "platform_technical_quote_authentication"
                       ],
                       "properties": {
                         "execution_budget_jwks": {
@@ -1568,6 +1633,69 @@
                           ]
                         },
                         "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_technical_quote_authentication": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -2957,6 +3085,483 @@
         "x-required-scopes": [
           "acquisition:write"
         ]
+      }
+    },
+    "/api/v1/platform-authority/technical-quote": {
+      "post": {
+        "description": "Service-only, zero-side-effect technical safety envelope; not a customer price, balance or quota.",
+        "operationId": "readPlatformExecutionTechnicalQuote",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schema_version",
+                  "purpose",
+                  "temporal_namespace",
+                  "schedule_id",
+                  "workflow_type",
+                  "workflow_id",
+                  "workflow_run_id",
+                  "schedule_request_sha256"
+                ],
+                "properties": {
+                  "schema_version": {
+                    "type": "string",
+                    "enum": [
+                      "platform-execution-technical-quote-request/v1"
+                    ]
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "temporal_namespace": {
+                    "type": "string",
+                    "enum": [
+                      "platform-automation"
+                    ]
+                  },
+                  "schedule_id": {
+                    "type": "string"
+                  },
+                  "workflow_type": {
+                    "type": "string"
+                  },
+                  "workflow_id": {
+                    "type": "string"
+                  },
+                  "workflow_run_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "schedule_request_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "execution_envelope_schema_version",
+                        "execution_envelope_sha256",
+                        "expires_at",
+                        "hard_bounds_sha256",
+                        "issued_at",
+                        "maximum_activity_attempts",
+                        "maximum_bytes_per_patent_anchor",
+                        "maximum_due_sources",
+                        "maximum_fallback_wires",
+                        "maximum_input_tokens",
+                        "maximum_costed_invocations",
+                        "maximum_durable_result_bytes",
+                        "maximum_output_items_per_wire",
+                        "maximum_output_tokens",
+                        "maximum_pages_per_source",
+                        "maximum_patent_anchors",
+                        "maximum_physical_invocations",
+                        "maximum_redirects_per_operation",
+                        "maximum_repair_wires",
+                        "maximum_sanctions_sources",
+                        "maximum_source_fetch_items",
+                        "maximum_transport_response_bytes_per_wire",
+                        "physical_wire_contracts_sha256",
+                        "physical_wire_selection",
+                        "policy_artifact_id",
+                        "policy_artifact_sha256",
+                        "policy_matrix_revision",
+                        "policy_revision",
+                        "price_catalog_revision",
+                        "provider_snapshot_sha256",
+                        "purpose",
+                        "quote_id",
+                        "request_contract_version",
+                        "required_campaign_cap_microusd",
+                        "required_cap_per_run_microusd",
+                        "required_max_runs",
+                        "schedule_id",
+                        "schedule_request_sha256",
+                        "schema_version",
+                        "temporal_namespace",
+                        "tool_contracts_sha256",
+                        "workflow_id",
+                        "workflow_run_id",
+                        "workflow_type",
+                        "quote_sha256"
+                      ],
+                      "properties": {
+                        "execution_envelope_schema_version": {
+                          "type": "string",
+                          "enum": [
+                            "platform-execution-envelope/v1"
+                          ]
+                        },
+                        "execution_envelope_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "expires_at": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "hard_bounds_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "issued_at": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_activity_attempts": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_bytes_per_patent_anchor": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_due_sources": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_fallback_wires": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_input_tokens": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_costed_invocations": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_durable_result_bytes": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_output_items_per_wire": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_output_tokens": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_pages_per_source": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_patent_anchors": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_physical_invocations": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_redirects_per_operation": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_repair_wires": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_sanctions_sources": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_source_fetch_items": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "maximum_transport_response_bytes_per_wire": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "physical_wire_contracts_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "physical_wire_selection": {
+                          "type": "string"
+                        },
+                        "policy_artifact_id": {
+                          "type": "string"
+                        },
+                        "policy_artifact_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "policy_matrix_revision": {
+                          "type": "string"
+                        },
+                        "policy_revision": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "price_catalog_revision": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "provider_snapshot_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "purpose": {
+                          "type": "string"
+                        },
+                        "quote_id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "request_contract_version": {
+                          "type": "string",
+                          "enum": [
+                            "platform-schedule-authority-v1"
+                          ]
+                        },
+                        "required_campaign_cap_microusd": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "required_cap_per_run_microusd": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9][0-9]*)$"
+                        },
+                        "required_max_runs": {
+                          "type": "string",
+                          "enum": [
+                            "1"
+                          ]
+                        },
+                        "schedule_id": {
+                          "type": "string"
+                        },
+                        "schedule_request_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "schema_version": {
+                          "type": "string",
+                          "enum": [
+                            "platform-execution-technical-quote/v1"
+                          ]
+                        },
+                        "temporal_namespace": {
+                          "type": "string",
+                          "enum": [
+                            "platform-automation"
+                          ]
+                        },
+                        "tool_contracts_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "workflow_id": {
+                          "type": "string"
+                        },
+                        "workflow_run_id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "workflow_type": {
+                          "type": "string"
+                        },
+                        "quote_sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_DENIED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_TECHNICAL_QUOTE_RATE_LIMITED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
+                            "PLATFORM_EXECUTION_BUDGET_QUOTE_UNAVAILABLE",
+                            "PLATFORM_EXECUTION_BUDGET_POLICY_DRIFT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read one pure Platform execution technical quote",
+        "tags": [
+          "PlatformAuthority"
+        ],
+        "x-content-encoding": "identity-only",
+        "x-maximum-request-body-bytes": 16384,
+        "x-maximum-request-header-bytes": 16384,
+        "x-maximum-request-header-count": 64,
+        "x-maximum-response-body-bytes": 16384,
+        "x-required-service-scope": "platform-technical-quote.read",
+        "x-service-authentication": {
+          "kind": "injected-dedicated-service-verifier",
+          "identity_token_fallback": false,
+          "workspace_token_fallback": false,
+          "unsigned_fallback": false
+        }
       }
     },
     "/api/v1/companies": {
@@ -12515,6 +13120,10 @@
     },
     {
       "name": "System",
+      "description": ""
+    },
+    {
+      "name": "PlatformAuthority",
       "description": ""
     }
   ],

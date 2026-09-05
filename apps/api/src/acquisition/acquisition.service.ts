@@ -11,10 +11,10 @@ import {
 } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { boundedPlatformAcquisitionFetchLimit } from '../platform-authority/platform-execution-contract';
 
 const PARSER_VERSION = 'acquisition/v1';
 const CHUNK = 50;
-const DEFAULT_FETCH_LIMIT = 10000; // 显式抓取上限；raw 达此值视为「疑似截断」→ 本次不判 REMOVED（防误杀）。源可用 config.fetchLimit 覆盖
 type AcquisitionWriteDb = Pick<
   PrismaClient,
   'sourceEntity' | 'sourceEntityChange' | 'sourceFetch' | 'monitoredSource'
@@ -117,9 +117,15 @@ export class AcquisitionService {
         : undefined;
     let truncated = false; // raw 达到抓取上限 → 快照可能不完整
     try {
-      const config = { ...(source.config as Record<string, unknown>), sourceKey: source.sourceKey };
-      const configLimit = Number((source.config as Record<string, unknown>)?.fetchLimit);
-      const limit = opts?.limit ?? (Number.isFinite(configLimit) && configLimit > 0 ? configLimit : DEFAULT_FETCH_LIMIT);
+      const sourceConfig = source.config as Record<string, unknown>;
+      const limit = boundedPlatformAcquisitionFetchLimit(
+        opts?.limit ?? sourceConfig?.fetchLimit,
+      );
+      const config = {
+        ...sourceConfig,
+        ...(sourceConfig?.fetchLimit === undefined ? {} : { fetchLimit: limit }),
+        sourceKey: source.sourceKey,
+      };
       const raw = await adapter.fetch(config, limit, context);
       truncated = raw.length >= limit;
       const byExt = new Map<string, CleanedEntity>();

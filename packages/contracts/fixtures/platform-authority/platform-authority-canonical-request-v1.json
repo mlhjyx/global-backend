@@ -1,0 +1,313 @@
+{
+  "schema_version": "platform-authority-canonical-request-conformance/v1",
+  "contract_version": "platform-authority-canonical-request/v1",
+  "reference_schema_id": "platform-authority-canonical-reference/v1",
+  "scope_notice": "This closed reference schema proves codec rules only; it is not an issuance or quote body contract.",
+  "positive_bodies": [
+    {
+      "id": "reordered-whitespace-nfc-surrogate-pair",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\n \"workflow_run_id\" : \"11111111-1111-4111-8111-111111111111\",\n \"schema_version\":\"platform-authority-canonical-reference/v1\",\n \"numeric_date\":\"1786800000\",\n \"label\":\"Cafe\\u0301 \\ud83d\\ude00\",\n \"padding\":\"\",\n \"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n \"count\":\"2\",\n \"amount_microusd\":\"5000000\"\n}\n",
+      "expected_canonical_utf8": "{\"amount_microusd\":\"5000000\",\"count\":\"2\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"Café 😀\",\"numeric_date\":\"1786800000\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}",
+      "expected_sha256": "28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1"
+    },
+    {
+      "id": "canonical-input-is-stable",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"5000000\",\"count\":\"2\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"Café 😀\",\"numeric_date\":\"1786800000\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}",
+      "expected_canonical_utf8": "{\"amount_microusd\":\"5000000\",\"count\":\"2\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"Café 😀\",\"numeric_date\":\"1786800000\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}",
+      "expected_sha256": "28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1"
+    },
+    {
+      "id": "json-escapes-and-zero-decimals",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"0\",\"count\":\"0\",\"digest_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"label\":\"quote:\\\" slash:\\/ backslash:\\\\ snowman:\\u2603\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"33333333-3333-4333-8333-333333333333\"}",
+      "expected_canonical_utf8": "{\"amount_microusd\":\"0\",\"count\":\"0\",\"digest_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"label\":\"quote:\\\" slash:/ backslash:\\\\ snowman:☃\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"33333333-3333-4333-8333-333333333333\"}",
+      "expected_sha256": "fea81f53e0f10612a73b19962781e7f84ee1a5b7cfd9191ced4a21df829edfff"
+    },
+    {
+      "id": "closed-field-upper-bounds",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"9223372036854775807\",\"count\":\"1000000\",\"digest_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"label\":\"界\",\"numeric_date\":\"253402300799\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"ffffffff-ffff-ffff-ffff-ffffffffffff\"}",
+      "expected_canonical_utf8": "{\"amount_microusd\":\"9223372036854775807\",\"count\":\"1000000\",\"digest_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"label\":\"界\",\"numeric_date\":\"253402300799\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"ffffffff-ffff-ffff-ffff-ffffffffffff\"}",
+      "expected_sha256": "70a88fdc22a9ef844d158bc43abb3cc24e254ac2207c3b079d6fcd883488a532"
+    },
+    {
+      "id": "raw-body-exactly-16384-bytes",
+      "content_type": "application/json",
+      "raw_body_repeat": {
+        "prefix": "{\"amount_microusd\":\"5000000\",\"count\":\"2\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"Café 😀\",\"numeric_date\":\"1786800000\",\"padding\":\"",
+        "ascii_character": "x",
+        "count": 16080,
+        "suffix": "\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+      },
+      "expected_sha256": "70c98ad5bf6b9021c3017e2ff38176f11c2ec007ee9fa32182d54de89f65757d"
+    }
+  ],
+  "adversarial_bodies": [
+    {
+      "id": "content-type-parameter",
+      "content_type": "application/json; charset=utf-8",
+      "raw_body_utf8": "{}"
+    },
+    {
+      "id": "content-type-case-change",
+      "content_type": "Application/JSON",
+      "raw_body_utf8": "{}"
+    },
+    {
+      "id": "utf8-bom",
+      "content_type": "application/json",
+      "raw_body_base64": "77u/eyJhbW91bnRfbWljcm91c2QiOiI1MDAwMDAwIiwiY291bnQiOiIyIiwiZGlnZXN0X3NoYTI1NiI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJsYWJlbCI6Im9rIiwibnVtZXJpY19kYXRlIjoiMTc4NjgwMDAwMCIsInBhZGRpbmciOiIiLCJzY2hlbWFfdmVyc2lvbiI6InBsYXRmb3JtLWF1dGhvcml0eS1jYW5vbmljYWwtcmVmZXJlbmNlL3YxIiwid29ya2Zsb3dfcnVuX2lkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIn0="
+    },
+    {
+      "id": "invalid-utf8",
+      "content_type": "application/json",
+      "raw_body_base64": "eyJhbW91bnRfbWljcm91c2QiOiI1MDAwMDAwIiwiY291bnQiOiIyIiwiZGlnZXN0X3NoYTI1NiI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJsYWJlbCI6IsCvIiwibnVtZXJpY19kYXRlIjoiMTc4NjgwMDAwMCIsInBhZGRpbmciOiIiLCJzY2hlbWFfdmVyc2lvbiI6InBsYXRmb3JtLWF1dGhvcml0eS1jYW5vbmljYWwtcmVmZXJlbmNlL3YxIiwid29ya2Zsb3dfcnVuX2lkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIn0="
+    },
+    {
+      "id": "duplicate-key",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"count\":\"1\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "normalization-colliding-keys",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"é\":\"first\",\"e\\u0301\":\"second\"}"
+    },
+    {
+      "id": "unknown-key",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"unknown\":\"x\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "non-ascii-key",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"lábel\":\"x\"}"
+    },
+    {
+      "id": "number-value",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":0,\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "array-value",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":[],\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "boolean-value",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":false,\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "null-value",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":null,\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "unpaired-high-surrogate",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"\\ud800\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "unpaired-low-surrogate",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"\\udc00\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "escaped-control-character",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"line\\nfeed\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "unicode-control-character",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"delete\\u007f\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "negative-zero-decimal",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"-0\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "leading-zero-decimal",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"01\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "fractional-decimal",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1.0\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "exponent-decimal",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1e3\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "signed-int64-overflow",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"9223372036854775808\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "count-overflow",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"1000001\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "numeric-date-overflow",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"253402300800\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "uppercase-digest",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+    },
+    {
+      "id": "uppercase-workflow-run-id",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\"}"
+    },
+    {
+      "id": "trailing-non-whitespace",
+      "content_type": "application/json",
+      "raw_body_utf8": "{\"amount_microusd\":\"1\",\"count\":\"0\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"ok\",\"numeric_date\":\"0\",\"padding\":\"\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}x"
+    },
+    {
+      "id": "root-array",
+      "content_type": "application/json",
+      "raw_body_utf8": "[]"
+    },
+    {
+      "id": "raw-body-16385-bytes",
+      "content_type": "application/json",
+      "raw_body_repeat": {
+        "prefix": "{\"amount_microusd\":\"5000000\",\"count\":\"2\",\"digest_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"label\":\"Café 😀\",\"numeric_date\":\"1786800000\",\"padding\":\"",
+        "ascii_character": "x",
+        "count": 16081,
+        "suffix": "\",\"schema_version\":\"platform-authority-canonical-reference/v1\",\"workflow_run_id\":\"11111111-1111-4111-8111-111111111111\"}"
+      }
+    }
+  ],
+  "positive_hmac_preimages": [
+    {
+      "id": "exact-approved-preimage",
+      "input": {
+        "method": "POST",
+        "normalized_path": "/api/v1/enterprise/global-backend/platform-authorities",
+        "growthos_audience": "growthos:platform-authority",
+        "environment_id": "development",
+        "numeric_date": "1786800000",
+        "key_id": "platform-issue-2026-09",
+        "nonce": "22222222-2222-4222-8222-222222222222",
+        "canonical_body_sha256": "28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1"
+      },
+      "expected_utf8": "platform-authority-request-hmac/v1\nPOST\n/api/v1/enterprise/global-backend/platform-authorities\ngrowthos:platform-authority\ndevelopment\n1786800000\nplatform-issue-2026-09\n22222222-2222-4222-8222-222222222222\n28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1",
+      "expected_sha256": "3fbbf249934090f2e5fb98050c476a0ddb9951015887e065f7d5c4c835c45201"
+    },
+    {
+      "id": "path-change-is-bound",
+      "input": {
+        "method": "POST",
+        "normalized_path": "/api/v1/enterprise/global-backend/platform-authorities-v2",
+        "growthos_audience": "growthos:platform-authority",
+        "environment_id": "development",
+        "numeric_date": "1786800000",
+        "key_id": "platform-issue-2026-09",
+        "nonce": "22222222-2222-4222-8222-222222222222",
+        "canonical_body_sha256": "28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1"
+      },
+      "expected_utf8": "platform-authority-request-hmac/v1\nPOST\n/api/v1/enterprise/global-backend/platform-authorities-v2\ngrowthos:platform-authority\ndevelopment\n1786800000\nplatform-issue-2026-09\n22222222-2222-4222-8222-222222222222\n28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1",
+      "expected_sha256": "afa3e849161783fab4e8765d6db8db1961df3420204da06d38916dfcabb025d6"
+    },
+    {
+      "id": "audience-host-change-is-bound",
+      "input": {
+        "method": "POST",
+        "normalized_path": "/api/v1/enterprise/global-backend/platform-authorities",
+        "growthos_audience": "growthos:platform-authority-staging",
+        "environment_id": "development",
+        "numeric_date": "1786800000",
+        "key_id": "platform-issue-2026-09",
+        "nonce": "22222222-2222-4222-8222-222222222222",
+        "canonical_body_sha256": "28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1"
+      },
+      "expected_utf8": "platform-authority-request-hmac/v1\nPOST\n/api/v1/enterprise/global-backend/platform-authorities\ngrowthos:platform-authority-staging\ndevelopment\n1786800000\nplatform-issue-2026-09\n22222222-2222-4222-8222-222222222222\n28f5fb2349d08129a0745fce79ea42b1f61feea6ca4a36223dfdd005e94dbdc1",
+      "expected_sha256": "160f607567985e623d7398bb5d6ce08ded5c55b17cce30854a2d704e8b6876a6"
+    }
+  ],
+  "adversarial_hmac_preimages": [
+    {
+      "id": "lowercase-method",
+      "field": "method",
+      "value": "post"
+    },
+    {
+      "id": "path-query",
+      "field": "normalized_path",
+      "value": "/api/v1/platform-authorities?x=1"
+    },
+    {
+      "id": "path-fragment",
+      "field": "normalized_path",
+      "value": "/api/v1/platform-authorities#x"
+    },
+    {
+      "id": "absolute-url-host",
+      "field": "normalized_path",
+      "value": "https://growthos.test/api/v1/platform-authorities"
+    },
+    {
+      "id": "dot-segment",
+      "field": "normalized_path",
+      "value": "/api/../platform-authorities"
+    },
+    {
+      "id": "duplicate-slash",
+      "field": "normalized_path",
+      "value": "/api//platform-authorities"
+    },
+    {
+      "id": "trailing-slash",
+      "field": "normalized_path",
+      "value": "/api/platform-authorities/"
+    },
+    {
+      "id": "audience-newline",
+      "field": "growthos_audience",
+      "value": "growthos:platform-authority\nother"
+    },
+    {
+      "id": "environment-uppercase",
+      "field": "environment_id",
+      "value": "Development"
+    },
+    {
+      "id": "numeric-date-leading-zero",
+      "field": "numeric_date",
+      "value": "01786800000"
+    },
+    {
+      "id": "key-id-space",
+      "field": "key_id",
+      "value": "platform issue"
+    },
+    {
+      "id": "nonce-uppercase",
+      "field": "nonce",
+      "value": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+    },
+    {
+      "id": "nonce-not-uuid",
+      "field": "nonce",
+      "value": "not-a-uuid"
+    },
+    {
+      "id": "uppercase-body-digest",
+      "field": "canonical_body_sha256",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  ]
+}

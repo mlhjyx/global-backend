@@ -86,7 +86,12 @@ describe('layered health OpenAPI contract', () => {
     expect(success?.properties?.capabilities).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['execution_budget_jwks', 'workspace_budget_authority', 'platform_budget_authority'],
+      required: [
+        'execution_budget_jwks',
+        'workspace_budget_authority',
+        'platform_budget_authority',
+        'platform_technical_quote_authentication',
+      ],
     });
     expect(success?.properties?.components).toMatchObject({
       type: 'object',
