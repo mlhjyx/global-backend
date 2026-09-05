@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const repositoryFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -69,18 +83,24 @@ test("production config requires TLS and the default JWT authorization stack", a
   assert.match(config, /databaseName: "temporal_platform"/);
   assert.match(config, /databaseName: "temporal_platform_visibility"/);
   assert.match(config, /tls:[\s\S]*internode:[\s\S]*frontend:/);
+  assert.match(config, /internode:[\s\S]*?requireClientAuth: true/);
   assert.match(
     config,
-    /certFile: "\/run\/secrets\/temporal-platform\/server\.crt"/,
+    /internode:[\s\S]*?clientCaFiles:[\s\S]*?\/run\/secrets\/temporal-platform\/internode-ca\.crt/,
   );
   assert.match(
     config,
-    /keyFile: "\/run\/secrets\/temporal-platform\/server\.key"/,
+    /internode:[\s\S]*?certFile: "\/run\/secrets\/temporal-platform\/internode\.crt"/,
   );
   assert.match(
     config,
-    /rootCaFiles:[\s\S]*\/run\/secrets\/temporal-platform\/ca\.crt/,
+    /frontend:[\s\S]*?requireClientAuth: false[\s\S]*?certFile: "\/run\/secrets\/temporal-platform\/frontend\.crt"/,
   );
+  assert.match(
+    config,
+    /internode:[\s\S]*?rootCaFiles:[\s\S]*?\/run\/secrets\/temporal-platform\/internode-ca\.crt/,
+  );
+  assert.doesNotMatch(config, /temporal-platform\/server\.(?:crt|key)/);
   assert.match(config, /authorization:[\s\S]*authorizer: "default"/);
   assert.match(config, /authorization:[\s\S]*claimMapper: "default"/);
   assert.match(config, /permissionsClaimName: "permissions"/);
@@ -177,7 +197,7 @@ test("provisioning roles and verification remain separated and fail closed", asy
 });
 
 test("disposable proof is isolated and product config never owns test keys", async () => {
-  const [compose, runner, fixtureGenerator, workerProbe, caddy] =
+  const [compose, runner, fixtureGenerator, workerProbe, internalProbe, caddy] =
     await Promise.all([
       repositoryFile(
         "infra/temporal-platform/test-support/compose.disposable.yml",
@@ -190,6 +210,9 @@ test("disposable proof is isolated and product config never owns test keys", asy
       ),
       repositoryFile(
         "infra/temporal-platform/test-support/worker-poll-probe.mjs",
+      ),
+      repositoryFile(
+        "infra/temporal-platform/test-support/internal-mtls-probe.mjs",
       ),
       repositoryFile("infra/temporal-platform/test-support/Caddyfile"),
     ]);
@@ -210,6 +233,8 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.match(runner, /generate-fixtures\.mjs/);
   assert.match(runner, /verify\.sh/);
   assert.match(runner, /worker-poll-probe\.mjs/);
+  assert.match(runner, /internal-mtls-probe\.mjs/);
+  assert.match(runner, /INTERNAL_MTLS_REJECTED/);
   assert.match(runner, /worker-cross-namespace-denied/);
   assert.match(runner, /AUTHORITY_DIRECTORY=.*\/authority/);
   assert.match(runner, /SERVER_SECRET_DIRECTORY=.*\/server/);
@@ -239,6 +264,11 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.doesNotMatch(fixtureGenerator, /privateKey\.export/);
   assert.match(workerProbe, /pollWorkflowTaskQueue/);
   assert.match(workerProbe, /respondWorkflowTaskFailed/);
+  assert.match(internalProbe, /certificate required|bad certificate/i);
+  assert.match(compose, /io\.growthos\.task4c\.run-id/);
+  assert.match(runner, /flock -n/);
+  assert.match(runner, /io\.growthos\.task4c\.run-id/);
+  assert.doesNotMatch(runner, /\$\{compose\[@\]\}.*rm -sf/);
   assert.match(caddy, /root \* \/srv\/jwks/);
   assert.match(
     caddy,
@@ -248,6 +278,77 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.doesNotMatch(
     compose,
     /global-(?:postgres|api|worker|redis|temporal)(?:\s|$)/m,
+  );
+});
+
+test("a concurrent disposable lifecycle exits before invoking Docker", async (t) => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "codex-task4c-platform-temporal-lock-test."),
+  );
+  const lockPath = join(directory, "lifecycle.lock");
+  const dockerSentinel = join(directory, "docker-called");
+  const fakeBin = join(directory, "bin");
+  await mkdir(fakeBin, { mode: 0o700 });
+  const fakeDocker = join(fakeBin, "docker");
+  await writeFile(
+    fakeDocker,
+    '#!/bin/sh\n: > "${TASK4C_DOCKER_SENTINEL:?}"\nexit 97\n',
+    { mode: 0o700 },
+  );
+  await chmod(fakeDocker, 0o700);
+
+  const holder = spawn(
+    "flock",
+    ["-n", lockPath, "sh", "-c", 'printf "ready\\n"; read -r line'],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  t.after(async () => {
+    holder.stdin.end("release\n");
+    if (holder.exitCode === null) {
+      await once(holder, "close");
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
+  const [ready] = await once(holder.stdout, "data");
+  assert.equal(String(ready), "ready\n");
+
+  const runner = spawn(
+    "bash",
+    [
+      join(
+        repositoryRoot,
+        "infra/temporal-platform/test-support/verify-disposable.sh",
+      ),
+    ],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        TASK4C_DOCKER_SENTINEL: dockerSentinel,
+        TEMPORAL_PLATFORM_TEST_LOCK_FILE: lockPath,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stderr = "";
+  runner.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  const [exitCode] = await once(runner, "close");
+
+  assert.equal(exitCode, 73);
+  assert.equal(stderr, "platform Temporal disposable lifecycle is busy\n");
+  await assert.rejects(access(dockerSentinel));
+});
+
+test("high-risk platform Temporal paths remain code-owner controlled", async () => {
+  const codeowners = await repositoryFile(".github/CODEOWNERS");
+
+  assert.match(codeowners, /^\/infra\/temporal-platform\/ @mlhjyx$/m);
+  assert.match(
+    codeowners,
+    /^\/scripts\/temporal-platform-infrastructure-contract\.spec\.mjs @mlhjyx$/m,
   );
 });
 
