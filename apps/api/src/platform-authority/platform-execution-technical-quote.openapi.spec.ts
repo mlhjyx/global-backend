@@ -2,18 +2,45 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+interface OpenApiSchema {
+  readonly type?: string;
+  readonly additionalProperties?: boolean;
+  readonly required?: readonly string[];
+  readonly properties?: Readonly<Record<string, OpenApiSchema>>;
+  readonly enum?: readonly string[];
+}
+
+interface OpenApiOperation extends Readonly<Record<string, unknown>> {
+  readonly operationId?: string;
+  readonly security?: unknown;
+  readonly requestBody: {
+    readonly content: Readonly<Record<string, { readonly schema: OpenApiSchema }>>;
+  };
+  readonly responses: Readonly<
+    Record<
+      string,
+      {
+        readonly content: Readonly<
+          Record<string, { readonly schema: OpenApiSchema }>
+        >;
+      }
+    >
+  >;
+}
+
 const OPENAPI = JSON.parse(
   readFileSync(
     resolve(process.cwd(), "../../packages/contracts/openapi/openapi.json"),
     "utf8",
   ),
 ) as {
-  paths: Record<string, Record<string, any>>;
+  paths: Record<string, Record<string, OpenApiOperation>>;
 };
 
 describe("Platform technical quote service-only OpenAPI", () => {
-  const operation =
-    OPENAPI.paths["/api/v1/platform-authority/technical-quote"]?.post;
+  const operation = OPENAPI.paths[
+    "/api/v1/platform-authority/technical-quote"
+  ]?.post as OpenApiOperation;
 
   it("publishes one dedicated service-only operation without bearer fallback", () => {
     expect(operation).toBeDefined();
@@ -28,6 +55,10 @@ describe("Platform technical quote service-only OpenAPI", () => {
       workspace_token_fallback: false,
       unsigned_fallback: false,
     });
+    expect(operation["x-maximum-request-body-bytes"]).toBe(16_384);
+    expect(operation["x-maximum-request-header-bytes"]).toBe(16_384);
+    expect(operation["x-maximum-request-header-count"]).toBe(64);
+    expect(operation["x-maximum-response-body-bytes"]).toBe(16_384);
     expect(Object.keys(operation.requestBody.content)).toEqual([
       "application/json",
     ]);
@@ -38,7 +69,7 @@ describe("Platform technical quote service-only OpenAPI", () => {
   });
 
   it("keeps the request and quote response as closed string-only objects", () => {
-    const request = operation.requestBody.content["application/json"].schema;
+    const request = operation.requestBody.content["application/json"]!.schema;
     expect(request.additionalProperties).toBe(false);
     expect(request.required).toEqual([
       "schema_version",
@@ -50,20 +81,21 @@ describe("Platform technical quote service-only OpenAPI", () => {
       "workflow_run_id",
       "schedule_request_sha256",
     ]);
-    expect(Object.keys(request.properties)).toEqual(request.required);
-    for (const property of Object.values(request.properties) as any[]) {
+    expect(Object.keys(request.properties!)).toEqual(request.required);
+    for (const property of Object.values(request.properties!)) {
       expect(property.type).toBe("string");
     }
     expect(request.properties).not.toHaveProperty("cap_microusd");
     expect(request.properties).not.toHaveProperty("workspace_id");
 
-    const response = operation.responses["200"].content["application/json"].schema;
+    const response = operation.responses["200"]!.content["application/json"]!
+      .schema;
     expect(response.additionalProperties).toBe(false);
     expect(response.required).toEqual(["data"]);
-    expect(response.properties.data.additionalProperties).toBe(false);
-    expect(response.properties.data.required).toContain("quote_sha256");
-    expect(response.properties.data.required).toContain("policy_revision");
-    expect(response.properties.data.required).not.toContain("customer_id");
+    expect(response.properties!.data!.additionalProperties).toBe(false);
+    expect(response.properties!.data!.required).toContain("quote_sha256");
+    expect(response.properties!.data!.required).toContain("policy_revision");
+    expect(response.properties!.data!.required).not.toContain("customer_id");
   });
 
   it("documents only stable closed authentication and quote errors", () => {
@@ -74,8 +106,8 @@ describe("Platform technical quote service-only OpenAPI", () => {
       "503",
     ]);
     const codes = (status: string) =>
-      operation.responses[status].content["application/json"].schema.properties.error
-        .properties.code.enum;
+      operation.responses[status]!.content["application/json"]!.schema
+        .properties!.error!.properties!.code!.enum;
     expect(codes("400")).toEqual([
       "PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID",
     ]);

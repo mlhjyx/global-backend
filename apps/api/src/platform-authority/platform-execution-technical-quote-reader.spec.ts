@@ -116,6 +116,20 @@ describe("PlatformExecutionTechnicalQuoteReaderService", () => {
     );
   });
 
+  it("treats an unknown schedule as invalid input rather than dependency outage", () => {
+    const rawBody = Buffer.from(
+      requestBody(VECTORS[0]!.expected_quote).replace(
+        '"schedule_id":"acq-sweep"',
+        '"schedule_id":"unknown-schedule"',
+      ),
+      "utf8",
+    );
+
+    expect(() =>
+      reader().read({ contentType: "application/json", rawBody }),
+    ).toThrow("PLATFORM_EXECUTION_BUDGET_QUOTE_INVALID");
+  });
+
   it("has no persistence, Temporal, Provider transport or billing dependency", async () => {
     const [readerSource, snapshotSource] = await Promise.all([
       readFile(
