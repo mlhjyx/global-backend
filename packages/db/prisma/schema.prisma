@@ -2447,15 +2447,136 @@ model SiteBuildSpend {
   createdAt              DateTime  @default(now()) @map("created_at")
   settledAt              DateTime? @map("settled_at")
 
-  buildRun        SiteBuildRun                   @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
-  taskAttempt     SiteBuildTaskAttempt?          @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
-  reconciliations SiteBuildSpendReconciliation[]
+  buildRun             SiteBuildRun                   @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
+  taskAttempt          SiteBuildTaskAttempt?          @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
+  reconciliations      SiteBuildSpendReconciliation[]
+  providerWireAttempts SiteBuildProviderWireAttempt[]
 
   @@unique([buildRunId, operationKey], map: "site_build_spend_run_operation_key")
   @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_spend_scope_key")
   @@index([workspaceId, buildRunId, kind, status], map: "site_build_spend_workspace_run_kind_status_idx")
   @@index([taskAttemptId], map: "site_build_spend_task_attempt_idx")
   @@map("site_build_spend")
+}
+
+/// One immutable recovery identity and send-cut state per physical paid model
+/// wire. Historical spends are deliberately not backfilled; existence of this
+/// row is the positive discriminator for settlement-readback/v1.
+model SiteBuildProviderWireAttempt {
+  id                              String    @id @default(uuid()) @db.Uuid
+  workspaceId                     String    @map("workspace_id") @db.Uuid
+  siteId                          String    @map("site_id") @db.Uuid
+  buildRunId                      String    @map("build_run_id") @db.Uuid
+  spendId                         String    @map("spend_id") @db.Uuid
+  operationKey                    String    @map("operation_key") @db.VarChar(64)
+  contractVersion                 String    @default("site-build-provider-transport/v1") @map("contract_version") @db.VarChar(64)
+  physicalWireAttempt             Int       @map("physical_wire_attempt")
+  derivationKeyId                 String    @map("derivation_key_id") @db.VarChar(64)
+  settlementRequestId             String    @unique(map: "site_build_provider_wire_request_id_key") @map("settlement_request_id") @db.VarChar(43)
+  settlementNonceSha256           String    @map("settlement_nonce_sha256") @db.VarChar(64)
+  resolverId                      String    @map("resolver_id") @db.VarChar(191)
+  protocol                        String    @db.VarChar(32)
+  requestedAlias                  String    @map("requested_alias") @db.VarChar(120)
+  expectedChannelId               Int       @map("expected_channel_id")
+  promptUtf8Bytes                 Int       @map("prompt_utf8_bytes")
+  maximumWireCalls                Int       @map("maximum_wire_calls")
+  actualMaxOutputTokens           Int       @map("actual_max_output_tokens")
+  catalogMaxOutputTokens          Int       @map("catalog_max_output_tokens")
+  maximumQuotaPoints              BigInt    @map("maximum_quota_points")
+  catalogId                       String    @map("catalog_id") @db.VarChar(191)
+  catalogSha256                   String    @map("catalog_sha256") @db.VarChar(64)
+  pricingSnapshotSha256           String    @map("pricing_snapshot_sha256") @db.VarChar(64)
+  inputPriceMicrounitsPerMillion  BigInt    @map("input_price_microunits_per_million")
+  outputPriceMicrounitsPerMillion BigInt    @map("output_price_microunits_per_million")
+  ledgerMicrousdPerPricingUnit    BigInt    @map("ledger_microusd_per_pricing_unit")
+  state                           String    @default("ALLOCATED") @db.VarChar(32)
+  settlementStatus                String?   @map("settlement_status") @db.VarChar(16)
+  finalPhase                      String?   @map("final_phase") @db.VarChar(64)
+  gatewayIdState                  String?   @map("gateway_id_state") @db.VarChar(32)
+  upstreamIdState                 String?   @map("upstream_id_state") @db.VarChar(32)
+  payloadState                    String?   @map("payload_state") @db.VarChar(32)
+  createdAt                       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  dispatchStartedAt               DateTime? @map("dispatch_started_at") @db.Timestamptz(3)
+  observedAt                      DateTime? @map("observed_at") @db.Timestamptz(3)
+
+  spend   SiteBuildSpend                   @relation(fields: [spendId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_wire_spend_scope_fkey")
+  probes  SiteBuildProviderReadbackProbe[]
+  receipt SiteBuildProviderWireReceipt?
+
+  @@unique([spendId, physicalWireAttempt], map: "site_build_provider_wire_spend_attempt_key")
+  @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_provider_wire_scope_key")
+  @@index([workspaceId, buildRunId, state, createdAt], map: "site_build_provider_wire_workspace_run_state_idx")
+  @@map("site_build_provider_wire_attempt")
+}
+
+/// Append-only exact receipt for one physical wire. It may arrive during the
+/// request or later through bounded readback; the original wire state remains
+/// historical and is never rewritten by reconciliation.
+model SiteBuildProviderWireReceipt {
+  id                String   @id @default(uuid()) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  siteId            String   @map("site_id") @db.Uuid
+  buildRunId        String   @map("build_run_id") @db.Uuid
+  spendId           String   @map("spend_id") @db.Uuid
+  wireAttemptId     String   @unique(map: "site_build_provider_wire_receipt_wire_key") @map("wire_attempt_id") @db.Uuid
+  receiptDigest     String   @unique(map: "site_build_provider_wire_receipt_digest_key") @map("receipt_digest") @db.VarChar(64)
+  alias             String   @db.VarChar(120)
+  protocol          String   @db.VarChar(32)
+  channelId         Int      @map("channel_id")
+  quota             BigInt
+  inputTokens       Int      @map("input_tokens")
+  outputTokens      Int      @map("output_tokens")
+  exactCostMicrousd BigInt   @map("exact_cost_microusd")
+  upstreamIdState   String   @map("upstream_id_state") @db.VarChar(32)
+  observedAt        DateTime @map("observed_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  wireAttempt SiteBuildProviderWireAttempt @relation(fields: [wireAttemptId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_wire_receipt_scope_fkey")
+
+  @@unique([wireAttemptId, workspaceId, siteId, buildRunId], map: "site_build_provider_wire_receipt_scope_key")
+  @@index([workspaceId, buildRunId, observedAt], map: "site_build_provider_wire_receipt_workspace_run_idx")
+  @@map("site_build_provider_wire_receipt")
+}
+
+/// Durable claim made before a readback GET. A lost claim ACK consumes the
+/// sequence, preventing another process from sending a third probe.
+model SiteBuildProviderReadbackProbe {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  siteId        String   @map("site_id") @db.Uuid
+  buildRunId    String   @map("build_run_id") @db.Uuid
+  spendId       String   @map("spend_id") @db.Uuid
+  wireAttemptId String   @map("wire_attempt_id") @db.Uuid
+  sequence      Int
+  claimedAt     DateTime @default(now()) @map("claimed_at") @db.Timestamptz(3)
+
+  wireAttempt SiteBuildProviderWireAttempt               @relation(fields: [wireAttemptId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_probe_wire_scope_fkey")
+  observation SiteBuildProviderReadbackProbeObservation?
+
+  @@unique([wireAttemptId, sequence], map: "site_build_provider_probe_wire_sequence_key")
+  @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_provider_probe_scope_key")
+  @@index([workspaceId, buildRunId, claimedAt], map: "site_build_provider_probe_workspace_run_idx")
+  @@map("site_build_provider_readback_probe")
+}
+
+/// Append-only closed outcome for one already-claimed readback probe.
+model SiteBuildProviderReadbackProbeObservation {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  siteId          String   @map("site_id") @db.Uuid
+  buildRunId      String   @map("build_run_id") @db.Uuid
+  spendId         String   @map("spend_id") @db.Uuid
+  probeId         String   @unique(map: "site_build_provider_probe_observation_probe_key") @map("probe_id") @db.Uuid
+  phase           String   @db.VarChar(64)
+  httpStatusClass Int?     @map("http_status_class")
+  observedAt      DateTime @map("observed_at") @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  probe SiteBuildProviderReadbackProbe @relation(fields: [probeId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_probe_observation_scope_fkey")
+
+  @@unique([probeId, workspaceId, siteId, buildRunId], map: "site_build_provider_probe_observation_scope_key")
+  @@index([workspaceId, buildRunId, observedAt], map: "site_build_provider_probe_observation_workspace_run_idx")
+  @@map("site_build_provider_readback_probe_observation")
 }
 
 /// Append-only later observations for a conservatively settled physical call.

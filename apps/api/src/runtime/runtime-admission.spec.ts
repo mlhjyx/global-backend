@@ -16,6 +16,17 @@ const attestedBuild = {
   schema_digest: `sha256:${"c".repeat(64)}`,
 };
 
+const SETTLEMENT_ENV = {
+  MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: `srb1.${"L".repeat(16)}.${"S".repeat(43)}`,
+  SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE:
+    "/run/secrets/site-build-settlement-keyring",
+  SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON: '{"schemaVersion":"fixture"}',
+};
+const PROVIDER_WIRE_ENV = {
+  SITE_BUILD_PROVIDER_WIRE_DATABASE_URL:
+    "postgresql://site_build_provider_wire_writer:secret@127.0.0.1:5432/global_dev",
+};
+
 describe("inspectRuntimeAdmission", () => {
   it("keeps managed development on the same attested auth and gateway path", () => {
     const result = inspectRuntimeAdmission(
@@ -40,6 +51,7 @@ describe("inspectRuntimeAdmission", () => {
     const result = inspectRuntimeAdmission(
       { mode: "development", bindHost: "127.0.0.1", port: 3000 },
       {
+        ...SETTLEMENT_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
         PII_ENCRYPTION_KEY: "a".repeat(64),
@@ -62,10 +74,221 @@ describe("inspectRuntimeAdmission", () => {
     });
   });
 
+  it("requires the dedicated provider-wire login for the Worker but not the API", () => {
+    const env = {
+      ...SETTLEMENT_ENV,
+      ...PROVIDER_WIRE_ENV,
+      NODE_ENV: "production",
+      DATA_PROCESSOR_JURISDICTION: "EU",
+      PII_ENCRYPTION_KEY: "a".repeat(64),
+      APP_DATABASE_URL:
+        "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+      AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+      AUTH_ISSUER: "http://127.0.0.1:3100/",
+      AUTH_AUDIENCE: "global-api",
+      AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+      MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+      MODEL_GATEWAY_KEY: "secret",
+    };
+    const withoutWriter = {
+      ...env,
+      SITE_BUILD_PROVIDER_WIRE_DATABASE_URL: undefined,
+    };
+
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        withoutWriter,
+        attestedBuild,
+        "API",
+      ).checks.gateway,
+    ).toEqual({ status: "ok" });
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        withoutWriter,
+        attestedBuild,
+        "WORKER",
+      ).checks.gateway,
+    ).toEqual({
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
+    });
+  });
+
+  it("rejects a provider-wire writer pointed at a different application database", () => {
+    const env = {
+      ...SETTLEMENT_ENV,
+      ...PROVIDER_WIRE_ENV,
+      SITE_BUILD_PROVIDER_WIRE_DATABASE_URL:
+        "postgresql://site_build_provider_wire_writer:secret@127.0.0.1:5432/other_db",
+      NODE_ENV: "production",
+      DATA_PROCESSOR_JURISDICTION: "EU",
+      PII_ENCRYPTION_KEY: "a".repeat(64),
+      APP_DATABASE_URL:
+        "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+      AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+      AUTH_ISSUER: "http://127.0.0.1:3100/",
+      AUTH_AUDIENCE: "global-api",
+      AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+      MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+      MODEL_GATEWAY_KEY: "secret",
+    };
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        env,
+        attestedBuild,
+        "WORKER",
+      ).checks.gateway,
+    ).toEqual({
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_TARGET_MISMATCH",
+    });
+  });
+
+  it("rejects reuse of the model dispatch credential as the readback credential", () => {
+    const reused = `srb1.${"L".repeat(16)}.${"S".repeat(43)}`;
+    const result = inspectRuntimeAdmission(
+      { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+      {
+        ...SETTLEMENT_ENV,
+        ...PROVIDER_WIRE_ENV,
+        NODE_ENV: "production",
+        DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
+        APP_DATABASE_URL:
+          "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+        AUTH_ISSUER: "http://127.0.0.1:3100/",
+        AUTH_AUDIENCE: "global-api",
+        AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+        MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+        MODEL_GATEWAY_KEY: reused,
+        MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: reused,
+      },
+      attestedBuild,
+      "WORKER",
+    );
+    expect(result.checks.gateway).toEqual({
+      status: "failed",
+      code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
+    });
+  });
+
+  it("rejects whitespace-padded credential reuse before Header normalization", () => {
+    const reused = `srb1.${"L".repeat(16)}.${"S".repeat(43)}`;
+    const result = inspectRuntimeAdmission(
+      { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+      {
+        ...SETTLEMENT_ENV,
+        ...PROVIDER_WIRE_ENV,
+        NODE_ENV: "production",
+        DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
+        APP_DATABASE_URL:
+          "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+        AUTH_ISSUER: "http://127.0.0.1:3100/",
+        AUTH_AUDIENCE: "global-api",
+        AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+        MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+        MODEL_GATEWAY_KEY: ` ${reused} `,
+        MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: reused,
+      },
+      attestedBuild,
+      "WORKER",
+    );
+    expect(result.checks.gateway.status).toBe("failed");
+  });
+
+  it("rejects a provider timeout beyond the durable wire-owner window", () => {
+    const result = inspectRuntimeAdmission(
+      { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+      {
+        ...SETTLEMENT_ENV,
+        ...PROVIDER_WIRE_ENV,
+        NODE_ENV: "production",
+        DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
+        APP_DATABASE_URL:
+          "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+        AUTH_ISSUER: "http://127.0.0.1:3100/",
+        AUTH_AUDIENCE: "global-api",
+        AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+        MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+        MODEL_GATEWAY_KEY: "secret",
+        MODEL_TIMEOUT_MS: "300001",
+      },
+      attestedBuild,
+      "WORKER",
+    );
+    expect(result.checks.gateway).toEqual({
+      status: "failed",
+      code: "GATEWAY_TIMEOUT_INVALID",
+    });
+  });
+
+  it("rejects the Worker-only provider-wire URL in an API runtime", () => {
+    const result = inspectRuntimeAdmission(
+      { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+      {
+        ...SETTLEMENT_ENV,
+        ...PROVIDER_WIRE_ENV,
+        NODE_ENV: "production",
+        DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
+        APP_DATABASE_URL:
+          "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+        AUTH_ISSUER: "http://127.0.0.1:3100/",
+        AUTH_AUDIENCE: "global-api",
+        AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+        MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+        MODEL_GATEWAY_KEY: "secret",
+      },
+      attestedBuild,
+      "API",
+    );
+    expect(result.checks.gateway).toEqual({
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
+    });
+  });
+
+  it("rejects the Worker-only provider-wire URL in an Outbox Relay runtime", () => {
+    const result = inspectRuntimeAdmission(
+      { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+      {
+        ...SETTLEMENT_ENV,
+        ...PROVIDER_WIRE_ENV,
+        NODE_ENV: "production",
+        DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
+        APP_DATABASE_URL:
+          "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+        AUTH_ISSUER: "http://127.0.0.1:3100/",
+        AUTH_AUDIENCE: "global-api",
+        AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+        MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+        MODEL_GATEWAY_KEY: "secret",
+      },
+      attestedBuild,
+      "OUTBOX_RELAY",
+    );
+    expect(result.checks.gateway).toEqual({
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
+    });
+  });
+
   it("admits the controlled pilot only with attested build, JWKS contract, and loopback gateway", () => {
     const result = inspectRuntimeAdmission(
       { mode: "pilot", bindHost: "127.0.0.1", port: 3000 },
       {
+        ...SETTLEMENT_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
         PII_ENCRYPTION_KEY: "a".repeat(64),
@@ -93,6 +316,7 @@ describe("inspectRuntimeAdmission", () => {
 
   it("fails every managed runtime when the production dependency graph is not active", () => {
     const baseEnv = {
+      ...SETTLEMENT_ENV,
       APP_DATABASE_URL:
         "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
       AUTH_JWKS_URI: "https://identity.example.test/.well-known/jwks.json",
@@ -135,6 +359,7 @@ describe("inspectRuntimeAdmission", () => {
     const invalidJurisdiction = inspectRuntimeAdmission(
       settings,
       {
+        ...SETTLEMENT_ENV,
         ...baseEnv,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "CHINA",
@@ -148,7 +373,11 @@ describe("inspectRuntimeAdmission", () => {
   });
 
   it("keeps managed admission closed when the PII key is missing or does not decode to AES-256 key material", () => {
-    const settings = { mode: "development" as const, bindHost: "127.0.0.1", port: 3000 };
+    const settings = {
+      mode: "development" as const,
+      bindHost: "127.0.0.1",
+      port: 3000,
+    };
     const base = {
       NODE_ENV: "production",
       DATA_PROCESSOR_JURISDICTION: "EU",
@@ -280,6 +509,7 @@ describe("inspectRuntimeAdmission", () => {
     const missingAudience = inspectRuntimeAdmission(
       { mode: "pilot", bindHost: "127.0.0.1", port: 3000 },
       {
+        ...SETTLEMENT_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
         AUTH_JWKS_URI: "https://identity.example.test/jwks",
@@ -341,6 +571,7 @@ describe("inspectRuntimeAdmission", () => {
     const remoteGateway = inspectRuntimeAdmission(
       { mode: "pilot", bindHost: "127.0.0.1", port: 3000 },
       {
+        ...SETTLEMENT_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
         AUTH_JWKS_URI: "https://identity.example.test/jwks",

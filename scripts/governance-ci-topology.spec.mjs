@@ -370,7 +370,15 @@ test("the required build verifies runtime lease roles against disposable Postgre
 
   assert.match(buildJob, /pgvector\/pgvector@sha256:[0-9a-f]{64}/);
   assert.match(permissionStep, /prisma migrate deploy/);
+  assert.match(
+    permissionStep,
+    /site-build-provider-transport\.rls\.spec\.mjs/,
+  );
   assert.match(permissionStep, /provision-runtime-lease-principals\.sh/);
+  assert.match(
+    permissionStep,
+    /provision-site-build-provider-wire-writer\.sh/,
+  );
   assert.match(
     permissionStep,
     /provision-execution-budget-platform-writer\.sh/,
@@ -378,6 +386,14 @@ test("the required build verifies runtime lease roles against disposable Postgre
   assert.match(
     permissionStep,
     /verify-runtime-lease-principal-permissions\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-site-build-provider-wire-writer\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-site-build-provider-wire-writer-disposable\.sh/,
   );
   assert.match(permissionStep, /verify-execution-budget-platform-writer\.sh/);
   assert.match(

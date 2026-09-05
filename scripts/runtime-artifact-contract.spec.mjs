@@ -27,6 +27,14 @@ test("runtime artifact scan rejects product test and synthetic-provider bytes", 
   await writeFile(join(root, "main.js"), "runtime");
   await writeFile(join(root, "gallery.js"), "visual fixture");
   await writeFile(join(root, "m1eb-golden.js"), "evaluation fixture generator");
+  await writeFile(
+    join(root, "site-builder-model-settlement.js"),
+    "legacy broad-log settlement reader",
+  );
+  await writeFile(
+    join(root, "legacy-reader-renamed.js"),
+    "fetch('/api/log/token')",
+  );
   await writeFile(join(root, "quality.test-fixture.js"), "test fixture");
   await writeFile(
     join(root, "site-builder", "eval", "campaign.js"),
@@ -38,8 +46,10 @@ test("runtime artifact scan rejects product test and synthetic-provider bytes", 
     violations.map((item) => item.path),
     [
       "gallery.js",
+      "legacy-reader-renamed.js",
       "m1eb-golden.js",
       "quality.test-fixture.js",
+      "site-builder-model-settlement.js",
       "site-builder/eval",
     ],
   );
@@ -175,7 +185,7 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     /pnpm --filter @global\/site-renderer deploy --prod --frozen-lockfile \/tmp\/renderer-runtime-deploy/,
   );
   const aptSources = dockerfile
-    .split('\n')
+    .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.startsWith("'deb [check-valid-until=no] "))
     .map((line) => {
@@ -193,22 +203,22 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     });
   assert.deepEqual(aptSources, [
     {
-      protocol: 'https:',
-      hostname: 'snapshot.debian.org',
-      pathname: '/archive/debian/20260826T000000Z/',
-      suite: 'bookworm',
+      protocol: "https:",
+      hostname: "snapshot.debian.org",
+      pathname: "/archive/debian/20260826T000000Z/",
+      suite: "bookworm",
     },
     {
-      protocol: 'https:',
-      hostname: 'snapshot.debian.org',
-      pathname: '/archive/debian/20260826T000000Z/',
-      suite: 'bookworm-updates',
+      protocol: "https:",
+      hostname: "snapshot.debian.org",
+      pathname: "/archive/debian/20260826T000000Z/",
+      suite: "bookworm-updates",
     },
     {
-      protocol: 'https:',
-      hostname: 'snapshot.debian.org',
-      pathname: '/archive/debian-security/20260826T000000Z/',
-      suite: 'bookworm-security',
+      protocol: "https:",
+      hostname: "snapshot.debian.org",
+      pathname: "/archive/debian-security/20260826T000000Z/",
+      suite: "bookworm-security",
     },
   ]);
   assert.match(dockerfile, /check-valid-until=no/);
@@ -221,7 +231,9 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     /766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/,
   );
   assert.equal(
-    dockerfile.match(/766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/g)?.length,
+    dockerfile.match(
+      /766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  \/etc\/ssl\/certs\/ca-certificates\.crt/g,
+    )?.length,
     2,
   );
   assert.match(

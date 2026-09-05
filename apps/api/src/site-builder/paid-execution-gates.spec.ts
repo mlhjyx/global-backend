@@ -4,6 +4,12 @@ import type { ModelProvider } from "../model-gateway/model-provider";
 import type { ModelRouter } from "../model-gateway/model-router";
 import type { ModelResult } from "../model-gateway/types";
 import { ProviderOutputError } from "../model-gateway/providers/provider-output-error";
+import { createProviderTransportObservation } from "../model-gateway/provider-transport-observation";
+import {
+  parseSettlementDerivationKeyring,
+  toDurableSettlementWireIdentity,
+  type SettlementWireIdentity,
+} from "../model-gateway/settlement-wire-identity";
 import { ToolBroker } from "../tools/tool-broker";
 import { ToolRegistry } from "../tools/tool-registry";
 import { RateLimiter } from "../tools/rate-limiter";
@@ -12,10 +18,7 @@ import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
 } from "./site-build-cost-ledger";
-import {
-  createSiteBuildCostReconciliationCatalogFromEnv,
-  NewApiSiteBuildCostReconciliationResolver,
-} from "./site-build-cost-reconciliation-resolver";
+import { createSiteBuildCostReconciliationCatalogFromEnv } from "./site-build-cost-reconciliation-resolver";
 
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const SITE_ID = "22222222-2222-4222-8222-222222222222";
@@ -26,7 +29,7 @@ const SETTLEMENT_PREFLIGHT = {
   schemaVersion: "site-builder-paid-model-preflight-evidence/v2" as const,
   attestationId: "site-builder-runtime-test",
   snapshotSha256: "a".repeat(64),
-  resolverId: "new-api-token-log-v1",
+  resolverId: "new-api-request-bound-reconciliation-v1",
   taskId: "site_builder.brand_profile",
   alias: "gpt-5.6-terra",
   protocol: "openai-responses" as const,
@@ -46,13 +49,14 @@ const SETTLEMENT_PREFLIGHT = {
 
 function settledUsage(
   usage: ModelResult<unknown>["usage"],
+  physicalWireAttempt: 1 | 2 = 1,
 ): ModelResult<unknown>["usage"] {
   return {
     ...usage,
     gatewaySettlements: [
       {
         status: "settled",
-        requestId: "req_paid_test_001",
+        physicalWireAttempt,
         resolverId: SETTLEMENT_PREFLIGHT.resolverId,
         alias: SETTLEMENT_PREFLIGHT.alias,
         protocol: SETTLEMENT_PREFLIGHT.protocol,
@@ -62,6 +66,15 @@ function settledUsage(
         costMicrousd: 1_000,
         inputTokens: usage?.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0,
+        upstreamIdState: "observed",
+        transportObservation: createProviderTransportObservation({
+          physicalWireAttempt,
+          finalPhase: "gateway_request_id_observed",
+          gatewayIdState: "observed",
+          upstreamIdState: "observed",
+          payloadState: "available",
+          readbackProbes: [],
+        }),
       },
     ],
   };
@@ -73,13 +86,27 @@ function provider(
   return {
     id: "gateway",
     preflightPaidCall: vi.fn(async () => SETTLEMENT_PREFLIGHT),
-    generateText: vi.fn(async () => {
+    generateText: vi.fn(async (_input, ctx) => {
       const result = await implementation();
-      return { ...result, usage: settledUsage(result.usage) };
+      return {
+        ...result,
+        usage: settledUsage(
+          result.usage,
+          ctx.paidCost?.settlementPhysicalWire?.identity.physicalWireAttempt ??
+            1,
+        ),
+      };
     }),
-    generateStructured: vi.fn(async () => {
+    generateStructured: vi.fn(async (_input, ctx) => {
       const result = await implementation();
-      return { ...result, usage: settledUsage(result.usage) };
+      return {
+        ...result,
+        usage: settledUsage(
+          result.usage,
+          ctx.paidCost?.settlementPhysicalWire?.identity.physicalWireAttempt ??
+            1,
+        ),
+      };
     }),
     embed: vi.fn(async () => {
       const result = await implementation();
@@ -100,6 +127,85 @@ const paidModelContext = {
   },
 };
 
+const TEST_SETTLEMENT_KEYRING = parseSettlementDerivationKeyring(
+  Buffer.from(
+    `schema=site-build-settlement-derivation-keyring/v1\n` +
+      `settlement-test ACTIVE ${"A".repeat(43)}\n`,
+  ),
+);
+const DEFAULT_RECONCILIATION_CATALOG =
+  createSiteBuildCostReconciliationCatalogFromEnv({
+    SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON: JSON.stringify({
+      schemaVersion: "site-build-cost-reconciliation-catalog/v1",
+      catalogId: "site-builder-product-pricing-test",
+      resolverId: "new-api-request-bound-reconciliation-v1",
+      pricingAuthority: "openox_model_marketplace",
+      pricingSnapshotSha256: "f".repeat(64),
+      pricingCurrency: "USD",
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      entries: [
+        {
+          providerId: "gateway",
+          taskId: "site_builder.brand_profile",
+          alias: "gpt-5.6-terra",
+          protocol: "openai-responses",
+          expectedChannelId: 7,
+          maxOutputTokensPerCall: 4_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+        },
+      ],
+    }),
+  });
+
+function installSettlementV1(gateway: RouterModelGateway): void {
+  const paidLedger = gateway.paidLedger as unknown as Record<string, unknown>;
+  const legacyReserve = paidLedger.reserveOperation as (
+    input: unknown,
+  ) => Promise<{ kind: string; [key: string]: unknown }>;
+  paidLedger.reserveModelOperation ??= async (input: unknown) => {
+    const decision = await legacyReserve(input);
+    const wireIdentity = (
+      input as {
+        wire: { wireIdentity: SettlementWireIdentity };
+      }
+    ).wire.wireIdentity;
+    return decision.kind === "execute"
+      ? {
+          kind: "execute",
+          spendId: "66666666-6666-4666-8666-666666666666",
+          wireAttemptId: "77777777-7777-4777-8777-777777777777",
+          physicalWireAttempt: 1,
+          wireIdentity: toDurableSettlementWireIdentity(wireIdentity),
+        }
+      : decision;
+  };
+  paidLedger.allocateModelPhysicalWire ??= async (input: unknown) => {
+    const wireIdentity = (
+      input as {
+        wireIdentity: SettlementWireIdentity;
+      }
+    ).wireIdentity;
+    return {
+      kind: "execute",
+      spendId: "66666666-6666-4666-8666-666666666666",
+      wireAttemptId: "88888888-8888-4888-8888-888888888888",
+      physicalWireAttempt: 2,
+      wireIdentity: toDurableSettlementWireIdentity(wireIdentity),
+    };
+  };
+  paidLedger.beginModelPhysicalWire ??= async () => "DISPATCH";
+  paidLedger.claimModelReadbackProbe ??= async () => null;
+  paidLedger.recordModelReadbackProbe ??= async () => undefined;
+  paidLedger.recordModelPhysicalWireReceipt ??= async () => undefined;
+  paidLedger.finalizeModelPhysicalWire ??= async () => undefined;
+  paidLedger.finalizeModelPhysicalWireNotDispatched ??= async () => undefined;
+  gateway.costReconciliationCatalog ??= DEFAULT_RECONCILIATION_CATALOG;
+  gateway.settlementDerivationKeyring = TEST_SETTLEMENT_KEYRING;
+  gateway.settlementReadbackResolver = { resolve: vi.fn() } as never;
+}
+
 describe("RouterModelGateway persistent paid-call gate", () => {
   it("uses the SaaS Grant ledger without requiring a per-call settlement attestation", async () => {
     const model = provider(async () => ({
@@ -117,6 +223,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation,
       settleOperation,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -154,6 +261,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       settleOperation: vi.fn(async () => "OVER_RESERVATION"),
       disablePaidCalls,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -171,29 +279,12 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
-  it("threads trusted product catalog context from a normal Router call into request-bound sweep resolution", async () => {
+  it("keeps recovery identity in the dedicated wire row instead of Spend metadata", async () => {
     const model = provider(async () => ({
       data: { ok: true },
       provider: "gateway",
       model: "gpt-5.6-terra",
     }));
-    vi.mocked(model.generateStructured).mockResolvedValue({
-      data: { ok: true },
-      provider: "gateway",
-      model: "gpt-5.6-terra",
-      usage: {
-        inputTokens: 120,
-        outputTokens: 30,
-        gatewaySettlements: [
-          {
-            status: "unknown",
-            requestId: "req-cost-reconcile-001",
-            resolverId: "new-api-request-bound-reconciliation-v1",
-            reason: "log_unavailable",
-          },
-        ],
-      },
-    });
     const settleOperation = vi.fn(async () => "SETTLED");
     const gateway = new RouterModelGateway({
       route: () => [model],
@@ -202,6 +293,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
     } as never;
+    installSettlementV1(gateway);
     gateway.costReconciliationCatalog =
       createSiteBuildCostReconciliationCatalogFromEnv({
         SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON: JSON.stringify({
@@ -248,31 +340,9 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       ...settlement.measurement.meta,
       ...settlement.meta,
     };
-    const resolver = new NewApiSiteBuildCostReconciliationResolver({
-      resolve: vi.fn(async () => ({
-        status: "settled" as const,
-        requestId: "req-cost-reconcile-001",
-        resolverId: "new-api-request-bound-reconciliation-v1",
-        alias: "gpt-5.6-terra",
-        protocol: "openai-responses",
-        channelId: 72,
-        quota: 1_250,
-        inputTokens: 120,
-        outputTokens: 30,
-        receiptDigest: "a".repeat(64),
-      })),
-    });
-    await expect(
-      resolver.resolve({
-        spendId: "spend-normal-product-flow",
-        operationKey: settlement.scope.operationKey,
-        meta: persistedMeta,
-      }),
-    ).resolves.toMatchObject({
-      status: "RESOLVED",
-      exactCostMicrousd: "540",
-      receiptDigest: "a".repeat(64),
-    });
+    expect(persistedMeta).not.toHaveProperty("settlementContext");
+    expect(persistedMeta).not.toHaveProperty("settlementWireIdentities");
+    expect(JSON.stringify(persistedMeta)).not.toContain("requestId");
   });
 
   it("denies the paid call before reservation when the catalog has no entry for the route", async () => {
@@ -289,6 +359,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation,
       settleOperation: vi.fn(async () => "SETTLED"),
     } as never;
+    installSettlementV1(gateway);
     // 目录只登记 brand_profile；copy 任务无条目时必须 fail closed——
     // 否则 spend meta 缺 settlementContext，对账只能在 24h 后 EXPIRED。
     gateway.costReconciliationCatalog =
@@ -345,6 +416,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     }));
     const settleOperation = vi.fn(async () => "SETTLED");
     const disablePaidCalls = vi.fn(async () => undefined);
+    const finalizeModelPhysicalWireNotDispatched = vi.fn(async () => undefined);
     const gateway = new RouterModelGateway({
       route: () => [model],
     } as unknown as ModelRouter);
@@ -352,7 +424,9 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
       disablePaidCalls,
+      finalizeModelPhysicalWireNotDispatched,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -376,6 +450,10 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     });
 
     expect(model.generateStructured).not.toHaveBeenCalled();
+    expect(finalizeModelPhysicalWireNotDispatched).toHaveBeenCalledOnce();
+    expect(
+      finalizeModelPhysicalWireNotDispatched.mock.invocationCallOrder[0],
+    ).toBeLessThan(settleOperation.mock.invocationCallOrder[0]!);
     expect(settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "RELEASED",
@@ -413,6 +491,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       settleOperation,
       disablePaidCalls,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -443,7 +522,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
         errorCode: "SUPPRESSION_ACTION_GATE",
         measurement: expect.objectContaining({
           basis: "token_pricing",
-          budgetChargeMicrousd: 10,
+          budgetChargeMicrousd: 1_000,
           callCount: 1,
         }),
       }),
@@ -482,6 +561,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       route: () => [model],
     } as unknown as ModelRouter);
     gateway.paidLedger = paidLedger as never;
+    installSettlementV1(gateway);
 
     const result = await gateway.generateStructured(
       {
@@ -556,6 +636,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       route: () => [model],
     } as unknown as ModelRouter);
     gateway.paidLedger = paidLedger as never;
+    installSettlementV1(gateway);
     const input = {
       task: "site_builder.brand_profile",
       prompt: "p",
@@ -595,6 +676,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation: vi.fn(async () => "SETTLED"),
     } as never;
+    installSettlementV1(gateway);
 
     await gateway.generateStructured(
       {
@@ -612,7 +694,14 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     expect(model.preflightPaidCall).not.toHaveBeenCalled();
     expect(model.generateStructured).toHaveBeenCalledWith(
       expect.objectContaining({ signal: controller.signal }),
-      paidModelContext,
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        runId: RUN_ID,
+        paidCost: expect.objectContaining({
+          siteId: SITE_ID,
+          settlementPhysicalWire: expect.any(Object),
+        }),
+      }),
     );
   });
 
@@ -634,9 +723,17 @@ describe("RouterModelGateway persistent paid-call gate", () => {
         gatewaySettlements: [
           {
             status: "unknown",
-            requestId: "req_unknown_initial_001",
+            physicalWireAttempt: 1,
             resolverId: SETTLEMENT_PREFLIGHT.resolverId,
-            reason: "log_unavailable",
+            reason: "gateway_log_missing",
+            transportObservation: createProviderTransportObservation({
+              physicalWireAttempt: 1,
+              finalPhase: "gateway_log_missing",
+              gatewayIdState: "observed",
+              upstreamIdState: "unknown",
+              payloadState: "available",
+              readbackProbes: [],
+            }),
           },
         ],
       },
@@ -651,6 +748,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       settleOperation,
       disablePaidCalls,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -675,11 +773,11 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       expect.objectContaining({
         status: "UNKNOWN",
         measurement: expect.objectContaining({ basis: "unknown" }),
-        disablePaidCallsReason: "MODEL_SETTLEMENT_UNKNOWN",
+        disablePaidCallsReason: "MODEL_SETTLEMENT_GATEWAY_LOG_MISSING",
       }),
     );
-    // UNKNOWN spend 的自动事实恢复依赖稳定 requestId；持久化 meta 必须
-    // 保留 provider 结算观测，且不得退回人工逐次批准或第二次物理请求。
+    // Recovery identity lives only in the dedicated wire table. Spend metadata
+    // retains the closed observation but never the raw request id or nonce.
     const settlement = settleOperation.mock.calls[0]?.[0];
     const persistedMeta = {
       ...settlement.scope.meta,
@@ -689,10 +787,11 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     expect(persistedMeta.gatewaySettlements).toEqual([
       expect.objectContaining({
         status: "unknown",
-        requestId: "req_unknown_initial_001",
+        physicalWireAttempt: 1,
         resolverId: SETTLEMENT_PREFLIGHT.resolverId,
       }),
     ]);
+    expect(JSON.stringify(persistedMeta)).not.toContain("requestId");
     expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
@@ -727,6 +826,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -775,6 +875,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -832,6 +933,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -871,6 +973,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       })),
       settleOperation: vi.fn(),
     } as never;
+    installSettlementV1(gateway);
 
     const error = await gateway
       .generateStructured(
@@ -905,6 +1008,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -963,6 +1067,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       route: () => [model],
     } as unknown as ModelRouter);
     gateway.paidLedger = paidLedger as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -1004,6 +1109,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       settleOperation: vi.fn(),
       disablePaidCalls: vi.fn(),
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -1049,7 +1155,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     expect(model.generateStructured).not.toHaveBeenCalled();
   });
 
-  it("turns a success-settlement ACK loss into a non-fallback paid-operation error", async () => {
+  it("replays an identical success settlement after ACK loss without another provider call", async () => {
     const execute = vi.fn(async () => ({
       data: { ok: true },
       provider: "gateway",
@@ -1058,16 +1164,19 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     }));
     const model = provider(execute);
     const disablePaidCalls = vi.fn(async () => undefined);
+    const settleOperation = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("database response lost"))
+      .mockResolvedValueOnce("REPLAY");
     const gateway = new RouterModelGateway({
       route: () => [model],
     } as unknown as ModelRouter);
     gateway.paidLedger = {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
-      settleOperation: vi.fn(async () => {
-        throw new Error("database response lost");
-      }),
+      settleOperation,
       disablePaidCalls,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(
@@ -1081,13 +1190,13 @@ describe("RouterModelGateway persistent paid-call gate", () => {
         },
         paidModelContext,
       ),
-    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+    ).resolves.toMatchObject({ data: { ok: true } });
     expect(execute).toHaveBeenCalledOnce();
-    expect(disablePaidCalls).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      RUN_ID,
-      "SETTLEMENT_ACK_UNKNOWN",
+    expect(settleOperation).toHaveBeenCalledTimes(2);
+    expect(settleOperation.mock.calls[1]).toEqual(
+      settleOperation.mock.calls[0],
     );
+    expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
   it("freezes the BuildRun when settlement returns a non-SETTLED decision", async () => {
@@ -1108,6 +1217,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       settleOperation: vi.fn(async () => "STALE_FENCE"),
       disablePaidCalls,
     } as never;
+    installSettlementV1(gateway);
 
     const error = await gateway
       .generateStructured(
@@ -1167,6 +1277,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       settleOperation,
       disablePaidCalls,
     } as never;
+    installSettlementV1(gateway);
 
     await expect(
       gateway.generateStructured(

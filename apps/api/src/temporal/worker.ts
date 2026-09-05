@@ -32,9 +32,14 @@ import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities
 import { createPlatformScheduleAuthorityActivities } from "./platform-schedule-authority.activities";
 import { createSiteBuilderActivities } from "./site-builder.activities";
 import {
+  costReconciliationCatalogCoversRoutes,
   createSiteBuildCostReconciliationCatalogFromEnv,
-  createSiteBuildCostReconciliationResolverFromEnv,
+  createSiteBuildSettlementReadbackRuntimeFromEnv,
 } from "../site-builder/site-build-cost-reconciliation-resolver";
+import {
+  resolveTaskRoute,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
+} from "../site-builder/agents/task-routes";
 import { createAssetCleanupActivities } from "./asset-cleanup.activities";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import { SanctionsScreeningService } from "../sanctions/sanctions-screening.service";
@@ -55,6 +60,7 @@ import {
 import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
 import { UNDERSTANDING_TASK_QUEUE } from "./understanding.constants";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
+import { createSiteBuildProviderWireDatabaseFromEnv } from "../site-builder/site-build-provider-wire.database";
 import { SiteReleaseService } from "../site-builder/site-release.service";
 import { createSiteReleaseMaintenanceActivities } from "./site-release-maintenance.activities";
 import { StorageQualityArtifactSink } from "../site-builder/quality/quality-artifact-sink";
@@ -78,6 +84,7 @@ import {
   checkImagePipelineIsolationReadiness,
   checkModelGatewayReadiness,
   checkRedisReadiness,
+  checkSiteBuildSettlementReadbackReadiness,
   rendererRuntimeIdentity,
 } from "../runtime/managed-dependency-readiness";
 import {
@@ -127,6 +134,7 @@ async function main(): Promise<void> {
     runtimeSettings,
     process.env,
     releaseIdentity,
+    "WORKER",
   );
   if (!admission.admitted) {
     const failed = Object.entries(admission.checks)
@@ -138,6 +146,24 @@ async function main(): Promise<void> {
 
   const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
+  const configuredProviderWireDatabase = (() => {
+    try {
+      return createSiteBuildProviderWireDatabaseFromEnv(
+        process.env,
+        undefined,
+        releaseIdentity.attested
+          ? releaseIdentity.migration_revision
+          : undefined,
+      );
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!configuredProviderWireDatabase) {
+    await runtimeTelemetry.shutdown();
+    return holdWorkerNotReady("SITE_BUILD_PROVIDER_WIRE_DATABASE_UNAVAILABLE");
+  }
+  const providerWireDatabase = configuredProviderWireDatabase;
   await waitForWorkerDependencyAdmission({
     check: async () => {
       const appDatabaseReadiness = await prisma.reconnect();
@@ -174,6 +200,7 @@ async function main(): Promise<void> {
       runtimeLeases.terminalize("WORKER", UNDERSTANDING_TASK_QUEUE),
     onEarlyCleanup: async () => {
       await runtimeTelemetry.shutdown().catch(() => undefined);
+      await providerWireDatabase.disconnect().catch(() => undefined);
       await runtimeLeaseStore.disconnectWriters().catch(() => undefined);
       await prisma.$disconnect().catch(() => undefined);
     },
@@ -201,7 +228,16 @@ async function main(): Promise<void> {
         `[worker] not ready: ${code}; Temporal polling remains disabled`,
       ),
   });
-  const costLedger = new SiteBuildCostLedger(prisma);
+  await waitForWorkerDependencyAdmission({
+    check: () => providerWireDatabase.checkReadiness(),
+    onBlocked: (code) =>
+      console.error(
+        `[worker] not ready: ${code}; Temporal polling remains disabled`,
+      ),
+  });
+  const costLedger = new SiteBuildCostLedger(prisma, {
+    providerWireDatabase,
+  });
   const siteBuilderStorage = new StorageService();
   await siteBuilderStorage.onModuleInit();
   const dependencyBlocked = (code: string): void =>
@@ -222,6 +258,10 @@ async function main(): Promise<void> {
   });
   await waitForWorkerDependencyAdmission({
     check: () => checkModelGatewayReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkSiteBuildSettlementReadbackReadiness(process.env),
     onBlocked: dependencyBlocked,
   });
   await waitForWorkerDependencyAdmission({
@@ -285,6 +325,7 @@ async function main(): Promise<void> {
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
     personalArtifactCleanupRuntime.destroy();
+    await providerWireDatabase.disconnect().catch(() => undefined);
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeTelemetry.shutdown();
@@ -352,14 +393,45 @@ async function main(): Promise<void> {
   gateway.paidLedger = costLedger;
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
-  if (!costReconciliationCatalog) {
+  const activeSettlementRoutes = (() => {
+    try {
+      return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
+        const route = resolveTaskRoute(taskId, process.env);
+        return [route.primary, ...route.fallbacks].map((alias) =>
+          Object.freeze({
+            taskId,
+            alias,
+            maxOutputTokens: route.maxTokens,
+          }),
+        );
+      });
+    } catch {
+      return undefined;
+    }
+  })();
+  if (
+    !activeSettlementRoutes ||
+    !costReconciliationCatalogCoversRoutes(
+      costReconciliationCatalog,
+      activeSettlementRoutes,
+    )
+  ) {
     await holdPlatformNotReady(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
     );
   }
   gateway.costReconciliationCatalog = costReconciliationCatalog;
+  const settlementReadbackRuntime =
+    createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
+  if (!settlementReadbackRuntime) {
+    await holdPlatformNotReady(
+      "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+    );
+  }
+  gateway.settlementDerivationKeyring = settlementReadbackRuntime?.keyring;
+  gateway.settlementReadbackResolver = settlementReadbackRuntime?.resolver;
   const costReconciliationResolver =
-    createSiteBuildCostReconciliationResolverFromEnv();
+    settlementReadbackRuntime?.reconciliationResolver;
 
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
@@ -546,11 +618,13 @@ async function main(): Promise<void> {
         } as const;
       }
       const checks = await Promise.all([
+        providerWireDatabase.checkReadiness(),
         siteBuilderStorage.checkReadiness(),
         checkGenericArtifactStorageReadiness(process.env),
         personalArtifactCleanupRuntime.checkReadiness(),
         checkRedisReadiness(process.env),
         checkModelGatewayReadiness(process.env),
+        checkSiteBuildSettlementReadbackReadiness(process.env),
         checkBrowserReadiness(process.env),
         checkImagePipelineIsolationReadiness(),
       ]);
@@ -592,6 +666,7 @@ async function main(): Promise<void> {
     await runtimeTelemetry.shutdown();
     personalArtifactCleanupRuntime.destroy();
     await connection.close().catch(() => undefined);
+    await providerWireDatabase.disconnect().catch(() => undefined);
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeLeaseStore.disconnectWriters();

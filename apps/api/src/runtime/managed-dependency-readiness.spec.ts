@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from "vitest";
 import {
   checkBrowserReadiness,
   checkExecutionBudgetJwksReadiness,
@@ -7,54 +7,55 @@ import {
   checkModelGatewayReadiness,
   checkPlatformBudgetAuthorityReadiness,
   checkRedisReadiness,
+  checkSiteBuildSettlementReadbackReadiness,
   ExecutionBudgetAuthorityReadinessContributors,
   ManagedDependencyReadinessContributors,
   rendererRuntimeIdentity,
-} from './managed-dependency-readiness';
+} from "./managed-dependency-readiness";
 
 const identity = {
   attested: true as const,
-  schema_version: 'global-runtime-release-identity/v1' as const,
-  build_sha: 'a'.repeat(40),
-  built_at: '2026-08-16T00:00:00.000Z',
-  image_digest: `sha256:${'b'.repeat(64)}`,
-  artifact_digest: `sha256:${'c'.repeat(64)}`,
-  artifact_manifest_digest: `sha256:${'d'.repeat(64)}`,
-  sbom_digest: `sha256:${'e'.repeat(64)}`,
-  source_tree_digest: `sha256:${'f'.repeat(64)}`,
-  renderer_digest: `sha256:${'1'.repeat(64)}`,
-  migration_revision: '20260816000000_runtime_process_lease',
-  schema_digest: `sha256:${'2'.repeat(64)}`,
+  schema_version: "global-runtime-release-identity/v1" as const,
+  build_sha: "a".repeat(40),
+  built_at: "2026-08-16T00:00:00.000Z",
+  image_digest: `sha256:${"b".repeat(64)}`,
+  artifact_digest: `sha256:${"c".repeat(64)}`,
+  artifact_manifest_digest: `sha256:${"d".repeat(64)}`,
+  sbom_digest: `sha256:${"e".repeat(64)}`,
+  source_tree_digest: `sha256:${"f".repeat(64)}`,
+  renderer_digest: `sha256:${"1".repeat(64)}`,
+  migration_revision: "20260816000000_runtime_process_lease",
+  schema_digest: `sha256:${"2".repeat(64)}`,
 };
 
 const EXECUTION_BUDGET_ENV = {
-  APP_ENVIRONMENT: 'test',
-  NODE_ENV: 'test',
+  APP_ENVIRONMENT: "test",
+  NODE_ENV: "test",
   EXECUTION_BUDGET_GRANT_JWKS_URI:
-    'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
-  EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
-  EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
-  EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+    "http://127.0.0.1:3100/.well-known/execution-budget-jwks.json",
+  EXECUTION_BUDGET_GRANT_ISSUER: "http://127.0.0.1:3100/",
+  EXECUTION_BUDGET_GRANT_AUDIENCE: "global-backend:execution-budget",
+  EXECUTION_BUDGET_GRANT_ALGORITHMS: "RS256,ES256,EdDSA",
 };
 
 const EXECUTION_ES256_PUBLIC_JWK = {
-  kty: 'EC',
-  x: 'RlAKnjNRkDLUtlfnTfa-PEqUIqRKwc9wqeL_jYz-l7s',
-  y: 'mEe-HjWcVujdmIJJc8Dyu4SQf1JGccAAnv2_uMOj-f4',
-  crv: 'P-256',
-  alg: 'ES256',
-  kid: 'execution-es256-1',
-  use: 'sig',
+  kty: "EC",
+  x: "RlAKnjNRkDLUtlfnTfa-PEqUIqRKwc9wqeL_jYz-l7s",
+  y: "mEe-HjWcVujdmIJJc8Dyu4SQf1JGccAAnv2_uMOj-f4",
+  crv: "P-256",
+  alg: "ES256",
+  kid: "execution-es256-1",
+  use: "sig",
 };
 
-describe('managed dependency readiness', () => {
+describe("managed dependency readiness", () => {
   const platformAuthorityRows = (
     overrides: Readonly<Record<string, string>> = {},
   ) =>
-    ['platform.acquisition', 'platform.intent_watch', 'platform.sanctions'].map(
+    ["platform.acquisition", "platform.intent_watch", "platform.sanctions"].map(
       (purpose) => ({
         purpose,
-        state: overrides[purpose] ?? 'active',
+        state: overrides[purpose] ?? "active",
       }),
     );
 
@@ -62,38 +63,182 @@ describe('managed dependency readiness', () => {
     return {
       inspectPlatformAuthorityFreshness: vi.fn(async () => {
         if (rows instanceof Error) throw rows;
-        return { status: 'available' as const, rows };
+        return { status: "available" as const, rows };
       }),
     };
   }
 
-  it('rejects an unsafe execution-budget JWKS URL before network dispatch', async () => {
+  it("probes the dedicated settlement-readback capability without a model call", async () => {
+    const reader = `srb1.${"L".repeat(16)}.${"S".repeat(43)}`;
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            schema_version: "new-api-settlement-readback-capability/v1",
+            status: "ready",
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "cache-control": "no-store",
+              "x-new-api-settlement-contract": "new-api-settlement-readback/v1",
+            },
+          },
+        ),
+    );
+    const loadKeyring = vi.fn(() => ({ activeKeyId: "settlement-test" }));
+
+    await expect(
+      checkSiteBuildSettlementReadbackReadiness(
+        {
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1",
+          MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: reader,
+          SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE:
+            "/run/secrets/site-build-settlement-keyring",
+        },
+        fetcher,
+        loadKeyring as never,
+      ),
+    ).resolves.toEqual({ status: "ok" });
+    expect(loadKeyring).toHaveBeenCalledWith(
+      "/run/secrets/site-build-settlement-keyring",
+    );
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:3010/api/settlement-readback/v1/capability",
+      expect.objectContaining({
+        method: "GET",
+        redirect: "error",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${reader}`,
+        },
+      }),
+    );
+  });
+
+  it("does not probe when dispatch and readback credentials are byte-equal", async () => {
+    const reused = `srb1.${"L".repeat(16)}.${"S".repeat(43)}`;
+    const fetcher = vi.fn();
+    const loadKeyring = vi.fn();
+
+    await expect(
+      checkSiteBuildSettlementReadbackReadiness(
+        {
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1",
+          MODEL_GATEWAY_KEY: reused,
+          MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: reused,
+          SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: "/secret/keyring",
+        },
+        fetcher,
+        loadKeyring as never,
+      ),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_CONFIG_REQUIRED",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(loadKeyring).not.toHaveBeenCalled();
+  });
+
+  it("does not probe when dispatch credential padding would normalize to the reader", async () => {
+    const reused = `srb1.${"L".repeat(16)}.${"S".repeat(43)}`;
+    const fetcher = vi.fn();
+    const loadKeyring = vi.fn();
+
+    await expect(
+      checkSiteBuildSettlementReadbackReadiness(
+        {
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1",
+          MODEL_GATEWAY_KEY: ` ${reused} `,
+          MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: reused,
+          SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: "/secret/keyring",
+        },
+        fetcher,
+        loadKeyring as never,
+      ),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_CONFIG_REQUIRED",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(loadKeyring).not.toHaveBeenCalled();
+  });
+
+  it("fails settlement readiness before network when either secret family is missing", async () => {
+    const fetcher = vi.fn();
+    const loadKeyring = vi.fn();
+
+    await expect(
+      checkSiteBuildSettlementReadbackReadiness(
+        { MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1" },
+        fetcher,
+        loadKeyring as never,
+      ),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_CONFIG_REQUIRED",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(loadKeyring).not.toHaveBeenCalled();
+  });
+
+  it("bounds a drifted settlement capability to one stable unavailable code", async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response('{"status":"ready","schema_version":"wrong"}', {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "no-store",
+            "x-new-api-settlement-contract": "new-api-settlement-readback/v1",
+          },
+        }),
+    );
+
+    await expect(
+      checkSiteBuildSettlementReadbackReadiness(
+        {
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1",
+          MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: `srb1.${"L".repeat(16)}.${"S".repeat(43)}`,
+          SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: "/secret/keyring",
+        },
+        fetcher,
+        vi.fn(() => ({ activeKeyId: "settlement-test" })) as never,
+      ),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+    });
+  });
+
+  it("rejects an unsafe execution-budget JWKS URL before network dispatch", async () => {
     const unsafe =
-      'https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil';
+      "https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil";
     const fetcher = vi.fn();
 
     const result = await checkExecutionBudgetJwksReadiness(
       {
-        APP_ENVIRONMENT: 'production',
-        NODE_ENV: 'production',
+        APP_ENVIRONMENT: "production",
+        NODE_ENV: "production",
         EXECUTION_BUDGET_GRANT_JWKS_URI: unsafe,
-        EXECUTION_BUDGET_GRANT_ISSUER: 'https://control-plane.example.test/',
-        EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
-        EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+        EXECUTION_BUDGET_GRANT_ISSUER: "https://control-plane.example.test/",
+        EXECUTION_BUDGET_GRANT_AUDIENCE: "global-backend:execution-budget",
+        EXECUTION_BUDGET_GRANT_ALGORITHMS: "RS256,ES256,EdDSA",
       },
       fetcher,
     );
 
     expect(result).toEqual({
-      status: 'failed',
-      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      status: "failed",
+      code: "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
     });
     expect(fetcher).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain(unsafe);
-    expect(JSON.stringify(result)).not.toContain('must-never-leak');
+    expect(JSON.stringify(result)).not.toContain("must-never-leak");
   });
 
-  it('probes the configured execution-budget JWKS with a bounded redirect-free request', async () => {
+  it("probes the configured execution-budget JWKS with a bounded redirect-free request", async () => {
     const fetcher = vi.fn(
       async () =>
         new Response(
@@ -109,37 +254,37 @@ describe('managed dependency readiness', () => {
       fetcher,
     );
 
-    expect(result).toEqual({ status: 'ok' });
+    expect(result).toEqual({ status: "ok" });
     expect(fetcher).toHaveBeenCalledWith(
-      'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
-      expect.objectContaining({ method: 'GET', redirect: 'error' }),
+      "http://127.0.0.1:3100/.well-known/execution-budget-jwks.json",
+      expect.objectContaining({ method: "GET", redirect: "error" }),
     );
   });
 
   it.each([
     [
-      'an unusable public key',
+      "an unusable public key",
       {
         ...EXECUTION_ES256_PUBLIC_JWK,
-        x: 'x',
-        y: 'y',
+        x: "x",
+        y: "y",
       },
     ],
     [
-      'private key material',
+      "private key material",
       {
         ...EXECUTION_ES256_PUBLIC_JWK,
-        d: 'WRRQcLrRvsQguZtooDJ6t3J-rcSfYKZjJzbnf0VdVtQ',
+        d: "WRRQcLrRvsQguZtooDJ6t3J-rcSfYKZjJzbnf0VdVtQ",
       },
     ],
     [
-      'an algorithm-incompatible key',
+      "an algorithm-incompatible key",
       {
         ...EXECUTION_ES256_PUBLIC_JWK,
-        alg: 'RS256',
+        alg: "RS256",
       },
     ],
-  ])('rejects an execution-budget JWKS containing %s', async (_name, key) => {
+  ])("rejects an execution-budget JWKS containing %s", async (_name, key) => {
     const fetcher = vi.fn(
       async () =>
         new Response(JSON.stringify({ keys: [key] }), { status: 200 }),
@@ -148,102 +293,102 @@ describe('managed dependency readiness', () => {
     await expect(
       checkExecutionBudgetJwksReadiness(EXECUTION_BUDGET_ENV, fetcher),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      status: "failed",
+      code: "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
     });
   });
 
-  it('rejects loopback HTTP execution-budget trust roots in production', async () => {
+  it("rejects loopback HTTP execution-budget trust roots in production", async () => {
     const fetcher = vi.fn();
 
     const result = await checkExecutionBudgetJwksReadiness(
       {
-        APP_ENVIRONMENT: 'production',
-        NODE_ENV: 'production',
-        EXECUTION_BUDGET_GRANT_JWKS_URI: 'http://127.0.0.1:3100/jwks',
-        EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
-        EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
-        EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+        APP_ENVIRONMENT: "production",
+        NODE_ENV: "production",
+        EXECUTION_BUDGET_GRANT_JWKS_URI: "http://127.0.0.1:3100/jwks",
+        EXECUTION_BUDGET_GRANT_ISSUER: "http://127.0.0.1:3100/",
+        EXECUTION_BUDGET_GRANT_AUDIENCE: "global-backend:execution-budget",
+        EXECUTION_BUDGET_GRANT_ALGORITHMS: "RS256,ES256,EdDSA",
       },
       fetcher,
     );
 
     expect(result).toEqual({
-      status: 'failed',
-      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      status: "failed",
+      code: "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
     });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('reports a missing deployment-owned platform writer without falling back to another principal', async () => {
+  it("reports a missing deployment-owned platform writer without falling back to another principal", async () => {
     await expect(
       checkPlatformBudgetAuthorityReadiness(undefined),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+      status: "failed",
+      code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
     });
   });
 
-  it('proves all three fixed platform purposes from the bounded repository readback', async () => {
+  it("proves all three fixed platform purposes from the bounded repository readback", async () => {
     const source = platformSource(platformAuthorityRows());
 
     await expect(
       checkPlatformBudgetAuthorityReadiness(
         source,
-        new Date('2026-08-21T00:00:00.000Z'),
+        new Date("2026-08-21T00:00:00.000Z"),
       ),
     ).resolves.toEqual({
-      status: 'ok',
+      status: "ok",
     });
     expect(source.inspectPlatformAuthorityFreshness).toHaveBeenCalledWith(
-      new Date('2026-08-21T00:00:00.000Z'),
+      new Date("2026-08-21T00:00:00.000Z"),
     );
   });
 
   it.each([
-    ['missing', 'MISSING'],
-    ['expired', 'EXPIRED'],
-    ['revoked', 'REVOKED'],
-    ['exhausted', 'EXHAUSTED'],
-    ['not_yet_valid', 'NOT_YET_VALID'],
-    ['invalid', 'INVALID'],
+    ["missing", "MISSING"],
+    ["expired", "EXPIRED"],
+    ["revoked", "REVOKED"],
+    ["exhausted", "EXHAUSTED"],
+    ["not_yet_valid", "NOT_YET_VALID"],
+    ["invalid", "INVALID"],
   ])(
-    'reports %s authority for the exact fixed platform purpose without row details',
+    "reports %s authority for the exact fixed platform purpose without row details",
     async (state, codeSuffix) => {
       const source = platformSource(
-        platformAuthorityRows({ 'platform.intent_watch': state }),
+        platformAuthorityRows({ "platform.intent_watch": state }),
       );
 
       const result = await checkPlatformBudgetAuthorityReadiness(
         source,
-        new Date('2026-08-21T00:00:00.000Z'),
+        new Date("2026-08-21T00:00:00.000Z"),
       );
 
       expect(result).toEqual({
-        status: 'failed',
+        status: "failed",
         code: `PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_${codeSuffix}`,
       });
-      expect(JSON.stringify(result)).not.toContain('schedule');
-      expect(JSON.stringify(result)).not.toContain('authority_id');
+      expect(JSON.stringify(result)).not.toContain("schedule");
+      expect(JSON.stringify(result)).not.toContain("authority_id");
     },
   );
 
-  it('bounds malformed rows and raw platform database errors to one stable code', async () => {
+  it("bounds malformed rows and raw platform database errors to one stable code", async () => {
     for (const rows of [
       platformAuthorityRows().slice(0, 2),
-      new Error('postgresql://writer:must-never-leak@db/platform'),
+      new Error("postgresql://writer:must-never-leak@db/platform"),
     ]) {
       const source = platformSource(rows);
       const result = await checkPlatformBudgetAuthorityReadiness(source);
       expect(result).toEqual({
-        status: 'failed',
-        code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE',
+        status: "failed",
+        code: "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE",
       });
-      expect(JSON.stringify(result)).not.toContain('must-never-leak');
+      expect(JSON.stringify(result)).not.toContain("must-never-leak");
     }
   });
 
-  it('registers and unregisters the additive authority contributors without probing on registration', async () => {
+  it("registers and unregisters the additive authority contributors without probing on registration", async () => {
     const contributors = new Map<string, () => unknown>();
     const unregister = vi.fn();
     const registry = {
@@ -257,29 +402,32 @@ describe('managed dependency readiness', () => {
       { current: () => identity } as never,
     );
     managed.onModuleInit();
-    expect(contributors.has('execution_budget_jwks')).toBe(true);
-    expect(contributors.has('generic_artifact_storage')).toBe(true);
-    expect(contributors.has('platform_budget_authority')).toBe(false);
+    expect(contributors.has("execution_budget_jwks")).toBe(true);
+    expect(contributors.has("generic_artifact_storage")).toBe(true);
+    expect(contributors.has("site_builder_model_settlement_readback")).toBe(
+      true,
+    );
+    expect(contributors.has("platform_budget_authority")).toBe(false);
     expect(unregister).not.toHaveBeenCalled();
-    vi.stubEnv('TOOL_RATE_LIMIT_REDIS_URL', '');
-    vi.stubEnv('REDIS_URL', '');
-    vi.stubEnv('MODEL_GATEWAY_URL', '');
-    vi.stubEnv('MODEL_GATEWAY_KEY', '');
-    vi.stubEnv('CHROME_PATH', '/not-an-allowed-browser');
+    vi.stubEnv("TOOL_RATE_LIMIT_REDIS_URL", "");
+    vi.stubEnv("REDIS_URL", "");
+    vi.stubEnv("MODEL_GATEWAY_URL", "");
+    vi.stubEnv("MODEL_GATEWAY_KEY", "");
+    vi.stubEnv("CHROME_PATH", "/not-an-allowed-browser");
     try {
-      await expect(contributors.get('redis')?.()).resolves.toEqual({
-        status: 'failed',
-        code: 'REDIS_CONFIG_REQUIRED',
+      await expect(contributors.get("redis")?.()).resolves.toEqual({
+        status: "failed",
+        code: "REDIS_CONFIG_REQUIRED",
       });
-      await expect(contributors.get('model_gateway')?.()).resolves.toEqual({
-        status: 'failed',
-        code: 'MODEL_GATEWAY_CONFIG_REQUIRED',
+      await expect(contributors.get("model_gateway")?.()).resolves.toEqual({
+        status: "failed",
+        code: "MODEL_GATEWAY_CONFIG_REQUIRED",
       });
-      await expect(contributors.get('browser')?.()).resolves.toEqual({
-        status: 'failed',
-        code: 'BROWSER_RUNTIME_CONFIG_INVALID',
+      await expect(contributors.get("browser")?.()).resolves.toEqual({
+        status: "failed",
+        code: "BROWSER_RUNTIME_CONFIG_INVALID",
       });
-      expect(contributors.get('renderer')?.()).toEqual({ status: 'ok' });
+      expect(contributors.get("renderer")?.()).toEqual({ status: "ok" });
     } finally {
       vi.unstubAllEnvs();
     }
@@ -297,39 +445,39 @@ describe('managed dependency readiness', () => {
       platformRegistry as never,
       {
         inspectPlatformAuthorityFreshness: vi.fn(async () => ({
-          status: 'writer_unavailable' as const,
+          status: "writer_unavailable" as const,
         })),
       } as never,
     );
     platform.onModuleInit();
     expect(platformRegistry.register).toHaveBeenCalledWith(
-      'platform_budget_authority',
+      "platform_budget_authority",
       expect.any(Function),
     );
     await expect(
-      contributors.get('platform_budget_authority')?.(),
+      contributors.get("platform_budget_authority")?.(),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+      status: "failed",
+      code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
     });
     platform.onModuleDestroy();
     expect(platformUnregister).toHaveBeenCalledOnce();
   });
 
-  it('fails artifact storage readiness before constructing a client when deployment config is incomplete', async () => {
+  it("fails artifact storage readiness before constructing a client when deployment config is incomplete", async () => {
     const factory = vi.fn();
 
     await expect(
       checkGenericArtifactStorageReadiness({}, factory),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+      status: "failed",
+      code: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE",
     });
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it('delegates artifact storage readiness to the production S3 store contract and destroys its client', async () => {
-    const checkReadiness = vi.fn(async () => ({ status: 'ready' as const }));
+  it("delegates artifact storage readiness to the production S3 store contract and destroys its client", async () => {
+    const checkReadiness = vi.fn(async () => ({ status: "ready" as const }));
     const checkLifecycleExtension = vi.fn(async () => true);
     const destroy = vi.fn();
     const factory = vi.fn(() => ({
@@ -338,25 +486,25 @@ describe('managed dependency readiness', () => {
       destroy,
     }));
     const env = {
-      GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: 'http://127.0.0.1:19000',
-      GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'global-operation-artifacts',
-      GENERIC_OPERATION_ARTIFACT_S3_REGION: 'us-east-1',
-      GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-artifact',
-      GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'must-never-be-returned',
-      GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: 'true',
+      GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: "http://127.0.0.1:19000",
+      GENERIC_OPERATION_ARTIFACT_S3_BUCKET: "global-operation-artifacts",
+      GENERIC_OPERATION_ARTIFACT_S3_REGION: "us-east-1",
+      GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: "runtime-artifact",
+      GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: "must-never-be-returned",
+      GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: "true",
     };
 
     await expect(
       checkGenericArtifactStorageReadiness(env, factory),
     ).resolves.toEqual({
-      status: 'ok',
+      status: "ok",
     });
     expect(factory).toHaveBeenCalledWith({
-      endpoint: 'http://127.0.0.1:19000/',
-      bucket: 'global-operation-artifacts',
-      region: 'us-east-1',
-      accessKeyId: 'runtime-artifact',
-      secretAccessKey: 'must-never-be-returned',
+      endpoint: "http://127.0.0.1:19000/",
+      bucket: "global-operation-artifacts",
+      region: "us-east-1",
+      accessKeyId: "runtime-artifact",
+      secretAccessKey: "must-never-be-returned",
       forcePathStyle: true,
     });
     expect(checkReadiness).toHaveBeenCalledOnce();
@@ -364,9 +512,9 @@ describe('managed dependency readiness', () => {
     expect(destroy).toHaveBeenCalledOnce();
   });
 
-  it('fails artifact storage readiness when the MinIO all-version expiry extension drifts', async () => {
+  it("fails artifact storage readiness when the MinIO all-version expiry extension drifts", async () => {
     const factory = vi.fn(() => ({
-      checkReadiness: vi.fn(async () => ({ status: 'ready' as const })),
+      checkReadiness: vi.fn(async () => ({ status: "ready" as const })),
       checkLifecycleExtension: vi.fn(async () => false),
       destroy: vi.fn(),
     }));
@@ -374,80 +522,80 @@ describe('managed dependency readiness', () => {
     await expect(
       checkGenericArtifactStorageReadiness(
         {
-          GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: 'http://127.0.0.1:19000',
-          GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'global-operation-artifacts',
-          GENERIC_OPERATION_ARTIFACT_S3_REGION: 'us-east-1',
-          GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-artifact',
-          GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'must-never-be-returned',
-          GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: 'true',
+          GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: "http://127.0.0.1:19000",
+          GENERIC_OPERATION_ARTIFACT_S3_BUCKET: "global-operation-artifacts",
+          GENERIC_OPERATION_ARTIFACT_S3_REGION: "us-east-1",
+          GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: "runtime-artifact",
+          GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: "must-never-be-returned",
+          GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: "true",
         },
         factory,
       ),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+      status: "failed",
+      code: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE",
     });
   });
 
-  it('holds Worker readiness when the Linux image decoder limiter is absent', async () => {
+  it("holds Worker readiness when the Linux image decoder limiter is absent", async () => {
     await expect(
-      checkImagePipelineIsolationReadiness('linux', async () => false),
+      checkImagePipelineIsolationReadiness("linux", async () => false),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'IMAGE_PIPELINE_ISOLATION_UNAVAILABLE',
+      status: "failed",
+      code: "IMAGE_PIPELINE_ISOLATION_UNAVAILABLE",
     });
     await expect(
-      checkImagePipelineIsolationReadiness('linux', async () => true),
+      checkImagePipelineIsolationReadiness("linux", async () => true),
     ).resolves.toEqual({
-      status: 'ok',
+      status: "ok",
     });
   });
 
-  it('requires an authoritative Redis PING and fails closed when config is missing', async () => {
+  it("requires an authoritative Redis PING and fails closed when config is missing", async () => {
     await expect(checkRedisReadiness({}, vi.fn())).resolves.toEqual({
-      status: 'failed',
-      code: 'REDIS_CONFIG_REQUIRED',
+      status: "failed",
+      code: "REDIS_CONFIG_REQUIRED",
     });
     const client = {
-      status: 'wait',
+      status: "wait",
       connect: vi.fn(async () => undefined),
-      ping: vi.fn(async () => 'PONG'),
+      ping: vi.fn(async () => "PONG"),
       disconnect: vi.fn(),
     };
     await expect(
       checkRedisReadiness(
-        { REDIS_URL: 'redis://127.0.0.1:6379' },
+        { REDIS_URL: "redis://127.0.0.1:6379" },
         vi.fn(() => client),
       ),
-    ).resolves.toEqual({ status: 'ok' });
+    ).resolves.toEqual({ status: "ok" });
     expect(client.connect).toHaveBeenCalledOnce();
     expect(client.ping).toHaveBeenCalledOnce();
     expect(client.disconnect).toHaveBeenCalledOnce();
   });
 
   it.each([
-    'redis://cache.example.test:6379/0',
-    'http://127.0.0.1:6379',
-    'rediss://cache.example.test:6380/0?family=4',
-    'rediss://cache.example.test:6380/0#private-fragment',
-    'rediss://cache.example.test:6380/not-a-db',
+    "redis://cache.example.test:6379/0",
+    "http://127.0.0.1:6379",
+    "rediss://cache.example.test:6380/0?family=4",
+    "rediss://cache.example.test:6380/0#private-fragment",
+    "rediss://cache.example.test:6380/not-a-db",
   ])(
-    'rejects an unsafe Redis URL before constructing a client: %s',
+    "rejects an unsafe Redis URL before constructing a client: %s",
     async (url) => {
       const factory = vi.fn();
       const result = await checkRedisReadiness({ REDIS_URL: url }, factory);
       expect(result).toEqual({
-        status: 'failed',
-        code: 'REDIS_CONFIG_INVALID',
+        status: "failed",
+        code: "REDIS_CONFIG_INVALID",
       });
       expect(factory).not.toHaveBeenCalled();
       expect(JSON.stringify(result)).not.toContain(url);
     },
   );
 
-  it('allows credentials in a TLS URL but never returns them when the probe fails', async () => {
+  it("allows credentials in a TLS URL but never returns them when the probe fails", async () => {
     const configured =
-      'rediss://user:must-never-leak@cache.example.test:6380/0';
+      "rediss://user:must-never-leak@cache.example.test:6380/0";
     const factory = vi.fn(() => {
       throw new Error(`failed ${configured}`);
     });
@@ -455,12 +603,12 @@ describe('managed dependency readiness', () => {
       { REDIS_URL: configured },
       factory,
     );
-    expect(result).toEqual({ status: 'failed', code: 'REDIS_UNAVAILABLE' });
+    expect(result).toEqual({ status: "failed", code: "REDIS_UNAVAILABLE" });
     expect(factory).toHaveBeenCalledWith(configured);
-    expect(JSON.stringify(result)).not.toContain('must-never-leak');
+    expect(JSON.stringify(result)).not.toContain("must-never-leak");
   });
 
-  it('uses only the no-generation model-list probe and bounds failures', async () => {
+  it("uses only the no-generation model-list probe and bounds failures", async () => {
     const fetcher = vi.fn(async () => ({
       ok: true,
       body: { cancel: vi.fn(async () => undefined) },
@@ -468,76 +616,76 @@ describe('managed dependency readiness', () => {
     await expect(
       checkModelGatewayReadiness(
         {
-          MODEL_GATEWAY_URL: 'http://127.0.0.1:3001/v1',
-          MODEL_GATEWAY_KEY: 'must-not-be-returned',
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+          MODEL_GATEWAY_KEY: "must-not-be-returned",
         },
         fetcher as never,
       ),
-    ).resolves.toEqual({ status: 'ok' });
+    ).resolves.toEqual({ status: "ok" });
     expect(fetcher).toHaveBeenCalledWith(
-      'http://127.0.0.1:3001/v1/models',
-      expect.objectContaining({ method: 'GET' }),
+      "http://127.0.0.1:3001/v1/models",
+      expect.objectContaining({ method: "GET" }),
     );
     expect(
       JSON.stringify(await checkModelGatewayReadiness({}, fetcher as never)),
-    ).not.toContain('must-not-be-returned');
+    ).not.toContain("must-not-be-returned");
   });
 
-  it('never sends the gateway key to an unsafe probe origin', async () => {
+  it("never sends the gateway key to an unsafe probe origin", async () => {
     for (const url of [
-      'http://gateway.example.test/v1',
-      'https://user:password@gateway.example.test/v1',
-      'https://gateway.example.test/v1?redirect=evil',
+      "http://gateway.example.test/v1",
+      "https://user:password@gateway.example.test/v1",
+      "https://gateway.example.test/v1?redirect=evil",
     ]) {
       const fetcher = vi.fn();
       const result = await checkModelGatewayReadiness(
         {
           MODEL_GATEWAY_URL: url,
-          MODEL_GATEWAY_KEY: 'never-dispatch-this-key',
+          MODEL_GATEWAY_KEY: "never-dispatch-this-key",
         },
         fetcher,
       );
       expect(result).toEqual({
-        status: 'failed',
-        code: 'MODEL_GATEWAY_CONFIG_INVALID',
+        status: "failed",
+        code: "MODEL_GATEWAY_CONFIG_INVALID",
       });
       expect(fetcher).not.toHaveBeenCalled();
-      expect(JSON.stringify(result)).not.toContain('never-dispatch-this-key');
+      expect(JSON.stringify(result)).not.toContain("never-dispatch-this-key");
     }
   });
 
-  it('derives the renderer identity from the attested renderer component digest', () => {
+  it("derives the renderer identity from the attested renderer component digest", () => {
     expect(rendererRuntimeIdentity(identity)).toBe(
       `site-renderer@${identity.renderer_digest}`,
     );
     expect(() =>
       rendererRuntimeIdentity({
         attested: false,
-        schema_version: 'global-runtime-release-identity/v1',
-        code: 'BUILD_ATTESTATION_REQUIRED',
+        schema_version: "global-runtime-release-identity/v1",
+        code: "BUILD_ATTESTATION_REQUIRED",
       }),
-    ).toThrow('RENDERER_IDENTITY_NOT_PROVEN');
+    ).toThrow("RENDERER_IDENTITY_NOT_PROVEN");
   });
 
-  it('launches only the fixed local Chromium binary with a zero-network data document', async () => {
+  it("launches only the fixed local Chromium binary with a zero-network data document", async () => {
     const probe = vi.fn(async () => undefined);
     await expect(checkBrowserReadiness({}, probe)).resolves.toEqual({
-      status: 'ok',
+      status: "ok",
     });
     expect(probe).toHaveBeenCalledWith(
-      '/usr/bin/chromium',
+      "/usr/bin/chromium",
       expect.arrayContaining([
-        '--headless=new',
-        '--disable-background-networking',
+        "--headless=new",
+        "--disable-background-networking",
         expect.stringMatching(/^data:text\/html,/),
       ]),
     );
     const unsafe = vi.fn();
     await expect(
-      checkBrowserReadiness({ CHROME_PATH: '/tmp/downloaded-chrome' }, unsafe),
+      checkBrowserReadiness({ CHROME_PATH: "/tmp/downloaded-chrome" }, unsafe),
     ).resolves.toEqual({
-      status: 'failed',
-      code: 'BROWSER_RUNTIME_CONFIG_INVALID',
+      status: "failed",
+      code: "BROWSER_RUNTIME_CONFIG_INVALID",
     });
     expect(unsafe).not.toHaveBeenCalled();
   });

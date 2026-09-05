@@ -153,6 +153,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
+          node --test packages/db/test/site-build-provider-transport.rls.spec.mjs
           export RUNTIME_LEASE_PROVISION_DATABASE_URL="${DATABASE_URL}"
           export RUNTIME_API_LEASE_LOGIN=ci_runtime_api
           export RUNTIME_WORKER_LEASE_LOGIN=ci_runtime_worker
@@ -165,6 +166,20 @@ jobs:
           export RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL="postgresql://${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}:${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           bash infra/postgres/provision-runtime-lease-principals.sh
           bash infra/postgres/verify-runtime-lease-principal-permissions.sh
+          export SITE_BUILD_PROVIDER_WIRE_PROVISION_DATABASE_URL="${DATABASE_URL}"
+          export SITE_BUILD_PROVIDER_WIRE_LOGIN=ci_site_build_provider_wire_writer
+          export SITE_BUILD_PROVIDER_WIRE_PASSWORD="$(openssl rand -hex 24)"
+          export SITE_BUILD_PROVIDER_WIRE_DATABASE_URL="postgresql://${SITE_BUILD_PROVIDER_WIRE_LOGIN}:${SITE_BUILD_PROVIDER_WIRE_PASSWORD}@127.0.0.1:5432/global_test"
+          export SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION=20260904190000_site_build_provider_wire_authority
+          bash infra/postgres/provision-site-build-provider-wire-writer.sh
+          bash infra/postgres/provision-site-build-provider-wire-writer.sh
+          bash infra/postgres/verify-site-build-provider-wire-writer.sh
+          SITE_BUILD_PROVIDER_WIRE_DISPOSABLE_TEST=1 \
+            bash infra/postgres/verify-site-build-provider-wire-writer-disposable.sh
+          pnpm --filter @global/api exec vitest run \
+            src/site-builder/site-build-provider-wire.database.spec.ts \
+            src/durable-results/model-result-projection-bounds.spec.ts \
+            src/model-gateway/router-model-gateway.postgres.spec.ts
           export EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL="${DATABASE_URL}"
           export EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN=ci_execution_budget_platform_writer
           export EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD="$(openssl rand -hex 24)"
