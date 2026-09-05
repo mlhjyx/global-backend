@@ -4,20 +4,23 @@
 > 生命周期：`CURRENT`
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
-> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（按各批追加日期拍板/收敛），标注 ⚠ 者待 A/B 会签。
-> 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**，2026-07-27 追加 **ADR-021**，2026-07-29 追加 **ADR-022**，2026-08-04 追加 **ADR-023**，2026-08-16 追加 **ADR-024**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档与用户拍板的单一产品运行路径），2026-08-29 追加 **ADR-025**。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
+> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。每条决策以本表行内状态为准；标注 ⚠ 者待 A/B 会签，SUPERSEDED 条目只保留历史 provenance。
+> 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**，2026-07-27 追加 **ADR-021**，2026-07-29 追加 **ADR-022**，2026-08-04 追加 **ADR-023**，2026-08-16 追加 **ADR-024**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档与用户拍板的单一产品运行路径），2026-08-29 追加 **ADR-025**，2026-09-04 追加 **PDR-004** 作为 PDR-003 的 forward supersession。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
 
 ## PDR（产品决策）
 
-| ID      | 决策                                                                                                                                              | 状态                  |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| PDR-001 | 对象词典统一：Candidate（机器候选）→ Lead（Company×ICP 资格对象）→ Opportunity 单一聚合（CANDIDATE/QGO/SAO/CLOSED 为状态）→ CommercialOutcome     | ACCEPTED ⚠待 A/B 会签 |
-| PDR-002 | 业务层级 Goal → GrowthInitiative → Campaign → Run/Batch/Job；Campaign 不承担战略/研究/长期商机（=交付包 TA-003）                                  | ACCEPTED ⚠待 A/B 会签 |
-| PDR-003 | 能力顺序：买家智能封版 → Campaign 控制面 → 受控邮件 → Inbox/QGO → Outcome/归因 → 内容/视频/多平台（纵向闭环，不做全域 Alpha；=交付包 TA-010/011） | ACCEPTED              |
+| ID      | 决策                                                                                                                                                                                                             | 状态                  |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| PDR-001 | 对象词典统一：Candidate（机器候选）→ Lead（Company×ICP 资格对象）→ Opportunity 单一聚合（CANDIDATE/QGO/SAO/CLOSED 为状态）→ CommercialOutcome                                                                    | ACCEPTED ⚠待 A/B 会签 |
+| PDR-002 | 业务层级 Goal → GrowthInitiative → Campaign → Run/Batch/Job；Campaign 不承担战略/研究/长期商机（=交付包 TA-003）                                                                                                 | ACCEPTED ⚠待 A/B 会签 |
+| PDR-003 | 能力顺序：买家智能封版 → Campaign 控制面 → 受控邮件 → Inbox/QGO → Outcome/归因 → 内容/视频/多平台（纵向闭环，不做全域 Alpha；=交付包 TA-010/011）。本行保留 2026-07 决策 provenance，不再规定当前施工顺序。      | SUPERSEDED BY PDR-004 |
+| PDR-004 | 能力顺序修订：Buyer Intelligence → immutable LeadQualifiedPackage → durable Opportunity → Human QGO → Outcome feedback；MVP-2 才引入 single approved email provider / Campaign，并受独立 OAuth/send 授权门约束。 | ACCEPTED              |
+
+PDR-004 is a forward amendment: it preserves PDR-003 as dated provenance while superseding only its Campaign/email-before-Opportunity execution order. `LeadQualifiedPackage` is the canonical immutable handoff object. `LeadQualified` only names the integration event; it is not a second canonical product object.
 
 ## ADR（架构决策）
 
-1. **ADR-001 SCOPE 本仓边界**：本后端止于 `QualifiedLeadHandoff`；SaaS 拥有身份、Campaign、发送、Inbox、Opportunity(QGO/SAO)、归因。成交结果只回流为训练/评估标签。存储侧合规（Data Rights/PII/保留/Suppression/DSR）留本仓。**边界变更唯一途径=修订本 ADR+三方书面确认。**
+1. **ADR-001 SCOPE 本仓边界**：本后端止于不可变 `LeadQualifiedPackage` 并发出 `LeadQualified` 集成事件；SaaS 拥有身份、Campaign、发送、Inbox、Opportunity(QGO/SAO)、归因。成交结果只回流为训练/评估标签。存储侧合规（Data Rights/PII/保留/Suppression/DSR）留本仓。**边界变更唯一途径=修订本 ADR+三方书面确认。**
 2. **ADR-002 MODULAR-MONOLITH**：单体单库继续；bounded context+依赖方向隔离；进程按资源类拆，不做业务微服务化。
 3. **ADR-003 DATA-PLANES**：四平面——Control Plane（SaaS）/平台共享绿色事实层（无 RLS、零个人数据）/租户 RLS Growth Plane/PII-rights zone（列级加密或 Tokenization、保留期、删除链）；DB 角色最小权限拆分；逻辑 Schema 写入 Owner 分区为演进方向。
 4. **ADR-004 CANDIDATE**：Fit、DemandProof、Score、stage 水位**必须属于 ICP×Organization（CandidateAssessment）**，禁止挂 CanonicalCompany；canonical_company 现有 fitVerdict/水位列迁移后删除。
