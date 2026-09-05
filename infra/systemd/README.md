@@ -84,6 +84,28 @@ The API-only secret file `.secrets/backend-api-runtime.env` contains
 these URLs. Each login inherits exactly one of `runtime_api`, `runtime_worker`,
 or `runtime_outbox_relay`; `app_user` remains read-only for the lease table.
 
+Provision the separate Site Builder provider-wire writer after migrations. It
+is not the Worker lease login: the dedicated login inherits exactly
+`app_user` plus `runtime_worker`, allowing tenant-RLS transactions to invoke
+the worker-only reserve/send-cut/probe/receipt functions without giving those
+functions to the API or Relay:
+
+```bash
+export APP_DATABASE_URL='postgresql://app_user:...@database:5432/global'
+export SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION='<release-attestation migration_revision>'
+bash infra/postgres/provision-site-build-provider-wire-writer.sh
+bash infra/postgres/verify-site-build-provider-wire-writer.sh
+```
+
+The verifier compares the writer and app host/port/database targets, checks the
+exact release migration, all provider-wire function ACLs, FORCE RLS, direct
+write denial, and both membership option sets. It never prints either URL.
+
+Install its `SITE_BUILD_PROVIDER_WIRE_DATABASE_URL` only in
+`.secrets/backend-worker-runtime.env`. Keep the provisioning owner URL, login
+name, and generated password in the deployment secret manager; none belongs in
+the common or API runtime secret file.
+
 ```bash
 cd /global/backend
 docker compose \

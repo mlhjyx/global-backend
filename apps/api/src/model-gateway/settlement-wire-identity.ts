@@ -28,7 +28,7 @@ interface KeyEntry {
 
 export interface SettlementWireIdentity {
   schemaVersion: "site-build-settlement-wire-identity/v1";
-  physicalWireAttempt: number;
+  physicalWireAttempt: 1 | 2;
   derivationKeyId: string;
   requestId: string;
   /** Transient only. Never include this object in persisted metadata. */
@@ -238,7 +238,7 @@ export function settlementWireIdentities(
     identities.push(
       Object.freeze({
         schemaVersion: "site-build-settlement-wire-identity/v1" as const,
-        physicalWireAttempt,
+        physicalWireAttempt: physicalWireAttempt as 1 | 2,
         derivationKeyId: keyring.activeKeyId,
         requestId,
         nonce,

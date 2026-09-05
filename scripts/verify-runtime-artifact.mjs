@@ -1,42 +1,46 @@
-import { lstat, opendir } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { lstat, opendir, readFile } from "node:fs/promises";
+import { relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const FORBIDDEN_SEGMENTS = new Set([
-  '__fixtures__',
-  '__mocks__',
-  'eval',
-  'fixtures',
-  'test-support',
-  'testing',
-  'visual-tests',
+  "__fixtures__",
+  "__mocks__",
+  "eval",
+  "fixtures",
+  "test-support",
+  "testing",
+  "visual-tests",
 ]);
-const FORBIDDEN_FILE = /(?:^|[.-])(?:dev-token-verifier|m1eb-golden|sandbox(?:-discovery)?|stub-model)(?:[.-]|$)/i;
+const FORBIDDEN_FILE =
+  /(?:^|[.-])(?:dev-token-verifier|m1eb-golden|sandbox(?:-discovery)?|site-builder-model-settlement|stub-model)(?:[.-]|$)/i;
 const TEST_FILE = /\.(?:spec|test(?:-fixture)?)\.[cm]?[jt]sx?$/i;
 const GALLERY_ENTRYPOINT = /(?:^|[.-])gallery(?:[.-]|$)/i;
 const PRODUCT_GALLERY_CATALOG_FILES = new Set([
-  'product-assets/component-catalog-v1/area-gallery-spec.json',
-  'product-assets/component-catalog-v1/photo-gallery-spec.json',
+  "product-assets/component-catalog-v1/area-gallery-spec.json",
+  "product-assets/component-catalog-v1/photo-gallery-spec.json",
 ]);
+const JAVASCRIPT_FILE = /\.[cm]?js$/iu;
+const LEGACY_MODEL_SETTLEMENT_SOURCE =
+  /\/api\/log\/token|site-builder-model-settlement-attestation|SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_(?:PATH|SHA256)/u;
 
 function normalized(root, path) {
-  return relative(root, path).split(sep).join('/');
+  return relative(root, path).split(sep).join("/");
 }
 
 function violationCode(path) {
-  const segments = path.split('/');
+  const segments = path.split("/");
   if (segments.some((segment) => FORBIDDEN_SEGMENTS.has(segment))) {
-    return 'FORBIDDEN_RUNTIME_DIRECTORY';
+    return "FORBIDDEN_RUNTIME_DIRECTORY";
   }
-  const basename = segments.at(-1) ?? '';
-  if (TEST_FILE.test(basename)) return 'PRODUCT_TEST_FILE_PRESENT';
+  const basename = segments.at(-1) ?? "";
+  if (TEST_FILE.test(basename)) return "PRODUCT_TEST_FILE_PRESENT";
   if (
     GALLERY_ENTRYPOINT.test(basename) &&
     !PRODUCT_GALLERY_CATALOG_FILES.has(path)
   ) {
-    return 'GALLERY_ENTRYPOINT_PRESENT';
+    return "GALLERY_ENTRYPOINT_PRESENT";
   }
-  if (FORBIDDEN_FILE.test(basename)) return 'SYNTHETIC_PROVIDER_PRESENT';
+  if (FORBIDDEN_FILE.test(basename)) return "SYNTHETIC_PROVIDER_PRESENT";
   return undefined;
 }
 
@@ -44,7 +48,7 @@ export async function findForbiddenRuntimeArtifacts(root) {
   const absoluteRoot = resolve(root);
   const rootStat = await lstat(absoluteRoot);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw new Error('runtime artifact root must be a non-symlink directory');
+    throw new Error("runtime artifact root must be a non-symlink directory");
   }
   const violations = [];
   const visit = async (directory) => {
@@ -53,13 +57,22 @@ export async function findForbiddenRuntimeArtifacts(root) {
       const absolute = resolve(directory, entry.name);
       const path = normalized(absoluteRoot, absolute);
       if (entry.isSymbolicLink()) {
-        violations.push({ path, code: 'RUNTIME_SYMLINK_FORBIDDEN' });
+        violations.push({ path, code: "RUNTIME_SYMLINK_FORBIDDEN" });
         continue;
       }
       const code = violationCode(path);
       if (code) {
         violations.push({ path, code });
         if (entry.isDirectory()) continue;
+      }
+      if (entry.isFile() && !code && JAVASCRIPT_FILE.test(entry.name)) {
+        const source = await readFile(absolute, "utf8");
+        if (LEGACY_MODEL_SETTLEMENT_SOURCE.test(source)) {
+          violations.push({
+            path,
+            code: "LEGACY_MODEL_SETTLEMENT_READER_PRESENT",
+          });
+        }
       }
       if (entry.isDirectory()) await visit(absolute);
     }
@@ -74,14 +87,20 @@ export async function assertRuntimeArtifactClean(root) {
     throw new Error(
       `forbidden runtime artifacts: ${violations
         .map((item) => `${item.code}:${item.path}`)
-        .join(',')}`,
+        .join(",")}`,
     );
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
   const root = process.argv[2];
-  if (!root) throw new Error('usage: verify-runtime-artifact.mjs <artifact-root>');
+  if (!root)
+    throw new Error("usage: verify-runtime-artifact.mjs <artifact-root>");
   await assertRuntimeArtifactClean(root);
-  process.stdout.write(`${JSON.stringify({ status: 'RUNTIME_ARTIFACT_CLEAN' })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ status: "RUNTIME_ARTIFACT_CLEAN" })}\n`,
+  );
 }

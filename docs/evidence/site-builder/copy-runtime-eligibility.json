@@ -4,10 +4,11 @@
   "active_binding_artifact_id": "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-15-v22-v1",
   "active_binding_source_bundle_digest": "5f4c321e9d48f0208e5b293a4d40d8f648c0414b8a429a789bed63cf4f874ac0",
   "status": "STALE_HOLD",
-  "current_source_fingerprint": "417dd95d876f3b910e9ad4a309779619214f95907f87071ebf6d3586f1951c78",
+  "current_source_fingerprint": "bcc60b9588deb6313f19f336bc3545b686550fe15ce0e94b5dd7b49de63051a6",
   "drifted_paths": [
     "apps/api/package.json",
     "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+    "apps/api/src/model-runtime/site-builder-ai-task-bridge.ts",
     "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
     "apps/api/src/site-builder/agents/ai-task.ts",
     "apps/api/tsconfig.build.json",
@@ -21,5 +22,5 @@
   "dispatch_authorization": "NOT_AUTHORIZED",
   "pilot_eligibility": "BLOCKED",
   "required_followup": "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
-  "stale_scope": "PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION"
+  "stale_scope": "PRODUCTION_PARITY_PROVIDER_SETTLEMENT_READBACK_V1"
 }

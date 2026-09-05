@@ -1,9 +1,13 @@
 import Ajv from 'ajv';
-import { describe, expect, it } from 'vitest';
+import { PrismaClient } from '@prisma/client';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   MODEL_RESULT_PROJECTION_DEFINITIONS,
+  registerModelResultProjections,
 } from './model-result-projections';
 import type { TypedProjectionSchema } from './durable-result-strategy';
+import { projectModelResultForReplay } from './model-result-replay';
+import { TypedProjectionRegistry } from './typed-projection.registry';
 
 type JsonRecord = Record<string, unknown>;
 type NumericBounds = Readonly<{
@@ -19,9 +23,9 @@ const COMMON_MODEL_METADATA_BOUNDS: Readonly<Record<string, NumericBounds>> = {
   'usage.inputTokens': { minimum: 0, maximum: 1_000_000_000 },
   'usage.outputTokens': { minimum: 0, maximum: 1_000_000_000 },
   'usage.costUsd': { minimum: 0, maximum: 1_000_000_000 },
-  'usage.gatewaySettlements': { maxItems: 16 },
+  'usage.gatewaySettlements': { maxItems: 2 },
   'usage.gatewaySettlements[].oneOf[0].status': { maxLength: 16 },
-  'usage.gatewaySettlements[].oneOf[0].requestId': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[0].physicalWireAttempt': { minimum: 1, maximum: 2 },
   'usage.gatewaySettlements[].oneOf[0].resolverId': { maxLength: 120 },
   'usage.gatewaySettlements[].oneOf[0].alias': { maxLength: 120 },
   'usage.gatewaySettlements[].oneOf[0].protocol': { maxLength: 40 },
@@ -31,10 +35,31 @@ const COMMON_MODEL_METADATA_BOUNDS: Readonly<Record<string, NumericBounds>> = {
   'usage.gatewaySettlements[].oneOf[0].costMicrousd': { minimum: 0, maximum: 1_000_000_000_000_000 },
   'usage.gatewaySettlements[].oneOf[0].inputTokens': { minimum: 0, maximum: 1_000_000_000 },
   'usage.gatewaySettlements[].oneOf[0].outputTokens': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].upstreamIdState': { maxLength: 16 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.schemaVersion': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.physicalWireAttempt': { minimum: 1, maximum: 2 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.finalPhase': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.gatewayIdState': { maxLength: 32 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.upstreamIdState': { maxLength: 32 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.payloadState': { maxLength: 32 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes': { maxItems: 2 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].sequence': { minimum: 1, maximum: 2 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].phase': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[0].transportObservation.readbackProbes[].httpStatusClass.oneOf[0]': { minimum: 2, maximum: 5 },
   'usage.gatewaySettlements[].oneOf[1].status': { maxLength: 16 },
-  'usage.gatewaySettlements[].oneOf[1].requestId.oneOf[0]': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[1].physicalWireAttempt': { minimum: 1, maximum: 2 },
   'usage.gatewaySettlements[].oneOf[1].resolverId': { maxLength: 120 },
   'usage.gatewaySettlements[].oneOf[1].reason': { maxLength: 40 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.schemaVersion': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.physicalWireAttempt': { minimum: 1, maximum: 2 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.finalPhase': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.gatewayIdState': { maxLength: 32 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.upstreamIdState': { maxLength: 32 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.payloadState': { maxLength: 32 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes': { maxItems: 2 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].sequence': { minimum: 1, maximum: 2 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].phase': { maxLength: 64 },
+  'usage.gatewaySettlements[].oneOf[1].transportObservation.readbackProbes[].httpStatusClass.oneOf[0]': { minimum: 2, maximum: 5 },
   callCount: { minimum: 0, maximum: 100 },
 };
 
@@ -271,7 +296,118 @@ function validates(schema: TypedProjectionSchema, path: string, value: unknown):
   return new Ajv({ strict: false }).compile(schemaNode(schema, path))(value) as boolean;
 }
 
+function maximalDomainValue(
+  node: JsonRecord,
+  path = '',
+  itemIndex = 0,
+): unknown {
+  if (Array.isArray(node.oneOf)) {
+    const branch = (node.oneOf as JsonRecord[]).find(
+      (candidate) => candidate.type !== 'null',
+    );
+    if (!branch) return null;
+    return maximalDomainValue(branch, path, itemIndex);
+  }
+  if (Object.hasOwn(node, 'const')) return node.const;
+  if (Array.isArray(node.enum)) return node.enum[itemIndex % node.enum.length];
+  const types = Array.isArray(node.type) ? node.type : [node.type];
+  const type = types.find((candidate) => candidate !== 'null');
+  if (type === 'object') {
+    const properties = (node.properties ?? {}) as JsonRecord;
+    const required = new Set((node.required ?? []) as string[]);
+    const rootOptionalMetadata = new Set([
+      'reportedModel',
+      'modelResolutionSource',
+      'usage',
+      'callCount',
+    ]);
+    return Object.fromEntries(
+      Object.entries(properties)
+        .filter(([key]) => path !== '' || required.has(key) || !rootOptionalMetadata.has(key))
+        .map(([key, child]) => [
+          key,
+          maximalDomainValue(child as JsonRecord, path ? `${path}.${key}` : key),
+        ]),
+    );
+  }
+  if (type === 'array') {
+    const item = node.items as JsonRecord;
+    const maximum = Number(node.maxItems ?? 0);
+    const keyValues = [
+      ...(
+      ((item.properties as JsonRecord | undefined)?.key as JsonRecord | undefined)
+        ?.enum ?? []
+      ),
+    ].sort((left, right) => String(left).localeCompare(String(right)));
+    const sequence = (item.properties as JsonRecord | undefined)?.sequence;
+    const count = keyValues.length > 0 ? Math.min(maximum, keyValues.length) : maximum;
+    return Array.from({ length: count }, (_, index) => {
+      const value = maximalDomainValue(item, `${path}[]`, index);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      if (keyValues.length > 0) {
+        return { ...value, key: keyValues[index] };
+      }
+      if (sequence) return { ...value, sequence: index + 1 };
+      return value;
+    });
+  }
+  if (type === 'string') return 'x'.repeat(Math.max(1, Number(node.minLength ?? 1)));
+  if (type === 'integer' || type === 'number') return Number(node.minimum ?? 0);
+  if (type === 'boolean') return true;
+  return null;
+}
+
 describe('model result projection exact literal bound lock', () => {
+  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
+    '$schema carries its maximum legal domain structure through the full replay envelope',
+    (projection) => {
+      const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
+      const validate = new Ajv({ strict: false }).compile(projection.jsonSchema);
+      expect(validate(projected), JSON.stringify(validate.errors)).toBe(true);
+      const raw = projection.restore(projected);
+
+      expect(() => projectModelResultForReplay(projection.schema, raw as never)).not.toThrow();
+    },
+  );
+
+  it('reserves outer-envelope bytes for the largest legal typed result', () => {
+    const registry = registerModelResultProjections(new TypedProjectionRegistry());
+    let lower = 1;
+    let upper = 4_000;
+    let best:
+      | { raw: Record<string, unknown>; typedBytes: number }
+      | undefined;
+    while (lower <= upper) {
+      const length = Math.floor((lower + upper) / 2);
+      const raw = {
+        data: {
+          claims: Array.from({ length: 64 }, () => ({
+            type: 'capability',
+            statement: 's'.repeat(length),
+            confidence: 1,
+          })),
+        },
+        provider: 'p',
+        model: 'm',
+      };
+      try {
+        const envelope = registry.project('understanding-claims/v1', raw);
+        best = {
+          raw,
+          typedBytes: Buffer.byteLength(JSON.stringify(envelope), 'utf8'),
+        };
+        lower = length + 1;
+      } catch (error) {
+        expect(error).toMatchObject({ message: 'TYPED_PROJECTION_TOO_LARGE' });
+        upper = length - 1;
+      }
+    }
+    expect(best?.typedBytes).toBeGreaterThan(118 * 1024);
+    expect(() =>
+      projectModelResultForReplay('understanding-claims/v1', best?.raw as never),
+    ).not.toThrow();
+  });
+
   it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
     '$schema matches every independently enumerated maxLength/maxItems/minimum/maximum',
     ({ schema, jsonSchema }) => {
@@ -380,4 +516,36 @@ describe('model result projection exact literal bound lock', () => {
   ] as const)('%s %s rejects a fractional value at its integer boundary', (schema, path) => {
     expect(validates(schema, path, 1.5)).toBe(false);
   });
+});
+
+const APP_DATABASE_URL = process.env.APP_DATABASE_URL?.trim();
+const liveDatabaseIt = APP_DATABASE_URL ? it : it.skip;
+
+describe('full model replay envelope PostgreSQL JSONB bound', () => {
+  let database: PrismaClient | undefined;
+
+  beforeAll(async () => {
+    if (!APP_DATABASE_URL) return;
+    database = new PrismaClient({ datasources: { db: { url: APP_DATABASE_URL } } });
+    await database.$connect();
+  });
+
+  afterAll(async () => database?.$disconnect());
+
+  liveDatabaseIt.each(MODEL_RESULT_PROJECTION_DEFINITIONS)(
+    '$schema maximum legal domain structure stays within real jsonb::text bytes',
+    async (projection) => {
+      if (!database) throw new Error('APP_DATABASE_URL is unavailable');
+      const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
+      const raw = projection.restore(projected);
+      const envelope = projectModelResultForReplay(projection.schema, raw as never);
+      const rows = await database.$queryRawUnsafe<Array<{ bytes: bigint }>>(
+        'SELECT octet_length($1::jsonb::text)::bigint AS bytes',
+        JSON.stringify(envelope),
+      );
+      expect(Number(rows[0]?.bytes), projection.schema).toBeLessThanOrEqual(
+        128 * 1024,
+      );
+    },
+  );
 });

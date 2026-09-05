@@ -1,13 +1,19 @@
-import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
 
-describe('site build cost reconciliation worker wiring', () => {
-  it('registers a one-minute Temporal schedule and the workflow export', async () => {
+describe("site build cost reconciliation worker wiring", () => {
+  it("registers a one-minute Temporal schedule and the workflow export", async () => {
     const [constants, schedules, workflows, worker] = await Promise.all([
-      readFile(new URL('../temporal/understanding.constants.ts', import.meta.url), 'utf8'),
-      readFile(new URL('../temporal/ensure-schedules.ts', import.meta.url), 'utf8'),
-      readFile(new URL('../temporal/workflows.ts', import.meta.url), 'utf8'),
-      readFile(new URL('../temporal/worker.ts', import.meta.url), 'utf8'),
+      readFile(
+        new URL("../temporal/understanding.constants.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../temporal/ensure-schedules.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../temporal/workflows.ts", import.meta.url), "utf8"),
+      readFile(new URL("../temporal/worker.ts", import.meta.url), "utf8"),
     ]);
 
     expect(constants).toContain("'siteBuildCostReconciliationSweepWorkflow'");
@@ -22,15 +28,19 @@ describe('site build cost reconciliation worker wiring', () => {
     expect(worker).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?ownerDb,/,
     );
-    expect(worker).toContain('createSiteBuildCostReconciliationResolverFromEnv');
+    expect(worker).toContain("createSiteBuildSettlementReadbackRuntimeFromEnv");
+    expect(worker).toContain("createSiteBuildCostReconciliationCatalogFromEnv");
     expect(worker).toContain(
-      'createSiteBuildCostReconciliationCatalogFromEnv',
+      "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
     );
     expect(worker).toContain(
-      'SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE',
+      "gateway.costReconciliationCatalog = costReconciliationCatalog",
     );
     expect(worker).toContain(
-      'gateway.costReconciliationCatalog = costReconciliationCatalog',
+      "gateway.settlementReadbackResolver = settlementReadbackRuntime?.resolver",
+    );
+    expect(worker).toContain(
+      "checkSiteBuildSettlementReadbackReadiness(process.env)",
     );
     expect(worker).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costReconciliationResolver,/,

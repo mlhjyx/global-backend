@@ -2,27 +2,28 @@ import {
   Injectable,
   OnApplicationBootstrap,
   OnApplicationShutdown,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { RuntimeAdmissionService } from '../runtime/runtime-admission';
-import { RuntimeProcessLeaseService } from '../runtime/runtime-process-lease';
-import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readiness-registry';
-import { RuntimeReleaseIdentityService } from '../runtime/runtime-release-identity';
-import { TemporalClient } from '../temporal/temporal.client';
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { RuntimeAdmissionService } from "../runtime/runtime-admission";
+import { RuntimeProcessLeaseService } from "../runtime/runtime-process-lease";
+import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
+import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
+import { TemporalClient } from "../temporal/temporal.client";
 
 export type ComponentStatus =
-  | { status: 'ok'; code?: never }
-  | { status: 'failed'; code: string }
-  | { status: 'not_proven'; code: string };
+  | { status: "ok"; code?: never }
+  | { status: "failed"; code: string }
+  | { status: "not_proven"; code: string };
 
 export interface RuntimeReadinessReport {
-  status: 'ready' | 'not_ready';
-  service: 'global-api';
+  status: "ready" | "not_ready";
+  service: "global-api";
   ts: string;
   capabilities: {
     execution_budget_jwks: ComponentStatus;
     workspace_budget_authority: ComponentStatus;
     platform_budget_authority: ComponentStatus;
+    site_builder_model_settlement_readback: ComponentStatus;
   };
   components: {
     database: ComponentStatus;
@@ -44,26 +45,27 @@ export interface RuntimeReadinessReport {
 }
 
 type RuntimeHardReadiness = Readonly<{
-  status: RuntimeReadinessReport['status'];
-  components: RuntimeReadinessReport['components'];
+  status: RuntimeReadinessReport["status"];
+  components: RuntimeReadinessReport["components"];
 }>;
 
 const READINESS_REFRESH_INTERVAL_MS = 10_000;
-const SNAPSHOT_UNAVAILABLE = 'RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE';
+const SNAPSHOT_UNAVAILABLE = "RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE";
 
 function unavailableComponent(): ComponentStatus {
-  return Object.freeze({ status: 'not_proven', code: SNAPSHOT_UNAVAILABLE });
+  return Object.freeze({ status: "not_proven", code: SNAPSHOT_UNAVAILABLE });
 }
 
 function initialReadinessSnapshot(): RuntimeReadinessReport {
   return Object.freeze({
-    status: 'not_ready' as const,
-    service: 'global-api' as const,
+    status: "not_ready" as const,
+    service: "global-api" as const,
     ts: new Date(0).toISOString(),
     capabilities: Object.freeze({
       execution_budget_jwks: unavailableComponent(),
       workspace_budget_authority: unavailableComponent(),
       platform_budget_authority: unavailableComponent(),
+      site_builder_model_settlement_readback: unavailableComponent(),
     }),
     components: Object.freeze({
       database: unavailableComponent(),
@@ -145,33 +147,49 @@ export class RuntimeReadinessService
     return report;
   }
 
+  async checkSiteBuilderPaidCapability(): Promise<RuntimeReadinessReport> {
+    const hard = await this.refreshHardComponents();
+    const settlementReadback = await this.contributors.check(
+      "site_builder_model_settlement_readback",
+    );
+    const report = this.report(hard, {
+      ...this.snapshot.capabilities,
+      site_builder_model_settlement_readback: settlementReadback,
+    });
+    this.snapshot = report;
+    return report;
+  }
+
   private async calculate(): Promise<RuntimeReadinessReport> {
     const hard = await this.refreshHardComponents();
-    const [executionBudgetJwks, platformBudgetAuthority] = await Promise.all([
-      this.contributors.check('execution_budget_jwks'),
-      this.contributors.check('platform_budget_authority'),
-    ]);
+    const [executionBudgetJwks, platformBudgetAuthority, settlementReadback] =
+      await Promise.all([
+        this.contributors.check("execution_budget_jwks"),
+        this.contributors.check("platform_budget_authority"),
+        this.contributors.check("site_builder_model_settlement_readback"),
+      ]);
     const workspaceBudgetAuthority: ComponentStatus =
-      executionBudgetJwks.status !== 'ok'
+      executionBudgetJwks.status !== "ok"
         ? {
-            status: 'failed',
-            code: 'WORKSPACE_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
+            status: "failed",
+            code: "WORKSPACE_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE",
           }
-        : hard.components.database.status !== 'ok'
+        : hard.components.database.status !== "ok"
           ? {
-              status: 'failed',
-              code: 'WORKSPACE_BUDGET_AUTHORITY_DATABASE_UNAVAILABLE',
+              status: "failed",
+              code: "WORKSPACE_BUDGET_AUTHORITY_DATABASE_UNAVAILABLE",
             }
-          : hard.components.migration.status !== 'ok'
+          : hard.components.migration.status !== "ok"
             ? {
-                status: 'failed',
-                code: 'WORKSPACE_BUDGET_AUTHORITY_MIGRATION_UNAVAILABLE',
+                status: "failed",
+                code: "WORKSPACE_BUDGET_AUTHORITY_MIGRATION_UNAVAILABLE",
               }
-            : { status: 'ok' };
+            : { status: "ok" };
     return this.report(hard, {
       execution_budget_jwks: executionBudgetJwks,
       workspace_budget_authority: workspaceBudgetAuthority,
       platform_budget_authority: platformBudgetAuthority,
+      site_builder_model_settlement_readback: settlementReadback,
     });
   }
 
@@ -208,24 +226,24 @@ export class RuntimeReadinessService
       this.checkTemporal(),
       this.checkLease(() =>
         this.leases.inspectWorkerQueue(
-          process.env.TEMPORAL_TASK_QUEUE ?? 'understanding',
+          process.env.TEMPORAL_TASK_QUEUE ?? "understanding",
         ),
       ),
-      this.checkLease(() => this.leases.inspectRole('OUTBOX_RELAY')),
-      this.contributors.check('api_runtime_lease'),
-      this.contributors.check('storage'),
-      this.contributors.check('generic_artifact_storage'),
-      this.contributors.check('redis'),
-      this.contributors.check('model_gateway'),
-      this.contributors.check('renderer'),
-      this.contributors.check('browser'),
-      this.contributors.check('budget_grant_verification'),
-      this.contributors.check('auth_jwks'),
+      this.checkLease(() => this.leases.inspectRole("OUTBOX_RELAY")),
+      this.contributors.check("api_runtime_lease"),
+      this.contributors.check("storage"),
+      this.contributors.check("generic_artifact_storage"),
+      this.contributors.check("redis"),
+      this.contributors.check("model_gateway"),
+      this.contributors.check("renderer"),
+      this.contributors.check("browser"),
+      this.contributors.check("budget_grant_verification"),
+      this.contributors.check("auth_jwks"),
     ]);
     const admissionStatus: ComponentStatus =
       admission.admitted && identity.attested
-        ? { status: 'ok' }
-        : { status: 'failed', code: 'RUNTIME_ADMISSION_FAILED' };
+        ? { status: "ok" }
+        : { status: "failed", code: "RUNTIME_ADMISSION_FAILED" };
     const components = {
       database: databaseAndMigration.database,
       migration: databaseAndMigration.migration,
@@ -242,23 +260,23 @@ export class RuntimeReadinessService
       budget_grant_verification: budgetGrantVerification,
       auth_jwks: authJwks,
       admission: admissionStatus,
-    } satisfies RuntimeReadinessReport['components'];
+    } satisfies RuntimeReadinessReport["components"];
     const ready = Object.values(components).every(
-      (component) => component.status === 'ok',
+      (component) => component.status === "ok",
     );
     return {
-      status: ready ? 'ready' : 'not_ready',
+      status: ready ? "ready" : "not_ready",
       components,
     };
   }
 
   private report(
     hard: RuntimeHardReadiness,
-    capabilities: RuntimeReadinessReport['capabilities'],
+    capabilities: RuntimeReadinessReport["capabilities"],
   ): RuntimeReadinessReport {
     return {
       status: hard.status,
-      service: 'global-api',
+      service: "global-api",
       ts: new Date().toISOString(),
       capabilities,
       components: hard.components,
@@ -270,27 +288,27 @@ export class RuntimeReadinessService
     migration: ComponentStatus;
   }> {
     try {
-      if (typeof this.prisma.reconnect === 'function') {
+      if (typeof this.prisma.reconnect === "function") {
         const connection = await this.prisma.reconnect();
-        if (connection.status !== 'ready') {
+        if (connection.status !== "ready") {
           return {
-            database: { status: 'failed', code: connection.code },
+            database: { status: "failed", code: connection.code },
             migration: {
-              status: 'not_proven',
-              code: 'MIGRATION_REVISION_NOT_PROVEN',
+              status: "not_proven",
+              code: "MIGRATION_REVISION_NOT_PROVEN",
             },
           };
         }
       }
       const expected = this.releaseIdentity.current();
       if (!expected.attested)
-        throw new Error('RUNTIME_RELEASE_IDENTITY_UNAVAILABLE');
+        throw new Error("RUNTIME_RELEASE_IDENTITY_UNAVAILABLE");
       const revision = await this.prisma.$transaction(
         async (transaction) => {
           await transaction.$executeRawUnsafe(
-            'SET LOCAL statement_timeout = 2000',
+            "SET LOCAL statement_timeout = 2000",
           );
-          await transaction.$queryRawUnsafe('SELECT 1');
+          await transaction.$queryRawUnsafe("SELECT 1");
           return transaction.$queryRawUnsafe<Array<{ migration_name: string }>>(
             `SELECT migration_name
                FROM "_prisma_migrations"
@@ -302,18 +320,18 @@ export class RuntimeReadinessService
         { maxWait: 1_000, timeout: 2_500 },
       );
       return {
-        database: { status: 'ok' },
+        database: { status: "ok" },
         migration:
           revision[0]?.migration_name === expected.migration_revision
-            ? { status: 'ok' }
-            : { status: 'failed', code: 'MIGRATION_REVISION_MISMATCH' },
+            ? { status: "ok" }
+            : { status: "failed", code: "MIGRATION_REVISION_MISMATCH" },
       };
     } catch {
       return {
-        database: { status: 'failed', code: 'DATABASE_UNAVAILABLE' },
+        database: { status: "failed", code: "DATABASE_UNAVAILABLE" },
         migration: {
-          status: 'not_proven',
-          code: 'MIGRATION_REVISION_NOT_PROVEN',
+          status: "not_proven",
+          code: "MIGRATION_REVISION_NOT_PROVEN",
         },
       };
     }
@@ -323,22 +341,22 @@ export class RuntimeReadinessService
     try {
       const result = await this.temporal.probe();
       return result.connected
-        ? { status: 'ok' }
-        : { status: 'failed', code: 'TEMPORAL_UNAVAILABLE' };
+        ? { status: "ok" }
+        : { status: "failed", code: "TEMPORAL_UNAVAILABLE" };
     } catch {
-      return { status: 'failed', code: 'TEMPORAL_UNAVAILABLE' };
+      return { status: "failed", code: "TEMPORAL_UNAVAILABLE" };
     }
   }
 
   private async checkLease(
     inspect: () => Promise<
-      { status: 'ok' } | { status: 'failed'; code: string }
+      { status: "ok" } | { status: "failed"; code: string }
     >,
   ): Promise<ComponentStatus> {
     try {
       return await inspect();
     } catch {
-      return { status: 'failed', code: 'RUNTIME_PROCESS_LEASE_UNAVAILABLE' };
+      return { status: "failed", code: "RUNTIME_PROCESS_LEASE_UNAVAILABLE" };
     }
   }
 }

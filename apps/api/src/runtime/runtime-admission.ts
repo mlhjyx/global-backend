@@ -4,8 +4,19 @@ import { createRolesToScopesPolicy } from "../auth/scopes";
 import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
 import { resolveProcessorJurisdiction } from "../compliance/data-rights.context";
 import { assertPiiKeyConfiguration } from "../compliance/pii-crypto";
+import { isAbsolute } from "node:path";
+import {
+  siteBuildProviderWireTargetsAppDatabase,
+  withSiteBuildProviderWireStatementTimeout,
+} from "../site-builder/site-build-provider-wire.database";
+import {
+  canonicalGatewayCredential,
+  gatewayCredentialsAreDistinct,
+  parseModelGatewayRequestTimeout,
+} from "../model-gateway/gateway-credential-boundary";
 
 type AdmissionStatus = "ok" | "optional" | "failed";
+export type RuntimeAdmissionRole = "API" | "WORKER" | "OUTBOX_RELAY";
 
 interface AdmissionCheck {
   status: AdmissionStatus;
@@ -146,10 +157,75 @@ function loopback(hostname: string): boolean {
 function inspectGateway(
   settings: RuntimeSettings,
   env: NodeJS.ProcessEnv,
+  role: RuntimeAdmissionRole,
 ): AdmissionCheck {
   if (!managed(settings.mode)) return { status: "optional" };
-  if (!present(env.MODEL_GATEWAY_URL) || !present(env.MODEL_GATEWAY_KEY)) {
+  const dispatchCredential = canonicalGatewayCredential(env.MODEL_GATEWAY_KEY);
+  if (!present(env.MODEL_GATEWAY_URL) || !dispatchCredential) {
     return { status: "failed", code: "GATEWAY_CONFIG_INCOMPLETE" };
+  }
+  if (parseModelGatewayRequestTimeout(env.MODEL_TIMEOUT_MS) === undefined) {
+    return { status: "failed", code: "GATEWAY_TIMEOUT_INVALID" };
+  }
+  const readerCredential = canonicalGatewayCredential(
+    env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
+  );
+  if (
+    !readerCredential ||
+    !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(
+      readerCredential,
+    ) ||
+    !present(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
+    !isAbsolute(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
+    !present(env.SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON)
+  ) {
+    return {
+      status: "failed",
+      code: "GATEWAY_SETTLEMENT_READBACK_CONFIG_INCOMPLETE",
+    };
+  }
+  if (
+    !gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)
+  ) {
+    return {
+      status: "failed",
+      code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
+    };
+  }
+  if (role === "WORKER") {
+    if (!present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
+      return {
+        status: "failed",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
+      };
+    }
+    try {
+      withSiteBuildProviderWireStatementTimeout(
+        env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
+      );
+    } catch {
+      return {
+        status: "failed",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_INVALID",
+      };
+    }
+    if (
+      !env.APP_DATABASE_URL ||
+      !siteBuildProviderWireTargetsAppDatabase(
+        env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
+        env.APP_DATABASE_URL,
+      )
+    ) {
+      return {
+        status: "failed",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_TARGET_MISMATCH",
+      };
+    }
+  } else if (present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
+    return {
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
+    };
   }
   try {
     const url = new URL(env.MODEL_GATEWAY_URL);
@@ -188,6 +264,7 @@ export function inspectRuntimeAdmission(
   settings: RuntimeSettings,
   env: NodeJS.ProcessEnv,
   buildIdentity: RuntimeReleaseIdentity,
+  role: RuntimeAdmissionRole = "API",
 ): RuntimeAdmissionResult {
   const build: AdmissionCheck = buildIdentity.attested
     ? { status: "ok" }
@@ -199,7 +276,7 @@ export function inspectRuntimeAdmission(
     environment: inspectEnvironment(settings, env),
     database: inspectDatabase(settings, env),
     auth: inspectAuth(settings, env),
-    gateway: inspectGateway(settings, env),
+    gateway: inspectGateway(settings, env, role),
     pii: inspectPii(settings, env),
   });
   return Object.freeze({

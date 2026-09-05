@@ -505,6 +505,47 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
 });
 
+test('provider-wire writer provisioning is dedicated, dual-role scoped, and secret-safe', async () => {
+  const [provision, verify, disposable] = await Promise.all([
+    repositoryFile('infra/postgres/provision-site-build-provider-wire-writer.sh'),
+    repositoryFile('infra/postgres/verify-site-build-provider-wire-writer.sh'),
+    repositoryFile(
+      'infra/postgres/verify-site-build-provider-wire-writer-disposable.sh',
+    ),
+  ]);
+  for (const script of [provision, verify, disposable]) {
+    assert.match(script, /^#!\/usr\/bin\/env bash\nset -euo pipefail/m);
+    assert.doesNotMatch(script, /set -x/);
+    assert.doesNotMatch(script, /PASSWORD\s+'[^']+'/i);
+  }
+  assert.doesNotMatch(provision, /\bDATABASE_URL\b|\bAPP_DATABASE_URL\b/);
+  assert.doesNotMatch(disposable, /\bDATABASE_URL\b|\bAPP_DATABASE_URL\b/);
+  assert.match(provision, /SITE_BUILD_PROVIDER_WIRE_PROVISION_DATABASE_URL/);
+  assert.match(provision, /SITE_BUILD_PROVIDER_WIRE_LOGIN/);
+  assert.match(provision, /SITE_BUILD_PROVIDER_WIRE_PASSWORD/);
+  assert.match(provision, /\\getenv provider_wire_password/);
+  assert.match(provision, /GRANT app_user, runtime_worker TO/);
+  assert.match(provision, /pg_shdepend/);
+  assert.match(verify, /SITE_BUILD_PROVIDER_WIRE_DATABASE_URL/);
+  assert.match(verify, /APP_DATABASE_URL/);
+  assert.match(verify, /parse_url APP APP_DATABASE_URL/);
+  assert.match(verify, /SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION/);
+  assert.doesNotMatch(verify, /psql "\$\{APP_DATABASE_URL\}"/);
+  assert.match(verify, /pg_auth_members/);
+  assert.match(verify, /membership\.admin_option/);
+  assert.match(verify, /membership\.inherit_option/);
+  assert.match(verify, /reserve_site_build_model_spend_v1/);
+  assert.match(verify, /finalize_site_build_provider_wire_not_dispatched_v1/);
+  assert.match(verify, /runtime_api/);
+  assert.match(verify, /runtime_outbox_relay/);
+  assert.match(disposable, /SITE_BUILD_PROVIDER_WIRE_DISPOSABLE_TEST/);
+  assert.match(disposable, /GRANT runtime_api/);
+  assert.match(disposable, /REVOKE runtime_api/);
+  assert.match(disposable, /DRIFT_NOT_REJECTED/);
+  assert.match(disposable, /ADMIN_OPTION_DRIFT_NOT_REJECTED/);
+  assert.match(disposable, /INHERIT_OPTION_DRIFT_NOT_REJECTED/);
+});
+
 test('disposable platform writer drift harness keeps every database URL out of argv and records cleanup inverses', async () => {
   const harness = await repositoryFile('infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh');
   assert.match(harness, /parse ADMIN/);

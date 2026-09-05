@@ -12,7 +12,9 @@ import {
   type TypedProjectionEnvelope,
 } from './typed-projection.types';
 
-const APPLICATION_MAX_BYTES = 120 * 1024;
+// Reserve one KiB for the generic model-replay wrapper and its digest. The
+// outer projection separately models PostgreSQL jsonb::text spacing.
+const APPLICATION_MAX_BYTES = 119 * 1024;
 const POSTGRES_JSONB_MAX_BYTES = 128 * 1024;
 const MAX_JSON_DEPTH = 32;
 const MAX_JSON_ARRAY_LENGTH = 65_536;

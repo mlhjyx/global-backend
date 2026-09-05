@@ -63,6 +63,14 @@ function anthropicInput(overrides: Record<string, unknown> = {}) {
     usage: { inputTokens: 1_501, outputTokens: 7 },
     maxOutputTokens: 1_200,
     maximumQuotaPoints: 500_000,
+    maximumProbeCount: 2 as const,
+    probeAuthority: {
+      claim: async (sequence: 1 | 2) =>
+        sequence === 1
+          ? "11111111-1111-4111-8111-111111111111"
+          : "22222222-2222-4222-8222-222222222222",
+      record: async () => undefined,
+    },
     ...overrides,
   };
 }

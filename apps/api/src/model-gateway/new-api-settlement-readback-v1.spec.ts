@@ -69,11 +69,81 @@ function input(overrides: Record<string, unknown> = {}) {
     usage: { inputTokens: 120, outputTokens: 30 },
     maxOutputTokens: 4_000,
     maximumQuotaPoints: 2_000,
+    maximumProbeCount: 2 as const,
+    probeAuthority: {
+      claim: async (sequence: 1 | 2) =>
+        sequence === 1
+          ? "11111111-1111-4111-8111-111111111111"
+          : "22222222-2222-4222-8222-222222222222",
+      record: async () => undefined,
+    },
     ...overrides,
   };
 }
 
 describe("New API exact settlement readback v1", () => {
+  it("cancels unread error and oversized response bodies", async () => {
+    const errorCancel = vi.fn();
+    const oversizedCancel = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            cancel: errorCancel,
+          }),
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            cancel: oversizedCancel,
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "cache-control": "no-store",
+              "x-new-api-settlement-contract":
+                NEW_API_SETTLEMENT_READBACK_CONTRACT,
+              "content-length": "16385",
+            },
+          },
+        ),
+      );
+    const firstAuthority = {
+      claim: vi.fn(async () => "11111111-1111-4111-8111-111111111111"),
+      record: vi.fn(async () => undefined),
+    };
+    const secondAuthority = {
+      claim: vi.fn(async () => "22222222-2222-4222-8222-222222222222"),
+      record: vi.fn(async () => undefined),
+    };
+
+    await resolver(fetchMock as typeof fetch).resolve(
+      input({ maximumProbeCount: 1, probeAuthority: firstAuthority }),
+    );
+    await resolver(fetchMock as typeof fetch).resolve(
+      input({ maximumProbeCount: 1, probeAuthority: secondAuthority }),
+    );
+
+    expect(errorCancel).toHaveBeenCalledOnce();
+    expect(oversizedCancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels an unread capability failure body", async () => {
+    const cancel = vi.fn();
+    const fetchMock = vi.fn(async () =>
+      new Response(new ReadableStream({ cancel }), { status: 503 }),
+    );
+
+    await expect(
+      resolver(fetchMock as typeof fetch).checkCapability(),
+    ).resolves.toMatchObject({ ready: false });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("reads one request-bound receipt with the dedicated reader and nonce", async () => {
     const fetchMock = vi.fn(async () =>
       exactResponse({ data: [exactReceipt()] }),
@@ -130,6 +200,61 @@ describe("New API exact settlement readback v1", () => {
       ],
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("claims each probe durably before GET and treats a replayed claim as spent", async () => {
+    const fetchMock = vi.fn(async () => exactResponse({ data: [] }));
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce("11111111-1111-4111-8111-111111111111")
+      .mockResolvedValueOnce(null);
+    const record = vi.fn(async () => undefined);
+
+    const result = await resolver(fetchMock as typeof fetch).resolve(
+      input({ probeAuthority: { claim, record } }),
+    );
+
+    expect(result).toMatchObject({
+      status: "unknown",
+      reason: "gateway_log_unavailable",
+      readbackProbes: [
+        { sequence: 1, phase: "gateway_log_pending", httpStatusClass: 2 },
+      ],
+    });
+    expect(claim).toHaveBeenNthCalledWith(1, 1);
+    expect(claim).toHaveBeenNthCalledWith(2, 2);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes with sequence two when sequence one was consumed by an earlier process", async () => {
+    const fetchMock = vi.fn(async () =>
+      exactResponse({ data: [exactReceipt()] }),
+    );
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("22222222-2222-4222-8222-222222222222");
+    const record = vi.fn(async () => undefined);
+
+    const result = await resolver(fetchMock as typeof fetch).resolve(
+      input({ probeAuthority: { claim, record } }),
+    );
+
+    expect(result).toMatchObject({
+      status: "settled",
+      physicalCallCount: 0,
+      readbackProbes: [
+        { sequence: 2, phase: "gateway_log_observed", httpStatusClass: 2 },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        probeId: "22222222-2222-4222-8222-222222222222",
+        probe: expect.objectContaining({ sequence: 2 }),
+      }),
+    );
   });
 
   it("classifies bounded network and 5xx failures without exposing causes", async () => {
@@ -226,6 +351,11 @@ describe("New API exact settlement readback v1", () => {
     ["unknown receipt key", { debug: "forbidden" }],
     ["quota exponent", { quota: "1e3" }],
     ["unsafe prompt tokens", { prompt_tokens: 9_007_199_254_740_992 }],
+    ["prompt tokens exceed durable bound", { prompt_tokens: 1_000_000_001 }],
+    [
+      "completion tokens exceed durable bound",
+      { completion_tokens: 1_000_000_001 },
+    ],
     ["usage semantic drift", { usage_semantic: "other" }],
     ["upstream state drift", { upstream_id_state: "unknown" }],
   ])("fails closed for %s", async (_case, overrides) => {
@@ -252,6 +382,63 @@ describe("New API exact settlement readback v1", () => {
       client.resolve(input({ requestId: "short", nonce: "also-short" })),
     ).resolves.toMatchObject({ reason: "request_id_missing" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not invent a readback probe when aborted before its durable claim", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = vi.fn();
+    const probeAuthority = {
+      claim: vi.fn(),
+      record: vi.fn(),
+    };
+
+    await expect(
+      resolver(fetchMock as typeof fetch).resolve(
+        input({ signal: controller.signal, probeAuthority }),
+      ),
+    ).resolves.toMatchObject({
+      status: "unknown",
+      reason: "gateway_log_unavailable",
+      readbackProbes: [],
+    });
+    expect(probeAuthority.claim).not.toHaveBeenCalled();
+    expect(probeAuthority.record).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not invent probe two when aborted after probe one is recorded", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 503 }));
+    const probeAuthority = {
+      claim: vi.fn(async (sequence: 1 | 2) =>
+        sequence === 1
+          ? "11111111-1111-4111-8111-111111111111"
+          : "22222222-2222-4222-8222-222222222222",
+      ),
+      record: vi.fn(async () => {
+        controller.abort();
+      }),
+    };
+
+    await expect(
+      resolver(fetchMock as typeof fetch).resolve(
+        input({ signal: controller.signal, probeAuthority }),
+      ),
+    ).resolves.toMatchObject({
+      status: "unknown",
+      reason: "gateway_log_unavailable",
+      readbackProbes: [
+        {
+          sequence: 1,
+          phase: "gateway_log_unavailable",
+          httpStatusClass: 5,
+        },
+      ],
+    });
+    expect(probeAuthority.claim).toHaveBeenCalledTimes(1);
+    expect(probeAuthority.record).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("checks the exact zero-generation capability surface", async () => {

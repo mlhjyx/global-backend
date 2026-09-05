@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 
 const OPAQUE_256 = /^[A-Za-z0-9_-]{43}$/u;
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,190}$/u;
-const MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/u;
+const MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
 const READER_CREDENTIAL = /^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u;
 const CANONICAL_NON_NEGATIVE_DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
 const MAXIMUM_RESPONSE_BYTES = 16 * 1024;
 const MAXIMUM_PROBE_DURATION_MS = 30_000;
 const MAXIMUM_SIGNED_64 = 9_223_372_036_854_775_807n;
+const MAXIMUM_DURABLE_MODEL_NUMBER = 1_000_000_000;
 const SECOND_PROBE_DELAY_MS = 50;
 const PROTOCOLS = new Set([
   "openai-chat-completions",
@@ -48,6 +48,15 @@ export interface NewApiRequestBoundSettlementInput {
   usage?: { inputTokens?: number; outputTokens?: number };
   maxOutputTokens: number;
   maximumQuotaPoints: number;
+  maximumProbeCount: 1 | 2;
+  probeAuthority: {
+    claim(sequence: 1 | 2): Promise<string | null>;
+    record(input: {
+      probeId: string;
+      probe: NewApiSettlementReadbackProbe;
+      observedAt: Date;
+    }): Promise<void>;
+  };
   signal?: AbortSignal;
 }
 
@@ -228,7 +237,7 @@ class StrictJsonScanner {
   private skipWhitespace(): void {
     while (
       this.index < this.raw.length &&
-      /[\u0009\u000a\u000d\u0020]/u.test(this.raw[this.index]!)
+      ["\t", "\n", "\r", " "].includes(this.raw[this.index]!)
     ) {
       this.index += 1;
     }
@@ -368,6 +377,7 @@ async function boundedText(
     (!CANONICAL_NON_NEGATIVE_DECIMAL.test(declared) ||
       BigInt(declared) > BigInt(maximumBytes))
   ) {
+    await response.body?.cancel().catch(() => undefined);
     throw new Error("NEW_API_SETTLEMENT_RESPONSE_TOO_LARGE");
   }
   if (!response.body) throw new Error("NEW_API_SETTLEMENT_RESPONSE_MISSING");
@@ -391,6 +401,10 @@ async function boundedText(
     offset += chunk.byteLength;
   }
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+async function cancelUnreadBody(response: Response | undefined): Promise<void> {
+  await response?.body?.cancel().catch(() => undefined);
 }
 
 function assertSuccessHeaders(response: Response): void {
@@ -450,8 +464,9 @@ function validateReceipt(
     receipt.type !== "consume" ||
     typeof receipt.model_name !== "string" ||
     !MODEL_IDENTIFIER.test(receipt.model_name) ||
-    Buffer.byteLength(receipt.model_name, "utf8") > 191 ||
+    Buffer.byteLength(receipt.model_name, "utf8") > 120 ||
     !safeInteger(receipt.channel_id, 1) ||
+    receipt.channel_id > 1_000_000_000 ||
     typeof receipt.quota !== "string" ||
     !CANONICAL_NON_NEGATIVE_DECIMAL.test(receipt.quota) ||
     BigInt(receipt.quota) > MAXIMUM_SIGNED_64 ||
@@ -459,6 +474,10 @@ function validateReceipt(
     !safeInteger(receipt.completion_tokens, 0) ||
     !safeInteger(receipt.cache_creation_tokens, 0) ||
     !safeInteger(receipt.cache_read_tokens, 0) ||
+    receipt.prompt_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
+    receipt.completion_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
+    receipt.cache_creation_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
+    receipt.cache_read_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
     (receipt.upstream_id_state !== "observed" &&
       receipt.upstream_id_state !== "absent")
   ) {
@@ -485,6 +504,7 @@ function validateReceipt(
   const quota = BigInt(receipt.quota);
   if (
     !safeInteger(inputTokens, 1) ||
+    inputTokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
     quota > BigInt(input.maximumQuotaPoints) ||
     receipt.completion_tokens > input.maxOutputTokens ||
     (input.usage?.inputTokens !== undefined &&
@@ -506,15 +526,25 @@ function validateReceipt(
 
 function validInput(input: NewApiRequestBoundSettlementInput): boolean {
   return (
-    IDENTIFIER.test(input.alias) &&
+    MODEL_IDENTIFIER.test(input.alias) &&
     PROTOCOLS.has(input.protocol) &&
     safeInteger(input.expectedChannelId, 1) &&
+    input.expectedChannelId <= 1_000_000_000 &&
     safeInteger(input.maxOutputTokens, 1) &&
+    input.maxOutputTokens <= MAXIMUM_DURABLE_MODEL_NUMBER &&
     safeInteger(input.maximumQuotaPoints, 1) &&
+    input.maximumQuotaPoints <= 1_000_000_000 &&
+    (input.maximumProbeCount === 1 || input.maximumProbeCount === 2) &&
+    input.probeAuthority !== null &&
+    typeof input.probeAuthority === "object" &&
+    typeof input.probeAuthority.claim === "function" &&
+    typeof input.probeAuthority.record === "function" &&
     (input.usage?.inputTokens === undefined ||
-      safeInteger(input.usage.inputTokens, 0)) &&
+      (safeInteger(input.usage.inputTokens, 0) &&
+        input.usage.inputTokens <= MAXIMUM_DURABLE_MODEL_NUMBER)) &&
     (input.usage?.outputTokens === undefined ||
-      safeInteger(input.usage.outputTokens, 0))
+      (safeInteger(input.usage.outputTokens, 0) &&
+        input.usage.outputTokens <= MAXIMUM_DURABLE_MODEL_NUMBER))
   );
 }
 
@@ -577,6 +607,23 @@ export class NewApiRequestBoundSettlementResolver {
     ]);
   }
 
+  private async recordProbe(
+    input: NewApiRequestBoundSettlementInput,
+    probeId: string,
+    probe: NewApiSettlementReadbackProbe,
+  ): Promise<boolean> {
+    try {
+      await input.probeAuthority.record({
+        probeId,
+        probe,
+        observedAt: new Date(),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async checkCapability(
     input: { signal?: AbortSignal } = {},
   ): Promise<NewApiSettlementReadbackCapability> {
@@ -584,8 +631,9 @@ export class NewApiRequestBoundSettlementResolver {
     const signal = input.signal
       ? AbortSignal.any([input.signal, timeout])
       : timeout;
+    let response: Response | undefined;
     try {
-      const response = await this.fetchImpl(
+      response = await this.fetchImpl(
         `${this.gatewayOrigin}/api/settlement-readback/v1/capability`,
         {
           method: "GET",
@@ -597,7 +645,11 @@ export class NewApiRequestBoundSettlementResolver {
           signal,
         },
       );
-      if (!response.ok) throw new Error("unavailable");
+      if (!response.ok) {
+        await cancelUnreadBody(response);
+        response = undefined;
+        throw new Error("unavailable");
+      }
       assertSuccessHeaders(response);
       const body = parseStrictJson(
         await boundedText(response, this.maximumResponseBytes),
@@ -615,6 +667,7 @@ export class NewApiRequestBoundSettlementResolver {
         resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
       });
     } catch (error) {
+      await cancelUnreadBody(response);
       const message = error instanceof Error ? error.message : "";
       const reason =
         message.includes("CONTRACT") ||
@@ -650,10 +703,21 @@ export class NewApiRequestBoundSettlementResolver {
       : timeout;
     const probes: NewApiSettlementReadbackProbe[] = [];
 
-    for (const sequence of [1, 2] as const) {
+    const sequences = ([1, 2] as const).slice(0, input.maximumProbeCount);
+    for (const sequence of sequences) {
       if (sequence === 2) await this.waitForSecondProbe(signal);
       if (signal.aborted) {
-        probes.push(frozenProbe(sequence, "gateway_log_unavailable", null));
+        return this.unknown(requestId, "gateway_log_unavailable", probes);
+      }
+
+      let probeId: string | null;
+      try {
+        probeId = await input.probeAuthority.claim(sequence);
+      } catch {
+        probeId = null;
+      }
+      if (!probeId) {
+        if (sequence < input.maximumProbeCount) continue;
         return this.unknown(requestId, "gateway_log_unavailable", probes);
       }
 
@@ -673,29 +737,55 @@ export class NewApiRequestBoundSettlementResolver {
           },
         );
       } catch {
-        probes.push(frozenProbe(sequence, "gateway_log_unavailable", null));
-        if (sequence === 1) continue;
+        const probe = frozenProbe(sequence, "gateway_log_unavailable", null);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
+        if (sequence < input.maximumProbeCount) continue;
         return this.unknown(requestId, "gateway_log_unavailable", probes);
       }
 
       const responseClass = statusClass(response.status);
       if (response.status === 404) {
-        probes.push(frozenProbe(sequence, "gateway_log_missing", 4));
+        await cancelUnreadBody(response);
+        const probe = frozenProbe(sequence, "gateway_log_missing", 4);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "gateway_log_missing", probes);
       }
       if (response.status === 409) {
-        probes.push(frozenProbe(sequence, "gateway_log_ambiguous", 4));
+        await cancelUnreadBody(response);
+        const probe = frozenProbe(sequence, "gateway_log_ambiguous", 4);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "log_ambiguous", probes);
       }
       if (response.status >= 500 && response.status <= 599) {
-        probes.push(frozenProbe(sequence, "gateway_log_unavailable", 5));
-        if (sequence === 1) continue;
+        await cancelUnreadBody(response);
+        const probe = frozenProbe(sequence, "gateway_log_unavailable", 5);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
+        if (sequence < input.maximumProbeCount) continue;
         return this.unknown(requestId, "gateway_log_unavailable", probes);
       }
       if (!response.ok) {
-        probes.push(
-          frozenProbe(sequence, "gateway_log_invalid", responseClass),
+        await cancelUnreadBody(response);
+        const probe = frozenProbe(
+          sequence,
+          "gateway_log_invalid",
+          responseClass,
         );
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "log_invalid", probes);
       }
 
@@ -706,24 +796,45 @@ export class NewApiRequestBoundSettlementResolver {
           await boundedText(response, this.maximumResponseBytes),
         );
       } catch {
-        probes.push(frozenProbe(sequence, "gateway_log_invalid", 2));
+        await cancelUnreadBody(response);
+        const probe = frozenProbe(sequence, "gateway_log_invalid", 2);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "log_invalid", probes);
       }
       if (!plainRecord(body) || !exactKeys(body, ["data"])) {
-        probes.push(frozenProbe(sequence, "gateway_log_invalid", 2));
+        const probe = frozenProbe(sequence, "gateway_log_invalid", 2);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "log_invalid", probes);
       }
       if (!Array.isArray(body.data)) {
-        probes.push(frozenProbe(sequence, "gateway_log_invalid", 2));
+        const probe = frozenProbe(sequence, "gateway_log_invalid", 2);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "log_invalid", probes);
       }
       if (body.data.length === 0) {
-        probes.push(frozenProbe(sequence, "gateway_log_pending", 2));
-        if (sequence === 1) continue;
+        const probe = frozenProbe(sequence, "gateway_log_pending", 2);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
+        if (sequence < input.maximumProbeCount) continue;
         return this.unknown(requestId, "gateway_log_missing", probes);
       }
       if (body.data.length !== 1) {
-        probes.push(frozenProbe(sequence, "gateway_log_ambiguous", 2));
+        const probe = frozenProbe(sequence, "gateway_log_ambiguous", 2);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, "log_ambiguous", probes);
       }
       const validated = validateReceipt(body.data[0], {
@@ -731,10 +842,18 @@ export class NewApiRequestBoundSettlementResolver {
         requestId,
       });
       if (validated.status === "invalid") {
-        probes.push(frozenProbe(sequence, "gateway_log_invalid", 2));
+        const probe = frozenProbe(sequence, "gateway_log_invalid", 2);
+        probes.push(probe);
+        if (!(await this.recordProbe(input, probeId, probe))) {
+          return this.unknown(requestId, "gateway_log_unavailable", probes);
+        }
         return this.unknown(requestId, validated.reason, probes);
       }
-      probes.push(frozenProbe(sequence, "gateway_log_observed", 2));
+      const probe = frozenProbe(sequence, "gateway_log_observed", 2);
+      probes.push(probe);
+      if (!(await this.recordProbe(input, probeId, probe))) {
+        return this.unknown(requestId, "gateway_log_unavailable", probes);
+      }
       const receipt = Object.freeze({
         requestId,
         resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
@@ -755,6 +874,12 @@ export class NewApiRequestBoundSettlementResolver {
       });
     }
 
-    return this.unknown(requestId, "gateway_log_unavailable", probes);
+    return this.unknown(
+      requestId,
+      probes.some((probe) => probe.phase === "gateway_log_pending")
+        ? "gateway_log_missing"
+        : "gateway_log_unavailable",
+      probes,
+    );
   }
 }

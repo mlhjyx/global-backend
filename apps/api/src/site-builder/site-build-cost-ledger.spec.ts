@@ -630,23 +630,46 @@ describe("R4-B stable BuildRun cost summary", () => {
     ).toThrow("too long");
   });
 
-  it("filters every terminal reconciliation before the database limit so old rows cannot starve due work", async () => {
+  it("re-enumerates an exact recovery settled before the reconciliation append ACK", async () => {
     const findMany = vi.fn(async () => [
       {
         id: "00000000-0000-4000-8000-000000000001",
         workspaceId: "00000000-0000-4000-8000-000000000002",
         siteId: "00000000-0000-4000-8000-000000000003",
         buildRunId: "00000000-0000-4000-8000-000000000004",
+        spendId: "00000000-0000-4000-8000-000000000005",
         operationKey: "a".repeat(64),
-        meta: null,
+        physicalWireAttempt: 1,
+        derivationKeyId: "settlement-test",
+        settlementRequestId: "R".repeat(43),
+        settlementNonceSha256: "b".repeat(64),
+        resolverId: "new-api-request-bound-reconciliation-v1",
+        protocol: "openai-responses",
+        requestedAlias: "gpt-5.6-terra",
+        expectedChannelId: 72,
+        actualMaxOutputTokens: 1000,
+        maximumQuotaPoints: 2000n,
+        inputPriceMicrounitsPerMillion: 2000000n,
+        outputPriceMicrounitsPerMillion: 10000000n,
+        ledgerMicrousdPerPricingUnit: 1000000n,
+        state: "OBSERVED",
+        receipt: { id: "00000000-0000-4000-8000-000000000006" },
         createdAt: new Date("2026-08-16T00:00:00.000Z"),
-        reconciliations: [],
+        observedAt: new Date("2026-08-16T00:00:00.000Z"),
+        spend: {
+          // Simulates a crash after completeProviderSpendReconciliation
+          // committed FAILED/token_pricing but before appendReconciliation.
+          status: "FAILED",
+          costBasis: "token_pricing",
+          createdAt: new Date("2026-08-16T00:00:00.000Z"),
+          reconciliations: [],
+        },
       },
     ]);
     const prisma = {
       withWorkspace: vi.fn(
         async (_workspaceId: string, fn: (tx: unknown) => unknown) =>
-          fn({ siteBuildSpend: { findMany } }),
+          fn({ siteBuildProviderWireAttempt: { findMany } }),
       ),
     };
     const ledger = new SiteBuildCostLedger(prisma as never, {
@@ -661,13 +684,468 @@ describe("R4-B stable BuildRun cost summary", () => {
     ).resolves.toHaveLength(1);
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        take: 1,
+        take: 2,
         where: expect.objectContaining({
-          costBasis: { in: ["estimated_upper_bound", "unknown"] },
-          reconciliations: {
-            none: { status: { in: ["RESOLVED", "CONFLICT", "EXPIRED"] } },
+          state: {
+            in: [
+              "ALLOCATED",
+              "DISPATCH_STARTED",
+              "OBSERVED",
+              "UNKNOWN",
+              "NOT_DISPATCHED",
+            ],
+          },
+          spend: expect.objectContaining({
+            OR: [
+              { status: "RESERVED" },
+              { status: { in: ["FAILED", "RELEASED"] } },
+              { costBasis: { in: ["estimated_upper_bound", "unknown"] } },
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("prioritizes the unresolved dispatched wire over a recorded earlier receipt for the same Spend", async () => {
+    const common = {
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+      siteId: "00000000-0000-4000-8000-000000000003",
+      buildRunId: "00000000-0000-4000-8000-000000000004",
+      spendId: "00000000-0000-4000-8000-000000000005",
+      operationKey: "a".repeat(64),
+      derivationKeyId: "settlement-test",
+      settlementNonceSha256: "b".repeat(64),
+      resolverId: "new-api-request-bound-reconciliation-v1",
+      protocol: "openai-responses",
+      requestedAlias: "gpt-5.6-terra",
+      expectedChannelId: 72,
+      actualMaxOutputTokens: 1000,
+      maximumQuotaPoints: 2000n,
+      inputPriceMicrounitsPerMillion: 2000000n,
+      outputPriceMicrounitsPerMillion: 10000000n,
+      ledgerMicrousdPerPricingUnit: 1000000n,
+      createdAt: new Date("2026-08-16T00:00:00.000Z"),
+      spend: {
+        status: "RESERVED",
+        costBasis: null,
+        createdAt: new Date("2026-08-16T00:00:00.000Z"),
+        reconciliations: [],
+      },
+    };
+    const findMany = vi.fn(async () => [
+      {
+        ...common,
+        id: "00000000-0000-4000-8000-000000000011",
+        physicalWireAttempt: 1,
+        settlementRequestId: "R".repeat(43),
+        state: "OBSERVED",
+        receipt: { id: "00000000-0000-4000-8000-000000000021" },
+      },
+      {
+        ...common,
+        id: "00000000-0000-4000-8000-000000000012",
+        physicalWireAttempt: 2,
+        settlementRequestId: "S".repeat(43),
+        state: "DISPATCH_STARTED",
+        dispatchStartedAt: new Date("2026-08-16T00:00:00.000Z"),
+        receipt: null,
+      },
+    ]);
+    const prisma =
+      {
+        withWorkspace: vi.fn(async (_workspaceId, fn) =>
+          fn({ siteBuildProviderWireAttempt: { findMany } }),
+        ),
+      } as never;
+
+    await expect(
+      new SiteBuildCostLedger(prisma, {
+        now: () => new Date("2026-08-16T00:01:00.000Z"),
+      }).listPendingReconciliations(common.workspaceId, 1),
+    ).resolves.toEqual([]);
+
+    const ledger = new SiteBuildCostLedger(prisma, {
+      now: () => new Date("2026-08-16T00:10:00.000Z"),
+    });
+
+    const [candidate] = await ledger.listPendingReconciliations(
+      common.workspaceId,
+      1,
+    );
+
+    expect(candidate).toMatchObject({
+      wireAttemptId: "00000000-0000-4000-8000-000000000012",
+      physicalWireAttempt: 2,
+      wireState: "DISPATCH_STARTED",
+      receiptRecorded: false,
+    });
+  });
+
+  it("atomically freezes a RESERVED Spend after every allocated wire is final", async () => {
+    const queryRaw = vi.fn(async () => [{ decision: "SETTLED" }]);
+    const tx = {
+      $queryRaw: queryRaw,
+      siteBuildSpend: {
+        findFirst: vi.fn(async () => ({
+          status: "RESERVED",
+          operationKey: "a".repeat(64),
+          fenceToken: "00000000-0000-4000-8000-000000000010",
+          reservationMicrousd: 800_000n,
+        })),
+      },
+      siteBuildProviderWireAttempt: {
+        findMany: vi.fn(async () => [
+          {
+            id: "00000000-0000-4000-8000-000000000011",
+            physicalWireAttempt: 1,
+            state: "UNKNOWN",
+          },
+        ]),
+      },
+      siteBuildProviderWireReceipt: { findMany: vi.fn(async () => []) },
+    };
+    const database = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn(tx)),
+    } as never;
+    const ledger = new SiteBuildCostLedger(database, {
+      providerWireDatabase: database,
+    });
+
+    await expect(
+      ledger.completeProviderSpendReconciliation({
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+        siteId: "00000000-0000-4000-8000-000000000003",
+        buildRunId: "00000000-0000-4000-8000-000000000004",
+        spendId: "00000000-0000-4000-8000-000000000005",
+        resolverId: "new-api-request-bound-reconciliation-v1",
+        observedAt: new Date("2026-08-16T00:01:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      status: "UNRESOLVED",
+      meta: { reason: "provider_wire_receipts_incomplete" },
+    });
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(queryRaw.mock.calls[0]).toEqual(
+      expect.arrayContaining([
+        800_000n,
+        1,
+        "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
+      ]),
+    );
+  });
+
+  it("releases a RESERVED Spend when every attempt is durably NOT_DISPATCHED", async () => {
+    const queryRaw = vi.fn(async () => [{ decision: "SETTLED" }]);
+    const tx = {
+      $queryRaw: queryRaw,
+      siteBuildSpend: {
+        findFirst: vi.fn(async () => ({
+          status: "RESERVED",
+          operationKey: "a".repeat(64),
+          fenceToken: "00000000-0000-4000-8000-000000000010",
+          reservationMicrousd: 800_000n,
+        })),
+      },
+      siteBuildProviderWireAttempt: {
+        findMany: vi.fn(async () => [
+          {
+            id: "00000000-0000-4000-8000-000000000011",
+            physicalWireAttempt: 1,
+            state: "NOT_DISPATCHED",
+          },
+        ]),
+      },
+      siteBuildProviderWireReceipt: { findMany: vi.fn(async () => []) },
+    };
+    const database = {
+      withWorkspace: vi.fn(async (_workspaceId, operation) => operation(tx)),
+    } as never;
+    const ledger = new SiteBuildCostLedger({} as never, {
+      providerWireDatabase: database,
+    });
+
+    await expect(
+      ledger.completeProviderSpendReconciliation({
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+        siteId: "00000000-0000-4000-8000-000000000003",
+        buildRunId: "00000000-0000-4000-8000-000000000004",
+        spendId: "00000000-0000-4000-8000-000000000005",
+        resolverId: "new-api-request-bound-reconciliation-v1",
+        observedAt: new Date("2026-08-17T00:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      status: "UNRESOLVED",
+      meta: { reason: "provider_wire_not_dispatched" },
+    });
+    expect(queryRaw.mock.calls[0]).toEqual(
+      expect.arrayContaining([
+        "RELEASED",
+        0n,
+        "not_incurred",
+        "MODEL_WIRE_NOT_DISPATCHED",
+      ]),
+    );
+  });
+
+  it("expires a send-cut gap only after durably closing the wire and freezing the Spend", async () => {
+    const candidate = {
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+      siteId: "00000000-0000-4000-8000-000000000003",
+      buildRunId: "00000000-0000-4000-8000-000000000004",
+      spendId: "00000000-0000-4000-8000-000000000005",
+      wireAttemptId: "00000000-0000-4000-8000-000000000006",
+      operationKey: "a".repeat(64),
+      physicalWireAttempt: 1 as const,
+      derivationKeyId: "settlement-test",
+      settlementRequestId: "R".repeat(43),
+      settlementNonceSha256: "b".repeat(64),
+      resolverId: "new-api-request-bound-reconciliation-v1",
+      alias: "gpt-5.6-terra",
+      protocol: "openai-responses" as const,
+      expectedChannelId: 72,
+      actualMaxOutputTokens: 1000,
+      maximumQuotaPoints: 2000,
+      inputPriceMicrounitsPerMillionTokens: 2000000,
+      outputPriceMicrounitsPerMillionTokens: 10000000,
+      ledgerMicrousdPerPricingUnit: 1000000,
+      wireState: "DISPATCH_STARTED" as const,
+      receiptRecorded: false,
+      action: "EXPIRE" as const,
+    };
+    const ledger = new SiteBuildCostLedger({} as never, {
+      now: () => new Date("2026-08-17T00:00:00.000Z"),
+    });
+    vi.spyOn(ledger, "listPendingReconciliations").mockResolvedValue([
+      candidate,
+    ]);
+    const finalize = vi
+      .spyOn(ledger, "finalizeModelPhysicalWire")
+      .mockResolvedValue(undefined);
+    const complete = vi
+      .spyOn(ledger, "completeProviderSpendReconciliation")
+      .mockResolvedValue({
+        status: "UNRESOLVED",
+        resolverId: candidate.resolverId,
+        observedAt: new Date("2026-08-17T00:00:00.000Z"),
+        meta: { reason: "provider_wire_receipts_incomplete" },
+      });
+    const append = vi
+      .spyOn(ledger, "appendReconciliation")
+      .mockResolvedValue({} as never);
+    const resolve = vi.fn();
+
+    await expect(
+      ledger.runReconciliationSweep({
+        workspaceId: candidate.workspaceId,
+        resolve,
+      }),
+    ).resolves.toEqual({ attempted: 1, resolved: 0 });
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(finalize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wireAttemptId: candidate.wireAttemptId,
+        observation: expect.objectContaining({
+          status: "unknown",
+          reason: "gateway_log_missing",
+        }),
+      }),
+    );
+    expect(complete).toHaveBeenCalledOnce();
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        observation: expect.objectContaining({
+          status: "EXPIRED",
+          meta: { reason: "reconciliation_window_expired" },
+        }),
+      }),
+    );
+  });
+
+  it("safely resumes an attempt-one wire that is still provably before the send cut", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [
+        {
+          decision: "REPLAY",
+          spend_id: "00000000-0000-4000-8000-000000000005",
+          spend_status: "RESERVED",
+          cached_result: null,
+          cached_meta: null,
+          cached_error_code: null,
+          wire_attempt_id: "00000000-0000-4000-8000-000000000006",
+          physical_wire_attempt: 1,
+          wire_state: "ALLOCATED",
+        },
+      ]),
+    };
+    const providerWireDatabase = {
+      withWorkspace: vi.fn(async (_workspaceId, operation) => operation(tx)),
+    };
+    const ledger = new SiteBuildCostLedger({} as never, {
+      providerWireDatabase: providerWireDatabase as never,
+    });
+
+    await expect(
+      ledger.reserveModelOperation({
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+        siteId: "00000000-0000-4000-8000-000000000003",
+        buildRunId: "00000000-0000-4000-8000-000000000004",
+        operationKey: "a".repeat(64),
+        kind: "model",
+        taskId: "site_builder.copy",
+        subject: "gpt-5.6-terra@gateway",
+        reservationMicrousd: 800_000,
+        wire: {
+          wireIdentity: {
+            schemaVersion: "site-build-settlement-wire-identity/v1",
+            physicalWireAttempt: 1,
+            derivationKeyId: "settlement-test",
+            requestId: "R".repeat(43),
+            nonce: "N".repeat(43),
+            nonceSha256: "b".repeat(64),
+          },
+          protocol: "openai-responses",
+          requestedAlias: "gpt-5.6-terra",
+          expectedChannelId: 72,
+          promptUtf8Bytes: 100,
+          maximumWireCalls: 2,
+          actualMaxOutputTokens: 1000,
+          catalogMaxOutputTokens: 4000,
+          maximumQuotaPoints: 2000,
+          catalogId: "catalog-v1",
+          catalogSha256: "c".repeat(64),
+          pricingSnapshotSha256: "d".repeat(64),
+          inputPriceMicrounitsPerMillionTokens: 2000000,
+          outputPriceMicrounitsPerMillionTokens: 10000000,
+          ledgerMicrousdPerPricingUnit: 1000000,
+        },
+      }),
+    ).resolves.toEqual({
+      kind: "execute",
+      spendId: "00000000-0000-4000-8000-000000000005",
+      wireAttemptId: "00000000-0000-4000-8000-000000000006",
+      physicalWireAttempt: 1,
+    });
+  });
+
+  it("does not terminalize an ALLOCATED wire until the bounded recovery window expires", async () => {
+    const createdAt = new Date("2026-08-16T00:00:00.000Z");
+    const row = {
+      id: "00000000-0000-4000-8000-000000000006",
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+      siteId: "00000000-0000-4000-8000-000000000003",
+      buildRunId: "00000000-0000-4000-8000-000000000004",
+      spendId: "00000000-0000-4000-8000-000000000005",
+      operationKey: "a".repeat(64),
+      physicalWireAttempt: 1,
+      derivationKeyId: "settlement-test",
+      settlementRequestId: "R".repeat(43),
+      settlementNonceSha256: "b".repeat(64),
+      resolverId: "new-api-request-bound-reconciliation-v1",
+      protocol: "openai-responses",
+      requestedAlias: "gpt-5.6-terra",
+      expectedChannelId: 72,
+      actualMaxOutputTokens: 1000,
+      maximumQuotaPoints: 2000n,
+      inputPriceMicrounitsPerMillion: 2000000n,
+      outputPriceMicrounitsPerMillion: 10000000n,
+      ledgerMicrousdPerPricingUnit: 1000000n,
+      state: "ALLOCATED",
+      receipt: null,
+      createdAt,
+      spend: {
+        status: "RESERVED",
+        costBasis: null,
+        // A late repair wire must own its own recovery clock even when the
+        // logical Spend was created by attempt one more than a day earlier.
+        createdAt: new Date("2026-08-15T00:00:00.000Z"),
+        reconciliations: [],
+      },
+    };
+    const database = {
+      withWorkspace: vi.fn(async (_workspaceId, operation) =>
+        operation({
+          siteBuildProviderWireAttempt: {
+            findMany: vi.fn(async () => [row]),
           },
         }),
+      ),
+    } as never;
+
+    await expect(
+      new SiteBuildCostLedger(database, {
+        now: () => new Date("2026-08-16T23:59:59.999Z"),
+      }).listPendingReconciliations(row.workspaceId),
+    ).resolves.toEqual([]);
+    await expect(
+      new SiteBuildCostLedger(database, {
+        now: () => new Date("2026-08-17T00:00:00.000Z"),
+      }).listPendingReconciliations(row.workspaceId),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        wireState: "ALLOCATED",
+        action: "EXPIRE",
+      }),
+    ]);
+  });
+
+  it("expires an ALLOCATED wire as NOT_DISPATCHED without a readback query", async () => {
+    const candidate = {
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+      siteId: "00000000-0000-4000-8000-000000000003",
+      buildRunId: "00000000-0000-4000-8000-000000000004",
+      spendId: "00000000-0000-4000-8000-000000000005",
+      wireAttemptId: "00000000-0000-4000-8000-000000000006",
+      operationKey: "a".repeat(64),
+      physicalWireAttempt: 1 as const,
+      derivationKeyId: "settlement-test",
+      settlementRequestId: "R".repeat(43),
+      settlementNonceSha256: "b".repeat(64),
+      resolverId: "new-api-request-bound-reconciliation-v1",
+      alias: "gpt-5.6-terra",
+      protocol: "openai-responses" as const,
+      expectedChannelId: 72,
+      actualMaxOutputTokens: 1000,
+      maximumQuotaPoints: 2000,
+      inputPriceMicrounitsPerMillionTokens: 2000000,
+      outputPriceMicrounitsPerMillionTokens: 10000000,
+      ledgerMicrousdPerPricingUnit: 1000000,
+      wireState: "ALLOCATED" as const,
+      receiptRecorded: false,
+      action: "EXPIRE" as const,
+    };
+    const ledger = new SiteBuildCostLedger({} as never);
+    vi.spyOn(ledger, "listPendingReconciliations").mockResolvedValue([
+      candidate,
+    ]);
+    const closeWire = vi
+      .spyOn(ledger, "finalizeModelPhysicalWireNotDispatched")
+      .mockResolvedValue(undefined);
+    vi.spyOn(ledger, "completeProviderSpendReconciliation").mockResolvedValue({
+      status: "UNRESOLVED",
+      resolverId: candidate.resolverId,
+      observedAt: new Date(),
+      meta: { reason: "provider_wire_receipts_incomplete" },
+    });
+    const append = vi
+      .spyOn(ledger, "appendReconciliation")
+      .mockResolvedValue({} as never);
+    const resolve = vi.fn();
+
+    await ledger.runReconciliationSweep({
+      workspaceId: candidate.workspaceId,
+      resolve,
+    });
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(closeWire).toHaveBeenCalledWith({
+      workspaceId: candidate.workspaceId,
+      wireAttemptId: candidate.wireAttemptId,
+    });
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        observation: expect.objectContaining({ status: "EXPIRED" }),
       }),
     );
   });

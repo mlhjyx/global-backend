@@ -18,7 +18,7 @@ export class ProviderOutputError extends Error {
     opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, opts);
-    this.name = 'ProviderOutputError';
+    this.name = "ProviderOutputError";
     this.usage = usage;
     this.callCount = opts?.callCount ?? 1;
     this.provider = opts?.provider;
@@ -41,7 +41,7 @@ export class TaskOutputValidationError extends ProviderOutputError {
     opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, usage, opts);
-    this.name = 'TaskOutputValidationError';
+    this.name = "TaskOutputValidationError";
   }
 }
 
@@ -53,7 +53,44 @@ export class ProviderIdentityError extends ProviderOutputError {
     opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, usage, opts);
-    this.name = 'ProviderIdentityError';
+    this.name = "ProviderIdentityError";
+  }
+}
+
+/**
+ * A paid physical wire could not produce both a usable payload and an exact
+ * settlement fact. The stable code is safe for persistence and user-facing
+ * diagnostics; raw transport errors and provider bodies are never embedded.
+ */
+export class ProviderSettlementError extends ProviderOutputError {
+  constructor(
+    public readonly errorCode:
+      | "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE"
+      | "MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN"
+      | "MODEL_SETTLEMENT_PAYLOAD_UNAVAILABLE"
+      | "MODEL_SETTLEMENT_GATEWAY_LOG_MISSING"
+      | "MODEL_SETTLEMENT_GATEWAY_LOG_UNAVAILABLE"
+      | "MODEL_SETTLEMENT_LOG_AMBIGUOUS"
+      | "MODEL_SETTLEMENT_LOG_INVALID"
+      | "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
+    usage?: ModelUsage,
+    opts?: { callCount?: number } & ProviderErrorProvenance,
+  ) {
+    super(`paid model settlement failed: ${errorCode}`, usage, opts);
+    this.name = "ProviderSettlementError";
+  }
+}
+
+/**
+ * Another worker owns the already-started physical wire. A replay must not
+ * dispatch, probe, settle, or terminalize that live owner's attempt.
+ */
+export class ProviderWireInFlightError extends Error {
+  readonly errorCode = "MODEL_WIRE_IN_FLIGHT" as const;
+
+  constructor() {
+    super("provider wire is owned by an in-flight dispatch");
+    this.name = "ProviderWireInFlightError";
   }
 }
 
@@ -64,14 +101,17 @@ export class ProviderIdentityError extends ProviderOutputError {
  * when a denial arrives between an initial structured call and its repair.
  */
 export class ExternalActionDeniedError extends ProviderOutputError {
-  readonly decision = 'suppression_action_gate';
+  readonly decision = "suppression_action_gate";
 
-  constructor(usage?: ModelUsage, opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance) {
-    super('external action denied: suppression_action_gate', usage, {
+  constructor(
+    usage?: ModelUsage,
+    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
+  ) {
+    super("external action denied: suppression_action_gate", usage, {
       ...opts,
       callCount: opts?.callCount ?? 0,
     });
-    this.name = 'ExternalActionDeniedError';
+    this.name = "ExternalActionDeniedError";
   }
 }
 
@@ -85,16 +125,15 @@ export class ProviderHttpError extends Error {
     status: number;
     provider: string;
     model: string;
-    responseExcerpt: string }) {
-    super(
-      `${input.provider} ${input.model}: HTTP ${input.status}: ${input.responseExcerpt}`);
-    this.name = 'ProviderHttpError';
+  }) {
+    super(`${input.provider} ${input.model}: HTTP ${input.status}`);
+    this.name = "ProviderHttpError";
     this.status = input.status;
     this.provider = input.provider;
     this.model = input.model;
   }
 }
-import type { ModelResolutionSource, ModelUsage } from '../types';
+import type { ModelResolutionSource, ModelUsage } from "../types";
 
 export interface ProviderErrorProvenance {
   provider?: string;

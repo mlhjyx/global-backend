@@ -30,6 +30,26 @@ async function expectMissing(filePath: string): Promise<void> {
   await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
 }
 
+async function expectNewRendererWorkspacesEventuallyClean(
+  before: ReadonlySet<string>,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const unexpected = (await readdir(tmpdir())).filter(
+      (name) =>
+        name.startsWith("global-site-renderer-") && !before.has(name),
+    );
+    if (unexpected.length === 0) return;
+    if (Date.now() >= deadline) {
+      expect(unexpected).toEqual([]);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 describe("buildRendererEnv — Renderer 子进程最小环境", () => {
   it("skips nonexistent candidate roots before resolving the hoisted Astro package", () => {
     expect(resolveRendererEntrypoint(process.cwd()).rendererRoot).toBe(
@@ -318,10 +338,11 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         ),
       );
       expect(manifests.every((manifest) => manifest.fileCount > 0)).toBe(true);
-      const after = (await readdir(tmpdir())).filter((name) =>
-        name.startsWith("global-site-renderer-"),
-      );
-      expect(after.filter((name) => !before.has(name))).toEqual([]);
+      // Vitest executes spec files concurrently. Another real-renderer spec can
+      // create its own workspace between this test's before/after snapshots,
+      // so assert eventual cleanup rather than treating an in-flight sibling
+      // build as leaked state.
+      await expectNewRendererWorkspacesEventuallyClean(before);
     } finally {
       await Promise.all(
         outDirs.map((outDir) => rm(outDir, { recursive: true, force: true })),

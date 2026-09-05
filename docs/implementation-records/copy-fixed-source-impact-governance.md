@@ -38,38 +38,40 @@ Binding path、binding bytes、artifact ID、fixed source commit 与 source bund
 - `PRODUCTION_PARITY_SINGLE_RUNTIME_PATH`：Production Parity 单一运行路径的精确集合。
 - `PRODUCTION_PARITY_SINGLE_RUNTIME_PATH_SECURITY_PATCH`：上一个精确集合加已审查的根 package security 变化。
 - `PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION`：当前 11-path Authority foundation successor。
+- `PRODUCTION_PARITY_PROVIDER_SETTLEMENT_READBACK_V1`：Authority foundation 再加 Site Builder AI result bridge 的精确 12-path settlement-readback successor。
 
 这些 scopes 是历史与当前分支所需的 exact sets，不是 allow-prefix、目录 wildcard、任意子集或“只要与 Copy 无关就放行”的语义例外。
 
-## 3. 当前 11-path successor
+## 3. 当前 12-path successor
 
 机器生成并 readback 的当前状态：
 
 | 字段 | 精确值 |
 | --- | --- |
 | Status | `STALE_HOLD` |
-| Current source fingerprint | `417dd95d876f3b910e9ad4a309779619214f95907f87071ebf6d3586f1951c78` |
-| Stale scope | `PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION` |
+| Current source fingerprint | `bcc60b9588deb6313f19f336bc3545b686550fe15ce0e94b5dd7b49de63051a6` |
+| Stale scope | `PRODUCTION_PARITY_PROVIDER_SETTLEMENT_READBACK_V1` |
 | Dispatch authorization | `NOT_AUTHORIZED` |
 | Pilot eligibility | `BLOCKED` |
 | Required follow-up | `REBASE_FIXED_SOURCE_BEFORE_DISPATCH` |
-| Eligibility receipt SHA-256 | `ec97151840f40fec96cf6063396e34308be6479c54c4eaf333be689d58b78d40` |
+| Eligibility receipt SHA-256 | `d0342470358bb56630477f1f65ac0f5d72d98d4784c59faaaad4c6654ea2fce4` |
 
 精确 drifted paths：
 
 1. `apps/api/package.json`
 2. `apps/api/src/model-gateway/new-api-request-bound-settlement.ts`
-3. `apps/api/src/model-runtime/structured-task-runtime-bridge.ts`
-4. `apps/api/src/site-builder/agents/ai-task.ts`
-5. `apps/api/tsconfig.build.json`
-6. `package.json`
-7. `packages/contracts/package.json`
-8. `packages/contracts/src/index.ts`
-9. `packages/contracts/src/site-builder/component-qualification.ts`
-10. `packages/db/prisma/schema.prisma`
-11. `pnpm-lock.yaml`
+3. `apps/api/src/model-runtime/site-builder-ai-task-bridge.ts`
+4. `apps/api/src/model-runtime/structured-task-runtime-bridge.ts`
+5. `apps/api/src/site-builder/agents/ai-task.ts`
+6. `apps/api/tsconfig.build.json`
+7. `package.json`
+8. `packages/contracts/package.json`
+9. `packages/contracts/src/index.ts`
+10. `packages/contracts/src/site-builder/component-qualification.ts`
+11. `packages/db/prisma/schema.prisma`
+12. `pnpm-lock.yaml`
 
-`packages/contracts/src/index.ts` 是相对 predecessor exact set 新增的 Authority contract export 漂移；其余十项来自已审查的 Production Parity/security successor。当前 receipt 没有改 active binding，也没有生成新的 Copy artifact。
+`apps/api/src/model-runtime/site-builder-ai-task-bridge.ts` 是相对 11-path Authority foundation 新增的 settlement result projection 漂移；其余十一项保留既有已审查 successor。当前 receipt 继续保持 `STALE_HOLD/NOT_AUTHORIZED/BLOCKED`，没有改 active binding，也没有生成新的 Copy artifact。
 
 ## 4. 安全边界
 
@@ -110,4 +112,5 @@ pnpm --filter @global/api exec vitest run \
 - `f5c0fc9c`：引入 reviewed exact path-set successor 机制，替代单一非承重 schema 例外。
 - `1d5aeb69`：增加精确 Production Parity security-patch successor。
 - `907936bc` RED / `7b34625c` GREEN：锁定当前 Authority foundation exact 11-path successor，并拒绝 partial、extra 与 predecessor stale sets。
+- 本次 settlement-readback RED/GREEN：锁定精确 12-path successor；移除任一非 predecessor-compatible path 或加入额外 path 仍失败关闭。
 - `573d2ad4` RED：CURRENT 文档必须逐项反映 active receipt，且旧 active-version/单 schema 叙述必须失败。

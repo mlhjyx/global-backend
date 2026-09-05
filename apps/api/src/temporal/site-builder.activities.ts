@@ -89,6 +89,7 @@ import { compareClaimProjectionOrder } from "../site-builder/claim-projection-or
 import { gateCertificationFactsForPersistence } from "../site-builder/claim-evidence-persistence-gate";
 import {
   SiteBuildCostLedger,
+  SITE_BUILD_PROVIDER_WIRE_OWNER_LEASE_MS,
   type SiteBuildCostSummary,
   type SiteBuildReconciliationObservation,
 } from "../site-builder/site-build-cost-ledger";
@@ -275,25 +276,6 @@ export function qualityNarrativePaidGateDecision(state: {
 }): "allowed" | "paid_gate_denied" | "prior_settlement_unknown" {
   if (state.unresolvedSpends > 0) return "prior_settlement_unknown";
   return state.paidCallsEnabled ? "allowed" : "paid_gate_denied";
-}
-
-function reconciliationRequestId(
-  meta: Record<string, unknown> | null,
-): string | undefined {
-  const settlements = meta?.gatewaySettlements;
-  if (!Array.isArray(settlements)) return undefined;
-  for (const settlement of settlements) {
-    if (!settlement || typeof settlement !== "object") continue;
-    const requestId = (settlement as Record<string, unknown>).requestId;
-    if (
-      typeof requestId === "string" &&
-      requestId.length > 0 &&
-      requestId.length <= 191
-    ) {
-      return requestId;
-    }
-  }
-  return undefined;
 }
 
 export async function runNonAuthoritativeQualityNarrative(
@@ -2266,13 +2248,36 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         SELECT
           s.workspace_id AS "workspaceId",
           MAX(att.last_attempt) AS "lastAttempt"
-        FROM site_build_spend s
+        FROM site_build_provider_wire_attempt w
+        JOIN site_build_spend s
+          ON s.id = w.spend_id
+         AND s.workspace_id = w.workspace_id
+         AND s.site_id = w.site_id
+         AND s.build_run_id = w.build_run_id
         LEFT JOIN LATERAL (
           SELECT MAX(r.created_at) AS last_attempt
           FROM site_build_spend_reconciliation r
           WHERE r.spend_id = s.id
         ) att ON TRUE
-        WHERE s.cost_basis IN ('estimated_upper_bound', 'unknown')
+        WHERE (
+            s.status = 'RESERVED'
+            OR s.status IN ('FAILED', 'RELEASED')
+            OR s.cost_basis IN ('estimated_upper_bound', 'unknown')
+          )
+          AND (
+            w.state IN (
+              'OBSERVED', 'UNKNOWN', 'NOT_DISPATCHED'
+            )
+            OR (
+              w.state = 'DISPATCH_STARTED'
+              AND w.dispatch_started_at <= clock_timestamp() -
+                (${SITE_BUILD_PROVIDER_WIRE_OWNER_LEASE_MS}::bigint * interval '1 millisecond')
+            )
+            OR (
+              w.state = 'ALLOCATED'
+              AND w.created_at <= clock_timestamp() - interval '24 hours'
+            )
+          )
           AND NOT EXISTS (
             SELECT 1
             FROM site_build_spend_reconciliation rx
@@ -2302,7 +2307,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               : {
                   status: "UNRESOLVED",
                   resolverId: "site-build-cost-reconciliation-v1",
-                  requestId: reconciliationRequestId(candidate.meta),
                   observedAt: new Date(),
                   meta: { reason: "exact_cost_resolver_unavailable" },
                 },
