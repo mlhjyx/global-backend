@@ -19,8 +19,18 @@ runtime.
 - Temporal uses its default JWT claim mapper and default authorizer with one
   configured audience and an HTTPS JWKS URI. There is no no-op authorizer and no
   unsigned development verifier.
-- Frontend and internode traffic use TLS with hostname verification. The server
-  image trusts the deployment-supplied JWKS CA bundle through `SSL_CERT_FILE`.
+- External Frontend `7233` uses TLS with hostname verification and continues to
+  authenticate product clients through JWT; it does not require a client
+  certificate.
+- Internode traffic, including `internal-frontend:7236`, uses a distinct
+  internode identity CA with mutual TLS and hostname verification. Temporal
+  presents the same dedicated internode identity certificate for its internal
+  server and client roles, as required by the native 1.31.2 local-store TLS
+  provider. Only the Temporal server secret mount contains that certificate and
+  private key. GrowthOS Reader, JWKS, Schedule writer tools and Worker probes
+  cannot establish an internal connection.
+- The server image trusts the deployment-supplied JWKS CA bundle through
+  `SSL_CERT_FILE`.
 - The PostgreSQL volume and network are dedicated to this service. PostgreSQL
   has no host port.
 - The internal network has the fixed deployment name `global-temporal-platform`.
@@ -60,9 +70,12 @@ The server secret directory is deployment-owned and mounted read-only at
 `/run/secrets/temporal-platform`:
 
 ```text
-ca.crt                 # CA used by Temporal clients
-server.crt             # SAN covers the configured Temporal server name
-server.key             # mode 0600, readable only by Temporal UID 1000
+frontend-ca.crt        # CA that signs the external Frontend certificate
+frontend.crt           # external Frontend SAN covers the configured server name
+frontend.key           # mode 0600, external Frontend private key
+internode-ca.crt       # dedicated CA trusted only for internode identities
+internode.crt          # serverAuth+clientAuth identity for Temporal internode RPC
+internode.key          # mode 0600, readable only by Temporal UID 1000
 jwks-ca-bundle.crt     # trust bundle for the configured HTTPS JWKS origin
 ```
 
@@ -79,7 +92,10 @@ worker.jwt
 Tokens are externally issued, short-lived, audience-bound and stored mode 0600.
 Product configuration never generates signing keys, TLS keys or temporary
 tokens. Neither script logs a raw token. GrowthOS receives `reader.jwt` through
-its own secret delivery path; it never receives the other three identities.
+its own secret delivery path; it never receives the other three identities or
+the internode certificate/key. This source change does not migrate an existing
+secret directory because no retained service has been deployed from this
+infrastructure contract.
 
 ## Provisioning
 
@@ -138,6 +154,11 @@ cross-namespace denial, admin-only namespace creation, distinct
 Worker/Schedule-writer/admin identities and wrong-audience denial. These checks establish
 infrastructure authorization only; they do not implement the GrowthOS client,
 validate the four production Schedule payloads, or prove the later 4D send fence.
+It also connects to `internal-frontend:7236` from the ordinary non-root probe
+container with the correct public internode CA but no client certificate; the
+connection must fail with a certificate-required TLS alert. Possession of that
+public CA is not an internal client credential, and no internode private key or
+leaf certificate enters the client fixture directory.
 
 ## RuntimeProcessLease limitation
 
@@ -151,6 +172,13 @@ cannot claim that integration is complete.
 
 ## Disposable proof and cleanup
 
+The test harness holds a non-blocking host `flock` from before its first Docker
+inventory through the final cleanup. The default lock lives in the repository's
+common Git directory so invocations from different worktrees still serialize.
+A concurrent invocation exits with status `73` and the stable `lifecycle is
+busy` diagnostic before calling Docker. Stale task resources cause status `74`
+and require manual review; a new run never recreates them implicitly.
+
 The test harness uses production `temporal.yaml` with test-only certificates,
 JWKS and tokens under a temporary directory. The public JWKS document and the
 JWKS server's TLS key use separate mounts, so the file server cannot expose its
@@ -160,7 +188,10 @@ as required, but every service, container, volume and internal network has the
 it never invokes `down`, changes the host Docker daemon, or touches a `global-*`
 retained container. The non-root Worker probe receives read-only copies of the
 three Temporal SDK packages from the repository's exact frozen 1.20.3 install;
-the harness does not install or download dependencies.
+the harness does not install or download dependencies. Every disposable
+container, volume and network carries an exact run-id and scope label. Cleanup
+enumerates only that run-id, verifies project/service labels before removal and
+refuses any mismatched resource.
 
 ```bash
 infra/temporal-platform/test-support/verify-disposable.sh

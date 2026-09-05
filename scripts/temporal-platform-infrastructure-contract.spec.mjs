@@ -234,7 +234,7 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.match(runner, /verify\.sh/);
   assert.match(runner, /worker-poll-probe\.mjs/);
   assert.match(runner, /internal-mtls-probe\.mjs/);
-  assert.match(runner, /INTERNAL_MTLS_REJECTED/);
+  assert.match(internalProbe, /INTERNAL_MTLS_REJECTED/);
   assert.match(runner, /worker-cross-namespace-denied/);
   assert.match(runner, /AUTHORITY_DIRECTORY=.*\/authority/);
   assert.match(runner, /SERVER_SECRET_DIRECTORY=.*\/server/);
@@ -264,7 +264,7 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.doesNotMatch(fixtureGenerator, /privateKey\.export/);
   assert.match(workerProbe, /pollWorkflowTaskQueue/);
   assert.match(workerProbe, /respondWorkflowTaskFailed/);
-  assert.match(internalProbe, /certificate required|bad certificate/i);
+  assert.match(internalProbe, /certificate[ .]required|bad[ .]certificate/i);
   assert.match(compose, /io\.growthos\.task4c\.run-id/);
   assert.match(runner, /flock -n/);
   assert.match(runner, /io\.growthos\.task4c\.run-id/);
@@ -343,13 +343,29 @@ test("a concurrent disposable lifecycle exits before invoking Docker", async (t)
 });
 
 test("high-risk platform Temporal paths remain code-owner controlled", async () => {
-  const codeowners = await repositoryFile(".github/CODEOWNERS");
+  const [codeowners, requiredContextsText] = await Promise.all([
+    repositoryFile(".github/CODEOWNERS"),
+    repositoryFile(".github/required-contexts.json"),
+  ]);
+  const requiredContexts = JSON.parse(requiredContextsText);
+  const expectedPatterns = [
+    "/infra/temporal-platform/",
+    "/scripts/temporal-platform-infrastructure-contract.spec.mjs",
+  ];
 
   assert.match(codeowners, /^\/infra\/temporal-platform\/ @mlhjyx$/m);
   assert.match(
     codeowners,
     /^\/scripts\/temporal-platform-infrastructure-contract\.spec\.mjs @mlhjyx$/m,
   );
+  for (const pattern of expectedPatterns) {
+    assert.ok(
+      requiredContexts.codeowner_requirements.terminal_patterns.includes(
+        pattern,
+      ),
+      `machine CODEOWNERS policy is missing ${pattern}`,
+    );
+  }
 });
 
 test("runbook records the namespace isolation and current lease limitation", async () => {

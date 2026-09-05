@@ -1,7 +1,12 @@
+x-task4c-disposable-labels: &task4c-disposable-labels
+  io.growthos.task4c.scope: platform-temporal-disposable
+  io.growthos.task4c.run-id: ${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}
+
 services:
   codex-task4c-platform-temporal-postgres:
     image: docker.io/library/postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-postgres
+    labels: *task4c-disposable-labels
     environment:
       POSTGRES_USER: temporal_platform
       POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set disposable password}
@@ -26,6 +31,7 @@ services:
   codex-task4c-platform-temporal-schema:
     image: docker.io/temporalio/admin-tools@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-schema
+    labels: *task4c-disposable-labels
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     entrypoint: ["/bin/sh"]
     command: ["/opt/temporal-platform/schema-provision.sh"]
@@ -52,6 +58,7 @@ services:
   codex-task4c-platform-temporal-jwks:
     image: docker.io/library/caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-jwks
+    labels: *task4c-disposable-labels
     hostname: task4c-jwks
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
@@ -105,6 +112,7 @@ services:
   codex-task4c-platform-temporal-server:
     image: docker.io/temporalio/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-server
+    labels: *task4c-disposable-labels
     hostname: task4c-temporal
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     environment:
@@ -159,6 +167,7 @@ services:
   codex-task4c-platform-temporal-admin:
     image: docker.io/temporalio/admin-tools@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-admin
+    labels: *task4c-disposable-labels
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     environment:
       TEMPORAL_PLATFORM_ADDRESS: task4c-temporal:7233
@@ -180,6 +189,7 @@ services:
   codex-task4c-platform-temporal-worker-probe:
     image: docker.io/library/node@sha256:e6d9a389d34ff9678438af985c9913fbd1eb6ed36e80fea56644f4b4f6dd70ba
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-worker-probe
+    labels: *task4c-disposable-labels
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     working_dir: /repo/apps/api
     volumes:
@@ -223,8 +233,10 @@ services:
 volumes:
   codex-task4c-platform-temporal-postgres-data:
     name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-postgres-data
+    labels: *task4c-disposable-labels
 
 networks:
   codex-task4c-platform-temporal:
     name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-network
     internal: true
+    labels: *task4c-disposable-labels

@@ -66,30 +66,26 @@ global:
       checkInterval: 1h
     internode:
       server:
-        requireClientAuth: false
-        certFile: "/run/secrets/temporal-platform/server.crt"
-        keyFile: "/run/secrets/temporal-platform/server.key"
+        requireClientAuth: true
+        certFile: "/run/secrets/temporal-platform/internode.crt"
+        keyFile: "/run/secrets/temporal-platform/internode.key"
+        clientCaFiles:
+          - "/run/secrets/temporal-platform/internode-ca.crt"
       client:
         serverName: "{{ $serverName }}"
         disableHostVerification: false
         rootCaFiles:
-          - "/run/secrets/temporal-platform/ca.crt"
+          - "/run/secrets/temporal-platform/internode-ca.crt"
     frontend:
       server:
         requireClientAuth: false
-        certFile: "/run/secrets/temporal-platform/server.crt"
-        keyFile: "/run/secrets/temporal-platform/server.key"
+        certFile: "/run/secrets/temporal-platform/frontend.crt"
+        keyFile: "/run/secrets/temporal-platform/frontend.key"
       client:
         serverName: "{{ $serverName }}"
         disableHostVerification: false
         rootCaFiles:
-          - "/run/secrets/temporal-platform/ca.crt"
-    systemWorker:
-      client:
-        serverName: "{{ $serverName }}"
-        disableHostVerification: false
-        rootCaFiles:
-          - "/run/secrets/temporal-platform/ca.crt"
+          - "/run/secrets/temporal-platform/frontend-ca.crt"
   metrics:
     prometheus:
       framework: "tally"

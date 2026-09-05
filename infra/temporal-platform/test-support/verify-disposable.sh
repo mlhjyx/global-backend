@@ -7,10 +7,50 @@ PLATFORM_DIR=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 REPOSITORY_ROOT=$(cd -- "${PLATFORM_DIR}/../.." && pwd)
 COMPOSE_FILE=${SCRIPT_DIR}/compose.disposable.yml
 AUDIENCE=global-backend:platform-temporal-test
+COMMON_GIT_DIRECTORY=$(git -C "${REPOSITORY_ROOT}" rev-parse --path-format=absolute --git-common-dir)
+DEFAULT_LOCK_FILE=${COMMON_GIT_DIRECTORY}/codex-task4c-platform-temporal.lock
+LOCK_FILE=${TEMPORAL_PLATFORM_TEST_LOCK_FILE:-${DEFAULT_LOCK_FILE}}
+case "${LOCK_FILE}" in
+  "${DEFAULT_LOCK_FILE}" | /tmp/codex-task4c-platform-temporal-lock-test.*/lifecycle.lock) ;;
+  *)
+    echo "platform Temporal disposable lock path is invalid" >&2
+    exit 1
+    ;;
+esac
+LOCK_DIRECTORY=$(dirname -- "${LOCK_FILE}")
+if [[ ! -d ${LOCK_DIRECTORY} || -L ${LOCK_DIRECTORY} ]]; then
+  echo "platform Temporal disposable lock directory is invalid" >&2
+  exit 1
+fi
+exec {LIFECYCLE_LOCK_FD}>>"${LOCK_FILE}"
+if ! flock -n "${LIFECYCLE_LOCK_FD}"; then
+  echo "platform Temporal disposable lifecycle is busy" >&2
+  exit 73
+fi
+
 RUN_ID=${TEMPORAL_PLATFORM_TEST_RUN_ID:-$(openssl rand -hex 8)}
 if [[ ! ${RUN_ID} =~ ^[a-z0-9]{8,32}$ ]]; then
   echo "disposable run id is invalid" >&2
   exit 1
+fi
+
+CONTAINER_INVENTORY=$(docker container ls -a --format '{{.Names}}') || {
+  echo "disposable container inventory is unavailable" >&2
+  exit 1
+}
+VOLUME_INVENTORY=$(docker volume ls --format '{{.Name}}') || {
+  echo "disposable volume inventory is unavailable" >&2
+  exit 1
+}
+NETWORK_INVENTORY=$(docker network ls --format '{{.Name}}') || {
+  echo "disposable network inventory is unavailable" >&2
+  exit 1
+}
+if printf '%s\n%s\n%s\n' \
+  "${CONTAINER_INVENTORY}" "${VOLUME_INVENTORY}" "${NETWORK_INVENTORY}" |
+  grep -Eq '(^|-)codex-task4c-platform-temporal-'; then
+  echo "stale platform Temporal disposable resources require manual review" >&2
+  exit 74
 fi
 
 FIXTURE_DIRECTORY=$(mktemp -d "/tmp/codex-task4c-platform-temporal-${RUN_ID}.XXXXXX")
@@ -63,75 +103,177 @@ export TEMPORAL_PLATFORM_COMPOSE_FILE=${COMPOSE_FILE}
 compose=(docker compose -p global -f "${COMPOSE_FILE}")
 cleanup() {
   exit_status=$?
+  trap - EXIT
   set +e
-  if (( exit_status != 0 )) &&
-    docker container inspect \
-      "codex-task4c-platform-temporal-${RUN_ID}-jwks" >/dev/null 2>&1; then
-    echo "bounded disposable JWKS diagnostics:" >&2
-    docker container inspect \
-      --format '{{json .State.Health}}' \
-      "codex-task4c-platform-temporal-${RUN_ID}-jwks" >&2
-    docker logs --tail 80 \
-      "codex-task4c-platform-temporal-${RUN_ID}-jwks" >&2
+  cleanup_status=0
+  scope_label=io.growthos.task4c.scope
+  run_label=io.growthos.task4c.run-id
+  scope_value=platform-temporal-disposable
+
+  container_owned() {
+    metadata=$(docker container inspect --format \
+      '{{index .Config.Labels "io.growthos.task4c.scope"}} {{index .Config.Labels "io.growthos.task4c.run-id"}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.service"}}' \
+      "$1" 2>/dev/null) || return 1
+    case "${metadata}" in
+      "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-postgres" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-schema" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-jwks" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-server" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-admin" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-worker-probe") return 0 ;;
+      *) return 2 ;;
+    esac
+  }
+
+  diagnose_owned_container() {
+    name=$1
+    lines=$2
+    label=$3
+    if container_owned "${name}"; then
+      echo "bounded disposable ${label} diagnostics:" >&2
+      docker logs --tail "${lines}" "${name}" >&2
+    fi
+  }
+
+  if (( exit_status != 0 )); then
+    diagnose_owned_container \
+      "codex-task4c-platform-temporal-${RUN_ID}-jwks" 80 JWKS
+    diagnose_owned_container \
+      "codex-task4c-platform-temporal-${RUN_ID}-schema" 120 schema
+    diagnose_owned_container \
+      "codex-task4c-platform-temporal-${RUN_ID}-server" 200 "Temporal server"
   fi
-  if (( exit_status != 0 )) &&
-    docker container inspect \
-      "codex-task4c-platform-temporal-${RUN_ID}-schema" >/dev/null 2>&1; then
-    echo "bounded disposable schema diagnostics:" >&2
-    docker logs --tail 120 \
-      "codex-task4c-platform-temporal-${RUN_ID}-schema" >&2
+
+  container_ids=$(docker container ls -aq \
+    --filter "label=${scope_label}=${scope_value}" \
+    --filter "label=${run_label}=${RUN_ID}") || cleanup_status=1
+  for container_id in ${container_ids}; do
+    if container_owned "${container_id}"; then
+      docker container rm -f "${container_id}" >/dev/null 2>&1 || cleanup_status=1
+    else
+      echo "refusing to remove disposable container with mismatched labels" >&2
+      cleanup_status=1
+    fi
+  done
+
+  remaining_containers=$(docker container ls -aq \
+    --filter "label=${scope_label}=${scope_value}" \
+    --filter "label=${run_label}=${RUN_ID}") || cleanup_status=1
+  if [[ -n ${remaining_containers} ]]; then
+    echo "disposable containers remain after bounded cleanup" >&2
+    cleanup_status=1
   fi
-  if (( exit_status != 0 )) &&
-    docker container inspect \
-      "codex-task4c-platform-temporal-${RUN_ID}-server" >/dev/null 2>&1; then
-    echo "bounded disposable Temporal server diagnostics:" >&2
-    docker logs --tail 200 \
-      "codex-task4c-platform-temporal-${RUN_ID}-server" >&2
+  for container_suffix in postgres schema jwks server admin worker-probe; do
+    expected_name=codex-task4c-platform-temporal-${RUN_ID}-${container_suffix}
+    if docker container inspect "${expected_name}" >/dev/null 2>&1; then
+      echo "refusing mismatched disposable container left at expected name" >&2
+      cleanup_status=1
+    fi
+  done
+
+  volume_name=codex-task4c-platform-temporal-${RUN_ID}-postgres-data
+  if volume_metadata=$(docker volume inspect --format \
+    '{{index .Labels "io.growthos.task4c.scope"}} {{index .Labels "io.growthos.task4c.run-id"}} {{index .Labels "com.docker.compose.project"}}' \
+    "${volume_name}" 2>/dev/null); then
+    if [[ ${volume_metadata} == "${scope_value} ${RUN_ID} global" ]]; then
+      docker volume rm "${volume_name}" >/dev/null 2>&1 || cleanup_status=1
+    else
+      echo "refusing to remove disposable volume with mismatched labels" >&2
+      cleanup_status=1
+    fi
   fi
-  "${compose[@]}" rm -sf \
-    codex-task4c-platform-temporal-worker-probe \
-    codex-task4c-platform-temporal-admin \
-    codex-task4c-platform-temporal-server \
-    codex-task4c-platform-temporal-jwks \
-    codex-task4c-platform-temporal-schema \
-    codex-task4c-platform-temporal-postgres >/dev/null 2>&1
-  docker volume rm \
-    "codex-task4c-platform-temporal-${RUN_ID}-postgres-data" >/dev/null 2>&1
-  docker network rm \
-    "codex-task4c-platform-temporal-${RUN_ID}-network" >/dev/null 2>&1
+
+  network_name=codex-task4c-platform-temporal-${RUN_ID}-network
+  if network_metadata=$(docker network inspect --format \
+    '{{index .Labels "io.growthos.task4c.scope"}} {{index .Labels "io.growthos.task4c.run-id"}} {{index .Labels "com.docker.compose.project"}}' \
+    "${network_name}" 2>/dev/null); then
+    if [[ ${network_metadata} == "${scope_value} ${RUN_ID} global" ]]; then
+      docker network rm "${network_name}" >/dev/null 2>&1 || cleanup_status=1
+    else
+      echo "refusing to remove disposable network with mismatched labels" >&2
+      cleanup_status=1
+    fi
+  fi
+
   rm -rf -- "${FIXTURE_DIRECTORY}"
+  if (( exit_status != 0 )); then
+    exit "${exit_status}"
+  fi
+  exit "${cleanup_status}"
 }
 trap cleanup EXIT
 
 openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
-  -subj "/CN=Task4C Disposable Temporal CA" \
-  -keyout "${AUTHORITY_DIRECTORY}/ca.key" \
-  -out "${AUTHORITY_DIRECTORY}/ca.crt" >/dev/null 2>&1
+  -subj "/CN=Task4C Disposable Frontend CA" \
+  -keyout "${AUTHORITY_DIRECTORY}/frontend-ca.key" \
+  -out "${AUTHORITY_DIRECTORY}/frontend-ca.crt" >/dev/null 2>&1
 openssl req -newkey rsa:2048 -sha256 -nodes \
   -subj "/CN=task4c-temporal" \
-  -addext "subjectAltName=DNS:task4c-temporal,DNS:task4c-jwks,DNS:temporal-platform" \
-  -keyout "${AUTHORITY_DIRECTORY}/server.key" \
-  -out "${AUTHORITY_DIRECTORY}/server.csr" >/dev/null 2>&1
+  -addext "subjectAltName=DNS:task4c-temporal,DNS:temporal-platform" \
+  -addext "extendedKeyUsage=serverAuth" \
+  -keyout "${AUTHORITY_DIRECTORY}/frontend.key" \
+  -out "${AUTHORITY_DIRECTORY}/frontend.csr" >/dev/null 2>&1
 openssl x509 -req -sha256 -days 1 \
-  -in "${AUTHORITY_DIRECTORY}/server.csr" \
-  -CA "${AUTHORITY_DIRECTORY}/ca.crt" \
-  -CAkey "${AUTHORITY_DIRECTORY}/ca.key" \
+  -in "${AUTHORITY_DIRECTORY}/frontend.csr" \
+  -CA "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
+  -CAkey "${AUTHORITY_DIRECTORY}/frontend-ca.key" \
   -CAcreateserial -copy_extensions copy \
-  -out "${AUTHORITY_DIRECTORY}/server.crt" >/dev/null 2>&1
-cp "${AUTHORITY_DIRECTORY}/server.crt" \
-  "${AUTHORITY_DIRECTORY}/server.key" \
+  -out "${AUTHORITY_DIRECTORY}/frontend.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -sha256 -nodes \
+  -subj "/CN=task4c-jwks" \
+  -addext "subjectAltName=DNS:task4c-jwks" \
+  -addext "extendedKeyUsage=serverAuth" \
+  -keyout "${AUTHORITY_DIRECTORY}/jwks.key" \
+  -out "${AUTHORITY_DIRECTORY}/jwks.csr" >/dev/null 2>&1
+openssl x509 -req -sha256 -days 1 \
+  -in "${AUTHORITY_DIRECTORY}/jwks.csr" \
+  -CA "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
+  -CAkey "${AUTHORITY_DIRECTORY}/frontend-ca.key" \
+  -CAserial "${AUTHORITY_DIRECTORY}/frontend-ca.srl" -copy_extensions copy \
+  -out "${AUTHORITY_DIRECTORY}/jwks.crt" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+  -subj "/CN=Task4C Disposable Internode CA" \
+  -keyout "${AUTHORITY_DIRECTORY}/internode-ca.key" \
+  -out "${AUTHORITY_DIRECTORY}/internode-ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -sha256 -nodes \
+  -subj "/CN=task4c-temporal-internode" \
+  -addext "subjectAltName=DNS:task4c-temporal,DNS:temporal-platform" \
+  -addext "extendedKeyUsage=serverAuth,clientAuth" \
+  -keyout "${AUTHORITY_DIRECTORY}/internode.key" \
+  -out "${AUTHORITY_DIRECTORY}/internode.csr" >/dev/null 2>&1
+openssl x509 -req -sha256 -days 1 \
+  -in "${AUTHORITY_DIRECTORY}/internode.csr" \
+  -CA "${AUTHORITY_DIRECTORY}/internode-ca.crt" \
+  -CAkey "${AUTHORITY_DIRECTORY}/internode-ca.key" \
+  -CAcreateserial -copy_extensions copy \
+  -out "${AUTHORITY_DIRECTORY}/internode.crt" >/dev/null 2>&1
+cp "${AUTHORITY_DIRECTORY}/frontend.crt" \
+  "${AUTHORITY_DIRECTORY}/frontend.key" \
+  "${AUTHORITY_DIRECTORY}/internode.crt" \
+  "${AUTHORITY_DIRECTORY}/internode.key" \
   "${SERVER_SECRET_DIRECTORY}/"
-cp "${AUTHORITY_DIRECTORY}/ca.crt" \
-  "${SERVER_SECRET_DIRECTORY}/ca.crt"
-cp "${AUTHORITY_DIRECTORY}/ca.crt" \
+cp "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
+  "${SERVER_SECRET_DIRECTORY}/frontend-ca.crt"
+cp "${AUTHORITY_DIRECTORY}/internode-ca.crt" \
+  "${SERVER_SECRET_DIRECTORY}/internode-ca.crt"
+cp "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
   "${SERVER_SECRET_DIRECTORY}/jwks-ca-bundle.crt"
-cp "${AUTHORITY_DIRECTORY}/server.crt" \
-  "${AUTHORITY_DIRECTORY}/server.key" \
-  "${JWKS_TLS_DIRECTORY}/"
-cp "${AUTHORITY_DIRECTORY}/ca.crt" \
+cp "${AUTHORITY_DIRECTORY}/jwks.crt" \
+  "${JWKS_TLS_DIRECTORY}/server.crt"
+cp "${AUTHORITY_DIRECTORY}/jwks.key" \
+  "${JWKS_TLS_DIRECTORY}/server.key"
+cp "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
   "${CLIENT_SECRET_DIRECTORY}/ca.crt"
+cp "${AUTHORITY_DIRECTORY}/internode-ca.crt" \
+  "${CLIENT_SECRET_DIRECTORY}/internode-ca.crt"
 node "${SCRIPT_DIR}/generate-fixtures.mjs" \
   "${JWKS_DIRECTORY}" "${CLIENT_SECRET_DIRECTORY}" "${AUDIENCE}" >/dev/null
+if find "${CLIENT_SECRET_DIRECTORY}" -maxdepth 1 -type f \
+  \( -name '*.key' -o -name 'internode.crt' \) -print -quit |
+  grep -q .; then
+  echo "ordinary client fixture contains an internode client credential" >&2
+  exit 1
+fi
 for package_name in client common proto; do
   package_source=${REPOSITORY_ROOT}/node_modules/.pnpm/@temporalio+${package_name}@1.20.3/node_modules/@temporalio/${package_name}
   if [[ ! -d ${package_source} || -L ${package_source} ]] ||
@@ -163,7 +305,7 @@ chmod 0644 \
   "${SERVER_SECRET_DIRECTORY}"/*.crt \
   "${JWKS_TLS_DIRECTORY}"/*.crt \
   "${JWKS_DIRECTORY}/jwks.json" \
-  "${CLIENT_SECRET_DIRECTORY}/ca.crt"
+  "${CLIENT_SECRET_DIRECTORY}"/*.crt
 if [[ $(id -u) -eq 0 ]]; then
   chown -R "${TEST_UID}:${TEST_GID}" "${FIXTURE_DIRECTORY}"
 fi
@@ -264,6 +406,12 @@ export TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID=${SCHEDULE_ID}
 export TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID=${ACTION_WORKFLOW_ID}
 export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}
 "${PLATFORM_DIR}/verify.sh"
+
+"${compose[@]}" run --rm --no-deps --entrypoint node \
+  codex-task4c-platform-temporal-worker-probe \
+  /repo/infra/temporal-platform/test-support/internal-mtls-probe.mjs \
+  /run/secrets/temporal-platform-client/internode-ca.crt \
+  task4c-temporal:7236 task4c-temporal
 
 "${compose[@]}" run --rm --no-deps --entrypoint node \
   codex-task4c-platform-temporal-worker-probe \
