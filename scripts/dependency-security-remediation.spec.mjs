@@ -6,7 +6,7 @@ const SECURITY_OVERRIDES = Object.freeze({
   "nanoid@>=3.0.0 <4.0.0": "3.3.18",
   postcss: "8.5.26",
   "js-yaml": "4.3.1",
-  "fast-uri": "3.1.5",
+  "fast-uri": "3.1.6",
   "deepmerge-ts": "8.0.1",
 });
 
@@ -15,13 +15,19 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "nanoid@3.3.15",
   "nanoid@3.3.16",
   "nanoid@3.3.17",
+  "baseline-browser-mapping@2.10.43",
+  "browserslist@4.28.6",
+  "fast-uri@3.1.5",
 ]);
 
 const REQUIRED_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
   "@nestjs/core@11.2.1",
   "express@5.2.1",
   "body-parser@2.3.0",
-  "qs@6.15.3",
+  "qs@6.16.0",
+  "fast-uri@3.1.6",
+  "browserslist@4.28.7",
+  "baseline-browser-mapping@2.10.44",
   "multer@2.2.0",
   "path-to-regexp@8.4.2",
   "file-type@21.3.4",
@@ -32,6 +38,7 @@ const FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
   "@nestjs/core@10.4.22",
   "express@4.22.1",
   "body-parser@1.20.4",
+  "qs@6.15.3",
   "qs@6.14.2",
   "multer@2.0.2",
   "path-to-regexp@0.1.13",
@@ -42,9 +49,7 @@ const FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
 ]);
 
 function lockfileHasSnapshot(lockfile, snapshot) {
-  const key = snapshot.startsWith("@")
-    ? `  '${snapshot}':`
-    : `  ${snapshot}:`;
+  const key = snapshot.startsWith("@") ? `  '${snapshot}':` : `  ${snapshot}:`;
   return lockfile.includes(key);
 }
 
@@ -79,7 +84,7 @@ test("extract-zip is remediated by removal, not a baseline exception", async () 
   assert.doesNotMatch(baseline, /GHSA-jmr9-qjv8-65gv|extract-zip/u);
 });
 
-test("NestJS 11 runtime security floors replace every overdue vulnerable snapshot", async () => {
+test("reviewed runtime security floors replace every vulnerable predecessor snapshot", async () => {
   const lockfile = await readFile("pnpm-lock.yaml", "utf8");
 
   for (const snapshot of REQUIRED_RUNTIME_SECURITY_SNAPSHOTS) {
