@@ -1,13 +1,20 @@
-import type { ModelGateway } from '../model-gateway/model-gateway';
-import { checkAgainstSchema } from '../model-gateway/schema-validate';
-import type { AiContext, ModelResolutionSource, ModelResult } from '../model-gateway/types';
+import type { ModelGateway } from "../model-gateway/model-gateway";
+import { checkAgainstSchema } from "../model-gateway/schema-validate";
+import type {
+  AiContext,
+  ModelResolutionSource,
+  ModelResult,
+} from "../model-gateway/types";
 import {
   getModelCandidateCatalogEntry,
   type ModelCandidateProtocol,
-} from '../site-builder/agents/model-candidate-baseline';
-import type { SiteBuilderTaskId, TaskRoute } from '../site-builder/agents/task-routes';
-import { canonicalDigest, ContextEngine } from './context-engine';
-import { ModelExecutionRuntime } from './model-execution-runtime';
+} from "../site-builder/agents/model-candidate-baseline";
+import type {
+  SiteBuilderTaskId,
+  TaskRoute,
+} from "../site-builder/agents/task-routes";
+import { canonicalDigest, ContextEngine } from "./context-engine";
+import { ModelExecutionRuntime } from "./model-execution-runtime";
 import type {
   ContextSegment,
   ModelExecutionState,
@@ -15,15 +22,17 @@ import type {
   ReasoningLevel,
   RuntimeTelemetry,
   TaskModelContract,
-} from './types';
+} from "./types";
 
 const SITE_BUILDER_CONTEXT_WINDOW = 128_000;
 
-const PROTOCOLS: Readonly<Partial<Record<ModelCandidateProtocol, ModelProtocol>>> = Object.freeze({
-  'openai-responses': 'openai_responses',
-  'openai-chat-completions': 'openai_chat_completions',
-  'anthropic-messages': 'anthropic_messages',
-  'google-generate-content': 'google_native',
+const PROTOCOLS: Readonly<
+  Partial<Record<ModelCandidateProtocol, ModelProtocol>>
+> = Object.freeze({
+  "openai-responses": "openai_responses",
+  "openai-chat-completions": "openai_chat_completions",
+  "anthropic-messages": "anthropic_messages",
+  "google-generate-content": "google_native",
 });
 
 export interface SiteBuilderRuntimeTaskDefinition<Input, Output> {
@@ -75,34 +84,45 @@ export interface SiteBuilderRuntimeAttemptResult<Output> {
 }
 
 function reasoningLevel(route: TaskRoute): ReasoningLevel {
-  return route.reasoningEffort ?? 'none';
+  return route.reasoningEffort ?? "none";
 }
 
 function reasoningReserve(level: ReasoningLevel): number {
-  if (level === 'high') return 2_048;
-  if (level === 'medium') return 1_024;
-  if (level === 'low') return 256;
+  if (level === "high") return 2_048;
+  if (level === "medium") return 1_024;
+  if (level === "low") return 256;
   return 0;
 }
 
 function estimateTokens(content: unknown): number {
-  return Math.max(1, Math.ceil(Buffer.byteLength(JSON.stringify(content), 'utf8') / 3));
+  return Math.max(
+    1,
+    Math.ceil(Buffer.byteLength(JSON.stringify(content), "utf8") / 3),
+  );
 }
 
-function resolveProtocol(alias: string, allowInjectedTestAlias: boolean): ModelProtocol {
+function resolveProtocol(
+  alias: string,
+  allowInjectedTestAlias: boolean,
+): ModelProtocol {
   try {
     const candidate = getModelCandidateCatalogEntry(alias);
-    const resolved = candidate.expectedProtocols.map((protocol) => PROTOCOLS[protocol]).find(Boolean);
-    if (!resolved) throw new Error(`model alias has no supported text protocol: ${alias}`);
+    const resolved = candidate.expectedProtocols
+      .map((protocol) => PROTOCOLS[protocol])
+      .find(Boolean);
+    if (!resolved)
+      throw new Error(`model alias has no supported text protocol: ${alias}`);
     return resolved;
   } catch (error) {
-    if (allowInjectedTestAlias) return 'openai_chat_completions';
+    if (allowInjectedTestAlias) return "openai_chat_completions";
     throw error;
   }
 }
 
 function segment(
-  value: Omit<ContextSegment, 'sourceDigest' | 'estimatedTokens'> & { estimatedTokens?: number },
+  value: Omit<ContextSegment, "sourceDigest" | "estimatedTokens"> & {
+    estimatedTokens?: number;
+  },
 ): ContextSegment {
   return {
     ...value,
@@ -114,10 +134,14 @@ function segment(
 export async function executeSiteBuilderModelAttempt<Input, Output>(
   options: ExecuteSiteBuilderAttemptOptions<Input, Output>,
 ): Promise<SiteBuilderRuntimeAttemptResult<Output>> {
-  const contractVersion = options.definition.contractVersion
-    ?? `site-builder-task-contract/${options.definition.id}/v1`;
+  const contractVersion =
+    options.definition.contractVersion ??
+    `site-builder-task-contract/${options.definition.id}/v1`;
   const promptVersion = `${contractVersion}/prompt-v1`;
-  const protocol = resolveProtocol(options.model, options.allowInjectedTestAlias);
+  const protocol = resolveProtocol(
+    options.model,
+    options.allowInjectedTestAlias,
+  );
   const reasoning = reasoningLevel(options.route);
   const settlementRequired = options.context.paidCost !== undefined;
   const policyRef = `task-policy:${options.definition.id}@${contractVersion}`;
@@ -126,38 +150,43 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
   const requestRef = `task-prompt:${options.definition.id}@${promptVersion}`;
   const contextSegments = [
     segment({
-      kind: 'policy',
+      kind: "policy",
       sourceRef: policyRef,
-      sensitivity: 'public',
-      cacheClass: 'stable-prefix',
+      sensitivity: "public",
+      cacheClass: "stable-prefix",
       content: {
         taskId: options.definition.id,
         contractVersion,
-        system: options.definition.system ?? '',
+        system: options.definition.system ?? "",
         dataPolicy: options.route.dataPolicy,
-        gatewayRepair: options.definition.repairTaskOutput ? 'single_closed_repair' : 'disabled',
+        gatewayRepair: options.definition.repairTaskOutput
+          ? "single_closed_repair"
+          : "disabled",
       },
     }),
     segment({
-      kind: 'schema',
+      kind: "schema",
       sourceRef: schemaRef,
-      sensitivity: 'public',
-      cacheClass: 'stable-prefix',
-      content: { input: options.definition.inputSchema, output: options.definition.outputSchema },
+      sensitivity: "public",
+      cacheClass: "stable-prefix",
+      content: {
+        input: options.definition.inputSchema,
+        output: options.definition.outputSchema,
+      },
     }),
     segment({
-      kind: 'facts',
+      kind: "facts",
       sourceRef: inputRef,
-      sensitivity: 'workspace',
-      cacheClass: 'request-local',
+      sensitivity: "workspace",
+      cacheClass: "request-local",
       content: options.input,
       relevance: 100,
     }),
     segment({
-      kind: 'request',
+      kind: "request",
       sourceRef: requestRef,
-      sensitivity: 'workspace',
-      cacheClass: 'request-local',
+      sensitivity: "workspace",
+      cacheClass: "request-local",
       content: { prompt: options.prompt },
     }),
   ];
@@ -177,7 +206,7 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
   const contract: TaskModelContract<Input, Output> = {
     taskId: options.definition.id,
     version: contractVersion,
-    executionMode: 'generative',
+    executionMode: "generative",
     inputSchema: options.definition.inputSchema,
     outputSchema: options.definition.outputSchema,
     contextPolicy: {
@@ -190,12 +219,20 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
       reasoning,
       settlementRequired,
     },
-    reasoningPolicy: { allowed: [reasoning], default: reasoning, reserveTokens: reasoningReserve(reasoning) },
-    cachePolicy: { mode: 'disabled' },
+    reasoningPolicy: {
+      allowed: [reasoning],
+      default: reasoning,
+      reserveTokens: reasoningReserve(reasoning),
+    },
+    cachePolicy: { mode: "disabled" },
     retryPolicy: { transportMaxAttempts: 1, contentRepairMaxAttempts: 0 },
     validateOutput: (input, output) => {
-      const schema = checkAgainstSchema(options.definition.outputSchema, output);
-      if (!schema.valid) throw new Error(`output invalid: ${(schema.errors ?? []).join('; ')}`);
+      const schema = checkAgainstSchema(
+        options.definition.outputSchema,
+        output,
+      );
+      if (!schema.valid)
+        throw new Error(`output invalid: ${(schema.errors ?? []).join("; ")}`);
       options.definition.validateOutput?.(input, output);
     },
   };
@@ -211,9 +248,17 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
             system: options.definition.system,
             schema: options.definition.outputSchema,
             ...(options.definition.validateOutput
-              ? { validateOutput: (output: unknown) => options.definition.validateOutput?.(options.input, output as Output) }
+              ? {
+                  validateOutput: (output: unknown) =>
+                    options.definition.validateOutput?.(
+                      options.input,
+                      output as Output,
+                    ),
+                }
               : {}),
-            ...(options.definition.repairTaskOutput ? { repairTaskOutput: true } : {}),
+            ...(options.definition.repairTaskOutput
+              ? { repairTaskOutput: true }
+              : {}),
             model: options.model,
             maxTokens: options.route.maxTokens,
             maxCostCents: options.route.maxCostCents,
@@ -232,19 +277,22 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
             inputTokens: gatewayResult.usage?.inputTokens ?? 0,
             outputTokens: gatewayResult.usage?.outputTokens ?? 0,
           },
-          ...(gatewayResult.usage?.gatewaySettlements?.at(-1)?.requestId
-            ? { requestId: gatewayResult.usage.gatewaySettlements.at(-1)?.requestId ?? undefined }
-            : {}),
-          settlement: settlementRequired
-            && (!gatewayResult.usage?.gatewaySettlements?.length
-              || gatewayResult.usage.gatewaySettlements.some((item) => item.status === 'unknown'))
-            ? 'unknown'
-            : 'known',
+          settlement:
+            settlementRequired &&
+            (!gatewayResult.usage?.gatewaySettlements?.length ||
+              gatewayResult.usage.gatewaySettlements.some(
+                (item) => item.status === "unknown",
+              ))
+              ? "unknown"
+              : "known",
         };
       },
     },
   });
-  const promptMaterial = { system: options.definition.system ?? '', user: options.prompt };
+  const promptMaterial = {
+    system: options.definition.system ?? "",
+    user: options.prompt,
+  };
   const result = await runtime.execute({
     executionId: `site-builder:${options.context.runId ?? options.context.workspaceId}:${options.definition.id}:${options.fallbackIndex}`,
     fallbackIndex: options.fallbackIndex,
@@ -262,12 +310,14 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
     protocol,
     reasoning,
     sampling: {},
-    locale: typeof (options.input as { locale?: unknown }).locale === 'string'
-      ? (options.input as { locale: string }).locale
-      : 'und',
+    locale:
+      typeof (options.input as { locale?: unknown }).locale === "string"
+        ? (options.input as { locale: string }).locale
+        : "und",
     prompt: promptMaterial,
   });
-  if (!gatewayResult) throw new Error('model runtime completed without a gateway observation');
+  if (!gatewayResult)
+    throw new Error("model runtime completed without a gateway observation");
   return {
     gatewayResult,
     runtime: {
@@ -283,7 +333,9 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
       runtimeResolvedAlias: options.model,
       gatewayResolvedModel: gatewayResult.model,
       provider: gatewayResult.provider,
-      ...(gatewayResult.reportedModel ? { reportedModel: gatewayResult.reportedModel } : {}),
+      ...(gatewayResult.reportedModel
+        ? { reportedModel: gatewayResult.reportedModel }
+        : {}),
       ...(gatewayResult.modelResolutionSource
         ? { modelResolutionSource: gatewayResult.modelResolutionSource }
         : {}),
