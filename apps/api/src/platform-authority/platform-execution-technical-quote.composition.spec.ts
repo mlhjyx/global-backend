@@ -22,6 +22,7 @@ import { RuntimeWorkAdmissionGuard } from "../runtime/runtime-work-admission.gua
 import { PlatformExecutionTechnicalQuoteController } from "./platform-execution-technical-quote.controller";
 import { PlatformExecutionTechnicalQuoteReaderService } from "./platform-execution-technical-quote-reader";
 import {
+  PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
@@ -102,7 +103,7 @@ const rateLimitedQuoteRead = vi.fn(() => ({
         }),
         verify: async () => ({
           authenticationMode: "SERVICE_ONLY",
-          principalId: "growthos-platform-authority",
+          principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
           scopes: [PLATFORM_TECHNICAL_QUOTE_READ_SCOPE],
         }),
       },

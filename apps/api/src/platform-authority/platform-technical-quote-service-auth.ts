@@ -13,6 +13,8 @@ import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readines
 
 export const PLATFORM_TECHNICAL_QUOTE_READ_SCOPE =
   "platform-technical-quote.read" as const;
+export const PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL =
+  "growthos:platform-technical-quote-reader" as const;
 export const PLATFORM_TECHNICAL_QUOTE_PATH =
   PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH;
 
@@ -21,7 +23,6 @@ export const PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT = 64;
 export const PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR =
   "platform_technical_quote_authentication" as const;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-const PRINCIPAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export interface PlatformTechnicalQuoteServiceAuthenticationRequest {
   readonly method: "POST";
@@ -31,7 +32,7 @@ export interface PlatformTechnicalQuoteServiceAuthenticationRequest {
 
 export interface PlatformTechnicalQuoteServiceIdentity {
   readonly authenticationMode: "SERVICE_ONLY";
-  readonly principalId: string;
+  readonly principalId: typeof PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL;
   readonly scopes: readonly [typeof PLATFORM_TECHNICAL_QUOTE_READ_SCOPE];
 }
 
@@ -206,8 +207,7 @@ function validIdentity(
     const scopes = identity.scopes;
     return (
       identity.authenticationMode === "SERVICE_ONLY" &&
-      typeof identity.principalId === "string" &&
-      PRINCIPAL_ID.test(identity.principalId) &&
+      identity.principalId === PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL &&
       Array.isArray(scopes) &&
       !types.isProxy(scopes) &&
       Object.getPrototypeOf(scopes) === Array.prototype &&

@@ -17,6 +17,7 @@ import { PlatformExecutionTechnicalQuoteController } from "./platform-execution-
 import { PlatformExecutionTechnicalQuoteReaderService } from "./platform-execution-technical-quote-reader";
 import { PlatformExecutionTechnicalQuoteService } from "./platform-execution-technical-quote";
 import {
+  PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
@@ -44,7 +45,7 @@ const allowVerifier = {
   }),
   verify: async () => Object.freeze({
     authenticationMode: "SERVICE_ONLY" as const,
-    principalId: "growthos-platform-authority",
+    principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
     scopes: Object.freeze([PLATFORM_TECHNICAL_QUOTE_READ_SCOPE]),
   }),
 } as PlatformTechnicalQuoteServiceAuthenticationVerifier;

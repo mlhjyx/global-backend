@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+  PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteAuthenticationReadinessContributor,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
@@ -72,7 +73,7 @@ describe("PlatformTechnicalQuoteServiceAuthenticationGuard", () => {
   it("accepts only the exact dedicated service identity and scope", async () => {
     const verify = vi.fn(async () => Object.freeze({
       authenticationMode: "SERVICE_ONLY" as const,
-      principalId: "growthos-platform-authority",
+      principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
       scopes: Object.freeze([PLATFORM_TECHNICAL_QUOTE_READ_SCOPE]),
     }));
     const guard = new PlatformTechnicalQuoteServiceAuthenticationGuard(
@@ -105,12 +106,17 @@ describe("PlatformTechnicalQuoteServiceAuthenticationGuard", () => {
     }],
     ["workspace scope", {
       authenticationMode: "SERVICE_ONLY",
-      principalId: "growthos-platform-authority",
+      principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
       scopes: ["acquisition:read"],
+    }],
+    ["another bounded service principal", {
+      authenticationMode: "SERVICE_ONLY",
+      principalId: "growthos-platform-authority-other",
+      scopes: [PLATFORM_TECHNICAL_QUOTE_READ_SCOPE],
     }],
     ["extra scope", {
       authenticationMode: "SERVICE_ONLY",
-      principalId: "growthos-platform-authority",
+      principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
       scopes: [PLATFORM_TECHNICAL_QUOTE_READ_SCOPE, "platform-authority.issue"],
     }],
     ["unbounded principal", {
@@ -285,7 +291,7 @@ describe("PlatformTechnicalQuoteServiceAuthenticationGuard", () => {
     const ready = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
       verifier(async () => ({
         authenticationMode: "SERVICE_ONLY",
-        principalId: "growthos-platform-authority",
+        principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
         scopes: [PLATFORM_TECHNICAL_QUOTE_READ_SCOPE],
       })),
       readyRegistry,
