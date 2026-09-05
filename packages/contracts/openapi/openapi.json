@@ -7274,6 +7274,79 @@
         ]
       }
     },
+    "/api/v1/events/{eventId}/ack-status": {
+      "get": {
+        "operationId": "EventsController_ackStatus_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "event_id",
+                        "status",
+                        "acked_at"
+                      ],
+                      "properties": {
+                        "event_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "ACKED",
+                            "DEAD"
+                          ]
+                        },
+                        "acked_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取 pull sink ACK 状态；仅 ACKED 可确认已消费，404 不表示未消费",
+        "tags": [
+          "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:event:ack"
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "operationId": "EventsController_list_v1",
