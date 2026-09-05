@@ -3,8 +3,10 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertAuthorityPurposeShape,
+  assertPlatformExecutionBudgetRunExpectation,
   ExecutionBudgetGrantError,
   type ExecutionBudgetGrantErrorCode,
+  type PlatformExecutionBudgetRunExpectation,
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
 
@@ -21,6 +23,12 @@ export interface ExecutionBudgetWorkspaceAccountPersistenceResult extends Execut
   accountId: string;
   generation: number;
   authorizedCapMicrousd: bigint;
+}
+
+export interface ExecutionBudgetPlatformAccountPersistenceResult extends ExecutionBudgetAuthorityPersistenceResult {
+  readonly accountId: string;
+  readonly generation: number;
+  readonly authorizedCapMicrousd: bigint;
 }
 
 export interface ExecutionBudgetAuthorityRevocationInput {
@@ -58,6 +66,10 @@ type PlatformRevocationRow = {
   replay: boolean;
 };
 
+type PlatformAuthorizedOpenRow = AuthorizedOpenRow & {
+  replay: boolean;
+};
+
 export type ExecutionBudgetPlatformAuthorityFreshnessRow = Readonly<{
   purpose: string;
   state: string;
@@ -90,6 +102,22 @@ type VerifiedWorkspaceExecutionBudgetAuthority =
     workspaceId: string;
     requestSha256: string;
     capMicrousd: bigint;
+  };
+
+type VerifiedPlatformExecutionBudgetAuthority =
+  VerifiedExecutionBudgetAuthority & {
+    authorityKind: 'PLATFORM_GRANT';
+    workspaceId: null;
+    requestSha256: null;
+    scheduleId: string;
+    scheduleRequestSha256: string;
+    workflowId: string;
+    workflowRunId: string;
+    technicalPolicyRevision: string;
+    capMicrousd: null;
+    capPerRunMicrousd: bigint;
+    campaignCapMicrousd: bigint;
+    maxRuns: 1n;
   };
 
 const DATABASE_ERROR_CODES = [
@@ -141,9 +169,13 @@ export function isTrustedExecutionBudgetDatabaseMarker(
     const code = errorDescriptors.code;
     const meta = errorDescriptors.meta;
     if (
-      !code || !('value' in code) || code.value !== 'P2010' ||
-      !meta || !('value' in meta) ||
-      !meta.value || typeof meta.value !== 'object'
+      !code ||
+      !('value' in code) ||
+      code.value !== 'P2010' ||
+      !meta ||
+      !('value' in meta) ||
+      !meta.value ||
+      typeof meta.value !== 'object'
     ) {
       return false;
     }
@@ -151,8 +183,11 @@ export function isTrustedExecutionBudgetDatabaseMarker(
     const sqlState = metaDescriptors.code;
     const message = metaDescriptors.message;
     return Boolean(
-      sqlState && 'value' in sqlState && sqlState.value === 'P0001' &&
-      message && 'value' in message &&
+      sqlState &&
+      'value' in sqlState &&
+      sqlState.value === 'P0001' &&
+      message &&
+      'value' in message &&
       message.value === `ERROR: ${marker}`,
     );
   } catch {
@@ -228,6 +263,32 @@ function parsePlatformRevocationRow(
   return { revocationId: row.revocation_id, replay: row.replay };
 }
 
+function parsePlatformAuthorizedOpenRow(
+  rows: readonly PlatformAuthorizedOpenRow[],
+): ExecutionBudgetPlatformAccountPersistenceResult {
+  const row = rows[0];
+  if (
+    rows.length !== 1 ||
+    !row ||
+    !isExecutionBudgetUuid(row.account_id) ||
+    !isExecutionBudgetUuid(row.authority_id) ||
+    !Number.isSafeInteger(row.generation) ||
+    row.generation < 1 ||
+    typeof row.authorized_cap_microusd !== 'bigint' ||
+    row.authorized_cap_microusd < 1n ||
+    typeof row.replay !== 'boolean'
+  ) {
+    throw unavailable();
+  }
+  return {
+    accountId: row.account_id,
+    authorityId: row.authority_id,
+    generation: row.generation,
+    authorizedCapMicrousd: row.authorized_cap_microusd,
+    replay: row.replay,
+  };
+}
+
 function numericDateToDatabaseTimestamp(value: number): Date {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID');
@@ -282,6 +343,31 @@ function assertWorkspaceAuthority(
   assertExecutionBudgetScopeKey(authority.workspaceId, {
     allowPlatform: false,
   });
+  assertExecutionBudgetAuthorityId(authority.jti);
+}
+
+function assertPlatformAuthority(
+  authority: VerifiedExecutionBudgetAuthority,
+): asserts authority is VerifiedPlatformExecutionBudgetAuthority {
+  assertAuthorityPurposeShape(authority);
+  if (
+    authority.authorityKind !== 'PLATFORM_GRANT' ||
+    authority.workspaceId !== null ||
+    authority.requestSha256 !== null ||
+    authority.scheduleId === null ||
+    authority.scheduleRequestSha256 === undefined ||
+    authority.workflowId === undefined ||
+    authority.workflowRunId === undefined ||
+    authority.technicalPolicyRevision === undefined ||
+    authority.capMicrousd !== null ||
+    authority.capPerRunMicrousd === null ||
+    authority.campaignCapMicrousd === null ||
+    authority.maxRuns !== 1n
+  ) {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    );
+  }
   assertExecutionBudgetAuthorityId(authority.jti);
 }
 
@@ -341,18 +427,18 @@ function isAuthorizedPlatformWriterPrincipal(
   const principal = rows[0];
   return Boolean(
     rows.length === 1 &&
-      principal &&
-      principal.sessionUser === principal.currentUser &&
-      principal.canLogin &&
-      !principal.superuser &&
-      !principal.bypassRls &&
-      !principal.createDb &&
-      !principal.createRole &&
-      !principal.replication &&
-      principal.inherit &&
-      Array.isArray(principal.memberships) &&
-      principal.memberships.length === 1 &&
-      principal.memberships[0] === 'execution_budget_platform_writer',
+    principal &&
+    principal.sessionUser === principal.currentUser &&
+    principal.canLogin &&
+    !principal.superuser &&
+    !principal.bypassRls &&
+    !principal.createDb &&
+    !principal.createRole &&
+    !principal.replication &&
+    principal.inherit &&
+    Array.isArray(principal.memberships) &&
+    principal.memberships.length === 1 &&
+    principal.memberships[0] === 'execution_budget_platform_writer',
   );
 }
 
@@ -397,14 +483,8 @@ export class ExecutionBudgetAuthorityRepository {
       assertWorkspaceAuthority(authority);
       assertBoundedText(accountKey, 200, 'EXECUTION_BUDGET_GRANT_INVALID');
 
-      return await this.prisma.withWorkspace(
-        authority.workspaceId,
-        (tx) =>
-          this.consumeWorkspaceAndOpenInTransaction(
-            tx,
-            authority,
-            accountKey,
-          ),
+      return await this.prisma.withWorkspace(authority.workspaceId, (tx) =>
+        this.consumeWorkspaceAndOpenInTransaction(tx, authority, accountKey),
       );
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
@@ -427,9 +507,7 @@ export class ExecutionBudgetAuthorityRepository {
         await consumeWorkspaceWithTransaction(tx, authority),
       );
       if (consumption.replay) {
-        throw new ExecutionBudgetGrantError(
-          'EXECUTION_BUDGET_GRANT_REUSED',
-        );
+        throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED');
       }
       const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
         Prisma.sql`SELECT * FROM open_tool_budget(
@@ -443,23 +521,13 @@ export class ExecutionBudgetAuthorityRepository {
     }
   }
 
-  async ingestPlatform(
+  async ingestPlatformAndAdmit(
     authority: VerifiedExecutionBudgetAuthority,
-  ): Promise<ExecutionBudgetAuthorityPersistenceResult> {
+    expected: PlatformExecutionBudgetRunExpectation,
+  ): Promise<ExecutionBudgetPlatformAccountPersistenceResult> {
     try {
-      assertAuthorityPurposeShape(authority);
-      if (
-        authority.authorityKind !== 'PLATFORM_GRANT' ||
-        authority.scheduleId === null ||
-        authority.capPerRunMicrousd === null ||
-        authority.campaignCapMicrousd === null ||
-        authority.maxRuns === null
-      ) {
-        throw new ExecutionBudgetGrantError(
-          'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
-        );
-      }
-      assertExecutionBudgetAuthorityId(authority.jti);
+      assertPlatformAuthority(authority);
+      assertPlatformExecutionBudgetRunExpectation(expected);
       if (!this.platformWriter) throw unavailable();
       const issuedAt = numericDateToDatabaseTimestamp(authority.issuedAt);
       const notBefore = numericDateToDatabaseTimestamp(authority.notBefore);
@@ -469,22 +537,30 @@ export class ExecutionBudgetAuthorityRepository {
         async (tx) => {
           await tx.$executeRawUnsafe('SET LOCAL statement_timeout = 2000');
           await attestExecutionBudgetPlatformWriterTransaction(tx);
-          return tx.$queryRaw<AuthorityRow[]>(
-          Prisma.sql`SELECT * FROM ingest_platform_execution_authority(
+          return tx.$queryRaw<PlatformAuthorizedOpenRow[]>(
+            Prisma.sql`SELECT * FROM ingest_and_admit_platform_execution_budget_run_v2(
             ${authority.issuer}, ${authority.audience}, ${authority.jti}::uuid,
             ${authority.tokenSha256}, ${authority.schemaVersion},
             ${authority.purpose}::"execution_budget_purpose",
             ${authority.subjectType}, ${authority.subjectId},
-            ${authority.scheduleId}, ${authority.currency}, ${authority.unit},
+            ${authority.scheduleId}, ${authority.scheduleRequestSha256},
+            ${authority.workflowId}, ${authority.workflowRunId},
+            ${authority.technicalPolicyRevision}, ${authority.currency},
+            ${authority.unit},
             ${authority.capPerRunMicrousd}, ${authority.campaignCapMicrousd},
             ${authority.maxRuns}, ${issuedAt}, ${notBefore},
-            ${expiresAt}
+            ${expiresAt},
+            ${expected.purpose}::"execution_budget_purpose",
+            ${expected.subjectType}, ${expected.subjectId},
+            ${expected.scheduleId}, ${expected.scheduleRequestSha256},
+            ${expected.workflowId}, ${expected.workflowRunId},
+            ${expected.technicalPolicyRevision}
           )`,
           );
         },
         { maxWait: 1_000, timeout: 2_500 },
       );
-      return parseAuthorityRow(rows);
+      return parsePlatformAuthorizedOpenRow(rows);
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }
