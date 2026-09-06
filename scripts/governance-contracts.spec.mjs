@@ -385,12 +385,25 @@ test("the discovery lineage successor is current-main based and the quarantined 
       "| G0 — Truth & Ownership | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit. |",
     ),
   ]);
-  const laterGateRows = status
+  const liveGateRows = status
     .split("\n")
     .filter((line) =>
-      /^\| G(?:[1-4]|5-(?:Site|Acquisition)|[6-7]) —/.test(line),
+      /^\| G(?:0|[1-4]|5-(?:Site|Acquisition)|[6-7]) —/.test(line),
     );
-  assert.equal(laterGateRows.length, 8);
+  assert.deepEqual(
+    liveGateRows.map((line) => line.split("|")[1].trim()),
+    [
+      "G0 — Truth & Ownership",
+      "G1 — Product/UX/Contract",
+      "G2 — Source/TDD/Security",
+      "G3 — Integration/Data",
+      "G4 — Release Candidate",
+      "G5-Site — Runtime Observed",
+      "G5-Acquisition — Runtime Observed",
+      "G6 — UAT Accepted",
+      "G7 — Pilot/GA Authorized",
+    ],
+  );
 });
 
 function issueCodes(result) {
