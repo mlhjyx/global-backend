@@ -515,6 +515,8 @@ test("comments and fenced examples cannot counterfeit fields in the visible card
   );
   for (const altered of [
     body().replace("PASS；", "PA\u202eSS；"),
+    body().replace("PASS；", "PA<!-- hidden -->SS；"),
+    body({ headSha: "a".repeat(20) + "<!-- hidden -->" + "a".repeat(20) }),
     body({ headSha: "a".repeat(20) + "\u200e" + "a".repeat(20) }),
     "x".repeat(256 * 1024) + body(),
   ])
@@ -523,4 +525,51 @@ test("comments and fenced examples cannot counterfeit fields in the visible card
         .blocking,
       true,
     );
+});
+
+test("Setext alternatives and multiline field continuations cannot hide another decision", () => {
+  for (const altered of [
+    body() + "\n非技术合并决策卡\n---\n- 技术门：HOLD\n",
+    ...[
+      "**非技术合并决策卡**",
+      "[非技术合并决策卡](https://example.invalid)",
+      "`非技术合并决策卡`",
+    ].map((title) => body() + `\n${title}\n---\n- 技术门：HOLD\n`),
+    body() + "\n## **非技术合并决策卡**\n- 技术门：HOLD\n",
+    ...[
+      "非技术<!-- hidden -->合并决策卡",
+      "**非技术<!-- hidden -->合并决策卡**",
+      "非技术\u200b合并决策卡",
+    ].map((title) => body() + `\n${title}\n---\n- 技术门：HOLD\n`),
+    body() + "\n## 非技术<!-- hidden -->合并决策卡\n- 技术门：HOLD\n",
+    ...["非技术合&#x5e76;决策卡", "非技术合<span></span>并决策卡"].map(
+      (title) => body() + `\n${title}\n---\n- 技术门：HOLD\n`,
+    ),
+    body() + "\n非技术合并决策卡\n===\n- 技术门：HOLD\n",
+    body().replace("- 技术门：PASS", "- 技术门：PASS\n  HOLD; checks failed"),
+    body().replace(
+      "- 用户会实际得到什么：",
+      "- 用户会实际得到什么：\n  " + "x".repeat(1300),
+    ),
+  ])
+    assert.equal(
+      evaluateDecisionCard(event(altered), new Date("2026-07-27T12:05:00Z"))
+        .blocking,
+      true,
+    );
+});
+
+test("unclosed comment markers in fenced examples are inert rather than body comments", () => {
+  for (const prefix of [
+    "```html\n<!-- TODO\n```\n",
+    "~~~html\n<!-- TODO\n~~~\n",
+  ]) {
+    assert.equal(
+      evaluateDecisionCard(
+        event(prefix + body()),
+        new Date("2026-07-27T12:05:00Z"),
+      ).blocking,
+      false,
+    );
+  }
 });

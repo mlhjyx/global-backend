@@ -49,14 +49,73 @@ function sanitize(value) {
     .slice(0, 1200);
 }
 
+function visibleCardSource(body) {
+  const lines = [];
+  let inComment = false;
+  let fence;
+  let malformed = false;
+  for (const raw of body.split(/\r?\n/)) {
+    const marker = raw.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (!inComment && fence) {
+      if (
+        marker &&
+        marker[1][0] === fence[0] &&
+        marker[1].length >= fence.length &&
+        !marker[2].trim()
+      )
+        fence = undefined;
+      lines.push({ text: "", code: true });
+      continue;
+    }
+    if (!inComment && marker) {
+      fence = marker[1];
+      lines.push({ text: "", code: true });
+      continue;
+    }
+    const parts = [];
+    const titleParts = [];
+    let offset = 0;
+    while (offset < raw.length) {
+      if (inComment) {
+        const end = raw.indexOf("-->", offset);
+        if (end < 0) break;
+        parts.push(" ");
+        inComment = false;
+        offset = end + 3;
+      } else {
+        const start = raw.indexOf("<!--", offset);
+        if (start < 0) {
+          parts.push(raw.slice(offset));
+          titleParts.push(raw.slice(offset));
+          break;
+        }
+        parts.push(raw.slice(offset, start), " ");
+        titleParts.push(raw.slice(offset, start));
+        inComment = true;
+        offset = start + 4;
+      }
+    }
+    const text = parts.join("");
+    if (text.includes("-->")) malformed = true;
+    // This second view is only a conservative title detector, never a field
+    // value. Field enums and identifiers must keep the space boundaries.
+    lines.push({
+      text,
+      reservedTitleProbe: titleParts.join("").replace(/\p{Cf}/gu, ""),
+      code: false,
+    });
+  }
+  return { lines, malformed: malformed || inComment };
+}
+
 function parseCardInput(body) {
   const card = Object.fromEntries(Object.keys(FIELDS).map((key) => [key, ""]));
   const errors = [];
   if (typeof body !== "string" || Buffer.byteLength(body) > 256 * 1024) {
     return { card, errors: ["决策卡正文缺失或超过字节上限"] };
   }
-  const visible = body.replace(/<!--[\s\S]*?-->/g, "");
-  if (visible.includes("<!--") || visible.includes("-->")) {
+  const source = visibleCardSource(body);
+  if (source.malformed) {
     errors.push("正文包含未闭合的 HTML 注释");
   }
   const labels = new Map(
@@ -65,31 +124,48 @@ function parseCardInput(body) {
   const seen = new Set();
   let sections = 0;
   let inCard = false;
-  let fence;
-  for (const line of visible.split(/\r?\n/)) {
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (fence) {
-      if (
-        marker &&
-        marker[1][0] === fence[0] &&
-        marker[1].length >= fence.length &&
-        !marker[2].trim()
-      )
-        fence = undefined;
+  for (const [index, entry] of source.lines.entries()) {
+    const line = entry.text;
+    if (entry.code) {
+      if (inCard && seen.size)
+        errors.push("决策卡字段必须单行，不接受代码块续行");
       continue;
     }
-    if (marker) {
-      fence = marker[1];
-      continue;
+    if (
+      entry.reservedTitleProbe.includes("非技术合并决策卡") &&
+      /^ {0,3}(?:-+|=+)\s*$/.test(source.lines[index + 1]?.text ?? "")
+    ) {
+      sections += 1;
+      errors.push("决策卡必须使用精确二级 ATX 标题");
     }
-    if (/^ {0,3}##[ \t]+非技术合并决策卡[ \t]*#*[ \t]*$/.test(line)) {
+    if (
+      entry.reservedTitleProbe === line &&
+      /^ {0,3}##[ \t]+非技术合并决策卡(?:[ \t]+#+)?[ \t]*$/.test(line)
+    ) {
       sections += 1;
       inCard = true;
       continue;
     }
+    if (
+      /^ {0,3}#{1,6}[ \t]+/.test(line) &&
+      entry.reservedTitleProbe.includes("非技术合并决策卡")
+    ) {
+      sections += 1;
+      errors.push("含保留卡片标题的替代标题不被接受");
+    }
     if (/^ {0,3}#{1,2}(?:[ \t]+|$)/.test(line)) inCard = false;
-    if (!inCard || !/^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])[ \t]+/.test(line))
+    if (!inCard) {
+      const outside = line.match(
+        /^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])[ \t]+([^：:]+)[：:]/,
+      );
+      if (labels.has(outside?.[1]?.trim()))
+        errors.push("保留决策卡字段不能出现在 canonical 卡片区段外");
+    }
+    if (!inCard || !line.trim()) continue;
+    if (!/^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])[ \t]+/.test(line)) {
+      if (seen.size) errors.push("决策卡字段必须单行，不接受隐式续行");
       continue;
+    }
     const field = line.match(/^ {0,3}-[ \t]+([^：:]+)[：:][ \t]*(.*)$/);
     const key = labels.get(field?.[1]?.trim());
     if (!key) {
