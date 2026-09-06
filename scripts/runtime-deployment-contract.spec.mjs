@@ -452,6 +452,7 @@ test('provider-wire writer provisioning is dedicated, dual-role scoped, and secr
   assert.match(verify, /APP_DATABASE_URL/);
   assert.match(verify, /parse_url APP APP_DATABASE_URL/);
   assert.match(verify, /SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION/);
+  assert.match(verify, /EXISTS \([\s\S]*migration_name = :'expected_migration'/);
   assert.doesNotMatch(verify, /psql "\$\{APP_DATABASE_URL\}"/);
   assert.match(verify, /pg_auth_members/);
   assert.match(verify, /membership\.admin_option/);
@@ -496,7 +497,7 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
   assert.match(harness, /DROP ROLE task3_nested/);
   assert.match(harness, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
-  assert.match(harness, /REVOKE EXECUTE ON FUNCTION revoke_platform_execution_authority_v1/);
+  assert.match(harness, /REVOKE EXECUTE ON FUNCTION acknowledge_platform_egress_v1/);
   assert.match(harness, /SET SESSION AUTHORIZATION runtime_api/);
 });
 
