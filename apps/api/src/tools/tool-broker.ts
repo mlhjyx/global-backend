@@ -502,7 +502,20 @@ export class ToolBroker implements ExecutionBroker {
       }
       let result: ToolResult<O>;
       try {
-        result = await tool.execute(input, ctx);
+        const operationKey = paidScope?.operationKey ?? paidOperationKey([
+          ctx.runId ?? ctx.workspaceId,
+          "platform-egress",
+          tool.id,
+          tool.version,
+          tool.idempotencyKey(input),
+        ]);
+        const executePhysicalWire = () => tool.execute(input, ctx);
+        result = ctx.platformEgress
+          ? await ctx.platformEgress.authorizeAndDispatch(
+              operationKey,
+              executePhysicalWire,
+            )
+          : await executePhysicalWire();
       } catch (err) {
         if (err instanceof ExternalToolActionDeniedError) {
           if (paidScope) {

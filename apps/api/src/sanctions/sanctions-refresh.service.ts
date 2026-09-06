@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import countries from 'world-countries';
-import type { ExecutionBroker } from '../tools/tool-contract';
+import type { ExecutionBroker, ToolContext } from '../tools/tool-contract';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import { normForMatch } from '../discovery/name-match';
 import { parseOfacXml, type ParsedSanctionsEntity, type ParsedSanctionsList } from '../adapters/ofac-xml';
@@ -151,6 +151,7 @@ export interface SanctionsRefreshDeps {
   ownerDb: PrismaClient; // owner 连接（绕 RLS，写平台表）
   platformWriter?: PrismaClient;
   broker: ExecutionBroker;
+  platformEgress?: ToolContext['platformEgress'];
 }
 
 const CHUNK = 1000;
@@ -224,6 +225,7 @@ export class SanctionsRefreshService {
         workspaceId: PLATFORM_WORKSPACE,
         purpose: 'sanctions_screening',
         ...(budgetKey ? { runId: budgetKey } : {}),
+        ...(this.deps.platformEgress ? { platformEgress: this.deps.platformEgress } : {}),
       },
     );
     const parsed = parse(res.data.body);

@@ -530,7 +530,20 @@ export class RouterModelGateway extends ModelGateway {
       if (ctx.authorizeExternalAction) {
         await this.assertExternalActionAuthorized(ctx);
       }
-      result = await call(provider, ctx);
+      const operationKey = paidOperationKey([
+        ctx.runId ?? ctx.workspaceId,
+        "platform-egress",
+        op,
+        input.task,
+        input.model ?? "",
+        ctx.correlationId ?? "",
+      ]);
+      result = ctx.platformEgress
+        ? await ctx.platformEgress.authorizeAndDispatch(
+            operationKey,
+            () => call(provider, ctx),
+          )
+        : await call(provider, ctx);
     } catch (err) {
       const failedUsage =
         err instanceof ProviderOutputError ? err.usage : undefined;

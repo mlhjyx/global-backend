@@ -17,6 +17,13 @@ export interface AiContext {
    * every provider wire call, including fallback and structured repair calls.
    */
   authorizeExternalAction?: () => Promise<boolean>;
+  /** Platform schedule send fence; absent for normal workspace/model calls. */
+  platformEgress?: {
+    authorizeAndDispatch: <T>(
+      operationKey: string,
+      executePhysicalWire: () => Promise<T>,
+    ) => Promise<T>;
+  };
   /** Optional Site Builder policy evidence; copied to every gateway trace row. */
   modelPolicy?: ModelExecutionTrace;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */

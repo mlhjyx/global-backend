@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
-import { PrismaService } from "../prisma/prisma.service";
+import type { PrismaService } from "../prisma/prisma.service";
 import type {
   PlatformEgressAuthorization,
   PlatformEgressBinding,
@@ -32,20 +32,53 @@ function one<T>(rows: readonly T[], code: string): T {
  */
 @Injectable()
 export class PrismaPlatformEgressFencePort implements PlatformEgressFencePort {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: Pick<PrismaService, "$queryRaw">,
+  ) {}
+
+  private async effectiveBinding(
+    binding: PlatformEgressBinding,
+  ): Promise<PlatformEgressBinding> {
+    if (binding.technicalPolicyRevision) return binding;
+    const rows = await this.database.$queryRaw<
+      ReadonlyArray<{
+        workflow_id: string | null;
+        technical_policy_revision: string | null;
+      }>
+    >`
+      SELECT workflow_id, technical_policy_revision
+      FROM "execution_budget_authority"
+      WHERE id = ${binding.authorityId}::uuid
+        AND scope_key = 'platform'
+        AND authority_kind = 'PLATFORM_GRANT'
+    `;
+    const row = rows[0];
+    if (
+      !row ||
+      row.workflow_id !== binding.workflowId ||
+      typeof row.technical_policy_revision !== "string"
+    ) {
+      throw new Error("PLATFORM_EGRESS_BINDING_INVALID");
+    }
+    return Object.freeze({
+      ...binding,
+      technicalPolicyRevision: row.technical_policy_revision,
+    });
+  }
 
   async authorize(
     binding: PlatformEgressBinding,
     operationKey: string,
   ): Promise<PlatformEgressAuthorization> {
+    const effective = await this.effectiveBinding(binding);
     const rows = await this.database.$queryRaw<AuthorizationRow[]>`
       SELECT * FROM authorize_platform_egress_v1(
-        ${binding.authorityId}::uuid,
-        ${binding.scheduleId}::text,
-        ${binding.workflowId}::text,
-        ${binding.workflowRunId}::text,
+        ${effective.authorityId}::uuid,
+        ${effective.scheduleId}::text,
+        ${effective.workflowId}::text,
+        ${effective.workflowRunId}::text,
         ${operationKey}::text,
-        ${binding.technicalPolicyRevision}::text
+        ${effective.technicalPolicyRevision}::text
       )
     `;
     const row = one(rows, "PLATFORM_EGRESS_AUTHORIZATION_UNAVAILABLE");
@@ -57,15 +90,16 @@ export class PrismaPlatformEgressFencePort implements PlatformEgressFencePort {
     authorization: PlatformEgressAuthorization,
     operationKey: string,
   ): Promise<PlatformEgressDispatchCapability> {
+    const effective = await this.effectiveBinding(binding);
     const rows = await this.database.$queryRaw<ClaimRow[]>`
       SELECT * FROM claim_platform_egress_send_v1(
         ${authorization.attemptId}::uuid,
-        ${binding.authorityId}::uuid,
-        ${binding.scheduleId}::text,
-        ${binding.workflowId}::text,
-        ${binding.workflowRunId}::text,
+        ${effective.authorityId}::uuid,
+        ${effective.scheduleId}::text,
+        ${effective.workflowId}::text,
+        ${effective.workflowRunId}::text,
         ${operationKey}::text,
-        ${binding.technicalPolicyRevision}::text
+        ${effective.technicalPolicyRevision}::text
       )
     `;
     const row = one(rows, "PLATFORM_EGRESS_SEND_CAS_REJECTED");
