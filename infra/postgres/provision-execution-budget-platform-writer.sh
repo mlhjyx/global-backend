@@ -114,7 +114,14 @@ SELECT format(
   :'platform_writer_login', :'platform_writer_password'
 ) \gexec
 SELECT format('GRANT execution_budget_platform_writer TO %I', :'platform_writer_login')
-WHERE NOT pg_has_role(:'platform_writer_login', 'execution_budget_platform_writer', 'member') \gexec
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_auth_members membership
+  JOIN pg_roles principal ON principal.oid = membership.member
+  JOIN pg_roles group_role ON group_role.oid = membership.roleid
+  WHERE principal.rolname = :'platform_writer_login'
+    AND group_role.rolname = 'execution_budget_platform_writer'
+) \gexec
 COMMIT;
 SQL
 
