@@ -421,8 +421,9 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
   assert.match(verify, /ingest_and_admit_platform_execution_budget_run_v2/);
   assert.doesNotMatch(verify, /SELECT \* FROM ingest_platform_execution_authority/);
-  assert.match(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
-  assert.match(verify, /execution_budget_authority_revocation/);
+  assert.match(verify, /ingest_and_admit_platform_execution_budget_run_v2\(TEXT, TEXT, UUID/);
+  assert.doesNotMatch(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
+  assert.match(verify, /execution_budget_authority/);
   assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
   assert.match(verify, /has_table_privilege\(session_user,'execution_budget_authority','INSERT'\)/);
   assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
