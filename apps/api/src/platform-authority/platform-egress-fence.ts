@@ -1,7 +1,12 @@
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
-
-export const PLATFORM_EGRESS_FENCE_UNAVAILABLE =
-  "PLATFORM_EGRESS_FENCE_UNAVAILABLE" as const;
+import { PLATFORM_EGRESS_FENCE_UNAVAILABLE } from "./platform-egress-fence.v1";
+export {
+  PLATFORM_EGRESS_FENCE_UNAVAILABLE,
+  PlatformEgressFence,
+  PlatformEgressFenceError,
+  type PlatformEgressFencePort,
+  type PlatformEgressBinding,
+} from "./platform-egress-fence.v1";
 
 /**
  * Temporary product-boundary hold while the 4D linearizable send fence is not
