@@ -239,7 +239,7 @@ export class IntakeService {
       );
     }
     const readinessFailure = await this.runtimeGuard
-      .assertReady()
+      .assertReady({ paidReachable: false })
       .then(() => null)
       .catch((error: unknown) => error);
     const nameEn = input.company.nameEn?.trim() || null;
@@ -299,7 +299,9 @@ export class IntakeService {
               }),
             ]);
             if (!existingGrant || !existingBudget) {
-              throw new Error("intake idempotency reference has no spending authority");
+              throw new Error(
+                "intake idempotency reference has no spending authority",
+              );
             }
             const exactConsumedGrant =
               existingGrant.issuer === budgetGrant.issuer &&
@@ -357,7 +359,8 @@ export class IntakeService {
               temporalRunId: true,
             },
           });
-          if (!run) throw new Error("budget grant references a missing intake build");
+          if (!run)
+            throw new Error("budget grant references a missing intake build");
           return {
             response: {
               siteId: run.siteId,
@@ -404,7 +407,10 @@ export class IntakeService {
           // must not race a refurbish request into two active runs for one Site.
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-${existing.id}`}))`;
           const active = await tx.siteBuildRun.findFirst({
-            where: { siteId: existing.id, status: { in: ['queued', 'running'] } },
+            where: {
+              siteId: existing.id,
+              status: { in: ["queued", "running"] },
+            },
             select: {
               id: true,
               siteId: true,
@@ -433,7 +439,10 @@ export class IntakeService {
               };
             }
             throw new ConflictException(
-              structuredError('SITE_LIMIT_REACHED', 'workspace site already has an active build'),
+              structuredError(
+                "SITE_LIMIT_REACHED",
+                "workspace site already has an active build",
+              ),
             );
           }
         }
@@ -489,23 +498,23 @@ export class IntakeService {
         try {
           await tx.siteBuildBudgetGrant.create({
             data: {
-            workspaceId: ctx.workspaceId,
-            siteId: site.id,
-            buildRunId: run.id,
-            issuer: budgetGrant.issuer,
-            audience: budgetGrant.audience,
-            jti: budgetGrant.jti,
-            schemaVersion: budgetGrant.schemaVersion,
-            purpose: budgetGrant.purpose,
-            operation: budgetGrant.operation,
-            requestSha256: budgetGrant.requestSha256,
-            tokenSha256: budgetGrant.tokenSha256,
-            currency: budgetGrant.currency,
-            unit: budgetGrant.unit,
-            capMicrousd: budgetGrant.capMicrousd,
-            issuedAt: budgetGrant.issuedAt,
-            notBefore: budgetGrant.notBefore,
-            expiresAt: budgetGrant.expiresAt,
+              workspaceId: ctx.workspaceId,
+              siteId: site.id,
+              buildRunId: run.id,
+              issuer: budgetGrant.issuer,
+              audience: budgetGrant.audience,
+              jti: budgetGrant.jti,
+              schemaVersion: budgetGrant.schemaVersion,
+              purpose: budgetGrant.purpose,
+              operation: budgetGrant.operation,
+              requestSha256: budgetGrant.requestSha256,
+              tokenSha256: budgetGrant.tokenSha256,
+              currency: budgetGrant.currency,
+              unit: budgetGrant.unit,
+              capMicrousd: budgetGrant.capMicrousd,
+              issuedAt: budgetGrant.issuedAt,
+              notBefore: budgetGrant.notBefore,
+              expiresAt: budgetGrant.expiresAt,
             },
           });
         } catch (error) {

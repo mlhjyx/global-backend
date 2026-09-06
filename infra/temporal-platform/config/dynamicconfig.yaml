@@ -1,0 +1,5 @@
+# Intentionally minimal. Every change to this production-path configuration is
+# reviewed and promoted with the same source as the Temporal service contract.
+limit.maxIDLength:
+  - value: 255
+    constraints: {}

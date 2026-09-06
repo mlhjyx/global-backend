@@ -142,10 +142,25 @@ describe("site build cost reconciliation sweep", () => {
     // 避免 `workspace_id ASC` 让 UUID 靠后的租户永久饥饿。
     expect(fairSql).toContain("NULLS FIRST");
     expect(fairSql).toContain("site_build_spend_reconciliation");
+    expect(fairSql).toContain("s.status = 'RESERVED'");
+    expect(fairSql).toContain("s.status = 'FAILED'");
+    expect(fairSql).toContain(
+      "s.error_code = 'MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY'",
+    );
+    expect(fairSql).toContain("s.status = 'RELEASED'");
+    expect(fairSql).toContain("s.error_code = 'MODEL_WIRE_NOT_DISPATCHED'");
     expect(fairSql).toContain(
       "s.cost_basis IN ('estimated_upper_bound', 'unknown')",
     );
-    expect(fairQuery.values).toEqual([10]);
+    expect(fairSql).toContain(
+      "'OBSERVED', 'UNKNOWN', 'NOT_DISPATCHED'",
+    );
+    expect(fairSql).toContain("w.state = 'DISPATCH_STARTED'");
+    expect(fairSql).toContain("interval '1 millisecond'");
+    expect(fairSql).toContain("w.state = 'ALLOCATED'");
+    expect(fairSql).toContain("interval '24 hours'");
+    expect(fairSql).not.toContain("wr.wire_attempt_id = w.id");
+    expect(fairQuery.values).toEqual([600_000, 10]);
     expect(runReconciliationSweep).toHaveBeenCalledTimes(2);
     expect(runReconciliationSweep).toHaveBeenNthCalledWith(
       1,

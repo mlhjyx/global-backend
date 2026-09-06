@@ -30,6 +30,27 @@ async function expectMissing(filePath: string): Promise<void> {
   await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
 }
 
+async function expectNewRendererWorkspacesEventuallyClean(
+  before: ReadonlySet<string>,
+  workspacePrefix: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const unexpected = (await readdir(tmpdir())).filter(
+      (name) =>
+        name.startsWith(workspacePrefix) && !before.has(name),
+    );
+    if (unexpected.length === 0) return;
+    if (Date.now() >= deadline) {
+      expect(unexpected).toEqual([]);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 describe("buildRendererEnv — Renderer 子进程最小环境", () => {
   it("skips nonexistent candidate roots before resolving the hoisted Astro package", () => {
     expect(resolveRendererEntrypoint(process.cwd()).rendererRoot).toBe(
@@ -332,10 +353,9 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
       );
       expect(manifests.every((manifest) => manifest.fileCount > 0)).toBe(true);
       expect((await stat(foreignTempDir)).isDirectory()).toBe(true);
-      const after = (await readdir(tmpdir())).filter((name) =>
-        name.startsWith(processOwnedTempPrefix),
-      );
-      expect(after.filter((name) => !before.has(name))).toEqual([]);
+      // Sibling builds may still be in flight; foreign-process directories are
+      // outside this test's cleanup scope and must remain untouched.
+      await expectNewRendererWorkspacesEventuallyClean(before, processOwnedTempPrefix);
     } finally {
       await Promise.all(
         [

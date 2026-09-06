@@ -537,37 +537,37 @@ describe('TypedProjectionRegistry', () => {
     );
   });
 
-  it('accepts a hand-sized 120 KiB envelope and rejects one byte beyond it', () => {
+  it('accepts a hand-sized 119 KiB envelope and rejects one byte beyond it', () => {
     const maximum = new TypedProjectionRegistry();
-    maximum.register(taxonomyDefinition('icp-design/v1', 122_688));
+    maximum.register(taxonomyDefinition('icp-design/v1', 121_664));
     const maxProjected = maximum.project('icp-design/v1', {
-      code: 'x'.repeat(122_688),
+      code: 'x'.repeat(121_664),
       provider: 'catalog',
     });
 
-    expect(Buffer.byteLength(JSON.stringify(maxProjected), 'utf8')).toBe(120 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(maxProjected), 'utf8')).toBe(119 * 1024);
 
     const over = new TypedProjectionRegistry();
-    over.register(taxonomyDefinition('icp-query-plan/v1', 122_685));
+    over.register(taxonomyDefinition('icp-query-plan/v1', 121_661));
     const oneByteOver = {
       schemaVersion: 'generic-operation-projection/v2',
       schema: 'icp-query-plan/v1',
-      data: { code: 'x'.repeat(122_685), provider: 'catalog' },
+      data: { code: 'x'.repeat(121_661), provider: 'catalog' },
       digest: '0'.repeat(64),
     };
     expect(Buffer.byteLength(JSON.stringify(oneByteOver), 'utf8')).toBe(
-      120 * 1024 + 1,
+      119 * 1024 + 1,
     );
     expect(() => over.project('icp-query-plan/v1', {
-      code: 'x'.repeat(122_685),
+      code: 'x'.repeat(121_661),
       provider: 'catalog',
     })).toThrow('TYPED_PROJECTION_TOO_LARGE');
   });
 
   it('rejects a digest-valid stored envelope that is one byte over the application cap', () => {
     const registry = new TypedProjectionRegistry();
-    registry.register(taxonomyDefinition('icp-design/v1', 122_689));
-    const data = { code: 'x'.repeat(122_689), provider: 'catalog' };
+    registry.register(taxonomyDefinition('icp-design/v1', 121_665));
+    const data = { code: 'x'.repeat(121_665), provider: 'catalog' };
     const base = JSON.stringify({
       data,
       schema: 'icp-design/v1',
@@ -580,7 +580,7 @@ describe('TypedProjectionRegistry', () => {
       digest: createHash('sha256').update(base).digest('hex'),
     };
 
-    expect(Buffer.byteLength(JSON.stringify(stored), 'utf8')).toBe(120 * 1024 + 1);
+    expect(Buffer.byteLength(JSON.stringify(stored), 'utf8')).toBe(119 * 1024 + 1);
     expect(() => registry.restore(stored)).toThrow('TYPED_PROJECTION_TOO_LARGE');
   });
 });
