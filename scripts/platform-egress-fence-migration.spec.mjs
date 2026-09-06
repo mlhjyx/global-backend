@@ -23,6 +23,7 @@ test("platform egress fence migration creates durable generation and attempt sta
   assert.match(migration, /"workflow_id" VARCHAR\(200\) NOT NULL/u);
   assert.match(migration, /authority\.workflow_id IS DISTINCT FROM p_workflow_id/u);
   assert.match(migration, /attempt\.workflow_id IS DISTINCT FROM p_workflow_id/u);
+  assert.match(migration, /attempt\.operation_key IS DISTINCT FROM p_operation_key/u);
   assert.match(migration, /generation = platform_egress_schedule_fence\.generation \+ 1/u);
 });
 

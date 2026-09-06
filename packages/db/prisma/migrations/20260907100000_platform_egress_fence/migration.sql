@@ -138,6 +138,7 @@ CREATE FUNCTION claim_platform_egress_send_v1(
   p_schedule_id TEXT,
   p_workflow_id TEXT,
   p_workflow_run_id TEXT,
+  p_operation_key TEXT,
   p_policy_revision TEXT
 )
 RETURNS TABLE(attempt_id UUID, generation BIGINT)
@@ -158,6 +159,7 @@ BEGIN
   IF attempt.id IS NULL OR authority.id IS NULL OR fence.schedule_id IS NULL
     OR attempt.schedule_id IS DISTINCT FROM p_schedule_id
     OR attempt.workflow_id IS DISTINCT FROM p_workflow_id
+    OR attempt.operation_key IS DISTINCT FROM p_operation_key
     OR attempt.workflow_run_id IS DISTINCT FROM p_workflow_run_id
     OR attempt.policy_revision IS DISTINCT FROM p_policy_revision
     OR attempt.generation IS DISTINCT FROM fence.generation
@@ -246,12 +248,12 @@ END
 $$;
 
 REVOKE ALL ON FUNCTION authorize_platform_egress_v1(UUID, TEXT, TEXT, TEXT, TEXT, TEXT),
-  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT, TEXT),
+  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT),
   acknowledge_platform_egress_v1(UUID, TEXT),
   mark_unknown_platform_egress_v1(UUID, TEXT)
   FROM PUBLIC, app_user, runtime_api, runtime_worker, runtime_outbox_relay;
 GRANT EXECUTE ON FUNCTION authorize_platform_egress_v1(UUID, TEXT, TEXT, TEXT, TEXT, TEXT),
-  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT, TEXT),
+  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT),
   acknowledge_platform_egress_v1(UUID, TEXT),
   mark_unknown_platform_egress_v1(UUID, TEXT)
   TO execution_budget_platform_writer;
