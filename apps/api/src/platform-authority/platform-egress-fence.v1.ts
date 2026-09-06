@@ -105,12 +105,8 @@ export class PlatformEgressFence {
     if (!this.port) invalid(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
 
     const authorization = await this.port.authorize(binding, operationKey);
-    let capability: PlatformEgressDispatchCapability;
-    try {
-      capability = await this.port.claimSend(binding, authorization, operationKey);
-    } catch (error) {
-      throw error;
-    }
+    const capability: PlatformEgressDispatchCapability =
+      await this.port.claimSend(binding, authorization, operationKey);
 
     try {
       const result = await capability.dispatch(executePhysicalWire);
