@@ -1,0 +1,168 @@
+# enable-template
+# {{- $postgresHost := env "TEMPORAL_PLATFORM_POSTGRES_HOST" -}}
+# {{- $postgresPassword := env "TEMPORAL_PLATFORM_POSTGRES_PASSWORD" -}}
+# {{- $jwksURI := env "TEMPORAL_PLATFORM_JWKS_URI" -}}
+# {{- $audience := env "TEMPORAL_PLATFORM_JWT_AUDIENCE" -}}
+# {{- $serverName := env "TEMPORAL_PLATFORM_TLS_SERVER_NAME" -}}
+# {{- $broadcastAddress := env "TEMPORAL_BROADCAST_ADDRESS" -}}
+# {{- $bindIP := env "BIND_ON_IP" -}}
+# {{- if empty $postgresHost }}{{ fail "TEMPORAL_PLATFORM_POSTGRES_HOST is required" }}{{ end -}}
+# {{- if empty $postgresPassword }}{{ fail "TEMPORAL_PLATFORM_POSTGRES_PASSWORD is required" }}{{ end -}}
+# {{- if empty $jwksURI }}{{ fail "TEMPORAL_PLATFORM_JWKS_URI is required" }}{{ end -}}
+# {{- if empty $audience }}{{ fail "TEMPORAL_PLATFORM_JWT_AUDIENCE is required" }}{{ end -}}
+# {{- if empty $serverName }}{{ fail "TEMPORAL_PLATFORM_TLS_SERVER_NAME is required" }}{{ end -}}
+# {{- if empty $broadcastAddress }}{{ fail "TEMPORAL_BROADCAST_ADDRESS is required" }}{{ end -}}
+# {{- if empty $bindIP }}{{ fail "BIND_ON_IP is required" }}{{ end -}}
+# {{- if not (regexMatch `^[A-Za-z0-9.-]+$` $postgresHost) }}{{ fail "TEMPORAL_PLATFORM_POSTGRES_HOST is invalid" }}{{ end -}}
+# {{- if not (regexMatch `^[A-Za-z0-9_-]{32,128}$` $postgresPassword) }}{{ fail "TEMPORAL_PLATFORM_POSTGRES_PASSWORD must be a generated base64url value" }}{{ end -}}
+# {{- if not (regexMatch `^https://[A-Za-z0-9._:-]+/[A-Za-z0-9._~/%+-]+$` $jwksURI) }}{{ fail "TEMPORAL_PLATFORM_JWKS_URI must be one bounded HTTPS URL without query, fragment, or userinfo" }}{{ end -}}
+# {{- if not (regexMatch `^[A-Za-z0-9][A-Za-z0-9._:/-]{2,190}$` $audience) }}{{ fail "TEMPORAL_PLATFORM_JWT_AUDIENCE is invalid" }}{{ end -}}
+# {{- if not (regexMatch `^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$` $serverName) }}{{ fail "TEMPORAL_PLATFORM_TLS_SERVER_NAME is invalid" }}{{ end }}
+log:
+  stdout: true
+  level: info
+
+persistence:
+  defaultStore: postgres-default
+  visibilityStore: postgres-visibility
+  numHistoryShards: 4
+  datastores:
+    postgres-default:
+      sql:
+        pluginName: "postgres12_pgx"
+        databaseName: "temporal_platform"
+        connectAddr: "{{ $postgresHost }}:5432"
+        connectProtocol: "tcp"
+        user: "temporal_platform"
+        password: |-
+          {{ $postgresPassword }}
+        maxConns: 20
+        maxIdleConns: 20
+        maxConnLifetime: "1h"
+    postgres-visibility:
+      sql:
+        pluginName: "postgres12_pgx"
+        databaseName: "temporal_platform_visibility"
+        connectAddr: "{{ $postgresHost }}:5432"
+        connectProtocol: "tcp"
+        user: "temporal_platform"
+        password: |-
+          {{ $postgresPassword }}
+        maxConns: 10
+        maxIdleConns: 10
+        maxConnLifetime: "1h"
+
+global:
+  membership:
+    maxJoinDuration: 30s
+    broadcastAddress: "{{ $broadcastAddress }}"
+  pprof:
+    port: 7936
+  tls:
+    refreshInterval: 1m
+    expirationChecks:
+      warningWindow: 168h
+      errorWindow: 24h
+      checkInterval: 1h
+    internode:
+      server:
+        requireClientAuth: true
+        certFile: "/run/secrets/temporal-platform/internode.crt"
+        keyFile: "/run/secrets/temporal-platform/internode.key"
+        clientCaFiles:
+          - "/run/secrets/temporal-platform/internode-ca.crt"
+      client:
+        serverName: "{{ $serverName }}"
+        disableHostVerification: false
+        rootCaFiles:
+          - "/run/secrets/temporal-platform/internode-ca.crt"
+    frontend:
+      server:
+        requireClientAuth: false
+        certFile: "/run/secrets/temporal-platform/frontend.crt"
+        keyFile: "/run/secrets/temporal-platform/frontend.key"
+      client:
+        serverName: "{{ $serverName }}"
+        disableHostVerification: false
+        rootCaFiles:
+          - "/run/secrets/temporal-platform/frontend-ca.crt"
+  metrics:
+    prometheus:
+      framework: "tally"
+      timerType: "histogram"
+      listenAddress: "0.0.0.0:8000"
+  authorization:
+    jwtKeyProvider:
+      keySourceURIs:
+        - "{{ $jwksURI }}"
+      refreshInterval: 10s
+    permissionsClaimName: "permissions"
+    permissionsRegex: ""
+    authorizer: "default"
+    claimMapper: "default"
+    authHeaderName: "authorization"
+    audience: "{{ $audience }}"
+
+services:
+  frontend:
+    rpc:
+      grpcPort: 7233
+      membershipPort: 6933
+      bindOnIP: "{{ $bindIP }}"
+      httpPort: 7243
+  internal-frontend:
+    rpc:
+      grpcPort: 7236
+      membershipPort: 6936
+      bindOnIP: "{{ $bindIP }}"
+      httpPort: 7246
+  matching:
+    rpc:
+      grpcPort: 7235
+      membershipPort: 6935
+      bindOnIP: "{{ $bindIP }}"
+  history:
+    rpc:
+      grpcPort: 7234
+      membershipPort: 6934
+      bindOnIP: "{{ $bindIP }}"
+  worker:
+    rpc:
+      grpcPort: 7239
+      membershipPort: 6939
+      bindOnIP: "{{ $bindIP }}"
+
+clusterMetadata:
+  enableGlobalNamespace: false
+  failoverVersionIncrement: 10
+  masterClusterName: "active"
+  currentClusterName: "active"
+  clusterInformation:
+    active:
+      enabled: true
+      initialFailoverVersion: 1
+      rpcName: "frontend"
+      rpcAddress: "127.0.0.1:7233"
+      httpAddress: "127.0.0.1:7243"
+
+dcRedirectionPolicy:
+  policy: "noop"
+
+archival:
+  history:
+    state: "disabled"
+    enableRead: false
+  visibility:
+    state: "disabled"
+    enableRead: false
+
+namespaceDefaults:
+  archival:
+    history:
+      state: "disabled"
+    visibility:
+      state: "disabled"
+
+dynamicConfigClient:
+  filepath: "/etc/temporal-platform/dynamicconfig.yaml"
+  pollInterval: "60s"
