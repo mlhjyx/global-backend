@@ -7,13 +7,15 @@
 
 本页是证据导航，不是第二份 current 状态。原始 artifact 保持追加式/不可改写；当前能力、路由、运行健康和发布状态仍分别由权威文档、机器合同、fresh RuntimeEvidence 与 Release Bundle 决定。
 
+当前证据计数、有效窗口和 Release Bundle 接纳状态统一见[当前状态](../status/current.md)，不在本索引维护第二份实时计数。历史观察见 [changelog](../roadmap/changelog.md)；机器真值由 RuntimeEvidence、Release Bundle 文件及 verifier 给出。索引、文件存在或结构校验均不延长证据窗口，也不构成 Pilot/GA 晋级。
+
 ## 1. 分类
 
-| 位置                               | 分类                                                                                    | 可证明                                                                            | 不可证明                                                         |
-| ---------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE`                                                          | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance                | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
-| [`site-builder/`](site-builder/)   | `HISTORICAL / FROZEN_EVIDENCE`，其中显式 successor readback 由对应 RuntimeEvidence 限定 | M1-f/M1-g 历史 provenance；2026-09-01 development runtime readback 的脱敏详细事实 | 超出 RuntimeEvidence 窗口的当前性、Pilot/GA、模型质量或公开发布  |
-| `runtime/`（仅在有记录时创建）     | `CURRENT` 或 `HISTORICAL`                                                               | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定 | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
+| 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE`                                                          | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance                              | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
+| [`site-builder/`](site-builder/)   | `HISTORICAL / FROZEN_EVIDENCE`，其中显式 successor readback 由对应 RuntimeEvidence 限定 | M1-f/M1-g 历史 provenance；2026-09-01 与 2026-09-04 development runtime readback 的脱敏详细事实 | 超出 RuntimeEvidence 窗口的当前性、Pilot/GA、模型质量或公开发布  |
+| `runtime/`（仅在有记录时创建）     | `CURRENT` 或 `HISTORICAL`                                                               | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定               | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
 
 现有 model-routing 和 Site Builder 文件不会因被索引而升级为 current。判断当前运行证据只运行：
 
@@ -35,7 +37,7 @@ RuntimeEvidence 文件必须位于 `docs/evidence/runtime/`、使用 [RuntimeEvi
 
 ## 3. Release 与决策边界
 
-真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`。当前已有追加式 development-only `CANDIDATE` 与 successor RuntimeEvidence；其 external provenance、独立 reviewer 与 Pilot/GA 用户授权均未成立，因此不能晋级。
+真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`。记录数量和当前接纳状态见[当前状态](../status/current.md)；只有完整机器校验、独立 reviewer、用户授权及可信 external provenance 均满足相应门时才可晋级。RuntimeEvidence 到期不改写 Bundle，也不能由 Bundle 反向延长。
 
 Release Bundle 必须分别引用：
 

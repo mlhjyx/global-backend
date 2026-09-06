@@ -4,6 +4,8 @@
 > 生命周期：`CURRENT`
 > 当前事实来源：当前代码、共享合同与 [当前状态](../status/current.md)。
 > 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../roadmap/release-plan.md](../roadmap/release-plan.md)。
+>
+> **as-built 与运行身份边界**：本文描述源码结构和目标收敛，不复制当前提交、工作区状态、审查数量、端口或运行证据计数；这些时间绑定事实只见[当前状态](../status/current.md)。历史观察保留在 changelog/evidence。Program C 的 Opportunity 主聚合与服务端消费边界不由既有 browser ACK 或 Conversation shell 替代；任何源码合入都不能自动证明 runtime adoption。
 > **2026-07-16 补，2026-07-27 模型候选重基线同步**：本文 §1–§8 主体描述**获客后端**（C 核心）as-built 架构。自 2026-07-13 起主线转为**独立站建设子系统（Site Builder）**；其 as-built 快照见下方 §1A，细节与承重决策见 [../site-builder/02-architecture.md](../site-builder/02-architecture.md)、[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md) 和 [../adr/registry.md](../adr/registry.md) ADR-013~021。旧 Word、v3.1/v3.2 和研究稿不是 as-built 权威。
 > **获客解冻与当前门**：用户已解除获客侧新增开发冻结，Site Builder M1 已完成阶段收口。这只移除旧冻结，不改变本文记录的 as-built 能力、产品边界、provider 默认状态或历史验证新鲜度，也不自动授权某项实现；获客首项仍须按当前代码与服务、owner、合规、成本和验收证据另做当前性审计。
 > **Copy Sonnet recovery 架构边界**：当前版本、提交、artifact 身份与授权状态只认[当前状态](../status/current.md)。每一版 recovery manifest 都是 create-only admission 输入；runtime binding 另行固定 canonical path、版本化 manifest/artifact/execution/child-slot、campaign/global authorization/child authorization/reservation namespace、Sonnet admission、Messages adapter、response compatibility、durable ledgers、request-bound settlement、closed repair、source verifier 与 recovery Git acceptance。任一历史 wire 或 authorization identity 都必须在 client/ledger 前拒绝，不能通过重算 digest 进入新版本。create-only、真实 dispatch、Git acceptance、质量矩阵、晋级和生产路由继续是相互独立的状态机与授权门。

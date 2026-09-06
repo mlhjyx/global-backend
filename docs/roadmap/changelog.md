@@ -1,6 +1,28 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+
+## 2026-09-06 · GitHub queue currentness closeout
+
+- 22:09 +08:00 只读复核 root/remote main `17b637d7e2a333cc4c76f04c7798b42f74f2fb37` 及该提交成功的 build/contracts/security/governance/CodeQL/advisory checks；#455 平台 Temporal 基础设施、#456 执行规则与 #457 决策卡修复均已合入，不再列为待合入候选。
+- GrowthOS 本地 authority 已前进到 clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；其当前接纳仍需独立证据。API/Worker metadata 仍为 `674ff12d…` / `sha256:b70175a0…`，6 条 RuntimeEvidence 全部 historical；本次没有重新验证 readiness 或用户旅程。
+- 承接既有 #451 文档修订，保留原历史条目和冻结证据。GitHub 队列收口授权不扩大为部署、保留迁移、Provider/模型/付费或 Pilot 授权。
+
+## 2026-09-06 · Global source merge readback and currentness correction
+
+- #452 Browser 默认生命周期接线、#453 ACK 状态回读、#454 DeletionCompleted v1 兼容修复依次合入，最终 merge 为 `63b4af94b662d7e2b6a40823a1872daf0fc9b993`。三项 PR 必需 CI 与该主线 CI 全部成功；最终源码树匹配本地组合，134 项相关测试、4 项一次性 PG/RLS、构建与 OpenAPI 一致性通过。
+- 后续另一任务合入 #457，主线前进到 `8eefba1cff15f2bbe4154451cac958a072803ab5`。2026-09-06 21:17 +08:00 回读时，其安全、治理、依赖、CodeQL 成功，CI 仍在运行；不能挪用前一提交的全绿描述。
+- 同次 Docker metadata 显示 API/Worker 仍运行旧 `674ff12d…`/image `b70175a…`，不是新修复的运行验收。治理报告 0 current / 6 historical RuntimeEvidence；没有新部署、保留数据迁移、缓存清理、Provider/模型调用或 UAT。
+- Program C 同文件 C1 合同在独立工作区提交 `4b116f10…`，三项剩余 wire/privacy/digest finding 已复审关闭；这是本地文档，不是 main 中的 C1 实现。GrowthOS 当前 writer 仍须完成明确文件交接。
+- 此次文档候选撤销针对旧日期/SHA/临时状态的硬编码文字断言，保留稳定 ownership、历史计划合同及真实机器 RuntimeEvidence/Release/权限/晋级测试；architecture 与 evidence 索引改为引用唯一 current 页面，不复制动态计数。旧观察和原始 evidence 不改写。
+
+## 2026-09-04 · Global dynamic currentness successor
+
+- 18:58 +08:00 source/worktree 与 18:32 runtime readback 固定 repository source `0679a0bc510a980f65ebd33eb88b3215a97c20ba` 和 development runtime source `674ff12d4d768ce5599fc07b565fe21da37dc5fe` 为分离身份；后者落后 main 4 commits。服务/探针健康不等于 current main 已部署，3001 与 legacy 8080 wildcard 风险仍开放。
+- 全局 G5 拆为 `G5-Site=AMBER / TIME_LIMITED` 与 `G5-Acquisition=RED / NOT_READY`：6 条 RuntimeEvidence 中 current 2 / historical 4，current 2 仅属 Site 且到期 `2026-09-05T03:49:25.000Z`；Acquisition evidence 为空，platform readiness 报 `PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING`。
+- Program B accepted source slices #427/#431/#432 已不可变进入 main，必须与 active Task0L 分开；后者 authoritative implementation review 仍为 `C3 / H3` 且 coverage <80%。Program C durable consumer/Opportunity/commit-before-ACK 尚未实现。current-main Supply Chain Canary run `33855198691` 因 advisory baseline stale 失败，不能称 main CI 全绿。
+- 本 successor 只更新 currentness 合同和导航；不改写 RuntimeEvidence/Release Bundle，不执行 push、PR、merge、retained migration、部署、listener 调整、provider/model dispatch、UAT 或 Pilot。
+
 ## 2026-09-04 · Platform writer terminal reconciliation and fresh zero-model evidence
 
 - 追加 platform-writer development successor evidence。fresh deterministic smoke 在同一 exact runtime 上完成且 model calls 为 0；历史 Spend 保持 `UNKNOWN/unknown`、reservation/conservative charge 均为 `800000`。
