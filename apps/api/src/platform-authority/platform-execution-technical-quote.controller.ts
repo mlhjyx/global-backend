@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiExtension,
@@ -36,6 +37,7 @@ import {
   PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_TYPE,
   PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_BYTES,
   PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT,
+  PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME,
   PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
@@ -61,6 +63,7 @@ function quoteUnavailable(code: string): never {
 
 @ApiTags("PlatformAuthority")
 @Controller("platform-authority")
+@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)
 @UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)
 export class PlatformExecutionTechnicalQuoteController {
   constructor(

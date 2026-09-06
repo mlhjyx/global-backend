@@ -19,6 +19,8 @@ export const PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_TYPE =
   "platform-technical-quote-access+jwt" as const;
 export const PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_AUDIENCE =
   "global-backend:platform-technical-quote" as const;
+export const PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME =
+  "platformTechnicalQuoteAccess" as const;
 export const PLATFORM_TECHNICAL_QUOTE_PATH =
   PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH;
 

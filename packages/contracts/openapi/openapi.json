@@ -3546,6 +3546,11 @@
             }
           }
         },
+        "security": [
+          {
+            "platformTechnicalQuoteAccess": []
+          }
+        ],
         "summary": "Read one pure Platform execution technical quote",
         "tags": [
           "PlatformAuthority"
@@ -13144,6 +13149,12 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "type": "http"
+      },
+      "platformTechnicalQuoteAccess": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "GrowthOS service token for the Platform Technical Quote reader only."
       }
     },
     "schemas": {

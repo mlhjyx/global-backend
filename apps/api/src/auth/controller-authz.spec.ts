@@ -99,6 +99,7 @@ describe('controller authorization guard topology', () => {
       if (SERVICE_PROTECTED_CONTROLLER_FILES.has(path)) {
         discoveredServiceProtected.add(path);
         for (const required of [
+          '@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)',
           '@UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)',
           '@ReadOnlyControlPlane()',
           '@ApiExtension("x-required-service-scope", "platform-technical-quote.read")',
