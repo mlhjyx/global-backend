@@ -497,6 +497,7 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
   assert.match(harness, /DROP ROLE task3_nested/);
   assert.match(harness, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
+  assert.match(harness, /REVOKE EXECUTE ON FUNCTION acknowledge_platform_egress_v1/);
   assert.match(harness, /REVOKE EXECUTE ON FUNCTION inspect_platform_execution_authority_freshness_v1/);
   assert.match(harness, /SET SESSION AUTHORIZATION runtime_api/);
 });
