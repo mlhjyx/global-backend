@@ -24,8 +24,7 @@ describe("SiteBuildCostLedger paid-operation replay gate", () => {
   it("projects CAP_VARIANCE and emits one outbox event without relabelling known output UNKNOWN", async () => {
     const updateRun = vi.fn(async () => ({ id: SCOPE.buildRunId }));
     const createOutbox = vi.fn(async () => ({ id: "outbox-1" }));
-    const ledger = new SiteBuildCostLedger(
-      fakePrisma({
+    const database = fakePrisma({
         $queryRaw: vi
           .fn()
           .mockResolvedValueOnce([{ decision: "OVER_RESERVATION" }])
@@ -69,8 +68,10 @@ describe("SiteBuildCostLedger paid-operation replay gate", () => {
         },
         siteBuildRun: { update: updateRun },
         outboxEvent: { create: createOutbox },
-      }),
-    );
+      });
+    const ledger = new SiteBuildCostLedger(database, {
+      providerWireDatabase: database,
+    });
 
     await expect(
       ledger.settleOperation({
@@ -135,11 +136,10 @@ describe("SiteBuildCostLedger paid-operation replay gate", () => {
 
   it("commits unknown settlement and the BuildRun kill switch in one workspace transaction", async () => {
     const queryRaw = vi.fn().mockResolvedValueOnce([{ decision: "SETTLED" }]);
-    const ledger = new SiteBuildCostLedger(
-      fakePrisma({
-        $queryRaw: queryRaw,
-      }),
-    );
+    const database = fakePrisma({ $queryRaw: queryRaw });
+    const ledger = new SiteBuildCostLedger(database, {
+      providerWireDatabase: database,
+    });
 
     await expect(
       ledger.settleOperation({

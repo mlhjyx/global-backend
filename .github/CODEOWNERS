@@ -41,6 +41,7 @@
 /apps/api/src/discovery/provider-source-classes.json @mlhjyx
 /apps/api/src/runtime/ @mlhjyx
 /apps/api/scripts/generate-build-attestation.mts @mlhjyx
+/infra/temporal-platform/ @mlhjyx
 /docs/adr/ @mlhjyx
 /docs/product-scope.md @mlhjyx
 /docs/site-builder/model-settlement-preflight.md @mlhjyx
@@ -68,6 +69,7 @@
 /scripts/ghcr-runtime-publication*.mjs @mlhjyx
 /scripts/docker-image-config-path*.mjs @mlhjyx
 /scripts/runtime-deployment-contract.spec.mjs @mlhjyx
+/scripts/temporal-platform-infrastructure-contract.spec.mjs @mlhjyx
 /scripts/environment-parity-*.mjs @mlhjyx
 /scripts/copy-fixed-source-impact*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx
