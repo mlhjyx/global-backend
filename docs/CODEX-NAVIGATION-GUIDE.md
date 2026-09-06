@@ -7,17 +7,24 @@
 
 This guide defines how to find the current truth, claim an isolated change surface, and report evidence without turning derived indexes or historical notes into authority.
 
+## 0. Continuous execution within the authorized task
+
+For a clear implementation request, establish the affected surface and acceptance criteria, then complete the authorized local work. Inspect discoverable facts before asking for them. Ordinary technical choices, verified local test commands, and changes of skill or execution phase do not need another approval. A review-only request remains read-only.
+
+Reuse explicit authorization only while the action, target, scope, access, cost/data limits, and any expiry remain unchanged. Silence is not approval. Formal architecture/security direction changes and explicitly requested spec-first work retain a written specification, independent review, and user confirmation before implementation planning; do not reopen an already approved specification without a material change.
+
+Pause work that depends on missing information, conflicting ownership, or blocked permission; continue independent authorized work. Diagnose ordinary test/build failures locally. Stop repeating the same unsuccessful approach when it yields no new evidence. Resolve review findings against code, contracts, and tests at each round rather than waiting for a fixed round count; actual required defects cannot be parked into acceptance.
+
+Optional tools may be unavailable: report their check as not run and use an authorized alternative. Project-required gates remain unresolved until their actual evidence is available. Reuse trustworthy checks for the same relevant source/diff, configuration, dependencies, environment, and verification scope. Re-run affected checks after relevant changes or new doubts, not merely because a message, reviewer, or timer changed.
+
+Finish local preparation and validation before requesting a still-missing external authorization. Staging/commit, push/PR, merge, deployment, credentials, retained-state changes, and paid evaluations follow the separate boundaries below and in `AGENTS.md`; a generic skill must not add them as automatic closeout steps. Required acceptance work should continue within scope; subjective scores, learning-log timestamps, and arbitrary iteration counts do not define completion. Report local delivery and any external gate separately.
+
 ## 1. Authority order
 
 Use the first applicable source in this order and resolve conflicts upward:
 
-1. Repository decisions and contracts:
-   - [product scope](product-scope.md) for product and repository boundaries;
-   - [current status](status/current.md) and [release plan](roadmap/release-plan.md) for the active phase and next gates;
-   - [current architecture](architecture/current.md) for as-built structure;
-   - [ADR registry](adr/registry.md) for accepted load-bearing decisions;
-   - code-first [OpenAPI](../packages/contracts/openapi/openapi.json), contract schemas, Prisma schema and migrations for executable interfaces and storage.
-2. Current source and tests at the exact commit and worktree under review.
+1. Current code, machine contracts, migrations, and tests at the exact commit/worktree: code-first [OpenAPI](../packages/contracts/openapi/openapi.json), contract schemas, and Prisma schema define executable interfaces and storage.
+2. [Product scope](product-scope.md), [current status](status/current.md), [current architecture](architecture/current.md), [ADR registry](adr/registry.md), and [release plan](roadmap/release-plan.md) define product intent, accepted decisions, and the next gates. A code discrepancy is evidence of an implementation gap, not permission to change the approved product or security policy.
 3. Live, read-only external evidence for drift-prone state such as Git branches, PR checks, development services, provider configuration, or deployed health.
 4. Repository history and implementation records, which explain provenance but do not override current documents or code.
 5. Long-term memory and historical task transcripts, which are navigation hints only.
@@ -31,7 +38,7 @@ Before editing:
 - identify the exact requested scope, base commit, branch, worktree and acceptance commands;
 - run the read-only inventory and inspect its per-worktree upstream, `origin/main` relationship, dirty/untracked state, last commit and provenance fields;
 - check that no other task owns the same files or responsibility;
-- stop on overlapping ownership, an unexpected dirty worktree, a base mismatch, or unique commits whose owner is unknown;
+- stop writes on overlapping ownership, an unexplained change to the intended write surface, a base mismatch, or reuse of unique commits whose owner is unknown; preserve unrelated dirty state and isolate the task rather than stopping independent read-only investigation;
 - preserve `main`, other worktrees, historical branches, user deletions and untracked files.
 
 One task has one writer and one isolated worktree. Read-only audits may inspect other refs, but they do not edit, rebase, clean, delete, or reuse another task's worktree. Branch, worktree and PR state are transient and must never be copied from an old status note without live verification.
@@ -118,11 +125,10 @@ Do not silently move a fixed-base task to newer `main`.
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm code-intelligence:scan
 pnpm --filter @global/code-intelligence exec tsx src/cli.ts status --repo ../..
 ```
 
-The `status` subcommand is implemented by `packages/code-intelligence/src/cli.ts`; the root package has scan/check aliases but no status alias, so the exact filtered `tsx` command above is intentional. The status must name the current branch, commit and worktree and report no freshness error. If it names another worktree or is stale, rebuild before relying on it. Query the smallest stable symbol, then inspect returned source:
+Prepare missing dependencies only when the task needs them and the installation's side effects are authorized; do not reinstall a usable worktree for each phase. The `status` subcommand is implemented by `packages/code-intelligence/src/cli.ts`; the root package has scan/check aliases but no status alias, so the exact filtered `tsx` command above is intentional. The status must name the current branch, commit and worktree and report no freshness error. If absent, stale, or bound to another worktree, run `pnpm code-intelligence:scan` when local artifact generation is authorized, then verify status before relying on the graph. For a read-only task that cannot rebuild, inspect source directly and state the missing graph evidence; do not claim graph completeness. Query the smallest stable symbol, then inspect returned source:
 
 ```bash
 pnpm --filter @global/code-intelligence exec tsx src/cli.ts query <symbol> --repo ../..
@@ -138,15 +144,15 @@ Before handoff:
 git diff --check
 git status --short --branch
 pnpm --silent worktree:inventory
-pnpm code-intelligence:scan
+pnpm --filter @global/code-intelligence exec tsx src/cli.ts status --repo ../..
 pnpm --filter @global/code-intelligence exec tsx src/cli.ts impact <changed-path...> --repo ../..
 ```
 
-Rebuilding ContractGraph after edits is required before an impact claim. A dirty scan accurately records the working tree but does not replace review of `git diff`.
+Before relying on `impact`, rebuild and recheck ContractGraph if the final edits made its status stale. Reuse a fresh graph bound to the same working tree; do not rebuild merely to enter handoff. A dirty scan accurately records the working tree but does not replace review of `git diff`. Runtime evidence has its own clean-collector and freshness requirements; never commit or capture live state merely to complete a read-only investigation.
 
 ### 5.4 Handoff and external gates
 
-Report the base, branch, worktree, commits, changed files, RED/GREEN evidence, verification results, risks and remaining gaps. Staging, committing, pushing, opening a PR, changing rulesets and merging are distinct actions; take only those explicitly authorized.
+Report the base, branch, worktree, any authorized commits, changed files, RED/GREEN evidence, verification results, risks and remaining gaps. Staging, committing, pushing, opening a PR, changing rulesets and merging are distinct actions; take only those explicitly authorized. Honor valid authorization already supplied for the same scope without repeating the question. Unrequested staging, commit, PR, publication, or cleanup does not block handing off a verified local diff; it must not be reported as completed remotely.
 
 This workflow intentionally has no cleanup command. The inventory script has no network or deletion path and sets `GIT_OPTIONAL_LOCKS=0`. Its runtime guard permits only local read-only forms of `git worktree list`, `for-each-ref`, `rev-parse`, `show`, `merge-base`, `rev-list` and `status`; it rejects fetch, push, prune, remove, clean, reset and every unlisted argument shape. Worktree or branch removal requires a separate read-only audit of unique commits and ownership, confirmation that the work is integrated or intentionally abandoned, and explicit authorization.
 
