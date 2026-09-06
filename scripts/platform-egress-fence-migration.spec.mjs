@@ -23,7 +23,7 @@ test("platform egress fence migration creates durable generation and attempt sta
   assert.match(migration, /"workflow_id" VARCHAR\(200\) NOT NULL/u);
   assert.match(migration, /authority\.workflow_id IS DISTINCT FROM p_workflow_id/u);
   assert.match(migration, /attempt\.workflow_id IS DISTINCT FROM p_workflow_id/u);
-  assert.match(migration, /generation = generation \+ 1/u);
+  assert.match(migration, /generation = platform_egress_schedule_fence\.generation \+ 1/u);
 });
 
 test("only the platform writer receives dispatch lifecycle functions", () => {
@@ -44,6 +44,8 @@ test("fence functions reject stale generations and preserve unknown no-redispatc
   assert.match(migration, /attempt\.state <> 'AUTHORIZED'/u);
   assert.match(migration, /state = 'BLOCKED'/u);
   assert.match(migration, /state = 'UNKNOWN'/u);
-  assert.match(migration, /RETURN EXISTS \(SELECT 1 FROM "platform_egress_attempt" WHERE id = p_attempt_id AND state = 'UNKNOWN'\)/u);
-  assert.match(migration, /RETURN EXISTS \(SELECT 1 FROM "platform_egress_attempt" WHERE id = p_attempt_id AND state = 'ACKNOWLEDGED'\)/u);
+  assert.match(migration, /existing\.state = 'UNKNOWN'/u);
+  assert.match(migration, /existing\.state = 'ACKNOWLEDGED'/u);
+  assert.match(migration, /PLATFORM_EGRESS_OUTCOME_CONFLICT/u);
+  assert.match(migration, /PLATFORM_EGRESS_OUTCOME_INVALID/u);
 });

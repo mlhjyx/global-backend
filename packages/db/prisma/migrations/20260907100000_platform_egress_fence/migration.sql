@@ -98,6 +98,9 @@ BEGIN
       AND authority_kind = 'PLATFORM_GRANT' FOR UPDATE;
   IF authority.id IS NULL OR authority.revoked_at IS NOT NULL
     OR authority.expires_at <= statement_timestamp()
+    OR authority.consumed_at IS NULL OR authority.runs_consumed IS DISTINCT FROM 1
+    OR authority.max_runs IS DISTINCT FROM 1
+    OR authority.campaign_cap_microusd IS DISTINCT FROM authority.cap_per_run_microusd
     OR authority.schedule_id IS DISTINCT FROM p_schedule_id
     OR authority.workflow_id IS DISTINCT FROM p_workflow_id
     OR authority.workflow_run_id IS DISTINCT FROM p_workflow_run_id
@@ -175,19 +178,30 @@ $$;
 CREATE FUNCTION acknowledge_platform_egress_v1(p_attempt_id UUID, p_outcome_digest TEXT DEFAULT NULL)
 RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
+DECLARE
+  existing "platform_egress_attempt"%ROWTYPE;
 BEGIN
   PERFORM assert_execution_budget_platform_writer_principal();
+  IF p_outcome_digest IS NOT NULL AND p_outcome_digest !~ '^[0-9a-f]{64}$'
+  THEN RAISE EXCEPTION 'PLATFORM_EGRESS_OUTCOME_INVALID' USING ERRCODE = 'P0001'; END IF;
   UPDATE "platform_egress_attempt"
     SET state = 'ACKNOWLEDGED', acknowledged_at = clock_timestamp(), outcome_digest = p_outcome_digest
     WHERE id = p_attempt_id AND state = 'SENDING';
   IF FOUND THEN RETURN true; END IF;
-  RETURN EXISTS (SELECT 1 FROM "platform_egress_attempt" WHERE id = p_attempt_id AND state = 'ACKNOWLEDGED');
+  SELECT * INTO existing FROM "platform_egress_attempt" WHERE id = p_attempt_id;
+  IF existing.state = 'ACKNOWLEDGED' AND existing.outcome_digest IS NOT DISTINCT FROM p_outcome_digest
+  THEN RETURN true; END IF;
+  IF existing.state = 'ACKNOWLEDGED'
+  THEN RAISE EXCEPTION 'PLATFORM_EGRESS_OUTCOME_CONFLICT' USING ERRCODE = 'P0001'; END IF;
+  RETURN false;
 END
 $$;
 
 CREATE FUNCTION mark_unknown_platform_egress_v1(p_attempt_id UUID, p_reason TEXT)
 RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
+DECLARE
+  existing "platform_egress_attempt"%ROWTYPE;
 BEGIN
   PERFORM assert_execution_budget_platform_writer_principal();
   IF p_reason IS NULL OR char_length(p_reason) NOT BETWEEN 1 AND 80
@@ -196,7 +210,12 @@ BEGIN
     SET state = 'UNKNOWN', unknown_at = clock_timestamp(), outcome_meta = jsonb_build_object('reason', p_reason)
     WHERE id = p_attempt_id AND state = 'SENDING';
   IF FOUND THEN RETURN true; END IF;
-  RETURN EXISTS (SELECT 1 FROM "platform_egress_attempt" WHERE id = p_attempt_id AND state = 'UNKNOWN');
+  SELECT * INTO existing FROM "platform_egress_attempt" WHERE id = p_attempt_id;
+  IF existing.state = 'UNKNOWN' AND existing.outcome_meta->>'reason' = p_reason
+  THEN RETURN true; END IF;
+  IF existing.state = 'UNKNOWN'
+  THEN RAISE EXCEPTION 'PLATFORM_EGRESS_OUTCOME_CONFLICT' USING ERRCODE = 'P0001'; END IF;
+  RETURN false;
 END
 $$;
 
@@ -207,15 +226,19 @@ AS $$
 DECLARE
   next_generation BIGINT;
 BEGIN
-  IF p_schedule_id IS NULL OR p_reason IS NULL OR char_length(p_reason) NOT BETWEEN 1 AND 80
+  IF p_schedule_id IS NULL OR p_schedule_id !~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$'
+    OR p_reason IS NULL OR char_length(p_reason) NOT BETWEEN 1 AND 80
   THEN RAISE EXCEPTION 'PLATFORM_EGRESS_FENCE_INPUT_INVALID' USING ERRCODE = 'P0001'; END IF;
   UPDATE "platform_egress_schedule_fence"
-    SET generation = generation + 1, state = 'DISABLED', updated_at = clock_timestamp()
+    SET generation = platform_egress_schedule_fence.generation + 1,
+        state = 'DISABLED', updated_at = clock_timestamp()
     WHERE schedule_id = p_schedule_id
     RETURNING platform_egress_schedule_fence.generation INTO next_generation;
   IF next_generation IS NULL THEN RAISE EXCEPTION 'PLATFORM_EGRESS_SCHEDULE_UNKNOWN' USING ERRCODE = 'P0001'; END IF;
   UPDATE "platform_egress_attempt" SET state = 'BLOCKED', outcome_meta = jsonb_build_object('reason', p_reason)
-    WHERE schedule_id = p_schedule_id AND generation < next_generation AND state = 'AUTHORIZED';
+    WHERE platform_egress_attempt.schedule_id = p_schedule_id
+      AND platform_egress_attempt.generation < next_generation
+      AND platform_egress_attempt.state = 'AUTHORIZED';
   GET DIAGNOSTICS blocked_attempts = ROW_COUNT;
   generation := next_generation;
   RETURN NEXT;
