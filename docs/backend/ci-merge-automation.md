@@ -11,7 +11,7 @@
 | **L3 用户授权**      | 产品负责人对当次 merge/release 作最终确认      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
 | **L4 合并/发布回执** | 合并执行者与 Release Owner                     | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
 
-四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人会把用户授权门固定显示为 `NOT_AUTHORIZED`，直到外部授权流程提供独立 provenance。`nontechnical decision card freshness` 保留已配置的稳定 context 名称，但实现同时验证声明的新鲜度、exact head 绑定和完整性；它不是授权或合并建议：Draft 可非阻断展示 `CURRENT_UNVERIFIED`，非 Draft 的完整 `PASS / RECOMMEND_MERGE / MERGE` 声明必须失败，直到可信外部 provenance 另行取证。
+四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人把正文的用户授权 lane 固定显示为 `NOT_AUTHORIZED`，不从正文获得授权。`nontechnical decision card freshness` 保留稳定 context 名称，只证明卡片完整性与 exact PR/head 绑定：非 Draft 的完整正向声明可以得到 `CURRENT_UNVERIFIED` 并通过完整性检查；缺失、重复、陈旧、畸形或矛盾卡片必须失败。检查通过不证明上述四层已满足，也不授权合并。执行合并前仍须独立回读实际 CI、review、未解决讨论和用户授权。精确规则及自举边界见[决策卡完整性规范](../governance/docs-verification.md#source-pr-决策卡与合并资格分离)；Runtime/Release/Pilot/GA 的证明要求不变。
 
 ## 仓内 required contexts 与外部 ruleset
 

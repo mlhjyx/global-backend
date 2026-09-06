@@ -1,0 +1,131 @@
+services:
+  temporal-platform-postgres:
+    image: docker.io/library/postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    profiles: [platform-temporal]
+    environment:
+      POSTGRES_USER: temporal_platform
+      POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set the dedicated Temporal PostgreSQL password}
+      POSTGRES_DB: temporal_platform
+    volumes:
+      - temporal-platform-postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ./postgres/init.sql
+        target: /docker-entrypoint-initdb.d/10-temporal-platform.sql
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [temporal-platform]
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U temporal_platform -d temporal_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+  temporal-platform-schema:
+    image: docker.io/temporalio/admin-tools@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
+    profiles: [platform-temporal]
+    user: "1000:1000"
+    entrypoint: ["/bin/sh"]
+    command: ["/opt/temporal-platform/schema-provision.sh"]
+    environment:
+      TEMPORAL_PLATFORM_POSTGRES_HOST: temporal-platform-postgres
+      TEMPORAL_PLATFORM_POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set the dedicated Temporal PostgreSQL password}
+    volumes:
+      - type: bind
+        source: ./schema-provision.sh
+        target: /opt/temporal-platform/schema-provision.sh
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [temporal-platform]
+    depends_on:
+      temporal-platform-postgres:
+        condition: service_healthy
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000"]
+    restart: "no"
+
+  temporal-platform:
+    image: docker.io/temporalio/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da
+    profiles: [platform-temporal]
+    user: "1000:1000"
+    environment:
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal-platform/temporal.yaml
+      TEMPORAL_ALLOW_NO_AUTH: "false"
+      TEMPORAL_SERVICES: frontend,internal-frontend,history,matching,worker
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_PLATFORM_POSTGRES_HOST: temporal-platform-postgres
+      TEMPORAL_PLATFORM_POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set the dedicated Temporal PostgreSQL password}
+      TEMPORAL_PLATFORM_JWKS_URI: ${TEMPORAL_PLATFORM_JWKS_URI:?set one HTTPS JWKS URI}
+      TEMPORAL_PLATFORM_JWT_AUDIENCE: ${TEMPORAL_PLATFORM_JWT_AUDIENCE:?set the Temporal JWT audience}
+      TEMPORAL_PLATFORM_TLS_SERVER_NAME: ${TEMPORAL_PLATFORM_TLS_SERVER_NAME:-temporal-platform}
+      SSL_CERT_FILE: /run/secrets/temporal-platform/jwks-ca-bundle.crt
+    volumes:
+      - type: bind
+        source: ./config/temporal.yaml
+        target: /etc/temporal-platform/temporal.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./config/dynamicconfig.yaml
+        target: /etc/temporal-platform/dynamicconfig.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_SERVER_SECRET_DIRECTORY:?set the Temporal TLS/JWKS trust directory}
+        target: /run/secrets/temporal-platform
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [temporal-platform]
+    depends_on:
+      temporal-platform-schema:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${TEMPORAL_PLATFORM_HOST_PORT:-17233}:7233"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000"]
+    stop_grace_period: 90s
+    restart: unless-stopped
+
+  temporal-platform-admin:
+    image: docker.io/temporalio/admin-tools@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
+    profiles: [platform-temporal-tools]
+    user: "1000:1000"
+    environment:
+      TEMPORAL_PLATFORM_ADDRESS: temporal-platform:7233
+      TEMPORAL_PLATFORM_TLS_SERVER_NAME: ${TEMPORAL_PLATFORM_TLS_SERVER_NAME:-temporal-platform}
+    volumes:
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_CLIENT_SECRET_DIRECTORY:?set the Temporal client trust and token directory}
+        target: /run/secrets/temporal-platform-client
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [temporal-platform]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000"]
+
+volumes:
+  temporal-platform-postgres-data:
+
+networks:
+  temporal-platform:
+    name: ${TEMPORAL_PLATFORM_NETWORK_NAME:-global-temporal-platform}
+    internal: true
