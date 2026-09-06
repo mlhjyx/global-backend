@@ -14,6 +14,7 @@ import "./supply-chain-gates.spec.mjs";
 import "./runtime-deployment-contract.spec.mjs";
 import "./ghcr-runtime-publication.spec.mjs";
 import "./docker-image-config-path.spec.mjs";
+import "./pr-decision-card.spec.mjs";
 
 import {
   renderProviderRegistry,

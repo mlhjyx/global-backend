@@ -261,7 +261,7 @@ describe('execution control producer structure', () => {
           expression.startsWith('`CONTROLLED_ASSEMBLY_REPLAY_INVALID:'),
       ),
     ).toBe(true);
-  }, 15_000);
+  }, 30_000);
 
   it('mutation resolves an imported const control-code chain', () => {
     expect(

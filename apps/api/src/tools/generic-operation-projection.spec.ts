@@ -61,7 +61,38 @@ describe('generic durable operation projection', () => {
   it('reserves envelope and PostgreSQL JSONB overhead below the 128 KiB database cap', () => {
     expect(() => projectGenericOperationResult({
       kind: 'tool', schema: 'bounded/v1',
-      data: { values: Array.from({ length: 256 }, () => 'x'.repeat(490)) },
+      data: { values: Array.from({ length: 256 }, () => 'x'.repeat(510)) },
     })).toThrow(/GENERIC_OPERATION_PROJECTION_INVALID/);
+  });
+
+  it('admits the typed-shape field envelope while retaining a finite object-field cap', () => {
+    const fields = Object.fromEntries(
+      Array.from({ length: 4_096 }, (_, index) => [`f${index}`, index]),
+    );
+    expect(() => projectGenericOperationResult({
+      kind: 'model', schema: 'bounded/v1', data: fields,
+    })).not.toThrow();
+    expect(() => projectGenericOperationResult({
+      kind: 'model', schema: 'bounded/v1', data: { ...fields, overflow: true },
+    })).toThrow(/GENERIC_OPERATION_PROJECTION_INVALID/);
+  });
+
+  it('permits the bounded provider-wire receipt depth and rejects one level beyond it', () => {
+    const nested = (depth: number): unknown =>
+      depth === 0 ? 'leaf' : { value: nested(depth - 1) };
+    expect(() =>
+      projectGenericOperationResult({
+        kind: 'model',
+        schema: 'bounded/v1',
+        data: nested(10),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      projectGenericOperationResult({
+        kind: 'model',
+        schema: 'bounded/v1',
+        data: nested(11),
+      }),
+    ).toThrow(/GENERIC_OPERATION_PROJECTION_INVALID/);
   });
 });
