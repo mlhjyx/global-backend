@@ -6,11 +6,11 @@ import { resolveCurrentPlatformExecutionProviderSnapshotV1 } from "./platform-ex
 import { PlatformExecutionTechnicalQuoteController } from "./platform-execution-technical-quote.controller";
 import { PlatformExecutionTechnicalQuoteReaderService } from "./platform-execution-technical-quote-reader";
 import { PlatformExecutionTechnicalQuoteService } from "./platform-execution-technical-quote";
+import { JwksPlatformTechnicalQuoteServiceAuthenticationVerifier } from "./platform-technical-quote-jwks-verifier";
 import {
   PlatformTechnicalQuoteServiceAuthenticationGuard,
   PlatformTechnicalQuoteAuthenticationReadinessContributor,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
-  UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
 } from "./platform-technical-quote-service-auth";
 
 const PLATFORM_EXECUTION_TECHNICAL_QUOTE_READER = {
@@ -31,7 +31,8 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_READER = {
   providers: [
     {
       provide: PlatformTechnicalQuoteServiceAuthenticationVerifier,
-      useClass: UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
+      useFactory: () =>
+        new JwksPlatformTechnicalQuoteServiceAuthenticationVerifier(),
     },
     PlatformTechnicalQuoteServiceAuthenticationGuard,
     PlatformTechnicalQuoteAuthenticationReadinessContributor,

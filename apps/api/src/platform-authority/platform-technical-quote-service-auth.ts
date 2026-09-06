@@ -13,6 +13,14 @@ import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readines
 
 export const PLATFORM_TECHNICAL_QUOTE_READ_SCOPE =
   "platform-technical-quote.read" as const;
+export const PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL =
+  "growthos:platform-technical-quote-reader" as const;
+export const PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_TYPE =
+  "platform-technical-quote-access+jwt" as const;
+export const PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_AUDIENCE =
+  "global-backend:platform-technical-quote" as const;
+export const PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME =
+  "platformTechnicalQuoteAccess" as const;
 export const PLATFORM_TECHNICAL_QUOTE_PATH =
   PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH;
 
@@ -21,7 +29,6 @@ export const PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT = 64;
 export const PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR =
   "platform_technical_quote_authentication" as const;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-const PRINCIPAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export interface PlatformTechnicalQuoteServiceAuthenticationRequest {
   readonly method: "POST";
@@ -31,7 +38,7 @@ export interface PlatformTechnicalQuoteServiceAuthenticationRequest {
 
 export interface PlatformTechnicalQuoteServiceIdentity {
   readonly authenticationMode: "SERVICE_ONLY";
-  readonly principalId: string;
+  readonly principalId: typeof PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL;
   readonly scopes: readonly [typeof PLATFORM_TECHNICAL_QUOTE_READ_SCOPE];
 }
 
@@ -51,7 +58,9 @@ export const PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_NOT_READY = Object.freeze({
 });
 
 export abstract class PlatformTechnicalQuoteServiceAuthenticationVerifier {
-  abstract readiness(): PlatformTechnicalQuoteServiceAuthenticationReadiness;
+  abstract readiness():
+    | PlatformTechnicalQuoteServiceAuthenticationReadiness
+    | Promise<PlatformTechnicalQuoteServiceAuthenticationReadiness>;
 
   abstract verify(
     request: PlatformTechnicalQuoteServiceAuthenticationRequest,
@@ -206,8 +215,7 @@ function validIdentity(
     const scopes = identity.scopes;
     return (
       identity.authenticationMode === "SERVICE_ONLY" &&
-      typeof identity.principalId === "string" &&
-      PRINCIPAL_ID.test(identity.principalId) &&
+      identity.principalId === PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL &&
       Array.isArray(scopes) &&
       !types.isProxy(scopes) &&
       Object.getPrototypeOf(scopes) === Array.prototype &&
@@ -219,11 +227,11 @@ function validIdentity(
   }
 }
 
-function verifierReadiness(
+async function verifierReadiness(
   verifier: PlatformTechnicalQuoteServiceAuthenticationVerifier,
-): PlatformTechnicalQuoteServiceAuthenticationReadiness {
+): Promise<PlatformTechnicalQuoteServiceAuthenticationReadiness> {
   try {
-    const value: unknown = verifier.readiness();
+    const value: unknown = await verifier.readiness();
     if (
       value === null ||
       typeof value !== "object" ||
@@ -290,8 +298,8 @@ export class PlatformTechnicalQuoteAuthenticationReadinessContributor
   onModuleInit(): void {
     this.unregister = this.registry.register(
       PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
-      () => {
-        const readiness = verifierReadiness(this.verifier);
+      async () => {
+        const readiness = await verifierReadiness(this.verifier);
         return readiness.status === "ready"
           ? ({ status: "ok" } as const)
           : ({ status: "failed", code: readiness.code } as const);
@@ -314,7 +322,7 @@ export class PlatformTechnicalQuoteServiceAuthenticationGuard
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const readiness = verifierReadiness(this.verifier);
+    const readiness = await verifierReadiness(this.verifier);
     if (
       readiness.status !== "ready" ||
       readiness.code !== "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READY"

@@ -16,11 +16,12 @@ import { resolveCurrentPlatformExecutionProviderSnapshotV1 } from "./platform-ex
 import { PlatformExecutionTechnicalQuoteController } from "./platform-execution-technical-quote.controller";
 import { PlatformExecutionTechnicalQuoteReaderService } from "./platform-execution-technical-quote-reader";
 import { PlatformExecutionTechnicalQuoteService } from "./platform-execution-technical-quote";
+import { JwksPlatformTechnicalQuoteServiceAuthenticationVerifier } from "./platform-technical-quote-jwks-verifier";
 import {
+  PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
   PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
   PlatformTechnicalQuoteServiceAuthenticationVerifier,
-  UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
 } from "./platform-technical-quote-service-auth";
 import { PlatformAuthorityModule } from "./platform-authority.module";
 
@@ -44,7 +45,7 @@ const allowVerifier = {
   }),
   verify: async () => Object.freeze({
     authenticationMode: "SERVICE_ONLY" as const,
-    principalId: "growthos-platform-authority",
+    principalId: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
     scopes: Object.freeze([PLATFORM_TECHNICAL_QUOTE_READ_SCOPE]),
   }),
 } as PlatformTechnicalQuoteServiceAuthenticationVerifier;
@@ -231,14 +232,14 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
     },
   );
 
-  it("composes only an unavailable service verifier in the product module", async () => {
+  it("composes the dedicated JWKS service verifier without any identity fallback", async () => {
     const [moduleSource, mainSource, appModuleSource] = await Promise.all([
       readFile(new URL("./platform-authority.module.ts", import.meta.url), "utf8"),
       readFile(new URL("../main.ts", import.meta.url), "utf8"),
       readFile(new URL("../app.module.ts", import.meta.url), "utf8"),
     ]);
     expect(moduleSource).not.toMatch(
-      /AuthModule|AuthGuard|TokenVerifier|JWKS|workspace|api.?key|dev.?token|unsigned|fallback/i,
+      /AuthModule|AuthGuard|TokenVerifier|workspace|api.?key|dev.?token|unsigned|fallback/i,
     );
     expect(moduleSource).not.toMatch(/process\.env/);
     expect(mainSource).toMatch(
@@ -253,17 +254,18 @@ describe("PlatformExecutionTechnicalQuoteController", () => {
     const verifierProvider = providers.find(
       (provider): provider is {
         provide: typeof PlatformTechnicalQuoteServiceAuthenticationVerifier;
-        useClass: typeof UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier;
+        useFactory: () => PlatformTechnicalQuoteServiceAuthenticationVerifier;
       } =>
         typeof provider === "object" &&
         provider !== null &&
         "provide" in provider &&
         provider.provide === PlatformTechnicalQuoteServiceAuthenticationVerifier,
     );
-    expect(verifierProvider?.useClass).toBe(
-      UnavailablePlatformTechnicalQuoteServiceAuthenticationVerifier,
+    const verifier = verifierProvider?.useFactory();
+    expect(verifier).toBeInstanceOf(
+      JwksPlatformTechnicalQuoteServiceAuthenticationVerifier,
     );
-    expect(new verifierProvider!.useClass().readiness()).toEqual({
+    await expect(verifier!.readiness()).resolves.toEqual({
       status: "not_ready",
       code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
     });

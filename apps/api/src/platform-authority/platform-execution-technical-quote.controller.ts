@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiExtension,
@@ -32,8 +33,13 @@ import {
   type PlatformExecutionTechnicalQuoteV1,
 } from "./platform-execution-technical-quote";
 import {
+  PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_AUDIENCE,
+  PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_TYPE,
   PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_BYTES,
   PLATFORM_TECHNICAL_QUOTE_MAX_HEADER_COUNT,
+  PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME,
+  PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
+  PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
   PlatformTechnicalQuoteServiceAuthenticationGuard,
 } from "./platform-technical-quote-service-auth";
 
@@ -57,6 +63,7 @@ function quoteUnavailable(code: string): never {
 
 @ApiTags("PlatformAuthority")
 @Controller("platform-authority")
+@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)
 @UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)
 export class PlatformExecutionTechnicalQuoteController {
   constructor(
@@ -69,7 +76,12 @@ export class PlatformExecutionTechnicalQuoteController {
   @ApiConsumes("application/json")
   @ApiExtension("x-required-service-scope", "platform-technical-quote.read")
   @ApiExtension("x-service-authentication", {
-    kind: "injected-dedicated-service-verifier",
+    kind: "growthos-identity-jwks-service-token",
+    algorithm: "RS256",
+    type: PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_TYPE,
+    audience: PLATFORM_TECHNICAL_QUOTE_ACCESS_TOKEN_AUDIENCE,
+    principal: PLATFORM_TECHNICAL_QUOTE_READER_PRINCIPAL,
+    scope: PLATFORM_TECHNICAL_QUOTE_READ_SCOPE,
     identity_token_fallback: false,
     workspace_token_fallback: false,
     unsigned_fallback: false,

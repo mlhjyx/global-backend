@@ -59,6 +59,17 @@ describe('roles to scopes policy', () => {
     expect(() =>
       createRolesToScopesPolicy(
         {
+          AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({
+            operator: ['platform-technical-quote.read'],
+          }),
+        },
+        'production',
+      ),
+    ).toThrow('unknown authorization scope');
+
+    expect(() =>
+      createRolesToScopesPolicy(
+        {
           AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({ operator: 'acquisition:read' }),
         },
         'pilot',

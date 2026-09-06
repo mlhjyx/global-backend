@@ -12,7 +12,7 @@ interface OpenApiSchema {
 
 interface OpenApiOperation extends Readonly<Record<string, unknown>> {
   readonly operationId?: string;
-  readonly security?: unknown;
+  readonly security?: readonly Readonly<Record<string, readonly string[]>>[];
   readonly requestBody: {
     readonly content: Readonly<Record<string, { readonly schema: OpenApiSchema }>>;
   };
@@ -28,6 +28,13 @@ interface OpenApiOperation extends Readonly<Record<string, unknown>> {
   >;
 }
 
+interface OpenApiSecurityScheme {
+  readonly type?: string;
+  readonly scheme?: string;
+  readonly bearerFormat?: string;
+  readonly description?: string;
+}
+
 const OPENAPI = JSON.parse(
   readFileSync(
     resolve(process.cwd(), "../../packages/contracts/openapi/openapi.json"),
@@ -35,6 +42,9 @@ const OPENAPI = JSON.parse(
   ),
 ) as {
   paths: Record<string, Record<string, OpenApiOperation>>;
+  components: {
+    securitySchemes: Readonly<Record<string, OpenApiSecurityScheme>>;
+  };
 };
 
 describe("Platform technical quote service-only OpenAPI", () => {
@@ -42,15 +52,33 @@ describe("Platform technical quote service-only OpenAPI", () => {
     "/api/v1/platform-authority/technical-quote"
   ]?.post as OpenApiOperation;
 
-  it("publishes one dedicated service-only operation without bearer fallback", () => {
+  it("publishes one dedicated named service bearer without user or anonymous fallback", () => {
     expect(operation).toBeDefined();
     expect(operation.operationId).toBe("readPlatformExecutionTechnicalQuote");
-    expect(operation.security).toBeUndefined();
+    expect(operation.security).toEqual([
+      { platformTechnicalQuoteAccess: [] },
+    ]);
+    expect(operation.security).not.toContainEqual({ bearer: [] });
+    expect(
+      OPENAPI.components.securitySchemes.platformTechnicalQuoteAccess,
+    ).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+    });
+    expect(
+      OPENAPI.components.securitySchemes.platformTechnicalQuoteAccess,
+    ).not.toEqual(OPENAPI.components.securitySchemes.bearer);
     expect(operation["x-required-service-scope"]).toBe(
       "platform-technical-quote.read",
     );
     expect(operation["x-service-authentication"]).toEqual({
-      kind: "injected-dedicated-service-verifier",
+      kind: "growthos-identity-jwks-service-token",
+      algorithm: "RS256",
+      type: "platform-technical-quote-access+jwt",
+      audience: "global-backend:platform-technical-quote",
+      principal: "growthos:platform-technical-quote-reader",
+      scope: "platform-technical-quote.read",
       identity_token_fallback: false,
       workspace_token_fallback: false,
       unsigned_fallback: false,

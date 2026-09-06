@@ -68,6 +68,14 @@
       "reason": "Development and the isolated test process may use loopback HTTP execution Budget Grant trust roots while retaining the same asymmetric verifier, fixed audience, claims, scope, amount, and failure contracts."
     },
     {
+      "id": "platform-technical-quote-loopback-jwks-trust-root",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/platform-authority/platform-technical-quote-jwks-verifier.ts",
+      "match_sha256": "sha256:19a1dd1e47e1f4e0470d9e571595f669c2e8eaafb7eb82f0490e0a99a9e06c49",
+      "category": "trust",
+      "reason": "Development and the isolated test process may use a loopback HTTP GrowthOS identity JWKS trust root while retaining the same fixed RS256 service-token header, claims, principal, scope, TTL, and failure contracts."
+    },
+    {
       "id": "pilot-gateway-loopback-network",
       "rule": "ENVIRONMENT_BRANCH",
       "path": "apps/api/src/runtime/runtime-admission.ts",
