@@ -26,9 +26,15 @@ export interface PlatformEgressBinding {
   readonly workflowId: string;
   readonly workflowRunId: string;
   readonly scheduleRequestSha256: string;
-  readonly technicalPolicyRevision: string;
+  /**
+   * Optional at the activity boundary. The durable port resolves the exact
+   * immutable revision from the admitted authority before invoking the SQL
+   * CAS, so callers cannot invent a policy revision.
+   */
+  readonly technicalPolicyRevision?: string;
   readonly accountKey: string;
-  readonly expiresAt: Date;
+  /** Optional local hint; PostgreSQL rechecks the authoritative expiry. */
+  readonly expiresAt?: Date;
 }
 
 export interface PlatformEgressAuthorization {
@@ -71,11 +77,13 @@ function validateBinding(binding: PlatformEgressBinding): void {
     !OPERATION_KEY.test(binding.workflowId) ||
     !UUID.test(binding.workflowRunId) ||
     !SHA256.test(binding.scheduleRequestSha256) ||
-    !SHA256.test(binding.technicalPolicyRevision) ||
+    (binding.technicalPolicyRevision !== undefined &&
+      !SHA256.test(binding.technicalPolicyRevision)) ||
     typeof binding.accountKey !== "string" ||
     binding.accountKey !== `platform:${binding.scheduleRequestSha256}:${binding.workflowRunId}` ||
-    !(binding.expiresAt instanceof Date) ||
-    !Number.isFinite(binding.expiresAt.getTime())
+    (binding.expiresAt !== undefined &&
+      (!(binding.expiresAt instanceof Date) ||
+        !Number.isFinite(binding.expiresAt.getTime())))
   ) {
     invalid("PLATFORM_EGRESS_BINDING_INVALID");
   }

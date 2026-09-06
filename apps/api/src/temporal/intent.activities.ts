@@ -8,6 +8,8 @@ import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store'
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
+import { platformEgressDispatcher } from './platform-schedule-authority.activities';
+import type { PlatformEgressFence } from '../platform-authority/platform-egress-fence';
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
@@ -31,6 +33,7 @@ export function createIntentActivities(deps: {
   budgetStore?: BudgetStore;
   platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
+  platformEgressFence?: PlatformEgressFence;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('intent activities require an authoritative BudgetStore');
   const projSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker, budgetStore: budgets });
@@ -62,6 +65,9 @@ export function createIntentActivities(deps: {
     /** 对一个 web_watch 源跑一次页面监控（抓每页→抽信号→diff→写 intent 事件）。幂等 by (source,url)。 */
     async watchSource(args: { sourceId: string } & PlatformScheduleAuthorityActivityInput): Promise<WatchResult> {
       const binding = await attest(args);
+      const platformEgress = deps.platformEgressFence
+        ? platformEgressDispatcher({ fence: deps.platformEgressFence, binding })
+        : undefined;
       const durableReceipts: Array<{
         producerId: string;
         receipt: DurableExecutionReceipt;
@@ -81,6 +87,7 @@ export function createIntentActivities(deps: {
           workspaceId: PLATFORM_WORKSPACE,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
+          ...(platformEgress ? { platformEgress } : {}),
           onDurableReceipt: capturePageReceipt,
         }) },
         platformWriter: deps.platformWriter,
