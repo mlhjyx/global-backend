@@ -1,15 +1,24 @@
-import type { ModelGateway } from '../model-gateway/model-gateway';
-import { checkAgainstSchema } from '../model-gateway/schema-validate';
+import type { ModelGateway } from "../model-gateway/model-gateway";
+import { checkAgainstSchema } from "../model-gateway/schema-validate";
 import type {
   AiContext,
   GenerateStructuredInput,
   ModelResolutionSource,
   ModelResult,
-} from '../model-gateway/types';
-import { canonicalDigest, ContextEngine } from './context-engine';
-import { ModelExecutionRuntime, unwrapModelExecutionError } from './model-execution-runtime';
-import type { ModelExecutionState, ModelProtocol, ReasoningLevel, RuntimeTelemetry, TaskModelContract } from './types';
-import { getTask } from '../ai-tasks/task-registry';
+} from "../model-gateway/types";
+import { canonicalDigest, ContextEngine } from "./context-engine";
+import {
+  ModelExecutionRuntime,
+  unwrapModelExecutionError,
+} from "./model-execution-runtime";
+import type {
+  ModelExecutionState,
+  ModelProtocol,
+  ReasoningLevel,
+  RuntimeTelemetry,
+  TaskModelContract,
+} from "./types";
+import { getTask } from "../ai-tasks/task-registry";
 
 const STRUCTURED_CONTEXT_WINDOW = 128_000;
 const MAX_PROVIDER_OUTPUT_TOKENS = 16_000;
@@ -43,18 +52,21 @@ export interface StructuredTaskRuntimeOptions {
 }
 
 function reasoning(input: GenerateStructuredInput): ReasoningLevel {
-  return input.reasoningEffort ?? 'none';
+  return input.reasoningEffort ?? "none";
 }
 
 function reasoningReserve(level: ReasoningLevel): number {
-  if (level === 'high') return 2_048;
-  if (level === 'medium') return 1_024;
-  if (level === 'low') return 256;
+  if (level === "high") return 2_048;
+  if (level === "medium") return 1_024;
+  if (level === "low") return 256;
   return 0;
 }
 
 function estimatedTokens(content: unknown): number {
-  return Math.max(1, Math.ceil(Buffer.byteLength(JSON.stringify(content), 'utf8') / 3));
+  return Math.max(
+    1,
+    Math.ceil(Buffer.byteLength(JSON.stringify(content), "utf8") / 3),
+  );
 }
 
 export async function executeStructuredTaskWithRuntime<Output>(
@@ -73,15 +85,16 @@ export async function executeStructuredTaskWithRuntime<Output>(
     (registeredMaxOutputTokens !== undefined &&
       (maxOutputTokens ?? 0) > registeredMaxOutputTokens)
   ) {
-    throw new Error('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
+    throw new Error("TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE");
   }
   const boundedInput = Object.freeze({
     ...input,
     maxTokens: maxOutputTokens as number,
   });
-  const contractVersion = options.contractVersion ?? `structured-task-contract/${input.task}/v1`;
-  const protocol = options.protocol ?? 'openai_chat_completions';
-  const requestedAlias = input.model ?? 'gateway-default';
+  const contractVersion =
+    options.contractVersion ?? `structured-task-contract/${input.task}/v1`;
+  const protocol = options.protocol ?? "openai_chat_completions";
+  const requestedAlias = input.model ?? "gateway-default";
   const effort = reasoning(input);
   const requestMaterial = {
     task: input.task,
@@ -93,10 +106,10 @@ export async function executeStructuredTaskWithRuntime<Output>(
   const policy = {
     task: input.task,
     contractVersion,
-    system: input.system ?? '',
+    system: input.system ?? "",
     model: requestedAlias,
     protocol,
-    gatewayRepair: 'single_closed_repair',
+    gatewayRepair: "single_closed_repair",
     maxOutputTokens: boundedInput.maxTokens,
   };
   const refs = {
@@ -106,36 +119,39 @@ export async function executeStructuredTaskWithRuntime<Output>(
   };
   const segments = [
     {
-      kind: 'policy' as const,
+      kind: "policy" as const,
       sourceRef: refs.policy,
       sourceDigest: canonicalDigest(policy),
-      sensitivity: 'public' as const,
-      cacheClass: 'stable-prefix' as const,
+      sensitivity: "public" as const,
+      cacheClass: "stable-prefix" as const,
       estimatedTokens: estimatedTokens(policy),
       content: policy,
     },
     {
-      kind: 'schema' as const,
+      kind: "schema" as const,
       sourceRef: refs.schema,
       sourceDigest: canonicalDigest(input.schema),
-      sensitivity: 'public' as const,
-      cacheClass: 'stable-prefix' as const,
+      sensitivity: "public" as const,
+      cacheClass: "stable-prefix" as const,
       estimatedTokens: estimatedTokens(input.schema),
       content: input.schema,
     },
     {
-      kind: 'request' as const,
+      kind: "request" as const,
       sourceRef: refs.request,
       sourceDigest: canonicalDigest(requestMaterial),
-      sensitivity: 'workspace' as const,
-      cacheClass: 'request-local' as const,
+      sensitivity: "workspace" as const,
+      cacheClass: "request-local" as const,
       estimatedTokens: estimatedTokens(requestMaterial),
       content: requestMaterial,
     },
   ];
   const envelope = new ContextEngine().assemble({
     workspaceId: context.workspaceId,
-    policy: { version: `${contractVersion}/context-v1`, allowedSourceRefs: Object.values(refs) },
+    policy: {
+      version: `${contractVersion}/context-v1`,
+      allowedSourceRefs: Object.values(refs),
+    },
     segments,
     budget: {
       contextWindow: STRUCTURED_CONTEXT_WINDOW,
@@ -149,22 +165,32 @@ export async function executeStructuredTaskWithRuntime<Output>(
   const contract: TaskModelContract<typeof taskInput, Output> = {
     taskId: input.task,
     version: contractVersion,
-    executionMode: 'generative',
-    inputSchema: { type: 'object' },
+    executionMode: "generative",
+    inputSchema: { type: "object" },
     outputSchema: input.schema,
-    contextPolicy: { version: `${contractVersion}/context-v1`, allowedSourceRefs: Object.values(refs) },
+    contextPolicy: {
+      version: `${contractVersion}/context-v1`,
+      allowedSourceRefs: Object.values(refs),
+    },
     capabilityRequirements: {
       protocols: [protocol],
       structuredOutput: true,
       reasoning: effort,
       settlementRequired,
     },
-    reasoningPolicy: { allowed: [effort], default: effort, reserveTokens: reasoningReserve(effort) },
-    cachePolicy: { mode: 'disabled' },
+    reasoningPolicy: {
+      allowed: [effort],
+      default: effort,
+      reserveTokens: reasoningReserve(effort),
+    },
+    cachePolicy: { mode: "disabled" },
     retryPolicy: { transportMaxAttempts: 1, contentRepairMaxAttempts: 0 },
     validateOutput: (_taskInput, output) => {
       const validation = checkAgainstSchema(input.schema, output);
-      if (!validation.valid) throw new Error(`output invalid: ${(validation.errors ?? []).join('; ')}`);
+      if (!validation.valid)
+        throw new Error(
+          `output invalid: ${(validation.errors ?? []).join("; ")}`,
+        );
       input.validateOutput?.(output);
     },
   };
@@ -172,7 +198,10 @@ export async function executeStructuredTaskWithRuntime<Output>(
     telemetry: options.telemetry,
     transport: {
       dispatch: async () => {
-        gatewayResult = await gateway.generateStructured<Output>(boundedInput, context);
+        gatewayResult = await gateway.generateStructured<Output>(
+          boundedInput,
+          context,
+        );
         return {
           output: gatewayResult.data,
           requestedAlias,
@@ -183,20 +212,20 @@ export async function executeStructuredTaskWithRuntime<Output>(
             inputTokens: gatewayResult.usage?.inputTokens ?? 0,
             outputTokens: gatewayResult.usage?.outputTokens ?? 0,
           },
-          ...(gatewayResult.usage?.gatewaySettlements?.at(-1)?.requestId
-            ? { requestId: gatewayResult.usage.gatewaySettlements.at(-1)?.requestId ?? undefined }
-            : {}),
-          settlement: settlementRequired
-            && (!gatewayResult.usage?.gatewaySettlements?.length
-              || gatewayResult.usage.gatewaySettlements.some((item) => item.status === 'unknown'))
-            ? 'unknown'
-            : 'known',
+          settlement:
+            settlementRequired &&
+            (!gatewayResult.usage?.gatewaySettlements?.length ||
+              gatewayResult.usage.gatewaySettlements.some(
+                (item) => item.status === "unknown",
+              ))
+              ? "unknown"
+              : "known",
         };
       },
     },
   });
   try {
-    const prompt = { system: input.system ?? '', user: input.prompt };
+    const prompt = { system: input.system ?? "", user: input.prompt };
     const result = await runtime.execute({
       executionId: `structured:${context.runId ?? context.correlationId ?? context.workspaceId}:${input.task}:${canonicalDigest(requestMaterial).slice(0, 16)}`,
       fallbackIndex: 0,
@@ -214,10 +243,11 @@ export async function executeStructuredTaskWithRuntime<Output>(
       protocol,
       reasoning: effort,
       sampling: {},
-      locale: 'und',
+      locale: "und",
       prompt,
     });
-    if (!gatewayResult) throw new Error('model runtime completed without a gateway observation');
+    if (!gatewayResult)
+      throw new Error("model runtime completed without a gateway observation");
     return {
       ...gatewayResult,
       runtimeExecution: {
@@ -234,7 +264,9 @@ export async function executeStructuredTaskWithRuntime<Output>(
         runtimeResolvedAlias: requestedAlias,
         gatewayResolvedModel: gatewayResult.model,
         provider: gatewayResult.provider,
-        ...(gatewayResult.reportedModel ? { reportedModel: gatewayResult.reportedModel } : {}),
+        ...(gatewayResult.reportedModel
+          ? { reportedModel: gatewayResult.reportedModel }
+          : {}),
         ...(gatewayResult.modelResolutionSource
           ? { modelResolutionSource: gatewayResult.modelResolutionSource }
           : {}),

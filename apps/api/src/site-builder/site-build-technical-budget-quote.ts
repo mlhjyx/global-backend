@@ -3,10 +3,7 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { COPY_GENERATION_LOCALES } from '@global/contracts';
 import { resolveTaskRoute } from './agents/task-routes';
 import type { SiteBuilderGenerativeTaskId } from './agents/task-route-bindings';
-import {
-  crawl4aiFetchTool,
-  searxngSearchTool,
-} from '../tools/builtin-tools';
+import { crawl4aiFetchTool, searxngSearchTool } from '../tools/builtin-tools';
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
 import { SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS } from './site-build-execution-envelope';
 
@@ -20,7 +17,7 @@ const MAX_ROUTE_ALIASES = 4;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MODEL_ALIAS = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/;
+const MODEL_ALIAS = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/;
 
 export interface TechnicalBudgetRoute {
   readonly primary: string;
@@ -68,19 +65,22 @@ export type SiteBuildTechnicalBudgetQuoteErrorCode =
 
 export class SiteBuildTechnicalBudgetQuoteError extends HttpException {
   constructor(public readonly code: SiteBuildTechnicalBudgetQuoteErrorCode) {
-    super({
-      error: {
-        code,
-        message:
-          code === 'SITE_BUILD_BUDGET_QUOTE_INVALID'
-            ? 'technical budget quote request is invalid'
-            : code === 'SITE_BUILD_BUDGET_POLICY_DRIFT'
-              ? 'technical budget policy is temporarily unavailable'
-              : 'technical budget quote is temporarily unavailable',
+    super(
+      {
+        error: {
+          code,
+          message:
+            code === 'SITE_BUILD_BUDGET_QUOTE_INVALID'
+              ? 'technical budget quote request is invalid'
+              : code === 'SITE_BUILD_BUDGET_POLICY_DRIFT'
+                ? 'technical budget policy is temporarily unavailable'
+                : 'technical budget quote is temporarily unavailable',
+        },
       },
-    }, code === 'SITE_BUILD_BUDGET_QUOTE_INVALID'
-      ? HttpStatus.BAD_REQUEST
-      : HttpStatus.SERVICE_UNAVAILABLE);
+      code === 'SITE_BUILD_BUDGET_QUOTE_INVALID'
+        ? HttpStatus.BAD_REQUEST
+        : HttpStatus.SERVICE_UNAVAILABLE,
+    );
     this.name = 'SiteBuildTechnicalBudgetQuoteError';
     this.message = this.code;
   }
@@ -143,8 +143,7 @@ function routeEnvelope(
     maxCostCents: route.maxCostCents,
     maxTokens: route.maxTokens,
     routeAliases: aliases.length,
-    structuredOutputWireUpperBound:
-      MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND,
+    structuredOutputWireUpperBound: MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND,
     temporalActivityAttemptUpperBound:
       SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS,
     multiplicity,
@@ -173,7 +172,9 @@ function digest(value: unknown): string {
 @Injectable()
 export class SiteBuildTechnicalBudgetQuoteService {
   private readonly now: () => Date;
-  private readonly routeResolver: NonNullable<QuoteDependencies['resolveRoute']>;
+  private readonly routeResolver: NonNullable<
+    QuoteDependencies['resolveRoute']
+  >;
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
@@ -236,8 +237,7 @@ export class SiteBuildTechnicalBudgetQuoteService {
     if (
       researchTools.some(
         (tool) =>
-          !Number.isSafeInteger(tool.estimatedCents) ||
-          tool.estimatedCents < 0,
+          !Number.isSafeInteger(tool.estimatedCents) || tool.estimatedCents < 0,
       )
     ) {
       return policyDrift();
