@@ -37,6 +37,221 @@ const SHA_D = "d".repeat(40);
 const DIGEST = `sha256:${"e".repeat(64)}`;
 const NOW = new Date("2026-08-07T12:00:00.000Z");
 
+test("the stable roadmap and ADR registry reject live-status and superseded product drift", () => {
+  const releasePlan = readFileSync(
+    new URL("../docs/roadmap/release-plan.md", import.meta.url),
+    "utf8",
+  );
+  const decisions = readFileSync(
+    new URL("../docs/adr/registry.md", import.meta.url),
+    "utf8",
+  );
+
+  const parseMarkdownRow = (line) => {
+    if (!/^\|.*\|$/.test(line)) return null;
+    return line
+      .slice(1, -1)
+      .split("|")
+      .map((cell) => cell.trim());
+  };
+  const assertStableRoadmap = (document) => {
+    const lines = document.split("\n");
+    assert.match(
+      document,
+      /Live gate verdicts and time-bound execution facts are maintained only in \[current status\]\(\.\.\/status\/current\.md\)\./,
+    );
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("## ")),
+      ["## Stable product sequence", "## Historical supersession index"],
+    );
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("### ")),
+      [
+        "### Program boundaries",
+        "### Stable G0-G7 definitions",
+        "### Ordered delivery",
+        "### Concurrency and authorization boundaries",
+        "### Final service acceptance",
+      ],
+    );
+    const historyStart = document.indexOf("## Historical supersession index");
+    assert.ok(historyStart > 0);
+    const activeSection = document.slice(0, historyStart);
+    assert.doesNotMatch(
+      document,
+      /\b(?:origin\/main|main)@[0-9a-f]{7,40}\b|\bPR\s*#\d+\b|\bREADY_FOR_[A-Z_]+\b|\bNOT_AUTHORIZED\b|\bcurrentRoute\b|\bcurrent-source\b|下一门/i,
+    );
+    assert.doesNotMatch(
+      document,
+      /\b(?:current|live)\s+(?:G[0-7]\s+)?(?:gate\s+)?(?:verdict|status)\b[\s\S]{0,80}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/i,
+    );
+    assert.doesNotMatch(
+      activeSection,
+      /\bG[0-7]\b[^\n.]{0,40}(?:=|:|\bis\b)[^\n.]{0,20}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|FAILED?|COMPLETE(?:D)?|RELEASE_CANDIDATE)\b/i,
+    );
+    assert.doesNotMatch(
+      activeSection,
+      /\bPhase\s+\d+(?:-[A-Z])?\b[^\n.]{0,100}(?:\bis\b|=|:)[^\n.]{0,20}\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|FAILED?|COMPLETE(?:D)?)\b/i,
+    );
+    assert.doesNotMatch(
+      activeSection,
+      /\b(?:SOURCE_INTEGRATED_ALPHA|CROSS_REPO_PRODUCT_ASSEMBLY|USER_JOURNEY_[A-Z0-9_]+|COMMERCIAL_LOOP_[A-Z0-9_]+|PRODUCTION_READINESS_[A-Z0-9_]+|RELEASE_[A-Z0-9_]+|RUNTIME_[A-Z0-9_]+|PILOT_[A-Z0-9_]+|GA_[A-Z0-9_]+)\b/,
+    );
+
+    const markdownRows = lines.map(parseMarkdownRow).filter(Boolean);
+    assert.equal(markdownRows.length, 10);
+    const tableHeaders = markdownRows.filter(
+      (cells) => cells?.[0]?.toLowerCase() === "gate",
+    );
+    assert.deepEqual(tableHeaders, [["Gate", "Stable proof"]]);
+    const gateRows = markdownRows.filter((cells) =>
+      /^G[0-7] —/.test(cells?.[0] ?? ""),
+    );
+    assert.equal(gateRows.length, 8);
+    assert.deepEqual(
+      gateRows.map(([gate]) => gate.slice(0, 2)),
+      ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7"],
+    );
+    for (const cells of gateRows) {
+      assert.equal(cells.length, 2);
+      const proofWithoutTddTerms = cells[1].replace(
+        "RED/GREEN evidence",
+        "TDD evidence",
+      );
+      assert.doesNotMatch(
+        proofWithoutTddTerms,
+        /\b(?:PASS|AMBER|RED|GREEN|DONE|BLOCKED|READY|NOT_AUTHORIZED|AUTHORIZED|COMPLETED?|FAILED?)\b/i,
+      );
+    }
+
+    const spine = /The stable product spine is `([^`]+)`/.exec(document)?.[1];
+    assert.deepEqual(spine?.split(" → "), [
+      "Onboarding",
+      "ICP",
+      "LeadQualifiedPackage",
+      "Opportunity",
+      "Human QGO",
+      "Feedback",
+    ]);
+    const orderedStart = document.indexOf("### Ordered delivery");
+    const boundaryStart = document.indexOf(
+      "### Concurrency and authorization boundaries",
+    );
+    assert.ok(orderedStart >= 0 && boundaryStart > orderedStart);
+    const orderedSteps = document
+      .slice(orderedStart, boundaryStart)
+      .split("\n")
+      .filter((line) => /^\d+\. \*\*/.test(line));
+    assert.equal(orderedSteps.length, 7);
+    for (const [index, label] of [
+      "Phase 0",
+      "MVP-0",
+      "MVP-1",
+      "Pilot 3-A",
+      "Site 3-B",
+      "MVP-2",
+      "Later",
+    ].entries()) {
+      assert.match(
+        orderedSteps[index],
+        new RegExp(`^${index + 1}\\. \\*\\*${label}`),
+      );
+    }
+    assert.match(orderedSteps[2], /Opportunity[^\n]*Human QGO/);
+    for (const preMvp2Step of orderedSteps.slice(0, 5)) {
+      assert.doesNotMatch(preMvp2Step, /\bCampaign\b|\bemail\b|邮件/i);
+    }
+    assert.match(orderedSteps[5], /Campaign[^\n]*email/);
+
+    assert.ok(historyStart > boundaryStart);
+    const historicalSection = document.slice(historyStart);
+    const historicalEntries = historicalSection
+      .split("\n")
+      .slice(1)
+      .filter((line) => line.length > 0);
+    assert.equal(historicalEntries.length, 2);
+    for (const entry of historicalEntries) {
+      assert.match(entry, /^- /);
+    }
+    assert.match(historicalSection, /HISTORICAL \/ SUPERSEDED/);
+    assert.match(historicalSection, /MVP-1[^\n]*Opportunity[^\n]*human QGO/);
+    assert.match(historicalSection, /MVP-2[^\n]*email/);
+    const campaignFirstLines = lines.filter((line) =>
+      /Campaign[^\n]*email[^\n]*QGO/i.test(line),
+    );
+    assert.ok(campaignFirstLines.length >= 1);
+    for (const line of campaignFirstLines) {
+      assert.match(line, /HISTORICAL \/ SUPERSEDED/);
+    }
+    const unmarkedCampaignContent = lines
+      .filter((line) => !line.includes("HISTORICAL / SUPERSEDED"))
+      .join("\n");
+    assert.doesNotMatch(
+      unmarkedCampaignContent,
+      /Campaign[\s\S]{0,160}(?:email|邮件)[\s\S]{0,160}QGO/i,
+    );
+  };
+
+  assertStableRoadmap(releasePlan);
+  for (const mutation of [
+    `${releasePlan}\n| Gate                     | Current verdict |\n| ------------------------ | --------------- |\n| G0 — Truth & Ownership   | \`PASS\`          |\n`,
+    releasePlan.replace(
+      "Binding plans, current authority",
+      "`PASS / DONE` — Binding plans, current authority",
+    ),
+    releasePlan.replace(
+      "4. **Pilot 3-A:**",
+      "4. **Campaign/email:** Campaign → email → QGO.\n4. **Pilot 3-A:**",
+    ),
+    `${releasePlan}\nCampaign → email → QGO.\n`,
+    `${releasePlan}\n### Active fast follow\nCampaign\n→ email\n→ QGO\n`,
+    `${releasePlan}\nG4 current verdict is PASS.\n`,
+    releasePlan.replace(
+      "Disposable-database/RLS proof",
+      "`Pass / Done` — Disposable-database/RLS proof",
+    ),
+    `${releasePlan}\n| Capability | Current status |\n| ---------- | -------------- |\n| Runtime    | BLOCKED        |\n`,
+    releasePlan.replace(
+      "## Historical supersession index",
+      "G4 = PASS / RELEASE_CANDIDATE.\n\n## Historical supersession index",
+    ),
+    releasePlan.replace(
+      "## Historical supersession index",
+      "Phase 0 is complete; G0=`PASS / OWNERSHIP_CLOSED`.\n\n## Historical supersession index",
+    ),
+    releasePlan.replace(
+      "## Historical supersession index",
+      "Product stage: `SOURCE_INTEGRATED_ALPHA / PRODUCTION_READINESS_BLOCKED`.\n\n## Historical supersession index",
+    ),
+  ]) {
+    assert.throws(() => assertStableRoadmap(mutation));
+  }
+
+  for (const document of [releasePlan, decisions]) {
+    assert.doesNotMatch(document, /QualifiedLeadHandoff/);
+    assert.match(document, /LeadQualifiedPackage/);
+  }
+  assert.doesNotMatch(decisions, /以下均 ACCEPTED/);
+  assert.match(decisions, /\| PDR-003 \|[^\n]+\| SUPERSEDED BY PDR-004\s+\|/);
+  assert.match(
+    decisions,
+    /\| PDR-004 \|[^\n]*LeadQualifiedPackage[^\n]*Opportunity[^\n]*Human QGO[^\n]*MVP-2[^\n]*email[^\n]*\| ACCEPTED\s+\|/,
+  );
+  assert.match(
+    decisions,
+    /`LeadQualified` only names the integration event; it is not a second canonical product object\./,
+  );
+  for (const preservedQualifier of ["| PDR-001 |", "| PDR-002 |"]) {
+    const row = decisions
+      .split("\n")
+      .find((line) => line.startsWith(preservedQualifier));
+    assert.match(row ?? "", /ACCEPTED ⚠待 A\/B 会签/);
+  }
+});
+
+// current.md is a dated human readout, not a frozen commit/status contract.
+// RuntimeEvidence and release-promotion behavior are tested below against
+// machine inputs; docs:verify owns document metadata and link validation.
 test("the discovery lineage successor is current-main based and the quarantined mega-branch is provenance only", () => {
   const plan = readFileSync(
     new URL(
@@ -117,113 +332,18 @@ test("the discovery lineage successor is current-main based and the quarantined 
     );
   }
 
-  const expectedProgramBRow =
-    "| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | `GPP-B-LINEAGE-001` 已通过 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 由 current main admit 给唯一 writer `codex/discovery-query-materialization-successor`，状态 `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`。G0 ownership 已关闭；A 分支的 B-owned delta 仍非 accepted implementation，任何产品施工必须另过 G2/G3 计划与 review。 |";
-  const expectedG0Row =
-    "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` | PR #424 已固定 ADR-025/`DEC-GPP-001` 与 mega-branch disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 已把唯一 `GPP-B-LINEAGE-001` card/writer 持久写入 current main。`CON-GPP-001=RESOLVED_WITH_REMEDIATION`、`BLK-GPP-001=RESOLVED`。此 PASS 只关闭 ownership/provenance；Program B implementation/TDD 仍属于 G2，DB/RLS/replay 与集成仍属于 G3，G1–G7 不由本门升级。 |";
   const normalizeTableRow = (line) =>
     line
       .split("|")
       .map((cell) => cell.trim())
       .join(" | ");
-  const statusRowLabel = (prefix) => prefix.trimEnd().replace(/\s*\|$/, "");
   const assertUniqueStatusRow = (document, prefix, expected) => {
-    const rows = document
-      .split("\n")
-      .filter((line) => line.startsWith(statusRowLabel(prefix)));
+    const label = prefix.trimEnd().replace(/\s*\|$/, "");
+    const rows = document.split("\n").filter((line) => line.startsWith(label));
     assert.deepEqual(rows.map(normalizeTableRow), [
       normalizeTableRow(expected),
     ]);
   };
-  const mutateStatusRow = (document, prefix, from, to) =>
-    document
-      .split("\n")
-      .map((line) =>
-        line.startsWith(statusRowLabel(prefix)) ? line.replace(from, to) : line,
-      )
-      .join("\n");
-  assertUniqueStatusRow(
-    status,
-    "| B — Buyer Intelligence discovery |",
-    expectedProgramBRow,
-  );
-  assertUniqueStatusRow(status, "| G0 — Truth & Ownership |", expectedG0Row);
-  const expectedProgramARow =
-    "| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `OWNERSHIP_CLOSED_WITH_REMEDIATION`: writer inactivity、clean/no-`MERGE_HEAD` packet、post-`ed615d1b` delta classification 与 binding-ledger/provenance correction 已在 `91cae351795cceced59893bcf552c2b502a4ebaa` 完成。35 个 main ancestry commits 仍是 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`；`b57af498` 是 two-parent integration provenance；五个 B-owned deltas 仍不是 accepted A work；四个 Task 5.2 commits 继续 `QUARANTINED / HOLD_OWNERSHIP` 历史处置。PR #424 已将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，PR #425 readback `d2c93dd6bea0348381286558896b395c84945171` 已接受唯一 B card/writer。A 的 ownership gate 已关闭，但其 source/runtime/Release 能力仍按 G2–G5 单独验证。 |";
-  const expectedRootRow =
-    "| `/global/backend` root `main` | evidence packaging 前观察于 `2026-09-04T12:49:25+08:00`：`HEAD=origin/main=0f72cc104e47128778f2392283a380bc1297f76d`；protected local现场仅保留未跟踪 `.playwright-cli/` | 本行是时间绑定的 pre-packaging observation，不预测本 evidence/docs merge 的 eventual commit。runtime source authority 仍由上文独立绑定。 |";
-  assertUniqueStatusRow(
-    status,
-    "| A — authority/runtime primitives |",
-    expectedProgramARow,
-  );
-  assertUniqueStatusRow(
-    status,
-    "| `/global/backend` root `main` |",
-    expectedRootRow,
-  );
-  for (const [expected, prefix, mutations] of [
-    [
-      expectedProgramBRow,
-      "| B — Buyer Intelligence discovery |",
-      [
-        ["ZERO_PRODUCT_CODE", "PRODUCT_CODE"],
-        ["CURRENT_MAIN_READBACK_PASS", "IMPLEMENTATION_AUTHORIZED"],
-        [
-          "codex/discovery-query-materialization-successor",
-          "codex/other-writer",
-        ],
-      ],
-    ],
-    [
-      expectedG0Row,
-      "| G0 — Truth & Ownership |",
-      [
-        ["`PASS / OWNERSHIP_CLOSED`", "`PASS / IMPLEMENTATION_COMPLETE`"],
-        ["RESOLVED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
-        ["G1–G7 不由本门升级", "G1–G7 PASS"],
-      ],
-    ],
-  ]) {
-    for (const [from, to] of mutations) {
-      assert.throws(() =>
-        assertUniqueStatusRow(
-          mutateStatusRow(status, prefix, from, to),
-          prefix,
-          expected,
-        ),
-      );
-    }
-  }
-  for (const [expected, prefix, mutation] of [
-    [
-      expectedProgramARow,
-      "| A — authority/runtime primitives |",
-      ["OWNERSHIP_CLOSED_WITH_REMEDIATION", "HOLD_OWNERSHIP"],
-    ],
-    [
-      expectedRootRow,
-      "| `/global/backend` root `main` |",
-      ["不预测本 evidence/docs merge 的 eventual commit", "预测本 evidence/docs merge 的 eventual commit"],
-    ],
-  ]) {
-    assert.throws(() =>
-      assertUniqueStatusRow(
-        mutateStatusRow(status, prefix, mutation[0], mutation[1]),
-        prefix,
-        expected,
-      ),
-    );
-  }
-  assert.match(status, /> 最后核验：2026-09-04T/);
-  assert.match(
-    status,
-    /当前 Backend runtime source authority 为 `main@674ff12d4d768ce5599fc07b565fe21da37dc5fe`/,
-  );
-  assert.match(
-    status,
-    /historical construction base 是 `23d111f7b400403deb7466abf34ab709685b8376`/,
-  );
   const expectedConflictRow =
     "| `CON-GPP-001` | Program A Task 5.2 与 Program B 的 Raw/Identity/Canonical/Discovery ownership 重叠。 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | PR #424 固定 owner/seam 与 mega-branch `NON_DEPLOYABLE / PROVENANCE_ONLY` disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 将唯一 `GPP-B-LINEAGE-001` card/writer 写入 current main。ownership collision 已关闭；四个 Task 5.2 commits 与五个 B-owned deltas 继续按 ADR-025 分类，G2/G3 产品实现仍未接纳。 |";
   const expectedBlockerRow =
@@ -252,24 +372,37 @@ test("the discovery lineage successor is current-main based and the quarantined 
   }
   const phase0Rows = releasePlan
     .split("\n")
-    .filter((line) => line.startsWith("1. **Phase 0:**"));
+    .filter((line) => line.startsWith("1. **Phase 0"));
   const expectedPhase0Row =
-    "1. **Phase 0:** current truth、A/B interface、provenance 与 documentation 已完成；G0=`PASS / OWNERSHIP_CLOSED`，绑定 PR #424 与 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171`。这不升级 G1–G7；Program B source/TDD 从 G2 继续，DB/RLS/replay/integration 从 G3 继续。";
+    "1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](../status/current.md).";
   assert.deepEqual(phase0Rows, [expectedPhase0Row]);
   const releaseG0Rows = releasePlan
     .split("\n")
-    .filter((line) => line.startsWith("| G0 — Truth & Ownership |"));
+    .filter((line) => /^\|\s*G0 — Truth & Ownership\s*\|/.test(line))
+    .map(normalizeTableRow);
   assert.deepEqual(releaseG0Rows, [
-    "| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` |",
+    normalizeTableRow(
+      "| G0 — Truth & Ownership | Binding plans, current authority, single-writer ownership, schema/migration boundaries and accepted seams are explicit. |",
+    ),
   ]);
-  const laterGateRows = status
+  const liveGateRows = status
     .split("\n")
-    .filter((line) => /^\| G[1-7] —/.test(line))
-    .map(normalizeTableRow)
-    .join("\n");
-  assert.equal(
-    createHash("sha256").update(laterGateRows).digest("hex"),
-    "02e23f8245c69b8934bd6248584b6883551ce91e99dbbfae540483fc154321eb",
+    .filter((line) =>
+      /^\| G(?:0|[1-4]|5-(?:Site|Acquisition)|[6-7]) —/.test(line),
+    );
+  assert.deepEqual(
+    liveGateRows.map((line) => line.split("|")[1].trim()),
+    [
+      "G0 — Truth & Ownership",
+      "G1 — Product/UX/Contract",
+      "G2 — Source/TDD/Security",
+      "G3 — Integration/Data",
+      "G4 — Release Candidate",
+      "G5-Site — Runtime Observed",
+      "G5-Acquisition — Runtime Observed",
+      "G6 — UAT Accepted",
+      "G7 — Pilot/GA Authorized",
+    ],
   );
 });
 
