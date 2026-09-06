@@ -2,6 +2,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 export const COMMENT_MARKER = "<!-- codex-nontechnical-decision-card:v1 -->";
 
@@ -35,10 +36,6 @@ const REQUIRED_NARRATIVE_FIELDS = [
   "codexRecommendation",
 ];
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function sanitize(value) {
   return String(value ?? "")
     .replace(/<!--[\s\S]*?-->/g, "")
@@ -52,22 +49,91 @@ function sanitize(value) {
     .slice(0, 1200);
 }
 
-function rawSection(body) {
-  const match = String(body ?? "").match(
-    /(?:^|\n)##\s+非技术合并决策卡\s*\n([\s\S]*?)(?=\n##\s+|$)/,
+function parseCardInput(body) {
+  const card = Object.fromEntries(Object.keys(FIELDS).map((key) => [key, ""]));
+  const errors = [];
+  if (typeof body !== "string" || Buffer.byteLength(body) > 256 * 1024) {
+    return { card, errors: ["决策卡正文缺失或超过字节上限"] };
+  }
+  const visible = body.replace(/<!--[\s\S]*?-->/g, "");
+  if (visible.includes("<!--") || visible.includes("-->")) {
+    errors.push("正文包含未闭合的 HTML 注释");
+  }
+  const labels = new Map(
+    Object.entries(FIELDS).map(([key, label]) => [label, key]),
   );
-  return match?.[1] ?? "";
+  const seen = new Set();
+  let sections = 0;
+  let inCard = false;
+  let fence;
+  for (const line of visible.split(/\r?\n/)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (
+        marker &&
+        marker[1][0] === fence[0] &&
+        marker[1].length >= fence.length &&
+        !marker[2].trim()
+      )
+        fence = undefined;
+      continue;
+    }
+    if (marker) {
+      fence = marker[1];
+      continue;
+    }
+    if (/^ {0,3}##[ \t]+非技术合并决策卡[ \t]*#*[ \t]*$/.test(line)) {
+      sections += 1;
+      inCard = true;
+      continue;
+    }
+    if (/^ {0,3}#{1,2}(?:[ \t]+|$)/.test(line)) inCard = false;
+    if (!inCard || !/^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])[ \t]+/.test(line))
+      continue;
+    const field = line.match(/^ {0,3}-[ \t]+([^：:]+)[：:][ \t]*(.*)$/);
+    const key = labels.get(field?.[1]?.trim());
+    if (!key) {
+      errors.push("决策卡包含未知或畸形字段");
+      continue;
+    }
+    if (seen.has(key)) {
+      errors.push(`决策卡字段重复：${FIELDS[key]}`);
+      continue;
+    }
+    seen.add(key);
+    let value = field[2].trim();
+    if (value.startsWith("`") && value.endsWith("`"))
+      value = value.slice(1, -1).trim();
+    if (
+      [
+        "repository",
+        "prNumber",
+        "headSha",
+        "generatedAt",
+        "technicalGate",
+        "independentReview",
+        "codexRecommendation",
+      ].includes(key) &&
+      /[\u0000-\u001f\u007f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(
+        value,
+      )
+    ) {
+      errors.push(`决策卡结构字段含不可见控制字符：${FIELDS[key]}`);
+    }
+    if (value.length > 1200) errors.push(`决策卡字段超长：${FIELDS[key]}`);
+    card[key] = sanitize(value);
+  }
+  if (sections !== 1) errors.push("正文必须有且只有一个可见决策卡区段");
+  return { card, errors };
 }
 
-function fieldValue(section, label) {
-  const pattern = new RegExp(
-    `^\\s*-\\s*${escapeRegExp(label)}\\s*[：:]\\s*(.*)$`,
-    "m",
-  );
-  const value = sanitize(section.match(pattern)?.[1] ?? "");
-  return value.startsWith("`") && value.endsWith("`")
-    ? value.slice(1, -1).trim()
-    : value;
+function utcTimestamp(value) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value))
+    return NaN;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return NaN;
+  const canonical = value.includes(".") ? value : value.replace("Z", ".000Z");
+  return new Date(time).toISOString() === canonical ? time : NaN;
 }
 
 function placeholder(value) {
@@ -79,34 +145,29 @@ function placeholder(value) {
 
 function leadingToken(value, allowed) {
   const normalized = value.toUpperCase();
-  return allowed.find((item) =>
-    new RegExp(`^${escapeRegExp(item)}(?:$|[\\s；;，,。.：:])`).test(
-      normalized,
-    ),
+  const match = normalized.match(
+    /^(?:`([A-Z_]+)`|([A-Z_]+))(?:$|[\s；;，,。.：:（(])/,
   );
+  return allowed.find((item) => item === (match?.[1] ?? match?.[2]));
 }
 
 function parsePrNumber(value) {
-  const match = value.match(/^#?(\d+)$/);
-  return match ? Number(match[1]) : null;
+  const match = value.match(/^#?([1-9]\d*)$/);
+  const number = match ? Number(match[1]) : NaN;
+  return Number.isSafeInteger(number) ? number : null;
 }
 
 export function parseDecisionCard(body) {
-  const section = rawSection(body);
-  return Object.fromEntries(
-    Object.entries(FIELDS).map(([key, label]) => [
-      key,
-      fieldValue(section, label),
-    ]),
-  );
+  return parseCardInput(body).card;
 }
 
 export function evaluateDecisionCard(event, now = new Date()) {
   const repository = sanitize(event?.repository?.full_name);
   const prNumber = Number(event?.pull_request?.number ?? event?.number);
   const headSha = sanitize(event?.pull_request?.head?.sha).toLowerCase();
-  const card = parseDecisionCard(event?.pull_request?.body);
-  const reasons = [];
+  const parsed = parseCardInput(event?.pull_request?.body);
+  const card = parsed.card;
+  const reasons = [...parsed.errors];
   const missing = REQUIRED_NARRATIVE_FIELDS.filter((key) =>
     placeholder(card[key]),
   );
@@ -125,11 +186,19 @@ export function evaluateDecisionCard(event, now = new Date()) {
   }
 
   const boundPrNumber = parsePrNumber(card.prNumber);
-  const generatedAtMs = Date.parse(card.generatedAt);
+  const generatedAtMs = utcTimestamp(card.generatedAt);
   const bindingPresent = bindingMissing.length === 0;
   const generatedAtValid =
     Number.isFinite(generatedAtMs) &&
     generatedAtMs <= now.getTime() + 5 * 60 * 1000;
+  const validBinding =
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) &&
+    Number.isSafeInteger(prNumber) &&
+    prNumber > 0 &&
+    /^[0-9a-f]{40}$/.test(headSha) &&
+    /^[0-9a-f]{40}$/.test(card.headSha) &&
+    boundPrNumber !== null;
+  if (!validBinding) reasons.push("决策卡或事件绑定格式无效");
   const stale =
     bindingPresent &&
     (card.repository !== repository ||
@@ -194,9 +263,6 @@ export function evaluateDecisionCard(event, now = new Date()) {
       independentReview === "RECOMMEND_MERGE"
     ) {
       status = "CURRENT_UNVERIFIED";
-      reasons.push(
-        "技术门、独立审查和 Codex 建议来自 PR 正文，机器人未验证其真实来源",
-      );
     } else {
       status = "INCOMPLETE";
     }
@@ -212,16 +278,18 @@ export function evaluateDecisionCard(event, now = new Date()) {
     recommendation === "MERGE" &&
     technicalGate === "PASS" &&
     independentReview === "RECOMMEND_MERGE";
-  if (!draft && mergeCandidate) {
-    reasons.push(
-      "非 Draft merge-candidate 缺少可信外部 provenance；PR 正文声明不能使 required check 通过",
-    );
-  }
+  const integrityValid =
+    reasons.length === 0 && validBinding && generatedAtValid;
+  if (!integrityValid && status !== "STALE") status = "INCOMPLETE";
 
   return {
-    schemaVersion: "pr-decision-card-status/v3",
+    schemaVersion: "pr-decision-card-status/v4",
     status,
-    blocking: !draft && mergeCandidate,
+    blocking: !draft && !integrityValid,
+    integrity: {
+      status: integrityValid ? "PASS" : "FAIL",
+      freshnessPolicy: "EXACT_PR_HEAD_NO_WALL_CLOCK_TTL",
+    },
     draft,
     mergeCandidate,
     repository,
@@ -281,9 +349,10 @@ export function renderDecisionCard(result) {
 
 > 本评论由默认分支上的受信脚本根据当前 PR 事件与 PR 正文生成。它只检查绑定、完整性和过期状态，**不会批准或合并 PR**。
 > PR 正文由作者控制，因此其中的技术门、独立审查和 Codex 建议一律按**未验证声明**展示；本机器人永远不会仅凭正文输出“已准备合并”。
-> \`nontechnical decision card freshness\` 保留既有 ruleset context 名称，但同时验证声明新鲜度与完整性：Draft 可非阻断展示；非 Draft merge-candidate 在没有可信外部 provenance 时必须阻断。
+> \`nontechnical decision card freshness\` 只校验卡片完整性和精确 PR/head 绑定：非 Draft 的畸形、缺失、陈旧或矛盾卡片必须阻断。通过不等于实际 CI、独立审查、用户授权或运行晋级证明。卡片不要求按日重签；合并前仍须独立回读当前真实证据。
 
 - 卡片状态：\`${result.status}\`
+- 完整性检查：\`${result.integrity.status}\`（不授予合并权限）
 - PR 类型：\`${result.draft ? "DRAFT" : "READY"}\`
 - Merge-candidate 声明：\`${result.mergeCandidate ? "YES_UNVERIFIED" : "NO"}\`
 - 实时绑定：\`${result.repository}#${result.prNumber}@${result.headSha}\`
@@ -334,16 +403,30 @@ async function main() {
   }
   if (command === "check") {
     const result = JSON.parse(await readFile(args.result, "utf8"));
-    if (result.blocking) {
+    const event = JSON.parse(await readFile(args.event, "utf8"));
+    const renderedAt = utcTimestamp(result?.generatedAt ?? "");
+    if (
+      !Number.isFinite(renderedAt) ||
+      renderedAt > Date.now() + 5 * 60 * 1000 ||
+      !isDeepStrictEqual(
+        result,
+        evaluateDecisionCard(event, new Date(renderedAt)),
+      )
+    )
+      throw new Error("invalid decision card result");
+    // Compare the complete result, then freshly evaluate the trusted event.
+    // A partial or altered result cannot supply its own verdict or trust lane.
+    const current = evaluateDecisionCard(event);
+    if (result.blocking || current.blocking) {
       console.error(
-        `decision card declaration is ${result.status}: ${result.reasons.join("; ")}`,
+        `decision card declaration is ${result.blocking ? result.status : current.status}: ${(result.blocking ? result.reasons : current.reasons).join("; ")}`,
       );
       process.exitCode = 1;
     }
     return;
   }
   throw new Error(
-    "usage: pr-decision-card render --event event.json --output card.md --result result.json | check --result result.json",
+    "usage: pr-decision-card render --event event.json --output card.md --result result.json | check --event event.json --result result.json",
   );
 }
 
@@ -351,8 +434,8 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  main().catch((error) => {
-    console.error(error.message);
+  main().catch(() => {
+    console.error("DECISION_CARD_COMMAND_FAILED");
     process.exitCode = 1;
   });
 }

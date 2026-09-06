@@ -38,6 +38,30 @@ pnpm docs:verify
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。
 
+## Source PR 决策卡与合并资格分离
+
+`nontechnical decision card freshness` 保留原 required context 名称和
+`pull_request_target` 的 trusted-base 执行边界；它不运行 PR head，也不把正文拼入 shell。
+`pr-decision-card-status/v4` 将卡片完整性与正文声明状态分开：非 Draft 卡片缺失、重复区段、
+重复/未知字段、绑定错误、非法时间或矛盾枚举必须失败。完整的 `PASS / RECOMMEND_MERGE / MERGE`
+声明可以通过完整性检查，但机器、reviewer、用户三个 lane 仍保持 `trusted=false`，
+正文不能产生合并授权或外部证据认证。Draft 可显示不完整信息，其转换为非 Draft 后必须重新检查。
+CLI `check` 必须接收同一可信事件文件，重算并逐字段核对 render 结果，再按当前时间重新判定；
+render 或 check 任一时点判为阻断，该次检查都失败，不因等待时间跨过容差边界而让失败的 bot 卡片自动变绿。
+不接受缺字段、额外字段、错绑定或自报绿色的结果文件。正文上限为 256 KiB，每个字段上限 1200 字符；
+字段使用精确的 `- ` 项目，其他顶层列表符不能隐藏重复或矛盾字段。
+
+卡片新鲜度定义为精确 repository、PR number 和 head SHA 绑定，不设按日续签的 wall-clock TTL。
+生成时间只接受有效 UTC ISO 8601（秒或三位毫秒），不得比检查时间超前超过五分钟；它是未验证的
+追溯元数据，不是 CI/review 的有效期。`edited`、`synchronize`、`ready_for_review` 等事件重新检查：
+修改 head 必须更新绑定，修改正文必须重新通过完整性检查。真正的 CI、独立审查、未解决讨论和
+已有用户授权由执行合并的 operator/Codex 在操作前对当前 exact head 分别回读，不依赖旧卡片或旧事件快照。
+
+该职责拆分不取消任何构建、安全、RLS、迁移或 required context，也不改变 RuntimeEvidence、
+Release Bundle、Pilot/GA 的外部证明规则。源码合并不等于部署或晋级。
+启用新校验器若需要修复 trusted-base 的自举问题，必须在修复形成精确提交并独立复审后，
+由用户另行明确确认实际机制与影响范围；本规范不授权临时关闭规则或管理员绕过。
+
 ## 3. 受控范围
 
 受控范围包括：文档门户、治理 Registry、AI 辅助开发指南、全局前端规范、设计规范、OSS 总账和仍保留的模板；五份权威页与指定活跃 Site Builder 专题页也在机器清单中，必须有单 H1、稳定 Document ID、`CURRENT` 生命周期和“当前事实来源”元数据。

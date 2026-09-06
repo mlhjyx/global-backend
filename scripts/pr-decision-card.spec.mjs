@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   evaluateDecisionCard,
@@ -77,10 +81,11 @@ test("author-controlled positive declarations never become a trusted ready state
     new Date("2026-07-27T12:05:00.000Z"),
   );
   assert.equal(result.status, "CURRENT_UNVERIFIED");
-  assert.equal(result.blocking, true);
+  assert.equal(result.blocking, false);
+  assert.equal(result.integrity.status, "PASS");
   assert.equal(result.technicalGate, "PASS");
   assert.equal(result.independentReview, "RECOMMEND_MERGE");
-  assert.match(result.reasons.join(" "), /可信外部 provenance/);
+  assert.equal(result.gates.machine.trusted, false);
   assert.match(renderDecisionCard(result), /未验证声明/);
 });
 
@@ -141,7 +146,7 @@ test("a changed head makes an old MERGE recommendation stale and blocking", () =
   assert.equal(result.blocking, true);
 });
 
-test("an unfinished non-merge card stays visible without pretending readiness", () => {
+test("an unfinished non-merge card blocks integrity without pretending readiness", () => {
   const result = evaluateDecisionCard(
     event(
       body({
@@ -154,7 +159,7 @@ test("an unfinished non-merge card stays visible without pretending readiness", 
     new Date("2026-07-27T12:05:00.000Z"),
   );
   assert.equal(result.status, "INCOMPLETE");
-  assert.equal(result.blocking, false);
+  assert.equal(result.blocking, true);
 });
 
 test("template placeholders wrapped in Markdown code remain incomplete", () => {
@@ -172,7 +177,7 @@ test("template placeholders wrapped in Markdown code remain incomplete", () => {
     new Date("2026-07-27T12:05:00.000Z"),
   );
   assert.equal(result.status, "INCOMPLETE");
-  assert.equal(result.blocking, false);
+  assert.equal(result.blocking, true);
 });
 
 test("product authorization text cannot override a technical hold", () => {
@@ -225,7 +230,7 @@ test("negated status phrases cannot be parsed as positive enumerations", () => {
     new Date("2026-07-27T12:05:00.000Z"),
   );
   assert.equal(result.status, "INCOMPLETE");
-  assert.equal(result.blocking, false);
+  assert.equal(result.blocking, true);
   assert.equal(result.technicalGate, null);
   assert.equal(result.independentReview, null);
   assert.equal(result.recommendation, null);
@@ -264,4 +269,258 @@ test("bot output neutralizes Markdown, mentions, and bidi controls from the PR b
   assert.equal(rendered.includes("@maintainer"), false);
   assert.equal(rendered.includes("\u202e"), false);
   assert.match(rendered, /＠maintainer/);
+});
+
+test("duplicate or unknown card members and sections cannot hide a conflicting declaration", () => {
+  for (const card of [
+    body() + body({ technicalGate: "HOLD", codexRecommendation: "HOLD" }),
+    body().replace("## 合规", "- 技术门：HOLD\n\n## 合规"),
+    ...["*", "+", "1.", "1)"].map((marker) =>
+      body().replace("## 合规", `${marker} 技术门：HOLD\n\n## 合规`),
+    ),
+    body().replace("## 合规", "- 外部认证：VERIFIED\n\n## 合规"),
+    body().replace("## 合规", "- 意外的额外字段\n\n## 合规"),
+    "```markdown\n" + body() + "```\n",
+    "<!--\n" + body(),
+  ]) {
+    const result = evaluateDecisionCard(
+      event(card),
+      new Date("2026-07-27T12:05:00Z"),
+    );
+    assert.equal(result.blocking, true, "ambiguous card must fail integrity");
+    assert.equal(result.integrity.status, "FAIL");
+    assert.equal(result.gates.userAuthorization.trusted, false);
+  }
+});
+
+test("freshness is exact-head bound and not an invented daily renewal requirement", () => {
+  const result = evaluateDecisionCard(
+    event(body()),
+    new Date("2026-09-06T00:00:00Z"),
+  );
+  assert.equal(result.blocking, false);
+  assert.equal(
+    result.integrity.freshnessPolicy,
+    "EXACT_PR_HEAD_NO_WALL_CLOCK_TTL",
+  );
+  assert.equal(result.gates.machine.trusted, false);
+  const stale = evaluateDecisionCard(
+    event(body(), "b".repeat(40)),
+    new Date("2026-09-06T00:00:00Z"),
+  );
+  assert.equal(stale.blocking, true);
+});
+
+test("malformed binding and timestamp are rejected even when both untrusted strings agree", () => {
+  const now = new Date("2026-07-27T12:05:00Z");
+  for (const overrides of [
+    { headSha: "not-a-commit" },
+    { prNumber: "#0237" },
+    { generatedAt: "2026-02-31T12:00:00Z" },
+    { generatedAt: "yesterday" },
+    { generatedAt: "2026-07-27" },
+    { userValue: "x".repeat(1201) },
+  ]) {
+    const value = event(body(overrides), overrides.headSha ?? HEAD);
+    assert.equal(evaluateDecisionCard(value, now).blocking, true);
+  }
+});
+
+test("contradictory merge recommendations cannot satisfy integrity", () => {
+  for (const overrides of [
+    { technicalGate: "HOLD" },
+    { technicalGate: "UNKNOWN" },
+    { independentReview: "RECOMMEND_HOLD" },
+    { independentReview: "NEED_USER_DECISION" },
+  ]) {
+    const result = evaluateDecisionCard(
+      event(body(overrides)),
+      new Date("2026-07-27T12:05:00Z"),
+    );
+    assert.equal(result.blocking, true);
+    assert.equal(result.gates.userAuthorization.status, "NOT_AUTHORIZED");
+  }
+});
+
+test("a structurally valid HOLD is documentary, not a failed CI result or permission to merge", () => {
+  const result = evaluateDecisionCard(
+    event(
+      body({
+        technicalGate: "HOLD",
+        independentReview: "RECOMMEND_HOLD",
+        codexRecommendation: "HOLD",
+      }),
+    ),
+    new Date("2026-07-27T12:05:00Z"),
+  );
+  assert.equal(result.integrity.status, "PASS");
+  assert.equal(result.status, "HOLD");
+  assert.equal(result.blocking, false);
+  assert.equal(result.gates.machine.trusted, false);
+  assert.equal(result.gates.userAuthorization.status, "NOT_AUTHORIZED");
+});
+
+test("the template's inline-code enum with an explanatory suffix is still one exact enum", () => {
+  const result = evaluateDecisionCard(
+    event(
+      body({
+        technicalGate: "`PASS`（已核验）",
+        independentReview: "`RECOMMEND_MERGE`；已复审",
+        codexRecommendation: "`MERGE`；源代码合并建议",
+      }),
+    ),
+    new Date("2026-07-27T12:05:00Z"),
+  );
+  assert.equal(result.integrity.status, "PASS");
+  assert.equal(result.gates.machine.trusted, false);
+});
+
+test("real render/check CLI accepts valid untrusted cards and rejects incomplete cards and malformed results", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "decision-card-cli-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cli = new URL("./pr-decision-card.mjs", import.meta.url).pathname;
+  const eventPath = join(directory, "event.json");
+  const output = join(directory, "card.md");
+  const resultPath = join(directory, "result.json");
+  const run = (args) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      encoding: "utf8",
+      timeout: 5000,
+    });
+  for (const [card, expectedExit] of [
+    [body(), 0],
+    [body({ userValue: "TODO", codexRecommendation: "HOLD" }), 1],
+  ]) {
+    await writeFile(eventPath, JSON.stringify(event(card)));
+    assert.equal(
+      run([
+        "render",
+        "--event",
+        eventPath,
+        "--output",
+        output,
+        "--result",
+        resultPath,
+      ]).status,
+      0,
+    );
+    assert.equal(
+      run(["check", "--result", resultPath, "--event", eventPath]).status,
+      expectedExit,
+    );
+    const data = JSON.parse(await readFile(resultPath, "utf8"));
+    assert.equal(data.gates.machine.trusted, false);
+    assert.equal(data.gates.userAuthorization.status, "NOT_AUTHORIZED");
+  }
+  await writeFile(resultPath, "{}");
+  assert.equal(
+    run(["check", "--result", resultPath, "--event", eventPath]).status,
+    1,
+  );
+  await writeFile(
+    resultPath,
+    JSON.stringify({
+      schemaVersion: "pr-decision-card-status/v4",
+      draft: false,
+      integrity: { status: "PASS" },
+      blocking: false,
+      gates: {
+        machine: { trusted: false },
+        reviewer: { trusted: false },
+        userAuthorization: { trusted: false, status: "NOT_AUTHORIZED" },
+      },
+      reasons: [],
+    }),
+  );
+  assert.equal(
+    run(["check", "--result", resultPath, "--event", eventPath]).status,
+    1,
+  );
+  assert.equal(run(["unknown"]).status, 1);
+  assert.equal(run(["render", "--event"]).status, 1);
+  await writeFile(eventPath, JSON.stringify(event(body())));
+  assert.equal(
+    run([
+      "render",
+      "--event",
+      eventPath,
+      "--output",
+      output,
+      "--result",
+      resultPath,
+    ]).status,
+    0,
+  );
+  const complete = JSON.parse(await readFile(resultPath, "utf8"));
+  for (const mutate of [
+    (v) => {
+      delete v.headSha;
+    },
+    (v) => {
+      v.unexpected = "extra";
+    },
+    (v) => {
+      v.gates.machine.trusted = true;
+    },
+    (v) => {
+      v.bodyBinding.headSha = "b".repeat(40);
+    },
+    (v) => {
+      v.integrity.freshnessPolicy = "TRUST_BODY";
+    },
+  ]) {
+    const tampered = structuredClone(complete);
+    mutate(tampered);
+    await writeFile(resultPath, JSON.stringify(tampered));
+    assert.equal(
+      run(["check", "--result", resultPath, "--event", eventPath]).status,
+      1,
+    );
+  }
+  await writeFile(resultPath, JSON.stringify(complete));
+  await writeFile(eventPath, JSON.stringify(event(body(), "b".repeat(40))));
+  assert.equal(
+    run(["check", "--result", resultPath, "--event", eventPath]).status,
+    1,
+  );
+  assert.equal(run(["check", "--result", resultPath]).status, 1);
+  const earlier = new Date(Date.now() - 600_000);
+  const recoveringEvent = event(
+    body({ generatedAt: new Date(earlier.getTime() + 300_001).toISOString() }),
+  );
+  const previouslyFailed = evaluateDecisionCard(recoveringEvent, earlier);
+  assert.equal(previouslyFailed.blocking, true);
+  assert.equal(evaluateDecisionCard(recoveringEvent).blocking, false);
+  await writeFile(eventPath, JSON.stringify(recoveringEvent));
+  await writeFile(resultPath, JSON.stringify(previouslyFailed));
+  assert.equal(
+    run(["check", "--result", resultPath, "--event", eventPath]).status,
+    1,
+  );
+});
+
+test("comments and fenced examples cannot counterfeit fields in the visible card", () => {
+  const fake = `\n\n\`\`\`markdown\n${body()}\n\`\`\`\n`;
+  const result = evaluateDecisionCard(
+    event(fake + body()),
+    new Date("2026-07-27T12:05:00Z"),
+  );
+  assert.equal(result.blocking, false);
+  assert.equal(
+    evaluateDecisionCard(
+      event("<!--" + body() + "-->"),
+      new Date("2026-07-27T12:05:00Z"),
+    ).blocking,
+    true,
+  );
+  for (const altered of [
+    body().replace("PASS；", "PA\u202eSS；"),
+    body({ headSha: "a".repeat(20) + "\u200e" + "a".repeat(20) }),
+    "x".repeat(256 * 1024) + body(),
+  ])
+    assert.equal(
+      evaluateDecisionCard(event(altered), new Date("2026-07-27T12:05:00Z"))
+        .blocking,
+      true,
+    );
 });

@@ -27,10 +27,12 @@
 
 > 进入合并候选时由 Codex 完成。本卡是业务解释和审查证据，**不是合并授权**；审查代理只能给建议，不能代替产品负责人或本任务的明确合并授权。
 
+> 非 Draft 必须有且只有一张可见卡片，以下字段每项恰好一次，不添加未知字段。检查通过仅表示完整且绑定当前 PR/head；真实 CI、review 和用户授权仍须分别回读。时间采用 UTC ISO 8601，不要求按日续签；head 改变或正文编辑会重新检查。
+
 - 决策卡仓库：`<owner/repository>`
 - 决策卡 PR：`#<number>`
 - 决策卡 head：`<40-char SHA>`
-- 决策卡生成时间：`<ISO 8601>`
+- 决策卡生成时间：`<YYYY-MM-DDTHH:mm:ss.sssZ>`
 - 关联业务结果、Capability / Scenario / Page / Object：`<由 Codex 填写>`
 - 用户会实际得到什么：`<由 Codex 填写>`
 - 明确没有改变什么：`<由 Codex 填写>`
