@@ -20,6 +20,7 @@ import {
   ExecutionBudgetGrantError,
   type ExecutionBudgetPurpose,
   type VerifiedExecutionBudgetAuthority,
+  type PlatformExecutionInvocation,
 } from './execution-budget-authority.types';
 
 export const EXECUTION_BUDGET_GRANT_AUDIENCE =
@@ -62,6 +63,10 @@ const PLATFORM_COMMAND_CLAIMS = new Set([
   'subject_type',
   'subject_id',
   'schedule_id',
+  'schedule_request_sha256',
+  'workflow_id',
+  'workflow_run_id',
+  'technical_policy_revision',
   'currency',
   'unit',
   'cap_per_run_microusd',
@@ -86,18 +91,18 @@ type WorkspaceExpectedScope = Readonly<
 >;
 
 type PlatformExpectedScope = Readonly<
-  Pick<
-    VerifiedExecutionBudgetAuthority,
-    'authorityKind' | 'purpose' | 'subjectType' | 'subjectId' | 'scheduleId'
-  > & {
-    authorityKind: 'PLATFORM_GRANT';
-    scheduleId: string;
-  }
+  PlatformExecutionInvocation &
+    Pick<
+      VerifiedExecutionBudgetAuthority,
+      'authorityKind' | 'purpose' | 'subjectType' | 'subjectId' | 'scheduleId'
+    > & {
+      authorityKind: 'PLATFORM_GRANT';
+      scheduleId: string;
+    }
 >;
 
 export type ExecutionBudgetGrantExpectedScope =
-  | WorkspaceExpectedScope
-  | PlatformExpectedScope;
+  WorkspaceExpectedScope | PlatformExpectedScope;
 
 export interface ExecutionBudgetGrantVerifierConfiguration {
   readonly jwks: URL;
@@ -144,11 +149,7 @@ function requiredCanonical(
   maxLength = 512,
 ): string {
   const value = env[name];
-  if (
-    !value ||
-    value !== value.trim() ||
-    value.length > maxLength
-  ) {
+  if (!value || value !== value.trim() || value.length > maxLength) {
     throw new ExecutionControlError('EXECUTION_BUDGET_VERIFIER_CONFIG_INVALID');
   }
   return value;
@@ -185,11 +186,7 @@ export function validateExecutionBudgetGrantVerifierConfiguration(
 ): ExecutionBudgetGrantVerifierConfiguration {
   const mode = resolveRuntimeMode(env);
   const jwks = trustedUrl(env, 'EXECUTION_BUDGET_GRANT_JWKS_URI', mode);
-  const issuer = trustedUrl(
-    env,
-    'EXECUTION_BUDGET_GRANT_ISSUER',
-    mode,
-  ).href;
+  const issuer = trustedUrl(env, 'EXECUTION_BUDGET_GRANT_ISSUER', mode).href;
   if (
     requiredCanonical(env, 'EXECUTION_BUDGET_GRANT_AUDIENCE', 256) !==
     EXECUTION_BUDGET_GRANT_AUDIENCE
@@ -442,8 +439,7 @@ function nullablePositiveBigInt(value: unknown): bigint | null {
 
 function isPurpose(value: unknown): value is ExecutionBudgetPurpose {
   return (
-    typeof value === 'string' &&
-    PURPOSES.has(value as ExecutionBudgetPurpose)
+    typeof value === 'string' && PURPOSES.has(value as ExecutionBudgetPurpose)
   );
 }
 
@@ -460,7 +456,11 @@ function assertExpectedScope(
     expected.authorityKind === 'WORKSPACE_GRANT'
       ? authority.workspaceId !== expected.workspaceId ||
         authority.requestSha256 !== expected.requestSha256
-      : authority.scheduleId !== expected.scheduleId;
+      : authority.scheduleId !== expected.scheduleId ||
+        authority.scheduleRequestSha256 !== expected.scheduleRequestSha256 ||
+        authority.workflowId !== expected.workflowId ||
+        authority.workflowRunId !== expected.workflowRunId ||
+        authority.technicalPolicyRevision !== expected.technicalPolicyRevision;
   if (commonMismatch || kindMismatch) {
     throw new ExecutionBudgetGrantError(
       'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
@@ -488,10 +488,7 @@ export class ExecutionBudgetGrantVerifier {
       configuration = validateExecutionBudgetGrantVerifierConfiguration(env);
       keyResolver =
         dependencies.keyResolver ??
-        createBoundedRemoteJwkSet(
-          configuration,
-          dependencies.fetcher ?? fetch,
-        );
+        createBoundedRemoteJwkSet(configuration, dependencies.fetcher ?? fetch);
     } catch {
       // Runtime composition may expose diagnostics while this additive
       // capability is unavailable. Verification remains fail closed.
@@ -561,7 +558,11 @@ export class ExecutionBudgetGrantVerifier {
       const decoded = JSON.parse(
         Buffer.from(verified.payload).toString('utf8'),
       ) as unknown;
-      if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
+      if (
+        decoded === null ||
+        typeof decoded !== 'object' ||
+        Array.isArray(decoded)
+      ) {
         throw invalid();
       }
       payload = decoded as JWTPayload;
@@ -577,8 +578,10 @@ export class ExecutionBudgetGrantVerifier {
         throw invalid();
       }
       if (
-        exactPlatformClaims &&
-        Object.keys(payload).some((claim) => !PLATFORM_COMMAND_CLAIMS.has(claim))
+        (exactPlatformClaims || payload.authority_kind === 'PLATFORM_GRANT') &&
+        Object.keys(payload).some(
+          (claim) => !PLATFORM_COMMAND_CLAIMS.has(claim),
+        )
       ) {
         throw invalid();
       }
@@ -589,9 +592,7 @@ export class ExecutionBudgetGrantVerifier {
       if (issuedAt > nowSeconds + CLOCK_TOLERANCE_SECONDS) throw invalid();
       if (notBefore > nowSeconds + CLOCK_TOLERANCE_SECONDS) throw invalid();
       if (expiresAt < nowSeconds - CLOCK_TOLERANCE_SECONDS) {
-        throw new ExecutionBudgetGrantError(
-          'EXECUTION_BUDGET_GRANT_EXPIRED',
-        );
+        throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_EXPIRED');
       }
       if (
         issuedAt > notBefore ||
@@ -602,6 +603,16 @@ export class ExecutionBudgetGrantVerifier {
       }
 
       const authorityKind = payload.authority_kind;
+      if (
+        authorityKind === 'WORKSPACE_GRANT' &&
+        [
+          'schedule_request_sha256',
+          'workflow_id',
+          'workflow_run_id',
+          'technical_policy_revision',
+        ].some((claim) => Object.hasOwn(payload, claim))
+      )
+        throw invalid();
       const purpose = payload.purpose;
       const workspaceId = nullableUuid(payload.workspace_id);
       const requestSha256 = nullableSha256(payload.request_sha256);
@@ -630,13 +641,24 @@ export class ExecutionBudgetGrantVerifier {
         subjectId: boundedIdentifier(payload.subject_id),
         requestSha256,
         scheduleId: nullableBoundedIdentifier(payload.schedule_id),
+        ...(authorityKind === 'PLATFORM_GRANT'
+          ? {
+              scheduleRequestSha256:
+                nullableSha256(payload.schedule_request_sha256) ?? undefined,
+              workflowId:
+                typeof payload.workflow_id === 'string'
+                  ? payload.workflow_id
+                  : undefined,
+              workflowRunId: nullableUuid(payload.workflow_run_id) ?? undefined,
+              technicalPolicyRevision:
+                nullableSha256(payload.technical_policy_revision) ?? undefined,
+            }
+          : {}),
         currency: 'USD' as const,
         unit: 'microusd' as const,
         capMicrousd: nullableMicrousd(payload.cap_microusd),
         capPerRunMicrousd: nullableMicrousd(payload.cap_per_run_microusd),
-        campaignCapMicrousd: nullableMicrousd(
-          payload.campaign_cap_microusd,
-        ),
+        campaignCapMicrousd: nullableMicrousd(payload.campaign_cap_microusd),
         maxRuns: nullablePositiveBigInt(payload.max_runs),
         tokenSha256: createHash('sha256').update(compactJws).digest('hex'),
         issuedAt,
@@ -653,7 +675,9 @@ export class ExecutionBudgetGrantVerifier {
     }
   }
 
-  private classifyVerificationFailure(error: unknown): ExecutionBudgetGrantError {
+  private classifyVerificationFailure(
+    error: unknown,
+  ): ExecutionBudgetGrantError {
     if (error instanceof ExecutionBudgetGrantError) return error;
     if (
       error instanceof ExecutionBudgetJwksUnavailableError ||

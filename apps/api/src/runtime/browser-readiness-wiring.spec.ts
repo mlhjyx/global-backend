@@ -2,7 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import childProcess, { type SpawnOptions } from "node:child_process";
 import { access, rm } from "node:fs/promises";
 import { dirname } from "node:path";
-import { checkBrowserReadiness } from "./managed-dependency-readiness";
+import {
+  checkBrowserReadiness,
+  inspectPlatformBudgetAuthorityReadiness,
+} from "./managed-dependency-readiness";
+import { RuntimeReadinessContributorRegistry } from "./runtime-readiness-registry";
+import {
+  platformAutomationReadinessFactName,
+  type PlatformAutomationExternalReadinessFact,
+} from "../platform-authority/platform-automation-readiness";
+import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "../platform-authority/platform-execution-contract";
+import { PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR } from "../platform-authority/platform-technical-quote-service-auth";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -79,5 +89,51 @@ describe("default browser readiness lifecycle integration", () => {
       code: "BROWSER_RUNTIME_CONFIG_INVALID",
     });
     expect(roots.size).toBe(0);
+  });
+
+  it("keeps the isolated browser probe and exact platform rows in one managed module", async () => {
+    installChild("<title>runtime-readiness</title>");
+    await expect(checkBrowserReadiness({})).resolves.toEqual({ status: "ok" });
+
+    const registry = new RuntimeReadinessContributorRegistry();
+    registry.register(
+      PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+      () => ({ status: "ok" }),
+    );
+    for (const row of PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows) {
+      for (const fact of [
+        "temporal_proof",
+        "issuer",
+        "revocation_delivery",
+      ] satisfies readonly PlatformAutomationExternalReadinessFact[]) {
+        registry.register(
+          platformAutomationReadinessFactName(fact, row.scheduleId),
+          () => ({ status: "ok" }),
+        );
+      }
+    }
+    const authority = {
+      inspectPlatformWriterCapability: vi.fn(async () => ({
+        status: "available" as const,
+      })),
+    };
+
+    const report = await inspectPlatformBudgetAuthorityReadiness(
+      authority,
+      registry,
+    );
+
+    expect(
+      report.rows.map((row) => [row.identity.scheduleId, row.state]),
+    ).toEqual([
+      ["acq-sweep", "BLOCKED"],
+      ["patents-cache-refresh", "INTENTIONALLY_DISABLED_NO_EGRESS"],
+      ["intent-sweep", "BLOCKED"],
+      ["sanctions-refresh", "BLOCKED"],
+    ]);
+    expect(authority.inspectPlatformWriterCapability).toHaveBeenCalledTimes(3);
+    expect(roots.size).toBe(1);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

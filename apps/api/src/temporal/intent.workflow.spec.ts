@@ -94,4 +94,18 @@ describe('intentSweepWorkflow', () => {
     await intentSweepWorkflow(workflowInput());
     expect(acts.listDueWatches).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50 }));
   });
+
+  it('clamps an oversized or malformed due-source request to the 50-source product envelope', async () => {
+    primeIntent([]);
+
+    await intentSweepWorkflow(workflowInput(5_000));
+    expect(acts.listDueWatches).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 50 }),
+    );
+
+    await intentSweepWorkflow(workflowInput(-1));
+    expect(acts.listDueWatches).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 50 }),
+    );
+  });
 });

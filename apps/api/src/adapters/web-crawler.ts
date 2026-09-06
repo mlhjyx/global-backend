@@ -9,8 +9,17 @@
  * fallback; the broad allow-internal switch is forbidden.
  */
 import { resolvePublicHttpUrl, type PublicUrlResolver } from "./url-guard";
+import {
+  PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
+  PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+} from "../platform-authority/platform-execution-contract";
+import {
+  decodeJsonBytes,
+  readFetchResponseBodyBounded,
+} from "./bounded-fetch-response";
 
-export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES = 3_000_000;
+export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES =
+  PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES;
 export interface CrawlResult {
   url: string;
   text: string;
@@ -20,14 +29,17 @@ export async function crawlUrl(
   url: string,
   authorizeExternalAction?: () => Promise<void>,
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
+  beforePhysicalWire?: () => Promise<void>,
 ): Promise<CrawlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
   const base = process.env.CRAWLER_URL ?? "http://localhost:11235";
   const token = process.env.CRAWLER_TOKEN ?? "";
   await authorizeExternalAction?.();
+  await beforePhysicalWire?.();
   const res = await fetch(`${base}/md`, {
     method: "POST",
+    redirect: "error",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -35,12 +47,16 @@ export async function crawlUrl(
     body: JSON.stringify({ url: target.url.toString() }),
     signal: AbortSignal.timeout(75_000),
   });
-  if (!res.ok) {
-    throw new Error(
-      `crawler ${res.status}: ${(await res.text()).slice(0, 200)}`,
-    );
-  }
-  const json = (await res.json()) as { markdown?: string; success?: boolean };
+  const responseBytes = await readFetchResponseBodyBounded(
+    res,
+    PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+    "CRAWL4AI_RESPONSE_TOO_LARGE",
+  );
+  if (!res.ok) throw new Error(`crawler ${res.status}`);
+  const json = decodeJsonBytes<{ markdown?: string; success?: boolean }>(
+    responseBytes,
+    "CRAWL4AI_RESPONSE_INVALID",
+  );
   return { url: target.url.toString(), text: json.markdown ?? "" };
 }
 
@@ -59,14 +75,17 @@ export async function crawlHtml(
   url: string,
   authorizeExternalAction?: () => Promise<void>,
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
+  beforePhysicalWire?: () => Promise<void>,
 ): Promise<CrawlHtmlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
   const base = process.env.CRAWLER_URL ?? "http://localhost:11235";
   const token = process.env.CRAWLER_TOKEN ?? "";
   await authorizeExternalAction?.();
+  await beforePhysicalWire?.();
   const res = await fetch(`${base}/crawl`, {
     method: "POST",
+    redirect: "error",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -85,15 +104,19 @@ export async function crawlHtml(
     }),
     signal: AbortSignal.timeout(75_000),
   });
-  if (!res.ok) {
-    throw new Error(
-      `crawler ${res.status}: ${(await res.text()).slice(0, 200)}`,
-    );
-  }
-  const data = (await res.json()) as {
+  const responseBytes = await readFetchResponseBodyBounded(
+    res,
+    PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+    "CRAWL4AI_RESPONSE_TOO_LARGE",
+  );
+  if (!res.ok) throw new Error(`crawler ${res.status}`);
+  const data = decodeJsonBytes<{
     results?: { html?: string; response_headers?: Record<string, string> }[];
     detail?: unknown;
-  };
+  }>(responseBytes, "CRAWL4AI_RESPONSE_INVALID");
+  if (Array.isArray(data.results) && data.results.length > 1) {
+    throw new Error("CRAWL4AI_RESPONSE_ITEM_BOUND_EXCEEDED");
+  }
   const r = Array.isArray(data.results) ? data.results[0] : undefined;
   if (!r)
     throw new Error(

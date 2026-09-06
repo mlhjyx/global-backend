@@ -67,6 +67,16 @@ import {
   SamSourcesSought,
   SamSearchParams,
 } from "../adapters/sam-api";
+import {
+  PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
+  PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+  PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX,
+  PLATFORM_ROBOTS_REDIRECT_MAX,
+  PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES,
+  boundedPlatformAcquisitionFetchLimit,
+  platformExecutionToolContract,
+} from "../platform-authority/platform-execution-contract";
+import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -83,6 +93,16 @@ import {
 const hash = (s: string): string =>
   createHash("sha256").update(s).digest("hex").slice(0, 24);
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
+const platformCrawl4aiContract =
+  platformExecutionToolContract("crawl4ai.render");
+const platformGooglePatentsContract =
+  platformExecutionToolContract("google_patents.search");
+const platformTradeFairContract =
+  platformExecutionToolContract("tradefair.algolia");
+const platformMapYourShowContract =
+  platformExecutionToolContract("mapyourshow.fetch");
+const platformSanctionsContract =
+  platformExecutionToolContract("sanctions.download");
 
 function beforeExternalRequest(
   ctx: ToolContext,
@@ -97,11 +117,15 @@ export const crawl4aiRenderTool: Tool<
   { url: string },
   CrawlHtmlResult & { robotsBlocked?: boolean }
 > = {
-  id: "crawl4ai.render",
-  version: "1.0.0",
+  id: platformCrawl4aiContract.toolId,
+  version: platformCrawl4aiContract.version,
   category: "fetch",
   sourceClass: "public_intelligence",
-  cost: { unit: "page", estimatedCents: 1, external: false },
+  cost: {
+    unit: platformCrawl4aiContract.costUnit,
+    estimatedCents: Number(platformCrawl4aiContract.estimatedCents),
+    external: false,
+  },
   rateLimit: { rps: 1, concurrency: 3, perDomainCrawlDelayMs: 2000 },
   compliance: {
     sourcePolicy: "advisory",
@@ -119,8 +143,8 @@ export const crawl4aiRenderTool: Tool<
   idempotencyKey: (i) => `crawl4ai.render:${hash(i.url)}`,
   durableResultStrategy: {
     kind: "artifact_reference",
-    schema: "crawl4ai-render/v1",
-    maxBytes: 3_000_000,
+    schema: platformCrawl4aiContract.resultSchema,
+    maxBytes: PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
     mediaTypes: ["text/html"],
     privacyClass: "PERSONAL_DATA",
     ttlSeconds: 86_400,
@@ -130,6 +154,7 @@ export const crawl4aiRenderTool: Tool<
     if (
       !(await isAllowedByRobots(input.url, {
         authorizeExternalAction: ctx.authorizeExternalAction,
+        beforePhysicalWire: ctx.beforePhysicalWire,
       }))
     ) {
       // robots 禁抓 → 合规放弃（不换 UA）。空 HTML 返回，不计费。
@@ -140,6 +165,8 @@ export const crawl4aiRenderTool: Tool<
     }
     const r = await crawlHtml(input.url, () =>
       assertToolExternalActionAuthorized(ctx),
+      undefined,
+      ctx.beforePhysicalWire,
     );
     return {
       data: r,
@@ -178,49 +205,14 @@ const HTTP_GET_UA = "Mozilla/5.0 (compatible; GlobalBot/1.0)";
 const MAX_REDIRECT_HOPS = 3;
 const MAX_HTTP_GET_ARTIFACT_BYTES = 3_000_000;
 export const HTTP_GET_ARTIFACT_MEDIA_TYPE = "text/plain" as const;
-export const MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES = 33_554_432;
+export const MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES =
+  PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES;
 const SANCTIONS_DOWNLOAD_MEDIA_TYPES = new Set(["application/xml", "text/xml"]);
 
 function canonicalSanctionsMediaType(value: string | null): string | null {
   if (!value) return null;
   const canonical = value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   return SANCTIONS_DOWNLOAD_MEDIA_TYPES.has(canonical) ? canonical : null;
-}
-
-async function readSanctionsBodyBounded(response: Response): Promise<string> {
-  const declared = response.headers.get("content-length");
-  if (declared !== null) {
-    const bytes = Number(declared);
-    if (
-      declared.trim() === "" ||
-      !Number.isSafeInteger(bytes) ||
-      bytes < 0 ||
-      bytes > MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES
-    ) {
-      throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE");
-    }
-  }
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      bytes += next.value.byteLength;
-      if (bytes > MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES) {
-        await reader.cancel();
-        throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE");
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return new TextDecoder("utf-8", { fatal: true }).decode(
-    Buffer.concat(chunks),
-  );
 }
 
 function decodeHttpGetArtifactText(body: Buffer): string {
@@ -282,6 +274,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
         },
         {
           authorizeExternalAction: ctx.authorizeExternalAction,
+          beforePhysicalWire: ctx.beforePhysicalWire,
         },
       );
       // gzip 魔数透明解压（sitemap.xml.gz 常见；与原 fetchText 实现对齐）
@@ -786,11 +779,15 @@ export const googlePatentsSearchTool: Tool<
   GooglePatentsInput,
   GooglePatentsOutput
 > = {
-  id: "google_patents.search",
-  version: "1.0.0",
+  id: platformGooglePatentsContract.toolId,
+  version: platformGooglePatentsContract.version,
   category: "structured_source",
   sourceClass: "public_intelligence",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformGooglePatentsContract.costUnit,
+    estimatedCents: Number(platformGooglePatentsContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 1 },
   // personalData:true —— inventors 是具名发明人（GDPR）；数据最小化（只 name）在 adapter 层强制。
   compliance: {
@@ -859,11 +856,15 @@ export const tradeFairAlgoliaTool: Tool<
   TradeFairAlgoliaInput,
   { exhibitors: FairExhibitor[] }
 > = {
-  id: "tradefair.algolia",
-  version: "1.0.0",
+  id: platformTradeFairContract.toolId,
+  version: platformTradeFairContract.version,
   category: "structured_source",
   sourceClass: "industry_data",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformTradeFairContract.costUnit,
+    estimatedCents: Number(platformTradeFairContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 2 },
   // personalData:true —— 参展商记录可内联联系人邮箱/电话。
   compliance: {
@@ -890,6 +891,7 @@ export const tradeFairAlgoliaTool: Tool<
         input.cfg,
         input.limit,
         beforeExternalRequest(ctx),
+        ctx.beforePhysicalWire,
       ),
     },
     costCents: 0,
@@ -916,11 +918,15 @@ export const mapYourShowFetchTool: Tool<
   MapYourShowFetchInput,
   { hits: MysRawHit[] }
 > = {
-  id: "mapyourshow.fetch",
-  version: "1.0.0",
+  id: platformMapYourShowContract.toolId,
+  version: platformMapYourShowContract.version,
   category: "structured_source",
   sourceClass: "industry_data",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformMapYourShowContract.costUnit,
+    estimatedCents: Number(platformMapYourShowContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 2 },
   compliance: {
     sourcePolicy: "required",
@@ -939,11 +945,14 @@ export const mapYourShowFetchTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["mapyourshow.fetch"],
   },
   healthCheck: async () => ({ healthy: true, detail: "mapyourshow" }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     const base = `https://${input.host}/8_0`;
-    const url = `${base}/ajax/remote-proxy.cfm?action=search&searchtype=exhibitor&searchterm=&pageID=1&perpage=${input.limit ?? 5000}`;
+    const limit = input.limit === undefined
+      ? PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX
+      : boundedPlatformAcquisitionFetchLimit(input.limit);
+    const url = `${base}/ajax/remote-proxy.cfm?action=search&searchtype=exhibitor&searchterm=&pageID=1&perpage=${limit}`;
     // IIS 对裸请求 403：带浏览器 UA + XHR 头 + 同源 Referer（与站点前端一致的公开端点访问方式）。
-    const res = await fetch(url, {
+    const res = await requestPublicHttp(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -951,17 +960,25 @@ export const mapYourShowFetchTool: Tool<
         "X-Requested-With": "XMLHttpRequest",
         Referer: `${base}/explore/exhibitor-gallery.cfm`,
       },
-      signal: AbortSignal.timeout(30_000),
+      timeoutMs: 30_000,
+      maxBytes: PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+      maxRedirects: 0,
+    }, {
+      authorizeExternalAction: ctx.authorizeExternalAction,
+      beforePhysicalWire: ctx.beforePhysicalWire,
     });
     if (!res.ok)
-      throw new Error(
-        `mapyourshow ${res.status}: ${(await res.text()).slice(0, 160)}`,
-      );
-    const json = (await res.json()) as {
+      throw new Error(`mapyourshow ${res.status}: ${res.text.slice(0, 160)}`);
+    const json = decodeJsonBytes<{
       DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } };
-    };
+    }>(res.body, "MAPYOURSHOW_RESPONSE_INVALID");
+    const hits = json?.DATA?.results?.exhibitor?.hit ?? [];
+    if (!Array.isArray(hits)) throw new Error("MAPYOURSHOW_RESPONSE_INVALID");
+    if (hits.length > limit) {
+      throw new Error("MAPYOURSHOW_RESPONSE_ITEM_BOUND_EXCEEDED");
+    }
     return {
-      data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] },
+      data: { hits },
       costCents: 0,
     };
   },
@@ -1056,11 +1073,15 @@ export const sanctionsDownloadTool: Tool<
   SanctionsDownloadInput,
   SanctionsDownloadOutput
 > = {
-  id: "sanctions.download",
-  version: "1.0.0",
+  id: platformSanctionsContract.toolId,
+  version: platformSanctionsContract.version,
   category: "fetch",
   sourceClass: "public_intelligence",
-  cost: { unit: "call", estimatedCents: 0, external: true },
+  cost: {
+    unit: platformSanctionsContract.costUnit,
+    estimatedCents: Number(platformSanctionsContract.estimatedCents),
+    external: true,
+  },
   rateLimit: { rps: 1, concurrency: 1 },
   compliance: {
     sourcePolicy: "required",
@@ -1075,31 +1096,51 @@ export const sanctionsDownloadTool: Tool<
   idempotencyKey: (i) => `sanctions.download:${hash(i.url)}`,
   durableResultStrategy: {
     kind: "artifact_reference",
-    schema: "sanctions-download/v1",
+    schema: platformSanctionsContract.resultSchema,
     maxBytes: MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
     mediaTypes: ["application/xml", "text/xml"],
     privacyClass: "PERSONAL_DATA",
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "sanctions" }),
-  execute: async (input) => {
-    const res = await fetch(input.url, {
-      redirect: "follow",
-      headers: { "user-agent": input.userAgent ?? DEFAULT_SANCTIONS_UA },
-      signal: AbortSignal.timeout(30_000),
-    });
+  execute: async (input, ctx) => {
+    let res;
+    try {
+      res = await requestPublicHttp(input.url, {
+        headers: { "user-agent": input.userAgent ?? DEFAULT_SANCTIONS_UA },
+        timeoutMs: 30_000,
+        maxBytes: MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES,
+        maxRedirects: PLATFORM_ROBOTS_REDIRECT_MAX,
+      }, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+        beforePhysicalWire: ctx.beforePhysicalWire,
+      });
+    } catch (error) {
+      if (
+        error instanceof EgressBlockedError &&
+        error.code === "response_too_large"
+      ) {
+        throw new Error("SANCTIONS_DOWNLOAD_TOO_LARGE", { cause: error });
+      }
+      throw error;
+    }
     if (!res.ok)
       throw new Error(`sanctions.download HTTP ${res.status} for ${input.url}`);
     const contentType = canonicalSanctionsMediaType(
-      res.headers.get("content-type"),
+      res.headers["content-type"] ?? null,
     );
     if (!contentType) throw new Error("SANCTIONS_DOWNLOAD_MEDIA_TYPE_INVALID");
-    const body = await readSanctionsBodyBounded(res);
+    let body: string;
+    try {
+      body = new TextDecoder("utf-8", { fatal: true }).decode(res.body);
+    } catch {
+      throw new Error("SANCTIONS_DOWNLOAD_UTF8_INVALID");
+    }
     return {
       data: {
         body,
         contentType,
-        lastModified: res.headers.get("last-modified"),
+        lastModified: res.headers["last-modified"] ?? null,
       },
       costCents: 0,
       provenance: {

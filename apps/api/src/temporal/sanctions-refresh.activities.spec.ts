@@ -41,8 +41,9 @@ describe('sanctions-refresh.activities — durable platform authority lifecycle'
 
   it('attests the admitted workflow account without reopening or closing it', async () => {
     const budget = budgetStoreSpies();
+    const findMany = vi.fn(async () => []);
     const ownerDb = {
-      sanctionsSource: { findMany: vi.fn(async () => []) },
+      sanctionsSource: { findMany },
     } as unknown as PrismaClient;
     const acts = createSanctionsRefreshActivities({
       ownerDb,
@@ -63,6 +64,14 @@ describe('sanctions-refresh.activities — durable platform authority lifecycle'
     expect(budget.open).not.toHaveBeenCalled();
     expect(budget.openAuthorized).not.toHaveBeenCalled();
     expect(budget.close).not.toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        status: 'ENABLED',
+        key: { in: ['ofac_sdn', 'eu_fsf'] },
+      },
+      orderBy: { key: 'asc' },
+      take: 2,
+    });
   });
 
   it('closes the platform budget account when the refresh fails before a source is processed', async () => {

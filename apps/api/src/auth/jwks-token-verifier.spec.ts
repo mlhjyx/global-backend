@@ -152,6 +152,9 @@ describe('JwksTokenVerifier contract', () => {
     configure();
     await invalid(await signed(oldKey, { issuer: 'https://attacker.example/' }));
     await invalid(await signed(oldKey, { audience: 'another-api' }));
+    await invalid(await signed(oldKey, {
+      audience: 'global-backend:platform-technical-quote',
+    }));
   });
 
   it('rejects expired and not-yet-valid tokens', async () => {

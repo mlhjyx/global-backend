@@ -5,6 +5,7 @@ import {
   resolvePublicHttpUrl,
   type PinnedPublicUrl,
   type PublicUrlResolver } from './url-guard';
+import { PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES } from '../platform-authority/platform-execution-contract';
 
 export { EgressBlockedError } from './url-guard';
 export type { PinnedPublicUrl, PublicUrlResolver } from './url-guard';
@@ -52,6 +53,8 @@ export interface PublicHttpDependencies {
   executePinned?: PinnedHttpExecutor;
   /** Acquisition suppression admission, rechecked before DNS and every wire hop. */
   authorizeExternalAction?: () => Promise<boolean>;
+  /** Exact one-shot fence/counter immediately before every pinned wire. */
+  beforePhysicalWire?: () => Promise<void>;
 }
 
 export class ExternalHttpActionDeniedError extends Error {
@@ -63,6 +66,24 @@ export class ExternalHttpActionDeniedError extends Error {
   }
 }
 
+export class ExternalHttpPhysicalWireDeniedError extends Error {
+  readonly decision = 'physical_wire_gate';
+
+  constructor(options?: { cause?: unknown }) {
+    super('external physical wire denied', options);
+    this.name = 'ExternalHttpPhysicalWireDeniedError';
+  }
+}
+
+export function isExternalHttpPhysicalWireDeniedError(
+  error: unknown,
+): boolean {
+  return error instanceof ExternalHttpPhysicalWireDeniedError || Boolean(
+    error && typeof error === 'object' &&
+      (error as { name?: unknown }).name === 'ExternalHttpPhysicalWireDeniedError',
+  );
+}
+
 async function assertExternalHttpActionAuthorized(authorizeExternalAction?: () => Promise<boolean>): Promise<void> {
   if (!authorizeExternalAction) return;
   try {
@@ -71,6 +92,17 @@ async function assertExternalHttpActionAuthorized(authorizeExternalAction?: () =
     throw new ExternalHttpActionDeniedError({ cause });
   }
   throw new ExternalHttpActionDeniedError();
+}
+
+async function assertPhysicalWireAuthorized(
+  beforePhysicalWire?: () => Promise<void>,
+): Promise<void> {
+  if (!beforePhysicalWire) return;
+  try {
+    await beforePhysicalWire();
+  } catch (cause) {
+    throw new ExternalHttpPhysicalWireDeniedError({ cause });
+  }
 }
 
 function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
@@ -191,7 +223,10 @@ export async function requestPublicHttp(
     method: options.method ?? 'GET',
     headers: sanitizeRequestHeaders(options.headers),
     timeoutMs: Math.min(Math.max(options.timeoutMs ?? 15_000, 100), 30_000),
-    maxBytes: Math.min(Math.max(options.maxBytes ?? 1_000_000, 1), 5_000_000),
+    maxBytes: Math.min(
+      Math.max(options.maxBytes ?? 1_000_000, 1),
+      PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES,
+    ),
     maxRedirects: Math.min(Math.max(options.maxRedirects ?? 3, 0), 5),
   };
   const resolver = dependencies.resolver ?? resolvePublicHttpUrl;
@@ -203,6 +238,7 @@ export async function requestPublicHttp(
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     const target = await resolver(current);
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
+    await assertPhysicalWireAuthorized(dependencies.beforePhysicalWire);
     const response = await execute(target, {
       ...effective,
       headers: currentHeaders,

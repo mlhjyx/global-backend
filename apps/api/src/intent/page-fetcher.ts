@@ -1,4 +1,3 @@
-import { isAllowedByRobots } from '../adapters/robots';
 import type { CrawlHtmlResult } from '../adapters/web-crawler';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { ToolContext } from '../tools/tool-contract';
@@ -14,8 +13,8 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
  * 经浏览器 pinning proxy 再校验，Ubuntu 仅保留 fake-IP-only 窄回退。
  * 抽象成注入点（PageFetcher）：WebsiteWatchService 依赖此接口，测试可注入假实现（不触网）。
  * fail-safe：robots 禁止 / 抓取失败 / 空内容 → 返回 null（单页失败不阻断其余页与其余源）。
- * 收口②：原始出网改经 ExecutionBroker 的 crawl4ai.render 工具（robots 在工具内权威强制，
- * 此处 isAllowedByRobots 仅作省一次工具调用的前置快查）；无 broker = 不允许直连（fail-closed 不出网）。
+ * 收口②：原始出网改经 ExecutionBroker 的 crawl4ai.render 工具；robots 只在该
+ * 持久幂等 Tool operation 内强制，不作账本外前置出网；无 broker 则 fail closed。
  */
 export interface FetchedPage {
   url: string;
@@ -46,7 +45,6 @@ export class Crawl4aiPageFetcher implements PageFetcher {
 
   async fetch(url: string, context?: ToolContext): Promise<FetchedPage | null> {
     if (!/^https?:\/\//i.test(url)) return null;
-    if (!(await isAllowedByRobots(url).catch(() => true))) return null; // 被 robots 禁 → 放弃（不硬闯）
     if (!this.broker) {
       // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 视同抓取失败降级（fail-closed），只警一次。
       if (!this.warnedNoBroker) {
