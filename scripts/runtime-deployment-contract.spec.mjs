@@ -420,6 +420,7 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.doesNotMatch(verify, /psql "\$\{EXECUTION_BUDGET_PLATFORM_WRITER_(?:PROVISION_)?DATABASE_URL\}"/);
   assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
   assert.match(verify, /ingest_and_admit_platform_execution_budget_run_v2/);
+  assert.match(verify, /acknowledge_platform_egress_v1\(UUID, TEXT\)/);
   assert.doesNotMatch(verify, /SELECT \* FROM ingest_platform_execution_authority/);
   assert.match(verify, /ingest_and_admit_platform_execution_budget_run_v2/);
   assert.doesNotMatch(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
