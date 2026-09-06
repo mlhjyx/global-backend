@@ -41,6 +41,10 @@ const RECEIPT_PHASES = new Set(['REVIEW', 'POST_MERGE', 'ACCEPTANCE_REVALIDATION
 const RECEIPT_ROLES = new Set(['OWN-PRODUCT', 'OWN-DATA-PRIVACY', 'OWN-QA-EVIDENCE', 'OWN-SECURITY']);
 const issuedValidatedCores = new WeakSet();
 const trustedIssuanceCapabilities = new WeakSet();
+// Capture the native membership operations before caller-controlled code can
+// replace collection intrinsics; neither set has a public issuance path.
+const hasIssuedValidatedCore = WeakSet.prototype.has.bind(issuedValidatedCores);
+const hasTrustedIssuanceCapability = WeakSet.prototype.has.bind(trustedIssuanceCapabilities);
 
 const snapshotsMatch = (candidate) => {
   if (!isPlainObject(candidate.pull_request) || !isPlainObject(candidate.ruleset) || !isPlainObject(candidate.decision)) {
@@ -202,7 +206,7 @@ export const buildApprovalReceiptCore = (
     const mergeValidation = validateMergeAuthorizationEvidence(mergeAuthorizationEvidence, candidate, authority, now);
     if (!mergeValidation.valid) throw approvalError(mergeValidation.issues[0].stable_code);
   }
-  if (!trustedIssuanceCapabilities.has(issuanceCapability)) {
+  if (!hasTrustedIssuanceCapability(issuanceCapability)) {
     throw approvalError('APPROVAL_INDEPENDENCE_NOT_PROVEN');
   }
   const review = reviewForReceiptRole(candidate);
@@ -232,7 +236,7 @@ export const buildApprovalReceiptCore = (
 };
 
 export const buildApprovalReceiptArtifact = (core) => {
-  if (!issuedValidatedCores.has(core)) throw approvalError('APPROVAL_RECEIPT_REQUIRED');
+  if (!hasIssuedValidatedCore(core)) throw approvalError('APPROVAL_RECEIPT_REQUIRED');
   return buildRawApprovalReceiptArtifact(core);
 };
 

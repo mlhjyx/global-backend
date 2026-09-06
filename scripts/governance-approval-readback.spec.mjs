@@ -875,6 +875,41 @@ test('local caller-owned verifier facts cannot issue a trusted approval receipt 
   );
 });
 
+test('monkeypatched WeakSet intrinsic cannot issue a caller-owned receipt core', () => {
+  const value = candidate();
+  const fakeCapability = Object.freeze({ kind: 'caller-declared-issuance' });
+  const originalHas = WeakSet.prototype.has;
+  try {
+    WeakSet.prototype.has = function patchedHas(capability) {
+      if (capability === fakeCapability) return true;
+      return Reflect.apply(originalHas, this, [capability]);
+    };
+    assert.throws(
+      () => buildApprovalReceiptCore(value, authority(), value.verifier, null, NOW, fakeCapability),
+      (error) => error.message === 'APPROVAL_INDEPENDENCE_NOT_PROVEN',
+    );
+  } finally {
+    WeakSet.prototype.has = originalHas;
+  }
+});
+
+test('monkeypatched WeakSet intrinsic cannot serialize a synthetic receipt core', () => {
+  const syntheticCore = buildSyntheticTrustedReceiptCore(candidate(), null, NOW);
+  const originalHas = WeakSet.prototype.has;
+  try {
+    WeakSet.prototype.has = function patchedHas(core) {
+      if (core === syntheticCore) return true;
+      return Reflect.apply(originalHas, this, [core]);
+    };
+    assert.throws(
+      () => buildApprovalReceiptArtifact(syntheticCore),
+      (error) => error.message === 'APPROVAL_RECEIPT_REQUIRED',
+    );
+  } finally {
+    WeakSet.prototype.has = originalHas;
+  }
+});
+
 test('base mutation inventory exactly covers its external requirement manifest', () => {
   const expected = MUTATION_MANIFEST.requirements
     .filter(({ spec_file: specFile }) => specFile === 'scripts/governance-approval-readback.spec.mjs')
