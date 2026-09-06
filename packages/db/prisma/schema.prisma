@@ -217,6 +217,7 @@ model PlatformEgressAttempt {
   id                     String                    @id @default(uuid()) @db.Uuid
   authorityId            String                    @map("authority_id") @db.Uuid
   scheduleId             String                    @map("schedule_id") @db.VarChar(191)
+  workflowId             String                    @map("workflow_id") @db.VarChar(200)
   workflowRunId          String                  @map("workflow_run_id") @db.VarChar(36)
   operationKey           String                  @map("operation_key") @db.VarChar(200)
   policyRevision         String                  @map("policy_revision") @db.VarChar(64)

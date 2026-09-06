@@ -28,6 +28,7 @@ CREATE TABLE "platform_egress_attempt" (
   "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "authority_id" UUID NOT NULL,
   "schedule_id" VARCHAR(191) NOT NULL,
+  "workflow_id" VARCHAR(200) NOT NULL,
   "workflow_run_id" VARCHAR(36) NOT NULL,
   "operation_key" VARCHAR(200) NOT NULL,
   "policy_revision" VARCHAR(64) NOT NULL,
@@ -44,6 +45,7 @@ CREATE TABLE "platform_egress_attempt" (
     ON DELETE NO ACTION ON UPDATE NO ACTION,
   CONSTRAINT "platform_egress_attempt_binding_check" CHECK (
     "schedule_id" ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$'
+    AND "workflow_id" ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$'
     AND "workflow_run_id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     AND "operation_key" ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$'
     AND "policy_revision" ~ '^[0-9a-f]{64}$'
@@ -68,6 +70,7 @@ REVOKE ALL ON "platform_egress_schedule_fence", "platform_egress_attempt"
 CREATE FUNCTION authorize_platform_egress_v1(
   p_authority_id UUID,
   p_schedule_id TEXT,
+  p_workflow_id TEXT,
   p_workflow_run_id TEXT,
   p_operation_key TEXT,
   p_policy_revision TEXT
@@ -81,9 +84,10 @@ DECLARE
   existing "platform_egress_attempt"%ROWTYPE;
 BEGIN
   PERFORM assert_execution_budget_platform_writer_principal();
-  IF p_authority_id IS NULL OR p_schedule_id IS NULL OR p_workflow_run_id IS NULL
+  IF p_authority_id IS NULL OR p_schedule_id IS NULL OR p_workflow_id IS NULL OR p_workflow_run_id IS NULL
     OR p_operation_key IS NULL OR p_policy_revision IS NULL
     OR p_schedule_id !~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$'
+    OR p_workflow_id !~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$'
     OR p_workflow_run_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     OR p_operation_key !~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$'
     OR p_policy_revision !~ '^[0-9a-f]{64}$'
@@ -95,6 +99,7 @@ BEGIN
   IF authority.id IS NULL OR authority.revoked_at IS NOT NULL
     OR authority.expires_at <= statement_timestamp()
     OR authority.schedule_id IS DISTINCT FROM p_schedule_id
+    OR authority.workflow_id IS DISTINCT FROM p_workflow_id
     OR authority.workflow_run_id IS DISTINCT FROM p_workflow_run_id
     OR authority.technical_policy_revision IS DISTINCT FROM p_policy_revision
   THEN RAISE EXCEPTION 'PLATFORM_EGRESS_NOT_AUTHORIZED' USING ERRCODE = 'P0001'; END IF;
@@ -115,8 +120,8 @@ BEGIN
   END IF;
 
   INSERT INTO "platform_egress_attempt"(
-    authority_id, schedule_id, workflow_run_id, operation_key, policy_revision, generation
-  ) VALUES (p_authority_id, p_schedule_id, p_workflow_run_id, p_operation_key,
+    authority_id, schedule_id, workflow_id, workflow_run_id, operation_key, policy_revision, generation
+  ) VALUES (p_authority_id, p_schedule_id, p_workflow_id, p_workflow_run_id, p_operation_key,
             p_policy_revision, fence.generation)
   RETURNING id, platform_egress_attempt.generation, false
   INTO attempt_id, generation, replay;
@@ -128,6 +133,7 @@ CREATE FUNCTION claim_platform_egress_send_v1(
   p_attempt_id UUID,
   p_authority_id UUID,
   p_schedule_id TEXT,
+  p_workflow_id TEXT,
   p_workflow_run_id TEXT,
   p_policy_revision TEXT
 )
@@ -148,6 +154,7 @@ BEGIN
     WHERE schedule_id = p_schedule_id FOR UPDATE;
   IF attempt.id IS NULL OR authority.id IS NULL OR fence.schedule_id IS NULL
     OR attempt.schedule_id IS DISTINCT FROM p_schedule_id
+    OR attempt.workflow_id IS DISTINCT FROM p_workflow_id
     OR attempt.workflow_run_id IS DISTINCT FROM p_workflow_run_id
     OR attempt.policy_revision IS DISTINCT FROM p_policy_revision
     OR attempt.generation IS DISTINCT FROM fence.generation
@@ -215,13 +222,13 @@ BEGIN
 END
 $$;
 
-REVOKE ALL ON FUNCTION authorize_platform_egress_v1(UUID, TEXT, TEXT, TEXT, TEXT),
-  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT),
+REVOKE ALL ON FUNCTION authorize_platform_egress_v1(UUID, TEXT, TEXT, TEXT, TEXT, TEXT),
+  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT, TEXT),
   acknowledge_platform_egress_v1(UUID, TEXT),
   mark_unknown_platform_egress_v1(UUID, TEXT)
   FROM PUBLIC, app_user, runtime_api, runtime_worker, runtime_outbox_relay;
-GRANT EXECUTE ON FUNCTION authorize_platform_egress_v1(UUID, TEXT, TEXT, TEXT, TEXT),
-  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT),
+GRANT EXECUTE ON FUNCTION authorize_platform_egress_v1(UUID, TEXT, TEXT, TEXT, TEXT, TEXT),
+  claim_platform_egress_send_v1(UUID, UUID, TEXT, TEXT, TEXT, TEXT),
   acknowledge_platform_egress_v1(UUID, TEXT),
   mark_unknown_platform_egress_v1(UUID, TEXT)
   TO execution_budget_platform_writer;
