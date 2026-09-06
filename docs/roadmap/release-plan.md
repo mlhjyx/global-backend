@@ -40,18 +40,27 @@ The G0–G7 meanings below are stable. Their current verdicts are intentionally 
 1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](../status/current.md).
 2. **MVP-0:** accept Program A current-main slices, establish formal GrowthOS source/Builder/remote/CI, recover Backend runtime and expose authentic capability availability/onboarding.
 3. **MVP-1 — Program C:** establish the service principal, durable package handoff with commit-before-ACK, Opportunity aggregate, Human QGO, SalesAcceptance/Outcome feedback and Conversation linkage.
-4. **Pilot 3-A:** after the required gates pass, run one separately authorized internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; keep the bounded zero-model, zero-paid and zero-send envelope.
+4. **Pilot 3-A:** after the required gates pass, run one separately authorized internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.
 5. **Site 3-B:** complete the parallel SaaS `Session → Quote → Grant → Build → Preview` vertical; Publish, Domain, Inquiry, Analytics and Design Editor remain later scope.
 6. **MVP-2:** add Campaign minimum state and one approved email provider only after MVP-0/MVP-1 and separate OAuth/send authorization.
 7. **Later:** Site Publish, Buyer R2, Agent Operation Contract, a second mail provider, social/WhatsApp, attribution and multi-industry/agency.
 
 ### Concurrency and authorization boundaries
 
+- Pilot 3-A remains one internal Workspace. Restricted providers, Patents, SAM, email guessing and named-person collection are disabled. Each accepted package reaches a unique Opportunity; at least one candidate receives a human QGO judgment (confirmation or structured rejection), with no unauthorized action, duplicate physical call or lost evidence. An honest zero-result run does not itself satisfy the human-review exit.
+- MVP-1 requires a local controlled fixture to complete `Package → Opportunity → human QGO decision → feedback`, replay/concurrency ten times without duplicates, and no ACK before confirmed local commit. Real Provider or email dispatch is not a dependency for this local exit.
+- Site 3-B must preserve the old Preview after a failed new Build, and correctly expose unknown result, cancellation and recovery. Current-release identity and RuntimeEvidence remain required; unsigned-dev cannot substitute for the product path.
+- UAT requires three consecutive critical-journey passes including a controlled restart, no remaining S1/S2, an owner/deadline for each S3, and product-owner acceptance of the user result.
+
 - No more than two implementation programs may run in parallel. Program C contract/spec may proceed after its prerequisites are accepted; cross-repository integration waits for accepted producer-consumer interfaces, while the Site vertical may parallel Program B.
 - Discovery implementation, runtime mutation, Pilot and release promotion remain gated by their corresponding G0–G7 evidence.
 - Push, PR mutation, merge, deployment/restart, retained migration, provider/model/paid call, OAuth/email send and credential changes each require separate exact authorization.
 - Model-candidate visibility is governed by the generated [candidate baseline](../site-builder/model-candidate-baseline.md), machine ID `site-builder-model-candidate-baseline/2026-08-07-v3`; it does not authorize route adoption, dispatch or deployment.
 - A passing local or hosted test is not runtime evidence; RuntimeEvidence is not a Release Bundle; neither implies UAT, Pilot or GA authorization.
+
+### Final service acceptance
+
+The original Buyer Intelligence final-service “封版” acceptance remains a capability target, not a current PASS: (1) Company/Offering/ICP produces a controlled Candidate Batch; (2) company/contact facts carry Canonical IDs, source, Evidence, rights, freshness, verification, cost and unknowns; (3) candidates expose decomposed scores and reason codes; (4) accept/reject/correct feedback reaches evaluation without cross-tenant leakage; (5) cancellation/retry/Partial/budget stop/provider degradation/fair scanning are supported; (6) OpenAPI/events/progress, RLS, deletion, audit, tests and SLO are verified; (7) real-company examples pass E2E/UAT; (8) the output contract is genuinely consumed downstream, not merely persisted. Docling/Langfuse are not mandatory gates. Phasing follows the current roadmap: Buyer R2 fair-cursor/Golden Set expansion stays later and is not made a new prerequisite for the bounded Pilot. The former schedule and dated completion annotations remain recoverable from Git commit `8eefba1cff15f2bbe4154451cac958a072803ab5`.
 
 ## Historical supersession index
 

@@ -7,7 +7,7 @@
 
 本页是证据导航，不是第二份 current 状态。原始 artifact 保持追加式/不可改写；当前能力、路由、运行健康和发布状态仍分别由权威文档、机器合同、fresh RuntimeEvidence 与 Release Bundle 决定。
 
-Inventory observed at `2026-09-04T18:58:19+08:00`: RuntimeEvidence is `6 total / 2 current / 4 historical`. 两条 current 记录共同到期于 `2026-09-05T03:49:25.000Z`，均为 Site Builder only；Acquisition evidence IDs count is 0。仓内另有 3 Release Bundles，全部是 development `CANDIDATE` 且保持 `EXTERNAL_UNVERIFIED`；它们的 machine/reviewer/user lanes 分别仍为 `NOT_VERIFIED`、`NOT_REVIEWED`、`NOT_AUTHORIZED`。这是时间绑定的索引计数，不延长 evidence 窗口，也不把 development candidate 升级为 Pilot/GA。
+当前证据计数、有效窗口和 Release Bundle 接纳状态统一见[当前状态](../status/current.md)，不在本索引维护第二份实时计数。历史观察见 [changelog](../roadmap/changelog.md)；机器真值由 RuntimeEvidence、Release Bundle 文件及 verifier 给出。索引、文件存在或结构校验均不延长证据窗口，也不构成 Pilot/GA 晋级。
 
 ## 1. 分类
 
@@ -37,7 +37,7 @@ RuntimeEvidence 文件必须位于 `docs/evidence/runtime/`、使用 [RuntimeEvi
 
 ## 3. Release 与决策边界
 
-真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`。当前 3 份记录都是追加式 development-only `CANDIDATE`；其 external provenance、机器 check、独立 reviewer 与 Pilot/GA 用户授权均未成立，因此不能晋级。RuntimeEvidence 到期不改写 Bundle，也不能由 Bundle 反向延长。
+真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`。记录数量和当前接纳状态见[当前状态](../status/current.md)；只有完整机器校验、独立 reviewer、用户授权及可信 external provenance 均满足相应门时才可晋级。RuntimeEvidence 到期不改写 Bundle，也不能由 Bundle 反向延长。
 
 Release Bundle 必须分别引用：
 
