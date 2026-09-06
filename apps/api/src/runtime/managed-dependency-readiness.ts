@@ -1,10 +1,9 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
-import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { promisify } from "node:util";
+import { probeBrowserReadiness } from "./browser-readiness-probe";
 import type { RuntimeComponentStatus } from "./runtime-readiness-registry";
 import { RuntimeReadinessContributorRegistry } from "./runtime-readiness-registry";
 import {
@@ -94,7 +93,6 @@ type PlatformAuthorityReadinessRow = Readonly<{
   state: string;
 }>;
 
-const execFileAsync = promisify(execFile);
 const BROWSER_PATHS = new Set(["/usr/bin/google-chrome", "/usr/bin/chromium"]);
 const BROWSER_PROBE_ARGS = Object.freeze([
   "--headless=new",
@@ -135,17 +133,6 @@ export async function checkImagePipelineIsolationReadiness(
   return (await probe("/usr/bin/prlimit"))
     ? { status: "ok" }
     : { status: "failed", code: "IMAGE_PIPELINE_ISOLATION_UNAVAILABLE" };
-}
-
-async function defaultBrowserProbe(
-  executable: string,
-  args: readonly string[],
-): Promise<void> {
-  await execFileAsync(executable, [...args], {
-    timeout: 5_000,
-    maxBuffer: 128 * 1024,
-    env: { PATH: "/usr/bin:/bin", HOME: "/tmp", LANG: "C.UTF-8" },
-  });
 }
 
 function loopback(hostname: string): boolean {
@@ -524,7 +511,7 @@ export function rendererRuntimeIdentity(
 
 export async function checkBrowserReadiness(
   env: NodeJS.ProcessEnv,
-  probe: BrowserProbe = defaultBrowserProbe,
+  probe: BrowserProbe = probeBrowserReadiness,
 ): Promise<RuntimeComponentStatus> {
   const executable = env.CHROME_PATH?.trim() || "/usr/bin/chromium";
   if (!BROWSER_PATHS.has(executable)) {
