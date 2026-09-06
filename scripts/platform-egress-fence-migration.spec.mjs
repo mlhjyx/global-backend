@@ -11,6 +11,13 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const privilegeHardeningMigration = readFileSync(
+  resolve(
+    root,
+    "packages/db/prisma/migrations/20260907110000_platform_egress_fence_privilege_hardening/migration.sql",
+  ),
+  "utf8",
+);
 
 test("platform egress fence migration creates durable generation and attempt state", () => {
   assert.match(migration, /CREATE TABLE "platform_egress_schedule_fence"/u);
@@ -38,6 +45,21 @@ test("only the platform writer receives dispatch lifecycle functions", () => {
   assert.match(migration, /state = 'UNKNOWN'/u);
   assert.match(migration, /state = 'AUTHORIZED'/u);
   assert.match(migration, /state = 'SENDING'/u);
+});
+
+test("fence generation hardening is writer-only and checks the caller principal", () => {
+  assert.match(
+    privilegeHardeningMigration,
+    /PERFORM assert_execution_budget_platform_writer_principal\(\)/u,
+  );
+  assert.match(
+    privilegeHardeningMigration,
+    /REVOKE ALL ON FUNCTION fence_platform_schedule_v1\(TEXT, TEXT\)[\s\S]*FROM PUBLIC, app_user, runtime_api, runtime_worker, runtime_outbox_relay,\s+execution_budget_platform_writer/u,
+  );
+  assert.match(
+    privilegeHardeningMigration,
+    /GRANT EXECUTE ON FUNCTION fence_platform_schedule_v1\(TEXT, TEXT\)[\s\S]*TO execution_budget_platform_writer/u,
+  );
 });
 
 test("fence functions reject stale generations and preserve unknown no-redispatch state", () => {
