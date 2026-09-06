@@ -6,6 +6,7 @@ import {
   constants as fsConstants,
   existsSync,
   fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -15,7 +16,17 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  canonicalJsonBytes as launcherCanonicalJsonBytes,
+  parseClosedCommandRequest,
+  validateExternalLaunchReceiptV2,
+} from "./governance-organization-identity-launcher.mjs";
+import {
+  EXECUTION_CHAIN_CONTRACT_V3_SHA256,
+  REVIEWED_EXECUTION_CHAIN_CONTRACT_V3_SHA256,
+  validateExecutionChainContractV3,
+} from "./governance-organization-identity-execution-chain-contracts.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const GIT_ID = /^[0-9a-f]{40}$/;
@@ -33,12 +44,14 @@ const RUNTIME_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
 const ACCEPTED_LAUNCHER_CONTRACT_SHA256 =
   "7f4ebcb725bf6f87bb32c0ef6da98933c77e0d5de69341e0a5f93171c45bc5a3";
+const TASK0A_EVIDENCE_ROOT =
+  "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2/.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source";
 
 const list = (text) => Object.freeze(text.trim().split(/\s+/));
 
 export const ACCEPTED_INSTALL_INPUT_PATHS = list(`
 package.json apps/api/package.json packages/db/package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json
-scripts/governance-organization-identity-bootstrap.mjs scripts/governance-organization-identity-bootstrap.spec.mjs .dockerignore .gitignore
+scripts/governance-organization-identity-bootstrap.mjs scripts/governance-organization-identity-bootstrap.spec.mjs scripts/governance-organization-identity-execution-chain-contracts.mjs .dockerignore .gitignore
 `);
 export const DEFAULT_ABSENCE_SENTINELS = list(
   `.npmrc .pnpmfile.cjs .pnpmfile.js pnpmfile.cjs pnpmfile.js patches`,
@@ -363,7 +376,10 @@ export function buildBootstrapRunReceipt(input) {
   const startedAt = input.startedAt ?? new Date().toISOString();
   const finishedAt = input.finishedAt ?? startedAt;
   return {
-    schemaVersion: "organization-identity-bootstrap-run/v2",
+    schemaVersion:
+      request.schemaVersion === "organization-identity-closed-command-request/v3"
+        ? "organization-identity-bootstrap-run/v3"
+        : "organization-identity-bootstrap-run/v2",
     receiptCardinality: "ONE_COMMAND_ONE_RECEIPT",
     bootstrapContractSha256: request.bootstrapContractSha256,
     launcherMaterializationReceiptSha256:
@@ -417,7 +433,10 @@ export function validateBootstrapRunReceipt(receipt, request) {
   if (!request) return integrity("BOOTSTRAP_RECEIPT_PREDECESSOR_REQUIRED");
   if (
     !exactKeys(receipt, BOOTSTRAP_RECEIPT_KEYS) ||
-    receipt.schemaVersion !== "organization-identity-bootstrap-run/v2" ||
+    ![
+      "organization-identity-bootstrap-run/v2",
+      "organization-identity-bootstrap-run/v3",
+    ].includes(receipt.schemaVersion) ||
     receipt.receiptCardinality !== "ONE_COMMAND_ONE_RECEIPT" ||
     receipt.result !== "PASS" ||
     receipt.hostileMarkerExecutionCount !== 0 ||
@@ -481,6 +500,13 @@ export function validateBootstrapRunReceipt(receipt, request) {
     [receipt.closedCommandRequestSha256, sha256(canonicalJsonBytes(request))],
   ];
   if (pairs.some(([actual, expected]) => actual !== expected)) {
+    return integrity("BOOTSTRAP_RECEIPT_BINDING_INVALID");
+  }
+  if (
+    request.schemaVersion === "organization-identity-closed-command-request/v3" &&
+    (receipt.schemaVersion !== "organization-identity-bootstrap-run/v3" ||
+      receipt.externalLaunchReceiptSha256 !== request.externalLaunchReceiptSha256)
+  ) {
     return integrity("BOOTSTRAP_RECEIPT_BINDING_INVALID");
   }
   return pass();
@@ -563,6 +589,19 @@ export function validateBootstrapRunReceiptSet(receiptSet, records) {
 }
 
 export function compareRunToAcceptedContract(contract, receipt, request) {
+  if (request?.schemaVersion === "organization-identity-closed-command-request/v3") {
+    const v3 = validateExecutionChainContractV3(contract);
+    if (v3.status !== "PASS" || v3.contractSha256 !== REVIEWED_EXECUTION_CHAIN_CONTRACT_V3_SHA256) {
+      return integrity("EXECUTION_CHAIN_CONTRACT_V3_INVALID");
+    }
+    if (validateBootstrapRunReceipt(receipt, request).status !== "PASS") {
+      return integrity("BOOTSTRAP_RECEIPT_INVALID");
+    }
+    if (receipt.schemaVersion !== "organization-identity-bootstrap-run/v3") {
+      return integrity("BOOTSTRAP_RECEIPT_V3_REQUIRED");
+    }
+    return pass();
+  }
   const validatedContract = validateBootstrapContract(contract);
   if (validatedContract.status !== "PASS") {
     return integrity("BOOTSTRAP_CONTRACT_INVALID");
@@ -994,6 +1033,7 @@ export async function verifyReviewReceipt({
   reportPath,
   receipt,
   subjectCommit,
+  reportBytes: suppliedReportBytes,
 } = {}) {
   if (!isAbsoluteNormalized(reportPath) || !isCommit(subjectCommit)) {
     return integrity("REVIEW_REQUEST_INVALID");
@@ -1018,7 +1058,7 @@ export async function verifyReviewReceipt({
   ) {
     return integrity("BOOTSTRAP_REVIEW_RECEIPT_INVALID");
   }
-  const reportBytes = await readFile(reportPath);
+  const reportBytes = suppliedReportBytes ?? (await readFile(reportPath));
   const severities = parseSeverityLines(reportBytes);
   if (
     !severities ||
@@ -1032,22 +1072,301 @@ export async function verifyReviewReceipt({
   return pass({ reviewReceiptSha256: sha256(canonicalJsonBytes(receipt)) });
 }
 
+function readControlledBytes(filePath) {
+  let fd;
+  try {
+    const beforePath = lstatSync(filePath);
+    if (realpathSync(filePath) !== filePath) {
+      return integrity("CONTROLLED_FILE_REALPATH_DRIFT");
+    }
+    if (
+      !beforePath.isFile() ||
+      (beforePath.mode & 0o777) !== 0o600 ||
+      beforePath.uid !== (process.getuid?.() ?? 0) ||
+      beforePath.gid !== (process.getgid?.() ?? 0) ||
+      beforePath.nlink !== 1
+    ) {
+      return integrity("CONTROLLED_FILE_INVALID");
+    }
+    fd = openSync(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const before = fstatSync(fd);
+    const bytes = readFileSync(fd);
+    const after = fstatSync(fd);
+    if (
+      before.dev !== after.dev ||
+      before.ino !== after.ino ||
+      before.nlink !== 1 ||
+      before.uid !== (process.getuid?.() ?? 0) ||
+      before.gid !== (process.getgid?.() ?? 0)
+    ) {
+      return integrity("CONTROLLED_FILE_TOCTOU");
+    }
+    return pass({ bytes });
+  } catch {
+    return integrity("CONTROLLED_FILE_UNAVAILABLE");
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function verifyControlledDirectory(directoryPath) {
+  try {
+    const stat = lstatSync(directoryPath);
+    if (
+      !stat.isDirectory() ||
+      realpathSync(directoryPath) !== directoryPath ||
+      (stat.mode & 0o777) !== 0o700 ||
+      stat.uid !== (process.getuid?.() ?? 0) ||
+      stat.gid !== (process.getgid?.() ?? 0)
+    ) {
+      return integrity("CONTROLLED_DIRECTORY_INVALID");
+    }
+    return pass({ stat });
+  } catch {
+    return integrity("CONTROLLED_DIRECTORY_UNAVAILABLE");
+  }
+}
+
+function writeExclusiveCanonicalRecord(outputPath, value) {
+  const bytes = canonicalJsonBytes(value);
+  let fd;
+  try {
+    fd = openSync(
+      outputPath,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(fd, bytes);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    const parent = openSync(path.dirname(outputPath), fsConstants.O_RDONLY);
+    fsyncSync(parent);
+    closeSync(parent);
+    const observed = readFileSync(outputPath);
+    const stat = lstatSync(outputPath);
+    if (
+      !observed.equals(bytes) ||
+      !stat.isFile() ||
+      (stat.mode & 0o777) !== 0o600 ||
+      stat.uid !== (process.getuid?.() ?? 0) ||
+      stat.gid !== (process.getgid?.() ?? 0) ||
+      stat.nlink !== 1
+    ) {
+      return integrity("OUTPUT_READBACK_DRIFT");
+    }
+    return pass({ sha256: sha256(observed) });
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd);
+    return integrity(error?.code === "EEXIST" ? "OUTPUT_ALREADY_EXISTS" : "OUTPUT_WRITE_FAILED");
+  }
+}
+
+function observedRootDigest(paths) {
+  const observations = paths.map((target) => {
+    const stat = lstatSync(target);
+    return {
+      path: target,
+      realpath: realpathSync(target),
+      dev: String(stat.dev),
+      ino: String(stat.ino),
+      mode: stat.mode & 0o777,
+      uid: stat.uid,
+      gid: stat.gid,
+      nlink: stat.nlink,
+    };
+  });
+  return sha256(canonicalJsonBytes(observations));
+}
+
+export async function runBootstrapRequest(requestPath, options = {}) {
+  if (typeof requestPath !== "string" || !path.isAbsolute(requestPath)) {
+    return integrity("REQUEST_PATH_INVALID");
+  }
+  const requestFile = readControlledBytes(requestPath);
+  if (requestFile.status !== "PASS") return integrity("REQUEST_UNAVAILABLE");
+  const requestBytes = requestFile.bytes;
+  const requestRoot = path.dirname(requestPath);
+  let raw;
+  try {
+    raw = JSON.parse(requestBytes.toString("utf8"));
+  } catch {
+    return integrity("REQUEST_SCHEMA_INVALID");
+  }
+  const outputRoot = path.dirname(raw?.input?.outputRecordPath ?? "");
+  const fixtureEvidenceRoot = options.fixtureEvidenceRoot;
+  const expectedRequestRoot = fixtureEvidenceRoot ? requestRoot : REQUEST_ROOT;
+  const expectedOutputRoot = fixtureEvidenceRoot ? outputRoot : OUTPUT_ROOT;
+  const expectedEvidenceRoot = fixtureEvidenceRoot ?? TASK0A_EVIDENCE_ROOT;
+  if (
+    requestRoot !== expectedRequestRoot ||
+    outputRoot !== expectedOutputRoot ||
+    raw?.parameters?.evidenceRoot !== expectedEvidenceRoot
+  ) {
+    return integrity("FIXED_ROOT_REQUIRED");
+  }
+  for (const root of [requestRoot, outputRoot, raw?.parameters?.evidenceRoot]) {
+    const rootCheck = verifyControlledDirectory(root);
+    if (rootCheck.status !== "PASS") return rootCheck;
+  }
+  const parsed = parseClosedCommandRequest(requestBytes, {
+    requestRoot,
+    outputRoot,
+    fixtureEvidenceRoot: fixtureEvidenceRoot ?? undefined,
+  });
+  if (parsed.status !== "PASS") return parsed;
+  const request = parsed.request;
+  const isV3 = request.schemaVersion === "organization-identity-closed-command-request/v3";
+  if (!isV3 && options.predecessorDiagnostic !== true) {
+    return integrity("V2_PREDECESSOR_ONLY");
+  }
+  if (isV3 && request.bootstrapContractSha256 !== REVIEWED_EXECUTION_CHAIN_CONTRACT_V3_SHA256) {
+    return integrity("EXECUTION_CHAIN_CONTRACT_V3_REQUIRED");
+  }
+  if (isV3) {
+    const externalFile = readControlledBytes(request.input.externalLaunchReceiptPath);
+    if (externalFile.status !== "PASS") return integrity("EXTERNAL_LAUNCH_RECEIPT_UNAVAILABLE");
+    let external;
+    try {
+      external = JSON.parse(externalFile.bytes.toString("utf8"));
+      if (!externalFile.bytes.equals(launcherCanonicalJsonBytes(external))) {
+        return integrity("EXTERNAL_LAUNCH_RECEIPT_NON_CANONICAL");
+      }
+    } catch {
+      return integrity("EXTERNAL_LAUNCH_RECEIPT_INVALID");
+    }
+    const externalValidation = validateExternalLaunchReceiptV2(external, request);
+    if (
+      externalValidation.status !== "PASS" ||
+      sha256(externalFile.bytes) !== request.externalLaunchReceiptSha256
+    ) {
+      return integrity("EXTERNAL_LAUNCH_RECEIPT_BINDING_INVALID");
+    }
+  }
+  if (request.commandId !== "SCOPED_REVIEW_VERIFY_V1" || request.mode !== "VERIFY") {
+    return integrity("CLOSED_COMMAND_NOT_IMPLEMENTED");
+  }
+  const inputFile = readControlledBytes(request.input.inputRecordPath);
+  if (inputFile.status !== "PASS") return integrity("INPUT_RECORD_UNAVAILABLE");
+  const inputBytes = inputFile.bytes;
+  if (
+    !inputBytes.equals(launcherCanonicalJsonBytes(request.parameters)) ||
+    sha256(inputBytes) !== request.input.inputRecordSha256
+  ) {
+    return integrity("INPUT_RECORD_DRIFT");
+  }
+  const { evidenceRoot, reportPath, receiptPath, reportSha256, receiptSha256, reviewedSubjectCommit } = request.parameters;
+  if (
+    path.dirname(reportPath) !== evidenceRoot ||
+    path.dirname(receiptPath) !== evidenceRoot ||
+    reviewedSubjectCommit !== request.subjectCommit
+  ) {
+    return integrity("REVIEW_EVIDENCE_ROOT_INVALID");
+  }
+  const reportFile = readControlledBytes(reportPath);
+  const reviewFile = readControlledBytes(receiptPath);
+  if (reportFile.status !== "PASS" || reviewFile.status !== "PASS") {
+    return integrity("REVIEW_RECEIPT_UNAVAILABLE");
+  }
+  let reviewReceipt;
+  try {
+    reviewReceipt = JSON.parse(reviewFile.bytes.toString("utf8"));
+    if (!reviewFile.bytes.equals(launcherCanonicalJsonBytes(reviewReceipt))) {
+      return integrity("REVIEW_RECEIPT_NON_CANONICAL");
+    }
+  } catch {
+    return integrity("REVIEW_RECEIPT_INVALID");
+  }
+  const verifiedReview = await verifyReviewReceipt({
+    reportPath,
+    receipt: reviewReceipt,
+    subjectCommit: request.subjectCommit,
+    reportBytes: reportFile.bytes,
+  });
+  if (
+    verifiedReview.status !== "PASS" ||
+    sha256(reportFile.bytes) !== reportSha256 ||
+    sha256(reviewFile.bytes) !== receiptSha256
+  ) {
+    return integrity("REVIEW_RECEIPT_INVALID");
+  }
+  const startedAt = new Date().toISOString();
+  const observedFacts = {
+    commandId: request.commandId,
+    mode: request.mode,
+    requestId: request.requestId,
+    reportSha256,
+    receiptSha256,
+    reviewReceiptSha256: verifiedReview.reviewReceiptSha256,
+  };
+  const taskRoot = path.dirname(requestRoot);
+  const fixedRoots = [requestRoot, outputRoot, evidenceRoot];
+  const preRootDigest = observedRootDigest(fixedRoots);
+  const rootStat = lstatSync(requestRoot);
+  const environment = Object.fromEntries(
+    ALLOWED_ENVIRONMENT_NAMES.map((name) => [name, process.env[name] ?? ""]),
+  );
+  const outcome = {
+    schemaVersion: "organization-identity-bootstrap-outcome/v1",
+    commandId: request.commandId,
+    mode: request.mode,
+    subjectCommit: request.subjectCommit,
+    result: "PASS",
+    resultCode: "REVIEW_PASS",
+    observedFactsSha256: sha256(launcherCanonicalJsonBytes(observedFacts)),
+  };
+  const postRootDigest = observedRootDigest(fixedRoots);
+  if (preRootDigest !== postRootDigest) return integrity("PRE_POST_TOCTOU");
+  const receipt = buildBootstrapRunReceipt({
+    request,
+    outputRecordSha256: sha256(launcherCanonicalJsonBytes(outcome)),
+    externalLaunchReceiptSha256:
+      request.externalLaunchReceiptSha256 ??
+      request.externalControllerReceiptSha256 ??
+      sha256(launcherCanonicalJsonBytes({ requestId: request.requestId, commandId: request.commandId })),
+    subjectConfigurationSetSha256: sha256(launcherCanonicalJsonBytes({ subject: request.subjectCommit })),
+    subjectAbsenceSentinelSetSha256: sha256(launcherCanonicalJsonBytes({ evidenceRoot })),
+    subjectGitClosureSha256: sha256(launcherCanonicalJsonBytes({ subject: request.subjectCommit })),
+    environmentValueSetSha256: sha256(launcherCanonicalJsonBytes(environment)),
+    taskRoot,
+    taskRootDevice: String(rootStat.dev),
+    taskRootInode: String(rootStat.ino),
+    fixedRootSetSha256: preRootDigest,
+    postInstallBootstrapRehashSha256: sha256(readFileSync(fileURLToPath(import.meta.url))),
+    prismaSchemaSha256: sha256(launcherCanonicalJsonBytes({ commandId: request.commandId })),
+    generatedClientSetSha256: sha256(launcherCanonicalJsonBytes({ result: "NOT_APPLICABLE" })),
+    generatedDmmfSha256: sha256(launcherCanonicalJsonBytes({ result: "NOT_APPLICABLE" })),
+    generatedDelegateSetSha256: sha256(launcherCanonicalJsonBytes({ result: "NOT_APPLICABLE" })),
+    generatedOutputSetSha256: sha256(launcherCanonicalJsonBytes({ result: "NOT_APPLICABLE" })),
+    typescriptDynamicImportSha256: sha256(launcherCanonicalJsonBytes({ result: "NOT_APPLICABLE" })),
+    hostileMarkerSetSha256: sha256(launcherCanonicalJsonBytes({ result: "NOT_APPLICABLE" })),
+    hostileMarkerExecutionCount: 0,
+    prePostToctouSha256: sha256(launcherCanonicalJsonBytes({ preRootDigest, postRootDigest })),
+    startedAt,
+    finishedAt: new Date().toISOString(),
+  });
+  const validation = validateBootstrapRunReceipt(receipt, request);
+  if (validation.status !== "PASS") return validation;
+  if (isV3) {
+    const outcomeWritten = writeExclusiveCanonicalRecord(request.input.outputRecordPath, outcome);
+    if (outcomeWritten.status !== "PASS") return outcomeWritten;
+    const receiptWritten = writeExclusiveCanonicalRecord(request.input.receiptPath, receipt);
+    if (receiptWritten.status !== "PASS") return receiptWritten;
+    return pass({ receipt, receiptSha256: receiptWritten.sha256, outcomeSha256: outcomeWritten.sha256 });
+  }
+  const written = writeExclusiveCanonicalRecord(request.input.outputRecordPath, receipt);
+  if (written.status !== "PASS") return written;
+  return pass({ receipt, receiptSha256: written.sha256, outcomeSha256: receipt.outputRecordSha256 });
+}
+
 async function cli(argv) {
-  const [command, ...rest] = argv;
-  if (command !== "verify-review") {
+  if (argv.length !== 2 || argv[0] !== "--request") {
     return { status: "USAGE_ERROR", code: "UNKNOWN_COMMAND" };
   }
-  const args = new Map();
-  for (let index = 0; index < rest.length; index += 2) {
-    args.set(rest[index], rest[index + 1]);
-  }
-  const receiptPath = args.get("--receipt");
-  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
-  return verifyReviewReceipt({
-    reportPath: path.resolve(args.get("--report")),
-    receipt,
-    subjectCommit: args.get("--subject"),
-  });
+  return runBootstrapRequest(argv[1]);
 }
 
 if (

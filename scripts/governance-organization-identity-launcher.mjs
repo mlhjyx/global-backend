@@ -4,9 +4,15 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  EXECUTION_CHAIN_CONTRACT_V3_SHA256,
+  REVIEWED_EXECUTION_CHAIN_CONTRACT_V3_SHA256,
+} from "./governance-organization-identity-execution-chain-contracts.mjs";
 
 const REQUEST_SCHEMA_VERSION =
   "organization-identity-closed-command-request/v2";
+const REQUEST_V3_SCHEMA_VERSION =
+  "organization-identity-closed-command-request/v3";
 const ROOT_DIRECTORY =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher";
 const DEFAULT_REQUEST_ROOT =
@@ -17,6 +23,8 @@ const TOOL_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
 const RUNTIME_ROOT =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
+const TASK0A_EVIDENCE_ROOT =
+  "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2/.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source";
 const APPROVED_REPOSITORY_ROOT = "/global/backend";
 const APPROVED_V2_WORKTREE_PATH =
   "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2";
@@ -357,6 +365,7 @@ const COMMAND_REGISTRY = Object.freeze({
     npmUserConfig: (value) => value === "/dev/null",
   }),
   SCOPED_REVIEW_VERIFY_V1: schema(["VERIFY"], {
+    evidenceRoot: isAbsoluteNormalized,
     reportPath: isAbsoluteNormalized,
     reportSha256: isSha,
     receiptPath: isAbsoluteNormalized,
@@ -785,16 +794,8 @@ function nodeDescriptor(request) {
     executableRole: "NODE",
     argv: [
       ROOT_BOOTSTRAP_PATH,
-      "--command",
-      request.commandId,
-      "--mode",
-      request.mode,
-      "--subject",
-      request.subjectCommit,
-      "--input",
-      request.input.inputRecordPath,
-      "--output",
-      request.input.outputRecordPath,
+      "--request",
+      "<request>",
     ],
     subjectCommit: request.subjectCommit,
     inputRecordPath: request.input.inputRecordPath,
@@ -1082,15 +1083,25 @@ const INPUT_KEYS = [
   "payloadSha256",
   "outputRecordPath",
 ];
+const INPUT_V3_KEYS = [...INPUT_KEYS, "receiptPath", "externalLaunchReceiptPath"];
+const REQUEST_V3_KEYS = [
+  ...REQUEST_KEYS,
+  "externalLaunchReceiptSha256",
+  "externalLaunchAcceptedAt",
+  "invocationDescriptorSha256",
+  "executableClosureSha256",
+  "launcherContractSha256",
+];
 
 function validateRequestObject(request, roots) {
-  if (!exactKeys(request, REQUEST_KEYS))
+  const isV3 = request?.schemaVersion === REQUEST_V3_SCHEMA_VERSION;
+  if (!exactKeys(request, isV3 ? REQUEST_V3_KEYS : REQUEST_KEYS))
     return integrity("REQUEST_SCHEMA_INVALID");
   if (!LOCAL_COMMAND_IDS.includes(request.commandId)) {
     return integrity("CLOSED_COMMAND_ID_INVALID");
   }
   if (
-    request.schemaVersion !== REQUEST_SCHEMA_VERSION ||
+    ![REQUEST_SCHEMA_VERSION, REQUEST_V3_SCHEMA_VERSION].includes(request.schemaVersion) ||
     !TASK_IDS.includes(request.taskId) ||
     !isCommit(request.subjectCommit) ||
     !isSha(request.bootstrapContractSha256) ||
@@ -1104,13 +1115,40 @@ function validateRequestObject(request, roots) {
   ) {
     return integrity("REQUEST_SCHEMA_INVALID");
   }
+  if (isV3 && request.bootstrapContractSha256 !== REVIEWED_EXECUTION_CHAIN_CONTRACT_V3_SHA256) {
+    return integrity("EXECUTION_CHAIN_CONTRACT_V3_REQUIRED");
+  }
+  if (isV3 && !Number.isFinite(Date.parse(request.externalLaunchAcceptedAt))) {
+    return integrity("EXTERNAL_LAUNCH_ACCEPTED_AT_INVALID");
+  }
+  if (
+    isV3 &&
+    (!isSha(request.invocationDescriptorSha256) ||
+      !isSha(request.executableClosureSha256) ||
+      !isSha(request.launcherContractSha256))
+  ) {
+    return integrity("EXECUTION_CHAIN_OBSERVATION_BINDING_INVALID");
+  }
   const parameters = validateParameters(
     request.commandId,
     request.mode,
     request.parameters,
   );
   if (parameters.status !== "PASS") return parameters;
-  if (!exactKeys(request.input, INPUT_KEYS))
+  if (request.commandId === "SCOPED_REVIEW_VERIFY_V1") {
+    const { evidenceRoot, reportPath, receiptPath } = request.parameters;
+    const expectedEvidenceRoot = roots.fixtureEvidenceRoot ?? TASK0A_EVIDENCE_ROOT;
+    if (
+      evidenceRoot !== expectedEvidenceRoot ||
+      path.posix.dirname(reportPath) !== evidenceRoot ||
+      path.posix.dirname(receiptPath) !== evidenceRoot ||
+      path.posix.basename(reportPath).includes("/") ||
+      path.posix.basename(receiptPath).includes("/")
+    ) {
+      return integrity("REVIEW_EVIDENCE_ROOT_INVALID");
+    }
+  }
+  if (!exactKeys(request.input, isV3 ? INPUT_V3_KEYS : INPUT_KEYS))
     return integrity("REQUEST_INPUT_INVALID");
 
   const requestRoot = roots.requestRoot ?? DEFAULT_REQUEST_ROOT;
@@ -1137,6 +1175,28 @@ function validateRequestObject(request, roots) {
     request.requestId !== deriveRequestId(request)
   ) {
     return integrity("REQUEST_INPUT_INVALID");
+  }
+  if (isV3) {
+    if (
+      !isSha(request.externalLaunchReceiptSha256) ||
+      !isAbsoluteNormalized(request.input.receiptPath) ||
+      !isAbsoluteNormalized(request.input.externalLaunchReceiptPath) ||
+      path.posix.dirname(request.input.receiptPath) !== outputRoot ||
+      path.posix.dirname(request.input.externalLaunchReceiptPath) !== outputRoot ||
+      path.posix.basename(request.input.receiptPath) === path.posix.basename(request.input.outputRecordPath) ||
+      path.posix.basename(request.input.externalLaunchReceiptPath) === path.posix.basename(request.input.outputRecordPath) ||
+      path.posix.basename(request.input.externalLaunchReceiptPath) === path.posix.basename(request.input.receiptPath)
+    ) {
+      return integrity("REQUEST_V3_OUTPUT_PATH_INVALID");
+    }
+    const stem = `${request.taskId}-${request.commandId.toLowerCase()}-${request.requestId}`;
+    if (
+      path.posix.basename(request.input.outputRecordPath) !== `${stem}.output.json` ||
+      path.posix.basename(request.input.receiptPath) !== `${stem}.receipt.json` ||
+      path.posix.basename(request.input.externalLaunchReceiptPath) !== `${stem}.launch.json`
+    ) {
+      return integrity("REQUEST_V3_BASENAME_INVALID");
+    }
   }
   return pass({ invocation: descriptor });
 }
@@ -1172,6 +1232,149 @@ export function buildClosedCommandRequest({
     canonicalJsonBytes(invocationDescriptor(partial)),
   );
   return cloneNullPrototype(partial);
+}
+
+function requestCoreV3(request) {
+  return {
+    taskId: request.taskId,
+    commandId: request.commandId,
+    mode: request.mode,
+    subjectCommit: request.subjectCommit,
+    bootstrapContractSha256: request.bootstrapContractSha256,
+    launcherMaterializationReceiptSha256: request.launcherMaterializationReceiptSha256,
+    launcherMaterializationReviewReceiptSha256: request.launcherMaterializationReviewReceiptSha256,
+    parameters: request.parameters,
+    requestRoot: path.posix.dirname(request.input.inputRecordPath),
+    outputRoot: path.posix.dirname(request.input.outputRecordPath),
+    allowedArgvSha256: request.allowedArgvSha256,
+    invocationDescriptorSha256: request.invocationDescriptorSha256,
+    executableClosureSha256: request.executableClosureSha256,
+    externalLaunchAcceptedAt: request.externalLaunchAcceptedAt,
+  };
+}
+
+export function buildExternalLaunchReceiptV2(request) {
+  return {
+    schemaVersion: "organization-identity-external-launch-receipt/v2",
+    requestId: request.requestId,
+    commandId: request.commandId,
+    mode: request.mode,
+    subjectCommit: request.subjectCommit,
+    launcherContractSha256: request.launcherContractSha256,
+    requestCoreSha256: sha256(canonicalJsonBytes(requestCoreV3(request))),
+    invocationDescriptorSha256: request.invocationDescriptorSha256,
+    executableClosureSha256: request.executableClosureSha256,
+    acceptedAt: request.externalLaunchAcceptedAt,
+    result: "PASS",
+  };
+}
+
+export function validateExternalLaunchReceiptV2(receipt, request) {
+  if (
+    !exactKeys(receipt, [
+      "schemaVersion",
+      "requestId",
+      "commandId",
+      "mode",
+      "subjectCommit",
+      "launcherContractSha256",
+      "requestCoreSha256",
+      "invocationDescriptorSha256",
+      "executableClosureSha256",
+      "acceptedAt",
+      "result",
+    ]) ||
+    receipt.schemaVersion !== "organization-identity-external-launch-receipt/v2" ||
+    receipt.requestId !== request.requestId ||
+    receipt.commandId !== request.commandId ||
+    receipt.mode !== request.mode ||
+    receipt.subjectCommit !== request.subjectCommit ||
+    receipt.launcherContractSha256 !== request.launcherContractSha256 ||
+    receipt.requestCoreSha256 !== sha256(canonicalJsonBytes(requestCoreV3(request))) ||
+    receipt.invocationDescriptorSha256 !== request.invocationDescriptorSha256 ||
+    receipt.executableClosureSha256 !== request.executableClosureSha256 ||
+    receipt.acceptedAt !== request.externalLaunchAcceptedAt ||
+    receipt.result !== "PASS"
+  ) {
+    return integrity("EXTERNAL_LAUNCH_RECEIPT_V2_INVALID");
+  }
+  return pass({ externalLaunchReceiptSha256: sha256(canonicalJsonBytes(receipt)) });
+}
+
+export function buildExecutionChainRequestV3(fields) {
+  const base = buildClosedCommandRequest({
+    ...fields,
+    bootstrapContractSha256:
+      fields.bootstrapContractSha256 ?? REVIEWED_EXECUTION_CHAIN_CONTRACT_V3_SHA256,
+  });
+  if (!isSha(fields.executableClosureSha256)) {
+    throw new Error("EXECUTABLE_CLOSURE_SHA_REQUIRED");
+  }
+  const request = cloneNullPrototype({
+    ...base,
+    schemaVersion: REQUEST_V3_SCHEMA_VERSION,
+    externalLaunchReceiptSha256: "0".repeat(64),
+    externalLaunchAcceptedAt: fields.externalLaunchAcceptedAt ?? new Date().toISOString(),
+    invocationDescriptorSha256: "0".repeat(64),
+    executableClosureSha256: fields.executableClosureSha256,
+    launcherContractSha256: fields.launcherContractSha256 ?? "0".repeat(64),
+    input: {
+      ...base.input,
+      receiptPath: "",
+      externalLaunchReceiptPath: "",
+    },
+  });
+  request.requestId = deriveRequestId(request);
+  const stem = `${request.taskId}-${request.commandId.toLowerCase()}-${request.requestId}`;
+  request.input.receiptPath = `${fields.outputRoot ?? DEFAULT_OUTPUT_ROOT}/${stem}.receipt.json`;
+  request.input.externalLaunchReceiptPath = `${fields.outputRoot ?? DEFAULT_OUTPUT_ROOT}/${stem}.launch.json`;
+  request.invocationDescriptorSha256 = sha256(
+    canonicalJsonBytes({
+      executableRole: "NODE",
+      argv: [ROOT_BOOTSTRAP_PATH, "--request", request.input.inputRecordPath],
+      subjectCommit: request.subjectCommit,
+      commandId: request.commandId,
+      mode: request.mode,
+    }),
+  );
+  const external = buildExternalLaunchReceiptV2(request);
+  request.externalLaunchReceiptSha256 = sha256(canonicalJsonBytes(external));
+  return cloneNullPrototype(request);
+}
+
+export function finalizeExecutionChainRequestV3(request, requestPath, options = {}) {
+  if (
+    request?.schemaVersion !== REQUEST_V3_SCHEMA_VERSION ||
+    !isAbsoluteNormalized(requestPath)
+  ) {
+    throw new Error("EXECUTION_CHAIN_REQUEST_V3_FINALIZE_INVALID");
+  }
+  const finalized = cloneNullPrototype(request);
+  finalized.externalLaunchAcceptedAt = new Date().toISOString();
+  if (options.launcherContractSha256 !== undefined) {
+    if (!isSha(options.launcherContractSha256)) throw new Error("LAUNCHER_CONTRACT_SHA_REQUIRED");
+    finalized.launcherContractSha256 = options.launcherContractSha256;
+  }
+  if (options.executableClosureSha256 !== undefined) {
+    if (!isSha(options.executableClosureSha256)) throw new Error("EXECUTABLE_CLOSURE_SHA_REQUIRED");
+    finalized.executableClosureSha256 = options.executableClosureSha256;
+  }
+  if (options.acceptedAt !== undefined) {
+    if (!Number.isFinite(Date.parse(options.acceptedAt))) throw new Error("EXTERNAL_LAUNCH_ACCEPTED_AT_INVALID");
+    finalized.externalLaunchAcceptedAt = options.acceptedAt;
+  }
+  finalized.invocationDescriptorSha256 = sha256(
+    canonicalJsonBytes({
+      executableRole: "NODE",
+      argv: [ROOT_BOOTSTRAP_PATH, "--request", requestPath],
+      subjectCommit: request.subjectCommit,
+      commandId: request.commandId,
+      mode: request.mode,
+    }),
+  );
+  const external = buildExternalLaunchReceiptV2(finalized);
+  finalized.externalLaunchReceiptSha256 = sha256(canonicalJsonBytes(external));
+  return cloneNullPrototype(finalized);
 }
 
 export function parseClosedCommandRequest(bytes, options = {}) {
@@ -1232,6 +1435,13 @@ export async function dispatchClosedCommand(request, verifiedContext = {}) {
     commandId: request.commandId,
     mode: request.mode,
     ...validation.invocation,
+    outputRecordPath: request.input.outputRecordPath,
+    ...(request.schemaVersion === REQUEST_V3_SCHEMA_VERSION
+      ? {
+          receiptPath: request.input.receiptPath,
+          externalLaunchReceiptPath: request.input.externalLaunchReceiptPath,
+        }
+      : {}),
   };
   if (invocation.executableRole === "GIT") {
     const worktreeReceipt = verifiedContext.verifiedWorktreeReceipt;
@@ -1672,7 +1882,10 @@ export function validateBootstrapRunReceipt(receipt, request) {
   if (!request) return integrity("BOOTSTRAP_RECEIPT_PREDECESSOR_REQUIRED");
   if (
     !exactKeys(receipt, BOOTSTRAP_RECEIPT_KEYS) ||
-    receipt.schemaVersion !== "organization-identity-bootstrap-run/v2" ||
+    ![
+      "organization-identity-bootstrap-run/v2",
+      "organization-identity-bootstrap-run/v3",
+    ].includes(receipt.schemaVersion) ||
     receipt.receiptCardinality !== "ONE_COMMAND_ONE_RECEIPT" ||
     receipt.result !== "PASS" ||
     receipt.hostileMarkerExecutionCount !== 0 ||
@@ -1765,6 +1978,13 @@ export function validateBootstrapRunReceipt(receipt, request) {
     [receipt.closedCommandRequestSha256, sha256(canonicalJsonBytes(request))],
   ];
   if (pairs.some(([actual, expected]) => actual !== expected)) {
+    return integrity("BOOTSTRAP_RECEIPT_BINDING_INVALID");
+  }
+  if (
+    request.schemaVersion === REQUEST_V3_SCHEMA_VERSION &&
+    (receipt.schemaVersion !== "organization-identity-bootstrap-run/v3" ||
+      receipt.externalLaunchReceiptSha256 !== request.externalLaunchReceiptSha256)
+  ) {
     return integrity("BOOTSTRAP_RECEIPT_BINDING_INVALID");
   }
   return pass();
@@ -2353,12 +2573,14 @@ export async function verifyFixedLauncherTrust(request, options = {}) {
       expectedMode: entry.mode,
     })),
   ];
+  const verificationObservations = [];
   for (const entry of verificationFiles) {
     const verified = await verifyControlledFile(entry.path, {
       ...expectedOwner,
       ...entry,
     });
     if (verified.status !== "PASS") return verified;
+    verificationObservations.push(verified.observation);
   }
   return pass({
     contract: contractRecord.value,
@@ -2369,6 +2591,8 @@ export async function verifyFixedLauncherTrust(request, options = {}) {
         entry.destinationExecutablePath,
       ]),
     ),
+    executableClosureSha256: sha256(canonicalJsonBytes(verificationObservations)),
+    verificationObservations,
   });
 }
 
@@ -2687,11 +2911,18 @@ export async function executeClosedInvocation(invocation, trust, environment) {
     );
     if (checked.status !== "PASS") return checked;
   }
+  const needsRequestPath = invocation.argv.includes("<request>");
+  const argv = invocation.argv.map((arg) =>
+    arg === "<request>" ? invocation.requestPath : arg,
+  );
+  if (needsRequestPath && !isAbsoluteNormalized(invocation.requestPath)) {
+    return integrity("REQUEST_PATH_REQUIRED");
+  }
   const executed = runClosedProcess(
     executablePath,
-    invocation.argv,
+    argv,
     environment,
-    invocation.cwd,
+    invocation.cwd ?? ROOT_DIRECTORY,
   );
   if (executed.status !== "PASS") return executed;
   for (const readback of readbacks.filter(({ phase }) => phase === "AFTER")) {
@@ -2703,7 +2934,20 @@ export async function executeClosedInvocation(invocation, trust, environment) {
     );
     if (checked.status !== "PASS") return checked;
   }
-  return pass({ outputRecordSha256: executed.resultSha256 });
+  const outputPath = invocation.receiptPath ?? invocation.outputRecordPath;
+  if (!isAbsoluteNormalized(outputPath)) {
+    return pass({ outputRecordSha256: executed.resultSha256 });
+  }
+  const receipt = await verifyControlledFile(outputPath, {
+    expectedMode: 0o600,
+    expectedUid: process.getuid?.() ?? 0,
+    expectedGid: process.getgid?.() ?? 0,
+  });
+  if (receipt.status !== "PASS") return integrity("BOOTSTRAP_RECEIPT_REQUIRED");
+  return pass({
+    receiptSha256: receipt.observation.sha256,
+    outputRecordSha256: receipt.observation.sha256,
+  });
 }
 
 export async function runLauncherCli(argv, options = {}) {
@@ -2747,9 +2991,51 @@ export async function runLauncherCli(argv, options = {}) {
   const parsed = parseClosedCommandRequest(requestFile.bytes, {
     requestRoot,
     outputRoot,
+    fixtureEvidenceRoot: options.fixtureEvidenceRoot,
   });
   if (parsed.status !== "PASS") return { exitCode: 68, result: parsed };
   const request = parsed.request;
+  if (request.schemaVersion !== REQUEST_V3_SCHEMA_VERSION && options.predecessorDiagnostic !== true) {
+    return { exitCode: 68, result: integrity("V2_PREDECESSOR_ONLY") };
+  }
+  const verifyTask0AEvidence = async () => {
+    if (request.commandId !== "SCOPED_REVIEW_VERIFY_V1") return pass();
+    const root = await verifyControlledDirectory(request.parameters.evidenceRoot, {
+      expectedMode: 0o700,
+      expectedUid,
+      expectedGid,
+    });
+    if (root.status !== "PASS") return root;
+    const [reportParent, receiptParent] = await Promise.all([
+      verifyControlledDirectory(path.posix.dirname(request.parameters.reportPath), {
+        expectedMode: 0o700,
+        expectedUid,
+        expectedGid,
+      }),
+      verifyControlledDirectory(path.posix.dirname(request.parameters.receiptPath), {
+        expectedMode: 0o700,
+        expectedUid,
+        expectedGid,
+      }),
+    ]);
+    if (reportParent.status !== "PASS" || receiptParent.status !== "PASS") {
+      return integrity("REVIEW_EVIDENCE_ROOT_INVALID");
+    }
+    if (JSON.stringify(reportParent.observation) !== JSON.stringify(root.observation)) {
+      return integrity("REVIEW_EVIDENCE_ROOT_INVALID");
+    }
+    for (const evidencePath of [request.parameters.reportPath, request.parameters.receiptPath]) {
+      const file = await verifyControlledFile(evidencePath, {
+        expectedMode: 0o600,
+        expectedUid,
+        expectedGid,
+      });
+      if (file.status !== "PASS") return file;
+    }
+    return pass();
+  };
+  const evidencePreflight = await verifyTask0AEvidence();
+  if (evidencePreflight.status !== "PASS") return { exitCode: 68, result: evidencePreflight };
   const inputFile = await verifyControlledFile(request.input.inputRecordPath, {
     expectedSha256: request.input.inputRecordSha256,
     expectedMode: 0o600,
@@ -2757,6 +3043,22 @@ export async function runLauncherCli(argv, options = {}) {
     expectedGid,
   });
   if (inputFile.status !== "PASS") return { exitCode: 69, result: inputFile };
+  if (request.schemaVersion === REQUEST_V3_SCHEMA_VERSION) {
+    for (const outputPath of [
+      request.input.outputRecordPath,
+      request.input.receiptPath,
+      request.input.externalLaunchReceiptPath,
+    ]) {
+      try {
+        await lstat(outputPath, { bigint: true });
+        return { exitCode: 71, result: integrity("OUTPUT_ALREADY_EXISTS") };
+      } catch (error) {
+        if (error?.code !== "ENOENT") {
+          return { exitCode: 71, result: integrity("OUTPUT_STATE_UNAVAILABLE") };
+        }
+      }
+    }
+  }
   const verifyTrust = options.verifyTrust ?? verifyFixedLauncherTrust;
   const trust = await verifyTrust(request, {
     ...options,
@@ -2764,6 +3066,48 @@ export async function runLauncherCli(argv, options = {}) {
     expectedGid,
   });
   if (trust.status !== "PASS") return { exitCode: 70, result: trust };
+  if (request.schemaVersion === REQUEST_V3_SCHEMA_VERSION) {
+    if (!trust.contract?.launcherContractSha256) {
+      return { exitCode: 70, result: integrity("LAUNCHER_CONTRACT_OBSERVATION_REQUIRED") };
+    }
+    if (trust.contract.launcherContractSha256 !== request.launcherContractSha256) {
+      return { exitCode: 70, result: integrity("LAUNCHER_CONTRACT_OBSERVATION_MISMATCH") };
+    }
+    const acceptedAt = Date.parse(request.externalLaunchAcceptedAt);
+    if (!Number.isFinite(acceptedAt) || acceptedAt > Date.now() || Date.now() - acceptedAt > 5 * 60 * 1000) {
+      return { exitCode: 70, result: integrity("EXTERNAL_LAUNCH_ACCEPTED_AT_INVALID") };
+    }
+    const actualInvocationDescriptorSha256 = sha256(
+      canonicalJsonBytes({
+        executableRole: "NODE",
+        argv: [ROOT_BOOTSTRAP_PATH, "--request", argv[1]],
+        subjectCommit: request.subjectCommit,
+        commandId: request.commandId,
+        mode: request.mode,
+      }),
+    );
+    if (actualInvocationDescriptorSha256 !== request.invocationDescriptorSha256) {
+      return { exitCode: 70, result: integrity("INVOCATION_DESCRIPTOR_OBSERVATION_MISMATCH") };
+    }
+    if (!trust.executableClosureSha256) {
+      return { exitCode: 70, result: integrity("EXECUTABLE_CLOSURE_OBSERVATION_REQUIRED") };
+    }
+    if (trust.executableClosureSha256 !== request.executableClosureSha256) {
+      return { exitCode: 70, result: integrity("EXECUTABLE_CLOSURE_OBSERVATION_MISMATCH") };
+    }
+    const external = buildExternalLaunchReceiptV2(request);
+    const externalHash = sha256(canonicalJsonBytes(external));
+    if (externalHash !== request.externalLaunchReceiptSha256) {
+      return { exitCode: 70, result: integrity("EXTERNAL_LAUNCH_RECEIPT_V2_INVALID") };
+    }
+    const written = await writeCanonicalOutputRecord(
+      request.input.externalLaunchReceiptPath,
+      external,
+      { expectedUid, expectedGid },
+      { fixtureRoot: outputRoot },
+    );
+    if (written.status !== "PASS") return { exitCode: 71, result: written };
+  }
   const evidenceFiles = [];
   for (const field of [
     "authorizationReceiptSha256",
@@ -2806,7 +3150,20 @@ export async function runLauncherCli(argv, options = {}) {
   }
   const executeInvocation =
     options.executeInvocation ??
-    (() => integrity("AUTHORITY_EXECUTOR_REQUIRED"));
+    ((invocation) => {
+      const candidateInvocation = {
+        ...invocation,
+        requestPath: argv[1],
+      };
+      if (options.fixtureBootstrapPath) {
+        candidateInvocation.argv = [options.fixtureBootstrapPath, "--request", "<request>"];
+      }
+      return executeClosedInvocation(
+        candidateInvocation,
+        trust,
+        options.executionEnvironment ?? EXACT_RUNTIME_ENVIRONMENT,
+      );
+    });
   const replaySet = new Set();
   const worktreeReceipt = await deriveVerifiedWorktreeReceipt(
     request,
@@ -2819,6 +3176,7 @@ export async function runLauncherCli(argv, options = {}) {
   const dispatched = await dispatchClosedCommand(request, {
     requestRoot,
     outputRoot,
+    fixtureEvidenceRoot: options.fixtureEvidenceRoot,
     inputRecordBytes: inputFile.bytes,
     outputExists: false,
     requestReplaySet: replaySet,
@@ -2847,6 +3205,15 @@ export async function runLauncherCli(argv, options = {}) {
           : []),
         ...evidenceFiles,
       ];
+      if (request.schemaVersion === REQUEST_V3_SCHEMA_VERSION) {
+        reverifyFiles.push({
+          path: request.input.externalLaunchReceiptPath,
+          expectedSha256: request.externalLaunchReceiptSha256,
+          expectedMode: 0o600,
+        });
+      }
+      const evidenceAgain = await verifyTask0AEvidence();
+      if (evidenceAgain.status !== "PASS") return evidenceAgain;
       for (const entry of reverifyFiles) {
         const verified = await verifyControlledFile(entry.path, {
           expectedSha256: entry.expectedSha256,
@@ -2864,7 +3231,9 @@ export async function runLauncherCli(argv, options = {}) {
     return { exitCode: 73, result: dispatched };
   }
   const receiptFile = await verifyControlledFile(
-    request.input.outputRecordPath,
+    request.schemaVersion === REQUEST_V3_SCHEMA_VERSION
+      ? request.input.receiptPath
+      : request.input.outputRecordPath,
     {
       expectedSha256: dispatched.executionResult?.receiptSha256,
       expectedMode: 0o600,
@@ -2881,10 +3250,8 @@ export async function runLauncherCli(argv, options = {}) {
   } catch {
     return { exitCode: 72, result: integrity("BOOTSTRAP_RECEIPT_INVALID") };
   }
-  if (
-    !receiptFile.bytes.equals(canonicalJsonBytes(receipt)) ||
-    validateBootstrapRunReceipt(receipt, request).status !== "PASS"
-  ) {
+  const receiptValidation = validateBootstrapRunReceipt(receipt, request);
+  if (!receiptFile.bytes.equals(canonicalJsonBytes(receipt)) || receiptValidation.status !== "PASS") {
     return { exitCode: 72, result: integrity("BOOTSTRAP_RECEIPT_INVALID") };
   }
   return {

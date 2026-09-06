@@ -57,6 +57,7 @@ function parse(request, options = {}) {
   return parseClosedCommandRequest(canonicalJsonBytes(request), {
     requestRoot: REQUEST_ROOT,
     outputRoot: OUTPUT_ROOT,
+    fixtureEvidenceRoot: "/controlled",
     ...options,
   });
 }
@@ -124,6 +125,7 @@ function commandFixture(commandId) {
       return [
         "VERIFY",
         {
+          evidenceRoot: "/controlled",
           reportPath: "/controlled/review.md",
           reportSha256: SHA,
           receiptPath: "/controlled/review.json",
@@ -294,6 +296,7 @@ test("every local command builds a complete executable descriptor from typed inp
     const result = await dispatchClosedCommand(request, {
       requestRoot: REQUEST_ROOT,
       outputRoot: OUTPUT_ROOT,
+      fixtureEvidenceRoot: "/controlled",
       inputRecordBytes: canonicalJsonBytes(request.parameters),
       requestReplaySet: new Set(),
       outputExists: false,
@@ -474,6 +477,7 @@ test("Git-backed CLI rejects ambient worktree, branch, and mode substitutions", 
     const result = await runLauncherCli(["--request", requestPath], {
       requestRoot,
       outputRoot,
+      predecessorDiagnostic: true,
       expectedUid: process.getuid(),
       expectedGid: process.getgid(),
       worktreePath: facts.worktreePath,

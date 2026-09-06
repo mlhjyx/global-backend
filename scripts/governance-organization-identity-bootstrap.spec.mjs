@@ -129,6 +129,10 @@ async function createFixtureRepo(t) {
       "scripts/governance-organization-identity-bootstrap.spec.mjs",
       "import 'node:test';\n",
     ],
+    [
+      "scripts/governance-organization-identity-execution-chain-contracts.mjs",
+      "export const fixtureExecutionChainContract = true;\n",
+    ],
     [".dockerignore", "node_modules\n"],
     [".gitignore", "node_modules\n"],
   ]);
@@ -747,7 +751,7 @@ test("closed review verification rejects drift, duplicate severities, and failin
       "--subject",
       COMMIT,
     ]).status,
-    0,
+    1,
   );
   assert.equal(
     (
