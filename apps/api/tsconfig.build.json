@@ -8,6 +8,7 @@
     "**/*.test-fixture.ts",
     "src/temporal/testing",
     "src/site-builder/eval",
+    "src/site-builder/site-builder-model-settlement.ts",
     "src/site-builder/design/m1eb-golden.ts"
   ]
 }

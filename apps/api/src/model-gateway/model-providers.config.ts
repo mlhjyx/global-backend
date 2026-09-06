@@ -4,6 +4,10 @@ import {
   VERIFIED_GATEWAY_MODEL_TRANSPORTS,
 } from './model-transports';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
+import {
+  canonicalGatewayCredential,
+  parseModelGatewayRequestTimeout,
+} from './gateway-credential-boundary';
 
 export interface GatewayEvaluationConfig {
   /**
@@ -25,12 +29,16 @@ export function buildGatewayProvider(
   evaluation: GatewayEvaluationConfig = {},
 ): ModelProvider | null {
   const baseUrl = env.MODEL_GATEWAY_URL;
-  const apiKey = env.MODEL_GATEWAY_KEY;
-  if (!baseUrl || !apiKey) return null;
+  const apiKey = canonicalGatewayCredential(env.MODEL_GATEWAY_KEY);
+  const requestTimeoutMs = parseModelGatewayRequestTimeout(
+    env.MODEL_TIMEOUT_MS,
+  );
+  if (!baseUrl || !apiKey || requestTimeoutMs === undefined) return null;
   return new OpenAICompatibleProvider({
     id: 'gateway',
     baseUrl,
     apiKey,
+    requestTimeoutMs,
     // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',
     modelTransports: VERIFIED_GATEWAY_MODEL_TRANSPORTS,

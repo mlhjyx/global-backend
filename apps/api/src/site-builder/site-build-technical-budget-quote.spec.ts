@@ -4,7 +4,10 @@ import {
   SiteBuildTechnicalBudgetQuoteService,
   type TechnicalBudgetRoute,
 } from './site-build-technical-budget-quote';
-import { buildRequestHash, normalizeBuildRequest } from './build-request-contract';
+import {
+  buildRequestHash,
+  normalizeBuildRequest,
+} from './build-request-contract';
 
 const NOW = new Date('2026-08-26T00:00:00.000Z');
 const SITE_ID = 'c9db2194-82b8-4a53-b328-a19d0d3b216e';
@@ -37,10 +40,13 @@ const ROUTES: Record<string, TechnicalBudgetRoute> = {
 function service(
   routeOverrides: Partial<Record<string, TechnicalBudgetRoute>> = {},
 ): SiteBuildTechnicalBudgetQuoteService {
-  return new SiteBuildTechnicalBudgetQuoteService({}, {
-    now: () => NOW,
-    resolveRoute: (taskId) => routeOverrides[taskId] ?? ROUTES[taskId]!,
-  });
+  return new SiteBuildTechnicalBudgetQuoteService(
+    {},
+    {
+      now: () => NOW,
+      resolveRoute: (taskId) => routeOverrides[taskId] ?? ROUTES[taskId]!,
+    },
+  );
 }
 
 describe('SiteBuildTechnicalBudgetQuoteService', () => {
@@ -109,14 +115,24 @@ describe('SiteBuildTechnicalBudgetQuoteService', () => {
       'non-canonical cost ceiling',
       () => ({ ...ROUTES['site_builder.brand_profile']!, maxCostCents: 0 }),
     ],
+    [
+      'model alias wider than the durable settlement identity',
+      () => ({
+        ...ROUTES['site_builder.brand_profile']!,
+        primary: `m${'x'.repeat(120)}`,
+      }),
+    ],
   ])('classifies %s as execution-policy drift', (_name, brandRoute) => {
-    const quoteService = new SiteBuildTechnicalBudgetQuoteService({}, {
-      now: () => NOW,
-      resolveRoute: (taskId) =>
-        taskId === 'site_builder.brand_profile'
-          ? brandRoute()
-          : ROUTES[taskId]!,
-    });
+    const quoteService = new SiteBuildTechnicalBudgetQuoteService(
+      {},
+      {
+        now: () => NOW,
+        resolveRoute: (taskId) =>
+          taskId === 'site_builder.brand_profile'
+            ? brandRoute()
+            : ROUTES[taskId]!,
+      },
+    );
 
     expect(() =>
       quoteService.quoteRefurbish(
@@ -127,12 +143,15 @@ describe('SiteBuildTechnicalBudgetQuoteService', () => {
   });
 
   it('classifies an unavailable route resolver without exposing its error', () => {
-    const quoteService = new SiteBuildTechnicalBudgetQuoteService({}, {
-      now: () => NOW,
-      resolveRoute: () => {
-        throw new Error('operator secret route detail');
+    const quoteService = new SiteBuildTechnicalBudgetQuoteService(
+      {},
+      {
+        now: () => NOW,
+        resolveRoute: () => {
+          throw new Error('operator secret route detail');
+        },
       },
-    });
+    );
 
     expect(() =>
       quoteService.quoteRefurbish(
@@ -150,10 +169,13 @@ describe('SiteBuildTechnicalBudgetQuoteService', () => {
 
   it('does not perform database, workflow, provider or network calls', () => {
     const resolveRoute = vi.fn((taskId: string) => ROUTES[taskId]!);
-    const quoteService = new SiteBuildTechnicalBudgetQuoteService({}, {
-      now: () => NOW,
-      resolveRoute,
-    });
+    const quoteService = new SiteBuildTechnicalBudgetQuoteService(
+      {},
+      {
+        now: () => NOW,
+        resolveRoute,
+      },
+    );
 
     quoteService.quoteRefurbish(
       SITE_ID,
