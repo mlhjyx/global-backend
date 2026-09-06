@@ -4,13 +4,13 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-06T21:17:19+08:00（Asia/Shanghai）
+> 最后核验：2026-09-06T22:09:01+08:00（Asia/Shanghai）
 
 ## 当前结论
 
 `SOURCE_INTEGRATED_ALPHA / CROSS_REPO_PRODUCT_ASSEMBLY / USER_JOURNEY_NOT_VALIDATED / COMMERCIAL_LOOP_NOT_CLOSED / PRODUCTION_READINESS_BLOCKED`
 
-源码、局部测试、主线 CI、部署、运行证据和用户验收是不同的事实。三个修复 PR 已合入，不代表用户已经能够完成 `LeadQualifiedPackage → Opportunity → Human QGO → Feedback`。当前仍没有可接纳的完整 MVP 用户闭环。
+源码、局部测试、主线 CI、部署、运行证据和用户验收是不同的事实。Browser/ACK/schema 修复、平台 Temporal 基础设施和执行规则更新已合入，不代表用户已经能够完成 `LeadQualifiedPackage → Opportunity → Human QGO → Feedback`。当前仍没有可接纳的完整 MVP 用户闭环。
 
 Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是未选择的可选缩范围，不构成原范围的执行阻塞。Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 是平台执行安全包络，不是客户余额或模型购买次数。
 
@@ -22,17 +22,17 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 
 | Subject              | Exact observed state                                                                                                                                                                                                                   | 证据边界                                                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Backend source       | root `main=origin/main=8eefba1cff15f2bbe4154451cac958a072803ab5`；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
+| Backend source       | root `main=origin/main=17b637d7e2a333cc4c76f04c7798b42f74f2fb37`；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
-| 主线 CI              | `63b4af94…` 的 CI/Security/Governance/Supply Chain/CodeQL 全部 SUCCESS；后续 #457 合入得到 `8eefba1…`，其 Security/Governance/Supply Chain/CodeQL SUCCESS，CI 在本次观察时 IN_PROGRESS                                                 | 前一提交的成功不冒充后一提交已完成；不因后续提交而作废未变源码的有效局部测试                                 |
+| 主线 CI | `17b637d7…` 的 build/typecheck/test、contracts、Security、Governance、CodeQL 和 production advisory freshness 均 SUCCESS；PR 专属 dependency delta/review 在 main push 上 SKIPPED | 只证明该提交的托管检查；不证明运行采用 |
 | Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它                                                                                                                               | 完整五文件源审查 C0/H0/M0；不再要求重复接线；当前保留运行环境尚未采用                                        |
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
-| GrowthOS source      | `/global/frontend/growthos-source` clean `24856e2805b89c0c842da141ea91414d48662498`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
+| GrowthOS source      | `/global/frontend/growthos-source` clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
-| 平台运行候选         | 平台 Temporal 基础设施 #455 仍为候选；另一任务维护平台权限、GrowthOS/Builder、New API 和后续运行采用                                                                                                                                   | 不能从历史分支的 finding 数量推断当前缺陷，也不能由容器存在推断已接纳                                        |
-| 文档候选             | #451 仍是独立 Draft；本地内容正随已核验事实修正                                                                                                                                                                                        | 不属于 #452/#453/#454 合入授权；本文本地准备不构成远端更新或合入                                             |
+| 平台基础设施 | 平台 Temporal 基础设施 #455 已合入 `b51ca08f7f279b2c0234237ef4cc970d4dc9dd5d`；#457 决策卡完整性修复和 #456 执行规则更新也已合入 | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把已合入源码继续列为候选 |
+| 文档候选 | 本次快照为 #451 的隔离收口候选，承接原本地文档提交并更新已合入事实；远端状态按 GitHub 当前 head/CI/review 回读 | 用户已批准本次 GitHub 队列自主收口；该授权不扩展到运行部署或 Pilot |
 
 ### Program 所有权与产品缺口
 
@@ -62,7 +62,7 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 
 ## 3. Development runtime 观察
 
-本次以只读 Docker metadata 核验：API 和 Worker 仍运行 `674ff12d4d768ce5599fc07b565fe21da37dc5fe` 对应 OCI `sha256:b70175a0904c6a6a2089efbf914467cb1dcd7465ca1eb9a1066649cb6190f2c9`，两者进程 running。该 runtime source 比本次 repository source 落后 22 个 Git 提交。未在本次调用真实模型、重启、清理缓存或写入保留数据库。
+本次以只读 Docker metadata 核验：API 和 Worker 仍运行 `674ff12d4d768ce5599fc07b565fe21da37dc5fe` 对应 OCI `sha256:b70175a0904c6a6a2089efbf914467cb1dcd7465ca1eb9a1066649cb6190f2c9`，两者进程 running。该运行制品未包含本页列出的后续 main 修复。未在本次调用真实模型、重启、清理缓存或写入保留数据库。
 
 | 观察              | 当前可确认的事实                                                                                                         | 不得外推                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -87,9 +87,9 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 
 商业主路径是 `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`；并行信任资产路径是 `Quote → Grant → Build → Preview`。
 
-1. 运行主线：平台候选接纳、精确制品/迁移核验、获授权的运行采用、fresh RuntimeEvidence；不重复已合入的 Browser wiring/ACK/schema 修复。
+1. 运行主线：已合入的平台基础设施进入精确制品/迁移核验、获授权的运行采用和 fresh RuntimeEvidence；不重复已合入的 Browser wiring/ACK/schema 修复。
 2. 产品主线：GrowthOS 单 writer 文件交接 → C1-A → C1-B/C1-C → C2 Opportunity → C3 Human QGO → C4 Outcome/C5 Conversation；不另起 R7 文档循环。
-3. 文档：本页维护当前事实，roadmap 保持稳定顺序；历史入 changelog/evidence。#451 先局部修正和审查，再按实际远端授权更新。
+3. 文档：本页维护当前事实，roadmap 保持稳定顺序；历史入 changelog/evidence。#451 按已批准的 GitHub 队列完成最终修订、验证、独立审查与远端收口。
 4. 验收：当前跨仓 Release Bundle、关键 UAT 三次与重启恢复通过后，才评估德国工业泵零模型/零付费/零发送 Pilot 的精确授权卡。
 
 既有明确授权在相同动作、目标、范围和成本/数据边界内继续有效，普通本地开发/验证不重复请示。#452/#453/#454 更新与合入授权已执行完成，不自动授权部署、保留数据库迁移、缓存删除、端口变更、真实 Provider/模型调用、OAuth/邮件或 Pilot。当前工作保留单 writer、费用、权限、RLS 与发布门；未知结果不被静态检查升级。
