@@ -69,4 +69,22 @@ describe('robots 合规与 SSRF 入口', () => {
     ).resolves.toBe(true);
     expect(otherWorkspaceRequest).toHaveBeenCalledOnce();
   });
+
+  it('never degrades a physical-wire fence rejection into robots allow', async () => {
+    const physicalFence = Object.assign(new Error('wire denied'), {
+      name: 'ExternalHttpPhysicalWireDeniedError',
+    });
+    const request = vi.fn(async () => Promise.reject(physicalFence));
+    const resolve = vi.fn(async (raw: string) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4 as const,
+      addresses: [{ address: '93.184.216.34', family: 4 as const }],
+    }));
+
+    await expect(isAllowedByRobots(
+      'https://physical-fence.example/about',
+      { request, resolve },
+    )).rejects.toBe(physicalFence);
+  });
 });

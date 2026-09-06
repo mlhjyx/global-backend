@@ -34,9 +34,13 @@ export interface PlatformExecutionBudgetAuthorityUpsertedV1Claims {
   readonly subject_type: 'schedule';
   readonly subject_id: string;
   readonly schedule_id: string;
+  readonly schedule_request_sha256: string;
+  readonly workflow_id: string;
+  readonly workflow_run_id: string;
+  readonly technical_policy_revision: string;
   readonly currency: 'USD';
   readonly unit: 'microusd';
   readonly cap_per_run_microusd: string;
   readonly campaign_cap_microusd: string;
-  readonly max_runs: string;
+  readonly max_runs: '1';
 }

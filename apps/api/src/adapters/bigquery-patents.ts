@@ -18,14 +18,19 @@
  * 纯逻辑（{@link assigneeLikeAnchor} / {@link normalizeRow}）与 I/O（{@link BigQueryPatentsClient}）分离，便于测试。
  */
 import { BigQuery } from '@google-cloud/bigquery';
+import {
+  PLATFORM_PATENTS_MAXIMUM_BYTES_PER_ANCHOR,
+  PLATFORM_PATENTS_OUTPUT_ITEM_MAX,
+} from '../platform-authority/platform-execution-contract';
 
 export const GOOGLE_PATENTS_LICENSE = 'CC-BY-4.0';
 export const GOOGLE_PATENTS_ATTRIBUTION =
   'Google Patents Public Data by IFI CLAIMS Patent Services, licensed under CC BY 4.0.';
 
 // publications 表无 assignee 分区/聚簇 → 每查按列全表扫描（只 SELECT 2 列压字节）。maximumBytesBilled 硬顶护额度。
-export const GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED = '214748364800';
-export const GOOGLE_PATENTS_MAX_ROWS = 50;
+export const GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED =
+  PLATFORM_PATENTS_MAXIMUM_BYTES_PER_ANCHOR;
+export const GOOGLE_PATENTS_MAX_ROWS = PLATFORM_PATENTS_OUTPUT_ITEM_MAX;
 const MAX_ROWS_DEFAULT = GOOGLE_PATENTS_MAX_ROWS;
 const MAX_ROWS_CEIL = GOOGLE_PATENTS_MAX_ROWS;
 

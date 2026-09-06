@@ -6,13 +6,18 @@ import type { PlatformScheduleAuthorityActivities } from './platform-schedule-au
 import type { PlatformScheduleWorkflowInput } from './platform-schedule-authority';
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
+import {
+  PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS,
+  boundedPlatformDueSourceLimit,
+} from '../platform-authority/platform-execution-contract';
 
 const acts = proxyActivities<AcquisitionActivities>({
   startToCloseTimeout: '5 minutes',
-  retry: { maximumAttempts: 2 },
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({
-  startToCloseTimeout: '1 minute', retry: { maximumAttempts: 2 },
+  startToCloseTimeout: '1 minute',
+  retry: { maximumAttempts: PLATFORM_EXECUTION_ACTIVITY_MAXIMUM_ATTEMPTS },
 });
 
 export interface AcquisitionSweepResult {
@@ -29,7 +34,10 @@ export interface AcquisitionSweepResult {
 export async function acquisitionSweepWorkflow(input: ({ limit?: number } & PlatformScheduleWorkflowInput) = {}): Promise<AcquisitionSweepResult> {
   const executionBudget = await admitPlatformScheduleForWorkflow({ activities: authorityActs, scheduleId: ACQ_SWEEP_SCHEDULE_ID, workflowInput: input });
   const authorityArgs = executionBudget ? { executionContractVersion: 1 as const, executionBudget } : {};
-  const { sourceIds } = await acts.listDueSources({ limit: input.limit ?? 50, ...authorityArgs });
+  const { sourceIds } = await acts.listDueSources({
+    limit: boundedPlatformDueSourceLimit(input.limit),
+    ...authorityArgs,
+  });
   const results: (AcquireResult & { error?: string })[] = [];
   for (const sourceId of sourceIds) {
     try {

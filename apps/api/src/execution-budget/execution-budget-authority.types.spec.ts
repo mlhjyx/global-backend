@@ -7,17 +7,14 @@ import {
 } from './execution-budget-authority.types';
 
 describe('execution budget authority claim types', () => {
-  it.each([
-    ['0'],
-    ['-1'],
-    ['1.0'],
-    ['01'],
-    ['9223372036854775808'],
-  ])('rejects non-canonical microusd %s', (value) => {
-    expect(() => assertCanonicalMicrousd(value)).toThrow(
-      'EXECUTION_BUDGET_GRANT_INVALID',
-    );
-  });
+  it.each([['0'], ['-1'], ['1.0'], ['01'], ['9223372036854775808']])(
+    'rejects non-canonical microusd %s',
+    (value) => {
+      expect(() => assertCanonicalMicrousd(value)).toThrow(
+        'EXECUTION_BUDGET_GRANT_INVALID',
+      );
+    },
+  );
 
   it('parses a positive PostgreSQL BIGINT microusd amount', () => {
     expect(assertCanonicalMicrousd('9223372036854775807')).toBe(
@@ -93,22 +90,63 @@ describe('execution budget authority claim types', () => {
     'platform.acquisition',
     'platform.intent_watch',
     'platform.sanctions',
-  ] as const)('accepts platform authority purpose %s with campaign fields', (purpose) => {
+  ] as const)(
+    'accepts platform authority purpose %s with campaign fields',
+    (purpose) => {
+      expect(() =>
+        assertAuthorityPurposeShape({
+          authorityKind: 'PLATFORM_GRANT',
+          purpose,
+          workspaceId: null,
+          requestSha256: null,
+          subjectType: 'schedule',
+          subjectId: 'schedule-1',
+          scheduleId: 'schedule-1',
+          capMicrousd: null,
+          capPerRunMicrousd: 1n,
+          campaignCapMicrousd: 1n,
+          maxRuns: 1n,
+          scheduleRequestSha256: 'a'.repeat(64),
+          workflowId: 'schedule-1-2026-09-05',
+          workflowRunId: '44444444-4444-4444-8444-444444444444',
+          technicalPolicyRevision: 'b'.repeat(64),
+        }),
+      ).not.toThrow();
+    },
+  );
+
+  it.each([
+    { scheduleRequestSha256: undefined },
+    { workflowId: undefined },
+    { workflowRunId: undefined },
+    { technicalPolicyRevision: undefined },
+    { workflowRunId: 'ABCDEF12-4444-4444-8444-444444444444' },
+    { scheduleRequestSha256: 'wrong-hash' },
+    { workflowId: 'workflow\nprivate' },
+    { technicalPolicyRevision: 'wrong-policy' },
+    { maxRuns: 2n },
+    { campaignCapMicrousd: 2n },
+  ])('rejects an unbound or multi-run platform grant case %#', (override) => {
     expect(() =>
       assertAuthorityPurposeShape({
         authorityKind: 'PLATFORM_GRANT',
-        purpose,
+        purpose: 'platform.acquisition',
         workspaceId: null,
         requestSha256: null,
         subjectType: 'schedule',
-        subjectId: 'schedule-1',
-        scheduleId: 'schedule-1',
+        subjectId: 'acq-sweep',
+        scheduleId: 'acq-sweep',
         capMicrousd: null,
         capPerRunMicrousd: 1n,
-        campaignCapMicrousd: 2n,
-        maxRuns: 3n,
+        campaignCapMicrousd: 1n,
+        maxRuns: 1n,
+        scheduleRequestSha256: 'a'.repeat(64),
+        workflowId: 'acq-sweep-2026-09-05',
+        workflowRunId: '44444444-4444-4444-8444-444444444444',
+        technicalPolicyRevision: 'b'.repeat(64),
+        ...override,
       }),
-    ).not.toThrow();
+    ).toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
   });
 
   it('rejects platform claims with workspace-only fields or no campaign fields', () => {
@@ -145,9 +183,9 @@ describe('execution budget authority claim types', () => {
         'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
       ),
     ).toBe(403);
-    expect(executionBudgetGrantErrorHttpStatus('EXECUTION_BUDGET_GRANT_REUSED')).toBe(
-      409,
-    );
+    expect(
+      executionBudgetGrantErrorHttpStatus('EXECUTION_BUDGET_GRANT_REUSED'),
+    ).toBe(409);
     expect(
       executionBudgetGrantErrorHttpStatus(
         'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',

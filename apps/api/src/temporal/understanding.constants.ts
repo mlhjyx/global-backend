@@ -1,24 +1,41 @@
 // Shared identifiers — no @temporalio imports, so this is safe to import from
 // both the workflow sandbox and normal Node code (the relay starts by name).
 // 单 worker 单队列跑获客主线的所有 workflow；量大后可按域拆队列。
-export const UNDERSTANDING_TASK_QUEUE = 'understanding';
+import { platformExecutionTechnicalRow } from '../platform-authority/platform-execution-contract';
+
+const ACQ_SWEEP_CONTRACT = platformExecutionTechnicalRow('acq-sweep');
+const INTENT_SWEEP_CONTRACT = platformExecutionTechnicalRow('intent-sweep');
+const PATENTS_CACHE_REFRESH_CONTRACT = platformExecutionTechnicalRow(
+  'patents-cache-refresh',
+);
+const SANCTIONS_REFRESH_CONTRACT = platformExecutionTechnicalRow(
+  'sanctions-refresh',
+);
+
+export const UNDERSTANDING_TASK_QUEUE =
+  ACQ_SWEEP_CONTRACT.taskQueue as 'understanding';
 export const UNDERSTANDING_WORKFLOW = 'understandingWorkflow';
 export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';
 export const QUALIFY_WORKFLOW = 'qualifyWorkflow';
-export const ACQUISITION_SWEEP_WORKFLOW = 'acquisitionSweepWorkflow';
-export const ACQ_SWEEP_SCHEDULE_ID = 'acq-sweep';
-export const INTENT_SWEEP_WORKFLOW = 'intentSweepWorkflow';
-export const INTENT_SWEEP_SCHEDULE_ID = 'intent-sweep';
+export const ACQUISITION_SWEEP_WORKFLOW = ACQ_SWEEP_CONTRACT.workflowType;
+export const ACQ_SWEEP_SCHEDULE_ID =
+  ACQ_SWEEP_CONTRACT.scheduleId as 'acq-sweep';
+export const INTENT_SWEEP_WORKFLOW = INTENT_SWEEP_CONTRACT.workflowType;
+export const INTENT_SWEEP_SCHEDULE_ID =
+  INTENT_SWEEP_CONTRACT.scheduleId as 'intent-sweep';
 export const BACKLOG_SWEEP_WORKFLOW = 'backlogSweepWorkflow';
 export const BACKLOG_SWEEP_SCHEDULE_ID = 'backlog-sweep';
 export const EXTERNAL_INTENT_SWEEP_WORKFLOW = 'externalIntentSweepWorkflow';
 export const EXTERNAL_INTENT_SWEEP_SCHEDULE_ID = 'external-intent-sweep';
 // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule）：一次共享大扫落 postgres → 逐公司零 BQ 字节读缓存
-export const PATENTS_CACHE_REFRESH_WORKFLOW = 'patentsCacheRefreshWorkflow';
-export const PATENTS_CACHE_REFRESH_SCHEDULE_ID = 'patents-cache-refresh';
+export const PATENTS_CACHE_REFRESH_WORKFLOW =
+  PATENTS_CACHE_REFRESH_CONTRACT.workflowType;
+export const PATENTS_CACHE_REFRESH_SCHEDULE_ID =
+  PATENTS_CACHE_REFRESH_CONTRACT.scheduleId as 'patents-cache-refresh';
 // 制裁名单筛查（Qualify 第五门，第 6 个周期 Schedule）：每日刷新 OFAC/EU 名单 → sanctions_entity + 重建索引
-export const SANCTIONS_REFRESH_WORKFLOW = 'sanctionsRefreshWorkflow';
-export const SANCTIONS_REFRESH_SCHEDULE_ID = 'sanctions-refresh';
+export const SANCTIONS_REFRESH_WORKFLOW = SANCTIONS_REFRESH_CONTRACT.workflowType;
+export const SANCTIONS_REFRESH_SCHEDULE_ID =
+  SANCTIONS_REFRESH_CONTRACT.scheduleId as 'sanctions-refresh';
 // Site Builder KB：commit workflow 丢启动、retry 到期或 processing lease 过期的持久恢复面。
 export const KB_RECOVERY_SWEEP_WORKFLOW = 'kbRecoverySweepWorkflow';
 export const KB_RECOVERY_SWEEP_SCHEDULE_ID = 'site-builder-kb-recovery';

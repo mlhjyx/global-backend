@@ -12,8 +12,9 @@ import {
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
+import { PLATFORM_PATENTS_MAX_ANCHORS } from '../platform-authority/platform-execution-contract';
 
-export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
+export const PATENT_CACHE_BROKER_MAX_ANCHORS = PLATFORM_PATENTS_MAX_ANCHORS;
 
 async function readbackPatentRefresh(
   transaction: PatentRefreshDb,

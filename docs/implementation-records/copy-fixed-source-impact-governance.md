@@ -39,39 +39,41 @@ Binding path、binding bytes、artifact ID、fixed source commit 与 source bund
 - `PRODUCTION_PARITY_SINGLE_RUNTIME_PATH_SECURITY_PATCH`：上一个精确集合加已审查的根 package security 变化。
 - `PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION`：当前 11-path Authority foundation successor。
 - `PRODUCTION_PARITY_PROVIDER_SETTLEMENT_READBACK_V1`：Authority foundation 再加 Site Builder AI result bridge 的精确 12-path settlement-readback successor。
+- `PRODUCTION_PARITY_PLATFORM_AUTHORITY_POLICY_V2`：上述 12-path 再加 API build 对 reviewed-v2 policy 原始字节的精确资产复制合同。
 
 这些 scopes 是历史与当前分支所需的 exact sets，不是 allow-prefix、目录 wildcard、任意子集或“只要与 Copy 无关就放行”的语义例外。
 
-## 3. 当前 12-path successor
+## 3. 当前 13-path successor
 
 机器生成并 readback 的当前状态：
 
 | 字段 | 精确值 |
 | --- | --- |
 | Status | `STALE_HOLD` |
-| Current source fingerprint | `1b0e7bf297085cc30bb443351df0d82fbc64cd569f763d4714a663a75f98c3d2` |
-| Stale scope | `PRODUCTION_PARITY_PROVIDER_SETTLEMENT_READBACK_V1` |
+| Current source fingerprint | `b62590163e470cdbc3e3771e40314f7f163e922369e828c0ec74ef6fffe67025` |
+| Stale scope | `PRODUCTION_PARITY_PLATFORM_AUTHORITY_POLICY_V2` |
 | Dispatch authorization | `NOT_AUTHORIZED` |
 | Pilot eligibility | `BLOCKED` |
 | Required follow-up | `REBASE_FIXED_SOURCE_BEFORE_DISPATCH` |
-| Eligibility receipt SHA-256 | `f787d9db3fd695d45001b0ea3e3d6f5a429c1c5d702231b74bfc20b3695a85e4` |
+| Eligibility receipt SHA-256 | `f2403e19f514f44bd2896a5ac851d966fa51029b70320154dcac4ce4e31e6dea` |
 
 精确 drifted paths：
 
-1. `apps/api/package.json`
-2. `apps/api/src/model-gateway/new-api-request-bound-settlement.ts`
-3. `apps/api/src/model-runtime/site-builder-ai-task-bridge.ts`
-4. `apps/api/src/model-runtime/structured-task-runtime-bridge.ts`
-5. `apps/api/src/site-builder/agents/ai-task.ts`
-6. `apps/api/tsconfig.build.json`
-7. `package.json`
-8. `packages/contracts/package.json`
-9. `packages/contracts/src/index.ts`
-10. `packages/contracts/src/site-builder/component-qualification.ts`
-11. `packages/db/prisma/schema.prisma`
-12. `pnpm-lock.yaml`
+1. `apps/api/nest-cli.json`
+2. `apps/api/package.json`
+3. `apps/api/src/model-gateway/new-api-request-bound-settlement.ts`
+4. `apps/api/src/model-runtime/site-builder-ai-task-bridge.ts`
+5. `apps/api/src/model-runtime/structured-task-runtime-bridge.ts`
+6. `apps/api/src/site-builder/agents/ai-task.ts`
+7. `apps/api/tsconfig.build.json`
+8. `package.json`
+9. `packages/contracts/package.json`
+10. `packages/contracts/src/index.ts`
+11. `packages/contracts/src/site-builder/component-qualification.ts`
+12. `packages/db/prisma/schema.prisma`
+13. `pnpm-lock.yaml`
 
-`apps/api/src/model-runtime/site-builder-ai-task-bridge.ts` 是相对 11-path Authority foundation 新增的 settlement result projection 漂移；其余十一项保留既有已审查 successor。当前 receipt 继续保持 `STALE_HOLD/NOT_AUTHORIZED/BLOCKED`，没有改 active binding，也没有生成新的 Copy artifact。
+`apps/api/nest-cli.json` 是相对 12-path settlement-readback successor 新增的 reviewed-v2 policy 原始字节复制合同；其余十二项保留既有已审查 successor。当前 receipt 继续保持 `STALE_HOLD/NOT_AUTHORIZED/BLOCKED`，没有改 active binding，也没有生成新的 Copy artifact。
 
 ## 4. 安全边界
 

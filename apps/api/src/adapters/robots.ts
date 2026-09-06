@@ -10,8 +10,17 @@
  * 复杂 robots（Allow 覆盖、按 UA 细分）从严处理为不可抓。结果带 TTL 缓存。
  */
 
-import { EgressBlockedError, ExternalHttpActionDeniedError, requestPublicHttp } from './guarded-http';
+import {
+  EgressBlockedError,
+  ExternalHttpActionDeniedError,
+  isExternalHttpPhysicalWireDeniedError,
+  requestPublicHttp,
+} from './guarded-http';
 import { resolvePublicHttpUrl, type PublicUrlResolver } from './url-guard';
+import {
+  PLATFORM_ROBOTS_REDIRECT_MAX,
+  PLATFORM_ROBOTS_RESPONSE_MAX_BYTES,
+} from '../platform-authority/platform-execution-contract';
 
 interface RobotsRule {
   disallow: string[];
@@ -25,6 +34,7 @@ export interface RobotsDependencies {
   request?: typeof requestPublicHttp;
   resolve?: PublicUrlResolver;
   authorizeExternalAction?: () => Promise<boolean>;
+  beforePhysicalWire?: () => Promise<void>;
 }
 
 async function loadRobots(
@@ -36,8 +46,8 @@ async function loadRobots(
   try {
     const res = await request(`${origin}/robots.txt`, {
       timeoutMs: 10_000,
-      maxBytes: 100_000,
-      maxRedirects: 3,
+      maxBytes: PLATFORM_ROBOTS_RESPONSE_MAX_BYTES,
+      maxRedirects: PLATFORM_ROBOTS_REDIRECT_MAX,
       headers: { 'User-Agent': 'GlobalBot/1.0' },
     });
     if (res.ok) {
@@ -45,6 +55,7 @@ async function loadRobots(
     }
     // 4xx/无 robots → 视为无限制（RFC 惯例）
   } catch (error) {
+    if (isExternalHttpPhysicalWireDeniedError(error)) throw error;
     const workspaceActionDenied =
       error instanceof ExternalHttpActionDeniedError ||
       (error instanceof Error && error.name === 'ExternalHttpActionDeniedError');
@@ -101,6 +112,7 @@ export async function isAllowedByRobots(url: string, dependencies: RobotsDepende
     : (raw: string, options: Parameters<typeof requestPublicHttp>[1]) =>
         requestPublicHttp(raw, options, {
           authorizeExternalAction: dependencies.authorizeExternalAction,
+          beforePhysicalWire: dependencies.beforePhysicalWire,
         });
   const rule = await loadRobots(u.origin, request);
   const path = u.pathname || '/';

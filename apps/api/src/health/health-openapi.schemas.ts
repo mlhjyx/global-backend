@@ -41,6 +41,98 @@ const COMPONENT_SCHEMA: SchemaObject = {
   ],
 };
 
+const PLATFORM_AUTOMATION_READINESS_SCHEMA: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "rows"],
+  properties: {
+    schemaVersion: {
+      type: "string",
+      enum: ["platform-automation-readiness/v1"],
+    },
+    rows: {
+      type: "array",
+      minItems: 4,
+      maxItems: 4,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["identity", "desiredMode", "state", "code"],
+        properties: {
+          identity: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "temporalNamespace",
+              "scheduleId",
+              "purpose",
+              "workflowType",
+              "taskQueue",
+            ],
+            properties: {
+              temporalNamespace: {
+                type: "string",
+                enum: ["platform-automation"],
+              },
+              scheduleId: {
+                type: "string",
+                enum: [
+                  "acq-sweep",
+                  "patents-cache-refresh",
+                  "intent-sweep",
+                  "sanctions-refresh",
+                ],
+              },
+              purpose: {
+                type: "string",
+                enum: [
+                  "platform.acquisition",
+                  "platform.intent_watch",
+                  "platform.sanctions",
+                ],
+              },
+              workflowType: {
+                type: "string",
+                enum: [
+                  "acquisitionSweepWorkflow",
+                  "patentsCacheRefreshWorkflow",
+                  "intentSweepWorkflow",
+                  "sanctionsRefreshWorkflow",
+                ],
+              },
+              taskQueue: { type: "string", enum: ["understanding"] },
+            },
+          },
+          desiredMode: {
+            type: "string",
+            enum: ["ENABLED", "INTENTIONALLY_DISABLED_NO_EGRESS"],
+          },
+          state: {
+            type: "string",
+            enum: [
+              "ISSUABLE",
+              "INTENTIONALLY_DISABLED_NO_EGRESS",
+              "QUOTE_UNAVAILABLE",
+              "TEMPORAL_PROOF_UNAVAILABLE",
+              "ISSUER_UNAVAILABLE",
+              "WRITER_UNAVAILABLE",
+              "REVOCATION_DELIVERY_UNAVAILABLE",
+              "POLICY_DRIFT",
+              "BLOCKED",
+            ],
+          },
+          code: {
+            type: "string",
+            minLength: 2,
+            maxLength: 128,
+            pattern: "^PLATFORM_AUTOMATION_[A-Z0-9_]{1,107}$",
+          },
+        },
+      },
+    },
+  },
+};
+
 export const LIVE_HEALTH_RESPONSE_SCHEMA: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -147,11 +239,17 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         "execution_budget_jwks",
         "workspace_budget_authority",
         "platform_budget_authority",
+        "platform_automation",
+        "site_builder_model_settlement_readback",
+        "platform_technical_quote_authentication",
       ],
       properties: {
         execution_budget_jwks: COMPONENT_SCHEMA,
         workspace_budget_authority: COMPONENT_SCHEMA,
         platform_budget_authority: COMPONENT_SCHEMA,
+        platform_automation: PLATFORM_AUTOMATION_READINESS_SCHEMA,
+        site_builder_model_settlement_readback: COMPONENT_SCHEMA,
+        platform_technical_quote_authentication: COMPONENT_SCHEMA,
       },
     },
     components: {
@@ -165,6 +263,7 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         "outbox_relay",
         "api_runtime",
         "storage",
+        "generic_artifact_storage",
         "redis",
         "model_gateway",
         "renderer",
@@ -181,6 +280,7 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         outbox_relay: COMPONENT_SCHEMA,
         api_runtime: COMPONENT_SCHEMA,
         storage: COMPONENT_SCHEMA,
+        generic_artifact_storage: COMPONENT_SCHEMA,
         redis: COMPONENT_SCHEMA,
         model_gateway: COMPONENT_SCHEMA,
         renderer: COMPONENT_SCHEMA,

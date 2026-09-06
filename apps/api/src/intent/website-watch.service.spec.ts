@@ -187,6 +187,31 @@ describe('WebsiteWatchService', () => {
     expect(r.added).toBe(1);
   });
 
+  it('never fetches more than 20 distinct configured pages for one scheduled source', async () => {
+    const pages = Array.from({ length: 25 }, (_unused, index) => ({
+      url: `https://acme.com/products/${index}`,
+      kind: 'products' as const,
+    }));
+    (prisma.sources.get('src1') as Record<string, unknown>).config = {
+      company: { name: 'Acme', domain: 'acme.com' },
+      pages,
+    };
+    const boundedFetch = vi.fn(async (url: string) => ({
+      url,
+      html: productHtml('Laser X1'),
+    }));
+    const bounded = new WebsiteWatchService({
+      prisma: prisma as unknown as PrismaService,
+      fetcher: { fetch: boundedFetch },
+    });
+
+    const result = await bounded.watch('src1');
+
+    expect(boundedFetch).toHaveBeenCalledTimes(20);
+    expect(result).toMatchObject({ pagesFetched: 20, added: 20 });
+    expect(boundedFetch).not.toHaveBeenCalledWith(pages[20]!.url);
+  });
+
   it('rejects a non-web_watch source', async () => {
     prisma.sources.set('bad', { id: 'bad', providerKey: 'trade_fair', status: 'ACTIVE', config: {} });
     await expect(svc.watch('bad')).rejects.toThrow(/not a web_watch/);

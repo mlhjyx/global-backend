@@ -5,6 +5,7 @@ import {
   PATENTS_CACHE_REFRESH_SCHEDULE_ID,
   SANCTIONS_REFRESH_SCHEDULE_ID,
 } from "./understanding.constants";
+import { platformExecutionTechnicalRow } from "../platform-authority/platform-execution-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -64,22 +65,26 @@ export const PLATFORM_SCHEDULE_AUTHORITY_SCOPES = Object.freeze({
   [ACQ_SWEEP_SCHEDULE_ID]: scope(
     "platform.acquisition",
     ACQ_SWEEP_SCHEDULE_ID,
-    "5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e",
+    platformExecutionTechnicalRow(ACQ_SWEEP_SCHEDULE_ID)
+      .scheduleRequestSha256,
   ),
   [INTENT_SWEEP_SCHEDULE_ID]: scope(
     "platform.intent_watch",
     INTENT_SWEEP_SCHEDULE_ID,
-    "9ef4afce408c36472e00db01a80b6e3a3e461a2b13af7f456d9ce31a7676c34a",
+    platformExecutionTechnicalRow(INTENT_SWEEP_SCHEDULE_ID)
+      .scheduleRequestSha256,
   ),
   [SANCTIONS_REFRESH_SCHEDULE_ID]: scope(
     "platform.sanctions",
     SANCTIONS_REFRESH_SCHEDULE_ID,
-    "50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe",
+    platformExecutionTechnicalRow(SANCTIONS_REFRESH_SCHEDULE_ID)
+      .scheduleRequestSha256,
   ),
   [PATENTS_CACHE_REFRESH_SCHEDULE_ID]: scope(
     "platform.acquisition",
     PATENTS_CACHE_REFRESH_SCHEDULE_ID,
-    "3fbcd9326937d66243f1395d3f0c4f098c6748977d00ae90017d0f8f04202db6",
+    platformExecutionTechnicalRow(PATENTS_CACHE_REFRESH_SCHEDULE_ID)
+      .scheduleRequestSha256,
   ),
 } satisfies Readonly<
   Record<PlatformScheduleId, PlatformScheduleAuthorityScope>

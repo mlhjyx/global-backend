@@ -12,6 +12,10 @@ import {
   isExecutionControlError,
 } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import {
+  PLATFORM_SANCTIONS_SCHEDULED_SOURCE_KEYS,
+  PLATFORM_SANCTIONS_SOURCE_MAX,
+} from '../platform-authority/platform-execution-contract';
 
 /**
  * 制裁名单刷新服务（Temporal 每日 Schedule 活动 + verify 脚本用）。owner 连接写平台表（绕 RLS）。
@@ -164,6 +168,32 @@ export class SanctionsRefreshService {
   /** 刷新全部 ENABLED 源（单源失败 fail-safe）。 */
   async refreshAll(budgetKey?: string): Promise<SanctionsRefreshSummary[]> {
     const sources = await this.deps.ownerDb.sanctionsSource.findMany({ where: { status: 'ENABLED' } });
+    return this.refreshSources(sources, budgetKey);
+  }
+
+  /**
+   * Schedule-only source matrix. The consolidated OFAC seed and its history
+   * remain available to explicit non-schedule callers, but cannot enlarge the
+   * signed two-source execution envelope.
+   */
+  async refreshScheduled(
+    budgetKey?: string,
+  ): Promise<SanctionsRefreshSummary[]> {
+    const sources = await this.deps.ownerDb.sanctionsSource.findMany({
+      where: {
+        status: 'ENABLED',
+        key: { in: [...PLATFORM_SANCTIONS_SCHEDULED_SOURCE_KEYS] },
+      },
+      orderBy: { key: 'asc' },
+      take: PLATFORM_SANCTIONS_SOURCE_MAX,
+    });
+    return this.refreshSources(sources, budgetKey);
+  }
+
+  private async refreshSources(
+    sources: readonly { readonly id: string; readonly key: string }[],
+    budgetKey?: string,
+  ): Promise<SanctionsRefreshSummary[]> {
     const out: SanctionsRefreshSummary[] = [];
     for (const src of sources) {
       try {
