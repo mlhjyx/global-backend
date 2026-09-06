@@ -14,6 +14,8 @@ import {
 
 const CLIENT_KEYS = Object.freeze(['fetch', 'token', 'apiVersion']);
 const clientStates = new WeakMap();
+const setClientState = WeakMap.prototype.set.bind(clientStates);
+const getClientState = WeakMap.prototype.get.bind(clientStates);
 
 export const createRestClient = (options) => {
   requireCondition(
@@ -25,12 +27,12 @@ export const createRestClient = (options) => {
   );
   requireCondition(options.apiVersion === API_VERSION, 'APPROVAL_GITHUB_API_VERSION_INVALID');
   const client = deepFreeze({ schema_version: 'github-readback-client/v1' });
-  clientStates.set(client, Object.freeze({ fetch: options.fetch, token: options.token }));
+  setClientState(client, Object.freeze({ fetch: options.fetch, token: options.token }));
   return client;
 };
 
 export const getRestState = (client) => {
-  const state = clientStates.get(client);
+  const state = getClientState(client);
   requireCondition(state !== undefined, 'APPROVAL_GITHUB_CLIENT_INVALID');
   return state;
 };

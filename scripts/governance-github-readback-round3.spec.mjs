@@ -152,3 +152,19 @@ test('round3 accepts canonical absolute query tokens in a different closed order
   const { evidence } = await collect(state);
   assert.equal(evidence.review_pagination_complete, true);
 });
+
+
+test('unregistered REST clients remain invalid after collection methods are replaced', async () => {
+  const { getRestState } = await import('./governance-github-readback-rest.mjs');
+  const client = Object.freeze({ schema_version: 'github-readback-client/v1' });
+  const originalGet = WeakMap.prototype.get;
+  try {
+    WeakMap.prototype.get = function changedGet(value) {
+      if (value === client) return Object.freeze({});
+      return Reflect.apply(originalGet, this, [value]);
+    };
+    assert.throws(() => getRestState(client), /^Error: APPROVAL_GITHUB_CLIENT_INVALID$/);
+  } finally {
+    WeakMap.prototype.get = originalGet;
+  }
+});

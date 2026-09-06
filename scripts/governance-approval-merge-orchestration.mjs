@@ -32,6 +32,9 @@ const RESERVATION_KEYS = Object.freeze([
 ]);
 const KEY_KEYS = Object.freeze(['repositoryId', 'singleUseNonce']);
 const freshDispatchCapabilities = new WeakSet();
+const addFreshDispatchCapability = WeakSet.prototype.add.bind(freshDispatchCapabilities);
+const hasFreshDispatchCapability = WeakSet.prototype.has.bind(freshDispatchCapabilities);
+const deleteFreshDispatchCapability = WeakSet.prototype.delete.bind(freshDispatchCapabilities);
 const clone = (value) => structuredClone(value);
 const frozenClone = (value) => deepFreeze(clone(value));
 const nowIso = (now) => {
@@ -244,7 +247,7 @@ export const reserveMergeAuthorizationNonce = async (
     throw approvalError('APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT');
   }
   const reservation = reservationFrom(grant, request, facts.reservation);
-  freshDispatchCapabilities.add(reservation);
+  addFreshDispatchCapability(reservation);
   return deepFreeze({ outcome: 'RESERVED', reservation, reservedLedgerRevision: expectedCommittedRevision });
 };
 
@@ -255,7 +258,7 @@ export const executeReservedMerge = async (reservation, mergeRequester, ledger, 
   } catch {
     return holdExecution('APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
   }
-  if (!freshDispatchCapabilities.has(reservation)) {
+  if (!hasFreshDispatchCapability(reservation)) {
     return holdExecution('APPROVAL_MERGE_AUTHORIZATION_NONCE_CAS_CONFLICT');
   }
   if (typeof mergeRequester?.requestMerge !== 'function') {
@@ -275,7 +278,7 @@ export const executeReservedMerge = async (reservation, mergeRequester, ledger, 
     || Date.parse(dispatchAt) >= Date.parse(reservation.grant.expires_at)) {
     return holdExecution('APPROVAL_MERGE_AUTHORIZATION_GRANT_STALE');
   }
-  freshDispatchCapabilities.delete(reservation);
+  deleteFreshDispatchCapability(reservation);
   const laterEvents = observed.stream.events.filter(
     ({ ledgerRevision }) => ledgerRevision > reservation.reservedLedgerRevision,
   );

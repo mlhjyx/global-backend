@@ -44,6 +44,7 @@ const trustedIssuanceCapabilities = new WeakSet();
 // Capture the native membership operations before caller-controlled code can
 // replace collection intrinsics; neither set has a public issuance path.
 const hasIssuedValidatedCore = WeakSet.prototype.has.bind(issuedValidatedCores);
+const addIssuedValidatedCore = WeakSet.prototype.add.bind(issuedValidatedCores);
 const hasTrustedIssuanceCapability = WeakSet.prototype.has.bind(trustedIssuanceCapabilities);
 
 const snapshotsMatch = (candidate) => {
@@ -231,7 +232,7 @@ export const buildApprovalReceiptCore = (
   };
   if (stage !== null) core.merge_authorization_evidence = mergeReceiptReference(mergeAuthorizationEvidence);
   const frozenCore = deepFreeze(core);
-  issuedValidatedCores.add(frozenCore);
+  addIssuedValidatedCore(frozenCore);
   return frozenCore;
 };
 

@@ -125,6 +125,32 @@ test('reviewer C2 restart counterexample cannot restore fresh physical-dispatch 
   assert.deepEqual(restarted.snapshot()[0].events.map(({ type }) => type), ['NONCE_RESERVED']);
 });
 
+test('restored reservations remain read-only after collection methods are replaced', async () => {
+  const grant = await readJson('valid-grant.json');
+  const source = new Ledger();
+  const fresh = await reserve(source, grant);
+  const restarted = new Ledger(source.snapshot());
+  const restored = clone(fresh.reservation);
+  const originalHas = WeakSet.prototype.has;
+  let calls = 0;
+  try {
+    WeakSet.prototype.has = function changedHas(value) {
+      return value === restored || Reflect.apply(originalHas, this, [value]);
+    };
+    const result = await executeReservedMerge(
+      restored,
+      { requestMerge: async () => { calls += 1; return { acknowledgement: 'ACKNOWLEDGED' }; } },
+      restarted,
+      NOW,
+    );
+    assert.equal(result.outcome, 'HOLD');
+    assert.equal(calls, 0);
+    assert.deepEqual(restarted.snapshot()[0].events.map(({ type }) => type), ['NONCE_RESERVED']);
+  } finally {
+    WeakSet.prototype.has = originalHas;
+  }
+});
+
 test('C2 forged execution mode and malformed dispatch CAS cannot reach the merger', async () => {
   const grant = await readJson('valid-grant.json');
   const failures = [];
