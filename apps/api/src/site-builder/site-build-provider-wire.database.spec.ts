@@ -4,6 +4,7 @@ import {
   isAuthorizedSiteBuildProviderWirePrincipal,
   siteBuildProviderWireTargetsAppDatabase,
   withSiteBuildProviderWireStatementTimeout,
+  SiteBuildProviderWireDatabase,
 } from "./site-build-provider-wire.database";
 
 const LOGIN_URL =
@@ -328,5 +329,26 @@ describe("SiteBuildProviderWireDatabase live contract", () => {
     } finally {
       await database?.disconnect();
     }
+  });
+
+  it("accepts the required migration when a later additive migration is present", async () => {
+    const client = {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+      $queryRawUnsafe: vi.fn(async () => [principal({
+        databaseName: "global_test",
+        migrationRevision: MIGRATION_REVISION,
+      })]),
+      $transaction: vi.fn(),
+    };
+    const database = new SiteBuildProviderWireDatabase(client, {
+      databaseName: "global_test",
+      migrationRevision: MIGRATION_REVISION,
+    });
+    await expect(database.checkReadiness()).resolves.toEqual({ status: "ok" });
+    expect(client.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("migration_name = $1"),
+      MIGRATION_REVISION,
+    );
   });
 });

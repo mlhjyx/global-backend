@@ -240,8 +240,9 @@ export class SiteBuildProviderWireDatabase
                 ), '[]'::jsonb) AS "memberships",
                 (SELECT migration_name
                    FROM public."_prisma_migrations"
-                  WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
-                  ORDER BY finished_at DESC, migration_name DESC LIMIT 1
+                  WHERE migration_name = $1
+                    AND finished_at IS NOT NULL AND rolled_back_at IS NULL
+                  LIMIT 1
                 )::text AS "migrationRevision",
                 COALESCE((SELECT bool_and(
                   pg_catalog.to_regprocedure(signature) IS NOT NULL AND
@@ -282,7 +283,7 @@ export class SiteBuildProviderWireDatabase
                    'site_build_provider_readback_probe_observation'
                  ])), false) AS "rlsForced"
            FROM pg_catalog.pg_roles p
-          WHERE p.rolname = session_user`);
+           WHERE p.rolname = session_user`, this.expected.migrationRevision);
       const row = rows.length === 1 ? rows[0] : undefined;
       if (!row || !isAuthorizedSiteBuildProviderWirePrincipal(row)) {
         this.principalVerified = false;
