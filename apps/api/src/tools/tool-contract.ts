@@ -83,6 +83,18 @@ export interface ToolContext {
    */
   beforePhysicalWire?: () => Promise<void>;
   /**
+   * Optional platform-schedule send fence. Managed platform activities inject
+   * this callback; ordinary workspace requests leave it absent. The broker
+   * invokes it exactly once around the physical tool execution so the
+   * durable authorize/claim/ACK-or-UNKNOWN protocol is the final send cut.
+   */
+  platformEgress?: {
+    authorizeAndDispatch: <T>(
+      operationKey: string,
+      executePhysicalWire: () => Promise<T>,
+    ) => Promise<T>;
+  };
+  /**
    * 本次调用的用途（'discovery' | 'enrichment' | 'intent' …，可多值=任一允许即放行）。
    * source_policy 用途门优先按它判（须在工具声明集内 + 域策略允许其一）；
    * 缺省退回工具声明的 allowedPurpose 任一交集（多用途工具如 smtp.rcpt_probe 的既有语义）。

@@ -98,6 +98,8 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
+import { PrismaPlatformEgressFencePort } from "../platform-authority/platform-egress-fence.prisma";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -345,6 +347,11 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
   }
   const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
+  // Platform physical wires use the same dedicated writer principal as
+  // authority admission. No in-memory or app-user fallback is permitted.
+  const platformEgressFence = new PlatformEgressFence(
+    new PrismaPlatformEgressFencePort(authorityWriter),
+  );
 
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
@@ -500,6 +507,7 @@ async function main(): Promise<void> {
         registry: buildSourceAdapterRegistry(broker),
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       ...createIntentActivities({
         prisma,
@@ -508,6 +516,7 @@ async function main(): Promise<void> {
         broker,
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       ...createBacklogActivities({
         prisma,
@@ -539,6 +548,7 @@ async function main(): Promise<void> {
         broker,
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
       ...createSanctionsRefreshActivities({
@@ -547,6 +557,7 @@ async function main(): Promise<void> {
         sanctionsScreening,
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
