@@ -6,7 +6,7 @@ import {
   PlatformEgressFenceError,
   type PlatformEgressFencePort,
   type PlatformEgressBinding,
-} from "./platform-egress-fence.v1";
+} from "./platform-egress-fence";
 
 const BINDING: PlatformEgressBinding = Object.freeze({
   authorityId: "11111111-1111-4111-8111-111111111111",
