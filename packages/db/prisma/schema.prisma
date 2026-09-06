@@ -30,6 +30,19 @@ enum RuntimeProcessState {
   @@map("runtime_process_state")
 }
 
+/// Linearizable platform physical-wire lifecycle. UNKNOWN is terminal for
+/// automatic dispatch; reconciliation may only append facts.
+enum PlatformEgressAttemptState {
+  AUTHORIZED
+  SENDING
+  ACKNOWLEDGED
+  UNKNOWN
+  SETTLED
+  BLOCKED
+
+  @@map("platform_egress_attempt_state")
+}
+
 enum SiteBuildSpendReconciliationStatus {
   UNRESOLVED
   RESOLVED
@@ -188,12 +201,51 @@ model ExecutionBudgetAuthority {
   artifacts                GenericOperationArtifact[]
   toolOperationSubjects    ToolOperationSubject[]               @relation("ToolOperationSubjectAuthority")
   governedSubjectRelations GovernedSubjectRelation[]            @relation("GovernedSubjectRelationAuthority")
+  platformEgressAttempts   PlatformEgressAttempt[]
 
   @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
   @@index([workspaceId, purpose, expiresAt], map: "execution_budget_authority_workspace_purpose_expiry_idx")
   @@index([scheduleId, purpose, expiresAt], map: "execution_budget_authority_schedule_purpose_expiry_idx")
   @@map("execution_budget_authority")
+}
+
+/// Durable send-cut state for one platform authority/run/operation key.
+/// Direct table DML is denied; the platform writer uses the functions from the
+/// additive fence migration so revocation and the final CAS share row locks.
+model PlatformEgressAttempt {
+  id                     String                    @id @default(uuid()) @db.Uuid
+  authorityId            String                    @map("authority_id") @db.Uuid
+  scheduleId             String                    @map("schedule_id") @db.VarChar(191)
+  workflowRunId          String                  @map("workflow_run_id") @db.VarChar(36)
+  operationKey           String                  @map("operation_key") @db.VarChar(200)
+  policyRevision         String                  @map("policy_revision") @db.VarChar(64)
+  generation             BigInt                  @default(0)
+  state                  PlatformEgressAttemptState @default(AUTHORIZED)
+  authorizedAt           DateTime                @default(now()) @map("authorized_at") @db.Timestamptz(3)
+  sendingAt              DateTime?               @map("sending_at") @db.Timestamptz(3)
+  acknowledgedAt         DateTime?               @map("acknowledged_at") @db.Timestamptz(3)
+  unknownAt              DateTime?               @map("unknown_at") @db.Timestamptz(3)
+  outcomeDigest           String?                 @map("outcome_digest") @db.VarChar(64)
+  outcomeMeta             Json?                   @map("outcome_meta")
+
+  authority ExecutionBudgetAuthority @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_authority_fkey")
+
+  @@unique([authorityId, operationKey], map: "platform_egress_attempt_authority_operation_key")
+  @@unique([scheduleId, workflowRunId, operationKey], map: "platform_egress_attempt_run_operation_key")
+  @@index([scheduleId, generation, state], map: "platform_egress_attempt_schedule_generation_idx")
+  @@map("platform_egress_attempt")
+}
+
+/// Monotonic per-schedule generation shared by authorization and the final
+/// send CAS. A disabled generation cannot be reopened by a process-local flag.
+model PlatformEgressScheduleFence {
+  scheduleId String   @id @map("schedule_id") @db.VarChar(191)
+  generation BigInt   @default(0)
+  state      String   @default("ACTIVE") @db.VarChar(16)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("platform_egress_schedule_fence")
 }
 
 /// Append-only revocation fact. The copied scope participates in both RLS and
