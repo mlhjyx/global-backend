@@ -19,6 +19,8 @@ import {
   type PlatformScheduleAuthorityScope,
   type PlatformScheduleId,
 } from "./platform-schedule-authority";
+import type { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
+import type { PlatformEgressBinding } from "../platform-authority/platform-egress-fence";
 
 export interface AdmitPlatformScheduleInput {
   readonly executionContractVersion?: 1;
@@ -50,6 +52,55 @@ function activityWorkflowRunId(
   } catch {
     return undefined;
   }
+}
+
+function activityWorkflowId(): string | undefined {
+  try {
+    return ActivityContext.current().info.workflowExecution?.workflowId;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Build the only platform physical-wire dispatcher exposed to activities.
+ * Workflow identity is read from Temporal and policy/expiry are resolved by
+ * the durable authority port; no activity argument can forge either value.
+ */
+export function platformEgressDispatcher(input: {
+  readonly fence: PlatformEgressFence;
+  readonly binding: PlatformExecutionBudgetBinding;
+  readonly workflowId?: string;
+}): {
+  authorizeAndDispatch: <T>(
+    operationKey: string,
+    executePhysicalWire: () => Promise<T>,
+  ) => Promise<T>;
+} {
+  const workflowId = input.workflowId ?? activityWorkflowId();
+  if (!workflowId) {
+    return {
+      authorizeAndDispatch: async () => {
+        throw nonRetryable("PLATFORM_EGRESS_WORKFLOW_ID_UNAVAILABLE");
+      },
+    };
+  }
+  const binding: PlatformEgressBinding = {
+    authorityId: input.binding.authorityId,
+    scheduleId: input.binding.scheduleId,
+    workflowId,
+    workflowRunId: input.binding.workflowRunId,
+    scheduleRequestSha256: input.binding.requestSha256,
+    accountKey: input.binding.accountKey,
+  };
+  return {
+    authorizeAndDispatch: (operationKey, executePhysicalWire) =>
+      input.fence.authorizeAndDispatchPlatformEgress(
+        binding,
+        operationKey,
+        executePhysicalWire,
+      ),
+  };
 }
 
 export function createPlatformScheduleAuthorityActivities(deps: {
