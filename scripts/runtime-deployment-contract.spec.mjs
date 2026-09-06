@@ -453,6 +453,7 @@ test('provider-wire writer provisioning is dedicated, dual-role scoped, and secr
   assert.match(verify, /APP_DATABASE_URL/);
   assert.match(verify, /parse_url APP APP_DATABASE_URL/);
   assert.match(verify, /SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION/);
+  assert.match(verify, /EXISTS \([\s\S]*migration_name = :'expected_migration'/);
   assert.doesNotMatch(verify, /psql "\$\{APP_DATABASE_URL\}"/);
   assert.match(verify, /pg_auth_members/);
   assert.match(verify, /membership\.admin_option/);
