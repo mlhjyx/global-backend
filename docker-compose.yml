@@ -37,15 +37,20 @@ services:
   # Web UI at http://localhost:3001 — the app calls only its one OpenAI-compatible
   # endpoint (http://localhost:3001/v1). First-run admin: root / 123456.
   new-api:
-    image: calciumion/new-api@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c
+    image: ghcr.io/mlhjyx/new-api@sha256:b72f2290d67d7f73bb47c9e7e52d6a9d3b78ce5a873695ea6b636c181829e299
     container_name: global-new-api
     restart: unless-stopped
     ports:
       - "127.0.0.1:3001:3000"
     environment:
       - TZ=Asia/Shanghai
+      - SETTLEMENT_READBACK_CREDENTIAL_PEPPER_KEYRING_FILE=/run/secrets/settlement-readback/pepper.keyring
     volumes:
-      - newapi-data:/data
+      - newapi-data-settlement-readback:/data
+      - type: bind
+        source: /global/backend/.secrets/new-api-settlement-readback
+        target: /run/secrets/settlement-readback
+        read_only: true
 
   # OpenOx exposes video creation at /v1/video/generations, while the pinned
   # new-api OpenAI video task adaptor submits to /v1/videos. Keep new-api in
@@ -205,5 +210,6 @@ volumes:
   pgdata:
   redisdata:
   newapi-data:
+  newapi-data-settlement-readback:
   miniodata:
   ollamadata:
