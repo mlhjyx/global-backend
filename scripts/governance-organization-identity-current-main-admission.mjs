@@ -282,7 +282,7 @@ export function collectCurrentMainAuditFacts({ repositoryRoot, branch = "HEAD", 
     if (pathFacts.status !== "PASS") return pathFacts;
     const afterMain = runGit(repositoryRoot, ["rev-parse", "refs/remotes/origin/main"]).toString().trim();
     if (afterMain !== advertisedMain) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
-    if (branch.startsWith("refs/") && runGit(repositoryRoot, ["rev-parse", branch]).toString().trim() !== branchCommit) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
+    if (!validCommit(branch) && runGit(repositoryRoot, ["rev-parse", branch]).toString().trim() !== branchCommit) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
     return pass({ branchCommit, liveMainCommit: mainCommit, mergeBaseCommit: mergeBase, mainOnlyPaths: pathFacts.records, mainOnlyPathSetSha256: pathFacts.pathSetSha256 });
   } catch {
     return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
