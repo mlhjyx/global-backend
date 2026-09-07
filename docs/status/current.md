@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-07T16:12:30+08:00（Asia/Shanghai）
+> 最后核验：2026-09-07T17:05:34+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -25,7 +25,7 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 | Backend source       | root `main=origin/main=ac2aacc8e551b9928c44a618e254072fa2a16333`；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
 | 主线 CI | `17b637d7…` 的 build/typecheck/test、contracts、Security、Governance、CodeQL 和 production advisory freshness 均 SUCCESS；PR 专属 dependency delta/review 在 main push 上 SKIPPED | 只证明该提交的托管检查；不证明运行采用 |
-| Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它                                                                                                                               | 完整五文件源审查 C0/H0/M0；不再要求重复接线；当前保留运行环境尚未采用                                        |
+| Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它；本次 API 重启后 `/health/ready` 的 browser component=ok | 完整五文件源审查 C0/H0/M0；本次运行回读已确认恢复，不外推到其他环境 |
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
 | GrowthOS source      | `/global/frontend/growthos-source` clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
@@ -67,7 +67,7 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 | 观察              | 当前可确认的事实                                                                                                         | 不得外推                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
 | 运行版本          | API/Worker 同 exact N+5 image `sha256:021789a2…`，build `/health/build` 返回 build SHA `f9278178…`、artifact/SBOM 与 `20260907110000_platform_egress_fence_privilege_hardening` | running 不证明 readiness、队列消费、模型或用户旅程成功                                   |
-| Browser 历史事故  | `2026-09-05T17:37:15+08:00` 曾确认 2 GiB tmpfs 满、23,545 个 scoped directories、ready=503 / BROWSER_RUNTIME_UNAVAILABLE | 这是历史事故证据，不冒充今天重新检测的容量/HTTP 状态；源码修复已合入，运行恢复待独立观察 |
+| Browser 历史事故  | `2026-09-05T17:37:15+08:00` 曾确认 2 GiB tmpfs 满、23,545 个 scoped directories、ready=503 / BROWSER_RUNTIME_UNAVAILABLE；本次 `2026-09-07T17:05:34+08:00` 重启后 browser=ok | 历史事故与本次恢复分别记录；不外推到其他环境 |
 | Listener exposure | 本次 `ss` 仍见 `0.0.0.0:3001`、`[::]:3001` 和 legacy Java `*:8080`                                                       | 未执行端口收敛或旧服务退役                                                               |
 | Readiness           | `/api/v1/health/build`=200 且 identity 已切换；`/api/v1/health/ready`=503，平台 technical quote authentication、settlement readback、migration、API runtime 和 Outbox Relay 已 ok；Worker 由 gate 保持 STARTING，唯一主要阻塞为平台 Temporal proof/authority 缺失 | 这是 fail-closed 运行事实；不得把 exact image 误报为可接单或可付费调用 |
 | Historical Spend  | 旧 UNKNOWN/unknown 及 unresolved/expired 记录按原证据保留                                                                | 不通过重发制造结果，也不由源修改自动改写历史费用                                         |
