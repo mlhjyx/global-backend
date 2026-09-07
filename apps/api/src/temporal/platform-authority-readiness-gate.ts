@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { ExecutionControlError } from "../execution-budget/execution-control-error";
 
 type PlatformAuthorityFreshnessRow = Readonly<{
   purpose: string;
@@ -29,7 +30,7 @@ export async function assertPlatformAuthorityReady(
   );
   for (const purpose of requiredPurposes) {
     if (!usable.has(purpose)) {
-      throw new Error("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
+      throw new ExecutionControlError("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
     }
   }
 }
