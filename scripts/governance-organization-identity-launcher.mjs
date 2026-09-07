@@ -13,16 +13,20 @@ const REQUEST_SCHEMA_VERSION =
   "organization-identity-closed-command-request/v2";
 const REQUEST_V3_SCHEMA_VERSION =
   "organization-identity-closed-command-request/v3";
-const ROOT_DIRECTORY =
+const FIXED_SOURCE_ROOT_DIRECTORY =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher";
-const DEFAULT_REQUEST_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
-const DEFAULT_OUTPUT_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
-const TOOL_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
-const RUNTIME_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
+const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const MATERIALIZED_SUCCESSOR_ROOT_PREFIX =
+  "/global/backups/backend-root-reconciliation-20260826/successors/";
+const ROOT_DIRECTORY =
+  MODULE_DIRECTORY.endsWith("/launcher") &&
+  MODULE_DIRECTORY.startsWith(MATERIALIZED_SUCCESSOR_ROOT_PREFIX)
+    ? MODULE_DIRECTORY
+    : FIXED_SOURCE_ROOT_DIRECTORY;
+const DEFAULT_REQUEST_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "requests");
+const DEFAULT_OUTPUT_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "outputs");
+const TOOL_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "tool-root");
+const RUNTIME_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "runtime");
 const TASK0A_EVIDENCE_ROOT =
   "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2/.superpowers/sdd/2026-09-01-organization-identity-writer-ban-at-source";
 const APPROVED_REPOSITORY_ROOT = "/global/backend";

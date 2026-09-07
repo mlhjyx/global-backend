@@ -32,16 +32,20 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const GIT_ID = /^[0-9a-f]{40}$/;
 const FINAL_SPEC_SHA256 =
   "536e376a40d9ef4f49a65bc0224b74d58eb8a2d743fa766aa020397e67279dd4";
-const ROOT_DIRECTORY =
+const FIXED_SOURCE_ROOT_DIRECTORY =
   "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher";
-const REQUEST_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/requests";
-const OUTPUT_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/outputs";
-const TOOL_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/tool-root";
-const RUNTIME_ROOT =
-  "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/runtime";
+const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const MATERIALIZED_SUCCESSOR_ROOT_PREFIX =
+  "/global/backups/backend-root-reconciliation-20260826/successors/";
+const ROOT_DIRECTORY =
+  MODULE_DIRECTORY.endsWith("/launcher") &&
+  MODULE_DIRECTORY.startsWith(MATERIALIZED_SUCCESSOR_ROOT_PREFIX)
+    ? MODULE_DIRECTORY
+    : FIXED_SOURCE_ROOT_DIRECTORY;
+const REQUEST_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "requests");
+const OUTPUT_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "outputs");
+const TOOL_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "tool-root");
+const RUNTIME_ROOT = path.join(path.dirname(ROOT_DIRECTORY), "runtime");
 const ACCEPTED_LAUNCHER_CONTRACT_SHA256 =
   "7f4ebcb725bf6f87bb32c0ef6da98933c77e0d5de69341e0a5f93171c45bc5a3";
 const TASK0A_EVIDENCE_ROOT =
