@@ -65,6 +65,10 @@ export function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function valuesEqual(left, right) {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
 function isPassivePlain(value, seen = new Set()) {
   if (value === null) return true;
   if (typeof value === "string") return value.normalize("NFC") === value;
@@ -249,9 +253,17 @@ export function validateCurrentMainAdmissionDecision(decision) {
 }
 
 function runGit(repoRoot, args) {
-  const allowed = new Set(["rev-parse", "merge-base", "rev-list", "diff", "show-ref", "cat-file"]);
+  const allowed = new Set(["rev-parse", "merge-base", "rev-list", "diff", "show-ref", "cat-file", "config"]);
   if (!allowed.has(args[0])) throw new Error("GIT_COMMAND_NOT_ALLOWED");
   return execFileSync("git", ["-C", repoRoot, ...args], { encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+function canonicalRemoteIdentity(remote) {
+  if (typeof remote !== "string" || remote.includes("\0") || remote.includes("@") && !remote.startsWith("git@")) return null;
+  const value = remote.trim().replace(/\.git$/u, "");
+  const match = value.match(/^(?:https?:\/\/|ssh:\/\/git@)github\.com[/:]([^/]+)\/([^/]+)$/u) || value.match(/^git@github\.com:([^/]+)\/([^/]+)$/u);
+  if (!match || !/^[A-Za-z0-9_.-]+$/u.test(match[1]) || !/^[A-Za-z0-9_.-]+$/u.test(match[2])) return null;
+  return { host: "github.com", owner: match[1], name: match[2], full_name: `${match[1]}/${match[2]}` };
 }
 
 function parseNameStatusNul(bytes) {
@@ -269,8 +281,12 @@ function parseNameStatusNul(bytes) {
   return pass({ records, pathSetSha256: sha256(Buffer.from(records.map(({ path: filePath }) => `${filePath}\0`).join(""), "utf8")) });
 }
 
-export function collectCurrentMainAuditFacts({ repositoryRoot, branch = "HEAD", liveMain }) {
+export function collectCurrentMainAuditFacts({ repositoryRoot, branch = "HEAD", liveMain, expectedRepository }) {
   try {
+    if (!hasExactKeys(expectedRepository, ["host", "owner", "name", "full_name"])) return hold("REPOSITORY_IDENTITY_REQUIRED");
+    const remote = runGit(repositoryRoot, ["config", "--get", "remote.origin.url"]).toString().trim();
+    const repositoryIdentity = canonicalRemoteIdentity(remote);
+    if (!repositoryIdentity || !valuesEqual(repositoryIdentity, expectedRepository)) return hold("REPOSITORY_IDENTITY_INVALID");
     const branchCommit = runGit(repositoryRoot, ["rev-parse", branch]).toString().trim();
     const advertisedMain = runGit(repositoryRoot, ["rev-parse", "refs/remotes/origin/main"]).toString().trim();
     if (liveMain !== undefined && liveMain !== advertisedMain) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
@@ -283,7 +299,7 @@ export function collectCurrentMainAuditFacts({ repositoryRoot, branch = "HEAD", 
     const afterMain = runGit(repositoryRoot, ["rev-parse", "refs/remotes/origin/main"]).toString().trim();
     if (afterMain !== advertisedMain) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
     if (!validCommit(branch) && runGit(repositoryRoot, ["rev-parse", branch]).toString().trim() !== branchCommit) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
-    return pass({ branchCommit, liveMainCommit: mainCommit, mergeBaseCommit: mergeBase, mainOnlyPaths: pathFacts.records, mainOnlyPathSetSha256: pathFacts.pathSetSha256 });
+    return pass({ repositoryIdentity, branchCommit, liveMainCommit: mainCommit, mergeBaseCommit: mergeBase, mainOnlyPaths: pathFacts.records, mainOnlyPathSetSha256: pathFacts.pathSetSha256 });
   } catch {
     return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
   }

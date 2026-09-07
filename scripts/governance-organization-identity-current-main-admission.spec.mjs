@@ -86,8 +86,9 @@ test("collector rejects a caller-supplied main commit that is not origin/main", 
   execFileSync("git", ["-C", root, "add", "base.txt"]);
   execFileSync("git", ["-C", root, "commit", "-qm", "base"]);
   const live = execFileSync("git", ["-C", root, "rev-parse", "HEAD"]).toString().trim();
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/fixture/repo.git"]);
   execFileSync("git", ["-C", root, "update-ref", "refs/remotes/origin/main", live]);
-  assert.deepEqual(collectCurrentMainAuditFacts({ repositoryRoot: root, branch: "HEAD", liveMain: "f".repeat(40) }), { status: "HOLD", code: "CURRENT_MAIN_READBACK_NOT_PROVEN" });
+  assert.deepEqual(collectCurrentMainAuditFacts({ repositoryRoot: root, branch: "HEAD", liveMain: "f".repeat(40), expectedRepository: { host: "github.com", owner: "fixture", name: "repo", full_name: "fixture/repo" } }), { status: "HOLD", code: "CURRENT_MAIN_READBACK_NOT_PROVEN" });
 });
 
 test("collector computes a NUL-safe main-only path set without mutating Git", async (t) => {
@@ -104,10 +105,26 @@ test("collector computes a NUL-safe main-only path set without mutating Git", as
   execFileSync("git", ["-C", root, "commit", "-qm", "main-only"]);
   const liveMain = execFileSync("git", ["-C", root, "rev-parse", "HEAD"]).toString().trim();
   const base = execFileSync("git", ["-C", root, "rev-list", "--max-parents=0", "HEAD"]).toString().trim();
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/fixture/repo.git"]);
   execFileSync("git", ["-C", root, "update-ref", "refs/remotes/origin/main", liveMain]);
-  const result = collectCurrentMainAuditFacts({ repositoryRoot: root, branch: base });
+  const result = collectCurrentMainAuditFacts({ repositoryRoot: root, branch: base, expectedRepository: { host: "github.com", owner: "fixture", name: "repo", full_name: "fixture/repo" } });
   assert.equal(result.status, "PASS");
   assert.equal(result.mainOnlyPaths.length, 1);
   assert.equal(result.mainOnlyPaths[0].path, "main-only.txt");
   assert.match(result.mainOnlyPathSetSha256, /^[0-9a-f]{64}$/);
+});
+
+test("collector binds repository root origin identity", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-repository-binding-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "-b", "main", root]);
+  execFileSync("git", ["-C", root, "config", "user.email", "test@example.invalid"]);
+  execFileSync("git", ["-C", root, "config", "user.name", "Test"]);
+  await writeFile(path.join(root, "base.txt"), "base\n");
+  execFileSync("git", ["-C", root, "add", "base.txt"]);
+  execFileSync("git", ["-C", root, "commit", "-qm", "base"]);
+  const live = execFileSync("git", ["-C", root, "rev-parse", "HEAD"]).toString().trim();
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/repo-a/main.git"]);
+  execFileSync("git", ["-C", root, "update-ref", "refs/remotes/origin/main", live]);
+  assert.deepEqual(collectCurrentMainAuditFacts({ repositoryRoot: root, expectedRepository: { host: "github.com", owner: "repo-b", name: "main", full_name: "repo-b/main" } }), { status: "HOLD", code: "REPOSITORY_IDENTITY_INVALID" });
 });
