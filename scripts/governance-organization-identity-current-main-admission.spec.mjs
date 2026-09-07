@@ -64,6 +64,32 @@ test("stale Copy impact cannot become an admission", () => {
   assert.equal(decision.decision.copy_impact_status, "STALE_HOLD");
 });
 
+test("Copy CURRENT cannot carry drift and stale drift is allowlisted", () => {
+  const current = input({ copy_impact: { ...input().copy_impact, drifted_paths: ["packages/db/prisma/schema.prisma"] } });
+  assert.deepEqual(validateCurrentMainAdmissionInput(current), { status: "HOLD", code: "COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH" });
+  const arbitrary = input({ copy_impact: { ...input().copy_impact, status: "STALE_HOLD", drifted_paths: ["apps/api/src/main.ts"], stale_scope: "PRISMA_SCHEMA_EVOLUTION", required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH" } });
+  assert.deepEqual(validateCurrentMainAdmissionInput(arbitrary), { status: "HOLD", code: "COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH" });
+});
+
+test("command descriptors reject secret-like parameters", async () => {
+  const { buildCopyCommandDescriptor } = await import("./governance-organization-identity-current-main-admission.mjs");
+  assert.deepEqual(buildCopyCommandDescriptor("COPY_WRITE_ELIGIBILITY_V1", { token: "secret" }), { status: "HOLD", code: "COMMAND_DESCRIPTOR_INVALID" });
+});
+
+test("collector rejects a caller-supplied main commit that is not origin/main", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-current-main-mismatch-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "-b", "main", root]);
+  execFileSync("git", ["-C", root, "config", "user.email", "test@example.invalid"]);
+  execFileSync("git", ["-C", root, "config", "user.name", "Test"]);
+  await writeFile(path.join(root, "base.txt"), "base\n");
+  execFileSync("git", ["-C", root, "add", "base.txt"]);
+  execFileSync("git", ["-C", root, "commit", "-qm", "base"]);
+  const live = execFileSync("git", ["-C", root, "rev-parse", "HEAD"]).toString().trim();
+  execFileSync("git", ["-C", root, "update-ref", "refs/remotes/origin/main", live]);
+  assert.deepEqual(collectCurrentMainAuditFacts({ repositoryRoot: root, branch: "HEAD", liveMain: "f".repeat(40) }), { status: "HOLD", code: "CURRENT_MAIN_READBACK_NOT_PROVEN" });
+});
+
 test("collector computes a NUL-safe main-only path set without mutating Git", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "identity-current-main-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -78,7 +104,8 @@ test("collector computes a NUL-safe main-only path set without mutating Git", as
   execFileSync("git", ["-C", root, "commit", "-qm", "main-only"]);
   const liveMain = execFileSync("git", ["-C", root, "rev-parse", "HEAD"]).toString().trim();
   const base = execFileSync("git", ["-C", root, "rev-list", "--max-parents=0", "HEAD"]).toString().trim();
-  const result = collectCurrentMainAuditFacts({ repositoryRoot: root, branch: base, liveMain });
+  execFileSync("git", ["-C", root, "update-ref", "refs/remotes/origin/main", liveMain]);
+  const result = collectCurrentMainAuditFacts({ repositoryRoot: root, branch: base });
   assert.equal(result.status, "PASS");
   assert.equal(result.mainOnlyPaths.length, 1);
   assert.equal(result.mainOnlyPaths[0].path, "main-only.txt");

@@ -10,6 +10,20 @@ const COMMAND_IDS = Object.freeze([
   "COPY_WRITE_ELIGIBILITY_V1",
   "COPY_SYNC_CITATIONS_V1",
 ]);
+const ALLOWED_STALE_PATHS = Object.freeze(["packages/db/prisma/schema.prisma"]);
+const DECISION_CODES = Object.freeze([
+  "APPROVAL_INDEPENDENCE_NOT_PROVEN",
+  "CURRENT_MAIN_READBACK_NOT_PROVEN",
+  "PROPOSAL_BYTES_MISMATCH",
+  "REPOSITORY_IDENTITY_INVALID",
+  "REQUIRED_FILE_SET_INVALID",
+  "COPY_FIXED_SOURCE_STALE",
+  "COPY_DISPATCH_NOT_AUTHORIZED",
+  "EXTERNAL_PROVENANCE_UNVERIFIED",
+  "SCHEMA_UNKNOWN_KEY",
+  "DIGEST_MISMATCH",
+]);
+const SECRET_KEYS = /(?:token|bearer|authorization|api[_-]?key|password|secret|credential|raw[_-]?response|prompt|output)/iu;
 
 export const ADMISSION_INPUT_KEYS = Object.freeze([
   "schema_version",
@@ -187,9 +201,17 @@ function validateCopyImpact(copy) {
   ) {
     return hold("COPY_FIXED_SOURCE_SAFETY_BOUNDARY_INVALID");
   }
-  if (copy.status === "STALE_HOLD" && copy.drifted_paths.length === 0) {
+  const sortedDrifted = [...copy.drifted_paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (copy.drifted_paths.some((value, index) => value !== sortedDrifted[index]) || new Set(copy.drifted_paths).size !== copy.drifted_paths.length) {
     return hold("COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH");
   }
+  if (copy.status === "CURRENT" && copy.drifted_paths.length !== 0) {
+    return hold("COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH");
+  }
+  if (copy.status === "STALE_HOLD" && (copy.drifted_paths.length === 0 || copy.drifted_paths.some((value) => !ALLOWED_STALE_PATHS.includes(value)) || copy.stale_scope !== "PRISMA_SCHEMA_EVOLUTION")) {
+    return hold("COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH");
+  }
+  if (copy.status === "CURRENT" && copy.stale_scope !== "NONE") return hold("COPY_FIXED_SOURCE_STALE_SCOPE_INVALID");
   return pass();
 }
 
@@ -221,7 +243,7 @@ export function validateCurrentMainAdmissionInput(input) {
 
 export function validateCurrentMainAdmissionDecision(decision) {
   if (!hasExactKeys(decision, ADMISSION_DECISION_KEYS)) return hold("SCHEMA_UNKNOWN_KEY");
-  if (!decision.schema_version || !["HOLD", "READY_FOR_EXTERNAL_READBACK"].includes(decision.outcome) || typeof decision.blocking_code !== "string" || !isPassivePlain(decision.checks) || !validSha(decision.canonical_input_sha256) || !validCommit(decision.observed_commit) || !["CURRENT", "STALE_HOLD"].includes(decision.copy_impact_status) || typeof decision.required_followup !== "string") return hold("DECISION_SCHEMA_INVALID");
+  if (decision.schema_version !== "current-main-admission-decision/v1" || !["HOLD", "READY_FOR_EXTERNAL_READBACK"].includes(decision.outcome) || !DECISION_CODES.includes(decision.blocking_code) || !hasExactKeys(decision.checks, ["repository", "required_files", "copy_impact", "external_provenance"]) || decision.checks.repository !== "PASS" || decision.checks.required_files !== "PASS" || !["CURRENT", "STALE_HOLD"].includes(decision.checks.copy_impact) || !["EXTERNAL_UNVERIFIED", "KNOWN_EXTERNAL_HOLD"].includes(decision.checks.external_provenance) || !validSha(decision.canonical_input_sha256) || !validCommit(decision.observed_commit) || !["CURRENT", "STALE_HOLD"].includes(decision.copy_impact_status) || !["OBTAIN_INDEPENDENT_CURRENT_MAIN_READBACK_AND_REVIEW", "REBASE_FIXED_SOURCE_BEFORE_DISPATCH"].includes(decision.required_followup)) return hold("DECISION_SCHEMA_INVALID");
   if (decision.outcome === "HOLD" && decision.blocking_code === "") return hold("DECISION_BLOCKER_REQUIRED");
   return pass();
 }
@@ -242,7 +264,7 @@ function parseNameStatusNul(bytes) {
     records.push({ status, path: fields[index + 1] });
     index += 1;
   }
-  records.sort((a, b) => a.path.localeCompare(b.path));
+  records.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   if (new Set(records.map(({ path: filePath }) => filePath)).size !== records.length) return hold("CURRENT_MAIN_PATH_SET_MISMATCH");
   return pass({ records, pathSetSha256: sha256(Buffer.from(records.map(({ path: filePath }) => `${filePath}\0`).join(""), "utf8")) });
 }
@@ -250,12 +272,17 @@ function parseNameStatusNul(bytes) {
 export function collectCurrentMainAuditFacts({ repositoryRoot, branch = "HEAD", liveMain }) {
   try {
     const branchCommit = runGit(repositoryRoot, ["rev-parse", branch]).toString().trim();
-    const mainCommit = liveMain ?? runGit(repositoryRoot, ["rev-parse", "refs/remotes/origin/main"]).toString().trim();
+    const advertisedMain = runGit(repositoryRoot, ["rev-parse", "refs/remotes/origin/main"]).toString().trim();
+    if (liveMain !== undefined && liveMain !== advertisedMain) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
+    const mainCommit = advertisedMain;
     if (!validCommit(branchCommit) || !validCommit(mainCommit)) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
     const mergeBase = runGit(repositoryRoot, ["merge-base", branchCommit, mainCommit]).toString().trim();
     if (!validCommit(mergeBase)) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
     const pathFacts = parseNameStatusNul(runGit(repositoryRoot, ["diff", "--name-status", "-z", "--find-renames=100%", "--find-copies=100%", "--find-copies-harder", mergeBase, mainCommit]));
     if (pathFacts.status !== "PASS") return pathFacts;
+    const afterMain = runGit(repositoryRoot, ["rev-parse", "refs/remotes/origin/main"]).toString().trim();
+    if (afterMain !== advertisedMain) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
+    if (branch.startsWith("refs/") && runGit(repositoryRoot, ["rev-parse", branch]).toString().trim() !== branchCommit) return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
     return pass({ branchCommit, liveMainCommit: mainCommit, mergeBaseCommit: mergeBase, mainOnlyPaths: pathFacts.records, mainOnlyPathSetSha256: pathFacts.pathSetSha256 });
   } catch {
     return hold("CURRENT_MAIN_READBACK_NOT_PROVEN");
@@ -265,11 +292,9 @@ export function collectCurrentMainAuditFacts({ repositoryRoot, branch = "HEAD", 
 export function generateCurrentMainAdmission(input) {
   const valid = validateCurrentMainAdmissionInput(input);
   if (valid.status !== "PASS") return valid;
-  const blocker = input.external_provenance.status !== "EXTERNAL_VERIFIED"
-    ? "EXTERNAL_PROVENANCE_UNVERIFIED"
-    : input.copy_impact.status === "STALE_HOLD"
-      ? "COPY_FIXED_SOURCE_STALE"
-      : "CURRENT_MAIN_READBACK_NOT_PROVEN";
+  const blocker = input.external_provenance.status === "KNOWN_EXTERNAL_HOLD"
+    ? "APPROVAL_INDEPENDENCE_NOT_PROVEN"
+    : "EXTERNAL_PROVENANCE_UNVERIFIED";
   const decision = {
     schema_version: "current-main-admission-decision/v1",
     outcome: "HOLD",
@@ -284,7 +309,11 @@ export function generateCurrentMainAdmission(input) {
 }
 
 export function buildCopyCommandDescriptor(commandId, parameters) {
-  if (!COMMAND_IDS.includes(commandId) || !isPassivePlain(parameters)) return hold("COMMAND_DESCRIPTOR_INVALID");
+  if (!COMMAND_IDS.includes(commandId) || !isPassivePlain(parameters) || Object.keys(parameters).some((key) => SECRET_KEYS.test(key))) return hold("COMMAND_DESCRIPTOR_INVALID");
+  const allowed = commandId === "COPY_WRITE_ELIGIBILITY_V1"
+    ? ["auditPacketSha256", "eligibilityPath"]
+    : ["auditPacketSha256", "eligibilityPath", "eligibilityInputSha256", "citationPath"];
+  if (!hasExactKeys(parameters, allowed) || Object.values(parameters).some((value) => typeof value !== "string" || value.length > 512)) return hold("COMMAND_DESCRIPTOR_INVALID");
   return pass({ commandId, mode: commandId === "COPY_WRITE_ELIGIBILITY_V1" ? "WRITE_ELIGIBILITY" : "SYNC_CITATIONS", parameters: JSON.parse(JSON.stringify(parameters)), dispatchAuthorization: "NOT_AUTHORIZED" });
 }
 
