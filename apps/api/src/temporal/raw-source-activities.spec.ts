@@ -40,6 +40,8 @@ describe("Raw Source retention activities", () => {
       nextCursor: null,
     });
     expect(query).toHaveBeenCalledOnce();
+    const statement = query.mock.calls[0]?.[0] as { strings: readonly string[] };
+    expect(statement.strings.join("?")).toContain("::integer");
   });
 
   it("returns a stable cursor only when the aggregate function provides an extra row", async () => {
