@@ -548,6 +548,73 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     },
   );
 
+  it('probes the durable egress fence through its writer-only read function', async () => {
+    const transactionClient = {
+      $executeRawUnsafe: vi.fn(async () => 0),
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([safePlatformPrincipal])
+        .mockResolvedValueOnce([
+          {
+            schedule_id: SCHEDULE_ID,
+            state: 'ACTIVE',
+            generation: 0n,
+            can_fence: true,
+          },
+        ]),
+    };
+    const writer = {
+      $transaction: vi.fn(async (operation: (client: typeof transactionClient) => Promise<unknown>) =>
+        operation(transactionClient),
+      ),
+    };
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => []),
+      writer as unknown as PrismaClient,
+    );
+
+    await expect(
+      repository.inspectPlatformEgressFenceCapability(SCHEDULE_ID),
+    ).resolves.toEqual({ status: 'available' });
+    const query = transactionClient.$queryRaw.mock.calls[1]?.[0] as {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    };
+    expect(query.strings?.join('')).toContain(
+      'inspect_platform_egress_fence_v1',
+    );
+    expect(query.strings?.join('')).not.toContain(
+      'platform_egress_schedule_fence',
+    );
+    expect(query.values).toEqual([SCHEDULE_ID]);
+  });
+
+  it('fails closed when the fence is disabled or its writer capability is absent', async () => {
+    const disabled = platformFreshnessWriter(
+      [safePlatformPrincipal],
+      [{ schedule_id: SCHEDULE_ID, state: 'DISABLED', generation: 1n, can_fence: true }],
+    );
+    const disabledRepository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => []),
+      disabled.writer,
+    );
+    await expect(
+      disabledRepository.inspectPlatformEgressFenceCapability(SCHEDULE_ID),
+    ).resolves.toEqual({ status: 'unavailable' });
+
+    const missingCapability = platformFreshnessWriter(
+      [safePlatformPrincipal],
+      [{ schedule_id: SCHEDULE_ID, state: 'ACTIVE', generation: 0n, can_fence: false }],
+    );
+    const missingRepository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => []),
+      missingCapability.writer,
+    );
+    await expect(
+      missingRepository.inspectPlatformEgressFenceCapability(SCHEDULE_ID),
+    ).resolves.toEqual({ status: 'unavailable' });
+  });
+
   it.each([
     new Error('EXECUTION_BUDGET_GRANT_EXPIRED'),
     rawQueryMarkerError('EXECUTION_BUDGET_GRANT_EXPIRED', {
