@@ -391,6 +391,31 @@ describe("managed dependency readiness", () => {
     expect(source.inspectPlatformWriterCapability).toHaveBeenCalledTimes(3);
   });
 
+  it("admits enabled rows when the durable egress fence capability is available", async () => {
+    const source = {
+      ...platformSource(),
+      inspectPlatformEgressFenceCapability: vi.fn(async () => ({
+        status: "available" as const,
+      })),
+    };
+
+    await expect(
+      inspectPlatformBudgetAuthorityReadiness(source, platformRegistry()),
+    ).resolves.toMatchObject({
+      status: "ready",
+      rows: [
+        { identity: { scheduleId: "acq-sweep" }, state: "ISSUABLE" },
+        {
+          identity: { scheduleId: "patents-cache-refresh" },
+          state: "INTENTIONALLY_DISABLED_NO_EGRESS",
+        },
+        { identity: { scheduleId: "intent-sweep" }, state: "ISSUABLE" },
+        { identity: { scheduleId: "sanctions-refresh" }, state: "ISSUABLE" },
+      ],
+    });
+    expect(source.inspectPlatformEgressFenceCapability).toHaveBeenCalledTimes(3);
+  });
+
   it("does not let a missing intent Temporal proof hide behind either acquisition row", async () => {
     const report = await inspectPlatformBudgetAuthorityReadiness(
       platformSource(),
