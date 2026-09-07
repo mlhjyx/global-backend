@@ -16,12 +16,19 @@
       "types": "./dist/execution-budget.d.ts",
       "default": "./dist/execution-budget.js"
     },
+    "./platform-authority": {
+      "types": "./dist/platform-authority/canonical-request.d.ts",
+      "default": "./dist/platform-authority/canonical-request.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "execution-budget": [
         "dist/execution-budget.d.ts"
+      ],
+      "platform-authority": [
+        "dist/platform-authority/canonical-request.d.ts"
       ]
     }
   },
@@ -29,7 +36,8 @@
     "zod": "^3.23.8"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.platform-authority.json",
+    "verify:platform-authority-policy-import": "node ../../scripts/verify-platform-authority-policy-import.mjs",
     "lint": "spectral lint openapi/openapi.json",
     "bundle": "redocly bundle openapi/openapi.json -o dist/openapi.bundled.yaml",
     "docs": "redocly build-docs openapi/openapi.json -o dist/docs.html",

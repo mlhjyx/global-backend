@@ -9,9 +9,17 @@ import {
   checkRedisReadiness,
   checkSiteBuildSettlementReadbackReadiness,
   ExecutionBudgetAuthorityReadinessContributors,
+  inspectPlatformBudgetAuthorityReadiness,
   ManagedDependencyReadinessContributors,
   rendererRuntimeIdentity,
 } from "./managed-dependency-readiness";
+import { RuntimeReadinessContributorRegistry } from "./runtime-readiness-registry";
+import {
+  platformAutomationReadinessFactName,
+  type PlatformAutomationExternalReadinessFact,
+} from "../platform-authority/platform-automation-readiness";
+import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "../platform-authority/platform-execution-contract";
+import { PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR } from "../platform-authority/platform-technical-quote-service-auth";
 
 const identity = {
   attested: true as const,
@@ -49,22 +57,44 @@ const EXECUTION_ES256_PUBLIC_JWK = {
 };
 
 describe("managed dependency readiness", () => {
-  const platformAuthorityRows = (
-    overrides: Readonly<Record<string, string>> = {},
-  ) =>
-    ["platform.acquisition", "platform.intent_watch", "platform.sanctions"].map(
-      (purpose) => ({
-        purpose,
-        state: overrides[purpose] ?? "active",
-      }),
-    );
+  function platformRegistry(input?: {
+    readonly includeQuoteAuthentication?: boolean;
+    readonly omit?: Readonly<{
+      fact: PlatformAutomationExternalReadinessFact;
+      scheduleId: string;
+    }>;
+  }) {
+    const registry = new RuntimeReadinessContributorRegistry();
+    if (input?.includeQuoteAuthentication !== false) {
+      registry.register(
+        PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
+        () => ({ status: "ok" }),
+      );
+    }
+    for (const row of PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1.rows) {
+      for (const fact of [
+        "temporal_proof",
+        "issuer",
+        "revocation_delivery",
+      ] as const) {
+        if (
+          input?.omit?.fact === fact &&
+          input.omit.scheduleId === row.scheduleId
+        ) {
+          continue;
+        }
+        registry.register(
+          platformAutomationReadinessFactName(fact, row.scheduleId),
+          () => ({ status: "ok" }),
+        );
+      }
+    }
+    return registry;
+  }
 
-  function platformSource(rows: readonly object[] | Error) {
+  function platformSource(status: "available" | "writer_unavailable" = "available") {
     return {
-      inspectPlatformAuthorityFreshness: vi.fn(async () => {
-        if (rows instanceof Error) throw rows;
-        return { status: "available" as const, rows };
-      }),
+      inspectPlatformWriterCapability: vi.fn(async () => ({ status } as const)),
     };
   }
 
@@ -322,70 +352,101 @@ describe("managed dependency readiness", () => {
 
   it("reports a missing deployment-owned platform writer without falling back to another principal", async () => {
     await expect(
-      checkPlatformBudgetAuthorityReadiness(undefined),
+      checkPlatformBudgetAuthorityReadiness(undefined, platformRegistry()),
     ).resolves.toEqual({
       status: "failed",
-      code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
+      code: "PLATFORM_AUTOMATION_ACQ_SWEEP_WRITER_UNAVAILABLE",
     });
   });
 
-  it("proves all three fixed platform purposes from the bounded repository readback", async () => {
-    const source = platformSource(platformAuthorityRows());
+  it("fails an enabled row as QUOTE_UNAVAILABLE when service authentication is absent", async () => {
+    const report = await inspectPlatformBudgetAuthorityReadiness(
+      platformSource(),
+      platformRegistry({ includeQuoteAuthentication: false }),
+    );
+
+    expect(report.rows[0]).toMatchObject({
+      state: "QUOTE_UNAVAILABLE",
+      code: "PLATFORM_AUTOMATION_ACQ_SWEEP_QUOTE_UNAVAILABLE",
+    });
+  });
+
+  it("publishes four exact schedule rows and keeps the pre-4D egress fence closed", async () => {
+    const source = platformSource();
 
     await expect(
-      checkPlatformBudgetAuthorityReadiness(
-        source,
-        new Date("2026-08-21T00:00:00.000Z"),
-      ),
-    ).resolves.toEqual({
-      status: "ok",
+      inspectPlatformBudgetAuthorityReadiness(source, platformRegistry()),
+    ).resolves.toMatchObject({
+      status: "not_ready",
+      rows: [
+        { identity: { scheduleId: "acq-sweep" }, state: "BLOCKED" },
+        {
+          identity: { scheduleId: "patents-cache-refresh" },
+          state: "INTENTIONALLY_DISABLED_NO_EGRESS",
+        },
+        { identity: { scheduleId: "intent-sweep" }, state: "BLOCKED" },
+        { identity: { scheduleId: "sanctions-refresh" }, state: "BLOCKED" },
+      ],
     });
-    expect(source.inspectPlatformAuthorityFreshness).toHaveBeenCalledWith(
-      new Date("2026-08-21T00:00:00.000Z"),
+    expect(source.inspectPlatformWriterCapability).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not let a missing intent Temporal proof hide behind either acquisition row", async () => {
+    const report = await inspectPlatformBudgetAuthorityReadiness(
+      platformSource(),
+      platformRegistry({
+        omit: { fact: "temporal_proof", scheduleId: "intent-sweep" },
+      }),
     );
+
+    expect(
+      report.rows.find((row) => row.identity.scheduleId === "intent-sweep"),
+    ).toMatchObject({
+      state: "TEMPORAL_PROOF_UNAVAILABLE",
+      code: "PLATFORM_AUTOMATION_INTENT_SWEEP_TEMPORAL_PROOF_UNAVAILABLE",
+    });
+    expect(
+      report.rows.filter(
+        (row) => row.identity.purpose === "platform.acquisition",
+      ),
+    ).toHaveLength(2);
   });
 
   it.each([
-    ["missing", "MISSING"],
-    ["expired", "EXPIRED"],
-    ["revoked", "REVOKED"],
-    ["exhausted", "EXHAUSTED"],
-    ["not_yet_valid", "NOT_YET_VALID"],
-    ["invalid", "INVALID"],
-  ])(
-    "reports %s authority for the exact fixed platform purpose without row details",
-    async (state, codeSuffix) => {
-      const source = platformSource(
-        platformAuthorityRows({ "platform.intent_watch": state }),
+    ["temporal_proof", "TEMPORAL_PROOF_UNAVAILABLE"],
+    ["issuer", "ISSUER_UNAVAILABLE"],
+    ["revocation_delivery", "REVOCATION_DELIVERY_UNAVAILABLE"],
+  ] as const)(
+    "maps a missing acq-sweep %s contributor to its approved exact state",
+    async (fact, expectedState) => {
+      const report = await inspectPlatformBudgetAuthorityReadiness(
+        platformSource(),
+        platformRegistry({ omit: { fact, scheduleId: "acq-sweep" } }),
       );
 
-      const result = await checkPlatformBudgetAuthorityReadiness(
-        source,
-        new Date("2026-08-21T00:00:00.000Z"),
-      );
-
-      expect(result).toEqual({
-        status: "failed",
-        code: `PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_${codeSuffix}`,
+      expect(report.rows[0]).toMatchObject({
+        identity: { scheduleId: "acq-sweep" },
+        state: expectedState,
+        code: `PLATFORM_AUTOMATION_ACQ_SWEEP_${expectedState}`,
       });
-      expect(JSON.stringify(result)).not.toContain("schedule");
-      expect(JSON.stringify(result)).not.toContain("authority_id");
     },
   );
 
-  it("bounds malformed rows and raw platform database errors to one stable code", async () => {
-    for (const rows of [
-      platformAuthorityRows().slice(0, 2),
-      new Error("postgresql://writer:must-never-leak@db/platform"),
-    ]) {
-      const source = platformSource(rows);
-      const result = await checkPlatformBudgetAuthorityReadiness(source);
-      expect(result).toEqual({
-        status: "failed",
-        code: "PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE",
-      });
-      expect(JSON.stringify(result)).not.toContain("must-never-leak");
-    }
+  it("bounds raw platform writer failures to the exact closed state", async () => {
+    const source = {
+      inspectPlatformWriterCapability: vi.fn(async () => {
+        throw new Error("postgresql://writer:must-never-leak@db/platform");
+      }),
+    };
+    const result = await checkPlatformBudgetAuthorityReadiness(
+      source,
+      platformRegistry(),
+    );
+    expect(result).toEqual({
+      status: "failed",
+      code: "PLATFORM_AUTOMATION_ACQ_SWEEP_WRITER_UNAVAILABLE",
+    });
+    expect(JSON.stringify(result)).not.toContain("must-never-leak");
   });
 
   it("registers and unregisters the additive authority contributors without probing on registration", async () => {
@@ -434,34 +495,30 @@ describe("managed dependency readiness", () => {
     managed.onModuleDestroy();
     expect(unregister).toHaveBeenCalledTimes(contributors.size);
 
-    const platformUnregister = vi.fn();
-    const platformRegistry = {
-      register: vi.fn((name: string, contributor: () => unknown) => {
-        contributors.set(name, contributor);
-        return platformUnregister;
-      }),
-    };
+    const authorityRegistry = platformRegistry();
+    const register = vi.spyOn(authorityRegistry, "register");
     const platform = new ExecutionBudgetAuthorityReadinessContributors(
-      platformRegistry as never,
-      {
-        inspectPlatformAuthorityFreshness: vi.fn(async () => ({
-          status: "writer_unavailable" as const,
-        })),
-      } as never,
+      authorityRegistry,
+      platformSource() as never,
     );
     platform.onModuleInit();
-    expect(platformRegistry.register).toHaveBeenCalledWith(
+    expect(register).toHaveBeenCalledWith(
       "platform_budget_authority",
       expect.any(Function),
     );
     await expect(
-      contributors.get("platform_budget_authority")?.(),
+      authorityRegistry.check("platform_budget_authority"),
     ).resolves.toEqual({
       status: "failed",
-      code: "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE",
+      code: "PLATFORM_AUTOMATION_ACQ_SWEEP_BLOCKED",
     });
     platform.onModuleDestroy();
-    expect(platformUnregister).toHaveBeenCalledOnce();
+    await expect(
+      authorityRegistry.check("platform_budget_authority"),
+    ).resolves.toEqual({
+      status: "failed",
+      code: "READINESS_CONTRIBUTOR_MISSING",
+    });
   });
 
   it("fails artifact storage readiness before constructing a client when deployment config is incomplete", async () => {

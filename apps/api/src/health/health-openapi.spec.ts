@@ -86,7 +86,14 @@ describe('layered health OpenAPI contract', () => {
     expect(success?.properties?.capabilities).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['execution_budget_jwks', 'workspace_budget_authority', 'platform_budget_authority'],
+      required: [
+        'execution_budget_jwks',
+        'workspace_budget_authority',
+        'platform_budget_authority',
+        'platform_automation',
+        'site_builder_model_settlement_readback',
+        'platform_technical_quote_authentication',
+      ],
     });
     expect(success?.properties?.components).toMatchObject({
       type: 'object',
@@ -99,6 +106,7 @@ describe('layered health OpenAPI contract', () => {
         'outbox_relay',
         'api_runtime',
         'storage',
+        'generic_artifact_storage',
         'redis',
         'model_gateway',
         'renderer',
@@ -108,6 +116,23 @@ describe('layered health OpenAPI contract', () => {
         'admission',
       ],
     });
+    expect(success?.properties?.capabilities?.properties?.platform_automation).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['schemaVersion', 'rows'],
+      properties: {
+        rows: {
+          type: 'array',
+          minItems: 4,
+          maxItems: 4,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['identity', 'desiredMode', 'state', 'code'],
+          },
+        },
+      },
+    });
   });
 
   it('publishes exact closed ComponentStatus unions for hard components and additive capabilities', () => {
@@ -115,6 +140,8 @@ describe('layered health OpenAPI contract', () => {
     const candidates = [
       response?.properties?.components?.properties?.database,
       response?.properties?.capabilities?.properties?.execution_budget_jwks,
+      response?.properties?.capabilities?.properties?.site_builder_model_settlement_readback,
+      response?.properties?.capabilities?.properties?.platform_technical_quote_authentication,
     ];
 
     for (const candidate of candidates) {

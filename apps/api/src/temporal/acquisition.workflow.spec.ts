@@ -67,6 +67,20 @@ describe('acquisitionSweepWorkflow', () => {
     expect(acts.listDueSources).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50 }));
   });
 
+  it('clamps an oversized or malformed due-source request to the 50-source product envelope', async () => {
+    acts.listDueSources.mockResolvedValue({ sourceIds: [] });
+
+    await acquisitionSweepWorkflow(workflowInput(5_000));
+    expect(acts.listDueSources).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 50 }),
+    );
+
+    await acquisitionSweepWorkflow(workflowInput(-1));
+    expect(acts.listDueSources).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 50 }),
+    );
+  });
+
   it('无到期源 → swept 0、不调 acquireSource', async () => {
     acts.listDueSources.mockResolvedValue({ sourceIds: [] });
     const out = await acquisitionSweepWorkflow(workflowInput());

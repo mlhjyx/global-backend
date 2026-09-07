@@ -22,6 +22,7 @@ import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
 import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guard';
 import { ExecutionBudgetModule } from './execution-budget/execution-budget.module';
+import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -41,6 +42,7 @@ import { ExecutionBudgetModule } from './execution-budget/execution-budget.modul
     AuthModule,
     ModelGatewayModule,
     ExecutionBudgetModule,
+    PlatformAuthorityModule,
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,

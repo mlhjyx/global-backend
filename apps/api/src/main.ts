@@ -10,6 +10,7 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
+import { PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME } from './platform-authority/platform-technical-quote-service-auth';
 import {
   resolveCorsOrigin,
   resolveRuntimeSettings,
@@ -30,7 +31,18 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Leads')
     .addTag('Events')
     .addTag('System')
+    .addTag('PlatformAuthority')
     .addBearerAuth()
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description:
+          'GrowthOS service token for the Platform Technical Quote reader only.',
+      },
+      PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME,
+    )
     .build();
   const document = SwaggerModule.createDocument(app, config);
   const buildStatus = document.components?.schemas?.BuildStatusResponseDto;
@@ -65,7 +77,9 @@ async function bootstrap(): Promise<void> {
     artifactRoot: resolve(__dirname),
     env: process.env,
   });
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.

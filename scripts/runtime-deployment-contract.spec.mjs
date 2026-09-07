@@ -410,6 +410,8 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(provision, /pg_shdepend/);
   assert.match(provision, /membership\.admin_option/);
   assert.match(provision, /membership\.roleid = principal\.oid/);
+  assert.match(provision, /pg_auth_members[\s\S]*group_role\.rolname = 'execution_budget_platform_writer'/);
+  assert.doesNotMatch(provision, /pg_has_role\(/);
   assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL/);
   assert.match(verify, /EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL/);
   assert.match(verify, /new URL\(value\)/);
@@ -417,9 +419,11 @@ test('platform writer principal provisioning is exclusive, fail-closed, and secr
   assert.match(verify, /parse_url WRITER/);
   assert.doesNotMatch(verify, /psql "\$\{EXECUTION_BUDGET_PLATFORM_WRITER_(?:PROVISION_)?DATABASE_URL\}"/);
   assert.match(verify, /inspect_platform_execution_authority_freshness_v1/);
-  assert.match(verify, /ingest_platform_execution_authority/);
-  assert.match(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
-  assert.match(verify, /execution_budget_authority_revocation/);
+  assert.match(verify, /ingest_and_admit_platform_execution_budget_run_v2/);
+  assert.doesNotMatch(verify, /SELECT \* FROM ingest_platform_execution_authority/);
+  assert.match(verify, /ingest_and_admit_platform_execution_budget_run_v2/);
+  assert.doesNotMatch(verify, /revoke_platform_execution_authority_v1\(UUID, TEXT, TIMESTAMPTZ\)/);
+  assert.match(verify, /execution_budget_authority/);
   assert.match(verify, /SET LOCAL ROLE execution_budget_platform_writer/);
   assert.match(verify, /has_table_privilege\(session_user,'execution_budget_authority','INSERT'\)/);
   assert.match(verify, /INSERT INTO execution_budget_authority\(scope_key,authority_kind/);
@@ -448,6 +452,7 @@ test('provider-wire writer provisioning is dedicated, dual-role scoped, and secr
   assert.match(verify, /APP_DATABASE_URL/);
   assert.match(verify, /parse_url APP APP_DATABASE_URL/);
   assert.match(verify, /SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION/);
+  assert.match(verify, /EXISTS \([\s\S]*migration_name = :'expected_migration'/);
   assert.doesNotMatch(verify, /psql "\$\{APP_DATABASE_URL\}"/);
   assert.match(verify, /pg_auth_members/);
   assert.match(verify, /membership\.admin_option/);
@@ -492,7 +497,8 @@ test('disposable platform writer drift harness keeps every database URL out of a
   assert.match(harness, /FAILURE_INJECT_AFTER_DRIFT/);
   assert.match(harness, /DROP ROLE task3_nested/);
   assert.match(harness, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
-  assert.match(harness, /REVOKE EXECUTE ON FUNCTION revoke_platform_execution_authority_v1/);
+  assert.match(harness, /REVOKE EXECUTE ON FUNCTION acknowledge_platform_egress_v1/);
+  assert.match(harness, /REVOKE EXECUTE ON FUNCTION inspect_platform_execution_authority_freshness_v1/);
   assert.match(harness, /SET SESSION AUTHORIZATION runtime_api/);
 });
 

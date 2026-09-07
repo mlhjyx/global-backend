@@ -12,8 +12,11 @@ import {
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
+import { PLATFORM_PATENTS_MAX_ANCHORS } from '../platform-authority/platform-execution-contract';
+import type { PlatformEgressFence } from '../platform-authority/platform-egress-fence';
+import { platformEgressDispatcher } from './platform-schedule-authority.activities';
 
-export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
+export const PATENT_CACHE_BROKER_MAX_ANCHORS = PLATFORM_PATENTS_MAX_ANCHORS;
 
 async function readbackPatentRefresh(
   transaction: PatentRefreshDb,
@@ -65,6 +68,7 @@ export function createPatentsCacheActivities(deps: {
   broker: ExecutionBroker;
   budgetStore?: BudgetStore;
   activityRunId?: () => string | undefined;
+  platformEgressFence?: PlatformEgressFence;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('patents cache activities require an authoritative BudgetStore');
   return {
@@ -73,6 +77,9 @@ export function createPatentsCacheActivities(deps: {
         args: input, budgetStore: budgets, scheduleId: PATENTS_CACHE_REFRESH_SCHEDULE_ID, activityRunId: deps.activityRunId,
       });
       const durableReceipts: DurableExecutionReceipt[] = [];
+      const platformEgress = deps.platformEgressFence
+        ? platformEgressDispatcher({ fence: deps.platformEgressFence, binding })
+        : undefined;
       return refreshPatentCache({
         db: deps.ownerDb as unknown as PatentRefreshDb, // 全 delegate ⊇ PatentRefreshDb 子集
         bq: createPatentCacheBrokerScanner({
@@ -84,6 +91,7 @@ export function createPatentsCacheActivities(deps: {
             }
             durableReceipts.push(durableReceipt);
           },
+          platformEgress,
         }),
         applyScanWithAck: async (_scan, persist, context) => {
           if (!durableReceipts.length) return persist(deps.ownerDb as unknown as PatentRefreshDb);

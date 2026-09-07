@@ -12,6 +12,17 @@
  * capture_network_requests 抓 *.algolianet.com 请求的 app-id/api-key/index/filter）。
  */
 
+import {
+  PLATFORM_ACQUISITION_SOURCE_FETCH_ITEM_MAX,
+  PLATFORM_ALGOLIA_ITEMS_PER_PAGE_MAX,
+  PLATFORM_ALGOLIA_PAGES_PER_SOURCE_MAX,
+  PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+} from '../platform-authority/platform-execution-contract';
+import {
+  decodeJsonBytes,
+  readFetchResponseBodyBounded,
+} from './bounded-fetch-response';
+
 export interface AlgoliaFairConfig {
   appId: string;
   apiKey: string; // public search-only key
@@ -48,8 +59,6 @@ interface AlgoliaHit {
   exhibitorFilters?: Record<string, { lvl0?: string[] }>;
 }
 
-const ALGOLIA_MAX_PER_PAGE = 1000;
-
 /**
  * 分页拉取一个展会全部（或 limit 上限内）参展商。
  * filters 固定为 recordType:exhibitor + locale + eventEditionId（与官网前端一致）。
@@ -58,7 +67,15 @@ export async function queryAlgoliaExhibitors(
   cfg: AlgoliaFairConfig,
   limit = 1000,
   beforeRequest?: () => Promise<void>,
+  beforePhysicalWire?: () => Promise<void>,
 ): Promise<FairExhibitor[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new Error('ALGOLIA_LIMIT_INVALID');
+  }
+  const boundedLimit = Math.min(
+    limit,
+    PLATFORM_ACQUISITION_SOURCE_FETCH_ITEM_MAX,
+  );
   const locale = cfg.locale ?? 'en-gb';
   const endpoint =
     `https://${cfg.appId.toLowerCase()}-dsn.algolia.net/1/indexes/${encodeURIComponent(cfg.indexName)}/query` +
@@ -67,12 +84,18 @@ export async function queryAlgoliaExhibitors(
 
   const out: FairExhibitor[] = [];
   const seen = new Set<string>();
-  const perPage = Math.min(ALGOLIA_MAX_PER_PAGE, limit);
-  for (let page = 0; out.length < limit; page++) {
+  const perPage = Math.min(PLATFORM_ALGOLIA_ITEMS_PER_PAGE_MAX, boundedLimit);
+  const pageLimit = Math.min(
+    PLATFORM_ALGOLIA_PAGES_PER_SOURCE_MAX,
+    Math.ceil(boundedLimit / perPage),
+  );
+  for (let page = 0; page < pageLimit && out.length < boundedLimit; page++) {
     const params = `query=&page=${page}&hitsPerPage=${perPage}` + `&filters=${encodeURIComponent(filters)}`;
     await beforeRequest?.();
+    await beforePhysicalWire?.();
     const res = await fetch(endpoint, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Accept: 'application/json',
@@ -80,18 +103,38 @@ export async function queryAlgoliaExhibitors(
       body: JSON.stringify({ params }),
       signal: AbortSignal.timeout(25_000),
     });
-    if (!res.ok) throw new Error(`algolia ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    const json = (await res.json()) as {
+    const responseBytes = await readFetchResponseBodyBounded(
+      res,
+      PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
+      'ALGOLIA_RESPONSE_TOO_LARGE',
+    );
+    if (!res.ok) {
+      const detail = new TextDecoder('utf-8', { fatal: false })
+        .decode(responseBytes)
+        .slice(0, 160);
+      throw new Error(`algolia ${res.status}: ${detail}`);
+    }
+    const json = decodeJsonBytes<{
       hits?: AlgoliaHit[];
       nbPages?: number;
-    };
+    }>(responseBytes, 'ALGOLIA_RESPONSE_INVALID');
+    if (
+      (json.hits !== undefined && !Array.isArray(json.hits)) ||
+      (json.nbPages !== undefined &&
+        (!Number.isSafeInteger(json.nbPages) || json.nbPages < 0))
+    ) {
+      throw new Error('ALGOLIA_RESPONSE_INVALID');
+    }
     const hits = json.hits ?? [];
+    if (hits.length > perPage) {
+      throw new Error('ALGOLIA_RESPONSE_ITEM_BOUND_EXCEEDED');
+    }
     for (const h of hits) {
       const rec = mapHit(h);
       if (!rec || seen.has(rec.externalId)) continue;
       seen.add(rec.externalId);
       out.push(rec);
-      if (out.length >= limit) break;
+      if (out.length >= boundedLimit) break;
     }
     if (!hits.length || page + 1 >= (json.nbPages ?? 1)) break;
   }

@@ -96,10 +96,13 @@ SELECT 1 / ((
 ))::integer;
 
 SELECT 1 / ((
-  SELECT migration_name = :'expected_migration'
-  FROM "_prisma_migrations"
-  WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
-  ORDER BY finished_at DESC, migration_name DESC LIMIT 1
+  EXISTS (
+    SELECT 1
+    FROM "_prisma_migrations"
+    WHERE migration_name = :'expected_migration'
+      AND finished_at IS NOT NULL
+      AND rolled_back_at IS NULL
+  )
 ))::integer;
 
 SELECT 1 / ((

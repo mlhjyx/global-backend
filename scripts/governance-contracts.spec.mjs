@@ -16,6 +16,7 @@ import "./ghcr-runtime-publication.spec.mjs";
 import "./docker-image-config-path.spec.mjs";
 import "./temporal-platform-infrastructure-contract.spec.mjs";
 import "./pr-decision-card.spec.mjs";
+import "./platform-egress-fence-migration.spec.mjs";
 
 import {
   renderProviderRegistry,
