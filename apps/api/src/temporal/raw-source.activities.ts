@@ -33,7 +33,7 @@ export function createRawSourceActivities(deps: { prisma: PrismaService }) {
         : null;
       const rows = await deps.prisma.$queryRaw<Array<{ workspace_id: string }>>(
         Prisma.sql`SELECT workspace_id::text
-          FROM list_due_raw_retention_workspaces_v1(${limit + 1}, ${after}::uuid)`,
+          FROM list_due_raw_retention_workspaces_v1(${limit + 1}::integer, ${after}::uuid)`,
       );
       const valid = rows.map((row) => workspaceId(row.workspace_id));
       const page = valid.slice(0, limit);
