@@ -352,3 +352,14 @@ test("v3 launcher fixture path reads the receipt path, not the outcome path", as
   assert.equal(mismatch.exitCode, 70);
   assert.equal(mismatch.result.code, "EXECUTABLE_CLOSURE_OBSERVATION_MISMATCH");
 });
+
+test("v3 trust result exposes the observed contract digest outside the exact contract record", async () => {
+  const source = await readFile(
+    fileURLToPath(new URL("./governance-organization-identity-launcher.mjs", import.meta.url)),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /contract:\s*\{\s*\.\.\.contractRecord\.value,\s*launcherContractSha256:\s*contractRecord\.verified\.observation\.sha256/s,
+  );
+});

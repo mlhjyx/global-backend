@@ -2587,7 +2587,14 @@ export async function verifyFixedLauncherTrust(request, options = {}) {
     verificationObservations.push(verified.observation);
   }
   return pass({
-    contract: contractRecord.value,
+    // The contract schema intentionally excludes its self-digest. The v3
+    // authority path nevertheless needs the observed canonical digest bound
+    // to the trust result, so expose it alongside (not inside) the exact
+    // contract record returned by the file validator.
+    contract: {
+      ...contractRecord.value,
+      launcherContractSha256: contractRecord.verified.observation.sha256,
+    },
     verificationFiles,
     executableByRole: Object.fromEntries(
       contractRecord.value.materializedExecutableClosure.map((entry) => [
