@@ -98,6 +98,7 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import { assertPlatformAuthorityReady } from "./platform-authority-readiness-gate";
 import { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
 import { PrismaPlatformEgressFencePort } from "../platform-authority/platform-egress-fence.prisma";
 
@@ -347,6 +348,11 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
   }
   const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
+  try {
+    await assertPlatformAuthorityReady(authorityWriter);
+  } catch {
+    await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
+  }
   // Platform physical wires use the same dedicated writer principal as
   // authority admission. No in-memory or app-user fallback is permitted.
   const platformEgressFence = new PlatformEgressFence(
