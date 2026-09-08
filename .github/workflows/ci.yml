@@ -159,8 +159,8 @@ jobs:
           docker run "${temporal_go[@]}" "$temporal_go_image" go mod download
           docker run "${temporal_go[@]}" --network=none -e GOPROXY=off "$temporal_go_image" sh -euc '
             go mod verify
-            grep -F $'google.golang.org/grpc v1.83.1' go.mod
-            grep -F $'github.com/aws/aws-sdk-go-v2/service/lambda v1.88.5' go.mod
+            grep -F "google.golang.org/grpc v1.83.1" go.mod
+            grep -F "github.com/aws/aws-sdk-go-v2/service/lambda v1.88.5" go.mod
             go test -mod=readonly -p 2 -count=1 -race -coverprofile=/cache/server.cover ./...
             go vet -mod=readonly -p 2 ./...
             CGO_ENABLED=0 go build -mod=readonly -p 2 -trimpath -buildvcs=false -o /cache/temporal-server ./cmd/server
