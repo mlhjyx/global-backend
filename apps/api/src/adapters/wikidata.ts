@@ -287,9 +287,9 @@ export function referencedQids(e: RawEntity): string[] {
 function bindingToCompany(b: SparqlBinding): WikidataCompany | null {
   const uri = b.company?.value;
   const name = b.companyLabel?.value;
-  if (!uri || !name) return null;
+  if (typeof uri !== 'string' || typeof name !== 'string' || !uri || !name) return null;
   const qid = uri.split('/').pop() ?? uri;
-  if (name === qid) return null; // 无标签，跳过
+  if (!/^Q[1-9][0-9]*$/.test(qid) || name === qid) return null; // 标识无效或无标签，跳过
   const coord = b.coord?.value; // "Point(lon lat)"
   let latitude: number | undefined;
   let longitude: number | undefined;
@@ -298,12 +298,15 @@ function bindingToCompany(b: SparqlBinding): WikidataCompany | null {
     longitude = Number(m[1]);
     latitude = Number(m[2]);
   }
+  const employeeValue = b.employees?.value ? Number(b.employees.value) : undefined;
+  const countryValue = b.countryCode?.value;
+  const country = typeof countryValue === 'string' ? countryValue.trim() : '';
   return {
     qid,
     name,
     website: b.website?.value,
-    employees: b.employees?.value ? Number(b.employees.value) : undefined,
-    countryCode: b.countryCode?.value,
+    employees: Number.isFinite(employeeValue) ? employeeValue : undefined,
+    countryCode: /^[A-Za-z]{2}$/.test(country) ? country.toUpperCase() : undefined,
     latitude,
     longitude,
   };
