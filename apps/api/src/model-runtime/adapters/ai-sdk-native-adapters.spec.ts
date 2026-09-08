@@ -1441,6 +1441,41 @@ describe("AI SDK 7 native provider adapters", () => {
     },
   );
 
+  it.each([
+    ["openai-responses", AiSdkOpenAiResponsesAdapter],
+    ["openai-chat-completions", AiSdkOpenAiChatCompletionsAdapter],
+  ] as const)(
+    "preserves settlement identity without retrying an empty %s HTTP error",
+    async (protocol, Adapter) => {
+      const requestId = "empty-body-request";
+      const gateway = await startFakeGateway((_request, response) => {
+        response.writeHead(503, { "x-oneapi-request-id": requestId });
+        response.end();
+      });
+      const adapter = new Adapter(adapterSettings(gateway.baseUrl));
+      const error = await adapter
+        .execute({
+          alias: "gpt-5.6-terra",
+          prompt: "hello",
+          maxOutputTokens: 32,
+          abortSignal: AbortSignal.timeout(5_000),
+        })
+        .catch((failure: unknown) => failure);
+
+      expect(error).toBeInstanceOf(NativeModelApiError);
+      expect(error).toMatchObject({
+        protocol,
+        requestedModel: "gpt-5.6-terra",
+        requestId,
+        statusCode: 503,
+        retryable: true,
+      });
+      expect(error).not.toHaveProperty("responseBody");
+      expect(error).not.toHaveProperty("requestBodyValues");
+      expect(gateway.observed).toHaveLength(1);
+    },
+  );
+
   it("rejects unsupported Anthropic reasoning before dispatch", async () => {
     const gateway = await startFakeGateway((_request, response) => {
       sendJson(response, 200, {});
