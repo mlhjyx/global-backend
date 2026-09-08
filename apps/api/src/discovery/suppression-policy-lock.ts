@@ -18,8 +18,9 @@ export async function lockWorkspaceSuppressionPolicy(
   tx: Prisma.TransactionClient,
   workspaceId: string,
 ): Promise<SuppressionPolicyLockReceipt> {
+  // Prisma cannot deserialize PostgreSQL void; cast only the result, not the lock key.
   await tx.$queryRaw`
-    SELECT pg_advisory_xact_lock(hashtextextended(${'acquisition-suppression-policy:' + workspaceId}, 0))`;
+    SELECT pg_advisory_xact_lock(hashtextextended(${'acquisition-suppression-policy:' + workspaceId}, 0))::text AS locked`;
   return Object.freeze({ workspaceId, [POLICY_LOCK_RECEIPT]: true as const });
 }
 

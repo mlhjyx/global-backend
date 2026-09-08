@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
-import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
+import { assertWorkspaceSuppressionPolicyLock, lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 
 describe('workspace suppression policy lock', () => {
   it('uses a transaction-scoped PostgreSQL advisory lock keyed by the authenticated workspace', async () => {
@@ -12,5 +12,11 @@ describe('workspace suppression policy lock', () => {
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(receipt).toMatchObject({ workspaceId: 'ws-1' });
     expect(Object.isFrozen(receipt)).toBe(true);
+    expect(() => assertWorkspaceSuppressionPolicyLock(receipt, 'ws-1')).not.toThrow();
+    expect(() => assertWorkspaceSuppressionPolicyLock(receipt, 'ws-2')).toThrow('workspace suppression policy lock receipt mismatch');
+  });
+
+  it.each([undefined, { workspaceId: 'ws-1' }])('rejects an absent or forged receipt', (receipt) => {
+    expect(() => assertWorkspaceSuppressionPolicyLock(receipt as never, 'ws-1')).toThrow('workspace suppression policy lock receipt mismatch');
   });
 });
