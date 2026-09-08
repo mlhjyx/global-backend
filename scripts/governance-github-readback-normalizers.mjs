@@ -178,6 +178,14 @@ const normalizeCodeownerReview = (reviews, request) => {
 };
 
 export const normalizeReviews = (reviews, authority, request, collectorObservedAt) => {
+  // Normalize only the documented UTC wire precision; retain invalid inputs
+  // so the existing role/currentness checks reject them with stable codes.
+  reviews = reviews.map((review) => {
+    const raw = review?.submitted_at;
+    const canonical = typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(raw)
+      ? raw.replace(/Z$/, '.000Z') : raw;
+    return { ...review, submitted_at: canonical };
+  });
   const parsed = reviews.map(parsedReview);
   const normalized = ROLES.map((role) => (
     normalizeRoleReview(parsed, role, authority, request, collectorObservedAt)
@@ -211,6 +219,16 @@ const getWorkflow = async (state, id, limits) => {
   return response.value;
 };
 
+// The API may suffix run paths with a ref. This collector only admits
+// the trusted default-branch execution or its exact expected base commit.
+const wireWorkflowPath = (value, baseSha) => {
+  if (typeof value !== 'string') return null;
+  const parts = value.split('@');
+  if (parts.length > 2 || !isWorkflowPath(parts[0])) return null;
+  if (parts.length === 2 && !['main', 'refs/heads/main', baseSha].includes(parts[1])) return null;
+  return parts[0];
+};
+
 export const normalizeMachineChecks = async (
   state,
   runs,
@@ -227,7 +245,7 @@ export const normalizeMachineChecks = async (
       run?.event === 'pull_request_target'
       && run?.head_sha === request.expectedBaseSha
       && run?.workflow_id === policy.allowedWorkflowIds[contextIndex]
-      && run?.path === policy.allowedWorkflowPaths[contextIndex]
+      && wireWorkflowPath(run?.path, request.expectedBaseSha) === policy.allowedWorkflowPaths[contextIndex]
       && Array.isArray(run?.pull_requests)
       && run.pull_requests.some((pull) => (
         pull?.number === request.prNumber
@@ -244,7 +262,7 @@ export const normalizeMachineChecks = async (
         && run.conclusion === 'success'
         && isSafePositiveInteger(run.check_suite_id)
         && isSafePositiveInteger(run.workflow_id)
-        && isWorkflowPath(run.path),
+        && wireWorkflowPath(run.path, request.expectedBaseSha) !== null,
       'APPROVAL_CHECK_WORKFLOW_MISMATCH',
     );
     const suiteResponse = await fetchJson(
@@ -292,9 +310,10 @@ export const normalizeMachineChecks = async (
         && check.app?.slug === suite.app.slug,
       'APPROVAL_CHECK_WORKFLOW_MISMATCH',
     );
+    const runPath = wireWorkflowPath(run.path, request.expectedBaseSha);
     const workflow = await getWorkflow(state, run.workflow_id, limits);
-    requireCondition(workflow.path === run.path, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
-    const workflowEntry = baseEntries.get(run.path);
+    requireCondition(workflow.path === runPath, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
+    const workflowEntry = baseEntries.get(runPath);
     requireCondition(workflowEntry !== undefined, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
     let reusableSigner = null;
     const references = run.referenced_workflows;
@@ -303,26 +322,30 @@ export const normalizeMachineChecks = async (
     } else {
       requireCondition(Array.isArray(references) && references.length === 1, 'APPROVAL_CHECK_WORKFLOW_MISMATCH');
       const reference = references[0];
+      const signerId = policy.allowedReusableSignerWorkflowIds[contextIndex];
+      const signerPath = policy.allowedReusableSignerWorkflowPaths[contextIndex];
+      const prefix = `${REPOSITORY_FULL_NAME}/`;
+      const referencePath = typeof reference?.path === 'string' && reference.path.startsWith(prefix)
+        ? reference.path.slice(prefix.length) : null;
+      const suffix = referencePath?.split('@')[1];
       requireCondition(
-        isSafePositiveInteger(reference?.workflow_id)
-          && isWorkflowPath(reference?.path)
-          && isGitSha(reference?.sha)
-          && policy.allowedReusableSignerWorkflowIds[contextIndex] === reference.workflow_id
-          && policy.allowedReusableSignerWorkflowPaths[contextIndex] === reference.path,
+        referencePath !== null && referencePath.includes('@')
+          && wireWorkflowPath(referencePath, request.expectedBaseSha) === signerPath
+          && reference.sha === request.expectedBaseSha
+          && (!Object.hasOwn(reference, 'workflow_id') || reference.workflow_id === signerId)
+          && (!Object.hasOwn(reference, 'ref') || reference.ref === (suffix === 'main' ? 'refs/heads/main' : suffix)),
         'APPROVAL_CHECK_WORKFLOW_MISMATCH',
       );
-      const signerWorkflow = await getWorkflow(state, reference.workflow_id, limits);
-      const signerEntry = baseEntries.get(reference.path);
+      const signerWorkflow = await getWorkflow(state, signerId, limits);
+      const signerEntry = baseEntries.get(signerPath);
       requireCondition(
-        signerWorkflow.path === reference.path
-          && signerEntry !== undefined
-          && signerEntry.sha === reference.sha,
+        signerWorkflow.path === signerPath && signerEntry !== undefined,
         'APPROVAL_CHECK_WORKFLOW_MISMATCH',
       );
       reusableSigner = {
-        workflow_id: reference.workflow_id,
-        workflow_path: reference.path,
-        workflow_sha: reference.sha,
+        workflow_id: signerId,
+        workflow_path: signerPath,
+        workflow_sha: signerEntry.sha,
       };
     }
     output.push({
@@ -332,7 +355,7 @@ export const normalizeMachineChecks = async (
       check_suite_id: suite.id,
       context,
       workflow_id: run.workflow_id,
-      workflow_path: run.path,
+      workflow_path: runPath,
       trusted_base_workflow_blob_sha: workflowEntry.sha,
       actions_run_id: run.id,
       actions_run_attempt: run.run_attempt,

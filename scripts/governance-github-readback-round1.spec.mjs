@@ -9,6 +9,8 @@ import {
   API_VERSION,
   AUTH_SENTINEL,
   HEAD_SHA,
+  BASE_SHA,
+  REPOSITORY_FULL_NAME,
   OTHER_SHA,
   PROPOSAL_MANIFEST_BLOB_SHA,
   REPOSITORY_ID,
@@ -51,9 +53,9 @@ const addSecondMachineTuple = (state) => {
     path: OTHER_WORKFLOW_PATH,
     check_suite_id: 71002,
     referenced_workflows: [{
-      workflow_id: 61004,
-      path: OTHER_SIGNER_PATH,
-      sha: OTHER_SIGNER_SHA,
+      path: `${REPOSITORY_FULL_NAME}/${OTHER_SIGNER_PATH}@main`,
+      sha: BASE_SHA,
+      ref: 'refs/heads/main',
     }],
   });
   state.workflows.set(61003, {

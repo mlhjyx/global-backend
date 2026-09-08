@@ -262,6 +262,7 @@ test('rejects cross-pair recombination inside multi-entry static tuple allowlist
   });
   await t.test('signer tuple', async () => {
     const state = fixtureState();
+    state.workflows.set(999, { id: 999, state: 'active', path: '.github/workflows/other-signer.yml' });
     addBasePaths(state);
     const unsafe = policy();
     unsafe.allowedCheckContexts = ['approval/readback', 'other/context'];

@@ -234,7 +234,7 @@ export const fixtureState = () => {
         head: { sha: HEAD_SHA },
         base: { sha: BASE_SHA },
       }],
-      referenced_workflows: [{ workflow_id: 61002, path: SIGNER_PATH, sha: SIGNER_BLOB_SHA }],
+      referenced_workflows: [{ path: `${REPOSITORY_FULL_NAME}/${SIGNER_PATH}@main`, sha: BASE_SHA, ref: 'refs/heads/main' }],
       display_title: 'untrusted free-form title',
     }]],
     workflows: new Map([

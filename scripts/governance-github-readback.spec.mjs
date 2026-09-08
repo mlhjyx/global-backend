@@ -1,3 +1,4 @@
+import './governance-github-readback-wire.spec.mjs';
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 
