@@ -50,12 +50,12 @@ Binding path、binding bytes、artifact ID、fixed source commit 与 source bund
 | 字段 | 精确值 |
 | --- | --- |
 | Status | `STALE_HOLD` |
-| Current source fingerprint | `8731b3df8b952709fea295af0936a50d7721f25fa3ba06dd8221916cd66a88d5` |
+| Current source fingerprint | `6bb6d39bc38f46a3fc3bec64a7f7e21ef7a899d92e3d562751c0949cff6ad736` |
 | Stale scope | `PRODUCTION_PARITY_PLATFORM_AUTHORITY_POLICY_V2` |
 | Dispatch authorization | `NOT_AUTHORIZED` |
 | Pilot eligibility | `BLOCKED` |
 | Required follow-up | `REBASE_FIXED_SOURCE_BEFORE_DISPATCH` |
-| Eligibility receipt SHA-256 | `b26de47aeb37776c897fae639a8ddc738ad781425b6dca5d2a0c7a060f3bb079` |
+| Eligibility receipt SHA-256 | `c061dbe589e134a038625baed4afa24a9798995a79484da06454ede58aab75fe` |
 
 精确 drifted paths：
 

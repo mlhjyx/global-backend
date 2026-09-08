@@ -32,6 +32,7 @@ async function expectMissing(filePath: string): Promise<void> {
 
 async function expectNewRendererWorkspacesEventuallyClean(
   before: ReadonlySet<string>,
+  workspacePrefix: string,
   timeoutMs = 30_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -39,7 +40,7 @@ async function expectNewRendererWorkspacesEventuallyClean(
   while (true) {
     const unexpected = (await readdir(tmpdir())).filter(
       (name) =>
-        name.startsWith("global-site-renderer-") && !before.has(name),
+        name.startsWith(workspacePrefix) && !before.has(name),
     );
     if (unexpected.length === 0) return;
     if (Date.now() >= deadline) {
@@ -240,11 +241,16 @@ describe("renderer output candidate binding", () => {
 });
 
 describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
+  const processOwnedTempPrefix = `global-site-renderer-${process.pid}-`;
+
   it("构建期间使用 0600 随机临时文件，成功后删除整个临时目录", async () => {
     let observedPath = "";
     const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
+      expect(path.basename(path.dirname(input.specPath)).startsWith(
+        processOwnedTempPrefix,
+      )).toBe(true);
       expect(input.cacheRoot).toBe(
         path.join(path.dirname(input.specPath), ".renderer-cache"),
       );
@@ -319,15 +325,23 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
     ) as unknown;
     const before = new Set(
       (await readdir(tmpdir())).filter((name) =>
-        name.startsWith("global-site-renderer-"),
+        name.startsWith(processOwnedTempPrefix),
       ),
     );
-    const outDirs = await Promise.all(
-      ["one", "two"].map(() =>
-        mkdtemp(path.join(tmpdir(), "renderer-real-concurrent-")),
-      ),
-    );
+    let foreignTempDir: string | undefined;
+    let outDirs: string[] = [];
     try {
+      foreignTempDir = await mkdtemp(
+        path.join(tmpdir(), "global-site-renderer-foreign-"),
+      );
+      expect(
+        path.basename(foreignTempDir).startsWith(processOwnedTempPrefix),
+      ).toBe(false);
+      outDirs = await Promise.all(
+        ["one", "two"].map(() =>
+          mkdtemp(path.join(tmpdir(), "renderer-real-concurrent-")),
+        ),
+      );
       const manifests = await Promise.all(
         outDirs.map((outDir) =>
           buildSiteSpecWithTemporaryFile(spec, {
@@ -338,14 +352,20 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         ),
       );
       expect(manifests.every((manifest) => manifest.fileCount > 0)).toBe(true);
-      // Vitest executes spec files concurrently. Another real-renderer spec can
-      // create its own workspace between this test's before/after snapshots,
-      // so assert eventual cleanup rather than treating an in-flight sibling
-      // build as leaked state.
-      await expectNewRendererWorkspacesEventuallyClean(before);
+      expect((await stat(foreignTempDir)).isDirectory()).toBe(true);
+      // Sibling builds may still be in flight; foreign-process directories are
+      // outside this test's cleanup scope and must remain untouched.
+      await expectNewRendererWorkspacesEventuallyClean(before, processOwnedTempPrefix);
     } finally {
       await Promise.all(
-        outDirs.map((outDir) => rm(outDir, { recursive: true, force: true })),
+        [
+          ...outDirs.map((directory) =>
+            rm(directory, { recursive: true, force: true }),
+          ),
+          ...(foreignTempDir
+            ? [rm(foreignTempDir, { recursive: true, force: true })]
+            : []),
+        ],
       );
     }
   }, 60_000);
