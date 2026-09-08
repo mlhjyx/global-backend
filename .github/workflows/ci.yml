@@ -246,6 +246,11 @@ jobs:
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
 
+      - name: Suppression lock Prisma PostgreSQL semantics
+        env:
+          SUPPRESSION_LOCK_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: pnpm --filter @global/api exec vitest run src/discovery/suppression-policy-lock.postgres.spec.ts
+
       - name: Site Builder isolated zero-dispatch evaluation boundary
         run: pnpm --filter @global/site-builder-eval-runner test
 
