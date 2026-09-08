@@ -277,13 +277,14 @@ if find "${CLIENT_SECRET_DIRECTORY}" -maxdepth 1 -type f \
   echo "ordinary client fixture contains an internode client credential" >&2
   exit 1
 fi
+TEMPORAL_SDK_VERSION=1.23.0
 for package_name in client common proto; do
-  package_source=${REPOSITORY_ROOT}/node_modules/.pnpm/@temporalio+${package_name}@1.20.3/node_modules/@temporalio/${package_name}
+  package_source=${REPOSITORY_ROOT}/node_modules/.pnpm/@temporalio+${package_name}@${TEMPORAL_SDK_VERSION}/node_modules/@temporalio/${package_name}
   if [[ ! -d ${package_source} || -L ${package_source} ]] ||
     ! jq -e --arg name "@temporalio/${package_name}" \
-      '.name == $name and .version == "1.20.3"' \
+      '.name == $name and .version == $version' --arg version "${TEMPORAL_SDK_VERSION}" \
       "${package_source}/package.json" >/dev/null; then
-    echo "Temporal SDK package does not match the frozen 1.20.3 install" >&2
+    echo "Temporal SDK package does not match the frozen ${TEMPORAL_SDK_VERSION} install" >&2
     exit 1
   fi
   mkdir -m 0700 "${NODE_OVERLAY_DIRECTORY}/${package_name}"

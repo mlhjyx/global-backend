@@ -365,9 +365,9 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY/);
-  assert.match(compose, /@temporalio\+client@1\.20\.3/);
-  assert.match(compose, /@temporalio\+common@1\.20\.3/);
-  assert.match(compose, /@temporalio\+proto@1\.20\.3/);
+  assert.match(compose, /@temporalio\+client@1\.23\.0/);
+  assert.match(compose, /@temporalio\+common@1\.23\.0/);
+  assert.match(compose, /@temporalio\+proto@1\.23\.0/);
   assert.doesNotMatch(compose, /TEMPORAL_PLATFORM_TEST_FIXTURES/);
   assert.doesNotMatch(runner, /(?:pnpm|npm|yarn|bun)\s+(?:add|install)/);
   assert.match(fixtureGenerator, /generateKeyPairSync\("rsa"/);

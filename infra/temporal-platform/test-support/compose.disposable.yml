@@ -220,19 +220,19 @@ services:
           create_host_path: false
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/client
-        target: /repo/node_modules/.pnpm/@temporalio+client@1.20.3/node_modules/@temporalio/client
+        target: /repo/node_modules/.pnpm/@temporalio+client@1.23.0/node_modules/@temporalio/client
         read_only: true
         bind:
           create_host_path: false
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/common
-        target: /repo/node_modules/.pnpm/@temporalio+common@1.20.3/node_modules/@temporalio/common
+        target: /repo/node_modules/.pnpm/@temporalio+common@1.23.0/node_modules/@temporalio/common
         read_only: true
         bind:
           create_host_path: false
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/proto
-        target: /repo/node_modules/.pnpm/@temporalio+proto@1.20.3/node_modules/@temporalio/proto
+        target: /repo/node_modules/.pnpm/@temporalio+proto@1.23.0/node_modules/@temporalio/proto
         read_only: true
         bind:
           create_host_path: false
