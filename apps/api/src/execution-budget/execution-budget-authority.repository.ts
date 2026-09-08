@@ -87,6 +87,11 @@ export type ExecutionBudgetPlatformWriterCapability =
   | Readonly<{ status: 'available' }>
   | Readonly<{ status: 'writer_unavailable' }>;
 
+export type ExecutionBudgetPlatformEgressFenceCapability =
+  | Readonly<{ status: 'available' }>
+  | Readonly<{ status: 'writer_unavailable' }>
+  | Readonly<{ status: 'unavailable' }>;
+
 type PlatformWriterPrincipal = Readonly<{
   sessionUser: string;
   currentUser: string;
@@ -627,6 +632,50 @@ export class ExecutionBudgetAuthorityRepository {
       );
     } catch {
       return Object.freeze({ status: 'writer_unavailable' });
+    }
+  }
+
+  async inspectPlatformEgressFenceCapability(
+    scheduleId: string,
+  ): Promise<ExecutionBudgetPlatformEgressFenceCapability> {
+    if (!this.platformWriter) {
+      return Object.freeze({ status: 'writer_unavailable' });
+    }
+    if (
+      typeof scheduleId !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/.test(scheduleId)
+    ) {
+      return Object.freeze({ status: 'unavailable' });
+    }
+    try {
+      return await this.platformWriter.$transaction(
+        async (transaction) => {
+          await transaction.$executeRawUnsafe(
+            'SET LOCAL statement_timeout = 2000',
+          );
+          await attestExecutionBudgetPlatformWriterTransaction(transaction);
+          const rows = await transaction.$queryRaw<
+            ReadonlyArray<{
+              schedule_id: string;
+              state: string;
+              generation: bigint;
+              can_fence: boolean;
+            }>
+          >(Prisma.sql`SELECT * FROM inspect_platform_egress_fence_v1(${scheduleId}::text)`);
+          const row = rows[0];
+          return rows.length === 1 &&
+            row?.schedule_id === scheduleId &&
+            row.state === 'ACTIVE' &&
+            typeof row.generation === 'bigint' &&
+            row.generation >= 0n &&
+            row.can_fence === true
+            ? Object.freeze({ status: 'available' as const })
+            : Object.freeze({ status: 'unavailable' as const });
+        },
+        { maxWait: 1_000, timeout: 2_500 },
+      );
+    } catch {
+      return Object.freeze({ status: 'unavailable' });
     }
   }
 

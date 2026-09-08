@@ -18,6 +18,13 @@ const privilegeHardeningMigration = readFileSync(
   ),
   "utf8",
 );
+const readinessMigration = readFileSync(
+  resolve(
+    root,
+    "packages/db/prisma/migrations/20260907120000_platform_egress_fence_readiness/migration.sql",
+  ),
+  "utf8",
+);
 
 test("platform egress fence migration creates durable generation and attempt state", () => {
   assert.match(migration, /CREATE TABLE "platform_egress_schedule_fence"/u);
@@ -71,4 +78,26 @@ test("fence functions reject stale generations and preserve unknown no-redispatc
   assert.match(migration, /existing\.state = 'ACKNOWLEDGED'/u);
   assert.match(migration, /PLATFORM_EGRESS_OUTCOME_CONFLICT/u);
   assert.match(migration, /PLATFORM_EGRESS_OUTCOME_INVALID/u);
+});
+
+test("egress fence readiness uses a writer-only read-only capability probe", () => {
+  assert.match(
+    readinessMigration,
+    /CREATE OR REPLACE FUNCTION inspect_platform_egress_fence_v1\(\s*p_schedule_id TEXT\s*\)/u,
+  );
+  assert.match(readinessMigration, /SECURITY DEFINER/u);
+  assert.match(
+    readinessMigration,
+    /assert_execution_budget_platform_writer_principal\(\)/u,
+  );
+  assert.match(readinessMigration, /has_function_privilege\(\s*session_user/u);
+  assert.match(readinessMigration, /public\.platform_egress_schedule_fence/u);
+  assert.match(
+    readinessMigration,
+    /REVOKE ALL ON FUNCTION inspect_platform_egress_fence_v1\(TEXT\)[\s\S]*FROM PUBLIC, app_user, runtime_api, runtime_worker, runtime_outbox_relay,/u,
+  );
+  assert.match(
+    readinessMigration,
+    /GRANT EXECUTE ON FUNCTION inspect_platform_egress_fence_v1\(TEXT\)[\s\S]*TO execution_budget_platform_writer/u,
+  );
 });

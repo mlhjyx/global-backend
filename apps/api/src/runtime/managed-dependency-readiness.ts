@@ -315,7 +315,16 @@ function failed(code: string): RuntimeComponentStatus {
 
 export async function inspectPlatformBudgetAuthorityReadiness(
   repository:
-    | Pick<ExecutionBudgetAuthorityRepository, "inspectPlatformWriterCapability">
+    | (Pick<
+        ExecutionBudgetAuthorityRepository,
+        "inspectPlatformWriterCapability"
+      > &
+        Partial<
+          Pick<
+            ExecutionBudgetAuthorityRepository,
+            "inspectPlatformEgressFenceCapability"
+          >
+        >)
     | undefined,
   registry: RuntimeReadinessContributorRegistry,
 ): Promise<PlatformAutomationReadinessReport> {
@@ -376,9 +385,25 @@ export async function inspectPlatformBudgetAuthorityReadiness(
       }
     },
     revocationDelivery: registryProbe("revocation_delivery"),
-    // 4D must replace this source-owned fail-closed fact with the real
-    // linearizable authorization-and-send fence. No environment flag opens it.
-    egressFence: async () => failed(PLATFORM_EGRESS_FENCE_UNAVAILABLE),
+    egressFence: async (identity) => {
+      const inspectFence = repository?.inspectPlatformEgressFenceCapability;
+      if (!inspectFence) return failed(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
+      try {
+        const capability = await inspectFence.call(
+          repository,
+          identity.scheduleId,
+        );
+        return capability.status === "available"
+          ? ({ status: "ok" } as const)
+          : failed(
+              capability.status === "writer_unavailable"
+                ? "PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE"
+                : PLATFORM_EGRESS_FENCE_UNAVAILABLE,
+            );
+      } catch {
+        return failed(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
+      }
+    },
   }).inspect();
 }
 
