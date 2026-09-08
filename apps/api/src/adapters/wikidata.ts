@@ -6,6 +6,9 @@
  * 合规：Wikidata 是 CC0 公开数据，官方 SPARQL 端点，遵守其 UA 与限流约定。
  */
 
+import { PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES } from '../platform-authority/platform-execution-contract';
+import { decodeJsonBytes, readFetchResponseBodyBounded } from './bounded-fetch-response';
+
 const ENDPOINT = process.env.WIKIDATA_SPARQL_URL ?? 'https://query.wikidata.org/sparql';
 const WD_API = process.env.WIKIDATA_API_URL ?? 'https://www.wikidata.org/w/api.php';
 const USER_AGENT = process.env.WIKIDATA_UA ?? 'GlobalDiscoveryBot/1.0 (b2b discovery; contact ops)';
@@ -73,11 +76,28 @@ export async function runSparql(
     },
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`wikidata ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const json = (await res.json()) as {
-    results?: { bindings?: SparqlBinding[] };
-  };
-  return json.results?.bindings ?? [];
+  try {
+    if (!res.ok) throw new Error(`wikidata ${res.status}`);
+    const bytes = await readFetchResponseBodyBounded(
+      res, PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES, 'wikidata_response_too_large',
+    );
+    const json = decodeJsonBytes<unknown>(bytes, 'wikidata_sparql_json_invalid');
+    if (
+      !isRecord(json) || !isRecord(json.results) ||
+      !Array.isArray(json.results.bindings) || !json.results.bindings.every(isRecord)
+    ) {
+      throw new Error('wikidata_sparql_schema_invalid');
+    }
+    return json.results.bindings as SparqlBinding[];
+  } catch (error) {
+    // Also release unread bodies rejected by status or declared content length.
+    void res.body?.cancel().catch(() => undefined);
+    throw error;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // ── Wikidata REST API（www.wikidata.org/w/api.php）——用于按名富集 ──────────────
