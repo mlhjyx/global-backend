@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import { gunzipSync } from "node:zlib";
 import { CATALOG_RESULT_PROJECTION_SCHEMAS } from "../durable-results/catalog-result-projections";
 import { SOURCE_RESULT_PROJECTION_SCHEMAS } from "../durable-results/source-result-projections";
@@ -13,6 +14,7 @@ import { isAllowedByRobots } from "../adapters/robots";
 import {
   EgressBlockedError,
   requestPublicHttp,
+  type DispatchPhysicalWire,
 } from "../adapters/guarded-http";
 import {
   wikidataSearchEntity,
@@ -112,6 +114,15 @@ function beforeExternalRequest(
     : undefined;
 }
 
+/** Bind an already-selected source wire to the Broker's per-wire capability. */
+function sourcePhysicalWire(ctx: ToolContext, wireId: string): DispatchPhysicalWire | undefined {
+  const dispatch = ctx.dispatchPhysicalWire;
+  if (ctx.workspaceId === "platform" && typeof dispatch !== "function") {
+    throw new ExecutionControlError("PLATFORM_EGRESS_PHYSICAL_WIRE_UNAVAILABLE");
+  }
+  return dispatch ? (execute) => dispatch(wireId, execute) : undefined;
+}
+
 /** crawl4ai.render —— 渲染后原始 HTML（数字足迹/结构化收割/web_watch 用；robots 在内强制）。 */
 export const crawl4aiRenderTool: Tool<
   { url: string },
@@ -155,6 +166,7 @@ export const crawl4aiRenderTool: Tool<
       !(await isAllowedByRobots(input.url, {
         authorizeExternalAction: ctx.authorizeExternalAction,
         beforePhysicalWire: ctx.beforePhysicalWire,
+        dispatchPhysicalWire: sourcePhysicalWire(ctx, "robots.public_http"),
       }))
     ) {
       // robots 禁抓 → 合规放弃（不换 UA）。空 HTML 返回，不计费。
@@ -167,6 +179,7 @@ export const crawl4aiRenderTool: Tool<
       assertToolExternalActionAuthorized(ctx),
       undefined,
       ctx.beforePhysicalWire,
+      sourcePhysicalWire(ctx, "crawl4ai.render.dispatch"),
     );
     return {
       data: r,
@@ -892,6 +905,7 @@ export const tradeFairAlgoliaTool: Tool<
         input.limit,
         beforeExternalRequest(ctx),
         ctx.beforePhysicalWire,
+        sourcePhysicalWire(ctx, "tradefair.algolia.page"),
       ),
     },
     costCents: 0,
@@ -966,6 +980,7 @@ export const mapYourShowFetchTool: Tool<
     }, {
       authorizeExternalAction: ctx.authorizeExternalAction,
       beforePhysicalWire: ctx.beforePhysicalWire,
+      dispatchPhysicalWire: sourcePhysicalWire(ctx, "mapyourshow.fetch"),
     });
     if (!res.ok)
       throw new Error(`mapyourshow ${res.status}: ${res.text.slice(0, 160)}`);
@@ -1114,6 +1129,7 @@ export const sanctionsDownloadTool: Tool<
       }, {
         authorizeExternalAction: ctx.authorizeExternalAction,
         beforePhysicalWire: ctx.beforePhysicalWire,
+        dispatchPhysicalWire: sourcePhysicalWire(ctx, "sanctions.public_http"),
       });
     } catch (error) {
       if (

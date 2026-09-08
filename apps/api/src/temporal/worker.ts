@@ -98,7 +98,12 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
-import { assertPlatformAuthorityReady } from "./platform-authority-readiness-gate";
+import { checkPlatformAuthorityReady } from "./platform-authority-readiness-gate";
+import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
+import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
+import { inspectPlatformBudgetAuthorityReadiness } from "../runtime/managed-dependency-readiness";
+import { JwksPlatformTechnicalQuoteServiceAuthenticationVerifier } from "../platform-authority/platform-technical-quote-jwks-verifier";
+import { PlatformTechnicalQuoteAuthenticationReadinessContributor } from "../platform-authority/platform-technical-quote-service-auth";
 import { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
 import { PrismaPlatformEgressFencePort } from "../platform-authority/platform-egress-fence.prisma";
 
@@ -348,11 +353,25 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
   }
   const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
-  try {
-    await assertPlatformAuthorityReady(authorityWriter);
-  } catch {
-    await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
-  }
+  // Read the same capability contract as API readiness. Existing per-run
+  // grants describe execution history, not whether a new grant can be issued.
+  const platformReadinessRegistry = new RuntimeReadinessContributorRegistry();
+  const platformQuoteReadiness = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
+    new JwksPlatformTechnicalQuoteServiceAuthenticationVerifier(),
+    platformReadinessRegistry,
+  );
+  platformQuoteReadiness.onModuleInit();
+  const platformAuthorityRepository = new ExecutionBudgetAuthorityRepository(prisma, authorityWriter);
+  const checkPlatformCapability = () => checkPlatformAuthorityReady(
+    () => inspectPlatformBudgetAuthorityReadiness(platformAuthorityRepository, platformReadinessRegistry),
+  );
+  await waitForWorkerDependencyAdmission({
+      check: checkPlatformCapability,
+      onBlocked: () => {
+        console.error("[worker] not ready: PLATFORM_BUDGET_AUTHORITY_NOT_READY; Temporal polling remains disabled");
+        void runtimeLeases.heartbeat("WORKER", "STARTING", UNDERSTANDING_TASK_QUEUE).catch(() => undefined);
+      },
+  });
   // Platform physical wires use the same dedicated writer principal as
   // authority admission. No in-memory or app-user fallback is permitted.
   const platformEgressFence = new PlatformEgressFence(
@@ -644,6 +663,7 @@ async function main(): Promise<void> {
         checkSiteBuildSettlementReadbackReadiness(process.env),
         checkBrowserReadiness(process.env),
         checkImagePipelineIsolationReadiness(),
+        checkPlatformCapability(),
       ]);
       return selectWorkerDependencyAdmissionBeforeAuthorityCutover({
         hardChecks: checks,
@@ -675,6 +695,7 @@ async function main(): Promise<void> {
     await runPromise;
   } finally {
     await controlledSignals.stop();
+    platformQuoteReadiness.onModuleDestroy();
     dependencyHeartbeat.stop();
     readyHeartbeat.stop();
     await runtimeLeases

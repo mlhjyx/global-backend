@@ -333,6 +333,8 @@ export async function inspectPlatformBudgetAuthorityReadiness(
     policyAsset,
     technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
   });
+  // Per-inspection expected source facts, never an authoritative budget cache.
+  const expectedPolicies = new Map<string, { policyArtifactSha256: string; executionEnvelopeSha256: string; requiredCapMicrousd: bigint }>();
   const registryProbe =
     (fact: "temporal_proof" | "issuer" | "revocation_delivery") =>
     (identity: PlatformAutomationReadinessIdentity) =>
@@ -353,7 +355,7 @@ export async function inspectPlatformBudgetAuthorityReadiness(
       );
       if (!row) return failed("PLATFORM_EXECUTION_BUDGET_POLICY_DRIFT");
       try {
-        quoteService.quote({
+        const quote = quoteService.quote({
           purpose: row.purpose,
           scheduleId: row.scheduleId,
           workflowType: row.workflowType,
@@ -364,6 +366,8 @@ export async function inspectPlatformBudgetAuthorityReadiness(
           providerSnapshot:
             resolveCurrentPlatformExecutionProviderSnapshotV1(row.scheduleId),
         });
+        expectedPolicies.set(row.scheduleId, { policyArtifactSha256: quote.policy_artifact_sha256,
+          executionEnvelopeSha256: quote.execution_envelope_sha256, requiredCapMicrousd: BigInt(quote.required_cap_per_run_microusd) });
         return { status: "ok" } as const;
       } catch {
         return failed("PLATFORM_EXECUTION_BUDGET_QUOTE_UNAVAILABLE");
@@ -387,11 +391,13 @@ export async function inspectPlatformBudgetAuthorityReadiness(
     revocationDelivery: registryProbe("revocation_delivery"),
     egressFence: async (identity) => {
       const inspectFence = repository?.inspectPlatformEgressFenceCapability;
-      if (!inspectFence) return failed(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
+      const expectedPolicy = expectedPolicies.get(identity.scheduleId);
+      if (!inspectFence || !expectedPolicy) return failed(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
       try {
         const capability = await inspectFence.call(
           repository,
           identity.scheduleId,
+          expectedPolicy,
         );
         return capability.status === "available"
           ? ({ status: "ok" } as const)

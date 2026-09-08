@@ -1,3 +1,6 @@
+import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
+import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
+import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
   ExecutionBroker,
   ExternalToolActionDeniedError,
@@ -203,6 +206,7 @@ export class ToolBroker implements ExecutionBroker {
     input: I,
     ctx: ToolContext,
   ): Promise<ToolResult<O>> {
+    assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
     const now = this.deps.now ?? Date.now;
     const started = now();
@@ -276,6 +280,7 @@ export class ToolBroker implements ExecutionBroker {
     // ledger; every other product caller uses the injected durable BudgetStore.
     const runId = ctx.runId ?? ctx.workspaceId;
     let reservation: BudgetReservation | undefined;
+    let budgetOperationKey: string | undefined;
     let paidScope: PaidOperationReservation | undefined;
     if (ctx.paidCost) {
       if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
@@ -338,18 +343,16 @@ export class ToolBroker implements ExecutionBroker {
       }
     } else {
       try {
+        budgetOperationKey = paidOperationKey([
+          runId, "tool-budget", tool.id, tool.version, tool.idempotencyKey(input),
+        ]);
         reservation = await this.budget.reserve({
           workspaceId: ctx.workspaceId,
           accountKey: runId,
-          operationKey: paidOperationKey([
-            runId,
-            "tool-budget",
-            tool.id,
-            tool.version,
-            tool.idempotencyKey(input),
-          ]),
+          operationKey: budgetOperationKey,
           estimatedMicrousd: BigInt(tool.cost.estimatedCents) * 10_000n,
         });
+        if (ctx.platformEgress) assertPlatformEgressReservation(reservation, ctx.workspaceId, runId);
         if (reservation.replay) {
           let replay: ToolResult<O> | null;
           try {
@@ -501,6 +504,8 @@ export class ToolBroker implements ExecutionBroker {
         }
       }
       let result: ToolResult<O>;
+      let platformWireStarted = false;
+      let platformWireFailed = false;
       try {
         const operationKey = paidScope?.operationKey ?? paidOperationKey([
           ctx.runId ?? ctx.workspaceId,
@@ -509,15 +514,32 @@ export class ToolBroker implements ExecutionBroker {
           tool.version,
           tool.idempotencyKey(input),
         ]);
-        const executePhysicalWire = () => tool.execute(input, ctx);
-        result = ctx.platformEgress
-          ? await ctx.platformEgress.authorizeAndDispatch(
-              operationKey,
-              executePhysicalWire,
-            )
-          : await executePhysicalWire();
+        let executionContext = ctx;
+        if (ctx.platformEgress) {
+          const operation = createPlatformEgressOperation({ operationKey, budgetOperationKey: budgetOperationKey!, reservation,
+            workspaceId: ctx.workspaceId, accountKey: runId,
+            execution: { kind: "tool", toolId: tool.id, toolVersion: tool.version } });
+          const dispatchWire = createPlatformToolWireDispatcher(operation, ctx.platformEgress);
+          executionContext = { ...ctx, dispatchPhysicalWire: async (wireId, send) => {
+            try {
+              return await dispatchWire(wireId, async () => {
+                platformWireStarted = true;
+                return send();
+              });
+            } catch (error) {
+              platformWireFailed = true;
+              throw error;
+            }
+          } };
+        }
+        result = await tool.execute(input, executionContext);
+        // A producer may catch a transport error and fabricate a fallback result.
+        // It cannot turn an unresolved child send into successful settlement.
+        if (platformWireFailed) throw new ExecutionControlError("PLATFORM_EGRESS_PHYSICAL_WIRE_FAILED");
       } catch (err) {
-        if (err instanceof ExternalToolActionDeniedError) {
+        // A later page can be suppressed after an earlier request already ran.
+        // That partial execution is unresolved, never a zero-call release.
+        if (err instanceof ExternalToolActionDeniedError && !platformWireStarted && !platformWireFailed) {
           if (paidScope) {
             await this.settlePersistentOperation({
               scope: paidScope,

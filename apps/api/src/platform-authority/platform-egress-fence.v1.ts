@@ -1,4 +1,5 @@
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
+import { snapshotPlatformEgressOperation, type PlatformEgressOperation } from "./platform-egress-operation";
 
 export const PLATFORM_EGRESS_FENCE_UNAVAILABLE =
   "PLATFORM_EGRESS_FENCE_UNAVAILABLE" as const;
@@ -51,13 +52,13 @@ export interface PlatformEgressFencePort {
   /** Transaction 1: lock authority/account/policy generation and create AUTHORIZED attempt. */
   authorize(
     binding: PlatformEgressBinding,
-    operationKey: string,
+    operation: PlatformEgressOperation,
   ): Promise<PlatformEgressAuthorization>;
   /** Transaction 2: repeat revocation/expiry/policy checks and perform AUTHORIZED→SENDING CAS. */
   claimSend(
     binding: PlatformEgressBinding,
     authorization: PlatformEgressAuthorization,
-    operationKey: string,
+    operation: PlatformEgressOperation,
   ): Promise<PlatformEgressDispatchCapability>;
   acknowledged(attemptId: string, meta: Readonly<Record<string, unknown>>): Promise<void>;
   unknown(attemptId: string, meta: Readonly<Record<string, unknown>>): Promise<void>;
@@ -89,12 +90,6 @@ function validateBinding(binding: PlatformEgressBinding): void {
   }
 }
 
-function validateOperation(operationKey: string): void {
-  if (typeof operationKey !== "string" || !OPERATION_KEY.test(operationKey)) {
-    invalid("PLATFORM_EGRESS_OPERATION_KEY_INVALID");
-  }
-}
-
 /**
  * The only product-level Platform dispatch entry point. The default has no
  * in-memory fallback; a durable PostgreSQL-backed port must be injected by the
@@ -105,16 +100,19 @@ export class PlatformEgressFence {
 
   async authorizeAndDispatchPlatformEgress<T>(
     binding: PlatformEgressBinding,
-    operationKey: string,
+    operation: PlatformEgressOperation,
     executePhysicalWire: () => Promise<T>,
   ): Promise<T> {
     validateBinding(binding);
-    validateOperation(operationKey);
+    if (!operation || typeof operation.operationKey !== "string" || !OPERATION_KEY.test(operation.operationKey)) {
+      invalid("PLATFORM_EGRESS_OPERATION_KEY_INVALID");
+    }
+    const immutableOperation = snapshotPlatformEgressOperation(operation);
     if (!this.port) invalid(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
 
-    const authorization = await this.port.authorize(binding, operationKey);
+    const authorization = await this.port.authorize(binding, immutableOperation);
     const capability: PlatformEgressDispatchCapability =
-      await this.port.claimSend(binding, authorization, operationKey);
+      await this.port.claimSend(binding, authorization, immutableOperation);
 
     try {
       const result = await capability.dispatch(executePhysicalWire);

@@ -70,6 +70,17 @@ describe("Crawl4AI adapter 的 API 侧入口闸", () => {
 });
 
 describe("Crawl4AI artifact-result boundaries", () => {
+  it.each([crawlUrl, crawlHtml])('keeps authorization and resolution before around, and body completion inside around', async crawl => {
+    const events: string[] = [];
+    const response = new Response(JSON.stringify({ markdown: 'ok', results: [{ html: 'ok' }] }), { status: 200 });
+    vi.stubGlobal('fetch', vi.fn(async () => { events.push('fetch'); return response; }));
+    await crawl('https://company.example/', async () => { events.push('auth'); }, async raw => {
+      events.push('dns'); return { url: new URL(raw), ip: '203.0.113.10', family: 4, addresses: [{ address: '203.0.113.10', family: 4 }] };
+    }, async () => { events.push('counter'); }, async <T>(execute: () => Promise<T>): Promise<T> => {
+      events.push('around'); const result = await execute(); expect(response.bodyUsed).toBe(true); events.push('complete'); return result;
+    });
+    expect(events).toEqual(['auth', 'dns', 'auth', 'counter', 'around', 'fetch', 'complete']);
+  });
   it("bounds and fences a successful markdown response", async () => {
     const beforePhysicalWire = vi.fn(async () => undefined);
     vi.stubGlobal(

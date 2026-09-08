@@ -149,6 +149,7 @@ model ToolBudgetAccount {
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   operations               ToolBudgetOperation[]
+  platformEgressAttempts   PlatformEgressAttempt[] @relation("PlatformEgressAttemptAccount")
   authority                ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
   toolOperationSubjects    ToolOperationSubject[]    @relation("ToolOperationSubjectAccount")
   governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationAccount")
@@ -222,6 +223,11 @@ model PlatformEgressAttempt {
   operationKey           String                  @map("operation_key") @db.VarChar(200)
   policyRevision         String                  @map("policy_revision") @db.VarChar(64)
   generation             BigInt                  @default(0)
+  accountId              String?                 @map("account_id") @db.Uuid
+  accountGeneration      Int?                    @map("account_generation")
+  budgetOperationId      String?                 @map("budget_operation_id") @db.Uuid
+  budgetOperationKey     String?                 @map("budget_operation_key") @db.VarChar(200)
+  reservedMicrousd       BigInt?                 @map("reserved_microusd")
   state                  PlatformEgressAttemptState @default(AUTHORIZED)
   authorizedAt           DateTime                @default(now()) @map("authorized_at") @db.Timestamptz(3)
   sendingAt              DateTime?               @map("sending_at") @db.Timestamptz(3)
@@ -231,6 +237,8 @@ model PlatformEgressAttempt {
   outcomeMeta             Json?                   @map("outcome_meta")
 
   authority ExecutionBudgetAuthority @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_authority_fkey")
+  account ToolBudgetAccount? @relation("PlatformEgressAttemptAccount", fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_account_fkey")
+  budgetOperation ToolBudgetOperation? @relation("PlatformEgressAttemptBudgetOperation", fields: [budgetOperationId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_budget_operation_fkey")
 
   @@unique([authorityId, operationKey], map: "platform_egress_attempt_authority_operation_key")
   @@unique([scheduleId, workflowRunId, operationKey], map: "platform_egress_attempt_run_operation_key")
@@ -241,12 +249,57 @@ model PlatformEgressAttempt {
 /// Monotonic per-schedule generation shared by authorization and the final
 /// send CAS. A disabled generation cannot be reopened by a process-local flag.
 model PlatformEgressScheduleFence {
-  scheduleId String   @id @map("schedule_id") @db.VarChar(191)
-  generation BigInt   @default(0)
-  state      String   @default("ACTIVE") @db.VarChar(16)
-  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+  scheduleId    String   @id @map("schedule_id") @db.VarChar(191)
+  generation    BigInt   @default(0)
+  fenceSequence BigInt   @default(0) @map("fence_sequence")
+  policyArtifactSha256 String? @map("policy_artifact_sha256") @db.VarChar(64)
+  executionEnvelopeSha256 String? @map("execution_envelope_sha256") @db.VarChar(64)
+  requiredCapMicrousd BigInt? @map("required_cap_microusd")
+  state         String   @default("ACTIVE") @db.VarChar(16)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@map("platform_egress_schedule_fence")
+}
+
+/// Immutable signed-command fence facts, not raw JWS or an authenticated ACK.
+/// committedAt is the transaction's fact time; expose only after outer commit.
+model PlatformRevocationReceipt {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  issuer           String   @db.VarChar(2048)
+  revocationJti    String   @map("revocation_jti") @db.Uuid
+  tokenSha256      String   @map("token_sha256") @db.VarChar(64)
+  targetIssuer     String   @map("target_issuer") @db.VarChar(2048)
+  targetJti        String   @map("target_jti") @db.Uuid
+  scheduleId       String   @map("schedule_id") @db.VarChar(191)
+  workflowRunId    String   @map("workflow_run_id") @db.VarChar(36)
+  fenceSequence    BigInt   @map("fence_sequence")
+  reason           String   @db.VarChar(80)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+  generation       BigInt
+  committedAt      DateTime @map("committed_at") @db.Timestamptz(6)
+  inFlightAttempts BigInt   @map("in_flight_attempts")
+
+  ackDelivery PlatformFenceAckDelivery?
+
+  @@unique([issuer, revocationJti], map: "platform_revocation_receipt_issuer_jti_key")
+  @@unique([scheduleId, fenceSequence], map: "platform_revocation_receipt_schedule_sequence_key")
+  @@map("platform_revocation_receipt")
+}
+
+/// First committed encrypted ACK is immutable and replayed without re-signing.
+/// Only migration-owned writer functions may read or insert delivery bytes.
+model PlatformFenceAckDelivery {
+  receiptId          String   @id @map("receipt_id") @db.Uuid
+  commandTokenSha256 String   @map("command_token_sha256") @db.VarChar(64)
+  ackTokenSha256     String   @map("ack_token_sha256") @db.VarChar(64)
+  signingKeyId       String   @map("signing_key_id") @db.VarChar(64)
+  cipherKeyId        String   @map("cipher_key_id") @db.VarChar(64)
+  ciphertext        Bytes
+  createdAt         DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  receipt PlatformRevocationReceipt @relation(fields: [receiptId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_fence_ack_delivery_receipt_fkey")
+
+  @@map("platform_fence_ack_delivery")
 }
 
 /// Append-only revocation fact. The copied scope participates in both RLS and
@@ -300,6 +353,7 @@ model ToolBudgetOperation {
   toolOperationSubject     ToolOperationSubject?            @relation("ToolOperationSubjectOperation")
   governedSubjectRelations GovernedSubjectRelation[]        @relation("GovernedSubjectRelationOperation")
   discoveryQueryAttempts   DiscoveryQueryOperationAttempt[]
+  platformEgressAttempts   PlatformEgressAttempt[] @relation("PlatformEgressAttemptBudgetOperation")
 
   @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
   @@unique([scopeKey, id], map: "tool_budget_operation_scope_id_key")

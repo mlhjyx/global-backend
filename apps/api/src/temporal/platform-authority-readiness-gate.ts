@@ -1,36 +1,31 @@
-import type { PrismaClient } from "@prisma/client";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
-
-type PlatformAuthorityFreshnessRow = Readonly<{
-  purpose: string;
-  state: string;
-}>;
+import type { RuntimeComponentStatus } from "../runtime/runtime-readiness-registry";
+import {
+  tryProjectPlatformAutomationReadinessForHealth,
+  platformAutomationAggregateFromHealthProjection,
+} from "../platform-authority/platform-automation-readiness-health";
 
 /** Refuse schedule polling unless every enabled platform purpose is issuable. */
 export async function assertPlatformAuthorityReady(
-  platformWriter: Pick<PrismaClient, "$queryRaw">,
+  inspectCapabilities: () => Promise<unknown>,
 ): Promise<void> {
-  const rows = await platformWriter.$queryRaw<PlatformAuthorityFreshnessRow[]>`
-    SELECT purpose, state
-    FROM inspect_platform_execution_authority_freshness_v1(clock_timestamp())
-  `;
-  const requiredPurposes = new Set([
-    "platform.acquisition",
-    "platform.intent_watch",
-    "platform.sanctions",
-  ]);
-  const usable = new Set(
-    rows
-      .filter(
-        (row) =>
-          row.state === "ISSUABLE" ||
-          row.state === "INTENTIONALLY_DISABLED_NO_EGRESS",
-      )
-      .map((row) => row.purpose),
-  );
-  for (const purpose of requiredPurposes) {
-    if (!usable.has(purpose)) {
-      throw new ExecutionControlError("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
+  const result = await checkPlatformAuthorityReady(inspectCapabilities);
+  if (result.status !== "ok") throw new ExecutionControlError(result.code);
+}
+
+/** Shared startup and heartbeat decision; no prior run or Grant is required. */
+export async function checkPlatformAuthorityReady(
+  inspectCapabilities: () => Promise<unknown>,
+): Promise<RuntimeComponentStatus> {
+  try {
+    const projection = tryProjectPlatformAutomationReadinessForHealth(
+      await inspectCapabilities(),
+    );
+    if (projection && platformAutomationAggregateFromHealthProjection(projection).status === "ok") {
+      return { status: "ok" };
     }
+  } catch {
+    // An unavailable dependency never grants admission or exposes transport details.
   }
+  return { status: "failed", code: "PLATFORM_BUDGET_AUTHORITY_NOT_READY" };
 }

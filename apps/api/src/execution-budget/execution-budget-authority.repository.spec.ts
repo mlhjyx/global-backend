@@ -549,6 +549,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
   );
 
   it('probes the durable egress fence through its writer-only read function', async () => {
+    const expectedPolicy = { policyArtifactSha256: 'a'.repeat(64), executionEnvelopeSha256: 'b'.repeat(64), requiredCapMicrousd: 1n };
     const transactionClient = {
       $executeRawUnsafe: vi.fn(async () => 0),
       $queryRaw: vi
@@ -558,8 +559,13 @@ describe('ExecutionBudgetAuthorityRepository', () => {
           {
             schedule_id: SCHEDULE_ID,
             state: 'ACTIVE',
-            generation: 0n,
+            generation: 1n,
             can_fence: true,
+            can_authorize: true,
+            can_claim: true,
+            policy_artifact_sha256: expectedPolicy.policyArtifactSha256,
+            execution_envelope_sha256: expectedPolicy.executionEnvelopeSha256,
+            required_cap_microusd: 1n,
           },
         ]),
     };
@@ -574,19 +580,39 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     );
 
     await expect(
-      repository.inspectPlatformEgressFenceCapability(SCHEDULE_ID),
+      repository.inspectPlatformEgressFenceCapability(SCHEDULE_ID, expectedPolicy),
     ).resolves.toEqual({ status: 'available' });
     const query = transactionClient.$queryRaw.mock.calls[1]?.[0] as {
       strings?: readonly string[];
       values?: readonly unknown[];
     };
     expect(query.strings?.join('')).toContain(
-      'inspect_platform_egress_fence_v1',
+      'inspect_platform_egress_policy_v2',
     );
     expect(query.strings?.join('')).not.toContain(
       'platform_egress_schedule_fence',
     );
     expect(query.values).toEqual([SCHEDULE_ID]);
+  });
+
+  it('does not report a policy-bound fence available when only the old kill-switch permission exists', async () => {
+    const source = platformFreshnessWriter([safePlatformPrincipal], [{ schedule_id: SCHEDULE_ID, state: 'ACTIVE', generation: 1n, can_fence: true }]);
+    const repository = new ExecutionBudgetAuthorityRepository(fakeWorkspacePrisma(async () => []), source.writer);
+    await expect(repository.inspectPlatformEgressFenceCapability(SCHEDULE_ID, {
+      policyArtifactSha256: 'a'.repeat(64), executionEnvelopeSha256: 'b'.repeat(64), requiredCapMicrousd: 1n,
+    })).resolves.toEqual({ status: 'unavailable' });
+  });
+  it.each([
+    { generation: 0n }, { can_authorize: false }, { can_claim: false },
+    { policy_artifact_sha256: 'c'.repeat(64) }, { execution_envelope_sha256: null }, { required_cap_microusd: 2n },
+  ])('rejects unbound or drifted policy generation and missing v2 permission', async mutation => {
+    const source = platformFreshnessWriter([safePlatformPrincipal], [{ schedule_id: SCHEDULE_ID, state: 'ACTIVE', generation: 1n,
+      can_fence: true, can_authorize: true, can_claim: true,
+      policy_artifact_sha256: 'a'.repeat(64), execution_envelope_sha256: 'b'.repeat(64), required_cap_microusd: 1n, ...mutation }]);
+    const repository = new ExecutionBudgetAuthorityRepository(fakeWorkspacePrisma(async () => []), source.writer);
+    await expect(repository.inspectPlatformEgressFenceCapability(SCHEDULE_ID, {
+      policyArtifactSha256: 'a'.repeat(64), executionEnvelopeSha256: 'b'.repeat(64), requiredCapMicrousd: 1n,
+    })).resolves.toEqual({ status: 'unavailable' });
   });
 
   it('fails closed when the fence is disabled or its writer capability is absent', async () => {
@@ -599,7 +625,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       disabled.writer,
     );
     await expect(
-      disabledRepository.inspectPlatformEgressFenceCapability(SCHEDULE_ID),
+      disabledRepository.inspectPlatformEgressFenceCapability(SCHEDULE_ID, { policyArtifactSha256: 'a'.repeat(64), executionEnvelopeSha256: 'b'.repeat(64), requiredCapMicrousd: 1n }),
     ).resolves.toEqual({ status: 'unavailable' });
 
     const missingCapability = platformFreshnessWriter(
@@ -611,7 +637,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       missingCapability.writer,
     );
     await expect(
-      missingRepository.inspectPlatformEgressFenceCapability(SCHEDULE_ID),
+      missingRepository.inspectPlatformEgressFenceCapability(SCHEDULE_ID, { policyArtifactSha256: 'a'.repeat(64), executionEnvelopeSha256: 'b'.repeat(64), requiredCapMicrousd: 1n }),
     ).resolves.toEqual({ status: 'unavailable' });
   });
 

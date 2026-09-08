@@ -1,3 +1,4 @@
+import type { PlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 /**
  * L0 Tool 契约（PRD 9.13）。最细粒度原子采集能力，一后端一动作。
  * 无状态、无业务语义、不做权限/预算判断——那些由 ToolBroker 在调用点强制。
@@ -82,15 +83,17 @@ export interface ToolContext {
    * also run before DNS or while a limiter is waiting.
    */
   beforePhysicalWire?: () => Promise<void>;
+  /** Broker-owned per-wire fence; adapters pass the actual bounded transport promise. */
+  dispatchPhysicalWire?: <T>(wireId: string, execute: () => Promise<T>) => Promise<T>;
   /**
    * Optional platform-schedule send fence. Managed platform activities inject
    * this callback; ordinary workspace requests leave it absent. The broker
-   * invokes it exactly once around the physical tool execution so the
+   * invokes it separately around each physical transport so the
    * durable authorize/claim/ACK-or-UNKNOWN protocol is the final send cut.
    */
   platformEgress?: {
     authorizeAndDispatch: <T>(
-      operationKey: string,
+      operation: PlatformEgressOperation,
       executePhysicalWire: () => Promise<T>,
     ) => Promise<T>;
   };

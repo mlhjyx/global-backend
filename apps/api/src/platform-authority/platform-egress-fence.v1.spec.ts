@@ -33,13 +33,33 @@ function port(overrides: Partial<PlatformEgressFencePort> = {}) {
   return value;
 }
 
+const operation = (operationKey: string) => ({ operationKey,
+  budgetOperationId: "44444444-4444-4444-8444-444444444444",
+  budgetOperationKey: "c".repeat(64), reservedMicrousd: 0n,
+  execution: { kind: "tool" as const, toolId: "test.tool", toolVersion: "1.0.0" },
+});
+
 describe("Platform egress fence v1", () => {
+  it("carries the same frozen reservation snapshot across both admission stages", async () => {
+    const original = operation("wire-1");
+    const durable = port({ authorize: vi.fn(async () => {
+      original.reservedMicrousd = 99n;
+      original.execution.toolVersion = "changed-after-authorize";
+      return { attemptId: "33333333-3333-4333-8333-333333333333" };
+    }) });
+    await new PlatformEgressFence(durable).authorizeAndDispatchPlatformEgress(BINDING, original, async () => "ok");
+    const first = durable.authorize.mock.calls[0][1];
+    expect(durable.claimSend.mock.calls[0][2]).toBe(first);
+    expect(first.reservedMicrousd).toBe(0n);
+    expect(first.execution).toEqual({ kind: "tool", toolId: "test.tool", toolVersion: "1.0.0" });
+    expect(Object.isFrozen(first)).toBe(true);
+  });
   it("fails closed without a durable fence port", async () => {
     const execute = vi.fn(async () => "must-not-run");
     const fence = new PlatformEgressFence();
 
     await expect(
-      fence.authorizeAndDispatchPlatformEgress(BINDING, "wire-1", execute),
+      fence.authorizeAndDispatchPlatformEgress(BINDING, operation("wire-1"), execute),
     ).rejects.toEqual(new PlatformEgressFenceError(PLATFORM_EGRESS_FENCE_UNAVAILABLE));
     expect(execute).not.toHaveBeenCalled();
   });
@@ -66,7 +86,7 @@ describe("Platform egress fence v1", () => {
     });
     const result = await new PlatformEgressFence(durable).authorizeAndDispatchPlatformEgress(
       BINDING,
-      "wire-1",
+      operation("wire-1"),
       execute,
     );
 
@@ -86,7 +106,7 @@ describe("Platform egress fence v1", () => {
     await expect(
       new PlatformEgressFence(durable).authorizeAndDispatchPlatformEgress(
         BINDING,
-        "wire-1",
+        operation("wire-1"),
         execute,
       ),
     ).rejects.toEqual(new PlatformEgressFenceError("PLATFORM_EGRESS_REVOKED"));
@@ -104,7 +124,7 @@ describe("Platform egress fence v1", () => {
     await expect(
       new PlatformEgressFence(durable).authorizeAndDispatchPlatformEgress(
         BINDING,
-        "wire-1",
+        operation("wire-1"),
         execute,
       ),
     ).rejects.toThrow("transport ack lost");
@@ -124,12 +144,12 @@ describe("Platform egress fence v1", () => {
     await expect(
       fence.authorizeAndDispatchPlatformEgress(
         { ...BINDING, accountKey: "wrong" },
-        "wire-1",
+        operation("wire-1"),
         execute,
       ),
     ).rejects.toEqual(new PlatformEgressFenceError("PLATFORM_EGRESS_BINDING_INVALID"));
     await expect(
-      fence.authorizeAndDispatchPlatformEgress(BINDING, "", execute),
+      fence.authorizeAndDispatchPlatformEgress(BINDING, operation(""), execute),
     ).rejects.toEqual(new PlatformEgressFenceError("PLATFORM_EGRESS_OPERATION_KEY_INVALID"));
     expect(durable.authorize).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();

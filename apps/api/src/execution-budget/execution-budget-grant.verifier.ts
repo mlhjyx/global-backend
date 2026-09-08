@@ -186,7 +186,10 @@ export function validateExecutionBudgetGrantVerifierConfiguration(
 ): ExecutionBudgetGrantVerifierConfiguration {
   const mode = resolveRuntimeMode(env);
   const jwks = trustedUrl(env, 'EXECUTION_BUDGET_GRANT_JWKS_URI', mode);
-  const issuer = trustedUrl(env, 'EXECUTION_BUDGET_GRANT_ISSUER', mode).href;
+  trustedUrl(env, 'EXECUTION_BUDGET_GRANT_ISSUER', mode);
+  // JWT issuer is an exact identifier, not an HTTP request URL. Do not add a slash
+  // or otherwise rewrite the configured value after validating its trust boundary.
+  const issuer = requiredCanonical(env, 'EXECUTION_BUDGET_GRANT_ISSUER');
   if (
     requiredCanonical(env, 'EXECUTION_BUDGET_GRANT_AUDIENCE', 256) !==
     EXECUTION_BUDGET_GRANT_AUDIENCE
@@ -371,7 +374,7 @@ export async function loadExecutionBudgetJwks(
   }
 }
 
-function createBoundedRemoteJwkSet(
+export function createBoundedRemoteJwkSet(
   configuration: ExecutionBudgetGrantVerifierConfiguration,
   fetcher: ExecutionBudgetJwksFetch,
 ): CompactVerifyGetKey {

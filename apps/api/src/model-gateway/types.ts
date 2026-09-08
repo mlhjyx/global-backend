@@ -1,3 +1,4 @@
+import type { PlatformEgressOperation } from '../platform-authority/platform-egress-operation';
 import type { ModelExecutionTrace } from '@global/contracts';
 import type { TypedProjectionSchema } from '../durable-results/durable-result-strategy';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -20,7 +21,7 @@ export interface AiContext {
   /** Platform schedule send fence; absent for normal workspace/model calls. */
   platformEgress?: {
     authorizeAndDispatch: <T>(
-      operationKey: string,
+      operation: PlatformEgressOperation,
       executePhysicalWire: () => Promise<T>,
     ) => Promise<T>;
   };
