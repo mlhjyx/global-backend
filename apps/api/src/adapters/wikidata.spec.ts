@@ -18,7 +18,7 @@ describe('Wikidata SPARQL company binding validation',()=>{
   expect(await parse(binding())).toEqual([{qid:'Q123',name:'Example Works',website:'https://example.test',employees:120,countryCode:'DE',longitude:13.4,latitude:52.5}]);
  });
  it.each(['not-a-qid','P123','Q0','Q01','Q-1','Q1?x=2',''])('drops invalid entity identifier %s',async id=>{
-  expect(await parse(binding({company:{type:'uri',value:`https://example.test/${id}`}}))).toEqual([]);
+  expect(await parse(binding({company:{type:'uri',value:`https://www.wikidata.org/entity/${id}`}}))).toEqual([]);
  });
  it.each(['NaN','Infinity','-Infinity','not-a-number'])('omits nonfinite employee value %s',async employees=>{
   const [row]=await parse(binding({employees:{type:'literal',value:employees}}));expect(row.employees).toBeUndefined();expect(row.qid).toBe('Q123');
@@ -37,4 +37,18 @@ describe('Wikidata SPARQL company binding validation',()=>{
   expect(row.employees).toBeUndefined();expect(row.countryCode).toBeUndefined();expect(row.latitude).toBeUndefined();
   for(const label of ['', 'Q123'])expect(await parse(binding({companyLabel:{type:'literal',value:label}}))).toEqual([]);
  });
+});
+
+it.each([
+ {type:'literal',value:'Q123'},
+ {type:'uri',value:'https://example.test/Q123'},
+ {type:'literal',value:'http://www.wikidata.org/entity/Q123'},
+ {type:'uri',value:'https://www.wikidata.org/wiki/Q123'},
+ {type:'uri',value:'https://www.wikidata.org/entity/Q123#fragment'},
+ {type:'uri',value:'https://www.wikidata.org@attacker.test/entity/Q123'},
+])('rejects a binding that is not the complete official entity URI %#',async company=>{
+ expect(await parse(binding({company}))).toEqual([]);
+});
+it('accepts the canonical entity URI with HTTPS as well as HTTP',async()=>{
+ expect((await parse(binding({company:{type:'uri',value:'https://www.wikidata.org/entity/Q123'}})))[0].qid).toBe('Q123');
 });
