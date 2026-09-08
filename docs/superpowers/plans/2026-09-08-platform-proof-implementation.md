@@ -19,3 +19,11 @@
 - Task 2及Task 4的GrowthOS源码当前由既有“修复独立站前端构建失败”任务（01a00ab2-0341-7443-adf1-04d9dfd6b0ff）推进，施工路径/root/.codex/worktrees/growthos-platform-authority-20260908。只读接管核对发现原生Temporal reader候选和持久签发补丁已存在；该任务仍在执行HMAC入口、撤销Outbox/fence ACK和能力检查。它的测试/提交声明必须在集成时按exact-source核验；本任务不覆盖其writer或重复新增迁移。
 - Task 3、5等待双方明确的capability wire/schema和producer事实交付。已批准的本任务签名capability readback与其它任务HMAC签发入口用途不同，不能自动互代；接线时同时核对issuer/audience/nonce/schema/密钥用途及底层fact截止。
 - 冻结规格内源码事实是审批时快照，不覆盖后续并行任务进展。当前源码实现和运行事实按各自exact commit/readback核验。
+
+## Backend HTTP transport交付
+
+- 新增platform-capability-transport.ts及测试：固定配置endpoint（HTTPS或literal loopback HTTP），专用service token provider，3秒覆盖取token/fetch/stream的总deadline，禁止重定向/cookie，application/jose与16KiB响应限制，UTF8/BOM/framing严格检查。
+- POST请求compact JSON字段固定为operationId=platformAutomationCapabilities_v1、nonce、backendSha、growthosSha、policyDigest、namespace=platform-automation、schedules。每个schedule固定scheduleId/workflowType/taskQueue/mode；nonce由cache生成。真实HTTP path仍必须与GrowthOS code-first接口确认，不由外部请求决定。
+- 返回raw compact JWS交给cache的签名/行/有效期验证；transport本身不授予ready。service token须由SaaS既有受控身份供应，接收方仍需核验服务主体/audience/scope。HMAC签发入口不能替代此capability read操作。
+- 新增transport focused23项，五模块合计98项通过；transport覆盖率statements98.48/branches98.36/functions81.81/lines98.33。独立review通过实现，额外验证父signal取消时body读取被取消。所有测试离线，不触发真实服务或凭据。
+- 尚未完成：实际token provider、producer endpoint/schema冻结、capability JWKS轮换接线、三类production contributor注册、服务端真实事实与跨仓运行验收。现有代码不自动改变当前not_ready状态。
