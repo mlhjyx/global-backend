@@ -28,6 +28,9 @@ const ORDINARY_DYNAMIC_ERROR_REGISTRY = Object.freeze(new Set([
   'sanctions/sanctions-refresh.service.ts|`sanctions refresh abort (shrink guard): parsed ${desired.length} vs existing active ${existingActive} — kept prior data`',
   'temporal/discovery.activities.ts|`query plan ${args.planId} not found`',
   'temporal/discovery.activities.ts|`query plan is ${plan.status}; must be READY (human-confirmed) before execution`',
+  'tools/source-tools.ts|`mapyourshow ${res.status}: ${res.text.slice(0, 160)}`',
+  'tools/source-tools.ts|`sanctions.download HTTP ${res.status} for ${input.url}`',
+  'tools/tool-broker.ts|`paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? "recorded_failure"}`',
 ]));
 
 function productionSources(directory: string): string[] {
