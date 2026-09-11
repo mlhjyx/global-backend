@@ -58,9 +58,13 @@ function signalGroup(pid: number | undefined, signal: NodeJS.Signals): void {
   }
 }
 
-async function waitForGroupExit(pid: number | undefined): Promise<void> {
+async function waitForGroupExit(
+  pid: number | undefined,
+  timeoutMs: number,
+): Promise<void> {
   if (pid === undefined) return;
-  for (let attempt = 0; attempt < 50; attempt++) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
     try {
       process.kill(-pid, 0);
     } catch (error) {
@@ -87,9 +91,12 @@ async function waitForGroupExit(pid: number | undefined): Promise<void> {
         active = true;
     }
     if (!active) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(CLEANUP_ERROR);
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(10, remaining)),
+    );
   }
-  throw new Error(CLEANUP_ERROR);
 }
 
 function runBrowserChild(executable: string, root: string): Promise<void> {
@@ -155,7 +162,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
       clearTimeout(reapDeadline);
       if (settled) return;
       settled = true;
-      void waitForGroupExit(child.pid).then(
+      void waitForGroupExit(child.pid, REAP_GRACE_MS).then(
         () => {
           if (uncertain) reject(new Error(CLEANUP_ERROR));
           else if (

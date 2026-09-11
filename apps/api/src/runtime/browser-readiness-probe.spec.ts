@@ -130,6 +130,35 @@ describe("Browser readiness temporary-state lifecycle", () => {
       await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
   }, 20_000);
 
+  it("waits for a slow same-group descendant within the bounded reap grace", async () => {
+    installBrowser(`
+      const child=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},1500)'],{stdio:'inherit'});
+      require('node:fs').writeFileSync(process.env.HOME+'/descendant.pid',String(child.pid));
+      process.stdout.write(${JSON.stringify(document)});
+    `);
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (children.some((child) => pid === -child.pid!)) return true;
+      return kill(pid, signal);
+    });
+    try {
+      await createBrowserReadinessProbe()("/usr/bin/chromium");
+      for (const root of roots)
+        await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      for (const root of roots) {
+        try {
+          const pid = Number(
+            await readFile(join(root, "home", "descendant.pid"), "utf8"),
+          );
+          if (Number.isInteger(pid) && pid > 1) kill(pid, "SIGKILL");
+        } catch {
+          // The root was cleaned successfully.
+        }
+      }
+    }
+  }, 15_000);
+
   it("fences new probes if its root identity is replaced", async () => {
     installBrowser(`
       const fs=require('node:fs'),path=require('node:path');const root=path.dirname(process.argv[1]);

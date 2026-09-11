@@ -95,6 +95,7 @@ const BROWSER_PROBE_ARGS = Object.freeze([
   "--disable-dev-shm-usage",
   "--disable-background-networking",
   "--disable-component-update",
+  "--disable-breakpad",
   "--no-first-run",
   "--no-default-browser-check",
   "--dump-dom",
