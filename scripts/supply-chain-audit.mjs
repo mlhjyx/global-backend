@@ -525,6 +525,9 @@ function normalizePnpmAudit(audit) {
   }
 
   const advisories = [];
+  const findingCounts = Object.fromEntries(
+    SEVERITIES.map((severity) => [severity, 0]),
+  );
   let pathEvidenceComplete = true;
   for (const raw of Object.values(audit.advisories)) {
     if (
@@ -609,6 +612,11 @@ function normalizePnpmAudit(audit) {
         ),
       }),
     );
+    // pnpm's vulnerability metadata counts vulnerable installed versions,
+    // while an advisory entry may cover more than one finding/version (for
+    // example Astro 5 and Astro 7 in the same workspace). Keep the advisory
+    // list and the vulnerability-count contract distinct.
+    findingCounts[raw.severity] += raw.findings.length;
   }
   const identities = advisories.map(advisoryIdentity);
   if (new Set(identities).size !== identities.length) {
@@ -619,7 +627,7 @@ function normalizePnpmAudit(audit) {
       ),
     );
   }
-  if (!sameCounts(audit.metadata.vulnerabilities, countsFor(advisories))) {
+  if (!sameCounts(audit.metadata.vulnerabilities, findingCounts)) {
     issues.push(
       issue(
         "AUDIT_SUMMARY_MISMATCH",

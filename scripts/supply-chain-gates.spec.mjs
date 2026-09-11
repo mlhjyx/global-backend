@@ -866,6 +866,24 @@ test("production audit input must be a complete production-only pnpm report", as
   );
 });
 
+test("production audit metadata counts vulnerable findings, not advisory identities", async () => {
+  const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
+  const advisoryWithTwoVersions = {
+    ...advisory(),
+    findings: [
+      { version: "1.0.0", paths: ["api > example-runtime@1.0.0"] },
+      { version: "1.1.0", paths: ["worker > example-runtime@1.1.0"] },
+    ],
+  };
+  const audit = pnpmAudit([advisoryWithTwoVersions]);
+  audit.metadata.vulnerabilities.moderate = 2;
+  const result = evaluateProductionAudit(audit, baseline(), { now: NOW });
+  assert.doesNotMatch(
+    issueCodes(result).join(","),
+    /AUDIT_SUMMARY_MISMATCH/u,
+  );
+});
+
 test("repository baseline is a current, exact-main-bound 10-advisory snapshot", async () => {
   const { validateProductionAuditBaseline } =
     await import("./supply-chain-audit.mjs");
