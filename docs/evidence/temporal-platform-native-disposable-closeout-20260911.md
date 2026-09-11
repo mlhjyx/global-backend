@@ -94,8 +94,10 @@ infra/temporal-platform/test-support/verify-disposable.sh
 - GrowthOS producer、service JWT、capability JWKS、真实跨仓 readback：
   `EXTERNAL_OWNED / HOLD`，#479 保持 Draft/HOLD。
 - #407 历史综合候选仍保留；Wikidata country binding 小候选尚未实施。
-- root `main` 同步：`LOCAL_COLLISION_HOLD`；ignored 文件
-  `.superpowers/sdd/platform-revocation-target-proof-addendum.md` 的 owner/保留意图
-  尚未确认，未删除、移动、覆盖或 stash。
+- root `main` sync is `APPLIED`: local and `origin/main` both resolve to
+  `89f212b6d4666627d19032c7ef5c297d2f019533`; the sync receipt reported
+  `statusPreserved=true` with an unchanged status digest. The previously cited
+  addendum is now a tracked file on both sides. Untracked `.playwright-cli/`
+  artifacts were retained.
 - 当前 RuntimeEvidence：`0 current / 6 historical`；Release Bundle：
   `EXTERNAL_UNVERIFIED`；UAT 未运行；Pilot/GA 未授权。
