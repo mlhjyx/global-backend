@@ -559,6 +559,51 @@ export function validateAdmissionObjectBindings(document, facts) {
   return pass({ evidenceClass: "LOCAL_OBJECT_BINDINGS_ONLY", admissionGranted: false });
 }
 
+// Artifact A relationship is deliberately supplied as a separately collected,
+// immutable fact set.  This function never infers authority from a migration
+// name or from a matching disposition; every row must be mechanically tied to
+// the Artifact A blob map and the exact main-only set.
+export function validateArtifactAMigrationBindings(document, migrationFacts) {
+  if (!hasExactKeys(migrationFacts, keys("artifactACommit artifactAMigrationBlobs mainOnlyMigrationPaths")) ||
+      !validCommit(migrationFacts.artifactACommit) ||
+      !hasExactKeys(document, keys("schemaVersion status artifactACommit branchPreRefreshCommit liveMainCommit mergeBaseCommit refreshMergeCommit refreshParents mainOnlyRange mainOnlyPathCount mainOnlyPathSetSha256 paths conflicts migrations rawDeltaSha256 buildDeltaSha256 schemaDeltaSha256 callerDeltaSha256 review")) ||
+      document.artifactACommit !== migrationFacts.artifactACommit || !Array.isArray(migrationFacts.artifactAMigrationBlobs) ||
+      !migrationFacts.artifactAMigrationBlobs.every(row => hasExactKeys(row, ["path", "blobId"]) && validPath(row.path) && validCommit(row.blobId)) ||
+      !sortedUnique(migrationFacts.artifactAMigrationBlobs.map(row => row.path), validPath) ||
+      !Array.isArray(migrationFacts.mainOnlyMigrationPaths) || !sortedUnique(migrationFacts.mainOnlyMigrationPaths, validPath)) {
+    return hold("ARTIFACT_A_MIGRATION_FACTS_INVALID");
+  }
+  const artifactBlobs = new Map(migrationFacts.artifactAMigrationBlobs.map(row => [row.path, row.blobId]));
+  const mainOnly = new Set(migrationFacts.mainOnlyMigrationPaths);
+  for (const row of document.migrations) {
+    const artifactBlob = artifactBlobs.get(row.path);
+    const expected = artifactBlob && artifactBlob === row.resultBlobId
+      ? "EXACT_ARTIFACT_A_BLOB"
+      : mainOnly.has(row.path)
+        ? "POST_ARTIFACT_A_MAIN_ONLY"
+        : "PREEXISTING_NON_IDENTITY";
+    if (row.artifactARelationship !== expected) return hold("ARTIFACT_A_MIGRATION_RELATION_MISMATCH");
+    if (row.mainOnly !== mainOnly.has(row.path)) return hold("MIGRATION_MAIN_ONLY_MISMATCH");
+  }
+  if (new Set(document.migrations.map(row => row.path)).size !== document.migrations.length ||
+      document.migrations.some(row => !artifactBlobs.has(row.path) && !mainOnly.has(row.path))) {
+    return hold("MIGRATION_RELATION_SET_MISMATCH");
+  }
+  return pass({ evidenceClass: "ARTIFACT_A_RELATION_BINDINGS_ONLY", admissionGranted: false });
+}
+
+export function validateAdmissionConflictBindings(document, conflictFacts) {
+  if (!hasExactKeys(conflictFacts, keys("conflicts conflictSetSha256")) || !Array.isArray(conflictFacts.conflicts) || !validSha(conflictFacts.conflictSetSha256) ||
+      !conflictFacts.conflicts.every(row => hasExactKeys(row, ["path", "hunkCount", "baseBlobId", "branchBlobId", "mainBlobId"]) && validPath(row.path) && Number.isSafeInteger(row.hunkCount) && row.hunkCount > 0 && [row.baseBlobId, row.branchBlobId, row.mainBlobId].every(nullableBlob)) ||
+      !sortedUnique(conflictFacts.conflicts.map(row => row.path), validPath)) {
+    return hold("CONFLICT_FACTS_REQUIRED");
+  }
+  const expected = conflictFacts.conflicts.map(row => ({ path: row.path, hunkCount: row.hunkCount, baseBlobId: row.baseBlobId, branchBlobId: row.branchBlobId, mainBlobId: row.mainBlobId }));
+  const actual = document.conflicts.map(row => ({ path: row.path, hunkCount: row.hunkCount, baseBlobId: row.baseBlobId, branchBlobId: row.branchBlobId, mainBlobId: row.mainBlobId }));
+  if (!valuesEqual(actual, expected)) return hold("ADMISSION_CONFLICT_BINDING_MISMATCH");
+  return pass({ evidenceClass: "LOCAL_CONFLICT_BINDINGS_ONLY", admissionGranted: false });
+}
+
 function canonicalRemoteIdentity(remote) {
   if (typeof remote !== "string" || remote.includes("\0") || remote.includes("@") && !remote.startsWith("git@")) return null;
   const value = remote.trim().replace(/\.git$/u, "");

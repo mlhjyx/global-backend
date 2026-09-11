@@ -14,6 +14,8 @@ import {
   validateCurrentMainAdmissionStructure,
   collectAdmissionObjectFacts,
   validateAdmissionObjectBindings,
+  validateArtifactAMigrationBindings,
+  validateAdmissionConflictBindings,
   resolveAdmissionOwner,
   collectThreeWayConflictFacts,
   generateCurrentMainAdmission,
@@ -275,6 +277,24 @@ test("object collector binds four trees, ordered parents and complete migration 
   document.migrations = result.migrations.map(row => ({ ...row, mainOnly: true,
     artifactARelationship: "POST_ARTIFACT_A_MAIN_ONLY", disposition: "IDENTITY_IRRELEVANT" }));
   assert.equal(validateAdmissionObjectBindings(document, result).status, "PASS");
+  const artifactRelations = validateArtifactAMigrationBindings(document, {
+    artifactACommit: document.artifactACommit,
+    artifactAMigrationBlobs: [],
+    mainOnlyMigrationPaths: [migrationPath],
+  });
+  assert.equal(artifactRelations.status, "PASS");
+  const exactArtifact = structuredClone(document);
+  exactArtifact.migrations[0].artifactARelationship = "EXACT_ARTIFACT_A_BLOB";
+  assert.equal(validateArtifactAMigrationBindings(exactArtifact, {
+    artifactACommit: document.artifactACommit,
+    artifactAMigrationBlobs: [{ path: migrationPath, blobId: result.migrations[0].resultBlobId }],
+    mainOnlyMigrationPaths: [migrationPath],
+  }).status, "PASS");
+  exactArtifact.migrations[0].artifactARelationship = "PREEXISTING_NON_IDENTITY";
+  assert.equal(validateArtifactAMigrationBindings(exactArtifact, {
+    artifactACommit: document.artifactACommit,
+    artifactAMigrationBlobs: [], mainOnlyMigrationPaths: [migrationPath],
+  }).code, "ARTIFACT_A_MIGRATION_RELATION_MISMATCH");
   const wrongOwner = structuredClone(document); wrongOwner.paths[0].owner.principals = ["@someone"];
   assert.equal(validateAdmissionObjectBindings(wrongOwner, result).code, "ADMISSION_OWNER_MISMATCH");
   assert.equal(validateAdmissionObjectBindings(document, JSON.parse(JSON.stringify(result))).code, "COLLECTED_OBJECT_FACTS_REQUIRED");
@@ -282,6 +302,13 @@ test("object collector binds four trees, ordered parents and complete migration 
   assert.equal(validateAdmissionObjectBindings(wrongBlob, result).code, "ADMISSION_BLOB_MISMATCH");
   const omitted = structuredClone(document); omitted.migrations = [];
   assert.equal(validateAdmissionObjectBindings(omitted, result).code, "MIGRATION_SET_MISMATCH");
+  const conflictDocument = admission();
+  conflictDocument.conflicts = [{ path: "a.txt", hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT,
+    mainBlobId: COMMIT, resultBlobId: COMMIT, resolutionSource: "LIVE_MAIN_GIT_BLOB" }];
+  const conflictFacts = { conflicts: [{ path: "a.txt", hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT, mainBlobId: COMMIT }], conflictSetSha256: SHA };
+  assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).status, "PASS");
+  conflictDocument.conflicts[0].hunkCount = 2;
+  assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).code, "ADMISSION_CONFLICT_BINDING_MISMATCH");
   assert.equal(git("status", "--porcelain"), before);
   assert.equal(git("rev-parse", "HEAD"), merged);
   assert.equal(collectAdmissionObjectFacts({ repoRoot: root, branchPreRefreshCommit: branch, liveMainCommit: main, refreshMergeCommit: main }).code, "REFRESH_PARENTS_MISMATCH");
