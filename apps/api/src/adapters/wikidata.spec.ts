@@ -14,6 +14,16 @@ async function parse(row:unknown){
 }
 afterEach(()=>vi.unstubAllGlobals());
 describe('Wikidata SPARQL company binding validation',()=>{
+ it('uses the same P17 country binding for filtering and countryCode enrichment',async()=>{
+  const fetchMock=vi.fn(async(_url: string | URL)=>new Response(JSON.stringify({results:{bindings:[]}})));
+  vi.stubGlobal('fetch',fetchMock);
+  await discoverCompaniesByIndustry({industryQids:['Q1'],countryQid:'Q183'});
+  const query=new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('query') ?? '';
+  expect(query).toMatch(/\?company\s+wdt:P17\s+\?country\s*\.\s*FILTER\s*\(\s*\?country\s*=\s*wd:Q183\s*\)/s);
+  expect(query).toMatch(/\?country\s+wdt:P297\s+\?countryCode/s);
+  expect(query).not.toMatch(/\?company\s+wdt:P17\s+wd:Q183/s);
+ });
+
  it('preserves valid identity, name, website, employee count and coordinates',async()=>{
   expect(await parse(binding())).toEqual([{qid:'Q123',name:'Example Works',website:'https://example.test',employees:120,countryCode:'DE',longitude:13.4,latitude:52.5}]);
  });
