@@ -299,6 +299,7 @@ cp "${AUTHORITY_DIRECTORY}/internode-ca.crt" \
 if [[ ${FRONTEND_MTLS} == true ]]; then
   openssl req -newkey rsa:2048 -sha256 -nodes \
     -subj "/CN=task4c-disposable-client" \
+    -addext "keyUsage=digitalSignature" \
     -addext "extendedKeyUsage=clientAuth" \
     -keyout "${AUTHORITY_DIRECTORY}/client.key" \
     -out "${AUTHORITY_DIRECTORY}/client.csr" >/dev/null 2>&1
@@ -312,6 +313,7 @@ if [[ ${FRONTEND_MTLS} == true ]]; then
     "${CLIENT_SECRET_DIRECTORY}/"
   openssl req -newkey rsa:2048 -sha256 -nodes \
     -subj "/CN=task4c-growthos-reader" \
+    -addext "keyUsage=digitalSignature" \
     -addext "extendedKeyUsage=clientAuth" \
     -keyout "${AUTHORITY_DIRECTORY}/reader.key" \
     -out "${AUTHORITY_DIRECTORY}/reader.csr" >/dev/null 2>&1
