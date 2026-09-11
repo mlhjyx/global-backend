@@ -43,14 +43,26 @@ if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) {
   throw new Error("worker authorization token format is invalid");
 }
 
+const tls = {
+  serverNameOverride: serverName,
+  serverRootCACertificate: ca,
+};
+if (process.env.TEMPORAL_PLATFORM_FRONTEND_MTLS === "true") {
+  const [crt, key] = await Promise.all([
+    readFile("/run/secrets/temporal-platform-client/client.crt"),
+    readFile("/run/secrets/temporal-platform-client/client.key"),
+  ]);
+  if (crt.byteLength < 64 || key.byteLength < 64) {
+    throw new Error("worker mTLS certificate material is invalid");
+  }
+  tls.clientCertPair = { crt, key };
+}
+
 const connection = await Connection.connect({
   address,
   apiKey: token,
   connectTimeout: "5s",
-  tls: {
-    serverNameOverride: serverName,
-    serverRootCACertificate: ca,
-  },
+  tls,
 });
 try {
   const task = await connection.withDeadline(Date.now() + 10_000, () =>

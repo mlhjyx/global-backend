@@ -271,11 +271,19 @@ test("disposable server can run the exact native wrapper without changing the ba
   assert.match(compose, /task4c-native-entrypoint/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_READER_SUBJECT/);
+  assert.match(compose, /TEMPORAL_PLATFORM_FRONTEND_MTLS/);
   assert.match(
     compose,
     /source: \$\{TEMPORAL_PLATFORM_TEST_CONFIG_PATH:-\.\.\/config\/temporal\.yaml\}/,
   );
   assert.match(runner, /native Temporal server binary must be an absolute path/);
+  assert.match(runner, /reader\.key/);
+  assert.match(runner, /temporal-reader-mtls\.yaml/);
+  assert.match(runner, /client\.key/);
+  assert.match(
+    await repositoryFile("infra/temporal-platform/verify.sh"),
+    /reader mTLS material is unavailable/,
+  );
   assert.match(entrypoint, /\/run\/native-server\/temporal-server start/);
   assert.match(entrypoint, /\/etc\/temporal\/entrypoint\.sh/);
   assert.match(serverDockerfile, /temporalio\/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da/);

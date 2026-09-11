@@ -126,6 +126,7 @@ services:
       TEMPORAL_PLATFORM_JWKS_URI: https://task4c-jwks:8443/jwks.json
       TEMPORAL_PLATFORM_JWT_AUDIENCE: ${TEMPORAL_PLATFORM_JWT_AUDIENCE:?set audience}
       TEMPORAL_PLATFORM_READER_SUBJECT: ${TEMPORAL_PLATFORM_READER_SUBJECT:-task4c-growthos-reader}
+      TEMPORAL_PLATFORM_FRONTEND_MTLS: ${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}
       TEMPORAL_PLATFORM_TLS_SERVER_NAME: task4c-temporal
       SSL_CERT_FILE: /run/secrets/temporal-platform/jwks-ca-bundle.crt
     volumes:
@@ -186,6 +187,7 @@ services:
     environment:
       TEMPORAL_PLATFORM_ADDRESS: task4c-temporal:7233
       TEMPORAL_PLATFORM_TLS_SERVER_NAME: task4c-temporal
+      TEMPORAL_PLATFORM_FRONTEND_MTLS: ${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}
     volumes:
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY:?set client fixture directory}
@@ -206,6 +208,8 @@ services:
     labels: *task4c-disposable-labels
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     working_dir: /repo/apps/api
+    environment:
+      TEMPORAL_PLATFORM_FRONTEND_MTLS: ${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}
     volumes:
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_REPOSITORY_ROOT:?set repository root}

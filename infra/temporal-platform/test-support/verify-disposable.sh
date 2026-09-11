@@ -68,6 +68,11 @@ JWKS_TLS_DIRECTORY=${FIXTURE_DIRECTORY}/jwks-tls
 CLIENT_SECRET_DIRECTORY=${FIXTURE_DIRECTORY}/client
 NODE_OVERLAY_DIRECTORY=${FIXTURE_DIRECTORY}/node-overlay
 NATIVE_SERVER_DIRECTORY=${FIXTURE_DIRECTORY}/native-server
+FRONTEND_MTLS=${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}
+case "${FRONTEND_MTLS}" in
+  true|false) ;;
+  *) echo "Temporal frontend mTLS mode is invalid" >&2; exit 1 ;;
+esac
 mkdir -m 0700 \
   "${AUTHORITY_DIRECTORY}" \
   "${SERVER_SECRET_DIRECTORY}" \
@@ -92,6 +97,7 @@ export TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY=${JWKS_TLS_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY=${CLIENT_SECRET_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY=${NODE_OVERLAY_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY=${NATIVE_SERVER_DIRECTORY}
+export TEMPORAL_PLATFORM_FRONTEND_MTLS=${FRONTEND_MTLS}
 if [[ -n ${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY:-} ]]; then
   case "${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY}" in
     /*) ;;
@@ -290,13 +296,47 @@ cp "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
   "${CLIENT_SECRET_DIRECTORY}/ca.crt"
 cp "${AUTHORITY_DIRECTORY}/internode-ca.crt" \
   "${CLIENT_SECRET_DIRECTORY}/internode-ca.crt"
+if [[ ${FRONTEND_MTLS} == true ]]; then
+  openssl req -newkey rsa:2048 -sha256 -nodes \
+    -subj "/CN=task4c-disposable-client" \
+    -addext "extendedKeyUsage=clientAuth" \
+    -keyout "${AUTHORITY_DIRECTORY}/client.key" \
+    -out "${AUTHORITY_DIRECTORY}/client.csr" >/dev/null 2>&1
+  openssl x509 -req -sha256 -days 1 \
+    -in "${AUTHORITY_DIRECTORY}/client.csr" \
+    -CA "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
+    -CAkey "${AUTHORITY_DIRECTORY}/frontend-ca.key" \
+    -CAcreateserial -copy_extensions copy \
+    -out "${AUTHORITY_DIRECTORY}/client.crt" >/dev/null 2>&1
+  cp "${AUTHORITY_DIRECTORY}/client.crt" "${AUTHORITY_DIRECTORY}/client.key" \
+    "${CLIENT_SECRET_DIRECTORY}/"
+  openssl req -newkey rsa:2048 -sha256 -nodes \
+    -subj "/CN=task4c-growthos-reader" \
+    -addext "extendedKeyUsage=clientAuth" \
+    -keyout "${AUTHORITY_DIRECTORY}/reader.key" \
+    -out "${AUTHORITY_DIRECTORY}/reader.csr" >/dev/null 2>&1
+  openssl x509 -req -sha256 -days 1 \
+    -in "${AUTHORITY_DIRECTORY}/reader.csr" \
+    -CA "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
+    -CAkey "${AUTHORITY_DIRECTORY}/frontend-ca.key" \
+    -CAcreateserial -copy_extensions copy \
+    -out "${AUTHORITY_DIRECTORY}/reader.crt" >/dev/null 2>&1
+  cp "${AUTHORITY_DIRECTORY}/reader.crt" "${AUTHORITY_DIRECTORY}/reader.key" \
+    "${CLIENT_SECRET_DIRECTORY}/"
+  TEMPORAL_PLATFORM_TEST_CONFIG_PATH=${FIXTURE_DIRECTORY}/temporal-reader-mtls.yaml
+  sed '0,/requireClientAuth: false/{s/requireClientAuth: false/requireClientAuth: true\n        clientCaFiles:\n          - "\/run\/secrets\/temporal-platform\/frontend-ca.crt"/}' \
+    "${PLATFORM_DIR}/config/temporal.yaml" > "${TEMPORAL_PLATFORM_TEST_CONFIG_PATH}"
+  export TEMPORAL_PLATFORM_TEST_CONFIG_PATH
+fi
 node "${SCRIPT_DIR}/generate-fixtures.mjs" \
   "${JWKS_DIRECTORY}" "${CLIENT_SECRET_DIRECTORY}" "${AUDIENCE}" >/dev/null
 if find "${CLIENT_SECRET_DIRECTORY}" -maxdepth 1 -type f \
   \( -name '*.key' -o -name 'internode.crt' \) -print -quit |
   grep -q .; then
-  echo "ordinary client fixture contains an internode client credential" >&2
-  exit 1
+  if [[ ${FRONTEND_MTLS} != true || ! -f ${CLIENT_SECRET_DIRECTORY}/reader.key || ! -f ${CLIENT_SECRET_DIRECTORY}/client.key ]]; then
+    echo "ordinary client fixture contains an unexpected client credential" >&2
+    exit 1
+  fi
 fi
 TEMPORAL_SDK_VERSION=1.23.0
 for package_name in client common proto; do
@@ -322,10 +362,13 @@ chmod 0700 \
   "${JWKS_TLS_DIRECTORY}" \
   "${CLIENT_SECRET_DIRECTORY}"
 chmod 0600 \
-  "${AUTHORITY_DIRECTORY}"/*.key \
-  "${SERVER_SECRET_DIRECTORY}"/*.key \
-  "${JWKS_TLS_DIRECTORY}"/*.key \
-  "${CLIENT_SECRET_DIRECTORY}"/*.jwt
+      "${AUTHORITY_DIRECTORY}"/*.key \
+      "${SERVER_SECRET_DIRECTORY}"/*.key \
+      "${JWKS_TLS_DIRECTORY}"/*.key \
+      "${CLIENT_SECRET_DIRECTORY}"/*.jwt
+    if [[ ${FRONTEND_MTLS} == true ]]; then
+      chmod 0600 "${CLIENT_SECRET_DIRECTORY}/reader.key" "${CLIENT_SECRET_DIRECTORY}/client.key"
+    fi
 chmod 0644 \
   "${SERVER_SECRET_DIRECTORY}"/*.crt \
   "${JWKS_TLS_DIRECTORY}"/*.crt \
@@ -342,8 +385,14 @@ fi
 change_namespace_fixture() {
   "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
     codex-task4c-platform-temporal-admin -eu -c '
+      temporal_cli() {
+        if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+          set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/client.crt --tls-key-path /run/secrets/temporal-platform-client/client.key
+        fi
+        temporal "$@"
+      }
       token=$(cat /run/secrets/temporal-platform-client/admin.jwt)
-      temporal operator namespace update --namespace platform-automation "$@" \
+      temporal_cli operator namespace update --namespace platform-automation "$@" \
         --address "${TEMPORAL_PLATFORM_ADDRESS}" --tls \
         --tls-ca-path /run/secrets/temporal-platform-client/ca.crt \
         --tls-server-name "${TEMPORAL_PLATFORM_TLS_SERVER_NAME}" \
@@ -381,11 +430,17 @@ if (( ${#ACTION_INPUT} > 4096 )); then
   exit 1
 fi
 
-"${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
+  "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
   codex-task4c-platform-temporal-admin -eu -c '
+    temporal_cli() {
+      if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+        set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/client.crt --tls-key-path /run/secrets/temporal-platform-client/client.key
+      fi
+      temporal "$@"
+    }
     token=$(cat "$1")
     shift
-    temporal schedule create \
+    temporal_cli schedule create \
       --namespace "platform-automation" \
       --schedule-id "$1" \
       --interval 24h \
@@ -401,7 +456,7 @@ fi
       --api-key "${token}" \
       --command-timeout 15s \
       --output none
-    temporal schedule trigger \
+    temporal_cli schedule trigger \
       --namespace "platform-automation" \
       --schedule-id "$1" \
       --address "${TEMPORAL_PLATFORM_ADDRESS}" \
@@ -416,13 +471,19 @@ fi
   "${SCHEDULE_ID}" "${WORKFLOW_ID}" "${TASK_QUEUE}" "${ACTION_INPUT}"
 
 SCHEDULE_JSON=$(
-  "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
-    codex-task4c-platform-temporal-admin -eu -c '
-      token=$(cat "$1")
+      "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
+        codex-task4c-platform-temporal-admin -eu -c '
+          temporal_cli() {
+            if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+              set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/client.crt --tls-key-path /run/secrets/temporal-platform-client/client.key
+            fi
+            temporal "$@"
+          }
+          token=$(cat "$1")
       attempt=0
       while [ "${attempt}" -lt 30 ]; do
         attempt=$((attempt + 1))
-        if temporal schedule describe \
+            if temporal_cli schedule describe \
           --namespace "platform-automation" --schedule-id "$2" \
           --address "${TEMPORAL_PLATFORM_ADDRESS}" \
           --tls \
@@ -478,15 +539,21 @@ export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}
   task4c-temporal:7233 task4c-temporal \
   platform-automation "${TASK_QUEUE}"
 
-"${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
-  codex-task4c-platform-temporal-admin -eu -c '
-    expect_denied() {
+  "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
+      codex-task4c-platform-temporal-admin -eu -c '
+        temporal_cli() {
+          if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+            set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/client.crt --tls-key-path /run/secrets/temporal-platform-client/client.key
+          fi
+          temporal "$@"
+        }
+        expect_denied() {
       token_file=$1
       label=$2
       shift 2
       token=$(cat "${token_file}")
       error_file="/tmp/${label}.error"
-      if temporal "$@" \
+          if temporal_cli "$@" \
         --address "${TEMPORAL_PLATFORM_ADDRESS}" \
         --tls \
         --tls-ca-path /run/secrets/temporal-platform-client/ca.crt \

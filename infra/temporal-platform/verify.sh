@@ -7,6 +7,7 @@ COMPOSE_FILE=${TEMPORAL_PLATFORM_COMPOSE_FILE:-${SCRIPT_DIR}/compose.yml}
 ADMIN_SERVICE=${TEMPORAL_PLATFORM_ADMIN_SERVICE:-temporal-platform-admin}
 CLIENT_SECRET_DIRECTORY=${TEMPORAL_PLATFORM_CLIENT_SECRET_DIRECTORY:?TEMPORAL_PLATFORM_CLIENT_SECRET_DIRECTORY is required}
 READER_TOKEN_FILE=${TEMPORAL_PLATFORM_READER_TOKEN_FILE:-/run/secrets/temporal-platform-client/reader.jwt}
+FRONTEND_MTLS=${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}
 : "${TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID:?TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID is required}"
 : "${TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID:?TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID is required}"
 : "${TEMPORAL_PLATFORM_PROOF_RUN_ID:?TEMPORAL_PLATFORM_PROOF_RUN_ID is required}"
@@ -24,11 +25,27 @@ case "${READER_TOKEN_FILE}" in
     exit 1
     ;;
 esac
+case "${FRONTEND_MTLS}" in
+  true|false) ;;
+  *) echo "Temporal frontend mTLS mode is invalid" >&2; exit 1 ;;
+esac
 
 HOST_READER_TOKEN=${CLIENT_SECRET_DIRECTORY}/${READER_TOKEN_FILE##*/}
 if [[ ! -f "${HOST_READER_TOKEN}" || -L "${HOST_READER_TOKEN}" ]]; then
   echo "Temporal reader token file is unavailable" >&2
   exit 1
+fi
+if [[ "${FRONTEND_MTLS}" == true ]]; then
+  for client_material in reader.crt reader.key; do
+    if [[ ! -f "${CLIENT_SECRET_DIRECTORY}/${client_material}" || -L "${CLIENT_SECRET_DIRECTORY}/${client_material}" ]]; then
+      echo "Temporal reader mTLS material is unavailable" >&2
+      exit 1
+    fi
+  done
+  if [[ "$(stat -c '%a' "${CLIENT_SECRET_DIRECTORY}/reader.key")" != 600 ]]; then
+    echo "Temporal reader mTLS key mode is invalid" >&2
+    exit 1
+  fi
 fi
 if [[ $(stat -c '%a' "${HOST_READER_TOKEN}") != 600 ]] ||
   (( $(stat -c '%s' "${HOST_READER_TOKEN}") < 32 )) ||
@@ -63,6 +80,9 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
       exit 1
     fi
     base() {
+      if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+        set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/reader.crt --tls-key-path /run/secrets/temporal-platform-client/reader.key
+      fi
       temporal "$@" \
         --address "${TEMPORAL_PLATFORM_ADDRESS}" \
         --tls \
@@ -72,6 +92,9 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
         --output none
     }
     reader_cli() {
+      if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+        set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/reader.crt --tls-key-path /run/secrets/temporal-platform-client/reader.key
+      fi
       temporal "$@" \
         --address "${TEMPORAL_PLATFORM_ADDRESS}" \
         --tls \
