@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const DOCUMENT = "data:text/html,<title>runtime-readiness</title>";
-const TIMEOUT_MS = 5_000;
+// Chromium startup can legitimately exceed five seconds when the managed host
+// is under normal build/renderer load. Keep the probe bounded, but leave enough
+// time to avoid turning transient scheduling pressure into a permanent
+// singleton fail-closed state.
+const TIMEOUT_MS = 10_000;
+const KILL_GRACE_MS = 1_000;
+const REAP_GRACE_MS = 5_000;
 const OUTPUT_LIMIT = 128 * 1024;
 const CLEANUP_ERROR = "BROWSER_PROBE_CLEANUP_INCOMPLETE";
 const EXECUTABLES = new Set(["/usr/bin/chromium", "/usr/bin/google-chrome"]);
@@ -33,6 +39,7 @@ function browserArguments(root: string): string[] {
     "--disable-dev-shm-usage",
     "--disable-background-networking",
     "--disable-component-update",
+    "--disable-breakpad",
     "--no-first-run",
     "--no-default-browser-check",
     "--host-resolver-rules=MAP * ~NOTFOUND",
@@ -114,7 +121,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
         } catch {
           uncertain = true;
         }
-      }, 500);
+      }, KILL_GRACE_MS);
     };
     const timeout = setTimeout(stop, TIMEOUT_MS);
     const reapDeadline = setTimeout(() => {
@@ -122,7 +129,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
       clearTimeout(timeout);
       clearTimeout(killTimer);
       reject(new Error(CLEANUP_ERROR));
-    }, TIMEOUT_MS + 2_000);
+    }, TIMEOUT_MS + REAP_GRACE_MS);
     child.stdout.on("data", (data: Buffer) => {
       stdoutBytes += data.length;
       if (stdoutBytes > OUTPUT_LIMIT) stop();
