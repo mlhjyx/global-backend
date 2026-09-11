@@ -1,6 +1,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-12 · Browser readiness headless environment successor
+
+- PR #513 `fix(runtime): pass headless mode to browser readiness probe` 已通过完整 hosted CI 并合入，merge commit 为 `479d51f0dd474df31f0547923cc072064b897a03`。修复在受控浏览器子进程环境中显式传递 `CHROME_HEADLESS=1`，保留批准的 Chromium executable、隔离临时目录、网络禁用参数和 fail-closed 错误语义；聚焦 runtime 测试 58/58 通过。
+- 从该 exact main 发布并验证新的 immutable OCI：`ghcr.io/mlhjyx/global-backend@sha256:137f881da04ac2d22258dd909c674798613335745226d22dd2cc9a03c965a783`，artifact `sha256:fe8e6fb41438012b502a791b7b3a9eda32bb4af078a5593dbf2e1c20fd5d6070`，manifest `sha256:0111e7a4016fa052788abd1604d9d0365202b3c554279cb5b0df791e61b2389f`，SBOM `sha256:5fe6a6215565126612b2476fcfe27c77618a9fb1f768d213529dc85fa3d882ff`，并完成 registry provenance attestation。
+- API 与 Worker 已通过受控 drain-and-swap 运行该同一 digest，`/health/build` 返回 attested、image/artifact/migration identity 一致；Chromium browser readiness 现为 `ok`。`/health/ready` 仍为 503，原因仍是 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE` 与 `MATCHING_WORKER_NOT_READY`，不把浏览器修复外推为平台或产品就绪。
+- 首次运行中 readback 曾捕获一次 browser probe 清理失败并按 singleton 语义保持 fail-closed；未修改数据或绕过门，执行同 digest 的受控 API/Worker 重启后 browser 恢复，连续 5 次 `/health/ready` readback 均为 browser=`ok`，残留 probe 目录已清理。该事实说明当前恢复依赖受控重启，不能宣称已有自动自愈或 RuntimeEvidence。
+- 当前未执行真实付费模型调用；客户 Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`，`cap_microusd` 仍只是平台内部执行安全包络。旧 PR #479 已关闭为 provenance，干净重放候选 #515 的 GrowthOS capability producer、capability JWKS/service token、真实 Temporal reader、revocation delivery 和跨仓 hosted contract 仍保持 HOLD。
+
 
 ## 2026-09-06 · GitHub queue currentness closeout
 

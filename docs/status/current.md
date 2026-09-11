@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-12T01:45:40+08:00（Asia/Shanghai）
+> 最后核验：2026-09-12T03:30:13+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -16,16 +16,16 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 
 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，不等于 active route、质量证明或真实 dispatch 授权。
 
-2026-09-12 增量核验：远端 `origin/main=98910a1cfee68cc6eb0d856348eb20fa0f5eec8b`，
-#497、#502、#504、#505、#507、#508、#509、#510 与 #506 已合入；#511 为被后续
+2026-09-12 增量核验：远端 `origin/main=479d51f0dd474df31f0547923cc072064b897a03`，
+#497、#502、#504、#505、#507、#508、#509、#510、#513 与 #506 已合入；#511 为被后续
 #510 supersede 的 baseline 候选，保留 provenance，不作为当前主线事实。#498 已重放到
 安全修复后的 main，当前候选 head 为
-`bc4eadc5c7a16ca7874a5a21cc2571ba43d92ae2`，新 hosted matrix 正在运行。
+`bc4eadc5c7a16ca7874a5a21cc2571ba43d92ae2`，最新 hosted matrix 已通过，但该 PR 仍为 Draft，独立 review 与合并未完成。
 其前序候选 `codex/temporal-native-disposable-closeout-20260911`
 的 custom native Temporal disposable 运行矩阵已通过，详细绑定见
 [Temporal native disposable closeout evidence](../evidence/temporal-platform-native-disposable-closeout-20260911.md)。
 这只更新源码候选与状态事实，不改变 GrowthOS producer、跨仓 readback、RuntimeEvidence、
-Release Bundle、UAT 或 Pilot/GA 的独立门；#479 与 #407 仍为 Draft/HOLD。
+Release Bundle、UAT 或 Pilot/GA 的独立门；旧 #479 已关闭为 provenance，干净重放候选 #515 与 #407 仍为 Draft/HOLD。
 
 ## 1. 源码与正在进行的工作
 
@@ -33,17 +33,17 @@ Release Bundle、UAT 或 Pilot/GA 的独立门；#479 与 #407 仍为 Draft/HOLD
 
 | Subject              | Exact observed state                                                                                                                                                                                                                   | 证据边界                                                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Backend source       | 根 `main=origin/main=98910a1cfee68cc6eb0d856348eb20fa0f5eec8b`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
+| Backend source       | 根 `main=origin/main=479d51f0dd474df31f0547923cc072064b897a03`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
-| 主线 CI | #506、#510 的 PR 与 post-merge required CI 已通过；`98910a1c…` 的 Supply Chain Canary=`FRESH`、current advisories=0、10 条历史记录 resolved；主线完整 CI 通过 | 只证明对应提交的托管检查；不等于平台 authority 或产品 UAT ready |
-| Browser readiness    | 最新 `0474aad…` runtime 的 `/api/v1/health/ready` 为 503，但 browser component=OK；migration/database/storage/Redis/Gateway/auth JWKS/renderer 均 OK | 浏览器能力已恢复；整体 readiness 仍被 platform authority 与 Worker 阻断 |
+| 主线 CI | #506、#510、#513 的 PR 与 post-merge required CI 已通过；#513 的完整 build、Native Temporal、lease 权限、OCI、Worker smoke、Renderer、治理、CodeQL、gitleaks 与依赖检查均通过；`98910a1c…` 的 Supply Chain Canary=`FRESH`、current advisories=0、10 条历史记录 resolved | 只证明对应提交的托管检查；不等于平台 authority 或产品 UAT ready |
+| Browser readiness    | 最新 `137f881…` runtime 的 `/api/v1/health/ready` 为 503，但 browser component=OK；`CHROME_HEADLESS=1` 已固定进入同一生产 Chromium readiness 子进程环境；受控重启后连续 5 次 readiness readback 均保持 browser=OK；migration/database/storage/Redis/Gateway/auth JWKS/renderer 均 OK | 浏览器能力已恢复；整体 readiness 仍被 platform authority 与 Worker 阻断 |
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
 | GrowthOS source      | `/global/frontend/growthos-source` clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
-| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497、#502、#506、#509、#510 已合入；当前远端主线为 `98910a1cfee68cc6eb0d856348eb20fa0f5eec8b`。#497 收口 native Temporal disposable reader proof，#502 统一 Worker 启动与心跳 admission，#506/#509/#510 完成依赖安全与审计基线收口 | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把 disposable 结果当成生产运行证明 |
-| 运行时采用 | API/Worker 当前均使用 `ghcr.io/mlhjyx/global-backend@sha256:0474aadca978ba6beb07a1ae919481e62d71e00f9c79cb213018177f00bda6fc`，build SHA `98910a1cfee68cc6eb0d856348eb20fa0f5eec8b`，artifact `sha256:7c60f10eb92f364f7c21e82d14f34813387a75c90e1f7f182d5e522c1d8847c6`，manifest `sha256:f8ac7b78c32f53a18494ca29312c38027dcab510a4cc2b6262f472150a2d603d`，SBOM `sha256:e02b7fd46c780475e83b1f63af3e98a34b9f79cbe764e949d8901559f9e96de3`，schema `sha256:ed90b02876d89e251e11749a2fa4b1ef1f172b65be9dc0c71af924b8e45832ff`，renderer `sha256:63a746f47b55a67063bb80a48bcccfb295b89409eda1878cdaab8153cafded5c`，migration `20260908130000_platform_egress_budget_policy_v2`；API/Worker image ID 与 UID/GID `10001:10001` 一致 | 这是当前运行身份 readback；整体 readiness 仍不代表用户旅程成功 |
+| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497、#502、#506、#509、#510、#513 已合入；当前远端主线为 `479d51f0dd474df31f0547923cc072064b897a03`。#497 收口 native Temporal disposable reader proof，#502 统一 Worker 启动与心跳 admission，#506/#509/#510 完成依赖安全与审计基线收口，#513 修复 Chromium headless readiness 环境 | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把 disposable 结果当成生产运行证明 |
+| 运行时采用 | API/Worker 当前均使用 `ghcr.io/mlhjyx/global-backend@sha256:137f881da04ac2d22258dd909c674798613335745226d22dd2cc9a03c965a783`，build SHA `479d51f0dd474df31f0547923cc072064b897a03`，artifact `sha256:fe8e6fb41438012b502a791b7b3a9eda32bb4af078a5593dbf2e1c20fd5d6070`，manifest `sha256:0111e7a4016fa052788abd1604d9d0365202b3c554279cb5b0df791e61b2389f`，SBOM `sha256:5fe6a6215565126612b2476fcfe27c77618a9fb1f768d213529dc85fa3d882ff`，source tree `sha256:f009099d741a439972dd2a9b5295f22233a904bc24243432006a6ffdc71ef7ba`，schema `sha256:ed90b02876d89e251e11749a2fa4b1ef1f172b65be9dc0c71af924b8e45832ff`，renderer `sha256:63a746f47b55a67063bb80a48bcccfb295b89409eda1878cdaab8153cafded5c`，migration `20260908130000_platform_egress_budget_policy_v2`；API/Worker image ID 与 UID/GID `10001:10001` 一致 | 这是当前运行身份 readback；整体 readiness 仍不代表用户旅程成功 |
 | Wikidata country successor | #498 已从旧 `52ab68b6…` 重放到 `bc4eadc5c7a16ca7874a5a21cc2571ba43d92ae2`；本地 55/55 与前一 head hosted 矩阵已通过，新 head hosted 矩阵正在运行，独立 review/merge 未完成 | 只处理当前 query 变量绑定；不关闭 #407 综合候选或 Program B 接纳 |
 | 安全治理候选 | #509 trusted verifier、#506 依赖修复、#510 post-remediation baseline 已合入；主线 advisory=`FRESH`、current=0，#511 关闭/保留为 superseded provenance | 不把安全收口当作平台 authority、RuntimeEvidence、Release Bundle 或用户验收 |
 | 文档候选 | #508 已合入并保留 #503/#499 provenance；本页 successor 记录 #506/#509/#510 与 runtime adoption，不代替 RuntimeEvidence、Release Bundle 或产品验收 | 只记录当前事实，不改变运行或发布授权 |
@@ -76,12 +76,12 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 
 ## 3. Development runtime 观察
 
-本次受控切换已将 API 和 Worker 都切到同一 exact OCI：`ghcr.io/mlhjyx/global-backend@sha256:0474aadca978ba6beb07a1ae919481e62d71e00f9c79cb213018177f00bda6fc`，绑定 build SHA `98910a1cfee68cc6eb0d856348eb20fa0f5eec8b`；两者容器 image ID、artifact identity 与 migration revision 均一致。此前缺失的迁移已应用，数据库 readback 为 135 条完成、0 条未完成且未回滚（两条历史记录为明确 rolled-back）。该镜像由 exact main 发布流程构建并完成 attestation/readback；当前未执行真实模型调用。
+本次受控切换已将 API 和 Worker 都切到同一 exact OCI：`ghcr.io/mlhjyx/global-backend@sha256:137f881da04ac2d22258dd909c674798613335745226d22dd2cc9a03c965a783`，绑定 build SHA `479d51f0dd474df31f0547923cc072064b897a03`；两者容器 image ID、artifact identity 与 migration revision 均一致。此前缺失的迁移已应用，数据库 readback 为 135 条完成、2 条已回滚且 0 条未完成未回滚；该镜像由 exact main 发布流程构建并完成 attestation/readback，离线 runtime image verifier 返回 `RUNTIME_IMAGE_VERIFIED`。首次采用后发现运行中 singleton probe 曾因清理失败而保持 fail-closed，受控重启后恢复，随后连续 5 次 readiness readback 稳定；当前未执行真实模型调用。
 
 | 观察              | 当前可确认的事实                                                                                                         | 不得外推                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| 运行版本          | `/health/build` 返回 attested=true、build SHA `98910a1cfee68cc6eb0d856348eb20fa0f5eec8b`、image `sha256:0474aadca…`、artifact `sha256:7c60f10e…`、manifest `sha256:f8ac7b78…`、SBOM `sha256:e02b7fd4…`、schema `sha256:ed90b028…`、renderer `sha256:63a746f4…`、migration `20260908130000_platform_egress_budget_policy_v2` | running 不证明 readiness、队列消费、模型或用户旅程成功                                   |
-| Browser 历史事故  | 历史 `2026-09-05` tmpfs/目录耗尽事故保留为历史；切换 `0474aad…` 后直接 Chromium readiness probe 与最新 health 均为 browser=OK | 历史事故与当前恢复状态分别记录；不外推到其他环境 |
+| 运行版本          | `/health/build` 返回 attested=true、build SHA `479d51f0dd474df31f0547923cc072064b897a03`、image `sha256:137f881d…`、artifact `sha256:fe8e6fb4…`、manifest `sha256:0111e7a4…`、SBOM `sha256:5fe6a621…`、schema `sha256:ed90b028…`、renderer `sha256:63a746f4…`、migration `20260908130000_platform_egress_budget_policy_v2` | running 不证明 readiness、队列消费、模型或用户旅程成功                                   |
+| Browser 历史事故  | 历史 `2026-09-05` tmpfs/目录耗尽事故保留为历史；`0474aad…` 曾因未传递 headless 环境返回 `BROWSER_RUNTIME_UNAVAILABLE`；切换 `137f881…` 后显式 `CHROME_HEADLESS=1` 的 Chromium readiness probe 与最新 health 均为 browser=OK | 历史事故与当前恢复状态分别记录；不外推到其他环境 |
 | Listener exposure | 本次 `ss` 仍见 `0.0.0.0:3001`、`[::]:3001` 和 legacy Java `*:8080`                                                       | 未执行端口收敛或旧服务退役                                                               |
 | Readiness           | `/api/v1/health/build`=200 且 API/Worker identity 已切换；`/api/v1/health/ready`=503，platform technical quote、settlement readback、API runtime、Outbox Relay、workspace budget authority、browser、storage、Redis、Gateway、renderer、auth JWKS 与 admission 均 ok；platform authority=`PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，intent/sanctions 同类失败，Worker=`MATCHING_WORKER_NOT_READY` | 这是 fail-closed 运行事实；不得把 exact image 误报为可接单或可付费调用 |
 | Historical Spend  | 旧 UNKNOWN/unknown 及 unresolved/expired 记录按原证据保留                                                                | 不通过重发制造结果，也不由源修改自动改写历史费用                                         |
@@ -97,13 +97,13 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 - 本次治理只读验证报告 RuntimeEvidence `6 total / 0 current / 6 historical`，Release Bundles=3。前两条 Site 证据到期点为 `2026-09-05T03:49:25.000Z`；到期不删除历史，但不能用于 G5/G7 晋级。
 - 3 个 Release Bundles 仍是 development `CANDIDATE` / `EXTERNAL_UNVERIFIED`，不是可信发布结果。具体字段以机器文件及 verifier 为准；路径存在或结构通过不是 runtime proof。
 - PR #461 的 privilege-hardening successor 已应用并 read back：`fence_platform_schedule_v1(text,text)` 对 `PUBLIC`、`app_user`、`runtime_api`、`runtime_worker`、`runtime_outbox_relay` 为无 EXECUTE，仅 dedicated `execution_budget_platform_writer` 可执行；这不等于平台 Temporal proof 或跨系统撤销链已就绪。
-- #448/#506/#509/#510 已完成依赖修复与基线收口，`98910a1c…` 的 Supply Chain Canary=`FRESH`、current advisories=0、10 条历史记录 resolved；该结果不解除平台 authority、Worker、RuntimeEvidence、UAT 或 Pilot/GA 门。
+- #448/#506/#509/#510 已完成依赖修复与基线收口，`98910a1c…` 的 Supply Chain Canary=`FRESH`、current advisories=0、10 条历史记录 resolved；#513 的 exact main build 与镜像发布已完成；这些结果不解除平台 authority、Worker、RuntimeEvidence、UAT 或 Pilot/GA 门。
 
 ## 5. 下一顺序与授权边界
 
 商业主路径是 `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`；并行信任资产路径是 `Quote → Grant → Build → Preview`。
 
-1. 运行主线：已合入的平台基础设施进入精确制品/迁移核验、获授权的运行采用和 fresh RuntimeEvidence；不重复已合入的 Browser wiring/ACK/schema 修复。
+1. 运行主线：已合入的平台基础设施进入精确制品/迁移核验、获授权的运行采用和 fresh RuntimeEvidence；Browser wiring 与 headless readiness 环境修复已合入，但平台 authority、matching Worker 与跨仓 capability 仍保持独立门。
 2. 产品主线：GrowthOS 单 writer 文件交接 → C1-A → C1-B/C1-C → C2 Opportunity → C3 Human QGO → C4 Outcome/C5 Conversation；不另起 R7 文档循环。
 3. 文档：本页维护当前事实，roadmap 保持稳定顺序；历史入 changelog/evidence。#451 按已批准的 GitHub 队列完成最终修订、验证、独立审查与远端收口。
 4. 验收：当前跨仓 Release Bundle、关键 UAT 三次与重启恢复通过后，才评估德国工业泵零模型/零付费/零发送 Pilot 的精确授权卡。
