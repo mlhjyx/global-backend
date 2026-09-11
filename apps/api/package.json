@@ -48,7 +48,7 @@
     "chrome-launcher": "1.2.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "csv-parse": "^7.0.1",
+    "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
     "fast-xml-parser": "^5.11.0",
     "helmet": "^8.3.0",

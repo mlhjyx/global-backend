@@ -57,11 +57,16 @@ async function listDevCaches() {
 }
 
 async function listSourceBuildCaches() {
-  return new Set(
-    (await readdir(tmpdir())).filter((name) =>
-      name.startsWith("global-site-renderer-source-cache-"),
+  const parents = [tmpdir(), dependencyRoot];
+  const entries = await Promise.all(
+    parents.map(async (parent) =>
+      (await readdir(parent)).filter((name) =>
+        name.startsWith("global-site-renderer-source-cache-"),
+      )
+        .map((name) => path.join(parent, name)),
     ),
   );
+  return new Set(entries.flat());
 }
 
 function startDevServer(port) {
