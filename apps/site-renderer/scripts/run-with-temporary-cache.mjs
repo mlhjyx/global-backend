@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   cp,
   lstat,
+  mkdir,
   mkdtemp,
   opendir,
   realpath,
@@ -88,16 +89,22 @@ async function run() {
 
     const outputRoot =
       command === "build"
-        ? path.resolve(
-            process.env.OUT_DIR ?? path.join(rendererRoot, "dist"),
-          )
+        ? path.resolve(process.env.OUT_DIR ?? path.join(rendererRoot, "dist"))
         : undefined;
+    let outputParent;
+    if (outputRoot) {
+      // Create the configured destination before resolving it. This follows a
+      // configured symlink (when present) and guarantees the cache shares the
+      // destination's real filesystem device rather than its lexical parent.
+      await mkdir(outputRoot, { recursive: true });
+      outputParent = path.dirname(await realpath(outputRoot));
+    }
     // Astro moves generated assets from its cache into OUT_DIR. Keep build
     // cache and output on the same device so that this atomic rename cannot
     // fail with EXDEV when /tmp is a separate mount.
     cacheRoot = await mkdtemp(
       command === "build"
-        ? path.join(path.dirname(outputRoot), "global-site-renderer-source-cache-")
+        ? path.join(outputParent, "global-site-renderer-source-cache-")
         : path.join(dependencyReal, ".site-renderer-dev-cache-"),
     );
     ownsCacheRoot = true;
@@ -144,6 +151,8 @@ async function run() {
     }
 
     await new Promise((resolve, reject) => {
+      const commandArgs =
+        command === "dev" ? ["--ignore-lock", ...forwardedArgs] : forwardedArgs;
       child = spawn(
         process.execPath,
         [
@@ -151,7 +160,7 @@ async function run() {
           command,
           "--config",
           path.relative(cacheRoot, path.join(rendererRoot, "astro.config.mjs")),
-          ...forwardedArgs,
+          ...commandArgs,
         ],
         {
           cwd: cacheRoot,

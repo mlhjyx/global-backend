@@ -622,7 +622,8 @@ export async function buildSiteSpecWithTemporaryFile(
   },
   execute: RendererBuildExecutor = runAstroBuild,
 ): Promise<RendererOutputManifestV1> {
-  const outputParent = path.dirname(path.resolve(output.outDir));
+  await mkdir(output.outDir, { recursive: true });
+  const outputParent = path.dirname(await realpath(output.outDir));
   const tempDir = await mkdtemp(
     path.join(outputParent, `.global-site-renderer-${process.pid}-`),
   );

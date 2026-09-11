@@ -60,9 +60,8 @@ async function listSourceBuildCaches() {
   const parents = [tmpdir(), dependencyRoot];
   const entries = await Promise.all(
     parents.map(async (parent) =>
-      (await readdir(parent)).filter((name) =>
-        name.startsWith("global-site-renderer-source-cache-"),
-      )
+      (await readdir(parent))
+        .filter((name) => name.startsWith("global-site-renderer-source-cache-"))
         .map((name) => path.join(parent, name)),
     ),
   );
