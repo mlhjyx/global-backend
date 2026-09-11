@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-11T19:56:34+08:00（Asia/Shanghai）
+> 最后核验：2026-09-11T19:57:42+08:00（Asia/Shanghai）
 
 ## 当前结论
 
