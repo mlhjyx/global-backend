@@ -26,8 +26,14 @@ func ValidateConfiguration(cfg *config.Config) error {
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return invalidConfiguration
 	}
-	for _, group := range []config.GroupTLS{cfg.Global.TLS.Frontend, cfg.Global.TLS.Internode} {
-		if group.Client.DisableHostVerification || validateServerTLS(group.Server) != nil {
+	for name, group := range map[string]config.GroupTLS{"frontend": cfg.Global.TLS.Frontend, "internode": cfg.Global.TLS.Internode} {
+		if group.Client.DisableHostVerification || (name == "internode" && validateServerTLS(group.Server) != nil) {
+			return invalidConfiguration
+		}
+		// The public frontend supports the normal JWT-only product path. A
+		// deployment that enables the dedicated reader mTLS boundary must still
+		// provide the same complete server contract as internode TLS.
+		if name == "frontend" && group.Server.RequireClientAuth && validateServerTLS(group.Server) != nil {
 			return invalidConfiguration
 		}
 		for _, override := range group.PerHostOverrides {
