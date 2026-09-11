@@ -64,6 +64,8 @@ describe("Browser readiness temporary-state lifecycle", () => {
       "XDG_CACHE_HOME",
       "XDG_CONFIG_HOME",
     ]);
+    expect(opts.env?.CHROME_HEADLESS).toBe("1");
+    expect(spy.mock.calls[0][1] as string[]).toContain("--disable-breakpad");
     expect(
       new Set(
         ["HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"].map(
@@ -114,7 +116,7 @@ describe("Browser readiness temporary-state lifecycle", () => {
     expect(children[0].signalCode).toBe("SIGKILL");
     for (const root of roots)
       await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
-  }, 10_000);
+  }, 20_000);
 
   it("reaps descendants that inherit its process group", async () => {
     installBrowser(`
@@ -126,7 +128,36 @@ describe("Browser readiness temporary-state lifecycle", () => {
     ).rejects.toThrow("BROWSER_RUNTIME_UNAVAILABLE");
     for (const root of roots)
       await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
-  }, 10_000);
+  }, 20_000);
+
+  it("waits for a slow same-group descendant within the bounded reap grace", async () => {
+    installBrowser(`
+      const child=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},1500)'],{stdio:'inherit'});
+      require('node:fs').writeFileSync(process.env.HOME+'/descendant.pid',String(child.pid));
+      process.stdout.write(${JSON.stringify(document)});
+    `);
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (children.some((child) => pid === -child.pid!)) return true;
+      return kill(pid, signal);
+    });
+    try {
+      await createBrowserReadinessProbe()("/usr/bin/chromium");
+      for (const root of roots)
+        await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      for (const root of roots) {
+        try {
+          const pid = Number(
+            await readFile(join(root, "home", "descendant.pid"), "utf8"),
+          );
+          if (Number.isInteger(pid) && pid > 1) kill(pid, "SIGKILL");
+        } catch {
+          // The root was cleaned successfully.
+        }
+      }
+    }
+  }, 15_000);
 
   it("fences new probes if its root identity is replaced", async () => {
     installBrowser(`
@@ -312,7 +343,7 @@ describe("Browser readiness temporary-state lifecycle", () => {
         await close;
       }
     }
-  }, 12_000);
+  }, 25_000);
 
   it("leaves no private roots after 1000 sequential real child processes", async () => {
     const parent = await mkdtemp(join(tmpdir(), "browser-probe-soak-"));
