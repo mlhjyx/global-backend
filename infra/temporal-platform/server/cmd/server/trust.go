@@ -32,11 +32,11 @@ func ValidateTrustDomains(cfg *config.Config) error {
 	if cfg == nil {
 		return invalidTrustDomains
 	}
-	frontend, err := trustDomainCertificates(cfg.Global.TLS.Frontend)
+	frontend, err := trustDomainCertificates(cfg.Global.TLS.Frontend, true)
 	if err != nil {
 		return invalidTrustDomains
 	}
-	internode, err := trustDomainCertificates(cfg.Global.TLS.Internode)
+	internode, err := trustDomainCertificates(cfg.Global.TLS.Internode, false)
 	if err != nil {
 		return invalidTrustDomains
 	}
@@ -91,7 +91,7 @@ func ValidateTrustDomains(cfg *config.Config) error {
 	return nil
 }
 
-func trustDomainCertificates(group config.GroupTLS) ([]*x509.Certificate, error) {
+func trustDomainCertificates(group config.GroupTLS, allowJwtOnly bool) ([]*x509.Certificate, error) {
 	if len(group.PerHostOverrides) > maxTrustCAFiles {
 		return nil, invalidTrustDomains
 	}
@@ -101,8 +101,19 @@ func trustDomainCertificates(group config.GroupTLS) ([]*x509.Certificate, error)
 	}
 	files := make(map[string]bool)
 	var certificates []*x509.Certificate
-	for _, server := range servers {
-		if len(server.ClientCAFiles) == 0 || len(server.ClientCAFiles) > maxTrustCAFiles || len(server.ClientCAData) != 0 {
+	jwtOnlyNoTrustDomain := false
+	for index, server := range servers {
+		if len(server.ClientCAFiles) == 0 {
+			// The public frontend is explicitly allowed to use JWT-only auth;
+			// it has no client-CA trust domain in that mode. Internode and an
+			// explicitly mTLS-enabled frontend still require a bounded CA set.
+			if allowJwtOnly && index == 0 && !server.RequireClientAuth && len(server.ClientCAData) == 0 {
+				jwtOnlyNoTrustDomain = true
+				continue
+			}
+			return nil, invalidTrustDomains
+		}
+		if len(server.ClientCAFiles) > maxTrustCAFiles || len(server.ClientCAData) != 0 {
 			return nil, invalidTrustDomains
 		}
 		for _, path := range server.ClientCAFiles {
@@ -124,7 +135,7 @@ func trustDomainCertificates(group config.GroupTLS) ([]*x509.Certificate, error)
 			certificates = append(certificates, parsed...)
 		}
 	}
-	if len(certificates) == 0 {
+	if len(certificates) == 0 && !jwtOnlyNoTrustDomain {
 		return nil, invalidTrustDomains
 	}
 	return certificates, nil

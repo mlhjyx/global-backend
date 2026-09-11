@@ -108,6 +108,18 @@ func TestTrustIndependentDomainsAndRotation(t *testing.T) {
 	}
 }
 
+func TestTrustAllowsJwtOnlyFrontendWithoutClientCA(t *testing.T) {
+	directory := t.TempDir()
+	internal := trustMakeCA(t, "internode", nil, nil, false)
+	internalPath := trustWriteCA(t, directory, "internal.pem", internal.pem)
+	cfg := trustConfiguration(nil, []string{internalPath})
+	cfg.Global.TLS.Frontend.Server.RequireClientAuth = false
+	cfg.Global.TLS.Internode.Server.RequireClientAuth = true
+	if err := ValidateTrustDomains(cfg); err != nil {
+		t.Fatalf("JWT-only frontend trust configuration rejected: %v", err)
+	}
+}
+
 func TestTrustRejectsSharedKeysAndKnownCrossSignatures(t *testing.T) {
 	frontend := trustMakeCA(t, "frontend", nil, nil, false)
 	internal := trustMakeCA(t, "internal", nil, nil, false)
