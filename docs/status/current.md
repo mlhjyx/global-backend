@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-11T15:30:00+08:00（Asia/Shanghai）
+> 最后核验：2026-09-11T17:34:16+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -16,8 +16,8 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 
 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，不等于 active route、质量证明或真实 dispatch 授权。
 
-2026-09-11 增量核验：远端 `origin/main=89f212b6d4666627d19032c7ef5c297d2f019533`，
-#494 与 #495 已合入；其后续候选 `codex/temporal-native-disposable-closeout-20260911`
+2026-09-11 增量核验：远端 `origin/main=b3cf80411f89b24825b01f942286d68a50f3b2ea`，
+#494、#495、#497 已合入；其后续候选 `codex/temporal-native-disposable-closeout-20260911`
 的 custom native Temporal disposable 运行矩阵已通过，详细绑定见
 [Temporal native disposable closeout evidence](../evidence/temporal-platform-native-disposable-closeout-20260911.md)。
 这只关闭源码与 disposable 层，不改变 GrowthOS producer、跨仓 readback、RuntimeEvidence、
@@ -29,17 +29,17 @@ Release Bundle、UAT 或 Pilot/GA 的独立门。
 
 | Subject              | Exact observed state                                                                                                                                                                                                                   | 证据边界                                                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Backend source       | 根 `main=origin/main=89f212b6d4666627d19032c7ef5c297d2f019533`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
+| Backend source       | 根 `main=origin/main=b3cf80411f89b24825b01f942286d68a50f3b2ea`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
 | 主线 CI | `17b637d7…` 的 build/typecheck/test、contracts、Security、Governance、CodeQL 和 production advisory freshness 均 SUCCESS；PR 专属 dependency delta/review 在 main push 上 SKIPPED | 只证明该提交的托管检查；不证明运行采用 |
-| Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它；最新 API/Worker readback 的 `/api/v1/health/ready` 仍为 503，browser component= BROWSER_RUNTIME_UNAVAILABLE，migration revision mismatch 与 workspace budget authority migration unavailable；此前 browser=ok 观察已被当前 readback 取代 | 完整五文件源审查 C0/H0/M0；本次运行回读显示仍未恢复，不外推到其他环境 |
+| Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；最新 exact image readback 的 browser component 为 `ok`，但整体 `/api/v1/health/ready` 仍为 503，原因转为 platform authority Temporal proof 与 Worker admission | browser 已恢复不等于全局 readiness 或用户旅程通过 |
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
 | GrowthOS source      | `/global/frontend/growthos-source` clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
-| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495 已合入；当前远端主线为 `89f212b6d4666627d19032c7ef5c297d2f019533`。#493 提供 native Temporal reader/physical wire fencing，#494 提供 disposable binary/config selector，#495 对齐 JWT-only frontend admission；后续候选已通过 custom native disposable RPC/mTLS 矩阵 | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把本地 disposable 结果当成生产运行证明 |
-| 文档候选 | 本次隔离快照修正 #477 合入后的 live runtime readback：源码已含 readiness probe，但旧 runtime 未应用 20260907120000 migration；workspace authority、migration revision、browser、Worker 与 Temporal proof 仍阻塞；待独立文档 PR/CI 回读 | 只记录当前事实，不改变运行或发布授权 |
+| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497 已合入；当前远端主线为 `b3cf80411f89b24825b01f942286d68a50f3b2ea`。#493 提供 native Temporal reader/physical wire fencing，#494 提供 disposable binary/config selector，#495 对齐 JWT-only frontend admission，#497 收口 native disposable reader proof | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把 readiness HOLD 误报为产品可接单 |
+| 文档候选 | 本次隔离快照修正 #497 合入后的 live runtime readback：API/Worker 已切到 `sha256:4f4a10ac…`，migration `20260908130000_platform_egress_budget_policy_v2` 已应用，browser/storage/Redis/Gateway/Renderer/JWKS 均 ok；platform Temporal proof 与 Worker admission 仍阻塞 readiness | 只记录当前事实，不改变运行或发布授权 |
 
 ### Program 所有权与产品缺口
 
@@ -69,14 +69,14 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 
 ## 3. Development runtime 观察
 
-本次受控切换已将 API 和 Worker 都切到同一 exact OCI：`ghcr.io/mlhjyx/global-backend@sha256:021789a2dd41cc448a46be24237958f937ed387df7230209efea4e128883c277`，绑定 build SHA `f9278178a8eea4374d9f63cce040f7080b9e7231`；两者容器 image ID、artifact identity 与 migration revision 均一致。此前缺失的 3 个迁移和后续 fence privilege hardening 已应用，数据库现为 131/131 up-to-date；切换前已生成并核验 PostgreSQL custom-format backup。当前未执行真实模型调用。
+本次受控切换已将 API 和 Worker 都切到同一 exact OCI：`ghcr.io/mlhjyx/global-backend@sha256:4f4a10ac0d07f56c4710b808980032a3d6a380e430fdc5c03eaaef587a2ac36d`，绑定 build SHA `b3cf80411f89b24825b01f942286d68a50f3b2ea`；两者容器 image ID、artifact identity 与 migration revision 均一致。此前待执行的 3 个迁移已应用，数据库现为 135 条已完成迁移、0 条未完成且未 rollback；切换前已生成并核验 N-1 配置备份。当前未执行真实模型调用。
 
 | 观察              | 当前可确认的事实                                                                                                         | 不得外推                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| 运行版本          | API/Worker 仍为旧 exact N+5 image `sha256:021789a2…`，build `/health/build` 返回 build SHA `f9278178…`、artifact/SBOM 与 `20260907110000_platform_egress_fence_privilege_hardening`；main 已合入 #477 的新 migration `20260907120000_platform_egress_fence_readiness`，但 runtime 尚未采用 | running 不证明 readiness、队列消费、模型或用户旅程成功                                   |
-| Browser 历史事故  | `2026-09-05T17:37:15+08:00` 曾确认 2 GiB tmpfs 满、23,545 个 scoped directories、ready=503 / BROWSER_RUNTIME_UNAVAILABLE；本次 `2026-09-08T00:25:46+08:00` 最新 readback 仍为 browser=BROWSER_RUNTIME_UNAVAILABLE / ready=503 | 历史事故与当前未恢复状态分别记录；不外推到其他环境 |
+| 运行版本          | API/Worker 已切换到同一 exact image `sha256:4f4a10ac…`，build `/health/build` 返回 build SHA `b3cf8041…`、artifact `sha256:3809bf59…`、SBOM 与 migration `20260908130000_platform_egress_budget_policy_v2`；镜像由主线发布 workflow 生成并通过 runtime verifier | running 不证明 readiness、队列消费、模型或用户旅程成功                                   |
+| Browser 历史事故  | `2026-09-05T17:37:15+08:00` 曾确认 2 GiB tmpfs 满、23,545 个 scoped directories；本次 `2026-09-11T17:34:16+08:00` readback 的 browser component 已为 `ok` | 历史事故与当前 platform authority HOLD 分别记录；不外推到其他环境 |
 | Listener exposure | 本次 `ss` 仍见 `0.0.0.0:3001`、`[::]:3001` 和 legacy Java `*:8080`                                                       | 未执行端口收敛或旧服务退役                                                               |
-| Readiness           | `/api/v1/health/build`=200 且 identity 已切换；`/api/v1/health/ready`=503，平台 technical quote authentication、settlement readback、API runtime 和 Outbox Relay 已 ok；workspace budget authority=WORKSPACE_BUDGET_AUTHORITY_MIGRATION_UNAVAILABLE、migration=MIGRATION_REVISION_MISMATCH，Worker 由 gate 保持 STARTING，browser 为 BROWSER_RUNTIME_UNAVAILABLE，主要阻塞为 platform Temporal proof/authority、migration adoption 与 browser runtime | 这是 fail-closed 运行事实；不得把 exact image 误报为可接单或可付费调用 |
+| Readiness           | `/api/v1/health/build`=200 且 API/Worker identity 已切换；`/api/v1/health/ready`=503。database、migration、Temporal control plane、storage、Redis、Gateway、Renderer、browser、Budget Grant verifier、auth JWKS 与 admission 均为 ok；platform authority 为 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，Worker 为 `MATCHING_WORKER_NOT_READY` | 这是 fail-closed 运行事实；不得把 exact image 误报为可接单或可付费调用 |
 | Historical Spend  | 旧 UNKNOWN/unknown 及 unresolved/expired 记录按原证据保留                                                                | 不通过重发制造结果，也不由源修改自动改写历史费用                                         |
 
 历史费用记录保持 UNKNOWN/unknown：attempts 1–5 为 UNRESOLVED，attempt 6 为 EXPIRED，reservation/conservative charge 均为 `800000`；EXPIRED 不产生有效输出或精确费用，继续不重发。完整脱敏字段见 [2026-09-04 platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json)；20260901 predecessor 保持 historical provenance。GrowthOS 2026-09-01 historical provenance 也不能代替当前 authority source。
