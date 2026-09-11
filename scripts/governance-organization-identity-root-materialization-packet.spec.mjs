@@ -44,7 +44,7 @@ import {
 const PHASE_A_SUBJECT = "61384076273feddcb4c5b5309d4b46902dc50e5c";
 const PHASE_B_SUBJECT = "56fde9df9448377f3ce6454ae12e332d2ccde946";
 const LAUNCHER_CONTRACT_SHA256 =
-  "3c71df7989da6312f0498bc8908ff07a581121fb24d03ab1e6ed36b0e2342292";
+  "a3aaf65989cd3147204bf21a6f2501bfa00fb85ea48458a2baff7f803fd3796c";
 
 function gitIdentity(commit, filePath) {
   const objectName = `${commit}:${filePath}`;

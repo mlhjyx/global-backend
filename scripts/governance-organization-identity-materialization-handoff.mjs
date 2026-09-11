@@ -67,6 +67,7 @@ const A_PATHS = [
 const CLOSURE = [
   ...A_PATHS,
   script("launcher.mjs"),
+  script("execution-chain-contracts.mjs"),
   ...[
     "launcher-execution.spec.mjs",
     "launcher-trust.spec.mjs",

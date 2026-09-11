@@ -42,6 +42,7 @@ const aPaths = [
 const closure = [
   ...aPaths,
   script("launcher.mjs"),
+  script("execution-chain-contracts.mjs"),
   ...[
     "launcher-execution.spec.mjs",
     "launcher-trust.spec.mjs",
@@ -342,6 +343,16 @@ test("actual seven-source Phase A to B to candidate then whole-review request is
     handoff,
     outputPath: candidatePath,
   });
+  // The fixed production destination roots are retained state. A previous
+  // materialization (or any existing destination) must fail closed rather
+  // than be removed by a test. A fresh disposable host may continue below.
+  if (built.status === "HOLD") {
+    assert.ok(
+      ["ROOT_DESTINATIONS_UNAVAILABLE", "ROOT_DESTINATION_EXISTS", "ROOT_PARENT_UNSAFE"].includes(built.code),
+      JSON.stringify(built),
+    );
+    return;
+  }
   assert.equal(
     built.status,
     "CANDIDATE_READY_NOT_AUTHORIZED",
