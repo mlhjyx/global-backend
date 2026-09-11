@@ -6,10 +6,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = new URL("../", import.meta.url);
-const BASE_COMMIT = "ec57a5e2fe0c5de05d4c6bd19ef079a4d7cd7a92";
+const BASE_COMMIT = "ec7aa46a520b6ccd3fc6fbe8d7a92970a1725ac2";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-09-04T10:53:12.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-11T12:36:25.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
