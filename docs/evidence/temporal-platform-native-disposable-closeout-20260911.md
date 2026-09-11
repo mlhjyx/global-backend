@@ -89,8 +89,9 @@ infra/temporal-platform/test-support/verify-disposable.sh
 
 - 源码、Go/API/contracts/governance/docs/ContractGraph 与 disposable native
   运行门：`PASS`，均绑定上述候选内容。
-- hosted CI/review/merge：#494 与 #495 已在本轮分别合入；本候选尚未取得新的
-  hosted CI 或独立 reviewer readback，不能把本地结果当成该门的通过。
+- hosted CI：`PASS`；#497 的 CI run `34576571019` 在重试后完整通过，包含 native
+  Go、API/OCI、worker 与 renderer steps；#494/#495 已在本轮分别合入。
+  独立 reviewer readback 与合入仍保持单独 `HOLD`，不能由本地或 hosted CI 自动代签。
 - GrowthOS producer、service JWT、capability JWKS、真实跨仓 readback：
   `EXTERNAL_OWNED / HOLD`，#479 保持 Draft/HOLD。
 - #407 历史综合候选仍保留；Wikidata country binding 小候选尚未实施。
