@@ -56,6 +56,7 @@ describe("Browser readiness temporary-state lifecycle", () => {
     await createBrowserReadinessProbe()("/usr/bin/chromium");
     const opts = spy.mock.calls[0][2] as SpawnOptions;
     expect(Object.keys(opts.env!).sort()).toEqual([
+      "CHROME_HEADLESS",
       "HOME",
       "LANG",
       "PATH",

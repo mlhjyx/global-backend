@@ -17,6 +17,11 @@ function browserEnvironment(root: string): NodeJS.ProcessEnv {
     XDG_CACHE_HOME: join(root, "cache"),
     XDG_CONFIG_HOME: join(root, "config"),
     TMPDIR: join(root, "tmp"),
+    // Chromium's crashpad helper requires an explicit headless mode in the
+    // managed container. Keep this in the isolated child environment so the
+    // readiness probe exercises the same non-interactive runtime contract in
+    // every environment.
+    CHROME_HEADLESS: "1",
   };
 }
 
