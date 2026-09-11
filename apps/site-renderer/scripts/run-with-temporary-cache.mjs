@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   cp,
   lstat,
+  mkdir,
   mkdtemp,
   opendir,
   realpath,
@@ -29,7 +30,8 @@ const require = createRequire(import.meta.url);
 const rendererRoot = path.resolve(import.meta.dirname, "..");
 const astroCli = path.join(
   path.dirname(require.resolve("astro/package.json")),
-  "astro.js",
+  "bin",
+  "astro.mjs",
 );
 async function rejectSourceSymlinks(root) {
   const entries = await opendir(root);
@@ -85,9 +87,24 @@ async function run() {
     }
     if (stopBeforeChild()) return;
 
+    const outputRoot =
+      command === "build"
+        ? path.resolve(process.env.OUT_DIR ?? path.join(rendererRoot, "dist"))
+        : undefined;
+    let outputParent;
+    if (outputRoot) {
+      // Create the configured destination before resolving it. This follows a
+      // configured symlink (when present) and guarantees the cache shares the
+      // destination's real filesystem device rather than its lexical parent.
+      await mkdir(outputRoot, { recursive: true });
+      outputParent = path.dirname(await realpath(outputRoot));
+    }
+    // Astro moves generated assets from its cache into OUT_DIR. Keep build
+    // cache and output on the same device so that this atomic rename cannot
+    // fail with EXDEV when /tmp is a separate mount.
     cacheRoot = await mkdtemp(
       command === "build"
-        ? path.join(tmpdir(), "global-site-renderer-source-cache-")
+        ? path.join(outputParent, "global-site-renderer-source-cache-")
         : path.join(dependencyReal, ".site-renderer-dev-cache-"),
     );
     ownsCacheRoot = true;
@@ -121,6 +138,10 @@ async function run() {
         "..",
         "node_modules",
       );
+      // Astro 7 backgrounds `dev` automatically when it detects an AI-agent
+      // environment. The wrapper owns the child lifecycle and must keep the
+      // server in the foreground so shutdown and cache cleanup remain bounded.
+      childEnv.ASTRO_DEV_BACKGROUND = "false";
     }
     for (const name of ["SITESPEC_PATH", "OUT_DIR", "PUBLIC_ASSET_DIR"]) {
       const value = childEnv[name];
@@ -130,6 +151,8 @@ async function run() {
     }
 
     await new Promise((resolve, reject) => {
+      const commandArgs =
+        command === "dev" ? ["--ignore-lock", ...forwardedArgs] : forwardedArgs;
       child = spawn(
         process.execPath,
         [
@@ -137,7 +160,7 @@ async function run() {
           command,
           "--config",
           path.relative(cacheRoot, path.join(rendererRoot, "astro.config.mjs")),
-          ...forwardedArgs,
+          ...commandArgs,
         ],
         {
           cwd: cacheRoot,

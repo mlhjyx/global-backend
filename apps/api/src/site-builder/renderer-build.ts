@@ -17,7 +17,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { releaseSpecDigest } from "./release-artifact";
@@ -462,7 +461,7 @@ export function resolveRendererEntrypoint(cwd = process.cwd()): {
       });
       return {
         rendererRoot,
-        astroCli: path.join(path.dirname(astroPackage), "astro.js"),
+        astroCli: path.join(path.dirname(astroPackage), "bin", "astro.mjs"),
       };
     } catch {
       // Try the next supported monorepo working directory shape.
@@ -623,8 +622,10 @@ export async function buildSiteSpecWithTemporaryFile(
   },
   execute: RendererBuildExecutor = runAstroBuild,
 ): Promise<RendererOutputManifestV1> {
+  await mkdir(output.outDir, { recursive: true });
+  const outputParent = path.dirname(await realpath(output.outDir));
   const tempDir = await mkdtemp(
-    path.join(tmpdir(), `global-site-renderer-${process.pid}-`),
+    path.join(outputParent, `.global-site-renderer-${process.pid}-`),
   );
   const specPath = path.join(tempDir, "site-spec.json");
   const manifestPath = path.join(output.outDir, RENDERER_OUTPUT_MANIFEST_FILE);

@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, open, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +26,12 @@ const siteSpecPath = path.join(
   "component-catalog-v1",
   "minimal-hero-spec.json",
 );
+
+test("dev wrapper disables Astro background mode and delegates lock ownership", async () => {
+  const source = await readFile(wrapperPath, "utf8");
+  assert.match(source, /ASTRO_DEV_BACKGROUND = "false"/u);
+  assert.match(source, /\["--ignore-lock", \.\.\.forwardedArgs\]/u);
+});
 
 async function reservePort() {
   const server = createServer();
@@ -57,11 +70,15 @@ async function listDevCaches() {
 }
 
 async function listSourceBuildCaches() {
-  return new Set(
-    (await readdir(tmpdir())).filter((name) =>
-      name.startsWith("global-site-renderer-source-cache-"),
+  const parents = [tmpdir(), dependencyRoot];
+  const entries = await Promise.all(
+    parents.map(async (parent) =>
+      (await readdir(parent))
+        .filter((name) => name.startsWith("global-site-renderer-source-cache-"))
+        .map((name) => path.join(parent, name)),
     ),
   );
+  return new Set(entries.flat());
 }
 
 function startDevServer(port) {

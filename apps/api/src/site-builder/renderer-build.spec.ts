@@ -241,7 +241,7 @@ describe("renderer output candidate binding", () => {
 });
 
 describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
-  const processOwnedTempPrefix = `global-site-renderer-${process.pid}-`;
+  const processOwnedTempPrefix = `.global-site-renderer-${process.pid}-`;
 
   it("构建期间使用 0600 随机临时文件，成功后删除整个临时目录", async () => {
     let observedPath = "";

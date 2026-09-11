@@ -66,7 +66,7 @@ Ubuntu mihomo fake-IP 兼容只在系统答案**全部且仅**位于 `198.18.0.0
 
 构建容器：**无网络**（依赖走离线 node_modules 基础镜像）、CPU/内存/时长/磁盘限额、非 root、只读基础层；产物大小上限；**每租户公平队列**（并发池隔离，防单租户挤占）。
 
-**临时盘、子进程与本地 pointer（R1-safety ① + R3-B2，✅ 2026-07-17 已落地，v3.2 §24.2）**：SiteSpec 只在随机 0700 临时目录内以 0600 文件物化，成功/异常路径统一在 `finally` 删除整个目录；Astro 由固定 `process.execPath + astro.js` 参数数组启动，不经 shell/pnpm/PATH，子进程 env 固定为 `NODE_ENV/LANG/TZ/SITESPEC_PATH/OUT_DIR/BASE_PATH/ASTRO_TELEMETRY_DISABLED` 七项，不再继承数据库、对象存储、模型网关、代理或 `NODE_OPTIONS`。R3-B2 后续新增 run-scoped 隐藏 durable artifact，数据库 CAS 提交后再以单次 symlink rename 原子切 `.active/<slug>`，retry 可从 durable artifactKey 重建 pointer。它仍是单机本地路径：生产对象存储不可变 Release、跨节点恢复/回收与 unknown component fail-closed 仍属 R1-min。
+**临时盘、子进程与本地 pointer（R1-safety ① + R3-B2，✅ 2026-07-17 已落地，v3.2 §24.2）**：SiteSpec 只在随机 0700 临时目录内以 0600 文件物化，成功/异常路径统一在 `finally` 删除整个目录；Astro 7 由固定 `process.execPath + astro/bin/astro.mjs` 参数数组启动，不经 shell/pnpm/PATH；build cache 先解析 `OUT_DIR` 的真实路径并与输出置于同一文件系统，避免跨设备 `EXDEV`，缺失输出父目录会在启动前创建。dev 由 wrapper 持有前台生命周期，显式关闭 Astro agent background 检测并使用 `--ignore-lock`，因此不会留下把前台进程误标为 background 的 Astro lock metadata。子进程 env 固定为 `NODE_ENV/LANG/TZ/SITESPEC_PATH/OUT_DIR/BASE_PATH/ASTRO_TELEMETRY_DISABLED` 七项，不再继承数据库、对象存储、模型网关、代理或 `NODE_OPTIONS`。R3-B2 后续新增 run-scoped 隐藏 durable artifact，数据库 CAS 提交后再以单次 symlink rename 原子切 `.active/<slug>`，retry 可从 durable artifactKey 重建 pointer。它仍是单机本地路径：生产对象存储不可变 Release、跨节点恢复/回收与 unknown component fail-closed 仍属 R1-min。
 
 ## 6. 询盘安全与 PII（T6）
 
