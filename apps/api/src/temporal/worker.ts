@@ -94,7 +94,7 @@ import {
 } from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import {
-  selectWorkerDependencyAdmissionBeforeAuthorityCutover,
+  selectWorkerDependencyAdmission,
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
@@ -663,11 +663,10 @@ async function main(): Promise<void> {
         checkSiteBuildSettlementReadbackReadiness(process.env),
         checkBrowserReadiness(process.env),
         checkImagePipelineIsolationReadiness(),
-        checkPlatformCapability(),
       ]);
-      return selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+      return selectWorkerDependencyAdmission({
         hardChecks: checks,
-        authorityCapabilities: [],
+        authorityCapabilities: [await checkPlatformCapability()],
       });
     },
     leases: runtimeLeases,

@@ -7,23 +7,22 @@ export interface WorkerDependencyAdmissionInput {
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
-export interface PreCutoverWorkerDependencyAdmissionInput {
+export interface WorkerDependencyAdmissionSelectionInput {
   readonly hardChecks: readonly RuntimeComponentStatus[];
   readonly authorityCapabilities: readonly RuntimeComponentStatus[];
 }
 
 /**
- * Authority capability probes are observe-only until the atomic cutover wires
- * both API and Worker admission. Keeping the parameter explicit makes that
- * temporary non-admitting behavior executable instead of a source-string claim.
+ * Once platform authority is part of the managed runtime contract, its
+ * capability probes are admission checks just like the hard dependencies.
  */
-export function selectWorkerDependencyAdmissionBeforeAuthorityCutover(
-  input: PreCutoverWorkerDependencyAdmissionInput,
+export function selectWorkerDependencyAdmission(
+  input: WorkerDependencyAdmissionSelectionInput,
 ): RuntimeComponentStatus {
-  void input.authorityCapabilities;
   return (
-    input.hardChecks.find((check) => check.status !== 'ok') ??
-    Object.freeze({ status: 'ok' as const })
+    [...input.hardChecks, ...input.authorityCapabilities].find(
+      (check) => check.status !== 'ok',
+    ) ?? Object.freeze({ status: 'ok' as const })
   );
 }
 
