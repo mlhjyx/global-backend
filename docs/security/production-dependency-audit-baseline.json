@@ -1,20 +1,20 @@
 {
   "schema_version": "production-dependency-audit-baseline/v1",
   "source": {
-    "base_commit": "ec7aa46a520b6ccd3fc6fbe8d7a92970a1725ac2",
-    "lockfile_digest": "sha256:7883a348e73ae7e1b6716b1ac7d664aeae119d2456171a5ea7b296f0842680a6",
+    "base_commit": "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99",
+    "lockfile_digest": "sha256:f9964b4bc6afb30fec981bba83e6435e9067d8695096f73146649513bbe5ec5f",
     "registry": "https://registry.npmjs.org/",
     "package_manager": "pnpm@9.15.9",
     "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
-    "captured_at": "2026-09-11T12:36:24.000Z"
+    "captured_at": "2026-09-11T16:20:42.000Z"
   },
   "bootstrap": {
     "mode": "INITIAL_BASELINE",
-    "base_commit": "ec7aa46a520b6ccd3fc6fbe8d7a92970a1725ac2"
+    "base_commit": "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99"
   },
   "governance": {
     "owner": "OWN-SECURITY",
-    "valid_until": "2026-09-15T12:36:24.000Z",
+    "valid_until": "2026-09-15T16:20:42.000Z",
     "policy": "Existing advisories may disappear; new advisories, severity increases, critical findings, and expired baselines fail closed."
   },
   "advisories": [
