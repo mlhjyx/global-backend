@@ -32,7 +32,6 @@ func TestConfigurationAdmission(t *testing.T) {
 		"plaintext JWKS": func(c *config.Config) {
 			c.Global.Authorization.JWTKeyProvider.KeySourceURIs[0] = "http://jwks.example/keys"
 		},
-		"no client auth":                    func(c *config.Config) { c.Global.TLS.Frontend.Server.RequireClientAuth = false },
 		"unauthenticated internal frontend": func(c *config.Config) { c.Global.TLS.Internode.Server.RequireClientAuth = false },
 		"missing client CA":                 func(c *config.Config) { c.Global.TLS.Frontend.Server.ClientCAFiles = nil },
 		"missing server key":                func(c *config.Config) { c.Global.TLS.Frontend.Server.KeyFile = "" },
@@ -51,6 +50,34 @@ func TestConfigurationAdmission(t *testing.T) {
 	}
 	if ValidateConfiguration(nil) == nil {
 		t.Fatal("nil configuration accepted")
+	}
+}
+
+func TestConfigurationAdmissionAllowsJwtOnlyFrontend(t *testing.T) {
+	cfg := secureConfiguration()
+	cfg.Global.TLS.Frontend.Server.RequireClientAuth = false
+	cfg.Global.TLS.Frontend.Server.ClientCAFiles = nil
+	if err := ValidateConfiguration(cfg); err != nil {
+		t.Fatalf("JWT-only product frontend rejected: %v", err)
+	}
+}
+
+func TestConfigurationAdmissionRejectsMalformedJwtOnlyFrontendIdentity(t *testing.T) {
+	cfg := secureConfiguration()
+	cfg.Global.TLS.Frontend.Server.RequireClientAuth = false
+	cfg.Global.TLS.Frontend.Server.ClientCAFiles = nil
+	cfg.Global.TLS.Frontend.Server.KeyFile = "relative.key"
+	if ValidateConfiguration(cfg) == nil {
+		t.Fatal("JWT-only frontend with relative key path accepted")
+	}
+}
+
+func TestConfigurationAdmissionChecksEnabledFrontendMTLS(t *testing.T) {
+	cfg := secureConfiguration()
+	cfg.Global.TLS.Frontend.Server.RequireClientAuth = true
+	cfg.Global.TLS.Frontend.Server.ClientCAFiles = nil
+	if ValidateConfiguration(cfg) == nil {
+		t.Fatal("enabled frontend mTLS without client CA accepted")
 	}
 }
 

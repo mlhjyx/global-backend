@@ -270,6 +270,7 @@ test("disposable server can run the exact native wrapper without changing the ba
   ]);
   assert.match(compose, /task4c-native-entrypoint/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY/);
+  assert.match(compose, /TEMPORAL_PLATFORM_READER_SUBJECT/);
   assert.match(
     compose,
     /source: \$\{TEMPORAL_PLATFORM_TEST_CONFIG_PATH:-\.\.\/config\/temporal\.yaml\}/,
