@@ -458,6 +458,9 @@ if [[ ! ${WORKFLOW_RUN_ID} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 fi
 
 export TEMPORAL_PLATFORM_READER_TOKEN_FILE=/run/secrets/temporal-platform-client/reader.jwt
+export TEMPORAL_PLATFORM_READER_PROBE_SERVICE=codex-task4c-platform-temporal-worker-probe
+export TEMPORAL_PLATFORM_READER_PROBE_ADDRESS=task4c-temporal:7233
+export TEMPORAL_PLATFORM_READER_PROBE_SERVER_NAME=task4c-temporal
 export TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID=${SCHEDULE_ID}
 export TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID=${ACTION_WORKFLOW_ID}
 export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}

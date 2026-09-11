@@ -85,10 +85,17 @@ func (m *claimMapper) GetClaims(info *authorization.AuthInfo) (*authorization.Cl
 		}
 		return claims, nil
 	}
-	if claims.AuthType != "jwt" || strings.TrimSpace(info.Audience) == "" || !exactReaderRole(claims) || leaf == nil {
+	if claims.AuthType != "jwt" || strings.TrimSpace(info.Audience) == "" || !exactReaderRole(claims) ||
+		info.TLSConnection == nil || !info.TLSConnection.State.HandshakeComplete {
 		return nil, denied()
 	}
-	if !singleReaderIdentity(leaf, m.subject) {
+	// Public frontend may use JWT-only. If a client certificate is presented,
+	// bind it to the reader subject; an unverified or mismatched certificate is
+	// never accepted as a substitute for the JWT identity.
+	if leaf == nil && (len(info.TLSConnection.State.PeerCertificates) != 0 || len(info.TLSConnection.State.VerifiedChains) != 0) {
+		return nil, denied()
+	}
+	if leaf != nil && !singleReaderIdentity(leaf, m.subject) {
 		return nil, denied()
 	}
 	now := time.Now()
@@ -97,9 +104,13 @@ func (m *claimMapper) GetClaims(info *authorization.AuthInfo) (*authorization.Cl
 	}
 	// VerifiedChains proves handshake-time validation. Recheck the selected full
 	// chain on every request so a long-lived connection cannot outlive its proof.
-	for _, cert := range info.TLSConnection.State.VerifiedChains[0] {
-		if cert == nil || now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
-			return nil, denied()
+	if leaf != nil {
+		for _, chain := range info.TLSConnection.State.VerifiedChains {
+			for _, cert := range chain {
+				if cert == nil || now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
+					return nil, denied()
+				}
+			}
 		}
 	}
 	copy := *claims

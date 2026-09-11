@@ -120,6 +120,7 @@ services:
       TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal-platform/temporal.yaml
       TEMPORAL_ALLOW_NO_AUTH: "false"
       TEMPORAL_SERVICES: frontend,internal-frontend,history,matching,worker
+      TEMPORAL_BROADCAST_ADDRESS: 127.0.0.1
       BIND_ON_IP: 0.0.0.0
       TEMPORAL_PLATFORM_POSTGRES_HOST: codex-task4c-platform-temporal-postgres
       TEMPORAL_PLATFORM_POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set disposable password}

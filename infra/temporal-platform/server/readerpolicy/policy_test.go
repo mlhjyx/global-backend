@@ -84,6 +84,10 @@ func verifiedTLS(t *testing.T, subject string, alternativeIdentity bool) *creden
 	return verifiedTLSAt(t, subject, alternativeIdentity, time.Now())
 }
 
+func verifiedJwtOnlyTLS() *credentials.TLSInfo {
+	return &credentials.TLSInfo{State: tls.ConnectionState{HandshakeComplete: true}}
+}
+
 func verifiedTLSAt(t *testing.T, subject string, alternativeIdentity bool, handshakeTime time.Time) *credentials.TLSInfo {
 	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -231,6 +235,18 @@ func TestReaderRejectsElevatedJWTAndIdentitySplicing(t *testing.T) {
 		TLSConnection: &unverified, TLSSubject: &pkix.Name{CommonName: reader}})
 	if err == nil {
 		t.Fatal("unverified peer or TLSSubject trusted")
+	}
+}
+
+func TestReaderAllowsVerifiedJwtOnlyFrontend(t *testing.T) {
+	provider, mapper, _ := setup(t)
+	_, err := mapper.GetClaims(&authorization.AuthInfo{
+		AuthToken:     token(t, provider.key, reader, []string{namespace + ":read"}),
+		Audience:      "temporal-platform",
+		TLSConnection: verifiedJwtOnlyTLS(),
+	})
+	if err != nil {
+		t.Fatalf("JWT-only frontend reader rejected: %v", err)
 	}
 }
 

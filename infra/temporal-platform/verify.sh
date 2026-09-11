@@ -7,6 +7,9 @@ COMPOSE_FILE=${TEMPORAL_PLATFORM_COMPOSE_FILE:-${SCRIPT_DIR}/compose.yml}
 ADMIN_SERVICE=${TEMPORAL_PLATFORM_ADMIN_SERVICE:-temporal-platform-admin}
 CLIENT_SECRET_DIRECTORY=${TEMPORAL_PLATFORM_CLIENT_SECRET_DIRECTORY:?TEMPORAL_PLATFORM_CLIENT_SECRET_DIRECTORY is required}
 READER_TOKEN_FILE=${TEMPORAL_PLATFORM_READER_TOKEN_FILE:-/run/secrets/temporal-platform-client/reader.jwt}
+READER_PROBE_SERVICE=${TEMPORAL_PLATFORM_READER_PROBE_SERVICE:-}
+READER_PROBE_ADDRESS=${TEMPORAL_PLATFORM_READER_PROBE_ADDRESS:-}
+READER_PROBE_SERVER_NAME=${TEMPORAL_PLATFORM_READER_PROBE_SERVER_NAME:-}
 : "${TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID:?TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID is required}"
 : "${TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID:?TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID is required}"
 : "${TEMPORAL_PLATFORM_PROOF_RUN_ID:?TEMPORAL_PLATFORM_PROOF_RUN_ID is required}"
@@ -24,6 +27,16 @@ case "${READER_TOKEN_FILE}" in
     exit 1
     ;;
 esac
+if [[ -n "${READER_PROBE_SERVICE}" ]]; then
+  case "${READER_PROBE_SERVICE}" in
+    *[!A-Za-z0-9_.-]*)
+      echo "Temporal reader probe service name is invalid" >&2
+      exit 1
+      ;;
+  esac
+  : "${READER_PROBE_ADDRESS:?TEMPORAL_PLATFORM_READER_PROBE_ADDRESS is required when using a direct reader probe}"
+  : "${READER_PROBE_SERVER_NAME:?TEMPORAL_PLATFORM_READER_PROBE_SERVER_NAME is required when using a direct reader probe}"
+fi
 
 HOST_READER_TOKEN=${CLIENT_SECRET_DIRECTORY}/${READER_TOKEN_FILE##*/}
 if [[ ! -f "${HOST_READER_TOKEN}" || -L "${HOST_READER_TOKEN}" ]]; then
@@ -44,6 +57,7 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
     schedule_id=$2
     workflow_id=$3
     run_id=$4
+    probe_service=$5
     reader=$(cat "${token_file}")
     case "${reader}" in
       *[!A-Za-z0-9._-]*|*.*.*.*|.*|*.)
@@ -104,15 +118,16 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
       base schedule describe \
         --namespace "platform-automation" --schedule-id "${schedule_id}"
 
-    reader_cli schedule describe \
-      --namespace "platform-automation" --schedule-id "${schedule_id}"
-    reader_cli workflow describe \
-      --namespace "platform-automation" \
-      --workflow-id "${workflow_id}" --run-id "${run_id}"
-    reader_cli workflow show \
-      --namespace "platform-automation" \
-      --workflow-id "${workflow_id}" --run-id "${run_id}"
-
+    if [ -z "${probe_service}" ]; then
+      reader_cli schedule describe \
+        --namespace "platform-automation" --schedule-id "${schedule_id}"
+      reader_cli workflow describe \
+        --namespace "platform-automation" \
+        --workflow-id "${workflow_id}" --run-id "${run_id}"
+      reader_cli workflow show \
+        --namespace "platform-automation" \
+        --workflow-id "${workflow_id}" --run-id "${run_id}"
+    fi
     expect_denied reader-write-denied \
       reader_cli schedule trigger \
         --namespace "platform-automation" --schedule-id "${schedule_id}"
@@ -122,6 +137,20 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
   "${READER_TOKEN_FILE}" \
   "${TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID}" \
   "${TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID}" \
-  "${TEMPORAL_PLATFORM_PROOF_RUN_ID}"
+  "${TEMPORAL_PLATFORM_PROOF_RUN_ID}" \
+  "${READER_PROBE_SERVICE}"
+
+if [[ -n "${READER_PROBE_SERVICE}" ]]; then
+  "${compose[@]}" run --rm --no-deps --entrypoint node \
+    "${READER_PROBE_SERVICE}" \
+    /repo/infra/temporal-platform/test-support/reader-rpc-probe.mjs \
+    /repo \
+    /run/secrets/temporal-platform-client/reader.jwt \
+    /run/secrets/temporal-platform-client/ca.crt \
+    "${READER_PROBE_ADDRESS}" "${READER_PROBE_SERVER_NAME}" \
+    "${TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID}" \
+    "${TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID}" \
+    "${TEMPORAL_PLATFORM_PROOF_RUN_ID}"
+fi
 
 echo "independent Temporal read-only authorization matrix passed"

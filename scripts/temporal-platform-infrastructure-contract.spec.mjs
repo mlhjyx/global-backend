@@ -263,22 +263,29 @@ test("managed compose uses independent persistence and no development server pat
 
 test("disposable server can run the exact native wrapper without changing the baseline image", async () => {
   const [compose, entrypoint, serverDockerfile, runner] = await Promise.all([
-    repositoryFile("infra/temporal-platform/test-support/compose.disposable.yml"),
+    repositoryFile(
+      "infra/temporal-platform/test-support/compose.disposable.yml",
+    ),
     repositoryFile("infra/temporal-platform/test-support/native-entrypoint.sh"),
     repositoryFile("infra/temporal-platform/server/Dockerfile"),
     repositoryFile("infra/temporal-platform/test-support/verify-disposable.sh"),
   ]);
   assert.match(compose, /task4c-native-entrypoint/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY/);
-  assert.match(compose, /TEMPORAL_PLATFORM_READER_SUBJECT/);
   assert.match(
     compose,
     /source: \$\{TEMPORAL_PLATFORM_TEST_CONFIG_PATH:-\.\.\/config\/temporal\.yaml\}/,
   );
-  assert.match(runner, /native Temporal server binary must be an absolute path/);
+  assert.match(
+    runner,
+    /native Temporal server binary must be an absolute path/,
+  );
   assert.match(entrypoint, /\/run\/native-server\/temporal-server start/);
   assert.match(entrypoint, /\/etc\/temporal\/entrypoint\.sh/);
-  assert.match(serverDockerfile, /temporalio\/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da/);
+  assert.match(
+    serverDockerfile,
+    /temporalio\/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da/,
+  );
   assert.match(serverDockerfile, /go1\.26\.4/);
 });
 
@@ -308,9 +315,7 @@ test("provisioning roles and verification remain separated and fail closed", asy
   assert.match(provision, /operator namespace create/);
   assert.match(provision, /--namespace "platform-automation"/);
   assert.match(verify, /TEMPORAL_PLATFORM_READER_TOKEN_FILE/);
-  assert.match(verify, /schedule describe/);
-  assert.match(verify, /workflow describe/);
-  assert.match(verify, /workflow show/);
+  assert.match(verify, /reader-rpc-probe\.mjs/);
   assert.match(verify, /PERMISSION_DENIED/);
   assert.match(verify, /no-token/);
   assert.match(verify, /reader-write-denied/);
@@ -323,25 +328,31 @@ test("provisioning roles and verification remain separated and fail closed", asy
 });
 
 test("disposable proof is isolated and product config never owns test keys", async () => {
-  const [compose, runner, fixtureGenerator, workerProbe, internalProbe, caddy] =
-    await Promise.all([
-      repositoryFile(
-        "infra/temporal-platform/test-support/compose.disposable.yml",
-      ),
-      repositoryFile(
-        "infra/temporal-platform/test-support/verify-disposable.sh",
-      ),
-      repositoryFile(
-        "infra/temporal-platform/test-support/generate-fixtures.mjs",
-      ),
-      repositoryFile(
-        "infra/temporal-platform/test-support/worker-poll-probe.mjs",
-      ),
-      repositoryFile(
-        "infra/temporal-platform/test-support/internal-mtls-probe.mjs",
-      ),
-      repositoryFile("infra/temporal-platform/test-support/Caddyfile"),
-    ]);
+  const [
+    compose,
+    runner,
+    fixtureGenerator,
+    workerProbe,
+    internalProbe,
+    readerProbe,
+    caddy,
+  ] = await Promise.all([
+    repositoryFile(
+      "infra/temporal-platform/test-support/compose.disposable.yml",
+    ),
+    repositoryFile("infra/temporal-platform/test-support/verify-disposable.sh"),
+    repositoryFile(
+      "infra/temporal-platform/test-support/generate-fixtures.mjs",
+    ),
+    repositoryFile(
+      "infra/temporal-platform/test-support/worker-poll-probe.mjs",
+    ),
+    repositoryFile(
+      "infra/temporal-platform/test-support/internal-mtls-probe.mjs",
+    ),
+    repositoryFile("infra/temporal-platform/test-support/reader-rpc-probe.mjs"),
+    repositoryFile("infra/temporal-platform/test-support/Caddyfile"),
+  ]);
 
   assert.match(compose, /codex-task4c-platform-temporal/);
   assert.match(compose, /internal:\s*true/);
@@ -359,6 +370,10 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.match(runner, /generate-fixtures\.mjs/);
   assert.match(runner, /verify\.sh/);
   assert.match(runner, /worker-poll-probe\.mjs/);
+  assert.match(readerProbe, /Connection\.lazy/);
+  assert.match(readerProbe, /describeSchedule/);
+  assert.match(readerProbe, /describeWorkflowExecution/);
+  assert.match(readerProbe, /getWorkflowExecutionHistory/);
   assert.match(runner, /internal-mtls-probe\.mjs/);
   assert.match(internalProbe, /INTERNAL_MTLS_REJECTED/);
   assert.match(runner, /worker-cross-namespace-denied/);
@@ -370,6 +385,11 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_SERVER_SECRET_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_JWKS_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY/);
+  assert.match(compose, /TEMPORAL_BROADCAST_ADDRESS:\s*127\.0\.0\.1/);
+  assert.match(
+    compose,
+    /TEMPORAL_PLATFORM_READER_SUBJECT:\s*\$\{TEMPORAL_PLATFORM_READER_SUBJECT:-task4c-growthos-reader\}/,
+  );
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY/);
   assert.match(compose, /@temporalio\+client@1\.23\.0/);

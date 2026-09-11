@@ -166,6 +166,11 @@ Acceptance requires all of the following in the same run:
 5. It cannot trigger the Schedule.
 6. It cannot read a different namespace.
 
+The reader checks call the three allowlisted WorkflowService methods directly
+through the SDK connection. Temporal CLI commands are used only for the
+negative write and cross-namespace probes because the CLI performs an extra
+`GetSystemInfo` preflight that is outside the reader allowlist.
+
 The disposable harness additionally proves writer success, authorized
 `PollWorkflowTaskQueue` and `RespondWorkflowTaskFailed` calls, Worker
 cross-namespace denial, admin-only namespace creation, distinct
