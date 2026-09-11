@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import {
   collectCurrentMainAuditFacts,
+  buildCopyCommandDescriptor,
+  hasExactKeys,
+  validateAuditReviewReceipt,
+  validateCurrentMainAdmissionStructure,
+  collectAdmissionObjectFacts,
+  validateAdmissionObjectBindings,
+  resolveAdmissionOwner,
+  collectThreeWayConflictFacts,
   generateCurrentMainAdmission,
   validateCurrentMainAdmissionDecision,
   validateCurrentMainAdmissionInput,
@@ -14,6 +23,105 @@ import {
 
 const SHA = "a".repeat(64);
 const COMMIT = "1".repeat(40);
+
+test("owner resolution binds the last matching supported rule and fails on ambiguous syntax", () => {
+  const source = Buffer.from("* @default\n/packages/ @team/db\n/packages/db/*.sql @sql\n");
+  const result = resolveAdmissionOwner(source, COMMIT, "packages/db/test.sql");
+  assert.equal(result.status, "PASS");
+  assert.deepEqual(result.owner, { source: "CODEOWNERS", codeownersBlobId: COMMIT,
+    matchedRule: "/packages/db/*.sql", principals: ["@sql"], resolution: "EXACT" });
+  assert.equal(resolveAdmissionOwner(Buffer.from("/docs/ @docs\n"), COMMIT, "src/a.ts").code, "CODEOWNERS_UNRESOLVED");
+  assert.equal(resolveAdmissionOwner(Buffer.from("* @default\n/docs/\n"), COMMIT, "docs/a.md").code, "CODEOWNERS_UNRESOLVED");
+  for (const pattern of ["[ab].ts", "!private/", "file\\ name", "/foo/**bar"]) {
+    assert.equal(resolveAdmissionOwner(Buffer.from(`* @default\n${pattern} @x\n`), COMMIT, "src/a.ts").status, "HOLD");
+  }
+  for (const file of ["package.json", "packages/api/package.json"]) {
+    assert.equal(resolveAdmissionOwner(Buffer.from("/**/package.json @pkg\n"), COMMIT, file).status, "PASS");
+  }
+});
+
+function admission() {
+  return {
+    schemaVersion: "organization-identity-current-main-admission/v1", status: "ADMITTED",
+    artifactACommit: "2400bac28796bae44294114edc99eaccb1bd65b3",
+    branchPreRefreshCommit: COMMIT, liveMainCommit: "2".repeat(40), mergeBaseCommit: "3".repeat(40),
+    refreshMergeCommit: "4".repeat(40), refreshParents: [COMMIT, "2".repeat(40)],
+    mainOnlyRange: `${"3".repeat(40)}..${"2".repeat(40)}`, mainOnlyPathCount: 1,
+    mainOnlyPathSetSha256: createHash("sha256").update("a.ts\0").digest("hex"),
+    paths: [{ path: "a.ts", changeKind: "ADD", baseBlobId: null, branchBlobId: null,
+      mainBlobId: COMMIT, resultBlobId: COMMIT, classifications: ["OTHER"],
+      owner: { source: "CODEOWNERS", codeownersBlobId: COMMIT, matchedRule: "*", principals: ["@owner"], resolution: "EXACT" },
+      evidenceSha256: [SHA], disposition: "ADMIT_IDENTITY_IRRELEVANT", generatedRebuild: null }],
+    conflicts: [], migrations: [], rawDeltaSha256: SHA, buildDeltaSha256: SHA,
+    schemaDeltaSha256: SHA, callerDeltaSha256: SHA,
+    review: { auditPacketSha256: SHA, auditReviewReceiptSha256: SHA, reportSha256: SHA, verdict: "PASS" },
+  };
+}
+
+test("planned admission structure rejects missing fields and path/parent/owner inconsistencies", () => {
+  const good = admission();
+  assert.deepEqual(validateCurrentMainAdmissionStructure(good), { status: "PASS", evidenceClass: "STRUCTURE_ONLY" });
+  for (const key of Object.keys(good)) {
+    const missing = structuredClone(good); delete missing[key];
+    assert.equal(validateCurrentMainAdmissionStructure(missing).status, "HOLD", key);
+  }
+  const mutations = [
+    x => x.status = "HOLD", x => x.refreshParents.reverse(), x => x.paths = [],
+    x => x.paths[0].baseBlobId = COMMIT, x => x.paths[0].owner.resolution = "UNRESOLVED",
+    x => x.paths[0].disposition = "HOLD", x => x.paths[0].extra = true,
+    x => x.paths[0].path = "../escape", x => x.paths[0].classifications.push("OTHER"),
+    x => x.conflicts.push({ path: "unknown" }), x => x.migrations.push({ name: "unknown" }),
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(good); mutate(changed);
+    assert.equal(validateCurrentMainAdmissionStructure(changed).status, "HOLD");
+  }
+});
+
+test("audit review validates the planned schema and binds every field to independently supplied facts", () => {
+  const receipt = {
+    schemaVersion: "organization-identity-current-main-audit-review/v1",
+    disposition: "PASS", auditPacketSha256: SHA, githubControllerContractSha256: SHA,
+    githubControllerReviewReceiptSha256: SHA, protectedMainReadbackReceiptSha256: SHA,
+    localBootstrapRunReceiptSetSha256: SHA, branchPreRefreshCommit: COMMIT,
+    advertisedLiveMainCommit: "2".repeat(40), mergeBaseCommit: COMMIT,
+    mainOnlyPathSetSha256: SHA, conflictSetSha256: SHA, migrationSetSha256: SHA,
+    dispositionSetSha256: SHA, authorizationRequestSha256: SHA, fetchReceiptSha256: null,
+    reportSha256: SHA, counterexampleSetSha256: "b".repeat(64),
+    reviewerClass: "INDEPENDENT_ADMISSION_AUDIT_REVIEW", critical: 0, important: 0, verdict: "PASS",
+  };
+  assert.equal(validateAuditReviewReceipt(receipt, receipt).status, "PASS");
+  assert.equal(validateAuditReviewReceipt(receipt).status, "HOLD");
+  for (const key of Object.keys(receipt)) {
+    const missing = { ...receipt }; delete missing[key];
+    assert.equal(validateAuditReviewReceipt(missing, receipt).status, "HOLD", key);
+  }
+  for (const change of [{ migrationSetSha256: null }, { auditPacketSha256: "c".repeat(64) }, { important: 1 }, { extra: true }]) {
+    assert.equal(validateAuditReviewReceipt({ ...receipt, ...change }, receipt).status, "HOLD");
+  }
+});
+
+test("hostile input is rejected without invoking proxy or accessor traps", () => {
+  let traps = 0;
+  const proxy = new Proxy({}, { getPrototypeOf() { traps++; throw Error("private"); } });
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  const accessor = Object.defineProperty({}, "secret", { get() { traps++; throw Error("private"); } });
+  for (const value of [null, undefined, proxy, revoked.proxy, accessor]) {
+    assert.equal(validateCurrentMainAdmissionInput(value).status, "HOLD");
+    assert.equal(validateCurrentMainAdmissionDecision(value).status, "HOLD");
+    assert.equal(buildCopyCommandDescriptor("COPY_WRITE_ELIGIBILITY_V1", value).status, "HOLD");
+  }
+  assert.equal(traps, 0);
+  assert.equal(hasExactKeys(new Array(2), []), false);
+});
+
+test("Copy descriptors reject invalid digests and arbitrary target paths", () => {
+  const valid = { auditPacketSha256: SHA, eligibilityPath: "docs/evidence/site-builder/copy-runtime-eligibility.json" };
+  assert.equal(buildCopyCommandDescriptor("COPY_WRITE_ELIGIBILITY_V1", valid).status, "PASS");
+  for (const change of [{ auditPacketSha256: "not-a-digest" }, { eligibilityPath: "../outside" }, { eligibilityPath: "docs/other.json" }]) {
+    assert.equal(buildCopyCommandDescriptor("COPY_WRITE_ELIGIBILITY_V1", { ...valid, ...change }).status, "HOLD");
+  }
+});
 
 function input(overrides = {}) {
   return {
@@ -127,4 +235,78 @@ test("collector binds repository root origin identity", async (t) => {
   execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/repo-a/main.git"]);
   execFileSync("git", ["-C", root, "update-ref", "refs/remotes/origin/main", live]);
   assert.deepEqual(collectCurrentMainAuditFacts({ repositoryRoot: root, expectedRepository: { host: "github.com", owner: "repo-b", name: "main", full_name: "repo-b/main" } }), { status: "HOLD", code: "REPOSITORY_IDENTITY_INVALID" });
+});
+
+test("object collector binds four trees, ordered parents and complete migration blobs", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-object-facts-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
+  await mkdir(path.join(root, ".github"));
+  await writeFile(path.join(root, ".github/CODEOWNERS"), "* @owner\n");
+  await writeFile(path.join(root, "base.txt"), "base\n"); git("add", "."); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "feature");
+  await writeFile(path.join(root, "branch.txt"), "feature\n"); git("add", "."); git("commit", "-qm", "feature");
+  const branch = git("rev-parse", "HEAD");
+  git("checkout", "-q", "main");
+  const migrationPath = "packages/db/prisma/migrations/20260908000000_example/migration.sql";
+  await mkdir(path.dirname(path.join(root, migrationPath)), { recursive: true });
+  await writeFile(path.join(root, migrationPath), "SELECT 1;\n");
+  git("add", "."); git("commit", "-qm", "migration"); const main = git("rev-parse", "HEAD");
+  git("checkout", "-q", "feature"); git("merge", "--no-ff", "-qm", "merge", main);
+  const merged = git("rev-parse", "HEAD");
+  const before = git("status", "--porcelain");
+  const result = collectAdmissionObjectFacts({ repoRoot: root, branchPreRefreshCommit: branch, liveMainCommit: main, refreshMergeCommit: merged });
+  assert.equal(result.status, "PASS", JSON.stringify(result));
+  assert.equal(result.evidenceClass, "LOCAL_GIT_OBJECT_FACTS_ONLY");
+  assert.equal(result.mergeBaseCommit, base);
+  assert.deepEqual(result.refreshParents, [branch, main]);
+  assert.deepEqual(result.mainOnlyPaths.map(x => x.path), [migrationPath]);
+  assert.equal(result.migrations.length, 1);
+  assert.equal(result.migrations[0].migrationSqlSha256, createHash("sha256").update("SELECT 1;\n").digest("hex"));
+  assert.equal(result.migrations[0].lastChangeCommit, main);
+  const document = admission();
+  Object.assign(document, { branchPreRefreshCommit: branch, liveMainCommit: main,
+    mergeBaseCommit: base, refreshMergeCommit: merged, refreshParents: [branch, main],
+    mainOnlyRange: `${base}..${main}`, mainOnlyPathSetSha256: result.mainOnlyPathSetSha256 });
+  document.paths = result.mainOnlyPaths.map((row, index) => ({ ...admission().paths[0], ...row, owner: result.owners[index].owner, classifications: ["MIGRATION"] }));
+  document.migrations = result.migrations.map(row => ({ ...row, mainOnly: true,
+    artifactARelationship: "POST_ARTIFACT_A_MAIN_ONLY", disposition: "IDENTITY_IRRELEVANT" }));
+  assert.equal(validateAdmissionObjectBindings(document, result).status, "PASS");
+  const wrongOwner = structuredClone(document); wrongOwner.paths[0].owner.principals = ["@someone"];
+  assert.equal(validateAdmissionObjectBindings(wrongOwner, result).code, "ADMISSION_OWNER_MISMATCH");
+  assert.equal(validateAdmissionObjectBindings(document, JSON.parse(JSON.stringify(result))).code, "COLLECTED_OBJECT_FACTS_REQUIRED");
+  const wrongBlob = structuredClone(document); wrongBlob.paths[0].resultBlobId = "a".repeat(40);
+  assert.equal(validateAdmissionObjectBindings(wrongBlob, result).code, "ADMISSION_BLOB_MISMATCH");
+  const omitted = structuredClone(document); omitted.migrations = [];
+  assert.equal(validateAdmissionObjectBindings(omitted, result).code, "MIGRATION_SET_MISMATCH");
+  assert.equal(git("status", "--porcelain"), before);
+  assert.equal(git("rev-parse", "HEAD"), merged);
+  assert.equal(collectAdmissionObjectFacts({ repoRoot: root, branchPreRefreshCommit: branch, liveMainCommit: main, refreshMergeCommit: main }).code, "REFRESH_PARENTS_MISMATCH");
+});
+
+test("three-way conflict collection hashes conflict facts without exposing source or writing Git", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-conflict-facts-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
+  await writeFile(path.join(root, "a.txt"), "base\n"); git("add", "."); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD"); git("checkout", "-qb", "feature");
+  await writeFile(path.join(root, "a.txt"), "private-branch-content\n"); git("add", "."); git("commit", "-qm", "feature");
+  const branch = git("rev-parse", "HEAD"); git("checkout", "-q", "main");
+  await writeFile(path.join(root, "a.txt"), "private-main-content\n"); git("add", "."); git("commit", "-qm", "main");
+  const main = git("rev-parse", "HEAD");
+  const result = collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base, branchPreRefreshCommit: branch, liveMainCommit: main });
+  assert.equal(result.status, "PASS", JSON.stringify(result));
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.conflicts[0].path, "a.txt");
+  assert.equal(result.conflicts[0].hunkCount, 1);
+  assert.equal(JSON.stringify(result).includes("private-"), false);
+  assert.equal(git("rev-parse", "HEAD"), main);
+  assert.equal(git("status", "--porcelain"), "");
+  const clean = collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base, branchPreRefreshCommit: base, liveMainCommit: main });
+  assert.equal(clean.status, "PASS"); assert.deepEqual(clean.conflicts, []);
 });
