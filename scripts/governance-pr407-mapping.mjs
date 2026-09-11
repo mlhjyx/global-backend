@@ -42,9 +42,14 @@ function changeKind(base, head, path) {
   return "MODIFY";
 }
 function blob(map, path) { return map.get(path)?.blobId ?? null; }
+function changedPaths(from, to) {
+  return new Set(git(["diff", "--name-only", "--no-ext-diff", "--no-textconv", from, to, "--"]).toString("utf8").split("\n").filter(Boolean));
+}
 const base = tree(baseCommit);
 const head = tree(prCommit);
 const main = tree(liveMainCommit);
+const prChangedPaths = changedPaths(baseCommit, prCommit);
+const mainChangedPaths = changedPaths(baseCommit, liveMainCommit);
 const raw = git(["diff", "--name-status", "--no-ext-diff", "--no-textconv", "-z", baseCommit, prCommit, "--"]);
 const fields = raw.toString("utf8").split("\0").filter(Boolean);
 const paths = [];
@@ -80,7 +85,12 @@ const result = {
   schemaVersion: "pr407-successor-mapping/v1",
   status: "MECHANICAL_PROVENANCE_ONLY",
   source: { author: "tugjvnh", baseCommit, prCommit, liveMainCommit, bundle: "pr407-70885cdb.bundle" },
-  counts: { total: records.length, blocked: records.length, adopt: 0, rewrite: 0, drop: 0, superseded: 0 },
+  counts: {
+    total: records.length, blocked: records.length, adopt: 0, rewrite: 0, drop: 0, superseded: 0,
+    overlapWithCurrentMain: [...prChangedPaths].filter(path => mainChangedPaths.has(path)).length,
+    prOnlyAgainstCurrentMain: [...prChangedPaths].filter(path => !mainChangedPaths.has(path)).length,
+    currentMainOnlyAgainstBase: [...mainChangedPaths].filter(path => !prChangedPaths.has(path)).length,
+  },
   semanticReview: "REQUIRED",
   paths: records,
 };

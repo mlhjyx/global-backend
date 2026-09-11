@@ -14,7 +14,10 @@
     "adopt": 0,
     "rewrite": 0,
     "drop": 0,
-    "superseded": 0
+    "superseded": 0,
+    "overlapWithCurrentMain": 100,
+    "prOnlyAgainstCurrentMain": 176,
+    "currentMainOnlyAgainstBase": 1006
   },
   "semanticReview": "REQUIRED",
   "paths": [
@@ -5461,5 +5464,5 @@
       "verificationEvidence": []
     }
   ],
-  "manifestSha256": "d6bf3e3c1dbabc3ab410d390954c6387fd3c3fefb4dffe087939ef6011b12ede"
+  "manifestSha256": "43ab6d60a09fb51d8cbdfd5a959ffff1545a76860395cd064f3cfd33bf605018"
 }
