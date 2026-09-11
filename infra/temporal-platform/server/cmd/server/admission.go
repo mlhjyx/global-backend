@@ -27,7 +27,7 @@ func ValidateConfiguration(cfg *config.Config) error {
 		return invalidConfiguration
 	}
 	for name, group := range map[string]config.GroupTLS{"frontend": cfg.Global.TLS.Frontend, "internode": cfg.Global.TLS.Internode} {
-		if group.Client.DisableHostVerification || (name == "internode" && validateServerTLS(group.Server) != nil) {
+		if group.Client.DisableHostVerification || validateServerIdentity(group.Server) != nil || (name == "internode" && validateServerTLS(group.Server) != nil) {
 			return invalidConfiguration
 		}
 		// The public frontend supports the normal JWT-only product path. A
@@ -46,14 +46,20 @@ func ValidateConfiguration(cfg *config.Config) error {
 }
 
 func validateServerTLS(server config.ServerTLS) error {
-	if !server.RequireClientAuth || !filepath.IsAbs(server.CertFile) || !filepath.IsAbs(server.KeyFile) ||
-		len(server.ClientCAFiles) == 0 || server.CertData != "" || server.KeyData != "" || len(server.ClientCAData) != 0 {
+	if !server.RequireClientAuth || validateServerIdentity(server) != nil || len(server.ClientCAFiles) == 0 || len(server.ClientCAData) != 0 {
 		return invalidConfiguration
 	}
 	for _, ca := range server.ClientCAFiles {
 		if !filepath.IsAbs(ca) {
 			return invalidConfiguration
 		}
+	}
+	return nil
+}
+
+func validateServerIdentity(server config.ServerTLS) error {
+	if !filepath.IsAbs(server.CertFile) || !filepath.IsAbs(server.KeyFile) || server.CertData != "" || server.KeyData != "" {
+		return invalidConfiguration
 	}
 	return nil
 }

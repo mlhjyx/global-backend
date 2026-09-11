@@ -62,6 +62,16 @@ func TestConfigurationAdmissionAllowsJwtOnlyFrontend(t *testing.T) {
 	}
 }
 
+func TestConfigurationAdmissionRejectsMalformedJwtOnlyFrontendIdentity(t *testing.T) {
+	cfg := secureConfiguration()
+	cfg.Global.TLS.Frontend.Server.RequireClientAuth = false
+	cfg.Global.TLS.Frontend.Server.ClientCAFiles = nil
+	cfg.Global.TLS.Frontend.Server.KeyFile = "relative.key"
+	if ValidateConfiguration(cfg) == nil {
+		t.Fatal("JWT-only frontend with relative key path accepted")
+	}
+}
+
 func TestConfigurationAdmissionChecksEnabledFrontendMTLS(t *testing.T) {
 	cfg := secureConfiguration()
 	cfg.Global.TLS.Frontend.Server.RequireClientAuth = true
