@@ -121,7 +121,7 @@ services:
       TEMPORAL_ALLOW_NO_AUTH: "false"
       TEMPORAL_SERVICES: frontend,internal-frontend,history,matching,worker
       BIND_ON_IP: 0.0.0.0
-      TEMPORAL_BROADCAST_ADDRESS: task4c-temporal
+      TEMPORAL_BROADCAST_ADDRESS: 127.0.0.1
       TEMPORAL_PLATFORM_POSTGRES_HOST: codex-task4c-platform-temporal-postgres
       TEMPORAL_PLATFORM_POSTGRES_PASSWORD: ${TEMPORAL_PLATFORM_POSTGRES_PASSWORD:?set disposable password}
       TEMPORAL_PLATFORM_JWKS_URI: https://task4c-jwks:8443/jwks.json

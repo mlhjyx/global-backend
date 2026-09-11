@@ -32,11 +32,11 @@ func ValidateTrustDomains(cfg *config.Config) error {
 	if cfg == nil {
 		return invalidTrustDomains
 	}
-	frontend, err := trustDomainCertificates(cfg.Global.TLS.Frontend)
+	frontend, err := trustDomainCertificates(cfg.Global.TLS.Frontend, true)
 	if err != nil {
 		return invalidTrustDomains
 	}
-	internode, err := trustDomainCertificates(cfg.Global.TLS.Internode)
+	internode, err := trustDomainCertificates(cfg.Global.TLS.Internode, false)
 	if err != nil {
 		return invalidTrustDomains
 	}
@@ -91,7 +91,7 @@ func ValidateTrustDomains(cfg *config.Config) error {
 	return nil
 }
 
-func trustDomainCertificates(group config.GroupTLS) ([]*x509.Certificate, error) {
+func trustDomainCertificates(group config.GroupTLS, allowEmpty bool) ([]*x509.Certificate, error) {
 	if len(group.PerHostOverrides) > maxTrustCAFiles {
 		return nil, invalidTrustDomains
 	}
@@ -102,7 +102,13 @@ func trustDomainCertificates(group config.GroupTLS) ([]*x509.Certificate, error)
 	files := make(map[string]bool)
 	var certificates []*x509.Certificate
 	for _, server := range servers {
-		if len(server.ClientCAFiles) == 0 || len(server.ClientCAFiles) > maxTrustCAFiles || len(server.ClientCAData) != 0 {
+		if len(server.ClientCAFiles) == 0 {
+			if allowEmpty && !server.RequireClientAuth && len(server.ClientCAData) == 0 {
+				continue
+			}
+			return nil, invalidTrustDomains
+		}
+		if len(server.ClientCAFiles) > maxTrustCAFiles || len(server.ClientCAData) != 0 {
 			return nil, invalidTrustDomains
 		}
 		for _, path := range server.ClientCAFiles {
@@ -124,7 +130,7 @@ func trustDomainCertificates(group config.GroupTLS) ([]*x509.Certificate, error)
 			certificates = append(certificates, parsed...)
 		}
 	}
-	if len(certificates) == 0 {
+	if len(certificates) == 0 && !allowEmpty {
 		return nil, invalidTrustDomains
 	}
 	return certificates, nil
