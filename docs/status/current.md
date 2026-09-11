@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-11T18:38:35+08:00（Asia/Shanghai）
+> 最后核验：2026-09-11T20:11:56+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -16,12 +16,14 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 
 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，不等于 active route、质量证明或真实 dispatch 授权。
 
-2026-09-11 增量核验：远端 `origin/main=b3cf80411f89b24825b01f942286d68a50f3b2ea`，
-#494 与 #495 已合入；其后续候选 `codex/temporal-native-disposable-closeout-20260911`
+2026-09-11 增量核验：远端 `origin/main=9e6b9e621805dfe0d0150162a14e23208cc9a6ca`，
+#497、#502 与 #504 已合入；#498 已重放到该主线，当前候选 head 为
+`c5ad3f58fd2f889a702a5c40739fb9f844aa4e7f`，全部必需 hosted checks 已通过，PR 保持 Draft 以等待独立审查与合入决策。
+其前序候选 `codex/temporal-native-disposable-closeout-20260911`
 的 custom native Temporal disposable 运行矩阵已通过，详细绑定见
 [Temporal native disposable closeout evidence](../evidence/temporal-platform-native-disposable-closeout-20260911.md)。
-这只关闭源码与 disposable 层，不改变 GrowthOS producer、跨仓 readback、RuntimeEvidence、
-Release Bundle、UAT 或 Pilot/GA 的独立门。
+这只更新源码候选与状态事实，不改变 GrowthOS producer、跨仓 readback、RuntimeEvidence、
+Release Bundle、UAT 或 Pilot/GA 的独立门；#479 与 #407 仍为 Draft/HOLD。
 
 ## 1. 源码与正在进行的工作
 
@@ -29,18 +31,19 @@ Release Bundle、UAT 或 Pilot/GA 的独立门。
 
 | Subject              | Exact observed state                                                                                                                                                                                                                   | 证据边界                                                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Backend source       | 根 `main=origin/main=b3cf80411f89b24825b01f942286d68a50f3b2ea`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
+| Backend source       | 根 `main=origin/main=9e6b9e621805dfe0d0150162a14e23208cc9a6ca`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
-| 主线 CI | #497 的 `b3cf8041…` hosted build/typecheck/test、contracts、Security、Governance、CodeQL 和 production advisory freshness 已通过；PR 专属 dependency delta/review 仍按事件单独核验 | 只证明该提交的托管检查；不证明运行采用 |
+| 主线 CI | #502 与 #504 的 PR 必需检查已通过；最新 main push `9e6b9e62…` 的 CI 已通过，Supply Chain Canary 仍因 `CRITICAL_ADVISORY_HOLD` 失败（baseline 过期/锁文件不匹配、22 条当前 advisory，含新的 critical 与 overdue remediation） | 只证明对应提交的托管检查；main 当前不能宣称全绿，也不证明运行采用 |
 | Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它；最新 API/Worker readback 的 `/api/v1/health/ready` 为 503，但 browser component=OK，migration/database/storage/Redis/Gateway/auth JWKS 均 OK | 完整五文件源审查 C0/H0/M0；本次运行回读不等于用户旅程成功 |
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
 | GrowthOS source      | `/global/frontend/growthos-source` clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
-| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497 已合入；当前远端主线为 `b3cf80411f89b24825b01f942286d68a50f3b2ea`。#497 收口 native Temporal disposable reader proof | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把 disposable 结果当成生产运行证明 |
-| 运行时采用 | API/Worker 当前均使用 `ghcr.io/mlhjyx/global-backend@sha256:4f4a10ac0d07f56c4710b808980032a3d6a380e430fdc5c03eaaef587a2ac36d`，build SHA `b3cf80411f89b24825b01f942286d68a50f3b2ea`，artifact `sha256:3809bf594ba86243855becc9e8440beee7d8809b6a74a68e6d1cb3cc604c8ab8`，migration `20260908130000_platform_egress_budget_policy_v2`；两者 exact image/artifact/migration 一致 | 这是当前运行身份 readback，不代表 readiness 或用户旅程成功 |
-| 文档候选 | #499 旧快照已关闭并保留 provenance；本 successor 只写入上述 exact runtime/readiness readback，不能代替 RuntimeEvidence、Release Bundle 或产品验收 | 只记录当前事实，不改变运行或发布授权 |
+| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497、#502 已合入；当前远端主线为 `9e6b9e621805dfe0d0150162a14e23208cc9a6ca`。#497 收口 native Temporal disposable reader proof，#502 统一 Worker 启动与心跳 admission | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把 disposable 结果当成生产运行证明 |
+| 运行时采用 | API/Worker 当前均使用 `ghcr.io/mlhjyx/global-backend@sha256:4f4a10ac0d07f56c4710b808980032a3d6a380e430fdc5c03eaaef587a2ac36d`，build SHA `b3cf80411f89b24825b01f942286d68a50f3b2ea`，artifact `sha256:3809bf594ba86243855becc9e8440beee7d8809b6a74a68e6d1cb3cc604c8ab8`，migration `20260908130000_platform_egress_budget_policy_v2`；该运行身份早于 #502/#504，尚未证明新主线源码已在运行时采用 | 这是当前运行身份 readback，不代表 readiness 或用户旅程成功 |
+| Wikidata country successor | #498 已从旧 `52ab68b6…` 重放到 `c5ad3f58fd2f889a702a5c40739fb9f844aa4e7f`；重放后的 55/55 focused tests 与完整 hosted 矩阵均已通过（CI run `34595659423`，23m51s），独立 review/merge 未完成 | 只处理当前 query 变量绑定；不关闭 #407 综合候选或 Program B 接纳 |
+| 文档候选 | #504 已合入并保留 #503/#499 provenance；本页再次记录 #502 合入、#498 重放和 main Supply Chain Canary 失败，不代替 RuntimeEvidence、Release Bundle 或产品验收 | 只记录当前事实，不改变运行或发布授权 |
 
 ### Program 所有权与产品缺口
 
@@ -70,7 +73,7 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 
 ## 3. Development runtime 观察
 
-本次受控切换已将 API 和 Worker 都切到同一 exact OCI：`ghcr.io/mlhjyx/global-backend@sha256:4f4a10ac0d07f56c4710b808980032a3d6a380e430fdc5c03eaaef587a2ac36d`，绑定 build SHA `b3cf80411f89b24825b01f942286d68a50f3b2ea`；两者容器 image ID、artifact identity 与 migration revision 均一致。此前缺失的迁移已应用，数据库 readback 为 135 条完成、0 条未完成且未回滚（两条历史记录为明确 rolled-back）；当前未执行真实模型调用。
+本次受控切换已将 API 和 Worker 都切到同一 exact OCI：`ghcr.io/mlhjyx/global-backend@sha256:4f4a10ac0d07f56c4710b808980032a3d6a380e430fdc5c03eaaef587a2ac36d`，绑定 build SHA `b3cf80411f89b24825b01f942286d68a50f3b2ea`；两者容器 image ID、artifact identity 与 migration revision 均一致。此前缺失的迁移已应用，数据库 readback 为 135 条完成、0 条未完成且未回滚（两条历史记录为明确 rolled-back）。该运行身份早于当前 main 的 #502/#504，尚未证明这些主线提交已在运行时采用；当前未执行真实模型调用。
 
 | 观察              | 当前可确认的事实                                                                                                         | 不得外推                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -91,7 +94,7 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 - 本次治理只读验证报告 RuntimeEvidence `6 total / 0 current / 6 historical`，Release Bundles=3。前两条 Site 证据到期点为 `2026-09-05T03:49:25.000Z`；到期不删除历史，但不能用于 G5/G7 晋级。
 - 3 个 Release Bundles 仍是 development `CANDIDATE` / `EXTERNAL_UNVERIFIED`，不是可信发布结果。具体字段以机器文件及 verifier 为准；路径存在或结构通过不是 runtime proof。
 - PR #461 的 privilege-hardening successor 已应用并 read back：`fence_platform_schedule_v1(text,text)` 对 `PUBLIC`、`app_user`、`runtime_api`、`runtime_worker`、`runtime_outbox_relay` 为无 EXECUTE，仅 dedicated `execution_budget_platform_writer` 可执行；这不等于平台 Temporal proof 或跨系统撤销链已就绪。
-- #448 修复了新增的依赖告警，不代表零风险。2026-09-05 本地 production audit 仍有 10 条既有告警（3 High）；本次没有重新做在线依赖审计，不将旧数量宣称为实时统计。
+- #448 修复了新增的依赖告警，不代表零风险。最新 main push 的 Supply Chain Canary 于 `2026-09-11T11:32:55Z` 输出 `CRITICAL_ADVISORY_HOLD`，记录 22 条当前 advisory，并包含 baseline 过期、锁文件摘要不匹配、新 critical advisory 与多项 overdue remediation；该门仍未闭环。
 
 ## 5. 下一顺序与授权边界
 
