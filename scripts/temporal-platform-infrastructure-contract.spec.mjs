@@ -262,13 +262,19 @@ test("managed compose uses independent persistence and no development server pat
 });
 
 test("disposable server can run the exact native wrapper without changing the baseline image", async () => {
-  const [compose, entrypoint, serverDockerfile] = await Promise.all([
+  const [compose, entrypoint, serverDockerfile, runner] = await Promise.all([
     repositoryFile("infra/temporal-platform/test-support/compose.disposable.yml"),
     repositoryFile("infra/temporal-platform/test-support/native-entrypoint.sh"),
     repositoryFile("infra/temporal-platform/server/Dockerfile"),
+    repositoryFile("infra/temporal-platform/test-support/verify-disposable.sh"),
   ]);
   assert.match(compose, /task4c-native-entrypoint/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY/);
+  assert.match(
+    compose,
+    /source: \$\{TEMPORAL_PLATFORM_TEST_CONFIG_PATH:-\.\.\/config\/temporal\.yaml\}/,
+  );
+  assert.match(runner, /native Temporal server binary must be an absolute path/);
   assert.match(entrypoint, /\/run\/native-server\/temporal-server start/);
   assert.match(entrypoint, /\/etc\/temporal\/entrypoint\.sh/);
   assert.match(serverDockerfile, /temporalio\/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da/);
