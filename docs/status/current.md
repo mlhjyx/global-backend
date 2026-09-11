@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-11T19:57:42+08:00（Asia/Shanghai）
+> 最后核验：2026-09-11T20:11:56+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -18,7 +18,7 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 
 2026-09-11 增量核验：远端 `origin/main=9e6b9e621805dfe0d0150162a14e23208cc9a6ca`，
 #497、#502 与 #504 已合入；#498 已重放到该主线，当前候选 head 为
-`c5ad3f58fd2f889a702a5c40739fb9f844aa4e7f`，托管检查正在运行。
+`c5ad3f58fd2f889a702a5c40739fb9f844aa4e7f`，全部必需 hosted checks 已通过，PR 保持 Draft 以等待独立审查与合入决策。
 其前序候选 `codex/temporal-native-disposable-closeout-20260911`
 的 custom native Temporal disposable 运行矩阵已通过，详细绑定见
 [Temporal native disposable closeout evidence](../evidence/temporal-platform-native-disposable-closeout-20260911.md)。
@@ -33,7 +33,7 @@ Release Bundle、UAT 或 Pilot/GA 的独立门；#479 与 #407 仍为 Draft/HOLD
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Backend source       | 根 `main=origin/main=9e6b9e621805dfe0d0150162a14e23208cc9a6ca`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
-| 主线 CI | #502 与 #504 的 PR 必需检查已通过；最新 main push `9e6b9e62…` 的 CI 仍在运行，Supply Chain Canary 已因 `CRITICAL_ADVISORY_HOLD` 失败（baseline 过期/锁文件不匹配、22 条当前 advisory，含新的 critical 与 overdue remediation） | 只证明对应提交的托管检查；main 当前不能宣称全绿，也不证明运行采用 |
+| 主线 CI | #502 与 #504 的 PR 必需检查已通过；最新 main push `9e6b9e62…` 的 CI 已通过，Supply Chain Canary 仍因 `CRITICAL_ADVISORY_HOLD` 失败（baseline 过期/锁文件不匹配、22 条当前 advisory，含新的 critical 与 overdue remediation） | 只证明对应提交的托管检查；main 当前不能宣称全绿，也不证明运行采用 |
 | Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它；最新 API/Worker readback 的 `/api/v1/health/ready` 为 503，但 browser component=OK，migration/database/storage/Redis/Gateway/auth JWKS 均 OK | 完整五文件源审查 C0/H0/M0；本次运行回读不等于用户旅程成功 |
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
@@ -42,7 +42,7 @@ Release Bundle、UAT 或 Pilot/GA 的独立门；#479 与 #407 仍为 Draft/HOLD
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
 | 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497、#502 已合入；当前远端主线为 `9e6b9e621805dfe0d0150162a14e23208cc9a6ca`。#497 收口 native Temporal disposable reader proof，#502 统一 Worker 启动与心跳 admission | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把 disposable 结果当成生产运行证明 |
 | 运行时采用 | API/Worker 当前均使用 `ghcr.io/mlhjyx/global-backend@sha256:4f4a10ac0d07f56c4710b808980032a3d6a380e430fdc5c03eaaef587a2ac36d`，build SHA `b3cf80411f89b24825b01f942286d68a50f3b2ea`，artifact `sha256:3809bf594ba86243855becc9e8440beee7d8809b6a74a68e6d1cb3cc604c8ab8`，migration `20260908130000_platform_egress_budget_policy_v2`；该运行身份早于 #502/#504，尚未证明新主线源码已在运行时采用 | 这是当前运行身份 readback，不代表 readiness 或用户旅程成功 |
-| Wikidata country successor | #498 已从旧 `52ab68b6…` 重放到 `c5ad3f58fd2f889a702a5c40739fb9f844aa4e7f`；原 55/55 focused tests 与完整 hosted 矩阵对应旧 head，重放后的新 hosted 矩阵仍在运行，独立 review/merge 未完成 | 只处理当前 query 变量绑定；不关闭 #407 综合候选或 Program B 接纳 |
+| Wikidata country successor | #498 已从旧 `52ab68b6…` 重放到 `c5ad3f58fd2f889a702a5c40739fb9f844aa4e7f`；重放后的 55/55 focused tests 与完整 hosted 矩阵均已通过（CI run `34595659423`，23m51s），独立 review/merge 未完成 | 只处理当前 query 变量绑定；不关闭 #407 综合候选或 Program B 接纳 |
 | 文档候选 | #504 已合入并保留 #503/#499 provenance；本页再次记录 #502 合入、#498 重放和 main Supply Chain Canary 失败，不代替 RuntimeEvidence、Release Bundle 或产品验收 | 只记录当前事实，不改变运行或发布授权 |
 
 ### Program 所有权与产品缺口
