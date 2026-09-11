@@ -129,7 +129,7 @@ services:
       SSL_CERT_FILE: /run/secrets/temporal-platform/jwks-ca-bundle.crt
     volumes:
       - type: bind
-        source: ../config/temporal.yaml
+        source: ${TEMPORAL_PLATFORM_TEST_CONFIG_PATH:-../config/temporal.yaml}
         target: /etc/temporal-platform/temporal.yaml
         read_only: true
         bind:

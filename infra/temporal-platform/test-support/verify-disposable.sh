@@ -92,6 +92,27 @@ export TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY=${JWKS_TLS_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY=${CLIENT_SECRET_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY=${NODE_OVERLAY_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY=${NATIVE_SERVER_DIRECTORY}
+if [[ -n ${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY:-} ]]; then
+  case "${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY}" in
+    /*) ;;
+    *) echo "native Temporal server binary must be an absolute path" >&2; exit 1 ;;
+  esac
+  if [[ ! -f ${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY} || -L ${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY} || ! -x ${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY} ]]; then
+    echo "native Temporal server binary is unavailable or not executable" >&2
+    exit 1
+  fi
+  install -m 0755 "${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY}" "${NATIVE_SERVER_DIRECTORY}/temporal-server"
+fi
+if [[ -n ${TEMPORAL_PLATFORM_TEST_CONFIG_PATH:-} ]]; then
+  case "${TEMPORAL_PLATFORM_TEST_CONFIG_PATH}" in
+    /*) ;;
+    *) echo "Temporal disposable config path must be absolute" >&2; exit 1 ;;
+  esac
+  if [[ ! -f ${TEMPORAL_PLATFORM_TEST_CONFIG_PATH} || -L ${TEMPORAL_PLATFORM_TEST_CONFIG_PATH} ]]; then
+    echo "Temporal disposable config path is unavailable" >&2
+    exit 1
+  fi
+fi
 export TEMPORAL_PLATFORM_TEST_REPOSITORY_ROOT=${REPOSITORY_ROOT}
 export TEMPORAL_PLATFORM_TEST_UID=${TEST_UID}
 export TEMPORAL_PLATFORM_TEST_GID=${TEST_GID}
