@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-11T15:30:00+08:00（Asia/Shanghai）
+> 最后核验：2026-09-11T17:30:09+08:00（Asia/Shanghai）
 
 ## 当前结论
 
@@ -16,12 +16,12 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 
 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，不等于 active route、质量证明或真实 dispatch 授权。
 
-2026-09-11 增量核验：远端 `origin/main=89f212b6d4666627d19032c7ef5c297d2f019533`，
-#494 与 #495 已合入；其后续候选 `codex/temporal-native-disposable-closeout-20260911`
-的 custom native Temporal disposable 运行矩阵已通过，详细绑定见
+2026-09-11 增量核验：根 `main=origin/main=b3cf80411f89b24825b01f942286d68a50f3b2ea`，
+#497 已合入；#498 的 Wikidata country-binding 小候选 hosted CI 也已通过。#497 的
+custom native Temporal disposable 运行矩阵详细绑定见
 [Temporal native disposable closeout evidence](../evidence/temporal-platform-native-disposable-closeout-20260911.md)。
-这只关闭源码与 disposable 层，不改变 GrowthOS producer、跨仓 readback、RuntimeEvidence、
-Release Bundle、UAT 或 Pilot/GA 的独立门。
+这只关闭当前源码与 disposable 层，不改变 GrowthOS producer、跨仓 readback、
+RuntimeEvidence、Release Bundle、UAT 或 Pilot/GA 的独立门。
 
 ## 1. 源码与正在进行的工作
 
@@ -29,7 +29,7 @@ Release Bundle、UAT 或 Pilot/GA 的独立门。
 
 | Subject              | Exact observed state                                                                                                                                                                                                                   | 证据边界                                                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Backend source       | 根 `main=origin/main=89f212b6d4666627d19032c7ef5c297d2f019533`，受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
+| Backend source       | 根 `main=origin/main=b3cf80411f89b24825b01f942286d68a50f3b2ea`，#497 合入后的受控 fast-forward 已完成；tracked clean，保留未跟踪 `.playwright-cli/`                                                                                                                         | repository source identity，不是 runtime identity                                                            |
 | 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
 | 主线 CI | `17b637d7…` 的 build/typecheck/test、contracts、Security、Governance、CodeQL 和 production advisory freshness 均 SUCCESS；PR 专属 dependency delta/review 在 main push 上 SKIPPED | 只证明该提交的托管检查；不证明运行采用 |
 | Browser readiness    | `checkBrowserReadiness` 默认调用已合入的生命周期 singleton；API contributor、Worker 启动和周期检查共享它；最新 API/Worker readback 的 `/api/v1/health/ready` 仍为 503，browser component= BROWSER_RUNTIME_UNAVAILABLE，migration revision mismatch 与 workspace budget authority migration unavailable；此前 browser=ok 观察已被当前 readback 取代 | 完整五文件源审查 C0/H0/M0；本次运行回读显示仍未恢复，不外推到其他环境 |
@@ -38,8 +38,8 @@ Release Bundle、UAT 或 Pilot/GA 的独立门。
 | GrowthOS source      | `/global/frontend/growthos-source` clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；archive-and-patch authority，不是直接运行 pnpm 的源码目录                                                                                         | 旧 `79e53f39…` 的 C0/H5/M3 仅对应历史审查，不能作为该新版本的通过或失败结论；当前版本接纳需要其 owner 的证据 |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
-| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495 已合入；当前远端主线为 `89f212b6d4666627d19032c7ef5c297d2f019533`。#493 提供 native Temporal reader/physical wire fencing，#494 提供 disposable binary/config selector，#495 对齐 JWT-only frontend admission；后续候选已通过 custom native disposable RPC/mTLS 矩阵 | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把本地 disposable 结果当成生产运行证明 |
-| 文档候选 | 本次隔离快照修正 #477 合入后的 live runtime readback：源码已含 readiness probe，但旧 runtime 未应用 20260907120000 migration；workspace authority、migration revision、browser、Worker 与 Temporal proof 仍阻塞；待独立文档 PR/CI 回读 | 只记录当前事实，不改变运行或发布授权 |
+| 平台基础设施 | #455、#457、#459、#460、#461、#462、#463、#464、#465、#468、#469、#472、#474、#475、#476、#477、#493、#494、#495、#497 已合入；当前远端主线为 `b3cf80411f89b24825b01f942286d68a50f3b2ea`。#493 提供 native Temporal reader/physical wire fencing，#494 提供 disposable binary/config selector，#495 对齐 JWT-only frontend admission，#497 完成 custom native disposable closeout | 源码接纳与平台权限、精确制品、GrowthOS/Builder/New API 的后续运行采用分开；不把本地 disposable 结果当成生产运行证明 |
+| 文档候选 | #497 合入后的当前源码已含 native Temporal disposable closeout；development runtime 仍未取得 fresh RuntimeEvidence，workspace authority、migration revision、browser、Worker 与后续跨仓 producer readback 仍阻塞 | 只记录当前事实，不改变运行或发布授权 |
 
 ### Program 所有权与产品缺口
 

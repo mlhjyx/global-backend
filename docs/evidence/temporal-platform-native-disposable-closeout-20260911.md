@@ -89,14 +89,17 @@ infra/temporal-platform/test-support/verify-disposable.sh
 
 - 源码、Go/API/contracts/governance/docs/ContractGraph 与 disposable native
   运行门：`PASS`，均绑定上述候选内容。
-- hosted CI：`PASS`；#497 的 CI run `34576571019` 在重试后完整通过，包含 native
-  Go、API/OCI、worker 与 renderer steps；#494/#495 已在本轮分别合入。
-  独立 reviewer readback 与合入仍保持单独 `HOLD`，不能由本地或 hosted CI 自动代签。
+- hosted CI：`PASS`；#497 最终 head 的 CI run `34579120278` 完整通过，包含 native
+  Go、API/OCI、worker 与 renderer steps，并已合入为
+  `b3cf80411f89b24825b01f942286d68a50f3b2ea`。#494/#495 已在本轮分别合入。
+  #498 仍是独立 Draft；它的 hosted CI 已通过，独立 reviewer readback 与合入仍保持
+  单独 `HOLD`，不能由本地或 hosted CI 自动代签。
 - GrowthOS producer、service JWT、capability JWKS、真实跨仓 readback：
   `EXTERNAL_OWNED / HOLD`，#479 保持 Draft/HOLD。
-- #407 历史综合候选仍保留；Wikidata country binding 小候选尚未实施。
+- #407 历史综合候选仍保留；Wikidata country binding 小候选已由 #498 实施并通过
+  hosted CI，但独立 reviewer 和合入仍未完成。
 - root `main` sync is `APPLIED`: local and `origin/main` both resolve to
-  `89f212b6d4666627d19032c7ef5c297d2f019533`; the sync receipt reported
+  `b3cf80411f89b24825b01f942286d68a50f3b2ea`; the sync receipt reported
   `statusPreserved=true` with an unchanged status digest. The previously cited
   addendum is now a tracked file on both sides. Untracked `.playwright-cli/`
   artifacts were retained.
