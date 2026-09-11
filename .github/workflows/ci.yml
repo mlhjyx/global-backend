@@ -145,6 +145,29 @@ jobs:
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
+      - name: Native Temporal reader server（verified modules · offline race · build）
+        shell: bash
+        run: |
+          set -euo pipefail
+          temporal_cache=$(mktemp -d "${RUNNER_TEMP}/temporal-server-go.XXXXXX")
+          temporal_go_image=docker.io/library/golang@sha256:ab3d6955bbc813a0f3fdf220c1d817dd89c0b3f283777db8ece4a32fe7858edd
+          temporal_go=(--rm --cpus=2 --memory=4g
+            --mount "type=bind,src=${PWD}/infra/temporal-platform/server,dst=/src,readonly"
+            --mount "type=bind,src=${temporal_cache},dst=/cache"
+            -w /src -e GOPATH=/cache -e GOCACHE=/cache/build
+            -e GOTOOLCHAIN=go1.26.4 -e GOMAXPROCS=2)
+          timeout 30m docker run "${temporal_go[@]}" -e GODEBUG=http2client=0 -e GOPROXY=https://proxy.golang.org -e GOSUMDB=sum.golang.org "$temporal_go_image" go mod download
+          timeout 30m docker run "${temporal_go[@]}" --network=none -e GOPROXY=off "$temporal_go_image" sh -euc '
+            go mod verify
+            grep -F "google.golang.org/grpc v1.83.2" go.mod
+            grep -F "github.com/aws/aws-sdk-go-v2/service/lambda v1.88.5" go.mod
+            go test -mod=readonly -p 2 -count=1 -race -coverprofile=/cache/server.cover ./...
+            go vet -mod=readonly -p 2 ./...
+            CGO_ENABLED=0 go build -mod=readonly -p 2 -trimpath -buildvcs=false -o /cache/temporal-server ./cmd/server
+            go tool cover -func=/cache/server.cover > /cache/coverage.txt
+          '
+          awk '$1 == "total:" { seen=1; if ($3+0 < 80) exit 1 } END { if (!seen) exit 1 }' "$temporal_cache/coverage.txt"
+
       - name: Runtime lease principal PostgreSQL permissions
         shell: bash
         env:

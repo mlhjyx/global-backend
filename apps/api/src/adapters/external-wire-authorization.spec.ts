@@ -8,6 +8,37 @@ afterEach(() => {
 });
 
 describe('adapter internal physical-wire authorization', () => {
+  it('completes one Algolia page inside its around-wrapper before a second page is refused', async () => {
+    const events: string[] = [];
+    const page = new Response(JSON.stringify({ hits: [{ objectID: 'one', companyName: 'One' }], nbPages: 2 }), { status: 200 });
+    const fetchMock = vi.fn(async () => { events.push('fetch'); return page.clone(); });
+    vi.stubGlobal('fetch', fetchMock);
+    let wrappers = 0;
+    const around = async <T>(execute: () => Promise<T>): Promise<T> => {
+      events.push(`enter-${++wrappers}`);
+      if (wrappers === 2) throw new Error('SECOND_WIRE_DENIED');
+      const result = await execute();
+      events.push('completed');
+      return result;
+    };
+    await expect(queryAlgoliaExhibitors({ appId: 'APP', apiKey: 'public-key', indexName: 'exhibitors', eventEditionId: 'edition' },
+      1500, async () => { events.push('authorize'); }, async () => { events.push('counter'); }, around))
+      .rejects.toThrow('SECOND_WIRE_DENIED');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(events).toEqual(['authorize', 'counter', 'enter-1', 'fetch', 'completed', 'authorize', 'counter', 'enter-2']);
+  });
+  it('does not acknowledge an Algolia wire before bounded body consumption succeeds', async () => {
+    const failure = new Error('BODY_FAILED');
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream({ pull(controller) { controller.error(failure); } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const complete = vi.fn();
+    const around = vi.fn(async <T>(execute: () => Promise<T>): Promise<T> => {
+      const result = await execute(); complete(); return result;
+    });
+    await expect(queryAlgoliaExhibitors({ appId: 'APP', apiKey: 'public-key', indexName: 'exhibitors', eventEditionId: 'edition' },
+      1000, undefined, undefined, around)).rejects.toThrow('BODY_FAILED');
+    expect(around).toHaveBeenCalledOnce(); expect(complete).not.toHaveBeenCalled();
+  });
   it('rechecks before an OSM fallback endpoint after the first endpoint fails', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

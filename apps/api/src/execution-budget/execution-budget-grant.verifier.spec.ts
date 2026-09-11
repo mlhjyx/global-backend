@@ -227,6 +227,14 @@ function remoteVerifier(
 }
 
 describe('ExecutionBudgetGrantVerifier', () => {
+  it('matches a configured issuer exactly without adding or removing a trailing slash', async () => {
+    const exactIssuer = 'https://control-plane.example.test';
+    const configured = verifier({ ...TEST_ENV, EXECUTION_BUDGET_GRANT_ISSUER: exactIssuer });
+    await expect(configured.verifyPlatform(await platformToken({}, { issuer: exactIssuer })))
+      .resolves.toMatchObject({ issuer: exactIssuer });
+    await expect(configured.verifyPlatform(await platformToken({}, { issuer: exactIssuer + '/' })))
+      .rejects.toThrow('EXECUTION_BUDGET_GRANT_INVALID');
+  });
   it('verifies all four platform invocation claims as signed immutable facts', async () => {
     await expect(
       verifier().verifyPlatform(await platformToken()),

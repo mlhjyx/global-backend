@@ -1,3 +1,5 @@
+export * from './platform-authority/revocation';
+
 export const PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND =
   'PlatformExecutionBudgetAuthorityUpserted/v1' as const;
 

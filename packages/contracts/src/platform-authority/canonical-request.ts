@@ -522,6 +522,17 @@ export const PLATFORM_EXECUTION_TECHNICAL_QUOTE_REQUEST_SCHEMA_V1 =
     { name: "schedule_request_sha256", kind: "sha256" },
   ]);
 
+/** Worker request binds the run and expected policy, never a caller-supplied amount. */
+export const PLATFORM_AUTHORITY_ISSUE_REQUEST_SCHEMA_V1 =
+  defineCodeOwnedSchema("platform-authority-issue-request/v1", [
+    ...PLATFORM_EXECUTION_TECHNICAL_QUOTE_REQUEST_SCHEMA_V1.fields.filter(
+      (field) => field.name !== "schema_version",
+    ),
+    { name: "schema_version", kind: "exact", value: "platform-authority-issue-request/v1" },
+    { name: "policy_artifact_sha256", kind: "sha256" },
+    { name: "technical_policy_revision", kind: "sha256" },
+  ]);
+
 /**
  * Product quote hash preimage. `quote_sha256` is deliberately absent so the
  * digest is non-self-referential and independently reproducible in GrowthOS.

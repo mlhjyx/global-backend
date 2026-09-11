@@ -67,13 +67,15 @@ JWKS_DIRECTORY=${FIXTURE_DIRECTORY}/jwks
 JWKS_TLS_DIRECTORY=${FIXTURE_DIRECTORY}/jwks-tls
 CLIENT_SECRET_DIRECTORY=${FIXTURE_DIRECTORY}/client
 NODE_OVERLAY_DIRECTORY=${FIXTURE_DIRECTORY}/node-overlay
+NATIVE_SERVER_DIRECTORY=${FIXTURE_DIRECTORY}/native-server
 mkdir -m 0700 \
   "${AUTHORITY_DIRECTORY}" \
   "${SERVER_SECRET_DIRECTORY}" \
   "${JWKS_DIRECTORY}" \
   "${JWKS_TLS_DIRECTORY}" \
   "${CLIENT_SECRET_DIRECTORY}" \
-  "${NODE_OVERLAY_DIRECTORY}"
+  "${NODE_OVERLAY_DIRECTORY}" \
+  "${NATIVE_SERVER_DIRECTORY}"
 
 if [[ $(id -u) -eq 0 ]]; then
   TEST_UID=1000
@@ -89,6 +91,7 @@ export TEMPORAL_PLATFORM_TEST_JWKS_DIRECTORY=${JWKS_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY=${JWKS_TLS_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY=${CLIENT_SECRET_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY=${NODE_OVERLAY_DIRECTORY}
+export TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY=${NATIVE_SERVER_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_REPOSITORY_ROOT=${REPOSITORY_ROOT}
 export TEMPORAL_PLATFORM_TEST_UID=${TEST_UID}
 export TEMPORAL_PLATFORM_TEST_GID=${TEST_GID}
@@ -274,13 +277,14 @@ if find "${CLIENT_SECRET_DIRECTORY}" -maxdepth 1 -type f \
   echo "ordinary client fixture contains an internode client credential" >&2
   exit 1
 fi
+TEMPORAL_SDK_VERSION=1.23.0
 for package_name in client common proto; do
-  package_source=${REPOSITORY_ROOT}/node_modules/.pnpm/@temporalio+${package_name}@1.20.3/node_modules/@temporalio/${package_name}
+  package_source=${REPOSITORY_ROOT}/node_modules/.pnpm/@temporalio+${package_name}@${TEMPORAL_SDK_VERSION}/node_modules/@temporalio/${package_name}
   if [[ ! -d ${package_source} || -L ${package_source} ]] ||
     ! jq -e --arg name "@temporalio/${package_name}" \
-      '.name == $name and .version == "1.20.3"' \
+      '.name == $name and .version == $version' --arg version "${TEMPORAL_SDK_VERSION}" \
       "${package_source}/package.json" >/dev/null; then
-    echo "Temporal SDK package does not match the frozen 1.20.3 install" >&2
+    echo "Temporal SDK package does not match the frozen ${TEMPORAL_SDK_VERSION} install" >&2
     exit 1
   fi
   mkdir -m 0700 "${NODE_OVERLAY_DIRECTORY}/${package_name}"

@@ -114,6 +114,7 @@ services:
     container_name: codex-task4c-platform-temporal-${TEMPORAL_PLATFORM_TEST_RUN_ID:?set test run id}-server
     labels: *task4c-disposable-labels
     hostname: task4c-temporal
+    entrypoint: ["/usr/local/bin/task4c-native-entrypoint"]
     user: "${TEMPORAL_PLATFORM_TEST_UID:?set test uid}:${TEMPORAL_PLATFORM_TEST_GID:?set test gid}"
     environment:
       TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal-platform/temporal.yaml
@@ -142,6 +143,18 @@ services:
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_SERVER_SECRET_DIRECTORY:?set server fixture directory}
         target: /run/secrets/temporal-platform
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY:?set native server directory}
+        target: /run/native-server
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./native-entrypoint.sh
+        target: /usr/local/bin/task4c-native-entrypoint
         read_only: true
         bind:
           create_host_path: false
@@ -207,19 +220,19 @@ services:
           create_host_path: false
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/client
-        target: /repo/node_modules/.pnpm/@temporalio+client@1.20.3/node_modules/@temporalio/client
+        target: /repo/node_modules/.pnpm/@temporalio+client@1.23.0/node_modules/@temporalio/client
         read_only: true
         bind:
           create_host_path: false
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/common
-        target: /repo/node_modules/.pnpm/@temporalio+common@1.20.3/node_modules/@temporalio/common
+        target: /repo/node_modules/.pnpm/@temporalio+common@1.23.0/node_modules/@temporalio/common
         read_only: true
         bind:
           create_host_path: false
       - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/proto
-        target: /repo/node_modules/.pnpm/@temporalio+proto@1.20.3/node_modules/@temporalio/proto
+        target: /repo/node_modules/.pnpm/@temporalio+proto@1.23.0/node_modules/@temporalio/proto
         read_only: true
         bind:
           create_host_path: false

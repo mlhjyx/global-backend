@@ -1,3 +1,4 @@
+import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ModelGateway } from "./model-gateway";
 import { ModelRouter } from "./model-router";
@@ -431,6 +432,7 @@ export class RouterModelGateway extends ModelGateway {
     ctx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
+    assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
     const chain = this.router.route(op, input.task);
     if (chain.length === 0)
@@ -476,6 +478,7 @@ export class RouterModelGateway extends ModelGateway {
         operationKey,
         estimatedMicrousd: centsToMicrousd(reserveCents),
       });
+      if (ctx.platformEgress) assertPlatformEgressReservation(reservation, ctx.workspaceId, accountKey);
       if (reservation.replay) {
         const replay =
           reservation.replayResult?.resultStrategy === "typed_projection"
@@ -530,7 +533,7 @@ export class RouterModelGateway extends ModelGateway {
       if (ctx.authorizeExternalAction) {
         await this.assertExternalActionAuthorized(ctx);
       }
-      const operationKey = paidOperationKey([
+      const fenceOperationKey = paidOperationKey([
         ctx.runId ?? ctx.workspaceId,
         "platform-egress",
         op,
@@ -540,7 +543,10 @@ export class RouterModelGateway extends ModelGateway {
       ]);
       result = ctx.platformEgress
         ? await ctx.platformEgress.authorizeAndDispatch(
-            operationKey,
+            createPlatformEgressOperation({ operationKey: fenceOperationKey, budgetOperationKey: operationKey,
+              reservation, workspaceId: ctx.workspaceId, accountKey,
+              execution: { kind: "model", modelOp: op, taskId: input.task, providerId: provider.id,
+                ...(input.model !== undefined ? { requestedModel: input.model } : {}) } }),
             () => call(provider, ctx),
           )
         : await call(provider, ctx);

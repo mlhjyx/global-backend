@@ -92,6 +92,12 @@ export type ExecutionBudgetPlatformEgressFenceCapability =
   | Readonly<{ status: 'writer_unavailable' }>
   | Readonly<{ status: 'unavailable' }>;
 
+export interface ExecutionBudgetPlatformPolicyExpectation {
+  readonly policyArtifactSha256: string;
+  readonly executionEnvelopeSha256: string;
+  readonly requiredCapMicrousd: bigint;
+}
+
 type PlatformWriterPrincipal = Readonly<{
   sessionUser: string;
   currentUser: string;
@@ -637,16 +643,22 @@ export class ExecutionBudgetAuthorityRepository {
 
   async inspectPlatformEgressFenceCapability(
     scheduleId: string,
+    expectedPolicy: ExecutionBudgetPlatformPolicyExpectation,
   ): Promise<ExecutionBudgetPlatformEgressFenceCapability> {
     if (!this.platformWriter) {
       return Object.freeze({ status: 'writer_unavailable' });
     }
     if (
       typeof scheduleId !== 'string' ||
-      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/.test(scheduleId)
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/.test(scheduleId) ||
+      !expectedPolicy || !/^[0-9a-f]{64}$/.test(expectedPolicy.policyArtifactSha256) ||
+      !/^[0-9a-f]{64}$/.test(expectedPolicy.executionEnvelopeSha256) ||
+      typeof expectedPolicy.requiredCapMicrousd !== 'bigint' || expectedPolicy.requiredCapMicrousd <= 0n ||
+      expectedPolicy.requiredCapMicrousd > 9_223_372_036_854_775_807n
     ) {
       return Object.freeze({ status: 'unavailable' });
     }
+    const expected = Object.freeze({ ...expectedPolicy });
     try {
       return await this.platformWriter.$transaction(
         async (transaction) => {
@@ -660,15 +672,27 @@ export class ExecutionBudgetAuthorityRepository {
               state: string;
               generation: bigint;
               can_fence: boolean;
+              can_authorize: boolean;
+              can_claim: boolean;
+              policy_artifact_sha256: string | null;
+              execution_envelope_sha256: string | null;
+              required_cap_microusd: bigint | null;
             }>
-          >(Prisma.sql`SELECT * FROM inspect_platform_egress_fence_v1(${scheduleId}::text)`);
+          >(Prisma.sql`SELECT policy.*,
+            has_function_privilege(session_user, 'public.fence_platform_schedule_v1(text,text)', 'EXECUTE') AS can_fence,
+            has_function_privilege(session_user, 'public.authorize_platform_egress_v2(uuid,text,text,text,text,text,text,uuid,text,bigint,bigint,bigint,text,text)', 'EXECUTE') AS can_authorize,
+            has_function_privilege(session_user, 'public.claim_platform_egress_send_v2(uuid,uuid,text,text,text,text,text,text,uuid,text,bigint,bigint,bigint,text,text)', 'EXECUTE') AS can_claim
+            FROM public.inspect_platform_egress_policy_v2(${scheduleId}::text) AS policy`);
           const row = rows[0];
           return rows.length === 1 &&
             row?.schedule_id === scheduleId &&
             row.state === 'ACTIVE' &&
             typeof row.generation === 'bigint' &&
-            row.generation >= 0n &&
-            row.can_fence === true
+            row.generation > 0n &&
+            row.can_fence === true && row.can_authorize === true && row.can_claim === true &&
+            row.policy_artifact_sha256 === expected.policyArtifactSha256 &&
+            row.execution_envelope_sha256 === expected.executionEnvelopeSha256 &&
+            row.required_cap_microusd === expected.requiredCapMicrousd
             ? Object.freeze({ status: 'available' as const })
             : Object.freeze({ status: 'unavailable' as const });
         },

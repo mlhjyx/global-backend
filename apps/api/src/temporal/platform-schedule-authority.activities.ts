@@ -1,3 +1,4 @@
+import type { PlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import {
   ApplicationFailure,
   Context as ActivityContext,
@@ -73,7 +74,7 @@ export function platformEgressDispatcher(input: {
   readonly workflowId?: string;
 }): {
   authorizeAndDispatch: <T>(
-    operationKey: string,
+    operation: PlatformEgressOperation,
     executePhysicalWire: () => Promise<T>,
   ) => Promise<T>;
 } {
@@ -94,10 +95,10 @@ export function platformEgressDispatcher(input: {
     accountKey: input.binding.accountKey,
   };
   return {
-    authorizeAndDispatch: (operationKey, executePhysicalWire) =>
+    authorizeAndDispatch: (operation, executePhysicalWire) =>
       input.fence.authorizeAndDispatchPlatformEgress(
         binding,
-        operationKey,
+        operation,
         executePhysicalWire,
       ),
   };

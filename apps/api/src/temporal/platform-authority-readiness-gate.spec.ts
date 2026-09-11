@@ -9,18 +9,18 @@ describe("platform authority worker admission", () => {
       { purpose: "platform.sanctions", state: "MISSING" },
     ]);
     await expect(
-      assertPlatformAuthorityReady({ $queryRaw: query } as never),
+      assertPlatformAuthorityReady(query),
     ).rejects.toThrow("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
   });
 
-  it("admits only when every required purpose is issuable or intentionally disabled", async () => {
+  it("rejects fabricated purpose-only issuance rows without the four schedule identities", async () => {
     const query = vi.fn(async () => [
       { purpose: "platform.acquisition", state: "ISSUABLE" },
       { purpose: "platform.intent_watch", state: "ISSUABLE" },
       { purpose: "platform.sanctions", state: "ISSUABLE" },
     ]);
     await expect(
-      assertPlatformAuthorityReady({ $queryRaw: query } as never),
-    ).resolves.toBeUndefined();
+      assertPlatformAuthorityReady(query),
+    ).rejects.toThrow("PLATFORM_BUDGET_AUTHORITY_NOT_READY");
   });
 });

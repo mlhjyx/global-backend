@@ -261,6 +261,20 @@ test("managed compose uses independent persistence and no development server pat
   assert.doesNotMatch(productFiles, /temporal-dev\.service/);
 });
 
+test("disposable server can run the exact native wrapper without changing the baseline image", async () => {
+  const [compose, entrypoint, serverDockerfile] = await Promise.all([
+    repositoryFile("infra/temporal-platform/test-support/compose.disposable.yml"),
+    repositoryFile("infra/temporal-platform/test-support/native-entrypoint.sh"),
+    repositoryFile("infra/temporal-platform/server/Dockerfile"),
+  ]);
+  assert.match(compose, /task4c-native-entrypoint/);
+  assert.match(compose, /TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY/);
+  assert.match(entrypoint, /\/run\/native-server\/temporal-server start/);
+  assert.match(entrypoint, /\/etc\/temporal\/entrypoint\.sh/);
+  assert.match(serverDockerfile, /temporalio\/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da/);
+  assert.match(serverDockerfile, /go1\.26\.4/);
+});
+
 test("provisioning roles and verification remain separated and fail closed", async () => {
   const [rolesText, provision, verify] = await Promise.all([
     repositoryFile("infra/temporal-platform/roles.json"),
@@ -351,9 +365,9 @@ test("disposable proof is isolated and product config never owns test keys", asy
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY/);
-  assert.match(compose, /@temporalio\+client@1\.20\.3/);
-  assert.match(compose, /@temporalio\+common@1\.20\.3/);
-  assert.match(compose, /@temporalio\+proto@1\.20\.3/);
+  assert.match(compose, /@temporalio\+client@1\.23\.0/);
+  assert.match(compose, /@temporalio\+common@1\.23\.0/);
+  assert.match(compose, /@temporalio\+proto@1\.23\.0/);
   assert.doesNotMatch(compose, /TEMPORAL_PLATFORM_TEST_FIXTURES/);
   assert.doesNotMatch(runner, /(?:pnpm|npm|yarn|bun)\s+(?:add|install)/);
   assert.match(fixtureGenerator, /generateKeyPairSync\("rsa"/);

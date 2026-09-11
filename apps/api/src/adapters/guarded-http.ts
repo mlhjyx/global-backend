@@ -10,6 +10,9 @@ import { PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES } from '../platform-authority/p
 export { EgressBlockedError } from './url-guard';
 export type { PinnedPublicUrl, PublicUrlResolver } from './url-guard';
 
+/** Around one actual transport and its bounded response read, not a preflight counter. */
+export type DispatchPhysicalWire = <T>(execute: () => Promise<T>) => Promise<T>;
+
 export interface PublicHttpResponse {
   status: number;
   ok: boolean;
@@ -55,6 +58,7 @@ export interface PublicHttpDependencies {
   authorizeExternalAction?: () => Promise<boolean>;
   /** Exact one-shot fence/counter immediately before every pinned wire. */
   beforePhysicalWire?: () => Promise<void>;
+  dispatchPhysicalWire?: DispatchPhysicalWire;
 }
 
 export class ExternalHttpActionDeniedError extends Error {
@@ -239,10 +243,13 @@ export async function requestPublicHttp(
     const target = await resolver(current);
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     await assertPhysicalWireAuthorized(dependencies.beforePhysicalWire);
-    const response = await execute(target, {
+    const executePhysicalWire = () => execute(target, {
       ...effective,
       headers: currentHeaders,
     });
+    const response = dependencies.dispatchPhysicalWire
+      ? await dependencies.dispatchPhysicalWire(executePhysicalWire)
+      : await executePhysicalWire();
     if (response.status < 300 || response.status >= 400) {
       return {
         ...response,

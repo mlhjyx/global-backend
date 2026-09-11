@@ -22,6 +22,7 @@ import {
   decodeJsonBytes,
   readFetchResponseBodyBounded,
 } from './bounded-fetch-response';
+import type { DispatchPhysicalWire } from './guarded-http';
 
 export interface AlgoliaFairConfig {
   appId: string;
@@ -68,6 +69,7 @@ export async function queryAlgoliaExhibitors(
   limit = 1000,
   beforeRequest?: () => Promise<void>,
   beforePhysicalWire?: () => Promise<void>,
+  dispatchPhysicalWire?: DispatchPhysicalWire,
 ): Promise<FairExhibitor[]> {
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new Error('ALGOLIA_LIMIT_INVALID');
@@ -93,21 +95,25 @@ export async function queryAlgoliaExhibitors(
     const params = `query=&page=${page}&hitsPerPage=${perPage}` + `&filters=${encodeURIComponent(filters)}`;
     await beforeRequest?.();
     await beforePhysicalWire?.();
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({ params }),
-      signal: AbortSignal.timeout(25_000),
-    });
-    const responseBytes = await readFetchResponseBodyBounded(
-      res,
-      PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES,
-      'ALGOLIA_RESPONSE_TOO_LARGE',
-    );
+    const executePhysicalWire = async () => {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        redirect: 'error',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ params }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      const responseBytes = await readFetchResponseBodyBounded(
+        res, PLATFORM_JSON_TRANSPORT_RESPONSE_MAX_BYTES, 'ALGOLIA_RESPONSE_TOO_LARGE',
+      );
+      return { res, responseBytes };
+    };
+    const { res, responseBytes } = dispatchPhysicalWire
+      ? await dispatchPhysicalWire(executePhysicalWire)
+      : await executePhysicalWire();
     if (!res.ok) {
       const detail = new TextDecoder('utf-8', { fatal: false })
         .decode(responseBytes)

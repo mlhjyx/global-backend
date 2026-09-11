@@ -15,6 +15,7 @@ import {
   ExternalHttpActionDeniedError,
   isExternalHttpPhysicalWireDeniedError,
   requestPublicHttp,
+  type DispatchPhysicalWire,
 } from './guarded-http';
 import { resolvePublicHttpUrl, type PublicUrlResolver } from './url-guard';
 import {
@@ -35,11 +36,13 @@ export interface RobotsDependencies {
   resolve?: PublicUrlResolver;
   authorizeExternalAction?: () => Promise<boolean>;
   beforePhysicalWire?: () => Promise<void>;
+  dispatchPhysicalWire?: DispatchPhysicalWire;
 }
 
 async function loadRobots(
   origin: string,
-  request: typeof requestPublicHttp): Promise<RobotsRule> {
+  request: typeof requestPublicHttp,
+  physicalWireFailed: () => boolean = () => false): Promise<RobotsRule> {
   const cached = cache.get(origin);
   if (cached && Date.now() - cached.fetchedAt < TTL_MS) return cached;
   let disallow: string[] = [];
@@ -55,6 +58,9 @@ async function loadRobots(
     }
     // 4xx/无 robots → 视为无限制（RFC 惯例）
   } catch (error) {
+    // A wrapped transport or durable ACK failure is request-local UNKNOWN, not
+    // a robots fact. Never swallow it as network-unreachable allow or cache it.
+    if (physicalWireFailed()) throw error;
     if (isExternalHttpPhysicalWireDeniedError(error)) throw error;
     const workspaceActionDenied =
       error instanceof ExternalHttpActionDeniedError ||
@@ -107,14 +113,21 @@ export async function isAllowedByRobots(url: string, dependencies: RobotsDepende
   } catch {
     return false;
   }
-  const request = dependencies.request
-    ? dependencies.request
-    : (raw: string, options: Parameters<typeof requestPublicHttp>[1]) =>
-        requestPublicHttp(raw, options, {
-          authorizeExternalAction: dependencies.authorizeExternalAction,
-          beforePhysicalWire: dependencies.beforePhysicalWire,
-        });
-  const rule = await loadRobots(u.origin, request);
+  let physicalWireFailed = false;
+  const dispatchPhysicalWire: DispatchPhysicalWire | undefined = dependencies.dispatchPhysicalWire
+    ? async <T>(execute: () => Promise<T>): Promise<T> => {
+        try { return await dependencies.dispatchPhysicalWire!(execute); }
+        catch (error) { physicalWireFailed = true; throw error; }
+      }
+    : undefined;
+  const request = (raw: string, options: Parameters<typeof requestPublicHttp>[1]) =>
+    (dependencies.request ?? requestPublicHttp)(raw, options, {
+      authorizeExternalAction: dependencies.authorizeExternalAction,
+      beforePhysicalWire: dependencies.beforePhysicalWire,
+      dispatchPhysicalWire,
+      ...(dependencies.resolve ? { resolver: dependencies.resolve } : {}),
+    });
+  const rule = await loadRobots(u.origin, request, () => physicalWireFailed);
   const path = u.pathname || '/';
   // 任一 Disallow 前缀命中路径 → 禁止。Disallow: / 表示全站禁抓。
   return !rule.disallow.some((d) => path.startsWith(d));

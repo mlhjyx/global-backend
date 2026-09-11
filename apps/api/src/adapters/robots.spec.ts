@@ -1,8 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EgressBlockedError, ExternalHttpActionDeniedError } from './guarded-http';
+import { EgressBlockedError, ExternalHttpActionDeniedError, requestPublicHttp } from './guarded-http';
 import { isAllowedByRobots, parseWildcardDisallow } from './robots';
 
 describe('robots 合规与 SSRF 入口', () => {
+  it('propagates an around-wrapper ACK failure and does not cache it as robots allow', async () => {
+    const origin = 'https://robots-around-ack.example';
+    const resolve = vi.fn(async (raw: string) => ({ url: new URL(raw), ip: '93.184.216.34', family: 4 as const,
+      addresses: [{ address: '93.184.216.34', family: 4 as const }] }));
+    const executePinned = vi.fn(async () => ({ status: 200, headers: {}, body: Buffer.from('User-agent: *\nDisallow:'), text: 'User-agent: *\nDisallow:' }));
+    const request: typeof requestPublicHttp = (raw, options, dependencies) => requestPublicHttp(raw, options, { ...dependencies, resolver: resolve, executePinned });
+    const dispatchPhysicalWire = async <T>(wire: () => Promise<T>): Promise<T> => { await wire(); throw new Error('ACK_UNKNOWN'); };
+    await expect(isAllowedByRobots(`${origin}/about`, { resolve, request, dispatchPhysicalWire })).rejects.toThrow('ACK_UNKNOWN');
+    expect(executePinned).toHaveBeenCalledOnce();
+    await expect(isAllowedByRobots(`${origin}/about`, { resolve, request })).resolves.toBe(true);
+    expect(executePinned).toHaveBeenCalledTimes(2);
+  });
   it('解析通配 UA 的 Disallow', () => {
     expect(
       parseWildcardDisallow('User-agent: *\nDisallow: /admin\nAllow: /admin/public\n'),

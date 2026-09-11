@@ -21,6 +21,31 @@ afterEach(async () => {
 });
 
 describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () => {
+  it('wraps each real loopback redirect wire after DNS and gates, and refuses the second before it reaches the server', async () => {
+    const events: string[] = [];
+    const server = createServer((req, res) => {
+      events.push(`wire:${req.url}`);
+      if (req.url === '/start') { res.writeHead(302, { location: '/final' }); res.end('first-body'); }
+      else res.end('second-body');
+    });
+    servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('bind failed');
+    const resolver: PublicUrlResolver = async raw => {
+      events.push('dns'); return { url: new URL(raw), ip: '127.0.0.1', family: 4, addresses: [{ address: '127.0.0.1', family: 4 }] };
+    };
+    let count = 0;
+    const dispatchPhysicalWire = async <T>(execute: () => Promise<T>): Promise<T> => {
+      events.push(`around:${++count}`); if (count === 2) throw new Error('SECOND_WIRE_DENIED');
+      const result = await execute();
+      expect((result as { body: Buffer }).body.toString()).toBe('first-body');
+      events.push('completed:first'); return result;
+    };
+    await expect(requestPublicHttp(`http://loopback-wire.example:${address.port}/start`, {}, {
+      resolver, authorizeExternalAction: async () => { events.push('auth'); return true; },
+      beforePhysicalWire: async () => { events.push('counter'); }, dispatchPhysicalWire,
+    })).rejects.toThrow('SECOND_WIRE_DENIED');
+    expect(events).toEqual(['auth','dns','auth','counter','around:1','wire:/start','completed:first','auth','dns','auth','counter','around:2']);
+  });
   it('rechecks acquisition authorization before every redirect hop and starts no second wire after denial', async () => {
     const authorizeExternalAction = vi
       .fn<() => Promise<boolean>>()
