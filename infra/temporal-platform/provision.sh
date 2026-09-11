@@ -61,6 +61,9 @@ compose=(docker compose -p global -f "${COMPOSE_FILE}")
       exit 1
     fi
     cli() {
+      if [ "${TEMPORAL_PLATFORM_FRONTEND_MTLS:-false}" = "true" ]; then
+        set -- "$@" --tls-cert-path /run/secrets/temporal-platform-client/client.crt --tls-key-path /run/secrets/temporal-platform-client/client.key
+      fi
       temporal "$@" \
         --address "${TEMPORAL_PLATFORM_ADDRESS}" \
         --tls \

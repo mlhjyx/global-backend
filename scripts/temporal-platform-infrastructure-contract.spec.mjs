@@ -284,6 +284,10 @@ test("disposable server can run the exact native wrapper without changing the ba
     await repositoryFile("infra/temporal-platform/verify.sh"),
     /reader mTLS material is unavailable/,
   );
+  assert.match(
+    await repositoryFile("infra/temporal-platform/provision.sh"),
+    /TEMPORAL_PLATFORM_FRONTEND_MTLS[\s\S]*client\.crt[\s\S]*client\.key/,
+  );
   assert.match(entrypoint, /\/run\/native-server\/temporal-server start/);
   assert.match(entrypoint, /\/etc\/temporal\/entrypoint\.sh/);
   assert.match(serverDockerfile, /temporalio\/server@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da/);
