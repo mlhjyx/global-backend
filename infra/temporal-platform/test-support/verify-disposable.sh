@@ -526,6 +526,20 @@ export TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID=${ACTION_WORKFLOW_ID}
 export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}
 "${PLATFORM_DIR}/verify.sh"
 
+if [[ ${FRONTEND_MTLS} == true ]]; then
+  "${compose[@]}" run --rm --no-deps --entrypoint node \
+    codex-task4c-platform-temporal-worker-probe \
+    /repo/infra/temporal-platform/test-support/native-reader-rpc-probe.mjs \
+    /repo \
+    /run/secrets/temporal-platform-client/reader.jwt \
+    /run/secrets/temporal-platform-client/ca.crt \
+    /run/secrets/temporal-platform-client/reader.crt \
+    /run/secrets/temporal-platform-client/reader.key \
+    task4c-temporal:7233 task4c-temporal \
+    "${SCHEDULE_ID}" "${ACTION_WORKFLOW_ID}" "${WORKFLOW_RUN_ID}" \
+    /run/secrets/temporal-platform-client/admin.jwt
+fi
+
 "${compose[@]}" run --rm --no-deps --entrypoint node \
   codex-task4c-platform-temporal-worker-probe \
   /repo/infra/temporal-platform/test-support/internal-mtls-probe.mjs \

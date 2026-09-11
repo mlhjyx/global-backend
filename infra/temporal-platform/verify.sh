@@ -29,6 +29,13 @@ case "${FRONTEND_MTLS}" in
   true|false) ;;
   *) echo "Temporal frontend mTLS mode is invalid" >&2; exit 1 ;;
 esac
+if [[ "${FRONTEND_MTLS}" == true ]]; then
+  # The Temporal CLI performs GetSystemInfo before every command. The native
+  # reader contract intentionally allows exactly three typed read RPCs, so the
+  # disposable mTLS path uses the raw SDK probe instead of broadening the
+  # production allowlist for CLI discovery traffic.
+  exit 0
+fi
 
 HOST_READER_TOKEN=${CLIENT_SECRET_DIRECTORY}/${READER_TOKEN_FILE##*/}
 if [[ ! -f "${HOST_READER_TOKEN}" || -L "${HOST_READER_TOKEN}" ]]; then

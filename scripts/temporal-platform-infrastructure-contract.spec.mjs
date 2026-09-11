@@ -280,6 +280,7 @@ test("disposable server can run the exact native wrapper without changing the ba
   assert.match(runner, /reader\.key/);
   assert.match(runner, /temporal-reader-mtls\.yaml/);
   assert.match(runner, /client\.key/);
+  assert.match(runner, /native-reader-rpc-probe\.mjs/);
   assert.match(
     await repositoryFile("infra/temporal-platform/verify.sh"),
     /reader mTLS material is unavailable/,
