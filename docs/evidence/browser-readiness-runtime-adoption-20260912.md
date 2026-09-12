@@ -52,3 +52,8 @@ GrowthOS at port18081 still used the older demo image and returned JWKS404. This
 receipt does not establish GrowthOS, native retained Temporal or user-journey
 adoption. Historical evidence remains historical; customer Billing/Credits
 remains deferred.
+
+Subsequent milestone: [GrowthOS managed release restoration](growthos-managed-runtime-restoration-20260912.md)
+records the later recovery of the JWKS/quote authentication dependencies. The
+failure states above remain the observations from this browser-only window;
+they have not been rewritten as successes.

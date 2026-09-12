@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
-> 最后核验：2026-09-12T22:02:14+08:00（本轮刷新 Production Parity 源码、发布与 runtime；其他业务线保留各自证据边界）
+> 最后核验：2026-09-12T23:21:15+08:00（本轮刷新 Production Parity 源码、发布与 runtime；其他业务线保留各自证据边界）
 
 ## 当前结论
 
@@ -33,6 +33,7 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 | Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
 | DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
 | GrowthOS source | authority `/global/frontend/growthos-source` 为 `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；本任务隔离 writer 中0099/0100历史候选保留，0101 codec和0102专用签名/JWKS已完成本地验证与patch登记，未作为正式新制品采用 | 0102相关35 tests、四新类96.55% lines/90.91% branches；service JWT交付、真实producer/consumer与全产品接纳未完成 |
+| GrowthOS runtime | 已恢复发布基线 `541bcc63c3486296ab4e2461d4d005e6cd43710b` 的三项exact镜像，current选择器已从旧demo切至managed release；27项Flyway checksum逐项匹配，原卷保留，JWKS三端点200，3002/3003/18081只绑定loopback | [恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)；不是最新source候选或平台capability完整采用，不是登录/建站UAT |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
 | 平台基础设施 | 已合入的 native reader、Worker admission、持久预算与浏览器修复继续保留；native retained compose仍未采用自定义server制品，专用发布/overlay正在隔离施工；现有混合Worker不能只改namespace便迁往平台服务 | 不替换 legacy SQLite/namespace，不用配置布尔值或 disposable结果冒充权限/运行证明 |
@@ -76,7 +77,7 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 | 运行版本 | `/api/v1/health/build`返回attested=true；API/Worker/Relay的source、image、artifact及migration逐字匹配上表 | running和身份匹配不证明readiness、消费、模型或用户旅程成功 |
 | Browser 历史事故 | 保留2026-09-05容量事故及#513/#516的历史短暂恢复；之后捕获成功退出Chromium后的proc stat ESRCH，#517补齐该竞态并保留EACCES/EIO/live-group拒绝语义 | 不再用重启后的5次短观察作为已稳定修复结论 |
 | Listener exposure | 本次 `ss` 仍见 `0.0.0.0:3001`、`[::]:3001` 和 legacy Java `*:8080`                                                       | 未执行端口收敛或旧服务退役                                                               |
-| Readiness | `/api/v1/health/ready`=503；database/migration/Temporal连接/storage/Redis/Gateway/renderer/browser/API/Relay当前ok；identity与Budget/Execution JWKS验证失败，平台acq/intent/sanctions当前首先报`QUOTE_UNAVAILABLE`，Worker=`MATCHING_WORKER_NOT_READY` | GrowthOS仍为旧demo运行版本、JWKS404；连接ok不证明native身份权限或平台proof，不能接新BuildRun |
+| Readiness | `/api/v1/health/ready`=503；基础依赖、browser、identity/Site Build/Execution JWKS、workspace budget authority及platform quote authentication均ok；平台acq/intent/sanctions当前报`TEMPORAL_PROOF_UNAVAILABLE`，Worker=`MATCHING_WORKER_NOT_READY` | 旧GrowthOS启动选择器造成的验签阻断已关闭；native权限/producer/consumer与matching Worker仍未完成，不接新BuildRun |
 | Historical Spend  | 旧 UNKNOWN/unknown 及 unresolved/expired 记录按原证据保留                                                                | 不通过重发制造结果，也不由源修改自动改写历史费用                                         |
 
 历史费用记录保持 UNKNOWN/unknown：attempts 1–5 为 UNRESOLVED，attempt 6 为 EXPIRED，reservation/conservative charge 均为 `800000`；EXPIRED 不产生有效输出或精确费用，继续不重发。完整脱敏字段见 [2026-09-04 platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json)；20260901 predecessor 保持 historical provenance。GrowthOS 2026-09-01 historical provenance 也不能代替当前 authority source。
