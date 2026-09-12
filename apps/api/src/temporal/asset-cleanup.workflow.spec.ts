@@ -146,9 +146,39 @@ describe('assetObjectCleanupWorkflow', () => {
     expect(temporal.cleanup).not.toHaveBeenCalled();
   });
 
+  it('rejects invalid payloads with a fixed failure before activities or timers', async () => {
+    await expect(assetObjectCleanupWorkflow({ ...INPUT, 'synthetic-secret-canary': true } as never))
+      .rejects.toMatchObject({ message: 'invalid asset cleanup payload', type: 'ASSET_CLEANUP_PAYLOAD_INVALID', nonRetryable: true });
+    const input = { ...INPUT };
+    Object.defineProperty(input, 'objectClass', { get() { throw new Error('synthetic-accessor-secret'); } });
+    await expect(assetObjectCleanupWorkflow(input))
+      .rejects.toMatchObject({ message: 'invalid asset cleanup payload', type: 'ASSET_CLEANUP_PAYLOAD_INVALID', nonRetryable: true });
+    expect(temporal.sleep).not.toHaveBeenCalled();
+    expect(temporal.cleanup).not.toHaveBeenCalled();
+    expect(temporal.cleanupCanonical).not.toHaveBeenCalled();
+  });
+
+  it.each(['cause', 'type', 'name'] as const)('does not inspect the activity failure %s getter or replace its failure', async (field) => {
+    const failure = new Error('synthetic-secret-canary');
+    const read = vi.fn(() => { throw new Error('diagnostic getter must not run'); });
+    Object.defineProperty(failure, field, { get: read });
+    temporal.cleanup.mockRejectedValueOnce(failure);
+    await expect(assetObjectCleanupWorkflow(INPUT)).rejects.toBe(failure);
+    expect(read).not.toHaveBeenCalled();
+    expect(temporal.logError).toHaveBeenCalledWith('asset object cleanup failed', {
+      eventId: INPUT.eventId, workspaceId: INPUT.workspaceId, objectClass: 'staging', errorCode: 'ASSET_CLEANUP_FAILED',
+    });
+  });
+
+  it.each([null, undefined, 'synthetic-secret-canary'])('preserves non-Error activity failures without echoing them', async (failure) => {
+    temporal.cleanup.mockRejectedValueOnce(failure);
+    await expect(assetObjectCleanupWorkflow(INPUT)).rejects.toBe(failure);
+    expect(JSON.stringify(temporal.logError.mock.calls)).not.toContain('canary');
+  });
+
   it('logs a minimal structured alert after activity exhaustion and rethrows', async () => {
     const failure = Object.assign(new Error('S3 secret and object key must not be logged'), {
-      cause: { type: 'ASSET_CLEANUP_STORAGE_UNAVAILABLE' },
+      cause: { type: 'synthetic-type-secret-canary' },
     });
     temporal.cleanup.mockResolvedValueOnce({
       eventId: INPUT.eventId,
@@ -162,9 +192,10 @@ describe('assetObjectCleanupWorkflow', () => {
       eventId: INPUT.eventId,
       workspaceId: INPUT.workspaceId,
       objectClass: 'staging',
-      errorCode: 'ASSET_CLEANUP_STORAGE_UNAVAILABLE',
+      errorCode: 'ASSET_CLEANUP_FAILED',
     });
     expect(JSON.stringify(temporal.logError.mock.calls)).not.toContain(INPUT.objectKey);
     expect(JSON.stringify(temporal.logError.mock.calls)).not.toContain('S3 secret');
+    expect(JSON.stringify(temporal.logError.mock.calls)).not.toContain('canary');
   });
 });

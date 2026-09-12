@@ -34,9 +34,9 @@ export async function runAssetObjectCleanup(input: AssetCleanupCommand, timing: 
   let command: AssetCleanupCommand;
   try {
     command = parseAssetCleanupCommand(input);
-  } catch (error) {
+  } catch {
     throw ApplicationFailure.nonRetryable(
-      error instanceof Error ? error.message : String(error),
+      'invalid asset cleanup payload',
       'ASSET_CLEANUP_PAYLOAD_INVALID',
     );
   }
@@ -55,21 +55,13 @@ export async function runAssetObjectCleanup(input: AssetCleanupCommand, timing: 
     }
     return await activities.settleCanonicalAssetCleanup(command);
   } catch (error) {
-    const candidate = error as {
-      type?: unknown;
-      name?: unknown;
-      cause?: { type?: unknown };
-    };
-    const errorCode =
-      (typeof candidate.cause?.type === 'string' && candidate.cause.type) ||
-      (typeof candidate.type === 'string' && candidate.type) ||
-      (typeof candidate.name === 'string' && candidate.name) ||
-      'ASSET_CLEANUP_FAILED';
+    // Failure properties may contain dependency text or throwing accessors.
+    // Do not inspect them for logging; rethrow unchanged to preserve failure semantics.
     log.error('asset object cleanup failed', {
       eventId: command.eventId,
       workspaceId: command.workspaceId,
       objectClass: command.objectClass,
-      errorCode,
+      errorCode: 'ASSET_CLEANUP_FAILED',
     });
     throw error;
   }
