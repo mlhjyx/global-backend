@@ -60,7 +60,7 @@
 ## 5. 当前承接边界
 
 - 独立站管理当前纵切是 `SPEC_READY_WITH_BLOCKERS`；后置公网发布链仍为 `TARGET_NOT_RUNNABLE`。
-- 其他非 Site 产品域仍是 `MAP_COMPLETE / NOT_DEV_READY`；客户开发已解除冻结但不自动升级，M1 收口后才按重审结果恢复实现。
+- 非 Site 产品域按[当前状态](../status/current.md)中各 Program 的实现、接纳与验收证据分别判定；本设计导航页不另设 M1 时间门或统一 readiness 状态。
 - 不决定 React/Next/Vite、BFF、UI 库、状态库、分析 SDK、i18n 库或设计工具。
 - 不生成高保真页面、生产 Token 数值、可执行 Fixture 或部署声明。
 - 不把首个用户承诺扩展到公网发布、域名、回滚、询盘、站点分析或诊断。
