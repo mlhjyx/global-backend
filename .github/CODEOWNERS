@@ -23,6 +23,8 @@
 /infra/*.compose.yml @mlhjyx
 /infra/systemd/ @mlhjyx
 
+/scripts/test-support/browser-probe-oci-smoke.cjs @mlhjyx
+
 # Terminal governance ownership block. Keep this last so broader later rules
 # cannot override the verifier, policy, schema, or required-context surfaces.
 /.github/ @mlhjyx
