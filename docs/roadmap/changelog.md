@@ -1,6 +1,27 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-12 · GrowthOS managed release restoration
+
+- 只读发现current选择器仍指向20260823 demo及local标签；恢复已发布541bcc63基线的三项exact镜像，并把选择器改到managed release，不重建源码、不接空卷。恢复前用实际Flyway12.8.1校验代码逐项比对27个迁移checksum，全部匹配；fresh备份可读且0600，基础设施镜像及既有凭据保持。
+- 三项产品容器healthy，JWKS三端点200且public-only；Tenant/Platform首页200，3002/3003/18081只绑定loopback。MySQL改用已发布release中正确权限的配置，旧world-writable警告消失；27/27迁移无变化。
+- Backend的identity/Budget/Execution JWKS、workspace budget和quote authentication恢复ok；aggregate仍503，阻断推进至平台Temporal proof和matching Worker。没有把历史基线恢复冒充最新GrowthOS候选、serviceJWT/producer/consumer、UAT或Pilot完成。精确来源、备份/校验摘要及镜像见[恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)。
+
+## 2026-09-12 · Browser proc-exit race successor and exact-image adoption
+
+- #517 在同步 #498 后以 exact head `0a7d2259466c144291f1e6abede51360c02eb1ac` 完成 required CI 和独立 delta review，合入为 `b6be49020b28dccf2f67413667c396a893b9ce94`。修复将 Linux proc stat 的 ESRCH 识别为该 PID 已消失，仍扫描其他成员并保留 EACCES/EIO/活进程组的阻断。先前 headless/timeout 变更及重启后的短暂成功并未消除该竞态。
+- 从该 exact main 发布 `ghcr.io/mlhjyx/global-backend@sha256:175ae53c6500456f1121d006fd4add694231d15e20d26fbd77ef795d3f9f90d5`，先完成发布来源校验、服务器预拉取和离线 verifier，再于13:28 UTC采用。API、Worker、Relay回读匹配同一source/image/artifact/migration；没有queued/running BuildRun，没有手工业务数据更新、迁移或凭据改动。
+- [持续运行观察](../evidence/browser-readiness-runtime-adoption-20260912.md) 已完成30分钟60次采样，observer exit0且PASS；browser持续`ok`不升级为整体ready。GrowthOS旧demo运行导致identity/Budget/Execution JWKS不可用，平台当前首先停在QUOTE_UNAVAILABLE，Worker仍STARTING。历史观察保留，不重写成新版本通过。
+- GrowthOS0101/0102的codec与独立签名/JWKS完成本地patch重放和35项相关测试；实际Java签名与Backend互操作通过，Backend本地`a56665123572b9471dff2761fb87cb3eb6472c9a`增加持久golden vectors及111项capability回归，精确绑定见[本地验签记录](../evidence/platform-capability-java-local-20260912.md)。未把这些源码结果外推为service JWT交付、真实producer/consumer、hosted跨仓CI或UAT。
+
+## 2026-09-12 · Browser readiness headless environment successor
+
+- PR #513 `fix(runtime): pass headless mode to browser readiness probe` 已通过完整 hosted CI 并合入，merge commit 为 `479d51f0dd474df31f0547923cc072064b897a03`。修复在受控浏览器子进程环境中显式传递 `CHROME_HEADLESS=1`，保留批准的 Chromium executable、隔离临时目录、网络禁用参数和 fail-closed 错误语义；聚焦 runtime 测试 58/58 通过。
+- 从该 exact main 发布并验证新的 immutable OCI：`ghcr.io/mlhjyx/global-backend@sha256:137f881da04ac2d22258dd909c674798613335745226d22dd2cc9a03c965a783`，artifact `sha256:fe8e6fb41438012b502a791b7b3a9eda32bb4af078a5593dbf2e1c20fd5d6070`，manifest `sha256:0111e7a4016fa052788abd1604d9d0365202b3c554279cb5b0df791e61b2389f`，SBOM `sha256:5fe6a6215565126612b2476fcfe27c77618a9fb1f768d213529dc85fa3d882ff`，并完成 registry provenance attestation。
+- API 与 Worker 已通过受控 drain-and-swap 运行该同一 digest，`/health/build` 返回 attested、image/artifact/migration identity 一致；Chromium browser readiness 现为 `ok`。`/health/ready` 仍为 503，原因仍是 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE` 与 `MATCHING_WORKER_NOT_READY`，不把浏览器修复外推为平台或产品就绪。
+- 首次运行中 readback 曾捕获一次 browser probe 清理失败并按 singleton 语义保持 fail-closed；未修改数据或绕过门，执行同 digest 的受控 API/Worker 重启后 browser 恢复，连续 5 次 `/health/ready` readback 均为 browser=`ok`，残留 probe 目录已清理。该事实说明当前恢复依赖受控重启，不能宣称已有自动自愈或 RuntimeEvidence。
+- 当前未执行真实付费模型调用；客户 Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`，`cap_microusd` 仍只是平台内部执行安全包络。旧 PR #479 已关闭为 provenance，干净重放候选 #515 的 GrowthOS capability producer、capability JWKS/service token、真实 Temporal reader、revocation delivery 和跨仓 hosted contract 仍保持 HOLD。
+
 
 ## 2026-09-06 · GitHub queue currentness closeout
 
