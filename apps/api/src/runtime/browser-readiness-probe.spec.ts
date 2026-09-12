@@ -64,6 +64,8 @@ describe("Browser readiness temporary-state lifecycle", () => {
       "XDG_CACHE_HOME",
       "XDG_CONFIG_HOME",
     ]);
+    expect(opts.env?.CHROME_HEADLESS).toBe("1");
+    expect(spy.mock.calls[0][1] as string[]).toContain("--disable-breakpad");
     expect(
       new Set(
         ["HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"].map(
@@ -114,7 +116,7 @@ describe("Browser readiness temporary-state lifecycle", () => {
     expect(children[0].signalCode).toBe("SIGKILL");
     for (const root of roots)
       await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
-  }, 10_000);
+  }, 20_000);
 
   it("reaps descendants that inherit its process group", async () => {
     installBrowser(`
@@ -126,7 +128,36 @@ describe("Browser readiness temporary-state lifecycle", () => {
     ).rejects.toThrow("BROWSER_RUNTIME_UNAVAILABLE");
     for (const root of roots)
       await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
-  }, 10_000);
+  }, 20_000);
+
+  it("waits for a slow same-group descendant within the bounded reap grace", async () => {
+    installBrowser(`
+      const child=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},1500)'],{stdio:'inherit'});
+      require('node:fs').writeFileSync(process.env.HOME+'/descendant.pid',String(child.pid));
+      process.stdout.write(${JSON.stringify(document)});
+    `);
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (children.some((child) => pid === -child.pid!)) return true;
+      return kill(pid, signal);
+    });
+    try {
+      await createBrowserReadinessProbe()("/usr/bin/chromium");
+      for (const root of roots)
+        await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      for (const root of roots) {
+        try {
+          const pid = Number(
+            await readFile(join(root, "home", "descendant.pid"), "utf8"),
+          );
+          if (Number.isInteger(pid) && pid > 1) kill(pid, "SIGKILL");
+        } catch {
+          // The root was cleaned successfully.
+        }
+      }
+    }
+  }, 15_000);
 
   it("fences new probes if its root identity is replaced", async () => {
     installBrowser(`
@@ -238,6 +269,104 @@ describe("Browser readiness temporary-state lifecycle", () => {
       await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it.each(["ENOENT", "ESRCH"])(
+    "cleans and keeps the singleton usable when a proc stat disappears with %s",
+    async (code) => {
+      const kill = process.kill.bind(process);
+      const readDirectory = fs.readdir.bind(fs);
+      const read = fs.readFile.bind(fs);
+      installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+      vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (signal === 0 && children.some((child) => pid === -child.pid!))
+          return true;
+        return kill(pid, signal);
+      });
+      vi.spyOn(fs, "readdir").mockImplementation(((path, options) =>
+        path === "/proc"
+          ? Promise.resolve(["987654321"])
+          : readDirectory(path, options)) as typeof fs.readdir);
+      vi.spyOn(fs, "readFile").mockImplementation(((path, options) => {
+        if (path === "/proc/987654321/stat")
+          return Promise.reject(
+            Object.assign(new Error("process exited"), { code }),
+          );
+        return read(path, options);
+      }) as typeof fs.readFile);
+      const probe = createBrowserReadinessProbe();
+      await probe("/usr/bin/chromium");
+      await probe("/usr/bin/chromium");
+      expect(children).toHaveLength(2);
+      for (const root of roots)
+        await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
+  it.each(["EACCES", "EIO"])(
+    "retains the cleanup fence for proc stat %s errors",
+    async (code) => {
+      const kill = process.kill.bind(process);
+      const readDirectory = fs.readdir.bind(fs);
+      const read = fs.readFile.bind(fs);
+      installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+      vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (signal === 0 && children.some((child) => pid === -child.pid!))
+          return true;
+        return kill(pid, signal);
+      });
+      vi.spyOn(fs, "readdir").mockImplementation(((path, options) =>
+        path === "/proc"
+          ? Promise.resolve(["987654321"])
+          : readDirectory(path, options)) as typeof fs.readdir);
+      vi.spyOn(fs, "readFile").mockImplementation(((path, options) => {
+        if (path === "/proc/987654321/stat")
+          return Promise.reject(
+            Object.assign(new Error("private failure"), { code }),
+          );
+        return read(path, options);
+      }) as typeof fs.readFile);
+      const probe = createBrowserReadinessProbe();
+      await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+        "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      );
+      for (const root of roots) await access(root);
+      await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+        "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      );
+      expect(children).toHaveLength(1);
+    },
+  );
+
+  it("does not let a vanished PID hide a still-active group member", async () => {
+    const kill = process.kill.bind(process);
+    const readDirectory = fs.readdir.bind(fs);
+    const read = fs.readFile.bind(fs);
+    let observed = 0;
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0 && children.some((child) => pid === -child.pid!))
+        return true;
+      return kill(pid, signal);
+    });
+    vi.spyOn(fs, "readdir").mockImplementation(((path, options) =>
+      path === "/proc"
+        ? Promise.resolve(["987654321", "987654322"])
+        : readDirectory(path, options)) as typeof fs.readdir);
+    vi.spyOn(fs, "readFile").mockImplementation((async (path, options) => {
+      if (path === "/proc/987654321/stat")
+        throw Object.assign(new Error("process exited"), { code: "ESRCH" });
+      if (path === "/proc/987654322/stat") {
+        observed++;
+        for (const root of roots) await access(root);
+        return `987654322 (browser helper) ${observed === 1 ? "S" : "Z"} 1 ${children[0].pid} 0`;
+      }
+      return read(path, options);
+    }) as typeof fs.readFile);
+    await createBrowserReadinessProbe()("/usr/bin/chromium");
+    expect(observed).toBe(2);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("withholds cleanup when a group observation exceeds its process bound", async () => {
     const kill = process.kill.bind(process);
     const readDirectory = fs.readdir.bind(fs);
@@ -312,7 +441,7 @@ describe("Browser readiness temporary-state lifecycle", () => {
         await close;
       }
     }
-  }, 12_000);
+  }, 25_000);
 
   it("leaves no private roots after 1000 sequential real child processes", async () => {
     const parent = await mkdtemp(join(tmpdir(), "browser-probe-soak-"));

@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const DOCUMENT = "data:text/html,<title>runtime-readiness</title>";
-const TIMEOUT_MS = 5_000;
+// Chromium startup can legitimately exceed five seconds when the managed host
+// is under normal build/renderer load. Keep the probe bounded, but leave enough
+// time to avoid turning transient scheduling pressure into a permanent
+// singleton fail-closed state.
+const TIMEOUT_MS = 10_000;
+const KILL_GRACE_MS = 1_000;
+const REAP_GRACE_MS = 5_000;
 const OUTPUT_LIMIT = 128 * 1024;
 const CLEANUP_ERROR = "BROWSER_PROBE_CLEANUP_INCOMPLETE";
 const EXECUTABLES = new Set(["/usr/bin/chromium", "/usr/bin/google-chrome"]);
@@ -33,6 +39,7 @@ function browserArguments(root: string): string[] {
     "--disable-dev-shm-usage",
     "--disable-background-networking",
     "--disable-component-update",
+    "--disable-breakpad",
     "--no-first-run",
     "--no-default-browser-check",
     "--host-resolver-rules=MAP * ~NOTFOUND",
@@ -51,9 +58,13 @@ function signalGroup(pid: number | undefined, signal: NodeJS.Signals): void {
   }
 }
 
-async function waitForGroupExit(pid: number | undefined): Promise<void> {
+async function waitForGroupExit(
+  pid: number | undefined,
+  timeoutMs: number,
+): Promise<void> {
   if (pid === undefined) return;
-  for (let attempt = 0; attempt < 50; attempt++) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
     try {
       process.kill(-pid, 0);
     } catch (error) {
@@ -72,7 +83,10 @@ async function waitForGroupExit(pid: number | undefined): Promise<void> {
       try {
         raw = await fs.readFile(`/proc/${candidate}/stat`, "utf8");
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        // A process may disappear before open (ENOENT) or after its proc file
+        // has been opened (ESRCH). Neither leaves an executable group member.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ESRCH") continue;
         throw new Error(CLEANUP_ERROR, { cause: error });
       }
       const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
@@ -80,9 +94,12 @@ async function waitForGroupExit(pid: number | undefined): Promise<void> {
         active = true;
     }
     if (!active) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(CLEANUP_ERROR);
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(10, remaining)),
+    );
   }
-  throw new Error(CLEANUP_ERROR);
 }
 
 function runBrowserChild(executable: string, root: string): Promise<void> {
@@ -114,7 +131,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
         } catch {
           uncertain = true;
         }
-      }, 500);
+      }, KILL_GRACE_MS);
     };
     const timeout = setTimeout(stop, TIMEOUT_MS);
     const reapDeadline = setTimeout(() => {
@@ -122,7 +139,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
       clearTimeout(timeout);
       clearTimeout(killTimer);
       reject(new Error(CLEANUP_ERROR));
-    }, TIMEOUT_MS + 2_000);
+    }, TIMEOUT_MS + REAP_GRACE_MS);
     child.stdout.on("data", (data: Buffer) => {
       stdoutBytes += data.length;
       if (stdoutBytes > OUTPUT_LIMIT) stop();
@@ -148,7 +165,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
       clearTimeout(reapDeadline);
       if (settled) return;
       settled = true;
-      void waitForGroupExit(child.pid).then(
+      void waitForGroupExit(child.pid, REAP_GRACE_MS).then(
         () => {
           if (uncertain) reject(new Error(CLEANUP_ERROR));
           else if (
