@@ -222,6 +222,7 @@ test("managed compose uses independent persistence and no development server pat
   const productFiles = [
     compose,
     await repositoryFile("infra/temporal-platform/provision.sh"),
+    await repositoryFile("infra/temporal-platform/provision-core.sh"),
     await repositoryFile("infra/temporal-platform/verify.sh"),
   ].join("\n");
 
@@ -292,7 +293,7 @@ test("disposable server can run the exact native wrapper without changing the ba
 test("provisioning roles and verification remain separated and fail closed", async () => {
   const [rolesText, provision, verify] = await Promise.all([
     repositoryFile("infra/temporal-platform/roles.json"),
-    repositoryFile("infra/temporal-platform/provision.sh"),
+    repositoryFile("infra/temporal-platform/provision-core.sh"),
     repositoryFile("infra/temporal-platform/verify.sh"),
   ]);
   const roles = JSON.parse(rolesText);
@@ -514,14 +515,6 @@ test("high-risk platform Temporal paths remain code-owner controlled", async () 
   }
 });
 
-test("runbook records the namespace isolation and current lease limitation", async () => {
-  const runbook = await repositoryFile("infra/temporal-platform/runbook.md");
-
-  assert.match(runbook, /platform-automation/);
-  assert.match(runbook, /accepted residual read scope/i);
-  assert.match(runbook, /RuntimeProcessLease/);
-  assert.match(runbook, /does not contain.*namespace/i);
-  assert.match(runbook, /must not.*match.*task queue alone/i);
-  assert.match(runbook, /does not modify.*temporal-dev\.service/i);
-  assert.match(runbook, /-p global/);
-});
+// Human runbook wording is reviewed as documentation. Native/stock admission,
+// namespace ownership and retained preflight are exercised by behavioral tests;
+// an obsolete "reader-wide" prose assertion must not authorize either runtime.

@@ -1,0 +1,205 @@
+name: Publish immutable native Temporal image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: publish-temporal-platform-image-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/mlhjyx/global-temporal-platform
+  SUBJECT_SHA: ${{ github.sha }}
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: runtime-image-publication
+    timeout-minutes: 60
+    outputs:
+      image_reference: ${{ steps.publication.outputs.image_reference }}
+      image_digest: ${{ steps.publication.outputs.image_digest }}
+    steps:
+      - id: checkout
+        name: Checkout exact publication subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: source
+        name: Require clean current main and derive native source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${SUBJECT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "${SUBJECT_SHA}"
+          test "$(git rev-parse HEAD)" = "${SUBJECT_SHA}"
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          node --test scripts/temporal-native-publication.spec.mjs scripts/ghcr-runtime-publication.spec.mjs
+          node scripts/temporal-native-publication.mjs source "${PWD}" "${SUBJECT_SHA}" > "${RUNNER_TEMP}/temporal-native-source.json"
+
+      - id: login
+        name: Authenticate scoped publication identity
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - id: existing
+        name: Resolve the publish-once source tag
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/ghcr-runtime-publication.mjs resolve --image mlhjyx/global-temporal-platform \
+            --tag "${SUBJECT_SHA}" --github-output "${GITHUB_OUTPUT}"
+
+      - id: prepare
+        name: Verify native filesystem and exact publication provenance
+        shell: bash
+        env:
+          EXISTING: ${{ steps.existing.outputs.exists }}
+          EXISTING_REFERENCE: ${{ steps.existing.outputs.image_reference }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.image_digest }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source_file="${RUNNER_TEMP}/temporal-native-source.json"
+          source_digest=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).sourceDigest' "$source_file")
+          image_tag="${IMAGE_NAME}:${SUBJECT_SHA}"
+          if [[ "${EXISTING}" == true ]]; then
+            [[ "${EXISTING_REFERENCE}" =~ ^ghcr\.io/mlhjyx/global-temporal-platform@sha256:[0-9a-f]{64}$ ]]
+            timeout 10m docker pull "${EXISTING_REFERENCE}"
+            inspected_image="${EXISTING_REFERENCE}"
+          else
+            docker build --file infra/temporal-platform/server/Dockerfile \
+              --build-arg "BUILD_SHA=${SUBJECT_SHA}" --build-arg "SOURCE_DIGEST=${source_digest}" --tag "$image_tag" .
+            inspected_image="$image_tag"
+          fi
+          snapshot=$(mktemp -d "${RUNNER_TEMP}/temporal-native-image.XXXXXX")
+          docker image inspect --format '{{json .}}' "$inspected_image" > "$snapshot/inspect.json"
+          image_id=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).Id' "$snapshot/inspect.json")
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker save --output "$snapshot/image.tar" "$inspected_image"
+          config_name=$(tar -xOf "$snapshot/image.tar" manifest.json | node scripts/docker-image-config-path.mjs)
+          tar -xOf "$snapshot/image.tar" "$config_name" > "$snapshot/image-config.json"
+          test "sha256:$(sha256sum "$snapshot/image-config.json" | cut -d ' ' -f 1)" = "$image_id"
+          container_id=$(docker create --network none --entrypoint /bin/false "$image_id")
+          [[ "$container_id" =~ ^[0-9a-f]{64}$ ]]
+          trap 'docker rm "$container_id" >/dev/null' EXIT
+          # The container is never started. Read exact paths from its merged export;
+          # no archive path is extracted onto the runner filesystem.
+          docker export --output "$snapshot/filesystem.tar" "$container_id"
+          tar -tf "$snapshot/filesystem.tar" > "$snapshot/files.list"
+          tar -xOf "$snapshot/filesystem.tar" usr/local/bin/temporal-server > "$snapshot/temporal-server"
+          tar -xOf "$snapshot/filesystem.tar" opt/temporal-platform-release/manifest.json > "$snapshot/manifest.json"
+          mkdir "$snapshot/config"
+          tar -xOf "$snapshot/filesystem.tar" opt/temporal-platform-release/config/temporal.yaml > "$snapshot/config/temporal.yaml"
+          tar -xOf "$snapshot/filesystem.tar" opt/temporal-platform-release/config/dynamicconfig.yaml > "$snapshot/config/dynamicconfig.yaml"
+          tar -xOf "$snapshot/filesystem.tar" opt/temporal-platform-release/roles.json > "$snapshot/roles.json"
+          tar -xOf "$snapshot/filesystem.tar" opt/temporal-platform-release/go-build-info.json > "$snapshot/go-build-info.json"
+          tar -xOf "$snapshot/filesystem.tar" opt/temporal-platform-release/sbom.cdx.json > "$snapshot/sbom.cdx.json"
+          tar -xOf "$snapshot/filesystem.tar" lib/apk/db/installed > "$snapshot/apk-installed"
+          node scripts/temporal-native-publication.mjs verify "$source_file" "$snapshot" "$image_id" > "${RUNNER_TEMP}/temporal-native-verification.json"
+          docker rm "$container_id" >/dev/null
+          trap - EXIT
+          if [[ "${EXISTING}" == true ]]; then
+            node scripts/temporal-native-publication.mjs provenance "$EXISTING_REFERENCE" "$SUBJECT_SHA" "$image_id" \
+              "$snapshot/image-config.json" > "$snapshot/provenance.json"
+            registry_attested=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).registryAttested' "$snapshot/provenance.json")
+          else
+            registry_attested=false
+          fi
+          printf 'config_path=%s\nimage_id=%s\nregistry_attested=%s\n' \
+            "$snapshot/image-config.json" "$image_id" "$registry_attested" >> "$GITHUB_OUTPUT"
+
+      - id: config_attestation
+        name: Attest local native image config before any push
+        if: steps.existing.outputs.exists != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.prepare.outputs.config_path }}
+          create-storage-record: false
+
+      - id: publication
+        name: Publish once with trusted recovery and exact digest readback
+        shell: bash
+        env:
+          EXISTING: ${{ steps.existing.outputs.exists }}
+          EXISTING_REFERENCE: ${{ steps.existing.outputs.image_reference }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.image_digest }}
+          LOCAL_IMAGE_ID: ${{ steps.prepare.outputs.image_id }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$EXISTING" == true ]]; then
+            printf 'image_reference=%s\nimage_digest=%s\n' "$EXISTING_REFERENCE" "$EXISTING_DIGEST" >> "$GITHUB_OUTPUT"
+          else
+            image_tag="${IMAGE_NAME}:${SUBJECT_SHA}"
+            prepush_output=$(mktemp "${RUNNER_TEMP}/temporal-native-prepush.XXXXXX")
+            # Recheck the exact main subject and tag absence immediately before the external write.
+            git fetch --no-tags origin main
+            test "$(git rev-parse origin/main)" = "${SUBJECT_SHA}"
+            test "$(git rev-parse HEAD)" = "${SUBJECT_SHA}"
+            node scripts/ghcr-runtime-publication.mjs resolve --image mlhjyx/global-temporal-platform \
+              --tag "${SUBJECT_SHA}" --github-output "$prepush_output"
+            test "$(sed -n 's/^exists=//p' "$prepush_output")" = false
+            timeout 15m docker push "$image_tag"
+            node scripts/ghcr-runtime-publication.mjs resolve --image mlhjyx/global-temporal-platform \
+              --tag "${SUBJECT_SHA}" --github-output "$GITHUB_OUTPUT" --wait-ms 30000
+            reference=$(sed -n 's/^image_reference=//p' "$GITHUB_OUTPUT" | tail -n 1)
+            [[ "$reference" =~ ^ghcr\.io/mlhjyx/global-temporal-platform@sha256:[0-9a-f]{64}$ ]]
+            timeout 10m docker pull "$reference"
+            test "$(docker image inspect --format '{{.Id}}' "$reference")" = "$LOCAL_IMAGE_ID"
+          fi
+
+      - id: registry_attestation
+        name: Attest or recover the native registry digest
+        if: steps.prepare.outputs.registry_attested != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.publication.outputs.image_digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - id: readback
+        name: Verify registry provenance and report native identity
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.publication.outputs.image_reference }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://${IMAGE_REFERENCE}" --repo "${GITHUB_REPOSITORY}" --bundle-from-oci \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/publish-temporal-platform-image.yml" \
+            --signer-digest "${SUBJECT_SHA}" --source-ref refs/heads/main --source-digest "${SUBJECT_SHA}" --deny-self-hosted-runners >/dev/null
+          {
+            printf '## Native Temporal publication\n\n- source: `%s`\n- exact image: `%s`\n' "$SUBJECT_SHA" "$IMAGE_REFERENCE"
+            printf '\nArtifact readback (not retained deployment/readiness proof):\n\n```json\n'
+            node -p 'JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1])),null,2)' "${RUNNER_TEMP}/temporal-native-verification.json"
+            printf '\n```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - id: logout
+        name: Remove registry credential from runner
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io

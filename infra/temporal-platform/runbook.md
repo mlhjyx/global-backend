@@ -26,6 +26,12 @@ namespace settings deliberately and requires re-provisioning to reject drift.
 
 ## Fixed security boundary
 
+The retained `compose.yml` is the stock-image baseline. Native adoption appends
+`compose.native.yml` and admits the published native artifact as described below;
+the baseline by itself does not install the custom reader authorizer. The
+2026-09-11 [native disposable closeout](../../docs/evidence/temporal-platform-native-disposable-closeout-20260911.md)
+binds the already-tested implementation, not a retained deployment.
+
 - The only product namespace admitted by this slice is `platform-automation`.
   It contains no tenant or customer Workflows.
 - GrowthOS receives only `platform-automation:read`.
@@ -34,9 +40,9 @@ namespace settings deliberately and requires re-provisioning to reject drift.
   `platform-automation:worker` plus `platform-automation:write`.
 - the provisioning operator receives only `temporal-system:admin` and is never
   installed in GrowthOS or a Worker.
-- Temporal uses its default JWT claim mapper and default authorizer with one
-  configured audience and an HTTPS JWKS URI. There is no no-op authorizer and no
-  unsigned development verifier.
+- Native Temporal wraps the official signature-verifying JWT mapper and default
+  authorizer with the dedicated reader policy, using one configured audience and
+  HTTPS JWKS URI. There is no no-op authorizer or unsigned development verifier.
 - External Frontend `7233` uses TLS with hostname verification and continues to
   authenticate product clients through JWT; it does not require a client
   certificate.
@@ -56,12 +62,19 @@ namespace settings deliberately and requires re-provisioning to reject drift.
   reviewed deployment override named by `TEMPORAL_PLATFORM_NETWORK_NAME`);
   Temporal is not given general internet egress merely to fetch keys.
 
-Temporal's default authorizer grants namespace-wide read-only access rather
-than per-Schedule or per-Workflow-type access. The accepted residual read scope
-is therefore all non-admin read APIs in `platform-automation`. This is acceptable
-only while the namespace contains no customer data and only the four approved
-platform automation Workflow types. The future GrowthOS proof client must still
-enforce its four Schedule/workflow-type allowlist and bounded input/history rules.
+The native reader permits only `DescribeSchedule`, `DescribeWorkflowExecution`
+and `GetWorkflowExecutionHistory`, checking the exact gRPC method, decoded request
+type and `platform-automation` namespace. `GetSystemInfo` is not on that allowlist.
+Other identities retain the default role policy described below. The GrowthOS
+proof client must still enforce its four Schedule/workflow-type allowlist and
+bounded input/history rules; server RPC authorization is not a particular run proof.
+
+The current accepted native frontend configuration is TLS plus verified JWT.
+If a client certificate is presented, the reader identity and verified chain
+remain bound and revalidated; the reader certificate cannot enter internode.
+An explicit frontend-mTLS configuration is supported but is a different deployment
+configuration with additional client-CA/certificate inputs. Do not describe the
+JWT-only disposable result as proof that reader mTLS was required.
 
 Temporal 1.31.2 also classifies Worker poll/respond RPCs as `AccessWrite`; its
 default authorizer does not select `RoleWorker` as a required role. A
@@ -81,6 +94,92 @@ and Linux/amd64 manifest digest read back from the registry. Compose refers only
 to the index digests. Updating any image requires a new tag-to-digest readback,
 review, disposable authorization proof, and release evidence; a moving tag is
 never a deployment input.
+
+### Native publication and retained overlay
+
+`.github/workflows/publish-temporal-platform-image.yml` is a manual, protected
+exact-main publisher for `ghcr.io/mlhjyx/global-temporal-platform`. It is separate
+from the Node runtime publisher and does not deploy or start Temporal. Creating
+the workflow does not authorize dispatching it. Its Dockerfile build context is
+the **repository root**, with `infra/temporal-platform/server/Dockerfile` selected.
+Existing required CI owns the Go business/race matrix; publication compiles the
+same code with verified modules and networking disabled at compile time.
+
+The image contains the native binary plus a source/binary/SBOM manifest and the public
+Temporal config/role templates under `/opt/temporal-platform-release`. The
+source digest binds production Go inputs, Dockerfile, schema/config contracts
+and both Compose files; the exact Git commit additionally binds the publisher.
+The publisher exports a never-started container, checks the actual native ELF
+module marker and SHA256, exact image/source labels, config bytes and the full
+merged path inventory for test/fixture contamination. It then publishes once,
+pulls the exact registry reference, checks its image ID and verifies the exact
+workflow/source attestation. Before pushing, it attests the actual Docker image
+config bytes (whose SHA256 is the image ID). If push succeeds but registry
+attestation fails or its ACK is lost, a retry can recover only after verifying
+those exact config bytes against the same trusted workflow/source attestation.
+A pre-existing tag without either trusted proof remains HOLD; labels alone are
+never enough, and the SHA tag is not overwritten. ELF/module inspection is a
+structural check, not an independent proof of RPC enforcement: source/build
+provenance and the separately bound native disposable proof remain required.
+The deterministic CycloneDX SBOM inventories the compiled binary's actual Go
+build-info, Go toolchain, pinned upstream container and its actual APK-installed
+package records. Module checksums and APK recorded checksums retain their own
+semantics; they are not mislabeled as binary file SHA256. The manifest binds Go
+build-info, APK inventory and SBOM bytes, and both publisher and retained
+preflight read back those files from the final image. Unmanaged upstream tools
+remain represented by the opaque pinned base component; inventory generation is
+**not** a vulnerability scan or a complete Release Bundle.
+Publication alone is not a
+retained readiness, namespace migration, RuntimeEvidence or Release Bundle.
+
+Before a separately authorized retained adoption, supply these **non-secret**
+bindings along with the existing deployment-owned secret references:
+
+```text
+TEMPORAL_PLATFORM_NATIVE_IMAGE=ghcr.io/mlhjyx/global-temporal-platform@sha256:<verified-digest>
+TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA=<verified-exact-source-commit>
+TEMPORAL_PLATFORM_READER_SUBJECT=<fixed-GrowthOS-reader-subject>
+```
+
+Render and validate without starting services (the JSON contains rendered
+deployment secrets; keep it in an operator-owned 0600 temporary file, never print,
+commit or attach it):
+
+```bash
+umask 077
+native_compose_json=$(mktemp /var/tmp/temporal-native-compose.XXXXXX)
+docker compose -p global \
+  -f infra/temporal-platform/compose.yml \
+  -f infra/temporal-platform/compose.native.yml \
+  --profile platform-temporal config --format json > "$native_compose_json"
+node scripts/temporal-native-publication.mjs compose "$native_compose_json" \
+  "$PWD" "$TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA" \
+  "$TEMPORAL_PLATFORM_NATIVE_IMAGE" "$TEMPORAL_PLATFORM_READER_SUBJECT"
+```
+
+The admission rejects stock/moving images, missing/mismatched reader identity,
+alternate entrypoints, binary-overriding mounts, writable contract mounts, public
+ports and reuse of legacy port 7233. It does not install secrets or establish
+their validity. Check the native image manifest against this exact source before
+using its public templates as bind mounts; a different source tree is not an
+equivalent deployment input. The printed admission summary contains no secrets.
+
+Preserve `temporal-dev.service`, its SQLite data, legacy namespaces and existing
+Workflow executions. The dedicated PostgreSQL/schema/namespace resources remain
+separate. Do not switch the global Backend `TEMPORAL_ADDRESS`/`TEMPORAL_NAMESPACE`
+or mixed Worker to this service: dedicated client credentials and namespace-aware
+Worker/lease admission are later contracts. `provision.sh` and `verify.sh` below
+remain **mutating operator tools** (the latter includes a write-denial probe), not
+safe commands for an unapproved retained readback. They are not invoked by the
+publisher. The standard retained `provision.sh` requires the native image, source
+and reader identities, renders the same two-file Compose input in a private 0700
+directory/0600 files, performs local-only image capture/admission (no pull, no
+container start), then invokes shared `provision-core.sh`. Temporary rendered
+secrets and image exports are cleaned on success and failure; raw Compose errors
+are never printed. Arbitrary topology overrides are rejected at this retained
+entry. The disposable harness has its own test-support wrapper calling the
+**same** core with exact disposable Compose/services; no product environment
+switch restores the stock fallback.
 
 ## Secret layout
 
@@ -133,6 +232,7 @@ Validate the fully materialized topology, then run the bounded provisioner:
 ```bash
 docker compose -p global \
   -f infra/temporal-platform/compose.yml \
+  -f infra/temporal-platform/compose.native.yml \
   --profile platform-temporal config --quiet
 infra/temporal-platform/provision.sh
 ```
