@@ -83,7 +83,10 @@ async function waitForGroupExit(
       try {
         raw = await fs.readFile(`/proc/${candidate}/stat`, "utf8");
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        // A process may disappear before open (ENOENT) or after its proc file
+        // has been opened (ESRCH). Neither leaves an executable group member.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ESRCH") continue;
         throw new Error(CLEANUP_ERROR, { cause: error });
       }
       const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
