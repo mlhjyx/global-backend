@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath, mkdir } from "node:fs/promises";
+import { lstat, readdir, open, realpath, mkdir } from "node:fs/promises";
+import { constants } from "node:fs";
 import { isAbsolute, join, relative, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { nativeSbom } from "./temporal-native-publication-sbom.mjs";
@@ -204,25 +205,57 @@ export async function captureNativeImage(
 }
 
 async function boundedFile(path, maximum = 4 * 1024 * 1024) {
-  const before = await lstat(path);
-  if (
-    !before.isFile() ||
-    before.size < 1 ||
-    before.size > maximum ||
-    (await realpath(path)) !== resolve(path)
-  )
-    fail("FILE");
-  const bytes = await readFile(path);
-  const after = await lstat(path);
-  if (
-    bytes.length !== before.size ||
-    before.ino !== after.ino ||
-    before.dev !== after.dev ||
-    before.mtimeMs !== after.mtimeMs ||
-    before.size !== after.size
-  )
-    fail("FILE");
-  return bytes;
+  let handle;
+  const sameFile = (left, right) =>
+    ["dev", "ino", "mode", "uid", "gid", "size", "mtimeNs", "ctimeNs"].every(
+      (field) => left[field] === right[field],
+    );
+  try {
+    if (!Number.isSafeInteger(maximum) || maximum < 1) fail("FILE");
+    // Open first; all content reads use this one descriptor. NONBLOCK prevents
+    // a FIFO from hanging before fstat can reject its non-regular file type.
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const before = await handle.stat({ bigint: true });
+    const namedBefore = await lstat(path, { bigint: true });
+    const canonical = resolve(path);
+    if (
+      !before.isFile() ||
+      !namedBefore.isFile() ||
+      before.size < 1n ||
+      before.size > BigInt(maximum) ||
+      !sameFile(before, namedBefore) ||
+      (await realpath(path)) !== canonical
+    )
+      fail("FILE");
+    // One extra byte detects growth without readFile's unbounded EOF allocation.
+    const bytes = Buffer.alloc(Number(before.size) + 1);
+    let size = 0;
+    while (size < bytes.length) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        size,
+        bytes.length - size,
+        size,
+      );
+      if (bytesRead === 0) break;
+      size += bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    const namedAfter = await lstat(path, { bigint: true });
+    if (
+      BigInt(size) !== before.size ||
+      !sameFile(before, after) ||
+      !sameFile(after, namedAfter) ||
+      (await realpath(path)) !== canonical
+    )
+      fail("FILE");
+    return bytes.subarray(0, size);
+  } finally {
+    await handle?.close();
+  }
 }
 
 export async function sourceIdentity(root, sourceSha) {

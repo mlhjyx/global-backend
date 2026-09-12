@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import {
   mkdtemp,
   mkdir,
@@ -1184,10 +1186,8 @@ function assertNativePublicationContract(workflow) {
       );
       if (step.id !== "logout")
         assert.equal(commands(step)[0], "set -euo pipefail");
-      assert.doesNotMatch(
-        run(step),
-        /^\s*(?:SUBJECT_SHA|IMAGE_NAME)=|set \+e/m,
-      );
+      assert.doesNotMatch(run(step), /^\s*(?:SUBJECT_SHA|IMAGE_NAME)=/m);
+      assert.doesNotMatch(run(step), /set \+e/);
     }
     assert(!Object.hasOwn(mapping(step.block, 10), "SUBJECT_SHA"));
     assert(!Object.hasOwn(mapping(step.block, 10), "IMAGE_NAME"));
@@ -1427,6 +1427,203 @@ test("native workflow machine contract rejects dangerous trigger, permission, id
   assert.throws(() =>
     assertNativePublicationContract(
       workflow.slice(0, configStart) + workflow.slice(publicationStart),
+    ),
+  );
+});
+
+test("file admission rejects restored pathname and content races and bounds concurrent growth", async (t) => {
+  // Interpose only at the actual I/O boundary; mutations are real filesystem
+  // operations against disposable files, not fabricated stat/read responses.
+  for (const scenario of [
+    "parent-swap",
+    "leaf-swap",
+    "same-inode-rewrite",
+    "growth",
+  ]) {
+    await t.test(scenario, async () => {
+      const directory = await mkdtemp(join(tmpdir(), "native-file-race-"));
+      const parent = join(directory, "named");
+      const outside = join(directory, "outside");
+      await mkdir(parent);
+      await mkdir(outside);
+      const path = join(parent, "config.json");
+      const attacker = join(outside, "config.json");
+      const bytes = (padding) =>
+        Buffer.from(
+          JSON.stringify({
+            config: {
+              Labels: {
+                "org.opencontainers.image.revision": sha,
+                "io.global.temporal.native.role": "native-reader-authorization",
+              },
+            },
+            padding,
+          }),
+        );
+      const original = bytes("Original");
+      const replacement = bytes("Attacked");
+      assert.equal(original.length, replacement.length);
+      await writeFile(path, original);
+      await writeFile(attacker, replacement);
+      // Exact whole-second mtime lets the test restore it faithfully. ctime
+      // still changes on a same-inode rewrite and cannot be restored by utimes.
+      await fsPromises.utimes(path, 1_000_000, 1_000_000);
+      const real = { open: fsPromises.open, readFile: fsPromises.readFile };
+      let mutations = 0;
+      let opened = 0;
+      let closed = 0;
+      let consumed = 0;
+      const mutate = async (operation) => {
+        if (mutations) return operation();
+        mutations++;
+        if (scenario === "parent-swap") {
+          const saved = join(directory, "saved-parent");
+          await fsPromises.rename(parent, saved);
+          await symlink(outside, parent);
+          try {
+            return await operation();
+          } finally {
+            await fsPromises.unlink(parent);
+            await fsPromises.rename(saved, parent);
+          }
+        }
+        if (scenario === "leaf-swap") {
+          const saved = join(directory, "saved-file");
+          await fsPromises.rename(path, saved);
+          await symlink(attacker, path);
+          try {
+            return await operation();
+          } finally {
+            await fsPromises.unlink(path);
+            await fsPromises.rename(saved, path);
+          }
+        }
+        await writeFile(
+          path,
+          scenario === "growth"
+            ? Buffer.alloc(4 * 1024 * 1024 + 1, 0x78)
+            : replacement,
+        );
+        await fsPromises.utimes(path, 1_000_000, 1_000_000);
+        try {
+          return await operation();
+        } finally {
+          await writeFile(path, original);
+          await fsPromises.utimes(path, 1_000_000, 1_000_000);
+        }
+      };
+      // Old pathname read is included so this regression demonstrates RED on
+      // the vulnerable implementation; the replacement reader uses real FDs.
+      fsPromises.readFile = async (file, ...args) => {
+        if (file !== path) return real.readFile(file, ...args);
+        return mutate(async () => {
+          const value = await real.readFile(file, ...args);
+          consumed += value.length;
+          return value;
+        });
+      };
+      fsPromises.open = async (file, ...args) => {
+        const create = () => real.open(file, ...args);
+        const handle =
+          file === path && scenario === "parent-swap"
+            ? await mutate(create)
+            : await create();
+        if (file === path) {
+          opened++;
+          const read = handle.read.bind(handle);
+          const close = handle.close.bind(handle);
+          handle.read = async (...readArgs) => {
+            const operation = async () => {
+              const value = await read(...readArgs);
+              consumed += value.bytesRead;
+              return value;
+            };
+            return scenario === "parent-swap" ? operation() : mutate(operation);
+          };
+          handle.close = async () => {
+            closed++;
+            return close();
+          };
+        }
+        return handle;
+      };
+      syncBuiltinESMExports();
+      try {
+        let rejected = false;
+        try {
+          await verifyNativeProvenance(
+            {
+              imageReference,
+              sourceSha: sha,
+              imageId: digest(replacement),
+              configPath: path,
+            },
+            () => {},
+          );
+        } catch (error) {
+          assert.match(error.message, /TEMPORAL_NATIVE_PROVENANCE_INVALID/);
+          rejected = true;
+        }
+        assert.equal(
+          mutations,
+          1,
+          "the real filesystem race must be exercised",
+        );
+        assert.equal(rejected, true, "raced bytes must never be admitted");
+        if (scenario === "parent-swap" && opened)
+          assert.equal(
+            consumed,
+            0,
+            "a different opened inode must be rejected before reading",
+          );
+        if (scenario === "growth")
+          assert(
+            consumed <= original.length + 1,
+            "concurrent growth must not cause an unbounded read",
+          );
+        assert.equal(
+          closed,
+          opened,
+          "all successfully opened descriptors must close",
+        );
+      } finally {
+        fsPromises.readFile = real.readFile;
+        fsPromises.open = real.open;
+        syncBuiltinESMExports();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("workflow guard retains anchored assignment and anywhere errexit disabling semantics", async () => {
+  const workflow = await readFile(
+    join(repo, ".github/workflows/publish-temporal-platform-image.yml"),
+    "utf8",
+  );
+  const location = "          git diff --exit-code";
+  for (const addition of [
+    "SUBJECT_SHA=changed",
+    "IMAGE_NAME=changed",
+    "set +e",
+    "echo safe; set +e",
+    "if true; then set +e; fi",
+  ]) {
+    assert.throws(
+      () =>
+        assertNativePublicationContract(
+          workflow.replace(location, location + "\n          " + addition),
+        ),
+      undefined,
+      addition,
+    );
+  }
+  assert.doesNotThrow(() =>
+    assertNativePublicationContract(
+      workflow.replace(
+        location,
+        location + '\n          echo "SUBJECT_SHA=display-only"',
+      ),
     ),
   );
 });
