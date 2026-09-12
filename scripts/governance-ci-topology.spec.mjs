@@ -355,8 +355,17 @@ test("the required build executes and inspects the exact-SHA immutable OCI contr
   assert.match(ociStep, /verify-runtime-artifact\.mjs/);
   assert.match(ociStep, /runtime-image-verifier\.mjs \/app/);
   assert.match(ociStep, /--entrypoint openssl/);
-  assert.match(ociStep, /--entrypoint \/usr\/bin\/chromium/);
-  assert.match(ociStep, /data:text\/html,<title>oci-browser-smoke<\/title>/);
+  assert.match(ociStep, /--rm --init --network none --read-only --cap-drop ALL/);
+  assert.match(ociStep, /timeout --signal=TERM --kill-after=10s 5m/);
+  assert.match(ociStep, /--name "\$\{CONTAINER_ID\}-browser-probe"/);
+  assert.match(ociStep, /docker rm -f "\$\{CONTAINER_ID\}-browser-probe"/);
+  assert.match(ociStep, /scripts\/test-support\/browser-probe-oci-smoke\.cjs",dst=\/run\/browser-probe-oci-smoke\.cjs,readonly/);
+  assert.match(ociStep, /--entrypoint node "\$\{OCI_IMAGE\}" \/run\/browser-probe-oci-smoke\.cjs/);
+  const smoke = await readRepositoryFile("scripts/test-support/browser-probe-oci-smoke.cjs");
+  assert.match(smoke, /require\('\/app\/apps\/api\/dist\/runtime\/browser-readiness-probe\.js'\)/);
+  assert.match(smoke, /iteration <= 200/);
+  assert.match(smoke, /await probe\('\/usr\/bin\/chromium'\)/);
+  assert.match(smoke, /if \(roots\.length !== 0\) throw/);
   assert.doesNotMatch(ociStep, /docker push|buildx build.*--push/);
 });
 
