@@ -188,6 +188,19 @@ function makeService(opts: { embedDim?: number; doclingMd?: string; siteExists?:
 }
 
 describe('KbService（知识库地基：切块→向量化→pgvector 落库，02 §12）', () => {
+  it.each([
+    { source: 'upload' as const },
+    { source: 'wizard' as const, assetId: 'unexpected-asset' },
+  ])('rejects inconsistent upload identity before embedding or persistence: $source', async (identity) => {
+    const { service, db, rawInserts, embedCalls } = makeService();
+    await expect(service.ingestText(CTX, {
+      siteId: SITE_ID, title: 'synthetic title', text: 'synthetic content', ...identity,
+    })).rejects.toThrow('KB upload documents require exactly one assetId');
+    expect(embedCalls).toHaveLength(0);
+    expect(rawInserts).toHaveLength(0);
+    expect(db.docs).toHaveLength(0);
+  });
+
   it('ingestText：建 doc（ready）+ 每 chunk 一次向量 INSERT + chunkCount 回填', async () => {
     const { service, db, rawInserts, embedCalls } = makeService();
     const text = ['# Intro', 'A'.repeat(300), '## Products', 'B'.repeat(300)].join('\n\n');
@@ -315,6 +328,7 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(db.assets[0]).toMatchObject({
       processingStatus: 'queued',
       processingErrorCode: 'KB_STORAGE_UNAVAILABLE',
+      error: 'KB ingestion failed',
       leaseToken: null,
       leaseUntil: null,
     });
@@ -451,11 +465,47 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(db.assets[0]).toMatchObject({
       processingStatus: 'failed_terminal',
       processingErrorCode: 'KB_DOCUMENT_INVALID',
+      error: 'KB ingestion failed',
       retryAt: null,
       leaseToken: null,
       leaseUntil: null,
     });
     expect(db.docs).toHaveLength(0);
+  });
+
+  it.each(['empty', 'aborted', 'superseded'] as const)('keeps %s failure state fenced without persisting dependency text', async (scenario) => {
+    const { service, db } = makeService({ doclingMd: '' });
+    db.assets.push({
+      id: 'ast-diagnostic', siteId: SITE_ID, kind: 'doc', filename: 'private.pdf',
+      mime: 'application/pdf', objectKey: 'private-object', contentHash: '4'.repeat(64),
+      processingStatus: 'queued', processingAttempt: 0,
+    });
+    const controller = new AbortController();
+    const storage = service as unknown as { storage: { getBuffer: () => Promise<Buffer> } };
+    storage.storage.getBuffer = async () => {
+      if (scenario === 'superseded') {
+        Object.assign(db.assets[0], {
+          leaseToken: 'replacement-token', processingAttempt: 2, error: 'replacement diagnostic',
+        });
+        throw new Error('late-worker-secret-canary');
+      }
+      if (scenario === 'aborted') controller.abort(new Error('abort-secret-canary'));
+      return Buffer.from('synthetic document');
+    };
+    const out = await service.processAsset(CTX, SITE_ID, 'ast-diagnostic', { signal: controller.signal });
+    expect(db.docs).toHaveLength(0);
+    if (scenario === 'superseded') {
+      expect(out.outcome).toBe('superseded');
+      expect(db.assets[0]).toMatchObject({
+        leaseToken: 'replacement-token', processingAttempt: 2, error: 'replacement diagnostic',
+      });
+    } else {
+      expect(out.outcome).toBe(scenario === 'empty' ? 'failed_terminal' : 'retry_scheduled');
+      expect(db.assets[0].error).toBe('KB ingestion failed');
+      expect(db.assets[0].retryAt).toEqual(scenario === 'empty' ? null : expect.any(Date));
+      expect(db.assets[0].leaseToken).toBeNull();
+    }
+    expect(JSON.stringify(db.assets[0])).not.toContain('canary');
   });
 
   it('R2-A2：retryAt 未到期时不认领，也不触达 MinIO', async () => {
@@ -512,7 +562,11 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     const svc = service as unknown as { storage: { getBuffer: (k: string) => Promise<Buffer> } };
     const realGet = svc.storage.getBuffer.bind(svc.storage);
     svc.storage.getBuffer = async (key: string) => {
-      if (key === 'missing-object') throw new Error('NoSuchKey');
+      if (key === 'missing-object') {
+        throw new Error('synthetic-storage-secret-canary', {
+          cause: new Error('synthetic-request-body-canary'),
+        });
+      }
       return realGet(key);
     };
     const summary = await service.processQueued(CTX, SITE_ID);
@@ -521,7 +575,8 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(bad?.processingStatus).toBe('queued');
     expect(bad?.processingErrorCode).toBe('KB_STORAGE_UNAVAILABLE');
     expect(bad?.retryAt).toBeInstanceOf(Date);
-    expect(String(bad?.error)).toContain('NoSuchKey');
+    expect(bad?.error).toBe('KB ingestion failed');
+    expect(JSON.stringify(bad)).not.toContain('canary');
     const ok = db.assets.find((a) => a.id === 'ast-ok');
     expect(ok?.processingStatus).toBe('ready');
   });
