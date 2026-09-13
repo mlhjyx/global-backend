@@ -62,7 +62,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requireExactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string) {
   const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) {
-    throw new AssetCleanupContractError(`${label} has unknown fields: ${unknown.join(',')}`);
+    throw new AssetCleanupContractError(`${label} has unknown fields`);
   }
 }
 

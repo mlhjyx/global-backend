@@ -50,6 +50,14 @@ function canonical() {
 }
 
 describe('MF0-B canonical cleanup contract', () => {
+  it.each(['command', 'canonical', 'variant'] as const)('does not echo unknown %s field names', (location) => {
+    const value = canonical();
+    const target = location === 'command' ? value : location === 'canonical' ? value.canonical : value.variants[0];
+    Object.assign(target, { ['synthetic-secret-canary-' + 'x'.repeat(8192)]: true });
+    const label = location === 'command' ? 'canonical cleanup command' : location === 'canonical' ? 'canonical cleanup object' : 'variants[0]';
+    expect(() => parseAssetCleanupCommand(value)).toThrow(new AssetCleanupContractError(`${label} has unknown fields`));
+  });
+
   it('accepts an exact sorted frozen plan and produces its Outbox payload', () => {
     const command = parseAssetCleanupCommand(canonical());
     expect(command.objectClass).toBe('canonical');
