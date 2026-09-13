@@ -250,6 +250,9 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         platform_automation: PLATFORM_AUTOMATION_READINESS_SCHEMA,
         site_builder_model_settlement_readback: COMPONENT_SCHEMA,
         platform_technical_quote_authentication: COMPONENT_SCHEMA,
+        // Optional for additive readback compatibility. Missing means unproven;
+        // the recovery caller must still enforce its own capability gate.
+        platform_target_lookup: COMPONENT_SCHEMA,
       },
     },
     components: {

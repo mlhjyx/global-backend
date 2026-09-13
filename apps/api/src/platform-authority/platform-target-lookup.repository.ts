@@ -36,13 +36,43 @@ export class PlatformTargetLookupRepository {
     private readonly monotonicNow: () => number = () => performance.now(),
   ) {}
 
+  async readiness(deadlineAtMs: number): Promise<boolean> {
+    try {
+      return await this.read(
+        Prisma.sql`SELECT COALESCE(has_function_privilege(session_user,
+        to_regprocedure('public.lookup_platform_authority_target_v1(text,uuid,text,text)'),
+        'EXECUTE'), false) AS found`,
+        deadlineAtMs,
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async lookup(
     request: PlatformAuthorityTargetLookupRequest,
     deadlineAtMs: number,
   ): Promise<boolean> {
     try {
-      if (!this.writer) return unavailable();
       const input = PlatformAuthorityTargetLookupRequestSchema.parse(request);
+      return await this.read(
+        Prisma.sql`SELECT public.lookup_platform_authority_target_v1(
+        ${input.target_issuer}::text, ${input.target_jti}::uuid,
+        ${input.schedule_id}::text, ${input.workflow_run_id}::text
+      ) AS found`,
+        deadlineAtMs,
+      );
+    } catch {
+      throw new Error(UNAVAILABLE);
+    }
+  }
+
+  private async read(
+    statement: Prisma.Sql,
+    deadlineAtMs: number,
+  ): Promise<boolean> {
+    try {
+      if (!this.writer) return unavailable();
       const budget = remaining(this.monotonicNow(), deadlineAtMs);
       // Acquisition and transaction share the caller's existing absolute deadline.
       // Reserving both within it prevents each layer from opening a new 2s window.
@@ -63,11 +93,7 @@ export class PlatformTargetLookupRepository {
           remaining(this.monotonicNow(), deadlineAtMs);
           await attestExecutionBudgetPlatformWriterTransaction(transaction);
           remaining(this.monotonicNow(), deadlineAtMs);
-          const rows =
-            await transaction.$queryRaw(Prisma.sql`SELECT public.lookup_platform_authority_target_v1(
-          ${input.target_issuer}::text, ${input.target_jti}::uuid,
-          ${input.schedule_id}::text, ${input.workflow_run_id}::text
-        ) AS found`);
+          const rows = await transaction.$queryRaw(statement);
           remaining(this.monotonicNow(), deadlineAtMs);
           return foundResult(rows);
         },

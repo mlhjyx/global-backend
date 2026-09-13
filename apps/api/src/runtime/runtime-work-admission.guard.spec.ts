@@ -9,6 +9,7 @@ import { RuntimeWorkAdmissionGuard } from './runtime-work-admission.guard';
 import { RuntimeAdmissionService } from './runtime-admission';
 import { RuntimeReadinessService } from '../health/runtime-readiness.service';
 import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
+import { PlatformTargetLookupController } from '../platform-authority/platform-target-lookup.controller';
 import { READ_ONLY_CONTROL_PLANE_METADATA } from './read-only-control-plane.decorator';
 
 const readySnapshot = Object.freeze({ status: 'ready' as const });
@@ -148,13 +149,15 @@ describe('RuntimeWorkAdmissionGuard', () => {
     expect(source).toContain('useClass: RuntimeWorkAdmissionGuard');
   });
 
-  it('admits the read-only metadata on exactly one code-owned product handler', () => {
+  it('admits read-only metadata only on the registered zero-write control-plane handlers', () => {
     const sourceRoot = resolve(import.meta.dirname, '..');
     const uses = productionTypescript(sourceRoot)
       .filter((path) => readFileSync(path, 'utf8').includes('@ReadOnlyControlPlane()'))
       .map((path) => relative(sourceRoot, path));
     expect(uses).toEqual([
       'platform-authority/platform-execution-technical-quote.controller.ts',
+      'platform-authority/platform-target-lookup.controller.ts',
     ]);
+    expect(Reflect.getMetadata(READ_ONLY_CONTROL_PLANE_METADATA, PlatformTargetLookupController.prototype.read)).toBe(true);
   });
 });

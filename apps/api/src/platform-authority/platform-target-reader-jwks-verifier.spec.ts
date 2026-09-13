@@ -83,7 +83,119 @@ const verifier = (
   });
 afterEach(() => vi.useRealTimers());
 
+describe("target reader public trust readiness", () => {
+  it("validates the actual public keyset and fixed configuration without verifying or minting a token", async () => {
+    const pull = fetcher();
+    const subject = verifier(pull);
+    const authenticate = vi.spyOn(subject, "verify");
+    await expect(subject.readiness(2100)).resolves.toBe(true);
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(pull).toHaveBeenCalledExactlyOnceWith(
+      env.PLATFORM_AUTHORITY_TARGET_READER_JWKS_URI,
+      expect.objectContaining({
+        method: "GET",
+        redirect: "error",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(pull.mock.calls[0]![1]!.headers).toEqual({
+      Accept: "application/jwk-set+json, application/json",
+    });
+    pull.mockResolvedValueOnce(response('{"keys":[]}'));
+    await expect(subject.readiness(2100)).resolves.toBe(false);
+    expect(pull).toHaveBeenCalledTimes(2);
+  });
+  it("returns false without network for missing identity/trust or invalid caller allocation", async () => {
+    for (const name of Object.keys(env)) {
+      const pull = fetcher();
+      await expect(
+        verifier(pull, { ...env, [name]: "" }).readiness(2100),
+      ).resolves.toBe(false);
+      expect(pull).not.toHaveBeenCalled();
+    }
+    const pull = fetcher();
+    await expect(
+      verifier(pull, {
+        ...env,
+        PLATFORM_AUTHORITY_TARGET_READER_JWKS_URI: "http://127.0.0.1/jwks",
+      }).readiness(2100),
+    ).resolves.toBe(false);
+    for (const deadline of [NaN, Infinity, 100, 2101])
+      await expect(verifier(pull).readiness(deadline)).resolves.toBe(false);
+    expect(pull).not.toHaveBeenCalled();
+  });
+  it("never treats redirected, private, duplicate, oversized or unavailable JWKS as ready", async () => {
+    for (const result of [
+      response("redirect", 302),
+      response(JSON.stringify({ keys: [{ ...jwk, d: "AA" }] })),
+      response(JSON.stringify({ keys: [jwk, jwk] })),
+      response(" ".repeat(65537)),
+    ])
+      await expect(verifier(async () => result).readiness(2100)).resolves.toBe(
+        false,
+      );
+    await expect(
+      verifier(async () => {
+        throw new Error("must-not-leak");
+      }).readiness(2100),
+    ).resolves.toBe(false);
+  });
+  it("uses the same absolute deadline and cancels a fulfilled response that arrives after readiness timed out", async () => {
+    vi.useFakeTimers();
+    let resolveFetch!: (response: Response) => void;
+    let signal: AbortSignal | undefined;
+    const subject = verifier(async (_url, init) => {
+      signal = init?.signal as AbortSignal;
+      return new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+    const pending = subject.readiness(120);
+    await vi.advanceTimersByTimeAsync(21);
+    await expect(pending).resolves.toBe(false);
+    expect(signal?.aborted).toBe(true);
+    const cancel = vi.fn();
+    resolveFetch(
+      new Response(new ReadableStream({ cancel }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it("discards a valid keyset when retrieval consumes the remaining budget", async () => {
+    let tick = 100;
+    const subject = verifier(
+      async () => {
+        tick = 2100;
+        return response();
+      },
+      env,
+      { monotonicNow: () => tick },
+    );
+    await expect(subject.readiness(2100)).resolves.toBe(false);
+  });
+});
+
 describe("fixed-purpose target reader authentication", () => {
+  it("rechecks expiry after the final async completion boundary before returning identity", async () => {
+    let wall = NOW;
+    let reads = 0;
+    const subject = verifier(fetcher(), env, {
+      now: () => {
+        reads += 1;
+        if (reads === 2)
+          queueMicrotask(() => {
+            wall = NOW + 300;
+          });
+        return new Date(wall * 1000);
+      },
+    });
+    await expect(subject.verify(token(), 2100)).rejects.toBeInstanceOf(
+      PlatformTargetReaderDeniedError,
+    );
+  });
+
   it("uses real default clocks and preserves configured loopback issuer identifiers without HTTP JWKS", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW * 1000);

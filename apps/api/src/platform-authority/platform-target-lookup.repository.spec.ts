@@ -60,6 +60,73 @@ function database(rows: unknown = [{ found: true }]) {
   return { tx, query, client, events };
 }
 describe("platform target lookup repository", () => {
+  it("readiness checks only static function metadata after the same read-only principal gate", async () => {
+    const db = database();
+    expect(
+      await new PlatformTargetLookupRepository(
+        db.client as never,
+        () => 100,
+      ).readiness(1600),
+    ).toBe(true);
+    expect(db.events).toEqual([
+      "read-only",
+      "timeout",
+      "attest",
+      "lookup",
+      "committed",
+    ]);
+    const statement = db.query.mock.calls[1][0];
+    expect(statement.values).toEqual([]);
+    expect(statement.text.replace(/\s+/g, " ").trim()).toBe(
+      "SELECT COALESCE(has_function_privilege(session_user, to_regprocedure('public.lookup_platform_authority_target_v1(text,uuid,text,text)'), 'EXECUTE'), false) AS found",
+    );
+  });
+  it.each(
+    [[{ found: false }], [], [{ found: "true" }]].map((rows) => ({ rows })),
+  )(
+    "readiness fails closed for absent function/privilege or malformed metadata %#",
+    async ({ rows }) => {
+      const db = database(rows);
+      expect(
+        await new PlatformTargetLookupRepository(
+          db.client as never,
+          () => 100,
+        ).readiness(1600),
+      ).toBe(false);
+    },
+  );
+  it("readiness has no fallback and rejects invalid principal before metadata", async () => {
+    expect(
+      await new PlatformTargetLookupRepository(null, () => 100).readiness(1600),
+    ).toBe(false);
+    const db = database();
+    db.query.mockReset().mockResolvedValue([{ ...principal, superuser: true }]);
+    expect(
+      await new PlatformTargetLookupRepository(
+        db.client as never,
+        () => 100,
+      ).readiness(1600),
+    ).toBe(false);
+    expect(db.query).toHaveBeenCalledTimes(1);
+  });
+  it("readiness rejects expired deadlines before DB and discards late metadata ACK", async () => {
+    let now = 100;
+    const db = database();
+    const repository = new PlatformTargetLookupRepository(
+      db.client as never,
+      () => now,
+    );
+    expect(await repository.readiness(100)).toBe(false);
+    expect(db.client.$transaction).not.toHaveBeenCalled();
+    db.query
+      .mockReset()
+      .mockResolvedValueOnce([principal])
+      .mockImplementationOnce(async () => {
+        now = 1600;
+        return [{ found: true }];
+      });
+    expect(await repository.readiness(1600)).toBe(false);
+  });
   it.each([true, false])(
     "returns only the committed boolean %s with a parameterized exact tuple",
     async (found) => {
