@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import test from "node:test";
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { inspectFilesystem } from "./governance-main-worktree-sync-filesystem.mjs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -9,15 +13,29 @@ import {
   assertGitCommandAllowed,
   createSafeGitEnvironment,
   getCliExitCode,
-  getMainWorktreeSyncStatus,
+  getMainWorktreeSyncStatus as getMainWorktreeSyncStatusImplementation,
 } from "./governance-main-worktree-sync.mjs";
 
 const MAIN_HEAD = "1111111111111111111111111111111111111111";
 const REMOTE_HEAD = "2222222222222222222222222222222222222222";
 
+const fakeFilesystemProof = async () => ({
+  preservationDigest: "local-proof",
+  destinationDigest: "destination-proof",
+  collisions: [],
+});
+
+function getMainWorktreeSyncStatus(options = {}) {
+  return getMainWorktreeSyncStatusImplementation({
+    observeFilesystem: fakeFilesystemProof,
+    ...options,
+  });
+}
+
 function applyMainWorktreeSync(options = {}) {
   return applyMainWorktreeSyncImplementation({
     invocationCwd: EXPECTED_MAIN_WORKTREE,
+    observeFilesystem: fakeFilesystemProof,
     ...options,
   });
 }
@@ -77,7 +95,10 @@ function createFakeExecutor(options = {}) {
       };
     }
     if (command === "symbolic-ref --quiet HEAD") {
-      return { stdout: `${config.branch}\n`, stderr: "" };
+      return {
+        stdout: `${state.applied ? (config.postApplyBranch ?? config.branch) : config.branch}\n`,
+        stderr: "",
+      };
     }
     if (command === "fetch origin --prune") {
       if (config.fetchError) throw config.fetchError;
@@ -97,7 +118,7 @@ function createFakeExecutor(options = {}) {
     if (command === "rev-parse HEAD") {
       state.localHeadReads += 1;
       const head = state.applied
-        ? REMOTE_HEAD
+        ? (config.postApplyLocalHead ?? REMOTE_HEAD)
         : state.localHeadReads > 1
           ? (config.preMergeLocalHead ?? MAIN_HEAD)
           : MAIN_HEAD;
@@ -117,7 +138,7 @@ function createFakeExecutor(options = {}) {
     }
     if (
       command ===
-      "status --porcelain=v1 -z --untracked-files=all --ignored=matching"
+      "status --porcelain=v1 -z --untracked-files=all --ignored=traditional"
     ) {
       state.statusReadsBeforeApply += 1;
       if (!state.applied) {
@@ -135,19 +156,14 @@ function createFakeExecutor(options = {}) {
         stderr: "",
       };
     }
+    if (command === "ls-files --cached -z") return { stdout: "", stderr: "" };
     if (command === "diff --name-only -z HEAD --") {
       return { stdout: nul(config.tracked), stderr: "" };
     }
-    if (
-      command ===
-      "ls-files --others --exclude-standard --directory --no-empty-directory -z"
-    ) {
+    if (command === "ls-files --others --exclude-standard -z") {
       return { stdout: nul(config.untracked), stderr: "" };
     }
-    if (
-      command ===
-      "ls-files --others --ignored --exclude-standard --directory --no-empty-directory -z"
-    ) {
+    if (command === "ls-files --others --ignored --exclude-standard -z") {
       return { stdout: nul(config.ignored), stderr: "" };
     }
     if (command === `diff --name-only -z ${MAIN_HEAD}..${REMOTE_HEAD} --`) {
@@ -161,7 +177,7 @@ function createFakeExecutor(options = {}) {
       if (config.readTreeError) throw config.readTreeError;
       return { stdout: "", stderr: "" };
     }
-    if (command === `merge --ff-only ${REMOTE_HEAD}`) {
+    if (command === `merge --ff-only --no-overwrite-ignore ${REMOTE_HEAD}`) {
       state.applied = true;
       return { stdout: "Updating\n", stderr: "" };
     }
@@ -210,30 +226,25 @@ test("status reports a clean fast-forward as ready but does not mutate it", asyn
   );
 });
 
-test("apply fetches and preserves non-colliding tracked dirt byte-for-byte", async () => {
-  const dirtyStatus = " D docs/local-only.md\0";
+test("apply preserves noncolliding dirt through exact fast-forward and postcheck", async () => {
   const git = createFakeExecutor({
     behind: 2,
     incoming: ["src/remote-change.ts"],
-    status: dirtyStatus,
+    status: " D docs/local-only.md\0",
     tracked: ["docs/local-only.md"],
   });
-
   const result = await applyMainWorktreeSync({
     git: git.run,
     resolveRealpath: fakeRealpath,
   });
-
   assert.equal(result.state, "APPLIED");
-  assert.equal(result.localHead, REMOTE_HEAD);
-  assert.equal(result.remoteHead, REMOTE_HEAD);
   assert.equal(result.statusPreserved, true);
-  assert.equal(result.remoteFreshness, "FETCHED_AT_RUNTIME");
+  assert.equal(result.filesystemPreserved, true);
   assert.equal(
-    git.calls.findIndex(({ args }) => args[0] === "fetch") <
-      git.calls.findIndex(({ args }) => args[0] === "merge"),
+    git.calls.some(({ args }) => args[0] === "merge"),
     true,
   );
+  assert.equal(git.state.readTreeReads, 3);
 });
 
 test("apply refuses a noncanonical invocation directory before any Git command", async () => {
@@ -427,43 +438,81 @@ test("read-tree rejection blocks merge", async () => {
   );
 });
 
-test("post-apply status drift is reported as a fail-closed partial application", async () => {
+test("unchanged status cannot hide a local content proof change", async () => {
+  const git = createFakeExecutor({ behind: 1, incoming: ["new.md"] });
+  let calls = 0;
+  const result = await applyMainWorktreeSync({
+    git: git.run,
+    resolveRealpath: fakeRealpath,
+    observeFilesystem: async () => ({
+      preservationDigest: String(++calls),
+      destinationDigest: "same",
+      collisions: [],
+    }),
+  });
+  assert.equal(result.state, "PRE_MERGE_FILESYSTEM_DRIFT_HOLD");
+  assert.equal(git.state.applied, false);
+});
+
+test("new destination between inventories blocks before merge", async () => {
+  const git = createFakeExecutor({ behind: 1, incoming: ["new.md"] });
+  let calls = 0;
+  const result = await applyMainWorktreeSync({
+    git: git.run,
+    resolveRealpath: fakeRealpath,
+    observeFilesystem: async () => ({
+      preservationDigest: "same",
+      destinationDigest: String(++calls),
+      collisions: [],
+    }),
+  });
+  assert.equal(result.state, "PRE_MERGE_FILESYSTEM_DRIFT_HOLD");
+  assert.equal(git.state.applied, false);
+});
+
+test("post-apply status drift is a reported partial application without rollback", async () => {
   const git = createFakeExecutor({
     behind: 1,
-    incoming: ["src/new.ts"],
+    incoming: ["new.md"],
     postApplyStatus: "?? hook-created.txt\0",
   });
-
   const result = await applyMainWorktreeSync({
     git: git.run,
     resolveRealpath: fakeRealpath,
   });
-
   assert.equal(result.state, "POST_APPLY_DRIFT_HOLD");
   assert.equal(result.statusPreserved, false);
   assert.equal(result.localHead, REMOTE_HEAD);
+  assert.equal(
+    git.calls.some(({ args }) => ["reset", "clean", "stash"].includes(args[0])),
+    false,
+  );
 });
 
-test("post-apply remote ref advancement is held after merging only the preflight target", async () => {
-  const advancedRemote = "3333333333333333333333333333333333333333";
-  const git = createFakeExecutor({
-    behind: 1,
-    incoming: ["src/new.ts"],
-    postApplyRemoteHead: advancedRemote,
-  });
-
-  const result = await applyMainWorktreeSync({
-    git: git.run,
-    resolveRealpath: fakeRealpath,
-  });
-
-  assert.equal(result.state, "POST_APPLY_HEAD_HOLD");
-  assert.equal(result.localHead, REMOTE_HEAD);
-  assert.equal(result.remoteHead, advancedRemote);
-  assert.deepEqual(
-    git.calls.filter(({ args }) => args[0] === "merge").map(({ args }) => args),
-    [["merge", "--ff-only", REMOTE_HEAD]],
-  );
+test("post-apply requires unchanged target ref, exact local head and the same main branch", async () => {
+  const advanced = "3333333333333333333333333333333333333333";
+  for (const drift of [
+    { postApplyRemoteHead: advanced },
+    { postApplyLocalHead: advanced },
+    { postApplyBranch: "refs/heads/other" },
+  ]) {
+    const git = createFakeExecutor({
+      behind: 1,
+      incoming: ["new.md"],
+      ...drift,
+    });
+    const result = await applyMainWorktreeSync({
+      git: git.run,
+      resolveRealpath: fakeRealpath,
+    });
+    assert.equal(result.state, "POST_APPLY_HEAD_HOLD");
+    assert.deepEqual(
+      git.calls
+        .filter(({ args }) => args[0] === "merge")
+        .map(({ args }) => args),
+      [["merge", "--ff-only", "--no-overwrite-ignore", REMOTE_HEAD]],
+    );
+  }
 });
 
 test("pre-merge local status drift blocks before any merge", async () => {
@@ -545,6 +594,9 @@ test("the exact command allowlist rejects unneeded reads and every other mutatio
     ["commit", "-m", "unexpected"],
     ["merge", "--no-ff", "refs/remotes/origin/main"],
     ["merge", "--ff-only", "refs/remotes/origin/main"],
+    ["merge", "--ff-only", REMOTE_HEAD],
+    ["merge", "--ff-only", "--overwrite-ignore", REMOTE_HEAD],
+    ["merge", "--ff-only", "--no-overwrite-ignore", "origin/main"],
     ["fetch", "evil", "--prune"],
     ["log", "-1"],
   ];
@@ -556,7 +608,12 @@ test("the exact command allowlist rejects unneeded reads and every other mutatio
     );
   }
   assert.doesNotThrow(() =>
-    assertGitCommandAllowed(["merge", "--ff-only", REMOTE_HEAD]),
+    assertGitCommandAllowed([
+      "merge",
+      "--ff-only",
+      "--no-overwrite-ignore",
+      REMOTE_HEAD,
+    ]),
   );
 });
 
@@ -619,4 +676,130 @@ test("CLI invalid action exits non-zero and emits a machine-readable hold", () =
   assert.equal(result.status, 2);
   assert.equal(result.stderr, "");
   assert.equal(JSON.parse(result.stdout).state, "INVALID_ACTION_HOLD");
+});
+
+async function realApplyFixture({
+  beforeMerge,
+  afterMerge,
+  beforeObservation,
+} = {}) {
+  const temporary = await mkdtemp(path.join(tmpdir(), "governor-apply-"));
+  const root = path.join(temporary, "checkout");
+  const remote = path.join(temporary, "remote.git");
+  await mkdir(root);
+  const run = (args) =>
+    execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  run(["init", "-q", "-b", "main"]);
+  run(["config", "user.name", "Local test"]);
+  run(["config", "user.email", "local-test@example.invalid"]);
+  run(["init", "-q", "--bare", remote]);
+  run(["remote", "add", "origin", remote]);
+  await writeFile(path.join(root, ".gitignore"), ".superpowers/\n");
+  await mkdir(path.join(root, ".superpowers"));
+  await writeFile(path.join(root, ".superpowers/local.json"), "preserved");
+  await writeFile(path.join(root, "tracked.md"), "before");
+  run(["add", ".gitignore", "tracked.md"]);
+  run(["commit", "-qm", "base"]);
+  const base = run(["rev-parse", "HEAD"]).trim();
+  run(["push", "-q", "origin", "main"]);
+  run(["checkout", "-qb", "incoming"]);
+  await writeFile(path.join(root, ".superpowers/new.md"), "incoming");
+  await writeFile(path.join(root, "tracked.md"), "after");
+  run(["add", "-f", ".superpowers/new.md", "tracked.md"]);
+  run(["commit", "-qm", "incoming"]);
+  const target = run(["rev-parse", "HEAD"]).trim();
+  run(["push", "-q", "origin", "incoming:main"]);
+  run(["checkout", "-q", "main"]);
+  const calls = [];
+  const git = async (args) => {
+    assertGitCommandAllowed(args);
+    calls.push(args);
+    if (args[0] === "merge") await beforeMerge?.(root);
+    const stdout = run(args);
+    if (args[0] === "merge") await afterMerge?.(root);
+    return {
+      stdout:
+        args[0] === "worktree"
+          ? stdout.replace(root, EXPECTED_MAIN_WORKTREE)
+          : stdout,
+    };
+  };
+  let observations = 0;
+  const result = await applyMainWorktreeSyncImplementation({
+    invocationCwd: EXPECTED_MAIN_WORKTREE,
+    resolveRealpath: fakeRealpath,
+    git,
+    observeFilesystem: async (options) => {
+      await beforeObservation?.(++observations, root);
+      return inspectFilesystem({ ...options, root });
+    },
+  });
+  return {
+    root,
+    base,
+    target,
+    result,
+    calls,
+    head: run(["rev-parse", "HEAD"]).trim(),
+  };
+}
+
+test("real apply preserves ignored local bytes while changing tracked and incoming sibling files", async () => {
+  const { root, target, result, calls, head } = await realApplyFixture();
+  assert.equal(result.state, "APPLIED");
+  assert.equal(head, target);
+  assert.equal(result.filesystemPreserved, true);
+  assert.equal(result.statusPreserved, true);
+  assert.equal(
+    await readFile(path.join(root, ".superpowers/local.json"), "utf8"),
+    "preserved",
+  );
+  assert.equal(await readFile(path.join(root, "tracked.md"), "utf8"), "after");
+  assert.deepEqual(
+    calls.filter((args) => args[0] === "merge"),
+    [["merge", "--ff-only", "--no-overwrite-ignore", target]],
+  );
+});
+
+test("real precheck detects same-status local bytes changed before the second observation", async () => {
+  const { result, head, base, calls } = await realApplyFixture({
+    beforeObservation: async (number, root) => {
+      if (number === 2)
+        await writeFile(path.join(root, ".superpowers/local.json"), "changed");
+    },
+  });
+  assert.equal(result.state, "PRE_MERGE_FILESYSTEM_DRIFT_HOLD");
+  assert.equal(head, base);
+  assert.equal(
+    calls.some((args) => args[0] === "merge"),
+    false,
+  );
+});
+
+test("real merge refuses an ignored destination created after the final precheck", async () => {
+  const { result, head, base, root } = await realApplyFixture({
+    beforeMerge: (root) =>
+      writeFile(path.join(root, ".superpowers/new.md"), "late local"),
+  });
+  assert.equal(result.state, "MERGE_FAILED_HOLD");
+  assert.equal(head, base);
+  assert.equal(
+    await readFile(path.join(root, ".superpowers/new.md"), "utf8"),
+    "late local",
+  );
+});
+
+test("real postcheck reports partial application when original local bytes change with the same status", async () => {
+  const { result, head, target } = await realApplyFixture({
+    afterMerge: (root) =>
+      writeFile(path.join(root, ".superpowers/local.json"), "changed"),
+  });
+  assert.equal(result.state, "POST_APPLY_FILESYSTEM_DRIFT_HOLD");
+  assert.equal(head, target);
+  assert.equal(result.statusPreserved, true);
+  assert.equal(result.filesystemPreserved, false);
 });
