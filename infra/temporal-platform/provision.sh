@@ -35,6 +35,10 @@ node "${REPOSITORY_ROOT}/scripts/temporal-native-publication.mjs" compose "${nat
 # Local-only immutable image capture: no pull and the temporary container is never started.
 node "${REPOSITORY_ROOT}/scripts/temporal-native-publication.mjs" capture "${REPOSITORY_ROOT}" \
   "${TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA}" "${TEMPORAL_PLATFORM_NATIVE_IMAGE}" "${native_tmp}/image"
+# Local metadata is not authorization. Require registry provenance for this exact
+# digest, protected main source and native publisher before any retained action.
+node "${REPOSITORY_ROOT}/scripts/temporal-native-publication.mjs" registry-provenance \
+  "${TEMPORAL_PLATFORM_NATIVE_IMAGE}" "${TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA}"
 source "${SCRIPT_DIR}/provision-core.sh"
 provision_platform_namespace temporal-platform-admin temporal-platform \
   -f "${SCRIPT_DIR}/compose.yml" -f "${SCRIPT_DIR}/compose.native.yml"

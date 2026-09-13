@@ -8,7 +8,13 @@ runtime.
 
 ## Namespace admission on every provision
 
-`provision.sh` requires the repository's Node runtime on the operator host.
+`provision.sh` requires the repository's Node runtime and a GitHub CLI supporting
+`gh attestation verify` on the operator host. The operator must be able to read
+the exact registry attestation. Before any retained start/schema/namespace action,
+the entry verifies the registry digest against the native publisher workflow,
+exact main source and hosted-runner provenance. Local image metadata or a
+config-only recovery attestation cannot replace this retained admission check;
+verification failure stops provisioning without exposing verifier diagnostics.
 Both a newly created namespace and an existing namespace must pass bounded
 DescribeNamespace JSON validation: registered state, exactly seven-day
 retention, the fixed non-tenant description, local (not global) namespace,

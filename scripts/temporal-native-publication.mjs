@@ -7,15 +7,48 @@ import { execFileSync } from "node:child_process";
 import { nativeSbom } from "./temporal-native-publication-sbom.mjs";
 
 export const NATIVE_IMAGE = "ghcr.io/mlhjyx/global-temporal-platform";
-export async function verifyNativeProvenance(
-  options,
-  run = (args) =>
-    execFileSync("gh", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 600000,
-      maxBuffer: 1024 * 1024,
-    }),
+const runGh = (args) =>
+  execFileSync("gh", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 600000,
+    maxBuffer: 1024 * 1024,
+  });
+const provenanceIdentity = (sourceSha) => [
+  "--repo",
+  "mlhjyx/global-backend",
+  "--signer-workflow",
+  "mlhjyx/global-backend/.github/workflows/publish-temporal-platform-image.yml",
+  "--signer-digest",
+  sourceSha,
+  "--source-ref",
+  "refs/heads/main",
+  "--source-digest",
+  sourceSha,
+  "--deny-self-hosted-runners",
+];
+
+// Retained admission requires the registry subject itself to be attested.
+// Config-only recovery is deliberately confined to the publisher below.
+export async function verifyNativeRegistryProvenance(
+  { imageReference, sourceSha },
+  run = runGh,
 ) {
+  try {
+    nativeIdentity(sourceSha, imageReference, "registry-verification");
+    run([
+      "attestation",
+      "verify",
+      "oci://" + imageReference,
+      "--bundle-from-oci",
+      ...provenanceIdentity(sourceSha),
+    ]);
+    return { result: "PASS", registryAttested: true, recovery: "NOT_REQUIRED" };
+  } catch {
+    return fail("PROVENANCE");
+  }
+}
+
+export async function verifyNativeProvenance(options, run = runGh) {
   try {
     const { imageReference, sourceSha, imageId, configPath } = options;
     if (
@@ -37,32 +70,12 @@ export async function verifyNativeProvenance(
         "native-reader-authorization"
     )
       fail("PROVENANCE");
-    const common = [
-      "--repo",
-      "mlhjyx/global-backend",
-      "--signer-workflow",
-      "mlhjyx/global-backend/.github/workflows/publish-temporal-platform-image.yml",
-      "--signer-digest",
-      sourceSha,
-      "--source-ref",
-      "refs/heads/main",
-      "--source-digest",
-      sourceSha,
-      "--deny-self-hosted-runners",
-    ];
+    const common = provenanceIdentity(sourceSha);
     try {
-      run([
-        "attestation",
-        "verify",
-        "oci://" + imageReference,
-        "--bundle-from-oci",
-        ...common,
-      ]);
-      return {
-        result: "PASS",
-        registryAttested: true,
-        recovery: "NOT_REQUIRED",
-      };
+      return await verifyNativeRegistryProvenance(
+        { imageReference, sourceSha },
+        run,
+      );
     } catch {
       // Only trusted pre-push config provenance can bridge the push/attest ACK gap.
       // An image label or a matching source-looking filename is never sufficient.
@@ -655,6 +668,12 @@ export async function main(argv) {
       sourceSha,
       imageReference,
       readerSubject,
+    });
+  } else if (command === "registry-provenance" && values.length === 2) {
+    const [imageReference, sourceSha] = values;
+    result = await verifyNativeRegistryProvenance({
+      imageReference,
+      sourceSha,
     });
   } else if (command === "provenance" && values.length === 4) {
     const [imageReference, sourceSha, imageId, configPath] = values;

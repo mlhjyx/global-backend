@@ -24,6 +24,7 @@ import {
   verifyNativeArtifact,
   verifyNativeCompose,
   verifyNativeProvenance,
+  verifyNativeRegistryProvenance,
 } from "./temporal-native-publication.mjs";
 
 const repo = resolve(import.meta.dirname, "..");
@@ -555,6 +556,55 @@ test("actual Compose merge is native-only and rendering fails before any start w
   );
 });
 
+test("retained registry admission never falls back to config proof or accepts malformed identity", async () => {
+  const calls = [];
+  await assert.rejects(
+    () =>
+      verifyNativeRegistryProvenance(
+        { imageReference, sourceSha: sha },
+        (args) => {
+          calls.push(args);
+          // A config-only proof would pass this boundary; it must never be requested.
+          if (args[2].startsWith("oci://"))
+            throw new Error(
+              "untrusted registry proof: must-not-appear-in-output",
+            );
+        },
+      ),
+    { message: "TEMPORAL_NATIVE_PROVENANCE_INVALID" },
+  );
+  assert.deepEqual(calls, [
+    [
+      "attestation",
+      "verify",
+      "oci://" + imageReference,
+      "--bundle-from-oci",
+      "--repo",
+      "mlhjyx/global-backend",
+      "--signer-workflow",
+      "mlhjyx/global-backend/.github/workflows/publish-temporal-platform-image.yml",
+      "--signer-digest",
+      sha,
+      "--source-ref",
+      "refs/heads/main",
+      "--source-digest",
+      sha,
+      "--deny-self-hosted-runners",
+    ],
+  ]);
+  for (const invalid of [
+    { imageReference: "stock:latest", sourceSha: sha },
+    { imageReference, sourceSha: "main" },
+    { imageReference: NATIVE_IMAGE + ":sha-" + sha, sourceSha: sha },
+  ]) {
+    await assert.rejects(
+      () => verifyNativeRegistryProvenance(invalid, (args) => calls.push(args)),
+      { message: "TEMPORAL_NATIVE_PROVENANCE_INVALID" },
+    );
+    assert.equal(calls.length, 1);
+  }
+});
+
 test("publish-once recovery requires a trusted exact config attestation when the registry attestation is missing", async (t) => {
   const directory = await mkdtemp(
     join(tmpdir(), "native-publication-recovery-"),
@@ -892,6 +942,34 @@ test("retained entry admits the same native overlay only after image preflight a
   await chmod(docker, 0o755);
   const log = join(directory, "calls.log");
   await writeFile(log, "");
+  // Only the external verification boundary is substituted: the real retained
+  // wrapper must refuse a valid-looking local artifact without registry proof.
+  const gh = join(directory, "bin/gh");
+  const registryArgs = [
+    "attestation",
+    "verify",
+    "oci://" + imageReference,
+    "--bundle-from-oci",
+    "--repo",
+    "mlhjyx/global-backend",
+    "--signer-workflow",
+    "mlhjyx/global-backend/.github/workflows/publish-temporal-platform-image.yml",
+    "--signer-digest",
+    sha,
+    "--source-ref",
+    "refs/heads/main",
+    "--source-digest",
+    sha,
+    "--deny-self-hosted-runners",
+  ];
+  await writeFile(
+    gh,
+    "#!/usr/bin/env node\n" +
+      'const fs=require("fs");const a=process.argv.slice(2);fs.appendFileSync(process.env.PROVISION_LOG,JSON.stringify(["gh",...a])+"\\n");' +
+      `if(JSON.stringify(a)!==${JSON.stringify(JSON.stringify(registryArgs))})process.exit(8);` +
+      'if(process.env.TEST_REGISTRY_FAIL){process.stderr.write("must-not-appear-in-output");process.exit(7);}\n',
+  );
+  await chmod(gh, 0o755);
   const runProvision = (extra = {}) =>
     spawnSync("bash", [join(repo, "infra/temporal-platform/provision.sh")], {
       encoding: "utf8",
@@ -925,15 +1003,23 @@ test("retained entry admits the same native overlay only after image preflight a
     ),
   );
   assert.deepEqual(await readdir(join(directory, "tmp")), []);
-  for (const failure of ["wrong-image-source", "render-error"]) {
+  for (const failure of [
+    "wrong-image-source",
+    "render-error",
+    "missing-registry-proof",
+  ]) {
     await writeFile(log, "");
     inspect.Config.Labels["org.opencontainers.image.revision"] =
       failure === "wrong-image-source" ? "e".repeat(40) : sha;
     await writeFile(join(directory, "inspect.json"), JSON.stringify(inspect));
     const rejected = runProvision(
-      failure === "render-error" ? { TEST_RENDER_FAIL: "1" } : {},
+      failure === "render-error"
+        ? { TEST_RENDER_FAIL: "1" }
+        : failure === "missing-registry-proof"
+          ? { TEST_REGISTRY_FAIL: "1" }
+          : {},
     );
-    assert.equal(rejected.status, 1);
+    assert.equal(rejected.status, 1, failure);
     assert(!rejected.stdout.includes("must-not-appear-in-output"));
     assert(!rejected.stderr.includes("must-not-appear-in-output"));
     const rejectedCalls = (await readFile(log, "utf8"))
@@ -947,6 +1033,9 @@ test("retained entry admits the same native overlay only after image preflight a
     );
     assert.deepEqual(await readdir(join(directory, "tmp")), []);
   }
+  const provenance = calls.findIndex((a) => a[0] === "gh");
+  assert(provenance > calls.findIndex((a) => a[0] === "export"));
+  assert(up > provenance);
 });
 
 test("disposable wrapper retains shared namespace admission and drift refusal without entering the retained path", async (t) => {
