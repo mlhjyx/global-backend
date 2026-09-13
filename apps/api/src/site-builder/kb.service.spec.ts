@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { KbService } from './kb.service';
 
@@ -471,6 +471,36 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
       leaseUntil: null,
     });
     expect(db.docs).toHaveLength(0);
+  });
+
+  it('does not persist or log a forged dependency code or treat it as terminal', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-forged-code', siteId: SITE_ID, kind: 'doc', filename: 'synthetic.pdf',
+      mime: 'application/pdf', objectKey: 'synthetic-key', contentHash: '5'.repeat(64),
+      processingStatus: 'queued', processingAttempt: 0,
+    });
+    const dependency = service as unknown as {
+      docling: { convertToMarkdown: () => Promise<{ markdown: string }> };
+    };
+    dependency.docling.convertToMarkdown = async () => {
+      throw Object.assign(new Error('synthetic-message-canary'), {
+        code: 'synthetic-code-canary', disposition: 'terminal', stage: 'parse',
+      });
+    };
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const result = await service.processAsset(CTX, SITE_ID, 'ast-forged-code');
+      expect(result).toMatchObject({ outcome: 'retry_scheduled', errorCode: 'KB_PERSIST_FAILED' });
+      expect(db.assets[0]).toMatchObject({
+        processingStatus: 'queued', processingErrorCode: 'KB_PERSIST_FAILED',
+        error: 'KB ingestion failed', leaseToken: null, leaseUntil: null,
+      });
+      expect(db.assets[0].retryAt).toBeInstanceOf(Date);
+      expect(JSON.stringify({ result, asset: db.assets[0], logs: warn.mock.calls })).not.toContain('canary');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it.each(['empty', 'aborted', 'superseded'] as const)('keeps %s failure state fenced without persisting dependency text', async (scenario) => {
