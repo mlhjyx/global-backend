@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSiteBuildCostSummary,
   boundedReconciliationMeta,
@@ -1487,5 +1487,953 @@ describe("R4-B stable BuildRun cost summary", () => {
         "fallback-1",
       ]),
     ).not.toBe(a);
+  });
+});
+
+const coverageScope = { workspaceId: "ws", siteId: "site", buildRunId: "run" };
+const coverageNow = new Date("2026-09-13T00:00:00Z");
+const coverageFence = {
+  workspaceId: "ws",
+  attemptId: "task",
+  fenceToken: "owned-fence",
+};
+function ledgerFixture() {
+  const budget = {
+    ...coverageScope,
+    capMicrousd: 100n,
+    reservedMicrousd: 20n,
+    chargedMicrousd: 10n,
+    paidCallsEnabled: true,
+    disabledReason: null,
+    exhaustedAt: null,
+  };
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ decision: "SETTLED" }]),
+    $executeRaw: vi.fn().mockResolvedValue(1),
+    siteBuildBudget: { findUnique: vi.fn().mockResolvedValue(budget) },
+    siteBuildBudgetGrant: {
+      findUnique: vi.fn().mockResolvedValue({ ...budget }),
+    },
+    siteBuildRun: {
+      findUnique: vi.fn().mockResolvedValue({ status: "running" }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    siteBuildSpend: {
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({
+          id: "spend",
+          reservationMicrousd: 100n,
+          status: "SUCCEEDED",
+          operationKey: "a".repeat(64),
+          fenceToken: "owned-fence",
+        }),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    siteBuildSpendReconciliation: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    siteBuildProviderWireAttempt: { findMany: vi.fn().mockResolvedValue([]) },
+    siteBuildProviderWireReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    siteBuildTaskAttempt: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn(async ({ data }) => ({ id: "task", ...data })),
+      create: vi.fn(async ({ data }) => ({ id: "task", ...data })),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    outboxEvent: { create: vi.fn().mockResolvedValue({}) },
+  };
+  const database = {
+    withWorkspace: vi.fn(async (_workspace, operation) => operation(tx)),
+  };
+  const ledger = new SiteBuildCostLedger(database as never, {
+    providerWireDatabase: database as never,
+    now: () => coverageNow,
+    randomUUID: () => "owned-fence",
+  });
+  return { budget, tx, database, ledger };
+}
+const coverageObservation = {
+  status: "RESOLVED" as const,
+  resolverId: "resolver",
+  observedAt: coverageNow,
+  receiptDigest: "b".repeat(64),
+  costBasis: "token_pricing" as const,
+  exactCostMicrousd: "10",
+};
+afterEach(() => vi.restoreAllMocks());
+
+describe("ledger authorization and owned task boundary cases", () => {
+  it.each([
+    "budget",
+    "grant",
+    "budget-workspace",
+    "grant-workspace",
+    "budget-site",
+    "grant-site",
+    "cap",
+  ])(
+    "denies inconsistent %s authority before any paid operation",
+    async (field) => {
+      const f = ledgerFixture();
+      const budget = { ...f.budget };
+      const grant = { ...f.budget };
+      if (field === "budget-workspace") budget.workspaceId = "other";
+      if (field === "grant-workspace") grant.workspaceId = "other";
+      if (field === "budget-site") budget.siteId = "other";
+      if (field === "grant-site") grant.siteId = "other";
+      if (field === "cap") grant.capMicrousd++;
+      f.tx.siteBuildBudget.findUnique.mockResolvedValue(
+        field === "budget" ? null : budget,
+      );
+      f.tx.siteBuildBudgetGrant.findUnique.mockResolvedValue(
+        field === "grant" ? null : grant,
+      );
+      await expect(
+        f.ledger.assertAuthorizedBudget(coverageScope),
+      ).rejects.toThrow("DENIED_BUDGET_AUTHORIZATION");
+      expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
+  it("accepts equal workspace/site/cap authority without mutating it", async () => {
+    const f = ledgerFixture();
+    await expect(
+      f.ledger.assertAuthorizedBudget(coverageScope),
+    ).resolves.toBeUndefined();
+    expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+  });
+  it.each([null, "wrong", []])(
+    "rejects a terminal task without an object replay payload",
+    async (resultJson) => {
+      const f = ledgerFixture();
+      f.tx.siteBuildTaskAttempt.findUnique.mockResolvedValue({
+        status: "SUCCEEDED",
+        resultJson,
+      });
+      await expect(
+        f.ledger.claimTaskAttempt({ ...coverageScope, taskId: "copy" }),
+      ).rejects.toThrow("no stable result");
+      expect(f.tx.siteBuildTaskAttempt.create).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["missing-run", "stopped", "missing-budget", "disabled"])(
+    "does not claim a fresh task after %s authority loss",
+    async (failure) => {
+      const f = ledgerFixture();
+      if (failure === "missing-run")
+        f.tx.siteBuildRun.findUnique.mockResolvedValue(null);
+      if (failure === "stopped")
+        f.tx.siteBuildRun.findUnique.mockResolvedValue({ status: "cancelled" });
+      if (failure === "missing-budget")
+        f.tx.siteBuildBudget.findUnique.mockResolvedValue(null);
+      if (failure === "disabled")
+        f.tx.siteBuildBudget.findUnique.mockResolvedValue({
+          ...f.budget,
+          paidCallsEnabled: false,
+        });
+      await expect(
+        f.ledger.claimTaskAttempt({ ...coverageScope, taskId: "copy" }),
+      ).rejects.toThrow("DENIED");
+      expect(f.tx.siteBuildTaskAttempt.create).not.toHaveBeenCalled();
+    },
+  );
+  it("reclaims MODEL_SUCCEEDED output even after paid calls have been disabled", async () => {
+    const f = ledgerFixture();
+    f.tx.siteBuildTaskAttempt.findUnique.mockResolvedValue({
+      id: "task",
+      status: "MODEL_SUCCEEDED",
+      leaseUntil: new Date(0),
+      attemptNo: 2,
+    });
+    f.tx.siteBuildBudget.findUnique.mockResolvedValue(null);
+    expect(
+      await f.ledger.claimTaskAttempt({ ...coverageScope, taskId: "copy" }),
+    ).toMatchObject({ kind: "claimed", attempt: { id: "task", attemptNo: 3 } });
+    expect(f.tx.siteBuildTaskAttempt.create).not.toHaveBeenCalled();
+  });
+  it.each(["missing", "token", "expired", "cas"])(
+    "refuses freezing task input after %s fence loss",
+    async (failure) => {
+      const f = ledgerFixture();
+      const row = {
+        fenceToken: failure === "token" ? "other" : coverageFence.fenceToken,
+        leaseUntil:
+          failure === "expired"
+            ? new Date(0)
+            : new Date(coverageNow.getTime() + 1000),
+      };
+      f.tx.siteBuildTaskAttempt.findUnique.mockResolvedValue(
+        failure === "missing" ? null : row,
+      );
+      if (failure === "cas")
+        f.tx.siteBuildTaskAttempt.updateMany.mockResolvedValue({ count: 0 });
+      await expect(
+        f.ledger.freezeTaskInput(coverageFence, { items: [{ b: 2, a: 1 }] }),
+      ).rejects.toThrow();
+    },
+  );
+  it("canonicalizes nested arrays and refuses non-object task payloads", async () => {
+    const f = ledgerFixture();
+    f.tx.siteBuildTaskAttempt.findUnique.mockResolvedValue({
+      fenceToken: coverageFence.fenceToken,
+      leaseUntil: new Date(coverageNow.getTime() + 1000),
+    });
+    expect(
+      await f.ledger.freezeTaskInput(coverageFence, {
+        z: [{ b: 2, a: 1 }],
+        a: null,
+      }),
+    ).toMatchObject({
+      input: { a: null, z: [{ a: 1, b: 2 }] },
+      replayed: false,
+    });
+    for (const invalid of [null, [], "text"])
+      await expect(
+        f.ledger.storeTaskOutput(coverageFence, invalid as never),
+      ).rejects.toThrow("JSON object");
+  });
+  it.each(["storeTaskOutput", "completeTask"] as const)(
+    "propagates %s compare-and-set failure",
+    async (method) => {
+      const f = ledgerFixture();
+      f.tx.siteBuildTaskAttempt.updateMany.mockResolvedValue({ count: 0 });
+      await expect(
+        f.ledger[method](coverageFence, { done: true }),
+      ).rejects.toThrow();
+    },
+  );
+  it("does not close a run with a blank terminal reason or absent budget", async () => {
+    const f = ledgerFixture();
+    await expect(
+      f.ledger.closeAndSummarize({ ...coverageScope, reason: " " }),
+    ).rejects.toThrow("reason");
+    f.tx.siteBuildBudget.findUnique.mockResolvedValue(null);
+    await expect(
+      f.ledger.closeAndSummarize({ ...coverageScope, reason: "run_succeeded" }),
+    ).rejects.toThrow("DENIED_NO_BUDGET");
+  });
+});
+
+describe("append-only reconciliation identity and cap variance", () => {
+  it.each([
+    "empty-resolver",
+    "long-resolver",
+    "digest",
+    "missing-digest",
+    "missing-basis",
+    "numeric-cost",
+    "negative-cost",
+    "leading-zero",
+    "overflow",
+    "unresolved-cost",
+    "unresolved-basis",
+  ])("rejects malformed %s before persistence", async (field) => {
+    const f = ledgerFixture();
+    const observation: Record<string, unknown> = { ...coverageObservation };
+    if (field === "empty-resolver") observation.resolverId = " ";
+    if (field === "long-resolver") observation.resolverId = "x".repeat(192);
+    if (field === "digest") observation.receiptDigest = "not-a-digest";
+    if (field === "missing-digest") delete observation.receiptDigest;
+    if (field === "missing-basis") delete observation.costBasis;
+    if (field === "numeric-cost") observation.exactCostMicrousd = 10;
+    if (field === "negative-cost") observation.exactCostMicrousd = "-1";
+    if (field === "leading-zero") observation.exactCostMicrousd = "01";
+    if (field === "overflow")
+      observation.exactCostMicrousd = "9223372036854775808";
+    if (field === "unresolved-cost" || field === "unresolved-basis") {
+      observation.status = "UNRESOLVED";
+      if (field === "unresolved-cost") delete observation.costBasis;
+      else delete observation.exactCostMicrousd;
+    }
+    await expect(
+      f.ledger.appendReconciliation({
+        ...coverageScope,
+        spendId: "spend",
+        observation: observation as never,
+      }),
+    ).rejects.toThrow();
+    expect(f.database.withWorkspace).not.toHaveBeenCalled();
+  });
+  it("requires an owned spend scope before appending an observation", async () => {
+    const f = ledgerFixture();
+    f.tx.siteBuildSpend.findFirst.mockResolvedValue(null);
+    await expect(
+      f.ledger.appendReconciliation({
+        ...coverageScope,
+        spendId: "spend",
+        observation: coverageObservation,
+      }),
+    ).rejects.toThrow("spend scope");
+  });
+  it("replays the exact receipt without another event or append", async () => {
+    const f = ledgerFixture();
+    f.tx.siteBuildSpendReconciliation.findFirst.mockResolvedValue({
+      receiptDigest: coverageObservation.receiptDigest,
+    });
+    await f.ledger.appendReconciliation({
+      ...coverageScope,
+      spendId: "spend",
+      observation: coverageObservation,
+    });
+    expect(f.tx.siteBuildSpendReconciliation.create).not.toHaveBeenCalled();
+    expect(f.tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+  it("records conflict rather than replacing an earlier resolved receipt", async () => {
+    const f = ledgerFixture();
+    f.tx.siteBuildSpendReconciliation.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ receiptDigest: "c".repeat(64) })
+      .mockResolvedValueOnce({ attemptNo: 3 });
+    await f.ledger.appendReconciliation({
+      ...coverageScope,
+      spendId: "spend",
+      observation: {
+        ...coverageObservation,
+        requestId: "synthetic-request",
+        inputTokens: 3,
+        outputTokens: 2,
+      },
+    });
+    expect(
+      f.tx.siteBuildSpendReconciliation.create.mock.calls[0][0].data,
+    ).toMatchObject({
+      status: "CONFLICT",
+      attemptNo: 4,
+      exactCostMicrousd: null,
+      meta: { reason: "conflicting_resolved_receipt" },
+    });
+  });
+  it.each([false, true])(
+    "records cap variance and disables paid calls without losing exact cost, prior=%s",
+    async (prior) => {
+      const f = ledgerFixture();
+      if (prior)
+        f.tx.siteBuildSpendReconciliation.findFirst
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ attemptNo: 2 });
+      await f.ledger.appendReconciliation({
+        ...coverageScope,
+        spendId: "spend",
+        observation: {
+          ...coverageObservation,
+          exactCostMicrousd: "101",
+          requestId: "synthetic-request",
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      });
+      expect(f.tx.siteBuildSpendReconciliation.create).toHaveBeenCalledTimes(2);
+      expect(
+        f.tx.siteBuildSpendReconciliation.create.mock.calls[0][0].data
+          .exactCostMicrousd,
+      ).toBe(101n);
+      expect(
+        f.tx.siteBuildSpendReconciliation.create.mock.calls[1][0].data,
+      ).toMatchObject({
+        status: "CONFLICT",
+        attemptNo: prior ? 4 : 2,
+        meta: {
+          reason: "CAP_VARIANCE",
+          observedMicrousd: "101",
+          authorizedMicrousd: "100",
+        },
+      });
+      expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
+      expect(f.tx.outboxEvent.create).toHaveBeenCalledOnce();
+    },
+  );
+  it("keeps unresolved observations non-exact and fails if the summary budget vanishes", async () => {
+    const f = ledgerFixture();
+    f.tx.siteBuildBudget.findUnique.mockResolvedValue(null);
+    await expect(
+      f.ledger.appendReconciliation({
+        ...coverageScope,
+        spendId: "spend",
+        observation: {
+          status: "UNRESOLVED",
+          resolverId: "resolver",
+          observedAt: coverageNow,
+        },
+      }),
+    ).rejects.toThrow("DENIED_NO_BUDGET");
+    expect(
+      f.tx.siteBuildSpendReconciliation.create.mock.calls[0][0].data,
+    ).toMatchObject({
+      exactCostMicrousd: null,
+      receiptDigest: null,
+      costBasis: null,
+      inputTokens: null,
+    });
+    expect(f.tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+});
+
+const coverageReservation = {
+  ...coverageScope,
+  operationKey: "a".repeat(64),
+  kind: "tool" as const,
+  taskId: "task",
+  subject: "tool",
+  reservationMicrousd: 100,
+};
+describe("unknown settlement and missing database acknowledgements", () => {
+  it.each(["invalid-key", "empty", "unknown-replay", "unknown", "denied"])(
+    "fails closed on %s reservation result",
+    async (failure) => {
+      const f = ledgerFixture();
+      if (failure === "empty") f.tx.$queryRaw.mockResolvedValue([]);
+      else
+        f.tx.$queryRaw.mockResolvedValue([
+          {
+            decision:
+              failure === "unknown-replay"
+                ? "REPLAY"
+                : failure === "unknown"
+                  ? "UNKNOWN"
+                  : "DENIED",
+            spend_status: failure === "unknown-replay" ? "UNKNOWN" : null,
+          },
+        ]);
+      await expect(
+        f.ledger.reserveOperation({
+          ...coverageReservation,
+          operationKey:
+            failure === "invalid-key"
+              ? "bad"
+              : coverageReservation.operationKey,
+        }),
+      ).rejects.toThrow();
+    },
+  );
+  it("preserves absent status on a recorded replay without treating it as execution", async () => {
+    const f = ledgerFixture();
+    f.tx.$queryRaw.mockResolvedValue([
+      {
+        decision: "REPLAY",
+        spend_status: null,
+        cached_result: null,
+        cached_error_code: null,
+      },
+    ]);
+    expect(await f.ledger.reserveOperation(coverageReservation)).toMatchObject({
+      kind: "replay",
+      status: "UNKNOWN",
+    });
+  });
+  it.each(["paired", "result", "disable", "blank-disable", "known-disable"])(
+    "refuses invalid UNKNOWN %s settlement before persistence",
+    async (failure) => {
+      const f = ledgerFixture();
+      const measurement = {
+        basis: "unknown",
+        budgetChargeMicrousd: 100,
+        reportedCostMicrousd: null,
+        calculatedCostMicrousd: null,
+        estimatedCostMicrousd: null,
+        inputTokens: null,
+        outputTokens: null,
+        callCount: 1,
+        meta: {},
+      };
+      await expect(
+        f.ledger.settleOperation({
+          scope: coverageReservation,
+          status:
+            failure === "paired" || failure === "known-disable"
+              ? "SUCCEEDED"
+              : "UNKNOWN",
+          measurement: {
+            ...measurement,
+            ...(failure === "known-disable" ? { basis: "token_pricing" } : {}),
+          } as never,
+          result: failure === "result" ? { output: true } : undefined,
+          disablePaidCallsReason:
+            failure === "disable"
+              ? undefined
+              : failure === "blank-disable"
+                ? " "
+                : "unknown",
+        }),
+      ).rejects.toThrow();
+      expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
+  it("reports missing settlement response without inventing a successful ACK", async () => {
+    const f = ledgerFixture();
+    f.tx.$queryRaw.mockResolvedValue([]);
+    expect(
+      await f.ledger.settleOperation({
+        scope: coverageReservation,
+        status: "SUCCEEDED",
+        measurement: legacyToolCostMeasurement(1, 100),
+      }),
+    ).toBe("MISSING");
+  });
+  it("requires the budget when over-reservation truth must be projected", async () => {
+    const f = ledgerFixture();
+    f.tx.$queryRaw.mockResolvedValue([{ decision: "OVER_RESERVATION" }]);
+    f.tx.siteBuildBudget.findUnique.mockResolvedValue(null);
+    await expect(
+      f.ledger.settleOperation({
+        scope: coverageReservation,
+        status: "SUCCEEDED",
+        measurement: legacyToolCostMeasurement(1, 100),
+      }),
+    ).rejects.toThrow("DENIED_NO_BUDGET");
+  });
+  it.each([
+    "recordModelReadbackProbe",
+    "finalizeModelPhysicalWire",
+    "recordModelPhysicalWireReceipt",
+    "finalizeModelPhysicalWireFromReceipt",
+    "finalizeModelPhysicalWireNotDispatched",
+  ] as const)("does not accept an empty %s response", async (method) => {
+    const f = ledgerFixture();
+    f.tx.$queryRaw.mockResolvedValue([]);
+    const observation = {
+      status: "settled",
+      alias: "model",
+      protocol: "openai-responses",
+      channelId: 1,
+      quota: 1,
+      costMicrousd: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      upstreamIdState: "observed",
+      transportObservation: {
+        finalPhase: "gateway_log_found",
+        gatewayIdState: "observed",
+        upstreamIdState: "observed",
+        payloadState: "available",
+      },
+    };
+    await expect(
+      f.ledger[method]({
+        workspaceId: "ws",
+        wireAttemptId: "wire",
+        probeId: "probe",
+        probe: { phase: "http_response", httpStatusClass: 2 },
+        observation,
+        receiptDigest: "b".repeat(64),
+        observedAt: coverageNow,
+      } as never),
+    ).rejects.toMatchObject({
+      errorCode: expect.stringContaining("ACK_UNKNOWN"),
+    });
+  });
+});
+
+describe("provider receipt aggregation boundaries", () => {
+  function completeFixture() {
+    const f = ledgerFixture();
+    const wire = { id: "wire", physicalWireAttempt: 1, state: "OBSERVED" };
+    const receipt = {
+      wireAttemptId: "wire",
+      receiptDigest: "b".repeat(64),
+      exactCostMicrousd: 10n,
+      inputTokens: 1,
+      outputTokens: 1,
+    };
+    f.tx.siteBuildProviderWireAttempt.findMany.mockResolvedValue([wire]);
+    f.tx.siteBuildProviderWireReceipt.findMany.mockResolvedValue([receipt]);
+    return { ...f, wire, receipt };
+  }
+  const scope = {
+    ...coverageScope,
+    spendId: "spend",
+    resolverId: "resolver",
+    observedAt: coverageNow,
+  };
+  it.each(["spend", "wires"])(
+    "does not reconcile missing %s provenance",
+    async (missing) => {
+      const f = completeFixture();
+      if (missing === "spend")
+        f.tx.siteBuildSpend.findFirst.mockResolvedValue(null);
+      else f.tx.siteBuildProviderWireAttempt.findMany.mockResolvedValue([]);
+      expect(
+        await f.ledger.completeProviderSpendReconciliation(scope),
+      ).toMatchObject({
+        status: "UNRESOLVED",
+        meta: { reason: "provider_wire_scope_unavailable" },
+      });
+    },
+  );
+  it.each(["count", "duplicate", "foreign"])(
+    "rejects incomplete %s receipt sets",
+    async (failure) => {
+      const f = completeFixture();
+      if (failure === "count")
+        f.tx.siteBuildProviderWireReceipt.findMany.mockResolvedValue([]);
+      if (failure === "duplicate") {
+        f.tx.siteBuildProviderWireAttempt.findMany.mockResolvedValue([
+          f.wire,
+          { ...f.wire, id: "second" },
+        ]);
+        f.tx.siteBuildProviderWireReceipt.findMany.mockResolvedValue([
+          f.receipt,
+          f.receipt,
+        ]);
+      }
+      if (failure === "foreign") f.receipt.wireAttemptId = "foreign";
+      expect(
+        await f.ledger.completeProviderSpendReconciliation(scope),
+      ).toMatchObject({
+        status: "UNRESOLVED",
+        meta: { reason: "provider_wire_receipts_incomplete" },
+      });
+    },
+  );
+  it.each(["cost", "input", "output"])(
+    "rejects unsafe %s aggregates rather than truncating exact facts",
+    async (field) => {
+      const f = completeFixture();
+      if (field === "cost")
+        f.receipt.exactCostMicrousd = 9_223_372_036_854_775_808n;
+      if (field === "input")
+        f.receipt.inputTokens = Number.MAX_SAFE_INTEGER + 1;
+      if (field === "output")
+        f.receipt.outputTokens = Number.MAX_SAFE_INTEGER + 1;
+      expect(
+        await f.ledger.completeProviderSpendReconciliation(scope),
+      ).toMatchObject({
+        status: "UNRESOLVED",
+        meta: { reason: "provider_wire_receipt_aggregate_invalid" },
+      });
+    },
+  );
+  it("does not finish a reserved spend while a physical dispatch remains active", async () => {
+    const f = completeFixture();
+    f.tx.siteBuildSpend.findFirst.mockResolvedValue({ status: "RESERVED" });
+    f.wire.state = "DISPATCH_STARTED";
+    expect(
+      await f.ledger.completeProviderSpendReconciliation(scope),
+    ).toMatchObject({
+      status: "UNRESOLVED",
+      meta: { reason: "provider_wire_observation_incomplete" },
+    });
+    expect(f.tx.$queryRaw).not.toHaveBeenCalled();
+  });
+  it.each(["empty", "denied"])(
+    "does not turn %s settlement ACK into resolved spend truth",
+    async (failure) => {
+      const f = completeFixture();
+      f.tx.siteBuildSpend.findFirst.mockResolvedValue({
+        status: "RESERVED",
+        operationKey: "a".repeat(64),
+        fenceToken: null,
+        reservationMicrousd: 100n,
+      });
+      f.tx.$queryRaw.mockResolvedValue(
+        failure === "empty" ? [] : [{ decision: "DENIED" }],
+      );
+      expect(
+        await f.ledger.completeProviderSpendReconciliation(scope),
+      ).toMatchObject({
+        status: "UNRESOLVED",
+        meta: { reason: "provider_spend_ack_recovery_unavailable" },
+      });
+    },
+  );
+  it("retains unknown charge when no receipt exists after physical dispatch", async () => {
+    const f = completeFixture();
+    f.tx.siteBuildSpend.findFirst.mockResolvedValue({
+      status: "RESERVED",
+      operationKey: "a".repeat(64),
+      fenceToken: null,
+      reservationMicrousd: 100n,
+    });
+    f.wire.state = "UNKNOWN";
+    f.tx.siteBuildProviderWireReceipt.findMany.mockResolvedValue([]);
+    expect(
+      await f.ledger.completeProviderSpendReconciliation(scope),
+    ).toMatchObject({ status: "UNRESOLVED" });
+    const values = f.tx.$queryRaw.mock.calls[0].slice(1);
+    expect(values).toContain(100n);
+    expect(values.filter((v) => v === null).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+function coverageWireRow() {
+  return {
+    id: "wire",
+    ...coverageScope,
+    spendId: "spend",
+    operationKey: "a".repeat(64),
+    physicalWireAttempt: 1,
+    derivationKeyId: "synthetic",
+    settlementRequestId: "synthetic-request",
+    settlementNonceSha256: "b".repeat(64),
+    resolverId: "resolver",
+    protocol: "openai-responses",
+    requestedAlias: "model",
+    expectedChannelId: 1,
+    actualMaxOutputTokens: 100,
+    maximumQuotaPoints: 10n,
+    inputPriceMicrounitsPerMillion: 10n,
+    outputPriceMicrounitsPerMillion: 10n,
+    ledgerMicrousdPerPricingUnit: 10n,
+    state: "OBSERVED",
+    createdAt: new Date(coverageNow.getTime() - 120_000) as Date | null,
+    observedAt: new Date(coverageNow.getTime() - 120_000) as Date | null,
+    dispatchStartedAt: null as Date | null,
+    receipt: null as { id: string } | null,
+    spend: {
+      createdAt: new Date(coverageNow.getTime() - 120_000) as Date | null,
+      reconciliations: [] as Array<{ status: string; observedAt: Date }>,
+    },
+  };
+}
+describe("bounded reconciliation enumeration and expiration", () => {
+  it.each([
+    "missing-start",
+    "live",
+    "missing-time",
+    "too-soon",
+    "terminal",
+    "unsafe-integer",
+    "allocated-young",
+  ])("does not enumerate %s work as immediately resolvable", async (reason) => {
+    const f = ledgerFixture();
+    const row = coverageWireRow();
+    if (reason === "missing-start") row.state = "DISPATCH_STARTED";
+    if (reason === "live") {
+      row.state = "DISPATCH_STARTED";
+      row.dispatchStartedAt = coverageNow;
+    }
+    if (reason === "missing-time") {
+      row.createdAt = null;
+      row.observedAt = null;
+      row.spend.createdAt = null;
+    }
+    if (reason === "too-soon") row.observedAt = coverageNow;
+    if (reason === "terminal")
+      row.spend.reconciliations = [
+        { status: "RESOLVED", observedAt: coverageNow },
+      ];
+    if (reason === "unsafe-integer")
+      row.maximumQuotaPoints = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+    if (reason === "allocated-young") row.state = "ALLOCATED";
+    f.tx.siteBuildProviderWireAttempt.findMany.mockResolvedValue([row]);
+    expect(await f.ledger.listPendingReconciliations("ws")).toEqual([]);
+  });
+  it("chooses the earliest unresolved physical boundary within each spend and caps the output page", async () => {
+    const f = ledgerFixture();
+    const old = new Date(coverageNow.getTime() - 86_400_000);
+    const rows = [
+      { ...coverageWireRow(), id: "observed", receipt: { id: "receipt" } },
+      { ...coverageWireRow(), id: "unknown", state: "UNKNOWN" },
+      {
+        ...coverageWireRow(),
+        id: "started-receipt",
+        state: "DISPATCH_STARTED",
+        dispatchStartedAt: old,
+        receipt: { id: "receipt" },
+      },
+      {
+        ...coverageWireRow(),
+        id: "started",
+        state: "DISPATCH_STARTED",
+        dispatchStartedAt: old,
+      },
+      {
+        ...coverageWireRow(),
+        id: "allocated",
+        state: "ALLOCATED",
+        createdAt: old,
+      },
+      { ...coverageWireRow(), id: "different", spendId: "other" },
+    ];
+    f.tx.siteBuildProviderWireAttempt.findMany.mockResolvedValue(rows);
+    const result = await f.ledger.listPendingReconciliations("ws", 1);
+    expect(result).toHaveLength(1);
+    expect(result[0].wireAttemptId).toBe("started");
+  });
+  it("falls back through observed, dispatch, created and spend timestamps without dropping due work", async () => {
+    const f = ledgerFixture();
+    const rows = [
+      coverageWireRow(),
+      {
+        ...coverageWireRow(),
+        spendId: "two",
+        observedAt: null,
+        dispatchStartedAt: new Date(0),
+      },
+      { ...coverageWireRow(), spendId: "three", observedAt: null },
+      {
+        ...coverageWireRow(),
+        spendId: "four",
+        observedAt: null,
+        createdAt: null,
+      },
+    ];
+    f.tx.siteBuildProviderWireAttempt.findMany.mockResolvedValue(rows);
+    expect(await f.ledger.listPendingReconciliations("ws", 10)).toHaveLength(4);
+  });
+  it("records resolver failure as unresolved and continues to the next candidate", async () => {
+    const f = ledgerFixture();
+    const candidate = {
+      ...coverageWireRow(),
+      wireAttemptId: "wire",
+      action: "RESOLVE" as const,
+    };
+    vi.spyOn(f.ledger, "listPendingReconciliations").mockResolvedValue([
+      candidate,
+      { ...candidate, spendId: "other" },
+    ] as never);
+    const append = vi
+      .spyOn(f.ledger, "appendReconciliation")
+      .mockResolvedValue({} as never);
+    const resolve = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("synthetic unavailable"))
+      .mockResolvedValueOnce(coverageObservation);
+    expect(
+      await f.ledger.runReconciliationSweep({ workspaceId: "ws", resolve }),
+    ).toEqual({ attempted: 2, resolved: 1 });
+    expect(append.mock.calls[0][0].observation).toMatchObject({
+      status: "UNRESOLVED",
+      meta: { reason: "resolver_unavailable" },
+    });
+  });
+  it.each([
+    "allocated-unresolved",
+    "allocated-error",
+    "recorded-unresolved",
+    "started-unresolved",
+    "observed-unresolved",
+  ])("expires %s conservatively without declaring exact zero", async (kind) => {
+    const f = ledgerFixture();
+    const candidate = {
+      ...coverageWireRow(),
+      wireAttemptId: "wire",
+      action: "EXPIRE",
+      wireState: kind.startsWith("allocated")
+        ? "ALLOCATED"
+        : kind.startsWith("started")
+          ? "DISPATCH_STARTED"
+          : "OBSERVED",
+      receiptRecorded: kind === "recorded-unresolved",
+    };
+    vi.spyOn(f.ledger, "listPendingReconciliations").mockResolvedValue([
+      candidate,
+    ] as never);
+    vi.spyOn(
+      f.ledger,
+      "finalizeModelPhysicalWireNotDispatched",
+    ).mockResolvedValue(undefined);
+    vi.spyOn(f.ledger, "finalizeModelPhysicalWire").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(
+      f.ledger,
+      "finalizeModelPhysicalWireFromReceipt",
+    ).mockResolvedValue(undefined);
+    const complete = vi
+      .spyOn(f.ledger, "completeProviderSpendReconciliation")
+      .mockResolvedValue({
+        status: "UNRESOLVED",
+        resolverId: "resolver",
+        observedAt: coverageNow,
+      });
+    if (kind === "allocated-error")
+      complete.mockRejectedValue(new Error("synthetic database ACK unknown"));
+    const append = vi
+      .spyOn(f.ledger, "appendReconciliation")
+      .mockResolvedValue({} as never);
+    expect(
+      await f.ledger.runReconciliationSweep({
+        workspaceId: "ws",
+        resolve: vi.fn(),
+      }),
+    ).toEqual({ attempted: 1, resolved: 0 });
+    expect(append.mock.calls[0][0].observation).toMatchObject({
+      status: kind === "allocated-error" ? "UNRESOLVED" : "EXPIRED",
+    });
+    expect(
+      append.mock.calls[0][0].observation.exactCostMicrousd,
+    ).toBeUndefined();
+  });
+});
+
+describe("bounded accounting metadata and conservative measurement", () => {
+  it.each([
+    { a: { b: { c: { d: { e: 1 } } } } },
+    { rows: Array.from({ length: 33 }, () => 1) },
+    Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`field${i}`, 1])),
+    { ["x".repeat(65)]: 1 },
+    Object.fromEntries(
+      Array.from({ length: 8 }, (_, i) => [`field${i}`, "x".repeat(512)]),
+    ),
+    { rows: Array.from({ length: 32 }, () => [1, 2, 3, 4]) },
+  ])(
+    "rejects complex or oversized metadata without truncating evidence",
+    (meta) => {
+      expect(() => boundedReconciliationMeta(meta)).toThrow();
+    },
+  );
+  it("preserves bounded nested arrays and null values", () => {
+    expect(
+      boundedReconciliationMeta({ ids: ["one", null, { ordinal: 2 }] }),
+    ).toEqual({ ids: ["one", null, { ordinal: 2 }] });
+  });
+  it("waits after the bounded retry schedule is exhausted until expiration", () => {
+    expect(
+      reconciliationDueAction({
+        now: coverageNow,
+        spendCreatedAt: new Date(coverageNow.getTime() - 1000),
+        observations: Array.from({ length: 5 }, () => ({
+          status: "UNRESOLVED",
+          observedAt: coverageNow,
+        })),
+      }),
+    ).toBe("WAIT");
+  });
+  it("rejects negative summary amounts instead of serializing invalid ledger truth", () => {
+    const f = ledgerFixture();
+    expect(() =>
+      buildSiteBuildCostSummary({ ...f.budget, capMicrousd: -1n }, []),
+    ).toThrow();
+  });
+  it("treats negative legacy cost as unknown and keeps the reservation upper bound", () => {
+    expect(legacyToolCostMeasurement(-1, 100)).toMatchObject({
+      basis: "unknown",
+      budgetChargeMicrousd: 100,
+    });
+  });
+  it("keeps known-price output with incomplete token usage conservatively charged", () => {
+    expect(
+      modelCostMeasurement({
+        taskId: "site_builder.brand_profile",
+        requestedModel: "gpt-5.6-terra",
+        resolvedModel: "gpt-5.6-terra",
+        usage: { inputTokens: 10 },
+        reservationMicrousd: 100,
+      }),
+    ).toMatchObject({
+      basis: "estimated_upper_bound",
+      budgetChargeMicrousd: 100,
+      meta: {
+        reason: "token_usage_incomplete",
+        resolvedModel: "gpt-5.6-terra",
+      },
+    });
+  });
+  it("does not apply the requested price to a different resolved model", () => {
+    expect(
+      modelCostMeasurement({
+        taskId: "site_builder.brand_profile",
+        requestedModel: "gpt-5.6-terra",
+        resolvedModel: "different-model",
+        usage: { inputTokens: 10, outputTokens: 2 },
+        reservationMicrousd: 100,
+      }),
+    ).toMatchObject({
+      basis: "estimated_upper_bound",
+      meta: { reason: "no_verified_price" },
+    });
   });
 });
