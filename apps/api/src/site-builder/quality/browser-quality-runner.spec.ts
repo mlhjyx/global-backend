@@ -429,6 +429,8 @@ async function fakeBrowserFixture(mode: FakeBrowserMode = {}) {
   );
   await writeFile(path.join(root, "exists.css"), "body{}");
   const contexts: Array<{ close: ReturnType<typeof vi.fn> }> = [];
+  const routeDecisions: Array<{ url: string; continue: ReturnType<typeof vi.fn>; abort: ReturnType<typeof vi.fn> }> = [];
+  const websocketCloses: Array<ReturnType<typeof vi.fn>> = [];
   const browser = {
     close: vi.fn().mockResolvedValue(undefined),
     newContext: vi.fn(),
@@ -633,23 +635,27 @@ async function fakeBrowserFixture(mode: FakeBrowserMode = {}) {
             }),
           },
         });
-        if (routeHandler)
+        if (routeHandler) {
           for (const target of [
             "data:text/plain,x",
             "blob:http://localhost/id",
             rawUrl,
             "https://outside.invalid/x",
-          ])
+          ]) {
+            const decision = { url: target, continue: vi.fn(), abort: vi.fn() };
+            routeDecisions.push(decision);
             await routeHandler({
               request: () => ({ url: () => target }),
-              continue: vi.fn(),
-              abort: vi.fn(),
+              continue: decision.continue,
+              abort: decision.abort,
             });
-        if (wsHandler)
-          wsHandler({
-            url: () => "ws://outside.invalid/socket",
-            close: vi.fn(),
-          });
+          }
+        }
+        if (wsHandler) {
+          const close = vi.fn();
+          websocketCloses.push(close);
+          wsHandler({ url: () => "ws://outside.invalid/socket", close });
+        }
         if (mode.networkOverflow && routeHandler)
           for (let i = 0; i < 513; i++)
             await routeHandler({
@@ -683,6 +689,8 @@ async function fakeBrowserFixture(mode: FakeBrowserMode = {}) {
     lighthouse,
     kill,
     contexts,
+    routeDecisions,
+    websocketCloses,
     cleanup: () => rm(root, { recursive: true, force: true }),
   };
 }
@@ -707,6 +715,20 @@ describe("fake runtime quality collection", () => {
       expect(
         result.pages[0].axeViolations.find((v) => v.id === "contrast"),
       ).toMatchObject({ impact: "serious", nodeCount: 6 });
+      expect(f.routeDecisions).toHaveLength(f.contexts.length * 4);
+      for (const decision of f.routeDecisions) {
+        if (decision.url.startsWith("https://outside.invalid/")) {
+          expect(decision.abort).toHaveBeenCalledExactlyOnceWith("blockedbyclient");
+          expect(decision.continue).not.toHaveBeenCalled();
+        } else {
+          expect(decision.continue).toHaveBeenCalledOnce();
+          expect(decision.abort).not.toHaveBeenCalled();
+        }
+      }
+      expect(f.websocketCloses).toHaveLength(f.contexts.length);
+      for (const close of f.websocketCloses) {
+        expect(close).toHaveBeenCalledExactlyOnceWith({ code: 1008, reason: "quality network policy" });
+      }
       expect(result.lighthouse).toHaveLength(2);
       expect(f.kill).toHaveBeenCalledTimes(2);
       expect(f.browser.close).toHaveBeenCalledOnce();
