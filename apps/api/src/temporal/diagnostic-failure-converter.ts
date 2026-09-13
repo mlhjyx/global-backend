@@ -372,7 +372,9 @@ function cleanError(
   } else {
     // Activity errors already arrive normalized by the SDK. Preserve the default
     // non-Application representation for plain Workflow Task failures.
-    error = new Error(text, { cause });
+    // Start with a fixed diagnostic. The common assignment below installs only
+    // the closed control token selected by message(), never the input message.
+    error = new Error("TEMPORAL_FAILURE", { cause });
   }
   error.message = text;
   Object.defineProperty(error, "cause", {
