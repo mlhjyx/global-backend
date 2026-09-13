@@ -1,9 +1,11 @@
 import { proxyActivities, patched, workflowInfo } from '@temporalio/workflow';
+import { DIAGNOSTIC_FAILURE_MESSAGE, DIAGNOSTIC_FAILURE_TYPE } from './failure-boundary.contract';
 import type { ExternalIntentActivities, ExternalIntentIcpResult, ExternalIntentRecomputeSummary, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
 
 function isDurableBudgetFailure(error: unknown, depth = 0): boolean {
   if (!error || typeof error !== 'object' || depth > 4) return false;
   const record = error as Record<string, unknown>;
+  if (record.type === DIAGNOSTIC_FAILURE_TYPE && record.message === DIAGNOSTIC_FAILURE_MESSAGE) return true;
   const tokens = [record.code, record.type, record.name, record.message]
     .filter((value): value is string => typeof value === 'string');
   if (tokens.some((value) =>
