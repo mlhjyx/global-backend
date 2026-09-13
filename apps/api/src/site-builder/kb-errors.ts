@@ -1,15 +1,21 @@
-export type KbErrorDisposition = 'retryable' | 'terminal' | 'superseded';
-export type KbErrorStage = 'claim' | 'storage' | 'parse' | 'embedding' | 'persist';
+export type KbErrorDisposition = (typeof KB_ERROR_DISPOSITIONS)[number];
+export type KbErrorStage = (typeof KB_ERROR_STAGES)[number];
 
-export type KbIngestErrorCode =
-  | 'KB_STORAGE_UNAVAILABLE'
-  | 'KB_DOCLING_UNAVAILABLE'
-  | 'KB_DOCUMENT_INVALID'
-  | 'KB_EMBEDDING_CONFIGURATION_INVALID'
-  | 'KB_EMBEDDING_UNAVAILABLE'
-  | 'KB_EMBEDDING_INVALID_RESPONSE'
-  | 'KB_PERSIST_FAILED'
-  | 'KB_LEASE_SUPERSEDED';
+const KB_ERROR_CODES = [
+  'KB_STORAGE_UNAVAILABLE',
+  'KB_DOCLING_UNAVAILABLE',
+  'KB_DOCUMENT_INVALID',
+  'KB_EMBEDDING_CONFIGURATION_INVALID',
+  'KB_EMBEDDING_UNAVAILABLE',
+  'KB_EMBEDDING_INVALID_RESPONSE',
+  'KB_PERSIST_FAILED',
+  'KB_LEASE_SUPERSEDED',
+] as const;
+export type KbIngestErrorCode = (typeof KB_ERROR_CODES)[number];
+
+const KB_ERROR_DISPOSITIONS = ['retryable', 'terminal', 'superseded'] as const;
+const KB_ERROR_STAGES = ['claim', 'storage', 'parse', 'embedding', 'persist'] as const;
+const SAFE_KB_ERROR_MESSAGE = 'KB ingestion failed';
 
 /**
  * Internal KB state-machine error. Classification is explicit at the dependency boundary;
@@ -28,41 +34,37 @@ export class KbIngestError extends Error {
   }
 }
 
-export function asKbIngestError(err: unknown, fallbackStage: KbErrorStage): KbIngestError {
-  if (err instanceof KbIngestError) return err;
-  if (
-    err !== null &&
-    typeof err === 'object' &&
-    typeof (err as { code?: unknown }).code === 'string' &&
-    ['retryable', 'terminal', 'superseded'].includes(
-      String((err as { disposition?: unknown }).disposition),
-    ) &&
-    ['claim', 'storage', 'parse', 'embedding', 'persist'].includes(
-      String((err as { stage?: unknown }).stage),
-    )
-  ) {
-    const typed = err as {
-      code: KbIngestErrorCode;
-      disposition: KbErrorDisposition;
-      stage: KbErrorStage;
-    };
-    return new KbIngestError(
-      typed.code,
-      typed.disposition,
-      typed.stage,
-      errorMessage(err),
-      err instanceof Error ? { cause: err } : undefined,
-    );
+function isAllowed<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value);
+}
+
+function readClassification(err: unknown): Pick<KbIngestError, 'code' | 'disposition' | 'stage'> | null {
+  if (err === null || typeof err !== 'object') return null;
+  try {
+    // Capture data properties once. Accessors and inherited metadata are not a declaration.
+    const code: unknown = Object.getOwnPropertyDescriptor(err, 'code')?.value;
+    const disposition: unknown = Object.getOwnPropertyDescriptor(err, 'disposition')?.value;
+    const stage: unknown = Object.getOwnPropertyDescriptor(err, 'stage')?.value;
+    if (!isAllowed(code, KB_ERROR_CODES) || !isAllowed(disposition, KB_ERROR_DISPOSITIONS) || !isAllowed(stage, KB_ERROR_STAGES)) {
+      return null;
+    }
+    return { code, disposition, stage };
+  } catch {
+    // A proxy may reject property inspection; unknown failures use the normal fallback.
+    return null;
   }
+}
+
+export function asKbIngestError(err: unknown, fallbackStage: KbErrorStage): KbIngestError {
+  const classification = readClassification(err);
   return new KbIngestError(
-    fallbackStage === 'persist' ? 'KB_PERSIST_FAILED' : 'KB_STORAGE_UNAVAILABLE',
-    'retryable',
-    fallbackStage,
-    errorMessage(err),
-    err instanceof Error ? { cause: err } : undefined,
+    classification?.code ?? (fallbackStage === 'persist' ? 'KB_PERSIST_FAILED' : 'KB_STORAGE_UNAVAILABLE'),
+    classification?.disposition ?? 'retryable',
+    classification?.stage ?? fallbackStage,
+    SAFE_KB_ERROR_MESSAGE,
   );
 }
 
-export function errorMessage(err: unknown): string {
-  return (err instanceof Error ? err.message : String(err)).slice(0, 2000);
+export function errorMessage(_err: unknown): string {
+  return SAFE_KB_ERROR_MESSAGE;
 }
