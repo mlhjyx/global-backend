@@ -30,6 +30,9 @@ export interface RuntimeReadinessReport {
     platform_automation: PlatformAutomationHealthProjection;
     site_builder_model_settlement_readback: ComponentStatus;
     platform_technical_quote_authentication: ComponentStatus;
+    // Additive capability for older readback consumers; absence is unproven,
+    // never permission to recover a target or an aggregate readiness override.
+    platform_target_lookup?: ComponentStatus;
   };
   components: {
     database: ComponentStatus;
@@ -75,6 +78,7 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
         projectPlatformAutomationReadinessForHealth(undefined),
       site_builder_model_settlement_readback: unavailableComponent(),
       platform_technical_quote_authentication: unavailableComponent(),
+      platform_target_lookup: unavailableComponent(),
     }),
     components: Object.freeze({
       database: unavailableComponent(),
@@ -176,11 +180,13 @@ export class RuntimeReadinessService
       platformBudgetAuthoritySnapshot,
       settlementReadback,
       platformTechnicalQuoteAuthentication,
+      platformTargetLookup,
     ] = await Promise.all([
       this.contributors.check("execution_budget_jwks"),
       this.checkPlatformAutomationSnapshot(),
       this.contributors.check("site_builder_model_settlement_readback"),
       this.contributors.check("platform_technical_quote_authentication"),
+      this.contributors.check("platform_target_lookup"),
     ]);
     const workspaceBudgetAuthority: ComponentStatus =
       executionBudgetJwks.status !== "ok"
@@ -208,6 +214,7 @@ export class RuntimeReadinessService
       site_builder_model_settlement_readback: settlementReadback,
       platform_technical_quote_authentication:
         platformTechnicalQuoteAuthentication,
+      platform_target_lookup: platformTargetLookup,
     });
   }
 

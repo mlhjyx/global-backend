@@ -2,9 +2,11 @@ import { ArgumentsHost, BadRequestException, HttpException, Logger } from '@nest
 import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from '@global/contracts/platform-authority';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GlobalHttpExceptionFilter } from './http-exception.filter';
+import { PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH } from '../platform-authority/platform-target-lookup.service';
+import { PLATFORM_TARGET_LOOKUP_HTTP_ERRORS } from '../platform-authority/platform-target-lookup.openapi';
 
 function responseHost(originalUrl: unknown = '/api/v1/example?token=canary') {
-  const response = { status: vi.fn(), json: vi.fn() };
+  const response = { status: vi.fn(), json: vi.fn(), setHeader: vi.fn() };
   response.status.mockReturnValue(response);
   const host = {
     switchToHttp: () => ({
@@ -18,6 +20,36 @@ function responseHost(originalUrl: unknown = '/api/v1/example?token=canary') {
 afterEach(() => vi.restoreAllMocks());
 
 describe('unknown HTTP exception diagnostics', () => {
+  it.each([
+    [400, 'invalid'], [413, 'invalid'], [415, 'invalid'], [401, 'denied'],
+    [403, 'scope'], [404, 'unavailable'], [429, 'rateLimited'], [503, 'unavailable'],
+    [500, 'unavailable'], [302, 'unavailable'],
+  ] as const)('closes target lookup HTTP %s diagnostics without leaking input', (status, kind) => {
+    const { response, host } = responseHost(`${PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH}?secret=canary`);
+    const expected = PLATFORM_TARGET_LOOKUP_HTTP_ERRORS[kind];
+    new GlobalHttpExceptionFilter().catch(new HttpException({ error: { code: 'untrusted', message: 'private-canary' } }, status), host);
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(response.status).toHaveBeenCalledWith(expected.status);
+    expect(response.json).toHaveBeenCalledWith({ error: { code: expected.code, message: expected.message } });
+  });
+  it('does not trust a forged business NOT_FOUND body or inspect its getter', () => {
+    const { response, host } = responseHost(PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH);
+    const forged = new HttpException({ error: { code: 'PLATFORM_AUTHORITY_TARGET_LOOKUP_NOT_FOUND', message: 'platform authority target was not found' } }, 404);
+    new GlobalHttpExceptionFilter().catch(forged, host);
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(response.json).toHaveBeenCalledWith({ error: { code: 'PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE', message: 'platform target lookup is unavailable' } });
+    const bodyAccess = vi.spyOn(forged, 'getResponse').mockImplementation(() => { throw new Error('private getter'); });
+    expect(() => new GlobalHttpExceptionFilter().catch(forged, host)).not.toThrow();
+    expect(bodyAccess).not.toHaveBeenCalled();
+  });
+  it.each([PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH, `${PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH}/`, PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH.toUpperCase()])('sanitizes parser failures before the lookup guard for %s', path => {
+    const { response, host } = responseHost(path);
+    const parser = { type: 'entity.parse.failed', status: 400, message: 'raw-private-body' };
+    new GlobalHttpExceptionFilter().catch(parser, host);
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(response.json).toHaveBeenCalledWith({ error: { code: PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.invalid.code, message: PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.invalid.message } });
+  });
   it('emits only a fixed diagnostic for a secret-bearing stack and cause', () => {
     const log = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { response, host } = responseHost();

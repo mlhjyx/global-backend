@@ -80,6 +80,16 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe("RuntimeReadinessService", () => {
+  it("reports lookup capability failure without recursively requiring business Worker readiness", async () => {
+    const deps = dependencies({ contributors: { check: vi.fn(async (name: string) => name === "platform_target_lookup"
+      ? { status: "failed", code: "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE" } : { status: "ok" }) } });
+    const service = new RuntimeReadinessService(deps.prisma as never, deps.temporal as never, deps.admission as never,
+      deps.releaseIdentity as never, deps.leases as never, deps.contributors as never);
+    expect(await service.check()).toMatchObject({ capabilities: { platform_target_lookup: {
+      status: "failed", code: "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE",
+    } } });
+    expect(deps.contributors.check).toHaveBeenCalledWith("platform_target_lookup");
+  });
   it("contains a rejected bootstrap refresh without replacing the fail-closed snapshot", async () => {
     vi.useFakeTimers();
     const rejectedRefresh = new Error("bounded background failure");
@@ -170,7 +180,7 @@ describe("RuntimeReadinessService", () => {
     releaseProbe?.();
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
     expect(deps.prisma.$transaction).toHaveBeenCalledOnce();
-    expect(deps.contributors.check).toHaveBeenCalledTimes(13);
+    expect(deps.contributors.check).toHaveBeenCalledTimes(14);
   });
 
   it("starts fail-closed and publishes a dynamic worker failure into the mutation snapshot", async () => {
