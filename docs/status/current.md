@@ -36,7 +36,7 @@ Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是�
 | GrowthOS runtime | 已恢复发布基线 `541bcc63c3486296ab4e2461d4d005e6cd43710b` 的三项exact镜像，current选择器已从旧demo切至managed release；27项Flyway checksum逐项匹配，原卷保留，JWKS三端点200，3002/3003/18081只绑定loopback | [恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)；不是最新source候选或平台capability完整采用，不是登录/建站UAT |
 | Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
 | Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
-| 平台基础设施 | 已合入的 native reader、Worker admission、持久预算与浏览器修复继续保留；native retained compose仍未采用自定义server制品，专用发布/overlay正在隔离施工；现有混合Worker不能只改namespace便迁往平台服务 | 不替换 legacy SQLite/namespace，不用配置布尔值或 disposable结果冒充权限/运行证明 |
+| 平台基础设施 | 2026-09-13：#520已合入，native image `a11b50e4…` 从 source `0192faa7…` 发布成功；[发布与本地制品回读](../evidence/temporal-native-publication-20260913.md)分别记录可信来源与 Docker inspect 兼容候选。retained尚未采用，现有混合Worker不能只改namespace便迁往平台服务 | 发布/制品回读不是服务启动或UAT；不替换 legacy SQLite/namespace，不用配置布尔值或 disposable结果冒充权限/运行证明 |
 | 运行时采用 | API/Worker/Relay均回读 image `sha256:175ae53c6500456f1121d006fd4add694231d15e20d26fbd77ef795d3f9f90d5`、source `b6be49020b28dccf2f67413667c396a893b9ce94`、artifact `sha256:74ac61098764370c00562152dc83a49876a7d9b363d6415fd82a72c510183c56`；migration `20260908130000_platform_egress_budget_policy_v2`，完整manifest/SBOM等见[采用观察](../evidence/browser-readiness-runtime-adoption-20260912.md) | API/Relay过程lease READY、Worker STARTING；匹配身份不等于可接新工作 |
 | Wikidata country successor | #498 已合入，merge `b07090011de652385aa53b17f6fd73c0e2e466d5`；country绑定修复不再列为在途候选 | 只闭环其 country-binding 子项，不关闭 #407 综合任务或 Program B 接纳 |
 | 安全治理候选 | #509 trusted verifier、#506 依赖修复、#510 post-remediation baseline 已合入；主线 advisory=`FRESH`、current=0，#511 关闭/保留为 superseded provenance | 不把安全收口当作平台 authority、RuntimeEvidence、Release Bundle 或用户验收 |
@@ -97,7 +97,7 @@ Program C 的 durable server consumer、handoff receipt、QualificationSnapshot�
 
 商业主路径是 `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`；并行信任资产路径是 `Quote → Grant → Build → Preview`。
 
-1. 运行主线：已完成#517持续浏览器观察；继续native制品发布/overlay、GrowthOS专用service JWT交付、producer事实与独立撤销consumer，随后才做完整运行切换与fresh RuntimeEvidence。新发现的撤销恢复安全差额须明确确认，不以绕过或伪造ACK收口。
+1. 运行主线：已完成#517持续浏览器观察与#520 native制品发布；继续operator兼容修复、retained采用、GrowthOS专用service JWT交付、producer事实与独立撤销consumer，随后才做完整运行切换与fresh RuntimeEvidence。撤销恢复差额已获用户确认，但实施及安全前提仍需逐项验证，不以绕过或伪造ACK收口。
 2. 产品主线：GrowthOS 单 writer 文件交接 → C1-A → C1-B/C1-C → C2 Opportunity → C3 Human QGO → C4 Outcome/C5 Conversation；不另起 R7 文档循环。
 3. 文档：本页维护当前事实，roadmap 保持稳定顺序；历史入 changelog/evidence。#451 按已批准的 GitHub 队列完成最终修订、验证、独立审查与远端收口。
 4. 验收：当前跨仓 Release Bundle、关键 UAT 三次与重启恢复通过后，才评估德国工业泵零模型/零付费/零发送 Pilot 的精确授权卡。
