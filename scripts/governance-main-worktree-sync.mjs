@@ -3,6 +3,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
+import { inspectFilesystem } from "./governance-main-worktree-sync-filesystem.mjs";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -19,26 +20,19 @@ const STATUS_ARGS = [
   "--porcelain=v1",
   "-z",
   "--untracked-files=all",
-  "--ignored=matching",
+  "--ignored=traditional",
 ];
 const TRACKED_ARGS = ["diff", "--name-only", "-z", "HEAD", "--"];
-const UNTRACKED_ARGS = [
-  "ls-files",
-  "--others",
-  "--exclude-standard",
-  "--directory",
-  "--no-empty-directory",
-  "-z",
-];
+const UNTRACKED_ARGS = ["ls-files", "--others", "--exclude-standard", "-z"];
 const IGNORED_ARGS = [
   "ls-files",
   "--others",
   "--ignored",
   "--exclude-standard",
-  "--directory",
-  "--no-empty-directory",
   "-z",
 ];
+
+const INDEXED_ARGS = ["ls-files", "--cached", "-z"];
 
 const ALLOWED_GIT_COMMANDS = new Set(
   [
@@ -51,6 +45,7 @@ const ALLOWED_GIT_COMMANDS = new Set(
     TRACKED_ARGS,
     UNTRACKED_ARGS,
     IGNORED_ARGS,
+    INDEXED_ARGS,
   ].map((args) => JSON.stringify(args)),
 );
 
@@ -86,10 +81,11 @@ function isExactObjectCommand(args) {
       args[3] === "-u" &&
       isObjectId(args[4]) &&
       isObjectId(args[5])) ||
-    (args.length === 3 &&
+    (args.length === 4 &&
       args[0] === "merge" &&
       args[1] === "--ff-only" &&
-      isObjectId(args[2]))
+      args[2] === "--no-overwrite-ignore" &&
+      isObjectId(args[3]))
   );
 }
 
@@ -126,6 +122,7 @@ async function defaultGit(args, { cwd = EXPECTED_MAIN_WORKTREE } = {}) {
     cwd,
     env: createSafeGitEnvironment(),
     maxBuffer: 16 * 1024 * 1024,
+    encoding: "buffer",
   });
 }
 
@@ -167,7 +164,10 @@ function parseWorktrees(text) {
 }
 
 function parseNulPaths(text) {
-  return outputText(text).split("\0").filter(Boolean);
+  return new TextDecoder("utf-8", { fatal: true })
+    .decode(outputBytes(text))
+    .split("\0")
+    .filter(Boolean);
 }
 
 function normalizeLocalPath(path) {
@@ -356,7 +356,10 @@ async function locateCanonicalInvocation(invocationCwd, resolveRealpath) {
   return undefined;
 }
 
-async function inspectStatus(git, { remoteFreshness, resolveRealpath }) {
+async function inspectStatus(
+  git,
+  { remoteFreshness, resolveRealpath, observeFilesystem },
+) {
   const locationHold = await locateCanonicalMain(git, resolveRealpath);
   if (locationHold) return locationHold;
 
@@ -423,23 +426,35 @@ async function inspectStatus(git, { remoteFreshness, resolveRealpath }) {
 
   let incoming;
   let localPathGroups;
+  let filesystemProof;
   try {
-    const [incomingResult, trackedResult, untrackedResult, ignoredResult] =
-      await Promise.all([
-        git(
-          ["diff", "--name-only", "-z", `${localHead}..${remoteHead}`, "--"],
-          { cwd: EXPECTED_MAIN_WORKTREE },
-        ),
-        git(TRACKED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
-        git(UNTRACKED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
-        git(IGNORED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
-      ]);
+    const [
+      incomingResult,
+      trackedResult,
+      untrackedResult,
+      ignoredResult,
+      indexedResult,
+    ] = await Promise.all([
+      git(["diff", "--name-only", "-z", `${localHead}..${remoteHead}`, "--"], {
+        cwd: EXPECTED_MAIN_WORKTREE,
+      }),
+      git(TRACKED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
+      git(UNTRACKED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
+      git(IGNORED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
+      git(INDEXED_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
+    ]);
     incoming = parseNulPaths(incomingResult.stdout);
     localPathGroups = {
       ignored: parseNulPaths(ignoredResult.stdout),
       tracked: parseNulPaths(trackedResult.stdout),
       untracked: parseNulPaths(untrackedResult.stdout),
     };
+    filesystemProof = await observeFilesystem({
+      root: EXPECTED_MAIN_WORKTREE,
+      incoming,
+      groups: localPathGroups,
+      indexed: parseNulPaths(indexedResult.stdout),
+    });
   } catch (error) {
     return baseResult({
       ...common,
@@ -464,7 +479,11 @@ async function inspectStatus(git, { remoteFreshness, resolveRealpath }) {
     ),
     collisions,
     gitignoreScopeCollisions,
+    filesystemProof,
   };
+  if (filesystemProof.collisions.length > 0) {
+    return baseResult({ ...withPaths, state: "FILESYSTEM_COLLISION_HOLD" });
+  }
   if (collisions.length > 0) {
     return baseResult({ ...withPaths, state: "LOCAL_COLLISION_HOLD" });
   }
@@ -489,22 +508,29 @@ async function inspectStatus(git, { remoteFreshness, resolveRealpath }) {
     state: "FAST_FORWARD_READY",
     canApply: true,
     rawStatus,
+    originalLocalPathGroups: localPathGroups,
   });
 }
 
 function publicResult(result) {
-  const { rawStatus: _rawStatus, ...safe } = result;
+  const {
+    rawStatus: _rawStatus,
+    originalLocalPathGroups: _localPaths,
+    ...safe
+  } = result;
   return safe;
 }
 
 export async function getMainWorktreeSyncStatus({
   git = defaultGit,
   resolveRealpath = realpath,
+  observeFilesystem = inspectFilesystem,
 } = {}) {
   try {
     const result = await inspectStatus(git, {
       remoteFreshness: "CACHED_LOCAL_REF",
       resolveRealpath,
+      observeFilesystem,
     });
     return publicResult({
       remoteFreshness: result.remoteFreshness ?? "CACHED_LOCAL_REF",
@@ -522,6 +548,7 @@ export async function applyMainWorktreeSync({
   git = defaultGit,
   invocationCwd = process.cwd(),
   resolveRealpath = realpath,
+  observeFilesystem = inspectFilesystem,
 } = {}) {
   try {
     const invocationHold = await locateCanonicalInvocation(
@@ -559,6 +586,7 @@ export async function applyMainWorktreeSync({
     const inspectedPreflight = await inspectStatus(git, {
       remoteFreshness: "FETCHED_AT_RUNTIME",
       resolveRealpath,
+      observeFilesystem,
     });
     const preflight = {
       remoteFreshness: "FETCHED_AT_RUNTIME",
@@ -613,36 +641,80 @@ export async function applyMainWorktreeSync({
       });
     }
 
-    try {
-      await git(["merge", "--ff-only", preflight.remoteHead], {
-        cwd: EXPECTED_MAIN_WORKTREE,
+    const rechecked = await inspectStatus(git, {
+      remoteFreshness: "FETCHED_AT_RUNTIME",
+      resolveRealpath,
+      observeFilesystem,
+    });
+    if (
+      rechecked.state !== "FAST_FORWARD_READY" ||
+      rechecked.localHead !== preflight.localHead ||
+      rechecked.remoteHead !== preflight.remoteHead ||
+      rechecked.localStatusDigest !== preflight.localStatusDigest ||
+      rechecked.filesystemProof?.preservationDigest !==
+        preflight.filesystemProof.preservationDigest ||
+      rechecked.filesystemProof?.destinationDigest !==
+        preflight.filesystemProof.destinationDigest
+    ) {
+      return publicResult({
+        ...preflight,
+        state: "PRE_MERGE_FILESYSTEM_DRIFT_HOLD",
+        canApply: false,
+        recheckState: rechecked.state,
       });
+    }
+    // The authorized single-writer workflow uses pre/post drift detection.
+    // Snapshots do not atomically exclude arbitrary concurrent writers; Git's
+    // no-overwrite-ignore guard additionally protects late ignored destinations.
+    try {
+      await git(
+        ["merge", "--ff-only", "--no-overwrite-ignore", preflight.remoteHead],
+        {
+          cwd: EXPECTED_MAIN_WORKTREE,
+        },
+      );
     } catch (error) {
       return publicResult({
         ...preflight,
         state: "MERGE_FAILED_HOLD",
         canApply: false,
+        mergeAttempted: true,
         error: errorText(error),
       });
     }
 
+    let postProof;
     let postStatus;
     let localHead;
     let remoteHead;
+    let branch;
     let ahead;
     let behind;
     try {
-      const [statusResult, localResult, remoteResult] = await Promise.all([
-        git(STATUS_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
-        git(["rev-parse", "HEAD"], { cwd: EXPECTED_MAIN_WORKTREE }),
-        git(["rev-parse", "--verify", REMOTE_MAIN_COMMIT], {
-          cwd: EXPECTED_MAIN_WORKTREE,
-        }),
-      ]);
+      // Revisit the ORIGINAL local paths only. Incoming tracked changes are
+      // expected and must not be compared against their pre-merge content.
+      postProof = await observeFilesystem({
+        root: EXPECTED_MAIN_WORKTREE,
+        incoming: [],
+        groups: preflight.originalLocalPathGroups,
+        indexed: [],
+      });
+      const [statusResult, localResult, remoteResult, branchResult] =
+        await Promise.all([
+          git(STATUS_ARGS, { cwd: EXPECTED_MAIN_WORKTREE }),
+          git(["rev-parse", "HEAD"], { cwd: EXPECTED_MAIN_WORKTREE }),
+          git(["rev-parse", "--verify", REMOTE_MAIN_COMMIT], {
+            cwd: EXPECTED_MAIN_WORKTREE,
+          }),
+          git(["symbolic-ref", "--quiet", "HEAD"], {
+            cwd: EXPECTED_MAIN_WORKTREE,
+          }),
+        ]);
       postStatus = outputBytes(statusResult.stdout);
       localHead = outputText(localResult.stdout).trim();
       remoteHead = outputText(remoteResult.stdout).trim();
-      if (!isObjectId(remoteHead) || !isObjectId(localHead)) {
+      branch = outputText(branchResult.stdout).trim();
+      if (!isObjectId(localHead) || !isObjectId(remoteHead)) {
         throw new Error(
           "post-apply local or remote HEAD is not a full object ID",
         );
@@ -654,39 +726,53 @@ export async function applyMainWorktreeSync({
       [ahead, behind] = outputText(countResult.stdout)
         .trim()
         .split(/\s+/u)
-        .map((value) => Number.parseInt(value, 10));
+        .map(Number);
+      if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind)) {
+        throw new Error("invalid post-apply ahead/behind count");
+      }
     } catch (error) {
       return publicResult({
         ...preflight,
         state: "POST_APPLY_VERIFY_FAILED_HOLD",
         canApply: false,
+        mergeAttempted: true,
         error: errorText(error),
       });
     }
-
     const statusPreserved = postStatus.equals(preflight.rawStatus);
+    const filesystemPreserved =
+      postProof.preservationDigest ===
+      preflight.filesystemProof.preservationDigest;
     const verification = {
       ...preflight,
       canApply: false,
+      mergeAttempted: true,
       localHead,
       remoteHead,
       ahead,
       behind,
       statusPreserved,
+      filesystemPreserved,
       postStatusDigest: statusDigest(postStatus),
+      postPreservationDigest: postProof.preservationDigest,
+      concurrencyGuarantee:
+        "SINGLE_WRITER_PRE_POST_DRIFT_DETECTION_NOT_ATOMIC_EXCLUSION",
     };
-    if (!statusPreserved) {
+    if (!filesystemPreserved)
+      return publicResult({
+        ...verification,
+        state: "POST_APPLY_FILESYSTEM_DRIFT_HOLD",
+      });
+    if (!statusPreserved)
       return publicResult({ ...verification, state: "POST_APPLY_DRIFT_HOLD" });
-    }
     if (
       localHead !== preflight.remoteHead ||
       remoteHead !== preflight.remoteHead ||
+      branch !== MAIN_BRANCH ||
       ahead !== 0 ||
       behind !== 0
-    ) {
+    )
       return publicResult({ ...verification, state: "POST_APPLY_HEAD_HOLD" });
-    }
-
     return publicResult({ ...verification, state: "APPLIED" });
   } catch (error) {
     return baseResult({
