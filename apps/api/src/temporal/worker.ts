@@ -503,6 +503,9 @@ async function main(): Promise<void> {
   );
   const worker = await Worker.create({
     connection,
+    dataConverter: {
+      failureConverterPath: require.resolve("./diagnostic-failure-converter"),
+    },
     namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve("./workflows"),
