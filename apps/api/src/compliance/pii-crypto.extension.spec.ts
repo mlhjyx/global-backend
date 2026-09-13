@@ -84,3 +84,57 @@ describe('pii-crypto.extension 数据库 principal 读取', () => {
     );
   });
 });
+
+describe('pii-crypto.extension lookup and bulk write preservation', () => {
+  beforeEach(() => {
+    process.env.PII_ENCRYPTION_KEY = TEST_KEY;
+  });
+
+  it.each(['createMany', 'createManyAndReturn'])('%s encrypts both bulk rows and a single record', (operation) => {
+    const rows = { data: [{ type: 'email', value: 'one@example.test' }, { type: 'external_id', value: 'external-1' }] };
+    encryptArgs(operation, rows, POINT);
+    expect(rows.data[0].value).toBe(encryptPii('one@example.test'));
+    expect(rows.data[1].value).toBe('external-1');
+    const single = { data: { fullName: 'Synthetic Person' } };
+    encryptArgs(operation, single, CONTACT);
+    expect(single.data.fullName).toBe(encryptPii('Synthetic Person'));
+  });
+
+  it.each(['update', 'updateMany'])('%s keeps lookup and replacement encrypted consistently', (operation) => {
+    const args = { where: { type: 'email', value: 'old@example.test' }, data: { type: 'email', value: 'new@example.test' } };
+    encryptArgs(operation, args, POINT);
+    expect(args.where.value).toBe(encryptPii('old@example.test'));
+    expect(args.data.value).toBe(encryptPii('new@example.test'));
+  });
+
+  it.each(['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'delete', 'deleteMany'])('%s encrypts a direct name lookup', (operation) => {
+    const args = { where: { fullName: 'Synthetic Person' } };
+    encryptArgs(operation, args, CONTACT);
+    expect(args.where.fullName).toBe(encryptPii('Synthetic Person'));
+  });
+
+  it('keeps non-PII and missing-type lookups unchanged', () => {
+    for (const where of [{ type: 'external_id', value: 'external-1' }, { value: 'unclassified' }]) {
+      const original = { ...where };
+      encryptArgs('findFirst', { where }, POINT);
+      expect(where).toEqual(original);
+    }
+    const args = { data: { value: 'unclassified' } };
+    encryptArgs('create', args, POINT);
+    expect(args.data.value).toBe('unclassified');
+  });
+
+  it('preserves absent optional arguments, non-string fields and unsupported operations', () => {
+    expect(() => encryptArgs('findMany', undefined, CONTACT)).not.toThrow();
+    expect(() => encryptArgs('create', { data: null }, CONTACT)).not.toThrow();
+    expect(() => encryptArgs('findMany', {}, CONTACT)).not.toThrow();
+    const args = { data: { fullName: null }, where: { id: 'contact-1' } };
+    encryptArgs('update', args, CONTACT);
+    expect(args.data.fullName).toBeNull();
+    const other = { data: { fullName: 'untouched' } };
+    encryptArgs('aggregate', other, CONTACT);
+    expect(other.data.fullName).toBe('untouched');
+    expect(piiSpecFor(undefined)).toBeUndefined();
+    expect(piiSpecFor('UnrelatedModel')).toBeUndefined();
+  });
+});
