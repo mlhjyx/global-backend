@@ -8,7 +8,7 @@ import { after, before, beforeEach, afterEach, describe, it } from 'node:test';
 // Self-owned, no-egress, no published ports/host volumes. Never accepts a DB URL.
 const container = `codex-revocation-pg-${randomUUID()}`;
 const migrations = fileURLToPath(new URL('../prisma/migrations/', import.meta.url));
-const migrationName = '20260908130000_platform_egress_budget_policy_v2';
+const migrationName = '20260913080000_platform_authority_target_lookup';
 const login = 'revocation_test_writer';
 const issuer = 'https://growthos.example';
 const revision = 'b'.repeat(64);
@@ -16,6 +16,11 @@ const policyArtifact = 'c'.repeat(64);
 const policyEnvelope = 'd'.repeat(64);
 const quoteVectors = JSON.parse(readFileSync(new URL('../../contracts/fixtures/platform-authority/platform-execution-technical-quote-v1.json', import.meta.url), 'utf8')).vectors;
 let created = false;
+let authorityAclBeforeLookup;
+let revocationFunctionAclBeforeLookup;
+const priorFunctionAcls = `SELECT jsonb_agg(jsonb_build_object('oid',oid,'acl',proacl) ORDER BY oid)::text
+  FROM pg_proc WHERE pronamespace='public'::regnamespace
+  AND proname IN ('apply_platform_revocation_fence_v1','inspect_platform_egress_fence_v1','assert_execution_budget_platform_writer_principal')`;
 let database = 'revocation_test';
 const docker = (args, input) => spawnSync('docker', args, { input, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 120000 });
 const args = () => ['exec', '-i', container, 'psql', '-U', 'postgres', '-d', database, '-X', '-qAt', '-v', 'ON_ERROR_STOP=1'];
@@ -111,6 +116,11 @@ function receipt() {
   const t = target(); const c = command(t);
   return JSON.parse(sql(writer(apply(c)))).receipt_id;
 }
+function lookup(t, changes = {}) {
+  const v = { issuer, jti: t.jti, schedule: t.schedule, run: t.run, ...changes };
+  const literal = value => value === null ? 'NULL' : quote(value);
+  return `SELECT public.lookup_platform_authority_target_v1(${literal(v.issuer)},${literal(v.jti)}::uuid,${literal(v.schedule)},${literal(v.run)});`;
+}
 async function waitSleeping(label) {
   for (let n = 0; n < 30; n++) {
     if (sql(`SELECT count(*) FROM pg_stat_activity WHERE application_name=${quote(label)} AND wait_event='PgSleep'`) === '1') return;
@@ -134,11 +144,18 @@ describe('signed platform revocation on self-owned disposable PostgreSQL 16', ()
     assert.ok(ready, 'disposable PostgreSQL did not start');
     sql('CREATE ROLE global LOGIN SUPERUSER;');
     const names = readdirSync(migrations).filter(name => name <= migrationName && existsSync(`${migrations}/${name}/migration.sql`)).sort();
-    sql('SET ROLE global;\n' + names.map(name => {
+    const lookupMigration = names.filter(name => name === migrationName);
+    sql('SET ROLE global;\n' + names.filter(name => name !== migrationName).map(name => {
       const source = readFileSync(`${migrations}/${name}/migration.sql`, 'utf8');
       // Match Prisma's atomic multi-statement execution for files without their own transaction.
       return /^BEGIN;/m.test(source) ? source : `BEGIN;\n${source}\nCOMMIT;`;
     }).join('\n'));
+    authorityAclBeforeLookup = sql("SELECT relacl::text FROM pg_class WHERE oid='public.execution_budget_authority'::regclass");
+    revocationFunctionAclBeforeLookup = sql(priorFunctionAcls);
+    // Existing owner defaults must not leak the new function to ordinary roles.
+    // This affects only the disposable template and only subsequently created functions.
+    sql('ALTER DEFAULT PRIVILEGES FOR ROLE global GRANT EXECUTE ON FUNCTIONS TO app_user, runtime_api, runtime_worker, runtime_outbox_relay;');
+    for (const name of lookupMigration) sql(`SET ROLE global;\n${readFileSync(`${migrations}/${name}/migration.sql`, 'utf8')}`);
     sql(`CREATE ROLE ${login} LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
       GRANT execution_budget_platform_writer TO ${login};`);
   });
@@ -156,6 +173,97 @@ describe('signed platform revocation on self-owned disposable PostgreSQL 16', ()
       assert.match(previous, /^revocation_case_[0-9a-f]{32}$/);
       sql(`DROP DATABASE ${previous}`);
     }
+  });
+
+  it('lookup observes exact committed locators without creating authority or budget state', () => {
+    const t = target();
+    const snapshot = () => sql(`SELECT jsonb_build_object(
+      'authority',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM execution_budget_authority a),
+      'revocation',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM execution_budget_authority_revocation a),
+      'account',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM tool_budget_account a),
+      'operation',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM tool_budget_operation a),
+      'fence',(SELECT jsonb_agg(to_jsonb(a) ORDER BY schedule_id) FROM platform_egress_schedule_fence a),
+      'attempt',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM platform_egress_attempt a),
+      'receipt',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM platform_revocation_receipt a))::text`);
+    const before = snapshot();
+    assert.equal(sql(writer(`BEGIN READ ONLY; ${lookup(t)} COMMIT;`)), 't');
+    for (const mutation of [{ issuer: 'https://other.example' }, { jti: randomUUID() },
+      { schedule: 'intent-sweep' }, { run: randomUUID() }]) {
+      assert.equal(sql(writer(lookup(t, mutation))), 'f');
+    }
+    assert.equal(snapshot(), before);
+  });
+  it('lookup retains expired and revoked locators rather than granting consumption', () => {
+    const t = target();
+    sql(writer(apply(command(t))));
+    assert.equal(sql(writer(lookup(t))), 't');
+    sql(`UPDATE execution_budget_authority SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${quote(t.id)}`);
+    assert.equal(sql(writer(lookup(t))), 't');
+    assert.equal(sql(`SELECT revoked_at IS NOT NULL AND expires_at < clock_timestamp() FROM execution_budget_authority WHERE id=${quote(t.id)}`), 't');
+  });
+  it('lookup does not reveal a workspace Grant or an uncommitted locator', async () => {
+    const ws = randomUUID(); const jti = randomUUID(); const run = randomUUID();
+    sql(`INSERT INTO workspace(id,name,created_at,updated_at) VALUES (${quote(ws)},'lookup-test',now(),now());
+      INSERT INTO execution_budget_authority(scope_key,authority_kind,workspace_id,issuer,audience,jti,
+        token_sha256,schema_version,purpose,subject_type,subject_id,request_sha256,currency,unit,
+        cap_microusd,runs_consumed,issued_at,not_before,expires_at,consumed_at)
+      VALUES (${quote(ws)},'WORKSPACE_GRANT',${quote(ws)},${quote(issuer)},'global-backend:execution-budget',${quote(jti)},
+        repeat('5',64),'execution-budget-grant/v1','discovery.run','discovery_run','request:lookup',repeat('6',64),
+        'USD','microusd',1000,1,now()-interval '30 seconds',now()-interval '20 seconds',now()+interval '4 minutes',now());`);
+    assert.equal(sql(writer(lookup({ jti, run, schedule: 'acq-sweep' }))), 'f');
+    const t = target();
+    const nextRun = randomUUID();
+    const pending = asyncSql(`SET application_name='lookup-uncommitted'; BEGIN;
+      UPDATE execution_budget_authority SET workflow_run_id=${quote(nextRun)} WHERE id=${quote(t.id)};
+      SELECT pg_sleep(1.5); COMMIT;`);
+    await waitSleeping('lookup-uncommitted');
+    assert.equal(sql(writer(lookup(t, { run: nextRun }))), 'f');
+    assert.equal(sql(writer(lookup(t))), 't');
+    await pending;
+    assert.equal(sql(writer(lookup(t, { run: nextRun }))), 't');
+  });
+  it('lookup rejects invalid bindings before querying and never permits an owner fallback', () => {
+    const t = target();
+    for (const changes of [{ issuer: null }, { issuer: '' }, { issuer: 'x'.repeat(2049) },
+      { issuer: 'https://growthos.example\n' }, { issuer: 'https://growthos.example x' },
+      { jti: null }, { jti: '00000000-0000-0000-0000-000000000000' },
+      { schedule: null }, { schedule: 'unknown' }, { run: null }, { run: 'invalid' },
+      { run: '00000000-0000-0000-0000-000000000000' }]) {
+      sql(writer(lookup(t, changes)), /PLATFORM_AUTHORITY_TARGET_LOOKUP_INVALID/);
+    }
+    sql(lookup(t), /EXECUTION_BUDGET_PLATFORM_WRITER_PRINCIPAL_INVALID/);
+    sql(owner(lookup(t)), /EXECUTION_BUDGET_PLATFORM_WRITER_PRINCIPAL_INVALID/);
+    sql(`SET ROLE execution_budget_platform_writer; ${lookup(t)}`, /EXECUTION_BUDGET_PLATFORM_WRITER_PRINCIPAL_INVALID/);
+    sql(`SET SESSION AUTHORIZATION app_user; ${lookup(t)}`, /permission denied/);
+  });
+  it('lookup exposes only EXECUTE and resists attacker search paths and temporary relations', () => {
+    const t = target();
+    const signature = 'public.lookup_platform_authority_target_v1(text,uuid,text,text)';
+    assert.deepEqual(JSON.parse(sql(`SELECT json_build_object(
+      'public_execute',has_function_privilege('public',${quote(signature)},'EXECUTE'),
+      'writer_execute',has_function_privilege('execution_budget_platform_writer',${quote(signature)},'EXECUTE'),
+      'app_execute',has_function_privilege('app_user',${quote(signature)},'EXECUTE'),
+      'api_execute',has_function_privilege('runtime_api',${quote(signature)},'EXECUTE'),
+      'worker_execute',has_function_privilege('runtime_worker',${quote(signature)},'EXECUTE'),
+      'relay_execute',has_function_privilege('runtime_outbox_relay',${quote(signature)},'EXECUTE'),
+      'definer',(SELECT prosecdef FROM pg_proc WHERE oid=${quote(signature)}::regprocedure),
+      'search_path',(SELECT proconfig FROM pg_proc WHERE oid=${quote(signature)}::regprocedure))::text`)),
+    { public_execute: false, writer_execute: true, app_execute: false,
+      api_execute: false, worker_execute: false, relay_execute: false,
+      definer: true, search_path: ['search_path=pg_catalog, public'] });
+    assert.equal(sql("SELECT relacl::text FROM pg_class WHERE oid='public.execution_budget_authority'::regclass"), authorityAclBeforeLookup);
+    assert.equal(sql(priorFunctionAcls), revocationFunctionAclBeforeLookup);
+    assert.equal(sql(writer(`CREATE TEMP TABLE execution_budget_authority(id uuid);
+      SET search_path=pg_temp; ${lookup(t)}`)), 't');
+  });
+  it('lookup rejects drifted writer privileges and mixed membership even with EXECUTE', () => {
+    const t = target();
+    for (const change of [`ALTER ROLE ${login} BYPASSRLS`, `ALTER ROLE ${login} CREATEDB`,
+      `ALTER ROLE ${login} CREATEROLE`, `ALTER ROLE ${login} SUPERUSER`,
+      `GRANT app_user TO ${login}`, 'ALTER ROLE execution_budget_platform_writer LOGIN']) {
+      sql(`BEGIN; ${change}; ${writer(lookup(t))} ROLLBACK;`, /EXECUTION_BUDGET_PLATFORM_WRITER_PRINCIPAL_INVALID/);
+    }
+    assert.equal(sql(writer(lookup(t))), 't');
   });
 
   it('exposes only a writer function and a FORCE RLS immutable receipt', () => {

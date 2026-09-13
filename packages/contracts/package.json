@@ -20,6 +20,10 @@
       "types": "./dist/platform-authority/canonical-request.d.ts",
       "default": "./dist/platform-authority/canonical-request.js"
     },
+    "./platform-authority/target-lookup": {
+      "types": "./dist/platform-authority/target-lookup.d.ts",
+      "default": "./dist/platform-authority/target-lookup.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -29,6 +33,9 @@
       ],
       "platform-authority": [
         "dist/platform-authority/canonical-request.d.ts"
+      ],
+      "platform-authority/target-lookup": [
+        "dist/platform-authority/target-lookup.d.ts"
       ]
     }
   },
