@@ -336,8 +336,8 @@ if [[ $(id -u) -eq 0 ]]; then
 fi
 
 "${compose[@]}" config --quiet
-"${PLATFORM_DIR}/provision.sh"
-"${PLATFORM_DIR}/provision.sh"
+"${PLATFORM_DIR}/test-support/provision-disposable.sh"
+"${PLATFORM_DIR}/test-support/provision-disposable.sh"
 
 change_namespace_fixture() {
   "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
@@ -351,7 +351,7 @@ change_namespace_fixture() {
     ' -- "$@"
 }
 assert_namespace_drift_rejected() {
-  if "${PLATFORM_DIR}/provision.sh" >"${FIXTURE_DIRECTORY}/namespace-drift.log" 2>&1; then
+  if "${PLATFORM_DIR}/test-support/provision-disposable.sh" >"${FIXTURE_DIRECTORY}/namespace-drift.log" 2>&1; then
     echo "namespace drift was accepted" >&2
     exit 1
   fi
@@ -363,11 +363,11 @@ assert_namespace_drift_rejected() {
 change_namespace_fixture --retention 1d
 assert_namespace_drift_rejected
 change_namespace_fixture --retention 7d
-"${PLATFORM_DIR}/provision.sh"
+"${PLATFORM_DIR}/test-support/provision-disposable.sh"
 change_namespace_fixture --data platform_non_tenant=false
 assert_namespace_drift_rejected
 change_namespace_fixture --data platform_non_tenant=true
-"${PLATFORM_DIR}/provision.sh"
+"${PLATFORM_DIR}/test-support/provision-disposable.sh"
 echo "namespace retention and ownership drift rejected"
 
 SCHEDULE_ID=task4c-proof-${RUN_ID}
