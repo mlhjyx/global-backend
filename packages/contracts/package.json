@@ -45,7 +45,7 @@
     "gen": "openapi-typescript openapi/openapi.json -o src/generated/api.ts"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.50.0",
+    "@redocly/cli": "^2.52.1",
     "@stoplight/prism-cli": "^5.16.0",
     "@stoplight/spectral-cli": "^6.16.3",
     "openapi-typescript": "^7.4.0"
