@@ -1,4 +1,8 @@
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ActivityFailure,
@@ -241,6 +245,56 @@ afterAll(async () => {
 });
 
 describe("compiled diagnostic converter integration", () => {
+  it("uses the actual Worker.create data converter configuration to redact outgoing failures", () => {
+    const workerPath = resolve(import.meta.dirname, "worker.ts");
+    const source = ts.createSourceFile(
+      workerPath,
+      readFileSync(workerPath, "utf8"),
+      ts.ScriptTarget.ESNext,
+      true,
+    );
+    const creates: ts.CallExpression[] = [];
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.expression.getText(source) === "Worker" &&
+        node.expression.name.text === "create"
+      )
+        creates.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(creates).toHaveLength(1);
+    const options = creates[0]!.arguments[0]!;
+    expect(ts.isObjectLiteralExpression(options)).toBe(true);
+    const property = (options as ts.ObjectLiteralExpression).properties.find(
+      (entry) => entry.name?.getText(source) === "dataConverter",
+    );
+    // Missing assembly deliberately exercises the SDK default and exposes the
+    // canary. Only this pure source initializer executes; no Worker starts.
+    const expression =
+      property && ts.isPropertyAssignment(property)
+        ? property.initializer.getText(source)
+        : "{}";
+    const configuration = runInNewContext(
+      `(${expression})`,
+      { require: createRequire(compiledConverter) },
+      { timeout: 1000 },
+    );
+    const loaded = loadDataConverter(configuration);
+    const proto = loaded.failureConverter.errorToFailure(
+      ApplicationFailure.retryable("synthetic-history-secret", "Error"),
+      loaded.payloadConverter,
+    );
+    expect(JSON.stringify(proto)).not.toContain("synthetic-history-secret");
+    expect(configuration.failureConverterPath).toBe(compiledConverter);
+    expect(
+      loaded.payloadConverter.toPayload({ business: "unchanged" }),
+    ).toEqual(defaultPayloadConverter.toPayload({ business: "unchanged" }));
+    expect(loaded.payloadCodecs).toEqual([]);
+  });
+
   it("loads the exact compiled named export through the SDK data converter loader", () => {
     const loaded = loadDataConverter({
       failureConverterPath: compiledConverter,

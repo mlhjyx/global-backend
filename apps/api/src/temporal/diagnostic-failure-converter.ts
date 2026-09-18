@@ -36,11 +36,14 @@ type Shape = { readonly [key: string]: ScalarKind | Shape };
 
 function fields(value: unknown): Fields {
   if (!value || typeof value !== "object") throw new Error(CONTROL);
-  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<
+    PropertyKey,
+    PropertyDescriptor
+  >;
   if (Reflect.ownKeys(descriptors).length > 32) throw new Error(CONTROL);
   const out: Fields = Object.create(null);
   for (const key of Reflect.ownKeys(descriptors)) {
-    const descriptor = Reflect.get(descriptors, key) as PropertyDescriptor;
+    const descriptor = descriptors[key]!;
     // The SDK and V8 both permit a lazy stack. It is never evaluated or copied.
     if (key === "stack") continue;
     if (!("value" in descriptor)) throw new Error(CONTROL);
