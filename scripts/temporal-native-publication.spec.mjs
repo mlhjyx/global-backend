@@ -129,6 +129,69 @@ test("native artifact binds actual binary bytes to exact source, image identity 
   );
 });
 
+for (const representation of ["absent", "null", "empty-array"]) {
+  test(`native artifact accepts ${representation} no-entrypoint representation without rewriting image identity`, () => {
+    const input = verification();
+    if (representation === "absent") delete input.inspect.Config.Entrypoint;
+    else
+      input.inspect.Config.Entrypoint = representation === "null" ? null : [];
+    const original = JSON.stringify(input.inspect);
+    assert.equal(verifyNativeArtifact(input).result, "PASS");
+    assert.equal(JSON.stringify(input.inspect), original);
+    for (const mutate of [
+      (v) => {
+        v.inspect.Id = "sha256:" + "d".repeat(64);
+      },
+      (v) => {
+        v.inspect.Config.Cmd = ["/bin/sh"];
+      },
+      (v) => {
+        v.inspect.Config.User = "root";
+      },
+      (v) => {
+        v.inspect.Config.Labels["org.opencontainers.image.revision"] =
+          "d".repeat(40);
+      },
+      (v) => {
+        v.binary = Buffer.from("wrong binary");
+      },
+      (v) => {
+        v.manifest.binarySha256 = "sha256:" + "d".repeat(64);
+      },
+      (v) => {
+        v.sbom = Buffer.from("{}");
+      },
+    ]) {
+      const changed = verification();
+      changed.inspect = JSON.parse(original);
+      mutate(changed);
+      assert.throws(
+        () => verifyNativeArtifact(changed),
+        /TEMPORAL_NATIVE_ARTIFACT_INVALID/,
+      );
+    }
+  });
+}
+test("native artifact rejects nonempty and malformed entrypoints", () => {
+  for (const entrypoint of [
+    ["/bin/sh"],
+    [""],
+    [null],
+    false,
+    0,
+    "",
+    {},
+    { length: 0 },
+  ]) {
+    const input = verification();
+    input.inspect.Config.Entrypoint = entrypoint;
+    assert.throws(
+      () => verifyNativeArtifact(input),
+      /TEMPORAL_NATIVE_ARTIFACT_INVALID/,
+    );
+  }
+});
+
 test("wrong source, digest, config, stock binary and synthetic final paths cannot be accepted", () => {
   for (const mutate of [
     (v) => {

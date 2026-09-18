@@ -449,7 +449,13 @@ export function verifyNativeArtifact(input) {
     const config = inspect.Config;
     if (
       config?.User !== "1000:1000" ||
-      config.Entrypoint !== null ||
+      // OCI optional null/absent and Docker's empty array all mean no entrypoint.
+      // Do not rewrite inspect/config bytes or relax the exact Cmd below.
+      (config.Entrypoint !== undefined &&
+        config.Entrypoint !== null &&
+        !(
+          Array.isArray(config.Entrypoint) && config.Entrypoint.length === 0
+        )) ||
       !equal(config.Cmd, ["/etc/temporal/entrypoint.sh"]) ||
       config.Labels?.["org.opencontainers.image.revision"] !==
         expected.sourceSha ||
