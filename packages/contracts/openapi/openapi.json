@@ -728,6 +728,69 @@
                               }
                             }
                           ]
+                        },
+                        "platform_target_lookup": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         }
                       }
                     },
@@ -2112,6 +2175,69 @@
                           ]
                         },
                         "platform_technical_quote_authentication": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_target_lookup": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -4048,6 +4174,393 @@
           "audience": "global-backend:platform-technical-quote",
           "principal": "growthos:platform-technical-quote-reader",
           "scope": "platform-technical-quote.read",
+          "identity_token_fallback": false,
+          "workspace_token_fallback": false,
+          "unsigned_fallback": false
+        }
+      }
+    },
+    "/api/v1/platform-authority/target-lookup": {
+      "post": {
+        "description": "Service-only read. Never creates authority or fences a schedule. Returns the observation root without a data wrapper; all responses are no-store.",
+        "operationId": "platformAuthorityTargetLookup_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "target_issuer",
+                  "target_jti",
+                  "schedule_id",
+                  "workflow_run_id",
+                  "nonce"
+                ],
+                "properties": {
+                  "target_issuer": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "format": "uri",
+                    "description": "Exact configured Grant issuer mapping; not a caller-selected URL to fetch."
+                  },
+                  "target_jti": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "schedule_id": {
+                    "type": "string",
+                    "enum": [
+                      "acq-sweep",
+                      "intent-sweep",
+                      "sanctions-refresh",
+                      "patents-cache-refresh"
+                    ]
+                  },
+                  "workflow_run_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "nonce": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{32}$",
+                    "description": "Fresh 128-bit request nonce, echoed only for this observation."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schema_version",
+                    "target_issuer",
+                    "target_jti",
+                    "schedule_id",
+                    "workflow_run_id",
+                    "nonce",
+                    "found",
+                    "observed_at"
+                  ],
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "enum": [
+                        "platform-authority-target-observation/v1"
+                      ]
+                    },
+                    "target_issuer": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "uri",
+                      "description": "Exact configured Grant issuer mapping; not a caller-selected URL to fetch."
+                    },
+                    "target_jti": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "schedule_id": {
+                      "type": "string",
+                      "enum": [
+                        "acq-sweep",
+                        "intent-sweep",
+                        "sanctions-refresh",
+                        "patents-cache-refresh"
+                      ]
+                    },
+                    "workflow_run_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{32}$",
+                      "description": "Fresh 128-bit request nonce, echoed only for this observation."
+                    },
+                    "found": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "observed_at": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 253402300799
+                    }
+                  },
+                  "description": "Synchronous target locator observation only, not a signed proof, authority creation or fence ACK. NOT_FOUND is not proof of global absence."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_AUTHORITY_TARGET_LOOKUP_INVALID"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "platform target lookup request is invalid"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_TARGET_READER_DENIED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "platform target reader authentication failed"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_AUTHORITY_TARGET_LOOKUP_SCOPE_MISMATCH"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "platform target lookup scope is forbidden"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_AUTHORITY_TARGET_LOOKUP_NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "platform authority target was not found"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_AUTHORITY_TARGET_LOOKUP_RATE_LIMITED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "platform target lookup rate limit exceeded"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "platform target lookup is unavailable"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformAuthorityTargetReader": []
+          }
+        ],
+        "summary": "Read an exact committed platform authority target locator",
+        "tags": [
+          "PlatformAuthority"
+        ],
+        "x-content-encoding": "identity-only",
+        "x-maximum-deadline-milliseconds": 2000,
+        "x-maximum-request-body-bytes": 4096,
+        "x-maximum-request-header-bytes": 32768,
+        "x-maximum-request-header-count": 64,
+        "x-maximum-response-body-bytes": 4096,
+        "x-required-service-scope": "platform-authority.target.read",
+        "x-service-authentication": {
+          "kind": "growthos-identity-jwks-service-token",
+          "algorithm": "RS256",
+          "type": "platform-authority-target-reader+jwt",
+          "audience": "global-backend:platform-authority-target-read",
+          "scope": "platform-authority.target.read",
+          "subject": "fixed deployment configuration",
           "identity_token_fallback": false,
           "workspace_token_fallback": false,
           "unsigned_fallback": false
@@ -13708,6 +14221,12 @@
         "bearerFormat": "JWT",
         "type": "http",
         "description": "GrowthOS service token for the Platform Technical Quote reader only."
+      },
+      "platformAuthorityTargetReader": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Fixed-purpose GrowthOS service identity for exact platform target lookup; not a user or budget token."
       }
     },
     "schemas": {

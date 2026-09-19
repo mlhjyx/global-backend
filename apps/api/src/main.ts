@@ -11,6 +11,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
 import { PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME } from './platform-authority/platform-technical-quote-service-auth';
+import { PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME } from './platform-authority/platform-target-lookup.openapi';
 import {
   resolveCorsOrigin,
   resolveRuntimeSettings,
@@ -42,6 +43,11 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
           'GrowthOS service token for the Platform Technical Quote reader only.',
       },
       PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME,
+    )
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT',
+        description: 'Fixed-purpose GrowthOS service identity for exact platform target lookup; not a user or budget token.' },
+      PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME,
     )
     .build();
   const document = SwaggerModule.createDocument(app, config);

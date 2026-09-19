@@ -1,6 +1,9 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from '@global/contracts/platform-authority';
+import { PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH } from '../platform-authority/platform-target-lookup.service';
+import { PLATFORM_TARGET_LOOKUP_HTTP_ERRORS } from '../platform-authority/platform-target-lookup.openapi';
+import { isCommittedPlatformTargetLookupNotFound } from '../platform-authority/platform-target-lookup.guard';
 
 const RAW_BODY_PARSER_ERROR_TYPES = new Set([
   'charset.unsupported',
@@ -65,6 +68,21 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     const requestPath =
       typeof originalUrl === 'string' ? originalUrl.split('?', 1)[0] : null;
     const status = boundedHttpStatus(exception);
+    // Parser/global-guard errors can precede the dedicated lookup guard. Keep
+    // this exact endpoint's error contract closed, including router aliases.
+    if (requestPath?.toLowerCase().replace(/\/$/, '') === PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH) {
+      res.setHeader('Cache-Control', 'no-store');
+      // A router 404 (including unsupported GET) never proves a committed lookup
+      // was performed. Only the dedicated guard can brand the core's true miss.
+      const error = isCommittedPlatformTargetLookupNotFound(exception)
+        ? PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.notFound
+        : status === HttpStatus.BAD_REQUEST || status === HttpStatus.PAYLOAD_TOO_LARGE || status === HttpStatus.UNSUPPORTED_MEDIA_TYPE
+        ? PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.invalid
+        : Object.values(PLATFORM_TARGET_LOOKUP_HTTP_ERRORS).find(value => value.status === status && value.status !== HttpStatus.NOT_FOUND)
+          ?? PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.unavailable;
+      res.status(error.status).json({ error: { code: error.code, message: error.message } });
+      return;
+    }
     if (requestPath === PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH) {
       if (
         status === HttpStatus.BAD_REQUEST ||
