@@ -4,7 +4,7 @@
 
 ## 当前合同
 
-- `production-dependency-audit-baseline.json` 当前绑定 `origin/main@a8fedc721bda57ef9d2aeb16a7838a24db4f4a99` 的历史 ratchet 基线与 canonical finding evidence：10 条已登记 advisory，其中 high 3、moderate 4、low 3、critical 0；安全修复后当前主线审计为 0 条，10 条历史记录均已解析关闭。
+- `production-dependency-audit-baseline.json` 绑定已修复提交 `28c362bd2da4a90822901510a2415f008d5cb695` 及其锁文件；对该精确干净提交执行 production audit 得到零条 advisory，因而基线同样记录零条 advisory/exposure。修复前 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的 devalue 风险不被伪装为零，也不再用它绑定新快照。已修复的 10 条历史例外撤销；精确 bootstrap 集合与锁文件绑定仍由原 verifier 校验。
 - ratchet 允许 advisory 消失；PR 还会使用受信 base 的依赖图生成独立 audit，已经消失的 advisory 再次出现、同一 advisory 新增 vulnerable version/path 或风险元数据漂移都会失败。新增 advisory、严重度提高、critical、畸形/非 production-only 报告和过期 baseline 全部失败。
 - PR 正常路径读取 base commit 中的 baseline 与 verifier，避免同一个 PR 放宽 policy 后自证通过。head 与 base 都以固定 pnpm、禁 lifecycle scripts、禁 `.pnpmfile.cjs` hooks 的方式物化依赖路径；缺路径证据直接失败。首次引入时只允许 candidate baseline 逐字绑定 PR exact base、base lockfile digest、advisory 集和 finding exposure；bootstrap PR 不得同时修改 manifest、lockfile、workspace、npmrc、pnpm hook 或 patch。合并后不再走 bootstrap。
 - 扫描器固定使用 `https://registry.npmjs.org/`；安装与 audit 从环境 allowlist 启动，user/global npm config 固定到 `/dev/null`，仓库任意层级 `.npmrc` 在联网前 fail-closed。受信 base 的 `supply-chain-source-policy.mjs` 还会在 head 安装前拒绝 direct HTTPS/Git/tarball/file source、越界 workspace/link 和未经评审的 patch/config dependency，只允许官方 registry 版本与已跟踪 workspace 包；`supply-chain-audit.mjs` 即使脱离 workflow 单独执行，也会先重复执行同一依赖源准入。依赖 manifest、lock/workspace、npmrc、pnpm hook、source-policy 与 patch 同时进入 CODEOWNERS。未来若需要私有 registry 或其他 source，必须先引入独立的受信配置合同，不能在普通依赖 PR 中直接放行。
@@ -29,3 +29,7 @@ pnpm governance:verify
 ## 处置原则
 
 Baseline 是限时治理账，不是 `allow-ghsas`。每条 advisory 都有 remediation stream、Owner、原因和不晚于 baseline 失效时间的 due date；到期仍未解决会失败。机器成功回执在仍有漏洞时只能写 `RATCHET_PASS_WITH_LEGACY_RISK`，仅零漏洞允许 `PASS_CLEAR`。需要调整 baseline 时必须作为安全决策审查；普通依赖 PR 不应把新漏洞追加为“遗留”。
+
+2026-09-19 重审的失效时间保持为 2026-10-03T13:46:50Z。历史 10 条准入记录仍保存在提交 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的该文件版本中。重审移除旧例外，并配套兼容补丁 `devalue@5.9.2` 与 `third-party-web@0.29.2` 精确 override；后者防止 pnpm 9 deploy 重新解析上游 `latest` 而令镜像与锁文件漂移。ratchet 实现及 required contexts 均不变。测试分别验证清洁审计通过、devalue 拒绝、到期拒绝与真实 deploy 版本不漂移。
+
+旧受信 base 已到期时，读取它的非必需 `production dependency delta · canary` 仍会失败；不能把候选的新基线当作该检查已通过。此纠正变更依靠独立审查、实际零漏洞候选审计、真实 deploy 回归及全部既有 required checks 验证；合入后使用新主线作受信 base，后续比较仍正常拒绝任何新漏洞。没有新增 advisory 例外，也没有停用检查。

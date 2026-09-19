@@ -115,7 +115,9 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    this.logger.error(String(exception instanceof Error ? exception.stack : exception));
+    // Unknown failures may contain credentials or payloads, including in stack
+    // getters and string coercion. Emit only a fixed diagnostic at this boundary.
+    this.logger.error({ code: 'INTERNAL', status: HttpStatus.INTERNAL_SERVER_ERROR });
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: { code: 'INTERNAL', message: 'internal server error' },
     });

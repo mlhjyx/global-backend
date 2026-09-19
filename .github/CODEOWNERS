@@ -23,6 +23,8 @@
 /infra/*.compose.yml @mlhjyx
 /infra/systemd/ @mlhjyx
 
+/scripts/test-support/browser-probe-oci-smoke.cjs @mlhjyx
+
 # Terminal governance ownership block. Keep this last so broader later rules
 # cannot override the verifier, policy, schema, or required-context surfaces.
 /.github/ @mlhjyx
@@ -75,6 +77,7 @@
 /scripts/docker-image-config-path*.mjs @mlhjyx
 /scripts/runtime-deployment-contract.spec.mjs @mlhjyx
 /scripts/temporal-platform-infrastructure-contract.spec.mjs @mlhjyx
+/scripts/temporal-native-publication*.mjs @mlhjyx
 /scripts/environment-parity-*.mjs @mlhjyx
 /scripts/copy-fixed-source-impact*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx

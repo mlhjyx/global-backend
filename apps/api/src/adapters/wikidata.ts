@@ -45,7 +45,12 @@ export async function discoverCompaniesByIndustry(params: {
 
   const values = industryQids.map((q) => `wd:${q}`).join(' ');
   const websiteClause = requireWebsite ? '?company wdt:P856 ?website .' : 'OPTIONAL { ?company wdt:P856 ?website }';
-  const countryClause = countryQid ? `?company wdt:P17 wd:${countryQid} .` : '';
+  const countryClause = countryQid
+    ? `?company wdt:P17 ?country . FILTER(?country = wd:${countryQid})`
+    : '';
+  const countryCodeClause = countryQid
+    ? 'OPTIONAL { ?country wdt:P297 ?countryCode }'
+    : 'OPTIONAL { ?company wdt:P17 ?country . ?country wdt:P297 ?countryCode }';
   const query = `
 SELECT ?company ?companyLabel ?website ?employees ?coord ?countryCode WHERE {
   VALUES ?industry { ${values} }
@@ -54,7 +59,7 @@ SELECT ?company ?companyLabel ?website ?employees ?coord ?countryCode WHERE {
   ${websiteClause}
   OPTIONAL { ?company wdt:P1128 ?employees }
   OPTIONAL { ?company wdt:P625 ?coord }
-  OPTIONAL { ?company wdt:P17 ?country . ?country wdt:P297 ?countryCode }
+  ${countryCodeClause}
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de,zh" }
 } LIMIT ${Math.min(limit, 200)}`;
 
