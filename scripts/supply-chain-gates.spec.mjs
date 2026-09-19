@@ -9,7 +9,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-09-11T16:19:58.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-19T13:46:51.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -878,14 +878,11 @@ test("production audit metadata counts vulnerable findings, not advisory identit
   const audit = pnpmAudit([advisoryWithTwoVersions]);
   audit.metadata.vulnerabilities.moderate = 2;
   const result = evaluateProductionAudit(audit, baseline(), { now: NOW });
-  assert.doesNotMatch(
-    issueCodes(result).join(","),
-    /AUDIT_SUMMARY_MISMATCH/u,
-  );
+  assert.doesNotMatch(issueCodes(result).join(","), /AUDIT_SUMMARY_MISMATCH/u);
 });
 
-test("repository baseline is a current, exact-main-bound 10-advisory snapshot", async () => {
-  const { validateProductionAuditBaseline } =
+test("repository baseline retires legacy exceptions and admits only a clear audit", async () => {
+  const { validateProductionAuditBaseline, evaluateProductionAudit } =
     await import("./supply-chain-audit.mjs");
   const repositoryBaseline = JSON.parse(
     await readRepositoryFile(
@@ -894,18 +891,38 @@ test("repository baseline is a current, exact-main-bound 10-advisory snapshot", 
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: BASE_COMMIT,
+    expectedBootstrapBase: "04e1acc489838ff99b8300ee6cc93e794fd57564",
   });
   assert.deepEqual(validation.issues, []);
-  assert.equal(repositoryBaseline.summary.advisories, 10);
+  assert.equal(repositoryBaseline.summary.advisories, 0);
   assert.deepEqual(repositoryBaseline.summary.vulnerabilities, {
     info: 0,
-    low: 3,
-    moderate: 4,
-    high: 3,
+    low: 0,
+    moderate: 0,
+    high: 0,
     critical: 0,
   });
-  assert.equal(repositoryBaseline.source.base_commit, BASE_COMMIT);
+  assert.equal(
+    repositoryBaseline.source.base_commit,
+    "04e1acc489838ff99b8300ee6cc93e794fd57564",
+  );
+  const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
+    now: REPOSITORY_BASELINE_NOW,
+  });
+  assert.equal(clear.ok, true);
+  const vulnerable = evaluateProductionAudit(
+    pnpmAudit([
+      advisory({
+        ghsa_id: "GHSA-9rgm-9g3h-6x36",
+        package: "devalue",
+        url: "https://github.com/advisories/GHSA-9rgm-9g3h-6x36",
+      }),
+    ]),
+    repositoryBaseline,
+    { now: REPOSITORY_BASELINE_NOW },
+  );
+  assert.equal(vulnerable.ok, false);
+  assert.ok(issueCodes(vulnerable).includes("AUDIT_NEW_ADVISORY"));
 });
 
 test("bounded dependency inputs are read through one no-follow file handle", async () => {
