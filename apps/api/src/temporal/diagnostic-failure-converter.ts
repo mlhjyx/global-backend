@@ -112,6 +112,10 @@ function message(
       /* Not a machine control token. */
     }
   }
+  // This exact machine sentinel controls cleanup backoff/continue-as-new.
+  // Preserve only the complete value, never diagnostic suffixes or substrings.
+  if (values.message === "PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE")
+    return "PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE";
   return MESSAGE;
 }
 
