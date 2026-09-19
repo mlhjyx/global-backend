@@ -38,6 +38,13 @@ function roundtrip(error: unknown) {
 }
 
 describe("diagnostic failure serialization boundary", () => {
+  it("does not preserve diagnostics appended to the cleanup retry sentinel", () => {
+    const { proto } = roundtrip(ApplicationFailure.retryable(
+      `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE: ${DIAGNOSTIC_CANARY}`, "Error",
+    ));
+    expect(JSON.stringify(proto)).not.toContain(DIAGNOSTIC_CANARY);
+    expect(proto.message).not.toBe("PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE");
+  });
   it("removes application diagnostics before invoking the payload converter while retaining retry fields", () => {
     const error = ApplicationFailure.create({
       message: DIAGNOSTIC_CANARY,
