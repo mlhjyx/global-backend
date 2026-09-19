@@ -8650,6 +8650,308 @@
         ]
       }
     },
+    "/api/v1/qualification-feedback": {
+      "post": {
+        "description": "Requires the verified growthos-qualification-feedback service subject and acquisition:label:write. Does not change Lead status, scoring or ICP labels.",
+        "operationId": "QualificationFeedbackController_receive_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "eventType",
+                  "producer",
+                  "eventId",
+                  "workspaceId",
+                  "opportunityId",
+                  "leadId",
+                  "decisionId",
+                  "revision",
+                  "decision",
+                  "occurredAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "type": "string",
+                    "enum": [
+                      "qualification-feedback-reference/v1"
+                    ]
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "QUALIFICATION_DECISION_RECORDED"
+                    ]
+                  },
+                  "producer": {
+                    "type": "string",
+                    "enum": [
+                      "growthos-saas"
+                    ]
+                  },
+                  "eventId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$(?![\\s\\S])"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$(?![\\s\\S])"
+                  },
+                  "opportunityId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$(?![\\s\\S])"
+                  },
+                  "leadId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$(?![\\s\\S])"
+                  },
+                  "decisionId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$(?![\\s\\S])"
+                  },
+                  "revision": {
+                    "type": "string",
+                    "maxLength": 19,
+                    "pattern": "^(?:[1-9][0-9]{0,17}|9223372036854775807|[12345678][0-9]{18}|9[01][0-9]{17}|92[01][0-9]{16}|922[012][0-9]{15}|9223[012][0-9]{14}|92233[0123456][0-9]{13}|922337[01][0-9]{12}|92233720[012][0-9]{10}|922337203[012345][0-9]{9}|9223372036[01234567][0-9]{8}|92233720368[01234][0-9]{7}|922337203685[0123][0-9]{6}|9223372036854[0123456][0-9]{5}|92233720368547[0123456][0-9]{4}|922337203685477[01234][0-9]{3}|9223372036854775[01234567][0-9]{2}|922337203685477580[0123456][0-9]{0})$(?![\\s\\S])"
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "REJECTED",
+                      "CORRECTED"
+                    ]
+                  },
+                  "occurredAt": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "pattern": "^(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$(?![\\s\\S])"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "receiptId",
+                        "eventId",
+                        "workspaceId",
+                        "eventDigest",
+                        "receivedAt"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "RECORDED"
+                          ]
+                        },
+                        "receiptId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "eventId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "eventDigest": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "receivedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Record one SaaS qualification feedback reference",
+        "tags": [
+          "QualificationFeedback"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write"
+        ]
+      }
+    },
+    "/api/v1/qualification-feedback/{eventId}/receipt": {
+      "get": {
+        "description": "Read-only reconciliation after response loss. NOT_RECEIVED is a current observation, not permission to change the source event identity.",
+        "operationId": "QualificationFeedbackController_receipt_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status",
+                            "receiptId",
+                            "eventId",
+                            "workspaceId",
+                            "eventDigest",
+                            "receivedAt"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "RECORDED"
+                              ]
+                            },
+                            "receiptId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "eventId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "workspaceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "eventDigest": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "receivedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status",
+                            "eventId",
+                            "workspaceId"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "NOT_RECEIVED"
+                              ]
+                            },
+                            "eventId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "workspaceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a workspace-scoped qualification feedback receipt",
+        "tags": [
+          "QualificationFeedback"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write"
+        ]
+      }
+    },
     "/api/v1/deletion-requests": {
       "post": {
         "operationId": "DeletionController_create_v1",

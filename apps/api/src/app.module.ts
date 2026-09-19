@@ -15,6 +15,7 @@ import { IcpModule } from './icp/icp.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { LeadModule } from './lead/lead.module';
 import { EventsModule } from './events/events.module';
+import { QualificationFeedbackModule } from './qualification-feedback/qualification-feedback.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
@@ -52,6 +53,7 @@ import { PlatformAuthorityModule } from './platform-authority/platform-authority
     DiscoveryModule,
     LeadModule,
     EventsModule,
+    QualificationFeedbackModule,
     ComplianceModule,
     SanctionsModule,
     SiteBuilderModule,
