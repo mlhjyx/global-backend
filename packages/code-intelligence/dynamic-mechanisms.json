@@ -29,15 +29,6 @@
       "patterns": ["Worker\\.create\\s*\\(", "workflowsPath\\s*:"]
     },
     {
-      "id": "temporal.failure-converter-reflection",
-      "category": "workflow",
-      "status": "EXTRACTOR",
-      "extractor": "typescript.temporal-worker",
-      "accountableRole": "OWN-PLATFORM",
-      "assignee": "UNASSIGNED",
-      "patterns": ["Reflect\\.(?:get|apply|construct)\\s*\\("]
-    },
-    {
       "id": "temporal.client-start",
       "category": "workflow",
       "status": "EXTRACTOR",
