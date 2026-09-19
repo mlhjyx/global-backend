@@ -568,6 +568,22 @@ test("final image verification binds every product component and permits only co
   );
 
   await assert.doesNotReject(() => assertRuntimeImageValid(root));
+  // pnpm 9 deploy may resolve a dist-tag again despite --frozen-lockfile.
+  // The final image must reject any installed identity absent from its SBOM.
+  const driftedPackageRoot = join(
+    root,
+    "apps/api/node_modules/.pnpm/third-party-web@0.30.0/node_modules/third-party-web",
+  );
+  await mkdir(driftedPackageRoot, { recursive: true });
+  await writeFile(
+    join(driftedPackageRoot, "package.json"),
+    JSON.stringify({ name: "third-party-web", version: "0.30.0" }),
+  );
+  await assert.rejects(
+    () => assertRuntimeImageValid(root),
+    /runtime SBOM omits installed packages: third-party-web@0\.30\.0/,
+  );
+  await rm(driftedPackageRoot, { recursive: true });
   await writeFile(
     join(
       root,
