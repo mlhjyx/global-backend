@@ -30,4 +30,6 @@ pnpm governance:verify
 
 Baseline 是限时治理账，不是 `allow-ghsas`。每条 advisory 都有 remediation stream、Owner、原因和不晚于 baseline 失效时间的 due date；到期仍未解决会失败。机器成功回执在仍有漏洞时只能写 `RATCHET_PASS_WITH_LEGACY_RISK`，仅零漏洞允许 `PASS_CLEAR`。需要调整 baseline 时必须作为安全决策审查；普通依赖 PR 不应把新漏洞追加为“遗留”。
 
-2026-09-19 重审的有效期为 14 天。此次仅更新安全元数据和测试，未改依赖或 ratchet 实现；历史 10 条准入记录仍保存在提交 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的该文件版本中。重审移除旧例外，同时维持对 devalue 新漏洞的拒绝；后续依赖补丁必须经过这份主线准入集验证，不能在同一补丁中自行放宽政策。测试分别验证清洁审计通过、devalue 拒绝及到期拒绝。
+2026-09-19 重审的有效期为 14 天。历史 10 条准入记录仍保存在提交 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的该文件版本中。重审移除旧例外，并配套兼容补丁 `devalue@5.9.2` 与 `third-party-web@0.29.2` 精确 override；后者防止 pnpm 9 deploy 重新解析上游 `latest` 而令镜像与锁文件漂移。ratchet 实现及 required contexts 均不变。测试分别验证清洁审计通过、devalue 拒绝、到期拒绝与真实 deploy 版本不漂移。
+
+旧受信 base 已到期时，读取它的非必需 `production dependency delta · canary` 仍会失败；不能把候选的新基线当作该检查已通过。此纠正变更依靠独立审查、实际零漏洞候选审计、真实 deploy 回归及全部既有 required checks 验证；合入后使用新主线作受信 base，后续比较仍正常拒绝任何新漏洞。没有新增 advisory 例外，也没有停用检查。
