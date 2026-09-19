@@ -17,6 +17,21 @@ function validate(relative) {
     throw new Error("FILESYSTEM_UNSAFE_PATH");
   }
 }
+function exactLocalInventory(groups) {
+  const entries = new Map();
+  for (const relative of Object.values(groups).flat()) {
+    const directoryMarker = relative.endsWith("/");
+    const normalized = directoryMarker ? relative.slice(0, -1) : relative;
+    validate(normalized);
+    const existing = entries.get(normalized);
+    if (existing && existing.directoryMarker !== directoryMarker)
+      throw new Error("FILESYSTEM_LOCAL_INVENTORY_AMBIGUOUS");
+    entries.set(normalized, { path: normalized, directoryMarker });
+  }
+  return [...entries.values()].sort((left, right) =>
+    left.path.localeCompare(right.path),
+  );
+}
 function metadata(stat) {
   return {
     dev: String(stat.dev),
@@ -57,11 +72,11 @@ export async function inspectFilesystem({
   const rootStat = await lstat(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
     throw new Error("FILESYSTEM_ROOT_NOT_DIRECTORY");
-  const local = [...new Set(Object.values(groups).flat())].sort();
+  const local = exactLocalInventory(groups);
   const destinations = [...new Set(incoming)].sort();
   if (local.length + destinations.length > maxPaths)
     throw new Error("FILESYSTEM_PATH_LIMIT");
-  for (const relative of [...local, ...destinations]) validate(relative);
+  for (const relative of destinations) validate(relative);
   const indexedSet = new Set(indexed);
   const collisions = [];
   let bytes = 0;
@@ -196,10 +211,12 @@ export async function inspectFilesystem({
       }
     }
   }
-  for (const relative of local) {
-    const result = await observe(relative, preservation, true);
-    if (result.blocked || result.directory)
+  for (const entry of local) {
+    const result = await observe(entry.path, preservation, true);
+    if (result.blocked || (!entry.directoryMarker && result.directory))
       throw new Error("FILESYSTEM_LOCAL_INVENTORY_NOT_EXACT");
+    if (entry.directoryMarker && result.directory !== true)
+      throw new Error("FILESYSTEM_DIRECTORY_MARKER_NOT_DIRECTORY");
   }
   for (const relative of destinations) {
     const result = await observe(relative, destinationRecords, true);

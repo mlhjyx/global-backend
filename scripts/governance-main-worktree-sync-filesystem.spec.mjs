@@ -234,6 +234,49 @@ test("directory-folded inventory and excessive paths fail closed", async () => {
   );
 });
 
+test("Git nested-repository directory markers preserve the opaque directory and permit siblings", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "main-sync-nested-repo-"));
+  await mkdir(path.join(root, ".codex/worktrees/nested"), { recursive: true });
+  await writeFile(path.join(root, ".codex/worktrees/nested/.git"), "gitdir");
+
+  const result = await inspectFilesystem({
+    root,
+    incoming: [".codex/worktrees/sibling/new.md"],
+    groups: {
+      tracked: [],
+      ignored: [".codex/worktrees/nested/"],
+      untracked: [],
+    },
+    indexed: [],
+  });
+
+  assert.deepEqual(result.collisions, []);
+  assert.equal(result.observedLocalPathCount, 1);
+  assert.equal(result.observedBytes, 0);
+  assert.match(result.preservationDigest, /^[a-f0-9]{64}$/u);
+});
+
+test("a Git directory marker fails closed unless its visible leaf is a real directory", async () => {
+  const root = await mkdtemp(
+    path.join(tmpdir(), "main-sync-directory-marker-"),
+  );
+  await writeFile(path.join(root, "not-a-directory"), "bytes");
+
+  await assert.rejects(
+    inspectFilesystem({
+      root,
+      incoming: [],
+      groups: {
+        tracked: [],
+        ignored: ["not-a-directory/"],
+        untracked: [],
+      },
+      indexed: [],
+    }),
+    /FILESYSTEM_DIRECTORY_MARKER_NOT_DIRECTORY/u,
+  );
+});
+
 // Interpose only in this test process, after the real open pinned an inode.
 // The replacement is a real rename/new directory, not a synthetic proof value.
 async function duringOpen(matches, replace, inspect) {
