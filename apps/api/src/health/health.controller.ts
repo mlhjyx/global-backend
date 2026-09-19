@@ -1,4 +1,5 @@
 import { Controller, Get, Res } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
 import {
   ApiOkResponse,
   ApiOperation,
@@ -25,7 +26,10 @@ export class HealthController {
     private readonly buildIdentity: RuntimeReleaseIdentityService,
   ) {}
 
+  // Local/cached diagnostics must survive Redis failure. Do not exempt /db,
+  // which performs real dependency I/O, or inherit a controller-wide bypass.
   @Get()
+  @SkipThrottle()
   @ApiOperation({ summary: "健康检查（存活）" })
   @ApiOkResponse({
     schema: {
@@ -46,6 +50,7 @@ export class HealthController {
   }
 
   @Get("live")
+  @SkipThrottle()
   @ApiOperation({ summary: "进程存活检查（不探测任何依赖）" })
   @ApiOkResponse({
     schema: LIVE_HEALTH_RESPONSE_SCHEMA,
@@ -68,6 +73,7 @@ export class HealthController {
   }
 
   @Get("build")
+  @SkipThrottle()
   @ApiOperation({ summary: "非敏感构建身份回执" })
   @ApiOkResponse({
     schema: BUILD_HEALTH_RESPONSE_SCHEMA,
@@ -81,6 +87,7 @@ export class HealthController {
   }
 
   @Get("ready")
+  @SkipThrottle()
   @ApiOperation({
     summary: "接流就绪检查（DB、Temporal control plane 与受控 admission）",
   })

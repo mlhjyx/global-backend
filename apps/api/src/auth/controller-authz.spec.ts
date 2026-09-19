@@ -12,6 +12,8 @@ import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
 import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
 import { PlatformTechnicalQuoteServiceAuthenticationGuard } from '../platform-authority/platform-technical-quote-service-auth';
+import { PlatformTargetLookupController } from '../platform-authority/platform-target-lookup.controller';
+import { PlatformTargetLookupGuard } from '../platform-authority/platform-target-lookup.guard';
 import { AssetsController } from '../site-builder/assets.controller';
 import { BuildsController } from '../site-builder/builds.controller';
 import { IntakeController } from '../site-builder/intake.controller';
@@ -50,6 +52,7 @@ const SERVICE_PROTECTED_CONTROLLERS = [
 
 const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
   'platform-authority/platform-execution-technical-quote.controller.ts',
+  'platform-authority/platform-target-lookup.controller.ts',
 ]);
 
 function controllerFiles(root: string): string[] {
@@ -65,6 +68,9 @@ function controllerFiles(root: string): string[] {
 }
 
 describe('controller authorization guard topology', () => {
+  it('requires the dedicated guarded lookup pipeline for its read-only handler', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, PlatformTargetLookupController)).toEqual([PlatformTargetLookupGuard]);
+  });
   it.each(PROTECTED_CONTROLLERS)(
     '%s runs authentication before scope enforcement',
     (controller) => {
@@ -98,12 +104,18 @@ describe('controller authorization guard topology', () => {
       const source = readFileSync(absolute, 'utf8');
       if (SERVICE_PROTECTED_CONTROLLER_FILES.has(path)) {
         discoveredServiceProtected.add(path);
-        for (const required of [
+        const requiredTokens = path === 'platform-authority/platform-target-lookup.controller.ts' ? [
+          '@ApiBearerAuth(PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME)',
+          '@UseGuards(PlatformTargetLookupGuard)',
+          '@ReadOnlyControlPlane()',
+          'PLATFORM_AUTHORITY_TARGET_READER_SCOPE',
+        ] : [
           '@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)',
           '@UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)',
           '@ReadOnlyControlPlane()',
           '@ApiExtension("x-required-service-scope", "platform-technical-quote.read")',
-        ]) {
+        ];
+        for (const required of requiredTokens) {
           if (!source.includes(required)) offenders.push(`${path}: ${required}`);
         }
         for (const forbidden of [
