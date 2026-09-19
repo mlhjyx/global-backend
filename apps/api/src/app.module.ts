@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { httpThrottlerOptions } from './common/redis-http-throttler.storage';
 import { PrismaModule } from './prisma/prisma.module';
 import { WsThrottlerGuard } from './common/ws-throttler.guard';
 import { AuthModule } from './auth/auth.module';
@@ -31,13 +32,10 @@ import { PlatformTargetLookupModule } from './platform-authority/platform-target
  */
 @Module({
   imports: [
-    // 按 workspace 限流（默认 300 req / 分钟 / 租户；可 env 覆盖）
-    ThrottlerModule.forRoot([
-      {
-        ttl: Number(process.env.THROTTLE_TTL_MS) || 60_000,
-        limit: Number(process.env.THROTTLE_LIMIT) || 300,
-      },
-    ]),
+    // 请求速率防护：沿用 WsThrottlerGuard tracker，默认 300 req / 分钟。
+    ThrottlerModule.forRootAsync({
+      useFactory: () => httpThrottlerOptions(process.env),
+    }),
     PrismaModule,
     RuntimeModule,
     AuthModule,
