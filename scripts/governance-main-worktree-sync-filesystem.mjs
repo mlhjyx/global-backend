@@ -19,14 +19,21 @@ function validate(relative) {
 }
 function exactLocalInventory(groups) {
   const entries = new Map();
-  for (const relative of Object.values(groups).flat()) {
-    const directoryMarker = relative.endsWith("/");
-    const normalized = directoryMarker ? relative.slice(0, -1) : relative;
-    validate(normalized);
-    const existing = entries.get(normalized);
-    if (existing && existing.directoryMarker !== directoryMarker)
-      throw new Error("FILESYSTEM_LOCAL_INVENTORY_AMBIGUOUS");
-    entries.set(normalized, { path: normalized, directoryMarker });
+  for (const [kind, paths] of Object.entries(groups)) {
+    for (const relative of paths) {
+      const directoryMarker = relative.endsWith("/");
+      const normalized = directoryMarker ? relative.slice(0, -1) : relative;
+      validate(normalized);
+      if (directoryMarker && kind !== "ignored")
+        throw new Error("FILESYSTEM_DIRECTORY_MARKER_SOURCE_INVALID");
+      const existing = entries.get(normalized);
+      if (
+        existing &&
+        (existing.directoryMarker !== directoryMarker || existing.kind !== kind)
+      )
+        throw new Error("FILESYSTEM_LOCAL_INVENTORY_AMBIGUOUS");
+      entries.set(normalized, { path: normalized, directoryMarker, kind });
+    }
   }
   return [...entries.values()].sort((left, right) =>
     left.path.localeCompare(right.path),
@@ -82,7 +89,12 @@ export async function inspectFilesystem({
   let bytes = 0;
   const preservation = [[".", "ROOT", metadata(rootStat)]];
   const destinationRecords = [];
-  async function observe(relative, records, includeContent) {
+  async function observe(
+    relative,
+    records,
+    includeContent,
+    directoryMarker = false,
+  ) {
     const parts = relative.split("/");
     const directories = [];
     const bindings = [];
@@ -184,7 +196,58 @@ export async function inspectFilesystem({
             }
           } else records.push([prefix, "FILE", version(stat)]);
         } else if (stat.isDirectory()) {
-          records.push([prefix, "DIRECTORY", metadata(stat)]);
+          if (directoryMarker) {
+            const directory = await open(
+              absolute,
+              constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+            );
+            directories.push(directory);
+            bindings.push({
+              handle: directory,
+              entry: absolute,
+              expected: stat,
+            });
+            if (
+              digest(metadata(await directory.stat())) !==
+              digest(metadata(stat))
+            )
+              throw new Error("FILESYSTEM_OBSERVATION_DRIFT");
+            const gitEntry = `/proc/self/fd/${directory.fd}/.git`;
+            const gitStat = await statOrMissing(gitEntry);
+            if (
+              !gitStat ||
+              gitStat.isSymbolicLink() ||
+              (!gitStat.isFile() && !gitStat.isDirectory())
+            )
+              throw new Error(
+                "FILESYSTEM_DIRECTORY_MARKER_NOT_NESTED_REPOSITORY",
+              );
+            const gitHandle = await open(
+              gitEntry,
+              constants.O_RDONLY |
+                constants.O_NOFOLLOW |
+                (gitStat.isDirectory()
+                  ? constants.O_DIRECTORY
+                  : constants.O_NONBLOCK),
+            );
+            directories.push(gitHandle);
+            bindings.push({
+              handle: gitHandle,
+              entry: gitEntry,
+              expected: gitStat,
+            });
+            if (
+              digest(metadata(await gitHandle.stat())) !==
+              digest(metadata(gitStat))
+            )
+              throw new Error("FILESYSTEM_OBSERVATION_DRIFT");
+            records.push([
+              prefix,
+              "NESTED_REPOSITORY_DIRECTORY",
+              metadata(stat),
+              metadata(gitStat),
+            ]);
+          } else records.push([prefix, "DIRECTORY", metadata(stat)]);
         } else throw new Error("FILESYSTEM_SPECIAL_ENTITY_HOLD");
         return { exists: true, directory: stat.isDirectory() };
       }
@@ -200,7 +263,8 @@ export async function inspectFilesystem({
           const pinned = await handle.stat();
           if (
             !visible ||
-            !visible.isDirectory() ||
+            visible.isDirectory() !== expected.isDirectory() ||
+            visible.isFile() !== expected.isFile() ||
             digest(metadata(visible)) !== digest(metadata(expected)) ||
             digest(metadata(pinned)) !== digest(metadata(expected))
           )
@@ -212,7 +276,12 @@ export async function inspectFilesystem({
     }
   }
   for (const entry of local) {
-    const result = await observe(entry.path, preservation, true);
+    const result = await observe(
+      entry.path,
+      preservation,
+      true,
+      entry.directoryMarker,
+    );
     if (result.blocked || (!entry.directoryMarker && result.directory))
       throw new Error("FILESYSTEM_LOCAL_INVENTORY_NOT_EXACT");
     if (entry.directoryMarker && result.directory !== true)

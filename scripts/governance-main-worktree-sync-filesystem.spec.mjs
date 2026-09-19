@@ -277,6 +277,50 @@ test("a Git directory marker fails closed unless its visible leaf is a real dire
   );
 });
 
+test("a Git directory marker rejects an ordinary ignored directory without a repository boundary", async () => {
+  const root = await mkdtemp(
+    path.join(tmpdir(), "main-sync-ordinary-directory-"),
+  );
+  await mkdir(path.join(root, "ordinary"));
+
+  await assert.rejects(
+    inspectFilesystem({
+      root,
+      incoming: [],
+      groups: { tracked: [], ignored: ["ordinary/"], untracked: [] },
+      indexed: [],
+    }),
+    /FILESYSTEM_DIRECTORY_MARKER_NOT_NESTED_REPOSITORY/u,
+  );
+});
+
+test("a nested-repository marker rejects leaf replacement after its directory fd is opened", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "main-sync-nested-swap-"));
+  const nested = path.join(root, "nested");
+  await mkdir(nested);
+  await writeFile(path.join(nested, ".git"), "gitdir");
+
+  await duringOpen(
+    (filename) =>
+      filename.startsWith("/proc/self/fd/") && filename.endsWith("/nested"),
+    async () => {
+      await rename(nested, path.join(root, "retired"));
+      await mkdir(nested);
+      await writeFile(path.join(nested, ".git"), "replacement");
+    },
+    () =>
+      assert.rejects(
+        inspectFilesystem({
+          root,
+          incoming: [],
+          groups: { tracked: [], ignored: ["nested/"], untracked: [] },
+          indexed: [],
+        }),
+        /FILESYSTEM_OBSERVATION_DRIFT/u,
+      ),
+  );
+});
+
 // Interpose only in this test process, after the real open pinned an inode.
 // The replacement is a real rename/new directory, not a synthetic proof value.
 async function duringOpen(matches, replace, inspect) {
