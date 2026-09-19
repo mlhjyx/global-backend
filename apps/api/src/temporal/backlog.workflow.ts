@@ -1,4 +1,5 @@
 import { patched, proxyActivities, log, workflowInfo } from '@temporalio/workflow';
+import { DIAGNOSTIC_FAILURE_MESSAGE, DIAGNOSTIC_FAILURE_TYPE } from './failure-boundary.contract';
 import type {
   BacklogActivities,
   ContactBacklogResult,
@@ -21,6 +22,7 @@ function isBacklogAuthorityHold(error: unknown): boolean {
     visited.add(current);
     const record = current as Record<string, unknown>;
     if (
+      (record.type === DIAGNOSTIC_FAILURE_TYPE && record.message === DIAGNOSTIC_FAILURE_MESSAGE) ||
       record.type === BACKLOG_AUTHORITY_HOLD ||
       record.code === BACKLOG_AUTHORITY_HOLD ||
       record.message === BACKLOG_AUTHORITY_HOLD
