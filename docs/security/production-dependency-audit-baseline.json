@@ -1,21 +1,21 @@
 {
   "schema_version": "production-dependency-audit-baseline/v1",
   "source": {
-    "base_commit": "04e1acc489838ff99b8300ee6cc93e794fd57564",
-    "lockfile_digest": "sha256:f9964b4bc6afb30fec981bba83e6435e9067d8695096f73146649513bbe5ec5f",
+    "base_commit": "28c362bd2da4a90822901510a2415f008d5cb695",
+    "lockfile_digest": "sha256:4fa4b3ce6a3123c699243e927db36cc6db2928fd3226c49fd0b00bbd42ddbd64",
     "registry": "https://registry.npmjs.org/",
     "package_manager": "pnpm@9.15.9",
     "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
-    "captured_at": "2026-09-19T13:46:50.000Z"
+    "captured_at": "2026-09-19T15:17:13.000Z"
   },
   "bootstrap": {
     "mode": "INITIAL_BASELINE",
-    "base_commit": "04e1acc489838ff99b8300ee6cc93e794fd57564"
+    "base_commit": "28c362bd2da4a90822901510a2415f008d5cb695"
   },
   "governance": {
     "owner": "OWN-SECURITY",
     "valid_until": "2026-10-03T13:46:50.000Z",
-    "policy": "Zero legacy advisory allowances after reassessment. Any production advisory, including GHSA-9rgm-9g3h-6x36 on the observed source, remains denied; expired baselines fail closed. This is an allowance set, not a claim that the observed source audit is clear."
+    "policy": "Exact zero-advisory snapshot of the audited corrected source. Any production advisory, severity increase, critical finding, or expired baseline fails closed."
   },
   "advisories": [],
   "exposure": {

@@ -9,7 +9,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-09-19T13:46:51.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-19T15:17:14.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -891,7 +891,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "04e1acc489838ff99b8300ee6cc93e794fd57564",
+    expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -904,10 +904,13 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "04e1acc489838ff99b8300ee6cc93e794fd57564",
+    "28c362bd2da4a90822901510a2415f008d5cb695",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
+    expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+    expectedSourceLockfileDigest:
+      "sha256:4fa4b3ce6a3123c699243e927db36cc6db2928fd3226c49fd0b00bbd42ddbd64",
   });
   assert.equal(clear.ok, true);
   const vulnerable = evaluateProductionAudit(
@@ -919,10 +922,14 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
       }),
     ]),
     repositoryBaseline,
-    { now: REPOSITORY_BASELINE_NOW },
+    {
+      now: REPOSITORY_BASELINE_NOW,
+      expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+    },
   );
   assert.equal(vulnerable.ok, false);
   assert.ok(issueCodes(vulnerable).includes("AUDIT_NEW_ADVISORY"));
+  assert.ok(issueCodes(vulnerable).includes("BASELINE_BOOTSTRAP_SET_MISMATCH"));
 });
 
 test("bounded dependency inputs are read through one no-follow file handle", async () => {
