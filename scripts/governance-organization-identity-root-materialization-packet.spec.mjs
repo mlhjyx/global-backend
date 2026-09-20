@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   OUTPUT_ROOT,
@@ -655,21 +656,62 @@ test("ordinary packet writer rejects historical synthetic diagnostics without cr
 });
 
 test("ordinary writer passes the real ignored-output gate then rejects synthetic source readiness", async (t) => {
+  // The ignored-output rule belongs to this disposable Git clone, never the
+  // shared worktree's .git/info/exclude or retained .superpowers directory.
   const fixtureRoot = await mkdtemp(
-    path.join(
-      MATERIALIZATION_RUNNING_ROOT,
-      ".superpowers/sdd/materialization-writer-regression-",
-    ),
+    path.join(os.tmpdir(), "packet-output-nonauthority-"),
   );
-  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
-  const outputPath = path.join(fixtureRoot, "new-packet.json");
+  const repo = path.join(fixtureRoot, "repo");
+  execFileSync(
+    "git",
+    ["clone", "--shared", "--no-checkout", MATERIALIZATION_RUNNING_ROOT, repo],
+    { stdio: "pipe" },
+  );
+  await mkdir(path.join(repo, "scripts"));
+  for (const name of [
+    "launcher",
+    "execution-chain-contracts",
+    "materialization-preflight",
+    "materialization-handoff",
+    "root-materialization-packet",
+  ]) {
+    const relative = `scripts/governance-organization-identity-${name}.mjs`;
+    await writeFile(
+      path.join(repo, relative),
+      await readFile(path.join(MATERIALIZATION_RUNNING_ROOT, relative)),
+    );
+  }
+  await writeFile(path.join(repo, ".git/info/exclude"), "\n.superpowers/\n", {
+    flag: "a",
+  });
+  const out = path.join(repo, ".superpowers/sdd");
+  await mkdir(out, { recursive: true, mode: 0o700 });
+  const preflight = await import(
+    pathToFileURL(
+      path.join(
+        repo,
+        "scripts/governance-organization-identity-materialization-preflight.mjs",
+      ),
+    )
+  );
+  const isolatedPacket = await import(
+    pathToFileURL(
+      path.join(
+        repo,
+        "scripts/governance-organization-identity-root-materialization-packet.mjs",
+      ),
+    )
+  );
+  t.diagnostic(
+    `Temporary non-authority packet fixture retained for coverage: ${fixtureRoot}`,
+  );
+  const outputPath = path.join(out, "new-packet.json");
   await assert.rejects(readFile(outputPath), { code: "ENOENT" });
   assert.equal(
-    verifyMaterializationOutput(MATERIALIZATION_RUNNING_ROOT, outputPath)
-      .status,
+    preflight.verifyMaterializationOutput(repo, outputPath).status,
     "LOCAL_FACTS_VERIFIED",
   );
-  const written = await writeLauncherMaterializationPacketFile({
+  const written = await isolatedPacket.writeLauncherMaterializationPacketFile({
     outputPath,
     packet: validPacket(),
   });
