@@ -4,7 +4,7 @@
 
 ## 当前合同
 
-- `production-dependency-audit-baseline.json` 绑定已修复提交 `1aaa1a779bbf716f301e5f08c7f3d0ad37eeaacc` 及其锁文件；对该精确干净提交执行 production audit 得到零条 advisory，因而基线同样记录零条 advisory/exposure。修复前 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的 devalue 风险不被伪装为零，也不再用它绑定新快照。已修复的 10 条历史例外撤销；精确 bootstrap 集合与锁文件绑定仍由原 verifier 校验。
+- `production-dependency-audit-baseline.json` 绑定已修复提交 `03e8ada02010052bf4220e1063d2c5c987bf1f8a` 及其锁文件；对该精确干净提交执行 production audit 得到零条 advisory，因而基线同样记录零条 advisory/exposure。修复前 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的 devalue 风险不被伪装为零，也不再用它绑定新快照。已修复的 10 条历史例外撤销；精确 bootstrap 集合与锁文件绑定仍由原 verifier 校验。
 - ratchet 允许 advisory 消失；PR 还会使用受信 base 的依赖图生成独立 audit，已经消失的 advisory 再次出现、同一 advisory 新增 vulnerable version/path 或风险元数据漂移都会失败。新增 advisory、严重度提高、critical、畸形/非 production-only 报告和过期 baseline 全部失败。
 - PR 正常路径读取 base commit 中的 baseline 与 verifier，避免同一个 PR 放宽 policy 后自证通过。head 与 base 都以固定 pnpm、禁 lifecycle scripts、禁 `.pnpmfile.cjs` hooks 的方式物化依赖路径；缺路径证据直接失败。首次引入时只允许 candidate baseline 逐字绑定 PR exact base、base lockfile digest、advisory 集和 finding exposure；bootstrap PR 不得同时修改 manifest、lockfile、workspace、npmrc、pnpm hook 或 patch。合并后不再走 bootstrap。
 - 扫描器固定使用 `https://registry.npmjs.org/`；安装与 audit 从环境 allowlist 启动，user/global npm config 固定到 `/dev/null`，仓库任意层级 `.npmrc` 在联网前 fail-closed。受信 base 的 `supply-chain-source-policy.mjs` 还会在 head 安装前拒绝 direct HTTPS/Git/tarball/file source、越界 workspace/link 和未经评审的 patch/config dependency，只允许官方 registry 版本与已跟踪 workspace 包；`supply-chain-audit.mjs` 即使脱离 workflow 单独执行，也会先重复执行同一依赖源准入。依赖 manifest、lock/workspace、npmrc、pnpm hook、source-policy 与 patch 同时进入 CODEOWNERS。未来若需要私有 registry 或其他 source，必须先引入独立的受信配置合同，不能在普通依赖 PR 中直接放行。
@@ -37,3 +37,5 @@ Baseline 是限时治理账，不是 `allow-ghsas`。每条 advisory 都有 reme
 2026-09-20 锁文件更新后的重审绑定 `6213baf2715f0680f05024bee0994e8593403433`：官方 registry 的 production audit 覆盖 845 个依赖，所有严重度计数均为零。旧绑定对当前锁文件返回 `BASELINE_SOURCE_LOCK_MISMATCH`；刷新来源提交、锁文件摘要和采集时间后，同一份审计返回 `FRESH`。原失效时间、零例外策略和 verifier 保持不变；后续锁文件变更仍须重新审计，不能复用本次通过结论。
 
 同日 main 合入配对 S3 依赖更新后，再以干净提交 `1aaa1a779bbf716f301e5f08c7f3d0ad37eeaacc` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
+
+同日 main 合入AI SDK 依赖更新后，再以干净提交 `03e8ada02010052bf4220e1063d2c5c987bf1f8a` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
