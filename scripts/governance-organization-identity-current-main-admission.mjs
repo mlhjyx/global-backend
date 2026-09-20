@@ -152,7 +152,6 @@ function sortedUnique(values, predicate, nonempty = false) {
 const CLASSIFICATIONS = keys("BUILD RAW_CAPABILITY PRISMA_SCHEMA MIGRATION GOVERNANCE RUNTIME_ARTIFACT IDENTITY_CALLER IDENTITY_AUTHORITY GENERATED_EVIDENCE OTHER");
 const DISPOSITIONS = keys("ADMIT_IDENTITY_AUTHORITY_UNCHANGED ADMIT_IDENTITY_IRRELEVANT ADMIT_GENERATED_MAIN_BYTES ADMIT_GENERATED_REBUILT");
 const GENERATORS = keys("COPY_FIXED_SOURCE_WRITE_ELIGIBILITY_V1 COPY_FIXED_SOURCE_SYNC_HUMAN_CITATIONS_V1");
-const SEMANTIC_UNION_RESOLUTIONS = keys("SEMANTIC_UNION_PRESERVE_IDENTITY_TESTS_AND_CURRENT_RECEIPT_ASSERTIONS SEMANTIC_UNION_PRESERVE_IDENTITY_LOCK_AND_CURRENT_POSTGRES_VOID_CAST");
 function validOwner(owner) {
   return hasExactKeys(owner, keys("source codeownersBlobId matchedRule principals resolution")) &&
     owner.source === "CODEOWNERS" && validCommit(owner.codeownersBlobId) &&
@@ -209,10 +208,17 @@ function validAdmissionPath(record) {
     (record.disposition === "ADMIT_GENERATED_REBUILT" ? validRebuild(record.generatedRebuild) : record.generatedRebuild === null);
 }
 function validConflict(record) {
+  const generatorByPath = {
+    "docs/evidence/site-builder/copy-runtime-eligibility.json": "COPY_FIXED_SOURCE_WRITE_ELIGIBILITY_V1",
+    "docs/implementation-records/copy-fixed-source-impact-governance.md": "COPY_FIXED_SOURCE_SYNC_HUMAN_CITATIONS_V1",
+  };
   return hasExactKeys(record, keys("path hunkCount baseBlobId branchBlobId mainBlobId resultBlobId resolutionSource")) &&
     validPath(record.path) && Number.isSafeInteger(record.hunkCount) && record.hunkCount > 0 &&
     [record.baseBlobId, record.branchBlobId, record.mainBlobId].every(nullableBlob) && validCommit(record.resultBlobId) &&
-    ["LIVE_MAIN_GIT_BLOB", ...GENERATORS, ...SEMANTIC_UNION_RESOLUTIONS].includes(record.resolutionSource);
+    Object.hasOwn(generatorByPath, record.path) &&
+    (record.resolutionSource === "LIVE_MAIN_GIT_BLOB"
+      ? record.resultBlobId === record.mainBlobId
+      : record.resolutionSource === generatorByPath[record.path]);
 }
 function validMigration(record) {
   return hasExactKeys(record, keys("name path resultBlobId migrationSqlSha256 lastChangeCommit mainOnly artifactARelationship disposition")) &&
@@ -433,7 +439,7 @@ const collectedObjectFacts = new WeakSet();
 function mergeNeutralAttributes(repoRoot, trees) {
   const blobIds = new Set(
     trees.flatMap((rows) => rows
-      .filter((row) => row.path === ".gitattributes")
+      .filter((row) => row.path.split("/").at(-1) === ".gitattributes")
       .map((row) => row.blobId)),
   );
   for (const blobId of blobIds) {
@@ -459,6 +465,8 @@ export function collectThreeWayConflictFacts(options) {
       !keys("mergeBaseCommit branchPreRefreshCommit liveMainCommit").every(k => validCommit(options[k]))) return hold("CONFLICT_INPUT_INVALID");
   try {
     const { repoRoot, mergeBaseCommit: base, branchPreRefreshCommit: branch, liveMainCommit: main } = options;
+    const actualBases = readObjectGit(repoRoot, ["merge-base", "--all", branch, main]).toString().trim().split("\n");
+    if (actualBases.length !== 1 || actualBases[0] !== base) return hold("MERGE_BASE_MISMATCH");
     const trees = [base, branch, main].map(commit => readTreeFacts(repoRoot, commit));
     // Attribute-controlled merge drivers and source marker collisions need a
     // separate reviewed parser path. Never execute or guess their semantics.
@@ -485,22 +493,49 @@ export function collectThreeWayConflictFacts(options) {
         : path.join(repoRoot, configuredObjects));
       const env = {
         PATH: "/usr/bin:/bin", HOME: "/nonexistent", XDG_CONFIG_HOME: "/nonexistent", GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: "/dev/null", LANG: "C", LC_ALL: "C",
         GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1", GIT_NO_REPLACE_OBJECTS: "1",
         GIT_ALLOW_PROTOCOL: "", GIT_OBJECT_DIRECTORY: objectDirectory, GIT_ALTERNATE_OBJECT_DIRECTORIES: sharedObjects,
       };
-      const merged = spawnSync("/usr/bin/git", ["-C", repoRoot, "-c", "core.attributesFile=/dev/null",
-        "merge-tree", "--write-tree", "--messages", branch, main],
-      { env, encoding: null, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+      const isolatedGitDirectory = path.join(temporary, "repository.git");
+      execFileSync("/usr/bin/git", ["init", "--bare", "--template=", "-q", isolatedGitDirectory],
+        { env, timeout: 15000, stdio: ["ignore", "pipe", "pipe"] });
+      const objectIds = [...new Set(trees.flatMap(rows => rows.map(row => row.blobId)))];
+      const sizeOutput = execFileSync("/usr/bin/git", ["--git-dir", isolatedGitDirectory,
+        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], {
+        env, input: objectIds.join("\n") + "\n", timeout: 15000, maxBuffer: 8 * 1024 * 1024,
+      }).toString("ascii").trim().split("\n");
+      let inputBytes = 0;
+      if (sizeOutput.length !== objectIds.length) throw Error("MERGE_INPUT_INVALID");
+      sizeOutput.forEach((row, index) => {
+        const match = /^([a-f0-9]{40}) blob ([0-9]+)$/u.exec(row);
+        if (!match || match[1] !== objectIds[index]) throw Error("MERGE_INPUT_INVALID");
+        inputBytes += Number(match[2]);
+        if (!Number.isSafeInteger(inputBytes) || inputBytes > 128 * 1024 * 1024)
+          throw Error("MERGE_INPUT_LIMIT_EXCEEDED");
+      });
+      const merged = spawnSync("/usr/bin/git", ["--git-dir", isolatedGitDirectory,
+        "-c", "core.attributesFile=/dev/null", "merge-tree", "--write-tree", "--messages", "-z",
+        `--merge-base=${base}`, branch, main],
+      { env, timeout: 15000, killSignal: "SIGKILL", encoding: null,
+        maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
       if (![0, 1].includes(merged.status) || merged.error || !Buffer.isBuffer(merged.stdout) || !Buffer.isBuffer(merged.stderr) || merged.stderr.length) {
         throw Error("MERGE_TREE_FAILED");
       }
       raw = merged.stdout;
       const text = raw.toString("utf8");
       if (!Buffer.from(text).equals(raw)) throw Error("MERGE_TREE_FORMAT_UNSUPPORTED");
-      const conflictPaths = [...new Set(text.split("\n").map(line => {
-        const match = /^(?:100644|100755) [a-f0-9]{40} [123]\t(.+)$/u.exec(line);
-        return match?.[1] ?? null;
-      }).filter(Boolean))].sort();
+      const fields = text.split("\0");
+      if (!validCommit(fields.shift()) || fields.at(-1) !== "") throw Error("MERGE_TREE_FORMAT_UNSUPPORTED");
+      const pathSet = new Set();
+      let index = 0;
+      for (; index < fields.length && fields[index] !== ""; index++) {
+        const match = /^(?:100644|100755) [a-f0-9]{40} [123]\t([\s\S]+)$/u.exec(fields[index]);
+        if (!match || !validPath(match[1])) throw Error("MERGE_TREE_FORMAT_UNSUPPORTED");
+        pathSet.add(match[1]);
+      }
+      const conflictPaths = [...pathSet].sort();
+      if ((merged.status === 1) !== (conflictPaths.length > 0)) throw Error("MERGE_CONFLICT_SET_MISMATCH");
       for (const conflictPath of conflictPaths) {
         if (!validPath(conflictPath) || !maps.some(map => map.has(conflictPath))) throw Error("CONFLICT_PATH_INVALID");
         const blobs = maps.map(map => map.get(conflictPath) ?? null);
@@ -508,8 +543,9 @@ export function collectThreeWayConflictFacts(options) {
         const files = ["branch", "base", "main"].map(name => path.join(temporary, name));
         [blobs[1], blobs[0], blobs[2]].forEach((blob, index) => writeFileSync(files[index],
           readObjectGit(repoRoot, ["cat-file", "blob", blob]), { mode: 0o600 }));
-        const mergeFile = spawnSync("/usr/bin/git", ["merge-file", "-p", "--diff3", ...files],
-          { env, encoding: null, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+        const mergeFile = spawnSync("/usr/bin/git", ["--git-dir", isolatedGitDirectory, "merge-file", "-p", "--diff3", ...files],
+          { env, timeout: 15000, killSignal: "SIGKILL", encoding: null,
+            maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
         if (mergeFile.error || !Number.isInteger(mergeFile.status) || mergeFile.status < 1 ||
             !Buffer.isBuffer(mergeFile.stdout) || !Buffer.isBuffer(mergeFile.stderr) || mergeFile.stderr.length) {
           throw Error("CONFLICT_HUNK_COUNT_UNAVAILABLE");

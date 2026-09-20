@@ -303,12 +303,13 @@ test("object collector binds four trees, ordered parents and complete migration 
   const omitted = structuredClone(document); omitted.migrations = [];
   assert.equal(validateAdmissionObjectBindings(omitted, result).code, "MIGRATION_SET_MISMATCH");
   const conflictDocument = admission();
-  conflictDocument.conflicts = [{ path: "a.txt", hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT,
+  const copyConflictPath = "docs/evidence/site-builder/copy-runtime-eligibility.json";
+  conflictDocument.conflicts = [{ path: copyConflictPath, hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT,
     mainBlobId: COMMIT, resultBlobId: COMMIT, resolutionSource: "LIVE_MAIN_GIT_BLOB" }];
-  const conflictFacts = { conflicts: [{ path: "a.txt", hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT, mainBlobId: COMMIT }], conflictSetSha256: SHA };
+  const conflictFacts = { conflicts: [{ path: copyConflictPath, hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT, mainBlobId: COMMIT }], conflictSetSha256: SHA };
   assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).status, "PASS");
   conflictDocument.conflicts[0].resolutionSource = "SEMANTIC_UNION_PRESERVE_IDENTITY_LOCK_AND_CURRENT_POSTGRES_VOID_CAST";
-  assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).status, "PASS");
+  assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).code, "ADMISSION_RECORD_INVALID");
   conflictDocument.conflicts[0].resolutionSource = "UNREVIEWED_FREEFORM_UNION";
   assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).code, "ADMISSION_RECORD_INVALID");
   conflictDocument.conflicts[0].resolutionSource = "LIVE_MAIN_GIT_BLOB";
@@ -392,4 +393,80 @@ test("three-way conflict collection ignores non-conflicting binary deltas while 
   assert.equal(result.status, "PASS", JSON.stringify(result));
   assert.deepEqual(result.conflicts.map((row) => row.path), ["a.txt"]);
   assert.equal(result.conflicts[0].hunkCount, 1);
+});
+
+async function isolatedConflictFixture(t, file = "a.txt", nestedAttributes = null) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-conflict-boundaries-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("/usr/bin/git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
+  await mkdir(path.dirname(path.join(root, file)), { recursive: true });
+  await writeFile(path.join(root, file), "base\n");
+  if (nestedAttributes) {
+    await mkdir(path.join(root, "nested"), { recursive: true });
+    await writeFile(path.join(root, "nested/.gitattributes"), nestedAttributes);
+  }
+  git("add", "."); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD"); git("checkout", "-qb", "feature");
+  await writeFile(path.join(root, file), "feature\n"); git("add", "."); git("commit", "-qm", "feature");
+  const branch = git("rev-parse", "HEAD"); git("checkout", "-q", "main");
+  await writeFile(path.join(root, file), "main\n"); git("add", "."); git("commit", "-qm", "main");
+  const main = git("rev-parse", "HEAD");
+  return { root, git, options: { repoRoot: root, mergeBaseCommit: base,
+    branchPreRefreshCommit: branch, liveMainCommit: main } };
+}
+
+test("conflict collector rejects nested merge attributes before a repository driver can run", async (t) => {
+  const f = await isolatedConflictFixture(t, "nested/a.txt", "a.txt merge=hostile\n");
+  const marker = path.join(f.root, "driver-ran");
+  f.git("config", "merge.hostile.driver", `touch '${marker}'; exit 0`);
+  const result = collectThreeWayConflictFacts(f.options);
+  assert.equal(result.code, "MERGE_ATTRIBUTES_UNSUPPORTED");
+  const { existsSync } = await import("node:fs");
+  assert.equal(existsSync(marker), false);
+});
+
+test("conflict collector does not consume a repository merge.default executable", async (t) => {
+  const f = await isolatedConflictFixture(t);
+  const marker = path.join(f.root, "driver-ran");
+  f.git("config", "merge.hostile.driver", `touch '${marker}'; exit 0`);
+  f.git("config", "merge.default", "hostile");
+  const result = collectThreeWayConflictFacts(f.options);
+  const { existsSync } = await import("node:fs");
+  assert.equal(existsSync(marker), false);
+  assert.equal(result.status, "PASS", JSON.stringify(result));
+  assert.deepEqual(result.conflicts.map(row => row.path), ["a.txt"]);
+});
+
+test("conflict collector preserves a tab in a NUL-delimited conflict path", async (t) => {
+  const file = "tab\tname.txt";
+  const f = await isolatedConflictFixture(t, file);
+  const result = collectThreeWayConflictFacts(f.options);
+  assert.equal(result.status, "PASS", JSON.stringify(result));
+  assert.deepEqual(result.conflicts.map(row => row.path), [file]);
+});
+
+test("conflict collector rejects a supplied base different from the unique merge base", async (t) => {
+  const f = await isolatedConflictFixture(t);
+  assert.equal(collectThreeWayConflictFacts({ ...f.options,
+    mergeBaseCommit: f.options.branchPreRefreshCommit }).code, "MERGE_BASE_MISMATCH");
+});
+
+test("admission refuses non-Copy conflicts and mislabeled Copy resolutions", () => {
+  const d = admission();
+  const eligibility = "docs/evidence/site-builder/copy-runtime-eligibility.json";
+  const conflict = { path: eligibility, hunkCount: 1, baseBlobId: COMMIT,
+    branchBlobId: COMMIT, mainBlobId: COMMIT, resultBlobId: COMMIT,
+    resolutionSource: "LIVE_MAIN_GIT_BLOB" };
+  d.conflicts = [conflict];
+  assert.equal(validateCurrentMainAdmissionStructure(d).status, "PASS");
+  for (const delta of [
+    { path: "apps/api/src/discovery/suppression-policy-lock.ts" },
+    { resultBlobId: "f".repeat(40) },
+    { resolutionSource: "COPY_FIXED_SOURCE_SYNC_HUMAN_CITATIONS_V1" },
+  ]) {
+    assert.equal(validateCurrentMainAdmissionStructure({ ...d, conflicts: [{ ...conflict, ...delta }] }).status,
+      "HOLD", JSON.stringify(delta));
+  }
 });

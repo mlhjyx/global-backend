@@ -59,6 +59,21 @@ describe("workspace suppression policy lock", () => {
     },
   );
 
+  it("preserves workspace isolation for both receipt assertion overloads", async () => {
+    const tx = transaction();
+    const receipt = await lockWorkspaceSuppressionPolicy(tx, WORKSPACE_ID);
+    const otherWorkspace = "22222222-2222-4222-8222-222222222222";
+    expect(() => assertWorkspaceSuppressionPolicyLock(receipt, WORKSPACE_ID)).not.toThrow();
+    expect(() => assertWorkspaceSuppressionPolicyLock(receipt, otherWorkspace))
+      .toThrow("workspace suppression policy lock receipt mismatch");
+    expect(() => assertWorkspaceSuppressionPolicyLock(receipt, tx, otherWorkspace))
+      .toThrow("workspace suppression policy lock receipt mismatch");
+    for (const forged of [undefined, { workspaceId: WORKSPACE_ID }]) {
+      expect(() => assertWorkspaceSuppressionPolicyLock(forged as never, WORKSPACE_ID))
+        .toThrow("workspace suppression policy lock receipt mismatch");
+    }
+  });
+
   it.each([
     ["non-array", { locked: "" }],
     ["zero rows", []],
