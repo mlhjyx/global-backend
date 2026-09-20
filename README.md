@@ -44,10 +44,10 @@ docker-compose.yml   10 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/M
 ```bash
 cd /global/backend
 pnpm install --frozen-lockfile
-docker compose -p global up -d             # 10 个 global-* 服务（含一次性 MinIO bootstrap）
+/global/local-config/global/infra.sh up -d # 10 个 global-* 服务（含一次性 MinIO bootstrap）
 DATABASE_URL=postgresql://global:global@localhost:5432/global_dev pnpm --filter @global/db exec prisma migrate deploy
 pnpm --filter @global/db generate
-systemctl status temporal-dev              # Ubuntu 26.04：Temporal :7233 由 systemd 托管
+docker ps --filter name=global-temporal-dev # Temporal :7233 由 compose 容器托管（非 systemd）
 pnpm --filter @global/contracts build
 pnpm --filter @global/api build
 DATABASE_URL=postgresql://global:global@localhost:5432/global_dev node apps/api/scripts/seed-taxonomy.mjs
@@ -55,6 +55,8 @@ pnpm --filter @global/api start:dev        # API（含 Outbox relay），门户 
 pnpm --filter @global/api worker           # Temporal worker（启动时幂等 seed + ensure 4 个 Schedule）
 pnpm --filter @global/api test             # vitest；以本次命令输出为准，不在 README 固化计数
 ```
+
+> **宿主环境**：WSL2（Ubuntu 26.04），2026-09 从旧 Ubuntu 机器迁入。compose 变量由 `/global/local-config/global/` 下的 launcher 以 `--env-file` 注入，裸跑 `docker compose -p global up -d` 会因缺少必需变量失败；容器 `restart` 策略为 `no`，宿主重启后需手动拉起。跨仓工作区入口见 `/global/CLAUDE.md`。
 
 > 从旧的目录推导项目 `global-backend` 迁移时，先按 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md) 核对标签、卷并备份；不要直接 `docker compose down -v`。
 
