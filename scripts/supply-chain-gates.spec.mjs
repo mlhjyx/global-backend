@@ -9,7 +9,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-09-19T15:17:14.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-20T07:16:35.231Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -889,9 +889,14 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
       "docs/security/production-dependency-audit-baseline.json",
     ),
   );
+  assert.ok(
+    Date.parse(repositoryBaseline.source.captured_at) <
+      REPOSITORY_BASELINE_NOW.getTime(),
+    "repository baseline must have been captured before the verification clock",
+  );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+    expectedBootstrapBase: "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -904,13 +909,13 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "28c362bd2da4a90822901510a2415f008d5cb695",
+    "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+    expectedBootstrapBase: "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
     expectedSourceLockfileDigest:
-      "sha256:4fa4b3ce6a3123c699243e927db36cc6db2928fd3226c49fd0b00bbd42ddbd64",
+      "sha256:17ee3a1431d9b46e7c0b38592bd0984bef098e74a0892afe6c1bfe08ee853e72",
   });
   assert.equal(clear.ok, true);
   const vulnerable = evaluateProductionAudit(
@@ -924,7 +929,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+      expectedBootstrapBase: "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
     },
   );
   assert.equal(vulnerable.ok, false);
@@ -1585,11 +1590,11 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4\.37\.9/,
+    /github\/codeql-action\/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4\.38\.0/,
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4\.37\.9/,
+    /github\/codeql-action\/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4\.38\.0/,
   );
   assert.match(workflow, /^          languages: javascript-typescript$/m);
   assert.match(workflow, /^          queries: security-extended$/m);
