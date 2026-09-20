@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "pr407-closeout-readback/v1",
+  "main": "0d82d89c28b713ee3fc90c4886f031e01d8cd9c6",
+  "sourceHead": "70885cdb4196ae86db762ae96ca73f4cfa51f89d",
+  "semanticDispositionsSha256": "8c5a8f4202e9eda66862450d68c0eade043ef3f641f814c88d2df02258e101e5",
+  "pathCount": 276,
+  "counts": {
+    "rewrite": 238,
+    "drop": 9,
+    "superseded": 26,
+    "adopt": 3
+  },
+  "conflictPathCount": 73,
+  "pr407": {
+    "state": "CLOSED",
+    "mergedAt": null,
+    "commentUrl": "https://github.com/mlhjyx/global-backend/pull/407#issuecomment-5747111444",
+    "disposition": [
+      "STALE_REBUILD_REQUIRED",
+      "NOT_MERGED",
+      "NOT_FULLY_SUPERSEDED",
+      "PROVENANCE_PRESERVED"
+    ]
+  },
+  "archive": {
+    "pr407BundleSha256": "d7fbc12033f760b83dc6ff6f7911f42327744fe70fb876aba455857cdf693d35",
+    "pr407Tag": "archive/acquisition/goodjob-integration-70885cdb-20260826",
+    "pr514BundleSha256": "338e7925a5e3561d0a3ff87ec12f3e3eb14bf8f97f0a58d075dbda9aeb27e66a",
+    "pr514Tag": "archive/governance/status-runtime-browser-fix-b5123654-20260912"
+  },
+  "branchDispositions": {
+    "codex/goodjob-acquisition-integration": "RETAIN_REQUIRED_SUCCESSORS_NOT_MERGED",
+    "codex/status-runtime-browser-fix-20260912": "RETAIN_OCCUPIED_WORKTREE",
+    "codex/platform-receiver-rebase-20260912": "RETAIN_OTHER_ACTIVE_OWNER"
+  },
+  "followupPlaywright": {
+    "fileCount": 25,
+    "bytes": 57189,
+    "sourceAbsent": true,
+    "destination": "/global/backups/backend-root-reconciliation-20260826/local-assets-followup-20260913/playwright-cli",
+    "readback": "/global/backups/backend-root-reconciliation-20260826/local-assets-followup-20260913/playwright-cli-move-readback.json"
+  },
+  "rootSync": {
+    "commit": "0d82d89c28b713ee3fc90c4886f031e01d8cd9c6",
+    "state": "APPLIED",
+    "statusPreserved": true,
+    "filesystemPreserved": true,
+    "ignoredPaths": 102412,
+    "preservationDigest": "4dca4c09df0f980003984869134de4d7a436add983b2ec1036653a16f76b9e43"
+  },
+  "completion": "INCOMPLETE_IDENTITY_ADMISSION_AND_REQUIRED_SUCCESSORS",
+  "runtimeClaim": "NONE"
+}
