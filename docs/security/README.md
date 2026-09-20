@@ -34,8 +34,4 @@ Baseline 是限时治理账，不是 `allow-ghsas`。每条 advisory 都有 reme
 
 旧受信 base 已到期时，读取它的非必需 `production dependency delta · canary` 仍会失败；不能把候选的新基线当作该检查已通过。此纠正变更依靠独立审查、实际零漏洞候选审计、真实 deploy 回归及全部既有 required checks 验证；合入后使用新主线作受信 base，后续比较仍正常拒绝任何新漏洞。没有新增 advisory 例外，也没有停用检查。
 
-2026-09-20 锁文件更新后的重审绑定 `6213baf2715f0680f05024bee0994e8593403433`：官方 registry 的 production audit 覆盖 845 个依赖，所有严重度计数均为零。旧绑定对当前锁文件返回 `BASELINE_SOURCE_LOCK_MISMATCH`；刷新来源提交、锁文件摘要和采集时间后，同一份审计返回 `FRESH`。原失效时间、零例外策略和 verifier 保持不变；后续锁文件变更仍须重新审计，不能复用本次通过结论。
-
-同日 main 合入配对 S3 依赖更新后，再以干净提交 `1aaa1a779bbf716f301e5f08c7f3d0ad37eeaacc` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
-
-同日 main 合入AI SDK 依赖更新后，再以干净提交 `03e8ada02010052bf4220e1063d2c5c987bf1f8a` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
+本次锁文件重审的历史记录见 [changelog](../roadmap/changelog.md)，原始审计与前后回执见 [冻结证据](../evidence/security/20260920-baseline-refresh.json)。

@@ -529,3 +529,14 @@ Codex 复审 #56（收口⑤ 一等 Signal）提 **P1 TOCTOU**：`temporal/exter
 - **质量**：build 0 · eslint 0 · **909 vitest**（新增 33：adapter `assigneeLikeAnchor`/`normalizeRow` 数据最小化/成本护栏 env+默认路径/无 creds fail-safe + provider 全护栏移植测）。**无 schema 迁移**（新增依赖 `@google-cloud/bigquery`）。EPO 代码 PR #61 留档 DISABLED。
 - **✅ 真库真 BigQuery 四段 verify 全绿**（2026-07-14，用户 GCP key，无 sandbox）：A 真 API Siemens(DE)→**25 名真实发明人**六护栏全绿；B 落库 25 + person.profile CC-BY-4.0 署名/personal_data、无 external_id 点、二次幂等（created=0/merged=25 Tier 2 归一名）；C 跨源并 match_rule=name_exact；D §8.8 用途门 DENIED 零发明人。对抗复审 APPROVE（0 CRITICAL/HIGH，1 MEDIUM「MAX_GB=0 静默默认」+ 2 LOW 均已收）。
 - **⚠️ seed 仍 DISABLED（刻意）**：verify 证明源可用，但 publications 无 assignee 分区 = 每查全表扫（数十 GB）→ 生产逐公司 fan-out 会快速吃光 1TB/月免费额度。**生产启用 = 物化「assignee→inventor」小表 fast-follow**（scale-safe），非直接翻 ENABLED 全量 fan-out。
+
+
+## 2026-09-20 · Production audit baseline refresh for Windows migration
+
+2026-09-20 锁文件更新后的重审绑定 `6213baf2715f0680f05024bee0994e8593403433`：官方 registry 的 production audit 覆盖 845 个依赖，所有严重度计数均为零。旧绑定对当前锁文件返回 `BASELINE_SOURCE_LOCK_MISMATCH`；刷新来源提交、锁文件摘要和采集时间后，同一份审计返回 `FRESH`。原失效时间、零例外策略和 verifier 保持不变；后续锁文件变更仍须重新审计，不能复用本次通过结论。
+
+同日 main 合入配对 S3 依赖更新后，再以干净提交 `1aaa1a779bbf716f301e5f08c7f3d0ad37eeaacc` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
+
+同日 main 合入AI SDK 依赖更新后，再以干净提交 `03e8ada02010052bf4220e1063d2c5c987bf1f8a` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
+
+原始审计和新鲜度回执保存在[冻结证据](../evidence/security/20260920-baseline-refresh.json)。本记录不证明镜像已发布、运行部署完成或当前主线永远满足基线。

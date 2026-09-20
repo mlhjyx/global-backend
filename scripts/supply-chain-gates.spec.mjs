@@ -9,7 +9,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-09-19T15:17:14.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-20T07:16:35.231Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -888,6 +888,11 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     await readRepositoryFile(
       "docs/security/production-dependency-audit-baseline.json",
     ),
+  );
+  assert.ok(
+    Date.parse(repositoryBaseline.source.captured_at) <
+      REPOSITORY_BASELINE_NOW.getTime(),
+    "repository baseline must have been captured before the verification clock",
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
