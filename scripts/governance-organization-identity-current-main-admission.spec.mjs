@@ -337,3 +337,31 @@ test("three-way conflict collection hashes conflict facts without exposing sourc
   const clean = collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base, branchPreRefreshCommit: base, liveMainCommit: main });
   assert.equal(clean.status, "PASS"); assert.deepEqual(clean.conflicts, []);
 });
+
+test("three-way conflict collection admits exact whitespace-only attributes and rejects merge drivers", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-conflict-attributes-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
+  await writeFile(path.join(root, "a.txt"), "base\n"); git("add", "."); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD"); git("checkout", "-qb", "feature");
+  await mkdir(path.join(root, "packages/db/test/fixtures"), { recursive: true });
+  await writeFile(path.join(root, ".gitattributes"),
+    "packages/db/test/fixtures/organization-identity-v2-contract-prisma-residual.sql whitespace=-blank-at-eof\n");
+  await writeFile(path.join(root, "a.txt"), "feature\n"); git("add", "."); git("commit", "-qm", "feature");
+  const branch = git("rev-parse", "HEAD"); git("checkout", "-q", "main");
+  await writeFile(path.join(root, "a.txt"), "main\n"); git("add", "."); git("commit", "-qm", "main");
+  const main = git("rev-parse", "HEAD");
+  const safe = collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base,
+    branchPreRefreshCommit: branch, liveMainCommit: main });
+  assert.equal(safe.status, "PASS", JSON.stringify(safe));
+  assert.deepEqual(safe.conflicts.map((row) => row.path), ["a.txt"]);
+
+  git("checkout", "-q", "feature");
+  await writeFile(path.join(root, ".gitattributes"), "a.txt merge=ours\n");
+  git("add", ".gitattributes"); git("commit", "-qm", "unsafe attributes");
+  const unsafeBranch = git("rev-parse", "HEAD");
+  assert.equal(collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base,
+    branchPreRefreshCommit: unsafeBranch, liveMainCommit: main }).code, "MERGE_ATTRIBUTES_UNSUPPORTED");
+});

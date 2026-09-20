@@ -428,6 +428,29 @@ function readTreeFacts(repoRoot, commit) {
 }
 
 const collectedObjectFacts = new WeakSet();
+function mergeNeutralAttributes(repoRoot, trees) {
+  const blobIds = new Set(
+    trees.flatMap((rows) => rows
+      .filter((row) => row.path === ".gitattributes")
+      .map((row) => row.blobId)),
+  );
+  for (const blobId of blobIds) {
+    const bytes = readObjectGit(repoRoot, ["cat-file", "blob", blobId]);
+    if (bytes.length > 64 * 1024 || bytes.includes(0)) return false;
+    const text = bytes.toString("utf8");
+    if (!Buffer.from(text).equals(bytes) || text.normalize("NFC") !== text) return false;
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const fields = line.split(/\s+/u);
+      if (!validPath(fields[0]) || fields.length < 2 ||
+          fields.slice(1).some((field) => !/^(?:!?-?whitespace|whitespace=[A-Za-z0-9,_-]+)$/u.test(field))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 export function collectThreeWayConflictFacts(options) {
   if (!hasExactKeys(options, keys("repoRoot mergeBaseCommit branchPreRefreshCommit liveMainCommit")) ||
       typeof options.repoRoot !== "string" || !path.isAbsolute(options.repoRoot) ||
@@ -437,7 +460,8 @@ export function collectThreeWayConflictFacts(options) {
     const trees = [base, branch, main].map(commit => readTreeFacts(repoRoot, commit));
     // Attribute-controlled merge drivers and source marker collisions need a
     // separate reviewed parser path. Never execute or guess their semantics.
-    if (trees.some(rows => rows.some(r => r.path.split("/").at(-1) === ".gitattributes"))) return hold("MERGE_ATTRIBUTES_UNSUPPORTED");
+    if (trees.some(rows => rows.some(r => r.path.split("/").at(-1) === ".gitattributes")) &&
+        !mergeNeutralAttributes(repoRoot, trees)) return hold("MERGE_ATTRIBUTES_UNSUPPORTED");
     const maps = trees.map(rows => new Map(rows.map(r => [r.path, r.blobId])));
     const overlapping = [...new Set(trees.flatMap(rows => rows.map(r => r.path)))].filter(p => maps[0].get(p) !== maps[1].get(p) && maps[0].get(p) !== maps[2].get(p));
     let scanned = 0;
