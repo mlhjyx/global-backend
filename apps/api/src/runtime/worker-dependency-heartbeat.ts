@@ -1,5 +1,5 @@
-import type { RuntimeProcessLeaseService } from './runtime-process-lease';
-import type { RuntimeComponentStatus } from './runtime-readiness-registry';
+import type { RuntimeProcessLeaseService } from "./runtime-process-lease";
+import type { RuntimeComponentStatus } from "./runtime-readiness-registry";
 
 export interface WorkerDependencyHeartbeatHandle {
   readonly admitted: boolean;
@@ -7,8 +7,9 @@ export interface WorkerDependencyHeartbeatHandle {
 }
 
 export async function startWorkerDependencyHeartbeat(input: {
+  role?: "WORKER" | "PLATFORM_WORKER";
   check: () => Promise<RuntimeComponentStatus>;
-  leases: Pick<RuntimeProcessLeaseService, 'heartbeat'>;
+  leases: Pick<RuntimeProcessLeaseService, "heartbeat">;
   worker: { shutdown(): void };
   taskQueue: string;
   intervalMs?: number;
@@ -23,19 +24,22 @@ export async function startWorkerDependencyHeartbeat(input: {
     try {
       result = await input.check();
     } catch {
-      result = { status: 'failed', code: 'WORKER_DEPENDENCY_UNAVAILABLE' };
+      result = { status: "failed", code: "WORKER_DEPENDENCY_UNAVAILABLE" };
     }
-    if (result.status === 'ok') return true;
+    if (result.status === "ok") return true;
     if (stopped) return false;
     stopped = true;
     if (timer.current) clearInterval(timer.current);
     input.onBlocked(result.code);
-    await input.leases.heartbeat('WORKER', 'DRAINING', input.taskQueue).catch(() => undefined);
+    await input.leases
+      .heartbeat(input.role ?? "WORKER", "DRAINING", input.taskQueue)
+      .catch(() => undefined);
     input.worker.shutdown();
     return false;
   };
 
-  if (!(await checkOnce())) return Object.freeze({ admitted: false, stop: () => undefined });
+  if (!(await checkOnce()))
+    return Object.freeze({ admitted: false, stop: () => undefined });
   timer.current = setInterval(() => void checkOnce(), intervalMs);
   timer.current.unref();
   return Object.freeze({

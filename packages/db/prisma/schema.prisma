@@ -16,6 +16,7 @@ datasource db {
 enum RuntimeProcessRole {
   API
   WORKER
+  PLATFORM_WORKER
   OUTBOX_RELAY
 
   @@map("runtime_process_role")
@@ -109,21 +110,27 @@ model Workspace {
 /// Platform process identity heartbeat. Managed API/Worker/relay processes are
 /// admitted from the same immutable artifact; this table is not tenant data.
 model RuntimeProcessLease {
-  id                String              @id @default(uuid()) @db.Uuid
-  instanceId        String              @unique @map("instance_id") @db.Uuid
-  role              RuntimeProcessRole
-  state             RuntimeProcessState @default(STARTING)
-  taskQueue         String?             @map("task_queue") @db.VarChar(191)
-  buildSha          String              @map("build_sha") @db.VarChar(40)
-  imageDigest       String              @map("image_digest") @db.VarChar(71)
-  artifactDigest    String              @map("artifact_digest") @db.VarChar(71)
-  migrationRevision String              @map("migration_revision") @db.VarChar(191)
-  startedAt         DateTime            @map("started_at") @db.Timestamptz(3)
-  lastSeenAt        DateTime            @map("last_seen_at") @db.Timestamptz(3)
-  stoppedAt         DateTime?           @map("stopped_at") @db.Timestamptz(3)
+  id                         String              @id @default(uuid()) @db.Uuid
+  instanceId                 String              @unique @map("instance_id") @db.Uuid
+  role                       RuntimeProcessRole
+  state                      RuntimeProcessState @default(STARTING)
+  taskQueue                  String?             @map("task_queue") @db.VarChar(191)
+  temporalClusterId          String?             @map("temporal_cluster_id") @db.VarChar(191)
+  temporalNamespace          String?             @map("temporal_namespace") @db.VarChar(191)
+  workloadKind               String?             @map("workload_kind") @db.VarChar(32)
+  temporalClusterProofDigest String?             @map("temporal_cluster_proof_digest") @db.VarChar(71)
+  writerPrincipal            String?             @map("writer_principal") @db.VarChar(63)
+  buildSha                   String              @map("build_sha") @db.VarChar(40)
+  imageDigest                String              @map("image_digest") @db.VarChar(71)
+  artifactDigest             String              @map("artifact_digest") @db.VarChar(71)
+  migrationRevision          String              @map("migration_revision") @db.VarChar(191)
+  startedAt                  DateTime            @map("started_at") @db.Timestamptz(3)
+  lastSeenAt                 DateTime            @map("last_seen_at") @db.Timestamptz(3)
+  stoppedAt                  DateTime?           @map("stopped_at") @db.Timestamptz(3)
 
   @@index([role, state, lastSeenAt], map: "runtime_process_lease_role_state_seen_idx")
   @@index([taskQueue, state, lastSeenAt], map: "runtime_process_lease_queue_state_seen_idx")
+  @@index([temporalClusterId, temporalNamespace, taskQueue, state, lastSeenAt], map: "runtime_process_lease_namespace_queue_seen_idx")
   @@index([imageDigest, artifactDigest, state, lastSeenAt], map: "runtime_process_lease_artifact_state_seen_idx")
   @@map("runtime_process_lease")
 }
@@ -149,7 +156,7 @@ model ToolBudgetAccount {
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   operations               ToolBudgetOperation[]
-  platformEgressAttempts   PlatformEgressAttempt[] @relation("PlatformEgressAttemptAccount")
+  platformEgressAttempts   PlatformEgressAttempt[]   @relation("PlatformEgressAttemptAccount")
   authority                ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
   toolOperationSubjects    ToolOperationSubject[]    @relation("ToolOperationSubjectAccount")
   governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationAccount")
@@ -164,37 +171,37 @@ model ToolBudgetAccount {
 /// Verified external spending authority. Signed claim fields are immutable;
 /// only narrow database functions advance lifecycle counters/timestamps.
 model ExecutionBudgetAuthority {
-  id                  String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  scopeKey            String                       @map("scope_key") @db.VarChar(200)
-  authorityKind       ExecutionBudgetAuthorityKind @map("authority_kind")
-  workspaceId         String?                      @map("workspace_id") @db.Uuid
-  issuer              String                       @db.VarChar(512)
-  audience            String                       @db.VarChar(191)
-  jti                 String                       @db.Uuid
-  tokenSha256         String                       @map("token_sha256") @db.VarChar(64)
-  schemaVersion       String                       @map("schema_version") @db.VarChar(80)
-  purpose             ExecutionBudgetPurpose
-  subjectType         String                       @map("subject_type") @db.VarChar(191)
-  subjectId           String                       @map("subject_id") @db.VarChar(191)
-  requestSha256       String?                      @map("request_sha256") @db.VarChar(64)
-  scheduleId          String?                      @map("schedule_id") @db.VarChar(191)
-  scheduleRequestSha256 String?                    @map("schedule_request_sha256") @db.VarChar(64)
-  workflowId          String?                      @map("workflow_id") @db.VarChar(200)
-  workflowRunId       String?                      @map("workflow_run_id") @db.VarChar(36)
-  technicalPolicyRevision String?                  @map("technical_policy_revision") @db.VarChar(64)
-  currency            String                       @db.VarChar(3)
-  unit                String                       @db.VarChar(16)
-  capMicrousd         BigInt?                      @map("cap_microusd")
-  capPerRunMicrousd   BigInt?                      @map("cap_per_run_microusd")
-  campaignCapMicrousd BigInt?                      @map("campaign_cap_microusd")
-  maxRuns             BigInt?                      @map("max_runs")
-  runsConsumed        BigInt                       @default(0) @map("runs_consumed")
-  issuedAt            DateTime                     @map("issued_at") @db.Timestamptz(3)
-  notBefore           DateTime                     @map("not_before") @db.Timestamptz(3)
-  expiresAt           DateTime                     @map("expires_at") @db.Timestamptz(3)
-  consumedAt          DateTime?                    @map("consumed_at") @db.Timestamptz(3)
-  revokedAt           DateTime?                    @map("revoked_at") @db.Timestamptz(3)
-  createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeKey                String                       @map("scope_key") @db.VarChar(200)
+  authorityKind           ExecutionBudgetAuthorityKind @map("authority_kind")
+  workspaceId             String?                      @map("workspace_id") @db.Uuid
+  issuer                  String                       @db.VarChar(512)
+  audience                String                       @db.VarChar(191)
+  jti                     String                       @db.Uuid
+  tokenSha256             String                       @map("token_sha256") @db.VarChar(64)
+  schemaVersion           String                       @map("schema_version") @db.VarChar(80)
+  purpose                 ExecutionBudgetPurpose
+  subjectType             String                       @map("subject_type") @db.VarChar(191)
+  subjectId               String                       @map("subject_id") @db.VarChar(191)
+  requestSha256           String?                      @map("request_sha256") @db.VarChar(64)
+  scheduleId              String?                      @map("schedule_id") @db.VarChar(191)
+  scheduleRequestSha256   String?                      @map("schedule_request_sha256") @db.VarChar(64)
+  workflowId              String?                      @map("workflow_id") @db.VarChar(200)
+  workflowRunId           String?                      @map("workflow_run_id") @db.VarChar(36)
+  technicalPolicyRevision String?                      @map("technical_policy_revision") @db.VarChar(64)
+  currency                String                       @db.VarChar(3)
+  unit                    String                       @db.VarChar(16)
+  capMicrousd             BigInt?                      @map("cap_microusd")
+  capPerRunMicrousd       BigInt?                      @map("cap_per_run_microusd")
+  campaignCapMicrousd     BigInt?                      @map("campaign_cap_microusd")
+  maxRuns                 BigInt?                      @map("max_runs")
+  runsConsumed            BigInt                       @default(0) @map("runs_consumed")
+  issuedAt                DateTime                     @map("issued_at") @db.Timestamptz(3)
+  notBefore               DateTime                     @map("not_before") @db.Timestamptz(3)
+  expiresAt               DateTime                     @map("expires_at") @db.Timestamptz(3)
+  consumedAt              DateTime?                    @map("consumed_at") @db.Timestamptz(3)
+  revokedAt               DateTime?                    @map("revoked_at") @db.Timestamptz(3)
+  createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace                Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
   accounts                 ToolBudgetAccount[]
@@ -215,30 +222,30 @@ model ExecutionBudgetAuthority {
 /// Direct table DML is denied; the platform writer uses the functions from the
 /// additive fence migration so revocation and the final CAS share row locks.
 model PlatformEgressAttempt {
-  id                     String                    @id @default(uuid()) @db.Uuid
-  authorityId            String                    @map("authority_id") @db.Uuid
-  scheduleId             String                    @map("schedule_id") @db.VarChar(191)
-  workflowId             String                    @map("workflow_id") @db.VarChar(200)
-  workflowRunId          String                  @map("workflow_run_id") @db.VarChar(36)
-  operationKey           String                  @map("operation_key") @db.VarChar(200)
-  policyRevision         String                  @map("policy_revision") @db.VarChar(64)
-  generation             BigInt                  @default(0)
-  accountId              String?                 @map("account_id") @db.Uuid
-  accountGeneration      Int?                    @map("account_generation")
-  budgetOperationId      String?                 @map("budget_operation_id") @db.Uuid
-  budgetOperationKey     String?                 @map("budget_operation_key") @db.VarChar(200)
-  reservedMicrousd       BigInt?                 @map("reserved_microusd")
-  state                  PlatformEgressAttemptState @default(AUTHORIZED)
-  authorizedAt           DateTime                @default(now()) @map("authorized_at") @db.Timestamptz(3)
-  sendingAt              DateTime?               @map("sending_at") @db.Timestamptz(3)
-  acknowledgedAt         DateTime?               @map("acknowledged_at") @db.Timestamptz(3)
-  unknownAt              DateTime?               @map("unknown_at") @db.Timestamptz(3)
-  outcomeDigest           String?                 @map("outcome_digest") @db.VarChar(64)
-  outcomeMeta             Json?                   @map("outcome_meta")
+  id                 String                     @id @default(uuid()) @db.Uuid
+  authorityId        String                     @map("authority_id") @db.Uuid
+  scheduleId         String                     @map("schedule_id") @db.VarChar(191)
+  workflowId         String                     @map("workflow_id") @db.VarChar(200)
+  workflowRunId      String                     @map("workflow_run_id") @db.VarChar(36)
+  operationKey       String                     @map("operation_key") @db.VarChar(200)
+  policyRevision     String                     @map("policy_revision") @db.VarChar(64)
+  generation         BigInt                     @default(0)
+  accountId          String?                    @map("account_id") @db.Uuid
+  accountGeneration  Int?                       @map("account_generation")
+  budgetOperationId  String?                    @map("budget_operation_id") @db.Uuid
+  budgetOperationKey String?                    @map("budget_operation_key") @db.VarChar(200)
+  reservedMicrousd   BigInt?                    @map("reserved_microusd")
+  state              PlatformEgressAttemptState @default(AUTHORIZED)
+  authorizedAt       DateTime                   @default(now()) @map("authorized_at") @db.Timestamptz(3)
+  sendingAt          DateTime?                  @map("sending_at") @db.Timestamptz(3)
+  acknowledgedAt     DateTime?                  @map("acknowledged_at") @db.Timestamptz(3)
+  unknownAt          DateTime?                  @map("unknown_at") @db.Timestamptz(3)
+  outcomeDigest      String?                    @map("outcome_digest") @db.VarChar(64)
+  outcomeMeta        Json?                      @map("outcome_meta")
 
-  authority ExecutionBudgetAuthority @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_authority_fkey")
-  account ToolBudgetAccount? @relation("PlatformEgressAttemptAccount", fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_account_fkey")
-  budgetOperation ToolBudgetOperation? @relation("PlatformEgressAttemptBudgetOperation", fields: [budgetOperationId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_budget_operation_fkey")
+  authority       ExecutionBudgetAuthority @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_authority_fkey")
+  account         ToolBudgetAccount?       @relation("PlatformEgressAttemptAccount", fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_account_fkey")
+  budgetOperation ToolBudgetOperation?     @relation("PlatformEgressAttemptBudgetOperation", fields: [budgetOperationId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_budget_operation_fkey")
 
   @@unique([authorityId, operationKey], map: "platform_egress_attempt_authority_operation_key")
   @@unique([scheduleId, workflowRunId, operationKey], map: "platform_egress_attempt_run_operation_key")
@@ -249,14 +256,14 @@ model PlatformEgressAttempt {
 /// Monotonic per-schedule generation shared by authorization and the final
 /// send CAS. A disabled generation cannot be reopened by a process-local flag.
 model PlatformEgressScheduleFence {
-  scheduleId    String   @id @map("schedule_id") @db.VarChar(191)
-  generation    BigInt   @default(0)
-  fenceSequence BigInt   @default(0) @map("fence_sequence")
-  policyArtifactSha256 String? @map("policy_artifact_sha256") @db.VarChar(64)
-  executionEnvelopeSha256 String? @map("execution_envelope_sha256") @db.VarChar(64)
-  requiredCapMicrousd BigInt? @map("required_cap_microusd")
-  state         String   @default("ACTIVE") @db.VarChar(16)
-  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+  scheduleId              String   @id @map("schedule_id") @db.VarChar(191)
+  generation              BigInt   @default(0)
+  fenceSequence           BigInt   @default(0) @map("fence_sequence")
+  policyArtifactSha256    String?  @map("policy_artifact_sha256") @db.VarChar(64)
+  executionEnvelopeSha256 String?  @map("execution_envelope_sha256") @db.VarChar(64)
+  requiredCapMicrousd     BigInt?  @map("required_cap_microusd")
+  state                   String   @default("ACTIVE") @db.VarChar(16)
+  updatedAt               DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@map("platform_egress_schedule_fence")
 }
@@ -294,8 +301,8 @@ model PlatformFenceAckDelivery {
   ackTokenSha256     String   @map("ack_token_sha256") @db.VarChar(64)
   signingKeyId       String   @map("signing_key_id") @db.VarChar(64)
   cipherKeyId        String   @map("cipher_key_id") @db.VarChar(64)
-  ciphertext        Bytes
-  createdAt         DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+  ciphertext         Bytes
+  createdAt          DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
 
   receipt PlatformRevocationReceipt @relation(fields: [receiptId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_fence_ack_delivery_receipt_fkey")
 
@@ -353,7 +360,7 @@ model ToolBudgetOperation {
   toolOperationSubject     ToolOperationSubject?            @relation("ToolOperationSubjectOperation")
   governedSubjectRelations GovernedSubjectRelation[]        @relation("GovernedSubjectRelationOperation")
   discoveryQueryAttempts   DiscoveryQueryOperationAttempt[]
-  platformEgressAttempts   PlatformEgressAttempt[] @relation("PlatformEgressAttemptBudgetOperation")
+  platformEgressAttempts   PlatformEgressAttempt[]          @relation("PlatformEgressAttemptBudgetOperation")
 
   @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
   @@unique([scopeKey, id], map: "tool_budget_operation_scope_id_key")

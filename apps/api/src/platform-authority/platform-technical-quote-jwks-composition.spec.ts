@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { GlobalHttpExceptionFilter } from "../common/http-exception.filter";
 import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
+import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
+import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { PlatformAuthorityModule } from "./platform-authority.module";
 import {
   PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
@@ -32,8 +34,37 @@ const VALID_BODY = JSON.stringify({
 
 @Global()
 @Module({
-  providers: [RuntimeReadinessContributorRegistry],
-  exports: [RuntimeReadinessContributorRegistry],
+  providers: [
+    RuntimeReadinessContributorRegistry,
+    {
+      provide: RuntimeReleaseIdentityService,
+      useValue: new RuntimeReleaseIdentityService({
+        attested: false,
+        schema_version: "global-runtime-release-identity/v1",
+        code: "TEST_RUNTIME_UNATTESTED",
+      }),
+    },
+    {
+      provide: RuntimeAdmissionService,
+      useValue: new RuntimeAdmissionService({
+        mode: "test",
+        admitted: false,
+        checks: {
+          build: { status: "failed", code: "TEST_RUNTIME_UNATTESTED" },
+          environment: { status: "optional" },
+          database: { status: "optional" },
+          auth: { status: "optional" },
+          gateway: { status: "optional" },
+          pii: { status: "optional" },
+        },
+      }),
+    },
+  ],
+  exports: [
+    RuntimeReadinessContributorRegistry,
+    RuntimeReleaseIdentityService,
+    RuntimeAdmissionService,
+  ],
 })
 class QuoteReadinessTestModule {}
 
@@ -72,7 +103,7 @@ describe("Platform quote product JWKS composition", () => {
 
     app = await NestFactory.create<NestExpressApplication>(
       ProductQuoteAuthenticationTestModule,
-      { logger: false, rawBody: true },
+      { logger: false, rawBody: true, abortOnError: false },
     );
     app.setGlobalPrefix("api");
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });

@@ -2,11 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('managed durable budget composition', () => {
-  it('injects the one Worker store into taxonomy, acquisition and intent activities', async () => {
+  it('injects the durable store into the corresponding customer and platform activity roots', async () => {
     const source = await readFile(new URL('../temporal/worker.ts', import.meta.url), 'utf8');
+    const platform = await readFile(new URL('../temporal/platform-worker.ts', import.meta.url), 'utf8');
     expect(source).toMatch(/new TaxonomyResolver\([\s\S]*?budgetStore,[\s\S]*?\)/);
-    expect(source).toMatch(/createAcquisitionActivities\(\{[\s\S]*?budgetStore/);
-    expect(source).toMatch(/createIntentActivities\(\{[\s\S]*?budgetStore/);
+    expect(source).not.toContain('createExecutionBudgetPlatformWriterClient');
+    expect(platform).toMatch(/createAcquisitionActivities\(\{[\s\S]*?budgetStore/);
+    expect(platform).toMatch(/createIntentActivities\(\{[\s\S]*?budgetStore/);
   });
 
   it('exports and injects the same managed BudgetStore into ICP taxonomy cold paths', async () => {

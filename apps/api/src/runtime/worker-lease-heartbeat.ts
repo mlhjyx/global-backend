@@ -8,6 +8,28 @@ export interface WorkerLeaseHeartbeatHandle {
   stop(): void;
 }
 
+export function createWorkerCredentialFailure(input: {
+  role: "WORKER" | "PLATFORM_WORKER";
+  leases: Pick<RuntimeProcessLeaseService, "heartbeat">;
+  heartbeat: WorkerLeaseHeartbeatHandle;
+  worker: { shutdown(): void };
+  taskQueue: string;
+}) {
+  let available = true;
+  return Object.freeze({
+    available: () => available,
+    fail: () => {
+      if (!available) return;
+      available = false;
+      input.heartbeat.stop();
+      void input.leases
+        .heartbeat(input.role, "DRAINING", input.taskQueue)
+        .catch(() => undefined);
+      input.worker.shutdown();
+    },
+  });
+}
+
 interface WorkerSignalSource {
   on(signal: NodeJS.Signals, listener: () => void): unknown;
   off(signal: NodeJS.Signals, listener: () => void): unknown;
@@ -58,6 +80,7 @@ interface AttachedWorkerShutdown {
 }
 
 export function startWorkerProcessSignalCoordinator(input: {
+  role?: "WORKER" | "PLATFORM_WORKER";
   leases: Pick<RuntimeProcessLeaseService, "heartbeat">;
   taskQueue: string;
   signals?: WorkerSignalSource;
@@ -74,7 +97,7 @@ export function startWorkerProcessSignalCoordinator(input: {
   );
   const handledSignals = Object.freeze<NodeJS.Signals[]>(["SIGTERM", "SIGINT"]);
   const registered = input.leases.heartbeat(
-    "WORKER",
+    input.role ?? "WORKER",
     "STARTING",
     input.taskQueue,
   );
@@ -105,7 +128,11 @@ export function startWorkerProcessSignalCoordinator(input: {
       }
       if (leaseRegistered) {
         const drainingPublished = await settlesWithin(
-          input.leases.heartbeat("WORKER", "DRAINING", input.taskQueue),
+          input.leases.heartbeat(
+            input.role ?? "WORKER",
+            "DRAINING",
+            input.taskQueue,
+          ),
           drainTimeoutMs,
         );
         if (!drainingPublished) input.onDrainLeaseFailure?.();
@@ -116,7 +143,11 @@ export function startWorkerProcessSignalCoordinator(input: {
       }
       if (leaseRegistered) {
         const stoppedPublished = await settlesWithin(
-          input.leases.heartbeat("WORKER", "STOPPED", input.taskQueue),
+          input.leases.heartbeat(
+            input.role ?? "WORKER",
+            "STOPPED",
+            input.taskQueue,
+          ),
           drainTimeoutMs,
         );
         if (!stoppedPublished) input.onDrainLeaseFailure?.();
@@ -159,6 +190,7 @@ export function startWorkerProcessSignalCoordinator(input: {
 }
 
 export async function startWorkerLeaseHeartbeat(input: {
+  role?: "WORKER" | "PLATFORM_WORKER";
   leases: Pick<RuntimeProcessLeaseService, "heartbeat">;
   worker: { shutdown(): void };
   taskQueue: string;
@@ -166,18 +198,22 @@ export async function startWorkerLeaseHeartbeat(input: {
   onLeaseLost?: () => void;
 }): Promise<WorkerLeaseHeartbeatHandle> {
   const intervalMs = input.intervalMs ?? 10_000;
-  await input.leases.heartbeat("WORKER", "READY", input.taskQueue);
+  await input.leases.heartbeat(
+    input.role ?? "WORKER",
+    "READY",
+    input.taskQueue,
+  );
   let stopped = false;
   const timer = setInterval(() => {
     void input.leases
-      .heartbeat("WORKER", "READY", input.taskQueue)
+      .heartbeat(input.role ?? "WORKER", "READY", input.taskQueue)
       .catch(async () => {
         if (stopped) return;
         stopped = true;
         clearInterval(timer);
         input.onLeaseLost?.();
         await input.leases
-          .heartbeat("WORKER", "DRAINING", input.taskQueue)
+          .heartbeat(input.role ?? "WORKER", "DRAINING", input.taskQueue)
           .catch(() => undefined);
         input.worker.shutdown();
       });

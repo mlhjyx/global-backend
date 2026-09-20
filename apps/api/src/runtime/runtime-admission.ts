@@ -16,7 +16,8 @@ import {
 } from "../model-gateway/gateway-credential-boundary";
 
 type AdmissionStatus = "ok" | "optional" | "failed";
-export type RuntimeAdmissionRole = "API" | "WORKER" | "OUTBOX_RELAY";
+export type RuntimeAdmissionRole =
+  "API" | "WORKER" | "PLATFORM_WORKER" | "OUTBOX_RELAY";
 
 interface AdmissionCheck {
   status: AdmissionStatus;
@@ -160,6 +161,7 @@ function inspectGateway(
   role: RuntimeAdmissionRole,
 ): AdmissionCheck {
   if (!managed(settings.mode)) return { status: "optional" };
+  if (role === "PLATFORM_WORKER") return { status: "optional" };
   const dispatchCredential = canonicalGatewayCredential(env.MODEL_GATEWAY_KEY);
   if (!present(env.MODEL_GATEWAY_URL) || !dispatchCredential) {
     return { status: "failed", code: "GATEWAY_CONFIG_INCOMPLETE" };
@@ -172,9 +174,7 @@ function inspectGateway(
   );
   if (
     !readerCredential ||
-    !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(
-      readerCredential,
-    ) ||
+    !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(readerCredential) ||
     !present(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
     !isAbsolute(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
     !present(env.SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON)
@@ -184,9 +184,7 @@ function inspectGateway(
       code: "GATEWAY_SETTLEMENT_READBACK_CONFIG_INCOMPLETE",
     };
   }
-  if (
-    !gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)
-  ) {
+  if (!gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)) {
     return {
       status: "failed",
       code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",

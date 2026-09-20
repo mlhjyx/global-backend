@@ -7,6 +7,8 @@
     "start": "node dist/main.js",
     "build": "nest build",
     "worker": "node dist/temporal/worker.js",
+    "customer-worker": "node dist/temporal/worker.js",
+    "platform-worker": "node dist/temporal/platform-worker.js",
     "test": "vitest run",
     "test:artifact:minio": "GENERIC_OPERATION_ARTIFACT_MINIO_TEST=1 vitest run src/durable-results/artifact/generic-operation-artifact.minio.spec.ts",
     "mg:check": "node scripts/mg-check.cjs",

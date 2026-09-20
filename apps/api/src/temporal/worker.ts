@@ -1,9 +1,14 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { resolve } from "node:path";
-import { NativeConnection, Runtime, Worker } from "@temporalio/worker";
+import { Runtime, Worker } from "@temporalio/worker";
+import { workerIdentity } from "./worker-composition";
+import { createRuntimeMachineTokenClient } from "../platform-authority/machine-token-runtime";
+import {
+  bindNativeMachineCredential,
+  connectNativeMachine,
+} from "./native-machine-connection";
 import { PrismaClient } from "@prisma/client";
-import { createExecutionBudgetPlatformWriterClient } from "../execution-budget/execution-budget-platform-writer.database";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
 import { ModelRouter } from "../model-gateway/model-router";
@@ -14,9 +19,6 @@ import { createUnderstandingActivities } from "./understanding.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createQualifyActivities } from "./qualify.activities";
-import { createAcquisitionActivities } from "./acquisition.activities";
-import { buildSourceAdapterRegistry } from "../acquisition/registry";
-import { createIntentActivities } from "./intent.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
 import { createDeletionActivities } from "./deletion.activities";
@@ -27,9 +29,6 @@ import {
   PrismaPersonalArtifactCleanupCommandRepository,
 } from "../durable-results/artifact/personal-artifact-cleanup.repository";
 import { createPersonalArtifactCleanupRuntime } from "../durable-results/artifact/personal-artifact-cleanup.runtime";
-import { createPatentsCacheActivities } from "./patents-cache.activities";
-import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities";
-import { createPlatformScheduleAuthorityActivities } from "./platform-schedule-authority.activities";
 import { createSiteBuilderActivities } from "./site-builder.activities";
 import {
   costReconciliationCatalogCoversRoutes,
@@ -49,9 +48,7 @@ import { DoclingClient } from "../site-builder/docling.client";
 import { StorageService } from "../site-builder/storage.service";
 import { ImagePipelineService } from "../site-builder/image-pipeline.service";
 import { IsolatedImagePipelineRunner } from "../site-builder/image-pipeline-runner";
-import { ensurePlatformSchedules } from "./ensure-schedules";
 import { seedJurisdictionPolicy } from "../compliance/jurisdiction-policy.seed";
-import { Crawl4aiPageFetcher } from "../intent/page-fetcher";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
 import {
   buildToolBroker,
@@ -89,6 +86,7 @@ import {
 } from "../runtime/managed-dependency-readiness";
 import {
   createIdempotentWorkerShutdown,
+  createWorkerCredentialFailure,
   startWorkerProcessSignalCoordinator,
   startWorkerLeaseHeartbeat,
 } from "../runtime/worker-lease-heartbeat";
@@ -98,14 +96,6 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
-import { checkPlatformAuthorityReady } from "./platform-authority-readiness-gate";
-import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
-import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
-import { inspectPlatformBudgetAuthorityReadiness } from "../runtime/managed-dependency-readiness";
-import { JwksPlatformTechnicalQuoteServiceAuthenticationVerifier } from "../platform-authority/platform-technical-quote-jwks-verifier";
-import { PlatformTechnicalQuoteAuthenticationReadinessContributor } from "../platform-authority/platform-technical-quote-service-auth";
-import { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
-import { PrismaPlatformEgressFencePort } from "../platform-authority/platform-egress-fence.prisma";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -193,7 +183,9 @@ async function main(): Promise<void> {
         `[worker] not ready: ${code}; Temporal polling remains disabled`,
       ),
   });
-  const runtimeLeaseStore = new PrismaRuntimeProcessLeaseStore(prisma);
+  const runtimeLeaseStore = new PrismaRuntimeProcessLeaseStore(prisma, {
+    roles: ["WORKER"],
+  });
   const runtimeLeases = new RuntimeProcessLeaseService(runtimeLeaseStore, {
     identity: releaseIdentity,
   });
@@ -327,14 +319,10 @@ async function main(): Promise<void> {
   // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
   // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
   const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-  const platformWriterDb = createExecutionBudgetPlatformWriterClient(
-    process.env,
-  );
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
     personalArtifactCleanupRuntime.destroy();
     await providerWireDatabase.disconnect().catch(() => undefined);
-    await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeTelemetry.shutdown();
     return holdWorkerNotReady(code, runtimeLeases);
@@ -344,39 +332,7 @@ async function main(): Promise<void> {
   } catch {
     await holdPlatformNotReady("OWNER_DATABASE_UNAVAILABLE");
   }
-  if (!platformWriterDb)
-    return holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
-  const authorityWriter = platformWriterDb;
-  try {
-    await authorityWriter.$connect();
-  } catch {
-    await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
-  }
-  const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
-  // Read the same capability contract as API readiness. Existing per-run
-  // grants describe execution history, not whether a new grant can be issued.
-  const platformReadinessRegistry = new RuntimeReadinessContributorRegistry();
-  const platformQuoteReadiness = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
-    new JwksPlatformTechnicalQuoteServiceAuthenticationVerifier(),
-    platformReadinessRegistry,
-  );
-  platformQuoteReadiness.onModuleInit();
-  const platformAuthorityRepository = new ExecutionBudgetAuthorityRepository(prisma, authorityWriter);
-  const checkPlatformCapability = () => checkPlatformAuthorityReady(
-    () => inspectPlatformBudgetAuthorityReadiness(platformAuthorityRepository, platformReadinessRegistry),
-  );
-  await waitForWorkerDependencyAdmission({
-      check: checkPlatformCapability,
-      onBlocked: () => {
-        console.error("[worker] not ready: PLATFORM_BUDGET_AUTHORITY_NOT_READY; Temporal polling remains disabled");
-        void runtimeLeases.heartbeat("WORKER", "STARTING", UNDERSTANDING_TASK_QUEUE).catch(() => undefined);
-      },
-  });
-  // Platform physical wires use the same dedicated writer principal as
-  // authority admission. No in-memory or app-user fallback is permitted.
-  const platformEgressFence = new PlatformEgressFence(
-    new PrismaPlatformEgressFencePort(authorityWriter),
-  );
+  const budgetStore = new PostgresBudgetStore(prisma);
 
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
@@ -407,12 +363,7 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("SANCTIONS_SEED_UNAVAILABLE");
   }
 
-  // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
-  try {
-    await ensurePlatformSchedules();
-  } catch {
-    await holdPlatformNotReady("PLATFORM_SCHEDULES_UNAVAILABLE");
-  }
+  // Schedule provisioning is an independently authorized operator action.
 
   const registry = new ModelProviderRegistry();
   const gatewayProvider = buildGatewayProvider();
@@ -496,21 +447,28 @@ async function main(): Promise<void> {
     runtimeTelemetry: runtimeTelemetry.telemetry,
   });
 
-  const connection = await NativeConnection.connect({
-    address: process.env.TEMPORAL_ADDRESS ?? "127.0.0.1:7233",
-  }).catch(async () =>
-    holdPlatformNotReady("TEMPORAL_WORKER_CONNECTION_UNAVAILABLE"),
+  if (!releaseIdentity.attested)
+    throw new Error("RUNTIME_RELEASE_IDENTITY_UNAVAILABLE");
+  const machine = await createRuntimeMachineTokenClient(
+    "temporal-customer-worker",
+    releaseIdentity.artifact_digest.replace(/^sha256:/, ""),
+  );
+  const connection = await connectNativeMachine(machine.client).catch(
+    async () => holdPlatformNotReady("TEMPORAL_WORKER_CONNECTION_UNAVAILABLE"),
   );
   const worker = await Worker.create({
     connection,
     dataConverter: {
       failureConverterPath: require.resolve("./diagnostic-failure-converter"),
     },
-    namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+    namespace: "default",
+    identity: workerIdentity(
+      machine.subject,
+      runtimeLeases.instanceId("WORKER"),
+    ),
     taskQueue: UNDERSTANDING_TASK_QUEUE,
-    workflowsPath: require.resolve("./workflows"),
+    workflowsPath: require.resolve("./customer-workflows"),
     activities: {
-      ...createPlatformScheduleAuthorityActivities({ budgetStore }),
       ...createUnderstandingActivities({
         prisma,
         gateway,
@@ -526,26 +484,9 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
-        platformWriter: authorityWriter,
       }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
-      ...createAcquisitionActivities({
-        prisma,
-        registry: buildSourceAdapterRegistry(broker),
-        budgetStore,
-        platformWriter: authorityWriter,
-        platformEgressFence,
-      }),
-      ...createIntentActivities({
-        prisma,
-        fetcher: new Crawl4aiPageFetcher(broker),
-        ownerDb,
-        broker,
-        budgetStore,
-        platformWriter: authorityWriter,
-        platformEgressFence,
-      }),
       ...createBacklogActivities({
         prisma,
         providers,
@@ -554,7 +495,6 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
-        platformWriter: authorityWriter,
       }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
       ...createExternalIntentActivities({
@@ -563,29 +503,11 @@ async function main(): Promise<void> {
         ownerDb,
         broker,
         budgetStore,
-        platformWriter: authorityWriter,
       }),
       // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
       ...createDeletionActivities({ prisma }),
       ...createPersonalArtifactCleanupActivities({
         service: personalArtifactCleanupService,
-      }),
-      // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
-      ...createPatentsCacheActivities({
-        ownerDb,
-        broker,
-        budgetStore,
-        platformWriter: authorityWriter,
-        platformEgressFence,
-      }),
-      // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
-      ...createSanctionsRefreshActivities({
-        ownerDb,
-        broker,
-        sanctionsScreening,
-        budgetStore,
-        platformWriter: authorityWriter,
-        platformEgressFence,
       }),
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
@@ -642,8 +564,24 @@ async function main(): Promise<void> {
         "[worker] runtime lease lost; polling is shutting down and readiness is closed",
       ),
   });
+  const credentialFailure = createWorkerCredentialFailure({
+    role: "WORKER",
+    leases: runtimeLeases,
+    heartbeat: readyHeartbeat,
+    worker: workerShutdown,
+    taskQueue: UNDERSTANDING_TASK_QUEUE,
+  });
+  const stopCredentialBinding = bindNativeMachineCredential(
+    machine.client,
+    connection,
+    credentialFailure.fail,
+  );
   const dependencyHeartbeat = await startWorkerDependencyHeartbeat({
     check: async () => {
+      const queueIdentity = await runtimeLeases.inspectWorkerQueue(
+        UNDERSTANDING_TASK_QUEUE,
+      );
+      if (queueIdentity.status !== "ok") return queueIdentity;
       const database = await prisma.reconnect();
       if (database.status !== "ready") {
         return { status: "failed", code: database.code } as const;
@@ -669,7 +607,7 @@ async function main(): Promise<void> {
       ]);
       return selectWorkerDependencyAdmission({
         hardChecks: checks,
-        authorityCapabilities: [await checkPlatformCapability()],
+        authorityCapabilities: [],
       });
     },
     leases: runtimeLeases,
@@ -691,13 +629,17 @@ async function main(): Promise<void> {
       readyHeartbeat.stop();
     },
   });
+  if (!credentialFailure.available())
+    throw new Error("WORKER_MACHINE_CREDENTIAL_UNAVAILABLE");
+  machine.client.currentToken();
   const runPromise = worker.run();
   workerShutdown.markRunning();
   try {
     await runPromise;
   } finally {
     await controlledSignals.stop();
-    platformQuoteReadiness.onModuleDestroy();
+    stopCredentialBinding();
+    machine.client.close();
     dependencyHeartbeat.stop();
     readyHeartbeat.stop();
     await runtimeLeases
@@ -707,14 +649,13 @@ async function main(): Promise<void> {
     personalArtifactCleanupRuntime.destroy();
     await connection.close().catch(() => undefined);
     await providerWireDatabase.disconnect().catch(() => undefined);
-    await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeLeaseStore.disconnectWriters();
     await prisma.$disconnect().catch(() => undefined);
   }
 }
 
-main().catch((err) => {
-  console.error(err);
+main().catch(() => {
+  console.error("[customer-worker] startup failed; polling disabled");
   process.exit(1);
 });

@@ -1,33 +1,38 @@
-import { Global, Module } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Global, Module } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
 import {
   BUILD_ATTESTATION_SCHEMA,
   BuildIdentityService,
   type BuildIdentity,
-} from './build-attestation';
+} from "./build-attestation";
 import {
   inspectRuntimeAdmission,
   RuntimeAdmissionService,
-} from './runtime-admission';
-import { resolveRuntimeSettings, type RuntimeSettings } from './runtime-environment';
+} from "./runtime-admission";
+import {
+  resolveRuntimeSettings,
+  type RuntimeSettings,
+} from "./runtime-environment";
 import {
   currentRuntimeReleaseIdentity,
   RuntimeReleaseIdentityService,
   type RuntimeReleaseIdentity,
-} from './runtime-release-identity';
-import { RuntimeReadinessContributorRegistry } from './runtime-readiness-registry';
+} from "./runtime-release-identity";
+import { RuntimeReadinessContributorRegistry } from "./runtime-readiness-registry";
 import {
   PrismaRuntimeProcessLeaseStore,
   RuntimeProcessLeaseService,
-} from './runtime-process-lease';
-import { ApiRuntimeProcessHeartbeat } from './runtime-process-heartbeat';
-import { ManagedDependencyReadinessContributors } from './managed-dependency-readiness';
-import { RuntimeReadinessService } from '../health/runtime-readiness.service';
+} from "./runtime-process-lease";
+import { ApiRuntimeProcessHeartbeat } from "./runtime-process-heartbeat";
+import { ManagedDependencyReadinessContributors } from "./managed-dependency-readiness";
+import { RuntimeReadinessService } from "../health/runtime-readiness.service";
 
-export const RUNTIME_SETTINGS = Symbol('RUNTIME_SETTINGS');
-export const RUNTIME_RELEASE_IDENTITY = Symbol('RUNTIME_RELEASE_IDENTITY');
+export const RUNTIME_SETTINGS = Symbol("RUNTIME_SETTINGS");
+export const RUNTIME_RELEASE_IDENTITY = Symbol("RUNTIME_RELEASE_IDENTITY");
 
-function buildCompatibilityIdentity(identity: RuntimeReleaseIdentity): BuildIdentity {
+function buildCompatibilityIdentity(
+  identity: RuntimeReleaseIdentity,
+): BuildIdentity {
   if (!identity.attested) {
     return Object.freeze({
       attested: false,
@@ -89,7 +94,9 @@ function buildCompatibilityIdentity(identity: RuntimeReleaseIdentity): BuildIden
       provide: PrismaRuntimeProcessLeaseStore,
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) =>
-        new PrismaRuntimeProcessLeaseStore(prisma),
+        new PrismaRuntimeProcessLeaseStore(prisma, {
+          roles: ["API", "OUTBOX_RELAY"],
+        }),
     },
     {
       provide: RuntimeProcessLeaseService,

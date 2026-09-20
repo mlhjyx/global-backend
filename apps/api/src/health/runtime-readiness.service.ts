@@ -39,6 +39,7 @@ export interface RuntimeReadinessReport {
     migration: ComponentStatus;
     temporal_control_plane: ComponentStatus;
     worker: ComponentStatus;
+    platform_worker: ComponentStatus;
     outbox_relay: ComponentStatus;
     api_runtime: ComponentStatus;
     storage: ComponentStatus;
@@ -85,6 +86,7 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
       migration: unavailableComponent(),
       temporal_control_plane: unavailableComponent(),
       worker: unavailableComponent(),
+      platform_worker: unavailableComponent(),
       outbox_relay: unavailableComponent(),
       api_runtime: unavailableComponent(),
       storage: unavailableComponent(),
@@ -209,8 +211,7 @@ export class RuntimeReadinessService
       execution_budget_jwks: executionBudgetJwks,
       workspace_budget_authority: workspaceBudgetAuthority,
       platform_budget_authority: platformBudgetAuthoritySnapshot.component,
-      platform_automation:
-        platformBudgetAuthoritySnapshot.platformAutomation,
+      platform_automation: platformBudgetAuthoritySnapshot.platformAutomation,
       site_builder_model_settlement_readback: settlementReadback,
       platform_technical_quote_authentication:
         platformTechnicalQuoteAuthentication,
@@ -219,12 +220,10 @@ export class RuntimeReadinessService
   }
 
   private async checkPlatformAutomationSnapshot() {
-    const contributor = this.contributors as RuntimeReadinessContributorRegistry &
+    const contributor = this
+      .contributors as RuntimeReadinessContributorRegistry &
       Partial<
-        Pick<
-          RuntimeReadinessContributorRegistry,
-          "checkPlatformAutomation"
-        >
+        Pick<RuntimeReadinessContributorRegistry, "checkPlatformAutomation">
       >;
     if (typeof contributor.checkPlatformAutomation === "function") {
       return contributor.checkPlatformAutomation("platform_budget_authority");
@@ -254,6 +253,7 @@ export class RuntimeReadinessService
       databaseAndMigration,
       temporalControlPlane,
       worker,
+      platformWorker,
       outboxRelay,
       apiRuntime,
       storage,
@@ -267,11 +267,8 @@ export class RuntimeReadinessService
     ] = await Promise.all([
       this.checkDatabaseAndMigration(),
       this.checkTemporal(),
-      this.checkLease(() =>
-        this.leases.inspectWorkerQueue(
-          process.env.TEMPORAL_TASK_QUEUE ?? "understanding",
-        ),
-      ),
+      this.checkLease(() => this.leases.inspectWorkerQueue("understanding")),
+      this.checkLease(() => this.leases.inspectRole("PLATFORM_WORKER")),
       this.checkLease(() => this.leases.inspectRole("OUTBOX_RELAY")),
       this.contributors.check("api_runtime_lease"),
       this.contributors.check("storage"),
@@ -292,6 +289,7 @@ export class RuntimeReadinessService
       migration: databaseAndMigration.migration,
       temporal_control_plane: temporalControlPlane,
       worker,
+      platform_worker: platformWorker,
       outbox_relay: outboxRelay,
       api_runtime: apiRuntime,
       storage,

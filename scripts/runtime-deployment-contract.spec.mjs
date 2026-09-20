@@ -309,7 +309,8 @@ test('development API and Worker use one immutable image reference and wait for 
   assert.match(compose, /RUNTIME_IMAGE_REFERENCE: \$\{GLOBAL_BACKEND_IMAGE\}/);
   assert.doesNotMatch(compose, /GLOBAL_BACKEND_IMAGE_DIGEST/);
   assert.match(compose, /api:\n[\s\S]*command: \["api"\]/);
-  assert.match(compose, /worker:\n[\s\S]*command: \["worker"\]/);
+  assert.match(compose, /worker:\n[\s\S]*command: \["customer-worker"\]/);
+  assert.match(compose, /platform-worker:\n[\s\S]*command: \["platform-worker"\]/);
   assert.match(compose, /minio-bootstrap:\n\s+condition: service_completed_successfully/g);
   for (const name of [
     'GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT',
@@ -331,10 +332,13 @@ test('development API and Worker use one immutable image reference and wait for 
     assert.doesNotMatch(compose, new RegExp(`${name}:`));
   }
   const apiService = compose.slice(compose.indexOf('\n  api:'), compose.indexOf('\n  worker:'));
-  const workerService = compose.slice(compose.indexOf('\n  worker:'));
+  const workerService = compose.slice(compose.indexOf('\n  worker:'), compose.indexOf('\n  platform-worker:'));
   const serviceEnvFiles = (section) => [...section.matchAll(/^\s+- (\.secrets\/[A-Za-z0-9._-]+\.env)$/gm)].map((match) => match[1]);
   assert.deepEqual(serviceEnvFiles(apiService), ['.secrets/backend-runtime.env', '.secrets/backend-api-runtime.env']);
   assert.deepEqual(serviceEnvFiles(workerService), ['.secrets/backend-runtime.env', '.secrets/backend-worker-runtime.env']);
+  const platformService = compose.slice(compose.indexOf('\n  platform-worker:'));
+  assert.deepEqual(serviceEnvFiles(platformService), ['.secrets/backend-platform-worker-runtime.env']);
+  assert.doesNotMatch(platformService, /site-build-settlement|backend-worker-runtime\.env|GENERIC_OPERATION_ARTIFACT_CLEANUP/);
   assert.doesNotMatch(compose, /GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:\s+[^$\n]/);
   assert.doesNotMatch(compose, /build:/);
   assert.doesNotMatch(compose, /node dist\//);
@@ -361,11 +365,13 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(provision, /\|\|[\s\S]*exit 1/);
   assert.doesNotMatch(provision, /--set\s+api_password=/);
   assert.doesNotMatch(provision, /--set\s+worker_password=/);
+  assert.doesNotMatch(provision, /--set\s+platform_worker_password=/);
   assert.doesNotMatch(provision, /--set\s+relay_password=/);
   assert.doesNotMatch(provision, /psql\s+"\$\{RUNTIME_LEASE_PROVISION_DATABASE_URL\}"/);
-  assert.match(provision, /REVOKE runtime_api, runtime_worker, runtime_outbox_relay/);
+  assert.match(provision, /REVOKE runtime_api, runtime_worker, runtime_platform_worker, runtime_outbox_relay/);
   assert.match(provision, /GRANT runtime_api TO/);
   assert.match(provision, /GRANT runtime_worker TO/);
+  assert.match(provision, /GRANT runtime_platform_worker TO/);
   assert.match(provision, /GRANT runtime_outbox_relay TO/);
   assert.doesNotMatch(provision, /PASSWORD\s+'[^']+'/i);
   assert.match(verify, /register_api_runtime_process_lease/);
@@ -386,8 +392,11 @@ test('every keyring reader inherits the dedicated read-only secret directory', a
   assert.match(common, /read_only: true[\s\S]*bind:\n\s+create_host_path: false/);
   assert.match(compose, /SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: \/run\/secrets\/site-build-settlement\/derivation\.keyring/);
   const services = compose.slice(compose.indexOf('\nservices:'));
-  assert.equal(services.match(/<<: \*backend-runtime/g)?.length, 2);
-  assert.doesNotMatch(services, /\n\s+volumes:/);
+  assert.equal(services.match(/<<: \*backend-runtime/g)?.length, 3);
+  const customerServices = services.slice(0, services.indexOf('\n  platform-worker:'));
+  assert.equal(customerServices.match(/target: \/run\/secrets\/site-build-settlement/g)?.length, 2);
+  const platformService = services.slice(services.indexOf('\n  platform-worker:'));
+  assert.doesNotMatch(platformService, /site-build-settlement/);
   assert.doesNotMatch(common, /source: \.\/?\.secrets\s*$/m);
 });
 
