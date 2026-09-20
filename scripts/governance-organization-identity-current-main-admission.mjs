@@ -152,6 +152,7 @@ function sortedUnique(values, predicate, nonempty = false) {
 const CLASSIFICATIONS = keys("BUILD RAW_CAPABILITY PRISMA_SCHEMA MIGRATION GOVERNANCE RUNTIME_ARTIFACT IDENTITY_CALLER IDENTITY_AUTHORITY GENERATED_EVIDENCE OTHER");
 const DISPOSITIONS = keys("ADMIT_IDENTITY_AUTHORITY_UNCHANGED ADMIT_IDENTITY_IRRELEVANT ADMIT_GENERATED_MAIN_BYTES ADMIT_GENERATED_REBUILT");
 const GENERATORS = keys("COPY_FIXED_SOURCE_WRITE_ELIGIBILITY_V1 COPY_FIXED_SOURCE_SYNC_HUMAN_CITATIONS_V1");
+const SEMANTIC_UNION_RESOLUTIONS = keys("SEMANTIC_UNION_PRESERVE_IDENTITY_TESTS_AND_CURRENT_RECEIPT_ASSERTIONS SEMANTIC_UNION_PRESERVE_IDENTITY_LOCK_AND_CURRENT_POSTGRES_VOID_CAST");
 function validOwner(owner) {
   return hasExactKeys(owner, keys("source codeownersBlobId matchedRule principals resolution")) &&
     owner.source === "CODEOWNERS" && validCommit(owner.codeownersBlobId) &&
@@ -211,7 +212,7 @@ function validConflict(record) {
   return hasExactKeys(record, keys("path hunkCount baseBlobId branchBlobId mainBlobId resultBlobId resolutionSource")) &&
     validPath(record.path) && Number.isSafeInteger(record.hunkCount) && record.hunkCount > 0 &&
     [record.baseBlobId, record.branchBlobId, record.mainBlobId].every(nullableBlob) && validCommit(record.resultBlobId) &&
-    ["LIVE_MAIN_GIT_BLOB", ...GENERATORS].includes(record.resolutionSource);
+    ["LIVE_MAIN_GIT_BLOB", ...GENERATORS, ...SEMANTIC_UNION_RESOLUTIONS].includes(record.resolutionSource);
 }
 function validMigration(record) {
   return hasExactKeys(record, keys("name path resultBlobId migrationSqlSha256 lastChangeCommit mainOnly artifactARelationship disposition")) &&
@@ -645,6 +646,8 @@ export function validateArtifactAMigrationBindings(document, migrationFacts) {
 }
 
 export function validateAdmissionConflictBindings(document, conflictFacts) {
+  const structure = validateCurrentMainAdmissionStructure(document);
+  if (structure.status !== "PASS") return structure;
   if (!hasExactKeys(conflictFacts, keys("conflicts conflictSetSha256")) || !Array.isArray(conflictFacts.conflicts) || !validSha(conflictFacts.conflictSetSha256) ||
       !conflictFacts.conflicts.every(row => hasExactKeys(row, ["path", "hunkCount", "baseBlobId", "branchBlobId", "mainBlobId"]) && validPath(row.path) && Number.isSafeInteger(row.hunkCount) && row.hunkCount > 0 && [row.baseBlobId, row.branchBlobId, row.mainBlobId].every(nullableBlob)) ||
       !sortedUnique(conflictFacts.conflicts.map(row => row.path), validPath)) {

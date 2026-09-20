@@ -160,7 +160,7 @@ describe("Organization Identity resolver command migration", () => {
     }
     assert.equal(
       sha256(readFileSync(schemaPath)),
-      "3db362c1c84f5f12ffa788eb54f2448a3b77d0dad410b96733acef1cc7337c3b",
+      "9fb7ed0c3fcefce3aad17d80f30ad87b752e600bb9c9787d3e5f0c4e7b8bf172",
     );
   });
 

@@ -307,6 +307,11 @@ test("object collector binds four trees, ordered parents and complete migration 
     mainBlobId: COMMIT, resultBlobId: COMMIT, resolutionSource: "LIVE_MAIN_GIT_BLOB" }];
   const conflictFacts = { conflicts: [{ path: "a.txt", hunkCount: 1, baseBlobId: COMMIT, branchBlobId: COMMIT, mainBlobId: COMMIT }], conflictSetSha256: SHA };
   assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).status, "PASS");
+  conflictDocument.conflicts[0].resolutionSource = "SEMANTIC_UNION_PRESERVE_IDENTITY_LOCK_AND_CURRENT_POSTGRES_VOID_CAST";
+  assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).status, "PASS");
+  conflictDocument.conflicts[0].resolutionSource = "UNREVIEWED_FREEFORM_UNION";
+  assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).code, "ADMISSION_RECORD_INVALID");
+  conflictDocument.conflicts[0].resolutionSource = "LIVE_MAIN_GIT_BLOB";
   conflictDocument.conflicts[0].hunkCount = 2;
   assert.equal(validateAdmissionConflictBindings(conflictDocument, conflictFacts).code, "ADMISSION_CONFLICT_BINDING_MISMATCH");
   assert.equal(git("status", "--porcelain"), before);
