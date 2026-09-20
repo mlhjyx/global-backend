@@ -1,5 +1,8 @@
 # Organization Identity Writer Ban-at-Source Implementation Plan
 
+> Additive current-main conflict contract: [exact suppression resolution v2](../specs/2026-09-20-organization-identity-suppression-resolution-v2.md).
+> Only its two path-and-blob-bound exceptions may amend the historical Copy-only rules below; v1 records remain Copy-only. Controller/credential/root, independent audit and exact execution authorization gates are unchanged. The unadmitted 3fb9e677 candidate is preserved and cannot be retroactively admitted.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Establish a branch-external root-only closed-command launcher and clean pre-execution bootstrap trust root, admit exact current main, add the sole reviewed C-TX compatibility migration, freeze a complete refreshed build/raw/migration writer baseline, and then replace the three `IdentityLink.create` callers in the machine-checked `3 → 2 → 1 → 0` sequence.

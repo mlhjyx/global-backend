@@ -207,7 +207,7 @@ function validAdmissionPath(record) {
     DISPOSITIONS.includes(record.disposition) &&
     (record.disposition === "ADMIT_GENERATED_REBUILT" ? validRebuild(record.generatedRebuild) : record.generatedRebuild === null);
 }
-function validConflict(record) {
+function validConflict(record, suppressionBinding = null) {
   const generatorByPath = {
     "docs/evidence/site-builder/copy-runtime-eligibility.json": "COPY_FIXED_SOURCE_WRITE_ELIGIBILITY_V1",
     "docs/implementation-records/copy-fixed-source-impact-governance.md": "COPY_FIXED_SOURCE_SYNC_HUMAN_CITATIONS_V1",
@@ -215,10 +215,12 @@ function validConflict(record) {
   return hasExactKeys(record, keys("path hunkCount baseBlobId branchBlobId mainBlobId resultBlobId resolutionSource")) &&
     validPath(record.path) && Number.isSafeInteger(record.hunkCount) && record.hunkCount > 0 &&
     [record.baseBlobId, record.branchBlobId, record.mainBlobId].every(nullableBlob) && validCommit(record.resultBlobId) &&
-    Object.hasOwn(generatorByPath, record.path) &&
-    (record.resolutionSource === "LIVE_MAIN_GIT_BLOB"
-      ? record.resultBlobId === record.mainBlobId
-      : record.resolutionSource === generatorByPath[record.path]);
+    ((Object.hasOwn(generatorByPath, record.path) &&
+      (record.resolutionSource === "LIVE_MAIN_GIT_BLOB"
+        ? record.resultBlobId === record.mainBlobId
+        : record.resolutionSource === generatorByPath[record.path])) ||
+      (suppressionBinding !== null && SUPPRESSION_PATHS.includes(record.path) &&
+        record.resolutionSource === "REVIEWED_EXACT_SUPPRESSION_BLOB"));
 }
 function validMigration(record) {
   return hasExactKeys(record, keys("name path resultBlobId migrationSqlSha256 lastChangeCommit mainOnly artifactARelationship disposition")) &&
@@ -234,24 +236,36 @@ function validMigration(record) {
 // observations are still required before the record can establish admission.
 export function validateCurrentMainAdmissionStructure(document) {
   const required = keys("schemaVersion status artifactACommit branchPreRefreshCommit liveMainCommit mergeBaseCommit refreshMergeCommit refreshParents mainOnlyRange mainOnlyPathCount mainOnlyPathSetSha256 paths conflicts migrations rawDeltaSha256 buildDeltaSha256 schemaDeltaSha256 callerDeltaSha256 review");
-  if (!hasExactKeys(document, required)) return hold("ADMISSION_SCHEMA_INVALID");
-  if (document.schemaVersion !== "organization-identity-current-main-admission/v1" || document.status !== "ADMITTED" ||
+  const v2 = hasExactKeys(document, [...required, "suppressionResolution"]) &&
+    document.schemaVersion === "organization-identity-current-main-admission/v2";
+  if (!v2 && (!hasExactKeys(document, required) || document.schemaVersion !== "organization-identity-current-main-admission/v1"))
+    return hold("ADMISSION_SCHEMA_INVALID");
+  const suppressionBinding = v2 ? document.suppressionResolution : null;
+  if (suppressionBinding !== null && (!hasExactKeys(suppressionBinding, ["candidateSha256", "reviewReceiptSha256"]) ||
+      !validSha(suppressionBinding.candidateSha256) || !validSha(suppressionBinding.reviewReceiptSha256))) {
+    return hold("SUPPRESSION_ADMISSION_BINDING_INVALID");
+  }
+  if (document.status !== "ADMITTED" ||
       document.artifactACommit !== "2400bac28796bae44294114edc99eaccb1bd65b3" ||
       !keys("branchPreRefreshCommit liveMainCommit mergeBaseCommit refreshMergeCommit").every(k => validCommit(document[k])) ||
       !valuesEqual(document.refreshParents, [document.branchPreRefreshCommit, document.liveMainCommit]) ||
       document.mainOnlyRange !== `${document.mergeBaseCommit}..${document.liveMainCommit}`) return hold("ADMISSION_IDENTITY_INVALID");
-  for (const [field, validate] of [["paths", validAdmissionPath], ["conflicts", validConflict], ["migrations", validMigration]]) {
+  for (const [field, validate] of [["paths", validAdmissionPath], ["conflicts", row => validConflict(row, suppressionBinding)], ["migrations", validMigration]]) {
     const records = document[field];
     if (!Array.isArray(records) || !records.every(validate) ||
         !sortedUnique(records.map(r => r.path), validPath) ||
         new Set(records.map(r => r.path.toLowerCase())).size !== records.length) return hold("ADMISSION_RECORD_INVALID");
+  }
+  const suppressionConflicts = document.conflicts.filter(row => row.resolutionSource === "REVIEWED_EXACT_SUPPRESSION_BLOB");
+  if (suppressionBinding !== null && !valuesEqual(suppressionConflicts.map(row => row.path), SUPPRESSION_PATHS)) {
+    return hold("SUPPRESSION_CONFLICT_SET_MISMATCH");
   }
   const pathDigest = sha256(Buffer.from(document.paths.map(r => `${r.path}\0`).join("")));
   if (document.mainOnlyPathCount !== document.paths.length || document.mainOnlyPathSetSha256 !== pathDigest) return hold("CURRENT_MAIN_PATH_SET_MISMATCH");
   if (!keys("rawDeltaSha256 buildDeltaSha256 schemaDeltaSha256 callerDeltaSha256").every(k => validSha(document[k])) ||
       !hasExactKeys(document.review, keys("auditPacketSha256 auditReviewReceiptSha256 reportSha256 verdict")) ||
       document.review.verdict !== "PASS" || !keys("auditPacketSha256 auditReviewReceiptSha256 reportSha256").every(k => validSha(document.review[k]))) return hold("ADMISSION_REVIEW_INVALID");
-  return pass({ evidenceClass: "STRUCTURE_ONLY" });
+  return pass({ evidenceClass: "STRUCTURE_ONLY", ...(v2 ? { admissionGranted: false } : {}) });
 }
 
 const AUDIT_REVIEW_KEYS = Object.freeze([
@@ -266,8 +280,14 @@ const AUDIT_REVIEW_KEYS = Object.freeze([
 // Structural and equality checking only. The caller must obtain expected facts
 // from independently verified artifacts; matching JSON does not establish trust.
 export function validateAuditReviewReceipt(receipt, expected) {
-  if (!hasExactKeys(receipt, AUDIT_REVIEW_KEYS)) return hold("AUDIT_REVIEW_SCHEMA_INVALID");
-  if (receipt.schemaVersion !== "organization-identity-current-main-audit-review/v1" ||
+  const extra = ["suppressionResolutionCandidateSha256", "suppressionResolutionReviewReceiptSha256"];
+  const v2 = hasExactKeys(receipt, [...AUDIT_REVIEW_KEYS, ...extra]) &&
+    receipt.schemaVersion === "organization-identity-current-main-audit-review/v2";
+  const receiptKeys = v2 ? [...AUDIT_REVIEW_KEYS, ...extra] : AUDIT_REVIEW_KEYS;
+  if (!v2 && (!hasExactKeys(receipt, receiptKeys) || receipt.schemaVersion !== "organization-identity-current-main-audit-review/v1"))
+    return hold("AUDIT_REVIEW_SCHEMA_INVALID");
+  if (v2 && ((receipt[extra[0]] === null) !== (receipt[extra[1]] === null))) return hold("AUDIT_REVIEW_SCHEMA_INVALID");
+  if (
       !["PASS", "FETCH_AUTH_REQUIRED"].includes(receipt.disposition) ||
       receipt.reviewerClass !== "INDEPENDENT_ADMISSION_AUDIT_REVIEW" ||
       receipt.critical !== 0 || receipt.important !== 0 || receipt.verdict !== "PASS" ||
@@ -275,7 +295,8 @@ export function validateAuditReviewReceipt(receipt, expected) {
     return hold("AUDIT_REVIEW_SCHEMA_INVALID");
   }
   const deferred = new Set(["mainOnlyPathSetSha256", "conflictSetSha256", "migrationSetSha256", "dispositionSetSha256"]);
-  for (const key of AUDIT_REVIEW_KEYS.filter(key => key.endsWith("Sha256"))) {
+  for (const key of receiptKeys.filter(key => key.endsWith("Sha256"))) {
+    if (v2 && extra.includes(key) && receipt[extra[0]] === null && receipt[extra[1]] === null) continue;
     if (receipt[key] === null && (key === "fetchReceiptSha256" ||
         (receipt.disposition === "FETCH_AUTH_REQUIRED" && deferred.has(key)))) continue;
     if (!validSha(receipt[key])) return hold("AUDIT_REVIEW_SCHEMA_INVALID");
@@ -284,9 +305,9 @@ export function validateAuditReviewReceipt(receipt, expected) {
       !(receipt.disposition === "FETCH_AUTH_REQUIRED" && receipt.mergeBaseCommit === null)) {
     return hold("AUDIT_REVIEW_SCHEMA_INVALID");
   }
-  if (!hasExactKeys(expected, AUDIT_REVIEW_KEYS)) return hold("AUDIT_REVIEW_EXPECTED_FACTS_REQUIRED");
+  if (!hasExactKeys(expected, receiptKeys)) return hold("AUDIT_REVIEW_EXPECTED_FACTS_REQUIRED");
   if (!valuesEqual(receipt, expected)) return hold("AUDIT_REVIEW_BINDING_MISMATCH");
-  return pass({ evidenceClass: "STRUCTURE_AND_BINDING_ONLY" });
+  return pass({ evidenceClass: "STRUCTURE_AND_BINDING_ONLY", ...(v2 ? { admissionGranted: false } : {}) });
 }
 
 function validUtc(value) {
@@ -435,7 +456,137 @@ function readTreeFacts(repoRoot, commit) {
   return rows;
 }
 
+const SUPPRESSION_PATHS = Object.freeze([
+  "apps/api/src/discovery/suppression-policy-lock.spec.ts",
+  "apps/api/src/discovery/suppression-policy-lock.ts",
+]);
+const SUPPRESSION_TEST_COMMAND = "pnpm --filter @global/api exec vitest run src/discovery/suppression-policy-lock.spec.ts --maxWorkers=1";
+const SUPPRESSION_REVIEW_KEYS = keys("schemaVersion candidateSha256 reportSha256 counterexampleSetSha256 reviewerClass critical important verdict");
+const collectedSuppressionFacts = new WeakSet();
+
+export function validateSuppressionResolutionCandidate(candidate) {
+  if (!hasExactKeys(candidate, keys("schemaVersion repository branchPreRefreshCommit liveMainCommit mergeBaseCommit resultSourceCommit entries testEvidence")) ||
+      candidate.schemaVersion !== "organization-identity-suppression-resolution-candidate/v1" ||
+      candidate.repository !== "mlhjyx/global-backend" ||
+      !keys("branchPreRefreshCommit liveMainCommit mergeBaseCommit resultSourceCommit").every(k => validCommit(candidate[k])) ||
+      !Array.isArray(candidate.entries) || candidate.entries.length !== 2) return hold("SUPPRESSION_CANDIDATE_INVALID");
+  for (const [index, row] of candidate.entries.entries()) {
+    if (!hasExactKeys(row, keys("path baseBlobId branchBlobId mainBlobId resultBlobId resultSha256 hunkCount deltaSha256 intent")) ||
+        row.path !== SUPPRESSION_PATHS[index] ||
+        !keys("baseBlobId branchBlobId mainBlobId resultBlobId").every(k => validCommit(row[k])) ||
+        !validSha(row.resultSha256) || !validSha(row.deltaSha256) ||
+        !Number.isSafeInteger(row.hunkCount) || row.hunkCount < 1 || row.hunkCount > 64 ||
+        row.intent !== (index === 0 ? "PRESERVE_TX_SCALAR_WORKSPACE_NEGATIVES" : "PRESERVE_TX_SCALAR_VOID_CAST")) {
+      return hold("SUPPRESSION_CANDIDATE_INVALID");
+    }
+  }
+  const evidence = candidate.testEvidence;
+  if (!hasExactKeys(evidence, keys("subjectCommit command exitCode reportSha256")) ||
+      evidence.subjectCommit !== candidate.resultSourceCommit || evidence.command !== SUPPRESSION_TEST_COMMAND ||
+      evidence.exitCode !== 0 || !validSha(evidence.reportSha256)) return hold("SUPPRESSION_TEST_BINDING_INVALID");
+  return pass({ evidenceClass: "STRUCTURE_ONLY", admissionGranted: false });
+}
+
+export function validateSuppressionResolutionReview(receipt, expected) {
+  if (!hasExactKeys(receipt, SUPPRESSION_REVIEW_KEYS) ||
+      receipt.schemaVersion !== "organization-identity-suppression-resolution-review/v1" ||
+      receipt.reviewerClass !== "INDEPENDENT_ADMISSION_RESOLUTION_REVIEW" ||
+      receipt.critical !== 0 || receipt.important !== 0 || receipt.verdict !== "PASS" ||
+      !keys("candidateSha256 reportSha256 counterexampleSetSha256").every(k => validSha(receipt[k]))) {
+    return hold("SUPPRESSION_REVIEW_INVALID");
+  }
+  // An independently authenticated expected artifact is required by the caller.
+  // Equality alone is deliberately not an independence or admission claim.
+  if (!hasExactKeys(expected, SUPPRESSION_REVIEW_KEYS) || !valuesEqual(receipt, expected)) {
+    return hold("SUPPRESSION_REVIEW_BINDING_REQUIRED");
+  }
+  return pass({ evidenceClass: "STRUCTURE_AND_BINDING_ONLY", admissionGranted: false });
+}
+
+export function collectSuppressionResolutionFacts(options) {
+  if (!hasExactKeys(options, ["repoRoot", "candidate"]) || typeof options.repoRoot !== "string" ||
+      !path.isAbsolute(options.repoRoot)) return hold("SUPPRESSION_FACT_INPUT_INVALID");
+  const valid = validateSuppressionResolutionCandidate(options.candidate);
+  if (valid.status !== "PASS") return valid;
+  try {
+    const { repoRoot, candidate: c } = options;
+    if (realpathSync(repoRoot) !== repoRoot) return hold("SUPPRESSION_FACT_ROOT_INVALID");
+    const identity = canonicalRemoteIdentity(readObjectGit(repoRoot, ["config", "--get", "remote.origin.url"]).toString().trim());
+    if (identity?.full_name !== c.repository) return hold("REPOSITORY_IDENTITY_INVALID");
+    for (const key of keys("mergeBaseCommit branchPreRefreshCommit liveMainCommit resultSourceCommit")) {
+      if (readObjectGit(repoRoot, ["cat-file", "-t", c[key]]).toString().trim() !== "commit") {
+        return hold("SUPPRESSION_COMMIT_TYPE_INVALID");
+      }
+    }
+    const conflicts = collectThreeWayConflictFacts({ repoRoot, mergeBaseCommit: c.mergeBaseCommit,
+      branchPreRefreshCommit: c.branchPreRefreshCommit, liveMainCommit: c.liveMainCommit });
+    if (conflicts.status !== "PASS") return conflicts;
+    const trees = [c.mergeBaseCommit, c.branchPreRefreshCommit, c.liveMainCommit, c.resultSourceCommit]
+      .map(commit => new Map(readTreeFacts(repoRoot, commit).map(row => [row.path, row])));
+    const modes = [];
+    for (const row of c.entries) {
+      const records = trees.map(tree => tree.get(row.path));
+      const names = ["baseBlobId", "branchBlobId", "mainBlobId", "resultBlobId"];
+      if (records.some((record, index) => !record || record.blobId !== row[names[index]]) ||
+          records.some(record => record.mode !== records[0].mode)) return hold("SUPPRESSION_BLOB_OR_MODE_MISMATCH");
+      const conflict = conflicts.conflicts.find(item => item.path === row.path);
+      if (!conflict || conflict.hunkCount !== row.hunkCount) return hold("SUPPRESSION_CONFLICT_MISMATCH");
+      const bytes = readObjectGit(repoRoot, ["cat-file", "blob", row.resultBlobId]);
+      if (bytes.length > 1024 * 1024 || bytes.includes(0) ||
+          !Buffer.from(bytes.toString("utf8")).equals(bytes) ||
+          /^(?:<<<<<<<|=======|>>>>>>>)/mu.test(bytes.toString("utf8")) || sha256(bytes) !== row.resultSha256) {
+        return hold("SUPPRESSION_RESULT_BYTES_MISMATCH");
+      }
+      const delta = readObjectGit(repoRoot, ["diff", "--no-ext-diff", "--no-textconv", "--binary",
+        c.branchPreRefreshCommit, c.resultSourceCommit, "--", row.path]);
+      if (sha256(delta) !== row.deltaSha256) return hold("SUPPRESSION_DELTA_MISMATCH");
+      modes.push({ path: row.path, mode: records[0].mode });
+    }
+    const facts = freezeFacts(pass({ evidenceClass: "LOCAL_RESOLUTION_GIT_BINDINGS_ONLY", admissionGranted: false,
+      candidateSha256: sha256(canonicalJsonBytes(c)), candidate: JSON.parse(JSON.stringify(c)), modes,
+      conflictFacts: { conflicts: conflicts.conflicts, conflictSetSha256: conflicts.conflictSetSha256 } }));
+    collectedSuppressionFacts.add(facts);
+    return facts;
+  } catch { return hold("SUPPRESSION_FACTS_UNAVAILABLE_OR_UNSAFE"); }
+}
+
 const collectedObjectFacts = new WeakSet();
+export function validateAdmissionSuppressionResolutionBindings(options) {
+  if (!hasExactKeys(options, keys("document candidateFacts reviewReceipt expectedReview objectFacts"))) {
+    return hold("SUPPRESSION_BINDINGS_REQUIRED");
+  }
+  const { document, candidateFacts, reviewReceipt, expectedReview, objectFacts } = options;
+  if (!collectedSuppressionFacts.has(candidateFacts) || !collectedObjectFacts.has(objectFacts)) {
+    return hold("COLLECTED_RESOLUTION_FACTS_REQUIRED");
+  }
+  const bound = validateAdmissionObjectBindings(document, objectFacts);
+  if (bound.status !== "PASS") return bound;
+  if (document.schemaVersion !== "organization-identity-current-main-admission/v2" ||
+      document.suppressionResolution === null) return hold("SUPPRESSION_BINDINGS_REQUIRED");
+  const completeConflicts = validateAdmissionConflictBindings(document, candidateFacts.conflictFacts);
+  if (completeConflicts.status !== "PASS") return completeConflicts;
+  const c = candidateFacts.candidate;
+  const review = validateSuppressionResolutionReview(reviewReceipt, expectedReview);
+  if (review.status !== "PASS") return review;
+  if (reviewReceipt.candidateSha256 !== candidateFacts.candidateSha256 ||
+      document.suppressionResolution.candidateSha256 !== candidateFacts.candidateSha256 ||
+      document.suppressionResolution.reviewReceiptSha256 !== sha256(canonicalJsonBytes(reviewReceipt)) ||
+      !keys("branchPreRefreshCommit liveMainCommit mergeBaseCommit").every(k => document[k] === c[k])) {
+    return hold("SUPPRESSION_BINDING_MISMATCH");
+  }
+  for (const row of c.entries) {
+    const actual = document.conflicts.find(record => record.path === row.path);
+    const result = objectFacts.trees.result.find(record => record.path === row.path);
+    const mode = candidateFacts.modes.find(record => record.path === row.path);
+    if (!actual || !result || actual.resolutionSource !== "REVIEWED_EXACT_SUPPRESSION_BLOB" ||
+        !keys("baseBlobId branchBlobId mainBlobId resultBlobId hunkCount").every(k => actual[k] === row[k]) ||
+        result.blobId !== row.resultBlobId || result.mode !== mode.mode) {
+      return hold("SUPPRESSION_RESULT_BINDING_MISMATCH");
+    }
+  }
+  return pass({ evidenceClass: "LOCAL_RESOLUTION_BINDINGS_ONLY", admissionGranted: false });
+}
+
 function mergeNeutralAttributes(repoRoot, trees) {
   const blobIds = new Set(
     trees.flatMap((rows) => rows
@@ -655,7 +806,7 @@ export function validateAdmissionObjectBindings(document, facts) {
 export function validateArtifactAMigrationBindings(document, migrationFacts) {
   if (!hasExactKeys(migrationFacts, keys("artifactACommit artifactAMigrationBlobs mainOnlyMigrationPaths")) ||
       !validCommit(migrationFacts.artifactACommit) ||
-      !hasExactKeys(document, keys("schemaVersion status artifactACommit branchPreRefreshCommit liveMainCommit mergeBaseCommit refreshMergeCommit refreshParents mainOnlyRange mainOnlyPathCount mainOnlyPathSetSha256 paths conflicts migrations rawDeltaSha256 buildDeltaSha256 schemaDeltaSha256 callerDeltaSha256 review")) ||
+      validateCurrentMainAdmissionStructure(document).status !== "PASS" ||
       document.artifactACommit !== migrationFacts.artifactACommit || !Array.isArray(migrationFacts.artifactAMigrationBlobs) ||
       !migrationFacts.artifactAMigrationBlobs.every(row => hasExactKeys(row, ["path", "blobId"]) && validPath(row.path) && validCommit(row.blobId)) ||
       !sortedUnique(migrationFacts.artifactAMigrationBlobs.map(row => row.path), validPath) ||
