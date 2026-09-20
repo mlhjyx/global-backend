@@ -9,6 +9,8 @@ import {
 import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
 import { SANCTIONS_REFRESH_SCHEDULE_ID } from './understanding.constants';
+import type { PlatformEgressFence } from '../platform-authority/platform-egress-fence';
+import { platformEgressDispatcher } from './platform-schedule-authority.activities';
 
 /**
  * 制裁名单刷新活动（Qualify 第五门，每日 Schedule）。owner 连接写平台表，下载经 broker（source_policy 门）。
@@ -21,12 +23,8 @@ export function createSanctionsRefreshActivities(deps: {
   budgetStore?: BudgetStore;
   platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
+  platformEgressFence?: PlatformEgressFence;
 }) {
-  const service = new SanctionsRefreshService({
-    ownerDb: deps.ownerDb,
-    broker: deps.broker,
-    platformWriter: deps.platformWriter,
-  });
   const budgets =
     deps.budgetStore ??
     new UnavailableBudgetStore('sanctions refresh activities require an authoritative BudgetStore');
@@ -36,7 +34,16 @@ export function createSanctionsRefreshActivities(deps: {
       const binding = await attestPlatformScheduleActivity({
         args, budgetStore: budgets, scheduleId: SANCTIONS_REFRESH_SCHEDULE_ID, activityRunId: deps.activityRunId,
       });
-      const summaries = await service.refreshAll(binding.accountKey);
+      const platformEgress = deps.platformEgressFence
+        ? platformEgressDispatcher({ fence: deps.platformEgressFence, binding })
+        : undefined;
+      const service = new SanctionsRefreshService({
+        ownerDb: deps.ownerDb,
+        broker: deps.broker,
+        platformWriter: deps.platformWriter,
+        platformEgress,
+      });
+      const summaries = await service.refreshScheduled(binding.accountKey);
       await deps.sanctionsScreening?.rebuildIndex().catch(() => undefined);
       return { sources: summaries.length, summaries };
     },

@@ -13,7 +13,7 @@
 ```
 
 - 正式分支统一命名 `codex/<topic>`，每个逻辑改动一个短生命周期分支和 PR。
-- 新 worktree 必须从刚 fetch 的 `origin/main` 创建，不以可能落后的本地 `main` 为基线。
+- 新 worktree 默认从刚 fetch 的 `origin/main` 创建；任务明确指定固定基线时，按[导航指南](../CODEX-NAVIGATION-GUIDE.md#51-inventory-and-create)从该精确 commit 创建并验证，不静默切换。不得把未核验的本地 `main` 当作远端当前基线。
 - `.codex/worktrees/` 与 `.codex/audits/` 只保存本机运行态，不提交、不存密钥，也不承担备份职责。
 - `/global/backend` 不做功能修改；其现有未跟踪文件不得因创建或迁移 worktree 被覆盖。
 - 不手工移动 Git worktree。合法移动只能使用 `git worktree move`；合法删除只能在清理门满足后使用 `git worktree remove`。
@@ -44,14 +44,16 @@ pnpm worktree:new r4-b-min --dry-run
 
 ### 2.1 规划、审计与实施的新鲜度门
 
-每次开始规划、只读审计或实施前，都执行：
+需要确认远端 main 当前状态或创建默认基线的实施 worktree 时，在任务的只读网络范围内刷新引用：
 
 ```bash
-git fetch origin --prune
+git fetch origin
 git rev-list --count HEAD..origin/main
 ```
 
-输出必须为 `0`，才能把该 worktree 当作当前事实基线。若有 origin-only 提交，停止以该路径输出当前结论；从刚 fetch 的 `origin/main` 新建正式 worktree，或先受控同步后重做核验。这个门检查的是远端是否领先，不以本分支自己的功能提交为“已同步”证据。
+输出为 `0` 才能称该 worktree 已包含所刷新远端 main 的全部提交；本分支自身的功能提交不证明同步。若有 origin-only 提交，先检查与任务相关的差异，不以旧基线冒充当前 main，也不自动替换已批准的固定基线。需要当前 main 施工时新建正式 worktree，根目录同步仍只走下节受控入口。
+
+针对已指定 commit、历史 provenance 或现有文件的只读审计，不因进入新消息或流程阶段重复 fetch、创建 worktree；报告其精确基线及局限。未刷新时把 `origin/main` 标为本地 cached ref。相关权限或网络不可用时继续独立的本地调查，保留远端当前性缺口，不宣称完成依赖该缺口的验收。该规则不放宽重叠 writer、未知独有提交或现场保护门。
 
 ### 2.2 根 `main` 受控跟随
 
@@ -118,7 +120,7 @@ git worktree move \
 3. 核对 PR/远端、reflog/stash、Codex 任务 UI/rollout、附件与工具任务；
 4. 从最后可信 commit 在 `.codex/worktrees/<topic>-recovery` 创建隔离候选；
 5. 机械重放后做路径、hash、diff 三方对账；存在未解释反证时不得宣告恢复完成；
-6. 恢复结果及时 checkpoint commit + push，但仍须经独立 PR 合入。
+6. 先交付隔离候选及 manifest/hash/diff 对账和验证证据；只有对应动作已获明确授权时才 checkpoint commit、push 或开 PR，缺少这些未请求的动作不阻断本地恢复交付。合入仍须独立 PR、检查、review 与用户合并授权。
 
 ## 6. 父工作区危险命令
 

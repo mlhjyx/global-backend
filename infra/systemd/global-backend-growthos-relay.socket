@@ -1,0 +1,14 @@
+[Unit]
+Description=GrowthOS Unix socket for the loopback Global Backend
+Documentation=https://github.com/mlhjyx/global-backend
+
+[Socket]
+ListenStream=/run/global-backend-growthos/backend.sock
+SocketGroup=global-backend-growthos
+SocketMode=0660
+DirectoryMode=0711
+RemoveOnStop=true
+Accept=no
+
+[Install]
+WantedBy=sockets.target

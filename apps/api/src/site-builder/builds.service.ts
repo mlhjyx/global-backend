@@ -175,7 +175,7 @@ export class BuildsService {
       );
     }
     const readinessFailure = await this.runtimeGuard
-      .assertReady()
+      .assertReady({ paidReachable: true })
       .then(() => null)
       .catch((error: unknown) => error);
 
@@ -234,7 +234,9 @@ export class BuildsService {
               }),
             ]);
             if (!existingGrant || !existingBudget) {
-              throw new Error("build idempotency reference has no spending authority");
+              throw new Error(
+                "build idempotency reference has no spending authority",
+              );
             }
             const exactConsumedGrant =
               existingGrant.issuer === budgetGrant.issuer &&
@@ -298,7 +300,8 @@ export class BuildsService {
           const existing = await tx.siteBuildRun.findUnique({
             where: { id: consumedGrant.buildRunId },
           });
-          if (!existing) throw new Error("budget grant references a missing build");
+          if (!existing)
+            throw new Error("budget grant references a missing build");
           return { run: existing, replayed: true };
         }
         if (readinessFailure) throw readinessFailure;
@@ -437,23 +440,23 @@ export class BuildsService {
         try {
           await tx.siteBuildBudgetGrant.create({
             data: {
-            workspaceId: ctx.workspaceId,
-            siteId,
-            buildRunId: created.id,
-            issuer: budgetGrant.issuer,
-            audience: budgetGrant.audience,
-            jti: budgetGrant.jti,
-            schemaVersion: budgetGrant.schemaVersion,
-            purpose: budgetGrant.purpose,
-            operation: budgetGrant.operation,
-            requestSha256: budgetGrant.requestSha256,
-            tokenSha256: budgetGrant.tokenSha256,
-            currency: budgetGrant.currency,
-            unit: budgetGrant.unit,
-            capMicrousd: budgetGrant.capMicrousd,
-            issuedAt: budgetGrant.issuedAt,
-            notBefore: budgetGrant.notBefore,
-            expiresAt: budgetGrant.expiresAt,
+              workspaceId: ctx.workspaceId,
+              siteId,
+              buildRunId: created.id,
+              issuer: budgetGrant.issuer,
+              audience: budgetGrant.audience,
+              jti: budgetGrant.jti,
+              schemaVersion: budgetGrant.schemaVersion,
+              purpose: budgetGrant.purpose,
+              operation: budgetGrant.operation,
+              requestSha256: budgetGrant.requestSha256,
+              tokenSha256: budgetGrant.tokenSha256,
+              currency: budgetGrant.currency,
+              unit: budgetGrant.unit,
+              capMicrousd: budgetGrant.capMicrousd,
+              issuedAt: budgetGrant.issuedAt,
+              notBefore: budgetGrant.notBefore,
+              expiresAt: budgetGrant.expiresAt,
             },
           });
         } catch (error) {

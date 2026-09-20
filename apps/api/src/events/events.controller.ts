@@ -1,14 +1,32 @@
-import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsUUID } from 'class-validator';
-import { AuthGuard } from '../auth/auth.guard';
-import { Ctx } from '../auth/ctx.decorator';
-import { RequireScopes } from '../auth/require-scopes.decorator';
-import { RequestContext } from '../auth/request-context';
-import { ScopesGuard } from '../auth/scopes.guard';
-import { envelope, pageEnvelope } from '../common/envelope';
-import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
-import { EventsService } from './events.service';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiProperty,
+  ApiQuery,
+  ApiTags,
+} from "@nestjs/swagger";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsUUID } from "class-validator";
+import { AuthGuard } from "../auth/auth.guard";
+import { Ctx } from "../auth/ctx.decorator";
+import { RequireScopes } from "../auth/require-scopes.decorator";
+import { RequestContext } from "../auth/request-context";
+import { ScopesGuard } from "../auth/scopes.guard";
+import { envelope, pageEnvelope } from "../common/envelope";
+import { ApiEnvelope, ApiPageEnvelope } from "../common/api-envelope.decorator";
+import { EVENT_ACK_STATUSES, EventsService } from "./events.service";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -19,33 +37,37 @@ const MAX_ACK_BATCH = 200;
  * required/enum 必须与该 JSON Schema 镜像一致——events.controller.spec.ts 有一致性单测防漂移。
  */
 export const EVENT_ENVELOPE_SCHEMA = {
-  type: 'object',
-  description: '事件 envelope（见 packages/contracts/events/envelope.schema.json）',
+  type: "object",
+  description:
+    "事件 envelope（见 packages/contracts/events/envelope.schema.json）",
   required: [
-    'event_id',
-    'event_type',
-    'schema_version',
-    'workspace_id',
-    'aggregate_type',
-    'aggregate_id',
-    'occurred_at',
-    'producer',
-    'privacy_classification',
-    'payload',
+    "event_id",
+    "event_type",
+    "schema_version",
+    "workspace_id",
+    "aggregate_type",
+    "aggregate_id",
+    "occurred_at",
+    "producer",
+    "privacy_classification",
+    "payload",
   ],
   properties: {
-    event_id: { type: 'string', format: 'uuid' },
-    event_type: { type: 'string' },
-    schema_version: { type: 'integer' },
-    workspace_id: { type: 'string', format: 'uuid' },
-    aggregate_type: { type: 'string' },
-    aggregate_id: { type: 'string' },
-    occurred_at: { type: 'string', format: 'date-time' },
-    producer: { type: 'string' },
-    correlation_id: { type: 'string', nullable: true },
-    causation_id: { type: 'string', nullable: true },
-    privacy_classification: { type: 'string', enum: ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] },
-    payload: { type: 'object', additionalProperties: true },
+    event_id: { type: "string", format: "uuid" },
+    event_type: { type: "string" },
+    schema_version: { type: "integer" },
+    workspace_id: { type: "string", format: "uuid" },
+    aggregate_type: { type: "string" },
+    aggregate_id: { type: "string" },
+    occurred_at: { type: "string", format: "date-time" },
+    producer: { type: "string" },
+    correlation_id: { type: "string", nullable: true },
+    causation_id: { type: "string", nullable: true },
+    privacy_classification: {
+      type: "string",
+      enum: ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"],
+    },
+    payload: { type: "object", additionalProperties: true },
   },
 };
 
@@ -56,16 +78,16 @@ export const EVENT_ENVELOPE_SCHEMA = {
  */
 class AckEventsDto {
   @ApiProperty({
-    description: '要 ACK 的 event_id 列表（envelope.event_id，uuid）',
-    type: 'array',
-    items: { type: 'string', format: 'uuid' },
+    description: "要 ACK 的 event_id 列表（envelope.event_id，uuid）",
+    type: "array",
+    items: { type: "string", format: "uuid" },
     minItems: 1,
     maxItems: MAX_ACK_BATCH,
   })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_ACK_BATCH)
-  @IsUUID('4', { each: true })
+  @IsUUID("4", { each: true })
   event_ids!: string[];
 }
 
@@ -73,30 +95,76 @@ class AckEventsDto {
  * 集成事件出口（收口③）：SaaS 拉取（GET /events 游标翻页）+ 消费确认（POST /events/ack）。
  * at-least-once：游标可从任意位置重放，消费端按 event_id 去重。
  */
-@ApiTags('Events')
+@ApiTags("Events")
 @ApiBearerAuth()
-@Controller('events')
+@Controller("events")
 @UseGuards(AuthGuard, ScopesGuard)
-@RequireScopes('acquisition:read')
+@RequireScopes("acquisition:read")
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
+  @Get(":eventId/ack-status")
+  @Header("Cache-Control", "no-store")
+  @RequireScopes("acquisition:event:ack")
+  @ApiOperation({
+    summary: "读取 pull sink ACK 状态；仅 ACKED 可确认已消费，404 不表示未消费",
+  })
+  @ApiParam({
+    name: "eventId",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+  })
+  @ApiEnvelope({
+    type: "object",
+    additionalProperties: false,
+    required: ["event_id", "status", "acked_at"],
+    properties: {
+      event_id: { type: "string", format: "uuid" },
+      status: { type: "string", enum: [...EVENT_ACK_STATUSES] },
+      acked_at: { type: "string", format: "date-time", nullable: true },
+    },
+  })
+  async ackStatus(
+    @Ctx() ctx: RequestContext,
+    @Param("eventId", new ParseUUIDPipe({ version: "4" })) eventId: string,
+  ) {
+    return envelope(await this.events.ackStatus(ctx, eventId));
+  }
+
   @Get()
-  @RequireScopes('acquisition:read', 'personal-data:read')
-  @ApiOperation({ summary: '拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）' })
+  @RequireScopes("acquisition:read", "personal-data:read")
+  @ApiOperation({
+    summary:
+      "拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）",
+  })
   // swagger 对 @Query 推断 required:true，SaaS codegen 客户端会强制要参数——三个都显式 optional。
-  @ApiQuery({ name: 'cursor', required: false, description: '游标（上次响应的 nextCursor；缺省从头拉）' })
-  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: DEFAULT_LIMIT, maximum: MAX_LIMIT } })
-  @ApiQuery({ name: 'type', required: false, description: '按集成事件类型过滤（如 LeadQualified）' })
+  @ApiQuery({
+    name: "cursor",
+    required: false,
+    description: "游标（上次响应的 nextCursor；缺省从头拉）",
+  })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    schema: { type: "integer", default: DEFAULT_LIMIT, maximum: MAX_LIMIT },
+  })
+  @ApiQuery({
+    name: "type",
+    required: false,
+    description: "按集成事件类型过滤（如 LeadQualified）",
+  })
   @ApiPageEnvelope(EVENT_ENVELOPE_SCHEMA)
   async list(
     @Ctx() ctx: RequestContext,
-    @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string,
-    @Query('type') type?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+    @Query("type") type?: string,
   ) {
     // floor：?limit=1.5 之类非整数不能原样进 Prisma take（非 int 会 500）
-    const n = Math.min(Math.max(Math.floor(Number(limit) || DEFAULT_LIMIT), 1), MAX_LIMIT);
+    const n = Math.min(
+      Math.max(Math.floor(Number(limit) || DEFAULT_LIMIT), 1),
+      MAX_LIMIT,
+    );
     // 空串游标当未给（避免 BigInt('') === 0n 的隐形语义）
     const r = await this.events.list(ctx, {
       cursor: cursor || undefined,
@@ -106,11 +174,17 @@ export class EventsController {
     return pageEnvelope(r.data, r);
   }
 
-  @Post('ack')
-  @RequireScopes('acquisition:event:ack')
+  @Post("ack")
+  @RequireScopes("acquisition:event:ack")
   @HttpCode(200)
-  @ApiOperation({ summary: 'ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）' })
-  @ApiEnvelope({ type: 'object', required: ['acked'], properties: { acked: { type: 'integer' } } })
+  @ApiOperation({
+    summary: "ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）",
+  })
+  @ApiEnvelope({
+    type: "object",
+    required: ["acked"],
+    properties: { acked: { type: "integer" } },
+  })
   async ack(@Ctx() ctx: RequestContext, @Body() dto: AckEventsDto) {
     // sink 不透传：恒走 service 缺省的 pull sink（'saas'）。
     return envelope(await this.events.ack(ctx, dto.event_ids));

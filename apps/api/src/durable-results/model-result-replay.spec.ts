@@ -39,7 +39,7 @@ describe('model result replay projection', () => {
         gatewaySettlements: [
           {
             status: 'settled',
-            requestId: 'req_123',
+            physicalWireAttempt: 1,
             resolverId: 'resolver-v1',
             alias: 'site-builder-copywriter',
             protocol: 'openai-chat-completions',
@@ -49,12 +49,43 @@ describe('model result replay projection', () => {
             costMicrousd: 2500,
             inputTokens: 10,
             outputTokens: 2,
+            upstreamIdState: 'observed',
+            transportObservation: {
+              schemaVersion: 'site-build-provider-transport-observation/v1',
+              physicalWireAttempt: 1,
+              finalPhase: 'gateway_request_id_observed',
+              gatewayIdState: 'observed',
+              upstreamIdState: 'observed',
+              payloadState: 'available',
+              readbackProbes: [
+                {
+                  sequence: 1,
+                  phase: 'gateway_log_observed',
+                  httpStatusClass: 2,
+                },
+              ],
+            },
           },
           {
             status: 'unknown',
-            requestId: null,
+            physicalWireAttempt: 2,
             resolverId: 'resolver-v1',
-            reason: 'log_unavailable',
+            reason: 'gateway_log_unavailable',
+            transportObservation: {
+              schemaVersion: 'site-build-provider-transport-observation/v1',
+              physicalWireAttempt: 2,
+              finalPhase: 'gateway_log_unavailable',
+              gatewayIdState: 'missing',
+              upstreamIdState: 'unknown',
+              payloadState: 'available',
+              readbackProbes: [
+                {
+                  sequence: 2,
+                  phase: 'gateway_log_unavailable',
+                  httpStatusClass: 5,
+                },
+              ],
+            },
           },
         ],
       },
@@ -71,7 +102,7 @@ describe('model result replay projection', () => {
         gatewaySettlements: [
           {
             status: 'settled',
-            requestId: 'req_123',
+            physicalWireAttempt: 1,
             resolverId: 'resolver-v1',
             alias: 'site-builder-copywriter',
             protocol: 'openai-chat-completions',
@@ -81,12 +112,43 @@ describe('model result replay projection', () => {
             costMicrousd: 2500,
             inputTokens: 10,
             outputTokens: 2,
+            upstreamIdState: 'observed',
+            transportObservation: {
+              schemaVersion: 'site-build-provider-transport-observation/v1',
+              physicalWireAttempt: 1,
+              finalPhase: 'gateway_request_id_observed',
+              gatewayIdState: 'observed',
+              upstreamIdState: 'observed',
+              payloadState: 'available',
+              readbackProbes: [
+                {
+                  sequence: 1,
+                  phase: 'gateway_log_observed',
+                  httpStatusClass: 2,
+                },
+              ],
+            },
           },
           {
             status: 'unknown',
-            requestId: null,
+            physicalWireAttempt: 2,
             resolverId: 'resolver-v1',
-            reason: 'log_unavailable',
+            reason: 'gateway_log_unavailable',
+            transportObservation: {
+              schemaVersion: 'site-build-provider-transport-observation/v1',
+              physicalWireAttempt: 2,
+              finalPhase: 'gateway_log_unavailable',
+              gatewayIdState: 'missing',
+              upstreamIdState: 'unknown',
+              payloadState: 'available',
+              readbackProbes: [
+                {
+                  sequence: 2,
+                  phase: 'gateway_log_unavailable',
+                  httpStatusClass: 5,
+                },
+              ],
+            },
           },
         ],
       },

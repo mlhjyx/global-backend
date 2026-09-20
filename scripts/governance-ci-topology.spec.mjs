@@ -37,8 +37,12 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
   const buildJob = jobBlock(ciWorkflow, "build-test");
 
   assert.equal(
+    rendererPackage.scripts.test,
+    "vitest run --exclude scripts/run-with-temporary-cache.spec.mjs && node --test scripts/run-with-temporary-cache.spec.mjs",
+  );
+  assert.equal(
     rendererPackage.scripts["test:contracts"],
-    "vitest run --exclude src/components/fixture-build.spec.ts",
+    "vitest run --exclude src/components/fixture-build.spec.ts --exclude scripts/run-with-temporary-cache.spec.mjs && node --test scripts/run-with-temporary-cache.spec.mjs",
   );
   assert.equal(
     rendererPackage.scripts["test:fixtures"],
@@ -63,10 +67,6 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
       "Renderer qualified component visual regression（375 · 768 · 1440）",
       "pnpm --filter @global/site-renderer test:visual",
     ],
-    [
-      "Renderer multilingual smoke build",
-      "pnpm --filter @global/site-renderer build",
-    ],
   ]) {
     const step = namedStepBlock(buildJob, stepName);
     assert.deepEqual(
@@ -79,6 +79,18 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
       `${stepName} must run ${command}`,
     );
   }
+  const multilingualStep = namedStepBlock(
+    buildJob,
+    "Renderer multilingual smoke build",
+  );
+  assert.deepEqual(multilingualStep.match(/^        if:.*$/gm), [
+    "        if: needs.renderer-visual-scope.outputs.run_visual == 'true'",
+  ]);
+  assert.match(
+    multilingualStep,
+    /apps\/api\/dist\/site-builder\/renderer-build\.js/,
+  );
+  assert.match(multilingualStep, /multilingual-spec\.json/);
 });
 
 test("renderer scope changes and periodic runs execute every heavy renderer gate", async () => {
@@ -343,8 +355,17 @@ test("the required build executes and inspects the exact-SHA immutable OCI contr
   assert.match(ociStep, /verify-runtime-artifact\.mjs/);
   assert.match(ociStep, /runtime-image-verifier\.mjs \/app/);
   assert.match(ociStep, /--entrypoint openssl/);
-  assert.match(ociStep, /--entrypoint \/usr\/bin\/chromium/);
-  assert.match(ociStep, /data:text\/html,<title>oci-browser-smoke<\/title>/);
+  assert.match(ociStep, /--rm --init --network none --read-only --cap-drop ALL/);
+  assert.match(ociStep, /timeout --signal=TERM --kill-after=10s 5m/);
+  assert.match(ociStep, /--name "\$\{CONTAINER_ID\}-browser-probe"/);
+  assert.match(ociStep, /docker rm -f "\$\{CONTAINER_ID\}-browser-probe"/);
+  assert.match(ociStep, /scripts\/test-support\/browser-probe-oci-smoke\.cjs",dst=\/run\/browser-probe-oci-smoke\.cjs,readonly/);
+  assert.match(ociStep, /--entrypoint node "\$\{OCI_IMAGE\}" \/run\/browser-probe-oci-smoke\.cjs/);
+  const smoke = await readRepositoryFile("scripts/test-support/browser-probe-oci-smoke.cjs");
+  assert.match(smoke, /require\('\/app\/apps\/api\/dist\/runtime\/browser-readiness-probe\.js'\)/);
+  assert.match(smoke, /iteration <= 200/);
+  assert.match(smoke, /await probe\('\/usr\/bin\/chromium'\)/);
+  assert.match(smoke, /if \(roots\.length !== 0\) throw/);
   assert.doesNotMatch(ociStep, /docker push|buildx build.*--push/);
 });
 
@@ -360,11 +381,50 @@ test("the required build verifies runtime lease roles against disposable Postgre
   assert.match(permissionStep, /prisma migrate deploy/);
   assert.match(
     permissionStep,
-    /provision-runtime-lease-principals\.sh/,
+    /site-build-provider-transport\.rls\.spec\.mjs/,
+  );
+  assert.match(permissionStep, /provision-runtime-lease-principals\.sh/);
+  assert.match(
+    permissionStep,
+    /provision-site-build-provider-wire-writer\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /provision-execution-budget-platform-writer\.sh/,
   );
   assert.match(
     permissionStep,
     /verify-runtime-lease-principal-permissions\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-site-build-provider-wire-writer\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-site-build-provider-wire-writer-disposable\.sh/,
+  );
+  assert.match(permissionStep, /verify-execution-budget-platform-writer\.sh/);
+  assert.match(
+    permissionStep,
+    /verify-execution-budget-platform-writer-disposable-drift\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-execution-budget-platform-writer-provision-safety-disposable\.sh/,
+  );
+  assert.match(permissionStep, /EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1/);
+  assert.match(permissionStep, /EXECUTION_BUDGET_PLATFORM_WRITER_FAILURE_INJECT_AFTER_DRIFT=superuser/);
+  assert.match(permissionStep, /failure_status=\$\?/);
+  assert.match(permissionStep, /failure_status[^\n]*-ne 42/);
+  assert.match(permissionStep, /PLATFORM_WRITER_FAILURE_INJECTED:superuser/);
+  assert.match(permissionStep, /grep -Fxq/);
+  assert.ok(
+    permissionStep.match(/verify-execution-budget-platform-writer-disposable-drift\.sh/g)?.length >= 4,
+  );
+  assert.match(
+    permissionStep,
+    /verify-runtime-lease-prisma-compatibility\.mts/,
   );
   assert.match(permissionStep, /verify-app-database-principal\.mts/);
   assert.match(permissionStep, /ALTER ROLE app_user BYPASSRLS/);

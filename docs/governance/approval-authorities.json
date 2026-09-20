@@ -1,0 +1,14 @@
+{
+  "schema_version": "approval-authorities/v1",
+  "repository": { "id": 1291151138, "full_name": "mlhjyx/global-backend" },
+  "revision": "approval-authorities/initial-unassigned",
+  "actor_policy": "DISTINCT_ACTORS_REQUIRED",
+  "roles": [
+    { "role": "OWN-PRODUCT", "status": "UNASSIGNED" },
+    { "role": "OWN-DATA-PRIVACY", "status": "UNASSIGNED" },
+    { "role": "OWN-QA-EVIDENCE", "status": "UNASSIGNED" },
+    { "role": "OWN-SECURITY", "status": "UNASSIGNED" },
+    { "role": "LEGAL-REVIEW", "status": "UNASSIGNED" },
+    { "role": "MERGE-AUTHORIZER", "status": "UNASSIGNED" }
+  ]
+}

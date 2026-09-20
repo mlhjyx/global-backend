@@ -205,6 +205,10 @@ export function parseGenericOperationArtifactManifest(
   assertScope(value.scopeKind, value.workspaceId);
   assertResultSchema(value.resultSchema);
   assertMediaType(value.mediaType);
+  if (!PRIVACY_CLASSES.has(value.privacyClass as ArtifactPrivacyClass)) {
+    return invalidGenericOperationArtifact();
+  }
+  const privacyClass = value.privacyClass as ArtifactPrivacyClass;
   if (
     value.schemaVersion !== GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA ||
     !isCanonicalArtifactUuid(value.artifactId) ||
@@ -212,8 +216,8 @@ export function parseGenericOperationArtifactManifest(
     !isCanonicalArtifactUuid(value.operationId) ||
     !isCanonicalArtifactSha256(value.sha256) ||
     !isCanonicalArtifactSizeBytes(value.sizeBytes) ||
-    value.objectKey !== contentAddressedObjectKey(value.sha256) ||
-    !PRIVACY_CLASSES.has(value.privacyClass as ArtifactPrivacyClass) ||
+    value.objectKey !==
+      contentAddressedObjectKey(value.sha256, privacyClass) ||
     (value.sourceDigest !== null &&
       !isCanonicalArtifactSha256(value.sourceDigest)) ||
     createdAt === null ||
@@ -235,7 +239,7 @@ export function parseGenericOperationArtifactManifest(
     sha256: value.sha256,
     sizeBytes: value.sizeBytes,
     mediaType: value.mediaType,
-    privacyClass: value.privacyClass as ArtifactPrivacyClass,
+    privacyClass,
     sourceDigest: value.sourceDigest,
     createdAt,
     expiresAt,

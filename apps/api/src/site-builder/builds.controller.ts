@@ -30,7 +30,10 @@ import {
   SITE_BUILD_BUDGET_GRANT_HEADER,
   SiteBuildBudgetGrantVerifier,
 } from "./site-build-budget-grant";
-import { buildRequestHash, normalizeBuildRequest } from "./build-request-contract";
+import {
+  buildRequestHash,
+  normalizeBuildRequest,
+} from "./build-request-contract";
 import { BUILD_PHASES } from "./build-progress";
 import { CreateBuildDto } from "./dto/build.dto";
 import { IDEMPOTENCY_KEY_PATTERN_SOURCE } from "./idempotency-key";
@@ -79,7 +82,10 @@ const COST_SUMMARY_SCHEMA = {
       ],
       properties: {
         authorizedCapMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
-        conservativeChargedMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        conservativeChargedMicrousd: {
+          type: "string",
+          pattern: "^(0|[1-9][0-9]*)$",
+        },
         capMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
         reservedMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
         chargedMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
@@ -106,11 +112,17 @@ const COST_SUMMARY_SCHEMA = {
       ],
       properties: {
         reportedCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
-        calculatedCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        calculatedCostMicrousd: {
+          type: "string",
+          pattern: "^(0|[1-9][0-9]*)$",
+        },
         estimatedCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
         unknownOperations: { type: "integer", minimum: 0 },
         exactCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
-        upperBoundCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        upperBoundCostMicrousd: {
+          type: "string",
+          pattern: "^(0|[1-9][0-9]*)$",
+        },
       },
     },
     usage: {
@@ -223,6 +235,7 @@ function publicBuildFailure(run: {
   error: string | null;
   phase: string | null;
   steps: unknown;
+  costSummary: unknown;
 }): { code: string; message: string } | null {
   if (!run.error) return null;
   const failedStep = Array.isArray(run.steps)
@@ -239,14 +252,32 @@ function publicBuildFailure(run: {
       ? candidate
       : "BUILD_FAILED";
   const phase =
-    run.phase && BUILD_PHASES.includes(run.phase as (typeof BUILD_PHASES)[number])
+    run.phase &&
+    BUILD_PHASES.includes(run.phase as (typeof BUILD_PHASES)[number])
       ? run.phase
       : "unknown_phase";
-  const message =
-    code.startsWith("BUDGET_") || code.includes("PAID_CALL")
+  const summary =
+    run.costSummary &&
+    typeof run.costSummary === "object" &&
+    !Array.isArray(run.costSummary)
+      ? (run.costSummary as Record<string, unknown>)
+      : null;
+  const reconciliation =
+    summary?.reconciliation &&
+    typeof summary.reconciliation === "object" &&
+    !Array.isArray(summary.reconciliation)
+      ? (summary.reconciliation as Record<string, unknown>)
+      : null;
+  const reconciliationPending =
+    typeof reconciliation?.pendingOperations === "number" &&
+    Number.isSafeInteger(reconciliation.pendingOperations) &&
+    reconciliation.pendingOperations > 0;
+  const message = reconciliationPending
+    ? `site build cost reconciliation is pending during ${phase}`
+    : code.startsWith("BUDGET_") || code.includes("PAID_CALL")
       ? `build budget authorization failed during ${phase}`
       : code.includes("SETTLEMENT")
-        ? `model cost reconciliation is pending during ${phase}`
+        ? `site build cost reconciliation is pending during ${phase}`
         : `build could not complete during ${phase}`;
   return { code, message };
 }
@@ -405,7 +436,8 @@ export class BuildsController {
   })
   @ApiResponse({
     status: 402,
-    description: "BUDGET_GRANT_REQUIRED、BUDGET_GRANT_INVALID 或 BUDGET_GRANT_EXPIRED",
+    description:
+      "BUDGET_GRANT_REQUIRED、BUDGET_GRANT_INVALID 或 BUDGET_GRANT_EXPIRED",
     schema: BUILD_ERROR_SCHEMA,
   })
   @ApiResponse({
@@ -415,7 +447,8 @@ export class BuildsController {
   })
   @ApiResponse({
     status: 503,
-    description: "BUDGET_GRANT_VERIFICATION_UNAVAILABLE 或 SITE_BUILD_RUNTIME_NOT_READY",
+    description:
+      "BUDGET_GRANT_VERIFICATION_UNAVAILABLE 或 SITE_BUILD_RUNTIME_NOT_READY",
     schema: BUILD_ERROR_SCHEMA,
   })
   async create(
@@ -433,10 +466,15 @@ export class BuildsController {
       requestSha256: buildRequestHash(siteId, normalized),
     });
     return envelope(
-      await this.builds.create(ctx, siteId, {
-        ...dto,
-        idempotencyKey: idempotencyKey ?? null,
-      }, budgetGrant),
+      await this.builds.create(
+        ctx,
+        siteId,
+        {
+          ...dto,
+          idempotencyKey: idempotencyKey ?? null,
+        },
+        budgetGrant,
+      ),
     );
   }
 

@@ -18,6 +18,7 @@ import {
 } from './compliance/email-verification-gate';
 import { EmailCandidate, generateEmailCandidates } from './email-permutation';
 import { KnownEmailSample, applyLearnedPattern, inferEmailPattern } from './email-format-learning';
+import { assertEmailProbeBound, MAX_EMAIL_PROBE_CANDIDATES } from './email-guess-targets';
 
 export interface GuessInput {
   fullName: string;
@@ -122,6 +123,7 @@ export class EmailGuesser {
   constructor(private readonly verifier: EmailVerificationAdapter) {}
 
   async guess(input: GuessInput, ctx: GuessContext = {}): Promise<GuessResult> {
+    assertEmailProbeBound(ctx.maxProbe);
     const candidates = this.buildCandidates(input);
     if (candidates.length === 0) {
       return { status: 'no_candidates', triedCount: 0, candidates, reason: 'name_or_domain_unusable',
@@ -157,7 +159,7 @@ export class EmailGuesser {
       onDurableReceipt: ctx.onDurableReceipt,
     };
 
-    const maxProbe = ctx.maxProbe ?? 8;
+    const maxProbe = ctx.maxProbe ?? MAX_EMAIL_PROBE_CANDIDATES;
     const suppressed = ctx.suppressedEmails ?? new Set<string>();
     let tried = 0;
     // 最优「未被证伪」候选：第一个非 INVALID 的探测（候选按先验降序 → 即最高先验的可信猜测）。

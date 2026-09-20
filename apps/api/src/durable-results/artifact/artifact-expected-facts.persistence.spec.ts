@@ -53,7 +53,7 @@ const manifest = Object.freeze({
   authorityId: AUTHORITY_ID,
   operationId: OPERATION_ID,
   resultSchema: "http-get/v1",
-  objectKey: contentAddressedObjectKey(SHA256),
+  objectKey: contentAddressedObjectKey(SHA256, 'CONFIDENTIAL_TENANT'),
   sha256: SHA256,
   sizeBytes: String(BODY.byteLength),
   mediaType: "text/plain",

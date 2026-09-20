@@ -1,9 +1,12 @@
 import {
   access,
+  mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,15 +17,38 @@ import {
   buildSiteSpecWithTemporaryFile,
   assertRendererOutputMatches,
   assertRenderedOutboundDomains,
+  linkRendererDependencies,
+  prepareRendererBuildWorkspace,
+  prepareRendererCacheRoot,
   resolveRendererEntrypoint,
   writeRendererOutputManifest,
   type RendererBuildInput,
 } from "./renderer-build";
-
 const SITE_ORIGIN = "https://preview.example.test";
 
 async function expectMissing(filePath: string): Promise<void> {
   await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
+async function expectNewRendererWorkspacesEventuallyClean(
+  before: ReadonlySet<string>,
+  workspacePrefix: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const unexpected = (await readdir(tmpdir())).filter(
+      (name) =>
+        name.startsWith(workspacePrefix) && !before.has(name),
+    );
+    if (unexpected.length === 0) return;
+    if (Date.now() >= deadline) {
+      expect(unexpected).toEqual([]);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 describe("buildRendererEnv — Renderer 子进程最小环境", () => {
@@ -36,6 +62,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
     const env = buildRendererEnv({
       specPath: "/tmp/spec.json",
       outDir: "/tmp/out",
+      cacheRoot: "/tmp/build-owned/.renderer-cache",
       basePath: "/preview/acme/",
       siteOrigin: SITE_ORIGIN,
     });
@@ -46,6 +73,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       TZ: "UTC",
       SITESPEC_PATH: "/tmp/spec.json",
       OUT_DIR: "/tmp/out",
+      RENDERER_CACHE_ROOT: "/tmp/build-owned/.renderer-cache",
       BASE_PATH: "/preview/acme/",
       SITE_ORIGIN,
       ASTRO_TELEMETRY_DISABLED: "1",
@@ -63,6 +91,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       buildRendererEnv({
         specPath: "/tmp/spec.json",
         outDir: "/tmp/out",
+        cacheRoot: "/tmp/build-owned/.renderer-cache",
         basePath: "/",
         siteOrigin: SITE_ORIGIN,
         publicAssetDir: "/tmp/overlay",
@@ -212,11 +241,20 @@ describe("renderer output candidate binding", () => {
 });
 
 describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
+  const processOwnedTempPrefix = `.global-site-renderer-${process.pid}-`;
+
   it("构建期间使用 0600 随机临时文件，成功后删除整个临时目录", async () => {
     let observedPath = "";
     const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
+      expect(path.basename(path.dirname(input.specPath)).startsWith(
+        processOwnedTempPrefix,
+      )).toBe(true);
+      expect(input.cacheRoot).toBe(
+        path.join(path.dirname(input.specPath), ".renderer-cache"),
+      );
+      expect((await stat(input.cacheRoot)).mode & 0o777).toBe(0o700);
       expect(path.basename(input.specPath)).toBe("site-spec.json");
       expect(await readFile(input.specPath, "utf8")).toBe('{"safe":true}');
       expect((await stat(path.dirname(input.specPath))).mode & 0o777).toBe(
@@ -242,6 +280,174 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
       await expectMissing(path.dirname(observedPath));
     } finally {
       await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("isolates concurrent renderer cache directories and cleans both workspaces", async () => {
+    const outputs = await Promise.all(
+      ["a", "b"].map(async (name) => {
+        const outDir = await mkdtemp(path.join(tmpdir(), `renderer-${name}-`));
+        let cacheRoot = "";
+        try {
+          await buildSiteSpecWithTemporaryFile(
+            { site: { name }, pages: [] },
+            { outDir, basePath: "/", siteOrigin: SITE_ORIGIN },
+            async (input) => {
+              cacheRoot = input.cacheRoot;
+              await writeFile(path.join(input.outDir, "index.html"), name);
+            },
+          );
+          return { outDir, cacheRoot };
+        } catch (error) {
+          await rm(outDir, { recursive: true, force: true });
+          throw error;
+        }
+      }),
+    );
+    try {
+      expect(outputs[0]?.cacheRoot).not.toBe(outputs[1]?.cacheRoot);
+      for (const output of outputs) await expectMissing(output.cacheRoot);
+    } finally {
+      await Promise.all(
+        outputs.map((output) =>
+          rm(output.outDir, { recursive: true, force: true }),
+        ),
+      );
+    }
+  });
+
+  it("runs two real Astro builds concurrently without shared cache or workspace residue", async () => {
+    const spec = JSON.parse(
+      await readFile(
+        path.resolve(process.cwd(), "../site-renderer/fixtures/demo-spec.json"),
+        "utf8",
+      ),
+    ) as unknown;
+    const before = new Set(
+      (await readdir(tmpdir())).filter((name) =>
+        name.startsWith(processOwnedTempPrefix),
+      ),
+    );
+    let foreignTempDir: string | undefined;
+    let outDirs: string[] = [];
+    try {
+      foreignTempDir = await mkdtemp(
+        path.join(tmpdir(), "global-site-renderer-foreign-"),
+      );
+      expect(
+        path.basename(foreignTempDir).startsWith(processOwnedTempPrefix),
+      ).toBe(false);
+      outDirs = await Promise.all(
+        ["one", "two"].map(() =>
+          mkdtemp(path.join(tmpdir(), "renderer-real-concurrent-")),
+        ),
+      );
+      const manifests = await Promise.all(
+        outDirs.map((outDir) =>
+          buildSiteSpecWithTemporaryFile(spec, {
+            outDir,
+            basePath: "/",
+            siteOrigin: SITE_ORIGIN,
+          }),
+        ),
+      );
+      expect(manifests.every((manifest) => manifest.fileCount > 0)).toBe(true);
+      expect((await stat(foreignTempDir)).isDirectory()).toBe(true);
+      // Sibling builds may still be in flight; foreign-process directories are
+      // outside this test's cleanup scope and must remain untouched.
+      await expectNewRendererWorkspacesEventuallyClean(before, processOwnedTempPrefix);
+    } finally {
+      await Promise.all(
+        [
+          ...outDirs.map((directory) =>
+            rm(directory, { recursive: true, force: true }),
+          ),
+          ...(foreignTempDir
+            ? [rm(foreignTempDir, { recursive: true, force: true })]
+            : []),
+        ],
+      );
+    }
+  }, 60_000);
+
+  it("rejects a cache symlink escaping the build-owned workspace", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "renderer-cache-root-"),
+    );
+    const outside = await mkdtemp(
+      path.join(tmpdir(), "renderer-cache-outside-"),
+    );
+    try {
+      await mkdir(path.join(outside, "cache"));
+      await symlink(
+        path.join(outside, "cache"),
+        path.join(workspace, ".renderer-cache"),
+      );
+      await expect(prepareRendererCacheRoot(workspace)).rejects.toThrow(
+        "RENDERER_CACHE_PATH_INVALID",
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a non-directory renderer workspace", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "renderer-cache-file-"));
+    const workspaceFile = path.join(root, "workspace");
+    try {
+      await writeFile(workspaceFile, "not a directory");
+      await expect(prepareRendererCacheRoot(workspaceFile)).rejects.toThrow(
+        "RENDERER_CACHE_PATH_INVALID",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a renderer dependency root that is itself a symlink", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "renderer-workspace-"));
+    const rendererRoot = await mkdtemp(path.join(tmpdir(), "renderer-source-"));
+    const externalModules = await mkdtemp(
+      path.join(tmpdir(), "renderer-modules-"),
+    );
+    try {
+      const cacheRoot = await prepareRendererCacheRoot(workspace);
+      await symlink(
+        externalModules,
+        path.join(rendererRoot, "node_modules"),
+        "dir",
+      );
+      await expect(
+        linkRendererDependencies(cacheRoot, rendererRoot),
+      ).rejects.toThrow("RENDERER_DEPENDENCY_ROOT_INVALID");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(rendererRoot, { recursive: true, force: true });
+      await rm(externalModules, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a source symlink before Astro receives the private workspace", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "renderer-workspace-"));
+    const rendererRoot = await mkdtemp(path.join(tmpdir(), "renderer-source-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "renderer-outside-"));
+    try {
+      const cacheRoot = await prepareRendererCacheRoot(workspace);
+      await mkdir(path.join(rendererRoot, "src"));
+      await mkdir(path.join(rendererRoot, "node_modules"));
+      await writeFile(path.join(outside, "secret"), "not renderer source");
+      await symlink(
+        path.join(outside, "secret"),
+        path.join(rendererRoot, "src", "escape"),
+      );
+      await expect(
+        prepareRendererBuildWorkspace(cacheRoot, rendererRoot),
+      ).rejects.toThrow("RENDERER_SOURCE_SYMLINK_FORBIDDEN");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(rendererRoot, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
     }
   });
 
@@ -293,6 +499,58 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
 
       await expectMissing(observedPath);
       await expectMissing(path.dirname(observedPath));
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("子进程超时也清理完整构建工作区", async () => {
+    let observedWorkspace = "";
+    const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-timeout-"));
+    const timeout = Object.assign(new Error("renderer timed out"), {
+      code: "ETIMEDOUT",
+    });
+    try {
+      await expect(
+        buildSiteSpecWithTemporaryFile(
+          { tenant: "content" },
+          { outDir, basePath: "/", siteOrigin: SITE_ORIGIN },
+          async (input) => {
+            observedWorkspace = path.dirname(input.specPath);
+            throw timeout;
+          },
+        ),
+      ).rejects.toBe(timeout);
+      await expectMissing(observedWorkspace);
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retry 总是获得新的构建工作区和 cache root", async () => {
+    const cacheRoots: string[] = [];
+    const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-retry-"));
+    const execute = vi.fn(async (input: RendererBuildInput) => {
+      cacheRoots.push(input.cacheRoot);
+      if (cacheRoots.length === 1) throw new Error("first attempt failed");
+      await writeFile(path.join(input.outDir, "index.html"), "retry ok");
+    });
+    try {
+      await expect(
+        buildSiteSpecWithTemporaryFile(
+          { attempt: 1 },
+          { outDir, basePath: "/", siteOrigin: SITE_ORIGIN },
+          execute,
+        ),
+      ).rejects.toThrow("first attempt failed");
+      await buildSiteSpecWithTemporaryFile(
+        { attempt: 2 },
+        { outDir, basePath: "/", siteOrigin: SITE_ORIGIN },
+        execute,
+      );
+      expect(cacheRoots).toHaveLength(2);
+      expect(cacheRoots[0]).not.toBe(cacheRoots[1]);
+      await Promise.all(cacheRoots.map(expectMissing));
     } finally {
       await rm(outDir, { recursive: true, force: true });
     }

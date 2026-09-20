@@ -54,6 +54,7 @@ export function createPatentCacheBrokerScanner(input: {
     producerId: string,
     receipt: DurableExecutionReceipt,
   ) => void;
+  readonly platformEgress?: ToolContext["platformEgress"];
 }): PatentRefreshScanner {
   const context: ToolContext = Object.freeze({
     workspaceId: PLATFORM_WORKSPACE,
@@ -61,6 +62,7 @@ export function createPatentCacheBrokerScanner(input: {
     correlationId: input.accountKey,
     purpose: "discovery",
     onDurableReceipt: input.onDurableReceipt,
+    platformEgress: input.platformEgress,
   });
   return {
     async searchInventorsForAnchorsWithStats(

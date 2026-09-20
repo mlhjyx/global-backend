@@ -118,7 +118,7 @@ jobs:
           persist-credentials: false
 
       # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -145,6 +145,29 @@ jobs:
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
+      - name: Native Temporal reader server（verified modules · offline race · build）
+        shell: bash
+        run: |
+          set -euo pipefail
+          temporal_cache=$(mktemp -d "${RUNNER_TEMP}/temporal-server-go.XXXXXX")
+          temporal_go_image=docker.io/library/golang@sha256:ab3d6955bbc813a0f3fdf220c1d817dd89c0b3f283777db8ece4a32fe7858edd
+          temporal_go=(--rm --cpus=2 --memory=4g
+            --mount "type=bind,src=${PWD}/infra/temporal-platform/server,dst=/src,readonly"
+            --mount "type=bind,src=${temporal_cache},dst=/cache"
+            -w /src -e GOPATH=/cache -e GOCACHE=/cache/build
+            -e GOTOOLCHAIN=go1.26.4 -e GOMAXPROCS=2)
+          timeout 30m docker run "${temporal_go[@]}" -e GODEBUG=http2client=0 -e GOPROXY=https://proxy.golang.org -e GOSUMDB=sum.golang.org "$temporal_go_image" go mod download
+          timeout 30m docker run "${temporal_go[@]}" --network=none -e GOPROXY=off "$temporal_go_image" sh -euc '
+            go mod verify
+            grep -F "google.golang.org/grpc v1.83.2" go.mod
+            grep -F "github.com/aws/aws-sdk-go-v2/service/lambda v1.88.5" go.mod
+            go test -mod=readonly -p 2 -count=1 -race -coverprofile=/cache/server.cover ./...
+            go vet -mod=readonly -p 2 ./...
+            CGO_ENABLED=0 go build -mod=readonly -p 2 -trimpath -buildvcs=false -o /cache/temporal-server ./cmd/server
+            go tool cover -func=/cache/server.cover > /cache/coverage.txt
+          '
+          awk '$1 == "total:" { seen=1; if ($3+0 < 80) exit 1 } END { if (!seen) exit 1 }' "$temporal_cache/coverage.txt"
+
       - name: Runtime lease principal PostgreSQL permissions
         shell: bash
         env:
@@ -153,6 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
+          node --test packages/db/test/site-build-provider-transport.rls.spec.mjs
           export RUNTIME_LEASE_PROVISION_DATABASE_URL="${DATABASE_URL}"
           export RUNTIME_API_LEASE_LOGIN=ci_runtime_api
           export RUNTIME_WORKER_LEASE_LOGIN=ci_runtime_worker
@@ -165,6 +189,60 @@ jobs:
           export RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL="postgresql://${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}:${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           bash infra/postgres/provision-runtime-lease-principals.sh
           bash infra/postgres/verify-runtime-lease-principal-permissions.sh
+          export SITE_BUILD_PROVIDER_WIRE_PROVISION_DATABASE_URL="${DATABASE_URL}"
+          export SITE_BUILD_PROVIDER_WIRE_LOGIN=ci_site_build_provider_wire_writer
+          export SITE_BUILD_PROVIDER_WIRE_PASSWORD="$(openssl rand -hex 24)"
+          export SITE_BUILD_PROVIDER_WIRE_DATABASE_URL="postgresql://${SITE_BUILD_PROVIDER_WIRE_LOGIN}:${SITE_BUILD_PROVIDER_WIRE_PASSWORD}@127.0.0.1:5432/global_test"
+          export SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION=20260904190000_site_build_provider_wire_authority
+          bash infra/postgres/provision-site-build-provider-wire-writer.sh
+          bash infra/postgres/provision-site-build-provider-wire-writer.sh
+          bash infra/postgres/verify-site-build-provider-wire-writer.sh
+          SITE_BUILD_PROVIDER_WIRE_DISPOSABLE_TEST=1 \
+            bash infra/postgres/verify-site-build-provider-wire-writer-disposable.sh
+          pnpm --filter @global/api exec vitest run \
+            src/site-builder/site-build-provider-wire.database.spec.ts \
+            src/durable-results/model-result-projection-bounds.spec.ts \
+            src/model-gateway/router-model-gateway.postgres.spec.ts
+          export EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL="${DATABASE_URL}"
+          export EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN=ci_execution_budget_platform_writer
+          export EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD="$(openssl rand -hex 24)"
+          export EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL="postgresql://${EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN}:${EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD}@127.0.0.1:5432/global_test"
+          bash infra/postgres/provision-execution-budget-platform-writer.sh
+          bash infra/postgres/provision-execution-budget-platform-writer.sh
+          bash infra/postgres/verify-execution-budget-platform-writer.sh
+          EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
+            bash infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh
+          EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
+          EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL="${APP_DATABASE_URL}" \
+            bash infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh
+          EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
+          EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL="${APP_DATABASE_URL}" \
+            bash infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh
+          failure_log="$(mktemp)"
+          cleanup_failure_log() {
+            rm -f "${failure_log}"
+          }
+          trap cleanup_failure_log EXIT
+          set +e
+          EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
+            EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL="${APP_DATABASE_URL}" \
+            EXECUTION_BUDGET_PLATFORM_WRITER_FAILURE_INJECT_AFTER_DRIFT=superuser \
+              bash infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh \
+                >"${failure_log}" 2>&1
+          failure_status=$?
+          set -e
+          if [[ "${failure_status}" -ne 42 ]] || \
+            ! grep -Fxq 'PLATFORM_WRITER_FAILURE_INJECTED:superuser' "${failure_log}"; then
+            echo "platform writer failure injection did not reach the exact checkpoint" >&2
+            exit 1
+          fi
+          cleanup_failure_log
+          trap - EXIT
+          bash infra/postgres/verify-execution-budget-platform-writer.sh
+          EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
+          EXECUTION_BUDGET_PLATFORM_WRITER_APP_DATABASE_URL="${APP_DATABASE_URL}" \
+            bash infra/postgres/verify-execution-budget-platform-writer-disposable-drift.sh
+          pnpm exec tsx apps/api/scripts/verify-runtime-lease-prisma-compatibility.mts
           EXPECT_APP_DATABASE_READINESS=ready \
             pnpm exec tsx apps/api/scripts/verify-app-database-principal.mts
           restore_app_role() {
@@ -190,6 +268,11 @@ jobs:
 
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
+
+      - name: Suppression lock Prisma PostgreSQL semantics
+        env:
+          SUPPRESSION_LOCK_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: pnpm --filter @global/api exec vitest run src/discovery/suppression-policy-lock.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         run: pnpm --filter @global/site-builder-eval-runner test
@@ -260,6 +343,7 @@ jobs:
           ARTIFACT_DIR="$(mktemp -d)"
           CONTAINER_ID="$(docker create "${OCI_IMAGE}" api)"
           cleanup() {
+            docker rm -f "${CONTAINER_ID}-browser-probe" >/dev/null 2>&1 || true
             docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
             rm -rf "${ARTIFACT_DIR}"
           }
@@ -270,11 +354,13 @@ jobs:
           docker run --rm --network none --entrypoint node "${OCI_IMAGE}" \
             /app/runtime-image-verifier.mjs /app
           docker run --rm --network none --entrypoint openssl "${OCI_IMAGE}" version
-          docker run --rm --network none --entrypoint /usr/bin/chromium "${OCI_IMAGE}" \
-            --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
-            --disable-background-networking --disable-component-update \
-            --no-first-run --no-default-browser-check --dump-dom \
-            'data:text/html,<title>oci-browser-smoke</title>'
+          timeout --signal=TERM --kill-after=10s 5m \
+            docker run --rm --init --network none --read-only --cap-drop ALL \
+              --name "${CONTAINER_ID}-browser-probe" \
+              --memory 1g --cpus 2 \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=512m,uid=10001,gid=10001 \
+              --mount type=bind,src="${GITHUB_WORKSPACE}/scripts/test-support/browser-probe-oci-smoke.cjs",dst=/run/browser-probe-oci-smoke.cjs,readonly \
+              --entrypoint node "${OCI_IMAGE}" /run/browser-probe-oci-smoke.cjs
               docker run --rm --network none \
                 --env "EXPECTED_BUILD_SHA=${BUILD_SHA}" \
                 --entrypoint node "${OCI_IMAGE}" -e \
@@ -316,6 +402,29 @@ jobs:
             exit 1
           fi
 
+      - name: Renderer read-only OCI smoke
+        shell: bash
+        env:
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+            --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
+            --mount type=bind,src="${GITHUB_WORKSPACE}/apps/site-renderer/fixtures/demo-spec.json",dst=/run/renderer-demo-spec.json,readonly \
+            --entrypoint node "${OCI_IMAGE}" -e '
+              const fs=require("node:fs");
+              const renderer=require("/app/apps/api/dist/site-builder/renderer-build.js");
+              const spec=JSON.parse(fs.readFileSync("/run/renderer-demo-spec.json","utf8"));
+              (async()=>{
+                await renderer.buildSiteSpecWithTemporaryFile(spec,{outDir:"/tmp/rendered",basePath:"/",siteOrigin:"http://127.0.0.1"});
+                const leaked=fs.readdirSync("/tmp").filter((name)=>name.startsWith("global-site-renderer-"));
+                if(leaked.length)throw new Error("renderer build workspace leaked");
+                for(const target of ["/app/apps/site-renderer/node_modules/.vite","/app/apps/site-renderer/.astro"]){
+                  if(fs.existsSync(target))throw new Error(`read-only renderer mutated ${target}`);
+                }
+              })().catch((error)=>{console.error(error);process.exit(1)});'
+
       - name: Renderer contract tests
         run: pnpm --filter @global/site-renderer test:contracts
 
@@ -329,11 +438,22 @@ jobs:
 
       - name: Renderer multilingual smoke build
         if: needs.renderer-visual-scope.outputs.run_visual == 'true'
-        run: pnpm --filter @global/site-renderer build
-        env:
-          SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json
-          OUT_DIR: ${{ runner.temp }}/site-renderer-multilingual
-          SITE_ORIGIN: https://preview.example.test
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const renderer = require('./apps/api/dist/site-builder/renderer-build.js');
+          const spec = JSON.parse(fs.readFileSync('./apps/site-renderer/fixtures/multilingual-spec.json', 'utf8'));
+          const outDir = process.env.RUNNER_TEMP + '/site-renderer-multilingual';
+          fs.mkdirSync(outDir, { recursive: true });
+          renderer.buildSiteSpecWithTemporaryFile(spec, {
+            outDir,
+            basePath: '/',
+            siteOrigin: 'https://preview.example.test',
+          }).catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
 
   contracts:
     name: contracts · drift · lint · breaking
@@ -343,7 +463,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -401,7 +521,7 @@ jobs:
           github.event_name == 'pull_request' &&
           env.HAS_BASE == '1' &&
           !contains(github.event.pull_request.labels.*.name, 'breaking-change-approved')
-        uses: oasdiff/oasdiff-action/breaking@2649ebe137aeb72a95707671204e829f86e091fc # v0.1.13
+        uses: oasdiff/oasdiff-action/breaking@9c0494cfee8b8fcc9fb383ed2d5d3fbdae169b93 # v0.1.15
         env:
           OASDIFF_INTERNAL: "1"
         with:

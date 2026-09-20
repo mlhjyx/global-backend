@@ -585,7 +585,9 @@ export class KbService {
           leaseUntil: null,
           retryAt,
           processingErrorCode: err.code,
-          error: err.message.slice(0, 2000),
+          // Dependency messages can contain credentials or document content.
+          // Keep classification in processingErrorCode, not free-text diagnostics.
+          error: 'KB ingestion failed',
         },
       }),
     );

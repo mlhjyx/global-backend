@@ -7,11 +7,44 @@
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./execution-budget": {
+      "types": "./dist/execution-budget.d.ts",
+      "default": "./dist/execution-budget.js"
+    },
+    "./platform-authority": {
+      "types": "./dist/platform-authority/canonical-request.d.ts",
+      "default": "./dist/platform-authority/canonical-request.js"
+    },
+    "./platform-authority/target-lookup": {
+      "types": "./dist/platform-authority/target-lookup.d.ts",
+      "default": "./dist/platform-authority/target-lookup.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "execution-budget": [
+        "dist/execution-budget.d.ts"
+      ],
+      "platform-authority": [
+        "dist/platform-authority/canonical-request.d.ts"
+      ],
+      "platform-authority/target-lookup": [
+        "dist/platform-authority/target-lookup.d.ts"
+      ]
+    }
+  },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.platform-authority.json",
+    "verify:platform-authority-policy-import": "node ../../scripts/verify-platform-authority-policy-import.mjs",
     "lint": "spectral lint openapi/openapi.json",
     "bundle": "redocly bundle openapi/openapi.json -o dist/openapi.bundled.yaml",
     "docs": "redocly build-docs openapi/openapi.json -o dist/docs.html",
@@ -19,9 +52,9 @@
     "gen": "openapi-typescript openapi/openapi.json -o src/generated/api.ts"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.39.0",
+    "@redocly/cli": "^2.50.0",
     "@stoplight/prism-cli": "^5.16.0",
-    "@stoplight/spectral-cli": "^6.16.2",
+    "@stoplight/spectral-cli": "^6.16.3",
     "openapi-typescript": "^7.4.0"
   }
 }

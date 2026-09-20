@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.example/governance/trusted-approval-readback.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "core", "receipt_core_sha256"],
+  "properties": {
+    "schema_version": { "const": "product-privacy-approval-readback-receipt/v1" },
+    "core": { "$ref": "#/$defs/core" },
+    "receipt_core_sha256": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "core": { "type": "object", "additionalProperties": false, "required": ["receipt_id", "repository", "authority_revision", "authority_sha256", "role", "actor_id", "actor_login", "decision_adr", "decision_revision", "policy_revision", "pr_number", "base_sha", "head_sha", "approved_at", "trust_class", "machine_check_evidence"], "properties": { "receipt_id": { "$ref": "#/$defs/id" }, "repository": { "$ref": "#/$defs/repository" }, "authority_revision": { "type": "string", "pattern": "^approval-authorities/r[1-9][0-9]*$" }, "authority_sha256": { "$ref": "#/$defs/digest" }, "role": { "enum": ["OWN-PRODUCT", "OWN-DATA-PRIVACY", "OWN-QA-EVIDENCE", "OWN-SECURITY", "LEGAL-REVIEW", "MERGE-AUTHORIZER"] }, "actor_id": { "$ref": "#/$defs/actorId" }, "actor_login": { "type": "string", "minLength": 1, "maxLength": 256 }, "decision_adr": { "enum": ["ADR-026", "ADR-027"] }, "decision_revision": { "type": "string", "pattern": "^program-c/decision-r[1-9][0-9]*$" }, "policy_revision": { "type": "string", "pattern": "^program-c/policy-r[1-9][0-9]*$" }, "pr_number": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "base_sha": { "$ref": "#/$defs/gitSha" }, "head_sha": { "$ref": "#/$defs/gitSha" }, "approved_at": { "$ref": "#/$defs/instant" }, "trust_class": { "const": "TRUSTED_BASE_VERIFIED" }, "machine_check_evidence": { "$ref": "#/$defs/machineCheckEvidence" }, "merge_authorization_evidence": { "$ref": "#/$defs/mergeAuthorizationEvidence" } } },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,127}$" },
+    "repository": { "type": "object", "additionalProperties": false, "required": ["id", "full_name"], "properties": { "id": { "const": 1291151138 }, "full_name": { "const": "mlhjyx/global-backend" } } },
+    "actorId": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "instant": { "type": "string", "format": "iso-instant" },
+    "mergeAuthorizationEvidence": { "type": "object", "additionalProperties": false, "required": ["stage", "grant_id", "grant_raw_sha256", "single_use_nonce", "consumption_id", "consumption_raw_sha256", "reserved_ledger_revision"], "properties": { "stage": { "enum": ["PROPOSAL_MERGE", "ACCEPTANCE_MERGE"] }, "grant_id": { "$ref": "#/$defs/id" }, "grant_raw_sha256": { "$ref": "#/$defs/digest" }, "single_use_nonce": { "type": "string", "pattern": "^nonce-program-c-[a-z0-9-]{4,96}$" }, "consumption_id": { "$ref": "#/$defs/id" }, "consumption_raw_sha256": { "$ref": "#/$defs/digest" }, "reserved_ledger_revision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 } } },
+    "machineCheckEvidence": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/machineCheck" } },
+    "machineCheck": { "type": "object", "additionalProperties": false, "required": ["github_app_id", "github_app_slug", "check_run_id", "check_suite_id", "context", "workflow_id", "workflow_path", "trusted_base_workflow_blob_sha", "actions_run_id", "actions_run_attempt", "actions_run_event", "actions_run_head_sha", "actions_run_conclusion", "reusable_signer"], "properties": { "github_app_id": { "$ref": "#/$defs/actorId" }, "github_app_slug": { "type": "string", "minLength": 1, "maxLength": 128 }, "check_run_id": { "$ref": "#/$defs/actorId" }, "check_suite_id": { "$ref": "#/$defs/actorId" }, "context": { "type": "string", "minLength": 1, "maxLength": 256 }, "workflow_id": { "$ref": "#/$defs/actorId" }, "workflow_path": { "type": "string", "pattern": "^\\.github/workflows/[a-zA-Z0-9._-]+\\.ya?ml$" }, "trusted_base_workflow_blob_sha": { "$ref": "#/$defs/gitSha" }, "actions_run_id": { "$ref": "#/$defs/actorId" }, "actions_run_attempt": { "$ref": "#/$defs/actorId" }, "actions_run_event": { "const": "pull_request_target" }, "actions_run_head_sha": { "$ref": "#/$defs/gitSha" }, "actions_run_conclusion": { "const": "success" }, "reusable_signer": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/reusableSigner" }] } } },
+    "reusableSigner": { "type": "object", "additionalProperties": false, "required": ["workflow_id", "workflow_path", "workflow_sha"], "properties": { "workflow_id": { "$ref": "#/$defs/actorId" }, "workflow_path": { "type": "string", "pattern": "^\\.github/workflows/[a-zA-Z0-9._-]+\\.ya?ml$" }, "workflow_sha": { "$ref": "#/$defs/gitSha" } } }
+  }
+}

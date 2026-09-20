@@ -34,6 +34,30 @@ function request(): { url: string; headers: Record<string, string> } {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('buildGatewayProvider — verified production model transports', () => {
+  it('rejects blank or whitespace-padded dispatch credentials', () => {
+    expect(buildGatewayProvider({
+      ...providerEnv(),
+      MODEL_GATEWAY_KEY: '   ',
+    })).toBeNull();
+    expect(buildGatewayProvider({
+      ...providerEnv(),
+      MODEL_GATEWAY_KEY: ' test-key ',
+    })).toBeNull();
+  });
+
+  it('rejects request timeouts outside the code-owned wire-owner window', () => {
+    for (const timeout of ['999', '300001', '1e3', ' 180000 ']) {
+      expect(buildGatewayProvider({
+        ...providerEnv(),
+        MODEL_TIMEOUT_MS: timeout,
+      })).toBeNull();
+    }
+    expect(buildGatewayProvider({
+      ...providerEnv(),
+      MODEL_TIMEOUT_MS: '300000',
+    })).not.toBeNull();
+  });
+
   it('does not expose an environment-controlled product stub policy', () => {
     expect(modelProviderConfig).not.toHaveProperty('stubAllowed');
   });

@@ -3,14 +3,22 @@ import { createHash } from 'node:crypto';
 export const GENERIC_OPERATION_PROJECTION_VERSION =
   'generic-operation-projection/v1' as const;
 
-// PostgreSQL caps the stored JSONB envelope at 128 KiB. Keep 8 KiB reserved
-// for the digest field plus JSONB key/value formatting so an application-valid
-// projection cannot fail only after a physical call has succeeded.
+// Typed projections reserve one KiB for this wrapper. Compact JSON remains
+// below 120 KiB, while a second structural estimate accounts for PostgreSQL
+// jsonb::text separator spacing up to the durable 128 KiB contract.
 const MAX_BYTES = 120 * 1024;
+const MAX_POSTGRES_JSONB_TEXT_BYTES = 128 * 1024;
 const MAX_STRING = 64 * 1024;
 const MAX_ARRAY = 256;
-const MAX_FIELDS = 512;
-const MAX_DEPTH = 8;
+// The widest registered typed shape is bounded below this value (including
+// maximum arrays and every optional domain field). Bytes remain the ultimate
+// aggregate bound for generic tool results.
+const MAX_FIELDS = 4_096;
+// Model replay wraps a typed projection inside the generic envelope. The
+// provider-wire observation adds one bounded probe object below that typed
+// result; total bytes (128 KiB), fields (4,096), and arrays (256, wire probes 2)
+// remain independently capped.
+const MAX_DEPTH = 10;
 const SCHEMA = /^[a-z][a-z0-9_-]{1,63}\/v[1-9][0-9]{0,3}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const SENSITIVE_KEYS = new Set([
@@ -69,6 +77,38 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function postgresJsonbTextUpperBoundBytes(value: unknown): number {
+  if (value === null || typeof value === 'boolean') {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  }
+  if (typeof value === 'string') {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  }
+  if (typeof value === 'number') {
+    const encoded = JSON.stringify(value);
+    // PostgreSQL numeric expands exponent notation. Every accepted JavaScript
+    // number is finite; 400 bytes safely covers the longest subnormal decimal.
+    return /e/iu.test(encoded) ? Math.max(400, encoded.length) : encoded.length;
+  }
+  if (Array.isArray(value)) {
+    return 2 + value.reduce(
+      (total, entry, index) =>
+        total + postgresJsonbTextUpperBoundBytes(entry) + (index === 0 ? 0 : 2),
+      0,
+    );
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  return 2 + entries.reduce(
+    (total, [key, entry], index) =>
+      total +
+      Buffer.byteLength(JSON.stringify(key), 'utf8') +
+      2 +
+      postgresJsonbTextUpperBoundBytes(entry) +
+      (index === 0 ? 0 : 2),
+    0,
+  );
+}
+
 export function projectGenericOperationResult(input: {
   kind: 'model' | 'tool';
   schema: string;
@@ -86,7 +126,10 @@ export function projectGenericOperationResult(input: {
     ...base,
     digest: createHash('sha256').update(canonical(base)).digest('hex'),
   });
-  if (Buffer.byteLength(canonical(projected), 'utf8') > MAX_BYTES) invalid();
+  if (
+    Buffer.byteLength(canonical(projected), 'utf8') > MAX_BYTES ||
+    postgresJsonbTextUpperBoundBytes(projected) > MAX_POSTGRES_JSONB_TEXT_BYTES
+  ) invalid();
   return projected;
 }
 

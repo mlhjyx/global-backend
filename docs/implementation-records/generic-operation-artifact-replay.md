@@ -49,7 +49,7 @@
 
 - 唯一公开 result reference schema 是 `generic-operation-artifact-ref/v1`，字段为 `artifactId`、`operationId`、`resultSchema`、`sha256`、canonical decimal `sizeBytes`、`mediaType`、`expiresAt`。它拒绝 extra fields，**不**携带 object key、body、headers、credentials、prompt、token 或 provider raw body。
 - 内部 manifest schema 是 `generic-operation-artifact/v1`，额外绑定 `scopeKind`、workspace（platform 为 null）、authority、operation、privacy、source digest、创建/过期时刻与内部 object key。
-- final key 严格由 digest 派生：`generic-operation-results/v1/sha256/<first-two-hex>/<64-lowercase-hex>`；staging key 只能由生成的 artifact UUID 派生：`generic-operation-results/v1/staging/<uuid>`。调用方不能选 key。
+- final key 严格由受控 privacy class + digest 派生：`generic-operation-results/v1/final/<privacy-class>/sha256/<first-two-hex>/<64-lowercase-hex>`；三种 privacy class 使用互不重叠的物理 prefix，staging key 只能由生成的 artifact UUID 派生：`generic-operation-results/v1/staging/<uuid>`。调用方不能选 key。
 - 三个 privacy class 仅为 `PUBLIC_ORGANIZATION`、`CONFIDENTIAL_TENANT`、`PERSONAL_DATA`；`sizeBytes` 是不带前导零、最大 signed-64-bit 的 decimal string。
 
 ### 3.2 数据库与 expected facts
@@ -93,7 +93,7 @@ GENERIC_OPERATION_ARTIFACT_MINIO_DISPOSABLE=1
 GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET=operation-artifacts-t7-<8 lowercase hex>
 ```
 
-它使用同一 disposable endpoint 上的 root、runtime、PERSONAL_DATA reader 三个独立 S3 principal，且运行时配置在 API/Worker 中是 endpoint/bucket/region/access-key/secret-key reference。bootstrap 是唯一 deployment owner：创建 dedicated bucket、启用 versioning、启用 SSE-S3、导入 lifecycle、创建/绑定最小 IAM policy，并 readback versioning、encryption、lifecycle 和 user policy。应用只验证；readiness 不 provision bucket。
+它使用同一 disposable endpoint 上的 root、runtime、PERSONAL_DATA reader、PERSONAL_DATA cleanup 四个独立 S3 principal，且运行时配置在 API/Worker 中是 endpoint/bucket/region/access-key/secret-key reference。bootstrap 是唯一 deployment owner：在首个 provision mutation 前先以成功的 root bucket inventory 区分“明确不存在”与“preflight 不可用”；bucket 存在时再把 predecessor `v1/sha256/` 的 version-aware listing 单独写入受控临时文件并检查 producer exit status。current/noncurrent version 或 delete marker 任一非零即 `GENERIC_OPERATION_ARTIFACT_LAYOUT_MIGRATION_REQUIRED`，inventory/list 失败则 `GENERIC_OPERATION_ARTIFACT_STORAGE_PREFLIGHT_UNAVAILABLE`；只有明确缺 bucket 或零旧布局才创建 dedicated bucket、启用 versioning、启用 SSE-S3、导入 lifecycle、创建/绑定最小 IAM policy，并 readback versioning、encryption、lifecycle 和 user policy。应用只验证；readiness 不 provision bucket。
 
 | prefix/tag | lifecycle contract |
 | --- | --- |
@@ -103,7 +103,9 @@ GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET=operation-artifacts-t7-<8 lowercase hex>
 | `artifact-privacy=PERSONAL_DATA` | 1 day、all versions/noncurrent 1 day |
 | final/readiness delete markers | final delete-marker cleanup；readiness prefix cleanup with 1-day noncurrent rule |
 
-runtime policy 只读 bucket configuration、限制 ListBucketVersions 到 readiness prefix、读取 staging/readiness/final objects、写 staging/readiness/final（final/readiness 要求 `artifact-privacy` tag）、仅删除 staging/readiness、并可 abort multipart；personal reader 仅可读取 tag 为 `PERSONAL_DATA` 的 final objects。它不是 root、不能管理 lifecycle 或 bucket。readiness 使用 reserved prefix 做 bounded **write/read/delete** canary，缺 bucket、lifecycle/versioning/encryption/IAM/object contract 任一不匹配均 not-ready，Worker 必须不 polling。
+runtime policy 只读 bucket configuration、限制 ListBucketVersions 到 readiness prefix、读取 staging/readiness/final objects、写 staging/readiness/final（final/readiness 要求 `artifact-privacy` tag）、仅删除 staging/readiness、并可 abort multipart；personal reader 仅可读取 personal-data prefix 且 tag 为 `PERSONAL_DATA` 的 final objects。cleanup principal 没有 list、write、tag mutation 或 bucket 管理权限，只能对 `final/personal-data/` 物理 prefix 读取 exact version、读取 exact-version tag 和删除 exact version；PUBLIC_ORGANIZATION 与 CONFIDENTIAL_TENANT 使用互不重叠的 prefix，cleanup credential 对其 exact VersionId 也会被对象存储拒绝。S3 权限模型不支持用 `s3:ExistingObjectTag` 条件授权 DELETE，因此应用 adapter 仍须先按同一 `VersionId` 读取 tag set，并且只有唯一 `artifact-privacy=PERSONAL_DATA` 时才发送删除；缺失、非个人或歧义 tag 均 fail closed。它们都不是 root、不能管理 lifecycle 或 bucket。readiness 使用 reserved prefix 做 bounded **write/read/delete** canary，缺 bucket、lifecycle/versioning/encryption/IAM/object contract 任一不匹配均 not-ready，Worker 必须不 polling。
+
+2026-09-01 的 retained development provision 首次实际执行这条 cleanup policy 时，MinIO 明确拒绝把 `s3:ExistingObjectTag/artifact-privacy` 用于 `s3:DeleteObjectVersion`。这与 S3 的公开授权语义一致：existing-object-tag 条件可约束读取，但不能约束删除。修复没有把 cleanup credential 扩成 root，也没有按环境切换实现；它新增 privacy-class 物理 prefix，把不可表达的分类边界下沉到 IAM resource ARN，并在 exact-version cleanup adapter 继续强制 tag 闭集验证。真实 MinIO 还证明该发行版对带 VersionId 的 tag/delete 请求分别检查 `GetObjectTagging`/`DeleteObject` action，因此 policy 同时声明标准 version action 与目标实现实际检查的 action，但全部只限 personal-data prefix。forward-only migration `20260901060000_generic_operation_artifact_privacy_prefix` 同步替换 table CHECK、manifest assertion 与 append/cleanup functions，并把 object identity 从单独 `sha256` 扩成 `(sha256, privacy_class)`，因此同一 bytes 可在不同 privacy 物理边界各有一条不可变 object；任一现有 object/manifest/pending cleanup row 都要求另行迁移。S3 bootstrap 独立扫描数据库无法证明的 orphan predecessor versions。原失败 bootstrap 在创建 cleanup user 前退出；修复后的同一 bootstrap 已在同一 retained MinIO 上完整返回 `OBJECT_STORAGE_PROVISIONED`。
 
 `generic-operation-artifact.minio.spec.ts` 的 six 个物理-store scenarios 覆盖：两 client 的 maximum-object immutability/reuse、corrupt staging/final metadata drift、lifecycle/versioning/encryption readback、PERSONAL_DATA read-role deny、readiness canary 不创建 missing bucket，以及 MinIO all-version-expiry extension drift fail closed；其中 fresh child process 重新 materialize 证明 restart/worker boundary。**截至 refresh HEAD `9aab31ff…`，当前 worktree 仍没有 fresh disposable MinIO receipt，故这 six 个 scenarios 的结果仍为 `RESULT_UNKNOWN`，不是 PASS/production evidence。** 这是为了不写入由其他 worktree 管理的 retained `global-minio`；也没有 image pull、provider call 或 retained topology mutation。
 

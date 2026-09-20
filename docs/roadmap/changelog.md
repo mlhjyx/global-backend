@@ -1,6 +1,76 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-12 · GrowthOS managed release restoration
+
+- 只读发现current选择器仍指向20260823 demo及local标签；恢复已发布541bcc63基线的三项exact镜像，并把选择器改到managed release，不重建源码、不接空卷。恢复前用实际Flyway12.8.1校验代码逐项比对27个迁移checksum，全部匹配；fresh备份可读且0600，基础设施镜像及既有凭据保持。
+- 三项产品容器healthy，JWKS三端点200且public-only；Tenant/Platform首页200，3002/3003/18081只绑定loopback。MySQL改用已发布release中正确权限的配置，旧world-writable警告消失；27/27迁移无变化。
+- Backend的identity/Budget/Execution JWKS、workspace budget和quote authentication恢复ok；aggregate仍503，阻断推进至平台Temporal proof和matching Worker。没有把历史基线恢复冒充最新GrowthOS候选、serviceJWT/producer/consumer、UAT或Pilot完成。精确来源、备份/校验摘要及镜像见[恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)。
+
+## 2026-09-12 · Browser proc-exit race successor and exact-image adoption
+
+- #517 在同步 #498 后以 exact head `0a7d2259466c144291f1e6abede51360c02eb1ac` 完成 required CI 和独立 delta review，合入为 `b6be49020b28dccf2f67413667c396a893b9ce94`。修复将 Linux proc stat 的 ESRCH 识别为该 PID 已消失，仍扫描其他成员并保留 EACCES/EIO/活进程组的阻断。先前 headless/timeout 变更及重启后的短暂成功并未消除该竞态。
+- 从该 exact main 发布 `ghcr.io/mlhjyx/global-backend@sha256:175ae53c6500456f1121d006fd4add694231d15e20d26fbd77ef795d3f9f90d5`，先完成发布来源校验、服务器预拉取和离线 verifier，再于13:28 UTC采用。API、Worker、Relay回读匹配同一source/image/artifact/migration；没有queued/running BuildRun，没有手工业务数据更新、迁移或凭据改动。
+- [持续运行观察](../evidence/browser-readiness-runtime-adoption-20260912.md) 已完成30分钟60次采样，observer exit0且PASS；browser持续`ok`不升级为整体ready。GrowthOS旧demo运行导致identity/Budget/Execution JWKS不可用，平台当前首先停在QUOTE_UNAVAILABLE，Worker仍STARTING。历史观察保留，不重写成新版本通过。
+- GrowthOS0101/0102的codec与独立签名/JWKS完成本地patch重放和35项相关测试；实际Java签名与Backend互操作通过，Backend本地`a56665123572b9471dff2761fb87cb3eb6472c9a`增加持久golden vectors及111项capability回归，精确绑定见[本地验签记录](../evidence/platform-capability-java-local-20260912.md)。未把这些源码结果外推为service JWT交付、真实producer/consumer、hosted跨仓CI或UAT。
+
+## 2026-09-12 · Browser readiness headless environment successor
+
+- PR #513 `fix(runtime): pass headless mode to browser readiness probe` 已通过完整 hosted CI 并合入，merge commit 为 `479d51f0dd474df31f0547923cc072064b897a03`。修复在受控浏览器子进程环境中显式传递 `CHROME_HEADLESS=1`，保留批准的 Chromium executable、隔离临时目录、网络禁用参数和 fail-closed 错误语义；聚焦 runtime 测试 58/58 通过。
+- 从该 exact main 发布并验证新的 immutable OCI：`ghcr.io/mlhjyx/global-backend@sha256:137f881da04ac2d22258dd909c674798613335745226d22dd2cc9a03c965a783`，artifact `sha256:fe8e6fb41438012b502a791b7b3a9eda32bb4af078a5593dbf2e1c20fd5d6070`，manifest `sha256:0111e7a4016fa052788abd1604d9d0365202b3c554279cb5b0df791e61b2389f`，SBOM `sha256:5fe6a6215565126612b2476fcfe27c77618a9fb1f768d213529dc85fa3d882ff`，并完成 registry provenance attestation。
+- API 与 Worker 已通过受控 drain-and-swap 运行该同一 digest，`/health/build` 返回 attested、image/artifact/migration identity 一致；Chromium browser readiness 现为 `ok`。`/health/ready` 仍为 503，原因仍是 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE` 与 `MATCHING_WORKER_NOT_READY`，不把浏览器修复外推为平台或产品就绪。
+- 首次运行中 readback 曾捕获一次 browser probe 清理失败并按 singleton 语义保持 fail-closed；未修改数据或绕过门，执行同 digest 的受控 API/Worker 重启后 browser 恢复，连续 5 次 `/health/ready` readback 均为 browser=`ok`，残留 probe 目录已清理。该事实说明当前恢复依赖受控重启，不能宣称已有自动自愈或 RuntimeEvidence。
+- 当前未执行真实付费模型调用；客户 Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`，`cap_microusd` 仍只是平台内部执行安全包络。旧 PR #479 已关闭为 provenance，干净重放候选 #515 的 GrowthOS capability producer、capability JWKS/service token、真实 Temporal reader、revocation delivery 和跨仓 hosted contract 仍保持 HOLD。
+
+
+## 2026-09-06 · GitHub queue currentness closeout
+
+- 22:09 +08:00 只读复核 root/remote main `17b637d7e2a333cc4c76f04c7798b42f74f2fb37` 及该提交成功的 build/contracts/security/governance/CodeQL/advisory checks；#455 平台 Temporal 基础设施、#456 执行规则与 #457 决策卡修复均已合入，不再列为待合入候选。
+- GrowthOS 本地 authority 已前进到 clean `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；其当前接纳仍需独立证据。API/Worker metadata 仍为 `674ff12d…` / `sha256:b70175a0…`，6 条 RuntimeEvidence 全部 historical；本次没有重新验证 readiness 或用户旅程。
+- 承接既有 #451 文档修订，保留原历史条目和冻结证据。GitHub 队列收口授权不扩大为部署、保留迁移、Provider/模型/付费或 Pilot 授权。
+
+## 2026-09-06 · Global source merge readback and currentness correction
+
+- #452 Browser 默认生命周期接线、#453 ACK 状态回读、#454 DeletionCompleted v1 兼容修复依次合入，最终 merge 为 `63b4af94b662d7e2b6a40823a1872daf0fc9b993`。三项 PR 必需 CI 与该主线 CI 全部成功；最终源码树匹配本地组合，134 项相关测试、4 项一次性 PG/RLS、构建与 OpenAPI 一致性通过。
+- 后续另一任务合入 #457，主线前进到 `8eefba1cff15f2bbe4154451cac958a072803ab5`。2026-09-06 21:17 +08:00 回读时，其安全、治理、依赖、CodeQL 成功，CI 仍在运行；不能挪用前一提交的全绿描述。
+- 同次 Docker metadata 显示 API/Worker 仍运行旧 `674ff12d…`/image `b70175a…`，不是新修复的运行验收。治理报告 0 current / 6 historical RuntimeEvidence；没有新部署、保留数据迁移、缓存清理、Provider/模型调用或 UAT。
+- Program C 同文件 C1 合同在独立工作区提交 `4b116f10…`，三项剩余 wire/privacy/digest finding 已复审关闭；这是本地文档，不是 main 中的 C1 实现。GrowthOS 当前 writer 仍须完成明确文件交接。
+- 此次文档候选撤销针对旧日期/SHA/临时状态的硬编码文字断言，保留稳定 ownership、历史计划合同及真实机器 RuntimeEvidence/Release/权限/晋级测试；architecture 与 evidence 索引改为引用唯一 current 页面，不复制动态计数。旧观察和原始 evidence 不改写。
+
+## 2026-09-04 · Global dynamic currentness successor
+
+- 18:58 +08:00 source/worktree 与 18:32 runtime readback 固定 repository source `0679a0bc510a980f65ebd33eb88b3215a97c20ba` 和 development runtime source `674ff12d4d768ce5599fc07b565fe21da37dc5fe` 为分离身份；后者落后 main 4 commits。服务/探针健康不等于 current main 已部署，3001 与 legacy 8080 wildcard 风险仍开放。
+- 全局 G5 拆为 `G5-Site=AMBER / TIME_LIMITED` 与 `G5-Acquisition=RED / NOT_READY`：6 条 RuntimeEvidence 中 current 2 / historical 4，current 2 仅属 Site 且到期 `2026-09-05T03:49:25.000Z`；Acquisition evidence 为空，platform readiness 报 `PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING`。
+- Program B accepted source slices #427/#431/#432 已不可变进入 main，必须与 active Task0L 分开；后者 authoritative implementation review 仍为 `C3 / H3` 且 coverage <80%。Program C durable consumer/Opportunity/commit-before-ACK 尚未实现。current-main Supply Chain Canary run `33855198691` 因 advisory baseline stale 失败，不能称 main CI 全绿。
+- 本 successor 只更新 currentness 合同和导航；不改写 RuntimeEvidence/Release Bundle，不执行 push、PR、merge、retained migration、部署、listener 调整、provider/model dispatch、UAT 或 Pilot。
+
+## 2026-09-04 · Platform writer terminal reconciliation and fresh zero-model evidence
+
+- 追加 platform-writer development successor evidence。fresh deterministic smoke 在同一 exact runtime 上完成且 model calls 为 0；历史 Spend 保持 `UNKNOWN/unknown`、reservation/conservative charge 均为 `800000`。
+- request-bound reconciliation attempts 1–5 为 `UNRESOLVED`，attempt 6 已 `EXPIRED`；该终态不产生 durable output、ACK、精确费用、redispatch 或第二次物理调用，也不构成 generative success、UAT、Pilot 或 GA。Platform acquisition authority 仍 missing，customer Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`。
+
+## 2026-09-02 · Platform writer API composition and exact-runtime successor
+
+- PR #443 修复 API Nest composition 漏装配：专用 `execution_budget_platform_writer` client 只来自唯一 deployment env，缺失/空白保持 fail-closed，owner/app URL 行为级负例禁止 fallback；API/Worker 复用同一工厂，API lifecycle 负责断连。完整 CI、CodeQL、安全与独立 review 通过。
+- exact main `674ff12d…` 发布为 `sha256:b70175a0…`，GitHub environment approval、registry attestation、非 root/entrypoint 与离线 image verifier 通过；API/Worker/Relay drain-and-swap 后共同绑定 artifact `sha256:f34128f5…`，127 migrations、READY、restart 0、mixed digest 0。
+- Platform capability 从 `WRITER_UNAVAILABLE` 变为 `PLATFORM_ACQUISITION_MISSING`，证明专用 writer/principal 可用但外部 Control Plane 仍未摄入 `platform.acquisition`、`platform.intent_watch`、`platform.sanctions`。没有 seed 假 authority；该缺口不阻塞 Site Builder workspace Grant。
+- 新 digest 上以 `DETERMINISTIC_ONLY=1` 运行 GrowthOS Session→Access Token→Technical Quote→Budget Grant→Intake→READY Release，BuildRun `034e4175…` 成功且模型调用为 0。历史 UNKNOWN Spend 在三次只读 reconciliation 后仍无 Gateway consume log；完整 reservation 与不重发语义保持。
+- 新增追加式 successor RuntimeEvidence、readback 与 development CANDIDATE；旧 evidence 不改写，Pilot/GA、成功 generative output、公开发布和客户 Billing/Credits 均未因此成立。
+
+## 2026-09-02 · Production Parity development capability cutover and UNKNOWN settlement correction
+
+- GrowthOS authority `541bcc63…` 的三个独立 RS256 signing domains、短期 Backend Access Token、零费用 Technical Budget Quote 与自动 Site Build Budget Grant 已装配到 Tenant Web；客户没有余额、充值、模型次数或固定金额门，technical cap 只作为平台执行安全包络。商业 Billing/Credits 继续 `DEFERRED / NOT_IMPLEMENTED`。
+- Backend PR #440/#441 合入后发布并部署 `main@da2f7aeb…` 的 exact OCI `sha256:66e2dbf8…`。API、Worker、Outbox Relay 三个 fresh lease 共用同一 image/artifact/migration；127 migrations、readiness、GrowthOS 三个 JWKS 与无 mixed queue digest 均已读回。
+- 同路径确定性 Intake BuildRun `84aa659f…` 成功并产生 READY Release。获授权的一次真实模型 refurbish BuildRun `81dcfe5a…` 没有 durable output/ACK；修复后的持久事实为 `UNKNOWN/unknown`、完整 reservation 保守扣减、paid-call kill switch 关闭，request-bound reconciliation attempt 1 为 `UNRESOLVED/log_unavailable`。只有一次物理模型调用，没有自动重发。
+- 新增 development RuntimeEvidence、脱敏 readback 与 `CANDIDATE` Release Bundle；它们明确不授权 Pilot/GA，不证明模型质量或公开发布。`platform_budget_authority` writer 仍不可用，但 Site Builder 使用的 workspace budget authority ready。
+
+## 2026-09-01 · MinIO PERSONAL_DATA exact-version cleanup policy correction
+
+- Production Parity retained-development bootstrap 首次真实 provision dedicated artifact bucket 时，bucket、versioning、SSE-S3、lifecycle、runtime policy 和 personal-read policy 均成功，但 MinIO 对 cleanup policy 返回：`s3:ExistingObjectTag/artifact-privacy` 不支持 `s3:DeleteObjectVersion`。bootstrap 按设计失败关闭，没有创建 cleanup user，也没有启动 Backend runtime。
+- 根因是 S3 授权模型本身不允许基于 existing-object tag 授权 DELETE，而不是 development/production 配置差异。修复保持一个产品路径：final key 由受控 privacy class + digest 派生到三个互斥物理 prefix；runtime 的 Put/PutTag 权限逐 prefix 绑定唯一 privacy tag，cleanup IAM 只允许 `final/personal-data/*` 的 exact-version read/tag/delete，无 list/write/tag mutation/bucket管理。adapter 在同一 exact `VersionId` 上读取 tag，并只在 tag set 唯一等于 `artifact-privacy=PERSONAL_DATA` 时删除。缺 tag、非个人 tag、歧义 tag、版本不一致或读取失败均在 delete 前关闭；模糊 404 只有在 bucket location 仍可读时才作为 ABSENT，NoSuchBucket/endpoint 404 保持重试失败。
+- 新增 forward-only `20260901060000_generic_operation_artifact_privacy_prefix`：任一 object/manifest/pending cleanup 非空即要求显式迁移；空库才把 object 主键扩成 `(sha256, privacy_class)`，并替换两张表 CHECK、manifest assertion、append/cleanup object lookup。一次性 PostgreSQL 从零应用 125 migrations；同一 digest 的三种 privacy object 可并存，新 prefix 通过、旧 prefix 拒绝、函数 readback 更新。S3 bootstrap 在首个 provision mutation 前独立执行 version-aware predecessor-prefix scan；root bucket inventory 或 version listing 任一失败均稳定 `STORAGE_PREFLIGHT_UNAVAILABLE` 且零 mutation，真实 MinIO 非零 version 拒绝、清零后接受，覆盖“DB 空但 promote 后 orphan version 存在”的失败窗。
+- RED 覆盖证明旧 adapter 会跳过 tag gate；GREEN 后 artifact+budget focused 336 PASS / 9 conditional skip、deployment contract 9/9、API build 和完整 API 429 files / 6,396 tests PASS（4 files / 42 tests conditional skip）。修复版 bootstrap 在同一 retained MinIO 上完成三类最小权限 user/policy attach并返回 `OBJECT_STORAGE_PROVISIONED`；真实 cleanup-principal spec 3/3 证明 personal exact-version 删除、confidential direct-delete deny、cross-prefix/tag 写拒绝、无 list/tag mutation、旧版本删除不产生新 marker 与 missing-bucket fail closed。测试在任何 client/stage/promote 前进入外层 `try/finally`，按阶段登记 staging/final key 与 exact VersionId；从全 bucket 0 开始并在 finally version-aware 清除 final/staging versions 与 delete markers，结束仍为 0。这仍不等于 Backend API/Worker readiness、真实 BuildRun 或 Pilot/GA；必须发布新的 exact-main OCI，当前中间镜像不得部署。
+
 ## 2026-08-24 · Production Parity PERSONAL_DATA cleanup runtime readback
 
 - [PR #413](https://github.com/mlhjyx/global-backend/pull/413) 在 required CI、Supply Chain、CodeQL 与全部 inline review thread 收口后，以普通 merge commit `866ede78` 合入 main；未使用 admin bypass。main freshness 以 `BASELINE_SOURCE_LOCK_MISMATCH` HOLD，证明旧 36-advisory baseline 不能描述新 lock。后继 baseline refresh 从 exact main 重建 10 条 advisory / 10 条 canonical exposure，并逐项继承剩余 Site Renderer/Astro 的 owner、due date 与 validity；不把已解决项保留为例外，也不延后剩余债务。

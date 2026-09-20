@@ -17,9 +17,10 @@ const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
 function fakeBroker(handlers: {
   search?: () => FrCompanyHit[];
   throwOn?: boolean;
+  throwError?: unknown;
 }): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
   const invokeMock = vi.fn(async (_toolId: string, _input: InpiRneInput): Promise<ToolResult<InpiRneOutput>> => {
-    if (handlers.throwOn) throw new Error('gate denied');
+    if (handlers.throwOn) throw handlers.throwError ?? new Error('gate denied');
     return { data: { companies: handlers.search?.() ?? [] }, costCents: 0 };
   });
   return {
@@ -183,5 +184,18 @@ describe('inpi_rne · discoverContacts', () => {
     const broker = fakeBroker({ throwOn: true });
     const res = await new InpiRneContactProvider({ broker }).discoverContacts(frCompany, CTX);
     expect(res.contacts).toEqual([]);
+  });
+
+  it('never downgrades an execution-budget or Domain ACK control failure to an empty source result', async () => {
+    const control = Object.assign(new Error('activity failed'), {
+      cause: Object.assign(new Error('budget failed'), {
+        code: 'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
+      }),
+    });
+    const broker = fakeBroker({ throwOn: true, throwError: control });
+
+    await expect(
+      new InpiRneContactProvider({ broker }).discoverContacts(frCompany, CTX),
+    ).rejects.toBe(control);
   });
 });

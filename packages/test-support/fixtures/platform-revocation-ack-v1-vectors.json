@@ -1,0 +1,38 @@
+{
+  "schema_version": "platform-revocation-ack-vectors/v1",
+  "revocation_typ": "execution-budget-authority-revocation+jwt",
+  "revocation_kid": "execution-active",
+  "ack_typ": "platform-authority-fence-ack+jwt",
+  "ack_kid": "backend-ack-active",
+  "command": {
+    "schema_version": "PlatformExecutionBudgetAuthorityRevoked/v1",
+    "iss": "https://growthos.example",
+    "aud": "global-backend:execution-budget",
+    "revocation_jti": "11111111-1111-4111-8111-111111111111",
+    "target_issuer": "https://growthos.example",
+    "target_jti": "22222222-2222-4222-8222-222222222222",
+    "schedule_id": "acq-sweep",
+    "workflow_run_id": "33333333-3333-4333-8333-333333333333",
+    "fence_sequence": "1",
+    "reason_code": "POLICY_DISABLED",
+    "iat": 1788830000,
+    "nbf": 1788830000,
+    "exp": 1788830300
+  },
+  "ack": {
+    "schema_version": "PlatformExecutionBudgetFenceAcknowledged/v1",
+    "iss": "https://backend.example",
+    "aud": "growthos:platform-authority-fence-ack",
+    "jti": "44444444-4444-4444-8444-444444444444",
+    "revocation_jti": "11111111-1111-4111-8111-111111111111",
+    "command_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "schedule_id": "acq-sweep",
+    "fence_sequence": "1",
+    "backend_generation": "1",
+    "committed_at": 1788830000,
+    "in_flight_attempts": "0",
+    "iat": 1788830000,
+    "nbf": 1788830000,
+    "exp": 1788830300
+  }
+}

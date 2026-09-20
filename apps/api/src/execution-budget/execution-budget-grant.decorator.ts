@@ -41,7 +41,32 @@ export const ExecutionBudgetGrant = createParamDecorator(
   },
 );
 
-export function ApiExecutionBudgetGrant(): MethodDecorator {
+export function ApiExecutionBudgetGrant(options?: {
+  additionalForbiddenCodes?: readonly string[];
+}): MethodDecorator {
+  const additionalForbiddenCodes = options?.additionalForbiddenCodes ?? [];
+  const forbiddenCodes = [
+    'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+    ...additionalForbiddenCodes,
+  ];
+  const forbiddenSchema: SchemaObject =
+    additionalForbiddenCodes.length === 0
+      ? AUTHORITY_ERROR_SCHEMA
+      : {
+          ...AUTHORITY_ERROR_SCHEMA,
+          properties: {
+            error: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['code', 'message'],
+              properties: {
+                code: { type: 'string', enum: forbiddenCodes },
+                message: { type: 'string' },
+              },
+            },
+          },
+        };
   return applyDecorators(
     ApiHeader({
       name: EXECUTION_BUDGET_GRANT_HEADER,
@@ -58,8 +83,10 @@ export function ApiExecutionBudgetGrant(): MethodDecorator {
     ApiResponse({
       status: 403,
       description:
-        'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED',
-      schema: AUTHORITY_ERROR_SCHEMA,
+        additionalForbiddenCodes.length === 0
+          ? 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED'
+          : forbiddenCodes.join(' or '),
+      schema: forbiddenSchema,
     }),
     ApiResponse({
       status: 409,

@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { BudgetExceededError, BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
-import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
+import { resolveIcpToCpv, boundedTargetCountries, collectIndustryTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
 import { resolveIcpToNaics } from '../discovery/icp-to-naics';
 import { SignalIngestService, IngestOutcome } from '../signals/signal-ingest.service';
@@ -176,7 +176,7 @@ export function createExternalIntentActivities(deps: {
 
       const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
       const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
-      const targetCountries = splitTerms(icp.targetMarkets);
+      const targetCountries = boundedTargetCountries(icp.targetMarkets);
       const product = attrs.product ? String(attrs.product) : undefined;
       const tradeSide = attrs.trade_side ? String(attrs.trade_side) : undefined;
 

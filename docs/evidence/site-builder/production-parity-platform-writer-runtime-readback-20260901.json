@@ -1,0 +1,138 @@
+{
+  "schema_version": "site-builder-production-parity-runtime-readback/v2",
+  "result": "PASS_WITH_LIMITATIONS",
+  "scope": "development exact runtime, deterministic product path, and persisted UNKNOWN containment",
+  "verified_at": "2026-09-01T20:08:12.000Z",
+  "valid_until": "2026-09-02T19:08:12.000Z",
+  "backend": {
+    "commit": "674ff12d4d768ce5599fc07b565fe21da37dc5fe",
+    "image_digest": "sha256:b70175a0904c6a6a2089efbf914467cb1dcd7465ca1eb9a1066649cb6190f2c9",
+    "artifact_digest": "sha256:f34128f5bc1c48cbfc7147b74d344a9b81b40d6812473a50f7d69d43bd52dec0",
+    "artifact_manifest_digest": "sha256:f4b69a0b4813e1e175582520e925af0dd4e637f900589a17a9b0ef4c83f8b361",
+    "sbom_digest": "sha256:45df01d11090814bd3927ef05607e4c77fd16f88cd59aa38d1b70957c557af89",
+    "source_tree_digest": "sha256:bbfa4d73c9988d2ffba2a9a810c301c09f9a0bcfc4859bd5bf7db3c4e5467b2c",
+    "renderer_digest": "sha256:aa1688a7c05489fae24606fffb75483e21d5cfee7e64a6fd9e071138c7775474",
+    "schema_digest": "sha256:e1f7d2c81ea4358c01776508503855baf573492873ef81246f96e528a0f8db1d",
+    "migration_revision": "20260902020000_unknown_spend_reconciliation",
+    "successful_migrations": 127,
+    "health_build_http_status": 200,
+    "health_ready_http_status": 200,
+    "readiness": "ready",
+    "task_queue": "understanding",
+    "mixed_active_worker_digests": 0,
+    "runtime_leases": [
+      {
+        "role": "API",
+        "instance_id": "139dbb82-65be-554e-9fbe-669b5bbdcd32",
+        "state": "READY"
+      },
+      {
+        "role": "OUTBOX_RELAY",
+        "instance_id": "b2e25650-2b7b-51bb-8d60-5f2e1eb9167d",
+        "state": "READY"
+      },
+      {
+        "role": "WORKER",
+        "instance_id": "6185096a-17b4-5f67-8d8b-3f84c6432fa0",
+        "state": "READY",
+        "task_queue": "understanding"
+      }
+    ],
+    "capabilities": {
+      "workspace_budget_authority": "ok",
+      "platform_budget_authority": "PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING"
+    }
+  },
+  "growthos": {
+    "authority_commit": "541bcc63c3486296ab4e2461d4d005e6cd43710b",
+    "source_archive_sha256": "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a",
+    "patch_stack_sha256": "33102a8d5f9f7b073f21dd77c7aeec97c9b60e13be2f4ccf52f9bc8cd0c5cdf2",
+    "images": {
+      "backend": "sha256:1535bb01c410e3ffa4b2ec469dbbe94a0e6128eb77eaed31dd03a676fa78f10c",
+      "tenant_web": "sha256:d60a13201ab0116127268870d75f8f133269b2cfa4362683b14d97920d96cf01",
+      "platform_admin_web": "sha256:202e56429d00a4f6e14e0f6cb0f10d8ec6ed83b389da733bddf41592c0a38083"
+    },
+    "jwks": [
+      {
+        "family": "identity",
+        "kid": "identity-2026-09-01",
+        "response_digest": "sha256:e27c894508a238bd45302471cd40662f284aed4fa6467ffd91cda5a30e6d3ac1"
+      },
+      {
+        "family": "site_build_budget",
+        "kid": "site-build-2026-09-01",
+        "response_digest": "sha256:927b6bc6a0b819fe2b0ae5c98afd09bbe660bfc558a05697938fba1f57e8b764"
+      },
+      {
+        "family": "execution_budget",
+        "kid": "execution-2026-09-01",
+        "response_digest": "sha256:bd397159ffd74e69829ec1d980b6411749bb09f798110ea41e1ae28983a619f3"
+      }
+    ]
+  },
+  "deterministic_product_path": {
+    "workspace_id": "0e3260ee-2514-4b99-ba35-5fd2f4758238",
+    "site_id": "05a59816-d049-4d61-aca2-4d7495c4714b",
+    "build_run_id": "034e4175-7a9b-4f47-b7ff-34c95f254e63",
+    "status": "succeeded",
+    "phase": "demo_v0",
+    "authorization_artifact_digest": "sha256:93bb859e9203fa66c6d439ee2a3aff46ef33a3bb7bdde14dd7e98d06312cbb68",
+    "grant_request_sha256": "92ed5987206b2fea40a1cd0ca7a4540f48b882bcef07ab5a6b51eb4771199d3b",
+    "release_id": "b3f45e09-545f-4f06-a54b-e7d6c1ce1e3a",
+    "artifact_digest": "sha256:37462c607762d47e8d26f56dbcafb7361b8143da50c2e6cf8bb41a83abdcf459",
+    "manifest_digest": "sha256:95f5c3bd10748f085c99c650041ab36ca9f8fbee993d09ffca12516b95d38463",
+    "model_calls": 0
+  },
+  "persisted_unknown_containment": {
+    "build_run_id": "81dcfe5a-b510-42fa-bbf8-317835bb2b52",
+    "physical_model_calls": 1,
+    "spend_status": "UNKNOWN",
+    "cost_basis": "unknown",
+    "reservation_microusd": "800000",
+    "conservative_charge_microusd": "800000",
+    "resolver_id": "new-api-request-bound-reconciliation-v1",
+    "reconciliation_attempts": 3,
+    "latest_reconciliation_status": "UNRESOLVED",
+    "latest_reconciliation_reason": "log_unavailable",
+    "request_identity_digest": "sha256:6dcb9eb007466b8cd89b64af4bbac69f12ba624f08c9a2cd4744b6dcc703dbfa",
+    "attempts": [
+      {
+        "attempt": 1,
+        "status": "UNRESOLVED",
+        "reason": "log_unavailable",
+        "created_at": "2026-09-01T18:29:24.836Z"
+      },
+      {
+        "attempt": 2,
+        "status": "UNRESOLVED",
+        "reason": "log_unavailable",
+        "created_at": "2026-09-01T18:35:01.040Z"
+      },
+      {
+        "attempt": 3,
+        "status": "UNRESOLVED",
+        "reason": "log_unavailable",
+        "created_at": "2026-09-01T19:06:00.982Z"
+      }
+    ],
+    "accounting_readback": {
+      "gateway_api_http_status": 200,
+      "gateway_api_content_type": "application/json",
+      "gateway_visible_log_rows": 181,
+      "gateway_request_matches": 0,
+      "sqlite_total_log_rows": 4574,
+      "sqlite_request_id_matches": 0,
+      "sqlite_upstream_request_id_matches": 0,
+      "sqlite_preconsume_request_matches": 0,
+      "persistent_runtime_log_matches": 0
+    },
+    "automatic_second_physical_call": false
+  },
+  "limitations": [
+    "This evidence is development-only and does not authorize PILOT or GA.",
+    "No generative refurbish was dispatched on the new runtime; the deterministic smoke stopped before refurbish authorization.",
+    "The historical real model operation has a gateway-local request identity but no durable output, gateway consume log, upstream provider request identity, or exact receipt and cannot be recovered by replay without a forbidden second physical call.",
+    "Platform writer composition is fixed, but the external Control Plane has not ingested platform.acquisition, platform.intent_watch, or platform.sanctions authorities.",
+    "Customer commercial Billing and Credits remain DEFERRED and NOT_IMPLEMENTED."
+  ]
+}

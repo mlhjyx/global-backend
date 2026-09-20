@@ -30,6 +30,19 @@ enum RuntimeProcessState {
   @@map("runtime_process_state")
 }
 
+/// Linearizable platform physical-wire lifecycle. UNKNOWN is terminal for
+/// automatic dispatch; reconciliation may only append facts.
+enum PlatformEgressAttemptState {
+  AUTHORIZED
+  SENDING
+  ACKNOWLEDGED
+  UNKNOWN
+  SETTLED
+  BLOCKED
+
+  @@map("platform_egress_attempt_state")
+}
+
 enum SiteBuildSpendReconciliationStatus {
   UNRESOLVED
   RESOLVED
@@ -136,6 +149,7 @@ model ToolBudgetAccount {
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   operations               ToolBudgetOperation[]
+  platformEgressAttempts   PlatformEgressAttempt[] @relation("PlatformEgressAttemptAccount")
   authority                ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
   toolOperationSubjects    ToolOperationSubject[]    @relation("ToolOperationSubjectAccount")
   governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationAccount")
@@ -164,6 +178,10 @@ model ExecutionBudgetAuthority {
   subjectId           String                       @map("subject_id") @db.VarChar(191)
   requestSha256       String?                      @map("request_sha256") @db.VarChar(64)
   scheduleId          String?                      @map("schedule_id") @db.VarChar(191)
+  scheduleRequestSha256 String?                    @map("schedule_request_sha256") @db.VarChar(64)
+  workflowId          String?                      @map("workflow_id") @db.VarChar(200)
+  workflowRunId       String?                      @map("workflow_run_id") @db.VarChar(36)
+  technicalPolicyRevision String?                  @map("technical_policy_revision") @db.VarChar(64)
   currency            String                       @db.VarChar(3)
   unit                String                       @db.VarChar(16)
   capMicrousd         BigInt?                      @map("cap_microusd")
@@ -184,12 +202,104 @@ model ExecutionBudgetAuthority {
   artifacts                GenericOperationArtifact[]
   toolOperationSubjects    ToolOperationSubject[]               @relation("ToolOperationSubjectAuthority")
   governedSubjectRelations GovernedSubjectRelation[]            @relation("GovernedSubjectRelationAuthority")
+  platformEgressAttempts   PlatformEgressAttempt[]
 
   @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
   @@index([workspaceId, purpose, expiresAt], map: "execution_budget_authority_workspace_purpose_expiry_idx")
   @@index([scheduleId, purpose, expiresAt], map: "execution_budget_authority_schedule_purpose_expiry_idx")
   @@map("execution_budget_authority")
+}
+
+/// Durable send-cut state for one platform authority/run/operation key.
+/// Direct table DML is denied; the platform writer uses the functions from the
+/// additive fence migration so revocation and the final CAS share row locks.
+model PlatformEgressAttempt {
+  id                     String                    @id @default(uuid()) @db.Uuid
+  authorityId            String                    @map("authority_id") @db.Uuid
+  scheduleId             String                    @map("schedule_id") @db.VarChar(191)
+  workflowId             String                    @map("workflow_id") @db.VarChar(200)
+  workflowRunId          String                  @map("workflow_run_id") @db.VarChar(36)
+  operationKey           String                  @map("operation_key") @db.VarChar(200)
+  policyRevision         String                  @map("policy_revision") @db.VarChar(64)
+  generation             BigInt                  @default(0)
+  accountId              String?                 @map("account_id") @db.Uuid
+  accountGeneration      Int?                    @map("account_generation")
+  budgetOperationId      String?                 @map("budget_operation_id") @db.Uuid
+  budgetOperationKey     String?                 @map("budget_operation_key") @db.VarChar(200)
+  reservedMicrousd       BigInt?                 @map("reserved_microusd")
+  state                  PlatformEgressAttemptState @default(AUTHORIZED)
+  authorizedAt           DateTime                @default(now()) @map("authorized_at") @db.Timestamptz(3)
+  sendingAt              DateTime?               @map("sending_at") @db.Timestamptz(3)
+  acknowledgedAt         DateTime?               @map("acknowledged_at") @db.Timestamptz(3)
+  unknownAt              DateTime?               @map("unknown_at") @db.Timestamptz(3)
+  outcomeDigest           String?                 @map("outcome_digest") @db.VarChar(64)
+  outcomeMeta             Json?                   @map("outcome_meta")
+
+  authority ExecutionBudgetAuthority @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_authority_fkey")
+  account ToolBudgetAccount? @relation("PlatformEgressAttemptAccount", fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_account_fkey")
+  budgetOperation ToolBudgetOperation? @relation("PlatformEgressAttemptBudgetOperation", fields: [budgetOperationId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_attempt_budget_operation_fkey")
+
+  @@unique([authorityId, operationKey], map: "platform_egress_attempt_authority_operation_key")
+  @@unique([scheduleId, workflowRunId, operationKey], map: "platform_egress_attempt_run_operation_key")
+  @@index([scheduleId, generation, state], map: "platform_egress_attempt_schedule_generation_idx")
+  @@map("platform_egress_attempt")
+}
+
+/// Monotonic per-schedule generation shared by authorization and the final
+/// send CAS. A disabled generation cannot be reopened by a process-local flag.
+model PlatformEgressScheduleFence {
+  scheduleId    String   @id @map("schedule_id") @db.VarChar(191)
+  generation    BigInt   @default(0)
+  fenceSequence BigInt   @default(0) @map("fence_sequence")
+  policyArtifactSha256 String? @map("policy_artifact_sha256") @db.VarChar(64)
+  executionEnvelopeSha256 String? @map("execution_envelope_sha256") @db.VarChar(64)
+  requiredCapMicrousd BigInt? @map("required_cap_microusd")
+  state         String   @default("ACTIVE") @db.VarChar(16)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("platform_egress_schedule_fence")
+}
+
+/// Immutable signed-command fence facts, not raw JWS or an authenticated ACK.
+/// committedAt is the transaction's fact time; expose only after outer commit.
+model PlatformRevocationReceipt {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  issuer           String   @db.VarChar(2048)
+  revocationJti    String   @map("revocation_jti") @db.Uuid
+  tokenSha256      String   @map("token_sha256") @db.VarChar(64)
+  targetIssuer     String   @map("target_issuer") @db.VarChar(2048)
+  targetJti        String   @map("target_jti") @db.Uuid
+  scheduleId       String   @map("schedule_id") @db.VarChar(191)
+  workflowRunId    String   @map("workflow_run_id") @db.VarChar(36)
+  fenceSequence    BigInt   @map("fence_sequence")
+  reason           String   @db.VarChar(80)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+  generation       BigInt
+  committedAt      DateTime @map("committed_at") @db.Timestamptz(6)
+  inFlightAttempts BigInt   @map("in_flight_attempts")
+
+  ackDelivery PlatformFenceAckDelivery?
+
+  @@unique([issuer, revocationJti], map: "platform_revocation_receipt_issuer_jti_key")
+  @@unique([scheduleId, fenceSequence], map: "platform_revocation_receipt_schedule_sequence_key")
+  @@map("platform_revocation_receipt")
+}
+
+/// First committed encrypted ACK is immutable and replayed without re-signing.
+/// Only migration-owned writer functions may read or insert delivery bytes.
+model PlatformFenceAckDelivery {
+  receiptId          String   @id @map("receipt_id") @db.Uuid
+  commandTokenSha256 String   @map("command_token_sha256") @db.VarChar(64)
+  ackTokenSha256     String   @map("ack_token_sha256") @db.VarChar(64)
+  signingKeyId       String   @map("signing_key_id") @db.VarChar(64)
+  cipherKeyId        String   @map("cipher_key_id") @db.VarChar(64)
+  ciphertext        Bytes
+  createdAt         DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  receipt PlatformRevocationReceipt @relation(fields: [receiptId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_fence_ack_delivery_receipt_fkey")
+
+  @@map("platform_fence_ack_delivery")
 }
 
 /// Append-only revocation fact. The copied scope participates in both RLS and
@@ -243,6 +353,7 @@ model ToolBudgetOperation {
   toolOperationSubject     ToolOperationSubject?            @relation("ToolOperationSubjectOperation")
   governedSubjectRelations GovernedSubjectRelation[]        @relation("GovernedSubjectRelationOperation")
   discoveryQueryAttempts   DiscoveryQueryOperationAttempt[]
+  platformEgressAttempts   PlatformEgressAttempt[] @relation("PlatformEgressAttemptBudgetOperation")
 
   @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
   @@unique([scopeKey, id], map: "tool_budget_operation_scope_id_key")
@@ -472,7 +583,7 @@ model GovernedSubjectTombstoneAudit {
 /// Physical metadata for one globally content-addressed immutable object.
 /// Source receipts and expiry remain per-operation manifest policy.
 model GenericOperationArtifactObject {
-  sha256          String   @id @db.Char(64)
+  sha256          String   @db.Char(64)
   objectKey       String   @unique(map: "generic_operation_artifact_object_key_key") @map("object_key") @db.VarChar(200)
   sizeBytes       BigInt   @map("size_bytes")
   mediaType       String   @map("media_type") @db.VarChar(160)
@@ -482,6 +593,7 @@ model GenericOperationArtifactObject {
 
   artifacts GenericOperationArtifact[]
 
+  @@id([sha256, privacyClass], map: "generic_operation_artifact_object_pkey")
   @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
   @@map("generic_operation_artifact_object")
 }
@@ -2656,15 +2768,136 @@ model SiteBuildSpend {
   createdAt              DateTime  @default(now()) @map("created_at")
   settledAt              DateTime? @map("settled_at")
 
-  buildRun        SiteBuildRun                   @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
-  taskAttempt     SiteBuildTaskAttempt?          @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
-  reconciliations SiteBuildSpendReconciliation[]
+  buildRun             SiteBuildRun                   @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
+  taskAttempt          SiteBuildTaskAttempt?          @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
+  reconciliations      SiteBuildSpendReconciliation[]
+  providerWireAttempts SiteBuildProviderWireAttempt[]
 
   @@unique([buildRunId, operationKey], map: "site_build_spend_run_operation_key")
   @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_spend_scope_key")
   @@index([workspaceId, buildRunId, kind, status], map: "site_build_spend_workspace_run_kind_status_idx")
   @@index([taskAttemptId], map: "site_build_spend_task_attempt_idx")
   @@map("site_build_spend")
+}
+
+/// One immutable recovery identity and send-cut state per physical paid model
+/// wire. Historical spends are deliberately not backfilled; existence of this
+/// row is the positive discriminator for settlement-readback/v1.
+model SiteBuildProviderWireAttempt {
+  id                              String    @id @default(uuid()) @db.Uuid
+  workspaceId                     String    @map("workspace_id") @db.Uuid
+  siteId                          String    @map("site_id") @db.Uuid
+  buildRunId                      String    @map("build_run_id") @db.Uuid
+  spendId                         String    @map("spend_id") @db.Uuid
+  operationKey                    String    @map("operation_key") @db.VarChar(64)
+  contractVersion                 String    @default("site-build-provider-transport/v1") @map("contract_version") @db.VarChar(64)
+  physicalWireAttempt             Int       @map("physical_wire_attempt")
+  derivationKeyId                 String    @map("derivation_key_id") @db.VarChar(64)
+  settlementRequestId             String    @unique(map: "site_build_provider_wire_request_id_key") @map("settlement_request_id") @db.VarChar(43)
+  settlementNonceSha256           String    @map("settlement_nonce_sha256") @db.VarChar(64)
+  resolverId                      String    @map("resolver_id") @db.VarChar(191)
+  protocol                        String    @db.VarChar(32)
+  requestedAlias                  String    @map("requested_alias") @db.VarChar(120)
+  expectedChannelId               Int       @map("expected_channel_id")
+  promptUtf8Bytes                 Int       @map("prompt_utf8_bytes")
+  maximumWireCalls                Int       @map("maximum_wire_calls")
+  actualMaxOutputTokens           Int       @map("actual_max_output_tokens")
+  catalogMaxOutputTokens          Int       @map("catalog_max_output_tokens")
+  maximumQuotaPoints              BigInt    @map("maximum_quota_points")
+  catalogId                       String    @map("catalog_id") @db.VarChar(191)
+  catalogSha256                   String    @map("catalog_sha256") @db.VarChar(64)
+  pricingSnapshotSha256           String    @map("pricing_snapshot_sha256") @db.VarChar(64)
+  inputPriceMicrounitsPerMillion  BigInt    @map("input_price_microunits_per_million")
+  outputPriceMicrounitsPerMillion BigInt    @map("output_price_microunits_per_million")
+  ledgerMicrousdPerPricingUnit    BigInt    @map("ledger_microusd_per_pricing_unit")
+  state                           String    @default("ALLOCATED") @db.VarChar(32)
+  settlementStatus                String?   @map("settlement_status") @db.VarChar(16)
+  finalPhase                      String?   @map("final_phase") @db.VarChar(64)
+  gatewayIdState                  String?   @map("gateway_id_state") @db.VarChar(32)
+  upstreamIdState                 String?   @map("upstream_id_state") @db.VarChar(32)
+  payloadState                    String?   @map("payload_state") @db.VarChar(32)
+  createdAt                       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  dispatchStartedAt               DateTime? @map("dispatch_started_at") @db.Timestamptz(3)
+  observedAt                      DateTime? @map("observed_at") @db.Timestamptz(3)
+
+  spend   SiteBuildSpend                   @relation(fields: [spendId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_wire_spend_scope_fkey")
+  probes  SiteBuildProviderReadbackProbe[]
+  receipt SiteBuildProviderWireReceipt?
+
+  @@unique([spendId, physicalWireAttempt], map: "site_build_provider_wire_spend_attempt_key")
+  @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_provider_wire_scope_key")
+  @@index([workspaceId, buildRunId, state, createdAt], map: "site_build_provider_wire_workspace_run_state_idx")
+  @@map("site_build_provider_wire_attempt")
+}
+
+/// Append-only exact receipt for one physical wire. It may arrive during the
+/// request or later through bounded readback; the original wire state remains
+/// historical and is never rewritten by reconciliation.
+model SiteBuildProviderWireReceipt {
+  id                String   @id @default(uuid()) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  siteId            String   @map("site_id") @db.Uuid
+  buildRunId        String   @map("build_run_id") @db.Uuid
+  spendId           String   @map("spend_id") @db.Uuid
+  wireAttemptId     String   @unique(map: "site_build_provider_wire_receipt_wire_key") @map("wire_attempt_id") @db.Uuid
+  receiptDigest     String   @unique(map: "site_build_provider_wire_receipt_digest_key") @map("receipt_digest") @db.VarChar(64)
+  alias             String   @db.VarChar(120)
+  protocol          String   @db.VarChar(32)
+  channelId         Int      @map("channel_id")
+  quota             BigInt
+  inputTokens       Int      @map("input_tokens")
+  outputTokens      Int      @map("output_tokens")
+  exactCostMicrousd BigInt   @map("exact_cost_microusd")
+  upstreamIdState   String   @map("upstream_id_state") @db.VarChar(32)
+  observedAt        DateTime @map("observed_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  wireAttempt SiteBuildProviderWireAttempt @relation(fields: [wireAttemptId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_wire_receipt_scope_fkey")
+
+  @@unique([wireAttemptId, workspaceId, siteId, buildRunId], map: "site_build_provider_wire_receipt_scope_key")
+  @@index([workspaceId, buildRunId, observedAt], map: "site_build_provider_wire_receipt_workspace_run_idx")
+  @@map("site_build_provider_wire_receipt")
+}
+
+/// Durable claim made before a readback GET. A lost claim ACK consumes the
+/// sequence, preventing another process from sending a third probe.
+model SiteBuildProviderReadbackProbe {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  siteId        String   @map("site_id") @db.Uuid
+  buildRunId    String   @map("build_run_id") @db.Uuid
+  spendId       String   @map("spend_id") @db.Uuid
+  wireAttemptId String   @map("wire_attempt_id") @db.Uuid
+  sequence      Int
+  claimedAt     DateTime @default(now()) @map("claimed_at") @db.Timestamptz(3)
+
+  wireAttempt SiteBuildProviderWireAttempt               @relation(fields: [wireAttemptId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_probe_wire_scope_fkey")
+  observation SiteBuildProviderReadbackProbeObservation?
+
+  @@unique([wireAttemptId, sequence], map: "site_build_provider_probe_wire_sequence_key")
+  @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_provider_probe_scope_key")
+  @@index([workspaceId, buildRunId, claimedAt], map: "site_build_provider_probe_workspace_run_idx")
+  @@map("site_build_provider_readback_probe")
+}
+
+/// Append-only closed outcome for one already-claimed readback probe.
+model SiteBuildProviderReadbackProbeObservation {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  siteId          String   @map("site_id") @db.Uuid
+  buildRunId      String   @map("build_run_id") @db.Uuid
+  spendId         String   @map("spend_id") @db.Uuid
+  probeId         String   @unique(map: "site_build_provider_probe_observation_probe_key") @map("probe_id") @db.Uuid
+  phase           String   @db.VarChar(64)
+  httpStatusClass Int?     @map("http_status_class")
+  observedAt      DateTime @map("observed_at") @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  probe SiteBuildProviderReadbackProbe @relation(fields: [probeId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_provider_probe_observation_scope_fkey")
+
+  @@unique([probeId, workspaceId, siteId, buildRunId], map: "site_build_provider_probe_observation_scope_key")
+  @@index([workspaceId, buildRunId, observedAt], map: "site_build_provider_probe_observation_workspace_run_idx")
+  @@map("site_build_provider_readback_probe_observation")
 }
 
 /// Append-only later observations for a conservatively settled physical call.

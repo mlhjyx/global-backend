@@ -6,10 +6,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = new URL("../", import.meta.url);
-const BASE_COMMIT = "866ede782579815dd3cd46bcaffb0c1d9626cf46";
+const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-08-24T14:35:16.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-19T15:17:14.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -866,8 +866,23 @@ test("production audit input must be a complete production-only pnpm report", as
   );
 });
 
-test("repository baseline is a current, exact-main-bound 10-advisory snapshot", async () => {
-  const { validateProductionAuditBaseline } =
+test("production audit metadata counts vulnerable findings, not advisory identities", async () => {
+  const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
+  const advisoryWithTwoVersions = {
+    ...advisory(),
+    findings: [
+      { version: "1.0.0", paths: ["api > example-runtime@1.0.0"] },
+      { version: "1.1.0", paths: ["worker > example-runtime@1.1.0"] },
+    ],
+  };
+  const audit = pnpmAudit([advisoryWithTwoVersions]);
+  audit.metadata.vulnerabilities.moderate = 2;
+  const result = evaluateProductionAudit(audit, baseline(), { now: NOW });
+  assert.doesNotMatch(issueCodes(result).join(","), /AUDIT_SUMMARY_MISMATCH/u);
+});
+
+test("repository baseline retires legacy exceptions and admits only a clear audit", async () => {
+  const { validateProductionAuditBaseline, evaluateProductionAudit } =
     await import("./supply-chain-audit.mjs");
   const repositoryBaseline = JSON.parse(
     await readRepositoryFile(
@@ -876,18 +891,45 @@ test("repository baseline is a current, exact-main-bound 10-advisory snapshot", 
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: BASE_COMMIT,
+    expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
   });
   assert.deepEqual(validation.issues, []);
-  assert.equal(repositoryBaseline.summary.advisories, 10);
+  assert.equal(repositoryBaseline.summary.advisories, 0);
   assert.deepEqual(repositoryBaseline.summary.vulnerabilities, {
     info: 0,
-    low: 3,
-    moderate: 4,
-    high: 3,
+    low: 0,
+    moderate: 0,
+    high: 0,
     critical: 0,
   });
-  assert.equal(repositoryBaseline.source.base_commit, BASE_COMMIT);
+  assert.equal(
+    repositoryBaseline.source.base_commit,
+    "28c362bd2da4a90822901510a2415f008d5cb695",
+  );
+  const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
+    now: REPOSITORY_BASELINE_NOW,
+    expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+    expectedSourceLockfileDigest:
+      "sha256:4fa4b3ce6a3123c699243e927db36cc6db2928fd3226c49fd0b00bbd42ddbd64",
+  });
+  assert.equal(clear.ok, true);
+  const vulnerable = evaluateProductionAudit(
+    pnpmAudit([
+      advisory({
+        ghsa_id: "GHSA-9rgm-9g3h-6x36",
+        package: "devalue",
+        url: "https://github.com/advisories/GHSA-9rgm-9g3h-6x36",
+      }),
+    ]),
+    repositoryBaseline,
+    {
+      now: REPOSITORY_BASELINE_NOW,
+      expectedBootstrapBase: "28c362bd2da4a90822901510a2415f008d5cb695",
+    },
+  );
+  assert.equal(vulnerable.ok, false);
+  assert.ok(issueCodes(vulnerable).includes("AUDIT_NEW_ADVISORY"));
+  assert.ok(issueCodes(vulnerable).includes("BASELINE_BOOTSTRAP_SET_MISMATCH"));
 });
 
 test("bounded dependency inputs are read through one no-follow file handle", async () => {
@@ -1543,11 +1585,11 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4\.37\.8/,
+    /github\/codeql-action\/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4\.38\.0/,
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4\.37\.8/,
+    /github\/codeql-action\/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4\.38\.0/,
   );
   assert.match(workflow, /^          languages: javascript-typescript$/m);
   assert.match(workflow, /^          queries: security-extended$/m);

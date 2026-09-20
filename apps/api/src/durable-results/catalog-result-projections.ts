@@ -4,6 +4,12 @@ import { normalizePersonName } from '../discovery/person-name';
 import type { TypedProjectionSchema } from './durable-result-strategy';
 import { TypedProjectionRegistry } from './typed-projection.registry';
 import type { TypedProjectionDefinition } from './typed-projection.types';
+import {
+  PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX,
+  PLATFORM_PATENTS_OUTPUT_ITEM_MAX,
+  PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX,
+  platformExecutionToolContract,
+} from '../platform-authority/platform-execution-contract';
 
 type JsonSchema = Readonly<Record<string, unknown>>;
 type UnknownRecord = Record<string, unknown>;
@@ -22,9 +28,9 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'gleif.fetch': 'gleif-fetch/v1',
   'companies_house.search': 'companies-house-search/v1',
   'inpi_rne.search': 'inpi-rne-search/v1',
-  'google_patents.search': 'google-patents-search/v1',
-  'tradefair.algolia': 'tradefair-algolia/v1',
-  'mapyourshow.fetch': 'mapyourshow-fetch/v1',
+  'google_patents.search': platformExecutionToolContract('google_patents.search').resultSchema,
+  'tradefair.algolia': platformExecutionToolContract('tradefair.algolia').resultSchema,
+  'mapyourshow.fetch': platformExecutionToolContract('mapyourshow.fetch').resultSchema,
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
 const TOOL_RESULT_KEYS = ['data', 'costCents', 'degraded'] as const;
 const TOOL_RESULT_WITH_PROVENANCE_KEYS = [...TOOL_RESULT_KEYS, 'provenance'] as const;
@@ -839,7 +845,7 @@ const patentsData = (value: unknown) => mapClosedRecord(value, ['patents', 'cost
 const googlePatentsDefinition = definition(
   'google-patents-search/v1',
   objectSchema({
-    patents: arraySchema(50, patentSchema),
+    patents: arraySchema(PLATFORM_PATENTS_OUTPUT_ITEM_MAX, patentSchema),
     costFacts: patentCostFactsSchema,
   }, ['patents', 'costFacts']),
   patentsData,
@@ -860,7 +866,7 @@ const fairData = (value: unknown) => mapClosedRecord(value, ['exhibitors'], ['ex
 });
 const tradeFairDefinition = definition(
   'tradefair-algolia/v1',
-  objectSchema({ exhibitors: arraySchema(2000, fairExhibitorSchema) }, ['exhibitors']),
+  objectSchema({ exhibitors: arraySchema(PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX, fairExhibitorSchema) }, ['exhibitors']),
   fairData,
 );
 
@@ -887,7 +893,7 @@ function restoreMysHit(value: unknown): UnknownRecord {
 }
 const mapYourShowDefinition = definition(
   'mapyourshow-fetch/v1',
-  objectSchema({ hits: arraySchema(5000, mysHitSchema) }, ['hits']),
+  objectSchema({ hits: arraySchema(PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX, mysHitSchema) }, ['hits']),
   (value) => mapClosedRecord(value, ['hits'], ['hits'], {
     hits: (items) => mapArray(items, projectMysHit),
   }),

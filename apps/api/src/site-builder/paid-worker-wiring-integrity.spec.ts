@@ -15,7 +15,10 @@ const factory = readFileSync(
 describe("R4-B production worker paid-ledger wiring", () => {
   it("shares one durable ledger across gateway, ToolBroker and Site Builder activities", () => {
     expect(worker).toMatch(
-      /const costLedger = new SiteBuildCostLedger\(prisma\)/,
+      /createSiteBuildProviderWireDatabaseFromEnv\([\s\S]*process\.env,[\s\S]*releaseIdentity\.migration_revision/,
+    );
+    expect(worker).toMatch(
+      /const costLedger = new SiteBuildCostLedger\(prisma, \{[\s\S]*providerWireDatabase,[\s\S]*\}\)/,
     );
     expect(worker).toContain("gateway.paidLedger = costLedger");
     expect(worker).toMatch(

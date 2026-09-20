@@ -23,6 +23,8 @@
 /infra/*.compose.yml @mlhjyx
 /infra/systemd/ @mlhjyx
 
+/scripts/test-support/browser-probe-oci-smoke.cjs @mlhjyx
+
 # Terminal governance ownership block. Keep this last so broader later rules
 # cannot override the verifier, policy, schema, or required-context surfaces.
 /.github/ @mlhjyx
@@ -34,6 +36,8 @@
 /apps/api/src/discovery/providers/ @mlhjyx
 /apps/api/src/health/ @mlhjyx
 /apps/api/src/model-gateway/ @mlhjyx
+/apps/api/src/execution-budget/ @mlhjyx
+/apps/api/src/platform-authority/ @mlhjyx
 /apps/api/src/site-builder/site-build-cost-ledger.ts @mlhjyx
 /apps/api/src/site-builder/site-builder-model-settlement.ts @mlhjyx
 /apps/api/src/temporal/ @mlhjyx
@@ -41,6 +45,8 @@
 /apps/api/src/discovery/provider-source-classes.json @mlhjyx
 /apps/api/src/runtime/ @mlhjyx
 /apps/api/scripts/generate-build-attestation.mts @mlhjyx
+/apps/api/nest-cli.json @mlhjyx
+/infra/temporal-platform/ @mlhjyx
 /docs/adr/ @mlhjyx
 /docs/product-scope.md @mlhjyx
 /docs/site-builder/model-settlement-preflight.md @mlhjyx
@@ -65,9 +71,13 @@
 /**/.pnpmfile.cjs @mlhjyx
 /patches/ @mlhjyx
 /scripts/governance-*.mjs @mlhjyx
+/scripts/platform-authority-*.mjs @mlhjyx
+/scripts/verify-platform-authority-*.mjs @mlhjyx
 /scripts/ghcr-runtime-publication*.mjs @mlhjyx
 /scripts/docker-image-config-path*.mjs @mlhjyx
 /scripts/runtime-deployment-contract.spec.mjs @mlhjyx
+/scripts/temporal-platform-infrastructure-contract.spec.mjs @mlhjyx
+/scripts/temporal-native-publication*.mjs @mlhjyx
 /scripts/environment-parity-*.mjs @mlhjyx
 /scripts/copy-fixed-source-impact*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx

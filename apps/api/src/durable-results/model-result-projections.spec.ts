@@ -251,7 +251,7 @@ const discoveryExtractListData: JsonRecord = {
 const discoveryExtractListRaw = rawResult(discoveryExtractListData);
 
 const contactDecisionMakersData: JsonRecord = {
-  people: Array.from({ length: 64 }, (_, index) => ({
+  people: Array.from({ length: 25 }, (_, index) => ({
     full_name: index === 0 ? 'n'.repeat(500) : `Person ${index}`,
     title: index === 0 ? 't'.repeat(500) : 'Managing Director',
     email: index === 0 ? `${'e'.repeat(308)}@example.com` : `person${index}@example.com`,

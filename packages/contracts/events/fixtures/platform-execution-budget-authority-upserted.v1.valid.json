@@ -1,7 +1,7 @@
 {
   "fixture_version": "platform-execution-budget-authority-conformance/v1",
   "command": "PlatformExecutionBudgetAuthorityUpserted/v1",
-  "verification_time": "2026-08-15T00:00:00.000Z",
+  "verification_time": "2026-09-03T22:00:30.000Z",
   "public_jwk": {
     "kty": "RSA",
     "n": "vvU8Nm9m3YvIiOXCZqXomV3u-zjFalIISNGP8ofPvEvAEcgsHUQIYIaCttQGx3jRrHVlQT0jbvMM_D1IlpEDDJjutdcwD559OZ9FHV06i_gEcflKxXCmG4JaElRwFLzIdo2asc62_YjuBDsXTNJQAvyehc38rnz2dhIqmvTPRqQw3Ofaa0A571IbX5U-P1nlGcKT2FffpPqj7l636e3rU2HMM-vvJIEt4N3qEqK4kuYM0B9-DIOJ5WgH9vKize-SzZS8asDf_w0G3966N0ExKIa6aq51B-gO-e0EEhTd2Ag52kAH0u4O69t4OCtsnkcbsUU_3RCauR9qqgTyTGw1Zw",
@@ -15,24 +15,32 @@
     "iss": "https://control-plane.example.test/",
     "aud": "global-backend:execution-budget",
     "jti": "120a4e9f-0c06-4cb4-8364-b7df51c45a88",
-    "iat": 1786752000,
-    "nbf": 1786752000,
-    "exp": 1786752300,
+    "iat": 1788472800,
+    "nbf": 1788472800,
+    "exp": 1788473100,
     "authority_kind": "PLATFORM_GRANT",
     "purpose": "platform.acquisition",
     "subject_type": "schedule",
-    "subject_id": "platform-acquisition-hourly",
-    "schedule_id": "platform-acquisition-hourly",
+    "subject_id": "acq-sweep",
+    "schedule_id": "acq-sweep",
+    "schedule_request_sha256": "5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e",
+    "workflow_id": "platform-acquisition-acq-sweep-20260904t100000z",
+    "workflow_run_id": "11111111-1111-4111-8111-111111111111",
+    "technical_policy_revision": "65ea2cd1c4c42c32e0d378940f65ee6a2530090a3077c54597432da7905337ba",
     "currency": "USD",
     "unit": "microusd",
-    "cap_per_run_microusd": "1000000",
-    "campaign_cap_microusd": "10000000",
-    "max_runs": "10"
+    "cap_per_run_microusd": "1",
+    "campaign_cap_microusd": "1",
+    "max_runs": "1"
   },
   "expected": {
     "accepted": true,
     "authority_kind": "PLATFORM_GRANT",
-    "schedule_id": "platform-acquisition-hourly",
+    "schedule_id": "acq-sweep",
+    "schedule_request_sha256": "5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e",
+    "workflow_id": "platform-acquisition-acq-sweep-20260904t100000z",
+    "workflow_run_id": "11111111-1111-4111-8111-111111111111",
+    "technical_policy_revision": "65ea2cd1c4c42c32e0d378940f65ee6a2530090a3077c54597432da7905337ba",
     "replay_on_exact_redelivery": true
   }
 }

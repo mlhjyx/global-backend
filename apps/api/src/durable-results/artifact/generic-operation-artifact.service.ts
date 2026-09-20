@@ -310,7 +310,8 @@ function snapshotExpectedManifest(
       value.workspaceId !== binding.workspaceId ||
       value.authorityId !== authorityId ||
       value.operationId !== reservation.operationId ||
-      value.objectKey !== contentAddressedObjectKey(reference.sha256) ||
+      value.objectKey !==
+        contentAddressedObjectKey(reference.sha256, value.privacyClass) ||
       !PRIVACY_CLASSES.has(value.privacyClass) ||
       (value.sourceDigest !== null &&
         !isCanonicalArtifactSha256(value.sourceDigest)) ||
@@ -443,7 +444,10 @@ export class GenericOperationArtifactService {
     const manifest = buildManifest(
       input,
       {
-        objectKey: contentAddressedObjectKey(staged.sha256),
+        objectKey: contentAddressedObjectKey(
+          staged.sha256,
+          staged.privacyClass,
+        ),
         sha256: staged.sha256,
         sizeBytes: staged.sizeBytes,
         mediaType: staged.mediaType,
@@ -470,12 +474,19 @@ export class GenericOperationArtifactService {
     }
     if (!sameStoredArtifact(promoted, {
       ...staged,
-      objectKey: contentAddressedObjectKey(staged.sha256),
+      objectKey: contentAddressedObjectKey(
+        staged.sha256,
+        staged.privacyClass,
+      ),
     })) {
       return invalid();
     }
 
-    const inspected = await this.store.inspect(promoted.sha256, input.signal);
+    const inspected = await this.store.inspect(
+      promoted.sha256,
+      promoted.privacyClass,
+      input.signal,
+    );
     if (!sameStoredArtifact(inspected, promoted)) return invalid();
     await this.drainVerifiedBody(promoted, input.signal);
 
@@ -546,7 +557,11 @@ export class GenericOperationArtifactService {
       input.subjectRef,
     );
     const snapshot = buildSnapshot(expected, loaded.expectedFacts);
-    const inspected = await this.store.inspect(expected.sha256, input.signal);
+    const inspected = await this.store.inspect(
+      expected.sha256,
+      expected.privacyClass,
+      input.signal,
+    );
     if (!sameStoredArtifact(inspected, expected)) return invalid();
     await this.drainVerifiedBody(expected, input.signal);
 
@@ -607,9 +622,17 @@ export class GenericOperationArtifactService {
     ) {
       return invalid();
     }
-    const inspected = await this.store.inspect(reference.sha256, input.signal);
+    const inspected = await this.store.inspect(
+      reference.sha256,
+      snapshot.manifest.privacyClass,
+      input.signal,
+    );
     if (!sameStoredArtifact(inspected, snapshot.manifest)) return invalid();
-    const body = await this.store.read(reference.sha256, input.signal);
+    const body = await this.store.read(
+      reference.sha256,
+      snapshot.manifest.privacyClass,
+      input.signal,
+    );
     return Object.freeze({
       manifest: snapshot.manifest,
       expectedFacts: snapshot.expectedFacts,
@@ -641,10 +664,17 @@ export class GenericOperationArtifactService {
   }
 
   private async drainVerifiedBody(
-    expected: Pick<GenericOperationArtifactManifest, 'sha256' | 'sizeBytes'>,
+    expected: Pick<
+      GenericOperationArtifactManifest,
+      'sha256' | 'sizeBytes' | 'privacyClass'
+    >,
     signal?: AbortSignal,
   ): Promise<void> {
-    const body = await this.store.read(expected.sha256, signal);
+    const body = await this.store.read(
+      expected.sha256,
+      expected.privacyClass,
+      signal,
+    );
     for await (const _chunk of this.verifiedBody(body, expected, signal)) {
       // Drain before manifest append so only byte-verified objects become durable facts.
     }

@@ -28,6 +28,7 @@ import {
 } from "../runtime/runtime-process-lease";
 import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
+import { completesWithin, settlesWithin } from "../runtime/bounded-settlement";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import {
   parseExecutionBudgetBinding,
@@ -114,7 +115,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private expireCounter = 0;
   private initialized = false;
+  private leaseStartingAttempted = false;
   private leaseStartingPublished = false;
+  private shuttingDown = false;
+  private managedTickInFlight?: Promise<void>;
+  private readonly shutdownAbort = new AbortController();
   private readiness:
     | Readonly<{ status: "ready" }>
     | Readonly<{
@@ -135,7 +140,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     @Optional() fetchFn?: FetchLike,
     @Optional() private readonly leases?: RuntimeProcessLeaseService,
     @Optional() private readonly admission?: RuntimeAdmissionService,
-    @Optional() private readonly releaseIdentity?: RuntimeReleaseIdentityService,
+    @Optional()
+    private readonly releaseIdentity?: RuntimeReleaseIdentityService,
   ) {
     this.db =
       db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -145,7 +151,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     await this.reconnect();
     this.timer = setInterval(() => {
-      void this.managedTick();
+      void this.scheduleManagedTick();
     }, 2000);
     this.timer.unref();
   }
@@ -163,26 +169,34 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reconnect(): Promise<boolean> {
+    if (this.shuttingDown) return false;
     if (this.admission && !this.admission.current().admitted) {
       this.readiness = {
         status: "not_ready",
         code: "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED",
       };
-      this.logger.error("outbox relay runtime admission is closed; relay remains non-consuming");
+      this.logger.error(
+        "outbox relay runtime admission is closed; relay remains non-consuming",
+      );
       return false;
     }
     try {
       await this.db.$connect();
       if (!(await this.migrationCompatible())) return false;
+      if (this.shuttingDown) return false;
       if (!this.leaseStartingPublished) {
+        this.leaseStartingAttempted = true;
         await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
+        if (this.shuttingDown) return false;
         this.leaseStartingPublished = true;
       }
       if (!this.initialized) {
         await this.initializePlatformState();
+        if (this.shuttingDown) return false;
         this.initialized = true;
       }
       await this.leases?.heartbeat("OUTBOX_RELAY", "READY", null);
+      if (this.shuttingDown) return false;
       this.readiness = { status: "ready" };
       return true;
     } catch {
@@ -213,22 +227,81 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
+    this.shutdownAbort.abort();
     if (this.timer) clearInterval(this.timer);
-    if (this.readiness.status === "ready") {
-      await this.leases
-        ?.heartbeat("OUTBOX_RELAY", "STOPPED", null)
-        .catch(() => this.logger.error("outbox relay stop heartbeat failed"));
+    this.readiness = {
+      status: "not_ready",
+      code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+    };
+    if (this.leaseStartingPublished) {
+      const drainingPublished = await settlesWithin(
+        this.leases?.heartbeat("OUTBOX_RELAY", "DRAINING", null) ??
+          Promise.resolve(),
+      );
+      if (!drainingPublished) {
+        this.logger.error("outbox relay draining heartbeat failed");
+      }
     }
-    await this.db.$disconnect().catch(() => undefined);
+    const inFlight = this.managedTickInFlight;
+    const drained = inFlight ? await completesWithin(inFlight) : true;
+    if (this.leaseStartingPublished) {
+      if (drained) {
+        const stoppedPublished = await settlesWithin(
+          this.leases?.heartbeat("OUTBOX_RELAY", "STOPPED", null) ??
+            Promise.resolve(),
+        );
+        if (!stoppedPublished) {
+          this.logger.error("outbox relay stop heartbeat failed");
+          await this.atomicTerminalizeUncertainLease();
+        }
+      } else {
+        this.logger.error(
+          "outbox relay shutdown timed out; lease remains DRAINING",
+        );
+      }
+    }
+    if (this.leaseStartingAttempted && !this.leaseStartingPublished) {
+      await this.atomicTerminalizeUncertainLease();
+    }
+    const disconnected = await completesWithin(
+      this.db.$disconnect().catch(() => undefined),
+    );
+    if (!disconnected) {
+      this.logger.error("outbox relay database disconnect timed out");
+    }
     this.readiness = {
       status: "not_ready",
       code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
     };
   }
 
+  private async atomicTerminalizeUncertainLease(): Promise<void> {
+    const terminalized = await settlesWithin(
+      this.leases?.terminalize("OUTBOX_RELAY", null) ?? Promise.resolve(),
+    );
+    if (!terminalized) {
+      this.logger.error("outbox relay atomic terminalization failed");
+    }
+  }
+
+  private scheduleManagedTick(): Promise<void> {
+    if (this.shuttingDown) return Promise.resolve();
+    if (this.managedTickInFlight) return this.managedTickInFlight;
+    const pending = this.managedTick().finally(() => {
+      if (this.managedTickInFlight === pending) {
+        this.managedTickInFlight = undefined;
+      }
+    });
+    this.managedTickInFlight = pending;
+    return pending;
+  }
+
   private async managedTick(): Promise<void> {
+    if (this.shuttingDown) return;
     if (this.readiness.status !== "ready" && !(await this.reconnect())) return;
     if (!(await this.migrationCompatible())) return;
+    if (this.shuttingDown) return;
     try {
       await this.leases?.heartbeat("OUTBOX_RELAY", "READY", null);
     } catch {
@@ -241,20 +314,26 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
+    if (this.shuttingDown) return;
     await this.tick();
   }
 
   private async migrationCompatible(): Promise<boolean> {
     if (!this.releaseIdentity) return true;
     try {
-      await assertMigrationCompatible(this.db as never, this.releaseIdentity.current());
+      await assertMigrationCompatible(
+        this.db as never,
+        this.releaseIdentity.current(),
+      );
       return true;
     } catch {
       this.readiness = {
         status: "not_ready",
         code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
       };
-      this.logger.error("outbox relay migration is incompatible; relay remains non-consuming");
+      this.logger.error(
+        "outbox relay migration is incompatible; relay remains non-consuming",
+      );
       return false;
     }
   }
@@ -264,6 +343,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     try {
       await this.expireDueClaims();
+      if (this.shuttingDown) return;
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
       const events = (await this.db.outboxEvent.findMany({
         where: { publishedAt: null, parkedAt: null },
@@ -271,10 +351,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         take: BATCH_SIZE,
       })) as OutboxEventRecord[];
       for (const ev of events) {
+        if (this.shuttingDown) break;
         await this.routeEvent(ev);
       }
       // webhook 派送循环：仅推模式启用时才扫账本（与 routeEvent 的 sink 判定共用同一谓词，消除漂移）。
-      if (this.webhookEnabled()) {
+      if (!this.shuttingDown && this.webhookEnabled()) {
         await this.pumpWebhookDeliveries(new Date());
       }
     } catch (err) {
@@ -395,7 +476,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    * 每请求带 HMAC 签名头（x-timestamp + x-signature，验签方式见 packages/contracts/events/WEBHOOK.md）。
    */
   async pumpWebhookDeliveries(now: Date): Promise<void> {
-    if (!this.webhookEnabled()) return;
+    if (this.shuttingDown || !this.webhookEnabled()) return;
     const url = process.env.SAAS_WEBHOOK_URL as string;
     const secret = process.env.SAAS_WEBHOOK_SECRET as string;
     const due = await this.db.outboxDelivery.findMany({
@@ -409,6 +490,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       include: { event: true },
     });
     for (const d of due) {
+      if (this.shuttingDown) break;
       try {
         const body = JSON.stringify(toEnvelope(d.event));
         const timestamp = now.toISOString();
@@ -424,8 +506,12 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
             "x-signature": `sha256=${signature}`,
           },
           body,
-          signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+          signal: AbortSignal.any([
+            AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+            this.shutdownAbort.signal,
+          ]),
         });
+        if (this.shuttingDown) break;
         if (res.ok) {
           // CAS：只翻 PENDING → ACKED。与 ACK API / 多实例竞态时 count=0 → 已被他方推进，本轮跳过
           // （防把 ACKED 覆写回去或重复置位）。
@@ -437,6 +523,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         }
         await this.recordWebhookFailure(d, `HTTP ${res.status}`, now);
       } catch (err) {
+        if (this.shuttingDown) break;
         await this.recordWebhookFailure(d, String(err), now);
       }
     }
@@ -568,7 +655,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       };
       let executionBudget: ExecutionBudgetBinding;
       try {
-        if (ev.schemaVersion !== 2) throw new Error('legacy command version');
+        if (ev.schemaVersion !== 2) throw new Error("legacy command version");
         executionBudget = parseExecutionBudgetBinding(payload.executionBudget, {
           scopeKey: ev.workspaceId,
           purpose: "understanding.run",
@@ -576,7 +663,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         });
       } catch {
         throw new NonRetryableOutboxCommandError(
-          'EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED',
+          "EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED",
         );
       }
       await this.startWorkflowIdempotent(
@@ -605,7 +692,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       };
       let executionBudget: ExecutionBudgetBinding;
       try {
-        if (ev.schemaVersion !== 2) throw new Error('legacy command version');
+        if (ev.schemaVersion !== 2) throw new Error("legacy command version");
         executionBudget = parseExecutionBudgetBinding(payload.executionBudget, {
           scopeKey: ev.workspaceId,
           purpose: "discovery.run",
@@ -613,7 +700,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         });
       } catch {
         throw new NonRetryableOutboxCommandError(
-          'EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED',
+          "EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED",
         );
       }
       await this.startWorkflowIdempotent(
@@ -673,7 +760,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (ev.eventType === "PersonalArtifactCleanupRequested") {
       const payload =
         ev.payload !== null &&
-        typeof ev.payload === 'object' &&
+        typeof ev.payload === "object" &&
         !Array.isArray(ev.payload)
           ? (ev.payload as Record<string, unknown>)
           : null;
@@ -684,7 +771,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         payload.deletionRequestId !== ev.aggregateId
       ) {
         throw new NonRetryableOutboxCommandError(
-          'personal artifact cleanup payload contract mismatch',
+          "personal artifact cleanup payload contract mismatch",
         );
       }
       await this.startWorkflowIdempotent(

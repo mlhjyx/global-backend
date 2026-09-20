@@ -86,7 +86,8 @@ jobs:
               });
             }
 
-      - name: Reject an untrusted ready merge declaration
+      - name: Check card integrity without granting merge authority
         run: >-
           node scripts/pr-decision-card.mjs check
+          --event "$GITHUB_EVENT_PATH"
           --result "$RUNNER_TEMP/pr-decision-card-result.json"

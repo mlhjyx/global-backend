@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "platform-temporal-images/v1",
+  "images": {
+    "server": {
+      "source": "docker.io/temporalio/server",
+      "tag": "1.31.2",
+      "indexDigest": "sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da",
+      "linuxAmd64Digest": "sha256:6b02e5176631c8d28f010735a3a73c69423a9adbcfad7e5dfe23836c904b7e26"
+    },
+    "adminTools": {
+      "source": "docker.io/temporalio/admin-tools",
+      "tag": "1.31.2",
+      "indexDigest": "sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107",
+      "linuxAmd64Digest": "sha256:7e5820112475b3490f011b28d86ca9fd8348f1640b8dd04c62adb906e6b28cb2"
+    },
+    "postgres": {
+      "source": "docker.io/library/postgres",
+      "tag": "16-alpine",
+      "indexDigest": "sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685",
+      "linuxAmd64Digest": "sha256:075f7ba66bc9b3ce7d6b8b635208ff61cd7cf1a67d71ec530eec5d7ae0cbe571"
+    },
+    "testJwks": {
+      "source": "docker.io/library/caddy",
+      "tag": "2.10.2-alpine",
+      "indexDigest": "sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d",
+      "linuxAmd64Digest": "sha256:d8c17a862962def15cde69863a3a463f25a2664942eafd7bdbf050e9c3116b83"
+    },
+    "testNodeClient": {
+      "source": "docker.io/library/node",
+      "tag": "22.23.1-trixie-slim",
+      "indexDigest": "sha256:e6d9a389d34ff9678438af985c9913fbd1eb6ed36e80fea56644f4b4f6dd70ba",
+      "linuxAmd64Digest": "sha256:4653dc205e772d0200f195ff333fe45157c5aa19385eab098f2af0517f982498"
+    }
+  }
+}

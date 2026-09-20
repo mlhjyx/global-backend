@@ -321,7 +321,7 @@ export class MemoryS3Client implements ArtifactS3Client {
             Expiration: { ExpiredObjectDeleteMarker: true },
             ID: 'generic-operation-artifact-final-delete-markers',
             Status: 'Enabled',
-            Filter: { Prefix: 'generic-operation-results/v1/sha256/' },
+            Filter: { Prefix: 'generic-operation-results/v1/final/' },
           },
           {
             Expiration: { ExpiredObjectDeleteMarker: true },

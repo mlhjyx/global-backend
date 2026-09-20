@@ -10,11 +10,16 @@ import { DiscoveryController } from '../discovery/discovery.controller';
 import { EventsController } from '../events/events.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
+import { PlatformTechnicalQuoteServiceAuthenticationGuard } from '../platform-authority/platform-technical-quote-service-auth';
+import { PlatformTargetLookupController } from '../platform-authority/platform-target-lookup.controller';
+import { PlatformTargetLookupGuard } from '../platform-authority/platform-target-lookup.guard';
 import { AssetsController } from '../site-builder/assets.controller';
 import { BuildsController } from '../site-builder/builds.controller';
 import { IntakeController } from '../site-builder/intake.controller';
 import { KbController } from '../site-builder/kb.controller';
 import { SitesController } from '../site-builder/sites.controller';
+import { SiteBuildTechnicalBudgetQuoteController } from '../site-builder/site-build-technical-budget-quote.controller';
 import { WhoamiController } from '../whoami/whoami.controller';
 import { AuthGuard } from './auth.guard';
 import { ScopesGuard } from './scopes.guard';
@@ -32,12 +37,22 @@ const PROTECTED_CONTROLLERS = [
   IntakeController,
   KbController,
   SitesController,
+  SiteBuildTechnicalBudgetQuoteController,
   WhoamiController,
 ] as const;
 
 const PUBLIC_CONTROLLER_FILES = new Set([
   'health/health.controller.ts',
   'site-builder/site-preview.controller.ts',
+]);
+
+const SERVICE_PROTECTED_CONTROLLERS = [
+  PlatformExecutionTechnicalQuoteController,
+] as const;
+
+const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
+  'platform-authority/platform-execution-technical-quote.controller.ts',
+  'platform-authority/platform-target-lookup.controller.ts',
 ]);
 
 function controllerFiles(root: string): string[] {
@@ -53,6 +68,9 @@ function controllerFiles(root: string): string[] {
 }
 
 describe('controller authorization guard topology', () => {
+  it('requires the dedicated guarded lookup pipeline for its read-only handler', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, PlatformTargetLookupController)).toEqual([PlatformTargetLookupGuard]);
+  });
   it.each(PROTECTED_CONTROLLERS)(
     '%s runs authentication before scope enforcement',
     (controller) => {
@@ -61,10 +79,21 @@ describe('controller authorization guard topology', () => {
     },
   );
 
+  it.each(SERVICE_PROTECTED_CONTROLLERS)(
+    '%s uses only the dedicated service authentication guard',
+    (controller) => {
+      const guards = (Reflect.getMetadata(GUARDS_METADATA, controller) ?? []) as unknown[];
+      expect(guards).toEqual([
+        PlatformTechnicalQuoteServiceAuthenticationGuard,
+      ]);
+    },
+  );
+
   it('fails closed when a new non-public controller omits the authz topology', () => {
     const sourceRoot = resolve(process.cwd(), 'src');
     const offenders: string[] = [];
     const discoveredPublic = new Set<string>();
+    const discoveredServiceProtected = new Set<string>();
 
     for (const absolute of controllerFiles(sourceRoot)) {
       const path = relative(sourceRoot, absolute);
@@ -73,6 +102,31 @@ describe('controller authorization guard topology', () => {
         continue;
       }
       const source = readFileSync(absolute, 'utf8');
+      if (SERVICE_PROTECTED_CONTROLLER_FILES.has(path)) {
+        discoveredServiceProtected.add(path);
+        const requiredTokens = path === 'platform-authority/platform-target-lookup.controller.ts' ? [
+          '@ApiBearerAuth(PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME)',
+          '@UseGuards(PlatformTargetLookupGuard)',
+          '@ReadOnlyControlPlane()',
+          'PLATFORM_AUTHORITY_TARGET_READER_SCOPE',
+        ] : [
+          '@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)',
+          '@UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)',
+          '@ReadOnlyControlPlane()',
+          '@ApiExtension("x-required-service-scope", "platform-technical-quote.read")',
+        ];
+        for (const required of requiredTokens) {
+          if (!source.includes(required)) offenders.push(`${path}: ${required}`);
+        }
+        for (const forbidden of [
+          '@ApiBearerAuth()',
+          '@UseGuards(AuthGuard, ScopesGuard)',
+          '@RequireScopes(',
+        ]) {
+          if (source.includes(forbidden)) offenders.push(`${path}: forbidden ${forbidden}`);
+        }
+        continue;
+      }
       for (const required of [
         '@ApiBearerAuth()',
         '@UseGuards(AuthGuard, ScopesGuard)',
@@ -84,6 +138,9 @@ describe('controller authorization guard topology', () => {
 
     expect([...discoveredPublic].sort()).toEqual(
       [...PUBLIC_CONTROLLER_FILES].sort(),
+    );
+    expect([...discoveredServiceProtected].sort()).toEqual(
+      [...SERVICE_PROTECTED_CONTROLLER_FILES].sort(),
     );
     expect(offenders).toEqual([]);
   });

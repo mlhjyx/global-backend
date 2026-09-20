@@ -60,6 +60,7 @@ function controlToken(value: unknown): boolean {
     token.includes('GENERIC_OPERATION_ARTIFACT_') ||
     token.includes('GENERICOPERATIONARTIFACT') ||
     token.includes('ARTIFACTSTORAGEERROR') ||
+    token.includes('PLATFORM_EGRESS_') ||
     token.includes('DURABLE_REPLAY_') ||
     token.includes('_REPLAY_')
   );

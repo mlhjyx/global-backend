@@ -7,6 +7,9 @@ import {
   PlanQueryShape,
   splitTerms,
   collectIndustryTerms,
+  boundedTargetCountries,
+  MAX_QUERY_PLAN_INDUSTRY_TERMS,
+  MAX_QUERY_PLAN_TARGET_COUNTRIES,
 } from './icp-to-cpv';
 import { CanonicalNode, cpvSubtreePrefix } from './taxonomy-resolver';
 
@@ -195,5 +198,38 @@ describe('复审修正 · cpvSubtreePrefix + 词采集稳健化', () => {
       { source_class: 'x', filters: { industry: 'pumps' }, keywords: [], rationale: '', priority: 2 },
     ];
     expect(collectIndustryTerms(null, planned)).toEqual(['pumps']);
+  });
+
+  it('行业与产品词按稳定首次出现顺序硬限制为统一执行包络', () => {
+    const attrs = {
+      industry: Array.from({ length: 40 }, (_, index) => `attr-${index}`),
+      product: Array.from({ length: 40 }, (_, index) => `product-${index}`),
+    };
+    const planned: PlanQueryShape[] = Array.from({ length: 40 }, (_, index) => ({
+      source_class: 'x',
+      filters: { industry: `planned-${index}` },
+      keywords: [],
+      rationale: '',
+      priority: index,
+    }));
+
+    const terms = collectIndustryTerms(attrs, planned);
+
+    expect(MAX_QUERY_PLAN_INDUSTRY_TERMS).toBe(64);
+    expect(terms).toHaveLength(MAX_QUERY_PLAN_INDUSTRY_TERMS);
+    expect(terms.slice(0, 3)).toEqual(['attr-0', 'attr-1', 'attr-2']);
+    expect(terms.at(-1)).toBe('product-23');
+    expect(terms).not.toContain('planned-0');
+  });
+
+  it('目标市场使用同一稳定上限，防数据库 JSON 扩大 taxonomy 物理调用', () => {
+    const targets = boundedTargetCountries(
+      Array.from({ length: 20 }, (_, index) => `country-${index}`),
+    );
+
+    expect(MAX_QUERY_PLAN_TARGET_COUNTRIES).toBe(8);
+    expect(targets).toEqual(
+      Array.from({ length: MAX_QUERY_PLAN_TARGET_COUNTRIES }, (_, index) => `country-${index}`),
+    );
   });
 });

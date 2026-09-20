@@ -91,11 +91,10 @@ describe("worker runtime admission wiring", () => {
     );
   });
 
-  it("does not promote additive execution authority capabilities into Worker polling admission", () => {
-    expect(source).not.toContain("checkExecutionBudgetJwksReadiness");
-    expect(source).not.toContain("checkPlatformBudgetAuthorityReadiness");
-    expect(source).not.toContain("workspace_budget_authority");
-    expect(source).not.toContain("platform_budget_authority");
+  it("keeps platform authority capabilities in Worker polling admission after cutover", () => {
+    expect(source).toContain("checkPlatformCapability");
+    expect(source).toContain("selectWorkerDependencyAdmission({");
+    expect(source).not.toContain("BeforeAuthorityCutover");
   });
 
   it("retries app-user database and migration admission before creating a worker lease", () => {

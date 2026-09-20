@@ -11,6 +11,10 @@ import {
   ContactDiscoveryResult,
   ExecutionContext,
 } from '../provider-contract';
+import {
+  MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+  MAX_DECISION_MAKER_PAGES,
+} from '../execution-envelope';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
@@ -37,7 +41,6 @@ export function scorePeoplePageUrl(url: string): number {
   return w;
 }
 
-const MAX_PEOPLE_PAGES = 4;
 
 export interface DecisionMakerContact {
   fullName: string;
@@ -129,7 +132,7 @@ export class DecisionMakerProvider {
 
     // 2) 逐页抓取 + LLM 抽取分类，按人名去重合并
     const dedup = new Map<string, DecisionMakerContact>();
-    for (const url of pages.slice(0, MAX_PEOPLE_PAGES)) {
+    for (const url of pages.slice(0, MAX_DECISION_MAKER_PAGES)) {
       if (
         !(await isAllowedByRobots(url, {
           authorizeExternalAction: ctx.authorizeExternalAction,
@@ -186,7 +189,7 @@ export class DecisionMakerProvider {
     this.log(
       `✓ ${company.domain}: ${out.length} named people (${out.filter((p) => p.isTargetRole).length} target-role)`,
     );
-    return out;
+    return out.slice(0, MAX_CONTACTS_PER_DISCOVERY_ADAPTER);
   }
 
   private async selectPeoplePages(domain: string, base: string, ctx: ExecutionContext): Promise<string[]> {
@@ -215,11 +218,11 @@ export class DecisionMakerProvider {
       const u = `https://${domain}${p}`;
       if (!picked.includes(u)) picked.push(u);
     }
-    return picked.slice(0, MAX_PEOPLE_PAGES + 2);
+    return picked.slice(0, MAX_DECISION_MAKER_PAGES + 2);
   }
 
   static toContactRecords(people: DecisionMakerContact[]): ContactDiscoveryResult['contacts'] {
-    return people.map((p) => ({
+    return people.slice(0, MAX_CONTACTS_PER_DISCOVERY_ADAPTER).map((p) => ({
       externalId: `${p.sourcePage}#${p.fullName.toLowerCase().replace(/\s+/g, '-')}`,
       fullName: p.fullName,
       title: p.title,

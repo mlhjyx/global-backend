@@ -45,6 +45,7 @@ describe('isExecutionControlError', () => {
     'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH',
     'GENERIC_OPERATION_ARTIFACT_INVALID',
     'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
+    'PLATFORM_EGRESS_FENCE_UNAVAILABLE',
   ])('recognizes %s on a direct code', (code) => {
     expect(isExecutionControlError({ code })).toBe(true);
   });

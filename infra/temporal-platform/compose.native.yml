@@ -1,0 +1,13 @@
+# Append to compose.yml; never replace the legacy temporal-dev.service stack.
+# Rendering alone does not prove the image/source binding: run the documented
+# temporal-native-publication compose and artifact admission before deployment.
+services:
+  temporal-platform:
+    image: ${TEMPORAL_PLATFORM_NATIVE_IMAGE:?set the published global-temporal-platform exact digest reference}
+    build: !reset null
+    entrypoint: !reset null
+    command: ["/etc/temporal/entrypoint.sh"]
+    environment:
+      TEMPORAL_PLATFORM_READER_SUBJECT: ${TEMPORAL_PLATFORM_READER_SUBJECT:?set the fixed GrowthOS reader subject}
+    labels:
+      io.global.temporal.native.source-sha: ${TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA:?set the verified native image source commit}

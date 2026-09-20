@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalReportedModelIdentifier,
   hasTrustedModelIdentity,
   resolveReportedModelIdentity,
 } from './model-identity';
@@ -17,10 +18,7 @@ describe('model identity aliases', () => {
 
   it('rejects a reviewed alias when transport provenance is missing', () => {
     expect(
-      resolveReportedModelIdentity(
-        'gemini-3.5-flash',
-        'gemini-default',
-      ),
+      resolveReportedModelIdentity('gemini-3.5-flash', 'gemini-default'),
     ).toBeUndefined();
   });
 
@@ -43,5 +41,16 @@ describe('model identity aliases', () => {
         resolvedModel: 'gpt-5.6-sol',
       }),
     ).toBe(true);
+  });
+
+  it.each([
+    [undefined, undefined],
+    [null, undefined],
+    [42, undefined],
+    [' model with spaces ', undefined],
+    [`m${'x'.repeat(120)}`, undefined],
+    ['gpt-5.6-terra', 'gpt-5.6-terra'],
+  ])('bounds an untrusted reported-model value %j', (value, expected) => {
+    expect(canonicalReportedModelIdentifier(value)).toBe(expected);
   });
 });

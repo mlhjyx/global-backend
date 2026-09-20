@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  selectWorkerDependencyAdmissionBeforeAuthorityCutover,
+  selectWorkerDependencyAdmission,
   waitForWorkerDependencyAdmission,
 } from './worker-dependency-admission';
 
 describe('waitForWorkerDependencyAdmission', () => {
-  it('keeps additive authority observations out of Worker polling admission before cutover', () => {
+  it('fails Worker admission when an authority capability is unavailable after cutover', () => {
     expect(
-      selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+      selectWorkerDependencyAdmission({
         hardChecks: [{ status: 'ok' }, { status: 'ok' }],
         authorityCapabilities: [
           {
@@ -16,15 +16,20 @@ describe('waitForWorkerDependencyAdmission', () => {
           },
         ],
       }),
-    ).toEqual({ status: 'ok' });
+    ).toEqual({
+      status: 'failed',
+      code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE',
+    });
 
     expect(
-      selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+      selectWorkerDependencyAdmission({
         hardChecks: [
           { status: 'ok' },
           { status: 'failed', code: 'REDIS_UNAVAILABLE' },
         ],
-        authorityCapabilities: [{ status: 'ok' }],
+        authorityCapabilities: [
+          { status: 'failed', code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE' },
+        ],
       }),
     ).toEqual({ status: 'failed', code: 'REDIS_UNAVAILABLE' });
   });

@@ -62,4 +62,43 @@ describe('workspace execution authority OpenAPI', () => {
       expect.arrayContaining(['402', '403', '409', '503']),
     );
   });
+
+  it('publishes the required lawful-basis body and stable 403 code for contact discovery', () => {
+    type OpenApiSchema = {
+      required?: string[];
+      properties?: Record<string, OpenApiSchema>;
+      enum?: string[];
+    };
+    type OpenApiOperation = {
+      requestBody?: { required?: boolean };
+      responses?: Record<
+        string,
+        {
+          content?: {
+            'application/json'?: { schema?: OpenApiSchema };
+          };
+        }
+      >;
+    };
+    const document = JSON.parse(
+      readFileSync(
+        resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
+        'utf8',
+      ),
+    ) as {
+      paths: Record<string, { post?: OpenApiOperation }>;
+      components?: { schemas?: Record<string, OpenApiSchema> };
+    };
+    const operation =
+      document.paths['/api/v1/canonical-companies/{id}/discover-contacts']
+        ?.post;
+    expect(operation?.requestBody).toMatchObject({ required: false });
+    expect(
+      document.components?.schemas?.DiscoverContactsDto?.required,
+    ).toContain('lawfulBasis');
+    expect(
+      operation?.responses?.['403']?.content?.['application/json']?.schema
+        ?.properties?.error?.properties?.code?.enum,
+    ).toContain('CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED');
+  });
 });

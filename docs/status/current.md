@@ -3,94 +3,103 @@
 > 文档 ID：`DOC-STATUS-001`
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
-> 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[发布路线](../roadmap/release-plan.md)、[ADR registry](../adr/registry.md)、本页所列 exact Git/worktree 与 development-runtime 只读观察
-> 最后核验：2026-08-30T00:03:46+08:00（Asia/Shanghai）
+> 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、下列 exact Git/GitHub 与 development-runtime 只读观察
+> 最后核验：2026-09-12T23:21:15+08:00（本轮刷新 Production Parity 源码、发布与 runtime；其他业务线保留各自证据边界）
 
 ## 当前结论
 
 `SOURCE_INTEGRATED_ALPHA / CROSS_REPO_PRODUCT_ASSEMBLY / USER_JOURNEY_NOT_VALIDATED / COMMERCIAL_LOOP_NOT_CLOSED / PRODUCTION_READINESS_BLOCKED`
 
-本页是 Phase 0 的一次性 live baseline，不以旧构建、旧模型执行或旧 PR 叙事替代当前事实。历史 provenance 继续见[追加式 changelog](../roadmap/changelog.md)和[evidence 索引](../evidence/README.md)。本页中的 Git 结论是 source/provenance evidence；systemd 与监听结论仅是 development-runtime observation，不是部署、可用性、UAT、RuntimeEvidence PASS 或 Release Bundle 证明。
+源码、局部测试、主线 CI、部署、运行证据和用户验收是不同的事实。Browser/ACK/schema 修复、平台 Temporal 基础设施和执行规则更新已合入，不代表用户已经能够完成 `LeadQualifiedPackage → Opportunity → Human QGO → Feedback`。当前仍没有可接纳的完整 MVP 用户闭环。
 
-当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`；它不是 active route、质量、dispatch、RuntimeEvidence 或发布证明。
+Program C 保持用户已批准的完整 C1–C5/QGO 范围；company-first 是未选择的可选缩范围，不构成原范围的执行阻塞。Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 是平台执行安全包络，不是客户余额或模型购买次数。
 
-## 1. Exact source baseline
+当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，不等于 active route、质量证明或真实 dispatch 授权。
 
-Phase 0 文档分支的 historical construction base 是 `23d111f7b400403deb7466abf34ab709685b8376`，不是当前 main。当前 source authority 是 `main@d2c93dd6bea0348381286558896b395c84945171`；精确在途候选由 Git/托管 PR head 与冻结 review packet 绑定，不嵌入本 tracked 页，因为一个 commit 无法稳定包含自身最终 SHA。
+2026-09-12 增量核验：#497、#502、#504、#505、#506、#507、#508、#509、#510、#513、#516、#517 与 #498 已合入。浏览器 ESRCH 修复的采用基线为 `b6be49020b28dccf2f67413667c396a893b9ce94`；对应 exact OCI 已采用，但整体仍为 `HOLD_CUTOVER / NOT_READY`，30分钟浏览器观察已通过，整体验收仍未完成。#511、旧 #479 保留为已关闭 provenance；#515 与 #407 仍为 Draft/HOLD。
 
-| Subject | Exact head / state | Evidence class and limitation |
-| --- | --- | --- |
-| `/global/backend` root `main` | `HEAD=d2c93dd6bea0348381286558896b395c84945171`; local `origin/main=d2c93dd6bea0348381286558896b395c84945171`; tracked/untracked clean at capture; 69 ignored status entries; status-entry digest `eb9d403efc501653cecc60be5af0de73d7ddf1e817fe568f1b385c352f7942f9` | Live local Git and `governance-main-worktree-sync` readback after PR #425. The digest binds porcelain path/state entries only；it does not prove ignored content byte identity or ignored-content cleanliness. This is source provenance only, not runtime/Release proof. |
-| Program A | `/global/backend/.codex/worktrees/production-parity-capability-cutover`; `codex/production-parity-capability-cutover@91cae351795cceced59893bcf552c2b502a4ebaa`; clean; `MERGE_HEAD=NONE`; `59 ahead / 17 behind` local `origin/main@d2c93dd6bea0348381286558896b395c84945171` | Live local Git readback. This is the closed audit packet and remains `NON_DEPLOYABLE / PROVENANCE_ONLY`, not a current-main acceptance claim; any later head/index/working-tree/merge movement reopens the delta audit. |
-| Program B successor admission | `/global/backend/.codex/worktrees/discovery-query-materialization-successor`; `codex/discovery-query-materialization-successor@801710918c05b31f000496dfa480260ac2be019b`; `0 ahead / 1 behind` local `origin/main`; PR #425 merge/readback=`d2c93dd6bea0348381286558896b395c84945171` | Live local/hosted Git readback. The card is `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`; it closes ownership only and is not implementation acceptance. |
-| Closeout plan | `/global/backend/.codex/worktrees/root-worktree-remote-closeout-plan`; `codex/root-worktree-remote-closeout-plan@3c9156d05ba6509c58bd4b806349fb5f07aef9a6`; `36 ahead / 62 behind` local `origin/main` | Live local Git readback; provenance only. |
-| GrowthOS local source | `/global/frontend/growthos-source`; `codex/production-parity-jwks-budget-grants@251dd1ecf15b1ebe58896027dc9c8a0d9d5ac8aa`; dirty paths: `scripts/materialize-and-build.mjs`, `scripts/materialize-and-build.spec.mjs`, `scripts/authority-builder.mjs`; untracked `node_modules/` content was not read | Live local Git readback. Status is `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`; local source neither proves a remote release nor user availability. |
+[Native Temporal disposable proof](../evidence/temporal-platform-native-disposable-closeout-20260911.md) 只证明绑定候选的隔离矩阵。它不是 retained native 服务、GrowthOS producer、机器 service JWT 交付、跨仓 UAT 或 Release Bundle 的完成证明。本轮只推进真实已验证的部分，不重复设计客户 Billing/Credits。
 
-### Program RAG and ownership boundary
+## 1. 源码与正在进行的工作
 
-| Program | RAG | Current owner boundary | Phase 0 condition |
-| --- | --- | --- | --- |
-| A — authority/runtime primitives | RED | Owns generic Execution Authority, GovernedSubject/Relation primitives, Site Quote/Grant, OCI/runtime and unified RuntimeEvidence/Release; does **not** own RawSourceRecord, IdentityLink, CanonicalCompany business schema, Provider or Opportunity | `OWNERSHIP_CLOSED_WITH_REMEDIATION`: writer inactivity、clean/no-`MERGE_HEAD` packet、post-`ed615d1b` delta classification 与 binding-ledger/provenance correction 已在 `91cae351795cceced59893bcf552c2b502a4ebaa` 完成。35 个 main ancestry commits 仍是 `KEEP_AS_MAIN_INTEGRATION_PROVENANCE`；`b57af498` 是 two-parent integration provenance；五个 B-owned deltas 仍不是 accepted A work；四个 Task 5.2 commits 继续 `QUARANTINED / HOLD_OWNERSHIP` 历史处置。PR #424 已将 mega-branch 固定为 `NON_DEPLOYABLE / PROVENANCE_ONLY`，PR #425 readback `d2c93dd6bea0348381286558896b395c84945171` 已接受唯一 B card/writer。A 的 ownership gate 已关闭，但其 source/runtime/Release 能力仍按 G2–G5 单独验证。 |
-| B — Buyer Intelligence discovery | AMBER | Owns query receipt, raw source, Identity/Canonical, Provider/transport, discovery workflow and immutable `LeadQualifiedPackage`; does **not** own generic Grant/primitive, SaaS Opportunity or runtime deploy | `GPP-B-LINEAGE-001` 已通过 PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 由 current main admit 给唯一 writer `codex/discovery-query-materialization-successor`，状态 `ADMITTED / ZERO_PRODUCT_CODE / CURRENT_MAIN_READBACK_PASS`。G0 ownership 已关闭；A 分支的 B-owned delta 仍非 accepted implementation，任何产品施工必须另过 G2/G3 计划与 review。 |
-| C — SaaS handoff/commercial loop | RED | Owns server-side handoff consumer, receipt, QualificationSnapshot, Opportunity, QGO/SAO/CLOSED, SalesAcceptance, CommercialOutcome and Conversation linkage; it must commit before ACK and must not copy Buyer Intelligence SoR | No selected C1 implementation card or verified consumer/runtime path. Owner/assignee remains `UNKNOWN`/`UNASSIGNED`, not inferred from a branch. |
+以下记录是时间绑定快照，不预测本文后续提交或其他任务未来结果。
 
-Fixed cross-program interface: `ExecutionAuthority → ToolOperationSubject → B-owned QueryReceipt → B-owned RawSourceRecord UUID → B-owned IdentityLink/CanonicalCompany UUID → A-owned append governed child/relation primitive → Domain ACK`.
+| Subject              | Exact observed state                                                                                                                                                                                                                   | 证据边界                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Backend source | 浏览器修复已由 #517 合入，采用基线 `b6be49020b28dccf2f67413667c396a893b9ce94`；根 main 通过受控同步跟随，未跟踪 `.playwright-cli/` 保留 | source、运行镜像和其他候选提交分别绑定，不把根 checkout 当 managed runtime |
+| 已完成修复           | #448 安全基线、#449 结算源码已合入；#452 浏览器接线合入 `490bed749823248a4dad9508ef0b86dd36454cc7`；#453 ACK 回读合入 `e09ff17f1f2b417ee99c2d3b3ea34e34ed25277a`；#454 删除事件 schema 合入 `63b4af94b662d7e2b6a40823a1872daf0fc9b993` | 不再列为未开发或待合入；部署、运行采用另行核验                                                               |
+| 主线 CI | #517 当前合并前 head `0a7d2259466c144291f1e6abede51360c02eb1ac` 的 [required CI](https://github.com/mlhjyx/global-backend/actions/runs/34694058234) 与独立 delta review 通过；包含 API 全量测试、native Go、镜像200次探针及 Renderer visual regression；[exact-main publication](https://github.com/mlhjyx/global-backend/actions/runs/34695996341) 通过 | 对应提交/制品的检查，不等于整体 runtime 或用户 UAT |
+| Browser readiness | `175ae53…` 镜像采用后 browser=`ok`，30分钟60次采样已通过；旧 `137f881…`/`4246f660…` 的短暂恢复不能证明稳定。实际修复是 Linux `/proc` 消失竞态的 ESRCH 处理 | [因果证据](../evidence/browser-readiness-proc-exit-race-20260912.md) 与 [运行观察](../evidence/browser-readiness-runtime-adoption-20260912.md) 分开；只确认该镜像的有界浏览器观察，不外推整体验收 |
+| Backend ACK readback | `EventsController_ackStatus_v1` 已进入 code-first OpenAPI；权限为 `acquisition:event:ack`，固定 saas sink、Workspace RLS、closed response、no-store                                                                                    | 只回读 ACK 状态；不是 SaaS consumer，也未授予浏览器后台权限                                                  |
+| DeletionCompleted    | v1 schema 已兼容 producer 的可选非负整数 `patent_cache_erased`，历史缺字段仍合法                                                                                                                                                       | 没有增加删除执行或 Patents 调用；不是跨仓 DSR 完成证明                                                       |
+| GrowthOS source | authority `/global/frontend/growthos-source` 为 `51d7420373e31ba5c2a696513d8d6b5e77ed3fe0`；本任务隔离 writer 中0099/0100历史候选保留，0101 codec和0102专用签名/JWKS已完成本地验证与patch登记，未作为正式新制品采用 | 0102相关35 tests、四新类96.55% lines/90.91% branches；service JWT交付、真实producer/consumer与全产品接纳未完成 |
+| GrowthOS runtime | 已恢复发布基线 `541bcc63c3486296ab4e2461d4d005e6cd43710b` 的三项exact镜像，current选择器已从旧demo切至managed release；27项Flyway checksum逐项匹配，原卷保留，JWKS三端点200，3002/3003/18081只绑定loopback | [恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)；不是最新source候选或平台capability完整采用，不是登录/建站UAT |
+| Program B source     | `pr407-organization-identity-caller-cutover-v2` clean `944ce580ae91f5bb2238e63f94726b5789dd63f5`                                                                                                                                       | 旧 `f3e5bc19… C6/H5` 不自动迁移到新版本；本次没有核得新版本全链路接纳/Pilot 完成证据                         |
+| Program C spec       | 独占 `program-c-c1-contract-20260904` 本地提交 `4b116f10bc3d7efca6f15611f900923f2ea73d1f`；同一 C1 文档的分页/隐私/digest finding 已独立复审关闭 C0/H0/M0                                                                              | 文档未进入 main；GrowthOS 文件所有权交接与源码实施仍未完成，不再把“合同尚未复审”作为阻塞                     |
+| 平台基础设施 | 2026-09-13：#520已合入，native image `a11b50e4…` 从 source `0192faa7…` 发布成功；[发布与本地制品回读](../evidence/temporal-native-publication-20260913.md)分别记录可信来源与 Docker inspect 兼容候选。retained尚未采用，现有混合Worker不能只改namespace便迁往平台服务 | 发布/制品回读不是服务启动或UAT；不替换 legacy SQLite/namespace，不用配置布尔值或 disposable结果冒充权限/运行证明 |
+| 运行时采用 | API/Worker/Relay均回读 image `sha256:175ae53c6500456f1121d006fd4add694231d15e20d26fbd77ef795d3f9f90d5`、source `b6be49020b28dccf2f67413667c396a893b9ce94`、artifact `sha256:74ac61098764370c00562152dc83a49876a7d9b363d6415fd82a72c510183c56`；migration `20260908130000_platform_egress_budget_policy_v2`，完整manifest/SBOM等见[采用观察](../evidence/browser-readiness-runtime-adoption-20260912.md) | API/Relay过程lease READY、Worker STARTING；匹配身份不等于可接新工作 |
+| Wikidata country successor | #498 已合入，merge `b07090011de652385aa53b17f6fd73c0e2e466d5`；country绑定修复不再列为在途候选 | 只闭环其 country-binding 子项，不关闭 #407 综合任务或 Program B 接纳 |
+| 安全治理候选 | #509 trusted verifier、#506 依赖修复、#510 post-remediation baseline 已合入；主线 advisory=`FRESH`、current=0，#511 关闭/保留为 superseded provenance | 不把安全收口当作平台 authority、RuntimeEvidence、Release Bundle 或用户验收 |
+| 文档候选 | 本页以#517实际采用与持续观察修正旧browser稳定结论；#515本地新增真实Java签名golden vectors，receiver候选仍未接完整producer | [本地验签及独立审查记录](../evidence/platform-capability-java-local-20260912.md)：111/111，不等于跨仓hosted或runtime整体通过 |
 
-## 2. Gate position
+### Program 所有权与产品缺口
 
-| Gate | Current verdict | Evidence and blocker |
-| --- | --- | --- |
-| G0 — Truth & Ownership | `PASS / OWNERSHIP_CLOSED` | PR #424 已固定 ADR-025/`DEC-GPP-001` 与 mega-branch disposition；PR #425 merge/readback `d2c93dd6bea0348381286558896b395c84945171` 已把唯一 `GPP-B-LINEAGE-001` card/writer 持久写入 current main。`CON-GPP-001=RESOLVED_WITH_REMEDIATION`、`BLK-GPP-001=RESOLVED`。此 PASS 只关闭 ownership/provenance；Program B implementation/TDD 仍属于 G2，DB/RLS/replay 与集成仍属于 G3，G1–G7 不由本门升级。 |
-| G1 — Product/UX/Contract | `AMBER / SPEC_ALIGNED / MACHINE_CONTRACT_AND_IMPLEMENTATION_PENDING` | Task 4/product docs are complete. Remaining gaps include the Program C machine contract/source, formal capability manifest and release adoption, and user validation. |
-| G2 — Source/TDD/Security | `AMBER / SOURCE_REVIEWED_NOT_ACCEPTED` | ADR-025/`DEC-GPP-001` ownership and interface are accepted, but the Program A quarantined source and B-owned deltas are not accepted as Program A implementation; Program C C1 TDD/security has not started; GrowthOS remote CI/release remains unverified. |
-| G3 — Integration/Data | `RED / NOT_INTEGRATED` | No accepted A/B seam implementation, Program C consumer, durable handoff transaction, current-data integration or end-to-end integration evidence exists. |
-| G4 — Release Candidate | `RED / NO_RELEASE_CANDIDATE` | No current release-candidate package, current PASS RuntimeEvidence or Release Bundle is present; governance count is `release_bundles=0`. |
-| G5 — Runtime Observed | `RED / DEGRADED_NO_CURRENT_EVIDENCE` | API and Worker are restart-looping; governance count is `runtime_current=0`, `runtime_historical=0`. Service observation cannot substitute for valid RuntimeEvidence. |
-| G6 — UAT Accepted | `RED / NOT_VALIDATED` | No evidence of an end-to-end user journey, human QGO decision, user acceptance or UAT. |
-| G7 — Pilot/GA Authorized | `RED / NOT_AUTHORIZED` | No pilot/GA authorization, independent external readback or commercial-loop closure exists; Billing/Credits remains `DEFERRED / NOT_IMPLEMENTED`. |
+| Program                          | 状态                                           | 所有权与当前缺口                                                                                                                                                                                                 |
+| -------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A — authority/runtime primitives | PARTIAL                                        | 通用 Authority、GovernedSubject/Relation、Site Quote/Grant、runtime/release；不拥有 Raw/Identity/Provider 或 Opportunity。历史 mega branch 仍为 NON_DEPLOYABLE / PROVENANCE_ONLY；当前平台候选及运行采用分别接纳 |
+| B — Buyer Intelligence discovery | CURRENT_CANDIDATE_ACCEPTANCE_NOT_VERIFIED      | QueryReceipt、Raw/Identity/Canonical、Provider/transport、Discovery、LeadQualifiedPackage；不拥有 SaaS Opportunity 或 runtime deploy。已接纳 main slices 与当前候选分开，完成当前版本验收后再进入受控 Pilot      |
+| C — SaaS handoff/commercial loop | SPEC_REVIEWED / IMPLEMENTATION_HANDOFF_PENDING | 服务端 consumer、receipt、QualificationSnapshot、Opportunity、QGO/SAO/CLOSED、SalesAcceptance、CommercialOutcome、Conversation linkage；完整原范围保持有效                                                       |
 
-## 3. Runtime observation — development only
+A/B ownership seam 已关闭，固定边界为 `ExecutionAuthority → ToolOperationSubject → B-owned QueryReceipt → B-owned RawSourceRecord UUID → B-owned IdentityLink/CanonicalCompany UUID → A-owned append governed child/relation primitive → Domain ACK`。历史来源见 ADR-025、冲突注册表与原计划；这不自动关闭所有 Program 的来源、迁移、运行和验收门。
 
-Captured at the timestamp above by `systemctl show` and `ss -ltnp`; no service was restarted and no deployment was inspected.
+Program C 的 durable server consumer、handoff receipt、QualificationSnapshot、Opportunity aggregate、commit-before-ACK、ACK_PENDING 与 QGO/SAO/Outcome 尚未完成产品接纳；browser ACK 和 Conversation shell 不能替代 Opportunity。C1-A 的本地 parser/client 不依赖真实 Provider 或邮件，但必须先取得现有 GrowthOS writer 的明确文件交接；C1-B 的持久化、KMS/DSR/suppression 与迁移有独立依赖。
 
-| Surface | Observation | Meaning and limitation |
-| --- | --- | --- |
-| `global-api.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=6612`, `ExecMainStatus=0` | Degraded development-runtime observation, not a healthy API proof. |
-| `global-worker.service` | `ActiveState=activating`, `SubState=auto-restart`, `NRestarts=6612`, `ExecMainStatus=0` | Degraded development-runtime observation, not a consuming Worker proof. |
-| `temporal-dev.service` | `ActiveState=active`, `SubState=running`, `NRestarts=0`, `ExecMainStatus=0` | Only the service-manager state is observed; this does not prove workflow execution. |
-| `3000` | No listener observed | API reachability is not established. |
-| `3001` | Docker proxy listens on `0.0.0.0:3001` and `[::]:3001` | Observed non-loopback exposure conflicts with the development-port policy; diagnose read-only before any mutation. |
-| `3002` / `3003` | Docker proxy listens on `0.0.0.0:3002` / `0.0.0.0:3003` | Observed non-loopback exposure; not deployment proof. |
-| `8080` | Java listens on `*:8080` | Observed wildcard listener; identity and external reachability are unverified. |
+## 2. 全局阶段门
 
-## 4. Other readiness and security gates
+| Gate                              | 当前裁决                        | 仍需证明                                                                                                                                 |
+| --------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| G0 — Truth & Ownership            | PARTIAL                         | 已关闭 A/B 重叠不代表全部 owner 已交接；Program C writer/migration/patch manifest 交接未完成；其他 Program 的新候选按当前 owner 证据接纳 |
+| G1 — Product/UX/Contract          | PARTIAL                         | 完整 C1 合同已复审；跨仓可执行隐私、不可变 Evidence、UI 和 UAT 合同仍有缺口                                                              |
+| G2 — Source/TDD/Security          | PARTIAL / MERGED_FIXES_VERIFIED | #452/#453/#454 源码及其必需 PR CI 已通过；不能把这一批成功推广到所有产品模块                                                             |
+| G3 — Integration/Data             | PARTIAL / PRODUCT_E2E_NOT_RUN   | 本地组合测试和一次性数据库测试通过；当前用户旅程、跨仓消费、重启、DSR/隐私闭环未验收                                                     |
+| G4 — Release Candidate            | DEVELOPMENT_CANDIDATE_ONLY      | 当前源码尚需匹配的跨仓 images/SBOM/migrations/rollback 与可信外部 readback                                                               |
+| G5-Site — Runtime Observed        | HISTORICAL_ONLY                 | 当前有效 RuntimeEvidence=0；#517已有development镜像采用观察，30分钟浏览器观察通过，但current RuntimeEvidence/UAT仍未完成；旧Site记录已到期，不能用于G5/G7晋级 |
+| G5-Acquisition — Runtime Observed | NOT_VERIFIED                    | 当前有效获客 RuntimeEvidence=0；平台权限、Discovery 到 Opportunity 的当前运行链未证明                                                    |
+| G6 — UAT Accepted                 | NOT_RUN                         | 关键用户旅程连续三次、其中一次受控重启，以及产品 Owner 验收                                                                              |
+| G7 — Pilot/GA Authorized          | NOT_AUTHORIZED                  | 有效跨仓 Release Bundle、运行证据、独立 readback 和精确 Pilot/GA 授权                                                                    |
 
-| Gate | Current disposition | Unique authority/history pointer and limitation |
-| --- | --- | --- |
-| Production dependency/advisory audit baseline | `UNKNOWN / REVALIDATION_REQUIRED` | The [2026-08-24 changelog entry](../roadmap/changelog.md#2026-08-24-production-parity-personal_data-cleanup-runtime-readback) is historical provenance only; no prior count is restored as current and the present lock/advisory set must be recaptured. |
-| Live required ruleset / branch protection / Dependency Review / CodeQL configuration | `EXTERNAL_STATE_UNVERIFIED` | [Repository ruleset authority](../backend/ci-merge-automation.md#仓内-required-contexts-与外部-ruleset) states that repository files cannot prove live external enforcement; no external readback was performed in this Phase 0 fix. |
-| Container / Compose / IaC supply-chain gate | `PARTIAL / REVALIDATION_REQUIRED` | The [dependency and security aggregate-gate sequence](../backend/ci-merge-automation.md#依赖与安全聚合门的启用顺序) is the authority pointer; source-side pieces do not prove a current complete required gate. |
-| Application DB principal admission (`app_user`, non-owner/non-superuser/non-`BYPASSRLS`) | `UNVERIFIED / REVALIDATION_REQUIRED` | Source/history exists, but [the current architecture gap register](../architecture/current.md#8-as-built-缺口登记已核验8-项) does not provide target-runtime admission evidence. |
-| Target PostgreSQL/Temporal, real SaaS JWKS/token and cross-workspace negatives | `RUNTIME_UNVERIFIED / REVALIDATION_REQUIRED` | The [risk-trigger verification matrix](../backend/ci-merge-automation.md#风险分级决定验证深度不授予自动合并) requires target DB/RLS and JWKS/workspace negative evidence; none was produced here. |
+## 3. Development runtime 观察
 
-These dispositions do not resolve or supersede the current API/Worker restart-loop and wildcard-listener observations above.
+本次已采用 #517 的 exact OCI 修复，来源与全部制品摘要见上表及[运行观察](../evidence/browser-readiness-runtime-adoption-20260912.md)。切换前没有 queued/running Site BuildRun；先拉取并离线校验镜像，再停止并启动 API/Worker。数据库只读回读为135条成功、2条历史rolled-back、0条未完成且未回滚；本次没有执行迁移或手工业务数据更新。30分钟观察60次采样通过；整体服务与用户旅程仍待验收。
 
-## 5. Product path and current priority
+| 观察              | 当前可确认的事实                                                                                                         | 不得外推                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| 运行版本 | `/api/v1/health/build`返回attested=true；API/Worker/Relay的source、image、artifact及migration逐字匹配上表 | running和身份匹配不证明readiness、消费、模型或用户旅程成功 |
+| Browser 历史事故 | 保留2026-09-05容量事故及#513/#516的历史短暂恢复；之后捕获成功退出Chromium后的proc stat ESRCH，#517补齐该竞态并保留EACCES/EIO/live-group拒绝语义 | 不再用重启后的5次短观察作为已稳定修复结论 |
+| Listener exposure | 本次 `ss` 仍见 `0.0.0.0:3001`、`[::]:3001` 和 legacy Java `*:8080`                                                       | 未执行端口收敛或旧服务退役                                                               |
+| Readiness | `/api/v1/health/ready`=503；基础依赖、browser、identity/Site Build/Execution JWKS、workspace budget authority及platform quote authentication均ok；平台acq/intent/sanctions当前报`TEMPORAL_PROOF_UNAVAILABLE`，Worker=`MATCHING_WORKER_NOT_READY` | 旧GrowthOS启动选择器造成的验签阻断已关闭；native权限/producer/consumer与matching Worker仍未完成，不接新BuildRun |
+| Historical Spend  | 旧 UNKNOWN/unknown 及 unresolved/expired 记录按原证据保留                                                                | 不通过重发制造结果，也不由源修改自动改写历史费用                                         |
 
-The first user result is not a raw-record count, build count or page count. The product path is:
+历史费用记录保持 UNKNOWN/unknown：attempts 1–5 为 UNRESOLVED，attempt 6 为 EXPIRED，reservation/conservative charge 均为 `800000`；EXPIRED 不产生有效输出或精确费用，继续不重发。完整脱敏字段见 [2026-09-04 platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json)；20260901 predecessor 保持 historical provenance。GrowthOS 2026-09-01 historical provenance 也不能代替当前 authority source。
 
-`Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`
+旧权限缺失码与健康响应仅对其原观察时间有效；当前 runtime acceptance 仍须 fresh readback，不能由本页或静态 CI 代签。
 
-The parallel Site path is:
+## 4. 验证、证据与发布
 
-`Quote → Grant → Build → Preview`
+- 已合入组合源码 `63b4af94…` 的 tree 为 `8e7ecd528d4190bfbfb17d93cce054d1923438cc`，与隔离组合逐字节一致。11 个测试文件 134/134、一次性 PostgreSQL16/RLS 4/4、API/contracts build、OpenAPI 零漂移、governance 147/147 通过。测试容器只清理自己的临时数据。
+- 浏览器本地范围的行/分支覆盖率为 94.06%/86.36%；独立五文件审查 C0/H0/M0。额外全目录测试源码 tsc 未通过，未修改测试中的类型/声明问题没有被此局部成功掩盖。
+- 本次治理只读验证报告 RuntimeEvidence `6 total / 0 current / 6 historical`，Release Bundles=3。前两条 Site 证据到期点为 `2026-09-05T03:49:25.000Z`；到期不删除历史，但不能用于 G5/G7 晋级。
+- 3 个 Release Bundles 仍是 development `CANDIDATE` / `EXTERNAL_UNVERIFIED`，不是可信发布结果。具体字段以机器文件及 verifier 为准；路径存在或结构通过不是 runtime proof。
+- PR #461 的 privilege-hardening successor 已应用并 read back：`fence_platform_schedule_v1(text,text)` 对 `PUBLIC`、`app_user`、`runtime_api`、`runtime_worker`、`runtime_outbox_relay` 为无 EXECUTE，仅 dedicated `execution_budget_platform_writer` 可执行；这不等于平台 Temporal proof 或跨系统撤销链已就绪。
+- #448/#506/#509/#510的历史安全基线保留；#517的exact-source检查与镜像发布已通过，新增持续观察不解除GrowthOS/platform/Worker/UAT/Pilot门。
 
-It does not create Campaign, outreach, conversation execution, attribution, SaaS product UI or commercial acceptance state in this backend. Product Billing/Credits remains `DEFERRED / NOT_IMPLEMENTED`; `cap_microusd` is an execution safety envelope, not a customer billing feature.
+## 5. 下一顺序与授权边界
 
-**Next single highest-priority user result:** G0 ownership/provenance is closed; establish the Program C server-side handoff-consumer/service-principal and receipt contract so one immutable `LeadQualifiedPackage` can become a durable Opportunity candidate. C1 and the admitted Program B lineage card may enter separate G2 plans, but each must satisfy G3 Integration/Data before supporting the user journey；no Discovery GREEN、actual pilot、runtime cutover、Provider wire 或 email sending is authorized by this closeout.
+商业主路径是 `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`；并行信任资产路径是 `Quote → Grant → Build → Preview`。
 
-## 6. Critical risks and external authorization queue
+1. 运行主线：已完成#517持续浏览器观察与#520 native制品发布；继续operator兼容修复、retained采用、GrowthOS专用service JWT交付、producer事实与独立撤销consumer，随后才做完整运行切换与fresh RuntimeEvidence。撤销恢复差额已获用户确认，但实施及安全前提仍需逐项验证，不以绕过或伪造ACK收口。
+2. 产品主线：GrowthOS 单 writer 文件交接 → C1-A → C1-B/C1-C → C2 Opportunity → C3 Human QGO → C4 Outcome/C5 Conversation；不另起 R7 文档循环。
+3. 文档：本页维护当前事实，roadmap 保持稳定顺序；历史入 changelog/evidence。#451 按已批准的 GitHub 队列完成最终修订、验证、独立审查与远端收口。
+4. 验收：当前跨仓 Release Bundle、关键 UAT 三次与重启恢复通过后，才评估德国工业泵零模型/零付费/零发送 Pilot 的精确授权卡。
 
-Critical risks are (1) Program A post-RED schema/writer provenance can collide with Program B Raw/Identity SoR if treated as accepted, (2) API/Worker restart loops and wildcard development listeners have no current diagnosis/remediation evidence, and (3) no validated user journey, current RuntimeEvidence or Release Bundle exists.
-
-The following actions require separate explicit authorization and are not performed by this baseline: any service restart/configuration or listener remediation; retained migration or database mutation; provider/model/paid call; credential/JWKS/OAuth/email action; push, PR mutation, merge, deploy or external control-plane readback. Read-only runtime diagnosis is allowed; it cannot upgrade G5–G7 or substitute for G3 integration, G4 release-candidate, or G6 UAT evidence.
+既有明确授权在相同动作、目标、范围和成本/数据边界内继续有效，普通本地开发/验证不重复请示。#452/#453/#454 更新与合入授权已执行完成，不自动授权部署、保留数据库迁移、缓存删除、端口变更、真实 Provider/模型调用、OAuth/邮件或 Pilot。当前工作保留单 writer、费用、权限、RLS 与发布门；未知结果不被静态检查升级。

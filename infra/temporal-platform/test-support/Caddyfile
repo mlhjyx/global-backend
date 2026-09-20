@@ -1,0 +1,13 @@
+{
+	admin off
+	auto_https off
+}
+
+https://task4c-jwks:8443 {
+	tls /run/secrets/task4c-jwks/server.crt /run/secrets/task4c-jwks/server.key
+	root * /srv/jwks
+	file_server
+	log {
+		output discard
+	}
+}

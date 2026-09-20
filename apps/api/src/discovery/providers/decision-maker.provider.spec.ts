@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { scorePeoplePageUrl } from './decision-maker.provider';
+import {
+  DecisionMakerProvider,
+  scorePeoplePageUrl,
+} from './decision-maker.provider';
 
 describe('决策人页优先级打分（Impressum 优先）', () => {
   it('Impressum/法律声明最高（德国依法列 Geschäftsführer）', () => {
@@ -27,5 +30,17 @@ describe('决策人页优先级打分（Impressum 优先）', () => {
   it('非人物页得 0（不误抓产品/新闻页）', () => {
     expect(scorePeoplePageUrl('https://x.de/produkte/laser')).toBe(0);
     expect(scorePeoplePageUrl('https://x.de/news/2026')).toBe(0);
+  });
+});
+
+describe('DecisionMakerProvider execution envelope', () => {
+  it('projects at most 25 contacts from an untrusted aggregate result', () => {
+    const people = Array.from({ length: 26 }, (_, index) => ({
+      fullName: `Person ${index}`,
+      personalData: true,
+      sourcePage: `https://acme.example/people/${index}`,
+    }));
+
+    expect(DecisionMakerProvider.toContactRecords(people)).toHaveLength(25);
   });
 });

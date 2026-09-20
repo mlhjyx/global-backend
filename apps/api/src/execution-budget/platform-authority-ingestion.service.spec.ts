@@ -1,10 +1,7 @@
 import 'reflect-metadata';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import {
-  importJWK,
-  type JWK,
-} from 'jose';
+import { importJWK, type JWK } from 'jose';
 import {
   EXECUTION_BUDGET_AUTHORITY_AUDIENCE,
   PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND,
@@ -33,8 +30,15 @@ import { ExecutionBudgetAuthorityReadinessContributors } from '../runtime/manage
 
 const COMPACT_JWS = 'header.payload.signature';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
+const ACCOUNT_ID = '8cf66f2a-1780-453e-8d7d-f70e36cb22a6';
 const JTI = '120a4e9f-0c06-4cb4-8364-b7df51c45a88';
-const SCHEDULE_ID = 'platform-acquisition-hourly';
+const SCHEDULE_ID = 'acq-sweep';
+const SCHEDULE_REQUEST_SHA256 =
+  '5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e';
+const WORKFLOW_ID = 'platform-acquisition-acq-sweep-20260904t100000z';
+const WORKFLOW_RUN_ID = '11111111-1111-4111-8111-111111111111';
+const TECHNICAL_POLICY_REVISION =
+  '65ea2cd1c4c42c32e0d378940f65ee6a2530090a3077c54597432da7905337ba';
 const ISSUER = 'https://control-plane.example.test/';
 const AUDIENCE = 'global-backend:execution-budget';
 
@@ -43,20 +47,35 @@ const VALID_CLAIMS = {
   iss: ISSUER,
   aud: AUDIENCE,
   jti: JTI,
-  iat: 1_786_752_000,
-  nbf: 1_786_752_000,
-  exp: 1_786_752_300,
+  iat: 1_788_472_800,
+  nbf: 1_788_472_800,
+  exp: 1_788_473_100,
   authority_kind: 'PLATFORM_GRANT',
   purpose: 'platform.acquisition',
   subject_type: 'schedule',
   subject_id: SCHEDULE_ID,
   schedule_id: SCHEDULE_ID,
+  schedule_request_sha256: SCHEDULE_REQUEST_SHA256,
+  workflow_id: WORKFLOW_ID,
+  workflow_run_id: WORKFLOW_RUN_ID,
+  technical_policy_revision: TECHNICAL_POLICY_REVISION,
   currency: 'USD',
   unit: 'microusd',
-  cap_per_run_microusd: '1000000',
-  campaign_cap_microusd: '10000000',
-  max_runs: '10',
+  cap_per_run_microusd: '1',
+  campaign_cap_microusd: '1',
+  max_runs: '1',
 } as const satisfies PlatformExecutionBudgetAuthorityUpsertedV1Claims;
+
+const EXPECTED_INVOCATION = Object.freeze({
+  purpose: 'platform.acquisition' as const,
+  subjectType: 'schedule' as const,
+  subjectId: SCHEDULE_ID,
+  scheduleId: SCHEDULE_ID,
+  scheduleRequestSha256: SCHEDULE_REQUEST_SHA256,
+  workflowId: WORKFLOW_ID,
+  workflowRunId: WORKFLOW_RUN_ID,
+  technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
+});
 
 function verifiedAuthority(): VerifiedExecutionBudgetAuthority {
   return Object.freeze({
@@ -71,12 +90,16 @@ function verifiedAuthority(): VerifiedExecutionBudgetAuthority {
     subjectId: SCHEDULE_ID,
     requestSha256: null,
     scheduleId: SCHEDULE_ID,
+    scheduleRequestSha256: SCHEDULE_REQUEST_SHA256,
+    workflowId: WORKFLOW_ID,
+    workflowRunId: WORKFLOW_RUN_ID,
+    technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
     currency: 'USD',
     unit: 'microusd',
     capMicrousd: null,
-    capPerRunMicrousd: 1_000_000n,
-    campaignCapMicrousd: 10_000_000n,
-    maxRuns: 10n,
+    capPerRunMicrousd: 1n,
+    campaignCapMicrousd: 1n,
+    maxRuns: 1n,
     tokenSha256: 'b'.repeat(64),
     issuedAt: 1_786_752_000,
     notBefore: 1_786_752_000,
@@ -88,13 +111,20 @@ function serviceWith(
   verifyPlatform: (
     compactJws: string,
   ) => Promise<VerifiedExecutionBudgetAuthority>,
-  ingestPlatform: (
+  ingestPlatformAndAdmit: (
     authority: VerifiedExecutionBudgetAuthority,
-  ) => Promise<{ authorityId: string; replay: boolean }>,
+    expected: typeof EXPECTED_INVOCATION,
+  ) => Promise<{
+    authorityId: string;
+    accountId: string;
+    generation: number;
+    authorizedCapMicrousd: bigint;
+    replay: boolean;
+  }>,
 ): PlatformExecutionBudgetAuthorityIngestionService {
   return new PlatformExecutionBudgetAuthorityIngestionService(
     { verifyPlatform } as ExecutionBudgetGrantVerifier,
-    { ingestPlatform } as ExecutionBudgetAuthorityRepository,
+    { ingestPlatformAndAdmit } as ExecutionBudgetAuthorityRepository,
   );
 }
 
@@ -234,7 +264,7 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
     ).compile(schema);
 
     expect(fixture.command).toBe(PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND);
-    expect(fixture.verification_time).toBe('2026-08-15T00:00:00.000Z');
+    expect(fixture.verification_time).toBe('2026-09-03T22:00:30.000Z');
     expect(fixture.claims).toEqual(VALID_CLAIMS);
     expect(validate(fixture.claims), JSON.stringify(validate.errors)).toBe(
       true,
@@ -244,16 +274,7 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
       alg: 'RS256',
       use: 'sig',
     });
-    for (const privateField of [
-      'd',
-      'p',
-      'q',
-      'dp',
-      'dq',
-      'qi',
-      'oth',
-      'k',
-    ]) {
+    for (const privateField of ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth', 'k']) {
       expect(fixture.public_jwk).not.toHaveProperty(privateField);
     }
     await expect(
@@ -263,6 +284,10 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
       accepted: true,
       authority_kind: 'PLATFORM_GRANT',
       schedule_id: SCHEDULE_ID,
+      schedule_request_sha256: SCHEDULE_REQUEST_SHA256,
+      workflow_id: WORKFLOW_ID,
+      workflow_run_id: WORKFLOW_RUN_ID,
+      technical_policy_revision: TECHNICAL_POLICY_REVISION,
       replay_on_exact_redelivery: true,
     });
   });
@@ -272,63 +297,149 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
     ['kind', { authority_kind: 'WORKSPACE_GRANT' }],
     ['purpose', { purpose: 'discovery.run' }],
     ['subject', { subject_type: 'campaign' }],
+    ['missing schedule request', { schedule_request_sha256: undefined }],
+    ['schedule request digest', { schedule_request_sha256: 'not-a-hash' }],
+    ['workflow id', { workflow_id: 'workflow\nsecret' }],
+    ['workflow run id', { workflow_run_id: 'NOT-A-LOWERCASE-UUID' }],
+    ['technical policy', { technical_policy_revision: 'not-a-hash' }],
     ['per-run decimal', { cap_per_run_microusd: '01' }],
     ['campaign decimal', { campaign_cap_microusd: '0' }],
+    ['campaign differs from per-run', { campaign_cap_microusd: '2' }],
+    ['multiple runs', { max_runs: '2' }],
     ['max-runs decimal', { max_runs: '1.0' }],
-    ['issued-at validity', { iat: '1786752000' }],
+    ['issued-at validity', { iat: '1788472800' }],
     ['not-before validity', { nbf: null }],
-    ['expiry validity', { exp: 1_786_752_300.5 }],
+    ['expiry validity', { exp: 1_788_473_100.5 }],
   ])('rejects an invalid %s claim', async (_name, override) => {
     const schema = await loadSchema();
     const validate = addFormats(
       new Ajv2020({ allErrors: true, strict: true }),
     ).compile(schema);
 
-    expect(validate({ ...VALID_CLAIMS, ...override })).toBe(false);
+    const candidate = { ...VALID_CLAIMS, ...override };
+    const schemaAccepted = validate(candidate);
+    if (override.campaign_cap_microusd === '2') {
+      // JSON Schema cannot express cross-field equality. The verified claim
+      // shape enforces it after signature verification.
+      expect(schemaAccepted).toBe(true);
+    } else {
+      expect(schemaAccepted).toBe(false);
+    }
   });
 });
 
 describe('PlatformExecutionBudgetAuthorityIngestionService', () => {
-  it('passes only raw compact JWS to the platform verifier and only verified claims to persistence', async () => {
+  it('passes only raw compact JWS to the verifier and exact verified plus expected facts to atomic persistence', async () => {
     const authority = verifiedAuthority();
     const verifyPlatform = vi.fn(async () => authority);
-    const ingestPlatform = vi.fn(async () => ({
+    const ingestPlatformAndAdmit = vi.fn(async () => ({
       authorityId: AUTHORITY_ID,
+      accountId: ACCOUNT_ID,
+      generation: 1,
+      authorizedCapMicrousd: 1n,
       replay: false,
     }));
 
-    const result = await serviceWith(verifyPlatform, ingestPlatform).ingest(
-      COMPACT_JWS,
-    );
+    const result = await serviceWith(
+      verifyPlatform,
+      ingestPlatformAndAdmit,
+    ).ingestAndAdmit({
+      compactJws: COMPACT_JWS,
+      expected: EXPECTED_INVOCATION,
+    });
 
     expect(verifyPlatform).toHaveBeenCalledWith(COMPACT_JWS);
-    expect(ingestPlatform).toHaveBeenCalledWith(authority);
-    expect(ingestPlatform).not.toHaveBeenCalledWith(
-      expect.objectContaining({ compactJws: COMPACT_JWS }),
+    expect(ingestPlatformAndAdmit).toHaveBeenCalledWith(
+      authority,
+      EXPECTED_INVOCATION,
     );
-    expect(result).toEqual({ authorityId: AUTHORITY_ID, replay: false });
-    expect(JSON.stringify(result)).not.toContain(COMPACT_JWS);
+    expect(ingestPlatformAndAdmit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ compactJws: COMPACT_JWS }),
+      expect.anything(),
+    );
+    expect(result).toEqual({
+      authorityId: AUTHORITY_ID,
+      accountId: ACCOUNT_ID,
+      generation: 1,
+      authorizedCapMicrousd: 1n,
+      replay: false,
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(
+      JSON.stringify(result, (_key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
+    ).not.toContain(COMPACT_JWS);
   });
 
-  it('propagates exact repository replay identity for idempotent delivery', async () => {
+  it('propagates exact account replay identity for idempotent ACK-loss recovery', async () => {
     const authority = verifiedAuthority();
     const verifyPlatform = vi.fn(async () => authority);
-    const ingestPlatform = vi
+    const ingestPlatformAndAdmit = vi
       .fn()
-      .mockResolvedValueOnce({ authorityId: AUTHORITY_ID, replay: false })
-      .mockResolvedValueOnce({ authorityId: AUTHORITY_ID, replay: true });
-    const service = serviceWith(verifyPlatform, ingestPlatform);
+      .mockResolvedValueOnce({
+        authorityId: AUTHORITY_ID,
+        accountId: ACCOUNT_ID,
+        generation: 1,
+        authorizedCapMicrousd: 1n,
+        replay: false,
+      })
+      .mockResolvedValueOnce({
+        authorityId: AUTHORITY_ID,
+        accountId: ACCOUNT_ID,
+        generation: 1,
+        authorizedCapMicrousd: 1n,
+        replay: true,
+      });
+    const service = serviceWith(verifyPlatform, ingestPlatformAndAdmit);
+    const input = {
+      compactJws: COMPACT_JWS,
+      expected: EXPECTED_INVOCATION,
+    } as const;
 
-    await expect(service.ingest(COMPACT_JWS)).resolves.toEqual({
+    await expect(service.ingestAndAdmit(input)).resolves.toMatchObject({
       authorityId: AUTHORITY_ID,
       replay: false,
     });
-    await expect(service.ingest(COMPACT_JWS)).resolves.toEqual({
+    await expect(service.ingestAndAdmit(input)).resolves.toMatchObject({
       authorityId: AUTHORITY_ID,
       replay: true,
     });
     expect(verifyPlatform).toHaveBeenCalledTimes(2);
-    expect(ingestPlatform).toHaveBeenCalledTimes(2);
+    expect(ingestPlatformAndAdmit).toHaveBeenCalledTimes(2);
+  });
+
+  it('reduces verifier output to signed claims so a raw compact JWS can never cross the persistence boundary', async () => {
+    const authority = {
+      ...verifiedAuthority(),
+      compactJws: COMPACT_JWS,
+      privateTransportEnvelope: 'must-not-persist',
+    };
+    const ingestPlatformAndAdmit = vi.fn(async () => ({
+      authorityId: AUTHORITY_ID,
+      accountId: ACCOUNT_ID,
+      generation: 1,
+      authorizedCapMicrousd: 1n,
+      replay: false,
+    }));
+    const service = serviceWith(
+      vi.fn(async () => authority),
+      ingestPlatformAndAdmit,
+    );
+
+    await service.ingestAndAdmit({
+      compactJws: COMPACT_JWS,
+      expected: EXPECTED_INVOCATION,
+    });
+
+    const persisted = ingestPlatformAndAdmit.mock.calls[0]?.[0];
+    expect(persisted).not.toHaveProperty('compactJws');
+    expect(persisted).not.toHaveProperty('privateTransportEnvelope');
+    expect(persisted).toMatchObject({
+      workflowRunId: WORKFLOW_RUN_ID,
+      technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
+      tokenSha256: 'b'.repeat(64),
+    });
   });
 
   it.each([
@@ -360,18 +471,23 @@ describe('PlatformExecutionBudgetAuthorityIngestionService', () => {
       },
       { keyResolver: vi.fn() },
     );
-    const ingestPlatform = vi.fn();
+    const ingestPlatformAndAdmit = vi.fn();
     const service = new PlatformExecutionBudgetAuthorityIngestionService(
       verifier,
       {
-        ingestPlatform,
+        ingestPlatformAndAdmit,
       } as unknown as ExecutionBudgetAuthorityRepository,
     );
 
-    await expect(service.ingest(input as string)).rejects.toEqual(
+    await expect(
+      service.ingestAndAdmit({
+        compactJws: input as string,
+        expected: EXPECTED_INVOCATION,
+      }),
+    ).rejects.toEqual(
       new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID'),
     );
-    expect(ingestPlatform).not.toHaveBeenCalled();
+    expect(ingestPlatformAndAdmit).not.toHaveBeenCalled();
   });
 
   it('fails closed after verification when no deployment-owned platform writer is bound', async () => {
@@ -384,10 +500,15 @@ describe('PlatformExecutionBudgetAuthorityIngestionService', () => {
     const repository = new ExecutionBudgetAuthorityRepository(prisma);
     const service = serviceWith(
       vi.fn(async () => authority),
-      repository.ingestPlatform.bind(repository),
+      repository.ingestPlatformAndAdmit.bind(repository),
     );
 
-    await expect(service.ingest(COMPACT_JWS)).rejects.toEqual(
+    await expect(
+      service.ingestAndAdmit({
+        compactJws: COMPACT_JWS,
+        expected: EXPECTED_INVOCATION,
+      }),
+    ).rejects.toEqual(
       new ExecutionBudgetGrantError(
         'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
       ),

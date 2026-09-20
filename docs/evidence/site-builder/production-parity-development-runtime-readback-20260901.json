@@ -1,0 +1,113 @@
+{
+  "schema_version": "site-builder-production-parity-runtime-readback/v1",
+  "result": "PASS_WITH_LIMITATIONS",
+  "scope": "development product path and runtime identity",
+  "verified_at": "2026-09-01T18:33:25Z",
+  "valid_until": "2026-09-02T17:33:25Z",
+  "backend": {
+    "commit": "da2f7aebafe87de3a5286d13e9d77864464dff7e",
+    "image_digest": "sha256:66e2dbf86d6ddb8facd9eedd25da435fb75ae2e42272c73897e3f9e91aec7766",
+    "artifact_digest": "sha256:169540c72f9c0bd3c020f8531093126361c2db55e42f34851d074c079c565da3",
+    "artifact_manifest_digest": "sha256:974dd5103be657a2a9df278402f93869143ce6c4b6ea12a7edc05b47a6fa8ce4",
+    "sbom_digest": "sha256:cfdd1206bba0766eeecda0ccfe1e56f803adad066168f1b6b48556ba533c9bc3",
+    "source_tree_digest": "sha256:49a06609d28f1d28c71bed7087a49361c80f159ad8c23c4382f7cda1e707f745",
+    "renderer_digest": "sha256:aa1688a7c05489fae24606fffb75483e21d5cfee7e64a6fd9e071138c7775474",
+    "schema_digest": "sha256:e1f7d2c81ea4358c01776508503855baf573492873ef81246f96e528a0f8db1d",
+    "migration_revision": "20260902020000_unknown_spend_reconciliation",
+    "successful_migrations": 127,
+    "health_build_http_status": 200,
+    "health_ready_http_status": 200,
+    "readiness": "ready",
+    "task_queue": "understanding",
+    "mixed_active_worker_digests": 0,
+    "runtime_leases": [
+      {
+        "role": "API",
+        "instance_id": "1b34ef44-8c1c-5428-bff1-2378540e7baf",
+        "state": "READY"
+      },
+      {
+        "role": "OUTBOX_RELAY",
+        "instance_id": "0f631468-29ec-5b78-9e47-e01d711a1da4",
+        "state": "READY"
+      },
+      {
+        "role": "WORKER",
+        "instance_id": "fa5e4366-cd10-5281-92d6-6eacff4d4fdb",
+        "state": "READY",
+        "task_queue": "understanding"
+      }
+    ]
+  },
+  "growthos": {
+    "authority_commit": "541bcc63c3486296ab4e2461d4d005e6cd43710b",
+    "authority_tree": "de4d4db17eaf81191d64965efbeb1d47d3595716",
+    "source_archive_sha256": "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a",
+    "patch_stack_sha256": "33102a8d5f9f7b073f21dd77c7aeec97c9b60e13be2f4ccf52f9bc8cd0c5cdf2",
+    "release_receipt_sha256": "60a988924241ac1c4d65a71f93e21039d35aa130870b2162d25df39c2b6abadc",
+    "images": {
+      "backend": "sha256:1535bb01c410e3ffa4b2ec469dbbe94a0e6128eb77eaed31dd03a676fa78f10c",
+      "tenant_web": "sha256:d60a13201ab0116127268870d75f8f133269b2cfa4362683b14d97920d96cf01",
+      "platform_admin_web": "sha256:202e56429d00a4f6e14e0f6cb0f10d8ec6ed83b389da733bddf41592c0a38083"
+    },
+    "jwks": [
+      {
+        "family": "identity",
+        "kid": "identity-2026-09-01",
+        "response_digest": "sha256:e27c894508a238bd45302471cd40662f284aed4fa6467ffd91cda5a30e6d3ac1"
+      },
+      {
+        "family": "site_build_budget",
+        "kid": "site-build-2026-09-01",
+        "response_digest": "sha256:927b6bc6a0b819fe2b0ae5c98afd09bbe660bfc558a05697938fba1f57e8b764"
+      },
+      {
+        "family": "execution_budget",
+        "kid": "execution-2026-09-01",
+        "response_digest": "sha256:bd397159ffd74e69829ec1d980b6411749bb09f798110ea41e1ae28983a619f3"
+      }
+    ]
+  },
+  "product_path": {
+    "workspace_id": "bcfeff93-e2ef-452c-86d4-02d206f32dfc",
+    "site_id": "3e6cbc9a-cc23-4b08-8894-e400813d71cb",
+    "deterministic_intake": {
+      "build_run_id": "84aa659f-856d-4fdb-b78e-141e45a77118",
+      "status": "succeeded",
+      "phase": "demo_v0",
+      "authorization_artifact_digest": "sha256:692c464dab32a0aa7252e53f206e4341dc91212d9aa8798b61d9c6c50770307b",
+      "grant_request_sha256": "e8fd86226c05c9efc3482cb3b825777b7fa14bf56610cd6f928a4ceb7621b72d",
+      "release_id": "2e17d3a9-ab69-4ccf-bcb7-0f3ac14c76f4",
+      "artifact_digest": "sha256:e5591b2a29972f62f96c13481dbce2b5fe1586db06a9bc8c11b51c3fd1f54b05",
+      "manifest_digest": "sha256:25956bd560ee87315684a0fcd52e7bcc98b8da60888cbe369394c126d9f342c2"
+    },
+    "real_model_refurbish": {
+      "build_run_id": "81dcfe5a-b510-42fa-bbf8-317835bb2b52",
+      "workflow_id": "site-refurbish-81dcfe5a-b510-42fa-bbf8-317835bb2b52",
+      "temporal_run_id": "01a05e04-dfb3-7452-a558-66ab345acf07",
+      "terminal_status": "failed",
+      "terminal_phase": "P3_assembly",
+      "public_error_code": "BRAND_PROFILE_FAILED",
+      "authorization_artifact_digest": "sha256:cd81d55ee1bb969712bc66b791238037fa922e92726ac77c17da92c1d2c74499",
+      "grant_request_sha256": "6e1876edc94abd3498a9bcfe9d374bc5b6b8b491252c42a6c888e28bfc1c0835",
+      "physical_model_calls": 1,
+      "spend_status": "UNKNOWN",
+      "cost_basis": "unknown",
+      "reservation_microusd": "800000",
+      "conservative_charge_microusd": "800000",
+      "operation_identity_digest": "sha256:ec3715935372b3003ef22eff04224095eb1af40777ddabd3893bc16466820775",
+      "provider_request_id": "202609011729418662973168268d9d6zAJvhFoh",
+      "resolver_id": "new-api-request-bound-reconciliation-v1",
+      "reconciliation_attempt": 1,
+      "reconciliation_status": "UNRESOLVED",
+      "reconciliation_reason": "log_unavailable",
+      "automatic_second_physical_call": false
+    }
+  },
+  "limitations": [
+    "This evidence is development-only and does not authorize PILOT or GA.",
+    "The real model path did not produce a durable model output; it proves UNKNOWN settlement containment and request-bound reconciliation, not model quality or a successful refurbish.",
+    "The platform_budget_authority capability reports PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE; the Site Builder workspace budget authority is ready.",
+    "Customer commercial Billing and Credits are DEFERRED and NOT_IMPLEMENTED; the technical cap is an internal execution safety envelope, not a customer balance or price."
+  ]
+}

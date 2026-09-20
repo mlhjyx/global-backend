@@ -6,11 +6,12 @@ import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store'
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
+import { platformEgressDispatcher } from './platform-schedule-authority.activities';
+import type { PlatformEgressFence } from '../platform-authority/platform-egress-fence';
 import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
-
-const DUE_LIMIT = 50;
+import { boundedPlatformDueSourceLimit } from '../platform-authority/platform-execution-contract';
 
 /**
  * 采集活动（平台级、源无关）。listDueSources 找到期的自动源、acquireSource 跑一次增量。
@@ -22,6 +23,7 @@ export function createAcquisitionActivities(deps: {
   budgetStore?: BudgetStore;
   platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
+  platformEgressFence?: PlatformEgressFence;
 }) {
   const svc = new AcquisitionService({
     prisma: deps.prisma,
@@ -42,7 +44,7 @@ export function createAcquisitionActivities(deps: {
     async listDueSources(args: ({ limit?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ sourceIds: string[] }> {
       await attest(args);
       const now = new Date();
-      const limit = args?.limit ?? DUE_LIMIT;
+      const limit = boundedPlatformDueSourceLimit(args?.limit);
       const rows = await deps.prisma.monitoredSource.findMany({
         where: {
           status: 'ACTIVE',
@@ -63,6 +65,9 @@ export function createAcquisitionActivities(deps: {
     /** 对一个源跑一次 acquire（抓取→清洗→落库→增量）。幂等 by externalId，可安全重试。 */
     async acquireSource(args: { sourceId: string; limit?: number } & PlatformScheduleAuthorityActivityInput): Promise<AcquireResult> {
       const binding = await attest(args);
+      const platformEgress = deps.platformEgressFence
+        ? platformEgressDispatcher({ fence: deps.platformEgressFence, binding })
+        : undefined;
       const durableReceipts: Array<{
         producerId: string;
         receipt: DurableExecutionReceipt;
@@ -82,6 +87,7 @@ export function createAcquisitionActivities(deps: {
           workspaceId: PLATFORM_WORKSPACE,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
+          ...(platformEgress ? { platformEgress } : {}),
           onDurableReceipt: captureAcquisitionReceipt,
         },
         durableReceipts,

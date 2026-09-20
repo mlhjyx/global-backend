@@ -1,7 +1,30 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { RequestContext } from '../auth/request-context';
-import { INTEGRATION_EVENTS, PULL_SINK, toEnvelope, DomainEventEnvelope, OutboxEventRow } from '../relay/event-registry';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
+import { isUUID } from "class-validator";
+import { PrismaService } from "../prisma/prisma.service";
+import { RequestContext } from "../auth/request-context";
+import {
+  INTEGRATION_EVENTS,
+  PULL_SINK,
+  toEnvelope,
+  DomainEventEnvelope,
+  OutboxEventRow,
+} from "../relay/event-registry";
+
+export const EVENT_ACK_STATUSES = Object.freeze([
+  "PENDING",
+  "ACKED",
+  "DEAD",
+] as const);
+export interface EventAckStatus {
+  event_id: string;
+  status: (typeof EVENT_ACK_STATUSES)[number];
+  acked_at: string | null;
+}
 
 /**
  * 集成事件拉取 + ACK（收口③ pull sink）。SaaS 侧消费真值在 outbox_delivery（sink='saas'）。
@@ -17,10 +40,72 @@ import { INTEGRATION_EVENTS, PULL_SINK, toEnvelope, DomainEventEnvelope, OutboxE
 export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Read pull-sink truth without relying on a repeated ACK's update count. */
+  async ackStatus(
+    ctx: RequestContext,
+    eventId: string,
+  ): Promise<EventAckStatus> {
+    if (!isUUID(eventId, "4")) {
+      throw new BadRequestException({
+        error: {
+          code: "INVALID_EVENT_ID",
+          message: "event id must be a UUID v4",
+        },
+      });
+    }
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const row = await tx.outboxDelivery.findFirst({
+        where: {
+          eventId,
+          workspaceId: ctx.workspaceId,
+          sink: PULL_SINK,
+          event: {
+            workspaceId: ctx.workspaceId,
+            eventType: { in: [...INTEGRATION_EVENTS] },
+          },
+        },
+        select: { eventId: true, status: true, ackedAt: true },
+      });
+      if (!row) {
+        throw new NotFoundException({
+          error: {
+            code: "EVENT_DELIVERY_NOT_FOUND",
+            message: "event delivery not found",
+          },
+        });
+      }
+      const validTime =
+        row.status === "ACKED"
+          ? row.ackedAt instanceof Date &&
+            Number.isFinite(row.ackedAt.getTime())
+          : row.ackedAt === null;
+      if (
+        !EVENT_ACK_STATUSES.includes(row.status as EventAckStatus["status"]) ||
+        !validTime
+      ) {
+        throw new ServiceUnavailableException({
+          error: {
+            code: "EVENT_ACK_STATUS_UNAVAILABLE",
+            message: "event acknowledgement status unavailable",
+          },
+        });
+      }
+      return {
+        event_id: row.eventId,
+        status: row.status as EventAckStatus["status"],
+        acked_at: row.ackedAt?.toISOString() ?? null,
+      };
+    });
+  }
+
   async list(
     ctx: RequestContext,
     opts: { cursor?: string; limit: number; type?: string },
-  ): Promise<{ data: DomainEventEnvelope[]; nextCursor: string | null; hasMore: boolean }> {
+  ): Promise<{
+    data: DomainEventEnvelope[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
     // 游标 = outbox_delivery 的 BigInt 行 id 字符串；非数字 → 400（fail fast）。
     let cursorId: bigint | undefined;
     if (opts.cursor !== undefined) {
@@ -28,7 +113,10 @@ export class EventsService {
         cursorId = BigInt(opts.cursor);
       } catch {
         throw new BadRequestException({
-          error: { code: 'INVALID_CURSOR', message: 'cursor must be a numeric event stream position' },
+          error: {
+            code: "INVALID_CURSOR",
+            message: "cursor must be a numeric event stream position",
+          },
         });
       }
     }
@@ -47,14 +135,15 @@ export class EventsService {
           event: { eventType: { in: typeFilter } },
         },
         include: { event: true },
-        orderBy: { id: 'asc' },
+        orderBy: { id: "asc" },
         take: opts.limit + 1,
       })) as Array<{ id: bigint; event: OutboxEventRow }>;
       const hasMore = rows.length > opts.limit;
       const data = hasMore ? rows.slice(0, opts.limit) : rows;
       return {
         data: data.map((d) => toEnvelope(d.event)), // envelope 不含 BigInt 行 id
-        nextCursor: hasMore && data.length ? String(data[data.length - 1].id) : null,
+        nextCursor:
+          hasMore && data.length ? String(data[data.length - 1].id) : null,
         hasMore,
       };
     });
@@ -65,12 +154,16 @@ export class EventsService {
    * sink 缺省锁死 pull sink（'saas'）——webhook sink 的 ACKED 只能由 relay 收到 2xx 写，
    * 对外 API（events.controller）不暴露 sink 参数。
    */
-  ack(ctx: RequestContext, eventIds: string[], sink: string = PULL_SINK): Promise<{ acked: number }> {
+  ack(
+    ctx: RequestContext,
+    eventIds: string[],
+    sink: string = PULL_SINK,
+  ): Promise<{ acked: number }> {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const now = new Date();
       const r = await tx.outboxDelivery.updateMany({
-        where: { eventId: { in: eventIds }, sink, status: 'PENDING' },
-        data: { status: 'ACKED', ackedAt: now, deliveredAt: now },
+        where: { eventId: { in: eventIds }, sink, status: "PENDING" },
+        data: { status: "ACKED", ackedAt: now, deliveredAt: now },
       });
       return { acked: r.count };
     });

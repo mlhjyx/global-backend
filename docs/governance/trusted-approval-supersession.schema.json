@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.example/governance/trusted-approval-supersession.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "predecessor", "successor", "authority_revision", "authority_sha256", "effective_at", "predecessor_chain"],
+  "properties": {
+    "schema_version": { "const": "trusted-approval-supersession/v1" },
+    "predecessor": { "$ref": "#/$defs/receipt" },
+    "successor": { "$ref": "#/$defs/receipt" },
+    "authority_revision": { "type": "string", "pattern": "^approval-authorities/r[1-9][0-9]*$" },
+    "authority_sha256": { "$ref": "#/$defs/digest" },
+    "effective_at": { "$ref": "#/$defs/instant" },
+    "predecessor_chain": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/id" }, "uniqueItems": true }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,127}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "instant": { "type": "string", "format": "iso-instant" },
+    "receipt": { "type": "object", "additionalProperties": false, "required": ["receipt_id", "receipt_core_sha256", "receipt_raw_sha256"], "properties": { "receipt_id": { "$ref": "#/$defs/id" }, "receipt_core_sha256": { "$ref": "#/$defs/digest" }, "receipt_raw_sha256": { "$ref": "#/$defs/digest" } } }
+  }
+}

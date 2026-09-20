@@ -1,0 +1,239 @@
+{
+  "schema_version": "approval-readback-mutation-manifest/v1",
+  "requirements": [
+    {
+      "requirement_id": "T3-ROLE-EVIDENCE-BASE",
+      "spec_file": "scripts/governance-approval-readback.spec.mjs",
+      "mutation_ids": [
+        "owner-actor-mismatch",
+        "bot-reviewer",
+        "pr-author-reviewer",
+        "same-actor-without-exception",
+        "missing-third-human",
+        "wrong-review-state",
+        "wrong-review-head",
+        "dismissed-review",
+        "later-changes-requested",
+        "legal-pending",
+        "receipt-replay",
+        "revoked-receipt",
+        "independence-overclaim",
+        "pagination-incomplete"
+      ]
+    },
+    {
+      "requirement_id": "T3-MACHINE-TOCTOU-BASE",
+      "spec_file": "scripts/governance-approval-readback.spec.mjs",
+      "mutation_ids": [
+        "check-ambiguity",
+        "ruleset-drift",
+        "ruleset-bypass",
+        "toctou-head",
+        "decision-raw-drift",
+        "decision-semantic-drift",
+        "policy-static-run-id",
+        "policy-static-suite-id",
+        "name-only-check",
+        "url-only-check",
+        "workflow-id-mismatch",
+        "workflow-path-mismatch",
+        "workflow-blob-mismatch",
+        "actions-app-mismatch",
+        "actions-run-head-mismatch",
+        "actions-run-conclusion",
+        "signer-mismatch",
+        "sidecar-path-not-allowlisted",
+        "machine-check-array-missing"
+      ]
+    },
+    {
+      "requirement_id": "T3-SECURITY-BASE",
+      "spec_file": "scripts/governance-approval-readback.spec.mjs",
+      "mutation_ids": [
+        "security-missing",
+        "security-wrong-pr",
+        "security-wrong-base",
+        "security-wrong-head",
+        "security-wrong-decision",
+        "security-command-digest",
+        "security-wrong-actor",
+        "security-wrong-review-id",
+        "security-wrong-state",
+        "security-wrong-commit",
+        "security-wrong-timestamp",
+        "security-readback-outside-authority",
+        "security-dismissed",
+        "security-superseded",
+        "security-free-form-body",
+        "security-product-actor-reuse",
+        "security-privacy-actor-reuse",
+        "security-qa-actor-reuse",
+        "security-machine-id-reuse",
+        "security-unassigned",
+        "security-authority-stale",
+        "security-authority-revoked",
+        "security-authority-superseded",
+        "security-authority-scope"
+      ]
+    },
+    {
+      "requirement_id": "T3-MERGE-BASE",
+      "spec_file": "scripts/governance-approval-readback.spec.mjs",
+      "mutation_ids": [
+        "grant-missing-authority",
+        "grant-stage",
+        "grant-pr",
+        "grant-base",
+        "grant-head",
+        "grant-decision-digest",
+        "grant-merge-method",
+        "grant-authority-revision",
+        "grant-expired",
+        "grant-revoked",
+        "grant-nonce-mismatch",
+        "grant-ledger-key",
+        "grant-consumption-absent",
+        "grant-ledger-absent",
+        "grant-consumption-digest",
+        "grant-ledger-revision",
+        "grant-authority-actor"
+      ]
+    },
+    {
+      "requirement_id": "T3-LIFECYCLE-BASE",
+      "spec_file": "scripts/governance-approval-readback.spec.mjs",
+      "mutation_ids": [
+        "supersession-cycle",
+        "revocation-receipt-digest"
+      ]
+    },
+    {
+      "requirement_id": "FIX1-MERGE-CLOSED-CAUSAL",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "critical-merge-grant-schema",
+        "critical-merge-consumption-schema",
+        "merge-invalid-method",
+        "merge-future-authorized",
+        "merge-future-consumed",
+        "merge-future-readback",
+        "merge-causal-order",
+        "merge-revocation-shape",
+        "merge-ledger-shape",
+        "merge-candidate-binding",
+        "merge-authority-receipt-binding",
+        "merge-verifier-binding",
+        "merge-verifier-subject-repo"
+      ]
+    },
+    {
+      "requirement_id": "FIX2-MACHINE-RECEIPT",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "machine-receipt-preserved",
+        "machine-receipt-order",
+        "machine-receipt-partial",
+        "machine-receipt-alias"
+      ]
+    },
+    {
+      "requirement_id": "FIX3-OPAQUE-CORE-CAPABILITY",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": ["artifact-forged-core"]
+    },
+    {
+      "requirement_id": "FIX4-CODEOWNER-GLOBAL-DISJOINT",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "codeowner-empty",
+        "codeowner-wrong-head",
+        "codeowner-bot",
+        "global-human-machine-id-reuse",
+        "global-machine-machine-id-reuse"
+      ]
+    },
+    {
+      "requirement_id": "FIX5-CURRENT-CAUSAL-TIME",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "authority-expired-now",
+        "review-future",
+        "review-causal-order",
+        "legal-future"
+      ]
+    },
+    {
+      "requirement_id": "FIX6-RECEIPT-SUBJECT-PHASE",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "receipt-subject-missing",
+        "receipt-subject-unknown-phase",
+        "receipt-subject-unknown-role",
+        "receipt-subject-open-shape",
+        "ordinary-merge-evidence-forbidden",
+        "merge-phase-evidence-required"
+      ]
+    },
+    {
+      "requirement_id": "FIX7-LIFECYCLE-AUTHORITATIVE",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "revocation-authority-revoked",
+        "revocation-authority-expired",
+        "revocation-authority-scope",
+        "supersession-authoritative-cycle",
+        "supersession-snapshot-open"
+      ]
+    },
+    {
+      "requirement_id": "FIX9-FOCUSED-MODULE-BOUNDS",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": ["implementation-module-bounds"]
+    },
+    {
+      "requirement_id": "FIX2A-MACHINE-POLICY-EXACT-SET",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": ["round2-machine-untrusted-extra"]
+    },
+    {
+      "requirement_id": "FIX2B-LIFECYCLE-SYNTHETIC-ONLY",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "round2-lifecycle-caller-snapshot-untrusted",
+        "round2-lifecycle-omitted-cycle-edge"
+      ]
+    },
+    {
+      "requirement_id": "FIX2C-PURE-IN-MEMORY-SCHEMAS",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "round2-facade-import-purity",
+        "round2-schema-catalog-present"
+      ]
+    },
+    {
+      "requirement_id": "FIX2D-CODEOWNER-ACTOR-ADJUDICATION",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": [
+        "round2-dual-privacy-codeowner-actor-allowed",
+        "round2-dual-coapprover-reused",
+        "round2-codeowner-review-id-reuse"
+      ]
+    },
+    {
+      "requirement_id": "FIX3-CODEOWNER-ACTOR-SHARING-POLICY-PROVENANCE",
+      "spec_file": "scripts/governance-approval-readback-fix.spec.mjs",
+      "mutation_ids": ["round3-codeowner-actor-sharing-policy-contract"]
+    }
+  ],
+  "implementation_files": [
+    "scripts/governance-approval-readback.mjs",
+    "scripts/governance-approval-readback-common.mjs",
+    "scripts/governance-approval-role-evidence.mjs",
+    "scripts/governance-approval-machine-policy.mjs",
+    "scripts/governance-approval-merge-authorization.mjs",
+    "scripts/governance-approval-receipt-lifecycle.mjs",
+    "scripts/governance-approval-schema-catalog.mjs",
+    "scripts/governance-approval-schema-validator.mjs"
+  ]
+}

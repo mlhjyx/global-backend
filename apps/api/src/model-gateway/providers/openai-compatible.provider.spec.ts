@@ -1,13 +1,18 @@
-import { createHash } from 'node:crypto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OpenAICompatibleProvider,
   stripJsonFence,
   type GatewayModelTransport,
   type GatewayVisionTransport,
-} from './openai-compatible.provider';
-import { ProviderHttpError, ProviderIdentityError, ProviderOutputError } from './provider-output-error';
-import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from '../new-api-request-bound-settlement';
+} from "./openai-compatible.provider";
+import {
+  ProviderHttpError,
+  ProviderIdentityError,
+  ProviderOutputError,
+} from "./provider-output-error";
+import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
+import { createProviderTransportObservation } from "../provider-transport-observation";
 
 /**
  * M1-b 网关增量（09 §2.4 AiTask 工程护栏的 provider 侧）：
@@ -17,15 +22,15 @@ import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from '../new-api-request-bound-sett
  */
 
 const provider = new OpenAICompatibleProvider({
-  id: 'gateway',
-  baseUrl: 'http://gw.test/v1',
-  apiKey: 'k',
-  model: 'default-model',
+  id: "gateway",
+  baseUrl: "http://gw.test/v1",
+  apiKey: "k",
+  model: "default-model",
 });
 
 function mockChatResponse(body: unknown): void {
   vi.stubGlobal(
-    'fetch',
+    "fetch",
     vi.fn(async () => ({
       ok: true,
       json: async () => body,
@@ -36,7 +41,10 @@ function mockChatResponse(body: unknown): void {
 
 const lastRequestBody = (): Record<string, unknown> => {
   const mock = fetch as unknown as ReturnType<typeof vi.fn>;
-  return JSON.parse(mock.mock.calls[0][1].body as string) as Record<string, unknown>;
+  return JSON.parse(mock.mock.calls[0][1].body as string) as Record<
+    string,
+    unknown
+  >;
 };
 
 const lastRequestUrl = (): string => {
@@ -51,113 +59,158 @@ const lastRequestHeaders = (): Record<string, string> => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-const png = (suffix = 0): Uint8Array => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, suffix]);
-const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const png = (suffix = 0): Uint8Array =>
+  Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, suffix]);
+const sha256 = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
 const visionInput = () => ({
-  task: 'site_builder.aesthetic_review.eval',
-  prompt: 'Review the three responsive screenshots.',
-  system: 'Return bounded findings only.',
-  model: 'gemini-3.5-flash',
+  task: "site_builder.aesthetic_review.eval",
+  prompt: "Review the three responsive screenshots.",
+  system: "Return bounded findings only.",
+  model: "gemini-3.5-flash",
   schema: {
-    type: 'object',
+    type: "object",
     additionalProperties: false,
-    required: ['ok'],
-    properties: { ok: { type: 'boolean' } },
+    required: ["ok"],
+    properties: { ok: { type: "boolean" } },
   },
   maxTokens: 1000,
   maxCostCents: 20,
   images: ([375, 768, 1440] as const).map((breakpoint, index) => {
     const bytes = png(index);
     return {
-      materialClass: 'model_eval_fixture' as const,
+      materialClass: "model_eval_fixture" as const,
       artifactId: `case-home-${breakpoint}`,
       sha256: sha256(bytes),
-      mimeType: 'image/png' as const,
+      mimeType: "image/png" as const,
       bytes,
-      target: { locale: 'en', pageId: 'home', breakpoint },
+      target: { locale: "en", pageId: "home", breakpoint },
     };
   }),
 });
 
-describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
-  it('入参带 reasoningEffort → 请求体含 reasoning_effort', async () => {
+describe("OpenAICompatibleProvider — reasoning_effort 透传", () => {
+  it("入参带 reasoningEffort → 请求体含 reasoning_effort", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '{"a":1}' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: '{"a":1}' }, finish_reason: "stop" }],
       usage: {},
     });
     await provider.generateStructured({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
-      reasoningEffort: 'low',
+      reasoningEffort: "low",
     });
-    expect(lastRequestBody().reasoning_effort).toBe('low');
+    expect(lastRequestBody().reasoning_effort).toBe("low");
   });
 
-  it('未指定 → 请求体不带 reasoning_effort（不干扰非 reasoning 模型）', async () => {
+  it("未指定 → 请求体不带 reasoning_effort（不干扰非 reasoning 模型）", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '{"a":1}' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: '{"a":1}' }, finish_reason: "stop" }],
       usage: {},
     });
-    await provider.generateStructured({ task: 't', prompt: 'p', schema: {} });
-    expect('reasoning_effort' in lastRequestBody()).toBe(false);
+    await provider.generateStructured({ task: "t", prompt: "p", schema: {} });
+    expect("reasoning_effort" in lastRequestBody()).toBe(false);
   });
 });
 
-describe('OpenAICompatibleProvider — request-bound settlement observation', () => {
+describe("OpenAICompatibleProvider — request-bound settlement observation", () => {
   // 同步逐请求结算（preflight/resolve controller）已移除：provider 只把
   // 网关 requestId 以 unknown 观测附着到 usage，精确费用由异步 reconciliation
   // sweep 按 requestId 补登。这里的合同是“观测永不丢失”。
+  const requestId = "R".repeat(43);
   const PAID_CTX = {
-    workspaceId: '11111111-1111-4111-8111-111111111111',
-    runId: '22222222-2222-4222-8222-222222222222',
+    workspaceId: "11111111-1111-4111-8111-111111111111",
+    runId: "22222222-2222-4222-8222-222222222222",
     paidCost: {
-      siteId: '33333333-3333-4333-8333-333333333333',
-      scopeKey: 'copy:model:0',
+      siteId: "33333333-3333-4333-8333-333333333333",
+      scopeKey: "copy:model:0",
+      settlementPhysicalWire: {
+        identity: {
+          schemaVersion: "site-build-settlement-wire-identity/v1" as const,
+          physicalWireAttempt: 1 as const,
+          derivationKeyId: "settlement-test",
+          requestId,
+          nonce: "N".repeat(43),
+          nonceSha256: "a".repeat(64),
+        },
+        begin: async () => "DISPATCH" as const,
+        resolve: async (input: {
+          payloadState: "not_read" | "available" | "unavailable";
+          gatewayIdState: "observed" | "missing" | "not_observable";
+          upstreamAckUnknown: boolean;
+        }) => {
+          const payloadUnavailable = input.payloadState === "unavailable";
+          return {
+            status: "unknown" as const,
+            physicalWireAttempt: 1 as const,
+            requestId,
+            resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+            reason: payloadUnavailable
+              ? ("payload_unavailable" as const)
+              : ("gateway_log_unavailable" as const),
+            transportObservation: createProviderTransportObservation({
+              physicalWireAttempt: 1,
+              finalPhase: payloadUnavailable
+                ? "payload_unavailable"
+                : "gateway_log_unavailable",
+              gatewayIdState: input.gatewayIdState,
+              upstreamIdState: "unknown",
+              payloadState: input.payloadState,
+              readbackProbes: [],
+            }),
+          };
+        },
+      },
     },
   } as const;
 
-  const paidProvider = (model: string, transports?: Record<string, GatewayModelTransport>) =>
+  const paidProvider = (
+    model: string,
+    transports?: Record<string, GatewayModelTransport>,
+  ) =>
     new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'https://gateway.example.test/v1',
-      apiKey: 'runtime-token',
+      id: "gateway",
+      baseUrl: "https://gateway.example.test/v1",
+      apiKey: "k",
       model,
       ...(transports ? { modelTransports: transports } : {}),
     });
 
-  it('keeps the request-bound observation when the caller generation aborts after the response', async () => {
+  it("keeps the request-bound observation when the caller generation aborts after the response", async () => {
     const generation = new AbortController();
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async () => {
-        generation.abort(new DOMException('generation deadline', 'TimeoutError'));
+        generation.abort(
+          new DOMException("generation deadline", "TimeoutError"),
+        );
         return new Response(
           JSON.stringify({
-            model: 'deepseek-v4-pro',
+            model: "deepseek-v4-pro",
             choices: [
-              { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+              { message: { content: '{"ok":true}' }, finish_reason: "stop" },
             ],
             usage: { prompt_tokens: 10, completion_tokens: 5 },
           }),
           {
             status: 200,
             headers: {
-              'content-type': 'application/json',
-              'x-oneapi-request-id': 'req_provider_paid_001',
+              "content-type": "application/json",
+              "x-oneapi-request-id": "req_provider_paid_001",
             },
           },
         );
       }),
     );
 
-    const result = await paidProvider('deepseek-v4-pro').generateStructured(
+    const result = await paidProvider("deepseek-v4-pro").generateStructured(
       {
-        task: 'site_builder.copy',
-        prompt: 'p',
+        task: "site_builder.copy",
+        prompt: "p",
         schema: {},
-        model: 'deepseek-v4-pro',
+        model: "deepseek-v4-pro",
         signal: generation.signal,
       },
       PAID_CTX,
@@ -167,33 +220,38 @@ describe('OpenAICompatibleProvider — request-bound settlement observation', ()
     expect(result.usage).toMatchObject({
       gatewaySettlements: [
         {
-          status: 'unknown',
-          requestId: 'req_provider_paid_001',
+          status: "unknown",
+          requestId,
           resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-          reason: 'log_unavailable',
+          reason: "gateway_log_unavailable",
         },
       ],
     });
   });
 
-  it('attaches the request-bound observation before parsing a malformed success body', async () => {
+  it("attaches the request-bound observation before parsing a malformed success body", async () => {
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(
         async () =>
           new Response('{"truncated"', {
             status: 200,
             headers: {
-              'content-type': 'application/json',
-              'x-oneapi-request-id': 'req_malformed_paid_001',
+              "content-type": "application/json",
+              "x-oneapi-request-id": "req_malformed_paid_001",
             },
           }),
       ),
     );
 
-    const error = await paidProvider('deepseek-v4-pro')
+    const error = await paidProvider("deepseek-v4-pro")
       .generateStructured(
-        { task: 'site_builder.copy', prompt: 'p', schema: {}, model: 'deepseek-v4-pro' },
+        {
+          task: "site_builder.copy",
+          prompt: "p",
+          schema: {},
+          model: "deepseek-v4-pro",
+        },
         PAID_CTX,
       )
       .catch((caught: unknown) => caught);
@@ -204,29 +262,32 @@ describe('OpenAICompatibleProvider — request-bound settlement observation', ()
     expect((error as ProviderOutputError).usage).toMatchObject({
       gatewaySettlements: [
         {
-          status: 'unknown',
-          requestId: 'req_malformed_paid_001',
+          status: "unknown",
+          requestId,
           resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-          reason: 'log_unavailable',
+          reason: "payload_unavailable",
         },
       ],
     });
   });
 
-  it.each(['openai-responses', 'anthropic-messages'] satisfies GatewayModelTransport[])(
-    'attaches the request-bound observation for %s before parsing malformed JSON',
+  it.each([
+    "openai-responses",
+    "anthropic-messages",
+  ] satisfies GatewayModelTransport[])(
+    "attaches the request-bound observation for %s before parsing malformed JSON",
     async (transport) => {
       const alias = `paid-${transport}`;
-      const requestId = `req_${transport.replaceAll('-', '_')}`;
+      const requestId = `req_${transport.replaceAll("-", "_")}`;
       vi.stubGlobal(
-        'fetch',
+        "fetch",
         vi.fn(
           async () =>
             new Response('{"truncated"', {
               status: 200,
               headers: {
-                'content-type': 'application/json',
-                'x-oneapi-request-id': requestId,
+                "content-type": "application/json",
+                "x-oneapi-request-id": requestId,
               },
             }),
         ),
@@ -234,7 +295,13 @@ describe('OpenAICompatibleProvider — request-bound settlement observation', ()
 
       const error = await paidProvider(alias, { [alias]: transport })
         .generateStructured(
-          { task: 'site_builder.copy', prompt: 'p', schema: {}, model: alias, maxTokens: 100 },
+          {
+            task: "site_builder.copy",
+            prompt: "p",
+            schema: {},
+            model: alias,
+            maxTokens: 100,
+          },
           PAID_CTX,
         )
         .catch((caught: unknown) => caught);
@@ -243,50 +310,50 @@ describe('OpenAICompatibleProvider — request-bound settlement observation', ()
       expect((error as ProviderOutputError).usage).toMatchObject({
         gatewaySettlements: [
           {
-            status: 'unknown',
-            requestId,
+            status: "unknown",
+            requestId: "R".repeat(43),
             resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-            reason: 'log_unavailable',
+            reason: "payload_unavailable",
           },
         ],
       });
     },
   );
 
-  it('omits settlement observations for non-paid calls', async () => {
+  it("omits settlement observations for non-paid calls", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: { prompt_tokens: 10, completion_tokens: 5 },
     });
 
-    const result = await paidProvider('deepseek-v4-pro').generateStructured({
-      task: 'site_builder.copy',
-      prompt: 'p',
+    const result = await paidProvider("deepseek-v4-pro").generateStructured({
+      task: "site_builder.copy",
+      prompt: "p",
       schema: {},
-      model: 'deepseek-v4-pro',
+      model: "deepseek-v4-pro",
     });
 
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 });
 
-describe('OpenAICompatibleProvider — 空输出显式失败', () => {
-  it('content 为空 + finish_reason=length → 抛 ProviderOutputError（含 finish_reason/模型名，携带 usage）', async () => {
+describe("OpenAICompatibleProvider — 空输出显式失败", () => {
+  it("content 为空 + finish_reason=length → 抛稳定 ProviderOutputError 并携带 usage", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '' }, finish_reason: 'length' }],
+      choices: [{ message: { content: "" }, finish_reason: "length" }],
       usage: { prompt_tokens: 300, completion_tokens: 2000 },
     });
     const err = await provider
       .generateStructured({
-        task: 't',
-        prompt: 'p',
+        task: "t",
+        prompt: "p",
         schema: {},
-        model: 'deepseek-v4-pro',
+        model: "deepseek-v4-pro",
       })
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
-    expect((err as Error).message).toMatch(/empty content.*finish_reason=length/s);
+    expect((err as Error).message).toBe("STRUCTURED_OUTPUT_EMPTY_TRUNCATED");
     // 🔴 改动 2：花了 token 却失败必须带 usage，供网关 catch 结算（否则绕过硬预算上界）
     expect((err as ProviderOutputError).usage).toEqual({
       inputTokens: 300,
@@ -294,22 +361,22 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     });
   });
 
-  it('content 为空 + finish_reason=stop → 明确为可见内容通道异常，不能误报截断', async () => {
+  it("content 为空 + finish_reason=stop → 明确为可见内容通道异常，不能误报截断", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: "" }, finish_reason: "stop" }],
       usage: { prompt_tokens: 300, completion_tokens: 794 },
     });
     const err = await provider
       .generateStructured({
-        task: 't',
-        prompt: 'p',
+        task: "t",
+        prompt: "p",
         schema: {},
-        model: 'gpt-5.6-terra',
+        model: "gpt-5.6-terra",
       })
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
-    expect((err as Error).message).toMatch(/empty content.*finish_reason=stop.*no visible message content/s);
+    expect((err as Error).message).toBe("STRUCTURED_OUTPUT_EMPTY");
     expect((err as Error).message).not.toMatch(/output truncated/);
     expect((err as ProviderOutputError).usage).toEqual({
       inputTokens: 300,
@@ -317,179 +384,188 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     });
   });
 
-  it('content 正常 → 照常解析', async () => {
+  it("content 正常 → 照常解析", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: {},
     });
     const r = await provider.generateStructured<{ ok: boolean }>({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
     });
     expect(r.data.ok).toBe(true);
   });
 
-  it('new-api 返回已解析模型时，保留该模型用于可重放 trace', async () => {
+  it("new-api 返回已解析模型时，保留该模型用于可重放 trace", async () => {
     mockChatResponse({
-      model: 'upstream/claude-sonnet-5-2026-07-18',
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      model: "default-model",
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: {},
     });
     const r = await provider.generateStructured<{ ok: boolean }>({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
     });
     expect(r).toMatchObject({
-      model: 'upstream/claude-sonnet-5-2026-07-18',
-      reportedModel: 'upstream/claude-sonnet-5-2026-07-18',
-      modelResolutionSource: 'upstream_response',
+      model: "default-model",
+      reportedModel: "default-model",
+      modelResolutionSource: "upstream_response",
     });
   });
 
-  it('上游不报告 model 时，显式标记为 requested fallback，不能冒充已解析模型', async () => {
+  it("上游不报告 model 时，显式标记为 requested fallback，不能冒充已解析模型", async () => {
     mockChatResponse({
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: {},
     });
     const r = await provider.generateStructured<{ ok: boolean }>({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
-      model: 'requested-model',
+      model: "requested-model",
     });
     expect(r).toMatchObject({
-      model: 'requested-model',
-      modelResolutionSource: 'requested_fallback',
+      model: "requested-model",
+      modelResolutionSource: "requested_fallback",
     });
     expect(r.reportedModel).toBeUndefined();
   });
 
-  it('JSON 中途截断 + finish_reason=length → 抛 ProviderOutputError（truncated 语义，带 cause+usage）', async () => {
+  it("JSON 中途截断 + finish_reason=length → 抛不携带原文的稳定 ProviderOutputError", async () => {
+    const sentinel = "pump-output-sentinel";
     mockChatResponse({
-      choices: [{ message: { content: '{"facts": ["pump' }, finish_reason: 'length' }],
+      choices: [
+        {
+          message: { content: `{"facts": ["${sentinel}` },
+          finish_reason: "length",
+        },
+      ],
       usage: { prompt_tokens: 120, completion_tokens: 800 },
     });
     const err = await provider
-      .generateStructured({ task: 't', prompt: 'p', schema: {} })
+      .generateStructured({ task: "t", prompt: "p", schema: {} })
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
-    expect((err as Error).message).toMatch(/output truncated at max_tokens/);
-    expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 保留原始解析错
+    expect((err as Error).message).toBe("STRUCTURED_OUTPUT_TRUNCATED");
+    expect((err as Error).message).not.toContain(sentinel);
+    expect((err as Error).cause).toBeUndefined();
     expect((err as ProviderOutputError).usage).toEqual({
       inputTokens: 120,
       outputTokens: 800,
     });
     expect(err).toMatchObject({
-      provider: 'gateway',
-      model: 'default-model',
-      modelResolutionSource: 'requested_fallback',
+      provider: "gateway",
+      model: "default-model",
+      modelResolutionSource: "requested_fallback",
     });
   });
 
-  it('JSON 不合法但 finish_reason=stop → 抛 ProviderOutputError（非截断语义，保留 SyntaxError 为 cause，带 usage）', async () => {
+  it("JSON 不合法但 finish_reason=stop → 抛不携带模型内容的稳定错误", async () => {
+    const sentinel = "not-json-output-sentinel";
     mockChatResponse({
-      choices: [{ message: { content: 'not json' }, finish_reason: 'stop' }],
+      choices: [{ message: { content: sentinel }, finish_reason: "stop" }],
       usage: { prompt_tokens: 50, completion_tokens: 10 },
     });
     const err = await provider
-      .generateStructured({ task: 't', prompt: 'p', schema: {} })
+      .generateStructured({ task: "t", prompt: "p", schema: {} })
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
     expect((err as Error).message).not.toMatch(/truncated/); // 不误报截断
-    expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 原始解析错保留在 cause
+    expect((err as Error).message).not.toContain(sentinel);
+    expect((err as Error).cause).toBeUndefined();
     expect((err as ProviderOutputError).usage).toEqual({
       inputTokens: 50,
       outputTokens: 10,
     });
   });
 
-  it('🔴 markdown 围栏包裹的 JSON（真机实证：glm-5.2 偶发 ```json）→ 剥壳后正常解析', async () => {
+  it("🔴 markdown 围栏包裹的 JSON（真机实证：glm-5.2 偶发 ```json）→ 剥壳后正常解析", async () => {
     mockChatResponse({
       choices: [
         {
           message: { content: '```json\n{"ok":true}\n```' },
-          finish_reason: 'stop',
+          finish_reason: "stop",
         },
       ],
       usage: {},
     });
     const r = await provider.generateStructured<{ ok: boolean }>({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
     });
     expect(r.data.ok).toBe(true);
   });
 });
 
-describe('OpenAICompatibleProvider — explicit native gateway transports', () => {
-  it('GPT Responses reads nested output text before the inconsistent output_text helper', async () => {
+describe("OpenAICompatibleProvider — explicit native gateway transports", () => {
+  it("GPT Responses reads nested output text before the inconsistent output_text helper", async () => {
     const responses = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'gpt-5.6-terra',
-      modelTransports: { 'gpt-5.6-terra': 'openai-responses' },
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "gpt-5.6-terra",
+      modelTransports: { "gpt-5.6-terra": "openai-responses" },
     });
     mockChatResponse({
-      model: 'gpt-5.6-terra-2026-07-18',
-      status: 'completed',
-      output_text: '',
+      model: "gpt-5.6-terra",
+      status: "completed",
+      output_text: "",
       output: [
-        { type: 'reasoning', content: [] },
+        { type: "reasoning", content: [] },
         {
-          type: 'message',
-          content: [{ type: 'output_text', text: '```json\n{"ok":true}\n```' }],
+          type: "message",
+          content: [{ type: "output_text", text: '```json\n{"ok":true}\n```' }],
         },
       ],
       usage: { input_tokens: 101, output_tokens: 45 },
     });
 
     const result = await responses.generateStructured<{ ok: boolean }>({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
       maxTokens: 456,
-      reasoningEffort: 'low',
+      reasoningEffort: "low",
     });
 
     expect(result).toMatchObject({
       data: { ok: true },
-      model: 'gpt-5.6-terra-2026-07-18',
+      model: "gpt-5.6-terra",
       usage: { inputTokens: 101, outputTokens: 45 },
     });
-    expect(lastRequestUrl()).toBe('http://gw.test/v1/responses');
+    expect(lastRequestUrl()).toBe("http://gw.test/v1/responses");
     expect(lastRequestBody()).toMatchObject({
-      model: 'gpt-5.6-terra',
+      model: "gpt-5.6-terra",
       max_output_tokens: 456,
-      text: { format: { type: 'json_object' } },
-      reasoning: { effort: 'low' },
+      text: { format: { type: "json_object" } },
+      reasoning: { effort: "low" },
     });
     expect(lastRequestBody().input).toEqual([
-      expect.objectContaining({ role: 'system' }),
-      { role: 'user', content: 'p' },
+      expect.objectContaining({ role: "system" }),
+      { role: "user", content: "p" },
     ]);
   });
 
-  it('GPT Responses rejects incomplete structured output even when the partial text is valid JSON', async () => {
+  it("GPT Responses rejects incomplete structured output even when the partial text is valid JSON", async () => {
     const responses = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'gpt-5.6-terra',
-      modelTransports: { 'gpt-5.6-terra': 'openai-responses' },
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "gpt-5.6-terra",
+      modelTransports: { "gpt-5.6-terra": "openai-responses" },
     });
     mockChatResponse({
-      model: 'gpt-5.6-terra',
-      status: 'incomplete',
+      model: "gpt-5.6-terra",
+      status: "incomplete",
       output: [
         {
-          type: 'message',
-          content: [{ type: 'output_text', text: '{"ok":true}' }],
+          type: "message",
+          content: [{ type: "output_text", text: '{"ok":true}' }],
         },
       ],
       usage: { input_tokens: 101, output_tokens: 456 },
@@ -497,178 +573,248 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
 
     const error = await responses
       .generateStructured({
-        task: 't',
-        prompt: 'p',
+        task: "t",
+        prompt: "p",
         schema: {},
         maxTokens: 456,
       })
       .catch((err: unknown) => err);
     expect(error).toBeInstanceOf(ProviderOutputError);
-    expect((error as Error).message).toContain('status=incomplete');
+    expect((error as Error).message).toBe("RESPONSES_STATUS_INVALID");
     expect((error as ProviderOutputError).usage).toEqual({
       inputTokens: 101,
       outputTokens: 456,
     });
     expect(error).toMatchObject({
-      provider: 'gateway',
-      model: 'gpt-5.6-terra',
-      reportedModel: 'gpt-5.6-terra',
-      modelResolutionSource: 'upstream_response',
+      provider: "gateway",
+      model: "gpt-5.6-terra",
+      reportedModel: "gpt-5.6-terra",
+      modelResolutionSource: "upstream_response",
     });
   });
 
-  it('Claude Messages sends the evaluated native schema/reasoning shape and excludes thinking from output', async () => {
-    const messages = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'claude-sonnet-5',
-      modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+  it("rejects an untrusted reported-model discriminator without persisting it", async () => {
+    const sentinel = "model identity contains private response material";
+    const responses = new OpenAICompatibleProvider({
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "gpt-5.6-terra",
+      modelTransports: { "gpt-5.6-terra": "openai-responses" },
     });
     mockChatResponse({
-      model: 'claude-sonnet-5-2026-07-18',
-      stop_reason: 'end_turn',
+      model: sentinel,
+      status: "completed",
+      output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+
+    const error = await responses
+      .generateStructured({
+        task: "t",
+        prompt: "p",
+        schema: {},
+        maxTokens: 100,
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ProviderIdentityError);
+    expect((error as Error).message).toBe("MODEL_IDENTITY_MISMATCH");
+    expect(JSON.stringify(error)).not.toContain(sentinel);
+    expect(String(error)).not.toContain(sentinel);
+  });
+
+  it.each([
+    ["openai-responses", { status: "private status material" }],
+    ["anthropic-messages", { stop_reason: "private stop material" }],
+  ])(
+    "redacts an untrusted %s completion discriminator",
+    async (transport, override) => {
+      const sentinel = Object.values(override)[0]!;
+      const model =
+        transport === "openai-responses" ? "gpt-5.6-terra" : "claude-sonnet-5";
+      const native = new OpenAICompatibleProvider({
+        id: "gateway",
+        baseUrl: "http://gw.test/v1",
+        apiKey: "k",
+        model,
+        modelTransports: { [model]: transport as GatewayModelTransport },
+      });
+      mockChatResponse({
+        model,
+        status: "completed",
+        stop_reason: "end_turn",
+        output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }],
+        content: [{ type: "tool_use", name: "json", input: { ok: true } }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+        ...override,
+      });
+
+      const error = await native
+        .generateStructured({
+          task: "t",
+          prompt: "p",
+          schema: {},
+          maxTokens: 100,
+        })
+        .catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect(String(error)).not.toContain(sentinel);
+    },
+  );
+
+  it("Claude Messages sends the evaluated native schema/reasoning shape and excludes thinking from output", async () => {
+    const messages = new OpenAICompatibleProvider({
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "claude-sonnet-5",
+      modelTransports: { "claude-sonnet-5": "anthropic-messages" },
+    });
+    mockChatResponse({
+      model: "claude-sonnet-5",
+      stop_reason: "end_turn",
       content: [
         {
-          type: 'thinking',
-          thinking: 'private reasoning must not enter the artifact',
+          type: "thinking",
+          thinking: "private reasoning must not enter the artifact",
         },
-        { type: 'tool_use', name: 'json', input: { ok: true } },
+        { type: "tool_use", name: "json", input: { ok: true } },
       ],
       usage: { input_tokens: 99, output_tokens: 55 },
     });
 
     const result = await messages.generateStructured<{ ok: boolean }>({
-      task: 't',
-      prompt: 'p',
+      task: "t",
+      prompt: "p",
       schema: {},
       maxTokens: 456,
-      reasoningEffort: 'medium',
+      reasoningEffort: "medium",
     });
 
     expect(result).toMatchObject({
       data: { ok: true },
-      model: 'claude-sonnet-5-2026-07-18',
+      model: "claude-sonnet-5",
       usage: { inputTokens: 99, outputTokens: 55 },
     });
-    expect(lastRequestUrl()).toBe('http://gw.test/v1/messages');
+    expect(lastRequestUrl()).toBe("http://gw.test/v1/messages");
     expect(lastRequestHeaders()).toEqual({
-      'Content-Type': 'application/json',
-      'x-api-key': 'k',
-      'anthropic-version': '2023-06-01',
+      "Content-Type": "application/json",
+      "x-api-key": "k",
+      "anthropic-version": "2023-06-01",
     });
     expect(lastRequestBody()).toMatchObject({
-      model: 'claude-sonnet-5',
+      model: "claude-sonnet-5",
       max_tokens: 456,
-      messages: [{ role: 'user', content: 'p' }],
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'medium' },
+      messages: [{ role: "user", content: "p" }],
+      thinking: { type: "adaptive" },
+      output_config: { effort: "medium" },
       tools: [
         {
-          name: 'json',
-          description: 'Respond with a JSON object.',
+          name: "json",
+          description: "Respond with a JSON object.",
           input_schema: {},
         },
       ],
-      tool_choice: { type: 'any', disable_parallel_tool_use: true },
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
     });
-    expect(lastRequestBody()).not.toHaveProperty('system');
+    expect(lastRequestBody()).not.toHaveProperty("system");
   });
 
-  it('rejects text JSON when a native Anthropic structured call did not return the required JSON tool', async () => {
+  it("rejects text JSON when a native Anthropic structured call did not return the required JSON tool", async () => {
     const messages = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'claude-sonnet-5',
-      modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "claude-sonnet-5",
+      modelTransports: { "claude-sonnet-5": "anthropic-messages" },
     });
     mockChatResponse({
-      model: 'claude-sonnet-5',
-      stop_reason: 'end_turn',
-      content: [{ type: 'text', text: '{"ok":true}' }],
+      model: "claude-sonnet-5",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: '{"ok":true}' }],
       usage: { input_tokens: 99, output_tokens: 55 },
     });
 
     await expect(
       messages.generateStructured({
-        task: 't',
-        prompt: 'p',
+        task: "t",
+        prompt: "p",
         schema: {},
         maxTokens: 456,
-        reasoningEffort: 'medium',
+        reasoningEffort: "medium",
       }),
-    ).rejects.toThrow('Anthropic structured response missing JSON tool output');
+    ).rejects.toThrow("Anthropic structured response missing JSON tool output");
   });
 
-  it.each(['max_tokens', 'model_context_window_exceeded'])(
-    'Claude Messages rejects %s output even when the partial text is valid JSON',
+  it.each(["max_tokens", "model_context_window_exceeded"])(
+    "Claude Messages rejects %s output even when the partial text is valid JSON",
     async (stopReason) => {
       const messages = new OpenAICompatibleProvider({
-        id: 'gateway',
-        baseUrl: 'http://gw.test/v1',
-        apiKey: 'k',
-        model: 'claude-sonnet-5',
-        modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+        id: "gateway",
+        baseUrl: "http://gw.test/v1",
+        apiKey: "k",
+        model: "claude-sonnet-5",
+        modelTransports: { "claude-sonnet-5": "anthropic-messages" },
       });
       mockChatResponse({
-        model: 'claude-sonnet-5',
+        model: "claude-sonnet-5",
         stop_reason: stopReason,
-        content: [{ type: 'text', text: '{"ok":true}' }],
+        content: [{ type: "text", text: '{"ok":true}' }],
         usage: { input_tokens: 99, output_tokens: 456 },
       });
 
       const error = await messages
         .generateStructured({
-          task: 't',
-          prompt: 'p',
+          task: "t",
+          prompt: "p",
           schema: {},
           maxTokens: 456,
         })
         .catch((err: unknown) => err);
       expect(error).toBeInstanceOf(ProviderOutputError);
-      expect((error as Error).message).toContain(`stop_reason=${stopReason}`);
+      expect((error as Error).message).toBe("ANTHROPIC_OUTPUT_TRUNCATED");
       expect((error as ProviderOutputError).usage).toEqual({
         inputTokens: 99,
         outputTokens: 456,
       });
       expect(error).toMatchObject({
-        provider: 'gateway',
-        model: 'claude-sonnet-5',
-        reportedModel: 'claude-sonnet-5',
-        modelResolutionSource: 'upstream_response',
+        provider: "gateway",
+        model: "claude-sonnet-5",
+        reportedModel: "claude-sonnet-5",
+        modelResolutionSource: "upstream_response",
       });
     },
   );
 
-  it('Claude Messages fails before fetch when the required max token limit is absent', async () => {
+  it("Claude Messages fails before fetch when the required max token limit is absent", async () => {
     const messages = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'claude-sonnet-5',
-      modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "claude-sonnet-5",
+      modelTransports: { "claude-sonnet-5": "anthropic-messages" },
     });
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(messages.generateText({ task: 't', prompt: 'p' })).rejects.toThrow(
-      'maxTokens is required for anthropic-messages transport',
-    );
+    await expect(
+      messages.generateText({ task: "t", prompt: "p" }),
+    ).rejects.toThrow("maxTokens is required for anthropic-messages transport");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-describe('OpenAICompatibleProvider — bounded vision review', () => {
+describe("OpenAICompatibleProvider — bounded vision review", () => {
   const visionProviderFor = (
-    model = 'gemini-3.5-flash',
-    transport: GatewayVisionTransport = 'openai-chat-completions',
+    model = "gemini-3.5-flash",
+    transport: GatewayVisionTransport = "openai-chat-completions",
   ) =>
     new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'default-model',
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "default-model",
       visionModelTransports: {
         [model]: transport,
       },
@@ -678,52 +824,130 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     });
   const visionProvider = () => visionProviderFor();
 
-  it('sends at most three controlled PNGs as local data payloads and proves exact model provenance', async () => {
+  it.each([
+    {
+      model: "gemini-3.5-flash",
+      transport: "openai-chat-completions" as const,
+      response: {
+        model: "gemini-3.5-flash",
+        choices: [
+          {
+            message: { content: "vision-output-sentinel" },
+            finish_reason: "stop",
+          },
+        ],
+      },
+    },
+    {
+      model: "gpt-5.6-sol",
+      transport: "openai-responses" as const,
+      response: {
+        model: "gpt-5.6-sol",
+        status: "completed",
+        output: [
+          {
+            content: [{ type: "output_text", text: "vision-output-sentinel" }],
+          },
+        ],
+      },
+    },
+    {
+      model: "claude-sonnet-5",
+      transport: "anthropic-messages" as const,
+      response: {
+        model: "claude-sonnet-5",
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "vision-output-sentinel" }],
+      },
+    },
+    {
+      model: "gemini-3.5-flash",
+      transport: "google-generate-content" as const,
+      response: {
+        modelVersion: "gemini-3.5-flash",
+        candidates: [
+          {
+            content: { parts: [{ text: "vision-output-sentinel" }] },
+            finishReason: "STOP",
+          },
+        ],
+      },
+    },
+  ])(
+    "redacts invalid structured vision output on $transport",
+    async ({ model, transport, response }) => {
+      mockChatResponse(response);
+      const error = await visionProviderFor(model, transport)
+        .reviewVision({
+          ...visionInput(),
+          model,
+          maxTokens: model === "claude-sonnet-5" ? 4_000 : 1_000,
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect((error as Error).message).toBe("VISION_REVIEW_OUTPUT_NOT_JSON");
+      expect((error as Error).message).not.toContain("vision-output-sentinel");
+      expect((error as Error).cause).toBeUndefined();
+    },
+  );
+
+  it("sends at most three controlled PNGs as local data payloads and proves exact model provenance", async () => {
     mockChatResponse({
-      model: 'gemini-3.5-flash',
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      model: "gemini-3.5-flash",
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     });
-    const result = await visionProvider().reviewVision<{ ok: boolean }>(visionInput());
+    const result = await visionProvider().reviewVision<{ ok: boolean }>(
+      visionInput(),
+    );
 
-    expect(lastRequestUrl()).toBe('http://gw.test/v1/chat/completions');
+    expect(lastRequestUrl()).toBe("http://gw.test/v1/chat/completions");
     const body = lastRequestBody();
     expect(body).toMatchObject({
-      model: 'gemini-3.5-flash',
+      model: "gemini-3.5-flash",
       max_tokens: 1000,
       temperature: 0,
-      response_format: { type: 'json_object' },
+      response_format: { type: "json_object" },
     });
     const messages = body.messages as Array<{
       role: string;
       content: string | Array<{ type: string; image_url?: { url: string } }>;
     }>;
-    const userContent = messages.find((message) => message.role === 'user')!.content as Array<{
+    const userContent = messages.find((message) => message.role === "user")!
+      .content as Array<{
       type: string;
       image_url?: { url: string };
     }>;
-    const imageUrls = userContent.filter((item) => item.type === 'image_url').map((item) => item.image_url!.url);
+    const imageUrls = userContent
+      .filter((item) => item.type === "image_url")
+      .map((item) => item.image_url!.url);
     expect(imageUrls).toHaveLength(3);
-    expect(imageUrls.every((url) => url.startsWith('data:image/png;base64,'))).toBe(true);
+    expect(
+      imageUrls.every((url) => url.startsWith("data:image/png;base64,")),
+    ).toBe(true);
     expect(imageUrls.some((url) => /^https?:/i.test(url))).toBe(false);
     expect(result).toMatchObject({
       data: { ok: true },
-      provider: 'gateway',
-      model: 'gemini-3.5-flash',
-      reportedModel: 'gemini-3.5-flash',
-      modelResolutionSource: 'upstream_response',
+      provider: "gateway",
+      model: "gemini-3.5-flash",
+      reportedModel: "gemini-3.5-flash",
+      modelResolutionSource: "upstream_response",
     });
   });
 
-  it('uses native Gemini inline_data and responseJsonSchema without an OpenAI conversion', async () => {
+  it("uses native Gemini inline_data and responseJsonSchema without an OpenAI conversion", async () => {
     mockChatResponse({
-      modelVersion: 'gemini-3.5-flash',
+      modelVersion: "gemini-3.5-flash",
       candidates: [
         {
           content: {
-            parts: [{ thought: true, text: 'hidden reasoning' }, { text: '```json\n{"ok":true}\n```' }],
+            parts: [
+              { thought: true, text: "hidden reasoning" },
+              { text: '```json\n{"ok":true}\n```' },
+            ],
           },
-          finishReason: 'STOP',
+          finishReason: "STOP",
         },
       ],
       usageMetadata: {
@@ -733,11 +957,14 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       },
     });
     const input = visionInput();
-    const result = await visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision<{ ok: boolean }>(
-      input,
-    );
+    const result = await visionProviderFor(
+      "gemini-3.5-flash",
+      "google-generate-content",
+    ).reviewVision<{ ok: boolean }>(input);
 
-    expect(lastRequestUrl()).toBe('http://gw.test/v1beta/models/gemini-3.5-flash:generateContent');
+    expect(lastRequestUrl()).toBe(
+      "http://gw.test/v1beta/models/gemini-3.5-flash:generateContent",
+    );
     const body = lastRequestBody();
     expect(body).toMatchObject({
       systemInstruction: {
@@ -746,7 +973,7 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       generationConfig: {
         temperature: 0,
         maxOutputTokens: 1000,
-        responseMimeType: 'application/json',
+        responseMimeType: "application/json",
         responseJsonSchema: input.schema,
       },
     });
@@ -756,30 +983,39 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
         inline_data?: { mime_type: string; data: string };
       }>;
     }>;
-    const imageParts = contents.flatMap((content) => content.parts).filter((part) => part.inline_data);
+    const imageParts = contents
+      .flatMap((content) => content.parts)
+      .filter((part) => part.inline_data);
     expect(imageParts).toHaveLength(3);
     expect(
-      imageParts.every((part) => part.inline_data?.mime_type === 'image/png' && part.inline_data.data.length > 0),
+      imageParts.every(
+        (part) =>
+          part.inline_data?.mime_type === "image/png" &&
+          part.inline_data.data.length > 0,
+      ),
     ).toBe(true);
     expect(result).toMatchObject({
       data: { ok: true },
-      provider: 'gateway',
-      model: 'gemini-3.5-flash',
-      reportedModel: 'gemini-3.5-flash',
-      modelResolutionSource: 'upstream_response',
+      provider: "gateway",
+      model: "gemini-3.5-flash",
+      reportedModel: "gemini-3.5-flash",
+      modelResolutionSource: "upstream_response",
       usage: { inputTokens: 24, outputTokens: 13 },
     });
   });
 
-  it('accepts the reviewed Gemini alias, preserves reported identity, and resolves canonically', async () => {
+  it("accepts the reviewed Gemini alias, preserves reported identity, and resolves canonically", async () => {
     mockChatResponse({
-      modelVersion: 'gemini-default',
+      modelVersion: "gemini-default",
       candidates: [
         {
           content: {
-            parts: [{ thought: true, text: 'hidden reasoning' }, { text: '{"ok":true}' }],
+            parts: [
+              { thought: true, text: "hidden reasoning" },
+              { text: '{"ok":true}' },
+            ],
           },
-          finishReason: 'STOP',
+          finishReason: "STOP",
         },
       ],
       usageMetadata: {
@@ -788,73 +1024,90 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
         thoughtsTokenCount: 5,
       },
     });
-    const result = await visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision<{ ok: boolean }>(
-      visionInput(),
-    );
+    const result = await visionProviderFor(
+      "gemini-3.5-flash",
+      "google-generate-content",
+    ).reviewVision<{ ok: boolean }>(visionInput());
 
     expect(result).toMatchObject({
-      model: 'gemini-3.5-flash',
-      reportedModel: 'gemini-default',
-      modelResolutionSource: 'upstream_response',
+      model: "gemini-3.5-flash",
+      reportedModel: "gemini-default",
+      modelResolutionSource: "upstream_response",
       data: { ok: true },
     });
   });
 
-  it('rejects the Gemini alias on a transport where it was not reviewed', async () => {
+  it("rejects the Gemini alias on a transport where it was not reviewed", async () => {
     mockChatResponse({
-      model: 'gemini-default',
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      model: "gemini-default",
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
     });
     await expect(
-      visionProviderFor('gemini-3.5-flash', 'openai-chat-completions').reviewVision(visionInput()),
+      visionProviderFor(
+        "gemini-3.5-flash",
+        "openai-chat-completions",
+      ).reviewVision(visionInput()),
     ).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
-  it('fails closed when the upstream omits the reported model', async () => {
+  it("fails closed when the upstream omits the reported model", async () => {
     mockChatResponse({
-      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }],
+      candidates: [
+        { content: { parts: [{ text: '{"ok":true}' }] }, finishReason: "STOP" },
+      ],
     });
     await expect(
-      visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision(visionInput()),
+      visionProviderFor(
+        "gemini-3.5-flash",
+        "google-generate-content",
+      ).reviewVision(visionInput()),
     ).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
-  it('fails closed when reported model changes across vendor family', async () => {
+  it("fails closed when reported model changes across vendor family", async () => {
     mockChatResponse({
-      modelVersion: 'claude-sonnet-5',
-      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }],
+      modelVersion: "claude-sonnet-5",
+      candidates: [
+        { content: { parts: [{ text: '{"ok":true}' }] }, finishReason: "STOP" },
+      ],
     });
     await expect(
-      visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision(visionInput()),
+      visionProviderFor(
+        "gemini-3.5-flash",
+        "google-generate-content",
+      ).reviewVision(visionInput()),
     ).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
-  it('uses strict Responses JSON schema and local input_image payloads for GPT vision candidates', async () => {
+  it("uses strict Responses JSON schema and local input_image payloads for GPT vision candidates", async () => {
     mockChatResponse({
-      model: 'gpt-5.6-sol',
-      status: 'completed',
+      model: "gpt-5.6-sol",
+      status: "completed",
       output: [
         {
-          content: [{ type: 'output_text', text: '{"ok":true}' }],
+          content: [{ type: "output_text", text: '{"ok":true}' }],
         },
       ],
       usage: { input_tokens: 24, output_tokens: 8 },
     });
-    const input = { ...visionInput(), model: 'gpt-5.6-sol' };
-    const result = await visionProviderFor('gpt-5.6-sol', 'openai-responses').reviewVision<{
+    const input = { ...visionInput(), model: "gpt-5.6-sol" };
+    const result = await visionProviderFor(
+      "gpt-5.6-sol",
+      "openai-responses",
+    ).reviewVision<{
       ok: boolean;
     }>(input);
 
-    expect(lastRequestUrl()).toBe('http://gw.test/v1/responses');
+    expect(lastRequestUrl()).toBe("http://gw.test/v1/responses");
     const body = lastRequestBody();
     expect(body).toMatchObject({
-      model: 'gpt-5.6-sol',
+      model: "gpt-5.6-sol",
       max_output_tokens: 1000,
       temperature: 0,
       text: {
         format: {
-          type: 'json_schema',
-          name: 'design_evaluation',
+          type: "json_schema",
+          name: "design_evaluation",
           strict: true,
           schema: input.schema,
         },
@@ -866,48 +1119,53 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     }>;
     const imageUrls = responseInput
       .flatMap((message) => message.content)
-      .filter((item) => item.type === 'input_image')
+      .filter((item) => item.type === "input_image")
       .map((item) => item.image_url);
     expect(imageUrls).toHaveLength(3);
-    expect(imageUrls.every((url) => url?.startsWith('data:image/png;base64,'))).toBe(true);
+    expect(
+      imageUrls.every((url) => url?.startsWith("data:image/png;base64,")),
+    ).toBe(true);
     expect(result).toMatchObject({
       data: { ok: true },
-      provider: 'gateway',
-      model: 'gpt-5.6-sol',
-      reportedModel: 'gpt-5.6-sol',
-      modelResolutionSource: 'upstream_response',
+      provider: "gateway",
+      model: "gpt-5.6-sol",
+      reportedModel: "gpt-5.6-sol",
+      modelResolutionSource: "upstream_response",
     });
   });
 
-  it('uses native Anthropic image blocks and structured output for Sonnet vision candidates', async () => {
+  it("uses native Anthropic image blocks and structured output for Sonnet vision candidates", async () => {
     mockChatResponse({
-      model: 'claude-sonnet-5',
-      stop_reason: 'end_turn',
-      content: [{ type: 'text', text: '{"ok":true}' }],
+      model: "claude-sonnet-5",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: '{"ok":true}' }],
       usage: { input_tokens: 24, output_tokens: 8 },
     });
     const input = {
       ...visionInput(),
-      model: 'claude-sonnet-5',
+      model: "claude-sonnet-5",
       maxTokens: 4000,
     };
-    const result = await visionProviderFor('claude-sonnet-5', 'anthropic-messages').reviewVision<{
+    const result = await visionProviderFor(
+      "claude-sonnet-5",
+      "anthropic-messages",
+    ).reviewVision<{
       ok: boolean;
     }>(input);
 
-    expect(lastRequestUrl()).toBe('http://gw.test/v1/messages');
+    expect(lastRequestUrl()).toBe("http://gw.test/v1/messages");
     expect(lastRequestHeaders()).toMatchObject({
-      'x-api-key': 'k',
-      'anthropic-version': '2023-06-01',
+      "x-api-key": "k",
+      "anthropic-version": "2023-06-01",
     });
     const body = lastRequestBody();
     expect(body).toMatchObject({
-      model: 'claude-sonnet-5',
+      model: "claude-sonnet-5",
       max_tokens: 4000,
       temperature: 0,
       output_config: {
         format: {
-          type: 'json_schema',
+          type: "json_schema",
           schema: input.schema,
         },
       },
@@ -918,216 +1176,230 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
         source?: { type: string; media_type: string; data: string };
       }>;
     }>;
-    const imageBlocks = messages.flatMap((message) => message.content).filter((item) => item.type === 'image');
+    const imageBlocks = messages
+      .flatMap((message) => message.content)
+      .filter((item) => item.type === "image");
     expect(imageBlocks).toHaveLength(3);
     expect(
       imageBlocks.every(
         (item) =>
-          item.source?.type === 'base64' && item.source.media_type === 'image/png' && item.source.data.length > 0,
+          item.source?.type === "base64" &&
+          item.source.media_type === "image/png" &&
+          item.source.data.length > 0,
       ),
     ).toBe(true);
     expect(result).toMatchObject({
       data: { ok: true },
-      provider: 'gateway',
-      model: 'claude-sonnet-5',
-      reportedModel: 'claude-sonnet-5',
-      modelResolutionSource: 'upstream_response',
+      provider: "gateway",
+      model: "claude-sonnet-5",
+      reportedModel: "claude-sonnet-5",
+      modelResolutionSource: "upstream_response",
     });
   });
 
   it.each([
     {
-      name: 'Gemini model identity',
-      model: 'gemini-3.5-flash',
-      transport: 'google-generate-content' as const,
+      name: "Gemini model identity",
+      model: "gemini-3.5-flash",
+      transport: "google-generate-content" as const,
       response: {
-        modelVersion: 'provider-fallback',
+        modelVersion: "provider-fallback",
         candidates: [
           {
             content: { parts: [{ text: '{"ok":true}' }] },
-            finishReason: 'STOP',
+            finishReason: "STOP",
           },
         ],
       },
       expected: ProviderIdentityError,
     },
     {
-      name: 'Gemini abnormal finish',
-      model: 'gemini-3.5-flash',
-      transport: 'google-generate-content' as const,
+      name: "Gemini abnormal finish",
+      model: "gemini-3.5-flash",
+      transport: "google-generate-content" as const,
       response: {
-        modelVersion: 'gemini-3.5-flash',
+        modelVersion: "gemini-3.5-flash",
         candidates: [
           {
             content: { parts: [{ text: '{"ok":true}' }] },
-            finishReason: 'SAFETY',
+            finishReason: "SAFETY",
           },
         ],
       },
-      expected: 'VISION_REVIEW_FINISH_REASON_INVALID',
+      expected: "VISION_REVIEW_FINISH_REASON_INVALID",
     },
     {
-      name: 'Gemini empty STOP',
-      model: 'gemini-3.5-flash',
-      transport: 'google-generate-content' as const,
+      name: "Gemini empty STOP",
+      model: "gemini-3.5-flash",
+      transport: "google-generate-content" as const,
       response: {
-        modelVersion: 'gemini-3.5-flash',
+        modelVersion: "gemini-3.5-flash",
         candidates: [
           {
-            content: { parts: [{ thought: true, text: 'not output' }] },
-            finishReason: 'STOP',
+            content: { parts: [{ thought: true, text: "not output" }] },
+            finishReason: "STOP",
           },
         ],
       },
-      expected: 'VISION_REVIEW_EMPTY_OUTPUT',
+      expected: "VISION_REVIEW_EMPTY_OUTPUT",
     },
     {
-      name: 'Responses model identity',
-      model: 'gpt-5.6-sol',
-      transport: 'openai-responses' as const,
+      name: "Responses model identity",
+      model: "gpt-5.6-sol",
+      transport: "openai-responses" as const,
       response: {
-        model: 'provider-fallback',
-        status: 'completed',
-        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+        model: "provider-fallback",
+        status: "completed",
+        output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }],
       },
       expected: ProviderIdentityError,
     },
     {
-      name: 'Responses incomplete status',
-      model: 'gpt-5.6-sol',
-      transport: 'openai-responses' as const,
+      name: "Responses incomplete status",
+      model: "gpt-5.6-sol",
+      transport: "openai-responses" as const,
       response: {
-        model: 'gpt-5.6-sol',
-        status: 'incomplete',
-        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+        model: "gpt-5.6-sol",
+        status: "incomplete",
+        output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }],
       },
-      expected: 'VISION_REVIEW_FINISH_REASON_INVALID',
+      expected: "VISION_REVIEW_FINISH_REASON_INVALID",
     },
     {
-      name: 'Responses refusal without output text',
-      model: 'gpt-5.6-sol',
-      transport: 'openai-responses' as const,
+      name: "Responses refusal without output text",
+      model: "gpt-5.6-sol",
+      transport: "openai-responses" as const,
       response: {
-        model: 'gpt-5.6-sol',
-        status: 'completed',
-        output: [{ content: [{ type: 'refusal', text: 'no' }] }],
+        model: "gpt-5.6-sol",
+        status: "completed",
+        output: [{ content: [{ type: "refusal", text: "no" }] }],
       },
-      expected: 'VISION_REVIEW_EMPTY_OUTPUT',
+      expected: "VISION_REVIEW_EMPTY_OUTPUT",
     },
     {
-      name: 'Anthropic model identity',
-      model: 'claude-sonnet-5',
-      transport: 'anthropic-messages' as const,
+      name: "Anthropic model identity",
+      model: "claude-sonnet-5",
+      transport: "anthropic-messages" as const,
       response: {
-        model: 'provider-fallback',
-        stop_reason: 'end_turn',
-        content: [{ type: 'text', text: '{"ok":true}' }],
+        model: "provider-fallback",
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: '{"ok":true}' }],
       },
       expected: ProviderIdentityError,
     },
     {
-      name: 'Anthropic truncation',
-      model: 'claude-sonnet-5',
-      transport: 'anthropic-messages' as const,
+      name: "Anthropic truncation",
+      model: "claude-sonnet-5",
+      transport: "anthropic-messages" as const,
       response: {
-        model: 'claude-sonnet-5',
-        stop_reason: 'max_tokens',
-        content: [{ type: 'text', text: '{"ok":true}' }],
+        model: "claude-sonnet-5",
+        stop_reason: "max_tokens",
+        content: [{ type: "text", text: '{"ok":true}' }],
       },
-      expected: 'VISION_REVIEW_OUTPUT_TRUNCATED',
+      expected: "VISION_REVIEW_OUTPUT_TRUNCATED",
     },
     {
-      name: 'Anthropic refusal without text',
-      model: 'claude-sonnet-5',
-      transport: 'anthropic-messages' as const,
+      name: "Anthropic refusal without text",
+      model: "claude-sonnet-5",
+      transport: "anthropic-messages" as const,
       response: {
-        model: 'claude-sonnet-5',
-        stop_reason: 'end_turn',
-        content: [{ type: 'refusal' }],
+        model: "claude-sonnet-5",
+        stop_reason: "end_turn",
+        content: [{ type: "refusal" }],
       },
-      expected: 'VISION_REVIEW_EMPTY_OUTPUT',
+      expected: "VISION_REVIEW_EMPTY_OUTPUT",
     },
-  ])('fails closed for $name', async ({ model, transport, response, expected }) => {
-    mockChatResponse(response);
-    const pending = visionProviderFor(model, transport).reviewVision({
-      ...visionInput(),
-      model,
-      maxTokens: model === 'claude-sonnet-5' ? 4000 : 1000,
-    });
-    if (typeof expected === 'string') {
-      await expect(pending).rejects.toThrow(expected);
-    } else {
-      await expect(pending).rejects.toBeInstanceOf(expected);
-    }
-  });
+  ])(
+    "fails closed for $name",
+    async ({ model, transport, response, expected }) => {
+      mockChatResponse(response);
+      const pending = visionProviderFor(model, transport).reviewVision({
+        ...visionInput(),
+        model,
+        maxTokens: model === "claude-sonnet-5" ? 4000 : 1000,
+      });
+      if (typeof expected === "string") {
+        await expect(pending).rejects.toThrow(expected);
+      } else {
+        await expect(pending).rejects.toBeInstanceOf(expected);
+      }
+    },
+  );
 
-  it('rejects URL/path shaped inputs before any provider call', async () => {
+  it("rejects URL/path shaped inputs before any provider call", async () => {
     const input = visionInput();
     input.images[0] = {
       ...input.images[0]!,
-      url: 'https://attacker.example/image.png',
+      url: "https://attacker.example/image.png",
     } as never;
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(visionProvider().reviewVision(input)).rejects.toThrow('VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN');
+    await expect(visionProvider().reviewVision(input)).rejects.toThrow(
+      "VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects excess image count before copying any caller byte buffer', async () => {
+  it("rejects excess image count before copying any caller byte buffer", async () => {
     const input = visionInput();
-    input.images = [...input.images, { ...input.images[0]!, artifactId: 'case-home-extra' }];
+    input.images = [
+      ...input.images,
+      { ...input.images[0]!, artifactId: "case-home-extra" },
+    ];
     const boundedProvider = visionProvider();
-    const copySpy = vi.spyOn(Uint8Array, 'from');
+    const copySpy = vi.spyOn(Uint8Array, "from");
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(boundedProvider.reviewVision(input)).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
+    await expect(boundedProvider.reviewVision(input)).rejects.toThrow(
+      "VISION_REVIEW_INPUT_INVALID",
+    );
     expect(copySpy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     copySpy.mockRestore();
   });
 
-  it('keeps eval fixtures out of the future runtime task', async () => {
+  it("keeps eval fixtures out of the future runtime task", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
     await expect(
       visionProvider().reviewVision({
         ...visionInput(),
-        task: 'site_builder.aesthetic_review',
+        task: "site_builder.aesthetic_review",
       }),
-    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    ).rejects.toThrow("VISION_REVIEW_IMAGE_INVALID");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('requires every eval fixture ID and digest to exist in the immutable provider catalog', async () => {
+  it("requires every eval fixture ID and digest to exist in the immutable provider catalog", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
     const providerWithoutCatalog = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'default-model',
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "default-model",
       visionModelTransports: {
-        'gemini-3.5-flash': 'openai-chat-completions',
+        "gemini-3.5-flash": "openai-chat-completions",
       },
     });
-    await expect(providerWithoutCatalog.reviewVision(visionInput())).rejects.toThrow(
-      'VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED',
-    );
+    await expect(
+      providerWithoutCatalog.reviewVision(visionInput()),
+    ).rejects.toThrow("VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('copies the eval fixture catalog at construction so later caller mutation grants no authority', async () => {
+  it("copies the eval fixture catalog at construction so later caller mutation grants no authority", async () => {
     const mutableCatalog: Record<string, string> = {};
     const input = visionInput();
     const providerWithMutableSource = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'http://gw.test/v1',
-      apiKey: 'k',
-      model: 'default-model',
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "default-model",
       visionModelTransports: {
-        'gemini-3.5-flash': 'openai-chat-completions',
+        "gemini-3.5-flash": "openai-chat-completions",
       },
       visionEvalFixtureDigests: mutableCatalog,
     });
@@ -1135,36 +1407,38 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       mutableCatalog[image.artifactId] = image.sha256;
     }
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(providerWithMutableSource.reviewVision(input)).rejects.toThrow(
-      'VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED',
+      "VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects unregistered model transports before any provider call', async () => {
+  it("rejects unregistered model transports before any provider call", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
     await expect(
       visionProvider().reviewVision({
         ...visionInput(),
-        model: 'unproven-vision-model',
+        model: "unproven-vision-model",
       }),
-    ).rejects.toThrow('VISION_REVIEW_MODEL_TRANSPORT_UNPROVEN');
+    ).rejects.toThrow("VISION_REVIEW_MODEL_TRANSPORT_UNPROVEN");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the upstream changes the reported model', async () => {
+  it("fails closed when the upstream changes the reported model", async () => {
     mockChatResponse({
-      model: 'provider-fallback-model',
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      model: "provider-fallback-model",
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     });
-    await expect(visionProvider().reviewVision(visionInput())).rejects.toBeInstanceOf(ProviderIdentityError);
+    await expect(
+      visionProvider().reviewVision(visionInput()),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
-  it('binds the real requested model before await so caller mutation cannot rewrite provenance', async () => {
+  it("binds the real requested model before await so caller mutation cannot rewrite provenance", async () => {
     let resolveFetch!: (response: {
       ok: boolean;
       status: number;
@@ -1172,7 +1446,7 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       text(): Promise<string>;
     }) => void;
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(
         () =>
           new Promise((resolve) => {
@@ -1183,45 +1457,50 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     const input = visionInput();
     const pending = visionProvider().reviewVision(input);
     expect(fetch).toHaveBeenCalledTimes(1);
-    input.model = 'provider-fallback';
+    input.model = "provider-fallback";
     input.schema = {};
     input.images[0]!.bytes.fill(0);
     resolveFetch({
       ok: true,
       status: 200,
       json: async () => ({
-        model: 'provider-fallback',
-        choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+        model: "provider-fallback",
+        choices: [
+          { message: { content: '{"ok":true}' }, finish_reason: "stop" },
+        ],
         usage: { prompt_tokens: 12, completion_tokens: 4 },
       }),
-      text: async () => '',
+      text: async () => "",
     });
 
     await expect(pending).rejects.toBeInstanceOf(ProviderIdentityError);
-    expect(lastRequestBody().model).toBe('gemini-3.5-flash');
+    expect(lastRequestBody().model).toBe("gemini-3.5-flash");
   });
 
-  it('rejects every non-stop finish reason even when the body contains valid JSON', async () => {
+  it("rejects every non-stop finish reason even when the body contains valid JSON", async () => {
     mockChatResponse({
-      model: 'gemini-3.5-flash',
+      model: "gemini-3.5-flash",
       choices: [
         {
           message: { content: '{"ok":true}' },
-          finish_reason: 'content_filter',
+          finish_reason: "content_filter",
         },
       ],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     });
-    await expect(visionProvider().reviewVision(visionInput())).rejects.toThrow('VISION_REVIEW_FINISH_REASON_INVALID');
+    await expect(visionProvider().reviewVision(visionInput())).rejects.toThrow(
+      "VISION_REVIEW_FINISH_REASON_INVALID",
+    );
   });
 
-  it('preserves HTTP status for capability-probe unavailable mapping', async () => {
+  it("preserves HTTP status for capability-probe unavailable mapping", async () => {
+    const sentinel = "provider-http-output-sentinel";
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async () => ({
         ok: false,
         status: 429,
-        text: async () => 'rate limited',
+        text: async () => sentinel,
       })),
     );
     const error = await visionProvider()
@@ -1231,20 +1510,82 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     expect(error).toBeInstanceOf(ProviderHttpError);
     expect(error).toMatchObject({
       status: 429,
-      provider: 'gateway',
-      model: 'gemini-3.5-flash',
+      provider: "gateway",
+      model: "gemini-3.5-flash",
     });
+    expect((error as Error).message).not.toContain(sentinel);
   });
 });
 
-describe('stripJsonFence', () => {
-  it('剥 ```json 围栏', () => {
+describe("provider response discriminator redaction", () => {
+  const variants = [
+    { mode: 'text', protocol: 'openai-chat-completions', model: 'gpt-5.6-terra' },
+    { mode: 'text', protocol: 'openai-responses', model: 'gpt-5.6-terra' },
+    { mode: 'text', protocol: 'anthropic-messages', model: 'claude-sonnet-5' },
+    { mode: 'vision', protocol: 'openai-chat-completions', model: 'gemini-3.5-flash' },
+    { mode: 'vision', protocol: 'openai-responses', model: 'gpt-5.6-sol' },
+    { mode: 'vision', protocol: 'anthropic-messages', model: 'claude-sonnet-5' },
+    { mode: 'vision', protocol: 'google-generate-content', model: 'gemini-3.5-flash' },
+  ] as const;
+  it.each(variants.flatMap((variant) => ['model', 'finish'].map((field) => ({ ...variant, field }))))(
+    'redacts $mode $protocol $field from errors and provenance',
+    async ({ mode, protocol, model, field }) => {
+      const sentinel = 'private-response-discriminator-sentinel';
+      const reported = field === 'model' ? sentinel : model;
+      const finish = (normal: string) => field === 'finish' ? sentinel : normal;
+      mockChatResponse({
+        model: reported,
+        modelVersion: reported,
+        choices: [{ message: { content: '{"ok":true}' }, finish_reason: finish('stop') }],
+        status: finish('completed'),
+        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+        stop_reason: finish('end_turn'),
+        content: [{ type: mode === 'text' ? 'tool_use' : 'text', name: 'json', input: { ok: true }, text: '{"ok":true}' }],
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: finish('STOP') }],
+        usage: {},
+      });
+      const native = new OpenAICompatibleProvider({
+        id: 'gateway', baseUrl: 'http://gw.test/v1', apiKey: 'k', model,
+        ...(mode === 'text' ? { modelTransports: { [model]: protocol as GatewayModelTransport } } : { visionModelTransports: { [model]: protocol } }),
+        visionEvalFixtureDigests: Object.fromEntries(visionInput().images.map((image) => [image.artifactId, image.sha256])),
+      });
+      const error = await (mode === 'vision'
+        ? native.reviewVision({ ...visionInput(), model, maxTokens: 4_000 })
+        : native.generateStructured({ task: 't', prompt: 'p', schema: {}, model, maxTokens: 4_000 }))
+        .catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect(String(error)).not.toContain(sentinel);
+      expect(JSON.stringify(error)).not.toContain(sentinel);
+      expect((error as Error).cause).toBeUndefined();
+    },
+  );
+
+  it.each(['embed', 'google-vision'] as const)('cancels %s HTTP body without reading it', async (mode) => {
+    const text = vi.fn(async () => 'private-http-body-sentinel');
+    const cancel = vi.fn(async () => undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 502, text, body: { cancel } })));
+    const native = new OpenAICompatibleProvider({
+      id: 'gateway', baseUrl: 'http://gw.test/v1', apiKey: 'k', model: 'gemini-3.5-flash', embedModel: 'embed-model',
+      visionModelTransports: { 'gemini-3.5-flash': 'google-generate-content' },
+      visionEvalFixtureDigests: Object.fromEntries(visionInput().images.map((image) => [image.artifactId, image.sha256])),
+    });
+    const error = await (mode === 'embed' ? native.embed({ task: 't', input: ['p'] }) : native.reviewVision(visionInput()))
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ProviderHttpError);
+    expect(text).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(String(error)).not.toContain('private-http-body-sentinel');
+  });
+});
+
+describe("stripJsonFence", () => {
+  it("剥 ```json 围栏", () => {
     expect(stripJsonFence('```json\n{"a":1}\n```')).toBe('{"a":1}');
   });
-  it('剥无语言标签的 ``` 围栏', () => {
+  it("剥无语言标签的 ``` 围栏", () => {
     expect(stripJsonFence('```\n{"a":1}\n```')).toBe('{"a":1}');
   });
-  it('无围栏原样返回（trim）', () => {
+  it("无围栏原样返回（trim）", () => {
     expect(stripJsonFence('  {"a":1}  ')).toBe('{"a":1}');
   });
 });

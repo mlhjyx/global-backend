@@ -68,6 +68,24 @@ const EXECUTION_BUDGET_AUTHORITY_EXTRA_STALE_PATHS = Object.freeze([
   "packages/db/prisma/schema.prisma",
   "pnpm-lock.yaml",
 ]);
+const PROVIDER_SETTLEMENT_READBACK_STALE_PATHS = Object.freeze([
+  "apps/api/package.json",
+  "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+  "apps/api/src/model-runtime/site-builder-ai-task-bridge.ts",
+  "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+  "apps/api/src/site-builder/agents/ai-task.ts",
+  "apps/api/tsconfig.build.json",
+  "package.json",
+  "packages/contracts/package.json",
+  "packages/contracts/src/index.ts",
+  "packages/contracts/src/site-builder/component-qualification.ts",
+  "packages/db/prisma/schema.prisma",
+  "pnpm-lock.yaml",
+]);
+const PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS = Object.freeze([
+  "apps/api/nest-cli.json",
+  ...PROVIDER_SETTLEMENT_READBACK_STALE_PATHS,
+]);
 
 function regularStat(overrides = {}) {
   return {
@@ -445,6 +463,68 @@ test("Copy impact admits only the exact execution-budget authority foundation su
       }),
     /COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH/u,
     "the stale predecessor path set cannot describe current authority drift",
+  );
+});
+
+test("Copy impact admits only the exact provider settlement-readback successor scope", () => {
+  const settlementBinding = bindingWithPaths(
+    PROVIDER_SETTLEMENT_READBACK_STALE_PATHS,
+  );
+  const currentFiles = PROVIDER_SETTLEMENT_READBACK_STALE_PATHS.map((path) => ({
+    path,
+    sha256: SHA_C,
+  }));
+  const receipt = buildCopyRuntimeEligibilityReceipt({
+    binding: settlementBinding,
+    currentFiles,
+  });
+
+  assert.equal(
+    receipt.stale_scope,
+    "PRODUCTION_PARITY_PROVIDER_SETTLEMENT_READBACK_V1",
+  );
+  assert.deepEqual(receipt.drifted_paths, PROVIDER_SETTLEMENT_READBACK_STALE_PATHS);
+  assert.equal(receipt.dispatch_authorization, "NOT_AUTHORIZED");
+  assert.equal(receipt.pilot_eligibility, "BLOCKED");
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: settlementBinding,
+        currentFiles: currentFiles.map((entry, index) =>
+          index === 0 ? { ...entry, sha256: SHA_A } : entry,
+        ),
+      }),
+    /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
+  );
+});
+
+test("Copy impact admits only the exact Platform Authority v2 successor scope", () => {
+  const policyBinding = bindingWithPaths(
+    PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS,
+  );
+  const currentFiles = PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS.map((path) => ({
+    path,
+    sha256: SHA_C,
+  }));
+  const receipt = buildCopyRuntimeEligibilityReceipt({
+    binding: policyBinding,
+    currentFiles,
+  });
+
+  assert.equal(
+    receipt.stale_scope,
+    "PRODUCTION_PARITY_PLATFORM_AUTHORITY_POLICY_V2",
+  );
+  assert.deepEqual(receipt.drifted_paths, PLATFORM_AUTHORITY_POLICY_V2_STALE_PATHS);
+  assert.equal(receipt.dispatch_authorization, "NOT_AUTHORIZED");
+  assert.equal(receipt.pilot_eligibility, "BLOCKED");
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: policyBinding,
+        currentFiles: currentFiles.slice(1),
+      }),
+    /COPY_FIXED_SOURCE_CURRENT_FILES_INVALID/u,
   );
 });
 

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "platform-temporal-role-contract/v1",
+  "namespace": "platform-automation",
+  "audienceEnvironment": "TEMPORAL_PLATFORM_JWT_AUDIENCE",
+  "roles": {
+    "growthosReader": ["platform-automation:read"],
+    "backendScheduleWriter": ["platform-automation:write"],
+    "backendWorker": [
+      "platform-automation:worker",
+      "platform-automation:write"
+    ],
+    "provisionAdmin": ["temporal-system:admin"]
+  }
+}

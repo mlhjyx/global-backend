@@ -17,13 +17,14 @@ function fakeBroker(handlers: {
   search?: () => ChCompanyHit[];
   officers?: () => ChOfficer[];
   throwOn?: 'search' | 'officers';
+  throwError?: unknown;
 }): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
   const invokeMock = vi.fn(async (_toolId: string, input: CompaniesHouseInput): Promise<ToolResult<CompaniesHouseOutput>> => {
     if (input.op === 'search') {
-      if (handlers.throwOn === 'search') throw new Error('gate denied');
+      if (handlers.throwOn === 'search') throw handlers.throwError ?? new Error('gate denied');
       return { data: { companies: handlers.search?.() ?? [] }, costCents: 0 };
     }
-    if (handlers.throwOn === 'officers') throw new Error('gate denied');
+    if (handlers.throwOn === 'officers') throw handlers.throwError ?? new Error('gate denied');
     return { data: { officers: handlers.officers?.() ?? [] }, costCents: 0 };
   });
   return {
@@ -118,6 +119,7 @@ describe('CH · discoverContacts', () => {
     // purpose='discovery' 贯穿（用途门按本次调用判）
     const searchCtx = broker.invokeMock.mock.calls[0][2] as ToolContext;
     expect(searchCtx.purpose).toBe('discovery');
+    expect(broker.invokeMock.mock.calls[1][1]).toMatchObject({ limit: 25 });
   });
 
   it('🔴 歧义/低置信公司对齐 → 弃（返空，绝不挂错公司）', async () => {
@@ -143,5 +145,21 @@ describe('CH · discoverContacts', () => {
     const broker = fakeBroker({ throwOn: 'search' });
     const res = await new CompaniesHouseContactProvider({ broker }).discoverContacts(ukCompany, CTX);
     expect(res.contacts).toEqual([]);
+  });
+
+  it('never downgrades an execution-budget or Domain ACK control failure to an empty source result', async () => {
+    const control = Object.assign(new Error('activity failed'), {
+      cause: Object.assign(new Error('ack failed'), {
+        code: 'DOMAIN_ACK_RECEIPT_BINDING_MISMATCH',
+      }),
+    });
+    const broker = fakeBroker({ throwOn: 'search', throwError: control });
+
+    await expect(
+      new CompaniesHouseContactProvider({ broker }).discoverContacts(
+        ukCompany,
+        CTX,
+      ),
+    ).rejects.toBe(control);
   });
 });

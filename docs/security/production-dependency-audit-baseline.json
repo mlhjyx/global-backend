@@ -1,239 +1,37 @@
 {
   "schema_version": "production-dependency-audit-baseline/v1",
   "source": {
-    "base_commit": "866ede782579815dd3cd46bcaffb0c1d9626cf46",
-    "lockfile_digest": "sha256:ce3b20115af81ad419abb71fe6817cac7fb8bccece9881caf5940cdf36b2f0ea",
+    "base_commit": "28c362bd2da4a90822901510a2415f008d5cb695",
+    "lockfile_digest": "sha256:4fa4b3ce6a3123c699243e927db36cc6db2928fd3226c49fd0b00bbd42ddbd64",
     "registry": "https://registry.npmjs.org/",
     "package_manager": "pnpm@9.15.9",
     "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
-    "captured_at": "2026-08-24T14:34:20.899Z"
+    "captured_at": "2026-09-19T15:17:13.000Z"
   },
   "bootstrap": {
     "mode": "INITIAL_BASELINE",
-    "base_commit": "866ede782579815dd3cd46bcaffb0c1d9626cf46"
+    "base_commit": "28c362bd2da4a90822901510a2415f008d5cb695"
   },
   "governance": {
     "owner": "OWN-SECURITY",
-    "valid_until": "2026-09-08T13:51:23.000Z",
-    "policy": "Existing advisories may disappear; new advisories, severity increases, critical findings, and expired baselines fail closed."
+    "valid_until": "2026-10-03T13:46:50.000Z",
+    "policy": "Exact zero-advisory snapshot of the audited corrected source. Any production advisory, severity increase, critical finding, or expired baseline fails closed."
   },
-  "advisories": [
-    {
-      "ghsa_id": "GHSA-2pvr-wf23-7pc7",
-      "package": "astro",
-      "severity": "high",
-      "vulnerable_versions": "<6.4.6",
-      "patched_versions": ">=6.4.6",
-      "url": "https://github.com/advisories/GHSA-2pvr-wf23-7pc7",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-4g3v-8h47-v7g6",
-      "package": "astro",
-      "severity": "moderate",
-      "vulnerable_versions": ">=2.9.0 <=7.0.9",
-      "patched_versions": ">=7.1.0",
-      "url": "https://github.com/advisories/GHSA-4g3v-8h47-v7g6",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-7pw4-f3q4-r2p2",
-      "package": "astro",
-      "severity": "low",
-      "vulnerable_versions": ">=3.10.0 <7.0.4",
-      "patched_versions": ">=7.0.4",
-      "url": "https://github.com/advisories/GHSA-7pw4-f3q4-r2p2",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-8hv8-536x-4wqp",
-      "package": "astro",
-      "severity": "high",
-      "vulnerable_versions": "<6.3.3",
-      "patched_versions": ">=6.3.3",
-      "url": "https://github.com/advisories/GHSA-8hv8-536x-4wqp",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-f48w-9m4c-m7f5",
-      "package": "astro",
-      "severity": "moderate",
-      "vulnerable_versions": "<7.0.6",
-      "patched_versions": ">=7.0.6",
-      "url": "https://github.com/advisories/GHSA-f48w-9m4c-m7f5",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-f88m-g3jw-g9cj",
-      "package": "sharp",
-      "severity": "high",
-      "vulnerable_versions": "<0.35.0",
-      "patched_versions": ">=0.35.0",
-      "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-g7r4-m6w7-qqqr",
-      "package": "esbuild",
-      "severity": "low",
-      "vulnerable_versions": ">=0.27.3 <0.28.1",
-      "patched_versions": ">=0.28.1",
-      "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-j687-52p2-xcff",
-      "package": "astro",
-      "severity": "moderate",
-      "vulnerable_versions": "<6.1.6",
-      "patched_versions": ">=6.1.6",
-      "url": "https://github.com/advisories/GHSA-j687-52p2-xcff",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-jrpj-wcv7-9fh9",
-      "package": "astro",
-      "severity": "moderate",
-      "vulnerable_versions": "<6.4.6",
-      "patched_versions": ">=6.4.6",
-      "url": "https://github.com/advisories/GHSA-jrpj-wcv7-9fh9",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    },
-    {
-      "ghsa_id": "GHSA-xr5h-phrj-8vxv",
-      "package": "astro",
-      "severity": "low",
-      "vulnerable_versions": "<6.1.10",
-      "patched_versions": ">=6.1.10",
-      "url": "https://github.com/advisories/GHSA-xr5h-phrj-8vxv",
-      "remediation": {
-        "stream": "site-renderer-dependency-migration",
-        "owner": "OWN-SITE-BE",
-        "due_at": "2026-09-08T13:51:23.000Z",
-        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
-      }
-    }
-  ],
+  "advisories": [],
   "exposure": {
     "schema_version": "production-dependency-exposure/v1",
     "path_evidence": "REQUIRED",
-    "findings": [
-      {
-        "ghsa_id": "GHSA-2pvr-wf23-7pc7",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-4g3v-8h47-v7g6",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-7pw4-f3q4-r2p2",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-8hv8-536x-4wqp",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-f48w-9m4c-m7f5",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-f88m-g3jw-g9cj",
-        "package": "sharp",
-        "version": "0.34.5",
-        "path": "apps/site-renderer > astro@5.18.2 > sharp@0.34.5"
-      },
-      {
-        "ghsa_id": "GHSA-g7r4-m6w7-qqqr",
-        "package": "esbuild",
-        "version": "0.27.7",
-        "path": "apps/site-renderer > astro@5.18.2 > esbuild@0.27.7"
-      },
-      {
-        "ghsa_id": "GHSA-j687-52p2-xcff",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-jrpj-wcv7-9fh9",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      },
-      {
-        "ghsa_id": "GHSA-xr5h-phrj-8vxv",
-        "package": "astro",
-        "version": "5.18.2",
-        "path": "apps/site-renderer > astro@5.18.2"
-      }
-    ]
+    "findings": []
   },
   "summary": {
-    "advisories": 10,
+    "advisories": 0,
     "vulnerabilities": {
       "info": 0,
-      "low": 3,
-      "moderate": 4,
-      "high": 3,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
       "critical": 0
     },
-    "exposures": 10
+    "exposures": 0
   }
 }

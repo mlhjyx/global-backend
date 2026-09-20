@@ -1,30 +1,28 @@
-import { createHash, pbkdf2Sync } from 'node:crypto';
+import { createHash, pbkdf2Sync } from "node:crypto";
 import {
-  GatewaySettlementObservation,
   PAID_MODEL_PROTOCOLS,
   PaidModelPreflightError,
   type PaidModelPreflightEvidence,
   type PaidModelPreflightRequest,
   type PaidModelProtocol,
-  type PaidModelSettlementController,
-} from '../model-gateway/paid-model-settlement';
-import type { AiContext } from '../model-gateway/types';
-import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
+} from "../model-gateway/paid-model-settlement";
+import type { AiContext } from "../model-gateway/types";
+import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from "../model-gateway/model-transports";
 import {
   resolveTaskExecutionTarget,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
-} from './agents/task-routes';
-import { modelPolicyRegistry } from './agents/model-policy.registry';
+} from "./agents/task-routes";
+import { modelPolicyRegistry } from "./agents/model-policy.registry";
 
 export const SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION =
-  'site-builder-model-settlement-attestation/2026-07-29-v2' as const;
+  "site-builder-model-settlement-attestation/2026-07-29-v2" as const;
 export const SITE_BUILDER_MODEL_SETTLEMENT_EVIDENCE_VERSION =
-  'site-builder-paid-model-preflight-evidence/v2' as const;
+  "site-builder-paid-model-preflight-evidence/v2" as const;
 export const OPENOX_PRICING_AUTHORITY = {
-  provider: 'openox_model_marketplace',
-  origin: 'https://openox.tech',
-  catalogEndpoint: '/api/public/pricing-catalog',
+  provider: "openox_model_marketplace",
+  origin: "https://openox.tech",
+  catalogEndpoint: "/api/public/pricing-catalog",
 } as const;
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -39,7 +37,7 @@ async function boundedJsonResponse(
   response: Response,
   maximumBytes: number,
 ): Promise<unknown> {
-  const contentLength = response.headers.get('content-length');
+  const contentLength = response.headers.get("content-length");
   if (contentLength !== null) {
     const parsedLength = Number(contentLength);
     if (
@@ -47,11 +45,11 @@ async function boundedJsonResponse(
       parsedLength < 0 ||
       parsedLength > maximumBytes
     ) {
-      throw new Error('response body exceeds byte limit');
+      throw new Error("response body exceeds byte limit");
     }
   }
   if (!response.body) {
-    throw new Error('response body unavailable');
+    throw new Error("response body unavailable");
   }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -62,7 +60,7 @@ async function boundedJsonResponse(
     totalBytes += value.byteLength;
     if (totalBytes > maximumBytes) {
       await reader.cancel();
-      throw new Error('response body exceeds byte limit');
+      throw new Error("response body exceeds byte limit");
     }
     chunks.push(value);
   }
@@ -72,7 +70,7 @@ async function boundedJsonResponse(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 
 export interface SettlementDispatch {
@@ -83,7 +81,7 @@ export interface SettlementDispatch {
   upstreamModelId: string;
   upstreamProductLine: string;
   upstreamGroupName: string;
-  pricingCurrency: 'USD' | 'CNY';
+  pricingCurrency: "USD" | "CNY";
   inputPriceMicrounitsPerMillionTokens: number;
   outputPriceMicrounitsPerMillionTokens: number;
   cacheReadPriceMicrounitsPerMillionTokens: number;
@@ -105,14 +103,14 @@ export interface SettlementSnapshot {
     origin: typeof OPENOX_PRICING_AUTHORITY.origin;
     catalogEndpoint: typeof OPENOX_PRICING_AUTHORITY.catalogEndpoint;
     snapshotSha256: string;
-    ledgerConversionPolicy: 'openox_1_to_1_balance_credit';
+    ledgerConversionPolicy: "openox_1_to_1_balance_credit";
     ledgerMicrousdPerUsd: 1_000_000;
     ledgerMicrousdPerCny: 1_000_000;
   };
   credential: {
     bearerTokenSha256: string;
-    purpose: 'site_builder_runtime';
-    quotaMode: 'limited';
+    purpose: "site_builder_runtime";
+    quotaMode: "limited";
     quotaCapPoints: number;
     scopeExact: true;
     modelAllowlist: string[];
@@ -120,9 +118,9 @@ export interface SettlementSnapshot {
   dispatches: SettlementDispatch[];
   settlement: {
     resolverId: string;
-    requestIdentityHeader: 'x-oneapi-request-id';
-    logEndpoint: '/api/log/token';
-    unknownSettlementPolicy: 'freeze_campaign';
+    requestIdentityHeader: "x-oneapi-request-id";
+    logEndpoint: "/api/log/token";
+    unknownSettlementPolicy: "freeze_campaign";
   };
 }
 
@@ -176,28 +174,28 @@ interface LogRow {
 }
 
 function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === 'boolean')
+  if (value === null || typeof value === "boolean")
     return JSON.stringify(value);
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error('non-finite canonical number');
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("non-finite canonical number");
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
   }
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(',')}}`;
+      .join(",")}}`;
   }
-  throw new Error('unsupported canonical JSON value');
+  throw new Error("unsupported canonical JSON value");
 }
 
 function sha256(value: string | Uint8Array): string {
-  return createHash('sha256').update(value).digest('hex');
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function legacyAttestationCredentialHash(value: string): string {
@@ -206,11 +204,11 @@ function legacyAttestationCredentialHash(value: string): string {
   // reintroducing a fast password-style computation.
   return pbkdf2Sync(
     value,
-    'site-builder-retired-attestation/v2',
+    "site-builder-retired-attestation/v2",
     100_000,
     32,
-    'sha256',
-  ).toString('hex');
+    "sha256",
+  ).toString("hex");
 }
 
 function sha256CanonicalJson(value: unknown): string {
@@ -233,7 +231,7 @@ function nonNegativeSafeInteger(value: unknown): value is number {
 }
 
 function canonicalInstant(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
+  if (typeof value !== "string") return false;
   const milliseconds = Date.parse(value);
   return (
     Number.isFinite(milliseconds) &&
@@ -244,20 +242,20 @@ function canonicalInstant(value: unknown): value is string {
 function canonicalGatewayOrigin(value: string): string {
   const parsed = new URL(value);
   const loopbackHttp =
-    parsed.protocol === 'http:' &&
-    ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    parsed.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
   if (
-    (parsed.protocol !== 'https:' && !loopbackHttp) ||
+    (parsed.protocol !== "https:" && !loopbackHttp) ||
     parsed.username ||
     parsed.password
   ) {
-    throw new Error('gateway origin must be HTTPS or explicit loopback HTTP');
+    throw new Error("gateway origin must be HTTPS or explicit loopback HTTP");
   }
   return parsed.origin;
 }
 
 function protocolFor(alias: string): PaidModelProtocol {
-  return VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? 'openai-chat-completions';
+  return VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? "openai-chat-completions";
 }
 
 function dispatchKey(dispatch: {
@@ -270,10 +268,10 @@ function dispatchKey(dispatch: {
 
 function requiredDispatches(
   env: NodeJS.ProcessEnv,
-): Array<Pick<SettlementDispatch, 'taskId' | 'alias' | 'protocol'>> {
+): Array<Pick<SettlementDispatch, "taskId" | "alias" | "protocol">> {
   return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
     const target = resolveTaskExecutionTarget(taskId, env);
-    if (target.kind === 'deterministic_fallback') return [];
+    if (target.kind === "deterministic_fallback") return [];
     const route = target.route;
     const aliases = [route.primary, ...route.fallbacks];
     for (const alias of aliases) {
@@ -293,57 +291,57 @@ function modelAllowlist(dispatches: readonly { alias: string }[]): string[] {
   return [...new Set(dispatches.map((entry) => entry.alias))].sort();
 }
 
-function assertAttestation(
+function _assertAttestation(
   input: unknown,
   env: NodeJS.ProcessEnv,
   gatewayUrl: string,
   apiKey: string,
   now: Date,
 ): SiteBuilderModelSettlementAttestation {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new Error('model settlement attestation must be an object');
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("model settlement attestation must be an object");
   }
   const envelope = input as SiteBuilderModelSettlementAttestation;
   const snapshot = envelope.snapshot;
   if (
-    !exactKeys(envelope, ['schemaVersion', 'snapshot', 'snapshotSha256']) ||
+    !exactKeys(envelope, ["schemaVersion", "snapshot", "snapshotSha256"]) ||
     envelope.schemaVersion !==
       SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION ||
     !snapshot ||
-    typeof snapshot !== 'object' ||
+    typeof snapshot !== "object" ||
     !exactKeys(snapshot, [
-      'attestationId',
-      'capturedAt',
-      'expiresAt',
-      'gateway',
-      'pricing',
-      'credential',
-      'dispatches',
-      'settlement',
+      "attestationId",
+      "capturedAt",
+      "expiresAt",
+      "gateway",
+      "pricing",
+      "credential",
+      "dispatches",
+      "settlement",
     ]) ||
-    !exactKeys(snapshot.gateway, ['origin', 'channelSnapshotSha256']) ||
+    !exactKeys(snapshot.gateway, ["origin", "channelSnapshotSha256"]) ||
     !exactKeys(snapshot.pricing, [
-      'authority',
-      'origin',
-      'catalogEndpoint',
-      'snapshotSha256',
-      'ledgerConversionPolicy',
-      'ledgerMicrousdPerUsd',
-      'ledgerMicrousdPerCny',
+      "authority",
+      "origin",
+      "catalogEndpoint",
+      "snapshotSha256",
+      "ledgerConversionPolicy",
+      "ledgerMicrousdPerUsd",
+      "ledgerMicrousdPerCny",
     ]) ||
     !exactKeys(snapshot.credential, [
-      'bearerTokenSha256',
-      'purpose',
-      'quotaMode',
-      'quotaCapPoints',
-      'scopeExact',
-      'modelAllowlist',
+      "bearerTokenSha256",
+      "purpose",
+      "quotaMode",
+      "quotaCapPoints",
+      "scopeExact",
+      "modelAllowlist",
     ]) ||
     !exactKeys(snapshot.settlement, [
-      'resolverId',
-      'requestIdentityHeader',
-      'logEndpoint',
-      'unknownSettlementPolicy',
+      "resolverId",
+      "requestIdentityHeader",
+      "logEndpoint",
+      "unknownSettlementPolicy",
     ]) ||
     !IDENTIFIER.test(snapshot.attestationId) ||
     !canonicalInstant(snapshot.capturedAt) ||
@@ -357,21 +355,22 @@ function assertAttestation(
       OPENOX_PRICING_AUTHORITY.catalogEndpoint ||
     !SHA256.test(snapshot.pricing.snapshotSha256) ||
     snapshot.pricing.ledgerConversionPolicy !==
-      'openox_1_to_1_balance_credit' ||
+      "openox_1_to_1_balance_credit" ||
     snapshot.pricing.ledgerMicrousdPerUsd !== 1_000_000 ||
     snapshot.pricing.ledgerMicrousdPerCny !== 1_000_000 ||
     !SHA256.test(snapshot.credential.bearerTokenSha256) ||
-    snapshot.credential.bearerTokenSha256 !== legacyAttestationCredentialHash(apiKey) ||
-    snapshot.credential.purpose !== 'site_builder_runtime' ||
-    snapshot.credential.quotaMode !== 'limited' ||
+    snapshot.credential.bearerTokenSha256 !==
+      legacyAttestationCredentialHash(apiKey) ||
+    snapshot.credential.purpose !== "site_builder_runtime" ||
+    snapshot.credential.quotaMode !== "limited" ||
     snapshot.credential.scopeExact !== true ||
     !positiveSafeInteger(snapshot.credential.quotaCapPoints) ||
-    snapshot.settlement.requestIdentityHeader !== 'x-oneapi-request-id' ||
-    snapshot.settlement.logEndpoint !== '/api/log/token' ||
-    snapshot.settlement.unknownSettlementPolicy !== 'freeze_campaign' ||
+    snapshot.settlement.requestIdentityHeader !== "x-oneapi-request-id" ||
+    snapshot.settlement.logEndpoint !== "/api/log/token" ||
+    snapshot.settlement.unknownSettlementPolicy !== "freeze_campaign" ||
     !IDENTIFIER.test(snapshot.settlement.resolverId)
   ) {
-    throw new Error('model settlement attestation is invalid');
+    throw new Error("model settlement attestation is invalid");
   }
 
   const capturedAt = Date.parse(snapshot.capturedAt);
@@ -381,13 +380,13 @@ function assertAttestation(
     expiresAt <= now.getTime() ||
     expiresAt - capturedAt > MAX_ATTESTATION_LIFETIME_MS
   ) {
-    throw new Error('model settlement attestation is stale or future-dated');
+    throw new Error("model settlement attestation is stale or future-dated");
   }
   if (
     canonicalGatewayOrigin(gatewayUrl) !==
     canonicalGatewayOrigin(snapshot.gateway.origin)
   ) {
-    throw new Error('model settlement gateway origin mismatch');
+    throw new Error("model settlement gateway origin mismatch");
   }
 
   const expected = requiredDispatches(env).map(dispatchKey).sort();
@@ -397,43 +396,43 @@ function assertAttestation(
     new Set(actual).size !== actual.length ||
     JSON.stringify(expected) !== JSON.stringify(actual)
   ) {
-    throw new Error('model settlement dispatch scope is not exact');
+    throw new Error("model settlement dispatch scope is not exact");
   }
   const expectedModels = modelAllowlist(snapshot.dispatches);
   if (
     JSON.stringify(snapshot.credential.modelAllowlist) !==
     JSON.stringify(expectedModels)
   ) {
-    throw new Error('model settlement credential allowlist is not exact');
+    throw new Error("model settlement credential allowlist is not exact");
   }
 
   for (const dispatch of snapshot.dispatches) {
     if (
       !exactKeys(dispatch, [
-        'taskId',
-        'alias',
-        'protocol',
-        'channelId',
-        'upstreamModelId',
-        'upstreamProductLine',
-        'upstreamGroupName',
-        'pricingCurrency',
-        'inputPriceMicrounitsPerMillionTokens',
-        'outputPriceMicrounitsPerMillionTokens',
-        'cacheReadPriceMicrounitsPerMillionTokens',
-        'cacheWritePriceMicrounitsPerMillionTokens',
-        'ledgerMicrousdPerPricingUnit',
-        'pricingVersion',
+        "taskId",
+        "alias",
+        "protocol",
+        "channelId",
+        "upstreamModelId",
+        "upstreamProductLine",
+        "upstreamGroupName",
+        "pricingCurrency",
+        "inputPriceMicrounitsPerMillionTokens",
+        "outputPriceMicrounitsPerMillionTokens",
+        "cacheReadPriceMicrounitsPerMillionTokens",
+        "cacheWritePriceMicrounitsPerMillionTokens",
+        "ledgerMicrousdPerPricingUnit",
+        "pricingVersion",
       ]) ||
       !SITE_BUILDER_TASK_IDS.includes(dispatch.taskId) ||
-      typeof dispatch.alias !== 'string' ||
+      typeof dispatch.alias !== "string" ||
       dispatch.alias.length === 0 ||
       !PAID_MODEL_PROTOCOLS.includes(dispatch.protocol) ||
       !positiveSafeInteger(dispatch.channelId) ||
       dispatch.upstreamModelId !== dispatch.alias ||
       !IDENTIFIER.test(dispatch.upstreamProductLine) ||
       !IDENTIFIER.test(dispatch.upstreamGroupName) ||
-      !['USD', 'CNY'].includes(dispatch.pricingCurrency) ||
+      !["USD", "CNY"].includes(dispatch.pricingCurrency) ||
       !nonNegativeSafeInteger(dispatch.inputPriceMicrounitsPerMillionTokens) ||
       !nonNegativeSafeInteger(dispatch.outputPriceMicrounitsPerMillionTokens) ||
       !nonNegativeSafeInteger(
@@ -444,19 +443,19 @@ function assertAttestation(
       ) ||
       !positiveSafeInteger(dispatch.ledgerMicrousdPerPricingUnit) ||
       dispatch.ledgerMicrousdPerPricingUnit !==
-        (dispatch.pricingCurrency === 'USD'
+        (dispatch.pricingCurrency === "USD"
           ? snapshot.pricing.ledgerMicrousdPerUsd
           : snapshot.pricing.ledgerMicrousdPerCny) ||
       !SHA256.test(dispatch.pricingVersion)
     ) {
-      throw new Error('model settlement dispatch entry is invalid');
+      throw new Error("model settlement dispatch entry is invalid");
     }
   }
   if (
     snapshot.gateway.channelSnapshotSha256 !==
     channelSnapshot(snapshot.dispatches)
   ) {
-    throw new Error('model settlement channel snapshot digest mismatch');
+    throw new Error("model settlement channel snapshot digest mismatch");
   }
   return structuredClone(envelope);
 }
@@ -478,14 +477,14 @@ function channelSnapshot(dispatches: readonly SettlementDispatch[]): string {
 
 function decimalMicrounits(value: unknown): number | null {
   const raw =
-    typeof value === 'number' && Number.isFinite(value)
+    typeof value === "number" && Number.isFinite(value)
       ? String(value)
-      : typeof value === 'string'
+      : typeof value === "string"
         ? value
-        : '';
+        : "";
   if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null;
-  const [whole, fraction = ''] = raw.split('.');
-  const result = Number(whole) * 1_000_000 + Number(fraction.padEnd(6, '0'));
+  const [whole, fraction = ""] = raw.split(".");
+  const result = Number(whole) * 1_000_000 + Number(fraction.padEnd(6, "0"));
   return Number.isSafeInteger(result) ? result : null;
 }
 
@@ -518,14 +517,14 @@ function catalogRows(catalog: OpenOxPricingCatalog): {
   };
 }
 
-function pricingCurrency(productLine: string): 'USD' | 'CNY' | null {
-  if (productLine === 'claude' || productLine === 'kimi') return 'USD';
+function pricingCurrency(productLine: string): "USD" | "CNY" | null {
+  if (productLine === "claude" || productLine === "kimi") return "USD";
   if (
-    ['gpt', 'deepseek', 'glm', 'grok', 'gemini', 'minimax', 'doubao'].includes(
+    ["gpt", "deepseek", "glm", "grok", "gemini", "minimax", "doubao"].includes(
       productLine,
     )
   ) {
-    return 'CNY';
+    return "CNY";
   }
   return null;
 }
@@ -544,8 +543,8 @@ function deriveOpenOxPrice(
   const model = matchingModels[0];
   if (
     !model ||
-    model.status !== 'enabled' ||
-    typeof model.product_line !== 'string'
+    model.status !== "enabled" ||
+    typeof model.product_line !== "string"
   ) {
     return null;
   }
@@ -559,9 +558,9 @@ function deriveOpenOxPrice(
   if (!group || !currency) return null;
 
   const modelMultiplier =
-    modelId === 'glm-5.2' &&
+    modelId === "glm-5.2" &&
     model.group_rates &&
-    typeof model.group_rates === 'object' &&
+    typeof model.group_rates === "object" &&
     !Array.isArray(model.group_rates)
       ? (model.group_rates as Record<string, unknown>).billing_multiplier
       : undefined;
@@ -598,8 +597,8 @@ function deriveOpenOxPrice(
     currency,
     inputRate: model.input_rate,
     outputRate: model.output_rate,
-    cacheReadRate: model.cache_read_rate ?? '0',
-    cacheWriteRate: model.cache_write_rate ?? '0',
+    cacheReadRate: model.cache_read_rate ?? "0",
+    cacheWriteRate: model.cache_write_rate ?? "0",
     status: model.status,
     updatedAt: model.updated_at,
   };
@@ -651,7 +650,7 @@ function openOxPricedCostMicrousd(input: {
   return Number.isSafeInteger(cost) && cost >= 0 ? cost : null;
 }
 
-export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementController {
+export class NewApiSiteBuilderModelSettlement {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;
   private readonly wait: (milliseconds: number) => Promise<void>;
@@ -737,8 +736,8 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     if (
       !ctx.paidCost ||
       request.signal?.aborted ||
-      request.op !== 'generateStructured' ||
-      request.providerId !== 'gateway' ||
+      request.op !== "generateStructured" ||
+      request.providerId !== "gateway" ||
       canonicalGatewayOrigin(request.gatewayOrigin) !== this.gatewayOrigin ||
       request.credentialSha256 !== snapshot.credential.bearerTokenSha256 ||
       !positiveSafeInteger(request.promptUtf8BytesPerCall) ||
@@ -747,7 +746,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       !positiveSafeInteger(request.reservationMicrousd) ||
       Date.parse(snapshot.expiresAt) <= now.getTime()
     ) {
-      throw new PaidModelPreflightError('REQUEST_OUTSIDE_ATTESTATION');
+      throw new PaidModelPreflightError("REQUEST_OUTSIDE_ATTESTATION");
     }
     const dispatch = snapshot.dispatches.find(
       (entry) =>
@@ -756,25 +755,25 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
         entry.protocol === request.protocol,
     );
     if (!dispatch) {
-      throw new PaidModelPreflightError('DISPATCH_NOT_ATTESTED');
+      throw new PaidModelPreflightError("DISPATCH_NOT_ATTESTED");
     }
 
     const [model, usage, pricing] = await Promise.all([
       this.getJson(`/v1/models/${encodeURIComponent(request.alias)}`, signal),
-      this.getJson('/api/usage/token', signal),
+      this.getJson("/api/usage/token", signal),
       this.getOpenOxCatalog(signal),
     ]);
     if (request.signal?.aborted) {
-      throw new PaidModelPreflightError('REQUEST_CANCELLED');
+      throw new PaidModelPreflightError("REQUEST_CANCELLED");
     }
     if (signal.aborted) {
-      throw new PaidModelPreflightError('LIVE_PREFLIGHT_UNAVAILABLE');
+      throw new PaidModelPreflightError("LIVE_PREFLIGHT_UNAVAILABLE");
     }
     if (Date.parse(snapshot.expiresAt) <= this.now().getTime()) {
-      throw new PaidModelPreflightError('ATTESTATION_EXPIRED_DURING_PREFLIGHT');
+      throw new PaidModelPreflightError("ATTESTATION_EXPIRED_DURING_PREFLIGHT");
     }
     if (!model.ok || !usage.ok || !pricing.ok) {
-      throw new PaidModelPreflightError('LIVE_PREFLIGHT_UNAVAILABLE');
+      throw new PaidModelPreflightError("LIVE_PREFLIGHT_UNAVAILABLE");
     }
 
     const modelBody = model.body as { id?: unknown };
@@ -783,7 +782,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     const pricingCatalog = pricing.body as OpenOxPricingCatalog;
     const liveAllowlist =
       usageBody.model_limits &&
-      typeof usageBody.model_limits === 'object' &&
+      typeof usageBody.model_limits === "object" &&
       !Array.isArray(usageBody.model_limits)
         ? Object.keys(usageBody.model_limits as Record<string, unknown>).sort()
         : [];
@@ -801,7 +800,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       pricingSnapshot(pricingCatalog, snapshot.dispatches) !==
         snapshot.pricing.snapshotSha256
     ) {
-      throw new PaidModelPreflightError('LIVE_SCOPE_OR_QUOTA_MISMATCH');
+      throw new PaidModelPreflightError("LIVE_SCOPE_OR_QUOTA_MISMATCH");
     }
     if (
       snapshot.dispatches.some(
@@ -813,7 +812,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
           ),
       )
     ) {
-      throw new PaidModelPreflightError('LIVE_PRICING_COVERAGE_INCOMPLETE');
+      throw new PaidModelPreflightError("LIVE_PRICING_COVERAGE_INCOMPLETE");
     }
     const price = deriveOpenOxPrice(
       pricingCatalog,
@@ -834,7 +833,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
         dispatch.cacheWritePriceMicrounitsPerMillionTokens ||
       price.pricingVersion !== dispatch.pricingVersion
     ) {
-      throw new PaidModelPreflightError('LIVE_PRICING_MISMATCH');
+      throw new PaidModelPreflightError("LIVE_PRICING_MISMATCH");
     }
 
     const pricedMaximumMicrousd = openOxPricedCostMicrousd({
@@ -852,7 +851,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       pricedMaximumMicrousd === null ||
       pricedMaximumMicrousd > request.reservationMicrousd
     ) {
-      throw new PaidModelPreflightError('PRICED_MAXIMUM_EXCEEDS_RESERVATION');
+      throw new PaidModelPreflightError("PRICED_MAXIMUM_EXCEEDS_RESERVATION");
     }
 
     return Object.freeze({
@@ -885,14 +884,14 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     evidence: PaidModelPreflightEvidence;
     usage?: { inputTokens?: number; outputTokens?: number };
     signal?: AbortSignal;
-  }): Promise<GatewaySettlementObservation> {
+  }): Promise<unknown> {
     const resolverId = this.attestation.snapshot.settlement.resolverId;
     if (!input.requestId || !REQUEST_ID.test(input.requestId)) {
       return {
-        status: 'unknown',
+        status: "unknown",
         requestId: input.requestId,
         resolverId,
-        reason: 'request_id_missing',
+        reason: "request_id_missing",
       };
     }
 
@@ -917,27 +916,27 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       if (matching.length === 0) continue;
       if (matching.length !== 1 || matching[0]!.type !== 2) {
         return {
-          status: 'unknown',
+          status: "unknown",
           requestId: input.requestId,
           resolverId,
-          reason: 'log_ambiguous',
+          reason: "log_ambiguous",
         };
       }
       const row = matching[0]!;
       if (row.model_name !== input.evidence.alias) {
         return {
-          status: 'unknown',
+          status: "unknown",
           requestId: input.requestId,
           resolverId,
-          reason: 'model_mismatch',
+          reason: "model_mismatch",
         };
       }
       if (row.channel !== input.evidence.expectedChannelId) {
         return {
-          status: 'unknown',
+          status: "unknown",
           requestId: input.requestId,
           resolverId,
-          reason: 'channel_mismatch',
+          reason: "channel_mismatch",
         };
       }
       if (
@@ -951,10 +950,10 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
           input.usage.outputTokens !== row.completion_tokens)
       ) {
         return {
-          status: 'unknown',
+          status: "unknown",
           requestId: input.requestId,
           resolverId,
-          reason: 'log_invalid',
+          reason: "log_invalid",
         };
       }
       const costMicrousd = openOxPricedCostMicrousd({
@@ -969,20 +968,20 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       });
       if (costMicrousd === null) {
         return {
-          status: 'unknown',
+          status: "unknown",
           requestId: input.requestId,
           resolverId,
-          reason: 'log_invalid',
+          reason: "log_invalid",
         };
       }
       return {
-        status: 'settled',
+        status: "settled",
         requestId: input.requestId,
         resolverId,
         alias: input.evidence.alias,
         protocol: input.evidence.protocol,
         channelId: row.channel,
-        basis: 'openox_catalog_token_pricing',
+        basis: "openox_catalog_token_pricing",
         quota: row.quota,
         costMicrousd,
         inputTokens: row.prompt_tokens,
@@ -990,10 +989,10 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       };
     }
     return {
-      status: 'unknown',
+      status: "unknown",
       requestId: input.requestId,
       resolverId,
-      reason: 'log_unavailable',
+      reason: "log_unavailable",
     };
   }
 }

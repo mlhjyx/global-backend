@@ -58,8 +58,8 @@
     {
       "workflow": ".github/workflows/ci.yml",
       "action": "pnpm/action-setup",
-      "revision": "0ebf47130e4866e96fce0953f49152a61190b271",
-      "version": "v6.0.9"
+      "revision": "ea17c68df8912ef543352723c149a84f56e3d413",
+      "version": "v6.1.0"
     },
     {
       "workflow": ".github/workflows/ci.yml",
@@ -70,8 +70,8 @@
     {
       "workflow": ".github/workflows/ci.yml",
       "action": "oasdiff/oasdiff-action/breaking",
-      "revision": "2649ebe137aeb72a95707671204e829f86e091fc",
-      "version": "v0.1.13"
+      "revision": "9c0494cfee8b8fcc9fb383ed2d5d3fbdae169b93",
+      "version": "v0.1.15"
     },
     {
       "workflow": ".github/workflows/security.yml",
@@ -94,8 +94,8 @@
     {
       "workflow": ".github/workflows/governance.yml",
       "action": "pnpm/action-setup",
-      "revision": "0ebf47130e4866e96fce0953f49152a61190b271",
-      "version": "v6.0.9"
+      "revision": "ea17c68df8912ef543352723c149a84f56e3d413",
+      "version": "v6.1.0"
     },
     {
       "workflow": ".github/workflows/governance.yml",
@@ -136,8 +136,8 @@
     {
       "workflow": ".github/workflows/supply-chain.yml",
       "action": "pnpm/action-setup",
-      "revision": "0ebf47130e4866e96fce0953f49152a61190b271",
-      "version": "v6.0.9"
+      "revision": "ea17c68df8912ef543352723c149a84f56e3d413",
+      "version": "v6.1.0"
     },
     {
       "workflow": ".github/workflows/supply-chain.yml",
@@ -154,14 +154,14 @@
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/init",
-      "revision": "db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28",
-      "version": "v4.37.8"
+      "revision": "b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+      "version": "v4.38.0"
     },
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/analyze",
-      "revision": "db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28",
-      "version": "v4.37.8"
+      "revision": "b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+      "version": "v4.38.0"
     },
     {
       "workflow": ".github/workflows/publish-runtime-image.yml",
@@ -171,6 +171,18 @@
     },
     {
       "workflow": ".github/workflows/publish-runtime-image.yml",
+      "action": "actions/attest",
+      "revision": "1e69f48acb82d1966a394da916b4c1698aa569d6",
+      "version": "v4.2.2"
+    },
+    {
+      "workflow": ".github/workflows/publish-temporal-platform-image.yml",
+      "action": "actions/checkout",
+      "revision": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "version": "v7"
+    },
+    {
+      "workflow": ".github/workflows/publish-temporal-platform-image.yml",
       "action": "actions/attest",
       "revision": "1e69f48acb82d1966a394da916b4c1698aa569d6",
       "version": "v4.2.2"
@@ -188,6 +200,8 @@
       "/apps/api/src/discovery/providers/",
       "/apps/api/src/health/",
       "/apps/api/src/model-gateway/",
+      "/apps/api/src/execution-budget/",
+      "/apps/api/src/platform-authority/",
       "/apps/api/src/site-builder/site-build-cost-ledger.ts",
       "/apps/api/src/site-builder/site-builder-model-settlement.ts",
       "/apps/api/src/temporal/",
@@ -195,6 +209,8 @@
       "/apps/api/src/discovery/provider-source-classes.json",
       "/apps/api/src/runtime/",
       "/apps/api/scripts/generate-build-attestation.mts",
+      "/apps/api/nest-cli.json",
+      "/infra/temporal-platform/",
       "/docs/adr/",
       "/docs/product-scope.md",
       "/docs/site-builder/model-settlement-preflight.md",
@@ -219,9 +235,13 @@
       "/**/.pnpmfile.cjs",
       "/patches/",
       "/scripts/governance-*.mjs",
+      "/scripts/platform-authority-*.mjs",
+      "/scripts/verify-platform-authority-*.mjs",
       "/scripts/ghcr-runtime-publication*.mjs",
       "/scripts/docker-image-config-path*.mjs",
       "/scripts/runtime-deployment-contract.spec.mjs",
+      "/scripts/temporal-platform-infrastructure-contract.spec.mjs",
+      "/scripts/temporal-native-publication*.mjs",
       "/scripts/environment-parity-*.mjs",
       "/scripts/copy-fixed-source-impact*.mjs",
       "/scripts/pr-decision-card*.mjs",

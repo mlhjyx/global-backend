@@ -46,6 +46,19 @@ describe("workspace suppression policy lock", () => {
     ).toThrow("workspace suppression policy lock receipt mismatch");
   });
 
+  it.each([undefined, { workspaceId: WORKSPACE_ID }])(
+    "rejects an absent or forged receipt",
+    (receipt) => {
+      expect(() =>
+        assertWorkspaceSuppressionPolicyLock(
+          receipt as never,
+          transaction(),
+          WORKSPACE_ID,
+        ),
+      ).toThrow("workspace suppression policy lock receipt mismatch");
+    },
+  );
+
   it.each([
     ["non-array", { locked: "" }],
     ["zero rows", []],

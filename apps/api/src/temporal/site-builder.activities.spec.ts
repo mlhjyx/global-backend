@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Context as ActivityContext } from "@temporalio/activity";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { PrismaService } from "../prisma/prisma.service";
@@ -12,14 +12,29 @@ import {
   durableCopyTaskCompletion,
   intakeToMarkdown,
   neutralCopyOutput,
+  previewBasePath,
+  previewOrigin,
+  qualitySettlementIsPublishable,
   qualityNarrativePaidGateDecision,
   releaseTaskWithoutMaskingPrimaryFailure,
   runBrandProfilePersistenceWithRetry,
   runNonAuthoritativeQualityNarrative,
   RefurbishActivityInput,
   RefurbishFinalizeInput,
+  type RefurbishQualityCandidateInput,
 } from "./site-builder.activities";
-import type { CopySlotDefinition } from "@global/contracts";
+import { Logger } from "@nestjs/common";
+import { ControlledAssemblyService } from "../site-builder/assembly/controlled-assembly.service";
+import * as ControlledAssets from "../site-builder/controlled-build-assets";
+import * as AssetMaterializer from "../site-builder/controlled-asset-materializer";
+import { releaseSpecDigest } from "../site-builder/release-artifact";
+import { buildM1ebGoldenAssemblyInputs, buildM1ebGoldenFixtures } from "../site-builder/design/m1eb-golden";
+import { PublishableClaimSnapshotService } from "../site-builder/publishable-claim-snapshot.service";
+import { PrismaPublishableClaimSnapshotRepository } from "../site-builder/publishable-claim-snapshot.prisma";
+import { COPY_GENERATION_CONTRACT_VERSION, buildCopyGenerationContext, copyGenerationContextDigest } from "../site-builder/copy-bundle.service";
+import * as AiTasks from "../site-builder/agents/ai-task";
+import { DesignBriefProducer } from "../site-builder/design/design-brief-producer";
+import type { CopySlotDefinition } from "../site-builder/copy-bundle.service";
 import { buildDemoSpec, DEMO_SPEC_VERSION } from "../site-builder/demo-spec";
 
 /**
@@ -142,7 +157,25 @@ describe("site build cost reconciliation sweep", () => {
     // 避免 `workspace_id ASC` 让 UUID 靠后的租户永久饥饿。
     expect(fairSql).toContain("NULLS FIRST");
     expect(fairSql).toContain("site_build_spend_reconciliation");
-    expect(fairQuery.values).toEqual([10]);
+    expect(fairSql).toContain("s.status = 'RESERVED'");
+    expect(fairSql).toContain("s.status = 'FAILED'");
+    expect(fairSql).toContain(
+      "s.error_code = 'MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY'",
+    );
+    expect(fairSql).toContain("s.status = 'RELEASED'");
+    expect(fairSql).toContain("s.error_code = 'MODEL_WIRE_NOT_DISPATCHED'");
+    expect(fairSql).toContain(
+      "s.cost_basis IN ('estimated_upper_bound', 'unknown')",
+    );
+    expect(fairSql).toContain(
+      "'OBSERVED', 'UNKNOWN', 'NOT_DISPATCHED'",
+    );
+    expect(fairSql).toContain("w.state = 'DISPATCH_STARTED'");
+    expect(fairSql).toContain("interval '1 millisecond'");
+    expect(fairSql).toContain("w.state = 'ALLOCATED'");
+    expect(fairSql).toContain("interval '24 hours'");
+    expect(fairSql).not.toContain("wr.wire_attempt_id = w.id");
+    expect(fairQuery.values).toEqual([600_000, 10]);
     expect(runReconciliationSweep).toHaveBeenCalledTimes(2);
     expect(runReconciliationSweep).toHaveBeenNthCalledWith(
       1,
@@ -178,23 +211,28 @@ describe("site build cost reconciliation sweep", () => {
       requestId: "req-cost-reconcile-001",
       receiptDigest: "a".repeat(64),
       costBasis: "token_pricing" as const,
-      exactCostMicrousd: '540',
+      exactCostMicrousd: "540",
       observedAt: new Date(),
     }));
-    const runReconciliationSweep = vi.fn(async (input: {
-      resolve: (candidate: {
-        spendId: string;
-        operationKey: string;
-        meta: Record<string, unknown> | null;
-      }) => Promise<{ status: string }>;
-    }) => {
-      const observation = await input.resolve({
-        spendId: "spend-1",
-        operationKey: "b".repeat(64),
-        meta: { settlementPreflight: {} },
-      });
-      return { attempted: 1, resolved: observation.status === "RESOLVED" ? 1 : 0 };
-    });
+    const runReconciliationSweep = vi.fn(
+      async (input: {
+        resolve: (candidate: {
+          spendId: string;
+          operationKey: string;
+          meta: Record<string, unknown> | null;
+        }) => Promise<{ status: string }>;
+      }) => {
+        const observation = await input.resolve({
+          spendId: "spend-1",
+          operationKey: "b".repeat(64),
+          meta: { settlementPreflight: {} },
+        });
+        return {
+          attempted: 1,
+          resolved: observation.status === "RESOLVED" ? 1 : 0,
+        };
+      },
+    );
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma({}),
       ownerDb: {
@@ -233,7 +271,10 @@ describe("site build cost reconciliation sweep", () => {
         lastAttempt: null,
       },
     ]);
-    const runReconciliationSweep = vi.fn(async () => ({ attempted: 1, resolved: 1 }));
+    const runReconciliationSweep = vi.fn(async () => ({
+      attempted: 1,
+      resolved: 1,
+    }));
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma({}),
       ownerDb: { $queryRaw: queryRaw } as unknown as PrismaClient,
@@ -278,7 +319,10 @@ describe("site build cost reconciliation sweep", () => {
       costLedger: {
         assertAuthorizedBudget: vi.fn(async () => undefined),
         closeAndSummarize: vi.fn(async () => undefined),
-        runReconciliationSweep: vi.fn(async () => ({ attempted: 0, resolved: 0 })),
+        runReconciliationSweep: vi.fn(async () => ({
+          attempted: 0,
+          resolved: 0,
+        })),
       } as never,
     });
     await expect(
@@ -2415,5 +2459,1651 @@ describe("cleanupFailedDemo — R0-6 不删站、置 setup_failed（保留用户
     await acts.cleanupFailedDemo(INPUT); // INPUT.buildRunId = 'run-1'
     expect(update).not.toHaveBeenCalled(); // 不动 site
     expect(versionUpdateMany).not.toHaveBeenCalled(); // 也不动版本
+  });
+});
+
+describe("activity dependency and heartbeat boundaries", () => {
+  it("rejects composition without an exact renderer identity", () => {
+    expect(() =>
+      createSiteBuilderActivitiesRaw({ prisma: fakePrisma({}) }),
+    ).toThrow("RENDERER_BUILD_IDENTITY_REQUIRED");
+  });
+  it("reports unavailable optional image and KB work without dispatch", async () => {
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma({}) });
+    await expect(acts.listImages(INPUT)).rejects.toThrow(
+      "image pipeline unavailable",
+    );
+    expect(await acts.processImages(INPUT)).toMatchObject({
+      status: "degraded",
+      processed: 0,
+    });
+    expect(await acts.ingestPendingKb(INPUT)).toEqual({
+      processed: 0,
+      failed: 0,
+    });
+    expect(await acts.processQueuedKbDocs(INPUT)).toEqual({
+      processed: 0,
+      failed: 0,
+    });
+    expect(await acts.processKbAsset({ ...INPUT, assetId: "asset-1" })).toEqual(
+      { assetId: "asset-1", outcome: "not_due" },
+    );
+    expect(await acts.listKbRecoveryCandidates({ limit: 1 })).toEqual([]);
+  });
+  it("delegates image membership freeze with exact workspace and site", async () => {
+    const listSiteImageIds = vi
+      .fn()
+      .mockResolvedValue({ assetIds: ["a"], truncated: false });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      imagePipeline: { listSiteImageIds } as never,
+    });
+    expect(await acts.listImages(INPUT)).toEqual({
+      assetIds: ["a"],
+      truncated: false,
+    });
+    expect(listSiteImageIds).toHaveBeenCalledWith({
+      workspaceId: INPUT.workspaceId,
+      siteId: INPUT.siteId,
+    });
+  });
+  it.each(["images", "queued", "asset"] as const)(
+    "propagates cancellation and heartbeats during %s work and clears the timer",
+    async (kind) => {
+      vi.useFakeTimers();
+      const heartbeat = vi.fn();
+      const abort = new AbortController();
+      vi.spyOn(ActivityContext, "current").mockReturnValue({
+        heartbeat,
+        cancellationSignal: abort.signal,
+      } as never);
+      let finish!: () => void;
+      const work = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const processSiteImages = vi.fn(async (_input, signal) => {
+        expect(signal).toBe(abort.signal);
+        await work;
+        return { status: "done" };
+      });
+      const processQueued = vi.fn(async (_ctx, _site, options) => {
+        expect(options.signal).toBe(abort.signal);
+        options.heartbeat("parsing");
+        await work;
+        return { processed: 1, failed: 0 };
+      });
+      const processAsset = vi.fn(async (_ctx, _site, _asset, options) => {
+        expect(options.signal).toBe(abort.signal);
+        options.heartbeat("embedding");
+        await work;
+        return { outcome: "ready" };
+      });
+      const acts = createSiteBuilderActivities({
+        prisma: fakePrisma({}),
+        imagePipeline: { processSiteImages } as never,
+        kb: { processQueued, processAsset } as never,
+      });
+      try {
+        const pending =
+          kind === "images"
+            ? acts.processImages(INPUT)
+            : kind === "queued"
+              ? acts.processQueuedKbDocs(INPUT)
+              : acts.processKbAsset({ ...INPUT, assetId: "a" });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(heartbeat.mock.calls.length).toBeGreaterThanOrEqual(2);
+        finish();
+        await pending;
+        const count = heartbeat.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(heartbeat).toHaveBeenCalledTimes(count);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+  it("propagates KB failure while releasing the heartbeat interval", async () => {
+    vi.useFakeTimers();
+    const heartbeat = vi.fn();
+    vi.spyOn(ActivityContext, "current").mockReturnValue({
+      heartbeat,
+      cancellationSignal: new AbortController().signal,
+    } as never);
+    const failure = new Error("synthetic parser failure");
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      kb: { processAsset: vi.fn().mockRejectedValue(failure) } as never,
+    });
+    try {
+      await expect(
+        acts.processKbAsset({ ...INPUT, assetId: "a" }),
+      ).rejects.toBe(failure);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("alerts on old or repeatedly retried KB work without writing through owner DB", async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
+    const rows = [
+      {
+        id: "a",
+        workspaceId: "ws",
+        siteId: "site",
+        processingStatus: "processing",
+        processingAttempt: 5,
+        createdAt: new Date(),
+        retryAt: new Date(0),
+        leaseUntil: new Date(0),
+        processingErrorCode: "DEPENDENCY_UNAVAILABLE",
+      },
+      {
+        id: "b",
+        workspaceId: "ws",
+        siteId: "site",
+        processingStatus: "queued",
+        processingAttempt: 0,
+        createdAt: new Date(0),
+        retryAt: null,
+        leaseUntil: null,
+        processingErrorCode: null,
+      },
+      {
+        id: "c",
+        workspaceId: "ws",
+        siteId: "site",
+        processingStatus: "queued",
+        processingAttempt: 0,
+        createdAt: new Date(),
+        retryAt: null,
+        leaseUntil: null,
+        processingErrorCode: null,
+      },
+    ];
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      ownerDb: { asset: { findMany } } as never,
+    });
+    expect(await acts.listKbRecoveryCandidates({ limit: 999 })).toEqual(
+      rows.map((r) => ({
+        workspaceId: r.workspaceId,
+        siteId: r.siteId,
+        assetId: r.id,
+      })),
+    );
+    expect(findMany.mock.calls[0][0].take).toBe(500);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("reconciliation cursor and terminal settlement boundaries", () => {
+  it.each([undefined, NaN, -5, 2.9])(
+    "bounds requested page size %s",
+    async (limit) => {
+      const query = vi.fn().mockResolvedValue([]);
+      const acts = createSiteBuilderActivities({
+        prisma: fakePrisma({}),
+        ownerDb: { $queryRaw: query } as never,
+      });
+      expect(await acts.sweepSiteBuildCostReconciliation({ limit })).toEqual({
+        workspaces: 0,
+        attempted: 0,
+        resolved: 0,
+        nextCursor: null,
+      });
+      expect(query.mock.calls[0][0].values.at(-1)).toBe(
+        limit === -5 ? 1 : limit === 2.9 ? 2 : 10,
+      );
+    },
+  );
+  it.each([
+    { workspaceId: 3, lastAttempt: null },
+    { workspaceId: "not-an-id", lastAttempt: null },
+    { workspaceId: "a".repeat(32), lastAttempt: "invalid-date" },
+    { workspaceId: "a".repeat(32), lastAttempt: 5 },
+  ])(
+    "rejects malformed cursor before tenant enumeration %j",
+    async (cursor) => {
+      const query = vi.fn();
+      const acts = createSiteBuilderActivities({
+        prisma: fakePrisma({}),
+        ownerDb: { $queryRaw: query } as never,
+      });
+      await expect(
+        acts.sweepSiteBuildCostReconciliation({ cursor: cursor as never }),
+      ).rejects.toThrow("CURSOR_INVALID");
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+  it("fails closed without an owner enumerator", async () => {
+    await expect(
+      createSiteBuilderActivities({
+        prisma: fakePrisma({}),
+      }).sweepSiteBuildCostReconciliation({}),
+    ).rejects.toThrow("RECONCILIATION_UNAVAILABLE");
+  });
+  it("rejects a broken returned cursor instead of permitting repeated enumeration", async () => {
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      ownerDb: {
+        $queryRaw: vi
+          .fn()
+          .mockResolvedValue([{ workspaceId: "", lastAttempt: null }]),
+      } as never,
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(),
+        closeAndSummarize: vi.fn(),
+        runReconciliationSweep: vi
+          .fn()
+          .mockResolvedValue({ attempted: 0, resolved: 0 }),
+      } as never,
+    });
+    await expect(acts.sweepSiteBuildCostReconciliation({})).rejects.toThrow(
+      "CURSOR_BROKEN",
+    );
+  });
+  it.each([
+    "summary",
+    "unknown",
+    "summary-paid",
+    "summary-reason",
+    "budget",
+    "budget-paid",
+    "budget-reason",
+  ])("does not publish when %s settlement gate is absent", (gap) => {
+    const summary = {
+      totals: { unknownOperations: gap === "unknown" ? 1 : 0 },
+      budget: {
+        paidCallsEnabled: gap === "summary-paid",
+        disabledReason: gap === "summary-reason" ? "manual" : "run_succeeded",
+      },
+    };
+    const budget = {
+      paidCallsEnabled: gap === "budget-paid",
+      disabledReason: gap === "budget-reason" ? null : "run_succeeded",
+    };
+    expect(
+      qualitySettlementIsPublishable(
+        gap === "summary" ? undefined : (summary as never),
+        gap === "budget" ? undefined : budget,
+      ),
+    ).toBe(false);
+  });
+  it("uses the documented preview origin fallback for an invalid operator URL pattern", () => {
+    vi.stubEnv("PREVIEW_URL_PATTERN", "not-a-url");
+    expect(previewOrigin("demo")).toBe("http://localhost:3000");
+    expect(previewBasePath("demo")).toBe("/preview/demo/");
+  });
+});
+
+describe("design brief activity freezes only supported capability facts", () => {
+  it.each([false, true])(
+    "projects optional BrandProfile/locales consistently, populated=%s",
+    async (populated) => {
+      const produce = vi
+        .spyOn(DesignBriefProducer.prototype, "produce")
+        .mockResolvedValue({ designBrief: {} } as never);
+      const site = {
+        id: INPUT.siteId,
+        intake: populated ? { company: { nameEn: "Synthetic" } } : [],
+        locales: populated ? ["en-us", 1] : null,
+        stylePreset: populated ? "industrial" : "unrecognized",
+        brandProfiles: populated
+          ? [
+              {
+                keywords: [" pump ", 1],
+                valueProps: { a: "Quality", nested: [null, "Quality"] },
+                differentiators: null,
+                factSheet: false,
+                _count: { evidenceRefs: 2 },
+              },
+            ]
+          : [],
+        assets: ["ready", "failed", "queued", "rejected", "deleted"]
+          .map((processingStatus, i) => ({
+            id: `a-${i}`,
+            kind: "product_image",
+            processingStatus,
+          }))
+          .concat([
+            { id: "ignored", kind: "unsupported", processingStatus: "ready" },
+          ]),
+      };
+      const acts = createSiteBuilderActivities({
+        prisma: fakePrisma({
+          site: { findFirst: vi.fn().mockResolvedValue(site) },
+        }),
+      });
+      expect(await acts.generateDesignBrief(INPUT)).toMatchObject({
+        source: "generated",
+      });
+      const input = produce.mock.calls[0][0];
+      expect(input.locales).toEqual(populated ? ["en-US"] : ["en"]);
+      expect(input.assetCapabilities.assets.map((a) => a.status)).toEqual([
+        "ready",
+        "failed",
+        "pending",
+        "failed",
+        "failed",
+      ]);
+      if (populated)
+        expect(input.brandProfile?.industryTags).toEqual(["pump", "Quality"]);
+      else expect(input.brandProfile).toBeUndefined();
+    },
+  );
+  it("rejects missing Site before producer invocation", async () => {
+    const produce = vi.spyOn(DesignBriefProducer.prototype, "produce");
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({
+        site: { findFirst: vi.fn().mockResolvedValue(null) },
+      }),
+    });
+    await expect(acts.generateDesignBrief(INPUT)).rejects.toThrow("not found");
+    expect(produce).not.toHaveBeenCalled();
+  });
+});
+
+function copyActivityFixture() {
+  const golden = buildM1ebGoldenAssemblyInputs(
+    ControlledAssets.resolveRepositoryRoot(),
+  )[0].assembly;
+  const site = {
+    name: "Synthetic Company",
+    intake: INTAKE,
+    stylePreset: null,
+    brandProfiles: [],
+  };
+  const snapshot = {
+    ...golden.claimSnapshot,
+    siteId: INPUT.siteId,
+    workspaceId: INPUT.workspaceId,
+    buildRunId: INPUT.buildRunId,
+  };
+  vi.spyOn(
+    PublishableClaimSnapshotService.prototype,
+    "capture",
+  ).mockResolvedValue(snapshot);
+  const tx = {
+    site: { findFirst: vi.fn().mockResolvedValue(site) },
+    sitePublishableClaimSnapshot: {
+      findUnique: vi.fn().mockResolvedValue({ id: "snapshot-copy" }),
+    },
+  };
+  const ledger = {
+    assertAuthorizedBudget: vi.fn().mockResolvedValue(undefined),
+    closeAndSummarize: vi.fn(),
+    claimTaskAttempt: vi
+      .fn()
+      .mockResolvedValue({
+        kind: "claimed",
+        attempt: { id: "attempt-copy", fenceToken: "synthetic-fence" },
+      }),
+    freezeTaskInput: vi.fn(async (_fence, input) => ({ input })),
+    storeTaskOutput: vi.fn().mockResolvedValue(undefined),
+    completeTask: vi.fn().mockResolvedValue(undefined),
+    releaseTask: vi.fn().mockResolvedValue(undefined),
+  };
+  const run = vi
+    .spyOn(AiTasks, "runAiTask")
+    .mockImplementation(
+      async (_task, input) =>
+        ({
+          data: neutralCopyOutput(
+            (input as { slots: CopySlotDefinition[] }).slots,
+            (input as { locale: string }).locale,
+          ),
+        }) as never,
+    );
+  const gateway = {
+    generateStructured: vi.fn(() => {
+      throw new Error("unexpected external gateway dispatch");
+    }),
+  };
+  const acts = createSiteBuilderActivities({
+    prisma: fakePrisma(tx),
+    costLedger: ledger as never,
+    gateway: gateway as never,
+  });
+  return { acts, tx, ledger, run, site, gateway, golden };
+}
+describe("copy activity input freezing and paid-task settlement", () => {
+  it("freezes one locale task and persists controlled output before marking it complete", async () => {
+    const f = copyActivityFixture();
+    const order: string[] = [];
+    f.ledger.storeTaskOutput.mockImplementation(async () => {
+      order.push("store");
+    });
+    f.ledger.completeTask.mockImplementation(async () => {
+      order.push("complete");
+    });
+    const result = await f.acts.generateCopyBundles(INPUT);
+    expect(result.taskAttemptIds).toEqual({ en: "attempt-copy" });
+    expect(f.ledger.claimTaskAttempt).toHaveBeenCalledOnce();
+    expect(f.run).toHaveBeenCalledOnce();
+    expect(order).toEqual(["store", "complete"]);
+    expect(f.ledger.releaseTask).not.toHaveBeenCalled();
+    expect(f.gateway.generateStructured).not.toHaveBeenCalled();
+  });
+  it.each(["snapshot", "site"])(
+    "rejects vanished %s after snapshot capture",
+    async (missing) => {
+      const f = copyActivityFixture();
+      if (missing === "snapshot")
+        f.tx.sitePublishableClaimSnapshot.findUnique.mockResolvedValue(null);
+      else f.tx.site.findFirst.mockResolvedValue(null);
+      await expect(f.acts.generateCopyBundles(INPUT)).rejects.toThrow(
+        "disappeared",
+      );
+      expect(f.ledger.claimTaskAttempt).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects a malformed frozen envelope and releases the task without dispatch", async () => {
+    const f = copyActivityFixture();
+    f.ledger.freezeTaskInput.mockResolvedValue({ input: { invalid: true } });
+    await expect(f.acts.generateCopyBundles(INPUT)).rejects.toThrow();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.ledger.releaseTask).toHaveBeenCalled();
+  });
+  it.each(["attempt", "version", "context", "slots"])(
+    "rejects completed task %s drift instead of reusing unbound output",
+    async (field) => {
+      const f = copyActivityFixture();
+      const contextDigest = copyGenerationContextDigest(
+        buildCopyGenerationContext({
+          locale: "en",
+          intake: f.site.intake,
+          brandProfile: null,
+        }),
+      );
+      const replay: Record<string, unknown> = {
+        taskAttemptId: "attempt-copy",
+        contractVersion: COPY_GENERATION_CONTRACT_VERSION,
+        contextDigest,
+        slots: {},
+      };
+      if (field === "attempt") delete replay.taskAttemptId;
+      if (field === "version") replay.contractVersion = "old";
+      if (field === "context") replay.contextDigest = "other";
+      if (field === "slots") delete replay.slots;
+      f.ledger.claimTaskAttempt.mockResolvedValue({
+        kind: "completed",
+        result: replay,
+      } as never);
+      await expect(f.acts.generateCopyBundles(INPUT)).rejects.toThrow();
+      expect(f.run).not.toHaveBeenCalled();
+      expect(f.ledger.freezeTaskInput).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["store", "complete"])(
+    "releases unsettled tasks after durable %s failure",
+    async (stage) => {
+      const f = copyActivityFixture();
+      const failure = new Error("synthetic persistence failure");
+      (stage === "store"
+        ? f.ledger.storeTaskOutput
+        : f.ledger.completeTask
+      ).mockRejectedValue(failure);
+      await expect(f.acts.generateCopyBundles(INPUT)).rejects.toBe(failure);
+      expect(f.ledger.releaseTask).toHaveBeenCalledOnce();
+    },
+  );
+});
+
+let activityGoldenFixtures: Awaited<ReturnType<typeof buildM1ebGoldenFixtures>>;
+let activityAssemblyInputs: ReturnType<typeof buildM1ebGoldenAssemblyInputs>;
+beforeAll(async () => {
+  const root = ControlledAssets.resolveRepositoryRoot();
+  activityAssemblyInputs = buildM1ebGoldenAssemblyInputs(root);
+  activityGoldenFixtures = await buildM1ebGoldenFixtures(root);
+});
+async function controlledActivityFixture() {
+  const golden = activityGoldenFixtures[0];
+  const assembly = activityAssemblyInputs.find(
+    (entry) => entry.id === golden.id,
+  )!.assembly;
+  const root = await mkdtemp(
+    path.join(tmpdir(), "activity-coverage-candidate-"),
+  );
+  vi.stubEnv("PREVIEW_DIR", root);
+  const snapshot = { ...assembly.claimSnapshot, siteId: INPUT.siteId };
+  const snapshotId = Object.values(assembly.copyBundleSet.bundles)[0]
+    .claimSnapshot.id;
+  const input = {
+    ...INPUT,
+    designBrief: { source: "generated", designBrief: golden.designBrief },
+    copy: {
+      snapshotId,
+      set: assembly.copyBundleSet,
+      degradedLocales: [],
+      taskAttemptIds: Object.fromEntries(
+        Object.keys(assembly.copyBundleSet.bundles).map((locale) => [
+          locale,
+          "attempt-copy",
+        ]),
+      ),
+    },
+  } as RefurbishQualityCandidateInput;
+  const tx = {
+    siteBuildRun: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue({ status: "running" }),
+    },
+    site: {
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({
+          id: INPUT.siteId,
+          name: assembly.siteName,
+          slug: "synthetic",
+        }),
+    },
+    siteVersion: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      aggregate: vi.fn().mockResolvedValue({ _max: { version: 1 } }),
+      create: vi
+        .fn()
+        .mockResolvedValue({
+          id: "version-candidate",
+          buildStatus: "building",
+        }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    siteCopyBundle: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+  };
+  const snapshotRead = vi
+    .spyOn(PrismaPublishableClaimSnapshotRepository.prototype, "findById")
+    .mockResolvedValue(snapshot);
+  vi.spyOn(ControlledAssets, "buildControlledAssetManifest").mockResolvedValue(
+    assembly.assets,
+  );
+  const assemble = vi
+    .spyOn(ControlledAssemblyService.prototype, "assemble")
+    .mockResolvedValue({
+      spec: golden.spec,
+      designBrief: golden.designBrief,
+    } as never);
+  const cleanup = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(
+    AssetMaterializer,
+    "materializeControlledAssetOverlay",
+  ).mockResolvedValue({ publicDir: root, cleanup } as never);
+  const render = vi.fn().mockResolvedValue({ treeDigest: "a".repeat(64) });
+  const materialize = vi.fn().mockResolvedValue({});
+  const deps = {
+    prisma: fakePrisma(tx),
+    releaseService: { materialize } as never,
+    qualityCandidateService: {} as never,
+    renderSiteSpec: render as never,
+  };
+  const acts = createSiteBuilderActivities(deps);
+  return {
+    acts,
+    deps,
+    tx,
+    input,
+    snapshotRead,
+    assemble,
+    render,
+    cleanup,
+    materialize,
+    root,
+    golden,
+    snapshot,
+  };
+}
+describe("controlled assembly activity fencing", () => {
+  it.each(["input", "release", "quality"])(
+    "requires %s dependencies before rendering",
+    async (missing) => {
+      const f = await controlledActivityFixture();
+      try {
+        const acts = createSiteBuilderActivities({
+          ...f.deps,
+          ...(missing === "release" ? { releaseService: undefined } : {}),
+          ...(missing === "quality"
+            ? { qualityCandidateService: undefined }
+            : {}),
+        });
+        await expect(
+          acts.assembleQualityCandidate(
+            (missing === "input"
+              ? INPUT
+              : f.input) as RefurbishQualityCandidateInput,
+          ),
+        ).rejects.toThrow(
+          missing === "input"
+            ? "INPUT_MISSING"
+            : missing === "release"
+              ? "RELEASE_SERVICE_UNAVAILABLE"
+              : "CANDIDATE_SERVICE_UNAVAILABLE",
+        );
+        expect(f.render).not.toHaveBeenCalled();
+      } finally {
+        await rm(f.root, { recursive: true, force: true });
+      }
+    },
+  );
+  it.each([
+    "run",
+    "site",
+    "snapshot",
+    "snapshot-site",
+    "bundle-id",
+    "bundle-digest",
+  ])("rejects %s drift before assembly", async (field) => {
+    const f = await controlledActivityFixture();
+    try {
+      if (field === "run")
+        f.tx.siteBuildRun.updateMany.mockResolvedValue({ count: 0 });
+      if (field === "site") f.tx.site.findFirst.mockResolvedValue(null);
+      if (field === "snapshot") f.snapshotRead.mockResolvedValue(null);
+      if (field === "snapshot-site")
+        f.snapshotRead.mockResolvedValue({ ...f.snapshot, siteId: "other" });
+      const input = structuredClone(f.input);
+      if (field.startsWith("bundle")) {
+        const bundle = Object.values(input.copy!.set.bundles)[0];
+        if (field === "bundle-id") bundle.claimSnapshot.id = "other";
+        else bundle.claimSnapshot.digest = "other";
+      }
+      await expect(f.acts.assembleQualityCandidate(input)).rejects.toThrow();
+      expect(f.assemble).not.toHaveBeenCalled();
+      expect(f.render).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it.each(["succeeded", "failed"])(
+    "does not reuse a %s version as a mutable quality candidate",
+    async (buildStatus) => {
+      const f = await controlledActivityFixture();
+      try {
+        f.tx.siteVersion.findFirst.mockResolvedValue({
+          id: "old",
+          buildStatus,
+        });
+        await expect(
+          f.acts.assembleQualityCandidate(f.input),
+        ).rejects.toThrow();
+        expect(f.render).not.toHaveBeenCalled();
+      } finally {
+        await rm(f.root, { recursive: true, force: true });
+      }
+    },
+  );
+  it("requires a durable ready Release before legacy successful-version replay", async () => {
+    const f = await controlledActivityFixture();
+    try {
+      f.tx.siteVersion.findFirst.mockResolvedValue({
+        id: "old",
+        buildStatus: "succeeded",
+        spec: f.golden.spec,
+        release: null,
+      });
+      await expect(f.acts.assembleAndBuild(f.input)).rejects.toThrow(
+        "REPLAY_INVALID",
+      );
+      expect(f.render).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("materializes a validated legacy candidate only after render and active-run recheck", async () => {
+    const f = await controlledActivityFixture();
+    try {
+      expect(await f.acts.assembleAndBuild(f.input)).toMatchObject({
+        previewSlug: "synthetic",
+        versionId: "version-candidate",
+      });
+      expect(f.tx.siteVersion.create).toHaveBeenCalledOnce();
+      expect(f.tx.siteCopyBundle.createMany).toHaveBeenCalledOnce();
+      expect(f.render).toHaveBeenCalledOnce();
+      expect(f.cleanup).toHaveBeenCalledOnce();
+      expect(f.materialize).toHaveBeenCalledOnce();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("reuses a building version instead of allocating another version on retry", async () => {
+    const f = await controlledActivityFixture();
+    try {
+      f.tx.siteVersion.findFirst.mockResolvedValue({
+        id: "existing",
+        buildStatus: "building",
+        spec: f.golden.spec,
+      });
+      expect(await f.acts.assembleAndBuild(f.input)).toMatchObject({
+        versionId: "existing",
+      });
+      expect(f.tx.siteVersion.create).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it.each(["cancelled", "missing"])(
+    "discards rendered output when the run becomes %s",
+    async (status) => {
+      const f = await controlledActivityFixture();
+      try {
+        f.tx.siteBuildRun.findUnique.mockResolvedValue(
+          status === "missing" ? null : { status },
+        );
+        await expect(f.acts.assembleAndBuild(f.input)).rejects.toThrow(
+          "discarded",
+        );
+        expect(f.tx.siteVersion.updateMany).toHaveBeenCalledWith({
+          where: { id: "version-candidate", buildStatus: "building" },
+          data: { buildStatus: "failed" },
+        });
+        expect(f.materialize).not.toHaveBeenCalled();
+      } finally {
+        await rm(f.root, { recursive: true, force: true });
+      }
+    },
+  );
+  it("retains the copy task ownership requirement when allocating the candidate", async () => {
+    const f = await controlledActivityFixture();
+    try {
+      const input = structuredClone(f.input);
+      input.copy!.taskAttemptIds = {};
+      await expect(f.acts.assembleAndBuild(input)).rejects.toThrow(
+        "copy task attempt missing",
+      );
+      expect(f.render).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("cleans the overlay if renderer fails, before propagating the error", async () => {
+    const f = await controlledActivityFixture();
+    const failure = new Error("synthetic render failure");
+    try {
+      f.render.mockRejectedValue(failure);
+      await expect(f.acts.assembleAndBuild(f.input)).rejects.toBe(failure);
+      expect(f.cleanup).toHaveBeenCalledOnce();
+      expect(f.materialize).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("does not emit a new quality history without immutable artifact storage", async () => {
+    const f = await controlledActivityFixture();
+    try {
+      await expect(f.acts.assembleQualityCandidate(f.input)).rejects.toThrow(
+        "ARTIFACT_UNAVAILABLE",
+      );
+      expect(f.render).toHaveBeenCalledOnce();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+});
+
+async function qualityActivityFixture() {
+  const f = await controlledActivityFixture();
+  const candidate = {
+    workspaceId: INPUT.workspaceId,
+    siteId: INPUT.siteId,
+    buildRunId: INPUT.buildRunId,
+    siteVersionId: "version-candidate",
+    specDigest: releaseSpecDigest(f.golden.spec),
+    designBriefDigest: f.golden.designBrief.digest,
+    rendererOutputDigest: "b".repeat(64),
+    basePath: "/preview/synthetic/",
+    siteOrigin: "http://localhost:3000",
+    root: path.join(f.root, "staging", INPUT.buildRunId),
+  };
+  const version = {
+    buildStatus: "building",
+    specVersion: f.golden.spec.specVersion,
+    spec: f.golden.spec,
+  };
+  f.tx.siteVersion.findFirst.mockResolvedValue(version);
+  const budget = {
+    findUnique: vi.fn().mockResolvedValue({ paidCallsEnabled: true }),
+  };
+  const spend = { count: vi.fn().mockResolvedValue(0) };
+  const qualityCandidateService = {
+    evaluateQualityCandidate: vi
+      .fn()
+      .mockRejectedValue(new Error("synthetic evaluator reached")),
+    applyQualityRepair: vi.fn(),
+    materializeApprovedRelease: vi.fn(),
+  };
+  const closedRepairService = {
+    generateCatalog: vi.fn().mockReturnValue({ catalog: { options: [] } }),
+  };
+  const deps = {
+    ...f.deps,
+    prisma: fakePrisma({
+      ...f.tx,
+      siteBuildBudget: budget,
+      siteBuildSpend: spend,
+    }),
+    qualityCandidateService: qualityCandidateService as never,
+    closedRepairService: closedRepairService as never,
+  };
+  const acts = createSiteBuilderActivities(deps);
+  const input = {
+    ...f.input,
+    qualityCandidate: {
+      previewSlug: "synthetic",
+      versionId: "version-candidate",
+      designBrief: f.golden.designBrief,
+      candidateSpec: f.golden.spec,
+      candidate,
+    },
+    round: 0,
+    qualityEvaluation: {
+      passed: true,
+      evaluation: { round: 0 },
+      artifactSet: {},
+    },
+    rounds: [],
+  };
+  return {
+    ...f,
+    acts,
+    deps,
+    input,
+    version,
+    budget,
+    spend,
+    qualityCandidateService,
+    closedRepairService,
+  };
+}
+describe("quality activity run and paid-state fencing", () => {
+  it.each([
+    "evaluateQualityCandidate",
+    "applyQualityRepair",
+    "materializeApprovedRelease",
+  ] as const)("requires the candidate service for %s", async (method) => {
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma({}) });
+    await expect(acts[method](INPUT as never)).rejects.toThrow(
+      "CANDIDATE_SERVICE_UNAVAILABLE",
+    );
+  });
+  it.each(["missing", "cancelled"])(
+    "rejects deterministic evaluation for a %s run",
+    async (status) => {
+      const f = await qualityActivityFixture();
+      try {
+        f.tx.siteBuildRun.findUnique.mockResolvedValue(
+          status === "missing" ? null : { status },
+        );
+        await expect(
+          f.acts.evaluateQualityCandidate(f.input as never),
+        ).rejects.toThrow("build run is not running");
+        expect(
+          f.qualityCandidateService.evaluateQualityCandidate,
+        ).not.toHaveBeenCalled();
+      } finally {
+        await rm(f.root, { recursive: true, force: true });
+      }
+    },
+  );
+  it.each([
+    "run",
+    "site",
+    "version",
+    "spec-version",
+    "build-status",
+    "spec-digest",
+    "brief-digest",
+    "snapshot",
+    "snapshot-site",
+  ])("refuses candidate %s drift before evaluator work", async (gap) => {
+    const f = await qualityActivityFixture();
+    try {
+      if (gap === "run")
+        f.tx.siteBuildRun.findUnique
+          .mockResolvedValueOnce({ status: "running" })
+          .mockResolvedValue({ status: "cancelled" });
+      if (gap === "site") f.tx.site.findFirst.mockResolvedValue(null);
+      if (gap === "version") f.tx.siteVersion.findFirst.mockResolvedValue(null);
+      if (gap === "spec-version")
+        f.tx.siteVersion.findFirst.mockResolvedValue({
+          ...f.version,
+          specVersion: "old",
+        });
+      if (gap === "build-status")
+        f.tx.siteVersion.findFirst.mockResolvedValue({
+          ...f.version,
+          buildStatus: "failed",
+        });
+      if (gap === "spec-digest")
+        f.input.qualityCandidate.candidate.specDigest = "wrong";
+      if (gap === "brief-digest")
+        f.input.qualityCandidate.candidate.designBriefDigest = "wrong";
+      if (gap === "snapshot") f.snapshotRead.mockResolvedValue(null);
+      if (gap === "snapshot-site")
+        f.snapshotRead.mockResolvedValue({ ...f.snapshot, siteId: "other" });
+      await expect(
+        f.acts.evaluateQualityCandidate(f.input as never),
+      ).rejects.toThrow(
+        gap.startsWith("snapshot") ? "SNAPSHOT_MISSING" : "FENCE_LOST",
+      );
+      expect(
+        f.qualityCandidateService.evaluateQualityCandidate,
+      ).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it.each(["missing", "different"])(
+    "refuses %s legacy root outside exact run staging",
+    async (root) => {
+      const f = await qualityActivityFixture();
+      try {
+        f.input.qualityCandidate.candidate.root =
+          root === "missing" ? "" : path.join(f.root, "other");
+        await expect(
+          f.acts.evaluateQualityCandidate(f.input as never),
+        ).rejects.toThrow("ARTIFACT_INVALID");
+      } finally {
+        await rm(f.root, { recursive: true, force: true });
+      }
+    },
+  );
+  it.each([
+    "missing-run",
+    "cancelled",
+    "missing-budget",
+    "disabled",
+    "unknown",
+  ])("blocks paid repair when %s authority is unresolved", async (gap) => {
+    const f = await qualityActivityFixture();
+    try {
+      if (gap === "missing-run")
+        f.tx.siteBuildRun.findUnique.mockResolvedValue(null);
+      if (gap === "cancelled")
+        f.tx.siteBuildRun.findUnique.mockResolvedValue({ status: "cancelled" });
+      if (gap === "missing-budget") f.budget.findUnique.mockResolvedValue(null);
+      if (gap === "disabled")
+        f.budget.findUnique.mockResolvedValue({ paidCallsEnabled: false });
+      if (gap === "unknown") f.spend.count.mockResolvedValue(1);
+      await expect(f.acts.applyQualityRepair(f.input as never)).rejects.toThrow(
+        "paid execution gate is closed",
+      );
+      expect(f.closedRepairService.generateCatalog).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("refuses repair after the bounded round limit", async () => {
+    const f = await qualityActivityFixture();
+    try {
+      f.input.qualityEvaluation.evaluation.round = 3;
+      await expect(f.acts.applyQualityRepair(f.input as never)).rejects.toThrow(
+        "QUALITY_GATE_FAILED",
+      );
+      expect(f.spend.count).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("does not invent a repair when the closed catalog has no options", async () => {
+    const f = await qualityActivityFixture();
+    try {
+      await expect(f.acts.applyQualityRepair(f.input as never)).rejects.toThrow(
+        "REPAIR_OPTION_UNAVAILABLE",
+      );
+      expect(
+        f.qualityCandidateService.applyQualityRepair,
+      ).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("cannot materialize a failed quality evaluation", async () => {
+    const f = await qualityActivityFixture();
+    try {
+      f.input.qualityEvaluation.passed = false;
+      await expect(
+        f.acts.materializeApprovedRelease(f.input as never),
+      ).rejects.toThrow("QUALITY_GATE_FAILED");
+      expect(
+        f.qualityCandidateService.materializeApprovedRelease,
+      ).not.toHaveBeenCalled();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+});
+
+function brandActivityFixture() {
+  const sourceRows: Array<Record<string, unknown>> = [];
+  const tx = {
+    site: {
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({
+          id: INPUT.siteId,
+          companyProfileId: "company-profile",
+          profileVersionId: null,
+          intake: INTAKE,
+          profile: null,
+        }),
+    },
+    siteBuildRun: {
+      findUnique: vi.fn().mockResolvedValue({ status: "running" }),
+    },
+    siteEvidenceSourceSnapshot: {
+      createMany: vi.fn(
+        async ({ data }: { data: Array<Record<string, unknown>> }) => {
+          sourceRows.push(
+            ...data.map((row, i) => ({
+              ...row,
+              id: `snapshot-${i}`,
+              fetchedAt: row.fetchedAt ?? null,
+            })),
+          );
+          return { count: data.length };
+        },
+      ),
+      findMany: vi.fn(async () => sourceRows),
+    },
+    brandProfile: {
+      aggregate: vi.fn().mockResolvedValue({ _max: { version: 2 } }),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    brandProfileEvidenceRef: {
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    siteBuildTaskAttempt: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    $queryRaw: vi.fn().mockResolvedValue([]),
+  };
+  const claim = {
+    kind: "claimed",
+    attempt: {
+      id: "attempt-brand",
+      fenceToken: "synthetic-fence",
+      status: "RUNNING",
+      outputJson: null as unknown,
+    },
+  };
+  const ledger = {
+    assertAuthorizedBudget: vi.fn().mockResolvedValue(undefined),
+    closeAndSummarize: vi.fn(),
+    claimTaskAttempt: vi.fn().mockResolvedValue(claim),
+    freezeTaskInput: vi.fn(async (_fence, input) => ({ input })),
+    storeTaskOutput: vi.fn().mockResolvedValue(undefined),
+    releaseTask: vi.fn().mockResolvedValue(undefined),
+  };
+  const output = { data: {}, model: "synthetic-model" };
+  const run = vi.spyOn(AiTasks, "runAiTask").mockResolvedValue(output as never);
+  const deps = {
+    prisma: fakePrisma(tx),
+    gateway: {} as never,
+    costLedger: ledger as never,
+  };
+  const acts = createSiteBuilderActivities(deps);
+  return { tx, claim, ledger, run, deps, acts, output };
+}
+describe("BrandProfile activity recovery and durable failure guards", () => {
+  it.each([
+    "site",
+    "run",
+    "cancelled",
+    "snapshot-run",
+    "snapshot-missing",
+    "frozen-missing",
+    "persist-run",
+    "task-cas",
+  ])(
+    "releases its task without reporting success after %s loss",
+    async (stage) => {
+      const f = brandActivityFixture();
+      if (stage === "site") f.tx.site.findUnique.mockResolvedValue(null);
+      if (stage === "run") f.tx.siteBuildRun.findUnique.mockResolvedValue(null);
+      if (stage === "cancelled")
+        f.tx.siteBuildRun.findUnique.mockResolvedValue({ status: "cancelled" });
+      if (stage === "snapshot-run")
+        f.tx.siteBuildRun.findUnique
+          .mockResolvedValueOnce({ status: "running" })
+          .mockResolvedValue(null);
+      if (stage === "snapshot-missing")
+        f.tx.siteEvidenceSourceSnapshot.findMany.mockResolvedValue([]);
+      if (stage === "frozen-missing")
+        f.ledger.freezeTaskInput.mockImplementation(async (_fence, input) => {
+          f.tx.siteEvidenceSourceSnapshot.findMany.mockResolvedValue([]);
+          return { input };
+        });
+      if (stage === "persist-run")
+        f.tx.siteBuildRun.findUnique
+          .mockResolvedValueOnce({ status: "running" })
+          .mockResolvedValueOnce({ status: "running" })
+          .mockResolvedValue(null);
+      if (stage === "task-cas")
+        f.tx.siteBuildTaskAttempt.updateMany.mockResolvedValue({ count: 0 });
+      await expect(f.acts.buildBrandProfile(INPUT)).rejects.toThrow();
+      expect(f.ledger.releaseTask).toHaveBeenCalledOnce();
+    },
+  );
+  it("replays a stored model result without issuing another paid task", async () => {
+    const f = brandActivityFixture();
+    f.claim.attempt.status = "MODEL_SUCCEEDED";
+    f.claim.attempt.outputJson = f.output;
+    expect(await f.acts.buildBrandProfile(INPUT)).toMatchObject({
+      version: 3,
+      factCount: 0,
+      gapsCount: 0,
+      researchDegraded: true,
+    });
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.ledger.storeTaskOutput).not.toHaveBeenCalled();
+    expect(f.ledger.releaseTask).not.toHaveBeenCalled();
+  });
+  it("rejects non-object durable replay data at the gateway persistence boundary", async () => {
+    const f = brandActivityFixture();
+    f.run.mockImplementation(async (_task, _input, options) => {
+      const ctx = options as {
+        ctx: {
+          paidCost: {
+            durableReplayResult: (data: Record<string, unknown>) => unknown;
+          };
+        };
+      };
+      for (const data of [null, "text", []])
+        expect(() => ctx.ctx.paidCost.durableReplayResult({ data })).toThrow(
+          "no object data",
+        );
+      return f.output as never;
+    });
+    expect(await f.acts.buildBrandProfile(INPUT)).toMatchObject({
+      factCount: 0,
+    });
+  });
+  it("preserves optional structured tone and gaps through the controlled projection", async () => {
+    const f = brandActivityFixture();
+    f.run.mockResolvedValue({
+      data: {
+        tone: { voice: "professional" },
+        gaps: [{ field: "capacity", question: "Provide workspace evidence" }],
+      },
+      model: "synthetic-model",
+    } as never);
+    expect(await f.acts.buildBrandProfile(INPUT)).toMatchObject({
+      gapsCount: 1,
+    });
+    expect(f.tx.brandProfile.create.mock.calls[0][0].data.tone).toMatchObject({
+      voice: "professional",
+      style: [],
+    });
+  });
+});
+
+describe("demo activity replay and claim fencing", () => {
+  function demoFixture() {
+    const run = {
+      status: "running",
+      siteId: INPUT.siteId,
+      scope: {} as unknown,
+    };
+    const site = {
+      id: INPUT.siteId,
+      name: "Synthetic",
+      slug: "synthetic",
+      intake: INTAKE,
+      activeVersionId: "version-1",
+      stylePreset: null,
+    };
+    const version = {
+      id: "version-1",
+      workspaceId: INPUT.workspaceId,
+      siteId: INPUT.siteId,
+      source: "demo_v0",
+      buildStatus: "succeeded",
+      artifactKey: "release:r1",
+      spec: {},
+    };
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn().mockResolvedValue(run),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      site: { findUnique: vi.fn().mockResolvedValue(site) },
+      siteVersion: { findFirst: vi.fn().mockResolvedValue(version) },
+    };
+    const render = vi.fn();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      renderSiteSpec: render as never,
+    });
+    return { run, site, version, tx, render, acts };
+  }
+  it.each([
+    "run",
+    "site",
+    "site-id",
+    "workspace",
+    "version-site",
+    "source",
+    "cancelled",
+    "base",
+    "cas",
+  ])("rejects %s mismatch before rendering", async (field) => {
+    const f = demoFixture();
+    if (field === "run") f.tx.siteBuildRun.findUnique.mockResolvedValue(null);
+    if (field === "site") f.tx.site.findUnique.mockResolvedValue(null);
+    if (field === "site-id") f.run.siteId = "other";
+    if (field === "workspace") f.version.workspaceId = "other";
+    if (field === "version-site") f.version.siteId = "other";
+    if (field === "source") f.version.source = "build";
+    if (field === "cancelled") f.run.status = "cancelled";
+    if (field === "base") f.run.scope = { publicationBaseVersionId: 3 };
+    if (field === "cas")
+      f.tx.siteBuildRun.updateMany.mockResolvedValue({ count: 0 });
+    await expect(f.acts.generateDemoV0(INPUT)).rejects.toThrow();
+    expect(f.render).not.toHaveBeenCalled();
+  });
+  it("replays only the active succeeded release without rendering", async () => {
+    const f = demoFixture();
+    f.run.status = "succeeded";
+    expect(await f.acts.generateDemoV0(INPUT)).toEqual({
+      previewSlug: "synthetic",
+    });
+    expect(f.render).not.toHaveBeenCalled();
+    expect(f.tx.siteBuildRun.updateMany).not.toHaveBeenCalled();
+  });
+  it.each(["missing", "status", "artifact", "pointer"])(
+    "rejects terminal %s mismatch rather than manufacturing success",
+    async (field) => {
+      const f = demoFixture();
+      f.run.status = "succeeded";
+      if (field === "missing")
+        f.tx.siteVersion.findFirst.mockResolvedValue(null);
+      if (field === "status") f.version.buildStatus = "failed";
+      if (field === "artifact") f.version.artifactKey = "local:old";
+      if (field === "pointer") f.site.activeVersionId = "other";
+      await expect(f.acts.generateDemoV0(INPUT)).rejects.toThrow(
+        "TERMINAL_STATE_MISMATCH",
+      );
+      expect(f.render).not.toHaveBeenCalled();
+    },
+  );
+});
+
+function publicationActivityFixture() {
+  const run = { status: "running", scope: {} as unknown };
+  const site = { activeVersionId: null as string | null };
+  const target = {
+    spec: { specVersion: "1.0.0", assets: {}, pages: [] },
+    artifactKey: "release:r1",
+    copyBundles: [],
+  };
+  const tx = {
+    $queryRaw: vi
+      .fn()
+      .mockResolvedValue([
+        { paid_calls_enabled: false, disabled_reason: "run_succeeded" },
+      ]),
+    siteBuildRun: {
+      findUnique: vi.fn().mockResolvedValue(run),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    site: {
+      findUnique: vi.fn().mockResolvedValue(site),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    siteVersion: { findFirst: vi.fn().mockResolvedValue(target) },
+    siteRelease: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    sitePublishableClaimSnapshot: {
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ id: "snapshot-copy", siteId: INPUT.siteId }),
+    },
+  };
+  const summary = {
+    totals: { unknownOperations: 0 },
+    budget: { paidCallsEnabled: false, disabledReason: "run_succeeded" },
+  };
+  const costLedger = {
+    assertAuthorizedBudget: vi.fn().mockResolvedValue(undefined),
+    closeAndSummarize: vi.fn().mockResolvedValue(summary),
+  };
+  const acts = createSiteBuilderActivities({
+    prisma: fakePrisma(tx),
+    costLedger: costLedger as never,
+  });
+  const input: RefurbishFinalizeInput = {
+    ...INPUT,
+    progressV1: true,
+    kb: { processed: 0, failed: 0, degraded: false },
+    profile: { status: "done", gaps: 0 },
+    build: { previewSlug: "synthetic", versionId: "version-1" },
+  };
+  return { acts, tx, run, site, target, summary, input, costLedger };
+}
+describe("final publication authority and snapshot gates", () => {
+  it.each([
+    "run",
+    "site",
+    "corrupt-base",
+    "cancelled-cas",
+    "target",
+    "release-cas",
+    "pointer-cas",
+  ])("does not activate after %s loss", async (failure) => {
+    const f = publicationActivityFixture();
+    if (failure === "run") f.tx.siteBuildRun.findUnique.mockResolvedValue(null);
+    if (failure === "site") f.tx.site.findUnique.mockResolvedValue(null);
+    if (failure === "corrupt-base")
+      f.run.scope = { publicationBaseVersionId: 99 };
+    if (failure === "cancelled-cas")
+      f.tx.siteBuildRun.updateMany.mockResolvedValue({ count: 0 });
+    if (failure === "target")
+      f.tx.siteVersion.findFirst.mockResolvedValue(null);
+    if (failure === "release-cas")
+      f.tx.siteRelease.updateMany.mockResolvedValue({ count: 0 });
+    if (failure === "pointer-cas")
+      f.tx.site.updateMany.mockResolvedValue({ count: 0 });
+    await expect(f.acts.finalizeRefurbish(f.input)).rejects.toThrow();
+    if (
+      ["run", "site", "corrupt-base", "cancelled-cas", "target"].includes(
+        failure,
+      )
+    )
+      expect(f.tx.siteRelease.updateMany).not.toHaveBeenCalled();
+  });
+  it.each(["missing-budget", "paid", "reason", "unknown"])(
+    "blocks quality publication when settlement %s remains unresolved",
+    async (gap) => {
+      const f = publicationActivityFixture();
+      f.input.qualityV1 = true;
+      if (gap === "missing-budget") f.tx.$queryRaw.mockResolvedValue([]);
+      if (gap === "paid")
+        f.tx.$queryRaw.mockResolvedValue([
+          { paid_calls_enabled: true, disabled_reason: "run_succeeded" },
+        ]);
+      if (gap === "reason")
+        f.tx.$queryRaw.mockResolvedValue([
+          { paid_calls_enabled: false, disabled_reason: "manual" },
+        ]);
+      if (gap === "unknown") f.summary.totals.unknownOperations = 1;
+      await expect(f.acts.finalizeRefurbish(f.input)).rejects.toThrow(
+        "budget settlement is not publishable",
+      );
+      expect(f.tx.siteBuildRun.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    null,
+    [],
+    { publicationBaseVersionId: null },
+    { publicationBaseVersionId: "base-v1" },
+  ])("preserves the durable publication base from %j", async (scope) => {
+    const f = publicationActivityFixture();
+    f.run.scope = scope;
+    expect(await f.acts.finalizeRefurbish(f.input)).toEqual({
+      previewSlug: "synthetic",
+    });
+    expect(f.tx.site.updateMany).toHaveBeenCalledOnce();
+    if (scope && !Array.isArray(scope))
+      expect(
+        f.tx.siteBuildRun.updateMany.mock.calls[0][0].data.scope,
+      ).toBeUndefined();
+  });
+  it.each(["frozen", "stored", "site", "id"])(
+    "requires the current copy %s snapshot before publication",
+    async (gap) => {
+      const f = publicationActivityFixture();
+      const snapshot = { siteId: INPUT.siteId };
+      vi.spyOn(
+        PrismaPublishableClaimSnapshotRepository.prototype,
+        "findById",
+      ).mockResolvedValue(gap === "frozen" ? null : (snapshot as never));
+      f.tx.sitePublishableClaimSnapshot.findUnique.mockResolvedValue(
+        gap === "stored"
+          ? null
+          : {
+              id: gap === "id" ? "other" : "snapshot-copy",
+              siteId: gap === "site" ? "other" : INPUT.siteId,
+            },
+      );
+      f.input.copy = {
+        snapshotId: "snapshot-copy",
+        set: { bundles: {} },
+        taskAttemptIds: {},
+        degradedLocales: [],
+      } as never;
+      await expect(f.acts.finalizeRefurbish(f.input)).rejects.toThrow(
+        "COPY_CLAIM_SNAPSHOT_MISSING",
+      );
+      expect(f.tx.siteBuildRun.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it("refuses mismatched persisted locale bundle digests at activation", async () => {
+    const f = publicationActivityFixture();
+    vi.spyOn(
+      PrismaPublishableClaimSnapshotRepository.prototype,
+      "findById",
+    ).mockResolvedValue({ siteId: INPUT.siteId } as never);
+    vi.spyOn(
+      PublishableClaimSnapshotService.prototype,
+      "assertCurrent",
+    ).mockResolvedValue(undefined);
+    f.input.copy = {
+      snapshotId: "snapshot-copy",
+      set: {
+        bundles: { en: { digest: "expected" }, de: { digest: "expected-de" } },
+      },
+      taskAttemptIds: {},
+      degradedLocales: [],
+    } as never;
+    await expect(f.acts.finalizeRefurbish(f.input)).rejects.toThrow(
+      "COPY_BUNDLE_ACTIVATION_MISMATCH",
+    );
+    expect(f.tx.site.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("activity bounded fallbacks and explicit input preservation", () => {
+  it.each([0, 1.5])(
+    "rejects invalid persistence retry budget %s",
+    async (maxAttempts) => {
+      const operation = vi.fn();
+      await expect(
+        runBrandProfilePersistenceWithRetry(operation, maxAttempts),
+      ).rejects.toThrow("positive integer");
+      expect(operation).not.toHaveBeenCalled();
+    },
+  );
+  it("refuses a style-preset drift even within the selected family", () => {
+    const requested = activityGoldenFixtures[0].designBrief;
+    expect(() =>
+      controlledAssemblyEffectiveBrief(
+        requested,
+        { ...requested, stylePresetId: "other" },
+        requested.familyId,
+        false,
+      ),
+    ).toThrow("IDENTITY_DRIFT");
+  });
+  it("preserves a stable cancellation error for narrative cancellation with a non-Error reason", async () => {
+    const abort = new AbortController();
+    abort.abort("cancelled");
+    await expect(
+      runNonAuthoritativeQualityNarrative(async () => {
+        throw new Error("narrative failed");
+      }, abort.signal),
+    ).rejects.toThrow("QUALITY_NARRATIVE_CANCELLED");
+  });
+  it("refuses beginning a deleted Site before budget access", async () => {
+    const assertAuthorizedBudget = vi.fn();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({
+        site: { findUnique: vi.fn().mockResolvedValue(null) },
+      }),
+      costLedger: { assertAuthorizedBudget } as never,
+    });
+    await expect(acts.beginRefurbishRun(INPUT)).rejects.toThrow("not found");
+    expect(assertAuthorizedBudget).not.toHaveBeenCalled();
+  });
+  it("runs direct KB work without a Temporal context and forwards stage callbacks safely", async () => {
+    const processQueued = vi.fn(async (_ctx, _site, options) => {
+      options.heartbeat("parse");
+      expect(options.signal).toBeUndefined();
+      return { processed: 1, failed: 0 };
+    });
+    const processAsset = vi.fn(async (_ctx, _site, _asset, options) => {
+      options.heartbeat("embed");
+      expect(options.signal).toBeUndefined();
+      return { outcome: "ready" };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      kb: { processQueued, processAsset } as never,
+    });
+    expect(await acts.ingestPendingKb(INPUT)).toEqual({
+      processed: 1,
+      failed: 0,
+    });
+    expect(await acts.processKbAsset({ ...INPUT, assetId: "a" })).toEqual({
+      outcome: "ready",
+    });
+  });
+  it("honors explicit design locales and a supported preset with a configured fake gateway", async () => {
+    const produce = vi
+      .spyOn(DesignBriefProducer.prototype, "produce")
+      .mockResolvedValue({ designBrief: {} } as never);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({
+        site: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValue({
+              id: INPUT.siteId,
+              intake: {},
+              locales: ["en"],
+              stylePreset: null,
+              brandProfiles: [],
+              assets: [],
+            }),
+        },
+      }),
+      gateway: {} as never,
+    });
+    await acts.generateDesignBrief({
+      ...INPUT,
+      scope: {
+        scope: "site",
+        options: { locales: ["de"], stylePreset: "modern-industrial" },
+      },
+    });
+    expect(produce.mock.calls[0][0]).toMatchObject({
+      locales: ["de"],
+      stylePreset: "modern-industrial",
+    });
+  });
+  it("uses the committed preset when no run-specific preset is requested", async () => {
+    const produce = vi
+      .spyOn(DesignBriefProducer.prototype, "produce")
+      .mockResolvedValue({ designBrief: {} } as never);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({
+        site: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValue({
+              id: INPUT.siteId,
+              intake: {},
+              locales: ["en"],
+              stylePreset: "precision-light",
+              brandProfiles: [],
+              assets: [],
+            }),
+        },
+      }),
+    });
+    await acts.generateDesignBrief(INPUT);
+    expect(produce.mock.calls[0][0].stylePreset).toBe("precision-light");
+  });
+  it("rejects immutable candidate evidence when the artifact reader is absent", async () => {
+    const f = await qualityActivityFixture();
+    try {
+      Object.assign(f.input.qualityCandidate.candidate, {
+        artifact: { objectKey: "candidate" },
+      });
+      await expect(
+        f.acts.evaluateQualityCandidate(f.input as never),
+      ).rejects.toThrow("ARTIFACT_UNAVAILABLE");
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it("keeps optional intake fields absent without inserting undefined in KB markdown", () => {
+    const intake = {
+      ...INTAKE,
+      company: { nameZh: "Synthetic Company" },
+      websiteUrl: undefined,
+    };
+    const text = intakeToMarkdown(intake as never);
+    expect(text).not.toContain("undefined");
+    expect(text).not.toContain("Existing website");
+  });
+  it("does not drop a copy task's exact completed replay identity", async () => {
+    const f = copyActivityFixture();
+    const contexts = new Map<string, Record<string, unknown>>();
+    const first = await f.acts.generateCopyBundles(INPUT);
+    const frozen = f.ledger.freezeTaskInput.mock.calls[0][1];
+    contexts.set("en", {
+      taskAttemptId: "attempt-copy",
+      contractVersion: COPY_GENERATION_CONTRACT_VERSION,
+      contextDigest: frozen.contextDigest,
+      slots: neutralCopyOutput(frozen.slots, "en").slots,
+    });
+    f.ledger.claimTaskAttempt.mockResolvedValue({
+      kind: "completed",
+      result: contexts.get("en"),
+    } as never);
+    f.run.mockClear();
+    const replay = await f.acts.generateCopyBundles(INPUT);
+    expect(replay.set).toEqual(first.set);
+    expect(f.run).not.toHaveBeenCalled();
+  });
+});
+
+describe("generation capability absence after durable authorization", () => {
+  it("fails BrandProfile when its configured model gateway is absent", async () => {
+    const f = brandActivityFixture();
+    const acts = createSiteBuilderActivities({ ...f.deps, gateway: undefined });
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
+      "model gateway unavailable",
+    );
+    expect(f.ledger.assertAuthorizedBudget).toHaveBeenCalledOnce();
+    expect(f.ledger.claimTaskAttempt).not.toHaveBeenCalled();
+  });
+  it("fails copy after snapshot capture when its configured model gateway is absent", async () => {
+    const f = copyActivityFixture();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(f.tx),
+      costLedger: f.ledger as never,
+    });
+    await expect(acts.generateCopyBundles(INPUT)).rejects.toThrow(
+      "model gateway unavailable",
+    );
+    expect(f.ledger.assertAuthorizedBudget).toHaveBeenCalledOnce();
+    expect(f.ledger.claimTaskAttempt).not.toHaveBeenCalled();
+  });
+});
+
+describe("approved quality evidence materialization acknowledgement", () => {
+  it("refuses a service success that never produced the required artifact references", async () => {
+    const f = await qualityActivityFixture();
+    try {
+      f.input.qualityCandidate.candidate.root = path.join(f.root, ".staging", INPUT.buildRunId);
+      Object.assign(f.tx.siteVersion, { findUnique: vi.fn().mockResolvedValue({ spec: f.golden.spec }) });
+      f.qualityCandidateService.materializeApprovedRelease.mockResolvedValue(undefined);
+      await expect(f.acts.materializeApprovedRelease(f.input as never)).rejects.toThrow("QUALITY_ARTIFACT_INVALID");
+      expect(f.qualityCandidateService.materializeApprovedRelease).toHaveBeenCalledOnce();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
   });
 });

@@ -1,8 +1,9 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { resolve } from "node:path";
-import { NativeConnection, Worker } from "@temporalio/worker";
+import { NativeConnection, Runtime, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
+import { createExecutionBudgetPlatformWriterClient } from "../execution-budget/execution-budget-platform-writer.database";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
 import { ModelRouter } from "../model-gateway/model-router";
@@ -19,21 +20,26 @@ import { createIntentActivities } from "./intent.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
 import { createDeletionActivities } from "./deletion.activities";
-import { createPersonalArtifactCleanupActivities } from './personal-artifact-cleanup.activities';
-import { PersonalArtifactCleanupService } from '../durable-results/artifact/personal-artifact-cleanup.contract';
+import { createPersonalArtifactCleanupActivities } from "./personal-artifact-cleanup.activities";
+import { PersonalArtifactCleanupService } from "../durable-results/artifact/personal-artifact-cleanup.contract";
 import {
   personalArtifactCleanupPersistence,
   PrismaPersonalArtifactCleanupCommandRepository,
-} from '../durable-results/artifact/personal-artifact-cleanup.repository';
-import { createPersonalArtifactCleanupRuntime } from '../durable-results/artifact/personal-artifact-cleanup.runtime';
+} from "../durable-results/artifact/personal-artifact-cleanup.repository";
+import { createPersonalArtifactCleanupRuntime } from "../durable-results/artifact/personal-artifact-cleanup.runtime";
 import { createPatentsCacheActivities } from "./patents-cache.activities";
 import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities";
-import { createPlatformScheduleAuthorityActivities } from './platform-schedule-authority.activities';
+import { createPlatformScheduleAuthorityActivities } from "./platform-schedule-authority.activities";
 import { createSiteBuilderActivities } from "./site-builder.activities";
 import {
+  costReconciliationCatalogCoversRoutes,
   createSiteBuildCostReconciliationCatalogFromEnv,
-  createSiteBuildCostReconciliationResolverFromEnv,
+  createSiteBuildSettlementReadbackRuntimeFromEnv,
 } from "../site-builder/site-build-cost-reconciliation-resolver";
+import {
+  resolveTaskRoute,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
+} from "../site-builder/agents/task-routes";
 import { createAssetCleanupActivities } from "./asset-cleanup.activities";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import { SanctionsScreeningService } from "../sanctions/sanctions-screening.service";
@@ -54,6 +60,7 @@ import {
 import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
 import { UNDERSTANDING_TASK_QUEUE } from "./understanding.constants";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
+import { createSiteBuildProviderWireDatabaseFromEnv } from "../site-builder/site-build-provider-wire.database";
 import { SiteReleaseService } from "../site-builder/site-release.service";
 import { createSiteReleaseMaintenanceActivities } from "./site-release-maintenance.activities";
 import { StorageQualityArtifactSink } from "../site-builder/quality/quality-artifact-sink";
@@ -77,15 +84,28 @@ import {
   checkImagePipelineIsolationReadiness,
   checkModelGatewayReadiness,
   checkRedisReadiness,
+  checkSiteBuildSettlementReadbackReadiness,
   rendererRuntimeIdentity,
 } from "../runtime/managed-dependency-readiness";
-import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
+import {
+  createIdempotentWorkerShutdown,
+  startWorkerProcessSignalCoordinator,
+  startWorkerLeaseHeartbeat,
+} from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import {
-  selectWorkerDependencyAdmissionBeforeAuthorityCutover,
+  selectWorkerDependencyAdmission,
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import { checkPlatformAuthorityReady } from "./platform-authority-readiness-gate";
+import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
+import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
+import { inspectPlatformBudgetAuthorityReadiness } from "../runtime/managed-dependency-readiness";
+import { JwksPlatformTechnicalQuoteServiceAuthenticationVerifier } from "../platform-authority/platform-technical-quote-jwks-verifier";
+import { PlatformTechnicalQuoteAuthenticationReadinessContributor } from "../platform-authority/platform-technical-quote-service-auth";
+import { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
+import { PrismaPlatformEgressFencePort } from "../platform-authority/platform-egress-fence.prisma";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -111,6 +131,7 @@ async function holdWorkerNotReady(
  * directly — no Nest bootstrap — so it never starts HTTP or the relay.
  */
 async function main(): Promise<void> {
+  Runtime.install({ shutdownSignals: [] });
   const runtimeSettings = resolveRuntimeSettings(process.env);
   const releaseIdentity = await loadRuntimeReleaseIdentity({
     mode: runtimeSettings.mode,
@@ -121,6 +142,7 @@ async function main(): Promise<void> {
     runtimeSettings,
     process.env,
     releaseIdentity,
+    "WORKER",
   );
   if (!admission.admitted) {
     const failed = Object.entries(admission.checks)
@@ -132,6 +154,24 @@ async function main(): Promise<void> {
 
   const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
+  const configuredProviderWireDatabase = (() => {
+    try {
+      return createSiteBuildProviderWireDatabaseFromEnv(
+        process.env,
+        undefined,
+        releaseIdentity.attested
+          ? releaseIdentity.migration_revision
+          : undefined,
+      );
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!configuredProviderWireDatabase) {
+    await runtimeTelemetry.shutdown();
+    return holdWorkerNotReady("SITE_BUILD_PROVIDER_WIRE_DATABASE_UNAVAILABLE");
+  }
+  const providerWireDatabase = configuredProviderWireDatabase;
   await waitForWorkerDependencyAdmission({
     check: async () => {
       const appDatabaseReadiness = await prisma.reconnect();
@@ -142,22 +182,42 @@ async function main(): Promise<void> {
         await assertMigrationCompatible(prisma, releaseIdentity);
         return { status: "ok" } as const;
       } catch {
-        return { status: "failed", code: "MIGRATION_REVISION_MISMATCH" } as const;
+        return {
+          status: "failed",
+          code: "MIGRATION_REVISION_MISMATCH",
+        } as const;
       }
     },
     onBlocked: (code) =>
-      console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`),
+      console.error(
+        `[worker] not ready: ${code}; Temporal polling remains disabled`,
+      ),
   });
   const runtimeLeaseStore = new PrismaRuntimeProcessLeaseStore(prisma);
   const runtimeLeases = new RuntimeProcessLeaseService(runtimeLeaseStore, {
     identity: releaseIdentity,
   });
+  const controlledSignals = startWorkerProcessSignalCoordinator({
+    leases: runtimeLeases,
+    taskQueue: UNDERSTANDING_TASK_QUEUE,
+    onDrainLeaseFailure: () =>
+      console.error(
+        "[worker] draining lease unavailable; process exit continues fail-closed",
+      ),
+    terminalizeUncertainRegistration: () =>
+      runtimeLeases.terminalize("WORKER", UNDERSTANDING_TASK_QUEUE),
+    onEarlyCleanup: async () => {
+      await runtimeTelemetry.shutdown().catch(() => undefined);
+      await providerWireDatabase.disconnect().catch(() => undefined);
+      await runtimeLeaseStore.disconnectWriters().catch(() => undefined);
+      await prisma.$disconnect().catch(() => undefined);
+    },
+    onEarlyExit: (signal) => {
+      process.kill(process.pid, signal);
+    },
+  });
   try {
-    await runtimeLeases.heartbeat(
-      "WORKER",
-      "STARTING",
-      UNDERSTANDING_TASK_QUEUE,
-    );
+    await controlledSignals.registered;
   } catch {
     await runtimeTelemetry.shutdown();
     await holdWorkerNotReady("RUNTIME_PROCESS_LEASE_PUBLISH_UNAVAILABLE");
@@ -176,11 +236,22 @@ async function main(): Promise<void> {
         `[worker] not ready: ${code}; Temporal polling remains disabled`,
       ),
   });
-  const costLedger = new SiteBuildCostLedger(prisma);
+  await waitForWorkerDependencyAdmission({
+    check: () => providerWireDatabase.checkReadiness(),
+    onBlocked: (code) =>
+      console.error(
+        `[worker] not ready: ${code}; Temporal polling remains disabled`,
+      ),
+  });
+  const costLedger = new SiteBuildCostLedger(prisma, {
+    providerWireDatabase,
+  });
   const siteBuilderStorage = new StorageService();
   await siteBuilderStorage.onModuleInit();
   const dependencyBlocked = (code: string): void =>
-    console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`);
+    console.error(
+      `[worker] not ready: ${code}; Temporal polling remains disabled`,
+    );
   await waitForWorkerDependencyAdmission({
     check: () => siteBuilderStorage.checkReadiness(),
     onBlocked: dependencyBlocked,
@@ -198,6 +269,10 @@ async function main(): Promise<void> {
     onBlocked: dependencyBlocked,
   });
   await waitForWorkerDependencyAdmission({
+    check: () => checkSiteBuildSettlementReadbackReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
     check: () => checkBrowserReadiness(process.env),
     onBlocked: dependencyBlocked,
   });
@@ -211,7 +286,7 @@ async function main(): Promise<void> {
     } catch {
       await runtimeTelemetry.shutdown();
       return holdWorkerNotReady(
-        'PERSONAL_ARTIFACT_CLEANUP_CONFIG_INVALID',
+        "PERSONAL_ARTIFACT_CLEANUP_CONFIG_INVALID",
         runtimeLeases,
       );
     }
@@ -252,11 +327,13 @@ async function main(): Promise<void> {
   // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
   // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
   const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-  const platformWriterUrl = process.env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL?.trim();
-  const platformWriterDb = platformWriterUrl ? new PrismaClient({ datasourceUrl: platformWriterUrl }) : undefined;
+  const platformWriterDb = createExecutionBudgetPlatformWriterClient(
+    process.env,
+  );
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
     personalArtifactCleanupRuntime.destroy();
+    await providerWireDatabase.disconnect().catch(() => undefined);
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeTelemetry.shutdown();
@@ -267,11 +344,39 @@ async function main(): Promise<void> {
   } catch {
     await holdPlatformNotReady("OWNER_DATABASE_UNAVAILABLE");
   }
-  if (!platformWriterDb) return holdPlatformNotReady('PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE');
+  if (!platformWriterDb)
+    return holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
   const authorityWriter = platformWriterDb;
-  try { await authorityWriter.$connect(); }
-  catch { await holdPlatformNotReady('PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE'); }
+  try {
+    await authorityWriter.$connect();
+  } catch {
+    await holdPlatformNotReady("PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE");
+  }
   const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
+  // Read the same capability contract as API readiness. Existing per-run
+  // grants describe execution history, not whether a new grant can be issued.
+  const platformReadinessRegistry = new RuntimeReadinessContributorRegistry();
+  const platformQuoteReadiness = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
+    new JwksPlatformTechnicalQuoteServiceAuthenticationVerifier(),
+    platformReadinessRegistry,
+  );
+  platformQuoteReadiness.onModuleInit();
+  const platformAuthorityRepository = new ExecutionBudgetAuthorityRepository(prisma, authorityWriter);
+  const checkPlatformCapability = () => checkPlatformAuthorityReady(
+    () => inspectPlatformBudgetAuthorityReadiness(platformAuthorityRepository, platformReadinessRegistry),
+  );
+  await waitForWorkerDependencyAdmission({
+      check: checkPlatformCapability,
+      onBlocked: () => {
+        console.error("[worker] not ready: PLATFORM_BUDGET_AUTHORITY_NOT_READY; Temporal polling remains disabled");
+        void runtimeLeases.heartbeat("WORKER", "STARTING", UNDERSTANDING_TASK_QUEUE).catch(() => undefined);
+      },
+  });
+  // Platform physical wires use the same dedicated writer principal as
+  // authority admission. No in-memory or app-user fallback is permitted.
+  const platformEgressFence = new PlatformEgressFence(
+    new PrismaPlatformEgressFencePort(authorityWriter),
+  );
 
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
@@ -320,14 +425,45 @@ async function main(): Promise<void> {
   gateway.paidLedger = costLedger;
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
-  if (!costReconciliationCatalog) {
+  const activeSettlementRoutes = (() => {
+    try {
+      return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
+        const route = resolveTaskRoute(taskId, process.env);
+        return [route.primary, ...route.fallbacks].map((alias) =>
+          Object.freeze({
+            taskId,
+            alias,
+            maxOutputTokens: route.maxTokens,
+          }),
+        );
+      });
+    } catch {
+      return undefined;
+    }
+  })();
+  if (
+    !activeSettlementRoutes ||
+    !costReconciliationCatalogCoversRoutes(
+      costReconciliationCatalog,
+      activeSettlementRoutes,
+    )
+  ) {
     await holdPlatformNotReady(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
     );
   }
   gateway.costReconciliationCatalog = costReconciliationCatalog;
+  const settlementReadbackRuntime =
+    createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
+  if (!settlementReadbackRuntime) {
+    await holdPlatformNotReady(
+      "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+    );
+  }
+  gateway.settlementDerivationKeyring = settlementReadbackRuntime?.keyring;
+  gateway.settlementReadbackResolver = settlementReadbackRuntime?.resolver;
   const costReconciliationResolver =
-    createSiteBuildCostReconciliationResolverFromEnv();
+    settlementReadbackRuntime?.reconciliationResolver;
 
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
@@ -367,6 +503,9 @@ async function main(): Promise<void> {
   );
   const worker = await Worker.create({
     connection,
+    dataConverter: {
+      failureConverterPath: require.resolve("./diagnostic-failure-converter"),
+    },
     namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve("./workflows"),
@@ -396,6 +535,7 @@ async function main(): Promise<void> {
         registry: buildSourceAdapterRegistry(broker),
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       ...createIntentActivities({
         prisma,
@@ -404,6 +544,7 @@ async function main(): Promise<void> {
         broker,
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       ...createBacklogActivities({
         prisma,
@@ -431,7 +572,11 @@ async function main(): Promise<void> {
       }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({
-        ownerDb, broker, budgetStore, platformWriter: authorityWriter,
+        ownerDb,
+        broker,
+        budgetStore,
+        platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
       ...createSanctionsRefreshActivities({
@@ -440,6 +585,7 @@ async function main(): Promise<void> {
         sanctionsScreening,
         budgetStore,
         platformWriter: authorityWriter,
+        platformEgressFence,
       }),
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
@@ -482,9 +628,14 @@ async function main(): Promise<void> {
     `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
   );
   clearInterval(startingHeartbeat);
+  const workerShutdown = createIdempotentWorkerShutdown(worker, () =>
+    console.error(
+      "[worker] duplicate or invalid shutdown request was contained",
+    ),
+  );
   const readyHeartbeat = await startWorkerLeaseHeartbeat({
     leases: runtimeLeases,
-    worker,
+    worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     onLeaseLost: () =>
       console.error(
@@ -500,35 +651,53 @@ async function main(): Promise<void> {
       try {
         await assertMigrationCompatible(prisma, releaseIdentity);
       } catch {
-        return { status: "failed", code: "MIGRATION_REVISION_MISMATCH" } as const;
+        return {
+          status: "failed",
+          code: "MIGRATION_REVISION_MISMATCH",
+        } as const;
       }
       const checks = await Promise.all([
+        providerWireDatabase.checkReadiness(),
         siteBuilderStorage.checkReadiness(),
         checkGenericArtifactStorageReadiness(process.env),
         personalArtifactCleanupRuntime.checkReadiness(),
         checkRedisReadiness(process.env),
         checkModelGatewayReadiness(process.env),
+        checkSiteBuildSettlementReadbackReadiness(process.env),
         checkBrowserReadiness(process.env),
         checkImagePipelineIsolationReadiness(),
       ]);
-      return selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+      return selectWorkerDependencyAdmission({
         hardChecks: checks,
-        authorityCapabilities: [],
+        authorityCapabilities: [await checkPlatformCapability()],
       });
     },
     leases: runtimeLeases,
-    worker,
+    worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     onBlocked: (code) =>
-      console.error(`[worker] dependency became unavailable: ${code}; polling is shutting down`),
+      console.error(
+        `[worker] dependency became unavailable: ${code}; polling is shutting down`,
+      ),
   });
   if (!dependencyHeartbeat.admitted) {
     readyHeartbeat.stop();
     await holdPlatformNotReady("WORKER_DEPENDENCY_UNAVAILABLE");
   }
+  controlledSignals.attach({
+    shutdown: workerShutdown,
+    stopHeartbeats: () => {
+      dependencyHeartbeat.stop();
+      readyHeartbeat.stop();
+    },
+  });
+  const runPromise = worker.run();
+  workerShutdown.markRunning();
   try {
-    await worker.run();
+    await runPromise;
   } finally {
+    await controlledSignals.stop();
+    platformQuoteReadiness.onModuleDestroy();
     dependencyHeartbeat.stop();
     readyHeartbeat.stop();
     await runtimeLeases
@@ -536,9 +705,11 @@ async function main(): Promise<void> {
       .catch(() => undefined);
     await runtimeTelemetry.shutdown();
     personalArtifactCleanupRuntime.destroy();
+    await connection.close().catch(() => undefined);
+    await providerWireDatabase.disconnect().catch(() => undefined);
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
-    await runtimeLeaseStore.onApplicationShutdown();
+    await runtimeLeaseStore.disconnectWriters();
     await prisma.$disconnect().catch(() => undefined);
   }
 }

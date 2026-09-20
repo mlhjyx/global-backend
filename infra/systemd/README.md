@@ -84,13 +84,61 @@ The API-only secret file `.secrets/backend-api-runtime.env` contains
 these URLs. Each login inherits exactly one of `runtime_api`, `runtime_worker`,
 or `runtime_outbox_relay`; `app_user` remains read-only for the lease table.
 
+Install the settlement derivation keyring into a dedicated secret directory,
+normally `/global/backend/.secrets/site-build-settlement/derivation.keyring`.
+The directory must be owned by runtime UID/GID `10001:10001` with mode `0700`,
+and the keyring file must be readable by that UID with mode `0600`. Do not mount
+the complete `.secrets` directory: it also contains unrelated database and
+deployment-owner credentials. `SITE_BUILD_SETTLEMENT_SECRET_DIRECTORY` selects
+only this dedicated host directory. Compose refuses to create a missing host
+directory and mounts it read-only into both API and Worker at
+`/run/secrets/site-build-settlement`; their common environment pins the loader
+to `/run/secrets/site-build-settlement/derivation.keyring`.
+
+API paid-capability readiness and Worker dispatch initialization both read the
+keyring. Supplying an environment variable alone does not install the file.
+An empty provisioned directory permits process diagnostics while the missing
+keyring keeps readiness closed. Rotate by atomically replacing the file in the
+dedicated directory and retaining the old `VERIFY_ONLY` keys for outstanding
+operations, then perform a controlled process restart to load the new keyring.
+
+Provision the separate Site Builder provider-wire writer after migrations. It
+is not the Worker lease login: the dedicated login inherits exactly
+`app_user` plus `runtime_worker`, allowing tenant-RLS transactions to invoke
+the worker-only reserve/send-cut/probe/receipt functions without giving those
+functions to the API or Relay:
+
+```bash
+export APP_DATABASE_URL='postgresql://app_user:...@database:5432/global'
+export SITE_BUILD_PROVIDER_WIRE_EXPECTED_MIGRATION_REVISION='<release-attestation migration_revision>'
+bash infra/postgres/provision-site-build-provider-wire-writer.sh
+bash infra/postgres/verify-site-build-provider-wire-writer.sh
+```
+
+The verifier compares the writer and app host/port/database targets, checks the
+exact release migration, all provider-wire function ACLs, FORCE RLS, direct
+write denial, and both membership option sets. It never prints either URL.
+
+Install its `SITE_BUILD_PROVIDER_WIRE_DATABASE_URL` only in
+`.secrets/backend-worker-runtime.env`. Keep the provisioning owner URL, login
+name, and generated password in the deployment secret manager; none belongs in
+the common or API runtime secret file.
+
 ```bash
 cd /global/backend
-docker compose -p global \
+docker compose \
+  --env-file /global/backend/.secrets/minio-bootstrap.env \
+  --env-file /global/backend/.secrets/backend-runtime.env \
+  -p global \
   -f docker-compose.yml \
   -f infra/backend-runtime.compose.yml \
   --profile managed-runtime config --quiet
 ```
+
+The bootstrap file participates in deployment-owner interpolation for MinIO
+provisioning and the Worker's dedicated cleanup credential. It is not an API or
+Worker service `env_file`: MinIO root, KMS, and personal-read credentials must
+not enter either runtime container, and cleanup credentials enter only Worker.
 
 ## Drain-and-swap
 
@@ -114,6 +162,33 @@ sudo systemctl daemon-reload
 Starting, enabling, stopping, or restarting these services is a deployment
 action and is deliberately not part of repository verification.
 
+### GrowthOS loopback relay
+
+When GrowthOS runs in a Docker bridge while Global Backend remains bound to
+host loopback, do not expose Backend on `0.0.0.0` or a Docker bridge address.
+Install the socket-activated AF_UNIX proxy instead:
+
+```bash
+sudo groupadd --system global-backend-growthos
+sudo ln -sf /global/backend/infra/systemd/global-backend-growthos-relay.socket \
+  /etc/systemd/system/global-backend-growthos-relay.socket
+sudo ln -sf /global/backend/infra/systemd/global-backend-growthos-relay.service \
+  /etc/systemd/system/global-backend-growthos-relay.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now global-backend-growthos-relay.socket
+```
+
+If the group already exists, do not recreate it. Read its numeric GID with
+`getent group global-backend-growthos` and configure only the GrowthOS relay
+container with that supplemental GID. The socket is group-owned and mode
+`0660`; ordinary host users and containers without that group cannot connect.
+
+The GrowthOS relay container mounts only
+`/run/global-backend-growthos/backend.sock` read-only and converts its own
+namespace-local `127.0.0.1:3000` to that Unix socket. No TCP listener is added
+to a Docker, LAN, Tailscale, or public interface. A container that does not
+receive the explicit socket mount has no Backend transport path.
+
 ## Exact readback
 
 Read back the running container configuration and both health contracts. Do not
@@ -122,8 +197,8 @@ infer identity from the source checkout or the local tag.
 ```bash
 docker inspect global-api global-worker \
   --format '{{.Name}} image={{.Config.Image}} id={{.Image}} user={{.Config.User}}'
-curl --fail --silent http://127.0.0.1:3000/health/build
-curl --fail --silent http://127.0.0.1:3000/health/ready
+curl --fail --silent http://127.0.0.1:3000/api/v1/health/build
+curl --fail --silent http://127.0.0.1:3000/api/v1/health/ready
 ```
 
 Acceptance requires:
@@ -131,9 +206,9 @@ Acceptance requires:
 - both container `.Config.Image` values equal the approved
   `GLOBAL_BACKEND_IMAGE` byte-for-byte;
 - both image IDs match and both containers run as UID/GID `10001`;
-- `/health/build` reports the expected commit, image, artifact, manifest, SBOM,
+- `/api/v1/health/build` reports the expected commit, image, artifact, manifest, SBOM,
   renderer, schema, and migration digests;
-- `/health/ready` reports every component ready and the API/Worker/Relay leases
+- `/api/v1/health/ready` reports every component ready and the API/Worker/Relay leases
   carry one matching release identity;
 - no second active digest exists on the same Temporal task queue.
 

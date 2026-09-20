@@ -192,7 +192,7 @@ async function readFromFreshServiceProcess(sha256: string): Promise<number> {
       bucket: process.env.GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET,
       client,
     });
-    const body = await store.read(process.argv[1]);
+    const body = await store.read(process.argv[1], 'PERSONAL_DATA');
     let size = 0;
     for await (const chunk of body) size += chunk.byteLength;
     client.destroy();
@@ -229,7 +229,7 @@ async function materializeHttpFromFreshServiceProcess(
       client,
     });
     const output = await httpGetMaterializer.materialize(
-      await store.read(sha256),
+      await store.read(sha256, 'PUBLIC_ORGANIZATION'),
       {
         schemaVersion: 'generic-operation-artifact/v1',
         artifactId: '11111111-1111-4111-8111-111111111111',
@@ -237,7 +237,7 @@ async function materializeHttpFromFreshServiceProcess(
         authorityId: '33333333-3333-4333-8333-333333333333',
         operationId: '44444444-4444-4444-8444-444444444444',
         resultSchema: 'http-get/v1',
-        objectKey: 'generic-operation-results/v1/sha256/' + sha256.slice(0, 2) + '/' + sha256,
+        objectKey: 'generic-operation-results/v1/final/public-organization/sha256/' + sha256.slice(0, 2) + '/' + sha256,
         sha256, sizeBytes, mediaType: 'text/plain',
         privacyClass: 'PUBLIC_ORGANIZATION', sourceDigest: null,
         createdAt: '2026-08-22T00:00:00.000Z', expiresAt: '2099-08-22T00:00:00.000Z',
@@ -289,9 +289,11 @@ describe.runIf(enabled)(
 
         const stored = await first.promote(staged);
         await expect(second.promote(staged)).resolves.toEqual(stored);
-        await expect(second.inspect(staged.sha256)).resolves.toEqual(stored);
+        await expect(
+          second.inspect(staged.sha256, staged.privacyClass),
+        ).resolves.toEqual(stored);
 
-        const read = await second.read(staged.sha256);
+        const read = await second.read(staged.sha256, staged.privacyClass);
         let readBytes = 0;
         for await (const chunk of read) readBytes += chunk.byteLength;
         expect(readBytes).toBe(MAX_ARTIFACT_BYTES);
@@ -320,7 +322,10 @@ describe.runIf(enabled)(
             untaggedClient.send(
               new PutObjectCommand({
                 Bucket: required('GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET'),
-                Key: contentAddressedObjectKey(untaggedSha),
+                Key: contentAddressedObjectKey(
+                  untaggedSha,
+                  'PERSONAL_DATA',
+                ),
                 Body: Uint8Array.of(1),
                 ContentType: 'application/octet-stream',
                 ServerSideEncryption: 'AES256',
@@ -340,7 +345,10 @@ describe.runIf(enabled)(
                   Bucket: required(
                     'GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET',
                   ),
-                  Key: contentAddressedObjectKey(invalidTagSha),
+                  Key: contentAddressedObjectKey(
+                    invalidTagSha,
+                    'PERSONAL_DATA',
+                  ),
                   Body: Uint8Array.of(1),
                   ContentType: 'application/octet-stream',
                   ServerSideEncryption: 'AES256',

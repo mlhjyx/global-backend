@@ -35,8 +35,11 @@ export default defineConfig({
     use: { viewport: { width, height } },
   })),
   webServer: {
-    command: `SITESPEC_PATH=${siteSpecPath} SITE_ORIGIN=http://127.0.0.1:4325 pnpm dev --host 127.0.0.1 --port 4325`,
+    // `exec` makes the cache-owning wrapper the process Playwright terminates,
+    // so its signal handlers can stop Astro and remove the private workspace.
+    command: `SITESPEC_PATH=${siteSpecPath} SITE_ORIGIN=http://127.0.0.1:4325 exec node scripts/run-with-temporary-cache.mjs dev --host 127.0.0.1 --port 4325`,
     url: "http://127.0.0.1:4325",
+    gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     reuseExistingServer:
       !process.env.CI &&
       !process.env.COMPONENT_QUALIFICATION_COMPONENT &&

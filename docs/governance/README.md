@@ -10,28 +10,31 @@
 
 ## 1. 当前 Registry
 
-| Registry | 回答的问题 | 唯一负责的事实 |
-|---|---|---|
-| [术语与状态](terminology-and-status.md) | 一个词或状态是什么意思 | 权威层、状态词和责任帽子 |
-| [能力登记](capability-register.md) | 产品有哪些能力、各轴做到哪里 | Capability ID、用户结果、多轴状态和能力入口 |
-| [核心对象登记](core-object-register.md) | 谁拥有数据，生命周期是什么 | Object ID、SoR、社会属性、生命周期与接缝 |
-| [场景目录](scenario-catalog.md) | 用什么场景评审和验收 | Scenario/Fixture ID、前置、恢复和证据状态 |
-| [冲突登记](conflict-register.md) | 哪些矛盾已裁决，哪些仍阻塞 | Conflict/Decision ID、状态、Owner 和裁决 |
-| [追踪矩阵](traceability-matrix.md) | 用户价值如何追到合同和证据 | Capability→Journey→Page→Object→Contract→Code→Scenario |
-| [文档自动校验](docs-verification.md) | 哪些漂移会让 CI 失败 | 受控范围、链接、状态、Registry 和历史标记检查 |
+| Registry                                | 回答的问题                   | 唯一负责的事实                                        |
+| --------------------------------------- | ---------------------------- | ----------------------------------------------------- |
+| [术语与状态](terminology-and-status.md) | 一个词或状态是什么意思       | 权威层、状态词和责任帽子                              |
+| [能力登记](capability-register.md)      | 产品有哪些能力、各轴做到哪里 | Capability ID、用户结果、多轴状态和能力入口           |
+| [核心对象登记](core-object-register.md) | 谁拥有数据，生命周期是什么   | Object ID、SoR、社会属性、生命周期与接缝              |
+| [场景目录](scenario-catalog.md)         | 用什么场景评审和验收         | Scenario/Fixture ID、前置、恢复和证据状态             |
+| [冲突登记](conflict-register.md)        | 哪些矛盾已裁决，哪些仍阻塞   | Conflict/Decision ID、状态、Owner 和裁决              |
+| [追踪矩阵](traceability-matrix.md)      | 用户价值如何追到合同和证据   | Capability→Journey→Page→Object→Contract→Code→Scenario |
+| [文档自动校验](docs-verification.md)    | 哪些漂移会让 CI 失败         | 受控范围、链接、状态、Registry 和历史标记检查         |
 
 机器承重 Registry/Schema 另有：
 
-| 机器合同 | 负责的硬门 |
-|---|---|
-| [`provider-registry/v1`](provider-registry.json) | Provider key、SourceClass、default enablement、许可、个人数据、call gate 与 test/evidence anchor；生成[人类页](../backend/provider-registry.md) |
-| [`delivery-traceability/v1`](delivery-traceability.json) | Capability→Object→operationId→code→test→Scenario→指定 kind 的 fresh Evidence；`PILOT/GA` 另须把同一 chain/capability/evidence set 精确绑定的 Release Bundle |
-| [`runtime-evidence/v1`](runtime-evidence.schema.json) | commit、environment、验证窗口、kind、result 与 artifact digest；到期只作 historical |
-| [`release-bundle/v1`](release-bundle.schema.json) | Scope、Promise、Source、Evidence、Operations、Data、Rollback、Guide、Learning，以及相互独立的机器/reviewer/用户授权/merge 声明与 `external_provenance`；当前无独立 readback verifier，所有 `PILOT/GA` 保持 fail closed |
+| 机器合同                                                                                          | 负责的硬门                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`provider-registry/v1`](provider-registry.json)                                                  | Provider key、SourceClass、default enablement、许可、个人数据、call gate 与 test/evidence anchor；生成[人类页](../backend/provider-registry.md)                                                                                                                      |
+| [`delivery-traceability/v1`](delivery-traceability.json)                                          | Capability→Object→operationId→code→test→Scenario→指定 kind 的 fresh Evidence；`PILOT/GA` 另须把同一 chain/capability/evidence set 精确绑定的 Release Bundle                                                                                                          |
+| [`runtime-evidence/v1`](runtime-evidence.schema.json)                                             | commit、environment、验证窗口、kind、result 与 artifact digest；到期只作 historical                                                                                                                                                                                  |
+| [`release-bundle/v1`](release-bundle.schema.json)                                                 | Scope、Promise、Source、Evidence、Operations、Data、Rollback、Guide、Learning，以及相互独立的机器/reviewer/用户授权/merge 声明与 `external_provenance`；当前无独立 readback verifier，所有 `PILOT/GA` 保持 fail closed                                               |
+| [`approval-authorities/v1`](approval-authorities.schema.json) 及 Trusted Approval receipt schemas | 固定的六个审批角色及其数值 GitHub actor 映射；receipt、evidence manifest、revocation、supersession 与 Program C 的不可变 merge grant/append-only consumption 均为 closed shape。当前 registry 全部 `UNASSIGNED`，因此不构成任何 trusted approval、merge 或发布授权。 |
 
 不再维护逐文件登记或阶段工作包；普通文档导航由[项目门户](../README.md)承担，文件历史与审批 provenance 由 Git 和 PR 承担。真实发布所需字段、证据与学习回写要求由 Release Bundle 机器合同承重，[分析、测试与发布证据](../frontend/12-analytics-testing-and-release-evidence.md)解释人类流程。
 
 Release Bundle 的 shape 检查不等于 authenticity 检查。`CHECK_RUN / GITHUB_REVIEW / SIGNED_AUTHORIZATION`、merge parent 和 `evidence_ref` 在 bundle 中都只是待回读的声明；仅改成 `VERIFIED` 或填入 URL 会被验证器拒绝。当前有效边界是 `EXTERNAL_UNVERIFIED`，而不是“schema 通过即可晋级”。
+
+Trusted Approval 的 local Task 3/4 validators、state 与 CLI 已实现并经确定性测试，但它们只检查本地输入形状或 fixture 内部一致性，尚无 product、durable 或 external trust。Synthetic inspector 的输出固定为 `evidence_trust_state=EXTERNAL_UNVERIFIED`、`trust_eligible=false`、`external_receipt_bytes_observed=false`、`durable_ledger_readback_observed=false`，并带 `APPROVAL_INDEPENDENCE_NOT_PROVEN`；它不能授权 approval、merge、dispatch 或 Release。未来仍需经独立 hosted readback 实际回读 receipt raw bytes、evidence manifest、independent verifier 与 durable ledger，并实现 durable admission/adapters 和 acceptance consumer，才可能构建 trusted consumer。
 
 ## 2. 唯一事实规则
 

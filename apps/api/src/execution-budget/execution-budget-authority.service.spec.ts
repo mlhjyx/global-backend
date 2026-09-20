@@ -18,6 +18,8 @@ import {
 } from './execution-budget-authority.types';
 import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
 import { ExecutionBudgetModule } from './execution-budget.module';
+import { WorkspaceTechnicalBudgetQuoteController } from './workspace-technical-budget-quote.controller';
+import { WorkspaceTechnicalBudgetQuoteService } from './workspace-technical-budget-quote';
 
 const WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
@@ -224,7 +226,7 @@ describe('ExecutionBudgetAuthorityService', () => {
 });
 
 describe('ExecutionBudgetModule product composition', () => {
-  it('registers and exports the authority application services without a transport', async () => {
+  it('registers authority services and the authenticated zero-side-effect quote transport', async () => {
     const { PlatformExecutionBudgetAuthorityIngestionService } =
       await import('./platform-authority-ingestion.service');
     const providers = Reflect.getMetadata(
@@ -233,6 +235,10 @@ describe('ExecutionBudgetModule product composition', () => {
     ) as readonly unknown[];
     const exports = Reflect.getMetadata(
       MODULE_METADATA.EXPORTS,
+      ExecutionBudgetModule,
+    ) as readonly unknown[];
+    const controllers = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
       ExecutionBudgetModule,
     ) as readonly unknown[];
 
@@ -245,11 +251,17 @@ describe('ExecutionBudgetModule product composition', () => {
       ExecutionBudgetAuthorityService,
       PlatformExecutionBudgetAuthorityIngestionService,
       ExecutionBudgetAuthorityReadinessContributors,
+      {
+        provide: WorkspaceTechnicalBudgetQuoteService,
+        useFactory: expect.any(Function),
+      },
     ]);
     expect(exports).toEqual([
       ExecutionBudgetAuthorityService,
       PlatformExecutionBudgetAuthorityIngestionService,
+      WorkspaceTechnicalBudgetQuoteService,
     ]);
+    expect(controllers).toEqual([WorkspaceTechnicalBudgetQuoteController]);
     expect(providers).not.toContain(TOOL_BUDGET_STORE);
     const verifierProvider = providers[0] as {
       useFactory: () => ExecutionBudgetGrantVerifier;

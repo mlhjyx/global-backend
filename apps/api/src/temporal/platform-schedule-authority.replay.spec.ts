@@ -6,6 +6,11 @@ import {
   type WorkflowBundle,
 } from "@temporalio/worker";
 import { beforeAll, describe, it } from "vitest";
+import {
+  PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+  PLATFORM_SCHEDULE_AUTHORITY_PATCH,
+  PLATFORM_SCHEDULE_AUTHORITY_SCOPES,
+} from "./platform-schedule-authority";
 
 function payload(value: unknown) {
   const converted = defaultPayloadConverter.toPayload(value)!;
@@ -120,6 +125,68 @@ function legacyHistory(input: {
   };
 }
 
+function postAuthorityPatentsHistory() {
+  const executionScope =
+    PLATFORM_SCHEDULE_AUTHORITY_SCOPES["patents-cache-refresh"];
+  const history = legacyHistory({
+    workflowType: "patentsCacheRefreshWorkflow",
+    workflowInput: {
+      executionContractVersion: PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+      executionScope,
+      maxAnchors: 11,
+    },
+    activityType: "admitPlatformSchedule",
+    activityInput: {
+      executionContractVersion: PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
+      executionScope,
+      workflowRunId: "00000000-0000-4000-8000-000000000001",
+    },
+    startToCloseTimeout: "60s",
+  }) as { events: Array<Record<string, unknown>> };
+  const scheduled = history.events[4]!;
+  scheduled.eventId = "7";
+  scheduled.taskId = "7";
+  history.events.splice(
+    4,
+    0,
+    {
+      eventId: "5",
+      eventTime: "2026-08-21T00:00:00Z",
+      eventType: "EVENT_TYPE_MARKER_RECORDED",
+      taskId: "5",
+      markerRecordedEventAttributes: {
+        markerName: "core_patch",
+        details: {
+          "patch-data": {
+            payloads: [
+              payload({
+                id: PLATFORM_SCHEDULE_AUTHORITY_PATCH,
+                deprecated: false,
+              }),
+            ],
+          },
+        },
+        workflowTaskCompletedEventId: "4",
+      },
+    },
+    {
+      eventId: "6",
+      eventTime: "2026-08-21T00:00:00Z",
+      eventType: "EVENT_TYPE_UPSERT_WORKFLOW_SEARCH_ATTRIBUTES",
+      taskId: "6",
+      upsertWorkflowSearchAttributesEventAttributes: {
+        workflowTaskCompletedEventId: "4",
+        searchAttributes: {
+          indexedFields: {
+            TemporalChangeVersion: payload([PLATFORM_SCHEDULE_AUTHORITY_PATCH]),
+          },
+        },
+      },
+    },
+  );
+  return history;
+}
+
 describe("platform schedule authority old-history replay", () => {
   let workflowBundle: WorkflowBundle;
 
@@ -167,4 +234,12 @@ describe("platform schedule authority old-history replay", () => {
       );
     }, 30_000);
   }
+
+  it("replays a patents history with authority admission but before the deterministic no-egress patch", async () => {
+    await Worker.runReplayHistory(
+      { workflowBundle },
+      postAuthorityPatentsHistory(),
+      "legacy-authorized-patentsCacheRefreshWorkflow",
+    );
+  }, 30_000);
 });

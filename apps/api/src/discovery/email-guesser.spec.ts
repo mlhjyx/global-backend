@@ -201,6 +201,20 @@ describe('EmailGuesser · 边界', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('拒绝绕开 DTO 的第 9 个 SMTP probe，且在验证器调用前失败', async () => {
+    const { adapter, calls } = fakeVerifier(() => REJECT);
+
+    await expect(
+      new EmailGuesser(adapter).guess(
+        { fullName: 'Hans Herold', domain: 'acme.de' },
+        { ...CTX, maxProbe: 9 },
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'EXECUTION_BUDGET_ENVELOPE_EXCEEDED' } },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
   it('候选全在禁联名单 → 一次未探，exhausted 标 all_candidates_suppressed（不谎称已探测拒收，MEDIUM 回归）', async () => {
     const all = new Set(generateEmailCandidates('Hans Herold', 'acme.de').map((c) => c.email.toLowerCase()));
     const { adapter, calls } = fakeVerifier(() => REJECT);

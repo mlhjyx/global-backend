@@ -1,6 +1,4 @@
-export type ExecutionBudgetAuthorityKind =
-  | 'WORKSPACE_GRANT'
-  | 'PLATFORM_GRANT';
+export type ExecutionBudgetAuthorityKind = 'WORKSPACE_GRANT' | 'PLATFORM_GRANT';
 
 export type ExecutionBudgetPurpose =
   | 'icp.design'
@@ -30,6 +28,11 @@ export interface VerifiedExecutionBudgetAuthority {
   readonly subjectId: string;
   readonly requestSha256: string | null;
   readonly scheduleId: string | null;
+  /** Required only for platform grants; absent from the workspace contract. */
+  readonly scheduleRequestSha256?: string;
+  readonly workflowId?: string;
+  readonly workflowRunId?: string;
+  readonly technicalPolicyRevision?: string;
   readonly currency: 'USD';
   readonly unit: 'microusd';
   readonly capMicrousd: bigint | null;
@@ -94,7 +97,69 @@ type AuthorityPurposeShape = Pick<
   | 'capPerRunMicrousd'
   | 'campaignCapMicrousd'
   | 'maxRuns'
+  | 'scheduleRequestSha256'
+  | 'workflowId'
+  | 'workflowRunId'
+  | 'technicalPolicyRevision'
 >;
+
+export interface PlatformExecutionInvocation {
+  readonly scheduleRequestSha256: string;
+  readonly workflowId: string;
+  readonly workflowRunId: string;
+  readonly technicalPolicyRevision: string;
+}
+
+export interface PlatformExecutionBudgetRunExpectation extends PlatformExecutionInvocation {
+  readonly purpose: (typeof EXECUTION_BUDGET_PLATFORM_PURPOSES)[number];
+  readonly subjectType: 'schedule';
+  readonly subjectId: string;
+  readonly scheduleId: string;
+}
+
+export function assertPlatformExecutionInvocation(
+  authority: Pick<
+    VerifiedExecutionBudgetAuthority,
+    | 'scheduleRequestSha256'
+    | 'workflowId'
+    | 'workflowRunId'
+    | 'technicalPolicyRevision'
+  >,
+): asserts authority is PlatformExecutionInvocation {
+  const sha = /^[0-9a-f]{64}$/;
+  const workflowId = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+  const runId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  if (
+    typeof authority.scheduleRequestSha256 !== 'string' ||
+    !sha.test(authority.scheduleRequestSha256) ||
+    typeof authority.technicalPolicyRevision !== 'string' ||
+    !sha.test(authority.technicalPolicyRevision) ||
+    typeof authority.workflowId !== 'string' ||
+    !workflowId.test(authority.workflowId) ||
+    typeof authority.workflowRunId !== 'string' ||
+    !runId.test(authority.workflowRunId)
+  )
+    scopeMismatch();
+}
+
+export function assertPlatformExecutionBudgetRunExpectation(
+  expected: PlatformExecutionBudgetRunExpectation,
+): void {
+  if (
+    !PLATFORM_PURPOSES.has(expected.purpose) ||
+    expected.subjectType !== 'schedule' ||
+    !isNonEmptyString(expected.subjectId) ||
+    !isNonEmptyString(expected.scheduleId) ||
+    expected.subjectId !== expected.scheduleId ||
+    expected.subjectId.length > 191 ||
+    expected.scheduleId.length > 191 ||
+    [...expected.scheduleId].some((character) => character.charCodeAt(0) < 32)
+  ) {
+    scopeMismatch();
+  }
+  assertPlatformExecutionInvocation(expected);
+}
 
 const WORKSPACE_PURPOSE_SUBJECT_TYPES: Readonly<
   Record<string, readonly string[]>
@@ -139,7 +204,8 @@ export function assertAuthorityPurposeShape(
   authority: AuthorityPurposeShape,
 ): void {
   if (authority.authorityKind === 'WORKSPACE_GRANT') {
-    const allowedSubjectTypes = WORKSPACE_PURPOSE_SUBJECT_TYPES[authority.purpose];
+    const allowedSubjectTypes =
+      WORKSPACE_PURPOSE_SUBJECT_TYPES[authority.purpose];
     if (
       !allowedSubjectTypes ||
       !isNonEmptyString(authority.workspaceId) ||
@@ -150,7 +216,11 @@ export function assertAuthorityPurposeShape(
       !isPositiveBigInt(authority.capMicrousd) ||
       authority.capPerRunMicrousd !== null ||
       authority.campaignCapMicrousd !== null ||
-      authority.maxRuns !== null
+      authority.maxRuns !== null ||
+      authority.scheduleRequestSha256 !== undefined ||
+      authority.workflowId !== undefined ||
+      authority.workflowRunId !== undefined ||
+      authority.technicalPolicyRevision !== undefined
     ) {
       scopeMismatch();
     }
@@ -169,8 +239,10 @@ export function assertAuthorityPurposeShape(
     authority.capMicrousd !== null ||
     !isPositiveBigInt(authority.capPerRunMicrousd) ||
     !isPositiveBigInt(authority.campaignCapMicrousd) ||
-    !isPositiveBigInt(authority.maxRuns)
+    authority.maxRuns !== 1n ||
+    authority.campaignCapMicrousd !== authority.capPerRunMicrousd
   ) {
     scopeMismatch();
   }
+  assertPlatformExecutionInvocation(authority);
 }
