@@ -21,6 +21,7 @@ import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
+import { RuntimeClockModule } from './runtime/runtime-clock.module';
 import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guard';
 import { ExecutionBudgetModule } from './execution-budget/execution-budget.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
@@ -39,6 +40,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     }),
     PrismaModule,
     RuntimeModule,
+    RuntimeClockModule,
     AuthModule,
     ModelGatewayModule,
     ExecutionBudgetModule,

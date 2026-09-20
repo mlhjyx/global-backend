@@ -1,7 +1,8 @@
 import 'reflect-metadata';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { ClaimController } from '../claim/claim.controller';
 import { CompanyController } from '../company/company.controller';
@@ -25,6 +26,9 @@ import { SiteBuildTechnicalBudgetQuoteController } from '../site-builder/site-bu
 import { WhoamiController } from '../whoami/whoami.controller';
 import { AuthGuard } from './auth.guard';
 import { ScopesGuard } from './scopes.guard';
+import { RuntimeClockController } from '../runtime/runtime-clock.controller';
+import { READ_ONLY_CONTROL_PLANE_METADATA } from '../runtime/read-only-control-plane.decorator';
+import { RECOVERY_CONTROL_PLANE_METADATA } from '../runtime/recovery-control-plane.decorator';
 
 const PROTECTED_CONTROLLERS = [
   ClaimController,
@@ -45,6 +49,7 @@ const PROTECTED_CONTROLLERS = [
 
 const PUBLIC_CONTROLLER_FILES = new Set([
   'health/health.controller.ts',
+  'runtime/runtime-clock.controller.ts',
   'site-builder/site-preview.controller.ts',
   'platform-authority/platform-fence-ack-jwks.controller.ts',
 ]);
@@ -72,6 +77,17 @@ function controllerFiles(root: string): string[] {
 }
 
 describe('controller authorization guard topology', () => {
+  it('limits the public clock controller to one GET diagnostic without mutation exemptions', () => {
+    expect(Reflect.getMetadata(PATH_METADATA, RuntimeClockController)).toBe('health');
+    expect(Object.getOwnPropertyNames(RuntimeClockController.prototype).filter(name => name !== 'constructor')).toEqual(['read']);
+    const handler = RuntimeClockController.prototype.read;
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('clock');
+    for (const target of [RuntimeClockController, handler]) {
+      expect(Reflect.getMetadata(READ_ONLY_CONTROL_PLANE_METADATA, target)).toBeUndefined();
+      expect(Reflect.getMetadata(RECOVERY_CONTROL_PLANE_METADATA, target)).toBeUndefined();
+    }
+  });
   it('requires the dedicated signed-command guard for the recovery mutation', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, PlatformRevocationHttpController)).toEqual([PlatformRevocationHttpGuard]);
   });
