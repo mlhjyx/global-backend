@@ -312,9 +312,8 @@ test("GitHub invocation is closed and carries only a credential handle", () => {
   assert.equal(result.status, "PASS");
   assert.deepEqual(result.argv, [
     "api",
-    "repos/mlhjyx/global-backend/git/ref/heads/main",
-    "--method",
-    "GET",
+    "repos/mlhjyx/global-backend/branches/main",
+    "--method", "GET", "--jq", "[.name,.commit.sha,.protected] | @tsv",
   ]);
   assert.equal(JSON.stringify(result).includes("secret"), false);
 });
@@ -735,4 +734,50 @@ test("GitHub receipts are operation-bound and reject cross-controller or credent
     ).status,
     "INTEGRITY_ERROR",
   );
+});
+
+test('protected-main invocation includes Git advertisement and protected branch projection', () => {
+  const descriptor = buildGitHubControllerInvocation(request(), contract(), evidence());
+  assert.deepEqual(descriptor.preReadbacks, [{executableRole:'GIT',argv:[
+    'ls-remote','--exit-code','--refs','https://github.com/mlhjyx/global-backend.git','refs/heads/main',
+  ]}]);
+  assert.ok(descriptor.argv.includes('repos/mlhjyx/global-backend/branches/main'));
+  assert.ok(descriptor.argv.includes('[.name,.commit.sha,.protected] | @tsv'));
+});
+
+test('protected-main normalization rejects mismatched, duplicate or unprotected observations without exposing data', async () => {
+  const api = await import('./governance-organization-identity-github-controller.mjs');
+  assert.equal(typeof api.normalizeProtectedMainReadback, 'function');
+  const git = `${COMMIT}\trefs/heads/main\n`, branch = `main\t${COMMIT}\ttrue\n`;
+  const accepted = api.normalizeProtectedMainReadback(git, branch);
+  assert.equal(accepted.status, 'PASS');
+  assert.equal(accepted.admissionGranted, false);
+  assert.equal(accepted.resultRecord.observedHeadSha, COMMIT);
+  assert.equal(accepted.resultRecord.protected, true);
+  for (const [g,b] of [[git+'\n',branch],[git,branch+'\n'],[git+git,branch],[git,branch+branch],[git,branch.replace('true','false')],
+    [git,branch.replace(COMMIT,'2'.repeat(40))],[git.replace('heads/main','heads/other'),branch],
+    [git,`private-response-value\n${branch}`],['a'.repeat(5000),branch],[null,branch]]) {
+    const result = api.normalizeProtectedMainReadback(g,b);
+    assert.equal(result.status, 'INTEGRITY_ERROR');
+    assert.equal(JSON.stringify(result).includes('private-response-value'), false);
+  }
+});
+
+test('readback orchestration refuses invalid requests before execution and binds both real observation slots', async () => {
+  const api = await import('./governance-organization-identity-github-controller.mjs');
+  assert.equal(typeof api.collectProtectedMainReadback, 'function');
+  const calls=[];
+  const execute=async descriptor=>{
+    calls.push(descriptor);
+    return {exitCode:0,stdout:descriptor.executableRole==='GIT'?`${COMMIT}\trefs/heads/main\n`:`main\t${COMMIT}\ttrue\n`,stderr:''};
+  };
+  const result = await api.collectProtectedMainReadback(request(), contract(), evidence(), execute);
+  assert.equal(result.status,'PASS');assert.equal(result.admissionGranted,false);
+  assert.deepEqual(calls.map(c=>c.executableRole),['GIT','GH']);
+  calls.length=0;
+  assert.equal((await api.collectProtectedMainReadback(request({operation:'PR_MERGE'}),contract(),evidence(),execute)).status,'INTEGRITY_ERROR');
+  assert.equal(calls.length,0);
+  assert.equal((await api.collectProtectedMainReadback(request(),contract(),evidence(),async()=>({exitCode:1,stdout:'private',stderr:'private'}))).status,'INTEGRITY_ERROR');
+  const failed=await api.collectProtectedMainReadback(request(),contract(),evidence(),async()=>{throw Error('private token');});
+  assert.equal(failed.status,'INTEGRITY_ERROR');assert.equal(JSON.stringify(failed).includes('private token'),false);
 });

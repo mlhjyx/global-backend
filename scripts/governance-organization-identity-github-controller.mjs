@@ -489,10 +489,11 @@ export function buildGitHubControllerInvocation(request, contract, evidence) {
         executableRole: "GH",
         argv: [
           "api",
-          "repos/mlhjyx/global-backend/git/ref/heads/main",
-          "--method",
-          "GET",
+          "repos/mlhjyx/global-backend/branches/main",
+          "--method", "GET", "--jq", "[.name,.commit.sha,.protected] | @tsv",
         ],
+        preReadbacks: [{ executableRole: "GIT", argv: ["ls-remote", "--exit-code", "--refs",
+          "https://github.com/mlhjyx/global-backend.git", "refs/heads/main"] }],
       });
     case "FETCH_EXACT_OBJECT":
       return pass({
@@ -754,4 +755,44 @@ export function validateGitHubControllerReceipt(
     return integrity("GITHUB_CONTROLLER_RECEIPT_INVALID");
   }
   return pass();
+}
+
+
+// Observation assembly only. The materialized executor must supply the pinned,
+// bounded broker transport; this helper never creates an authority receipt.
+export function normalizeProtectedMainReadback(advertisement, protectedBranch) {
+  if (typeof advertisement !== "string" || typeof protectedBranch !== "string" ||
+      Buffer.byteLength(advertisement) > 4096 || Buffer.byteLength(protectedBranch) > 4096) {
+    return integrity("GITHUB_MAIN_READBACK_INVALID");
+  }
+  const git = /^([a-f0-9]{40})\trefs\/heads\/main\n$/u.exec(advertisement);
+  const api = /^main\t([a-f0-9]{40})\ttrue\n$/u.exec(protectedBranch);
+  if (!git || !api || git[1] !== api[1]) return integrity("GITHUB_MAIN_READBACK_INVALID");
+  return pass({ evidenceClass: "OPERATION_RESULT_ONLY", admissionGranted: false,
+    resultRecord: Object.freeze({ schemaVersion: "organization-identity-protected-main-observation/v1",
+      repository: "mlhjyx/global-backend", ref: "refs/heads/main", observedHeadSha: git[1],
+      advertisedHeadSha: git[1], branchHeadSha: api[1], protected: true }),
+  });
+}
+
+export async function collectProtectedMainReadback(request, contract, evidence, execute) {
+  try {
+    const descriptor = buildGitHubControllerInvocation(request, contract, evidence);
+    if (descriptor.status !== "PASS" || descriptor.operation !== "PROTECTED_MAIN_READBACK" ||
+        typeof execute !== "function") return integrity("GITHUB_MAIN_READBACK_REQUEST_INVALID");
+    const read = async command => {
+      const observation = await execute(Object.freeze({ executableRole: command.executableRole,
+        argv: Object.freeze([...command.argv]), timeoutMs: 15000, maxOutputBytes: 4096 }));
+      if (!hasExactKeys(observation, ["exitCode", "stdout", "stderr"]) || observation.exitCode !== 0 ||
+          typeof observation.stdout !== "string" || observation.stderr !== "" ||
+          Buffer.byteLength(observation.stdout) > 4096) throw Error("GITHUB_MAIN_READBACK_EXECUTION_FAILED");
+      return observation.stdout;
+    };
+    const advertised = await read(descriptor.preReadbacks[0]);
+    const branch = await read(descriptor);
+    return normalizeProtectedMainReadback(advertised, branch);
+  } catch {
+    // Process failures may carry credential-bearing stderr/cause; emit only a closed code.
+    return integrity("GITHUB_MAIN_READBACK_EXECUTION_FAILED");
+  }
 }
