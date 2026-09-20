@@ -365,3 +365,26 @@ test("three-way conflict collection admits exact whitespace-only attributes and 
   assert.equal(collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base,
     branchPreRefreshCommit: unsafeBranch, liveMainCommit: main }).code, "MERGE_ATTRIBUTES_UNSUPPORTED");
 });
+
+test("three-way conflict collection ignores non-conflicting binary deltas while counting text conflicts", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "identity-conflict-binary-delta-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
+  await writeFile(path.join(root, "a.txt"), "base\n");
+  await writeFile(path.join(root, "binary.png"), Buffer.from([0xff, 1, 2]));
+  git("add", "."); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD"); git("checkout", "-qb", "feature");
+  await writeFile(path.join(root, "a.txt"), "feature\n"); git("add", "."); git("commit", "-qm", "feature");
+  const branch = git("rev-parse", "HEAD"); git("checkout", "-q", "main");
+  await writeFile(path.join(root, "a.txt"), "main\n");
+  await writeFile(path.join(root, "binary.png"), Buffer.from([0xfe, 3, 4]));
+  git("add", "."); git("commit", "-qm", "main");
+  const main = git("rev-parse", "HEAD");
+  const result = collectThreeWayConflictFacts({ repoRoot: root, mergeBaseCommit: base,
+    branchPreRefreshCommit: branch, liveMainCommit: main });
+  assert.equal(result.status, "PASS", JSON.stringify(result));
+  assert.deepEqual(result.conflicts.map((row) => row.path), ["a.txt"]);
+  assert.equal(result.conflicts[0].hunkCount, 1);
+});

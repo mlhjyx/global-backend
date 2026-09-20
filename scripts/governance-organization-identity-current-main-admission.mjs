@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { types } from "node:util";
 
@@ -471,32 +472,59 @@ export function collectThreeWayConflictFacts(options) {
       scanned += bytes.length;
       if (scanned > 64 * 1024 * 1024 || bytes.includes(0) || /^(?:<<<<<<<|=======|>>>>>>>)/mu.test(bytes.toString("utf8"))) return hold("CONFLICT_SOURCE_UNSUPPORTED");
     }
-    const raw = readObjectGit(repoRoot, ["-c", "core.attributesFile=/dev/null", "merge-tree", base, branch, main]);
-    const text = raw.toString("utf8");
-    if (!Buffer.from(text).equals(raw)) return hold("CONFLICT_ENCODING_INVALID");
+    const temporary = mkdtempSync(path.join(os.tmpdir(), "identity-conflict-objects-"));
+    let raw;
     const conflicts = [];
-    let block = null;
-    const finish = () => {
-      if (!block) return;
-      if (block.starts !== block.ends || block.starts !== block.separators) throw Error("CONFLICT_MARKERS_UNBALANCED");
-      if (!block.starts) return;
-      if (block.paths.size !== 1) throw Error("CONFLICT_PATH_AMBIGUOUS");
-      const p = [...block.paths][0];
-      conflicts.push({ path: p, hunkCount: block.starts, baseBlobId: maps[0].get(p) ?? null,
-        branchBlobId: maps[1].get(p) ?? null, mainBlobId: maps[2].get(p) ?? null });
-    };
-    for (const line of text.split("\n")) {
-      if (/^(changed in both|added in both|merged|removed in both|removed in local|removed in remote|added in remote|added in local)$/u.test(line)) {
-        finish(); block = { paths: new Set(), starts: 0, separators: 0, ends: 0 }; continue;
+    try {
+      const objectDirectory = path.join(temporary, "objects");
+      mkdirSync(objectDirectory, { mode: 0o700 });
+      const configuredObjects = readObjectGit(repoRoot, ["rev-parse", "--git-path", "objects"]).toString().trim();
+      const sharedObjects = realpathSync(path.isAbsolute(configuredObjects)
+        ? configuredObjects
+        : path.join(repoRoot, configuredObjects));
+      const env = {
+        PATH: "/usr/bin:/bin", HOME: "/nonexistent", XDG_CONFIG_HOME: "/nonexistent", GIT_CONFIG_NOSYSTEM: "1",
+        GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1", GIT_NO_REPLACE_OBJECTS: "1",
+        GIT_ALLOW_PROTOCOL: "", GIT_OBJECT_DIRECTORY: objectDirectory, GIT_ALTERNATE_OBJECT_DIRECTORIES: sharedObjects,
+      };
+      const merged = spawnSync("/usr/bin/git", ["-C", repoRoot, "-c", "core.attributesFile=/dev/null",
+        "merge-tree", "--write-tree", "--messages", branch, main],
+      { env, encoding: null, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+      if (![0, 1].includes(merged.status) || merged.error || !Buffer.isBuffer(merged.stdout) || !Buffer.isBuffer(merged.stderr) || merged.stderr.length) {
+        throw Error("MERGE_TREE_FAILED");
       }
-      const stage = /^  (?:base|our|their)  (?:100644|100755) [a-f0-9]{40} ([\s\S]+)$/u.exec(line);
-      if (stage && block) { if (!validPath(stage[1]) || !maps.some(m => m.has(stage[1]))) throw Error("CONFLICT_PATH_INVALID"); block.paths.add(stage[1]); }
-      else if (line.startsWith("+<<<<<<<") && block) block.starts++;
-      else if (line === "+======= " || line === "+=======") { if (!block) throw Error("CONFLICT_BLOCK_INVALID"); block.separators++; }
-      else if (line.startsWith("+>>>>>>>") && block) block.ends++;
-      else if (line && !/^[ +\-@\\]/u.test(line)) throw Error("MERGE_TREE_FORMAT_UNSUPPORTED");
+      raw = merged.stdout;
+      const text = raw.toString("utf8");
+      if (!Buffer.from(text).equals(raw)) throw Error("MERGE_TREE_FORMAT_UNSUPPORTED");
+      const conflictPaths = [...new Set(text.split("\n").map(line => {
+        const match = /^(?:100644|100755) [a-f0-9]{40} [123]\t(.+)$/u.exec(line);
+        return match?.[1] ?? null;
+      }).filter(Boolean))].sort();
+      for (const conflictPath of conflictPaths) {
+        if (!validPath(conflictPath) || !maps.some(map => map.has(conflictPath))) throw Error("CONFLICT_PATH_INVALID");
+        const blobs = maps.map(map => map.get(conflictPath) ?? null);
+        if (blobs.some(blob => blob === null)) throw Error("CONFLICT_SOURCE_UNSUPPORTED");
+        const files = ["branch", "base", "main"].map(name => path.join(temporary, name));
+        [blobs[1], blobs[0], blobs[2]].forEach((blob, index) => writeFileSync(files[index],
+          readObjectGit(repoRoot, ["cat-file", "blob", blob]), { mode: 0o600 }));
+        const mergeFile = spawnSync("/usr/bin/git", ["merge-file", "-p", "--diff3", ...files],
+          { env, encoding: null, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+        if (mergeFile.error || !Number.isInteger(mergeFile.status) || mergeFile.status < 1 ||
+            !Buffer.isBuffer(mergeFile.stdout) || !Buffer.isBuffer(mergeFile.stderr) || mergeFile.stderr.length) {
+          throw Error("CONFLICT_HUNK_COUNT_UNAVAILABLE");
+        }
+        const mergedText = mergeFile.stdout.toString("utf8");
+        if (!Buffer.from(mergedText).equals(mergeFile.stdout)) throw Error("CONFLICT_SOURCE_UNSUPPORTED");
+        const starts = mergedText.split("\n").filter(line => line.startsWith("<<<<<<<")).length;
+        const separators = mergedText.split("\n").filter(line => line === "=======").length;
+        const ends = mergedText.split("\n").filter(line => line.startsWith(">>>>>>>")).length;
+        if (!starts || starts !== separators || starts !== ends) throw Error("CONFLICT_MARKERS_UNBALANCED");
+        conflicts.push({ path: conflictPath, hunkCount: starts, baseBlobId: blobs[0],
+          branchBlobId: blobs[1], mainBlobId: blobs[2] });
+      }
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
     }
-    finish();
     conflicts.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     if (new Set(conflicts.map(r => r.path)).size !== conflicts.length) return hold("CONFLICT_PATH_AMBIGUOUS");
     return pass({ evidenceClass: "LOCAL_CONFLICT_FACTS_ONLY", conflicts,
