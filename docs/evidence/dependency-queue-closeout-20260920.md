@@ -57,4 +57,8 @@ Owner 交付来源分别保留：R4 消息 `PARITY-LOCAL-CLOSEOUT-20260920-17`�
 
 #494/#495 的实际 GitHub 历史是分别 MERGED，随后 #497 完成 harness 收口；不是最初计划的“关闭为 superseded”。#407 与#479 CLOSED并保留 provenance，#407 不等于全量语义接纳。原始状态页和旧运行观察的 Git provenance 与 evidence links 保留，不把2026-09-12的health/readiness写作本轮当前运行。
 
-JS production audit 的 `PASS_CLEAR / 0 advisories` 与所有依赖告警、Go 安全性、baseline freshness 分开。完整 npm audit 观察仍有12项漏洞（2high/10moderate），GitHub告警也包含原生Go OTel低危；后者已交 native owner 按其范围处理。对未变工具链源码冻结 `58f4971f42a04b8c5c544da1203d5c18c8c03081` 的实际 freshness CLI 返回 exit1、`AUDIT_INVALID_HOLD / BASELINE_SOURCE_LOCK_MISMATCH`，不是 PASS。独立 Draft #542（已观察 head `4aeb2d5aff7f2df8fe03ad9c936e2d71b3d4d5de`）绑定旧 main `1aaa1a779bbf716f301e5f08c7f3d0ad37eeaacc`，仍须确认 owner 并对最终 lock重新审计，不能放宽零漏洞政策或原有效期。该待处理门明确保留，不用源合入推导发布可用。
+JS production audit 的 `PASS_CLEAR / 0 advisories` 与所有依赖告警、Go 安全性和运行发布分开。此前完整 npm audit 有12项漏洞（2high/10moderate），GitHub告警也包含原生Go OTel低危；这些观察保留为对应时间/来源的范围记录。此前 `58f4971f42a04b8c5c544da1203d5c18c8c03081` 的 `AUDIT_INVALID_HOLD / BASELINE_SOURCE_LOCK_MISMATCH` 回执未被改写。
+
+迁移任务随后将 #542 合入 `cca0d0e546ab649fcdfd22132c96fa44c4b4c1cd`，并明确释放依赖窗口；本任务接入该基线后，以干净候选 `728fbf8eaab86f24182cffe1cccdfb5fbaa7e16c` 重新访问官方 npm registry，872个生产依赖、0 advisories。同一新审计在旧 lock绑定下实际HOLD、更新精确来源/lock/采集时间后FRESH，25项供应链回归通过；原政策、有效期和verifier未改变，见[新冻结证据](security/20260920-tooling-baseline-refresh.json)。不把旧head的CI当作新head通过，最终候选仍需自己的完整hosted门。
+
+恢复窗口时另收到身份owner回执 `PR538-NATIVE-READER-LOCAL-20260920-15`：native HTTPS方向已确认、本地读取器在2f5d4313完成54项相关测试；该确认不等于凭据、物化、真实请求或ADMITTED授权。迁移owner报告镜像 `sha256:65e3b734c858d0b6019da27ee2a36dbb8baaa9f42b713bbb7e2fe336cece23c5` 已拉取并验证，本任务只独立核对[发布运行](https://github.com/mlhjyx/global-backend/actions/runs/35499848896)成功且绑定cca0d0e5，没有据此宣称运行、Release Bundle或UAT完成，也不操作远端服务。

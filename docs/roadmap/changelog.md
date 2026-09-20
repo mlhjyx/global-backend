@@ -7,7 +7,7 @@
 - 保留 Copy 固定 binding 和 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`，只重算实际源码的派生指纹；保留无关平台 metadata，工具链候选恢复10项共享解析降级。真实MinIO、本地SDK/loopback与现有测试不升级为retained runtime、Release、UAT或Pilot/GA。
 - 修正状态页中#407仍开放、#451仍待办以及把2026-09-12运行观察当作当前事实的旧文字；原文Git provenance、历史evidence和产品完整C1–C5/QGO、Site验收、Billing延期边界保留。#494/#495实际分别MERGED，随后#497收口；不把实际历史改写成最初计划的superseded路线。
 - 216个历史worktree候选的commit/tree完成独立恢复回读，ignored材料、owner release与精确删除授权仍独立处理；没有据此删除未知分支或现场。根main只经受控governor跟随，实际同步与全量处置结果由批末回执确立。
-- 生产审计零advisories不等于baseline freshness；旧baseline实际为`BASELINE_SOURCE_LOCK_MISMATCH`，独立Draft#542仍需针对最终lock重审。其他owner的R4、身份admission与Program C仅按其已交付层级记录，未声明全产品闭环。
+- 生产审计零advisories不等于baseline freshness。迁移任务的#542合入并发布后明确释放依赖窗口；本工具链候选重新采集精确生产审计，实际旧绑定HOLD、新绑定FRESH，保留原政策/到期时间/verifier及全部历史回执。其他owner的R4、身份admission与Program C按各自已交付层级记录，未声明全产品闭环。
 
 ## 2026-09-12 · GrowthOS managed release restoration
 
@@ -548,3 +548,6 @@ Codex 复审 #56（收口⑤ 一等 Signal）提 **P1 TOCTOU**：`temporal/exter
 同日 main 合入AI SDK 依赖更新后，再以干净提交 `03e8ada02010052bf4220e1063d2c5c987bf1f8a` 对官方 registry 重审，仍为零公告；刷新当前绑定并保留原到期时间。同一审计在旧绑定下失败，在新绑定下返回 `FRESH`。
 
 原始审计和新鲜度回执保存在[冻结证据](../evidence/security/20260920-baseline-refresh.json)。本记录不证明镜像已发布、运行部署完成或当前主线永远满足基线。
+
+
+2026-09-20 工具链候选重审：源码 `728fbf8eaab86f24182cffe1cccdfb5fbaa7e16c`、锁文件 `sha256:3fa4365cd8f83ba44680fa94e1f3c336a5c94eb055065a0b1eae38ab97333787`，官方production audit共872依赖、零公告；同一审计在旧绑定下HOLD，刷新来源和采集时点后FRESH。原有效期不变，前后回执见[工具链重审证据](../evidence/security/20260920-tooling-baseline-refresh.json)。
