@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,7 +9,10 @@ const migrationPath = resolve(
   repositoryRoot,
   "packages/db/prisma/migrations/20260830090000_organization_identity_v2_resolver_command/migration.sql",
 );
-const schemaPath = resolve(repositoryRoot, "packages/db/prisma/schema.prisma");
+const migrationRepositoryPath =
+  "packages/db/prisma/migrations/20260830090000_organization_identity_v2_resolver_command/migration.sql";
+const schemaRepositoryPath = "packages/db/prisma/schema.prisma";
+const artifactACommit = "2400bac28796bae44294114edc99eaccb1bd65b3";
 const resolverPath = resolve(
   repositoryRoot,
   "apps/api/src/discovery/organization-identity-resolver.ts",
@@ -25,6 +29,13 @@ function source(path: string): string {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function git(...args: string[]): string {
+  return execFileSync("git", ["-C", repositoryRoot, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 function withoutDollarQuotedBodies(sql: string): string {
@@ -118,10 +129,19 @@ function functionRevokes(
 describe("organization identity resolver command migration", () => {
   it("adds only the reviewed command migration and preserves the Prisma datamodel", () => {
     const sql = source(migrationPath);
+    const migrationCommit = git(
+      "log", "--diff-filter=A", "-n", "1", "--format=%H", "--", migrationRepositoryPath,
+    );
+    const migrationParent = git("rev-parse", `${migrationCommit}^`);
     expect(
-      sha256(source(schemaPath)),
+      git("rev-parse", `${migrationCommit}:${schemaRepositoryPath}`),
       "Task 6B.2c must not change schema.prisma",
-    ).toBe("3db362c1c84f5f12ffa788eb54f2448a3b77d0dad410b96733acef1cc7337c3b");
+    ).toBe(git("rev-parse", `${migrationParent}:${schemaRepositoryPath}`));
+    expect(
+      sha256(sql),
+      "the command migration must preserve the final reviewed Artifact A bytes",
+    ).toBe(sha256(execFileSync("git", ["-C", repositoryRoot, "show",
+      `${artifactACommit}:${migrationRepositoryPath}`], { encoding: "utf8" })));
     const topLevel = withoutDollarQuotedBodies(sql);
     expect(topLevel.match(/^BEGIN;$/gmu)).toHaveLength(1);
     expect(topLevel.match(/^COMMIT;$/gmu)).toHaveLength(1);

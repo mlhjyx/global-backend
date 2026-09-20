@@ -298,7 +298,7 @@ describe('actual discovery receipt consumers', () => {
       dedupeKey: 'd:acme.example',
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: { findUnique: vi.fn(async () => company) },
       fieldEvidence: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
@@ -339,7 +339,7 @@ describe('actual discovery receipt consumers', () => {
       dedupeKey: 'd:acme.example',
     };
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: { findUnique: vi.fn(async () => company) },
       fieldEvidence: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
