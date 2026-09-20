@@ -14,6 +14,8 @@ import { PlatformExecutionTechnicalQuoteController } from '../platform-authority
 import { PlatformTechnicalQuoteServiceAuthenticationGuard } from '../platform-authority/platform-technical-quote-service-auth';
 import { PlatformTargetLookupController } from '../platform-authority/platform-target-lookup.controller';
 import { PlatformTargetLookupGuard } from '../platform-authority/platform-target-lookup.guard';
+import { PlatformRevocationHttpController } from '../platform-authority/platform-revocation-http.controller';
+import { PlatformRevocationHttpGuard } from '../platform-authority/platform-revocation-http.guard';
 import { AssetsController } from '../site-builder/assets.controller';
 import { BuildsController } from '../site-builder/builds.controller';
 import { IntakeController } from '../site-builder/intake.controller';
@@ -44,6 +46,7 @@ const PROTECTED_CONTROLLERS = [
 const PUBLIC_CONTROLLER_FILES = new Set([
   'health/health.controller.ts',
   'site-builder/site-preview.controller.ts',
+  'platform-authority/platform-fence-ack-jwks.controller.ts',
 ]);
 
 const SERVICE_PROTECTED_CONTROLLERS = [
@@ -53,6 +56,7 @@ const SERVICE_PROTECTED_CONTROLLERS = [
 const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
   'platform-authority/platform-execution-technical-quote.controller.ts',
   'platform-authority/platform-target-lookup.controller.ts',
+  'platform-authority/platform-revocation-http.controller.ts',
 ]);
 
 function controllerFiles(root: string): string[] {
@@ -68,6 +72,9 @@ function controllerFiles(root: string): string[] {
 }
 
 describe('controller authorization guard topology', () => {
+  it('requires the dedicated signed-command guard for the recovery mutation', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, PlatformRevocationHttpController)).toEqual([PlatformRevocationHttpGuard]);
+  });
   it('requires the dedicated guarded lookup pipeline for its read-only handler', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, PlatformTargetLookupController)).toEqual([PlatformTargetLookupGuard]);
   });
@@ -104,7 +111,9 @@ describe('controller authorization guard topology', () => {
       const source = readFileSync(absolute, 'utf8');
       if (SERVICE_PROTECTED_CONTROLLER_FILES.has(path)) {
         discoveredServiceProtected.add(path);
-        const requiredTokens = path === 'platform-authority/platform-target-lookup.controller.ts' ? [
+        const requiredTokens = path === 'platform-authority/platform-revocation-http.controller.ts' ? [
+          '@UseGuards(PlatformRevocationHttpGuard)', '@PlatformRevocationRecovery()', '@ApiConsumes("application/jose")', 'receivePlatformAuthorityRevocation_v1',
+        ] : path === 'platform-authority/platform-target-lookup.controller.ts' ? [
           '@ApiBearerAuth(PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME)',
           '@UseGuards(PlatformTargetLookupGuard)',
           '@ReadOnlyControlPlane()',

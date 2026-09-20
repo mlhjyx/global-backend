@@ -8,6 +8,7 @@ import { RuntimeAdmissionService } from './runtime-admission';
 import { RuntimeReadinessService } from '../health/runtime-readiness.service';
 import { Reflector } from '@nestjs/core';
 import { READ_ONLY_CONTROL_PLANE_METADATA } from './read-only-control-plane.decorator';
+import { RECOVERY_CONTROL_PLANE_METADATA, PLATFORM_REVOCATION_RECOVERY } from './recovery-control-plane.decorator';
 
 const MUTATING_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -35,8 +36,12 @@ export class RuntimeWorkAdmissionGuard implements CanActivate {
         READ_ONLY_CONTROL_PLANE_METADATA,
         [context.getHandler(), context.getClass()],
       ) === true;
+    const recoveryControlPlane = method === 'POST' &&
+      this.reflector.get<string>(RECOVERY_CONTROL_PLANE_METADATA, context.getHandler()) === PLATFORM_REVOCATION_RECOVERY &&
+      this.admission.current().admitted;
     if (
       readOnlyControlPlane ||
+      recoveryControlPlane ||
       !MUTATING_HTTP_METHODS.has(method) ||
       (this.admission.current().admitted &&
         this.readiness.current().status === 'ready')

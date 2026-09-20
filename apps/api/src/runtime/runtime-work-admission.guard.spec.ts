@@ -49,6 +49,26 @@ function productionTypescript(directory: string): string[] {
 }
 
 describe('RuntimeWorkAdmissionGuard', () => {
+  it('admits code-owned recovery writes independently of aggregate readiness but never release admission', () => {
+    const handler = () => undefined;
+    Reflect.defineMetadata('runtime:recovery-control-plane', 'platform-authority-revocation', handler);
+    const make = (admitted: boolean) => new RuntimeWorkAdmissionGuard(
+      { current: () => ({ admitted }) } as never,
+      { current: () => ({ status: 'not_ready' }) } as never,
+      new Reflector(),
+    );
+    expect(make(true).canActivate(context('POST', { handler }))).toBe(true);
+    expect(() => make(false).canActivate(context('POST', { handler }))).toThrow('RUNTIME_ADMISSION_CLOSED');
+    for (const method of ['PUT', 'PATCH', 'DELETE']) {
+      expect(() => make(true).canActivate(context(method, { handler }))).toThrow('RUNTIME_ADMISSION_CLOSED');
+    }
+    expect(() => make(true).canActivate(context('POST', {
+      request: { headers: { 'x-recovery-control-plane': 'platform-authority-revocation' } },
+    }))).toThrow('RUNTIME_ADMISSION_CLOSED');
+    Reflect.defineMetadata('runtime:recovery-control-plane', true, handler);
+    expect(() => make(true).canActivate(context('POST', { handler }))).toThrow('RUNTIME_ADMISSION_CLOSED');
+  });
+
   it('keeps concrete Nest injection metadata for the dynamic readiness snapshot', () => {
     expect(
       Reflect.getMetadata('design:paramtypes', RuntimeWorkAdmissionGuard),

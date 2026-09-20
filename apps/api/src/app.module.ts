@@ -25,6 +25,7 @@ import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guar
 import { ExecutionBudgetModule } from './execution-budget/execution-budget.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 import { PlatformTargetLookupModule } from './platform-authority/platform-target-lookup.module';
+import { PlatformRevocationHttpModule } from './platform-authority/platform-revocation-http.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -43,6 +44,7 @@ import { PlatformTargetLookupModule } from './platform-authority/platform-target
     ExecutionBudgetModule,
     PlatformAuthorityModule,
     PlatformTargetLookupModule,
+    PlatformRevocationHttpModule,
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,
