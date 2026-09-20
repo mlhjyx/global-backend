@@ -2,6 +2,8 @@
 
 状态：DRAFT_FOR_INDEPENDENT_REVIEW。用户本轮授权查找与设计说明；本文不授权创建凭据、安装 broker、物化 controller 或执行真实认证请求。
 
+后续传输实测已发现当前 GH 的重定向与原始响应限额缺口。[限定的 HTTPS 修订提案](2026-09-20-identity-protected-main-native-https-amendment.md)已完成独立设计审查，等待 owner 决策；本页的 GH 物理操作描述未因此自动获得替代实现或运行授权。
+
 ## 1. 现场结论
 
 2026-09-20 只读核查未发现可用的仓库限定 FD broker：会话工具没有对应入口；仓库只有 ROOT_SECRET_STORE / GITHUB_TOKEN_HANDLE 合同及 fixture；计划中的 controllers/github 与 /run/identity-github-credential-broker 均不存在。机器有 /usr/bin/pass，但 /root/.password-store 及 .gpg-id 不存在。systemd-udev-load-credentials.service 是通用系统单元，不是 GitHub broker。

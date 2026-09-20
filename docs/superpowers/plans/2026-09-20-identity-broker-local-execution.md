@@ -47,3 +47,9 @@ Technical references checked for the selected Git command profile: [Git 2.53 com
 ## Independent review fixes for the preparation layer
 
 The fresh read-only reviewer found two P2 issues: a colon in a Linux directory name could inject a second PATH/GIT_CEILING_DIRECTORIES entry, and four empty private workspace directories did not validate their ancestors. Both were reproduced by failing tests before repair. Profiles now reject path-list delimiters, filesystem root and trailing-slash aliases. All workspace leaves reuse the same trusted-parent collector as tool files and include parent identities in the before/after comparison. Real temporary-directory tests cover each of cwd/home/config/temporary beneath either a non-sticky writable parent or a non-root-owned parent. No findings were deferred. These repairs validate local preparation only; the reviewer did not execute tests or attest controller authority.
+
+## Confirmed GH transport limitation
+
+The 2026-09-20 diagnostic used only a 127.0.0.1 HTTP server and synthetic authentication input, with update notifications disabled and empty temporary GH configuration. The installed GH binary followed a local 302 and projected a 2,097,257-byte raw JSON body into 51 stdout bytes while the outer runner's 4096-byte output limit passed. This directly confirms that the current GH profile cannot supply a raw-response byte limit or redirect refusal. It is diagnostic evidence, not a provider/GitHub call or successful controller acceptance.
+
+The [native HTTPS amendment](../specs/2026-09-20-identity-protected-main-native-https-amendment.md) proposes replacing only this observation. Its local implementation depends on the required security-design review and owner decision; no existing v2 contract or historical receipt may be upgraded by this proposal. Existing primitives and offline CLI remain preserved, and the overall execution/admission status remains HOLD.
