@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "organization-identity-bootstrap-contract/v2",
+  "launcherContractSha256": "7f4ebcb725bf6f87bb32c0ef6da98933c77e0d5de69341e0a5f93171c45bc5a3",
+  "bootstrapSchemaSha256": "22bd080b957071ff11f00deb523176b223abe467c545b10b0c54a7ce80112858",
+  "closedRequestSchemaSha256": "86bdbb58bc85ec897847563a94b544086172aa12b155317eca391bbda491130f",
+  "effectivePnpmArgvRuleSha256": "c38f8dfb7481c24859339f7f2f648afd0ffc0713f8298b6a5ce9c4985b592202",
+  "receiptComparatorSha256": "8e440a465d22d2a8efedfd6efe7e840f32e89dd066ffcc7b9510643c885dcf6f",
+  "toolLogicalExpectations": [
+    {
+      "role": "ENV",
+      "packageName": "posix-env",
+      "loadPolicy": "EXEC_ONLY",
+      "authority": "PINNED_ABSOLUTE_EXECUTABLE"
+    },
+    {
+      "role": "NODE",
+      "packageName": "node",
+      "loadPolicy": "EXEC_ONLY",
+      "authority": "PINNED_ABSOLUTE_EXECUTABLE"
+    },
+    {
+      "role": "GIT",
+      "packageName": "git",
+      "loadPolicy": "EXEC_ONLY",
+      "authority": "PINNED_ABSOLUTE_EXECUTABLE"
+    },
+    {
+      "role": "COREPACK_SHIM",
+      "packageName": "corepack",
+      "loadPolicy": "HASH_BEFORE_EXEC",
+      "authority": "PINNED_SHIM"
+    },
+    {
+      "role": "COREPACK_LIB_COREPACK_CJS",
+      "packageName": "corepack",
+      "loadPolicy": "HASH_BEFORE_EXEC",
+      "authority": "PINNED_ENTRYPOINT"
+    },
+    {
+      "role": "PNPM_SHIM",
+      "packageName": "pnpm",
+      "loadPolicy": "HASH_BEFORE_EXEC",
+      "authority": "PINNED_SHIM"
+    },
+    {
+      "role": "PNPM_ENTRYPOINT",
+      "packageName": "pnpm",
+      "loadPolicy": "HASH_BEFORE_EXEC",
+      "authority": "PINNED_ENTRYPOINT"
+    }
+  ],
+  "allowedEnvironmentNames": [
+    "PATH",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "COREPACK_HOME",
+    "PNPM_HOME",
+    "TMPDIR",
+    "NPM_CONFIG_USERCONFIG",
+    "CI",
+    "LANG",
+    "LC_ALL"
+  ]
+}

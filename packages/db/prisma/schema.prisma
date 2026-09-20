@@ -1366,10 +1366,12 @@ model RawSourceRecord {
   sourcePolicySnapshot Json?     @map("source_policy_snapshot")
   createdAt            DateTime  @default(now()) @map("created_at")
 
-  run                    DiscoveryRun?                    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  sourceEntity           SourceEntity?                    @relation(fields: [sourceEntityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  governanceDispositions RawSourceGovernanceDisposition[]
-  queryAttemptItems      DiscoveryQueryAttemptItem[]
+  run                     DiscoveryRun?                    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceEntity            SourceEntity?                    @relation(fields: [sourceEntityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  governanceDispositions  RawSourceGovernanceDisposition[]
+  queryAttemptItems       DiscoveryQueryAttemptItem[]
+  organizationIdentifiers OrganizationIdentifier[]
+  identityConflicts       OrganizationIdentityConflict[]
 
   @@unique([workspaceId, id], map: "raw_source_record_workspace_id_id_key")
   @@unique([workspaceId, sourceEntityId, ingestKey], map: "raw_source_record_workspace_source_entity_ingest_key")
@@ -1743,9 +1745,14 @@ model CanonicalCompany {
   contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
   emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at") // 决策人邮箱猜测尝试（选项 B P0.4）
 
-  contacts                CanonicalContact[]
-  leads                   Lead[]
-  materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
+  contacts                  CanonicalContact[]
+  leads                     Lead[]
+  materializationOutcomes   DiscoveryCompanyMaterializationOutcome[]
+  organizationIdentifiers   OrganizationIdentifier[]
+  identityConflictParties   OrganizationIdentityConflictParty[]
+  identitySourceMappings    OrganizationCanonicalMapping[]           @relation("IdentityMappingSource")
+  identityCanonicalMappings OrganizationCanonicalMapping[]           @relation("IdentityMappingCanonical")
+  identityDecisions         OrganizationIdentityDecision[]           @relation("IdentityDecisionCanonicalCompany")
 
   @@unique([workspaceId, dedupeKey])
   @@unique([workspaceId, id], map: "canonical_company_workspace_id_id_key")
@@ -1802,22 +1809,225 @@ model ContactPoint {
 
 /// 身份解析连接（PRD 8.8）：canonical 实体 ↔ raw 记录，可审计可回溯。
 model IdentityLink {
-  id            String   @id @default(uuid()) @db.Uuid
-  workspaceId   String   @map("workspace_id") @db.Uuid
-  canonicalType String   @map("canonical_type") // company | contact
-  canonicalId   String   @map("canonical_id") @db.Uuid
-  rawRecordId   String   @map("raw_record_id") @db.Uuid
-  matchRule     String   @map("match_rule") // domain_exact | name_country | provider_id
-  confidence    Float    @default(1)
-  createdAt     DateTime @default(now()) @map("created_at")
+  id              String             @id @default(uuid()) @db.Uuid
+  workspaceId     String             @map("workspace_id") @db.Uuid
+  /// This is a creation-time reference, not a durable canonical relation.
+  /// Target deletion/cascade is allowed; readers must tolerate a missing canonical target and retain a historical UUID stub.
+  canonicalType   String             @map("canonical_type") // company | contact
+  canonicalId     String             @map("canonical_id") @db.Uuid
+  rawRecordId     String             @map("raw_record_id") @db.Uuid
+  matchRule       String             @map("match_rule") // domain_exact | name_country | provider_id
+  confidence      Float              @default(1)
+  status          IdentityLinkStatus @default(ACTIVE)
+  resolverVersion String             @default("identity-v1") @map("resolver_version") @db.VarChar(64)
+  inputHash       String             @default("legacy") @map("input_hash") @db.VarChar(64)
+  conflictId      String?            @map("conflict_id") @db.Uuid
+  createdAt       DateTime           @default(now()) @map("created_at")
 
+  conflict                OrganizationIdentityConflict?            @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "identity_link_conflict_scope_fkey")
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
 
   @@unique([workspaceId, id], map: "identity_link_workspace_id_id_key")
   @@unique([workspaceId, id, canonicalType, canonicalId, rawRecordId], map: "identity_link_exact_tuple_key")
+  @@unique([workspaceId, canonicalType, canonicalId, rawRecordId], map: "identity_link_workspace_canonical_raw_key")
   @@index([workspaceId])
   @@index([canonicalId])
+  @@index([workspaceId, conflictId], map: "identity_link_workspace_id_conflict_id_idx")
   @@map("identity_link")
+}
+
+enum OrganizationIdentifierStatus {
+  ACTIVE
+  PENDING_CONFLICT
+  REVOKED
+
+  @@map("organization_identifier_status")
+}
+
+enum OrganizationIdentityConflictStatus {
+  OPEN
+  RESOLVING
+  RESOLVED
+
+  @@map("organization_identity_conflict_status")
+}
+
+enum OrganizationIdentityDecisionAction {
+  MERGE
+  KEEP_SEPARATE
+  SPLIT
+
+  @@map("organization_identity_decision_action")
+}
+
+enum OrganizationCanonicalMappingStatus {
+  ACTIVE
+  REVOKED
+
+  @@map("organization_canonical_mapping_status")
+}
+
+enum OrganizationIdentityReplayStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+
+  @@map("organization_identity_replay_status")
+}
+
+enum IdentityLinkStatus {
+  ACTIVE
+  PENDING_CONFLICT
+  REVOKED
+
+  @@map("identity_link_status")
+}
+
+/// Workspace-scoped authoritative organization identifier claim.
+model OrganizationIdentifier {
+  id                   String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String                       @map("workspace_id") @db.Uuid
+  companyId            String                       @map("company_id") @db.Uuid
+  scheme               String                       @db.VarChar(64)
+  jurisdiction         String                       @db.VarChar(64)
+  normalizedValue      String                       @map("normalized_value") @db.VarChar(512)
+  authorityProviderKey String                       @map("authority_provider_key") @db.VarChar(128)
+  rawRecordId          String                       @map("raw_record_id") @db.Uuid
+  conflictId           String?                      @map("conflict_id") @db.Uuid
+  confidence           Float                        @default(1)
+  normalizerVersion    String                       @map("normalizer_version") @db.VarChar(64)
+  validatorVersion     String                       @map("validator_version") @db.VarChar(64)
+  provenance           Json
+  status               OrganizationIdentifierStatus @default(ACTIVE)
+  firstSeenAt          DateTime                     @default(now()) @map("first_seen_at") @db.Timestamp(3)
+  lastSeenAt           DateTime                     @default(now()) @map("last_seen_at") @db.Timestamp(3)
+  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamp(3)
+  revokedAt            DateTime?                    @map("revoked_at") @db.Timestamp(3)
+
+  company   CanonicalCompany              @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identifier_company_scope_fkey")
+  rawRecord RawSourceRecord               @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identifier_raw_scope_fkey")
+  conflict  OrganizationIdentityConflict? @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identifier_conflict_scope_fkey")
+
+  @@unique([workspaceId, id], map: "organization_identifier_workspace_id_id_key")
+  @@unique([workspaceId, conflictId, scheme, jurisdiction, normalizedValue], map: "organization_identifier_conflict_claim_key")
+  @@index([workspaceId, companyId, status], map: "organization_identifier_workspace_id_company_id_status_idx")
+  @@index([workspaceId, scheme, jurisdiction, normalizedValue], map: "org_identifier_lookup_idx")
+  @@map("organization_identifier")
+}
+
+/// Deterministic identity conflict fact; app_user receives no physical DML.
+model OrganizationIdentityConflict {
+  id           String                             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String                             @map("workspace_id") @db.Uuid
+  rawRecordId  String?                            @map("raw_record_id") @db.Uuid
+  conflictType String                             @map("conflict_type") @db.VarChar(64)
+  fingerprint  String                             @db.VarChar(64)
+  status       OrganizationIdentityConflictStatus @default(OPEN)
+  revision     Int                                @default(1)
+  facts        Json
+  createdAt    DateTime                           @default(now()) @map("created_at") @db.Timestamp(3)
+  resolvedAt   DateTime?                          @map("resolved_at") @db.Timestamp(3)
+
+  rawRecord        RawSourceRecord?                    @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identity_conflict_raw_scope_fkey")
+  parties          OrganizationIdentityConflictParty[]
+  decisions        OrganizationIdentityDecision[]
+  identifierClaims OrganizationIdentifier[]
+  identityLinks    IdentityLink[]
+
+  @@unique([workspaceId, id], map: "organization_identity_conflict_workspace_id_id_key")
+  @@unique([workspaceId, fingerprint], map: "organization_identity_conflict_workspace_fingerprint_key")
+  @@index([workspaceId, status, createdAt], map: "organization_identity_conflict_workspace_status_created_idx")
+  @@map("organization_identity_conflict")
+}
+
+model OrganizationIdentityConflictParty {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  conflictId  String   @map("conflict_id") @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  role        String   @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  conflict OrganizationIdentityConflict @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identity_conflict_party_conflict_scope_fkey")
+  company  CanonicalCompany             @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identity_conflict_party_company_scope_fkey")
+
+  @@unique([workspaceId, conflictId, companyId, role], map: "organization_identity_conflict_party_key")
+  @@index([workspaceId, companyId], map: "organization_identity_conflict_party_workspace_company_idx")
+  @@map("organization_identity_conflict_party")
+}
+
+/// Immutable server-authored identity decision fact.
+model OrganizationIdentityDecision {
+  id                      String                             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId             String                             @map("workspace_id") @db.Uuid
+  conflictId              String?                            @map("conflict_id") @db.Uuid
+  action                  OrganizationIdentityDecisionAction
+  canonicalCompanyId      String?                            @map("canonical_company_id") @db.Uuid
+  requestId               String                             @map("request_id") @db.VarChar(128)
+  expectedRevision        Int                                @map("expected_revision")
+  requestPreconditionEtag String                             @map("request_precondition_etag") @db.VarChar(256)
+  reasonCode              String                             @map("reason_code") @db.VarChar(64)
+  note                    String?                            @db.VarChar(2000)
+  decidedBy               String                             @map("decided_by") @db.VarChar(256)
+  decisionHash            String                             @map("decision_hash") @db.VarChar(64)
+  factSnapshot            Json                               @map("fact_snapshot")
+  createdAt               DateTime                           @default(now()) @map("created_at") @db.Timestamp(3)
+
+  conflict         OrganizationIdentityConflict?  @relation(fields: [workspaceId, conflictId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identity_decision_conflict_scope_fkey")
+  canonicalCompany CanonicalCompany?              @relation("IdentityDecisionCanonicalCompany", fields: [workspaceId, canonicalCompanyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identity_decision_company_scope_fkey")
+  mergedMappings   OrganizationCanonicalMapping[] @relation("IdentityMappingMergeDecision")
+  splitMappings    OrganizationCanonicalMapping[] @relation("IdentityMappingSplitDecision")
+  replay           OrganizationIdentityReplay?
+
+  @@unique([workspaceId, requestId], map: "organization_identity_decision_workspace_request_key")
+  @@unique([workspaceId, id], map: "organization_identity_decision_workspace_id_id_key")
+  @@map("organization_identity_decision")
+}
+
+/// Reversible source-company to canonical-root mapping.
+model OrganizationCanonicalMapping {
+  id                 String                             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String                             @map("workspace_id") @db.Uuid
+  sourceCompanyId    String                             @map("source_company_id") @db.Uuid
+  canonicalCompanyId String                             @map("canonical_company_id") @db.Uuid
+  status             OrganizationCanonicalMappingStatus @default(ACTIVE)
+  revision           Int                                @default(1)
+  mergeDecisionId    String                             @map("merge_decision_id") @db.Uuid
+  splitDecisionId    String?                            @map("split_decision_id") @db.Uuid
+  createdAt          DateTime                           @default(now()) @map("created_at") @db.Timestamp(3)
+  revokedAt          DateTime?                          @map("revoked_at") @db.Timestamp(3)
+
+  sourceCompany    CanonicalCompany              @relation("IdentityMappingSource", fields: [workspaceId, sourceCompanyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_canonical_mapping_source_scope_fkey")
+  canonicalCompany CanonicalCompany              @relation("IdentityMappingCanonical", fields: [workspaceId, canonicalCompanyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_canonical_mapping_canonical_scope_fkey")
+  mergeDecision    OrganizationIdentityDecision  @relation("IdentityMappingMergeDecision", fields: [workspaceId, mergeDecisionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_canonical_mapping_merge_decision_scope_fkey")
+  splitDecision    OrganizationIdentityDecision? @relation("IdentityMappingSplitDecision", fields: [workspaceId, splitDecisionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_canonical_mapping_split_decision_scope_fkey")
+
+  @@unique([workspaceId, id], map: "organization_canonical_mapping_workspace_id_id_key")
+  @@index([workspaceId, sourceCompanyId, status], map: "organization_canonical_mapping_workspace_source_status_idx")
+  @@index([workspaceId, canonicalCompanyId, status], map: "organization_canonical_mapping_workspace_canonical_status_idx")
+  @@map("organization_canonical_mapping")
+}
+
+/// Durable replay state associated one-to-one with an identity decision.
+model OrganizationIdentityReplay {
+  id          String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String                           @map("workspace_id") @db.Uuid
+  decisionId  String                           @map("decision_id") @db.Uuid
+  status      OrganizationIdentityReplayStatus @default(PENDING)
+  attempt     Int                              @default(0)
+  inputHash   String                           @map("input_hash") @db.VarChar(64)
+  outputHash  String?                          @map("output_hash") @db.VarChar(64)
+  errorCode   String?                          @map("error_code") @db.VarChar(128)
+  createdAt   DateTime                         @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt   DateTime                         @default(now()) @updatedAt @map("updated_at") @db.Timestamp(3)
+  completedAt DateTime?                        @map("completed_at") @db.Timestamp(3)
+
+  decision OrganizationIdentityDecision @relation(fields: [workspaceId, decisionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "organization_identity_replay_decision_scope_fkey")
+
+  @@unique([workspaceId, decisionId], map: "organization_identity_replay_workspace_decision_key")
+  @@index([workspaceId, status, createdAt], map: "organization_identity_replay_workspace_status_created_idx")
+  @@map("organization_identity_replay")
 }
 
 /// 字段级 Evidence（PRD 7.4.9 / 8.10）：canonical 字段不只存最终值 ——

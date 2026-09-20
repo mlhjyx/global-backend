@@ -338,7 +338,7 @@ function suppressionSnapshotDigest(
 }
 
 function legacyMaterializationQueryRaw(
-  onOther: () => unknown = () => [{ pg_advisory_xact_lock: null }],
+  onOther: () => unknown = () => [{ locked: "" }],
 ) {
   return vi.fn(async (query: unknown) => {
     if (
@@ -384,7 +384,7 @@ const budgetSwallowingEnricher = {
 
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
-    $queryRaw: async () => [{ locked: true }],
+    $queryRaw: async () => [{ locked: "" }],
     rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
     identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
     canonicalCompany: {
@@ -1178,7 +1178,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(() => {
         order.push("lock");
-        return [{ pg_advisory_xact_lock: null }];
+        return [{ locked: "" }];
       }),
       rawSourceRecord: {
         findMany: async () => [
@@ -1815,7 +1815,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
           return [{ status: "APPLIED", companies: 0, suppressed: 1 }];
         }
-        if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+        if (sql.includes("pg_advisory_xact_lock")) return [{ locked: "" }];
         throw new Error(`unexpected governed C-TX query: ${sql}`);
       }),
     };
@@ -2002,7 +2002,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               suppressed: 0,
             }];
           }
-          if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+          if (sql.includes("pg_advisory_xact_lock")) return [{ locked: "" }];
           throw new Error(`unexpected malformed-output query: ${sql}`);
         }),
       };
@@ -2172,7 +2172,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
           return [{ status: "APPLIED", companies: 1, suppressed: 3 }];
         }
-        if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+        if (sql.includes("pg_advisory_xact_lock")) return [{ locked: "" }];
         throw new Error(`unexpected governed canonical query: ${sql}`);
       }),
     };

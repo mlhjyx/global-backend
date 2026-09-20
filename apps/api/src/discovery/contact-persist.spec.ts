@@ -46,11 +46,21 @@ function fakeTx(
     ...(opts?.suppressedDomains ?? []).map((value) => ({ type: 'domain', value })),
     ...(opts?.suppressedCompanyNames ?? []).map((value) => ({ type: 'company_name', value })),
   ]);
-  const queryRaw = vi.fn(async () => [{
-    status: opts?.companyStatus ?? 'NEW',
-    name: opts?.companyName ?? 'AstraZeneca GmbH',
-    domain: opts?.companyDomain === undefined ? 'astrazeneca.com' : opts.companyDomain,
-  }]);
+  const queryRaw = vi.fn(async (
+    statement: TemplateStringsArray | { strings?: readonly string[] },
+  ) => {
+    const sql = Array.isArray(statement)
+      ? statement.join("?")
+      : statement.strings?.join("?") ?? "";
+    if (sql.includes("pg_advisory_xact_lock")) {
+      return [{ locked: "" }];
+    }
+    return [{
+      status: opts?.companyStatus ?? 'NEW',
+      name: opts?.companyName ?? 'AstraZeneca GmbH',
+      domain: opts?.companyDomain === undefined ? 'astrazeneca.com' : opts.companyDomain,
+    }];
+  });
   const tx = {
     canonicalContact: {
       findMany: vi.fn(async () => candidates),

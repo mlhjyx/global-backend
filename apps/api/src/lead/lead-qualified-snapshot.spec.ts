@@ -253,7 +253,15 @@ function makeDecideTx(
   return {
     // Art.17 竞态闸（PR #72）：decide 交棒前对公司行 SELECT … FOR UPDATE 加锁——
     // 单测无真库，桩返空即可（结果被丢弃，公司状态仍由下方 canonicalCompany.findUnique 决定）。
-    $queryRaw: async () => [] as unknown[],
+    $queryRaw: async (
+      statement: TemplateStringsArray | { strings?: readonly string[] },
+    ) =>
+      (Array.isArray(statement)
+        ? statement.join("?")
+        : statement.strings?.join("?") ?? ""
+      ).includes("pg_advisory_xact_lock")
+        ? [{ locked: "" }]
+        : [],
     lead: {
       findUnique: async () => ({ ...lead }),
       updateMany: vi.fn(async ({

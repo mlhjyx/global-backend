@@ -1,0 +1,760 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import {
+  COMMIT,
+  EXPECTED_COMMAND_IDS as expectedCommandIds,
+  EXPECTED_ENVIRONMENT_NAMES as expectedEnvironmentNames,
+  OUTPUT_ROOT,
+  REQUEST_ROOT,
+  SHA,
+  SHA_B,
+  SHA_C,
+  buildClosure as closure,
+  buildExactEnvironment,
+  buildValidRequest as validRequest,
+  canonicalJson as canonical,
+  sha256Of as sha,
+} from "./governance-organization-identity-test-fixtures.mjs";
+import {
+  LOCAL_COMMAND_IDS,
+  canonicalJsonBytes,
+  dispatchClosedCommand,
+  executeClosedInvocation,
+  parseClosedCommandRequest,
+  renderRootWrapper,
+  runLauncherCli,
+  validateBootstrapRunReceipt,
+  validateBootstrapRunReceiptSet,
+  validateLauncherMaterializationReceipt,
+  validateLauncherMaterializationReviewReceipt,
+  validateLauncherReadbackReport,
+  verifyExecutableClosure,
+  verifyControlledFile,
+  verifyLauncherContract,
+  writeCanonicalOutputRecord,
+} from "./governance-organization-identity-launcher.mjs";
+
+const launcherModulePath = fileURLToPath(
+  new URL("./governance-organization-identity-launcher.mjs", import.meta.url),
+);
+
+function parse(request, options = {}) {
+  return parseClosedCommandRequest(canonicalJsonBytes(request), {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    fixtureEvidenceRoot: "/controlled",
+    ...options,
+  });
+}
+
+function verifiedWorktreeReceipt(request, expectedMode = request.mode) {
+  return {
+    schemaVersion: "organization-identity-verified-worktree/v1",
+    repositoryRoot: "/global/backend",
+    worktreePath:
+      "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+    gitDirRealpathSha256: SHA,
+    commonDirRealpathSha256: SHA,
+    branch: "codex/pr407-organization-identity-caller-cutover-v2",
+    headCommit: request.subjectCommit,
+    subjectCommit: request.subjectCommit,
+    statusPorcelainSha256: SHA,
+    worktreeListEntrySha256: SHA,
+    expectedMode,
+    verifiedByExecutableClosureSha256: SHA,
+    prePostToctouSha256: SHA,
+    result: "PASS",
+  };
+}
+
+test("the local command registry is exhaustive and excludes every external controller", () => {
+  assert.deepEqual(LOCAL_COMMAND_IDS, expectedCommandIds);
+  assert.deepEqual(
+    Object.keys(buildExactEnvironment()),
+    expectedEnvironmentNames,
+  );
+  const serialized = LOCAL_COMMAND_IDS.join("\n");
+  for (const forbidden of [
+    "GH",
+    "GITHUB",
+    "GITLEAKS",
+    "DOCKER",
+    "PSQL",
+    "DISPOSABLE_POSTGRES",
+    "ROOT_ANCHOR",
+    "FETCH_EXACT_OBJECT",
+    "PUSH_EXACT_BRANCH",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+function commandFixture(commandId) {
+  const scannerCommon = {
+    baselineSubjectCommit: COMMIT,
+    currentMainAdmissionCommit: "2".repeat(40),
+    b0mMigrationCommit: "3".repeat(40),
+  };
+  switch (commandId) {
+    case "BOOTSTRAP_AUTHORITY_RUN_V1":
+      return [
+        "INSTALL_AND_PRISMA_GENERATE",
+        {
+          frozenLockfile: true,
+          ignoreScripts: true,
+          ignorePnpmfile: true,
+          npmUserConfig: "/dev/null",
+        },
+      ];
+    case "SCOPED_REVIEW_VERIFY_V1":
+      return [
+        "VERIFY",
+        {
+          evidenceRoot: "/controlled",
+          reportPath: "/controlled/review.md",
+          reportSha256: SHA,
+          receiptPath: "/controlled/review.json",
+          receiptSha256: SHA_B,
+          reviewedSubjectCommit: COMMIT,
+        },
+      ];
+    case "CURRENT_MAIN_AUDIT_LOCAL_V1":
+      return [
+        "COLLECT_LOCAL_FACTS",
+        {
+          branchPreRefreshCommit: COMMIT,
+          advertisedLiveMainCommit: "2".repeat(40),
+          githubControllerReceiptSha256: SHA,
+        },
+      ];
+    case "CURRENT_MAIN_VALIDATE_V1":
+    case "CURRENT_MAIN_GENERATE_V1":
+      return [
+        commandId === "CURRENT_MAIN_VALIDATE_V1" ? "VALIDATE" : "GENERATE",
+        {
+          auditPacketSha256: SHA,
+          auditReviewReceiptSha256: SHA_B,
+          refreshMergeCommit:
+            commandId === "CURRENT_MAIN_VALIDATE_V1" ? null : "2".repeat(40),
+          admissionPath:
+            "docs/governance/organization-identity-current-main-admission.json",
+        },
+      ];
+    case "COPY_WRITE_ELIGIBILITY_V1":
+      return [
+        "WRITE_ELIGIBILITY",
+        {
+          auditPacketSha256: SHA,
+          eligibilityPath:
+            "docs/evidence/site-builder/copy-runtime-eligibility.json",
+        },
+      ];
+    case "COPY_SYNC_CITATIONS_V1":
+      return [
+        "SYNC_CITATIONS",
+        {
+          auditPacketSha256: SHA,
+          eligibilityPath:
+            "docs/evidence/site-builder/copy-runtime-eligibility.json",
+          eligibilityInputSha256: SHA_B,
+          citationPath:
+            "docs/implementation-records/copy-fixed-source-impact-governance.md",
+        },
+      ];
+    case "GIT_REFRESH_START_V1":
+      return [
+        "START_NO_COMMIT",
+        {
+          expectedHead: COMMIT,
+          otherParent: "2".repeat(40),
+          exactMergeResultPathSetSha256: SHA,
+        },
+      ];
+    case "GIT_REFRESH_COMMIT_V1":
+      return [
+        "COMMIT_REFRESH",
+        {
+          expectedFirstParent: COMMIT,
+          expectedSecondParent: "2".repeat(40),
+          stagedPathSetSha256: SHA,
+          commitMessage:
+            "chore: merge admitted main for identity writer baseline",
+        },
+      ];
+    case "GIT_ADMISSION_COMMIT_V1":
+      return [
+        "COMMIT_ADMISSION",
+        {
+          expectedParent: COMMIT,
+          stagedPath:
+            "docs/governance/organization-identity-current-main-admission.json",
+          stagedStatus: "ADD",
+          commitMessage:
+            "chore: admit current main for identity writer baseline",
+        },
+      ];
+    case "GIT_ACCEPTANCE_COMMIT_V1":
+      return [
+        "COMMIT_ACCEPTANCE",
+        {
+          expectedParent: COMMIT,
+          stagedPath:
+            "docs/governance/organization-identity-writer-acceptance.json",
+          stagedStatus: "ADD",
+          commitMessage: "chore: anchor organization identity writer baseline",
+        },
+      ];
+    case "REFRESH_VERIFY_V1":
+      return [
+        "VERIFY",
+        { suiteId: "REFRESH_FULL", refreshMergeCommit: COMMIT },
+      ];
+    case "MIGRATION_STATIC_VERIFY_V1":
+      return [
+        "VERIFY",
+        { suiteId: "MIGRATION_0M_STATIC", b0mMigrationCommit: COMMIT },
+      ];
+    case "PRISMA_GENERATE_V1":
+      return [
+        "VERIFY",
+        {
+          suiteId: "PRISMA_GENERATE",
+          schemaPath: "packages/db/prisma/schema.prisma",
+        },
+      ];
+    case "SCANNER_TEST_V1":
+      return ["TEST", { ...scannerCommon, suiteId: "B0_SCANNER" }];
+    case "SCANNER_BASELINE_V1":
+      return [
+        "BASELINE_CHECK",
+        {
+          ...scannerCommon,
+          artifactACommit: "2400bac28796bae44294114edc99eaccb1bd65b3",
+          dispositionReceiptSha256: null,
+          outputDirectory: null,
+        },
+      ];
+    case "SCANNER_STAGE_V1":
+      return ["STAGE_CHECK", { ...scannerCommon, stage: "B0_BASELINE" }];
+    case "SCANNER_ZERO_V1":
+      return ["ZERO_CHECK", { ...scannerCommon, expectedWriterCount: 3 }];
+    case "SCANNER_ACCEPTANCE_V1":
+      return [
+        "ACCEPTANCE_CHECK",
+        {
+          ...scannerCommon,
+          implementationParent: COMMIT,
+          implementationReviewSha256: SHA,
+          acceptancePath:
+            "docs/governance/organization-identity-writer-acceptance.json",
+        },
+      ];
+    case "GOVERNANCE_VERIFY_V1":
+      return ["VERIFY", { suiteId: "GOVERNANCE_B0" }];
+    case "DOCS_VERIFY_V1":
+      return ["VERIFY", { suiteId: "DOCS_FULL" }];
+    case "API_VERIFY_V1":
+      return ["VERIFY", { suiteId: "API_FULL" }];
+    case "RUNTIME_ARTIFACT_VERIFY_V1":
+      return ["VERIFY", { suiteId: "RUNTIME_ARTIFACT" }];
+    case "CONTRACT_GRAPH_VERIFY_V1":
+      return ["VERIFY", { suiteId: "CONTRACT_GRAPH" }];
+    case "V3_WORKTREE_CREATE_V1":
+      return [
+        "CREATE",
+        {
+          mergeCommit: COMMIT,
+          branch: "codex/pr407-organization-identity-caller-cutover-v3",
+          worktreePath:
+            "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v3",
+        },
+      ];
+    default:
+      throw new Error(`missing fixture for ${commandId}`);
+  }
+}
+
+test("every local command builds a complete executable descriptor from typed input", async () => {
+  for (const commandId of LOCAL_COMMAND_IDS) {
+    const [mode, parameters] = commandFixture(commandId);
+    const request = validRequest({ commandId, mode, parameters });
+    const result = await dispatchClosedCommand(request, {
+      requestRoot: REQUEST_ROOT,
+      outputRoot: OUTPUT_ROOT,
+      fixtureEvidenceRoot: "/controlled",
+      inputRecordBytes: canonicalJsonBytes(request.parameters),
+      requestReplaySet: new Set(),
+      outputExists: false,
+      preDispatchReverify: async () => ({ status: "PASS" }),
+      verifiedWorktreeReceipt: verifiedWorktreeReceipt(request),
+      loadDependency: async () => ({ status: "PASS" }),
+    });
+    assert.equal(result.status, "PASS", commandId);
+    assert.equal(result.invocation.argv.length > 2, true, commandId);
+    assert.equal(
+      result.invocation.outputRecordPath,
+      request.input.outputRecordPath,
+    );
+    assert.equal(result.invocation.subjectCommit, request.subjectCommit);
+    assert.deepEqual(result.invocation.parameters, request.parameters);
+    if (result.invocation.executableRole === "NODE") {
+      assert.equal(
+        result.invocation.argv[0],
+        "/global/backups/backend-root-reconciliation-20260826/successors/identity-writer-b0-v2/launcher/identity-writer-bootstrap.mjs",
+      );
+    }
+  }
+});
+
+test("Git descriptors retain exact state preconditions and immutable targets", async () => {
+  for (const commandId of [
+    "GIT_REFRESH_START_V1",
+    "GIT_REFRESH_COMMIT_V1",
+    "GIT_ADMISSION_COMMIT_V1",
+    "GIT_ACCEPTANCE_COMMIT_V1",
+    "V3_WORKTREE_CREATE_V1",
+  ]) {
+    const [mode, parameters] = commandFixture(commandId);
+    const request = validRequest({ commandId, mode, parameters });
+    const result = await dispatchClosedCommand(request, {
+      requestRoot: REQUEST_ROOT,
+      outputRoot: OUTPUT_ROOT,
+      inputRecordBytes: canonicalJsonBytes(request.parameters),
+      requestReplaySet: new Set(),
+      outputExists: false,
+      preDispatchReverify: async () => ({ status: "PASS" }),
+      verifiedWorktreeReceipt: verifiedWorktreeReceipt(request),
+      loadDependency: async () => ({ status: "PASS" }),
+    });
+    assert.equal(result.status, "PASS");
+    assert.equal(
+      canonical(result.invocation.preconditions),
+      canonical(parameters),
+    );
+    assert.equal(
+      result.invocation.cwd,
+      "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+    );
+    const beforeReadbacks = result.invocation.readbacks.filter(
+      ({ phase }) => phase === "BEFORE",
+    );
+    assert.equal(beforeReadbacks.length > 0, true);
+    assert.equal(canonical(result.invocation).includes(COMMIT), true);
+    if (commandId === "GIT_REFRESH_START_V1") {
+      assert.equal(
+        canonical(result.invocation).includes(
+          parameters.exactMergeResultPathSetSha256,
+        ),
+        true,
+      );
+    }
+  }
+});
+
+test("Git dispatch rejects an unverified caller CWD before loading", async () => {
+  const [mode, parameters] = commandFixture("GIT_ACCEPTANCE_COMMIT_V1");
+  const request = validRequest({
+    commandId: "GIT_ACCEPTANCE_COMMIT_V1",
+    mode,
+    parameters,
+  });
+  let loads = 0;
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    requestReplaySet: new Set(),
+    outputExists: false,
+    preDispatchReverify: async () => ({ status: "PASS" }),
+    loadDependency: async () => {
+      loads += 1;
+      return { status: "PASS" };
+    },
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "VERIFIED_WORKTREE_RECEIPT_REQUIRED",
+  });
+  assert.equal(loads, 0);
+});
+
+test("Git dispatch rejects caller-asserted worktree surrogates even when shape matches", async () => {
+  const [mode, parameters] = commandFixture("GIT_REFRESH_START_V1");
+  const request = validRequest({
+    commandId: "GIT_REFRESH_START_V1",
+    mode,
+    parameters,
+  });
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    outputExists: false,
+    requestReplaySet: new Set(),
+    preDispatchReverify: () => ({ status: "PASS" }),
+    verifiedWorktree: {
+      path: "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+      subjectCommit: request.subjectCommit,
+    },
+    loadDependency: () => ({ status: "PASS" }),
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "VERIFIED_WORKTREE_RECEIPT_REQUIRED",
+  });
+});
+
+test("Git-backed CLI rejects ambient worktree, branch, and mode substitutions", async (t) => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "identity-git-cli-"),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const requestRoot = path.join(fixtureRoot, "requests");
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await Promise.all([
+    mkdir(requestRoot, { mode: 0o700 }),
+    mkdir(outputRoot, { mode: 0o700 }),
+  ]);
+  const [mode, parameters] = commandFixture("GIT_REFRESH_START_V1");
+  const request = validRequest({
+    commandId: "GIT_REFRESH_START_V1",
+    mode,
+    parameters,
+    requestRoot,
+    outputRoot,
+  });
+  await writeFile(
+    request.input.inputRecordPath,
+    canonicalJsonBytes(request.parameters),
+    { mode: 0o600 },
+  );
+  const requestPath = path.join(requestRoot, "request.json");
+  await writeFile(requestPath, canonicalJsonBytes(request), { mode: 0o600 });
+  const validFacts = {
+    repositoryRoot: "/global/backend",
+    worktreePath:
+      "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+    gitDirRealpath: "/global/backend/.git/worktrees/pr407",
+    commonDirRealpath: "/global/backend/.git",
+    branch: "codex/pr407-organization-identity-caller-cutover-v2",
+    headCommit: request.subjectCommit,
+    statusPorcelain: "",
+    worktreeListEntry:
+      "worktree pr407\nHEAD 1111\nbranch refs/heads/codex/pr407\n",
+    expectedMode: request.mode,
+    verifiedByExecutableClosureSha256: SHA,
+    prePostToctouSha256: SHA,
+  };
+  for (const facts of [
+    {
+      ...validFacts,
+      worktreePath:
+        "/global/backend/.codex/worktrees/ambient-same-head-worktree",
+    },
+    {
+      ...validFacts,
+      branch: "codex/pr407-organization-identity-caller-cutover-v3",
+    },
+    { ...validFacts, expectedMode: "COMMIT_REFRESH" },
+    { ...validFacts, statusPorcelain: " M package.json\n" },
+  ]) {
+    let loads = 0;
+    const result = await runLauncherCli(["--request", requestPath], {
+      requestRoot,
+      outputRoot,
+      predecessorDiagnostic: true,
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+      worktreePath: facts.worktreePath,
+      verifyTrust: async () => ({
+        status: "PASS",
+        executableByRole: { GIT: "/controlled/bin/git" },
+        verificationFiles: [],
+      }),
+      deriveWorktreeReceipt: async (gitInvocation) => {
+        assert.equal(
+          gitInvocation.worktreePath,
+          "/global/backend/.codex/worktrees/pr407-organization-identity-caller-cutover-v2",
+        );
+        return facts;
+      },
+      executeInvocation: async () => {
+        loads += 1;
+        return { status: "PASS" };
+      },
+    });
+    assert.equal(result.exitCode, 70);
+    assert.equal(result.result.code, "VERIFIED_WORKTREE_RECEIPT_REQUIRED");
+    assert.equal(loads, 0);
+  }
+});
+
+test("canonical output records are fixture-bounded and reject duplicate or symlink targets", async (t) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "identity-output-"));
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const outputRoot = path.join(fixtureRoot, "outputs");
+  await mkdir(outputRoot, { mode: 0o700 });
+  const owner = {
+      expectedUid: process.getuid(),
+      expectedGid: process.getgid(),
+    },
+    value = { schemaVersion: "fixture/v1", ok: true },
+    outputPath = path.join(outputRoot, "result.json");
+  assert.equal(
+    (
+      await writeCanonicalOutputRecord(outputPath, value, owner, {
+        fixtureRoot: outputRoot,
+      })
+    ).status,
+    "PASS",
+  );
+  assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), value);
+  const linkedPath = path.join(outputRoot, "linked.json");
+  await symlink(outputPath, linkedPath);
+  for (const [candidatePath, expected] of [
+    [outputPath, "OUTPUT_CREATE_EXCLUSIVE_FAILED"],
+    [linkedPath, "OUTPUT_CREATE_EXCLUSIVE_FAILED"],
+    [path.join(fixtureRoot, "other.json"), "OUTPUT_PATH_INVALID"],
+  ]) {
+    const result = await writeCanonicalOutputRecord(
+      candidatePath,
+      value,
+      owner,
+      {
+        fixtureRoot: outputRoot,
+      },
+    );
+    assert.equal(result.code ?? result.status, expected);
+  }
+});
+
+test("closed executor covers exact, set, status, and absent-path readbacks", async () => {
+  const trust = { executableByRole: { NODE: process.execPath } };
+  const successInvocation = {
+    executableRole: "NODE",
+    argv: ["-e", ""],
+    cwd: process.cwd(),
+    readbacks: [
+      {
+        phase: "BEFORE",
+        argv: ["-e", "process.stdout.write('alpha\\n')"],
+        expected: "alpha",
+      },
+      {
+        phase: "BEFORE",
+        argv: ["-e", "process.stdout.write('b\\na\\n')"],
+        expectedSetSha256: sha(canonicalJsonBytes(["a", "b"])),
+      },
+      {
+        phase: "AFTER",
+        argv: ["-e", "process.stdout.write('ADD docs/test.json\\n')"],
+        expectedStatus: "ADD",
+        expectedPath: "docs/test.json",
+      },
+      {
+        phase: "AFTER",
+        argv: ["-e", "process.stdout.write('safe\\n')"],
+        expectedAbsentPath: "hostile",
+      },
+    ],
+  };
+  assert.equal(
+    (
+      await executeClosedInvocation(
+        successInvocation,
+        trust,
+        buildExactEnvironment(),
+      )
+    ).status,
+    "PASS",
+  );
+  const failureInvocation = {
+      executableRole: "NODE",
+      argv: ["-e", ""],
+      cwd: process.cwd(),
+      readbacks: [
+        {
+          phase: "BEFORE",
+          argv: ["-e", "process.stdout.write('alpha\\n')"],
+          expected: "alpha",
+        },
+        {
+          phase: "BEFORE",
+          argv: ["-e", "process.stdout.write('b\\na\\n')"],
+          expectedSetSha256: sha(canonicalJsonBytes(["a", "b"])),
+        },
+        {
+          phase: "AFTER",
+          argv: ["-e", "process.stdout.write('ADD docs/test.json\\n')"],
+          expectedStatus: "ADD",
+          expectedPath: "docs/test.json",
+        },
+        {
+          phase: "AFTER",
+          argv: ["-e", "process.stdout.write('safe\\n')"],
+          expectedAbsentPath: "hostile",
+        },
+      ],
+    };
+  assert.equal(
+    (
+      await executeClosedInvocation(
+        {
+          ...failureInvocation,
+          readbacks: [
+            {
+              phase: "BEFORE",
+              argv: ["-e", "process.stdout.write('hostile\\n')"],
+              expectedAbsentPath: "hostile",
+            },
+          ],
+        },
+        trust,
+        buildExactEnvironment(),
+      )
+    ).code,
+    "CLOSED_PROCESS_READBACK_MISMATCH",
+  );
+});
+
+test("rejects an executable-looking value before dependency loading", async () => {
+  let dependencyLoadCount = 0;
+  let hostileMarkerExecutionCount = 0;
+  const request = {
+    ...validRequest(),
+    commandId: "node scripts/governance-verify.mjs",
+  };
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    loadDependency: async () => {
+      dependencyLoadCount += 1;
+      hostileMarkerExecutionCount += 1;
+    },
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "CLOSED_COMMAND_ID_INVALID",
+  });
+  assert.equal(dependencyLoadCount, 0);
+  assert.equal(hostileMarkerExecutionCount, 0);
+});
+
+test("dispatch revalidates typed input and TOCTOU before one dependency load", async () => {
+  const request = validRequest();
+  let dependencyLoadCount = 0;
+  let reverifyCount = 0;
+  const context = {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    requestReplaySet: new Set(),
+    outputExists: false,
+    verifiedWorktree: { path: process.cwd(), subjectCommit: COMMIT },
+    preDispatchReverify: async () => {
+      reverifyCount += 1;
+      return { status: "PASS" };
+    },
+    loadDependency: async (invocation) => {
+      dependencyLoadCount += 1;
+      return {
+        status: "PASS",
+        invocation,
+        executionResult: { status: "PASS" },
+      };
+    },
+  };
+  const result = await dispatchClosedCommand(request, context);
+  assert.equal(result.status, "PASS");
+  assert.equal(result.invocation.commandId, "SCANNER_TEST_V1");
+  assert.equal(result.invocation.mode, "TEST");
+  assert.equal(dependencyLoadCount, 1);
+  assert.equal(reverifyCount, 1);
+  assert.equal(
+    (await dispatchClosedCommand(request, context)).code,
+    "REQUEST_REPLAY",
+  );
+  assert.equal(dependencyLoadCount, 1);
+});
+
+test("dispatch requires a controller-owned replay set", async () => {
+  const request = validRequest();
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    outputExists: false,
+    preDispatchReverify: async () => ({ status: "PASS" }),
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "REPLAY_GUARD_REQUIRED",
+  });
+});
+
+test("dispatch refuses authority when no verified executor is supplied", async () => {
+  const request = validRequest();
+  const result = await dispatchClosedCommand(request, {
+    requestRoot: REQUEST_ROOT,
+    outputRoot: OUTPUT_ROOT,
+    inputRecordBytes: canonicalJsonBytes(request.parameters),
+    requestReplaySet: new Set(),
+    outputExists: false,
+    verifiedWorktree: {
+      path: process.cwd(),
+      subjectCommit: request.subjectCommit,
+    },
+    preDispatchReverify: async () => ({ status: "PASS" }),
+  });
+  assert.deepEqual(result, {
+    status: "INTEGRITY_ERROR",
+    code: "EXECUTOR_REQUIRED",
+  });
+});
+
+test("dispatch rejects typed-input drift, output reuse, and failed inode revalidation before loading", async () => {
+  const request = validRequest();
+  const cases = [
+    { inputRecordBytes: canonicalJsonBytes({ hostile: true }) },
+    {
+      inputRecordBytes: canonicalJsonBytes(request.parameters),
+      outputExists: true,
+    },
+    {
+      inputRecordBytes: canonicalJsonBytes(request.parameters),
+      preDispatchReverify: async () => ({ status: "INTEGRITY_ERROR" }),
+    },
+  ];
+  for (const mutation of cases) {
+    let loads = 0;
+    const result = await dispatchClosedCommand(request, {
+      requestRoot: REQUEST_ROOT,
+      outputRoot: OUTPUT_ROOT,
+      requestReplaySet: new Set(),
+      outputExists: false,
+      preDispatchReverify: async () => ({ status: "PASS" }),
+      loadDependency: async () => {
+        loads += 1;
+      },
+      ...mutation,
+    });
+    assert.equal(result.status, "INTEGRITY_ERROR");
+    assert.equal(loads, 0);
+  }
+});

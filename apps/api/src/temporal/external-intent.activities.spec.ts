@@ -225,7 +225,7 @@ function recomputeActs() {
     status: 'NEW',
   });
   const tx = {
-    $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+    $queryRaw: vi.fn(async () => [{ locked: "" }]),
     suppressionRecord: { findMany: vi.fn(async () => []) },
     fieldEvidence: { findMany: vi.fn(async () => []) },
     canonicalCompany: {

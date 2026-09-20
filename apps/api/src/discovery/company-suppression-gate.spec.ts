@@ -15,7 +15,7 @@ function fakeTx(opts: {
 }) {
   const updateMany = vi.fn(async () => ({ count: 1 }));
   const tx = {
-    $queryRaw: vi.fn(async () => [{ locked: true }]),
+    $queryRaw: vi.fn(async () => [{ locked: "" }]),
     canonicalCompany: {
       findUnique: vi.fn(async () => opts.company),
       updateMany,
@@ -33,7 +33,7 @@ describe('company suppression terminal gate', () => {
     const tx = {
       $queryRaw: vi.fn(async () => {
         order.push('lock');
-        return [{ locked: true }];
+        return [{ locked: "" }];
       }),
       suppressionRecord: {
         findMany: vi.fn(async () => {
@@ -73,7 +73,7 @@ describe('company suppression terminal gate', () => {
     const tx = {
       $queryRaw: vi.fn(async () => {
         order.push('lock');
-        return [{ locked: true }];
+        return [{ locked: "" }];
       }),
       canonicalCompany: {
         findUnique: vi.fn(async () => {
@@ -112,7 +112,7 @@ describe('company suppression terminal gate', () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const suppressionRead = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1', name: 'Canonical GmbH', domain: 'blocked.example',
@@ -156,7 +156,7 @@ describe('company suppression terminal gate', () => {
   it('removes a retained role mailbox even when the canonical company is already SUPPRESSED', async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: 'co-1',
@@ -194,7 +194,7 @@ describe('company suppression terminal gate', () => {
       })
       .mockResolvedValueOnce({ attributes: { contact_email: 'sales@acme.de', keep: 'current' } });
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: { findUnique, updateMany },
       suppressionRecord: { findMany: vi.fn(async () => [{ type: 'domain', value: 'acme.de' }]) },
     } as unknown as Prisma.TransactionClient;
@@ -233,7 +233,7 @@ describe('contact external-processing authorization', () => {
   function contactTx(suppressions: { type: string; value: string }[]) {
     const order: string[] = [];
     const tx = {
-      $queryRaw: vi.fn(async () => { order.push('lock'); return [{ locked: true }]; }),
+      $queryRaw: vi.fn(async () => { order.push('lock'); return [{ locked: "" }]; }),
       canonicalContact: {
         findUnique: vi.fn(async () => {
           order.push('contact');

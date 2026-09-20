@@ -32,7 +32,7 @@ interface Fixture {
 
 function fakePrisma(f: Fixture): PrismaService {
   const tx = {
-    $queryRaw: async () => [{ locked: true }],
+    $queryRaw: async () => [{ locked: "" }],
     canonicalCompany: {
       findUnique: async ({ where }: { where: { id?: string; workspaceId_dedupeKey?: { dedupeKey: string } } }) =>
         where.id

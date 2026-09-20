@@ -18,7 +18,7 @@ describe('SamIntentProjectionService synthetic provenance quarantine', () => {
     const upsert = vi.fn(async () => ({ id: company.id }));
     const evidenceCreate = vi.fn();
     const tx = {
-      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      $queryRaw: vi.fn(async () => [{ locked: "" }]),
       canonicalCompany: {
         findUnique: vi.fn(async () => company),
         upsert,

@@ -36,7 +36,7 @@ describe('deletion artifact subject freeze', () => {
         }];
       }
       order.push('policy-lock');
-      return [];
+      return [{ locked: '' }];
     });
     const tx = {
       $queryRaw: queryRaw,

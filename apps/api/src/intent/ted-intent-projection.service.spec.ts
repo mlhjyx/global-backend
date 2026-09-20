@@ -80,7 +80,7 @@ function fakePrisma(
   const evidence: FakeTenant['evidence'] = [];
   const syntheticEntityIds = new Set<string>();
   const tx = {
-    $queryRaw: async () => [{ locked: true }],
+    $queryRaw: async () => [{ locked: "" }],
     suppressionRecord: {
       findMany: async () => suppressions,
     },
