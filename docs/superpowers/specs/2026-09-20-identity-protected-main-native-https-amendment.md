@@ -1,6 +1,6 @@
 # Protected-main 只读观察的有界 HTTPS 修订
 
-状态：INDEPENDENT_DESIGN_REVIEW_COMPLETE_AWAITING_OWNER_DECISION。仅授权后的本地实现候选；本文不授权凭据、controller 物化、真实认证请求、push、merge 或 root main 同步。
+状态：APPROVED_FOR_LOCAL_IMPLEMENTATION。owner 在明确的限定修订确认请求后指示“继续”；仅沿用本地源码、审查与合成测试授权。本文不授权凭据、controller 物化、真实认证请求、push、merge 或 root main 同步。
 
 独立只读设计审查 `native_https_amendment_review` 未发现阻塞提交 owner 决策的 Critical/Important 问题；它没有执行探测或实现，不构成实施批准或 admission。
 
