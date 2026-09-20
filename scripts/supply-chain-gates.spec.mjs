@@ -1585,11 +1585,11 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4\.37\.9/,
+    /github\/codeql-action\/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4\.38\.0/,
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4\.37\.9/,
+    /github\/codeql-action\/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4\.38\.0/,
   );
   assert.match(workflow, /^          languages: javascript-typescript$/m);
   assert.match(workflow, /^          queries: security-extended$/m);
