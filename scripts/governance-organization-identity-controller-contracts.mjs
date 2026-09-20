@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { types } from "node:util";
 
 const keyList = (value) => value.split(" ");
 
@@ -58,7 +59,14 @@ export function isAbsoluteNormalizedPath(value) {
 }
 
 export function hasExactKeys(value, keys) {
-  if (!isPassivePlainData(value)) return false;
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    types.isProxy(value) ||
+    Array.isArray(value) ||
+    !isPassivePlainData(value)
+  )
+    return false;
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return (
@@ -68,6 +76,7 @@ export function hasExactKeys(value, keys) {
 }
 
 export function isPassivePlainData(value, seen = new Set()) {
+  if (types.isProxy(value)) return false;
   if (value === null) return true;
   const type = typeof value;
   if (type === "string") return value.normalize("NFC") === value;
@@ -77,6 +86,11 @@ export function isPassivePlainData(value, seen = new Set()) {
   seen.add(value);
   try {
     if (Array.isArray(value)) {
+      if (
+        Object.getPrototypeOf(value) !== Array.prototype ||
+        Object.keys(value).length !== value.length
+      )
+        return false;
       if (Object.getOwnPropertySymbols(value).length !== 0) return false;
       const descriptors = Object.getOwnPropertyDescriptors(value);
       for (const [key, descriptor] of Object.entries(descriptors)) {

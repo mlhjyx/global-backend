@@ -531,3 +531,32 @@ test("root-anchor shared closure rejects cross-record and final review substitut
     "INTEGRITY_ERROR",
   );
 });
+
+test("exact records reject null, scalar and proxy input without running traps", async () => {
+  const { hasExactKeys } =
+    await import("./governance-organization-identity-controller-contracts.mjs");
+  for (const value of [null, undefined, 1, "x", true, []])
+    assert.equal(hasExactKeys(value, []), false);
+  let traps = 0;
+  const proxy = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        traps++;
+        throw Error("private");
+      },
+      ownKeys() {
+        traps++;
+        throw Error("private");
+      },
+    },
+  );
+  assert.equal(hasExactKeys(proxy, []), false);
+  assert.equal(isPassivePlainData({ nested: proxy }), false);
+  assert.equal(traps, 0);
+});
+
+test("passive controller arrays reject holes and altered prototypes", () => {
+  assert.equal(isPassivePlainData(new Array(2)), false);
+  assert.equal(isPassivePlainData(Object.setPrototypeOf([], null)), false);
+});
