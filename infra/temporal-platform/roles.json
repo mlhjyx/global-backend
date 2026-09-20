@@ -5,10 +5,9 @@
   "roles": {
     "growthosReader": ["platform-automation:read"],
     "backendScheduleWriter": ["platform-automation:write"],
-    "backendWorker": [
-      "platform-automation:worker",
-      "platform-automation:write"
-    ],
+    "backendWorker": ["platform-automation:worker"],
+    "backendCustomerWorker": ["default:worker"],
+    "backendCustomerClient": ["default:read", "default:write"],
     "provisionAdmin": ["temporal-system:admin"]
   }
 }

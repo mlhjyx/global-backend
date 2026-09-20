@@ -12,6 +12,7 @@ import (
 	"global.local/temporal-platform-server/readerpolicy"
 	"go.temporal.io/server/common/authorization"
 	"go.temporal.io/server/common/config"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql"
@@ -49,6 +50,9 @@ func run(args []string) error {
 	if err = ValidateConfiguration(cfg); err != nil {
 		return err
 	}
+	if err = ValidateReaderEndpoint(cfg, os.Getenv("TEMPORAL_PLATFORM_READER_SERVER_NAME")); err != nil {
+		return err
+	}
 	if err = ValidateTrustDomains(cfg); err != nil {
 		return err
 	}
@@ -57,6 +61,19 @@ func run(args []string) error {
 		return err
 	}
 	authorizer, err := readerpolicy.NewAuthorizer(os.Getenv("TEMPORAL_PLATFORM_READER_SUBJECT"))
+	if err != nil {
+		return err
+	}
+	machineConfig := readerpolicy.MachineConfig{
+		Issuer: os.Getenv("TEMPORAL_RUNTIME_JWT_ISSUER"), Audience: cfg.Global.Authorization.Audience,
+		ReaderSubject:         os.Getenv("TEMPORAL_PLATFORM_READER_SUBJECT"),
+		PlatformWorkerSubject: os.Getenv("TEMPORAL_PLATFORM_WORKER_SUBJECT"),
+		CustomerWorkerSubject: os.Getenv("TEMPORAL_CUSTOMER_WORKER_SUBJECT"),
+		CustomerClientSubject: os.Getenv("TEMPORAL_CUSTOMER_CLIENT_SUBJECT"),
+		ProvisionAdminSubject: os.Getenv("TEMPORAL_PROVISION_ADMIN_SUBJECT"),
+		ScheduleWriterSubject: os.Getenv("TEMPORAL_SCHEDULE_WRITER_SUBJECT"),
+	}
+	authorizer, err = readerpolicy.NewMachineAuthorizer(authorizer, machineConfig)
 	if err != nil {
 		return err
 	}
@@ -87,6 +104,19 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	mapper, err = readerpolicy.NewMachineClaimMapper(mapper, machineConfig)
+	if err != nil {
+		return err
+	}
+	stopDynamicConfig := make(chan any)
+	defer close(stopDynamicConfig)
+	var dynamicClient dynamicconfig.Client = dynamicconfig.NewNoopClient()
+	if cfg.DynamicConfigClient != nil {
+		dynamicClient, err = dynamicconfig.NewFileBasedClientWithMetrics(cfg.DynamicConfigClient, logger, stopDynamicConfig, metricHandler)
+		if err != nil {
+			return err
+		}
+	}
 	audience, err := authorization.GetAudienceMapperFromConfig(&cfg.Global.Authorization)
 	if err != nil {
 		return err
@@ -95,6 +125,7 @@ func run(args []string) error {
 		temporal.ForServices(services), temporal.WithConfig(cfg), temporal.WithLogger(logger),
 		temporal.WithTLSConfigFactory(tlsProvider), temporal.WithCustomMetricsHandler(metricHandler),
 		temporal.InterruptOn(temporal.InterruptCh()), temporal.WithAuthorizer(authorizer),
+		temporal.WithDynamicConfigClient(readerpolicy.PinTokenNamespaceEnforcement(dynamicClient)),
 		temporal.WithClaimMapper(func(*config.Config) authorization.ClaimMapper { return mapper }),
 		temporal.WithAudienceGetter(func(*config.Config) authorization.JWTAudienceMapper { return audience }),
 	)

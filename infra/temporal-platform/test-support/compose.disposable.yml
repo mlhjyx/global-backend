@@ -127,7 +127,14 @@ services:
       TEMPORAL_PLATFORM_JWKS_URI: https://task4c-jwks:8443/jwks.json
       TEMPORAL_PLATFORM_JWT_AUDIENCE: ${TEMPORAL_PLATFORM_JWT_AUDIENCE:?set audience}
       TEMPORAL_PLATFORM_READER_SUBJECT: ${TEMPORAL_PLATFORM_READER_SUBJECT:-task4c-growthos-reader}
+      TEMPORAL_RUNTIME_JWT_ISSUER: https://growthos.example/temporal-runtime
+      TEMPORAL_PLATFORM_WORKER_SUBJECT: task4c-backend-worker
+      TEMPORAL_CUSTOMER_WORKER_SUBJECT: task4c-customer-worker
+      TEMPORAL_CUSTOMER_CLIENT_SUBJECT: task4c-customer-client
+      TEMPORAL_PROVISION_ADMIN_SUBJECT: task4c-provision-admin
+      TEMPORAL_SCHEDULE_WRITER_SUBJECT: task4c-backend-schedule-writer
       TEMPORAL_PLATFORM_TLS_SERVER_NAME: task4c-temporal
+      TEMPORAL_PLATFORM_READER_SERVER_NAME: task4c-reader
       SSL_CERT_FILE: /run/secrets/temporal-platform/jwks-ca-bundle.crt
     volumes:
       - type: bind
@@ -209,6 +216,12 @@ services:
     working_dir: /repo/apps/api
     volumes:
       - type: bind
+        source: ${TEMPORAL_PLATFORM_TEST_READER_CLIENT_DIRECTORY:?set reader client fixture directory}
+        target: /run/secrets/temporal-platform-reader
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ${TEMPORAL_PLATFORM_TEST_REPOSITORY_ROOT:?set repository root}
         target: /repo
         read_only: true
@@ -221,20 +234,8 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/client
-        target: /repo/node_modules/.pnpm/@temporalio+client@1.23.0/node_modules/@temporalio/client
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/common
-        target: /repo/node_modules/.pnpm/@temporalio+common@1.23.0/node_modules/@temporalio/common
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/proto
-        target: /repo/node_modules/.pnpm/@temporalio+proto@1.23.0/node_modules/@temporalio/proto
+        source: ${TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY:?set node overlay directory}/.pnpm
+        target: /repo/node_modules/.pnpm
         read_only: true
         bind:
           create_host_path: false

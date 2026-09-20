@@ -150,7 +150,12 @@ if [[ -n "${READER_PROBE_SERVICE}" ]]; then
     "${READER_PROBE_ADDRESS}" "${READER_PROBE_SERVER_NAME}" \
     "${TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID}" \
     "${TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID}" \
-    "${TEMPORAL_PLATFORM_PROOF_RUN_ID}"
+    "${TEMPORAL_PLATFORM_PROOF_RUN_ID}" \
+    /run/secrets/temporal-platform-reader/reader.crt \
+    /run/secrets/temporal-platform-reader/reader.key \
+    "${TEMPORAL_PLATFORM_READER_PUBLIC_SERVER_NAME:?set the public JWT-only server name}" \
+    /run/secrets/temporal-platform-client/internode-ca.crt \
+    "${TEMPORAL_PLATFORM_READER_INTERNAL_PROBE_ADDRESS:-}"
 fi
 
 echo "independent Temporal read-only authorization matrix passed"

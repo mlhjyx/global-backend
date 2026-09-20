@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 export COMPOSE_IGNORE_ORPHANS=true
+export DOCKER_CONTEXT=default
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PLATFORM_DIR=$(cd -- "${SCRIPT_DIR}/.." && pwd)
@@ -66,6 +67,7 @@ SERVER_SECRET_DIRECTORY=${FIXTURE_DIRECTORY}/server
 JWKS_DIRECTORY=${FIXTURE_DIRECTORY}/jwks
 JWKS_TLS_DIRECTORY=${FIXTURE_DIRECTORY}/jwks-tls
 CLIENT_SECRET_DIRECTORY=${FIXTURE_DIRECTORY}/client
+READER_CLIENT_DIRECTORY=${FIXTURE_DIRECTORY}/reader-client
 NODE_OVERLAY_DIRECTORY=${FIXTURE_DIRECTORY}/node-overlay
 NATIVE_SERVER_DIRECTORY=${FIXTURE_DIRECTORY}/native-server
 mkdir -m 0700 \
@@ -74,6 +76,7 @@ mkdir -m 0700 \
   "${JWKS_DIRECTORY}" \
   "${JWKS_TLS_DIRECTORY}" \
   "${CLIENT_SECRET_DIRECTORY}" \
+  "${READER_CLIENT_DIRECTORY}" \
   "${NODE_OVERLAY_DIRECTORY}" \
   "${NATIVE_SERVER_DIRECTORY}"
 
@@ -90,6 +93,7 @@ export TEMPORAL_PLATFORM_TEST_SERVER_SECRET_DIRECTORY=${SERVER_SECRET_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_JWKS_DIRECTORY=${JWKS_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_JWKS_TLS_DIRECTORY=${JWKS_TLS_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY=${CLIENT_SECRET_DIRECTORY}
+export TEMPORAL_PLATFORM_TEST_READER_CLIENT_DIRECTORY=${READER_CLIENT_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY=${NODE_OVERLAY_DIRECTORY}
 export TEMPORAL_PLATFORM_TEST_NATIVE_SERVER_DIRECTORY=${NATIVE_SERVER_DIRECTORY}
 if [[ -n ${TEMPORAL_PLATFORM_NATIVE_SERVER_BINARY:-} ]]; then
@@ -233,7 +237,7 @@ openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
   -out "${AUTHORITY_DIRECTORY}/frontend-ca.crt" >/dev/null 2>&1
 openssl req -newkey rsa:2048 -sha256 -nodes \
   -subj "/CN=task4c-temporal" \
-  -addext "subjectAltName=DNS:task4c-temporal,DNS:temporal-platform" \
+  -addext "subjectAltName=DNS:task4c-temporal,DNS:temporal-platform,DNS:task4c-reader" \
   -addext "extendedKeyUsage=serverAuth" \
   -keyout "${AUTHORITY_DIRECTORY}/frontend.key" \
   -out "${AUTHORITY_DIRECTORY}/frontend.csr" >/dev/null 2>&1
@@ -288,32 +292,32 @@ cp "${AUTHORITY_DIRECTORY}/jwks.key" \
   "${JWKS_TLS_DIRECTORY}/server.key"
 cp "${AUTHORITY_DIRECTORY}/frontend-ca.crt" \
   "${CLIENT_SECRET_DIRECTORY}/ca.crt"
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+  -subj "/CN=Task4C Disposable Reader CA" \
+  -keyout "${AUTHORITY_DIRECTORY}/reader-ca.key" \
+  -out "${SERVER_SECRET_DIRECTORY}/reader-ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -sha256 -nodes \
+  -subj "/CN=task4c-growthos-reader" \
+  -addext "extendedKeyUsage=clientAuth" -addext "keyUsage=digitalSignature" \
+  -keyout "${READER_CLIENT_DIRECTORY}/reader.key" \
+  -out "${AUTHORITY_DIRECTORY}/reader.csr" >/dev/null 2>&1
+openssl x509 -req -sha256 -days 1 \
+  -in "${AUTHORITY_DIRECTORY}/reader.csr" \
+  -CA "${SERVER_SECRET_DIRECTORY}/reader-ca.crt" \
+  -CAkey "${AUTHORITY_DIRECTORY}/reader-ca.key" \
+  -CAcreateserial -copy_extensions copy \
+  -out "${READER_CLIENT_DIRECTORY}/reader.crt" >/dev/null 2>&1
 cp "${AUTHORITY_DIRECTORY}/internode-ca.crt" \
   "${CLIENT_SECRET_DIRECTORY}/internode-ca.crt"
-node "${SCRIPT_DIR}/generate-fixtures.mjs" \
-  "${JWKS_DIRECTORY}" "${CLIENT_SECRET_DIRECTORY}" "${AUDIENCE}" >/dev/null
 if find "${CLIENT_SECRET_DIRECTORY}" -maxdepth 1 -type f \
   \( -name '*.key' -o -name 'internode.crt' \) -print -quit |
   grep -q .; then
   echo "ordinary client fixture contains an internode client credential" >&2
   exit 1
 fi
-TEMPORAL_SDK_VERSION=1.23.0
-for package_name in client common proto; do
-  package_source=${REPOSITORY_ROOT}/node_modules/.pnpm/@temporalio+${package_name}@${TEMPORAL_SDK_VERSION}/node_modules/@temporalio/${package_name}
-  if [[ ! -d ${package_source} || -L ${package_source} ]] ||
-    ! jq -e --arg name "@temporalio/${package_name}" \
-      '.name == $name and .version == $version' --arg version "${TEMPORAL_SDK_VERSION}" \
-      "${package_source}/package.json" >/dev/null; then
-    echo "Temporal SDK package does not match the frozen ${TEMPORAL_SDK_VERSION} install" >&2
-    exit 1
-  fi
-  mkdir -m 0700 "${NODE_OVERLAY_DIRECTORY}/${package_name}"
-  cp -R --no-preserve=mode,ownership \
-    "${package_source}/." "${NODE_OVERLAY_DIRECTORY}/${package_name}/"
-done
-find "${NODE_OVERLAY_DIRECTORY}" -type d -exec chmod 0755 {} +
-find "${NODE_OVERLAY_DIRECTORY}" -type f -exec chmod 0644 {} +
+node "${SCRIPT_DIR}/prepare-worker-dependencies.mjs" "${REPOSITORY_ROOT}" "${NODE_OVERLAY_DIRECTORY}"
+node "${SCRIPT_DIR}/generate-fixtures.mjs" \
+  "${JWKS_DIRECTORY}" "${CLIENT_SECRET_DIRECTORY}" "${AUDIENCE}" >/dev/null
 chmod 0700 \
   "${FIXTURE_DIRECTORY}" \
   "${AUTHORITY_DIRECTORY}" \
@@ -326,6 +330,8 @@ chmod 0600 \
   "${SERVER_SECRET_DIRECTORY}"/*.key \
   "${JWKS_TLS_DIRECTORY}"/*.key \
   "${CLIENT_SECRET_DIRECTORY}"/*.jwt
+chmod 0600 "${READER_CLIENT_DIRECTORY}/reader.key"
+chmod 0644 "${READER_CLIENT_DIRECTORY}/reader.crt"
 chmod 0644 \
   "${SERVER_SECRET_DIRECTORY}"/*.crt \
   "${JWKS_TLS_DIRECTORY}"/*.crt \
@@ -372,7 +378,7 @@ echo "namespace retention and ownership drift rejected"
 
 SCHEDULE_ID=task4c-proof-${RUN_ID}
 WORKFLOW_ID=task4c-proof-workflow-${RUN_ID}
-TASK_QUEUE=task4c-proof-queue
+TASK_QUEUE=understanding
 ACTION_INPUT=$(printf \
   '{"executionContractVersion":1,"executionScope":{"purpose":"platform.acquisition","requestSha256":"%064d","scheduleId":"%s","subjectId":"%s","subjectType":"schedule"}}' \
   0 "${SCHEDULE_ID}" "${SCHEDULE_ID}")
@@ -460,7 +466,9 @@ fi
 export TEMPORAL_PLATFORM_READER_TOKEN_FILE=/run/secrets/temporal-platform-client/reader.jwt
 export TEMPORAL_PLATFORM_READER_PROBE_SERVICE=codex-task4c-platform-temporal-worker-probe
 export TEMPORAL_PLATFORM_READER_PROBE_ADDRESS=task4c-temporal:7233
-export TEMPORAL_PLATFORM_READER_PROBE_SERVER_NAME=task4c-temporal
+export TEMPORAL_PLATFORM_READER_PROBE_SERVER_NAME=task4c-reader
+export TEMPORAL_PLATFORM_READER_PUBLIC_SERVER_NAME=task4c-temporal
+export TEMPORAL_PLATFORM_READER_INTERNAL_PROBE_ADDRESS=task4c-temporal:7236
 export TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID=${SCHEDULE_ID}
 export TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID=${ACTION_WORKFLOW_ID}
 export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}
@@ -480,6 +488,10 @@ export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}
   /run/secrets/temporal-platform-client/ca.crt \
   task4c-temporal:7233 task4c-temporal \
   platform-automation "${TASK_QUEUE}"
+
+"${compose[@]}" run --rm --no-deps --entrypoint node \
+  codex-task4c-platform-temporal-worker-probe \
+  /repo/infra/temporal-platform/test-support/machine-worker-probe.mjs
 
 "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
   codex-task4c-platform-temporal-admin -eu -c '

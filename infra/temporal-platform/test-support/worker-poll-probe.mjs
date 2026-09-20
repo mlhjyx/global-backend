@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 
@@ -39,6 +40,7 @@ if (tokenBytes.byteLength < 32 || tokenBytes.byteLength > 16_384) {
   throw new Error("worker authorization token size is invalid");
 }
 const token = tokenBytes.toString("utf8").trim();
+const identity = `task4c-backend-worker:${randomUUID()}`;
 if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) {
   throw new Error("worker authorization token format is invalid");
 }
@@ -57,7 +59,7 @@ try {
     connection.workflowService.pollWorkflowTaskQueue({
       namespace,
       taskQueue: { name: taskQueue, kind: 1 },
-      identity: "task4c-worker-authz-probe",
+      identity,
       workerVersionCapabilities: {
         buildId: "task4c-worker-authz-probe",
         useVersioning: false,
@@ -75,7 +77,7 @@ try {
       namespace,
       taskToken: task.taskToken,
       cause: 14,
-      identity: "task4c-worker-authz-probe",
+      identity,
       failure: {
         message: "Task4C disposable authorization probe",
         source: "task4c-disposable-proof",
