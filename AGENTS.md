@@ -25,9 +25,10 @@
 
 ## 3. 当前开发环境的稳定约束
 
-- 唯一施工仓库是 Ubuntu 上的 `/global/backend`；Mac 只作为 SSH 客户端。
-- Compose 一律使用 `docker compose -p global ...`。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
-- Temporal 由 `temporal-dev.service` 管理，不另起手工开发服务。
+- 唯一施工仓库是 `/global/backend`。宿主环境是 **WSL2（Ubuntu 26.04）**，2026-09 从旧 Ubuntu 机器迁入；旧机器只读，其 `server` remote 已锁为 `disabled://server-read-only`，不得推送。
+- Compose 一律使用 `docker compose -p global ...`，且必须经 launcher `/global/local-config/global/infra.sh` 注入 `--env-file`；**直接裸跑 `docker compose` 会因缺少必需变量失败**。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
+- Temporal 由容器 `global-temporal-dev` 提供（compose 托管），**不是** systemd unit；本机无 `temporal-dev.service`。不另起手工开发服务。
+- 容器 `restart` 策略为 `no`：宿主重启后服务不会自动恢复，需经 launcher 手动拉起。
 - 开发端口只绑定 `127.0.0.1`；跨主机访问使用 SSH 转发，不向 Tailscale 或公网直接暴露。
 - 密钥只进入环境变量或 secret store；不得读取、打印、提交或在文档中保存 token、密码、凭据指纹之外的秘密。
 
@@ -35,7 +36,7 @@
 
 ```bash
 pnpm install --frozen-lockfile
-docker compose -p global up -d
+/global/local-config/global/infra.sh up -d
 DATABASE_URL=postgresql://global:global@localhost:5432/global_dev pnpm --filter @global/db exec prisma migrate deploy
 pnpm --filter @global/db generate
 pnpm --filter @global/contracts build
