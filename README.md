@@ -52,6 +52,7 @@ gctl link-env "$PWD"
 pnpm install --frozen-lockfile
 pnpm --filter @global/db generate
 pnpm --filter @global/contracts build
+pnpm --filter @global/api build          # 部分单测加载编译产物（apps/api/dist），先 build 再测
 ```
 
 ### 开发循环三档
