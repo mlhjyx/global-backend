@@ -10,6 +10,7 @@ const REQUIRED_URLS = Object.freeze([
   "APP_DATABASE_URL",
   "RUNTIME_API_LEASE_DATABASE_URL",
   "RUNTIME_WORKER_LEASE_DATABASE_URL",
+  "RUNTIME_PLATFORM_WORKER_LEASE_DATABASE_URL",
   "RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL",
 ] as const);
 
@@ -24,6 +25,7 @@ for (const name of REQUIRED_URLS) {
 const roles = Object.freeze<readonly RuntimeProcessRole[]>([
   "API",
   "WORKER",
+  "PLATFORM_WORKER",
   "OUTBOX_RELAY",
 ]);
 const buildSha = "a".repeat(40);
@@ -31,14 +33,38 @@ const imageDigest = `sha256:${"b".repeat(64)}`;
 const artifactDigest = `sha256:${"c".repeat(64)}`;
 const migrationRevision =
   "runtime-lease-prisma-void-return-compatibility-verification";
+const temporalClusterId = "runtime-lease-prisma-verification";
+const temporalClusterProofDigest = `sha256:${"e".repeat(64)}`;
+
+// Worker leases are bound (v2) to one cluster, the role's own namespace and
+// workload kind, and the shared "understanding" queue; the database rejects
+// anything else with RUNTIME_PROCESS_LEASE_IDENTITY_INVALID.
+const BOUND_WORKER = Object.freeze({
+  WORKER: { namespace: "default", workloadKind: "customer-worker" },
+  PLATFORM_WORKER: {
+    namespace: "platform-automation",
+    workloadKind: "platform-worker",
+  },
+} as const);
+
+function boundWorker(role: RuntimeProcessRole) {
+  return role === "WORKER" || role === "PLATFORM_WORKER"
+    ? BOUND_WORKER[role]
+    : null;
+}
 
 function startingLease(role: RuntimeProcessRole): RuntimeProcessLeaseRecord {
   const startedAt = new Date();
+  const bound = boundWorker(role);
   return Object.freeze({
     instanceId: randomUUID(),
     role,
     state: "STARTING",
-    taskQueue: role === "WORKER" ? "runtime-lease-prisma-verification" : null,
+    taskQueue: bound ? "understanding" : null,
+    temporalClusterId: bound ? temporalClusterId : null,
+    temporalClusterProofDigest: bound ? temporalClusterProofDigest : null,
+    temporalNamespace: bound?.namespace ?? null,
+    workloadKind: bound?.workloadKind ?? null,
     buildSha,
     imageDigest,
     artifactDigest,
@@ -94,6 +120,10 @@ try {
         role: RuntimeProcessRole;
         state: string;
         taskQueue: string | null;
+        temporalClusterId: string | null;
+        temporalClusterProofDigest: string | null;
+        temporalNamespace: string | null;
+        workloadKind: string | null;
         buildSha: string;
         imageDigest: string;
         artifactDigest: string;
@@ -102,7 +132,12 @@ try {
       }>
     >(
       `SELECT "role", "state"::text AS "state",
-              "task_queue" AS "taskQueue", "build_sha" AS "buildSha",
+              "task_queue" AS "taskQueue",
+              "temporal_cluster_id" AS "temporalClusterId",
+              "temporal_cluster_proof_digest" AS "temporalClusterProofDigest",
+              "temporal_namespace" AS "temporalNamespace",
+              "workload_kind"::text AS "workloadKind",
+              "build_sha" AS "buildSha",
               "image_digest" AS "imageDigest",
               "artifact_digest" AS "artifactDigest",
               "migration_revision" AS "migrationRevision",
@@ -112,14 +147,18 @@ try {
       starting.instanceId,
     );
     const observed = rows[0];
-    const expectedTaskQueue =
-      role === "WORKER" ? "runtime-lease-prisma-verification" : null;
+    const bound = boundWorker(role);
     if (
       rows.length !== 1 ||
       !observed ||
       observed.role !== role ||
       observed.state !== "STOPPED" ||
-      observed.taskQueue !== expectedTaskQueue ||
+      observed.taskQueue !== (bound ? "understanding" : null) ||
+      observed.temporalClusterId !== (bound ? temporalClusterId : null) ||
+      observed.temporalClusterProofDigest !==
+        (bound ? temporalClusterProofDigest : null) ||
+      observed.temporalNamespace !== (bound?.namespace ?? null) ||
+      observed.workloadKind !== (bound?.workloadKind ?? null) ||
       observed.buildSha !== buildSha ||
       observed.imageDigest !== imageDigest ||
       observed.artifactDigest !== artifactDigest ||
