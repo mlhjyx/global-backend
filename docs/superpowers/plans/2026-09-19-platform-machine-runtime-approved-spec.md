@@ -1,5 +1,8 @@
 # R4 最小 machine/runtime 安全差额提案
 
+> 生命周期：`APPROVED`
+> 生命周期依据：用户已批准的 R4 规格；实现随 #545 与 GrowthOS 补丁线推进，尚无 RuntimeEvidence
+
 状态：**APPROVED_SPEC / IMPLEMENTATION_IN_PROGRESS / NO_RUNTIME_EVIDENCE**。
 
 用户已明确同意本 R4 方案及另行界定的旧执行处置。原审查草案 SHA256：`7ecb2247d670608805d007cb084da874c15d9f57c99387cdfd799b060d03f6d1`。本文记录已批准设计，不表示代码、凭据或部署已完成；切换前仍须逐项取得事实证明。
