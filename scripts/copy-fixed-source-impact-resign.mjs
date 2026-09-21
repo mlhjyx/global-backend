@@ -58,47 +58,60 @@ export function updateGovernanceRecord(markdown, fingerprint, receiptSha256) {
   return updated;
 }
 
+/**
+ * Decide what a re-sign run may do, validating the governance record before
+ * anything is written so a malformed record fails with the repository
+ * untouched.
+ */
+export function planResign({ previous, next, record, accept }) {
+  const verdict = classifyResign(previous, next);
+  if (verdict.kind === "UNCHANGED") return { ...verdict, write: false, refused: false };
+  if (verdict.kind === "ELIGIBILITY_CHANGED" && !accept) {
+    return { ...verdict, write: false, refused: true };
+  }
+  updateGovernanceRecord(record, next.current_source_fingerprint, "0".repeat(64));
+  return { ...verdict, write: true, refused: false };
+}
+
 async function main(argv) {
   if (argv.some((argument) => argument !== ACCEPT_FLAG)) {
     throw new Error(`usage: node scripts/copy-fixed-source-impact-resign.mjs [${ACCEPT_FLAG}]`);
   }
   const root = process.cwd();
   const receiptPath = resolve(root, COPY_RUNTIME_ELIGIBILITY_PATH);
+  const recordPath = resolve(root, COPY_GOVERNANCE_RECORD_PATH);
   const previous = JSON.parse(await readFile(receiptPath, "utf8"));
   const next = await prepareCopyRuntimeEligibilityReceiptFromRepository(root);
-  const verdict = classifyResign(previous, next);
-  if (verdict.kind === "UNCHANGED") {
-    process.stdout.write(`${JSON.stringify({ result: "UNCHANGED", status: next.status })}\n`);
-    return;
-  }
-  if (verdict.kind === "ELIGIBILITY_CHANGED" && !argv.includes(ACCEPT_FLAG)) {
+  const record = await readFile(recordPath, "utf8");
+  const plan = planResign({ previous, next, record, accept: argv.includes(ACCEPT_FLAG) });
+  if (plan.refused) {
     process.stderr.write(
-      `COPY_RESIGN_ELIGIBILITY_CHANGED: ${verdict.changed.join(", ")}\n` +
+      `COPY_RESIGN_ELIGIBILITY_CHANGED: ${plan.changed.join(", ")}\n` +
         `status ${previous.status} -> ${next.status}. Review why before re-running with ${ACCEPT_FLAG}.\n`,
     );
     process.exitCode = 1;
     return;
   }
-  await writeCopyRuntimeEligibilityReceiptFromRepository(root);
+  if (!plan.write) {
+    process.stdout.write(`${JSON.stringify({ result: plan.kind, status: next.status })}\n`);
+    return;
+  }
+  // Mirror what was actually written, not the earlier prepared receipt.
+  const written = await writeCopyRuntimeEligibilityReceiptFromRepository(root);
   const receiptSha256 = createHash("sha256")
     .update(await readFile(receiptPath))
     .digest("hex");
-  const recordPath = resolve(root, COPY_GOVERNANCE_RECORD_PATH);
   await writeFile(
     recordPath,
-    updateGovernanceRecord(
-      await readFile(recordPath, "utf8"),
-      next.current_source_fingerprint,
-      receiptSha256,
-    ),
+    updateGovernanceRecord(record, written.current_source_fingerprint, receiptSha256),
     "utf8",
   );
   process.stdout.write(
     `${JSON.stringify({
-      result: verdict.kind,
-      changed: verdict.changed,
-      status: next.status,
-      current_source_fingerprint: next.current_source_fingerprint,
+      result: plan.kind,
+      changed: plan.changed,
+      status: written.status,
+      current_source_fingerprint: written.current_source_fingerprint,
       receipt_sha256: receiptSha256,
     })}\n`,
   );

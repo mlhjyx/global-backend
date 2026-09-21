@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   classifyResign,
+  planResign,
   updateGovernanceRecord,
 } from "./copy-fixed-source-impact-resign.mjs";
 
@@ -72,4 +73,38 @@ test("the governance record rejects missing, duplicated or malformed digests", (
     /ROW_COUNT: Current/,
   );
   assert.throws(() => updateGovernanceRecord([row, sha].join("\n"), "C".repeat(64), "d".repeat(64)), /DIGEST_INVALID/);
+});
+
+test("a re-sign plan writes only hash-only moves or explicitly accepted changes", () => {
+  const record = [
+    `| Current source fingerprint | \`${"1".repeat(64)}\` |`,
+    `| Eligibility receipt SHA-256 | \`${"2".repeat(64)}\` |`,
+  ].join("\n");
+  const moved = { ...receipt, current_source_fingerprint: "b".repeat(64) };
+  const escalated = { ...moved, status: "CURRENT" };
+  assert.deepEqual(planResign({ previous: receipt, next: { ...receipt }, record, accept: false }), {
+    kind: "UNCHANGED", changed: [], write: false, refused: false,
+  });
+  assert.deepEqual(planResign({ previous: receipt, next: moved, record, accept: false }), {
+    kind: "HASH_ONLY", changed: [], write: true, refused: false,
+  });
+  assert.deepEqual(planResign({ previous: receipt, next: escalated, record, accept: false }), {
+    kind: "ELIGIBILITY_CHANGED", changed: ["status"], write: false, refused: true,
+  });
+  assert.deepEqual(planResign({ previous: receipt, next: escalated, record, accept: true }), {
+    kind: "ELIGIBILITY_CHANGED", changed: ["status"], write: true, refused: false,
+  });
+});
+
+test("a malformed governance record fails the plan before anything is written", () => {
+  const moved = { ...receipt, current_source_fingerprint: "b".repeat(64) };
+  const duplicated = [
+    `| Current source fingerprint | \`${"1".repeat(64)}\` |`,
+    `| Current source fingerprint | \`${"1".repeat(64)}\` |`,
+    `| Eligibility receipt SHA-256 | \`${"2".repeat(64)}\` |`,
+  ].join("\n");
+  assert.throws(
+    () => planResign({ previous: receipt, next: moved, record: duplicated, accept: false }),
+    /ROW_COUNT: Current/,
+  );
 });

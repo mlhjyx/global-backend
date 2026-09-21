@@ -6,7 +6,8 @@ version: 2
 # 指纹与 required-contexts 的 action pin，Dependabot 无法自行更新二者，版本更新 PR
 # 结构性必挂（76 个中 56 个未合即关）。常规升级改为每月一次批量 PR，并在漏洞基线
 # valid_until 之前完成；安全更新 PR 由开发代理补一次重签后合入。流程见
-# docs/backend/dependency-refresh.md。下方分组仍决定安全更新的打包方式与批量升级的分域。
+# docs/backend/dependency-refresh.md。实际生效的只剩 production-security / development-security
+# 两个安全分组；applies-to: version-updates 的分组在重新开启版本更新前不起作用，保留以免丢失分域约定。
 updates:
   - package-ecosystem: npm
     directory: "/"
