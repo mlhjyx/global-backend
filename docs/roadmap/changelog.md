@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-21 · PR decision card retired; standing merge authorization
+
+- 移除 `nontechnical decision card freshness` 必需检查及其 `pull_request_target` 工作流、`pr-decision-card-status/v4` 解析器与测试；PR 模板改为四行不经机器解析的「给产品负责人的说明」。原因：卡片按其自身合同只是未验证声明、授权字段恒为 `NOT_AUTHORIZED`，检查不能验证真实性也不承载授权，却让每次推送都失效（两天 123 次运行、40 次失败、42 次取消）。历史合同见 Git provenance 与[真实验证记录](../ai-development/decision-card-live-validation.md)。
+- 产品负责人以 `DEC-AIDEV-004` 授予常规 PR 常设合并授权：开发代理独立审查通过、必需检查全绿、线程清零且基于最新 main 后可合并；ruleset/设置/权限、部署发布与付费调用不在其内。`required-contexts.json` 中 ≥1 批准 + CODEOWNERS 的远期目标保持不变。
+- Copy fixed-source 回执只因 `package.json` 删去一条脚本而重签指纹；漂移集合与 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED` 不变。
+
 ## 2026-09-20 · Dependency queue and source-status closeout
 
 - 按批准顺序接入 Redocly2.53.2（#539）、Langfuse5.11.1（#540）、配对S3 3.1134.0（#541）与AI SDK补丁（#543）。工具链更新与本次状态修订组成最后候选；最终 head、hosted checks、独立审查与 merge 分别从原#533的successor记录回读，不预设本文自身未来SHA。完整来源与验证边界见[本轮证据](../evidence/dependency-queue-closeout-20260920.md)。

@@ -22,7 +22,7 @@ flowchart LR
     K["CodeGraph<br/>普通静态调用"] --> H
     H --> I["源码、测试复核"]
     R["RuntimeEvidence<br/>开发环境元数据"] --> I
-    I --> J["非技术合并决策卡"]
+    I --> J["给产品负责人的说明"]
 ```
 
 `OWN-*` 是责任帽，不是实际人员。仓库没有记录真实负责人的节点必须显示 `assignee=UNASSIGNED`；图谱不得把角色存在解释成已有人批准。
