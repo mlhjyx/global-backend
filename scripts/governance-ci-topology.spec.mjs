@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = new URL("../", import.meta.url);
@@ -148,7 +151,12 @@ test("the live required build fails when its scope dependency is not successful"
     (item) => item.name === "build · typecheck · test",
   );
 
-  assert.match(buildJob, /\n {4}if: always\(\)/);
+  assert.match(buildJob, /\n {4}if: \$\{\{ !cancelled\(\) \}\}/);
+  assert.doesNotMatch(
+    buildJob,
+    /\n {4}if: always\(\)/,
+    "always() jobs ignore cancellation, so a superseded PR run would block the next one",
+  );
   assert.match(buildJob, /\n {4}needs: renderer-visual-scope/);
   assert.equal(
     firstStep,
@@ -163,7 +171,134 @@ test("the live required build fails when its scope dependency is not successful"
     /if \[\[ "\$SCOPE_RESULT" != "success" \]\]; then/,
   );
   assert.match(scopeGuardStep, /^            exit 1$/m);
-  assert.equal(buildPolicy.allowed_job_if, "always()");
+  assert.equal(buildPolicy.allowed_job_if, "${{ !cancelled() }}");
+});
+
+function scopeScript(workflow) {
+  const lines = jobBlock(workflow, "renderer-visual-scope").split(/\r?\n/);
+  const start = lines.findIndex((line) => line === "        run: |");
+  assert.notEqual(start, -1, "scope step must use a literal run block");
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() !== "" && !line.startsWith("          ")) break;
+    body.push(line.slice(10));
+  }
+  return body.join("\n");
+}
+
+async function runScope(script, changedPaths, event = "pull_request") {
+  const root = await mkdtemp(join(tmpdir(), "ci-scope-"));
+  try {
+    // Ignore the developer's global/system git config (signing, hooks).
+    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    const git = (...args) =>
+      execFileSync("git", args, { cwd: root, encoding: "utf8", env: gitEnv }).trim();
+    git("init", "-q");
+    git("config", "user.email", "scope@example.test");
+    git("config", "user.name", "scope");
+    await writeFile(join(root, "seed"), "seed\n");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    const base = git("rev-parse", "HEAD");
+    for (const path of changedPaths) {
+      await mkdir(join(root, dirname(path)), { recursive: true });
+      await writeFile(join(root, path), "changed\n");
+    }
+    git("add", "-A");
+    git("commit", "-qm", "change", "--allow-empty");
+    const output = join(root, "github-output");
+    await writeFile(output, "");
+    execFileSync("bash", ["-euo", "pipefail", "-c", script], {
+      cwd: root,
+      env: {
+        ...gitEnv,
+        EVENT_NAME: event,
+        BASE_SHA: base,
+        HEAD_SHA: git("rev-parse", "HEAD"),
+        GITHUB_OUTPUT: output,
+        RUNNER_TEMP: root,
+      },
+    });
+    return Object.fromEntries(
+      (await readFile(output, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => line.split("=")),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test("heavy Temporal and OCI gates are path-scoped and fail closed", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const scopeJob = jobBlock(ciWorkflow, "renderer-visual-scope");
+  const buildJob = jobBlock(ciWorkflow, "build-test");
+  for (const output of ["run_temporal_go", "run_oci"]) {
+    assert.match(
+      scopeJob,
+      new RegExp(`\\n      ${output}: \\$\\{\\{ steps\\.scope\\.outputs\\.${output} \\}\\}`),
+    );
+    assert.equal(
+      scopeJob.split(`echo "${output}=true"`).length - 1,
+      2,
+      `periodic/base and diff-failure branches must force ${output}`,
+    );
+  }
+  const conditions = [
+    [
+      "Native Temporal reader server（verified modules · offline race · build）",
+      "run_temporal_go",
+    ],
+    ["Build and inspect immutable OCI runtime", "run_oci"],
+    ["Worker fail-closed runtime smoke", "run_oci"],
+    ["Renderer read-only OCI smoke", "run_oci"],
+  ];
+  for (const [stepName, output] of conditions) {
+    assert.deepEqual(
+      namedStepBlock(buildJob, stepName).match(/^        if:.*$/gm),
+      [`        if: needs.renderer-visual-scope.outputs.${output} == 'true'`],
+      `${stepName} must have exactly one ${output} scope condition`,
+    );
+  }
+
+  assert.match(
+    ciWorkflow,
+    /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+    "main pushes must not cancel each other's verification",
+  );
+  const cleanTree = namedStepBlock(
+    buildJob,
+    "Verify build and test steps left the tree clean",
+  );
+  assert.equal(cleanTree.match(/^        if:/gm), null, "tree-cleanliness check must stay unconditional");
+  assert.match(cleanTree, /git diff --exit-code/);
+  assert.match(cleanTree, /git ls-files --others --exclude-standard/);
+
+  const script = scopeScript(ciWorkflow);
+  const cases = [
+    [["docs/status/current.md", "README.md", ".claude/skills/x/SKILL.md"], "false", "false", "false"],
+    [["infra/temporal-platform/server/go.mod"], "false", "true", "true"],
+    [["apps/api/src/main.ts"], "false", "false", "true"],
+    [["pnpm-lock.yaml"], "true", "false", "true"],
+    [["apps/site-renderer/src/index.ts"], "true", "false", "true"],
+    [[".github/workflows/ci.yml"], "true", "true", "true"],
+    [[".github/workflows/security.yml"], "false", "false", "false"],
+    [["brand-new-top-level-dir/file.txt"], "false", "false", "true"],
+    [["apps/api/src/prompts/notes.md"], "false", "false", "true"],
+  ];
+  for (const [paths, visual, temporal, oci] of cases) {
+    assert.deepEqual(
+      await runScope(script, paths),
+      { run_visual: visual, run_temporal_go: temporal, run_oci: oci },
+      paths.join(", "),
+    );
+  }
+  assert.deepEqual(await runScope(script, ["docs/a.md"], "schedule"), {
+    run_visual: "true",
+    run_temporal_go: "true",
+    run_oci: "true",
+  });
 });
 
 test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {

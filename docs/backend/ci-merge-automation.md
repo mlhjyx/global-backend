@@ -84,7 +84,8 @@ CI workflow 显式把 `GITHUB_TOKEN` 收敛为 `contents: read`，checkout 不�
 凭据。只有确实需要回写 PR comment 的受信 `pull_request_target` decision-card 和
 Gitleaks workflow 保留最小的 `pull-requests: write`。CI 并发键同时包含 event
 类型，防止 scheduled 全量视觉基线与 main push 验证因为共享 `refs/heads/main`
-而互相取消；同一 PR 的旧 synchronize run 仍会被新 head 取消。
+而互相取消；同一 PR 的旧 synchronize run 会被新 head 取消 —— 前提是 build job
+不用 `always()`（见下文），否则旧 run 无视取消、跑满全程，新 run 只能排队等待。
 
 ### CI 成本与有效保护面的迁移约束
 
@@ -96,21 +97,33 @@ TypeScript 配置
 fail-safe 全部执行；变更路径使用 NUL 分隔并禁用 rename folding（移动受控文件时
 旧路径仍进入判定），diff 自身失败时同样全跑，不能降级成 `false`。无关 PR 只
 跳过这三项重任务，不能跳过 renderer contract tests。
-该拓扑由 `scripts/governance-ci-topology.spec.mjs` 进行确定性结构合同校验。
 
-`build · typecheck · test` 是 live ruleset 已强制的 context，而它依赖的
-`renderer visual scope` 尚未被 live ruleset 强制。为防 upstream failure 让 build
-job 被 GitHub 标为 skipped，build job 固定以 policy 批准的 `always()` 启动，并在
+同一个 scope job 另外输出两项重门的范围，fallback 规则完全相同（schedule、manual、
+无可用 diff base、diff 失败时一律为 `true`）：
+
+- `run_temporal_go`：原生 Temporal reader 服务的 Go 校验（`go mod verify`、race 测试、
+  vet、build，约 14 分钟）。该步骤只 bind-mount `infra/temporal-platform/server`，所以仅在
+  该目录或 CI workflow 变化时执行。
+- `run_oci`：OCI 运行镜像构建与 inspect、Worker fail-closed 冒烟、renderer 只读冒烟。
+  采用**排除清单**：只有全部改动都落在 `docs/`、`.github/`（CI workflow 除外）、
+  代理元数据目录或根目录四份说明文档时才跳过；任何未列名路径都会重建镜像，新增目录
+  不会被静默漏掉。API build、单测、attestation 生成与 renderer contract tests 不受影响，始终执行。
+
+该拓扑由 `scripts/governance-ci-topology.spec.mjs` 进行确定性结构合同校验；其中
+范围判定另有行为测试，在临时 git 仓库里真实执行 scope 脚本并逐项核对三个输出。
+
+`build · typecheck · test` 与它依赖的 `renderer visual scope` 均已被 live ruleset
+强制（2026-09-21 回读）。为防 upstream failure 让 build job 被 GitHub 标为 skipped，
+build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `always()`：两者在依赖
+失败时都照跑，但 `always()` 的 job 无视工作流取消），并在
 任何 checkout 或仓库代码执行前验证 `needs.renderer-visual-scope.result` 必须为
 `success`；failure、cancelled 或 skipped 一律显式失败。这个传播合同也受拓扑
 结构合同保护。
 
-当前 live ruleset 尚未强制 `governance · traceability · release`，所以
-`docs:verify`、`memory:test` 与 `decision-card:test` 暂时仍保留在已受外部 ruleset
-保护的 `build · typecheck · test` 内；不能为了减少重复执行而提前移走。只有在
-governance context 经 PR/main canary 稳定、被外部 ruleset 实际设为 required 并
-完成回读后，才可另开 PR 消除这部分重复。仓内 required-context 清单本身不能
-证明这个外部迁移已完成。
+`docs:verify`、`memory:test` 与 `decision-card:test` 当初留在 `build · typecheck · test`
+内，是因为 `governance · traceability · release` 那时尚未被 live ruleset 强制。
+2026-09-21 回读确认它已被强制，消除这部分重复的前置条件已满足；但 `docs:verify`
+是 Copy fixed-source 绑定的根 package 命令，拆分须另开 PR 并同步指纹，不在本次范围。
 
 ## Release Bundle 的外部 provenance
 
