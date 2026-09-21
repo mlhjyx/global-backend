@@ -10,6 +10,7 @@ import "./governance-main-worktree-sync.spec.mjs";
 import "./governance-codeql-action-pin.spec.mjs";
 import "./governance-oasdiff-action-pin.spec.mjs";
 import "./copy-fixed-source-impact.spec.mjs";
+import "./copy-fixed-source-impact-resign.spec.mjs";
 import "./supply-chain-gates.spec.mjs";
 import "./runtime-deployment-contract.spec.mjs";
 import "./ghcr-runtime-publication.spec.mjs";

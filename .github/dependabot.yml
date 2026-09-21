@@ -1,11 +1,18 @@
 version: 2
-# 依赖自动更新（团队后端安全基线）。npm 生态覆盖 pnpm-lock.yaml。
+# 依赖更新（团队后端安全基线）。npm 生态覆盖 pnpm-lock.yaml。
+#
+# 只保留安全更新：open-pull-requests-limit: 0 关闭版本更新 PR，不影响安全更新
+# （GitHub 为安全更新单独计数）。原因：依赖或 action 变动必然触发 Copy fixed-source
+# 指纹与 required-contexts 的 action pin，Dependabot 无法自行更新二者，版本更新 PR
+# 结构性必挂（76 个中 56 个未合即关）。常规升级改为每月一次批量 PR，并在漏洞基线
+# valid_until 之前完成；安全更新 PR 由开发代理补一次重签后合入。流程见
+# docs/backend/dependency-refresh.md。下方分组仍决定安全更新的打包方式与批量升级的分域。
 updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     groups:
       # Domain groups are ordered from specific to fallback. Non-ignored major
       # updates stay outside these groups and remain individually reviewable;
@@ -112,5 +119,7 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    # action 升级还须同步 .github/required-contexts.json 的精确 pin，随每月批量处理
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "chore(ci)"
