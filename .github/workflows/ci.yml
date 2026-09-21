@@ -27,10 +27,11 @@ permissions:
 
 concurrency:
   # A scheduled full visual baseline must not cancel a main push verification
-  # (or vice versa). Only PR synchronizations cancel stale runs: every main
-  # commit keeps its own complete verification, and a newer main push queues
-  # behind the running one instead of cancelling it.
-  group: ci-${{ github.event_name }}-${{ github.ref }}
+  # (or vice versa). Only PR synchronizations cancel stale runs. Pushes get one
+  # group per commit: with a shared group GitHub keeps a single pending run and
+  # replaces it when a third merge lands, so an intermediate main commit would
+  # never be verified (observed on 4ad5f4dc).
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

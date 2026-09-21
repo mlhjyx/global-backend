@@ -115,6 +115,8 @@ CI workflow 显式把 `GITHUB_TOKEN` 收敛为 `contents: read`，checkout 不�
 类型，防止 scheduled 全量视觉基线与 main push 验证因为共享 `refs/heads/main`
 而互相取消；同一 PR 的旧 synchronize run 会被新 head 取消 —— 前提是 build job
 不用 `always()`（见下文），否则旧 run 无视取消、跑满全程，新 run 只能排队等待。
+main 的 push 按提交分组、互不取消：GitHub 在同一并发组里只保留一个排队中的 run，
+第三个 run 到达时会顶掉排队者，共用一组会让连续合并中间的 main 提交得不到验证（2026-09-21 在 `4ad5f4dc` 上实际发生）。
 
 ### CI 成本与有效保护面的迁移约束
 

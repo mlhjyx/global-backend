@@ -267,6 +267,11 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
     /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
     "main pushes must not cancel each other's verification",
   );
+  assert.match(
+    ciWorkflow,
+    /^  group: ci-\$\{\{ github\.event_name \}\}-\$\{\{ github\.event_name == 'push' && github\.sha \|\| github\.ref \}\}$/m,
+    "each main push needs its own group, or GitHub replaces queued main runs",
+  );
   const cleanTree = namedStepBlock(
     buildJob,
     "Verify build and test steps left the tree clean",
