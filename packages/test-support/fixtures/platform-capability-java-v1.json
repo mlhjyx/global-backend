@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "platform-capability-java-vector/v1",
+  "provenance": {
+    "javaPatchSha256": "9b0e80db0e72b0d7e2f3daa057fe3940d2969d91b8d4c34965cebedb75292498",
+    "source": "GrowthOS GlobalBackendJwtSigner with ephemeral RSA test key; no Node re-signing",
+    "testOnly": true,
+    "encoding": "Exact compact-JWS segments [protected header, payload, signature], joined with dots only; no signing key retained"
+  },
+  "issuer": "https://growthos.example\u001b/汉字/😀",
+  "token": [
+    "eyJhbGciOiJSUzI1NiIsImtpZCI6ImNhcGFiaWxpdHktYWN0aXZlIiwidHlwIjoicGxhdGZvcm0tY2FwYWJpbGl0eStqd3QifQ",
+    "eyJpc3MiOiJodHRwczovL2dyb3d0aG9zLmV4YW1wbGVcdTAwMWIv5rGJ5a2XL_CfmIAiLCJhdWQiOiJwbGF0Zm9ybS1hdXRvbWF0aW9uLWNhcGFiaWxpdHktcmVhZCIsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDMwLCJub25jZSI6ImRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkIiwiYmFja2VuZFNoYSI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJncm93dGhvc1NoYSI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIiLCJwb2xpY3lEaWdlc3QiOiJjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIiwibmFtZXNwYWNlIjoicGxhdGZvcm0tYXV0b21hdGlvbiIsInJvd3MiOlt7InNjaGVkdWxlSWQiOiJzYW5jdGlvbnMtcmVmcmVzaCIsIndvcmtmbG93VHlwZSI6IlNhbmN0aW9uc1dvcmtmbG93IiwidGFza1F1ZXVlIjoicGxhdGZvcm0iLCJtb2RlIjoiRU5BQkxFRCIsInRlbXBvcmFsUGVybWlzc2lvbiI6eyJzdGF0dXMiOiJvayIsIm9ic2VydmVkQXQiOjE4MDAwMDAwMDAwMDAsInZhbGlkVW50aWwiOjE4MDAwMDAwMjAwMDB9LCJpc3N1ZXIiOnsic3RhdHVzIjoib2siLCJvYnNlcnZlZEF0IjoxODAwMDAwMDAwMDAwLCJ2YWxpZFVudGlsIjoxODAwMDAwMDIwMDAwfSwicmV2b2NhdGlvbkNvbnN1bWVyIjp7InN0YXR1cyI6Im9rIiwib2JzZXJ2ZWRBdCI6MTgwMDAwMDAwMDAwMCwidmFsaWRVbnRpbCI6MTgwMDAwMDAyMDAwMH0sInVuZGVsaXZlcmVkQ291bnQiOjAsIm9sZGVzdFVuZGVsaXZlcmVkQ3JlYXRlZEF0IjpudWxsfV19",
+    "YLFOaEI3oczKpiTlxxgbKCewOWYLyTLSiF-uz8WK3iglePJheqG8HxyeSZabENfLM29OTZEXsDjFnhZTtz6hptdHefRmxV16vOooPG7xfvipxBQFOJVSwfs6CWGY3hx5V44Pnt1FynWeqQTBzLmfsir6v6tezaQkNUssU4FLBzP7BQyfHyftxI8KbRM-eEqNd9gzlJniK6wowUBs8Z1SdwKMXBxQsux9p2cxgsR2tN5P8VYeh6eM82kVcM0BvfWcr84r9ydLUt_bi2XgzkVt4OdbVUQys42emdFZqLQqknt1ieXZXHUzrZTj3tsfrJ6sYFLhKshT51Bvn8gOJm1Rjw"
+  ],
+  "wrongAudienceToken": [
+    "eyJhbGciOiJSUzI1NiIsImtpZCI6ImNhcGFiaWxpdHktYWN0aXZlIiwidHlwIjoicGxhdGZvcm0tY2FwYWJpbGl0eStqd3QifQ",
+    "eyJpc3MiOiJodHRwczovL2dyb3d0aG9zLmV4YW1wbGVcdTAwMWIv5rGJ5a2XL_CfmIAiLCJhdWQiOiJnbG9iYWwtYmFja2VuZDpwbGF0Zm9ybS10ZWNobmljYWwtcXVvdGUiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDAzMCwibm9uY2UiOiJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZCIsImJhY2tlbmRTaGEiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwiZ3Jvd3Rob3NTaGEiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwicG9saWN5RGlnZXN0IjoiY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsIm5hbWVzcGFjZSI6InBsYXRmb3JtLWF1dG9tYXRpb24iLCJyb3dzIjpbeyJzY2hlZHVsZUlkIjoic2FuY3Rpb25zLXJlZnJlc2giLCJ3b3JrZmxvd1R5cGUiOiJTYW5jdGlvbnNXb3JrZmxvdyIsInRhc2tRdWV1ZSI6InBsYXRmb3JtIiwibW9kZSI6IkVOQUJMRUQiLCJ0ZW1wb3JhbFBlcm1pc3Npb24iOnsic3RhdHVzIjoib2siLCJvYnNlcnZlZEF0IjoxODAwMDAwMDAwMDAwLCJ2YWxpZFVudGlsIjoxODAwMDAwMDIwMDAwfSwiaXNzdWVyIjp7InN0YXR1cyI6Im9rIiwib2JzZXJ2ZWRBdCI6MTgwMDAwMDAwMDAwMCwidmFsaWRVbnRpbCI6MTgwMDAwMDAyMDAwMH0sInJldm9jYXRpb25Db25zdW1lciI6eyJzdGF0dXMiOiJvayIsIm9ic2VydmVkQXQiOjE4MDAwMDAwMDAwMDAsInZhbGlkVW50aWwiOjE4MDAwMDAwMjAwMDB9LCJ1bmRlbGl2ZXJlZENvdW50IjowLCJvbGRlc3RVbmRlbGl2ZXJlZENyZWF0ZWRBdCI6bnVsbH1dfQ",
+    "JJEpvkoJNaZgiXzq753xEAmlwXgmiRbcmZsE24Aod9TgoHvGXrrWvd2PeyniHZ5GL4f9AYhUN2WRxv0PggKY5HsWWqoTh0OVlpRwAQcNVWvw4GnFVkQkYmK670ZZ_qjgkpZIKgSWb37fk6dhsDWqLvz-mLcyIq7iV3jR9c_QFIBZawIsOVFqZ0fQlgbkactAkhHH0G3-GWmJr2CaoYE5Em3-WFzp_gqLG7US5Hf68l0-w1SOFJhW7h1ogjSv9cOVLBsDXfxtyHtLnl7a9tTS7Hk9VPzkgARPUwqDLLXmhOxIV4aBqKORcMhKyRK4mSpq95LEhBZ5O58sp_HcJUHnyA"
+  ],
+  "jwks": {
+    "keys": [
+      {
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS256",
+        "kid": "capability-active",
+        "n": "t9SgBLJIuyA10gXsLvXG2zGOFx4aewcjnndy3cevuJnzzZyuBu2eYZtFLc7MBUnexqWL8ZfL_Woc2X3_jNjVHIrtGCW98stxNsIIKtEszTRvJqKC5FBHN-IhITIwUhvXrDbO2bRvAXZ0E-yxB1ynAvscA5WrlcMWSLtPW6Xw7z3uQVkUgCIDzDWgdhDT5cq_hM_a-DrryK54JxVYp80-beUX3Ke33yU6yQyePzH7jLv-gLg-d01SO3SKYKAmYYMlCasANIHoEaU0ifJx3iPCHNP6XnzzoTYYsuCIQaZqHXkzHYRHXFG_loFK78c_wcQQe6JZusPveGr6XImzith6jw",
+        "e": "AQAB"
+      },
+      {
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS256",
+        "kid": "capability-old",
+        "n": "opsPe7Iq29qj828vgfS9Jw4W2J9SQUPqRbHQ_Ett1LD02U5pjIPdU6JkHeXvKVytgMu0L3iHBXdmgwdcww783kHr0ll5l6_vlLz5Kg-YjjCGhyq0Aa_Wt094gcf6hd5AmYnqDMoe-mtU0CTc1fXMPEeka82PYStH_O9afrc01BF5L3WoVPZVFr1-KfSl2okueUmkTZF6JckIlpbW55eXhEGzIac3Iu-yo0-GrqfW-CxVLYu4NTwNIwWPowXVHV3l2iBK64Hl549761Cz25GRbdmZ-uUqZcPNZ4pj1Z2xOen-_7bPLRSVDhplPK72YppEzpL_EJt9q3BMCcoo1B7HDw",
+        "e": "AQAB"
+      }
+    ]
+  }
+}

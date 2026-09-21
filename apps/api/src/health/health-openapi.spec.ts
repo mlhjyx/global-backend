@@ -103,6 +103,7 @@ describe('layered health OpenAPI contract', () => {
         'migration',
         'temporal_control_plane',
         'worker',
+        'platform_worker',
         'outbox_relay',
         'api_runtime',
         'storage',

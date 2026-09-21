@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { PlatformCapabilityContributor } from "./platform-capability-contributor";
 
 import { loadVerifiedPlatformAuthorityPolicyAsset } from "./platform-authority-policy-asset";
 import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "./platform-execution-contract";
@@ -29,6 +30,7 @@ const PLATFORM_EXECUTION_TECHNICAL_QUOTE_READER = {
 @Module({
   controllers: [PlatformExecutionTechnicalQuoteController],
   providers: [
+    PlatformCapabilityContributor,
     {
       provide: PlatformTechnicalQuoteServiceAuthenticationVerifier,
       useFactory: () =>

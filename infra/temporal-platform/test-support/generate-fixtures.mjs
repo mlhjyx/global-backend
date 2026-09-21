@@ -41,16 +41,23 @@ const jwks = {
 const now = Math.floor(Date.now() / 1_000);
 const encode = (value) =>
   Buffer.from(JSON.stringify(value)).toString("base64url");
-const jwt = (subject, permissions, tokenAudience = audience) => {
-  const protectedHeader = encode({ alg: "RS256", kid, typ: "JWT" });
+const jwt = (subject, permissions, tokenAudience = audience, profile) => {
+  const protectedHeader = encode({
+    alg: "RS256",
+    kid,
+    typ: profile ? "temporal-runtime+jwt" : "JWT",
+  });
   const payload = encode({
     sub: subject,
     aud: tokenAudience,
     permissions,
     jti: randomUUID(),
     iat: now,
-    nbf: now - 30,
-    exp: now + 1_200,
+    nbf: profile ? now : now - 30,
+    exp: now + (profile ? 300 : 1_200),
+    ...(profile
+      ? { iss: "https://growthos.example/temporal-runtime", profile }
+      : {}),
   });
   const signingInput = `${protectedHeader}.${payload}`;
   const signature = sign("RSA-SHA256", Buffer.from(signingInput), privateKey);
@@ -59,18 +66,38 @@ const jwt = (subject, permissions, tokenAudience = audience) => {
 
 const tokens = {
   "admin.jwt": jwt("task4c-provision-admin", ["temporal-system:admin"]),
-  "reader.jwt": jwt("task4c-growthos-reader", ["platform-automation:read"]),
+  "reader.jwt": jwt(
+    "task4c-growthos-reader",
+    ["platform-automation:read"],
+    audience,
+    "temporal-reader",
+  ),
   "writer.jwt": jwt("task4c-backend-schedule-writer", [
     "platform-automation:write",
   ]),
-  "worker.jwt": jwt("task4c-backend-worker", [
-    "platform-automation:worker",
-    "platform-automation:write",
-  ]),
+  "worker.jwt": jwt(
+    "task4c-backend-worker",
+    ["platform-automation:worker"],
+    audience,
+    "temporal-platform-worker",
+  ),
+  "customer-worker.jwt": jwt(
+    "task4c-customer-worker",
+    ["default:worker"],
+    audience,
+    "temporal-customer-worker",
+  ),
+  "customer-client.jwt": jwt(
+    "task4c-customer-client",
+    ["default:read", "default:write"],
+    audience,
+    "temporal-customer-client",
+  ),
   "wrong-audience.jwt": jwt(
-    "task4c-wrong-audience",
+    "task4c-growthos-reader",
     ["platform-automation:read"],
     `${audience}-wrong`,
+    "temporal-reader",
   ),
 };
 

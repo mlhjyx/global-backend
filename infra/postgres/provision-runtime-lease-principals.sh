@@ -7,6 +7,8 @@ required=(
   RUNTIME_API_LEASE_PASSWORD
   RUNTIME_WORKER_LEASE_LOGIN
   RUNTIME_WORKER_LEASE_PASSWORD
+  RUNTIME_PLATFORM_WORKER_LEASE_LOGIN
+  RUNTIME_PLATFORM_WORKER_LEASE_PASSWORD
   RUNTIME_OUTBOX_RELAY_LEASE_LOGIN
   RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD
 )
@@ -20,6 +22,7 @@ done
 logins=(
   "${RUNTIME_API_LEASE_LOGIN}"
   "${RUNTIME_WORKER_LEASE_LOGIN}"
+  "${RUNTIME_PLATFORM_WORKER_LEASE_LOGIN}"
   "${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}"
 )
 for login in "${logins[@]}"; do
@@ -31,7 +34,10 @@ for login in "${logins[@]}"; do
 done
 if [[ "${logins[0]}" == "${logins[1]}" ||
   "${logins[0]}" == "${logins[2]}" ||
-  "${logins[1]}" == "${logins[2]}" ]]; then
+  "${logins[0]}" == "${logins[3]}" ||
+  "${logins[1]}" == "${logins[2]}" ||
+  "${logins[1]}" == "${logins[3]}" ||
+  "${logins[2]}" == "${logins[3]}" ]]; then
   echo "one runtime lease login cannot own multiple process roles" >&2
   exit 1
 fi
@@ -72,10 +78,13 @@ psql \
   --set ON_ERROR_STOP=1 \
   --set api_login="${RUNTIME_API_LEASE_LOGIN}" \
   --set worker_login="${RUNTIME_WORKER_LEASE_LOGIN}" \
+  --set platform_worker_login="${RUNTIME_PLATFORM_WORKER_LEASE_LOGIN}" \
   --set relay_login="${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}" <<'SQL'
 \getenv api_password RUNTIME_API_LEASE_PASSWORD
 \getenv worker_password RUNTIME_WORKER_LEASE_PASSWORD
+\getenv platform_worker_password RUNTIME_PLATFORM_WORKER_LEASE_PASSWORD
 \getenv relay_password RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD
+BEGIN;
 SELECT format(
   'CREATE ROLE %I LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
   :'api_login', :'api_password'
@@ -84,6 +93,10 @@ SELECT format(
   'CREATE ROLE %I LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
   :'worker_login', :'worker_password'
 ) WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'worker_login') \gexec
+SELECT format(
+  'CREATE ROLE %I LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'platform_worker_login', :'platform_worker_password'
+) WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'platform_worker_login') \gexec
 SELECT format(
   'CREATE ROLE %I LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
   :'relay_login', :'relay_password'
@@ -99,20 +112,28 @@ SELECT format(
 ) \gexec
 SELECT format(
   'ALTER ROLE %I WITH LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'platform_worker_login', :'platform_worker_password'
+) \gexec
+SELECT format(
+  'ALTER ROLE %I WITH LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
   :'relay_login', :'relay_password'
 ) \gexec
 
 SELECT format(
-  'REVOKE runtime_api, runtime_worker, runtime_outbox_relay FROM %I',
+  'REVOKE runtime_api, runtime_worker, runtime_platform_worker, runtime_outbox_relay FROM %I',
   :'api_login'
 ) \gexec
 SELECT format(
-  'REVOKE runtime_api, runtime_worker, runtime_outbox_relay FROM %I',
+  'REVOKE runtime_api, runtime_worker, runtime_platform_worker, runtime_outbox_relay FROM %I',
   :'worker_login'
 ) \gexec
 SELECT format(
-  'REVOKE runtime_api, runtime_worker, runtime_outbox_relay FROM %I',
+  'REVOKE runtime_api, runtime_worker, runtime_platform_worker, runtime_outbox_relay FROM %I',
   :'relay_login'
+) \gexec
+SELECT format(
+  'REVOKE runtime_api, runtime_worker, runtime_platform_worker, runtime_outbox_relay FROM %I',
+  :'platform_worker_login'
 ) \gexec
 
 -- Never silently retain an owner, monitoring, or other inherited role. An
@@ -132,10 +153,17 @@ SELECT 1 / ((NOT EXISTS (
   JOIN pg_roles member_role ON member_role.oid = membership.member
   WHERE member_role.rolname = :'relay_login'
 ))::integer);
+SELECT 1 / ((NOT EXISTS (
+  SELECT 1 FROM pg_auth_members membership
+  JOIN pg_roles member_role ON member_role.oid = membership.member
+  WHERE member_role.rolname = :'platform_worker_login'
+))::integer);
 
 SELECT format('GRANT runtime_api TO %I', :'api_login') \gexec
 SELECT format('GRANT runtime_worker TO %I', :'worker_login') \gexec
+SELECT format('GRANT runtime_platform_worker TO %I', :'platform_worker_login') \gexec
 SELECT format('GRANT runtime_outbox_relay TO %I', :'relay_login') \gexec
+COMMIT;
 SQL
 
 echo "runtime lease principals provisioned with exclusive role membership"

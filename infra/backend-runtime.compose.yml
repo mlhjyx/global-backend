@@ -5,6 +5,10 @@ x-backend-environment: &backend-environment
   NODE_ENV: production
   APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
   RUNTIME_IMAGE_REFERENCE: ${GLOBAL_BACKEND_IMAGE}
+  MACHINE_BOOTSTRAP_CA_FILE: /run/secrets/machine/bootstrap-ca.pem
+  MACHINE_BOOTSTRAP_CERT_FILE: /run/secrets/machine/client-cert.pem
+  MACHINE_BOOTSTRAP_KEY_FILE: /run/secrets/machine/client-key.pem
+  TEMPORAL_TLS_CA_FILE: /run/secrets/machine/temporal-ca.pem
   SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE: /run/secrets/site-build-settlement/derivation.keyring
   GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: ${GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT:?set the artifact S3 endpoint}
   GENERIC_OPERATION_ARTIFACT_S3_BUCKET: ${GENERIC_OPERATION_ARTIFACT_S3_BUCKET:?set the artifact S3 bucket}
@@ -62,6 +66,20 @@ services:
       - .secrets/backend-runtime.env
       - .secrets/backend-api-runtime.env
     command: ["api"]
+    environment:
+      <<: *backend-environment
+      PLATFORM_CAPABILITY_CA_FILE: /run/secrets/machine/capability-ca.pem
+    volumes:
+      - type: bind
+        source: ${SITE_BUILD_SETTLEMENT_SECRET_DIRECTORY:-./.secrets/site-build-settlement}
+        target: /run/secrets/site-build-settlement
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${API_MACHINE_SECRET_DIRECTORY:?set the API-only machine credential directory}
+        target: /run/secrets/machine
+        read_only: true
+        bind: { create_host_path: false }
 
   worker:
     <<: *backend-runtime
@@ -73,4 +91,37 @@ services:
       <<: *backend-environment
       GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:?set the personal artifact cleanup S3 access key}
       GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:?set the personal artifact cleanup S3 secret key}
-    command: ["worker"]
+    command: ["customer-worker"]
+    volumes:
+      - type: bind
+        source: ${SITE_BUILD_SETTLEMENT_SECRET_DIRECTORY:-./.secrets/site-build-settlement}
+        target: /run/secrets/site-build-settlement
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${CUSTOMER_WORKER_MACHINE_SECRET_DIRECTORY:?set the customer-worker-only machine credential directory}
+        target: /run/secrets/machine
+        read_only: true
+        bind: { create_host_path: false }
+
+  platform-worker:
+    <<: *backend-runtime
+    container_name: global-platform-worker
+    env_file:
+      - .secrets/backend-platform-worker-runtime.env
+    environment:
+      NODE_ENV: production
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+      RUNTIME_IMAGE_REFERENCE: ${GLOBAL_BACKEND_IMAGE}
+      MACHINE_BOOTSTRAP_CA_FILE: /run/secrets/machine/bootstrap-ca.pem
+      MACHINE_BOOTSTRAP_CERT_FILE: /run/secrets/machine/client-cert.pem
+      MACHINE_BOOTSTRAP_KEY_FILE: /run/secrets/machine/client-key.pem
+      TEMPORAL_TLS_CA_FILE: /run/secrets/machine/temporal-ca.pem
+      PLATFORM_CAPABILITY_CA_FILE: /run/secrets/machine/capability-ca.pem
+    command: ["platform-worker"]
+    volumes:
+      - type: bind
+        source: ${PLATFORM_WORKER_MACHINE_SECRET_DIRECTORY:?set the platform-worker-only machine credential directory}
+        target: /run/secrets/machine
+        read_only: true
+        bind: { create_host_path: false }

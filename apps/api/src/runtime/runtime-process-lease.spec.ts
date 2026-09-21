@@ -33,6 +33,10 @@ function lease(
     role: "WORKER",
     state: "READY",
     taskQueue: "understanding",
+    temporalClusterId: "test-cluster",
+    temporalClusterProofDigest: `sha256:${"9".repeat(64)}`,
+    temporalNamespace: "default",
+    workloadKind: "customer-worker",
     buildSha: identity.build_sha,
     imageDigest: identity.image_digest,
     artifactDigest: identity.artifact_digest,
@@ -54,11 +58,92 @@ function fixture(records: RuntimeProcessLeaseRecord[] = []) {
     identity,
     instanceId: "00000000-0000-4000-8000-000000000099",
     now: () => new Date("2026-08-16T00:00:30.000Z"),
+    temporal: {
+      temporalClusterId: "test-cluster",
+      temporalClusterProofDigest: `sha256:${"9".repeat(64)}`,
+    },
   });
   return { service, store };
 }
 
 describe("RuntimeProcessLeaseService", () => {
+  it("refuses a fresh old worker lease lacking cluster and namespace proof", async () => {
+    const { service } = fixture([
+      lease({
+        temporalClusterId: null,
+        temporalNamespace: null,
+        temporalClusterProofDigest: null,
+        workloadKind: null,
+      }),
+    ]);
+    await expect(service.inspectWorkerQueue("understanding")).resolves.toEqual({
+      status: "failed",
+      code: "WORKER_TEMPORAL_IDENTITY_INVALID",
+    });
+  });
+  it("never admits a same-queue worker from a different namespace or cluster", async () => {
+    for (const changed of [
+      { temporalNamespace: "platform-automation" },
+      { temporalClusterId: "other-cluster" },
+      { temporalClusterProofDigest: `sha256:${"0".repeat(64)}` },
+      { workloadKind: "platform-worker" as const },
+    ]) {
+      const { service } = fixture([lease(changed)]);
+      await expect(
+        service.inspectWorkerQueue("understanding"),
+      ).resolves.toMatchObject({
+        status: "failed",
+        code: "WORKER_TEMPORAL_IDENTITY_INVALID",
+      });
+    }
+  });
+  it("publishes a platform lease with a distinct role instance and detects mixed releases", async () => {
+    const records = [
+      lease({
+        role: "PLATFORM_WORKER",
+        temporalNamespace: "platform-automation",
+        workloadKind: "platform-worker",
+      }),
+    ];
+    const store = {
+      upsert: vi.fn(async () => undefined),
+      terminalize: vi.fn(async () => undefined),
+      listFresh: vi.fn(async () => records),
+    };
+    const service = new RuntimeProcessLeaseService(store, {
+      identity,
+      workerRole: "PLATFORM_WORKER",
+      temporal: {
+        temporalClusterId: "test-cluster",
+        temporalClusterProofDigest: `sha256:${"9".repeat(64)}`,
+      },
+      now: () => new Date("2026-08-16T00:00:30.000Z"),
+    });
+    await service.heartbeat("PLATFORM_WORKER", "STARTING", "understanding");
+    expect(store.upsert.mock.calls[0]?.[0]).toMatchObject({
+      role: "PLATFORM_WORKER",
+      temporalNamespace: "platform-automation",
+      workloadKind: "platform-worker",
+    });
+    expect(service.instanceId("PLATFORM_WORKER")).not.toBe(
+      service.instanceId("WORKER"),
+    );
+    await expect(service.inspectWorkerQueue("understanding")).resolves.toEqual({
+      status: "ok",
+    });
+    records.push(
+      lease({
+        role: "PLATFORM_WORKER",
+        temporalNamespace: "platform-automation",
+        workloadKind: "platform-worker",
+        imageDigest: `sha256:${"0".repeat(64)}`,
+      }),
+    );
+    await expect(service.inspectWorkerQueue("understanding")).resolves.toEqual({
+      status: "failed",
+      code: "PLATFORM_WORKER_MIXED_RELEASE_IDENTITY",
+    });
+  });
   it("adds a server-side statement timeout without dropping existing connection options", () => {
     const withRuntimeLeaseStatementTimeout = (
       leaseModule as typeof leaseModule & {

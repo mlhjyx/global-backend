@@ -44,6 +44,14 @@
       "reason": "Only the isolated test process is outside managed runtime admission and cannot accept product work."
     },
     {
+      "id": "revocation-http-isolated-test-fixture",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/platform-authority/platform-revocation-http.test-fixture.ts",
+      "match_sha256": "sha256:fe8f461ebed4eafe9d76e80c623c8d7aefc48d04f19efa4f91092b916e679e76",
+      "category": "test-process",
+      "reason": "The isolated TLS integration fixture selects the test process only; tsconfig.build.json excludes all .test-fixture.ts files, and the product composition never imports this fixture. Signed-command guards and validation remain the actual product implementation."
+    },
+    {
       "id": "development-loopback-jwks-trust-root",
       "rule": "ENVIRONMENT_BRANCH",
       "path": "apps/api/src/runtime/runtime-admission.ts",

@@ -2,14 +2,31 @@ package main
 
 import (
 	"errors"
+	"net"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"go.temporal.io/server/common/config"
 )
 
 var invalidConfiguration = errors.New("TEMPORAL_PLATFORM_CONFIGURATION_INVALID")
+
+var readerDNS = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// The reader SNI must select a real mTLS override, not the public JWT-only
+// listener. The same admission is used with every environment's configuration.
+func ValidateReaderEndpoint(cfg *config.Config, name string) error {
+	if cfg == nil || len(name) == 0 || len(name) > 253 || !readerDNS.MatchString(name) || net.ParseIP(name) != nil || strings.EqualFold(name, cfg.Global.TLS.Frontend.Client.ServerName) {
+		return invalidConfiguration
+	}
+	override, ok := cfg.Global.TLS.Frontend.PerHostOverrides[name]
+	if !ok || validateServerTLS(override) != nil {
+		return invalidConfiguration
+	}
+	return nil
+}
 
 // ValidateConfiguration rejects startup paths that would bypass the reader
 // authorizer, including unauthenticated access to internal-frontend.

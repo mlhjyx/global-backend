@@ -9,7 +9,7 @@ describe("worker runtime admission wiring", () => {
     const identity = source.indexOf("await loadRuntimeReleaseIdentity");
     const telemetry = source.indexOf("await startLangfuseRuntimeTelemetry");
     const prisma = source.indexOf("new PrismaService()");
-    const temporal = source.indexOf("NativeConnection.connect");
+    const temporal = source.indexOf("await connectNativeMachine");
 
     expect(identity).toBeGreaterThan(-1);
     expect(identity).toBeLessThan(telemetry);
@@ -52,7 +52,7 @@ describe("worker runtime admission wiring", () => {
     expect(imageIsolation).toBeLessThan(poll);
   });
 
-  it("holds without polling when owner database, platform seeds or schedules are unavailable", () => {
+  it("holds without polling when owner database and required seeds are unavailable", () => {
     const poll = source.indexOf("worker.run()");
     for (const code of [
       "OWNER_DATABASE_UNAVAILABLE",
@@ -60,7 +60,6 @@ describe("worker runtime admission wiring", () => {
       "PROVIDER_REGISTRY_SEED_UNAVAILABLE",
       "JURISDICTION_POLICY_SEED_UNAVAILABLE",
       "SANCTIONS_SEED_UNAVAILABLE",
-      "PLATFORM_SCHEDULES_UNAVAILABLE",
       "SANCTIONS_INDEX_UNAVAILABLE",
     ]) {
       expect(source).toContain(`"${code}"`);
@@ -91,8 +90,14 @@ describe("worker runtime admission wiring", () => {
     );
   });
 
-  it("keeps platform authority capabilities in Worker polling admission after cutover", () => {
-    expect(source).toContain("checkPlatformCapability");
+  it("keeps customer dependencies separate from platform authority polling admission", () => {
+    const platformSource = readFileSync(
+      join(import.meta.dirname, "platform-worker.ts"),
+      "utf8",
+    );
+    expect(platformSource).toContain("checkPlatformAuthorityReady");
+    expect(platformSource).toContain("startWorkerDependencyHeartbeat");
+    expect(source).not.toContain("createExecutionBudgetPlatformWriterClient");
     expect(source).toContain("selectWorkerDependencyAdmission({");
     expect(source).not.toContain("BeforeAuthorityCutover");
   });

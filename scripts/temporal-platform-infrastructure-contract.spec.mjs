@@ -305,10 +305,9 @@ test("provisioning roles and verification remain separated and fail closed", asy
     roles: {
       growthosReader: ["platform-automation:read"],
       backendScheduleWriter: ["platform-automation:write"],
-      backendWorker: [
-        "platform-automation:worker",
-        "platform-automation:write",
-      ],
+      backendWorker: ["platform-automation:worker"],
+      backendCustomerWorker: ["default:worker"],
+      backendCustomerClient: ["default:read", "default:write"],
       provisionAdmin: ["temporal-system:admin"],
     },
   });
@@ -393,9 +392,8 @@ test("disposable proof is isolated and product config never owns test keys", asy
   );
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_CLIENT_SECRET_DIRECTORY/);
   assert.match(compose, /TEMPORAL_PLATFORM_TEST_NODE_OVERLAY_DIRECTORY/);
-  assert.match(compose, /@temporalio\+client@1\.23\.0/);
-  assert.match(compose, /@temporalio\+common@1\.23\.0/);
-  assert.match(compose, /@temporalio\+proto@1\.23\.0/);
+  assert.match(compose, /target: \/repo\/node_modules\/\.pnpm/);
+  assert.match(runner, /prepare-worker-dependencies\.mjs/);
   assert.doesNotMatch(compose, /TEMPORAL_PLATFORM_TEST_FIXTURES/);
   assert.doesNotMatch(runner, /(?:pnpm|npm|yarn|bun)\s+(?:add|install)/);
   assert.match(fixtureGenerator, /generateKeyPairSync\("rsa"/);

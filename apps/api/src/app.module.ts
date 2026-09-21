@@ -21,10 +21,12 @@ import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
+import { RuntimeClockModule } from './runtime/runtime-clock.module';
 import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guard';
 import { ExecutionBudgetModule } from './execution-budget/execution-budget.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 import { PlatformTargetLookupModule } from './platform-authority/platform-target-lookup.module';
+import { PlatformRevocationHttpModule } from './platform-authority/platform-revocation-http.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -38,11 +40,13 @@ import { PlatformTargetLookupModule } from './platform-authority/platform-target
     }),
     PrismaModule,
     RuntimeModule,
+    RuntimeClockModule,
     AuthModule,
     ModelGatewayModule,
     ExecutionBudgetModule,
     PlatformAuthorityModule,
     PlatformTargetLookupModule,
+    PlatformRevocationHttpModule,
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,

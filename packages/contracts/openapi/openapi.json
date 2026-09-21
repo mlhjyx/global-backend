@@ -802,6 +802,7 @@
                         "migration",
                         "temporal_control_plane",
                         "worker",
+                        "platform_worker",
                         "outbox_relay",
                         "api_runtime",
                         "storage",
@@ -1005,6 +1006,69 @@
                           ]
                         },
                         "worker": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_worker": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -2310,6 +2374,7 @@
                         "migration",
                         "temporal_control_plane",
                         "worker",
+                        "platform_worker",
                         "outbox_relay",
                         "api_runtime",
                         "storage",
@@ -2513,6 +2578,69 @@
                           ]
                         },
                         "worker": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_worker": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -3355,6 +3483,82 @@
         ],
         "x-required-scopes": [
           "ops:read"
+        ]
+      }
+    },
+    "/api/v1/health/clock": {
+      "get": {
+        "operationId": "readRuntimeClock_v1",
+        "parameters": [
+          {
+            "name": "nonce",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "nonce",
+                    "observedAt",
+                    "buildSha",
+                    "imageDigest",
+                    "artifactDigest"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "string",
+                      "enum": [
+                        "runtime-clock-observation/v1"
+                      ]
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{32}$"
+                    },
+                    "observedAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "buildSha": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    "imageDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    },
+                    "artifactDigest": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Noncanonical clock observation request"
+          },
+          "503": {
+            "description": "Own release admission or local clock unavailable"
+          }
+        },
+        "summary": "Nonce-bound admitted relative clock observation",
+        "tags": [
+          "System"
         ]
       }
     },
@@ -4565,6 +4769,87 @@
           "workspace_token_fallback": false,
           "unsigned_fallback": false
         }
+      }
+    },
+    "/api/v1/platform-authority/revocations": {
+      "post": {
+        "operationId": "receivePlatformAuthorityRevocation_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/jose": {
+              "schema": {
+                "type": "string",
+                "maxLength": 16384,
+                "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original durable ACK JWS; expired exact ACKs are not re-signed or refreshed",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "type": "string",
+                  "maxLength": 16384
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid bounded representation"
+          },
+          "401": {
+            "description": "Invalid signature or token family"
+          },
+          "403": {
+            "description": "Target/schedule scope mismatch"
+          },
+          "409": {
+            "description": "Expired new command, reused identity or sequence conflict; not an ACK"
+          },
+          "429": {
+            "description": "Authenticated issuer rate limited"
+          },
+          "503": {
+            "description": "Unavailable or ambiguous; exact replay may recover committed state"
+          }
+        },
+        "summary": "Apply signed revocation or replay its exact committed ACK",
+        "tags": [
+          "PlatformAuthority"
+        ],
+        "x-maximum-deadline-milliseconds": 25000,
+        "x-maximum-request-body-bytes": 16384,
+        "x-maximum-response-body-bytes": 16384,
+        "x-service-authentication": {
+          "kind": "signed-jws-request-body",
+          "algorithm": "RS256",
+          "type": "execution-budget-authority-revocation+jwt",
+          "user_token_fallback": false
+        }
+      }
+    },
+    "/api/v1/platform-authority/fence-ack-jwks": {
+      "get": {
+        "operationId": "getPlatformFenceAckJwks_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Public RSA ACK keys only; no signing action or private material"
+          },
+          "503": {
+            "description": "Own admission, key provenance or cross-family independence unavailable"
+          }
+        },
+        "summary": "Read only the independently admitted public fence-ACK key family",
+        "tags": [
+          "PlatformAuthority"
+        ],
+        "x-public-key-family": "platform-authority-fence-ack+jwt"
       }
     },
     "/api/v1/companies": {

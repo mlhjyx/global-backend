@@ -220,12 +220,15 @@ jobs:
           export RUNTIME_LEASE_PROVISION_DATABASE_URL="${DATABASE_URL}"
           export RUNTIME_API_LEASE_LOGIN=ci_runtime_api
           export RUNTIME_WORKER_LEASE_LOGIN=ci_runtime_worker
+          export RUNTIME_PLATFORM_WORKER_LEASE_LOGIN=ci_runtime_platform_worker
           export RUNTIME_OUTBOX_RELAY_LEASE_LOGIN=ci_runtime_outbox_relay
           export RUNTIME_API_LEASE_PASSWORD="$(openssl rand -hex 24)"
           export RUNTIME_WORKER_LEASE_PASSWORD="$(openssl rand -hex 24)"
+          export RUNTIME_PLATFORM_WORKER_LEASE_PASSWORD="$(openssl rand -hex 24)"
           export RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD="$(openssl rand -hex 24)"
           export RUNTIME_API_LEASE_DATABASE_URL="postgresql://${RUNTIME_API_LEASE_LOGIN}:${RUNTIME_API_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           export RUNTIME_WORKER_LEASE_DATABASE_URL="postgresql://${RUNTIME_WORKER_LEASE_LOGIN}:${RUNTIME_WORKER_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
+          export RUNTIME_PLATFORM_WORKER_LEASE_DATABASE_URL="postgresql://${RUNTIME_PLATFORM_WORKER_LEASE_LOGIN}:${RUNTIME_PLATFORM_WORKER_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           export RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL="postgresql://${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}:${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
           bash infra/postgres/provision-runtime-lease-principals.sh
           bash infra/postgres/verify-runtime-lease-principal-permissions.sh
@@ -438,7 +441,7 @@ jobs:
               --env NODE_ENV=production \
               --env APP_ENVIRONMENT=development \
               --env "RUNTIME_IMAGE_REFERENCE=${RUNTIME_IMAGE_REFERENCE}" \
-              "${OCI_IMAGE}" worker >"${WORKER_LOG}" 2>&1
+              "${OCI_IMAGE}" customer-worker >"${WORKER_LOG}" 2>&1
           WORKER_STATUS=$?
           set -e
           if [[ "${WORKER_STATUS}" -eq 0 ]]; then

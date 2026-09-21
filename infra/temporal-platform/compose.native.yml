@@ -9,5 +9,12 @@ services:
     command: ["/etc/temporal/entrypoint.sh"]
     environment:
       TEMPORAL_PLATFORM_READER_SUBJECT: ${TEMPORAL_PLATFORM_READER_SUBJECT:?set the fixed GrowthOS reader subject}
+      TEMPORAL_PLATFORM_READER_SERVER_NAME: ${TEMPORAL_PLATFORM_READER_SERVER_NAME:?set the distinct reader mTLS server name}
+      TEMPORAL_RUNTIME_JWT_ISSUER: ${TEMPORAL_RUNTIME_JWT_ISSUER:?set the fixed temporal-runtime issuer}
+      TEMPORAL_PLATFORM_WORKER_SUBJECT: ${TEMPORAL_PLATFORM_WORKER_SUBJECT:?set the fixed platform worker subject}
+      TEMPORAL_CUSTOMER_WORKER_SUBJECT: ${TEMPORAL_CUSTOMER_WORKER_SUBJECT:?set the fixed customer worker subject}
+      TEMPORAL_CUSTOMER_CLIENT_SUBJECT: ${TEMPORAL_CUSTOMER_CLIENT_SUBJECT:?set the fixed customer client subject}
+      TEMPORAL_PROVISION_ADMIN_SUBJECT: ${TEMPORAL_PROVISION_ADMIN_SUBJECT:?set the independent provision admin subject}
+      TEMPORAL_SCHEDULE_WRITER_SUBJECT: ${TEMPORAL_SCHEDULE_WRITER_SUBJECT:?set the independent schedule writer subject}
     labels:
       io.global.temporal.native.source-sha: ${TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA:?set the verified native image source commit}

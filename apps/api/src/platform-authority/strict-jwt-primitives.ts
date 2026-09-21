@@ -11,6 +11,10 @@ interface StrictJwtPrimitives {
     parse(
       expectedKeys: readonly string[],
     ): Readonly<Record<string, string | number>>;
+    parse(
+      expectedKeys: readonly string[],
+      stringArrayKeys: readonly string[],
+    ): Readonly<Record<string, string | number | readonly string[]>>;
     parseJwks(): { keys: readonly Readonly<Record<string, string | number>>[] };
   };
   validJwksDocument(value: unknown): Promise<VerifiedJwksDocument>;
@@ -152,15 +156,27 @@ export function createStrictJwtPrimitives(
 
     parse(
       expectedKeys: readonly string[],
-    ): Readonly<Record<string, FlatJsonValue>> {
+    ): Readonly<Record<string, FlatJsonValue>>;
+    parse(
+      expectedKeys: readonly string[],
+      stringArrayKeys: readonly string[],
+    ): Readonly<Record<string, FlatJsonValue | readonly string[]>>;
+    parse(
+      expectedKeys: readonly string[],
+      stringArrayKeys: readonly string[] = [],
+    ): Readonly<Record<string, FlatJsonValue | readonly string[]>> {
       try {
+        if (stringArrayKeys.some((key) => !expectedKeys.includes(key)))
+          return this.invalid();
         this.skipWhitespace();
         if (this.source[this.index] !== "{") return this.invalid();
         this.index += 1;
         this.skipWhitespace();
-        const result: Record<string, FlatJsonValue> = Object.create(
-          null,
-        ) as Record<string, FlatJsonValue>;
+        const result: Record<string, FlatJsonValue | readonly string[]> =
+          Object.create(null) as Record<
+            string,
+            FlatJsonValue | readonly string[]
+          >;
         const keys = new Set<string>();
         if (this.source[this.index] === "}") return this.invalid();
         for (;;) {
@@ -171,8 +187,11 @@ export function createStrictJwtPrimitives(
           if (this.source[this.index] !== ":") return this.invalid();
           this.index += 1;
           this.skipWhitespace();
-          const value =
-            this.source[this.index] === '"' ? this.string() : this.integer();
+          const value = stringArrayKeys.includes(key)
+            ? this.stringArray()
+            : this.source[this.index] === '"'
+              ? this.string()
+              : this.integer();
           result[key] = value;
           this.skipWhitespace();
           const separator = this.source[this.index];
@@ -203,6 +222,22 @@ export function createStrictJwtPrimitives(
     private skipWhitespace(): void {
       while ([" ", "\t", "\n", "\r"].includes(this.source[this.index] ?? "")) {
         this.index += 1;
+      }
+    }
+
+    /** Opt-in only: existing flat JWT contracts still reject all arrays. */
+    private stringArray(): readonly string[] {
+      if (this.source[this.index] !== "[") return this.invalid();
+      this.index += 1;
+      const values: string[] = [];
+      for (;;) {
+        this.skipWhitespace();
+        values.push(this.string());
+        if (values.length > 8) return this.invalid();
+        this.skipWhitespace();
+        const separator = this.source[this.index++];
+        if (separator === "]") return Object.freeze(values);
+        if (separator !== ",") return this.invalid();
       }
     }
 

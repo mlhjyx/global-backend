@@ -4,7 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PrismaService } from "../prisma/prisma.service";
 import type { RuntimeReleaseIdentity } from "./runtime-release-identity";
 
-export type RuntimeProcessRole = "API" | "WORKER" | "OUTBOX_RELAY";
+export type RuntimeProcessRole =
+  "API" | "WORKER" | "PLATFORM_WORKER" | "OUTBOX_RELAY";
 export type RuntimeProcessState = "STARTING" | "READY" | "DRAINING" | "STOPPED";
 
 export interface RuntimeProcessLeaseRecord {
@@ -12,6 +13,10 @@ export interface RuntimeProcessLeaseRecord {
   role: RuntimeProcessRole;
   state: RuntimeProcessState;
   taskQueue: string | null;
+  temporalClusterId: string | null;
+  temporalClusterProofDigest: string | null;
+  temporalNamespace: string | null;
+  workloadKind: "customer-worker" | "platform-worker" | null;
   buildSha: string;
   imageDigest: string;
   artifactDigest: string;
@@ -61,32 +66,38 @@ export function withRuntimeLeaseStatementTimeout(value: string): string {
 
 export interface RuntimeProcessLeaseStoreOptions {
   env?: NodeJS.ProcessEnv;
+  roles?: readonly RuntimeProcessRole[];
   writers?: Partial<Record<RuntimeProcessRole, RuntimeLeaseQueryClient>>;
 }
 
 const WRITER_URL_ENV: Readonly<Record<RuntimeProcessRole, string>> = {
   API: "RUNTIME_API_LEASE_DATABASE_URL",
   WORKER: "RUNTIME_WORKER_LEASE_DATABASE_URL",
+  PLATFORM_WORKER: "RUNTIME_PLATFORM_WORKER_LEASE_DATABASE_URL",
   OUTBOX_RELAY: "RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL",
 };
 const REGISTER_FUNCTION: Readonly<Record<RuntimeProcessRole, string>> = {
   API: "register_api_runtime_process_lease",
-  WORKER: "register_worker_runtime_process_lease",
+  WORKER: "register_worker_runtime_process_lease_v2",
+  PLATFORM_WORKER: "register_platform_worker_runtime_process_lease_v2",
   OUTBOX_RELAY: "register_outbox_relay_runtime_process_lease",
 };
 const HEARTBEAT_FUNCTION: Readonly<Record<RuntimeProcessRole, string>> = {
   API: "heartbeat_api_runtime_process_lease",
   WORKER: "heartbeat_worker_runtime_process_lease",
+  PLATFORM_WORKER: "heartbeat_platform_worker_runtime_process_lease",
   OUTBOX_RELAY: "heartbeat_outbox_relay_runtime_process_lease",
 };
 const TERMINALIZE_FUNCTION: Readonly<Record<RuntimeProcessRole, string>> = {
   API: "terminalize_api_runtime_process_lease",
-  WORKER: "terminalize_worker_runtime_process_lease",
+  WORKER: "terminalize_worker_runtime_process_lease_v2",
+  PLATFORM_WORKER: "terminalize_platform_worker_runtime_process_lease_v2",
   OUTBOX_RELAY: "terminalize_outbox_relay_runtime_process_lease",
 };
 const DATABASE_ROLE: Readonly<Record<RuntimeProcessRole, string>> = {
   API: "runtime_api",
   WORKER: "runtime_worker",
+  PLATFORM_WORKER: "runtime_platform_worker",
   OUTBOX_RELAY: "runtime_outbox_relay",
 };
 
@@ -106,7 +117,7 @@ function configuredWriters(
 ): ReadonlyMap<RuntimeProcessRole, RuntimeLeaseQueryClient> {
   const env = options.env ?? process.env;
   const writers = new Map<RuntimeProcessRole, RuntimeLeaseQueryClient>();
-  for (const role of PROCESS_ROLES) {
+  for (const role of options.roles ?? PROCESS_ROLES) {
     const injected = options.writers?.[role];
     if (injected) {
       writers.set(role, injected);
@@ -153,7 +164,7 @@ export class PrismaRuntimeProcessLeaseStore implements RuntimeProcessLeaseStore 
       await writer.$queryRawUnsafe<Array<{ instance_id: string }>>(
         `SELECT ${registerFunction}(
           $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
-          $7::timestamptz
+          $7::timestamptz${isWorker(record.role) ? ", $8::text, $9::text, $10::text, $11::text" : ""}
         ) AS instance_id`,
         record.instanceId,
         record.taskQueue,
@@ -162,6 +173,14 @@ export class PrismaRuntimeProcessLeaseStore implements RuntimeProcessLeaseStore 
         record.artifactDigest,
         record.migrationRevision,
         record.startedAt,
+        ...(isWorker(record.role)
+          ? [
+              record.temporalClusterId,
+              record.temporalNamespace,
+              record.workloadKind,
+              record.temporalClusterProofDigest,
+            ]
+          : []),
       );
       this.registeredInstances.add(record.instanceId);
       registeredNow = true;
@@ -188,7 +207,7 @@ export class PrismaRuntimeProcessLeaseStore implements RuntimeProcessLeaseStore 
     await writer.$queryRawUnsafe<Array<{ instance_id: string }>>(
       `SELECT ${terminalizeFunction}(
         $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
-        $7::timestamptz, $8::timestamptz
+        $7::timestamptz, $8::timestamptz${isWorker(record.role) ? ", $9::text, $10::text, $11::text, $12::text" : ""}
       ) AS instance_id`,
       record.instanceId,
       record.taskQueue,
@@ -198,6 +217,14 @@ export class PrismaRuntimeProcessLeaseStore implements RuntimeProcessLeaseStore 
       record.migrationRevision,
       record.startedAt,
       record.stoppedAt,
+      ...(isWorker(record.role)
+        ? [
+            record.temporalClusterId,
+            record.temporalNamespace,
+            record.workloadKind,
+            record.temporalClusterProofDigest,
+          ]
+        : []),
     );
     this.registeredInstances.add(record.instanceId);
   }
@@ -263,6 +290,8 @@ export class PrismaRuntimeProcessLeaseStore implements RuntimeProcessLeaseStore 
   }): Promise<RuntimeProcessLeaseRecord[]> {
     return this.prisma.$queryRawUnsafe<RuntimeProcessLeaseRecord[]>(
       `SELECT "instance_id" AS "instanceId", "role", "state",
+              "temporal_cluster_id" AS "temporalClusterId", "temporal_namespace" AS "temporalNamespace",
+              "workload_kind" AS "workloadKind", "temporal_cluster_proof_digest" AS "temporalClusterProofDigest",
               "task_queue" AS "taskQueue", "build_sha" AS "buildSha",
               "image_digest" AS "imageDigest", "artifact_digest" AS "artifactDigest",
               "migration_revision" AS "migrationRevision", "started_at" AS "startedAt",
@@ -286,8 +315,31 @@ const FRESHNESS_MS = 30_000;
 const PROCESS_ROLES: readonly RuntimeProcessRole[] = [
   "API",
   "WORKER",
+  "PLATFORM_WORKER",
   "OUTBOX_RELAY",
 ];
+
+function isWorker(role: RuntimeProcessRole): boolean {
+  return role === "WORKER" || role === "PLATFORM_WORKER";
+}
+
+export interface RuntimeTemporalIdentity {
+  temporalClusterId: string;
+  temporalClusterProofDigest: string;
+}
+
+export function runtimeTemporalIdentity(
+  env: NodeJS.ProcessEnv = process.env,
+): RuntimeTemporalIdentity {
+  const temporalClusterId = env.TEMPORAL_CLUSTER_ID ?? "";
+  const temporalClusterProofDigest = env.TEMPORAL_CLUSTER_PROOF_DIGEST ?? "";
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/.test(temporalClusterId) ||
+    !/^sha256:[0-9a-f]{64}$/.test(temporalClusterProofDigest)
+  )
+    throw new Error("WORKER_TEMPORAL_IDENTITY_INVALID");
+  return Object.freeze({ temporalClusterId, temporalClusterProofDigest });
+}
 
 function roleInstanceId(seed: string, role: RuntimeProcessRole): string {
   const digest = createHash("sha256").update(`${seed}\0${role}`).digest("hex");
@@ -326,6 +378,8 @@ export class RuntimeProcessLeaseService {
       identity: RuntimeReleaseIdentity;
       instanceId?: string;
       now?: () => Date;
+      temporal?: RuntimeTemporalIdentity;
+      workerRole?: "WORKER" | "PLATFORM_WORKER";
     },
   ) {
     const processSeed = options.instanceId ?? randomUUID();
@@ -337,6 +391,36 @@ export class RuntimeProcessLeaseService {
       instanceId: processSeed,
       now: options.now ?? (() => new Date()),
     });
+  }
+
+  instanceId(role: RuntimeProcessRole): string {
+    return this.instanceIds.get(role)!;
+  }
+
+  private temporalFields(
+    role: RuntimeProcessRole,
+  ): Pick<
+    RuntimeProcessLeaseRecord,
+    | "temporalClusterId"
+    | "temporalClusterProofDigest"
+    | "temporalNamespace"
+    | "workloadKind"
+  > {
+    if (!isWorker(role))
+      return {
+        temporalClusterId: null,
+        temporalClusterProofDigest: null,
+        temporalNamespace: null,
+        workloadKind: null,
+      };
+    const identity = this.options.temporal ?? runtimeTemporalIdentity();
+    return {
+      ...identity,
+      temporalNamespace:
+        role === "PLATFORM_WORKER" ? "platform-automation" : "default",
+      workloadKind:
+        role === "PLATFORM_WORKER" ? "platform-worker" : "customer-worker",
+    };
   }
 
   async heartbeat(
@@ -359,6 +443,7 @@ export class RuntimeProcessLeaseService {
       role,
       state,
       taskQueue,
+      ...this.temporalFields(role),
       buildSha: identity.build_sha,
       imageDigest: identity.image_digest,
       artifactDigest: identity.artifact_digest,
@@ -389,6 +474,7 @@ export class RuntimeProcessLeaseService {
       role,
       state: "STOPPED",
       taskQueue,
+      ...this.temporalFields(role),
       buildSha: identity.build_sha,
       imageDigest: identity.image_digest,
       artifactDigest: identity.artifact_digest,
@@ -403,11 +489,15 @@ export class RuntimeProcessLeaseService {
     taskQueue: string,
     options: { requireReady?: boolean } = {},
   ): Promise<ProcessLeaseInspection> {
-    return this.inspect("WORKER", taskQueue, options.requireReady ?? true);
+    return this.inspect(
+      this.options.workerRole ?? "WORKER",
+      taskQueue,
+      options.requireReady ?? true,
+    );
   }
 
   async inspectRole(role: RuntimeProcessRole): Promise<ProcessLeaseInspection> {
-    return this.inspect(role, null, true);
+    return this.inspect(role, isWorker(role) ? "understanding" : null, true);
   }
 
   private async inspect(
@@ -429,6 +519,26 @@ export class RuntimeProcessLeaseService {
         record.state !== "STOPPED" &&
         (taskQueue === null || record.taskQueue === taskQueue),
     );
+    if (isWorker(role)) {
+      let expected: ReturnType<RuntimeProcessLeaseService["temporalFields"]>;
+      try {
+        expected = this.temporalFields(role);
+      } catch {
+        return { status: "failed", code: "WORKER_TEMPORAL_IDENTITY_INVALID" };
+      }
+      if (
+        records.some(
+          (record) =>
+            record.role !== role ||
+            record.temporalClusterId !== expected.temporalClusterId ||
+            record.temporalClusterProofDigest !==
+              expected.temporalClusterProofDigest ||
+            record.temporalNamespace !== expected.temporalNamespace ||
+            record.workloadKind !== expected.workloadKind,
+        )
+      )
+        return { status: "failed", code: "WORKER_TEMPORAL_IDENTITY_INVALID" };
+    }
     if (records.some((record) => !sameRelease(record, identity))) {
       return {
         status: "failed",

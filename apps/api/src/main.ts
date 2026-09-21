@@ -17,6 +17,7 @@ import {
   resolveRuntimeSettings,
 } from './runtime/runtime-environment';
 import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-identity';
+import { installPlatformRevocationHttpBoundary } from './platform-authority/platform-revocation-http.middleware';
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
@@ -87,6 +88,9 @@ async function bootstrap(): Promise<void> {
     rawBody: true,
   });
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
+  // Exact signed-body parser and no-store boundary precede Nest's JSON parser
+  // and all guards. Never expose compact JWS through enumerable request.body.
+  installPlatformRevocationHttpBoundary(app);
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.
   app.set('query parser', 'extended');

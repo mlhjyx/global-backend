@@ -80,15 +80,67 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe("RuntimeReadinessService", () => {
+  it("holds aggregate API readiness when the separate platform worker lease is unavailable", async () => {
+    const deps = dependencies({
+      leases: {
+        inspectWorkerQueue: vi.fn(async () => ({ status: "ok" })),
+        inspectRole: vi.fn(async (role: string) =>
+          role === "PLATFORM_WORKER"
+            ? { status: "failed", code: "PLATFORM_WORKER_NOT_READY" }
+            : { status: "ok" },
+        ),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+    expect(await service.check()).toMatchObject({
+      status: "not_ready",
+      components: {
+        platform_worker: {
+          status: "failed",
+          code: "PLATFORM_WORKER_NOT_READY",
+        },
+      },
+    });
+  });
   it("reports lookup capability failure without recursively requiring business Worker readiness", async () => {
-    const deps = dependencies({ contributors: { check: vi.fn(async (name: string) => name === "platform_target_lookup"
-      ? { status: "failed", code: "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE" } : { status: "ok" }) } });
-    const service = new RuntimeReadinessService(deps.prisma as never, deps.temporal as never, deps.admission as never,
-      deps.releaseIdentity as never, deps.leases as never, deps.contributors as never);
-    expect(await service.check()).toMatchObject({ capabilities: { platform_target_lookup: {
-      status: "failed", code: "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE",
-    } } });
-    expect(deps.contributors.check).toHaveBeenCalledWith("platform_target_lookup");
+    const deps = dependencies({
+      contributors: {
+        check: vi.fn(async (name: string) =>
+          name === "platform_target_lookup"
+            ? {
+                status: "failed",
+                code: "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE",
+              }
+            : { status: "ok" },
+        ),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+    expect(await service.check()).toMatchObject({
+      capabilities: {
+        platform_target_lookup: {
+          status: "failed",
+          code: "PLATFORM_AUTHORITY_TARGET_LOOKUP_UNAVAILABLE",
+        },
+      },
+    });
+    expect(deps.contributors.check).toHaveBeenCalledWith(
+      "platform_target_lookup",
+    );
   });
   it("contains a rejected bootstrap refresh without replacing the fail-closed snapshot", async () => {
     vi.useFakeTimers();
@@ -391,16 +443,16 @@ describe("RuntimeReadinessService", () => {
     ]);
   });
 
-  it('publishes quote service authentication as an additive non-recursive capability fact', async () => {
+  it("publishes quote service authentication as an additive non-recursive capability fact", async () => {
     const deps = dependencies({
       contributors: {
         check: vi.fn(async (name: string) =>
-          name === 'platform_technical_quote_authentication'
+          name === "platform_technical_quote_authentication"
             ? {
-                status: 'failed',
-                code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+                status: "failed",
+                code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
               }
-            : { status: 'ok' },
+            : { status: "ok" },
         ),
       },
     });
@@ -414,36 +466,36 @@ describe("RuntimeReadinessService", () => {
     );
 
     await expect(service.check()).resolves.toMatchObject({
-      status: 'ready',
+      status: "ready",
       capabilities: {
         platform_technical_quote_authentication: {
-          status: 'failed',
-          code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+          status: "failed",
+          code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
         },
       },
     });
     expect(deps.contributors.check).toHaveBeenCalledWith(
-      'platform_technical_quote_authentication',
+      "platform_technical_quote_authentication",
     );
   });
 
-  it('publishes quote authentication and model settlement readback as independent capability facts', async () => {
+  it("publishes quote authentication and model settlement readback as independent capability facts", async () => {
     const deps = dependencies({
       contributors: {
         check: vi.fn(async (name: string) => {
-          if (name === 'platform_technical_quote_authentication') {
+          if (name === "platform_technical_quote_authentication") {
             return {
-              status: 'failed',
-              code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+              status: "failed",
+              code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
             };
           }
-          if (name === 'site_builder_model_settlement_readback') {
+          if (name === "site_builder_model_settlement_readback") {
             return {
-              status: 'failed',
-              code: 'MODEL_PROVIDER_SETTLEMENT_READBACK_UNAVAILABLE',
+              status: "failed",
+              code: "MODEL_PROVIDER_SETTLEMENT_READBACK_UNAVAILABLE",
             };
           }
-          return { status: 'ok' };
+          return { status: "ok" };
         }),
       },
     });
@@ -457,23 +509,23 @@ describe("RuntimeReadinessService", () => {
     );
 
     await expect(service.check()).resolves.toMatchObject({
-      status: 'ready',
+      status: "ready",
       capabilities: {
         platform_technical_quote_authentication: {
-          status: 'failed',
-          code: 'PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE',
+          status: "failed",
+          code: "PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_UNAVAILABLE",
         },
         site_builder_model_settlement_readback: {
-          status: 'failed',
-          code: 'MODEL_PROVIDER_SETTLEMENT_READBACK_UNAVAILABLE',
+          status: "failed",
+          code: "MODEL_PROVIDER_SETTLEMENT_READBACK_UNAVAILABLE",
         },
       },
     });
     expect(deps.contributors.check).toHaveBeenCalledWith(
-      'platform_technical_quote_authentication',
+      "platform_technical_quote_authentication",
     );
     expect(deps.contributors.check).toHaveBeenCalledWith(
-      'site_builder_model_settlement_readback',
+      "site_builder_model_settlement_readback",
     );
   });
 

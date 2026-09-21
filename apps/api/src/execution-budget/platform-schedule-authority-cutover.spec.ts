@@ -29,7 +29,7 @@ describe('platform schedule authority database cutover', () => {
 
   it('requires a deployment-owned writer URL with no owner or app fallback', async () => {
     const [worker, database, example] = await Promise.all([
-      readFile(new URL('../temporal/worker.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../temporal/platform-worker.ts', import.meta.url), 'utf8'),
       readFile(
         new URL(
           './execution-budget-platform-writer.database.ts',
@@ -42,7 +42,7 @@ describe('platform schedule authority database cutover', () => {
     expect(worker).toContain('createExecutionBudgetPlatformWriterClient');
     expect(database).toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL');
     expect(worker).toMatch(
-      /new PostgresBudgetStore\(\s*prisma,\s*authorityWriter,?\s*\)/,
+      /new PostgresBudgetStore\(\s*prisma,\s*writer,?\s*\)/,
     );
     expect(database).not.toMatch(
       /EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL[^\n]*(?:DATABASE_URL|APP_DATABASE_URL)/,

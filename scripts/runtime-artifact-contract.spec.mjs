@@ -285,7 +285,7 @@ test("CI starts the final Worker artifact fail-closed before it can poll Tempora
     /RUNTIME_IMAGE_REFERENCE="global-backend-ci@\$\{LOCAL_IMAGE_DIGEST\}"/,
   );
   assert.match(workflow, /docker run --rm --network none --read-only/);
-  assert.match(workflow, /"\$\{OCI_IMAGE\}" worker >"\$\{WORKER_LOG\}" 2>&1/);
+  assert.match(workflow, /"\$\{OCI_IMAGE\}" customer-worker >"\$\{WORKER_LOG\}" 2>&1/);
   assert.match(workflow, /Temporal polling remains disabled/);
   assert.match(workflow, /understanding worker up/);
 });

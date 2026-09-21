@@ -570,6 +570,13 @@ test("actual Compose merge is native-only and rendering fails before any start w
     TEMPORAL_PLATFORM_NATIVE_IMAGE: imageReference,
     TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA: sha,
     TEMPORAL_PLATFORM_READER_SUBJECT: "growthos-reader",
+    TEMPORAL_RUNTIME_JWT_ISSUER: "https://growthos.example/temporal-runtime",
+    TEMPORAL_PLATFORM_READER_SERVER_NAME: "reader.temporal.example",
+    TEMPORAL_PLATFORM_WORKER_SUBJECT: "platform-worker",
+    TEMPORAL_CUSTOMER_WORKER_SUBJECT: "customer-worker",
+    TEMPORAL_CUSTOMER_CLIENT_SUBJECT: "customer-client",
+    TEMPORAL_PROVISION_ADMIN_SUBJECT: "provision-admin",
+    TEMPORAL_SCHEDULE_WRITER_SUBJECT: "schedule-writer",
   };
   const render = (env) =>
     spawnSync(
@@ -602,6 +609,13 @@ test("actual Compose merge is native-only and rendering fails before any start w
     "TEMPORAL_PLATFORM_NATIVE_IMAGE",
     "TEMPORAL_PLATFORM_READER_SUBJECT",
     "TEMPORAL_PLATFORM_NATIVE_SOURCE_SHA",
+    "TEMPORAL_RUNTIME_JWT_ISSUER",
+    "TEMPORAL_PLATFORM_READER_SERVER_NAME",
+    "TEMPORAL_PLATFORM_WORKER_SUBJECT",
+    "TEMPORAL_CUSTOMER_WORKER_SUBJECT",
+    "TEMPORAL_CUSTOMER_CLIENT_SUBJECT",
+    "TEMPORAL_PROVISION_ADMIN_SUBJECT",
+    "TEMPORAL_SCHEDULE_WRITER_SUBJECT",
   ]) {
     const env = { ...environment };
     delete env[field];
