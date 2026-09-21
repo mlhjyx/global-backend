@@ -85,6 +85,22 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 
 已合入或关闭不自动授权删除分支/worktree。历史综合候选、独有提交、脏文件、ignored/untracked 材料和锁定旧路径继续保留。当前主线包含的提交可恢复，不代表 owner 已释放其工作区或其 ignored 材料已归档。
 
+## 4.1 开发宿主迁移（2026-09-20 增补，边界限于本节）
+
+> 本节只记录宿主迁移这一件事，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4 证据裁决 —— 那些仍绑定其各自的原核验时刻。
+
+开发宿主已从旧 Ubuntu 机器迁至 **WSL2（Ubuntu 26.04）**。完整缺口盘点与证据见 `/global/migration-audit/MIGRATION-TRIAGE-20260920.md` 与同目录 `legacy-worktree-audit-20260920.tsv`（420 个 worktree 逐项 git 状态）。
+
+| 观察 | 当前可确认的事实 | 不得外推 |
+| --- | --- | --- |
+| 源码完整性 | 旧机 181 个"领先 origin/main"的 head 已全部存在于新宿主；交叉核对已合并 PR 后，其中 77 个实为 squash 合入、104 个未进主线；1 个从未推送的分支（6 commits，`refs/rescued/pr407-identity-test-closeout-20260913`）已直取 | 取回不等于已裁决或已合入；104 个未进主线分支的去留未决 |
+| 运行配置 | 旧机 `.secrets/`、`apps/api/.env`、`packages/db/.env` 及 `GOOGLE_PATENTS_SA_JSON` 指向的 service account 文件已取回并 sha256 逐项校验；可移植三方凭据已接入 `local-config`，主机相关值刻意不继承 | 配置就位不等于服务已启动或已验证 |
+| 运行时 | **新宿主上 API/Worker 从未成功启动。** `migration-audit/runtime-prerequisites/` 全部回执的 `runtime_started` / `globalApiStarted` / `complete_runtime_readiness` 均为 `false` | 基础设施探针通过不等于应用就绪；§3 的 runtime 观察绑定旧宿主，不自动迁移到新宿主 |
+| 主线一致性 | `origin/main` 为最新真相；旧机与新宿主的本地 `main` 均落后 | 本地 checkout 不是权威 |
+| 旧机器 | 迁移快照（2026-09-20T04:30Z）后旧机仍有写入与新分支推送；尚未停写退役 | 快照不是最终 writer 交接 |
+
+**本节不改变任何阶段门裁决。** G5-Site / G5-Acquisition / G6 / G7 维持 §2 的现有裁决；宿主迁移不产生、也不替代 RuntimeEvidence。
+
 ## 5. 下一顺序与授权边界
 
 1. #538 完成v3消费者、完整闭包及独立controller/materialization/readback/admission门；R4将已接线的本地候选推进到最终hosted、制品和运行接纳。两条owner施工面各自接纳，不互相借用局部成功。
