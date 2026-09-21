@@ -1,5 +1,8 @@
 # Execution Budget Authority and Artifact Replay Program Implementation Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：总体计划；其子计划（预算授权、制品回放、领域 ACK、typed projection）均已落地
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace Backend-authored generic execution caps with externally signed authority and make every managed Model/Tool result recoverable without a second physical call.

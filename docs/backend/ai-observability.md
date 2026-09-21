@@ -1,5 +1,8 @@
 # AI observability development profile
 
+> 生命周期：`GUIDE`
+> 生命周期依据：Langfuse 可观测性开发 profile 的使用说明（#302 起）
+
 Langfuse is an optional, fail-open observer for the Model Execution Runtime. It
 does not provide prompts to production, choose routes, proxy model traffic, or
 participate in BuildRun success. Git remains authoritative for task contracts,

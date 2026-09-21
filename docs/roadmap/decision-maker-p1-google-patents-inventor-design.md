@@ -1,6 +1,7 @@
 # 待办 3 · BigQuery Google Patents 发明人身份源（替代被封 EPO OPS）
 
-> 状态：代码完成 + CI 绿 + **真库真 BigQuery 四段 verify 全绿**（2026-07-14，用户 GCP key），seed **仍 DISABLED**（见 §4 规模警示：生产启用走物化小表 fast-follow，非全量 fan-out）。
+> 生命周期：`CLOSED`
+> 状态说明：代码完成 + CI 绿 + **真库真 BigQuery 四段 verify 全绿**（2026-07-14，用户 GCP key），seed **仍 DISABLED**（见 §4 规模警示：生产启用走物化小表 fast-follow，非全量 fan-out）。
 > 这是「选项 B · 决策人多途径身份源」待办 3 的**专利发明人**能力——原定 EPO OPS（PR #61）因账号被网关封禁停摆，改走 **BigQuery Google Patents Public Data**（等价数据、更低门槛：仅需 Google 账号，无审批/无身份墙/无封号风险）。
 >
 > **实测（`scripts/verify-google-patents.mts`，真库真 API 无 sandbox）**：A 真 API Siemens(DE)→**25 名真实发明人**（Eichler Roman/Mehl Sebastian/Reichmann Jürgen…），六护栏全绿（personalData/technical_buyer/CC-BY-4.0/无 externalIds/无 residence 地址国籍 country_code）；B 落库 25 + person.profile 证据（CC-BY-4.0 署名 + personal_data）、无 external_id 点，二次跑幂等（created=0/merged=25 Tier 2 归一名）；C 跨源并（Impressum 同名 + 发明人 → 并同一行 match_rule=name_exact）；D §8.8 用途门 → ToolBroker DENIED → 零发明人。

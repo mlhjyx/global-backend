@@ -1,5 +1,8 @@
 # Execution Authority Cutover and Verification Implementation Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：计划列出的新建/修改文件 29/32 已在 main（2026-09-21 回读），其余为后续改名或合并
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Atomically make signed authority and durable result/ACK semantics mandatory for every product Model/Tool path, remove Backend-authored budget authorization, and prove the exact immutable runtime before merge and deployment.

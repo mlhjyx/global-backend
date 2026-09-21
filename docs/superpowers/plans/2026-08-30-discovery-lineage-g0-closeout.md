@@ -1,5 +1,8 @@
 # Discovery Lineage G0 Closeout Implementation Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：计划列出的新建/修改文件 4/4 已在 main（2026-09-21 回读）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 PR #425 已进入 current main 的零代码 Program B successor card 持久回读为 G0 PASS，并保持所有产品实现、G1–G7、runtime 与发布门不变。

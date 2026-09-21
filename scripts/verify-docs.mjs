@@ -70,6 +70,56 @@ function isImmutableEvidence(path) {
   );
 }
 
+function isLifecycleRequired(path) {
+  const pathFromRoot = repoPath(path);
+  return (
+    policy.lifecycleRequired?.prefixes?.some((prefix) =>
+      pathFromRoot.startsWith(prefix),
+    ) ?? false
+  );
+}
+
+/** Status/lifecycle values must be backticked tokens from the policy vocabulary. */
+function checkStatusTokens(path, metadata) {
+  for (const match of metadata.matchAll(
+    /^> (?:状态|生命周期|评审状态)：(.+)$/gm,
+  )) {
+    const rawStatus = match[1].trim();
+    if (!/^`[^`\n]+`(?:\s*\/\s*`[^`\n]+`)*$/.test(rawStatus)) {
+      report(
+        "error",
+        "STATUS_UNKNOWN",
+        path,
+        `malformed metadata status value ${rawStatus}`,
+      );
+      continue;
+    }
+    const tokens = [...rawStatus.matchAll(/`([^`]+)`/g)].flatMap((item) => {
+      const value = item[1].trim();
+      if (!/^[A-Z][A-Z0-9_]*(?:\s*\/\s*[A-Z][A-Z0-9_]*)*$/.test(value)) {
+        report(
+          "error",
+          "STATUS_UNKNOWN",
+          path,
+          `malformed metadata status token ${value}`,
+        );
+        return [];
+      }
+      return value.split(/\s*\/\s*/);
+    });
+    for (const token of tokens) {
+      if (!policy.allowedStatusTokens.includes(token)) {
+        report(
+          "error",
+          "STATUS_UNKNOWN",
+          path,
+          `unknown metadata status token ${token}`,
+        );
+      }
+    }
+  }
+}
+
 function withoutFencedCode(content) {
   let inFence = false;
   return content
@@ -275,42 +325,29 @@ for (const [path, content] of markdownByPath) {
         "controlled Markdown requires 状态 or 生命周期 metadata",
       );
     }
-    for (const match of metadata.matchAll(
-      /^> (?:状态|生命周期|评审状态)：(.+)$/gm,
-    )) {
-      const rawStatus = match[1].trim();
-      if (!/^`[^`\n]+`(?:\s*\/\s*`[^`\n]+`)*$/.test(rawStatus)) {
-        report(
-          "error",
-          "STATUS_UNKNOWN",
-          path,
-          `malformed metadata status value ${rawStatus}`,
-        );
-        continue;
-      }
-      const tokens = [...rawStatus.matchAll(/`([^`]+)`/g)].flatMap((item) => {
-        const value = item[1].trim();
-        if (!/^[A-Z][A-Z0-9_]*(?:\s*\/\s*[A-Z][A-Z0-9_]*)*$/.test(value)) {
-          report(
-            "error",
-            "STATUS_UNKNOWN",
-            path,
-            `malformed metadata status token ${value}`,
-          );
-          return [];
-        }
-        return value.split(/\s*\/\s*/);
-      });
-      for (const token of tokens) {
-        if (!policy.allowedStatusTokens.includes(token)) {
-          report(
-            "error",
-            "STATUS_UNKNOWN",
-            path,
-            `unknown metadata status token ${token}`,
-          );
-        }
-      }
+    checkStatusTokens(path, metadata);
+  }
+
+  // Plans, records, research and runbooks outside the controlled set still
+  // declare whether they are current, closed or superseded, so a reader never
+  // mistakes a finished plan or a time-bound report for the live contract.
+  if (
+    !controlled &&
+    !authoritativeCurrent &&
+    !historicalProvenance &&
+    !immutableEvidence &&
+    isLifecycleRequired(path)
+  ) {
+    const metadata = content.split("\n").slice(0, 16).join("\n");
+    if (!/^> (状态|生命周期)：/m.test(metadata)) {
+      report(
+        "error",
+        "LIFECYCLE_MISSING",
+        path,
+        "documents under lifecycleRequired prefixes need 生命周期 (or 状态) metadata in the first 16 lines",
+      );
+    } else {
+      checkStatusTokens(path, metadata);
     }
   }
 

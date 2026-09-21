@@ -1,5 +1,8 @@
 # 待办 3 · P1 第一个身份源 = UK Companies House（官方公司注册处）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：UK Companies House 身份源设计；已实现（apps/api/src/discovery/providers/companies-house.provider.ts）
+
 > 设计定稿 2026-07-11 · 分支 `feat/companies-house-identity` · 承接待办 2（PR #54，`resolvePersonIdentity` 4-Tier 解析缝）
 > 权威决策见 `docs/adr/registry.md`；本文件只记本期设计 + 合规 + 边界。
 

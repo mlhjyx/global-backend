@@ -1,5 +1,8 @@
 # Copy Sonnet recovery v13 create-only TDD record
 
+> 生命周期：`CLOSED`
+> 生命周期依据：Copy recovery v13 create-only 门的 TDD 记录
+
 Date: 2026-08-09
 
 ## Outcome

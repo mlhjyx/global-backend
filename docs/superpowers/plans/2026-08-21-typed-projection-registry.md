@@ -1,5 +1,8 @@
 # Typed Projection Registry Implementation Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：计划列出的新建/修改文件 38/40 已在 main（2026-09-21 回读）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give every first-wave small managed Model/Tool output a closed, bounded, versioned projector/restorer that can be safely persisted and replayed.

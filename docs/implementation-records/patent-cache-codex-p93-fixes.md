@@ -1,5 +1,8 @@
 # 专利发明人缓存 · Codex PR #93 复审 7 findings 收口（fast-follow）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：专利发明人缓存 PR #93 复审收口记录，修复已合入（#97）
+
 > 2026-07-14 · 分支 `fix/patent-cache-codex-p93` · 基于 main `f828f19`（PR #93 合并后）
 > 处置 PR #93「专利发明人 postgres scoped 缓存（scale-safe #89）」合并**之后**收到的 7 条 Codex inline 复审意见。
 > 🔴 全程功能保持默认关闭：`data_provider.google_patents` seed=**DISABLED** + `PATENT_SOURCE_MODE=off`（翻 ENABLED 须用户先签 LIA/DPIA）。

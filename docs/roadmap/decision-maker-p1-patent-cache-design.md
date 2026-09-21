@@ -1,6 +1,7 @@
 # 待办3 · 专利发明人缓存（Google Patents #89 的 scale-safe 生产启用）
 
-> 状态：**进行中**（分支 `feat/patent-inventor-cache`）。地基已提交 `5b3e7a9`；其余步骤见 §进度。
+> 生命周期：`CLOSED`
+> 状态说明：**进行中**（分支 `feat/patent-inventor-cache`）。地基已提交 `5b3e7a9`；其余步骤见 §进度。
 > 目的：让 #89（BigQuery Google Patents 发明人源）能开进生产 contact 漏斗而**每查零 BQ 字节、零额外 GCP 设置**。
 > 方案由 3 方案 judge-panel workflow 选定（postgres_scoped_cache 合成方案，total 37）。
 

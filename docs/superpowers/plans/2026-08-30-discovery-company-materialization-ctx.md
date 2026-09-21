@@ -1,5 +1,8 @@
 # Discovery Company Materialization C-TX Implementation Plan
 
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：自述 PLANNED / HOLD_IMPLEMENTATION；公司物化已随 governed lineage G3 落地（packages/db 的 discovery-company-materialization 测试）
+
 > Status: PLANNED / HOLD_IMPLEMENTATION
 >
 > Authority baseline: `90f005de6cb945a05632a079c00d53a994c33855`

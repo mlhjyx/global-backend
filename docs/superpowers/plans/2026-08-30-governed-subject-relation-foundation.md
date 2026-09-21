@@ -1,5 +1,8 @@
 # Governed Subject Relation Foundation Implementation Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：计划列出的新建/修改文件 8/8 已在 main（2026-09-21 回读）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为 current-main Execution Authority、Tool operation 与 Domain ACK 增加产品中立、append-only、可 exact replay/attest/DSR tombstone 的 GovernedSubject relation substrate。

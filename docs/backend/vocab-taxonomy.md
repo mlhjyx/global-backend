@@ -1,5 +1,8 @@
 # 规范词表归一：标准化设计
 
+> 生命周期：`REFERENCE_ONLY`
+> 生命周期依据：2026-07 的词表归一设计；现行实现见 apps/api/scripts/seed-taxonomy.mjs 与 canonical_taxonomy 表
+
 > 回应「规范词表归一不够充分、行业/国家词不够全面」。现状 `discovery/vocab.ts` 是约 10 行业 + 10 国家的硬编码种子，够 demo 不够用。
 
 ## 结论：混合归一（确定性种子 + 冷路径 LLM 回填）
