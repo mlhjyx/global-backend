@@ -2,7 +2,7 @@
 # Temporal intentionally runs outside Compose via `temporal-dev.service`.
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     container_name: global-postgres
     restart: unless-stopped
     environment:
@@ -20,7 +20,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:520775a41a63e77e06c73e35d2fd9cc15921a609516818796b4ecbb813078bc7
     container_name: global-redis
     restart: unless-stopped
     ports:
@@ -108,7 +108,7 @@ services:
   # Tenant isolation = key prefix ws/{workspace_id}/… + presigned URLs; bucket is
   # never public. Console at http://localhost:9001 (dev creds below, dev only).
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: global-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -132,7 +132,7 @@ services:
   # Single deployment owner for the private Site Builder bucket. API and Worker
   # validate this immutable contract but never race lifecycle configuration PUTs.
   minio-bootstrap:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: global-minio-bootstrap
     depends_on:
       minio:
@@ -164,7 +164,7 @@ services:
   # once after New API admin setup to create the private alias + model-limited token.
   # loopback :11434 is retained for local health checks and break-glass diagnostics only.
   embeddings:
-    image: ollama/ollama:latest
+    image: ollama/ollama@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532
     container_name: global-embeddings
     restart: unless-stopped
     ports:
@@ -185,7 +185,7 @@ services:
   # unprivileged but retains egress because first convert downloads layout models;
   # production target pre-bakes models and disables network (06 §2).
   docling:
-    image: ghcr.io/docling-project/docling-serve:latest
+    image: ghcr.io/docling-project/docling-serve@sha256:09fc953cbe973b0a3a3db437479949a7290728ca00b2db93d56a53d01e6f7bd0
     container_name: global-docling
     restart: unless-stopped
     ports:
@@ -196,7 +196,7 @@ services:
   # Self-hosted meta-search (discovery entry point for public intelligence).
   # Server-to-server only — never expose beyond localhost (limiter is off).
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng@sha256:11ffedd387dc9cf99e881250c67861470384e55194a86f76df76aa0034a28a1a
     container_name: global-searxng
     restart: unless-stopped
     ports:
