@@ -13,6 +13,8 @@
 
 [工具链生产审计重审](security/20260920-tooling-baseline-refresh.json)保留同一审计在旧绑定下的HOLD与新精确绑定的FRESH；不改写[迁移任务的先前回执](security/20260920-baseline-refresh.json)，也不表示全部依赖告警或运行发布完成。
 
+[2026-09-21 开发依赖告警刷新](security/20260921-dev-dependency-alert-refresh.json)：vitest 补丁、Prism 链的 lodash/uuid 精确 override 与 baseline-browser-mapping 传递升级后，同一生产审计（零 advisory）在旧锁文件绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长，faker 5.5.3（仅 Prism 开发依赖）仍开放。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |
