@@ -40,6 +40,21 @@ review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相
   目标在单账号条件下无法达成；产品负责人据此以 `DEC-AIDEV-004` 把审查职责交给开发代理，目标本身
   保留为远期要求，不据此下调。
 
+### 2026-09-21 ruleset 变更（产品负责人授权）
+
+#549 合入后，经产品负责人明确授权对 `protect-main` 做了两处修改，并回读确认：
+
+- 移除 `nontechnical decision card freshness`，required checks 现为 5 项：`renderer visual scope`、
+  `build · typecheck · test`、`contracts · drift · lint · breaking`、`gitleaks 密钥扫描`、
+  `governance · traceability · release`；
+- 关闭 strict（`strict_required_status_checks_policy: false`）：PR 绿了即可合，不再要求先并入最新 main。
+  理由：单人加开发代理顺序合并、并行 PR 少，strict 带来的是每次合并后其余 PR 串行重跑（一批 4 个 PR 约多等 45 分钟），
+  而它防范的"各自绿、合起来坏"在此规模下风险低。替代保护：main 每个 push 的 CI 不被取消、完整跑完；
+  开发代理合并前把 PR 与最新 main 的组合在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）；
+  Copy 回执与 changelog 等多 PR 共改的行会产生文本冲突，迫使后合者变基重签。
+
+删除、non-fast-forward、review thread 解决与 push 后撤销旧 review 等其余规则不变。
+
 ### 2026-08-09 只读 ruleset 回读
 
 GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` ruleset 为
@@ -148,7 +163,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `/global/backend/.codex/worktrees/<topic>` 与 `codex/<topic>`，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
 3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
-4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零且基于最新 main 后合并。
+4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。
 5. 合并后在 `/global/backend` 运行 `node scripts/governance-main-worktree-sync.mjs apply`，以 fetch 后解析出的 `origin/main` 精确 commit 做纯 fast-forward；若远端 PR/分支由另一会话处理，它只交接已合入的精确 SHA，本地会话仍独立 fetch 和验证，不从通知推导 merge 授权。同步脚本遇到 HOLD 时保留现场并单独审计，不 stash/reset/clean。功能分支与本地 worktree 默认保留用于复查。删除仅是可选空间清理，须满足 `CONTRIBUTING.md` 的提交已入主线、工作区干净且未跟踪文件归属已核清条件，并取得用户明确授权。
 
 ## 风险分级（决定验证深度，不授予自动合并）

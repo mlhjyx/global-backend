@@ -245,7 +245,7 @@ ExecutionAuthority
 | `DEC-AIDEV-001` | 批准 AI 辅助开发运行模型、非技术需求与业务验收、记忆/知识事实优先级和受控工具试点门；默认每个 PR 最终合并仍需产品负责人明确授权，后续精确范围决定可以建立独立审查后自动合并例外 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [AI 辅助开发协作入口](../ai-development/README.md) |
 | `DEC-AIDEV-002` | 批准受控 MCP Memory 第一阶段：固定本机版本、普通会话只读、`memoryctl` 候选/原子晋升/备份/审计与非技术合并决策卡（决策卡部分 2026-09-21 由 `DEC-AIDEV-004` 取代）；不把记忆升级为项目真值，旧写入会话排空前不执行首次晋升 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [记忆、知识与派生认知政策](../ai-development/memory-and-context-policy.md) |
 | `DEC-AIDEV-003` | 批准四 PR 的 AI 记忆与代码智能实施计划：ContractGraph 补动态契约，CodeGraph 仅作受控静态试点，运行证据关闭静态推断；本计划各 PR 在独立只读审查通过、CI 全绿、审查线程清零且基于最新 main 后由 Codex 合并，无需逐 PR 重复授权；不授权生产观测、产品范围变化或把派生图升级为真值 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [代码智能使用与边界](../ai-development/code-intelligence.md) |
-| `DEC-AIDEV-004` | 常规 PR 的常设合并授权：开发代理对每个 PR 做独立审查（发现问题先修复并重验），在必需检查于当前 head 全绿、审查线程清零且基于最新 main 后可直接合并，无需逐 PR 重复授权；PR 正文以不经机器解析的「给产品负责人的说明」取代非技术合并决策卡。不授权 ruleset/仓库设置/权限变更、部署与发布、付费调用或产品范围变化；产品负责人可随时撤回或对单个 PR 另行指示 | `APPROVED` | `OWN-PRODUCT` | [AI 辅助开发运行模型 §3.4](../ai-development/operating-model.md) |
+| `DEC-AIDEV-004` | 常规 PR 的常设合并授权：开发代理对每个 PR 做独立审查（发现问题先修复并重验），在必需检查于当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）后可直接合并，无需逐 PR 重复授权；PR 正文以不经机器解析的「给产品负责人的说明」取代非技术合并决策卡。不授权 ruleset/仓库设置/权限变更、部署与发布、付费调用或产品范围变化；产品负责人可随时撤回或对单个 PR 另行指示 | `APPROVED` | `OWN-PRODUCT` | [AI 辅助开发运行模型 §3.4](../ai-development/operating-model.md) |
 
 ## 12. 关闭冲突的证据要求
 
