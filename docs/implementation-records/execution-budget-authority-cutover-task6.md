@@ -1,5 +1,8 @@
 # Execution Budget Authority Task 6 cutover record
 
+> 生命周期：`CLOSED`
+> 生命周期依据：执行预算授权 Task 6 cutover 记录，对应改动已合入
+
 > Document ID: `DOC-IMPL-EXECUTION-BUDGET-AUTHORITY-TASK6-001`
 >
 > Lifecycle: `PRE_CUTOVER_IMPLEMENTATION`

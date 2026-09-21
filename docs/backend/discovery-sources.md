@@ -1,5 +1,8 @@
 # 多源发现蓝图：数据源 → 采集方式 → 字段 → 合规 → 优先级
 
+> 生命周期：`REFERENCE_ONLY`
+> 生命周期依据：2026-08 的多源发现蓝图；各数据源的现行状态以 provider registry 与 docs/status/current.md 为准
+
 > 研究结论（2025-2026 现状）。目标：把发现从「只挖官网」扩展到真正多源。
 > 场景基准：为 TRUMPF（德国激光/钣金设备商）找全球中大型金属加工买家。
 > **2026-08-07 as-built 纠偏**：本文保留研究 provenance，表内优先级、实测数字和“已实现”措辞不再承担当前 registry 真值。Provider 的实现状态、SourceClass、默认 enablement、许可、个人数据等级、调用门与测试只认[机器生成 Provider Registry](provider-registry.md)。当前 `executeQuery` 已对同 `source_class` 的全部 ENABLED adapter 并行 fan-out，`source_hint` 才会收窄；生产 `customs`/`trade_data`/Comtrade adapter 尚未实现，枚举或 sandbox 插槽不构成能力。

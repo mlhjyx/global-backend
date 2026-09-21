@@ -1,5 +1,8 @@
 # Trusted Approval Readback Hosted Bootstrap Implementation Plan
 
+> 生命周期：`REFERENCE_ONLY`
+> 生命周期依据：计划列出的文件 13/30 在 main；hosted bootstrap 部分未完整落地，现状以 docs/status/current.md 为准
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bootstrap trusted hosted approval readback, attested receipts, canary evidence, independent verifier placement, and live ruleset parity without allowing the bootstrap workflow or its introducing PR to self-verify.

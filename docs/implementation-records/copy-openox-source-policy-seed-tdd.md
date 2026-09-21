@@ -1,5 +1,8 @@
 # Copy OpenOx source-policy seed — TDD evidence
 
+> 生命周期：`CLOSED`
+> 生命周期依据：Copy OpenOx source-policy seed 的 TDD 证据
+
 | Stage | Evidence |
 | --- | --- |
 | RED | `pnpm --filter @global/api exec vitest run src/site-builder/eval/copy-sonnet-recovery-source-policy-seed.spec.ts` failed because the new seed module did not exist. |

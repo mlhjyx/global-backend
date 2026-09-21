@@ -1,5 +1,8 @@
 # Platform revocation recovery implementation
 
+> 生命周期：`APPROVED`
+> 生命周期依据：上述规格的实施计划，进行中
+
 ## Goal and authority
 
 Recover an already-authorized schedule disable across missing target, command expiry and lost ACK without issuing replacement Grants, advancing a second fence, changing original authorization or inventing completion.

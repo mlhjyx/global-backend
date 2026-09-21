@@ -1,5 +1,8 @@
 # 收口⑥ 存储合规收口 —— 设计定稿（spec）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：收口⑥ 存储合规设计定稿；DataRights 引擎与 jurisdiction_policy 已实现
+
 > 2026-07-11。六项工程收口最后一项。上游权威：[ADR-010 COMPLIANCE-SCORING](../adr/registry.md) + [ADR-003 DATA-PLANES](../adr/registry.md) + [platform-top-level-design-v1 §11/§6.3](../research/platform-top-level-design-v1.md)（frozen 研究，已蒸馏进 ADR-010）。本收口=把散落的合规「代码纪律」升级为**一等事实 + 确定性引擎 + 删除编排**，让存储侧 GDPR/PIPL 义务可判定、可审计、可执行。
 
 ## 0. 范围与不做（KISS/YAGNI）

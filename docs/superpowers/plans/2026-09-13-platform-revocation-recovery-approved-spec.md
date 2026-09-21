@@ -1,5 +1,8 @@
 # 平台撤销恢复：已批准差额规格
 
+> 生命周期：`APPROVED`
+> 生命周期依据：已批准规格；恢复查找原语已合入，其余在 R4 线（#545 与 GrowthOS 105 补丁线）进行中
+
 状态：**USER_APPROVED / IMPLEMENTATION_PENDING / NO_RUNTIME_ACCEPTANCE**。
 
 2026-09-13 用户明确同意推荐方案并要求继续实施。原冻结提案 `/var/tmp/parity-revocation-recovery-decision.md` SHA-256：`ddba48051c4435577d027ad200a69c782560acf04a1a65353fe069439ca7e5fc`。以下提案正文保留审查时措辞作为 provenance；其中“待用户确认”已由本批准记录覆盖，U1–U5 的事实核验、安全边界和未知状态处置并未豁免。产品实施与运行验收分别取证。

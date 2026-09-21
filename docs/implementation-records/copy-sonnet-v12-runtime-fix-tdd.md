@@ -1,5 +1,8 @@
 # Copy Sonnet v12 runtime fix — TDD evidence
 
+> 生命周期：`CLOSED`
+> 生命周期依据：Copy v12 runtime 修复的 TDD 证据
+
 ## Source and scope
 
 No standalone plan file was supplied. The journeys and acceptance criteria were

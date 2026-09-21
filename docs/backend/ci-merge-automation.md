@@ -1,5 +1,8 @@
 # CI / 审查与合并流程（Codex）
 
+> 生命周期：`GUIDE`
+> 生命周期依据：CI、审查与合并的现行流程；2026-09-21 随 #548–#553 更新
+
 > 2026-07-16 起，当前开发与复核主体是 Codex。旧 Claude `merge-judge` workflow 已退役；不再使用 AI auto-merge。权威简版见 [AGENTS.md §8](../../AGENTS.md)。
 
 ## 合并模型

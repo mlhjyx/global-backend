@@ -1,5 +1,8 @@
 # 删除编排 Art.17 —— contact 主体重物化残留并发窗口收口（设计note + 实施）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：Art.17 残留并发窗口收口的设计与复审记录，修复已合入
+
 > 承 PR #80（`feat/deletion-art17-race-hardening`，merge `f57345d`）对抗复审 **CONFIRMED（2-0，HIGH）** 的残留窗口。
 > 决策：**综合方案**（Option 1 的行锁机制置于擦除侧 + Option 2 的有界对账，折进 `eraseSubject`）。2026-07-13。
 

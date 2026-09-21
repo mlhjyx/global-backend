@@ -1,5 +1,8 @@
 # 选项 B · 待办 2 设计——跨源决策人身份解析（修桥 + 建缝）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：选项 B 待办 2 设计；跨源身份解析已实现
+
 > 2026-07-11 设计（会话内已过目、拍板：方案「修桥+建缝」+ `matchRule` 记进 field_evidence 零迁移 + 实现留新会话）。**状态：设计定稿，实现待新会话**。
 > 关联：[decision-maker-multi-source-spec.md](decision-maker-multi-source-spec.md)（立项 spec §5 遗留「跨源身份解析」的落地设计）· [decision-maker-p0.4-mainchain-wiring-design.md](decision-maker-p0.4-mainchain-wiring-design.md)（前序 P0.4）· [../product-scope.md](../product-scope.md)（合规红线 🔴 绝不贴错身份）。
 

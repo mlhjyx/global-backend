@@ -1,5 +1,8 @@
 # Discovery Query Lineage Successor Admission Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：计划列出的新建/修改文件 3/3 已在 main（2026-09-21 回读）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 只把 Program B 的唯一 successor/card/writer 作为治理事实合入 current main 并完成独立 G0 readback，不修改任何 Discovery 产品代码。

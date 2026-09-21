@@ -1,5 +1,8 @@
 # AI 获客阶段 0：API 运行身份与 layered health TDD 记录
 
+> 生命周期：`CLOSED`
+> 生命周期依据：阶段 0 运行身份与 layered health 的 TDD 实施记录，对应改动已合入
+
 > 初始基线：`origin/main@a3c5c323e93ca398c12c96f89cf2967218862070`；最终合成树另以 merge commit 纳入 `origin/main@d6184ff8b83c2936ef286c706a2e2d1179aafef2` 的 Copy v15 post-merge 真值。
 >
 > 范围：API bind admission、build attestation、`live/build/ready`、Temporal control-plane probe 与 CI 构建回执。

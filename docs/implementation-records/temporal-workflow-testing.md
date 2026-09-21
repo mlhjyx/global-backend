@@ -1,6 +1,7 @@
 # 工作流编排单测地基（hermetic proxyActivities-mock）
 
-> 状态：**已落地**（pilot = `externalIntentSweepWorkflow`，2026-07-12）。后续 6 个 workflow 复用同一 harness，各一 spec（fast-follow PR）。
+> 生命周期：`GUIDE`
+> 状态说明：**已落地**（pilot = `externalIntentSweepWorkflow`，2026-07-12）。后续 6 个 workflow 复用同一 harness，各一 spec（fast-follow PR）。
 
 ## 背景 / 动机
 
