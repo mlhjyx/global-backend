@@ -1,6 +1,11 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-21 · Dev-dependency alert refresh
+
+- vitest / @vitest/coverage-v8 升至 4.1.11；baseline-browser-mapping 经传递升级至 2.11.25；Prism 模拟服务链上 `postman-collection` 固定依赖的 lodash、uuid 以精确范围 override 升至 4.18.1 / 11.1.1（上游最新版仍固定旧版本）。升级后本地启动模拟服务，`/api/v1/health` 返回 200。
+- `@faker-js/faker` 5.5.3 保留：仅 `@global/contracts` 的 Prism 开发依赖使用，上游精确固定且 10.x API 不兼容；模拟服务只渲染本仓 OpenAPI 示例，`helpers.fake` 模板注入不可达。Go OTel 三项低危告警随 Temporal 服务镜像另行处理。
+- 生产审计仍为零 advisory；漏洞基线重新绑定到新锁文件（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`，新绑定 `FRESH`，见[回执](../evidence/security/20260921-dev-dependency-alert-refresh.json)），`valid_until` 2026-10-03 未延长。Copy fixed-source 回执只重签指纹。
 ## 2026-09-21 · PR decision card retired; standing merge authorization
 
 - 移除 `nontechnical decision card freshness` 必需检查及其 `pull_request_target` 工作流、`pr-decision-card-status/v4` 解析器与测试；PR 模板改为四行不经机器解析的「给产品负责人的说明」。原因：卡片按其自身合同只是未验证声明、授权字段恒为 `NOT_AUTHORIZED`，检查不能验证真实性也不承载授权，却让每次推送都失效（两天 123 次运行、40 次失败、42 次取消）。历史合同见 Git provenance 与[真实验证记录](../ai-development/decision-card-live-validation.md)。
