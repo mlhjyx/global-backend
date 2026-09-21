@@ -56,7 +56,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 
 - 明确、已授权的本地任务持续推进到可审查交付；普通技术选择不重复确认。先查可发现的事实，只暂停依赖未决信息或权限的部分，继续独立工作；同一动作、目标和范围的有效授权跨步骤沿用，变化部分另行确认。只读请求仍不授权修改。
 - 正式架构或安全方向变更保留书面规格、独立 review 和用户明确确认；已批准的同一规格不因切换 Skill 或执行阶段重复审批。Skill 不得新增操作权限、强制无关收尾或取消项目门。
-- 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex；下文“Codex”指当前开发代理，决策卡字段名保持不变）；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
+- 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex；下文“Codex”指当前开发代理）；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
 - `/global/backend` 主工作区只作 main 与现场审计；功能施工使用 `/global/backend/.codex/worktrees/<topic>` 的持久隔离 worktree 与 `codex/<topic>` 分支。
 - 远端 PR 合入后，根 `main` 以 `node scripts/governance-main-worktree-sync.mjs status` 只读检查、以同一脚本的 `apply` 动作受控跟随；后者只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 执行 `merge --ff-only`，必须证明入站路径不触碰本地 tracked/untracked/ignored 现场，并在操作前后保持完整 status 一致。它不代替 PR/CI/review/用户合并授权，也不 stash、reset、clean 或清理分支/worktree。
 - 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。

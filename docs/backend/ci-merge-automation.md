@@ -134,7 +134,7 @@ build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `alwa
 `success`；failure、cancelled 或 skipped 一律显式失败。这个传播合同也受拓扑
 结构合同保护。
 
-`docs:verify`、`memory:test` 与 `decision-card:test` 当初留在 `build · typecheck · test`
+`docs:verify` 与 `memory:test` 当初留在 `build · typecheck · test`
 内，是因为 `governance · traceability · release` 那时尚未被 live ruleset 强制。
 2026-09-21 回读确认它已被强制，消除这部分重复的前置条件已满足；但 `docs:verify`
 是 Copy fixed-source 绑定的根 package 命令，拆分须另开 PR 并同步指纹，不在本次范围。
