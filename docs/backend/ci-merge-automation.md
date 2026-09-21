@@ -11,11 +11,11 @@
 | **L3 用户授权**      | 产品负责人对当次 merge/release 作最终确认      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
 | **L4 合并/发布回执** | 合并执行者与 Release Owner                     | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
 
-四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人把正文的用户授权 lane 固定显示为 `NOT_AUTHORIZED`，不从正文获得授权。`nontechnical decision card freshness` 保留稳定 context 名称，只证明卡片完整性与 exact PR/head 绑定：非 Draft 的完整正向声明可以得到 `CURRENT_UNVERIFIED` 并通过完整性检查；缺失、重复、陈旧、畸形或矛盾卡片必须失败。检查通过不证明上述四层已满足，也不授权合并。执行合并前仍须独立回读实际 CI、review、未解决讨论和用户授权。精确规则及自举边界见[决策卡完整性规范](../governance/docs-verification.md#source-pr-决策卡与合并资格分离)；Runtime/Release/Pilot/GA 的证明要求不变。
+四层分别取证，任一层不能推导另一层。PR 正文的「给产品负责人的说明」只是作者用业务语言写的自述，不经机器解析，也不提供任何一层的证明或授权。执行合并前须独立回读实际 CI、review、未解决讨论和用户授权。见 [Source PR 说明与合并资格分离](../governance/docs-verification.md#source-pr-说明与合并资格分离)；Runtime/Release/Pilot/GA 的证明要求不变。
 
 ## 仓内 required contexts 与外部 ruleset
 
-唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会把每个 context 绑定到声明 workflow 的一个唯一 job，确认 event 存在，并拒绝未在机器清单逐字登记的 job-level `if` 与任何 `continue-on-error`；当前唯一获准条件是 decision-card 对 GitHub default branch 的精确不变量。required job 的 `needs` 只能指向另一个 required job，避免 GitHub 把条件跳过、容错失败或未受保护的前置依赖显示成绿色。验证器同时拒绝放宽 CODEOWNERS/review/history 保护的仓内政策，并扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence、Release Bundle、Gitleaks suppression 配置或 Provider SourceClass manifest。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
+唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会把每个 context 绑定到声明 workflow 的一个唯一 job，确认 event 存在，并拒绝未在机器清单逐字登记的 job-level `if` 与任何 `continue-on-error`；当前唯一获准条件是 `build · typecheck · test` 的 fail-closed 启动条件（见下文“CI 成本与有效保护面的迁移约束”）。required job 的 `needs` 只能指向另一个 required job，避免 GitHub 把条件跳过、容错失败或未受保护的前置依赖显示成绿色。验证器同时拒绝放宽 CODEOWNERS/review/history 保护的仓内政策，并扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence、Release Bundle、Gitleaks suppression 配置或 Provider SourceClass manifest。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
 
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 
@@ -25,6 +25,35 @@
 4. 回读 ruleset/branch protection 与真实 PR checks，保存 URL/ID/时间作为外部配置证据。
 
 若外部配置未完成或无法回读，状态必须写 `EXTERNAL_RULESET_NOT_VERIFIED`，不能因为仓内 JSON 存在就称保护已启用。
+
+### 2026-09-21 只读 ruleset 回读
+
+`protect-main` 仍为 `active`，只作用于默认分支；禁止删除与 non-fast-forward，strict 同步、
+review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相比：
+
+- required checks 已扩为 `renderer visual scope`、`build · typecheck · test`、
+  `contracts · drift · lint · breaking`、`gitleaks 密钥扫描`、`governance · traceability · release`
+  与 `nontechnical decision card freshness`。后者随决策卡移除，须在该变更合入后立即从 ruleset 删去，
+  否则之后的 PR 会一直等待一个不再产生的检查；
+- approving review 数仍为 0、未要求 CODEOWNERS review，RepositoryRole 5 仍有 `always` bypass。
+  仓库只有产品负责人一个 GitHub 账号，PR 均以该账号创建，GitHub 不允许自批，上文第 2 条的批准
+  目标在单账号条件下无法达成；产品负责人据此以 `DEC-AIDEV-004` 把审查职责交给开发代理，目标本身
+  保留为远期要求，不据此下调。
+
+### 2026-09-21 ruleset 变更（产品负责人授权）
+
+#549 合入后，经产品负责人明确授权对 `protect-main` 做了两处修改，并回读确认：
+
+- 移除 `nontechnical decision card freshness`，required checks 现为 5 项：`renderer visual scope`、
+  `build · typecheck · test`、`contracts · drift · lint · breaking`、`gitleaks 密钥扫描`、
+  `governance · traceability · release`；
+- 关闭 strict（`strict_required_status_checks_policy: false`）：PR 绿了即可合，不再要求先并入最新 main。
+  理由：单人加开发代理顺序合并、并行 PR 少，strict 带来的是每次合并后其余 PR 串行重跑（一批 4 个 PR 约多等 45 分钟），
+  而它防范的"各自绿、合起来坏"在此规模下风险低。替代保护：main 每个 push 的 CI 不被取消、完整跑完；
+  开发代理合并前把 PR 与最新 main 的组合在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）；
+  Copy 回执与 changelog 等多 PR 共改的行会产生文本冲突，迫使后合者变基重签。
+
+删除、non-fast-forward、review thread 解决与 push 后撤销旧 review 等其余规则不变。
 
 ### 2026-08-09 只读 ruleset 回读
 
@@ -54,7 +83,7 @@ context 的工作流进入 main，在目标 main 的 canary PR 上观察 exact c
 批准数升为 1、启用 CODEOWNERS、移除常态 bypass；最后重新回读完整 ruleset
 和真实 PR checks。`pull_request_target` 的 decision-card context 名称保持
 `freshness`，只强化内部 integrity 语义，避免 base workflow 尚未合并时出现
-required-context bootstrap 死锁。
+required-context bootstrap 死锁（该 context 已于 2026-09-21 随决策卡一并移除）。
 
 ### 依赖与安全聚合门的启用顺序
 
@@ -81,10 +110,13 @@ npm 官方 endpoint 后返回 36 项漏洞，其中 18 high、0 critical。这�
 Action SHA 升级只能通过官方 Git 仓库的 tag 做只读解析；不以 marketplace 显示文字、moving major tag 或非官方 mirror 作为 revision 真值。仓内当前精确 pin 以 required-context 清单为唯一机器真值。
 
 CI workflow 显式把 `GITHUB_TOKEN` 收敛为 `contents: read`，checkout 不持久化
-凭据。只有确实需要回写 PR comment 的受信 `pull_request_target` decision-card 和
-Gitleaks workflow 保留最小的 `pull-requests: write`。CI 并发键同时包含 event
+凭据。只有确实需要回写 PR comment 的 Gitleaks workflow 保留最小的
+`pull-requests: write`。CI 并发键同时包含 event
 类型，防止 scheduled 全量视觉基线与 main push 验证因为共享 `refs/heads/main`
-而互相取消；同一 PR 的旧 synchronize run 仍会被新 head 取消。
+而互相取消；同一 PR 的旧 synchronize run 会被新 head 取消 —— 前提是 build job
+不用 `always()`（见下文），否则旧 run 无视取消、跑满全程，新 run 只能排队等待。
+main 的 push 按提交分组、互不取消：GitHub 在同一并发组里只保留一个排队中的 run，
+第三个 run 到达时会顶掉排队者，共用一组会让连续合并中间的 main 提交得不到验证（2026-09-21 在 `4ad5f4dc` 上实际发生）。
 
 ### CI 成本与有效保护面的迁移约束
 
@@ -96,21 +128,33 @@ TypeScript 配置
 fail-safe 全部执行；变更路径使用 NUL 分隔并禁用 rename folding（移动受控文件时
 旧路径仍进入判定），diff 自身失败时同样全跑，不能降级成 `false`。无关 PR 只
 跳过这三项重任务，不能跳过 renderer contract tests。
-该拓扑由 `scripts/governance-ci-topology.spec.mjs` 进行确定性结构合同校验。
 
-`build · typecheck · test` 是 live ruleset 已强制的 context，而它依赖的
-`renderer visual scope` 尚未被 live ruleset 强制。为防 upstream failure 让 build
-job 被 GitHub 标为 skipped，build job 固定以 policy 批准的 `always()` 启动，并在
+同一个 scope job 另外输出两项重门的范围，fallback 规则完全相同（schedule、manual、
+无可用 diff base、diff 失败时一律为 `true`）：
+
+- `run_temporal_go`：原生 Temporal reader 服务的 Go 校验（`go mod verify`、race 测试、
+  vet、build，约 14 分钟）。该步骤只 bind-mount `infra/temporal-platform/server`，所以仅在
+  该目录或 CI workflow 变化时执行。
+- `run_oci`：OCI 运行镜像构建与 inspect、Worker fail-closed 冒烟、renderer 只读冒烟。
+  采用**排除清单**：只有全部改动都落在 `docs/`、`.github/`（CI workflow 除外）、
+  代理元数据目录或根目录四份说明文档时才跳过；任何未列名路径都会重建镜像，新增目录
+  不会被静默漏掉。API build、单测、attestation 生成与 renderer contract tests 不受影响，始终执行。
+
+该拓扑由 `scripts/governance-ci-topology.spec.mjs` 进行确定性结构合同校验；其中
+范围判定另有行为测试，在临时 git 仓库里真实执行 scope 脚本并逐项核对三个输出。
+
+`build · typecheck · test` 与它依赖的 `renderer visual scope` 均已被 live ruleset
+强制（2026-09-21 回读）。为防 upstream failure 让 build job 被 GitHub 标为 skipped，
+build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `always()`：两者在依赖
+失败时都照跑，但 `always()` 的 job 无视工作流取消），并在
 任何 checkout 或仓库代码执行前验证 `needs.renderer-visual-scope.result` 必须为
 `success`；failure、cancelled 或 skipped 一律显式失败。这个传播合同也受拓扑
 结构合同保护。
 
-当前 live ruleset 尚未强制 `governance · traceability · release`，所以
-`docs:verify`、`memory:test` 与 `decision-card:test` 暂时仍保留在已受外部 ruleset
-保护的 `build · typecheck · test` 内；不能为了减少重复执行而提前移走。只有在
-governance context 经 PR/main canary 稳定、被外部 ruleset 实际设为 required 并
-完成回读后，才可另开 PR 消除这部分重复。仓内 required-context 清单本身不能
-证明这个外部迁移已完成。
+`docs:verify` 与 `memory:test` 当初留在 `build · typecheck · test`
+内，是因为 `governance · traceability · release` 那时尚未被 live ruleset 强制。
+2026-09-21 回读确认它已被强制，消除这部分重复的前置条件已满足；但 `docs:verify`
+是 Copy fixed-source 绑定的根 package 命令，拆分须另开 PR 并同步指纹，不在本次范围。
 
 ## Release Bundle 的外部 provenance
 
@@ -120,8 +164,8 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 
 1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `/global/backend/.codex/worktrees/<topic>` 与 `codex/<topic>`，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
-3. 开 PR 后等待 required-context 清单中的 CI、Security、Governance 与 decision-card freshness/integrity 语义门，触发独立 review，逐条处置 inline comment 并 resolve。
-4. 向用户报告改动、风险、验证和未完成项；只在用户对当次 PR 明确授权后合并。
+3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
+4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。
 5. 合并后在 `/global/backend` 运行 `node scripts/governance-main-worktree-sync.mjs apply`，以 fetch 后解析出的 `origin/main` 精确 commit 做纯 fast-forward；若远端 PR/分支由另一会话处理，它只交接已合入的精确 SHA，本地会话仍独立 fetch 和验证，不从通知推导 merge 授权。同步脚本遇到 HOLD 时保留现场并单独审计，不 stash/reset/clean。功能分支与本地 worktree 默认保留用于复查。删除仅是可选空间清理，须满足 `CONTRIBUTING.md` 的提交已入主线、工作区干净且未跟踪文件归属已核清条件，并取得用户明确授权。
 
 ## 风险分级（决定验证深度，不授予自动合并）

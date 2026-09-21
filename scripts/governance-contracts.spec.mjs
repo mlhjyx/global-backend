@@ -10,13 +10,13 @@ import "./governance-main-worktree-sync.spec.mjs";
 import "./governance-codeql-action-pin.spec.mjs";
 import "./governance-oasdiff-action-pin.spec.mjs";
 import "./copy-fixed-source-impact.spec.mjs";
+import "./copy-fixed-source-impact-resign.spec.mjs";
 import "./supply-chain-gates.spec.mjs";
 import "./runtime-deployment-contract.spec.mjs";
 import "./ghcr-runtime-publication.spec.mjs";
 import "./docker-image-config-path.spec.mjs";
 import "./temporal-platform-infrastructure-contract.spec.mjs";
 import "./temporal-native-publication.spec.mjs";
-import "./pr-decision-card.spec.mjs";
 import "./platform-egress-fence-migration.spec.mjs";
 
 import {

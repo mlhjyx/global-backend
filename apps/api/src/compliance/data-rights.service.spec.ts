@@ -1,7 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DataRightsService } from './data-rights.service';
-import { JURISDICTION_POLICY_SEED } from './jurisdiction-policy.seed';
+import { JURISDICTION_POLICY_SEED, seedJurisdictionPolicy } from './jurisdiction-policy.seed';
 import { DataRightsContext } from './data-rights.types';
+
+// onModuleInit 用自建的 owner PrismaClient 播种（DATABASE_URL）。单测必须密闭：
+// 不 mock 的话，本机 Prisma 自动加载 packages/db/.env 后会真连库 ——
+// 库在时悄悄写 global_dev，库不在时等 Prisma 连接超时，把本用例拖过 5 秒上限。
+vi.mock('./jurisdiction-policy.seed', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./jurisdiction-policy.seed')>()),
+  seedJurisdictionPolicy: vi.fn(async () => undefined),
+}));
 
 interface LoggedRow {
   [k: string]: unknown;
@@ -35,6 +43,10 @@ function svc(fake: FakePrisma): DataRightsService {
 const WS = '00000000-0000-0000-0000-000000000001';
 
 describe('DataRightsService', () => {
+  beforeEach(() => {
+    vi.mocked(seedJurisdictionPolicy).mockClear();
+  });
+
   it('loadRules 映射 DB 行到引擎规则', async () => {
     const fake = new FakePrisma();
     const s = svc(fake);
@@ -45,6 +57,7 @@ describe('DataRightsService', () => {
 
   it('onModuleInit 在数据库不可达时启动但不就绪：规则为空、fail-closed、不抛错', async () => {
     const fake = new FakePrisma();
+    vi.mocked(seedJurisdictionPolicy).mockRejectedValueOnce(new Error("Can't reach database server"));
     fake.jurisdictionPolicy.findMany = async () => {
       throw new Error("Can't reach database server");
     };
@@ -52,7 +65,16 @@ describe('DataRightsService', () => {
     // 缺 managed dependency 的合同是「进程可启动做诊断，readiness 关闭」，
     // 不允许 onModuleInit 抛错杀死进程（OCI 单制品运行时 smoke 守门）。
     await expect(s.onModuleInit()).resolves.toBeUndefined();
+    expect(seedJurisdictionPolicy).toHaveBeenCalledTimes(1);
     expect(s.ruleCount()).toBe(0);
+  });
+
+  it('onModuleInit 播种后装载当前版本规则', async () => {
+    const fake = new FakePrisma();
+    const s = svc(fake);
+    await s.onModuleInit();
+    expect(seedJurisdictionPolicy).toHaveBeenCalledTimes(1);
+    expect(s.ruleCount()).toBe(JURISDICTION_POLICY_SEED.length);
   });
 
   it('evaluateAndLog 写 policy_decision_log 并返回判定', async () => {

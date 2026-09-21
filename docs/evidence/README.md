@@ -9,6 +9,12 @@
 
 当前证据计数、有效窗口和 Release Bundle 接纳状态统一见[当前状态](../status/current.md)，不在本索引维护第二份实时计数。历史观察见 [changelog](../roadmap/changelog.md)；机器真值由 RuntimeEvidence、Release Bundle 文件及 verifier 给出。索引、文件存在或结构校验均不延长证据窗口，也不构成 Pilot/GA 晋级。
 
+2026-09-20 的[依赖队列、根同步与历史处置记录](dependency-queue-closeout-20260920.md)提供来源提交、验证范围、原 PR provenance 与回执位置；它不是 RuntimeEvidence，也不授予历史分支/worktree 删除或运行发布权限。
+
+[工具链生产审计重审](security/20260920-tooling-baseline-refresh.json)保留同一审计在旧绑定下的HOLD与新精确绑定的FRESH；不改写[迁移任务的先前回执](security/20260920-baseline-refresh.json)，也不表示全部依赖告警或运行发布完成。
+
+[2026-09-21 开发依赖告警刷新](security/20260921-dev-dependency-alert-refresh.json)：vitest 补丁、Prism 链的 lodash/uuid 精确 override 与 baseline-browser-mapping 传递升级后，同一生产审计（零 advisory）在旧锁文件绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长，faker 5.5.3（仅 Prism 开发依赖）仍开放。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |

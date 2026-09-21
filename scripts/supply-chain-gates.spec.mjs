@@ -9,7 +9,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-09-20T07:16:35.231Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-09-21T11:58:48.648Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -896,7 +896,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
+    expectedBootstrapBase: "a57d46ca49586a6655d969606c1dda524966e762",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -909,13 +909,13 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
+    "a57d46ca49586a6655d969606c1dda524966e762",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
+    expectedBootstrapBase: "a57d46ca49586a6655d969606c1dda524966e762",
     expectedSourceLockfileDigest:
-      "sha256:17ee3a1431d9b46e7c0b38592bd0984bef098e74a0892afe6c1bfe08ee853e72",
+      "sha256:3f96637abb82e16c0f78b555d91d38ee8bb7e5eeb98250b8116586c6de7ac9e7",
   });
   assert.equal(clear.ok, true);
   const vulnerable = evaluateProductionAudit(
@@ -929,7 +929,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "03e8ada02010052bf4220e1063d2c5c987bf1f8a",
+      expectedBootstrapBase: "a57d46ca49586a6655d969606c1dda524966e762",
     },
   );
   assert.equal(vulnerable.ok, false);
