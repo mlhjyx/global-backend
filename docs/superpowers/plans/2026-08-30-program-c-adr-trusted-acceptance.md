@@ -1,5 +1,8 @@
 # Program C ADR-027 / ADR-026 Trusted Acceptance Implementation Plan
 
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：正文自述 SUPERSEDED_FOR_ADR_ACCEPTANCE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Convert the user's exact documentary Product decisions for Program C Suppression and Retention into independently verified, exact-head Product/Privacy/Legal/CODEOWNER/QA/Security/machine evidence, immutable stage-specific merge grants, append-only merge consumptions, attested receipts, and two-stage ADR acceptance without closing implementation, admission-runtime, replay, closure, Release, or Pilot gates by implication.

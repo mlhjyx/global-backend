@@ -1,5 +1,8 @@
 # Site Builder paid-model settlement preflight
 
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：正文自述 2026-08-16 被 ADR-024 取代
+
 Status: `SUPERSEDED`
 
 Version: `site-builder-model-settlement-attestation/2026-07-29-v2`

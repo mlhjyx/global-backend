@@ -52,6 +52,7 @@ pnpm docs:verify
 
 机器政策明确区分三类文件：
 
+- **生命周期必填目录**（`lifecycleRequired`）：`docs/backend/`、`docs/implementation-records/`、`docs/research/`、`docs/roadmap/`、`docs/security/`、`docs/site-builder/`、`docs/status/`、`docs/superpowers/plans/` 下不属于受控、权威当前、历史出处或不可变证据的文档，前 16 行必须有 `> 生命周期：` 行，值取自同一词表（如计划落地后 `CLOSED`、调研与时点报告 `REFERENCE_ONLY`、runbook `GUIDE`、被取代 `SUPERSEDED`）。判断依据另写一行 `> 生命周期依据：`，该行不被解析。缺失为 `LIFECYCLE_MISSING`，非法值为 `STATUS_UNKNOWN`。目的只有一个：读者（包括开发代理）不会把已完成的计划或过时的时点报告当成现行合同。
 - **权威当前页**：承载当下合同与阶段事实，改动能力时须按阶段回写清单人工复核；机器校验结构、链接、ID、事实来源元数据，并要求生命周期**恰为** `CURRENT`。
 - **历史 / provenance 页**：保留当时决策、实施记录与 handoff；机器要求已登记路径的前言含显著历史 banner、结构和链接，不为消除 warning 改写正文。
 - **不可改写 evidence**：证据原文只作路径、结构、链接和敏感模式校验；不以当前文档格式或日期要求重写。

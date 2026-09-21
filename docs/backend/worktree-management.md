@@ -1,5 +1,8 @@
 # Worktree 管理 runbook
 
+> 生命周期：`GUIDE`
+> 生命周期依据：worktree 布局与 governor 同步的现行规程
+
 > 适用于 Ubuntu 当前开发环境。目标是让 `main`、正式施工、历史取证与工具临时状态在路径和生命周期上相互隔离。
 
 ## 1. 固定布局与不变量

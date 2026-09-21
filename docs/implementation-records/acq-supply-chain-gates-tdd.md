@@ -1,5 +1,8 @@
 # Supply-chain canary 与 production audit ratchet TDD 记录
 
+> 生命周期：`CLOSED`
+> 生命周期依据：供应链 canary 与审计 ratchet 的 TDD 实施记录；现行合同见 docs/security/README.md
+
 > 基线：`origin/main@fcb61e3060dd3289fec93bca11d02584f8080791`
 >
 > 范围：dependency review、production-only audit ratchet、机器可读遗留漏洞基线、Dependabot 分域、CodeQL canary。

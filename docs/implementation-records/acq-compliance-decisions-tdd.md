@@ -1,5 +1,8 @@
 # 获客 Suppression / DataRights 收口 TDD 记录
 
+> 生命周期：`CLOSED`
+> 生命周期依据：Suppression / DataRights 收口的 TDD 实施记录，对应改动已合入
+
 > 日期：2026-08-10
 > 范围：append-only suppression decision、DataRights DENY 审计、类型化 canonicalizer、动作终极闸、逐物理外部调用授权、投影物化线性化、OpenAPI 错误合同。
 > 边界：本记录只证明 source/deterministic/隔离测试结果；没有部署、服务重启、真实试点数据、付费调用、fresh RuntimeEvidence 或 Release Bundle。真实试点继续 `NO-GO`。

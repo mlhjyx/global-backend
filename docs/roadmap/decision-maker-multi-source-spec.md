@@ -1,5 +1,8 @@
 # 决策人多途径发现与联系方式补全 —— 立项 spec（选项 B）
 
+> 生命周期：`REFERENCE_ONLY`
+> 生命周期依据：选项 B 立项 spec；其分期（P0.4 / Companies House / INPI RNE 等）已分别落地，剩余范围以 docs/status/current.md 为准
+
 > 2026-07-10 立项（DRAFT，待评审）。回应真实痛点：官网这一途径能稳定拿决策人**姓名+职务**，但**本人可用邮箱/电话**大多拿不到（官网很少公示到个人）。目标=从「谁是决策人」到「决策人本人可用、经验证、合规可存的联系方式」。
 > 关联：[../product-scope.md](../product-scope.md)（边界与合规红线）· [../adr/registry.md](../adr/registry.md) ADR-010（存储侧合规）· [../research/buyer-intelligence-v3.md](../research/buyer-intelligence-v3.md) §B（原始设计）· [release-plan.md](release-plan.md)。
 > 已落地基建（复用，不重造）：`decision-maker.provider`（官网抽具名人）· `smtp_self`（SMTP RCPT 验证）· `name-match`（实体解析）· `field_evidence`（来源/许可/时间）· `ToolBroker`（出网闸门）· `source_policy`（用途门）。

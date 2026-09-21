@@ -3,6 +3,9 @@
 
 # TED v3 招投标 Provider — 落地规格（build-ready）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：TED v3 provider 落地规格；已实现（apps/api/src/discovery/providers/ted.provider.ts）
+
 > 2026-07-08 定。给**下一个开工会话**的权威实施规格。API 事实**均为当日活体实测 + 独立对抗复验**(4 agent research→verify),用哪个数字/字段直接照抄本文。
 > 上游：[buyer-intelligence-v3.md](../research/buyer-intelligence-v3.md)（P1 需求证据源，§10.6 排 TED 第一）· [positioning-and-acquisition-backlog.md](../research/positioning-and-acquisition-backlog.md) §5 #2 · [AGENTS.md](../../AGENTS.md) §6。
 > 硬规矩：真实数据、无 sandbox（§5）；多租户、**绝不硬编码行业/国家**（§3）；合规红线（§5）。

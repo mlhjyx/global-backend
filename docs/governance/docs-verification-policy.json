@@ -32,6 +32,18 @@
     ],
     "documentIdExceptions": ["docs/templates/前端技术方案模板.md"]
   },
+  "lifecycleRequired": {
+    "prefixes": [
+      "docs/backend/",
+      "docs/implementation-records/",
+      "docs/research/",
+      "docs/roadmap/",
+      "docs/security/",
+      "docs/site-builder/",
+      "docs/status/",
+      "docs/superpowers/plans/"
+    ]
+  },
   "authoritativeCurrent": {
     "exact": [
       "docs/product-scope.md",
@@ -94,6 +106,7 @@
     "GATE_4_AND_5_APPROVED",
     "GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS",
     "GUIDE",
+    "IMPLEMENTATION_RECORD",
     "PHASE_8_READY_FOR_GATE_8_REVIEW",
     "OBSERVING",
     "READY_FOR_GATE_1_REVIEW",
@@ -104,6 +117,7 @@
     "READY_FOR_RELEASE_REVIEW",
     "READY_FOR_REVIEW_WITH_POST_BASELINE_DELTA",
     "REFERENCE_ONLY",
+    "RETIRED",
     "ROLLED_BACK",
     "SUPERSEDED",
     "TEMPLATE"

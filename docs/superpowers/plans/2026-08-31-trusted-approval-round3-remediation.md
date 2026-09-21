@@ -1,5 +1,8 @@
 # Trusted Approval Current-Head Review Round 3 Remediation Implementation Plan
 
+> 生命周期：`CLOSED`
+> 生命周期依据：计划列出的新建/修改文件 20/20 已在 main（2026-09-21 回读）
+
 > **For Codex:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
 **Goal:** Resolve the four current-head Hosted Review findings on PR #430 without weakening approval, provenance, release, or external-action gates, and produce a locally verified Round 3 candidate that stops before push.

@@ -1,5 +1,8 @@
 # 部署与托管设计（草稿，待用户确认）
 
+> 生命周期：`DRAFT`
+> 生命周期依据：标题自述「草稿，待用户确认」
+
 > 落实 [02-architecture.md](02-architecture.md) D10（海外部署）与 D7（预览域名）。2026-07-14 web 调研支撑。
 > Reviewed against 12 v3.2（2026-07-16 回写：slug 覆盖 → 不可变 Release、加域名 ownership/tombstone/原子指针、R1-min 构建隔离）。承重决策见 **ADR-013**（不可变 Release：内容寻址、可回放、可回滚，异步失败绝不删除用户现有 Site）。
 > **里程碑分层**：**M1 = 本地预览**（R1-safety 临时文件/子进程 env 与 Crawl4AI/robots 出站闸已完成；接着做 R1-min 本地原子指针，零域名依赖）；**M2 = 发布/域名**（不可变 Release 构建产物 + Caddy 边缘 + 自定义域 + 询盘）。素材/KB 对象当前已使用 MinIO，不能与尚未对象化的 Release artifact 混为一谈。本文 as-built 与 target 分栏，绝不把目标态写成已落地。

@@ -3,6 +3,9 @@
 
 # 定位、现阶段范围与获客 Backlog（权威梳理）
 
+> 生命周期：`REFERENCE_ONLY`
+> 生命周期依据：2026-08 的定位与获客 backlog 梳理；现行范围与顺序以 docs/product-scope.md、docs/status/current.md、docs/roadmap/release-plan.md 为准
+
 > 2026-07-08 定。给团队和未来 Claude 会话的**唯一权威「我们是谁、现在做什么、还剩什么、谁的活」**。（历史原文；现已被顶部所列权威层取代。）
 > 上游研究：[buyer-intelligence-v3.md](buyer-intelligence-v3.md)（10 支柱深研）· [roadmap/changelog.md](../roadmap/changelog.md)（历史进度）。PRD：`docs/*.docx`（v2.0 母本 / v3.0 评审稿）。
 

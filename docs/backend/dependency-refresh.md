@@ -1,5 +1,8 @@
 # 依赖刷新 runbook
 
+> 生命周期：`GUIDE`
+> 生命周期依据：依赖刷新 runbook（#550 起）
+
 > 适用：每月一次的批量依赖升级、Dependabot 安全更新 PR、生产漏洞基线到期前的续期。安全合同本身以 [供应链安全门](../security/README.md) 为准，本文只写操作顺序。
 
 ## 1. 为什么不让 Dependabot 自动开版本更新 PR

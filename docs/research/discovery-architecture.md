@@ -2,6 +2,9 @@
 
 # 多源发现系统架构：工具契约 · Agent 编排 · MCP
 
+> 生命周期：`REFERENCE_ONLY`
+> 生命周期依据：多源发现架构调研，作为输入保留；现行架构见 docs/architecture/current.md
+
 > 设计依据：PRD 第 9 部分（9.2 AI 分层 / 9.4 Task Contract / 9.8 Durable Workflow / 9.11 无超级 Agent / 9.13 Tool Registry）+ 10.19（禁止直接暴露 OSS 未认证 API / 外部队列替代核心 Workflow）。
 > 目标：把发现从「只挖官网单源」扩展到「多源、多工具、可编排、可选 MCP 暴露」，且**不引入超级 Agent**。
 

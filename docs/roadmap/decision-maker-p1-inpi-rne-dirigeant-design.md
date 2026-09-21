@@ -1,5 +1,8 @@
 # 待办 3 · 第三个身份源 = INPI RNE dirigeants（法国注册处 · 经开放政务网关）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：法国 INPI RNE 身份源设计；已实现（apps/api/src/discovery/providers/inpi-rne.provider.ts）
+
 > 设计定稿 2026-07-11 · 分支 `feat/fr-dirigeants` · 承接待办 3 首源（UK Companies House，PR #58/#59）+ 第二源（EPO OPS 发明人，PR #61）
 > 权威决策见 `docs/adr/registry.md`；立项 spec 见 `decision-maker-multi-source-spec.md` §5。本文件只记本期设计 + 合规 + 边界。
 

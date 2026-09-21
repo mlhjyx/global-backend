@@ -1,5 +1,8 @@
 # Compose 项目名迁移（`global-backend` → `global`）
 
+> 生命周期：`GUIDE`
+> 生命周期依据：执行 `down -v` 或删改固定 global-* 容器/卷之前的必读 runbook（AGENTS.md §3 引用）
+
 > 目的：防止从旧 Mac/WSL 或旧 checkout 启动 Compose 时，因项目名变化撞固定容器名、切到空卷或误删数据库。当前 Ubuntu 实机已核验使用 `project=global` 与 `global_pgdata`；本 runbook 只在发现旧 `global-backend` 资源时使用。
 
 ## 1. 只读预检

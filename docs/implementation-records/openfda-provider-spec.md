@@ -3,6 +3,9 @@
 
 # openFDA 认证/注册库 Provider — 落地规格（build-ready）
 
+> 生命周期：`CLOSED`
+> 生命周期依据：openFDA provider 落地规格；已实现（apps/api/src/discovery/providers/openfda.provider.ts）
+
 > 2026-07-08 定。给**下一个开工会话**的权威实施规格。API 事实**均为当日活体实测**(curl 真打 `api.fda.gov`)；映射+合规经研究 agent 附实链核实。用哪个数字/字段直接照抄本文。
 > **与 [ted-provider-spec.md](ted-provider-spec.md) 同构**——集成接缝(§4)完全复用 TED 那份(同 `public_intelligence` discovery/enrich 模式)，本文只写 openFDA 特有的 API 契约 / ICP→产品码映射 / 合规 / 端点接缝映射。
 > 上游：[buyer-intelligence-v3.md](../research/buyer-intelligence-v3.md)（P1「认证注册库」）· [positioning-and-acquisition-backlog.md](../research/positioning-and-acquisition-backlog.md) §5 #2。
