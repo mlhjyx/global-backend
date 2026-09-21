@@ -1,6 +1,6 @@
 # PR 决策卡真实验证记录
 
-> `SUPERSEDED`：下列 V2/V5 是历史 v3 合同的验证预期，不再承担当前操作规范。v4 的唯一现行合同见[Source PR 决策卡完整性规范](../governance/docs-verification.md#source-pr-决策卡与合并资格分离)：有效正向声明可通过完整性检查，但从不获得合并或晋级授权。历史矩阵及当时的 `NOT_RUN` 事实保留，不伪造为 v4 已完成的 GitHub 运营验证。
+> `SUPERSEDED`（2026-09-21）：`PR decision card` 工作流、解析器与 `nontechnical decision card freshness` 必需检查均已移除，PR 正文改为不经机器解析的「给产品负责人的说明」，见 [Source PR 说明与合并资格分离](../governance/docs-verification.md#source-pr-说明与合并资格分离)。本文只作历史记录：下列 V2/V5 是历史 v3 合同的验证预期，v4 合同见 git 历史。历史矩阵及当时的 `NOT_RUN` 事实保留，不伪造为 v4 已完成的 GitHub 运营验证。
 
 > 文档 ID：`GUIDE-AIDEV-005`
 > 层级：`L5 / Guide`

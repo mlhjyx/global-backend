@@ -62,7 +62,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。
 - 保留用户删除、未跟踪文件、脏工作区、独有提交和历史证据。不得使用 `git reset --hard`、`git clean -fdx` 或未经明确授权的递归删除。
 - 网络工具默认只读。push、开/改 PR、发消息、发布、部署、合并、由 Codex/operator 发起的付费调用或 evaluation、远程任务、第三方配置与凭据变更都需要用户对该动作的明确授权。正常产品请求携带有效 SaaS 签名 Budget Grant 时，该 Grant 是本次 BuildRun 的产品费用授权，不再要求聊天式逐次批准；它不授权开发者额外探测、评测或扩大额度。
-- 技术完成、机器检查、独立 review、产品决策卡、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。
+- 技术完成、机器检查、独立 review、PR 里给产品负责人的说明、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。
 
 ## 6. 实现与安全门
 

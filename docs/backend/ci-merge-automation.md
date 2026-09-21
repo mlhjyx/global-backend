@@ -11,7 +11,7 @@
 | **L3 用户授权**      | 产品负责人对当次 merge/release 作最终确认      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
 | **L4 合并/发布回执** | 合并执行者与 Release Owner                     | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
 
-四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人把正文的用户授权 lane 固定显示为 `NOT_AUTHORIZED`，不从正文获得授权。`nontechnical decision card freshness` 保留稳定 context 名称，只证明卡片完整性与 exact PR/head 绑定：非 Draft 的完整正向声明可以得到 `CURRENT_UNVERIFIED` 并通过完整性检查；缺失、重复、陈旧、畸形或矛盾卡片必须失败。检查通过不证明上述四层已满足，也不授权合并。执行合并前仍须独立回读实际 CI、review、未解决讨论和用户授权。精确规则及自举边界见[决策卡完整性规范](../governance/docs-verification.md#source-pr-决策卡与合并资格分离)；Runtime/Release/Pilot/GA 的证明要求不变。
+四层分别取证，任一层不能推导另一层。PR 正文的「给产品负责人的说明」只是作者用业务语言写的自述，不经机器解析，也不提供任何一层的证明或授权。执行合并前须独立回读实际 CI、review、未解决讨论和用户授权。见 [Source PR 说明与合并资格分离](../governance/docs-verification.md#source-pr-说明与合并资格分离)；Runtime/Release/Pilot/GA 的证明要求不变。
 
 ## 仓内 required contexts 与外部 ruleset
 
@@ -81,8 +81,8 @@ npm 官方 endpoint 后返回 36 项漏洞，其中 18 high、0 critical。这�
 Action SHA 升级只能通过官方 Git 仓库的 tag 做只读解析；不以 marketplace 显示文字、moving major tag 或非官方 mirror 作为 revision 真值。仓内当前精确 pin 以 required-context 清单为唯一机器真值。
 
 CI workflow 显式把 `GITHUB_TOKEN` 收敛为 `contents: read`，checkout 不持久化
-凭据。只有确实需要回写 PR comment 的受信 `pull_request_target` decision-card 和
-Gitleaks workflow 保留最小的 `pull-requests: write`。CI 并发键同时包含 event
+凭据。只有确实需要回写 PR comment 的 Gitleaks workflow 保留最小的
+`pull-requests: write`。CI 并发键同时包含 event
 类型，防止 scheduled 全量视觉基线与 main push 验证因为共享 `refs/heads/main`
 而互相取消；同一 PR 的旧 synchronize run 会被新 head 取消 —— 前提是 build job
 不用 `always()`（见下文），否则旧 run 无视取消、跑满全程，新 run 只能排队等待。
@@ -133,7 +133,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 
 1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `/global/backend/.codex/worktrees/<topic>` 与 `codex/<topic>`，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
-3. 开 PR 后等待 required-context 清单中的 CI、Security、Governance 与 decision-card freshness/integrity 语义门，触发独立 review，逐条处置 inline comment 并 resolve。
+3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；只在用户对当次 PR 明确授权后合并。
 5. 合并后在 `/global/backend` 运行 `node scripts/governance-main-worktree-sync.mjs apply`，以 fetch 后解析出的 `origin/main` 精确 commit 做纯 fast-forward；若远端 PR/分支由另一会话处理，它只交接已合入的精确 SHA，本地会话仍独立 fetch 和验证，不从通知推导 merge 授权。同步脚本遇到 HOLD 时保留现场并单独审计，不 stash/reset/clean。功能分支与本地 worktree 默认保留用于复查。删除仅是可选空间清理，须满足 `CONTRIBUTING.md` 的提交已入主线、工作区干净且未跟踪文件归属已核清条件，并取得用户明确授权。
 

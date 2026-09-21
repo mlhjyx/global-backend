@@ -23,28 +23,14 @@
 - [ ] **真实数据实测**（provider/采集/富集类改动必填；无 sandbox，见 AGENTS.md §5）—— 附命令与结果：
 - [ ] CI 绿
 
-## 非技术合并决策卡
+## 给产品负责人的说明
 
-> 进入合并候选时由 Codex 完成。本卡是业务解释和审查证据，**不是合并授权**；审查代理只能给建议，不能代替产品负责人或本任务的明确合并授权。
+<!-- 用业务语言写，不写实现细节；每项一两句。这是作者自述，不是机器检查，也不构成合并授权 -->
 
-> 非 Draft 必须有且只有一张二级 ATX 标题卡片，以下字段每项恰好一次并保持单行，不添加未知字段或续行。检查通过仅表示完整且绑定当前 PR/head；真实 CI、review 和用户授权仍须分别回读。时间采用 UTC ISO 8601，不要求按日续签；head 改变或正文编辑会重新检查。
-
-> 以下 14 个保留字段仅放在本区段，不在其他区段重复同名列表字段；模板示例请使用 fenced code。
-
-- 决策卡仓库：`<owner/repository>`
-- 决策卡 PR：`#<number>`
-- 决策卡 head：`<40-char SHA>`
-- 决策卡生成时间：`<YYYY-MM-DDTHH:mm:ss.sssZ>`
-- 关联业务结果、Capability / Scenario / Page / Object：`<由 Codex 填写>`
-- 用户会实际得到什么：`<由 Codex 填写>`
-- 明确没有改变什么：`<由 Codex 填写>`
-- 成功、失败与恢复路径：`<由 Codex 填写>`
-- 数据、权限、迁移、外部合同或生产影响：`<由 Codex 填写>`
-- 技术门：`UNKNOWN`（进入合并候选后可陈述 `PASS / HOLD` 并附 commit、命令和 CI URL；正文仍是未验证声明）
-- 独立审查代理：`NEED_USER_DECISION`（审查后可陈述 `RECOMMEND_MERGE / RECOMMEND_HOLD` 并附 review URL；正文仍是未验证声明）
-- 最大剩余风险、未知项与回退方式：`<由 Codex 填写>`
-- 产品负责人授权：`AWAITING_PRODUCT_OWNER`（仅展示；即使粘贴授权语句，机器人仍标 `NOT_AUTHORIZED`，真实授权必须有独立 provenance）：
-- Codex 建议：`NEED_USER_DECISION`（收口后改为 `MERGE / HOLD`）
+- 你会得到什么：
+- 明确没有改变什么：
+- 风险与回退：
+- 建议：合并 / 暂缓 / 需要你决定 —— 理由：
 
 ## 合规（涉数据源 / 联系人 / 抓取时必填）
 
@@ -57,4 +43,3 @@
 
 -
 
-- [ ] Codex 实际参与了本 PR 的开发/复核（仅在真实发生时勾选，不伪造 provenance）

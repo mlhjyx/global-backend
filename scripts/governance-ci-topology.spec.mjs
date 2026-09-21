@@ -356,7 +356,6 @@ test("the topology cleanup does not rename or expand required contexts", async (
     "contracts · drift · lint · breaking",
     "gitleaks 密钥扫描",
     "governance · traceability · release",
-    "nontechnical decision card freshness",
   ]);
 });
 
