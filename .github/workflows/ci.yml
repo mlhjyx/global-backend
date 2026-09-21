@@ -1,8 +1,13 @@
 name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
-# 55 型三断点视觉回归仅在渲染输出、其消费的契约或本工作流变更时运行；
-# 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终跑全量视觉门，避免路径过滤遗漏或运行器漂移长期未被发现。
+# 三类重门按改动路径触发（同一个 scope job 计算，拿不到可用 diff 时一律全跑）：
+#   · 55 型三断点视觉回归：渲染输出、其消费的契约或本工作流变更时
+#   · 原生 Temporal reader 服务（Go race，约 14 分钟）：infra/temporal-platform/server 或本工作流变更时
+#   · OCI 运行镜像构建与三项镜像冒烟：除纯文档与代理元数据外的任何改动
+# 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终全跑，避免路径过滤遗漏或运行器漂移长期未被发现。
+# build-test 用 `!cancelled()` 而非 `always()`：两者都在依赖失败时照跑以 fail-closed，但 `always()` 的 job
+# 无视取消 —— 同一 PR 的新推送无法取消旧 run，新 run 要排在完整的旧 run（27–40 分钟）之后。
 # 绿了才合。普通API测试仍是纯单测；运行身份权限另使用一次性 PostgreSQL 验证真实数据库授权。
 # 真源/provider调用仍走受控验证（见 AGENTS.md §5），不进入CI。
 # contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
@@ -32,6 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_visual: ${{ steps.scope.outputs.run_visual }}
+      run_temporal_go: ${{ steps.scope.outputs.run_temporal_go }}
+      run_oci: ${{ steps.scope.outputs.run_oci }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -39,7 +46,7 @@ jobs:
           persist-credentials: false
 
       - id: scope
-        name: Detect renderer visual-regression inputs
+        name: Detect heavy-gate inputs（renderer visual · Temporal server · OCI runtime）
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -54,15 +61,22 @@ jobs:
             [[ -z "$BASE_SHA" || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]] ||
             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             echo "run_visual=true" >> "$GITHUB_OUTPUT"
+            echo "run_temporal_go=true" >> "$GITHUB_OUTPUT"
+            echo "run_oci=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           scope_paths="$RUNNER_TEMP/renderer-visual-scope-paths.txt"
           if ! git diff --no-renames --name-only -z "${BASE_SHA}...${HEAD_SHA}" > "$scope_paths"; then
             echo "run_visual=true" >> "$GITHUB_OUTPUT"
+            echo "run_temporal_go=true" >> "$GITHUB_OUTPUT"
+            echo "run_oci=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          run_visual=false
+          run_temporal_go=false
+          run_oci=false
           while IFS= read -r -d '' path; do
             case "$path" in
               apps/site-renderer/* | \
@@ -73,18 +87,43 @@ jobs:
               tsconfig.base.json | \
               package.json | pnpm-lock.yaml | pnpm-workspace.yaml | \
               .github/workflows/ci.yml)
-                echo "run_visual=true" >> "$GITHUB_OUTPUT"
-                exit 0
+                run_visual=true
+                ;;
+            esac
+            # The Go step bind-mounts only infra/temporal-platform/server.
+            case "$path" in
+              infra/temporal-platform/server/* | \
+              .github/workflows/ci.yml)
+                run_temporal_go=true
+                ;;
+            esac
+            # Exclusion list, not inclusion: any path not named here rebuilds
+            # the image, so a new directory can never silently skip it.
+            case "$path" in
+              .github/workflows/ci.yml)
+                run_oci=true
+                ;;
+              docs/* | .github/* | .claude/* | .agents/* | .codex/* | .superpowers/* | \
+              README.md | AGENTS.md | CLAUDE.md | CONTRIBUTING.md)
+                ;;
+              *)
+                run_oci=true
                 ;;
             esac
           done < "$scope_paths"
 
-          echo "run_visual=false" >> "$GITHUB_OUTPUT"
+          if [[ "$run_visual" == true ]]; then
+            echo "run_visual=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_visual=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "run_temporal_go=${run_temporal_go}" >> "$GITHUB_OUTPUT"
+          echo "run_oci=${run_oci}" >> "$GITHUB_OUTPUT"
 
   build-test:
     name: build · typecheck · test
     needs: renderer-visual-scope
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -146,6 +185,7 @@ jobs:
         run: pnpm --filter @global/db generate
 
       - name: Native Temporal reader server（verified modules · offline race · build）
+        if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -322,6 +362,7 @@ jobs:
           pnpm exec tsx apps/api/scripts/generate-build-attestation.mts
 
       - name: Build and inspect immutable OCI runtime
+        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
         shell: bash
         env:
           BUILD_SHA: ${{ github.sha }}
@@ -367,6 +408,7 @@ jobs:
                 'const fs=require("node:fs");const a=JSON.parse(fs.readFileSync("/app/apps/api/dist/build-attestation.json","utf8"));if(a.build_sha!==process.env.EXPECTED_BUILD_SHA)process.exit(1)'
 
       - name: Worker fail-closed runtime smoke
+        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
         shell: bash
         env:
           OCI_IMAGE: global-backend-ci:${{ github.sha }}
@@ -403,6 +445,7 @@ jobs:
           fi
 
       - name: Renderer read-only OCI smoke
+        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
         shell: bash
         env:
           OCI_IMAGE: global-backend-ci:${{ github.sha }}

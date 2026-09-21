@@ -18,7 +18,7 @@
       "name": "build · typecheck · test",
       "workflow": ".github/workflows/ci.yml",
       "event": "pull_request",
-      "allowed_job_if": "always()"
+      "allowed_job_if": "${{ !cancelled() }}"
     },
     {
       "name": "contracts · drift · lint · breaking",
