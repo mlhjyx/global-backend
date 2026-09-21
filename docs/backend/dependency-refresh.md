@@ -24,6 +24,8 @@ pnpm worktree:new deps-refresh-YYYYMMDD
 cd /global/backend/.codex/worktrees/deps-refresh-YYYYMMDD
 pnpm install --frozen-lockfile
 pnpm update -r                                   # 范围内的 minor / patch
+rm -rf node_modules apps/*/node_modules packages/*/node_modules
+pnpm install --frozen-lockfile                   # 按 CI 的方式重装：update 会额外链接 .bin，使部分测试本地假失败
 pnpm audit --prod --registry=https://registry.npmjs.org --json   # 与基线 source.command 一致；目标零 advisory
 node scripts/supply-chain-source-policy.mjs validate-sources --repository-root .
 node scripts/copy-fixed-source-impact-resign.mjs # 只重签指纹；资格字段变化会拒绝
@@ -40,13 +42,22 @@ pnpm --filter @global/api build && pnpm --filter @global/api test
 
 基线是限时治理账，不是豁免。两种情形：
 
-- **锁文件变动后的重新绑定**（每个改了 `pnpm-lock.yaml` 的 PR）：先提交锁文件改动，再对**该提交**执行上面的审计命令，把 `source.base_commit`、`bootstrap.base_commit` 设为该提交，`source.lockfile_digest` 设为 `sha256:` 加 `pnpm-lock.yaml` 的 SHA-256，更新 `source.captured_at`；审计结果若有变化，同步 `advisories` / `exposure` / `summary`。`governance.valid_until` 不变。先例：#544 的基线改动。
+- **锁文件变动后的重新绑定**（每个改了 `pnpm-lock.yaml` 的 PR）：先提交锁文件改动，再对**该提交**执行上面的审计命令，把 `source.base_commit`、`bootstrap.base_commit` 设为该提交，`source.lockfile_digest` 设为 `sha256:` 加 `pnpm-lock.yaml` 的 SHA-256，更新 `source.captured_at`；审计结果若有变化，同步 `advisories` / `exposure` / `summary`。`governance.valid_until` 不变。同时更新 `scripts/supply-chain-gates.spec.mjs` 里钉住的基线提交、锁文件摘要与 `REPOSITORY_BASELINE_NOW`（`captured_at` 加 1 秒），并把同一审计在旧、新绑定下的 `baseline-freshness` 结果存为 `docs/evidence/security/` 下的冻结回执。先例：#544 与 2026-09-21 开发依赖告警刷新。
 - **到期续期**：在 `governance.valid_until` 之前另设新的到期时间（惯例约两周），同时按上一条重新绑定。先例：#542 及其证据 [`20260920-baseline-refresh.json`](../evidence/security/20260920-baseline-refresh.json)。
 
-本地验证：
+本地验证：`verify` 对照基线做生产审计（应为 `PASS_CLEAR`），但不检查锁文件绑定；绑定要用与 main 上 `production advisory baseline freshness · canary` 相同的 `baseline-freshness`（应为 `FRESH`）：
 
 ```bash
 node scripts/supply-chain-audit.mjs verify
+pnpm audit --prod --registry=https://registry.npmjs.org --json > /tmp/audit.json
+node scripts/supply-chain-audit.mjs baseline-freshness \
+  --baseline docs/security/production-dependency-audit-baseline.json \
+  --audit-file /tmp/audit.json --subject-commit "$(git rev-parse HEAD)" \
+  --lockfile-digest "sha256:$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)" \
+  --verifier-digest "sha256:$(sha256sum scripts/supply-chain-audit.mjs | cut -d' ' -f1)" \
+  --source-policy-digest "sha256:$(sha256sum scripts/supply-chain-source-policy.mjs | cut -d' ' -f1)" \
+  --audit-digest "sha256:$(sha256sum /tmp/audit.json | cut -d' ' -f1)" \
+  --observed-at "$(date --utc +%Y-%m-%dT%H:%M:%SZ)"
 pnpm governance:verify
 ```
 
