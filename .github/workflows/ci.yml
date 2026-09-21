@@ -27,9 +27,11 @@ permissions:
 
 concurrency:
   # A scheduled full visual baseline must not cancel a main push verification
-  # (or vice versa). Synchronizations of the same PR still cancel stale runs.
+  # (or vice versa). Only PR synchronizations cancel stale runs: every main
+  # commit keeps its own complete verification, and a newer main push queues
+  # behind the running one instead of cancelling it.
   group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   renderer-visual-scope:
@@ -360,6 +362,15 @@ jobs:
             --output apps/api/dist/artifact-manifest.json
           node scripts/verify-runtime-artifact.mjs apps/api/dist
           pnpm exec tsx apps/api/scripts/generate-build-attestation.mts
+
+      # Kept unconditional: the OCI step repeats this check before docker build,
+      # but it is scoped, and generated-file drift must fail every run.
+      - name: Verify build and test steps left the tree clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
 
       - name: Build and inspect immutable OCI runtime
         if: needs.renderer-visual-scope.outputs.run_oci == 'true'

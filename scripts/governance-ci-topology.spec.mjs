@@ -189,8 +189,10 @@ function scopeScript(workflow) {
 async function runScope(script, changedPaths, event = "pull_request") {
   const root = await mkdtemp(join(tmpdir(), "ci-scope-"));
   try {
+    // Ignore the developer's global/system git config (signing, hooks).
+    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
     const git = (...args) =>
-      execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+      execFileSync("git", args, { cwd: root, encoding: "utf8", env: gitEnv }).trim();
     git("init", "-q");
     git("config", "user.email", "scope@example.test");
     git("config", "user.name", "scope");
@@ -209,7 +211,7 @@ async function runScope(script, changedPaths, event = "pull_request") {
     execFileSync("bash", ["-euo", "pipefail", "-c", script], {
       cwd: root,
       env: {
-        ...process.env,
+        ...gitEnv,
         EVENT_NAME: event,
         BASE_SHA: base,
         HEAD_SHA: git("rev-parse", "HEAD"),
@@ -259,6 +261,19 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
       `${stepName} must have exactly one ${output} scope condition`,
     );
   }
+
+  assert.match(
+    ciWorkflow,
+    /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+    "main pushes must not cancel each other's verification",
+  );
+  const cleanTree = namedStepBlock(
+    buildJob,
+    "Verify build and test steps left the tree clean",
+  );
+  assert.equal(cleanTree.match(/^        if:/gm), null, "tree-cleanliness check must stay unconditional");
+  assert.match(cleanTree, /git diff --exit-code/);
+  assert.match(cleanTree, /git ls-files --others --exclude-standard/);
 
   const script = scopeScript(ciWorkflow);
   const cases = [
