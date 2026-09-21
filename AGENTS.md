@@ -35,6 +35,7 @@
 最小启动与验证序列：
 
 ```bash
+gctl link-env "$PWD"                                # 新 worktree 先链接两个 .env；全新克隆从 .env.example 复制
 pnpm install --frozen-lockfile
 pnpm --filter @global/db generate
 pnpm --filter @global/contracts build

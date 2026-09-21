@@ -6,6 +6,7 @@
 - 移除 `nontechnical decision card freshness` 必需检查及其 `pull_request_target` 工作流、`pr-decision-card-status/v4` 解析器与测试；PR 模板改为四行不经机器解析的「给产品负责人的说明」。原因：卡片按其自身合同只是未验证声明、授权字段恒为 `NOT_AUTHORIZED`，检查不能验证真实性也不承载授权，却让每次推送都失效（两天 123 次运行、40 次失败、42 次取消）。历史合同见 Git provenance 与[真实验证记录](../ai-development/decision-card-live-validation.md)。
 - 产品负责人以 `DEC-AIDEV-004` 授予常规 PR 常设合并授权：开发代理独立审查通过、必需检查全绿、线程清零且基于最新 main 后可合并；ruleset/设置/权限、部署发布与付费调用不在其内。`required-contexts.json` 中 ≥1 批准 + CODEOWNERS 的远期目标保持不变。
 - Copy fixed-source 回执只因 `package.json` 删去一条脚本而重签指纹；漂移集合与 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED` 不变。
+- #549 合入后经产品负责人授权修改 `protect-main`：移除决策卡 required check（余 5 项），并关闭 strict，以免每次合并后其余 PR 串行重跑；替代保护见 [CI 合并自动化](../backend/ci-merge-automation.md#2026-09-21-ruleset-变更产品负责人授权)。
 
 ## 2026-09-20 · Dependency queue and source-status closeout
 
