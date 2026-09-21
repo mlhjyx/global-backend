@@ -9,6 +9,10 @@
 
 当前证据计数、有效窗口和 Release Bundle 接纳状态统一见[当前状态](../status/current.md)，不在本索引维护第二份实时计数。历史观察见 [changelog](../roadmap/changelog.md)；机器真值由 RuntimeEvidence、Release Bundle 文件及 verifier 给出。索引、文件存在或结构校验均不延长证据窗口，也不构成 Pilot/GA 晋级。
 
+2026-09-20 的[依赖队列、根同步与历史处置记录](dependency-queue-closeout-20260920.md)提供来源提交、验证范围、原 PR provenance 与回执位置；它不是 RuntimeEvidence，也不授予历史分支/worktree 删除或运行发布权限。
+
+[工具链生产审计重审](security/20260920-tooling-baseline-refresh.json)保留同一审计在旧绑定下的HOLD与新精确绑定的FRESH；不改写[迁移任务的先前回执](security/20260920-baseline-refresh.json)，也不表示全部依赖告警或运行发布完成。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |
