@@ -106,8 +106,9 @@ a separate relay:
 - It joins the internal network and `global-temporal-platform-ingress`, a bridge
   with IP masquerading and inter-container traffic disabled and no IPv6. A port
   can be published on that bridge, but nothing on it can reach an outside
-  address. On 2026-09-22 on native dockerd 29.8.1, the relay's
-  `1.1.1.1:443` probe was blocked while the host itself could reach it.
+  address (native dockerd 29.8.1 run: the relay's `1.1.1.1:443` probe was
+  blocked while the host reached it; see the
+  [2026-09-22 record](../../docs/evidence/temporal-platform-loopback-ingress-20260922.md)).
 - It publishes only `127.0.0.1:${TEMPORAL_PLATFORM_HOST_PORT:-17233}` to
   container port `7233`. It re-resolves `temporal-platform` through Docker's
   embedded DNS, so recreating the server needs no relay restart. Idle timeouts

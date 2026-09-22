@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-22 · Native Temporal loopback ingress and customer namespace provisioning
+
+- 原生 Linux dockerd 不为只接 `internal` 网络的容器映射宿主端口，`temporal-platform` 的 `127.0.0.1:17233` 在任何 Linux 宿主上都从未生效（Docker Desktop 用自带端口转发掩盖了它），`network_mode: host` 的 Backend 因此连不到原生 Temporal。改为：Temporal 不发布端口、仍只接 internal 网络；新增 `temporal-platform-ingress`（官方 HAProxy 3.4 LTS，按 digest 钉住，uid 99、只读、无能力、无密钥），只把 `127.0.0.1` 转发为纯 TCP 到 `temporal-platform:7233`，TLS 与 JWT 授权仍端到端。relay 另接一个关闭 masquerade 与 ICC、无 IPv6 的网桥，能发布端口但不能出网。
+- 保留准入拒绝 Temporal 自身的任何宿主端口，钉住 relay 的镜像、入口、用户、挂载、网络、loopback 端口与网桥选项；relay 配置并入原生源码摘要，启用需要从包含本改动的提交重新发布原生镜像。
+- 共享 provision 现在同时创建 `default`（`roles.json` 授予 customer worker/client 的命名空间）：7 天保留、不带任何归属标记，漂移报 `TEMPORAL_CUSTOMER_NAMESPACE_DRIFT` 且不自动修复；已按 `--retention 7d` 手工创建的宿主不受影响。disposable harness 用产品 relay 配置证明宿主网络路径，machine-worker 探针不再自建 `default`（这正是缺口此前未被发现的原因）。原生 dockerd 真实运行见[记录](../evidence/temporal-platform-loopback-ingress-20260922.md)；不是 RuntimeEvidence 或保留部署。
+
 ## 2026-09-21 · Dev-dependency alert refresh
 
 - vitest / @vitest/coverage-v8 升至 4.1.11；baseline-browser-mapping 经传递升级至 2.11.25；Prism 模拟服务链上 `postman-collection` 固定依赖的 lodash、uuid 以精确范围 override 升至 4.18.1 / 11.1.1（上游最新版仍固定旧版本）。升级后本地启动模拟服务，`/api/v1/health` 返回 200。
