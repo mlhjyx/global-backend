@@ -26,6 +26,20 @@ The markers are ownership declarations, not proof that historical workflow
 payloads contain no tenant data; pre-cutover inventory and the dedicated
 credential boundary remain required. Unknown historical state stays on hold.
 
+The same run then provisions `default`, the customer namespace that
+`roles.json` grants to the customer Worker (`default:worker`) and customer client
+(`default:read`, `default:write`). Temporal's native server does not create it,
+and before this step each host had to create it by hand. It is created with
+seven-day retention and **no** data markers or description, because it holds
+tenant workflows and must never claim `platform_non_tenant`. Its separate
+contract requires registered state, a local namespace, exactly seven-day
+retention, no description and no data keys at all. Any drift, including a
+platform marker, returns `TEMPORAL_CUSTOMER_NAMESPACE_DRIFT`, and the namespace
+is not repaired. A host that already created `default` with
+`operator namespace create --namespace default --retention 7d` passes
+unchanged. Changing its retention is a reviewed contract change, not an
+operator adjustment.
+
 The infrastructure contract suite is imported by the rooted governance test
 entry, so required CI executes it. The disposable harness also changes
 namespace settings deliberately and requires re-provisioning to reject drift.
@@ -52,6 +66,10 @@ binds the already-tested implementation, not a retained deployment.
 - External Frontend `7233` uses TLS with hostname verification and continues to
   authenticate product clients through JWT; it does not require a client
   certificate.
+- `temporal-platform` publishes **no** host port. Host-network clients (the
+  managed Backend runs with `network_mode: host`) use the loopback ingress
+  relay described below. TLS, hostname verification and JWT authorization stay
+  end-to-end between each client and Temporal.
 - Internode traffic, including `internal-frontend:7236`, uses a distinct
   internode identity CA with mutual TLS and hostname verification. Temporal
   presents the same dedicated internode identity certificate for its internal
@@ -67,6 +85,40 @@ binds the already-tested implementation, not a retained deployment.
   The GrowthOS HTTPS JWKS endpoint must explicitly join that network (or an
   reviewed deployment override named by `TEMPORAL_PLATFORM_NETWORK_NAME`);
   Temporal is not given general internet egress merely to fetch keys.
+
+### Loopback ingress relay
+
+Native Linux dockerd never creates a host port mapping for a container whose
+only network is `internal: true`. `docker inspect` still shows the requested
+`PortBindings`, but `NetworkSettings.Ports` is empty and nothing listens.
+Docker Desktop hides this because its own port forwarder publishes the port
+anyway. So on any Linux host a `ports:` entry on `temporal-platform` never
+worked, and the Backend could not reach `127.0.0.1:17233`. Giving Temporal a
+second, non-internal network would give it an egress route, so the host path is
+a separate relay:
+
+- `temporal-platform-ingress` runs the official HAProxy LTS image, pinned by
+  digest, as uid 99 with a read-only root, all capabilities dropped,
+  `no-new-privileges`, bounded memory/PIDs, no environment and no secret mount.
+  Its only mount is the read-only [`ingress/haproxy.cfg`](ingress/haproxy.cfg):
+  a plain TCP relay to `temporal-platform:7233` with no TLS termination, stats
+  socket or request rules. It holds no certificate, key or token.
+- It joins the internal network and `global-temporal-platform-ingress`, a bridge
+  with IP masquerading and inter-container traffic disabled and no IPv6. A port
+  can be published on that bridge, but nothing on it can reach an outside
+  address. On 2026-09-22 on native dockerd 29.8.1, the relay's
+  `1.1.1.1:443` probe was blocked while the host itself could reach it.
+- It publishes only `127.0.0.1:${TEMPORAL_PLATFORM_HOST_PORT:-17233}` to
+  container port `7233`. It re-resolves `temporal-platform` through Docker's
+  embedded DNS, so recreating the server needs no relay restart. Idle timeouts
+  are one hour, so Worker long polls and HTTP/2 keepalive are never cut.
+- The retained admission (`temporal-native-publication.mjs compose`) rejects
+  any host port on `temporal-platform`. It requires this exact relay image,
+  entrypoint, user, mount and network set, and exactly one loopback port that
+  is not `7233`. The bridge must stay non-internal, compose-owned, IPv4-only,
+  with masquerade and ICC off. No other rendered service may publish a port,
+  join the bridge or use `network_mode`. The relay config is part of the native
+  image's source digest, like both Compose files.
 
 The native reader permits only `DescribeSchedule`, `DescribeWorkflowExecution`
 and `GetWorkflowExecutionHistory`, checking the exact gRPC method, decoded request
@@ -97,7 +149,10 @@ claimed as complete merely because the token subjects differ.
 
 `images.lock.json` records the official tag, multi-architecture index digest,
 and Linux/amd64 manifest digest read back from the registry. Compose refers only
-to the index digests. Updating any image requires a new tag-to-digest readback,
+to the index digests. The relay's `ingress` entry is the Docker Official
+`haproxy:3.4.4-alpine` (HAProxy 3.4 LTS). The admission verifier pins the same
+index digest as `INGRESS_IMAGE`, and the contract suite requires the two to
+match. Updating any image requires a new tag-to-digest readback,
 review, disposable authorization proof, and release evidence; a moving tag is
 never a deployment input.
 
@@ -113,8 +168,9 @@ same code with verified modules and networking disabled at compile time.
 
 The image contains the native binary plus a source/binary/SBOM manifest and the public
 Temporal config/role templates under `/opt/temporal-platform-release`. The
-source digest binds production Go inputs, Dockerfile, schema/config contracts
-and both Compose files; the exact Git commit additionally binds the publisher.
+source digest binds production Go inputs, Dockerfile, schema/config contracts,
+both Compose files and the ingress relay config; the exact Git commit
+additionally binds the publisher.
 The publisher exports a never-started container, checks the actual native ELF
 module marker and SHA256, exact image/source labels, config bytes and the full
 merged path inventory for test/fixture contamination. It then publishes once,
@@ -164,17 +220,19 @@ node scripts/temporal-native-publication.mjs compose "$native_compose_json" \
 ```
 
 The admission rejects stock/moving images, missing/mismatched reader identity,
-alternate entrypoints, binary-overriding mounts, writable contract mounts, public
-ports and reuse of legacy port 7233. It does not install secrets or establish
+alternate entrypoints, binary-overriding mounts and writable contract mounts. It
+also rejects any Temporal host port, public or non-loopback relay ports, reuse of
+legacy port 7233, and a relay or bridge that differs from the loopback ingress
+contract. It does not install secrets or establish
 their validity. Check the native image manifest against this exact source before
 using its public templates as bind mounts; a different source tree is not an
 equivalent deployment input. The printed admission summary contains no secrets.
 
 Preserve `temporal-dev.service`, its SQLite data, legacy namespaces and existing
 Workflow executions. The dedicated PostgreSQL/schema/namespace resources remain
-separate. Do not switch the global Backend `TEMPORAL_ADDRESS`/`TEMPORAL_NAMESPACE`
-or mixed Worker to this service: dedicated client credentials and namespace-aware
-Worker/lease admission are later contracts. `provision.sh` and `verify.sh` below
+separate. Backend clients reach this service only through the loopback ingress
+relay; their machine credentials and namespace-aware Worker/lease admission are
+Backend runtime contracts, not part of this directory. `provision.sh` and `verify.sh` below
 remain **mutating operator tools** (the latter includes a write-denial probe), not
 safe commands for an unapproved retained readback. They are not invoked by the
 publisher. The standard retained `provision.sh` requires the native image, source
@@ -245,9 +303,32 @@ infra/temporal-platform/provision.sh
 
 The schema service uses the exact-version Temporal SQL tool against the two
 dedicated databases. The provisioner waits for PostgreSQL, schema completion and
-the TLS frontend, then creates `platform-automation` through the externally
-issued admin identity. A TCP health check is diagnostic only; it does not prove
-JWKS retrieval or authorization readiness.
+the TLS frontend, then creates `platform-automation` and then `default` through
+the externally issued admin identity (see namespace admission above). A TCP
+health check is diagnostic only; it does not prove JWKS retrieval or
+authorization readiness.
+
+Provisioning does not start the relay. Start it with the same inputs, then
+confirm the host path from the host network namespace. The TLS peer must be
+Temporal's frontend certificate, and an unauthenticated call must reach
+Temporal's authorizer and be denied:
+
+```bash
+docker compose -p global \
+  -f infra/temporal-platform/compose.yml \
+  -f infra/temporal-platform/compose.native.yml \
+  --profile platform-temporal up -d --wait temporal-platform-ingress
+openssl s_client -connect 127.0.0.1:17233 -servername "$TEMPORAL_PLATFORM_TLS_SERVER_NAME" \
+  -verify_hostname "$TEMPORAL_PLATFORM_TLS_SERVER_NAME" \
+  -CAfile "$TEMPORAL_PLATFORM_CLIENT_SECRET_DIRECTORY/ca.crt" -alpn h2 </dev/null
+```
+
+Expect `Verify return code: 0 (ok)` and `ALPN protocol: h2`. Adopting the relay
+needs a native image published from a commit that contains it, because the
+source digest binds the Compose files and relay config. Until then, provisioning
+from the new source against an older image fails source admission by design. A
+host that runs a local forwarder on the same port must remove it before
+starting the relay, or the second bind fails.
 
 ## Read-only authorization verification
 
@@ -308,11 +389,23 @@ A concurrent invocation exits with status `73` and the stable `lifecycle is
 busy` diagnostic before calling Docker. Stale task resources cause status `74`
 and require manual review; a new run never recreates them implicitly.
 
+The harness also proves the host path the Backend uses. The disposable server
+publishes nothing and carries the extra alias `temporal-platform`, so the
+product `ingress/haproxy.cfg` runs unchanged in a disposable relay. That relay
+publishes an ephemeral `127.0.0.1` port on its own masquerade-free bridge. The
+runner asserts that the server has no host port binding and checks the bridge
+flags. A `network_mode: host` probe then connects through the published port.
+It verifies that TLS terminates at Temporal (correct name accepted, wrong name
+rejected), makes an authorized Schedule-writer `DescribeSchedule`, and confirms
+an unauthenticated call is denied. On native Linux this reproduces the exact
+failure the old direct `ports:` entry had. No harness probe creates a
+namespace; `default` exists only because shared provisioning created it.
+
 The test harness uses production `temporal.yaml` with test-only certificates,
 JWKS and tokens under a temporary directory. The public JWKS document and the
 JWKS server's TLS key use separate mounts, so the file server cannot expose its
 private key. It uses `docker compose -p global`
-as required, but every service, container, volume and internal network has the
+as required, but every service, container, volume and network has the
 `codex-task4c-platform-temporal` prefix. Cleanup targets only those exact names;
 it never invokes `down`, changes the host Docker daemon, or touches a `global-*`
 retained container. The non-root Worker probe receives read-only copies of the

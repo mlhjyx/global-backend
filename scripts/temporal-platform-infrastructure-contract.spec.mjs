@@ -32,6 +32,25 @@ function namespaceFixture() {
   };
 }
 
+function customerNamespaceFixture() {
+  return {
+    namespaceInfo: { name: "default", state: "Registered" },
+    config: { workflowExecutionRetentionTtl: "604800s" },
+    isGlobalNamespace: false,
+  };
+}
+
+// Text-level service slice of a two-space-indented Compose file; the contract
+// suite intentionally has no YAML dependency.
+function composeService(compose, name) {
+  const lines = compose.split("\n");
+  const start = lines.indexOf(`  ${name}:`);
+  assert(start >= 0, `service ${name} is missing`);
+  let end = start + 1;
+  while (end < lines.length && !/^ {0,2}\S/.test(lines[end])) end += 1;
+  return lines.slice(start, end).join("\n");
+}
+
 test("required governance executes the platform infrastructure contract suite", async () => {
   const rootedSuite = await repositoryFile(
     "scripts/governance-contracts.spec.mjs",
@@ -124,6 +143,130 @@ test("namespace CLI bounds input and emits only safe contract diagnostics", () =
   }
 });
 
+test("customer namespace admission is unmarked, local, registered and exactly seven-day", async () => {
+  const { validateCustomerNamespace, validatePlatformNamespace } =
+    await import("../infra/temporal-platform/namespace-contract.mjs");
+  const current = customerNamespaceFixture();
+  assert.equal(validateCustomerNamespace(JSON.stringify(current)), true);
+  for (const accepted of [
+    (v) => {
+      v.namespaceInfo.state = "NAMESPACE_STATE_REGISTERED";
+    },
+    (v) => {
+      v.namespaceInfo.description = "";
+      v.namespaceInfo.data = {};
+    },
+  ]) {
+    const changed = structuredClone(current);
+    accepted(changed);
+    assert.equal(validateCustomerNamespace(JSON.stringify(changed)), true);
+  }
+  for (const mutate of [
+    (v) => {
+      v.namespaceInfo.name = "platform-automation";
+    },
+    (v) => {
+      v.namespaceInfo.state = "Deprecated";
+    },
+    // Tenant workflows live here: a platform ownership claim is drift.
+    (v) => {
+      v.namespaceInfo.data = { platform_non_tenant: "true" };
+    },
+    (v) => {
+      v.namespaceInfo.data = { platform_contract: "1" };
+    },
+    (v) => {
+      v.namespaceInfo.data = { tenant_id: "tenant" };
+    },
+    (v) => {
+      v.namespaceInfo.description =
+        "Dedicated non-tenant platform automation workflows";
+    },
+    (v) => {
+      v.config.workflowExecutionRetentionTtl = "86400s";
+    },
+    (v) => {
+      delete v.config;
+    },
+    (v) => {
+      v.isGlobalNamespace = true;
+    },
+  ]) {
+    const changed = structuredClone(current);
+    mutate(changed);
+    assert.throws(
+      () => validateCustomerNamespace(JSON.stringify(changed)),
+      /TEMPORAL_CUSTOMER_NAMESPACE_DRIFT/,
+    );
+  }
+  for (const source of ["null", "{", "[]", " ".repeat(65537)])
+    assert.throws(
+      () => validateCustomerNamespace(source),
+      /TEMPORAL_CUSTOMER_NAMESPACE_DRIFT/,
+    );
+  // Neither contract accepts the other namespace's shape.
+  assert.throws(
+    () => validatePlatformNamespace(JSON.stringify(current)),
+    /PLATFORM_TEMPORAL_NAMESPACE_DRIFT/,
+  );
+  assert.throws(
+    () => validateCustomerNamespace(JSON.stringify(namespaceFixture())),
+    /TEMPORAL_CUSTOMER_NAMESPACE_DRIFT/,
+  );
+});
+
+test("namespace CLI selects exactly one contract and never reflects input", () => {
+  const validator = join(
+    repositoryRoot,
+    "infra/temporal-platform/namespace-contract.mjs",
+  );
+  const platform = JSON.stringify(namespaceFixture());
+  const customer = JSON.stringify(customerNamespaceFixture());
+  for (const [args, input, status, stdout, stderr] of [
+    [
+      ["platform-automation"],
+      platform,
+      0,
+      "platform-automation namespace contract verified\n",
+      "",
+    ],
+    [["default"], customer, 0, "default namespace contract verified\n", ""],
+    [["default"], platform, 1, "", "TEMPORAL_CUSTOMER_NAMESPACE_DRIFT\n"],
+    [
+      ["platform-automation"],
+      customer,
+      1,
+      "",
+      "PLATFORM_TEMPORAL_NAMESPACE_DRIFT\n",
+    ],
+    [
+      ["default"],
+      "x".repeat(65537),
+      1,
+      "",
+      "TEMPORAL_CUSTOMER_NAMESPACE_DRIFT\n",
+    ],
+    [["tenant-a"], customer, 1, "", "TEMPORAL_NAMESPACE_CONTRACT_UNKNOWN\n"],
+    [
+      ["default", "platform-automation"],
+      customer,
+      1,
+      "",
+      "TEMPORAL_NAMESPACE_CONTRACT_UNKNOWN\n",
+    ],
+  ]) {
+    const result = spawnSync(process.execPath, [validator, ...args], {
+      input,
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 4096,
+    });
+    assert.equal(result.status, status, args.join(" "));
+    assert.equal(result.stdout, stdout);
+    assert.equal(result.stderr, stderr);
+  }
+});
+
 test("platform Temporal images are official exact-digest releases", async () => {
   const lock = JSON.parse(
     await repositoryFile("infra/temporal-platform/images.lock.json"),
@@ -156,6 +299,14 @@ test("platform Temporal images are official exact-digest releases", async () => 
         linuxAmd64Digest:
           "sha256:075f7ba66bc9b3ce7d6b8b635208ff61cd7cf1a67d71ec530eec5d7ae0cbe571",
       },
+      ingress: {
+        source: "docker.io/library/haproxy",
+        tag: "3.4.4-alpine",
+        indexDigest:
+          "sha256:52c5921e1619f39cbd5b25e1b4b5847667917f39745056cf004d9c263fbf11b9",
+        linuxAmd64Digest:
+          "sha256:560d1d5cc8edfff2536ac4c8d4ae6807371c07213b3cc7372bcba3cf61b506a4",
+      },
       testJwks: {
         source: "docker.io/library/caddy",
         tag: "2.10.2-alpine",
@@ -174,6 +325,11 @@ test("platform Temporal images are official exact-digest releases", async () => 
       },
     },
   });
+  const { INGRESS_IMAGE } = await import("./temporal-native-publication.mjs");
+  assert.equal(
+    INGRESS_IMAGE,
+    `${lock.images.ingress.source}@${lock.images.ingress.indexDigest}`,
+  );
 });
 
 test("production config requires TLS and the default JWT authorization stack", async () => {
@@ -262,6 +418,78 @@ test("managed compose uses independent persistence and no development server pat
   assert.doesNotMatch(productFiles, /temporal-dev\.service/);
 });
 
+test("the Backend reaches native Temporal only through a loopback relay, never a Temporal host port", async () => {
+  const [compose, relay] = await Promise.all([
+    repositoryFile("infra/temporal-platform/compose.yml"),
+    repositoryFile("infra/temporal-platform/ingress/haproxy.cfg"),
+  ]);
+  const server = composeService(compose, "temporal-platform");
+  const ingress = composeService(compose, "temporal-platform-ingress");
+
+  // Native Linux dockerd never maps a host port for a container whose only
+  // network is internal; Temporal keeps that single network and no ports.
+  assert.doesNotMatch(server, /^\s+ports:/m);
+  assert.match(server, /^    networks: \[temporal-platform\]$/m);
+  assert.equal(compose.match(/^\s+ports:/gm).length, 1);
+  assert.match(
+    ingress,
+    /ports:\n      - "127\.0\.0\.1:\$\{TEMPORAL_PLATFORM_HOST_PORT:-17233\}:7233"/,
+  );
+  assert.match(
+    ingress,
+    /image: docker\.io\/library\/haproxy@sha256:52c5921e1619f39cbd5b25e1b4b5847667917f39745056cf004d9c263fbf11b9/,
+  );
+  assert.match(ingress, /profiles: \[platform-temporal\]/);
+  assert.match(ingress, /user: "99:99"/);
+  assert.match(
+    ingress,
+    /entrypoint: \["haproxy", "-db", "-f", "\/usr\/local\/etc\/haproxy\/haproxy\.cfg"\]/,
+  );
+  assert.match(ingress, /source: \.\/ingress\/haproxy\.cfg/);
+  assert.match(
+    ingress,
+    /networks: \[temporal-platform, temporal-platform-ingress\]/,
+  );
+  assert.match(
+    ingress,
+    /temporal-platform:\n        condition: service_healthy/,
+  );
+  assert.match(ingress, /read_only: true/);
+  assert.match(ingress, /cap_drop: \[ALL\]/);
+  assert.match(ingress, /no-new-privileges:true/);
+  assert.match(ingress, /pids_limit: \d+/);
+  assert.match(ingress, /mem_limit: \d+m/);
+  assert.doesNotMatch(
+    ingress,
+    /environment:|secrets|cap_add|privileged|network_mode/,
+  );
+  // The relay's bridge must allow published ports but never NAT traffic out.
+  assert.match(
+    compose,
+    /  temporal-platform-ingress:\n    name: global-temporal-platform-ingress\n    driver: bridge\n    enable_ipv6: false\n    driver_opts:\n      com\.docker\.network\.bridge\.enable_ip_masquerade: "false"\n      com\.docker\.network\.bridge\.enable_icc: "false"/,
+  );
+
+  // Plain TCP relay: TLS and JWT authorization terminate at Temporal itself.
+  assert.match(relay, /^\s+mode tcp$/m);
+  assert.doesNotMatch(
+    relay,
+    /mode http|ssl|crt |ca-file|stats|http-request|tcp-request/,
+  );
+  assert.match(relay, /^\s+bind :7233$/m);
+  assert.match(relay, /^\s+maxconn \d+$/m);
+  assert.match(relay, /^\s+nbthread \d+$/m);
+  assert.match(
+    relay,
+    /^\s+server temporal-platform temporal-platform:7233 resolvers docker-embedded init-addr libc,none$/m,
+  );
+  assert.match(relay, /^\s+parse-resolv-conf$/m);
+  assert.match(relay, /^\s+timeout connect 5s$/m);
+  // Worker long polls and HTTP/2 keepalive must not be cut by idle timers.
+  for (const timer of ["client", "server", "tunnel"])
+    assert.match(relay, new RegExp(`^\\s+timeout ${timer} 1h$`, "m"));
+  assert.equal((relay.match(/^\s+server /gm) ?? []).length, 1);
+});
+
 test("disposable server can run the exact native wrapper without changing the baseline image", async () => {
   const [compose, entrypoint, serverDockerfile, runner] = await Promise.all([
     repositoryFile(
@@ -313,7 +541,16 @@ test("provisioning roles and verification remain separated and fail closed", asy
   });
   assert.match(provision, /TEMPORAL_PLATFORM_ADMIN_TOKEN_FILE/);
   assert.match(provision, /operator namespace create/);
-  assert.match(provision, /--namespace "platform-automation"/);
+  assert.match(
+    provision,
+    /"\$\{ADMIN_TOKEN_FILE\}" platform-automation \\\n\s+--retention 7d --data platform_non_tenant=true --data platform_contract=1 \\\n\s+--description "Dedicated non-tenant platform automation workflows"/,
+  );
+  assert.match(provision, /namespace-contract\.mjs" platform-automation/);
+  // The customer namespace used by customer-worker/API is created without any
+  // platform ownership marker and validated by its own contract.
+  assert.match(provision, /"\$\{ADMIN_TOKEN_FILE\}" default --retention 7d \|/);
+  assert.match(provision, /namespace-contract\.mjs" default/);
+  assert.match(provision, /platform-automation\|default\)/);
   assert.match(verify, /TEMPORAL_PLATFORM_READER_TOKEN_FILE/);
   assert.match(verify, /reader-rpc-probe\.mjs/);
   assert.match(verify, /PERMISSION_DENIED/);
@@ -424,6 +661,114 @@ test("disposable proof is isolated and product config never owns test keys", asy
     compose,
     /global-(?:postgres|api|worker|redis|temporal)(?:\s|$)/m,
   );
+});
+
+test("disposable proof reaches Temporal from the host network through the product relay config", async () => {
+  const [compose, runner, probe] = await Promise.all([
+    repositoryFile(
+      "infra/temporal-platform/test-support/compose.disposable.yml",
+    ),
+    repositoryFile("infra/temporal-platform/test-support/verify-disposable.sh"),
+    repositoryFile(
+      "infra/temporal-platform/test-support/host-ingress-probe.mjs",
+    ),
+  ]);
+  const server = composeService(
+    compose,
+    "codex-task4c-platform-temporal-server",
+  );
+  const ingress = composeService(
+    compose,
+    "codex-task4c-platform-temporal-ingress",
+  );
+  const hostProbe = composeService(
+    compose,
+    "codex-task4c-platform-temporal-host-probe",
+  );
+  // The product relay config names temporal-platform:7233 verbatim.
+  assert.match(server, /aliases: \[task4c-temporal, temporal-platform\]/);
+  assert.doesNotMatch(server, /^\s+ports:/m);
+  assert.match(
+    ingress,
+    /haproxy@sha256:52c5921e1619f39cbd5b25e1b4b5847667917f39745056cf004d9c263fbf11b9/,
+  );
+  assert.match(ingress, /source: \.\.\/ingress\/haproxy\.cfg/);
+  assert.match(ingress, /- "127\.0\.0\.1::7233"/);
+  assert.match(
+    ingress,
+    /networks:\n      \[codex-task4c-platform-temporal, codex-task4c-platform-temporal-ingress\]/,
+  );
+  assert.match(hostProbe, /network_mode: host/);
+  assert.doesNotMatch(hostProbe, /temporal-platform-reader|networks:/);
+  assert.match(
+    compose,
+    /codex-task4c-platform-temporal-ingress:\n    name: codex-task4c-platform-temporal-\$\{TEMPORAL_PLATFORM_TEST_RUN_ID:\?set test run id\}-ingress-network\n    driver: bridge\n    enable_ipv6: false\n    driver_opts:\n      com\.docker\.network\.bridge\.enable_ip_masquerade: "false"\n      com\.docker\.network\.bridge\.enable_icc: "false"/,
+  );
+  assert.match(runner, /host-ingress-probe\.mjs/);
+  assert.match(runner, /docker port "\$\{ingress_container\}" 7233\/tcp/);
+  assert.match(runner, /\.HostConfig\.PortBindings/);
+  assert.match(runner, /Temporal server must not publish a host port/);
+  assert.match(runner, /codex-task4c-platform-temporal-ingress"/);
+  assert.match(runner, /codex-task4c-platform-temporal-host-probe"/);
+  assert.match(runner, /-ingress-network/);
+  assert.match(runner, /TEMPORAL_CUSTOMER_NAMESPACE_DRIFT/);
+  assert.match(probe, /Connection\.lazy/);
+  assert.match(probe, /describeSchedule/);
+  assert.match(probe, /ERR_TLS_CERT_ALTNAME_INVALID/);
+});
+
+test("disposable probes use provisioned namespaces and never create one themselves", async () => {
+  // A probe that registers "default" on demand would mask a provisioning gap.
+  for (const probe of [
+    "machine-worker-probe.mjs",
+    "worker-poll-probe.mjs",
+    "reader-rpc-probe.mjs",
+    "host-ingress-probe.mjs",
+  ]) {
+    const source = await repositoryFile(
+      `infra/temporal-platform/test-support/${probe}`,
+    );
+    assert.doesNotMatch(source, /registerNamespace|namespace create/, probe);
+  }
+});
+
+test("host ingress probe accepts only a loopback target and bounded identities", () => {
+  const probe = join(
+    repositoryRoot,
+    "infra/temporal-platform/test-support/host-ingress-probe.mjs",
+  );
+  const valid = [
+    "/repo",
+    "/run/secrets/temporal-platform-client/writer.jwt",
+    "/run/secrets/temporal-platform-client/ca.crt",
+    "127.0.0.1:32768",
+    "task4c-temporal",
+    "task4c-proof-schedule",
+  ];
+  for (const [index, value] of [
+    [0, "relative/repo"],
+    [3, "10.0.0.5:32768"],
+    [3, "temporal-platform:7233"],
+    [3, "127.0.0.1:7"],
+    [4, "bad name"],
+    [5, "x"],
+  ]) {
+    const args = [...valid];
+    args[index] = value;
+    const result = spawnSync(process.execPath, [probe, ...args], {
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 16384,
+    });
+    assert.equal(result.status, 1, `${index}=${value}`);
+    assert.match(result.stderr, /host ingress probe input is invalid/);
+    assert.equal(result.stdout, "");
+  }
+  const missing = spawnSync(process.execPath, [probe], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  assert.equal(missing.status, 1);
 });
 
 test("a concurrent disposable lifecycle exits before invoking Docker", async (t) => {

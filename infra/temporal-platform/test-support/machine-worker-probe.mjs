@@ -53,14 +53,7 @@ const adminConnection = await Connection.connect({
   connectTimeout: "5s",
 });
 try {
-  try {
-    await adminConnection.workflowService.registerNamespace({
-      namespace: "default",
-      workflowExecutionRetentionPeriod: { seconds: 86400 },
-    });
-  } catch (error) {
-    if (error?.code !== 6) throw error;
-  }
+  // "default" must already exist: shared provisioning creates and validates it.
   // Obtain an actual server-issued platform task token, then attempt completion
   // with a valid customer worker and a caller-supplied customer namespace. The
   // closed authorizer admits the customer's own RPC; native token enforcement
