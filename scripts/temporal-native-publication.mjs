@@ -7,6 +7,11 @@ import { execFileSync } from "node:child_process";
 import { nativeSbom } from "./temporal-native-publication-sbom.mjs";
 
 export const NATIVE_IMAGE = "ghcr.io/mlhjyx/global-temporal-platform";
+// Official HAProxy LTS index digest; images.lock.json records the readback.
+export const INGRESS_IMAGE =
+  "docker.io/library/haproxy@sha256:52c5921e1619f39cbd5b25e1b4b5847667917f39745056cf004d9c263fbf11b9";
+const INGRESS_CONFIG = "infra/temporal-platform/ingress/haproxy.cfg";
+const INGRESS_CONFIG_TARGET = "/usr/local/etc/haproxy/haproxy.cfg";
 const runGh = (args) =>
   execFileSync("gh", args, {
     stdio: ["ignore", "pipe", "pipe"],
@@ -288,6 +293,7 @@ export async function sourceIdentity(root, sourceSha) {
         "images.lock.json",
         "provision.sh",
         "provision-core.sh",
+        "ingress/haproxy.cfg",
       ].map((p) => "infra/temporal-platform/" + p),
     ];
     const walk = async (directory) => {
@@ -527,6 +533,96 @@ export function verifyNativeArtifact(input) {
   }
 }
 
+function loopbackPort(ports) {
+  return (
+    Array.isArray(ports) &&
+    ports.length === 1 &&
+    ports[0].host_ip === "127.0.0.1" &&
+    ports[0].target === 7233 &&
+    ports[0].protocol === "tcp" &&
+    /^[0-9]{2,5}$/.test(String(ports[0].published)) &&
+    Number(ports[0].published) >= 1024 &&
+    Number(ports[0].published) <= 65535 &&
+    Number(ports[0].published) !== 7233
+  );
+}
+
+function readOnlyBind(volume) {
+  // Compose's canonical JSON omits an explicitly false create_host_path.
+  // A short-syntax auto-creating bind renders true and remains forbidden.
+  return (
+    volume?.type === "bind" &&
+    volume.read_only === true &&
+    volume.bind &&
+    [undefined, false].includes(volume.bind.create_host_path) &&
+    isAbsolute(volume.source) &&
+    volume.source !== "/"
+  );
+}
+
+/** Native Linux dockerd maps no host port for an internal-only container, so
+ * host-network clients reach Temporal through one fixed loopback TCP relay. It
+ * is the only service on a bridge that can publish ports but never masquerade,
+ * and it carries no secret, environment or writable path. */
+function verifyIngress(value, root) {
+  const service = value.services["temporal-platform-ingress"];
+  const network = value.networks?.["temporal-platform-ingress"];
+  const options = network?.driver_opts ?? {};
+  if (
+    !service ||
+    !network ||
+    network.internal === true ||
+    network.external ||
+    network.driver !== "bridge" ||
+    network.enable_ipv6 === true ||
+    options["com.docker.network.bridge.enable_ip_masquerade"] !== "false" ||
+    options["com.docker.network.bridge.enable_icc"] !== "false" ||
+    service.image !== INGRESS_IMAGE ||
+    service.build ||
+    !equal(service.entrypoint, [
+      "haproxy",
+      "-db",
+      "-f",
+      INGRESS_CONFIG_TARGET,
+    ]) ||
+    (service.command !== undefined && service.command !== null) ||
+    service.user !== "99:99" ||
+    service.read_only !== true ||
+    !equal(service.cap_drop, ["ALL"]) ||
+    service.cap_add?.length ||
+    !service.security_opt?.includes("no-new-privileges:true") ||
+    service.privileged ||
+    service.network_mode ||
+    service.pid ||
+    service.ipc ||
+    service.volumes_from ||
+    service.devices?.length ||
+    service.secrets?.length ||
+    (service.environment && Object.keys(service.environment).length) ||
+    service.env_file?.length ||
+    !equal(Object.keys(service.networks ?? {}).sort(), [
+      "temporal-platform",
+      "temporal-platform-ingress",
+    ]) ||
+    !loopbackPort(service.ports) ||
+    !Array.isArray(service.volumes) ||
+    service.volumes.length !== 1 ||
+    !readOnlyBind(service.volumes[0]) ||
+    service.volumes[0].target !== INGRESS_CONFIG_TARGET ||
+    service.volumes[0].source !== resolve(root, INGRESS_CONFIG)
+  )
+    fail("COMPOSE");
+  for (const [name, other] of Object.entries(value.services)) {
+    if (name === "temporal-platform-ingress") continue;
+    if (
+      other?.network_mode ||
+      (Array.isArray(other?.ports) && other.ports.length) ||
+      Object.keys(other?.networks ?? {}).includes("temporal-platform-ingress")
+    )
+      fail("COMPOSE");
+  }
+}
+
 export function verifyNativeCompose(value, expected) {
   try {
     const reference = expected.imageReference;
@@ -550,6 +646,7 @@ export function verifyNativeCompose(value, expected) {
       service.cap_add?.length ||
       !equal(Object.keys(service.networks ?? {}), ["temporal-platform"]) ||
       value.networks?.["temporal-platform"]?.internal !== true ||
+      value.networks["temporal-platform"].external ||
       service.user !== "1000:1000" ||
       !equal(service.command, ["/etc/temporal/entrypoint.sh"]) ||
       service.read_only !== true ||
@@ -564,19 +661,12 @@ export function verifyNativeCompose(value, expected) {
         expected.sourceSha
     )
       fail("COMPOSE");
-    const ports = service.ports;
-    if (
-      !Array.isArray(ports) ||
-      ports.length !== 1 ||
-      ports[0].host_ip !== "127.0.0.1" ||
-      ports[0].target !== 7233 ||
-      ports[0].protocol !== "tcp" ||
-      !/^[0-9]{2,5}$/.test(String(ports[0].published)) ||
-      Number(ports[0].published) < 1024 ||
-      Number(ports[0].published) > 65535 ||
-      Number(ports[0].published) === 7233
-    )
-      fail("COMPOSE");
+    // The server never publishes; verifyIngress admits the only host path.
+    if (service.ports !== undefined && service.ports !== null) {
+      if (!Array.isArray(service.ports) || service.ports.length)
+        fail("COMPOSE");
+    }
+    verifyIngress(value, expected.root);
     const volumes = service.volumes;
     if (!Array.isArray(volumes) || volumes.length !== 3) fail("COMPOSE");
     const targets = [
@@ -587,17 +677,7 @@ export function verifyNativeCompose(value, expected) {
     if (!equal(volumes.map((v) => v.target).sort(), [...targets].sort()))
       fail("COMPOSE");
     for (const volume of volumes) {
-      // Compose's canonical JSON omits an explicitly false create_host_path.
-      // A short-syntax auto-creating bind renders true and remains forbidden.
-      if (
-        volume.type !== "bind" ||
-        volume.read_only !== true ||
-        !volume.bind ||
-        ![undefined, false].includes(volume.bind.create_host_path) ||
-        !isAbsolute(volume.source) ||
-        volume.source === "/"
-      )
-        fail("COMPOSE");
+      if (!readOnlyBind(volume)) fail("COMPOSE");
       const index = targets.indexOf(volume.target);
       if (
         index < 2 &&

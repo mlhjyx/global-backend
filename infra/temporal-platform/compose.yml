@@ -88,8 +88,8 @@ services:
     depends_on:
       temporal-platform-schema:
         condition: service_completed_successfully
-    ports:
-      - "127.0.0.1:${TEMPORAL_PLATFORM_HOST_PORT:-17233}:7233"
+    # No host port here: native Linux dockerd never maps one for a container
+    # whose only network is internal. Host clients use temporal-platform-ingress.
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "7233"]
       interval: 5s
@@ -100,6 +100,46 @@ services:
     cap_drop: [ALL]
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000"]
     stop_grace_period: 90s
+    restart: unless-stopped
+
+  # Loopback-only TCP relay for host-network clients (the managed Backend runs
+  # with network_mode: host). It joins the internal network and a bridge that
+  # cannot NAT traffic out; Temporal itself keeps no host port and no egress.
+  # TLS and JWT authorization terminate at temporal-platform, not here.
+  temporal-platform-ingress:
+    image: docker.io/library/haproxy@sha256:52c5921e1619f39cbd5b25e1b4b5847667917f39745056cf004d9c263fbf11b9
+    profiles: [platform-temporal]
+    user: "99:99"
+    entrypoint: ["haproxy", "-db", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+    volumes:
+      - type: bind
+        source: ./ingress/haproxy.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [temporal-platform, temporal-platform-ingress]
+    depends_on:
+      temporal-platform:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${TEMPORAL_PLATFORM_HOST_PORT:-17233}:7233"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # Stopping needs both. HAProxy installs no SIGTERM/SIGUSR1 handler and PID 1
+    # ignores signals that have none, so an init process must own PID 1; and the
+    # image's default SIGUSR1 is a soft stop that waits for the Backend's
+    # long-lived gRPC connections. Either alone ends in SIGKILL.
+    init: true
+    stop_signal: SIGTERM
+    mem_limit: 64m
+    pids_limit: 64
     restart: unless-stopped
 
   temporal-platform-admin:
@@ -129,3 +169,12 @@ networks:
   temporal-platform:
     name: ${TEMPORAL_PLATFORM_NETWORK_NAME:-global-temporal-platform}
     internal: true
+  # Only the relay joins this bridge. Published ports need a non-internal
+  # network; masquerading off means nothing on it can reach an outside address.
+  temporal-platform-ingress:
+    name: global-temporal-platform-ingress
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.bridge.enable_icc: "false"

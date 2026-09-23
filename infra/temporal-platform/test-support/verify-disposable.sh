@@ -147,8 +147,10 @@ cleanup() {
         "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-schema" | \
         "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-jwks" | \
         "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-server" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-ingress" | \
         "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-admin" | \
-        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-worker-probe") return 0 ;;
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-worker-probe" | \
+        "${scope_value} ${RUN_ID} global codex-task4c-platform-temporal-host-probe") return 0 ;;
       *) return 2 ;;
     esac
   }
@@ -170,6 +172,8 @@ cleanup() {
       "codex-task4c-platform-temporal-${RUN_ID}-schema" 120 schema
     diagnose_owned_container \
       "codex-task4c-platform-temporal-${RUN_ID}-server" 200 "Temporal server"
+    diagnose_owned_container \
+      "codex-task4c-platform-temporal-${RUN_ID}-ingress" 60 "loopback ingress"
   fi
 
   container_ids=$(docker container ls -aq \
@@ -191,7 +195,7 @@ cleanup() {
     echo "disposable containers remain after bounded cleanup" >&2
     cleanup_status=1
   fi
-  for container_suffix in postgres schema jwks server admin worker-probe; do
+  for container_suffix in postgres schema jwks server ingress admin worker-probe host-probe; do
     expected_name=codex-task4c-platform-temporal-${RUN_ID}-${container_suffix}
     if docker container inspect "${expected_name}" >/dev/null 2>&1; then
       echo "refusing mismatched disposable container left at expected name" >&2
@@ -211,17 +215,20 @@ cleanup() {
     fi
   fi
 
-  network_name=codex-task4c-platform-temporal-${RUN_ID}-network
-  if network_metadata=$(docker network inspect --format \
-    '{{index .Labels "io.growthos.task4c.scope"}} {{index .Labels "io.growthos.task4c.run-id"}} {{index .Labels "com.docker.compose.project"}}' \
-    "${network_name}" 2>/dev/null); then
-    if [[ ${network_metadata} == "${scope_value} ${RUN_ID} global" ]]; then
-      docker network rm "${network_name}" >/dev/null 2>&1 || cleanup_status=1
-    else
-      echo "refusing to remove disposable network with mismatched labels" >&2
-      cleanup_status=1
+  for network_name in \
+    "codex-task4c-platform-temporal-${RUN_ID}-network" \
+    "codex-task4c-platform-temporal-${RUN_ID}-ingress-network"; do
+    if network_metadata=$(docker network inspect --format \
+      '{{index .Labels "io.growthos.task4c.scope"}} {{index .Labels "io.growthos.task4c.run-id"}} {{index .Labels "com.docker.compose.project"}}' \
+      "${network_name}" 2>/dev/null); then
+      if [[ ${network_metadata} == "${scope_value} ${RUN_ID} global" ]]; then
+        docker network rm "${network_name}" >/dev/null 2>&1 || cleanup_status=1
+      else
+        echo "refusing to remove disposable network with mismatched labels" >&2
+        cleanup_status=1
+      fi
     fi
-  fi
+  done
 
   rm -rf -- "${FIXTURE_DIRECTORY}"
   if (( exit_status != 0 )); then
@@ -349,7 +356,9 @@ change_namespace_fixture() {
   "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
     codex-task4c-platform-temporal-admin -eu -c '
       token=$(cat /run/secrets/temporal-platform-client/admin.jwt)
-      temporal operator namespace update --namespace platform-automation "$@" \
+      namespace=$1
+      shift
+      temporal operator namespace update --namespace "${namespace}" "$@" \
         --address "${TEMPORAL_PLATFORM_ADDRESS}" --tls \
         --tls-ca-path /run/secrets/temporal-platform-client/ca.crt \
         --tls-server-name "${TEMPORAL_PLATFORM_TLS_SERVER_NAME}" \
@@ -361,18 +370,23 @@ assert_namespace_drift_rejected() {
     echo "namespace drift was accepted" >&2
     exit 1
   fi
-  if ! grep -Fxq PLATFORM_TEMPORAL_NAMESPACE_DRIFT "${FIXTURE_DIRECTORY}/namespace-drift.log"; then
+  if ! grep -Fxq "$1" "${FIXTURE_DIRECTORY}/namespace-drift.log"; then
     echo "namespace drift did not fail with the expected contract reason" >&2
     exit 1
   fi
 }
-change_namespace_fixture --retention 1d
-assert_namespace_drift_rejected
-change_namespace_fixture --retention 7d
+change_namespace_fixture platform-automation --retention 1d
+assert_namespace_drift_rejected PLATFORM_TEMPORAL_NAMESPACE_DRIFT
+change_namespace_fixture platform-automation --retention 7d
 "${PLATFORM_DIR}/test-support/provision-disposable.sh"
-change_namespace_fixture --data platform_non_tenant=false
-assert_namespace_drift_rejected
-change_namespace_fixture --data platform_non_tenant=true
+change_namespace_fixture platform-automation --data platform_non_tenant=false
+assert_namespace_drift_rejected PLATFORM_TEMPORAL_NAMESPACE_DRIFT
+change_namespace_fixture platform-automation --data platform_non_tenant=true
+"${PLATFORM_DIR}/test-support/provision-disposable.sh"
+# The customer namespace is provisioned by the same core and is never repaired.
+change_namespace_fixture default --retention 1d
+assert_namespace_drift_rejected TEMPORAL_CUSTOMER_NAMESPACE_DRIFT
+change_namespace_fixture default --retention 7d
 "${PLATFORM_DIR}/test-support/provision-disposable.sh"
 echo "namespace retention and ownership drift rejected"
 
@@ -473,6 +487,37 @@ export TEMPORAL_PLATFORM_PROOF_SCHEDULE_ID=${SCHEDULE_ID}
 export TEMPORAL_PLATFORM_PROOF_WORKFLOW_ID=${ACTION_WORKFLOW_ID}
 export TEMPORAL_PLATFORM_PROOF_RUN_ID=${WORKFLOW_RUN_ID}
 "${PLATFORM_DIR}/verify.sh"
+
+# Host reachability: the managed Backend uses network_mode: host, and native
+# Linux dockerd maps no host port for a container whose only network is
+# internal. The server must publish nothing; the relay alone is reachable.
+"${compose[@]}" up -d --wait --wait-timeout 120 --no-deps codex-task4c-platform-temporal-ingress
+server_container=codex-task4c-platform-temporal-${RUN_ID}-server
+ingress_container=codex-task4c-platform-temporal-${RUN_ID}-ingress
+server_bindings=$(docker container inspect --format '{{json .HostConfig.PortBindings}}' "${server_container}")
+if [[ ${server_bindings} != "{}" && ${server_bindings} != "null" ]]; then
+  echo "Temporal server must not publish a host port" >&2
+  exit 1
+fi
+ingress_network_flags=$(docker network inspect --format \
+  '{{.Internal}} {{index .Options "com.docker.network.bridge.enable_ip_masquerade"}} {{index .Options "com.docker.network.bridge.enable_icc"}} {{.EnableIPv6}}' \
+  "codex-task4c-platform-temporal-${RUN_ID}-ingress-network")
+if [[ ${ingress_network_flags} != "false false false false" ]]; then
+  echo "loopback ingress network must allow publication without NAT egress" >&2
+  exit 1
+fi
+host_address=$(docker port "${ingress_container}" 7233/tcp)
+if [[ ! ${host_address} =~ ^127\.0\.0\.1:[0-9]{4,5}$ ]]; then
+  echo "loopback ingress is not published on 127.0.0.1 only" >&2
+  exit 1
+fi
+"${compose[@]}" run --rm --no-deps --entrypoint node \
+  codex-task4c-platform-temporal-host-probe \
+  /repo/infra/temporal-platform/test-support/host-ingress-probe.mjs \
+  /repo \
+  /run/secrets/temporal-platform-client/writer.jwt \
+  /run/secrets/temporal-platform-client/ca.crt \
+  "${host_address}" task4c-temporal "${SCHEDULE_ID}"
 
 "${compose[@]}" run --rm --no-deps --entrypoint node \
   codex-task4c-platform-temporal-worker-probe \

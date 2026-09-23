@@ -43,9 +43,19 @@ provision_platform_namespace() {
   local -a compose=(docker compose -p global "$@")
   "${compose[@]}" --profile platform-temporal up -d --wait --wait-timeout 180 "${SERVER_SERVICE}"
 
-  "${compose[@]}" --profile platform-temporal-tools run --rm --no-deps \
-    --entrypoint /bin/sh "${ADMIN_SERVICE}" -eu -c '
+  # Describe first; create only on proven absence; always re-validate the
+  # final state. Arguments after the token file: namespace, then create flags.
+  local admin_script='
       token_file=$1
+      namespace=$2
+      shift 2
+      case "${namespace}" in
+        platform-automation|default) ;;
+        *)
+          echo "Temporal namespace is not provisionable" >&2
+          exit 1
+          ;;
+      esac
       token=$(cat "${token_file}")
       case "${token}" in
         *[!A-Za-z0-9._-]*|*.*.*.*|.*|*.)
@@ -75,7 +85,7 @@ provision_platform_namespace() {
           --output json
       }
       error_file=/tmp/namespace-describe.error
-      if cli operator namespace describe --namespace "platform-automation" >/tmp/namespace-describe.json 2>"${error_file}"; then
+      if cli operator namespace describe --namespace "${namespace}" >/tmp/namespace-describe.json 2>"${error_file}"; then
         cat /tmp/namespace-describe.json
         exit 0
       fi
@@ -87,14 +97,20 @@ provision_platform_namespace() {
         echo >&2
         exit 1
       fi
-      cli operator namespace create \
-        --namespace "platform-automation" \
-        --retention 7d \
-        --data platform_non_tenant=true \
-        --data platform_contract=1 \
-        --description "Dedicated non-tenant platform automation workflows"
-      cli operator namespace describe --namespace "platform-automation"
-    ' -- "${ADMIN_TOKEN_FILE}" | node "${SCRIPT_DIR}/namespace-contract.mjs"
+      cli operator namespace create --namespace "${namespace}" "$@"
+      cli operator namespace describe --namespace "${namespace}"
+    '
+  local -a admin=("${compose[@]}" --profile platform-temporal-tools run --rm --no-deps
+    --entrypoint /bin/sh "${ADMIN_SERVICE}" -eu -c "${admin_script}" --)
 
-  echo "platform-automation namespace is provisioned; authorization verification remains a separate gate"
+  "${admin[@]}" "${ADMIN_TOKEN_FILE}" platform-automation \
+    --retention 7d --data platform_non_tenant=true --data platform_contract=1 \
+    --description "Dedicated non-tenant platform automation workflows" |
+    node "${SCRIPT_DIR}/namespace-contract.mjs" platform-automation
+  # customer-worker and the API run tenant workflows in "default". It is
+  # created without any platform ownership marker and validated as unmarked.
+  "${admin[@]}" "${ADMIN_TOKEN_FILE}" default --retention 7d |
+    node "${SCRIPT_DIR}/namespace-contract.mjs" default
+
+  echo "platform-automation and default namespaces are provisioned; authorization verification remains a separate gate"
 }

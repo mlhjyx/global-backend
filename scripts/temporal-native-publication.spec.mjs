@@ -19,6 +19,7 @@ import test from "node:test";
 import { nativeSbom } from "./temporal-native-publication-sbom.mjs";
 import {
   NATIVE_IMAGE,
+  INGRESS_IMAGE,
   sourceIdentity,
   artifactManifest,
   verifyNativeArtifact,
@@ -269,10 +270,61 @@ test("wrong source, digest, config, stock binary and synthetic final paths canno
   }
 });
 
+const ingressConfigPath = "infra/temporal-platform/ingress/haproxy.cfg";
 function composeFixture() {
   return {
-    networks: { "temporal-platform": { internal: true } },
+    networks: {
+      "temporal-platform": { internal: true },
+      "temporal-platform-ingress": {
+        name: "global-temporal-platform-ingress",
+        driver: "bridge",
+        driver_opts: {
+          "com.docker.network.bridge.enable_ip_masquerade": "false",
+          "com.docker.network.bridge.enable_icc": "false",
+        },
+      },
+    },
     services: {
+      "temporal-platform-postgres": {
+        networks: { "temporal-platform": null },
+        ports: null,
+      },
+      "temporal-platform-ingress": {
+        image: INGRESS_IMAGE,
+        user: "99:99",
+        entrypoint: [
+          "haproxy",
+          "-db",
+          "-f",
+          "/usr/local/etc/haproxy/haproxy.cfg",
+        ],
+        command: null,
+        read_only: true,
+        cap_drop: ["ALL"],
+        security_opt: ["no-new-privileges:true"],
+        networks: {
+          "temporal-platform": null,
+          "temporal-platform-ingress": null,
+        },
+        ports: [
+          {
+            mode: "ingress",
+            host_ip: "127.0.0.1",
+            published: "17233",
+            target: 7233,
+            protocol: "tcp",
+          },
+        ],
+        volumes: [
+          {
+            type: "bind",
+            source: join(repo, ingressConfigPath),
+            target: "/usr/local/etc/haproxy/haproxy.cfg",
+            read_only: true,
+            bind: {},
+          },
+        ],
+      },
       "temporal-platform": {
         image: imageReference,
         user: "1000:1000",
@@ -288,14 +340,7 @@ function composeFixture() {
           TEMPORAL_ALLOW_NO_AUTH: "false",
         },
         labels: { "io.global.temporal.native.source-sha": sha },
-        ports: [
-          {
-            host_ip: "127.0.0.1",
-            published: "17233",
-            target: 7233,
-            protocol: "tcp",
-          },
-        ],
+        ports: null,
         volumes: [
           {
             type: "bind",
@@ -362,10 +407,10 @@ test("native compose accepts only exact digest and dedicated reader while retain
       v.services["temporal-platform"].entrypoint = ["/bin/sh"];
     },
     (v) => {
-      v.services["temporal-platform"].ports[0].host_ip = "0.0.0.0";
+      v.services["temporal-platform-ingress"].ports[0].host_ip = "0.0.0.0";
     },
     (v) => {
-      v.services["temporal-platform"].ports[0].published = "7233";
+      v.services["temporal-platform-ingress"].ports[0].published = "7233";
     },
     (v) => {
       v.services["temporal-platform"].environment.TEMPORAL_ALLOW_NO_AUTH =
@@ -396,6 +441,9 @@ test("native compose accepts only exact digest and dedicated reader while retain
     (v) => {
       v.networks["temporal-platform"].internal = false;
     },
+    (v) => {
+      v.networks["temporal-platform"].external = true;
+    },
   ]) {
     const value = composeFixture();
     mutate(value);
@@ -404,6 +452,179 @@ test("native compose accepts only exact digest and dedicated reader while retain
       /TEMPORAL_NATIVE_COMPOSE_INVALID/,
     );
   }
+});
+
+test("native compose publishes only through the loopback ingress relay and never from Temporal itself", () => {
+  const ingress = (v) => v.services["temporal-platform-ingress"];
+  for (const mutate of [
+    // Native Linux never maps a host port for an internal-only container.
+    (v) => {
+      v.services["temporal-platform"].ports = [
+        {
+          host_ip: "127.0.0.1",
+          published: "17233",
+          target: 7233,
+          protocol: "tcp",
+        },
+      ];
+    },
+    (v) => {
+      v.services["temporal-platform"].networks["temporal-platform-ingress"] =
+        null;
+    },
+    (v) => {
+      delete v.services["temporal-platform-ingress"];
+    },
+    (v) => {
+      delete v.networks["temporal-platform-ingress"];
+    },
+    (v) => {
+      ingress(v).image = "docker.io/library/haproxy:3.4-alpine";
+    },
+    (v) => {
+      ingress(v).image = "docker.io/alpine/socat@sha256:" + "d".repeat(64);
+    },
+    (v) => {
+      ingress(v).build = { context: "." };
+    },
+    (v) => {
+      ingress(v).entrypoint = ["/bin/sh", "-c", "exec haproxy"];
+    },
+    (v) => {
+      ingress(v).command = ["-f", "/tmp/other.cfg"];
+    },
+    (v) => {
+      ingress(v).user = "0:0";
+    },
+    (v) => {
+      delete ingress(v).user;
+    },
+    (v) => {
+      ingress(v).read_only = false;
+    },
+    (v) => {
+      ingress(v).cap_drop = [];
+    },
+    (v) => {
+      ingress(v).cap_add = ["NET_ADMIN"];
+    },
+    (v) => {
+      ingress(v).security_opt = [];
+    },
+    (v) => {
+      ingress(v).privileged = true;
+    },
+    (v) => {
+      ingress(v).network_mode = "host";
+    },
+    (v) => {
+      ingress(v).pid = "host";
+    },
+    (v) => {
+      ingress(v).environment = { UPSTREAM: "attacker:7233" };
+    },
+    (v) => {
+      ingress(v).networks.default = null;
+    },
+    (v) => {
+      delete ingress(v).networks["temporal-platform"];
+    },
+    (v) => {
+      ingress(v).ports = [];
+    },
+    (v) => {
+      ingress(v).ports.push({ ...ingress(v).ports[0], published: "17234" });
+    },
+    (v) => {
+      ingress(v).ports[0].host_ip = "";
+    },
+    (v) => {
+      ingress(v).ports[0].target = 7236;
+    },
+    (v) => {
+      ingress(v).ports[0].protocol = "udp";
+    },
+    (v) => {
+      ingress(v).ports[0].published = "80";
+    },
+    (v) => {
+      ingress(v).volumes[0].source = "/tmp/other.cfg";
+    },
+    (v) => {
+      ingress(v).volumes[0].read_only = false;
+    },
+    (v) => {
+      ingress(v).volumes[0].bind.create_host_path = true;
+    },
+    (v) => {
+      ingress(v).volumes.push({
+        type: "bind",
+        source: "/run/secure/native-temporal",
+        target: "/run/secrets/temporal-platform",
+        read_only: true,
+        bind: {},
+      });
+    },
+    (v) => {
+      v.networks["temporal-platform-ingress"].internal = true;
+    },
+    (v) => {
+      v.networks["temporal-platform-ingress"].external = true;
+    },
+    (v) => {
+      v.networks["temporal-platform-ingress"].enable_ipv6 = true;
+    },
+    (v) => {
+      v.networks["temporal-platform-ingress"].driver = "macvlan";
+    },
+    (v) => {
+      delete v.networks["temporal-platform-ingress"].driver_opts[
+        "com.docker.network.bridge.enable_ip_masquerade"
+      ];
+    },
+    (v) => {
+      v.networks["temporal-platform-ingress"].driver_opts[
+        "com.docker.network.bridge.enable_ip_masquerade"
+      ] = "true";
+    },
+    (v) => {
+      v.networks["temporal-platform-ingress"].driver_opts[
+        "com.docker.network.bridge.enable_icc"
+      ] = "true";
+    },
+    // No other rendered service may join the egress-capable bridge, publish a
+    // port or share the host network namespace.
+    (v) => {
+      v.services["temporal-platform-postgres"].networks[
+        "temporal-platform-ingress"
+      ] = null;
+    },
+    (v) => {
+      v.services["temporal-platform-postgres"].ports = [
+        { host_ip: "127.0.0.1", published: "15432", target: 5432 },
+      ];
+    },
+    (v) => {
+      v.services["temporal-platform-postgres"].network_mode = "host";
+    },
+  ]) {
+    const value = composeFixture();
+    mutate(value);
+    assert.throws(
+      () => verifyNativeCompose(value, composeExpected),
+      /TEMPORAL_NATIVE_COMPOSE_INVALID/,
+    );
+  }
+  const emptyPorts = composeFixture();
+  emptyPorts.services["temporal-platform"].ports = [];
+  assert.equal(verifyNativeCompose(emptyPorts, composeExpected).result, "PASS");
+  const explicitFalse = composeFixture();
+  ingress(explicitFalse).volumes[0].bind.create_host_path = false;
+  delete ingress(explicitFalse).command;
+  assert.equal(
+    verifyNativeCompose(explicitFalse, composeExpected).result,
+    "PASS",
+  );
 });
 
 test("source identity is content-derived, deterministic and rejects invalid revision and symlinks", async (t) => {
@@ -427,6 +648,7 @@ test("source identity is content-derived, deterministic and rejects invalid revi
     "namespace-contract.mjs",
     "provision.sh",
     "provision-core.sh",
+    "ingress/haproxy.cfg",
   ]) {
     await mkdir(resolve(directory, "infra/temporal-platform", path, ".."), {
       recursive: true,
@@ -456,6 +678,22 @@ test("source identity is content-derived, deterministic and rejects invalid revi
   await writeFile(
     join(server, "cmd/server/main_test.go"),
     "test-only never included",
+  );
+  assert.deepEqual(await sourceIdentity(directory, sha), first);
+  assert(
+    first.files.some(
+      (file) => file.path === "infra/temporal-platform/ingress/haproxy.cfg",
+    ),
+  );
+  await writeFile(
+    join(directory, "infra/temporal-platform/ingress/haproxy.cfg"),
+    "changed relay upstream\n",
+  );
+  const relayChanged = await sourceIdentity(directory, sha);
+  assert.notEqual(relayChanged.sourceDigest, first.sourceDigest);
+  await writeFile(
+    join(directory, "infra/temporal-platform/ingress/haproxy.cfg"),
+    "production config\n",
   );
   assert.deepEqual(await sourceIdentity(directory, sha), first);
   await writeFile(join(server, "cmd/server/main.go"), "changed implementation");
@@ -601,9 +839,37 @@ test("actual Compose merge is native-only and rendering fails before any start w
     );
   const result = render(environment);
   assert.equal(result.status, 0, result.stderr);
+  const rendered = JSON.parse(result.stdout);
+  assert.equal(verifyNativeCompose(rendered, composeExpected).result, "PASS");
+  assert.equal(rendered.services["temporal-platform"].ports ?? null, null);
+  assert.deepEqual(
+    rendered.services["temporal-platform-ingress"].ports.map(
+      ({ host_ip, published, target }) => ({ host_ip, published, target }),
+    ),
+    [{ host_ip: "127.0.0.1", published: "17233", target: 7233 }],
+  );
+  const moved = render({
+    ...environment,
+    TEMPORAL_PLATFORM_HOST_PORT: "17299",
+  });
+  assert.equal(moved.status, 0, moved.stderr);
+  const movedCompose = JSON.parse(moved.stdout);
   assert.equal(
-    verifyNativeCompose(JSON.parse(result.stdout), composeExpected).result,
+    verifyNativeCompose(movedCompose, composeExpected).result,
     "PASS",
+  );
+  assert.equal(
+    movedCompose.services["temporal-platform-ingress"].ports[0].published,
+    "17299",
+  );
+  const legacy = render({
+    ...environment,
+    TEMPORAL_PLATFORM_HOST_PORT: "7233",
+  });
+  assert.equal(legacy.status, 0, legacy.stderr);
+  assert.throws(
+    () => verifyNativeCompose(JSON.parse(legacy.stdout), composeExpected),
+    /TEMPORAL_NATIVE_COMPOSE_INVALID/,
   );
   for (const field of [
     "TEMPORAL_PLATFORM_NATIVE_IMAGE",
@@ -898,6 +1164,40 @@ test("SBOM inventories actual build-info and APK package records rather than cla
   );
 });
 
+// Both product namespaces are provisioned by the same admin identity, after the
+// server start, in a fixed order. Only platform-automation carries ownership
+// markers; the customer namespace must never be created with them.
+function assertNamespaceProvisioning(calls, composeFile) {
+  const runs = calls.filter((args) => args.includes("run"));
+  assert.equal(runs.length, 2);
+  const namespaces = runs.map((args) => {
+    assert(args.includes(composeFile));
+    const separator = args.indexOf("--");
+    assert(separator > 0);
+    assert.match(
+      args[separator + 1],
+      /^\/run\/secrets\/temporal-platform-client\/[^/]+\.jwt$/,
+    );
+    return args.slice(separator + 2);
+  });
+  assert.deepEqual(namespaces, [
+    [
+      "platform-automation",
+      "--retention",
+      "7d",
+      "--data",
+      "platform_non_tenant=true",
+      "--data",
+      "platform_contract=1",
+      "--description",
+      "Dedicated non-tenant platform automation workflows",
+    ],
+    ["default", "--retention", "7d"],
+  ]);
+  const up = calls.findIndex((args) => args.includes("up"));
+  assert(up >= 0 && up < calls.indexOf(runs[0]));
+}
+
 test("retained provision refuses missing identity and stock before any up, schema or namespace call", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "native-retained-refusal-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -1014,7 +1314,9 @@ test("retained entry admits the same native overlay only after image preflight a
       'const dir=process.env.TMPDIR+"/"+p;if((fs.statSync(dir).mode&511)!==448||(fs.statSync(dir+"/compose.json").mode&511)!==384)process.exit(9);' +
       'if(process.env.TEST_RENDER_FAIL){process.stderr.write("must-not-appear-in-output");process.exit(7);}' +
       "process.stdout.write(fs.readFileSync(process.env.TEST_COMPOSE));}" +
-      'else if(a.includes("run"))console.log(JSON.stringify({namespaceInfo:{name:"platform-automation",state:"Registered",description:"Dedicated non-tenant platform automation workflows",data:{platform_non_tenant:"true",platform_contract:"1"}},config:{workflowExecutionRetentionTtl:"604800s"},isGlobalNamespace:false}));\n',
+      'else if(a.includes("run"))console.log(JSON.stringify(a[a.indexOf("--")+2]==="default"?' +
+      '{namespaceInfo:{name:"default",state:"Registered"},config:{workflowExecutionRetentionTtl:"604800s"},isGlobalNamespace:false}:' +
+      '{namespaceInfo:{name:"platform-automation",state:"Registered",description:"Dedicated non-tenant platform automation workflows",data:{platform_non_tenant:"true",platform_contract:"1"}},config:{workflowExecutionRetentionTtl:"604800s"},isGlobalNamespace:false}));\n',
   );
   await chmod(docker, 0o755);
   const log = join(directory, "calls.log");
@@ -1079,6 +1381,10 @@ test("retained entry admits the same native overlay only after image preflight a
       join(repo, "infra/temporal-platform/compose.native.yml"),
     ),
   );
+  assertNamespaceProvisioning(
+    calls,
+    join(repo, "infra/temporal-platform/compose.native.yml"),
+  );
   assert.deepEqual(await readdir(join(directory, "tmp")), []);
   for (const failure of [
     "wrong-image-source",
@@ -1128,15 +1434,23 @@ test("disposable wrapper retains shared namespace admission and drift refusal wi
   const docker = join(directory, "bin/docker");
   await writeFile(
     docker,
-    '#!/usr/bin/env node\nconst fs=require("fs");const a=process.argv.slice(2);fs.appendFileSync(process.env.PROVISION_LOG,JSON.stringify(a)+"\\n");if(a.includes("run"))process.stdout.write(fs.readFileSync(process.env.NAMESPACE_JSON));\n',
+    '#!/usr/bin/env node\nconst fs=require("fs");const a=process.argv.slice(2);fs.appendFileSync(process.env.PROVISION_LOG,JSON.stringify(a)+"\\n");if(a.includes("run"))process.stdout.write(fs.readFileSync(a[a.indexOf("--")+2]==="default"?process.env.CUSTOMER_NAMESPACE_JSON:process.env.NAMESPACE_JSON));\n',
   );
   await chmod(docker, 0o755);
   const log = join(directory, "calls.log");
   const data = join(directory, "namespace.json");
-  for (const [retention, accepted] of [
-    ["604800s", true],
-    ["86400s", false],
+  const customerData = join(directory, "customer-namespace.json");
+  for (const [retention, customerMarkers, expectedFailure, callCount] of [
+    ["604800s", undefined, undefined, 3],
+    ["86400s", undefined, "PLATFORM_TEMPORAL_NAMESPACE_DRIFT", 2],
+    [
+      "604800s",
+      { platform_non_tenant: "true" },
+      "TEMPORAL_CUSTOMER_NAMESPACE_DRIFT",
+      3,
+    ],
   ]) {
+    const accepted = expectedFailure === undefined;
     await writeFile(log, "");
     await writeFile(
       data,
@@ -1148,6 +1462,18 @@ test("disposable wrapper retains shared namespace admission and drift refusal wi
           data: { platform_non_tenant: "true", platform_contract: "1" },
         },
         config: { workflowExecutionRetentionTtl: retention },
+        isGlobalNamespace: false,
+      }),
+    );
+    await writeFile(
+      customerData,
+      JSON.stringify({
+        namespaceInfo: {
+          name: "default",
+          state: "Registered",
+          ...(customerMarkers ? { data: customerMarkers } : {}),
+        },
+        config: { workflowExecutionRetentionTtl: "604800s" },
         isGlobalNamespace: false,
       }),
     );
@@ -1175,25 +1501,38 @@ test("disposable wrapper retains shared namespace admission and drift refusal wi
             "codex-task4c-platform-temporal-server",
           PROVISION_LOG: log,
           NAMESPACE_JSON: data,
+          CUSTOMER_NAMESPACE_JSON: customerData,
         },
       },
     );
     assert.equal(result.status, accepted ? 0 : 1, result.stderr);
-    if (!accepted)
-      assert(result.stderr.includes("PLATFORM_TEMPORAL_NAMESPACE_DRIFT"));
+    if (!accepted) assert(result.stderr.includes(expectedFailure));
     const calls = (await readFile(log, "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, callCount);
     assert(
       calls[0].includes("up") &&
         calls[0].includes("codex-task4c-platform-temporal-server"),
     );
     assert(
-      calls[1].includes("run") &&
-        calls[1].includes("codex-task4c-platform-temporal-admin"),
+      calls
+        .slice(1)
+        .every(
+          (args) =>
+            args.includes("run") &&
+            args.includes("codex-task4c-platform-temporal-admin"),
+        ),
     );
+    if (accepted)
+      assertNamespaceProvisioning(
+        calls,
+        join(
+          repo,
+          "infra/temporal-platform/test-support/compose.disposable.yml",
+        ),
+      );
     assert(
       calls.every(
         (args) =>
