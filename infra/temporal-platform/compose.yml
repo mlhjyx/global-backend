@@ -132,6 +132,12 @@ services:
     read_only: true
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    # Stopping needs both. HAProxy installs no SIGTERM/SIGUSR1 handler and PID 1
+    # ignores signals that have none, so an init process must own PID 1; and the
+    # image's default SIGUSR1 is a soft stop that waits for the Backend's
+    # long-lived gRPC connections. Either alone ends in SIGKILL.
+    init: true
+    stop_signal: SIGTERM
     mem_limit: 64m
     pids_limit: 64
     restart: unless-stopped

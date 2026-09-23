@@ -113,6 +113,11 @@ a separate relay:
   container port `7233`. It re-resolves `temporal-platform` through Docker's
   embedded DNS, so recreating the server needs no relay restart. Idle timeouts
   are one hour, so Worker long polls and HTTP/2 keepalive are never cut.
+- It runs under an init process with `stop_signal: SIGTERM`. Both are required:
+  HAProxy installs no SIGTERM/SIGUSR1 handler, PID 1 ignores signals that have
+  none, and the image's default SIGUSR1 is a soft stop that waits for the
+  Backend's long-lived gRPC connections. With either one missing, every stop
+  waits out the grace period and ends in SIGKILL (measured 10.7s versus 0.8s).
 - The retained admission (`temporal-native-publication.mjs compose`) rejects
   any host port on `temporal-platform`. It requires this exact relay image,
   entrypoint, user, mount and network set, and exactly one loopback port that

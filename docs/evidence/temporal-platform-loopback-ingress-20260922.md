@@ -26,6 +26,7 @@ Release Bundle 或 Pilot/GA 验收。没有调用模型，没有改动保留环�
 - 发布 `127.0.0.1:32773`，监听套接字只在 `127.0.0.1`；宿主经 relay 拿到上游应答。
 - 出网：relay 内 `nc -z -w 3 1.1.1.1 443` 被阻断，宿主自身可达（正向对照）。
 - 上游重建后地址 `192.168.64.2 → 192.168.64.4`，relay 未重启（RestartCount 0），约 2 秒后经 relay 恢复连通。
+- 停止语义（独立审查发现后追测）：haproxy 作 PID 1 时 `/proc/1/status` 的 `SigCgt` 为全零，SIGTERM 与 SIGUSR1 都无处理器，`docker stop` 两种信号都是 10.4–10.7 秒后 SIGKILL（exit 137），加 `-W` 也一样；只有 `init: true` 且 `stop_signal: SIGTERM` 两者同时具备才是 0.8 秒 exit 143。按产品 `compose.yml` 形状、握着一条空闲连接实测。
 
 ## disposable harness（候选提交、干净工作树）
 

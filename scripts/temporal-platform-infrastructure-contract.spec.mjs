@@ -458,6 +458,15 @@ test("the Backend reaches native Temporal only through a loopback relay, never a
   assert.match(ingress, /cap_drop: \[ALL\]/);
   assert.match(ingress, /no-new-privileges:true/);
   assert.match(ingress, /pids_limit: \d+/);
+  // HAProxy installs no SIGTERM/SIGUSR1 handler, and PID 1 ignores signals that
+  // have none, so without an init process every stop waits the grace period and
+  // ends in SIGKILL. stop_signal alone cannot fix that.
+  // Stopping the relay needs both: an init process, because HAProxy installs
+  // no SIGTERM/SIGUSR1 handler and PID 1 ignores signals that have none, and
+  // SIGTERM, because the image's default SIGUSR1 is a soft stop that waits for
+  // the Backend's long-lived gRPC connections. Either alone ends in SIGKILL.
+  assert.match(ingress, /init: true/);
+  assert.match(ingress, /stop_signal: SIGTERM/);
   assert.match(ingress, /mem_limit: \d+m/);
   assert.doesNotMatch(
     ingress,
@@ -694,6 +703,8 @@ test("disposable proof reaches Temporal from the host network through the produc
   );
   assert.match(ingress, /source: \.\.\/ingress\/haproxy\.cfg/);
   assert.match(ingress, /- "127\.0\.0\.1::7233"/);
+  assert.match(ingress, /init: true/);
+  assert.match(ingress, /stop_signal: SIGTERM/);
   assert.match(
     ingress,
     /networks:\n      \[codex-task4c-platform-temporal, codex-task4c-platform-temporal-ingress\]/,
