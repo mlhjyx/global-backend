@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import {
   OFFICIAL_REGISTRY,
   assertNoRepositoryNpmrc,
+  buildTrustedGitEnvironment,
   buildTrustedPnpmEnvironment,
   listTrackedRepositoryNpmrc,
   readBoundedRegularText,
@@ -62,6 +63,9 @@ function runReadOnlyGit(root, arguments_) {
     {
       cwd: root,
       encoding: "utf8",
+      // An inherited GIT_DIR (git hooks, `git rebase -x`) would make git read
+      // that repository instead of `root`.
+      env: buildTrustedGitEnvironment(),
       maxBuffer: MAX_INPUT_BYTES,
       timeout: 10_000,
     },

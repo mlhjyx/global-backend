@@ -446,7 +446,7 @@ test("active indexing rejects every non-ignored untracked file", async () => {
     await execFile(
       "git",
       ["add", ".gitignore", "tracked.ts", "credentials.json"],
-      { cwd: root },
+      { cwd: root, env: createSafeGitEnvironment() },
     );
     await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
       cwd: root,

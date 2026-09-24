@@ -22,7 +22,14 @@ import {
   EvidenceRefV1,
   GraphDiagnosticV1,
 } from "./schema";
-import { readUtf8, relativePath, sha256, stableJson, walkFiles } from "./utils";
+import {
+  createSafeGitEnvironment,
+  readUtf8,
+  relativePath,
+  sha256,
+  stableJson,
+  walkFiles,
+} from "./utils";
 
 const execFile = promisify(execFileCallback);
 
@@ -64,6 +71,7 @@ function isProbablyText(value: Buffer): boolean {
 async function git(repositoryRoot: string, args: string[]): Promise<string> {
   const { stdout } = await execFile("git", ["-C", repositoryRoot, ...args], {
     encoding: "utf8",
+    env: createSafeGitEnvironment(),
     maxBuffer: 16 * 1024 * 1024,
   });
   return stdout.trim();
