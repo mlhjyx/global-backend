@@ -113,7 +113,7 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 | --- | --- | --- |
 | 拒绝面 | 唯一被拒的是 `growthos-temporal-reader`（capability 路径上的 `DescribeSchedule`），约 12 次/分，宿主重启后速率不变。`global-backend-platform-worker` 未被拒——它根本没有连过 Temporal，而用其真实 token 手工调用 `platform-automation` 的 `operator namespace describe` 可以成功。`global-backend-customer-worker`、`global-backend-api`（`default` 命名空间）正常工作 | 这是本机只读运行观察，不是 RuntimeEvidence，也不定位产品代码缺陷所在；不证明其他环境有同样表现 |
 | 已排除的配置面 | 逐项核对一致：两侧 reader 主体；`TEMPORAL_RUNTIME_JWT_ISSUER` 与 GrowthOS machine manifest 的 `temporalIssuer`；JWT audience；JWKS URI 及其信任 CA；reader 叶子证书满足 `readerpolicy.singleReaderIdentity`（CN 为主体、无 SAN、EKU 仅 clientAuth、KeyUsage digitalSignature）；服务端 `reader-ca.crt` 对该证书验签通过（带 reader 证书且 SNI 为 reader server name 时 TLS 握手成功并进入 gRPC，不带证书或改用其他 CA 签发的证书则握手失败） | 配置一致不等于已定位根因；未核对项不得据此推定正确 |
-| 已证伪的假设 | 曾假设 gRPC `overrideAuthority` 未把 SNI 设为 reader server name、导致连接落到不要求客户端证书的默认前端（`VerifiedChains` 为空 → `readerpolicy` 的 peer proof 失败）。以一个仅提供 reader 名地址的纯 TCP 转发器实测两次：首次（09-23）未核验流量是否真的经过转发器，结论不成立；重做（09-24）以转发器连接日志确认 GrowthOS 的连接确实经由该地址，**拒绝依旧**。两次实验均已回退 | 证伪一个假设不等于其余假设成立；未经流量核验的转发实验不构成证伪 |
+| **已定位的根因（2026-09-24）** | GrowthOS 的 gRPC 连接**根本不发送 SNI**：在不改 GrowthOS 任何配置的前提下（仅以 host 条目把 `temporal-platform` 指向一台只读 ClientHello、原样透传、不终止 TLS 的 SNI 嗅探代理），观测到的 SNI 捕获为空。而 Temporal 前端**按 SNI 选择监听器**：实测「连 IP 不发 SNI」与「SNI=`temporal-platform`」都落到默认监听器且从不索要客户端证书，只有 SNI 恰为 `temporal-platform-reader` 的连接才会索要并校验 reader 证书。因此 reader 的连接永远落在只认 JWT 的默认监听器上，`VerifiedChains` 恒为空，而 `readerpolicy` 对 `temporal-reader` profile 强制要求非空 peer proof —— 必然 `denied()`。这也解释了此前两次「把地址改成 reader 名」的转发实验为何无效：不发 SNI 时地址名与监听器选择无关 | 已定位触发链，但**未指定由哪一侧修**：可由 GrowthOS 客户端显式设置 SNI，也可由本仓调整 Temporal 前端的 reader mTLS 暴露方式；两者的安全含义不同，需各自评审。本机观察不替代修复后的回归证据 |
 | 首次验证 | 该正向路径此前从未验证过：平台 Temporal 发布当时只执行了负例授权探针，reader 正例被明确记为「改由 GrowthOS 真实 reader 端到端承担」 | 历史负例通过不构成正向路径可用的证据 |
 
 **与既有缺口的关系**：本项与 `platform_target_lookup`（`PLATFORM_AUTHORITY_TARGET_READER_*` 从未配置）同属 R4 未交付项。后者已可由部署配置闭合并在本机观察到 readiness 转 `ok`；本项不能由已知配置面闭合，需单独定位。
@@ -126,6 +126,6 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 2. Program C 保留已验证的C4本地候选，补齐action-intent隐私/DSR、C1 restricted envelope、C5产品接线与跨仓接纳；已完成的本地候选不重复列为未开发。
 3. 根据实际最终制品与保留环境事实生成当前 RuntimeEvidence、可信 Release Bundle，再做完整三次用户旅程和重启/失败/UNKNOWN/隐私删除验收。
 4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。
-5. §4.2 的 GrowthOS reader 授权缺口逐项定位并闭合：需要 Temporal 侧 claim mapper/authorizer 的可观测诊断，或一次受控的真实 reader token 探针（后者动用 GrowthOS 运行时签名密钥，须单独授权）。闭合前不得把 platform Worker 就绪、capability 事实或相关 RuntimeEvidence 记为成立。
+5. §4.2 的 GrowthOS reader 授权缺口已定位到「客户端不发 SNI ⇒ 落到不索要客户端证书的默认前端 ⇒ peer proof 恒失败」，待决的是修复面选择：GrowthOS 客户端显式设置 SNI，或本仓调整 Temporal 前端对 reader mTLS 的暴露方式。注意 `readerpolicy` 的注释声称「包括仅 JWT 的公共监听器也要 peer proof」，而当前 `temporal.yaml` 只在 `temporal-platform-reader` 这个 hostOverride 上开启 `requireClientAuth`，两者需要一并对齐。闭合前不得把 platform Worker 就绪、capability 事实或相关 RuntimeEvidence 记为成立。
 
 相同动作、目标和范围的有效授权继续沿用。源码/PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、真实 provider/model/付费调用或 Pilot/GA。正常产品请求的费用权威与开发者 ad-hoc 调用授权保持分离。
