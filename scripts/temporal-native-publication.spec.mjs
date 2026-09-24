@@ -835,10 +835,23 @@ test("actual Compose merge is native-only and rendering fails before any start w
         "--format",
         "json",
       ],
-      { env, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024 },
+      // Compose renders in well under a second, but the first call also pays
+      // the plugin's cold start. A loaded CI runner exceeded the old 10s
+      // budget; spawnSync then SIGTERMs the child, which surfaces as status 255
+      // with empty stderr and reads like a Compose rejection instead of the
+      // timeout it is. The diagnostics below name the timeout when it happens.
+      { env, encoding: "utf8", timeout: 60000, maxBuffer: 1024 * 1024 },
     );
+  const diagnose = (value) =>
+    `status=${value.status} signal=${value.signal} error=${value.error?.code ?? "none"} stderr=${value.stderr}`;
+  // A render killed by the timeout must never count as a rejection: these cases
+  // have to prove that Compose itself refused the input.
+  const assertRejected = (value) => {
+    assert.notEqual(value.status, 0, diagnose(value));
+    assert.equal(value.error?.code ?? null, null, diagnose(value));
+  };
   const result = render(environment);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, diagnose(result));
   const rendered = JSON.parse(result.stdout);
   assert.equal(verifyNativeCompose(rendered, composeExpected).result, "PASS");
   assert.equal(rendered.services["temporal-platform"].ports ?? null, null);
@@ -852,7 +865,7 @@ test("actual Compose merge is native-only and rendering fails before any start w
     ...environment,
     TEMPORAL_PLATFORM_HOST_PORT: "17299",
   });
-  assert.equal(moved.status, 0, moved.stderr);
+  assert.equal(moved.status, 0, diagnose(moved));
   const movedCompose = JSON.parse(moved.stdout);
   assert.equal(
     verifyNativeCompose(movedCompose, composeExpected).result,
@@ -866,7 +879,7 @@ test("actual Compose merge is native-only and rendering fails before any start w
     ...environment,
     TEMPORAL_PLATFORM_HOST_PORT: "7233",
   });
-  assert.equal(legacy.status, 0, legacy.stderr);
+  assert.equal(legacy.status, 0, diagnose(legacy));
   assert.throws(
     () => verifyNativeCompose(JSON.parse(legacy.stdout), composeExpected),
     /TEMPORAL_NATIVE_COMPOSE_INVALID/,
@@ -885,14 +898,14 @@ test("actual Compose merge is native-only and rendering fails before any start w
   ]) {
     const env = { ...environment };
     delete env[field];
-    assert.notEqual(render(env).status, 0);
+    assertRejected(render(env));
   }
   const stock = render({
     ...environment,
     TEMPORAL_PLATFORM_NATIVE_IMAGE:
       "docker.io/temporalio/server@sha256:" + "c".repeat(64),
   });
-  assert.equal(stock.status, 0);
+  assert.equal(stock.status, 0, diagnose(stock));
   assert.throws(
     () => verifyNativeCompose(JSON.parse(stock.stdout), composeExpected),
     /TEMPORAL_NATIVE_COMPOSE_INVALID/,
