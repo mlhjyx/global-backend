@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 
 const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
@@ -386,6 +387,7 @@ test("comparable audit subjects bind exact clean commits and reject untracked de
     const execution = spawnSync("git", arguments_, {
       cwd: directory,
       encoding: "utf8",
+      env: createSafeGitEnvironment(),
     });
     assert.equal(execution.status, 0, execution.stderr);
     return execution.stdout.trim();
@@ -438,6 +440,7 @@ test("graph delta CLI rejects untrusted dependency sources even when the graph i
     const execution = spawnSync("git", arguments_, {
       cwd: directory,
       encoding: "utf8",
+      env: createSafeGitEnvironment(),
     });
     assert.equal(
       execution.status,
@@ -492,7 +495,7 @@ test("graph delta CLI rejects untrusted dependency sources even when the graph i
         "--candidate-root",
         directory,
       ],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: createSafeGitEnvironment() },
     );
     assert.notEqual(execution.status, 0, execution.stdout);
     assert.match(
@@ -510,6 +513,7 @@ test("dependency graph proof compares exact trusted-base and head, never their m
     const execution = spawnSync("git", arguments_, {
       cwd: directory,
       encoding: "utf8",
+      env: createSafeGitEnvironment(),
     });
     assert.equal(
       execution.status,
@@ -547,12 +551,12 @@ test("dependency graph proof compares exact trusted-base and head, never their m
         "--",
         "pnpm-lock.yaml",
       ],
-      { cwd: directory, encoding: "utf8" },
+      { cwd: directory, encoding: "utf8", env: createSafeGitEnvironment() },
     );
     const exactEndpoints = spawnSync(
       "git",
       ["diff", "--quiet", trustedBase, staleHead, "--", "pnpm-lock.yaml"],
-      { cwd: directory, encoding: "utf8" },
+      { cwd: directory, encoding: "utf8", env: createSafeGitEnvironment() },
     );
     assert.equal(
       tripleDot.status,

@@ -45,6 +45,7 @@ import {
   COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
 } from "./copy-sonnet-recovery-contract";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const TOKEN = createHash("sha256")
   .update(import.meta.url)
@@ -75,6 +76,7 @@ function git(root: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd: root,
     encoding: "utf8",
+    env: createSafeGitEnvironment(),
   }).trim();
 }
 

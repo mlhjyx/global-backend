@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 
 const BACKEND_ROOT = resolve(import.meta.dirname, "..");
 const AUTHORITY_ROOT = resolve(
@@ -31,6 +32,7 @@ function git(args, input) {
   return execFileSync("git", args, {
     cwd: AUTHORITY_ROOT,
     encoding: "utf8",
+    env: createSafeGitEnvironment(),
     input,
     stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   }).trim();
@@ -48,7 +50,7 @@ test("clean reviewed GrowthOS authority independently materializes the exact Bac
   execFileSync(
     "git",
     ["merge-base", "--is-ancestor", EXPECTED.reviewedHeadCommit, "HEAD"],
-    { cwd: AUTHORITY_ROOT, stdio: "ignore" },
+    { cwd: AUTHORITY_ROOT, env: createSafeGitEnvironment(), stdio: "ignore" },
   );
   assert.equal(git(["status", "--porcelain=v1"]), "");
 

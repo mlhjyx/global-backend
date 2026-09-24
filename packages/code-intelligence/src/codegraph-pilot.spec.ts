@@ -29,6 +29,7 @@ import {
   measureIncrementalUpdate,
 } from "./codegraph-pilot";
 import { ContractGraphV1, GraphNodeV1 } from "./schema";
+import { createSafeGitEnvironment } from "../../../scripts/safe-git-environment.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -421,12 +422,17 @@ test("path precision counts extra returned paths as false positives", () => {
 test("active indexing rejects every non-ignored untracked file", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codegraph-untracked-"));
   try {
-    await execFile("git", ["init", "--quiet"], { cwd: root });
+    await execFile("git", ["init", "--quiet"], {
+      cwd: root,
+      env: createSafeGitEnvironment(),
+    });
     await execFile("git", ["config", "user.email", "test@example.invalid"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
     });
     await execFile("git", ["config", "user.name", "ContractGraph Test"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
     });
     await writeFile(
       path.join(root, ".gitignore"),
@@ -444,6 +450,7 @@ test("active indexing rejects every non-ignored untracked file", async () => {
     );
     await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
     });
     await assertNoUntrackedIndexInputs(root);
 
@@ -452,7 +459,10 @@ test("active indexing rejects every non-ignored untracked file", async () => {
       "export const secret = 'must-not-index';\n",
     );
     await assert.rejects(assertNoUntrackedIndexInputs(root), /recovery\.ts/);
-    await execFile("git", ["add", "recovery.ts"], { cwd: root });
+    await execFile("git", ["add", "recovery.ts"], {
+      cwd: root,
+      env: createSafeGitEnvironment(),
+    });
     await assertNoUntrackedIndexInputs(root);
 
     const snapshot = path.join(
@@ -484,7 +494,10 @@ test("active indexing rejects every non-ignored untracked file", async () => {
       await assertActiveSnapshotReady(root, snapshot, initialTrackedPaths),
       /^[a-f0-9]{64}$/,
     );
-    await execFile("git", ["rm", "--quiet", "tracked.ts"], { cwd: root });
+    await execFile("git", ["rm", "--quiet", "tracked.ts"], {
+      cwd: root,
+      env: createSafeGitEnvironment(),
+    });
     await assert.rejects(
       assertActiveSnapshotReady(root, snapshot, initialTrackedPaths),
       /tracked path set changed/,
@@ -507,20 +520,30 @@ test("incremental benchmark proves old symbol removal and new symbol indexing", 
 test("main archive extraction replaces a pre-existing wrong snapshot", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codegraph-archive-"));
   try {
-    await execFile("git", ["init", "--quiet"], { cwd: root });
+    await execFile("git", ["init", "--quiet"], {
+      cwd: root,
+      env: createSafeGitEnvironment(),
+    });
     await execFile("git", ["config", "user.email", "test@example.invalid"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
     });
     await execFile("git", ["config", "user.name", "ContractGraph Test"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
     });
     await writeFile(path.join(root, "truth.txt"), "from git\n");
-    await execFile("git", ["add", "truth.txt"], { cwd: root });
+    await execFile("git", ["add", "truth.txt"], {
+      cwd: root,
+      env: createSafeGitEnvironment(),
+    });
     await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
     });
     const { stdout } = await execFile("git", ["rev-parse", "HEAD"], {
       cwd: root,
+      env: createSafeGitEnvironment(),
       encoding: "utf8",
     });
     const destination = path.join(

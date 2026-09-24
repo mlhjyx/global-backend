@@ -13,6 +13,7 @@ import {
   verifyGitReviewedEvidenceAcceptanceArtifact,
   writeGitReviewedEvidenceAcceptanceArtifact,
 } from "./git-reviewed-evidence-acceptance";
+import { createSafeGitEnvironment } from "../../../../scripts/safe-git-environment.mjs";
 
 const directories: string[] = [];
 const REQUIRE = createRequire(import.meta.url);
@@ -27,7 +28,11 @@ afterEach(async () => {
 });
 
 function git(root: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    env: createSafeGitEnvironment(),
+  }).trim();
 }
 
 const candidateReceipt = Object.freeze({

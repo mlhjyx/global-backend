@@ -4,6 +4,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { inspectFilesystem } from "./governance-main-worktree-sync-filesystem.mjs";
+import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -104,16 +105,6 @@ export function assertGitCommandAllowed(args) {
   ) {
     throw new Error(`forbidden git command: git ${args.join(" ")}`);
   }
-}
-
-export function createSafeGitEnvironment(environment = process.env) {
-  const safeEnvironment = Object.fromEntries(
-    Object.entries(environment).filter(([key]) => !key.startsWith("GIT_")),
-  );
-  return {
-    ...safeEnvironment,
-    GIT_TERMINAL_PROMPT: "0",
-  };
 }
 
 async function defaultGit(args, { cwd = EXPECTED_MAIN_WORKTREE } = {}) {

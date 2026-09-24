@@ -11,10 +11,10 @@ import {
   EXPECTED_MAIN_WORKTREE,
   applyMainWorktreeSync as applyMainWorktreeSyncImplementation,
   assertGitCommandAllowed,
-  createSafeGitEnvironment,
   getCliExitCode,
   getMainWorktreeSyncStatus as getMainWorktreeSyncStatusImplementation,
 } from "./governance-main-worktree-sync.mjs";
+import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 
 const MAIN_HEAD = "1111111111111111111111111111111111111111";
 const REMOTE_HEAD = "2222222222222222222222222222222222222222";
@@ -691,6 +691,7 @@ async function realApplyFixture({
     execFileSync("git", args, {
       cwd: root,
       encoding: "utf8",
+      env: createSafeGitEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
     });
   run(["init", "-q", "-b", "main"]);
@@ -747,6 +748,55 @@ async function realApplyFixture({
     head: run(["rev-parse", "HEAD"]).trim(),
   };
 }
+
+async function withInheritedEnvironment(overrides, action) {
+  const previous = Object.fromEntries(
+    Object.keys(overrides).map((key) => [key, process.env[key]]),
+  );
+  Object.assign(process.env, overrides);
+  try {
+    return await action();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test("real apply fixture leaves a repository named by an inherited GIT_DIR untouched", async () => {
+  // Git exports GIT_DIR/GIT_PREFIX to hooks; a fixture that inherits them
+  // runs init/config/commit against that repository instead of its own.
+  const outside = await mkdtemp(path.join(tmpdir(), "governor-outside-"));
+  const outsideGit = (args) =>
+    spawnSync("git", args, {
+      cwd: outside,
+      encoding: "utf8",
+      env: createSafeGitEnvironment(),
+    });
+  outsideGit(["init", "-q", "-b", "main"]);
+  const configPath = path.join(outside, ".git", "config");
+  const configBefore = await readFile(configPath, "utf8");
+
+  const fixture = await withInheritedEnvironment(
+    { GIT_DIR: path.join(outside, ".git"), GIT_PREFIX: "" },
+    () => realApplyFixture(),
+  ).catch((error) => ({ error }));
+
+  assert.equal(await readFile(configPath, "utf8"), configBefore);
+  assert.equal(
+    outsideGit(["config", "--file", configPath, "--bool", "core.bare"]).stdout,
+    "false\n",
+  );
+  assert.equal(
+    outsideGit(["config", "--file", configPath, "--get-regexp", "^user\\."])
+      .status,
+    1,
+  );
+  assert.equal(outsideGit(["for-each-ref"]).stdout, "");
+  assert.equal(fixture.error, undefined);
+  assert.equal(fixture.result.state, "APPLIED");
+});
 
 test("real apply preserves ignored local bytes while changing tracked and incoming sibling files", async () => {
   const { root, target, result, calls, head } = await realApplyFixture();

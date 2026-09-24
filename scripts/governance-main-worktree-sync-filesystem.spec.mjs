@@ -16,17 +16,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { inspectFilesystem } from "./governance-main-worktree-sync-filesystem.mjs";
+import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "main-sync-proof-"));
-  execFileSync("git", ["init", "-q", root]);
+  execFileSync("git", ["init", "-q", root], {
+    env: createSafeGitEnvironment(),
+  });
   await writeFile(path.join(root, ".gitignore"), ".superpowers/\n");
   await mkdir(path.join(root, ".superpowers"));
   await writeFile(path.join(root, ".superpowers", "local.json"), "original");
   const ignored = execFileSync(
     "git",
     ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
-    { cwd: root, encoding: "utf8" },
+    { cwd: root, encoding: "utf8", env: createSafeGitEnvironment() },
   )
     .split("\0")
     .filter(Boolean);
@@ -149,7 +152,11 @@ test("real Git status integrates exact ignored inventory without writing the che
   } = await import("./governance-main-worktree-sync.mjs");
   const { root } = await fixture();
   const run = (args) =>
-    execFileSync("git", args, { cwd: root, encoding: "utf8" });
+    execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      env: createSafeGitEnvironment(),
+    });
   run(["config", "user.name", "Local test"]);
   run(["config", "user.email", "local-test@example.invalid"]);
   run(["symbolic-ref", "HEAD", "refs/heads/main"]);
