@@ -29,6 +29,7 @@ import {
 } from "./copy-sonnet-recovery-manifest-prep";
 import { canonicalDigest } from "../../model-runtime/context-engine";
 import { describe, expect, it } from "vitest";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const PREPARATION_HEAD = "f".repeat(40);
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../");
@@ -199,22 +200,19 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     const trackedPath = "evidence.json";
     const absolutePath = resolve(repositoryRoot, trackedPath);
     try {
-      execFileSync("git", ["init", "--quiet"], { cwd: repositoryRoot });
-      execFileSync("git", ["config", "user.email", "test@example.invalid"], {
-        cwd: repositoryRoot,
-      });
-      execFileSync("git", ["config", "user.name", "Test"], {
-        cwd: repositoryRoot,
-      });
+      const git = (...args: string[]) =>
+        execFileSync("git", args, {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: createSafeGitEnvironment(),
+        }).trim();
+      git("init", "--quiet");
+      git("config", "user.email", "test@example.invalid");
+      git("config", "user.name", "Test");
       writeFileSync(absolutePath, "fixed\n", "utf8");
-      execFileSync("git", ["add", trackedPath], { cwd: repositoryRoot });
-      execFileSync("git", ["commit", "--quiet", "-m", "fixture"], {
-        cwd: repositoryRoot,
-      });
-      const fixedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
-        cwd: repositoryRoot,
-        encoding: "utf8",
-      }).trim();
+      git("add", trackedPath);
+      git("commit", "--quiet", "-m", "fixture");
+      const fixedCommit = git("rev-parse", "HEAD");
 
       expect(
         readCopySonnetRecoveryFixedTrackedFile({

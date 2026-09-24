@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 
 const repositoryRoot = new URL("../", import.meta.url);
 
@@ -189,8 +190,13 @@ function scopeScript(workflow) {
 async function runScope(script, changedPaths, event = "pull_request") {
   const root = await mkdtemp(join(tmpdir(), "ci-scope-"));
   try {
-    // Ignore the developer's global/system git config (signing, hooks).
-    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    // Ignore the developer's global/system git config (signing, hooks) and any
+    // GIT_DIR/GIT_* inherited from an enclosing git hook.
+    const gitEnv = {
+      ...createSafeGitEnvironment(),
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    };
     const git = (...args) =>
       execFileSync("git", args, { cwd: root, encoding: "utf8", env: gitEnv }).trim();
     git("init", "-q");

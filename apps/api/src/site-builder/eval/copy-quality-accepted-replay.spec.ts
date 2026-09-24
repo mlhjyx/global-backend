@@ -54,6 +54,7 @@ import {
   COPY_QUALITY_REVIEW_SCHEMA_VERSION,
   COPY_QUALITY_RUBRIC_VERSION,
 } from "./copy-quality-rubric";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const directories: string[] = [];
 let sequence = 0;
@@ -86,7 +87,11 @@ function sharedCampaignBinding(binding: CopyQualityCandidateRuntimeBinding) {
 }
 
 function git(root: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    env: createSafeGitEnvironment(),
+  }).trim();
 }
 
 async function realCandidate(input?: {

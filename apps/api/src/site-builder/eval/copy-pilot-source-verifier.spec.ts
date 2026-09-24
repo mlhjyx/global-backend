@@ -22,6 +22,7 @@ import {
   getCopyPilotVerifiedSourceBinding,
   requireCopyPilotVerifiedSourceBinding,
 } from "./copy-pilot-source-verifier";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const directories: string[] = [];
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../");
@@ -35,7 +36,11 @@ afterEach(async () => {
 });
 
 function git(root: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    env: createSafeGitEnvironment(),
+  }).trim();
 }
 
 async function repository() {

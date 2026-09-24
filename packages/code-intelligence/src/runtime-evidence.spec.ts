@@ -17,6 +17,7 @@ import {
 import { createEvidence, writeDerivedArtifacts } from "./scan";
 import { ContractGraphV1, CoverageReportV1, GraphNodeV1 } from "./schema";
 import { sha256, stableJson } from "./utils";
+import { createSafeGitEnvironment } from "../../../scripts/safe-git-environment.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -193,17 +194,28 @@ async function fixtureRepository(): Promise<{
   graph: ContractGraphV1;
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), "runtime-evidence-"));
-  await execFile("git", ["init", "--quiet"], { cwd: root });
+  await execFile("git", ["init", "--quiet"], {
+    cwd: root,
+    env: createSafeGitEnvironment(),
+  });
   await execFile("git", ["config", "user.email", "test@example.invalid"], {
     cwd: root,
+    env: createSafeGitEnvironment(),
   });
   await execFile("git", ["config", "user.name", "Runtime Evidence Test"], {
     cwd: root,
+    env: createSafeGitEnvironment(),
   });
   await writeFile(path.join(root, ".gitignore"), ".code-intelligence/\n");
   await writeFile(path.join(root, "fixture.ts"), "export const fixture = 1;\n");
-  await execFile("git", ["add", ".gitignore", "fixture.ts"], { cwd: root });
-  await execFile("git", ["commit", "--quiet", "-m", "fixture"], { cwd: root });
+  await execFile("git", ["add", ".gitignore", "fixture.ts"], {
+    cwd: root,
+    env: createSafeGitEnvironment(),
+  });
+  await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
+    cwd: root,
+    env: createSafeGitEnvironment(),
+  });
   const evidence = await createEvidence(root);
   const scheduleEdge = {
     id: "edge:schedule-calls-acquisition",

@@ -40,6 +40,7 @@ import {
 } from "./copy-real-capability-runner";
 import { prepareCopyPilotLedgerIdentity } from "./copy-pilot-ledger-identity";
 import { COPY_PILOT_COMPILED_BUILD_COMMANDS } from "./copy-pilot-source-verifier";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const EXEC_FILE = promisify(execFile);
 const REQUIRE = createRequire(import.meta.url);
@@ -62,6 +63,7 @@ function git(repositoryRoot: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd: repositoryRoot,
     encoding: "utf8",
+    env: createSafeGitEnvironment(),
   }).trim();
 }
 
@@ -1373,6 +1375,7 @@ describe("Copy real capability runner admission", () => {
       });
     `;
     const { stdout } = await EXEC_FILE(process.execPath, ["-e", script], {
+      env: createSafeGitEnvironment(),
       maxBuffer: 4 * 1024 * 1024,
     });
     const result = JSON.parse(stdout) as {

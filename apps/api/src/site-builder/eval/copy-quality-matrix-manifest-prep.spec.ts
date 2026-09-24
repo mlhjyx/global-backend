@@ -25,6 +25,7 @@ import {
   writeCopyQualityMatrixManifestCreateOnly,
   type CopyQualityMatrixSourceFile,
 } from "./copy-quality-matrix-manifest-prep";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const FIXED_SOURCE_COMMIT = "a".repeat(40);
 const PREPARATION_HEAD_COMMIT = "b".repeat(40);
@@ -57,6 +58,7 @@ function git(root: string, args: readonly string[]): string {
   return execFileSync("git", [...args], {
     cwd: root,
     encoding: "utf8",
+    env: createSafeGitEnvironment(),
   }).trim();
 }
 
