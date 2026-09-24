@@ -105,13 +105,15 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 
 > 本节只记录这一个缺口，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4/§4.1 的证据裁决。开发宿主自 2026-09-22 起为原生 Ubuntu 主机；§4.1 的 WSL2 记述绑定其原核验时刻，本节不改写它。
 
-原生 Temporal 持续拒绝 **`platform-automation` 命名空间的两个机器身份**，而 `default` 命名空间的两个身份正常。因此 GrowthOS capability producer 取不到 Temporal 事实，Backend 的 `platform_budget_authority` 保持 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`、platform Worker 保持 `PLATFORM_WORKER_NOT_READY`。
+原生 Temporal 持续拒绝 GrowthOS 的 `growthos-temporal-reader` 身份（`PLATFORM_TEMPORAL_READER_AUTH_DENIED`）。因此 GrowthOS capability producer 取不到 Temporal 事实，Backend 的 `platform_budget_authority` 保持 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`、platform Worker 保持 `PLATFORM_WORKER_NOT_READY`。
+
+> **2026-09-24 更正**：本节最初（2026-09-23）记为「`platform-automation` 命名空间的两个机器身份都被拒」，并称停掉 platform Worker 后拒绝速率减半可区分出两个独立调用方。该归因**错误**，下表已按复核结果改写。实际上 platform Worker 从未连过 Temporal（其日志为 `polling disabled`，30 分钟内 `temporal-platform-worker` profile 的机器 token 签发数为 0）；它轮询的是 GrowthOS 的 capability 端点，而**每次 capability 读取都会触发 GrowthOS reader 去调 `DescribeSchedule`**，所以停掉它减半的是同一个调用方的触发频率。以真实 `global-backend-platform-worker` token 直接调用 `platform-automation` 的 `operator namespace describe` **成功**，证明该身份本身可以通过授权。
 
 | 观察 | 当前可确认的事实 | 不得外推 |
 | --- | --- | --- |
-| 拒绝面 | 原生 Temporal 以 `PLATFORM_TEMPORAL_READER_AUTH_DENIED` 持续拒绝 `growthos-temporal-reader`（capability 的 `DescribeSchedule`）与 `global-backend-platform-worker`；同一时刻 `global-backend-customer-worker`、`global-backend-api`（`default` 命名空间）正常工作。停止 platform Worker 容器后拒绝速率减半，据此区分出两个独立调用方 | 这是本机只读运行观察，不是 RuntimeEvidence，也不定位产品代码缺陷所在；不证明其他环境有同样表现 |
+| 拒绝面 | 唯一被拒的是 `growthos-temporal-reader`（capability 路径上的 `DescribeSchedule`），约 12 次/分，宿主重启后速率不变。`global-backend-platform-worker` 未被拒——它根本没有连过 Temporal，而用其真实 token 手工调用 `platform-automation` 的 `operator namespace describe` 可以成功。`global-backend-customer-worker`、`global-backend-api`（`default` 命名空间）正常工作 | 这是本机只读运行观察，不是 RuntimeEvidence，也不定位产品代码缺陷所在；不证明其他环境有同样表现 |
 | 已排除的配置面 | 逐项核对一致：两侧 reader 主体；`TEMPORAL_RUNTIME_JWT_ISSUER` 与 GrowthOS machine manifest 的 `temporalIssuer`；JWT audience；JWKS URI 及其信任 CA；reader 叶子证书满足 `readerpolicy.singleReaderIdentity`（CN 为主体、无 SAN、EKU 仅 clientAuth、KeyUsage digitalSignature）；服务端 `reader-ca.crt` 对该证书验签通过（带 reader 证书且 SNI 为 reader server name 时 TLS 握手成功并进入 gRPC，不带证书或改用其他 CA 签发的证书则握手失败） | 配置一致不等于已定位根因；未核对项不得据此推定正确 |
-| 已证伪的假设 | 曾假设 gRPC `overrideAuthority` 未把 SNI 设为 reader server name、导致连接落到不要求客户端证书的默认前端（`VerifiedChains` 为空 → `readerpolicy` 的 peer proof 失败）。以一个仅提供 reader 名地址的纯 TCP 转发器实测，**拒绝依旧**，该实验已回退 | 证伪一个假设不等于其余假设成立 |
+| 已证伪的假设 | 曾假设 gRPC `overrideAuthority` 未把 SNI 设为 reader server name、导致连接落到不要求客户端证书的默认前端（`VerifiedChains` 为空 → `readerpolicy` 的 peer proof 失败）。以一个仅提供 reader 名地址的纯 TCP 转发器实测两次：首次（09-23）未核验流量是否真的经过转发器，结论不成立；重做（09-24）以转发器连接日志确认 GrowthOS 的连接确实经由该地址，**拒绝依旧**。两次实验均已回退 | 证伪一个假设不等于其余假设成立；未经流量核验的转发实验不构成证伪 |
 | 首次验证 | 该正向路径此前从未验证过：平台 Temporal 发布当时只执行了负例授权探针，reader 正例被明确记为「改由 GrowthOS 真实 reader 端到端承担」 | 历史负例通过不构成正向路径可用的证据 |
 
 **与既有缺口的关系**：本项与 `platform_target_lookup`（`PLATFORM_AUTHORITY_TARGET_READER_*` 从未配置）同属 R4 未交付项。后者已可由部署配置闭合并在本机观察到 readiness 转 `ok`；本项不能由已知配置面闭合，需单独定位。
@@ -124,6 +126,6 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 2. Program C 保留已验证的C4本地候选，补齐action-intent隐私/DSR、C1 restricted envelope、C5产品接线与跨仓接纳；已完成的本地候选不重复列为未开发。
 3. 根据实际最终制品与保留环境事实生成当前 RuntimeEvidence、可信 Release Bundle，再做完整三次用户旅程和重启/失败/UNKNOWN/隐私删除验收。
 4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。
-5. §4.2 的平台命名空间机器身份授权缺口逐项定位并闭合：需要 Temporal 侧 claim mapper/authorizer 的可观测诊断，或一次受控的真实 reader token 探针（后者动用 GrowthOS 运行时签名密钥，须单独授权）。闭合前不得把 platform Worker 就绪、capability 事实或相关 RuntimeEvidence 记为成立。
+5. §4.2 的 GrowthOS reader 授权缺口逐项定位并闭合：需要 Temporal 侧 claim mapper/authorizer 的可观测诊断，或一次受控的真实 reader token 探针（后者动用 GrowthOS 运行时签名密钥，须单独授权）。闭合前不得把 platform Worker 就绪、capability 事实或相关 RuntimeEvidence 记为成立。
 
 相同动作、目标和范围的有效授权继续沿用。源码/PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、真实 provider/model/付费调用或 Pilot/GA。正常产品请求的费用权威与开发者 ad-hoc 调用授权保持分离。
