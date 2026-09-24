@@ -75,12 +75,14 @@
 
 ## 4. 本仓边界（获客情报后端）【已拍板 2026-07-10】
 
+本节及 §6 的 A/B/C 是团队：SaaS 平台方（A）/接口层（B）/本仓开发（C）；ADR-025、status 与 release-plan 的 Program A/B/C 是工作包，两者不可混用。
+
 - **本仓 = 买家智能与机会资格引擎**：Understand → Target → Discover → Qualify → **LeadQualifiedPackage 交付**（=交付包 TA-007）。
 - 本仓**不建、任何时候也不在本仓新增**：身份/用户/角色、Campaign、发送/触达、Conversation/Inbox、Opportunity/QGO/SAO、归因。SaaS 消费 `LeadQualified` 事件创建 Opportunity（CANDIDATE 态）；成交结果（QgoCreated/SalesAccepted/CommercialOutcomeVerified/LeadOutcomeRejected）**只回流为质量学习标签**，QGO 主状态不复制回本仓。
 - **存储侧合规必须留在本仓**（个人数据在摄取/富集时已发生处理）：Data Rights、PII 分类、保留期、Suppression、DSR 删除。发送侧合规、Approval、ExecutionAuthorization 由 SaaS/执行系统负责，但**消费本仓的政策结论**。
 - 边界判据一句话：动「人、权、审、发、看」不进本仓；动「挖、并、证、分、存」是本仓。
-- **改边界的唯一途径**：修订 ADR-001 并经 A/B/业务负责人三方书面确认——不存在其他「过流程就能加」的后门。
-- **身份归属（已拍板）与两条硬规矩**：身份 SoR 维持在 A（独立库），本仓只 JWKS 验签；为拦住交付包 AR-01/AR-02 风险，锁定：① **A 的库永远不存业务对象**——Company/ICP/Lead/Campaign/Opportunity/QGO 唯一主数据在增长库；② **权限执行点在服务端**（B 层 claims→scopes），任何接口不信任前端提交的 role。详见 ADR-011。
+- **改边界的唯一途径**：修订 ADR-001 并经 SaaS 平台方（A）/接口层（B）/业务负责人三方书面确认——不存在其他「过流程就能加」的后门。
+- **身份归属（已拍板）与两条硬规矩**：身份 SoR 维持在 SaaS 平台方（A，独立库），本仓只 JWKS 验签；为拦住交付包 AR-01/AR-02 风险，锁定：① **SaaS 平台方（A）的库永远不存业务对象**——Company/ICP/Lead/Campaign/Opportunity/QGO 唯一主数据在增长库；② **权限执行点在服务端**（接口层（B）claims→scopes），任何接口不信任前端提交的 role。详见 ADR-011。
 
 ## 4A. Site Builder 产品面与当前边界【2026-07-24 真值】
 
@@ -111,11 +113,11 @@ Goal（业务目标：如进入德国市场）
 
 | 方                                     | 拥有                                                                                                                         |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| A（SaaS 平台）                         | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing/Credits SoR、Site Builder Budget Grant 签发 |
-| B（接口层，同库）                      | JWKS 与 Budget Grant 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射                                     |
-| Codex（本仓当前开发主体；用户 C 拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规                         |
+| SaaS 平台方（A）                         | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing/Credits SoR、Site Builder Budget Grant 签发 |
+| 接口层（B，同库）                      | JWKS 与 Budget Grant 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射                                     |
+| 本仓开发（C，当前开发主体为 Claude Code；用户拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规                         |
 
-四接缝：① **JWKS**——A 签发登录凭证、我们只验签解出租户；② **Budget Grant**——A 对正常产品 BuildRun 签发短期、一次性、workspace/operation/request 绑定金额授权（已有 Site 时也绑定 site），本仓不签发、不扩额；③ **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK，Site Builder 费用摘要通过事务性 Outbox 回报；④ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封、Budget Grant）在实现前先经 B/A 评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
+四接缝：① **JWKS**——SaaS 平台方（A）签发登录凭证、我们只验签解出租户；② **Budget Grant**——SaaS 平台方（A）对正常产品 BuildRun 签发短期、一次性、workspace/operation/request 绑定金额授权（已有 Site 时也绑定 site），本仓不签发、不扩额；③ **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK，Site Builder 费用摘要通过事务性 Outbox 回报；④ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封、Budget Grant）在实现前先经接口层（B）/SaaS 平台方（A）评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
 
 ## 7. 首个商业切口
 

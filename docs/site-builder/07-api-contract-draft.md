@@ -14,6 +14,7 @@
 ## 0. 通用约定
 
 - Base：`/api/v1/site-builder`；鉴权：`Authorization: Bearer <SaaS token>`（JWKS 验签 → workspace，RLS 隔离）。下文端点均相对此 Base。
+- **Budget Grant**：`IntakeController_create_v1` 与 `BuildsController_create_v1` 必须携带 `X-Site-Build-Budget-Grant` 请求头，值由 SaaS 服务端签发。SaaS 服务端先调用 `SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1` 或 `SiteBuildTechnicalBudgetQuoteController_quoteRefurbish_v1` 取得 technical quote，再签发 Grant 并调用创建端点；浏览器不能直接调用 intake 或 build。
 - **契约生成**：正式契约 code-first OpenAPI **JSON**（ADR-009 唯一 REST 真值），本稿是先行对齐稿，字段以生成的 Scalar 门户为准。
 - 响应信封（与后端既有收口④定稿一致，ADR-009；M0 实现即此形状）：单资源 `{ "data": … }`；列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`；错误 `{ "error": { "code", "message", "details"? } }`。协议键 snake_case，资源字段 camelCase。
 - **HTTP 状态**：401 未认证 / 403 越权 / 404 不存在 / 409 冲突（构建进行中、Asset 被引用、body 基版本落后）/ 412 前置条件失败（`If-Match` 不匹配）/ 422 校验失败或发布门拒绝 / 428 缺少必要写前置条件 / 429 配额或限流。业务分支一律读 `error.code`（唯一稳定键，见 **§13 统一错误码表**）；`message` 仅供展示、可变。
@@ -24,7 +25,8 @@
 ## 1. 注册引导（intake）〔🟢 M0 / R0-contract 已落地〕
 
 ```
-POST /intake        ← 建议 SaaS 服务端代理转发（注册时用户尚无 token，见 §12 对齐项）
+POST /intake        ← 必须经 SaaS 服务端调用，浏览器不得直调（见 §12 对齐项）
+hdr : X-Site-Build-Budget-Grant: <SaaS 服务端签发的 Budget Grant>
 hdr : Idempotency-Key: <uuid>                          // 重放同键返回第一次 {siteId,buildId,status}
 req : { "company": {"nameZh": "…", "nameEn": "…"?}, "industry": "<taxonomyId>",
         "products": ["pump", …](1-5), "targetMarkets": ["DE","US"],
@@ -105,6 +107,7 @@ GET /sites/{id}/kb/status → { "documents": 5, "chunks": 182,
 ## 5. 构建（精装修）〔🟢 M0：POST/GET/cancel · 🎯 M1-a：R3 契约补强〕
 
 ```
+hdr : X-Site-Build-Budget-Grant: <SaaS 服务端签发的 Budget Grant>
 POST /sites/{id}/builds  { "scope":"site",
                            "options"?: { "stylePreset"?: "modern-industrial|precision-light",
                                          "locales"?: ["en"] } }
@@ -199,7 +202,7 @@ outbox 事件：`SiteDemoReady / SiteBuildProgress / SiteBuildFailed / SitePubli
 ## 12. 待对齐/拍板（与 SaaS 前端）
 
 1. **事件通道形式**：webhook vs 轮询游标——建议 webhook + 签名头，失败重试退避。
-2. **intake 调用方式**：建议 **SaaS 服务端代理转发**（注册时用户尚无 token，server-to-server 走服务凭证；避免前端直调的 CORS/凭证复杂度）。
+2. **intake/build 调用方式**：必须由 **SaaS 服务端**完成 quote → 签发 Budget Grant → 带 `X-Site-Build-Budget-Grant` 调用创建端点；浏览器不得直调 intake 或 build，具体鉴权与字段以 code-first OpenAPI 为准。
 3. 询盘导出格式（CSV 字段清单）——M2 前定。
 
 ---

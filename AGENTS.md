@@ -25,10 +25,10 @@
 
 ## 3. 当前开发环境的稳定约束
 
-- 唯一施工仓库是 `/global/backend`。宿主环境是 **WSL2（Ubuntu 26.04）**，2026-09 从旧 Ubuntu 机器迁入；旧机器只读，其 `server` remote 已锁为 `disabled://server-read-only`，不得推送。
-- Compose 一律使用 `docker compose -p global ...`，且必须经 launcher 注入 `--env-file`：日常用工作区工具 `gctl up <core|ai|growthos|runtime|all>`（`/global/local-config/bin/gctl`，封装 `/global/local-config/global/infra.sh` 等 launcher，见 `/global/CLAUDE.md`）；**直接裸跑 `docker compose` 会因缺少必需变量失败**。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
-- Temporal 由容器 `global-temporal-dev` 提供（compose 托管），**不是** systemd unit；本机无 `temporal-dev.service`。不另起手工开发服务。
-- 容器 `restart` 策略为 `no`：宿主重启后服务不会自动恢复，需经 launcher 手动拉起。
+- 唯一施工仓库是 `/global/backend`。开发宿主为 **xin，原生 Ubuntu 26.04**；WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器。仓库以 `origin` 为准，不存在 `server` remote。
+- global 容器位于原生 dockerd 的 `default` context；root 的 currentContext 指向空的 Docker Desktop，工作区工具固定使用 `DOCKER_CONTEXT=default`。Compose 一律使用 `docker compose -p global ...`，且必须经 launcher 注入 `--env-file`：日常用工作区工具 `gctl up <core|ai|growthos|runtime|all>`（`/global/local-config/bin/gctl`，封装 `/global/local-config/global/infra.sh` 等 launcher，见 `/global/CLAUDE.md`）；**直接裸跑 `docker compose` 会因缺少必需变量失败**。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
+- Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。不另起手工开发服务。
+- 基础设施容器的 `restart` 策略为 `no`，而 managed runtime 编排（`infra/backend-runtime.compose.yml`）里 API/Worker 为 `unless-stopped`：宿主重启后 API/Worker 会先于数据库和 Temporal 自行启动并报未就绪。恢复顺序是 `gctl up core` → `gctl up growthos` → `gctl up platform`，然后重启 API/Worker（或直接 `gctl up all`）。
 - 开发端口只绑定 `127.0.0.1`；跨主机访问使用 SSH 转发，不向 Tailscale 或公网直接暴露。
 - 密钥只进入环境变量或 secret store；不得读取、打印、提交或在文档中保存 token、密码、凭据指纹之外的秘密。
 
@@ -57,13 +57,13 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 
 - 明确、已授权的本地任务持续推进到可审查交付；普通技术选择不重复确认。先查可发现的事实，只暂停依赖未决信息或权限的部分，继续独立工作；同一动作、目标和范围的有效授权跨步骤沿用，变化部分另行确认。只读请求仍不授权修改。
 - 正式架构或安全方向变更保留书面规格、独立 review 和用户明确确认；已批准的同一规格不因切换 Skill 或执行阶段重复审批。Skill 不得新增操作权限、强制无关收尾或取消项目门。
-- 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex；下文“Codex”指当前开发代理）；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
-- `/global/backend` 主工作区只作 main 与现场审计；功能施工使用 `/global/backend/.codex/worktrees/<topic>` 的持久隔离 worktree 与 `codex/<topic>` 分支。
+- 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
+- `/global/backend` 主工作区只作 main 与现场审计；功能施工遵循「一个任务一个 writer 一个 worktree」。Claude Code 使用 `.claude/worktrees/<topic>` 与 `claude/<topic>`，也可使用 `pnpm worktree:new` 创建的 `.codex/worktrees/<topic>` 与 `codex/<topic>`；两种约定都合法。
 - 远端 PR 合入后，根 `main` 以 `node scripts/governance-main-worktree-sync.mjs status` 只读检查、以同一脚本的 `apply` 动作受控跟随；后者只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 执行 `merge --ff-only`，必须证明入站路径不触碰本地 tracked/untracked/ignored 现场，并在操作前后保持完整 status 一致。它不代替 PR/CI/review/用户合并授权，也不 stash、reset、clean 或清理分支/worktree。
 - 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。
 - 保留用户删除、未跟踪文件、脏工作区、独有提交和历史证据。不得使用 `git reset --hard`、`git clean -fdx` 或未经明确授权的递归删除。
 - 网络工具默认只读。push、开/改 PR、发消息、发布、部署、合并、由 Codex/operator 发起的付费调用或 evaluation、远程任务、第三方配置与凭据变更都需要用户对该动作的明确授权。正常产品请求携带有效 SaaS 签名 Budget Grant 时，该 Grant 是本次 BuildRun 的产品费用授权，不再要求聊天式逐次批准；它不授权开发者额外探测、评测或扩大额度。
-- 技术完成、机器检查、独立 review、PR 里给产品负责人的说明、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。产品负责人的常设合并授权（开发代理独立审查通过、必需检查全绿后可合并）见 `DEC-AIDEV-004`，不含 ruleset/仓库设置/权限变更、部署发布与付费调用。
+- 技术完成、机器检查、独立 review、PR 里给产品负责人的说明、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。产品负责人的常设合并授权（开发代理独立审查通过、必需检查全绿后可 squash 合并）见 `DEC-AIDEV-004`，不含 ruleset/仓库设置/权限变更、部署发布与付费调用。
 
 ## 6. 实现与安全门
 

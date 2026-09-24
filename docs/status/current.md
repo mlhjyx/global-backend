@@ -81,23 +81,23 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 
 ## 4. PR、分支与工作区处置
 
-#407、#479、#514、#527/#529 以及被本批 successor 替代的原 PR 保留 provenance；关闭状态不授权删除历史分支。216 个结构退役候选已完成 committed history 的独立恢复回读，其中195个仍有 ignored 材料、21个未见 ignored 条目，均未取得 owner release 或删除授权。全量本地分支、远端分支与 worktree 的精确分类在批末回执 `/var/tmp/backend-dependency-queue-20260920/final-all-dispositions.json` 中记录，不把未检查的材料或独有历史当作已清理。
+#407、#479、#514、#527/#529 以及被本批 successor 替代的原 PR 保留 provenance；关闭状态不授权删除历史分支。216 个结构退役候选已完成 committed history 的独立恢复回读，其中195个仍有 ignored 材料、21个未见 ignored 条目，均未取得 owner release 或删除授权。全量本地分支、远端分支与 worktree 的精确分类在批末回执 `/var/tmp/backend-dependency-queue-20260920/final-all-dispositions.json` 中记录（本机已不存在），不把未检查的材料或独有历史当作已清理。
 
 已合入或关闭不自动授权删除分支/worktree。历史综合候选、独有提交、脏文件、ignored/untracked 材料和锁定旧路径继续保留。当前主线包含的提交可恢复，不代表 owner 已释放其工作区或其 ignored 材料已归档。
 
-## 4.1 开发宿主迁移（2026-09-20 增补、2026-09-21 更新，边界限于本节）
+## 4.1 开发宿主迁移至 xin 原生 Ubuntu（2026-09-23 更新，边界限于本节）
 
 > 本节只记录宿主迁移这一件事，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4 证据裁决 —— 那些仍绑定其各自的原核验时刻。
 
-开发宿主已从旧 Ubuntu 机器迁至 **WSL2（Ubuntu 26.04）**。完整缺口盘点与证据见本机只读归档 `/global/_archive/migration-20260920/audit/MIGRATION-TRIAGE-20260920.md`、同目录 `legacy-worktree-audit-20260920.tsv`（420 个 worktree 逐项 git 状态）与 `BRANCH-TRIAGE-20260921.md`（旧机分支归属）。
+开发宿主为 **xin，原生 Ubuntu 26.04**；WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器，仓库以 `origin` 为准，不存在 `server` remote。下列迁移盘点与表中 2026-09-20/21 观察仅保留原 WSL 迁移时的历史事实，不是 xin 当前运行证明。原只读归档 `/global/_archive/migration-20260920/audit/MIGRATION-TRIAGE-20260920.md`、同目录 `legacy-worktree-audit-20260920.tsv`（420 个 worktree 逐项 git 状态）与 `BRANCH-TRIAGE-20260921.md`（旧机分支归属）；**该归档仅在已停用的 WSL 上，尚未取回 xin**。
 
-| 观察 | 当前可确认的事实 | 不得外推 |
+| 观察 | 原迁移记录与本次更正 | 不得外推 |
 | --- | --- | --- |
-| 源码完整性 | 旧机 181 个"领先 origin/main"的 head 已全部存在于新宿主；交叉核对已合并 PR 后，其中 77 个实为 squash 合入、104 个未进主线；1 个从未推送的分支（6 commits）已直取并推送为 `codex/pr407-identity-test-closeout-20260913`（#538）；全量 git bundle 另存本机归档 | 取回不等于已裁决或已合入；104 个未进主线分支按 `BRANCH-TRIAGE-20260921.md` 默认归档、零操作，不代表放弃或采纳 |
+| 源码完整性 | 旧机 181 个"领先 origin/main"的 head 已全部存在于新宿主；交叉核对已合并 PR 后，其中 77 个实为 squash 合入、104 个未进主线；1 个从未推送的分支（6 commits）已直取并推送为 `codex/pr407-identity-test-closeout-20260913`（#538）；全量 git bundle 原存 WSL 归档（尚未取回 xin） | 取回不等于已裁决或已合入；104 个未进主线分支按 `BRANCH-TRIAGE-20260921.md` 默认归档、零操作，不代表放弃或采纳 |
 | 运行配置 | 旧机 `.secrets/`、`apps/api/.env`、`packages/db/.env` 及 `GOOGLE_PATENTS_SA_JSON` 指向的 service account 文件已取回并 sha256 逐项校验；可移植三方凭据已接入 `local-config`，主机相关值刻意不继承 | 配置就位不等于服务已启动或已验证 |
-| 运行时 | 2026-09-21 起新宿主以已发布镜像（`ghcr.io/mlhjyx/global-backend`，按 digest 钉住，源提交 `cca0d0e5`）经 `infra/backend-runtime.compose.yml` 启动 API/Worker：`/health/build` 为 `attested: true`；Worker 就绪链停在 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，与旧宿主 2026-09-12 的 `TEMPORAL_PROOF_UNAVAILABLE` 同一既有缺口（见[原恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)）。参考数据由代码 seed，未从旧库导入 | 这是本机运行观察，不是 RuntimeEvidence，也不产生可信 Release Bundle；源码 `pnpm worker` 停在 `BUILD_ATTESTATION_REQUIRED` 属设计；§3 的 runtime 观察仍绑定其原宿主与时刻 |
-| 主线一致性 | `origin/main` 为最新真相；旧机与新宿主的本地 `main` 均落后 | 本地 checkout 不是权威 |
-| 旧机器 | 迁移快照（2026-09-20T04:30Z）后旧机仍有写入与新分支推送；尚未停写退役 | 快照不是最终 writer 交接 |
+| 运行时 | 2026-09-21 起新宿主以已发布镜像（`ghcr.io/mlhjyx/global-backend`，按 digest 钉住，源提交 `cca0d0e5`）经 `infra/backend-runtime.compose.yml` 启动 API/Worker：`/health/build` 为 `attested: true`；Worker 就绪链停在 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，与旧宿主 2026-09-12 的 `TEMPORAL_PROOF_UNAVAILABLE` 同一既有缺口（见[原恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)）。参考数据由代码 seed，未从旧库导入 | 这是原 WSL 宿主的历史运行观察，不是 xin 当前观察或 RuntimeEvidence，也不产生可信 Release Bundle；源码 `pnpm worker` 停在 `BUILD_ATTESTATION_REQUIRED` 属设计；§3 的 runtime 观察仍绑定其原宿主与时刻 |
+| 主线一致性 | 以 `origin/main` 为准；原记录中旧机与 WSL 本地 `main` 落后的事实不外推到 xin | 本地 checkout 不是权威 |
+| WSL 停用 | WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器 | 停用不代表归档已取回 xin |
 
 **本节不改变任何阶段门裁决。** G5-Site / G5-Acquisition / G6 / G7 维持 §2 的现有裁决；宿主迁移不产生、也不替代 RuntimeEvidence。
 

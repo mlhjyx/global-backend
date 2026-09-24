@@ -66,10 +66,13 @@ Deep link 必须先恢复 session/Workspace，再检查 object authorization；�
 
 ### 3.1 当前 operation surface
 
-从 `packages/contracts/openapi/openapi.json` 生成并校验以下 13 个 SiteBuilder operation：
+**Budget Grant**：`IntakeController_create_v1` 与 `BuildsController_create_v1` 必须携带 `X-Site-Build-Budget-Grant` 请求头，值由 SaaS 服务端签发。SaaS 服务端先调用 `SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1` 或 `SiteBuildTechnicalBudgetQuoteController_quoteRefurbish_v1` 取得 technical quote，再签发 Grant 并调用创建端点；浏览器不能直接调用 intake 或 build。
+
+从 `packages/contracts/openapi/openapi.json` 生成并校验以下 SiteBuilder operation（清单以 code-first OpenAPI 为准，不写死数量）：
 
 | Use case | operationId |
 |---|---|
+| Technical budget quote | `SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1`、`SiteBuildTechnicalBudgetQuoteController_quoteRefurbish_v1` |
 | Intake | `IntakeController_create_v1` |
 | Site list/detail | `SitesController_list_v1`、`SitesController_get_v1` |
 | Profile get/patch | `SitesController_getProfile_v1`、`SitesController_patchProfile_v1` |
@@ -82,12 +85,12 @@ CI 生成/漂移门至少检查 operationId、request/response schema、required
 ### 3.2 Runtime validation
 
 - API response 在 trust boundary 做运行时校验或由已批准的 generated runtime validator 保证；失败进入 contract incident，不把未知字段/枚举静默变默认。
-- SiteSpec 当前只有 TypeScript shared type，不能被前端任意 JSON 编辑器视为 runtime-safe；`CON-FE-017` 关闭前编辑器 lane 不实现。
+- SiteSpec 已有运行时校验（`packages/contracts/src/site-builder/site-spec-validation.ts`），仍不能据此把前端任意 JSON 编辑器视为 runtime-safe；`CON-FE-017` 关闭前编辑器 lane 不实现。
 - Error adapter 保留 stable code、HTTP class、correlation ID、retryability、acknowledgement semantics 和 safe details；用户文案只消费批准映射。
 
 ### 3.3 Auth/BFF 决策边界
 
-是否使用 BFF、server component 或 direct API 取决于正式 repo、token 放置、same-site/CSRF、aggregation、streaming、latency 和 deploy ownership。无论选择哪种：
+intake/build 固定经 SaaS 服务端执行 Quote→Grant→创建；其他操作是否使用 BFF、server component 或 direct API 取决于正式 repo、token 放置、same-site/CSRF、aggregation、streaming、latency 和 deploy ownership。无论选择哪种：
 
 1. 浏览器不持久化长期 token；Workspace 从已验证会话绑定，不接受页面任意参数覆盖。
 2. 服务端仍是 authorization 真值；BFF 不能把客户端角色映射升级为授权。
@@ -179,7 +182,7 @@ mutation 成功后按对象精确 invalidate；ACK unknown 不执行 optimistic 
 
 | Test | 重点 |
 |---|---|
-| Contract generation | 13 operations、required headers、enums、stable error mapping、nullable fields |
+| Contract generation | OpenAPI operationId 清单、required headers、enums、stable error mapping、nullable fields |
 | State-machine unit | 所有合法/非法 transition、ACK unknown、cancel confirming、old result |
 | Query/integration | cache isolation by Workspace、stale/reconnect/poll stop、mutation invalidation |
 | Upload integration | URL expiry、PUT fail、commit loss、duplicate/reject/retry、page reload |

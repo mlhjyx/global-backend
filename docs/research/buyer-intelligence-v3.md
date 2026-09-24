@@ -34,7 +34,7 @@
 | **pgvector 0.8.x**（已装 pgvector/pg16 镜像，含 HNSW/halfvec/iterative_scan） | ① 成单客户 embedding → 最近邻 = **look-alike 找孪生买家**；② 模糊去重（含 WHERE 过滤下保召回） |
 | **name-match.ts**（0.72 门槛 + 歧义边距） | 脏 consignee 名（`SHENZHEN ABC CO LTD`）↔ `canonical_company` **实体解析**终裁纪律，防贴错 |
 | **Temporal Schedule**（本轮已建） | 分级信号监控：海关周级、招聘/新闻日级、广告库月级 |
-| **crawl4ai `capture_network_requests`**（逆向展会 API 用的） | 泛化成「任意 SPA 目录 URL → 逆向后端 JSON API → 自动生成 adapter」的**平台能力** |
+| **crawl4ai `capture_network_requests`**（逆向展会 API 用的） | 泛化成「任意 SPA 目录 URL → 逆向后端 JSON API → 自动生成 adapter」的**平台能力**。**已撤回：违反 ToS，不得实施**（2026-09-23 更正；见 [展会情报实施记录的 Algolia 结论](../implementation-records/trade-fair-intelligence.md)）。 |
 | **ToolBroker**（白名单 + 预算 reserve-settle + 限流 + source_policy + 幂等 + trace） | 付费/受限源的**配额闸门**，逆向与直连都在闸门内 |
 | **Outbox 领域事件** | 新信号到达 → **事件驱动重评分**（非定时全量重算） |
 | **field_evidence**（`allowed_actions` + `license`） | 字段级权限引擎 → 合规「可发送性」编译产物直接写这里，无需新表 |
@@ -239,7 +239,7 @@ LinkedIn（全球 B2B）、**WhatsApp（拉美/中东/印度/东南亚主导**�
 > 10 支柱经并行深研 + 对抗核验（专门枪毙「声称免费其实付费/ToS 禁止」）。以下是对上文的**精确化修正**与**新增免费源**——凡与上文乐观表述冲突的，以此节为准。
 
 ### 10.1 海关提单（§A1 修正 —— 更诚实）
-- **ImportYeti 免费层的真实硬顶**：只能**按公司名搜**、每公司约 **50 票**上限、**无 CSV 导出、无 HS 反查、无免费 API**（BETA API `data.importyeti.com` 是**积分制付费**，核心约 $600/yr）。上文「免费 + BETA API」表述过乐观，更正之。要做「按 HS/产品反查进口商」必须**逆向其内部 JSON API**（crawl4ai capture_network_requests，把「按公司名」翻转为「按 HS」+绕 50 票分页上限）或落到付费。
+- **ImportYeti 免费层的真实硬顶**：只能**按公司名搜**、每公司约 **50 票**上限、**无 CSV 导出、无 HS 反查、无免费 API**（BETA API `data.importyeti.com` 是**积分制付费**，核心约 $600/yr）。上文「免费 + BETA API」表述过乐观，更正之。要做「按 HS/产品反查进口商」必须**逆向其内部 JSON API**（crawl4ai capture_network_requests，把「按公司名」翻转为「按 HS」+绕 50 票分页上限）或落到付费。**上述逆向内部 JSON API、绕过分页限制的建议已撤回：违反 ToS，不得实施**（2026-09-23 更正；见 [展会情报实施记录的 Algolia 结论](../implementation-records/trade-fair-intelligence.md)）。
 - **新增最干净的免费路径 — [Data Liberation Project](https://www.data-liberation-project.org/requests/cbp-bills-of-lading/)**：已通过 **FOIA** 把 CBP 海运提单「解放」成**真免费 + 明示可再分发**的开放数据集（consignee/shipper/品名/量/港/日期）。适合做**冷启动离线基线 + 降级契约兜底**（覆盖为历史样本、非实时增量）。
 - **OEC（oec.world）**：有 CBP 提单逐票（2021-01…2026-04 月度），但**逐票/公司级/批量/API 属 Premium 付费**——免费用户只拿聚合，**别当免费逐票源**。
 - **法律基石**：美国是唯一把逐票提单**法定公开**（19 U.S.C. §1431 + 19 CFR 103.31）的主要经济体——付费商卖的是**检索与聚合、不是数据授权**，这让「自建免费替代」合法站得住。美国以外（印度 2016 后限制、墨西哥等）交易级基本无免费官方发布。

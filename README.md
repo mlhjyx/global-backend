@@ -41,11 +41,11 @@ docker-compose.yml   10 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/M
 
 ## 本地起步
 
-宿主是 WSL2（Ubuntu 26.04），2026-09 从旧 Ubuntu 机器迁入。本机起停服务、密钥位置与已知陷阱以 `/global/CLAUDE.md` 为准；其中的工作区工具 `gctl`（`/global/local-config/bin/gctl`）封装了下面各档所需的 launcher 与 `--env-file` 注入 —— **裸跑 `docker compose -p global up -d` 会因缺少必需变量失败**。
+宿主是 xin（原生 Ubuntu 26.04），WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器。本机起停服务、密钥位置与已知陷阱以 `/global/CLAUDE.md` 为准；其中的工作区工具 `gctl`（`/global/local-config/bin/gctl`）封装了下面各档所需的 launcher 与 `--env-file` 注入 —— **裸跑 `docker compose -p global up -d` 会因缺少必需变量失败**。
 
-工具链：Node 22、pnpm 9.15.9（由 `package.json` 的 `packageManager` 锁定，`corepack enable` 即可）、Docker（WSL 下为 Docker Desktop），与 CI 一致。
+工具链：Node 22、pnpm 9.15.9（由 `package.json` 的 `packageManager` 锁定，`corepack enable` 即可）、Docker（xin 原生 dockerd，global 容器位于 `default` context；root 的 currentContext 指向空的 Docker Desktop，工作区工具固定使用 `DOCKER_CONTEXT=default`），与 CI 一致。
 
-功能施工在 `/global/backend/.codex/worktrees/<topic>`（`pnpm worktree:new <topic>`）里进行。新 worktree 没有被 gitignore 的 `.env`：本机用 `gctl link-env <worktree>` 链接根 checkout 的 `apps/api/.env` 与 `packages/db/.env`；全新克隆则从两处 `.env.example` 复制后修改。依赖装在 worktree 内：
+功能施工遵循「一个任务一个 writer 一个 worktree」：Claude Code 使用 `/global/backend/.claude/worktrees/<topic>` 与 `claude/<topic>`，也可用 `pnpm worktree:new <topic>` 创建 `.codex/worktrees/<topic>` 与 `codex/<topic>`。新 worktree 没有被 gitignore 的 `.env`：本机用 `gctl link-env <worktree>` 链接根 checkout 的 `apps/api/.env` 与 `packages/db/.env`；全新克隆则从两处 `.env.example` 复制后修改。依赖装在 worktree 内：
 
 ```bash
 gctl link-env "$PWD"
@@ -68,7 +68,7 @@ pnpm --filter @global/api build          # 部分单测加载编译产物（apps
 - **单测**：`APP_DATABASE_URL` 一旦可见（含 Prisma 自动加载的 `packages/db/.env`），PostgreSQL JSONB 字节门等少量只读集成用例就会连库；库不在时它们失败而不是跳过。零容器跑时显式置空，`gctl up core` 后直接跑即可多覆盖这部分。计数以本次命令输出为准，不在 README 固化。
 - **源码热重载**：`start:dev` 是 `nest start --watch`，交互门户在 `/api/portal`。源码运行不持有 runtime lease，`/health/ready` 为 503、outbox relay 报 admission closed 是设计如此；读写接口可正常调试。
 - **Worker 不从源码跑**（它在启动时幂等 seed 参考数据并 ensure 平台 Temporal Schedule，清单见 `apps/api/src/temporal/ensure-schedules.ts`）：`apps/api/src/runtime/` 对 `test` 以外的所有模式（含 `development`）强制 `BUILD_ATTESTATION_REQUIRED`，源码 `pnpm --filter @global/api worker` 会停在该门。Worker 与 managed API 只跑已发布镜像（`infra/backend-runtime.compose.yml`，镜像按 digest 钉住）。
-- Temporal 由 compose 容器 `global-temporal-dev` 提供，**不是** systemd unit。容器 `restart` 策略为 `no`，宿主或 Docker Desktop 重启后按需重新拉起。
+- Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。基础设施容器的 `restart` 策略为 `no`，API/Worker 为 `unless-stopped`；宿主重启后按 AGENTS §3 的顺序恢复。
 
 首次建库（全新数据卷）：
 

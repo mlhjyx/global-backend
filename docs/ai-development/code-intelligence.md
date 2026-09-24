@@ -9,7 +9,7 @@
 
 ## 1. 结论
 
-ContractGraph 是当前 worktree 的可丢弃项目契约地图；CodeGraph 是补充普通语言调用关系的可选二级试点。两者都不是项目真值。它们先回答“这个改动可能影响哪些 Capability、场景、API、事件、工作流、数据、测试和部署入口”，再由 Codex 回到当前源码、机器合同、测试与运行证据核实。
+ContractGraph 是当前 worktree 的可丢弃项目契约地图；CodeGraph 是补充普通语言调用关系的可选二级试点。两者都不是项目真值。它们先回答“这个改动可能影响哪些 Capability、场景、API、事件、工作流、数据、测试和部署入口”，再由 Claude Code 回到当前源码、机器合同、测试与运行证据核实。
 
 ```mermaid
 flowchart LR

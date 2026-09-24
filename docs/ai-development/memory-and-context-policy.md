@@ -100,7 +100,7 @@ Obsidian/
 
 本机 MCP Memory 只保留官方兼容的 `entity` / `relation` JSONL 记录；来源、审批、有效期和哈希以独立的 `memory_fact_v1` receipt entity、候选文件、审计文件和备份 manifest 保存。不能向官方 JSONL 添加私有字段，因为上游重写图时会丢弃未知字段。
 
-- 普通 Codex 会话只允许 `read_graph`、`search_nodes`、`open_nodes`；六个 create/add/delete 工具必须在客户端配置中同时列入 allowlist/denylist 以防误用。
+- 普通开发代理会话（Claude Code，以及受其指派的 Codex）只允许 `read_graph`、`search_nodes`、`open_nodes`；六个 create/add/delete 工具必须在客户端配置中同时列入 allowlist/denylist 以防误用。
 - `memoryctl candidate` 只在 Inbox 写不可变候选；`promote` 必须带候选哈希和当前图哈希，拒绝任意自由文本写入；`verify` 只读检查 JSONL、哈希、权限和残留 journal。首次 promote 前必须执行 `node scripts/memoryctl.mjs verify --graph /root/.codex/mcp-memory/knowledge-graph.jsonl --codex-config /root/.codex/config.toml`，由工具核验固定 MCP 版本、持久路径、三项只读 allowlist 和六项写工具 denylist，且不输出配置中的其他值。
 - `promote` 在锁内重新读取和校验图，先耐久备份并同步备份目录，再写 journal、同目录临时文件、`fsync`、原子替换、目录 `fsync` 和写后重读验证。journal 保存待发布 audit，可在图已替换但 audit 未完成时通过同一 promote/restore 重试收口。restore 必须验证备份的目标图、schema、大小、哈希、owner 和权限，并发布 restore audit。备份放 `/data/codex-memory/backups`，目录 `0700`、文件 `0600`；保留所有 90 天内备份且至少最近 100 份。
 - 遗留 lock 默认 fail-closed；只能用带精确 lock/graph 哈希和原因的 `memoryctl unlock` 处理，并且 lock 至少 60 秒、记录的进程已不存在。unlock 先写审计再释放，不能用于抢占活跃写入者。

@@ -1,9 +1,9 @@
-# CI / 审查与合并流程（Codex）
+# CI / 审查与合并流程（Claude Code）
 
 > 生命周期：`GUIDE`
 > 生命周期依据：CI、审查与合并的现行流程；2026-09-21 随 #548–#553 更新
 
-> 2026-07-16 起，当前开发与复核主体是 Codex。旧 Claude `merge-judge` workflow 已退役；不再使用 AI auto-merge。权威简版见 [AGENTS.md §8](../../AGENTS.md)。
+> 2026-09-21 起，当前开发主体是 Claude Code；Codex 只在 Claude Code 指派下执行边界明确的任务。旧 Claude `merge-judge` workflow 已退役；合并遵循 `DEC-AIDEV-004`：开发代理独立审查通过、必需检查全绿并满足其余门后可 squash 合并，不包括 ruleset/仓库设置/权限变更、部署发布与付费调用。权威简版见 [AGENTS.md §8](../../AGENTS.md)。
 
 ## 合并模型
 
@@ -11,7 +11,7 @@
 | -------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | **L1 机械闸**        | GitHub ruleset + required checks               | 所有仓内声明的 context 真实通过；PR 正文的 `PASS` 不是 check provenance                                  |
 | **L2 独立审查**      | 非作者 reviewer 审 diff、契约、安全/合规和证据 | 独立 GitHub review；发现问题先修复并重验，不以 CI 绿替代判断                                             |
-| **L3 用户授权**      | 产品负责人对当次 merge/release 作最终确认      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
+| **L3 用户授权**      | merge 依 `DEC-AIDEV-004` 或当次明确授权；release 单独授权      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
 | **L4 合并/发布回执** | 合并执行者与 Release Owner                     | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
 
 四层分别取证，任一层不能推导另一层。PR 正文的「给产品负责人的说明」只是作者用业务语言写的自述，不经机器解析，也不提供任何一层的证明或授权。执行合并前须独立回读实际 CI、review、未解决讨论和用户授权。见 [Source PR 说明与合并资格分离](../governance/docs-verification.md#source-pr-说明与合并资格分离)；Runtime/Release/Pilot/GA 的证明要求不变。
@@ -163,9 +163,9 @@ build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `alwa
 
 Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、merge SHA/parent 和 `evidence_ref` 是待验证声明，不是自证。当前仓内尚无可信外部 readback verifier，所以 `external_provenance.status` 只能有效地表达 `EXTERNAL_UNVERIFIED`；对 `PILOT/GA`，验证器始终返回 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED`。仅把字段改为 `VERIFIED`或填入 URL 会追加 `RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED`，不能解锁 promotion。未来实现必须独立回读外部对象、绑定当次仓库/PR/head/actor/result 和 receipt，并另行审查；不开放由 bundle 调用者注入“已信任”的旁路。
 
-## Codex 收口步骤
+## 开发代理收口步骤
 
-1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `/global/backend/.codex/worktrees/<topic>` 与 `codex/<topic>`，一个逻辑改动一个 PR。
+1. 按 [worktree 管理 runbook](worktree-management.md) 从最新 `origin/main` 建 `.claude/worktrees/<topic>` 与 `claude/<topic>`，或用 `pnpm worktree:new <topic>` 建 `.codex/worktrees/<topic>` 与 `codex/<topic>`；两种约定都合法，一个任务一个 writer 一个 worktree，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
 3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。
@@ -185,5 +185,5 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 ## 退役记录
 
 - `.github/workflows/claude-merge-judge.yml` 已删除；不再需要 `ANTHROPIC_API_KEY` 或 Claude GitHub App 作合并判官。
-- GitHub 原生 auto-merge 不作为默认执行层。即使全绿，也要满足当次用户明确授权。
+- GitHub 原生 auto-merge 不作为默认执行层。即使全绿，也要满足 `DEC-AIDEV-004` 的全部合并门或当次用户明确授权。
 - 历史 changelog/实施记录中的「自审自合」、`feat/` 等保留当时 provenance，不覆盖现行规则。
