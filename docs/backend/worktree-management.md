@@ -9,21 +9,22 @@
 
 ```text
 /global/backend/                                  # 只承载 main
-/global/backend/.codex/worktrees/<topic>/         # 新正式开发 worktree
+/global/backend/.claude/worktrees/<topic>/        # Claude Code 正式开发 worktree
+/global/backend/.codex/worktrees/<topic>/         # worktree:new 创建的正式开发 worktree
 /global/backend/.codex/audits/                    # 本机只读审计产物，可选
 /global/wt/<topic>/                               # legacy，只审计，不再新建
 /root/.codex/worktrees/...                        # Codex App 管理，不作为正式持久施工目标
 ```
 
-- 正式分支统一命名 `codex/<topic>`，每个逻辑改动一个短生命周期分支和 PR。
+- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务。`.claude/worktrees/<topic>` 与 `claude/<topic>`、`.codex/worktrees/<topic>` 与 `codex/<topic>` 两种约定都合法，遵循「一个任务一个 writer 一个 worktree」，每个逻辑改动一个分支和 PR。
 - 新 worktree 默认从刚 fetch 的 `origin/main` 创建；任务明确指定固定基线时，按[导航指南](../CODEX-NAVIGATION-GUIDE.md#51-inventory-and-create)从该精确 commit 创建并验证，不静默切换。不得把未核验的本地 `main` 当作远端当前基线。
-- `.codex/worktrees/` 与 `.codex/audits/` 只保存本机运行态，不提交、不存密钥，也不承担备份职责。
+- `.claude/worktrees/`、`.codex/worktrees/` 与 `.codex/audits/` 只保存本机运行态，不提交、不存密钥，也不承担备份职责。
 - `/global/backend` 不做功能修改；其现有未跟踪文件不得因创建或迁移 worktree 被覆盖。
 - 不手工移动 Git worktree。合法移动只能使用 `git worktree move`；合法删除只能在清理门满足后使用 `git worktree remove`。
 
 ## 2. 创建新 worktree
 
-优先使用仓库助手：
+选择 `.codex/worktrees/` 约定时使用仓库助手（Claude Code 也可采用 `.claude/worktrees/` 约定）：
 
 ```bash
 cd /global/backend

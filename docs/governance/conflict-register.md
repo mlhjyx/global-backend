@@ -90,7 +90,7 @@ ExecutionAuthority
 | `CON-FE-014` | 原型展示发布/域名/分析/询盘等超范围承诺 | `RESOLVED` | `OWN-PRODUCT` | `DEC-FE-P2-007`；对应 Capability 保持后置状态 |
 | `CON-FE-015` | 开发预览与生产 Release/Publish 混写 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | R1-min substrate 已合入；Preview/Release/Publish/Domain 术语仍严格分层 |
 | `CON-FE-016` | unknown component 静默缺内容 | `RESOLVED` 于 R1-min promotion gate | `OWN-SITE-BE` | Release 预检 fail-closed；继续由 Scenario 017 防回归 |
-| `CON-FE-017` | SiteSpec 仅 TypeScript cast、运行时 validator 未完成 | `CONTRACT_BLOCKED` | `OWN-SITE-BE` | Release 预检不等于通用 runtime schema；Phase 5 前需明确合同/版本门 |
+| `CON-FE-017` | SiteSpec 已有运行时校验（`packages/contracts/src/site-builder/site-spec-validation.ts`）；编辑器合同/版本门仍需核验 | `CONTRACT_BLOCKED` | `OWN-SITE-BE` | 已有 SiteSpec runtime validator；Phase 5 前仍需明确编辑器合同/版本门，本文描述更正不改变状态裁决 |
 | `CON-FE-018` | 文档目标有 quality loop，当前仍 `skipped_m1f` | `OPEN_DECISION` | `OWN-SITE-BE` | UI 必须显示 skipped/degraded；M1-f 另 Gate，不以 Build success 覆盖 |
 | `CON-FE-019` | 宽泛多语种 vs en/de-DE 生成范围 | `RESOLVED` 当前承诺 / `PARKED` 扩展 | `OWN-PRODUCT` | 当前选择器只消费服务端 capability；新语言需独立质量/运营证据 |
 | `CON-FE-020` | 本地流程图取消独立 QA 与仓库证据门冲突 | `OPEN_DECISION` | `OWN-QA-EVIDENCE` | 可优化岗位交接，不得取消独立验证责任；Phase 4 定规范 |

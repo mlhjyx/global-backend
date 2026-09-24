@@ -3,7 +3,7 @@
 > 文档 ID：`DOC-CODEX-NAV-001`
 > 生命周期：`GUIDE`
 > 当前事实来源：仓库内权威文档、当前源码与脚本；分支、PR、服务和部署状态必须在执行时重新核验。
-> 适用范围：`/global/backend` 的 Codex 接手、审计、实现、评审与交接。
+> 适用范围：`/global/backend` 的开发代理接手、审计、实现、评审与交接。当前开发主体是 Claude Code（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务。
 
 This guide defines how to find the current truth, claim an isolated change surface, and report evidence without turning derived indexes or historical notes into authority.
 
@@ -41,7 +41,7 @@ Before editing:
 - stop writes on overlapping ownership, an unexplained change to the intended write surface, a base mismatch, or reuse of unique commits whose owner is unknown; preserve unrelated dirty state and isolate the task rather than stopping independent read-only investigation;
 - preserve `main`, other worktrees, historical branches, user deletions and untracked files.
 
-One task has one writer and one isolated worktree. Read-only audits may inspect other refs, but they do not edit, rebase, clean, delete, or reuse another task's worktree. Branch, worktree and PR state are transient and must never be copied from an old status note without live verification.
+One task has one writer and one isolated worktree. Claude Code may use `.claude/worktrees/<topic>` with `claude/<topic>`, or `.codex/worktrees/<topic>` with `codex/<topic>` created by `pnpm worktree:new`; both conventions are valid. Read-only audits may inspect other refs, but they do not edit, rebase, clean, delete, or reuse another task's worktree. Branch, worktree and PR state are transient and must never be copied from an old status note without live verification.
 
 ## 3. Module map
 
@@ -110,7 +110,7 @@ cd "/global/backend/.codex/worktrees/$TASK_SLUG"
 
 `worktree:inventory` emits one deterministic `git-worktree-inventory/v1` JSON document. Every entry includes its upstream state; `ahead`, `behind`, relationship and merge base relative to the locally available `origin/main`; typed dirty/untracked and last-commit observations; and explicit `owner`, `activeTask` and `pullRequest` provenance. This repository currently has no local ownership registry, so those three provenance fields must remain structured `UNKNOWN` rather than being inferred from a branch name. Missing paths and local Git failures remain typed `UNAVAILABLE`; a configured upstream whose local ref has disappeared is `GONE`. These states are evidence for review, never permission to prune.
 
-`worktree:new` fetches `origin`, requires exactly one `main` worktree, rejects existing paths or branches, creates `codex/<topic>` from the then-current `origin/main`, and verifies the new worktree is clean. When an approved task specifies a fixed base, create from that exact commit instead and verify it before any edit:
+The commands above illustrate the `.codex/worktrees/` convention. `worktree:new` fetches `origin`, requires exactly one `main` worktree, rejects existing paths or branches, creates `codex/<topic>` from the then-current `origin/main`, and verifies the new worktree is clean. When an approved task specifies a fixed base, create from that exact commit instead and verify it before any edit:
 
 ```bash
 git rev-parse HEAD
@@ -152,7 +152,7 @@ Before relying on `impact`, rebuild and recheck ContractGraph if the final edits
 
 ### 5.4 Handoff and external gates
 
-Report the base, branch, worktree, any authorized commits, changed files, RED/GREEN evidence, verification results, risks and remaining gaps. Staging, committing, pushing, opening a PR, changing rulesets and merging are distinct actions; take only those explicitly authorized. Honor valid authorization already supplied for the same scope without repeating the question. Unrequested staging, commit, PR, publication, or cleanup does not block handing off a verified local diff; it must not be reported as completed remotely.
+Report the base, branch, worktree, any authorized commits, changed files, RED/GREEN evidence, verification results, risks and remaining gaps. Staging, committing, pushing, opening a PR, changing rulesets and merging are distinct actions; take only those explicitly authorized. For squash merges, `DEC-AIDEV-004` supplies standing authorization after independent review and all required checks and its remaining gates pass; it excludes ruleset/repository settings/permission changes, deployment/publication and paid calls. Honor valid authorization already supplied for the same scope without repeating the question. Unrequested staging, commit, PR, publication, or cleanup does not block handing off a verified local diff; it must not be reported as completed remotely.
 
 This workflow intentionally has no cleanup command. The inventory script has no network or deletion path and sets `GIT_OPTIONAL_LOCKS=0`. Its runtime guard permits only local read-only forms of `git worktree list`, `for-each-ref`, `rev-parse`, `show`, `merge-base`, `rev-list` and `status`; it rejects fetch, push, prune, remove, clean, reset and every unlisted argument shape. Worktree or branch removal requires a separate read-only audit of unique commits and ownership, confirmation that the work is integrated or intentionally abandoned, and explicit authorization.
 

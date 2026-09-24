@@ -1,12 +1,12 @@
 # 贡献指南（团队协作流程）
 
-> 面向团队成员与 Codex 会话。权威简版另见 [AGENTS.md §8](AGENTS.md)。
+> 面向团队成员与 Claude Code 开发会话；Codex 只在 Claude Code 指派下执行边界明确的任务。权威简版另见 [AGENTS.md §8](AGENTS.md)。
 
 ## 分支
 
 - **不在 `main` 上直接提交**。`main` 受保护，只经 PR 合入。
-- Codex 开发分支统一使用 `codex/<topic>`，从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
-- `/global/backend` 只承载 `main`。正式 Codex worktree 统一放在 `/global/backend/.codex/worktrees/<topic>`，使用 `pnpm worktree:new <topic>` 从最新 `origin/main` 创建 `codex/<topic>`；禁止在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工目录。完整创建、迁移、恢复与清理规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。
+- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex），分支可使用 `claude/<topic>` 或 `codex/<topic>`，从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
+- `/global/backend` 只承载 `main`。正式施工遵循「一个任务一个 writer 一个 worktree」；Claude Code 可使用 `/global/backend/.claude/worktrees/<topic>` 与 `claude/<topic>`，也可使用 `pnpm worktree:new <topic>` 从最新 `origin/main` 创建 `.codex/worktrees/<topic>` 与 `codex/<topic>`；两种约定都合法。禁止在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工目录。完整创建、迁移、恢复与清理规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。
 - 远端 PR 合入后，本地根 `main` 的跟随使用 `node scripts/governance-main-worktree-sync.mjs status` / `node scripts/governance-main-worktree-sync.mjs apply`。`apply` 只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 纯 fast-forward，且必须证明远端入站路径不触碰本地 tracked、untracked 或 ignored 现场；任何 ahead/diverged、路径冲突、ref 新鲜度变化或事后状态变化都 fail-closed。它不 stash/reset/clean，不处理 PR、push、merge 授权或分支清理。
 - **新鲜度门**：规划、只读审计和实施开始前先执行 `git fetch origin --prune` 与 `git rev-list --count HEAD..origin/main`。若结果非 `0`，该 worktree 已落后，不能据此给出“当前事实”结论；必须从刚 fetch 的 `origin/main` 新建正式 worktree，或先完成受控同步后再继续。功能分支上的已提交工作不免除此门。
 - 已有 `/global/wt/*` 不批量迁移：干净且确认仍需开发的才可用 `git worktree move` 迁入；脏、锁定、失联或承载 provenance 的现场原地冻结并先审计。工具管理且仍被活跃任务持有的 worktree 不得手工移动。
@@ -21,7 +21,7 @@
 2. 核对 Git 层：本地/远端分支与 PR、commit、reflog、stash、未跟踪文件和失联 worktree 登记。
 3. 核对 Codex 持久层：任务 UI 的“已编辑文件”、本地 `/root/.codex/sessions/**/rollout-*.jsonl` 中成功的 `patch_apply_end`、任务附件与子任务记录。**UI 仍能展示 diff 就说明必须继续追查其持久来源**。
 4. 核对文件系统与服务层：原目录是否真的消失、是否只是未挂载/路径变化/权限问题；临时目录只作现场来源，不再作为恢复目标。
-5. 从最后可信 commit 在 `/global/backend/.codex/worktrees/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。原现场无论位于 legacy `/global/wt` 还是工具目录都保持只读。
+5. 从最后可信 commit 在 `/global/backend/.claude/worktrees/<topic>-recovery` 或 `/global/backend/.codex/worktrees/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。原现场无论位于 legacy `/global/wt` 还是工具目录都保持只读。
 6. 只有在“原始变更全部可追踪、后来正确修订未被覆盖、diff/check/build/test 通过”后才宣告恢复完成；恢复前的人工重写只能作为候选稿，不能冒充原始内容。
 
 恢复后立即 checkpoint commit + push；临时恢复 worktree 即使计划删除，也必须等 PR 合并、分支清理与独有文件审计完成后再做。
@@ -61,11 +61,11 @@ cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts
 
 | 级别 | 例子                                        | 处理                                                                                    |
 | ---- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| 琐碎 | 错别字、注释、单行配置、文档措辞            | **不单独发 PR**——搭下一个功能 PR，或攒成一个滚动 `chore:` PR；仍须 CI/审查绿 + 用户确认 |
-| 小改 | 一个 bug 修复、小功能、一份文档             | 独立 PR（一个逻辑单元一起，别拆）；CI/审查绿 + 用户确认                                 |
-| 实质 | schema/RLS/鉴权/迁移/对外抓取/大量删除/合规 | 独立 PR + **Codex 专项复核 + 用户明确确认**，不自动合并                                 |
+| 琐碎 | 错别字、注释、单行配置、文档措辞            | **不单独发 PR**——搭下一个功能 PR，或攒成一个滚动 `chore:` PR；仍须 CI/审查绿 + `DEC-AIDEV-004` 合并门 |
+| 小改 | 一个 bug 修复、小功能、一份文档             | 独立 PR（一个逻辑单元一起，别拆）；CI/审查绿 + `DEC-AIDEV-004` 合并门                                 |
+| 实质 | schema/RLS/鉴权/迁移/对外抓取/大量删除/合规 | 独立 PR + **开发代理专项复核**，合并授权按 `DEC-AIDEV-004`                                 |
 
-三条硬规矩：① 一逻辑改动一 PR（不碎）；② 琐碎搭车不单开；③ Codex 不得自行合并，所有 PR 都须用户明确确认，风险类另加专项人审。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
+三条硬规矩：① 一逻辑改动一 PR（不碎）；② 琐碎搭车不单开；③ 合并遵循 `DEC-AIDEV-004`：开发代理独立审查通过、必需检查全绿并满足该决定其余门后可 squash 合并；不含 ruleset/仓库设置/权限变更、部署发布与付费调用，风险类另加专项复核。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
 
 ## 合规红线（涉数据源/联系人）
 
