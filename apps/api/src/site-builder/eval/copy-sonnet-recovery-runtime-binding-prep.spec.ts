@@ -35,6 +35,7 @@ import {
   validateCopySonnetRecoveryRuntimeBindingArtifact,
   writeCopySonnetRecoveryRuntimeBindingCreateOnly,
 } from "./copy-sonnet-recovery-runtime-binding-prep";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const HISTORICAL_V13_MANIFEST_PATH =
@@ -426,6 +427,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     const shallowCheckout =
       execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
         cwd: REPOSITORY_ROOT,
+        env: createSafeGitEnvironment(),
         encoding: "utf8",
       }).trim() === "true";
     if (!shallowCheckout) {
@@ -433,7 +435,11 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         const fixedBytes = execFileSync(
           "git",
           ["show", `${artifact.fixedSourceCommit}:${source.path}`],
-          { cwd: REPOSITORY_ROOT, encoding: "buffer" },
+          {
+            cwd: REPOSITORY_ROOT,
+            env: createSafeGitEnvironment(),
+            encoding: "buffer",
+          },
         );
         expect(sha256(fixedBytes)).toBe(source.sha256);
       }
@@ -665,6 +671,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: REPOSITORY_ROOT,
+        env: createSafeGitEnvironment(),
         encoding: "utf8",
       }).trim();
       const artifact =

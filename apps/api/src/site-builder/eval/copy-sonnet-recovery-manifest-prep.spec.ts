@@ -267,6 +267,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: REPOSITORY_ROOT,
+        env: createSafeGitEnvironment(),
         encoding: "utf8",
       }).trim();
       // The live successor must not make historical v16 appear current. The
@@ -290,7 +291,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
             fixedSourceRoot,
             COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
           ],
-          { cwd: REPOSITORY_ROOT },
+          { cwd: REPOSITORY_ROOT, env: createSafeGitEnvironment() },
         );
         worktreeCreated = true;
         const artifact =
@@ -362,6 +363,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
             ["worktree", "remove", "--force", fixedSourceRoot],
             {
               cwd: REPOSITORY_ROOT,
+              env: createSafeGitEnvironment(),
             },
           );
         }

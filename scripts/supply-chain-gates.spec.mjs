@@ -432,6 +432,66 @@ test("comparable audit subjects bind exact clean commits and reject untracked de
   }
 });
 
+test("audit subjects are read from the explicit root even under an inherited GIT_DIR", async () => {
+  const { assertRepositoryAuditSubject } =
+    await import("./supply-chain-audit.mjs");
+  const outside = await mkdtemp(join(tmpdir(), "supply-chain-outside-"));
+  const directory = await mkdtemp(join(tmpdir(), "supply-chain-subject-"));
+  const gitIn = (cwd, ...arguments_) => {
+    const execution = spawnSync("git", arguments_, {
+      cwd,
+      encoding: "utf8",
+      env: createSafeGitEnvironment(),
+    });
+    assert.equal(execution.status, 0, execution.stderr);
+    return execution.stdout.trim();
+  };
+  const outsideGitDirectory = join(outside, ".git");
+  const snapshotOutside = async () => ({
+    config: await readFile(join(outsideGitDirectory, "config"), "utf8"),
+    index: await readFile(join(outsideGitDirectory, "index")),
+    refs: gitIn(outside, "for-each-ref"),
+  });
+
+  try {
+    for (const [root, file] of [
+      [outside, "outside.txt"],
+      [directory, "subject.txt"],
+    ]) {
+      gitIn(root, "init", "--initial-branch=main", "--quiet");
+      gitIn(root, "config", "user.email", "governance@example.invalid");
+      gitIn(root, "config", "user.name", "Governance Test");
+      await writeFile(join(root, file), `${file}\n`);
+      gitIn(root, "add", file);
+      gitIn(root, "commit", "--quiet", "-m", file);
+    }
+    await writeFile(join(outside, "untracked.txt"), "dirty outside\n");
+    const head = gitIn(directory, "rev-parse", "HEAD");
+    const before = await snapshotOutside();
+
+    const inherited = { GIT_DIR: outsideGitDirectory, GIT_PREFIX: "" };
+    const previous = Object.fromEntries(
+      Object.keys(inherited).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, inherited);
+    let subject;
+    try {
+      subject = assertRepositoryAuditSubject(directory, head);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+
+    assert.deepEqual(subject, { root: directory, commit: head });
+    assert.deepEqual(await snapshotOutside(), before);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("graph delta CLI rejects untrusted dependency sources even when the graph is reported identical", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "supply-chain-identical-source-policy-"),

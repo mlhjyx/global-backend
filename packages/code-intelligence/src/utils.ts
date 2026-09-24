@@ -95,3 +95,21 @@ export function lineOf(text: string, offset: number): number {
 export function uniqueSorted(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
+
+/**
+ * Environment for running git against an explicit repository root. Git
+ * exports GIT_DIR, GIT_PREFIX, GIT_CONFIG_PARAMETERS, ... to hooks and to
+ * `git rebase -x`; a child git that inherits them ignores `-C`/cwd and reads
+ * (and refreshes the index of) the outer repository instead. Mirrors
+ * scripts/safe-git-environment.mjs, which this package cannot import.
+ */
+export function createSafeGitEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(
+      Object.entries(environment).filter(([key]) => !key.startsWith("GIT_")),
+    ),
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}

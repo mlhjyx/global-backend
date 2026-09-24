@@ -105,7 +105,7 @@ export function assertNoRepositoryNonRegularFiles(entries) {
   }
 }
 
-function buildTrustedGitEnvironment() {
+export function buildTrustedGitEnvironment() {
   return Object.freeze({
     ...buildTrustedPnpmEnvironment(),
     GIT_CONFIG_GLOBAL: "/dev/null",

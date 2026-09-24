@@ -25,7 +25,12 @@ import {
   readGraph,
 } from "./scan";
 import { ContractGraphV1, GraphEdgeKind, GraphNodeV1 } from "./schema";
-import { sha256, stableJson, uniqueSorted } from "./utils";
+import {
+  createSafeGitEnvironment,
+  sha256,
+  stableJson,
+  uniqueSorted,
+} from "./utils";
 
 const execFile = promisify(execFileCallback);
 export const PINNED_CODEGRAPH_VERSION = "1.5.0";
@@ -239,6 +244,7 @@ async function loadCodeGraph(): Promise<typeof CodeGraphInstance> {
 async function git(repositoryRoot: string, args: string[]): Promise<string> {
   const { stdout } = await execFile("git", ["-C", repositoryRoot, ...args], {
     encoding: "utf8",
+    env: createSafeGitEnvironment(),
     maxBuffer: 16 * 1024 * 1024,
   });
   return stdout.trim();
@@ -374,7 +380,7 @@ export async function extractGitArchive(
         `--output=${archivePath}`,
         commit,
       ],
-      { maxBuffer: 16 * 1024 * 1024 },
+      { env: createSafeGitEnvironment(), maxBuffer: 16 * 1024 * 1024 },
     );
     await execFile("tar", ["-xf", archivePath, "-C", temporary], {
       maxBuffer: 16 * 1024 * 1024,

@@ -19,6 +19,7 @@ import {
   writeCopyRealCapabilityManifestCreateOnly,
   type CopyRealCapabilitySourceFile,
 } from "./copy-real-capability-manifest-prep";
+import { createSafeGitEnvironment } from "../../../../../scripts/safe-git-environment.mjs";
 
 const PREPARATION_HEAD = "f".repeat(40);
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../..");
@@ -875,7 +876,11 @@ describe("Copy real capability create-only manifest preparation", () => {
         "apps/api/src/model-runtime",
         "packages/contracts/src",
       ],
-      { cwd: REPOSITORY_ROOT, encoding: "utf8" },
+      {
+        cwd: REPOSITORY_ROOT,
+        env: createSafeGitEnvironment(),
+        encoding: "utf8",
+      },
     )
       .trim()
       .split("\n");
