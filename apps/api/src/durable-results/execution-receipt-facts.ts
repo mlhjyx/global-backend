@@ -38,6 +38,7 @@ export const RECEIPT_FACT_MODEL_TASK_IDS = Object.freeze([
   'discovery.extract_company',
   'discovery.extract_list',
   'contact.find_decision_makers',
+  'discovery.classify_trade_role',
 ] as const);
 
 type PatentCostBasis = 'not_incurred' | 'provider_reported' | 'estimated_upper_bound';
