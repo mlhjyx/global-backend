@@ -261,6 +261,37 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  'discovery.classify_trade_role': {
+    id: 'discovery.classify_trade_role',
+    // G3 5.4（2026-09-24）：官网画像富集以已建档公司为主体抓首页与 Impressum（ToolBroker 按调用绑定主体）。
+    allowedTools: ['crawl4ai.fetch'],
+    maxCostCents: 10,
+    maxOutputTokens: 2_048,
+    timeoutMs: 120000,
+    description:
+      '根据一家公司官网首页与 Impressum 的文本，判断它在所给品类上的贸易角色：distributor（分销/经销/代理，含进口商）、wholesaler（批发/B2B 大宗供货）、manufacturer（自有研发制造）、mixed（既制造又分销他牌）、service（安装/维修/工程服务为主）、other（无关或无法判断）。同时列出页面明确出现的在售第三方品牌名（只写品牌，不写人名、邮箱、电话），并判断是否有自有制造。只允许使用给定文本中明确出现的信息，禁止编造；证据片段逐字摘自文本且不得包含人名或联系方式。',
+    outputSchema: closedObject({
+      trade_role: boundedString(40, {
+        enum: ['distributor', 'wholesaler', 'manufacturer', 'mixed', 'service', 'other'],
+        description: '贸易角色',
+      }),
+      confidence: boundedNumber(0, 1),
+      own_manufacturing: { type: 'boolean', description: '页面是否明确声明自有制造/生产' },
+      carried_brands: {
+        ...boundedArray(30, boundedString(80)),
+        description: '页面明确出现的在售第三方品牌名',
+      },
+      evidence: {
+        ...boundedArray(3, boundedString(300)),
+        description: '支持判断的原文片段（不含人名与联系方式）',
+      },
+    }, ['trade_role']),
+    // 分类是高频便宜任务：flash 档（设计 §3.6）。
+    model: 'deepseek-v4-flash',
+    risk: 'low',
+    humanGate: false,
+  },
+
   'contact.find_decision_makers': {
     id: 'contact.find_decision_makers',
     // DecisionMaker/public_web 联系人路径以本契约身份经 Broker 搜索/抓取（收口②）。

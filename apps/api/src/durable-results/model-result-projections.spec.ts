@@ -237,6 +237,15 @@ const discoveryExtractCompanyData: JsonRecord = {
 };
 const discoveryExtractCompanyRaw = rawResult(discoveryExtractCompanyData);
 
+const tradeRoleData: JsonRecord = {
+  trade_role: 'distributor',
+  confidence: 1,
+  own_manufacturing: false,
+  carried_brands: ['b'.repeat(80), ...Array.from({ length: 29 }, () => 'Wilo')],
+  evidence: ['e'.repeat(300), 'Großhandel', 'Vertriebspartner'],
+};
+const tradeRoleRaw = rawResult(tradeRoleData);
+
 const discoveryExtractListData: JsonRecord = {
   is_directory: true,
   list_kind: 'association_members',
@@ -393,6 +402,22 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
     ],
   },
   {
+    taskId: 'discovery.classify_trade_role', schema: 'discovery-classify-trade-role/v1', raw: tradeRoleRaw,
+    restored: restoredResult(tradeRoleData),
+    invalid: [
+      invalid('brand maxLength + 1', tradeRoleRaw, (copy) => {
+        (copy.data.carried_brands as string[])[0] = 'b'.repeat(81);
+      }),
+      invalid('carried brands maxItems + 1', tradeRoleRaw, (copy) => {
+        (copy.data.carried_brands as unknown[]).push('Grundfos');
+      }),
+      invalid('unknown ModelResult root', tradeRoleRaw, (copy) => { copy.unexpected = true; }, false),
+      invalid('unknown trade-role field', tradeRoleRaw, (copy) => { copy.data.contact_person = 'forbidden'; }),
+      invalid('trade role outside the closed enum', tradeRoleRaw, (copy) => { copy.data.trade_role = 'broker'; }),
+      invalid('non-canonical confidence number', tradeRoleRaw, (copy) => { copy.data.confidence = -0; }),
+    ],
+  },
+  {
     taskId: 'discovery.extract_list', schema: 'discovery-extract-list/v1', raw: discoveryExtractListRaw,
     restored: restoredResult(discoveryExtractListData),
     invalid: [
@@ -472,7 +497,7 @@ function expectRecursivelyClosedAndBounded(schema: unknown, propertyNames?: stri
 }
 
 describe('non-Site-Builder model result projection registry', () => {
-  it('locks the exact ten task IDs and their exact schema IDs', () => {
+  it('locks the exact eleven task IDs and their exact schema IDs', () => {
     expect(MODEL_RESULT_TASK_IDS).toEqual([
       'company_understanding.extract_claims',
       'company_understanding.extract_profile',
@@ -484,6 +509,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.extract_company',
       'discovery.extract_list',
       'contact.find_decision_makers',
+      'discovery.classify_trade_role',
     ]);
     expect(MODEL_RESULT_PROJECTION_SCHEMAS).toEqual({
       'company_understanding.extract_claims': 'understanding-claims/v1',
@@ -496,6 +522,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.extract_company': 'discovery-extract-company/v1',
       'discovery.extract_list': 'discovery-extract-list/v1',
       'contact.find_decision_makers': 'contact-decision-makers/v1',
+      'discovery.classify_trade_role': 'discovery-classify-trade-role/v1',
     });
     expect(MODEL_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema)).toEqual([
       'understanding-claims/v1',
@@ -508,6 +535,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery-extract-company/v1',
       'discovery-extract-list/v1',
       'contact-decision-makers/v1',
+      'discovery-classify-trade-role/v1',
     ]);
   });
 
@@ -526,7 +554,7 @@ describe('non-Site-Builder model result projection registry', () => {
   });
 
   it('registers only closed, bounded, ASCII-camelCase, non-sensitive projection schemas', () => {
-    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(10);
+    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(11);
     for (const definition of MODEL_RESULT_PROJECTION_DEFINITIONS) {
       const names: string[] = [];
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);

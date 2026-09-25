@@ -240,7 +240,7 @@ describe('DomainAckService', () => {
     const service = new DomainAckService(repository);
     const apply = vi.fn(async () => ({ status: 'verified' }));
 
-    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(28);
+    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(29);
     expect(getDomainAckProductConsumerBinding('smtp.rcpt_probe')).toEqual({
       producerId: 'smtp.rcpt_probe',
       consumer: 'EmailVerificationProvider',

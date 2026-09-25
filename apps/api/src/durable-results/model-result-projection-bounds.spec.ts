@@ -273,6 +273,17 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<R
     model: { maxLength: 120 },
     ...COMMON_MODEL_METADATA_BOUNDS,
   },
+  'discovery-classify-trade-role/v1': {
+    'data.tradeRole': { maxLength: 40 },
+    'data.confidence': { minimum: 0, maximum: 1 },
+    'data.carriedBrands': { maxItems: 30 },
+    'data.carriedBrands[]': { maxLength: 80 },
+    'data.evidence': { maxItems: 3 },
+    'data.evidence[]': { maxLength: 300 },
+    provider: { maxLength: 120 },
+    model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
+  },
   'discovery-extract-list/v1': {
     'data.listKind': { maxLength: 80 },
     'data.companies': { maxItems: 128 },

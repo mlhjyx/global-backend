@@ -17,6 +17,7 @@ export const MODEL_RESULT_TASK_IDS = Object.freeze([
   "discovery.extract_company",
   "discovery.extract_list",
   "contact.find_decision_makers",
+  "discovery.classify_trade_role",
 ] as const);
 export type ModelResultTaskId = (typeof MODEL_RESULT_TASK_IDS)[number];
 export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -30,6 +31,7 @@ export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   "discovery.extract_company": "discovery-extract-company/v1",
   "discovery.extract_list": "discovery-extract-list/v1",
   "contact.find_decision_makers": "contact-decision-makers/v1",
+  "discovery.classify_trade_role": "discovery-classify-trade-role/v1",
 } satisfies Readonly<Record<ModelResultTaskId, TypedProjectionSchema>>);
 const MODEL_RESULT_KEYS = [
   "data",
@@ -1359,6 +1361,73 @@ const peopleDefinition: TypedProjectionDefinition<unknown, unknown> = {
     });
   },
 };
+const TRADE_ROLES = [
+  "distributor",
+  "wholesaler",
+  "manufacturer",
+  "mixed",
+  "service",
+  "other",
+] as const;
+const tradeRoleDefinition: TypedProjectionDefinition<unknown, unknown> = {
+  schema: "discovery-classify-trade-role/v1",
+  jsonSchema: modelResultSchema(
+    optionalObjectSchema(
+      {
+        tradeRole: stringSchema(40, { enum: [...TRADE_ROLES] }),
+        confidence: numberSchema(0, 1),
+        ownManufacturing: { type: "boolean" },
+        carriedBrands: arraySchema(30, stringSchema(80)),
+        evidence: arraySchema(3, stringSchema(300)),
+      },
+      ["tradeRole"],
+    ),
+  ),
+  project(raw) {
+    const result = readModelResult(
+      raw,
+      ["trade_role", "confidence", "own_manufacturing", "carried_brands", "evidence"],
+      ["trade_role"],
+    );
+    return projectModelResultEnvelope(result, {
+      tradeRole: field(result.data, "trade_role"),
+      ...(hasField(result.data, "confidence")
+        ? { confidence: field(result.data, "confidence") }
+        : {}),
+      ...(hasField(result.data, "own_manufacturing")
+        ? { ownManufacturing: field(result.data, "own_manufacturing") }
+        : {}),
+      ...(hasField(result.data, "carried_brands")
+        ? { carriedBrands: projectStringArray(field(result.data, "carried_brands")) }
+        : {}),
+      ...(hasField(result.data, "evidence")
+        ? { evidence: projectStringArray(field(result.data, "evidence")) }
+        : {}),
+    });
+  },
+  restore(projected) {
+    const result = projected as {
+      data: UnknownRecord;
+      provider: string;
+      model: string;
+    };
+    return restoreModelResult(result, {
+      trade_role: result.data.tradeRole,
+      ...(hasField(result.data, "confidence")
+        ? { confidence: result.data.confidence }
+        : {}),
+      ...(hasField(result.data, "ownManufacturing")
+        ? { own_manufacturing: result.data.ownManufacturing }
+        : {}),
+      ...(hasField(result.data, "carriedBrands")
+        ? { carried_brands: [...(result.data.carriedBrands as string[])] }
+        : {}),
+      ...(hasField(result.data, "evidence")
+        ? { evidence: [...(result.data.evidence as string[])] }
+        : {}),
+    });
+  },
+};
 export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   claimsDefinition,
   profileDefinition,
@@ -1370,6 +1439,7 @@ export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   companyDefinition,
   listDefinition,
   peopleDefinition,
+  tradeRoleDefinition,
 ] as const);
 export function getModelResultProjectionSchema(
   taskId: string,
