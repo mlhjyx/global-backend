@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-  normalizeEvidenceText,
-} from '../../../site-builder/agents/evidence-ref';
+import { normalizeArtifactPageText } from '../artifact-page-text';
 import {
   parseArtifactExpectedFacts,
   type Crawl4aiFetchArtifactExpectedFacts,
@@ -67,7 +65,7 @@ export const crawl4aiFetchMaterializer: ArtifactMaterializer<Crawl4aiFetchOutput
         'crawl4ai-fetch/v1',
         expectedFacts,
       ) as Crawl4aiFetchArtifactExpectedFacts;
-      const text = normalizeEvidenceText(
+      const text = normalizeArtifactPageText(
         await readBoundedArtifactUtf8(input, manifest, FETCH_CONTRACT),
       );
       if (facts.contentHash !== shortHash(text)) return invalid();
