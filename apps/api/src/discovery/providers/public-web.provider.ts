@@ -172,7 +172,7 @@ export class PublicWebDiscoveryProvider
     for (let i = 0; i < domains.length; i += JUDGE_CONCURRENCY) {
       const batch = domains.slice(i, i + JUDGE_CONCURRENCY);
       const settled = await Promise.allSettled(
-        batch.map((d) => this.judgeDomain(d, candidates.get(d) ?? [], query, ctx)),
+        batch.map((d) => this.mineDomain(d, candidates.get(d) ?? [], query, ctx)),
       );
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
@@ -219,7 +219,7 @@ export class PublicWebDiscoveryProvider
     return res.data.results.slice(0, 20);
   }
 
-  private async judgeDomain(
+  private async mineDomain(
     domain: string,
     hits: readonly SearchHit[],
     query: CompanyDiscoveryQuery,
