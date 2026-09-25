@@ -4,7 +4,7 @@
 > 生命周期：`IMPLEMENTATION_RECORD`
 > 适用范围：Execution Budget Authority Tasks 1–8 的 additive foundation；不代表产品切换、部署或运行可用
 > 设计权威：[Execution Budget Authority / Artifact Replay 设计](../architecture/execution-budget-authority-artifact-replay-design.md)
-> 后续切换权威：[Execution Authority cutover verification plan](../superpowers/plans/2026-08-21-execution-authority-cutover-verification.md)
+> 后续切换权威：[Execution Authority cutover verification plan](../archive/superpowers/plans/2026-08-21-execution-authority-cutover-verification.md)
 
 ## 1. 裁决摘要
 

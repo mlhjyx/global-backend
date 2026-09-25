@@ -6,6 +6,7 @@
 > 评审状态：`READY_FOR_GATE_1_REVIEW`
 > 事实 Owner：`OWN-DOC-GOV`
 > 最后核验：2026-08-30
+> 2026-09-25 注：本草案的本地实现脚本（`scripts/governance-approval-*`、`scripts/governance-github-readback-*` 与 `approval-readback:test`）从未接入 CI，已按用户 2026-09-23 的治理减负决定删除，见[证据](../evidence/governance-slimming-20260925.md)。下文命令仅作历史记录；schema 仍被代码智能提取器使用，保留不变。
 > 批准边界：用户已 documentary 批准下述精确 Product 选择和值，并批准本地只读设计/计划工作；Privacy、Legal、独立 trust root、实现、GitHub 外部动作、merge 与 Release 均未批准
 >
 > 文档状态：`SPEC_DRAFT / PRODUCT_DIRECTION_APPROVED / PRIVACY_LEGAL_TRUST_PENDING`

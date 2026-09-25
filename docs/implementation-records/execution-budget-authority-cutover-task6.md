@@ -7,7 +7,7 @@
 >
 > Lifecycle: `PRE_CUTOVER_IMPLEMENTATION`
 >
-> Source plan: [Execution Authority Cutover and Verification](../superpowers/plans/2026-08-21-execution-authority-cutover-verification.md#task-6-atomic-databaseproduct-cutover-and-legacy-removal)
+> Source plan: [Execution Authority Cutover and Verification](../archive/superpowers/plans/2026-08-21-execution-authority-cutover-verification.md#task-6-atomic-databaseproduct-cutover-and-legacy-removal)
 >
 > Approved design: [Execution Budget Authority and Artifact Replay](../architecture/execution-budget-authority-artifact-replay-design.md)
 >

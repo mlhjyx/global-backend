@@ -15,7 +15,7 @@
 
 ## Global Constraints
 
-- This plan consumes a merged and independently reviewed local foundation from `2026-08-30-trusted-approval-readback-local-foundation.md`.
+- This plan consumes a merged and independently reviewed local foundation from `../../archive/superpowers/plans/2026-08-30-trusted-approval-readback-local-foundation.md`.
 - External actions are split into explicit gates. No push, PR, workflow run, repository creation, App installation, ruleset update, credential change, or merge is authorized by the plan itself.
 - The introducing PR cannot be verified by the workflow it introduces.
 - No privileged workflow may checkout, fetch, download-and-execute, install, build, or run PR head/merge content.

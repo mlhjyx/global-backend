@@ -24,7 +24,7 @@
 
 ## 1.1 当前 Global Product Program ownership 与接口
 
-本节把 [Phase 0 计划](../superpowers/plans/2026-08-29-global-product-program-phase0.md) 和 [current status](../status/current.md) 的当前裁决写入唯一治理登记。它是对 `.superpowers/sdd/2026-08-29-global-product-program-phase0/ab-three-way-audit.md` 的简要治理结论，而非对其 85 条 assertion 的复制；完整工作证据仍仅保留在该 ignored audit，直至后续已接纳 successor 决定是否创建 tracked handoff。
+本节把 [Phase 0 计划](../archive/superpowers/plans/2026-08-29-global-product-program-phase0.md) 和 [current status](../status/current.md) 的当前裁决写入唯一治理登记。它是对 `.superpowers/sdd/2026-08-29-global-product-program-phase0/ab-three-way-audit.md` 的简要治理结论，而非对其 85 条 assertion 的复制；完整工作证据仍仅保留在该 ignored audit，直至后续已接纳 successor 决定是否创建 tracked handoff。
 
 | Decision ID | 当前裁决 | 状态 | Decision Owner | 裁决位置 |
 |---|---|---|---|---|
