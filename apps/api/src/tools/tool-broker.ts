@@ -10,6 +10,10 @@ import {
   ToolResult,
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
+import type {
+  ArtifactExecutionPort,
+  ArtifactSubjectRef,
+} from "./artifact-execution-port";
 import type { RateLimitStore } from "./rate-limiter";
 import {
   BudgetOperationReplayError,
@@ -41,11 +45,12 @@ import { assertPlatformEgressFenceAvailable } from "../platform-authority/platfo
 
 /**
  * These schemas require the GenericOperationArtifactService plus a Task 5
- * company/contact subject binding. The additive artifact foundation exists,
- * but the current product callers cannot supply a truthful subject for a
- * platform sanctions list or for a company that has not been identified yet.
- * Keep the exact inventory here so an artifact declaration can never fall
- * through to the small inline projection path.
+ * company/contact subject binding. Since G3 (spec 2026-09-24 §4.1) the hold is
+ * decided per call: a caller that supplies `ctx.artifactSubject` for an
+ * existing, live workspace subject is admitted; every other call (first
+ * discovery before a company exists, platform sanctions) stays held. Keep the
+ * exact inventory here so an artifact declaration can never fall through to
+ * the small inline projection path.
  */
 const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
   "crawl4ai-fetch/v1",
@@ -53,6 +58,21 @@ const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
   "http-get/v1",
   "sanctions-download/v1",
 ]);
+
+/** Platform-scoped artifacts have no truthful workspace subject; always held. */
+const PLATFORM_HELD_ARTIFACT_SCHEMAS: ReadonlySet<string> = new Set([
+  "sanctions-download/v1",
+]);
+
+const SUBJECT_BINDING_HOLD = "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD";
+
+function subjectBoundArtifactSchema(tool: Tool): string | null {
+  const strategy = tool.durableResultStrategy;
+  return strategy.kind === "artifact_reference" &&
+    SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS.has(strategy.schema)
+    ? strategy.schema
+    : null;
+}
 
 /**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
@@ -88,6 +108,8 @@ export interface BrokerDeps {
   now?: () => number;
   /** R4-B durable ledger. Any paidCost context fails closed when this is absent. */
   paidLedger?: SiteBuildCostLedger;
+  /** G3 subject-bound artifact execution. Absent → subject-bound calls stay held. */
+  artifactExecution?: ArtifactExecutionPort;
 }
 
 export interface ToolTrace {
@@ -353,7 +375,8 @@ export class ToolBroker implements ExecutionBroker {
           estimatedMicrousd: BigInt(tool.cost.estimatedCents) * 10_000n,
         });
         if (ctx.platformEgress) assertPlatformEgressReservation(reservation, ctx.workspaceId, runId);
-        if (reservation.replay) {
+        // Subject-bound artifact replays are admitted and read below.
+        if (reservation.replay && !subjectBoundArtifactSchema(tool)) {
           let replay: ToolResult<O> | null;
           try {
             replay = this.replayGenericToolProjection(
@@ -399,29 +422,37 @@ export class ToolBroker implements ExecutionBroker {
     // The four governed artifact producers must never use ToolBroker's small
     // typed-projection settlement as a physical fallback. Their approved
     // PERSONAL_DATA contract requires a real company/contact subject before
-    // object persistence; current platform/pre-identity callers cannot provide
-    // one. Release only because execute() has not started, then fail closed.
+    // object persistence. Decide per call (G3): only an admitted subject may
+    // proceed; otherwise release (execute() has not started) and fail closed.
     // Site Builder's separately governed paid ledger remains outside this
     // generic authority/artifact cutover.
-    if (
-      !ctx.paidCost &&
-      reservation &&
-      tool.durableResultStrategy.kind === "artifact_reference" &&
-      SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS.has(tool.durableResultStrategy.schema)
-    ) {
-      await this.budget.release(reservation);
-      this.trace(
-        ctx,
-        tool,
-        "DENIED",
-        "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
-        0,
-        now() - started,
-      );
-      throw new ToolPolicyDenied(
-        toolId,
-        "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
-      );
+    let artifactSubject: ArtifactSubjectRef | undefined;
+    if (!ctx.paidCost && reservation && subjectBoundArtifactSchema(tool)) {
+      let admission: { subjectRef: ArtifactSubjectRef } | { reason: string };
+      try {
+        admission = await this.admitArtifactSubject(tool, ctx);
+      } catch (error) {
+        if (!reservation.replay) await this.budget.release(reservation);
+        throw error;
+      }
+      if ("reason" in admission) {
+        if (!reservation.replay) await this.budget.release(reservation);
+        this.trace(ctx, tool, "DENIED", admission.reason, 0, now() - started);
+        throw new ToolPolicyDenied(toolId, admission.reason);
+      }
+      artifactSubject = admission.subjectRef;
+      if (reservation.replay) {
+        let replay: ToolResult<O>;
+        try {
+          replay = await this.deps.artifactExecution!.replay({ reservation, tool });
+        } catch {
+          throw new BudgetOperationReplayError(reservation.operationId);
+        }
+        if (replay.durableReceipt) {
+          ctx.onDurableReceipt?.(tool.id, replay.durableReceipt);
+        }
+        return replay;
+      }
     }
 
     // 4) 限流（令牌桶 + 每域延迟）
@@ -608,6 +639,28 @@ export class ToolBroker implements ExecutionBroker {
             replayPayload: durableReplay ? "scrubbed" : "omitted",
           },
         });
+      } else if (reservation && artifactSubject) {
+        try {
+          result = await this.deps.artifactExecution!.persist({
+            reservation,
+            tool,
+            input,
+            result,
+            subjectRef: artifactSubject,
+          });
+        } catch (error) {
+          // The wire already ran: the reservation stays unresolved (or was
+          // marked RESULT_UNKNOWN by the artifact service) and is never retried.
+          this.trace(
+            ctx,
+            tool,
+            "ERROR",
+            `artifact settlement failed: ${error instanceof Error ? error.name : "unknown"}`,
+            0,
+            now() - started,
+          );
+          throw new BudgetOperationReplayError(reservation.operationId);
+        }
       } else if (reservation) {
         let projection: GenericOperationProjection | undefined;
         try {
@@ -683,6 +736,27 @@ export class ToolBroker implements ExecutionBroker {
     } finally {
       await release?.();
     }
+  }
+
+  private async admitArtifactSubject<I, O>(
+    tool: Tool<I, O>,
+    ctx: ToolContext,
+  ): Promise<{ subjectRef: ArtifactSubjectRef } | { reason: string }> {
+    const schema = subjectBoundArtifactSchema(tool as Tool);
+    if (!schema || PLATFORM_HELD_ARTIFACT_SCHEMAS.has(schema) || !ctx.artifactSubject) {
+      return { reason: SUBJECT_BINDING_HOLD };
+    }
+    if (!this.deps.artifactExecution) {
+      return { reason: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE" };
+    }
+    const admission = await this.deps.artifactExecution.admit({
+      workspaceId: ctx.workspaceId,
+      resultSchema: schema,
+      subjectRef: ctx.artifactSubject,
+    });
+    return admission.status === "BOUND"
+      ? { subjectRef: admission.subjectRef }
+      : { reason: `GENERIC_OPERATION_ARTIFACT_${admission.reason}` };
   }
 
   private replayGenericToolProjection<I, O>(

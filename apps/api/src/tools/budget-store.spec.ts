@@ -134,6 +134,36 @@ describe('PostgresBudgetStore', () => {
     },
   );
 
+  it('carries the account authority on an executable reservation for artifact manifests', async () => {
+    const authorityId = '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0';
+    const row = (authority: unknown) => ({
+      kind: 'EXECUTE',
+      operation_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      reserved_microusd: 10_000n,
+      remaining_microusd: 0n,
+      status: 'RESERVED',
+      authority_id: authority,
+    });
+    for (const [authority, expected] of [
+      [authorityId, authorityId],
+      [null, undefined],
+      ['not-a-uuid', undefined],
+    ] as const) {
+      const prisma = {
+        withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+          $queryRaw: vi.fn(async () => [row(authority)]),
+        } as never)),
+      } as unknown as PrismaService;
+      const reservation = await new PostgresBudgetStore(prisma).reserve({
+        workspaceId: TEST_WORKSPACE_ID,
+        accountKey: 'run',
+        operationKey: 'artifact-authority',
+        estimatedMicrousd: 10_000n,
+      });
+      expect(reservation.authorityId).toBe(expected);
+    }
+  });
+
   it('rejects microusd overflow before persistence', async () => {
     const prisma = fakePrisma([]);
     const store = new PostgresBudgetStore(prisma);

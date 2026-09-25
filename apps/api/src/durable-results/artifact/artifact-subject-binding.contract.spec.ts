@@ -277,3 +277,76 @@ describe("ArtifactSubjectBindingContract", () => {
     expect(subjects.resolveExistingSubject).not.toHaveBeenCalled();
   });
 });
+
+describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
+  const bound = {
+    workspaceId: WORKSPACE_ID,
+    subjectType: "company" as const,
+    subjectId: COMPANY_ID,
+  };
+  const input = workspaceInput("crawl4ai-fetch/v1", {
+    subjectType: "company",
+    subjectId: COMPANY_ID,
+  });
+
+  it("binds only a live, unsuppressed subject before any wire", async () => {
+    const subjects = {
+      ...repository(bound),
+      findExecutionHold: vi.fn(async () => null),
+    };
+    const contract = new ArtifactSubjectBindingContract(subjects);
+
+    await expect(contract.resolveForExecution(tx, input)).resolves.toEqual({
+      status: "BOUND",
+      subjectRef: { subjectType: "company", subjectId: COMPANY_ID },
+    });
+    expect(subjects.findExecutionHold).toHaveBeenCalledWith(tx, {
+      workspaceId: WORKSPACE_ID,
+      subjectRef: { subjectType: "company", subjectId: COMPANY_ID },
+    });
+  });
+
+  it.each([
+    ["TOMBSTONED", "SUBJECT_TOMBSTONED"],
+    ["SUPPRESSED", "SUBJECT_SUPPRESSED"],
+  ] as const)("denies a %s subject", async (hold, reason) => {
+    const contract = new ArtifactSubjectBindingContract({
+      ...repository(bound),
+      findExecutionHold: vi.fn(async () => hold),
+    });
+
+    await expect(contract.resolveForExecution(tx, input)).resolves.toEqual({
+      status: "DENIED",
+      reason,
+    });
+  });
+
+  it("never checks holds for a denied or held binding and fails closed without a hold reader", async () => {
+    const findExecutionHold = vi.fn(async () => null);
+    const crossWorkspace = new ArtifactSubjectBindingContract({
+      ...repository({ ...bound, workspaceId: OTHER_WORKSPACE_ID }),
+      findExecutionHold,
+    });
+    await expect(crossWorkspace.resolveForExecution(tx, input)).resolves.toEqual({
+      status: "DENIED",
+      reason: "SUBJECT_BINDING_INVALID",
+    });
+    const unbound = new ArtifactSubjectBindingContract({
+      ...repository(bound),
+      findExecutionHold,
+    });
+    await expect(
+      unbound.resolveForExecution(tx, workspaceInput("crawl4ai-fetch/v1")),
+    ).resolves.toEqual({
+      status: "SUBJECT_BINDING_HOLD",
+      reason: "CANONICAL_SUBJECT_UNAVAILABLE",
+    });
+    expect(findExecutionHold).not.toHaveBeenCalled();
+
+    const noReader = new ArtifactSubjectBindingContract(repository(bound));
+    await expect(noReader.resolveForExecution(tx, input)).resolves.toEqual({
+      status: "DENIED",
+      reason: "SUBJECT_BINDING_INVALID",
+    });
+  });
+});

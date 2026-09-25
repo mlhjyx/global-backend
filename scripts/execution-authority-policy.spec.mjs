@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -111,4 +112,21 @@ test('policy errors enumerate exact paths and producers', async () => {
   for (const id of [...EXPECTED_TOOL_IDS, ...EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)]) {
     assert.ok(result.issues.some((entry) => entry.producerId === id), id);
   }
+});
+
+test('artifact execution is bound per call: only a subject-bound call may reach a wire (G3 5.1)', async () => {
+  const manifest = JSON.parse(await readFile(resolve(repositoryRoot, 'docs/governance/durable-result-strategies.json'), 'utf8'));
+  assert.equal(manifest.artifactPhysicalExecution.status, 'PER_CALL_SUBJECT_BINDING');
+  for (const status of ['SUBJECT_BINDING_HOLD', 'OPEN']) {
+    const result = await verifyExecutionAuthorityPolicy({
+      repoRoot: repositoryRoot,
+      manifest: { ...manifest, artifactPhysicalExecution: { ...manifest.artifactPhysicalExecution, status } },
+    });
+    assert.ok(result.issues.some((entry) => entry.code === 'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID'), status);
+  }
+  const fallback = await verifyExecutionAuthorityPolicy({
+    repoRoot: repositoryRoot,
+    manifest: { ...manifest, artifactPhysicalExecution: { ...manifest.artifactPhysicalExecution, inlineFallbackAllowed: true } },
+  });
+  assert.ok(fallback.issues.some((entry) => entry.code === 'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID'));
 });

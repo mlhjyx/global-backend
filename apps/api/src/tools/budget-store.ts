@@ -114,6 +114,8 @@ export interface BudgetReservation {
   accountKey: string;
   operationId: string;
   estimatedMicrousd: bigint;
+  /** Ledger account authority; artifact manifests must bind exactly this id. */
+  authorityId?: string;
   replay: boolean;
   replayResult?: BudgetReplayResult;
   receipt?: DurableExecutionReceipt;
@@ -935,6 +937,9 @@ export class PostgresBudgetStore implements BudgetStore {
       accountKey: input.accountKey,
       operationId: row.operation_id,
       estimatedMicrousd: row.reserved_microusd,
+      ...(isCanonicalArtifactUuid(row.authority_id)
+        ? { authorityId: row.authority_id }
+        : {}),
       replay: row.kind === 'REPLAY',
       ...(replayResult ? { replayResult } : {}),
       ...(receipt ? { receipt } : {}),

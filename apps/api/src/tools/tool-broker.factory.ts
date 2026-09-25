@@ -12,6 +12,8 @@ import {
   UnavailableBudgetStore,
 } from './budget-store';
 import type { RateLimitStore } from './rate-limiter';
+import type { ArtifactExecutionPort } from './artifact-execution-port';
+import { createGenericOperationArtifactExecutionFromEnv } from '../durable-results/artifact/generic-operation-artifact.runtime';
 import {
   RedisRateLimitStore,
   UnavailableRateLimitStore,
@@ -82,6 +84,8 @@ export function buildToolBroker(deps?: {
   sourcePolicyReader?: SourcePolicyReader;
   traceRecorder?: (t: ToolTrace) => void;
   paidLedger?: SiteBuildCostLedger;
+  /** Test/composition override; managed composition derives it from PrismaService + storage env. */
+  artifactExecution?: ArtifactExecutionPort;
 }): ToolBroker {
   const registry = registerSourceTools(registerBuiltinTools(new ToolRegistry()));
   const traceRecorder =
@@ -89,16 +93,25 @@ export function buildToolBroker(deps?: {
     ((t: ToolTrace) => {
       if (t.status !== 'OK') console.warn(`[tool-broker] ${t.status} ${t.toolId} ${t.reason ?? ''}`.trim());
     });
+  const budgetStore =
+    deps?.budgetStore ??
+    (deps?.prisma
+      ? new PostgresBudgetStore(deps.prisma)
+      : new UnavailableBudgetStore('ToolBroker factory requires PrismaService for durable budgets'));
+  // G3: subject-bound PERSONAL_DATA artifacts persist through the same durable
+  // budget ledger. Without Prisma or valid storage env every such call stays held.
+  const artifactExecution =
+    deps?.artifactExecution ??
+    (deps?.prisma
+      ? createGenericOperationArtifactExecutionFromEnv(deps.prisma, budgetStore)
+      : undefined);
   return new ToolBroker({
     registry,
-    budgetStore:
-      deps?.budgetStore ??
-      (deps?.prisma
-        ? new PostgresBudgetStore(deps.prisma)
-        : new UnavailableBudgetStore('ToolBroker factory requires PrismaService for durable budgets')),
+    budgetStore,
     limiter: deps?.limiter ?? rateLimitStoreFromEnvironment(),
     sourcePolicyReader: deps?.sourcePolicyReader,
     traceRecorder,
     paidLedger: deps?.paidLedger,
+    artifactExecution,
   });
 }
