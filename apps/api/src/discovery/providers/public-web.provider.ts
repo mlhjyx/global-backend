@@ -26,6 +26,17 @@ import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
+import {
+  MAX_SEARCHES_PER_QUERY,
+  isForeignCountryDomain,
+  searchLanguageFor,
+  targetCountryTlds,
+  tradeRoleFor,
+  tradeRoleTerms,
+} from '../search-localization';
+
+export { searchLanguageFor, tradeRoleFor } from '../search-localization';
 import {
   executeStructuredTaskWithRuntime,
   type RuntimeStructuredModelResult,
@@ -42,7 +53,7 @@ import {
   type DiscoveryCompanyReceiptObservation,
 } from '../company-discovery-lineage';
 
-const PARSER_VERSION = 'public_web/v1';
+const PARSER_VERSION = 'public_web/v2-search';
 
 /** 搜索结果里永远不是目标公司官网的域名（词典/百科/社媒/平台市场/招聘站…）。 */
 const NOISE_DOMAINS = [
@@ -59,8 +70,12 @@ const NOISE_DOMAINS = [
   'cloudflare.com', 'baidu.com', 'toutiao.com', 'ensun.io', 'zaixianjisuan.com',
 ];
 
-const MAX_DOMAINS_PER_QUERY = 14; // 每条计划查询最多深挖的候选域名数（控成本/时长）
-const CRAWL_CONCURRENCY = 5;
+const MAX_DOMAINS_PER_QUERY = 14; // 每条计划查询最多判定的候选域名数（控成本/时长）
+const JUDGE_CONCURRENCY = 5;
+const MAX_HITS_PER_DOMAIN = 3;
+const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
+
+type SearchHit = Readonly<{ url: string; title: string; content: string }>;
 
 export interface ExtractedCompany {
   is_company_site: boolean;
@@ -76,9 +91,10 @@ export interface ExtractedCompany {
 
 /**
  * 真实公开数据挖掘 Provider（PRD 7.4.11 Public Intelligence / DAT-013）。
- * 管线：SearXNG 元搜索发现候选 → 噪声域名过滤 + Source Registry SUSPENDED 检查 →
- * Crawl4AI 抓官网 → LLM（gemini-2.5-flash）判站并抽取结构化属性（只取文本中存在的）→
- * 带页面指纹的记录。所有值都可回溯到真实抓取的页面（P-04）。
+ * 发现管线（G3 2026-09-24「搜索优先、建档后再抓」）：SearXNG 元搜索（语言随目标国、
+ * 查询串随贸易角色）→ 噪声域名 + 非目标国 ccTLD 过滤 → LLM 仅凭同域名的搜索标题/摘要/URL
+ * 判站并抽取（只取搜索结果中存在的）→ 带搜索证据指纹的记录。官网页面只在公司建档之后、
+ * 以该公司为主体抓取（官网画像富集阶段）。
  *
  * 联系人路径：抓 contact/impressum/about 页 → 确定性正则抽公开邮箱/电话（不做
  * 人名画像 —— 个人数据留给 SourcePolicy/合规门后的版本）。
@@ -128,27 +144,42 @@ export class PublicWebDiscoveryProvider
     }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
-    const candidates = new Map<string, { url: string; title: string }>(); // domain → first hit
+    const language = searchLanguageFor(query);
+    const targetTlds = targetCountryTlds(query);
+    // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
+    const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
 
-    for (const q of searches) {
-      const results = await this.search(q, ctx);
-      for (const r of results) {
-        const domain = normalizeDomain(r.url);
-        if (!domain) continue;
-        if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-        if (blocked.has(domain)) continue;
-        if (!candidates.has(domain)) candidates.set(domain, { url: r.url, title: r.title });
+    const perQuery: SearxResult[][] = [];
+    for (const q of searches) perQuery.push(await this.search(q, language, ctx));
+    // Round-robin across queries so each role query contributes candidates
+    // before the per-query domain cap applies.
+    const interleaved: SearxResult[] = [];
+    for (let i = 0; perQuery.some((results) => i < results.length); i += 1) {
+      for (const results of perQuery) if (results[i]) interleaved.push(results[i]!);
+    }
+    for (const r of interleaved) {
+      const domain = normalizeDomain(r.url);
+      if (!domain) continue;
+      if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
+      if (blocked.has(domain)) continue;
+      if (isForeignCountryDomain(domain, targetTlds)) continue;
+      const hits = candidates.get(domain) ?? [];
+      if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {
+        hits.push({ url: r.url, title: r.title ?? '', content: r.content ?? '' });
       }
+      candidates.set(domain, hits);
     }
 
     const domains = [...candidates.keys()].slice(0, MAX_DOMAINS_PER_QUERY);
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
 
-    // 有限并发地：抓首页 → LLM 判站 + 抽取
-    for (let i = 0; i < domains.length; i += CRAWL_CONCURRENCY) {
-      const batch = domains.slice(i, i + CRAWL_CONCURRENCY);
-      const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
+    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题/摘要/URL）
+    for (let i = 0; i < domains.length; i += JUDGE_CONCURRENCY) {
+      const batch = domains.slice(i, i + JUDGE_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        batch.map((d) => this.mineDomain(d, candidates.get(d) ?? [], query, ctx)),
+      );
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
         if (s.status === 'rejected' && isDiscoveryCompanyReceiptForwardingFailure(s.reason)) throw s.reason;
@@ -180,11 +211,15 @@ export class PublicWebDiscoveryProvider
     };
   }
 
-  /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
-  private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
+  /** SearXNG 元搜索（经 Broker：searxng.search 工具），语言随目标国。 */
+  private async search(
+    q: string,
+    language: string,
+    ctx: ExecutionContext,
+  ): Promise<SearxResult[]> {
     const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
       'searxng.search',
-      { q, language: 'en' },
+      { q, language },
       this.toolCtx(ctx, 'discovery.extract_company'),
     );
     return res.data.results.slice(0, 20);
@@ -192,6 +227,7 @@ export class PublicWebDiscoveryProvider
 
   private async mineDomain(
     domain: string,
+    hits: readonly SearchHit[],
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
   ): Promise<Readonly<{
@@ -199,33 +235,9 @@ export class PublicWebDiscoveryProvider
     collector?: DiscoveryCompanyReceiptCollector;
   }>> {
     const homeUrl = `https://${domain}/`;
-    // 合规闸门（DAT-011）：robots 禁抓则放弃，不换 UA 硬闯（robots.ts 有缓存；工具内亦权威强制）
-    if (!(await isAllowedByRobots(homeUrl, {
-        authorizeExternalAction: ctx.authorizeExternalAction,
-      }))) {
-      this.log(`skip ${domain}: robots disallow`);
-      return Object.freeze({ record: null });
-    }
-    let text: string;
-    try {
-      const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
-        'crawl4ai.fetch',
-        { url: homeUrl },
-        // FIX C（Codex P1）：仅在 crawl4ai.fetch 处显式声明用途（toolCtx 与 searxng.search 共享，
-        // searxng 是 sourcePolicy=none 短路放行，不在此加）；精确复现 site_builder 扩宽前的有效集。
-        {
-          ...this.toolCtx(ctx, 'discovery.extract_company'),
-          purpose: ['discovery', 'enrichment'],
-        },
-      );
-      text = crawled.data.text.slice(0, 30_000);
-    } catch (err) {
-      if (isExecutionControlError(err)) throw err;
-      this.log('skip: crawl failed (ERROR)');
-      return Object.freeze({ record: null }); // 站点不可达/闸门拒绝 → 放弃该候选
-    }
-    if (text.trim().length < 200) {
-      this.log(`skip ${domain}: too little text (${text.trim().length})`);
+    const text = searchEvidenceText(hits);
+    if (!text) {
+      this.log(`skip ${domain}: no usable search text`);
       return Object.freeze({ record: null });
     }
 
@@ -245,7 +257,7 @@ export class PublicWebDiscoveryProvider
           prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
             filters: query.filters,
             keywords: query.keywords,
-          }).slice(0, 1200)}\n\n网页文本（URL: ${homeUrl}）：\n${text}`,
+          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题、摘要与 URL）：\n${text}`,
           system: contract?.description,
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['is_company_site'] },
@@ -279,7 +291,7 @@ export class PublicWebDiscoveryProvider
     return Object.freeze({
       record: mapPublicWebCompanyToRecord({
         domain,
-        homeUrl,
+        homeUrl: provenanceUrl(hits[0]?.url) ?? homeUrl,
         sourceText: text,
         extracted: out,
         sourceClass: query.sourceClass,
@@ -432,19 +444,47 @@ export function buildPublicContacts(
   });
 }
 
-/** 从计划查询构造 2 条搜索串：结构化过滤词 + 关键词的组合。 */
+/** Search-hit URL for provenance: sanitized, without query string or fragment. */
+function provenanceUrl(raw: string | undefined): string | null {
+  const sanitized = sanitizeEvidenceUrl(raw);
+  if (!sanitized) return null;
+  const url = new URL(sanitized);
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+/** 同一域名的搜索命中 → 给模型的证据文本（标题/摘要/URL；空白命中不算证据）。 */
+export function searchEvidenceText(hits: readonly SearchHit[]): string {
+  const lines = hits
+    .filter((h) => h.title.trim() || h.content.trim())
+    .map((h) => `- 标题：${h.title.trim()}\n  摘要：${h.content.trim()}\n  URL：${h.url}`);
+  return lines.join('\n').slice(0, MAX_SEARCH_EVIDENCE_CHARS);
+}
+
+/**
+ * 从计划查询构造 ≤3 条搜索串（G3 §4.3）：品类词 × 目标国语言的贸易角色词
+ * （分销商 ICP → Großhandel/Händler/Vertrieb）；角色未知时只用品类词，不再硬加
+ * 'manufacturer company'。
+ */
 export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
   const industries = [...arr(f.industry), ...arr(f.sub_industry)].slice(0, 2);
-  const countries = arr(f.country ?? f.region).slice(0, 2);
+  const products = arr(f.product).slice(0, 2);
   const keywords = (query.keywords ?? []).slice(0, 3);
+  const terms = [...keywords, ...products, ...industries]
+    .map((t) => t.trim())
+    .filter((t, i, a) => t.length > 0 && a.indexOf(t) === i);
+  if (!terms.length) return [];
+  const language = searchLanguageFor(query);
+  const roleTerms = tradeRoleTerms(tradeRoleFor(query), language);
 
-  const q1 = [...industries, ...keywords.slice(0, 2), 'manufacturer company', ...countries.slice(0, 1)]
-    .join(' ')
-    .trim();
-  const q2 = [keywords[2] ?? industries[1] ?? industries[0] ?? 'manufacturing', 'supplier', ...countries.slice(1, 2)]
-    .join(' ')
-    .trim();
-  return [q1, q2].filter((q, i, a) => q.length > 3 && a.indexOf(q) === i);
+  const queries = roleTerms.length
+    ? roleTerms.map((role, i) => `${terms[i % terms.length]} ${role}`)
+    : [terms.slice(0, 2).join(' '), terms[2] ?? ''];
+  return queries
+    .map((q) => q.trim())
+    .filter((q, i, a) => q.length > 3 && a.indexOf(q) === i)
+    .slice(0, MAX_SEARCHES_PER_QUERY);
 }

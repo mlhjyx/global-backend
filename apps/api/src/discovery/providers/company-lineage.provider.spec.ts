@@ -182,7 +182,7 @@ describe('provider-owned company receipt lineage', () => {
       .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
   });
 
-  it('public-web excludes search/crawl receipts and covers only the final model record', async () => {
+  it('public-web excludes search receipts and covers only the final model record', async () => {
     const parent = vi.fn();
     const executionBroker = broker(async (toolId, _input, ctx) => {
       if (toolId === 'searxng.search') {
@@ -252,10 +252,9 @@ describe('provider-owned company receipt lineage', () => {
     expect(result).not.toHaveProperty('lineage');
   });
 
-  it('returns an empty public-web lineage when robots prevents the model invocation', async () => {
-    mocks.isAllowedByRobots.mockResolvedValue(false);
+  it('returns an empty public-web lineage when no search hit carries usable text (no model call)', async () => {
     const executionBroker = broker(async () => ({
-      data: { results: [{ url: 'https://acme.test/', title: 'Acme' }] },
+      data: { results: [{ url: 'https://acme.test/', title: '   ' }] },
       costCents: 0,
     }));
     const result = await new PublicWebDiscoveryProvider({
@@ -272,30 +271,15 @@ describe('provider-owned company receipt lineage', () => {
     });
   });
 
-  it('public-web covers no-broker, too-short, ordinary rejection and settled no-output paths', async () => {
+  it('public-web covers no-broker and settled no-output paths', async () => {
     const noBroker = await new PublicWebDiscoveryProvider({ gateway: {} as never })
       .discoverCompanies(query, context());
     expect(noBroker.lineage?.recordCount).toBe(0);
 
-    const tooShortBroker = broker(async (toolId) => toolId === 'searxng.search'
-      ? { data: { results: [{ url: 'https://short.test/', title: 'Short' }] }, costCents: 0 }
-      : { data: { text: 'short' }, costCents: 0 });
-    const tooShort = await new PublicWebDiscoveryProvider({
-      gateway: {} as never,
-      broker: tooShortBroker,
-    }).discoverCompanies(query, context());
-    expect(tooShort.lineage?.recordCount).toBe(0);
-
-    mocks.isAllowedByRobots.mockRejectedValueOnce(new Error('robots unavailable'));
-    const rejected = await new PublicWebDiscoveryProvider({
-      gateway: {} as never,
-      broker: tooShortBroker,
-    }).discoverCompanies(query, context());
-    expect(rejected.lineage?.recordCount).toBe(0);
-
-    const settledBroker = broker(async (toolId) => toolId === 'searxng.search'
-      ? { data: { results: [{ url: 'https://noncompany.test/', title: 'Candidate' }] }, costCents: 0 }
-      : { data: { text: 'candidate content '.repeat(30) }, costCents: 0 });
+    const settledBroker = broker(async () => ({
+      data: { results: [{ url: 'https://noncompany.test/', title: 'Candidate' }] },
+      costCents: 0,
+    }));
     mocks.executeStructuredTaskWithRuntime.mockImplementationOnce(
       async (_gateway, input, ctx) => {
         ctx.onDurableReceipt?.(input.task, MODEL_A);
