@@ -4,7 +4,7 @@
 > 生命周期：`IMPLEMENTATION_RECORD`  
 > 适用范围：Execution Budget / Artifact Replay Program 的 Artifact Tasks 1–8；仅记录 additive、pre-cutover 的源码与本地验证状态  
 > 设计权威：[Execution Budget Authority 与大型结果耐久重放设计](../architecture/execution-budget-authority-artifact-replay-design.md)  
-> 实施计划：[Generic Operation Artifact Replay Implementation Plan](../superpowers/plans/2026-08-21-generic-operation-artifacts.md)
+> 实施计划：[Generic Operation Artifact Replay Implementation Plan](../archive/superpowers/plans/2026-08-21-generic-operation-artifacts.md)
 
 ## 1. 裁决与严格边界
 
