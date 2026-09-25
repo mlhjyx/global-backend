@@ -1225,6 +1225,40 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("admits the subject after the limiter and crawl delay, immediately before the wire", async () => {
+    const order: string[] = [];
+    const { tool, execute } = fetchTool(vi.fn(async () => {
+      order.push("execute");
+      return { url: "https://pumpen.example/", text: "Pumpen", contentHash: "x" };
+    }));
+    tool.rateLimit = { rps: 100, concurrency: 10, perDomainCrawlDelayMs: 2_000 };
+    const reservation = {
+      workspaceId: WORKSPACE, accountKey: "run", operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
+      estimatedMicrousd: 10_000n, replay: false, authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+    };
+    const release = vi.fn(async () => ({ chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false }));
+    const limiter = {
+      configure: vi.fn(),
+      acquire: vi.fn(async () => { order.push("limiter"); return () => undefined; }),
+      respectDomainDelay: vi.fn(async () => { order.push("crawl-delay"); }),
+    };
+    const admit = vi.fn(async () => {
+      order.push("admit");
+      return { status: "DENIED" as const, reason: "SUBJECT_TOMBSTONED" as const };
+    });
+    const { broker } = makeBroker(tool, {
+      budgetStore: { reserve: vi.fn(async () => reservation), release } as unknown as BudgetStore,
+      limiter: limiter as never,
+      artifactExecution: { admit, persist: vi.fn(), replay: vi.fn() } as unknown as ArtifactExecutionPort,
+    });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED" });
+    expect(order).toEqual(["limiter", "crawl-delay", "admit"]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(reservation);
+  });
+
   it("never releases or retries once the wire ran and persistence failed", async () => {
     const { broker, execute, release } = harness({ persistError: new Error("object store ack lost") });
     await expect(

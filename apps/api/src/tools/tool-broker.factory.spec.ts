@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
 import { buildToolBroker } from './tool-broker.factory';
+import { RateLimiter } from './rate-limiter';
 
 const originalToolRedisUrl = process.env.TOOL_RATE_LIMIT_REDIS_URL;
 const originalRedisUrl = process.env.REDIS_URL;
@@ -60,6 +61,7 @@ describe('buildToolBroker artifact composition (G3 5.1)', () => {
     const admit = vi.fn(async () => ({ status: 'DENIED' as const, reason: 'SUBJECT_SUPPRESSED' as const }));
     const broker = buildToolBroker({
       budgetStore: new InMemoryBudgetStoreAdapter(new BudgetLedger()),
+      limiter: new RateLimiter(),
       artifactExecution: { admit, persist: vi.fn(), replay: vi.fn() },
     });
     await expect(broker.invoke(

@@ -5,7 +5,9 @@ import { GenericOperationArtifactExecution } from './generic-operation-artifact.
 import {
   createGenericOperationArtifactExecutionFromEnv,
   productArtifactMaterializerRegistry,
+  sharedGenericOperationArtifactStore,
 } from './generic-operation-artifact.runtime';
+import { genericArtifactStorageConfig } from './generic-operation-artifact.storage-config';
 
 const STORAGE_ENV = {
   GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: 'http://127.0.0.1:9000',
@@ -38,5 +40,14 @@ describe('generic operation artifact runtime composition', () => {
     expect(productArtifactMaterializerRegistry().resultSchemas()).toEqual([
       'sanctions-download/v1', 'http-get/v1', 'crawl4ai-fetch/v1', 'crawl4ai-render/v1',
     ]);
+  });
+
+  it('reuses one S3 client/store per process for the same storage config', () => {
+    const config = genericArtifactStorageConfig(STORAGE_ENV);
+    const first = sharedGenericOperationArtifactStore(config);
+    expect(sharedGenericOperationArtifactStore({ ...config })).toBe(first);
+    expect(
+      sharedGenericOperationArtifactStore({ ...config, bucket: 'other-artifact-bucket' }),
+    ).not.toBe(first);
   });
 });
