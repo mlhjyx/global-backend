@@ -54,6 +54,16 @@ type TombstoneRow = Readonly<{
 
 type SubjectBindingRow = SubjectRow & Readonly<{ replay: unknown }>;
 
+/** A pre-wire refusal reason for an otherwise existing subject. */
+export type GenericOperationArtifactSubjectExecutionHold =
+  | "TOMBSTONED"
+  | "SUPPRESSED";
+
+type ExecutionHoldRow = Readonly<{
+  tombstoned: unknown;
+  suppressed: unknown;
+}>;
+
 type ResolvedSubjectRow = Readonly<{
   workspace_id: unknown;
   subject_type: unknown;
@@ -267,6 +277,43 @@ export class GenericOperationArtifactSubjectRepository {
       return invalid();
     }
     return resolved;
+  }
+
+  /**
+   * G3 pre-wire admission: a subject already tombstoned by a DSR, or a company
+   * (or the company of a contact) suppressed by the rights flow, must not start
+   * a new physical fetch. The settlement SQL re-checks tombstones; this read
+   * only prevents the wire. The owner-defined reader applies the app_user and
+   * workspace guard; zero rows means that guard failed (fail closed).
+   */
+  async findExecutionHold(
+    tx: Prisma.TransactionClient,
+    input: Readonly<{
+      workspaceId: string;
+      subjectRef: GenericOperationArtifactSubjectRef;
+    }>,
+  ): Promise<GenericOperationArtifactSubjectExecutionHold | null> {
+    const workspaceId = assertWorkspace(input.workspaceId);
+    const subjectRef = parseGenericOperationArtifactSubjectRef(
+      input.subjectRef,
+    );
+    const rows = await tx.$queryRaw<ExecutionHoldRow[]>(Prisma.sql`
+      SELECT * FROM find_workspace_generic_operation_artifact_subject_execution_hold_v1(
+        ${workspaceId}::uuid,
+        ${subjectRef.subjectType},
+        ${subjectRef.subjectId}::uuid
+      )
+    `);
+    if (rows.length !== 1) return invalid();
+    const row = closedRecord(rows[0], ["tombstoned", "suppressed"]);
+    if (
+      typeof row.tombstoned !== "boolean" ||
+      typeof row.suppressed !== "boolean"
+    ) {
+      return invalid();
+    }
+    if (row.tombstoned) return "TOMBSTONED";
+    return row.suppressed ? "SUPPRESSED" : null;
   }
 
   async bindArtifact(

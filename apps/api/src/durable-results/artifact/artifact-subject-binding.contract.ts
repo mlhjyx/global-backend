@@ -21,7 +21,10 @@ export type ArtifactSubjectBindingDecision =
     }>
   | Readonly<{
       status: "DENIED";
-      reason: "SUBJECT_BINDING_INVALID";
+      reason:
+        | "SUBJECT_BINDING_INVALID"
+        | "SUBJECT_TOMBSTONED"
+        | "SUBJECT_SUPPRESSED";
     }>
   | Readonly<{
       status: "BOUND";
@@ -31,7 +34,10 @@ export type ArtifactSubjectBindingDecision =
 type SubjectResolver = Pick<
   GenericOperationArtifactSubjectRepository,
   "resolveExistingSubject"
->;
+> &
+  Partial<
+    Pick<GenericOperationArtifactSubjectRepository, "findExecutionHold">
+  >;
 
 const WORKSPACE_SUBJECT_SCHEMAS: ReadonlySet<string> = new Set([
   "http-get/v1",
@@ -106,11 +112,21 @@ function exactResolvedSubject(
   );
 }
 
+const TOMBSTONED: ArtifactSubjectBindingDecision = Object.freeze({
+  status: "DENIED",
+  reason: "SUBJECT_TOMBSTONED",
+});
+
+const SUPPRESSED: ArtifactSubjectBindingDecision = Object.freeze({
+  status: "DENIED",
+  reason: "SUBJECT_SUPPRESSED",
+});
+
 /**
  * Pre-binding decision only. It deliberately has no ToolBroker, provider,
- * object-store or execution dependency, so a BOUND result cannot start a
- * physical call. The four product schemas remain held at ToolBroker until a
- * separately reviewed wiring phase consumes this contract.
+ * object-store or execution dependency. ToolBroker consumes
+ * `resolveForExecution` per call (G3 spec 2026-09-24 §4.1): only a BOUND,
+ * non-tombstoned, non-suppressed workspace subject may reach a physical wire.
  */
 export class ArtifactSubjectBindingContract {
   constructor(
@@ -160,5 +176,26 @@ export class ArtifactSubjectBindingContract {
       return DENIED;
     }
     return Object.freeze({ status: "BOUND", subjectRef });
+  }
+
+  /**
+   * `resolve` plus the pre-wire rights checks. Must run in the same RLS
+   * workspace transaction as `resolve`.
+   */
+  async resolveForExecution(
+    tx: Prisma.TransactionClient,
+    input: unknown,
+  ): Promise<ArtifactSubjectBindingDecision> {
+    const decision = await this.resolve(tx, input);
+    if (decision.status !== "BOUND") return decision;
+    if (!this.subjects.findExecutionHold) return DENIED;
+    const source = input as Readonly<{ workspaceId: string }>;
+    const hold = await this.subjects.findExecutionHold(tx, {
+      workspaceId: source.workspaceId,
+      subjectRef: decision.subjectRef,
+    });
+    if (hold === "TOMBSTONED") return TOMBSTONED;
+    if (hold === "SUPPRESSED") return SUPPRESSED;
+    return hold === null ? decision : DENIED;
   }
 }

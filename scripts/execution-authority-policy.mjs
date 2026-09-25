@@ -377,7 +377,7 @@ function validateArtifactPhysicalExecution(manifest, path, issues) {
       path,
       'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID',
     ) ||
-    value.status !== 'SUBJECT_BINDING_HOLD' ||
+    value.status !== 'PER_CALL_SUBJECT_BINDING' ||
     !sameSet(value.schemas, Object.keys(ARTIFACT_CONTRACTS)) ||
     value.deniedBeforeWire !== true ||
     value.inlineFallbackAllowed !== false
@@ -385,7 +385,7 @@ function validateArtifactPhysicalExecution(manifest, path, issues) {
     issues.push(issue(
       'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID',
       path,
-      'artifact physical execution must remain denied before wire until a truthful subject binding exists',
+      'artifact physical execution must be bound per call: calls without a truthful workspace subject stay denied before wire and never fall back inline',
     ));
   }
 }

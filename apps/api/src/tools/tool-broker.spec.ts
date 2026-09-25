@@ -11,6 +11,7 @@ import { BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
 import { projectGenericOperationResult } from "./generic-operation-projection";
 import { RateLimitStoreUnavailableError } from "./redis-rate-limit-store";
 import { Tool } from "./tool-contract";
+import type { ArtifactExecutionPort } from "./artifact-execution-port";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import { TypedProjectionRegistry } from "../durable-results/typed-projection.registry";
 import { registerCatalogResultProjections } from "../durable-results/catalog-result-projections";
@@ -1074,5 +1075,196 @@ describe("ToolBroker — source_policy fail-closed（收口②：未登记不放
         { workspaceId: "w", purpose: ["intent", "discovery"] },
       ),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
+  const WORKSPACE = "00000000-0000-4000-8000-0000000000a1";
+  const COMPANY = "00000000-0000-4000-8000-0000000000c3";
+  const subject = { subjectType: "company" as const, subjectId: COMPANY };
+  const RECEIPT: DurableExecutionReceipt = {
+    ...DURABLE_RECEIPT,
+    scopeKey: WORKSPACE,
+    resultStrategy: "artifact_reference",
+    resultSchema: "crawl4ai-fetch/v1",
+    artifactId: "2c3d6096-b924-4bc8-bb4f-8436efb37b07",
+  };
+
+  function fetchTool(execute = vi.fn(async () => ({ url: "https://pumpen.example/", text: "Pumpen", contentHash: "x" }))) {
+    const tool = fakeTool("crawl4ai.fetch", 1, execute);
+    tool.durableResultStrategy = {
+      kind: "artifact_reference",
+      schema: "crawl4ai-fetch/v1",
+      maxBytes: 300_000,
+      mediaTypes: ["text/markdown"],
+      privacyClass: "PERSONAL_DATA",
+      ttlSeconds: 86_400,
+    };
+    return { tool, execute };
+  }
+
+  function harness(options: {
+    admission?: Awaited<ReturnType<ArtifactExecutionPort["admit"]>>;
+    replay?: boolean;
+    persistError?: Error;
+    schema?: string;
+    noPort?: boolean;
+  } = {}) {
+    const { tool, execute } = fetchTool();
+    if (options.schema) {
+      tool.durableResultStrategy = {
+        ...(tool.durableResultStrategy as Extract<Tool["durableResultStrategy"], { kind: "artifact_reference" }>),
+        schema: options.schema,
+      };
+    }
+    const reservation = {
+      workspaceId: WORKSPACE,
+      accountKey: "run",
+      operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
+      estimatedMicrousd: 10_000n,
+      replay: options.replay ?? false,
+      authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+    };
+    const release = vi.fn(async () => ({
+      chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false,
+    }));
+    const settle = vi.fn();
+    const budgetStore = {
+      reserve: vi.fn(async () => reservation),
+      release,
+      settle,
+    } as unknown as BudgetStore;
+    const durable = {
+      data: { url: "https://pumpen.example/", text: "Pumpen", contentHash: "abc" },
+      costCents: 1,
+      durableReceipt: RECEIPT,
+    };
+    const port = {
+      admit: vi.fn(async () => options.admission ?? { status: "BOUND" as const, subjectRef: subject }),
+      persist: vi.fn(async () => {
+        if (options.persistError) throw options.persistError;
+        return durable;
+      }),
+      replay: vi.fn(async () => ({ data: durable.data, costCents: 0, durableReceipt: RECEIPT })),
+    };
+    const { broker } = makeBroker(tool, {
+      budgetStore,
+      ...(options.noPort ? {} : { artifactExecution: port as unknown as ArtifactExecutionPort }),
+    });
+    return { broker, tool, execute, port, release, settle, reservation, durable };
+  }
+
+  it("keeps the hold when the caller supplies no subject, even with an artifact port", async () => {
+    const { broker, execute, port, release, reservation } = harness();
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run" }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD" });
+    expect(port.admit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(reservation);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("holds a subject-bound call when no artifact storage is composed", async () => {
+    const { broker, execute, release } = harness({ noPort: true });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE" });
+    expect(release).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["SUBJECT_TOMBSTONED", "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED"],
+    ["SUBJECT_SUPPRESSED", "GENERIC_OPERATION_ARTIFACT_SUBJECT_SUPPRESSED"],
+    ["SUBJECT_BINDING_INVALID", "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID"],
+    ["SUBJECT_BINDING_HOLD", "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD"],
+  ] as const)("denies %s before the wire and releases the reservation", async (reason, denial) => {
+    const { broker, execute, release, reservation, port } = harness({ admission: { status: "DENIED", reason } });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: denial });
+    expect(port.admit).toHaveBeenCalledWith({ workspaceId: WORKSPACE, resultSchema: "crawl4ai-fetch/v1", subjectRef: subject });
+    expect(release).toHaveBeenCalledWith(reservation);
+    expect(execute).not.toHaveBeenCalled();
+    expect(port.persist).not.toHaveBeenCalled();
+  });
+
+  it("executes a bound call once and settles only through artifact persistence", async () => {
+    const receipts: string[] = [];
+    const { broker, execute, port, settle, release, reservation, durable } = harness();
+    const result = await broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
+      workspaceId: WORKSPACE, runId: "run", artifactSubject: subject,
+      onDurableReceipt: (producer) => receipts.push(producer),
+    });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(port.persist).toHaveBeenCalledWith(expect.objectContaining({
+      reservation, subjectRef: subject, input: { url: "https://pumpen.example/" },
+      result: expect.objectContaining({ costCents: 1 }),
+    }));
+    expect(settle).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(result).toEqual(durable);
+    expect(receipts).toEqual(["crawl4ai.fetch"]);
+  });
+
+  it("replays a settled artifact from storage without a wire or a release", async () => {
+    const { broker, execute, port, release } = harness({ replay: true });
+    const result = await broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject });
+    expect(port.replay).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(result.durableReceipt).toEqual(RECEIPT);
+  });
+
+  it("keeps the platform sanctions artifact held even when a subject is supplied", async () => {
+    const { broker, execute, port } = harness({ schema: "sanctions-download/v1" });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD" });
+    expect(port.admit).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("admits the subject after the limiter and crawl delay, immediately before the wire", async () => {
+    const order: string[] = [];
+    const { tool, execute } = fetchTool(vi.fn(async () => {
+      order.push("execute");
+      return { url: "https://pumpen.example/", text: "Pumpen", contentHash: "x" };
+    }));
+    tool.rateLimit = { rps: 100, concurrency: 10, perDomainCrawlDelayMs: 2_000 };
+    const reservation = {
+      workspaceId: WORKSPACE, accountKey: "run", operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
+      estimatedMicrousd: 10_000n, replay: false, authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+    };
+    const release = vi.fn(async () => ({ chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false }));
+    const limiter = {
+      configure: vi.fn(),
+      acquire: vi.fn(async () => { order.push("limiter"); return () => undefined; }),
+      respectDomainDelay: vi.fn(async () => { order.push("crawl-delay"); }),
+    };
+    const admit = vi.fn(async () => {
+      order.push("admit");
+      return { status: "DENIED" as const, reason: "SUBJECT_TOMBSTONED" as const };
+    });
+    const { broker } = makeBroker(tool, {
+      budgetStore: { reserve: vi.fn(async () => reservation), release } as unknown as BudgetStore,
+      limiter: limiter as never,
+      artifactExecution: { admit, persist: vi.fn(), replay: vi.fn() } as unknown as ArtifactExecutionPort,
+    });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED" });
+    expect(order).toEqual(["limiter", "crawl-delay", "admit"]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(reservation);
+  });
+
+  it("never releases or retries once the wire ran and persistence failed", async () => {
+    const { broker, execute, release } = harness({ persistError: new Error("object store ack lost") });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(release).not.toHaveBeenCalled();
   });
 });

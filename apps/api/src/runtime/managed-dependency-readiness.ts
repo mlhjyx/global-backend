@@ -14,13 +14,16 @@ import { validateRedisConnectionUrl } from "../tools/redis-rate-limit-store";
 import { probeJwksDocument } from "../auth/jwks-readiness";
 import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
 import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
-import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
   loadExecutionBudgetJwks,
   validateExecutionBudgetGrantVerifierConfiguration,
   type ExecutionBudgetJwksFetch,
 } from "../execution-budget/execution-budget-grant.verifier";
 import { S3GenericOperationArtifactStore } from "../durable-results/artifact/generic-operation-artifact.store";
+import {
+  genericArtifactStorageConfig,
+  type GenericArtifactStorageConfig,
+} from "../durable-results/artifact/generic-operation-artifact.storage-config";
 import { checkMinioAllVersionLifecycle } from "../durable-results/artifact/generic-operation-artifact.minio-lifecycle";
 import {
   NEW_API_REQUEST_BOUND_RESOLVER_ID,
@@ -61,15 +64,6 @@ type BrowserProbe = (
   args: readonly string[],
 ) => Promise<void>;
 type ExecutableProbe = (executable: string) => Promise<boolean>;
-
-type GenericArtifactStorageConfig = Readonly<{
-  endpoint: string;
-  bucket: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  forcePathStyle: boolean;
-}>;
 
 interface GenericArtifactStorageProbe {
   checkReadiness(): Promise<
@@ -128,56 +122,6 @@ function loopback(hostname: string): boolean {
     hostname === "[::1]" ||
     hostname === "::1"
   );
-}
-
-function genericArtifactStorageConfig(
-  env: NodeJS.ProcessEnv,
-): GenericArtifactStorageConfig {
-  const endpointValue = env.GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT?.trim();
-  const bucket = env.GENERIC_OPERATION_ARTIFACT_S3_BUCKET?.trim();
-  const region = env.GENERIC_OPERATION_ARTIFACT_S3_REGION?.trim();
-  const accessKeyId = env.GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY?.trim();
-  const secretAccessKey = env.GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY?.trim();
-  const forcePathStyleValue =
-    env.GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE?.trim();
-  if (
-    !endpointValue ||
-    !bucket ||
-    !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket) ||
-    !region ||
-    region.length > 64 ||
-    !/^[a-z0-9][a-z0-9-]*$/.test(region) ||
-    !accessKeyId ||
-    accessKeyId.length > 128 ||
-    !secretAccessKey ||
-    secretAccessKey.length > 256 ||
-    (forcePathStyleValue !== "true" && forcePathStyleValue !== "false")
-  ) {
-    throw new ExecutionControlError(
-      "GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID",
-    );
-  }
-  const endpoint = new URL(endpointValue);
-  if (
-    endpoint.username ||
-    endpoint.password ||
-    endpoint.search ||
-    endpoint.hash ||
-    (endpoint.protocol !== "https:" &&
-      !(endpoint.protocol === "http:" && loopback(endpoint.hostname)))
-  ) {
-    throw new ExecutionControlError(
-      "GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID",
-    );
-  }
-  return Object.freeze({
-    endpoint: endpoint.href,
-    bucket,
-    region,
-    accessKeyId,
-    secretAccessKey,
-    forcePathStyle: forcePathStyleValue === "true",
-  });
 }
 
 function defaultGenericArtifactStorageProbe(

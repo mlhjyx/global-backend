@@ -93,7 +93,7 @@ describe('Task 6 execution authority cutover', () => {
     expect(policy.cutoverFence).toBe('TASK_6_AUTHORITY_BOUND_TYPED_EXECUTION_ARTIFACT_HOLD');
     expect(policy.physicalExecutionWiring?.status).toBe('PARTIAL_HOLD');
     expect(policy.artifactPhysicalExecution).toMatchObject({
-      status: 'SUBJECT_BINDING_HOLD',
+      status: 'PER_CALL_SUBJECT_BINDING',
       deniedBeforeWire: true,
       inlineFallbackAllowed: false,
     });

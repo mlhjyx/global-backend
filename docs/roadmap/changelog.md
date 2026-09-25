@@ -4,6 +4,11 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-25 · Per-call artifact subject binding (G3 slice 5.1)
+
+- `crawl4ai.fetch` / `crawl4ai.render` / `http.get` 的主体绑定禁令改为按调用判断：调用方在 `ToolContext.artifactSubject` 给出已建档的公司或联系人时，ToolBroker 先在 RLS 事务内核对主体属于本 workspace、未被 DSR tombstone、公司（或联系人所属公司）未被 SUPPRESSED，全部通过才发请求；抓取结果按工具声明的 `PERSONAL_DATA`、1 天 TTL 经 `GenericOperationArtifactService` 落对象存储，以 artifact 引用原子结算，重放时从校验过的对象字节还原。没有主体的调用（发现阶段建档前、平台 sanctions）保持原禁令；存储配置缺失时一律拒绝，不回退到内联结算。
+- 新增迁移 `20260925090000_artifact_subject_execution_hold`：app_user 对 tombstone 表无表权限，执行前检查经只读 SECURITY DEFINER 函数完成，守卫与其余 v1 主体函数一致。治理锁 `artifactPhysicalExecution.status` 改为 `PER_CALL_SUBJECT_BINDING`。依据：G3 规格（2026-09-24，用户批准）§4.1、§5.1。本条不含失败语义（5.2）与发现阶段改造（5.3），产品链路尚未有调用方传入主体。
+
 ## 2026-09-22 · Native Temporal loopback ingress and customer namespace provisioning
 
 - 原生 Linux dockerd 不为只接 `internal` 网络的容器映射宿主端口，`temporal-platform` 的 `127.0.0.1:17233` 在任何 Linux 宿主上都从未生效（Docker Desktop 用自带端口转发掩盖了它），`network_mode: host` 的 Backend 因此连不到原生 Temporal。改为：Temporal 不发布端口、仍只接 internal 网络；新增 `temporal-platform-ingress`（官方 HAProxy 3.4 LTS，按 digest 钉住，uid 99、只读、无能力、无密钥），只把 `127.0.0.1` 转发为纯 TCP 到 `temporal-platform:7233`，TLS 与 JWT 授权仍端到端。relay 另接一个关闭 masquerade 与 ICC、无 IPv6 的网桥，能发布端口但不能出网。

@@ -1,3 +1,4 @@
+import type { ArtifactSubjectRef } from "./artifact-execution-port";
 import type { PlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 /**
  * L0 Tool 契约（PRD 9.13）。最细粒度原子采集能力，一后端一动作。
@@ -107,6 +108,12 @@ export interface ToolContext {
   sourcePolicySnapshot?: Record<string, unknown>;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: Omit<PaidCostContext, "siteId">;
+  /**
+   * G3 (spec 2026-09-24 §4.1): the existing company/contact row a
+   * PERSONAL_DATA artifact producer (crawl4ai.fetch/render, http.get) is bound
+   * to. Absent → ToolBroker keeps the subject-binding hold for that call.
+   */
+  artifactSubject?: ArtifactSubjectRef;
   /** Collects only a closed ledger receipt after settlement; never receives result data. */
   onDurableReceipt?: (
     producerId: string,

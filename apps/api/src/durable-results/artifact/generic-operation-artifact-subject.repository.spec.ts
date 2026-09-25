@@ -143,4 +143,39 @@ describe('GenericOperationArtifactSubjectRepository', () => {
       DELETION_REQUEST_ID,
     ]);
   });
+
+  describe('findExecutionHold (G3 pre-wire admission)', () => {
+    const subjectRef = { subjectType: 'company' as const, subjectId: SUBJECT_ID };
+
+    it.each([
+      [{ tombstoned: false, suppressed: false }, null],
+      [{ tombstoned: true, suppressed: false }, 'TOMBSTONED'],
+      [{ tombstoned: false, suppressed: true }, 'SUPPRESSED'],
+      [{ tombstoned: true, suppressed: true }, 'TOMBSTONED'],
+    ] as const)('maps %o to %s through the guarded owner-defined reader', async (row, expected) => {
+      const queryRaw = vi.fn(async () => [row]);
+      const repository = new GenericOperationArtifactSubjectRepository();
+
+      await expect(repository.findExecutionHold(
+        { $queryRaw: queryRaw } as never,
+        { workspaceId: WORKSPACE_ID, subjectRef },
+      )).resolves.toBe(expected);
+
+      const sql = queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+      expect(sql.strings.join('')).toContain(
+        'find_workspace_generic_operation_artifact_subject_execution_hold_v1',
+      );
+      expect(sql.values).toEqual([WORKSPACE_ID, 'company', SUBJECT_ID]);
+    });
+
+    it('fails closed when the scope guard yields no row or a malformed row', async () => {
+      const repository = new GenericOperationArtifactSubjectRepository();
+      for (const rows of [[], [{ tombstoned: 'no', suppressed: false }], [{ tombstoned: false }]]) {
+        await expect(repository.findExecutionHold(
+          { $queryRaw: vi.fn(async () => rows) } as never,
+          { workspaceId: WORKSPACE_ID, subjectRef },
+        )).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID');
+      }
+    });
+  });
 });
