@@ -188,3 +188,54 @@ describe('DirectoryDiscoveryProvider without a subject (G3 5.3)', () => {
       .rejects.toMatchObject({ code: 'BUDGET_EXCEEDED' });
   });
 });
+
+describe('search-first review follow-ups (G3 5.3)', () => {
+  it.each([
+    [{ region: 'Baden-Württemberg' }, 'de'],
+    [{ region: 'Bayern' }, 'de'],
+    [{ region: 'Tirol' }, 'de'],
+    [{ region: 'Île-de-France' }, 'en'],
+  ])('infers the country from a region-only filter %o', (filters, language) => {
+    expect(searchLanguageFor({ filters })).toBe(language);
+  });
+
+  it('prefers the role mentioned first when both role vocabularies match', () => {
+    expect(tradeRoleFor({ filters: { business_model: 'manufacturer that imports raw materials' } })).toBe('manufacturer');
+    expect(tradeRoleFor({ filters: { trade_side: 'importer and distributor, no own manufacturing' } })).toBe('distributor');
+  });
+
+  it('stores only the sanitized page URL (no query string) as provenance', async () => {
+    const executionBroker = broker(async () => ({
+      data: { results: [{ url: 'https://shop.pumpen.example/kontakt?email=max%40pumpen.example&utm_source=x', title: 'Pumpen Shop GmbH', content: 'Großhandel' }] },
+      costCents: 0,
+    }));
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Pumpen Shop GmbH' }, provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX);
+    expect(result.records[0]?.provenance?.sourceUrl).toBe('https://shop.pumpen.example/kontakt');
+  });
+
+  it('interleaves candidates across queries so every role query contributes', async () => {
+    const perQuery: Record<string, string> = {};
+    const executionBroker = broker(async (_toolId, input) => {
+      const q = (input as { q: string }).q;
+      const tag = Object.keys(perQuery).length;
+      perQuery[q] = String(tag);
+      return {
+        data: { results: Array.from({ length: 20 }, (_, i) => ({ url: `https://q${tag}-${i}.example.de/`, title: `Firma ${tag}-${i} GmbH` })) },
+        costCents: 0,
+      };
+    });
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: false }, provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX);
+    const judgedPrompts = mocks.executeStructuredTaskWithRuntime.mock.calls.map(([, input]) => input.prompt as string);
+    for (const tag of ['0', '1', '2']) {
+      expect(judgedPrompts.some((p) => p.includes(`https://q${tag}-0.example.de/`))).toBe(true);
+    }
+  });
+});

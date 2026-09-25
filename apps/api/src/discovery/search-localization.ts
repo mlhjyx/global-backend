@@ -23,6 +23,20 @@ const COUNTRIES: readonly CountryEntry[] = Object.freeze([
   { iso2: 'us', language: 'en', aliases: ['united states', 'usa', 'us', 'america', '美国'] },
 ]);
 
+/** Region names (lower case) that imply a country when no country filter is given. */
+const REGION_COUNTRY: Readonly<Record<string, string>> = Object.freeze({
+  'baden-württemberg': 'de', 'baden-wuerttemberg': 'de', bayern: 'de', bavaria: 'de',
+  berlin: 'de', brandenburg: 'de', bremen: 'de', hamburg: 'de', hessen: 'de', hesse: 'de',
+  'mecklenburg-vorpommern': 'de', niedersachsen: 'de', 'lower saxony': 'de',
+  'nordrhein-westfalen': 'de', 'north rhine-westphalia': 'de', nrw: 'de',
+  'rheinland-pfalz': 'de', 'rhineland-palatinate': 'de', saarland: 'de', sachsen: 'de',
+  saxony: 'de', 'sachsen-anhalt': 'de', 'saxony-anhalt': 'de', 'schleswig-holstein': 'de',
+  thüringen: 'de', thueringen: 'de', thuringia: 'de',
+  wien: 'at', vienna: 'at', niederösterreich: 'at', oberösterreich: 'at', salzburg: 'at',
+  steiermark: 'at', styria: 'at', tirol: 'at', tyrol: 'at', kärnten: 'at', vorarlberg: 'at',
+  burgenland: 'at',
+});
+
 /** Two-letter TLDs that are routinely used as generic brands, not as a country. */
 const GENERIC_CCTLDS: ReadonlySet<string> = new Set(['io', 'co', 'ai', 'me', 'tv', 'eu', 'cc', 'biz']);
 
@@ -69,6 +83,13 @@ function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
     const entry = COUNTRIES.find((c) => c.aliases.includes(value));
     if (entry && !found.includes(entry)) found.push(entry);
   }
+  if (found.length) return found;
+  // Region-only plans ("industry + country OR region") imply their country.
+  for (const region of strings(filters.region).map((v) => v.trim().toLowerCase())) {
+    const iso2 = REGION_COUNTRY[region];
+    const entry = COUNTRIES.find((c) => c.iso2 === iso2);
+    if (entry && !found.includes(entry)) found.push(entry);
+  }
   return found;
 }
 
@@ -95,9 +116,13 @@ export function tradeRoleFor(query: { filters?: Record<string, unknown> }): Trad
     ...strings(filters.business_model),
     ...strings(filters.establishment_type),
   ].join(' ');
-  if (DISTRIBUTOR_PATTERN.test(text)) return 'distributor';
-  if (MANUFACTURER_PATTERN.test(text)) return 'manufacturer';
-  return null;
+  const distributorAt = text.search(DISTRIBUTOR_PATTERN);
+  const manufacturerAt = text.search(MANUFACTURER_PATTERN);
+  if (distributorAt < 0 && manufacturerAt < 0) return null;
+  if (manufacturerAt < 0) return 'distributor';
+  if (distributorAt < 0) return 'manufacturer';
+  // Both vocabularies present ("manufacturer that imports …"): the role named first wins.
+  return distributorAt < manufacturerAt ? 'distributor' : 'manufacturer';
 }
 
 export function tradeRoleTerms(role: TradeRole | null, language: SearchLanguage): readonly string[] {

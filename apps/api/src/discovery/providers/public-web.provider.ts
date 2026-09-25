@@ -26,6 +26,7 @@ import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
 import {
   MAX_SEARCHES_PER_QUERY,
   isForeignCountryDomain,
@@ -148,20 +149,25 @@ export class PublicWebDiscoveryProvider
     // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
     const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
 
-    for (const q of searches) {
-      const results = await this.search(q, language, ctx);
-      for (const r of results) {
-        const domain = normalizeDomain(r.url);
-        if (!domain) continue;
-        if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-        if (blocked.has(domain)) continue;
-        if (isForeignCountryDomain(domain, targetTlds)) continue;
-        const hits = candidates.get(domain) ?? [];
-        if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {
-          hits.push({ url: r.url, title: r.title ?? '', content: r.content ?? '' });
-        }
-        candidates.set(domain, hits);
+    const perQuery: SearxResult[][] = [];
+    for (const q of searches) perQuery.push(await this.search(q, language, ctx));
+    // Round-robin across queries so each role query contributes candidates
+    // before the per-query domain cap applies.
+    const interleaved: SearxResult[] = [];
+    for (let i = 0; perQuery.some((results) => i < results.length); i += 1) {
+      for (const results of perQuery) if (results[i]) interleaved.push(results[i]!);
+    }
+    for (const r of interleaved) {
+      const domain = normalizeDomain(r.url);
+      if (!domain) continue;
+      if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
+      if (blocked.has(domain)) continue;
+      if (isForeignCountryDomain(domain, targetTlds)) continue;
+      const hits = candidates.get(domain) ?? [];
+      if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {
+        hits.push({ url: r.url, title: r.title ?? '', content: r.content ?? '' });
       }
+      candidates.set(domain, hits);
     }
 
     const domains = [...candidates.keys()].slice(0, MAX_DOMAINS_PER_QUERY);
@@ -285,7 +291,7 @@ export class PublicWebDiscoveryProvider
     return Object.freeze({
       record: mapPublicWebCompanyToRecord({
         domain,
-        homeUrl: hits[0]?.url ?? homeUrl,
+        homeUrl: provenanceUrl(hits[0]?.url) ?? homeUrl,
         sourceText: text,
         extracted: out,
         sourceClass: query.sourceClass,
@@ -436,6 +442,16 @@ export function buildPublicContacts(
       ...(personal ? { personalData: true, sourcePage: `https://${domain}/` } : {}),
     };
   });
+}
+
+/** Search-hit URL for provenance: sanitized, without query string or fragment. */
+function provenanceUrl(raw: string | undefined): string | null {
+  const sanitized = sanitizeEvidenceUrl(raw);
+  if (!sanitized) return null;
+  const url = new URL(sanitized);
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
 
 /** 同一域名的搜索命中 → 给模型的证据文本（标题/摘要/URL；空白命中不算证据）。 */
