@@ -4,6 +4,10 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-25 · Skippable artifact-subject denials (G3 slice 5.2)
+
+- 新增 `artifactSubjectSkipReason`：沿 cause 链识别 ToolBroker 的四类禁令拒绝（主体 HOLD、tombstone、SUPPRESSED、绑定失效），供按公司处理的富集阶段跳过该公司，而不是让整个 run 失败。预算、授权、存储不可用等控制错误照旧上抛；`isExecutionControlError` 不变，所以发现阶段（无主体）的行为不变。`resolveRunStatus` 新增 `skippedSubjects`：有跳过时至少为 PARTIAL，但不会把全失败的 run 抬成 PARTIAL。依据：G3 规格 §4.2、§5.2；调用方在 5.4 接入。
+
 ## 2026-09-25 · Per-call artifact subject binding (G3 slice 5.1)
 
 - `crawl4ai.fetch` / `crawl4ai.render` / `http.get` 的主体绑定禁令改为按调用判断：调用方在 `ToolContext.artifactSubject` 给出已建档的公司或联系人时，ToolBroker 先在 RLS 事务内核对主体属于本 workspace、未被 DSR tombstone、公司（或联系人所属公司）未被 SUPPRESSED，全部通过才发请求；抓取结果按工具声明的 `PERSONAL_DATA`、1 天 TTL 经 `GenericOperationArtifactService` 落对象存储，以 artifact 引用原子结算，重放时从校验过的对象字节还原。没有主体的调用（发现阶段建档前、平台 sanctions）保持原禁令；存储配置缺失时一律拒绝，不回退到内联结算。

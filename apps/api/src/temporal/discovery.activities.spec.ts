@@ -2547,6 +2547,24 @@ describe("enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
   });
 });
 
+describe("resolveRunStatus —— 按公司跳过（G3 5.2）", () => {
+  it("有公司因禁令类拒绝被跳过 → 至少 PARTIAL，绝不 DONE", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedSubjects: 2 }),
+    ).toBe("PARTIAL");
+  });
+  it("跳过不会把全失败的 run 改成 PARTIAL", () => {
+    expect(
+      resolveRunStatus({ failures: 3, totalQueries: 3, budgetTruncated: false, skippedSubjects: 1 }),
+    ).toBe("FAILED");
+  });
+  it("零跳过保持原语义", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedSubjects: 0 }),
+    ).toBe("DONE");
+  });
+});
+
 describe("resolveRunStatus —— 预算截断绝不判 DONE", () => {
   it("无失败无截断 → DONE", () => {
     expect(
