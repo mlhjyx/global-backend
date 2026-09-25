@@ -1,0 +1,58 @@
+# 平台自动化证明链补齐规格 v1
+
+状态：PROPOSED；只批准此规格后才能安排实现。它替代 platform-proof-decision.md 的未决选项，不授权凭据签发、服务端配置、部署或真实任务。
+
+独立审查修订：明确recent_actions无历史输入、底层lease约束快照寿命、撤销控制面先于平台Worker启动。
+
+## 1. 问题与边界
+
+Backend 基线34a931ac1d46d81dc091d11e2b944c1133bd95f6；GrowthOS源码权威51d7420373e31ba5c2a696513d8d6b5e77ed3fe0。GrowthOS的独立Temporal reader尚无生产实现，候选策略backendBindingReady仍为false；Backend temporal_proof/issuer/revocation_delivery只有registry读取，无生产注册实现。服务恢复不消除这个缺口。
+目标：使用真实只读Temporal事实支持单次平台Grant证明，并提供独立于单次任务的capability readiness，避免Worker启动循环。
+范围：平台四个既有schedule；保留patents-cache-refresh默认INTENTIONALLY_DISABLED_NO_EGRESS。无新Provider、客户余额、付费探测或模型调用。
+
+## 2. 推荐身份与传输
+
+采用Temporal Frontend端的mTLS身份认证及精确方法/namespace授权。GrowthOS reader使用专用服务身份，和Backend的Workflow调度、Worker、平台Grant签发身份分离。证书只通过secret store挂载；认证证书本身不等同方法授权。
+Temporal服务端Authorizer必须对reader仅允许platform-automation namespace的DescribeSchedule、DescribeWorkflowExecution、GetWorkflowExecutionHistory；DescribeSchedule中的recent_actions用于SCHEDULE_ACTION_HISTORY_READ逻辑操作。其他方法以及其他namespace全部拒绝。不能把无认证temporal server start-dev或仅客户端禁用写方法作为独立权限证明。
+开发与生产使用同一个Authorizer和reader实现，独立信任根/证书及配置；Temporal部署变更需单独制定现有namespace和worker迁移方案，保留temporal-dev.service管理入口。未具备此服务端能力时保持NOT_READY，不降级为裸连接。
+
+## 3. 单次任务证明
+
+GrowthOS生产adapter实现既有PlatformAuthorityTemporalProofClient，使用固定配置endpoint和独立身份。调用者只提交scheduleId/workflowId/workflowRunId，不能选择endpoint/namespace/method/codec。
+读取同一namespace的schedule和指定run；要求schedule action记录准确包含该workflow/run，并匹配workflowType/taskQueue。Schedule recent_actions只提供归因及workflow/run引用，不包含该次执行的历史输入，禁止将其虚构成payload来源。首个WorkflowExecutionStarted事件提供精确run的输入；DescribeSchedule当前action提供配置输入，两者按候选JSON闭合合同正规化后分别与既有action digest比较，不能以scope request hash替代action input hash。读取schedule前后各一次，核对action digest、workflowType/taskQueue、冲突token与last_updated_at完全一致；若schedule在run开始后被更新、缺少可判定的更新时间或任一前后事实漂移，拒绝该次proof。此保守路径不声称恢复历史schedule配置；需要历史版本功能时另立合同。
+只接受RUNNING、开始时间不晚于可信当前时刻且年龄<=300秒、非continue-as-new替代run、完整可判定归因；recent_actions不含目标run或历史不足时拒绝，不能猜测人工启动属于schedule。输入decoded payload<=4096字节；禁止写入raw history/payload日志或持久证据。
+总deadline=5秒；单次最多8个分页、总响应<=1MiB；超限/分页循环/不完整/未知encoding/压缩codec均拒绝。出错返回既有稳定unavailable/denied码。一个workflow的proof不可作为另一个workflow的授权。每次Grant准备都重新检查proof及既有持久幂等/撤销/费用合同，不用readiness缓存代替。
+
+## 4. Capability readiness与跨仓读回
+
+增加GrowthOS只读内部capability快照接口，固定operation identity platformAutomationCapabilities_v1（具体HTTP path在code-first合同阶段生成，禁止在多个文档手抄）。Backend以专用service JWT调用，audience=platform-automation-capability-read，scope只允许该read操作；既有用户token或quote调用token不能替代。响应为RS256签名JWS，专用kid/key从GrowthOS受控JWKS发布；Backend只验签，不签发身份。请求service JWT由SaaS Control Plane签发，GrowthOS必须同时核验部署配置固定的Backend服务主体、专用audience与scope；同issuer签发的普通用户token不能替代。GrowthOS以受控配置中的固定issuer和JWKS根验证，不能从请求指定验签根。响应固定GrowthOS issuer、专用capability kid和部署配置固定的capability JWKS URI；capability只允许RS256，kid必须在受控capability key集合且use=sig；kid缺失、重复、未知或算法/key用途不符均拒绝。通用身份JWKS中的其他key即使有效也不能签capability。禁止响应携带jku/x5u覆盖根。该issuer与URL的部署值在切换清单固定，开发/生产只允许信任根与地址差异。
+请求绑定：Backend每轮生成128-bit随机nonce，请求包含nonce、固定Backend/GrowthOS source revision和schedule identity。响应绑定iss、aud、iat、exp、nonce、source revisions、policy digest、namespace和每行schedule/type/queue；禁止额外未登记字段。JWS<=16KiB、exp-iat<=30秒、iat<=now、now<exp，错误audience/source/policy/nonce或缺行均拒绝。旧nonce响应不能更新新快照。source revision由独立部署配置固定，不能信任响应自己宣告的revision。
+每10秒后台刷新，deadline3秒，同进程single-flight；HTTP请求/Worker启动只读缓存。首次无快照或刷新失败立即not_ready；成功快照在exp到达后必然失效，不使用stale-while-revalidate。每行有效截止=min(JWS exp、Temporal只读权限证据截止、issuer能力截止、revocation consumer lease expires_at、最老未投递项的created_at+30秒)；响应必须提供未投递数量undeliveredCount与oldestUndeliveredCreatedAt。数量为0时后者必须显式null，仅该积压截止项不参与min；数量>0时必须有合法时间并纳入min。缺字段、负数/非整数数量、数量与时间矛盾均拒绝；空队列仍验证consumer lease及其他截止。其余缺截止字段或截止<=now均拒绝。不允许以重新签发JWS延长底层事实寿命，Backend在本地每次check时也检查这些截止。缓存只存公开的有界事实与digest，不持久JWS原文、身份token或payload。服务依赖、key/source轮换使缓存失效；恢复后重新取得匹配nonce快照。
+
+## 5. 三类事实的成功条件
+
+所有事实均基于服务真实read-only探测，不读配置布尔值直接报告ok：
+- temporal_proof capability：reader认证有效、服务端授权revision与受控部署清单一致、策略已绑定Backend action合同，DescribeSchedule读取通过且type/queue/input匹配。capability不要求当前有RUNNING workflow，也不触发schedule；单次proof仍按第3节执行。
+- issuer capability：既有Grant签发实现实际装配、签名key可用且对应JWKS、受控策略一致、持久ledger schema/专用writer权限只读检查通过。健康检查不签Grant，不插入测试ledger。
+- revocation_delivery capability：既有durable delivery实现已装配，outbox/consumer游标与同部署身份匹配，consumer新鲜租约<=30秒，未投递项最大年龄<=30秒；零消息且consumer健康允许ready。撤销consumer由独立于平台业务Worker准入的持久Outbox/Relay控制面运行，允许在平台Worker尚not_ready时启动并处理撤销；仅可消费撤销并调用既有fence，不执行Provider或Grant业务。其启动不得依赖平台aggregate readiness；若现有实现与平台Worker共用此阻断条件，则必须先按此规格分离控制面启动顺序，禁止把未启动consumer虚报健康。仅文件存在、进程存在或配置enable不成立。当前没有可证明的实现时继续unavailable；该项实现应复用已有撤销合同，发现缺失必须回到规格评审，不能另造竞争状态。
+Backend对三类每行事实独立注册contributor。健康快照不创建或消费authority，也不能放宽真实业务的wire前校验、revocation fence和UNKNOWN containment。
+
+## 6. 生命周期和风险
+
+服务重启、nonce重放、过期key、wrong revision、网络中断、schedule drift都使ready失败；Worker进入既有阻断模式，不以新identity伪装旧任务完成。健康检查禁止任何Start/Signal/Update/Terminate/PatchSchedule调用；不为证明权限而在保留环境试发写RPC。
+只读权限的负例证明在一次性隔离Temporal环境完成，由同一服务端配置/Authorizer制品绑定到部署；保留环境只回读受控权限配置指纹和只读行为。服务器授权改变或证据失效时撤销capability。
+签名快照只是服务间capability事实，不替代独立发布证明；没有部署绑定和真实运行证据时RuntimeEvidence仍不晋级。
+
+## 7. 验收与交付门
+
+1. 本规格独立安全审查通过、用户对精确版本确认；核对GrowthOS writer交接。尚不执行部署或凭据变化。
+2. RED/GREEN：服务端read-only/namespace限制、错误身份、history截断/超限、手动启动、wrong run、过期/未来时间、codec拒绝、action/scope摘要混淆；保留真实adapter与test fake入口分离。
+3. 跨仓合同测试：JWS错误签名/aud/source/policy/nonce、漏行/重复行、刷新失败、过期缓存、重启冷启动；无RUNNING workflow时capability可健康，仍不能伪造单次proof。
+4. 三类fact分别注入实际失败证明各自fail-closed；issuer/revocation缺实现时不得标全绿；相关四维覆盖>=80%、必需docs/governance/ContractGraph及独立review通过。
+5. 单独授权的部署阶段固定server/reader/Backend/GrowthOS image、CA/权限revision、migration与回退方案；无模型无付费无发送readback先完成。实际schedule/Grant/UAT必须按已有独立操作授权执行。
+
+## 8. 本次确认的具体取舍
+
+确认采用服务端mTLS+精确RPC授权；GrowthOS直接读取Temporal并以短期、nonce绑定的签名capability快照供Backend消费；capability与单次proof分离。代价是需要Temporal服务端安全配置/制品和跨仓readback合同。审批不授权立即替换当前Temporal、签发凭据或恢复平台业务消费。
+
+参考：Temporal官方security说明明确认证与Authorizer分离、默认noopAuthorizer不施加API权限限制：https://docs.temporal.io/self-hosted-guide/security 。上述具体方法allowlist、缓存期限和签名快照为本规格提出的项目选择，非官方既定要求。
