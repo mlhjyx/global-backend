@@ -156,6 +156,16 @@ test("customer namespace admission is unmarked, local, registered and exactly se
       v.namespaceInfo.description = "";
       v.namespaceInfo.data = {};
     },
+    // Temporal treats an empty description in UpdateNamespace as "no change",
+    // so a description set at creation can never be cleared. An ordinary
+    // description is not an ownership claim (xin's hand-created namespace).
+    (v) => {
+      v.namespaceInfo.description =
+        "Customer (tenant) workloads: global-backend api / customer-worker";
+    },
+    (v) => {
+      v.namespaceInfo.description = "x".repeat(1024);
+    },
   ]) {
     const changed = structuredClone(current);
     accepted(changed);
@@ -181,6 +191,26 @@ test("customer namespace admission is unmarked, local, registered and exactly se
     (v) => {
       v.namespaceInfo.description =
         "Dedicated non-tenant platform automation workflows";
+    },
+    // Any wording that claims non-tenant ownership is drift, not just the
+    // platform namespace's exact description.
+    (v) => {
+      v.namespaceInfo.description = "Customer workloads (NON-TENANT exempt)";
+    },
+    (v) => {
+      v.namespaceInfo.description = "platform_non_tenant";
+    },
+    (v) => {
+      v.namespaceInfo.description = "nontenant scratch";
+    },
+    (v) => {
+      v.namespaceInfo.description = "Non Tenant";
+    },
+    (v) => {
+      v.namespaceInfo.description = 42;
+    },
+    (v) => {
+      v.namespaceInfo.description = "x".repeat(1025);
     },
     (v) => {
       v.config.workflowExecutionRetentionTtl = "86400s";

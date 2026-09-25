@@ -33,12 +33,16 @@ and before this step each host had to create it by hand. It is created with
 seven-day retention and **no** data markers or description, because it holds
 tenant workflows and must never claim `platform_non_tenant`. Its separate
 contract requires registered state, a local namespace, exactly seven-day
-retention, no description and no data keys at all. Any drift, including a
-platform marker, returns `TEMPORAL_CUSTOMER_NAMESPACE_DRIFT`, and the namespace
-is not repaired. A host that already created `default` with
-`operator namespace create --namespace default --retention 7d` passes
-unchanged. Changing its retention is a reviewed contract change, not an
-operator adjustment.
+retention and no data keys at all. A description is allowed, because Temporal
+cannot clear one once it is set (an empty description in UpdateNamespace means
+"no change"). It must be a string of at most 1024 characters and must not claim
+non-tenant ownership in any wording (`/non[\s_-]*tenant/i`, which also covers the
+platform namespace's own description). Any drift, including a platform marker,
+returns `TEMPORAL_CUSTOMER_NAMESPACE_DRIFT`, and the namespace is not repaired. A
+host that already created `default` with
+`operator namespace create --namespace default --retention 7d`, with or without
+an ordinary description, passes unchanged. Changing its retention is a reviewed
+contract change, not an operator adjustment.
 
 The infrastructure contract suite is imported by the rooted governance test
 entry, so required CI executes it. The disposable harness also changes
