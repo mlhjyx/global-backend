@@ -9,6 +9,7 @@
   "openfda": ["public_intelligence"],
   "digital_footprint": ["public_intelligence"],
   "structured_harvest": ["public_intelligence"],
+  "website_profile": ["public_intelligence"],
   "smtp_self": ["email_verification"],
   "decision_maker": ["contact_discovery"],
   "companies_house": ["contact_discovery"],

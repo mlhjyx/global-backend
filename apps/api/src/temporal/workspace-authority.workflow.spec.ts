@@ -13,6 +13,7 @@ import {
 import {
   DISCOVERY_AUTHORITY_PATCH,
   DISCOVERY_RAW_GOVERNANCE_PATCH,
+  DISCOVERY_WEBSITE_PROFILE_PATCH,
   discoveryWorkflow,
 } from './discovery.workflow';
 import { understandingWorkflow } from './understanding.workflow';
@@ -75,6 +76,12 @@ function primeDiscovery() {
   acts.qualifyFitForRun.mockResolvedValue({
     verdicts: { match: 1 },
     skippedForBudget: 0,
+  });
+  acts.profileWebsitesForRun.mockResolvedValue({
+    profiled: 1,
+    matched: 1,
+    skippedSubjects: 0,
+    budgetTruncated: false,
   });
   acts.enrichRun.mockResolvedValue({
     matched: 1,
@@ -144,13 +151,16 @@ describe('discoveryWorkflow execution-control propagation', () => {
   );
 
   it.each([
+    ['website profiling', 'profileWebsitesForRun'],
     ['signal enrichment', 'enrichSignalsRun'],
     ['watch registration', 'registerWatchesForRun'],
   ] as const)('finalizes PARTIAL when %s skipped a denied company subject (G3 5.5)', async (_label, stage) => {
     primeDiscovery();
     const base = stage === 'enrichSignalsRun'
       ? { matched: 0, enriched: 0, provider: null, budgetTruncated: false }
-      : { candidates: 1, registered: 0 };
+      : stage === 'profileWebsitesForRun'
+        ? { profiled: 0, matched: 0, budgetTruncated: false }
+        : { candidates: 1, registered: 0 };
     acts[stage].mockResolvedValue({ ...base, skippedSubjects: 1 });
 
     await discoveryWorkflow(discoveryInput());
@@ -161,6 +171,32 @@ describe('discoveryWorkflow execution-control propagation', () => {
         stats: expect.objectContaining({ skippedSubjects: 1 }),
       }),
     );
+  });
+
+  it('profiles company websites after canonicalization and before the fit judge (G3 5.4b)', async () => {
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [profiledAt] = acts.profileWebsitesForRun.mock.invocationCallOrder;
+    expect(profiledAt).toBeGreaterThan(acts.canonicalizeRun.mock.invocationCallOrder[0]!);
+    expect(profiledAt).toBeLessThan(acts.qualifyFitForRun.mock.invocationCallOrder[0]!);
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1 } }),
+      }),
+    );
+  });
+
+  it('keeps pre-profile histories on their old command sequence (patch guard)', async () => {
+    primeDiscovery();
+    setPatched((patchId) => patchId !== DISCOVERY_WEBSITE_PROFILE_PATCH);
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.profileWebsitesForRun).not.toHaveBeenCalled();
+    expect(acts.qualifyFitForRun).toHaveBeenCalled();
   });
 
   it('keeps an ordinary query failure in the normal status path while still finalizing', async () => {

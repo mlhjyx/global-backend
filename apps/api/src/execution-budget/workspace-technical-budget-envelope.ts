@@ -8,6 +8,8 @@ import {
   MAX_DISCOVERY_ENRICH_COMPANIES,
   MAX_DISCOVERY_FIT_COMPANIES,
   MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROFILE_COMPANIES,
+  MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY,
   MAX_DISCOVERY_PROVIDER_RECORDS,
   MAX_DISCOVERY_SIGNAL_COMPANIES,
   MAX_DISCOVERY_WATCH_COMPANIES,
@@ -159,6 +161,8 @@ function discoveryRunEnvelope(
       ),
       model('discovery.extract_company', queries * MAX_PUBLIC_WEB_DOMAINS_PER_QUERY),
       model('discovery.extract_list', queries * directoryPages),
+      // profileWebsitesForRun: at most one trade-role classification per profiled company.
+      model('discovery.classify_trade_role', MAX_DISCOVERY_PROFILE_COMPANIES),
       // qualifyFitForRun: one judgment per canonical company of the run.
       model('discovery.qualify_fit', MAX_DISCOVERY_FIT_COMPANIES),
     ],
@@ -167,7 +171,11 @@ function discoveryRunEnvelope(
         contract(searxngSearchTool),
         queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY),
       ),
-      tool(contract(crawl4aiFetchTool), queries * directoryPages),
+      tool(
+        contract(crawl4aiFetchTool),
+        queries * directoryPages +
+          MAX_DISCOVERY_PROFILE_COMPANIES * MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY,
+      ),
       tool(contract(wikidataTool), singleSearches),
       tool(contract(osmOverpassTool), singleSearches),
       tool(contract(tedSearchTool), singleSearches),
@@ -203,6 +211,7 @@ function discoveryRunEnvelope(
       directoryPagesPerQuery: directoryPages,
       tradeFairs: TRADE_FAIRS.length,
       fitCompanies: MAX_DISCOVERY_FIT_COMPANIES,
+      profileCompanies: MAX_DISCOVERY_PROFILE_COMPANIES,
       enrichCompanies: MAX_DISCOVERY_ENRICH_COMPANIES,
       signalCompanies: MAX_DISCOVERY_SIGNAL_COMPANIES,
       watchCompanies: MAX_DISCOVERY_WATCH_COMPANIES,

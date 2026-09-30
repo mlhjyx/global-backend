@@ -68,7 +68,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'discovery.run',
         subjectType: 'discovery_run',
-        requiredCapMicrousd: '5586480000',
+        requiredCapMicrousd: '5597480000',
       }),
     });
   });

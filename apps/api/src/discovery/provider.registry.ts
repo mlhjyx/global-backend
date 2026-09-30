@@ -291,6 +291,12 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'structured_harvest', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // 官网画像（G3 5.4b）：以已建档公司为主体抓首页与 Impressum。新 provider 默认 DISABLED，真测后才翻 ENABLED。
+    await db.dataProvider.upsert({
+      where: { key: 'website_profile' },
+      update: {},
+      create: { key: 'website_profile', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
     await db.dataProvider.upsert({
       where: { key: 'smtp_self' },
       update: {},

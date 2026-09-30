@@ -241,4 +241,33 @@ describe('Fit follows the ICP trade role (design §4 step 8)', () => {
     expect(description).toMatch(/distributor[^。]*分销商[^。]*pass/);
     expect(description).toMatch(/不适用[^。]*pass/);
   });
+
+  it('shows the judge the website profile as direct evidence (G3 5.4b)', async () => {
+    executeTask.mockReset();
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+
+    await judgeFitCompany({} as never, '10000000-0000-4000-8000-000000000001', { seller: 'S', seller_summary: null }, {
+      ...company,
+      attributes: {
+        products: ['Kreiselpumpen'],
+        website_profile: {
+          trade_role: 'distributor',
+          own_manufacturing: false,
+          carried_brands: [{ name: 'Grundfos', country: 'dk' }, { name: 'Leo', country: 'cn' }],
+          carries_chinese_brand: true,
+          carries_foreign_brand: true,
+          evidence: ['Großhandel für Pumpen'],
+          vat_id: 'DE136695976',
+        },
+      },
+    });
+
+    const [, input] = executeTask.mock.calls[0]!;
+    expect(input.prompt).toContain('"trade_role": "distributor"');
+    expect(input.prompt).toContain('"carries_chinese_brand": true');
+    expect(input.prompt).toContain('Großhandel für Pumpen');
+    expect(input.prompt).not.toContain('DE136695976');
+    expect(getTask('discovery.qualify_fit')!.description).toContain('website_profile');
+  });
 });
+
