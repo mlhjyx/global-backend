@@ -94,9 +94,9 @@ test('pure contracts preserve typed authority wiring and the artifact pre-wire h
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
   assert.equal(result.toolCount, 18);
-  assert.equal(result.modelTaskCount, 10);
+  assert.equal(result.modelTaskCount, 11);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
-  assert.equal(result.physicalToolCallsiteCount, 35);
+  assert.equal(result.physicalToolCallsiteCount, 36);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });
 
