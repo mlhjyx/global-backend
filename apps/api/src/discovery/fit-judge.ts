@@ -7,6 +7,8 @@ import type { RuntimeTelemetry } from '../model-runtime/types';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { icpTradeRole } from './icp-trade-role';
+import type { TradeRole } from './search-localization';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -18,6 +20,8 @@ export interface IcpBrief {
   seller: string;
   seller_summary: string | null;
   icp_name?: string;
+  /** Deterministic ICP trade role (design §4 step 8); the judge's role and business-model gates follow it. */
+  icp_trade_role?: TradeRole | null;
   company_attributes?: unknown;
   exclusions?: unknown;
   target_markets?: unknown;
@@ -106,6 +110,7 @@ export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string,
     seller: icp.company?.name ?? 'unknown',
     seller_summary: icp.company?.summary ?? null,
     icp_name: icp.name,
+    icp_trade_role: icpTradeRole(icp.companyAttributes),
     company_attributes: icp.companyAttributes,
     exclusions: icp.exclusions,
     target_markets: icp.targetMarkets,
@@ -126,7 +131,10 @@ export async function judgeFitCompany(
   },
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
-  const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
+  const attributes = company.attributes as { products?: string[]; keywords?: string[] } | null;
+  const products = attributes?.products ?? [];
+  // Capability keywords carry the reseller evidence a distributor ICP is judged on (Großhandel, Vertrieb …).
+  const keywords = attributes?.keywords ?? [];
   let out: FitOutput;
   let durableReceipt: DurableExecutionReceipt | undefined;
   try {
@@ -136,6 +144,7 @@ export async function judgeFitCompany(
         task: contract.id,
         prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${JSON.stringify(
           { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products,
+            keywords,
           },
           null,
           2,
