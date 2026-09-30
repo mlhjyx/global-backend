@@ -12,7 +12,6 @@
       "js-yaml": "4.3.2",
       "fast-uri": "3.1.8",
       "deepmerge-ts": "8.0.1",
-      "multer": "2.4.0",
       "smol-toml": "1.7.1",
       "svgo": "4.1.0",
       "third-party-web": "0.29.2",
@@ -61,16 +60,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^22.20.3",
+    "@types/node": "^22.20.4",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.12.0",
     "nx": "^23.2.1",
-    "prettier": "^3.9.7",
-    "tsx": "^4.23.13",
-    "typescript": "^5.6.3",
-    "typescript-eslint": "^8.70.0"
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.0"
   }
 }
