@@ -10,6 +10,10 @@
 - 各阶段上限集中到 `discovery/execution-envelope.ts`，provider、workflow 与报价引用同一常量。借此补上两处此前无界或未强制的上限：robots.txt 声明的 sitemap 根最多读 4 个；每条计划查询送去词表归一的行业词最多 4 个、国家/地区词最多 2 个（原先每个过滤字段最多 32 个值，每个未命中词一次模型调用）。计划查询上限改为 planner 的 64 条加 TED、openFDA 冷路径各 1 条，共 66 条，并在执行时强制（原 64 条上限从未被检查）。
 - 按现有上限，一次 run 的预留上限约 5,587 美元，其中 Fit（最多 11,550 家 × 每家预留 40 美分）约占 83%；实际费用按真实用量结算。卖方企业建档约 5.87 美元。依据：设计 §3.1 / §4 第 3 项（G2）。
 
+## 2026-09-30 · ICP trade role carried into keyword discovery queries (G3 5.3 follow-up)
+
+- 5.3 让关键词搜索按 `filters.trade_side` 等构造贸易角色词，但 `discovery.query_plan` 的过滤器 schema 没有 `business_model`，planner 也不一定填 `trade_side`，真实链路上角色词可能根本不出现。现在生成查询计划时，若 ICP 的 `company_attributes.trade_side`（优先）或 `business_model` 能识别出角色，就把规范值 `distributor` / `manufacturer` 写进未带角色的 planner 查询；planner 自己写了角色的保持不变，TED、openFDA 冷路径查询不受影响。写入发生在计划落库前，人工确认计划时可见。
+
 ## 2026-09-25 · Search-first company discovery (G3 slice 5.3)
 
 - `public_web` 发现阶段不再抓官网：SearXNG 的搜索语言随 ICP 目标国（德奥瑞 → `de`，法 → `fr`……，未知 → `en`）；查询串 = 品类词 × 目标国语言的贸易角色词（分销商 ICP → Großhandel/Händler/Vertrieb，角色来自 `trade_side`/`business_model`/`establishment_type`），不再硬加 `manufacturer company`；候选域名额外过滤非目标国 ccTLD；`discovery.extract_company` 只凭同一域名的搜索标题、摘要与 URL 判站并抽取，任务白名单去掉 `crawl4ai.fetch`。记录的 `parserVersion` 为 `public_web/v2-search`。官网页面改为在建档之后、以公司为主体抓取（5.4）。
