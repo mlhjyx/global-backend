@@ -10,6 +10,11 @@
 - 语义由「精确快照必须存在 + root overrides 全等」改为锁文件上的已审下限：例行升级（如 @nestjs/core 11.2.3→11.2.7）不再误报，而修补版旁边混入的旧版本（如 qs 6.14.0 与 6.16.0 并存）此前两层断言都会放过，现在失败；撤掉已被上游范围覆盖的 override 不受影响，但 override 只能精确钉到正式版本（范围、别名、git/URL 来源都失败）；锁文件里 URL/git/file 来源的同名包按无法比较处理并失败；已登记的漏洞前任（原先分在两张表，现合为 `VULNERABLE_PREDECESSORS`）必须低于下限，防止下调下限；`third-party-web` 仍由真实 pnpm deploy 回归钉住。对 9-30 修复前的 main 锁文件，下限正好报出 fast-uri 3.1.6、multer 2.3.0、undici 8.10.0。
 - 代价实测：整份 spec 在 xin（4 核共用、load 12–21）上 2.7–4.3 秒；deploy 回归连续 20 次与 6 路并发 ×5 轮共 50/50 通过，load 37 时最慢 20 秒（单命令超时 50 秒、用例 120 秒）；在 load 35 的完整 `governance:verify` 中占 19.7 秒。
 
+## 2026-09-30 · Website-profile provider and trade-role task (G3 slice 5.4b, part 1)
+
+- 新增 `WebsiteProfileProvider`（尚未接入 run）：以已建档公司为主体（`artifactSubject`）抓首页与 Impressum，两次抓取都由 ToolBroker 按调用绑定主体。规则分类器能下结论就不调模型，否则调用新任务 `discovery.classify_trade_role`（flash 档，闭合 schema：贸易角色 distributor/wholesaler/manufacturer/mixed/service/other、置信度、是否自有制造、在售品牌、至多 3 条证据）。品牌取词典匹配加模型补充；Impressum 解析出登记号、税号和法定名称。禁令类拒绝与控制错误向上抛出，由调用方按公司跳过或让 run 失败；Impressum 缺失或模型普通失败时保留确定性结果。
+- 证据只留公司级：含 Geschäftsführer、Inhaber、Ansprechpartner、Herr/Frau 等人员标记的片段整条丢弃，其余打码电话与邮箱。新任务已登记进 typed projection、回执事实、domain-ACK 与治理清单（`durable-result-strategies.json`、`execution-authority-callsites.json`）。依据：G3 规格 §3 ⑤、§5.4；设计 §3.3。
+
 ## 2026-09-30 · Website-profile rules and identifiers (G3 slice 5.4a)
 
 - 新增纯函数（尚未接线）：Impressum 解析，产出 HRB/HRA+登记法院（次级去重键 `de-hrb:<法院>:<号>`）、带校验位的德国税号，以及只接受资合公司形式（GmbH/AG/SE/UG/KG 组合/eG）的法定名称；独资商号（e.K.）与任何人员行一律不取。在售品牌词典附带品牌国别，用来标出「在售中国品牌」和「在售外国品牌」两个信号。贸易角色规则分类器只有结论明确时才跳过模型。

@@ -16,11 +16,11 @@ const modelResult = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('execution receipt fact producers', () => {
-  it('locks explicit fact producers to all 18 Tools and 10 Model tasks', () => {
+  it('locks explicit fact producers to all 18 Tools and 11 Model tasks', () => {
     expect(RECEIPT_FACT_TOOL_IDS).toHaveLength(18);
-    expect(RECEIPT_FACT_MODEL_TASK_IDS).toHaveLength(10);
+    expect(RECEIPT_FACT_MODEL_TASK_IDS).toHaveLength(11);
     expect(new Set(RECEIPT_FACT_TOOL_IDS).size).toBe(18);
-    expect(new Set(RECEIPT_FACT_MODEL_TASK_IDS).size).toBe(10);
+    expect(new Set(RECEIPT_FACT_MODEL_TASK_IDS).size).toBe(11);
   });
 
   it.each(RECEIPT_FACT_TOOL_IDS.filter((id) => id !== 'google_patents.search'))(
