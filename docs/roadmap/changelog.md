@@ -4,6 +4,11 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Fit judges by the ICP trade role (design §4 step 8, part 1)
+
+- `discovery.qualify_fit` 的四个门原本按「设备制造类买家」写：商业模式门把中介判为 weak，材质门、工艺门对分销商也不适用，分销商 ICP 下的真分销商会被系统性判成 weak。现在 ICP 摘要带上确定性的 `icp_trade_role`（与 5.3 同一套识别规则），任务说明按角色判：distributor 时，采购并转售实物产品的分销商、批发商、进口商、经销商判 pass，只做信息撮合的平台、目录或门户判 weak，同类产品制造商仍按角色门判为竞品；ICP 未对材质或工艺提出要求时视为不适用、判 pass；manufacturer 或未指定角色时，原有判定不变。候选信息新增已抽取的能力关键词（`keywords`），分销证据多在其中。
+- 第 2 部分（官网画像给出的贸易角色与在售品牌作为 Fit 证据、评分加减分项）随 5.4 进行。依据：设计 §3.3、§4 第 8 项。
+
 ## 2026-09-30 · Company-subject binding for signal enrichment and watch registration (G3 slice 5.5)
 
 - 信号富集（数字足迹 `crawl4ai.render`、结构化收割 `http.get` + `crawl4ai.render`）与网站监控注册（sitemap `http.get`）此前不带主体，调用全部落在主体绑定禁令上。更糟的是，这类拒绝属于控制错误，只要 run 里有公司通过 Fit=match，整个 run 就会在信号富集这一步失败。现在这两处按公司传入 `artifactSubject`（`ExecutionContext` 新增该字段，provider 展开进 ToolContext；`registerWatch` 直接绑定它正在注册的公司），抓取结果按 5.1 的合同以该公司为主体落对象存储。

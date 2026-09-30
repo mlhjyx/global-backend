@@ -5,7 +5,8 @@ vi.mock('../model-runtime/structured-task-runtime-bridge', () => ({
 }));
 
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
-import { judgeFitCompany } from './fit-judge';
+import { judgeFitCompany, loadIcpBrief } from './fit-judge';
+import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 import {
   projectModelResultForReplay,
@@ -179,5 +180,65 @@ describe('judgeFitCompany provider-independent result semantics', () => {
         company,
       ),
     ).resolves.toBeNull();
+  });
+});
+
+describe('Fit follows the ICP trade role (design §4 step 8)', () => {
+  function icpTx(companyAttributes: unknown) {
+    return {
+      icpDefinition: {
+        findUnique: vi.fn(async () => ({
+          name: '德国工业泵分销商',
+          companyAttributes,
+          exclusions: [],
+          targetMarkets: ['Germany'],
+          company: { name: 'Seller Pumps Co.', summary: 'Chinese pump maker' },
+        })),
+      },
+    };
+  }
+
+  it.each([
+    [{ business_model: 'Großhandel / Distributor' }, 'distributor'],
+    [{ trade_side: 'OEM manufacturer' }, 'manufacturer'],
+    [{ industry: 'pumps' }, null],
+  ])('puts the deterministic trade role of %o into the ICP brief', async (attributes, role) => {
+    const brief = await loadIcpBrief(icpTx(attributes) as never, 'icp-1');
+
+    expect(brief).toMatchObject({ icp_trade_role: role });
+  });
+
+  it('sends the trade role to the judge together with role-aware gate rules', async () => {
+    executeTask.mockReset();
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+    const brief = await loadIcpBrief(icpTx({ business_model: 'distributor' }) as never, 'icp-1');
+
+    await judgeFitCompany({} as never, '10000000-0000-4000-8000-000000000001', brief, company);
+
+    const [, input] = executeTask.mock.calls[0]!;
+    expect(input.prompt).toContain('"icp_trade_role": "distributor"');
+    expect(input.system).toBe(getTask('discovery.qualify_fit')!.description);
+  });
+
+  it('shows the judge the capability keywords that carry reseller evidence', async () => {
+    executeTask.mockReset();
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+
+    await judgeFitCompany({} as never, '10000000-0000-4000-8000-000000000001', { seller: 'S', seller_summary: null }, {
+      ...company,
+      attributes: { products: ['Kreiselpumpen'], keywords: ['Pumpen-Großhandel', 'Vertrieb Grundfos'] },
+    });
+
+    const [, input] = executeTask.mock.calls[0]!;
+    expect(input.prompt).toContain('Pumpen-Großhandel');
+    expect(input.prompt).toContain('Kreiselpumpen');
+  });
+
+  it('judges resellers as the target, not as intermediaries, when the ICP targets distributors', () => {
+    const description = getTask('discovery.qualify_fit')!.description;
+
+    expect(description).toContain('icp_trade_role');
+    expect(description).toMatch(/distributor[^。]*分销商[^。]*pass/);
+    expect(description).toMatch(/不适用[^。]*pass/);
   });
 });
