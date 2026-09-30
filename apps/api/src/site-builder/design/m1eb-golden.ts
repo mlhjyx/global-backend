@@ -45,6 +45,14 @@ export interface M1ebGoldenFixture {
   spec: SiteSpecV1_1;
 }
 
+export interface M1ebGoldenFixtureOptions {
+  /**
+   * Assemble only these approved fixture ids. Fixtures are assembled
+   * independently, so each result equals its entry in the full matrix.
+   */
+  ids?: readonly string[];
+}
+
 export interface M1ebGoldenAssemblyInput {
   id: string;
   mode: "sparse" | "rich";
@@ -313,9 +321,27 @@ export function buildM1ebGoldenAssemblyInputs(
   return output.sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function requestedGoldenFixtureIds(
+  ids: readonly string[] | undefined,
+): ReadonlySet<string> | null {
+  if (ids === undefined) return null;
+  const approved = new Set(
+    STATIC_DESIGN_CATALOG_V2.families.flatMap(
+      ({ goldenFixtureIds }) => goldenFixtureIds,
+    ),
+  );
+  const unknown = ids.filter((id) => !approved.has(id));
+  if (unknown.length > 0) {
+    throw new Error(`M1_E_B_GOLDEN_FIXTURE_UNKNOWN: ${unknown.join(", ")}`);
+  }
+  return new Set(ids);
+}
+
 export async function buildM1ebGoldenFixtures(
   repositoryRoot = process.cwd(),
+  options: M1ebGoldenFixtureOptions = {},
 ): Promise<M1ebGoldenFixture[]> {
+  const requested = requestedGoldenFixtureIds(options.ids);
   const templates = loadQualifiedComponentTemplates(repositoryRoot);
   const generator: AssemblySelectionGenerator = {
     generate: async () => ({ sections: [] }),
@@ -323,6 +349,7 @@ export async function buildM1ebGoldenFixtures(
   const output: M1ebGoldenFixture[] = [];
   for (const family of STATIC_DESIGN_CATALOG_V2.families) {
     for (const id of family.goldenFixtureIds) {
+      if (requested && !requested.has(id)) continue;
       const mode = id.endsWith("-sparse") ? "sparse" : "rich";
       const designBrief = fixtureBrief(family, id, mode);
       const slots = deriveCopySlotDefinitions({
