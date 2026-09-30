@@ -132,6 +132,17 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "structured_harvest.hiring_signal",
       "structured_harvest.site_sections",
       "structured_harvest.sitemap_url_count",
+      "website_profile.carried_brands",
+      "website_profile.carries_chinese_brand",
+      "website_profile.carries_foreign_brand",
+      "website_profile.evidence",
+      "website_profile.legal_name",
+      "website_profile.own_manufacturing",
+      "website_profile.register_key",
+      "website_profile.trade_role",
+      "website_profile.trade_role_confidence",
+      "website_profile.trade_role_source",
+      "website_profile.vat_id",
       "wikidata.country",
       "wikidata.employees",
       "wikidata.headquarters",
@@ -149,6 +160,30 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "wikidata.subsidiary_count",
       "wikidata.website",
     ]);
+  });
+
+  it("keeps the company-level website profile and validates its identifiers (G3 5.4b)", () => {
+    const profile = {
+      trade_role: "distributor",
+      trade_role_source: "rules",
+      trade_role_confidence: 0.7,
+      own_manufacturing: false,
+      carried_brands: [{ name: "Grundfos", country: "dk" }, { name: "Leo", country: "cn" }],
+      carries_chinese_brand: true,
+      carries_foreign_brand: true,
+      legal_name: "Pumpen Handel GmbH",
+      register_key: "de-hrb:muenchen:98765",
+      vat_id: "DE136695976",
+      evidence: ["Großhandel für Pumpen"],
+    };
+    expect(sanitizeCanonicalCompanyAttributes({ website_profile: profile })).toEqual({ website_profile: profile });
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        website_profile: { trade_role: "distributor", vat_id: "DE136695977", register_key: "de-hrb:unknown x" },
+      }),
+    ).toEqual({ website_profile: { trade_role: "distributor" } });
+    expect(sanitizeStored("website_profile.vat_id", "DE136695976")).toBe("DE136695976");
+    expect(sanitizeStored("website_profile.vat_id", "DE136695977")).toBeUndefined();
   });
 
   it("adapts every admitted stored field to its exact Canonical or column value shape", () => {
