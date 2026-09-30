@@ -8,8 +8,12 @@ export interface ImpressumRegister {
   readonly type: 'HRA' | 'HRB';
   readonly number: string;
   readonly court: string | null;
-  /** Secondary dedupe key, e.g. `de-hrb:muenchen:98765`. */
-  readonly key: string;
+  /**
+   * Secondary dedupe key, e.g. `de-hrb:muenchen:98765`. Null when the court is
+   * unknown: register numbers are only unique per court, so a court-less key
+   * could merge different companies.
+   */
+  readonly key: string | null;
 }
 
 export interface ParsedImpressum {
@@ -19,7 +23,9 @@ export interface ParsedImpressum {
 }
 
 const REGISTER_RE = /\bH\s?R\s?([AB])\b\s*(?:Nr\.?|-?Nummer)?\s*[:.]?\s*(\d{1,6})(?:\s?([A-Z]{1,2})\b)?/u;
-const COURT_RE = /Amtsgericht\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*(?:[ -][A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*)?(?:\s*\([^)\n]{1,40}\))?)/u;
+// "Amtsgericht München", "des Amtsgerichts München", "Registergericht: München",
+// "Registergericht: AG Köln"; a bare "Registergericht:" before "Amtsgericht …" defers to it.
+const COURT_RE = /(?:Amtsgerichts?|Registergericht):?\s+(?:AG\s+)?(?!Amtsgericht)([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*(?:[ -](?!H\s?R\s?[AB]\b)[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*)?(?:\s*\([^)\n]{1,40}\))?)/u;
 const VAT_RE = /\bDE\s?(\d{3})\s?(\d{3})\s?(\d{3})\b/gu;
 const CAPITAL_FORM_RE =
   /\b(?:GmbH\s*&\s*Co\.?\s*KG(?:aA)?|GmbH|gGmbH|AG|SE|KGaA|UG\s*\(haftungsbeschränkt\)|eG)(?![\p{L}\p{N}])/u;
@@ -57,7 +63,9 @@ function parseRegister(text: string): ImpressumRegister | null {
   const number = match[3] ? `${match[2]} ${match[3]}` : match[2]!;
   const window = text.slice(Math.max(0, match.index - 160), match.index + match[0].length + 160);
   const court = COURT_RE.exec(window)?.[1]?.trim() ?? null;
-  const key = `de-${type.toLowerCase()}:${court ? slug(court) : 'unknown'}:${number.replace(/\s+/gu, '').toLowerCase()}`;
+  const key = court
+    ? `de-${type.toLowerCase()}:${slug(court)}:${number.replace(/\s+/gu, '').toLowerCase()}`
+    : null;
   return { type, number, court, key };
 }
 
@@ -82,9 +90,12 @@ function parseLegalName(text: string): string | null {
     const line = cleanLine(raw);
     if (!line || line.length > MAX_NAME_LENGTH) continue;
     if (NON_NAME_LINE_RE.test(line)) continue;
-    if (!CAPITAL_FORM_RE.test(line)) continue;
-    if (/:/u.test(line)) continue;
-    return line;
+    const form = CAPITAL_FORM_RE.exec(line);
+    if (!form) continue;
+    // A legal name ends with its company form: drop taglines after it.
+    const name = line.slice(0, form.index + form[0].length).trim();
+    if (/:/u.test(name)) continue;
+    return name;
   }
   return null;
 }

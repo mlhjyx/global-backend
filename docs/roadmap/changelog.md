@@ -8,6 +8,7 @@
 
 - 新增纯函数（尚未接线）：Impressum 解析，产出 HRB/HRA+登记法院（次级去重键 `de-hrb:<法院>:<号>`）、带校验位的德国税号，以及只接受资合公司形式（GmbH/AG/SE/UG/KG 组合/eG）的法定名称；独资商号（e.K.）与任何人员行一律不取。在售品牌词典附带品牌国别，用来标出「在售中国品牌」和「在售外国品牌」两个信号。贸易角色规则分类器只有结论明确时才跳过模型。
 - 主体绑定的 `crawl4ai.fetch` 产物文本改用专用归一化：保留 `DE136695976` 这类税号（原通用打码会把它当成电话），截断上限从 2 万提到 7.5 万码点（仍在 300 KB 合约之内），首次结果与重放一致。Site Builder 的证据归一化与 `scrubPii` 不变。依据：G3 规格 §3 ⑤⑥、§5.4。
+- 接手时的审查修正：登记法院未知时不产出去重键（登记号只在同一法院内唯一，`de-hrb:unknown:<号>` 会把不同公司并成一家）；法院识别补上「des Amtsgerichts München」「Registergericht: München」「Registergericht: AG Köln」几种写法，也修正了把后面的「HRB」读进法院名的问题；法定名称截到公司形式为止，丢掉同一行的宣传语；Leo、DAB、Zenit 等本身是常见词或人名的品牌，裸名只在谈到泵、或同一行还有其他明确品牌时才计入，Impressum 里「Geschäftsführer: Leo …」这类行不再被当成「在售中国品牌」。
 
 ## 2026-09-30 · Fit judges by the ICP trade role (design §4 step 8, part 1)
 

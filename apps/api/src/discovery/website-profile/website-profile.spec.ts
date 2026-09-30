@@ -140,3 +140,42 @@ describe('parseImpressum legal-name boundaries', () => {
     expect(parseImpressum('Muster Steuerungstechnik GmbH\nHRB 1').legalName).toBe('Muster Steuerungstechnik GmbH');
   });
 });
+
+describe('parseImpressum court boundaries', () => {
+  it('does not read the register type as part of the court name', () => {
+    expect(parseImpressum('Amtsgericht München HRB 98765').register).toMatchObject({
+      court: 'München', key: 'de-hrb:muenchen:98765',
+    });
+    expect(parseImpressum('Amtsgericht Frankfurt am Main, HRB 1').register?.court).toBe('Frankfurt');
+    expect(parseImpressum('Amtsgericht Bad Homburg HRA 7').register).toMatchObject({ court: 'Bad Homburg', type: 'HRA' });
+  });
+});
+
+describe('5.4a review fixes', () => {
+  it('never emits a dedupe key when the register court is unknown', () => {
+    expect(parseImpressum('Pumpen Müller GmbH\nHRB 12345').register).toEqual({
+      type: 'HRB', number: '12345', court: null, key: null,
+    });
+  });
+
+  it('reads the court from "Amtsgerichts …" and "Registergericht: …" phrasings', () => {
+    expect(parseImpressum('eingetragen im Handelsregister des Amtsgerichts München unter HRB 12345').register)
+      .toMatchObject({ court: 'München', key: 'de-hrb:muenchen:12345' });
+    expect(parseImpressum('Registergericht: München, HRB 12345').register?.court).toBe('München');
+    expect(parseImpressum('Registergericht: AG Köln, HRB 1').register).toMatchObject({ court: 'Köln', key: 'de-hrb:koeln:1' });
+  });
+
+  it('cuts a legal-name line right after the company form, dropping taglines', () => {
+    expect(parseImpressum('Pumpen Müller GmbH – Ihr Partner für Pumpen\nHRB 1, Amtsgericht Köln').legalName)
+      .toBe('Pumpen Müller GmbH');
+    expect(parseImpressum('Müller Pumpen GmbH & Co. KG | Großhandel').legalName).toBe('Müller Pumpen GmbH & Co. KG');
+  });
+
+  it('counts a word-like brand name only in a brand-list or pump context', () => {
+    expect(matchCarriedBrands('Geschäftsführer: Leo Schmidt', 'de').brands).toEqual([]);
+    expect(matchCarriedBrands('Unsere Marken: Grundfos, Wilo und Leo.', 'de').brands.map((b) => b.name))
+      .toEqual(['Grundfos', 'Wilo', 'Leo']);
+    expect(matchCarriedBrands('Leo Pumpen ab Lager', 'de').brands.map((b) => b.name)).toEqual(['Leo']);
+    expect(matchCarriedBrands('Tauchpumpen von Zenit', 'de').brands.map((b) => b.name)).toEqual(['Zenit']);
+  });
+});
