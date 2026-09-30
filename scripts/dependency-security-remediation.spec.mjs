@@ -7,20 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const SECURITY_OVERRIDES = Object.freeze({
-  "nanoid@>=3.0.0 <4.0.0": "3.3.18",
-  postcss: "8.5.26",
-  "js-yaml": "4.3.2",
-  "fast-uri": "3.1.8",
-  "deepmerge-ts": "8.0.1",
-  multer: "2.4.0",
-  "smol-toml": "1.7.1",
-  svgo: "4.1.0",
-  "third-party-web": "0.29.2",
-  "lodash@<4.18.0": "4.18.1",
-  "uuid@<11.1.1": "11.1.1",
-  "undici@>=8.0.0 <8.10.2": "8.10.2",
-});
+const repositoryRoot = new URL("../", import.meta.url);
 
 test(
   "pnpm deploy preserves the reviewed third-party-web source when upstream latest moves",
@@ -132,7 +119,9 @@ test(
     });
     t.after(() => new Promise((resolve) => server.close(resolve)));
     registry = `http://127.0.0.1:${server.address().port}/`;
-    const manifest = JSON.parse(await readFile("package.json", "utf8"));
+    const manifest = JSON.parse(
+      await readFile(new URL("package.json", repositoryRoot), "utf8"),
+    );
     const configuredPin = manifest.pnpm?.overrides?.["third-party-web"];
 
     async function deploy(pin, label) {
@@ -231,33 +220,49 @@ test(
   },
 );
 
-const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
-  "extract-zip@2.0.1",
+// Removed outright: no patched release exists to hold a floor for.
+const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
+
+// Minimum reviewed versions in the resolved graph. Routine upgrades pass without
+// editing this table; an older release of a listed package fails wherever it is
+// pulled in. `from` confines a floor to the remediated line where an older line
+// legitimately coexists (undici 7, file-type 3). The root pnpm.overrides are one
+// way to hold a floor, so an override may retire once upstream ranges hold it.
+const SECURITY_FLOORS = Object.freeze(
+  [
+    { name: "nanoid", floor: "3.3.18" },
+    { name: "postcss", floor: "8.5.26" },
+    { name: "js-yaml", floor: "4.3.2" },
+    { name: "fast-uri", floor: "3.1.8" },
+    { name: "deepmerge-ts", floor: "8.0.1" },
+    { name: "multer", floor: "2.4.0" },
+    { name: "smol-toml", floor: "1.7.1" },
+    { name: "svgo", floor: "4.1.0" },
+    { name: "lodash", floor: "4.18.1" },
+    { name: "uuid", floor: "11.1.1" },
+    { name: "undici", from: "8.0.0", floor: "8.10.2" },
+    { name: "@nestjs/core", floor: "11.2.3" },
+    { name: "express", floor: "5.2.1" },
+    { name: "body-parser", floor: "2.3.0" },
+    { name: "qs", floor: "6.16.0" },
+    { name: "browserslist", floor: "4.28.7" },
+    { name: "baseline-browser-mapping", floor: "2.11.25" },
+    { name: "path-to-regexp", floor: "8.4.2" },
+    { name: "file-type", from: "20.0.0", floor: "21.3.4" },
+    { name: "fast-xml-parser", floor: "5.11.0" },
+  ].map((entry) => Object.freeze(entry)),
+);
+
+// Every vulnerable release a floor replaced. Each must stay below its floor, so a
+// floor cannot be lowered back past a known-bad release.
+const VULNERABLE_PREDECESSORS = Object.freeze([
   "nanoid@3.3.15",
   "nanoid@3.3.16",
   "nanoid@3.3.17",
-  "baseline-browser-mapping@2.10.43",
-  "browserslist@4.28.6",
   "fast-uri@3.1.5",
   "fast-uri@3.1.6",
-]);
-
-const REQUIRED_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
-  "@nestjs/core@11.2.3",
-  "express@5.2.1",
-  "body-parser@2.3.0",
-  "qs@6.16.0",
-  "fast-uri@3.1.8",
-  "browserslist@4.28.7",
-  "baseline-browser-mapping@2.11.25",
-  "multer@2.4.0",
-  "undici@8.10.2",
-  "path-to-regexp@8.4.2",
-  "file-type@21.3.4",
-  "fast-xml-parser@5.11.0",
-]);
-
-const FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
+  "browserslist@4.28.6",
+  "baseline-browser-mapping@2.10.43",
   "@nestjs/core@10.4.22",
   "express@4.22.1",
   "body-parser@1.20.4",
@@ -273,16 +278,95 @@ const FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
   "fast-xml-parser@4.5.7",
 ]);
 
-function lockfileHasSnapshot(lockfile, snapshot) {
-  const key = snapshot.startsWith("@") ? `  '${snapshot}':` : `  ${snapshot}:`;
-  return lockfile.includes(key);
+function resolvedPackageVersions(lockfile) {
+  const start = lockfile.indexOf("\npackages:\n");
+  const end = lockfile.indexOf("\nsnapshots:\n", start);
+  assert.ok(
+    start !== -1 && end !== -1,
+    "pnpm-lock.yaml must keep its packages section ahead of snapshots",
+  );
+  const versions = new Map();
+  for (const [, name, version] of lockfile
+    .slice(start, end)
+    .matchAll(/^ {2}'?(@?[^@\s']+)@(.+?)'?:$/gmu)) {
+    versions.set(name, [...(versions.get(name) ?? []), version]);
+  }
+  return versions;
+}
+
+function parseRelease(version) {
+  const match =
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u.exec(
+      version,
+    );
+  return match
+    ? { core: match.slice(1, 4).map(Number), prerelease: match[4] }
+    : undefined;
+}
+
+function compareCore(left, right) {
+  const index = left.core.findIndex((part, i) => part !== right.core[i]);
+  return index === -1 ? 0 : Math.sign(left.core[index] - right.core[index]);
+}
+
+function meetsFloor(release, floor) {
+  if (!release) return false;
+  const order = compareCore(release, floor);
+  // A prerelease sorts below the release it previews.
+  return order > 0 || (order === 0 && release.prerelease === undefined);
+}
+
+function findSecurityFloorViolations(lockfile, floors) {
+  const resolved = resolvedPackageVersions(lockfile);
+  return floors.flatMap(({ name, from = "0.0.0", floor }) => {
+    const lineStart = parseRelease(from);
+    const minimum = parseRelease(floor);
+    assert.ok(
+      lineStart && minimum && !lineStart.prerelease && !minimum.prerelease,
+      `${name} security floor must name plain release versions`,
+    );
+    const covered = (resolved.get(name) ?? []).filter((version) => {
+      const release = parseRelease(version);
+      // A version that cannot be compared stays covered and fails the floor.
+      return !release || compareCore(release, lineStart) >= 0;
+    });
+    if (covered.length === 0) return [{ name, version: null, floor }];
+    return covered
+      .filter((version) => !meetsFloor(parseRelease(version), minimum))
+      .map((version) => ({ name, version, floor }));
+  });
+}
+
+// An override rewrites every matching dependency in the graph, so it may only
+// pin an exact release: never a range, an alias to another package, or a source.
+function findLooseOverrides(overrides) {
+  return Object.entries(overrides ?? {})
+    .filter(([, pin]) => {
+      const release = parseRelease(pin);
+      return !release || release.prerelease !== undefined;
+    })
+    .map(([selector]) => selector);
+}
+
+function lockfileWith(...snapshots) {
+  const entries = snapshots.map((snapshot) => {
+    const key =
+      snapshot.startsWith("@") || snapshot.includes(":")
+        ? `'${snapshot}'`
+        : snapshot;
+    return `  ${key}:\n    resolution: {integrity: sha512-fixture}\n`;
+  });
+  return `lockfileVersion: '9.0'\n\npackages:\n\n${entries.join("\n")}\nsnapshots:\n\n`;
 }
 
 test("production security remediation removes the unpatched extract-zip path", async () => {
   const apiManifest = JSON.parse(
-    await readFile("apps/api/package.json", "utf8"),
+    await readFile(new URL("apps/api/package.json", repositoryRoot), "utf8"),
   );
-  const lockfile = await readFile("pnpm-lock.yaml", "utf8");
+  const lockfile = await readFile(
+    new URL("pnpm-lock.yaml", repositoryRoot),
+    "utf8",
+  );
 
   assert.equal(apiManifest.dependencies?.lighthouse, "13.4.1");
   for (const snapshot of FORBIDDEN_LOCKFILE_SNAPSHOTS) {
@@ -294,36 +378,133 @@ test("production security remediation removes the unpatched extract-zip path", a
   }
 });
 
-test("nanoid v3 is pinned to the current patched security floor", async () => {
-  const rootManifest = JSON.parse(await readFile("package.json", "utf8"));
+test("the resolved dependency graph meets every reviewed security floor", async () => {
+  const lockfile = await readFile(
+    new URL("pnpm-lock.yaml", repositoryRoot),
+    "utf8",
+  );
 
-  assert.deepEqual(rootManifest.pnpm?.overrides, SECURITY_OVERRIDES);
+  assert.deepEqual(findSecurityFloorViolations(lockfile, SECURITY_FLOORS), []);
 });
 
 test("extract-zip is remediated by removal, not a baseline exception", async () => {
   const baseline = await readFile(
-    "docs/security/production-dependency-audit-baseline.json",
+    new URL(
+      "docs/security/production-dependency-audit-baseline.json",
+      repositoryRoot,
+    ),
     "utf8",
   );
 
   assert.doesNotMatch(baseline, /GHSA-jmr9-qjv8-65gv|extract-zip/u);
 });
 
-test("reviewed runtime security floors replace every vulnerable predecessor snapshot", async () => {
-  const lockfile = await readFile("pnpm-lock.yaml", "utf8");
+test("reviewed security floors keep every recorded vulnerable predecessor out", () => {
+  for (const snapshot of VULNERABLE_PREDECESSORS) {
+    const separator = snapshot.lastIndexOf("@");
+    const name = snapshot.slice(0, separator);
+    const version = snapshot.slice(separator + 1);
+    const floors = SECURITY_FLOORS.filter((entry) => entry.name === name);
 
-  for (const snapshot of REQUIRED_RUNTIME_SECURITY_SNAPSHOTS) {
-    assert.equal(
-      lockfileHasSnapshot(lockfile, snapshot),
-      true,
-      `${snapshot} must remain in the reviewed runtime dependency graph`,
+    assert.ok(
+      findSecurityFloorViolations(lockfileWith(snapshot), floors).some(
+        (violation) => violation.version === version,
+      ),
+      `${snapshot} must stay below a reviewed security floor`,
     );
   }
-  for (const snapshot of FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS) {
-    assert.equal(
-      lockfileHasSnapshot(lockfile, snapshot),
-      false,
-      `${snapshot} must not re-enter the dependency graph`,
+});
+
+test("security floors admit upgrades but reject any older release beside the patched one", () => {
+  const floors = [
+    { name: "qs", floor: "6.16.0" },
+    { name: "@nestjs/core", floor: "11.2.3" },
+  ];
+
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith("qs@6.17.0", "@nestjs/core@11.2.7"),
+      floors,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith(
+        "qs@6.14.0",
+        "qs@6.16.0",
+        "qs@6.16.0-rc.1",
+        "@nestjs/core@11.2.3",
+      ),
+      floors,
+    ),
+    [
+      { name: "qs", version: "6.14.0", floor: "6.16.0" },
+      { name: "qs", version: "6.16.0-rc.1", floor: "6.16.0" },
+    ],
+  );
+});
+
+test("a scoped security floor ignores older lines but fails closed when it covers nothing or cannot compare", () => {
+  const floors = [{ name: "undici", from: "8.0.0", floor: "8.10.2" }];
+
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith("undici@7.29.1", "undici@8.10.2"),
+      floors,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    findSecurityFloorViolations(lockfileWith("undici@7.29.1"), floors),
+    [{ name: "undici", version: null, floor: "8.10.2" }],
+  );
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith("undici@8.0.0-rc.1", "undici@8", "undici@8.10.2"),
+      floors,
+    ),
+    [
+      { name: "undici", version: "8.0.0-rc.1", floor: "8.10.2" },
+      { name: "undici", version: "8", floor: "8.10.2" },
+    ],
+  );
+  const tarball = "https://codeload.github.com/nodejs/undici/tar.gz/0123abc";
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith("undici@8.10.2", `undici@${tarball}`),
+      floors,
+    ),
+    [{ name: "undici", version: tarball, floor: "8.10.2" }],
+  );
+  for (const invalid of [
+    { name: "undici", floor: "8.10" },
+    { name: "undici", from: "8", floor: "8.10.2" },
+    { name: "undici", floor: "8.10.2-rc.1" },
+  ]) {
+    assert.throws(
+      () =>
+        findSecurityFloorViolations(lockfileWith("undici@8.10.2"), [invalid]),
+      /undici security floor must name plain release versions/,
     );
   }
+});
+
+test("root overrides pin exact releases rather than ranges, aliases or sources", async () => {
+  assert.deepEqual(
+    findLooseOverrides({
+      qs: "6.16.0",
+      "undici@>=8.0.0 <8.10.2": "8.10.2",
+      lodash: "^4.18.1",
+      multer: "npm:multer-fork@2.4.0",
+      svgo: "github:svg/svgo#main",
+      postcss: "8.5.26-beta.1",
+    }),
+    ["lodash", "multer", "svgo", "postcss"],
+  );
+  const manifest = JSON.parse(
+    await readFile(new URL("package.json", repositoryRoot), "utf8"),
+  );
+
+  assert.deepEqual(findLooseOverrides(manifest.pnpm?.overrides), []);
 });
