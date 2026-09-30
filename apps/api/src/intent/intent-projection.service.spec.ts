@@ -356,6 +356,41 @@ describe('IntentProjectionService — synthetic projection quarantine', () => {
   });
 });
 
+describe('IntentProjectionService — company subject for sitemap wires (G3 5.5)', () => {
+  it('binds every sitemap read to the watched canonical company', async () => {
+    const invoke = vi.fn(async () => ({
+      data: { status: 404, ok: false, text: '', mediaType: 'text/plain' },
+      costCents: 0,
+    }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => unknown) => fn({
+        canonicalCompany: { findUnique: vi.fn(async () => ({ id: 'company-1', name: 'Acme', domain: 'acme.example', region: null })) },
+        fieldEvidence: { findMany: vi.fn(async () => []) },
+      })),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'monitor-1' })),
+      },
+    };
+    const service = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: { invoke } as never,
+      budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
+    });
+
+    await service.registerWatch(WATCH_WORKSPACE, 'company-1', {
+      budgetKey: WATCH_BINDING.accountKey,
+      budgetWorkspaceId: WATCH_WORKSPACE,
+      executionBudget: WATCH_BINDING,
+    });
+
+    expect(invoke).toHaveBeenCalled();
+    for (const call of invoke.mock.calls as unknown as Array<[string, unknown, Record<string, unknown>]>) {
+      expect(call[2]).toMatchObject({ artifactSubject: { subjectType: 'company', subjectId: 'company-1' } });
+    }
+  });
+});
+
 describe('IntentProjectionService — sitemap budget scope', () => {
   it('opens the caller scope and binds broker runId to the same budgetKey', async () => {
     const order: string[] = [];

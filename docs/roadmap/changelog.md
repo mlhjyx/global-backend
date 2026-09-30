@@ -4,11 +4,11 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-09-30 · Production advisory remediation and audit baseline renewal
+## 2026-09-30 · Company-subject binding for signal enrichment and watch registration (G3 slice 5.5)
 
-- 9-28/29（UTC）官方 advisory 库新收录 15 条生产 advisory，9-30 起 main 的 `production advisory baseline freshness · canary` 报 `BASELINE_STALE`（#568、#569 合入后的运行均如此）：undici 8.10.0 共 11 条（3 高危，经 astro→unifont，仅 site-renderer 链）、fast-uri 3.1.6 共 3 条（2 高危，经 `@temporalio/worker` 的 webpack→ajv）、multer 2.3.0 共 1 条（经 `@nestjs/platform-express`）。
-- fast-uri、multer 的安全 override 升至 3.1.8 / 2.4.0（后者也是 `@nestjs/platform-express` 11.2.7 自带的版本，并去掉了 concat-stream / typedarray）；另加以漏洞区间为选择器的 `undici@>=8.0.0 <8.10.2` → 8.10.2：pnpm 对声明范围与该区间相交的 undici 依赖生效（这里是 unifont 的 `^8.0.0`），AI SDK 的 `^7.29.0` 不相交，undici 7.29.1 未改动。按包过滤的 `pnpm update` 不会移动这份传递副本，还会扰动 vitest 的 peer 快照，所以沿用 lodash/uuid 那种精确钉版；unifont 自身要求 ≥8.10.2 后应撤掉这条 override。三个新包的 integrity 与官方 registry 一致，离线 `pnpm deploy` site-renderer（镜像构建路径）得到的也是 undici 8.10.2；本仓 API 没有文件上传路由，site-renderer 用 `@fontsource` 自带字体、不经 unifont 下载，两处升级触及的运行面都很小。
-- 官方 registry 生产审计清零（870 个依赖）；基线重新绑定到修复提交，失效时间由 2026-10-03 延至 2026-10-14T16:13:14Z（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20260930-advisory-remediation-baseline-renewal.json)）。Copy fixed-source 回执只重签指纹；`scripts/dependency-security-remediation.spec.mjs` 同步到新的安全下限（目前没有入口执行它）。
+- 信号富集（数字足迹 `crawl4ai.render`、结构化收割 `http.get` + `crawl4ai.render`）与网站监控注册（sitemap `http.get`）此前不带主体，调用全部落在主体绑定禁令上。更糟的是，这类拒绝属于控制错误，只要 run 里有公司通过 Fit=match，整个 run 就会在信号富集这一步失败。现在这两处按公司传入 `artifactSubject`（`ExecutionContext` 新增该字段，provider 展开进 ToolContext；`registerWatch` 直接绑定它正在注册的公司），抓取结果按 5.1 的合同以该公司为主体落对象存储。
+- 按公司失败语义：主体被 tombstone、SUPPRESSED 或绑定失效时，只跳过这家公司，不写任何属性（已产生的回执照常 ACK），计入 `skippedSubjects`，run 至少记为 PARTIAL，stats 中可见。预算、授权、对象存储不可用等控制错误照旧让 run 失败。
+- 联系人发现（decision_maker、public_web 联系人页）有意不接入，继续保持禁令：它不在公司级链路内，报价也仍是 unavailable。这比规格 §5.5 列的范围更保守。依据：G3 规格 §3.1、§4.2、§5.5。
 
 ## 2026-09-30 · Technical quotes for discovery runs and company creation (G2)
 
@@ -19,6 +19,12 @@
 ## 2026-09-30 · ICP trade role carried into keyword discovery queries (G3 5.3 follow-up)
 
 - 5.3 让关键词搜索按 `filters.trade_side` 等构造贸易角色词，但 `discovery.query_plan` 的过滤器 schema 没有 `business_model`，planner 也不一定填 `trade_side`，真实链路上角色词可能根本不出现。现在生成查询计划时，若 ICP 的 `company_attributes.trade_side`（优先）或 `business_model` 能识别出角色，就把规范值 `distributor` / `manufacturer` 写进未带角色的 planner 查询；planner 自己写了角色的保持不变，TED、openFDA 冷路径查询不受影响。写入发生在计划落库前，人工确认计划时可见。
+
+## 2026-09-30 · Production advisory remediation and audit baseline renewal
+
+- 9-28/29（UTC）官方 advisory 库新收录 15 条生产 advisory，9-30 起 main 的 `production advisory baseline freshness · canary` 报 `BASELINE_STALE`（#568、#569 合入后的运行均如此）：undici 8.10.0 共 11 条（3 高危，经 astro→unifont，仅 site-renderer 链）、fast-uri 3.1.6 共 3 条（2 高危，经 `@temporalio/worker` 的 webpack→ajv）、multer 2.3.0 共 1 条（经 `@nestjs/platform-express`）。
+- fast-uri、multer 的安全 override 升至 3.1.8 / 2.4.0（后者也是 `@nestjs/platform-express` 11.2.7 自带的版本，并去掉了 concat-stream / typedarray）；另加以漏洞区间为选择器的 `undici@>=8.0.0 <8.10.2` → 8.10.2：pnpm 对声明范围与该区间相交的 undici 依赖生效（这里是 unifont 的 `^8.0.0`），AI SDK 的 `^7.29.0` 不相交，undici 7.29.1 未改动。按包过滤的 `pnpm update` 不会移动这份传递副本，还会扰动 vitest 的 peer 快照，所以沿用 lodash/uuid 那种精确钉版；unifont 自身要求 ≥8.10.2 后应撤掉这条 override。三个新包的 integrity 与官方 registry 一致，离线 `pnpm deploy` site-renderer（镜像构建路径）得到的也是 undici 8.10.2；本仓 API 没有文件上传路由，site-renderer 用 `@fontsource` 自带字体、不经 unifont 下载，两处升级触及的运行面都很小。
+- 官方 registry 生产审计清零（870 个依赖）；基线重新绑定到修复提交，失效时间由 2026-10-03 延至 2026-10-14T16:13:14Z（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20260930-advisory-remediation-baseline-renewal.json)）。Copy fixed-source 回执只重签指纹；`scripts/dependency-security-remediation.spec.mjs` 同步到新的安全下限（目前没有入口执行它）。
 
 ## 2026-09-25 · Search-first company discovery (G3 slice 5.3)
 

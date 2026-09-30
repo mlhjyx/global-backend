@@ -96,7 +96,7 @@ export class IntentProjectionService {
     const pages = (
       opts?.pages?.length
         ? opts.pages
-        : await this.discoverPagesWithBudget(workspaceId, domain, opts, durableReceipts)
+        : await this.discoverPagesWithBudget(workspaceId, company.id, domain, opts, durableReceipts)
     ).slice(0, 12);
     const sourceKey = `${WEB_WATCH_KEY}:${domain}`;
     const config = {
@@ -282,6 +282,7 @@ export class IntentProjectionService {
    */
   private async discoverPagesWithBudget(
     workspaceId: string,
+    companyId: string,
     domain: string,
     opts?: {
       authorizeExternalAction?: () => Promise<boolean>;
@@ -319,6 +320,7 @@ export class IntentProjectionService {
       domain,
       binding.scopeKey,
       binding.accountKey,
+      companyId,
       opts.authorizeExternalAction,
       durableReceipts,
     );
@@ -328,6 +330,7 @@ export class IntentProjectionService {
     domain: string,
     workspaceId: string,
     budgetKey: string,
+    companyId: string,
     authorizeExternalAction?: () => Promise<boolean>,
     durableReceipts: DurableExecutionReceipt[] = [],
   ): Promise<{ url: string; kind: PageKind }[]> {
@@ -337,6 +340,7 @@ export class IntentProjectionService {
       this.sitemapHttpGet(
         workspaceId,
         budgetKey,
+        companyId,
         authorizeExternalAction,
         (error) => { budgetError = error; },
         durableReceipts,
@@ -349,6 +353,7 @@ export class IntentProjectionService {
   private sitemapHttpGet(
     workspaceId: string,
     budgetKey: string,
+    companyId: string,
     authorizeExternalAction?: () => Promise<boolean>,
     onBudgetError?: (error: unknown) => void,
     durableReceipts: DurableExecutionReceipt[] = [],
@@ -365,6 +370,8 @@ export class IntentProjectionService {
           runId: budgetKey,
           correlationId: budgetKey,
           authorizeExternalAction,
+          // G3 5.5：sitemap 读取的产物挂在被监控的这家已建档公司名下。
+          artifactSubject: { subjectType: 'company', subjectId: companyId },
         });
         if (result.durableReceipt) durableReceipts.push(result.durableReceipt);
         return result.data;
