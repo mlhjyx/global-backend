@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Dependency security floors wired into the governance gate
+
+- `scripts/dependency-security-remediation.spec.mjs` 自 8-15 引入后从未被任何 runner 执行（不在 `governance:test` 入口、package 脚本、workflow 或 `gctl check` 里），#551 之后在 main 上 2/5 失败却无人察觉；安全合同页所说的「真实 deploy 版本不漂移」验证也因此一直没有在跑。现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行；`governance-path-contracts.spec.mjs` 拒绝移除该导入。
+- 语义由「精确快照必须存在 + root overrides 全等」改为锁文件上的已审下限：例行升级（如 @nestjs/core 11.2.3→11.2.7）不再误报，而修补版旁边混入的旧版本（如 qs 6.14.0 与 6.16.0 并存）此前两层断言都会放过，现在失败；撤掉已被上游范围覆盖的 override 不受影响；已登记的漏洞前任必须低于下限，防止下调下限；`third-party-web` 仍由真实 pnpm deploy 回归钉住。对 9-30 修复前的 main 锁文件，下限正好报出 fast-uri 3.1.6、multer 2.3.0、undici 8.10.0。
+- 代价实测：整份 spec 在 xin（4 核共用、load 12–21）上 2.7–4.3 秒；deploy 回归连续 20 次与 6 路并发 ×5 轮共 50/50 通过，load 37 时最慢 20 秒（单命令超时 50 秒、用例 120 秒）；在 load 35 的完整 `governance:verify` 中占 19.7 秒。
+
 ## 2026-09-30 · Website-profile rules and identifiers (G3 slice 5.4a)
 
 - 新增纯函数（尚未接线）：Impressum 解析，产出 HRB/HRA+登记法院（次级去重键 `de-hrb:<法院>:<号>`）、带校验位的德国税号，以及只接受资合公司形式（GmbH/AG/SE/UG/KG 组合/eG）的法定名称；独资商号（e.K.）与任何人员行一律不取。在售品牌词典附带品牌国别，用来标出「在售中国品牌」和「在售外国品牌」两个信号。贸易角色规则分类器只有结论明确时才跳过模型。

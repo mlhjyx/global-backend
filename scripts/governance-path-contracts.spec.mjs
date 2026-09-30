@@ -101,4 +101,9 @@ test("the explicit root governance entry loads the CI topology suite", async () 
     /^import "\.\/copy-fixed-source-impact\.spec\.mjs";$/m,
     "the independently rooted governance path suite must reject removal of the Copy impact suite import",
   );
+  assert.match(
+    governanceContractsTest,
+    /^import "\.\/dependency-security-remediation\.spec\.mjs";$/m,
+    "the independently rooted governance path suite must reject removal of the dependency security floor suite import",
+  );
 });
