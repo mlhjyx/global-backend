@@ -47,9 +47,9 @@ export interface M1ebGoldenFixture {
 
 export interface M1ebGoldenFixtureOptions {
   /**
-   * Assemble only these approved fixture ids. Fixtures are assembled
-   * independently, so each result equals its entry in the full matrix;
-   * results keep the matrix's id order, not the order requested.
+   * Build only these approved fixture ids. Fixtures are built independently,
+   * so each result equals its entry in the full matrix; results keep the
+   * matrix's id order, not the order requested.
    */
   ids?: readonly string[];
 }
@@ -263,6 +263,22 @@ function neutralCopyBundleSet(input: {
   };
 }
 
+function requestedGoldenFixtureIds(
+  ids: readonly string[] | undefined,
+): ReadonlySet<string> | null {
+  if (ids === undefined) return null;
+  const approved = new Set(
+    STATIC_DESIGN_CATALOG_V2.families.flatMap(
+      ({ goldenFixtureIds }) => goldenFixtureIds,
+    ),
+  );
+  const unknown = ids.filter((id) => !approved.has(id));
+  if (unknown.length > 0) {
+    throw new Error(`M1_E_B_GOLDEN_FIXTURE_UNKNOWN: ${unknown.join(", ")}`);
+  }
+  return new Set(ids);
+}
+
 /**
  * Synchronous, zero-call source for evaluation fixtures.  It rebuilds the
  * approved M1-e-B golden inputs, but intentionally does not invoke a model or
@@ -270,11 +286,14 @@ function neutralCopyBundleSet(input: {
  */
 export function buildM1ebGoldenAssemblyInputs(
   repositoryRoot = process.cwd(),
+  options: M1ebGoldenFixtureOptions = {},
 ): M1ebGoldenAssemblyInput[] {
+  const requested = requestedGoldenFixtureIds(options.ids);
   const templates = loadQualifiedComponentTemplates(repositoryRoot);
   const output: M1ebGoldenAssemblyInput[] = [];
   for (const family of STATIC_DESIGN_CATALOG_V2.families) {
     for (const id of family.goldenFixtureIds) {
+      if (requested && !requested.has(id)) continue;
       const mode = id.endsWith("-sparse") ? "sparse" : "rich";
       const brief = fixtureBrief(family, id, mode);
       const slots = deriveCopySlotDefinitions({
@@ -320,22 +339,6 @@ export function buildM1ebGoldenAssemblyInputs(
     }
   }
   return output.sort((left, right) => left.id.localeCompare(right.id));
-}
-
-function requestedGoldenFixtureIds(
-  ids: readonly string[] | undefined,
-): ReadonlySet<string> | null {
-  if (ids === undefined) return null;
-  const approved = new Set(
-    STATIC_DESIGN_CATALOG_V2.families.flatMap(
-      ({ goldenFixtureIds }) => goldenFixtureIds,
-    ),
-  );
-  const unknown = ids.filter((id) => !approved.has(id));
-  if (unknown.length > 0) {
-    throw new Error(`M1_E_B_GOLDEN_FIXTURE_UNKNOWN: ${unknown.join(", ")}`);
-  }
-  return new Set(ids);
 }
 
 export async function buildM1ebGoldenFixtures(

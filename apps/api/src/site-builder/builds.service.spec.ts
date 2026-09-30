@@ -508,7 +508,9 @@ describe("BuildsService.create", () => {
   let approvedBase: ActiveV2Base;
   beforeAll(async () => {
     const repo = path.resolve(import.meta.dirname, "../../../..");
-    const [fixture] = await buildM1ebGoldenFixtures(repo);
+    const [fixture] = await buildM1ebGoldenFixtures(repo, {
+      ids: ["natural-origin-rich"],
+    });
     approvedBase = activeV2Base(fixture);
   });
 

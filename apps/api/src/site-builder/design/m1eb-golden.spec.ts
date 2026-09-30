@@ -5,7 +5,12 @@ import { validateSiteSpecV1_1 } from "@global/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlledAssemblyService } from "../assembly/controlled-assembly.service";
 import { STATIC_DESIGN_CATALOG_V2 } from "./catalog";
-import { buildM1ebGoldenFixtures, type M1ebGoldenFixture } from "./m1eb-golden";
+import {
+  buildM1ebGoldenAssemblyInputs,
+  buildM1ebGoldenFixtures,
+  type M1ebGoldenAssemblyInput,
+  type M1ebGoldenFixture,
+} from "./m1eb-golden";
 
 const repositoryRoot = new URL("../../../../../", import.meta.url).pathname;
 const directory = path.join(
@@ -31,14 +36,24 @@ function expectApprovedGoldenFixture(fixture: M1ebGoldenFixture): void {
   });
 }
 
+// Each call loads its own template repository, whose accessor only compares
+// equal by reference, so inputs from separate calls are compared without it.
+function withoutTemplates({
+  assembly: { templates: _templates, ...assembly },
+  ...input
+}: M1ebGoldenAssemblyInput) {
+  return { ...input, assembly };
+}
+
 describe("M1-e-B approved Golden matrix", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  // Tests that assemble fixtures get 60 s: every assembly re-validates the
-  // whole design catalog, and the full matrix took about 2.5 s alone at load
-  // ~20 and about 10 s at load ~45 on a 4-core host, past the 5 s default.
+  // Tests that build fixtures or their inputs get 60 s: every build
+  // re-validates the whole design catalog, and assembling the full matrix
+  // took about 2.5 s alone at load ~20 and about 10 s at load ~45 on a 4-core
+  // host, past the 5 s default.
   it("builds exactly six sparse/rich pairs through controlled assembly", async () => {
     const fixtures = await buildM1ebGoldenFixtures(repositoryRoot);
     expect(fixtures).toHaveLength(12);
@@ -96,5 +111,29 @@ describe("M1-e-B approved Golden matrix", () => {
       }),
     ).rejects.toThrow("M1_E_B_GOLDEN_FIXTURE_UNKNOWN: missing-fixture");
     expect(assemble).not.toHaveBeenCalled();
+  });
+
+  it("derives assembly inputs only for the requested fixtures, identical to the full matrix", () => {
+    const ids = ["oem-capability-sparse", "natural-origin-rich"];
+
+    const inputs = buildM1ebGoldenAssemblyInputs(repositoryRoot, { ids });
+
+    expect(inputs.map(({ id, mode }) => ({ id, mode }))).toEqual([
+      { id: "natural-origin-rich", mode: "rich" },
+      { id: "oem-capability-sparse", mode: "sparse" },
+    ]);
+    expect(inputs.map(withoutTemplates)).toEqual(
+      buildM1ebGoldenAssemblyInputs(repositoryRoot)
+        .filter(({ id }) => ids.includes(id))
+        .map(withoutTemplates),
+    );
+  }, 60_000);
+
+  it("rejects an unknown assembly input id", () => {
+    expect(() =>
+      buildM1ebGoldenAssemblyInputs(repositoryRoot, {
+        ids: ["missing-fixture"],
+      }),
+    ).toThrow("M1_E_B_GOLDEN_FIXTURE_UNKNOWN: missing-fixture");
   });
 });
