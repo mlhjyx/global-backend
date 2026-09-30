@@ -181,7 +181,13 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const enrich = await acts.enrichRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
 
   // 信号富集（数字足迹 + 结构化收割）：慢且时变，走独立长活动 + heartbeat；失败不拖垮整个 run
-  let signals: { matched: number; enriched: number; provider: string | null; budgetTruncated?: boolean } = {
+  let signals: {
+    matched: number;
+    enriched: number;
+    provider: string | null;
+    budgetTruncated?: boolean;
+    skippedSubjects?: number;
+  } = {
     matched: 0,
     enriched: 0,
     provider: null,
@@ -195,7 +201,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
   // 从 ICP 短名单自动注册网站变更监控（#4 loop）：对本 run ICP fit=match 公司建 web_watch，交给 intentSweep 持续盯变更。
   // best-effort（每家一次 sitemap 探测，慢）→ 长活动；失败不影响 run 状态。
-  let watches: { candidates: number; registered: number } = { candidates: 0, registered: 0 };
+  let watches: { candidates: number; registered: number; skippedSubjects?: number } = {
+    candidates: 0,
+    registered: 0,
+  };
   try {
     watches = await signalActs.registerWatchesForRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
   } catch (error) {
@@ -221,7 +230,14 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     discoveryBudgetTruncated ||
     enrich.budgetTruncated ||
     (signals.budgetTruncated ?? false);
-  let status = resolveRunStatus({ failures, totalQueries: queries.length, budgetTruncated });
+  // G3 5.5：按公司跳过的被拒主体（tombstone/SUPPRESSED/失效）意味着漏了活儿 → 至少 PARTIAL。
+  const skippedSubjects = (signals.skippedSubjects ?? 0) + (watches.skippedSubjects ?? 0);
+  let status = resolveRunStatus({
+    failures,
+    totalQueries: queries.length,
+    budgetTruncated,
+    skippedSubjects,
+  });
   if (usesRawGovernance && governanceDenied > 0) {
     status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
   }
@@ -271,6 +287,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       enrichBudgetTruncated: enrich.budgetTruncated,
       signalsBudgetTruncated: signals.budgetTruncated ?? false,
       budgetTruncated,
+      skippedSubjects,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },
