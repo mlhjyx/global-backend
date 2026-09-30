@@ -11,12 +11,15 @@ const SECURITY_OVERRIDES = Object.freeze({
   "nanoid@>=3.0.0 <4.0.0": "3.3.18",
   postcss: "8.5.26",
   "js-yaml": "4.3.2",
-  "fast-uri": "3.1.6",
+  "fast-uri": "3.1.8",
   "deepmerge-ts": "8.0.1",
-  multer: "2.3.0",
+  multer: "2.4.0",
   "smol-toml": "1.7.1",
   svgo: "4.1.0",
   "third-party-web": "0.29.2",
+  "lodash@<4.18.0": "4.18.1",
+  "uuid@<11.1.1": "11.1.1",
+  "undici@>=8.0.0 <8.10.2": "8.10.2",
 });
 
 test(
@@ -236,6 +239,7 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "baseline-browser-mapping@2.10.43",
   "browserslist@4.28.6",
   "fast-uri@3.1.5",
+  "fast-uri@3.1.6",
 ]);
 
 const REQUIRED_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
@@ -243,10 +247,11 @@ const REQUIRED_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
   "express@5.2.1",
   "body-parser@2.3.0",
   "qs@6.16.0",
-  "fast-uri@3.1.6",
+  "fast-uri@3.1.8",
   "browserslist@4.28.7",
-  "baseline-browser-mapping@2.10.44",
-  "multer@2.3.0",
+  "baseline-browser-mapping@2.11.25",
+  "multer@2.4.0",
+  "undici@8.10.2",
   "path-to-regexp@8.4.2",
   "file-type@21.3.4",
   "fast-xml-parser@5.11.0",
@@ -259,6 +264,8 @@ const FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
   "qs@6.15.3",
   "qs@6.14.2",
   "multer@2.0.2",
+  "multer@2.3.0",
+  "undici@8.10.0",
   "path-to-regexp@0.1.13",
   "path-to-regexp@0.2.5",
   "path-to-regexp@3.3.0",
