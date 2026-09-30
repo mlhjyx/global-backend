@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { ToolPolicyDenied } from "../tools/tool-broker";
 import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
@@ -2574,6 +2575,83 @@ describe("enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
     ).rejects.toBeInstanceOf(BudgetUnsettledOperationsError);
     expect(close).not.toHaveBeenCalled();
     expect(adapter).not.toHaveBeenCalled();
+  });
+});
+
+describe("company-subject call sites (G3 5.5)", () => {
+  it("binds every signal-enrichment wire to the canonical company it enriches", async () => {
+    const enricher = {
+      key: "digital_footprint",
+      enrichCompany: vi.fn(async () => ({ matched: false }) as EnrichmentResult),
+    };
+
+    await createDiscoveryActivities(makeEnrichDeps([enricher])).enrichSignalsRun(
+      discoveryArgs("run-signal-subject", { icpId: "icp-1" }),
+    );
+
+    expect(enricher.enrichCompany).toHaveBeenCalledOnce();
+    expect(enricher.enrichCompany.mock.calls[0]![1]).toMatchObject({
+      artifactSubject: { subjectType: "company", subjectId: "c1" },
+    });
+  });
+
+  it.each([
+    "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
+    "GENERIC_OPERATION_ARTIFACT_SUBJECT_SUPPRESSED",
+  ])("skips a company whose subject is denied (%s) and reports it instead of failing the run", async (reason) => {
+    const later = {
+      key: "structured_harvest",
+      enrichCompany: vi.fn(async () => ({ matched: true, attributes: { x: 1 } }) as unknown as EnrichmentResult),
+    };
+    const denied = {
+      key: "digital_footprint",
+      enrichCompany: vi.fn(async () => {
+        throw new ToolPolicyDenied("crawl4ai.render", reason);
+      }),
+    };
+
+    const result = await createDiscoveryActivities(makeEnrichDeps([denied, later])).enrichSignalsRun(
+      discoveryArgs(`run-signal-skip-${reason}`, { icpId: "icp-1" }),
+    );
+
+    expect(result).toMatchObject({ enriched: 0, matched: 0, skippedSubjects: 1 });
+    expect(later.enrichCompany).not.toHaveBeenCalled();
+  });
+
+  it("skips a company whose watch sitemap wire is denied for its subject", async () => {
+    const deps = makeEnrichDeps([]) as unknown as {
+      prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
+      broker?: unknown;
+    };
+    await deps.prisma.withWorkspace("ws", async (tx) => {
+      tx.fieldEvidence!.findMany = async () => [];
+    });
+    const invoke = vi.fn(async () => {
+      throw new ToolPolicyDenied("http.get", "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED");
+    });
+    deps.broker = { invoke };
+
+    const result = await createDiscoveryActivities(deps as never).registerWatchesForRun(
+      discoveryArgs("run-watch-skip", { icpId: "icp-1" }) as never,
+    );
+
+    expect(invoke).toHaveBeenCalled();
+    expect(result).toEqual({ candidates: 1, registered: 0, skippedSubjects: 1 });
+  });
+
+  it("still fails the run when the artifact store itself is unavailable", async () => {
+    const enricher = {
+      key: "digital_footprint",
+      enrichCompany: vi.fn(async () => {
+        throw new ToolPolicyDenied("crawl4ai.render", "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+      }),
+    };
+
+    await expect(
+      createDiscoveryActivities(makeEnrichDeps([enricher])).enrichSignalsRun(
+        discoveryArgs("run-signal-storage", { icpId: "icp-1" }),
+      ),
+    ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
   });
 });
 

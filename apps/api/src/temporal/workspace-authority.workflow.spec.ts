@@ -143,6 +143,26 @@ describe('discoveryWorkflow execution-control propagation', () => {
     },
   );
 
+  it.each([
+    ['signal enrichment', 'enrichSignalsRun'],
+    ['watch registration', 'registerWatchesForRun'],
+  ] as const)('finalizes PARTIAL when %s skipped a denied company subject (G3 5.5)', async (_label, stage) => {
+    primeDiscovery();
+    const base = stage === 'enrichSignalsRun'
+      ? { matched: 0, enriched: 0, provider: null, budgetTruncated: false }
+      : { candidates: 1, registered: 0 };
+    acts[stage].mockResolvedValue({ ...base, skippedSubjects: 1 });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({ skippedSubjects: 1 }),
+      }),
+    );
+  });
+
   it('keeps an ordinary query failure in the normal status path while still finalizing', async () => {
     primeDiscovery();
     acts.executeQuery.mockRejectedValue(new Error('provider unavailable'));
