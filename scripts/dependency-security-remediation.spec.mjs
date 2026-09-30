@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+const repositoryRoot = new URL("../", import.meta.url);
+
 test(
   "pnpm deploy preserves the reviewed third-party-web source when upstream latest moves",
   { timeout: 120_000 },
@@ -117,7 +119,9 @@ test(
     });
     t.after(() => new Promise((resolve) => server.close(resolve)));
     registry = `http://127.0.0.1:${server.address().port}/`;
-    const manifest = JSON.parse(await readFile("package.json", "utf8"));
+    const manifest = JSON.parse(
+      await readFile(new URL("package.json", repositoryRoot), "utf8"),
+    );
     const configuredPin = manifest.pnpm?.overrides?.["third-party-web"];
 
     async function deploy(pin, label) {
@@ -216,16 +220,8 @@ test(
   },
 );
 
-const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
-  "extract-zip@2.0.1",
-  "nanoid@3.3.15",
-  "nanoid@3.3.16",
-  "nanoid@3.3.17",
-  "baseline-browser-mapping@2.10.43",
-  "browserslist@4.28.6",
-  "fast-uri@3.1.5",
-  "fast-uri@3.1.6",
-]);
+// Removed outright: no patched release exists to hold a floor for.
+const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
 
 // Minimum reviewed versions in the resolved graph. Routine upgrades pass without
 // editing this table; an older release of a listed package fails wherever it is
@@ -257,7 +253,16 @@ const SECURITY_FLOORS = Object.freeze(
   ].map((entry) => Object.freeze(entry)),
 );
 
-const FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS = Object.freeze([
+// Every vulnerable release a floor replaced. Each must stay below its floor, so a
+// floor cannot be lowered back past a known-bad release.
+const VULNERABLE_PREDECESSORS = Object.freeze([
+  "nanoid@3.3.15",
+  "nanoid@3.3.16",
+  "nanoid@3.3.17",
+  "fast-uri@3.1.5",
+  "fast-uri@3.1.6",
+  "browserslist@4.28.6",
+  "baseline-browser-mapping@2.10.43",
   "@nestjs/core@10.4.22",
   "express@4.22.1",
   "body-parser@1.20.4",
@@ -283,7 +288,7 @@ function resolvedPackageVersions(lockfile) {
   const versions = new Map();
   for (const [, name, version] of lockfile
     .slice(start, end)
-    .matchAll(/^ {2}'?(@?[^@\s']+)@([^\s'():]+)'?:$/gmu)) {
+    .matchAll(/^ {2}'?(@?[^@\s']+)@(.+?)'?:$/gmu)) {
     versions.set(name, [...(versions.get(name) ?? []), version]);
   }
   return versions;
@@ -332,9 +337,23 @@ function findSecurityFloorViolations(lockfile, floors) {
   });
 }
 
+// An override rewrites every matching dependency in the graph, so it may only
+// pin an exact release: never a range, an alias to another package, or a source.
+function findLooseOverrides(overrides) {
+  return Object.entries(overrides ?? {})
+    .filter(([, pin]) => {
+      const release = parseRelease(pin);
+      return !release || release.prerelease !== undefined;
+    })
+    .map(([selector]) => selector);
+}
+
 function lockfileWith(...snapshots) {
   const entries = snapshots.map((snapshot) => {
-    const key = snapshot.startsWith("@") ? `'${snapshot}'` : snapshot;
+    const key =
+      snapshot.startsWith("@") || snapshot.includes(":")
+        ? `'${snapshot}'`
+        : snapshot;
     return `  ${key}:\n    resolution: {integrity: sha512-fixture}\n`;
   });
   return `lockfileVersion: '9.0'\n\npackages:\n\n${entries.join("\n")}\nsnapshots:\n\n`;
@@ -342,9 +361,12 @@ function lockfileWith(...snapshots) {
 
 test("production security remediation removes the unpatched extract-zip path", async () => {
   const apiManifest = JSON.parse(
-    await readFile("apps/api/package.json", "utf8"),
+    await readFile(new URL("apps/api/package.json", repositoryRoot), "utf8"),
   );
-  const lockfile = await readFile("pnpm-lock.yaml", "utf8");
+  const lockfile = await readFile(
+    new URL("pnpm-lock.yaml", repositoryRoot),
+    "utf8",
+  );
 
   assert.equal(apiManifest.dependencies?.lighthouse, "13.4.1");
   for (const snapshot of FORBIDDEN_LOCKFILE_SNAPSHOTS) {
@@ -357,22 +379,28 @@ test("production security remediation removes the unpatched extract-zip path", a
 });
 
 test("the resolved dependency graph meets every reviewed security floor", async () => {
-  const lockfile = await readFile("pnpm-lock.yaml", "utf8");
+  const lockfile = await readFile(
+    new URL("pnpm-lock.yaml", repositoryRoot),
+    "utf8",
+  );
 
   assert.deepEqual(findSecurityFloorViolations(lockfile, SECURITY_FLOORS), []);
 });
 
 test("extract-zip is remediated by removal, not a baseline exception", async () => {
   const baseline = await readFile(
-    "docs/security/production-dependency-audit-baseline.json",
+    new URL(
+      "docs/security/production-dependency-audit-baseline.json",
+      repositoryRoot,
+    ),
     "utf8",
   );
 
   assert.doesNotMatch(baseline, /GHSA-jmr9-qjv8-65gv|extract-zip/u);
 });
 
-test("reviewed runtime security floors keep every vulnerable predecessor out", () => {
-  for (const snapshot of FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS) {
+test("reviewed security floors keep every recorded vulnerable predecessor out", () => {
+  for (const snapshot of VULNERABLE_PREDECESSORS) {
     const separator = snapshot.lastIndexOf("@");
     const name = snapshot.slice(0, separator);
     const version = snapshot.slice(separator + 1);
@@ -441,6 +469,14 @@ test("a scoped security floor ignores older lines but fails closed when it cover
       { name: "undici", version: "8", floor: "8.10.2" },
     ],
   );
+  const tarball = "https://codeload.github.com/nodejs/undici/tar.gz/0123abc";
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith("undici@8.10.2", `undici@${tarball}`),
+      floors,
+    ),
+    [{ name: "undici", version: tarball, floor: "8.10.2" }],
+  );
   for (const invalid of [
     { name: "undici", floor: "8.10" },
     { name: "undici", from: "8", floor: "8.10.2" },
@@ -452,4 +488,23 @@ test("a scoped security floor ignores older lines but fails closed when it cover
       /undici security floor must name plain release versions/,
     );
   }
+});
+
+test("root overrides pin exact releases rather than ranges, aliases or sources", async () => {
+  assert.deepEqual(
+    findLooseOverrides({
+      qs: "6.16.0",
+      "undici@>=8.0.0 <8.10.2": "8.10.2",
+      lodash: "^4.18.1",
+      multer: "npm:multer-fork@2.4.0",
+      svgo: "github:svg/svgo#main",
+      postcss: "8.5.26-beta.1",
+    }),
+    ["lodash", "multer", "svgo", "postcss"],
+  );
+  const manifest = JSON.parse(
+    await readFile(new URL("package.json", repositoryRoot), "utf8"),
+  );
+
+  assert.deepEqual(findLooseOverrides(manifest.pnpm?.overrides), []);
 });

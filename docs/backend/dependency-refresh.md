@@ -39,7 +39,7 @@ pnpm --filter @global/api build && pnpm --filter @global/api test
 - 大版本升级（`dependabot.yml` 的 `ignore` 清单：astro、`@nestjs/*`、fast-xml-parser、`@types/node`）不进批量 PR，各自单独立项。
 - Action 升级：只从官方仓库的 tag 只读解析完整 commit SHA，同时更新 workflow 里的 `uses:` 与 `required-contexts.json` 的 pin，由 `pnpm governance:verify` 校验两边一致。
 - **锁文件变了就必须在同一 PR 重新绑定漏洞基线**（见第 4 节），否则合入后 main 变红。
-- `pnpm governance:verify` 同时检查 `scripts/dependency-security-remediation.spec.mjs` 的安全下限（`SECURITY_FLOORS`）。例行升级、撤掉已被上游范围覆盖的 override 都不用改它；为新 advisory 升级时，把对应下限上调到修复版本，并把被替换的漏洞版本登记进 `FORBIDDEN_RUNTIME_SECURITY_SNAPSHOTS`。新依赖带进同名包更旧的版本线时测试会失败：确认那条线已单独审计，再用 `from` 把下限限定到修复所在的版本线，否则就升级它。某个下限包整个离开依赖图时，测试报 `version: null`，删掉该条即可。
+- `pnpm governance:verify` 同时检查 `scripts/dependency-security-remediation.spec.mjs` 的安全下限（`SECURITY_FLOORS`）。例行升级、撤掉已被上游范围覆盖的 override 都不用改它；为新 advisory 升级时，把对应下限上调到修复版本，并把被替换的漏洞版本登记进 `VULNERABLE_PREDECESSORS`。root overrides 只能精确钉到正式版本，不能写范围、别名或来源。新依赖带进同名包更旧的版本线时测试会失败：确认那条线已单独审计，再用 `from` 把下限限定到修复所在的版本线，否则就升级它。某个下限包整个离开依赖图时，测试报 `version: null`，删掉该条即可。
 - `copy-fixed-source-impact-resign.mjs` 报 `COPY_RESIGN_ELIGIBILITY_CHANGED` 时，说明改动影响的不只是哈希（状态、漂移文件集合或 stale scope 变了）：先查明原因，确属预期再加 `--accept-eligibility-change`。
 
 ## 4. 漏洞基线续期
