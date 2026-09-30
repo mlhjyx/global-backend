@@ -31,6 +31,9 @@ export const MAX_DIRECTORY_PAGINATION = 3 as const;
 export const MAX_SINGLE_SEARCH_WIRES_PER_QUERY = 1 as const;
 
 // Post-discovery stages of one run, and their per-company wires.
+/** Website profile (G3 5.4b): before fit, homepage + Impressum per company, at most one model call. */
+export const MAX_DISCOVERY_PROFILE_COMPANIES = 50 as const;
+export const MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY = 2 as const;
 export const MAX_DISCOVERY_ENRICH_COMPANIES = 50 as const;
 /** GLEIF: country search, name-only retry, direct and ultimate parent. */
 export const MAX_GLEIF_FETCHES_PER_COMPANY = 4 as const;

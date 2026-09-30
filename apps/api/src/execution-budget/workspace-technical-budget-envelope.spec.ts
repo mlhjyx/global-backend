@@ -109,13 +109,16 @@ describe('workspace execution technical envelope catalog', () => {
       expect.objectContaining({ taskId: 'taxonomy.normalize', logicalInvocations: 66 * (4 + 2) }),
       expect.objectContaining({ taskId: 'discovery.extract_company', logicalInvocations: 66 * 14 }),
       expect.objectContaining({ taskId: 'discovery.extract_list', logicalInvocations: 66 * 8 * 3 }),
+      // website profile (G3 5.4b): at most one classify call per profiled company
+      expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
       expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 7 * 25 }),
     ]);
     expect(
       envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
     ).toEqual([
       ['searxng.search', 66 * (3 + 4)],
-      ['crawl4ai.fetch', 66 * 8 * 3],
+      // directory pages + homepage and Impressum of each profiled company
+      ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 2],
       ['wikidata.sparql', 66],
       ['osm.overpass', 66],
       ['ted.search', 66],
@@ -134,13 +137,14 @@ describe('workspace execution technical envelope catalog', () => {
       taxonomyIndustryTermsPerQuery: 4,
       taxonomyCountryTermsPerQuery: 2,
       fitCompanies: 11_550,
+      profileCompanies: 50,
       enrichCompanies: 50,
       signalCompanies: 12,
       watchCompanies: 12,
     });
-    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 11550×2×20 = 557_040 cents;
-    // tools: crawl4ai.fetch 1584×1 + crawl4ai.render 24×1 = 1_608 cents.
-    expect(envelope.requiredCapMicrousd).toBe(558_648n * 10_000n);
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 11550×2×20 = 558_040 cents;
+    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 24×1 = 1_708 cents.
+    expect(envelope.requiredCapMicrousd).toBe(559_748n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {

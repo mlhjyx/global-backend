@@ -4,11 +4,11 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-09-30 · Dependency security floors wired into the governance gate
+## 2026-09-30 · Website profiling in the discovery run (G3 slice 5.4b, part 2)
 
-- `scripts/dependency-security-remediation.spec.mjs` 自 8-15 引入后从未被任何 runner 执行（不在 `governance:test` 入口、package 脚本、workflow 或 `gctl check` 里），#551 之后在 main 上 2/5 失败却无人察觉；安全合同页所说的「真实 deploy 版本不漂移」验证也因此一直没有在跑。现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行；`governance-path-contracts.spec.mjs` 拒绝移除该导入。
-- 语义由「精确快照必须存在 + root overrides 全等」改为锁文件上的已审下限：例行升级（如 @nestjs/core 11.2.3→11.2.7）不再误报，而修补版旁边混入的旧版本（如 qs 6.14.0 与 6.16.0 并存）此前两层断言都会放过，现在失败；撤掉已被上游范围覆盖的 override 不受影响，但 override 只能精确钉到正式版本（范围、别名、git/URL 来源都失败）；锁文件里 URL/git/file 来源的同名包按无法比较处理并失败；已登记的漏洞前任（原先分在两张表，现合为 `VULNERABLE_PREDECESSORS`）必须低于下限，防止下调下限；`third-party-web` 仍由真实 pnpm deploy 回归钉住。对 9-30 修复前的 main 锁文件，下限正好报出 fast-uri 3.1.6、multer 2.3.0、undici 8.10.0。
-- 代价实测：整份 spec 在 xin（4 核共用、load 12–21）上 2.7–4.3 秒；deploy 回归连续 20 次与 6 路并发 ×5 轮共 50/50 通过，load 37 时最慢 20 秒（单命令超时 50 秒、用例 120 秒）；在 load 35 的完整 `governance:verify` 中占 19.7 秒。
+- discovery run 在归一之后、Fit 之前新增「官网画像」阶段 `profileWebsitesForRun`：按公司绑定主体抓首页与 Impressum，把贸易角色、置信度与来源、是否自有制造、在售品牌与两个品牌信号、法定名称、登记号（带法院）、税号、证据片段写入 `website_profile` 命名空间，登记号与税号作为带校验的语义标识符进入属性白名单。主体被拒只跳过该公司并计入 PARTIAL，控制错误照旧让 run 失败；30 天内画像过的公司不重抓；每个 run 至多 50 家。工作流以 patch `discovery-website-profile-v1` 守卫，旧历史重放不变；阶段为尽力而为，失败时 Fit 照常判定。
+- 新数据源 `website_profile` 默认 DISABLED，登记进 provider 注册表、source-class 清单与生成文档，实测后再开启。发现 run 的技术报价补上这一阶段（每家 2 次抓取 + 1 次分类，上限 50 家）。
+- Fit 第 2 部分：候选信息带上 `website_profile`（不含登记号与税号），任务说明写明官网画像是角色门与商业模式门的直接证据、在售外国尤其中国品牌是进口分销的强信号。依据：G3 规格 §3 ⑤、§5.4；设计 §3.3、§4 第 7–8 项。有证据的名称修正与次级去重键留待 5.4c。
 
 ## 2026-09-30 · Website-profile provider and trade-role task (G3 slice 5.4b, part 1)
 
@@ -41,6 +41,12 @@
 ## 2026-09-30 · ICP trade role carried into keyword discovery queries (G3 5.3 follow-up)
 
 - 5.3 让关键词搜索按 `filters.trade_side` 等构造贸易角色词，但 `discovery.query_plan` 的过滤器 schema 没有 `business_model`，planner 也不一定填 `trade_side`，真实链路上角色词可能根本不出现。现在生成查询计划时，若 ICP 的 `company_attributes.trade_side`（优先）或 `business_model` 能识别出角色，就把规范值 `distributor` / `manufacturer` 写进未带角色的 planner 查询；planner 自己写了角色的保持不变，TED、openFDA 冷路径查询不受影响。写入发生在计划落库前，人工确认计划时可见。
+
+## 2026-09-30 · Dependency security floors wired into the governance gate
+
+- `scripts/dependency-security-remediation.spec.mjs` 自 8-15 引入后从未被任何 runner 执行（不在 `governance:test` 入口、package 脚本、workflow 或 `gctl check` 里），#551 之后在 main 上 2/5 失败却无人察觉；安全合同页所说的「真实 deploy 版本不漂移」验证也因此一直没有在跑。现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行；`governance-path-contracts.spec.mjs` 拒绝移除该导入。
+- 语义由「精确快照必须存在 + root overrides 全等」改为锁文件上的已审下限：例行升级（如 @nestjs/core 11.2.3→11.2.7）不再误报，而修补版旁边混入的旧版本（如 qs 6.14.0 与 6.16.0 并存）此前两层断言都会放过，现在失败；撤掉已被上游范围覆盖的 override 不受影响，但 override 只能精确钉到正式版本（范围、别名、git/URL 来源都失败）；锁文件里 URL/git/file 来源的同名包按无法比较处理并失败；已登记的漏洞前任（原先分在两张表，现合为 `VULNERABLE_PREDECESSORS`）必须低于下限，防止下调下限；`third-party-web` 仍由真实 pnpm deploy 回归钉住。对 9-30 修复前的 main 锁文件，下限正好报出 fast-uri 3.1.6、multer 2.3.0、undici 8.10.0。
+- 代价实测：整份 spec 在 xin（4 核共用、load 12–21）上 2.7–4.3 秒；deploy 回归连续 20 次与 6 路并发 ×5 轮共 50/50 通过，load 37 时最慢 20 秒（单命令超时 50 秒、用例 120 秒）；在 load 35 的完整 `governance:verify` 中占 19.7 秒。
 
 ## 2026-09-30 · Production advisory remediation and audit baseline renewal
 

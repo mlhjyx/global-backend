@@ -15,7 +15,8 @@ import { classifyTradeRoleByRules } from '../website-profile/trade-role-rules';
 import { scrubPii } from '../../site-builder/agents/pii';
 
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
-export const WEBSITE_PROFILE_MAX_FETCHES_PER_COMPANY = 2;
+/** data_provider kill switch and canonical attribute namespace. */
+export const WEBSITE_PROFILE_PROVIDER_KEY = 'website_profile' as const;
 const HOME_PROMPT_CHARS = 12_000;
 const IMPRESSUM_PROMPT_CHARS = 4_000;
 const RULES_CONFIDENCE = 0.7;

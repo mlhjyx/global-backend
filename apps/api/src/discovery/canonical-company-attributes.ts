@@ -6,6 +6,7 @@ import {
   isSecretFreeText,
 } from "./raw-source-provider-normalizer";
 import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site-sections";
+import { isValidGermanVat } from "./website-profile/impressum";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
   "digital_footprint",
@@ -34,6 +35,7 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "structured_harvest",
   "ted",
   "ted_buyer",
+  "website_profile",
   "wikidata",
   "wikidata_qid",
 ]);
@@ -76,9 +78,11 @@ const SEMANTIC_IDENTIFIER_KEYS = new Set([
   "product_code",
   "publication_number",
   "qid",
+  "register_key",
   "registration_number",
   "source",
   "ultimate_parent_lei",
+  "vat_id",
   "wikidata_qid",
   "winner_identifier",
 ]);
@@ -200,6 +204,12 @@ const semanticIdentifierContracts = new Map<
     { validate: (value) => /^[A-Z]{3}$/u.test(value) },
   ],
   ["intent.events.evidence.k_number", { validate: safeCode }],
+  // G3 5.4b: Impressum identifiers, court-qualified register key and checksum-valid VAT id.
+  [
+    "website_profile.register_key",
+    { validate: (value) => /^de-hr[ab]:[a-z0-9]+(?:-[a-z0-9]+)*:\d{1,6}[a-z]{0,2}$/u.test(value) },
+  ],
+  ["website_profile.vat_id", { validate: isValidGermanVat }],
 ]);
 
 const storedCompanyFieldAttributePaths = new Map<
@@ -233,6 +243,17 @@ const storedCompanyFieldAttributePaths = new Map<
   ["structured_harvest.hiring_signal", ["structured_harvest", "hiring_signal"]],
   ["structured_harvest.site_sections", ["structured_harvest", "site_sections"]],
   ["structured_harvest.sitemap_url_count", ["structured_harvest", "sitemap_url_count"]],
+  ["website_profile.carried_brands", ["website_profile", "carried_brands"]],
+  ["website_profile.carries_chinese_brand", ["website_profile", "carries_chinese_brand"]],
+  ["website_profile.carries_foreign_brand", ["website_profile", "carries_foreign_brand"]],
+  ["website_profile.evidence", ["website_profile", "evidence"]],
+  ["website_profile.legal_name", ["website_profile", "legal_name"]],
+  ["website_profile.own_manufacturing", ["website_profile", "own_manufacturing"]],
+  ["website_profile.register_key", ["website_profile", "register_key"]],
+  ["website_profile.trade_role", ["website_profile", "trade_role"]],
+  ["website_profile.trade_role_confidence", ["website_profile", "trade_role_confidence"]],
+  ["website_profile.trade_role_source", ["website_profile", "trade_role_source"]],
+  ["website_profile.vat_id", ["website_profile", "vat_id"]],
   ["wikidata.country", ["wikidata", "country"]],
   ["wikidata.employees", ["wikidata", "employees"]],
   ["wikidata.headquarters", ["wikidata", "headquarters"]],
@@ -292,6 +313,17 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "structured_harvest.hiring_signal",
   "structured_harvest.site_sections",
   "structured_harvest.sitemap_url_count",
+  "website_profile.carried_brands",
+  "website_profile.carries_chinese_brand",
+  "website_profile.carries_foreign_brand",
+  "website_profile.evidence",
+  "website_profile.legal_name",
+  "website_profile.own_manufacturing",
+  "website_profile.register_key",
+  "website_profile.trade_role",
+  "website_profile.trade_role_confidence",
+  "website_profile.trade_role_source",
+  "website_profile.vat_id",
   "wikidata.country",
   "wikidata.employees",
   "wikidata.headquarters",

@@ -131,10 +131,26 @@ export async function judgeFitCompany(
   },
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
-  const attributes = company.attributes as { products?: string[]; keywords?: string[] } | null;
+  const attributes = company.attributes as {
+    products?: string[];
+    keywords?: string[];
+    website_profile?: Record<string, unknown>;
+  } | null;
   const products = attributes?.products ?? [];
   // Capability keywords carry the reseller evidence a distributor ICP is judged on (Großhandel, Vertrieb …).
   const keywords = attributes?.keywords ?? [];
+  // G3 5.4b: the company's own homepage/Impressum profile is direct trade-role evidence.
+  const profile = attributes?.website_profile;
+  const websiteProfile = profile
+    ? {
+        trade_role: profile.trade_role,
+        own_manufacturing: profile.own_manufacturing,
+        carried_brands: profile.carried_brands,
+        carries_chinese_brand: profile.carries_chinese_brand,
+        carries_foreign_brand: profile.carries_foreign_brand,
+        evidence: profile.evidence,
+      }
+    : undefined;
   let out: FitOutput;
   let durableReceipt: DurableExecutionReceipt | undefined;
   try {
@@ -145,6 +161,7 @@ export async function judgeFitCompany(
         prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${JSON.stringify(
           { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products,
             keywords,
+            ...(websiteProfile ? { website_profile: websiteProfile } : {}),
           },
           null,
           2,

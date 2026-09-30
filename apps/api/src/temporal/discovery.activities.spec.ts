@@ -2655,6 +2655,129 @@ describe("company-subject call sites (G3 5.5)", () => {
   });
 });
 
+describe("profileWebsitesForRun (G3 5.4b)", () => {
+  const PROFILE = {
+    homepageUrl: "https://c1.de/",
+    impressumUrl: "https://c1.de/impressum",
+    tradeRole: "distributor",
+    tradeRoleSource: "rules",
+    tradeRoleConfidence: 0.7,
+    ownManufacturing: null,
+    carriedBrands: [{ name: "Grundfos", country: "dk" }],
+    carriesChineseBrand: false,
+    carriesForeignBrand: true,
+    legalName: "C1 Pumpen GmbH",
+    register: { type: "HRB", number: "1", court: "Köln", key: "de-hrb:koeln:1" },
+    vatId: "DE136695976",
+    evidence: ["Großhandel für Pumpen"],
+  };
+
+  async function makeProfileDeps(
+    profile: ReturnType<typeof vi.fn>,
+    options: { status?: string; attributes?: Record<string, unknown> } = {},
+  ) {
+    const deps = makeEnrichDeps([]) as unknown as {
+      prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
+      websiteProfile?: unknown;
+    };
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    await deps.prisma.withWorkspace("ws", async (tx) => {
+      tx.dataProvider = { findUnique: vi.fn(async () => ({ status: options.status ?? "ENABLED" })) };
+      tx.icpDefinition = {
+        findUnique: vi.fn(async () => ({
+          companyAttributes: { industry: "Pumpen", product: "Kreiselpumpen" },
+          targetMarkets: ["德国（DACH）"],
+        })),
+      };
+      tx.canonicalCompany!.updateMany = updateMany;
+      tx.canonicalCompany!.findMany = async () => [
+        { id: "c1", name: "C1", domain: "c1.de", country: "DE", attributes: options.attributes ?? {} },
+      ];
+      tx.fieldEvidence!.findMany = async () => [];
+    });
+    deps.websiteProfile = { profile };
+    return { acts: createDiscoveryActivities(deps as never), updateMany };
+  }
+
+  it("is a no-op while the website_profile source is not ENABLED", async () => {
+    const profile = vi.fn();
+    const { acts } = await makeProfileDeps(profile, { status: "DISABLED" });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-off", { icpId: "icp-1" })),
+    ).resolves.toEqual({ profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false });
+    expect(profile).not.toHaveBeenCalled();
+  });
+
+  it("profiles run companies bound to their subject and stores the company-level profile", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts, updateMany } = await makeProfileDeps(profile);
+
+    const result = await acts.profileWebsitesForRun(discoveryArgs("run-profile", { icpId: "icp-1" }));
+
+    expect(result).toMatchObject({ profiled: 1, matched: 1, skippedSubjects: 0 });
+    const [input, ctx] = profile.mock.calls[0]!;
+    expect(input).toMatchObject({ domain: "c1.de", homeCountry: "de" });
+    expect(input.icpContext).toContain("Pumpen");
+    expect(ctx).toMatchObject({ artifactSubject: { subjectType: "company", subjectId: "c1" } });
+    const attributes = (updateMany.mock.calls[0]![0] as { data: { attributes: Record<string, unknown> } }).data.attributes;
+    expect(attributes.website_profile).toMatchObject({
+      trade_role: "distributor",
+      trade_role_source: "rules",
+      carried_brands: [{ name: "Grundfos", country: "dk" }],
+      carries_foreign_brand: true,
+      legal_name: "C1 Pumpen GmbH",
+      register_key: "de-hrb:koeln:1",
+      vat_id: "DE136695976",
+      evidence: ["Großhandel für Pumpen"],
+    });
+  });
+
+  it("judges brand foreignness from the company's own country before the ICP market", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts } = await makeProfileDeps(profile);
+    // makeProfileDeps: company country "DE"; its ICP market ("德国（DACH）") is unrecognizable.
+    await acts.profileWebsitesForRun(discoveryArgs("run-profile-home", { icpId: "icp-1" }));
+
+    expect(profile.mock.calls[0]![0]).toMatchObject({ homeCountry: "de" });
+  });
+
+  it("does not refetch a company profiled within the profile TTL", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts } = await makeProfileDeps(profile, {
+      attributes: { website_profile: { trade_role: "distributor", _ts: new Date().toISOString() } },
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-fresh", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 0 });
+    expect(profile).not.toHaveBeenCalled();
+  });
+
+  it("skips a company whose subject is denied and reports it", async () => {
+    const profile = vi.fn(async () => {
+      throw new ToolPolicyDenied("crawl4ai.fetch", "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED");
+    });
+    const { acts, updateMany } = await makeProfileDeps(profile);
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-skip", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 0, matched: 0, skippedSubjects: 1 });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("fails the run when the artifact store is unavailable", async () => {
+    const profile = vi.fn(async () => {
+      throw new ToolPolicyDenied("crawl4ai.fetch", "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+    });
+    const { acts } = await makeProfileDeps(profile);
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
+    ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+});
+
 describe("resolveRunStatus —— 按公司跳过（G3 5.2）", () => {
   it("有公司因禁令类拒绝被跳过 → 至少 PARTIAL，绝不 DONE", () => {
     expect(

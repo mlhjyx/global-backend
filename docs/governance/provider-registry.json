@@ -133,6 +133,19 @@
       "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/providers/structured-harvest.provider.spec.ts" }]
     },
     {
+      "key": "website_profile",
+      "status": "IMPLEMENTED",
+      "source_classes": ["public_intelligence"],
+      "purpose": "Profile a materialized company's own homepage and Impressum: trade role, carried brands, register and VAT identifiers.",
+      "taxonomy": ["trade role", "carried brand and home country", "register court and number", "VAT id"],
+      "license": { "classification": "SOURCE_SPECIFIC", "note": "Page artifacts expire after one day; only company-level facts and provenance are retained." },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": ["data_provider_status", "source_policy", "tool_broker", "egress_guard"],
+      "test_paths": ["apps/api/src/discovery/providers/website-profile.provider.spec.ts", "apps/api/src/discovery/website-profile/website-profile.spec.ts"],
+      "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/providers/website-profile.provider.spec.ts" }]
+    },
+    {
       "key": "smtp_self",
       "status": "IMPLEMENTED",
       "source_classes": ["email_verification"],
