@@ -99,6 +99,11 @@ export function searchLanguageFor(query: { filters?: Record<string, unknown> }):
   return targetCountries(query.filters ?? {})[0]?.language ?? 'en';
 }
 
+/** Target countries as lower-case ISO-3166 alpha-2 codes; empty when unknown. */
+export function targetCountryCodes(query: { filters?: Record<string, unknown> }): readonly string[] {
+  return targetCountries(query.filters ?? {}).map((c) => c.iso2);
+}
+
 /** Target-country ccTLDs; empty when the target country is unknown. */
 export function targetCountryTlds(query: { filters?: Record<string, unknown> }): ReadonlySet<string> {
   return new Set(targetCountries(query.filters ?? {}).map((c) => c.iso2 === 'gb' ? 'uk' : c.iso2));

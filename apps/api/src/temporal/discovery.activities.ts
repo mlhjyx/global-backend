@@ -9,6 +9,7 @@ import {
   MAX_DISCOVERY_ENRICH_COMPANIES,
   MAX_DISCOVERY_FIT_COMPANIES,
   MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROFILE_COMPANIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
   MAX_DISCOVERY_SIGNAL_COMPANIES,
   MAX_DISCOVERY_WATCH_COMPANIES,
@@ -88,6 +89,12 @@ import {
   sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
 import { executeDiscoveryCompanyMaterialization } from './discovery-company-materialization';
+import {
+  WEBSITE_PROFILE_PROVIDER_KEY,
+  WebsiteProfileProvider,
+  type WebsiteProfile,
+} from '../discovery/providers/website-profile.provider';
+import { targetCountryCodes } from '../discovery/search-localization';
 import { companyMatchesSuppression } from '../discovery/suppression-value';
 
 export interface DiscoveryRunInput {
@@ -280,6 +287,52 @@ const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢�
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 const WATCH_REGISTER_LIMIT = MAX_DISCOVERY_WATCH_COMPANIES; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
+const WEBSITE_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000; // 官网画像较稳定：30 天内画像过的公司不重抓
+
+/** ICP 品类上下文（只供模型判断相关品类，不进输出）。 */
+function icpProductContext(companyAttributes: unknown): string {
+  const attributes = (companyAttributes ?? {}) as Record<string, unknown>;
+  return [attributes.industry, attributes.sub_industry, attributes.product]
+    .flat()
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join(', ')
+    .slice(0, 600);
+}
+
+/** 官网画像 → 只含公司级事实的富集结果（命名空间 `website_profile`）。 */
+function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): EnrichmentResult {
+  const attributes = Object.fromEntries(
+    Object.entries({
+      trade_role: profile.tradeRole,
+      trade_role_source: profile.tradeRoleSource,
+      trade_role_confidence: profile.tradeRoleConfidence,
+      own_manufacturing: profile.ownManufacturing,
+      carried_brands: profile.carriedBrands.length
+        ? profile.carriedBrands.map((brand) =>
+            brand.country ? { name: brand.name, country: brand.country } : { name: brand.name })
+        : null,
+      carries_chinese_brand: profile.carriesChineseBrand,
+      carries_foreign_brand: profile.carriesForeignBrand,
+      legal_name: profile.legalName,
+      register_key: profile.register?.key ?? null,
+      vat_id: profile.vatId,
+      evidence: profile.evidence.length ? profile.evidence : null,
+    }).filter(([, value]) => value !== null && value !== undefined),
+  );
+  const sourceUrl = profile.impressumUrl ?? profile.homepageUrl;
+  return {
+    matched: true,
+    confidence: profile.tradeRoleConfidence ?? 0.5,
+    attributes,
+    provenance: {
+      sourceUrl,
+      fetchedAt: fetchedAt.toISOString(),
+      contentHash: createHash('sha256').update(JSON.stringify(attributes)).digest('hex'),
+      parserVersion: 'website_profile/v1',
+    },
+    costCents: 0,
+  };
+}
 const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
   'http.get', 'inpi_rne.search', 'mapyourshow.fetch', 'openfda.search',
@@ -304,6 +357,8 @@ export function createDiscoveryActivities(deps: {
   budgetStore?: BudgetStore;
   platformWriter?: PrismaClient;
   rawIngestLimits?: RawSourceIngestLimits;
+  /** G3 5.4b website profile; defaults to the provider over `gateway` + `broker`. */
+  websiteProfile?: Pick<WebsiteProfileProvider, 'profile'>;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
@@ -1254,6 +1309,153 @@ export function createDiscoveryActivities(deps: {
         enriched,
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
+        budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
+      };
+    },
+
+    /**
+     * 官网画像（G3 5.4b，归一之后、Fit 之前）：以已建档公司为主体抓首页与 Impressum，
+     * 得出贸易角色、在售品牌、登记号/税号等公司级事实，写入 `website_profile` 命名空间供 Fit 使用。
+     *  - kill-switch：data_provider `website_profile` 非 ENABLED → 整段不出网。
+     *  - 上限 MAX_DISCOVERY_PROFILE_COMPANIES；30 天内画像过的公司不重抓。
+     *  - 主体被拒（tombstone/SUPPRESSED/失效）→ 只跳过这家，计入 skippedSubjects；控制错误让 run 失败。
+     */
+    async profileWebsitesForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+      profiled: number;
+      matched: number;
+      skippedSubjects: number;
+      budgetTruncated: boolean;
+    }> {
+      const binding = await ensureRunBudget(args);
+      const idle = { profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false };
+      const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const source = await tx.dataProvider.findUnique({
+          where: { key: WEBSITE_PROFILE_PROVIDER_KEY },
+          select: { status: true },
+        });
+        if (source?.status !== 'ENABLED') return null;
+        const icp = await tx.icpDefinition.findUnique({
+          where: { id: args.icpId },
+          select: { companyAttributes: true, targetMarkets: true },
+        });
+        const rawIds = (
+          await tx.rawSourceRecord.findMany({
+            where: { runId: args.runId, ingestStatus: 'ACCEPTED', ingestVersion: 'raw-source/v2' },
+            select: { id: true, providerKey: true, payload: true },
+          })
+        ).filter(isProductDiscoveryRawRecord);
+        const links = await tx.identityLink.findMany({
+          where: { canonicalType: 'company', rawRecordId: { in: rawIds.map((r) => r.id) } },
+          select: { canonicalId: true },
+        });
+        const companies = await tx.canonicalCompany.findMany({
+          where: {
+            id: { in: [...new Set(links.map((l) => l.canonicalId))] },
+            status: { not: 'SUPPRESSED' },
+            domain: { not: null },
+          },
+          select: { id: true, name: true, domain: true, country: true, attributes: true },
+          orderBy: { createdAt: 'asc' },
+          take: MAX_DISCOVERY_PROFILE_COMPANIES,
+        });
+        return { icp, companies };
+      });
+      if (!setup) return idle;
+      const provider =
+        deps.websiteProfile ??
+        (deps.broker
+          ? new WebsiteProfileProvider({
+              gateway: deps.gateway,
+              broker: deps.broker,
+              runtimeTelemetry: deps.runtimeTelemetry,
+            })
+          : null);
+      if (!provider) return idle;
+
+      const homeCountry = targetCountryCodes({ filters: { country: setup.icp?.targetMarkets } })[0] ?? '';
+      const icpContext = icpProductContext(setup.icp?.companyAttributes);
+      const nowMs = Date.now();
+      let profiled = 0;
+      let matched = 0;
+      let skippedSubjects = 0;
+      for (const c of setup.companies) {
+        const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
+          | { _ts?: string }
+          | undefined;
+        if (existing?._ts && nowMs - Date.parse(existing._ts) < WEBSITE_PROFILE_TTL_MS) continue;
+        if (
+          !c.domain ||
+          !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
+          ))
+        )
+          continue;
+        const durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }> = [];
+        let profile: WebsiteProfile | null = null;
+        let subjectDenied = false;
+        try {
+          profile = await provider.profile(
+            { domain: c.domain, homeCountry, icpContext },
+            {
+              workspaceId: args.workspaceId,
+              runId: binding.accountKey,
+              correlationId: binding.accountKey,
+              authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+              onDurableReceipt: (producerId, receipt) => {
+                durableReceipts.push({ producerId, receipt });
+              },
+              artifactSubject: { subjectType: 'company', subjectId: c.id },
+            },
+          );
+        } catch (error) {
+          if (artifactSubjectSkipReason(error)) {
+            subjectDenied = true;
+          } else if (isExecutionControlError(error)) {
+            throw error;
+          }
+          /* 单家画像失败不影响其余 */
+        }
+        if (subjectDenied) skippedSubjects += 1;
+        else profiled += 1;
+        // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
+        const hits = profile && !subjectDenied
+          ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
+          : [];
+        if (!hits.length && !durableReceipts.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const result = await applyDomainAckConsumerTransactions({
+            transaction: tx,
+            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+              producerId,
+              receipt,
+              domainAckKey: `${c.id}:${receipt.operationId}:website-profile`,
+              domainRevision: receipt.resultDigest,
+            })),
+            apply: (transaction) => hits.length
+              ? commitCompanyEnrichmentResults(transaction, {
+                  workspaceId: args.workspaceId,
+                  companyId: c.id,
+                  hits,
+                  signalTimestamp: new Date(nowMs),
+                })
+              : Promise.resolve(false),
+            readback: async (transaction) => {
+              const current = await transaction.canonicalCompany.findUnique({
+                where: { id: c.id },
+                select: { attributes: true },
+              });
+              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+              return hits.length > 0 && Object.hasOwn(attributes, WEBSITE_PROFILE_PROVIDER_KEY);
+            },
+          });
+          return result.value;
+        });
+        if (committed) matched += 1;
+      }
+      return {
+        profiled,
+        matched,
+        skippedSubjects,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
       };
     },
