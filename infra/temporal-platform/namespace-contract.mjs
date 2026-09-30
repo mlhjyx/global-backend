@@ -53,14 +53,10 @@ export function validatePlatformNamespace(source) {
   return true;
 }
 
-/** The customer namespace used by customer-worker and the API holds tenant
- * workflows, so it carries no ownership claim at all: a platform marker here
- * would misstate what its histories contain. Existing state is never repaired.
- * A free-text description is allowed because Temporal cannot clear one once
- * set (an empty UpdateNamespace description means "no change"), but it must
- * not claim non-tenant ownership in any wording. */
 const MAX_DESCRIPTION = 1024;
-const NON_TENANT_CLAIM = /non[\s_-]*tenant/i;
+// The platform's ownership phrase in any case, with any whitespace, underscore,
+// dash or invisible format character (such as a soft hyphen) between the words.
+const NON_TENANT_CLAIM = /non[\s_\p{Pd}\p{Cf}]*tenant/iu;
 
 function unclaimedDescription(description) {
   return (
@@ -71,6 +67,12 @@ function unclaimedDescription(description) {
   );
 }
 
+/** The customer namespace used by customer-worker and the API holds tenant
+ * workflows, so it carries no ownership claim at all: a platform marker here
+ * would misstate what its histories contain. Existing state is never repaired.
+ * A free-text description is allowed because Temporal cannot clear one once
+ * set (an empty UpdateNamespace description means "no change"), but it must
+ * not repeat the platform's non-tenant phrase. */
 export function validateCustomerNamespace(source) {
   const { value, drift } = parseDescribe(source, CUSTOMER_ERROR_CODE);
   const info = value.namespaceInfo;

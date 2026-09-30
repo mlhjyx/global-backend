@@ -35,10 +35,13 @@ tenant workflows and must never claim `platform_non_tenant`. Its separate
 contract requires registered state, a local namespace, exactly seven-day
 retention and no data keys at all. A description is allowed, because Temporal
 cannot clear one once it is set (an empty description in UpdateNamespace means
-"no change"). It must be a string of at most 1024 characters and must not claim
-non-tenant ownership in any wording (`/non[\s_-]*tenant/i`, which also covers the
-platform namespace's own description). Any drift, including a platform marker,
-returns `TEMPORAL_CUSTOMER_NAMESPACE_DRIFT`, and the namespace is not repaired. A
+"no change"). It must be a string of at most 1024 characters and must not
+contain the platform's phrase "non-tenant" in any case, with or without
+whitespace, underscores, dashes or invisible format characters between the words
+(so the platform namespace's own description is rejected too). This guards only
+the human-readable text; the machine-readable ownership claim is the data map,
+which must stay empty. Any drift, including a platform marker, returns
+`TEMPORAL_CUSTOMER_NAMESPACE_DRIFT`, and the namespace is not repaired. A
 host that already created `default` with
 `operator namespace create --namespace default --retention 7d`, with or without
 an ordinary description, passes unchanged. Changing its retention is a reviewed
