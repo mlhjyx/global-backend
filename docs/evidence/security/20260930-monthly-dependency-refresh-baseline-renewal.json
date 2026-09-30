@@ -1,0 +1,62 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-09-30 monthly dependency refresh and baseline renewal; not runtime/release/UAT evidence",
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "AUDIT_INVALID_HOLD",
+        "hold": true,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [
+          "BASELINE_SOURCE_LOCK_MISMATCH"
+        ],
+        "provenance": {
+          "subject_commit": "e7a611493a5948c635b42ea8bc7fd99b1afff612",
+          "lockfile_digest": "sha256:873708e8cc39106b826b3cbc2dc96dcc1d9a5fde4eb9c4b3fb6ce4abc2ca6b32",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-09-30T21:28:24.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "e7a611493a5948c635b42ea8bc7fd99b1afff612",
+          "lockfile_digest": "sha256:873708e8cc39106b826b3cbc2dc96dcc1d9a5fde4eb9c4b3fb6ce4abc2ca6b32",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-09-30T21:28:24.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ]
+}

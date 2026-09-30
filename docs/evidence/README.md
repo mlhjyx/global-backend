@@ -17,6 +17,8 @@
 
 [2026-09-30 生产漏洞修复与基线续期](security/20260930-advisory-remediation-baseline-renewal.json)：main canary 报出的 15 条生产 advisory（undici / fast-uri / multer）以升级清零后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`，`valid_until` 延至 2026-10-14；不作为运行或发布证明。
 
+[2026-09-30 月度依赖刷新与基线续期](security/20260930-monthly-dependency-refresh-baseline-renewal.json)：范围内批量升级（Temporal SDK 锁步到 1.24.0、sharp 保持 0.35.4、撤掉已被上游覆盖的 multer override）后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`，`valid_until` 延至 2026-10-14T21:28:22Z；不作为运行或发布证明。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |
