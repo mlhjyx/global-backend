@@ -48,6 +48,24 @@ describe('structured harvest — bounded physical reads (G2 quote)', () => {
     expect(urls.length).toBeLessThanOrEqual(MAX_SITEMAP_HTTP_GETS);
   });
 
+  it('spends the root ceiling on same-site sitemaps only, so off-site entries cannot starve /sitemap.xml', async () => {
+    const httpGet = vi.fn(async ({ url }: HttpGetInput): Promise<HttpGetOutput> => {
+      const text = (body: string): HttpGetOutput => ({ status: 200, ok: true, mediaType: 'text/plain', text: body });
+      if (url.endsWith('/robots.txt')) {
+        return text(Array.from({ length: 6 }, (_, i) => `Sitemap: https://cdn-${i}.other.example/sitemap.xml`).join('\n'));
+      }
+      if (url === 'https://acme.example/sitemap.xml') {
+        return text('<urlset><url><loc>https://acme.example/careers</loc></url></urlset>');
+      }
+      return { status: 404, ok: false, mediaType: 'text/plain', text: '' };
+    });
+
+    const urls = await fetchSitemapUrls('acme.example', httpGet);
+
+    expect(urls).toEqual(['https://acme.example/careers']);
+    expect(httpGet.mock.calls.map(([input]) => input.url)).not.toContain('https://cdn-0.other.example/sitemap.xml');
+  });
+
   it('never exceeds the quoted per-company http.get and render ceilings', async () => {
     const invoke = vi.fn(async (toolId: string, input: { url: string }) => {
       if (toolId === 'http.get') return { data: adversarialSite(input.url) };

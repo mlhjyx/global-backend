@@ -237,12 +237,13 @@ export async function fetchSitemapUrls(domain: string, httpGet: HttpGetFn): Prom
 
   const out: string[] = [];
   let childBudget = MAX_CHILD_SITEMAPS;
-  // robots.txt may advertise any number of sitemaps: read the first MAX_SITEMAP_ROOTS only.
-  for (const root of [...roots].slice(0, MAX_SITEMAP_ROOTS)) {
+  // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只收同注册域
+  //（业务归属规则，留在 provider 侧；私网/SSRF 拦截由 http.get 工具权威强制）。
+  // robots.txt may advertise any number of sitemaps: read the first MAX_SITEMAP_ROOTS
+  // same-site roots only, so off-site entries never use up the ceiling.
+  const sameSiteRoots = [...roots].filter((root) => isSameSiteUrl(root, domain)).slice(0, MAX_SITEMAP_ROOTS);
+  for (const root of sameSiteRoots) {
     if (out.length >= MAX_URLS) break;
-    // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只收同注册域
-    //（业务归属规则，留在 provider 侧；私网/SSRF 拦截由 http.get 工具权威强制）
-    if (!isSameSiteUrl(root, domain)) continue;
     const xml = await recoverExternalActionFailure(fetchText(root, httpGet), '');
     if (!xml) continue;
     const { locs, isIndex } = parseSitemapXml(xml);
