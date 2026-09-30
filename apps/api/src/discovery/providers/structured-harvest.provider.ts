@@ -28,9 +28,13 @@ import {
   MAX_STRUCTURED_HARVEST_SITE_SECTION_KEYS,
   sanitizeStructuredHarvestSiteSections,
 } from '../structured-harvest-site-sections';
+import {
+  CAREERS_PROBE_PATHS,
+  MAX_CHILD_SITEMAPS,
+  MAX_SITEMAP_ROOTS,
+} from '../execution-envelope';
 
 const PARSER_VERSION = 'structured-harvest/v1';
-const MAX_CHILD_SITEMAPS = 3;
 const MAX_URLS = MAX_STRUCTURED_HARVEST_SITE_SECTION_COUNT;
 
 /**
@@ -233,11 +237,13 @@ export async function fetchSitemapUrls(domain: string, httpGet: HttpGetFn): Prom
 
   const out: string[] = [];
   let childBudget = MAX_CHILD_SITEMAPS;
-  for (const root of roots) {
+  // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只收同注册域
+  //（业务归属规则，留在 provider 侧；私网/SSRF 拦截由 http.get 工具权威强制）。
+  // robots.txt may advertise any number of sitemaps: read the first MAX_SITEMAP_ROOTS
+  // same-site roots only, so off-site entries never use up the ceiling.
+  const sameSiteRoots = [...roots].filter((root) => isSameSiteUrl(root, domain)).slice(0, MAX_SITEMAP_ROOTS);
+  for (const root of sameSiteRoots) {
     if (out.length >= MAX_URLS) break;
-    // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只收同注册域
-    //（业务归属规则，留在 provider 侧；私网/SSRF 拦截由 http.get 工具权威强制）
-    if (!isSameSiteUrl(root, domain)) continue;
     const xml = await recoverExternalActionFailure(fetchText(root, httpGet), '');
     if (!xml) continue;
     const { locs, isIndex } = parseSitemapXml(xml);
@@ -275,7 +281,7 @@ function isSameSiteUrl(raw: string, domain: string): boolean {
 /** 常见 careers 固定路径兜底（sitemap 无命中时；HEAD 探测经 http.get 工具）。
  *  返回重定向后**最终落地 URL**（与原实现语义一致——证据记录真实入口）；跳出注册域退回探测路径。 */
 export async function probeCommonCareersPath(domain: string, httpGet: HttpGetFn): Promise<string | undefined> {
-  for (const p of ['/careers', '/en/careers', '/career', '/jobs', '/karriere', '/company/careers']) {
+  for (const p of CAREERS_PROBE_PATHS) {
     const u = `https://${domain}${p}`;
     try {
       const res = await httpGet({ url: u, method: 'HEAD', timeoutMs: 8000 });

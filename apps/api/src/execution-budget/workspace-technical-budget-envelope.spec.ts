@@ -3,11 +3,11 @@ import {
   WORKSPACE_EXECUTION_QUOTE_OPERATIONS,
   resolveWorkspaceTechnicalBudgetEnvelope,
 } from './workspace-technical-budget-envelope';
-import type { WorkspaceExecutionBudgetRequest } from './execution-budget-request-scope';
 
 const COMPANY_ID = '20000000-0000-4000-8000-000000000002';
 const ICP_ID = '30000000-0000-4000-8000-000000000003';
 const POINT_ID = '40000000-0000-4000-8000-000000000004';
+const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 
 describe('workspace execution technical envelope catalog', () => {
   it('machine-enumerates all and only the seven workspace operations', () => {
@@ -98,23 +98,77 @@ describe('workspace execution technical envelope catalog', () => {
     expect(guess.policy.representationMinimumMicrousd).toBe('1');
   });
 
-  it.each<WorkspaceExecutionBudgetRequest>([
-    {
+  it('quotes a discovery run as the sum of every stage physical bound', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /query-plans/:planId/execute',
+      planId: PLAN_ID,
+    });
+
+    // 66 queries = 64 planner queries + the TED and openFDA cold-path queries.
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({ taskId: 'taxonomy.normalize', logicalInvocations: 66 * (4 + 2) }),
+      expect.objectContaining({ taskId: 'discovery.extract_company', logicalInvocations: 66 * 14 }),
+      expect.objectContaining({ taskId: 'discovery.extract_list', logicalInvocations: 66 * 8 * 3 }),
+      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 7 * 25 }),
+    ]);
+    expect(
+      envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
+    ).toEqual([
+      ['searxng.search', 66 * (3 + 4)],
+      ['crawl4ai.fetch', 66 * 8 * 3],
+      ['wikidata.sparql', 66],
+      ['osm.overpass', 66],
+      ['ted.search', 66],
+      ['openfda.search', 66],
+      ['tradefair.algolia', 66],
+      ['gleif.fetch', 50 * 4],
+      ['wikidata.entity', 50 * 3],
+      ['crawl4ai.render', 12 * 2],
+      // structured harvest (sitemap 8 + careers probes 6 + ATS 1) + watch sitemap 8
+      ['http.get', 12 * 15 + 12 * 8],
+    ]);
+    expect(envelope.policy.executionLimits).toMatchObject({
+      planQueries: 66,
+      companyDiscoveryAdapters: 7,
+      providerRecords: 25,
+      taxonomyIndustryTermsPerQuery: 4,
+      taxonomyCountryTermsPerQuery: 2,
+      fitCompanies: 11_550,
+      enrichCompanies: 50,
+      signalCompanies: 12,
+      watchCompanies: 12,
+    });
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 11550×2×20 = 557_040 cents;
+    // tools: crawl4ai.fetch 1584×1 + crawl4ai.render 24×1 = 1_608 cents.
+    expect(envelope.requiredCapMicrousd).toBe(558_648n * 10_000n);
+  });
+
+  it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
       operation: 'POST /companies',
       body: { website: 'https://example.test' },
-    },
-    {
-      operation: 'POST /query-plans/:planId/execute',
-      planId: '50000000-0000-4000-8000-000000000005',
-    },
-    {
-      operation: 'POST /canonical-companies/:id/discover-contacts',
-      companyId: COMPANY_ID,
-    },
-  ])('fails closed for $operation while its physical envelope remains incomplete', (request) => {
-    expect(() => resolveWorkspaceTechnicalBudgetEnvelope(request)).toThrow(
-      'EXECUTION_BUDGET_QUOTE_UNAVAILABLE',
-    );
+    });
+
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({ taskId: 'company_understanding.extract_claims', logicalInvocations: 7 }),
+      expect.objectContaining({ taskId: 'company_understanding.extract_offerings', logicalInvocations: 7 }),
+      expect.objectContaining({ taskId: 'company_understanding.extract_profile', logicalInvocations: 1 }),
+    ]);
+    expect(
+      envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
+    ).toEqual([['crawl4ai.fetch', 7]]);
+    expect(envelope.policy.executionLimits).toEqual({ pages: 7, subpages: 6 });
+    // 7×2×20 + 7×2×20 + 1×2×10 + 7×1 = 587 cents
+    expect(envelope.requiredCapMicrousd).toBe(587n * 10_000n);
+  });
+
+  it('fails closed for contact discovery, which stays outside the company-level chain', () => {
+    expect(() =>
+      resolveWorkspaceTechnicalBudgetEnvelope({
+        operation: 'POST /canonical-companies/:id/discover-contacts',
+        companyId: COMPANY_ID,
+      }),
+    ).toThrow('EXECUTION_BUDGET_QUOTE_UNAVAILABLE');
   });
 
   it.each([

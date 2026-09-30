@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../adapters/robots', () => ({ isAllowedByRobots: vi.fn(async () => true) }));
+
 import {
+  StructuredHarvestProvider,
   fetchSitemapUrls,
   parseSitemapXml,
   pickCareersUrl,
@@ -9,6 +13,82 @@ import {
   slugToTitle,
 } from './structured-harvest.provider';
 import { ToolPolicyDenied } from '../../tools/tool-broker';
+import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
+import {
+  MAX_SITEMAP_HTTP_GETS,
+  MAX_SITEMAP_ROOTS,
+  MAX_STRUCTURED_HARVEST_HTTP_GETS,
+  MAX_STRUCTURED_HARVEST_RENDERS,
+} from '../execution-envelope';
+
+/** A site that maximizes wires: many advertised sitemaps, big indexes, no careers URL in any sitemap. */
+function adversarialSite(url: string): HttpGetOutput {
+  const text = (body: string): HttpGetOutput => ({ status: 200, ok: true, mediaType: 'text/plain', text: body });
+  if (url.endsWith('/robots.txt')) {
+    return text(Array.from({ length: 10 }, (_, i) => `Sitemap: https://acme.example/root-${i}.xml`).join('\n'));
+  }
+  if (url.includes('/root-') || url.endsWith('/sitemap.xml') || url.endsWith('/sitemap_index.xml')) {
+    return text(`<sitemapindex>${Array.from({ length: 10 }, (_, i) =>
+      `<sitemap><loc>https://acme.example/child-${i}.xml</loc></sitemap>`).join('')}</sitemapindex>`);
+  }
+  if (url.includes('/child-')) return text('<urlset><url><loc>https://acme.example/about</loc></url></urlset>');
+  if (url.endsWith('/company/careers')) return { status: 200, ok: true, mediaType: 'text/plain', text: '' };
+  if (url.includes('greenhouse')) return text('{"jobs":[]}');
+  return { status: 404, ok: false, mediaType: 'text/plain', text: '' };
+}
+
+describe('structured harvest — bounded physical reads (G2 quote)', () => {
+  it('reads robots.txt, at most MAX_SITEMAP_ROOTS roots and a bounded number of children', async () => {
+    const httpGet = vi.fn(async (input: HttpGetInput) => adversarialSite(input.url));
+
+    await fetchSitemapUrls('acme.example', httpGet);
+
+    const urls = httpGet.mock.calls.map(([input]) => input.url);
+    expect(urls.filter((url) => url.includes('/root-'))).toHaveLength(MAX_SITEMAP_ROOTS);
+    expect(urls.length).toBeLessThanOrEqual(MAX_SITEMAP_HTTP_GETS);
+  });
+
+  it('spends the root ceiling on same-site sitemaps only, so off-site entries cannot starve /sitemap.xml', async () => {
+    const httpGet = vi.fn(async ({ url }: HttpGetInput): Promise<HttpGetOutput> => {
+      const text = (body: string): HttpGetOutput => ({ status: 200, ok: true, mediaType: 'text/plain', text: body });
+      if (url.endsWith('/robots.txt')) {
+        return text(Array.from({ length: 6 }, (_, i) => `Sitemap: https://cdn-${i}.other.example/sitemap.xml`).join('\n'));
+      }
+      if (url === 'https://acme.example/sitemap.xml') {
+        return text('<urlset><url><loc>https://acme.example/careers</loc></url></urlset>');
+      }
+      return { status: 404, ok: false, mediaType: 'text/plain', text: '' };
+    });
+
+    const urls = await fetchSitemapUrls('acme.example', httpGet);
+
+    expect(urls).toEqual(['https://acme.example/careers']);
+    expect(httpGet.mock.calls.map(([input]) => input.url)).not.toContain('https://cdn-0.other.example/sitemap.xml');
+  });
+
+  it('never exceeds the quoted per-company http.get and render ceilings', async () => {
+    const invoke = vi.fn(async (toolId: string, input: { url: string }) => {
+      if (toolId === 'http.get') return { data: adversarialSite(input.url) };
+      if (toolId === 'crawl4ai.render') {
+        return { data: { html: '<script src="https://boards.greenhouse.io/embed/job_board/js?for=acme"></script>' } };
+      }
+      throw new Error(`unexpected tool ${toolId}`);
+    });
+
+    await new StructuredHarvestProvider({ broker: { invoke } as never }).enrichCompany(
+      { companyId: 'c1', name: 'Acme', domain: 'acme.example' } as never,
+      { workspaceId: '00000000-0000-4000-8000-0000000000a1' },
+    );
+
+    const tools = invoke.mock.calls.map(([toolId]) => toolId);
+    expect(tools.filter((toolId) => toolId === 'crawl4ai.render')).toHaveLength(MAX_STRUCTURED_HARVEST_RENDERS);
+    expect(tools.filter((toolId) => toolId === 'http.get').length).toBeLessThanOrEqual(
+      MAX_STRUCTURED_HARVEST_HTTP_GETS,
+    );
+    // The adversarial site forces every probe path, so the bound is tight.
+    expect(tools.filter((toolId) => toolId === 'http.get')).toHaveLength(MAX_STRUCTURED_HARVEST_HTTP_GETS);
+  });
+});
 
 describe('fetchSitemapUrls — terminal suppression denial', () => {
   it('does not retry roots or children after the action gate denies a physical request', async () => {

@@ -22,6 +22,7 @@ import {
   applyDomainAckConsumerTransactions,
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { MAX_UNDERSTANDING_SUBPAGES } from '../discovery/execution-envelope';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -66,7 +67,6 @@ export interface CrawledPage {
 
 /** Keep Temporal payloads bounded — a page beyond this adds noise, not facts. */
 const MAX_PAGE_CHARS = 40_000;
-const MAX_SUBPAGES = 6;
 
 /**
  * Activities do the real (side-effectful) work — DB writes go through
@@ -195,7 +195,7 @@ export function createUnderstandingActivities(deps: {
     async selectSubpages(args: UnderstandingAuthorityEnvelope & { markdown: string; website: string }): Promise<string[]> {
       requireAuthority(args);
       const links = extractSameSiteLinks(args.markdown, args.website);
-      return selectKeySubpages(links, MAX_SUBPAGES);
+      return selectKeySubpages(links, MAX_UNDERSTANDING_SUBPAGES);
     },
 
     /** Crawl subpages, tolerating individual failures — a broken page must not kill the run. */

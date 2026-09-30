@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Technical quotes for discovery runs and company creation (G2)
+
+- `POST /query-plans/:planId/execute` 与 `POST /companies` 的技术报价不再恒为 unavailable，GrowthOS 可以为发现 run 和卖方企业建档签发 Grant。报价是整条链路的物理预留上限（每次模型调用按结构化输出的 2 次 wire 上限预留），逐阶段累加：词表归一、`public_web` 搜索与判站、名录页、单次检索类源（wikidata/osm/ted/openfda/展会）、Fit、GLEIF/Wikidata 富集、信号富集、网站监控注册；建档 = 首页加至多 6 个子页的抓取与逐页抽取。联系人发现仍返回 unavailable（不在公司级链路内）。
+- 各阶段上限集中到 `discovery/execution-envelope.ts`，provider、workflow 与报价引用同一常量。借此补上两处此前无界或未强制的上限：robots.txt 声明的 sitemap 根最多读 4 个；每条计划查询送去词表归一的行业词最多 4 个、国家/地区词最多 2 个（原先每个过滤字段最多 32 个值，每个未命中词一次模型调用）。计划查询上限改为 planner 的 64 条加 TED、openFDA 冷路径各 1 条，共 66 条，并在执行时强制（原 64 条上限从未被检查）。
+- 按现有上限，一次 run 的预留上限约 5,587 美元，其中 Fit（最多 11,550 家 × 每家预留 40 美分）约占 83%；实际费用按真实用量结算。卖方企业建档约 5.87 美元。依据：设计 §3.1 / §4 第 3 项（G2）。
+
 ## 2026-09-30 · ICP trade role carried into keyword discovery queries (G3 5.3 follow-up)
 
 - 5.3 让关键词搜索按 `filters.trade_side` 等构造贸易角色词，但 `discovery.query_plan` 的过滤器 schema 没有 `business_model`，planner 也不一定填 `trade_side`，真实链路上角色词可能根本不出现。现在生成查询计划时，若 ICP 的 `company_attributes.trade_side`（优先）或 `business_model` 能识别出角色，就把规范值 `distributor` / `manufacturer` 写进未带角色的 planner 查询；planner 自己写了角色的保持不变，TED、openFDA 冷路径查询不受影响。写入发生在计划落库前，人工确认计划时可见。

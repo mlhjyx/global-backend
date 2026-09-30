@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseCompanyFacts, referencedQids, RawEntity } from '../../adapters/wikidata';
+import { WikidataEnrichmentProvider } from './wikidata-enrich.provider';
+import { MAX_WIKIDATA_ENTITY_READS_PER_COMPANY } from '../execution-envelope';
 
 // 构造一个仿真的 Wikidata 实体（wbgetentities claims 结构）
 function entityIdSnak(id: string) {
@@ -75,5 +77,27 @@ describe('Wikidata claim 解析（parseCompanyFacts）', () => {
   it('非公司实体（家族名：无公司性属性）isCompany=false', () => {
     const familyName: RawEntity = { labels: { en: { value: 'Trumpf' } }, claims: { P31: [entityIdSnak('Q101352')] } };
     expect(parseCompanyFacts('Q1', familyName, {}).isCompany).toBe(false);
+  });
+});
+
+describe('WikidataEnrichmentProvider — bounded physical reads (G2 quote)', () => {
+  it('uses at most the quoted entity reads: search, candidate claims and referenced labels', async () => {
+    const invoke = vi.fn(async (_toolId: string, input: { op: string; props?: string }) => {
+      if (input.op === 'search') {
+        return { data: { search: [{ qid: 'Q1', label: 'ACME Manufacturing AG' }] } };
+      }
+      if (input.props === 'labels') {
+        return { data: { entities: { Q100: { labels: { en: { value: 'pumps' } } } } } };
+      }
+      return { data: { entities: { Q1: ACME } } };
+    });
+
+    const result = await new WikidataEnrichmentProvider({ broker: { invoke } as never }).enrichCompany(
+      { name: 'ACME Manufacturing AG' },
+      { workspaceId: '00000000-0000-4000-8000-0000000000a1' },
+    );
+
+    expect(result.matched).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(MAX_WIKIDATA_ENTITY_READS_PER_COMPANY);
   });
 });
