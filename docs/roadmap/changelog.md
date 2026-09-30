@@ -4,6 +4,11 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Website-profile provider and trade-role task (G3 slice 5.4b, part 1)
+
+- 新增 `WebsiteProfileProvider`（尚未接入 run）：以已建档公司为主体（`artifactSubject`）抓首页与 Impressum，两次抓取都由 ToolBroker 按调用绑定主体。规则分类器能下结论就不调模型，否则调用新任务 `discovery.classify_trade_role`（flash 档，闭合 schema：贸易角色 distributor/wholesaler/manufacturer/mixed/service/other、置信度、是否自有制造、在售品牌、至多 3 条证据）。品牌取词典匹配加模型补充；Impressum 解析出登记号、税号和法定名称。禁令类拒绝与控制错误向上抛出，由调用方按公司跳过或让 run 失败；Impressum 缺失或模型普通失败时保留确定性结果。
+- 证据只留公司级：含 Geschäftsführer、Inhaber、Ansprechpartner、Herr/Frau 等人员标记的片段整条丢弃，其余打码电话与邮箱。新任务已登记进 typed projection、回执事实、domain-ACK 与治理清单（`durable-result-strategies.json`、`execution-authority-callsites.json`）。依据：G3 规格 §3 ⑤、§5.4；设计 §3.3。
+
 ## 2026-09-30 · Website-profile rules and identifiers (G3 slice 5.4a)
 
 - 新增纯函数（尚未接线）：Impressum 解析，产出 HRB/HRA+登记法院（次级去重键 `de-hrb:<法院>:<号>`）、带校验位的德国税号，以及只接受资合公司形式（GmbH/AG/SE/UG/KG 组合/eG）的法定名称；独资商号（e.K.）与任何人员行一律不取。在售品牌词典附带品牌国别，用来标出「在售中国品牌」和「在售外国品牌」两个信号。贸易角色规则分类器只有结论明确时才跳过模型。

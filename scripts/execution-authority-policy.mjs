@@ -71,6 +71,7 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/structured-harvest.provider.ts#http.get#1',
   'apps/api/src/discovery/providers/ted.provider.ts#ted.search#1',
   'apps/api/src/discovery/providers/trade-fair.provider.ts#tradefair.algolia#1',
+  'apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.fetch#1',
   'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#1',
   'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#2',
   'apps/api/src/discovery/providers/wikidata.provider.ts#wikidata.sparql#1',

@@ -16,6 +16,7 @@ const typedProjectionSchemaValues = [
   'icp-design/v1', 'icp-query-plan/v1', 'understanding-claims/v1',
   'understanding-profile/v1', 'understanding-offerings/v1', 'taxonomy-code/v1',
   'fit-judgment/v1', 'discovery-extract-company/v1', 'discovery-extract-list/v1',
+  'discovery-classify-trade-role/v1',
   'contact-decision-makers/v1', 'ted-search/v1', 'openfda-search/v1',
   'samgov-search/v1', 'smtp-probe-verdict/v1', 'searxng-search/v1',
   'wikidata-sparql/v1', 'osm-overpass/v1', 'wikidata-entity/v1',

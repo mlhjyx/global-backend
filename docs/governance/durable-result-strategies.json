@@ -529,6 +529,22 @@
       }
     },
     {
+      "taskId": "discovery.classify_trade_role",
+      "callsitePath": "apps/api/src/discovery/providers/website-profile.provider.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "discovery-classify-trade-role/v1",
+      "operationIdentity": "model:discovery.classify_trade_role:<request-hash>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "WebsiteProfileProvider.classify",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "company-id-and-operation",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "taskId": "contact.find_decision_makers",
       "callsitePath": "apps/api/src/discovery/providers/decision-maker.provider.ts",
       "resultStrategy": "typed_projection",
