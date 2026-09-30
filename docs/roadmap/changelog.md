@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Website profiling in the discovery run (G3 slice 5.4b, part 2)
+
+- discovery run 在归一之后、Fit 之前新增「官网画像」阶段 `profileWebsitesForRun`：按公司绑定主体抓首页与 Impressum，把贸易角色、置信度与来源、是否自有制造、在售品牌与两个品牌信号、法定名称、登记号（带法院）、税号、证据片段写入 `website_profile` 命名空间，登记号与税号作为带校验的语义标识符进入属性白名单。主体被拒只跳过该公司并计入 PARTIAL，控制错误照旧让 run 失败；30 天内画像过的公司不重抓；每个 run 至多 50 家。工作流以 patch `discovery-website-profile-v1` 守卫，旧历史重放不变；阶段为尽力而为，失败时 Fit 照常判定。
+- 新数据源 `website_profile` 默认 DISABLED，登记进 provider 注册表、source-class 清单与生成文档，实测后再开启。发现 run 的技术报价补上这一阶段（每家 2 次抓取 + 1 次分类，上限 50 家）。
+- Fit 第 2 部分：候选信息带上 `website_profile`（不含登记号与税号），任务说明写明官网画像是角色门与商业模式门的直接证据、在售外国尤其中国品牌是进口分销的强信号。依据：G3 规格 §3 ⑤、§5.4；设计 §3.3、§4 第 7–8 项。有证据的名称修正与次级去重键留待 5.4c。
+
 ## 2026-09-30 · Website-profile provider and trade-role task (G3 slice 5.4b, part 1)
 
 - 新增 `WebsiteProfileProvider`（尚未接入 run）：以已建档公司为主体（`artifactSubject`）抓首页与 Impressum，两次抓取都由 ToolBroker 按调用绑定主体。规则分类器能下结论就不调模型，否则调用新任务 `discovery.classify_trade_role`（flash 档，闭合 schema：贸易角色 distributor/wholesaler/manufacturer/mixed/service/other、置信度、是否自有制造、在售品牌、至多 3 条证据）。品牌取词典匹配加模型补充；Impressum 解析出登记号、税号和法定名称。禁令类拒绝与控制错误向上抛出，由调用方按公司跳过或让 run 失败；Impressum 缺失或模型普通失败时保留确定性结果。
