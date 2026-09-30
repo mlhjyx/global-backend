@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Website-profile rules and identifiers (G3 slice 5.4a)
+
+- 新增纯函数（尚未接线）：Impressum 解析，产出 HRB/HRA+登记法院（次级去重键 `de-hrb:<法院>:<号>`）、带校验位的德国税号，以及只接受资合公司形式（GmbH/AG/SE/UG/KG 组合/eG）的法定名称；独资商号（e.K.）与任何人员行一律不取。在售品牌词典附带品牌国别，用来标出「在售中国品牌」和「在售外国品牌」两个信号。贸易角色规则分类器只有结论明确时才跳过模型。
+- 主体绑定的 `crawl4ai.fetch` 产物文本改用专用归一化：保留 `DE136695976` 这类税号（原通用打码会把它当成电话），截断上限从 2 万提到 7.5 万码点（仍在 300 KB 合约之内），首次结果与重放一致。Site Builder 的证据归一化与 `scrubPii` 不变。依据：G3 规格 §3 ⑤⑥、§5.4。
+- 接手时的审查修正：登记法院未知时不产出去重键（登记号只在同一法院内唯一，`de-hrb:unknown:<号>` 会把不同公司并成一家）；法院识别补上「des Amtsgerichts München」「Registergericht: München」「Registergericht: AG Köln」几种写法，也修正了把后面的「HRB」读进法院名的问题；法定名称截到公司形式为止，丢掉同一行的宣传语；Leo、DAB、Zenit 等本身是常见词或人名的品牌，裸名只在谈到泵、或同一行还有其他明确品牌时才计入，Impressum 里「Geschäftsführer: Leo …」这类行不再被当成「在售中国品牌」。
+
 ## 2026-09-30 · Fit judges by the ICP trade role (design §4 step 8, part 1)
 
 - `discovery.qualify_fit` 的四个门原本按「设备制造类买家」写：商业模式门把中介判为 weak，材质门、工艺门对分销商也不适用，分销商 ICP 下的真分销商会被系统性判成 weak。现在 ICP 摘要带上确定性的 `icp_trade_role`（与 5.3 同一套识别规则），任务说明按角色判：distributor 时，采购并转售实物产品的分销商、批发商、进口商、经销商判 pass，只做信息撮合的平台、目录或门户判 weak，同类产品制造商仍按角色门判为竞品；ICP 未对材质或工艺提出要求时视为不适用、判 pass；manufacturer 或未指定角色时，原有判定不变。候选信息新增已抽取的能力关键词（`keywords`），分销证据多在其中。

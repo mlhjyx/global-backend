@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import {
-  normalizeEvidenceText,
-  sanitizeEvidenceUrl,
-} from '../../site-builder/agents/evidence-ref';
+import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
+import { normalizeArtifactPageText } from './artifact-page-text';
 import type { BudgetReservation } from '../../tools/budget-store';
 import type {
   ArtifactExecutionAdmission,
@@ -94,7 +92,7 @@ function isHtmlBody(value: string): boolean {
 
 function crawl4aiFetchPayload(input: unknown, data: unknown): ArtifactPayload {
   const source = record(data);
-  const text = normalizeEvidenceText(stringField(source.text));
+  const text = normalizeArtifactPageText(stringField(source.text));
   const url = persistableUrl(source.url ?? record(input).url);
   const contentHash = shortHash(text);
   return {
