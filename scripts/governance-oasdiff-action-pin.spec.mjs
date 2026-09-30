@@ -8,8 +8,8 @@ import { validateRequiredContexts } from "./governance-contracts.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const action = "oasdiff/oasdiff-action/breaking";
-const revision = "9c0494cfee8b8fcc9fb383ed2d5d3fbdae169b93";
-const version = "v0.1.15";
+const revision = "5e81b5c380accc6b523f9d32a637ca630e33620b";
+const version = "v0.1.17";
 
 function read(path) {
   return readFileSync(join(root, path), "utf8");
@@ -58,7 +58,7 @@ function assertOasdiffPolicy(policy, workflow) {
   assert.doesNotMatch(step, /github-token\s*:/u);
 }
 
-test("oasdiff breaking is policy-bound to the reviewed v0.1.15 commit and privacy contract", () => {
+test("oasdiff breaking is policy-bound to the reviewed v0.1.17 commit and privacy contract", () => {
   const policy = JSON.parse(read(".github/required-contexts.json"));
   const workflow = read(".github/workflows/ci.yml");
 
@@ -109,7 +109,7 @@ test("oasdiff breaking is policy-bound to the reviewed v0.1.15 commit and privac
       (value) =>
         value.replace(
           `@${revision} # ${version}`,
-          "@1111111111111111111111111111111111111111 # v0.1.15 tag object",
+          "@1111111111111111111111111111111111111111 # v0.1.17 tag object",
         ),
     ],
     [
