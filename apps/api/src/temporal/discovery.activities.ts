@@ -1372,7 +1372,8 @@ export function createDiscoveryActivities(deps: {
           : null);
       if (!provider) return idle;
 
-      const homeCountry = targetCountryCodes({ filters: { country: setup.icp?.targetMarkets } })[0] ?? '';
+      // 「外国品牌」相对这家公司自己的国家判断（德国经销商卖 Grundfos 才是外国品牌）；认不出时退回 ICP 目标市场。
+      const icpHomeCountry = targetCountryCodes({ filters: { country: setup.icp?.targetMarkets } })[0] ?? '';
       const icpContext = icpProductContext(setup.icp?.companyAttributes);
       const nowMs = Date.now();
       let profiled = 0;
@@ -1394,6 +1395,7 @@ export function createDiscoveryActivities(deps: {
         let profile: WebsiteProfile | null = null;
         let subjectDenied = false;
         try {
+          const homeCountry = targetCountryCodes({ filters: { country: c.country } })[0] ?? icpHomeCountry;
           profile = await provider.profile(
             { domain: c.domain, homeCountry, icpContext },
             {

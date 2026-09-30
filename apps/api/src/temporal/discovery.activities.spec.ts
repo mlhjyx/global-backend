@@ -2686,7 +2686,7 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       tx.icpDefinition = {
         findUnique: vi.fn(async () => ({
           companyAttributes: { industry: "Pumpen", product: "Kreiselpumpen" },
-          targetMarkets: ["Germany"],
+          targetMarkets: ["德国（DACH）"],
         })),
       };
       tx.canonicalCompany!.updateMany = updateMany;
@@ -2731,6 +2731,15 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       vat_id: "DE136695976",
       evidence: ["Großhandel für Pumpen"],
     });
+  });
+
+  it("judges brand foreignness from the company's own country before the ICP market", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts } = await makeProfileDeps(profile);
+    // makeProfileDeps: company country "DE"; its ICP market ("德国（DACH）") is unrecognizable.
+    await acts.profileWebsitesForRun(discoveryArgs("run-profile-home", { icpId: "icp-1" }));
+
+    expect(profile.mock.calls[0]![0]).toMatchObject({ homeCountry: "de" });
   });
 
   it("does not refetch a company profiled within the profile TTL", async () => {
