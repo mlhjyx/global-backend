@@ -4,6 +4,10 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · ICP trade role carried into keyword discovery queries (G3 5.3 follow-up)
+
+- 5.3 让关键词搜索按 `filters.trade_side` 等构造贸易角色词，但 `discovery.query_plan` 的过滤器 schema 没有 `business_model`，planner 也不一定填 `trade_side`，真实链路上角色词可能根本不出现。现在生成查询计划时，若 ICP 的 `company_attributes.trade_side`（优先）或 `business_model` 能识别出角色，就把规范值 `distributor` / `manufacturer` 写进未带角色的 planner 查询；planner 自己写了角色的保持不变，TED、openFDA 冷路径查询不受影响。写入发生在计划落库前，人工确认计划时可见。
+
 ## 2026-09-25 · Search-first company discovery (G3 slice 5.3)
 
 - `public_web` 发现阶段不再抓官网：SearXNG 的搜索语言随 ICP 目标国（德奥瑞 → `de`，法 → `fr`……，未知 → `en`）；查询串 = 品类词 × 目标国语言的贸易角色词（分销商 ICP → Großhandel/Händler/Vertrieb，角色来自 `trade_side`/`business_model`/`establishment_type`），不再硬加 `manufacturer company`；候选域名额外过滤非目标国 ccTLD；`discovery.extract_company` 只凭同一域名的搜索标题、摘要与 URL 判站并抽取，任务白名单去掉 `crawl4ai.fetch`。记录的 `parserVersion` 为 `public_web/v2-search`。官网页面改为在建档之后、以公司为主体抓取（5.4）。

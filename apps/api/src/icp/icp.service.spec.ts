@@ -543,6 +543,37 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(f.cpv.mock.calls[0][1]).toMatchObject({ product: "pump" });
     expect(f.fda.mock.calls[0][1]).toMatchObject({ tradeSide: "importer" });
   });
+  it("carries the ICP trade role into planner queries before the cold-path injections", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.companyAttributes = { industry: "Pumpen", business_model: "Großhandel" };
+    f.result.data = {
+      estimated_volume: 20,
+      queries: [
+        {
+          source_class: "public_intelligence",
+          filters: { industry: "Pumpen", country: "Germany" },
+          keywords: ["Kreiselpumpen"],
+          rationale: "keyword discovery",
+          priority: 2,
+        },
+      ],
+    };
+    f.cpv.mockResolvedValue({
+      cpvCodes: ["42120000"],
+      buyerCountries: ["DEU"],
+      warnings: [],
+    });
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+    const queries = plan.queries as Array<{ filters: Record<string, unknown> }>;
+    expect(queries).toHaveLength(2);
+    expect(queries[0]!.filters).toMatchObject({ source_hint: "ted" });
+    expect(queries[0]!.filters).not.toHaveProperty("trade_side");
+    expect(queries[1]!.filters).toMatchObject({
+      industry: "Pumpen",
+      trade_side: "distributor",
+    });
+  });
   it.each(["cpv", "fda"] as const)(
     "preserves a plan after ordinary %s resolver failure",
     async (resolver) => {

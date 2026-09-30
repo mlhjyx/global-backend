@@ -15,6 +15,7 @@ import { qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { resolveIcpToCpv, buildTedQuery, boundedTargetCountries, collectIndustryTerms } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
+import { withIcpTradeRole } from '../discovery/icp-trade-role';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
@@ -521,7 +522,9 @@ export class IcpService {
 
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    let queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries'], binding);
+    // G3 5.3：ICP 的贸易角色（分销商/制造商）确定性写进未带角色的 planner 查询，关键词搜索据此构造角色词。
+    const planned = withIcpTradeRole((out.queries ?? []) as QueryPlanModelOutput['queries'], icp.companyAttributes);
+    let queries = await this.injectTedQuery(ctx.workspaceId, icp, planned, binding);
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
     queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries, binding);
 
