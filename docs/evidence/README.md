@@ -15,6 +15,8 @@
 
 [2026-09-21 开发依赖告警刷新](security/20260921-dev-dependency-alert-refresh.json)：vitest 补丁、Prism 链的 lodash/uuid 精确 override 与 baseline-browser-mapping 传递升级后，同一生产审计（零 advisory）在旧锁文件绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长，faker 5.5.3（仅 Prism 开发依赖）仍开放。
 
+[2026-09-30 生产漏洞修复与基线续期](security/20260930-advisory-remediation-baseline-renewal.json)：main canary 报出的 15 条生产 advisory（undici / fast-uri / multer）以升级清零后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`，`valid_until` 延至 2026-10-14；不作为运行或发布证明。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |
