@@ -13,6 +13,8 @@ export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
 export const DISCOVERY_RAW_GOVERNANCE_PATCH =
   'discovery-raw-governance-dispositions-v1';
 export const DISCOVERY_QUERY_RECEIPT_PATCH = 'discovery-query-receipt-input-v1';
+/** G3 5.4b: website profiling between canonicalization and fit. */
+export const DISCOVERY_WEBSITE_PROFILE_PATCH = 'discovery-website-profile-v1';
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
@@ -174,6 +176,28 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
   const { companies, suppressed } = await acts.canonicalizeRun({ workspaceId, runId, ...authorityArgs });
 
+  // 官网画像（G3 5.4b）：Fit 之前以已建档公司为主体抓首页与 Impressum（慢 → 长活动）；
+  // 尽力而为，失败不影响 run 状态，控制错误照旧上抛。patch 守卫：旧历史重放不产生新命令。
+  let websiteProfile: {
+    profiled: number;
+    matched: number;
+    skippedSubjects?: number;
+    budgetTruncated?: boolean;
+  } = { profiled: 0, matched: 0 };
+  if (patched(DISCOVERY_WEBSITE_PROFILE_PATCH)) {
+    try {
+      websiteProfile = await signalActs.profileWebsitesForRun({
+        workspaceId,
+        runId,
+        icpId: input.icpId,
+        ...authorityArgs,
+      });
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
+      /* 画像是 Fit 的补充证据，失败时 Fit 仍按已有信息判定 */
+    }
+  }
+
   // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
   const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
 
@@ -229,9 +253,13 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     (fit.skippedForBudget ?? 0) > 0 ||
     discoveryBudgetTruncated ||
     enrich.budgetTruncated ||
-    (signals.budgetTruncated ?? false);
+    (signals.budgetTruncated ?? false) ||
+    (websiteProfile.budgetTruncated ?? false);
   // G3 5.5：按公司跳过的被拒主体（tombstone/SUPPRESSED/失效）意味着漏了活儿 → 至少 PARTIAL。
-  const skippedSubjects = (signals.skippedSubjects ?? 0) + (watches.skippedSubjects ?? 0);
+  const skippedSubjects =
+    (websiteProfile.skippedSubjects ?? 0) +
+    (signals.skippedSubjects ?? 0) +
+    (watches.skippedSubjects ?? 0);
   let status = resolveRunStatus({
     failures,
     totalQueries: queries.length,
@@ -288,6 +316,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       signalsBudgetTruncated: signals.budgetTruncated ?? false,
       budgetTruncated,
       skippedSubjects,
+      websiteProfile: { profiled: websiteProfile.profiled, matched: websiteProfile.matched },
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },
