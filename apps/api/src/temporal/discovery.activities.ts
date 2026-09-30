@@ -6,10 +6,14 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
+  MAX_DISCOVERY_ENRICH_COMPANIES,
   MAX_DISCOVERY_FIT_COMPANIES,
   MAX_DISCOVERY_PLAN_QUERIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
+  MAX_DISCOVERY_SIGNAL_COMPANIES,
+  MAX_DISCOVERY_WATCH_COMPANIES,
 } from '../discovery/execution-envelope';
+import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
@@ -265,15 +269,15 @@ function executionResult(
 const PER_SOURCE_LIMIT = MAX_DISCOVERY_PROVIDER_RECORDS;
 export const MAX_DISCOVERY_PROVIDER_ADAPTERS =
   MAX_COMPANY_DISCOVERY_ADAPTERS;
-const ENRICH_LIMIT = 50; // 单 run 富集上限（护栏；GLEIF 限流）
+const ENRICH_LIMIT = MAX_DISCOVERY_ENRICH_COMPANIES; // 单 run 富集上限（护栏；GLEIF 限流）
 export {
   MAX_DISCOVERY_FIT_COMPANIES,
   MAX_DISCOVERY_PLAN_QUERIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
 };
-const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
+const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
-const WATCH_REGISTER_LIMIT = 12; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
+const WATCH_REGISTER_LIMIT = MAX_DISCOVERY_WATCH_COMPANIES; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
 const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
@@ -351,6 +355,13 @@ export function createDiscoveryActivities(deps: {
           throw new Error(`query plan is ${plan.status}; must be READY (human-confirmed) before execution`);
         }
         const queries = (plan.queries as unknown as PlanQuery[]) ?? [];
+        // The discovery.run technical quote covers at most MAX_DISCOVERY_PLAN_QUERIES.
+        if (queries.length > MAX_DISCOVERY_PLAN_QUERIES) {
+          throw ApplicationFailure.nonRetryable(
+            'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+            'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+          );
+        }
         return {
           queries: [...queries].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99)),
         };
@@ -447,8 +458,8 @@ export function createDiscoveryActivities(deps: {
         ...(args.query.filters ?? {}),
       };
       if (deps.taxonomy) {
-        const industryTerms = [enriched.industry, enriched.sub_industry].flat().filter(Boolean).map(String);
-        const countryTerms = [enriched.country, enriched.region].flat().filter(Boolean).map(String);
+        // Bounded per query: each unresolved term costs one taxonomy.normalize call.
+        const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
         const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
           workspaceId: args.workspaceId,
           runId: binding.accountKey,

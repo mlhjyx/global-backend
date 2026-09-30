@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
   BudgetLedger,
@@ -474,6 +475,35 @@ describe("loadPlanQueries receipt identity inputs", () => {
         { ...QUERY, priority: undefined },
       ],
     });
+  });
+
+  it("fails closed when a plan exceeds the quoted query ceiling (planner + cold-path queries)", async () => {
+    const plan: Record<string, unknown> = { status: "READY", queries: [] };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) =>
+          callback({ discoveryQueryPlan: { findUnique: vi.fn(async () => plan) } }),
+        ),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+    const args = {
+      workspaceId: DISCOVERY_BINDING.scopeKey,
+      planId: "50000000-0000-4000-8000-000000000001",
+      executionContractVersion: 2 as const,
+      executionBudget: DISCOVERY_BINDING,
+    };
+
+    plan.queries = Array.from({ length: MAX_DISCOVERY_PLAN_QUERIES }, () => QUERY);
+    await expect(activities.loadPlanQueries(args)).resolves.toMatchObject({
+      queries: { length: MAX_DISCOVERY_PLAN_QUERIES },
+    });
+    plan.queries = Array.from({ length: MAX_DISCOVERY_PLAN_QUERIES + 1 }, () => QUERY);
+    await expect(activities.loadPlanQueries(args)).rejects.toThrow(
+      "EXECUTION_BUDGET_ENVELOPE_EXCEEDED",
+    );
   });
 });
 

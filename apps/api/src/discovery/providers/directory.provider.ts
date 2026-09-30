@@ -31,6 +31,11 @@ import {
   isDiscoveryCompanyLineageInvalid,
   type DiscoveryCompanyReceiptCollector,
 } from '../company-discovery-lineage';
+import {
+  MAX_DIRECTORY_LISTING_PAGES,
+  MAX_DIRECTORY_PAGINATION,
+  MAX_DIRECTORY_SEARCHES_PER_QUERY,
+} from '../execution-envelope';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -49,8 +54,6 @@ const DIRECTORY_INTENTS_DE = ['Mitgliederverzeichnis', 'Mitglieder', 'Aussteller
 /** 列表页 URL/标题的正向信号（用于从搜索命中里挑真正的名录页）。 */
 const LISTING_HINT = /member|mitglied|exhibitor|aussteller|directory|verzeichnis|list|catalog|katalog|branchenbuch/i;
 
-const MAX_LISTING_PAGES = 8; // 深挖的候选名录页上限（控成本/时长）
-const MAX_PAGINATION = 3; // 单个名录最多翻的分页数
 const CRAWL_CONCURRENCY = 4;
 
 interface ExtractedList {
@@ -133,7 +136,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (!listingUrls.has(h.url)) listingUrls.set(h.url, h.title);
       }
     }
-    const urls = [...listingUrls.keys()].slice(0, MAX_LISTING_PAGES);
+    const urls = [...listingUrls.keys()].slice(0, MAX_DIRECTORY_LISTING_PAGES);
     if (!urls.length) {
       return {
         records: [],
@@ -211,7 +214,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
 
-    for (let page = 0; page < MAX_PAGINATION && pageUrl && !visited.has(pageUrl); page++) {
+    for (let page = 0; page < MAX_DIRECTORY_PAGINATION && pageUrl && !visited.has(pageUrl); page++) {
       visited.add(pageUrl);
       if (
         !(await isAllowedByRobots(pageUrl, {
@@ -387,7 +390,7 @@ export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
   const intents = [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
   const searches = intents.map((intent) => [topic, intent, region ?? ''].filter(Boolean).join(' ').trim());
   // 去重 + 去过短
-  return [...new Set(searches)].filter((q) => q.length > 5).slice(0, 4);
+  return [...new Set(searches)].filter((q) => q.length > 5).slice(0, MAX_DIRECTORY_SEARCHES_PER_QUERY);
 }
 
 function slug(s: string): string {

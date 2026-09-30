@@ -1,15 +1,53 @@
 import { getTask } from '../ai-tasks/task-registry';
 import {
+  MAX_COMPANY_DISCOVERY_ADAPTERS,
+  MAX_DIGITAL_FOOTPRINT_RENDERS,
+  MAX_DIRECTORY_LISTING_PAGES,
+  MAX_DIRECTORY_PAGINATION,
+  MAX_DIRECTORY_SEARCHES_PER_QUERY,
+  MAX_DISCOVERY_ENRICH_COMPANIES,
+  MAX_DISCOVERY_FIT_COMPANIES,
+  MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROVIDER_RECORDS,
+  MAX_DISCOVERY_SIGNAL_COMPANIES,
+  MAX_DISCOVERY_WATCH_COMPANIES,
   MAX_EMAIL_GUESS_CONTACTS,
   MAX_EMAIL_PROBE_CANDIDATES,
   MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET,
+  MAX_GLEIF_FETCHES_PER_COMPANY,
+  MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
+  MAX_PUBLIC_WEB_SEARCHES_PER_QUERY,
+  MAX_QUERY_TAXONOMY_COUNTRY_TERMS,
+  MAX_QUERY_TAXONOMY_INDUSTRY_TERMS,
+  MAX_SINGLE_SEARCH_WIRES_PER_QUERY,
+  MAX_SITEMAP_HTTP_GETS,
+  MAX_STRUCTURED_HARVEST_HTTP_GETS,
+  MAX_STRUCTURED_HARVEST_RENDERS,
+  MAX_UNDERSTANDING_SUBPAGES,
+  MAX_WIKIDATA_ENTITY_READS_PER_COMPANY,
 } from '../discovery/execution-envelope';
+import { TRADE_FAIRS } from '../discovery/trade-fairs';
 import {
   MAX_QUERY_PLAN_INDUSTRY_TERMS,
   MAX_QUERY_PLAN_TARGET_COUNTRIES,
 } from '../discovery/icp-to-cpv';
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
-import { smtpRcptProbeTool } from '../tools/builtin-tools';
+import {
+  crawl4aiFetchTool,
+  osmOverpassTool,
+  searxngSearchTool,
+  smtpRcptProbeTool,
+  wikidataTool,
+} from '../tools/builtin-tools';
+import {
+  crawl4aiRenderTool,
+  gleifFetchTool,
+  httpGetTool,
+  openFdaSearchTool,
+  tedSearchTool,
+  tradeFairAlgoliaTool,
+  wikidataEntityTool,
+} from '../tools/source-tools';
 import type { Tool } from '../tools/tool-contract';
 import type { WorkspaceExecutionBudgetRequest } from './execution-budget-request-scope';
 import {
@@ -94,6 +132,99 @@ function tool(
     estimatedCents: contract.cost.estimatedCents,
     costUnit: contract.cost.unit,
   });
+}
+
+function contract<I, O>(value: Tool<I, O>): Tool<unknown, unknown> {
+  return value as unknown as Tool<unknown, unknown>;
+}
+
+/**
+ * One discovery run (POST /query-plans/:planId/execute): every model task and
+ * tool wire the run can reserve, stage by stage, from the ceilings the
+ * workflow and providers enforce. See discovery.workflow.ts for the stages.
+ */
+function discoveryRunEnvelope(
+  request: WorkspaceExecutionBudgetRequest,
+): WorkspaceTechnicalBudgetEnvelope {
+  const queries = MAX_DISCOVERY_PLAN_QUERIES;
+  const directoryPages = MAX_DIRECTORY_LISTING_PAGES * MAX_DIRECTORY_PAGINATION;
+  const singleSearches = queries * MAX_SINGLE_SEARCH_WIRES_PER_QUERY;
+  return ready(
+    request,
+    [
+      // executeQuery: taxonomy cold path, then public_web and directory extraction.
+      model(
+        'taxonomy.normalize',
+        queries * (MAX_QUERY_TAXONOMY_INDUSTRY_TERMS + MAX_QUERY_TAXONOMY_COUNTRY_TERMS),
+      ),
+      model('discovery.extract_company', queries * MAX_PUBLIC_WEB_DOMAINS_PER_QUERY),
+      model('discovery.extract_list', queries * directoryPages),
+      // qualifyFitForRun: one judgment per canonical company of the run.
+      model('discovery.qualify_fit', MAX_DISCOVERY_FIT_COMPANIES),
+    ],
+    [
+      tool(
+        contract(searxngSearchTool),
+        queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY),
+      ),
+      tool(contract(crawl4aiFetchTool), queries * directoryPages),
+      tool(contract(wikidataTool), singleSearches),
+      tool(contract(osmOverpassTool), singleSearches),
+      tool(contract(tedSearchTool), singleSearches),
+      tool(contract(openFdaSearchTool), singleSearches),
+      tool(contract(tradeFairAlgoliaTool), queries * TRADE_FAIRS.length),
+      // enrichRun: GLEIF and Wikidata facts for fit=match companies.
+      tool(contract(gleifFetchTool), MAX_DISCOVERY_ENRICH_COMPANIES * MAX_GLEIF_FETCHES_PER_COMPANY),
+      tool(
+        contract(wikidataEntityTool),
+        MAX_DISCOVERY_ENRICH_COMPANIES * MAX_WIKIDATA_ENTITY_READS_PER_COMPANY,
+      ),
+      // enrichSignalsRun (digital footprint + structured harvest) and registerWatchesForRun.
+      tool(
+        contract(crawl4aiRenderTool),
+        MAX_DISCOVERY_SIGNAL_COMPANIES *
+          (MAX_DIGITAL_FOOTPRINT_RENDERS + MAX_STRUCTURED_HARVEST_RENDERS),
+      ),
+      tool(
+        contract(httpGetTool),
+        MAX_DISCOVERY_SIGNAL_COMPANIES * MAX_STRUCTURED_HARVEST_HTTP_GETS +
+          MAX_DISCOVERY_WATCH_COMPANIES * MAX_SITEMAP_HTTP_GETS,
+      ),
+    ],
+    {
+      planQueries: queries,
+      companyDiscoveryAdapters: MAX_COMPANY_DISCOVERY_ADAPTERS,
+      providerRecords: MAX_DISCOVERY_PROVIDER_RECORDS,
+      taxonomyIndustryTermsPerQuery: MAX_QUERY_TAXONOMY_INDUSTRY_TERMS,
+      taxonomyCountryTermsPerQuery: MAX_QUERY_TAXONOMY_COUNTRY_TERMS,
+      publicWebSearchesPerQuery: MAX_PUBLIC_WEB_SEARCHES_PER_QUERY,
+      publicWebDomainsPerQuery: MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
+      directorySearchesPerQuery: MAX_DIRECTORY_SEARCHES_PER_QUERY,
+      directoryPagesPerQuery: directoryPages,
+      tradeFairs: TRADE_FAIRS.length,
+      fitCompanies: MAX_DISCOVERY_FIT_COMPANIES,
+      enrichCompanies: MAX_DISCOVERY_ENRICH_COMPANIES,
+      signalCompanies: MAX_DISCOVERY_SIGNAL_COMPANIES,
+      watchCompanies: MAX_DISCOVERY_WATCH_COMPANIES,
+    },
+  );
+}
+
+/** Seller understanding (POST /companies): homepage + subpages, per-page extraction. */
+function understandingRunEnvelope(
+  request: WorkspaceExecutionBudgetRequest,
+): WorkspaceTechnicalBudgetEnvelope {
+  const pages = 1 + MAX_UNDERSTANDING_SUBPAGES;
+  return ready(
+    request,
+    [
+      model('company_understanding.extract_claims', pages),
+      model('company_understanding.extract_offerings', pages),
+      model('company_understanding.extract_profile', 1),
+    ],
+    [tool(contract(crawl4aiFetchTool), pages)],
+    { pages, subpages: MAX_UNDERSTANDING_SUBPAGES },
+  );
 }
 
 function positiveBound(value: unknown, fallback: number, maximum: number): number {
@@ -240,8 +371,11 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
         },
       );
     case 'POST /companies':
+      return understandingRunEnvelope(request);
     case 'POST /query-plans/:planId/execute':
+      return discoveryRunEnvelope(request);
     case 'POST /canonical-companies/:id/discover-contacts':
+      // Contact discovery is outside the company-level acquisition chain.
       return unavailable();
   }
 }

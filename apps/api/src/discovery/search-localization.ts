@@ -5,6 +5,8 @@
  * Pure functions over the query-plan filters; no I/O.
  */
 
+import { MAX_PUBLIC_WEB_SEARCHES_PER_QUERY } from './execution-envelope';
+
 export type SearchLanguage = 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl';
 export type TradeRole = 'distributor' | 'manufacturer';
 
@@ -66,7 +68,7 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
   },
 });
 
-export const MAX_SEARCHES_PER_QUERY = 3;
+export const MAX_SEARCHES_PER_QUERY = MAX_PUBLIC_WEB_SEARCHES_PER_QUERY;
 
 function strings(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');

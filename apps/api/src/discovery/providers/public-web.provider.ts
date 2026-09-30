@@ -26,6 +26,7 @@ import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { MAX_PUBLIC_WEB_DOMAINS_PER_QUERY } from '../execution-envelope';
 import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
 import {
   MAX_SEARCHES_PER_QUERY,
@@ -70,7 +71,6 @@ const NOISE_DOMAINS = [
   'cloudflare.com', 'baidu.com', 'toutiao.com', 'ensun.io', 'zaixianjisuan.com',
 ];
 
-const MAX_DOMAINS_PER_QUERY = 14; // 每条计划查询最多判定的候选域名数（控成本/时长）
 const JUDGE_CONCURRENCY = 5;
 const MAX_HITS_PER_DOMAIN = 3;
 const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
@@ -170,7 +170,7 @@ export class PublicWebDiscoveryProvider
       candidates.set(domain, hits);
     }
 
-    const domains = [...candidates.keys()].slice(0, MAX_DOMAINS_PER_QUERY);
+    const domains = [...candidates.keys()].slice(0, MAX_PUBLIC_WEB_DOMAINS_PER_QUERY);
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
 

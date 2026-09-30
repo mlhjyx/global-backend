@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { pickBest } from './gleif.provider';
+import { describe, expect, it, vi } from 'vitest';
+import { GleifEnrichmentProvider, pickBest } from './gleif.provider';
 import { GleifRecord } from '../../adapters/gleif';
+import { MAX_GLEIF_FETCHES_PER_COMPANY } from '../execution-envelope';
 
 function rec(lei: string, legalName: string, extra: Partial<GleifRecord> = {}): GleifRecord {
   return { lei, legalName, ...extra };
@@ -67,5 +68,30 @@ describe('GLEIF 最佳匹配 + 置信度 + 歧义护栏（绝不贴错身份）'
 
   it('候选为空返回 null', () => {
     expect(pickBest('TRUMPF', [])).toBeNull();
+  });
+});
+
+describe('GleifEnrichmentProvider — bounded physical reads (G2 quote)', () => {
+  it('uses at most the quoted fetches: country search, name-only retry and both parent lookups', async () => {
+    const invoke = vi.fn(async (_toolId: string, input: { op: string; country?: string }) => {
+      if (input.op === 'search') {
+        return {
+          data: {
+            records: input.country
+              ? []
+              : [rec('EXACTMATCHLEI00000001', 'Acme Pumpen GmbH', { hasDirectParent: true, hasUltimateParent: true })],
+          },
+        };
+      }
+      return { data: { parent: { lei: 'PARENTLEI00000000001', legalName: 'Acme Holding AG' } } };
+    });
+
+    const result = await new GleifEnrichmentProvider({ broker: { invoke } as never }).enrichCompany(
+      { name: 'Acme Pumpen GmbH', country: 'DE' },
+      { workspaceId: '00000000-0000-4000-8000-0000000000a1' },
+    );
+
+    expect(result.matched).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(MAX_GLEIF_FETCHES_PER_COMPANY);
   });
 });

@@ -58,11 +58,41 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
     ).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
   });
 
-  it('keeps incomplete physical envelopes fail-closed as 503', () => {
-    expect(() =>
+  it('quotes a discovery run bound to a request-scoped discovery_run subject', () => {
+    expect(
+      controller().quote(CTX, {
+        operation: 'POST /query-plans/:planId/execute',
+        planId: '50000000-0000-4000-8000-000000000005',
+      }),
+    ).toEqual({
+      data: expect.objectContaining({
+        purpose: 'discovery.run',
+        subjectType: 'discovery_run',
+        requiredCapMicrousd: '5586480000',
+      }),
+    });
+  });
+
+  it('quotes company creation for the understanding run', () => {
+    expect(
       controller().quote(CTX, {
         operation: 'POST /companies',
         body: { website: 'https://example.test' },
+      }),
+    ).toEqual({
+      data: expect.objectContaining({
+        purpose: 'understanding.run',
+        subjectType: 'company',
+        requiredCapMicrousd: '5870000',
+      }),
+    });
+  });
+
+  it('keeps incomplete physical envelopes fail-closed as 503', () => {
+    expect(() =>
+      controller().quote(CTX, {
+        operation: 'POST /canonical-companies/:id/discover-contacts',
+        companyId: '30000000-0000-4000-8000-000000000003',
       }),
     ).toThrow('EXECUTION_BUDGET_QUOTE_UNAVAILABLE');
   });
