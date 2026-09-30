@@ -12,6 +12,7 @@ import type { ExecutionContext } from '../provider-contract';
 import { matchCarriedBrands } from '../website-profile/brands';
 import { parseImpressum, type ImpressumRegister } from '../website-profile/impressum';
 import { classifyTradeRoleByRules } from '../website-profile/trade-role-rules';
+import { scrubPii } from '../../site-builder/agents/pii';
 
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
 export const WEBSITE_PROFILE_MAX_FETCHES_PER_COMPANY = 2;
@@ -19,6 +20,18 @@ const HOME_PROMPT_CHARS = 12_000;
 const IMPRESSUM_PROMPT_CHARS = 4_000;
 const RULES_CONFIDENCE = 0.7;
 const IMPRESSUM_LINK = /impressum|imprint|legal-notice|legal_notice/iu;
+/** Lines about people (management, owners, contacts) never become stored evidence. */
+const PERSON_MARKERS =
+  /gesch(?:ä|ae)ftsf(?:ü|ue)hr|inhaber|ansprechpartner|vorstand|\b(?:herr|frau|mr|mrs|ms)\b\.?|\bdr\.\s/iu;
+const MAX_EVIDENCE_SNIPPETS = 3;
+
+/** Company-level evidence only: person lines dropped, phones and emails redacted. */
+function companyEvidence(snippets: readonly string[]): string[] {
+  return snippets
+    .map((snippet) => scrubPii(snippet).trim())
+    .filter((snippet) => snippet.length > 0 && !PERSON_MARKERS.test(snippet))
+    .slice(0, MAX_EVIDENCE_SNIPPETS);
+}
 
 export type WebsiteTradeRole =
   | 'distributor' | 'wholesaler' | 'manufacturer' | 'mixed' | 'service' | 'other';
@@ -118,7 +131,7 @@ export class WebsiteProfileProvider {
       legalName: identifiers.legalName,
       register: identifiers.register,
       vatId: identifiers.vatId,
-      evidence: (classified?.evidence ?? []).slice(0, 3),
+      evidence: companyEvidence(classified?.evidence ?? []),
     };
   }
 

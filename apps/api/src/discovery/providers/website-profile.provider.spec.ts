@@ -118,4 +118,23 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
     }).profile(INPUT, CTX);
     expect(profile).toMatchObject({ tradeRole: null, tradeRoleSource: null, register: { number: '98765' } });
   });
+
+  it('keeps only company-level evidence: person lines are dropped, phones and emails redacted', async () => {
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValueOnce({
+      data: {
+        trade_role: 'distributor',
+        evidence: ['Großhandel für Pumpen', 'Geschäftsführer: Max Mustermann', 'Vertrieb: Tel. +49 30 1234567, vertrieb@x.example'],
+      },
+    });
+    const profile = await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
+    }).profile(INPUT, CTX);
+
+    expect(profile?.evidence).toEqual([
+      'Großhandel für Pumpen',
+      'Vertrieb: Tel. [redacted-phone], [redacted-email]',
+    ]);
+  });
 });
+
