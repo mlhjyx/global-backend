@@ -12,7 +12,7 @@ import {
   type QualityArtifactSetV1,
   type SiteSpec,
 } from '@global/contracts';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { buildM1ebGoldenFixtures } from './design/m1eb-golden';
 import {
@@ -380,6 +380,20 @@ const input = {
 };
 
 describe('SiteReleaseService cross-system commit protocol', () => {
+  // Assembling a golden fixture re-validates the whole design catalog, so the
+  // v3 tests share one fixture built once here rather than rebuilding all
+  // twelve per test, which ran into the 5 s test timeout on a loaded host.
+  let golden: Awaited<ReturnType<typeof buildM1ebGoldenFixtures>>[number];
+
+  beforeAll(async () => {
+    golden = (
+      await buildM1ebGoldenFixtures(
+        new URL('../../../../', import.meta.url).pathname,
+        { ids: ['natural-origin-rich'] },
+      )
+    )[0]!;
+  });
+
   it('reserves a fenced identity after P4 so a new v3 Release can copy evidence and finalize', async () => {
     const prisma = fakePrisma();
     const storage = fakeStorage();
@@ -392,11 +406,6 @@ describe('SiteReleaseService cross-system commit protocol', () => {
       now: () => new Date('2026-07-24T00:00:00Z'),
       randomUuid: () => ids.shift()!,
     });
-    const golden = (
-      await buildM1ebGoldenFixtures(
-        new URL('../../../../', import.meta.url).pathname,
-      )
-    )[0]!;
     const scope = {
       workspaceId: input.workspaceId,
       siteId: input.siteId,
@@ -494,11 +503,6 @@ describe('SiteReleaseService cross-system commit protocol', () => {
         return buildReleaseArtifact(artifactInput);
       },
     });
-    const golden = (
-      await buildM1ebGoldenFixtures(
-        new URL('../../../../', import.meta.url).pathname,
-      )
-    )[0]!;
     prisma.state.versionSpec = golden.spec;
     prisma.state.versionSpecVersion = golden.spec.specVersion;
     const scope = {
@@ -543,11 +547,6 @@ describe('SiteReleaseService cross-system commit protocol', () => {
       buildIdentity: 'site-renderer@test',
       randomUuid: () => ids.shift()!,
     });
-    const golden = (
-      await buildM1ebGoldenFixtures(
-        new URL('../../../../', import.meta.url).pathname,
-      )
-    )[0]!;
     prisma.state.versionSpec = {
       ...golden.spec,
       site: {
@@ -610,11 +609,6 @@ describe('SiteReleaseService cross-system commit protocol', () => {
     const t2 = await service.reserveMaterialization(scope);
     expect(t2.producerToken).not.toBe(t1.producerToken);
     const t2Lease = prisma.state.release!.leaseUntil.getTime();
-    const golden = (
-      await buildM1ebGoldenFixtures(
-        new URL('../../../../', import.meta.url).pathname,
-      )
-    )[0]!;
     const quality = await releaseQualityFixture(golden, t2, storage);
     prisma.state.versionSpec = golden.spec;
     prisma.state.versionSpecVersion = golden.spec.specVersion;
