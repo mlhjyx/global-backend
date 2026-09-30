@@ -36,6 +36,9 @@ describe("M1-e-B approved Golden matrix", () => {
     vi.restoreAllMocks();
   });
 
+  // Tests that assemble fixtures get 60 s: every assembly re-validates the
+  // whole design catalog, and the full matrix took about 2.5 s alone at load
+  // ~20 and about 10 s at load ~45 on a 4-core host, past the 5 s default.
   it("builds exactly six sparse/rich pairs through controlled assembly", async () => {
     const fixtures = await buildM1ebGoldenFixtures(repositoryRoot);
     expect(fixtures).toHaveLength(12);
@@ -65,7 +68,7 @@ describe("M1-e-B approved Golden matrix", () => {
     for (const fixture of fixtures) {
       expectApprovedGoldenFixture(fixture);
     }
-  });
+  }, 60_000);
 
   it("assembles only the requested fixtures, identical to their approved entries", async () => {
     const assemble = vi.spyOn(ControlledAssemblyService.prototype, "assemble");
@@ -82,7 +85,7 @@ describe("M1-e-B approved Golden matrix", () => {
     for (const fixture of fixtures) {
       expectApprovedGoldenFixture(fixture);
     }
-  });
+  }, 60_000);
 
   it("rejects an unknown fixture id before assembling anything", async () => {
     const assemble = vi.spyOn(ControlledAssemblyService.prototype, "assemble");

@@ -48,7 +48,8 @@ export interface M1ebGoldenFixture {
 export interface M1ebGoldenFixtureOptions {
   /**
    * Assemble only these approved fixture ids. Fixtures are assembled
-   * independently, so each result equals its entry in the full matrix.
+   * independently, so each result equals its entry in the full matrix;
+   * results keep the matrix's id order, not the order requested.
    */
   ids?: readonly string[];
 }
