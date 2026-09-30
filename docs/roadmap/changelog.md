@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-25 · Search-first company discovery (G3 slice 5.3)
+
+- `public_web` 发现阶段不再抓官网：SearXNG 的搜索语言随 ICP 目标国（德奥瑞 → `de`，法 → `fr`……，未知 → `en`）；查询串 = 品类词 × 目标国语言的贸易角色词（分销商 ICP → Großhandel/Händler/Vertrieb，角色来自 `trade_side`/`business_model`/`establishment_type`），不再硬加 `manufacturer company`；候选域名额外过滤非目标国 ccTLD；`discovery.extract_company` 只凭同一域名的搜索标题、摘要与 URL 判站并抽取，任务白名单去掉 `crawl4ai.fetch`。记录的 `parserVersion` 为 `public_web/v2-search`。官网页面改为在建档之后、以公司为主体抓取（5.4）。
+- `directory` 名录页在建档前没有真实主体，抓取被主体绑定禁令拒绝时只跳过该页，不再让整个发现 run 失败；预算、授权等控制错误照旧上抛。
+- 未升 lineage/materialization 合约版本：producer（`discovery.extract_company`）与结果 schema（`discovery-extract-company/v1`）不变，搜索回执本来就作为辅助回执处理；materialization 合约版本钉在 SQL 触发器与 activation 表中，升版不带来额外可验证性。依据：G3 规格 §3、§4.3、§5.3（版本一项按上述理由偏离，已在 PR 说明）。
+
 ## 2026-09-25 · Skippable artifact-subject denials (G3 slice 5.2)
 
 - 新增 `artifactSubjectSkipReason`：沿 cause 链识别 ToolBroker 的四类禁令拒绝（主体 HOLD、tombstone、SUPPRESSED、绑定失效），供按公司处理的富集阶段跳过该公司，而不是让整个 run 失败。预算、授权、存储不可用等控制错误照旧上抛；`isExecutionControlError` 不变，所以发现阶段（无主体）的行为不变。`resolveRunStatus` 新增 `skippedSubjects`：有跳过时至少为 PARTIAL，但不会把全失败的 run 抬成 PARTIAL。依据：G3 规格 §4.2、§5.2；调用方在 5.4 接入。

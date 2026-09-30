@@ -61,10 +61,16 @@ describe('discovery providers rethrow execution-control errors', () => {
     ).rejects.toBe(hold);
   });
 
-  it('PublicWebDiscoveryProvider rethrows control errors from crawl catches', async () => {
+  it('PublicWebDiscoveryProvider rethrows control errors from the search call', async () => {
+    // G3 5.3: discovery no longer fetches pages; the search wire is the only tool call.
     const provider = new PublicWebDiscoveryProvider({
       gateway: {} as never,
-      broker: brokerForCompanyDiscovery(),
+      broker: {
+        checkSourcePolicy: async () => ({ allowed: true }),
+        invoke: vi.fn(async (): Promise<ToolResult<unknown>> => {
+          throw controlError();
+        }) as unknown as ExecutionBroker['invoke'],
+      },
     });
 
     await expect(

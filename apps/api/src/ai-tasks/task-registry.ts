@@ -226,13 +226,14 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.extract_company': {
     id: 'discovery.extract_company',
-    // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②：白名单真实生效）。
-    allowedTools: ['searxng.search', 'crawl4ai.fetch'],
+    // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索（收口②：白名单真实生效）。
+    // G3（2026-09-24）：发现阶段只用搜索结果判站，建档前不抓页面，故不再允许 crawl4ai.fetch。
+    allowedTools: ['searxng.search'],
     maxCostCents: 15,
     maxOutputTokens: 4_096,
     timeoutMs: 180000,
     description:
-      '判断给定网页是否为一家真实企业的官网，若是则抽取结构化企业属性。只允许使用网页文本中明确出现的信息，禁止编造或从画像上下文照抄。若不是企业官网（是目录/百科/新闻/市场平台/博客），is_company_site 置 false。',
+      '判断给定的一组搜索结果（同一域名的标题、摘要与 URL）是否指向一家真实企业自己的官网，若是则抽取结构化企业属性。只允许使用搜索结果中明确出现的信息，禁止编造或从画像上下文照抄；名称取搜索结果中的企业名称原文。若不是企业官网（是目录/百科/新闻/市场平台/博客），或信息不足以判断，is_company_site 置 false。',
     outputSchema: closedObject({
       is_company_site: { type: 'boolean', description: '该页面是否为某家企业自己的官网' },
       name: boundedString(500, { description: '企业名称（原文语言）' }),

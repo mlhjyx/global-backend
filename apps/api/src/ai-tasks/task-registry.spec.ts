@@ -58,8 +58,9 @@ describe('AI task registry model execution policy invariants', () => {
         allowedTools: [], maxCostCents: 20, timeoutMs: 180000,
       },
       'discovery.extract_company': {
+        // G3 5.3: discovery judges from search results only; no pre-identity fetch.
         model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
-        allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 15,
+        allowedTools: ['searxng.search'], maxCostCents: 15,
         timeoutMs: 180000,
       },
       'discovery.extract_list': {

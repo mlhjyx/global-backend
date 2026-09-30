@@ -21,6 +21,7 @@ import {
   type RuntimeStructuredModelResult,
 } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
@@ -234,6 +235,12 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         );
         text = crawled.data.text.slice(0, 60_000);
       } catch (err) {
+        // G3（2026-09-24）：名录页在建档前没有真实主体，抓取被主体绑定禁令拒绝时
+        // 只跳过这一页（请求未发出、预算已释放），不让整个发现 run 失败。
+        if (artifactSubjectSkipReason(err)) {
+          this.log(`skip ${pageUrl}: artifact subject binding held`);
+          break;
+        }
         if (isExecutionControlError(err)) throw err;
         this.log(`skip ${pageUrl}: crawl failed (${String(err).slice(0, 80)})`);
         break;
