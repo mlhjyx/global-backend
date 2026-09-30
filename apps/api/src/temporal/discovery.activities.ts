@@ -14,6 +14,7 @@ import {
   MAX_DISCOVERY_WATCH_COMPANIES,
 } from '../discovery/execution-envelope';
 import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
+import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
@@ -1269,6 +1270,7 @@ export function createDiscoveryActivities(deps: {
       matched: number;
       provider: string | null;
       budgetTruncated: boolean;
+      skippedSubjects: number;
     }> {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -1280,6 +1282,7 @@ export function createDiscoveryActivities(deps: {
           matched: 0,
           provider: null,
           budgetTruncated: false,
+          skippedSubjects: 0,
         };
 
       // DAT-011：SUSPENDED 域名黑名单（平台级 source_policy，富集侧同样遵守 —— 富集也会抓这些域名）
@@ -1332,6 +1335,7 @@ export function createDiscoveryActivities(deps: {
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
+      let skippedSubjects = 0;
       const nowMs = Date.now();
       for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
         const durableReceipts: Array<{
@@ -1350,11 +1354,14 @@ export function createDiscoveryActivities(deps: {
           correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
           onDurableReceipt: captureEnrichmentReceipt,
+          // G3 5.5：官网抓取（crawl4ai.render / http.get）的产物挂在这家已建档公司名下。
+          artifactSubject: { subjectType: 'company', subjectId: c.id },
         };
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
 
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const hits: { key: string; result: EnrichmentResult }[] = [];
+        let subjectDenied = false;
         for (const e of enrichers) {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
@@ -1376,12 +1383,20 @@ export function createDiscoveryActivities(deps: {
             );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch (error) {
+            // G3 5.2/5.5：主体被 tombstone/SUPPRESSED/失效 → 跳过这家公司（计入 PARTIAL），不拖垮整个 run。
+            if (artifactSubjectSkipReason(error)) {
+              subjectDenied = true;
+              break;
+            }
             if (isExecutionControlError(error)) throw error;
             /* 单信号源失败不影响其余 */
           }
         }
-        enriched += 1;
-        if (!hits.length && !durableReceipts.length) continue;
+        if (subjectDenied) skippedSubjects += 1;
+        else enriched += 1;
+        // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
+        const committedHits = subjectDenied ? [] : hits;
+        if (!committedHits.length && !durableReceipts.length) continue;
         const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const result = await applyDomainAckConsumerTransactions({
             transaction: tx,
@@ -1391,11 +1406,11 @@ export function createDiscoveryActivities(deps: {
               domainAckKey: `${c.id}:${receipt.operationId}:signal-enrichment`,
               domainRevision: receipt.resultDigest,
             })),
-            apply: (transaction) => hits.length
+            apply: (transaction) => committedHits.length
               ? commitCompanyEnrichmentResults(transaction, {
                   workspaceId: args.workspaceId,
                   companyId: c.id,
-                  hits,
+                  hits: committedHits,
                   signalTimestamp: new Date(nowMs),
                 })
               : Promise.resolve(false),
@@ -1405,20 +1420,21 @@ export function createDiscoveryActivities(deps: {
                 select: { attributes: true },
               });
               const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
-              return hits.some((hit) => Object.hasOwn(attributes, hit.key));
+              return committedHits.some((hit) => Object.hasOwn(attributes, hit.key));
             },
           });
           return result.value;
         });
         if (!committed) continue;
         matched += 1;
-        hits.forEach((h) => providersHit.add(h.key));
+        committedHits.forEach((h) => providersHit.add(h.key));
       }
       return {
         enriched,
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
+        skippedSubjects,
       };
     },
 
@@ -1432,7 +1448,7 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
       icpId: string;
-    }): Promise<{ candidates: number; registered: number }> {
+    }): Promise<{ candidates: number; registered: number; skippedSubjects: number }> {
       const binding = await ensureRunBudget(args);
       const intentSvc = new IntentProjectionService({
         prisma: deps.prisma,
@@ -1470,6 +1486,7 @@ export function createDiscoveryActivities(deps: {
         });
       });
       let registered = 0;
+      let skippedSubjects = 0;
       for (const c of companies.slice(0, WATCH_REGISTER_LIMIT)) {
         try {
           if (
@@ -1486,11 +1503,16 @@ export function createDiscoveryActivities(deps: {
           });
           registered += 1;
         } catch (error) {
+          // G3 5.5：sitemap 抓取挂在这家公司名下；主体被拒 → 跳过这家（计入 PARTIAL）。
+          if (artifactSubjectSkipReason(error)) {
+            skippedSubjects += 1;
+            continue;
+          }
           if (isExecutionControlError(error)) throw error;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
-      return { candidates: companies.length, registered };
+      return { candidates: companies.length, registered, skippedSubjects };
     },
 
     /**

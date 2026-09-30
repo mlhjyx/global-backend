@@ -6,6 +6,7 @@
 
 import type { CompanyIdentifier } from './identity';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import type { ArtifactSubjectRef } from '../tools/artifact-execution-port';
 import type { DiscoveryCompanyResultLineageV1 } from './company-discovery-lineage';
 
 export type SourceClass =
@@ -48,6 +49,12 @@ export interface ExecutionContext {
     producerId: string,
     receipt: DurableExecutionReceipt,
   ) => void;
+  /**
+   * G3 5.5: the canonical company a per-company stage works on. Providers
+   * spread the context into their ToolContext, so subject-bound artifact tools
+   * (crawl4ai.fetch/render, http.get) are admitted for this company only.
+   */
+  artifactSubject?: ArtifactSubjectRef;
 }
 
 /** Fail-closed helper for direct DNS/robots boundaries that are not Tool calls. */
