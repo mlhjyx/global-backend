@@ -7,7 +7,7 @@
 
 ## 当前合同
 
-- `production-dependency-audit-baseline.json` 绑定已审计工具链候选 `728fbf8eaab86f24182cffe1cccdfb5fbaa7e16c` 及其锁文件；对该精确干净提交执行 production audit 得到零条 advisory，因而基线同样记录零条 advisory/exposure。修复前 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的 devalue 风险不被伪装为零，也不再用它绑定新快照。已修复的 10 条历史例外撤销；精确 bootstrap 集合与锁文件绑定仍由原 verifier 校验。
+- `production-dependency-audit-baseline.json` 绑定 2026-09-30 生产漏洞修复提交 `49ab7db583d7fa4d029712b3891dc95e35453b50` 及其锁文件；对该精确干净提交执行 production audit 得到零条 advisory，因而基线同样记录零条 advisory/exposure。修复前 `04e1acc489838ff99b8300ee6cc93e794fd57564` 的 devalue 风险不被伪装为零，也不再用它绑定新快照。已修复的 10 条历史例外撤销；精确 bootstrap 集合与锁文件绑定仍由原 verifier 校验。
 - ratchet 允许 advisory 消失；PR 还会使用受信 base 的依赖图生成独立 audit，已经消失的 advisory 再次出现、同一 advisory 新增 vulnerable version/path 或风险元数据漂移都会失败。新增 advisory、严重度提高、critical、畸形/非 production-only 报告和过期 baseline 全部失败。
 - PR 正常路径读取 base commit 中的 baseline 与 verifier，避免同一个 PR 放宽 policy 后自证通过。head 与 base 都以固定 pnpm、禁 lifecycle scripts、禁 `.pnpmfile.cjs` hooks 的方式物化依赖路径；缺路径证据直接失败。首次引入时只允许 candidate baseline 逐字绑定 PR exact base、base lockfile digest、advisory 集和 finding exposure；bootstrap PR 不得同时修改 manifest、lockfile、workspace、npmrc、pnpm hook 或 patch。合并后不再走 bootstrap。
 - 扫描器固定使用 `https://registry.npmjs.org/`；安装与 audit 从环境 allowlist 启动，user/global npm config 固定到 `/dev/null`，仓库任意层级 `.npmrc` 在联网前 fail-closed。受信 base 的 `supply-chain-source-policy.mjs` 还会在 head 安装前拒绝 direct HTTPS/Git/tarball/file source、越界 workspace/link 和未经评审的 patch/config dependency，只允许官方 registry 版本与已跟踪 workspace 包；`supply-chain-audit.mjs` 即使脱离 workflow 单独执行，也会先重复执行同一依赖源准入。依赖 manifest、lock/workspace、npmrc、pnpm hook、source-policy 与 patch 同时进入 CODEOWNERS。未来若需要私有 registry 或其他 source，必须先引入独立的受信配置合同，不能在普通依赖 PR 中直接放行。
@@ -38,3 +38,5 @@ Baseline 是限时治理账，不是 `allow-ghsas`。每条 advisory 都有 reme
 旧受信 base 已到期时，读取它的非必需 `production dependency delta · canary` 仍会失败；不能把候选的新基线当作该检查已通过。此纠正变更依靠独立审查、实际零漏洞候选审计、真实 deploy 回归及全部既有 required checks 验证；合入后使用新主线作受信 base，后续比较仍正常拒绝任何新漏洞。没有新增 advisory 例外，也没有停用检查。
 
 本次锁文件重审的历史记录见 [changelog](../roadmap/changelog.md)，原始审计与前后回执见 [迁移基线证据](../evidence/security/20260920-baseline-refresh.json) 和 [工具链重审证据](../evidence/security/20260920-tooling-baseline-refresh.json)。
+
+2026-09-30 续期：当日 main 的 freshness canary 报 `BASELINE_STALE`，原因是 9-28/29（UTC）官方 advisory 库新收录的 15 条生产 advisory——undici 8.10.0 共 11 条（经 astro→unifont，仅 site-renderer 链）、fast-uri 3.1.6 共 3 条（经 `@temporalio/worker` 的 webpack→ajv）、multer 2.3.0 共 1 条（经 `@nestjs/platform-express`）。处置是升级而不是追加例外：fast-uri、multer 的精确 override 升至 3.1.8 / 2.4.0，另加以漏洞区间为选择器的 `undici@>=8.0.0 <8.10.2` → 8.10.2：pnpm 只对声明范围与该区间相交的 undici 依赖生效（这里是 unifont 的 `^8.0.0`），AI SDK 的 `^7.29.0` 不受影响。它和其他安全 override 一样是精确钉版，`pnpm update` 不会再移动这份 undici；unifont 自身要求 ≥8.10.2 后应撤掉。修复提交重审为零 advisory 后重新绑定，失效时间由 2026-10-03T13:46:50Z 延至 2026-10-14T16:13:14Z；零例外策略、verifier 与 required contexts 均不变。审计与前后回执见[冻结证据](../evidence/security/20260930-advisory-remediation-baseline-renewal.json)。

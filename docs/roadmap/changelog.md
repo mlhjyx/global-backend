@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-09-30 · Production advisory remediation and audit baseline renewal
+
+- 9-28/29（UTC）官方 advisory 库新收录 15 条生产 advisory，9-30 起 main 的 `production advisory baseline freshness · canary` 报 `BASELINE_STALE`（#568、#569 合入后的运行均如此）：undici 8.10.0 共 11 条（3 高危，经 astro→unifont，仅 site-renderer 链）、fast-uri 3.1.6 共 3 条（2 高危，经 `@temporalio/worker` 的 webpack→ajv）、multer 2.3.0 共 1 条（经 `@nestjs/platform-express`）。
+- fast-uri、multer 的安全 override 升至 3.1.8 / 2.4.0（后者也是 `@nestjs/platform-express` 11.2.7 自带的版本，并去掉了 concat-stream / typedarray）；另加以漏洞区间为选择器的 `undici@>=8.0.0 <8.10.2` → 8.10.2：pnpm 对声明范围与该区间相交的 undici 依赖生效（这里是 unifont 的 `^8.0.0`），AI SDK 的 `^7.29.0` 不相交，undici 7.29.1 未改动。按包过滤的 `pnpm update` 不会移动这份传递副本，还会扰动 vitest 的 peer 快照，所以沿用 lodash/uuid 那种精确钉版；unifont 自身要求 ≥8.10.2 后应撤掉这条 override。三个新包的 integrity 与官方 registry 一致，离线 `pnpm deploy` site-renderer（镜像构建路径）得到的也是 undici 8.10.2；本仓 API 没有文件上传路由，site-renderer 用 `@fontsource` 自带字体、不经 unifont 下载，两处升级触及的运行面都很小。
+- 官方 registry 生产审计清零（870 个依赖）；基线重新绑定到修复提交，失效时间由 2026-10-03 延至 2026-10-14T16:13:14Z（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20260930-advisory-remediation-baseline-renewal.json)）。Copy fixed-source 回执只重签指纹；`scripts/dependency-security-remediation.spec.mjs` 同步到新的安全下限（目前没有入口执行它）。
+
 ## 2026-09-30 · Technical quotes for discovery runs and company creation (G2)
 
 - `POST /query-plans/:planId/execute` 与 `POST /companies` 的技术报价不再恒为 unavailable，GrowthOS 可以为发现 run 和卖方企业建档签发 Grant。报价是整条链路的物理预留上限（每次模型调用按结构化输出的 2 次 wire 上限预留），逐阶段累加：词表归一、`public_web` 搜索与判站、名录页、单次检索类源（wikidata/osm/ted/openfda/展会）、Fit、GLEIF/Wikidata 富集、信号富集、网站监控注册；建档 = 首页加至多 6 个子页的抓取与逐页抽取。联系人发现仍返回 unavailable（不在公司级链路内）。
