@@ -111,7 +111,7 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
   });
 
   it('falls back to deterministic facts when the model fails with an ordinary error', async () => {
-    mocks.executeStructuredTaskWithRuntime.mockRejectedValue(new Error('gateway 502'));
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(new Error('gateway 502'));
     const profile = await new WebsiteProfileProvider({
       gateway: {} as never,
       broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
