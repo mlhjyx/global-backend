@@ -61,6 +61,11 @@ describe("clean @global/contracts platform-authority build", () => {
       await expect(lstat(resolve(packageRoot, "dist"))).rejects.toMatchObject({
         code: "ENOENT",
       });
+      // `pnpm run build` is two real tsc compiles of the contracts package:
+      // about 12-14 s alone at load ~20 and about 48 s inside a full parallel
+      // `gctl check` at load ~40 on a 4-core host, past the old 30 s budget.
+      // spawnSync blocks the event loop, so the test timeout is only checked
+      // after the build returns; it cannot interrupt a hung build.
       const build = spawnSync("pnpm", ["run", "build"], {
         cwd: packageRoot,
         encoding: "utf8",
@@ -136,5 +141,5 @@ describe("clean @global/contracts platform-authority build", () => {
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 });
