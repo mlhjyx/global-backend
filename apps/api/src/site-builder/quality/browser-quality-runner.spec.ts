@@ -42,7 +42,9 @@ const repositoryRoot = path.resolve(
 const SITE_ORIGIN = "https://preview.example.test";
 
 async function loadFixture() {
-  const fixtures = await buildM1ebGoldenFixtures(repositoryRoot);
+  const fixtures = await buildM1ebGoldenFixtures(repositoryRoot, {
+    ids: ["natural-origin-rich"],
+  });
   const fixture = fixtures.find(({ id }) => id === "natural-origin-rich");
   if (!fixture) throw new Error("golden fixture missing");
   const claimSnapshot: PublishableClaimSnapshot = {

@@ -28,9 +28,11 @@ let artifactSet: QualityArtifactSetV1;
 let evaluation: DesignEvaluationV2;
 
 beforeAll(async () => {
-  fixture = (await buildM1ebGoldenFixtures(repositoryRoot)).find(
-    (candidate) => candidate.mode === "sparse",
-  )!;
+  fixture = (
+    await buildM1ebGoldenFixtures(repositoryRoot, {
+      ids: ["natural-origin-sparse"],
+    })
+  ).find((candidate) => candidate.mode === "sparse")!;
   const claimIdentity = fixture.spec.copyBundleSet!.bundles.en!.claimSnapshot;
   const claimSnapshot: PublishableClaimSnapshot = {
     schemaVersion: "site-builder-publishable-claim-snapshot/v1",

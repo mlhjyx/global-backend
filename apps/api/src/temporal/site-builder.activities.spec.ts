@@ -2809,6 +2809,7 @@ describe("design brief activity freezes only supported capability facts", () => 
 function copyActivityFixture() {
   const golden = buildM1ebGoldenAssemblyInputs(
     ControlledAssets.resolveRepositoryRoot(),
+    { ids: ["natural-origin-rich"] },
   )[0].assembly;
   const site = {
     name: "Synthetic Company",
@@ -2956,8 +2957,9 @@ let activityGoldenFixtures: Awaited<ReturnType<typeof buildM1ebGoldenFixtures>>;
 let activityAssemblyInputs: ReturnType<typeof buildM1ebGoldenAssemblyInputs>;
 beforeAll(async () => {
   const root = ControlledAssets.resolveRepositoryRoot();
-  activityAssemblyInputs = buildM1ebGoldenAssemblyInputs(root);
-  activityGoldenFixtures = await buildM1ebGoldenFixtures(root);
+  const ids = ["natural-origin-rich"];
+  activityAssemblyInputs = buildM1ebGoldenAssemblyInputs(root, { ids });
+  activityGoldenFixtures = await buildM1ebGoldenFixtures(root, { ids });
 });
 async function controlledActivityFixture() {
   const golden = activityGoldenFixtures[0];

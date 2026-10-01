@@ -50,6 +50,7 @@ beforeAll(async () => {
   golden = (
     await buildM1ebGoldenFixtures(
       new URL("../../../../", import.meta.url).pathname,
+      { ids: ["natural-origin-rich"] },
     )
   )[0]!;
   root = await mkdtemp(path.join(tmpdir(), "m1f-release-v3-"));

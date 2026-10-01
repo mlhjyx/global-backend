@@ -14,9 +14,11 @@ describe("DeterministicQualityService replay fence", () => {
     const repositoryRoot = path.resolve(
       new URL("../../../../../", import.meta.url).pathname,
     );
-    const fixture = (await buildM1ebGoldenFixtures(repositoryRoot)).find(
-      ({ id }) => id === "natural-origin-rich",
-    );
+    const fixture = (
+      await buildM1ebGoldenFixtures(repositoryRoot, {
+        ids: ["natural-origin-rich"],
+      })
+    ).find(({ id }) => id === "natural-origin-rich");
     if (!fixture) throw new Error("golden fixture missing");
     const claimSnapshot: PublishableClaimSnapshot = {
       schemaVersion: "site-builder-publishable-claim-snapshot/v1",

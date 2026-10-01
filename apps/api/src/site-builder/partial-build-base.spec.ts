@@ -28,6 +28,7 @@ beforeAll(async () => {
   golden = (
     await buildM1ebGoldenFixtures(
       new URL("../../../../", import.meta.url).pathname,
+      { ids: ["natural-origin-rich"] },
     )
   )[0]!;
 });
