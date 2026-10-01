@@ -6,7 +6,7 @@
 
 ## 2026-10-01 · @grpc/grpc-js security floor
 
-- 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入），自 #581（c9e9b45b）起 main 的 `production advisory baseline freshness · canary` 报 `BASELINE_STALE`；e7ee633d 的官方 registry 生产审计正好是这 2 条。
+- 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。
 - #583 的月度刷新已把它解析到 1.14.5（Temporal SDK 1.24.0 的声明范围内，不需要 override），合入后 main（590b9f3e）的 canary 恢复 `FRESH`、零 advisory。#583 的回执只记录了刷新后的审计，没有写到这 2 条，在此补记。
 - 按 runbook，`scripts/dependency-security-remediation.spec.mjs` 新增 `@grpc/grpc-js` 下限 1.14.5，并把 1.14.4 登记进 `VULNERABLE_PREDECESSORS`：对 e7ee633d 的锁文件该下限失败，对当前锁文件通过。锁文件、override 与漏洞基线都不变。
 
