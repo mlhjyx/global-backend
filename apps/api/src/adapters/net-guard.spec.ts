@@ -105,6 +105,60 @@ describe('SSRF 出网护栏', () => {
     expect(dohLookup).not.toHaveBeenCalled();
   });
 
+  it('mihomo 开 IPv6 时 A/AAAA 全是 fake-IP（198.18/15 + fdfe:dcba:9876::/64）同样触发 DoH 回退', async () => {
+    const systemLookup: HostResolver = vi.fn(async () => [
+      { address: 'fdfe:dcba:9876::26', family: 6 },
+      { address: '198.18.0.38', family: 4 },
+    ]);
+    const dohLookup: HostResolver = vi.fn(async () => [
+      { address: '104.20.23.154', family: 4 },
+    ]);
+
+    const result = await resolvePublicIp('example.com', { systemLookup, dohLookup });
+
+    expect(result).toMatchObject({ safe: true, ip: '104.20.23.154', family: 4 });
+    expect(dohLookup).toHaveBeenCalledOnce();
+  });
+
+  it('只有 IPv6 fake-IP 答案时也触发 DoH 回退', async () => {
+    const dohLookup: HostResolver = vi.fn(async () => [
+      { address: '2606:4700:10::6814:179a', family: 6 },
+    ]);
+
+    const result = await resolvePublicIp('v6-only.example', {
+      systemLookup: async () => [{ address: 'fdfe:dcba:9876::1e', family: 6 }],
+      dohLookup,
+    });
+
+    expect(result).toMatchObject({ safe: true, ip: '2606:4700:10::6814:179a', family: 6 });
+    expect(dohLookup).toHaveBeenCalledOnce();
+  });
+
+  it('IPv6 fake-IP 段之外的 ULA、或 IPv6 fake-IP 混入真实私网，都不借 DoH 洗白', async () => {
+    const dohLookup: HostResolver = vi.fn(async () => [
+      { address: '104.20.23.154', family: 4 },
+    ]);
+    const neighbourUla = await resolvePublicIp('ula.example', {
+      systemLookup: async () => [{ address: 'fdfe:dcba:9876:1::1e', family: 6 }],
+      dohLookup,
+    });
+    const mixed = await resolvePublicIp('mixed-v6.example', {
+      systemLookup: async () => [
+        { address: 'fdfe:dcba:9876::26', family: 6 },
+        { address: 'fd12::3', family: 6 },
+      ],
+      dohLookup,
+    });
+
+    expect(neighbourUla).toMatchObject({ safe: false, reason: 'non_global_address' });
+    expect(mixed).toMatchObject({ safe: false, reason: 'non_global_address' });
+    expect(dohLookup).not.toHaveBeenCalled();
+  });
+
+  it('isPrivateIp：IPv6 fake-IP 地址本身仍按非全局地址拒绝', () => {
+    expect(isPrivateIp('fdfe:dcba:9876::26')).toBe(true);
+  });
+
   it('DoH 回退若返回 metadata/私网仍拒绝', async () => {
     const result = await resolvePublicIp('poisoned.example', {
       systemLookup: async () => [{ address: '198.18.0.88', family: 4 }],
