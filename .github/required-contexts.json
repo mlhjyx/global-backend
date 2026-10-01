@@ -62,8 +62,8 @@
     {
       "workflow": ".github/workflows/ci.yml",
       "action": "oasdiff/oasdiff-action/breaking",
-      "revision": "9c0494cfee8b8fcc9fb383ed2d5d3fbdae169b93",
-      "version": "v0.1.15"
+      "revision": "5e81b5c380accc6b523f9d32a637ca630e33620b",
+      "version": "v0.1.17"
     },
     {
       "workflow": ".github/workflows/security.yml",
@@ -128,14 +128,14 @@
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/init",
-      "revision": "b96794f015dfd88f77b49b1c93e0fa7110f94c63",
-      "version": "v4.38.0"
+      "revision": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+      "version": "v4.38.2"
     },
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/analyze",
-      "revision": "b96794f015dfd88f77b49b1c93e0fa7110f94c63",
-      "version": "v4.38.0"
+      "revision": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+      "version": "v4.38.2"
     },
     {
       "workflow": ".github/workflows/publish-runtime-image.yml",

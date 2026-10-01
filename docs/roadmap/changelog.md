@@ -42,6 +42,14 @@
 
 - 5.3 让关键词搜索按 `filters.trade_side` 等构造贸易角色词，但 `discovery.query_plan` 的过滤器 schema 没有 `business_model`，planner 也不一定填 `trade_side`，真实链路上角色词可能根本不出现。现在生成查询计划时，若 ICP 的 `company_attributes.trade_side`（优先）或 `business_model` 能识别出角色，就把规范值 `distributor` / `manufacturer` 写进未带角色的 planner 查询；planner 自己写了角色的保持不变，TED、openFDA 冷路径查询不受影响。写入发生在计划落库前，人工确认计划时可见。
 
+## 2026-09-30 · Monthly dependency refresh and audit baseline renewal
+
+- 按[依赖刷新 runbook](../backend/dependency-refresh.md) §3 做本月批量：`pnpm update -r '!sharp'` 在声明范围内移动约 260 个锁定包，`package.json` 的范围下限随之改写为实际版本。实际变化的直接依赖：NestJS common/core/platform-express 11.2.3→11.2.7、`@nestjs/throttler` 6.5.0→6.7.1、Temporal SDK 1.23.0→1.24.0、`ai` 7.0.105→7.0.124（及 Anthropic/OpenAI provider）、astro 7.3.2→7.3.5、AWS S3 SDK 3.1134→3.1144、jose 6.2.3→6.2.12、fast-xml-parser 5.11.0→5.11.2、`@redocly/cli` 2.53.2→2.57.0、eslint 10.10→10.11、typescript-eslint 8.70→8.71、prettier 3.9.7→3.9.9 等；传递依赖含 AI SDK 链的 undici 7.29.1→7.30.0、vite 8.1→8.3、webpack 5.110→5.111、Sentry 10.70→10.75。未纳入大版本：NestJS 12、`actions/dependency-review-action` v5。
+- `pnpm update` 不移动精确钉版，同族包因此显式处理：`apps/api` 精确钉的 `@temporalio/common`、`@temporalio/proto` 与其余 `@temporalio/*` 一起到 1.24.0——有界失败诊断转换器继承 SDK 的 `DefaultFailureConverter` 并自建失败类，必须与 worker/client 同版本；1.24.0 让 `ApplicationFailure` 保留原生 `Error.cause` 链，转换器、控制与重放共 71 个用例照常通过。`sharp` 用 `!sharp` 排除：确定性图片管线精确钉 0.35.4，否则 astro 链会带出 0.35.5 和第二份 libvips。`packages/db/package.json` 是仍与 Copy 固定源一致的绑定文件，丢弃它纯表面的范围改写（prisma 解析本来就是 6.19.3），漂移集合不越出已审范围。
+- 撤掉 `multer` override：`@nestjs/platform-express` 11.2.6 起自己钉 2.4.0 且是唯一消费者，解析不变。undici、fast-uri 两条保留（unifont 最新 1.0.2 仍要求 `undici ^8.0.0`，ajv 8.20.0 仍要求 `fast-uri ^3.0.1`）。
+- Actions：`github/codeql-action` v4.38.0→v4.38.2（默认 CodeQL bundle 2.27.1，只用于非必需 canary）；`oasdiff/oasdiff-action` v0.1.15→v0.1.17（镜像内 oasdiff 1.31.0→1.32.1，入口脚本只加了 shellcheck 注释，`review: "false"` 与 `OASDIFF_INTERNAL` 的隐私合同不变；两个版本离线重放本仓最近 40 次 `openapi.json` 变更，finding 逐条一致）。
+- 官方 registry 生产审计零 advisory（830 个依赖）；基线重新绑定到刷新提交，失效时间 2026-10-14T16:13:14Z → 2026-10-14T21:28:22Z（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20260930-monthly-dependency-refresh-baseline-renewal.json)）。上一次续期同在当天，所以只顺延数小时，下一次刷新仍须在 10-14 前合入。Copy fixed-source 回执只重签指纹（`HASH_ONLY`）。
+
 ## 2026-09-30 · Dependency security floors wired into the governance gate
 
 - `scripts/dependency-security-remediation.spec.mjs` 自 8-15 引入后从未被任何 runner 执行（不在 `governance:test` 入口、package 脚本、workflow 或 `gctl check` 里），#551 之后在 main 上 2/5 失败却无人察觉；安全合同页所说的「真实 deploy 版本不漂移」验证也因此一直没有在跑。现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行；`governance-path-contracts.spec.mjs` 拒绝移除该导入。

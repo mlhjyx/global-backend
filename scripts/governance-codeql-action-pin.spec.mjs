@@ -8,10 +8,10 @@ import { validateRequiredContexts } from "./governance-contracts.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = ".github/workflows/codeql-canary.yml";
-const revision = "b96794f015dfd88f77b49b1c93e0fa7110f94c63";
-const version = "v4.38.0";
-const tagObject = "4bd7200e1f146b1c937cae12d258b50f41a53cf8";
-const staleRevision = "cdf488f595d80d6e07e03d4674febd5ab45fa938";
+const revision = "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2";
+const version = "v4.38.2";
+const tagObject = "88585263c0627ee42c0e1c5143a112c8d6f4aa18";
+const staleRevision = "b96794f015dfd88f77b49b1c93e0fa7110f94c63";
 const actions = ["github/codeql-action/init", "github/codeql-action/analyze"];
 
 function read(path) {
@@ -28,7 +28,7 @@ function validate(policy, workflow) {
   });
 }
 
-test("CodeQL init and analyze are atomically policy-bound to the v4.38.0 peeled commit", () => {
+test("CodeQL init and analyze are atomically policy-bound to the v4.38.2 peeled commit", () => {
   const policy = JSON.parse(read(".github/required-contexts.json"));
   const workflow = read(workflowPath);
   const pins = policy.workflow_action_pins.filter(
