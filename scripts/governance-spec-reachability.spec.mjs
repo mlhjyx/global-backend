@@ -80,6 +80,99 @@ test("pnpm script expansion terminates on recursive scripts", () => {
   assert.deepEqual(paths, ["scripts/loop.spec.mjs"]);
 });
 
+test("only step run commands count, not step names, env values or echoed text", () => {
+  const workflow = [
+    "jobs:",
+    "  check:",
+    "    env:",
+    "      CMD: node --test scripts/env.spec.mjs",
+    "    steps:",
+    "      - name: node --test scripts/named.spec.mjs",
+    '        run: echo "node --test scripts/echoed.spec.mjs"',
+    "      - run: node --test scripts/real.spec.mjs",
+  ].join("\n");
+
+  const { paths } = findRunnerSpecPaths({
+    workflows: [{ path: "w.yml", text: workflow }],
+    rootScripts: {},
+  });
+
+  assert.deepEqual(paths, ["scripts/real.spec.mjs"]);
+});
+
+test("folded, literal, quoted and multi-line run scalars are read whole", () => {
+  const workflow = [
+    "jobs:",
+    "  check:",
+    "    steps:",
+    "      - run: >-",
+    "          node --test",
+    "          scripts/folded.spec.mjs",
+    "      - run: node --test",
+    "          scripts/plain.spec.mjs",
+    "      - run: | # literal block",
+    "          node --test scripts/literal.spec.mjs",
+    "        name: after the block",
+    '      - run: "node --test scripts/quoted.spec.mjs"',
+  ].join("\n");
+
+  const { paths } = findRunnerSpecPaths({
+    workflows: [{ path: "w.yml", text: workflow }],
+    rootScripts: {},
+  });
+
+  assert.deepEqual(paths, [
+    "scripts/folded.spec.mjs",
+    "scripts/literal.spec.mjs",
+    "scripts/plain.spec.mjs",
+    "scripts/quoted.spec.mjs",
+  ]);
+});
+
+test("steps and jobs switched off with a literal false condition do not count", () => {
+  const workflow = [
+    "jobs:",
+    "  disabled:",
+    "    if: false",
+    "    steps:",
+    "      - run: node --test scripts/job-off.spec.mjs",
+    "  enabled:",
+    "    steps:",
+    "      - if: ${{ false }}",
+    "        run: node --test scripts/step-off.spec.mjs",
+    "      - run: node --test scripts/late-off.spec.mjs",
+    "        if: 'false' # quoted",
+    "      - if: github.event_name == 'push'",
+    "        run: node --test scripts/conditional.spec.mjs",
+  ].join("\n");
+
+  const { paths } = findRunnerSpecPaths({
+    workflows: [{ path: "w.yml", text: workflow }],
+    rootScripts: {},
+  });
+
+  assert.deepEqual(paths, ["scripts/conditional.spec.mjs"]);
+});
+
+test("root-preserving pnpm flags before the script name still expand it", () => {
+  const workflow = [
+    "      - run: pnpm run --silent quiet",
+    "      - run: pnpm -w root",
+    "      - run: pnpm --filter @global/api scoped",
+  ].join("\n");
+
+  const { paths } = findRunnerSpecPaths({
+    workflows: [{ path: "w.yml", text: workflow }],
+    rootScripts: {
+      quiet: "node --test scripts/quiet.spec.mjs",
+      root: "node --test scripts/root.spec.mjs",
+      scoped: "node --test scripts/scoped.spec.mjs",
+    },
+  });
+
+  assert.deepEqual(paths, ["scripts/quiet.spec.mjs", "scripts/root.spec.mjs"]);
+});
+
 test("runner globs fail closed instead of guessing which specs they match", () => {
   const { paths, issues } = findRunnerSpecPaths({
     workflows: [
@@ -105,6 +198,8 @@ test("relative imports come from import syntax, not comments, strings or type-on
     "  helper,",
     '} from "./helper.mjs";',
     "import type { Shape } from './types.spec.mts';",
+    "import { type Only } from './all-types.spec.mts';",
+    "import Mixed, { type Kind } from './mixed.mjs';",
     "export type { Other } from './other-types.spec.mts';",
     'export * from "../shared/reexport.mjs";',
     "await import('./late.spec.mjs');",
@@ -120,6 +215,7 @@ test("relative imports come from import syntax, not comments, strings or type-on
   assert.deepEqual(findRelativeImports(source), [
     "./side-effect.spec.mjs",
     "./helper.mjs",
+    "./mixed.mjs",
     "../shared/reexport.mjs",
     "./late.spec.mjs",
     "./conditional.spec.mjs",

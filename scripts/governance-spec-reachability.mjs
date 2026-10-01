@@ -1,11 +1,12 @@
 // Which scripts/ specs a CI runner actually executes.
 //
-// A spec runs when a GitHub workflow `run` line passes it to `node --test` or
-// `tsx --test`, directly or through a root package.json script that the line
-// starts with `pnpm <script>`, or when a spec that runs imports it. Nothing
-// fails when a spec stops running, so such a spec drifts unnoticed; every spec
-// that no runner reaches must be listed in MANUAL_SPECS with the reason no gate
-// runs it and the command that does.
+// A spec runs when the `run:` command of a GitHub workflow step passes it to
+// `node --test` or `tsx --test`, directly or through a root package.json script
+// that the command starts with `pnpm <script>`, or when a spec that runs
+// imports it. Steps and jobs switched off with a literal false `if:` do not
+// count. Nothing fails when a spec stops running, so such a spec drifts
+// unnoticed; every spec that no runner reaches must be listed in MANUAL_SPECS
+// with the reason no gate runs it and the command that does.
 import { readdir, readFile } from "node:fs/promises";
 import { join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,17 @@ const SPEC_FILE = /\.(?:spec|test)\.[cm]?[jt]s$/;
 const GLOB_CHARACTER = /[*?[\]{}]/;
 const SHELL_TOKEN = /&&|\|\||[;&|]|[^\s;&|]+/g;
 const SHELL_SEPARATORS = new Set(["&&", "||", ";", "&", "|"]);
+const TEST_RUNNER = /(?:^|\/)(?:node|tsx)$/;
+const ROOT_PNPM_FLAGS = new Set([
+  "-s",
+  "--silent",
+  "-w",
+  "--workspace-root",
+  "--if-present",
+]);
+const LITERAL_FALSE = /^(?:false|\$\{\{\s*false\s*\}\})$/;
+const UNREACHABLE =
+  "no CI runner executes this spec: import it from scripts/governance-contracts.spec.mjs if it needs no containers, run it from a workflow, or list it in MANUAL_SPECS (scripts/governance-spec-reachability.mjs) with a reason and a run command";
 
 export const MANUAL_SPECS = Object.freeze({
   "scripts/execution-authority-policy.spec.mjs": Object.freeze({
@@ -77,6 +89,110 @@ function isScriptsGlob(argument) {
   );
 }
 
+function classifyTestArguments(tokens, start, origin) {
+  const found = { paths: [], issues: [] };
+  for (const argument of testArguments(tokens, start)) {
+    if (isScriptsGlob(argument)) {
+      found.issues.push(
+        issue(
+          "SPEC_RUNNER_GLOB_UNSUPPORTED",
+          origin,
+          `list the specs explicitly instead of the glob ${argument}`,
+        ),
+      );
+    } else if (
+      argument.startsWith(`${SCRIPTS_DIRECTORY}/`) &&
+      SPEC_FILE.test(argument)
+    ) {
+      found.paths.push(argument);
+    }
+  }
+  return found;
+}
+
+function pnpmScript(tokens, start) {
+  let index = start;
+  while (ROOT_PNPM_FLAGS.has(tokens[index])) index += 1;
+  if (tokens[index] !== "run") return tokens[index];
+  index += 1;
+  while (ROOT_PNPM_FLAGS.has(tokens[index])) index += 1;
+  return tokens[index];
+}
+
+function indentation(line) {
+  return line.search(/\S/);
+}
+
+function yamlScalar(value) {
+  const trimmed = value.replace(/(^|\s)#.*$/, "").trim();
+  return /^(["']).*\1$/s.test(trimmed) ? trimmed.slice(1, -1) : trimmed;
+}
+
+function startsItem(line, column) {
+  return line.length > column && /^\s*-\s+$/.test(line.slice(0, column));
+}
+
+// Lines of the YAML mapping whose keys sit at `column` around line `index`.
+function mappingLines(lines, index, column) {
+  const outside = (line) => {
+    const indent = indentation(line);
+    return indent >= 0 && indent < column;
+  };
+  let start = index;
+  while (start > 0 && !startsItem(lines[start], column)) {
+    const previous = lines[start - 1];
+    if (outside(previous) && !startsItem(previous, column)) break;
+    start -= 1;
+  }
+  let end = index + 1;
+  while (end < lines.length && !outside(lines[end])) end += 1;
+  return lines.slice(start, end);
+}
+
+function switchedOff(mapping, column) {
+  return mapping.some(
+    (line) =>
+      line.slice(column).startsWith("if:") &&
+      LITERAL_FALSE.test(yamlScalar(line.slice(column + 3))),
+  );
+}
+
+function stepSwitchedOff(lines, index, column) {
+  if (switchedOff(mappingLines(lines, index, column), column)) return true;
+  for (let line = index; line >= 0; line -= 1) {
+    const steps = lines[line].match(/^(\s*)steps:\s*(?:#.*)?$/);
+    if (steps) {
+      const jobColumn = steps[1].length;
+      return switchedOff(mappingLines(lines, line, jobColumn), jobColumn);
+    }
+  }
+  return false;
+}
+
+// The `run:` commands of workflow steps, with YAML block, folded, quoted and
+// multi-line scalars read whole.
+function workflowRunCommands(text) {
+  const lines = text.split(/\r?\n/);
+  const commands = [];
+  lines.forEach((line, index) => {
+    const match = line.match(/^(\s*(?:-\s+)?)run:(?:\s+(.*))?$/);
+    if (!match || stepSwitchedOff(lines, index, match[1].length)) return;
+    const continuation = [];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const indent = indentation(lines[next]);
+      if (indent >= 0 && indent <= match[1].length) break;
+      continuation.push(lines[next].trim());
+    }
+    const head = (match[2] ?? "").replace(/(^|\s)#.*$/, "").trim();
+    if (/^[|>][-+0-9]*$/.test(head)) {
+      commands.push(continuation.join(head.startsWith("|") ? "\n" : " "));
+    } else {
+      commands.push(yamlScalar([head, ...continuation].join(" ")));
+    }
+  });
+  return commands;
+}
+
 export function findRunnerSpecPaths({ workflows, rootScripts }) {
   const paths = new Set();
   const issues = [];
@@ -84,38 +200,46 @@ export function findRunnerSpecPaths({ workflows, rootScripts }) {
   const scan = (text, origin) => {
     for (const line of commandLines(text)) {
       const tokens = line.match(SHELL_TOKEN) ?? [];
+      let segment = 0;
       tokens.forEach((token, index) => {
-        if (token === "pnpm") {
-          const script =
-            tokens[index + 1] === "run" ? tokens[index + 2] : tokens[index + 1];
+        if (SHELL_SEPARATORS.has(token)) {
+          segment = index + 1;
+        } else if (token === "pnpm") {
+          const script = pnpmScript(tokens, index + 1);
           if (Object.hasOwn(rootScripts, script) && !expanded.has(script)) {
             expanded.add(script);
             scan(rootScripts[script], origin);
           }
-          return;
-        }
-        if (token !== "--test") return;
-        for (const argument of testArguments(tokens, index + 1)) {
-          if (isScriptsGlob(argument)) {
-            issues.push(
-              issue(
-                "SPEC_RUNNER_GLOB_UNSUPPORTED",
-                origin,
-                `list the specs explicitly instead of the glob ${argument}`,
-              ),
-            );
-          } else if (
-            argument.startsWith(`${SCRIPTS_DIRECTORY}/`) &&
-            SPEC_FILE.test(argument)
-          ) {
-            paths.add(argument);
-          }
+        } else if (
+          token === "--test" &&
+          tokens.slice(segment, index).some((word) => TEST_RUNNER.test(word))
+        ) {
+          const found = classifyTestArguments(tokens, index + 1, origin);
+          found.paths.forEach((path) => paths.add(path));
+          issues.push(...found.issues);
         }
       });
     }
   };
-  for (const { path, text } of workflows) scan(text, path);
+  for (const { path, text } of workflows) {
+    for (const command of workflowRunCommands(text)) scan(command, path);
+  }
   return { paths: [...paths].sort(), issues: sortIssues(issues) };
+}
+
+// An import whose bindings are all `type` is elided as well: tsconfig.base.json
+// does not enable verbatimModuleSyntax.
+function isTypeOnlyImport(clause) {
+  if (clause === undefined) return false;
+  if (clause.isTypeOnly) return true;
+  const bindings = clause.namedBindings;
+  return (
+    clause.name === undefined &&
+    bindings !== undefined &&
+    ts.isNamedImports(bindings) &&
+    bindings.elements.length > 0 &&
+    bindings.elements.every((element) => element.isTypeOnly)
+  );
 }
 
 // Parsed rather than pattern-matched, so imports inside comments or strings
@@ -124,7 +248,7 @@ export function findRelativeImports(source) {
   const found = [];
   const visit = (node) => {
     if (
-      (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) ||
+      (ts.isImportDeclaration(node) && !isTypeOnlyImport(node.importClause)) ||
       (ts.isExportDeclaration(node) && !node.isTypeOnly)
     ) {
       if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -159,27 +283,9 @@ function isCompleteManualEntry(entry) {
   );
 }
 
-export async function analyzeSpecReachability({
-  files,
-  runnerPaths,
-  readSource,
-  manualSpecs,
-}) {
-  const known = new Set(files);
-  const issues = [];
+async function walkImports(roots, known, readSource) {
   const visited = new Set();
-  const queue = [];
-  for (const path of runnerPaths) {
-    if (known.has(path)) queue.push(path);
-    else
-      issues.push(
-        issue(
-          "SPEC_RUNNER_TARGET_MISSING",
-          path,
-          "a CI runner names a spec that does not exist",
-        ),
-      );
-  }
+  const queue = [...roots];
   while (queue.length > 0) {
     const path = queue.shift();
     if (visited.has(path)) continue;
@@ -189,17 +295,11 @@ export async function analyzeSpecReachability({
       if (known.has(target) && !visited.has(target)) queue.push(target);
     }
   }
-  const specs = files.filter((path) => SPEC_FILE.test(path));
-  for (const path of specs) {
-    if (visited.has(path) || Object.hasOwn(manualSpecs, path)) continue;
-    issues.push(
-      issue(
-        "SPEC_UNREACHABLE",
-        path,
-        "no CI runner executes this spec: import it from scripts/governance-contracts.spec.mjs if it needs no containers, run it from a workflow, or list it in MANUAL_SPECS (scripts/governance-spec-reachability.mjs) with a reason and a run command",
-      ),
-    );
-  }
+  return visited;
+}
+
+function manualSpecIssues(manualSpecs, specs, visited) {
+  const issues = [];
   for (const [path, entry] of Object.entries(manualSpecs)) {
     if (!specs.includes(path)) {
       issues.push(
@@ -228,6 +328,37 @@ export async function analyzeSpecReachability({
       );
     }
   }
+  return issues;
+}
+
+export async function analyzeSpecReachability({
+  files,
+  runnerPaths,
+  readSource,
+  manualSpecs,
+}) {
+  const known = new Set(files);
+  const specs = files.filter((path) => SPEC_FILE.test(path));
+  const visited = await walkImports(
+    runnerPaths.filter((path) => known.has(path)),
+    known,
+    readSource,
+  );
+  const issues = [
+    ...runnerPaths
+      .filter((path) => !known.has(path))
+      .map((path) =>
+        issue(
+          "SPEC_RUNNER_TARGET_MISSING",
+          path,
+          "a CI runner names a spec that does not exist",
+        ),
+      ),
+    ...specs
+      .filter((path) => !visited.has(path) && !Object.hasOwn(manualSpecs, path))
+      .map((path) => issue("SPEC_UNREACHABLE", path, UNREACHABLE)),
+    ...manualSpecIssues(manualSpecs, specs, visited),
+  ];
   return {
     reachable: specs.filter((path) => visited.has(path)),
     issues: sortIssues(issues),
