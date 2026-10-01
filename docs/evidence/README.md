@@ -19,6 +19,8 @@
 
 [2026-09-30 月度依赖刷新与基线续期](security/20260930-monthly-dependency-refresh-baseline-renewal.json)：范围内批量升级（Temporal SDK 锁步到 1.24.0、sharp 保持 0.35.4、撤掉已被上游覆盖的 multer override）后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`，`valid_until` 延至 2026-10-14T21:28:22Z；不作为运行或发布证明。
 
+[2026-10-01 开发依赖告警刷新](security/20261001-dev-dependency-alert-refresh.json)：nx 链上 axios、brace-expansion 的精确 override 与安全下限上调后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长，faker 5.5.3（仅 Prism 开发依赖）仍开放。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |

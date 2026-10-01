@@ -10,6 +10,13 @@
 - #583 的月度刷新已把它解析到 1.14.5（Temporal SDK 1.24.0 的声明范围内，不需要 override），合入后 main（590b9f3e）的 canary 恢复 `FRESH`、零 advisory。#583 的回执只记录了刷新后的审计，没有写到这 2 条，在此补记。
 - 按 runbook，`scripts/dependency-security-remediation.spec.mjs` 新增 `@grpc/grpc-js` 下限 1.14.5，并把 1.14.4 登记进 `VULNERABLE_PREDECESSORS`：对 e7ee633d 的锁文件该下限失败，对当前锁文件通过。锁文件、override 与漏洞基线都不变。
 
+## 2026-10-01 · Dev-dependency alert refresh (axios, brace-expansion)
+
+- 官方全量审计（含开发依赖）在 main 上报 16 条：axios 12 条（7 高危，`<1.20.0`）、brace-expansion 3 条（2 高危，`>=4.0.0 <5.0.12`）、`@faker-js/faker` 1 条（高危，`<=10.4.0`）；生产审计为 0。axios 与 brace-expansion 都来自 nx 23.2.1（当前最新版）自己的精确钉版——`axios 1.18.1`、`minimatch 10.2.5`（后者以 `^5.0.5` 解析出 brace-expansion 5.0.9）——所以 `pnpm update` 移不动。
+- 加两条以漏洞区间为选择器的精确 override：`"axios@<1.20.0": "1.20.0"`、`"brace-expansion@>=4.0.0 <5.0.12": "5.0.12"`（minimatch 3/5 用的 1.x、2.x 线不在区间内，不受影响）。锁文件只变这两个包：axios 1.18.1→1.20.0，brace-expansion 5.0.9 并入 5.0.12；nx 照常运行。安全下限表新增 axios ≥1.20.0、brace-expansion（自 4.0.0 起）≥5.0.12，并登记前任 1.18.1、5.0.9：对上一版锁文件失败，对当前锁文件通过。
+- 全量审计由 16 条降到 1 条，只剩 faker 5.5.3（`@stoplight/prism-cli` → `json-schema-faker`，仅 contracts 的 mock 开发依赖）：强制换成 faker 10 会让 json-schema-faker 失效，继续开放。Go 侧原生 Temporal 镜像的 otel 3 条低危已于 10-01 按可容忍风险关闭，下次重发该镜像时升级。
+- 生产审计仍为零 advisory（830 个依赖）；基线重新绑定到本提交，`valid_until` 不变（2026-10-14T21:28:22Z）；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261001-dev-dependency-alert-refresh.json)。Copy fixed-source 回执只重签指纹。
+
 ## 2026-10-01 · Egress guard recognizes mihomo IPv6 fake IPs
 
 - xin 的 Clash Verge（mihomo，TUN + fake-ip）打开 IPv6 后，公网域名同时解析出 198.18.x 与默认 `fake-ip-range6` 里的 `fdfe:dcba:9876::x`。出网护栏 `net-guard.ts` 与 Crawl4AI 镜像里的 `fakeip_resolver.py` 都只认 198.18/15：只有全部答案都是假 IP 时才改查固定 Cloudflare DoH，混进 IPv6 假 IP 后就按私网拒绝。结果是 `POST /companies` 对任何官网都报 `INVALID_URL`，抓取也会全部失败。

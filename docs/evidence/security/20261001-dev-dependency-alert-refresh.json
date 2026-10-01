@@ -1,0 +1,261 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-10-01 dev-dependency alert refresh (axios, brace-expansion); not runtime/release/UAT evidence",
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "AUDIT_INVALID_HOLD",
+        "hold": true,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [
+          "BASELINE_SOURCE_LOCK_MISMATCH"
+        ],
+        "provenance": {
+          "subject_commit": "deb57c122e1a4b49ef19677972058d059eacd486",
+          "lockfile_digest": "sha256:5debd0be57cee4bd749e009ae0425dfe80a7998235b679071ce20687c6e14252",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-01T17:01:42.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "deb57c122e1a4b49ef19677972058d059eacd486",
+          "lockfile_digest": "sha256:5debd0be57cee4bd749e009ae0425dfe80a7998235b679071ce20687c6e14252",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-01T17:01:42.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ],
+  "full_audit": {
+    "source": "Official-registry `pnpm audit --registry=https://registry.npmjs.org --json` including dev dependencies (user/global npm config at /dev/null); projection of the advisory list. Development advisories are outside the production baseline and recorded for the alert refresh only.",
+    "before": {
+      "subject_commit": "5eeb9d81a807ee9104176a8e3c8e6a62f5d106f6",
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 6,
+        "high": 10,
+        "critical": 0
+      },
+      "totalDependencies": 1431,
+      "advisories": [
+        {
+          "github_advisory_id": "GHSA-qxc2-j82w-r537",
+          "module_name": "@faker-js/faker",
+          "severity": "high",
+          "vulnerable_versions": "<=10.4.0",
+          "patched_versions": ">=10.5.0",
+          "installed_versions": [
+            "5.5.3"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-3pq3-5fj3-cg6v",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.13.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-44g4-m2mj-wpvx",
+          "module_name": "axios",
+          "severity": "moderate",
+          "vulnerable_versions": ">=1.15.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-4hqw-qxg8-jxx2",
+          "module_name": "axios",
+          "severity": "moderate",
+          "vulnerable_versions": ">=1.12.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-542g-h47m-68v8",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.13.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-9fr6-4gfg-395g",
+          "module_name": "axios",
+          "severity": "moderate",
+          "vulnerable_versions": ">=1.0.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-c29m-xwm3-cm6r",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.16.1 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-j8rh-479h-cp32",
+          "module_name": "axios",
+          "severity": "moderate",
+          "vulnerable_versions": ">=1.0.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-m8m8-qj5v-23w3",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.15.2 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-mghh-pgcx-3jjj",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.15.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-r4gj-5m52-g5wh",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.17.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-vh66-26gq-q6x8",
+          "module_name": "axios",
+          "severity": "moderate",
+          "vulnerable_versions": ">=1.7.0 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-x97p-jq2g-jp4f",
+          "module_name": "axios",
+          "severity": "high",
+          "vulnerable_versions": ">=1.15.1 <1.20.0",
+          "patched_versions": ">=1.20.0",
+          "installed_versions": [
+            "1.18.1"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-6j4f-fj2g-mc7p",
+          "module_name": "brace-expansion",
+          "severity": "high",
+          "vulnerable_versions": ">=4.0.0 <5.0.10",
+          "patched_versions": ">=5.0.10",
+          "installed_versions": [
+            "5.0.9"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-q2hr-2g5m-vwhr",
+          "module_name": "brace-expansion",
+          "severity": "moderate",
+          "vulnerable_versions": ">=4.0.0 <5.0.12",
+          "patched_versions": ">=5.0.12",
+          "installed_versions": [
+            "5.0.9"
+          ]
+        },
+        {
+          "github_advisory_id": "GHSA-qhr7-859c-m2p7",
+          "module_name": "brace-expansion",
+          "severity": "high",
+          "vulnerable_versions": ">=4.0.0 <5.0.11",
+          "patched_versions": ">=5.0.11",
+          "installed_versions": [
+            "5.0.9"
+          ]
+        }
+      ]
+    },
+    "after": {
+      "subject_commit": "deb57c122e1a4b49ef19677972058d059eacd486",
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 1,
+        "critical": 0
+      },
+      "totalDependencies": 1430,
+      "advisories": [
+        {
+          "github_advisory_id": "GHSA-qxc2-j82w-r537",
+          "module_name": "@faker-js/faker",
+          "severity": "high",
+          "vulnerable_versions": "<=10.4.0",
+          "patched_versions": ">=10.5.0",
+          "installed_versions": [
+            "5.5.3"
+          ]
+        }
+      ]
+    }
+  }
+}
