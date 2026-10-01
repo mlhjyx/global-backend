@@ -39,7 +39,8 @@ USER appuser
 RUN python -m playwright install chromium chromium-headless-shell
 
 # Preserve upstream's fail-closed global-IP check + browser pinning proxy. Only replace
-# the all-198.18/15 mihomo answer with fixed DoH answers before that existing check.
+# an all-fake-IP mihomo answer (198.18/15, plus fdfe:dcba:9876::/64 when its IPv6 is on)
+# with fixed DoH answers before that existing check.
 USER root
 COPY --chown=root:root fakeip_resolver.py patch_egress_broker.py /app/
 RUN python /app/patch_egress_broker.py \

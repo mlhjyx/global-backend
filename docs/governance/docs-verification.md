@@ -34,6 +34,7 @@ pnpm docs:verify
 | RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；artifact 路径逃逸、符号链接、非普通文件或超过 10 MiB；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
 | Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权 |
 | Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
+| Spec 可达性 | `scripts/` 下的 spec 既不在 workflow 经 `node --test`/`tsx --test`（直接或经根 package.json 脚本）执行的入口及其 import 链上，也没有带理由与运行命令登记进 `MANUAL_SPECS`；登记项已失效（已被 runner 执行或文件已删）；runner 用 glob 或指向不存在的 spec | spec 内容正确、手动 spec 近期跑过，或 `scripts/` 以外的测试有 runner 执行 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。

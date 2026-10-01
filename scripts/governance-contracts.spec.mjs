@@ -7,6 +7,9 @@ import "./governance-ci-topology.spec.mjs";
 import "./governance-document-drift.spec.mjs";
 import "./environment-parity-policy.spec.mjs";
 import "./governance-main-worktree-sync.spec.mjs";
+import "./governance-main-worktree-sync-filesystem.spec.mjs";
+import "./worktree-inventory.spec.mjs";
+import "./governance-spec-reachability.spec.mjs";
 import "./governance-codeql-action-pin.spec.mjs";
 import "./governance-oasdiff-action-pin.spec.mjs";
 import "./copy-fixed-source-impact.spec.mjs";
@@ -14,11 +17,13 @@ import "./copy-fixed-source-impact-resign.spec.mjs";
 import "./supply-chain-gates.spec.mjs";
 import "./dependency-security-remediation.spec.mjs";
 import "./runtime-deployment-contract.spec.mjs";
+import "./runtime-artifact-contract.spec.mjs";
 import "./ghcr-runtime-publication.spec.mjs";
 import "./docker-image-config-path.spec.mjs";
 import "./temporal-platform-infrastructure-contract.spec.mjs";
 import "./temporal-native-publication.spec.mjs";
 import "./platform-egress-fence-migration.spec.mjs";
+import "./verify-platform-authority-policy-import.spec.mjs";
 
 import {
   renderProviderRegistry,

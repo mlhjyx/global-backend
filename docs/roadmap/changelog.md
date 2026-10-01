@@ -17,6 +17,12 @@
 - 全量审计由 16 条降到 1 条，只剩 faker 5.5.3（`@stoplight/prism-cli` → `json-schema-faker`，仅 contracts 的 mock 开发依赖）：强制换成 faker 10 会让 json-schema-faker 失效，继续开放。Go 侧原生 Temporal 镜像的 otel 3 条低危已于 10-01 按可容忍风险关闭，下次重发该镜像时升级。
 - 生产审计仍为零 advisory（830 个依赖）；基线重新绑定到本提交，`valid_until` 不变（2026-10-14T21:28:22Z）；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261001-dev-dependency-alert-refresh.json)。Copy fixed-source 回执只重签指纹。
 
+## 2026-10-01 · Egress guard recognizes mihomo IPv6 fake IPs
+
+- xin 的 Clash Verge（mihomo，TUN + fake-ip）打开 IPv6 后，公网域名同时解析出 198.18.x 与默认 `fake-ip-range6` 里的 `fdfe:dcba:9876::x`。出网护栏 `net-guard.ts` 与 Crawl4AI 镜像里的 `fakeip_resolver.py` 都只认 198.18/15：只有全部答案都是假 IP 时才改查固定 Cloudflare DoH，混进 IPv6 假 IP 后就按私网拒绝。结果是 `POST /companies` 对任何官网都报 `INVALID_URL`，抓取也会全部失败。
+- 两处都把 `fdfe:dcba:9876::/64` 认作 mihomo 假 IP。规则不变：只有**全部**答案都是假 IP 才走 DoH，DoH 的答案照旧要过全局地址校验；该 /64 之外的 ULA、假 IP 与真实私网的混合答案仍直接拒绝。TS 与 Python 两侧都补了正反例。Crawl4AI 是本机自建的 `global-crawl4ai:local`，下次重建时生效；后端随下一次运行时镜像生效。
+
+
 ## 2026-09-30 · Website profiling in the discovery run (G3 slice 5.4b, part 2)
 
 - discovery run 在归一之后、Fit 之前新增「官网画像」阶段 `profileWebsitesForRun`：按公司绑定主体抓首页与 Impressum，把贸易角色、置信度与来源、是否自有制造、在售品牌与两个品牌信号、法定名称、登记号（带法院）、税号、证据片段写入 `website_profile` 命名空间，登记号与税号作为带校验的语义标识符进入属性白名单。主体被拒只跳过该公司并计入 PARTIAL，控制错误照旧让 run 失败；30 天内画像过的公司不重抓；每个 run 至多 50 家。工作流以 patch `discovery-website-profile-v1` 守卫，旧历史重放不变；阶段为尽力而为，失败时 Fit 照常判定。
@@ -68,6 +74,13 @@
 - `scripts/dependency-security-remediation.spec.mjs` 自 8-15 引入后从未被任何 runner 执行（不在 `governance:test` 入口、package 脚本、workflow 或 `gctl check` 里），#551 之后在 main 上 2/5 失败却无人察觉；安全合同页所说的「真实 deploy 版本不漂移」验证也因此一直没有在跑。现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行；`governance-path-contracts.spec.mjs` 拒绝移除该导入。
 - 语义由「精确快照必须存在 + root overrides 全等」改为锁文件上的已审下限：例行升级（如 @nestjs/core 11.2.3→11.2.7）不再误报，而修补版旁边混入的旧版本（如 qs 6.14.0 与 6.16.0 并存）此前两层断言都会放过，现在失败；撤掉已被上游范围覆盖的 override 不受影响，但 override 只能精确钉到正式版本（范围、别名、git/URL 来源都失败）；锁文件里 URL/git/file 来源的同名包按无法比较处理并失败；已登记的漏洞前任（原先分在两张表，现合为 `VULNERABLE_PREDECESSORS`）必须低于下限，防止下调下限；`third-party-web` 仍由真实 pnpm deploy 回归钉住。对 9-30 修复前的 main 锁文件，下限正好报出 fast-uri 3.1.6、multer 2.3.0、undici 8.10.0。
 - 代价实测：整份 spec 在 xin（4 核共用、load 12–21）上 2.7–4.3 秒；deploy 回归连续 20 次与 6 路并发 ×5 轮共 50/50 通过，load 37 时最慢 20 秒（单命令超时 50 秒、用例 120 秒）；在 load 35 的完整 `governance:verify` 中占 19.7 秒。
+
+## 2026-09-30 · Scripts specs must be reachable from a CI runner
+
+- 上一条不是孤例：`scripts/` 下另有 8 个 spec 从未被任何 runner 执行。逐个在 xin（4 核共用、load 12–22）上跑：`governance-main-worktree-sync-filesystem`（18 项，0.8 秒）、`runtime-artifact-contract`（13 项，0.4 秒）、`verify-platform-authority-policy-import`（2 项，0.4 秒）、`worktree-inventory`（8 项，0.9 秒）全过且零容器，现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行。
+- `governance-github-readback.spec.mjs` 与 `governance-github-readback.mjs` 是 #566 删除 approval/readback 簇时漏掉的两个文件（名字不带 `-` 后缀），它们导入的 5 个 spec 与 4 个模块已随该簇删除，加载即报 `ERR_MODULE_NOT_FOUND`；按该簇已获批准的删除一并移除。
+- 三个按设计不进零容器门的 spec 登记为手动（`MANUAL_SPECS`，各带理由与运行命令）：`platform-authority-policy-import.cross-repo` 需要 GrowthOS 权威检出，本机经 `node scripts/verify-platform-authority-policy-import.mjs` 实测 `VERIFIED`（4.0 秒）；`runtime-worker-namespace-lease.postgres` 起一次性 PostgreSQL 容器，默认跳过，设 `RUN_RUNTIME_WORKER_NAMESPACE_POSTGRES=1` 时 7 项全过（24.9 秒，容器已自动清理）；`execution-authority-policy` 在 main 上 6 项中 1 项失败，策略检查报 25 个问题：钉住的 `router-model-gateway.ts` 指纹自 d5e4bc42（8-26）起就不再匹配，Tool、Model 任务与投影清单也跟不上现有源码。重新钉 Router/ToolBroker 围栏要单独做安全复核，本次只登记、不改。
+- 新增 `scripts/governance-spec-reachability.mjs`：只读 workflow 步骤的 `run:` 命令（折叠、字面、引号与多行标量整段读取，字面 `if: false` 关掉的步骤或作业不算），`pnpm <script>` 展开为根 package.json 脚本，收集同一命令段里 `node`/`tsx` 的 `--test` 参数，再沿 spec 与辅助模块的 import 求闭包（按 TypeScript 语法树判断，注释、字符串与纯类型导入不算）。`governance:test` 的独立根 `governance-path-contracts.spec.mjs` 断言 `scripts/` 下每个 `*.spec.*`/`*.test.*` 都可达或已登记为手动；登记缺理由或运行命令、已被 runner 执行、文件已删，以及 runner 用 glob 或指向不存在的 spec，都会失败。在仓库副本上做的 15 项变异（删导入、用块注释注掉导入、新增孤儿、删 CI 步骤、把运行步骤换成 echo、用 `if: false` 关掉步骤或唯一运行它的作业、glob runner 等）全部被拦下。`governance:test` 由 221 项增至 276 项，xin 上 load 15–17 时 51–64 秒（改动前 load 14.6 下 45 秒）。
 
 ## 2026-09-30 · Production advisory remediation and audit baseline renewal
 

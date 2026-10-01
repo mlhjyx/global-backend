@@ -15,6 +15,7 @@ import {
   readRepoRegularFile,
   resolveRepoOutputFile,
 } from "./governance-path-contracts.mjs";
+import { inspectRepositorySpecReachability } from "./governance-spec-reachability.mjs";
 
 test("repository artifact reader admits only bounded regular files", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "governance-path-"));
@@ -105,5 +106,15 @@ test("the explicit root governance entry loads the CI topology suite", async () 
     governanceContractsTest,
     /^import "\.\/dependency-security-remediation\.spec\.mjs";$/m,
     "the independently rooted governance path suite must reject removal of the dependency security floor suite import",
+  );
+});
+
+test("every scripts spec runs in a CI runner or is registered as manual with a reason", async () => {
+  const { issues } = await inspectRepositorySpecReachability();
+
+  assert.deepEqual(
+    issues.map(({ code, path, message }) => `${code} ${path}: ${message}`),
+    [],
+    "the independently rooted governance path suite must reject a scripts spec that no CI runner executes",
   );
 });

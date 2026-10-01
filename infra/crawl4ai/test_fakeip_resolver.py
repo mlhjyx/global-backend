@@ -21,6 +21,30 @@ class FakeIpFallbackTest(unittest.TestCase):
         self.assertEqual(resolver("example.com", 443), [answer("104.20.23.154")])
         doh.assert_called_once_with("example.com", 443)
 
+    def test_ipv6_fake_ip_answers_also_use_fixed_doh(self):
+        for answers in (
+            [answer("fdfe:dcba:9876::26"), answer("198.18.0.38")],
+            [answer("fdfe:dcba:9876::1e")],
+        ):
+            with self.subTest(answers=answers):
+                system = Mock(return_value=answers)
+                doh = Mock(return_value=[answer("104.20.23.154")])
+                resolver = fakeip_resolver.make_resolver(system, doh_lookup=doh, enabled=True)
+                self.assertEqual(resolver("example.com", 443), [answer("104.20.23.154")])
+                doh.assert_called_once_with("example.com", 443)
+
+    def test_ula_outside_fake_range_or_mixed_with_private_never_falls_back(self):
+        doh = Mock(return_value=[answer("104.20.23.154")])
+        for answers in (
+            [answer("fdfe:dcba:9876:1::1e")],
+            [answer("fdfe:dcba:9876::26"), answer("fd12::3")],
+        ):
+            with self.subTest(answers=answers):
+                system = Mock(return_value=answers)
+                resolver = fakeip_resolver.make_resolver(system, doh_lookup=doh, enabled=True)
+                self.assertEqual(resolver("private.example", 443), answers)
+        doh.assert_not_called()
+
     def test_private_and_mixed_answers_never_fall_back(self):
         doh = Mock(return_value=[answer("104.20.23.154")])
         for answers in (

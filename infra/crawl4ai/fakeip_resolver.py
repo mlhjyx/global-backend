@@ -2,10 +2,12 @@
 
 The pinned upstream image rejects every non-global address and routes Chromium
 through a localhost proxy that dials the validated IP. On this Ubuntu host,
-mihomo returns 198.18/15 for every public DNS query, so the correct guard rejects
-all public sites. This adapter changes only resolution: if and only if every
-system answer is in 198.18/15, resolve A/AAAA through a fixed DoH endpoint and
-hand those answers back to the upstream global-address check and pinning proxy.
+mihomo returns 198.18/15 for every public DNS query (and, with IPv6 enabled, AAAA
+answers from its default fake-ip-range6 fdfe:dcba:9876::/64), so the correct guard
+rejects all public sites. This adapter changes only resolution: if and only if every
+system answer is in one of those two fake-IP ranges, resolve A/AAAA through a fixed
+DoH endpoint and hand those answers back to the upstream global-address check and
+pinning proxy.
 
 Real private, metadata, loopback, mixed fake/private, redirects and rebinding are
 still decided by the upstream broker. This module never has an allow-internal
@@ -24,7 +26,10 @@ import urllib.parse
 import urllib.request
 from typing import Callable
 
-_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+_FAKE_IP_NETWORKS = (
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("fdfe:dcba:9876::/64"),
+)
 _DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query"
 _MAX_DOH_RESPONSE = 64 * 1024
 _CACHE_TTL_CAP_SECONDS = 60
@@ -48,7 +53,11 @@ def _all_fake_ip(answers: list[tuple]) -> bool:
     if any(ip is None for ip in ips):
         return False
     try:
-        return all(ipaddress.ip_address(ip) in _FAKE_IP_NETWORK for ip in ips if ip)
+        return all(
+            any(ipaddress.ip_address(ip) in network for network in _FAKE_IP_NETWORKS)
+            for ip in ips
+            if ip
+        )
     except ValueError:
         return False
 
