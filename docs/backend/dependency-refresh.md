@@ -67,6 +67,8 @@ node scripts/supply-chain-audit.mjs baseline-freshness \
 pnpm governance:verify
 ```
 
+合并前（CI 绿之后、按下合并之前）再用官方 registry 跑一次 `node scripts/supply-chain-audit.mjs verify`：npm 审计库收录 advisory 可能比 GitHub 发布晚数小时，PR 上的零 advisory 审计到合并时可能已不成立。2026-09-30 的两条 `@grpc/grpc-js` advisory 15:35Z 已在 GitHub 发布，16:13Z 的审计仍为 0，#576 合入后 main 的 freshness canary 随即变红。
+
 ## 5. Dependabot 安全更新 PR
 
 安全更新 PR 会改锁文件，因此同样要处理 Copy 指纹**和**漏洞基线：检出该分支，运行 `node scripts/copy-fixed-source-impact-resign.mjs`，按第 4 节重新绑定基线，按第 3 节上调对应的安全下限，推送后再按正常 PR 流程合入。推送后 Dependabot 不再自动 rebase 该分支，main 前进时需手动更新。

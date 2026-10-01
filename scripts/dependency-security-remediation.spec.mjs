@@ -250,6 +250,7 @@ const SECURITY_FLOORS = Object.freeze(
     { name: "path-to-regexp", floor: "8.4.2" },
     { name: "file-type", from: "20.0.0", floor: "21.3.4" },
     { name: "fast-xml-parser", floor: "5.11.0" },
+    { name: "@grpc/grpc-js", floor: "1.14.5" },
   ].map((entry) => Object.freeze(entry)),
 );
 
@@ -276,6 +277,7 @@ const VULNERABLE_PREDECESSORS = Object.freeze([
   "path-to-regexp@3.3.0",
   "file-type@20.4.1",
   "fast-xml-parser@4.5.7",
+  "@grpc/grpc-js@1.14.4",
 ]);
 
 function resolvedPackageVersions(lockfile) {

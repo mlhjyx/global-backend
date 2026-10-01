@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-01 · @grpc/grpc-js security floor
+
+- 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。
+- #583 的月度刷新已把它解析到 1.14.5（Temporal SDK 1.24.0 的声明范围内，不需要 override），合入后 main（590b9f3e）的 canary 恢复 `FRESH`、零 advisory。#583 的回执只记录了刷新后的审计，没有写到这 2 条，在此补记。
+- 按 runbook，`scripts/dependency-security-remediation.spec.mjs` 新增 `@grpc/grpc-js` 下限 1.14.5，并把 1.14.4 登记进 `VULNERABLE_PREDECESSORS`：对 e7ee633d 的锁文件该下限失败，对当前锁文件通过。锁文件、override 与漏洞基线都不变。
+
 ## 2026-09-30 · Website profiling in the discovery run (G3 slice 5.4b, part 2)
 
 - discovery run 在归一之后、Fit 之前新增「官网画像」阶段 `profileWebsitesForRun`：按公司绑定主体抓首页与 Impressum，把贸易角色、置信度与来源、是否自有制造、在售品牌与两个品牌信号、法定名称、登记号（带法院）、税号、证据片段写入 `website_profile` 命名空间，登记号与税号作为带校验的语义标识符进入属性白名单。主体被拒只跳过该公司并计入 PARTIAL，控制错误照旧让 run 失败；30 天内画像过的公司不重抓；每个 run 至多 50 家。工作流以 patch `discovery-website-profile-v1` 守卫，旧历史重放不变；阶段为尽力而为，失败时 Fit 照常判定。
