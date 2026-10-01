@@ -6,9 +6,10 @@ import ipaddr from 'ipaddr.js';
  * SSRF 出网护栏（平台级共享）。规则不是“列几个私网段”，而是只允许 ipaddr.js
  * 判定为普通 global unicast 的地址；保留/文档/CGNAT/multicast/IPv6 过渡形态全部拒绝。
  *
- * Ubuntu mihomo 会把公网域名全部映射到 RFC 2544 的 198.18/15。只有当系统 DNS 的
- * **全部**答案都属于该 fake-IP 段时，才向固定 Cloudflare DoH 端点查询真实答案；
- * 真私网或 fake+private 混合答案绝不借 DoH 洗白。
+ * Ubuntu mihomo 会把公网域名全部映射到 RFC 2544 的 198.18/15；开启 IPv6 时 AAAA
+ * 另映射到默认 `fake-ip-range6` 的 fdfe:dcba:9876::/64。只有当系统 DNS 的**全部**答案
+ * 都属于这两个 fake-IP 段时，才向固定 Cloudflare DoH 端点查询真实答案；真私网或
+ * fake+private 混合答案绝不借 DoH 洗白。
  */
 
 export interface ResolvedAddress {
@@ -31,7 +32,8 @@ export interface PublicIpResolution {
   reason?: string;
 }
 
-const FAKE_IP_RANGE = ipaddr.parseCIDR('198.18.0.0/15');
+const FAKE_IPV4_RANGE = ipaddr.parseCIDR('198.18.0.0/15');
+const FAKE_IPV6_RANGE = ipaddr.parseCIDR('fdfe:dcba:9876::/64');
 const DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
 const DNS_TIMEOUT_MS = 5_000;
 
@@ -45,7 +47,9 @@ function parsedIp(ip: string): ipaddr.IPv4 | ipaddr.IPv6 | null {
 
 function isMihomoFakeIp(ip: string): boolean {
   const parsed = parsedIp(ip);
-  return parsed?.kind() === 'ipv4' && parsed.match(FAKE_IP_RANGE);
+  if (parsed?.kind() === 'ipv4') return parsed.match(FAKE_IPV4_RANGE);
+  if (parsed?.kind() === 'ipv6') return parsed.match(FAKE_IPV6_RANGE);
+  return false;
 }
 
 /** 保留旧函数名兼容 SMTP 调用方；true 实际表示“不是普通 global unicast”。 */

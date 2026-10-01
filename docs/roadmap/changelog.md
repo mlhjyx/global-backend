@@ -10,6 +10,11 @@
 - #583 的月度刷新已把它解析到 1.14.5（Temporal SDK 1.24.0 的声明范围内，不需要 override），合入后 main（590b9f3e）的 canary 恢复 `FRESH`、零 advisory。#583 的回执只记录了刷新后的审计，没有写到这 2 条，在此补记。
 - 按 runbook，`scripts/dependency-security-remediation.spec.mjs` 新增 `@grpc/grpc-js` 下限 1.14.5，并把 1.14.4 登记进 `VULNERABLE_PREDECESSORS`：对 e7ee633d 的锁文件该下限失败，对当前锁文件通过。锁文件、override 与漏洞基线都不变。
 
+## 2026-10-01 · Egress guard recognizes mihomo IPv6 fake IPs
+
+- xin 的 Clash Verge（mihomo，TUN + fake-ip）打开 IPv6 后，公网域名同时解析出 198.18.x 与默认 `fake-ip-range6` 里的 `fdfe:dcba:9876::x`。出网护栏 `net-guard.ts` 与 Crawl4AI 镜像里的 `fakeip_resolver.py` 都只认 198.18/15：只有全部答案都是假 IP 时才改查固定 Cloudflare DoH，混进 IPv6 假 IP 后就按私网拒绝。结果是 `POST /companies` 对任何官网都报 `INVALID_URL`，抓取也会全部失败。
+- 两处都把 `fdfe:dcba:9876::/64` 认作 mihomo 假 IP。规则不变：只有**全部**答案都是假 IP 才走 DoH，DoH 的答案照旧要过全局地址校验；该 /64 之外的 ULA、假 IP 与真实私网的混合答案仍直接拒绝。TS 与 Python 两侧都补了正反例。Crawl4AI 是本机自建的 `global-crawl4ai:local`，下次重建时生效；后端随下一次运行时镜像生效。
+
 ## 2026-09-30 · Website profiling in the discovery run (G3 slice 5.4b, part 2)
 
 - discovery run 在归一之后、Fit 之前新增「官网画像」阶段 `profileWebsitesForRun`：按公司绑定主体抓首页与 Impressum，把贸易角色、置信度与来源、是否自有制造、在售品牌与两个品牌信号、法定名称、登记号（带法院）、税号、证据片段写入 `website_profile` 命名空间，登记号与税号作为带校验的语义标识符进入属性白名单。主体被拒只跳过该公司并计入 PARTIAL，控制错误照旧让 run 失败；30 天内画像过的公司不重抓；每个 run 至多 50 家。工作流以 patch `discovery-website-profile-v1` 守卫，旧历史重放不变；阶段为尽力而为，失败时 Fit 照常判定。

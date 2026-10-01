@@ -5,8 +5,9 @@
  *
  * R1-safety enforces two layers of egress validation: this adapter rejects non-public seeds,
  * while the pinned Crawl4AI image revalidates seeds/redirects and makes Chromium connect
- * through its pinning proxy. Ubuntu fake-IP compatibility is an all-198.18/15-only DoH
- * fallback; the broad allow-internal switch is forbidden.
+ * through its pinning proxy. Ubuntu fake-IP compatibility is a DoH fallback taken only when
+ * every answer is a mihomo fake IP (198.18/15, or fdfe:dcba:9876::/64 with IPv6 on); the
+ * broad allow-internal switch is forbidden.
  */
 import type { DispatchPhysicalWire } from "./guarded-http";
 import { resolvePublicHttpUrl, type PublicUrlResolver } from "./url-guard";
