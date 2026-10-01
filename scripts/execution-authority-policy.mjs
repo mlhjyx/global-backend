@@ -13,6 +13,7 @@ const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/source-tools.ts',
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
+const PLATFORM_CONTRACT_PATH = 'apps/api/src/platform-authority/platform-execution-contract.ts';
 const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
@@ -34,6 +35,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/discovery/providers/public-web.provider.ts', taskId: 'discovery.extract_company', schema: 'discovery-extract-company/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/directory.provider.ts', taskId: 'discovery.extract_list', schema: 'discovery-extract-list/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/decision-maker.provider.ts', taskId: 'contact.find_decision_makers', schema: 'contact-decision-makers/v1' }),
+  Object.freeze({ path: 'apps/api/src/discovery/providers/website-profile.provider.ts', taskId: 'discovery.classify_trade_role', schema: 'discovery-classify-trade-role/v1' }),
 ]);
 
 export const EXPECTED_MODEL_GATEWAY_BOUNDARIES = Object.freeze([
@@ -448,7 +450,7 @@ function validateModelTasks(manifest, path, issues) {
   const ids = manifest.modelTasks.map((entry) => entry?.taskId).filter(Boolean);
   const expectedIds = EXPECTED_MODEL_TASKS.map((entry) => entry.taskId);
   if (!sameSet(ids, expectedIds) || new Set(ids).size !== expectedIds.length) {
-    issues.push(issue('EXECUTION_AUTHORITY_MODEL_INVENTORY_MISMATCH', path, 'manifest must declare exactly 10 generic product Model tasks'));
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_INVENTORY_MISMATCH', path, `manifest must declare exactly ${expectedIds.length} generic product Model tasks`));
   }
   const allowed = [
     'taskId', 'callsitePath', 'resultStrategy', 'resultSchema',
@@ -512,7 +514,7 @@ async function validateProtectedFiles(repoRoot, manifest, path, issues) {
     }
     const source = existsSync(resolve(repoRoot, entry.path)) ? await readText(repoRoot, entry.path) : null;
     if (source === null || sha256(source) !== entry.sha256) {
-      issues.push(issue('EXECUTION_AUTHORITY_PHYSICAL_WIRING_DRIFT', entry.path, 'protected Router/ToolBroker composition changed before Task 6'));
+      issues.push(issue('EXECUTION_AUTHORITY_PHYSICAL_WIRING_DRIFT', entry.path, 'protected Router/ToolBroker composition changed: review the change for authority, budget, receipt and egress bypasses, then re-pin its sha256 in docs/governance/durable-result-strategies.json and record the review in the PR'));
     }
   }
 }
@@ -526,31 +528,87 @@ function toolBlock(source, id) {
   return source.slice(start, next < 0 ? source.length : start + marker.length + next);
 }
 
-function numberConstants(source) {
-  const values = new Map();
-  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*([0-9_]+)\s*;/g)) {
-    const normalized = match[2].replaceAll('_', '');
-    if (/^[0-9]+$/.test(normalized)) values.set(match[1], Number(normalized));
+// Top-level `const NAME = <number | string | OTHER_NAME> [as const];`
+// declarations, aliases resolved. Expressions stay unresolved (fail closed).
+export function sourceConstants(source) {
+  const declared = new Map();
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*=\s*([0-9_]+|"[^"\n]*"|'[^'\n]*'|[A-Z][A-Z0-9_]*)(?:\s+as\s+const)?\s*;/g)) {
+    declared.set(match[1], match[2]);
   }
-  return values;
+  const resolved = new Map();
+  const resolveName = (name, seen) => {
+    if (resolved.has(name)) return resolved.get(name);
+    if (!declared.has(name) || seen.has(name)) return undefined;
+    const token = declared.get(name);
+    const value = /^[0-9_]+$/.test(token)
+      ? Number(token.replaceAll('_', ''))
+      : /^["']/.test(token)
+        ? token.slice(1, -1)
+        : resolveName(token, new Set([...seen, name]));
+    if (value !== undefined) resolved.set(name, value);
+    return value;
+  };
+  for (const name of declared.keys()) resolveName(name, new Set());
+  return resolved;
 }
 
-function stringConstants(source) {
-  const values = new Map();
-  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*["']([^"']+)["'](?:\s+as\s+const)?\s*;/g)) {
-    values.set(match[1], match[2]);
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
+// Product sources may declare a platform Tool through
+// `platformExecutionToolContract("<id>")`; read its id and schema from the
+// contract so the checks below compare the same literal values.
+export function resolvePlatformContractReferences(source, contractSource) {
+  const schemas = new Map();
+  for (const match of contractSource.matchAll(/\btoolId:\s*"([a-z0-9_.]+)"[^}]*?\bresultSchema:\s*"([^"]+)"/g)) {
+    schemas.set(match[1], match[2]);
   }
-  return values;
+  let resolved = source;
+  for (const match of source.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*platformExecutionToolContract\(\s*["']([a-z0-9_.]+)["']\s*\)/g)) {
+    const [, binding, toolId] = match;
+    if (!schemas.has(toolId)) continue;
+    resolved = resolved
+      .replace(new RegExp(`\\b${escapeRegExp(binding)}\\.toolId\\b`, 'g'), JSON.stringify(toolId))
+      .replace(new RegExp(`\\b${escapeRegExp(binding)}\\.resultSchema\\b`, 'g'), JSON.stringify(schemas.get(toolId)));
+  }
+  return resolved.replace(
+    /\bplatformExecutionToolContract\(\s*["']([a-z0-9_.]+)["']\s*\)\.resultSchema\b/g,
+    (expression, toolId) => (schemas.has(toolId) ? JSON.stringify(schemas.get(toolId)) : expression),
+  );
+}
+
+export function declaresMapping(source, key, value) {
+  return new RegExp(`["']${escapeRegExp(key)}["']\\s*:\\s*["']${escapeRegExp(value)}["']`).test(source);
+}
+
+// Literal `getTask("<id>")` calls and `getTask(CONSTANT)` through a string
+// constant declared in the same file. Lower-case arguments are generic
+// lookups (`input.task`, `taskId`), not product task declarations.
+export function modelTaskIdsInSource(source) {
+  const constants = sourceConstants(source);
+  const taskIds = [];
+  const unresolved = [];
+  for (const match of source.matchAll(/\bgetTask\s*\(\s*(?:["']([^"']+)["']|([A-Z][A-Z0-9_]*))\s*\)/g)) {
+    const taskId = match[1] ?? constants.get(match[2]);
+    if (typeof taskId === 'string') taskIds.push(taskId);
+    else unresolved.push(match[2]);
+  }
+  return { taskIds, unresolved };
 }
 
 function resolveNumber(token, constants) {
   const normalized = token.replaceAll('_', '').trim();
-  return /^[0-9]+$/.test(normalized) ? Number(normalized) : constants.get(token.trim());
+  if (/^[0-9]+$/.test(normalized)) return Number(normalized);
+  const value = constants.get(token.trim());
+  return typeof value === 'number' ? value : undefined;
 }
 
 function resolveString(token, constants) {
   const literal = token.trim().match(/^["']([^"']+)["']$/);
-  return literal?.[1] ?? constants.get(token.trim());
+  if (literal) return literal[1];
+  const value = constants.get(token.trim());
+  return typeof value === 'string' ? value : undefined;
 }
 
 function artifactSourceContract(block, completeSource) {
@@ -558,39 +616,42 @@ function artifactSourceContract(block, completeSource) {
   const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)/)?.[1];
   const mediaExpression = block.match(/\bmediaTypes:\s*\[([^\]]+)\]/)?.[1];
   if (!maxToken || !ttlToken || !mediaExpression) return null;
-  const numbers = numberConstants(completeSource);
-  const strings = stringConstants(completeSource);
-  const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, strings));
+  const constants = sourceConstants(completeSource);
+  const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, constants));
   if (mediaTypes.some((entry) => typeof entry !== 'string')) return null;
   return Object.freeze({
-    maxBytes: resolveNumber(maxToken, numbers),
+    maxBytes: resolveNumber(maxToken, constants),
     mediaTypes,
     privacyClass: block.match(/\bprivacyClass:\s*["']([^"']+)["']/)?.[1],
-    ttlSeconds: resolveNumber(ttlToken, numbers),
+    ttlSeconds: resolveNumber(ttlToken, constants),
   });
 }
 
 async function scanCurrentSources(repoRoot, manifest, issues) {
-  const toolSources = await Promise.all(TOOL_SOURCE_PATHS.map((path) => readText(repoRoot, path)));
+  const platformContract = await readText(repoRoot, PLATFORM_CONTRACT_PATH);
+  const readResolved = async (path) =>
+    resolvePlatformContractReferences(await readText(repoRoot, path), platformContract);
+  const toolSources = await Promise.all(TOOL_SOURCE_PATHS.map(readResolved));
   const source = toolSources.join('\n');
+  const constantSource = `${source}\n${platformContract}`;
   const sourceIds = [...source.matchAll(/\bid:\s*["']([a-z0-9_.]+)["']/g)].map((match) => match[1]);
   const registrationCount = [...source.matchAll(/\bregistry\.register\s*\(/g)].length;
   if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 18 || registrationCount !== 18) {
     issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', 'source declarations/registrations must be exactly 18'));
   }
   const projectionSources = [
-    await readText(repoRoot, 'apps/api/src/durable-results/catalog-result-projections.ts'),
-    await readText(repoRoot, 'apps/api/src/durable-results/source-result-projections.ts'),
+    await readResolved('apps/api/src/durable-results/catalog-result-projections.ts'),
+    await readResolved('apps/api/src/durable-results/source-result-projections.ts'),
   ].join('\n');
   for (const entry of manifest.tools ?? []) {
-    const declarationSource = await readText(repoRoot, entry.declarationPath);
+    const declarationSource = await readResolved(entry.declarationPath);
     const block = toolBlock(declarationSource, entry.id);
     if (!block.includes('durableResultStrategy') || !block.includes(`kind: "${entry.resultStrategy}"`)) {
       issues.push(issue('EXECUTION_AUTHORITY_TOOL_STRATEGY_SOURCE_MISMATCH', entry.declarationPath, `source strategy mismatch ${entry.id}`, entry.id));
     }
     if (entry.resultStrategy === 'artifact_reference') {
       const expected = ARTIFACT_CONTRACTS[entry.resultSchema];
-      const actual = artifactSourceContract(block, source);
+      const actual = artifactSourceContract(block, constantSource);
       if (
         !block.includes(`schema: "${entry.resultSchema}"`) || !expected || !actual ||
         actual.maxBytes !== expected.maxBytes || actual.privacyClass !== expected.privacyClass ||
@@ -602,7 +663,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
       const sourceBinding =
         block.includes(`["${entry.id}"]`) || block.includes(`['${entry.id}']`) ||
         block.includes(`schema: "${entry.resultSchema}"`) || block.includes(`schema: '${entry.resultSchema}'`);
-      if (!sourceBinding || !projectionSources.includes(`'${entry.id}': '${entry.resultSchema}'`)) {
+      if (!sourceBinding || !declaresMapping(projectionSources, entry.id, entry.resultSchema)) {
         issues.push(issue('EXECUTION_AUTHORITY_TOOL_SCHEMA_SOURCE_MISMATCH', entry.declarationPath, `typed projection mapping mismatch ${entry.id}`, entry.id));
       }
     }
@@ -612,9 +673,10 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     .filter((path) => !path.startsWith('apps/api/src/site-builder/'));
   const discoveredModelTasks = new Set();
   for (const path of genericSources) {
-    const content = await readText(repoRoot, path);
-    for (const match of content.matchAll(/\bgetTask\s*\(\s*["']([^"']+)["']\s*\)/g)) {
-      discoveredModelTasks.add(match[1]);
+    const { taskIds, unresolved } = modelTaskIdsInSource(await readText(repoRoot, path));
+    taskIds.forEach((taskId) => discoveredModelTasks.add(taskId));
+    for (const name of unresolved) {
+      issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `getTask(${name}) must name a string constant declared in the same file`));
     }
   }
   if (!sameSet(discoveredModelTasks, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))) {
@@ -688,7 +750,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     if (!callsite.includes(entry.taskId)) {
       issues.push(issue('EXECUTION_AUTHORITY_MODEL_CALLSITE_MISSING', entry.path, `missing Model task anchor ${entry.taskId}`, entry.taskId));
     }
-    if (!modelProjectionSource.includes(`'${entry.taskId}': '${entry.schema}'`)) {
+    if (!declaresMapping(modelProjectionSource, entry.taskId, entry.schema)) {
       issues.push(issue('EXECUTION_AUTHORITY_MODEL_SCHEMA_SOURCE_MISMATCH', 'apps/api/src/durable-results/model-result-projections.ts', `missing Model projection ${entry.taskId}`, entry.taskId));
     }
   }
@@ -709,16 +771,21 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const patentScanner = await readText(repoRoot, 'apps/api/src/temporal/patent-cache-broker-scanner.ts');
   const patentAdapter = await readText(repoRoot, 'apps/api/src/adapters/bigquery-patents.ts');
   const patentProjectionSpec = await readText(repoRoot, 'apps/api/src/durable-results/catalog-result-projections.spec.ts');
+  const patentPlatformContract = await readText(repoRoot, PLATFORM_CONTRACT_PATH);
+  const patentBytesBilled = sourceConstants(`${patentAdapter}\n${patentPlatformContract}`)
+    .get('GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED');
   const patentRequired = [
     [patentScanner, 'const MAX_PATENTS_PER_ANCHOR = 25'],
     [patentScanner, '"google_patents.search"'],
-    [patentAdapter, "GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED = '214748364800'"],
     [patentAdapter, 'return GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED'],
     [patentAdapter, 'MAX_APPLICANTS_PER_PATENT = 32'],
     [patentProjectionSpec, "'$.data.patents.maxItems': 50"],
     [patentProjectionSpec, "'$.data.patents[].inventors.maxItems': 25"],
   ];
-  if (patentRequired.some(([text, token]) => !text.includes(token))) {
+  if (
+    patentBytesBilled !== '214748364800' ||
+    patentRequired.some(([text, token]) => !text.includes(token))
+  ) {
     issues.push(issue('EXECUTION_AUTHORITY_PATENT_SOURCE_CONSTRAINT_MISMATCH', 'apps/api/src', 'Patent Cache source constraints drifted from manifest', 'google_patents.search'));
   }
   const patentsActivity = await readText(repoRoot, 'apps/api/src/temporal/patents-cache.activities.ts');

@@ -11,17 +11,21 @@ import {
   EXPECTED_PROTECTED_WIRING_PATHS,
   EXPECTED_TOOL_CALLSITES,
   EXPECTED_TOOL_IDS,
+  declaresMapping,
   inspectExecutionAuthoritySource,
+  modelTaskIdsInSource,
+  resolvePlatformContractReferences,
+  sourceConstants,
   verifyExecutionAuthorityPolicy,
 } from './execution-authority-policy.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 18 Tools and 10 product Model tasks', () => {
+test('inventory is locked to 18 Tools and 11 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_IDS.length, 18);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 10);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 11);
   assert.equal(new Set(EXPECTED_TOOL_IDS).size, 18);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 10);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 11);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
     'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
@@ -88,6 +92,64 @@ test('AST inspection sees aliased gateway calls, Tool calls and BigQuery aliases
   `);
   assert.deepEqual(elementAccess.modelMethods, ['generateStructured']);
   assert.deepEqual(elementAccess.toolIds, ['http.get']);
+});
+
+test('source constants resolve as-const, multi-line and aliased declarations', () => {
+  const constants = sourceConstants([
+    'export const DIRECT = 3_000_000 as const;',
+    'export const TEXT =',
+    '  "214748364800" as const;',
+    'export const ALIAS =',
+    '  DIRECT;',
+    "const TASK = 'discovery.classify_trade_role' as const;",
+    'const LOOP_A = LOOP_B;',
+    'const LOOP_B = LOOP_A;',
+  ].join('\n'));
+  assert.equal(constants.get('DIRECT'), 3_000_000);
+  assert.equal(constants.get('TEXT'), '214748364800');
+  assert.equal(constants.get('ALIAS'), 3_000_000);
+  assert.equal(constants.get('TASK'), 'discovery.classify_trade_role');
+  assert.equal(constants.has('LOOP_A'), false);
+});
+
+test('platform execution contract references resolve to the contract tool id and schema', () => {
+  const contract = [
+    'toolContracts: [',
+    '  { toolId: "crawl4ai.render", version: "1.0.0", resultSchema: "crawl4ai-render/v1" },',
+    '  { toolId: "google_patents.search", version: "1.0.0", resultSchema: "google-patents-search/v1" },',
+    ']',
+  ].join('\n');
+  const resolved = resolvePlatformContractReferences([
+    'const render = platformExecutionToolContract("crawl4ai.render");',
+    'export const tool = { id: render.toolId, durableResultStrategy: { kind: "artifact_reference", schema: render.resultSchema } };',
+    "const projections = { 'google_patents.search': platformExecutionToolContract('google_patents.search').resultSchema };",
+    'const unknown = platformExecutionToolContract("not.declared");',
+    'export const other = { id: unknown.toolId, schema: unknown.resultSchema };',
+  ].join('\n'), contract);
+  assert.match(resolved, /id: "crawl4ai\.render"/);
+  assert.match(resolved, /schema: "crawl4ai-render\/v1"/);
+  assert.equal(declaresMapping(resolved, 'google_patents.search', 'google-patents-search/v1'), true);
+  assert.match(resolved, /schema: unknown\.resultSchema/);
+});
+
+test('a declared mapping is found in either quote style and only for the exact key and value', () => {
+  assert.equal(declaresMapping('"icp.design": "icp-design/v1",', 'icp.design', 'icp-design/v1'), true);
+  assert.equal(declaresMapping("'icp.design': 'icp-design/v1',", 'icp.design', 'icp-design/v1'), true);
+  assert.equal(declaresMapping('"icp.design": "icp-design/v2",', 'icp.design', 'icp-design/v1'), false);
+  assert.equal(declaresMapping('"icpXdesign": "icp-design/v1",', 'icp.design', 'icp-design/v1'), false);
+});
+
+test('getTask through a same-file string constant joins the Model task inventory', () => {
+  const { taskIds, unresolved } = modelTaskIdsInSource([
+    "export const TASK = 'discovery.classify_trade_role' as const;",
+    'getTask(TASK);',
+    "getTask('icp.design');",
+    'getTask(input.task);',
+    'getTask(taskId);',
+    'getTask(MISSING_TASK);',
+  ].join('\n'));
+  assert.deepEqual(taskIds, ['discovery.classify_trade_role', 'icp.design']);
+  assert.deepEqual(unresolved, ['MISSING_TASK']);
 });
 
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
