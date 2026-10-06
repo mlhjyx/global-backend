@@ -1168,12 +1168,14 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       .fn()
       .mockRejectedValueOnce(new Error("database response lost"))
       .mockResolvedValueOnce("REPLAY");
+    const confirmSettlementReplay = vi.fn(async () => true);
     const gateway = new RouterModelGateway({
       route: () => [model],
     } as unknown as ModelRouter);
     gateway.paidLedger = {
       reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
       settleOperation,
+      confirmSettlementReplay,
       disablePaidCalls,
     } as never;
     installSettlementV1(gateway);
@@ -1195,6 +1197,9 @@ describe("RouterModelGateway persistent paid-call gate", () => {
     expect(settleOperation).toHaveBeenCalledTimes(2);
     expect(settleOperation.mock.calls[1]).toEqual(
       settleOperation.mock.calls[0],
+    );
+    expect(confirmSettlementReplay).toHaveBeenCalledWith(
+      settleOperation.mock.calls[1]![0],
     );
     expect(disablePaidCalls).not.toHaveBeenCalled();
   });

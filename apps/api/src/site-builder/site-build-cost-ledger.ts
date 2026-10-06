@@ -1,4 +1,5 @@
 import { createHash, randomUUID as nodeRandomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Prisma } from "@prisma/client";
 import type { PrismaService } from "../prisma/prisma.service";
 import type {
@@ -1448,6 +1449,65 @@ export class SiteBuildCostLedger {
       }
       return decision;
     });
+  }
+
+  /**
+   * The settle functions answer REPLAY for any Spend that is no longer
+   * RESERVED. After a settlement retry, that is either this attempt's own
+   * commit whose ACK was lost, or a row another writer (the provider-spend
+   * recovery sweep) terminalized first. Compares the stored row with exactly
+   * what settleOperation writes for this input. Fence token and call count
+   * alone cannot tell the two apart (the sweep settles under the row's own
+   * fence, and a trigger forces call_count to the physical-wire count for
+   * every writer), so meta and error code, which the sweep writes
+   * differently, are compared as well.
+   */
+  async confirmSettlementReplay(
+    input: Parameters<SiteBuildCostLedger["settleOperation"]>[0],
+  ): Promise<boolean> {
+    const { scope, measurement } = input;
+    const database =
+      scope.kind === "model" ? this.requireProviderWireDatabase() : this.prisma;
+    const stored = await database.withWorkspace(scope.workspaceId, (tx) =>
+      tx.siteBuildSpend.findFirst({
+        where: {
+          workspaceId: scope.workspaceId,
+          buildRunId: scope.buildRunId,
+          operationKey: scope.operationKey,
+        },
+        select: {
+          status: true,
+          fenceToken: true,
+          costBasis: true,
+          callCount: true,
+          resultJson: true,
+          meta: true,
+          errorCode: true,
+        },
+      }),
+    );
+    if (!stored) return false;
+    const unknown = input.status === "UNKNOWN";
+    const expectedResult =
+      unknown || !input.result ? null : JSON.parse(asJsonText(input.result));
+    const expectedMeta = JSON.parse(
+      asJsonText({ ...scope.meta, ...measurement.meta, ...input.meta }),
+    );
+    // A charge above the reservation is recorded as CAP_VARIANCE instead.
+    const expectedErrorCode =
+      !unknown && measurement.budgetChargeMicrousd > scope.reservationMicrousd
+        ? "CAP_VARIANCE"
+        : (input.errorCode ?? null);
+    return (
+      stored.status === input.status &&
+      stored.fenceToken === (scope.fenceToken ?? null) &&
+      stored.costBasis === (unknown ? "unknown" : measurement.basis) &&
+      stored.callCount ===
+        (measurement.basis === "not_incurred" ? null : measurement.callCount) &&
+      stored.errorCode === expectedErrorCode &&
+      isDeepStrictEqual(stored.resultJson ?? null, expectedResult) &&
+      isDeepStrictEqual(stored.meta ?? null, expectedMeta)
+    );
   }
 
   async assertAuthorizedBudget(input: {

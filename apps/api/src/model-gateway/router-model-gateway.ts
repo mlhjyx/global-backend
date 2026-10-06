@@ -1456,19 +1456,21 @@ export class RouterModelGateway extends ModelGateway {
       input.measurement.basis === "unknown"
         ? (input.errorCode ?? "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE")
         : undefined;
-    const settle = () =>
-      this.paidLedger!.settleOperation({
-        ...input,
-        ...(disablePaidCallsReason ? { disablePaidCallsReason } : {}),
-      });
+    const settlement = {
+      ...input,
+      ...(disablePaidCallsReason ? { disablePaidCallsReason } : {}),
+    };
+    const settle = () => this.paidLedger!.settleOperation(settlement);
     let decision: string;
+    let retried = false;
     try {
       decision = await settle();
     } catch {
+      retried = true;
       try {
         // The operation key and every settlement byte are unchanged. A second
         // database-only call recovers commit-before-ACK without another model
-        // wire; the SQL function returns REPLAY for the identical terminal row.
+        // wire.
         decision = await settle();
       } catch (error) {
         return this.freezeUnknownSettlement(
@@ -1476,6 +1478,30 @@ export class RouterModelGateway extends ModelGateway {
           error instanceof PaidOperationUnknownError
             ? error.errorCode
             : "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
+        );
+      }
+    }
+    // The SQL functions answer REPLAY for any Spend that is no longer
+    // RESERVED. On the first call only another writer (the provider-spend
+    // recovery sweep) can have settled it, so this attempt's output is not the
+    // durable record. That holds on the failure and release paths too: the
+    // attempt cannot vouch for the outcome it was about to record, so it
+    // freezes like STALE_FENCE. After a retry REPLAY counts only once the
+    // stored row is confirmed as exactly this settlement (commit-before-ACK).
+    if (decision === "REPLAY") {
+      if (!retried) {
+        return this.freezeUnknownSettlement(input.scope, "SETTLEMENT_REPLAY");
+      }
+      let confirmed = false;
+      try {
+        confirmed = await this.paidLedger!.confirmSettlementReplay(settlement);
+      } catch {
+        // An unreadable row is as unconfirmed as another writer's row.
+      }
+      if (!confirmed) {
+        return this.freezeUnknownSettlement(
+          input.scope,
+          "SETTLEMENT_REPLAY_UNCONFIRMED",
         );
       }
     }

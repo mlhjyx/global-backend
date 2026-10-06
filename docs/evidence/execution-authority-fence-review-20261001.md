@@ -69,3 +69,18 @@
   3. 低，`b8dd5eb0` 时就已存在。客户侧工具如果在执行中途抛出 `ExternalToolActionDeniedError`，预留仍按零调用释放；在此之前可能已经发生的只有 robots.txt 抓取或 DNS 查询（例如 `crawl4ai.render` 和 SMTP 探测之前的那一步）。
 
 据此，在本次 PR 中把 `router-model-gateway.ts` 的指纹更新为 `446e5771db74872d29c845086e5ec81e628d24d4db608f108581289b1105b324`，并把 `scripts/execution-authority-policy.spec.mjs` 移出 `MANUAL_SPECS`，接入 `governance-contracts.spec.mjs`。
+
+## 2026-10-06 Router 改动复核（结算 REPLAY 判定）
+
+本节对应上文后续事项 1，处理它需要修改 `router-model-gateway.ts`，所以按围栏规则先复核、再更新指纹。
+
+- **改动**：只改 `settlePersistentOperation`，加两条分支，均走既有的 `freezeUnknownSettlement`（停用该 BuildRun 的付费调用，抛 `PaidOperationUnknownError`）：
+  - 首次结算就返回 `REPLAY` 时，说明行已被其他写入方（即 provider-spend 恢复任务）结算。本次的输出不是持久记录，因此冻结并报 `SETTLEMENT_REPLAY`；失败与零调用释放路径同样冻结，与 `STALE_FENCE` 的处理一致。
+  - 唯一一次 ACK 重试返回 `REPLAY` 时，要先由新增的 `SiteBuildCostLedger.confirmSettlementReplay` 回读该行，确认 status、fence、计费依据、调用次数、结果、meta 与错误码都正是本次写入的内容，才按原逻辑接受；不一致或读不到就冻结，报 `SETTLEMENT_REPLAY_UNCONFIRMED`。
+- **没有放宽任何约束**：没有删除授权、预算预留与结算、持久回执、出网或禁联检查，也没有新增物理调用路径，失败只会更保守。`confirmSettlementReplay` 是只读查询，走的数据库、角色与 RLS 都与 `completeProviderSpendReconciliation` 相同（provider-wire 角色属于 `app_user`，后者对 `site_build_spend` 有 SELECT 权限，见 `20260816220000` 迁移第 883 行）。ToolBroker 本来就把 `SETTLED` 以外的结算结果都当作未知处理，本次不改动它。
+- **独立复审**（只读代理）：没有 CRITICAL 或 HIGH 级问题。
+  - MEDIUM 一项已修复：恢复任务以该行自身的 fence 结算，而触发器 `guard_site_build_provider_spend_settlement_v1` 对任何写入方都把 `call_count` 固定为物理调用数，所以仅比较这些字段，区分不出恢复任务写的 FAILED / RELEASED / UNKNOWN 行。现在一并比较 meta 与错误码：恢复任务的 meta 带 `site-build-provider-spend-ack-recovery/v1`，错误码也不同；超出预留的结算记为 `CAP_VARIANCE`，也已计入比较。
+  - LOW 一项按设计保留：首次 `REPLAY` 在不返回输出的路径上也会冻结整个 BuildRun，此时调用方拿到的是 `PaidOperationUnknownError`，而不是原始的 provider 错误。
+  - 复审没有发现依赖旧行为的调用方：Temporal 重试经 `reserveModelOperation` 重放终态行，不会再次结算。
+- **未覆盖**：没有用真实 PostgreSQL 做往返验证。`router-model-gateway.postgres.spec.ts` 会在库里留下夹具且不清理，所以没有对共用的 `global_dev` 运行。jsonb 规范化、Prisma 的 Json 解析与触发器的行为只做了静态核对，并用单测模拟。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `0ad768f0edf1e1ef5160db6c58025c711def8fcde69b2b3db73bd6c1cd178198`。
