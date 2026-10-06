@@ -236,7 +236,7 @@ const SECURITY_FLOORS = Object.freeze(
     { name: "fast-uri", floor: "3.1.8" },
     { name: "deepmerge-ts", floor: "8.0.1" },
     { name: "multer", floor: "2.4.0" },
-    { name: "smol-toml", floor: "1.7.1" },
+    { name: "smol-toml", floor: "1.9.0" },
     { name: "svgo", floor: "4.1.0" },
     { name: "lodash", floor: "4.18.1" },
     { name: "uuid", floor: "11.1.1" },
@@ -253,6 +253,7 @@ const SECURITY_FLOORS = Object.freeze(
     { name: "@grpc/grpc-js", floor: "1.14.5" },
     { name: "axios", floor: "1.20.0" },
     { name: "brace-expansion", from: "4.0.0", floor: "5.0.12" },
+    { name: "http-cache-semantics", floor: "4.3.0" },
   ].map((entry) => Object.freeze(entry)),
 );
 
@@ -282,6 +283,8 @@ const VULNERABLE_PREDECESSORS = Object.freeze([
   "@grpc/grpc-js@1.14.4",
   "axios@1.18.1",
   "brace-expansion@5.0.9",
+  "smol-toml@1.7.1",
+  "http-cache-semantics@4.2.0",
 ]);
 
 function resolvedPackageVersions(lockfile) {
