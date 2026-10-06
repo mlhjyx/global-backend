@@ -43,6 +43,12 @@
 
   新增用例在加固前的脚本上均失败。spec 由 10 项增至 16 项。`governance:test` 由 276 项增至 292 项，xin 上 load 12 时 48 秒，其中本 spec 约 18 秒。
 
+## 2026-10-06 · Model settlement REPLAY must be this attempt's own
+
+- `settle_site_build_spend` 与 `settle_unknown_site_build_spend` 对任何已不是 RESERVED 的行都返回 `REPLAY`，而且这一判断在 fence 校验之前。Router 原先把 `REPLAY` 一律当作结算成功，首次调用也不例外。可是 provider-spend 恢复任务（`completeProviderSpendReconciliation`）会把仍为 RESERVED 的模型支出结算为 UNKNOWN，或结算为结果为空的 FAILED（`MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY`）。原调用若只是慢，随后会拿到 `REPLAY`，把自己的输出当作成功返回，而账本记的是「输出不可用」。没有预算泄漏，也不会多发一次调用，但交出去的结果不是持久记录。
+- 现在首次结算返回 `REPLAY` 即冻结（`SETTLEMENT_REPLAY`，停用该 BuildRun 的付费调用）；失败与零调用释放路径也一样，与 `STALE_FENCE` 的处理一致。唯一一次 ACK 重试返回的 `REPLAY`，要经新增的只读方法 `SiteBuildCostLedger.confirmSettlementReplay` 回读该行，确认 status、fence、计费依据、调用次数、结果、meta 与错误码都正是本次写入的内容，才接受；否则冻结（`SETTLEMENT_REPLAY_UNCONFIRMED`）。只比较 fence 与调用次数不够：恢复任务以该行自身的 fence 结算，调用次数又由触发器固定，所以 meta 与错误码也要比较。超出预留时记录的 `CAP_VARIANCE` 也计入比较。不需要迁移。
+- `router-model-gateway.ts` 是受保护文件。复核记录追加在[围栏复核](../evidence/execution-authority-fence-review-20261001.md)文末（独立复审：无 CRITICAL/HIGH；MEDIUM 一项已修复；LOW 一项按设计保留），指纹 `446e5771…` → `0ad768f0…`。新增 Router 用例 6 个、账本用例 13 个（先确认为红；去掉 meta 与错误码比较后，区分恢复任务的 4 个用例会失败）。`paid-execution-gates` 中 ACK 丢失后重放的用例改为要求回读确认。没有用真实 PostgreSQL 做往返：现有 live spec 会在共用的 `global_dev` 留下夹具，所以没有跑。
+
 ## 2026-10-06 · Platform wire dispatch fence
 
 - 平台出网自 7c87ea80 起按每次物理调用授权，前提是工具把 `sourcePhysicalWire(ctx, "<wire>")` 交给适配器，适配器也只经这个调度器发请求。四个适配器（`requestPublicHttp`、`crawlUrl`/`crawlHtml`、`queryAlgoliaExhibitors`，以及转交调度器的 `isAllowedByRobots`）在没拿到调度器时会直接发请求，这是客户侧路径的正常行为。因此只要平台工具或适配器丢了调度器，请求就会绕过平台出网授权，ToolBroker 也照样接受结果。这几处都不在 Router/ToolBroker 指纹围栏里（#592 围栏复审后续事项 2）。
