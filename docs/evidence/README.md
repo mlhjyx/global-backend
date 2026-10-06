@@ -21,6 +21,8 @@
 
 [2026-10-01 开发依赖告警刷新](security/20261001-dev-dependency-alert-refresh.json)：nx 链上 axios、brace-expansion 的精确 override 与安全下限上调后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长，faker 5.5.3（仅 Prism 开发依赖）仍开放。
 
+[2026-10-06 生产漏洞修复](security/20261006-production-advisory-remediation.json)：main 定时 canary 检出的 `http-cache-semantics`（范围内升到 4.3.0；维护者对 advisory 有异议，非实质修复，本仓不暴露）与 `smol-toml`（override 升到修复版 1.9.0）两条生产 advisory 处理后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |

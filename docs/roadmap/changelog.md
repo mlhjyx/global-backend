@@ -4,6 +4,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
+
+- 10-01 重绑之后，官方 npm 审计库新收录 2 条生产 advisory，都只在 site-renderer 的 astro 链上：GHSA-ch52-4w7c-c8xp（高危，`http-cache-semantics <=4.2.0`，未列修复版本：max-stale 处理可能把一个用户的缓存响应发给另一个用户），main 的定时 freshness canary 自 10-03（ac024fd5）起报 `BASELINE_STALE`；GHSA-r4xh-jqrq-34v2（中危，`smol-toml <=1.8.0`，1.9.0 修复：构造的 TOML 让 `parse()` 退化为二次方时间），10-05 23:41Z 才发布。
+- `http-cache-semantics` 4.2.0→4.3.0：4.3.0 于 10-04 发布，就在 astro 自己声明的 `^4.2.0` 范围内，所以只用 `pnpm update -r http-cache-semantics` 定向重解析，不加 override，锁文件也没有别的变化。**这不是实质修复**：维护者以 RFC 9111 §7.3 允许该行为为由把上游报告（issue #56）判为不成立并关闭，4.3.0 里 `satisfiesWithoutRevalidation` 的 max-stale 分支一字未改；4.3.0 只是不在 advisory 现行范围内，另外收紧了 Vary 匹配（任意位置的 `*`、只认自身属性）。astro 只在 `assets/build/remote.js` 里用它在构建期判断远程图片缓存是否新鲜，本仓渲染器不用远程图片，也没有服务多个用户的共享缓存，报告描述的跨用户泄露不适用。若 advisory 日后把范围扩到 4.3.0，需另作安全决策。
+- `smol-toml` 精确 override 1.7.1→1.9.0（依赖方的范围仍接受有漏洞的版本，override 保留）。1.9.0 重写了解析器，返回 null 原型对象，并拒绝少数畸形输入；消费者只有 astro 与 nx。
+- 安全下限表把 smol-toml 上调到 1.9.0、新增 `http-cache-semantics` ≥4.3.0，登记前任 1.7.1、4.2.0：对上一版锁文件失败，对当前锁文件通过。生产审计回到零 advisory（830 个依赖），两个新包的 integrity 与官方 registry 一致；渲染器契约测试与 Astro fixture 构建矩阵通过（27+4、31/31），nx 照常运行。基线重新绑定到修复提交，`valid_until` 不变（2026-10-14T21:28:22Z，下一次刷新与续期仍须在此之前合入）；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261006-production-advisory-remediation.json)。Copy fixed-source 回执只重签指纹。
+
 ## 2026-10-01 · @grpc/grpc-js security floor
 
 - 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。

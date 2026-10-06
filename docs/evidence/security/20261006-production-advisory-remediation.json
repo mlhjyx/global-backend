@@ -1,0 +1,112 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-10-06 http-cache-semantics and smol-toml production advisory remediation; not runtime/release/UAT evidence",
+  "detected": {
+    "source": "GitHub Actions run 37115111253 (supply-chain.yml, production advisory baseline freshness · canary, scheduled) on main ac024fd5",
+    "receipt": {
+      "schema_version": "production-dependency-baseline-freshness-result/v1",
+      "result": "BASELINE_STALE",
+      "hold": true,
+      "current_advisories": 1,
+      "resolved_advisories": [],
+      "issues": [
+        "AUDIT_EXPOSURE_NOT_BASELINED",
+        "AUDIT_NEW_ADVISORY"
+      ],
+      "provenance": {
+        "subject_commit": "ac024fd5c3e0e85b6c19f2654b7313f1e7a2a5d0",
+        "lockfile_digest": "sha256:873708e8cc39106b826b3cbc2dc96dcc1d9a5fde4eb9c4b3fb6ce4abc2ca6b32",
+        "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+        "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+        "audit_digest": "sha256:b627483cfa2b075dde9557cc089a7d8858d4de1d36da3d4423c65e760231c239",
+        "observed_at": "2026-10-03T10:03:42.000Z",
+        "registry": "https://registry.npmjs.org/"
+      }
+    },
+    "advisories_source": "Projection of an official-registry `pnpm audit --prod --registry=https://registry.npmjs.org --json` of main 309937de at 2026-10-06T07:13Z. The scheduled run above predates the smol-toml advisory (published 2026-10-05T23:41Z) and reported only http-cache-semantics.",
+    "advisories": [
+      {
+        "github_advisory_id": "GHSA-ch52-4w7c-c8xp",
+        "module_name": "http-cache-semantics",
+        "severity": "high",
+        "vulnerable_versions": "<=4.2.0",
+        "patched_versions": "<0.0.0",
+        "installed_versions": [
+          "4.2.0"
+        ],
+        "remediated_version": "4.3.0",
+        "note": "4.3.0 is outside the advisory range (<= 4.2.0) but is not a substantive fix: the maintainer closed the upstream report (kornelski/http-cache-semantics#56) as invalid under RFC 9111 section 7.3 and the max-stale branch of satisfiesWithoutRevalidation is unchanged in 4.3.0. Astro uses the package only in assets/build/remote.js to revalidate cached remote images at build time; the site renderer does not use remote images and no shared cache serves multiple users, so the reported cross-user disclosure does not apply."
+      },
+      {
+        "github_advisory_id": "GHSA-r4xh-jqrq-34v2",
+        "module_name": "smol-toml",
+        "severity": "moderate",
+        "vulnerable_versions": "<=1.8.0",
+        "patched_versions": ">=1.9.0",
+        "installed_versions": [
+          "1.7.1"
+        ],
+        "remediated_version": "1.9.0",
+        "note": "Fixed upstream in 1.9.0 (parser rewrite replacing the quadratic parseKey rescanning); the exact override moves from 1.7.1 to 1.9.0."
+      }
+    ]
+  },
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "AUDIT_INVALID_HOLD",
+        "hold": true,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [
+          "BASELINE_SOURCE_LOCK_MISMATCH"
+        ],
+        "provenance": {
+          "subject_commit": "14ca4d1f70b9c4590e6df32130cab490aa2979ed",
+          "lockfile_digest": "sha256:8d264dde4d325f5136cf7efc2c858d29393d29d1e5c8c12dc9362cb45e172d58",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-06T07:38:21.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "14ca4d1f70b9c4590e6df32130cab490aa2979ed",
+          "lockfile_digest": "sha256:8d264dde4d325f5136cf7efc2c858d29393d29d1e5c8c12dc9362cb45e172d58",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-06T07:38:21.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ]
+}
