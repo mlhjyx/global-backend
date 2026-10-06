@@ -16,7 +16,7 @@ Program C 保持已批准的完整 C1–C5/QGO 范围；company-first 是未选�
 
 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。本轮 SDK 依赖升级没有改变这一边界。
 
-本轮依赖队列状态见最终收口证据。历史 #407 已关闭，原始分支与逐项语义处置继续保留；关闭不代表整个历史综合候选已被替代或取得准入。#515 与 #538 仍按各自真实外部门保持 Draft/HOLD。
+本轮依赖队列状态见最终收口证据。历史 #407 已关闭，原始分支与逐项语义处置继续保留；关闭不代表整个历史综合候选已被替代或取得准入。#515 与 #538 已于 2026-10-06 关闭（见 §4.3）。
 
 ## 1. 源码与候选
 
@@ -30,10 +30,10 @@ Owner 行中的局部测试和独立 review 统计来自其2026-09-20交付回�
 | 依赖维护 | #539 Redocly、#540 Langfuse、#541 S3、#543 AI SDK 已逐项合入；最后工具链与本次状态修订属于同一候选，最终 head/CI/merge 从原 #533 的 successor 收口记录回读，见[本轮证据](../evidence/dependency-queue-closeout-20260920.md) | 本地与 hosted 成功不证明 retained 采用；JS production audit 不覆盖所有开发依赖或 Go 告警 |
 | 已采用的修复 | Browser/ACK/DeletionCompleted、native Temporal 基础设施、覆盖率与受控 root-sync 修复已有独立已合入来源；#494/#495 实际分别合入，#497 完成后续 native harness 收口；Wikidata country binding 由 #498 合入 | #494/#495 的实际历史不是最初计划的“关闭为 superseded”；country 子项不是完整获客产品；ACK readback 不是 SaaS durable consumer；native disposable 不是保留环境健康 |
 | #407 历史综合候选 | CLOSED，原始 head `70885cdb4196ae86db762ae96ca73f4cfa51f89d` 保留，successor 按独立准入条件处理 | 不恢复历史 Identity、迁移、provider、Relay 或 HTTP hook；不把关闭解释为全量语义接纳 |
-| #538 身份/质量 | 远端 Draft `576fabeb810e54ae043d4c3a45ed09873c6fc07a`；最新已收受并回读的本地交付 `2f5d4313849bc4c2332be64ec2f428e123a3337a` 已在方向确认后实现 native HTTPS reader，owner 报告54项相关测试通过 | v3 request/receipt/descriptor及消费者迁移、完整 transport/source/tool/CA/DNS 闭包、controller/FD/journal/可信receipt接线、精确外部物化/凭据与独立readback仍缺；旧v2未切换，Task0A/0B没有ADMITTED |
+| #538 身份/质量 | 2026-10-06 关闭、未合并：owner 于 2026-09-23 决定不再向治理与 R4 授权机制投入，本 PR 属该方向。关闭时远端 head 为 `2f5d4313849bc4c2332be64ec2f428e123a3337a`（native HTTPS reader 交付，owner 曾报告54项相关测试通过），由 tag `archive/governance/organization-identity-successor-2f5d4313-20260920` 与 PR 保留，见 §4.3 | 关闭不代表下列门已满足或其内容被采纳： v3 request/receipt/descriptor及消费者迁移、完整 transport/source/tool/CA/DNS 闭包、controller/FD/journal/可信receipt接线、精确外部物化/凭据与独立readback仍缺；旧v2未切换，Task0A/0B没有ADMITTED |
 | R4 native 与 Backend | 本地 `41a59788d72d44b728ceff98dbf88bb1049cc93f` 已接入cca0d0e5；split-worker、namespace lease、capability正式装配已有本地实现。owner 报告当前main依赖下API/Worker编译、22files/257相关测试、gov220，以及native真实矩阵、PG lease7项和独立review通过 | 当前head hosted CI、最终制品、retained migrations/principals/TLS/storage/lease/readiness、RuntimeEvidence和三轮UAT仍未完成；不把此前不同源码的全API结果合并为当前fresh全量PASS |
 | GrowthOS 平台 authority | 已确认产品patch108/99paths基线 `f9699f0f42a050a69294bb4ae679de520ba50e91`，随后构建资源修复head `6125b6da8da974dde8ff8399f46940cf73b2b511`。owner 报告真实producer/consumer lease/recovery/clock/ACK等本地接线、51整合和Bootstrap hermetic591项通过 | 最新JAR/3OCI仍待重新构建；该local authority无remote，hosted CI/私有仓库授权待解决；源码/本地矩阵不等于保留环境采用 |
-| #515 capability receiver | 远端旧Draft `6a3126b7670661a64c95676574320a3f6992ee66`保留；其后续receiver及真实producer合同已进入R4本地装配范围 | 待R4最终候选的hosted/独立接纳与实际合入后再处置旧PR；专用identity/JWKS、nonce/digest、freshness/backlog与Temporal事实仍须在被采用制品和环境中共同成立 |
+| #515 capability receiver | 2026-10-06 以 superseded 关闭：它新增的 11 个 `apps/api/src/platform-authority/` 源码文件与 main 逐字节相同（随 R4 合入，capability 读取自 2026-09-30 起在开发宿主走通）；head `6a3126b7670661a64c95676574320a3f6992ee66` 由 PR 保留，见 §4.3 | 关闭只处置旧 PR，不构成运行接纳；专用identity/JWKS、nonce/digest、freshness/backlog与Temporal事实仍须在被采用制品和环境中共同成立 |
 | #542 安全基线刷新 | 迁移任务已合入为 `cca0d0e546ab649fcdfd22132c96fa44c4b4c1cd` 并明确释放依赖窗口；本工具链候选又以精确源码 `728fbf8eaab86f24182cffe1cccdfb5fbaa7e16c` 重审，872个生产依赖、0 advisories，freshness从HOLD转为FRESH | 本地精确审计不等于全部开发依赖或Go告警清零；零漏洞政策、原有效期和验证器保持不变，源码接纳与后续运行发布仍分开 |
 | Program C | 最新 owner 交付 `a6debdf4271920b5658e66e05e481c5e922a1adb` 已增加 C4 durable action-intent 与前端挂载，状态为 `LOCAL_CANDIDATE_VERIFIED / NOT_ADOPTED` | 可信 QGO evidence 仍 HOLD；新增 human action-intent 表尚未被既有 DSR 覆盖，保持 `HOLD_PRIVACY`、不可激活真实数据。C1 restricted envelope、C5 facade/会话接线、shared main、retained upgrade/release/runtime/真实全栈 UAT 仍未接纳 |
 
@@ -123,12 +123,32 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 
 **本节不改变任何阶段门裁决。** G5-Site / G5-Acquisition / G6 / G7 维持 §2 的现有裁决；本机观察到的 platform Worker 就绪不是 RuntimeEvidence，撤销投递链（`BLOCKED_PENDING_BACKEND_4A4`）闭合之前，也不得据此声称撤销可以送达。
 
+## 4.3 远端分支清理（2026-10-06，边界限于本节）
+
+> 本节只记录这一次清理，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4–§4.2 的证据裁决。
+
+§4 要求历史分支按 owner 的精确删除授权逐项退役。2026-10-06 owner 逐项批准了下表的处置，`mlhjyx/global-backend` 的远端分支由 17 个非 main 分支减为只剩 `main`（其中 `codex/prod-advisories-20261006` 是 #589 合并后自动删除的，不属于本次清理）。每个被删分支的提交仍可从下表的 PR 或 `archive/` tag 找回；删除前另在开发宿主做了全量 bundle。
+
+| 分支 | 处置依据 | GitHub 上的保留位置 |
+| --- | --- | --- |
+| `codex/status-runtime-browser-fix-20260912` | 提交已全部在 main | main 历史；tag `archive/governance/status-runtime-browser-fix-b5123654-20260912`；#514 |
+| `archive/codex/runtime-sbom-third-party-pin-20260919` | 已以 `28c362bd` 合入 main | main 历史 |
+| `archive/codex/platform-receiver-rebase-20260912`、`codex/platform-receiver-rebase-20260912` | 源码与 main 逐字节相同；#515 以 superseded 关闭 | #515 |
+| `claude/g3-website-profile-rules` | G3 5.3–5.4b 的半成品，经修订后由 #575、#578、#581 合入 | 各合入 PR |
+| `codex/goodjob-acquisition-integration` | #407 早已关闭 | tag `archive/acquisition/goodjob-integration-70885cdb-20260826`；#407 |
+| `codex/qualification-feedback-receiver-20260919` 及其 `archive/` 副本 | 未进 main，也从未开 PR | tag `archive/acquisition/qualification-feedback-receiver-ab0af629-20260919` |
+| `codex/pr407-final-closeout-20260919` | #407 收口证据，未进 main，也从未开 PR | tag `archive/governance/pr407-final-closeout-fcb0fb7c-20260919` |
+| `codex/pr407-identity-test-closeout-20260913` | #538 关闭、未合并 | tag `archive/governance/organization-identity-successor-2f5d4313-20260920`；#538 |
+| `dependabot/*`（6 个） | #527–#532 早已关闭；main 上的对应版本均已更新 | 各自 PR |
+
+本次只处理远端分支。开发宿主上的本地分支与 worktree 不在本节范围内，仍按 §4、§4.1 的历史登记处理。
+
 ## 5. 下一顺序与授权边界
 
-1. #538 完成v3消费者、完整闭包及独立controller/materialization/readback/admission门；R4将已接线的本地候选推进到最终hosted、制品和运行接纳。两条owner施工面各自接纳，不互相借用局部成功。
+1. #538 已于 2026-10-06 关闭、不再推进（§4.3）。R4将已接线的本地候选推进到最终hosted、制品和运行接纳。
 2. Program C 保留已验证的C4本地候选，补齐action-intent隐私/DSR、C1 restricted envelope、C5产品接线与跨仓接纳；已完成的本地候选不重复列为未开发。
 3. 根据实际最终制品与保留环境事实生成当前 RuntimeEvidence、可信 Release Bundle，再做完整三次用户旅程和重启/失败/UNKNOWN/隐私删除验收。
-4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。
+4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。远端分支已于 2026-10-06 按此完成（§4.3），本地分支与 worktree 仍待逐项处理。
 5. §4.2 的 GrowthOS reader 授权缺口、update_time 门与出网围栏，已分别由 GrowthOS 补丁 0113、0114 与 2026-10-01 owner 批准的出网策略安装解除；本机 readiness 整体就绪，platform Worker 取得租约。剩余事项：平台 schedule 恢复运行是 owner 的单独决定（执行路径尚未验证）；技术合同或报价一旦变化，就要重新推导并以 generation+1 重装出网策略，目前没有仓库工具；另外 `readerpolicy` 的注释声称「包括仅 JWT 的公共监听器也要 peer proof」，而当前 `temporal.yaml` 只在 `temporal-platform-reader` 这个 hostOverride 上开启 `requireClientAuth`，两者仍需对齐（与本次修复无关，属本仓注释与配置的一致性）。本机就绪不构成 RuntimeEvidence；Backend 仍没有调用 GrowthOS HMAC 签发端点的客户端（`BLOCKED_PENDING_BACKEND_4A4`），所以这次转绿只代表事实可观察，不代表撤销能真正送达。
 
 相同动作、目标和范围的有效授权继续沿用。源码/PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、真实 provider/model/付费调用或 Pilot/GA。正常产品请求的费用权威与开发者 ad-hoc 调用授权保持分离。
