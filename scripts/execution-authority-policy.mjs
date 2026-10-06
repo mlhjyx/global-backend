@@ -43,6 +43,15 @@ export const EXPECTED_MODEL_GATEWAY_BOUNDARIES = Object.freeze([
   'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
 ]);
 
+// The only `getTask` calls whose argument is not a task literal or constant:
+// generic lookups that load the contract of a task chosen elsewhere.
+export const EXPECTED_GENERIC_MODEL_TASK_LOOKUPS = Object.freeze([
+  'apps/api/src/execution-budget/workspace-technical-budget-envelope.ts#taskId',
+  'apps/api/src/model-gateway/router-model-gateway.ts#input.task',
+  'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#input.task',
+  'apps/api/src/tools/tool-broker.ts#ctx.taskContractId',
+]);
+
 export const EXPECTED_PROTECTED_WIRING_PATHS = Object.freeze([
   'apps/api/src/model-gateway/model-gateway.module.ts',
   'apps/api/src/model-gateway/router-model-gateway.ts',
@@ -528,17 +537,35 @@ function toolBlock(source, id) {
   return source.slice(start, next < 0 ? source.length : start + marker.length + next);
 }
 
-// Top-level `const NAME = <number | string | OTHER_NAME> [as const];`
-// declarations, aliases resolved. Expressions stay unresolved (fail closed).
+// `const NAME = <number | string | OTHER_NAME> [as const];` declarations,
+// aliases resolved. Expressions stay unresolved (fail closed), and so does a
+// name that is declared more than once (a shadowing declaration may differ)
+// or bound by an import rename (`import { OTHER as NAME }` refers to OTHER).
 export function sourceConstants(source) {
   const declared = new Map();
+  const ambiguous = new Set();
+  const declarationCounts = new Map();
+  for (const match of source.matchAll(/\b(?:const|let|var)\s+([A-Z][A-Z0-9_]*)\b/g)) {
+    declarationCounts.set(match[1], (declarationCounts.get(match[1]) ?? 0) + 1);
+  }
+  const simpleCounts = new Map();
   for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*=\s*([0-9_]+|"[^"\n]*"|'[^'\n]*'|[A-Z][A-Z0-9_]*)(?:\s+as\s+const)?\s*;/g)) {
+    if (declared.has(match[1]) && declared.get(match[1]) !== match[2]) ambiguous.add(match[1]);
     declared.set(match[1], match[2]);
+    simpleCounts.set(match[1], (simpleCounts.get(match[1]) ?? 0) + 1);
+  }
+  for (const [name, count] of simpleCounts) {
+    if (declarationCounts.get(name) !== count) ambiguous.add(name);
+  }
+  for (const clause of source.matchAll(/\b(?:import|export)\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const alias of clause[1].matchAll(/\b([A-Za-z_$][\w$]*)\s+as\s+([A-Z][A-Z0-9_]*)\b/g)) {
+      if (alias[1] !== alias[2]) ambiguous.add(alias[2]);
+    }
   }
   const resolved = new Map();
   const resolveName = (name, seen) => {
     if (resolved.has(name)) return resolved.get(name);
-    if (!declared.has(name) || seen.has(name)) return undefined;
+    if (!declared.has(name) || ambiguous.has(name) || seen.has(name)) return undefined;
     const token = declared.get(name);
     const value = /^[0-9_]+$/.test(token)
       ? Number(token.replaceAll('_', ''))
@@ -558,16 +585,20 @@ function escapeRegExp(value) {
 
 // Product sources may declare a platform Tool through
 // `platformExecutionToolContract("<id>")`; read its id and schema from the
-// contract so the checks below compare the same literal values.
+// contract so the checks below compare the same literal values. Only a binding
+// that is exactly `const name = platformExecutionToolContract("<id>");` and is
+// declared once in the source resolves; anything else stays as written.
 export function resolvePlatformContractReferences(source, contractSource) {
   const schemas = new Map();
   for (const match of contractSource.matchAll(/\btoolId:\s*"([a-z0-9_.]+)"[^}]*?\bresultSchema:\s*"([^"]+)"/g)) {
     schemas.set(match[1], match[2]);
   }
   let resolved = source;
-  for (const match of source.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*platformExecutionToolContract\(\s*["']([a-z0-9_.]+)["']\s*\)/g)) {
+  for (const match of source.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*platformExecutionToolContract\(\s*["']([a-z0-9_.]+)["']\s*\)\s*;/g)) {
     const [, binding, toolId] = match;
     if (!schemas.has(toolId)) continue;
+    const declarations = source.match(new RegExp(`\\b(?:const|let|var)\\s+${escapeRegExp(binding)}\\b`, 'g')) ?? [];
+    if (declarations.length !== 1) continue;
     resolved = resolved
       .replace(new RegExp(`\\b${escapeRegExp(binding)}\\.toolId\\b`, 'g'), JSON.stringify(toolId))
       .replace(new RegExp(`\\b${escapeRegExp(binding)}\\.resultSchema\\b`, 'g'), JSON.stringify(schemas.get(toolId)));
@@ -582,19 +613,91 @@ export function declaresMapping(source, key, value) {
   return new RegExp(`["']${escapeRegExp(key)}["']\\s*:\\s*["']${escapeRegExp(value)}["']`).test(source);
 }
 
-// Literal `getTask("<id>")` calls and `getTask(CONSTANT)` through a string
-// constant declared in the same file. Lower-case arguments are generic
-// lookups (`input.task`, `taskId`), not product task declarations.
-export function modelTaskIdsInSource(source) {
+// String literals of `MODEL_RESULT_TASK_IDS = Object.freeze([...] as const)`,
+// the runtime's closed list of Model tasks with a typed projection; null when
+// the declaration is missing, repeated or not a plain literal list.
+export function modelResultTaskIds(source) {
+  const sourceFile = ts.createSourceFile('model-result-projections.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const declarations = [];
+  const collect = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'MODEL_RESULT_TASK_IDS') declarations.push(node);
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  if (declarations.length !== 1) return null;
+  const initializer = declarations[0].initializer;
+  if (
+    !initializer || !ts.isCallExpression(initializer) ||
+    initializer.expression.getText(sourceFile) !== 'Object.freeze' || initializer.arguments.length !== 1
+  ) return null;
+  let list = initializer.arguments[0];
+  if (ts.isAsExpression(list)) list = list.expression;
+  if (!ts.isArrayLiteralExpression(list) || !list.elements.every((element) => ts.isStringLiteralLike(element))) return null;
+  return list.elements.map((element) => element.text);
+}
+
+function isDeclarationOrCallee(identifier) {
+  const parent = identifier.parent;
+  if (
+    ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent) || ts.isTypeQueryNode(parent) ||
+    ((ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent)) && parent.name === identifier)
+  ) return true;
+  let current = ts.isPropertyAccessExpression(parent) && parent.name === identifier ? parent : identifier;
+  while (ts.isNonNullExpression(current.parent) || ts.isParenthesizedExpression(current.parent)) current = current.parent;
+  return ts.isCallExpression(current.parent) && current.parent.expression === current;
+}
+
+// Every `getTask(...)` call, found on the syntax tree (also through an import
+// alias, `?.`, `!` or a member access). A string literal names a product task;
+// a bare upper-case name must resolve to a string constant of the same file;
+// a missing, extra or spread argument is unresolved. Any other argument is a
+// generic lookup (`input.task`), which the caller checks against the closed
+// EXPECTED_GENERIC_MODEL_TASK_LOOKUPS list. A reference that is not a direct
+// call (`ids.map(getTask)`, `const f = getTask`) would hide which task it
+// loads and is reported as a value reference.
+export function modelTaskIdsInSource(source, path = 'source.ts') {
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const constants = sourceConstants(source);
+  const callees = new Set(['getTask']);
+  const collectAliases = (node) => {
+    if (ts.isImportSpecifier(node) && (node.propertyName ?? node.name).text === 'getTask') callees.add(node.name.text);
+    ts.forEachChild(node, collectAliases);
+  };
+  collectAliases(sourceFile);
   const taskIds = [];
   const unresolved = [];
-  for (const match of source.matchAll(/\bgetTask\s*\(\s*(?:["']([^"']+)["']|([A-Z][A-Z0-9_]*))\s*\)/g)) {
-    const taskId = match[1] ?? constants.get(match[2]);
-    if (typeof taskId === 'string') taskIds.push(taskId);
-    else unresolved.push(match[2]);
-  }
-  return { taskIds, unresolved };
+  const genericLookups = [];
+  const valueReferences = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      let callee = node.expression;
+      while (ts.isNonNullExpression(callee) || ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      const name = ts.isIdentifier(callee)
+        ? callee.text
+        : ts.isPropertyAccessExpression(callee)
+          ? callee.name.text
+          : ts.isElementAccessExpression(callee) && ts.isStringLiteralLike(callee.argumentExpression)
+            ? callee.argumentExpression.text
+            : null;
+      if (callees.has(name)) {
+        const [argument, ...rest] = node.arguments;
+        const text = node.arguments.map((entry) => entry.getText(sourceFile)).join(', ');
+        if (!argument || rest.length > 0 || ts.isSpreadElement(argument)) unresolved.push(text);
+        else if (ts.isStringLiteralLike(argument)) taskIds.push(argument.text);
+        else if (ts.isIdentifier(argument) && /^[A-Z][A-Z0-9_]*$/.test(argument.text)) {
+          const taskId = constants.get(argument.text);
+          if (typeof taskId === 'string') taskIds.push(taskId);
+          else unresolved.push(argument.text);
+        } else genericLookups.push(text);
+      }
+    }
+    if (ts.isIdentifier(node) && callees.has(node.text) && !isDeclarationOrCallee(node)) {
+      valueReferences.push(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { taskIds, unresolved, genericLookups, valueReferences };
 }
 
 function resolveNumber(token, constants) {
@@ -611,10 +714,12 @@ function resolveString(token, constants) {
   return typeof value === 'string' ? value : undefined;
 }
 
-function artifactSourceContract(block, completeSource) {
-  const maxToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)/)?.[1];
-  const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)/)?.[1];
-  const mediaExpression = block.match(/\bmediaTypes:\s*\[([^\]]+)\]/)?.[1];
+export function artifactSourceContract(block, completeSource) {
+  // Each bound must be a single token ending the property, so an expression
+  // such as `LIMIT * 10` or `[...].concat(more)` fails closed.
+  const maxToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)(?=[ \t]*[,}])/)?.[1];
+  const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)(?=[ \t]*[,}])/)?.[1];
+  const mediaExpression = block.match(/\bmediaTypes:\s*\[([^\]]+)\](?=[ \t]*[,}])/)?.[1];
   if (!maxToken || !ttlToken || !mediaExpression) return null;
   const constants = sourceConstants(completeSource);
   const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, constants));
@@ -622,7 +727,7 @@ function artifactSourceContract(block, completeSource) {
   return Object.freeze({
     maxBytes: resolveNumber(maxToken, constants),
     mediaTypes,
-    privacyClass: block.match(/\bprivacyClass:\s*["']([^"']+)["']/)?.[1],
+    privacyClass: block.match(/\bprivacyClass:\s*["']([^"']+)["'](?=[ \t]*[,}])/)?.[1],
     ttlSeconds: resolveNumber(ttlToken, constants),
   });
 }
@@ -672,15 +777,37 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     .filter((path) => path.endsWith('.ts') && !path.endsWith('.spec.ts'))
     .filter((path) => !path.startsWith('apps/api/src/site-builder/'));
   const discoveredModelTasks = new Set();
+  const genericLookups = [];
   for (const path of genericSources) {
-    const { taskIds, unresolved } = modelTaskIdsInSource(await readText(repoRoot, path));
+    const { taskIds, unresolved, genericLookups: lookups, valueReferences } =
+      modelTaskIdsInSource(await readText(repoRoot, path), path);
     taskIds.forEach((taskId) => discoveredModelTasks.add(taskId));
     for (const name of unresolved) {
-      issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `getTask(${name}) must name a string constant declared in the same file`));
+      issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `getTask(${name}) must name a task literal or a string constant declared once in the same file`));
     }
+    for (const name of valueReferences) {
+      issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `${name} is referenced without a direct call; call it with a task literal or a same-file string constant`));
+    }
+    for (const lookup of lookups) {
+      const key = `${path}#${lookup}`;
+      genericLookups.push(key);
+      if (!EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.includes(key)) {
+        issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `getTask(${lookup}) is not a registered generic lookup; name the task with a literal or a same-file string constant`));
+      }
+    }
+  }
+  if (!sameSet(genericLookups, EXPECTED_GENERIC_MODEL_TASK_LOOKUPS) || genericLookups.length !== EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length) {
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_LOOKUP_DRIFT', 'apps/api/src', 'generic getTask lookups must be exactly the registered Router, runtime bridge, ToolBroker and budget envelope lookups'));
   }
   if (!sameSet(discoveredModelTasks, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))) {
     issues.push(issue('EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src', 'generic product Model task inventory drifted from the closed registry'));
+  }
+  const runtimeTaskIds = modelResultTaskIds(await readText(repoRoot, 'apps/api/src/durable-results/model-result-projections.ts'));
+  if (
+    runtimeTaskIds === null || runtimeTaskIds.length !== EXPECTED_MODEL_TASKS.length ||
+    !sameSet(runtimeTaskIds, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))
+  ) {
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_RESULT_TASKS_MISMATCH', 'apps/api/src/durable-results/model-result-projections.ts', 'MODEL_RESULT_TASK_IDS must list exactly the closed product Model task inventory'));
   }
   const modelBoundaryCalls = [];
   const toolPhysicalCalls = [];

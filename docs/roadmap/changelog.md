@@ -20,7 +20,17 @@
 
 - `scripts/execution-authority-policy.spec.mjs` 自 #586 起登记在 `MANUAL_SPECS`：策略检查在 main 上报 25 个问题，10-06 的 main（`49dfd9f1`）仍是同样 25 项、没有新增。其中 24 项是检查脚本跟不上重构，不是代码违规：10 项是模型投影表在 #449 改成双引号，脚本只认单引号；11 项是五个平台 Tool 改经 `platformExecutionToolContract("<id>")` 声明 id、schema 与产物上限，脚本只认字面 `id: "<id>"`；1 项是专利计费上限改为指向平台合同常量的别名；2 项是 #578 新增的 `discovery.classify_trade_role` 未登记，且它以常量调用 `getTask(WEBSITE_PROFILE_TASK)`，源码清单扫描漏掉了它。脚本现按平台合同解析这些间接引用（含 `as const`、跨行与别名常量），以引号无关的方式匹配映射，把同文件字符串常量的 `getTask` 计入清单，无法解析的大写常量参数报 `EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED`。
 - 剩下 1 项是受保护的 `router-model-gateway.ts` 指纹，自 d5e4bc42（8-26）起不再匹配。[围栏复核](../evidence/execution-authority-fence-review-20261001.md)逐提交核对了 `b8dd5eb0` 以来改动四个受保护文件的全部提交：要么语义不变，要么新增 fail-closed 控制，唯一的放宽是已批准的 G3 5.1 按调用主体绑定（#565，当时已顺带更新了 ToolBroker 两个文件的指纹）。10-01 之后四个文件都没有再改，Router 当前内容仍是复核时的 `446e5771…`；10-06 另做了一次独立复审，逐行确认了复核结论，另提三点不影响更新指纹的后续事项（结算 `REPLAY` 判定的注释与 SQL 不符、平台出网授权实际还依赖未钉住的 `source-tools.ts`、客户侧中途拒绝的预留释放），一并记在复核记录文末。据此把 Router 指纹更新为 `446e5771…`，检查失败时的提示也改为「先复核、记录复核，再更新指纹」。
-- 该 spec 现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行，`MANUAL_SPECS` 删去该项（剩 2 项）。在仓库副本上做的 7 项变异全部被拦下：Router、ToolBroker 各改一个字节，平台合同里 `crawl4ai.render` 的 schema，专利计费上限常量，`icp.design` 的投影值，把 trade-role 任务常量改成未登记的 id，以未定义常量调用 `getTask`。去掉这条导入时，可达性门报 `SPEC_UNREACHABLE`。`governance:test` 由 276 项增至 286 项，xin 上 load 14 时 44 秒，其中本 spec 约 14 秒。
+- 该 spec 现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行，`MANUAL_SPECS` 删去该项（剩 2 项）。去掉这条导入时，可达性门报 `SPEC_UNREACHABLE`。
+- 合并前的独立代码复审找到新解析逻辑会漏报的几种写法。这些写法当前代码里都没有，但都已改为按失败处理：
+  - 产物上限按首个记号读取：`LIMIT * 10`、`[…].concat(more)`、`86_400 * 365` 都会被当成合规。现在要求取值是紧接 `,` 或 `}` 的单个记号。
+  - `getTask` 改用语法树扫描，也能识别 import 别名、`?.`、`!` 和成员访问。参数不是字面量、也不是同文件常量的调用，只允许 Router、运行时桥、ToolBroker、预算信封这四处登记过的通用查找（`EXPECTED_GENERIC_MODEL_TASK_LOOKUPS`）；把 `getTask` 当作值传递（如 `ids.map(getTask)`）同样报错。
+  - 同名常量被声明多次，或经 `import { A as B }` 改名绑定的，按无法解析处理。只有恰为 `const x = platformExecutionToolContract("<id>");` 且只声明一次的绑定，才按平台合同解析。
+  - 新增：运行时的封闭清单 `MODEL_RESULT_TASK_IDS` 必须与期望的 Model 任务清单完全一致（`EXECUTION_AUTHORITY_MODEL_RESULT_TASKS_MISMATCH`）。
+- 在仓库副本上做了 16 项变异，全部被拦下：
+  - 先前的 7 项：Router、ToolBroker 各改一个字节，平台合同里 `crawl4ai.render` 的 schema，专利计费上限常量，`icp.design` 的投影值，把 trade-role 任务常量改成未登记的 id，以未定义常量调用 `getTask`；
+  - 复审给出的反例及据此补充的 9 项：产物上限三种表达式、`getTask` 经对象成员 / 小写常量 / 作为值传递、常量 import 改名、被遮蔽的任务常量、运行时任务清单多一项。
+
+  新增的 5 个用例在复审前的脚本上全部失败。spec 由 10 项增至 15 项。`governance:test` 由 276 项增至 291 项，xin 上 load 12 时 46 秒，其中本 spec 约 18 秒。
 
 ## 2026-10-01 · @grpc/grpc-js security floor
 
