@@ -34,11 +34,6 @@ const UNREACHABLE =
   "no CI runner executes this spec: import it from scripts/governance-contracts.spec.mjs if it needs no containers, run it from a workflow, or list it in MANUAL_SPECS (scripts/governance-spec-reachability.mjs) with a reason and a run command";
 
 export const MANUAL_SPECS = Object.freeze({
-  "scripts/execution-authority-policy.spec.mjs": Object.freeze({
-    reason:
-      "Fails on main and stays out of the gates until it is re-baselined: the pinned router-model-gateway.ts fingerprint has not matched since d5e4bc42 (2026-08-26), and the Tool, Model task and projection inventories no longer match current sources (25 issues on 2026-09-30). Re-pinning the Router/ToolBroker fence needs its own security review.",
-    run: "node --test scripts/execution-authority-policy.spec.mjs",
-  }),
   "scripts/platform-authority-policy-import.cross-repo.spec.mjs": Object.freeze(
     {
       reason:

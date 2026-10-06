@@ -13,6 +13,7 @@ const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/source-tools.ts',
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
+const PLATFORM_CONTRACT_PATH = 'apps/api/src/platform-authority/platform-execution-contract.ts';
 const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
@@ -34,11 +35,21 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/discovery/providers/public-web.provider.ts', taskId: 'discovery.extract_company', schema: 'discovery-extract-company/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/directory.provider.ts', taskId: 'discovery.extract_list', schema: 'discovery-extract-list/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/decision-maker.provider.ts', taskId: 'contact.find_decision_makers', schema: 'contact-decision-makers/v1' }),
+  Object.freeze({ path: 'apps/api/src/discovery/providers/website-profile.provider.ts', taskId: 'discovery.classify_trade_role', schema: 'discovery-classify-trade-role/v1' }),
 ]);
 
 export const EXPECTED_MODEL_GATEWAY_BOUNDARIES = Object.freeze([
   'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
   'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
+]);
+
+// The only `getTask` calls whose argument is not a task literal or constant:
+// generic lookups that load the contract of a task chosen elsewhere.
+export const EXPECTED_GENERIC_MODEL_TASK_LOOKUPS = Object.freeze([
+  'apps/api/src/execution-budget/workspace-technical-budget-envelope.ts#taskId',
+  'apps/api/src/model-gateway/router-model-gateway.ts#input.task',
+  'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#input.task',
+  'apps/api/src/tools/tool-broker.ts#ctx.taskContractId',
 ]);
 
 export const EXPECTED_PROTECTED_WIRING_PATHS = Object.freeze([
@@ -448,7 +459,7 @@ function validateModelTasks(manifest, path, issues) {
   const ids = manifest.modelTasks.map((entry) => entry?.taskId).filter(Boolean);
   const expectedIds = EXPECTED_MODEL_TASKS.map((entry) => entry.taskId);
   if (!sameSet(ids, expectedIds) || new Set(ids).size !== expectedIds.length) {
-    issues.push(issue('EXECUTION_AUTHORITY_MODEL_INVENTORY_MISMATCH', path, 'manifest must declare exactly 10 generic product Model tasks'));
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_INVENTORY_MISMATCH', path, `manifest must declare exactly ${expectedIds.length} generic product Model tasks`));
   }
   const allowed = [
     'taskId', 'callsitePath', 'resultStrategy', 'resultSchema',
@@ -512,7 +523,7 @@ async function validateProtectedFiles(repoRoot, manifest, path, issues) {
     }
     const source = existsSync(resolve(repoRoot, entry.path)) ? await readText(repoRoot, entry.path) : null;
     if (source === null || sha256(source) !== entry.sha256) {
-      issues.push(issue('EXECUTION_AUTHORITY_PHYSICAL_WIRING_DRIFT', entry.path, 'protected Router/ToolBroker composition changed before Task 6'));
+      issues.push(issue('EXECUTION_AUTHORITY_PHYSICAL_WIRING_DRIFT', entry.path, 'protected Router/ToolBroker composition changed: review the change for authority, budget, receipt and egress bypasses, then re-pin its sha256 in docs/governance/durable-result-strategies.json and record the review in the PR'));
     }
   }
 }
@@ -526,71 +537,285 @@ function toolBlock(source, id) {
   return source.slice(start, next < 0 ? source.length : start + marker.length + next);
 }
 
-function numberConstants(source) {
-  const values = new Map();
-  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*([0-9_]+)\s*;/g)) {
-    const normalized = match[2].replaceAll('_', '');
-    if (/^[0-9]+$/.test(normalized)) values.set(match[1], Number(normalized));
+// `const NAME = <number | string | OTHER_NAME> [as const];` declarations,
+// aliases resolved. Expressions stay unresolved (fail closed), and so does a
+// name that is declared more than once (a shadowing declaration may differ)
+// or bound by an import rename (`import { OTHER as NAME }` refers to OTHER).
+export function sourceConstants(source) {
+  const declared = new Map();
+  const ambiguous = new Set();
+  const declarationCounts = new Map();
+  for (const match of source.matchAll(/\b(?:const|let|var)\s+([A-Z][A-Z0-9_]*)\b/g)) {
+    declarationCounts.set(match[1], (declarationCounts.get(match[1]) ?? 0) + 1);
   }
-  return values;
+  const simpleCounts = new Map();
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*=\s*([0-9_]+|"[^"\n]*"|'[^'\n]*'|[A-Z][A-Z0-9_]*)(?:\s+as\s+const)?\s*;/g)) {
+    if (declared.has(match[1]) && declared.get(match[1]) !== match[2]) ambiguous.add(match[1]);
+    declared.set(match[1], match[2]);
+    simpleCounts.set(match[1], (simpleCounts.get(match[1]) ?? 0) + 1);
+  }
+  for (const [name, count] of simpleCounts) {
+    if (declarationCounts.get(name) !== count) ambiguous.add(name);
+  }
+  for (const clause of source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}/g)) {
+    for (const alias of clause[1].matchAll(/\b([A-Za-z_$][\w$]*)\s+as\s+([A-Z][A-Z0-9_]*)\b/g)) {
+      if (alias[1] !== alias[2]) ambiguous.add(alias[2]);
+    }
+  }
+  const resolved = new Map();
+  const resolveName = (name, seen) => {
+    if (resolved.has(name)) return resolved.get(name);
+    if (!declared.has(name) || ambiguous.has(name) || seen.has(name)) return undefined;
+    const token = declared.get(name);
+    const value = /^[0-9_]+$/.test(token)
+      ? Number(token.replaceAll('_', ''))
+      : /^["']/.test(token)
+        ? token.slice(1, -1)
+        : resolveName(token, new Set([...seen, name]));
+    if (value !== undefined) resolved.set(name, value);
+    return value;
+  };
+  for (const name of declared.keys()) resolveName(name, new Set());
+  return resolved;
 }
 
-function stringConstants(source) {
-  const values = new Map();
-  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*["']([^"']+)["'](?:\s+as\s+const)?\s*;/g)) {
-    values.set(match[1], match[2]);
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
+// Product sources may declare a platform Tool through
+// `platformExecutionToolContract("<id>")`; read its id and schema from the
+// contract so the checks below compare the same literal values. Only a binding
+// that is exactly `const name = platformExecutionToolContract("<id>");` and is
+// declared once in the source resolves; anything else stays as written.
+export function resolvePlatformContractReferences(source, contractSource) {
+  const schemas = new Map();
+  for (const match of contractSource.matchAll(/\btoolId:\s*"([a-z0-9_.]+)"[^}]*?\bresultSchema:\s*"([^"]+)"/g)) {
+    schemas.set(match[1], match[2]);
   }
-  return values;
+  let resolved = source;
+  for (const match of source.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*platformExecutionToolContract\(\s*["']([a-z0-9_.]+)["']\s*\)\s*;/g)) {
+    const [, binding, toolId] = match;
+    if (!schemas.has(toolId)) continue;
+    const declarations = source.match(new RegExp(`\\b(?:const|let|var)\\s+${escapeRegExp(binding)}\\b`, 'g')) ?? [];
+    if (declarations.length !== 1) continue;
+    resolved = resolved
+      .replace(new RegExp(`\\b${escapeRegExp(binding)}\\.toolId\\b`, 'g'), JSON.stringify(toolId))
+      .replace(new RegExp(`\\b${escapeRegExp(binding)}\\.resultSchema\\b`, 'g'), JSON.stringify(schemas.get(toolId)));
+  }
+  return resolved.replace(
+    /\bplatformExecutionToolContract\(\s*["']([a-z0-9_.]+)["']\s*\)\.resultSchema\b/g,
+    (expression, toolId) => (schemas.has(toolId) ? JSON.stringify(schemas.get(toolId)) : expression),
+  );
+}
+
+export function declaresMapping(source, key, value) {
+  return new RegExp(`["']${escapeRegExp(key)}["']\\s*:\\s*["']${escapeRegExp(value)}["']`).test(source);
+}
+
+// String literals of `MODEL_RESULT_TASK_IDS = Object.freeze([...] as const)`,
+// the runtime's closed list of Model tasks with a typed projection; null when
+// the declaration is missing, repeated or not a plain literal list.
+export function modelResultTaskIds(source) {
+  const sourceFile = ts.createSourceFile('model-result-projections.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const declarations = [];
+  const collect = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'MODEL_RESULT_TASK_IDS') declarations.push(node);
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  if (declarations.length !== 1) return null;
+  const initializer = declarations[0].initializer;
+  if (
+    !initializer || !ts.isCallExpression(initializer) ||
+    initializer.expression.getText(sourceFile) !== 'Object.freeze' || initializer.arguments.length !== 1
+  ) return null;
+  let list = initializer.arguments[0];
+  if (ts.isAsExpression(list)) list = list.expression;
+  if (!ts.isArrayLiteralExpression(list) || !list.elements.every((element) => ts.isStringLiteralLike(element))) return null;
+  return list.elements.map((element) => element.text);
+}
+
+function isDeclarationOrCallee(identifier) {
+  const parent = identifier.parent;
+  if (
+    ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent) || ts.isTypeQueryNode(parent) ||
+    ((ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent)) && parent.name === identifier)
+  ) return true;
+  let current = ts.isPropertyAccessExpression(parent) && parent.name === identifier ? parent : identifier;
+  while (ts.isNonNullExpression(current.parent) || ts.isParenthesizedExpression(current.parent)) current = current.parent;
+  return ts.isCallExpression(current.parent) && current.parent.expression === current;
+}
+
+// Every `getTask(...)` call, found on the syntax tree (also through an import
+// alias, `?.`, `!` or a member access). A string literal names a product task;
+// a bare upper-case name must be bound exactly once in the file, as a string
+// `const` (a parameter or destructured name that shadows it is a binding too);
+// a missing, extra or spread argument is unresolved. Any other argument is a
+// generic lookup (`input.task`), which the caller checks against the closed
+// EXPECTED_GENERIC_MODEL_TASK_LOOKUPS list. A reference that is not a direct
+// call (`ids.map(getTask)`, `const f = getTask`) would hide which task it
+// loads and is reported as a value reference.
+export function modelTaskIdsInSource(source, path = 'source.ts') {
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const callees = new Set(['getTask']);
+  const declarations = new Map();
+  const valueReferences = [];
+  const collect = (node) => {
+    if (ts.isImportSpecifier(node) && (node.propertyName ?? node.name).text === 'getTask') callees.add(node.name.text);
+    // A re-export under another name lets a different file call it unseen.
+    if (ts.isExportSpecifier(node) && (node.propertyName ?? node.name).text === 'getTask' && node.name.text !== 'getTask') {
+      valueReferences.push(`export as ${node.name.text}`);
+    }
+    // Every binding of a name (const/let/var, parameter, destructuring, import,
+    // function or class), so a parameter that shadows a constant is seen.
+    const named = ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node) ||
+      ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node) ||
+      ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node);
+    if (named && node.name && ts.isIdentifier(node.name)) {
+      declarations.set(node.name.text, [...(declarations.get(node.name.text) ?? []), node]);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  // A task constant counts only when the file binds its name exactly once, as
+  // a `const` initialized with a string literal (optionally `as const`).
+  const constantTask = (name) => {
+    const bindings = declarations.get(name) ?? [];
+    const [binding] = bindings;
+    if (bindings.length !== 1 || !ts.isVariableDeclaration(binding) || !binding.initializer) return undefined;
+    if (!(binding.parent.flags & ts.NodeFlags.Const)) return undefined;
+    let initializer = binding.initializer;
+    if (ts.isAsExpression(initializer)) initializer = initializer.expression;
+    return ts.isStringLiteralLike(initializer) ? initializer.text : undefined;
+  };
+  const taskIds = [];
+  const unresolved = [];
+  const genericLookups = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      let callee = node.expression;
+      while (ts.isNonNullExpression(callee) || ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      const name = ts.isIdentifier(callee)
+        ? callee.text
+        : ts.isPropertyAccessExpression(callee)
+          ? callee.name.text
+          : ts.isElementAccessExpression(callee) && ts.isStringLiteralLike(callee.argumentExpression)
+            ? callee.argumentExpression.text
+            : null;
+      if (callees.has(name)) {
+        const [argument, ...rest] = node.arguments;
+        const text = node.arguments.map((entry) => entry.getText(sourceFile)).join(', ');
+        if (!argument || rest.length > 0 || ts.isSpreadElement(argument)) unresolved.push(text);
+        else if (ts.isStringLiteralLike(argument)) taskIds.push(argument.text);
+        else if (ts.isIdentifier(argument) && /^[A-Z][A-Z0-9_]*$/.test(argument.text)) {
+          const taskId = constantTask(argument.text);
+          if (typeof taskId === 'string') taskIds.push(taskId);
+          else unresolved.push(argument.text);
+        } else genericLookups.push(text);
+      }
+    }
+    if (ts.isIdentifier(node) && callees.has(node.text) && !isDeclarationOrCallee(node)) {
+      valueReferences.push(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { taskIds, unresolved, genericLookups, valueReferences };
 }
 
 function resolveNumber(token, constants) {
   const normalized = token.replaceAll('_', '').trim();
-  return /^[0-9]+$/.test(normalized) ? Number(normalized) : constants.get(token.trim());
+  if (/^[0-9]+$/.test(normalized)) return Number(normalized);
+  const value = constants.get(token.trim());
+  return typeof value === 'number' ? value : undefined;
 }
 
 function resolveString(token, constants) {
   const literal = token.trim().match(/^["']([^"']+)["']$/);
-  return literal?.[1] ?? constants.get(token.trim());
+  if (literal) return literal[1];
+  const value = constants.get(token.trim());
+  return typeof value === 'string' ? value : undefined;
 }
 
-function artifactSourceContract(block, completeSource) {
-  const maxToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)/)?.[1];
-  const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)/)?.[1];
-  const mediaExpression = block.match(/\bmediaTypes:\s*\[([^\]]+)\]/)?.[1];
-  if (!maxToken || !ttlToken || !mediaExpression) return null;
-  const numbers = numberConstants(completeSource);
-  const strings = stringConstants(completeSource);
-  const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, strings));
+// Direct properties of the Tool's single `durableResultStrategy: { ... }`
+// object, parsed as TypeScript, so a same-named key elsewhere in the block
+// (a transport limit, the execute body, a comment) never stands in for it.
+// Null when the object is missing, repeated, unparsable or has duplicate keys.
+function durableResultStrategyProperties(block) {
+  const markers = [...block.matchAll(/\bdurableResultStrategy\s*:\s*\{/g)];
+  if (markers.length !== 1) return null;
+  const open = markers[0].index + markers[0][0].length - 1;
+  let depth = 0;
+  let close = -1;
+  for (let index = open; index < block.length && close < 0; index += 1) {
+    if (block[index] === '{') depth += 1;
+    else if (block[index] === '}' && --depth === 0) close = index;
+  }
+  if (close < 0) return null;
+  const sourceFile = ts.createSourceFile('strategy.ts', `const strategy = ${block.slice(open, close + 1)};`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const [statement] = sourceFile.statements;
+  const object = statement && ts.isVariableStatement(statement)
+    ? statement.declarationList.declarations[0]?.initializer
+    : undefined;
+  if (!object || !ts.isObjectLiteralExpression(object) || sourceFile.parseDiagnostics.length > 0) return null;
+  const properties = new Map();
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name) || properties.has(property.name.text)) return null;
+    properties.set(property.name.text, property.initializer);
+  }
+  return properties;
+}
+
+// Each bound must be a single token (a literal or a constant name), so an
+// expression such as `LIMIT * 10` or `[...].concat(more)` fails closed.
+export function artifactSourceContract(block, completeSource) {
+  const properties = durableResultStrategyProperties(block);
+  if (!properties) return null;
+  const token = (node) => (node && (ts.isIdentifier(node) || ts.isNumericLiteral(node)) ? node.getText() : undefined);
+  const maxToken = token(properties.get('maxBytes'));
+  const ttlNode = properties.get('ttlSeconds');
+  const ttlToken = ttlNode && ts.isNumericLiteral(ttlNode) ? ttlNode.getText() : undefined;
+  const mediaNode = properties.get('mediaTypes');
+  const privacyNode = properties.get('privacyClass');
+  if (!maxToken || !ttlToken || !mediaNode || !ts.isArrayLiteralExpression(mediaNode) || mediaNode.elements.length === 0) return null;
+  const constants = sourceConstants(completeSource);
+  const mediaTypes = mediaNode.elements.map((element) =>
+    ts.isStringLiteralLike(element) ? element.text : ts.isIdentifier(element) ? resolveString(element.text, constants) : undefined);
   if (mediaTypes.some((entry) => typeof entry !== 'string')) return null;
   return Object.freeze({
-    maxBytes: resolveNumber(maxToken, numbers),
+    maxBytes: resolveNumber(maxToken, constants),
     mediaTypes,
-    privacyClass: block.match(/\bprivacyClass:\s*["']([^"']+)["']/)?.[1],
-    ttlSeconds: resolveNumber(ttlToken, numbers),
+    privacyClass: privacyNode && ts.isStringLiteralLike(privacyNode) ? privacyNode.text : undefined,
+    ttlSeconds: resolveNumber(ttlToken, constants),
   });
 }
 
 async function scanCurrentSources(repoRoot, manifest, issues) {
-  const toolSources = await Promise.all(TOOL_SOURCE_PATHS.map((path) => readText(repoRoot, path)));
+  const platformContract = await readText(repoRoot, PLATFORM_CONTRACT_PATH);
+  const readResolved = async (path) =>
+    resolvePlatformContractReferences(await readText(repoRoot, path), platformContract);
+  const toolSources = await Promise.all(TOOL_SOURCE_PATHS.map(readResolved));
   const source = toolSources.join('\n');
+  const constantSource = `${source}\n${platformContract}`;
   const sourceIds = [...source.matchAll(/\bid:\s*["']([a-z0-9_.]+)["']/g)].map((match) => match[1]);
   const registrationCount = [...source.matchAll(/\bregistry\.register\s*\(/g)].length;
   if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 18 || registrationCount !== 18) {
     issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', 'source declarations/registrations must be exactly 18'));
   }
   const projectionSources = [
-    await readText(repoRoot, 'apps/api/src/durable-results/catalog-result-projections.ts'),
-    await readText(repoRoot, 'apps/api/src/durable-results/source-result-projections.ts'),
+    await readResolved('apps/api/src/durable-results/catalog-result-projections.ts'),
+    await readResolved('apps/api/src/durable-results/source-result-projections.ts'),
   ].join('\n');
   for (const entry of manifest.tools ?? []) {
-    const declarationSource = await readText(repoRoot, entry.declarationPath);
+    const declarationSource = await readResolved(entry.declarationPath);
     const block = toolBlock(declarationSource, entry.id);
     if (!block.includes('durableResultStrategy') || !block.includes(`kind: "${entry.resultStrategy}"`)) {
       issues.push(issue('EXECUTION_AUTHORITY_TOOL_STRATEGY_SOURCE_MISMATCH', entry.declarationPath, `source strategy mismatch ${entry.id}`, entry.id));
     }
     if (entry.resultStrategy === 'artifact_reference') {
       const expected = ARTIFACT_CONTRACTS[entry.resultSchema];
-      const actual = artifactSourceContract(block, source);
+      const actual = artifactSourceContract(block, constantSource);
       if (
         !block.includes(`schema: "${entry.resultSchema}"`) || !expected || !actual ||
         actual.maxBytes !== expected.maxBytes || actual.privacyClass !== expected.privacyClass ||
@@ -602,7 +827,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
       const sourceBinding =
         block.includes(`["${entry.id}"]`) || block.includes(`['${entry.id}']`) ||
         block.includes(`schema: "${entry.resultSchema}"`) || block.includes(`schema: '${entry.resultSchema}'`);
-      if (!sourceBinding || !projectionSources.includes(`'${entry.id}': '${entry.resultSchema}'`)) {
+      if (!sourceBinding || !declaresMapping(projectionSources, entry.id, entry.resultSchema)) {
         issues.push(issue('EXECUTION_AUTHORITY_TOOL_SCHEMA_SOURCE_MISMATCH', entry.declarationPath, `typed projection mapping mismatch ${entry.id}`, entry.id));
       }
     }
@@ -611,14 +836,37 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     .filter((path) => path.endsWith('.ts') && !path.endsWith('.spec.ts'))
     .filter((path) => !path.startsWith('apps/api/src/site-builder/'));
   const discoveredModelTasks = new Set();
+  const genericLookups = [];
   for (const path of genericSources) {
-    const content = await readText(repoRoot, path);
-    for (const match of content.matchAll(/\bgetTask\s*\(\s*["']([^"']+)["']\s*\)/g)) {
-      discoveredModelTasks.add(match[1]);
+    const { taskIds, unresolved, genericLookups: lookups, valueReferences } =
+      modelTaskIdsInSource(await readText(repoRoot, path), path);
+    taskIds.forEach((taskId) => discoveredModelTasks.add(taskId));
+    for (const name of unresolved) {
+      issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `getTask(${name}) must name a task literal or a string constant declared once in the same file`));
     }
+    for (const name of valueReferences) {
+      issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `${name} is referenced without a direct call; call it with a task literal or a same-file string constant`));
+    }
+    for (const lookup of lookups) {
+      const key = `${path}#${lookup}`;
+      genericLookups.push(key);
+      if (!EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.includes(key)) {
+        issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED', path, `getTask(${lookup}) is not a registered generic lookup; name the task with a literal or a same-file string constant`));
+      }
+    }
+  }
+  if (!sameSet(genericLookups, EXPECTED_GENERIC_MODEL_TASK_LOOKUPS) || genericLookups.length !== EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length) {
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_TASK_LOOKUP_DRIFT', 'apps/api/src', 'generic getTask lookups must be exactly the registered Router, runtime bridge, ToolBroker and budget envelope lookups'));
   }
   if (!sameSet(discoveredModelTasks, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))) {
     issues.push(issue('EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src', 'generic product Model task inventory drifted from the closed registry'));
+  }
+  const runtimeTaskIds = modelResultTaskIds(await readText(repoRoot, 'apps/api/src/durable-results/model-result-projections.ts'));
+  if (
+    runtimeTaskIds === null || runtimeTaskIds.length !== EXPECTED_MODEL_TASKS.length ||
+    !sameSet(runtimeTaskIds, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))
+  ) {
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_RESULT_TASKS_MISMATCH', 'apps/api/src/durable-results/model-result-projections.ts', 'MODEL_RESULT_TASK_IDS must list exactly the closed product Model task inventory'));
   }
   const modelBoundaryCalls = [];
   const toolPhysicalCalls = [];
@@ -688,7 +936,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     if (!callsite.includes(entry.taskId)) {
       issues.push(issue('EXECUTION_AUTHORITY_MODEL_CALLSITE_MISSING', entry.path, `missing Model task anchor ${entry.taskId}`, entry.taskId));
     }
-    if (!modelProjectionSource.includes(`'${entry.taskId}': '${entry.schema}'`)) {
+    if (!declaresMapping(modelProjectionSource, entry.taskId, entry.schema)) {
       issues.push(issue('EXECUTION_AUTHORITY_MODEL_SCHEMA_SOURCE_MISMATCH', 'apps/api/src/durable-results/model-result-projections.ts', `missing Model projection ${entry.taskId}`, entry.taskId));
     }
   }
@@ -709,16 +957,21 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const patentScanner = await readText(repoRoot, 'apps/api/src/temporal/patent-cache-broker-scanner.ts');
   const patentAdapter = await readText(repoRoot, 'apps/api/src/adapters/bigquery-patents.ts');
   const patentProjectionSpec = await readText(repoRoot, 'apps/api/src/durable-results/catalog-result-projections.spec.ts');
+  const patentPlatformContract = await readText(repoRoot, PLATFORM_CONTRACT_PATH);
+  const patentBytesBilled = sourceConstants(`${patentAdapter}\n${patentPlatformContract}`)
+    .get('GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED');
   const patentRequired = [
     [patentScanner, 'const MAX_PATENTS_PER_ANCHOR = 25'],
     [patentScanner, '"google_patents.search"'],
-    [patentAdapter, "GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED = '214748364800'"],
     [patentAdapter, 'return GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED'],
     [patentAdapter, 'MAX_APPLICANTS_PER_PATENT = 32'],
     [patentProjectionSpec, "'$.data.patents.maxItems': 50"],
     [patentProjectionSpec, "'$.data.patents[].inventors.maxItems': 25"],
   ];
-  if (patentRequired.some(([text, token]) => !text.includes(token))) {
+  if (
+    patentBytesBilled !== '214748364800' ||
+    patentRequired.some(([text, token]) => !text.includes(token))
+  ) {
     issues.push(issue('EXECUTION_AUTHORITY_PATENT_SOURCE_CONSTRAINT_MISMATCH', 'apps/api/src', 'Patent Cache source constraints drifted from manifest', 'google_patents.search'));
   }
   const patentsActivity = await readText(repoRoot, 'apps/api/src/temporal/patents-cache.activities.ts');
