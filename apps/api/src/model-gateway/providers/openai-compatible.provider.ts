@@ -64,6 +64,12 @@ export interface OpenAICompatConfig {
   /** Optional, explicit protocol override for models that have passed a protocol probe. */
   modelTransports?: Readonly<Record<string, GatewayModelTransport>>;
   /**
+   * Stream unsettled chat-completions calls (SSE) and reassemble the result.
+   * Long non-streamed generations are cut by proxies with ~100 s idle limits;
+   * settled (paidCost) calls keep the non-streamed request-bound contract.
+   */
+  streamChatCompletions?: boolean;
+  /**
    * Explicit vision request adapters. Presence is not capability evidence:
    * MODEL-1 must still probe the live endpoint before route promotion.
    */
@@ -705,6 +711,69 @@ export class OpenAICompatibleProvider implements ModelProvider {
     });
   }
 
+  /**
+   * Reassembles an SSE chat-completions stream into the non-streamed body shape.
+   * Fails closed on unreadable bodies, malformed data lines, upstream error
+   * events and streams without any completion chunk. An upstream that ignores
+   * `stream` and answers with a plain JSON body is accepted as such.
+   */
+  private async parseChatCompletionStream(
+    response: Response,
+    model: string,
+  ): Promise<ChatCompletionBody> {
+    const invalid = (reason: string): never => {
+      throw new ProviderOutputError(
+        `${this.id} ${model}: ${reason}`,
+        undefined,
+        { provider: this.id, model },
+      );
+    };
+    let text: string;
+    try {
+      text = await response.text();
+    } catch {
+      return invalid("stream body unavailable");
+    }
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith("{")) {
+      try {
+        return JSON.parse(trimmed) as ChatCompletionBody;
+      } catch {
+        return invalid("response body is not valid JSON");
+      }
+    }
+    let content = "";
+    let chunks = 0;
+    let finishReason: string | undefined;
+    let reportedModel: string | undefined;
+    let usage: ChatCompletionBody["usage"];
+    for (const rawLine of text.split(/\r?\n/u)) {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice("data:".length).trim();
+      if (payload === "[DONE]") break;
+      let event: ChatCompletionStreamEvent;
+      try {
+        event = JSON.parse(payload) as ChatCompletionStreamEvent;
+      } catch {
+        return invalid("stream data line is not valid JSON");
+      }
+      if (event.error !== undefined) return invalid("stream carried an upstream error");
+      chunks += 1;
+      if (typeof event.model === "string" && event.model) reportedModel = event.model;
+      if (event.usage) usage = event.usage;
+      const choice = event.choices?.[0];
+      if (typeof choice?.delta?.content === "string") content += choice.delta.content;
+      if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
+    }
+    if (chunks === 0) return invalid("stream carried no completion chunk");
+    return {
+      choices: [{ message: { content }, finish_reason: finishReason }],
+      ...(usage ? { usage } : {}),
+      ...(reportedModel ? { model: reportedModel } : {}),
+    };
+  }
+
   private async parseResponseJson<T>(
     response: Response,
     ctx: AiContext | undefined,
@@ -787,6 +856,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     finishReason?: string;
     model?: string;
   }> {
+    const stream = this.cfg.streamChatCompletions === true && !ctx?.paidCost;
     const res = await this.paidFetch(
       `${this.cfg.baseUrl}/chat/completions`,
       {
@@ -802,6 +872,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
           ...(opts.reasoningEffort
             ? { reasoning_effort: opts.reasoningEffort }
             : {}),
+          ...(stream
+            ? { stream: true, stream_options: { include_usage: true } }
+            : {}),
         }),
       },
       ctx,
@@ -810,11 +883,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (!res.ok) {
       return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const json = await this.parseResponseJson<{
-      choices?: { message?: { content?: string }; finish_reason?: string }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-      model?: string;
-    }>(res, ctx, opts.model);
+    const json = stream
+      ? await this.parseChatCompletionStream(res, opts.model)
+      : await this.parseResponseJson<ChatCompletionBody>(res, ctx, opts.model);
     const bodyUsage = {
       inputTokens: json.usage?.prompt_tokens,
       outputTokens: json.usage?.completion_tokens,
@@ -1668,4 +1739,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
       model: reportedModel,
     };
   }
+}
+
+interface ChatCompletionBody {
+  choices?: { message?: { content?: string }; finish_reason?: string }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  model?: string;
+}
+
+interface ChatCompletionStreamEvent {
+  model?: string;
+  choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  error?: unknown;
 }

@@ -115,6 +115,155 @@ describe("OpenAICompatibleProvider — reasoning_effort 透传", () => {
   });
 });
 
+describe("OpenAICompatibleProvider — streamed chat completions for unsettled calls", () => {
+  // Long non-streamed generations die behind proxies with ~100 s idle limits
+  // (observed 2026-10-06: Cloudflare 524 at ~125 s in front of the upstream).
+  // Unsettled calls can opt into SSE and are reassembled into the same result.
+  const streaming = new OpenAICompatibleProvider({
+    id: "gateway",
+    baseUrl: "http://gw.test/v1",
+    apiKey: "k",
+    model: "default-model",
+    streamChatCompletions: true,
+  });
+  const sse = (events: readonly unknown[]): string =>
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") +
+    "data: [DONE]\n\n";
+  const mockText = (text: string): void => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      })),
+    );
+  };
+
+  it("requests a stream with usage and assembles content, usage and model", async () => {
+    mockText(
+      ": keep-alive\n\n" +
+        sse([
+          { model: "deepseek-v4-pro", choices: [{ delta: { role: "assistant", content: "" } }] },
+          { model: "deepseek-v4-pro", choices: [{ delta: { content: '{"a":' } }] },
+          { model: "deepseek-v4-pro", choices: [{ delta: { content: "1}" }, finish_reason: "stop" }] },
+          { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 11, completion_tokens: 7 } },
+        ]),
+    );
+
+    const out = await streaming.generateStructured({
+      task: "t",
+      prompt: "p",
+      schema: {},
+      model: "deepseek-v4-pro",
+    });
+
+    expect(lastRequestBody()).toMatchObject({
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    expect(out.data).toEqual({ a: 1 });
+    expect(out.usage).toMatchObject({ inputTokens: 11, outputTokens: 7 });
+  });
+
+  it("keeps settled calls on the non-streamed request even when streaming is enabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          model: "deepseek-v4-pro",
+          choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )),
+    );
+    const requestId = "R".repeat(43);
+    const paidCtx = {
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      runId: "22222222-2222-4222-8222-222222222222",
+      paidCost: {
+        siteId: "33333333-3333-4333-8333-333333333333",
+        scopeKey: "copy:model:0",
+        settlementPhysicalWire: {
+          identity: {
+            schemaVersion: "site-build-settlement-wire-identity/v1" as const,
+            physicalWireAttempt: 1 as const,
+            derivationKeyId: "settlement-test",
+            requestId,
+            nonce: "N".repeat(43),
+            nonceSha256: "a".repeat(64),
+          },
+          begin: async () => "DISPATCH" as const,
+          resolve: async () => ({
+            status: "unknown" as const,
+            physicalWireAttempt: 1 as const,
+            requestId,
+            resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+            reason: "gateway_log_unavailable" as const,
+            transportObservation: createProviderTransportObservation({
+              physicalWireAttempt: 1,
+              finalPhase: "gateway_log_unavailable",
+              gatewayIdState: "observed",
+              upstreamIdState: "unknown",
+              payloadState: "available",
+              readbackProbes: [],
+            }),
+          }),
+        },
+      },
+    };
+
+    await streaming
+      .generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }, paidCtx as never)
+      .catch(() => undefined);
+
+    expect(lastRequestBody().stream).toBeUndefined();
+    expect(lastRequestBody().stream_options).toBeUndefined();
+  });
+
+  it("fails closed on a stream that carries no completion chunk", async () => {
+    mockText(": keep-alive\n\ndata: not-json\n\n");
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+  });
+
+  it("rejects an abnormal finish reason carried by the stream", async () => {
+    mockText(
+      sse([
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: '{"a":1}' }, finish_reason: "content_filter" }] },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+  });
+
+  it("accepts a plain JSON body when the upstream ignores the stream flag", async () => {
+    mockText(
+      JSON.stringify({
+        model: "deepseek-v4-pro",
+        choices: [{ message: { content: '{"a":2}' }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 3, completion_tokens: 2 },
+      }),
+    );
+
+    const out = await streaming.generateStructured({
+      task: "t",
+      prompt: "p",
+      schema: {},
+      model: "deepseek-v4-pro",
+    });
+
+    expect(out.data).toEqual({ a: 2 });
+    expect(out.usage).toMatchObject({ inputTokens: 3, outputTokens: 2 });
+  });
+});
+
 describe("OpenAICompatibleProvider — request-bound settlement observation", () => {
   // 同步逐请求结算（preflight/resolve controller）已移除：provider 只把
   // 网关 requestId 以 unknown 观测附着到 usage，精确费用由异步 reconciliation
