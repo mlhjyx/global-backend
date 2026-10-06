@@ -209,6 +209,23 @@ test('every getTask call is classified: literal, same-file constant, generic loo
   assert.deepEqual(valueReferences, ['getTask']);
 });
 
+test('a task constant shadowed by a parameter or destructuring, or a renamed re-export, is not trusted', () => {
+  const shadowed = modelTaskIdsInSource([
+    'const FIT_TASK = "discovery.qualify_fit";',
+    'function probe(FIT_TASK: string) { return getTask(FIT_TASK); }',
+    'const PLAN_TASK = "discovery.query_plan";',
+    'function other(o: { PLAN_TASK: string }) { const { PLAN_TASK } = o; return getTask(PLAN_TASK); }',
+    'let LET_TASK = "icp.design";',
+    'getTask(LET_TASK);',
+  ].join('\n'));
+  assert.deepEqual(shadowed.taskIds, []);
+  assert.deepEqual(shadowed.unresolved, ['FIT_TASK', 'PLAN_TASK', 'LET_TASK']);
+  const reexported = modelTaskIdsInSource("export { getTask as loadTask } from '../ai-tasks/task-registry';");
+  assert.deepEqual(reexported.valueReferences, ['export as loadTask']);
+  const constants = sourceConstants("import fallback, { OTHER as LIMIT } from './module';\nexport const LIMIT = 5;");
+  assert.equal(constants.has('LIMIT'), false);
+});
+
 test('the runtime Model task list is read only from a plain literal declaration', () => {
   assert.deepEqual(
     modelResultTaskIds('export const MODEL_RESULT_TASK_IDS = Object.freeze([\n  "icp.design",\n  "taxonomy.normalize",\n] as const);'),
@@ -233,6 +250,7 @@ test('artifact bounds must be single tokens that end the property', () => {
     `maxBytes: LIMIT * 10,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400,`,
     `maxBytes: LIMIT,\n  mediaTypes: ["text/html"].concat(EXTRA),${tail}  ttlSeconds: 86_400,`,
     `maxBytes: LIMIT,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400 * 365,`,
+    `maxBytes: LIMIT * 4,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400,\n  execute: () => fetch({ maxBytes: LIMIT, ttlSeconds: 86_400 }),`,
   ]) assert.equal(artifactSourceContract(block, constants), null, block);
   const privacy = artifactSourceContract(`maxBytes: LIMIT,\n  mediaTypes: ["text/html"],\n  privacyClass: "PUBLIC_SOURCE" + SUFFIX,\n  ttlSeconds: 86_400,`, constants);
   assert.equal(privacy.privacyClass, undefined);

@@ -557,7 +557,7 @@ export function sourceConstants(source) {
   for (const [name, count] of simpleCounts) {
     if (declarationCounts.get(name) !== count) ambiguous.add(name);
   }
-  for (const clause of source.matchAll(/\b(?:import|export)\s+(?:type\s+)?\{([^}]*)\}/g)) {
+  for (const clause of source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}/g)) {
     for (const alias of clause[1].matchAll(/\b([A-Za-z_$][\w$]*)\s+as\s+([A-Z][A-Z0-9_]*)\b/g)) {
       if (alias[1] !== alias[2]) ambiguous.add(alias[2]);
     }
@@ -649,7 +649,8 @@ function isDeclarationOrCallee(identifier) {
 
 // Every `getTask(...)` call, found on the syntax tree (also through an import
 // alias, `?.`, `!` or a member access). A string literal names a product task;
-// a bare upper-case name must resolve to a string constant of the same file;
+// a bare upper-case name must be bound exactly once in the file, as a string
+// `const` (a parameter or destructured name that shadows it is a binding too);
 // a missing, extra or spread argument is unresolved. Any other argument is a
 // generic lookup (`input.task`), which the caller checks against the closed
 // EXPECTED_GENERIC_MODEL_TASK_LOOKUPS list. A reference that is not a direct
@@ -657,17 +658,40 @@ function isDeclarationOrCallee(identifier) {
 // loads and is reported as a value reference.
 export function modelTaskIdsInSource(source, path = 'source.ts') {
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const constants = sourceConstants(source);
   const callees = new Set(['getTask']);
-  const collectAliases = (node) => {
+  const declarations = new Map();
+  const valueReferences = [];
+  const collect = (node) => {
     if (ts.isImportSpecifier(node) && (node.propertyName ?? node.name).text === 'getTask') callees.add(node.name.text);
-    ts.forEachChild(node, collectAliases);
+    // A re-export under another name lets a different file call it unseen.
+    if (ts.isExportSpecifier(node) && (node.propertyName ?? node.name).text === 'getTask' && node.name.text !== 'getTask') {
+      valueReferences.push(`export as ${node.name.text}`);
+    }
+    // Every binding of a name (const/let/var, parameter, destructuring, import,
+    // function or class), so a parameter that shadows a constant is seen.
+    const named = ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node) ||
+      ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node) ||
+      ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node);
+    if (named && node.name && ts.isIdentifier(node.name)) {
+      declarations.set(node.name.text, [...(declarations.get(node.name.text) ?? []), node]);
+    }
+    ts.forEachChild(node, collect);
   };
-  collectAliases(sourceFile);
+  collect(sourceFile);
+  // A task constant counts only when the file binds its name exactly once, as
+  // a `const` initialized with a string literal (optionally `as const`).
+  const constantTask = (name) => {
+    const bindings = declarations.get(name) ?? [];
+    const [binding] = bindings;
+    if (bindings.length !== 1 || !ts.isVariableDeclaration(binding) || !binding.initializer) return undefined;
+    if (!(binding.parent.flags & ts.NodeFlags.Const)) return undefined;
+    let initializer = binding.initializer;
+    if (ts.isAsExpression(initializer)) initializer = initializer.expression;
+    return ts.isStringLiteralLike(initializer) ? initializer.text : undefined;
+  };
   const taskIds = [];
   const unresolved = [];
   const genericLookups = [];
-  const valueReferences = [];
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       let callee = node.expression;
@@ -685,7 +709,7 @@ export function modelTaskIdsInSource(source, path = 'source.ts') {
         if (!argument || rest.length > 0 || ts.isSpreadElement(argument)) unresolved.push(text);
         else if (ts.isStringLiteralLike(argument)) taskIds.push(argument.text);
         else if (ts.isIdentifier(argument) && /^[A-Z][A-Z0-9_]*$/.test(argument.text)) {
-          const taskId = constants.get(argument.text);
+          const taskId = constantTask(argument.text);
           if (typeof taskId === 'string') taskIds.push(taskId);
           else unresolved.push(argument.text);
         } else genericLookups.push(text);
@@ -714,12 +738,20 @@ function resolveString(token, constants) {
   return typeof value === 'string' ? value : undefined;
 }
 
+// The value of the first `name:` property in the block, read only when it is a
+// single token that ends the property, so an expression such as `LIMIT * 10`
+// or `[...].concat(more)` fails closed instead of falling through to a later
+// same-named property (for example one inside the Tool's execute body).
+function firstPropertyToken(block, name, valuePattern) {
+  const start = block.search(new RegExp(`\\b${name}:`));
+  if (start < 0) return undefined;
+  return block.slice(start).match(new RegExp(`^${name}:\\s*(${valuePattern})(?=[ \\t]*[,}])`))?.[1];
+}
+
 export function artifactSourceContract(block, completeSource) {
-  // Each bound must be a single token ending the property, so an expression
-  // such as `LIMIT * 10` or `[...].concat(more)` fails closed.
-  const maxToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)(?=[ \t]*[,}])/)?.[1];
-  const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)(?=[ \t]*[,}])/)?.[1];
-  const mediaExpression = block.match(/\bmediaTypes:\s*\[([^\]]+)\](?=[ \t]*[,}])/)?.[1];
+  const maxToken = firstPropertyToken(block, 'maxBytes', '[A-Za-z0-9_]+');
+  const ttlToken = firstPropertyToken(block, 'ttlSeconds', '[0-9_]+');
+  const mediaExpression = firstPropertyToken(block, 'mediaTypes', '\\[[^\\]]+\\]')?.slice(1, -1);
   if (!maxToken || !ttlToken || !mediaExpression) return null;
   const constants = sourceConstants(completeSource);
   const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, constants));
@@ -727,7 +759,7 @@ export function artifactSourceContract(block, completeSource) {
   return Object.freeze({
     maxBytes: resolveNumber(maxToken, constants),
     mediaTypes,
-    privacyClass: block.match(/\bprivacyClass:\s*["']([^"']+)["'](?=[ \t]*[,}])/)?.[1],
+    privacyClass: firstPropertyToken(block, 'privacyClass', `"[^"]+"|'[^']+'`)?.slice(1, -1),
     ttlSeconds: resolveNumber(ttlToken, constants),
   });
 }
