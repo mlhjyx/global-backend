@@ -43,6 +43,17 @@
 
   新增用例在加固前的脚本上均失败。spec 由 10 项增至 16 项。`governance:test` 由 276 项增至 292 项，xin 上 load 12 时 48 秒，其中本 spec 约 18 秒。
 
+## 2026-10-06 · Platform wire dispatch fence
+
+- 平台出网自 7c87ea80 起按每次物理调用授权，前提是工具把 `sourcePhysicalWire(ctx, "<wire>")` 交给适配器，适配器也只经这个调度器发请求。四个适配器（`requestPublicHttp`、`crawlUrl`/`crawlHtml`、`queryAlgoliaExhibitors`，以及转交调度器的 `isAllowedByRobots`）在没拿到调度器时会直接发请求，这是客户侧路径的正常行为。因此只要平台工具或适配器丢了调度器，请求就会绕过平台出网授权，ToolBroker 也照样接受结果。这几处都不在 Router/ToolBroker 指纹围栏里（#592 围栏复审后续事项 2）。
+- 用户选定静态接线检查，不把这些文件整份钉住（`source-tools.ts` 自 8-01 起改过 16 次）。新增 `scripts/execution-authority-wire-dispatch.mjs`，作为 `execution-authority-policy` 的一部分在 required 门里运行：
+  - 接受调度器的导出适配器函数构成封闭清单，共 5 个；
+  - 终端适配器的每个发送调用（`fetch` / `execute`）都必须位于唯一的 `executePhysicalWire` 闭包内，闭包只能经 `dispatchPhysicalWire ? await dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire()` 执行；
+  - 转交型适配器所在文件里，所有 `requestPublicHttp` 调用都必须在它内部，并把收到的调度器原样转交；
+  - 活跃平台工具（从平台合同推导，跳过 `disabled_no_egress`）的 `execute`，及其调用到的同文件辅助函数里，每个适配器调用都必须带一个 `sourcePhysicalWire(ctx, "<wire>")`，而且 wire 必须是调度器按合同会接受的那一个；合同声明的每个 wire 都必须用到；不得直接调用 `fetch`、Node 网络模块，或未登记的适配器函数；
+  - `sourcePhysicalWire` 的故障即拒绝函数体按文本钉住。
+- 当前代码零问题。在仓库副本上做了 15 项变异，全部被拦下：工具丢了调度器、传 `undefined`、使用未声明的 wire、直接 `fetch`、调用未登记的适配器、经本地辅助函数绕过、`sourcePhysicalWire` 去掉平台拒绝、三个终端适配器各自绕过闭包或调度、robots 停止转交 / 包装器不调用收到的调度器 / 在函数外直接调用、新增接受调度器的适配器、合同新增却从未用到的 wire。新 spec 共 11 项。没有跟进的范围：从 `adapters/` 以外模块导入的函数。
+
 ## 2026-10-01 · @grpc/grpc-js security floor
 
 - 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。
