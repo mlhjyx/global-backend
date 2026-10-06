@@ -42,6 +42,7 @@ export function buildGatewayProvider(
     // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',
     modelTransports: VERIFIED_GATEWAY_MODEL_TRANSPORTS,
+    streamChatCompletions: env.MODEL_GATEWAY_STREAM_CHAT_COMPLETIONS === 'true',
     visionModelTransports: CANDIDATE_GATEWAY_VISION_TRANSPORTS,
     visionEvalFixtureDigests: evaluation.visionEvalFixtureDigests,
   });
