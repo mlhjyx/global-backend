@@ -16,6 +16,11 @@
 - 自 2026-08-30 的 authority-first 预锁（`20aa1839`）起，`PostgresDomainAckRepository` 用 `$queryRaw` 执行 `SELECT public.lock_execution_domain_ack_authority_first_v1(…)`。该函数返回 `void`，Prisma 无法反序列化 `void` 列：锁已经拿到，随后在客户端抛出 `Failed to deserialize column of type 'void'`，事务回滚，HTTP 层只报 `INTERNAL`。因此每一个带回执的领域 ACK 都会失败：ICP 设计、查询计划、发现抽取、分类、Fit 的结果都写不进业务表，`execution_domain_ack` 在本机真库里从未有过一行。单测用的是假事务，所以没有发现。PostgreSQL 日志里也没有错误，因为 SQL 本身执行成功了。
 - 改为 `SELECT 1 AS locked FROM public.lock_…(…)`：调用移到 FROM，语句返回普通整数；锁的语义与参数不变。新增回归测试：假事务按 Prisma 的真实行为，在 select 列表里出现 void 函数时抛错。修复前该测试为红。另以 app_user 对真库重放一次 ICP 落库事务（随后回滚）：修复前在 domain ack 这一步失败，修复后 ACK 为 `APPLIED`，ICP 与 13 条规则均写入成功。
 
+## 2026-10-06 · Optional streaming for unsettled chat completions
+
+- 网关 provider 新增可选开关 `MODEL_GATEWAY_STREAM_CHAT_COMPLETIONS=true`。打开后，未结算（无 `paidCost`）的 chat-completions 调用以 SSE 流式请求（`stream` + `stream_options.include_usage`），在本地拼回与非流式完全相同的结果（内容、finish_reason、上游模型、usage），后续的模型身份、用量对账和 finish_reason 校验都不变。结算调用（Site Builder 的 request-bound settlement）始终不走流式。默认关闭。
+- 起因（2026-10-06 xin 实测）：上游中转 `openox.tech` 在 Cloudflare 后面，非流式长生成约 125 秒时被以 524 断开，直连和经 new-api 都一样，所以 ICP 设计、查询计划这类长输出任务会失败；同一请求改用流式（不经 VPN）146 秒正常完成。解析器严格校验，以下情况一律失败关闭：无法读取正文、data 行不是合法 JSON、流里带上游错误、流里没有任何补全块。上游忽略 `stream`、直接返回普通 JSON 时按普通响应处理。
+
 ## 2026-10-01 · @grpc/grpc-js security floor
 
 - 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。

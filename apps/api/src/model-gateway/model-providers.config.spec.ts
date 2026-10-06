@@ -45,6 +45,27 @@ describe('buildGatewayProvider — verified production model transports', () => 
     })).toBeNull();
   });
 
+  it('streams unsettled chat completions only when MODEL_GATEWAY_STREAM_CHAT_COMPLETIONS is exactly true', async () => {
+    const body = (): Record<string, unknown> => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      return JSON.parse(fetchMock.mock.calls[0][1].body as string) as Record<string, unknown>;
+    };
+    for (const [flag, streams] of [[undefined, false], ['false', false], ['TRUE', false], ['true', true]] as const) {
+      mockResponse({
+        model: 'deepseek-v4-flash',
+        choices: [{ message: { content: '{"a":1}' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+      const provider = buildGatewayProvider({
+        ...providerEnv(),
+        ...(flag === undefined ? {} : { MODEL_GATEWAY_STREAM_CHAT_COMPLETIONS: flag }),
+      }) as ModelProvider;
+      await provider.generateStructured({ task: 't', prompt: 'p', schema: {}, model: 'deepseek-v4-flash' });
+      expect(body().stream === true, String(flag)).toBe(streams);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('rejects request timeouts outside the code-owned wire-owner window', () => {
     for (const timeout of ['999', '300001', '1e3', ' 180000 ']) {
       expect(buildGatewayProvider({
