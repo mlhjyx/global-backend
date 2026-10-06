@@ -532,6 +532,37 @@ describe('DomainAckService', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it('takes the void authority prelock through a column Prisma $queryRaw can deserialize', async () => {
+    // Prisma's $queryRaw cannot deserialize a `void` column. Selecting the
+    // void-returning lock function in the select list takes the lock and then
+    // throws, so every receipted ACK rolled back (seen against PostgreSQL on
+    // 2026-10-06: no execution_domain_ack row had ever been written).
+    const transaction = {
+      $queryRaw: vi.fn(async (query: { readonly strings: readonly string[] }) => {
+        const sql = query.strings.join('?');
+        if (sql.includes('lock_execution_domain_ack_authority_first_v1')) {
+          if (!/\bFROM\s+public\.lock_execution_domain_ack_authority_first_v1\(/u.test(sql)) {
+            throw new Error("Failed to deserialize column of type 'void'");
+          }
+          return [{ locked: 1 }];
+        }
+        return [{ status: 'APPLIED', ack_json: ackRecord() }];
+      }),
+    };
+    const service = new DomainAckService(new PostgresDomainAckRepository(transaction));
+
+    await expect(service.applyWithAck({
+      receipt: receipt(),
+      consumer: 'TaxonomyResolver',
+      domainAggregateType: 'TermAlias',
+      domainAckKey: 'taxonomy:cpv:pump',
+    }, async () => 'written')).resolves.toMatchObject({
+      status: 'APPLIED',
+      value: 'written',
+    });
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
   it('defines an authority-first historical-safe ACK prelock with matching ACL', async () => {
     const migration = await readFile(authorityLockMigration, 'utf8');
     expect(migration).toContain('lock_execution_domain_ack_authority_first_v1');

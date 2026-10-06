@@ -204,8 +204,11 @@ export class PostgresDomainAckRepository implements DomainAckRepository<DomainAc
     record: DomainAckRecord,
     apply: (transaction: DomainAckTransaction) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>> {
+    // The lock function returns void. Selecting it as a column makes Prisma's
+    // $queryRaw fail to deserialize the row after the lock has been taken, so the
+    // call goes in FROM and the statement returns a plain integer instead.
     await this.transaction.$queryRaw(
-      Prisma.sql`SELECT public.lock_execution_domain_ack_authority_first_v1(
+      Prisma.sql`SELECT 1 AS locked FROM public.lock_execution_domain_ack_authority_first_v1(
         ${record.scopeKey}, ${record.authorityId}::uuid
       )`,
     );
