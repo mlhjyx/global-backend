@@ -141,14 +141,14 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 | `codex/pr407-identity-test-closeout-20260913` | #538 关闭、未合并 | tag `archive/governance/organization-identity-successor-2f5d4313-20260920`；#538 |
 | `dependabot/*`（6 个） | #527–#532 早已关闭；main 上的对应版本均已更新 | 各自 PR |
 
-本次只处理远端分支。开发宿主上的本地分支与 worktree 不在本节范围内，仍按 §4、§4.1 的历史登记处理。
+同日 owner 又要求清理开发宿主上的本地分支与 worktree：525 个本地分支删去 518 个，只保留被 worktree 占用的分支；移除了 2 个无进程占用的 worktree。唯一一个未合入、也未推送的提交（`claude/execution-authority-rebaseline`，执行授权策略重基线）先推到 origin，再删本地。被删的本地分支中有 213 个带有不在 origin 分支和 tag 上的提交，它们与全部 525 个分支一起保存在开发宿主的全量 bundle 中；正被其他会话使用的 worktree、常驻的 `local-development` worktree 与原生 Temporal 的编排源码均未动。
 
 ## 5. 下一顺序与授权边界
 
 1. #538 已于 2026-10-06 关闭、不再推进（§4.3）。R4将已接线的本地候选推进到最终hosted、制品和运行接纳。
 2. Program C 保留已验证的C4本地候选，补齐action-intent隐私/DSR、C1 restricted envelope、C5产品接线与跨仓接纳；已完成的本地候选不重复列为未开发。
 3. 根据实际最终制品与保留环境事实生成当前 RuntimeEvidence、可信 Release Bundle，再做完整三次用户旅程和重启/失败/UNKNOWN/隐私删除验收。
-4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。远端分支已于 2026-10-06 按此完成（§4.3），本地分支与 worktree 仍待逐项处理。
+4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。远端与本地分支、worktree 已于 2026-10-06 按此完成（§4.3）。
 5. §4.2 的 GrowthOS reader 授权缺口、update_time 门与出网围栏，已分别由 GrowthOS 补丁 0113、0114 与 2026-10-01 owner 批准的出网策略安装解除；本机 readiness 整体就绪，platform Worker 取得租约。剩余事项：平台 schedule 恢复运行是 owner 的单独决定（执行路径尚未验证）；技术合同或报价一旦变化，就要重新推导并以 generation+1 重装出网策略，目前没有仓库工具；另外 `readerpolicy` 的注释声称「包括仅 JWT 的公共监听器也要 peer proof」，而当前 `temporal.yaml` 只在 `temporal-platform-reader` 这个 hostOverride 上开启 `requireClientAuth`，两者仍需对齐（与本次修复无关，属本仓注释与配置的一致性）。本机就绪不构成 RuntimeEvidence；Backend 仍没有调用 GrowthOS HMAC 签发端点的客户端（`BLOCKED_PENDING_BACKEND_4A4`），所以这次转绿只代表事实可观察，不代表撤销能真正送达。
 
 相同动作、目标和范围的有效授权继续沿用。源码/PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、真实 provider/model/付费调用或 Pilot/GA。正常产品请求的费用权威与开发者 ad-hoc 调用授权保持分离。
