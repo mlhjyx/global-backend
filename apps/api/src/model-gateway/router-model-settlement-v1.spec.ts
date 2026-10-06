@@ -853,4 +853,192 @@ describe("RouterModelGateway settlement-readback/v1", () => {
       }),
     );
   });
+
+  describe("settlement REPLAY", () => {
+    const request = {
+      task: "site_builder.copy",
+      prompt: "bounded",
+      schema: { type: "object" },
+      model: "gpt-5.6-terra",
+      maxCostCents: 40,
+      maxTokens: 1_000,
+    } as const;
+
+    function replayLedger(
+      settle: () => Promise<string>,
+      confirm: () => Promise<boolean> = async () => true,
+    ) {
+      return {
+        ...ledger(),
+        settleOperation: vi.fn(settle),
+        confirmSettlementReplay: vi.fn(confirm),
+      };
+    }
+
+    it("fails closed when the first settlement finds the operation already terminal", async () => {
+      // Only another writer (a recovery sweep, a fenced-out attempt) can have
+      // settled the row before this attempt did: its output is not the record.
+      const paidLedger = replayLedger(async () => "REPLAY");
+      const instance = gateway({
+        provider: model(() => ({ ok: true })),
+        paidLedger,
+      });
+
+      await expect(
+        instance.generateStructured(request, CONTEXT),
+      ).rejects.toMatchObject({
+        name: "PaidOperationUnknownError",
+        errorCode: "SETTLEMENT_REPLAY",
+      });
+      expect(paidLedger.settleOperation).toHaveBeenCalledOnce();
+      expect(paidLedger.confirmSettlementReplay).not.toHaveBeenCalled();
+      expect(paidLedger.disablePaidCalls).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        RUN_ID,
+        "SETTLEMENT_REPLAY",
+      );
+    });
+
+    it("accepts a retried REPLAY once the stored row is confirmed as this settlement", async () => {
+      let calls = 0;
+      const paidLedger = replayLedger(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("connection reset after commit");
+        return "REPLAY";
+      });
+      const instance = gateway({
+        provider: model(() => ({ ok: true })),
+        paidLedger,
+      });
+
+      await expect(
+        instance.generateStructured(request, CONTEXT),
+      ).resolves.toMatchObject({
+        data: { ok: true },
+      });
+      expect(paidLedger.settleOperation).toHaveBeenCalledTimes(2);
+      expect(paidLedger.confirmSettlementReplay).toHaveBeenCalledOnce();
+      expect(paidLedger.confirmSettlementReplay).toHaveBeenCalledWith(
+        paidLedger.settleOperation.mock.calls[1]![0],
+      );
+      expect(paidLedger.disablePaidCalls).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["another writer settled the row", async () => false],
+      [
+        "the stored row cannot be read",
+        async () => {
+          throw new Error("read failed");
+        },
+      ],
+    ])("fails closed on a retried REPLAY when %s", async (_case, confirm) => {
+      let calls = 0;
+      const paidLedger = replayLedger(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("connection reset");
+        return "REPLAY";
+      }, confirm);
+      const instance = gateway({
+        provider: model(() => ({ ok: true })),
+        paidLedger,
+      });
+
+      await expect(
+        instance.generateStructured(request, CONTEXT),
+      ).rejects.toMatchObject({
+        name: "PaidOperationUnknownError",
+        errorCode: "SETTLEMENT_REPLAY_UNCONFIRMED",
+      });
+      expect(paidLedger.disablePaidCalls).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        RUN_ID,
+        "SETTLEMENT_REPLAY_UNCONFIRMED",
+      );
+    });
+
+    it("keeps the unknown outcome when a retried REPLAY confirms an UNKNOWN settlement", async () => {
+      let calls = 0;
+      const paidLedger = replayLedger(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("connection reset after commit");
+        return "REPLAY";
+      });
+      const instance = gateway({
+        provider: model(() => ({ wrong: true })),
+        paidLedger,
+        resolve: async (readback) => ({
+          status: "unknown",
+          requestId: readback.requestId,
+          resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+          reason: "gateway_log_missing",
+          physicalCallCount: 0,
+          readbackProbes: [],
+        }),
+      });
+
+      await expect(
+        instance.generateStructured(
+          {
+            ...request,
+            schema: {
+              type: "object",
+              required: ["ok"],
+              properties: { ok: { type: "boolean" } },
+            },
+          },
+          CONTEXT,
+        ),
+      ).rejects.toMatchObject({
+        name: "PaidOperationUnknownError",
+        errorCode: "MODEL_SETTLEMENT_GATEWAY_LOG_MISSING",
+      });
+      expect(paidLedger.confirmSettlementReplay).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "UNKNOWN",
+          disablePaidCallsReason: "MODEL_SETTLEMENT_GATEWAY_LOG_MISSING",
+        }),
+      );
+      // The UNKNOWN settlement itself disabled paid calls atomically.
+      expect(paidLedger.disablePaidCalls).not.toHaveBeenCalled();
+    });
+
+    it("freezes instead of surfacing the provider error when the first RELEASED settlement replays", async () => {
+      // Deliberate: the row was settled by another writer, so this attempt
+      // cannot vouch for the zero-call release it was about to record.
+      const paidLedger = replayLedger(async () => "REPLAY");
+      const provider: ModelProvider = {
+        id: "gateway",
+        supports: () => true,
+        health: async () => ({ healthy: true }),
+        generateStructured: vi.fn(async () => {
+          throw new ProviderSettlementError(
+            "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE",
+            undefined,
+            { callCount: 0, provider: "gateway", model: "gpt-5.6-terra" },
+          );
+        }),
+        generateText: vi.fn() as never,
+        reviewVision: vi.fn() as never,
+        embed: vi.fn() as never,
+      };
+      const instance = gateway({ provider, paidLedger });
+
+      await expect(
+        instance.generateStructured(request, CONTEXT),
+      ).rejects.toMatchObject({
+        name: "PaidOperationUnknownError",
+        errorCode: "SETTLEMENT_REPLAY",
+      });
+      expect(paidLedger.settleOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "RELEASED" }),
+      );
+      expect(paidLedger.confirmSettlementReplay).not.toHaveBeenCalled();
+      expect(paidLedger.disablePaidCalls).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        RUN_ID,
+        "SETTLEMENT_REPLAY",
+      );
+    });
+  });
 });

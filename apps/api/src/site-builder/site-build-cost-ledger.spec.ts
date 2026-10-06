@@ -2437,3 +2437,213 @@ describe("bounded accounting metadata and conservative measurement", () => {
     });
   });
 });
+
+describe("settlement REPLAY confirmation", () => {
+  const scope = {
+    workspaceId: "00000000-0000-4000-8000-000000000002",
+    siteId: "00000000-0000-4000-8000-000000000003",
+    buildRunId: "00000000-0000-4000-8000-000000000004",
+    fenceToken: "00000000-0000-4000-8000-000000000010",
+    operationKey: "a".repeat(64),
+    kind: "model" as const,
+    taskId: "site_builder.copy",
+    subject: "copy",
+    reservationMicrousd: 800_000,
+    meta: { subjectKind: "copy" },
+  };
+  const measurement = {
+    basis: "token_pricing" as const,
+    budgetChargeMicrousd: 540,
+    reportedCostMicrousd: null,
+    calculatedCostMicrousd: 540,
+    estimatedCostMicrousd: null,
+    inputTokens: 120,
+    outputTokens: 30,
+    callCount: 1,
+    meta: { resolverId: "new-api-request-bound-reconciliation-v1" },
+  };
+  const settlement = {
+    scope,
+    status: "SUCCEEDED" as const,
+    measurement,
+    result: { ok: true, nested: { b: 2, a: 1 }, dropped: undefined },
+  };
+  const storedMeta = {
+    resolverId: "new-api-request-bound-reconciliation-v1",
+    subjectKind: "copy",
+  };
+  const ownRow = {
+    status: "SUCCEEDED",
+    fenceToken: scope.fenceToken,
+    costBasis: "token_pricing",
+    callCount: 1,
+    resultJson: { nested: { a: 1, b: 2 }, ok: true },
+    meta: storedMeta,
+    errorCode: null,
+  };
+  // What completeProviderSpendReconciliation writes: the row's own fence and a
+  // trigger-enforced call count, so only meta and error code differ.
+  const sweepMeta = {
+    schemaVersion: "site-build-provider-spend-ack-recovery/v1",
+    physicalWireCount: 1,
+  };
+
+  function ledgerReading(row: unknown) {
+    const findFirst = vi.fn(async () => row);
+    const database = {
+      withWorkspace: vi.fn(async (_workspaceId, operation) =>
+        operation({ siteBuildSpend: { findFirst } }),
+      ),
+    } as never;
+    return {
+      findFirst,
+      ledger: new SiteBuildCostLedger(database, {
+        providerWireDatabase: database,
+      }),
+    };
+  }
+
+  it("confirms the row this settlement wrote, whatever the stored key order", async () => {
+    const { ledger, findFirst } = ledgerReading(ownRow);
+
+    await expect(ledger.confirmSettlementReplay(settlement)).resolves.toBe(
+      true,
+    );
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        workspaceId: scope.workspaceId,
+        buildRunId: scope.buildRunId,
+        operationKey: scope.operationKey,
+      },
+      select: {
+        status: true,
+        fenceToken: true,
+        costBasis: true,
+        callCount: true,
+        resultJson: true,
+        meta: true,
+        errorCode: true,
+      },
+    });
+  });
+
+  it("confirms a charge above the reservation recorded as CAP_VARIANCE", async () => {
+    const { ledger } = ledgerReading({ ...ownRow, errorCode: "CAP_VARIANCE" });
+
+    await expect(
+      ledger.confirmSettlementReplay({
+        ...settlement,
+        measurement: { ...measurement, budgetChargeMicrousd: 900_000 },
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("tells this attempt's FAILED settlement from the recovery sweep's", async () => {
+    const failed = {
+      scope,
+      status: "FAILED" as const,
+      measurement,
+      errorCode: "MODEL_OUTPUT_INVALID",
+    };
+    const own = {
+      ...ownRow,
+      status: "FAILED",
+      resultJson: null,
+      errorCode: "MODEL_OUTPUT_INVALID",
+    };
+
+    await expect(
+      ledgerReading(own).ledger.confirmSettlementReplay(failed),
+    ).resolves.toBe(true);
+    await expect(
+      ledgerReading({
+        ...own,
+        meta: sweepMeta,
+        errorCode: "MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY",
+      }).ledger.confirmSettlementReplay(failed),
+    ).resolves.toBe(false);
+  });
+
+  it("tells this attempt's UNKNOWN settlement from the recovery sweep's", async () => {
+    const unknown = {
+      scope,
+      status: "UNKNOWN" as const,
+      measurement: {
+        ...measurement,
+        basis: "unknown" as const,
+        calculatedCostMicrousd: null,
+      },
+      errorCode: "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE",
+      disablePaidCallsReason: "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE",
+    };
+    const own = {
+      ...ownRow,
+      status: "UNKNOWN",
+      costBasis: "unknown",
+      resultJson: null,
+      errorCode: "MODEL_SETTLEMENT_GATEWAY_UNAVAILABLE",
+    };
+
+    await expect(
+      ledgerReading(own).ledger.confirmSettlementReplay(unknown),
+    ).resolves.toBe(true);
+    await expect(
+      ledgerReading({
+        ...own,
+        meta: sweepMeta,
+        errorCode: "MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN",
+      }).ledger.confirmSettlementReplay(unknown),
+    ).resolves.toBe(false);
+  });
+
+  it.each([
+    ["no row", null],
+    [
+      "the recovery sweep's FAILED settlement",
+      {
+        ...ownRow,
+        status: "FAILED",
+        resultJson: null,
+        meta: sweepMeta,
+        errorCode: "MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY",
+      },
+    ],
+    ["another result", { ...ownRow, resultJson: { ok: false } }],
+    ["other meta", { ...ownRow, meta: sweepMeta }],
+    ["another error code", { ...ownRow, errorCode: "CAP_VARIANCE" }],
+    // Invariant guards: no settle path rewrites the fence, and a trigger pins
+    // call_count, so these differ only if those invariants change.
+    [
+      "another fence",
+      { ...ownRow, fenceToken: "00000000-0000-4000-8000-000000000099" },
+    ],
+    ["another call count", { ...ownRow, callCount: 2 }],
+    ["another cost basis", { ...ownRow, costBasis: "unknown" }],
+  ])("does not confirm %s", async (_case, row) => {
+    const { ledger } = ledgerReading(row);
+
+    await expect(ledger.confirmSettlementReplay(settlement)).resolves.toBe(
+      false,
+    );
+  });
+
+  it("expects no call count for a not-incurred settlement", async () => {
+    const { ledger } = ledgerReading({
+      ...ownRow,
+      status: "RELEASED",
+      costBasis: "not_incurred",
+      callCount: null,
+      resultJson: null,
+      errorCode: "SUPPRESSION_ACTION_GATE",
+    });
+
+    await expect(
+      ledger.confirmSettlementReplay({
+        scope,
+        status: "RELEASED",
+        measurement: { ...measurement, basis: "not_incurred", callCount: 0 },
+        errorCode: "SUPPRESSION_ACTION_GATE",
+      }),
+    ).resolves.toBe(true);
+  });
+});
