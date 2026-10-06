@@ -16,7 +16,7 @@ import {
 } from './execution-authority-wire-dispatch.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
-const codes = (issues) => issues.map((entry) => entry.code);
+const codes = (issues) => [...new Set(issues.map((entry) => entry.code))].sort();
 
 async function listFiles(relative) {
   const entries = await readdir(resolve(repositoryRoot, relative), { withFileTypes: true });
@@ -51,7 +51,7 @@ test('live platform Tools and their dispatchable wires come from the platform co
 });
 
 const contract = (rows) => `export const PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 = deepFreeze({ rows: [${rows.join(',')}] } as const);`;
-const row = (costMode, wires, tools) => `technicalRow({ costMode: "${costMode}",
+const row = (costMode, wires, tools, builder = 'technicalRow') => `${builder}({ costMode: "${costMode}",
   physicalWireContracts: [${wires.map((wire) => `{ wireId: "${wire}" }`).join(',')}],
   toolContracts: [${tools.map((tool) => `{ toolId: "${tool}" }`).join(',')}] })`;
 
@@ -62,17 +62,17 @@ test('a multi-tool row gives each Tool only its own wires, as the dispatcher doe
     row('disabled_no_egress', ['p.query'], ['p']),
   ]));
 
-  assert.deepEqual(Object.fromEntries(wires), {
-    a: ['a.page'],
-    b: ['b'],
-    r: ['robots.public_http', 'r.dispatch'],
-  });
+  assert.deepEqual(Object.fromEntries(wires), { a: ['a.page'], b: ['b'], r: ['robots.public_http', 'r.dispatch'] });
 });
 
-test('an unreadable contract or a Tool on two rows yields no wire map', () => {
-  assert.equal(livePlatformToolWires('export const OTHER = {};'), null);
-  assert.equal(livePlatformToolWires(contract([row('zero_paid_dispatch', ['a'], ['a']), row('zero_paid_dispatch', ['a.x'], ['a'])])), null);
-  assert.equal(livePlatformToolWires(contract([`{ costMode: "zero_paid_dispatch", physicalWireContracts: [{ wireId: WIRE }], toolContracts: [{ toolId: "a" }] }`])), null);
+test('a contract that cannot be read exactly yields no wire map', () => {
+  for (const source of [
+    'export const OTHER = {};',
+    contract([row('zero_paid_dispatch', ['a'], ['a']), row('zero_paid_dispatch', ['a.x'], ['a'])]),
+    contract(['{ costMode: "zero_paid_dispatch", physicalWireContracts: [{ wireId: WIRE }], toolContracts: [{ toolId: "a" }] }']),
+    contract([row('zero_paid_dispatch', ['a'], ['a']).replace('{ costMode', '{ ...live, costMode')]),
+    contract([row('zero_paid_dispatch', ['a'], ['a'], 'customBuilder')]),
+  ]) assert.equal(livePlatformToolWires(source), null, source);
 });
 
 test('adapters that take a dispatcher are found directly and through an options interface', () => {
@@ -88,45 +88,79 @@ test('adapters that take a dispatcher are found directly and through an options 
   assert.deepEqual(names, ['direct', 'viaOptions', 'arrow']);
 });
 
-const terminal = (body) => `export async function send(url: string, dispatchPhysicalWire?: DispatchPhysicalWire) {\n${body}\n}`;
+const CRAWLER = 'apps/api/src/adapters/web-crawler.ts';
+const terminal = (body, outside = '') => `${outside}
+export async function crawlHtml(url: string, dispatchPhysicalWire?: DispatchPhysicalWire) {\n${body}\n}`;
 const DISPATCHED = `
   const executePhysicalWire = async () => fetch(url);
   return dispatchPhysicalWire ? await dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire();`;
-const TERMINAL = { name: 'send', send: 'fetch' };
+const HTML = { name: 'crawlHtml', send: 'fetch' };
 
-test('a terminal adapter sends only inside executePhysicalWire, run through the dispatch conditional', () => {
-  assert.deepEqual(terminalAdapterIssues('a.ts', terminal(DISPATCHED), TERMINAL), []);
-  for (const body of [
-    `await fetch(url);${DISPATCHED}`,
-    `const executePhysicalWire = async () => fetch(url);\n  return await executePhysicalWire();`,
-    `${DISPATCHED.replace('return ', 'await executePhysicalWire();\n  return ')}`,
-    `const executePhysicalWire = async () => fetch(url);\n  return other ? await other(executePhysicalWire) : await executePhysicalWire();`,
-    `const executePhysicalWire = async () => url;\n  await fetch(url);\n  return dispatchPhysicalWire ? await dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire();`,
-  ]) {
-    assert.deepEqual(codes(terminalAdapterIssues('a.ts', terminal(body), TERMINAL)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED'], body);
+test('a terminal adapter sends once, inside executePhysicalWire, run through its own dispatcher', () => {
+  assert.deepEqual(terminalAdapterIssues(CRAWLER, terminal(DISPATCHED), HTML), []);
+  const undispatched = [
+    terminal(`await fetch(url);${DISPATCHED}`),
+    terminal('const executePhysicalWire = async () => fetch(url);\n  return await executePhysicalWire();'),
+    terminal(DISPATCHED.replace('return ', 'await executePhysicalWire();\n  return ')),
+    terminal(DISPATCHED.replace(/dispatchPhysicalWire/g, 'other')),
+    terminal(`await globalThis.fetch(url);${DISPATCHED}`),
+    terminal(`await ping(url);${DISPATCHED}`, 'function ping(target: string) { return fetch(target); }'),
+    terminal(`await crawlUrl(url);${DISPATCHED}`, 'export async function crawlUrl(target: string) { return target; }'),
+    terminal(`if (process.env.X) dispatchPhysicalWire = undefined;${DISPATCHED}`),
+    terminal(DISPATCHED.replace('async () => fetch(url)', 'async () => { for (let i = 0; i < 3; i++) { try { return await fetch(url); } catch {} } }')),
+    terminal(DISPATCHED.replace('async () => fetch(url)', 'async () => { await fetch(url); return fetch(url); }')),
+    terminal(DISPATCHED.replace('async () => fetch(url)', 'async () => { await globalThis.fetch(url); return fetch(url); }')),
+  ];
+  for (const source of undispatched) {
+    assert.deepEqual(codes(terminalAdapterIssues(CRAWLER, source, HTML)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED'], source);
   }
 });
 
+test('a dispatcher read from a copy of the options, not the parameter, does not count', () => {
+  const source = `export async function requestPublicHttp(raw: string, dependencies: Deps = {}) {
+    const execute = dependencies.executePinned ?? executePinnedHttp;
+    const options = { ...dependencies, dispatchPhysicalWire: undefined };
+    const executePhysicalWire = () => execute(raw);
+    return options.dispatchPhysicalWire ? await options.dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire();
+  }
+  function executePinnedHttp(target: string) { return httpsRequest(target); }`;
+  const imports = 'import { request as httpsRequest } from "node:https";\n';
+  const adapter = { name: 'requestPublicHttp', send: 'execute' };
+
+  assert.deepEqual(
+    terminalAdapterIssues('apps/api/src/adapters/guarded-http.ts', imports + source.replace(/options\.dispatchPhysicalWire/g, 'dependencies.dispatchPhysicalWire').replace('const options = { ...dependencies, dispatchPhysicalWire: undefined };\n', ''), adapter),
+    [],
+  );
+  assert.deepEqual(codes(terminalAdapterIssues('apps/api/src/adapters/guarded-http.ts', imports + source, adapter)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED']);
+  assert.deepEqual(
+    codes(terminalAdapterIssues('apps/api/src/adapters/guarded-http.ts', imports + source.replace(/options\.dispatchPhysicalWire/g, 'dependencies.dispatchPhysicalWire').replace('const options = { ...dependencies, dispatchPhysicalWire: undefined };', 'await executePinnedHttp(raw);'), adapter)),
+    ['EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED'],
+  );
+});
+
+const ROBOTS = 'apps/api/src/adapters/robots.ts';
 const forwarding = (body, outside = '') => `${outside}
-export async function check(url: string, dependencies: Deps = {}) {
+export async function isAllowedByRobots(url: string, dependencies: Deps = {}) {
   const dispatchPhysicalWire = dependencies.dispatchPhysicalWire
     ? async (execute) => { try { return await dependencies.dispatchPhysicalWire!(execute); } finally { done(); } }
     : undefined;
   ${body}
 }`;
-const FORWARDING = { name: 'check', forwardsTo: 'requestPublicHttp' };
+const FORWARDING = { name: 'isAllowedByRobots', forwardsTo: 'requestPublicHttp' };
+const FORWARDED = 'const request = (raw) => (dependencies.request ?? requestPublicHttp)(raw, {}, { dispatchPhysicalWire });\n  return load(url, request);';
 
 test('a forwarding adapter passes the dispatcher it was given to every terminal call in its file', () => {
-  const good = 'return (dependencies.request ?? requestPublicHttp)(url, {}, { dispatchPhysicalWire });';
-  assert.deepEqual(forwardingAdapterIssues('r.ts', forwarding(good), FORWARDING), []);
-  assert.deepEqual(forwardingAdapterIssues('r.ts', forwarding('return requestPublicHttp(url, {}, { dispatchPhysicalWire: dependencies.dispatchPhysicalWire });'), FORWARDING), []);
+  assert.deepEqual(forwardingAdapterIssues(ROBOTS, forwarding(FORWARDED), FORWARDING), []);
+  assert.deepEqual(forwardingAdapterIssues(ROBOTS, forwarding('return requestPublicHttp(url, {}, { dispatchPhysicalWire: dependencies.dispatchPhysicalWire });'), FORWARDING), []);
   for (const source of [
     forwarding('return requestPublicHttp(url, {}, {});'),
-    forwarding(good).replace('dependencies.dispatchPhysicalWire!(execute)', 'execute()'),
-    forwarding(good, 'async function preload(url: string) { return requestPublicHttp(url); }'),
+    forwarding(FORWARDED).replace('dependencies.dispatchPhysicalWire!(execute)', 'execute()'),
+    forwarding(FORWARDED).replace('try { return', 'try { if (url.length > 9) return execute(); return'),
+    forwarding(FORWARDED, 'async function preload(url: string) { return requestPublicHttp(url); }'),
+    forwarding('return load(url, dependencies.request ?? requestPublicHttp);'),
     forwarding('return url;'),
   ]) {
-    assert.deepEqual(codes(forwardingAdapterIssues('r.ts', source, FORWARDING)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_FORWARD_MISSING'], source);
+    assert.deepEqual(codes(forwardingAdapterIssues(ROBOTS, source, FORWARDING)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_FORWARD_MISSING'], source);
   }
 });
 
@@ -138,26 +172,29 @@ const SOURCE_PHYSICAL_WIRE = `function sourcePhysicalWire(ctx: ToolContext, wire
   return dispatch ? (execute) => dispatch(wireId, execute) : undefined;
 }`;
 
-test('sourcePhysicalWire stays the fail-closed platform dispatcher accessor', () => {
+test('sourcePhysicalWire stays the single fail-closed platform dispatcher accessor', () => {
   assert.deepEqual(sourcePhysicalWireIssues('t.ts', SOURCE_PHYSICAL_WIRE), []);
-  assert.deepEqual(
-    codes(sourcePhysicalWireIssues('t.ts', SOURCE_PHYSICAL_WIRE.replace('ctx.workspaceId === "platform" && ', ''))),
-    ['EXECUTION_AUTHORITY_SOURCE_PHYSICAL_WIRE_DRIFT'],
-  );
-  assert.deepEqual(codes(sourcePhysicalWireIssues('t.ts', 'const x = 1;')), ['EXECUTION_AUTHORITY_SOURCE_PHYSICAL_WIRE_DRIFT']);
+  for (const source of [
+    SOURCE_PHYSICAL_WIRE.replace('ctx.workspaceId === "platform" && ', ''),
+    'const x = 1;',
+    `${SOURCE_PHYSICAL_WIRE}\nfunction run() { const sourcePhysicalWire = () => undefined; return sourcePhysicalWire; }`,
+  ]) assert.deepEqual(codes(sourcePhysicalWireIssues('t.ts', source)), ['EXECUTION_AUTHORITY_SOURCE_PHYSICAL_WIRE_DRIFT'], source);
 });
 
 const TOOL_PATH = 'apps/api/src/tools/source-tools.ts';
 const tool = (execute, extra = '') => `
-import { requestPublicHttp } from "../adapters/guarded-http";
+import { requestPublicHttp } from "../adapters/guarded-http.js";
 import { isAllowedByRobots } from "../adapters/robots";
 import { wikidataSearchEntity } from "../adapters/wikidata";
 import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
+import { fetchSitemap } from "../discovery/sitemap";
 import { request as httpsRequest } from "node:https";
+import axios from "axios";
+import type { ToolContext } from "./tool-contract";
 const contract = platformExecutionToolContract("demo.fetch");
 ${SOURCE_PHYSICAL_WIRE}
 ${extra}
-export const demoTool = { id: contract.toolId, execute: async (input, ctx) => {
+export const demoTool = { id: contract.toolId, execute: async (input, ctx: ToolContext) => {
 ${execute}
 } };`;
 const ALL_WIRES = `
@@ -165,6 +202,8 @@ const ALL_WIRES = `
   const res = await requestPublicHttp(input.url, {}, { dispatchPhysicalWire: sourcePhysicalWire(ctx, "demo.fetch") });
   return decodeJsonBytes(res.body, "X");`;
 const WIRES = ['robots.public_http', 'demo.fetch'];
+const before = (statement) => ALL_WIRES.replace('  return ', `  ${statement}\n  return `);
+const toolCodes = (execute, extra) => codes(platformToolIssues(TOOL_PATH, tool(execute, extra), 'demo.fetch', WIRES));
 
 test('a live platform Tool passes a declared sourcePhysicalWire to every wire adapter call', () => {
   assert.deepEqual(platformToolIssues(TOOL_PATH, tool(ALL_WIRES), 'demo.fetch', WIRES), []);
@@ -172,31 +211,47 @@ test('a live platform Tool passes a declared sourcePhysicalWire to every wire ad
     [ALL_WIRES.replace(', { dispatchPhysicalWire: sourcePhysicalWire(ctx, "demo.fetch") }', ''), ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED']],
     [ALL_WIRES.replace('sourcePhysicalWire(ctx, "demo.fetch")', 'sourcePhysicalWire(input, "demo.fetch")'), ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED']],
     [ALL_WIRES.replace('"demo.fetch"', '"other.fetch"'), ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNDECLARED', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED']],
-    [`${ALL_WIRES.replace('return ', 'await fetch(input.url);\n  return ')}`, ['EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK']],
-    [`${ALL_WIRES.replace('return ', 'httpsRequest(input.url);\n  return ')}`, ['EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK']],
-    [`${ALL_WIRES.replace('return ', 'await wikidataSearchEntity(input.url);\n  return ')}`, ['EXECUTION_AUTHORITY_PLATFORM_TOOL_ADAPTER_UNREGISTERED']],
   ];
-  for (const [execute, expected] of cases) {
-    assert.deepEqual(codes(platformToolIssues(TOOL_PATH, tool(execute), 'demo.fetch', WIRES)), expected, execute);
-  }
+  for (const [execute, expected] of cases) assert.deepEqual(toolCodes(execute), expected, execute);
 });
 
-test('same-file helpers a live platform Tool reaches are held to the same wiring', () => {
+test('a live platform Tool cannot add a send beside its dispatched wires', () => {
+  const direct = ['EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK'];
+  const unregistered = ['EXECUTION_AUTHORITY_PLATFORM_TOOL_IMPORT_UNREGISTERED'];
+  const missing = ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING'];
+  for (const [statement, expected] of [
+    ['await fetch(input.url);', direct],
+    ['await globalThis.fetch(input.url);', direct],
+    ['await fetch.call(null, input.url);', direct],
+    ['httpsRequest(input.url);', direct],
+    ['await axios.get(input.url);', direct],
+    ['await wikidataSearchEntity(input.url);', unregistered],
+    ['await fetchSitemap(input.url);', unregistered],
+    ['await import("../adapters/guarded-http");', unregistered],
+    ['const raw = requestPublicHttp; await raw(input.url);', missing],
+    ['await isAllowedByRobots(input.url, { dispatchPhysicalWire: sourcePhysicalWire(ctx, "robots.public_http"), request: requestPublicHttp });', missing],
+  ]) assert.deepEqual(toolCodes(before(statement)), expected, statement);
+});
+
+test('same-file declarations a live platform Tool reaches are held to the same wiring', () => {
   const viaHelper = ALL_WIRES.replace(
     'const res = await requestPublicHttp(input.url, {}, { dispatchPhysicalWire: sourcePhysicalWire(ctx, "demo.fetch") });',
     'const res = await download(input.url, ctx);',
   );
   const dispatched = 'async function download(url: string, context: ToolContext) { return requestPublicHttp(url, {}, { dispatchPhysicalWire: sourcePhysicalWire(context, "demo.fetch") }); }';
 
-  assert.deepEqual(platformToolIssues(TOOL_PATH, tool(viaHelper, dispatched), 'demo.fetch', WIRES), []);
-  assert.deepEqual(
-    codes(platformToolIssues(TOOL_PATH, tool(viaHelper, 'async function download(url: string) { return requestPublicHttp(url); }'), 'demo.fetch', WIRES)),
-    ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED'],
-  );
-  assert.deepEqual(
-    codes(platformToolIssues(TOOL_PATH, tool(viaHelper, 'const download = async (url: string) => fetch(url);'), 'demo.fetch', WIRES)),
-    ['EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED'],
-  );
+  assert.deepEqual(toolCodes(viaHelper, dispatched), []);
+  for (const [execute, extra, expected] of [
+    [viaHelper, 'async function download(url: string) { return requestPublicHttp(url); }', ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED']],
+    [viaHelper, 'const download = async (url: string) => fetch(url);', ['EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK', 'EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_UNUSED']],
+    [before('await withRetry(plain);'), 'const withRetry = (send) => send();\nconst plain = () => requestPublicHttp("https://x");', ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING']],
+    [before('await helpers.get(input.url);'), 'const helpers = { get: (url: string) => requestPublicHttp(url) };', ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING']],
+    [
+      ALL_WIRES.replace('sourcePhysicalWire(ctx, "robots.public_http") }', 'sourcePhysicalWire(ctx, "robots.public_http"), request: plainRequest }'),
+      'const plainRequest = (raw: string, options: object) => requestPublicHttp(raw, options);',
+      ['EXECUTION_AUTHORITY_PLATFORM_TOOL_WIRE_MISSING'],
+    ],
+  ]) assert.deepEqual(toolCodes(execute, extra), expected, extra);
 });
 
 test('a live platform Tool must be declared exactly once', () => {

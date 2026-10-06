@@ -52,7 +52,18 @@
   - 转交型适配器所在文件里，所有 `requestPublicHttp` 调用都必须在它内部，并把收到的调度器原样转交；
   - 活跃平台工具（从平台合同推导，跳过 `disabled_no_egress`）的 `execute`，及其调用到的同文件辅助函数里，每个适配器调用都必须带一个 `sourcePhysicalWire(ctx, "<wire>")`，而且 wire 必须是调度器按合同会接受的那一个；合同声明的每个 wire 都必须用到；不得直接调用 `fetch`、Node 网络模块，或未登记的适配器函数；
   - `sourcePhysicalWire` 的故障即拒绝函数体按文本钉住。
-- 当前代码零问题。在仓库副本上做了 15 项变异，全部被拦下：工具丢了调度器、传 `undefined`、使用未声明的 wire、直接 `fetch`、调用未登记的适配器、经本地辅助函数绕过、`sourcePhysicalWire` 去掉平台拒绝、三个终端适配器各自绕过闭包或调度、robots 停止转交 / 包装器不调用收到的调度器 / 在函数外直接调用、新增接受调度器的适配器、合同新增却从未用到的 wire。新 spec 共 11 项。没有跟进的范围：从 `adapters/` 以外模块导入的函数。
+- 合并前的独立复审在不改变「静态检查」选型的前提下找到若干绕过写法，均已改为按失败处理：
+  - 平台工具能触达的导入改为白名单。只允许已登记的 wire 适配器，以及 `EXPECTED_PLATFORM_TOOL_IMPORTS` 中的平台合同、`ExecutionControlError`、`assertToolExternalActionAuthorized`、`decodeJsonBytes`、`EgressBlockedError` 与 `createHash`。从其他模块导入、动态 `import()`、`globalThis` / `fetch` 作为值使用、axios / child_process 等网络模块都报错。
+  - 工具会顺着它引用的所有同文件声明继续检查，包括回调、别名和方法对象。这样也覆盖了经 robots 的 `request` 钩子注入未经调度的请求。wire 适配器只能被直接调用，不能当作值传递。
+  - 终端适配器：同文件中任何能发请求的声明，都不得在闭包外被引用（传递求出，例如 `executePinnedHttp` 与 `crawlUrl`）；闭包内只能发一次、不在循环里；调度条件必须读取函数自身的调度器参数，且该参数不得被重新赋值、删除或遮蔽。
+  - 转交型适配器：`requestPublicHttp` 只能作为带调度器调用的被调函数出现，包装器只能经收到的调度器执行。
+  - 合同行不得含 spread，且只认 `deepFreeze` 与 `technicalRow` 两个构造器；文件里只能有一个名为 `sourcePhysicalWire` 的绑定；兼容 `.js` 后缀导入与 const 箭头函数形式的适配器。
+- 当前代码零问题。在仓库副本上做了 22 项变异，全部被拦下：
+  - 先前 15 项：工具丢了调度器、传 `undefined`、使用未声明的 wire、直接 `fetch`、调用未登记的适配器、经本地辅助函数绕过、`sourcePhysicalWire` 去掉平台拒绝、三个终端适配器绕过闭包或调度、robots 的三种转交缺陷、新增接受调度器的适配器、合同新增却从未用到的 wire；
+  - 复审补充 7 项：robots 的 `request` 钩子、`globalThis.fetch`、从非适配器模块导入、`executePinnedHttp` 预检、`crawlHtml` 未经调度调用 `crawlUrl`、调度器参数被置空、把 `requestPublicHttp` 当作值传给 `loadRobots`。
+
+  新 spec 共 13 项，其中 8 项在加固前的检查上失败。
+- 定位：这是防回归的检测器，不是出网边界。白名单模块内部（例如平台合同模块）若藏有发送，本检查看不到。复审建议在 ToolBroker 加运行时兜底（平台调用必须至少经过一次调度），这一项超出所选的静态方案，没有做，留作后续决定。
 
 ## 2026-10-01 · @grpc/grpc-js security floor
 

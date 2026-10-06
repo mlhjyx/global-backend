@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-import { inspectPlatformWireDispatch } from './execution-authority-wire-dispatch.mjs';
+import { inspectPlatformWireDispatch, PLATFORM_CONTRACT_PATH } from './execution-authority-wire-dispatch.mjs';
 
 const SCRIPT_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const DEFAULT_REPO_ROOT = resolve(SCRIPT_DIR, '..');
@@ -15,7 +15,6 @@ const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/source-tools.ts',
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
-const PLATFORM_CONTRACT_PATH = 'apps/api/src/platform-authority/platform-execution-contract.ts';
 const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
