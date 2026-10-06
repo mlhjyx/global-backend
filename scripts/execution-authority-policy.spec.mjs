@@ -239,20 +239,34 @@ test('the runtime Model task list is read only from a plain literal declaration'
   ]) assert.equal(modelResultTaskIds(source), null, source);
 });
 
-test('artifact bounds must be single tokens that end the property', () => {
+test('artifact bounds are read only from the durableResultStrategy object and must be single tokens', () => {
   const constants = 'export const LIMIT = 3_000_000;';
-  const tail = '\n  privacyClass: "PUBLIC_SOURCE",\n';
+  const strategy = (body) => `id: "x",\n  durableResultStrategy: {\n    kind: "artifact_reference",\n${body}\n  },\n  execute: async () => fetch({ maxBytes: LIMIT, ttlSeconds: 86_400 }),`;
+  const bounds = (max, media, ttl) =>
+    `    maxBytes: ${max},\n    mediaTypes: ${media},\n    privacyClass: "PUBLIC_SOURCE",\n    ttlSeconds: ${ttl},`;
   assert.deepEqual(
-    { ...artifactSourceContract(`maxBytes: LIMIT,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400,`, constants) },
+    { ...artifactSourceContract(strategy(bounds('LIMIT', '["text/html"]', '86_400')), constants) },
     { maxBytes: 3_000_000, mediaTypes: ['text/html'], privacyClass: 'PUBLIC_SOURCE', ttlSeconds: 86_400 },
   );
   for (const block of [
-    `maxBytes: LIMIT * 10,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400,`,
-    `maxBytes: LIMIT,\n  mediaTypes: ["text/html"].concat(EXTRA),${tail}  ttlSeconds: 86_400,`,
-    `maxBytes: LIMIT,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400 * 365,`,
-    `maxBytes: LIMIT * 4,\n  mediaTypes: ["text/html"],${tail}  ttlSeconds: 86_400,\n  execute: () => fetch({ maxBytes: LIMIT, ttlSeconds: 86_400 }),`,
+    strategy(bounds('LIMIT * 10', '["text/html"]', '86_400')),
+    strategy(bounds('LIMIT', '["text/html"].concat(EXTRA)', '86_400')),
+    strategy(bounds('LIMIT', '["text/html"]', '86_400 * 365')),
+    strategy(bounds('LIMIT', '[]', '86_400')),
+    `transportLimits: { maxBytes: LIMIT },\n  ${strategy(bounds('LIMIT * 4', '["text/html"]', '86_400'))}`,
+    `// durableResultStrategy: { maxBytes: LIMIT }\n  ${strategy(bounds('LIMIT * 4', '["text/html"]', '86_400'))}`,
+    strategy(`${bounds('LIMIT', '["text/html"]', '86_400')}\n    maxBytes: LIMIT,`),
+    'id: "x", execute: async () => ({ maxBytes: LIMIT, mediaTypes: ["text/html"], ttlSeconds: 86_400 }),',
   ]) assert.equal(artifactSourceContract(block, constants), null, block);
-  const privacy = artifactSourceContract(`maxBytes: LIMIT,\n  mediaTypes: ["text/html"],\n  privacyClass: "PUBLIC_SOURCE" + SUFFIX,\n  ttlSeconds: 86_400,`, constants);
+  const commented = artifactSourceContract(
+    `// maxBytes: 999,\n  ${strategy(`    // maxBytes: 999,\n${bounds('LIMIT', '["text/html"]', '86_400')}`)}`,
+    constants,
+  );
+  assert.equal(commented.maxBytes, 3_000_000);
+  const privacy = artifactSourceContract(
+    strategy('    maxBytes: LIMIT,\n    mediaTypes: ["text/html"],\n    privacyClass: "PUBLIC_SOURCE" + SUFFIX,\n    ttlSeconds: 86_400,'),
+    constants,
+  );
   assert.equal(privacy.privacyClass, undefined);
 });
 

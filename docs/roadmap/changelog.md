@@ -27,14 +27,14 @@
   - 同名常量被声明多次，或经 `import { A as B }` 改名绑定的，按无法解析处理。只有恰为 `const x = platformExecutionToolContract("<id>");` 且只声明一次的绑定，才按平台合同解析。
   - 新增：运行时的封闭清单 `MODEL_RESULT_TASK_IDS` 必须与期望的 Model 任务清单完全一致（`EXECUTION_AUTHORITY_MODEL_RESULT_TASKS_MISMATCH`）。
 - 对修复的复查又发现四处问题，均已补上：
-  - 加了锚定之后，`match()` 会跳过不合规的首个 `maxBytes:`，转而命中同一 Tool 执行体里的另一个同名属性。现在只读块内的第一个属性。
+  - 加了锚定之后，`match()` 会跳过不合规的首个 `maxBytes:`，转而命中同一 Tool 执行体里的另一个同名属性。现在用 TypeScript 解析该 Tool 唯一的 `durableResultStrategy` 对象，只读它的直接属性，块内其他同名键与注释都不再能顶替。
   - 以函数参数或解构遮蔽的同名常量此前没有识别。现在 `getTask` 的常量参数按语法树上的全部绑定判断：只认文件内唯一的字符串 `const`。
   - 以新名字再导出 `getTask` 此前没有识别。
   - `import def, { A as B }` 形式的改名此前没有识别。
-- 在仓库副本上做了 20 项变异，全部被拦下：
+- 在仓库副本上做了 21 项变异，全部被拦下：
   - 先前的 7 项：Router、ToolBroker 各改一个字节，平台合同里 `crawl4ai.render` 的 schema，专利计费上限常量，`icp.design` 的投影值，把 trade-role 任务常量改成未登记的 id，以未定义常量调用 `getTask`；
   - 复审给出的反例及据此补充的 9 项：产物上限三种表达式、`getTask` 经对象成员 / 小写常量 / 作为值传递、常量 import 改名、被遮蔽的任务常量、运行时任务清单多一项；
-  - 复查给出的 4 项：制裁与 `http.get` 的上限表达式落到后面的同名属性、参数遮蔽任务常量、以新名字再导出 `getTask`。
+  - 复查给出的 5 项：制裁与 `http.get` 的上限表达式落到后面的同名属性、在策略对象之前放一个同名键、参数遮蔽任务常量、以新名字再导出 `getTask`。
 
   新增用例在加固前的脚本上均失败。spec 由 10 项增至 16 项。`governance:test` 由 276 项增至 292 项，xin 上 load 12 时 48 秒，其中本 spec 约 18 秒。
 

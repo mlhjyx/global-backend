@@ -738,28 +738,55 @@ function resolveString(token, constants) {
   return typeof value === 'string' ? value : undefined;
 }
 
-// The value of the first `name:` property in the block, read only when it is a
-// single token that ends the property, so an expression such as `LIMIT * 10`
-// or `[...].concat(more)` fails closed instead of falling through to a later
-// same-named property (for example one inside the Tool's execute body).
-function firstPropertyToken(block, name, valuePattern) {
-  const start = block.search(new RegExp(`\\b${name}:`));
-  if (start < 0) return undefined;
-  return block.slice(start).match(new RegExp(`^${name}:\\s*(${valuePattern})(?=[ \\t]*[,}])`))?.[1];
+// Direct properties of the Tool's single `durableResultStrategy: { ... }`
+// object, parsed as TypeScript, so a same-named key elsewhere in the block
+// (a transport limit, the execute body, a comment) never stands in for it.
+// Null when the object is missing, repeated, unparsable or has duplicate keys.
+function durableResultStrategyProperties(block) {
+  const markers = [...block.matchAll(/\bdurableResultStrategy\s*:\s*\{/g)];
+  if (markers.length !== 1) return null;
+  const open = markers[0].index + markers[0][0].length - 1;
+  let depth = 0;
+  let close = -1;
+  for (let index = open; index < block.length && close < 0; index += 1) {
+    if (block[index] === '{') depth += 1;
+    else if (block[index] === '}' && --depth === 0) close = index;
+  }
+  if (close < 0) return null;
+  const sourceFile = ts.createSourceFile('strategy.ts', `const strategy = ${block.slice(open, close + 1)};`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const [statement] = sourceFile.statements;
+  const object = statement && ts.isVariableStatement(statement)
+    ? statement.declarationList.declarations[0]?.initializer
+    : undefined;
+  if (!object || !ts.isObjectLiteralExpression(object) || sourceFile.parseDiagnostics.length > 0) return null;
+  const properties = new Map();
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name) || properties.has(property.name.text)) return null;
+    properties.set(property.name.text, property.initializer);
+  }
+  return properties;
 }
 
+// Each bound must be a single token (a literal or a constant name), so an
+// expression such as `LIMIT * 10` or `[...].concat(more)` fails closed.
 export function artifactSourceContract(block, completeSource) {
-  const maxToken = firstPropertyToken(block, 'maxBytes', '[A-Za-z0-9_]+');
-  const ttlToken = firstPropertyToken(block, 'ttlSeconds', '[0-9_]+');
-  const mediaExpression = firstPropertyToken(block, 'mediaTypes', '\\[[^\\]]+\\]')?.slice(1, -1);
-  if (!maxToken || !ttlToken || !mediaExpression) return null;
+  const properties = durableResultStrategyProperties(block);
+  if (!properties) return null;
+  const token = (node) => (node && (ts.isIdentifier(node) || ts.isNumericLiteral(node)) ? node.getText() : undefined);
+  const maxToken = token(properties.get('maxBytes'));
+  const ttlNode = properties.get('ttlSeconds');
+  const ttlToken = ttlNode && ts.isNumericLiteral(ttlNode) ? ttlNode.getText() : undefined;
+  const mediaNode = properties.get('mediaTypes');
+  const privacyNode = properties.get('privacyClass');
+  if (!maxToken || !ttlToken || !mediaNode || !ts.isArrayLiteralExpression(mediaNode) || mediaNode.elements.length === 0) return null;
   const constants = sourceConstants(completeSource);
-  const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, constants));
+  const mediaTypes = mediaNode.elements.map((element) =>
+    ts.isStringLiteralLike(element) ? element.text : ts.isIdentifier(element) ? resolveString(element.text, constants) : undefined);
   if (mediaTypes.some((entry) => typeof entry !== 'string')) return null;
   return Object.freeze({
     maxBytes: resolveNumber(maxToken, constants),
     mediaTypes,
-    privacyClass: firstPropertyToken(block, 'privacyClass', `"[^"]+"|'[^']+'`)?.slice(1, -1),
+    privacyClass: privacyNode && ts.isStringLiteralLike(privacyNode) ? privacyNode.text : undefined,
     ttlSeconds: resolveNumber(ttlToken, constants),
   });
 }
