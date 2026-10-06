@@ -21,6 +21,28 @@
 - 网关 provider 新增可选开关 `MODEL_GATEWAY_STREAM_CHAT_COMPLETIONS=true`。打开后，未结算（无 `paidCost`）的 chat-completions 调用以 SSE 流式请求（`stream` + `stream_options.include_usage`），在本地拼回与非流式完全相同的结果（内容、finish_reason、上游模型、usage），后续的模型身份、用量对账和 finish_reason 校验都不变。结算调用（Site Builder 的 request-bound settlement）始终不走流式。默认关闭。
 - 起因（2026-10-06 xin 实测）：上游中转 `openox.tech` 在 Cloudflare 后面，非流式长生成约 125 秒时被以 524 断开，直连和经 new-api 都一样，所以 ICP 设计、查询计划这类长输出任务会失败；同一请求改用流式（不经 VPN）146 秒正常完成。解析器严格校验，以下情况一律失败关闭：无法读取正文、data 行不是合法 JSON、流里带上游错误、流里没有任何补全块。上游忽略 `stream`、直接返回普通 JSON 时按普通响应处理。
 
+## 2026-10-06 · Execution authority policy back in the gates
+
+- `scripts/execution-authority-policy.spec.mjs` 自 #586 起登记在 `MANUAL_SPECS`：策略检查在 main 上报 25 个问题，10-06 的 main（`49dfd9f1`）仍是同样 25 项、没有新增。其中 24 项是检查脚本跟不上重构，不是代码违规：10 项是模型投影表在 #449 改成双引号，脚本只认单引号；11 项是五个平台 Tool 改经 `platformExecutionToolContract("<id>")` 声明 id、schema 与产物上限，脚本只认字面 `id: "<id>"`；1 项是专利计费上限改为指向平台合同常量的别名；2 项是 #578 新增的 `discovery.classify_trade_role` 未登记，且它以常量调用 `getTask(WEBSITE_PROFILE_TASK)`，源码清单扫描漏掉了它。脚本现按平台合同解析这些间接引用（含 `as const`、跨行与别名常量），以引号无关的方式匹配映射，把同文件字符串常量的 `getTask` 计入清单，无法解析的大写常量参数报 `EXECUTION_AUTHORITY_MODEL_TASK_UNRESOLVED`。
+- 剩下 1 项是受保护的 `router-model-gateway.ts` 指纹，自 d5e4bc42（8-26）起不再匹配。[围栏复核](../evidence/execution-authority-fence-review-20261001.md)逐提交核对了 `b8dd5eb0` 以来改动四个受保护文件的全部提交：要么语义不变，要么新增 fail-closed 控制，唯一的放宽是已批准的 G3 5.1 按调用主体绑定（#565，当时已顺带更新了 ToolBroker 两个文件的指纹）。10-01 之后四个文件都没有再改，Router 当前内容仍是复核时的 `446e5771…`；10-06 另做了一次独立复审，逐行确认了复核结论，另提三点不影响更新指纹的后续事项（结算 `REPLAY` 判定的注释与 SQL 不符、平台出网授权实际还依赖未钉住的 `source-tools.ts`、客户侧中途拒绝的预留释放），一并记在复核记录文末。据此把 Router 指纹更新为 `446e5771…`，检查失败时的提示也改为「先复核、记录复核，再更新指纹」。
+- 该 spec 现由 `governance-contracts.spec.mjs` 导入，随 required 的 `governance · traceability · release` 与 build 作业的 `docs:verify` 执行，`MANUAL_SPECS` 删去该项（剩 2 项）。去掉这条导入时，可达性门报 `SPEC_UNREACHABLE`。
+- 合并前的独立代码复审找到新解析逻辑会漏报的几种写法。这些写法当前代码里都没有，但都已改为按失败处理：
+  - 产物上限按首个记号读取：`LIMIT * 10`、`[…].concat(more)`、`86_400 * 365` 都会被当成合规。现在要求取值是紧接 `,` 或 `}` 的单个记号。
+  - `getTask` 改用语法树扫描，也能识别 import 别名、`?.`、`!` 和成员访问。参数不是字面量、也不是同文件常量的调用，只允许 Router、运行时桥、ToolBroker、预算信封这四处登记过的通用查找（`EXPECTED_GENERIC_MODEL_TASK_LOOKUPS`）；把 `getTask` 当作值传递（如 `ids.map(getTask)`）同样报错。
+  - 同名常量被声明多次，或经 `import { A as B }` 改名绑定的，按无法解析处理。只有恰为 `const x = platformExecutionToolContract("<id>");` 且只声明一次的绑定，才按平台合同解析。
+  - 新增：运行时的封闭清单 `MODEL_RESULT_TASK_IDS` 必须与期望的 Model 任务清单完全一致（`EXECUTION_AUTHORITY_MODEL_RESULT_TASKS_MISMATCH`）。
+- 对修复的复查又发现四处问题，均已补上：
+  - 加了锚定之后，`match()` 会跳过不合规的首个 `maxBytes:`，转而命中同一 Tool 执行体里的另一个同名属性。现在用 TypeScript 解析该 Tool 唯一的 `durableResultStrategy` 对象，只读它的直接属性，块内其他同名键与注释都不再能顶替。
+  - 以函数参数或解构遮蔽的同名常量此前没有识别。现在 `getTask` 的常量参数按语法树上的全部绑定判断：只认文件内唯一的字符串 `const`。
+  - 以新名字再导出 `getTask` 此前没有识别。
+  - `import def, { A as B }` 形式的改名此前没有识别。
+- 在仓库副本上做了 21 项变异，全部被拦下：
+  - 先前的 7 项：Router、ToolBroker 各改一个字节，平台合同里 `crawl4ai.render` 的 schema，专利计费上限常量，`icp.design` 的投影值，把 trade-role 任务常量改成未登记的 id，以未定义常量调用 `getTask`；
+  - 复审给出的反例及据此补充的 9 项：产物上限三种表达式、`getTask` 经对象成员 / 小写常量 / 作为值传递、常量 import 改名、被遮蔽的任务常量、运行时任务清单多一项；
+  - 复查给出的 5 项：制裁与 `http.get` 的上限表达式落到后面的同名属性、在策略对象之前放一个同名键、参数遮蔽任务常量、以新名字再导出 `getTask`。
+
+  新增用例在加固前的脚本上均失败。spec 由 10 项增至 16 项。`governance:test` 由 276 项增至 292 项，xin 上 load 12 时 48 秒，其中本 spec 约 18 秒。
+
 ## 2026-10-01 · @grpc/grpc-js security floor
 
 - 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。

@@ -8,20 +8,28 @@ import {
   EXPECTED_MODEL_TASKS,
   EXPECTED_MODEL_GATEWAY_BOUNDARIES,
   EXPECTED_NON_TOOL_INVOKE_BOUNDARIES,
+  EXPECTED_GENERIC_MODEL_TASK_LOOKUPS,
   EXPECTED_PROTECTED_WIRING_PATHS,
   EXPECTED_TOOL_CALLSITES,
   EXPECTED_TOOL_IDS,
+  artifactSourceContract,
+  declaresMapping,
   inspectExecutionAuthoritySource,
+  modelResultTaskIds,
+  modelTaskIdsInSource,
+  resolvePlatformContractReferences,
+  sourceConstants,
   verifyExecutionAuthorityPolicy,
 } from './execution-authority-policy.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 18 Tools and 10 product Model tasks', () => {
+test('inventory is locked to 18 Tools and 11 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_IDS.length, 18);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 10);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 11);
   assert.equal(new Set(EXPECTED_TOOL_IDS).size, 18);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 10);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 11);
+  assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
     'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
@@ -88,6 +96,178 @@ test('AST inspection sees aliased gateway calls, Tool calls and BigQuery aliases
   `);
   assert.deepEqual(elementAccess.modelMethods, ['generateStructured']);
   assert.deepEqual(elementAccess.toolIds, ['http.get']);
+});
+
+test('source constants resolve as-const, multi-line and aliased declarations', () => {
+  const constants = sourceConstants([
+    'export const DIRECT = 3_000_000 as const;',
+    'export const TEXT =',
+    '  "214748364800" as const;',
+    'export const ALIAS =',
+    '  DIRECT;',
+    "const TASK = 'discovery.classify_trade_role' as const;",
+    'const LOOP_A = LOOP_B;',
+    'const LOOP_B = LOOP_A;',
+  ].join('\n'));
+  assert.equal(constants.get('DIRECT'), 3_000_000);
+  assert.equal(constants.get('TEXT'), '214748364800');
+  assert.equal(constants.get('ALIAS'), 3_000_000);
+  assert.equal(constants.get('TASK'), 'discovery.classify_trade_role');
+  assert.equal(constants.has('LOOP_A'), false);
+});
+
+test('platform execution contract references resolve to the contract tool id and schema', () => {
+  const contract = [
+    'toolContracts: [',
+    '  { toolId: "crawl4ai.render", version: "1.0.0", resultSchema: "crawl4ai-render/v1" },',
+    '  { toolId: "google_patents.search", version: "1.0.0", resultSchema: "google-patents-search/v1" },',
+    ']',
+  ].join('\n');
+  const resolved = resolvePlatformContractReferences([
+    'const render = platformExecutionToolContract("crawl4ai.render");',
+    'export const tool = { id: render.toolId, durableResultStrategy: { kind: "artifact_reference", schema: render.resultSchema } };',
+    "const projections = { 'google_patents.search': platformExecutionToolContract('google_patents.search').resultSchema };",
+    'const unknown = platformExecutionToolContract("not.declared");',
+    'export const other = { id: unknown.toolId, schema: unknown.resultSchema };',
+  ].join('\n'), contract);
+  assert.match(resolved, /id: "crawl4ai\.render"/);
+  assert.match(resolved, /schema: "crawl4ai-render\/v1"/);
+  assert.equal(declaresMapping(resolved, 'google_patents.search', 'google-patents-search/v1'), true);
+  assert.match(resolved, /schema: unknown\.resultSchema/);
+});
+
+test('a declared mapping is found in either quote style and only for the exact key and value', () => {
+  assert.equal(declaresMapping('"icp.design": "icp-design/v1",', 'icp.design', 'icp-design/v1'), true);
+  assert.equal(declaresMapping("'icp.design': 'icp-design/v1',", 'icp.design', 'icp-design/v1'), true);
+  assert.equal(declaresMapping('"icp.design": "icp-design/v2",', 'icp.design', 'icp-design/v1'), false);
+  assert.equal(declaresMapping('"icpXdesign": "icp-design/v1",', 'icp.design', 'icp-design/v1'), false);
+});
+
+test('getTask through a same-file string constant joins the Model task inventory', () => {
+  const { taskIds, unresolved } = modelTaskIdsInSource([
+    "export const TASK = 'discovery.classify_trade_role' as const;",
+    'getTask(TASK);',
+    "getTask('icp.design');",
+    'getTask(input.task);',
+    'getTask(taskId);',
+    'getTask(MISSING_TASK);',
+  ].join('\n'));
+  assert.deepEqual(taskIds, ['discovery.classify_trade_role', 'icp.design']);
+  assert.deepEqual(unresolved, ['MISSING_TASK']);
+});
+
+test('constants declared twice or bound by an import rename stay unresolved', () => {
+  const constants = sourceConstants([
+    "import { PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES as PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES } from './contract';",
+    'export const PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES = 30_000_000;',
+    'function inner() { const FIT_TASK = "discovery.secret_task"; return FIT_TASK; }',
+    'const FIT_TASK = "discovery.qualify_fit";',
+    'function other() { let LIMIT = compute(); return LIMIT; }',
+    'const LIMIT = 1;',
+    'const SHARED = 2;',
+    'const SHARED = 2;',
+  ].join('\n'));
+  assert.equal(constants.has('PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES'), false);
+  assert.equal(constants.has('FIT_TASK'), false);
+  assert.equal(constants.has('LIMIT'), false);
+  assert.equal(constants.get('SHARED'), 2);
+});
+
+test('only a plain, single platform contract binding resolves', () => {
+  const contract = '{ toolId: "crawl4ai.render", version: "1.0.0", resultSchema: "crawl4ai-render/v1" }';
+  const combined = resolvePlatformContractReferences([
+    'const render = platformExecutionToolContract("crawl4ai.render") && OTHER;',
+    'export const tool = { id: render.toolId };',
+  ].join('\n'), contract);
+  assert.match(combined, /id: render\.toolId/);
+  const shadowed = resolvePlatformContractReferences([
+    'const render = platformExecutionToolContract("crawl4ai.render");',
+    'function build() { const render = other(); return { id: render.toolId }; }',
+  ].join('\n'), contract);
+  assert.match(shadowed, /id: render\.toolId/);
+});
+
+test('every getTask call is classified: literal, same-file constant, generic lookup or unresolved', () => {
+  const { taskIds, unresolved, genericLookups, valueReferences } = modelTaskIdsInSource([
+    "import { getTask as lookupTask } from '../ai-tasks/task-registry';",
+    "const TASKS = { secret: 'discovery.secret' } as const;",
+    "const secretTask = 'discovery.secret';",
+    "lookupTask('discovery.aliased');",
+    "registry.getTask?.('discovery.optional');",
+    'getTask!(`discovery.template`);',
+    'getTask(TASKS.secret);',
+    'getTask(secretTask);',
+    'getTask(input.task as string);',
+    "getTask('a', 'b');",
+    "['discovery.mapped'].map(getTask);",
+    'type Contract = ReturnType<typeof getTask>;',
+    '// getTask(COMMENTED_OUT)',
+  ].join('\n'));
+  assert.deepEqual(taskIds, ['discovery.aliased', 'discovery.optional', 'discovery.template']);
+  assert.deepEqual(unresolved, ["'a', 'b'"]);
+  assert.deepEqual(genericLookups, ['TASKS.secret', 'secretTask', 'input.task as string']);
+  assert.deepEqual(valueReferences, ['getTask']);
+});
+
+test('a task constant shadowed by a parameter or destructuring, or a renamed re-export, is not trusted', () => {
+  const shadowed = modelTaskIdsInSource([
+    'const FIT_TASK = "discovery.qualify_fit";',
+    'function probe(FIT_TASK: string) { return getTask(FIT_TASK); }',
+    'const PLAN_TASK = "discovery.query_plan";',
+    'function other(o: { PLAN_TASK: string }) { const { PLAN_TASK } = o; return getTask(PLAN_TASK); }',
+    'let LET_TASK = "icp.design";',
+    'getTask(LET_TASK);',
+  ].join('\n'));
+  assert.deepEqual(shadowed.taskIds, []);
+  assert.deepEqual(shadowed.unresolved, ['FIT_TASK', 'PLAN_TASK', 'LET_TASK']);
+  const reexported = modelTaskIdsInSource("export { getTask as loadTask } from '../ai-tasks/task-registry';");
+  assert.deepEqual(reexported.valueReferences, ['export as loadTask']);
+  const constants = sourceConstants("import fallback, { OTHER as LIMIT } from './module';\nexport const LIMIT = 5;");
+  assert.equal(constants.has('LIMIT'), false);
+});
+
+test('the runtime Model task list is read only from a plain literal declaration', () => {
+  assert.deepEqual(
+    modelResultTaskIds('export const MODEL_RESULT_TASK_IDS = Object.freeze([\n  "icp.design",\n  "taxonomy.normalize",\n] as const);'),
+    ['icp.design', 'taxonomy.normalize'],
+  );
+  for (const source of [
+    'export const MODEL_RESULT_TASK_IDS = Object.freeze(["icp.design", ...MORE] as const);',
+    'export const MODEL_RESULT_TASK_IDS = Object.freeze([TASK] as const);',
+    'export const MODEL_RESULT_TASK_IDS = ["icp.design"];',
+    'export const OTHER = Object.freeze(["icp.design"]);',
+  ]) assert.equal(modelResultTaskIds(source), null, source);
+});
+
+test('artifact bounds are read only from the durableResultStrategy object and must be single tokens', () => {
+  const constants = 'export const LIMIT = 3_000_000;';
+  const strategy = (body) => `id: "x",\n  durableResultStrategy: {\n    kind: "artifact_reference",\n${body}\n  },\n  execute: async () => fetch({ maxBytes: LIMIT, ttlSeconds: 86_400 }),`;
+  const bounds = (max, media, ttl) =>
+    `    maxBytes: ${max},\n    mediaTypes: ${media},\n    privacyClass: "PUBLIC_SOURCE",\n    ttlSeconds: ${ttl},`;
+  assert.deepEqual(
+    { ...artifactSourceContract(strategy(bounds('LIMIT', '["text/html"]', '86_400')), constants) },
+    { maxBytes: 3_000_000, mediaTypes: ['text/html'], privacyClass: 'PUBLIC_SOURCE', ttlSeconds: 86_400 },
+  );
+  for (const block of [
+    strategy(bounds('LIMIT * 10', '["text/html"]', '86_400')),
+    strategy(bounds('LIMIT', '["text/html"].concat(EXTRA)', '86_400')),
+    strategy(bounds('LIMIT', '["text/html"]', '86_400 * 365')),
+    strategy(bounds('LIMIT', '[]', '86_400')),
+    `transportLimits: { maxBytes: LIMIT },\n  ${strategy(bounds('LIMIT * 4', '["text/html"]', '86_400'))}`,
+    `// durableResultStrategy: { maxBytes: LIMIT }\n  ${strategy(bounds('LIMIT * 4', '["text/html"]', '86_400'))}`,
+    strategy(`${bounds('LIMIT', '["text/html"]', '86_400')}\n    maxBytes: LIMIT,`),
+    'id: "x", execute: async () => ({ maxBytes: LIMIT, mediaTypes: ["text/html"], ttlSeconds: 86_400 }),',
+  ]) assert.equal(artifactSourceContract(block, constants), null, block);
+  const commented = artifactSourceContract(
+    `// maxBytes: 999,\n  ${strategy(`    // maxBytes: 999,\n${bounds('LIMIT', '["text/html"]', '86_400')}`)}`,
+    constants,
+  );
+  assert.equal(commented.maxBytes, 3_000_000);
+  const privacy = artifactSourceContract(
+    strategy('    maxBytes: LIMIT,\n    mediaTypes: ["text/html"],\n    privacyClass: "PUBLIC_SOURCE" + SUFFIX,\n    ttlSeconds: 86_400,'),
+    constants,
+  );
+  assert.equal(privacy.privacyClass, undefined);
 });
 
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {

@@ -24,6 +24,7 @@ import "./temporal-platform-infrastructure-contract.spec.mjs";
 import "./temporal-native-publication.spec.mjs";
 import "./platform-egress-fence-migration.spec.mjs";
 import "./verify-platform-authority-policy-import.spec.mjs";
+import "./execution-authority-policy.spec.mjs";
 
 import {
   renderProviderRegistry,
