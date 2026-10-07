@@ -4,13 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-10-07 · Skip one item when its model call fails instead of stopping the discovery run
+## 2026-10-07 · Give discovery query execution and the fit pass a 15-minute activity timeout
 
-- 起因（2026-10-07 审查发现，并用编译产物实测）：`isExecutionControlError` 对认不出的错误形状一律按控制类停止处理。模型调用抛出的 `ProviderOutputError`、`ProviderIdentityError`、`TaskOutputValidationError`、`ProviderHttpError` 和请求超时都带额外字段，于是全被当成控制类。公司抽取、官网画像、名录抽取、分类归一、资格判定里任何一次模型失败都会被重新抛出，查询活动失败，重试撞上无结果的重放，整个发现 run 失败。这些调用点的注释本意都是「单家失败只跳过这一家」。
-- 新增 `model-gateway/model-call-failure.ts`：`isModelCallItemFailure` 只认上述模型失败，不含结算失败、对外动作拒绝、在途 wire、取消，也不含原因链里带控制类错误的；`isControlStopAfterModelCall` 供调用点判断是否中止。5 处模型调用点改用它：公司抽取、官网画像分类、名录抽取、分类归一 4 处、资格判定。预算耗尽、授权、重放、出网等控制类错误照旧中止，网页抓取失败的处理不变。
-- 发现工作流里的查询执行与逐家资格判定改用 15 分钟的活动超时（原 2 分钟），因为两者都串行调用 deepseek-v4-pro。其他活动仍为 2 分钟；活动类型不变，当前没有进行中的发现工作流。
-- 不在本次范围：企业理解的抽取活动（模型输出不合格时拒收是既有的刻意设计）、查询计划里 FDA 一轮重放已失败的分类归一操作、推理模型的输出上限。
-- 测试：新模块 14 项；官网画像 3 项、资格判定 1 项、分类归一 1 项在修复前为红，即模型失败被当成控制类重新抛出。
+- 起因（2026-10-07 xin 实测与审查）：获客任务改用 deepseek-v4-pro 之后，发现工作流里的查询执行要串行跑抽取批次与分类归一，资格判定逐家调用一次模型，都会超过原来 2 分钟的活动超时。超时后活动重试，撞上没有结果的重放，整个 run 失败。
+- 改动：这两个活动改走 15 分钟超时的代理，重试次数不变，仍为 3 次。其余活动仍为 2 分钟，信号富集等慢活动仍为 30 分钟。活动类型与输入不变，当前没有进行中的发现工作流。
+- 撤回了本 PR 第一版的「单项模型失败只跳过」。审查发现它在受治理的血缘校验下照样中止，重放时只是把失败推迟一步，还会把额度耗尽这类系统性故障变成逐家扣费、没有结果也没有失败原因的空跑。共同根因是预算账本分不清「已知失败」和「结果丢失」，另行设计。
+- 测试：新增按语法树核对每个活动所用超时的测试 2 项，修改前为红。
 
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 

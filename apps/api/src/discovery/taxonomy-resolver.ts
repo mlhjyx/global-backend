@@ -11,8 +11,8 @@ import {
 } from '../execution-budget/execution-budget-binding';
 import {
   ExecutionControlError,
+  isExecutionControlError,
 } from '../execution-budget/execution-control-error';
-import { isControlStopAfterModelCall } from '../model-gateway/model-call-failure';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -179,7 +179,7 @@ export class TaxonomyResolver {
       );
       return node;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isControlStopAfterModelCall(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -256,7 +256,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isControlStopAfterModelCall(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -333,7 +333,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isControlStopAfterModelCall(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -416,7 +416,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isControlStopAfterModelCall(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }

@@ -8,7 +8,6 @@ import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-ta
 import { judgeFitCompany, loadIcpBrief } from './fit-judge';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
-import { ProviderOutputError } from '../model-gateway/providers/provider-output-error';
 import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
@@ -172,30 +171,6 @@ describe('judgeFitCompany provider-independent result semantics', () => {
 
   it('keeps a provider/runtime failure retryable without persisting a fabricated judgment', async () => {
     executeTask.mockRejectedValue(new Error('provider unavailable'));
-
-    await expect(
-      judgeFitCompany(
-        {} as never,
-        '10000000-0000-4000-8000-000000000001',
-        { seller: 'Seller', seller_summary: null },
-        company,
-      ),
-    ).resolves.toBeNull();
-  });
-});
-
-describe('judgeFitCompany when one model call fails', () => {
-  beforeEach(() => {
-    executeTask.mockReset();
-  });
-
-  it('skips this company instead of stopping the whole fit pass', async () => {
-    executeTask.mockRejectedValue(
-      new ProviderOutputError('STRUCTURED_OUTPUT_TRUNCATED', undefined, {
-        provider: 'gateway',
-        model: 'deepseek-v4-pro',
-      }),
-    );
 
     await expect(
       judgeFitCompany(

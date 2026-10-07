@@ -4,7 +4,7 @@ import { getTask } from '../ai-tasks/task-registry';
 import { BudgetExceededError, BudgetOperationReplayError } from '../tools/budget-store';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
-import { isControlStopAfterModelCall } from '../model-gateway/model-call-failure';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { icpTradeRole } from './icp-trade-role';
@@ -187,7 +187,7 @@ export async function judgeFitCompany(
     if (
       err instanceof BudgetExceededError ||
       err instanceof BudgetOperationReplayError ||
-      isControlStopAfterModelCall(err)
+      isExecutionControlError(err)
     ) throw err;
     return null;
   }

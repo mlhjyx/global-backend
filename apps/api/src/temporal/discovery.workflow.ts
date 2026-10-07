@@ -30,8 +30,6 @@ const acts = proxyActivities<DiscoveryActivities>({
   retry: { maximumAttempts: 3 },
 });
 
-// 信号富集是**慢活动**（抓官网/sitemap，逐家数十秒）：单独长超时代理，绝不用上面的 2 分钟超时
-// （否则会超时重试整段富集）。工作量有界（SIGNAL_ENRICH_LIMIT 家 × 逐家有 AbortSignal 超时），30 分钟足够。
 // Query execution and the per-company fit pass make deepseek-v4-pro calls one
 // after another (extraction batches, taxonomy terms, one fit call per company),
 // which outruns the 2-minute default and turns into replay failures on retry.
@@ -39,6 +37,9 @@ const modelActs = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '15 minutes',
   retry: { maximumAttempts: 3 },
 });
+
+// 信号富集是**慢活动**（抓官网/sitemap，逐家数十秒）：单独长超时代理，绝不用上面的 2 分钟超时
+// （否则会超时重试整段富集）。工作量有界（SIGNAL_ENRICH_LIMIT 家 × 逐家有 AbortSignal 超时），30 分钟足够。
 const signalActs = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '30 minutes',
   retry: { maximumAttempts: 2 },

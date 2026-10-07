@@ -2,7 +2,6 @@ import { getTask } from '../../ai-tasks/task-registry';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
-import { isControlStopAfterModelCall } from '../../model-gateway/model-call-failure';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
@@ -174,7 +173,7 @@ export class WebsiteProfileProvider {
       );
       return result.data ?? null;
     } catch (error) {
-      if (isControlStopAfterModelCall(error)) throw error;
+      if (isExecutionControlError(error)) throw error;
       return null; // model unavailable/invalid output: keep the deterministic facts
     }
   }
