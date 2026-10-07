@@ -8,6 +8,10 @@ vi.mock('../../model-runtime/structured-task-runtime-bridge', () => ({
 
 import { WebsiteProfileProvider } from './website-profile.provider';
 import { ToolPolicyDenied } from '../../tools/tool-broker';
+import {
+  ProviderHttpError,
+  ProviderIdentityError,
+} from '../../model-gateway/providers/provider-output-error';
 
 const COMPANY = '00000000-0000-4000-8000-0000000000c3';
 const CTX = {
@@ -112,6 +116,19 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
 
   it('falls back to deterministic facts when the model fails with an ordinary error', async () => {
     mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(new Error('gateway 502'));
+    const profile = await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
+    }).profile(INPUT, CTX);
+    expect(profile).toMatchObject({ tradeRole: null, tradeRoleSource: null, register: { number: '98765' } });
+  });
+
+  it.each([
+    ['an untrusted model identity', () => new ProviderIdentityError('MODEL_IDENTITY_MISMATCH', undefined, { provider: 'gateway', model: 'deepseek-v4-pro' })],
+    ['a gateway HTTP error', () => new ProviderHttpError({ status: 429, provider: 'gateway', model: 'deepseek-v4-pro' })],
+    ['a request timeout', () => new DOMException('The operation was aborted due to timeout', 'TimeoutError')],
+  ])('falls back to deterministic facts when the model call fails with %s', async (_case, makeError) => {
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(makeError());
     const profile = await new WebsiteProfileProvider({
       gateway: {} as never,
       broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),

@@ -4,6 +4,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-07 · Skip one item when its model call fails instead of stopping the discovery run
+
+- 起因（2026-10-07 审查发现，并用编译产物实测）：`isExecutionControlError` 对认不出的错误形状一律按控制类停止处理。模型调用抛出的 `ProviderOutputError`、`ProviderIdentityError`、`TaskOutputValidationError`、`ProviderHttpError` 和请求超时都带额外字段，于是全被当成控制类。公司抽取、官网画像、名录抽取、分类归一、资格判定里任何一次模型失败都会被重新抛出，查询活动失败，重试撞上无结果的重放，整个发现 run 失败。这些调用点的注释本意都是「单家失败只跳过这一家」。
+- 新增 `model-gateway/model-call-failure.ts`：`isModelCallItemFailure` 只认上述模型失败，不含结算失败、对外动作拒绝、在途 wire、取消，也不含原因链里带控制类错误的；`isControlStopAfterModelCall` 供调用点判断是否中止。5 处模型调用点改用它：公司抽取、官网画像分类、名录抽取、分类归一 4 处、资格判定。预算耗尽、授权、重放、出网等控制类错误照旧中止，网页抓取失败的处理不变。
+- 发现工作流里的查询执行与逐家资格判定改用 15 分钟的活动超时（原 2 分钟），因为两者都串行调用 deepseek-v4-pro。其他活动仍为 2 分钟；活动类型不变，当前没有进行中的发现工作流。
+- 不在本次范围：企业理解的抽取活动（模型输出不合格时拒收是既有的刻意设计）、查询计划里 FDA 一轮重放已失败的分类归一操作、推理模型的输出上限。
+- 测试：新模块 14 项；官网画像 3 项、资格判定 1 项、分类归一 1 项在修复前为红，即模型失败被当成控制类重新抛出。
+
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 
 - 10-01 重绑之后，官方 npm 审计库新收录 2 条生产 advisory，都只在 site-renderer 的 astro 链上：GHSA-ch52-4w7c-c8xp（高危，`http-cache-semantics <=4.2.0`，未列修复版本：max-stale 处理可能把一个用户的缓存响应发给另一个用户），main 的定时 freshness canary 自 10-03（ac024fd5）起报 `BASELINE_STALE`；GHSA-r4xh-jqrq-34v2（中危，`smol-toml <=1.8.0`，1.9.0 修复：构造的 TOML 让 `parse()` 退化为二次方时间），10-05 23:41Z 才发布。

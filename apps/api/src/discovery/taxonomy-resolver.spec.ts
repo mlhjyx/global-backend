@@ -1,6 +1,7 @@
 import Ajv from 'ajv';
 import { describe, expect, it, vi } from 'vitest';
 import { BudgetOperationReplayError } from '../tools/budget-store';
+import { ProviderHttpError } from '../model-gateway/providers/provider-output-error';
 import { TaxonomyResolver } from './taxonomy-resolver';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -325,4 +326,35 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       expect(aliasUpsert).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('TaxonomyResolver when one model call fails', () => {
+  it('records a taxonomy miss instead of stopping the plan or run', async () => {
+    const generateStructured = vi.fn(async () => {
+      throw new ProviderHttpError({ status: 429, provider: 'gateway', model: 'deepseek-v4-pro' });
+    });
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, callback) =>
+        callback({ termAlias: { upsert: vi.fn() } })),
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: {
+        findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'industry-1', labels: {} }]),
+        findUnique: vi.fn(async () => null),
+      },
+    };
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured } as never,
+      undefined,
+      { open: vi.fn(), close: vi.fn(), attestAuthorized: vi.fn() } as never,
+    );
+    const opts = {
+      workspaceId: TEST_BINDING.scopeKey,
+      runId: TEST_BINDING.accountKey,
+      executionBudget: TEST_BINDING,
+    };
+
+    await expect(resolver.resolve('industry', 'pumps', opts)).resolves.toBeNull();
+    expect(generateStructured).toHaveBeenCalledTimes(1);
+  });
 });

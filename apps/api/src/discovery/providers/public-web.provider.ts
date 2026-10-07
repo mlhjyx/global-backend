@@ -44,6 +44,7 @@ import {
 } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { isControlStopAfterModelCall } from '../../model-gateway/model-call-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -273,7 +274,7 @@ export class PublicWebDiscoveryProvider
     } catch (error) {
       if (
         collector.isForwardingFailure(error) ||
-        isExecutionControlError(error) ||
+        isControlStopAfterModelCall(error) ||
         isDiscoveryCompanyLineageInvalid(error)
       ) {
         throw error;
