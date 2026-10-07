@@ -49,6 +49,36 @@
 - 现在首次结算返回 `REPLAY` 即冻结（`SETTLEMENT_REPLAY`，停用该 BuildRun 的付费调用）；失败与零调用释放路径也一样，与 `STALE_FENCE` 的处理一致。唯一一次 ACK 重试返回的 `REPLAY`，要经新增的只读方法 `SiteBuildCostLedger.confirmSettlementReplay` 回读该行，确认 status、fence、计费依据、调用次数、结果、meta 与错误码都正是本次写入的内容，才接受；否则冻结（`SETTLEMENT_REPLAY_UNCONFIRMED`）。只比较 fence 与调用次数不够：恢复任务以该行自身的 fence 结算，调用次数又由触发器固定，所以 meta 与错误码也要比较。超出预留时记录的 `CAP_VARIANCE` 也计入比较。不需要迁移。
 - `router-model-gateway.ts` 是受保护文件。复核记录追加在[围栏复核](../evidence/execution-authority-fence-review-20261001.md)文末（独立复审：无 CRITICAL/HIGH；MEDIUM 一项已修复；LOW 一项按设计保留），指纹 `446e5771…` → `0ad768f0…`。新增 Router 用例 6 个、账本用例 13 个（先确认为红；去掉 meta 与错误码比较后，区分恢复任务的 4 个用例会失败）。`paid-execution-gates` 中 ACK 丢失后重放的用例改为要求回读确认。没有用真实 PostgreSQL 做往返：现有 live spec 会在共用的 `global_dev` 留下夹具，所以没有跑。
 
+## 2026-10-06 · Platform wire dispatch fence
+
+- 平台出网自 7c87ea80 起按每次物理调用授权，前提是工具把 `sourcePhysicalWire(ctx, "<wire>")` 交给适配器，适配器也只经这个调度器发请求。四个适配器（`requestPublicHttp`、`crawlUrl`/`crawlHtml`、`queryAlgoliaExhibitors`，以及转交调度器的 `isAllowedByRobots`）在没拿到调度器时会直接发请求，这是客户侧路径的正常行为。因此只要平台工具或适配器丢了调度器，请求就会绕过平台出网授权，ToolBroker 也照样接受结果。这几处都不在 Router/ToolBroker 指纹围栏里（#592 围栏复审后续事项 2）。
+- 用户选定静态接线检查，不把这些文件整份钉住（`source-tools.ts` 自 8-01 起改过 16 次）。新增 `scripts/execution-authority-wire-dispatch.mjs`，作为 `execution-authority-policy` 的一部分在 required 门里运行：
+  - 接受调度器的导出适配器函数构成封闭清单，共 5 个；
+  - 终端适配器的每个发送调用（`fetch` / `execute`）都必须位于唯一的 `executePhysicalWire` 闭包内，闭包只能经 `dispatchPhysicalWire ? await dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire()` 执行；
+  - 转交型适配器所在文件里，所有 `requestPublicHttp` 调用都必须在它内部，并把收到的调度器原样转交；
+  - 活跃平台工具（从平台合同推导，跳过 `disabled_no_egress`）的 `execute`，及其调用到的同文件辅助函数里，每个适配器调用都必须带一个 `sourcePhysicalWire(ctx, "<wire>")`，而且 wire 必须是调度器按合同会接受的那一个；合同声明的每个 wire 都必须用到；不得直接调用 `fetch`、Node 网络模块，或未登记的适配器函数；
+  - `sourcePhysicalWire` 的故障即拒绝函数体按文本钉住。
+- 合并前的独立复审在不改变「静态检查」选型的前提下找到若干绕过写法，均已改为按失败处理：
+  - 平台工具能触达的导入改为白名单。只允许已登记的 wire 适配器，以及 `EXPECTED_PLATFORM_TOOL_IMPORTS` 中的平台合同、`ExecutionControlError`、`assertToolExternalActionAuthorized`、`decodeJsonBytes`、`EgressBlockedError` 与 `createHash`。从其他模块导入、动态 `import()`、`globalThis` / `fetch` 作为值使用、axios / child_process 等网络模块都报错。
+  - 工具会顺着它引用的所有同文件声明继续检查，包括回调、别名和方法对象。这样也覆盖了经 robots 的 `request` 钩子注入未经调度的请求。wire 适配器只能被直接调用，不能当作值传递。
+  - 终端适配器：同文件中任何能发请求的声明，都不得在闭包外被引用（传递求出，例如 `executePinnedHttp` 与 `crawlUrl`）；闭包内只能发一次、不在循环里；调度条件必须读取函数自身的调度器参数，且该参数不得被重新赋值、删除或遮蔽。
+  - 转交型适配器：`requestPublicHttp` 只能作为带调度器调用的被调函数出现，包装器只能经收到的调度器执行。
+  - 合同行不得含 spread，且只认 `deepFreeze` 与 `technicalRow` 两个构造器；文件里只能有一个名为 `sourcePhysicalWire` 的绑定；兼容 `.js` 后缀导入与 const 箭头函数形式的适配器。
+- 第二轮独立复审又找到一批绕过写法，同样改为按失败处理：
+  - 适配器文件的导入改为白名单：只允许网络模块与 `EXPECTED_WIRE_ADAPTER_IMPORTS`（`bounded-fetch-response`、`guarded-http`、`url-guard`、平台合同），其他导入报 `WIRE_ADAPTER_IMPORT_UNREGISTERED`；`process.getBuiltinModule` / `process.binding` / `module.require` / `eval` / `Function` 这类运行时加载器在适配器文件与平台工具里都报错。
+  - robots 文件只能经 `requestPublicHttp` 发请求：文件里出现网络模块、网络全局或其他 wire 适配器即报 `WIRE_ADAPTER_FORWARD_MISSING`。
+  - 终端适配器的 send 别名（`dependencies.executePinned ?? executePinnedHttp`）里不得有调用或新建函数，防止提前发送或包进重试。
+  - 调度器参数只读：`dispatchPhysicalWire` 只能出现在调度条件里；options 参数只能以 `<param>.<property>` 读取，不得整体传出、别名、经成员改写（含 `Object.assign`）、删除或遮蔽。
+  - `executePhysicalWire` 闭包内的那一次发送必须直接位于闭包，不能藏在嵌套函数（如 `Promise.all([..].map(...))`）里。
+  - 平台工具对象不得被展开、重新赋值或经 `Object.assign` / `defineProperty` 改写（`PLATFORM_TOOL_REDEFINED`），保证被检查的 `execute` 就是注册运行的那个。
+- 当前代码零问题。在仓库副本上做了 29 项变异，全部被拦下：
+  - 先前 15 项：工具丢了调度器、传 `undefined`、使用未声明的 wire、直接 `fetch`、调用未登记的适配器、经本地辅助函数绕过、`sourcePhysicalWire` 去掉平台拒绝、三个终端适配器绕过闭包或调度、robots 的三种转交缺陷、新增接受调度器的适配器、合同新增却从未用到的 wire；
+  - 第一轮复审补充 7 项：robots 的 `request` 钩子、`globalThis.fetch`、从非适配器模块导入、`executePinnedHttp` 预检、`crawlHtml` 未经调度调用 `crawlUrl`、调度器参数被置空、把 `requestPublicHttp` 当作值传给 `loadRobots`；
+  - 第二轮复审补充 7 项：适配器文件导入白名单外模块、robots 文件裸 `fetch`、send 别名包进调用、`Object.assign` 改写调度器参数、闭包内经嵌套函数发送、工具里 `process.getBuiltinModule("node:https")`、注册时展开工具对象替换 `execute`。
+
+  spec 共 17 项，其中第一轮 8 项、第二轮 4 项在各自加固前的检查上失败。
+- 定位：这是防回归的检测器，不是出网边界。白名单模块内部（例如平台合同模块）若藏有发送，本检查看不到。复审建议在 ToolBroker 加运行时兜底（平台调用必须至少经过一次调度），用户 2026-10-07 决定不加：它只多抓「完全没经过调度」这一种情况，而这种情况静态检查已经覆盖；它会误杀 robots 缓存命中且被禁抓时的零请求结果；4 个平台 schedule 仍处于暂停状态。真正的边界应在网络层做：platform worker 只能经过一个校验授权的代理出网。恢复平台 schedule 或上 pilot 前再评估。
+
 ## 2026-10-01 · @grpc/grpc-js security floor
 
 - 9-30（UTC）官方 advisory 库新收录 2 条 `@grpc/grpc-js` 生产 advisory：GHSA-m9gg-hp2v-232j（高危，特定配置下 `getAuthContext` 可能把未经授权的证书当作已授权返回）与 GHSA-f596-whhp-79r4（低危，服务端把方法处理器抛出的部分错误信息放进状态消息发给客户端），受影响 `>=1.14.0 <1.14.5`。main 锁文件里是 1.14.4（经 `@temporalio/*` 1.23.0 与 OpenTelemetry 的 OTLP gRPC exporter 引入）。这两条在 GitHub 上 9-30 15:35Z 发布，但 #576 在 16:13Z 的官方审计仍为 0（npm 审计库收录滞后），所以 #576 合入后（22b1ca31，19:45Z）main 的 `production advisory baseline freshness · canary` 立即报 `BASELINE_STALE`，`current_advisories` 正是这 2 条，直到 e7ee633d 都没变。

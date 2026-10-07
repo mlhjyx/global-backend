@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+import { inspectPlatformWireDispatch, PLATFORM_CONTRACT_PATH } from './execution-authority-wire-dispatch.mjs';
+
 const SCRIPT_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const DEFAULT_REPO_ROOT = resolve(SCRIPT_DIR, '..');
 const DEFAULT_MANIFEST_PATH = 'docs/governance/durable-result-strategies.json';
@@ -13,7 +15,6 @@ const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/source-tools.ts',
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
-const PLATFORM_CONTRACT_PATH = 'apps/api/src/platform-authority/platform-execution-contract.ts';
 const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
@@ -1090,6 +1091,11 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   validateManagedAdapters(manifest, manifestPath, issues);
   await validateProtectedFiles(repoRoot, manifest, manifestPath, issues);
   const callsites = await scanCurrentSources(repoRoot, manifest, issues);
+  issues.push(...await inspectPlatformWireDispatch({
+    readText: (path) => readText(repoRoot, path),
+    listFiles: (relative) => listFiles(repoRoot, relative),
+    toolSourcePaths: TOOL_SOURCE_PATHS,
+  }));
   return Object.freeze({
     ok: issues.length === 0,
     issues: Object.freeze(issues),
