@@ -24,23 +24,17 @@ const WORKSPACE_PURPOSES = new Set<ExecutionBudgetPurpose>([
 
 /**
  * Purposes whose successful model operation always leaves a durable result.
- * Only these may move a proven-failed request onto a fresh retry account; see
- * resolveRetryableWorkspaceAccountKey in the authority repository.
+ * Only these may move a request that never reached a provider onto a fresh
+ * retry account; see execution-budget-retry-account.ts.
  */
 export const RETRYABLE_WORKSPACE_PURPOSES: ReadonlySet<ExecutionBudgetPurpose> =
   new Set<ExecutionBudgetPurpose>(['icp.design', 'icp.query_plan']);
-
-const RETRY_ACCOUNT_INFIX = ':retry:';
-
-export function retryWorkspaceAccountKeyPrefix(primaryAccountKey: string): string {
-  return `${primaryAccountKey}${RETRY_ACCOUNT_INFIX}`;
-}
 
 export function retryWorkspaceAccountKey(
   primaryAccountKey: string,
   authorityId: string,
 ): string {
-  return `${retryWorkspaceAccountKeyPrefix(primaryAccountKey)}${authorityId}`;
+  return `${primaryAccountKey}:retry:${authorityId}`;
 }
 
 /**

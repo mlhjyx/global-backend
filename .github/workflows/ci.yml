@@ -246,6 +246,9 @@ jobs:
             src/site-builder/site-build-provider-wire.database.spec.ts \
             src/durable-results/model-result-projection-bounds.spec.ts \
             src/model-gateway/router-model-gateway.postgres.spec.ts
+          EXECUTION_BUDGET_RETRY_ACCOUNT_DATABASE_TEST=1 \
+            pnpm --filter @global/api exec vitest run \
+              src/execution-budget/execution-budget-retry-account.postgres.spec.ts
           export EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL="${DATABASE_URL}"
           export EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN=ci_execution_budget_platform_writer
           export EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD="$(openssl rand -hex 24)"

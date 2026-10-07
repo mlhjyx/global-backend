@@ -7,6 +7,14 @@ import {
 } from './execution-budget-authority.types';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 
+const retryAccount = vi.hoisted(() => ({
+  resolveRetryableWorkspaceAccountKey: vi.fn(
+    async (_tx: unknown, input: { primaryAccountKey: string }) =>
+      input.primaryAccountKey,
+  ),
+}));
+vi.mock('./execution-budget-retry-account', () => retryAccount);
+
 const WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
 const ACCOUNT_ID = '8cf66f2a-1780-453e-8d7d-f70e36cb22a6';
@@ -105,29 +113,6 @@ function fakeWorkspacePrisma(
   } as unknown as PrismaService;
 }
 
-/** Answers the consume, retry lock, retry lookup and open statements by SQL text. */
-function workspaceOpenResponse(
-  query: { strings?: readonly string[] },
-  retryCandidates: readonly unknown[],
-): unknown {
-  const sql = query.strings?.join('') ?? '';
-  if (sql.includes('consume_workspace_execution_authority')) {
-    return [{ authority_id: AUTHORITY_ID, replay: false }];
-  }
-  if (sql.includes('pg_advisory_xact_lock')) return [{ locked: 1 }];
-  if (sql.includes('open_tool_budget')) {
-    return [
-      {
-        account_id: ACCOUNT_ID,
-        generation: 1,
-        authority_id: AUTHORITY_ID,
-        authorized_cap_microusd: 2_000_000n,
-      },
-    ];
-  }
-  if (sql.includes('"tool_budget_account"')) return retryCandidates;
-  throw new Error(`unexpected SQL: ${sql.slice(0, 80)}`);
-}
 function fakePlatformWriter(
   handler: (query: {
     strings?: readonly string[];
@@ -194,7 +179,16 @@ describe('ExecutionBudgetAuthorityRepository', () => {
         query: { strings?: readonly string[]; values?: readonly unknown[] },
       ) {
         queries.push({ receiver: this, query });
-        return workspaceOpenResponse(query, []);
+        return queries.length === 1
+          ? [{ authority_id: AUTHORITY_ID, replay: false }]
+          : [
+              {
+                account_id: ACCOUNT_ID,
+                generation: 1,
+                authority_id: AUTHORITY_ID,
+                authorized_cap_microusd: 2_000_000n,
+              },
+            ];
       }),
     };
     const prisma = {
@@ -221,15 +215,13 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       WORKSPACE_ID,
       expect.any(Function),
     );
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
-    expect(queries.map(({ receiver }) => receiver)).toEqual([tx, tx, tx, tx]);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(queries.map(({ receiver }) => receiver)).toEqual([tx, tx]);
     expect(queries[0]?.query.strings?.join('')).toContain(
       'consume_workspace_execution_authority',
     );
-    expect(queries[1]?.query.strings?.join('')).toContain('pg_advisory_xact_lock');
-    expect(queries[2]?.query.strings?.join('')).toContain('"tool_budget_account"');
-    expect(queries[3]?.query.strings?.join('')).toContain('open_tool_budget');
-    expect(queries[3]?.query.values).toEqual([
+    expect(queries[1]?.query.strings?.join('')).toContain('open_tool_budget');
+    expect(queries[1]?.query.values).toEqual([
       WORKSPACE_ID,
       AUTHORITY_ID,
       ACCOUNT_KEY,
@@ -238,6 +230,44 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(
       COMPACT_JWS,
     );
+  });
+
+  it('opens the account the retry policy selects and reports it', async () => {
+    const retryKey = `${ACCOUNT_KEY}:retry:${AUTHORITY_ID}`;
+    retryAccount.resolveRetryableWorkspaceAccountKey.mockResolvedValueOnce(retryKey);
+    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
+    const prisma = fakeWorkspacePrisma(async (query) => {
+      queries.push(query);
+      return queries.length === 1
+        ? [{ authority_id: AUTHORITY_ID, replay: false }]
+        : [
+            {
+              account_id: ACCOUNT_ID,
+              generation: 1,
+              authority_id: AUTHORITY_ID,
+              authorized_cap_microusd: 2_000_000n,
+            },
+          ];
+    });
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(
+      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
+    ).resolves.toMatchObject({ accountKey: retryKey, accountId: ACCOUNT_ID });
+
+    expect(retryAccount.resolveRetryableWorkspaceAccountKey).toHaveBeenLastCalledWith(
+      expect.anything(),
+      {
+        scopeKey: WORKSPACE_ID,
+        authorityId: AUTHORITY_ID,
+        purpose: 'icp.design',
+        subjectType: 'company',
+        subjectId: 'f5ba98f2-a0e2-4e85-b799-e85568877702',
+        requestSha256: 'a'.repeat(64),
+        primaryAccountKey: ACCOUNT_KEY,
+      },
+    );
+    expect(queries[1]?.values).toEqual([WORKSPACE_ID, AUTHORITY_ID, retryKey, true]);
   });
 
   it('returns replay from the consumption transaction without opening or incrementing the account', async () => {
@@ -281,9 +311,6 @@ describe('ExecutionBudgetAuthorityRepository', () => {
               staged.push('authority');
               return [{ authority_id: AUTHORITY_ID, replay: false }];
             }
-            if (!sql.includes('open_tool_budget')) {
-              return workspaceOpenResponse(query, []);
-            }
             throw rawQueryMarkerError('EXECUTION_BUDGET_AUTHORITY_REVOKED');
           }),
         };
@@ -301,7 +328,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     );
 
     expect(prisma.withWorkspace).toHaveBeenCalledTimes(1);
-    expect(observedQueries).toHaveLength(4);
+    expect(observedQueries).toHaveLength(2);
     expect(committed).toEqual([]);
   });
 
@@ -1153,115 +1180,4 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       expect(JSON.stringify(result)).not.toContain('global_platform_writer');
     },
   );
-});
-
-describe('ExecutionBudgetAuthorityRepository workspace retry accounts', () => {
-  const PREVIOUS_AUTHORITY_ID = '9a0d4c55-3a31-4b8e-9d55-6f1d2c3b4a59';
-  const RETRY_ACCOUNT_KEY = `${ACCOUNT_KEY}:retry:${AUTHORITY_ID}`;
-  const failedEarlierAccount = Object.freeze({
-    account_key: ACCOUNT_KEY,
-    authority_id: PREVIOUS_AUTHORITY_ID,
-    authority_expired: true,
-    unresolved: false,
-    has_result: false,
-  });
-  type Query = { strings?: readonly string[]; values?: readonly unknown[] };
-  const sqlOf = (query: Query | undefined): string => query?.strings?.join('') ?? '';
-
-  function harness(retryCandidates: readonly unknown[]) {
-    const queries: Query[] = [];
-    const prisma = fakeWorkspacePrisma(async (query) => {
-      queries.push(query);
-      return workspaceOpenResponse(query, retryCandidates);
-    });
-    return { repository: new ExecutionBudgetAuthorityRepository(prisma), queries };
-  }
-  const openQuery = (queries: readonly Query[]) =>
-    queries.find((query) => sqlOf(query).includes('open_tool_budget'));
-
-  it('opens a fresh retry account once the earlier attempt is proven failed and its grant expired', async () => {
-    const { repository, queries } = harness([failedEarlierAccount]);
-
-    await expect(
-      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
-    ).resolves.toMatchObject({
-      authorityId: AUTHORITY_ID,
-      replay: false,
-      accountKey: RETRY_ACCOUNT_KEY,
-    });
-
-    expect(
-      queries.find((query) => sqlOf(query).includes('pg_advisory_xact_lock'))?.values,
-    ).toEqual([`workspace-account-retry:${WORKSPACE_ID}:${ACCOUNT_KEY}`]);
-    expect(
-      queries.find((query) => sqlOf(query).includes('"tool_budget_account"'))?.values,
-    ).toEqual([WORKSPACE_ID, ACCOUNT_KEY, `${ACCOUNT_KEY}:retry:`, `${ACCOUNT_KEY}:retry:`]);
-    expect(openQuery(queries)?.values).toEqual([
-      WORKSPACE_ID,
-      AUTHORITY_ID,
-      RETRY_ACCOUNT_KEY,
-      true,
-    ]);
-  });
-
-  it.each([
-    ['an operation is still reserved or its result unknown', { unresolved: true }],
-    ['the earlier attempt left a durable result', { has_result: true }],
-    ['the earlier grant has not expired yet', { authority_expired: false }],
-  ])('keeps the original account when %s', async (_case, override) => {
-    const { repository, queries } = harness([{ ...failedEarlierAccount, ...override }]);
-
-    await expect(
-      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
-    ).resolves.toMatchObject({ accountKey: ACCOUNT_KEY });
-    expect(openQuery(queries)?.values?.[2]).toBe(ACCOUNT_KEY);
-  });
-
-  it('keeps the original account while an earlier retry is still live', async () => {
-    const { repository, queries } = harness([
-      failedEarlierAccount,
-      {
-        ...failedEarlierAccount,
-        account_key: `${ACCOUNT_KEY}:retry:${PREVIOUS_AUTHORITY_ID}`,
-        authority_expired: false,
-      },
-    ]);
-
-    await expect(
-      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
-    ).resolves.toMatchObject({ accountKey: ACCOUNT_KEY });
-    expect(openQuery(queries)?.values?.[2]).toBe(ACCOUNT_KEY);
-  });
-
-  it('never looks for retry accounts for a purpose that is not retryable', async () => {
-    const requestSha256 = 'a'.repeat(64);
-    const authority = {
-      ...workspaceAuthority(),
-      purpose: 'understanding.run' as const,
-      subjectId: `request:${requestSha256}`,
-    };
-    const accountKey = `understanding.run:company:request:${requestSha256}:${requestSha256}`;
-    const { repository, queries } = harness([failedEarlierAccount]);
-
-    await expect(
-      repository.consumeWorkspaceAndOpen(authority, accountKey),
-    ).resolves.toMatchObject({ accountKey });
-    expect(queries).toHaveLength(2);
-    expect(
-      queries.some(
-        (query) =>
-          sqlOf(query).includes('pg_advisory_xact_lock') ||
-          sqlOf(query).includes('"tool_budget_account"'),
-      ),
-    ).toBe(false);
-  });
-
-  it('fails closed on a malformed retry candidate row', async () => {
-    const { repository, queries } = harness([{ account_key: ACCOUNT_KEY }]);
-
-    await expect(
-      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
-    ).rejects.toBeInstanceOf(ExecutionBudgetGrantError);
-    expect(openQuery(queries)).toBeUndefined();
-  });
 });
