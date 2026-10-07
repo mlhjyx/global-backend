@@ -4,6 +4,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-07 · Production advisory remediation (sharp)
+
+- GHSA-wq5f-xc86-pv6w（高危，`sharp <0.35.5`，10-06 13:43Z 发布）：sharp 预编译 libvips 自带的 librsvg 有释放后重用，解码 SVG 时在 glibc Linux 上可能导致远程代码执行。main 自 10-06 17:16Z（`49dfd9f1`）起每次 push 的 `production advisory baseline freshness · canary` 都报 `BASELINE_STALE`，到 `c248c59b` 共 5 次。
+- `apps/api` 的精确钉版 0.35.4→0.35.5，即上游修复版（librsvg 2.62.91→2.63.2，libvips 8.18.6→8.18.7，`@img/sharp-libvips-*` 1.3.3→1.3.4）。`pnpm update -r sharp --lockfile-only` 让 astro 的可选依赖 `^0.35.4` 与 Temporal worker 打包链上 webpack 压缩插件的可选 peer 解析到同一个 0.35.5，锁文件里仍只有一份 sharp 和一份 libvips；没有加 override，锁文件也没有别的变化。sharp 与 26 个 `@img/*` 平台包的 integrity 与官方 registry 一致。
+- 图片管线版本号随之变为 `sharp-0.35.5-vips-8.18.7-m1c.1`。它是 recipe hash 的一部分，所以 0.35.4 渲染的衍生图不会被复用，下次处理时按新版本重新渲染；钉版本的用例同步改为 0.35.5。管线与 media-foundation 的 3 个用例文件共 172 项通过。
+- 修复前的暴露面：API 图片管线只把魔数为 JPEG/PNG/WebP 的字节交给 sharp，解码后再核对格式，而且只在强制 `VIPS_BLOCK_UNTRUSTED=1` 的子进程里解码，该设置下 libvips 拒绝 SVG 输入（0.35.4 与 0.35.5 均实测）；渲染器不用 `astro:assets`，Temporal 打包也不用 webpack 图片压缩。没有产品路径解码过 SVG，但有漏洞的二进制确实随运行镜像发布。
+- 安全下限新增 `sharp` ≥0.35.5、登记前任 0.35.4：对上一版锁文件失败，对当前锁文件通过。生产审计回到零 advisory（830 个依赖）。基线重新绑定到修复提交，`valid_until` 不变（2026-10-14T21:28:22Z，月度刷新与续期仍须在此之前合入）；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261007-sharp-advisory-remediation.json)。Copy fixed-source 回执只重签指纹。
+
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 
 - 10-01 重绑之后，官方 npm 审计库新收录 2 条生产 advisory，都只在 site-renderer 的 astro 链上：GHSA-ch52-4w7c-c8xp（高危，`http-cache-semantics <=4.2.0`，未列修复版本：max-stale 处理可能把一个用户的缓存响应发给另一个用户），main 的定时 freshness canary 自 10-03（ac024fd5）起报 `BASELINE_STALE`；GHSA-r4xh-jqrq-34v2（中危，`smol-toml <=1.8.0`，1.9.0 修复：构造的 TOML 让 `parse()` 退化为二次方时间），10-05 23:41Z 才发布。

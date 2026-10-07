@@ -1,0 +1,100 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-10-07 sharp production advisory remediation; not runtime/release/UAT evidence",
+  "detected": {
+    "source": "GitHub Actions run 37581036600 (supply-chain.yml, production advisory baseline freshness · canary, push) on main c248c59b; every main push since run 37502227162 on 49dfd9f1 (2026-10-06T17:16Z) failed with the same advisory",
+    "receipt": {
+      "schema_version": "production-dependency-baseline-freshness-result/v1",
+      "result": "BASELINE_STALE",
+      "hold": true,
+      "current_advisories": 1,
+      "resolved_advisories": [],
+      "issues": [
+        "AUDIT_EXPOSURE_NOT_BASELINED",
+        "AUDIT_NEW_ADVISORY"
+      ],
+      "provenance": {
+        "subject_commit": "c248c59b7ed725aae677573e47d152490cf5d007",
+        "lockfile_digest": "sha256:8d264dde4d325f5136cf7efc2c858d29393d29d1e5c8c12dc9362cb45e172d58",
+        "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+        "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+        "audit_digest": "sha256:8285432c39febb5dbafc1c6026b2ab6ff0bbed1ea690f19e83a12a034282246e",
+        "observed_at": "2026-10-07T06:22:18.000Z",
+        "registry": "https://registry.npmjs.org/"
+      }
+    },
+    "advisories_source": "Projection of an official-registry `pnpm audit --prod --registry=https://registry.npmjs.org --json` of main c248c59b at 2026-10-07T16:41Z, run on a git archive of its manifests and lockfile; the audit action names the direct path apps__api>sharp.",
+    "advisories": [
+      {
+        "github_advisory_id": "GHSA-wq5f-xc86-pv6w",
+        "module_name": "sharp",
+        "severity": "high",
+        "vulnerable_versions": "<0.35.5",
+        "patched_versions": ">=0.35.5",
+        "installed_versions": [
+          "0.35.4"
+        ],
+        "remediated_version": "0.35.5",
+        "note": "Use-after-free in the librsvg bundled with sharp's prebuilt libvips (librsvg 2.62.91 in @img/sharp-libvips-* 1.3.3). Fixed in 0.35.5, which ships librsvg 2.63.2 and libvips 8.18.7 (@img/sharp-libvips-* 1.3.4). The exact apps/api pin moves from 0.35.4 to 0.35.5; astro's optional ^0.35.4 and the webpack minimizer's optional peer resolve to the same single version, without an override. Exposure before the fix: the API image pipeline admits only JPEG/PNG/WebP signatures, re-checks the decoded format, and decodes only in a child process that requires VIPS_BLOCK_UNTRUSTED=1, under which libvips rejects SVG input (measured on both 0.35.4 and 0.35.5); the renderer does not use astro:assets. No product path decoded SVG, but the vulnerable binaries shipped in the runtime image."
+      }
+    ]
+  },
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "AUDIT_INVALID_HOLD",
+        "hold": true,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [
+          "BASELINE_SOURCE_LOCK_MISMATCH"
+        ],
+        "provenance": {
+          "subject_commit": "2362e9469a5b4ed22c3d537924cf021f4a63c879",
+          "lockfile_digest": "sha256:a66816d1e93315d29c502738363938db712ed4a56e48f5afe72410614b31c803",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-07T16:40:54.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "2362e9469a5b4ed22c3d537924cf021f4a63c879",
+          "lockfile_digest": "sha256:a66816d1e93315d29c502738363938db712ed4a56e48f5afe72410614b31c803",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-07T16:40:54.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ]
+}
