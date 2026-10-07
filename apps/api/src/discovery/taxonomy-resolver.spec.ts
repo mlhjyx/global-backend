@@ -207,7 +207,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     };
     const generateStructured = vi.fn(async (input, context) => {
       expect(input.task).toBe('taxonomy.normalize');
-      expect(input.model).toBe('deepseek-v4-flash');
+      expect(input.model).toBe('deepseek-v4-pro');
       expect(context.durableResultSchema).toBe('taxonomy-code/v1');
       const code = ((input.schema as {
         properties: { code: { enum: (string | null)[] } };

@@ -298,6 +298,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx?: AiContext,
   ): Promise<ModelResult<string>> {
     const model = input.model ?? this.cfg.model;
+    // Reviewed upstream aliases resolve only on the transport that produced
+    // them, so provenance must carry the same transport complete() uses.
+    const transport =
+      this.cfg.modelTransports?.[model] ?? "openai-chat-completions";
     const {
       content,
       usage,
@@ -319,7 +323,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     return {
       data: content,
       provider: this.id,
-      ...resolutionProvenance(model, resolvedModel),
+      ...resolutionProvenance(model, resolvedModel, transport),
       usage,
     };
   }
@@ -369,7 +373,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
         {
           provider: this.id,
-          ...resolutionProvenance(model, resolvedModel),
+          ...resolutionProvenance(model, resolvedModel, transport),
         },
       );
     }
@@ -379,7 +383,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return {
         data: JSON.parse(payload) as T,
         provider: this.id,
-        ...resolutionProvenance(model, resolvedModel),
+        ...resolutionProvenance(model, resolvedModel, transport),
         usage,
       };
     } catch {
@@ -388,7 +392,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (finishReason === "length") {
         throw new ProviderOutputError("STRUCTURED_OUTPUT_TRUNCATED", usage, {
           provider: this.id,
-          ...resolutionProvenance(model, resolvedModel),
+          ...resolutionProvenance(model, resolvedModel, transport),
         });
       }
       // ② 非截断的解析失败（模型返回非 JSON 文本）。原始文本和
@@ -398,7 +402,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
         {
           provider: this.id,
-          ...resolutionProvenance(model, resolvedModel),
+          ...resolutionProvenance(model, resolvedModel, transport),
         },
       );
     }

@@ -4,6 +4,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
+
+- 起因（2026-10-07 xin 实测）：获客分组唯一的网关渠道（OpenOx）对同一个 `deepseek-v4-pro` 会报三种名字：`deepseek-v4-pro`、流式块里常见的 `deepseek.deepseek-v4-pro`、非流式应答里常见的 `deepseek-v4-pro-ga-260813`。身份闸门只认精确名，ICP 设计等 pro 调用因此间歇以 `ProviderIdentityError` 失败（网关侧调用其实已正常结束）。该渠道还把 `deepseek-v4-flash` 映射到 pro，应答报 pro 名，所以 flash 任务 100% 被拒，发现 run 跑不出结果。
+- `model-identity.ts` 为 `deepseek-v4-pro` 登记这两个已审别名，只在 `openai-chat-completions` 传输下成立；其他名字（含 `gpt-5.6-*`）照旧失败关闭，pro 的名字也不能冒充 flash 请求。
+- provider 的文本与结构化生成在记录来源时带上与 `complete()` 相同的传输协议，别名调用如实记为 `upstream_response` 并保留上游名字。此前这一步不带传输，别名永远解析不到，来源只能记成 `requested_fallback`。
+- 8 个 flash 档获客任务（企业理解 3 项、`discovery.extract_company`、`discovery.classify_trade_role`、`discovery.extract_list`、`contact.find_decision_makers`、`taxonomy.normalize`）改为经常量 `ACQUISITION_GATEWAY_MODEL` 显式请求 `deepseek-v4-pro`。渠道本来就用 pro 服务这些请求，真实成本与速度不变，身份校验与花费记录如实；网关提供真 flash 后改这一个常量即可切回。`maxCostCents` 不变：后端按自身价目表结算，一次 pro 调用约 1 美分（与网关自己的计价相差很大，另行对齐）。
+- 测试：身份别名 8 例、provider 3 例（前缀名流式通过、日期名非流式通过、其他模型族仍拒）、任务路由 8 例；修复前均为红。平台报价与 GrowthOS 钉住的策略资产不引用任务模型名（已核），本改动不影响平台 worker 就绪。
+
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 
 - 10-01 重绑之后，官方 npm 审计库新收录 2 条生产 advisory，都只在 site-renderer 的 astro 链上：GHSA-ch52-4w7c-c8xp（高危，`http-cache-semantics <=4.2.0`，未列修复版本：max-stale 处理可能把一个用户的缓存响应发给另一个用户），main 的定时 freshness canary 自 10-03（ac024fd5）起报 `BASELINE_STALE`；GHSA-r4xh-jqrq-34v2（中危，`smol-toml <=1.8.0`，1.9.0 修复：构造的 TOML 让 `parse()` 退化为二次方时间），10-05 23:41Z 才发布。

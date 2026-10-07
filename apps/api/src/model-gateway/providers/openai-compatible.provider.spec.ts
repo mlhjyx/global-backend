@@ -262,6 +262,67 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     expect(out.data).toEqual({ a: 2 });
     expect(out.usage).toMatchObject({ inputTokens: 3, outputTokens: 2 });
   });
+
+  // OpenOx (observed 2026-10-07 on xin) reports the same DeepSeek v4 pro model
+  // under a provider-prefixed name in stream chunks and a dated GA name in
+  // plain bodies. Only those reviewed aliases resolve; other families fail.
+  it("accepts the reviewed provider-prefixed pro identity carried by stream chunks", async () => {
+    mockText(
+      sse([
+        { model: "deepseek.deepseek-v4-pro", choices: [{ delta: { content: '{"a":' } }] },
+        { model: "deepseek.deepseek-v4-pro", choices: [{ delta: { content: "3}" }, finish_reason: "stop" }] },
+        { model: "deepseek.deepseek-v4-pro", choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      ]),
+    );
+
+    const out = await streaming.generateStructured({
+      task: "t",
+      prompt: "p",
+      schema: {},
+      model: "deepseek-v4-pro",
+    });
+
+    expect(out.data).toEqual({ a: 3 });
+    expect(out).toMatchObject({
+      model: "deepseek-v4-pro",
+      reportedModel: "deepseek.deepseek-v4-pro",
+      modelResolutionSource: "upstream_response",
+    });
+  });
+
+  it("accepts the reviewed dated GA pro identity in a plain body", async () => {
+    mockChatResponse({
+      model: "deepseek-v4-pro-ga-260813",
+      choices: [{ message: { content: '{"a":4}' }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 3 },
+    });
+
+    const out = await provider.generateStructured({
+      task: "t",
+      prompt: "p",
+      schema: {},
+      model: "deepseek-v4-pro",
+    });
+
+    expect(out.data).toEqual({ a: 4 });
+    expect(out).toMatchObject({
+      model: "deepseek-v4-pro",
+      reportedModel: "deepseek-v4-pro-ga-260813",
+      modelResolutionSource: "upstream_response",
+    });
+  });
+
+  it("still rejects a stream whose chunks report another model family", async () => {
+    mockText(
+      sse([
+        { model: "gpt-5.6-sol", choices: [{ delta: { content: '{"a":5}' }, finish_reason: "stop" }] },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
 });
 
 describe("OpenAICompatibleProvider — request-bound settlement observation", () => {

@@ -30,15 +30,15 @@ describe('AI task registry model execution policy invariants', () => {
   it('tightens only output contracts for the ten projected tasks', () => {
     const expected = {
       'company_understanding.extract_claims': {
-        model: 'deepseek-v4-flash', risk: 'medium', humanGate: true,
+        model: 'deepseek-v4-pro', risk: 'medium', humanGate: true,
         allowedTools: ['crawl4ai.fetch'], maxCostCents: 20, timeoutMs: 180000,
       },
       'company_understanding.extract_profile': {
-        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
         allowedTools: [], maxCostCents: 10, timeoutMs: 120000,
       },
       'company_understanding.extract_offerings': {
-        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
         allowedTools: [], maxCostCents: 20, timeoutMs: 180000,
       },
       'icp.design': {
@@ -50,7 +50,7 @@ describe('AI task registry model execution policy invariants', () => {
         allowedTools: [], maxCostCents: 40, timeoutMs: 180000,
       },
       'taxonomy.normalize': {
-        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
         allowedTools: [], maxCostCents: 5, timeoutMs: 60000,
       },
       'discovery.qualify_fit': {
@@ -59,17 +59,17 @@ describe('AI task registry model execution policy invariants', () => {
       },
       'discovery.extract_company': {
         // G3 5.3: discovery judges from search results only; no pre-identity fetch.
-        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
         allowedTools: ['searxng.search'], maxCostCents: 15,
         timeoutMs: 180000,
       },
       'discovery.extract_list': {
-        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
         allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 20,
         timeoutMs: 180000,
       },
       'contact.find_decision_makers': {
-        model: 'deepseek-v4-flash', risk: 'medium', humanGate: false,
+        model: 'deepseek-v4-pro', risk: 'medium', humanGate: false,
         allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 15,
         timeoutMs: 120000,
       },
@@ -89,5 +89,25 @@ describe('AI task registry model execution policy invariants', () => {
       expect(task!.maxOutputTokens).toBeGreaterThan(0);
       expect(task!.maxOutputTokens).toBeLessThanOrEqual(16_000);
     }
+  });
+});
+
+describe('AI task registry acquisition gateway routing', () => {
+  // 2026-10-07: the acquisition gateway group serves no genuine
+  // deepseek-v4-flash; it maps flash requests onto pro and reports a pro
+  // identity, which the identity gate correctly refuses for a flash request.
+  // Acquisition tasks therefore request pro explicitly so identity and spend
+  // records stay truthful. Restore flash only with a gateway that serves it.
+  it.each([
+    'company_understanding.extract_claims',
+    'company_understanding.extract_profile',
+    'company_understanding.extract_offerings',
+    'discovery.extract_company',
+    'discovery.classify_trade_role',
+    'discovery.extract_list',
+    'contact.find_decision_makers',
+    'taxonomy.normalize',
+  ])('routes %s to deepseek-v4-pro', (taskId) => {
+    expect(getTask(taskId)?.model).toBe('deepseek-v4-pro');
   });
 });
