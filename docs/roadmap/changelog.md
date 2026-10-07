@@ -64,11 +64,19 @@
   - 终端适配器：同文件中任何能发请求的声明，都不得在闭包外被引用（传递求出，例如 `executePinnedHttp` 与 `crawlUrl`）；闭包内只能发一次、不在循环里；调度条件必须读取函数自身的调度器参数，且该参数不得被重新赋值、删除或遮蔽。
   - 转交型适配器：`requestPublicHttp` 只能作为带调度器调用的被调函数出现，包装器只能经收到的调度器执行。
   - 合同行不得含 spread，且只认 `deepFreeze` 与 `technicalRow` 两个构造器；文件里只能有一个名为 `sourcePhysicalWire` 的绑定；兼容 `.js` 后缀导入与 const 箭头函数形式的适配器。
-- 当前代码零问题。在仓库副本上做了 22 项变异，全部被拦下：
+- 第二轮独立复审又找到一批绕过写法，同样改为按失败处理：
+  - 适配器文件的导入改为白名单：只允许网络模块与 `EXPECTED_WIRE_ADAPTER_IMPORTS`（`bounded-fetch-response`、`guarded-http`、`url-guard`、平台合同），其他导入报 `WIRE_ADAPTER_IMPORT_UNREGISTERED`；`process.getBuiltinModule` / `process.binding` / `module.require` / `eval` / `Function` 这类运行时加载器在适配器文件与平台工具里都报错。
+  - robots 文件只能经 `requestPublicHttp` 发请求：文件里出现网络模块、网络全局或其他 wire 适配器即报 `WIRE_ADAPTER_FORWARD_MISSING`。
+  - 终端适配器的 send 别名（`dependencies.executePinned ?? executePinnedHttp`）里不得有调用或新建函数，防止提前发送或包进重试。
+  - 调度器参数只读：`dispatchPhysicalWire` 只能出现在调度条件里；options 参数只能以 `<param>.<property>` 读取，不得整体传出、别名、经成员改写（含 `Object.assign`）、删除或遮蔽。
+  - `executePhysicalWire` 闭包内的那一次发送必须直接位于闭包，不能藏在嵌套函数（如 `Promise.all([..].map(...))`）里。
+  - 平台工具对象不得被展开、重新赋值或经 `Object.assign` / `defineProperty` 改写（`PLATFORM_TOOL_REDEFINED`），保证被检查的 `execute` 就是注册运行的那个。
+- 当前代码零问题。在仓库副本上做了 29 项变异，全部被拦下：
   - 先前 15 项：工具丢了调度器、传 `undefined`、使用未声明的 wire、直接 `fetch`、调用未登记的适配器、经本地辅助函数绕过、`sourcePhysicalWire` 去掉平台拒绝、三个终端适配器绕过闭包或调度、robots 的三种转交缺陷、新增接受调度器的适配器、合同新增却从未用到的 wire；
-  - 复审补充 7 项：robots 的 `request` 钩子、`globalThis.fetch`、从非适配器模块导入、`executePinnedHttp` 预检、`crawlHtml` 未经调度调用 `crawlUrl`、调度器参数被置空、把 `requestPublicHttp` 当作值传给 `loadRobots`。
+  - 第一轮复审补充 7 项：robots 的 `request` 钩子、`globalThis.fetch`、从非适配器模块导入、`executePinnedHttp` 预检、`crawlHtml` 未经调度调用 `crawlUrl`、调度器参数被置空、把 `requestPublicHttp` 当作值传给 `loadRobots`；
+  - 第二轮复审补充 7 项：适配器文件导入白名单外模块、robots 文件裸 `fetch`、send 别名包进调用、`Object.assign` 改写调度器参数、闭包内经嵌套函数发送、工具里 `process.getBuiltinModule("node:https")`、注册时展开工具对象替换 `execute`。
 
-  新 spec 共 13 项，其中 8 项在加固前的检查上失败。
+  spec 共 17 项，其中第一轮 8 项、第二轮 4 项在各自加固前的检查上失败。
 - 定位：这是防回归的检测器，不是出网边界。白名单模块内部（例如平台合同模块）若藏有发送，本检查看不到。复审建议在 ToolBroker 加运行时兜底（平台调用必须至少经过一次调度），这一项超出所选的静态方案，没有做，留作后续决定。
 
 ## 2026-10-01 · @grpc/grpc-js security floor

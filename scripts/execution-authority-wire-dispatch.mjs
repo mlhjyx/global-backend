@@ -41,7 +41,22 @@ const NETWORK_MODULES = new Set([
   'node:http', 'node:https', 'node:http2', 'node:net', 'node:tls', 'node:dgram', 'node:child_process',
   'undici', 'axios', 'node-fetch', 'got',
 ]);
-const NETWORK_GLOBALS = new Set(['fetch', 'globalThis', 'global', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'require']);
+// Modules the wire adapter files may import besides NETWORK_MODULES; none of
+// them sends (url-guard only resolves and vets the target).
+export const EXPECTED_WIRE_ADAPTER_IMPORTS = Object.freeze([
+  'apps/api/src/adapters/bounded-fetch-response.ts',
+  'apps/api/src/adapters/guarded-http.ts',
+  'apps/api/src/adapters/url-guard.ts',
+  'apps/api/src/platform-authority/platform-execution-contract.ts',
+]);
+
+const NETWORK_GLOBALS = new Set(['fetch', 'globalThis', 'global', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'require', 'eval', 'Function']);
+// Member expressions that load a module or native code at run time.
+const RUNTIME_LOADERS = new Set(['process.getBuiltinModule', 'process.binding', 'process.dlopen', 'module.require']);
+
+function runtimeLoaders(root) {
+  return descendants(root, (node) => ts.isPropertyAccessExpression(node) && RUNTIME_LOADERS.has(node.getText()));
+}
 const CONTRACT_BUILDERS = new Set(['deepFreeze', 'technicalRow']);
 
 // The fail-closed core of sourcePhysicalWire, whitespace-normalized.
@@ -284,22 +299,37 @@ function isAssignment(node) {
     node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
 }
 
-// The dispatcher test must read the function's own parameter
-// (`dispatchPhysicalWire` or `<param>.dispatchPhysicalWire`), and nothing in
-// the function may reassign, delete or shadow it.
-function dispatcherParameterIssue(fn, test) {
+// The dispatcher test must read the function's own parameter, which the
+// function may only read: `dispatchPhysicalWire` is used nowhere outside
+// `container` (the dispatch conditional), and an options parameter only as
+// `<param>.<property>` reads, never reassigned, aliased, passed on whole,
+// mutated through a member, deleted or shadowed.
+function dispatcherParameterIssue(fn, test, container) {
   const parameters = new Set(fn.parameters.map((parameter) => parameter.name.getText()));
   const root = ts.isIdentifier(test) ? test : ts.isPropertyAccessExpression(test) && ts.isIdentifier(test.expression) ? test.expression : null;
   if (!root || !parameters.has(root.text) || (ts.isPropertyAccessExpression(test) && test.name.text !== 'dispatchPhysicalWire') ||
     (ts.isIdentifier(test) && test.text !== 'dispatchPhysicalWire')) {
     return 'the dispatch test must read the function\'s own dispatcher parameter';
   }
-  const touched = descendants(fn.body, (node) =>
-    (isAssignment(node) && [test.getText(), root.text].includes(unwrap(node.left).getText())) ||
-    (ts.isDeleteExpression(node) && unwrap(node.expression).getText() === test.getText()) ||
-    ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) &&
-      ts.isIdentifier(node.name) && node.name.text === root.text && !fn.parameters.includes(node)));
-  return touched.length > 0 ? `${root.text} must not be reassigned, deleted or shadowed` : null;
+  const shadowed = descendants(fn.body, (node) =>
+    (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node) || ts.isFunctionDeclaration(node)) &&
+    node.name && ts.isIdentifier(node.name) && node.name.text === root.text);
+  if (shadowed.length > 0) return `${root.text} must not be shadowed`;
+  const uses = references(fn.body).filter((reference) => reference.text === root.text);
+  if (ts.isIdentifier(test)) {
+    return uses.every((use) => within(use, container)) ? null : `${root.text} may be used only in the dispatch conditional`;
+  }
+  const written = (access) => {
+    let outer = access;
+    while (ts.isPropertyAccessExpression(outer.parent) || ts.isElementAccessExpression(outer.parent) ||
+      ts.isNonNullExpression(outer.parent) || ts.isParenthesizedExpression(outer.parent)) outer = outer.parent;
+    const parent = outer.parent;
+    return (isAssignment(parent) && parent.left === outer) || ts.isDeleteExpression(parent) ||
+      ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
+        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(parent.operator));
+  };
+  const misused = uses.filter((use) => !ts.isPropertyAccessExpression(use.parent) || use.parent.expression !== use || written(use.parent));
+  return misused.length > 0 ? `${root.text} may only be read as ${root.text}.<property>` : null;
 }
 
 function loopBetween(node, container) {
@@ -324,13 +354,19 @@ export function terminalAdapterIssues(path, source, adapter) {
   const aliases = descendants(fn.body, (node) =>
     ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === adapter.send);
   if (aliases.length > 1) return fail(`${adapter.send} is declared more than once`);
+  // A send alias only picks an implementation (`deps.executePinned ?? executePinnedHttp`);
+  // a call there could send eagerly or wrap the send in retries.
+  if (aliases[0] && descendants(aliases[0].initializer, (node) => ts.isCallExpression(node) || ts.isNewExpression(node) ||
+    ts.isArrowFunction(node) || ts.isFunctionExpression(node)).length > 0) {
+    return fail(`${adapter.send} may only alias an existing implementation, without calls or new functions`);
+  }
   const senders = senderNames(path, sourceFile, [adapter.send]);
   const stray = references(fn.body).filter((reference) => senders.has(reference.text) &&
     !within(reference, closure) && !(aliases[0] && within(reference, aliases[0].initializer)));
   if (stray.length > 0) return fail(`${stray[0].text} can send outside executePhysicalWire`);
   const inside = references(closure).filter((reference) => senders.has(reference.text));
   const sends = inside.filter((reference) => reference.text === adapter.send && calleeCall(reference));
-  if (sends.length !== 1 || inside.length !== 1 || loopBetween(sends[0], closure)) {
+  if (sends.length !== 1 || inside.length !== 1 || loopBetween(sends[0], closure) || enclosingFunction(sends[0]) !== closure) {
     return fail(`executePhysicalWire must make exactly one ${adapter.send}() call, outside any loop, and no other send`);
   }
   const references_ = references(fn.body).filter((reference) => reference.text === 'executePhysicalWire');
@@ -348,13 +384,34 @@ export function terminalAdapterIssues(path, source, adapter) {
   if (conditionals.length !== 1 || references_.length !== 2 || references_.some((reference) => !within(reference, conditionals[0]))) {
     return fail('executePhysicalWire must run only through `dispatchPhysicalWire ? await dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire()`');
   }
-  const parameterIssue = dispatcherParameterIssue(fn, unwrap(conditionals[0].condition));
+  const parameterIssue = dispatcherParameterIssue(fn, unwrap(conditionals[0].condition), conditionals[0]);
   return parameterIssue ? fail(parameterIssue) : [];
+}
+
+function enclosingFunction(node) {
+  for (let current = node.parent; current; current = current.parent) {
+    if (ts.isFunctionLike(current)) return current;
+  }
+  return undefined;
+}
+
+// What every wire adapter file shares: imports only from NETWORK_MODULES and
+// EXPECTED_WIRE_ADAPTER_IMPORTS, and no run-time module loader.
+export function wireAdapterFileIssues(path, source) {
+  const sourceFile = parse(path, source);
+  const unknown = [...new Set([...importSources(sourceFile, path).values()].map((origin) => origin.module))]
+    .filter((module) => !NETWORK_MODULES.has(module) && !EXPECTED_WIRE_ADAPTER_IMPORTS.includes(module));
+  const issues = unknown.map((module) => issue('EXECUTION_AUTHORITY_WIRE_ADAPTER_IMPORT_UNREGISTERED', path,
+    `imports ${module}, which is not in EXPECTED_WIRE_ADAPTER_IMPORTS`));
+  if (runtimeLoaders(sourceFile).length > 0 || references(sourceFile).some((reference) => ['eval', 'Function'].includes(reference.text))) {
+    issues.push(issue('EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED', path, 'loads modules or code at run time'));
+  }
+  return issues;
 }
 
 function forwardedDispatcherIssue(fn, property) {
   const value = ts.isShorthandPropertyAssignment(property) ? property.name : unwrap(property.initializer);
-  if (ts.isPropertyAccessExpression(value)) return dispatcherParameterIssue(fn, value);
+  if (ts.isPropertyAccessExpression(value)) return dispatcherParameterIssue(fn, value, property);
   if (!ts.isIdentifier(value)) return 'the dispatcher must be passed by name';
   // A local wrapper must be `given ? (execute) => ...given(execute)... : undefined`
   // and run execute only through the given dispatcher.
@@ -368,7 +425,7 @@ function forwardedDispatcherIssue(fn, property) {
     wrap.parameters.length !== 1 || !ts.isIdentifier(wrap.parameters[0].name)) {
     return 'the dispatcher wrapper must be `given ? (execute) => given(execute) : undefined`';
   }
-  const parameterIssue = dispatcherParameterIssue(fn, given);
+  const parameterIssue = dispatcherParameterIssue(fn, given, wrapper);
   if (parameterIssue) return parameterIssue;
   const execute = wrap.parameters[0].name.text;
   const uses = references(wrap.body).filter((reference) => reference.text === execute);
@@ -388,6 +445,15 @@ export function forwardingAdapterIssues(path, source, adapter) {
   const fn = functionNamed(sourceFile, adapter.name);
   const fail = (message) => [issue('EXECUTION_AUTHORITY_WIRE_ADAPTER_FORWARD_MISSING', path, `${adapter.name}: ${message}`)];
   if (!fn?.body) return fail('function not found');
+  // The file reaches the network only through the terminal adapter.
+  const networkImports = new Set([...importSources(sourceFile, path)]
+    .filter(([, origin]) => NETWORK_MODULES.has(origin.module) ||
+      (WIRE_ADAPTER_KEYS.has(wireAdapterKey(origin)) && origin.imported !== adapter.forwardsTo))
+    .map(([local]) => local));
+  const declared = topLevelDeclarations(sourceFile);
+  const direct = references(sourceFile).find((reference) =>
+    networkImports.has(reference.text) || (NETWORK_GLOBALS.has(reference.text) && !declared.has(reference.text)));
+  if (direct) return fail(`${direct.text} reaches the network without ${adapter.forwardsTo}`);
   const uses = references(sourceFile).filter((reference) => reference.text === adapter.forwardsTo);
   if (uses.length === 0) return fail(`no ${adapter.forwardsTo}() call`);
   for (const use of uses) {
@@ -467,6 +533,26 @@ function dispatchedWires(call, ctxName) {
   });
 }
 
+// The checked execute must be the one that runs: the Tool object's binding
+// may not be spread into another object, reassigned or mutated in its file.
+function toolRedefinitionIssues(sourceFile, object) {
+  let holder = object.parent;
+  while (holder && (ts.isAsExpression(holder) || ts.isSatisfiesExpression(holder) || ts.isParenthesizedExpression(holder))) holder = holder.parent;
+  if (!holder || !ts.isVariableDeclaration(holder) || !ts.isIdentifier(holder.name)) return [];
+  const name = holder.name.text;
+  const rootOf = (node) => {
+    let current = unwrap(node);
+    while (current && (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current))) current = unwrap(current.expression);
+    return current;
+  };
+  const misuses = descendants(sourceFile, (node) =>
+    ((ts.isSpreadAssignment(node) || ts.isSpreadElement(node)) && rootOf(node.expression)?.getText() === name) ||
+    (isAssignment(node) && rootOf(node.left)?.getText() === name) ||
+    (ts.isCallExpression(node) && ['Object.assign', 'Object.defineProperty', 'Object.defineProperties', 'Reflect.set'].includes(node.expression.getText()) &&
+      node.arguments[0] && rootOf(node.arguments[0])?.getText() === name));
+  return misuses.length > 0 ? [`${name} is spread, reassigned or mutated, so its checked execute may not be the one that runs`] : [];
+}
+
 // A live platform Tool's execute and every same-file declaration it reaches
 // (called, passed as a callback or used as an object of methods): each wire
 // adapter is called directly with exactly one sourcePhysicalWire(ctx,
@@ -485,7 +571,7 @@ export function platformToolIssues(path, source, toolId, allowedWires) {
   }
   const imports = importSources(sourceFile, path);
   const declarations = topLevelDeclarations(sourceFile);
-  const issues = [];
+  const issues = toolRedefinitionIssues(sourceFile, objects[0]).map((message) => fail('EXECUTION_AUTHORITY_PLATFORM_TOOL_REDEFINED', message));
   const used = new Set();
   const queue = [{ node: fn, ctxName: fn.parameters[1].name.getText() }];
   const visited = new Set();
@@ -495,6 +581,9 @@ export function platformToolIssues(path, source, toolId, allowedWires) {
     visited.add(node);
     if (descendants(node, (child) => ts.isCallExpression(child) && child.expression.kind === ts.SyntaxKind.ImportKeyword).length > 0) {
       issues.push(fail('EXECUTION_AUTHORITY_PLATFORM_TOOL_IMPORT_UNREGISTERED', 'uses a dynamic import()'));
+    }
+    for (const loader of runtimeLoaders(node)) {
+      issues.push(fail('EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK', `uses ${loader.getText()} instead of a dispatched wire adapter`));
     }
     for (const reference of references(node)) {
       const name = reference.text;
@@ -544,6 +633,9 @@ export async function inspectPlatformWireDispatch({ readText, listFiles, toolSou
   if (declared.length !== WIRE_ADAPTER_KEYS.size || declared.some((key) => !WIRE_ADAPTER_KEYS.has(key))) {
     issues.push(issue('EXECUTION_AUTHORITY_WIRE_ADAPTER_INVENTORY_MISMATCH', ADAPTER_DIRECTORY,
       `adapters that accept a physical-wire dispatcher must be exactly the registered ${WIRE_ADAPTER_KEYS.size}: found ${[...declared].sort().join(', ')}`));
+  }
+  for (const path of new Set(EXPECTED_WIRE_ADAPTERS.map((adapter) => adapter.path))) {
+    issues.push(...wireAdapterFileIssues(path, await readText(path)));
   }
   for (const adapter of EXPECTED_WIRE_ADAPTERS) {
     const source = await readText(adapter.path);

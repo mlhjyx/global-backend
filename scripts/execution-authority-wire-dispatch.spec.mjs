@@ -8,6 +8,7 @@ import {
   dispatcherAdapterNames,
   forwardingAdapterIssues,
   inspectPlatformWireDispatch,
+  wireAdapterFileIssues,
   livePlatformToolWires,
   PLATFORM_CONTRACT_PATH,
   platformToolIssues,
@@ -260,4 +261,63 @@ test('a live platform Tool must be declared exactly once', () => {
     codes(platformToolIssues(TOOL_PATH, `${tool(ALL_WIRES)}\nexport const copy = { id: "demo.fetch", execute: async (input, ctx) => null };`, 'demo.fetch', WIRES)),
     ['EXECUTION_AUTHORITY_PLATFORM_TOOL_NOT_FOUND'],
   );
+});
+
+test('a wire adapter file imports only admitted modules and loads nothing at run time', () => {
+  const admitted = 'import { resolvePublicHttpUrl } from "./url-guard";\nimport { request } from "node:https";\nexport const x = 1;';
+
+  assert.deepEqual(wireAdapterFileIssues(CRAWLER, admitted), []);
+  assert.deepEqual(codes(wireAdapterFileIssues(CRAWLER, `${admitted}\nimport { warm } from "./crawler-health";`)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_IMPORT_UNREGISTERED']);
+  for (const loader of ['process.getBuiltinModule("node:https")', 'module.require("https")', 'eval("x")']) {
+    assert.deepEqual(codes(wireAdapterFileIssues(CRAWLER, `${admitted}\nconst y = ${loader};`)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED'], loader);
+  }
+});
+
+test('a terminal adapter only reads its options and sends directly in the closure', () => {
+  const guarded = (body) => `import { request as httpsRequest } from "node:https";
+  export async function requestPublicHttp(raw: string, dependencies: Deps = {}) {
+    ${body}
+    const execute = dependencies.executePinned ?? executePinnedHttp;
+    const executePhysicalWire = () => execute(raw);
+    return dependencies.dispatchPhysicalWire ? await dependencies.dispatchPhysicalWire(executePhysicalWire) : await executePhysicalWire();
+  }
+  function executePinnedHttp(target: string) { return httpsRequest(target); }
+  function withRetry(send) { return send; }`;
+  const adapter = { name: 'requestPublicHttp', send: 'execute' };
+  const path = 'apps/api/src/adapters/guarded-http.ts';
+
+  assert.deepEqual(terminalAdapterIssues(path, guarded(''), adapter), []);
+  for (const source of [
+    guarded('Object.assign(dependencies, { dispatchPhysicalWire: undefined });'),
+    guarded('const options = dependencies; options.dispatchPhysicalWire = undefined;'),
+    guarded('strip(dependencies);'),
+    guarded('dependencies.dispatchPhysicalWire = undefined;'),
+    guarded('').replace('dependencies.executePinned ?? executePinnedHttp', 'withRetry(executePinnedHttp)'),
+    guarded('').replace('() => execute(raw)', '() => Promise.all([raw].map((target) => execute(target)))'),
+  ]) {
+    assert.deepEqual(codes(terminalAdapterIssues(path, source, adapter)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_SEND_UNDISPATCHED'], source);
+  }
+});
+
+test('a forwarding adapter file reaches the network only through the terminal adapter', () => {
+  for (const outside of [
+    'async function load(origin: string) { return fetch(`${origin}/robots.txt`); }',
+    'import { get } from "node:https";\nasync function load(origin: string) { return get(origin); }',
+  ]) {
+    assert.deepEqual(codes(forwardingAdapterIssues(ROBOTS, forwarding(FORWARDED, outside), FORWARDING)), ['EXECUTION_AUTHORITY_WIRE_ADAPTER_FORWARD_MISSING'], outside);
+  }
+});
+
+test('the checked execute of a live platform Tool is the one that runs', () => {
+  const redefined = ['EXECUTION_AUTHORITY_PLATFORM_TOOL_REDEFINED'];
+
+  assert.deepEqual(toolCodes(ALL_WIRES, ''), []);
+  for (const extra of [
+    'registry.register({ ...demoTool, execute: async () => fetch("https://x") });',
+    'demoTool.execute = async () => null;',
+    'Object.assign(demoTool, { execute: async () => null });',
+  ]) {
+    assert.deepEqual(codes(platformToolIssues(TOOL_PATH, `${tool(ALL_WIRES)}\n${extra}`, 'demo.fetch', WIRES)), redefined, extra);
+  }
+  assert.deepEqual(toolCodes(before('const https = process.getBuiltinModule("node:https");')), ['EXECUTION_AUTHORITY_PLATFORM_TOOL_DIRECT_NETWORK']);
 });
