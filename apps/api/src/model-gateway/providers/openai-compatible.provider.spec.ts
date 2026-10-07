@@ -312,6 +312,59 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     });
   });
 
+  it("rejects a stream whose content chunks report another family even when the last chunk names a reviewed alias", async () => {
+    mockText(
+      sse([
+        { model: "gpt-5.6-sol", choices: [{ delta: { content: '{"a":7}' }, finish_reason: "stop" }] },
+        { model: "deepseek.deepseek-v4-pro", choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
+
+  it("accepts the observed mix of the reviewed stream alias and the exact pro name", async () => {
+    mockText(
+      sse([
+        { model: "deepseek.deepseek-v4-pro", choices: [{ delta: { content: '{"a":' } }] },
+        { model: "deepseek.deepseek-v4-pro", choices: [{ delta: { content: "6}" }, finish_reason: "stop" }] },
+        { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      ]),
+    );
+
+    const out = await streaming.generateStructured({
+      task: "t",
+      prompt: "p",
+      schema: {},
+      model: "deepseek-v4-pro",
+    });
+
+    expect(out.data).toEqual({ a: 6 });
+    expect(out).toMatchObject({
+      model: "deepseek-v4-pro",
+      modelResolutionSource: "upstream_response",
+    });
+  });
+
+  it("records a reviewed alias for text generation as an upstream identity", async () => {
+    mockChatResponse({
+      model: "deepseek-v4-pro-ga-260813",
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 2, completion_tokens: 1 },
+    });
+
+    const out = await provider.generateText({ prompt: "p", model: "deepseek-v4-pro" });
+
+    expect(out).toMatchObject({
+      data: "ok",
+      model: "deepseek-v4-pro",
+      reportedModel: "deepseek-v4-pro-ga-260813",
+      modelResolutionSource: "upstream_response",
+    });
+  });
+
   it("still rejects a stream whose chunks report another model family", async () => {
     mockText(
       sse([

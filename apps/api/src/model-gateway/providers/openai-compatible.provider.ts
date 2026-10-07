@@ -90,8 +90,8 @@ export function stripJsonFence(content: string): string {
 
 function resolutionProvenance(
   requestedModel: string,
-  reportedModel?: unknown,
-  transport?: GatewayVisionTransport,
+  reportedModel: unknown,
+  transport: GatewayVisionTransport,
 ): {
   model: string;
   reportedModel?: string;
@@ -298,10 +298,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx?: AiContext,
   ): Promise<ModelResult<string>> {
     const model = input.model ?? this.cfg.model;
-    // Reviewed upstream aliases resolve only on the transport that produced
-    // them, so provenance must carry the same transport complete() uses.
-    const transport =
-      this.cfg.modelTransports?.[model] ?? "openai-chat-completions";
+    const transport = this.transportFor(model);
     const {
       content,
       usage,
@@ -333,8 +330,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx?: AiContext,
   ): Promise<ModelResult<T>> {
     const model = input.model ?? this.cfg.model;
-    const transport =
-      this.cfg.modelTransports?.[model] ?? "openai-chat-completions";
+    const transport = this.transportFor(model);
     const system =
       transport === "anthropic-messages"
         ? (input.system ?? "")
@@ -360,6 +356,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       },
       ctx,
     );
+    const provenance = resolutionProvenance(model, resolvedModel, transport);
     if (!content.trim()) {
       // Empty content is an explicit failure, not JSON.parse(''). A length
       // finish can indicate an exhausted reasoning/output budget; a stop
@@ -371,10 +368,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           ? "STRUCTURED_OUTPUT_EMPTY_TRUNCATED"
           : "STRUCTURED_OUTPUT_EMPTY",
         usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(model, resolvedModel, transport),
-        },
+        { provider: this.id, ...provenance },
       );
     }
     // 剥 markdown 围栏（真机实证：glm-5.2 在 json_object 模式下仍偶发 ```json…``` 包裹）。
@@ -383,7 +377,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return {
         data: JSON.parse(payload) as T,
         provider: this.id,
-        ...resolutionProvenance(model, resolvedModel, transport),
+        ...provenance,
         usage,
       };
     } catch {
@@ -392,7 +386,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (finishReason === "length") {
         throw new ProviderOutputError("STRUCTURED_OUTPUT_TRUNCATED", usage, {
           provider: this.id,
-          ...resolutionProvenance(model, resolvedModel, transport),
+          ...provenance,
         });
       }
       // ② 非截断的解析失败（模型返回非 JSON 文本）。原始文本和
@@ -400,10 +394,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${model}: structured output is not valid JSON`,
         usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(model, resolvedModel, transport),
-        },
+        { provider: this.id, ...provenance },
       );
     }
   }
@@ -516,9 +507,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     /** OpenAI-compatible gateways may expose the post-alias/upstream model here. */
     model?: string;
   }> {
-    const transport =
-      this.cfg.modelTransports?.[opts.model] ?? "openai-chat-completions";
-    switch (transport) {
+    switch (this.transportFor(opts.model)) {
       case "openai-chat-completions":
         return this.chatCompletions(messages, opts, ctx);
       case "openai-responses":
@@ -526,6 +515,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
       case "anthropic-messages":
         return this.anthropicMessages(messages, opts, ctx);
     }
+  }
+
+  /**
+   * The wire protocol complete() dispatches a model on. Reviewed upstream
+   * aliases resolve only on the transport that produced them, so provenance
+   * must be derived from this same choice.
+   */
+  private transportFor(model: string): GatewayModelTransport {
+    return this.cfg.modelTransports?.[model] ?? "openai-chat-completions";
   }
 
   private async settledUsage(
@@ -724,7 +722,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   private async parseChatCompletionStream(
     response: Response,
     model: string,
-  ): Promise<ChatCompletionBody> {
+  ): Promise<{ body: ChatCompletionBody; streamedModels: readonly string[] }> {
     const invalid = (reason: string): never => {
       throw new ProviderOutputError(
         `${this.id} ${model}: ${reason}`,
@@ -741,7 +739,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const trimmed = text.trimStart();
     if (trimmed.startsWith("{")) {
       try {
-        return JSON.parse(trimmed) as ChatCompletionBody;
+        return {
+          body: JSON.parse(trimmed) as ChatCompletionBody,
+          streamedModels: [],
+        };
       } catch {
         return invalid("response body is not valid JSON");
       }
@@ -750,6 +751,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let chunks = 0;
     let finishReason: string | undefined;
     let reportedModel: string | undefined;
+    const streamedModels = new Set<string>();
     let usage: ChatCompletionBody["usage"];
     for (const rawLine of text.split(/\r?\n/u)) {
       const line = rawLine.trim();
@@ -764,7 +766,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }
       if (event.error !== undefined) return invalid("stream carried an upstream error");
       chunks += 1;
-      if (typeof event.model === "string" && event.model) reportedModel = event.model;
+      if (typeof event.model === "string" && event.model) {
+        reportedModel = event.model;
+        streamedModels.add(event.model);
+      }
       if (event.usage) usage = event.usage;
       const choice = event.choices?.[0];
       if (typeof choice?.delta?.content === "string") content += choice.delta.content;
@@ -772,9 +777,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
     if (chunks === 0) return invalid("stream carried no completion chunk");
     return {
-      choices: [{ message: { content }, finish_reason: finishReason }],
-      ...(usage ? { usage } : {}),
-      ...(reportedModel ? { model: reportedModel } : {}),
+      body: {
+        choices: [{ message: { content }, finish_reason: finishReason }],
+        ...(usage ? { usage } : {}),
+        ...(reportedModel ? { model: reportedModel } : {}),
+      },
+      streamedModels: [...streamedModels],
     };
   }
 
@@ -887,15 +895,34 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (!res.ok) {
       return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const json = stream
+    const { body: json, streamedModels } = stream
       ? await this.parseChatCompletionStream(res, opts.model)
-      : await this.parseResponseJson<ChatCompletionBody>(res, ctx, opts.model);
+      : {
+          body: await this.parseResponseJson<ChatCompletionBody>(
+            res,
+            ctx,
+            opts.model,
+          ),
+          streamedModels: [] as readonly string[],
+        };
     const bodyUsage = {
       inputTokens: json.usage?.prompt_tokens,
       outputTokens: json.usage?.completion_tokens,
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    // A stream names its model on every chunk. Each name must pass the gate,
+    // otherwise content from an untrusted model could ride under a trusted
+    // name carried only by a later chunk.
+    for (const streamedModel of streamedModels) {
+      this.trustedReportedModel(
+        opts.model,
+        streamedModel,
+        "openai-chat-completions",
+        usage,
+        true,
+      );
+    }
     const reportedModel = this.trustedReportedModel(
       opts.model,
       json.model,

@@ -1,5 +1,6 @@
 import Ajv from 'ajv';
 import { describe, expect, it, vi } from 'vitest';
+import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 import { TaxonomyResolver } from './taxonomy-resolver';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -207,7 +208,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     };
     const generateStructured = vi.fn(async (input, context) => {
       expect(input.task).toBe('taxonomy.normalize');
-      expect(input.model).toBe('deepseek-v4-pro');
+      expect(input.model).toBe(getTask('taxonomy.normalize')?.model);
       expect(context.durableResultSchema).toBe('taxonomy-code/v1');
       const code = ((input.schema as {
         properties: { code: { enum: (string | null)[] } };

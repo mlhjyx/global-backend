@@ -9,14 +9,15 @@ type OutputSchema = Record<string, unknown>;
 
 /**
  * Model for the flash-tier acquisition tasks (extraction, classification,
- * taxonomy). 2026-10-07: the acquisition gateway group serves no genuine
- * deepseek-v4-flash; it maps flash requests onto pro and reports a pro
- * identity, which the identity gate rightly refuses for a flash request. The
- * tasks therefore request pro explicitly, so identity checks pass and spend
- * records name the model that actually ran. Switch back here once the gateway
- * serves a real flash model under the requested name.
+ * taxonomy). Pinned to deepseek-v4-pro on 2026-10-07: the only deployment's
+ * acquisition gateway group (xin, OpenOx) serves no genuine deepseek-v4-flash.
+ * It maps flash requests onto pro and reports a pro identity, which the
+ * identity gate rightly refuses for a flash request. Requesting pro keeps the
+ * identity check and spend records truthful; that gateway already charges
+ * these calls at the pro ratio. Make this configurable per deployment before a
+ * gateway that serves a real flash model is used.
  */
-const ACQUISITION_GATEWAY_MODEL = 'deepseek-v4-pro';
+const ACQUISITION_FLASH_TIER_MODEL = 'deepseek-v4-pro';
 
 const boundedString = (maxLength: number, extra: OutputSchema = {}): OutputSchema => ({
   type: 'string', maxLength, ...extra,
@@ -111,8 +112,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         confidence: boundedNumber(0, 1),
       }, ['type', 'statement', 'evidence', 'confidence'])),
     }, ['claims']),
-    // 抽取是高频、结构化任务：属 flash 档；获客网关暂无真 flash，见 ACQUISITION_GATEWAY_MODEL。
-    model: ACQUISITION_GATEWAY_MODEL,
+    // 抽取是高频、结构化任务：属 flash 档；获客网关暂无真 flash，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
   },
@@ -129,7 +130,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       industry: boundedString(500, { description: '主行业，如「精密金属加工设备制造」' }),
       summary: boundedString(8000, { description: '80-150 字中文简介' }),
     }, ['industry', 'summary']),
-    model: ACQUISITION_GATEWAY_MODEL,
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'low',
     humanGate: false, // 画像随 Claim 审批可被人工修正
   },
@@ -159,8 +160,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         confidence: boundedNumber(0, 1),
       }, ['name', 'description', 'evidence', 'confidence'])),
     }, ['offerings']),
-    // 与 Claim 抽取同为高频结构化任务：flash 档，见 ACQUISITION_GATEWAY_MODEL。
-    model: ACQUISITION_GATEWAY_MODEL,
+    // 与 Claim 抽取同为高频结构化任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'low', // 只进结构化知识库，不直接对外
     humanGate: false,
   },
@@ -268,9 +269,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       evidence: boundedString(2000, { description: '支持判断的原文片段' }),
       confidence: boundedNumber(0, 1),
     }, ['is_company_site']),
-    // 判站 + 抽取是高频任务。原用 gemini-2.5-flash（快、长上下文、便宜）；2026-07-09 网关 Gemini
-    // 预付额度耗尽（429）→ 改路由到同为高频便宜档的 deepseek-v4-flash。额度恢复后可切回 gemini-2.5-flash。
-    model: ACQUISITION_GATEWAY_MODEL,
+    // 判站 + 抽取是高频任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL（路由沿革见 changelog）。
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'low',
     humanGate: false,
   },
@@ -300,8 +300,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         description: '支持判断的原文片段（不含人名与联系方式）',
       },
     }, ['trade_role']),
-    // 分类是高频便宜任务：flash 档（设计 §3.6），见 ACQUISITION_GATEWAY_MODEL。
-    model: ACQUISITION_GATEWAY_MODEL,
+    // 分类是高频便宜任务：flash 档（设计 §3.6），见 ACQUISITION_FLASH_TIER_MODEL。
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'low',
     humanGate: false,
   },
@@ -339,8 +339,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         description: '页面明确出现的具名人员（去重）',
       },
     }, ['people']),
-    // 原 gemini-2.5-flash；2026-07-09 网关 Gemini 额度耗尽（429）→ 改 deepseek-v4-flash（额度恢复可切回）。
-    model: ACQUISITION_GATEWAY_MODEL,
+    // flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
     humanGate: false,
   },
@@ -371,9 +371,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       },
       has_next_page: { type: 'boolean', description: '页面是否有下一页/分页' },
     }, ['is_directory', 'companies']),
-    // 列表抽取是长上下文任务（一页多公司）。原 gemini-2.5-flash；2026-07-09 网关 Gemini 额度耗尽（429）
-    // → 改 deepseek-v4-flash（同为长上下文/便宜档，额度恢复可切回）。
-    model: ACQUISITION_GATEWAY_MODEL,
+    // 列表抽取是长上下文任务（一页多公司）：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: ACQUISITION_FLASH_TIER_MODEL,
     risk: 'low',
     humanGate: false,
   },
@@ -389,7 +388,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxCostCents: 5,
     maxOutputTokens: 4_096,
     timeoutMs: 60000,
-    model: ACQUISITION_GATEWAY_MODEL, // 高频、冷路径（flash 档）
+    model: ACQUISITION_FLASH_TIER_MODEL, // 高频、冷路径（flash 档）
     risk: 'low',
     humanGate: false,
   },
