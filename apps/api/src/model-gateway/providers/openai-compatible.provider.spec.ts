@@ -344,8 +344,43 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     expect(out.data).toEqual({ a: 6 });
     expect(out).toMatchObject({
       model: "deepseek-v4-pro",
+      reportedModel: "deepseek.deepseek-v4-pro",
       modelResolutionSource: "upstream_response",
     });
+  });
+
+  it("rejects a stream whose content chunk names its model with a non-string value", async () => {
+    mockText(
+      sse([
+        { model: ["gpt-5.6-sol"], choices: [{ delta: { content: '{"a":8}' }, finish_reason: "stop" }] },
+        { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
+
+  it("does not claim an upstream identity when content chunks name no model", async () => {
+    mockText(
+      sse([
+        { choices: [{ delta: { content: '{"a":' } }] },
+        { choices: [{ delta: { content: "9}" }, finish_reason: "stop" }] },
+        { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      ]),
+    );
+
+    const out = await streaming.generateStructured({
+      task: "t",
+      prompt: "p",
+      schema: {},
+      model: "deepseek-v4-pro",
+    });
+
+    expect(out.data).toEqual({ a: 9 });
+    expect(out.modelResolutionSource).toBe("requested_fallback");
+    expect(out.reportedModel).toBeUndefined();
   });
 
   it("records a reviewed alias for text generation as an upstream identity", async () => {

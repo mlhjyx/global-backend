@@ -722,7 +722,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   private async parseChatCompletionStream(
     response: Response,
     model: string,
-  ): Promise<{ body: ChatCompletionBody; streamedModels: readonly string[] }> {
+  ): Promise<{ body: ChatCompletionBody; streamedModels: readonly unknown[] }> {
     const invalid = (reason: string): never => {
       throw new ProviderOutputError(
         `${this.id} ${model}: ${reason}`,
@@ -750,8 +750,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let content = "";
     let chunks = 0;
     let finishReason: string | undefined;
-    let reportedModel: string | undefined;
-    const streamedModels = new Set<string>();
+    let lastNamedModel: string | undefined;
+    let contentModel: string | undefined;
+    let unnamedContentChunks = 0;
+    const streamedModels: unknown[] = [];
+    const seenModels = new Set<string>();
     let usage: ChatCompletionBody["usage"];
     for (const rawLine of text.split(/\r?\n/u)) {
       const line = rawLine.trim();
@@ -766,23 +769,43 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }
       if (event.error !== undefined) return invalid("stream carried an upstream error");
       chunks += 1;
-      if (typeof event.model === "string" && event.model) {
-        reportedModel = event.model;
-        streamedModels.add(event.model);
+      const model: unknown = (event as { model?: unknown }).model;
+      const named = model !== undefined && model !== null && model !== "";
+      if (named) {
+        if (typeof model !== "string") {
+          streamedModels.push(model); // a present non-string name fails the gate
+        } else {
+          lastNamedModel = model;
+          if (!seenModels.has(model)) {
+            seenModels.add(model);
+            streamedModels.push(model);
+          }
+        }
       }
       if (event.usage) usage = event.usage;
       const choice = event.choices?.[0];
-      if (typeof choice?.delta?.content === "string") content += choice.delta.content;
+      const piece = typeof choice?.delta?.content === "string" ? choice.delta.content : "";
+      if (piece) {
+        content += piece;
+        if (!named) unnamedContentChunks += 1;
+        else if (contentModel === undefined && typeof model === "string") {
+          contentModel = model;
+        }
+      }
       if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
     }
     if (chunks === 0) return invalid("stream carried no completion chunk");
+    // Provenance names the model that produced the content. Content on chunks
+    // that named no model leaves the upstream identity unproven.
+    const reportedModel =
+      unnamedContentChunks > 0 ? undefined : (contentModel ?? lastNamedModel);
     return {
       body: {
         choices: [{ message: { content }, finish_reason: finishReason }],
         ...(usage ? { usage } : {}),
         ...(reportedModel ? { model: reportedModel } : {}),
       },
-      streamedModels: [...streamedModels],
+      streamedModels,
     };
   }
 
@@ -903,7 +926,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             ctx,
             opts.model,
           ),
-          streamedModels: [] as readonly string[],
+          streamedModels: [] as readonly unknown[],
         };
     const bodyUsage = {
       inputTokens: json.usage?.prompt_tokens,
@@ -911,7 +934,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    // A stream names its model on every chunk. Each name must pass the gate,
+    // Every model name a stream carries, string or not, must pass the gate;
     // otherwise content from an untrusted model could ride under a trusted
     // name carried only by a later chunk.
     for (const streamedModel of streamedModels) {
