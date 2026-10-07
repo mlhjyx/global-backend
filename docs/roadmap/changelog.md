@@ -13,6 +13,12 @@
 - 8 个 flash 档获客任务（企业理解 3 项、`discovery.extract_company`、`discovery.classify_trade_role`、`discovery.extract_list`、`contact.find_decision_makers`、`taxonomy.normalize`）改为经 `ACQUISITION_FLASH_TIER_MODEL` 请求 `deepseek-v4-pro`。xin 网关的扣费日志显示 flash 请求与 pro 请求都按倍率 37.5 扣费、都由上游 pro 服务，所以真实成本与速度不变。`maxCostCents` 不变：后端按自身价目表结算，与网关计价相差很大，另行对齐。这是针对唯一部署的网关的固定选择，有第二个部署之前要改成按部署配置。核验脚本 `verify-broker-closure.mts` 改为从任务注册表取模型。
 - 部署注意：无结算调用的预算操作键含请求模型名，工作区报价修订号含 `requestedAlias`。换镜像前须确认没有在途的获客工作流和待重试的授权，否则在途调用可能以新键再发一次。
 - 测试：相对 main 为红的有别名解析 2 项、provider 3 项（前缀名流式、日期名非流式、文本生成记录上游名）、任务合同表 1 项（改为 pro，并补上 `discovery.classify_trade_role`）。「混合模型族的流被拒」「真实混合流记录内容块的别名」「非字符串模型名被拒」「内容块无名时不声称上游身份」在前一版实现上为红。另有 7 项负向守护（缺传输或错传输 3、其他模型族 1、pro 冒充 flash 2、整段别的模型族的流 1）修复前后都应为绿。
+## 2026-10-07 · Give discovery query execution and the fit pass a 15-minute activity timeout
+
+- 起因（2026-10-07 xin 实测与审查）：获客任务改用 deepseek-v4-pro 之后，发现工作流里的查询执行要串行跑抽取批次与分类归一，资格判定逐家调用一次模型，都会超过原来 2 分钟的活动超时。超时后活动重试，撞上没有结果的重放，整个 run 失败。
+- 改动：这两个活动改走 15 分钟超时的代理，重试次数不变，仍为 3 次。其余活动仍为 2 分钟，信号富集等慢活动仍为 30 分钟。活动类型与输入不变，当前没有进行中的发现工作流。
+- 撤回了本 PR 第一版的「单项模型失败只跳过」。审查发现它在受治理的血缘校验下照样中止，重放时只是把失败推迟一步，还会把额度耗尽这类系统性故障变成逐家扣费、没有结果也没有失败原因的空跑。共同根因是预算账本分不清「已知失败」和「结果丢失」，另行设计。
+- 测试：新增按语法树核对每个活动所用超时的测试 2 项，修改前为红。
 
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 

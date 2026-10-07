@@ -30,6 +30,14 @@ const acts = proxyActivities<DiscoveryActivities>({
   retry: { maximumAttempts: 3 },
 });
 
+// Query execution and the per-company fit pass make deepseek-v4-pro calls one
+// after another (extraction batches, taxonomy terms, one fit call per company),
+// which outruns the 2-minute default and turns into replay failures on retry.
+const modelActs = proxyActivities<DiscoveryActivities>({
+  startToCloseTimeout: '15 minutes',
+  retry: { maximumAttempts: 3 },
+});
+
 // 信号富集是**慢活动**（抓官网/sitemap，逐家数十秒）：单独长超时代理，绝不用上面的 2 分钟超时
 // （否则会超时重试整段富集）。工作量有界（SIGNAL_ENRICH_LIMIT 家 × 逐家有 AbortSignal 超时），30 分钟足够。
 const signalActs = proxyActivities<DiscoveryActivities>({
@@ -96,7 +104,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const { queries } = await acts.loadPlanQueries({ workspaceId, planId, ...authorityArgs });
   for (const [queryOrdinal, query] of queries.entries()) {
     try {
-      const r = await acts.executeQuery(
+      const r = await modelActs.executeQuery(
         usesQueryReceipts
           ? {
               workspaceId,
@@ -199,7 +207,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   }
 
   // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
-  const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
+  const fit = await modelActs.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
 
   // 富集（Waterfall 富化段）：只给过了本 run ICP fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
   const enrich = await acts.enrichRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
