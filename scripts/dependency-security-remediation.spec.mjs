@@ -254,6 +254,7 @@ const SECURITY_FLOORS = Object.freeze(
     { name: "axios", floor: "1.20.0" },
     { name: "brace-expansion", from: "4.0.0", floor: "5.0.12" },
     { name: "http-cache-semantics", floor: "4.3.0" },
+    { name: "sharp", floor: "0.35.5" },
   ].map((entry) => Object.freeze(entry)),
 );
 
@@ -285,6 +286,7 @@ const VULNERABLE_PREDECESSORS = Object.freeze([
   "brace-expansion@5.0.9",
   "smol-toml@1.7.1",
   "http-cache-semantics@4.2.0",
+  "sharp@0.35.4",
 ]);
 
 function resolvedPackageVersions(lockfile) {
