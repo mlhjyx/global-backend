@@ -19,6 +19,20 @@ const TRUSTED_MODEL_IDENTITY_ALIASES: Readonly<
       transport: 'google-generate-content',
     },
   ]),
+  // OpenOx (observed 2026-10-07): the same DeepSeek v4 pro model is reported
+  // with a provider prefix in stream chunks and as a dated GA build in plain
+  // chat-completions bodies. Any other name, including another vendor family,
+  // still fails closed.
+  'deepseek-v4-pro': Object.freeze([
+    {
+      reportedModel: 'deepseek.deepseek-v4-pro',
+      transport: 'openai-chat-completions',
+    },
+    {
+      reportedModel: 'deepseek-v4-pro-ga-260813',
+      transport: 'openai-chat-completions',
+    },
+  ]),
 });
 
 const REPORTED_MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
