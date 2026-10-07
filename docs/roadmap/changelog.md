@@ -4,6 +4,16 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-07 · Retry an ICP design or query plan that never reached a provider
+
+- 起因（2026-10-07 xin 实测）：工作区预算账户的键是「用途:主体类型:主体 ID:请求摘要」，同一公司或 ICP 的请求摘要恒定。第一次请求一旦开户，之后任何新 Grant 都在 `open_authorized_tool_budget_v1` 报 `EXECUTION_BUDGET_GRANT_REUSED`。例如生成 ICP 时企业事实还没审批，或生成查询计划时 ICP 还没激活：Grant 已消费、账户已开，这个公司或 ICP 就再也生成不了。
+- 对 `icp.design` 与 `icp.query_plan`：消费新 Grant 后，在同一事务里改开 `原键:retry:<本次 authority id>`。条件是同一请求之前的每个账户都满足两点：所有操作都是派发前释放的（`RELEASED`），或者根本没有操作；对应 Grant 已超过账本自己的 60 秒容差，规则与 `execution_budget_authority_time_state` 的 EXPIRED 分支相同。只要有一笔操作结算过，或者还在 `RESERVED` / `RESULT_UNKNOWN`，就维持原键，数据库照旧拒收。结算过的失败可能是超时、524 或断流，上游结果未知，所以这类调用绝不会因重试再付一次钱。
+- 已派发后才失败的请求仍会锁住。10-06 那次查询计划失败属于这一类（模型身份不符），它的直接原因已由 #596 修复。彻底解决要让请求标识「第几次尝试」，需要与 GrowthOS 一起改协议，另行处理。
+- 并发与时间竞态：判定只在 READ COMMITTED 事务里进行，其他隔离级别直接维持原键。先取原账户的账本锁，也就是预留、结算、释放、关账共用的 `tool-budget-account` 咨询锁，同一请求的所有重试都在这里排队。然后用新快照列出之前的 Grant，按顺序取它们账户的锁，按精确键读状态；查询走唯一索引和 `(workspace_id, purpose, expires_at)` 索引，不再前缀扫描整个工作区的账户。换户前把之前仍开着的账户强制关闭，排在锁后面、沿用旧语句时间戳的预留会报 `TOOL_BUDGET_ACCOUNT_UNAVAILABLE`，不会再花钱。
+- 判定移到独立模块 `execution-budget-retry-account.ts`，仓储回到 800 行以内。删掉了仓储里第四份 200 字符上限的私有副本，超长键由绑定解析和开户函数显式拒绝。
+- 预算绑定校验只为这两个用途多接受一种键：派生键加上它自己的 authority id。其余用途的行为与查询次数不变；数据库无迁移。
+- 测试：重试判定单测 13 项，仓储、绑定、服务单测随之更新。新增真库测试 5 项，以 app_user 在 RLS 下执行，CI 在 Postgres 步骤显式运行：60 秒容差边界、已结算或仍预留时不换户、旧账户关闭后无法再预留、并发重试只有一次换户、REPEATABLE READ 下拒绝换户。本地对实现做了 5 种变异：去掉容差、把已结算算作安全、去掉关账、去掉原账户锁、去掉隔离检查，真库测试全部变红。
+
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 
 - 10-01 重绑之后，官方 npm 审计库新收录 2 条生产 advisory，都只在 site-renderer 的 astro 链上：GHSA-ch52-4w7c-c8xp（高危，`http-cache-semantics <=4.2.0`，未列修复版本：max-stale 处理可能把一个用户的缓存响应发给另一个用户），main 的定时 freshness canary 自 10-03（ac024fd5）起报 `BASELINE_STALE`；GHSA-r4xh-jqrq-34v2（中危，`smol-toml <=1.8.0`，1.9.0 修复：构造的 TOML 让 `parse()` 退化为二次方时间），10-05 23:41Z 才发布。

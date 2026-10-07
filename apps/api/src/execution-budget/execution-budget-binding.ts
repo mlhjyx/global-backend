@@ -22,6 +22,39 @@ const WORKSPACE_PURPOSES = new Set<ExecutionBudgetPurpose>([
   'contact.verify',
 ]);
 
+/**
+ * Purposes whose successful model operation always leaves a durable result.
+ * Only these may move a request that never reached a provider onto a fresh
+ * retry account; see execution-budget-retry-account.ts.
+ */
+export const RETRYABLE_WORKSPACE_PURPOSES: ReadonlySet<ExecutionBudgetPurpose> =
+  new Set<ExecutionBudgetPurpose>(['icp.design', 'icp.query_plan']);
+
+export function retryWorkspaceAccountKey(
+  primaryAccountKey: string,
+  authorityId: string,
+): string {
+  return `${primaryAccountKey}:retry:${authorityId}`;
+}
+
+/**
+ * A workspace binding may carry only the account key derived from its grant
+ * or, for a retryable purpose, that key suffixed with its own authority id.
+ */
+export function isAllowedWorkspaceAccountKey(input: {
+  readonly purpose: ExecutionBudgetPurpose;
+  readonly derivedAccountKey: string;
+  readonly accountKey: string;
+  readonly authorityId: string;
+}): boolean {
+  return (
+    input.accountKey === input.derivedAccountKey ||
+    (RETRYABLE_WORKSPACE_PURPOSES.has(input.purpose) &&
+      input.accountKey ===
+        retryWorkspaceAccountKey(input.derivedAccountKey, input.authorityId))
+  );
+}
+
 export interface ExecutionBudgetBinding {
   readonly authorityId: string;
   readonly replay: boolean;
@@ -98,7 +131,12 @@ export function parseExecutionBudgetBinding(
     record.requestSha256,
   ].join(':');
   if (
-    record.accountKey !== expectedAccountKey ||
+    !isAllowedWorkspaceAccountKey({
+      purpose,
+      derivedAccountKey: expectedAccountKey,
+      accountKey: record.accountKey,
+      authorityId: record.authorityId,
+    }) ||
     (expected.scopeKey !== undefined && record.scopeKey !== expected.scopeKey) ||
     (expected.purpose !== undefined && purpose !== expected.purpose) ||
     (expected.subjectType !== undefined && record.subjectType !== expected.subjectType)

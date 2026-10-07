@@ -9,6 +9,7 @@ import {
   type PlatformExecutionBudgetRunExpectation,
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
+import { resolveRetryableWorkspaceAccountKey } from './execution-budget-retry-account';
 
 export const EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE = Symbol(
   'EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE',
@@ -20,6 +21,8 @@ export interface ExecutionBudgetAuthorityPersistenceResult {
 }
 
 export interface ExecutionBudgetWorkspaceAccountPersistenceResult extends ExecutionBudgetAuthorityPersistenceResult {
+  /** The account actually opened: the grant-derived key or its retry key. */
+  accountKey: string;
   accountId: string;
   generation: number;
   authorizedCapMicrousd: bigint;
@@ -318,6 +321,7 @@ function numericDateToDatabaseTimestamp(value: number): Date {
 function parseAuthorizedOpenRow(
   rows: readonly AuthorizedOpenRow[],
   consumption: ExecutionBudgetAuthorityPersistenceResult,
+  accountKey: string,
 ): ExecutionBudgetWorkspaceAccountPersistenceResult {
   const row = rows[0];
   if (
@@ -335,6 +339,7 @@ function parseAuthorizedOpenRow(
   }
   return {
     ...consumption,
+    accountKey,
     accountId: row.account_id,
     generation: row.generation,
     authorizedCapMicrousd: row.authorized_cap_microusd,
@@ -524,13 +529,22 @@ export class ExecutionBudgetAuthorityRepository {
       if (consumption.replay) {
         throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED');
       }
+      const openAccountKey = await resolveRetryableWorkspaceAccountKey(tx, {
+        scopeKey: authority.workspaceId,
+        authorityId: consumption.authorityId,
+        purpose: authority.purpose,
+        subjectType: authority.subjectType,
+        subjectId: authority.subjectId,
+        requestSha256: authority.requestSha256,
+        primaryAccountKey: accountKey,
+      });
       const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
         Prisma.sql`SELECT * FROM open_tool_budget(
           ${authority.workspaceId}, ${consumption.authorityId}::uuid,
-          ${accountKey}, ${true}
+          ${openAccountKey}, ${true}
         )`,
       );
-      return parseAuthorizedOpenRow(opened, consumption);
+      return parseAuthorizedOpenRow(opened, consumption, openAccountKey);
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }
