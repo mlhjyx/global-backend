@@ -4,6 +4,15 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
+
+- 起因（2026-10-07 xin 实测）：获客分组唯一的网关渠道（OpenOx）对同一个 `deepseek-v4-pro` 会报三种名字：`deepseek-v4-pro`、流式块里常见的 `deepseek.deepseek-v4-pro`、非流式应答里常见的 `deepseek-v4-pro-ga-260813`。身份闸门只认精确名，ICP 设计等 pro 调用因此间歇以 `ProviderIdentityError` 失败，而网关侧调用其实已正常结束。该渠道还把 `deepseek-v4-flash` 映射到 pro、应答报 pro 名，所以 flash 任务 100% 被拒，发现 run 跑不出结果。
+- `model-identity.ts` 为 `deepseek-v4-pro` 登记这两个已审别名，只在 `openai-chat-completions` 传输下成立；其他名字（含 `gpt-5.6-*`）照旧失败关闭，pro 的名字也不能冒充 flash 请求。别名表是全局的，结算路径上请求 `deepseek-v4-pro` 的 chat-completions 调用同样适用，包括建站默认关闭的回退路由；三个名字指同一模型，结算仍按请求名。
+- 流式应答里出现的每个模型名都要过身份闸门，非字符串的名字同样拒收。此前重组只保留最后一块的模型名，内容块来自别的模型族、最后一块报已审别名时会被当作 pro 放行；这个缺口自 #593 起就在，本次加别名后一并补上。来源记录取产出内容那几块的模型名；只要有内容块没报模型名，就不声称上游身份，记为 `requested_fallback`。
+- provider 的文本与结构化生成记录来源时，用与 `complete()` 相同的传输（收拢为 `transportFor`），别名调用如实记为 `upstream_response` 并保留上游名字；`resolutionProvenance` 的传输参数改为必填，漏传即编译失败。
+- 8 个 flash 档获客任务（企业理解 3 项、`discovery.extract_company`、`discovery.classify_trade_role`、`discovery.extract_list`、`contact.find_decision_makers`、`taxonomy.normalize`）改为经 `ACQUISITION_FLASH_TIER_MODEL` 请求 `deepseek-v4-pro`。xin 网关的扣费日志显示 flash 请求与 pro 请求都按倍率 37.5 扣费、都由上游 pro 服务，所以真实成本与速度不变。`maxCostCents` 不变：后端按自身价目表结算，与网关计价相差很大，另行对齐。这是针对唯一部署的网关的固定选择，有第二个部署之前要改成按部署配置。核验脚本 `verify-broker-closure.mts` 改为从任务注册表取模型。
+- 部署注意：无结算调用的预算操作键含请求模型名，工作区报价修订号含 `requestedAlias`。换镜像前须确认没有在途的获客工作流和待重试的授权，否则在途调用可能以新键再发一次。
+- 测试：相对 main 为红的有别名解析 2 项、provider 3 项（前缀名流式、日期名非流式、文本生成记录上游名）、任务合同表 1 项（改为 pro，并补上 `discovery.classify_trade_role`）。「混合模型族的流被拒」「真实混合流记录内容块的别名」「非字符串模型名被拒」「内容块无名时不声称上游身份」在前一版实现上为红。另有 7 项负向守护（缺传输或错传输 3、其他模型族 1、pro 冒充 flash 2、整段别的模型族的流 1）修复前后都应为绿。
 ## 2026-10-07 · Give discovery query execution and the fit pass a 15-minute activity timeout
 
 - 起因（2026-10-07 xin 实测与审查）：获客任务改用 deepseek-v4-pro 之后，发现工作流里的查询执行要串行跑抽取批次与分类归一，资格判定逐家调用一次模型，都会超过原来 2 分钟的活动超时。超时后活动重试，撞上没有结果的重放，整个 run 失败。
