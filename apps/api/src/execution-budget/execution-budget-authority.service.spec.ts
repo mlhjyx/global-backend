@@ -75,6 +75,7 @@ function serviceHarness(options?: {
   readonly replay?: boolean;
   readonly includeUnexpectedRawToken?: boolean;
   readonly subjectId?: string;
+  readonly accountKey?: string;
 }) {
   const baseAuthority = {
     ...verifiedAuthority(),
@@ -91,6 +92,7 @@ function serviceHarness(options?: {
     : vi.fn().mockResolvedValue({
         authorityId: AUTHORITY_ID,
         replay: options?.replay ?? false,
+        accountKey: options?.accountKey ?? ACCOUNT_KEY,
         accountId: '8cf66f2a-1780-453e-8d7d-f70e36cb22a6',
         generation: 1,
         authorizedCapMicrousd: 2_000_000n,
@@ -222,6 +224,28 @@ describe('ExecutionBudgetAuthorityService', () => {
       }),
     ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
     expect(consumeWorkspaceAndOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExecutionBudgetAuthorityService retry accounts', () => {
+  it('binds the retry account that persistence opened for a retryable purpose', async () => {
+    const retryAccountKey = `${ACCOUNT_KEY}:retry:${AUTHORITY_ID}`;
+    const { service } = serviceHarness({ accountKey: retryAccountKey });
+
+    await expect(service.consumeWorkspaceGrant(input())).resolves.toMatchObject({
+      authorityId: AUTHORITY_ID,
+      accountKey: retryAccountKey,
+    });
+  });
+
+  it('rejects a persisted account key that is neither derived from the grant nor its own retry', async () => {
+    const { service } = serviceHarness({
+      accountKey: `${ACCOUNT_KEY}:retry:9a0d4c55-3a31-4b8e-9d55-6f1d2c3b4a59`,
+    });
+
+    await expect(service.consumeWorkspaceGrant(input())).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID'),
+    );
   });
 });
 

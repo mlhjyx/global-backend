@@ -2,6 +2,11 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  RETRYABLE_WORKSPACE_PURPOSES,
+  retryWorkspaceAccountKey,
+  retryWorkspaceAccountKeyPrefix,
+} from './execution-budget-binding';
+import {
   assertAuthorityPurposeShape,
   assertPlatformExecutionBudgetRunExpectation,
   ExecutionBudgetGrantError,
@@ -20,6 +25,8 @@ export interface ExecutionBudgetAuthorityPersistenceResult {
 }
 
 export interface ExecutionBudgetWorkspaceAccountPersistenceResult extends ExecutionBudgetAuthorityPersistenceResult {
+  /** The account actually opened: the grant-derived key or its retry key. */
+  accountKey: string;
   accountId: string;
   generation: number;
   authorizedCapMicrousd: bigint;
@@ -318,6 +325,7 @@ function numericDateToDatabaseTimestamp(value: number): Date {
 function parseAuthorizedOpenRow(
   rows: readonly AuthorizedOpenRow[],
   consumption: ExecutionBudgetAuthorityPersistenceResult,
+  accountKey: string,
 ): ExecutionBudgetWorkspaceAccountPersistenceResult {
   const row = rows[0];
   if (
@@ -335,10 +343,90 @@ function parseAuthorizedOpenRow(
   }
   return {
     ...consumption,
+    accountKey,
     accountId: row.account_id,
     generation: row.generation,
     authorizedCapMicrousd: row.authorized_cap_microusd,
   };
+}
+
+const MAX_WORKSPACE_ACCOUNT_KEY_LENGTH = 200;
+
+type RetryCandidateRow = {
+  account_key: string;
+  authority_id: string;
+  authority_expired: boolean;
+  unresolved: boolean;
+  has_result: boolean;
+};
+
+function isRetryCandidateRow(row: unknown): row is RetryCandidateRow {
+  if (!row || typeof row !== 'object') return false;
+  const candidate = row as Record<string, unknown>;
+  return (
+    typeof candidate.account_key === 'string' &&
+    isExecutionBudgetUuid(candidate.authority_id) &&
+    typeof candidate.authority_expired === 'boolean' &&
+    typeof candidate.unresolved === 'boolean' &&
+    typeof candidate.has_result === 'boolean'
+  );
+}
+
+/**
+ * A workspace account is keyed by its grant's request, so one known failure
+ * used to lock the subject for good: every later grant for the same request
+ * hit GRANT_REUSED. For purposes whose success always leaves a durable result,
+ * open a fresh account suffixed with the new authority only when every earlier
+ * account for this request is proven settled without a result and its grant
+ * has expired. A reserved or result-unknown operation, any durable result or a
+ * still-valid earlier grant keeps the original key, so the SQL guard rejects
+ * the request exactly as before and an unknown outcome is never paid twice.
+ * The advisory lock serialises concurrent retries of the same request.
+ */
+async function resolveRetryableWorkspaceAccountKey(
+  tx: Prisma.TransactionClient,
+  scopeKey: string,
+  authorityId: string,
+  primaryAccountKey: string,
+): Promise<string> {
+  const retryAccountKey = retryWorkspaceAccountKey(primaryAccountKey, authorityId);
+  if (retryAccountKey.length > MAX_WORKSPACE_ACCOUNT_KEY_LENGTH) {
+    return primaryAccountKey;
+  }
+  await tx.$queryRaw(
+    Prisma.sql`SELECT 1 AS locked FROM pg_advisory_xact_lock(
+      hashtextextended(${`workspace-account-retry:${scopeKey}:${primaryAccountKey}`}, 0)
+    )`,
+  );
+  const retryPrefix = retryWorkspaceAccountKeyPrefix(primaryAccountKey);
+  const rows = await tx.$queryRaw<unknown[]>(
+    Prisma.sql`SELECT account."account_key" AS account_key,
+        account."authority_id"::text AS authority_id,
+        (authority."expires_at" <= statement_timestamp()) AS authority_expired,
+        COALESCE(bool_or(operation."status" IN ('RESERVED', 'RESULT_UNKNOWN')), false) AS unresolved,
+        COALESCE(bool_or(operation."result_digest" IS NOT NULL), false) AS has_result
+      FROM "tool_budget_account" account
+      JOIN "execution_budget_authority" authority
+        ON authority."scope_key" = account."scope_key"
+       AND authority."id" = account."authority_id"
+      LEFT JOIN "tool_budget_operation" operation
+        ON operation."scope_key" = account."scope_key"
+       AND operation."account_id" = account."id"
+     WHERE account."scope_key" = ${scopeKey}
+       AND (account."account_key" = ${primaryAccountKey}
+            OR left(account."account_key", char_length(${retryPrefix})) = ${retryPrefix})
+     GROUP BY account."account_key", account."authority_id", authority."expires_at"`,
+  );
+  if (rows.length === 0) return primaryAccountKey;
+  if (!rows.every(isRetryCandidateRow)) throw unavailable();
+  const blocked = rows.some(
+    (row) =>
+      row.authority_id === authorityId ||
+      row.unresolved ||
+      row.has_result ||
+      !row.authority_expired,
+  );
+  return blocked ? primaryAccountKey : retryAccountKey;
 }
 
 function assertWorkspaceAuthority(
@@ -524,13 +612,21 @@ export class ExecutionBudgetAuthorityRepository {
       if (consumption.replay) {
         throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED');
       }
+      const openAccountKey = RETRYABLE_WORKSPACE_PURPOSES.has(authority.purpose)
+        ? await resolveRetryableWorkspaceAccountKey(
+            tx,
+            authority.workspaceId,
+            consumption.authorityId,
+            accountKey,
+          )
+        : accountKey;
       const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
         Prisma.sql`SELECT * FROM open_tool_budget(
           ${authority.workspaceId}, ${consumption.authorityId}::uuid,
-          ${accountKey}, ${true}
+          ${openAccountKey}, ${true}
         )`,
       );
-      return parseAuthorizedOpenRow(opened, consumption);
+      return parseAuthorizedOpenRow(opened, consumption, openAccountKey);
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }

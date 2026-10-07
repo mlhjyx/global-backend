@@ -8,7 +8,10 @@ import {
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
 import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
-import type { ExecutionBudgetBinding } from './execution-budget-binding';
+import {
+  isAllowedWorkspaceAccountKey,
+  type ExecutionBudgetBinding,
+} from './execution-budget-binding';
 export type { ExecutionBudgetBinding } from './execution-budget-binding';
 
 const MAX_ACCOUNT_KEY_LENGTH = 200;
@@ -94,14 +97,25 @@ function executionBudgetBinding(
   authority: VerifiedExecutionBudgetAuthority,
   authorityId: string,
   replay: boolean,
+  openedAccountKey: string,
 ): ExecutionBudgetBinding {
   const { accountKey, scopeKey, requestSha256 } =
     workspaceBindingIdentity(authority);
+  if (
+    !isAllowedWorkspaceAccountKey({
+      purpose: authority.purpose,
+      derivedAccountKey: accountKey,
+      accountKey: openedAccountKey,
+      authorityId,
+    })
+  ) {
+    throw invalid();
+  }
   return Object.freeze({
     authorityId,
     replay,
     scopeKey,
-    accountKey,
+    accountKey: openedAccountKey,
     purpose: authority.purpose,
     subjectType: authority.subjectType,
     subjectId: authority.subjectId,
@@ -146,6 +160,7 @@ export class ExecutionBudgetAuthorityService {
       authority,
       consumed.authorityId,
       consumed.replay,
+      consumed.accountKey,
     );
   }
 
@@ -161,7 +176,12 @@ export class ExecutionBudgetAuthorityService {
         exact,
         accountKey,
       );
-    return executionBudgetBinding(exact, consumed.authorityId, consumed.replay);
+    return executionBudgetBinding(
+      exact,
+      consumed.authorityId,
+      consumed.replay,
+      consumed.accountKey,
+    );
   }
 }
 

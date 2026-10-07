@@ -4,6 +4,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-07 · Retry an ICP design or query plan after a proven failure
+
+- 起因（2026-10-07 xin 实测）：工作区预算账户的键是「用途:主体类型:主体 ID:请求摘要」，同一 ICP 的查询计划请求摘要恒定。第一次调用失败后，这个账户永久绑定在第一把 Grant 上，之后任何新 Grant 都在 `open_authorized_tool_budget_v1` 报 `EXECUTION_BUDGET_GRANT_REUSED`，于是这个 ICP 再也生成不了查询计划，只能新建一个卖方和 ICP 绕开。
+- 对 `icp.design` 与 `icp.query_plan`（成功必写持久结果的两个 HTTP 模型操作）：消费新 Grant 后，在同一事务里先按原键取事务级咨询锁，再查原账户和已有的重试账户。只有全部账户都已证实失败（操作都已结算或释放、没有 `RESERVED` / `RESULT_UNKNOWN`、没有持久结果）且各自的 Grant 都已过期，才改开 `原键:retry:<本次 authority id>`；否则维持原键，数据库照旧拒收。所以「结果未知时绝不为同一次操作付第二次钱」的保证不变，并发的两次重试也只会成功一个。
+- 预算绑定校验（`parseExecutionBudgetBinding` 与服务层）只为这两个用途多接受一种键：派生键加上它自己的 authority id。别的 authority、裸后缀、别的后缀、不可重试的用途一律拒绝。其余用途（企业理解、发现 run、联系点验证）的行为与查询次数完全不变；数据库无迁移。
+- 测试：绑定 5 例、仓储 7 例（含原有 2 例改为按 SQL 文本分发）、服务 2 例；实现前 12 项为红。另以 app_user 在真库只读执行同一条候选查询：RLS 只见本工作区，10-06 失败的查询计划账户被判为「已证实失败、Grant 已过期」。
+
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 
 - 10-01 重绑之后，官方 npm 审计库新收录 2 条生产 advisory，都只在 site-renderer 的 astro 链上：GHSA-ch52-4w7c-c8xp（高危，`http-cache-semantics <=4.2.0`，未列修复版本：max-stale 处理可能把一个用户的缓存响应发给另一个用户），main 的定时 freshness canary 自 10-03（ac024fd5）起报 `BASELINE_STALE`；GHSA-r4xh-jqrq-34v2（中危，`smol-toml <=1.8.0`，1.9.0 修复：构造的 TOML 让 `parse()` 退化为二次方时间），10-05 23:41Z 才发布。

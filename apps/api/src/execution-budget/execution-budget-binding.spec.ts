@@ -49,3 +49,47 @@ describe('parseExecutionBudgetBinding', () => {
     ).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
   });
 });
+
+describe('parseExecutionBudgetBinding retry accounts', () => {
+  const ICP_ID = '40000000-0000-4000-8000-000000000004';
+  const OTHER_AUTHORITY_ID = '50000000-0000-4000-8000-000000000005';
+  const primary = `icp.query_plan:icp:${ICP_ID}:${REQUEST_SHA256}`;
+  const retryBinding = Object.freeze({
+    authorityId: AUTHORITY_ID,
+    replay: false,
+    scopeKey: WORKSPACE_ID,
+    accountKey: `${primary}:retry:${AUTHORITY_ID}`,
+    purpose: 'icp.query_plan',
+    subjectType: 'icp',
+    subjectId: ICP_ID,
+    requestSha256: REQUEST_SHA256,
+  }) satisfies ExecutionBudgetBinding;
+  const expectation = {
+    scopeKey: WORKSPACE_ID,
+    purpose: 'icp.query_plan',
+    subjectType: 'icp',
+  } as const;
+
+  it('accepts a retry account suffixed with its own authority for a retryable purpose', () => {
+    expect(parseExecutionBudgetBinding(retryBinding, expectation)).toEqual(retryBinding);
+  });
+
+  it.each([
+    ['another authority', `${primary}:retry:${OTHER_AUTHORITY_ID}`],
+    ['a bare retry suffix', `${primary}:retry:`],
+    ['an unrelated suffix', `${primary}:copy:${AUTHORITY_ID}`],
+  ])('rejects a retry account carrying %s', (_case, accountKey) => {
+    expect(() =>
+      parseExecutionBudgetBinding({ ...retryBinding, accountKey }, expectation),
+    ).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+  });
+
+  it('rejects a retry suffix on a purpose that is not retryable', () => {
+    expect(() =>
+      parseExecutionBudgetBinding(
+        { ...binding, accountKey: `${binding.accountKey}:retry:${AUTHORITY_ID}` },
+        { scopeKey: WORKSPACE_ID, purpose: 'understanding.run', subjectType: 'company' },
+      ),
+    ).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+  });
+});
