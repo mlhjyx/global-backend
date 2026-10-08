@@ -34,7 +34,7 @@ describe('workspace execution technical envelope catalog', () => {
         logicalInvocations: 1,
         structuredWireUpperBound: 2,
         maxCostCents: 40,
-        maxOutputTokens: 4_096,
+        maxOutputTokens: 8_192,
       }),
     ]);
     expect(envelope.policy.tools).toEqual([]);
