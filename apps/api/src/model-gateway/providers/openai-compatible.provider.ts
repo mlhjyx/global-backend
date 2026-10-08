@@ -394,7 +394,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${model}: structured output is not valid JSON`,
         usage,
-        { provider: this.id, ...provenance },
+        { provider: this.id, ...provenance, reasonCode: "STRUCTURED_OUTPUT_NOT_JSON" },
       );
     }
   }
@@ -717,24 +717,31 @@ export class OpenAICompatibleProvider implements ModelProvider {
    * Reassembles an SSE chat-completions stream into the non-streamed body shape.
    * Fails closed on unreadable bodies, malformed data lines, upstream error
    * events and streams without any completion chunk. An upstream that ignores
-   * `stream` and answers with a plain JSON body is accepted as such.
+   * `stream` and answers with a plain JSON body is accepted as such. A stream
+   * that never carried a finish reason was cut short (new-api still closes it
+   * with a locally counted usage chunk), which the caller reports once usage
+   * and identity are known.
    */
   private async parseChatCompletionStream(
     response: Response,
     model: string,
-  ): Promise<{ body: ChatCompletionBody; streamedModels: readonly unknown[] }> {
-    const invalid = (reason: string): never => {
+  ): Promise<{
+    body: ChatCompletionBody;
+    streamedModels: readonly unknown[];
+    truncated: boolean;
+  }> {
+    const invalid = (reason: string, reasonCode: string): never => {
       throw new ProviderOutputError(
         `${this.id} ${model}: ${reason}`,
         undefined,
-        { provider: this.id, model },
+        { provider: this.id, model, reasonCode },
       );
     };
     let text: string;
     try {
       text = await response.text();
     } catch {
-      return invalid("stream body unavailable");
+      return invalid("stream body unavailable", "CHAT_COMPLETIONS_STREAM_UNREADABLE");
     }
     const trimmed = text.trimStart();
     if (trimmed.startsWith("{")) {
@@ -742,9 +749,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
         return {
           body: JSON.parse(trimmed) as ChatCompletionBody,
           streamedModels: [],
+          truncated: false,
         };
       } catch {
-        return invalid("response body is not valid JSON");
+        return invalid("response body is not valid JSON", "CHAT_COMPLETIONS_BODY_NOT_JSON");
       }
     }
     let content = "";
@@ -765,9 +773,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
       try {
         event = JSON.parse(payload) as ChatCompletionStreamEvent;
       } catch {
-        return invalid("stream data line is not valid JSON");
+        return invalid("stream data line is not valid JSON", "CHAT_COMPLETIONS_STREAM_LINE_INVALID");
       }
-      if (event.error !== undefined) return invalid("stream carried an upstream error");
+      if (event.error !== undefined) {
+        return invalid("stream carried an upstream error", "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR");
+      }
       chunks += 1;
       const model: unknown = (event as { model?: unknown }).model;
       const named = model !== undefined && model !== null && model !== "";
@@ -794,7 +804,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }
       if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
     }
-    if (chunks === 0) return invalid("stream carried no completion chunk");
+    if (chunks === 0) {
+      return invalid("stream carried no completion chunk", "CHAT_COMPLETIONS_STREAM_EMPTY");
+    }
     // Provenance names the model that produced the content. Content on chunks
     // that named no model leaves the upstream identity unproven.
     const reportedModel =
@@ -806,6 +818,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         ...(reportedModel ? { model: reportedModel } : {}),
       },
       streamedModels,
+      truncated: finishReason === undefined,
     };
   }
 
@@ -821,7 +834,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         throw new ProviderOutputError(
           `${this.id} ${model}: response body is not valid JSON`,
           undefined,
-          { provider: this.id, model },
+          { provider: this.id, model, reasonCode: "CHAT_COMPLETIONS_BODY_NOT_JSON" },
         );
       }
       const usage = await this.settledUsage(
@@ -918,7 +931,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (!res.ok) {
       return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const { body: json, streamedModels } = stream
+    const { body: json, streamedModels, truncated } = stream
       ? await this.parseChatCompletionStream(res, opts.model)
       : {
           body: await this.parseResponseJson<ChatCompletionBody>(
@@ -927,6 +940,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             opts.model,
           ),
           streamedModels: [] as readonly unknown[],
+          truncated: false,
         };
     const bodyUsage = {
       inputTokens: json.usage?.prompt_tokens,
@@ -953,6 +967,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
       usage,
       false,
     );
+    if (truncated) {
+      // Half an answer is never a usable one: report the cut instead of
+      // letting the caller misread it as invalid JSON or an empty output.
+      throw new ProviderOutputError("CHAT_COMPLETIONS_STREAM_TRUNCATED", usage, {
+        provider: this.id,
+        ...resolutionProvenance(opts.model, reportedModel, "openai-chat-completions"),
+      });
+    }
     const finishReason = json.choices?.[0]?.finish_reason;
     if (
       finishReason !== undefined &&
@@ -1767,6 +1789,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         `${this.id} ${opts.model}: Anthropic structured response missing JSON tool output`,
         usage,
         {
+          reasonCode: "ANTHROPIC_TOOL_OUTPUT_MISSING",
           provider: this.id,
           ...resolutionProvenance(
             opts.model,

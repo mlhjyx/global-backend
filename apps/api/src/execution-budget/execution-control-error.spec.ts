@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
 import {
   ExecutionControlError,
+  RECOVERABLE_MODEL_FAILURE,
   isExecutionControlError,
 } from './execution-control-error';
+import {
+  ExternalActionDeniedError,
+  ProviderHttpError,
+  ProviderIdentityError,
+  ProviderOutputError,
+  ProviderSettlementError,
+  TaskOutputValidationError,
+} from '../model-gateway/providers/provider-output-error';
 
 describe('isExecutionControlError', () => {
   it('preserves a bounded structured code directly and through Temporal conversion', () => {
@@ -217,6 +226,62 @@ describe('isExecutionControlError', () => {
     expect(isExecutionControlError(new Error('ordinary provider failure'))).toBe(
       false,
     );
+  });
+
+  it('lets a caller with a fallback absorb an unusable model answer', () => {
+    // 2026-10-08 xin: one taxonomy.normalize answer that was not JSON failed the
+    // whole discovery run, because the rich error shape read as a control.
+    const failures = [
+      new ProviderOutputError(
+        'gateway deepseek-v4-pro: structured output is not valid JSON',
+        { inputTokens: 520, outputTokens: 11 },
+        { provider: 'gateway', model: 'deepseek-v4-pro', reportedModel: 'deepseek-v4-pro' },
+      ),
+      new ProviderOutputError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 2601 }),
+      new TaskOutputValidationError('task output hard gate rejected: x', { inputTokens: 1 }),
+    ];
+
+    for (const failure of failures) {
+      expect(isExecutionControlError(failure)).toBe(false);
+    }
+  });
+
+  it('keeps run-wide model failures, compliance denials and unknown settlements failing closed', () => {
+    // A substituted model or a failing gateway hits every call of a run:
+    // absorbing them per company would end the run with nothing judged.
+    expect(isExecutionControlError(new ProviderIdentityError('model identity mismatch', { inputTokens: 1 }))).toBe(true);
+    expect(
+      isExecutionControlError(new ProviderHttpError({ status: 502, provider: 'gateway', model: 'deepseek-v4-pro' })),
+    ).toBe(true);
+    expect(isExecutionControlError(new ExternalActionDeniedError({ inputTokens: 1 }))).toBe(true);
+    expect(
+      isExecutionControlError(new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN')),
+    ).toBe(true);
+  });
+
+  it('still finds a control failure behind an unusable model answer', () => {
+    const failure = new ProviderOutputError('repair call failed', undefined, {
+      cause: new ExecutionControlError('EXECUTION_BUDGET_GRANT_REUSED'),
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('does not trust a recoverable brand reached through an accessor', () => {
+    let getterCalls = 0;
+    const prototype = Object.defineProperty({}, RECOVERABLE_MODEL_FAILURE, {
+      get() {
+        getterCalls += 1;
+        return true;
+      },
+    });
+    const failure = Object.assign(Object.create(prototype) as object, {
+      message: 'ordinary-looking failure',
+      usage: { inputTokens: 1 },
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+    expect(getterCalls).toBe(0);
   });
 
   it('never executes an own getter and requires the caller to pass the hostile shape through', () => {

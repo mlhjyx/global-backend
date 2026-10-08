@@ -79,6 +79,20 @@
 - 验证：在 xin 的 Postgres 上用 text 形参的预备语句复现，旧写法分别报 `uuid = text`、`uuid > text`，加转换后正常执行。三个现有测试新增断言：锁 run 行和翻页条件的 SQL 在参数后带 `::uuid`；去掉转换时这三项失败。
 - 未做：在真库上跑发现链路的回归测试（CI 的 Postgres 步骤目前不覆盖这条链路），留作后续。
 
+## 2026-10-08 · One unusable model answer no longer fails a discovery run
+
+- 起因（2026-10-08 xin 实测）：
+  - 卖方 #14 的发现 run 启动 12 秒即失败。查询执行时给分类词归一的 `taxonomy.normalize` 调用，模型只回了 11 个 token，不是 JSON。归一器本来会把模型失败当作「没归一上」继续，但 `isExecutionControlError` 把 `ProviderOutputError` 判成了控制错误。原因是这个类带 `usage`、`callCount` 等字段，判定函数遇到不认识的形状一律从严。错误于是一路抛出，Temporal 重试时又被预算账本挡住（同一次调用已结算、没有可重放的结果），整个 run 失败。
+  - 同样的误判让公开网页抽取、Fit 判定、官网画像等处「单家失败不影响其余」的退路，在真实模型失败时一处都不生效。现有测试用的是普通 `Error`，所以没发现。
+  - 卖方 #13 的 ICP 设计报 `ProviderOutputError`，trace 里只有类名。查 new-api 日志才知道是上游 TLS 连接在第 140 秒断开（`scanner_error: tls: bad record MAC`），new-api 仍补发本地估算的用量块并正常结束流，后端把半截 JSON 当成了「模型输出不是 JSON」。
+- 改动：
+  - `ProviderOutputError` 与 `TaskOutputValidationError` 在原型上带「可恢复的模型失败」标记，`isExecutionControlError` 认这个标记：调用方有确定性退路时可以吸收这类错误。如果 `cause` 链里有控制错误，仍按控制错误处理；标记只认数据属性，访问器一律从严。
+  - 合规拦截（`ExternalActionDeniedError`）、结算未知（`ProviderSettlementError`）照旧是控制错误。身份不符（`ProviderIdentityError`）与网关 HTTP 错误也照旧失败即停：它们通常一次 run 里每个调用都会遇到，逐家吸收会让 run 跑完却一家都没判。
+  - 流式响应自始至终没有 `finish_reason` 时，报 `CHAT_COMPLETIONS_STREAM_TRUNCATED`，用量照带，结算不变。
+  - `ProviderOutputError` 增加 `reasonCode`：显式给定，或取消息开头的大写代码，否则为 `PROVIDER_OUTPUT_UNCLASSIFIED`，从不含模型文本。几处描述性消息补了代码（非 JSON、流不可读、修复被抑制、修复调用失败、修复后仍不合 schema 等）。`ai_trace.error_message` 从类名改为 `类名:原因码`。
+- 测试：判定函数 4 项（可恢复、从严的四类、`cause` 链里的控制错误、访问器伪造标记），截断流与各流形状的原因码，router trace 记原因码且不含 schema 细节，词表归一与官网画像遇真实模型失败时走退路。全量单测 8,951 项通过；唯一失败是已登记的负载假红 `browser-readiness-probe`，单独重跑 24 项全过。
+- 未做：吸收失败后若同一活动因别的原因重试，重放那次已结算的调用仍会被预算账本拒绝。要彻底解决，需要把失败也存成可重放的结果，留作后续。
+
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 
 - 起因（2026-10-07 xin 实测）：获客分组唯一的网关渠道（OpenOx）对同一个 `deepseek-v4-pro` 会报三种名字：`deepseek-v4-pro`、流式块里常见的 `deepseek.deepseek-v4-pro`、非流式应答里常见的 `deepseek-v4-pro-ga-260813`。身份闸门只认精确名，ICP 设计等 pro 调用因此间歇以 `ProviderIdentityError` 失败，而网关侧调用其实已正常结束。该渠道还把 `deepseek-v4-flash` 映射到 pro、应答报 pro 名，所以 flash 任务 100% 被拒，发现 run 跑不出结果。

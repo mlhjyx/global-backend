@@ -8,6 +8,7 @@ vi.mock('../../model-runtime/structured-task-runtime-bridge', () => ({
 
 import { WebsiteProfileProvider } from './website-profile.provider';
 import { ToolPolicyDenied } from '../../tools/tool-broker';
+import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
 
 const COMPANY = '00000000-0000-4000-8000-0000000000c3';
 const CTX = {
@@ -112,6 +113,17 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
 
   it('falls back to deterministic facts when the model fails with an ordinary error', async () => {
     mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(new Error('gateway 502'));
+    const profile = await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
+    }).profile(INPUT, CTX);
+    expect(profile).toMatchObject({ tradeRole: null, tradeRoleSource: null, register: { number: '98765' } });
+  });
+
+  it('falls back to deterministic facts when the model answer is unusable', async () => {
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(
+      new ProviderOutputError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 900, outputTokens: 40 }),
+    );
     const profile = await new WebsiteProfileProvider({
       gateway: {} as never,
       broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),

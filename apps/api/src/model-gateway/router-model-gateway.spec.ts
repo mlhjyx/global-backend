@@ -1369,11 +1369,64 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
         status: 'ERROR',
         inputTokens: 7,
         outputTokens: 3,
-        errorMessage: 'TaskOutputValidationError',
+        errorMessage: 'TaskOutputValidationError:TASK_OUTPUT_REJECTED',
       }),
     );
     expect(trace.record).not.toHaveBeenCalledWith(
       expect.objectContaining({ status: 'OK' }),
+    );
+  });
+
+  it('traces why an output was unusable, not just the error class', async () => {
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ProviderOutputError('CHAT_COMPLETIONS_STREAM_TRUNCATED', {
+        inputTokens: 2601,
+        outputTokens: 11086,
+      }),
+    );
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+
+    await gw
+      .generateStructured({ task: 'icp.design', prompt: 'p', schema: {} }, { workspaceId: 'ws-1' })
+      .catch(() => undefined);
+
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        errorMessage: 'ProviderOutputError:CHAT_COMPLETIONS_STREAM_TRUNCATED',
+        inputTokens: 2601,
+        outputTokens: 11086,
+      }),
+    );
+  });
+
+  it('traces a schema failure after repair by code, keeping the model-derived errors out of the trace', async () => {
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: { y: 'Acme GmbH' } as never, provider: 'fake', model: 'm' })
+      .mockResolvedValueOnce({ data: { y: 'Acme GmbH' } as never, provider: 'fake', model: 'm' });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+
+    const error = await gw
+      .generateStructured(
+        { task: 'icp.design', prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1' },
+      )
+      .catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR' });
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        errorMessage: 'ProviderOutputError:STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR',
+      }),
     );
   });
 

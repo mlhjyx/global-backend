@@ -243,6 +243,59 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     ).rejects.toBeInstanceOf(ProviderOutputError);
   });
 
+  it("names a stream cut off before its finish reason as truncated and keeps the usage it carried", async () => {
+    // 2026-10-08 xin: new-api lost the upstream TLS stream after 140 s
+    // (`scanner_error: tls: bad record MAC`) and still closed the stream with
+    // a locally counted usage chunk and [DONE]. The half JSON must not be
+    // reported as a model that answered with invalid JSON.
+    mockText(
+      sse([
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: '{"name":"Pumpen' } }] },
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: "händler" } }] },
+        { choices: [], usage: { prompt_tokens: 2601, completion_tokens: 11086 } },
+      ]),
+    );
+
+    const error = await streaming
+      .generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" })
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect(error).toMatchObject({
+      reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+      usage: { inputTokens: 2601, outputTokens: 11086 },
+    });
+  });
+
+  it("classifies a finished stream whose structured output is not JSON", async () => {
+    mockText(
+      sse([
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: "Sorry, no JSON" }, finish_reason: "stop" }] },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ reasonCode: "STRUCTURED_OUTPUT_NOT_JSON" });
+  });
+
+  it("gives each unreadable stream shape its own reason code", async () => {
+    mockText(": keep-alive\n\ndata: not-json\n\n");
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_LINE_INVALID" });
+
+    mockText(": keep-alive\n\n");
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_EMPTY" });
+
+    mockText(`data: ${JSON.stringify({ error: { message: "upstream overloaded" } })}\n\n`);
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR" });
+  });
+
   it("accepts a plain JSON body when the upstream ignores the stream flag", async () => {
     mockText(
       JSON.stringify({

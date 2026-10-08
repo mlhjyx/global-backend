@@ -236,6 +236,7 @@ export class RouterModelGateway extends ModelGateway {
           "initial structured output is unusable and settlement is unresolved; repair suppressed",
           first.usage,
           {
+            reasonCode: "STRUCTURED_OUTPUT_REPAIR_SUPPRESSED",
             callCount: 1,
             provider: first.provider,
             model: first.model,
@@ -267,6 +268,7 @@ export class RouterModelGateway extends ModelGateway {
           "repair preparation failed before provider dispatch",
           first.usage,
           {
+            reasonCode: "STRUCTURED_OUTPUT_REPAIR_PREPARATION_FAILED",
             callCount: 1,
             provider: first.provider,
             model: first.model,
@@ -293,6 +295,7 @@ export class RouterModelGateway extends ModelGateway {
             err instanceof ProviderOutputError ? err.usage : undefined,
           ),
           {
+            reasonCode: "STRUCTURED_OUTPUT_REPAIR_CALL_FAILED",
             cause: err,
             callCount:
               1 + (err instanceof ProviderOutputError ? err.callCount : 1),
@@ -323,6 +326,7 @@ export class RouterModelGateway extends ModelGateway {
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join("; ")}`,
           mergeStructuredUsage(first.usage, repair.usage),
           {
+            reasonCode: "STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR",
             callCount: 2,
             provider: repair.provider,
             model: repair.model,
@@ -579,7 +583,14 @@ export class RouterModelGateway extends ModelGateway {
         provider: provider.id,
         model: input.model ?? "unknown",
         status: "ERROR",
-        errorMessage: err instanceof Error ? err.name : "model call failed",
+        // The class alone cannot tell a cut stream from bad JSON; the reason
+        // code can, and it never carries model text.
+        errorMessage:
+          err instanceof ProviderOutputError
+            ? `${err.name}:${err.reasonCode}`
+            : err instanceof Error
+              ? err.name
+              : "model call failed",
         latencyMs: Date.now() - started,
         inputTokens: failedUsage?.inputTokens,
         outputTokens: failedUsage?.outputTokens,

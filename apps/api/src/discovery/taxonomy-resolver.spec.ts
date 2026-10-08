@@ -2,6 +2,7 @@ import Ajv from 'ajv';
 import { describe, expect, it, vi } from 'vitest';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
+import { ProviderOutputError } from '../model-gateway/providers/provider-output-error';
 import { TaxonomyResolver } from './taxonomy-resolver';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -197,6 +198,42 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       executionBudget: TEST_BINDING,
     })).rejects.toBe(replayError);
     expect(budgetStore.close).not.toHaveBeenCalled();
+  });
+
+  it('treats an unusable model answer as a miss so the query can go on', async () => {
+    // 2026-10-08 xin: an 11-token non-JSON answer failed the executeQuery
+    // activity, and the retries could only replay the spent operation.
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        termAlias: { upsert: vi.fn(async () => ({})) },
+      })),
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: { findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]) },
+    };
+    const generateStructured = vi.fn(async () => {
+      throw new ProviderOutputError(
+        'gateway deepseek-v4-pro: structured output is not valid JSON',
+        { inputTokens: 520, outputTokens: 11 },
+        { provider: 'gateway', model: 'deepseek-v4-pro', reasonCode: 'STRUCTURED_OUTPUT_NOT_JSON' },
+      );
+    });
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured } as never,
+      undefined,
+      {
+        open: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        attestAuthorized: vi.fn(async () => undefined),
+      } as never,
+    );
+
+    await expect(resolver.resolve('industry', 'Pumpen Großhandel', {
+      workspaceId: TEST_BINDING.scopeKey,
+      runId: TEST_BINDING.accountKey,
+      executionBudget: TEST_BINDING,
+    })).resolves.toBeNull();
+    expect(generateStructured).toHaveBeenCalledOnce();
   });
 
   it('sends all four real taxonomy wires an exact enum over the closed bounded task schema', async () => {

@@ -218,6 +218,42 @@ function isLegacyTemporalApplicationControl(
 }
 
 /**
+ * Brand on the prototype of errors that report one unusable model answer: bad
+ * JSON, a schema miss, a cut stream or a task-gate rejection. Such an answer is
+ * not a control-plane decision. The call was reserved and settled before the
+ * error left the gateway, so a caller with a deterministic fallback may absorb
+ * it. Subclasses that carry a control decision or a run-wide failure set the
+ * brand to false.
+ */
+export const RECOVERABLE_MODEL_FAILURE: unique symbol = Symbol('recoverable-model-failure');
+
+/** Nearest data descriptor wins; an accessor or an unreadable chain fails closed. */
+function carriesRecoverableModelFailureBrand(value: object): boolean {
+  try {
+    let target: object | null = value;
+    for (let depth = 0; target && depth <= 8; depth += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(target, RECOVERABLE_MODEL_FAILURE);
+      if (descriptor) return 'value' in descriptor && descriptor.value === true;
+      target = Object.getPrototypeOf(target) as object | null;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/** The cause of a branded model failure, read without invoking accessors. */
+function recoverableModelFailureCause(value: object): { readonly cause: unknown } | null {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'cause');
+    if (!descriptor) return { cause: undefined };
+    return 'value' in descriptor ? { cause: descriptor.value as unknown } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Temporal preserves application failures under one or more ActivityFailure /
  * ApplicationFailure `cause` wrappers. Control-plane denials must therefore be
  * classified structurally instead of by the outer Error class alone.
@@ -231,6 +267,14 @@ export function isExecutionControlError(error: unknown): boolean {
     if (!current || typeof current !== 'object') return true;
     if (visited.has(current)) return true;
     visited.add(current);
+    if (carriesRecoverableModelFailureBrand(current)) {
+      const link = recoverableModelFailureCause(current);
+      if (!link) return true;
+      if (link.cause === null || link.cause === undefined) return false;
+      if (typeof link.cause !== 'object') return true;
+      current = link.cause;
+      continue;
+    }
     const snapshot = safeFailureSnapshot(current);
     if (!snapshot) return true;
     if (
