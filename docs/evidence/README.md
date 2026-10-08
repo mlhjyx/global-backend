@@ -23,6 +23,8 @@
 
 [2026-10-06 生产漏洞修复](security/20261006-production-advisory-remediation.json)：main 定时 canary 检出的 `http-cache-semantics`（范围内升到 4.3.0；维护者对 advisory 有异议，非实质修复，本仓不暴露）与 `smol-toml`（override 升到修复版 1.9.0）两条生产 advisory 处理后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
 
+[2026-10-07 sharp 漏洞修复](security/20261007-sharp-advisory-remediation.json)：main 每次 push 的 canary 自 10-06 起检出的 sharp 生产 advisory（GHSA-wq5f-xc86-pv6w，自带 librsvg 的释放后重用）随 `apps/api` 精确钉版升到修复版 0.35.5 处理后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
