@@ -13,9 +13,11 @@
 
 ## 2026-10-08 · Pin legacy-javascript against dist-tag drift in the OCI build
 
-- main 自 698b4518 起，CI 的「Build and inspect immutable OCI runtime」报 `runtime SBOM omits installed packages: legacy-javascript@0.0.3`（64614baf 时还是绿的），所有 PR 的 `build · typecheck · test` 随之变红。原因：`@paulirish/trace_engine` 0.0.65（经 lighthouse）把 `legacy-javascript` 声明为 dist-tag `latest`，上游在 10-07 22:13Z 与 10-08 00:08Z 先后发布 0.0.2、0.0.3；镜像构建以全新元数据缓存执行 `pnpm deploy`，装进 0.0.3，而 SBOM 按锁文件记 0.0.1。同样以 `latest` 声明的 `third-party-web` 早已用精确 override 钉住（见 `dependency-security-remediation.spec.mjs` 的 deploy 回归测试）。
+- main 自 698b4518 起，CI 的「Build and inspect immutable OCI runtime」报 `runtime SBOM omits installed packages: legacy-javascript@0.0.3`（64614baf 时还是绿的），会构建镜像的 PR（改了代码的 PR）的 `build · typecheck · test` 也随之变红。原因：`@paulirish/trace_engine` 0.0.65（经 lighthouse）把 `legacy-javascript` 声明为 dist-tag `latest`，上游在 10-07 22:13Z 与 10-08 00:08Z 先后发布 0.0.2、0.0.3；镜像构建以全新元数据缓存执行 `pnpm deploy`，装进 0.0.3，而 SBOM 按锁文件记 0.0.1。同样以 `latest` 声明的 `third-party-web` 早已用精确 override 钉住（见 `dependency-security-remediation.spec.mjs` 的 deploy 回归测试）。
 - 根 overrides 新增 `legacy-javascript` 0.0.1，即锁文件里已审过的版本，锁文件只改 overrides 段。本机用空缓存执行 `pnpm --filter @global/api deploy --prod --frozen-lockfile`：main 上装进 0.0.3，加 override 后为 0.0.1（`third-party-web` 两次都是 0.29.2）。新增防回归测试：trace_engine 以 dist-tag 声明的依赖必须都有精确 override，且等于锁文件中唯一的解析版本；去掉这条 override 时测试失败。
 - 生产审计零 advisory（830 个依赖）；基线按锁文件变动重新绑定到钉版提交，`valid_until` 不变；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261008-legacy-javascript-dist-tag-pin.json)。Copy fixed-source 回执只重签指纹。
+- 跟进（独立审查，#603）：锁文件不记录依赖的声明写法，所以防回归测试同时钉住 trace_engine 的已审版本 0.0.65。将来 lighthouse 带进别的 trace_engine 版本时，测试会失败，要求先复核它以 dist-tag 声明的依赖、同步名单与 override，再更新已审版本。这道守卫只覆盖 trace_engine；别的包新增 dist-tag 依赖，仍要等 OCI 构建的 SBOM 检查发现。本条目第一项的受影响范围已就地更正为「会构建镜像的 PR」（纯文档 PR 不跑 OCI 那一步）；同时修正了安全合同页的当前合同段、依赖刷新手册，以及 deploy 回归测试的注释。
+
 ## 2026-10-08 · Keep Chinese words out of discovery search strings
 
 - 起因（2026-10-07 xin 实测，卖方 #7 的查询计划）：6 条查询里，公开网页查询的关键词约一半是中文，例如「工业泵 分销商 进口商」。规划器的提示把关键词写成「含本地语言变体」，又要求中文 rationale，ICP 本身也是中文，于是模型中德混写。公开网页源取前 3 个关键词，再拼上过滤条件里的产品与行业词（按设计可以是中文，供规范词表映射），所以德国市场的 3 条搜索里有 1 到 2 条是中文，抽取费基本白花。名录源也会把中文行业词和「德国」这样的地区词拼进检索串。
