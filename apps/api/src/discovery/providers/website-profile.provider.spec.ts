@@ -149,6 +149,9 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
           'Geschäftsführer: Max Mustermann',
           'Vertreten durch:',
           'Erika Musterfrau',
+          'Vertretungsberechtigte Personen:',
+          'Geschäftsführer:',
+          'Hans Beispiel',
           'Telefon: +49 89 1234567',
           'E-Mail: erika.musterfrau@pumpen-handel.example',
         ].join('\n'),
@@ -159,7 +162,7 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
     expect(modelInput.prompt).toContain('Hersteller und Händler von Pumpen.');
     expect(modelInput.prompt).toContain('HRB 98765');
     expect(modelInput.prompt).toContain('DE136695976');
-    for (const personal of ['Max Muster', 'Erika Musterfrau', 'max.muster@', 'erika.musterfrau@', '1234567']) {
+    for (const personal of ['Max Muster', 'Erika Musterfrau', 'Hans Beispiel', 'max.muster@', 'erika.musterfrau@', '1234567']) {
       expect(modelInput.prompt).not.toContain(personal);
     }
   });

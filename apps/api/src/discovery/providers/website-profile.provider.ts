@@ -40,20 +40,21 @@ function companyEvidence(snippets: readonly string[]): string[] {
 /**
  * Page text for the model, which sits with a third-country provider: person
  * lines are dropped, together with the value line after a bare label such as
- * "Vertreten durch:", and emails and phones are redacted. Register numbers
- * and VAT IDs stay, because they are company facts.
+ * "Vertreten durch:" (labels may be stacked), and emails and phones are
+ * redacted. Register numbers and VAT IDs stay, because they are company facts.
  */
 function modelSafeText(text: string): string {
   const kept: string[] = [];
   let dropValueLine = false;
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
-    if (dropValueLine && trimmed) {
-      dropValueLine = false;
+    if (!trimmed) {
+      kept.push(line);
       continue;
     }
-    if (PERSON_MARKERS.test(trimmed) || PERSON_LABELS.test(trimmed)) {
-      dropValueLine = trimmed.endsWith(':');
+    const personLine = PERSON_MARKERS.test(trimmed) || PERSON_LABELS.test(trimmed);
+    if (personLine || dropValueLine) {
+      dropValueLine = personLine && trimmed.endsWith(':');
       continue;
     }
     kept.push(line);
