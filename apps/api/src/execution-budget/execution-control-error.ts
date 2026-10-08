@@ -218,6 +218,11 @@ function isLegacyTemporalApplicationControl(
 }
 
 const RECOVERABLE_MODEL_FAILURE_PROTOTYPES = new WeakSet<object>();
+const BUILT_IN_ERROR_PROTOTYPES: ReadonlySet<object> = new Set<object>(
+  [EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError].map(
+    (errorClass) => errorClass.prototype as object,
+  ),
+);
 
 /**
  * Registers an error class whose own instances report one unusable model
@@ -230,8 +235,19 @@ const RECOVERABLE_MODEL_FAILURE_PROTOTYPES = new WeakSet<object>();
 export function registerRecoverableModelFailureClass(
   errorClass: abstract new (...args: never[]) => Error,
 ): void {
-  RECOVERABLE_MODEL_FAILURE_PROTOTYPES.add(errorClass.prototype as object);
+  const prototype: unknown = errorClass.prototype;
+  // Built-in errors (fetch's TypeError among them) must keep their shape check.
+  if (
+    typeof prototype !== 'object' ||
+    prototype === null ||
+    !(prototype instanceof Error) ||
+    BUILT_IN_ERROR_PROTOTYPES.has(prototype)
+  ) {
+    throw new TypeError('RECOVERABLE_MODEL_FAILURE_CLASS_INVALID');
+  }
+  RECOVERABLE_MODEL_FAILURE_PROTOTYPES.add(prototype);
 }
+
 
 /**
  * The cause link of a registered recoverable model failure, or null when the

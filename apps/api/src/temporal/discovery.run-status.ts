@@ -6,15 +6,24 @@
  * 让 backlog sweep 兜底重跑。全源失败才 FAILED。
  * G3 5.2：富集阶段因禁令类拒绝（主体 HOLD/tombstone/SUPPRESSED/失效）按公司跳过的，
  * 同样意味着漏了活儿 → 至少 PARTIAL；它不会把全失败的 run 抬成 PARTIAL。
+ * Fit 判定按公司吸收的模型失败（判不出）同样至少 PARTIAL；一家都没判出来则 FAILED，
+ * 绝不静默漏判假 DONE。
  */
 export function resolveRunStatus(args: {
   failures: number;
   totalQueries: number;
   budgetTruncated: boolean;
   skippedSubjects?: number;
+  /** Companies that got a fit verdict. */
+  fitJudged?: number;
+  /** Companies whose fit judgment failed: a model failure absorbed per company. */
+  fitUnjudged?: number;
 }): 'DONE' | 'PARTIAL' | 'FAILED' {
   const { failures, totalQueries, budgetTruncated } = args;
   const skipped = (args.skippedSubjects ?? 0) > 0;
-  if (failures === 0 && !budgetTruncated && !skipped) return 'DONE';
+  const unjudged = args.fitUnjudged ?? 0;
+  // Every fit judgment failed: the run produced no verdicts and must say so.
+  if (unjudged > 0 && (args.fitJudged ?? 0) === 0) return 'FAILED';
+  if (failures === 0 && !budgetTruncated && !skipped && unjudged === 0) return 'DONE';
   return failures < totalQueries ? 'PARTIAL' : 'FAILED';
 }

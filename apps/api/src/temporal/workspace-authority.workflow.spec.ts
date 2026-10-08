@@ -184,7 +184,7 @@ describe('discoveryWorkflow execution-control propagation', () => {
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1 } }),
+        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1, unclassified: 0 } }),
       }),
     );
   });

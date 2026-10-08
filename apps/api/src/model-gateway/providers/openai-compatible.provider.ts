@@ -949,6 +949,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    if (
+      (json as { error?: unknown }).error !== undefined ||
+      !Array.isArray(json.choices) ||
+      json.choices.length === 0
+    ) {
+      // An error body or a body without choices is the gateway failing, not
+      // the model answering with nothing.
+      throw new ProviderTransportError("CHAT_COMPLETIONS_BODY_INVALID", usage, {
+        provider: this.id,
+        model: opts.model,
+      });
+    }
     // Every model name a stream carries, string or not, must pass the gate;
     // otherwise content from an untrusted model could ride under a trusted
     // name carried only by a later chunk.
@@ -982,18 +994,26 @@ export class OpenAICompatibleProvider implements ModelProvider {
       finishReason !== "stop" &&
       finishReason !== "length"
     ) {
-      throw new ProviderOutputError(
-        "CHAT_COMPLETIONS_FINISH_REASON_INVALID",
-        usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(
-            opts.model,
-            reportedModel,
-            "openai-chat-completions",
-          ),
-        },
-      );
+      const provenance = {
+        provider: this.id,
+        ...resolutionProvenance(opts.model, reportedModel, "openai-chat-completions"),
+      };
+      // Only reasons about this one answer are recoverable. Anything else,
+      // such as DeepSeek's `insufficient_system_resource`, is the upstream
+      // failing and usually hits every call of a run.
+      const answerReason =
+        finishReason === "content_filter"
+          ? "CHAT_COMPLETIONS_CONTENT_FILTERED"
+          : finishReason === "tool_calls" || finishReason === "function_call"
+            ? "CHAT_COMPLETIONS_TOOL_CALL_UNEXPECTED"
+            : null;
+      if (answerReason) {
+        throw new ProviderOutputError("CHAT_COMPLETIONS_FINISH_REASON_INVALID", usage, {
+          ...provenance,
+          reasonCode: answerReason,
+        });
+      }
+      throw new ProviderTransportError("CHAT_COMPLETIONS_FINISH_REASON_INVALID", usage, provenance);
     }
     return {
       content: json.choices?.[0]?.message?.content ?? "",
@@ -1633,10 +1653,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
       false,
     );
     if (json.status !== "completed") {
-      throw new ProviderOutputError("RESPONSES_STATUS_INVALID", usage, {
+      const provenance = {
         provider: this.id,
         ...resolutionProvenance(opts.model, reportedModel, "openai-responses"),
-      });
+      };
+      // `incomplete` is about this answer (output limit, content filter);
+      // `failed`, `cancelled` and anything else are the upstream failing.
+      if (json.status === "incomplete") {
+        throw new ProviderOutputError("RESPONSES_STATUS_INVALID", usage, {
+          ...provenance,
+          reasonCode: "RESPONSES_INCOMPLETE",
+        });
+      }
+      throw new ProviderTransportError("RESPONSES_STATUS_INVALID", usage, provenance);
     }
     return {
       content: nestedContent || json.output_text || "",

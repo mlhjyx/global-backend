@@ -325,6 +325,42 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     });
   });
 
+  it("treats a finish reason about the upstream, not the answer, as a transport failure", async () => {
+    mockText(
+      sse([
+        {
+          model: "deepseek-v4-pro",
+          choices: [{ delta: { content: '{"a":1}' }, finish_reason: "insufficient_system_resource" }],
+        },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_FINISH_REASON_INVALID",
+    });
+  });
+
+  it("keeps a filtered answer recoverable under its own reason code", async () => {
+    mockText(
+      sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: '{"a":1}' }, finish_reason: "content_filter" }] }]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ name: "ProviderOutputError", reasonCode: "CHAT_COMPLETIONS_CONTENT_FILTERED" });
+  });
+
+  it("reports an error body as a transport failure, not an empty answer", async () => {
+    mockText(JSON.stringify({ error: { message: "upstream overloaded" } }));
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "CHAT_COMPLETIONS_BODY_INVALID" });
+  });
+
   it("accepts a plain JSON body without a finish reason when the upstream ignores the stream flag", async () => {
     mockText(
       JSON.stringify({
@@ -985,6 +1021,27 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
       reportedModel: "gpt-5.6-terra",
       modelResolutionSource: "upstream_response",
     });
+    expect(error).toMatchObject({ name: "ProviderOutputError", reasonCode: "RESPONSES_INCOMPLETE" });
+  });
+
+  it("GPT Responses reports a failed response as a transport failure", async () => {
+    const responses = new OpenAICompatibleProvider({
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "gpt-5.6-terra",
+      modelTransports: { "gpt-5.6-terra": "openai-responses" },
+    });
+    mockChatResponse({
+      model: "gpt-5.6-terra",
+      status: "failed",
+      output: [],
+      usage: { input_tokens: 101, output_tokens: 0 },
+    });
+
+    await expect(
+      responses.generateStructured({ task: "t", prompt: "p", schema: {}, maxTokens: 456 }),
+    ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "RESPONSES_STATUS_INVALID" });
   });
 
   it("rejects an untrusted reported-model discriminator without persisting it", async () => {

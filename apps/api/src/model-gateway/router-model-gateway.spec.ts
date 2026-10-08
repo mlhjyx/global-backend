@@ -1407,6 +1407,37 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     );
   });
 
+  it('keeps a repair that answered unusably again recoverable, but not one that failed on the network', async () => {
+    const run = async (repairFailure: Error) => {
+      const provider = fakeProvider();
+      (provider.generateStructured as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ data: { y: 1 } as never, provider: 'fake', model: 'm', usage: { inputTokens: 7 } })
+        .mockRejectedValueOnce(repairFailure);
+      const router = { route: () => [provider] } as unknown as ModelRouter;
+      const gw = new RouterModelGateway(router, { record: vi.fn() } as unknown as AiTraceSink);
+      gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+      return gw
+        .generateStructured(
+          { task: 'icp.design', prompt: 'p', schema: { required: ['x'] } },
+          { workspaceId: 'ws-1' },
+        )
+        .catch((err: unknown) => err);
+    };
+
+    const badAgain = await run(
+      new ProviderOutputError('gateway m: structured output is not valid JSON', { inputTokens: 5 }, {
+        reasonCode: 'STRUCTURED_OUTPUT_NOT_JSON',
+      }),
+    );
+    expect(badAgain).toMatchObject({ name: 'ProviderOutputError', reasonCode: 'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED' });
+    expect(isExecutionControlError(badAgain)).toBe(false);
+
+    const network = await run(new TypeError('fetch failed'));
+    expect(network).toBeInstanceOf(ProviderOutputUnresolvedError);
+    expect(network).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED' });
+    expect(isExecutionControlError(network)).toBe(true);
+  });
+
   it('fails closed when the first answer is unusable and its settlement is unresolved', async () => {
     const trace = { record: vi.fn() } as unknown as AiTraceSink;
     const provider = fakeProvider();

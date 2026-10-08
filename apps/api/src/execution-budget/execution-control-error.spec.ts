@@ -1,8 +1,11 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
 import {
   ExecutionControlError,
   isExecutionControlError,
+  registerRecoverableModelFailureClass,
 } from './execution-control-error';
 import {
   ExternalActionDeniedError,
@@ -306,6 +309,30 @@ describe('isExecutionControlError', () => {
     expect(isExecutionControlError(accessorCause)).toBe(true);
     expect(getterCalls).toBe(0);
     expect(isExecutionControlError(primitiveCause)).toBe(true);
+  });
+
+  it('refuses to register Error itself or a built-in error class', () => {
+    for (const errorClass of [Error, TypeError, RangeError, SyntaxError]) {
+      expect(() => registerRecoverableModelFailureClass(errorClass)).toThrow(
+        'RECOVERABLE_MODEL_FAILURE_CLASS_INVALID',
+      );
+    }
+    expect(isExecutionControlError(new TypeError('fetch failed'))).toBe(false);
+  });
+
+  it('is registered only by the model gateway error module, for exactly two classes', () => {
+    const sourceRoot = join(import.meta.dirname, '..');
+    const files = (readdirSync(sourceRoot, { recursive: true }) as string[])
+      .filter((file) => file.endsWith('.ts') && !file.endsWith('.spec.ts'));
+    const calls = files.flatMap((file) =>
+      [...readFileSync(join(sourceRoot, file), 'utf8').matchAll(/registerRecoverableModelFailureClass\((\w+)\)/gu)]
+        .map((match) => `${file.split(sep).join('/')}:${match[1]}`),
+    );
+
+    expect(calls.sort()).toEqual([
+      'model-gateway/providers/provider-output-error.ts:ProviderOutputError',
+      'model-gateway/providers/provider-output-error.ts:TaskOutputValidationError',
+    ]);
   });
 
   it('fails closed on a proxy whose prototype trap throws', () => {

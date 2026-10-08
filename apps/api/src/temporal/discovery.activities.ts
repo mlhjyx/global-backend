@@ -1054,6 +1054,8 @@ export function createDiscoveryActivities(deps: {
       judged: number;
       verdicts: Record<string, number>;
       skippedForBudget: number;
+      /** Companies whose judgment failed (an absorbed model failure); they lower the run status. */
+      unjudged: number;
     }> {
       const binding = await ensureRunBudget(args); // fit 判定（LLM）消耗计入同一 authority 账户
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
@@ -1118,6 +1120,7 @@ export function createDiscoveryActivities(deps: {
         mismatch: 0,
       };
       let judged = 0;
+      let unjudged = 0;
 
       // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
       let skippedForBudget = 0;
@@ -1148,14 +1151,18 @@ export function createDiscoveryActivities(deps: {
           }
           throw err;
         }
-        if (!judgment) continue; // 单家判别失败不影响其余
+        if (!judgment) {
+          // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
+          unjudged += 1;
+          continue;
+        }
         verdicts[judgment.verdict] += 1;
         judged += 1;
         await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
           upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
-      return { judged, verdicts, skippedForBudget };
+      return { judged, verdicts, skippedForBudget, unjudged };
     },
 
     /**
@@ -1325,9 +1332,11 @@ export function createDiscoveryActivities(deps: {
       matched: number;
       skippedSubjects: number;
       budgetTruncated: boolean;
+      /** Profiles without a trade role: rules were not decisive and the model gave no verdict. */
+      unclassified: number;
     }> {
       const binding = await ensureRunBudget(args);
-      const idle = { profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false };
+      const idle = { profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false, unclassified: 0 };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
           where: { key: WEBSITE_PROFILE_PROVIDER_KEY },
@@ -1379,6 +1388,7 @@ export function createDiscoveryActivities(deps: {
       let profiled = 0;
       let matched = 0;
       let skippedSubjects = 0;
+      let unclassified = 0;
       for (const c of setup.companies) {
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
           | { _ts?: string }
@@ -1419,6 +1429,7 @@ export function createDiscoveryActivities(deps: {
         }
         if (subjectDenied) skippedSubjects += 1;
         else profiled += 1;
+        if (profile && profile.tradeRoleSource === null) unclassified += 1;
         // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
         const hits = profile && !subjectDenied
           ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
@@ -1459,6 +1470,7 @@ export function createDiscoveryActivities(deps: {
         matched,
         skippedSubjects,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
+        unclassified,
       };
     },
 

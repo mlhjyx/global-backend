@@ -6,6 +6,10 @@ import { ToolPolicyDenied } from "../tools/tool-broker";
 import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
+  ProviderOutputError,
+  ProviderTransportError,
+} from "../model-gateway/providers/provider-output-error";
+import {
   BudgetLedger,
   InMemoryBudgetStoreAdapter,
   TestBudgetExceededError as BudgetExceededError,
@@ -1417,6 +1421,25 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(prompt).not.toMatch(
       /person@example|alice van smith|unbounded historical prose/u,
     );
+
+    // One unusable answer skips that company but is counted, so the run cannot end DONE.
+    fitRuntimeMocks.execute.mockRejectedValueOnce(
+      new ProviderOutputError(
+        "gateway deepseek-v4-pro: structured output is not valid JSON",
+        { inputTokens: 520, outputTokens: 11 },
+        { reasonCode: "STRUCTURED_OUTPUT_NOT_JSON" },
+      ),
+    );
+    await expect(
+      activities.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ judged: 0, unjudged: 1 });
+
+    // A transport failure usually hits every company: it stops the activity instead.
+    const cut = new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", { inputTokens: 520 });
+    fitRuntimeMocks.execute.mockRejectedValueOnce(cut);
+    await expect(
+      activities.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).rejects.toBe(cut);
   });
 
   it("既有 canonical identity 命中 suppression 时只修复状态，不再链接或写 evidence", async () => {
@@ -2710,7 +2733,7 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-off", { icpId: "icp-1" })),
-    ).resolves.toEqual({ profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false });
+    ).resolves.toEqual({ profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false, unclassified: 0 });
     expect(profile).not.toHaveBeenCalled();
   });
 
@@ -2780,6 +2803,25 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
     ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+});
+
+describe("resolveRunStatus —— Fit 判定按公司吸收的模型失败", () => {
+  it("有公司没判出来 → 至少 PARTIAL，绝不 DONE", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitJudged: 4, fitUnjudged: 1 }),
+    ).toBe("PARTIAL");
+  });
+  it("一家都没判出来 → FAILED", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitJudged: 0, fitUnjudged: 3 }),
+    ).toBe("FAILED");
+  });
+  it("没有判定失败时保持原语义，包括旧历史重放时缺这两个字段", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitJudged: 0, fitUnjudged: 0 }),
+    ).toBe("DONE");
+    expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
   });
 });
 

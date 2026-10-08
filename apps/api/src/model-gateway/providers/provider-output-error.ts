@@ -186,7 +186,10 @@ export class ProviderHttpError extends Error {
   }
 }
 import type { ModelResolutionSource, ModelUsage } from "../types";
-import { registerRecoverableModelFailureClass } from "../../execution-budget/execution-control-error";
+import {
+  isExecutionControlError,
+  registerRecoverableModelFailureClass,
+} from "../../execution-budget/execution-control-error";
 
 export interface ProviderErrorProvenance {
   provider?: string;
@@ -210,3 +213,12 @@ export type ProviderOutputErrorOptions = {
 // outcomes, unknown settlements and compliance denials are control decisions.
 registerRecoverableModelFailureClass(ProviderOutputError);
 registerRecoverableModelFailureClass(TaskOutputValidationError);
+
+/**
+ * One unusable model answer that a deterministic fallback may absorb: a
+ * registered class with no control failure in its cause chain. The gateway
+ * modules ask here because they must not import the shared classifier.
+ */
+export function isRecoverableModelFailure(error: unknown): error is ProviderOutputError {
+  return error instanceof ProviderOutputError && !isExecutionControlError(error);
+}

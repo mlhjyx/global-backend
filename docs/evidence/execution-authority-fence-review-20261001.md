@@ -92,6 +92,7 @@
 - **改动**：
   - 修复路径上四处已有的抛错补了 `reasonCode`：修复被抑制、修复准备失败、修复调用失败、修复后仍不合 schema。
   - 其中「首次结算未定所以禁止修复」与「修复准备失败」两处，改抛 `ProviderOutputUnresolvedError`。它是 `ProviderOutputError` 的子类，但没有登记为可恢复，所以仍被判为控制错误。准备失败的那一处现在带上 `cause`，不再丢掉原错误。
+  - 「修复调用失败」的外层包装按修复错误本身选类：修复又回了不能用的答案（可恢复的模型失败），仍是可恢复的 `ProviderOutputError`；网络失败、传输失败等其他情况，修复的结果未知，改抛 `ProviderOutputUnresolvedError`。判断用 `provider-output-error.ts` 导出的 `isRecoverableModelFailure`，Router 仍然不直接引入共享判定（静态规格要求它作为例外边界的消费方不引入）。
   - 通用 trace 的 `errorMessage` 对 `ProviderOutputError` 记 `类名:原因码`，其余错误仍记类名。
 - **没有放宽任何约束**：
   - 授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放投影、出网围栏、物理调用的分配与计数都没有改动。
@@ -103,7 +104,7 @@
   - `ProviderOutputError` 与 `TaskOutputValidationError` 登记为「可恢复的模型失败」，有确定性退路的调用方可以吸收。
   - 判定只认实例的直接原型。未登记的子类，以及自身 `code`/`type`/`name` 带控制标记的实例，一律仍按控制错误处理；字段只按数据属性读取，`cause` 链照常追查。
   - 传输失败（流不可读、被截断、格式错误、上游错误事件、响应体不是 JSON）改抛未登记的 `ProviderTransportError`，与非流式下的 HTTP 错误一样失败即停。
-  - 身份不符、结算未知、合规拦截保持控制错误。
+  - 身份不符、结算未知的 `ProviderSettlementError`、合规拦截保持控制错误。付费路径上的普通 `ProviderOutputError` 即使用量里带着未知的网关结算，现在也算可恢复；付费路径只有建站在用，它不用 `isExecutionControlError` 做退路，所以行为不变。
 - **独立复审**（只读代理）：
   - 第一轮：HIGH 一项是本指纹，即本节；另有 MEDIUM 五项、LOW 一项。
     - 传输失败被当作可恢复：已改为 `ProviderTransportError`。
@@ -111,5 +112,12 @@
     - 修复被抑制、修复准备失败被当作可恢复：已改为 `ProviderOutputUnresolvedError`，并补上 `cause`。
     - 两个子类缺原因码：已补。
     - 吸收失败后，若活动因别的原因重试，重放那次已结算的调用仍会被拒；被吸收的官网画像分类失败会写入一份没有贸易角色的画像，30 天内不重新画像。这两项列为后续事项，因为它们不比改动前更差：改动前同样的失败会让整个 run 直接失败。
+  - 第二轮：没有 CRITICAL 或 HIGH，第一轮五项都核实已修；`bundleWorkflowCode` 能打包，工作流里的分类不变。新提出 MEDIUM 两项、LOW 四项，处理如下。
+    - `finish_reason` 与 Responses 的 `status` 把整批失败（如 DeepSeek 的 `insufficient_system_resource`、`failed`）也当成单次回答不能用：现在只有 `content_filter`、工具调用与 `incomplete` 可恢复，各有原因码，其余报 `ProviderTransportError`。
+    - 被吸收的失败到不了 run 状态，所有 Fit 判定都失败时 run 仍会 DONE：`qualifyFitForRun` 统计 `unjudged`，大于零至少 PARTIAL，一家都没判出来则 FAILED；官网画像统计 `unclassified`，只进 stats。
+    - 200 响应体带 `error` 或没有 `choices` 被当成空回答：现在报 `ProviderTransportError`（`CHAT_COMPLETIONS_BODY_INVALID`）。
+    - 修复调用遇到网络失败会被外层包装成可恢复：已按上文选类。
+    - 登记入口不受限制：拒绝 `Error` 与内置错误类，并有测试限定只有 `provider-output-error.ts` 登记、且只有两个类。
+    - 活动边界上丢失控制属性（Temporal 只保留类名）是改动前就有的问题，记为后续事项。
   - 没有发现合规绕过：`ExternalActionDeniedError` 仍是控制错误，修复路径照旧直接抛出。
-- **结论**：更新 `router-model-gateway.ts` 指纹为 `e92c491fce5de6d41fbbcd643e3c907c2b00b6c7fecf5931d0096841c0f4e311`。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `c9fc50b3fb17090441cc36e535f78643371a1d7fabbb8468ad47e9ab96f5122a`。

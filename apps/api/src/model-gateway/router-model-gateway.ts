@@ -28,6 +28,7 @@ import {
   ProviderSettlementError,
   ProviderWireInFlightError,
   TaskOutputValidationError,
+  isRecoverableModelFailure,
 } from "./providers/provider-output-error";
 import {
   modelCostMeasurement,
@@ -289,8 +290,13 @@ export class RouterModelGateway extends ModelGateway {
         );
       } catch (err) {
         if (err instanceof ExternalActionDeniedError) throw err;
+        // A repair that answered unusably again is one bad item; a repair that
+        // failed any other way (transport, network) has an unknown outcome.
+        const RepairFailure = isRecoverableModelFailure(err)
+          ? ProviderOutputError
+          : ProviderOutputUnresolvedError;
         // FIX 1：修复调用抛错也要带上首调已消耗的 token（否则网关 catch 只结算修复那次、漏首调，少记绕硬顶）。
-        throw new ProviderOutputError(
+        throw new RepairFailure(
           `repair call failed: ${String(err)}`,
           mergeStructuredUsage(
             first.usage,
