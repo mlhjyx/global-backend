@@ -15,6 +15,11 @@ import {
   type ImagePipelineRunner,
 } from './image-pipeline-runner';
 import {
+  reclaimSupersededImageVariants,
+  variantAttemptKeys,
+  type ImageVariantReclaimResult,
+} from './image-variant-reclaim';
+import {
   buildAssetVariantRecipeHash,
   projectDerivedImageManifest,
 } from './media-foundation';
@@ -317,6 +322,7 @@ export class ImagePipelineService {
       sourceMeta: meta,
     };
     await this.reconcileAttemptKeys(job, signal);
+    await this.reclaimSupersededVariants(job, plans, signal);
     const producerToken = randomUUID();
     const waitDeadline = Date.now() + VARIANT_WAIT_TIMEOUT_MS;
     while (!(await this.reserveVariantSet(job, inspection, plans, producerToken))) {
@@ -592,26 +598,7 @@ export class ImagePipelineService {
     });
     const keysByRow = new Map<string, string[]>();
     for (const row of candidates) {
-      const canonicalPrefix =
-        `ws/${input.workspaceId}/${input.siteId}/variants/${input.assetId}/${row.recipeHash}.`;
-      const ext = row.objectKey.startsWith(canonicalPrefix)
-        ? row.objectKey.slice(canonicalPrefix.length)
-        : '';
-      if (!['avif', 'webp', 'jpg', 'png'].includes(ext)) {
-        throw new Error(`image variant canonical provenance conflicts for ${row.recipeHash}`);
-      }
-      const prefix = `ws/${input.workspaceId}/${input.siteId}/variant-attempts/${input.assetId}/`;
-      const suffix = `/${row.recipeHash}.${ext}`;
-      const keys = attemptKeysFromMetadata(jsonRecord(row.metadata));
-      for (const key of keys) {
-        const token = key.startsWith(prefix) && key.endsWith(suffix)
-          ? key.slice(prefix.length, -suffix.length)
-          : '';
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token)) {
-          throw new Error(`image variant attempt provenance conflicts for ${row.recipeHash}`);
-        }
-      }
-      keysByRow.set(row.id, keys);
+      keysByRow.set(row.id, variantAttemptKeys(input, row));
     }
     const allKeys = [...new Set([...keysByRow.values()].flat())];
     if (allKeys.length === 0) return;
@@ -682,6 +669,26 @@ export class ImagePipelineService {
         });
       }
     });
+  }
+
+  /** Frees the budget superseded variant sets hold before a new set is reserved. */
+  private reclaimSupersededVariants(
+    input: {
+      workspaceId: string;
+      siteId: string;
+      assetId: string;
+      sourceHash: string;
+      sourceObjectKey: string;
+    },
+    plans: readonly PlannedImageVariant[],
+    signal?: AbortSignal,
+  ): Promise<ImageVariantReclaimResult> {
+    return reclaimSupersededImageVariants(
+      { prisma: this.prisma, storage: this.storage },
+      input,
+      new Set(plans.map((plan) => plan.recipeHash)),
+      signal,
+    );
   }
 
   private async reserveVariantSet(

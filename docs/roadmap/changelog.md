@@ -4,6 +4,22 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-08 · Reclaim superseded image variants before reserving a new set
+
+- 起因是 sharp 修复（#599）独立审查时发现的问题。图片管线版本号是 recipe hash 的一部分，所以每次升级 sharp 或 libvips（改焦点也一样）都会生成一整套新变体。预留时有两道预算：每个资产最多 120 行、冻结清理计划最多 128 个对象，它们都把该资产所有版本的行算在内；而旧行只有在删除资产时才会清掉。结果是：大图产品图每版 30 个变体，保留 3 套旧版本后再处理，就会报 `asset cleanup object budget exceeded (151>128)`。预算也不能改成只数当前版本，因为它守的是删除合同：删除资产时，全部变体要冻结进一条不超过 128 个对象的清理命令。
+- 构建选图（`controlled-build-assets.ts`）改为只从资产 `derivedKeys` 清单发布的变体里选。此前按 role、id 取第一条 ready 变体，新旧版本并存时，选中哪一版是随意的。没有清单或清单无法解析时，不提供 tenant 变体。
+- 新增 `image-variant-reclaim.ts`。`processAsset` 在 reconcile 之后、预留之前，回收「既不在清单、也不在本次计划里」的 ready/failed 行，连同它们的对象和 attempt key。
+  - 全程持有资产行锁，和预留、提升、定稿是同一把。
+  - 先删对象并确认已不存在，再删行：按 `updatedAt` 防并发改动，先删子行再删父行。
+  - 站点有 `building` 的 SiteVersion，或清单无法解析时，跳过回收。
+  - 超过 128 个对象、来源不符、对象删不掉时，失败关闭。
+  - 这样一个资产最多同时保留两套变体：清单那套，加正在生成的那套。预算和删除合同都不变。
+- `reconcileAttemptKeys` 的来源校验改用同一个函数，报错文案不变。
+- 新增用例：
+  - 服务层「三套旧版本 + 第四版 30 个计划」：修复前报 151>128，修复后回收 60 行并预留成功。
+  - 回收模块 11 项、清单解析 13 项、构建选图 4 项。
+- xin 的 `global_dev` 目前只有 1 个资产带变体：12 个变体，0.35.3，清单完整，构建结果不受影响。
+
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 
 - 起因（2026-10-07 xin 实测）：获客分组唯一的网关渠道（OpenOx）对同一个 `deepseek-v4-pro` 会报三种名字：`deepseek-v4-pro`、流式块里常见的 `deepseek.deepseek-v4-pro`、非流式应答里常见的 `deepseek-v4-pro-ga-260813`。身份闸门只认精确名，ICP 设计等 pro 调用因此间歇以 `ProviderIdentityError` 失败，而网关侧调用其实已正常结束。该渠道还把 `deepseek-v4-flash` 映射到 pro、应答报 pro 名，所以 flash 任务 100% 被拒，发现 run 跑不出结果。
