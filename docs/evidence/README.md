@@ -25,6 +25,8 @@
 
 [2026-10-07 sharp 漏洞修复](security/20261007-sharp-advisory-remediation.json)：main 每次 push 的 canary 自 10-06 起检出的 sharp 生产 advisory（GHSA-wq5f-xc86-pv6w，自带 librsvg 的释放后重用）随 `apps/api` 精确钉版升到修复版 0.35.5 处理后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
 
+[2026-10-08 legacy-javascript 钉版](security/20261008-legacy-javascript-dist-tag-pin.json)：上游把 dist-tag `latest` 移到 0.0.3 后，镜像构建的 `pnpm deploy` 与锁文件 SBOM 不一致；加精确 override 后全新缓存 deploy 回到 0.0.1。同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
