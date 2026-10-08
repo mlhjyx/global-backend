@@ -38,7 +38,7 @@ describe('executeStructuredTaskWithRuntime', () => {
       task: 'taxonomy.normalize',
       model: 'deepseek-v4-flash',
       prompt: 'Normalize pumps.',
-      maxTokens: 4_096,
+      maxTokens: 8_192,
     });
     expect(result).toMatchObject({
       data: { code: '123' },
@@ -133,7 +133,7 @@ describe('executeStructuredTaskWithRuntime', () => {
           prompt: 'x',
           model: 'deepseek-v4-flash',
           schema,
-          maxTokens: 4_097,
+          maxTokens: 8_193,
         },
         { workspaceId: 'ws-1' },
       ),

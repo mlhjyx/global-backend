@@ -94,4 +94,19 @@ describe('AI task registry model execution policy invariants', () => {
       expect(task!.maxOutputTokens).toBeLessThanOrEqual(16_000);
     }
   });
+
+  it('leaves every deepseek-v4-pro task room for its reasoning tokens', () => {
+    // 2026-10-08: icp.design hit max_tokens=4096 twice in a row on xin and was
+    // truncated, because the reasoning tokens count against the same cap.
+    const reasoningTasks = [
+      'company_understanding.extract_claims', 'company_understanding.extract_profile',
+      'company_understanding.extract_offerings', 'icp.design', 'discovery.query_plan',
+      'taxonomy.normalize', 'discovery.qualify_fit', 'discovery.extract_company',
+      'discovery.extract_list', 'discovery.classify_trade_role', 'contact.find_decision_makers',
+    ];
+    for (const taskId of reasoningTasks) {
+      expect(getTask(taskId)?.model, taskId).toBe('deepseek-v4-pro');
+      expect(getTask(taskId)?.maxOutputTokens, taskId).toBe(8_192);
+    }
+  });
 });

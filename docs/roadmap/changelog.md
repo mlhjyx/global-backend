@@ -4,6 +4,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-08 · Room for reasoning tokens in acquisition model tasks
+
+- 起因（2026-10-08 xin 实测）：换到含 #602 的镜像后，卖方 #8、#9 的 ICP 设计连续两次失败，网关记 2,654 输入、4,096 输出，正好卡在任务上限，后端报 `ProviderOutputError`（输出被截断），每次仍按网关口径扣约 0.51 美元。10-07 卖方 #7 那次用了 3,510，已经贴近上限。deepseek-v4-pro 是推理模型，推理 token 与答案共用同一个 `max_tokens`。
+- 改动：获客注册表里走 deepseek-v4-pro 的 11 个任务（企业理解 3 个、ICP 设计、查询规划、分类归一、资格判定、公司抽取、名录抽取、贸易角色、决策人抽取）输出上限统一为 8,192，原来 10 个是 4,096、贸易角色是 2,048。上限只约束单次调用，网关按实际生成的 token 计费，没截断的调用花费不变；报价按 `maxCostCents` 计，金额不变，只是策略摘要随之变化。
+- 这对发现 run 同样重要：抽取、资格判定一旦截断就是模型失败，按现有规则会让整个 run 中止。
+- 测试：注册表新增 1 项（11 个任务都在 deepseek-v4-pro 上且上限为 8,192）；ICP 预算包络与运行时桥接两项改为读到 8,192，越界反例改为 8,193。
+
 ## 2026-10-08 · Pin legacy-javascript against dist-tag drift in the OCI build
 
 - main 自 698b4518 起，CI 的「Build and inspect immutable OCI runtime」报 `runtime SBOM omits installed packages: legacy-javascript@0.0.3`（64614baf 时还是绿的），所有 PR 的 `build · typecheck · test` 随之变红。原因：`@paulirish/trace_engine` 0.0.65（经 lighthouse）把 `legacy-javascript` 声明为 dist-tag `latest`，上游在 10-07 22:13Z 与 10-08 00:08Z 先后发布 0.0.2、0.0.3；镜像构建以全新元数据缓存执行 `pnpm deploy`，装进 0.0.3，而 SBOM 按锁文件记 0.0.1。同样以 `latest` 声明的 `third-party-web` 早已用精确 override 钉住（见 `dependency-security-remediation.spec.mjs` 的 deploy 回归测试）。
