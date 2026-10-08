@@ -11,6 +11,13 @@
 - 这对发现 run 同样重要：抽取、资格判定一旦截断就是模型失败，按现有规则会让整个 run 中止。
 - 测试：注册表新增 1 项（11 个任务都在 deepseek-v4-pro 上且上限为 8,192）；ICP 预算包络与运行时桥接两项改为读到 8,192，越界反例改为 8,193。
 
+## 2026-10-08 · Planning tasks get the provider's 16,000-token output ceiling
+
+- 起因（2026-10-08 xin 实测）：#604 把 pro 任务的输出上限放到 8,192 后，卖方 #10 的查询规划输出了 10,568 个 token 仍然成功，卖方 #11 的规划却在 8,192 处被截断（134 秒，`ProviderOutputError`，接口返回 500）。OpenOx 对 `max_tokens` 的执行前后不一致，规划类回答本身也可能超过 8,192。截断的代价不止一次调用：同一个 ICP 的规划请求共用一个预算账户，调用过模型后这个 ICP 就再也生成不了计划；ICP 设计同理，一家卖方只有一次设计机会。
+- 改动：`icp.design` 与 `discovery.query_plan` 的输出上限改为 16,000，即网关 provider 允许的最大值；其余 9 个 pro 任务仍是 8,192。网关按实际生成的 token 计费，报价仍按 `maxCostCents` 计，金额不变，只是策略摘要随之变化。
+- 运行时：按约每秒 72 个 token 估算，写满 16,000 个 token 约需 225 秒。注册表里这两个任务的 `timeoutMs`（180 秒）没有代码读取，实际生效的是进程级 `MODEL_TIMEOUT_MS`；xin 上是 240 秒，换到本镜像时提到代码允许的最大值 300 秒。
+- 测试：注册表测试拆为两项（9 个任务 8,192，两个规划任务 16,000）；ICP 报价包络读到 16,000。
+
 ## 2026-10-08 · Pin legacy-javascript against dist-tag drift in the OCI build
 
 - main 自 698b4518 起，CI 的「Build and inspect immutable OCI runtime」报 `runtime SBOM omits installed packages: legacy-javascript@0.0.3`（64614baf 时还是绿的），会构建镜像的 PR（改了代码的 PR）的 `build · typecheck · test` 也随之变红。原因：`@paulirish/trace_engine` 0.0.65（经 lighthouse）把 `legacy-javascript` 声明为 dist-tag `latest`，上游在 10-07 22:13Z 与 10-08 00:08Z 先后发布 0.0.2、0.0.3；镜像构建以全新元数据缓存执行 `pnpm deploy`，装进 0.0.3，而 SBOM 按锁文件记 0.0.1。同样以 `latest` 声明的 `third-party-web` 早已用精确 override 钉住（见 `dependency-security-remediation.spec.mjs` 的 deploy 回归测试）。

@@ -100,13 +100,21 @@ describe('AI task registry model execution policy invariants', () => {
     // truncated, because the reasoning tokens count against the same cap.
     const reasoningTasks = [
       'company_understanding.extract_claims', 'company_understanding.extract_profile',
-      'company_understanding.extract_offerings', 'icp.design', 'discovery.query_plan',
+      'company_understanding.extract_offerings',
       'taxonomy.normalize', 'discovery.qualify_fit', 'discovery.extract_company',
       'discovery.extract_list', 'discovery.classify_trade_role', 'contact.find_decision_makers',
     ];
     for (const taskId of reasoningTasks) {
       expect(getTask(taskId)?.model, taskId).toBe('deepseek-v4-pro');
       expect(getTask(taskId)?.maxOutputTokens, taskId).toBe(8_192);
+    }
+  });
+
+  it('gives the two planning tasks the provider ceiling of 16,000 output tokens', () => {
+    // 2026-10-08: one query plan used 10,568 output tokens, the next was cut off at 8,192.
+    for (const taskId of ['icp.design', 'discovery.query_plan']) {
+      expect(getTask(taskId)?.model, taskId).toBe('deepseek-v4-pro');
+      expect(getTask(taskId)?.maxOutputTokens, taskId).toBe(16_000);
     }
   });
 });
