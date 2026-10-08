@@ -27,6 +27,15 @@ const ACQUISITION_FLASH_TIER_MODEL = 'deepseek-v4-pro';
  */
 const REASONING_TASK_MAX_OUTPUT_TOKENS = 8_192;
 
+/**
+ * The two planning tasks write the longest answers. On 2026-10-08 one query
+ * plan used 10,568 output tokens and the next was cut off at 8,192, which
+ * spends the ICP's only planning attempt. 16,000 is the gateway provider's
+ * ceiling. At about 72 tokens a second it takes about 225 seconds, so the
+ * process-wide MODEL_TIMEOUT_MS must allow for it.
+ */
+const PLANNING_TASK_MAX_OUTPUT_TOKENS = 16_000;
+
 const boundedString = (maxLength: number, extra: OutputSchema = {}): OutputSchema => ({
   type: 'string', maxLength, ...extra,
 });
@@ -178,7 +187,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'icp.design',
     allowedTools: [],
     maxCostCents: 40,
-    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '基于卖方企业的已确认事实(Claim)，设计理想客户画像(ICP)：目标公司属性、痛点、采购触发信号、排除条件、价值主张、目标市场、买家委员会角色，以及机器可评估的验证规则(qualification_rules)。规则的 field 使用规范属性名：industry/sub_industry/region/country/employee_count/revenue/certifications/keywords/tech/business_model/end_markets。',
@@ -433,7 +442,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.query_plan',
     allowedTools: [],
     maxCostCents: 40,
-    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（可用 filters.source_hint 精确路由，省略=该类全跑）：\n- public_intelligence → public_web（SearXNG 官网挖掘，关键词驱动）、ted（欧盟招投标中标发现：需 filters.cpv + filters.buyer_country；CPV 由系统按 ICP 冷路径确定性注入，勿自行臆造码）\n- company_registry → wikidata（结构化：按行业+国家零爬取查公司+官网+员工数）\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索，必须用目标市场的语言书写（如德国、奥地利、瑞士用德语），不要用中文。',
