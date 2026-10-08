@@ -86,12 +86,26 @@
   - 同样的误判让公开网页抽取、Fit 判定、官网画像等处「单家失败不影响其余」的退路，在真实模型失败时一处都不生效。现有测试用的是普通 `Error`，所以没发现。
   - 卖方 #13 的 ICP 设计报 `ProviderOutputError`，trace 里只有类名。查 new-api 日志才知道是上游 TLS 连接在第 140 秒断开（`scanner_error: tls: bad record MAC`），new-api 仍补发本地估算的用量块并正常结束流，后端把半截 JSON 当成了「模型输出不是 JSON」。
 - 改动：
-  - `ProviderOutputError` 与 `TaskOutputValidationError` 在原型上带「可恢复的模型失败」标记，`isExecutionControlError` 认这个标记：调用方有确定性退路时可以吸收这类错误。如果 `cause` 链里有控制错误，仍按控制错误处理；标记只认数据属性，访问器一律从严。
-  - 合规拦截（`ExternalActionDeniedError`）、结算未知（`ProviderSettlementError`）照旧是控制错误。身份不符（`ProviderIdentityError`）与网关 HTTP 错误也照旧失败即停：它们通常一次 run 里每个调用都会遇到，逐家吸收会让 run 跑完却一家都没判。
-  - 流式响应自始至终没有 `finish_reason` 时，报 `CHAT_COMPLETIONS_STREAM_TRUNCATED`，用量照带，结算不变。
-  - `ProviderOutputError` 增加 `reasonCode`：显式给定，或取消息开头的大写代码，否则为 `PROVIDER_OUTPUT_UNCLASSIFIED`，从不含模型文本。几处描述性消息补了代码（非 JSON、流不可读、修复被抑制、修复调用失败、修复后仍不合 schema 等）。`ai_trace.error_message` 从类名改为 `类名:原因码`。
-- 测试：判定函数 4 项（可恢复、从严的四类、`cause` 链里的控制错误、访问器伪造标记），截断流与各流形状的原因码，router trace 记原因码且不含 schema 细节，词表归一与官网画像遇真实模型失败时走退路。全量单测 8,951 项通过；唯一失败是已登记的负载假红 `browser-readiness-probe`，单独重跑 24 项全过。
-- 未做：吸收失败后若同一活动因别的原因重试，重放那次已结算的调用仍会被预算账本拒绝。要彻底解决，需要把失败也存成可重放的结果，留作后续。
+  - `execution-control-error.ts` 新增按类显式登记的「可恢复的模型失败」。登记的只有 `ProviderOutputError` 与 `TaskOutputValidationError`，代表一次回答不能用：非 JSON、schema 不合格、超长截断、任务闸门拒收。有确定性退路的调用方可以吸收这类错误。
+  - 判定只认实例的直接原型，所以子类不登记就仍是控制错误。已登记的实例自身 `code`/`type`/`name` 带控制标记时仍按控制错误处理。字段只按数据属性读取，`cause` 链照常追查。
+  - 仍然失败即停：
+    - 传输失败，即流不可读、被截断、格式错误、上游错误事件、响应体不是 JSON，改抛新的 `ProviderTransportError`；
+    - 身份不符（`ProviderIdentityError`）、网关 HTTP 错误；
+    - 修复被抑制或修复准备失败，改抛新的 `ProviderOutputUnresolvedError`，并带上原错误作为 `cause`；
+    - 结算未知、合规拦截。
+    - 传输、身份、HTTP 这几类失败通常一次 run 里每个调用都会遇到，逐家吸收会让 run 跑完却一家都没判。
+  - 流式响应自始至终没有 `finish_reason` 时，报 `CHAT_COMPLETIONS_STREAM_TRUNCATED`，用量照带，结算不变。上游忽略 `stream`、直接回完整 JSON 的情况不受影响。
+  - `ProviderOutputError` 增加 `reasonCode`：显式给定（必须是大写代码），或取消息开头的大写代码，否则为 `PROVIDER_OUTPUT_UNCLASSIFIED`，从不含模型文本。几处描述性消息补了代码，结算错误用自身的 `errorCode`，合规拦截为 `EXTERNAL_ACTION_DENIED`。`ai_trace.error_message` 从类名改为 `类名:原因码`。
+  - Router 是受保护文件：复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`，指纹 `0ad768f0…` → `e92c491f…`。
+- 测试：
+  - 判定函数：可恢复的三种形态（含普通 `Error` 包着可恢复错误）；从严的六类；`cause` 链里的控制错误；未登记的子类；自带控制代码的实例；访问器或原始值形式的 `cause`；原型陷阱抛错的 Proxy。
+  - 流：截断（内容不完整、内容完整但缺 `finish_reason`、文本生成）都报 `ProviderTransportError`，各种流形状有各自的原因码；缺 `finish_reason` 的普通 JSON 响应照常接受。
+  - router：trace 记原因码；修复后仍不合 schema 时不记 schema 细节；结算未定时抛 `ProviderOutputUnresolvedError`，判为控制错误，且只调用一次模型。
+  - 退路：词表归一与官网画像遇非 JSON 回答走退路；官网画像遇传输失败照常上抛。
+  - 模型网关、执行预算、发现与建站付费相关测试 1,725 项通过；执行授权策略检查 16 项通过。
+- 未做：
+  - 吸收失败后若同一活动因别的原因重试，重放那次已结算的调用仍会被预算账本拒绝。要彻底解决，需要把失败也存成可重放的结果。
+  - 官网画像分类失败被吸收后，会写入一份没有贸易角色的画像，30 天内不会重新画像。这两项都不比改动前更差，因为改动前同样的失败会让整个 run 直接失败。留作后续。
 
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 

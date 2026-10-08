@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderOutputError, TaskOutputValidationError } from './provider-output-error';
+import {
+  ExternalActionDeniedError,
+  ProviderOutputError,
+  ProviderSettlementError,
+  TaskOutputValidationError,
+} from './provider-output-error';
 
 /**
  * ProviderOutputError（M1-b fast-follow · 改动 2）：provider 消费了 token 但结构化输出不可用
@@ -63,9 +68,13 @@ describe('ProviderOutputError', () => {
     ).toThrow('PROVIDER_OUTPUT_REASON_CODE_INVALID');
   });
 
-  it('gives a task-gate rejection its own reason code', () => {
+  it('gives task-gate rejections, settlement failures and compliance denials their own reason codes', () => {
     expect(new TaskOutputValidationError('task output hard gate rejected: x').reasonCode).toBe(
       'TASK_OUTPUT_REJECTED',
     );
+    expect(new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN').reasonCode).toBe(
+      'MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN',
+    );
+    expect(new ExternalActionDeniedError().reasonCode).toBe('EXTERNAL_ACTION_DENIED');
   });
 });

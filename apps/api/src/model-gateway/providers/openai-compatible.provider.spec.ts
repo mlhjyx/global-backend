@@ -10,6 +10,7 @@ import {
   ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderTransportError,
 } from "./provider-output-error";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
 import { createProviderTransportObservation } from "../provider-transport-observation";
@@ -260,10 +261,32 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
       .generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" })
       .catch((err: unknown) => err);
 
-    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect(error).toBeInstanceOf(ProviderTransportError);
     expect(error).toMatchObject({
       reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
       usage: { inputTokens: 2601, outputTokens: 11086 },
+    });
+  });
+
+  it("treats a stream that never carried a finish reason as cut even when its content parses", async () => {
+    mockText(sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: '{"a":1}' } }] }]));
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+    });
+  });
+
+  it("reports a cut text stream the same way", async () => {
+    mockText(sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: "Hallo" } }] }]));
+
+    await expect(
+      streaming.generateText({ task: "t", prompt: "p", model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
     });
   });
 
@@ -279,21 +302,41 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     ).rejects.toMatchObject({ reasonCode: "STRUCTURED_OUTPUT_NOT_JSON" });
   });
 
-  it("gives each unreadable stream shape its own reason code", async () => {
+  it("gives each unreadable stream shape its own reason code as a transport failure", async () => {
     mockText(": keep-alive\n\ndata: not-json\n\n");
     await expect(
       streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
-    ).rejects.toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_LINE_INVALID" });
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_LINE_INVALID",
+    });
 
     mockText(": keep-alive\n\n");
     await expect(
       streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
-    ).rejects.toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_EMPTY" });
+    ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "CHAT_COMPLETIONS_STREAM_EMPTY" });
 
     mockText(`data: ${JSON.stringify({ error: { message: "upstream overloaded" } })}\n\n`);
     await expect(
       streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
-    ).rejects.toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR" });
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR",
+    });
+  });
+
+  it("accepts a plain JSON body without a finish reason when the upstream ignores the stream flag", async () => {
+    mockText(
+      JSON.stringify({
+        model: "deepseek-v4-pro",
+        choices: [{ message: { content: '{"a":3}' } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2 },
+      }),
+    );
+
+    const out = await streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" });
+
+    expect(out.data).toEqual({ a: 3 });
   });
 
   it("accepts a plain JSON body when the upstream ignores the stream flag", async () => {

@@ -76,6 +76,39 @@ export class ProviderIdentityError extends ProviderOutputError {
 }
 
 /**
+ * The transport failed before a complete answer arrived: an unreadable or cut
+ * stream, a malformed event, an upstream error event or a body that is not
+ * JSON. Like an HTTP error it usually hits every call of a run, so it fails
+ * closed instead of letting each company's fallback absorb it.
+ */
+export class ProviderTransportError extends ProviderOutputError {
+  constructor(
+    message: string,
+    usage?: ModelUsage,
+    opts?: ProviderOutputErrorOptions,
+  ) {
+    super(message, usage, opts);
+    this.name = "ProviderTransportError";
+  }
+}
+
+/**
+ * A structured-output repair could not run because the first call's settlement
+ * is unresolved or the repair wire could not be prepared. The call's outcome is
+ * not known, so this fails closed like an unknown settlement.
+ */
+export class ProviderOutputUnresolvedError extends ProviderOutputError {
+  constructor(
+    message: string,
+    usage?: ModelUsage,
+    opts?: ProviderOutputErrorOptions,
+  ) {
+    super(message, usage, opts);
+    this.name = "ProviderOutputUnresolvedError";
+  }
+}
+
+/**
  * A paid physical wire could not produce both a usable payload and an exact
  * settlement fact. The stable code is safe for persistence and user-facing
  * diagnostics; raw transport errors and provider bodies are never embedded.
@@ -94,7 +127,7 @@ export class ProviderSettlementError extends ProviderOutputError {
     usage?: ModelUsage,
     opts?: { callCount?: number } & ProviderErrorProvenance,
   ) {
-    super(`paid model settlement failed: ${errorCode}`, usage, opts);
+    super(`paid model settlement failed: ${errorCode}`, usage, { ...opts, reasonCode: errorCode });
     this.name = "ProviderSettlementError";
   }
 }
@@ -128,6 +161,7 @@ export class ExternalActionDeniedError extends ProviderOutputError {
     super("external action denied: suppression_action_gate", usage, {
       ...opts,
       callCount: opts?.callCount ?? 0,
+      reasonCode: "EXTERNAL_ACTION_DENIED",
     });
     this.name = "ExternalActionDeniedError";
   }
@@ -152,7 +186,7 @@ export class ProviderHttpError extends Error {
   }
 }
 import type { ModelResolutionSource, ModelUsage } from "../types";
-import { RECOVERABLE_MODEL_FAILURE } from "../../execution-budget/execution-control-error";
+import { registerRecoverableModelFailureClass } from "../../execution-budget/execution-control-error";
 
 export interface ProviderErrorProvenance {
   provider?: string;
@@ -168,17 +202,11 @@ export type ProviderOutputErrorOptions = {
   reasonCode?: string;
 } & ProviderErrorProvenance;
 
-// One unusable answer (bad JSON, schema miss, cut stream, task-gate rejection)
-// is not a control decision, so a caller with a deterministic fallback may
-// absorb it (isExecutionControlError). Failures that usually hit every call of
-// a run keep failing closed, so a run stops instead of skipping every company:
-// an unreviewed model, and HTTP errors, which carry no brand. Compliance
-// denials and unknown settlements are control decisions.
-for (const [errorClass, recoverable] of [
-  [ProviderOutputError, true],
-  [ProviderIdentityError, false],
-  [ProviderSettlementError, false],
-  [ExternalActionDeniedError, false],
-] as const) {
-  Object.defineProperty(errorClass.prototype, RECOVERABLE_MODEL_FAILURE, { value: recoverable });
-}
+// One unusable answer (bad JSON, schema miss, task-gate rejection) is not a
+// control decision, so a caller with a deterministic fallback may absorb it
+// (isExecutionControlError). Every other subclass stays unregistered and fails
+// closed: transport, identity and HTTP failures usually hit every call of a
+// run, so absorbing them would end a run with nothing judged; unresolved
+// outcomes, unknown settlements and compliance denials are control decisions.
+registerRecoverableModelFailureClass(ProviderOutputError);
+registerRecoverableModelFailureClass(TaskOutputValidationError);

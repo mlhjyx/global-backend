@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
 import {
   ExecutionControlError,
-  RECOVERABLE_MODEL_FAILURE,
   isExecutionControlError,
 } from './execution-control-error';
 import {
@@ -10,7 +9,9 @@ import {
   ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderOutputUnresolvedError,
   ProviderSettlementError,
+  ProviderTransportError,
   TaskOutputValidationError,
 } from '../model-gateway/providers/provider-output-error';
 
@@ -237,8 +238,9 @@ describe('isExecutionControlError', () => {
         { inputTokens: 520, outputTokens: 11 },
         { provider: 'gateway', model: 'deepseek-v4-pro', reportedModel: 'deepseek-v4-pro' },
       ),
-      new ProviderOutputError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 2601 }),
+      new ProviderOutputError('STRUCTURED_OUTPUT_TRUNCATED', { inputTokens: 2601 }),
       new TaskOutputValidationError('task output hard gate rejected: x', { inputTokens: 1 }),
+      new Error('fallback wrapper', { cause: new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY') }),
     ];
 
     for (const failure of failures) {
@@ -246,17 +248,23 @@ describe('isExecutionControlError', () => {
     }
   });
 
-  it('keeps run-wide model failures, compliance denials and unknown settlements failing closed', () => {
-    // A substituted model or a failing gateway hits every call of a run:
-    // absorbing them per company would end the run with nothing judged.
-    expect(isExecutionControlError(new ProviderIdentityError('model identity mismatch', { inputTokens: 1 }))).toBe(true);
-    expect(
-      isExecutionControlError(new ProviderHttpError({ status: 502, provider: 'gateway', model: 'deepseek-v4-pro' })),
-    ).toBe(true);
-    expect(isExecutionControlError(new ExternalActionDeniedError({ inputTokens: 1 }))).toBe(true);
-    expect(
-      isExecutionControlError(new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN')),
-    ).toBe(true);
+  it('keeps run-wide model failures, unresolved outcomes, compliance denials and unknown settlements failing closed', () => {
+    // A cut stream, a substituted model or a failing gateway usually hits every
+    // call of a run: absorbing them per company would end the run with nothing judged.
+    const failures = [
+      new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 2601 }),
+      new ProviderIdentityError('model identity mismatch', { inputTokens: 1 }),
+      new ProviderHttpError({ status: 502, provider: 'gateway', model: 'deepseek-v4-pro' }),
+      new ProviderOutputUnresolvedError('repair suppressed', { inputTokens: 1 }, {
+        reasonCode: 'STRUCTURED_OUTPUT_REPAIR_SUPPRESSED',
+      }),
+      new ExternalActionDeniedError({ inputTokens: 1 }),
+      new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN'),
+    ];
+
+    for (const failure of failures) {
+      expect(isExecutionControlError(failure)).toBe(true);
+    }
   });
 
   it('still finds a control failure behind an unusable model answer', () => {
@@ -267,21 +275,48 @@ describe('isExecutionControlError', () => {
     expect(isExecutionControlError(failure)).toBe(true);
   });
 
-  it('does not trust a recoverable brand reached through an accessor', () => {
-    let getterCalls = 0;
-    const prototype = Object.defineProperty({}, RECOVERABLE_MODEL_FAILURE, {
-      get() {
-        getterCalls += 1;
-        return true;
-      },
+  it('fails closed for a subclass until that class is registered on its own', () => {
+    class LocalModelError extends ProviderOutputError {}
+
+    expect(isExecutionControlError(new LocalModelError('STRUCTURED_OUTPUT_EMPTY'))).toBe(true);
+  });
+
+  it('fails closed when a registered failure carries a control code of its own', () => {
+    const coded = Object.assign(new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY'), {
+      code: 'EXECUTION_BUDGET_GRANT_REUSED',
     });
-    const failure = Object.assign(Object.create(prototype) as object, {
-      message: 'ordinary-looking failure',
-      usage: { inputTokens: 1 },
+    const bare = Object.assign(Object.create(ProviderOutputError.prototype) as object, {
+      code: 'EXECUTION_BUDGET_GRANT_REUSED',
     });
 
-    expect(isExecutionControlError(failure)).toBe(true);
+    expect(isExecutionControlError(coded)).toBe(true);
+    expect(isExecutionControlError(bare)).toBe(true);
+  });
+
+  it('reads a registered failure without invoking accessors; an accessor or primitive cause fails closed', () => {
+    let getterCalls = 0;
+    const accessorCause = Object.defineProperty(new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY'), 'cause', {
+      get() {
+        getterCalls += 1;
+        return undefined;
+      },
+    });
+    const primitiveCause = new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY', undefined, { cause: 'boom' });
+
+    expect(isExecutionControlError(accessorCause)).toBe(true);
     expect(getterCalls).toBe(0);
+    expect(isExecutionControlError(primitiveCause)).toBe(true);
+  });
+
+  it('fails closed on a proxy whose prototype trap throws', () => {
+    const failure = new Proxy(new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY'), {
+      getPrototypeOf() {
+        throw new Error('sensitive-prototype-trap-payload');
+      },
+    });
+
+    expect(() => isExecutionControlError(failure)).not.toThrow();
+    expect(isExecutionControlError(failure)).toBe(true);
   });
 
   it('never executes an own getter and requires the caller to pass the hostile shape through', () => {

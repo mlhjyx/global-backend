@@ -24,6 +24,7 @@ import {
   ExternalActionDeniedError,
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderOutputUnresolvedError,
   ProviderSettlementError,
   ProviderWireInFlightError,
   TaskOutputValidationError,
@@ -232,7 +233,7 @@ export class RouterModelGateway extends ModelGateway {
         // A valid output can proceed under an upper-bound charge. An unusable
         // output must not trigger a second physical request while the first
         // call's exact settlement remains unresolved.
-        throw new ProviderOutputError(
+        throw new ProviderOutputUnresolvedError(
           "initial structured output is unusable and settlement is unresolved; repair suppressed",
           first.usage,
           {
@@ -264,11 +265,12 @@ export class RouterModelGateway extends ModelGateway {
         // Allocation precedes Provider invocation. Even if the allocation DB
         // commit/ACK is ambiguous, there is still exactly one known physical
         // Provider call and this execution must never send attempt two.
-        throw new ProviderOutputError(
+        throw new ProviderOutputUnresolvedError(
           "repair preparation failed before provider dispatch",
           first.usage,
           {
             reasonCode: "STRUCTURED_OUTPUT_REPAIR_PREPARATION_FAILED",
+            cause: err,
             callCount: 1,
             provider: first.provider,
             model: first.model,

@@ -6,8 +6,11 @@ import { ModelProvider } from './model-provider';
 import {
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderOutputUnresolvedError,
+  ProviderTransportError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   BudgetLedger,
   InMemoryBudgetStoreAdapter,
@@ -1381,7 +1384,7 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     const trace = { record: vi.fn() } as unknown as AiTraceSink;
     const provider = fakeProvider();
     (provider.generateStructured as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new ProviderOutputError('CHAT_COMPLETIONS_STREAM_TRUNCATED', {
+      new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', {
         inputTokens: 2601,
         outputTokens: 11086,
       }),
@@ -1397,9 +1400,44 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     expect(trace.record).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'ERROR',
-        errorMessage: 'ProviderOutputError:CHAT_COMPLETIONS_STREAM_TRUNCATED',
+        errorMessage: 'ProviderTransportError:CHAT_COMPLETIONS_STREAM_TRUNCATED',
         inputTokens: 2601,
         outputTokens: 11086,
+      }),
+    );
+  });
+
+  it('fails closed when the first answer is unusable and its settlement is unresolved', async () => {
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: { y: 1 } as never,
+      provider: 'fake',
+      model: 'm',
+      usage: {
+        inputTokens: 7,
+        outputTokens: 3,
+        gatewaySettlements: [{ status: 'unknown' } as never],
+      },
+    });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+
+    const error = await gw
+      .generateStructured(
+        { task: 'icp.design', prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1' },
+      )
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderOutputUnresolvedError);
+    expect(error).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_REPAIR_SUPPRESSED', callCount: 1 });
+    expect(isExecutionControlError(error)).toBe(true);
+    expect(provider.generateStructured).toHaveBeenCalledOnce();
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorMessage: 'ProviderOutputUnresolvedError:STRUCTURED_OUTPUT_REPAIR_SUPPRESSED',
       }),
     );
   });

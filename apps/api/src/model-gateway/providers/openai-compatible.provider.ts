@@ -5,6 +5,7 @@ import {
   ProviderIdentityError,
   ProviderOutputError,
   ProviderSettlementError,
+  ProviderTransportError,
   ProviderWireInFlightError,
 } from "./provider-output-error";
 import {
@@ -731,7 +732,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     truncated: boolean;
   }> {
     const invalid = (reason: string, reasonCode: string): never => {
-      throw new ProviderOutputError(
+      throw new ProviderTransportError(
         `${this.id} ${model}: ${reason}`,
         undefined,
         { provider: this.id, model, reasonCode },
@@ -831,7 +832,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return (await response.json()) as T;
     } catch {
       if (!ctx?.paidCost) {
-        throw new ProviderOutputError(
+        throw new ProviderTransportError(
           `${this.id} ${model}: response body is not valid JSON`,
           undefined,
           { provider: this.id, model, reasonCode: "CHAT_COMPLETIONS_BODY_NOT_JSON" },
@@ -970,7 +971,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (truncated) {
       // Half an answer is never a usable one: report the cut instead of
       // letting the caller misread it as invalid JSON or an empty output.
-      throw new ProviderOutputError("CHAT_COMPLETIONS_STREAM_TRUNCATED", usage, {
+      throw new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", usage, {
         provider: this.id,
         ...resolutionProvenance(opts.model, reportedModel, "openai-chat-completions"),
       });

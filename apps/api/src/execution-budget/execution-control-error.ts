@@ -217,37 +217,43 @@ function isLegacyTemporalApplicationControl(
   return controlToken(snapshot.message);
 }
 
+const RECOVERABLE_MODEL_FAILURE_PROTOTYPES = new WeakSet<object>();
+
 /**
- * Brand on the prototype of errors that report one unusable model answer: bad
- * JSON, a schema miss, a cut stream or a task-gate rejection. Such an answer is
+ * Registers an error class whose own instances report one unusable model
+ * answer: bad JSON, a schema miss or a task-gate rejection. Such an answer is
  * not a control-plane decision. The call was reserved and settled before the
  * error left the gateway, so a caller with a deterministic fallback may absorb
- * it. Subclasses that carry a control decision or a run-wide failure set the
- * brand to false.
+ * it. Only instances whose immediate prototype is a registered class qualify:
+ * a subclass fails closed until it is registered on its own.
  */
-export const RECOVERABLE_MODEL_FAILURE: unique symbol = Symbol('recoverable-model-failure');
-
-/** Nearest data descriptor wins; an accessor or an unreadable chain fails closed. */
-function carriesRecoverableModelFailureBrand(value: object): boolean {
-  try {
-    let target: object | null = value;
-    for (let depth = 0; target && depth <= 8; depth += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(target, RECOVERABLE_MODEL_FAILURE);
-      if (descriptor) return 'value' in descriptor && descriptor.value === true;
-      target = Object.getPrototypeOf(target) as object | null;
-    }
-  } catch {
-    return false;
-  }
-  return false;
+export function registerRecoverableModelFailureClass(
+  errorClass: abstract new (...args: never[]) => Error,
+): void {
+  RECOVERABLE_MODEL_FAILURE_PROTOTYPES.add(errorClass.prototype as object);
 }
 
-/** The cause of a branded model failure, read without invoking accessors. */
-function recoverableModelFailureCause(value: object): { readonly cause: unknown } | null {
+/**
+ * The cause link of a registered recoverable model failure, or null when the
+ * value is not one. Own code/type/name fields must still be free of control
+ * tokens, and every field is read as a data descriptor, never through an
+ * accessor; anything unreadable fails closed.
+ */
+function recoverableModelFailureLink(value: object): { readonly cause: unknown } | null {
   try {
-    const descriptor = Object.getOwnPropertyDescriptor(value, 'cause');
-    if (!descriptor) return { cause: undefined };
-    return 'value' in descriptor ? { cause: descriptor.value as unknown } : null;
+    if (!RECOVERABLE_MODEL_FAILURE_PROTOTYPES.has(Object.getPrototypeOf(value) as object)) {
+      return null;
+    }
+    for (const key of ['code', 'type', 'name'] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) continue;
+      if (!('value' in descriptor)) return null;
+      const field: unknown = descriptor.value;
+      if (field !== undefined && (typeof field !== 'string' || controlToken(field))) return null;
+    }
+    const cause = Object.getOwnPropertyDescriptor(value, 'cause');
+    if (!cause) return { cause: undefined };
+    return 'value' in cause ? { cause: cause.value as unknown } : null;
   } catch {
     return null;
   }
@@ -267,12 +273,11 @@ export function isExecutionControlError(error: unknown): boolean {
     if (!current || typeof current !== 'object') return true;
     if (visited.has(current)) return true;
     visited.add(current);
-    if (carriesRecoverableModelFailureBrand(current)) {
-      const link = recoverableModelFailureCause(current);
-      if (!link) return true;
-      if (link.cause === null || link.cause === undefined) return false;
-      if (typeof link.cause !== 'object') return true;
-      current = link.cause;
+    const recoverable = recoverableModelFailureLink(current);
+    if (recoverable) {
+      if (recoverable.cause === null || recoverable.cause === undefined) return false;
+      if (typeof recoverable.cause !== 'object') return true;
+      current = recoverable.cause;
       continue;
     }
     const snapshot = safeFailureSnapshot(current);

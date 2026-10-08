@@ -84,3 +84,32 @@
   - 复审没有发现依赖旧行为的调用方：Temporal 重试经 `reserveModelOperation` 重放终态行，不会再次结算。
 - **未覆盖**：没有用真实 PostgreSQL 做往返验证。`router-model-gateway.postgres.spec.ts` 会在库里留下夹具且不清理，所以没有对共用的 `global_dev` 运行。jsonb 规范化、Prisma 的 Json 解析与触发器的行为只做了静态核对，并用单测模拟。
 - **结论**：更新 `router-model-gateway.ts` 指纹为 `0ad768f0edf1e1ef5160db6c58025c711def8fcde69b2b3db73bd6c1cd178198`。
+
+## 2026-10-08 Router 改动复核（模型失败原因码与可恢复分类）
+
+起因：xin 上一次发现 run 因为一次 11 token 的非 JSON 归一回答整体失败。`isExecutionControlError` 把所有 `ProviderOutputError` 判成控制错误，发现流程里「单家失败不影响其余」的退路因此一处都没生效。修复的主体在 `execution-control-error.ts` 与 `provider-output-error.ts`，不在本围栏内。Router 只做了下面几处配套改动，按围栏规则先复核、再更新指纹。
+
+- **改动**：
+  - 修复路径上四处已有的抛错补了 `reasonCode`：修复被抑制、修复准备失败、修复调用失败、修复后仍不合 schema。
+  - 其中「首次结算未定所以禁止修复」与「修复准备失败」两处，改抛 `ProviderOutputUnresolvedError`。它是 `ProviderOutputError` 的子类，但没有登记为可恢复，所以仍被判为控制错误。准备失败的那一处现在带上 `cause`，不再丢掉原错误。
+  - 通用 trace 的 `errorMessage` 对 `ProviderOutputError` 记 `类名:原因码`，其余错误仍记类名。
+- **没有放宽任何约束**：
+  - 授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放投影、出网围栏、物理调用的分配与计数都没有改动。
+  - 失败结算仍按 `err instanceof ProviderOutputError` 分支计费，子类走同一分支，金额不变。
+  - 付费路径的 `safeProviderErrorCode` 仍返回 `PROVIDER_OUTPUT_ERROR`。
+  - 没有新增物理调用路径。
+  - trace 只多了原因码。原因码只能是大写代码：显式给定的必须通过 `^[A-Z][A-Z0-9_]{2,63}$`，推导的只取消息开头的代码，不会带进模型文本。
+- **围栏外的配套改动**：
+  - `ProviderOutputError` 与 `TaskOutputValidationError` 登记为「可恢复的模型失败」，有确定性退路的调用方可以吸收。
+  - 判定只认实例的直接原型。未登记的子类，以及自身 `code`/`type`/`name` 带控制标记的实例，一律仍按控制错误处理；字段只按数据属性读取，`cause` 链照常追查。
+  - 传输失败（流不可读、被截断、格式错误、上游错误事件、响应体不是 JSON）改抛未登记的 `ProviderTransportError`，与非流式下的 HTTP 错误一样失败即停。
+  - 身份不符、结算未知、合规拦截保持控制错误。
+- **独立复审**（只读代理）：
+  - 第一轮：HIGH 一项是本指纹，即本节；另有 MEDIUM 五项、LOW 一项。
+    - 传输失败被当作可恢复：已改为 `ProviderTransportError`。
+    - 标记可被继承、并且跳过了控制标记检查：已改为按类显式登记，并在已登记的实例上照查控制标记。
+    - 修复被抑制、修复准备失败被当作可恢复：已改为 `ProviderOutputUnresolvedError`，并补上 `cause`。
+    - 两个子类缺原因码：已补。
+    - 吸收失败后，若活动因别的原因重试，重放那次已结算的调用仍会被拒；被吸收的官网画像分类失败会写入一份没有贸易角色的画像，30 天内不重新画像。这两项列为后续事项，因为它们不比改动前更差：改动前同样的失败会让整个 run 直接失败。
+  - 没有发现合规绕过：`ExternalActionDeniedError` 仍是控制错误，修复路径照旧直接抛出。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `e92c491fce5de6d41fbbcd643e3c907c2b00b6c7fecf5931d0096841c0f4e311`。
