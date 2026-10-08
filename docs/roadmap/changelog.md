@@ -4,6 +4,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-08 · Pin legacy-javascript against dist-tag drift in the OCI build
+
+- main 自 698b4518 起，CI 的「Build and inspect immutable OCI runtime」报 `runtime SBOM omits installed packages: legacy-javascript@0.0.3`（64614baf 时还是绿的），所有 PR 的 `build · typecheck · test` 随之变红。原因：`@paulirish/trace_engine` 0.0.65（经 lighthouse）把 `legacy-javascript` 声明为 dist-tag `latest`，上游在 10-07 22:13Z 与 10-08 00:08Z 先后发布 0.0.2、0.0.3；镜像构建以全新元数据缓存执行 `pnpm deploy`，装进 0.0.3，而 SBOM 按锁文件记 0.0.1。同样以 `latest` 声明的 `third-party-web` 早已用精确 override 钉住（见 `dependency-security-remediation.spec.mjs` 的 deploy 回归测试）。
+- 根 overrides 新增 `legacy-javascript` 0.0.1，即锁文件里已审过的版本，锁文件只改 overrides 段。本机用空缓存执行 `pnpm --filter @global/api deploy --prod --frozen-lockfile`：main 上装进 0.0.3，加 override 后为 0.0.1（`third-party-web` 两次都是 0.29.2）。新增防回归测试：trace_engine 以 dist-tag 声明的依赖必须都有精确 override，且等于锁文件中唯一的解析版本；去掉这条 override 时测试失败。
+- 生产审计零 advisory（830 个依赖）；基线按锁文件变动重新绑定到钉版提交，`valid_until` 不变；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261008-legacy-javascript-dist-tag-pin.json)。Copy fixed-source 回执只重签指纹。
+
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 
 - 起因（2026-10-07 xin 实测）：获客分组唯一的网关渠道（OpenOx）对同一个 `deepseek-v4-pro` 会报三种名字：`deepseek-v4-pro`、流式块里常见的 `deepseek.deepseek-v4-pro`、非流式应答里常见的 `deepseek-v4-pro-ga-260813`。身份闸门只认精确名，ICP 设计等 pro 调用因此间歇以 `ProviderIdentityError` 失败，而网关侧调用其实已正常结束。该渠道还把 `deepseek-v4-flash` 映射到 pro、应答报 pro 名，所以 flash 任务 100% 被拒，发现 run 跑不出结果。
