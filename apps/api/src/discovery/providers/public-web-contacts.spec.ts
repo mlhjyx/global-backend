@@ -24,6 +24,54 @@ describe('buildPublicContacts', () => {
     expect(c.phone).toBe('+49 30 123'); // 仅首个联系点带电话
   });
 
+  it('单名与缩写邮箱（max@、mueller@、mm@）也是个人数据：标 personalData，不当公开联系点', () => {
+    // 2026-10-08 BI-14 设计调研：此前只认 first.last 形，max@ 被存成「公开联系点 (max@)」且不标个人数据。
+    const contacts = buildPublicContacts(
+      'acme.de',
+      [{ value: 'max@acme.de' }, { value: 'mueller@acme.de' }, { value: 'mm@acme.de' }],
+      undefined,
+    );
+
+    for (const c of contacts) {
+      expect(c.personalData).toBe(true);
+      expect(c.sourcePage).toBe('https://acme.de/');
+      expect(c.title).toBeUndefined();
+      expect(c.department).toBeUndefined();
+      expect(c.fullName).not.toContain('公开联系点');
+    }
+  });
+
+  it('任意形状的个人本地部分都能推出显示名，连续分隔符不报错', () => {
+    const [c] = buildPublicContacts('acme.de', [{ value: 'max__x@acme.de' }], undefined);
+    expect(c.fullName).toBe('Max X');
+    expect(c.personalData).toBe(true);
+  });
+
+  it('白名单里的职能邮箱（含带数字的 sales2@）仍是公司联系点', () => {
+    const contacts = buildPublicContacts(
+      'acme.de',
+      [
+        { value: 'info@acme.de' },
+        { value: 'vertrieb@acme.de' },
+        { value: 'einkauf@acme.de' },
+        { value: 'sales2@acme.de' },
+      ],
+      undefined,
+    );
+
+    expect(contacts.map((c) => c.fullName)).toEqual([
+      '公开联系点 (info@)',
+      '公开联系点 (vertrieb@)',
+      '公开联系点 (einkauf@)',
+      '公开联系点 (sales2@)',
+    ]);
+    for (const c of contacts) {
+      expect(c.personalData).toBeUndefined();
+      expect(c.title).toBe(GENERIC_CONTACT_TITLE);
+      expect(c.department).toBe('general');
+    }
+  });
+
   it('只有首个联系点带电话', () => {
     const cs = buildPublicContacts('acme.de', [{ value: 'a.b@acme.de' }, { value: 'c.d@acme.de' }], '+1 555');
     expect(cs[0].phone).toBe('+1 555');

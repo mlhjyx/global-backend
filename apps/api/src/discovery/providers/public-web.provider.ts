@@ -24,6 +24,7 @@ import type { SearxResult } from '../../adapters/searxng';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
+import { cleanEmail } from '../../acquisition/clean';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { MAX_PUBLIC_WEB_DOMAINS_PER_QUERY } from '../execution-envelope';
@@ -413,10 +414,11 @@ export function mapPublicWebCompanyToRecord(args: {
 }
 
 /**
- * 从公开邮箱构造联系人记录（纯函数，可测）。`first.last@` 形反推**具名个人** → `personalData=true` +
- * `sourcePage`（GDPR Art.4：persistDiscoveredContacts 据此写 person.profile 侧写证据）；总机/职能邮箱
- * （info@…）非个人数据 → 不标 personalData、给通用占位 title/department（generic 公开联系点）。
- * 只首个联系点带电话（与原行为一致）。最多 5 个。
+ * 从公开邮箱构造联系人记录（纯函数，可测）。只有职能邮箱白名单（`cleanEmail`，与采集清洗、合规门同一份）
+ * 里的本地部分（info@、vertrieb@、sales2@ …）算公司联系点：非个人数据，不标 personalData，给通用占位
+ * title/department。其余一律按**个人数据**处理（GDPR Art.4）：first.last@ 与 max@、mueller@、mm@ 这类
+ * 单名或缩写都可能指向具体的人 → `personalData=true` + `sourcePage`（persistDiscoveredContacts 据此写
+ * person.profile 侧写证据）。只首个联系点带电话（与原行为一致）。最多 5 个。
  */
 export function buildPublicContacts(
   domain: string,
@@ -425,12 +427,14 @@ export function buildPublicContacts(
 ): ProviderContactRecord[] {
   return emails.slice(0, 5).map((e, i) => {
     const local = e.value.split('@')[0];
-    const personal = /^[a-z]+[._-][a-z]+$/i.test(local);
+    // 白名单外一律个人：未知的本地部分可能就是人名（max@），保守判 personal。
+    const personal = cleanEmail(e.value)?.kind !== 'role';
     const fullName = personal
       ? local
           .split(/[._-]/)
+          .filter((w) => w.length > 0)
           .map((w) => w[0].toUpperCase() + w.slice(1))
-          .join(' ')
+          .join(' ') || local
       : `公开联系点 (${local}@)`;
     return {
       externalId: `${domain}:${e.value}`,
