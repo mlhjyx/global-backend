@@ -139,7 +139,8 @@ test(
         join(workspace, "pnpm-workspace.yaml"),
         "packages:\n  - app\n",
       );
-      // The real trace_engine manifest uses this same dist-tag. A tiny local package
+      // The real trace_engine 0.0.65 declares third-party-web and legacy-javascript with this
+      // same dist-tag (see TRACE_ENGINE_DIST_TAG_DEPENDENCIES). A tiny local package
       // lets us observe pnpm's actual resolver without network or lifecycle scripts.
       await writeFile(
         join(workspace, "app/package.json"),
@@ -220,11 +221,17 @@ test(
   },
 );
 
-// @paulirish/trace_engine 0.0.65 (via lighthouse) declares both of these as the "latest"
-// dist-tag, so a fresh `pnpm deploy` follows upstream unless an exact root override holds the
-// reviewed version. legacy-javascript 0.0.1 had been latest since 2025-03; 0.0.2 and 0.0.3 were
-// published on 2026-10-07/08 and the OCI build then deployed 0.0.3 beside a lockfile SBOM of 0.0.1.
-const TRACE_ENGINE_DIST_TAG_DEPENDENCIES = Object.freeze(["third-party-web", "legacy-javascript"]);
+// @paulirish/trace_engine (via lighthouse) declares these as the "latest" dist-tag, so a fresh
+// `pnpm deploy` follows upstream unless an exact root override holds the reviewed version.
+// legacy-javascript 0.0.1 had been latest since 2025-03; 0.0.2 and 0.0.3 were published on
+// 2026-10-07/08 and the OCI build then deployed 0.0.3 beside a lockfile SBOM of 0.0.1. The
+// lockfile does not record how a dependency was declared, so this list is only as good as the
+// review of the trace_engine version it was read from: a new version must be re-reviewed first.
+const TRACE_ENGINE_REVIEWED_VERSION = "0.0.65";
+const TRACE_ENGINE_DIST_TAG_DEPENDENCIES = Object.freeze([
+  "third-party-web",
+  "legacy-javascript",
+]);
 
 test("every dist-tag dependency of @paulirish/trace_engine stays on its reviewed lockfile version", async () => {
   const manifest = JSON.parse(
@@ -235,6 +242,11 @@ test("every dist-tag dependency of @paulirish/trace_engine stays on its reviewed
     "utf8",
   );
   const resolved = resolvedPackageVersions(lockfile);
+  assert.deepEqual(
+    resolved.get("@paulirish/trace_engine"),
+    [TRACE_ENGINE_REVIEWED_VERSION],
+    "@paulirish/trace_engine changed: pin every dependency its manifest declares by dist-tag, then update the reviewed version",
+  );
   for (const name of TRACE_ENGINE_DIST_TAG_DEPENDENCIES) {
     const pin = manifest.pnpm?.overrides?.[name];
     assert.equal(typeof pin, "string", `${name} needs an exact root override`);
