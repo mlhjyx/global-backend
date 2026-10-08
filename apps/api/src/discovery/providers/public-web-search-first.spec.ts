@@ -94,6 +94,23 @@ describe('search language and trade role (G3 5.3)', () => {
     expect(queries.join(' | ')).not.toMatch(/manufacturer|supplier|Großhandel|Hersteller/i);
     expect(queries.length).toBeGreaterThan(0);
   });
+
+  it('never puts the Chinese words of a 2026-10-07 plan into a German search string', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: { country: '德国', industry: '工业泵', trade_side: 'distributor', source_hint: 'public_web' },
+      keywords: ['工业泵 分销商 进口商', 'Pumpen Vertrieb Importeur Deutschland', '流体技术 批发 库存', '潜污泵 离心泵 经销商'],
+    }));
+    expect(queries).toHaveLength(3);
+    expect(queries.join(' | ')).not.toMatch(/\p{Script=Han}/u);
+    expect(queries.every((q) => q.startsWith('Pumpen Vertrieb Importeur Deutschland '))).toBe(true);
+  });
+
+  it('builds no search at all when every planner word is Chinese', () => {
+    expect(buildSearchQueries(distributorQuery({
+      filters: { country: '德国', industry: '工业泵', trade_side: 'distributor' },
+      keywords: ['德国 泵 批发商'],
+    }))).toEqual([]);
+  });
 });
 
 describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {

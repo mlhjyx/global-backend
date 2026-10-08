@@ -10,20 +10,30 @@ import { MAX_PUBLIC_WEB_SEARCHES_PER_QUERY } from './execution-envelope';
 export type SearchLanguage = 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl';
 export type TradeRole = 'distributor' | 'manufacturer';
 
-type CountryEntry = Readonly<{ iso2: string; language: SearchLanguage; aliases: readonly string[] }>;
+/** `name` is the country as a search in its own language would write it. */
+type CountryEntry = Readonly<{ iso2: string; language: SearchLanguage; name: string; aliases: readonly string[] }>;
 
 const COUNTRIES: readonly CountryEntry[] = Object.freeze([
-  { iso2: 'de', language: 'de', aliases: ['germany', 'deutschland', 'de', 'deu', '德国'] },
-  { iso2: 'at', language: 'de', aliases: ['austria', 'österreich', 'oesterreich', 'at', 'aut', '奥地利'] },
-  { iso2: 'ch', language: 'de', aliases: ['switzerland', 'schweiz', 'suisse', 'ch', 'che', '瑞士'] },
-  { iso2: 'fr', language: 'fr', aliases: ['france', 'fr', 'fra', '法国'] },
-  { iso2: 'it', language: 'it', aliases: ['italy', 'italia', 'it', 'ita', '意大利'] },
-  { iso2: 'es', language: 'es', aliases: ['spain', 'españa', 'espana', 'es', 'esp', '西班牙'] },
-  { iso2: 'nl', language: 'nl', aliases: ['netherlands', 'nederland', 'holland', 'nl', 'nld', '荷兰'] },
-  { iso2: 'pl', language: 'pl', aliases: ['poland', 'polska', 'pl', 'pol', '波兰'] },
-  { iso2: 'gb', language: 'en', aliases: ['united kingdom', 'uk', 'gb', 'gbr', 'great britain', '英国'] },
-  { iso2: 'us', language: 'en', aliases: ['united states', 'usa', 'us', 'america', '美国'] },
+  { iso2: 'de', language: 'de', name: 'Deutschland', aliases: ['germany', 'deutschland', 'de', 'deu', '德国'] },
+  { iso2: 'at', language: 'de', name: 'Österreich', aliases: ['austria', 'österreich', 'oesterreich', 'at', 'aut', '奥地利'] },
+  { iso2: 'ch', language: 'de', name: 'Schweiz', aliases: ['switzerland', 'schweiz', 'suisse', 'ch', 'che', '瑞士'] },
+  { iso2: 'fr', language: 'fr', name: 'France', aliases: ['france', 'fr', 'fra', '法国'] },
+  { iso2: 'it', language: 'it', name: 'Italia', aliases: ['italy', 'italia', 'it', 'ita', '意大利'] },
+  { iso2: 'es', language: 'es', name: 'España', aliases: ['spain', 'españa', 'espana', 'es', 'esp', '西班牙'] },
+  { iso2: 'nl', language: 'nl', name: 'Nederland', aliases: ['netherlands', 'nederland', 'holland', 'nl', 'nld', '荷兰'] },
+  { iso2: 'pl', language: 'pl', name: 'Polska', aliases: ['poland', 'polska', 'pl', 'pol', '波兰'] },
+  { iso2: 'gb', language: 'en', name: 'United Kingdom', aliases: ['united kingdom', 'uk', 'gb', 'gbr', 'great britain', '英国'] },
+  { iso2: 'us', language: 'en', name: 'United States', aliases: ['united states', 'usa', 'us', 'america', '美国'] },
 ]);
+
+/** Han, kana and Hangul: none of the supported search languages is written in them. */
+const CJK_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/**
+ * A trailing "(…)" or "（…）" qualifier, as in 「瑞士（德语区优先）」. The body
+ * excludes every bracket, which keeps the match linear on any input.
+ */
+const MARKET_QUALIFIER = /[（(][^（()）]*[）)]\s*$/u;
 
 /** Region names (lower case) that imply a country when no country filter is given. */
 const REGION_COUNTRY: Readonly<Record<string, string>> = Object.freeze({
@@ -77,7 +87,7 @@ function strings(value: unknown): string[] {
 
 function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
   const values = [...strings(filters.country), ...strings(filters.iso_country), ...strings(filters.buyer_country)]
-    .flatMap((v) => v.split(/[,/;]/u))
+    .flatMap((v) => v.split(/[,/;、，；]/u))
     .map((v) => v.trim().toLowerCase())
     .filter(Boolean);
   const found: CountryEntry[] = [];
@@ -97,6 +107,28 @@ function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
 
 export function searchLanguageFor(query: { filters?: Record<string, unknown> }): SearchLanguage {
   return targetCountries(query.filters ?? {})[0]?.language ?? 'en';
+}
+
+/**
+ * Trimmed, non-empty terms a search in a supported language can use. The
+ * planner may keep Chinese industry and country words for the taxonomy
+ * mapping, but they must never become part of a search string.
+ */
+export function searchableTerms(terms: readonly string[]): string[] {
+  return terms
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0 && !CJK_SCRIPT.test(term));
+}
+
+/** The first target country as its own language writes it; undefined when unknown. */
+export function searchCountryName(query: { filters?: Record<string, unknown> }): string | undefined {
+  return targetCountries(query.filters ?? {})[0]?.name;
+}
+
+/** Search languages of ICP target markets such as 「德国」 or "Germany (Bavaria)", in first-seen order. */
+export function searchLanguagesForMarkets(markets: unknown): SearchLanguage[] {
+  const country = strings(markets).map((market) => market.replace(MARKET_QUALIFIER, ''));
+  return [...new Set(targetCountries({ country }).map((entry) => entry.language))];
 }
 
 /** Target countries as lower-case ISO-3166 alpha-2 codes; empty when unknown. */

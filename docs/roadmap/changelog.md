@@ -9,7 +9,36 @@
 - main 自 698b4518 起，CI 的「Build and inspect immutable OCI runtime」报 `runtime SBOM omits installed packages: legacy-javascript@0.0.3`（64614baf 时还是绿的），会构建镜像的 PR（改了代码的 PR）的 `build · typecheck · test` 也随之变红。原因：`@paulirish/trace_engine` 0.0.65（经 lighthouse）把 `legacy-javascript` 声明为 dist-tag `latest`，上游在 10-07 22:13Z 与 10-08 00:08Z 先后发布 0.0.2、0.0.3；镜像构建以全新元数据缓存执行 `pnpm deploy`，装进 0.0.3，而 SBOM 按锁文件记 0.0.1。同样以 `latest` 声明的 `third-party-web` 早已用精确 override 钉住（见 `dependency-security-remediation.spec.mjs` 的 deploy 回归测试）。
 - 根 overrides 新增 `legacy-javascript` 0.0.1，即锁文件里已审过的版本，锁文件只改 overrides 段。本机用空缓存执行 `pnpm --filter @global/api deploy --prod --frozen-lockfile`：main 上装进 0.0.3，加 override 后为 0.0.1（`third-party-web` 两次都是 0.29.2）。新增防回归测试：trace_engine 以 dist-tag 声明的依赖必须都有精确 override，且等于锁文件中唯一的解析版本；去掉这条 override 时测试失败。
 - 生产审计零 advisory（830 个依赖）；基线按锁文件变动重新绑定到钉版提交，`valid_until` 不变；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261008-legacy-javascript-dist-tag-pin.json)。Copy fixed-source 回执只重签指纹。
-- 跟进（独立审查）：锁文件不记录依赖的声明写法，所以防回归测试同时钉住 trace_engine 的已审版本 0.0.65。将来 lighthouse 带进别的 trace_engine 版本时，测试会失败，要求先复核它以 dist-tag 声明的依赖、逐个补上 override，再更新已审版本。另修正了安全合同页的当前合同段和 deploy 回归测试的注释。
+- 跟进（独立审查，#603）：锁文件不记录依赖的声明写法，所以防回归测试同时钉住 trace_engine 的已审版本 0.0.65。将来 lighthouse 带进别的 trace_engine 版本时，测试会失败，要求先复核它以 dist-tag 声明的依赖、同步名单与 override，再更新已审版本。这道守卫只覆盖 trace_engine；别的包新增 dist-tag 依赖，仍要等 OCI 构建的 SBOM 检查发现。本条目第一项的受影响范围已就地更正为「会构建镜像的 PR」（纯文档 PR 不跑 OCI 那一步）；同时修正了安全合同页的当前合同段、依赖刷新手册，以及 deploy 回归测试的注释。
+
+## 2026-10-08 · Keep Chinese words out of discovery search strings
+
+- 起因（2026-10-07 xin 实测，卖方 #7 的查询计划）：6 条查询里，公开网页查询的关键词约一半是中文，例如「工业泵 分销商 进口商」。规划器的提示把关键词写成「含本地语言变体」，又要求中文 rationale，ICP 本身也是中文，于是模型中德混写。公开网页源取前 3 个关键词，再拼上过滤条件里的产品与行业词（按设计可以是中文，供规范词表映射），所以德国市场的 3 条搜索里有 1 到 2 条是中文，抽取费基本白花。名录源也会把中文行业词和「德国」这样的地区词拼进检索串。
+- 规划提示按 ICP 的目标市场写明关键词语言，例如「必须全部用德语书写……不得出现中文」；涉及多种语言时要求每条查询的关键词用该查询所在国家的语言；认不出市场时要求用当地语言、无法确定时用英语。任务描述同步改为关键词用目标市场语言、不要用中文；过滤条件里的行业、国家词仍可用中文。
+- 搜索串构造：支持的 7 种搜索语言都不用中日韩文字，所以公开网页源与名录源都先剔除空词和含汉字、假名、谚文的词，再取前几个。全是中文时不发起检索，名录源也不再退回通用的 manufacturing。名录源的地区依次取可写的地区词、国家词、目标国的当地名称（例如 Deutschland）；给了地理范围却一个都写不出（例如「加拿大」不在国家表里）时不检索，免得搜成全球名录。顺带去掉名录主题词的重复（只有关键词、没有行业词时同一个词会拼两次）。
+- 目标市场解析：能拆开用顿号、全角逗号、分号连写的市场（例如「德国、奥地利」）；去掉「（德语区优先）」这类括注的正则写成线性时间，避免超长输入卡住事件循环（独立审查实测旧写法 10 万字符要 10 秒以上）。
+- 用 10-07 那份真实计划核对：会执行公开网页检索的 3 条查询，9 条搜索串全部是德语。
+- 测试：搜索语言工具 14 项、公开网页源 2 项、名录源 4 项、ICP 服务 3 项，实现前均为红。
+
+## 2026-10-08 · Reclaim superseded image variants before reserving a new set
+
+- 起因是 sharp 修复（#599）独立审查时发现的问题。图片管线版本号是 recipe hash 的一部分，所以每次升级 sharp 或 libvips 都会生成一整套新变体。预留时有两道预算：每个资产最多 120 行、冻结清理计划最多 128 个对象，它们都把该资产所有版本的行算在内；而旧行只有在删除资产时才会清掉。结果是：大图产品图每版 30 个变体，保留 3 套旧版本后再处理，就会报 `asset cleanup object budget exceeded (151>128)`。预算也不能改成只数当前版本，因为它守的是删除合同：删除资产时，全部变体要冻结进一条不超过 128 个对象的清理命令。
+- 构建选图（`controlled-build-assets.ts`）改为只从资产 `derivedKeys` 清单发布的变体里选。此前按 role、id 取第一条 ready 变体，新旧版本并存时，选中哪一版是随意的。没有清单或清单无法解析时，不提供 tenant 变体，页面回落到目录图；首次处理定稿失败、只留下部分 ready 行的资产就属于这种情况。
+- 新增 `image-variant-reclaim.ts`。`processAsset` 在 reconcile 之后、预留之前回收已被取代的变体，连同它们的对象和 attempt key。被取代的定义是：状态为 ready 或 failed，且同时满足三条——不在清单里；没有未失败的 SiteVersion 的 spec 引用它；不在本次计划里。
+  - 为什么要看 spec 引用：页面和区块级的局部构建会把当前版本的 assets 合并进新 spec，并按 variantId 逐条物化；成功的版本回滚后也会重新成为构建基础。失败的版本不会再被构建，不计入。没有可回收的候选时，不扫描 site_version。
+  - 整个回收在一个事务里完成，持有资产行锁（与预留、提升、定稿、资产删除是同一把）。存储操作在事务开始后 20 秒截止；删除对象前若剩余时间不足 5 秒（例如等锁或查询太久），就跳过本轮。每批删除要全部落定后才报错，不会在锁释放后还有删除在进行。
+  - 先删对象并确认已不存在，再删行，先删子行再删父行。顺序之所以如此，是因为 ready 行在数据库层不可改状态：删不掉的「行在、对象没了」只会在同一 recipe 再次被计划时按完整性错误失败关闭；反过来留下孤儿对象，资产删除时就无从清理。
+  - 以下情况跳过回收，并记 warn 日志：站点有 `building` 的 SiteVersion、清单无法解析、剩余时间不足。之后的预留若失败，报错会附上跳过原因。回收成功时记一条 info 日志。
+  - 超过 128 个对象、来源不符、对象删不掉时，失败关闭。
+  - 回收没被跳过时，一个资产保留的是：清单那套、正在生成的那套，外加未失败的站点版本仍在引用的行。最后这一部分会随版本数和管线升级次数增长，目前远低于预算。预算、删除合同和清理活动都不变。
+- `reconcileAttemptKeys` 的来源校验和 attempt key 提取改用同一组函数，报错文案不变。
+- `verify-site-builder-m1c.mts` 的容量夹具改为租约有效的 processing 行，同时按 `asset_variant_state_payload_check` 去掉 hash、size 和 error 字段（已用库里实际部署的约束表达式对夹具值求值核对）。回收不碰这类行，所以「120 行时拒绝预留」的真栈断言保持原意。按用户确认的验收范围，本次没有在真栈上运行这个脚本。
+- 新增用例：
+  - 服务层「三套旧版本 + 第四版 30 个计划」：修复前报 151>128，修复后回收 60 行并预留成功。
+  - 服务层另有：调用顺序；跳过时报错带原因；未跳过时报错原样抛出。
+  - 回收模块 15 项：含锁条件与查询条件、版本引用保护（排除失败版本）、无候选时不扫描、存储窗口从事务开始计时、剩余时间不足时跳过。
+  - 清单解析 13 项、构建选图 4 项。
+- xin 的 `global_dev` 目前只有 1 个资产带变体：12 个变体，0.35.3，清单完整，构建结果不受影响。
 
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 

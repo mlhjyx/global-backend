@@ -4,6 +4,7 @@ import {
   ASSET_VARIANT_FITS,
   ASSET_VARIANT_OUTPUT_FORMATS,
   ASSET_VARIANT_POSITIONS,
+  IMAGE_VARIANT_FORMATS,
   IMAGE_VARIANT_ROLES,
   type AssetVariantProjectionRow,
   type AnyAssetVariantRecipe,
@@ -248,4 +249,60 @@ export function projectDerivedImageManifest(input: {
     sourceHash: input.sourceHash,
     variants,
   };
+}
+
+export type PublishedVariantKeys =
+  | { status: "absent" }
+  | { status: "invalid" }
+  | { status: "present"; pipelineVersion: string; keys: ReadonlySet<string> };
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+/**
+ * derivedKeys 清单发布的对象 key：构建只用这些变体，回收绝不删除它们。
+ * 没有清单等于没有发布任何变体；结构不符或属于另一个源文件时返回 invalid，调用方须按「无法判断」处理。
+ */
+export function readPublishedVariantKeys(value: unknown, sourceHash: string): PublishedVariantKeys {
+  if (value === null || value === undefined) return { status: "absent" };
+  const invalid = { status: "invalid" } as const;
+  if (
+    !isPlainRecord(value) ||
+    value.schemaVersion !== "1.0" ||
+    typeof value.pipelineVersion !== "string" ||
+    !value.pipelineVersion.trim() ||
+    !SHA256.test(sourceHash) ||
+    value.sourceHash !== sourceHash ||
+    !isPlainRecord(value.variants)
+  ) {
+    return invalid;
+  }
+  const keys = new Set<string>();
+  for (const [role, set] of Object.entries(value.variants)) {
+    if (!isRole(role) || !isPlainRecord(set)) return invalid;
+    for (const [format, entries] of Object.entries(set)) {
+      if (!(IMAGE_VARIANT_FORMATS as readonly string[]).includes(format) || !Array.isArray(entries)) {
+        return invalid;
+      }
+      for (const entry of entries) {
+        if (
+          !isPlainRecord(entry) ||
+          typeof entry.key !== "string" ||
+          entry.key.length === 0 ||
+          !isPositiveInteger(entry.width) ||
+          !isPositiveInteger(entry.height) ||
+          !isPositiveInteger(entry.bytes)
+        ) {
+          return invalid;
+        }
+        keys.add(entry.key);
+      }
+    }
+  }
+  return { status: "present", pipelineVersion: value.pipelineVersion, keys };
 }

@@ -11,6 +11,7 @@ import type {
   TenantVariantBytes,
   TenantVariantReader,
 } from "./controlled-asset-materializer";
+import { readPublishedVariantKeys } from "./media-foundation";
 
 const TENANT_ASSET_KINDS = new Set([
   "logo",
@@ -78,6 +79,7 @@ export async function buildControlledAssetManifest(
       id: true,
       kind: true,
       contentHash: true,
+      derivedKeys: true,
       variants: {
         where: { status: "ready", contentHash: { not: null } },
         orderBy: [{ variantType: "asc" }, { id: "asc" }],
@@ -85,14 +87,26 @@ export async function buildControlledAssetManifest(
           id: true,
           contentHash: true,
           mime: true,
+          objectKey: true,
         },
       },
     },
   });
   for (const asset of assets) {
-    const variant = asset.variants.find((candidate) =>
-      RENDERABLE_IMAGE_MIMES.has(candidate.mime),
+    // Only the set the asset's derived manifest publishes: rows outside it are
+    // superseded, and the image pipeline reclaims them once no build is running.
+    const published = readPublishedVariantKeys(
+      asset.derivedKeys,
+      asset.contentHash ?? "",
     );
+    const variant =
+      published.status === "present"
+        ? asset.variants.find(
+            (candidate) =>
+              RENDERABLE_IMAGE_MIMES.has(candidate.mime) &&
+              published.keys.has(candidate.objectKey),
+          )
+        : undefined;
     if (
       !asset.contentHash ||
       !/^[a-f0-9]{64}$/.test(asset.contentHash) ||

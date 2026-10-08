@@ -518,6 +518,37 @@ describe("ICP generation authority and controlled enrichment", () => {
       });
     },
   );
+  it("asks the planner for keywords in the target market's language instead of Chinese", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    Object.assign(f.icp, { targetMarkets: ["德国", "奥地利", "瑞士（德语区优先）"] });
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("keywords");
+    expect(prompt).toContain("必须全部用德语书写");
+    expect(prompt).toContain("不得出现中文");
+    expect(prompt).toContain("输出中文 rationale");
+  });
+  it("ties each query's keywords to its own country when the ICP spans several languages", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    Object.assign(f.icp, { targetMarkets: ["德国", "法国"] });
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("每条查询的 keywords 必须用该查询 filters.country 所在国家的语言书写");
+    expect(prompt).toContain("德语、法语");
+    expect(prompt).toContain("不得出现中文");
+  });
+  it("names the local language generically when no target market is recognised", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    Object.assign(f.icp, { targetMarkets: ["火星"] });
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("必须全部用目标市场的当地语言书写");
+    expect(prompt).toContain("无法确定时用英语");
+    expect(prompt).toContain("不得出现中文");
+  });
   it("injects deterministic TED/FDA facts from the taxonomy mapping, preserving seller filters", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
