@@ -169,7 +169,7 @@ async function lockDiscoveryRunReceiptState(
   const rows = await transaction.$queryRaw<LockedDiscoveryRunReceiptState[]>(
     Prisma.sql`SELECT id::text, plan_id::text, stats
       FROM discovery_run
-      WHERE id = ${args.runId}
+      WHERE id = ${args.runId}::uuid
       FOR UPDATE`,
   );
   const row = rows[0];

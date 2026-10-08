@@ -315,7 +315,7 @@ export async function commitGovernedDiscoveryQueryExecution(input: Readonly<{
         await appendQueryLineageV2(tx, command);
         try {
           const rows = await tx.$queryRaw<Array<{ id: string; plan_id: string; stats: unknown }>>(
-            Prisma.sql`SELECT id::text, plan_id::text, stats FROM discovery_run WHERE id=${input.runId} FOR UPDATE`,
+            Prisma.sql`SELECT id::text, plan_id::text, stats FROM discovery_run WHERE id=${input.runId}::uuid FOR UPDATE`,
           );
           const run = rows[0];
           if (!run || run.id !== input.runId || run.plan_id !== input.planId) {

@@ -2234,7 +2234,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               OR (
                 COALESCE(MAX(att.last_attempt), '1970-01-01 00:00:00+00'::timestamptz) =
                   ${cursorAttempt}::timestamptz
-                AND s.workspace_id > ${cursor.workspaceId}
+                AND s.workspace_id > ${cursor.workspaceId}::uuid
               )
             )
           `

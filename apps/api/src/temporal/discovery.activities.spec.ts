@@ -2401,11 +2401,12 @@ describe("finalizeRun durable query receipt readback", () => {
 
   it("rejects a missing or cross-plan locked run before final mutation", async () => {
     const { outboxCreate, update } = finalizeHarness();
+    const queryRaw = vi.fn(async (_statement: { strings: readonly string[] }) => []);
     const invalid = createDiscoveryActivities({
       prisma: {
         withWorkspace: vi.fn(async (_workspaceId, callback) =>
           callback({
-            $queryRaw: vi.fn(async () => []),
+            $queryRaw: queryRaw,
             discoveryRun: { update },
             outboxEvent: { create: outboxCreate },
           }),
@@ -2426,6 +2427,10 @@ describe("finalizeRun durable query receipt readback", () => {
     ).rejects.toThrow("DISCOVERY_QUERY_RECEIPT_RUN_BINDING_INVALID");
     expect(update).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
+    // Prisma binds a string as text, and PostgreSQL has no uuid = text operator.
+    expect(queryRaw.mock.calls[0]?.[0].strings.join("?")).toMatch(
+      /WHERE id\s*=\s*\?::uuid\b/,
+    );
   });
 });
 
