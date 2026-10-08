@@ -4,6 +4,18 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-08 · Prepare every raw SQL statement against the real schema in CI
+
+- 起因：xin 上第一次发现 run 因 `uuid = text` 失败（#605）。单测里 `$queryRaw` 都是模拟的，参数类型、列名、函数签名从来不在真库上检查，这类错误因此能在 main 上待一个多月。
+- 新增真库测试 `apps/api/src/prisma/raw-sql-parameter-types.postgres.spec.ts`。它用 TypeScript 类型检查器收集 `apps/api/src` 里全部原生 SQL：`Prisma.sql`、`$queryRaw`、`$executeRaw`，连同嵌套片段、条件分支、`Prisma.join` 以及 `.map` 生成的片段。每个参数按 Prisma 实际绑定的类型声明（字符串 `text`、整数 `bigint`、日期 `timestamptz`、对象 `jsonb` 等），在已迁移的库上 `PREPARE` 后立即 `DEALLOCATE`，不执行、不写入。172 条语句、193 个变体全部检查，一条都不跳过。另一项测试在真库上实测 Prisma 的绑定类型，防止升级后检查器失准。CI 在「Suppression lock」之后新增一步运行它。
+- 它一上线就查出 8 处此前没人发现的缺陷，本次一并修复：
+  - 发现 run 建档时计算证据清单摘要的 SQL 少一个右括号。这是 c9723c8d 引入的，08-31 起每次执行都是语法错误，`canonicalizeRun` 必然失败。现在改成与数据库函数相同的表达式。
+  - 预算账本「标记结果未知」与两版「带产物清单结算」，把 HTTP 状态当 `bigint` 传给 `smallint` 参数，只要状态不是 null 就找不到函数。加 `::smallint`。
+  - 通用产物写入（工作区、平台）同样加 `::smallint`。
+  - 个人产物清理的「完成」「重试」把尝试次数当 `bigint` 传给 `integer`，原始数据过期把条数上限也传错了。加 `::integer`。
+  - 建站成本对账巡检的翻页条件含聚合 `MAX(...)`，却放在 WHERE 里，带游标翻到第二页必然报错。移到 GROUP BY 之后的 HAVING。
+- 验证：撤掉 #605 的 `::uuid` 或撤回括号修复时，新测试分别报 `uuid = text` 和语法错误；相关模块单测 5,707 项通过。
+
 ## 2026-10-08 · Room for reasoning tokens in acquisition model tasks
 
 - 起因（2026-10-08 xin 实测）：换到含 #602 的镜像后，卖方 #8、#9 的 ICP 设计连续两次失败，网关记 2,654 输入、4,096 输出，正好卡在任务上限，后端报 `ProviderOutputError`（输出被截断），每次仍按网关口径扣约 0.51 美元。10-07 卖方 #7 那次用了 3,510，已经贴近上限。deepseek-v4-pro 是推理模型，推理 token 与答案共用同一个 `max_tokens`。

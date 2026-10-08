@@ -1024,7 +1024,7 @@ export class PostgresBudgetStore implements BudgetStore {
           Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v5(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${durable ? JSON.stringify(durable.manifest) : null}::jsonb,
-            ${facts?.expectedHttpStatus ?? null},
+            ${facts?.expectedHttpStatus ?? null}::smallint,
             ${facts?.expectedHttpOk ?? null},
             ${facts?.expectedSanitizedUrl ?? null},
             ${facts?.expectedContentHash ?? null},
@@ -1167,7 +1167,7 @@ export class PostgresBudgetStore implements BudgetStore {
             ? Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v3(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
-            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedHttpStatus}::smallint, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
             ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
             ${JSON.stringify(explicitFacts.usage)}::jsonb,
@@ -1179,7 +1179,7 @@ export class PostgresBudgetStore implements BudgetStore {
             : Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
-            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedHttpStatus}::smallint, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
             ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
             ${JSON.stringify(explicitFacts.usage)}::jsonb,

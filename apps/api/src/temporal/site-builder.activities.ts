@@ -2291,8 +2291,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             WHERE rx.spend_id = s.id
               AND rx.status IN ('RESOLVED', 'CONFLICT', 'EXPIRED')
           )
-          ${cursorCondition}
         GROUP BY s.workspace_id
+        HAVING TRUE ${cursorCondition}
         ORDER BY MAX(att.last_attempt) ASC NULLS FIRST, s.workspace_id ASC
         LIMIT ${limit}
       `);

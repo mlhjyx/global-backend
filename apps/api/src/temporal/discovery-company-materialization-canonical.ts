@@ -58,7 +58,7 @@ async function readEvidenceManifest(transaction: Transaction, workspaceId: strin
       encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_array(
         evidence.field,evidence.id,encode(digest(evidence.value::text,'sha256'),'hex'),
         evidence.provider_key,evidence.license,
-        encode(digest(coalesce(evidence.allowed_actions,'null'::jsonb)::text,'sha256'),'hex')
+        encode(digest(coalesce(evidence.allowed_actions,'null'::jsonb)::text,'sha256'),'hex'))
         ORDER BY evidence.field,evidence.id),'[]'::jsonb)::text,'UTF8'),'sha256'),'hex')
         AS evidence_manifest_sha256
     FROM field_evidence evidence
