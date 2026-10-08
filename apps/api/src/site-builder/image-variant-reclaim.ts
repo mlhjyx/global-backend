@@ -47,12 +47,6 @@ interface LedgerRow extends VariantProvenanceRow {
   sourceVariantId: string | null;
 }
 
-interface KeptVariants {
-  published: ReadonlySet<string>;
-  referenced: ReadonlySet<string>;
-  planned: ReadonlySet<string>;
-}
-
 function jsonRecord(value: Prisma.JsonValue | null | undefined): Record<string, Prisma.JsonValue> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, Prisma.JsonValue>)
@@ -111,9 +105,10 @@ async function lockAsset(tx: Prisma.TransactionClient, job: ImageVariantReclaimJ
 }
 
 /**
- * Variant ids that any version of the site still names. A page or section build merges the
- * active version's assets into its spec and materializes every one of them by id, so a row a
- * version references must outlive the manifest that once published it.
+ * Variant ids that a version of the site may still materialize. A page or section build merges
+ * the active version's assets into its spec and reads every one of them by id, and a succeeded
+ * version can become active again on rollback, so a row such a version references must outlive
+ * the manifest that once published it. A failed version is never built from again.
  */
 async function referencedVariantIds(tx: Prisma.TransactionClient, job: ImageVariantReclaimJob): Promise<Set<string>> {
   const rows = await tx.$queryRaw<Array<{ variantId: string }>>(Prisma.sql`
@@ -123,6 +118,7 @@ async function referencedVariantIds(tx: Prisma.TransactionClient, job: ImageVari
       CASE WHEN jsonb_typeof(version.spec -> 'assets') = 'object' THEN version.spec -> 'assets' ELSE '{}'::jsonb END
     ) AS ref
     WHERE version.site_id = ${job.siteId}::uuid
+      AND version.build_status <> 'failed'
       AND ref.value ->> 'source' = 'tenant'
       AND lower(ref.value ->> 'assetId') = lower(${job.assetId})
       AND ref.value ->> 'variantId' IS NOT NULL
@@ -130,18 +126,28 @@ async function referencedVariantIds(tx: Prisma.TransactionClient, job: ImageVari
   return new Set(rows.map((row) => row.variantId));
 }
 
-/** Terminal rows nothing keeps, children first; a kept row keeps its source row, transitively. */
-function supersededRows(rows: readonly LedgerRow[], kept: KeptVariants): LedgerRow[] {
+/** Terminal rows that are neither published nor about to be produced again. */
+function unpublishedTerminalRows(
+  rows: readonly LedgerRow[],
+  published: ReadonlySet<string>,
+  planned: ReadonlySet<string>,
+): LedgerRow[] {
+  return rows.filter(
+    (row) =>
+      (row.status === 'ready' || row.status === 'failed') &&
+      !published.has(row.objectKey) &&
+      !planned.has(row.recipeHash),
+  );
+}
+
+/** Candidates nothing keeps, children first; a kept row keeps its source row, transitively. */
+function supersededRows(
+  rows: readonly LedgerRow[],
+  candidateRows: readonly LedgerRow[],
+  referenced: ReadonlySet<string>,
+): LedgerRow[] {
   const candidates = new Map(
-    rows
-      .filter(
-        (row) =>
-          (row.status === 'ready' || row.status === 'failed') &&
-          !kept.published.has(row.objectKey) &&
-          !kept.planned.has(row.recipeHash) &&
-          !kept.referenced.has(row.id.toLowerCase()),
-      )
-      .map((row) => [row.id, row]),
+    candidateRows.filter((row) => !referenced.has(row.id.toLowerCase())).map((row) => [row.id, row]),
   );
   let changed = true;
   while (changed) {
@@ -174,7 +180,11 @@ async function deleteObjects(
       throw signal.reason instanceof Error ? signal.reason : new Error('image variant reclamation aborted');
     }
     const batch = keys.slice(offset, offset + RECLAIM_CONCURRENCY);
-    await Promise.all(batch.map((key) => storage.delete(key, signal)));
+    // Settle the whole batch first: a rejection must not end the transaction, and with it the
+    // asset lock, while sibling deletes are still in flight.
+    const deleted = await Promise.allSettled(batch.map((key) => storage.delete(key, signal)));
+    const failure = deleted.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failure) throw failure.reason;
     const heads = await Promise.all(batch.map((key) => storage.head(key, signal)));
     const survivor = batch.find((_key, index) => heads[index]);
     if (survivor) throw new Error(`image variant reclamation could not delete ${survivor}`);
@@ -201,11 +211,13 @@ async function reclaimLocked(
     where: { assetId: job.assetId },
     select: { id: true, recipeHash: true, objectKey: true, status: true, metadata: true, sourceVariantId: true },
   });
-  const superseded = supersededRows(rows, {
-    published: published.status === 'present' ? published.keys : new Set<string>(),
-    referenced: await referencedVariantIds(tx, job),
+  const candidates = unpublishedTerminalRows(
+    rows,
+    published.status === 'present' ? published.keys : new Set<string>(),
     planned,
-  });
+  );
+  if (candidates.length === 0) return { status: 'reclaimed', rows: 0, objects: 0 };
+  const superseded = supersededRows(rows, candidates, await referencedVariantIds(tx, job));
   const objects = [...new Set(superseded.flatMap((row) => [row.objectKey, ...variantAttemptKeys(job, row)]))];
   if (objects.length > MAX_RECLAIM_OBJECTS) {
     throw new Error(`image variant reclamation exceeds ${MAX_RECLAIM_OBJECTS} objects`);
@@ -238,8 +250,11 @@ async function reclaimLocked(
  * finalization and asset deletion also take, so no producer can publish or re-promote a row
  * while it is reclaimed. Builds pick only published rows; a build already in flight may still
  * hold a row chosen under an older manifest, so reclamation waits until the site has no building
- * version. Objects go first and must be gone before their rows are deleted, so a failure never
- * leaves an object without the row that asset deletion would clean it up through.
+ * version. The only moment a build holds rows outside site_version is between choosing them and
+ * creating its building version; image processing runs before that step in the same run, and a
+ * site has one active build run at a time. Objects go first and must be gone before their rows
+ * are deleted, so a failure never leaves an object without the row that asset deletion would
+ * clean it up through.
  */
 export async function reclaimSupersededImageVariants(
   deps: ImageVariantReclaimDeps,

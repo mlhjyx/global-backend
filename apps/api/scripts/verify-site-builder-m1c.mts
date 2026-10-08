@@ -256,6 +256,7 @@ async function main(): Promise<void> {
     });
     // Rows under a live lease: superseded-variant reclamation leaves them to lease
     // reconciliation, so they still fill the per-Asset budget when the writer reserves.
+    // asset_variant_state_payload_check: processing rows carry no hash, size or error.
     const capacityLeaseUntil = new Date(Date.now() + 60 * 60_000).toISOString();
     await owner.assetVariant.createMany({
       data: Array.from({ length: 120 }, (_, index) => {
@@ -268,7 +269,6 @@ async function main(): Promise<void> {
           mime: 'image/png',
           width: 1,
           height: 1,
-          sizeBytes: 1,
           objectKey: buildVariantObjectKey(
             workspaceId,
             siteId,

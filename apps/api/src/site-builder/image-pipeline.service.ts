@@ -319,11 +319,16 @@ export class ImagePipelineService {
     const reclaimed = await this.reclaimSupersededVariants(job, plans, signal);
     if (reclaimed.status === 'skipped') {
       this.log.warn(`superseded image variants of asset ${input.assetId} were not reclaimed: ${reclaimed.reason}`);
+    } else if (reclaimed.rows > 0) {
+      this.log.log(
+        `reclaimed ${reclaimed.rows} superseded image variants (${reclaimed.objects} objects) of asset ${input.assetId}`,
+      );
     }
     const producerToken = randomUUID();
     const reserve = () =>
       this.reserveVariantSet(job, inspection, plans, producerToken).catch((error: unknown) => {
-        // A budget refusal is otherwise indistinguishable from one that reclamation would have prevented.
+        // Name the skip on any reservation failure: a budget refusal after a skipped reclamation is
+        // otherwise indistinguishable from one that reclamation would have prevented.
         if (reclaimed.status !== 'skipped') throw error;
         throw new Error(`${safeMessage(error)}; superseded variants were not reclaimed (${reclaimed.reason})`, {
           cause: error,

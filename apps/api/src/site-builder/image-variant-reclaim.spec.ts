@@ -165,7 +165,7 @@ describe("superseded image variant reclamation", () => {
   });
 
   it("locks exactly the asset row the producer is working from", async () => {
-    const f = ledger({ rows: [], derivedKeys: null });
+    const f = ledger({ rows: [row("v-a")], derivedKeys: null });
 
     await reclaimSupersededImageVariants(f.deps, job, new Set());
 
@@ -178,7 +178,22 @@ describe("superseded image variant reclamation", () => {
     });
     const references = f.tx.$queryRaw.mock.calls.map(([query]) => query).find((query) => sqlText(query).includes("site_version"))!;
     expect(sqlText(references)).toMatch(/ref\.value ->> 'source' = 'tenant'/);
+    // A failed version is never built from again, so it keeps nothing alive.
+    expect(sqlText(references)).toMatch(/version\.build_status <> 'failed'/);
     expect(references.values).toEqual([job.siteId, job.assetId]);
+  });
+
+  it("does not scan site versions when nothing terminal is left unpublished", async () => {
+    const published = row("v-a");
+    const planned = row("v-b", { status: "failed" });
+    const f = ledger({ rows: [published, planned], derivedKeys: manifestOf("v-a", [published]) });
+
+    await expect(
+      reclaimSupersededImageVariants(f.deps, job, new Set([planned.recipeHash])),
+    ).resolves.toEqual({ status: "reclaimed", rows: 0, objects: 0 });
+    expect(
+      f.tx.$queryRaw.mock.calls.some(([query]) => sqlText(query).includes("site_version")),
+    ).toBe(false);
   });
 
   it("keeps every variant a site version still names, even outside the published manifest", async () => {
@@ -247,6 +262,27 @@ describe("superseded image variant reclamation", () => {
     expect(now).toHaveBeenCalled();
     expect(f.storage.delete).not.toHaveBeenCalled();
     expect(f.rows.size).toBe(1);
+  });
+
+  it("times the storage window from the start of the transaction, not from the caller", async () => {
+    // Waiting for a pooled connection (maxWait) precedes BEGIN and is not part of the 30 s timeout.
+    let clock = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const f = ledger({ rows: [row("v-a")], derivedKeys: null });
+    const run = f.prisma.withWorkspace.getMockImplementation()!;
+    f.prisma.withWorkspace.mockImplementation(async (workspaceId, fn) => {
+      clock += 10_000;
+      return run(workspaceId, async (tx) => {
+        const result = fn(tx);
+        clock += 6_000;
+        return result;
+      });
+    });
+
+    await expect(reclaimSupersededImageVariants(f.deps, job, new Set())).resolves.toMatchObject({
+      status: "reclaimed",
+      rows: 1,
+    });
   });
 
   it("leaves processing rows to lease reconciliation", async () => {
