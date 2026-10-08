@@ -139,8 +139,8 @@ test(
         join(workspace, "pnpm-workspace.yaml"),
         "packages:\n  - app\n",
       );
-      // The real trace_engine 0.0.65 declares third-party-web and legacy-javascript with this
-      // same dist-tag (see TRACE_ENGINE_DIST_TAG_DEPENDENCIES). A tiny local package
+      // The real trace_engine (TRACE_ENGINE_REVIEWED_VERSION) declares every package in
+      // TRACE_ENGINE_DIST_TAG_DEPENDENCIES with this same dist-tag. A tiny local package
       // lets us observe pnpm's actual resolver without network or lifecycle scripts.
       await writeFile(
         join(workspace, "app/package.json"),
@@ -242,10 +242,13 @@ test("every dist-tag dependency of @paulirish/trace_engine stays on its reviewed
     "utf8",
   );
   const resolved = resolvedPackageVersions(lockfile);
+  const traceEngine = resolved.get("@paulirish/trace_engine");
   assert.deepEqual(
-    resolved.get("@paulirish/trace_engine"),
+    traceEngine,
     [TRACE_ENGINE_REVIEWED_VERSION],
-    "@paulirish/trace_engine changed: pin every dependency its manifest declares by dist-tag, then update the reviewed version",
+    traceEngine === undefined
+      ? "@paulirish/trace_engine left the dependency graph: retire this guard and the overrides it holds"
+      : `@paulirish/trace_engine is not exactly ${TRACE_ENGINE_REVIEWED_VERSION}: read its new manifest, make TRACE_ENGINE_DIST_TAG_DEPENDENCIES list exactly its dist-tag dependencies, give each an exact root override equal to its locked version, drop overrides no longer needed, then update TRACE_ENGINE_REVIEWED_VERSION`,
   );
   for (const name of TRACE_ENGINE_DIST_TAG_DEPENDENCIES) {
     const pin = manifest.pnpm?.overrides?.[name];
