@@ -62,7 +62,7 @@ export function createRawSourceActivities(deps: { prisma: PrismaService }) {
           }>
         >(Prisma.sql`SELECT expired, deferred_for_conflict, has_more
           FROM expire_due_raw_source_records_v1(
-            ${scopedWorkspaceId}::uuid, ${limit}, NULL::timestamptz
+            ${scopedWorkspaceId}::uuid, ${limit}::integer, NULL::timestamptz
           )`);
         const row = rows[0];
         if (
