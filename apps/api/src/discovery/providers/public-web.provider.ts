@@ -418,7 +418,9 @@ export function mapPublicWebCompanyToRecord(args: {
  * 里的本地部分（info@、vertrieb@、sales2@ …）算公司联系点：非个人数据，不标 personalData，给通用占位
  * title/department。其余一律按**个人数据**处理（GDPR Art.4）：first.last@ 与 max@、mueller@、mm@ 这类
  * 单名或缩写都可能指向具体的人 → `personalData=true` + `sourcePage`（persistDiscoveredContacts 据此写
- * person.profile 侧写证据）。只首个联系点带电话（与原行为一致）。最多 5 个。
+ * person.profile 侧写证据）。只有 first.last@ 形反推姓名；其余个人邮箱推不出「名 + 姓」，给占位名
+ * 「个人邮箱 (max@)」，否则 email-format-learning 会把邮箱自身反推出的单名学成 `first` 命名法。
+ * 只首个联系点带电话（与原行为一致）。最多 5 个。
  */
 export function buildPublicContacts(
   domain: string,
@@ -429,13 +431,15 @@ export function buildPublicContacts(
     const local = e.value.split('@')[0];
     // 白名单外一律个人：未知的本地部分可能就是人名（max@），保守判 personal。
     const personal = cleanEmail(e.value)?.kind !== 'role';
-    const fullName = personal
-      ? local
-          .split(/[._-]/)
-          .filter((w) => w.length > 0)
-          .map((w) => w[0].toUpperCase() + w.slice(1))
-          .join(' ') || local
-      : `公开联系点 (${local}@)`;
+    const nameShaped = /^[a-z]+[._-][a-z]+$/i.test(local);
+    const fullName = !personal
+      ? `公开联系点 (${local}@)`
+      : nameShaped
+        ? local
+            .split(/[._-]/)
+            .map((w) => w[0].toUpperCase() + w.slice(1))
+            .join(' ')
+        : `个人邮箱 (${local}@)`;
     return {
       externalId: `${domain}:${e.value}`,
       fullName,

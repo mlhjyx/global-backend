@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildPublicContacts } from './public-web.provider';
 import { GENERIC_CONTACT_TITLE } from '../provider-contract';
+import { inferEmailPattern } from '../email-format-learning';
 
 /**
- * public_web 联系人构造单测（Codex P2 on #58 discovery.service.ts:127）：first.last@ 反推的**具名个人**
- * 邮箱 = 个人数据（GDPR Art.4），必须标 personalData=true → persistDiscoveredContacts 才写 person.profile
- * 侧写证据（GDPR 标记）。此前漏标 → 具名个人邮箱入库却无标记/证据。总机/职能邮箱不是个人数据、不标。
+ * public_web 联系人构造单测。只有职能邮箱白名单（`cleanEmail`）里的地址是公司联系点，不是个人数据、不标；
+ * 其余一律是个人数据（GDPR Art.4），必须标 personalData=true → persistDiscoveredContacts 才写
+ * person.profile 侧写证据（Codex P2 on #58 曾漏标 first.last@；2026-10-08 又发现 max@ 这类单名被当公开联系点）。
+ * 只有 first.last@ 反推姓名，其余个人邮箱给占位名，不能成为邮箱格式学习样本。
  */
 describe('buildPublicContacts', () => {
   it('first.last@ 反推姓名 → personalData=true + sourcePage，无 switchboard title', () => {
@@ -39,11 +41,54 @@ describe('buildPublicContacts', () => {
       expect(c.department).toBeUndefined();
       expect(c.fullName).not.toContain('公开联系点');
     }
+    expect(contacts.map((c) => c.fullName)).toEqual([
+      '个人邮箱 (max@)',
+      '个人邮箱 (mueller@)',
+      '个人邮箱 (mm@)',
+    ]);
   });
 
-  it('任意形状的个人本地部分都能推出显示名，连续分隔符不报错', () => {
+  it('单名个人邮箱不当姓名样本：邮箱格式学习只从 first.last@ 学', () => {
+    // 复审 HIGH：从 mueller@ 反推出 "Mueller" 会给 `first` 投票，datenschutz@、technik@ 一多就压过真实样本。
+    const samples = (domainEmails: string[]) =>
+      buildPublicContacts('acme.de', domainEmails.map((value) => ({ value })), undefined).map((c) => ({
+        fullName: c.fullName,
+        email: c.email!,
+      }));
+
+    expect(inferEmailPattern(samples(['info@acme.de', 'mueller@acme.de']))).toBeNull();
+    expect(
+      inferEmailPattern(
+        samples(['info@acme.de', 'datenschutz@acme.de', 'technik@acme.de', 'j.schmidt@acme.de']),
+      ),
+    ).toMatchObject({ pattern: 'first.last', support: 1, samples: 1 });
+  });
+
+  it('大小写、加号地址与白名单外的职能词：按白名单判，未知的一律个人', () => {
+    const contacts = buildPublicContacts(
+      'acme.de',
+      [
+        { value: 'INFO@ACME.DE' },
+        { value: 'info-eu@acme.de' },
+        { value: 'Max@Acme.de' },
+        { value: 'max+news@acme.de' },
+        { value: 'datenschutz@acme.de' },
+      ],
+      undefined,
+    );
+
+    expect(contacts.map((c) => [c.fullName, c.personalData ?? false])).toEqual([
+      ['公开联系点 (INFO@)', false],
+      ['公开联系点 (info-eu@)', false],
+      ['个人邮箱 (Max@)', true],
+      ['个人邮箱 (max+news@)', true],
+      ['个人邮箱 (datenschutz@)', true],
+    ]);
+  });
+
+  it('只有恰好一个分隔符的 first.last@ 反推姓名，max__x@ 这类给占位名', () => {
     const [c] = buildPublicContacts('acme.de', [{ value: 'max__x@acme.de' }], undefined);
-    expect(c.fullName).toBe('Max X');
+    expect(c.fullName).toBe('个人邮箱 (max__x@)');
     expect(c.personalData).toBe(true);
   });
 
