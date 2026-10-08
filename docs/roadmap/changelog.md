@@ -11,6 +11,12 @@
 - 这对发现 run 同样重要：抽取、资格判定一旦截断就是模型失败，按现有规则会让整个 run 中止。
 - 测试：注册表新增 1 项（11 个任务都在 deepseek-v4-pro 上且上限为 8,192）；ICP 预算包络与运行时桥接两项改为读到 8,192，越界反例改为 8,193。
 
+## 2026-10-08 · Keep person data out of the trade-role model prompt
+
+- 起因（2026-10-08 设计调研）：官网画像在规则判不出贸易角色时调用 `discovery.classify_trade_role`，提示里直接拼了首页前 12,000 字与 Impressum 前 4,000 字的原文。Impressum 按法律要写代表人、负责人和联系邮箱，所以总经理姓名、个人邮箱与电话会原样发给模型网关；当前模型经 OpenOx 调用 DeepSeek，属于第三国处理。存储侧早已脱敏（证据只留公司级片段），发给模型的这一侧没有。
+- 改动：发给模型前先删人员行（沿用 `PERSON_MARKERS`，另加 Vertreten durch / vertretungsberechtigt / Verantwortlich / Prokurist / Datenschutzbeauftragter / Kontaktperson 等标签；标签单独成行时连下一行的值一起删），再用 `scrubPiiKeepingTaxIds` 给邮箱、电话打码，商业登记号与增值税号保留。规则分类与 Impressum 标识符解析仍在本机读原文，不受影响。
+- 测试：新增一项（先红后绿）：含代表人、负责人、个人邮箱与电话的首页和 Impressum，发给模型的提示里不出现这些值，HRB 与 USt-IdNr. 仍在。
+
 ## 2026-10-08 · Planning tasks get the provider's 16,000-token output ceiling
 
 - 起因（2026-10-08 xin 实测）：#604 把 pro 任务的输出上限放到 8,192 后，卖方 #10 的查询规划输出了 10,568 个 token 仍然成功，卖方 #11 的规划却在 8,192 处被截断（134 秒，`ProviderOutputError`，接口返回 500）。OpenOx 对 `max_tokens` 的执行前后不一致，规划类回答本身也可能超过 8,192。截断的代价不止一次调用：同一个 ICP 的规划请求共用一个预算账户，调用过模型后这个 ICP 就再也生成不了计划；ICP 设计同理，一家卖方只有一次设计机会。

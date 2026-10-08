@@ -12,7 +12,7 @@ import type { ExecutionContext } from '../provider-contract';
 import { matchCarriedBrands } from '../website-profile/brands';
 import { parseImpressum, type ImpressumRegister } from '../website-profile/impressum';
 import { classifyTradeRoleByRules } from '../website-profile/trade-role-rules';
-import { scrubPii } from '../../site-builder/agents/pii';
+import { scrubPii, scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
 
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
 /** data_provider kill switch and canonical attribute namespace. */
@@ -24,6 +24,9 @@ const IMPRESSUM_LINK = /impressum|imprint|legal-notice|legal_notice/iu;
 /** Lines about people (management, owners, contacts) never become stored evidence. */
 const PERSON_MARKERS =
   /gesch(?:ä|ae)ftsf(?:ü|ue)hr|inhaber|ansprechpartner|vorstand|\b(?:herr|frau|mr|mrs|ms)\b\.?|\bdr\.\s/iu;
+/** Impressum labels whose value is a person, beyond PERSON_MARKERS. */
+const PERSON_LABELS =
+  /vertreten|vertretungsberechtig|verantwortlich|prokur|datenschutzbeauftrag|kontaktperson|managing director|contact person|\bceo\b|\bowner\b/iu;
 const MAX_EVIDENCE_SNIPPETS = 3;
 
 /** Company-level evidence only: person lines dropped, phones and emails redacted. */
@@ -32,6 +35,30 @@ function companyEvidence(snippets: readonly string[]): string[] {
     .map((snippet) => scrubPii(snippet).trim())
     .filter((snippet) => snippet.length > 0 && !PERSON_MARKERS.test(snippet))
     .slice(0, MAX_EVIDENCE_SNIPPETS);
+}
+
+/**
+ * Page text for the model, which sits with a third-country provider: person
+ * lines are dropped, together with the value line after a bare label such as
+ * "Vertreten durch:", and emails and phones are redacted. Register numbers
+ * and VAT IDs stay, because they are company facts.
+ */
+function modelSafeText(text: string): string {
+  const kept: string[] = [];
+  let dropValueLine = false;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (dropValueLine && trimmed) {
+      dropValueLine = false;
+      continue;
+    }
+    if (PERSON_MARKERS.test(trimmed) || PERSON_LABELS.test(trimmed)) {
+      dropValueLine = trimmed.endsWith(':');
+      continue;
+    }
+    kept.push(line);
+  }
+  return scrubPiiKeepingTaxIds(kept.join('\n'));
 }
 
 export type WebsiteTradeRole =
@@ -163,7 +190,7 @@ export class WebsiteProfileProvider {
         this.deps.gateway,
         {
           task: WEBSITE_PROFILE_TASK,
-          prompt: `品类上下文（只用于判断相关品类，禁止照抄进字段）：${input.icpContext.slice(0, 600)}\n\n首页（${homepageUrl}）：\n${home.slice(0, HOME_PROMPT_CHARS)}\n\nImpressum：\n${impressum.slice(0, IMPRESSUM_PROMPT_CHARS)}`,
+          prompt: `品类上下文（只用于判断相关品类，禁止照抄进字段）：${input.icpContext.slice(0, 600)}\n\n首页（${homepageUrl}）：\n${modelSafeText(home).slice(0, HOME_PROMPT_CHARS)}\n\nImpressum：\n${modelSafeText(impressum).slice(0, IMPRESSUM_PROMPT_CHARS)}`,
           system: contract?.description,
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['trade_role'] },

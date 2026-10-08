@@ -136,5 +136,32 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
       'Vertrieb: Tel. [redacted-phone], [redacted-email]',
     ]);
   });
+
+  it('sends the model no person lines, emails or phones, but keeps the register and VAT IDs', async () => {
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValueOnce({ data: { trade_role: 'mixed' } });
+    await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({
+        'https://pumpen-handel.example/':
+          'Hersteller und Händler von Pumpen.\nIhr Ansprechpartner: Herr Max Muster, max.muster@pumpen-handel.example',
+        'https://pumpen-handel.example/impressum': [
+          IMPRESSUM,
+          'Geschäftsführer: Max Mustermann',
+          'Vertreten durch:',
+          'Erika Musterfrau',
+          'Telefon: +49 89 1234567',
+          'E-Mail: erika.musterfrau@pumpen-handel.example',
+        ].join('\n'),
+      }),
+    }).profile(INPUT, CTX);
+
+    const [, modelInput] = mocks.executeStructuredTaskWithRuntime.mock.calls[0]!;
+    expect(modelInput.prompt).toContain('Hersteller und Händler von Pumpen.');
+    expect(modelInput.prompt).toContain('HRB 98765');
+    expect(modelInput.prompt).toContain('DE136695976');
+    for (const personal of ['Max Muster', 'Erika Musterfrau', 'max.muster@', 'erika.musterfrau@', '1234567']) {
+      expect(modelInput.prompt).not.toContain(personal);
+    }
+  });
 });
 
