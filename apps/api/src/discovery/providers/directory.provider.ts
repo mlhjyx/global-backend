@@ -36,6 +36,7 @@ import {
   MAX_DIRECTORY_PAGINATION,
   MAX_DIRECTORY_SEARCHES_PER_QUERY,
 } from '../execution-envelope';
+import { searchCountryName, searchableTerms } from '../search-localization';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -378,14 +379,27 @@ export function mapDirectoryCompanyToRecord(args: {
   };
 }
 
-/** 构造名录检索串：行业/关键词 × 意图词（EN + DE）× 地区。 */
+/**
+ * 构造名录检索串：行业/关键词 × 意图词（EN + DE）× 地区。中文等中日韩文字的词与空词不进检索串：
+ * 主题词全是中文时不检索（不退回通用的 manufacturing）；地区依次取可写的地区词、国家词、
+ * 目标国的当地名称，给了地理范围却一个都写不出时也不检索，免得搜成全球名录。
+ */
 export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
-  const industries = [...arr(f.industry), ...arr(f.sub_industry)].slice(0, 2);
-  const keywords = (query.keywords ?? []).slice(0, 2);
-  const region = arr(f.region ?? f.country)[0];
-  const topic = [industries[0] ?? keywords[0] ?? 'manufacturing', ...keywords.slice(0, 1)].join(' ').trim();
+  const rawIndustries = [...arr(f.industry), ...arr(f.sub_industry)];
+  const rawKeywords = query.keywords ?? [];
+  const industries = searchableTerms(rawIndustries).slice(0, 2);
+  const keywords = searchableTerms(rawKeywords).slice(0, 2);
+  if (!industries.length && !keywords.length && (rawIndustries.length || rawKeywords.length)) return [];
+  const region = searchableTerms(arr(f.region))[0]
+    ?? searchableTerms(arr(f.country))[0]
+    ?? searchCountryName(query);
+  const geographyGiven = [...arr(f.region), ...arr(f.country)].some((value) => value.trim().length > 0);
+  if (region === undefined && geographyGiven) return [];
+  const topic = [...new Set([industries[0] ?? keywords[0] ?? 'manufacturing', ...keywords.slice(0, 1)])]
+    .join(' ')
+    .trim();
 
   const intents = [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
   const searches = intents.map((intent) => [topic, intent, region ?? ''].filter(Boolean).join(' ').trim());

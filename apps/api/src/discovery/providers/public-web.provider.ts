@@ -32,6 +32,7 @@ import {
   MAX_SEARCHES_PER_QUERY,
   isForeignCountryDomain,
   searchLanguageFor,
+  searchableTerms,
   targetCountryTlds,
   tradeRoleFor,
   tradeRoleTerms,
@@ -465,14 +466,15 @@ export function searchEvidenceText(hits: readonly SearchHit[]): string {
 /**
  * 从计划查询构造 ≤3 条搜索串（G3 §4.3）：品类词 × 目标国语言的贸易角色词
  * （分销商 ICP → Großhandel/Händler/Vertrieb）；角色未知时只用品类词，不再硬加
- * 'manufacturer company'。
+ * 'manufacturer company'。中文等中日韩文字的词先剔除再取前几个：规划器为词表映射
+ * 保留的中文行业词不得进入目标国语言的检索串，全是中文时不发起检索。
  */
 export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
-  const industries = [...arr(f.industry), ...arr(f.sub_industry)].slice(0, 2);
-  const products = arr(f.product).slice(0, 2);
-  const keywords = (query.keywords ?? []).slice(0, 3);
+  const industries = searchableTerms([...arr(f.industry), ...arr(f.sub_industry)]).slice(0, 2);
+  const products = searchableTerms(arr(f.product)).slice(0, 2);
+  const keywords = searchableTerms(query.keywords ?? []).slice(0, 3);
   const terms = [...keywords, ...products, ...industries]
     .map((t) => t.trim())
     .filter((t, i, a) => t.length > 0 && a.indexOf(t) === i);
