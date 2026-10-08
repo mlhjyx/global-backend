@@ -308,6 +308,10 @@ describe("site build cost reconciliation sweep", () => {
       values: readonly unknown[];
     };
     expect(queryWithCursor.strings.join(" ")).toContain("COALESCE");
+    // Prisma binds a string as text, and PostgreSQL has no uuid > text operator.
+    expect(queryWithCursor.strings.join("?")).toMatch(
+      /s\.workspace_id\s*>\s*\?::uuid\b/,
+    );
   });
 
   it("rejects malformed cursor input", async () => {

@@ -47,6 +47,13 @@
   - 清单解析 13 项、构建选图 4 项。
 - xin 的 `global_dev` 目前只有 1 个资产带变体：12 个变体，0.35.3，清单完整，构建结果不受影响。
 
+## 2026-10-08 · Discovery runs can lock their own run row
+
+- 起因（2026-10-08 xin 实测）：xin 上第一次执行发现 run（卖方 #10 的查询计划），工作流启动 5 秒即失败，worker 报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_UNAVAILABLE`。Postgres 日志里的真实原因是 `operator does not exist: uuid = text`：提交查询结果时用原生 SQL 按 run ID 锁 `discovery_run` 行，Prisma 把字符串参数按 text 绑定，而 `discovery_run.id` 是 uuid。这种写法自 90f005de（2026-08-30 接入受治理的查询血缘）起就在，此后任何查询走到提交这一步都会失败。`finalizeRun` 用的是同一个加锁函数，所以失败的 run 也没法标成 FAILED，一直停在 RUNNING。单测用模拟的 `$queryRaw`，不检查参数类型。
+- 改动：两处锁 run 行的查询给参数加 `::uuid`（`discovery-query-governed-execution.ts`，以及 `discovery.activities.ts` 的 `lockDiscoveryRunReceiptState`）。同一次排查扫了全部原生 SQL：建站成本对账巡检的翻页条件 `s.workspace_id > ${cursor.workspaceId}` 有同样的问题（翻到第二页才触发），一并加 `::uuid`。其余把参数传给 uuid 列或 uuid 形参的地方都已带类型转换。
+- 验证：在 xin 的 Postgres 上用 text 形参的预备语句复现，旧写法分别报 `uuid = text`、`uuid > text`，加转换后正常执行。三个现有测试新增断言：锁 run 行和翻页条件的 SQL 在参数后带 `::uuid`；去掉转换时这三项失败。
+- 未做：在真库上跑发现链路的回归测试（CI 的 Postgres 步骤目前不覆盖这条链路），留作后续。
+
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 
 - 起因（2026-10-07 xin 实测）：获客分组唯一的网关渠道（OpenOx）对同一个 `deepseek-v4-pro` 会报三种名字：`deepseek-v4-pro`、流式块里常见的 `deepseek.deepseek-v4-pro`、非流式应答里常见的 `deepseek-v4-pro-ga-260813`。身份闸门只认精确名，ICP 设计等 pro 调用因此间歇以 `ProviderIdentityError` 失败，而网关侧调用其实已正常结束。该渠道还把 `deepseek-v4-flash` 映射到 pro、应答报 pro 名，所以 flash 任务 100% 被拒，发现 run 跑不出结果。
