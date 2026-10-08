@@ -254,6 +254,9 @@ async function main(): Promise<void> {
         },
       ],
     });
+    // Rows under a live lease: superseded-variant reclamation leaves them to lease
+    // reconciliation, so they still fill the per-Asset budget when the writer reserves.
+    const capacityLeaseUntil = new Date(Date.now() + 60 * 60_000).toISOString();
     await owner.assetVariant.createMany({
       data: Array.from({ length: 120 }, (_, index) => {
         const recipeHash = hash(Buffer.from(`capacity-${index}`));
@@ -273,11 +276,12 @@ async function main(): Promise<void> {
             recipeHash,
             'png',
           ),
-          contentHash: 'a'.repeat(64),
           pipelineVersion: 'capacity-fixture-v1',
           recipeHash,
-          status: 'failed',
-          error: 'capacity fixture',
+          status: 'processing',
+          metadata: {
+            reservation: { token: randomUUID(), leaseUntil: capacityLeaseUntil, attempt: 1 },
+          },
         };
       }),
     });

@@ -1426,13 +1426,20 @@ describe("ImagePipelineService superseded variant reclamation", () => {
     const rows = new Map([...oldest, ...older, ...published].map((entry) => [entry.id, entry]));
     const objects = new Set([...rows.values()].map((entry) => entry.objectKey));
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: imageJob.assetId, derivedKeys: asset.derivedKeys }]),
+      $queryRaw: vi.fn(async (query: { strings: readonly string[] }) =>
+        query.strings.join("?").includes("site_version") ? [] : [{ id: imageJob.assetId, derivedKeys: asset.derivedKeys }],
+      ),
       $executeRaw: vi.fn(async () => 1),
       asset: { findFirst: vi.fn(async () => asset) },
       siteVersion: { findFirst: vi.fn(async () => null) },
       assetVariant: {
         findMany: vi.fn(async () => [...rows.values()].map((entry) => ({ ...entry }))),
-        deleteMany: vi.fn(async ({ where }: { where: { id: string } }) => ({ count: rows.delete(where.id) ? 1 : 0 })),
+        deleteMany: vi.fn(async ({ where }: { where: { id: string; assetId: string; status: string } }) => {
+          const current = rows.get(where.id);
+          if (!current || where.assetId !== imageJob.assetId || current.status !== where.status) return { count: 0 };
+          rows.delete(where.id);
+          return { count: 1 };
+        }),
         create: vi.fn(async ({ data }: { data: { recipeHash: string } }) => {
           rows.set(`reserved-${data.recipeHash}`, { ...(data as unknown as typeof published[number]), id: `reserved-${data.recipeHash}` });
           return {};
@@ -1504,5 +1511,31 @@ describe("ImagePipelineService superseded variant reclamation", () => {
     );
     // The set kept from reclamation is exactly the set that is then reserved.
     expect(reclaim.mock.calls[0][1]).toBe(reserve.mock.calls[0][2]);
+  });
+
+  it("names a skipped reclamation in the budget refusal it could have prevented", async () => {
+    const f = imageFixture();
+    vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
+    vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    vi.spyOn(f.internals, "reclaimSupersededVariants").mockResolvedValue({ status: "skipped", reason: "build_in_progress" });
+    vi.spyOn(f.internals, "reserveVariantSet").mockRejectedValue(
+      new Error("asset cleanup object budget exceeded (151>128)"),
+    );
+
+    await expect(f.service.processAsset(imageJob)).rejects.toThrow(
+      "asset cleanup object budget exceeded (151>128); superseded variants were not reclaimed (build_in_progress)",
+    );
+    expect(f.runner.render).not.toHaveBeenCalled();
+  });
+
+  it("passes a reservation failure through unchanged when reclamation ran", async () => {
+    const f = imageFixture();
+    const refusal = new Error("asset variant budget exceeded (120+3>120)");
+    vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
+    vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    vi.spyOn(f.internals, "reclaimSupersededVariants").mockResolvedValue({ status: "reclaimed", rows: 0, objects: 0 });
+    vi.spyOn(f.internals, "reserveVariantSet").mockRejectedValue(refusal);
+
+    await expect(f.service.processAsset(imageJob)).rejects.toBe(refusal);
   });
 });

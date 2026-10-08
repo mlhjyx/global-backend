@@ -8,8 +8,11 @@ import type { StorageService } from './storage.service';
 // reservation budgets keep every asset inside it, so reclaiming never needs more.
 const MAX_RECLAIM_OBJECTS = 128;
 const RECLAIM_CONCURRENCY = 8;
-// Storage work runs inside the asset-locked transaction (30 s), so it must give up first.
-const RECLAIM_STORAGE_TIMEOUT_MS = 20_000;
+// The transaction may run 30 s from BEGIN, the wait for the asset lock included. Storage work
+// stops 20 s after BEGIN so the lock still covers every deletion and the row deletes after it.
+const RECLAIM_TRANSACTION = { maxWait: 10_000, timeout: 30_000 } as const;
+const RECLAIM_STORAGE_DEADLINE_MS = 20_000;
+const MIN_STORAGE_WINDOW_MS = 5_000;
 const VARIANT_EXTENSIONS = new Set(['avif', 'webp', 'jpg', 'png']);
 const ATTEMPT_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -26,9 +29,11 @@ export interface ImageVariantReclaimJob {
   sourceObjectKey: string;
 }
 
+export type ImageVariantReclaimSkipReason = 'build_in_progress' | 'manifest_unreadable' | 'lock_contended';
+
 export type ImageVariantReclaimResult =
   | { status: 'reclaimed'; rows: number; objects: number }
-  | { status: 'skipped'; reason: 'build_in_progress' | 'manifest_unreadable' };
+  | { status: 'skipped'; reason: ImageVariantReclaimSkipReason };
 
 export interface VariantProvenanceRow {
   recipeHash: string;
@@ -40,13 +45,28 @@ interface LedgerRow extends VariantProvenanceRow {
   id: string;
   status: string;
   sourceVariantId: string | null;
-  updatedAt: Date;
+}
+
+interface KeptVariants {
+  published: ReadonlySet<string>;
+  referenced: ReadonlySet<string>;
+  planned: ReadonlySet<string>;
 }
 
 function jsonRecord(value: Prisma.JsonValue | null | undefined): Record<string, Prisma.JsonValue> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, Prisma.JsonValue>)
     : {};
+}
+
+/** Every attempt-object key a variant row records, from its history and its reservation. */
+export function attemptKeysFromMetadata(metadata: Record<string, Prisma.JsonValue>): string[] {
+  const keys = Array.isArray(metadata.attemptKeys)
+    ? metadata.attemptKeys.filter((value): value is string => typeof value === 'string')
+    : [];
+  const reservation = jsonRecord(metadata.reservation ?? null);
+  if (typeof reservation.attemptKey === 'string') keys.push(reservation.attemptKey);
+  return [...new Set(keys)];
 }
 
 /**
@@ -60,12 +80,7 @@ export function variantAttemptKeys(job: ImageVariantReclaimJob, row: VariantProv
   if (!VARIANT_EXTENSIONS.has(ext)) {
     throw new Error(`image variant canonical provenance conflicts for ${row.recipeHash}`);
   }
-  const metadata = jsonRecord(row.metadata);
-  const keys = Array.isArray(metadata.attemptKeys)
-    ? metadata.attemptKeys.filter((value): value is string => typeof value === 'string')
-    : [];
-  const reservation = jsonRecord(metadata.reservation);
-  if (typeof reservation.attemptKey === 'string') keys.push(reservation.attemptKey);
+  const keys = attemptKeysFromMetadata(jsonRecord(row.metadata));
   const prefix = `ws/${job.workspaceId}/${job.siteId}/variant-attempts/${job.assetId}/`;
   const suffix = `/${row.recipeHash}.${ext}`;
   for (const key of keys) {
@@ -74,25 +89,57 @@ export function variantAttemptKeys(job: ImageVariantReclaimJob, row: VariantProv
       throw new Error(`image variant attempt provenance conflicts for ${row.recipeHash}`);
     }
   }
-  return [...new Set(keys)];
+  return keys;
+}
+
+/** Locks the asset row the producer is working from and returns its published manifest. */
+async function lockAsset(tx: Prisma.TransactionClient, job: ImageVariantReclaimJob): Promise<Prisma.JsonValue | null> {
+  const locked = await tx.$queryRaw<Array<{ id: string; derivedKeys: Prisma.JsonValue | null }>>(Prisma.sql`
+    SELECT id, derived_keys AS "derivedKeys"
+    FROM asset
+    WHERE id = ${job.assetId}::uuid
+      AND workspace_id = ${job.workspaceId}::uuid
+      AND site_id = ${job.siteId}::uuid
+      AND deleted_at IS NULL
+      AND processing_status = 'ready'
+      AND content_hash = ${job.sourceHash}
+      AND object_key = ${job.sourceObjectKey}
+    FOR UPDATE
+  `);
+  if (locked.length !== 1) throw new Error('asset changed before image variant reclamation');
+  return locked[0].derivedKeys;
 }
 
 /**
- * Terminal rows the asset neither publishes nor is about to produce, ordered children first.
- * A row that stays keeps its source row, transitively.
+ * Variant ids that any version of the site still names. A page or section build merges the
+ * active version's assets into its spec and materializes every one of them by id, so a row a
+ * version references must outlive the manifest that once published it.
  */
-function reclaimableRows(
-  rows: readonly LedgerRow[],
-  published: ReadonlySet<string>,
-  planned: ReadonlySet<string>,
-): LedgerRow[] {
+async function referencedVariantIds(tx: Prisma.TransactionClient, job: ImageVariantReclaimJob): Promise<Set<string>> {
+  const rows = await tx.$queryRaw<Array<{ variantId: string }>>(Prisma.sql`
+    SELECT DISTINCT lower(ref.value ->> 'variantId') AS "variantId"
+    FROM site_version AS version
+    CROSS JOIN LATERAL jsonb_each(
+      CASE WHEN jsonb_typeof(version.spec -> 'assets') = 'object' THEN version.spec -> 'assets' ELSE '{}'::jsonb END
+    ) AS ref
+    WHERE version.site_id = ${job.siteId}::uuid
+      AND ref.value ->> 'source' = 'tenant'
+      AND lower(ref.value ->> 'assetId') = lower(${job.assetId})
+      AND ref.value ->> 'variantId' IS NOT NULL
+  `);
+  return new Set(rows.map((row) => row.variantId));
+}
+
+/** Terminal rows nothing keeps, children first; a kept row keeps its source row, transitively. */
+function supersededRows(rows: readonly LedgerRow[], kept: KeptVariants): LedgerRow[] {
   const candidates = new Map(
     rows
       .filter(
         (row) =>
           (row.status === 'ready' || row.status === 'failed') &&
-          !published.has(row.objectKey) &&
-          !planned.has(row.recipeHash),
+          !kept.published.has(row.objectKey) &&
+          !kept.planned.has(row.recipeHash) &&
+          !kept.referenced.has(row.id.toLowerCase()),
       )
       .map((row) => [row.id, row]),
   );
@@ -100,20 +147,17 @@ function reclaimableRows(
   while (changed) {
     changed = false;
     for (const row of rows) {
-      if (!candidates.has(row.id) && row.sourceVariantId && candidates.delete(row.sourceVariantId)) {
-        changed = true;
-      }
+      if (!candidates.has(row.id) && row.sourceVariantId && candidates.delete(row.sourceVariantId)) changed = true;
     }
   }
-  const remaining = new Map(candidates);
   const ordered: LedgerRow[] = [];
-  while (remaining.size > 0) {
-    const sources = new Set([...remaining.values()].flatMap((row) => (row.sourceVariantId ? [row.sourceVariantId] : [])));
-    const leaves = [...remaining.values()].filter((row) => !sources.has(row.id));
+  while (candidates.size > 0) {
+    const sources = new Set([...candidates.values()].flatMap((row) => (row.sourceVariantId ? [row.sourceVariantId] : [])));
+    const leaves = [...candidates.values()].filter((row) => !sources.has(row.id));
     if (leaves.length === 0) throw new Error('image variant source graph contains a cycle');
     for (const leaf of leaves) {
       ordered.push(leaf);
-      remaining.delete(leaf.id);
+      candidates.delete(leaf.id);
     }
   }
   return ordered;
@@ -137,17 +181,65 @@ async function deleteObjects(
   }
 }
 
+async function reclaimLocked(
+  tx: Prisma.TransactionClient,
+  deps: ImageVariantReclaimDeps,
+  job: ImageVariantReclaimJob,
+  planned: ReadonlySet<string>,
+  startedAt: number,
+  signal: AbortSignal | undefined,
+): Promise<ImageVariantReclaimResult> {
+  const derivedKeys = await lockAsset(tx, job);
+  const building = await tx.siteVersion.findFirst({
+    where: { siteId: job.siteId, buildStatus: 'building' },
+    select: { id: true },
+  });
+  if (building) return { status: 'skipped', reason: 'build_in_progress' };
+  const published = readPublishedVariantKeys(derivedKeys, job.sourceHash);
+  if (published.status === 'invalid') return { status: 'skipped', reason: 'manifest_unreadable' };
+  const rows = await tx.assetVariant.findMany({
+    where: { assetId: job.assetId },
+    select: { id: true, recipeHash: true, objectKey: true, status: true, metadata: true, sourceVariantId: true },
+  });
+  const superseded = supersededRows(rows, {
+    published: published.status === 'present' ? published.keys : new Set<string>(),
+    referenced: await referencedVariantIds(tx, job),
+    planned,
+  });
+  const objects = [...new Set(superseded.flatMap((row) => [row.objectKey, ...variantAttemptKeys(job, row)]))];
+  if (objects.length > MAX_RECLAIM_OBJECTS) {
+    throw new Error(`image variant reclamation exceeds ${MAX_RECLAIM_OBJECTS} objects`);
+  }
+  if (superseded.length === 0) return { status: 'reclaimed', rows: 0, objects: 0 };
+  const window = startedAt + RECLAIM_STORAGE_DEADLINE_MS - Date.now();
+  if (window < MIN_STORAGE_WINDOW_MS) return { status: 'skipped', reason: 'lock_contended' };
+  await deleteObjects(
+    deps.storage,
+    objects,
+    AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(window)]),
+  );
+  let removed = 0;
+  for (const row of superseded) {
+    const deleted = await tx.assetVariant.deleteMany({
+      where: { id: row.id, assetId: job.assetId, status: row.status },
+    });
+    removed += deleted.count;
+  }
+  return { status: 'reclaimed', rows: removed, objects: objects.length };
+}
+
 /**
  * Removes the variant rows and objects an asset has superseded: terminal rows that its published
- * derivedKeys manifest does not reference and that the current plans will not reuse. Without
- * this, every pipeline-version change (each sharp/libvips upgrade) or focal-point change leaves a
- * full set behind until the reservation and cleanup budgets refuse the asset.
+ * derivedKeys manifest does not reference, that no site version names, and that the current
+ * plans will not reuse. Without this, every pipeline-version change (each sharp/libvips upgrade)
+ * leaves a full set behind until the reservation and cleanup budgets refuse the asset.
  *
- * Everything runs under the asset row lock that reservation, promotion and finalization also
- * take, so no producer can publish or re-promote a row while it is reclaimed. Builds read only
- * published rows; a build already in flight may still hold a row chosen under an older manifest,
- * so reclamation waits until the site has no building version. Objects go first and must be
- * gone before their rows are deleted, so a failure never leaves an object without its row.
+ * Everything runs in one transaction under the asset row lock that reservation, promotion,
+ * finalization and asset deletion also take, so no producer can publish or re-promote a row
+ * while it is reclaimed. Builds pick only published rows; a build already in flight may still
+ * hold a row chosen under an older manifest, so reclamation waits until the site has no building
+ * version. Objects go first and must be gone before their rows are deleted, so a failure never
+ * leaves an object without the row that asset deletion would clean it up through.
  */
 export async function reclaimSupersededImageVariants(
   deps: ImageVariantReclaimDeps,
@@ -157,66 +249,7 @@ export async function reclaimSupersededImageVariants(
 ): Promise<ImageVariantReclaimResult> {
   return deps.prisma.withWorkspace(
     job.workspaceId,
-    async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ id: string; derivedKeys: Prisma.JsonValue | null }>>(Prisma.sql`
-        SELECT id, derived_keys AS "derivedKeys"
-        FROM asset
-        WHERE id = ${job.assetId}::uuid
-          AND workspace_id = ${job.workspaceId}::uuid
-          AND site_id = ${job.siteId}::uuid
-          AND deleted_at IS NULL
-          AND processing_status = 'ready'
-          AND content_hash = ${job.sourceHash}
-          AND object_key = ${job.sourceObjectKey}
-        FOR UPDATE
-      `);
-      if (locked.length !== 1) throw new Error('asset changed before image variant reclamation');
-      const building = await tx.siteVersion.findFirst({
-        where: { siteId: job.siteId, buildStatus: 'building' },
-        select: { id: true },
-      });
-      if (building) return { status: 'skipped', reason: 'build_in_progress' };
-      const published = readPublishedVariantKeys(locked[0].derivedKeys, job.sourceHash);
-      if (published.status === 'invalid') return { status: 'skipped', reason: 'manifest_unreadable' };
-      const rows = await tx.assetVariant.findMany({
-        where: { assetId: job.assetId },
-        select: {
-          id: true,
-          recipeHash: true,
-          objectKey: true,
-          status: true,
-          metadata: true,
-          sourceVariantId: true,
-          updatedAt: true,
-        },
-      });
-      const reclaimable = reclaimableRows(
-        rows,
-        published.status === 'present' ? published.keys : new Set<string>(),
-        planned,
-      );
-      const objects = [
-        ...new Set(reclaimable.flatMap((row) => [row.objectKey, ...variantAttemptKeys(job, row)])),
-      ];
-      if (objects.length > MAX_RECLAIM_OBJECTS) {
-        throw new Error(`image variant reclamation exceeds ${MAX_RECLAIM_OBJECTS} objects`);
-      }
-      if (reclaimable.length === 0) return { status: 'reclaimed', rows: 0, objects: 0 };
-      const storageSignal = AbortSignal.any([
-        ...(signal ? [signal] : []),
-        AbortSignal.timeout(RECLAIM_STORAGE_TIMEOUT_MS),
-      ]);
-      await deleteObjects(deps.storage, objects, storageSignal);
-      let removed = 0;
-      for (const row of reclaimable) {
-        // updatedAt fences writers that touch a row without the asset lock.
-        const deleted = await tx.assetVariant.deleteMany({
-          where: { id: row.id, assetId: job.assetId, status: row.status, updatedAt: row.updatedAt },
-        });
-        removed += deleted.count;
-      }
-      return { status: 'reclaimed', rows: removed, objects: objects.length };
-    },
-    { maxWait: 10_000, timeout: 30_000 },
+    (tx) => reclaimLocked(tx, deps, job, planned, Date.now(), signal),
+    RECLAIM_TRANSACTION,
   );
 }

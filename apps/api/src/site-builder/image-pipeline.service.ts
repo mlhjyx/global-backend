@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,6 +15,7 @@ import {
   type ImagePipelineRunner,
 } from './image-pipeline-runner';
 import {
+  attemptKeysFromMetadata,
   reclaimSupersededImageVariants,
   variantAttemptKeys,
   type ImageVariantReclaimResult,
@@ -79,15 +80,6 @@ function jsonRecord(value: Prisma.JsonValue | null): Record<string, Prisma.JsonV
     : {};
 }
 
-function attemptKeysFromMetadata(metadata: Record<string, Prisma.JsonValue>): string[] {
-  const keys = Array.isArray(metadata.attemptKeys)
-    ? metadata.attemptKeys.filter((value): value is string => typeof value === 'string')
-    : [];
-  const reservation = jsonRecord(metadata.reservation ?? null);
-  if (typeof reservation.attemptKey === 'string') keys.push(reservation.attemptKey);
-  return [...new Set(keys)];
-}
-
 function safeMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : String(error);
   return value.replace(/[\r\n]+/g, ' ').slice(0, 500);
@@ -124,6 +116,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 @Injectable()
 export class ImagePipelineService {
+  private readonly log = new Logger(ImagePipelineService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -322,10 +316,21 @@ export class ImagePipelineService {
       sourceMeta: meta,
     };
     await this.reconcileAttemptKeys(job, signal);
-    await this.reclaimSupersededVariants(job, plans, signal);
+    const reclaimed = await this.reclaimSupersededVariants(job, plans, signal);
+    if (reclaimed.status === 'skipped') {
+      this.log.warn(`superseded image variants of asset ${input.assetId} were not reclaimed: ${reclaimed.reason}`);
+    }
     const producerToken = randomUUID();
+    const reserve = () =>
+      this.reserveVariantSet(job, inspection, plans, producerToken).catch((error: unknown) => {
+        // A budget refusal is otherwise indistinguishable from one that reclamation would have prevented.
+        if (reclaimed.status !== 'skipped') throw error;
+        throw new Error(`${safeMessage(error)}; superseded variants were not reclaimed (${reclaimed.reason})`, {
+          cause: error,
+        });
+      });
     const waitDeadline = Date.now() + VARIANT_WAIT_TIMEOUT_MS;
-    while (!(await this.reserveVariantSet(job, inspection, plans, producerToken))) {
+    while (!(await reserve())) {
       throwIfAborted(signal);
       if (Date.now() >= waitDeadline) throw new Error('image variant reservation wait timed out');
       await sleep(VARIANT_WAIT_MS, signal);
