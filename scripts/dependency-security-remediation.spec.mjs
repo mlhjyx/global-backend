@@ -220,6 +220,32 @@ test(
   },
 );
 
+// @paulirish/trace_engine 0.0.65 (via lighthouse) declares both of these as the "latest"
+// dist-tag, so a fresh `pnpm deploy` follows upstream unless an exact root override holds the
+// reviewed version. legacy-javascript 0.0.1 had been latest since 2025-03; 0.0.2 and 0.0.3 were
+// published on 2026-10-07/08 and the OCI build then deployed 0.0.3 beside a lockfile SBOM of 0.0.1.
+const TRACE_ENGINE_DIST_TAG_DEPENDENCIES = Object.freeze(["third-party-web", "legacy-javascript"]);
+
+test("every dist-tag dependency of @paulirish/trace_engine stays on its reviewed lockfile version", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("package.json", repositoryRoot), "utf8"),
+  );
+  const lockfile = await readFile(
+    new URL("pnpm-lock.yaml", repositoryRoot),
+    "utf8",
+  );
+  const resolved = resolvedPackageVersions(lockfile);
+  for (const name of TRACE_ENGINE_DIST_TAG_DEPENDENCIES) {
+    const pin = manifest.pnpm?.overrides?.[name];
+    assert.equal(typeof pin, "string", `${name} needs an exact root override`);
+    assert.deepEqual(
+      resolved.get(name),
+      [pin],
+      `${name} must resolve only to its pinned version`,
+    );
+  }
+});
+
 // Removed outright: no patched release exists to hold a floor for.
 const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
 
