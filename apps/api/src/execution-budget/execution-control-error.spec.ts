@@ -311,8 +311,8 @@ describe('isExecutionControlError', () => {
     expect(isExecutionControlError(primitiveCause)).toBe(true);
   });
 
-  it('refuses to register Error itself or a built-in error class', () => {
-    for (const errorClass of [Error, TypeError, RangeError, SyntaxError]) {
+  it('refuses to register Error itself or a built-in or host error class', () => {
+    for (const errorClass of [Error, TypeError, RangeError, SyntaxError, DOMException]) {
       expect(() => registerRecoverableModelFailureClass(errorClass)).toThrow(
         'RECOVERABLE_MODEL_FAILURE_CLASS_INVALID',
       );
@@ -322,17 +322,22 @@ describe('isExecutionControlError', () => {
 
   it('is registered only by the model gateway error module, for exactly two classes', () => {
     const sourceRoot = join(import.meta.dirname, '..');
-    const files = (readdirSync(sourceRoot, { recursive: true }) as string[])
-      .filter((file) => file.endsWith('.ts') && !file.endsWith('.spec.ts'));
-    const calls = files.flatMap((file) =>
-      [...readFileSync(join(sourceRoot, file), 'utf8').matchAll(/registerRecoverableModelFailureClass\((\w+)\)/gu)]
-        .map((match) => `${file.split(sep).join('/')}:${match[1]}`),
-    );
+    const sources = (readdirSync(sourceRoot, { recursive: true }) as string[])
+      .filter((file) => /\.[cm]?[jt]sx?$/u.test(file) && !/\.spec\.[cm]?[jt]sx?$/u.test(file))
+      .map((file) => ({ file: file.split(sep).join('/'), text: readFileSync(join(sourceRoot, file), 'utf8') }));
+    const name = 'registerRecoverableModelFailureClass';
 
-    expect(calls.sort()).toEqual([
-      'model-gateway/providers/provider-output-error.ts:ProviderOutputError',
-      'model-gateway/providers/provider-output-error.ts:TaskOutputValidationError',
+    // Any mention, an aliased import included, stays in the defining module or the one registrant.
+    expect(sources.filter(({ text }) => text.includes(name)).map(({ file }) => file).sort()).toEqual([
+      'execution-budget/execution-control-error.ts',
+      'model-gateway/providers/provider-output-error.ts',
     ]);
+    const registrant = sources.find(({ file }) => file === 'model-gateway/providers/provider-output-error.ts')!.text;
+    const calls = [...registrant.matchAll(/registerRecoverableModelFailureClass\s*\(\s*(\w+)\s*,?\s*\)/gu)]
+      .map((match) => match[1]);
+    expect(calls.sort()).toEqual(['ProviderOutputError', 'TaskOutputValidationError']);
+    // The only other mention is the import specifier.
+    expect(registrant.split(name).length - 1).toBe(calls.length + 1);
   });
 
   it('fails closed on a proxy whose prototype trap throws', () => {

@@ -361,6 +361,20 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "CHAT_COMPLETIONS_BODY_INVALID" });
   });
 
+  it("does not read an explicit null error field as a failure", async () => {
+    mockText(
+      JSON.stringify({
+        error: null,
+        model: "deepseek-v4-pro",
+        choices: [{ message: { content: '{"a":4}' }, finish_reason: "stop" }],
+      }),
+    );
+
+    const out = await streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" });
+
+    expect(out.data).toEqual({ a: 4 });
+  });
+
   it("accepts a plain JSON body without a finish reason when the upstream ignores the stream flag", async () => {
     mockText(
       JSON.stringify({

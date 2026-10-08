@@ -114,10 +114,16 @@
     - 吸收失败后，若活动因别的原因重试，重放那次已结算的调用仍会被拒；被吸收的官网画像分类失败会写入一份没有贸易角色的画像，30 天内不重新画像。这两项列为后续事项，因为它们不比改动前更差：改动前同样的失败会让整个 run 直接失败。
   - 第二轮：没有 CRITICAL 或 HIGH，第一轮五项都核实已修；`bundleWorkflowCode` 能打包，工作流里的分类不变。新提出 MEDIUM 两项、LOW 四项，处理如下。
     - `finish_reason` 与 Responses 的 `status` 把整批失败（如 DeepSeek 的 `insufficient_system_resource`、`failed`）也当成单次回答不能用：现在只有 `content_filter`、工具调用与 `incomplete` 可恢复，各有原因码，其余报 `ProviderTransportError`。
-    - 被吸收的失败到不了 run 状态，所有 Fit 判定都失败时 run 仍会 DONE：`qualifyFitForRun` 统计 `unjudged`，大于零至少 PARTIAL，一家都没判出来则 FAILED；官网画像统计 `unclassified`，只进 stats。
+    - 被吸收的失败到不了 run 状态，所有 Fit 判定都失败时 run 仍会 DONE：`qualifyFitForRun` 统计 `unjudged`，大于零时 run 至少 PARTIAL；官网画像统计 `unclassified`，只进 stats。
     - 200 响应体带 `error` 或没有 `choices` 被当成空回答：现在报 `ProviderTransportError`（`CHAT_COMPLETIONS_BODY_INVALID`）。
     - 修复调用遇到网络失败会被外层包装成可恢复：已按上文选类。
     - 登记入口不受限制：拒绝 `Error` 与内置错误类，并有测试限定只有 `provider-output-error.ts` 登记、且只有两个类。
     - 活动边界上丢失控制属性（Temporal 只保留类名）是改动前就有的问题，记为后续事项。
+  - 第三轮：没有 CRITICAL 或 HIGH；全量 API 单测 8,970 项通过，指纹与执行授权策略检查都核过。提出 MEDIUM 两项、LOW 三项。
+    - 「一家都没判出来则 FAILED」按活动的单次尝试计数：重试时已有结论的公司不再重判，可能把已有 9 家结论的 run 判成 FAILED，结论也就不进评分。已改为只降到 PARTIAL，FAILED 仍只由查询全部失败决定。
+    - Fit 阶段遇传输失败时，工作流没有兜底，run 停在 RUNNING。这是已登记的 BI-25；改动前所有模型失败都会这样，现在只剩传输类，另开后续任务。
+    - 登记防护漏了宿主错误类：已补 `DOMException` 与 WebAssembly 错误类（在工作流沙箱里按需查找）；扫描测试改为限定只有两个文件提到该函数，并容忍换行与尾逗号。
+    - `"error": null` 会被当成错误：已改为 `!= null`（响应体与流事件两处）。
+    - 修复调用会把 `ProviderWireInFlightError` 包起来，付费路径因此认不出、仍去结算别的 worker 正在用的调用。这是改动前就有的问题，只在建站付费路径；修它要改结算语义，另开后续任务，本次 Router 不再改动。
   - 没有发现合规绕过：`ExternalActionDeniedError` 仍是控制错误，修复路径照旧直接抛出。
 - **结论**：更新 `router-model-gateway.ts` 指纹为 `c9fc50b3fb17090441cc36e535f78643371a1d7fabbb8468ad47e9ab96f5122a`。

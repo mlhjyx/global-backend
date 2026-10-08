@@ -98,21 +98,24 @@
     - 传输、身份、HTTP 这几类失败通常一次 run 里每个调用都会遇到，逐家吸收会让 run 跑完却一家都没判。
   - 流式响应自始至终没有 `finish_reason` 时，报 `CHAT_COMPLETIONS_STREAM_TRUNCATED`，用量照带，结算不变。上游忽略 `stream`、直接回完整 JSON 的情况不受影响。
   - `ProviderOutputError` 增加 `reasonCode`：显式给定（必须是大写代码），或取消息开头的大写代码，否则为 `PROVIDER_OUTPUT_UNCLASSIFIED`，从不含模型文本。几处描述性消息补了代码，结算错误用自身的 `errorCode`，合规拦截为 `EXTERNAL_ACTION_DENIED`。`ai_trace.error_message` 从类名改为 `类名:原因码`。
-  - 被吸收的失败要体现在 run 状态里，绝不静默漏判假 DONE：`qualifyFitForRun` 统计没判出来的公司（`unjudged`），大于零时 run 至少 PARTIAL，一家都没判出来则 FAILED；官网画像统计没判出贸易角色的数量（`unclassified`），只进 stats。旧历史重放时缺这两个字段，状态不变。
-  - 登记入口拒绝 `Error` 与内置错误类，并有测试限定只有 `provider-output-error.ts` 登记、且只有两个类。
+  - 被吸收的失败要体现在 run 状态里，绝不静默漏判假 DONE：`qualifyFitForRun` 统计没判出来的公司（`unjudged`），大于零时 run 至少 PARTIAL。它不单独判 FAILED，因为计数只覆盖活动的最后一次尝试，之前的尝试可能已存下结论，FAILED 会让这些结论不进评分。官网画像统计没判出贸易角色的数量（`unclassified`），只进 stats。旧历史重放时缺这两个字段，状态不变。
+  - 登记入口拒绝 `Error`、内置错误类与宿主错误类（`DOMException`、WebAssembly 错误类），并有测试限定全仓只有两个文件提到该函数、只有两个类被登记。
+  - 响应体或流事件里显式的 `"error": null` 不算错误。
   - Router 是受保护文件：两轮复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`，指纹 `0ad768f0…` → `c9fc50b3…`。
 - 测试：
   - 判定函数：可恢复的三种形态（含普通 `Error` 包着可恢复错误）；从严的六类；`cause` 链里的控制错误；未登记的子类；自带控制代码的实例；访问器或原始值形式的 `cause`；原型陷阱抛错的 Proxy。
   - 流：截断（内容不完整、内容完整但缺 `finish_reason`、文本生成）都报 `ProviderTransportError`，各种流形状有各自的原因码；缺 `finish_reason` 的普通 JSON 响应照常接受。
   - router：trace 记原因码；修复后仍不合 schema 时不记 schema 细节；结算未定时抛 `ProviderOutputUnresolvedError`，判为控制错误，且只调用一次模型。
   - 退路：词表归一与官网画像遇非 JSON 回答走退路；官网画像遇传输失败照常上抛。
-  - 第二轮：上游整体出错的 `finish_reason` 与 `failed` 报传输错误，`content_filter` 与 `incomplete` 可恢复；错误响应体报传输错误；修复又回坏答案仍可恢复，修复遇网络失败判为控制错误；Fit 判定吸收一次失败后 `unjudged` 为 1、遇传输失败照常上抛；run 状态的 PARTIAL / FAILED / 旧历史三种情况；登记入口拒绝内置错误类、只有两个类被登记。
-  - 模型网关、执行预算、发现、Temporal 活动与工作流、模型运行时与建站付费相关测试 2,625 项通过；执行授权策略检查 16 项通过。
+  - 第二、三轮：上游整体出错的 `finish_reason` 与 `failed` 报传输错误，`content_filter` 与 `incomplete` 可恢复；错误响应体报传输错误，`"error": null` 照常接受；修复又回坏答案仍可恢复，修复遇网络失败判为控制错误；Fit 判定吸收一次失败后 `unjudged` 为 1、遇传输失败照常上抛；run 状态在有未判公司时为 PARTIAL、不会把查询全失败抬成 PARTIAL、旧历史不变；登记入口拒绝内置与宿主错误类，全仓只有两个类被登记。
+  - 模型网关、执行预算、发现、Temporal 活动与工作流（含打包重放）、模型运行时与建站付费相关测试 2,627 项通过；第三轮复审跑的全量 API 单测 8,970 项通过；执行授权策略检查 16 项通过。
 - 未做：
   - 吸收失败后若同一活动因别的原因重试，重放那次已结算的调用仍会被预算账本拒绝。要彻底解决，需要把失败也存成可重放的结果。
   - 官网画像分类失败被吸收后，会写入一份没有贸易角色的画像，30 天内不会重新画像。这两项都不比改动前更差，因为改动前同样的失败会让整个 run 直接失败。留作后续。
   - 非付费路径上 `fetch` 本身失败（网关不通、请求头超时）抛的是普通 `TypeError`，各处退路会吸收它。这是改动前就有的行为；修复调用里的这类失败本次已改为控制错误。
   - 控制属性在活动边界上丢失：Temporal 只保留类名，工作流层面目前靠重试撞上预算重放错误才失败即停。这也是改动前就有的问题。
+  - Fit 阶段遇传输失败时 run 仍停在 RUNNING（BI-25）：改动前所有模型失败都会这样，现在只剩传输类。要在工作流里兜底并收尾，另开任务。
+  - 建站付费路径上，修复调用把 `ProviderWireInFlightError` 包起来，结算时认不出来（改动前就有），另开任务。
 
 ## 2026-10-07 · Reviewed DeepSeek v4 pro identities and pro routing for acquisition tasks
 

@@ -218,10 +218,18 @@ function isLegacyTemporalApplicationControl(
 }
 
 const RECOVERABLE_MODEL_FAILURE_PROTOTYPES = new WeakSet<object>();
+// Host error classes (fetch's AbortError/TimeoutError are DOMExceptions) are
+// looked up defensively: Temporal's workflow sandbox may not define them.
+const HOST_ERROR_CLASSES: readonly unknown[] = [
+  (globalThis as { DOMException?: unknown }).DOMException,
+  (globalThis as { WebAssembly?: Record<string, unknown> }).WebAssembly?.CompileError,
+  (globalThis as { WebAssembly?: Record<string, unknown> }).WebAssembly?.LinkError,
+  (globalThis as { WebAssembly?: Record<string, unknown> }).WebAssembly?.RuntimeError,
+];
 const BUILT_IN_ERROR_PROTOTYPES: ReadonlySet<object> = new Set<object>(
-  [EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError].map(
-    (errorClass) => errorClass.prototype as object,
-  ),
+  [EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, ...HOST_ERROR_CLASSES]
+    .filter((errorClass): errorClass is { prototype: object } => typeof errorClass === 'function')
+    .map((errorClass) => errorClass.prototype),
 );
 
 /**

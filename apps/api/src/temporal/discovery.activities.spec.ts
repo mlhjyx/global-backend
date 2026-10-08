@@ -2809,17 +2809,22 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 describe("resolveRunStatus —— Fit 判定按公司吸收的模型失败", () => {
   it("有公司没判出来 → 至少 PARTIAL，绝不 DONE", () => {
     expect(
-      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitJudged: 4, fitUnjudged: 1 }),
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitUnjudged: 1 }),
     ).toBe("PARTIAL");
   });
-  it("一家都没判出来 → FAILED", () => {
+  it("最后一次尝试一家都没判出也只是 PARTIAL：之前的尝试可能已存下结论，FAILED 会让它们不进评分", () => {
     expect(
-      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitJudged: 0, fitUnjudged: 3 }),
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitUnjudged: 3 }),
+    ).toBe("PARTIAL");
+  });
+  it("不会把查询全失败的 run 抬成 PARTIAL", () => {
+    expect(
+      resolveRunStatus({ failures: 3, totalQueries: 3, budgetTruncated: false, fitUnjudged: 1 }),
     ).toBe("FAILED");
   });
-  it("没有判定失败时保持原语义，包括旧历史重放时缺这两个字段", () => {
+  it("没有判定失败时保持原语义，包括旧历史重放时缺这个字段", () => {
     expect(
-      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitJudged: 0, fitUnjudged: 0 }),
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitUnjudged: 0 }),
     ).toBe("DONE");
     expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
   });

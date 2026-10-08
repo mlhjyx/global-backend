@@ -776,7 +776,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       } catch {
         return invalid("stream data line is not valid JSON", "CHAT_COMPLETIONS_STREAM_LINE_INVALID");
       }
-      if (event.error !== undefined) {
+      if (event.error != null) {
         return invalid("stream carried an upstream error", "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR");
       }
       chunks += 1;
@@ -950,7 +950,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
     if (
-      (json as { error?: unknown }).error !== undefined ||
+      (json as { error?: unknown }).error != null ||
       !Array.isArray(json.choices) ||
       json.choices.length === 0
     ) {

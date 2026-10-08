@@ -274,7 +274,6 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     totalQueries: queries.length,
     budgetTruncated,
     skippedSubjects,
-    fitJudged: fit.judged,
     // Absent in histories recorded before the counter existed: replays keep their status.
     fitUnjudged: fit.unjudged ?? 0,
   });
