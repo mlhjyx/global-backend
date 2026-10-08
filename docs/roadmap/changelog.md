@@ -4,6 +4,17 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-08 · Treat single-name mailboxes as personal contacts
+
+- 起因（2026-10-08 BI-14 公司联系点设计调研）：手动联系人发现用的 `buildPublicContacts` 靠 `/^[a-z]+[._-][a-z]+$/i` 判断邮箱是否属于个人，只有 first.last 这种形状才算。`max@`、`mueller@`、`mm@` 这类单名或缩写邮箱因此被存成「公开联系点 (max@)」，不标个人数据，也不写 person.profile 证据。这违背 GDPR Art.4 和「只做公司级数据」的红线。仓库其他地方（采集清洗 `cleanEmail`、联系人持久化、邮箱验证合规门）早已改用白名单：只有职能邮箱算非个人。
+- 改动：
+  - 改用 `cleanEmail(...).kind` 判断。职能邮箱白名单里的地址算公司联系点，包括 `sales2@`、`info-eu@` 这类带数字或地区后缀的写法；其余一律按个人处理，标 `personalData` 与 `sourcePage`。
+  - 只有 first.last 形状继续反推姓名。其他个人邮箱推不出「名 + 姓」，改用占位名「个人邮箱 (max@)」。独立复审发现：如果从 `mueller@` 推出 "Mueller"，邮箱格式学习会把这类单名当成 `first` 命名法的样本；`datenschutz@`、`technik@` 一多，就会压过真实的 `j.schmidt@`。占位名和旧的「公开联系点」一样解析不出姓名，不会进入学习。
+  - 输出结构不变，仍然只有首个联系点带电话。
+- 影响范围：只有手动联系人发现接口 `discoverContacts` 调用它，该接口要求显式的合法依据；发现 run 不经过这里。xin 的 `global_dev` 里没有已存的联系人，不需要处理存量。
+- 测试：新增 5 项，分别覆盖：单名与缩写判为个人并给占位名（改动前失败）；白名单职能邮箱仍是公司联系点；单名个人邮箱不进入格式学习，`j.schmidt@` 仍学成 `first.last`；大小写、加号地址与白名单外的职能词；`max__x@` 给占位名。把实现改回「所有个人邮箱都反推姓名」时，后 4 项中的相关断言失败。
+- 已知取舍：白名单外的职能邮箱（如 `datenschutz@`、`technik@`）也按个人处理，宁可多标、不能漏标；补充白名单会同时放宽邮箱验证合规门，留作单独评估。
+
 ## 2026-10-08 · Prepare every raw SQL statement against the real schema in CI
 
 - 起因：xin 上第一次发现 run 因 `uuid = text` 失败（#605）。单测里 `$queryRaw` 都是模拟的，参数类型、列名、函数签名从来不在真库上检查，这类错误因此能在 main 上待一个多月。
