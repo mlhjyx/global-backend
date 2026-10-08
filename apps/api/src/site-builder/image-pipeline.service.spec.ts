@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IMAGE_PIPELINE_VERSION, IMAGE_QUALITY_POLICY_VERSION, planImageVariants, type ImageInspection, type PlannedImageVariant, type RenderedImageVariant } from './image-pipeline';
 import { buildVariantObjectKey, buildVariantAttemptObjectKey } from './object-key';
+import { projectDerivedImageManifest } from './media-foundation';
 
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ImagePipelineRunner } from './image-pipeline-runner';
@@ -370,6 +371,7 @@ type ImageInternals = Pick<ImagePipelineService, 'processAsset' | 'processSiteIm
   promoteAttempt: ImagePipelineService['promoteAttempt'];
   materializeAndFinalize: ImagePipelineService['materializeAndFinalize'];
   reconcileAttemptKeys: ImagePipelineService['reconcileAttemptKeys'];
+  reclaimSupersededVariants: ImagePipelineService['reclaimSupersededVariants'];
 };
 function imageFixture() {
   const source = Buffer.from("synthetic source");
@@ -1268,6 +1270,7 @@ describe("ImagePipelineService source and renderer gates", () => {
     const f = imageFixture();
     vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
     vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    vi.spyOn(f.internals, "reclaimSupersededVariants").mockResolvedValue({ status: "reclaimed", rows: 0, objects: 0 });
     vi.spyOn(f.internals, "reserveVariantSet").mockResolvedValue(true);
     f.runner.render.mockImplementation(
       async (_source, plans: PlannedImageVariant[]) =>
@@ -1287,6 +1290,7 @@ describe("ImagePipelineService source and renderer gates", () => {
     const failure = new Error("decoder failure");
     vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
     vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    vi.spyOn(f.internals, "reclaimSupersededVariants").mockResolvedValue({ status: "reclaimed", rows: 0, objects: 0 });
     vi.spyOn(f.internals, "reserveVariantSet").mockResolvedValue(true);
     const fail = vi
       .spyOn(f.internals, "failReservation")
@@ -1358,5 +1362,180 @@ describe("ImagePipelineService source and renderer gates", () => {
     await expect(
       f.internals.ensureObject("key", f.output, abort.signal),
     ).rejects.toThrow("image pipeline aborted");
+  });
+});
+
+describe("ImagePipelineService superseded variant reclamation", () => {
+  const largeInspection: ImageInspection = {
+    ...inspection,
+    decodedMime: "image/jpeg",
+    width: 2400,
+    height: 1600,
+    hasAlpha: false,
+  };
+
+  function supersededLedger() {
+    const source = Buffer.from("large synthetic source");
+    const sourceHash = digest(source);
+    const plans = planImageVariants({
+      assetKind: "product_image",
+      assetContentHash: sourceHash,
+      inspection: largeInspection,
+      focalPoint: null,
+    });
+    let sequence = 0;
+    const versionSet = (version: string) =>
+      plans.map(() => {
+        sequence += 1;
+        const recipeHash = sequence.toString(16).padStart(64, "0");
+        return {
+          id: `00000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}`,
+          assetId: imageJob.assetId,
+          recipeHash,
+          objectKey: buildVariantObjectKey(imageJob.workspaceId, imageJob.siteId, imageJob.assetId, recipeHash, "webp"),
+          pipelineVersion: version,
+          variantType: "card",
+          width: sequence,
+          height: sequence,
+          mime: "image/webp",
+          contentHash: "c".repeat(64) as string | null,
+          sizeBytes: 10 as number | null,
+          status: "ready",
+          metadata: null as Record<string, unknown> | null,
+          sourceVariantId: null as string | null,
+          updatedAt: new Date("2026-10-01T00:00:00.000Z"),
+        };
+      });
+    const oldest = versionSet("sharp-0.35.0-vips-8.18.0-m1c.1");
+    const older = versionSet("sharp-0.35.3-vips-8.18.3-m1c.1");
+    const published = versionSet("sharp-0.35.4-vips-8.18.6-m1c.1");
+    const asset = {
+      id: imageJob.assetId,
+      kind: "product_image",
+      mime: "image/jpeg",
+      contentHash: sourceHash,
+      sizeBytes: source.length,
+      objectKey: "source",
+      meta: {},
+      derivedKeys: projectDerivedImageManifest({
+        pipelineVersion: "sharp-0.35.4-vips-8.18.6-m1c.1",
+        sourceHash,
+        variants: published,
+      }),
+    };
+    const rows = new Map([...oldest, ...older, ...published].map((entry) => [entry.id, entry]));
+    const objects = new Set([...rows.values()].map((entry) => entry.objectKey));
+    const tx = {
+      $queryRaw: vi.fn(async (query: { strings: readonly string[] }) =>
+        query.strings.join("?").includes("site_version") ? [] : [{ id: imageJob.assetId, derivedKeys: asset.derivedKeys }],
+      ),
+      $executeRaw: vi.fn(async () => 1),
+      asset: { findFirst: vi.fn(async () => asset) },
+      siteVersion: { findFirst: vi.fn(async () => null) },
+      assetVariant: {
+        findMany: vi.fn(async () => [...rows.values()].map((entry) => ({ ...entry }))),
+        deleteMany: vi.fn(async ({ where }: { where: { id: string; assetId: string; status: string } }) => {
+          const current = rows.get(where.id);
+          if (!current || where.assetId !== imageJob.assetId || current.status !== where.status) return { count: 0 };
+          rows.delete(where.id);
+          return { count: 1 };
+        }),
+        create: vi.fn(async ({ data }: { data: { recipeHash: string } }) => {
+          rows.set(`reserved-${data.recipeHash}`, { ...(data as unknown as typeof published[number]), id: `reserved-${data.recipeHash}` });
+          return {};
+        }),
+      },
+    };
+    const storage = {
+      getBufferBounded: vi.fn(async () => source),
+      delete: vi.fn(async (key: string) => {
+        objects.delete(key);
+      }),
+      head: vi.fn(async (key: string) => (objects.has(key) ? { size: 10, contentType: "image/webp" } : null)),
+    };
+    const runner = {
+      inspect: vi.fn(async () => largeInspection),
+      render: vi.fn(async (_source: Buffer, planned: PlannedImageVariant[]) =>
+        new Map(planned.map((plan) => [plan.recipeHash, renderedVariant(plan)])),
+      ),
+    };
+    const service = new ImagePipelineService(
+      { withWorkspace: vi.fn(async (_workspace: string, fn: (client: typeof tx) => unknown) => fn(tx)) } as unknown as PrismaService,
+      storage as unknown as StorageService,
+      runner as unknown as ImagePipelineRunner,
+    );
+    return { service, internals: service as unknown as ImageInternals, rows, storage, plans, oldest, older, published };
+  }
+
+  it("lets a fourth pipeline version reserve once the superseded sets are reclaimed", async () => {
+    const f = supersededLedger();
+    expect(f.plans).toHaveLength(30);
+    vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
+    const finalize = vi.spyOn(f.internals, "materializeAndFinalize").mockResolvedValue({ reused: 0 });
+
+    await expect(f.service.processAsset(imageJob)).resolves.toMatchObject({ status: "done", variants: 30 });
+
+    expect(finalize).toHaveBeenCalledOnce();
+    const remaining = [...f.rows.values()];
+    expect(remaining.filter((entry) => entry.pipelineVersion === IMAGE_PIPELINE_VERSION)).toHaveLength(30);
+    expect(remaining.filter((entry) => entry.pipelineVersion !== IMAGE_PIPELINE_VERSION).map((entry) => entry.id).sort()).toEqual(
+      f.published.map((entry) => entry.id).sort(),
+    );
+    expect(f.storage.delete.mock.calls.map(([key]) => key).sort()).toEqual(
+      [...f.oldest, ...f.older].map((entry) => entry.objectKey).sort(),
+    );
+  });
+
+  it("reclaims after attempt reconciliation and before reservation, for the current plans only", async () => {
+    const f = imageFixture();
+    vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
+    const reconcile = vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    const reclaim = vi
+      .spyOn(f.internals, "reclaimSupersededVariants")
+      .mockResolvedValue({ status: "reclaimed", rows: 0, objects: 0 });
+    const reserve = vi.spyOn(f.internals, "reserveVariantSet").mockResolvedValue(true);
+    vi.spyOn(f.internals, "materializeAndFinalize").mockResolvedValue({ reused: 0 });
+    f.runner.render.mockImplementation(
+      async (_source, plans: PlannedImageVariant[]) =>
+        new Map(plans.map((plan) => [plan.recipeHash, renderedVariant(plan)])),
+    );
+
+    await f.service.processAsset(imageJob);
+
+    expect(reconcile.mock.invocationCallOrder[0]).toBeLessThan(reclaim.mock.invocationCallOrder[0]);
+    expect(reclaim.mock.invocationCallOrder[0]).toBeLessThan(reserve.mock.invocationCallOrder[0]);
+    expect(reclaim).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: imageJob.assetId, sourceHash: f.asset.contentHash }),
+      expect.any(Array),
+      undefined,
+    );
+    // The set kept from reclamation is exactly the set that is then reserved.
+    expect(reclaim.mock.calls[0][1]).toBe(reserve.mock.calls[0][2]);
+  });
+
+  it("names a skipped reclamation in the budget refusal it could have prevented", async () => {
+    const f = imageFixture();
+    vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
+    vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    vi.spyOn(f.internals, "reclaimSupersededVariants").mockResolvedValue({ status: "skipped", reason: "build_in_progress" });
+    vi.spyOn(f.internals, "reserveVariantSet").mockRejectedValue(
+      new Error("asset cleanup object budget exceeded (151>128)"),
+    );
+
+    await expect(f.service.processAsset(imageJob)).rejects.toThrow(
+      "asset cleanup object budget exceeded (151>128); superseded variants were not reclaimed (build_in_progress)",
+    );
+    expect(f.runner.render).not.toHaveBeenCalled();
+  });
+
+  it("passes a reservation failure through unchanged when reclamation ran", async () => {
+    const f = imageFixture();
+    const refusal = new Error("asset variant budget exceeded (120+3>120)");
+    vi.spyOn(f.internals, "tryReuseReadySet").mockResolvedValue(false);
+    vi.spyOn(f.internals, "reconcileAttemptKeys").mockResolvedValue(undefined);
+    vi.spyOn(f.internals, "reclaimSupersededVariants").mockResolvedValue({ status: "reclaimed", rows: 0, objects: 0 });
+    vi.spyOn(f.internals, "reserveVariantSet").mockRejectedValue(refusal);
+
+    await expect(f.service.processAsset(imageJob)).rejects.toBe(refusal);
   });
 });
