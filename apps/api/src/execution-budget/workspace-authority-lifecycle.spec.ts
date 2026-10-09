@@ -1,12 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(process.cwd(), '../..');
-const migrationPath = resolve(
-  repoRoot,
-  'packages/db/prisma/migrations/20260822203000_execution_budget_account_attestation/migration.sql',
-);
+const migrationsRoot = resolve(repoRoot, 'packages/db/prisma/migrations');
+const ATTEST_HEADER = /CREATE (?:OR REPLACE )?FUNCTION attest_authorized_tool_budget_v1\(/;
 
 const postAdmissionCallers = [
   'apps/api/src/temporal/discovery.activities.ts',
@@ -16,6 +14,25 @@ const postAdmissionCallers = [
   'apps/api/src/intent/intent-projection.service.ts',
   'apps/api/src/discovery/discovery.service.ts',
 ] as const;
+
+/** The deployed attest is the definition in the last migration that (re)creates it. */
+async function latestAttestDefinition(): Promise<string> {
+  const directories = (await readdir(migrationsRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  let latest: string | undefined;
+  for (const directory of directories) {
+    const sql = await readFile(resolve(migrationsRoot, directory, 'migration.sql'), 'utf8');
+    const start = sql.search(ATTEST_HEADER);
+    if (start < 0) continue;
+    const end = sql.indexOf('\n$$;', start);
+    expect(end, directory).toBeGreaterThan(start);
+    latest = sql.slice(start, end);
+  }
+  if (!latest) throw new Error('attest_authorized_tool_budget_v1 is not defined by any migration');
+  return latest;
+}
 
 describe('workspace authority post-admission lifecycle', () => {
   it('attests every post-admission caller and never reopens the holder account', async () => {
@@ -33,13 +50,14 @@ describe('workspace authority post-admission lifecycle', () => {
   });
 
   it('keeps attestation read-only while preserving expiry, revocation, scope, exhaustion and single-holder checks', async () => {
-    const sql = await readFile(migrationPath, 'utf8');
-    const body = sql.slice(
-      sql.indexOf('CREATE FUNCTION attest_authorized_tool_budget_v1'),
-      sql.indexOf('REVOKE ALL ON FUNCTION'),
-    );
+    const body = await latestAttestDefinition();
 
+    expect(body).toContain('\nSTABLE\nSECURITY DEFINER\n');
     expect(body).toContain('execution_budget_authority_time_state');
+    // Post-admission expiry is the discovery run admission lease, else the Grant window.
+    expect(body).toContain(
+      'COALESCE(authority."admission_lease_expires_at", authority."expires_at")',
+    );
     expect(body).toContain("time_state = 'EXPIRED'");
     expect(body).toContain('EXECUTION_BUDGET_AUTHORITY_REVOKED');
     expect(body).toContain('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');

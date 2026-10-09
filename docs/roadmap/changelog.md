@@ -4,6 +4,39 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-09 · Give discovery runs a 3-hour admission lease
+
+- 起因（2026-10-09 xin 实测，run `733fbf03`）：发现 run 的授权（Grant）最长 5 分钟。准入后每个活动开头、每次模型或工具预留都要再核验授权是否过期，所以 run 开始约 6 分钟（5 分钟加 60 秒容差）后的第一次核验就报 `EXECUTION_BUDGET_GRANT_EXPIRED`。733fbf03 在准入后 6 分钟因此失败，而一个发现 run 预计要跑 1–1.5 小时。产品负责人 2026-10-09 选定「准入后给 run 一段租约」，并确认 3 小时、只给发现 run。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md`（已改为 APPROVED）。
+- 改动：
+  - 新迁移 `20261009170000_discovery_run_admission_lease`：
+    - `execution_budget_authority` 加可空列 `admission_lease_expires_at`。准入发现 run（`WORKSPACE_GRANT` + `discovery.run` + `discovery_run`）时写入准入时刻加 3 小时，其余准入写 NULL。准入时刻只取一次，`consumed_at` 和租约用同一个值，租约恰好等于 `consumed_at` 加 3 小时。
+    - 新 CHECK：租约只能出现在发现 run 行上，必须晚于 `expires_at`，且不超过 `consumed_at` 加 3 小时。app_user 对该表只有 SELECT，不能设置或延长租约。
+    - `consume_workspace_execution_authority` 和 `attest_authorized_tool_budget_v1` 用 CREATE OR REPLACE 重定义，函数体逐字复制，只改租约相关的几行。attest 判断过期改用 `COALESCE(admission_lease_expires_at, expires_at)`，60 秒容差和错误码都不变。两个函数仍是 SECURITY DEFINER，attest 仍是 STABLE，属主和 EXECUTE 授权不变。search_path 写成 `pg_catalog, public, pg_temp`，与 #616 对所有 SECURITY DEFINER 函数的要求一致；迁移名排在 #616 的 `20261009160000` 之后。
+    - Grant 本身不变：验签、`consume`、`open` 仍按 5 分钟窗口判断，撤销、范围、cap、耗尽和单持有者检查一字不动。迁移不回填：迁移前准入的行租约为 NULL，照旧按 5 分钟判断，xin 上卡住的 run 不会复活。
+  - Prisma 模型加 `admissionLeaseExpiresAt`。schema.prisma 是 Copy 绑定文件，已重签（只变指纹）。
+  - relay 启动发现工作流时加 `workflowIdReusePolicy: REJECT_DUPLICATE`。租约内 binding 一直能花钱，而默认策略允许同 ID 的上一次执行结束后再启动，同一条 `DiscoveryRunRequested` 被再次投递时会用同一个 binding 重跑。现在 Temporal 对已结束的同 ID 报 `WorkflowExecutionAlreadyStartedError`，relay 照旧记为合并、标为已投递。qualify、understanding、删除等其他启动不变。
+  - 文档：架构设计写明 300 秒只约束出示与准入、reserve 的有效期取租约或 Grant 窗口；ADR-024 加 2026-10-09 补充；落地设计记下产品负责人的答复；更正 #614 条目里「授权只有 5 分钟」的说法。
+- 测试：
+  - 静态迁移合同 8 项（零容器）：单事务、带锁超时、不回填；新列可空、无默认值；CHECK 原文；两个函数与原定义逐字比对，只差预期的几行；只重定义这两个函数，原定义与本迁移之间没有别的重定义；Prisma 模型有该列；本迁移排在 #616 的 `20261009160000` 之后，且分支里必须已有它。最后一项挡住「先合本 PR、后合 #616」：那样 #616 的迁移会更晚部署，库里最后完成的迁移与镜像的 `migration_revision` 对不上，运行时拒绝启动；#616 合入并合进本分支之前，这一项按设计失败。`workspace-authority-lifecycle.spec.ts` 改为读取 attest 的最新定义，并检查租约口径。加迁移前，其余 7 项与 lifecycle 这一项都失败，加迁移后通过。
+  - relay 2 项：只有发现工作流带 `REJECT_DUPLICATE`；用真实 SDK 客户端接一个桩 gRPC 服务，服务对已结束的同 ID 回 `ALREADY_EXISTS`，SDK 报 `WorkflowExecutionAlreadyStartedError`，relay 记为合并、事件标为已投递。改动前 2 项都失败。另在一次性 Temporal 开发服务器上实测（CLI 1.8.0 / Server 1.31.2，与 xin 相同）：同 ID 终止后，`REJECT_DUPLICATE` 报 `WorkflowExecutionAlreadyStartedError`，默认策略则另起一次执行。
+  - 真库合同 `discovery-run-admission-lease.postgres.spec.ts` 10 项，接进 CI 里 `migrate deploy` 之后跑真库用例的那一步（需 `EXECUTION_BUDGET_ADMISSION_LEASE_DATABASE_TEST=1`，两个库名都必须以 `_test` 结尾）。走真实的准入服务和 `PostgresBudgetStore`，业务连接是受 RLS 约束的 app_user；用 owner 把 authority 的全部时间列整体前移来模拟时间流逝：
+    - 发现 run 的租约恰为准入加 3 小时，重放同一 Grant 不改租约；其余 6 种准入为 NULL；
+    - 准入 10 分钟后，发现 run 仍能核验、预留（0 微美元）和释放；其余 6 种照旧报 `GRANT_EXPIRED`；
+    - 租约到期也有 60 秒容差，过后核验报 `GRANT_EXPIRED`，TS 映射为同名错误；
+    - 租约内撤销、额度耗尽、换工作区、账户关闭照旧拦住；
+    - 准入仍受 Grant 窗口约束：过期 Grant 不能准入，过窗后不能再 open；
+    - CHECK 拒绝其他 authority 上的租约、超过 3 小时的租约、不晚于 `expires_at` 的租约，允许置 NULL；
+    - 租约为 NULL 的发现 run 按旧口径判断；
+    - 两个函数的 SECURITY DEFINER、易变性、属主、EXECUTE 授权（app_user、平台 writer、PUBLIC）和 search_path；
+    - app_user 用同名临时表伪造 authority 行时，attest 仍读 public 的真表。
+  - 一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据放 tmpfs，用完即删）：只部署 main 的迁移时，真库合同 9 项失败，核心是准入 10 分钟后报 `GRANT_EXPIRED`，临时表一项在 main 上读到了伪造行；其余准入保持 5 分钟那 1 项本来就成立。部署新迁移后 10 项全过。main 的迁移、#616 的迁移（`1a1c0112`）与本迁移一起部署时，本合同 10 项和 #616 的真库护栏都通过，#616 的静态护栏对本迁移也通过。手动测试 `packages/db/test/execution-budget-authority.rls.spec.mjs` 用 #616 的版本（9 个授权函数的 search_path 都期望带 pg_temp，本 PR 不改该文件）在这样部署的新库上 29 项全过，含 20 个客户端同一 jti 并发准入。
+- 未做：
+  - RUNBOOK（工作区文件，不在本仓）还没补「租约内停止发现 run」：等 cap 耗尽；`temporal workflow terminate --workflow-id discovery-<runId>`；或以 app_user 设置 `app.current_workspace_id` 后向 `execution_budget_authority_revocation` 插一行，下一次核验即报 `REVOKED`，#614 之后 run 记为 FAILED。GrowthOS 仍不能撤销 workspace grant。
+  - 工作流被 terminate 或 cancel 后，正在执行的活动尝试要到 startToClose 超时（15 或 30 分钟）才停，这期间它的预留仍会通过；运维 reset 工作流也会复用同一个 binding。
+  - run 收尾时关闭账户、让租约提前失效，留待与 #614 的重试语义一起设计。平台 Schedule 恢复后会遇到同样的约 6 分钟失败，另行决定。understanding.run 和联系人端点仍是 5 分钟。
+  - 同一计划的 run 失败后不能用新 Grant 重跑（账户键由计划决定，仍绑定旧 authority），另行跟踪。
+  - 部署：#616 须先于本 PR 合入。迁移和带它的新镜像必须在同一个维护窗口上线，`migrate deploy` 会依次应用 #616 的 `20261009160000` 和本迁移。运行时要求库里最新迁移名与镜像的 `migration_revision` 完全一致，两步之间 API 与 Worker 不就绪；切换时不能有发现 run 在跑。
+
 ## 2026-10-09 · Shape public-web company records to the Raw source governance
 
 - 起因（2026-10-09 xin 实测）：卖方 #16 的发现 run `733fbf03` 是 #611 之后第一次真正跑通公开网页搜索的 run。模型判出 21 家公司官网，21 条 raw 记录却全部 `REJECTED`（`PROVIDER_PAYLOAD_SCHEMA_INVALID`），各查询回执是接受 0、拒绝 9 / 8 / 4，所以 run 即使不提前停也建不出公司。`mapPublicWebCompanyToRecord` 交出的记录有三处不合 Raw 治理，任何一处都会拒掉整条：
@@ -89,7 +122,7 @@
   - 补写放在不可取消的作用域里，取消的 run 也能收尾；补写本身失败时，抛出的仍是阶段错误。工作流代码自身的缺陷（例如活动返回了畸形结果）不在这里收尾：Temporal 让工作流任务失败并重试，修好的版本还能接着跑。正常收尾失败时不补写 FAILED，以免覆盖一次可能已经提交的结果。授权之前的旧历史跳过，它们的 `finalizeRun` 反正会被 parked。
   - 以 patch `discovery-failure-finalize-v1` 守卫，只在出错时检查，成功的 run 不多记标记；patch 之前录下的历史重放时命令序列不变。
   - `finalizeRun` 记 FAILED 时只关闭仍是 RUNNING 的 run：已有的结果（包括已记的 FAILED）一律不改，重试也不会再发第二条 `DiscoveryRunCompleted`。锁 run 行的查询为此多取 `status` 一列。
-  - `finalizeRun` 记 FAILED 时，核验结果为授权已结束（`EXECUTION_BUDGET_GRANT_EXPIRED`、`EXECUTION_BUDGET_AUTHORITY_REVOKED`、`EXECUTION_BUDGET_AUTHORITY_EXHAUSTED`）也照常写入。FAILED 不花钱，也不启动任何后续工作。发现 run 的授权只有 5 分钟（另有 60 秒时钟容差），撤销和额度耗尽也都以控制错误结束 run；不放行的话，这些 run 照样停在 RUNNING。数据库在作用域核对和授权查找之后才会报这三种代码，所以授权仍属于本工作区；撤销和过期时不再核对 run 的预算账户，写入仍按 run 与计划 ID 绑定，受工作区行级安全约束。DONE/PARTIAL、其他核验失败和没有 v2 信封的旧调用照旧拒绝。
+  - `finalizeRun` 记 FAILED 时，核验结果为授权已结束（`EXECUTION_BUDGET_GRANT_EXPIRED`、`EXECUTION_BUDGET_AUTHORITY_REVOKED`、`EXECUTION_BUDGET_AUTHORITY_EXHAUSTED`）也照常写入。FAILED 不花钱，也不启动任何后续工作。发现 run 的授权只有 5 分钟（另有 60 秒时钟容差；准入租约落地后改为准入后 3 小时，见同日「Give discovery runs a 3-hour admission lease」），撤销和额度耗尽也都以控制错误结束 run；不放行的话，这些 run 照样停在 RUNNING。数据库在作用域核对和授权查找之后才会报这三种代码，所以授权仍属于本工作区；撤销和过期时不再核对 run 的预算账户，写入仍按 run 与计划 ID 绑定，受工作区行级安全约束。DONE/PARTIAL、其他核验失败和没有 v2 信封的旧调用照旧拒绝。
 - 测试：
   - 工作流（模拟活动）：Fit 重试用尽后记 FAILED，查询计数与正常路径逐项一致，之后的阶段不再执行，原错误照旧抛出。计划载入、归一、Fit、富集的普通失败，查询、归一、官网画像、Fit、富集的控制错误，以及三个尽力而为阶段的控制错误，都记 FAILED 并带对应阶段。第 2 条查询遇到控制错误时保留第 1 条的回执；Raw 治理回执之前的历史不带回执字段；取消时在不可取消的作用域里记 FAILED；补写失败时抛阶段错误；正常收尾失败时不补写；工作流代码缺陷不补写，也不检查新 patch；成功 run 的收尾参数逐项不变，且不检查新 patch；没有 patch 的历史和授权之前的历史都不补写。原有的「控制错误不收尾」用例改为「记 FAILED 后抛出，从不记 DONE/PARTIAL」。
   - 工作流接真实的 `finalizeRun`：工作流建的 FAILED stats 通过回执核对并写入；数据库里有工作流不知道的回执时报漂移，不写入，抛出的仍是阶段错误。
@@ -99,7 +132,7 @@
 - 未做：
   - Fit 活动的重试退避不改。现在两次重试之间只等约 1 秒、2 秒，但加长没用：重试时同一家公司的模型调用用的是同一个预算操作键，失败那次已经结算、没有可重放的结果，后两次尝试都会立刻报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，退避再长也只是推迟失败。要让暂时的上游故障能靠重试恢复，得先让预算账本把「已知失败」存成可重放的结果（见 10-07、10-08 条目）。改活动选项本身不影响重放：重放只比对活动类型和顺序，不比对超时与重试策略（已有的重放测试里，查询活动按 120 秒超时录制，代码里是 15 分钟，照样能重放）。
   - 也没把这类模型失败改成不可重试。那样 stats 能直接记 `ProviderTransportError`，也省掉两次无用的尝试，但改的是 Fit 活动的重试语义，另行评估。
-  - 发现 run 的授权只有 5 分钟。每个活动开头、每次模型或工具预留都会核验授权是否过期，所以 run 开始约 6 分钟后的第一次核验就会以 `EXECUTION_BUDGET_GRANT_EXPIRED` 失败；本次让这样的 run 记为 FAILED。授权时长另由「发现 run 准入租约」处理（产品负责人 2026-10-09 已选定方向）。
+  - 本条合入时，发现 run 的授权只有 5 分钟。每个活动开头、每次模型或工具预留都会核验授权是否过期，所以 run 开始约 6 分钟后的第一次核验就会以 `EXECUTION_BUDGET_GRANT_EXPIRED` 失败；本次让这样的 run 记为 FAILED。之后的「发现 run 准入租约」（同日「Give discovery runs a 3-hour admission lease」）让发现 run 准入后按 3 小时租约核验；超过租约仍报同一错误码，照样记为 FAILED。
   - 仍会停在 RUNNING 的情况：授权恰好在最后一个阶段和正常收尾之间过期（正常收尾被拒）；数据库里有工作流不知道的查询回执，例如某次尝试已经提交、之后的重试又失败（回执漂移，正常收尾也一样）；工作流输入的授权本身不合法；工作流代码自身的缺陷。
   - xin 上现有的 3 个 RUNNING run 不处理。它们的工作流已经结束，不会再收尾，要清理须单独决定。
 
