@@ -68,7 +68,7 @@
 
 - 第 1 条的「转小写」只折叠 ASCII 字母，TS 与 DB（`translate`）一样；DB 的 `lower()` 随库的排序规则变，会让两边对个别非 ASCII 域名的判定不同。来源主机本来就是小写 ASCII。
 - 第 2 条的「最长」按去掉 `www.` 之后的长度算。原来 TS 按原始拼写长度排序，`www.foo.com` 会压过更具体的 `eu.foo.com`。
-- 第 2 条并列（多行规范化后是同一个域名，如 `foo.com` 与 `www.foo.com`、`FOO.com`）时，非 APPROVED 的行优先，再按原始拼写长、再按 id。这样只要有一种拼写封了该站，封禁就生效，结果也不随读出顺序变。
+- 第 2 条并列（多行规范化后是同一个域名，如 `foo.com` 与 `www.foo.com`、`FOO.com`）时，非 APPROVED 的行优先，再按原始拼写长、再按 id。这样只要有一种拼写封了该站，封禁就生效，结果也不随读出顺序变。用途不参与排序：两种拼写都是 APPROVED、只有一种带 `discovery` 时，记录是否放行取决于拼写更长的那一行。这属于配置错误，靠 §4 的规范写法避免。
 - 第 3 条的「来源主机」指 URL 里的主机原样（小写，不去 `www.`），与写入器 L906-907、TS provider 校验比较的是同一个值。
 
 ### 3.3 TS 改动
@@ -130,10 +130,17 @@
   VALUES (gen_random_uuid(),'<规范域名>','official_website','crawl','["discovery","enrichment"]',365,'SUSPENDED','<原因/日期>',now());
   ```
   - 规范域名：小写，用 punycode，不带 `www.`、协议和尾点，与 public_web 记录的 `domain` 写法相同。
+    - 写错了封禁就静默失效。Raw 入库只折叠 ASCII 大小写、去一个 `www.`；带 `https://`、尾点、空白或没转 punycode 的写法谁都匹配不上，Broker 等按精确域名查的地方连大写和 `www.` 也匹配不上。（实施时补充）有了通用行之后，这样写错的 SUSPENDED 行挡不住任何记录：记录会按通用行被接受，而不是像以前那样按缺策略隔离。
   - `allowed_purpose` 要带 `discovery`，这样新旧写入器都不会失败。
+  - `retention_days` 必须在 1–3650 之间（实施时补充）：TS 会把越界值截断，与库里的值不等，写入器拒绝，碰到这条策略的查询整条失败。通用行越界，所有带公开网页命中的查询都会失败。
   - 封禁后：public_web 搜索阶段跳过该精确域名；Raw 把该域名及其子域的记录隔离为 `SOURCE_POLICY_SUSPENDED`；Broker、信号富集、网站监控不再抓该精确主机。
   - 只对之后的 run 生效。已建档的公司要另用 suppression 处理（「停采不停用」，`docs/architecture/current.md:152`）。
 - **全部关停**：把通用行改成 SUSPENDED，seed 不会改回。若要连搜索和模型调用一起停，把 `data_provider.public_web` 设为 DISABLED。删除通用行无效，下次启动时 seed 会重建。
+  ```sql
+  UPDATE source_policy SET review_status='SUSPENDED', updated_at=now()
+  WHERE domain='public_web:company_site';
+  ```
+  - 用 SQL 改任何策略行都要同时 `SET updated_at = now()`（实施时补充）：表上没有触发器维护它，只有 Prisma 的 `@updatedAt` 会写，不写的话快照里的 `updatedAt` 停在旧值。
 - **审计**：每条 Raw 行的快照（策略 id、`updatedAt`、状态、保留期）、provenance 四列和处置码都不可改。通用行本身没有历史表，修改它时要同时在 `_archive/` 留一份记录。
 
 ## 5. 决策与权衡（请 owner 确认）
@@ -149,7 +156,7 @@
 ## 6. 风险与回退
 
 - **TS/DB 判定不一致**：会让整条 query 失败（A6）。§7 第 4 步用同一组用例在真库上对照，兜住这个风险。
-- **运行中改策略**：TS 在 fan-out 前读策略（A2），DB 在写入时复核。如果中间有人新加了逐域行，DB 会拒收通用行的 id，这条 query 失败（fail-closed）。现在把 APPROVED 改成 SUSPENDED 也会这样；改动通用行还会改变它的 `updated_at`，同一 run 重放写入时快照对不上，报 `RAW_SOURCE_WRITER_DRIFT`（A4）。规则：改 source_policy 前，先确认没有在跑的 run。
+- **运行中改策略**：TS 在 fan-out 前读策略（A2），DB 在写入时复核。如果中间有人新加了逐域行，DB 会拒收通用行的 id，这条 query 失败（fail-closed）。现在把 APPROVED 改成 SUSPENDED 也会这样；改动通用行会改变它派生出的快照（状态、用途，按 §4 同时改 `updated_at`），同一 run 重放写入时快照对不上，报 `RAW_SOURCE_WRITER_DRIFT`（A4）。规则：改 source_policy 前，先确认没有在跑的 run。
 - **放行后的出网**：放行后，同一个 run 会继续抓这些公司官网。画像最多 50 家（`execution-envelope.ts:35`）；信号富集和网站监控只针对 fit=match 的公司；抓取都查 robots。
 - **迁移安全**：只新增一个函数、替换一个函数，不动表。拿不到锁就快速失败。`CREATE OR REPLACE` 保留属主和 ACL。
 - **部署**：运行时要求库里最新的迁移等于镜像证明的 `migration_revision`。
@@ -189,7 +196,7 @@
 4. **真库合同**：新建 `apps/api/src/discovery/raw-source-company-site-policy.postgres.spec.ts`。
    - 门控：`RAW_SOURCE_POLICY_DATABASE_TEST=1`，并设置 `RAW_SOURCE_POLICY_TEST_DATABASE_URL`（owner）和 `RAW_SOURCE_POLICY_TEST_APP_DATABASE_URL`（app_user），才跑；只许回环主机；库名只许 `/global_test` 或 `/raw_source_policy_test`。仓内现有写法（`suppression-policy-lock.postgres.spec.ts:10-22`）是「URL 存在即跑 + 回环 + 库名白名单」，这里多加一个显式开关。
    - 第 2 步的矩阵经 `prepareRawSourceBatch` → `persistPreparedRawSourceRecord` 真写一遍（写入器要求 session_user 是 app_user，L740-743）。断言不 RAISE，状态和快照与 TS 一致。
-   - 再加只有 DB 才会拒的负例：通用行 id 配非 public_web；存在匹配的逐域行时仍传通用行 id；ACCEPTED 配 SUSPENDED；保留期不等。实施时另加：存在更具体的逐域行时传父域行；ACCEPTED 时并列行里有 SUSPENDED。
+   - 再加只有 DB 才会拒的负例：通用行 id 配非 public_web；存在匹配的逐域行时仍传通用行 id；ACCEPTED 配 SUSPENDED；保留期不等。实施时另加：存在更具体的逐域行时传父域行；ACCEPTED 时并列行里有 SUSPENDED；传一条不覆盖该主机的逐域行。通用行配非 public_web 的负例放在没有逐域策略覆盖的主机上，只有 provider 检查能拒。
    - CI：在 `ci.yml` 已跑过 `migrate deploy` 的 Raw SQL 步骤（L322-329）之后加一步。改 `ci.yml` 会让全部重门都跑（约 40 分钟）；不进 CI，这个 spec 就只能手跑，会无声过期。
 5. **本机一次性库**（绝不连 `global_dev`）：
    - 起库：`docker --context default run -d --rm --pull never -p 127.0.0.1:<空闲端口>:5432 --tmpfs /var/lib/postgresql/data -e POSTGRES_USER=global -e POSTGRES_PASSWORD=<一次性> -e POSTGRES_DB=global_test pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b`（与 `ci.yml:133` 钉的摘要相同，本机已有）。
@@ -211,6 +218,6 @@
 4. public_web 写入 field_evidence 的许可是 `licensed`（`evidence-license.ts:11-13`），与 registry 里的 `SOURCE_SPECIFIC` 不一致。要不要另开一个小改，让 mapper 写 `license:'public'`？
    - **答复**：另开后续小改，不在本 PR。
 5. 以后要不要给 `source_policy.domain` 加格式 CHECK？带 `https://`、尾点或大写的域名会让封禁静默失效。这不在本次范围内。
-   - **答复**：以后再做。（本次 TS 与 DB 都按 ASCII 折叠大小写，大写拼写的封禁已能生效；`https://` 与尾点仍会静默失效。）
+   - **答复**：以后再做。（在那之前，封单站必须用 §4 的规范写法：写错的 SUSPENDED 行在 Raw 入库匹配不上，记录会按通用行被接受。）
 6. app_user 对 `source_policy` 实有写权限（A10），与「app_user 只读、owner 写」的本意不符。运行时没有用 app_user 写这张表（唯一的 eval seed 也明确拒绝 app_user，`copy-sonnet-recovery-source-policy-seed.ts:60-70`）。要不要另开 PR 收回写权限？`data_provider` 也是同样情况。
    - **答复**：另有一个 PR 收回 app_user 对 `source_policy` 与 `data_provider` 的写权限。本 PR 不动任何授权。

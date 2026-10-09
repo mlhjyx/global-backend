@@ -425,13 +425,46 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
       await expect(persist(providerKey, row)).rejects.toThrow(BINDING_INVALID);
     }
 
-    it("refuses the company-site policy for another provider", async () => {
-      await withPolicies([companySite(), { id: policyId(8), domain: site }], async () => {
-        const row = await prepare("registry", registryRecord(site));
-        // Control: the record itself is writable under the site policy that covers its host.
-        expect((await persist("registry", row)).ingestStatus).toBe("ACCEPTED");
-        await expectRefused("registry", bindTo(row, COMPANY_SITE_ID, 365));
+    it("refuses the company-site policy for another provider on a host no site policy covers", async () => {
+      // Nothing covers the host and the record sits on its own domain, so the provider check is
+      // the only clause that can refuse: registry has no origin binding in the writer.
+      await withPolicies([companySite()], async () => {
+        const quarantined = await prepare("registry", registryRecord(site));
+        expect(quarantined.dispositionCode).toBe("SOURCE_POLICY_MISSING");
+        const accepted = prepareRawSourceBatch({
+          providerKey: "registry",
+          records: [registryRecord(site)],
+          policies: [
+            {
+              id: policyId(8),
+              domain: site,
+              retentionDays: 365,
+              reviewStatus: "APPROVED",
+              allowedPurpose: ["discovery"],
+              updatedAt: new Date(),
+            },
+          ],
+        }).rows[0]!;
+        expect(accepted.ingestStatus).toBe("ACCEPTED");
+
+        await expectRefused("registry", bindTo(quarantined, COMPANY_SITE_ID, 365));
+        await expectRefused("registry", bindTo(accepted, COMPANY_SITE_ID, 365));
       });
+    });
+
+    it("refuses a site policy that does not cover the host", async () => {
+      // Same length as the covering row, APPROVED, discovery: only the cover clause refuses.
+      await withPolicies(
+        [
+          { id: policyId(15), domain: site },
+          { id: policyId(16), domain: `pumpex-${suffix}.de` },
+        ],
+        async () => {
+          const row = await prepare("public_web", publicWebRecord(site));
+          expect(row.sourcePolicySnapshot.id).toBe(policyId(15));
+          await expectRefused("public_web", bindTo(row, policyId(16)));
+        },
+      );
     });
 
     it("refuses the company-site policy while a site policy covers the host, whatever the status", async () => {

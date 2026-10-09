@@ -176,8 +176,9 @@ export class DiscoveryProviderRegistry {
     // public_web 的「公司自有官网」通用 source_policy（保留键，不是主机名，Broker 与各处 SUSPENDED
     // 黑名单都查不到它）。只在 Raw 入库兜底：来源主机就是记录自己的域名、且没有逐域策略覆盖该主机
     // 时才用；逐域策略（含 SUSPENDED）永远优先。update: {} —— 运维改成 SUSPENDED 或改保留期后，
-    // 启动 seed 不会改回；删掉无效（下次启动重建），全停请改 SUSPENDED。设计：
-    // docs/superpowers/plans/2026-10-09-public-web-company-site-source-policy.md
+    // 启动 seed 不会改回；删掉无效（下次启动重建），全停请改 SUSPENDED。保留期只能在 1–3650 天，
+    // 越界会让每条带公开网页命中的查询在写入时失败；用 SQL 改时同时 SET updated_at = now()。设计：
+    // docs/superpowers/plans/2026-10-09-public-web-company-site-source-policy.md §4
     if (db.sourcePolicy) {
       await db.sourcePolicy.upsert({
         where: { domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN },
