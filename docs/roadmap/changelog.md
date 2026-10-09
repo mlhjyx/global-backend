@@ -4,6 +4,26 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-09 · Record a discovery run as FAILED when a stage stops it
+
+- 起因（BI-25；2026-10-09 xin 核查）：发现工作流只在正常路径调用 `finalizeRun`。某个阶段重试用尽后失败（例如 Fit 阶段遇到被切断的模型流，或 DeepSeek 的 `insufficient_system_resource`），或者查询循环、尽力而为的阶段遇到控制错误时，工作流直接失败，`discovery_run` 停在默认的 RUNNING，也没有统计。xin 上现有 3 个这样的 run，分别在存下 0、2、1 条查询回执后中止。最近一个的 worker 日志显示，原因是查询执行报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`（控制错误）；另外两个的日志已随容器重建丢失。
+- 改动：
+  - 工作流把从载入计划到专利预热的各阶段放进一个 try。任一阶段抛出没被吸收的错误（重试用尽的普通失败，或控制错误）时，先调用 `finalizeRun` 记 FAILED，再抛出原错误，工作流照旧失败，控制错误照旧可见。stats 带查询阶段的计数（含查询回执，形状与正常收尾一致，`finalizeRun` 的回执核对照常通过）、`queries`、`failures`，以及 `failure: { stage, errorType, control }`：失败的阶段；最内层失败的类型或类名（只收标识符形状的值，否则记 `UNCLASSIFIED`）；是否为控制错误。不记任何错误消息。
+  - 状态一律记 FAILED，不记 PARTIAL。活动失败时工作流拿不到结果，无法证明这一阶段已经存下多少。FAILED 让计划保持 READY，上游恢复后可以直接重跑，已判过的公司不会重判；它也不写 QualifyRequested，控制错误不会触发后续工作。
+  - 补写 FAILED 本身失败时，抛出的仍是阶段错误。正常收尾失败时不补写 FAILED，以免覆盖一次可能已经提交的结果。授权之前的旧历史跳过，它们的 `finalizeRun` 反正会被 parked。
+  - 以 patch `discovery-failure-finalize-v1` 守卫，只在出错时检查，成功的 run 不多记标记；patch 之前录下的历史重放时命令序列不变。
+  - `finalizeRun` 记 FAILED 时，核验结果为授权已结束（`EXECUTION_BUDGET_GRANT_EXPIRED`、`EXECUTION_BUDGET_AUTHORITY_REVOKED`、`EXECUTION_BUDGET_AUTHORITY_EXHAUSTED`）也照常写入。FAILED 不花钱，也不启动任何后续工作。发现 run 的授权只有 5 分钟（另有 60 秒时钟容差），撤销和额度耗尽也都以控制错误结束 run；不放行的话，这些 run 照样停在 RUNNING。数据库只在作用域核对通过后才会报这三种代码，所以授权仍须属于本工作区。DONE/PARTIAL、其他核验失败和没有 v2 信封的旧调用照旧拒绝。
+- 测试：
+  - 工作流（模拟活动）：Fit 重试用尽后记 FAILED，查询计数与正常路径逐项一致，之后的阶段不再执行，原错误照旧抛出。计划载入、归一、Fit、富集的普通失败，查询、归一、官网画像、Fit、富集的控制错误，以及三个尽力而为阶段的控制错误，都记 FAILED 并带对应阶段。第 2 条查询遇到控制错误时保留第 1 条的回执；Raw 治理回执之前的历史不带回执字段；补写失败时抛阶段错误；正常收尾失败时不补写；成功 run 的收尾参数逐项不变，且不检查新 patch；没有 patch 的历史和授权之前的历史都不补写。原有的「控制错误不收尾」用例改为「记 FAILED 后抛出，从不记 DONE/PARTIAL」。
+  - 打包重放（真实 Temporal 重放器）：patch 之前「Fit 失败→工作流失败」的历史照旧重放；patch 之后「Fit 失败→标记→`finalizeRun`→工作流失败」的历史可以重放。去掉 patch 守卫时两项都报不确定性错误；main 上的代码只能重放前一项。
+  - 活动：三种授权结束代码下 FAILED 照常写入，计划不改，不写 QualifyRequested；DONE/PARTIAL 照旧拒绝；作用域不符、授权无效、核验不可用照旧拒绝；没有 v2 信封照旧 parked。
+  - 失败描述（纯函数）7 项：不复制消息和细节；控制标记与共享分类器一致；只读数据属性；有环或过深的 cause 链有界。
+- 未做：
+  - Fit 活动的重试退避不改。现在两次重试之间只等约 1 秒、2 秒，但加长没用：重试时同一家公司的模型调用用的是同一个预算操作键，失败那次已经结算、没有可重放的结果，后两次尝试都会立刻报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，退避再长也只是推迟失败。要让暂时的上游故障能靠重试恢复，得先让预算账本把「已知失败」存成可重放的结果（见 10-07、10-08 条目）。改活动选项本身不影响重放：重放不比对超时和重试策略，本次重放测试里的旧历史就是按旧策略录的。
+  - 发现 run 的授权只有 5 分钟。每个活动开头、每次模型或工具预留都会核验授权是否过期，所以 run 开始约 6 分钟后的第一次核验就会以 `EXECUTION_BUDGET_GRANT_EXPIRED` 失败。本次只保证这样的 run 记为 FAILED、不再停在 RUNNING；授权时长本身要单独决定。
+  - xin 上现有的 3 个 RUNNING run 不处理。它们的工作流已经结束，不会再收尾，要清理须单独决定。
+  - 如果数据库里有工作流不知道的查询回执（某次尝试已经提交，之后的重试又失败），`finalizeRun` 会报回执漂移，run 仍停在 RUNNING。正常收尾也有同样的问题，留作后续。
+
 ## 2026-10-08 · Treat single-name mailboxes as personal contacts
 
 - 起因（2026-10-08 BI-14 公司联系点设计调研）：手动联系人发现用的 `buildPublicContacts` 靠 `/^[a-z]+[._-][a-z]+$/i` 判断邮箱是否属于个人，只有 first.last 这种形状才算。`max@`、`mueller@`、`mm@` 这类单名或缩写邮箱因此被存成「公开联系点 (max@)」，不标个人数据，也不写 person.profile 证据。这违背 GDPR Art.4 和「只做公司级数据」的红线。仓库其他地方（采集清洗 `cleanEmail`、联系人持久化、邮箱验证合规门）早已改用白名单：只有职能邮箱算非个人。

@@ -49,6 +49,7 @@ import {
   ExecutionControlError,
   isExecutionControlError,
 } from '../execution-budget/execution-control-error';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import {
   applyDomainAckConsumerTransactions,
 } from '../durable-results/domain-ack-consumer-bindings';
@@ -333,6 +334,17 @@ function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): Enr
     costCents: 0,
   };
 }
+/**
+ * Attestation outcomes that only say the run's authority has ended. The
+ * database raises them after its scope checks, so the authority still belongs
+ * to this workspace.
+ */
+const ENDED_AUTHORITY_CODES: ReadonlySet<string> = new Set([
+  'EXECUTION_BUDGET_GRANT_EXPIRED',
+  'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+  'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
+]);
+
 const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
   'http.get', 'inpi_rne.search', 'mapyourshow.fetch', 'openfda.search',
@@ -385,6 +397,29 @@ export function createDiscoveryActivities(deps: {
       accountKey: binding.accountKey,
     });
     return binding;
+  };
+  /**
+   * A FAILED outcome spends nothing and starts nothing: the plan stays READY
+   * and no QualifyRequested is written. It may therefore still be recorded
+   * after the run's authority has ended; otherwise a run whose grant lapsed or
+   * was revoked mid-way would stay RUNNING forever. A legacy envelope stays
+   * parked, and every other attestation failure still refuses the write.
+   */
+  const attestRunFinalization = async (
+    args: DiscoveryActivityInput & { status: 'DONE' | 'PARTIAL' | 'FAILED' },
+  ): Promise<void> => {
+    try {
+      await ensureRunBudget(args);
+    } catch (error) {
+      if (
+        args.status === 'FAILED' &&
+        error instanceof ExecutionBudgetGrantError &&
+        ENDED_AUTHORITY_CODES.has(error.code)
+      ) {
+        return;
+      }
+      throw error;
+    }
   };
   const authorizeCompanyExternalAction =
     (workspaceId: string, companyId: string): (() => Promise<boolean>) =>
@@ -1809,7 +1844,7 @@ export function createDiscoveryActivities(deps: {
       status: 'DONE' | 'PARTIAL' | 'FAILED';
       stats: Record<string, unknown>;
     }): Promise<void> {
-      await ensureRunBudget(args);
+      await attestRunFinalization(args);
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const lockedRun = await lockDiscoveryRunReceiptState(tx, args);
         if (

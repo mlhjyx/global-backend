@@ -19,6 +19,10 @@ import {
   BudgetUnsettledOperationsError,
   type BudgetStore,
 } from "../tools/budget-store";
+import {
+  ExecutionBudgetGrantError,
+  type ExecutionBudgetGrantErrorCode,
+} from "../execution-budget/execution-budget-authority.types";
 
 const budgetLedger = new BudgetLedger();
 import type {
@@ -2320,9 +2324,13 @@ describe("finalizeRun durable query receipt readback", () => {
     },
   };
 
-  function finalizeHarness(stats: unknown = { perQuery: derived.perQuery }) {
+  function finalizeHarness(
+    stats: unknown = { perQuery: derived.perQuery },
+    budgetStore: BudgetStore = authorityBudgetStore(),
+  ) {
     const update = vi.fn(async () => ({}));
     const outboxCreate = vi.fn(async () => ({}));
+    const planUpdate = vi.fn(async () => ({}));
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
@@ -2332,7 +2340,7 @@ describe("finalizeRun durable query receipt readback", () => {
         },
       ]),
       discoveryRun: { update },
-      discoveryQueryPlan: { update: vi.fn(async () => ({})) },
+      discoveryQueryPlan: { update: planUpdate },
       outboxEvent: { create: outboxCreate },
     };
     const activities = createDiscoveryActivities({
@@ -2341,10 +2349,132 @@ describe("finalizeRun durable query receipt readback", () => {
       },
       providers: {},
       gateway: {},
-      budgetStore: authorityBudgetStore(),
+      budgetStore,
     } as never);
-    return { activities, outboxCreate, update };
+    return { activities, outboxCreate, update, planUpdate };
   }
+
+  function endedAuthorityStore(code: ExecutionBudgetGrantErrorCode): BudgetStore {
+    const store = authorityBudgetStore();
+    store.attestAuthorized = vi.fn(async () => {
+      throw new ExecutionBudgetGrantError(code);
+    });
+    return store;
+  }
+
+  const FAILURE_STATS = Object.freeze({
+    failures: 0,
+    failure: { stage: "fit", errorType: "ProviderTransportError", control: false },
+  });
+
+  it.each([
+    "EXECUTION_BUDGET_GRANT_EXPIRED",
+    "EXECUTION_BUDGET_AUTHORITY_REVOKED",
+    "EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+  ] as const)(
+    "still records a FAILED outcome after the run's authority ended (%s)",
+    async (code) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(
+        null,
+        endedAuthorityStore(code),
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: FAILURE_STATS,
+        }),
+      );
+
+      expect(update).toHaveBeenCalledWith({
+        where: { id: "40000000-0000-4000-8000-000000000001" },
+        data: expect.objectContaining({ status: "FAILED", stats: FAILURE_STATS }),
+      });
+      // FAILED starts nothing: the plan stays READY and no QualifyRequested is written.
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).toHaveBeenCalledOnce();
+      expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+        data: {
+          eventType: "DiscoveryRunCompleted",
+          payload: { status: "FAILED", stats: FAILURE_STATS },
+        },
+      });
+    },
+  );
+
+  it.each(["DONE", "PARTIAL"] as const)(
+    "refuses a %s outcome once the run's authority has ended",
+    async (status) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(
+        null,
+        endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED"),
+      );
+
+      await expect(
+        activities.finalizeRun(
+          discoveryArgs("40000000-0000-4000-8000-000000000001", {
+            planId: "50000000-0000-4000-8000-000000000001",
+            icpId: "60000000-0000-4000-8000-000000000001",
+            status,
+            stats: { failures: 0 },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "EXECUTION_BUDGET_GRANT_EXPIRED" });
+      expect(update).not.toHaveBeenCalled();
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+    "EXECUTION_BUDGET_GRANT_INVALID",
+    "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+  ] as const)(
+    "still refuses a FAILED outcome when attestation reports %s",
+    async (code) => {
+      const { activities, outboxCreate, update } = finalizeHarness(
+        null,
+        endedAuthorityStore(code),
+      );
+
+      await expect(
+        activities.finalizeRun(
+          discoveryArgs("40000000-0000-4000-8000-000000000001", {
+            planId: "50000000-0000-4000-8000-000000000001",
+            status: "FAILED" as const,
+            stats: FAILURE_STATS,
+          }),
+        ),
+      ).rejects.toMatchObject({ code });
+      expect(update).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a FAILED outcome without a v2 envelope parked", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness(
+      null,
+      endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED"),
+    );
+
+    await expect(
+      activities.finalizeRun({
+        workspaceId: DISCOVERY_BINDING.scopeKey,
+        runId: "40000000-0000-4000-8000-000000000001",
+        planId: "50000000-0000-4000-8000-000000000001",
+        status: "FAILED",
+        stats: FAILURE_STATS,
+      } as never),
+    ).rejects.toMatchObject({
+      type: "EXECUTION_BUDGET_LEGACY_HISTORY_PARKED",
+      nonRetryable: true,
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
 
   it("merges the locked immutable receipt into final stats and Outbox metadata", async () => {
     const { activities, outboxCreate, update } = finalizeHarness();
