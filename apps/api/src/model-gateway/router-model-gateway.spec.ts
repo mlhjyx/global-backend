@@ -8,6 +8,7 @@ import {
   ProviderOutputError,
   ProviderOutputUnresolvedError,
   ProviderTransportError,
+  ProviderWireInFlightError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
@@ -1436,6 +1437,32 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     expect(network).toBeInstanceOf(ProviderOutputUnresolvedError);
     expect(network).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED' });
     expect(isExecutionControlError(network)).toBe(true);
+  });
+
+  it('passes a repair wire owned by another worker through unwrapped, never as a repair failure', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const inFlight = new ProviderWireInFlightError();
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: { y: 1 } as never, provider: 'fake', model: 'm', usage: { inputTokens: 7 } })
+      .mockRejectedValueOnce(inFlight);
+    const gw = gatewayWith(provider, budget);
+
+    const error = await gw
+      .generateStructured(
+        { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      )
+      .catch((err: unknown) => err);
+
+    // The paid path recognises this exact class (MODEL_WIRE_IN_FLIGHT) and
+    // leaves settlement to the wire's owner; a wrapper would hide it.
+    expect(error).toBe(inFlight);
+    expect(isExecutionControlError(error)).toBe(true);
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    // Outcome unknown: the whole two-call reservation (2 × 20¢) stays charged.
+    expect(budget.remainingCents('run-1')).toBe(460);
   });
 
   it('fails closed when the first answer is unusable and its settlement is unresolved', async () => {

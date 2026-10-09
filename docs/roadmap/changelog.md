@@ -4,6 +4,15 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-09 · Leave an in-flight repair wire to its owner
+
+- 起因（#610 第三轮独立复审，改动前就有）：建站付费路径上，结构化输出的修复调用拿到 `ProviderWireInFlightError`（修复用的物理调用已不是 `ALLOCATED`，归别人处理）时，Router 的修复 `catch` 把它包成 `ProviderOutputUnresolvedError`。付费路径专门处理「调用进行中」的分支（不结算、保留预留）因此认不出，Router 转而按两次调用去结算这次支出。
+- 改动：修复 `catch` 把 `ProviderWireInFlightError` 与 `ExternalActionDeniedError` 一样原样抛出。付费路径于是记 `MODEL_WIRE_IN_FLIGHT` trace，抛 `PaidOperationUnknownError(MODEL_WIRE_IN_FLIGHT)`，不结算、不停用付费调用，与首次调用遇到「调用进行中」时一致；AiTask 把它当终态，不换模型。
+- 首次物理调用的结算不受影响：修复调用能分配之前，首次调用的精确回执已由 provider 写入并终结，数据库的分配函数也要求首次调用已结算。支出保持 `RESERVED`，两次调用的预留原样占着，由终结修复调用的一方（目前是 provider-spend 恢复任务）按持久回执结算，首次调用的费用不会丢。改动前 Router 会以 `FAILED`、`call_count` 2 去结算：真库守卫会拒绝（实际物理调用只有 1 次），随后以 `MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN` 停用整个 BuildRun 的付费调用，`MODEL_WIRE_IN_FLIGHT` trace 也丢了。
+- 可达性：按现有 SQL，只有恢复任务把分配后满 24 小时仍未发出的修复调用收为 `NOT_DISPATCHED`、又还没结算支出时才会出现，属于防御性修复。
+- Router 是受保护文件：复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`，指纹 `c9fc50b3…` → `bf31b8ee…`。独立复审（只读代理）没有 CRITICAL、HIGH 或 MEDIUM。LOW 五项中，复核记录里改动前后果的细节与代码注释的措辞已改正；相邻的修复准备路径、恢复任务少数情况下停在未结算这两项都不比改动前差，记在复核记录里。
+- 测试：新增 3 项，改动前都失败（拿到包装后的 `ProviderOutputUnresolvedError`）。settlement-v1 照真实 provider 的 `READBACK_ONLY` 走一遍：首次调用的回执与终结各写一次，修复调用不终结，不结算支出、不停用付费调用；付费门夹具下同样不结算，trace 为 `MODEL_WIRE_IN_FLIGHT`；非付费路径上调用方拿到的就是原来那个实例。模型网关、执行预算、AiTask 与付费门相关测试 767 项通过，执行授权策略检查 16 项通过。
+
 ## 2026-10-09 · Public-web search results fit their durable contract
 
 - 起因（2026-10-09 xin 实测）：
