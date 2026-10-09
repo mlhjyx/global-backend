@@ -21,6 +21,7 @@ import {
   tradeRoleFor,
 } from './public-web.provider';
 import { getTask } from '../../ai-tasks/task-registry';
+import { validateRawSourceProviderPayload } from '../raw-source-provider-schema';
 
 const CTX: ExecutionContext = {
   workspaceId: '00000000-0000-4000-8000-0000000000a1',
@@ -164,6 +165,55 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     const result = await new PublicWebDiscoveryProvider({
       gateway: {} as never,
       broker: searchBroker([{ url: 'https://empty.example/', title: '   ' }]),
+    }).discoverCompanies(distributorQuery(), CTX);
+    expect(result.records).toEqual([]);
+    expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+  });
+
+  it('returns records the Raw governance accepts from www hits and a German answer (run 733fbf03)', async () => {
+    const executionBroker = searchBroker([
+      { url: 'https://www.pumpen-mueller.de/', title: 'Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel' },
+      { url: 'https://www.pumpen-mueller.de/produkte/tauchpumpen', title: 'Tauchpumpen | Pumpen Müller' },
+    ]);
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: {
+        is_company_site: true,
+        name: 'Pumpen Müller GmbH & Co. KG',
+        country: 'Germany',
+        industry: 'pump wholesale',
+        products: ['Kreiselpumpen', 'Tauchpumpen', 'centrifugal pumps'],
+        keywords: ['Großhandel', 'industrial pumps'],
+        evidence: 'Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel',
+        confidence: 0.85,
+      },
+      provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX);
+
+    expect(result.records).toHaveLength(1);
+    const validation = validateRawSourceProviderPayload('public_web', result.records[0]);
+    expect(validation).toMatchObject({
+      ok: true,
+      value: {
+        externalId: 'pumpen-mueller.de',
+        country: 'DE',
+        attributes: { products: ['centrifugal pumps'], keywords: ['industrial pumps'] },
+        provenance: { sourceUrl: 'https://pumpen-mueller.de/' },
+      },
+    });
+  });
+
+  it('never judges a Wikidata page as a company site', async () => {
+    // Raw would match the record to the seeded www.wikidata.org policy, which the database writer
+    // does not apply to the bare wikidata.org source page: the write would raise.
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Pumpen Müller GmbH' }, provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    const result = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: searchBroker([{ url: 'https://www.wikidata.org/wiki/Q42', title: 'Pumpen Müller GmbH - Wikidata' }]),
     }).discoverCompanies(distributorQuery(), CTX);
     expect(result.records).toEqual([]);
     expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();

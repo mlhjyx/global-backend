@@ -217,7 +217,7 @@ describe("actual provider mapper output → governed Raw boundary", () => {
   it("keeps PublicWeb consumer industry/evidence while Raw stores digest and controlled terms", () => {
     const mapped = mapPublicWebCompanyToRecord({
       domain: "acme.example",
-      homeUrl: "https://acme.example/",
+      hitUrls: ["https://acme.example/"],
       sourceText: "Acme industrial pump systems",
       extracted: {
         is_company_site: true,
@@ -249,6 +249,69 @@ describe("actual provider mapper output → governed Raw boundary", () => {
     expect(JSON.stringify(row.payload)).not.toMatch(
       /Free-form evidence|Industrial machinery/u,
     );
+  });
+
+  describe("a PublicWeb company judged from German search hits (run 733fbf03)", () => {
+    const mapped = () =>
+      mapPublicWebCompanyToRecord({
+        domain: "pumpen-mueller.de",
+        hitUrls: [
+          "https://www.pumpen-mueller.de/produkte/kreiselpumpen",
+          "https://pumpen-mueller.de/über-uns",
+        ],
+        sourceText:
+          "- 标题：Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel\n  URL：https://www.pumpen-mueller.de/produkte/kreiselpumpen",
+        extracted: {
+          is_company_site: true,
+          name: "Pumpen Müller GmbH & Co. KG",
+          country: "Germany",
+          industry: "Pumpengroßhandel",
+          products: ["Kreiselpumpen", "Tauchpumpen", "centrifugal pumps"],
+          keywords: ["Großhandel", "submersible", "industrial"],
+          evidence: "Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel",
+          confidence: 0.8,
+        },
+        sourceClass: "public_intelligence",
+        fetchedAt: NOW,
+      });
+
+    it("is ACCEPTED, not REJECTED, under a policy for the company domain", () => {
+      const row = prepare("public_web", mapped(), "pumpen-mueller.de");
+      expect(row).toMatchObject({
+        ingestStatus: "ACCEPTED",
+        dispositionCode: null,
+        externalId: "pumpen-mueller.de",
+        sourceUrl: "https://pumpen-mueller.de/",
+      });
+      expect(row.payload).toMatchObject({
+        name: "Pumpen Müller GmbH & Co. KG",
+        domain: "pumpen-mueller.de",
+        country: "DE",
+        attributes: {
+          products: ["centrifugal pumps"],
+          keywords: ["industrial"],
+          extraction_confidence: 0.8,
+        },
+        provenance: { sourceUrl: "https://pumpen-mueller.de/" },
+      });
+      expect(JSON.stringify(row.payload)).not.toMatch(
+        /Kreiselpumpen|Tauchpumpen|submersible|Pumpengroßhandel/u,
+      );
+    });
+
+    it("waits for a source policy instead, with a source URL the database writer stores", () => {
+      // No source_policy row covers an arbitrary company domain yet: the record now reaches the
+      // policy gate. A quarantined row still carries its source URL, and the writer raises on any
+      // URL it would not store, which would abort the query's transaction. The first hit is on
+      // www.<domain>; the second is on the exact host but its umlaut path is percent-escaped
+      // (/%C3%BCber-uns), which the writer refuses: so the home page is recorded.
+      const row = prepare("public_web", mapped(), "directory.example");
+      expect(row).toMatchObject({
+        ingestStatus: "QUARANTINED",
+        dispositionCode: "SOURCE_POLICY_MISSING",
+        sourceUrl: "https://pumpen-mueller.de/",
+      });
+    });
   });
 
   it("keeps TED attribution/buyer consumer fields while Raw stores structured notice facts", () => {
