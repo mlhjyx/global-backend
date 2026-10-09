@@ -29,6 +29,12 @@ import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { MAX_PUBLIC_WEB_DOMAINS_PER_QUERY } from '../execution-envelope';
+import {
+  isContactFreeText,
+  isControlledBusinessTerm,
+  isStableSafeHttpsUrl,
+} from '../raw-source-provider-normalizer';
+import { COUNTRY_ISO, lookupCountryIso } from '../vocab';
 import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
 import {
   MAX_SEARCHES_PER_QUERY,
@@ -77,6 +83,8 @@ const NOISE_DOMAINS = [
 const JUDGE_CONCURRENCY = 5;
 const MAX_HITS_PER_DOMAIN = 3;
 const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
+/** Raw governance stores at most 20 products and 20 keywords (TypeScript boundary and database writer alike). */
+const MAX_RAW_TERMS = 20;
 
 type SearchHit = Readonly<{ url: string; title: string }>;
 
@@ -238,7 +246,6 @@ export class PublicWebDiscoveryProvider
     record: ProviderCompanyRecord | null;
     collector?: DiscoveryCompanyReceiptCollector;
   }>> {
-    const homeUrl = `https://${domain}/`;
     const text = searchEvidenceText(hits);
     if (!text) {
       this.log(`skip ${domain}: no usable search text`);
@@ -286,16 +293,18 @@ export class PublicWebDiscoveryProvider
       return Object.freeze({ record: null, collector });
     }
     const out = result.data;
-    if (!out?.is_company_site || !out.name?.trim()) {
+    // Same normalization as the record: a name of only quotes or trademark signs is no name.
+    const name = out?.name ? companyName(out.name) : '';
+    if (!out?.is_company_site || !name) {
       this.log(`skip ${domain}: not a company site (llm)`);
       return Object.freeze({ record: null, collector });
     }
-    this.log(`✓ ${domain}: ${out.name}`);
+    this.log(`✓ ${domain}: ${name}`);
 
     return Object.freeze({
       record: mapPublicWebCompanyToRecord({
         domain,
-        homeUrl: provenanceUrl(hits[0]?.url) ?? homeUrl,
+        hitUrls: hits.map((hit) => hit.url),
         sourceText: text,
         extracted: out,
         sourceClass: query.sourceClass,
@@ -379,40 +388,139 @@ export class PublicWebDiscoveryProvider
   }
 }
 
+/**
+ * One judged company → the record Raw ingestion governs (`validateRawSourceProviderPayload`, then the
+ * database writer `write_raw_source_record_v2`). Each value is shaped here so that a real model answer
+ * passes that boundary instead of failing it as a whole (discovery run 733fbf03: 21 of 21 rejected):
+ * - `domain` (= `externalId`): the suppression canonicalization (lower case, no leading "www.", ASCII form);
+ * - `name`: {@link companyName}; `country`: {@link countryIso};
+ * - `products` / `keywords`: {@link controlledTerms}; `provenance.sourceUrl`: {@link sourcePageUrl}.
+ * The free-text `industry` and `evidence` stay on the record: Raw drops the first and stores a digest of the second.
+ */
 export function mapPublicWebCompanyToRecord(args: {
   domain: string;
-  homeUrl: string;
+  /** URLs of this domain's search hits, in result order. */
+  hitUrls: readonly string[];
   sourceText: string;
   extracted: ExtractedCompany;
   sourceClass: SourceClass;
   fetchedAt: string;
 }): ProviderCompanyRecord {
-  const name = args.extracted.name?.trim();
+  const name = args.extracted.name ? companyName(args.extracted.name) : '';
   if (!name) throw new Error('public web company name is required');
+  const domain = canonicalizeSuppressionValue('domain', args.domain) ?? args.domain;
+  const employeeCount = args.extracted.employee_count;
   return {
-    externalId: args.domain,
+    externalId: domain,
     name,
-    domain: args.domain,
-    country: args.extracted.country || undefined,
+    domain,
+    country: countryIso(args.extracted.country),
     industry: args.extracted.industry || undefined,
     employeeCount:
-      typeof args.extracted.employee_count === 'number'
-        ? args.extracted.employee_count
+      typeof employeeCount === 'number' && Number.isSafeInteger(employeeCount) && employeeCount >= 0
+        ? employeeCount
         : undefined,
     attributes: {
-      products: args.extracted.products ?? [],
-      keywords: args.extracted.keywords ?? [],
+      products: controlledTerms(args.extracted.products),
+      keywords: controlledTerms(args.extracted.keywords),
       extraction_evidence: args.extracted.evidence ?? null,
       extraction_confidence: args.extracted.confidence ?? null,
       source_class: args.sourceClass,
     },
     provenance: {
-      sourceUrl: args.homeUrl,
+      sourceUrl: sourcePageUrl(domain, args.hitUrls),
       fetchedAt: args.fetchedAt,
       contentHash: createHash('sha256').update(args.sourceText).digest('hex'),
       parserVersion: PARSER_VERSION,
     },
   };
+}
+
+/** © ® ℠ ™. */
+const TRADEMARK_SIGNS = /[©®℠™]/gu;
+/** ` ʻ ʼ ‘ ’ ‛ ′ (´ is handled before NFKC). */
+const APOSTROPHES = /[`ʻʼ‘’‛′]/gu;
+/** ‐ ‑ ‒ – — ― −. */
+const DASHES = /[‐-―−]/gu;
+/** " « » “ ” „ ‟ ‹ ›. */
+const DOUBLE_QUOTES = /["«»“-‟‹›]/gu;
+
+/**
+ * The model's company name as the Raw boundary stores it: NFKC text of letters, digits, spaces and
+ * `._+&'(),/#:-`. Typographic apostrophes and dashes become their plain form; quotation marks, trademark
+ * signs and invisible format characters go; white space collapses. A name that still fails, such as one
+ * carrying a phone number, an email address or a URL, is not repaired: the boundary rejects it with a
+ * value-free receipt.
+ */
+function companyName(raw: string): string {
+  return raw
+    // Before NFKC, which spells ™ and ℠ out as "TM" and "SM" and splits ´ into a space and a combining accent.
+    .replace(TRADEMARK_SIGNS, '')
+    .replace(/´/gu, "'")
+    .normalize('NFKC')
+    .replace(APOSTROPHES, "'")
+    .replace(DASHES, '-')
+    .replace(DOUBLE_QUOTES, '')
+    .replace(/\p{Cf}/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+/**
+ * ISO 3166-1 alpha-2 code of the model's free-text country ("Germany", "Deutschland", "德国" → DE) from the
+ * discovery vocabulary; Raw stores no other form. An answer that already is one of the vocabulary's codes
+ * ("DE", "de") is kept. Anything else ("DACH", "Österreich", "Germany (Bavaria)") is omitted, not guessed.
+ */
+function countryIso(country: string | undefined): string | undefined {
+  const term = country?.trim();
+  if (!term) return undefined;
+  const code = term.toUpperCase();
+  return lookupCountryIso(term) ?? (Object.values(COUNTRY_ISO).includes(code) ? code : undefined);
+}
+
+/**
+ * Products or keywords as Raw stores them. Raw only accepts terms made entirely of its controlled business
+ * vocabulary (`isControlledBusinessTerm`, a data-minimisation control that is not widened here) and rejects
+ * the whole record for one other term, so the rest (German product names, "submersible") is dropped here.
+ * Words are rejoined with single spaces: "centrifugal-pumps" becomes "centrifugal pumps", and a stray
+ * leading or trailing "-" or "_", which the database writer's term check reads as an empty word, goes.
+ * Case-insensitive duplicates are dropped; at most 20 terms are kept.
+ */
+function controlledTerms(terms: readonly unknown[] | undefined): string[] {
+  const kept = new Map<string, string>();
+  for (const term of terms ?? []) {
+    if (kept.size === MAX_RAW_TERMS) break;
+    if (typeof term !== 'string') continue;
+    const words = term.normalize('NFKC').split(/[\s_-]+/u).filter(Boolean).join(' ');
+    const key = words.toLowerCase();
+    if (!kept.has(key) && isControlledBusinessTerm(words)) kept.set(key, words);
+  }
+  return [...kept.values()];
+}
+
+/**
+ * Provenance page of a public_web record. Raw binds its host to `domain` exactly, in the TypeScript
+ * boundary and again in the database writer, and `domain` has no leading "www." (normalizeDomain). So the
+ * first search hit served from exactly that host is kept; a hit on www.<domain>, on a subdomain or over
+ * plain http falls back to the home page https://<domain>/. So does a hit the database would not store,
+ * such as an umlaut path: the writer raises on that URL, quarantined rows included, and the raise aborts
+ * the whole query's transaction.
+ */
+function sourcePageUrl(domain: string, hitUrls: readonly string[]): string {
+  for (const hit of hitUrls) {
+    const url = provenanceUrl(hit);
+    if (url && new URL(url).hostname === domain && isStorableSourceUrl(url)) return url;
+  }
+  return `https://${domain}/`;
+}
+
+/**
+ * The TypeScript boundary's URL check plus the two places where the database writer's check
+ * (`raw_source_safe_https_url_v2`) is stricter: it refuses every percent-escape but %20, and its
+ * contact rules read "_" as a word break (forgot_password).
+ */
+function isStorableSourceUrl(url: string): boolean {
+  return isStableSafeHttpsUrl(url) && !url.includes('%') && isContactFreeText(url.replace(/_/gu, ' '));
 }
 
 /**

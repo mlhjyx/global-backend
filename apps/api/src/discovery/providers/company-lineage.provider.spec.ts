@@ -233,6 +233,38 @@ describe('provider-owned company receipt lineage', () => {
       .toEqual([['discovery.extract_company', MODEL_A]]);
   });
 
+  it('public-web keeps the receipt of an answer whose name is only quotation marks and a trademark sign', async () => {
+    const executionBroker = broker(async (toolId, _input, ctx) => {
+      ctx.onDurableReceipt?.(toolId, SEARCH_RECEIPT);
+      return {
+        data: { results: [{ url: 'https://acme.test/', title: 'Acme' }] },
+        costCents: 0,
+        durableReceipt: SEARCH_RECEIPT,
+      };
+    });
+    mocks.executeStructuredTaskWithRuntime.mockImplementation(
+      async (_gateway, input, ctx) => {
+        ctx.onDurableReceipt?.(input.task, MODEL_A);
+        return {
+          data: { is_company_site: true, name: ' „“ ™ ' },
+          provider: 'gateway',
+          model: 'model',
+          durableReceipt: MODEL_A,
+          runtimeExecution: {},
+        };
+      },
+    );
+
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(query, context());
+
+    // Skipped like any answer without a name: no record, the model call stays an attempt.
+    expect(result.records).toEqual([]);
+    expect(result.lineage?.attemptReceipts).toEqual([
+      { producerId: 'discovery.extract_company', receipt: MODEL_A },
+    ]);
+  });
+
   it('omits the entire public-web lineage when the expected model call returns no receipt', async () => {
     const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
       ? { data: { results: [{ url: 'https://acme.test/', title: 'Acme' }] }, costCents: 0 }
