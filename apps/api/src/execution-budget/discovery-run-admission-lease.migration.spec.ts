@@ -6,6 +6,7 @@ const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 const migrationsRoot = `${repoRoot}packages/db/prisma/migrations`;
 
 const LEASE_MIGRATION = '20261009170000_discovery_run_admission_lease';
+const HARDENING_MIGRATION = '20261009160000_security_definer_search_path_pg_temp';
 const CONSUME_ORIGIN = '20260821090000_execution_budget_authority';
 const ATTEST_ORIGIN = '20260822203000_execution_budget_account_attestation';
 const CONSUME = 'consume_workspace_execution_authority';
@@ -40,13 +41,16 @@ function normalized(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
 }
 
-async function migrationsDefining(name: string): Promise<string[]> {
-  const directories = (await readdir(migrationsRoot, { withFileTypes: true }))
+async function migrationDirectories(): Promise<string[]> {
+  return (await readdir(migrationsRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
+}
+
+async function migrationsDefining(name: string): Promise<string[]> {
   const definers: string[] = [];
-  for (const directory of directories) {
+  for (const directory of await migrationDirectories()) {
     const sql = await migrationSql(directory);
     if (new RegExp(`CREATE (?:OR REPLACE )?FUNCTION ${name}\\(`).test(sql)) {
       definers.push(directory);
@@ -183,9 +187,21 @@ describe('discovery run admission lease migration', () => {
     expect(lease).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/);
   });
 
-  it('leaves the two original definitions as the only earlier ones', async () => {
-    await expect(migrationsDefining(CONSUME)).resolves.toEqual([CONSUME_ORIGIN, LEASE_MIGRATION]);
-    await expect(migrationsDefining(ATTEST)).resolves.toEqual([ATTEST_ORIGIN, LEASE_MIGRATION]);
+  it('copies from the latest earlier definitions: nothing redefined either function in between', async () => {
+    const throughLease = (definers: string[]) =>
+      definers.filter((directory) => directory <= LEASE_MIGRATION);
+
+    expect(throughLease(await migrationsDefining(CONSUME))).toEqual([CONSUME_ORIGIN, LEASE_MIGRATION]);
+    expect(throughLease(await migrationsDefining(ATTEST))).toEqual([ATTEST_ORIGIN, LEASE_MIGRATION]);
+  });
+
+  it('deploys after the SECURITY DEFINER search_path hardening, which must already be on the branch', async () => {
+    // The runtime compares the database's last finished migration with the image's
+    // alphabetically last one. If the hardening merged after this migration, deploying it
+    // later would leave those two apart and the runtime would refuse to start, so the
+    // hardening (#616) has to merge first.
+    expect(await migrationDirectories()).toContain(HARDENING_MIGRATION);
+    expect(LEASE_MIGRATION > HARDENING_MIGRATION).toBe(true);
   });
 
   it('maps the column in the Prisma model so migrate dev does not drop it', async () => {

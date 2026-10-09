@@ -144,7 +144,7 @@ Outbox/Relay 只负责传输；Backend 必须验签后才写入 authority。未�
 
 - `UNIQUE(issuer,jti)`。
 - Workspace authority 必须有 workspace/subject/request hash；Platform authority 必须有 schedule/campaign fields。
-- app role 只允许 `SELECT/INSERT`，禁止 `UPDATE/DELETE`；撤销通过 append-only `ExecutionBudgetAuthorityRevocation`。
+- app role 对 authority 表只有 `SELECT`，写入（准入、开账户、计数）都经 SECURITY DEFINER 函数，不能设置或延长租约；对撤销表只有 `SELECT/INSERT`；两张表都禁止 `UPDATE/DELETE`。撤销通过 append-only `ExecutionBudgetAuthorityRevocation`。
 - `ToolBudgetAccount` 新增非空 `authorityId` 和 `authorizedCapMicrousd`。
 - `open_tool_budget` 改为接收 `authorityId + accountKey + replayScope`，数据库从 authority 读取 cap；不再接收调用方任意 cap。
 - reserve 函数再次验证 authority、scope、purpose、subject、有效期、撤销、run/campaign cap 与账户 generation。有效期取 `COALESCE(admission_lease_expires_at, expires_at)`：只有发现 run 有准入租约，其余仍是 Grant 的 `expires_at`。

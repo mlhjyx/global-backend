@@ -278,8 +278,22 @@ describe('discovery run admission lease on PostgreSQL as the RLS-bound app princ
       expect(times.lease!.getTime() - times.consumed_at.getTime()).toBe(LEASE_SECONDS * 1000);
       expect(times.lease!.getTime()).toBeGreaterThan(times.expires_at.getTime());
 
-      // A replayed Grant returns the stored row and never rewrites the lease.
+      // The product refuses a replayed Grant (and rolls its transaction back) ...
       await expect(admitClaims(claims)).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_REUSED' });
+      // ... so replay consume directly and commit: the replay branch returns the stored
+      // row and never rewrites the lease.
+      const replayed = await app.withWorkspace(workspaceId, (tx) =>
+        tx.$queryRaw<Array<{ authority_id: string; replay: boolean }>>`
+          SELECT * FROM consume_workspace_execution_authority(
+            ${claims.issuer}, ${claims.audience}, ${claims.jti}::uuid,
+            ${claims.tokenSha256}, ${claims.schemaVersion},
+            ${claims.purpose}::"execution_budget_purpose",
+            ${workspaceId}::uuid, ${claims.subjectType}, ${claims.subjectId},
+            ${claims.requestSha256}, ${claims.currency}, ${claims.unit},
+            ${claims.capMicrousd}, ${new Date(claims.issuedAt * 1000)},
+            ${new Date(claims.notBefore * 1000)}, ${new Date(claims.expiresAt * 1000)})`,
+      );
+      expect(replayed).toEqual([{ authority_id: binding.authorityId, replay: true }]);
       await expect(authorityTimes(binding.authorityId)).resolves.toEqual(times);
 
       for (const [name, request] of OTHER_OPERATIONS) {
