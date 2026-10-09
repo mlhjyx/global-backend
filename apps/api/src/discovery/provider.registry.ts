@@ -31,6 +31,7 @@ import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
   MAX_CONTACT_DISCOVERY_ADAPTERS,
 } from './execution-envelope';
+import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -172,6 +173,29 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'public_web', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // public_web 的「公司自有官网」通用 source_policy（保留键，不是主机名，Broker 与各处 SUSPENDED
+    // 黑名单都查不到它）。只在 Raw 入库兜底：来源主机就是记录自己的域名、且没有逐域策略覆盖该主机
+    // 时才用；逐域策略（含 SUSPENDED）永远优先。update: {} —— 运维改成 SUSPENDED 或改保留期后，
+    // 启动 seed 不会改回；删掉无效（下次启动重建），全停请改 SUSPENDED。设计：
+    // docs/superpowers/plans/2026-10-09-public-web-company-site-source-policy.md
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN },
+        update: {},
+        create: {
+          domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+          sourceType: 'official_website',
+          accessMode: 'crawl',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'UNREVIEWED',
+          termsStatus: 'UNREVIEWED',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'public_web 公司自有官网通用策略（保留键，非主机名；产品负责人 2026-10-09 决定）。只在 Raw 入库兜底：来源主机等于记录自身域名、且没有逐域策略覆盖该主机时适用，逐域策略（含 SUSPENDED）优先。发现阶段只交搜索标题与 URL，不存页面正文。robots 与站点条款无法逐站审，如实 UNREVIEWED；站方有异议即逐域登记 SUSPENDED 封该站。',
+        },
+      });
+    }
     await db.dataProvider.upsert({
       where: { key: 'wikidata' },
       update: {},

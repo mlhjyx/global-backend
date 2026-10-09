@@ -8,12 +8,12 @@
       "source_classes": ["public_intelligence", "industry_data"],
       "purpose": "Discover public company facts and public contact points through bounded search and crawl.",
       "taxonomy": ["ICP industry terms", "product terms", "target geography"],
-      "license": { "classification": "SOURCE_SPECIFIC", "note": "Preserve per-page provenance and terms; there is no blanket web-content licence." },
+      "license": { "classification": "SOURCE_SPECIFIC", "note": "Preserve per-page provenance and terms; there is no blanket web-content licence. Raw admission: a per-domain source_policy covering the source host always governs, SUSPENDED included; without one, a record whose source host is its own domain falls back to the company-site policy public_web:company_site (owner decision 2026-10-09). Discovery stores search titles and URLs as provenance, never page bodies." },
       "personal_data_class": "RESTRICTED_POSSIBLE",
       "default_enablement": "ENABLED",
       "call_gates": ["data_provider_status", "source_policy", "tool_broker", "egress_guard"],
-      "test_paths": ["apps/api/src/discovery/providers/public-web-contacts.spec.ts"],
-      "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/providers/public-web-contacts.spec.ts" }]
+      "test_paths": ["apps/api/src/discovery/providers/public-web-contacts.spec.ts", "apps/api/src/discovery/providers/public-web-raw-governance.spec.ts", "apps/api/src/discovery/raw-source-company-site-policy.migration.spec.ts", "apps/api/src/discovery/raw-source-company-site-policy.postgres.spec.ts"],
+      "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/providers/public-web-contacts.spec.ts" }, { "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/raw-source-company-site-policy.postgres.spec.ts" }]
     },
     {
       "key": "wikidata",
