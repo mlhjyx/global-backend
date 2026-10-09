@@ -10,6 +10,7 @@ import {
   ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderTransportError,
 } from "./provider-output-error";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
 import { createProviderTransportObservation } from "../provider-transport-observation";
@@ -241,6 +242,151 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     await expect(
       streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
     ).rejects.toBeInstanceOf(ProviderOutputError);
+  });
+
+  it("names a stream cut off before its finish reason as truncated and keeps the usage it carried", async () => {
+    // 2026-10-08 xin: new-api lost the upstream TLS stream after 140 s
+    // (`scanner_error: tls: bad record MAC`) and still closed the stream with
+    // a locally counted usage chunk and [DONE]. The half JSON must not be
+    // reported as a model that answered with invalid JSON.
+    mockText(
+      sse([
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: '{"name":"Pumpen' } }] },
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: "händler" } }] },
+        { choices: [], usage: { prompt_tokens: 2601, completion_tokens: 11086 } },
+      ]),
+    );
+
+    const error = await streaming
+      .generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" })
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderTransportError);
+    expect(error).toMatchObject({
+      reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+      usage: { inputTokens: 2601, outputTokens: 11086 },
+    });
+  });
+
+  it("treats a stream that never carried a finish reason as cut even when its content parses", async () => {
+    mockText(sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: '{"a":1}' } }] }]));
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+    });
+  });
+
+  it("reports a cut text stream the same way", async () => {
+    mockText(sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: "Hallo" } }] }]));
+
+    await expect(
+      streaming.generateText({ task: "t", prompt: "p", model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+    });
+  });
+
+  it("classifies a finished stream whose structured output is not JSON", async () => {
+    mockText(
+      sse([
+        { model: "deepseek-v4-pro", choices: [{ delta: { content: "Sorry, no JSON" }, finish_reason: "stop" }] },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ reasonCode: "STRUCTURED_OUTPUT_NOT_JSON" });
+  });
+
+  it("gives each unreadable stream shape its own reason code as a transport failure", async () => {
+    mockText(": keep-alive\n\ndata: not-json\n\n");
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_LINE_INVALID",
+    });
+
+    mockText(": keep-alive\n\n");
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "CHAT_COMPLETIONS_STREAM_EMPTY" });
+
+    mockText(`data: ${JSON.stringify({ error: { message: "upstream overloaded" } })}\n\n`);
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR",
+    });
+  });
+
+  it("treats a finish reason about the upstream, not the answer, as a transport failure", async () => {
+    mockText(
+      sse([
+        {
+          model: "deepseek-v4-pro",
+          choices: [{ delta: { content: '{"a":1}' }, finish_reason: "insufficient_system_resource" }],
+        },
+      ]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({
+      name: "ProviderTransportError",
+      reasonCode: "CHAT_COMPLETIONS_FINISH_REASON_INVALID",
+    });
+  });
+
+  it("keeps a filtered answer recoverable under its own reason code", async () => {
+    mockText(
+      sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: '{"a":1}' }, finish_reason: "content_filter" }] }]),
+    );
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ name: "ProviderOutputError", reasonCode: "CHAT_COMPLETIONS_CONTENT_FILTERED" });
+  });
+
+  it("reports an error body as a transport failure, not an empty answer", async () => {
+    mockText(JSON.stringify({ error: { message: "upstream overloaded" } }));
+
+    await expect(
+      streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" }),
+    ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "CHAT_COMPLETIONS_BODY_INVALID" });
+  });
+
+  it("does not read an explicit null error field as a failure", async () => {
+    mockText(
+      JSON.stringify({
+        error: null,
+        model: "deepseek-v4-pro",
+        choices: [{ message: { content: '{"a":4}' }, finish_reason: "stop" }],
+      }),
+    );
+
+    const out = await streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" });
+
+    expect(out.data).toEqual({ a: 4 });
+  });
+
+  it("accepts a plain JSON body without a finish reason when the upstream ignores the stream flag", async () => {
+    mockText(
+      JSON.stringify({
+        model: "deepseek-v4-pro",
+        choices: [{ message: { content: '{"a":3}' } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2 },
+      }),
+    );
+
+    const out = await streaming.generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" });
+
+    expect(out.data).toEqual({ a: 3 });
   });
 
   it("accepts a plain JSON body when the upstream ignores the stream flag", async () => {
@@ -889,6 +1035,27 @@ describe("OpenAICompatibleProvider — explicit native gateway transports", () =
       reportedModel: "gpt-5.6-terra",
       modelResolutionSource: "upstream_response",
     });
+    expect(error).toMatchObject({ name: "ProviderOutputError", reasonCode: "RESPONSES_INCOMPLETE" });
+  });
+
+  it("GPT Responses reports a failed response as a transport failure", async () => {
+    const responses = new OpenAICompatibleProvider({
+      id: "gateway",
+      baseUrl: "http://gw.test/v1",
+      apiKey: "k",
+      model: "gpt-5.6-terra",
+      modelTransports: { "gpt-5.6-terra": "openai-responses" },
+    });
+    mockChatResponse({
+      model: "gpt-5.6-terra",
+      status: "failed",
+      output: [],
+      usage: { input_tokens: 101, output_tokens: 0 },
+    });
+
+    await expect(
+      responses.generateStructured({ task: "t", prompt: "p", schema: {}, maxTokens: 456 }),
+    ).rejects.toMatchObject({ name: "ProviderTransportError", reasonCode: "RESPONSES_STATUS_INVALID" });
   });
 
   it("rejects an untrusted reported-model discriminator without persisting it", async () => {

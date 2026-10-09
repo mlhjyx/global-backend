@@ -1,9 +1,22 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
 import {
   ExecutionControlError,
   isExecutionControlError,
+  registerRecoverableModelFailureClass,
 } from './execution-control-error';
+import {
+  ExternalActionDeniedError,
+  ProviderHttpError,
+  ProviderIdentityError,
+  ProviderOutputError,
+  ProviderOutputUnresolvedError,
+  ProviderSettlementError,
+  ProviderTransportError,
+  TaskOutputValidationError,
+} from '../model-gateway/providers/provider-output-error';
 
 describe('isExecutionControlError', () => {
   it('preserves a bounded structured code directly and through Temporal conversion', () => {
@@ -217,6 +230,125 @@ describe('isExecutionControlError', () => {
     expect(isExecutionControlError(new Error('ordinary provider failure'))).toBe(
       false,
     );
+  });
+
+  it('lets a caller with a fallback absorb an unusable model answer', () => {
+    // 2026-10-08 xin: one taxonomy.normalize answer that was not JSON failed the
+    // whole discovery run, because the rich error shape read as a control.
+    const failures = [
+      new ProviderOutputError(
+        'gateway deepseek-v4-pro: structured output is not valid JSON',
+        { inputTokens: 520, outputTokens: 11 },
+        { provider: 'gateway', model: 'deepseek-v4-pro', reportedModel: 'deepseek-v4-pro' },
+      ),
+      new ProviderOutputError('STRUCTURED_OUTPUT_TRUNCATED', { inputTokens: 2601 }),
+      new TaskOutputValidationError('task output hard gate rejected: x', { inputTokens: 1 }),
+      new Error('fallback wrapper', { cause: new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY') }),
+    ];
+
+    for (const failure of failures) {
+      expect(isExecutionControlError(failure)).toBe(false);
+    }
+  });
+
+  it('keeps run-wide model failures, unresolved outcomes, compliance denials and unknown settlements failing closed', () => {
+    // A cut stream, a substituted model or a failing gateway usually hits every
+    // call of a run: absorbing them per company would end the run with nothing judged.
+    const failures = [
+      new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 2601 }),
+      new ProviderIdentityError('model identity mismatch', { inputTokens: 1 }),
+      new ProviderHttpError({ status: 502, provider: 'gateway', model: 'deepseek-v4-pro' }),
+      new ProviderOutputUnresolvedError('repair suppressed', { inputTokens: 1 }, {
+        reasonCode: 'STRUCTURED_OUTPUT_REPAIR_SUPPRESSED',
+      }),
+      new ExternalActionDeniedError({ inputTokens: 1 }),
+      new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN'),
+    ];
+
+    for (const failure of failures) {
+      expect(isExecutionControlError(failure)).toBe(true);
+    }
+  });
+
+  it('still finds a control failure behind an unusable model answer', () => {
+    const failure = new ProviderOutputError('repair call failed', undefined, {
+      cause: new ExecutionControlError('EXECUTION_BUDGET_GRANT_REUSED'),
+    });
+
+    expect(isExecutionControlError(failure)).toBe(true);
+  });
+
+  it('fails closed for a subclass until that class is registered on its own', () => {
+    class LocalModelError extends ProviderOutputError {}
+
+    expect(isExecutionControlError(new LocalModelError('STRUCTURED_OUTPUT_EMPTY'))).toBe(true);
+  });
+
+  it('fails closed when a registered failure carries a control code of its own', () => {
+    const coded = Object.assign(new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY'), {
+      code: 'EXECUTION_BUDGET_GRANT_REUSED',
+    });
+    const bare = Object.assign(Object.create(ProviderOutputError.prototype) as object, {
+      code: 'EXECUTION_BUDGET_GRANT_REUSED',
+    });
+
+    expect(isExecutionControlError(coded)).toBe(true);
+    expect(isExecutionControlError(bare)).toBe(true);
+  });
+
+  it('reads a registered failure without invoking accessors; an accessor or primitive cause fails closed', () => {
+    let getterCalls = 0;
+    const accessorCause = Object.defineProperty(new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY'), 'cause', {
+      get() {
+        getterCalls += 1;
+        return undefined;
+      },
+    });
+    const primitiveCause = new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY', undefined, { cause: 'boom' });
+
+    expect(isExecutionControlError(accessorCause)).toBe(true);
+    expect(getterCalls).toBe(0);
+    expect(isExecutionControlError(primitiveCause)).toBe(true);
+  });
+
+  it('refuses to register Error itself or a built-in or host error class', () => {
+    for (const errorClass of [Error, TypeError, RangeError, SyntaxError, DOMException]) {
+      expect(() => registerRecoverableModelFailureClass(errorClass)).toThrow(
+        'RECOVERABLE_MODEL_FAILURE_CLASS_INVALID',
+      );
+    }
+    expect(isExecutionControlError(new TypeError('fetch failed'))).toBe(false);
+  });
+
+  it('is registered only by the model gateway error module, for exactly two classes', () => {
+    const sourceRoot = join(import.meta.dirname, '..');
+    const sources = (readdirSync(sourceRoot, { recursive: true }) as string[])
+      .filter((file) => /\.[cm]?[jt]sx?$/u.test(file) && !/\.spec\.[cm]?[jt]sx?$/u.test(file))
+      .map((file) => ({ file: file.split(sep).join('/'), text: readFileSync(join(sourceRoot, file), 'utf8') }));
+    const name = 'registerRecoverableModelFailureClass';
+
+    // Any mention, an aliased import included, stays in the defining module or the one registrant.
+    expect(sources.filter(({ text }) => text.includes(name)).map(({ file }) => file).sort()).toEqual([
+      'execution-budget/execution-control-error.ts',
+      'model-gateway/providers/provider-output-error.ts',
+    ]);
+    const registrant = sources.find(({ file }) => file === 'model-gateway/providers/provider-output-error.ts')!.text;
+    const calls = [...registrant.matchAll(/registerRecoverableModelFailureClass\s*\(\s*(\w+)\s*,?\s*\)/gu)]
+      .map((match) => match[1]);
+    expect(calls.sort()).toEqual(['ProviderOutputError', 'TaskOutputValidationError']);
+    // The only other mention is the import specifier.
+    expect(registrant.split(name).length - 1).toBe(calls.length + 1);
+  });
+
+  it('fails closed on a proxy whose prototype trap throws', () => {
+    const failure = new Proxy(new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY'), {
+      getPrototypeOf() {
+        throw new Error('sensitive-prototype-trap-payload');
+      },
+    });
+
+    expect(() => isExecutionControlError(failure)).not.toThrow();
+    expect(isExecutionControlError(failure)).toBe(true);
   });
 
   it('never executes an own getter and requires the caller to pass the hostile shape through', () => {

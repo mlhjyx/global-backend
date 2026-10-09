@@ -191,6 +191,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     matched: number;
     skippedSubjects?: number;
     budgetTruncated?: boolean;
+    unclassified?: number;
   } = { profiled: 0, matched: 0 };
   if (patched(DISCOVERY_WEBSITE_PROFILE_PATCH)) {
     try {
@@ -273,6 +274,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     totalQueries: queries.length,
     budgetTruncated,
     skippedSubjects,
+    // Absent in histories recorded before the counter existed: replays keep their status.
+    fitUnjudged: fit.unjudged ?? 0,
   });
   if (usesRawGovernance && governanceDenied > 0) {
     status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
@@ -318,13 +321,18 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       suppressed,
       fit: fit.verdicts,
       fitSkippedForBudget: fit.skippedForBudget ?? 0,
+      fitUnjudged: fit.unjudged ?? 0,
       // 预算截断按阶段拆开可观测（哪一路耗预算阶段打穿了 run 预算）+ 聚合总判。
       discoveryBudgetTruncated,
       enrichBudgetTruncated: enrich.budgetTruncated,
       signalsBudgetTruncated: signals.budgetTruncated ?? false,
       budgetTruncated,
       skippedSubjects,
-      websiteProfile: { profiled: websiteProfile.profiled, matched: websiteProfile.matched },
+      websiteProfile: {
+        profiled: websiteProfile.profiled,
+        matched: websiteProfile.matched,
+        unclassified: websiteProfile.unclassified ?? 0,
+      },
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },

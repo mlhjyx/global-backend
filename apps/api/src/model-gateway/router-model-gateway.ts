@@ -24,9 +24,11 @@ import {
   ExternalActionDeniedError,
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderOutputUnresolvedError,
   ProviderSettlementError,
   ProviderWireInFlightError,
   TaskOutputValidationError,
+  isRecoverableModelFailure,
 } from "./providers/provider-output-error";
 import {
   modelCostMeasurement,
@@ -232,10 +234,11 @@ export class RouterModelGateway extends ModelGateway {
         // A valid output can proceed under an upper-bound charge. An unusable
         // output must not trigger a second physical request while the first
         // call's exact settlement remains unresolved.
-        throw new ProviderOutputError(
+        throw new ProviderOutputUnresolvedError(
           "initial structured output is unusable and settlement is unresolved; repair suppressed",
           first.usage,
           {
+            reasonCode: "STRUCTURED_OUTPUT_REPAIR_SUPPRESSED",
             callCount: 1,
             provider: first.provider,
             model: first.model,
@@ -263,10 +266,12 @@ export class RouterModelGateway extends ModelGateway {
         // Allocation precedes Provider invocation. Even if the allocation DB
         // commit/ACK is ambiguous, there is still exactly one known physical
         // Provider call and this execution must never send attempt two.
-        throw new ProviderOutputError(
+        throw new ProviderOutputUnresolvedError(
           "repair preparation failed before provider dispatch",
           first.usage,
           {
+            reasonCode: "STRUCTURED_OUTPUT_REPAIR_PREPARATION_FAILED",
+            cause: err,
             callCount: 1,
             provider: first.provider,
             model: first.model,
@@ -285,14 +290,20 @@ export class RouterModelGateway extends ModelGateway {
         );
       } catch (err) {
         if (err instanceof ExternalActionDeniedError) throw err;
+        // A repair that answered unusably again is one bad item; a repair that
+        // failed any other way (transport, network) has an unknown outcome.
+        const RepairFailure = isRecoverableModelFailure(err)
+          ? ProviderOutputError
+          : ProviderOutputUnresolvedError;
         // FIX 1：修复调用抛错也要带上首调已消耗的 token（否则网关 catch 只结算修复那次、漏首调，少记绕硬顶）。
-        throw new ProviderOutputError(
+        throw new RepairFailure(
           `repair call failed: ${String(err)}`,
           mergeStructuredUsage(
             first.usage,
             err instanceof ProviderOutputError ? err.usage : undefined,
           ),
           {
+            reasonCode: "STRUCTURED_OUTPUT_REPAIR_CALL_FAILED",
             cause: err,
             callCount:
               1 + (err instanceof ProviderOutputError ? err.callCount : 1),
@@ -323,6 +334,7 @@ export class RouterModelGateway extends ModelGateway {
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join("; ")}`,
           mergeStructuredUsage(first.usage, repair.usage),
           {
+            reasonCode: "STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR",
             callCount: 2,
             provider: repair.provider,
             model: repair.model,
@@ -579,7 +591,14 @@ export class RouterModelGateway extends ModelGateway {
         provider: provider.id,
         model: input.model ?? "unknown",
         status: "ERROR",
-        errorMessage: err instanceof Error ? err.name : "model call failed",
+        // The class alone cannot tell a cut stream from bad JSON; the reason
+        // code can, and it never carries model text.
+        errorMessage:
+          err instanceof ProviderOutputError
+            ? `${err.name}:${err.reasonCode}`
+            : err instanceof Error
+              ? err.name
+              : "model call failed",
         latencyMs: Date.now() - started,
         inputTokens: failedUsage?.inputTokens,
         outputTokens: failedUsage?.outputTokens,

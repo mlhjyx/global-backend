@@ -6,8 +6,11 @@ import { ModelProvider } from './model-provider';
 import {
   ProviderIdentityError,
   ProviderOutputError,
+  ProviderOutputUnresolvedError,
+  ProviderTransportError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   BudgetLedger,
   InMemoryBudgetStoreAdapter,
@@ -1369,11 +1372,130 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
         status: 'ERROR',
         inputTokens: 7,
         outputTokens: 3,
-        errorMessage: 'TaskOutputValidationError',
+        errorMessage: 'TaskOutputValidationError:TASK_OUTPUT_REJECTED',
       }),
     );
     expect(trace.record).not.toHaveBeenCalledWith(
       expect.objectContaining({ status: 'OK' }),
+    );
+  });
+
+  it('traces why an output was unusable, not just the error class', async () => {
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', {
+        inputTokens: 2601,
+        outputTokens: 11086,
+      }),
+    );
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+
+    await gw
+      .generateStructured({ task: 'icp.design', prompt: 'p', schema: {} }, { workspaceId: 'ws-1' })
+      .catch(() => undefined);
+
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        errorMessage: 'ProviderTransportError:CHAT_COMPLETIONS_STREAM_TRUNCATED',
+        inputTokens: 2601,
+        outputTokens: 11086,
+      }),
+    );
+  });
+
+  it('keeps a repair that answered unusably again recoverable, but not one that failed on the network', async () => {
+    const run = async (repairFailure: Error) => {
+      const provider = fakeProvider();
+      (provider.generateStructured as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ data: { y: 1 } as never, provider: 'fake', model: 'm', usage: { inputTokens: 7 } })
+        .mockRejectedValueOnce(repairFailure);
+      const router = { route: () => [provider] } as unknown as ModelRouter;
+      const gw = new RouterModelGateway(router, { record: vi.fn() } as unknown as AiTraceSink);
+      gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+      return gw
+        .generateStructured(
+          { task: 'icp.design', prompt: 'p', schema: { required: ['x'] } },
+          { workspaceId: 'ws-1' },
+        )
+        .catch((err: unknown) => err);
+    };
+
+    const badAgain = await run(
+      new ProviderOutputError('gateway m: structured output is not valid JSON', { inputTokens: 5 }, {
+        reasonCode: 'STRUCTURED_OUTPUT_NOT_JSON',
+      }),
+    );
+    expect(badAgain).toMatchObject({ name: 'ProviderOutputError', reasonCode: 'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED' });
+    expect(isExecutionControlError(badAgain)).toBe(false);
+
+    const network = await run(new TypeError('fetch failed'));
+    expect(network).toBeInstanceOf(ProviderOutputUnresolvedError);
+    expect(network).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED' });
+    expect(isExecutionControlError(network)).toBe(true);
+  });
+
+  it('fails closed when the first answer is unusable and its settlement is unresolved', async () => {
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: { y: 1 } as never,
+      provider: 'fake',
+      model: 'm',
+      usage: {
+        inputTokens: 7,
+        outputTokens: 3,
+        gatewaySettlements: [{ status: 'unknown' } as never],
+      },
+    });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+
+    const error = await gw
+      .generateStructured(
+        { task: 'icp.design', prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1' },
+      )
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderOutputUnresolvedError);
+    expect(error).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_REPAIR_SUPPRESSED', callCount: 1 });
+    expect(isExecutionControlError(error)).toBe(true);
+    expect(provider.generateStructured).toHaveBeenCalledOnce();
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorMessage: 'ProviderOutputUnresolvedError:STRUCTURED_OUTPUT_REPAIR_SUPPRESSED',
+      }),
+    );
+  });
+
+  it('traces a schema failure after repair by code, keeping the model-derived errors out of the trace', async () => {
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: { y: 'Acme GmbH' } as never, provider: 'fake', model: 'm' })
+      .mockResolvedValueOnce({ data: { y: 'Acme GmbH' } as never, provider: 'fake', model: 'm' });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
+
+    const error = await gw
+      .generateStructured(
+        { task: 'icp.design', prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1' },
+      )
+      .catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ reasonCode: 'STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR' });
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        errorMessage: 'ProviderOutputError:STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR',
+      }),
     );
   });
 
