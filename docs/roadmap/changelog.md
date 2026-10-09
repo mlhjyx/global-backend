@@ -62,6 +62,23 @@
   - TS 的 `isStableSafeHttpsUrl` 比数据库宽（百分号转义、`_` 词界），其他 provider 的来源 URL 也可能让写入抛错、整条查询回滚；本次只在 public_web 的映射里避开。更稳的做法是让 TS 的检查与数据库一致。
   - 仍会被拒的名字：只有半边引号的、带 `;`、`!`、`[]` 等边界不收的字符的。国家词表只有 8 国，`AT`、`Austria`、`Schweiz`、`United Kingdom`、`U.S.` 都映射不了；`search-localization.ts` 有一张更全的表，两张表可以合并。
 
+## 2026-10-09 · One generic source policy for public-web company sites
+
+- 起因：#615 之后公开网页发现判出的公司记录能过 Raw 的格式检查，但 Raw 入库要按来源页主机找 `source_policy`，公司官网都没有逐域策略，记录全部以 `SOURCE_POLICY_MISSING` 隔离；建档只读 ACCEPTED，所以公开网页发现仍建不出公司。产品负责人 2026-10-09 决定加一条通用的「公司自有官网」策略，设计见 `docs/superpowers/plans/2026-10-09-public-web-company-site-source-policy.md`（`APPROVED`：保留 365 天、`personal_data=true`、用途只在 Raw 入库强制）。
+- 改动：
+  - `source_policy` 加一行保留键 `public_web:company_site`。它不是主机名，Broker 的按域名查找和各处 SUSPENDED 黑名单都碰不到它。由 `DiscoveryProviderRegistry.seed` 写入，`update: {}`：APPROVED、用途 `discovery` / `enrichment`、保留 365 天、`personal_data=true`，robots 与站点条款无法逐站审，如实写 `UNREVIEWED`。运维改成 SUSPENDED 后，启动 seed 不会改回。
+  - Raw 入库按同一规则选策略：先取覆盖来源主机的最具体逐域策略，SUSPENDED、缺用途的也算；没有逐域策略，且 provider 是 `public_web`、来源主机就是记录自己的域名，才用通用行。「最具体」按去掉 `www.` 后的长度算（原来按原始拼写，`www.foo.com` 会压过更具体的 `eu.foo.com`）；同一域名的几种拼写并存时 SUSPENDED 的优先；大小写只折叠 ASCII。SUSPENDED 判定挪到用途判定之前，封禁行的处置码因此是 `SOURCE_POLICY_SUSPENDED`。
+  - 迁移 `20261009180000_public_web_company_site_source_policy`：新函数 `raw_source_policy_binding_v3` 在写入时按同一规则复核命令里的策略 id。`write_raw_source_record_v2_legacy` 只把策略块（`20260826130000` L911-947）换成对它的调用，其余逐字不变，`search_path` 末尾是 `pg_temp`（与 #616 一致）。新函数不是 SECURITY DEFINER，对 PUBLIC 和 app_user 收回执行权。同时修了两处 TS 与数据库的不一致，它们会让整条查询回滚：数据库比较前不去 `www.`，SUSPENDED 的 `www.<站点>` 行会让写入抛错；用途与 APPROVED 原来对隔离行也要求，缺用途的 SUSPENDED 行同样会让写入抛错，现在只对 ACCEPTED 要求。另外，通用行只在没有逐域策略覆盖该主机时可用；逐域策略必须是最具体的，ACCEPTED 时同样具体的几行都得是 APPROVED，app_user 拿父域的 APPROVED 行绕不过子域的 SUSPENDED 行。快照形状不变，迁移前写入的行重放得到同样的快照。不改表、不改 `schema.prisma`、不动授权、不碰受保护的 Broker 文件。
+  - CI 加一步「Raw source company-site policy on PostgreSQL」，放在 Site Builder 评测边界之后，用前面 Raw SQL 步骤已迁移好的库。
+  - provider registry 的 public_web 说明与测试锚点更新，重新生成 `docs/backend/provider-registry.md`。
+- 测试：
+  - 单测 21 项。`raw-source-ingestion.spec.ts` 18 项：只有通用行时 ACCEPTED；精确域名、父域、`www.` 拼写、大写拼写、缺用途这五种 SUSPENDED 都隔离，不落到通用行；逐域 APPROVED 优先于通用行；通用行 SUSPENDED、缺用途、只有 enrichment、不存在；registry 与 trade_fair 在自己的主机上也不用通用行（附逐域策略的对照）；SUSPENDED 先于用途；`www.` 父域不压过更具体的子域；并列时 SUSPENDED 优先、与读出顺序无关。另有 seed 2 项、`public-web-raw-governance.spec.ts` 1 项。改实现前其中 13 项失败，另 8 项是行为不变的回归护栏。
+  - 迁移静态合同 `raw-source-company-site-policy.migration.spec.ts` 5 项：单事务与超时；只建一个函数、替换一个函数，两条 REVOKE，没有表、数据或授权语句；legacy 正文与 `20260826130000` L707-1010 逐字相同，只有 L911-947 换成调用；新函数不是 definer、不是 STABLE、表名全限定、`search_path` 末尾是 `pg_temp`；SQL 里的保留键等于 TS 常量。
+  - 真库 `raw-source-company-site-policy.postgres.spec.ts` 22 项：TS 用 app_user 读到的全部策略准备记录，经真实写入器以 app_user 写入（每次都回滚），读回的状态、处置码、保留期、快照与 TS 完全一致（14 项）；数据库独有的拒绝 7 项（通用行配非 public_web、有逐域策略时用通用行、ACCEPTED 配 SUSPENDED 或缺用途、保留期不等、存在更具体的逐域行时用父域行、ACCEPTED 时并列行有 SUSPENDED、逐域行不覆盖该主机）；函数属性 1 项。一次性容器（CI 钉的 pgvector 镜像，tmpfs，用完删除）上先只部署 main 的迁移：9 项失败（6 项一致性用例在写入时抛错；拒绝用例里 1 项没有拒绝，1 项在对照步骤就因旧写入器不认 `www.` 拼写而抛错；1 项函数不存在）；加上新迁移后 22 项全部通过。
+  - 变异：把迁移里通用行的 provider 检查、逐域行的覆盖检查各删掉一次，都只有对应的那 1 项失败。
+- 部署：迁移与镜像在同一窗口上线，换的时候不能有 run 在跑；迁移按名称顺序部署，#616 的 `20261009160000_…` 与 admission lease 的 `20261009170000_…` 在本迁移之前。新镜像启动、relay 完成 seed 之前，public_web 记录仍按缺策略隔离（fail-closed）。
+- 未做：下游抓取（官网画像、信号富集、网站监控）不读通用行，仍按 Broker 的 advisory 规则放行（产品负责人答复：不约束下游）；public_web 写 field_evidence 的许可是 `licensed`、与 registry 的 `SOURCE_SPECIFIC` 不一致，另开小改；`source_policy.domain` 的格式 CHECK 以后再做；app_user 对 `source_policy` 与 `data_provider` 的写权限由另一个 PR 收回。部署后用同一个 ICP 跑有界样本，需要单独授权。
+
 ## 2026-10-09 · Leave an in-flight repair wire to its owner
 
 - 起因（#610 第三轮独立复审，改动前就有）：建站付费路径上，结构化输出的修复调用拿到 `ProviderWireInFlightError`（修复用的物理调用已不是 `ALLOCATED`，归别人处理）时，Router 的修复 `catch` 把它包成 `ProviderOutputUnresolvedError`。付费路径专门处理「调用进行中」的分支（不结算、保留预留）因此认不出，Router 转而按两次调用去结算这次支出。

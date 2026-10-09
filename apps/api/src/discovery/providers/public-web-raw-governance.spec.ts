@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { mapPublicWebCompanyToRecord, type ExtractedCompany } from './public-web.provider';
+import { prepareRawSourceBatch } from '../raw-source-ingestion';
 import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { validateRawSourceProviderPayload } from '../raw-source-provider-schema';
+import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from '../source-policy-scope';
 
 const DOMAIN = 'pumpen-mueller.de';
 const FETCHED_AT = '2026-10-09T08:00:00.000Z';
@@ -237,6 +239,41 @@ describe('public_web records pass the Raw governance (discovery run 733fbf03)', 
       parserVersion: 'public_web/v2-search',
     });
     expect(databaseStoresSourceUrl(c.sourceUrl)).toBe(true);
+  });
+
+  it('is ACCEPTED by Raw ingestion under the company-site source policy alone', () => {
+    const record = mapped({ country: 'Germany', products: ['pumps'] }, [
+      'https://www.pumpen-mueller.de/produkte',
+    ]);
+    const companySite = {
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+      retentionDays: 365,
+      reviewStatus: 'APPROVED',
+      allowedPurpose: ['discovery', 'enrichment'],
+      updatedAt: new Date('2026-10-09T00:00:00.000Z'),
+    };
+
+    const [row] = prepareRawSourceBatch({
+      providerKey: 'public_web',
+      records: [record],
+      policies: [companySite],
+      now: new Date(FETCHED_AT),
+    }).rows;
+
+    expect(row).toMatchObject({
+      ingestStatus: 'ACCEPTED',
+      dispositionCode: null,
+      externalId: DOMAIN,
+      sourceUrl: 'https://pumpen-mueller.de/',
+      retentionDays: 365,
+    });
+    expect(row!.sourcePolicySnapshot).toMatchObject({
+      kind: 'source_policy',
+      id: companySite.id,
+      domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+      allowedPurpose: ['discovery'],
+    });
   });
 
   it.each(NAMES)('stores a name with %s', (_title, raw, stored) => {
