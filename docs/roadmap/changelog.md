@@ -29,7 +29,7 @@
     - 租约为 NULL 的发现 run 按旧口径判断；
     - 两个函数的 SECURITY DEFINER、易变性、属主、EXECUTE 授权（app_user、平台 writer、PUBLIC）和 search_path；
     - app_user 用同名临时表伪造 authority 行时，attest 仍读 public 的真表。
-  - 一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据放 tmpfs，用完即删）：只部署 main 的迁移时，真库合同 9 项失败，核心是准入 10 分钟后报 `GRANT_EXPIRED`，临时表一项在 main 上读到了伪造行；其余准入保持 5 分钟那 1 项本来就成立。部署新迁移后 10 项全过。手动测试 `packages/db/test/execution-budget-authority.rls.spec.mjs` 在一次性新库（main 的迁移加本迁移）上 29 项全过，含 20 个客户端同一 jti 并发准入；跑时临时把它对 consume 的 search_path 期望改为带 pg_temp。该文件的正式改动（9 个授权函数都带 pg_temp）由 #616 提交，本 PR 不改它。
+  - 一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据放 tmpfs，用完即删）：只部署 main 的迁移时，真库合同 9 项失败，核心是准入 10 分钟后报 `GRANT_EXPIRED`，临时表一项在 main 上读到了伪造行；其余准入保持 5 分钟那 1 项本来就成立。部署新迁移后 10 项全过。main 的迁移、#616 的迁移（`1a1c0112`）与本迁移一起部署时，本合同 10 项和 #616 的真库护栏都通过，#616 的静态护栏对本迁移也通过。手动测试 `packages/db/test/execution-budget-authority.rls.spec.mjs` 用 #616 的版本（9 个授权函数的 search_path 都期望带 pg_temp，本 PR 不改该文件）在这样部署的新库上 29 项全过，含 20 个客户端同一 jti 并发准入。
 - 未做：
   - RUNBOOK（工作区文件，不在本仓）还没补「租约内停止发现 run」：等 cap 耗尽；`temporal workflow terminate --workflow-id discovery-<runId>`；或以 app_user 设置 `app.current_workspace_id` 后向 `execution_budget_authority_revocation` 插一行，下一次核验即报 `REVOKED`，#614 之后 run 记为 FAILED。GrowthOS 仍不能撤销 workspace grant。
   - 工作流被 terminate 或 cancel 后，正在执行的活动尝试要到 startToClose 超时（15 或 30 分钟）才停，这期间它的预留仍会通过；运维 reset 工作流也会复用同一个 binding。
