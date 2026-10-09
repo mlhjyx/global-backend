@@ -125,9 +125,34 @@ export const searxngSearchTool: Tool<
       },
       input.pages ?? 1,
     );
-    return { data: { results }, costCents: 0 };
+    return { data: { results: durableSearxResults(results) }, costCents: 0 };
   },
 };
+
+/** searxng-search/v1 bounds: at most 20 results, url ≤ 2048 and title ≤ 2000 characters. */
+const SEARX_DURABLE_RESULT_LIMIT = 20;
+const SEARX_DURABLE_URL_CHARS = 2048;
+const SEARX_DURABLE_TITLE_CHARS = 2000;
+
+/**
+ * The live result is exactly what a replay restores, so it carries only what the
+ * durable contract keeps: url and title. Snippets and engine metadata are raw
+ * provider output that may name people; they never leave this tool.
+ */
+function durableSearxResults(results: readonly SearxResult[]): SearxResult[] {
+  return results
+    .flatMap((result) => {
+      const url: unknown = result.url;
+      if (typeof url !== "string" || url.length === 0 || url.length > SEARX_DURABLE_URL_CHARS) return [];
+      const title: unknown = result.title;
+      return [
+        (typeof title === "string"
+          ? { url, title: title.slice(0, SEARX_DURABLE_TITLE_CHARS) }
+          : { url }) as SearxResult,
+      ];
+    })
+    .slice(0, SEARX_DURABLE_RESULT_LIMIT);
+}
 
 /** crawl4ai.fetch —— 抓单页（需 source_policy + robots）。maxChars 由调用方按任务上下文需求指定
  *  （名录列表页 60k vs 普通页 40k——复审抓到统一 40k 令 directory 抽取静默丢 1/3 上下文）。 */

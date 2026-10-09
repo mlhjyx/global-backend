@@ -176,7 +176,7 @@ export class PublicWebDiscoveryProvider
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
 
-    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题/摘要/URL）
+    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题与 URL：搜索摘要不出 searxng.search，见其持久契约）
     for (let i = 0; i < domains.length; i += JUDGE_CONCURRENCY) {
       const batch = domains.slice(i, i + JUDGE_CONCURRENCY);
       const settled = await Promise.allSettled(

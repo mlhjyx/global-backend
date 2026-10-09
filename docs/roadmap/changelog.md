@@ -4,6 +4,20 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-09 · Public-web search results fit their durable contract
+
+- 起因（2026-10-09 xin 实测）：
+  - 卖方 #15 的发现 run 启动 18 秒即失败。第一条公开网页查询的第一次 SearXNG 搜索就报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，重试也一样，预算操作停在 RESERVED。
+  - 原因是 ToolBroker 要把搜索结果投影成持久结果 `searxng-search/v1`：每条只允许 `url`、`title`，最多 20 条，而且是封闭记录，多余字段直接拒绝。8 月 21 日的治理加固定下这份契约，并有测试明确拒绝摘要。但 `searxng.search` 工具一直原样返回 SearXNG 的结果：每页 35–45 条，每条带 `content`、`engines`、`score` 等 20 多个字段。投影因此每次都失败，broker 按设计报错，也不允许再发第二次物理请求。
+  - 也就是说，8 月下旬以来，凡是在 run 预算内调用这个工具都会失败：公开网页发现一次都跑不通，建站付费路径的品牌调研也一样。之前没有发现，是因为 xin 上第一次真实发现 run 在 10-08，而那次第一条查询走的是名录源，没有搜索。
+- 改动：
+  - `searxng.search` 的输出直接按持久契约整理：每条只保留 `url` 与 `title`，`url` 超过 2,048 字符或缺失的丢掉，`title` 截到 2,000 字符，最多 20 条。
+  - 现场结果与重放恢复的结果因此完全一致。摘要和引擎元数据可能含具名个人，不再离开工具。
+  - 公开网页判站的证据从「标题 + 摘要 + URL」变为「标题 + URL」。provider 早已处理摘要为空的情况（`content: r.content ?? ''`），只更新了注释。
+  - 建站品牌调研本来就只用 `url`，不受影响。
+- 测试：新增 2 项。一项用 43 条带引擎字段的真实形状结果，断言输出只剩 `url`/`title`、共 20 条、不含摘要里的人名与邮箱，且能通过投影；另一项断言缺失或超长的 `url` 被丢掉、超长 `title` 被截断。改动前两项都失败。另用 xin 本机的真实 SearXNG 核对：卖方 #15 计划里的搜索串，改动前 15 次全部投影失败，改动后每次 20 条、全部通过。
+- 未做：要不要把截短、去除人名后的摘要也纳入持久契约，以提高判站质量。这需要改 8 月定下的数据最小化规则，留给 owner 决定。
+
 ## 2026-10-08 · Treat single-name mailboxes as personal contacts
 
 - 起因（2026-10-08 BI-14 公司联系点设计调研）：手动联系人发现用的 `buildPublicContacts` 靠 `/^[a-z]+[._-][a-z]+$/i` 判断邮箱是否属于个人，只有 first.last 这种形状才算。`max@`、`mueller@`、`mm@` 这类单名或缩写邮箱因此被存成「公开联系点 (max@)」，不标个人数据，也不写 person.profile 证据。这违背 GDPR Art.4 和「只做公司级数据」的红线。仓库其他地方（采集清洗 `cleanEmail`、联系人持久化、邮箱验证合规门）早已改用白名单：只有职能邮箱算非个人。
