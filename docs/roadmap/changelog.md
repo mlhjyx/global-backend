@@ -120,6 +120,38 @@
   - 仍会停在 RUNNING 的情况：授权恰好在最后一个阶段和正常收尾之间过期（正常收尾被拒）；数据库里有工作流不知道的查询回执，例如某次尝试已经提交、之后的重试又失败（回执漂移，正常收尾也一样）；工作流输入的授权本身不合法；工作流代码自身的缺陷。
   - xin 上现有的 3 个 RUNNING run 不处理。它们的工作流已经结束，不会再收尾，要清理须单独决定。
 
+## 2026-10-09 · List pg_temp last wherever a routine sets its search_path
+
+- 起因（2026-10-09 设计发现准入租约时核实）：只要 search_path 里没写 pg_temp，PostgreSQL 就会**最先**在当前会话的临时 schema 里找表。xin 的 `global_dev` 上，PUBLIC 有建临时表的权限，`app_user` 和运行时各登录角色都由此获得这项权限。函数里引用的表又多半不带 schema，于是：
+  - `public` 下 126 个 SECURITY DEFINER 函数的 search_path 是 `pg_catalog, public`，它们以属主权限运行。能以 `app_user` 执行 SQL 的会话，只要建一张同名临时表，就能让这些函数去读伪造的行。一次性库上实测：`tool_budget_status` 读到了会话伪造的预算账户，在下游报 `TOOL_BUDGET_HISTORICAL_TERMINAL`，而正常情况下它查不到这个账户、应该返回空。
+  - 另有 83 个 SECURITY INVOKER 函数（其中 21 个是触发器函数）自带同样的设置。函数自带的设置会替换调用方的设置；在 SECURITY DEFINER 函数里被调用或由它触发时，它们以那个函数的属主身份运行，同样会先找临时表。独立复审发现了这一类。
+  - 利用的前提是已能以 `app_user` 执行任意 SQL（例如 SQL 注入或应用被攻破），属于纵深防御缺口。另有 42 个函数本来就把 pg_temp 放在最后；22 个没有自带 search_path 的函数沿用调用方的设置，在加固后的 SECURITY DEFINER 函数里会继承以 pg_temp 结尾的路径。
+- 改动：
+  - 新迁移 `20261009160000_security_definer_search_path_pg_temp`：
+    - 对每个 search_path 恰为 `pg_catalog, public` 的函数或过程（不论 DEFINER 还是 INVOKER）执行 `ALTER … SET search_path = pg_catalog, public, pg_temp`，按 PostgreSQL 手册的做法把 pg_temp 放在最后。
+    - 只改这一项设置，函数体、属主、易变性、安全属性和授权都不变；扩展自带的函数跳过；不动数据。
+    - 迁移结束前做两项核对：所有带 search_path 设置的函数都以 pg_temp 结尾；每个 SECURITY DEFINER 函数都设了 search_path。任何一项不满足，整个迁移回滚。
+  - 静态护栏 `apps/api/src/prisma/security-definer-search-path.spec.ts`：零容器，随单测一起跑。
+    - 解析迁移的顶层语句，跳过注释和函数体，并处理美元引号、带 `$` 的标识符和 `E''` 字符串。
+    - 此后的迁移里，凡是设置 search_path 的 CREATE 或 ALTER，都必须以 pg_temp 结尾；`DEFAULT`、`FROM CURRENT`、`RESET search_path` / `RESET ALL`，以及把整串写进一个引号（会被当成一个 schema 名）都算违规。SECURITY DEFINER 函数必须设 search_path。
+    - 冻结「加固迁移及其之前」的迁移个数（140）。名字排在它前面的新迁移会直接失败：这样的迁移在已有的库上会在加固之后执行，可能把加固撤回。
+  - 真库护栏 `apps/api/src/prisma/security-definer-search-path.postgres.spec.ts`，接进 CI 已有的「Raw SQL parameter types on PostgreSQL」一步。迁移后的库要满足同样两项要求；并以 `app_user` 建同名临时表复现上面的攻击，`tool_budget_status` 仍只读 `public`。
+  - 手动测试 `packages/db/test/execution-budget-authority.rls.spec.mjs` 会迁移到最新状态，再检查 9 个授权函数的 search_path，期望值改为带 pg_temp。其他只验证某个迁移时点的手动测试不改。
+- 测试：
+  - 静态护栏 6 项：
+    - 22 个解析探针，覆盖上面每种写法与 INVOKER、触发器函数；
+    - 转义字符串和引号内分号不会拆错语句；
+    - 旧迁移里能找到 150 多个待加固的定义，证明护栏不是空跑；
+    - 冻结个数；
+    - 加固迁移之后没有违规；
+    - 加固迁移本身是单事务、只改设置。
+  - 一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据放 tmpfs，用完即删）：只跑 main 的迁移时，真库护栏报 209 个函数（126 个 DEFINER、83 个 INVOKER），攻击复现成功；加上新迁移后两项都通过。按 CI 那一步的方式再跑原有的 raw SQL 测试，也全过。
+  - 与 xin 的 `global_dev` 逐个比对全部 273 个函数（迁移集相同，只少本次迁移）：函数体摘要、属主、易变性、安全属性、strict、leakproof、cost、parallel、ACL 和其他设置完全一致，只有 209 个函数的 search_path 末尾多了 pg_temp。
+- 未做：
+  - 没有收回 PUBLIC 在库上的建临时表权限。补齐 search_path 已经堵住这条路，两道护栏防止回退；`packages/db/test` 里几个手动安全测试正是以 `app_user` 建临时对象来证明加固有效，收回权限会让它们失去意义。以后要再加一层，可以在库级执行 `REVOKE TEMPORARY … FROM PUBLIC`。
+  - 函数体里用动态 SQL 新建的函数，静态护栏看不到，由真库护栏兜底。
+  - 部署：迁移要和带它的镜像在同一窗口上线，因为运行时要求库里最新的迁移与镜像的 migration_revision 一致。计划和准入租约（`20261009170000`）、来源策略（`20261009180000`）一起按名称顺序发布。
+
 ## 2026-10-08 · Treat single-name mailboxes as personal contacts
 
 - 起因（2026-10-08 BI-14 公司联系点设计调研）：手动联系人发现用的 `buildPublicContacts` 靠 `/^[a-z]+[._-][a-z]+$/i` 判断邮箱是否属于个人，只有 first.last 这种形状才算。`max@`、`mueller@`、`mm@` 这类单名或缩写邮箱因此被存成「公开联系点 (max@)」，不标个人数据，也不写 person.profile 证据。这违背 GDPR Art.4 和「只做公司级数据」的红线。仓库其他地方（采集清洗 `cleanEmail`、联系人持久化、邮箱验证合规门）早已改用白名单：只有职能邮箱算非个人。
