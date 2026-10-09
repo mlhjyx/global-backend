@@ -4,6 +4,57 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-09 · Leave an in-flight repair wire to its owner
+
+- 起因（#610 第三轮独立复审，改动前就有）：建站付费路径上，结构化输出的修复调用拿到 `ProviderWireInFlightError`（修复用的物理调用已不是 `ALLOCATED`，归别人处理）时，Router 的修复 `catch` 把它包成 `ProviderOutputUnresolvedError`。付费路径专门处理「调用进行中」的分支（不结算、保留预留）因此认不出，Router 转而按两次调用去结算这次支出。
+- 改动：修复 `catch` 把 `ProviderWireInFlightError` 与 `ExternalActionDeniedError` 一样原样抛出。付费路径于是记 `MODEL_WIRE_IN_FLIGHT` trace，抛 `PaidOperationUnknownError(MODEL_WIRE_IN_FLIGHT)`，不结算、不停用付费调用，与首次调用遇到「调用进行中」时一致；AiTask 把它当终态，不换模型。
+- 首次物理调用的结算不受影响：修复调用能分配之前，首次调用的精确回执已由 provider 写入并终结，数据库的分配函数也要求首次调用已结算。支出保持 `RESERVED`，两次调用的预留原样占着，由终结修复调用的一方（目前是 provider-spend 恢复任务）按持久回执结算，首次调用的费用不会丢。改动前 Router 会以 `FAILED`、`call_count` 2 去结算：真库守卫会拒绝（实际物理调用只有 1 次），随后以 `MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN` 停用整个 BuildRun 的付费调用，`MODEL_WIRE_IN_FLIGHT` trace 也丢了。
+- 可达性：按现有 SQL，只有恢复任务把分配后满 24 小时仍未发出的修复调用收为 `NOT_DISPATCHED`、又还没结算支出时才会出现，属于防御性修复。
+- Router 是受保护文件：复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`，指纹 `c9fc50b3…` → `bf31b8ee…`。独立复审（只读代理）没有 CRITICAL、HIGH 或 MEDIUM。LOW 五项中，复核记录里改动前后果的细节与代码注释的措辞已改正；相邻的修复准备路径、恢复任务少数情况下停在未结算这两项都不比改动前差，记在复核记录里。
+- 测试：新增 3 项，改动前都失败（拿到包装后的 `ProviderOutputUnresolvedError`）。settlement-v1 照真实 provider 的 `READBACK_ONLY` 走一遍：首次调用的回执与终结各写一次，修复调用不终结，不结算支出、不停用付费调用；付费门夹具下同样不结算，trace 为 `MODEL_WIRE_IN_FLIGHT`；非付费路径上调用方拿到的就是原来那个实例。模型网关、执行预算、AiTask 与付费门相关测试 767 项通过，执行授权策略检查 16 项通过。
+
+## 2026-10-09 · Public-web search results fit their durable contract
+
+- 起因（2026-10-09 xin 实测）：
+  - 卖方 #15 的发现 run 启动 18 秒即失败。第一条公开网页查询的第一次 SearXNG 搜索就报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，重试也一样，预算操作停在 RESERVED。
+  - 原因是 ToolBroker 要把搜索结果投影成持久结果 `searxng-search/v1`：每条只允许 `url`、`title`，最多 20 条，而且是封闭记录，多余字段直接拒绝。8 月 21 日的治理加固定下这份契约，并有测试明确拒绝摘要。但 `searxng.search` 工具一直原样返回 SearXNG 的结果：每页 35–45 条，每条带 `content`、`engines`、`score` 等 20 多个字段。投影因此每次都失败，broker 按设计报错，也不允许再发第二次物理请求。
+  - 8 月下旬 broker 开始执行这份契约以来，凡是在 run 预算内调用这个工具都会失败：公开网页发现一次都跑不通，名录源（xin 上未启用）也一样。建站品牌调研走付费账本路径，只持久化来源站点、不做投影，不受影响。之前没有发现，是因为 xin 上第一次真实发现 run 在 10-08，那次的两条查询都走公司注册源，不调用搜索。
+- 改动：
+  - `searxng.search` 的输出直接按持久契约整理：
+    - 每条只保留 `url` 与 `title`，最多 20 条。
+    - `url` 缺失、超过 2,048 字符，或不是投影接受的文本（非 NFC、含 NUL 或孤立代理项）时，整条丢掉，不改写网址。
+    - `title` 转成投影接受的文本：去掉 NUL，孤立代理项换成 U+FFFD，再做 NFC 规范化；超过 2,000 字符时截断，不拆开代理对。以前只要一个标题不合规，整页搜索就会投影失败。
+    - 领英个人主页（`linkedin.com/in/`、`/pub/`）和 XING 个人主页（`xing.com/profile/`）整条丢掉：它们的网址和标题写出具体的人。工具声明不含个人数据（`personalData: false`），而这些结果会被持久保存，且不能按数据主体请求删除。公司主页（如 `linkedin.com/company/`）保留。
+  - 摘要和引擎元数据不再离开工具。在通用预算路径上，现场结果与重放恢复的结果完全一致。
+  - 工具输出类型改为只含 `url` 与可选 `title` 的 `SearxngSearchResult`。公开网页与名录源按这个类型读取结果，名录源对缺失的标题补空串。
+  - 公开网页判站的证据从「标题 + 摘要 + URL」变为「标题 + URL」：去掉每条命中里恒为空的「摘要」行，提示词和 `discovery.extract_company` 任务说明同步改为「标题与 URL」。
+- 测试：
+  - `builtin-tools.searxng.spec.ts` 共 5 项：
+    - 43 条真实形状结果只剩 `url`/`title`、共 20 条、不含摘要里的人名与邮箱，且能通过投影；
+    - 缺失或超长的 `url` 被丢掉，超长 `title` 被截断；
+    - 恰好处在上限的 `url`（2,048）和 `title`（2,000）原样保留；
+    - NFD、OHM SIGN、NUL、孤立代理项、跨截断点的表情符号都被整理成可投影的标题，网址不合规的整条丢掉；
+    - 个人主页在取前 20 条之前被丢掉，公司主页保留。
+  - 公开网页判站的提示断言不再出现「摘要」。上面的 Unicode、个人主页两项和这条提示断言，在改动前都失败。
+  - 另用 xin 本机的真实 SearXNG 核对：卖方 #15 计划里的搜索串，改动前 15 次全部投影失败，改动后每次 20 条、全部通过。独立复审经真实 ToolBroker 与重放路径跑了 3 条查询，现场与重放结果一致。
+- 未做：要不要把截短、去除人名后的摘要也纳入持久契约，以提高判站质量。这需要改 8 月定下的数据最小化规则，留给 owner 决定。
+
+## 2026-10-09 · Record the real source page and drop mangled or off-domain public emails
+
+- 起因（2026-10-08 独立复审，#609 待续里列的三项）：手动联系人发现 `discoverContacts` 抓公司首页和最多两个联系、Impressum、关于、法律页，用 `extractPublicContacts` 抽邮箱，再由 `buildPublicContacts` 建联系人。复审发现三处缺陷：抽邮箱的正则只认 ASCII，又会从词中间开始匹配，`müller@acme.de` 被抽成 `ller@acme.de`，`Jörg.Schmidt@` 被抽成 `rg.schmidt@`，错地址作为个人联系人挂到公司名下；个人邮箱的 `sourcePage` 一律记首页，而抽取结果本来就带着邮箱所在的页（多半是 Impressum），GDPR Art.14 要说明的来源因此不准；页面上其他域名的邮箱（建站公司、外部数据保护官、gmail）也被当成这家公司的联系人。
+- 改动：
+  - 抽取正则不再从词中间开始：前一个字符是拉丁字母（含变音字母）、组合附加符、数字或本地部分符号时，不从这里开始匹配，中间隔着软连字符、零宽空格这类隐形格式字符也一样；前面是「字母 + 撇号」时也不开始，撇号认 `'`、`’`、`´`、`ʼ` 等常见写法（`o'brien@`、`O´Brien@` 不再变成 `brien@`）。本地部分含拉丁变音字母的地址因此整条丢弃，不保留原样：`cleanEmail`、禁联规范化与邮箱验证都只认 ASCII，原样地址在持久化时会被判无效，也加不进禁联名单。百分号编码的本地部分（`mailto:m%C3%BCller@…`）和以 `.` 开头的本地部分同样丢弃。中文、俄文等非拉丁文字紧贴地址时按文字边界处理，`邮箱sales@…` 照常抽取；代价是非拉丁字母与 ASCII 混在同一个本地部分时（真实地址里极少见）会从边界处切开，切出以 `.` 开头的片段时丢弃。复审建议的 `(?<![\p{L}\p{N}._%+-])` 挡不住分解写法的变音（u + U+0308）和 `o'brien@`，还会漏掉紧贴中文的地址，所以没有照搬。
+  - `buildPublicContacts` 只留公司域名或其子域上的邮箱。两边都先用联系人持久化判域名禁联的同一套规范化（小写、去 `www.`、国际化域名转 ASCII）再比较，`notacme.de`、`acme.de.evil.com` 都不算。其他域名的地址直接丢弃、不存；先筛再取前 5 个，丢弃的地址不占名额，电话给第一个真正留下的联系点。
+  - 个人邮箱的 `sourcePage` 改为该邮箱实际被抓到的页（同一地址出现在多页时取先抓到的页，首页在前），并按公司来源的同一规则（`provenanceUrl`）去掉账号口令、查询串与片段。这条规则也会把路径里像邮箱或长串数字的片段打码，这样的来源页 URL 打不开。说不出来源页的个人邮箱不存；抓到的页都是 http(s) 地址，实际不会发生。抽取结果本来就带 `sourceUrl`，`PublicContact` 与联系人记录的结构都不变。
+- 影响范围：联系人发现只有手动接口 `discoverContacts` 走这里，它要求显式的合法依据；发现 run 不受影响。卖方企业理解（`persistPublicContacts`）用同一个抽取器，只受第一项影响：卖方官网上的 `müller@` 不再被存成 `ller@`。已核对 xin 的 `global_dev`：`canonical_contact` 为 0 行，卖方公司档案里存的公开联系方式也为空，不需要处理存量。
+- 测试：新增 12 项。抽取器 5 项：`müller@`、`Jörg.Schmidt@` 整条不抽，ASCII 地址不变；分解写法的变音、`o'brien@`、百分号编码都不截成半个地址；紧贴中文、俄文的地址照常抽取，混写切出的 `.petrov@` 丢弃；软连字符、零宽空格与各种撇号写法不让匹配从词中间开始；同一地址取先抓到的页。联系人构造 6 项：来源页是邮箱实际所在的页；来源页不带账号口令、查询串与片段；其他域名的地址被丢弃且不占名额；国际化域名规范化后再比较；说不出来源页的个人邮箱不存且不占名额；公司域名无法规范化时一个都不留。另有 1 项接线测试：模拟抓首页和 Impressum，个人邮箱记 Impressum 为来源，变音地址和其他域名的地址都不出现。把两个源文件换回 main 的实现跑这 12 项，11 项失败；「同一地址取先抓到的页」记录的是原有行为，前后都通过。
+- 未做：
+  - 官网域名和邮件域名不同的公司（官网 `acme-pumpen.com`、邮箱 `@acme.de`，或集团统一域名），邮箱现在不再收录，这多半是最常见的损失。丢弃是静默的，目前不记数量。
+  - 小公司用 gmail、t-online 这类免费邮箱作对外联系方式的，这类地址现在不再收录。
+  - 公司档案的域名本身是子域（如 `de.acme.com`）时，上级域名 `acme.com` 的邮箱也会被丢弃。
+  - 卖方企业理解没有加域名过滤，卖方官网上建站公司的邮箱仍会进公司档案的公开联系方式。
+  - 电话没有域名可比，仍把抓到的第一个电话（首页优先）给首个联系点。
+
 ## 2026-10-09 · Record a discovery run as FAILED when a stage stops it
 
 - 起因（BI-25；2026-10-09 xin 核查）：发现工作流只在正常路径调用 `finalizeRun`。某个阶段重试用尽后失败（例如 Fit 阶段遇到被切断的模型流，或 DeepSeek 的 `insufficient_system_resource`），或者查询循环、尽力而为的阶段遇到控制错误时，工作流直接失败，`discovery_run` 停在默认的 RUNNING，也没有统计。xin 上现有 3 个这样的 run，分别在存下 0、2、1 条查询回执后中止。最近一个的 worker 日志显示，原因是查询执行报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`（控制错误）；另外两个的日志已随容器重建丢失。

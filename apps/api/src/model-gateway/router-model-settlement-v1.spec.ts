@@ -341,6 +341,120 @@ describe("RouterModelGateway settlement-readback/v1", () => {
     expect(paidLedger.settleOperation).toHaveBeenCalledOnce();
   });
 
+  it("keeps the first wire's exact receipt and leaves a repair wire in flight to its owner", async () => {
+    let physicalCalls = 0;
+    const provider: ModelProvider = {
+      id: "gateway",
+      supports: () => true,
+      health: async () => ({ healthy: true }),
+      generateStructured: vi.fn(async (_input, ctx) => {
+        const runtime = ctx.paidCost?.settlementPhysicalWire;
+        if (!runtime) throw new Error("missing settlement runtime");
+        // As in OpenAICompatibleProvider.paidFetch: a wire that is no longer
+        // ALLOCATED is neither sent, probed nor finalized by this execution.
+        if ((await runtime.begin()) === "READBACK_ONLY") {
+          throw new ProviderWireInFlightError();
+        }
+        physicalCalls += 1;
+        const observation = await runtime.resolve({
+          usage: { inputTokens: 120, outputTokens: 30 },
+          payloadState: "available",
+          gatewayIdState: "observed",
+          upstreamAckUnknown: false,
+        });
+        return {
+          data: { wrong: true },
+          provider: "gateway",
+          model: "gpt-5.6-terra",
+          reportedModel: "gpt-5.6-terra",
+          modelResolutionSource: "upstream_response" as const,
+          usage: {
+            inputTokens: 120,
+            outputTokens: 30,
+            gatewaySettlements: [observation],
+          },
+        };
+      }),
+      generateText: vi.fn() as never,
+      reviewVision: vi.fn() as never,
+      embed: vi.fn() as never,
+    };
+    const paidLedger = ledger();
+    paidLedger.beginModelPhysicalWire
+      .mockResolvedValueOnce("DISPATCH")
+      .mockResolvedValueOnce("READBACK_ONLY");
+    const trace = { record: vi.fn() };
+    const instance = gateway({ provider, paidLedger, trace });
+
+    await expect(
+      instance.generateStructured(
+        {
+          task: "site_builder.copy",
+          prompt: "bounded",
+          schema: {
+            type: "object",
+            required: ["ok"],
+            properties: { ok: { type: "boolean" } },
+          },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        CONTEXT,
+      ),
+    ).rejects.toMatchObject({
+      name: "PaidOperationUnknownError",
+      errorCode: "MODEL_WIRE_IN_FLIGHT",
+      operationKey: paidOperationKey([
+        RUN_ID,
+        CONTEXT.paidCost.scopeKey,
+        "generateStructured",
+        "gateway",
+        "0",
+        "gpt-5.6-terra",
+      ]),
+    });
+
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    expect(physicalCalls).toBe(1);
+    expect(paidLedger.allocateModelPhysicalWire).toHaveBeenCalledOnce();
+    expect(paidLedger.beginModelPhysicalWire).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ wireAttemptId: WIRE_ID_1 }),
+    );
+    expect(paidLedger.beginModelPhysicalWire).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ wireAttemptId: WIRE_ID_2 }),
+    );
+    // The first wire recorded its own exact receipt before the repair could
+    // be allocated; its cost stays durable for whoever settles the operation.
+    expect(paidLedger.recordModelPhysicalWireReceipt).toHaveBeenCalledOnce();
+    expect(paidLedger.recordModelPhysicalWireReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ wireAttemptId: WIRE_ID_1 }),
+    );
+    expect(paidLedger.finalizeModelPhysicalWire).toHaveBeenCalledOnce();
+    expect(paidLedger.finalizeModelPhysicalWire).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wireAttemptId: WIRE_ID_1,
+        observation: expect.objectContaining({
+          status: "settled",
+          physicalWireAttempt: 1,
+        }),
+      }),
+    );
+    // Nothing terminalizes the operation underneath the repair wire's owner.
+    expect(paidLedger.finalizeModelPhysicalWireNotDispatched).not.toHaveBeenCalled();
+    expect(paidLedger.settleOperation).not.toHaveBeenCalled();
+    expect(paidLedger.disablePaidCalls).not.toHaveBeenCalled();
+    expect(trace.record).toHaveBeenCalledOnce();
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "ERROR",
+        errorMessage: "MODEL_WIRE_IN_FLIGHT",
+      }),
+    );
+  });
+
   it("closes a provider-proven zero-call failure as NOT_DISPATCHED before release", async () => {
     const paidLedger = ledger();
     const provider: ModelProvider = {

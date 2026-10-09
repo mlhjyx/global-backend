@@ -20,11 +20,12 @@ import {
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
-import type { SearxResult } from '../../adapters/searxng';
+import type { SearxngSearchOutput, SearxngSearchResult } from '../../tools/builtin-tools';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
-import { extractPublicContacts } from '../../adapters/contact-extractor';
+import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
 import { cleanEmail } from '../../acquisition/clean';
+import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { MAX_PUBLIC_WEB_DOMAINS_PER_QUERY } from '../execution-envelope';
@@ -77,7 +78,7 @@ const JUDGE_CONCURRENCY = 5;
 const MAX_HITS_PER_DOMAIN = 3;
 const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
 
-type SearchHit = Readonly<{ url: string; title: string; content: string }>;
+type SearchHit = Readonly<{ url: string; title: string }>;
 
 export interface ExtractedCompany {
   is_company_site: boolean;
@@ -94,12 +95,13 @@ export interface ExtractedCompany {
 /**
  * 真实公开数据挖掘 Provider（PRD 7.4.11 Public Intelligence / DAT-013）。
  * 发现管线（G3 2026-09-24「搜索优先、建档后再抓」）：SearXNG 元搜索（语言随目标国、
- * 查询串随贸易角色）→ 噪声域名 + 非目标国 ccTLD 过滤 → LLM 仅凭同域名的搜索标题/摘要/URL
+ * 查询串随贸易角色）→ 噪声域名 + 非目标国 ccTLD 过滤 → LLM 仅凭同域名的搜索标题/URL
  * 判站并抽取（只取搜索结果中存在的）→ 带搜索证据指纹的记录。官网页面只在公司建档之后、
  * 以该公司为主体抓取（官网画像富集阶段）。
  *
  * 联系人路径：抓 contact/impressum/about 页 → 确定性正则抽公开邮箱/电话（不做
- * 人名画像 —— 个人数据留给 SourcePolicy/合规门后的版本）。
+ * 人名画像 —— 个人数据留给 SourcePolicy/合规门后的版本）；只留公司域名（含子域）上的邮箱，
+ * 个人邮箱记它实际所在的页。
  * 邮箱验证：语法 + MX（诚实上限是 RISKY；VALID 需要真正的 SMTP 验证源）。
  */
 export class PublicWebDiscoveryProvider
@@ -151,11 +153,11 @@ export class PublicWebDiscoveryProvider
     // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
     const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
 
-    const perQuery: SearxResult[][] = [];
+    const perQuery: SearxngSearchResult[][] = [];
     for (const q of searches) perQuery.push(await this.search(q, language, ctx));
     // Round-robin across queries so each role query contributes candidates
     // before the per-query domain cap applies.
-    const interleaved: SearxResult[] = [];
+    const interleaved: SearxngSearchResult[] = [];
     for (let i = 0; perQuery.some((results) => i < results.length); i += 1) {
       for (const results of perQuery) if (results[i]) interleaved.push(results[i]!);
     }
@@ -167,7 +169,7 @@ export class PublicWebDiscoveryProvider
       if (isForeignCountryDomain(domain, targetTlds)) continue;
       const hits = candidates.get(domain) ?? [];
       if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {
-        hits.push({ url: r.url, title: r.title ?? '', content: r.content ?? '' });
+        hits.push({ url: r.url, title: r.title ?? '' });
       }
       candidates.set(domain, hits);
     }
@@ -176,7 +178,7 @@ export class PublicWebDiscoveryProvider
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
 
-    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题/摘要/URL）
+    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题与 URL：搜索摘要不出 searxng.search，见其持久契约）
     for (let i = 0; i < domains.length; i += JUDGE_CONCURRENCY) {
       const batch = domains.slice(i, i + JUDGE_CONCURRENCY);
       const settled = await Promise.allSettled(
@@ -218,8 +220,8 @@ export class PublicWebDiscoveryProvider
     q: string,
     language: string,
     ctx: ExecutionContext,
-  ): Promise<SearxResult[]> {
-    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
+  ): Promise<SearxngSearchResult[]> {
+    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
       { q, language },
       this.toolCtx(ctx, 'discovery.extract_company'),
@@ -259,7 +261,7 @@ export class PublicWebDiscoveryProvider
           prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
             filters: query.filters,
             keywords: query.keywords,
-          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题、摘要与 URL）：\n${text}`,
+          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题与 URL）：\n${text}`,
           system: contract?.description,
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['is_company_site'] },
@@ -420,17 +422,30 @@ export function mapPublicWebCompanyToRecord(args: {
  * 单名或缩写都可能指向具体的人 → `personalData=true` + `sourcePage`（persistDiscoveredContacts 据此写
  * person.profile 侧写证据）。只有 first.last@ 形反推姓名；其余个人邮箱推不出「名 + 姓」，给占位名
  * 「个人邮箱 (max@)」，否则 email-format-learning 会把邮箱自身反推出的单名学成 `first` 命名法。
+ *
+ * 只留公司域名或其子域上的邮箱：建站公司、外部数据保护官、gmail 等其他域名的地址不属于这家公司，
+ * 直接丢弃、不存。`sourcePage` 是该邮箱实际被抓到的页（常是 Impressum，GDPR Art.14 的来源说明），
+ * 按公司来源同一规则去掉账号口令、查询串与片段；说不出来源页的个人邮箱不存。
  * 只首个联系点带电话（与原行为一致）。最多 5 个。
  */
 export function buildPublicContacts(
   domain: string,
-  emails: { value: string }[],
+  emails: ReadonlyArray<Pick<PublicContact, 'value' | 'sourceUrl'>>,
   firstPhone: string | undefined,
 ): ProviderContactRecord[] {
-  return emails.slice(0, 5).map((e, i) => {
-    const local = e.value.split('@')[0];
+  const companyDomain = canonicalizeSuppressionValue('domain', domain);
+  if (!companyDomain) return [];
+  // 先筛后取前 5 个：丢弃的地址不占名额，电话给第一个真正留下的联系点。
+  const kept = emails.flatMap((e) => {
+    if (!onCompanyDomain(e.value, companyDomain)) return [];
     // 白名单外一律个人：未知的本地部分可能就是人名（max@），保守判 personal。
     const personal = cleanEmail(e.value)?.kind !== 'role';
+    const sourcePage = provenanceUrl(e.sourceUrl) ?? undefined;
+    // 个人数据要说得出来源页（GDPR Art.14），说不出就不存。
+    return personal && !sourcePage ? [] : [{ value: e.value, personal, sourcePage }];
+  });
+  return kept.slice(0, 5).map(({ value, personal, sourcePage }, i) => {
+    const local = value.split('@')[0];
     const nameShaped = /^[a-z]+[._-][a-z]+$/i.test(local);
     const fullName = !personal
       ? `公开联系点 (${local}@)`
@@ -441,19 +456,30 @@ export function buildPublicContacts(
             .join(' ')
         : `个人邮箱 (${local}@)`;
     return {
-      externalId: `${domain}:${e.value}`,
+      externalId: `${domain}:${value}`,
       fullName,
       title: personal ? undefined : GENERIC_CONTACT_TITLE,
       department: personal ? undefined : 'general',
-      email: e.value,
+      email: value,
       phone: i === 0 ? firstPhone : undefined,
       // 🔴 具名个人邮箱 = 个人数据（GDPR Art.4）：标记 → 持久化写 person.profile 证据（此前漏标，#58 P2）。
-      ...(personal ? { personalData: true, sourcePage: `https://${domain}/` } : {}),
+      ...(personal ? { personalData: true, sourcePage } : {}),
     };
   });
 }
 
-/** Search-hit URL for provenance: sanitized, without query string or fragment. */
+/**
+ * 邮箱是否在公司域名（已规范化）或其子域上。主机名与联系人持久化判域名禁联用同一套规范化
+ *（小写、去 www.、国际化域名转 ASCII、去末尾点）；`acme.de.evil.com`、`notacme.de` 都不算。
+ */
+function onCompanyDomain(email: string, companyDomain: string): boolean {
+  const at = email.lastIndexOf('@');
+  if (at < 1) return false;
+  const host = canonicalizeSuppressionValue('domain', email.slice(at + 1));
+  return !!host && (host === companyDomain || host.endsWith(`.${companyDomain}`));
+}
+
+/** Provenance URL (search hit or crawled contact page): sanitized, without query string or fragment. */
 function provenanceUrl(raw: string | undefined): string | null {
   const sanitized = sanitizeEvidenceUrl(raw);
   if (!sanitized) return null;
@@ -463,11 +489,11 @@ function provenanceUrl(raw: string | undefined): string | null {
   return url.toString();
 }
 
-/** 同一域名的搜索命中 → 给模型的证据文本（标题/摘要/URL；空白命中不算证据）。 */
+/** 同一域名的搜索命中 → 给模型的证据文本（标题/URL；无标题的命中不算证据）。 */
 export function searchEvidenceText(hits: readonly SearchHit[]): string {
   const lines = hits
-    .filter((h) => h.title.trim() || h.content.trim())
-    .map((h) => `- 标题：${h.title.trim()}\n  摘要：${h.content.trim()}\n  URL：${h.url}`);
+    .filter((h) => h.title.trim())
+    .map((h) => `- 标题：${h.title.trim()}\n  URL：${h.url}`);
   return lines.join('\n').slice(0, MAX_SEARCH_EVIDENCE_CHARS);
 }
 

@@ -127,3 +127,33 @@
     - 修复调用会把 `ProviderWireInFlightError` 包起来，付费路径因此认不出、仍去结算别的 worker 正在用的调用。这是改动前就有的问题，只在建站付费路径；修它要改结算语义，另开后续任务，本次 Router 不再改动。
   - 没有发现合规绕过：`ExternalActionDeniedError` 仍是控制错误，修复路径照旧直接抛出。
 - **结论**：更新 `router-model-gateway.ts` 指纹为 `c9fc50b3fb17090441cc36e535f78643371a1d7fabbb8468ad47e9ab96f5122a`。
+
+## 2026-10-09 Router 改动复核（修复调用遇到「调用进行中」）
+
+本节对应上文 2026-10-08 第三轮复审另开的后续事项：修复调用把 `ProviderWireInFlightError` 包起来，付费路径认不出。处理它要改 `router-model-gateway.ts`，所以按围栏规则先复核、再更新指纹。
+
+- **改动**：只改 `generateStructured` 里修复调用外层的 `catch`。原来只把 `ExternalActionDeniedError` 原样抛出，其余错误一律包成 `ProviderOutputError` 或 `ProviderOutputUnresolvedError`（「repair call failed」）；现在 `ProviderWireInFlightError` 也原样抛出。没有新增引入（该类本来就从 `./providers/provider-output-error` 引入），没有新增错误构造，Router 仍不引入 `execution-budget/execution-control-error`。
+- **改后的走向**：错误原样到达 `runPersistent` 已有的「调用进行中」分支：记 `MODEL_WIRE_IN_FLIGHT` trace，抛 `PaidOperationUnknownError(operationKey, "MODEL_WIRE_IN_FLIGHT")`。不结算、不收为未发出、不停用付费调用，也不换下一个 provider。这与首次调用遇到「调用进行中」时的处理相同，10-06 复审已确认过这一分支。
+- **首次物理调用的结算仍然完整**（动手前逐段核对）：
+  - 物理调用层面：provider 在返回首次结果之前，已经经 `physicalWireRuntime().resolve` 自己落了账。网关回读已结算时先写回执（`recordModelPhysicalWireReceipt`），再终结这次调用（`finalizeModelPhysicalWire`）。观测未知或写库 ACK 丢失时，首次结果的用量里是 `unknown`，`initialSettlementUnknown` 直接禁止修复。数据库函数 `allocate_site_build_provider_wire_v1` 也要求首次调用已是 `OBSERVED`、`settlement_status = SETTLED`、载荷可用且派生密钥相同，否则拒绝分配第二次调用（`SITE_BUILD_PROVIDER_REPAIR_NOT_AUTHORIZED`）。所以只要修复调用存在，首次调用的精确回执就已持久。修复 `catch` 从不碰首次调用的记录，本次改动也不碰。
+  - 支出层面：这次支出保持 `RESERVED`，按两次调用（`MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND`）算的预留原样占着，不释放。触发器 `guard_site_build_provider_spend_settlement_v1` 只在全部物理调用都已终结（`OBSERVED`/`UNKNOWN`/`NOT_DISPATCHED`）、且 `call_count` 等于实际物理调用数时，才允许支出离开 `RESERVED`，所以只能由终结修复调用的一方来结算。目前这一方是 provider-spend 恢复任务，它的 `completeProviderSpendReconciliation` 按持久回执结算：修复调用为 `NOT_DISPATCHED` 时，按首次调用的回执精确记 `FAILED`（`MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY`，`call_count` 为 1）；有 `UNKNOWN` 或回执不全时，按预留记 `UNKNOWN` 并停用付费调用。两种情况下，首次调用的费用都计入最终扣费：要么按回执精确计入，要么连同修复调用按整笔预留保守计入。恢复任务少数情况下会停在未结算（见下文复审第 5 点），这时预留一直占着，费用同样没有丢。
+  - 重试与退路：Temporal 重试经 `reserveModelOperation` 重放。支出仍是 `RESERVED`、首次调用已不是 `ALLOCATED` 时，抛 `PaidOperationUnknownError("MODEL_WIRE_ALREADY_ALLOCATED")`；支出已被恢复任务记为 `FAILED` 或 `UNKNOWN` 时，按记录的错误码抛 `PaidOperationUnknownError`。两种情况都不会再发物理调用。`site-builder/agents/ai-task.ts` 把 `PaidOperationUnknownError` 当作终态，不换下一个模型。
+- **改动前的实际后果**：包装后的错误 `callCount` 为 2，合并用量里只有首次调用的已结算观测。`modelCostMeasurement` 因此给出 `estimated_upper_bound`；`site_builder.brand_profile` 用价目表里的模型时，则是只按首次调用 token 计的 `token_pricing`。Router 随后调用 `settlePersistentOperation`，状态 `FAILED`、`call_count` 2、错误码 `PROVIDER_OUTPUT_ERROR`（新增用例在改动前实测如此）。放到真库上：
+  - 修复调用尚未终结或已是 `NOT_DISPATCHED` 时，实际物理调用数 1 不等于 2，或观测不全，守卫拒绝。两次结算都失败后走 `freezeUnknownSettlement("MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN")`，以错误的原因停用整个 BuildRun 的付费调用，`MODEL_WIRE_IN_FLIGHT` trace 也丢了；
+  - 恢复任务已先结算时，首次结算即返回 `REPLAY`，冻结并报 `SETTLEMENT_REPLAY`；恢复任务若在两次结算之间完成，重试拿到 `REPLAY` 却回读不符，冻结并报 `SETTLEMENT_REPLAY_UNCONFIRMED`；
+  - 修复调用若已被别人终结、而支出尚未结算，`call_count` 2 恰好对上，守卫放行。这包括修复调用为 `OBSERVED`，或为终态阶段 `gateway_log_missing`/`gateway_log_unavailable` 的 `UNKNOWN`（这两个阶段不强制 `UNKNOWN` 状态）。这时 Router 会抢在所有者之前终结这次支出，品牌画像任务还只按首次调用的 token 计费、少记修复调用；随后抛不属于终态的 `ProviderOutputUnresolvedError`，AiTask 换下一个模型，开一次新的付费操作。
+- **可达性**：按现有 SQL，只有发出首次调用的那次执行能分配修复调用：分配要求首次调用已是 `OBSERVED`；重放时支出仍是 `RESERVED`、首次调用不是 `ALLOCATED`，就直接抛 `MODEL_WIRE_ALREADY_ALLOCATED`；`begin_site_build_provider_wire_v1` 还校验支出自身的 fence。修复调用要拿到 `READBACK_ONLY`，必须有别人在支出仍是 `RESERVED` 时把它移出 `ALLOCATED`。目前只有恢复任务会这样做：分配满 24 小时（`RECONCILIATION_EXPIRY_MS`）仍未发出的调用会被收为 `NOT_DISPATCHED`，然后才结算支出。这两步是分开的事务，后一步也可能失败，窗口就在两步之间；原执行要在分配与 `begin` 之间停顿满 24 小时才会撞上。所以这是防御性修复，针对的是罕见路径。
+- **没有放宽任何约束**：授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放、出网围栏、物理调用的分配与计数都没有改动，也没有新增物理调用路径。行为上唯一的变化：修复调用遇到「调用进行中」时，本次执行不再去结算不归它的支出，也不再以错误的原因停用整个 BuildRun 的付费调用，预留照旧保留。非付费路径不会出现这个错误，因为 `paidFetch` 只在 `ctx.paidCost` 存在时才调用 `begin`；即使出现，通用 `catch` 也会扣减整笔预留，比原来按 token 计费更保守。
+- **相邻路径，未改**：修复准备阶段的 `catch` 也会遇到「修复调用已存在、且不是 `ALLOCATED`」：`allocateModelPhysicalWire` 此时抛 `PaidOperationUnknownError`，被包成 `callCount` 为 1 的 `ProviderOutputUnresolvedError`，Router 再按首次调用的回执结算 `FAILED`。守卫只在修复调用已是 `NOT_DISPATCHED` 时放行，这时金额正确，之后 AiTask 与其他修复准备失败一样换下一个模型；其余情况被拒后冻结，抛终态的 `PaidOperationUnknownError`。两种结局计费都正确，所以本次不改；只是支出上记的错误码是 `PROVIDER_OUTPUT_ERROR`，看不出是分配阶段的原因。
+- **测试**：新增 3 项，改动前都失败，拿到的是包装后的 `ProviderOutputUnresolvedError`。
+  - `router-model-settlement-v1.spec.ts`：照真实 provider 的做法，修复调用的 `begin` 返回 `READBACK_ONLY` 时抛 `ProviderWireInFlightError`。断言调用方拿到 `PaidOperationUnknownError(MODEL_WIRE_IN_FLIGHT)`；首次调用的回执与终结各写一次，且为已结算；修复调用既不终结也不收为未发出；不结算支出、不停用付费调用；trace 只记 `MODEL_WIRE_IN_FLIGHT`。
+  - `paid-execution-gates.spec.ts`：付费门夹具下，修复确实发生在第二次物理调用上，同样不结算、不停用，trace 为 `MODEL_WIRE_IN_FLIGHT`。
+  - `router-model-gateway.spec.ts`：调用方拿到的正是修复调用抛出的那个 `ProviderWireInFlightError` 实例，判为控制错误，预留整笔扣减。
+- **独立复审**（只读代理）：没有 CRITICAL、HIGH 或 MEDIUM。上面关于首次调用（物理调用层面与支出层面）、改动前后果与可达性的推理，逐条对照源码成立，没有找到其他可达路径；授权、出网、回执、分配与计数都没有被削弱；三项测试去掉修复都会失败。LOW 五项：
+  1. 改动前的计量不总是 `estimated_upper_bound`，守卫放行的情形也不止 `OBSERVED`，还漏了 `SETTLEMENT_REPLAY_UNCONFIRMED`：已在上文改正。
+  2. 本节当时还留着复审占位：已填。
+  3. 相邻的修复准备路径结局不同（守卫放行时 AiTask 会换模型，错误码记成 `PROVIDER_OUTPUT_ERROR`）：两条路径计费都正确，不改，已写进「相邻路径」一条。
+  4. 代码注释说「另一个 worker 持有」不准确，目前唯一可达的情形是恢复任务把修复调用收为 `NOT_DISPATCHED`：注释已改为「另一个 worker 或恢复任务」，指纹按改后的内容更新。`MODEL_WIRE_IN_FLIGHT` trace 不带 token：首次调用的 token 已在它的回执里，本次不改。
+  5. 改动前就有：恢复任务 EXPIRE 时，`completeProviderSpendReconciliation` 若返回 UNRESOLVED 而不抛错，会记 EXPIRED 并停止巡检，支出可能一直停在 `RESERVED`、预留一直占着。这是保守的，费用以预留的形式占着、没有丢，记为后续事项。
+- **未覆盖**：没有用真实 PostgreSQL 做往返；守卫与恢复任务的行为只做了静态核对。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `bf31b8ee89249aece725d72cc18ad97ee00fbd3ddcb86e4c147d6bf6817fb9df`。
