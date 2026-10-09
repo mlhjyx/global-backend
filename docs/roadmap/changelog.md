@@ -64,6 +64,26 @@
   - 另用 xin 本机的真实 SearXNG 核对：卖方 #15 计划里的搜索串，改动前 15 次全部投影失败，改动后每次 20 条、全部通过。独立复审经真实 ToolBroker 与重放路径跑了 3 条查询，现场与重放结果一致。
 - 未做：要不要把截短、去除人名后的摘要也纳入持久契约，以提高判站质量。这需要改 8 月定下的数据最小化规则，留给 owner 决定。
 
+## 2026-10-09 · Keep source_policy and data_provider read-only for app_user
+
+- 起因（2026-10-09 xin 只读核查，owner 当天决定「收回，只留读」）：
+  - `global_dev` 上 app_user 对 `source_policy`、`data_provider` 有 SELECT、INSERT、UPDATE、DELETE。两张表的建表迁移本意只给 SELECT（`20260706164026` 第 35 行、`20260706160025` 第 253 行），但更早的 `20260706033625_rls_and_app_role` 设了默认权限：owner 以后建的每张表都自动给 app_user 增删改查。全新库（CI）也是这样。
+  - 两张表都没有 RLS。`source_policy` 是 Raw 摄取与 ToolBroker 的逐域放行/封禁名单，`data_provider.status` 是数据源开关（新数据源以 DISABLED 播种，真测后才改 ENABLED）。能以 app_user 执行 SQL 的会话（例如 SQL 注入）可以放行任意域名、打开 DISABLED 的数据源。site-build provider-wire 登录是 app_user 的成员，也继承了这些写权限。
+- 改动前先核对写入路径：两张表只经 owner 连接（`DATABASE_URL`）写入。运行时是 outbox relay 与 worker 启动时的播种（`provider.registry.ts` 的 `seed()`、`sanctions-seed.ts` 的 `seedSanctions()`），此外只有 Copy Sonnet 评测种子脚本（专用 owner 连接，拒绝 app_user）和 `apps/api/scripts/verify-*.mts` 运维脚本。应用代码没有以 app_user 写这两张表，也没有对它们加行锁（行锁要 UPDATE 权限）。数据库里引用它们的函数只有 `write_raw_source_record_v2_legacy`，它是 owner 为 `global` 的 SECURITY DEFINER。`packages/db/test` 里写这两张表的夹具都以 `global` 执行。四个运行时角色及其登录对两张表没有任何权限。
+- 改动：
+  - 新迁移 `20261009190000_governance_tables_app_user_read_only`：单事务，`lock_timeout` 5 秒、`statement_timeout` 30 秒。对两张表从 PUBLIC、app_user 与四个运行时角色收回 INSERT、UPDATE、DELETE、TRUNCATE、REFERENCES、TRIGGER，app_user 保留 SELECT。最后检查 app_user、运行时角色和它们的全部成员（运行时登录、provider-wire 登录）都没有写权限，否则报 `GOVERNANCE_TABLE_WRITE_PRIVILEGE_REMAINS`，整个迁移回滚。不改数据、表结构和默认权限。
+  - 新增真库用例 `governance-table-privileges.postgres.spec.ts` 和 CI 步骤「Governance tables read-only for app_user on PostgreSQL」，放在 Site Builder 评测边界之后。用例检查三件事：app_user 只有 SELECT；除表 owner、超级用户和 PostgreSQL 内置的 `pg_*` 角色外，没有任何角色能写这两张表；app_user 真去执行 INSERT、UPDATE、DELETE、TRUNCATE 都报 permission denied，读照常。
+- 部署：迁移与镜像在同一窗口上线，迁移按名称顺序执行。
+- 测试（一次性容器，与 CI 同一 pgvector 镜像，tmpfs，只绑 127.0.0.1）：
+  - 只跑 main 的迁移时，新用例 3 项全部失败。app_user 实际能把 DISABLED 的数据源改成 ENABLED、把全部 policy 改成 APPROVED、登记新域名、删光 `source_policy`。
+  - 同一个库加跑新迁移后，3 项全部通过，上面这些写法都报 permission denied。owner 播种（registry 与 sanctions）照常，先删掉一行再播种也能补回；同样的播种改用 app_user 会被拒绝。
+  - 从零迁移、按 CI 顺序开通运行时角色后，新 CI 步骤原样通过；runtime lease、provider-wire、platform writer 三个权限验证脚本照常通过；不带环境变量时用例跳过。
+  - 预先给一个运行时登录直接授予 INSERT 时，迁移报错，权限保持原样；迁移重复执行没有副作用。
+- 未做：
+  - xin 的 `global_dev` 另有 17 张表的 app_user 权限比迁移的结果宽，例如 `jurisdiction_policy`、`policy_decision_log`、`deletion_receipt`、`brand_profile*`、`site_*` 快照表。按各迁移的执行时间推断，7 月 22 日之后、8 月 31 日之前有人对全部表重新授过权。只有 xin 这样，全新库是对的。怎么修复要 owner 决定。
+  - 全新库上 app_user 对另外 15 张没有 RLS 的表也有增删改，其中 `sanctions_source`（制裁名单源开关）、`sanctions_entity`（名单本身）、`canonical_taxonomy`、`term_alias`、`_prisma_migrations` 与这次的问题同类。这次没有动，需要 owner 逐张决定。
+  - 默认权限没改：owner 以后新建的表仍默认给 app_user 增删改，只读的平台表要在建表迁移里显式收回。
+
 ## 2026-10-09 · Record the real source page and drop mangled or off-domain public emails
 
 - 起因（2026-10-08 独立复审，#609 待续里列的三项）：手动联系人发现 `discoverContacts` 抓公司首页和最多两个联系、Impressum、关于、法律页，用 `extractPublicContacts` 抽邮箱，再由 `buildPublicContacts` 建联系人。复审发现三处缺陷：抽邮箱的正则只认 ASCII，又会从词中间开始匹配，`müller@acme.de` 被抽成 `ller@acme.de`，`Jörg.Schmidt@` 被抽成 `rg.schmidt@`，错地址作为个人联系人挂到公司名下；个人邮箱的 `sourcePage` 一律记首页，而抽取结果本来就带着邮箱所在的页（多半是 Impressum），GDPR Art.14 要说明的来源因此不准；页面上其他域名的邮箱（建站公司、外部数据保护官、gmail）也被当成这家公司的联系人。
