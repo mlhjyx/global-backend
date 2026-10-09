@@ -20,7 +20,7 @@ import {
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
-import type { SearxResult } from '../../adapters/searxng';
+import type { SearxngSearchOutput, SearxngSearchResult } from '../../tools/builtin-tools';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
@@ -78,7 +78,7 @@ const JUDGE_CONCURRENCY = 5;
 const MAX_HITS_PER_DOMAIN = 3;
 const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
 
-type SearchHit = Readonly<{ url: string; title: string; content: string }>;
+type SearchHit = Readonly<{ url: string; title: string }>;
 
 export interface ExtractedCompany {
   is_company_site: boolean;
@@ -95,7 +95,7 @@ export interface ExtractedCompany {
 /**
  * 真实公开数据挖掘 Provider（PRD 7.4.11 Public Intelligence / DAT-013）。
  * 发现管线（G3 2026-09-24「搜索优先、建档后再抓」）：SearXNG 元搜索（语言随目标国、
- * 查询串随贸易角色）→ 噪声域名 + 非目标国 ccTLD 过滤 → LLM 仅凭同域名的搜索标题/摘要/URL
+ * 查询串随贸易角色）→ 噪声域名 + 非目标国 ccTLD 过滤 → LLM 仅凭同域名的搜索标题/URL
  * 判站并抽取（只取搜索结果中存在的）→ 带搜索证据指纹的记录。官网页面只在公司建档之后、
  * 以该公司为主体抓取（官网画像富集阶段）。
  *
@@ -153,11 +153,11 @@ export class PublicWebDiscoveryProvider
     // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
     const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
 
-    const perQuery: SearxResult[][] = [];
+    const perQuery: SearxngSearchResult[][] = [];
     for (const q of searches) perQuery.push(await this.search(q, language, ctx));
     // Round-robin across queries so each role query contributes candidates
     // before the per-query domain cap applies.
-    const interleaved: SearxResult[] = [];
+    const interleaved: SearxngSearchResult[] = [];
     for (let i = 0; perQuery.some((results) => i < results.length); i += 1) {
       for (const results of perQuery) if (results[i]) interleaved.push(results[i]!);
     }
@@ -169,7 +169,7 @@ export class PublicWebDiscoveryProvider
       if (isForeignCountryDomain(domain, targetTlds)) continue;
       const hits = candidates.get(domain) ?? [];
       if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {
-        hits.push({ url: r.url, title: r.title ?? '', content: r.content ?? '' });
+        hits.push({ url: r.url, title: r.title ?? '' });
       }
       candidates.set(domain, hits);
     }
@@ -178,7 +178,7 @@ export class PublicWebDiscoveryProvider
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
 
-    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题/摘要/URL）
+    // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题与 URL：搜索摘要不出 searxng.search，见其持久契约）
     for (let i = 0; i < domains.length; i += JUDGE_CONCURRENCY) {
       const batch = domains.slice(i, i + JUDGE_CONCURRENCY);
       const settled = await Promise.allSettled(
@@ -220,8 +220,8 @@ export class PublicWebDiscoveryProvider
     q: string,
     language: string,
     ctx: ExecutionContext,
-  ): Promise<SearxResult[]> {
-    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
+  ): Promise<SearxngSearchResult[]> {
+    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
       { q, language },
       this.toolCtx(ctx, 'discovery.extract_company'),
@@ -261,7 +261,7 @@ export class PublicWebDiscoveryProvider
           prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
             filters: query.filters,
             keywords: query.keywords,
-          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题、摘要与 URL）：\n${text}`,
+          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题与 URL）：\n${text}`,
           system: contract?.description,
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['is_company_site'] },
@@ -489,11 +489,11 @@ function provenanceUrl(raw: string | undefined): string | null {
   return url.toString();
 }
 
-/** 同一域名的搜索命中 → 给模型的证据文本（标题/摘要/URL；空白命中不算证据）。 */
+/** 同一域名的搜索命中 → 给模型的证据文本（标题/URL；无标题的命中不算证据）。 */
 export function searchEvidenceText(hits: readonly SearchHit[]): string {
   const lines = hits
-    .filter((h) => h.title.trim() || h.content.trim())
-    .map((h) => `- 标题：${h.title.trim()}\n  摘要：${h.content.trim()}\n  URL：${h.url}`);
+    .filter((h) => h.title.trim())
+    .map((h) => `- 标题：${h.title.trim()}\n  URL：${h.url}`);
   return lines.join('\n').slice(0, MAX_SEARCH_EVIDENCE_CHARS);
 }
 

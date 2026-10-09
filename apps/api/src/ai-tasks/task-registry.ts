@@ -265,7 +265,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
-      '判断给定的一组搜索结果（同一域名的标题、摘要与 URL）是否指向一家真实企业自己的官网，若是则抽取结构化企业属性。只允许使用搜索结果中明确出现的信息，禁止编造或从画像上下文照抄；名称取搜索结果中的企业名称原文。若不是企业官网（是目录/百科/新闻/市场平台/博客），或信息不足以判断，is_company_site 置 false。',
+      '判断给定的一组搜索结果（同一域名的标题与 URL）是否指向一家真实企业自己的官网，若是则抽取结构化企业属性。只允许使用搜索结果中明确出现的信息，禁止编造或从画像上下文照抄；名称取搜索结果中的企业名称原文。若不是企业官网（是目录/百科/新闻/市场平台/博客），或信息不足以判断，is_company_site 置 false。',
     outputSchema: closedObject({
       is_company_site: { type: 'boolean', description: '该页面是否为某家企业自己的官网' },
       name: boundedString(500, { description: '企业名称（原文语言）' }),
