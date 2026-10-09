@@ -114,7 +114,7 @@ describe('search language and trade role (G3 5.3)', () => {
 });
 
 describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
-  function searchBroker(results: Array<{ url: string; title: string; content?: string }>) {
+  function searchBroker(results: Array<{ url: string; title?: string }>) {
     return broker(async (toolId) => {
       if (toolId === 'searxng.search') return { data: { results }, costCents: 0 };
       throw new Error(`unexpected tool ${toolId}`);
@@ -123,9 +123,9 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
 
   it('never fetches a page before a company exists and judges from search hits in the target language', async () => {
     const executionBroker = searchBroker([
-      { url: 'https://www.pumpen-handel.example/', title: 'Pumpen Handel GmbH – Großhandel für Pumpen', content: 'Ihr Pumpen-Großhändler: Grundfos, Wilo, Leo' },
-      { url: 'https://www.pumpen-handel.example/produkte', title: 'Produkte', content: 'Kreiselpumpen und Tauchpumpen ab Lager' },
-      { url: 'https://pompes.example.fr/', title: 'Pompes France', content: 'distributeur' },
+      { url: 'https://www.pumpen-handel.example/', title: 'Pumpen Handel GmbH – Großhandel für Pumpen' },
+      { url: 'https://www.pumpen-handel.example/produkte', title: 'Produkte' },
+      { url: 'https://pompes.example.fr/', title: 'Pompes France' },
     ]);
     mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
       data: { is_company_site: true, name: 'Pumpen Handel GmbH', country: 'Germany' },
@@ -144,7 +144,9 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     expect(mocks.executeStructuredTaskWithRuntime).toHaveBeenCalledOnce();
     const [, modelInput] = mocks.executeStructuredTaskWithRuntime.mock.calls[0]!;
     expect(modelInput.prompt).toContain('Pumpen Handel GmbH – Großhandel für Pumpen');
-    expect(modelInput.prompt).toContain('Kreiselpumpen und Tauchpumpen ab Lager');
+    expect(modelInput.prompt).toContain('- 标题：Produkte\n  URL：https://www.pumpen-handel.example/produkte');
+    // searxng.search returns only url and title (searxng-search/v1): no empty snippet lines.
+    expect(modelInput.prompt).not.toContain('摘要');
     expect(modelInput.prompt).not.toContain('Pompes France');
     expect(result.records).toHaveLength(1);
     expect(result.records[0]).toMatchObject({
@@ -223,7 +225,7 @@ describe('search-first review follow-ups (G3 5.3)', () => {
 
   it('stores only the sanitized page URL (no query string) as provenance', async () => {
     const executionBroker = broker(async () => ({
-      data: { results: [{ url: 'https://shop.pumpen.example/kontakt?email=max%40pumpen.example&utm_source=x', title: 'Pumpen Shop GmbH', content: 'Großhandel' }] },
+      data: { results: [{ url: 'https://shop.pumpen.example/kontakt?email=max%40pumpen.example&utm_source=x', title: 'Pumpen Shop GmbH' }] },
       costCents: 0,
     }));
     mocks.executeStructuredTaskWithRuntime.mockResolvedValue({

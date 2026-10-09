@@ -13,6 +13,32 @@
 - Router 是受保护文件：复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`，指纹 `c9fc50b3…` → `bf31b8ee…`。独立复审（只读代理）没有 CRITICAL、HIGH 或 MEDIUM。LOW 五项中，复核记录里改动前后果的细节与代码注释的措辞已改正；相邻的修复准备路径、恢复任务少数情况下停在未结算这两项都不比改动前差，记在复核记录里。
 - 测试：新增 3 项，改动前都失败（拿到包装后的 `ProviderOutputUnresolvedError`）。settlement-v1 照真实 provider 的 `READBACK_ONLY` 走一遍：首次调用的回执与终结各写一次，修复调用不终结，不结算支出、不停用付费调用；付费门夹具下同样不结算，trace 为 `MODEL_WIRE_IN_FLIGHT`；非付费路径上调用方拿到的就是原来那个实例。模型网关、执行预算、AiTask 与付费门相关测试 767 项通过，执行授权策略检查 16 项通过。
 
+## 2026-10-09 · Public-web search results fit their durable contract
+
+- 起因（2026-10-09 xin 实测）：
+  - 卖方 #15 的发现 run 启动 18 秒即失败。第一条公开网页查询的第一次 SearXNG 搜索就报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，重试也一样，预算操作停在 RESERVED。
+  - 原因是 ToolBroker 要把搜索结果投影成持久结果 `searxng-search/v1`：每条只允许 `url`、`title`，最多 20 条，而且是封闭记录，多余字段直接拒绝。8 月 21 日的治理加固定下这份契约，并有测试明确拒绝摘要。但 `searxng.search` 工具一直原样返回 SearXNG 的结果：每页 35–45 条，每条带 `content`、`engines`、`score` 等 20 多个字段。投影因此每次都失败，broker 按设计报错，也不允许再发第二次物理请求。
+  - 8 月下旬 broker 开始执行这份契约以来，凡是在 run 预算内调用这个工具都会失败：公开网页发现一次都跑不通，名录源（xin 上未启用）也一样。建站品牌调研走付费账本路径，只持久化来源站点、不做投影，不受影响。之前没有发现，是因为 xin 上第一次真实发现 run 在 10-08，那次的两条查询都走公司注册源，不调用搜索。
+- 改动：
+  - `searxng.search` 的输出直接按持久契约整理：
+    - 每条只保留 `url` 与 `title`，最多 20 条。
+    - `url` 缺失、超过 2,048 字符，或不是投影接受的文本（非 NFC、含 NUL 或孤立代理项）时，整条丢掉，不改写网址。
+    - `title` 转成投影接受的文本：去掉 NUL，孤立代理项换成 U+FFFD，再做 NFC 规范化；超过 2,000 字符时截断，不拆开代理对。以前只要一个标题不合规，整页搜索就会投影失败。
+    - 领英个人主页（`linkedin.com/in/`、`/pub/`）和 XING 个人主页（`xing.com/profile/`）整条丢掉：它们的网址和标题写出具体的人。工具声明不含个人数据（`personalData: false`），而这些结果会被持久保存，且不能按数据主体请求删除。公司主页（如 `linkedin.com/company/`）保留。
+  - 摘要和引擎元数据不再离开工具。在通用预算路径上，现场结果与重放恢复的结果完全一致。
+  - 工具输出类型改为只含 `url` 与可选 `title` 的 `SearxngSearchResult`。公开网页与名录源按这个类型读取结果，名录源对缺失的标题补空串。
+  - 公开网页判站的证据从「标题 + 摘要 + URL」变为「标题 + URL」：去掉每条命中里恒为空的「摘要」行，提示词和 `discovery.extract_company` 任务说明同步改为「标题与 URL」。
+- 测试：
+  - `builtin-tools.searxng.spec.ts` 共 5 项：
+    - 43 条真实形状结果只剩 `url`/`title`、共 20 条、不含摘要里的人名与邮箱，且能通过投影；
+    - 缺失或超长的 `url` 被丢掉，超长 `title` 被截断；
+    - 恰好处在上限的 `url`（2,048）和 `title`（2,000）原样保留；
+    - NFD、OHM SIGN、NUL、孤立代理项、跨截断点的表情符号都被整理成可投影的标题，网址不合规的整条丢掉；
+    - 个人主页在取前 20 条之前被丢掉，公司主页保留。
+  - 公开网页判站的提示断言不再出现「摘要」。上面的 Unicode、个人主页两项和这条提示断言，在改动前都失败。
+  - 另用 xin 本机的真实 SearXNG 核对：卖方 #15 计划里的搜索串，改动前 15 次全部投影失败，改动后每次 20 条、全部通过。独立复审经真实 ToolBroker 与重放路径跑了 3 条查询，现场与重放结果一致。
+- 未做：要不要把截短、去除人名后的摘要也纳入持久契约，以提高判站质量。这需要改 8 月定下的数据最小化规则，留给 owner 决定。
+
 ## 2026-10-08 · Treat single-name mailboxes as personal contacts
 
 - 起因（2026-10-08 BI-14 公司联系点设计调研）：手动联系人发现用的 `buildPublicContacts` 靠 `/^[a-z]+[._-][a-z]+$/i` 判断邮箱是否属于个人，只有 first.last 这种形状才算。`max@`、`mueller@`、`mm@` 这类单名或缩写邮箱因此被存成「公开联系点 (max@)」，不标个人数据，也不写 person.profile 证据。这违背 GDPR Art.4 和「只做公司级数据」的红线。仓库其他地方（采集清洗 `cleanEmail`、联系人持久化、邮箱验证合规门）早已改用白名单：只有职能邮箱算非个人。
