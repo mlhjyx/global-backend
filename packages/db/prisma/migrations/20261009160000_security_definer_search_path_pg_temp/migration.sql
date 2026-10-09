@@ -7,11 +7,10 @@
 -- * 83 SECURITY INVOKER routines (21 of them trigger functions) carry the same setting. A
 --   routine's own setting replaces its caller's, and inside a SECURITY DEFINER routine, or in
 --   a trigger fired by one, an invoker routine runs as that routine's owner.
--- Routines written since September already list pg_temp last. This lists pg_temp last for
--- every remaining routine that sets `pg_catalog, public`, as the PostgreSQL manual
--- prescribes ("Writing SECURITY DEFINER Functions Safely"). Routines without a search_path
--- setting keep their caller's, which inside a hardened SECURITY DEFINER routine now ends in
--- pg_temp.
+-- 42 routines already list pg_temp last. This lists pg_temp last for every remaining routine
+-- that sets `pg_catalog, public`, as the PostgreSQL manual prescribes ("Writing SECURITY
+-- DEFINER Functions Safely"). Routines without a search_path setting keep their caller's,
+-- which inside a hardened SECURITY DEFINER routine now ends in pg_temp.
 --
 -- Only the search_path setting changes. Bodies, owners, volatility, security and grants stay
 -- exactly as they are. A routine with any other search_path is not rewritten: the final check

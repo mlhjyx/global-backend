@@ -32,7 +32,7 @@ function migrationSql(name: string): string {
   return readFileSync(`${MIGRATIONS}${name}/migration.sql`, 'utf8');
 }
 
-const IDENTIFIER_CHARACTER = /[\w$]/u;
+const IDENTIFIER_CHARACTER = /[\p{L}\p{N}_$]/u;
 
 /** End index of the quoted literal or identifier that opens at `start`. */
 function quotedEnd(sql: string, start: number, backslashEscapes: boolean): number {
@@ -98,7 +98,7 @@ export function topLevelStatements(sql: string): string[] {
     // `$` inside an identifier (foo$bar$) never opens a dollar quote.
     const dollar = IDENTIFIER_CHARACTER.test(previous)
       ? null
-      : /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u.exec(sql.slice(index, index + 64));
+      : /^\$(?:[\p{L}_][\p{L}\p{N}_]*)?\$/u.exec(sql.slice(index, index + 64));
     if (dollar) {
       const end = sql.indexOf(dollar[0], index + dollar[0].length);
       if (end === -1) throw new Error(`unterminated dollar quote ${dollar[0]}`);
@@ -120,23 +120,26 @@ export function topLevelStatements(sql: string): string[] {
 
 const ROUTINE_DEFINITION = /^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+([^\s(]+)/iu;
 const ROUTINE_ALTERATION = /^alter\s+(?:function|procedure|routine)\s+([^\s(]+)/iu;
-const SEARCH_PATH_ENTRY = String.raw`(?:'[^']*'|"[^"]*"|[A-Za-z_][\w$]*)`;
+const SEARCH_PATH_ENTRY = String.raw`(?:'[^']*'|"(?:[^"]|"")*"|[\p{L}_][\p{L}\p{N}_$]*)`;
+/**
+ * One `SET search_path` clause. The list must run to the next keyword or the end of the
+ * statement, so an entry the pattern cannot read fails the clause instead of cutting it short.
+ */
 const SEARCH_PATH_LIST = new RegExp(
-  String.raw`\bset\s+search_path\s*(?:=|\bto\b)\s*(${SEARCH_PATH_ENTRY}(?:\s*,\s*${SEARCH_PATH_ENTRY})*)`,
-  'iu',
+  String.raw`\bset\s+"?search_path"?\s*(?:=|\bto\b)\s*(${SEARCH_PATH_ENTRY}(?:\s*,\s*${SEARCH_PATH_ENTRY})*)(?=\s+\p{L}|\s*$)`,
+  'giu',
 );
-const SETS_SEARCH_PATH = /\bset\s+search_path\b/iu;
-const RESETS_SEARCH_PATH = /\breset\s+(?:search_path|all)\b/iu;
+const SETS_SEARCH_PATH = /\bset\s+"?search_path"?(?![\p{L}\p{N}_$])/giu;
+const RESETS_SEARCH_PATH = /\breset\s+(?:"?search_path"?|all)(?![\p{L}\p{N}_$])/iu;
 const SECURITY_DEFINER = /\bsecurity\s+definer\b/iu;
 
-/** Schemas of a `SET search_path` list, or null for FROM CURRENT and other forms. */
-function searchPathEntries(statement: string): string[] | null {
-  const list = SEARCH_PATH_LIST.exec(statement)?.[1];
-  if (list === undefined) return null;
+/** Schemas of one `SET search_path` list. */
+function searchPathEntries(list: string): string[] {
   // One quoted literal is one schema name: 'pg_catalog, public, pg_temp' is not three.
-  return [...list.matchAll(new RegExp(SEARCH_PATH_ENTRY, 'gu'))].map(([entry]) =>
-    entry.startsWith("'") || entry.startsWith('"') ? entry.slice(1, -1) : entry.toLowerCase(),
-  );
+  return [...list.matchAll(new RegExp(SEARCH_PATH_ENTRY, 'gu'))].map(([entry]) => {
+    if (entry.startsWith('"')) return entry.slice(1, -1).replaceAll('""', '"');
+    return entry.startsWith("'") ? entry.slice(1, -1) : entry.toLowerCase();
+  });
 }
 
 /**
@@ -151,10 +154,16 @@ export function unsafeRoutine(statement: string): string | null {
   const definition = ROUTINE_DEFINITION.exec(statement);
   const name = (definition ?? ROUTINE_ALTERATION.exec(statement))?.[1];
   if (!name) return null;
-  if (SETS_SEARCH_PATH.test(statement)) {
-    return searchPathEntries(statement)?.at(-1) === 'pg_temp' ? null : name;
-  }
   if (!definition && RESETS_SEARCH_PATH.test(statement)) return name;
+  // Every SET clause must read as a list ending in pg_temp; DEFAULT and FROM CURRENT do not.
+  const clauses = statement.match(SETS_SEARCH_PATH)?.length ?? 0;
+  if (clauses > 0) {
+    const lists = [...statement.matchAll(SEARCH_PATH_LIST)].map(([, list]) =>
+      searchPathEntries(list!),
+    );
+    const safe = lists.length === clauses && lists.every((entries) => entries.at(-1) === 'pg_temp');
+    return safe ? null : name;
+  }
   return SECURITY_DEFINER.test(statement) ? name : null;
 }
 
@@ -193,6 +202,15 @@ describe('routine search_path guard', () => {
       ['ALTER FUNCTION u(uuid) SECURITY DEFINER', 'u'],
       ['ALTER FUNCTION v(uuid) SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp', null],
       ['ALTER FUNCTION w(uuid) OWNER TO app_user', null],
+      ['ALTER FUNCTION x1(uuid) SET search_path = pg_catalog, public, pg_temp RESET search_path', 'x1'],
+      ['ALTER FUNCTION x2(uuid) SET search_path = pg_catalog, public, pg_temp SET search_path = public', 'x2'],
+      ['CREATE FUNCTION x3() RETURNS int LANGUAGE sql SET "search_path" = pg_catalog, public AS $$ SELECT 1 $$', 'x3'],
+      ['CREATE FUNCTION x4() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_temp, $q$public$q$ AS $$ SELECT 1 $$', 'x4'],
+      ['CREATE FUNCTION x5() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp, \u00e9schema AS $$ SELECT 1 $$', 'x5'],
+      ['CREATE FUNCTION x6() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public, "pg_temp""x" AS $$ SELECT 1 $$', 'x6'],
+      ['CREATE FUNCTION f\u00e9$x$() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public AS $$ SELECT 1 $$', 'f\u00e9$x$'],
+      ["CREATE FUNCTION x7() RETURNS text LANGUAGE sql AS $\u00e9$ SELECT 'SECURITY DEFINER' $\u00e9$", null],
+      ['CREATE FUNCTION x8() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp SET lock_timeout = 1000 AS $$ SELECT 1 $$', null],
     ];
     for (const [sql, expected] of probes) {
       const statements = topLevelStatements(`-- probe\n${sql}; /* trailing */`);
@@ -214,7 +232,7 @@ describe('routine search_path guard', () => {
   it('finds the earlier routines the hardening migration exists for', () => {
     // The guard below would pass vacuously if the parser missed every routine.
     const earlier = unsafeRoutines(migrations.filter((name) => name < HARDENING_MIGRATION));
-    expect(earlier.length).toBeGreaterThan(150);
+    expect(earlier.length).toBeGreaterThan(250);
   });
 
   it('admits no migration named before the hardening migration', () => {
