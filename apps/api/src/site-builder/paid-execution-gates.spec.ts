@@ -3,7 +3,10 @@ import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import type { ModelProvider } from "../model-gateway/model-provider";
 import type { ModelRouter } from "../model-gateway/model-router";
 import type { ModelResult } from "../model-gateway/types";
-import { ProviderOutputError } from "../model-gateway/providers/provider-output-error";
+import {
+  ProviderOutputError,
+  ProviderWireInFlightError,
+} from "../model-gateway/providers/provider-output-error";
 import { createProviderTransportObservation } from "../model-gateway/provider-transport-observation";
 import {
   parseSettlementDerivationKeyring,
@@ -528,6 +531,75 @@ describe("RouterModelGateway persistent paid-call gate", () => {
       }),
     );
     expect(disablePaidCalls).not.toHaveBeenCalled();
+  });
+
+  it("leaves the operation to its owner when the structured repair wire is already in flight", async () => {
+    let calls = 0;
+    const model = provider(async () => {
+      calls += 1;
+      if (calls === 2) throw new ProviderWireInFlightError();
+      return {
+        data: {},
+        provider: "gateway",
+        model: "gpt-5.6-terra",
+        reportedModel: "gpt-5.6-terra",
+        modelResolutionSource: "upstream_response",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+    });
+    const settleOperation = vi.fn(async () => "SETTLED");
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const finalizeModelPhysicalWireNotDispatched = vi.fn(async () => undefined);
+    const trace = { record: vi.fn() };
+    const gateway = new RouterModelGateway(
+      { route: () => [model] } as unknown as ModelRouter,
+      trace as never,
+    );
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
+      settleOperation,
+      disablePaidCalls,
+      finalizeModelPhysicalWireNotDispatched,
+    } as never;
+    installSettlementV1(gateway);
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: "site_builder.brand_profile",
+          prompt: "p",
+          schema: {
+            type: "object",
+            required: ["ok"],
+            properties: { ok: { type: "boolean" } },
+          },
+          model: "gpt-5.6-terra",
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        paidModelContext,
+      ),
+    ).rejects.toMatchObject({
+      name: "PaidOperationUnknownError",
+      errorCode: "MODEL_WIRE_IN_FLIGHT",
+    });
+
+    // The repair really ran on the allocated second wire, and nothing after it.
+    expect(model.generateStructured).toHaveBeenCalledTimes(2);
+    expect(
+      vi.mocked(model.generateStructured).mock.calls[1]?.[1]?.paidCost
+        ?.settlementPhysicalWire?.identity.physicalWireAttempt,
+    ).toBe(2);
+    expect(settleOperation).not.toHaveBeenCalled();
+    expect(finalizeModelPhysicalWireNotDispatched).not.toHaveBeenCalled();
+    expect(disablePaidCalls).not.toHaveBeenCalled();
+    expect(trace.record).toHaveBeenCalledOnce();
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "ERROR",
+        errorMessage: "MODEL_WIRE_IN_FLIGHT",
+      }),
+    );
   });
 
   it("reserves before execution and settles request-bound gateway cost with provenance", async () => {

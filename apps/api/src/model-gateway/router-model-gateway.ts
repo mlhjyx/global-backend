@@ -289,7 +289,17 @@ export class RouterModelGateway extends ModelGateway {
           repairCtx,
         );
       } catch (err) {
-        if (err instanceof ExternalActionDeniedError) throw err;
+        // Neither is a verdict on the repair answer. A compliance denial is
+        // terminal; a repair wire that left ALLOCATED before this execution
+        // could send it (another worker or the recovery sweep holds it) must
+        // reach the paid in-flight handler as is, so the operation is left
+        // to that owner and never settled here.
+        if (
+          err instanceof ExternalActionDeniedError ||
+          err instanceof ProviderWireInFlightError
+        ) {
+          throw err;
+        }
         // A repair that answered unusably again is one bad item; a repair that
         // failed any other way (transport, network) has an unknown outcome.
         const RepairFailure = isRecoverableModelFailure(err)
