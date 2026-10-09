@@ -61,6 +61,10 @@ function publicOrigin(rawUrl: string | undefined): string | null {
   }
 }
 
+/** One searxng.search result: exactly what the durable contract searxng-search/v1 keeps. */
+export type SearxngSearchResult = { url: string; title?: string };
+export type SearxngSearchOutput = { results: SearxngSearchResult[] };
+
 /** searxng.search —— 元搜索发现候选域名（自托管，无需 source_policy）。 */
 export const searxngSearchTool: Tool<
   {
@@ -71,7 +75,7 @@ export const searxngSearchTool: Tool<
     timeRange?: "day" | "week" | "month" | "year";
     pages?: number;
   },
-  { results: SearxResult[] }
+  SearxngSearchOutput
 > = {
   id: "searxng.search",
   version: "1.0.0",
@@ -100,7 +104,7 @@ export const searxngSearchTool: Tool<
     data: {
       results: result.data.results.flatMap((item) => {
         const url = publicOrigin(item.url);
-        return url ? [{ url } as SearxResult] : [];
+        return url ? [{ url }] : [];
       }),
     },
     costCents: result.costCents,
@@ -134,24 +138,65 @@ const SEARX_DURABLE_RESULT_LIMIT = 20;
 const SEARX_DURABLE_URL_CHARS = 2048;
 const SEARX_DURABLE_TITLE_CHARS = 2000;
 
+/** Profile pages of individual people: their URL and title name the person. */
+const PERSON_PROFILE_PAGES: readonly (readonly [domain: string, path: RegExp])[] = [
+  ["linkedin.com", /^\/(?:in|pub)\//iu],
+  ["xing.com", /^\/profile\//iu],
+];
+
 /**
- * The live result is exactly what a replay restores, so it carries only what the
- * durable contract keeps: url and title. Snippets and engine metadata are raw
- * provider output that may name people; they never leave this tool.
+ * Only what the durable contract keeps leaves this tool: url and title, as text the
+ * typed projection accepts, so on the generic budget path a replay restores exactly
+ * the live result (the paid path replays origins only, see durableReplayResult).
+ * Snippets and engine metadata are raw provider output that may name people, and a
+ * personal profile page names one in its URL and title; neither leaves this tool,
+ * which declares personalData: false.
  */
-function durableSearxResults(results: readonly SearxResult[]): SearxResult[] {
+function durableSearxResults(results: readonly SearxResult[]): SearxngSearchResult[] {
   return results
-    .flatMap((result) => {
+    .flatMap((result): SearxngSearchResult[] => {
       const url: unknown = result.url;
-      if (typeof url !== "string" || url.length === 0 || url.length > SEARX_DURABLE_URL_CHARS) return [];
-      const title: unknown = result.title;
-      return [
-        (typeof title === "string"
-          ? { url, title: title.slice(0, SEARX_DURABLE_TITLE_CHARS) }
-          : { url }) as SearxResult,
-      ];
+      if (
+        typeof url !== "string" || url.length === 0 || url.length > SEARX_DURABLE_URL_CHARS ||
+        !isDurableText(url) || isPersonProfileUrl(url)
+      ) {
+        return [];
+      }
+      const title = typeof result.title === "string" ? durableTitle(result.title) : null;
+      return [title === null ? { url } : { url, title }];
     })
     .slice(0, SEARX_DURABLE_RESULT_LIMIT);
+}
+
+/** With the u flag a surrogate pair reads as one astral code point, so this matches lone surrogates only. */
+const LONE_SURROGATE = /[\uD800-\uDFFF]/u;
+
+/** Text the typed projection accepts: NFC, without NUL and without lone surrogates. */
+function isDurableText(value: string): boolean {
+  return !value.includes("\0") && !LONE_SURROGATE.test(value) && value === value.normalize("NFC");
+}
+
+/** A provider title as durable text, cut to the contract without splitting a surrogate pair. */
+function durableTitle(raw: string): string | null {
+  let title = raw.replaceAll("\0", "").replace(/[\uD800-\uDFFF]/gu, "�").normalize("NFC");
+  if (title.length > SEARX_DURABLE_TITLE_CHARS) {
+    title = title.slice(0, SEARX_DURABLE_TITLE_CHARS);
+    if (/[\uD800-\uDBFF]$/u.test(title)) title = title.slice(0, -1);
+  }
+  return isDurableText(title) ? title : null;
+}
+
+function isPersonProfileUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.replace(/\.$/u, "");
+  return PERSON_PROFILE_PAGES.some(
+    ([domain, path]) => (host === domain || host.endsWith(`.${domain}`)) && path.test(parsed.pathname),
+  );
 }
 
 /** crawl4ai.fetch —— 抓单页（需 source_policy + robots）。maxChars 由调用方按任务上下文需求指定

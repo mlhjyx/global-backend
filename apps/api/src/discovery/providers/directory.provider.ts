@@ -11,7 +11,7 @@ import {
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
-import type { SearxResult } from '../../adapters/searxng';
+import type { SearxngSearchOutput } from '../../tools/builtin-tools';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -196,12 +196,12 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
 
   /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
   private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
-    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
+    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
       { q, language: 'en' },
       this.toolCtx(ctx, 'discovery.extract_list'),
     );
-    return res.data.results.slice(0, 20);
+    return res.data.results.slice(0, 20).map((r) => ({ url: r.url, title: r.title ?? '' }));
   }
 
   /** 抓一个名录页（含有限翻页）→ 列表抽取 → 该页所有公司记录。 */
