@@ -32,24 +32,27 @@ describe.runIf(Boolean(ownerUrl && appUrl))('SECURITY DEFINER routines on the mi
     await Promise.all([owner?.$disconnect(), app?.$disconnect()]);
   });
 
-  it('lists pg_temp last in the search_path of every SECURITY DEFINER routine', async () => {
-    const routines = await owner.$queryRaw<{ routine: string; searchPath: string | null }[]>`
-      SELECT p.oid::regprocedure::text AS routine,
+  it('lists pg_temp last wherever a routine sets its search_path, and every SECURITY DEFINER routine sets one', async () => {
+    const routines = await owner.$queryRaw<
+      { routine: string; definer: boolean; searchPath: string | null }[]
+    >`
+      SELECT p.oid::regprocedure::text AS routine, p.prosecdef AS definer,
         (SELECT setting FROM unnest(p.proconfig) AS setting
-          WHERE setting LIKE 'search_path=%') AS "searchPath"
+          WHERE left(setting, 12) = 'search_path=') AS "searchPath"
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE p.prosecdef
+      WHERE left(n.nspname, 3) <> 'pg_'
         AND n.nspname <> 'information_schema'
-        AND n.nspname NOT LIKE 'pg\_%'
         AND NOT EXISTS (
           SELECT 1 FROM pg_depend d
           WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
       ORDER BY 1`;
-    // A migrated schema has well over a hundred; fewer means the query read the wrong database.
-    expect(routines.length).toBeGreaterThan(100);
+    // A migrated schema has well over a hundred SECURITY DEFINER routines; fewer means the
+    // query read the wrong database.
+    expect(routines.filter(({ definer }) => definer).length).toBeGreaterThan(100);
     const offenders = routines
-      .filter(({ searchPath }) => searchPath?.split(',').at(-1)?.trim() !== 'pg_temp')
+      .filter(({ definer, searchPath }) =>
+        searchPath === null ? definer : !searchPath.endsWith(', pg_temp'))
       .map(({ routine, searchPath }) => `${routine} ${searchPath ?? '<no search_path>'}`);
     expect(offenders).toEqual([]);
   });

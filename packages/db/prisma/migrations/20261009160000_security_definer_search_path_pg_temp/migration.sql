@@ -1,14 +1,22 @@
--- SECURITY DEFINER routines run with their owner's rights. When a routine's search_path
--- does not list pg_temp, PostgreSQL searches pg_temp FIRST for tables, so any session that
--- may create temporary tables can shadow a table the routine reads unqualified and make it
--- act on forged rows. app_user may: the database grants TEMPORARY to PUBLIC. 126 routines
--- written before September carry `search_path = pg_catalog, public`; later ones already list
--- pg_temp last. This lists pg_temp last for every remaining one, as the PostgreSQL manual
--- prescribes ("Writing SECURITY DEFINER Functions Safely").
+-- When a routine's search_path does not list pg_temp, PostgreSQL searches pg_temp FIRST for
+-- tables while the routine runs, so a session that may create temporary tables can shadow a
+-- table the routine reads unqualified. app_user may: the database grants TEMPORARY to PUBLIC.
+-- That matters wherever the routine runs with more rights than the session:
+-- * 126 SECURITY DEFINER routines carry `search_path = pg_catalog, public` and run as their
+--   owner;
+-- * 83 SECURITY INVOKER routines (21 of them trigger functions) carry the same setting. A
+--   routine's own setting replaces its caller's, and inside a SECURITY DEFINER routine, or in
+--   a trigger fired by one, an invoker routine runs as that routine's owner.
+-- Routines written since September already list pg_temp last. This lists pg_temp last for
+-- every remaining routine that sets `pg_catalog, public`, as the PostgreSQL manual
+-- prescribes ("Writing SECURITY DEFINER Functions Safely"). Routines without a search_path
+-- setting keep their caller's, which inside a hardened SECURITY DEFINER routine now ends in
+-- pg_temp.
 --
 -- Only the search_path setting changes. Bodies, owners, volatility, security and grants stay
--- exactly as they are. A routine with any other search_path is not rewritten: it fails the
--- final check and the whole migration rolls back. Forward-only; no data is touched.
+-- exactly as they are. A routine with any other search_path is not rewritten: the final check
+-- fails and the whole migration rolls back. The same check requires every SECURITY DEFINER
+-- routine to set a search_path. Forward-only; no data is touched.
 -- apps/api/src/prisma/security-definer-search-path*.spec.ts keep later migrations in line.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -24,9 +32,8 @@ BEGIN
     SELECT p.oid::regprocedure, p.prokind
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE p.prosecdef
+    WHERE left(n.nspname, 3) <> 'pg_'
       AND n.nspname <> 'information_schema'
-      AND n.nspname NOT LIKE 'pg\_%'
       AND NOT EXISTS (
         SELECT 1 FROM pg_depend d
         WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
@@ -43,17 +50,23 @@ BEGIN
   INTO unhardened
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
-  WHERE p.prosecdef
+  WHERE left(n.nspname, 3) <> 'pg_'
     AND n.nspname <> 'information_schema'
-    AND n.nspname NOT LIKE 'pg\_%'
     AND NOT EXISTS (
       SELECT 1 FROM pg_depend d
       WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
-    AND NOT EXISTS (
-      SELECT 1 FROM unnest(p.proconfig) AS setting
-      WHERE setting LIKE 'search\_path=%' AND setting LIKE '%, pg\_temp');
+    AND (
+      -- a search_path setting that does not end in pg_temp
+      EXISTS (
+        SELECT 1 FROM unnest(p.proconfig) AS setting
+        WHERE left(setting, 12) = 'search_path='
+          AND right(setting, 9) <> ', pg_temp')
+      -- a SECURITY DEFINER routine that runs on its caller's search_path
+      OR (p.prosecdef AND NOT EXISTS (
+        SELECT 1 FROM unnest(p.proconfig) AS setting
+        WHERE left(setting, 12) = 'search_path=')));
   IF unhardened IS NOT NULL THEN
-    RAISE EXCEPTION 'SECURITY_DEFINER_SEARCH_PATH_UNHARDENED: %', unhardened
+    RAISE EXCEPTION 'ROUTINE_SEARCH_PATH_UNHARDENED: %', unhardened
       USING ERRCODE = 'P0001';
   END IF;
 END
