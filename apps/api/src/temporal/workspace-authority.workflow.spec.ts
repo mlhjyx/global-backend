@@ -6,12 +6,20 @@ vi.mock(
 );
 
 import {
+  ActivityFailure,
+  ApplicationFailure,
+  CancelledFailure,
+} from '@temporalio/common';
+import {
   acts,
+  CancellationScope,
   resetActivities,
   setPatched,
 } from './testing/temporal-workflow.mock';
+import { createDiscoveryActivities } from './discovery.activities';
 import {
   DISCOVERY_AUTHORITY_PATCH,
+  DISCOVERY_FAILURE_FINALIZE_PATCH,
   DISCOVERY_RAW_GOVERNANCE_PATCH,
   DISCOVERY_WEBSITE_PROFILE_PATCH,
   discoveryWorkflow,
@@ -118,35 +126,43 @@ function discoveryInput() {
   };
 }
 
-function wrappedControl(code: string) {
-  return {
-    name: 'ActivityFailure',
-    message: 'Activity task failed',
-    cause: { type: 'ApplicationFailure', cause: { code } },
-  };
+/** What Temporal hands the workflow once an activity's last attempt has failed. */
+function activityFailure(activityType: string, type: string) {
+  return new ActivityFailure(
+    'Activity task failed',
+    activityType,
+    '5',
+    'MAXIMUM_ATTEMPTS_REACHED',
+    'worker-1',
+    new ApplicationFailure('Temporal execution failed', type, false),
+  );
 }
 
 beforeEach(() => resetActivities());
 
 describe('discoveryWorkflow execution-control propagation', () => {
   it.each([
-    'executeQuery',
-    'enrichSignalsRun',
-    'registerWatchesForRun',
-    'enqueuePatentLookupsForRun',
-  ])(
-    'rethrows wrapped controls from %s instead of finalizing EXECUTED/PARTIAL',
-    async (activityName) => {
+    ['executeQuery', 'query', 'BudgetOperationReplayError'],
+    ['enrichSignalsRun', 'signals', 'ExecutionBudgetGrantError'],
+    ['registerWatchesForRun', 'watches', 'ExecutionBudgetGrantError'],
+    ['enqueuePatentLookupsForRun', 'patentEnqueue', 'ExecutionBudgetGrantError'],
+  ] as const)(
+    'rethrows wrapped controls from %s after recording the run FAILED, never EXECUTED/PARTIAL',
+    async (activityName, stage, type) => {
       primeDiscovery();
-      const failure = wrappedControl(
-        activityName === 'executeQuery'
-          ? 'BUDGET_OPERATION_REPLAY_UNAVAILABLE'
-          : 'EXECUTION_BUDGET_AUTHORITY_REVOKED',
-      );
+      const failure = activityFailure(activityName, type);
       acts[activityName].mockRejectedValue(failure);
 
       await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failure);
-      expect(acts.finalizeRun).not.toHaveBeenCalled();
+      expect(acts.finalizeRun).toHaveBeenCalledOnce();
+      expect(acts.finalizeRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'FAILED',
+          stats: expect.objectContaining({
+            failure: { stage, errorType: type, control: true },
+          }),
+        }),
+      );
     },
   );
 
@@ -560,6 +576,450 @@ describe('discoveryWorkflow execution-control propagation', () => {
       nonRetryable: true,
     });
     expect(acts.loadPlanQueries).not.toHaveBeenCalled();
+  });
+});
+
+describe('discoveryWorkflow failure finalization (BI-25)', () => {
+  const HAPPY_RECEIPT = {
+    schemaVersion: 'discovery-query-receipt/v1',
+    queryKey: 'a'.repeat(64),
+    queryOrdinal: 0,
+    sourceClass: 'official_registry',
+    providers: ['gleif'],
+    accepted: 1,
+    quarantined: 0,
+    rejected: 0,
+    governanceDenied: 0,
+    duplicate: 0,
+    usageQuantity: 1,
+    costCents: 0,
+  };
+  const HAPPY_QUERY_STATS = {
+    perSource: {
+      official_registry: {
+        rawCount: 1,
+        quarantinedCount: 0,
+        rejectedCount: 0,
+        governanceDenied: 0,
+        duplicateCount: 0,
+        usageQuantity: 1,
+        costCents: 0,
+        providers: ['gleif'],
+        provider: 'gleif',
+      },
+    },
+    perQuery: { ['a'.repeat(64)]: HAPPY_RECEIPT },
+    rawGovernance: {
+      accepted: 1,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: 1,
+      costCents: 0,
+    },
+  };
+
+  it('finalizes a successful run exactly as before and never asks for the failure patch', async () => {
+    const asked: string[] = [];
+    setPatched((patchId) => {
+      asked.push(patchId);
+      return true;
+    });
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(asked).not.toContain(DISCOVERY_FAILURE_FINALIZE_PATCH);
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith({
+      workspaceId: WS,
+      runId: 'run-1',
+      planId: 'plan-1',
+      icpId: 'icp-1',
+      status: 'DONE',
+      stats: {
+        ...HAPPY_QUERY_STATS,
+        companies: 1,
+        suppressed: 0,
+        fit: { match: 1 },
+        fitSkippedForBudget: 0,
+        fitUnjudged: 0,
+        discoveryBudgetTruncated: false,
+        enrichBudgetTruncated: false,
+        signalsBudgetTruncated: false,
+        budgetTruncated: false,
+        skippedSubjects: 0,
+        websiteProfile: { profiled: 1, matched: 1, unclassified: 0 },
+        enrich: { matched: 1, of: 1, provider: 'gleif' },
+        signals: { matched: 1, of: 1, provider: 'public_web' },
+        watches: { registered: 1, of: 1 },
+        patentEnqueue: { enqueued: 1, of: 1 },
+        queries: 1,
+        failures: 0,
+      },
+      executionContractVersion: 2,
+      executionBudget: DISCOVERY_BUDGET,
+    });
+  });
+
+  it('records a fit stage that failed after its retries as FAILED, with the stage and error type, then fails', async () => {
+    primeDiscovery();
+    // The type is the last attempt's. In production a lost fit call is usually
+    // retried into BudgetOperationReplayError (covered below); a transport
+    // failure surfaces as itself only when it ends the last attempt.
+    const transport = activityFailure('qualifyFitForRun', 'ProviderTransportError');
+    acts.qualifyFitForRun.mockRejectedValue(transport);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(transport);
+
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith({
+      workspaceId: WS,
+      runId: 'run-1',
+      planId: 'plan-1',
+      icpId: 'icp-1',
+      status: 'FAILED',
+      // The query totals keep the exact shape finalizeRun checks against the stored receipts.
+      stats: {
+        ...HAPPY_QUERY_STATS,
+        queries: 1,
+        failures: 0,
+        failure: {
+          stage: 'fit',
+          errorType: 'ProviderTransportError',
+          control: false,
+        },
+      },
+      executionContractVersion: 2,
+      executionBudget: DISCOVERY_BUDGET,
+    });
+    expect(acts.finalizeRun.mock.invocationCallOrder[0]).toBeGreaterThan(
+      acts.qualifyFitForRun.mock.invocationCallOrder[0]!,
+    );
+    for (const later of [
+      'enrichRun',
+      'enrichSignalsRun',
+      'registerWatchesForRun',
+      'enqueuePatentLookupsForRun',
+    ]) {
+      expect(acts[later], later).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ['loadPlanQueries', 'plan', 0],
+    ['canonicalizeRun', 'canonicalize', 1],
+    ['qualifyFitForRun', 'fit', 1],
+    ['enrichRun', 'enrich', 1],
+  ] as const)(
+    'records FAILED when %s fails for an ordinary reason',
+    async (activityName, stage, queries) => {
+      primeDiscovery();
+      const failure = activityFailure(activityName, 'PrismaClientKnownRequestError');
+      acts[activityName].mockRejectedValue(failure);
+
+      await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failure);
+
+      expect(acts.finalizeRun).toHaveBeenCalledOnce();
+      expect(acts.finalizeRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'FAILED',
+          stats: expect.objectContaining({
+            queries,
+            failure: {
+              stage,
+              errorType: 'PrismaClientKnownRequestError',
+              control: false,
+            },
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['executeQuery', 'query', 'BudgetOperationReplayError'],
+    ['canonicalizeRun', 'canonicalize', 'ExecutionBudgetGrantError'],
+    ['profileWebsitesForRun', 'websiteProfile', 'ExecutionBudgetGrantError'],
+    ['qualifyFitForRun', 'fit', 'BudgetOperationReplayError'],
+    ['enrichRun', 'enrich', 'ExecutionControlError'],
+  ] as const)(
+    'still surfaces a control stop from %s after recording the run FAILED',
+    async (activityName, stage, type) => {
+      primeDiscovery();
+      const control = activityFailure(activityName, type);
+      acts[activityName].mockRejectedValue(control);
+
+      await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(control);
+
+      expect(acts.finalizeRun).toHaveBeenCalledOnce();
+      expect(acts.finalizeRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'FAILED',
+          stats: expect.objectContaining({
+            failure: { stage, errorType: type, control: true },
+          }),
+        }),
+      );
+    },
+  );
+
+  it('keeps the receipts already returned when a later query stops on a control error', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({
+      queries: [
+        { source_class: 'official_registry', filters: {}, keywords: [], priority: 1 },
+        { source_class: 'public_intelligence', filters: {}, keywords: ['pump'], priority: 2 },
+      ],
+    });
+    const replay = activityFailure('executeQuery', 'BudgetOperationReplayError');
+    acts.executeQuery
+      .mockResolvedValueOnce({
+        rawCount: 1,
+        quarantinedCount: 0,
+        rejectedCount: 0,
+        duplicateCount: 0,
+        queryReceipt: HAPPY_RECEIPT,
+        provider: 'gleif',
+        budgetTruncated: false,
+      })
+      .mockRejectedValueOnce(replay);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(replay);
+
+    expect(acts.canonicalizeRun).not.toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun.mock.calls[0]![0]).toMatchObject({
+      status: 'FAILED',
+      stats: {
+        ...HAPPY_QUERY_STATS,
+        queries: 2,
+        failures: 0,
+        failure: {
+          stage: 'query',
+          errorType: 'BudgetOperationReplayError',
+          control: true,
+        },
+      },
+    });
+  });
+
+  it('records a pre-receipt Raw-governance history without receipt fields', async () => {
+    setPatched((patchId) => patchId !== 'discovery-query-receipt-input-v1');
+    primeDiscovery();
+    acts.executeQuery.mockResolvedValue({
+      rawCount: 1,
+      quarantinedCount: 2,
+      rejectedCount: 3,
+      duplicateCount: 4,
+      costCents: 0,
+      provider: 'gleif',
+      budgetTruncated: false,
+    });
+    const failure = activityFailure('enrichRun', 'Error');
+    acts.enrichRun.mockRejectedValue(failure);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failure);
+
+    const stats = acts.finalizeRun.mock.calls[0]![0].stats;
+    expect(stats).not.toHaveProperty('perQuery');
+    expect(stats).toEqual({
+      perSource: {
+        official_registry: {
+          rawCount: 1,
+          quarantinedCount: 2,
+          rejectedCount: 3,
+          duplicateCount: 4,
+          provider: 'gleif',
+        },
+      },
+      rawGovernance: { accepted: 1, quarantined: 2, rejected: 3, duplicate: 4 },
+      queries: 1,
+      failures: 0,
+      failure: { stage: 'enrich', errorType: 'Error', control: false },
+    });
+  });
+
+  it('surfaces the stage error, not the bookkeeping error, when recording FAILED also fails', async () => {
+    primeDiscovery();
+    const transport = activityFailure('qualifyFitForRun', 'ProviderTransportError');
+    acts.qualifyFitForRun.mockRejectedValue(transport);
+    acts.finalizeRun.mockRejectedValue(
+      activityFailure('finalizeRun', 'ExecutionBudgetGrantError'),
+    );
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(transport);
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a bug in workflow code to fail the workflow task, without recording the run', async () => {
+    const asked: string[] = [];
+    setPatched((patchId) => {
+      asked.push(patchId);
+      return true;
+    });
+    primeDiscovery();
+    // A malformed activity result breaks the workflow code itself: Temporal fails
+    // the workflow task and retries it, so a fixed build can still resume the run.
+    acts.loadPlanQueries.mockResolvedValue({});
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBeInstanceOf(TypeError);
+    expect(asked).not.toContain(DISCOVERY_FAILURE_FINALIZE_PATCH);
+    expect(acts.finalizeRun).not.toHaveBeenCalled();
+  });
+
+  it('still records a cancelled run, in a scope the cancellation cannot reach', async () => {
+    const nonCancellable = vi.spyOn(CancellationScope, 'nonCancellable');
+    try {
+      primeDiscovery();
+      const cancelled = new CancelledFailure('Workflow cancelled');
+      acts.qualifyFitForRun.mockRejectedValue(cancelled);
+
+      await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(cancelled);
+
+      expect(nonCancellable).toHaveBeenCalledOnce();
+      expect(acts.finalizeRun).toHaveBeenCalledOnce();
+      expect(acts.finalizeRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'FAILED',
+          stats: expect.objectContaining({
+            failure: { stage: 'fit', errorType: 'CancelledFailure', control: true },
+          }),
+        }),
+      );
+    } finally {
+      nonCancellable.mockRestore();
+    }
+  });
+
+  /** Routes the workflow's finalizeRun through the real activity over a locked run row. */
+  function realFinalizeRun(storedReceipts: Record<string, unknown>) {
+    const update = vi.fn(async () => ({}));
+    const outboxCreate = vi.fn(async () => ({}));
+    const tx = {
+      $queryRaw: vi.fn(async () => [
+        {
+          id: 'run-1',
+          plan_id: 'plan-1',
+          stats: { perQuery: storedReceipts },
+          status: 'RUNNING',
+        },
+      ]),
+      discoveryRun: { update },
+      discoveryQueryPlan: { update: vi.fn(async () => ({})) },
+      outboxEvent: { create: outboxCreate },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: async (
+          _workspaceId: string,
+          callback: (client: typeof tx) => Promise<unknown>,
+        ) => callback(tx),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: {
+        attestAuthorized: vi.fn(async (input: { authorityId: string }) => ({
+          accountId: '40000000-0000-4000-8000-000000000004',
+          authorityId: input.authorityId,
+          authorizedCapMicrousd: 1_000_000n,
+          generation: 1,
+        })),
+      },
+    } as never);
+    acts.finalizeRun.mockImplementation((args) => activities.finalizeRun(args));
+    return { update, outboxCreate };
+  }
+
+  it('passes the real finalizeRun receipt check with the FAILED stats it builds', async () => {
+    primeDiscovery();
+    const { update, outboxCreate } = realFinalizeRun({
+      [HAPPY_RECEIPT.queryKey]: HAPPY_RECEIPT,
+    });
+    const replay = activityFailure('qualifyFitForRun', 'BudgetOperationReplayError');
+    acts.qualifyFitForRun.mockRejectedValue(replay);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(replay);
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'run-1' },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        stats: {
+          ...HAPPY_QUERY_STATS,
+          queries: 1,
+          failures: 0,
+          failure: {
+            stage: 'fit',
+            errorType: 'BudgetOperationReplayError',
+            control: true,
+          },
+        },
+      }),
+    });
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it('reports the stage error, and leaves the run open, when the store holds a receipt the workflow never saw', async () => {
+    primeDiscovery();
+    const unseen = { ...HAPPY_RECEIPT, queryKey: 'b'.repeat(64), queryOrdinal: 1 };
+    const { update, outboxCreate } = realFinalizeRun({
+      [HAPPY_RECEIPT.queryKey]: HAPPY_RECEIPT,
+      [unseen.queryKey]: unseen,
+    });
+    const replay = activityFailure('qualifyFitForRun', 'BudgetOperationReplayError');
+    acts.qualifyFitForRun.mockRejectedValue(replay);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(replay);
+
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not follow a failed normal finalization with a FAILED one', async () => {
+    primeDiscovery();
+    const drift = activityFailure('finalizeRun', 'Error');
+    acts.finalizeRun.mockRejectedValue(drift);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(drift);
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'DONE' }),
+    );
+  });
+
+  it('keeps histories recorded before the patch on their old command sequence', async () => {
+    setPatched((patchId) => patchId !== DISCOVERY_FAILURE_FINALIZE_PATCH);
+    primeDiscovery();
+    const transport = activityFailure('qualifyFitForRun', 'ProviderTransportError');
+    acts.qualifyFitForRun.mockRejectedValue(transport);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(transport);
+    expect(acts.finalizeRun).not.toHaveBeenCalled();
+  });
+
+  it('never asks for the patch on a pre-authority history, whose finalizeRun would be parked', async () => {
+    const asked: string[] = [];
+    setPatched((patchId) => {
+      asked.push(patchId);
+      return patchId === DISCOVERY_FAILURE_FINALIZE_PATCH;
+    });
+    primeDiscovery();
+    const transport = activityFailure('qualifyFitForRun', 'ProviderTransportError');
+    acts.qualifyFitForRun.mockRejectedValue(transport);
+
+    await expect(
+      discoveryWorkflow({
+        workspaceId: WS,
+        runId: 'run-1',
+        planId: 'plan-1',
+        icpId: 'icp-1',
+      } as never),
+    ).rejects.toBe(transport);
+    expect(asked).not.toContain(DISCOVERY_FAILURE_FINALIZE_PATCH);
+    expect(acts.finalizeRun).not.toHaveBeenCalled();
   });
 });
 
