@@ -161,6 +161,7 @@ interface LockedDiscoveryRunReceiptState {
   id: string;
   plan_id: string;
   stats: unknown;
+  status: string;
 }
 
 async function lockDiscoveryRunReceiptState(
@@ -168,7 +169,7 @@ async function lockDiscoveryRunReceiptState(
   args: { runId: string; planId: string },
 ): Promise<LockedDiscoveryRunReceiptState> {
   const rows = await transaction.$queryRaw<LockedDiscoveryRunReceiptState[]>(
-    Prisma.sql`SELECT id::text, plan_id::text, stats
+    Prisma.sql`SELECT id::text, plan_id::text, stats, status
       FROM discovery_run
       WHERE id = ${args.runId}::uuid
       FOR UPDATE`,
@@ -336,8 +337,10 @@ function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): Enr
 }
 /**
  * Attestation outcomes that only say the run's authority has ended. The
- * database raises them after its scope checks, so the authority still belongs
- * to this workspace.
+ * database raises them after its scope check and authority lookup, so the
+ * authority belongs to this workspace. For a revoked or expired authority the
+ * run's budget account is not checked; the write is still bound to the run and
+ * plan ids under the workspace's row-level security.
  */
 const ENDED_AUTHORITY_CODES: ReadonlySet<string> = new Set([
   'EXECUTION_BUDGET_GRANT_EXPIRED',
@@ -1847,6 +1850,10 @@ export function createDiscoveryActivities(deps: {
       await attestRunFinalization(args);
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const lockedRun = await lockDiscoveryRunReceiptState(tx, args);
+        // FAILED only closes a run that is still open: it never replaces a recorded
+        // outcome (say, from a duplicate execution after the grant lapsed), and a
+        // retried FAILED write emits no second DiscoveryRunCompleted.
+        if (args.status === 'FAILED' && lockedRun.status !== 'RUNNING') return;
         if (
           lockedRun.stats !== null &&
           (typeof lockedRun.stats !== 'object' || Array.isArray(lockedRun.stats))

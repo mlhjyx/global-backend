@@ -40,8 +40,8 @@ const PRE_FAILURE_PATCHES = [
   'discovery-query-receipt-input-v1',
 ] as const;
 const WEBSITE_PROFILE_PATCH = 'discovery-website-profile-v1';
-// The retry policy the fit activity was scheduled with before this change.
-const OLD_RETRY = {
+// The policy a `retry: { maximumAttempts: 3 }` proxy schedules with.
+const RETRY_POLICY = {
   initialInterval: '1s',
   backoffCoefficient: 2,
   maximumInterval: '100s',
@@ -151,7 +151,7 @@ class DiscoveryHistory {
       startToCloseTimeout,
       heartbeatTimeout: '0s',
       workflowTaskCompletedEventId: task,
-      retryPolicy: OLD_RETRY,
+      retryPolicy: RETRY_POLICY,
       useWorkflowBuildId: true,
     });
     const attempt = 'failure' in outcome ? 3 : 1;
@@ -188,9 +188,11 @@ class DiscoveryHistory {
   }
 }
 
-const transport = ApplicationFailure.create({
-  message: 'Temporal execution failed',
-  type: 'ProviderTransportError',
+// What the last fit attempt reports after a lost model call: its retries reuse
+// the settled budget operation of the failed call.
+const lastAttempt = ApplicationFailure.create({
+  message: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE',
+  type: 'BudgetOperationReplayError',
   nonRetryable: false,
 });
 
@@ -213,7 +215,7 @@ function historyThroughFailedFit(): { history: DiscoveryHistory; task: string } 
   });
   task = history.workflowTask();
   history.activity(task, 'qualifyFitForRun', { ...RUN_ICP, ...AUTHORITY }, '900s', {
-    failure: transport,
+    failure: lastAttempt,
   });
   return { history, task: history.workflowTask() };
 }
@@ -225,7 +227,7 @@ function fitFailure(): ActivityFailure {
     '4',
     'MAXIMUM_ATTEMPTS_REACHED',
     'replay-fixture',
-    transport,
+    lastAttempt,
   );
 }
 
@@ -269,7 +271,7 @@ describe('discovery failure finalization replay (BI-25)', () => {
           },
           queries: 0,
           failures: 0,
-          failure: { stage: 'fit', errorType: 'ProviderTransportError', control: false },
+          failure: { stage: 'fit', errorType: 'BudgetOperationReplayError', control: true },
         },
         ...AUTHORITY,
       },

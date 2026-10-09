@@ -1,4 +1,10 @@
-import { ApplicationFailure, patched, proxyActivities } from '@temporalio/workflow';
+import {
+  ApplicationFailure,
+  CancellationScope,
+  TemporalFailure,
+  patched,
+  proxyActivities,
+} from '@temporalio/workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
 import {
@@ -379,21 +385,29 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       },
     };
   } catch (error) {
-    // BI-25：阶段失败（重试用尽或控制错误）不能让 run 永远停在 RUNNING。先记 FAILED 再抛原错误，
-    // 工作流照旧失败、控制错误照旧可见。只在收尾之前的阶段生效：正常收尾本身失败时不再补写，
-    // 免得覆盖一次可能已提交的结果。授权前的旧历史跳过（其 finalizeRun 会被 parked）；
-    // patch 守卫让旧历史重放时命令序列不变，补写失败时以阶段错误为准。
-    if (usesAuthority && patched(DISCOVERY_FAILURE_FINALIZE_PATCH)) {
+    // BI-25：阶段失败（重试用尽、控制错误、超时或取消）不能让 run 永远停在 RUNNING。先记 FAILED
+    // 再抛原错误，工作流照旧失败、控制错误照旧可见。只处理 Temporal 上报的失败：工作流代码自身的
+    // 缺陷让工作流任务失败并重试，修好的版本还能接着跑，不在这里收尾。只在收尾之前的阶段生效：
+    // 正常收尾本身失败时不再补写，免得覆盖一次可能已提交的结果。授权前的旧历史跳过（其
+    // finalizeRun 会被 parked）；patch 守卫让旧历史重放时命令序列不变。补写放在不可取消的作用域里，
+    // 取消的 run 也能收尾；补写失败时以阶段错误为准。
+    if (
+      error instanceof TemporalFailure &&
+      usesAuthority &&
+      patched(DISCOVERY_FAILURE_FINALIZE_PATCH)
+    ) {
       try {
-        await finalize({
-          status: 'FAILED',
-          stats: {
-            ...queryStats(),
-            queries: queryCount,
-            failures,
-            failure: describeDiscoveryRunFailure(stage, error),
-          },
-        });
+        await CancellationScope.nonCancellable(() =>
+          finalize({
+            status: 'FAILED',
+            stats: {
+              ...queryStats(),
+              queries: queryCount,
+              failures,
+              failure: describeDiscoveryRunFailure(stage, error),
+            },
+          }),
+        );
       } catch {
         /* 阶段错误才是要报告的结果，收尾写入失败不能顶替它 */
       }

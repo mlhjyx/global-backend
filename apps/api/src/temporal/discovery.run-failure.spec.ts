@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ActivityFailure,
   ApplicationFailure,
+  TemporalFailure,
   TimeoutFailure,
 } from '@temporalio/common';
 import { describeDiscoveryRunFailure } from './discovery.run-failure';
@@ -66,6 +67,23 @@ describe('describeDiscoveryRunFailure', () => {
     });
   });
 
+  it('prefers the activity\'s own failure type over the generic causes it wraps', () => {
+    const wrapped = activityFailure(
+      'qualifyFitForRun',
+      new ApplicationFailure(
+        'Temporal execution failed',
+        'ProviderOutputUnresolvedError',
+        false,
+        undefined,
+        new TemporalFailure('Temporal execution failed', new Error('socket hang up')),
+      ),
+    );
+
+    expect(describeDiscoveryRunFailure('fit', wrapped).errorType).toBe(
+      'ProviderOutputUnresolvedError',
+    );
+  });
+
   it('falls back to a plain error code or class name when there is no application type', () => {
     expect(
       describeDiscoveryRunFailure('canonicalize', new Error('database refused: secret')),
@@ -74,7 +92,7 @@ describe('describeDiscoveryRunFailure', () => {
       describeDiscoveryRunFailure('enrich', {
         name: 'ActivityFailure',
         message: 'Activity task failed',
-        cause: { type: 'ApplicationFailure', cause: { code: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' } },
+        cause: { code: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' },
       }),
     ).toEqual({
       stage: 'enrich',

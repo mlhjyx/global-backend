@@ -2327,6 +2327,7 @@ describe("finalizeRun durable query receipt readback", () => {
   function finalizeHarness(
     stats: unknown = { perQuery: derived.perQuery },
     budgetStore: BudgetStore = authorityBudgetStore(),
+    runStatus = "RUNNING",
   ) {
     const update = vi.fn(async () => ({}));
     const outboxCreate = vi.fn(async () => ({}));
@@ -2337,6 +2338,7 @@ describe("finalizeRun durable query receipt readback", () => {
           id: "40000000-0000-4000-8000-000000000001",
           plan_id: "50000000-0000-4000-8000-000000000001",
           stats,
+          status: runStatus,
         },
       ]),
       discoveryRun: { update },
@@ -2453,6 +2455,55 @@ describe("finalizeRun durable query receipt readback", () => {
       expect(outboxCreate).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ["a finished run", "DONE", authorityBudgetStore],
+    ["a partial run whose grant has since expired", "PARTIAL", () =>
+      endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED")],
+    ["a run already recorded FAILED (retried write)", "FAILED", authorityBudgetStore],
+  ] as const)(
+    "never overwrites %s with a FAILED outcome",
+    async (_label, runStatus, budgetStore) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(
+        { perQuery: derived.perQuery },
+        budgetStore(),
+        runStatus,
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: FAILURE_STATS,
+        }),
+      );
+
+      expect(update).not.toHaveBeenCalled();
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("records workflow-built FAILED stats over the locked receipts without drift", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness();
+    const stats = { ...derived, queries: 1, ...FAILURE_STATS };
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats,
+      }),
+    );
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "40000000-0000-4000-8000-000000000001" },
+      data: expect.objectContaining({ status: "FAILED", stats }),
+    });
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
 
   it("keeps a FAILED outcome without a v2 envelope parked", async () => {
     const { activities, outboxCreate, update } = finalizeHarness(

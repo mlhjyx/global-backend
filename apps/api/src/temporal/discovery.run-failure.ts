@@ -18,9 +18,18 @@ export type DiscoveryRunStage =
 /** What a FAILED run records about the error that stopped it: no message, no details. */
 export interface DiscoveryRunFailure {
   readonly stage: DiscoveryRunStage;
-  /** The innermost failure's type, code or class name, or UNCLASSIFIED. */
+  /**
+   * The failure type of the activity's last attempt: the first application
+   * type or code along the cause chain, else the innermost class name, else
+   * UNCLASSIFIED. A fit pass that lost a model call usually reports
+   * BudgetOperationReplayError here, because its retries reuse the settled
+   * budget operation of the failed call.
+   */
   readonly errorType: string;
-  /** True when the shared classifier treats the error as an execution-control stop. */
+  /**
+   * The shared classifier's verdict. It fails closed, so timeouts,
+   * cancellations and unknown shapes count as control stops too.
+   */
   readonly control: boolean;
 }
 
@@ -51,24 +60,26 @@ function identifier(value: unknown): string | undefined {
 
 /**
  * Temporal hands the workflow an ActivityFailure whose cause is the
- * ApplicationFailure (or TimeoutFailure) that ended the last attempt. Its
- * message is redacted at the activity boundary and is never read here.
+ * ApplicationFailure (or TimeoutFailure) that ended the last attempt; that
+ * application type names the activity's own error class, while deeper causes
+ * are usually generic wrappers. Messages are redacted at the activity boundary
+ * and are never read here.
  */
 function failureType(error: unknown): string {
-  let type = UNCLASSIFIED;
+  let innermostName: string | undefined;
   const visited = new Set<object>();
   let current: unknown = error;
   for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth += 1) {
     if (!current || typeof current !== 'object' || visited.has(current)) break;
     visited.add(current);
-    type =
+    const applicationType =
       identifier(dataProperty(current, 'type', false)) ??
-      identifier(dataProperty(current, 'code', false)) ??
-      identifier(dataProperty(current, 'name', true)) ??
-      type;
+      identifier(dataProperty(current, 'code', false));
+    if (applicationType) return applicationType;
+    innermostName = identifier(dataProperty(current, 'name', true)) ?? innermostName;
     current = dataProperty(current, 'cause', false);
   }
-  return type;
+  return innermostName ?? UNCLASSIFIED;
 }
 
 /** Content-free description of the error that stopped a discovery run in `stage`. */
