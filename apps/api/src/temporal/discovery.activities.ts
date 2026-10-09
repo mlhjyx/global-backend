@@ -1697,6 +1697,7 @@ export function createDiscoveryActivities(deps: {
      * （与 enrichSignalsRun 同口径）建平台级 web_watch monitored_source（dedup by 域名，sitemap 推监控页），
      * 交给独立 intentSweep 持续盯产品/招聘/供应商招募/新闻页变更 → intent 事件 → 投影进 attributes.intent.*。
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
+     * 只在持有平台写入者的进程里注册；客户 worker 没有平台写入者，只数候选、不出网（见函数内注释）。
      */
     async registerWatchesForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
@@ -1704,12 +1705,6 @@ export function createDiscoveryActivities(deps: {
       icpId: string;
     }): Promise<{ candidates: number; registered: number; skippedSubjects: number }> {
       const binding = await ensureRunBudget(args);
-      const intentSvc = new IntentProjectionService({
-        prisma: deps.prisma,
-        broker: deps.broker,
-        budgetStore: budgets,
-        platformWriter: deps.platformWriter,
-      });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
@@ -1738,6 +1733,23 @@ export function createDiscoveryActivities(deps: {
           },
           select: { id: true },
         });
+      });
+      // 监控是平台行：注册前的 sitemap 读取会带回持久回执，回执只能在平台写入者的事务里确认
+      // （DomainAck）。客户 worker 不持有平台写入者，硬注册必报 DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE，
+      // 这是控制错误，会在线索已经写入之后打挂整个 run。所以在任何出网之前跳过，留给有平台写入者的进程。
+      if (!deps.platformWriter) {
+        if (companies.length) {
+          console.warn(
+            `[discovery] run ${args.runId} 跳过 ${companies.length} 家的网站监控注册：本进程没有平台写入者`,
+          );
+        }
+        return { candidates: companies.length, registered: 0, skippedSubjects: 0 };
+      }
+      const intentSvc = new IntentProjectionService({
+        prisma: deps.prisma,
+        broker: deps.broker,
+        budgetStore: budgets,
+        platformWriter: deps.platformWriter,
       });
       let registered = 0;
       let skippedSubjects = 0;
