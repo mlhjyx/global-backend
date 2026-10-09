@@ -351,6 +351,18 @@ jobs:
           RAW_SOURCE_POLICY_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: pnpm --filter @global/api exec vitest run src/discovery/raw-source-company-site-policy.postgres.spec.ts
 
+      # source_policy and data_provider are written by the owner connection only.
+      # app_user keeps SELECT; no other role, runtime logins included, may write them.
+      - name: Governance tables read-only for app_user on PostgreSQL
+        env:
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          GOVERNANCE_TABLES_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          GOVERNANCE_TABLES_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+        run: |
+          set -euo pipefail
+          pnpm --filter @global/db exec prisma migrate deploy
+          pnpm --filter @global/api exec vitest run src/prisma/governance-table-privileges.postgres.spec.ts
+
       - name: Evaluate Copy fixed-source impact
         id: copy-impact
         run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"
