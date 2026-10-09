@@ -47,4 +47,39 @@ describe('contact-extractor（确定性，非 LLM —— 命中的必然真实�
     ]);
     expect(contacts.filter((c) => c.type === 'email')).toHaveLength(1);
   });
+
+  const emailsIn = (text: string) =>
+    extractPublicContacts([{ url: 'https://acme.de/impressum', text }])
+      .filter((c) => c.type === 'email')
+      .map((c) => c.value);
+
+  it('本地部分含变音字母的地址整条不抽，不截成 ller@ / rg.schmidt@；ASCII 地址照旧', () => {
+    // 2026-10-09 独立复审：müller@ 曾被抽成 ller@acme.de、Jörg.Schmidt@ 抽成 rg.schmidt@acme.de，错地址挂到公司名下。
+    expect(
+      emailsIn(
+        [
+          'Geschäftsführer: Hans Müller, müller@acme.de',
+          'Vertrieb: Jörg.Schmidt@acme.de',
+          'Kontakt: info@acme.de, max.mueller@acme.de; j.schmidt@acme.de',
+        ].join('\n'),
+      ),
+    ).toEqual(['info@acme.de', 'max.mueller@acme.de', 'j.schmidt@acme.de']);
+  });
+
+  it('分解写法的变音（u + U+0308）、撇号姓名与百分号编码的 mailto 也不截成半个地址', () => {
+    expect(emailsIn('mu\u0308ller@acme.de')).toEqual([]);
+    expect(emailsIn("Irland: o'brien@acme.ie")).toEqual([]);
+    expect(emailsIn('[Mail](mailto:m%C3%BCller@acme.de)')).toEqual([]);
+    // 引号、Markdown 链接与尖括号不算词的一部分。
+    expect(emailsIn("'info@acme.de' [x](mailto:vertrieb@acme.de) <max.mueller@acme.de>")).toEqual([
+      'info@acme.de',
+      'vertrieb@acme.de',
+      'max.mueller@acme.de',
+    ]);
+  });
+
+  it('中文、俄文等非拉丁文字紧贴地址时不算同一个词，照常抽取', () => {
+    expect(emailsIn('联系邮箱sales@acme.cn 电话')).toEqual(['sales@acme.cn']);
+    expect(emailsIn('почтаinfo@acme.ru')).toEqual(['info@acme.ru']);
+  });
 });
