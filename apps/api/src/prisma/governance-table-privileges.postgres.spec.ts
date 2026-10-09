@@ -97,8 +97,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('governance tables are read-only for
   it('lets no role but the table owner write either table, directly or with SET ROLE', async () => {
     // Every role except superusers, PostgreSQL's predefined pg_* roles and the owner: app_user,
     // the runtime roles and their logins, and anything that inherits from them. A role counts as
-    // a writer when it holds the privilege on the table or on any of its columns, or can SET ROLE
-    // to a role that does, to the owner or to a superuser.
+    // a writer when it holds the privilege on the table or on any of its columns, or can reach a
+    // role that does, the owner or a superuser: with SET ROLE, or by granting itself a role it
+    // administers.
     const writers = await owner.$queryRaw<{ entry: string }[]>`
       SELECT DISTINCT format('%s %s %s',
           CASE WHEN assumed.oid = member.oid THEN member.rolname::text
@@ -115,7 +116,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))('governance tables are read-only for
         AND NOT member.rolsuper
         AND left(member.rolname, 3) <> 'pg_'
         AND member.oid <> c.relowner
-        AND pg_catalog.pg_has_role(member.oid, assumed.oid, 'SET')
+        AND (pg_catalog.pg_has_role(member.oid, assumed.oid, 'SET')
+          OR pg_catalog.pg_has_role(member.oid, assumed.oid, 'MEMBER WITH ADMIN OPTION'))
         AND (assumed.rolsuper
           OR assumed.oid = c.relowner
           OR CASE WHEN p.privilege IN ('INSERT', 'UPDATE', 'REFERENCES')

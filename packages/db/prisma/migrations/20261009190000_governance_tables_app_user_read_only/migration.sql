@@ -24,9 +24,10 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
 GRANT SELECT ON TABLE public.source_policy, public.data_provider TO app_user;
 
 -- app_user, the runtime roles, the platform writer and every role that is a member of one of
--- them (the runtime logins, the site-build provider-wire login) must be left with no write
--- privilege: not granted directly, through PUBLIC or through membership, not on any single
--- column, and not reachable with SET ROLE (a superuser or the table owner counts as a writer).
+-- them (the runtime logins, the platform writer login, the site-build provider-wire login) must
+-- be left with no write privilege: not granted directly, through PUBLIC or through membership,
+-- not on any single column, and not reachable with SET ROLE or by granting itself a role it
+-- administers (a superuser or the table owner counts as a writer).
 -- Superusers and the table owner themselves are outside that family by definition.
 DO $$
 DECLARE
@@ -56,7 +57,8 @@ BEGIN
     WHERE c.oid IN ('public.source_policy'::regclass, 'public.data_provider'::regclass)
       AND NOT member.rolsuper
       AND member.oid <> c.relowner
-      AND pg_catalog.pg_has_role(member.oid, assumed.oid, 'SET')
+      AND (pg_catalog.pg_has_role(member.oid, assumed.oid, 'SET')
+        OR pg_catalog.pg_has_role(member.oid, assumed.oid, 'MEMBER WITH ADMIN OPTION'))
       AND (assumed.rolsuper
         OR assumed.oid = c.relowner
         OR CASE WHEN p.privilege IN ('INSERT', 'UPDATE', 'REFERENCES')
