@@ -819,7 +819,8 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     assert.equal(functions.length, 9);
     for (const entry of functions) {
       assert.equal(entry.prosecdef, true);
-      assert.deepEqual(entry.proconfig, ["search_path=pg_catalog, public"]);
+      // pg_temp last since 20261009160000_security_definer_search_path_pg_temp.
+      assert.deepEqual(entry.proconfig, ["search_path=pg_catalog, public, pg_temp"]);
     }
 
     const [platformRole] = await owner.$queryRawUnsafe(`

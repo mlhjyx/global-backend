@@ -7,6 +7,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
+import { WorkflowIdReusePolicy } from "@temporalio/client";
 import { TemporalClient } from "../temporal/temporal.client";
 import {
   DELETION_WORKFLOW,
@@ -623,11 +624,18 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   /**
    * 幂等启动工作流（B）：已有同 workflowId 在跑 → 视为已处理（合并语义，事件照常标 published）。
    * 否则事件每 2s 重试直到实例结束——日志风暴 + 假积压。其余错误照旧抛出（下轮重试）。
-   * 三个 internal command 共用，不改各自 workflowId reuse policy。
+   * 各 internal command 共用；reuse policy 由调用方逐个决定，未指定时用 Temporal 默认
+   * （同 ID 的上一次执行结束后允许再启动）。指定 REJECT_DUPLICATE 时，同 ID 已结束也报
+   * WorkflowExecutionAlreadyStartedError，同样按合并处理。
    */
   private async startWorkflowIdempotent(
     workflowType: string,
-    options: { taskQueue: string; workflowId: string; args: unknown[] },
+    options: {
+      taskQueue: string;
+      workflowId: string;
+      args: unknown[];
+      workflowIdReusePolicy?: WorkflowIdReusePolicy;
+    },
     what: string,
   ): Promise<void> {
     try {
@@ -635,7 +643,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`started ${what}`);
     } catch (err) {
       if ((err as Error)?.name === "WorkflowExecutionAlreadyStartedError") {
-        this.logger.log(`${what} already running — merged`);
+        this.logger.log(`${what} already started — merged`);
       } else throw err;
     }
   }
@@ -708,6 +716,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         {
           taskQueue: UNDERSTANDING_TASK_QUEUE,
           workflowId: `discovery-${ev.aggregateId}`,
+          // 准入租约（3 小时）内 binding 一直可花钱：同一事件再投递不能在 run 结束后
+          // 用同一 binding 另起一次执行。已结束的同 ID 报 AlreadyStarted，按合并处理。
+          workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
           args: [
             {
               workspaceId: ev.workspaceId,
