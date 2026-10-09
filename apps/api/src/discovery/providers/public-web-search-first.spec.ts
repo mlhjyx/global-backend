@@ -205,6 +205,20 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     });
   });
 
+  it('never judges a Wikidata page as a company site', async () => {
+    // Raw would match the record to the seeded www.wikidata.org policy, which the database writer
+    // does not apply to the bare wikidata.org source page: the write would raise.
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Pumpen Müller GmbH' }, provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    const result = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: searchBroker([{ url: 'https://www.wikidata.org/wiki/Q42', title: 'Pumpen Müller GmbH - Wikidata' }]),
+    }).discoverCompanies(distributorQuery(), CTX);
+    expect(result.records).toEqual([]);
+    expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+  });
+
   it('allows the extract task only the search tool', () => {
     expect(getTask('discovery.extract_company')?.allowedTools).toEqual(['searxng.search']);
   });

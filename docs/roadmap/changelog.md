@@ -7,24 +7,27 @@
 ## 2026-10-09 · Shape public-web company records to the Raw source governance
 
 - 起因（2026-10-09 xin 实测）：卖方 #16 的发现 run `733fbf03` 是 #611 之后第一次真正跑通公开网页搜索的 run。模型判出 21 家公司官网，21 条 raw 记录却全部 `REJECTED`（`PROVIDER_PAYLOAD_SCHEMA_INVALID`），各查询回执是接受 0、拒绝 9 / 8 / 4，所以 run 即使不提前停也建不出公司。`mapPublicWebCompanyToRecord` 交出的记录有三处不合 Raw 治理，任何一处都会拒掉整条：
-  - `country` 是模型原文（`Germany`），Raw 只收 ISO 3166-1 alpha-2 大写代码；
-  - `products` / `keywords` 里只要有一个词不在受控业务词表（约 36 个英文词，属数据最小化控制）里，整条拒绝；德国官网的产品词（`Kreiselpumpen`、`submersible`……）几乎都不在；
+  - `country` 是模型原文（`Germany`），Raw 只收两位大写字母的国家代码；
+  - `products` / `keywords` 里只要有一个词不在受控业务词表（36 个英文词，属数据最小化控制）里，整条拒绝；德国官网的产品词（`Kreiselpumpen`、`submersible`……）几乎都不在；
   - Raw 要求来源页的主机名与 `domain` 完全相同，`domain` 却去掉了开头的 `www.`；G3 搜索优先以后，来源页是第一条搜索命中，通常是 `https://www.<domain>/...`。
-- 改动（只改 provider 的映射；Raw 治理、词表、数据库都不动）：
+- 改动（只改公开网页 provider；Raw 治理、词表、数据库都不动）：
   - 国家用现有词表 `lookupCountryIso` 映射（德国 / Germany / Deutschland → DE）；模型直接答了词表里的代码（`DE`、`de`）也保留；`DACH`、`Österreich`、未知的不填，不猜。
   - 产品词、关键词只留受控词表里的词，其余丢掉，不扩词表；词之间统一成一个空格（`centrifugal-pumps` → `centrifugal pumps`），大小写不同的重复只留第一个，最多 20 个（Raw 与数据库的上限，模型契约允许 32 个）。
   - 来源页取第一条主机名恰好等于 `domain` 的搜索命中，没有就用首页 `https://<domain>/`；`www.` 命中、其他子域、http 命中都退回首页。没有改成「验证器比较前去掉 `www.`」：数据库写入函数 `write_raw_source_record_v2` 对 ACCEPTED 的 public_web 行同样要求主机名等于 `domain`，只放宽 TS 验证器会让写入抛错、整条查询的事务回滚，两边一起改就要加 migration。
-  - 数据库对来源 URL 的检查比 TS 严：除 `%20` 外不收任何百分号转义，联系方式规则把 `_` 当词界；对 QUARANTINED 行一样检查、一样抛错。所以路径含变音字母（`/über-uns` 编码成 `%C3%BC…`）或 `forgot_password` 这类的命中也退回首页，免得一条记录拖垮整条查询。
-  - 公司名做确定性的规范化：NFKC，弯撇号和各种破折号换成 ASCII，去掉引号、®、™ 和不可见格式字符，合并空白。带电话、邮箱或网址的名字不修，照旧由边界拒绝（回执不含原值）。规范化后只剩空串的名字（只有引号、商标符号）按「没有名字」跳过，模型回执照常记为尝试。
+  - 数据库对来源 URL 的检查比 TS 严，而且对带来源 URL 的 QUARANTINED 行一样检查、一样抛错：除 `%20` 外不收任何百分号转义（`/über-uns` 会编码成 `%C3%BC…`）；联系方式规则把 `_` 当词界，`/Kreiselpumpe_SK-40_160` 里它认出 TS 认不出的 `sk-` 密钥记号。所以含 `%` 或 `_` 的命中也退回首页；没有这两个字符的 URL 是纯 ASCII，两边的规则读法一致。
+  - 公司名做确定性的规范化：NFKC；弯撇号、各种破折号和搜索标题里的分隔符（`|`、`·`）换成 ASCII 的撇号或连字符；去掉双引号、包住词的单引号、®、™ 和不可见格式字符；`_` 换成空格（数据库把它当词界，`Pumpen_Secret` 两边都拒，而不是只在写入时抛错）；合并空白。带电话、邮箱或网址的名字不修，照旧由边界拒绝（回执不含原值）。规范化后只剩空串的名字按「没有名字」跳过，模型回执照常记为尝试。
   - `domain` 用联系人禁联的同一套规范化（小写、去 `www.`、国际化域名转 ASCII）；员工数只收非负整数。
+  - `wikidata.org` 加进噪声域名：Raw 会把它匹配到种子里的 `www.wikidata.org` policy，数据库却不认这条 policy 覆盖裸域名，写入会抛错。
 - 测试：
-  - 新增 `public-web-raw-governance.spec.ts` 24 项，按真实模型输出列表驱动：德语产品词与受控词混杂；国家 `Germany`、`Deutschland`、`德国`、`DACH`、`Österreich`、未知、`de`；置信度缺省、null、0.9；命中 `https://www.<domain>/x`、`https://<domain>/`、`http://www.<domain>/`、子域、变音路径、带查询串、`forgot_password`、非默认端口；`GmbH & Co. KG` 以及带弯引号、®、™、全角字母、制表符的名字；国际化域名。逐条断言丢掉的词、国家代码和实际选用的来源页，并要求通过 `validateRawSourceProviderPayload`；另测 20 个上限、员工数、带电话的名字仍被拒。
-  - `provider-raw-boundary.integration.spec.ts` 加 run 733fbf03 形状的记录，有覆盖公司域名的 source policy 时 ACCEPTED；`public-web-search-first.spec.ts` 加一条从 `www.` 命中和德语回答走完 `discoverCompanies` 的用例；`company-lineage.provider.spec.ts` 加只剩引号与商标符号的名字。新增 28 项中 27 项换回 main 的 provider 时失败，另一项（带电话的名字被拒）记录的是不变的边界行为。
-  - 变异：逐一撤掉 19 处改动，每次都有用例失败。
-  - `src/discovery` 及相关 temporal、durable-results、searxng 用例全部通过，`governance:verify` 310 项通过，`nest build` 与 eslint 通过。
+  - 新增 `public-web-raw-governance.spec.ts` 34 项。用例是按真实形状手写的模型输出，没有回放 run 733fbf03 的 21 条原始回答：德语产品词与受控词混杂；国家 `Germany`、`Deutschland`、`德国`、`DACH`、`Österreich`、未知、`de`；置信度缺省、null、0.9；命中 `https://www.<domain>/x`、`https://<domain>/`、`http://www.<domain>/`、子域、变音路径、带查询串、`_SK-`、`forgot_password`、非默认端口；13 种要规范化的名字；国际化域名。逐条断言丢掉的词、国家代码和实际选用的来源页。测试里另有一份数据库来源 URL 检查的 ASCII 移植（`raw_source_safe_https_url_v2` 及其联系方式规则），每个选中的来源页都要过它；12 个刁钻的同主机路径选出的 URL 两边都收。另测 20 个上限、员工数，以及带电话或 `_Secret` 的名字仍被拒（附干净名字的对照）。
+  - `provider-raw-boundary.integration.spec.ts` 加 run 733fbf03 形状的记录：有覆盖公司域名的 source policy 时 ACCEPTED，没有时 QUARANTINED 且来源 URL 是数据库能存的首页。`public-web-search-first.spec.ts` 加两项（从 `www.` 命中和德语回答走完 `discoverCompanies`；Wikidata 页面不送判站），`company-lineage.provider.spec.ts` 加一项（只剩引号与商标符号的名字）。
+  - 先红：换回 main 的 provider，并按 main 的 `mineDomain` 把首条命中当来源页传入，映射表 34 项中 30 项失败；没失败的 4 项是不变的行为（员工数 120、0、null，带电话的名字被拒）。走真实 `mineDomain` 的 3 项也都失败。
+  - 变异：逐一撤掉 25 处改动，每次都有用例失败。
+  - `src/discovery` 及相关 temporal、durable-results、searxng 用例全部通过，`governance:verify` 通过，`nest build` 与 eslint 通过。独立只读复审提出的 1 项 MEDIUM（`_SK-` 路径）与其余 LOW 已在第二个提交处理或写入下面。
 - 未做：
-  - Raw 按来源页主机名找 `source_policy`，而代码与种子都没有为公司官网登记 policy（本次未查库核实）。记录不再被拒，但会以 `SOURCE_POLICY_MISSING` 进 QUARANTINED，建档只读 ACCEPTED，所以公开网页发现多半仍建不出公司。怎样给公司官网放行（逐域登记还是按 provider 统一处理）要 owner 决定。
-  - TS 的 `isStableSafeHttpsUrl` 比数据库宽（百分号转义、`_` 词界），其他 provider 的来源 URL 也可能让写入抛错、整条查询回滚；本次只在 public_web 的映射里避开。
+  - Raw 按来源页主机名找 `source_policy`，而代码与种子都没有为公司官网登记 policy（本次未查库核实）。记录不再因这三处被拒，但会以 `SOURCE_POLICY_MISSING` 进 QUARANTINED，建档只读 ACCEPTED，所以公开网页发现多半仍建不出公司。怎样给公司官网放行（逐域登记还是按 provider 统一处理）要 owner 决定。若逐域登记，要登记裸域名：TS 的 `policyFor` 比较前两边都去掉 `www.`，数据库不去，`www.<domain>` 的 policy 会在 TS 匹配上、在写入时抛错。
+  - TS 的 `isStableSafeHttpsUrl` 比数据库宽（百分号转义、`_` 词界），其他 provider 的来源 URL 也可能让写入抛错、整条查询回滚；本次只在 public_web 的映射里避开。更稳的做法是让 TS 的检查与数据库一致。
+  - 仍会被拒的名字：只有半边引号的、带 `;`、`!`、`[]` 等边界不收的字符的。国家词表只有 8 国，`AT`、`Austria`、`Schweiz`、`United Kingdom`、`U.S.` 都映射不了；`search-localization.ts` 有一张更全的表，两张表可以合并。
 
 ## 2026-10-09 · Leave an in-flight repair wire to its owner
 

@@ -257,7 +257,7 @@ describe("actual provider mapper output → governed Raw boundary", () => {
         domain: "pumpen-mueller.de",
         hitUrls: [
           "https://www.pumpen-mueller.de/produkte/kreiselpumpen",
-          "https://www.pumpen-mueller.de/über-uns",
+          "https://pumpen-mueller.de/über-uns",
         ],
         sourceText:
           "- 标题：Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel\n  URL：https://www.pumpen-mueller.de/produkte/kreiselpumpen",
@@ -302,7 +302,9 @@ describe("actual provider mapper output → governed Raw boundary", () => {
     it("waits for a source policy instead, with a source URL the database writer stores", () => {
       // No source_policy row covers an arbitrary company domain yet: the record now reaches the
       // policy gate. A quarantined row still carries its source URL, and the writer raises on any
-      // URL it would not store (a percent-escape), which would abort the query's transaction.
+      // URL it would not store, which would abort the query's transaction. The first hit is on
+      // www.<domain>; the second is on the exact host but its umlaut path is percent-escaped
+      // (/%C3%BCber-uns), which the writer refuses: so the home page is recorded.
       const row = prepare("public_web", mapped(), "directory.example");
       expect(row).toMatchObject({
         ingestStatus: "QUARANTINED",

@@ -29,11 +29,7 @@ import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { MAX_PUBLIC_WEB_DOMAINS_PER_QUERY } from '../execution-envelope';
-import {
-  isContactFreeText,
-  isControlledBusinessTerm,
-  isStableSafeHttpsUrl,
-} from '../raw-source-provider-normalizer';
+import { isControlledBusinessTerm, isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { COUNTRY_ISO, lookupCountryIso } from '../vocab';
 import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
 import {
@@ -67,7 +63,7 @@ const PARSER_VERSION = 'public_web/v2-search';
 
 /** 搜索结果里永远不是目标公司官网的域名（词典/百科/社媒/平台市场/招聘站…）。 */
 const NOISE_DOMAINS = [
-  'wikipedia.org', 'wiktionary.org', 'merriam-webster.com', 'dictionary.com', 'britannica.com',
+  'wikipedia.org', 'wikidata.org', 'wiktionary.org', 'merriam-webster.com', 'dictionary.com', 'britannica.com',
   'youtube.com', 'facebook.com', 'linkedin.com', 'instagram.com', 'x.com', 'twitter.com',
   'reddit.com', 'quora.com', 'pinterest.com', 'tiktok.com',
   'amazon.com', 'amazon.de', 'ebay.com', 'alibaba.com', 'aliexpress.com', 'made-in-china.com',
@@ -394,7 +390,7 @@ export class PublicWebDiscoveryProvider
  * passes that boundary instead of failing it as a whole (discovery run 733fbf03: 21 of 21 rejected):
  * - `domain` (= `externalId`): the suppression canonicalization (lower case, no leading "www.", ASCII form);
  * - `name`: {@link companyName}; `country`: {@link countryIso};
- * - `products` / `keywords`: {@link controlledTerms}; `provenance.sourceUrl`: {@link sourcePageUrl}.
+ * - `products` / `keywords`: {@link keepControlledTerms}; `provenance.sourceUrl`: {@link sourcePageUrl}.
  * The free-text `industry` and `evidence` stay on the record: Raw drops the first and stores a digest of the second.
  */
 export function mapPublicWebCompanyToRecord(args: {
@@ -421,8 +417,8 @@ export function mapPublicWebCompanyToRecord(args: {
         ? employeeCount
         : undefined,
     attributes: {
-      products: controlledTerms(args.extracted.products),
-      keywords: controlledTerms(args.extracted.keywords),
+      products: keepControlledTerms(args.extracted.products),
+      keywords: keepControlledTerms(args.extracted.keywords),
       extraction_evidence: args.extracted.evidence ?? null,
       extraction_confidence: args.extracted.confidence ?? null,
       source_class: args.sourceClass,
@@ -436,40 +432,51 @@ export function mapPublicWebCompanyToRecord(args: {
   };
 }
 
-/** © ® ℠ ™. */
-const TRADEMARK_SIGNS = /[©®℠™]/gu;
-/** ` ʻ ʼ ‘ ’ ‛ ′ (´ is handled before NFKC). */
-const APOSTROPHES = /[`ʻʼ‘’‛′]/gu;
-/** ‐ ‑ ‒ – — ― −. */
-const DASHES = /[‐-―−]/gu;
-/** " « » “ ” „ ‟ ‹ ›. */
-const DOUBLE_QUOTES = /["«»“-‟‹›]/gu;
+/** © ® ℠ ™ */
+const TRADEMARK_SIGNS = /[\u{a9}\u{ae}\u{2120}\u{2122}]/gu;
+/** ` ʻ ʼ ‘ ’ ‚ ‛ ′ (´ is handled before NFKC) */
+const APOSTROPHES = /[`\u{2bb}\u{2bc}\u{2018}\u{2019}\u{201a}\u{201b}\u{2032}]/gu;
+/** ‐ ‑ ‒ – — ― − */
+const DASHES = /[\u{2010}-\u{2015}\u{2212}]/gu;
+/** Separators that search titles put between a company name and a slogan: | ¦ · • ‧ ∙ ⋅ */
+const TITLE_SEPARATORS = /[|\u{a6}\u{b7}\u{2022}\u{2027}\u{2219}\u{22c5}]/gu;
+/** " « » “ ” „ ‟ ‹ › */
+const DOUBLE_QUOTES = /["\u{ab}\u{bb}\u{201c}-\u{201f}\u{2039}\u{203a}]/gu;
+/** Single quotes around a word or phrase ('Pumpen' GmbH): quotation marks, unlike the apostrophe in O'Brien. */
+const QUOTED_PHRASE = /(^|[\s(])'([^']+)'(?=$|[\s),.:/-])/gu;
 
 /**
  * The model's company name as the Raw boundary stores it: NFKC text of letters, digits, spaces and
- * `._+&'(),/#:-`. Typographic apostrophes and dashes become their plain form; quotation marks, trademark
- * signs and invisible format characters go; white space collapses. A name that still fails, such as one
- * carrying a phone number, an email address or a URL, is not repaired: the boundary rejects it with a
- * value-free receipt.
+ * `._+&'(),/#:-`. Typographic apostrophes and dashes become their plain form, and so do the separators of a
+ * copied search title ("Pumpen Müller GmbH | Großhandel"); double quotation marks, single quotes around a
+ * word, trademark signs and invisible format characters go; "_" becomes a space; white space collapses.
+ * A name that still fails, such as one carrying a phone number, an email address or a URL, is not
+ * repaired: the boundary rejects it with a value-free receipt.
  */
 function companyName(raw: string): string {
   return raw
     // Before NFKC, which spells ™ and ℠ out as "TM" and "SM" and splits ´ into a space and a combining accent.
     .replace(TRADEMARK_SIGNS, '')
-    .replace(/´/gu, "'")
+    .replace(/\u{b4}/gu, "'")
     .normalize('NFKC')
     .replace(APOSTROPHES, "'")
     .replace(DASHES, '-')
+    .replace(TITLE_SEPARATORS, '-')
     .replace(DOUBLE_QUOTES, '')
     .replace(/\p{Cf}/gu, '')
+    // The database writer's contact rules read "_" as a word break, so "Pumpen_Secret" must reach the
+    // TypeScript boundary as "Pumpen Secret": both then refuse it, instead of the writer raising alone.
+    .replace(/_/gu, ' ')
+    .replace(QUOTED_PHRASE, '$1$2')
     .replace(/\s+/gu, ' ')
     .trim();
 }
 
 /**
  * ISO 3166-1 alpha-2 code of the model's free-text country ("Germany", "Deutschland", "德国" → DE) from the
- * discovery vocabulary; Raw stores no other form. An answer that already is one of the vocabulary's codes
- * ("DE", "de") is kept. Anything else ("DACH", "Österreich", "Germany (Bavaria)") is omitted, not guessed.
+ * discovery vocabulary; Raw only takes two upper-case letters. An answer that already is one of the
+ * vocabulary's codes ("DE", "de") is kept. Anything else ("DACH", "Österreich", "Germany (Bavaria)") is
+ * omitted, not guessed.
  */
 function countryIso(country: string | undefined): string | undefined {
   const term = country?.trim();
@@ -486,7 +493,7 @@ function countryIso(country: string | undefined): string | undefined {
  * leading or trailing "-" or "_", which the database writer's term check reads as an empty word, goes.
  * Case-insensitive duplicates are dropped; at most 20 terms are kept.
  */
-function controlledTerms(terms: readonly unknown[] | undefined): string[] {
+function keepControlledTerms(terms: readonly unknown[] | undefined): string[] {
   const kept = new Map<string, string>();
   for (const term of terms ?? []) {
     if (kept.size === MAX_RAW_TERMS) break;
@@ -502,9 +509,9 @@ function controlledTerms(terms: readonly unknown[] | undefined): string[] {
  * Provenance page of a public_web record. Raw binds its host to `domain` exactly, in the TypeScript
  * boundary and again in the database writer, and `domain` has no leading "www." (normalizeDomain). So the
  * first search hit served from exactly that host is kept; a hit on www.<domain>, on a subdomain or over
- * plain http falls back to the home page https://<domain>/. So does a hit the database would not store,
- * such as an umlaut path: the writer raises on that URL, quarantined rows included, and the raise aborts
- * the whole query's transaction.
+ * plain http falls back to the home page https://<domain>/. So does a hit the database might not store
+ * ({@link isStorableSourceUrl}): the writer raises on such a URL, quarantined rows included, and the raise
+ * aborts the whole query's transaction.
  */
 function sourcePageUrl(domain: string, hitUrls: readonly string[]): string {
   for (const hit of hitUrls) {
@@ -515,12 +522,14 @@ function sourcePageUrl(domain: string, hitUrls: readonly string[]): string {
 }
 
 /**
- * The TypeScript boundary's URL check plus the two places where the database writer's check
- * (`raw_source_safe_https_url_v2`) is stricter: it refuses every percent-escape but %20, and its
- * contact rules read "_" as a word break (forgot_password).
+ * A source URL that both the TypeScript boundary (`isStableSafeHttpsUrl`) and the database writer
+ * (`raw_source_safe_https_url_v2`) store. The database refuses every percent-escape but %20, such as an
+ * umlaut path, and its contact rules read "_" as a word break where TypeScript's do not: in
+ * `/Kreiselpumpe_SK-40_160` it finds a `sk-` key token that TypeScript misses. Without "%" and "_" the URL
+ * is plain ASCII, on which the two sets of rules read alike.
  */
 function isStorableSourceUrl(url: string): boolean {
-  return isStableSafeHttpsUrl(url) && !url.includes('%') && isContactFreeText(url.replace(/_/gu, ' '));
+  return isStableSafeHttpsUrl(url) && !/[%_]/u.test(url);
 }
 
 /**
