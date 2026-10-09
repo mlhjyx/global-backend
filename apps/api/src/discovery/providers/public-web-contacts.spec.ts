@@ -184,6 +184,21 @@ describe('buildPublicContacts', () => {
     expect(contacts.map((c) => c.email)).toEqual(['info@xn--mller-pumpen-dlb.de']);
   });
 
+  it('说不出来源页的个人邮箱不存，也不占名额；电话给第一个留下的联系点', () => {
+    const contacts = buildPublicContacts(
+      'acme.de',
+      [
+        { value: 'max@acme.de', sourceUrl: 'ftp://acme.de/kontakt' },
+        { value: 'info@acme.de', sourceUrl: 'ftp://acme.de/kontakt' },
+      ],
+      '+49 30 123',
+    );
+    // 职能邮箱不是个人数据，本来就不记来源页，照常保留。
+    expect(contacts.map((c) => [c.email, c.phone, c.sourcePage])).toEqual([
+      ['info@acme.de', '+49 30 123', undefined],
+    ]);
+  });
+
   it('公司域名无法规范化时一个都不留', () => {
     expect(buildPublicContacts('', at(['info@acme.de']), undefined)).toEqual([]);
     expect(buildPublicContacts('localhost', at(['info@localhost.de']), undefined)).toEqual([]);

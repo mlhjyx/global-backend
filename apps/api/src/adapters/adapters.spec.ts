@@ -81,5 +81,25 @@ describe('contact-extractor（确定性，非 LLM —— 命中的必然真实�
   it('中文、俄文等非拉丁文字紧贴地址时不算同一个词，照常抽取', () => {
     expect(emailsIn('联系邮箱sales@acme.cn 电话')).toEqual(['sales@acme.cn']);
     expect(emailsIn('почтаinfo@acme.ru')).toEqual(['info@acme.ru']);
+    // 非拉丁字母与 ASCII 混在一个本地部分里时从文字边界切开；以「.」开头的切片不是合法地址，丢弃。
+    expect(emailsIn('иван.petrov@acme.ru')).toEqual([]);
+  });
+
+  it('隐形格式字符（软连字符、零宽空格）与撇号的各种写法也不让匹配从词中间开始', () => {
+    // 复审补充：max.muster\u00ADmann@ 曾被抽成 mann@，O\u00B4Brien@ 被抽成 brien@。
+    expect(emailsIn('max.muster\u00ADmann@acme.de')).toEqual([]);
+    expect(emailsIn('max.muster\u200Bmann@acme.de')).toEqual([]);
+    expect(emailsIn('o\u2019brien@acme.ie O\u00B4Brien@acme.ie o\u02BCbrien@acme.ie')).toEqual([]);
+    // 格式字符本身不算词：标签后、中文后的零宽空格不挡住地址。
+    expect(emailsIn('E-Mail:\u200Binfo@acme.de 邮箱\u200Bsales@acme.cn')).toEqual(['info@acme.de', 'sales@acme.cn']);
+  });
+
+  it('同一地址出现在多页时记先抓到的页（首页在前）', () => {
+    expect(
+      extractPublicContacts([
+        { url: 'https://acme.de/', text: 'max@acme.de' },
+        { url: 'https://acme.de/impressum', text: 'Max@acme.de' },
+      ]),
+    ).toEqual([{ type: 'email', value: 'max@acme.de', sourceUrl: 'https://acme.de/' }]);
   });
 });

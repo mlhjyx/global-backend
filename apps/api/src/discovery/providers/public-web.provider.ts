@@ -435,13 +435,17 @@ export function buildPublicContacts(
 ): ProviderContactRecord[] {
   const companyDomain = canonicalizeSuppressionValue('domain', domain);
   if (!companyDomain) return [];
-  const onDomain = emails.filter((e) => onCompanyDomain(e.value, companyDomain));
-  return onDomain.slice(0, 5).flatMap((e, i): ProviderContactRecord[] => {
-    const local = e.value.split('@')[0];
+  // 先筛后取前 5 个：丢弃的地址不占名额，电话给第一个真正留下的联系点。
+  const kept = emails.flatMap((e) => {
+    if (!onCompanyDomain(e.value, companyDomain)) return [];
     // 白名单外一律个人：未知的本地部分可能就是人名（max@），保守判 personal。
     const personal = cleanEmail(e.value)?.kind !== 'role';
     const sourcePage = provenanceUrl(e.sourceUrl) ?? undefined;
-    if (personal && !sourcePage) return [];
+    // 个人数据要说得出来源页（GDPR Art.14），说不出就不存。
+    return personal && !sourcePage ? [] : [{ value: e.value, personal, sourcePage }];
+  });
+  return kept.slice(0, 5).map(({ value, personal, sourcePage }, i) => {
+    const local = value.split('@')[0];
     const nameShaped = /^[a-z]+[._-][a-z]+$/i.test(local);
     const fullName = !personal
       ? `公开联系点 (${local}@)`
@@ -451,16 +455,16 @@ export function buildPublicContacts(
             .map((w) => w[0].toUpperCase() + w.slice(1))
             .join(' ')
         : `个人邮箱 (${local}@)`;
-    return [{
-      externalId: `${domain}:${e.value}`,
+    return {
+      externalId: `${domain}:${value}`,
       fullName,
       title: personal ? undefined : GENERIC_CONTACT_TITLE,
       department: personal ? undefined : 'general',
-      email: e.value,
+      email: value,
       phone: i === 0 ? firstPhone : undefined,
       // 🔴 具名个人邮箱 = 个人数据（GDPR Art.4）：标记 → 持久化写 person.profile 证据（此前漏标，#58 P2）。
       ...(personal ? { personalData: true, sourcePage } : {}),
-    }];
+    };
   });
 }
 
