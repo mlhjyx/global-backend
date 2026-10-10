@@ -133,7 +133,7 @@ describe.runIf(enabled)('Sanctions operator refresh on PostgreSQL', { timeout: 1
   const lists = new Map<string, string>();
   const request = vi.fn<PublicHttpRequester>(async (url): Promise<PublicHttpResponse> => {
     const body = Buffer.from(lists.get(url) ?? '', 'utf8');
-    const ofac = url.includes('ofac.treas.gov');
+    const ofac = new URL(url).hostname === OFAC_DOMAIN;
     return {
       status: 200,
       ok: true,
