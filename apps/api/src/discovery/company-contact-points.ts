@@ -16,6 +16,11 @@ import {
 export const COMPANY_CONTACT_PROVIDER_KEY = 'company_contact' as const;
 /** Rules version of the automatic points; a new version re-reads profiled companies. */
 export const COMPANY_CONTACT_PARSER_VERSION = 'company_contact/v1' as const;
+/**
+ * Bookkeeping key in the website_profile namespace (next to `_ts`, never field
+ * evidence): the rules version the contact paths were last read with.
+ */
+export const COMPANY_CONTACT_PARSER_MARKER = '_contact_parser' as const;
 const REMOVED_FROM_SITE = 'REMOVED_FROM_SITE';
 
 export type CompanyContactSourceKind = 'homepage' | 'contact_page';
