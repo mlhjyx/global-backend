@@ -102,6 +102,26 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     ]);
   });
 
+  it('seeds the BI-14 company_contact switch DISABLED and never overwrites a later change', async () => {
+    const providers: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    await new DiscoveryProviderRegistry().seed({
+      dataProvider: {
+        upsert: async (args: (typeof providers)[number]) => {
+          providers.push(args);
+          return args;
+        },
+      },
+    } as never);
+
+    expect(providers.filter((entry) => entry.create.key === 'company_contact')).toEqual([
+      {
+        where: { key: 'company_contact' },
+        update: {},
+        create: { key: 'company_contact', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+      },
+    ]);
+  });
+
   it('writes the company-site seed as one brace-free create body, as the provider registry parse expects', () => {
     // scripts/governance-evidence-provider-contracts.mjs reads each `create: {...}` without nested
     // braces and keeps only bodies with a provider key, class and status, so this one stays out.
