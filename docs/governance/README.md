@@ -29,6 +29,7 @@
 | [`runtime-evidence/v1`](runtime-evidence.schema.json)                                             | commit、environment、验证窗口、kind、result 与 artifact digest；到期只作 historical                                                                                                                                                                                  |
 | [`release-bundle/v1`](release-bundle.schema.json)                                                 | Scope、Promise、Source、Evidence、Operations、Data、Rollback、Guide、Learning，以及相互独立的机器/reviewer/用户授权/merge 声明与 `external_provenance`；当前无独立 readback verifier，所有 `PILOT/GA` 保持 fail closed                                               |
 | [`approval-authorities/v1`](approval-authorities.schema.json) 及 Trusted Approval receipt schemas | 固定的六个审批角色及其数值 GitHub actor 映射；receipt、evidence manifest、revocation、supersession 与 Program C 的不可变 merge grant/append-only consumption 均为 closed shape。当前 registry 全部 `UNASSIGNED`，因此不构成任何 trusted approval、merge 或发布授权。 |
+| [`app-user-table-privileges/v1`](app-user-table-privileges.json)                                  | `public` 下每张表上 `app_user` 的权限（含只授在列上的）与属主对新表的默认权限；CI 的真库用例要求迁移后的实际权限与它逐表一致，新表或改授权须在同一 PR 更新本清单                                                                                                    |
 
 不再维护逐文件登记或阶段工作包；普通文档导航由[项目门户](../README.md)承担，文件历史与审批 provenance 由 Git 和 PR 承担。真实发布所需字段、证据与学习回写要求由 Release Bundle 机器合同承重，[分析、测试与发布证据](../frontend/12-analytics-testing-and-release-evidence.md)解释人类流程。
 
