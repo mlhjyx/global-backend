@@ -1,7 +1,7 @@
 # 制裁名单运营刷新 runbook
 
 > 生命周期：`GUIDE`
-> 生命周期依据：平台 schedule 准入设计（PR #625，`docs/superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md` §2 方案 B0，产品负责人 2026-10-10 拍板）引入的运营命令
+> 生命周期依据：[平台 schedule 准入设计](../superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md) §2 方案 B0（PR #625，产品负责人 2026-10-10 拍板）引入的运营命令
 
 R4 冻结期间平台 schedule 保持暂停，`sanctionsRefreshWorkflow` 不运行。三份官方制裁名单改由运营者用一条命令刷新；打开制裁门是之后单独的 owner 步骤（§4）。
 
