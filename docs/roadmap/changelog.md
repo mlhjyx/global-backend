@@ -32,6 +32,32 @@
     - 把 xin 上 07-13 版的 SDN 行只读复制到一次性库后 dry run：将新增 319、更新 19、不变 9,680、撤下 111，收缩保护通过。随后写入，结果与 dry run 逐项相同（活跃 10,018 行，撤下的 111 行保留 07-13 版本号），再跑一次零变化。
 - 未做：没有在 xin 的 `global_dev` 上运行；运行与打开制裁门都待产品负责人批准。SDN 已到 32 MiB 上限的约 87%。本机经代理下载时 DNS 解析与连接偶尔失败（实测中出现过 `dns_lookup_failed` 与 `ECONNRESET`），已由重试与单源重跑覆盖。
 
+## 2026-10-10 · Design the lead delivery loop: package fields, weekly report, feedback and contact drafts
+
+- 设计 `docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md`（APPROVED），对应 BI-15、BI-19–BI-23。产品负责人当天拍板 E1–E9：
+  - `LeadQualified` 仍为 v1，只加可选字段；
+  - 周报为本周 accepted 线索的 CSV；
+  - 线索级成本分摊估算并注明口径；
+  - 拒绝原因码必填；
+  - 开发信草稿给目标国语言加中文译文，末尾附卖方自己的 WhatsApp 一键聊天链接，由买家先开口；
+  - 联系路径加入公司自己的领英公司页、X 账号链接；
+  - 修复信号挂不上有域名公司的缺陷。
+- 客户跟进前台只用 GrowthOS，不接其他 CRM。
+- 本条只有文档；按设计 §11 拆 6 个 PR 施工。
+
+## 2026-10-10 · Record why paused platform schedules cannot be admitted, and the decision to freeze R4
+
+- 起因：为补平台写入者的表授权（2026-10-09 设计的 P4）做只读核对时发现，4 个暂停的平台 schedule 现在恢复，第一步就会失败。
+  - 四个工作流的第一步 `admitPlatformSchedule` 调用 `admit_platform_execution_budget_run_v1`；`20260905193000` 已收回平台写入者对它的执行权。
+  - 替代的 v2 要 GrowthOS 为每次运行签发平台授权。GrowthOS 只有签名器，没有持久签发与投递；Backend 的 v2 服务没有调用方。
+  - 另有 10 张表平台写入者没有授权。
+- 设计 `docs/superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md`（APPROVED），产品负责人当天拍板：
+  - 冻结 R4（D2），不在 R4 准入上继续投入；
+  - RL1 期间平台 schedule 继续暂停；
+  - 制裁名单走不经平台 schedule 的运营刷新，之后打开制裁门（D9）；
+  - 平台工作流迁进 customer worker 的设计另出。
+- 本条只有文档，没有代码与迁移。
+
 ## 2026-10-10 · Extend the admission lease to ICP design and ICP query planning
 
 - 起因（2026-10-10 xin 实测）：一次 ICP 查询计划（`POST /icps/:icpId/query-plans`）返回 HTTP 402 `EXECUTION_BUDGET_GRANT_EXPIRED`。Grant 10:12:04 签发、10:17:04 到期，10:12:10 准入（authority 为 `icp.query_plan` + `icp`）。请求先做一次约 130 秒的规划调用，再做 9 次串行的 `taxonomy.normalize`（10:14:21 至 10:18:13）；10:18:04（到期加 60 秒容差）之后的下一次预留被拒。ICP 设计（`POST /companies/:companyId/icps`）是一次模型调用（10-10 为 130 至 150 秒，账本里最长 3 分 04 秒）；按现有代码它在准入后只核验与预留一次，修复调用也在同一个预留里，不会因模型耗时在准入后过期，给它租约是防御性的。产品负责人 2026-10-10 决定：准入租约扩展到这两个操作，时长 30 分钟；发现 run 仍是 3 小时，不包含其他用途。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §8。
