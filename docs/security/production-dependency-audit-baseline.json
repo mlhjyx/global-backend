@@ -1,20 +1,20 @@
 {
   "schema_version": "production-dependency-audit-baseline/v1",
   "source": {
-    "base_commit": "92eb84cbdae05951dc83b1b219a94362240046ff",
-    "lockfile_digest": "sha256:c03d7d74dde36aa0225a1e765383e92274f7ec8474da510969997c6575d7a61e",
+    "base_commit": "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
+    "lockfile_digest": "sha256:14962679245f94987162656a5c23354f5ca92f59d4643c2d74d1a9fbf17a80b5",
     "registry": "https://registry.npmjs.org/",
     "package_manager": "pnpm@9.15.9",
     "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
-    "captured_at": "2026-10-10T13:29:24.325Z"
+    "captured_at": "2026-10-10T13:59:34.073Z"
   },
   "bootstrap": {
     "mode": "INITIAL_BASELINE",
-    "base_commit": "92eb84cbdae05951dc83b1b219a94362240046ff"
+    "base_commit": "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1"
   },
   "governance": {
     "owner": "OWN-SECURITY",
-    "valid_until": "2026-10-24T13:29:24.000Z",
+    "valid_until": "2026-10-24T13:59:34.000Z",
     "policy": "Exact zero-advisory snapshot of the audited corrected source. Any production advisory, severity increase, critical finding, or expired baseline fails closed."
   },
   "advisories": [],
