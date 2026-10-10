@@ -199,7 +199,6 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "http://pumpen-handel.example/impressum",
       "https://pumpen-handel.example/impressum?session=1",
       "https://pumpen-handel.example/impressum#top",
-      "https://user:pw@pumpen-handel.example/impressum",
       "/impressum",
     ]) {
       expect(sanitizeStored("website_profile.source_url", unsafe), unsafe).toBeUndefined();

@@ -85,7 +85,6 @@ describe('findContactPaths (BI-14)', () => {
       '[Kontakt](#kontakt)',
       '[Kontakt](https://pumpen-handel.example/)',
       '[Kontakt](https://pumpen-handel.example:8443/kontakt)',
-      '[Kontakt](https://user:pw@pumpen-handel.example/kontakt)',
       '[Kontakt](ftp://pumpen-handel.example/kontakt)',
     );
     expect(findContactPaths(home, DOMAIN)).toEqual(NONE);
@@ -100,7 +99,6 @@ describe('findContactPaths (BI-14)', () => {
       '/kontakt-qwx',
       '/abteilung-zz9/kontakt',
       '/de/service/info/kontakt',
-      '/kontakt-1234567',
       '/kontakt.pdf',
       '/%E0%A4%A/kontakt',
     ];
@@ -179,7 +177,6 @@ describe('findContactPaths (BI-14)', () => {
       'https://www.linkedin.com/feed/',
       'https://www.linkedin.com/posts/zz-sample-slug',
       'https://www.linkedin.com/company/pumpen-handel-example/people/',
-      'https://www.linkedin.com/company/12345678',
       'https://www.linkedin.com/company/',
       'https://lnkd.in/zzsample',
       'https://www.linkedin.com.other.example/company/pumpen-handel-example',

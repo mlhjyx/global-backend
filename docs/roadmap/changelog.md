@@ -4,6 +4,24 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-10 · Store links to each company's own contact paths (BI-14 PR-1, switch off by default)
+
+- 起因：BI-14 设计（产品负责人批准，2026-10-10 修订）改为只存公司自己的联系路径链接，不抽邮箱和电话。当天又批准两项范围补充：供应商页（`supplier_page`），以及首页链接里的公司 LinkedIn 页与 X 账号（决定 E9）。本 PR 只做数据通路，不改评分、原因码、运营端点与 OpenAPI（PR-2）。
+- 新表 `company_contact_point`（迁移 `20261011090000_company_contact_point`，单事务、只新增、零回填）：
+  - kind 只有六种：`contact_page`、`impressum_page`、`contact_form`、`supplier_page`、`linkedin_company_page`、`x_company_account`；value 是不带 query、fragment、`@` 与空白的 https 链接，LinkedIn 只收 `https://www.linkedin.com/company|showcase/<slug>`，X 只收 `https://x.com/<handle>`；`data_class` 只能是 green。表里没有邮箱、电话、人名字段，以上全部由 CHECK 约束。
+  - 自动来源（`company_contact`）只写 UNVERIFIED；VALID 与 OPERATOR_REJECTED 必须有 `updated_by`（人）。状态 CHECK 每个分支先判 `status_reason IS NOT NULL`：一次性库实测，没有这一判断时 INVALID 且无原因的行会因 CHECK 结果为 NULL 而写进去。
+  - 复合外键到 `canonical_company(workspace_id, id)`，随公司级联删除；唯一键 (workspace, company, kind, value)；ENABLE + FORCE RLS，租户策略同发现表；`app_user` 显式授予 SELECT、INSERT、UPDATE、DELETE，`app-user-table-privileges.json` 同步。`schema.prisma` 加模型，Copy 已重签（只变指纹）。
+- 找链接（`discovery/website-profile/contact-paths.ts`，纯函数）：只读官网画像已经抓到的首页里的链接。同站链接（公司域名或其子域）只有在路径每一段都是已知词或短数字时才收，所以存下的链接带不出页面上的任意文字（比如人名）；按路径或链接文字判定联系页、Impressum、供应商页（德英文：Lieferant werden、Lieferantenportal、Partner werden、Händler werden、Hersteller werden、Become a supplier、Supplier portal、Partner program 等），每种至多 1 个，规范成 https、去掉 query 与 fragment；只靠链接文字命中且带 query 的链接不收。LinkedIn 只收 company / showcase 页；X 只收账号页，且账号名里必须含公司域名名称（无法确认账号属于公司时不存，避免把个人账号当成公司数据）。
+- 联系表单：开关打开且首页链到联系页时，经 ToolBroker 以同一公司主体对联系页做 1 次 `crawl4ai.render`（robots 与 source_policy 在工具内照常执行），看是否有表单：提交控件、同意文本、必填标记三类至少两类，排除搜索、登录、购物车和不带留言框的订阅表单。只读 HTML，不填写、不提交。渲染失败或被 robots 拦时，表单记为「未知」，不当作「没有」。
+- 写入：在官网画像的同一事务里，先拿工作区禁联锁，再 FOR SHARE 复读公司状态，再读禁联事实；公司缺失、已 SUPPRESSED、命中域名或公司名禁联时一条不写，链接主机命中域名禁联时丢掉该点。重画像时，本次看过的种类里不再出现的自动来源点改为 INVALID / `REMOVED_FROM_SITE`，再次出现时恢复为 UNVERIFIED；运营来源或被人改过的点从不自动修改。联系页渲染的回执单独成一批 ACK，避免重放与新回执混在同一批。
+- 开关 `data_provider.company_contact` 以 DISABLED 种入（`update: {}` 不覆盖运维改动）。关闭时与改动前完全一样：只抓首页和 Impressum、不渲染、不写点。打开后，30 天内画像过、但还没用当前规则读过联系路径的公司会重画像一次（`website_profile._contact_parser` 标记，不写 field_evidence）。
+- 其他：
+  - `website_profile.source_url` 记录画像事实所在的页（Impressum，否则首页），经现有安全 https 校验；贸易角色、登记号、税号因此有来源 URL（A4）。
+  - `discovery.classify_trade_role` 的 allowedTools 加 `crawl4ai.render`；发现 run 预算包络按每家画像公司至多 1 次 render 加上限（`crawl4ai.render` 24 → 74 次，技术报价上限多 0.50 美元，5,597.48 → 5,597.98 美元）。新调用点登记进执行授权清单（37 个）。
+  - 公司主体 DSR 擦除时删掉该公司的点，计数并入 `contact_points_erased`，DeletionCompleted 契约不加字段。
+- 测试：纯函数 17 项、画像提供方 6 项（含开关关闭时恰好 2 次抓取）、经真实 ToolBroker 验证渲染以公司 subjectRef 准入 2 项、写入 7 项、活动 4 项、命名空间标记 2 项、擦除 2 项、迁移静态合同 6 项、属性清洗 1 项、种子 1 项；真库用例 `company-contact-point.postgres.spec.ts` 5 项以 app_user 运行（带 superuser 与 BYPASSRLS 守卫），接入 CI「Raw SQL parameter types on PostgreSQL」步骤，`app-user-table-privileges.postgres.spec.ts` 新增一项正向用例。一次性库：只部署 main 的迁移时新用例与权限清单用例失败（表不存在），在同一个库上部署新迁移后全部通过。
+- 未做（PR-2）：可达性公式与评分、原因码、运营端点、读模型与 OpenAPI。真栈有界样本要等 D9 开关与预算拍板。
+
 ## 2026-10-10 · Record why paused platform schedules cannot be admitted, and the decision to freeze R4
 
 - 起因：为补平台写入者的表授权（2026-10-09 设计的 P4）做只读核对时发现，4 个暂停的平台 schedule 现在恢复，第一步就会失败。

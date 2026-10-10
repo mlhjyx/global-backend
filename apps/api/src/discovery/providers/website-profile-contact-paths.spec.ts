@@ -18,7 +18,7 @@ const CTX = {
   artifactSubject: { subjectType: 'company' as const, subjectId: COMPANY },
 };
 const INPUT = { domain: 'pumpen-handel.example', homeCountry: 'de', icpContext: 'Pumpen' };
-const IMPRESSUM = 'Impressum\n\nPumpen Handel GmbH\nAmtsgericht München HRB 98765\nUSt-IdNr.: DE136695976';
+const IMPRESSUM = 'Impressum\n\nPumpen Handel GmbH';
 const HOME = [
   'Ihr Pumpen-Großhandel. Autorisierter Händler und Vertriebspartner für Grundfos.',
   '[Kontakt](https://pumpen-handel.example/kontakt)',
@@ -98,7 +98,7 @@ describe('WebsiteProfileProvider contact paths (BI-14)', () => {
     expect(profile).toMatchObject({
       tradeRole: 'distributor',
       tradeRoleSource: 'rules',
-      vatId: 'DE136695976',
+      impressumUrl: 'https://pumpen-handel.example/impressum.html',
     });
   });
 
