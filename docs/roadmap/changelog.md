@@ -4,6 +4,19 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-10 · Record why paused platform schedules cannot be admitted, and the decision to freeze R4
+
+- 起因：为补平台写入者的表授权（2026-10-09 设计的 P4）做只读核对时发现，4 个暂停的平台 schedule 现在恢复，第一步就会失败。
+  - 四个工作流的第一步 `admitPlatformSchedule` 调用 `admit_platform_execution_budget_run_v1`；`20260905193000` 已收回平台写入者对它的执行权。
+  - 替代的 v2 要 GrowthOS 为每次运行签发平台授权。GrowthOS 只有签名器，没有持久签发与投递；Backend 的 v2 服务没有调用方。
+  - 另有 10 张表平台写入者没有授权。
+- 设计 `docs/superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md`（APPROVED），产品负责人当天拍板：
+  - 冻结 R4（D2），不在 R4 准入上继续投入；
+  - RL1 期间平台 schedule 继续暂停；
+  - 制裁名单走不经平台 schedule 的运营刷新，之后打开制裁门（D9）；
+  - 平台工作流迁进 customer worker 的设计另出。
+- 本条只有文档，没有代码与迁移。
+
 ## 2026-10-10 · Extend the admission lease to ICP design and ICP query planning
 
 - 起因（2026-10-10 xin 实测）：一次 ICP 查询计划（`POST /icps/:icpId/query-plans`）返回 HTTP 402 `EXECUTION_BUDGET_GRANT_EXPIRED`。Grant 10:12:04 签发、10:17:04 到期，10:12:10 准入（authority 为 `icp.query_plan` + `icp`）。请求先做一次约 130 秒的规划调用，再做 9 次串行的 `taxonomy.normalize`（10:14:21 至 10:18:13）；10:18:04（到期加 60 秒容差）之后的下一次预留被拒。ICP 设计（`POST /companies/:companyId/icps`）是一次模型调用（10-10 为 130 至 150 秒，账本里最长 3 分 04 秒）；按现有代码它在准入后只核验与预留一次，修复调用也在同一个预留里，不会因模型耗时在准入后过期，给它租约是防御性的。产品负责人 2026-10-10 决定：准入租约扩展到这两个操作，时长 30 分钟；发现 run 仍是 3 小时，不包含其他用途。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §8。
