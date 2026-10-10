@@ -6,15 +6,16 @@ import type { PrismaClient } from '@prisma/client';
  * 端点据 2026-07-14 一手真探（OFAC 跟 302 + 必带 UA；EU 固定公开 token）。
  */
 
-interface SanctionsSourceSeed {
-  key: string;
-  label: string;
-  url: string;
-  format: string;
-  license: string;
+export interface SanctionsSourceSeed {
+  readonly key: string;
+  readonly label: string;
+  readonly url: string;
+  readonly format: string;
+  readonly license: string;
 }
 
-const SOURCES: SanctionsSourceSeed[] = [
+/** The official list endpoints; the operator refresh (B0) downloads from these and nothing else. */
+export const SANCTIONS_SOURCE_SEEDS: readonly SanctionsSourceSeed[] = Object.freeze([
   {
     key: 'ofac_sdn',
     label: 'OFAC SDN (US Treasury)',
@@ -36,7 +37,7 @@ const SOURCES: SanctionsSourceSeed[] = [
     format: 'eu_fsf_xml',
     license: 'CC-BY-4.0', // EU 再用（Decision 2011/833/EU）——实现期核实
   },
-];
+].map((source) => Object.freeze(source)));
 
 interface SanctionsPolicySeed {
   domain: string;
@@ -60,7 +61,7 @@ const POLICIES: SanctionsPolicySeed[] = [
 
 /** 幂等 seed（owner 连接）：sanctions_source（DISABLED）+ source_policy（sanctions_screening 用途门）。 */
 export async function seedSanctions(db: PrismaClient): Promise<void> {
-  for (const s of SOURCES) {
+  for (const s of SANCTIONS_SOURCE_SEEDS) {
     await db.sanctionsSource.upsert({
       where: { key: s.key },
       update: {}, // 不覆盖 ops 手改的 status/config

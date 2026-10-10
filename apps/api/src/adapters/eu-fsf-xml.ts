@@ -1,5 +1,10 @@
 import { XMLParser } from 'fast-xml-parser';
-import type { ParsedSanctionsAlias, ParsedSanctionsEntity, ParsedSanctionsList } from './ofac-xml';
+import {
+  countSubjectType,
+  type ParsedSanctionsAlias,
+  type ParsedSanctionsEntity,
+  type ParsedSanctionsList,
+} from './ofac-xml';
 
 /**
  * EU FSF（Financial Sanctions Files，DG FISMA）合并制裁名单 XML 解析器。
@@ -38,7 +43,7 @@ function attr(node: unknown, name: string): string | null {
 }
 
 export function parseEuFsf(xml: string): ParsedSanctionsList {
-  const empty: ParsedSanctionsList = { publishDate: null, recordCount: null, entities: [] };
+  const empty: ParsedSanctionsList = { publishDate: null, recordCount: null, entities: [], subjectTypes: {} };
   if (!xml || !xml.trim()) return empty;
 
   let doc: { export?: XmlNode };
@@ -52,8 +57,11 @@ export function parseEuFsf(xml: string): ParsedSanctionsList {
   const publishDate = gen && /^\d{4}-\d{2}-\d{2}/.test(gen) ? gen.slice(0, 10) : null;
 
   const entities: ParsedSanctionsEntity[] = [];
+  const subjectTypes = new Map<string, number>();
   for (const ent of asArray<XmlNode>(exp.sanctionEntity as XmlNode | XmlNode[])) {
-    if (attr(ent.subjectType, 'code') !== 'enterprise') continue; // 🔴 仅实体，person 剔除
+    const subjectType = attr(ent.subjectType, 'code');
+    countSubjectType(subjectTypes, subjectType);
+    if (subjectType !== 'enterprise') continue; // 🔴 仅实体，person 剔除
     const externalId = attr(ent, 'logicalId') ?? attr(ent, 'euReferenceNumber');
     if (!externalId) continue;
 
@@ -78,5 +86,5 @@ export function parseEuFsf(xml: string): ParsedSanctionsList {
 
     entities.push({ externalId, primaryName, country, programs, aliases });
   }
-  return { publishDate, recordCount: entities.length, entities };
+  return { publishDate, recordCount: entities.length, entities, subjectTypes: Object.fromEntries(subjectTypes) };
 }
