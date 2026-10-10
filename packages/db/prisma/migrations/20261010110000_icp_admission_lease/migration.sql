@@ -4,7 +4,9 @@
 -- On 2026-10-10 an ICP query plan failed with EXECUTION_BUDGET_GRANT_EXPIRED: one planning
 -- model call of about 130 seconds and nine sequential taxonomy.normalize calls ran past the
 -- Grant window (at most 5 minutes plus 60 seconds of tolerance), and the next reservation was
--- refused. ICP design is one model call of 130 to 185 seconds plus any repair call.
+-- refused. ICP design attests and reserves once, right after admission, and its repair call
+-- runs inside that same reservation, so with the current code it cannot expire after admission;
+-- its lease is a defensive choice of the product owner.
 --
 -- Admitting a WORKSPACE_GRANT for icp.design + company or icp.query_plan + icp now stamps
 -- admission_lease_expires_at = consumed_at + 30 minutes. Discovery runs (discovery.run +
@@ -23,7 +25,9 @@
 -- 20261009160000_security_definer_search_path_pg_temp.
 --
 -- Deploy in name order, after 20261010090000 and 20261010100000, in the same window as the
--- image that carries this migration, with no discovery run or ICP request in flight.
+-- image that carries this migration, with no discovery run or ICP request in flight. The runtime
+-- takes the last finished migration, so an earlier-named migration deployed after this one would
+-- keep every image from starting.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';

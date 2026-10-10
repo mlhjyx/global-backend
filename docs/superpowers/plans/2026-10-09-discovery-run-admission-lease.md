@@ -10,7 +10,7 @@
 - 准入后的时间检查全仓只有一处：`attest_authorized_tool_budget_v1`。每次预留（模型与工具都走 `reserve_tool_budget`）和每个活动开头的 `attestAuthorized` 都调用它。准入时另有两处检查（`consume_workspace_execution_authority`、`open_authorized_tool_budget_v1`），不改。
 - 给 `execution_budget_authority` 加可空列 `admission_lease_expires_at`。准入时只对 `WORKSPACE_GRANT` + `discovery.run` + `discovery_run` 写入 `准入时刻 + 3 小时`，其余行为 NULL。
 - `attest` 的过期判断改用 `COALESCE(admission_lease_expires_at, expires_at)`，仍走原有 `execution_budget_authority_time_state`（含 60 秒容差）。撤销、范围、账户、额度检查一字不动。
-- 新 CHECK 约束兜底：租约只能出现在发现 run 行上，必须晚于 `expires_at`，且不超过 `consumed_at + 3 小时`。
+- 新 CHECK 约束兜底：租约只能出现在发现 run 行上，必须晚于 `expires_at`，且不超过 `consumed_at + 3 小时`。（2026-10-10 起两个 ICP 操作也有 30 分钟租约，见 §8）
 - 租约结束仍报 `EXECUTION_BUDGET_GRANT_EXPIRED`，与 #614 的放行码一致，TS 无需改动。
 - 存量行保持 NULL，行为与现在相同；迁移不回填。
 
@@ -57,7 +57,7 @@
 ### 1.4 TS 侧重新核验的路径（全部经同一个 SQL）
 
 - 发现 run binding（本设计覆盖）：`discovery.activities.ts:365-389` 的 `ensureRunBudget`，用于 loadPlanQueries、qualifyFitForRun、enrichRun、profileWebsitesForRun、enrichSignalsRun、registerWatchesForRun、enqueuePatentLookupsForRun、finalizeRun（:405 至 :1812）；`executeQuery` 的直接核验（:505）；`taxonomy-resolver.ts:452`；`intent-projection.service.ts:314`；每次预留 `router-model-gateway.ts:497`、`tool-broker.ts:371` → `budget-store.ts:880`。
-- 不覆盖（保持 5 分钟）：`understanding.activities.ts:114`（understanding.run）；`icp-budget-execution.ts:13`（icp.*）；`discovery.service.ts:333/556`（discover-contacts、guess-emails，`discovery.run` + `company`）与 `:847`（contact.verify）；`platform-schedule-authority.activities.ts:181`（平台）。
+- 不覆盖（保持 5 分钟）：`understanding.activities.ts:114`（understanding.run）；`icp-budget-execution.ts:13`（icp.*，2026-10-10 起有 30 分钟租约，见 §8）；`discovery.service.ts:333/556`（discover-contacts、guess-emails，`discovery.run` + `company`）与 `:847`（contact.verify）；`platform-schedule-authority.activities.ts:181`（平台）。
 
 ### 1.5 表结构与平台 grant 的差异
 
@@ -117,7 +117,7 @@ COMMIT;
 
 ### 2.3 决定与理由
 
-- **只给发现 run 租约。** 证据只指向发现 run（预计 1–1.5 小时）。其他 workspace 操作是同步 HTTP 或短工作流，3 小时对它们是 36 倍的无谓放宽。`discovery.run` 也被联系人端点使用，所以必须同时按 `subject_type = 'discovery_run'` 区分。
+- **只给发现 run 租约。**（2026-10-10 起扩展到两个 ICP 操作，见 §8）证据只指向发现 run（预计 1–1.5 小时）。其他 workspace 操作是同步 HTTP 或短工作流，3 小时对它们是 36 倍的无谓放宽。`discovery.run` 也被联系人端点使用，所以必须同时按 `subject_type = 'discovery_run'` 区分。
 - **长度写在 SQL 里，3 小时。** 函数写确切值，CHECK 写上限。授权语义的权威在数据库（ADR-024：金额、Grant、消费是 PostgreSQL 权威事实）。若由 TS 参数传入，就等于让应用代码自定授权时长。若放进环境变量，就成了 `environment-parity-policy.json` 未登记的环境差异。代价是改长度要走迁移加换镜像，可以接受。3 小时约为预期时长的 2 倍。
 - **结算与释放不改。** 它们本来就不查时间（A6）。租约内做的预留，租约结束后照样能结算或释放。
 - **存量行为 NULL，沿用旧口径。** 迁移不写 UPDATE；`COALESCE` 让 NULL 行按 `expires_at` 判断。xin 上 43 行全部不变，4 个卡住的 run 不会复活。
@@ -163,7 +163,7 @@ COMMIT;
 
 - **迁移安全：** 加可空列且无默认值，只改元数据，不重写表。CHECK 校验扫一遍小表（xin 43 行）。整个迁移是一个事务，带 `lock_timeout 5s` 与 `statement_timeout 30s`，拿不到锁就快速失败。不回填。
 - **部署门：** 运行时要求库里最新迁移名与镜像证明的 `migration_revision` 完全相等（`runtime-process-lease.ts:567-577`，worker 在 `worker.ts:171-178` 检查）。所以「`migrate deploy` 加换镜像」要在同一维护窗口内完成（RUNBOOK §2，含 R4 续期与 GrowthOS 钉值），两步之间 API 与 Worker 不就绪。换时不能有发现 run 在跑；迁移前准入的 run 租约为 NULL，照旧约 6 分钟失败。
-- **回退：** 迁移只向前。正式回退是新迁移把两个函数体恢复原样（列留着，无害）再换镜像。应急时不换镜像也有两种做法：按 run 撤销（§3）；或以 owner 执行 `UPDATE … SET admission_lease_expires_at = NULL WHERE admission_lease_expires_at > now()`（CHECK 允许 NULL），让在跑的 run 回到 Grant 窗口，下一次核验即过期。
+- **回退：** 迁移只向前。正式回退是新迁移把两个函数体恢复原样（列留着，无害）再换镜像。应急时不换镜像也有两种做法：按 run 撤销（§3）；或以 owner 执行 `UPDATE … SET admission_lease_expires_at = NULL WHERE admission_lease_expires_at > now()`（CHECK 允许 NULL），让在跑的 run 回到 Grant 窗口，下一次核验即过期。该表是 FORCE RLS，同一事务里先 `SET LOCAL row_security = off`，见 §8.6。
 - **与 #614 的交互：** 兼容。租约结束报的仍是 `GRANT_EXPIRED`，在 #614 的放行集合内。#614 对超出租约、撤销、额度耗尽和其他阶段失败仍然必要。两者文件只在 changelog 重叠，后合者变基。#614 正文与 changelog 里「授权只有 5 分钟」的说法，在本设计合入后要更正。
 - **Temporal：** 已确认不改工作流。`discovery.workflow.ts` 里没有任何时间逻辑，binding 只作参数传递，核验都在活动内的 SQL 里；不加 patch，没有确定性问题；活动超时（2、15、30 分钟）不变；relay 启动时不设工作流总超时（`outbox-relay.service.ts:705-716`）。
 - **超出租约：** 跑满 3 小时的 run 会像今天一样失败，只是时间点推后到 3 小时。#614 合入后记为 FAILED。
@@ -227,7 +227,7 @@ COMMIT;
 | authority `ecdb1a5c` | `icp.query_plan` + `icp`；`issued_at` 10:12:04、`expires_at` 10:17:04、`consumed_at` 10:12:10.808（UTC） |
 | 该请求的预留 | 规划调用 1 次，10:12:10.832 至 10:14:21.504（约 130 秒）；之后 9 次串行的 `taxonomy.normalize`，10:14:21.845 至 10:18:13.017，全部 `SETTLED`。按 60 秒容差，10:18:04 之后的核验判 EXPIRED，下一次预留被拒 |
 | 其余查询计划 | 准入到最后一次结算最长 5:33（16 次预留），离 6 分钟边界只差约 30 秒 |
-| ICP 设计 | 单次模型调用；10-10 的两次为 2:14 与 2:29，账本里 18 次的中位数约 1:30、最长 3:04（10-08）；结构化输出不合格时还有修复调用 |
+| ICP 设计 | 单次模型调用；10-10 的两次为 2:14 与 2:29，账本里 18 次的中位数约 1:30、最长 3:04（10-08）；结构化输出不合格时还有修复调用，但在同一个预留里（见 §8.3） |
 
 ### 8.2 范围
 
@@ -248,6 +248,7 @@ COMMIT;
   - 查询计划的 `injectTedQuery`、`injectFdaQuery`（`icp.service.ts:585`、`:620`）经 `TaxonomyResolver.executeBudgetedTask`（`taxonomy-resolver.ts:436-465`）：`parseExecutionBudgetBinding` 不含时间，随后 attest 与 reserve 同上；
   - 落库的 `applyDomainAckConsumerTransaction`（`lock_execution_domain_ack_authority_first_v1`、`apply_execution_domain_ack_v1`）不查时间（A7）。
 - TS 侧：binding 不含时间；准入后没有代码比较 Grant 的 `exp`；错误码由数据库标记映射（`mapExecutionBudgetPersistenceError`）。ICP 路径不用 ToolBroker。
+- ICP 设计在准入后只核验一次、预留一次，都在准入后数秒内：模型调用前的 attest，以及 `run` 里按两次线缆上限的一次 reserve。结构化输出的修复调用在同一个 `run`、同一个预留里（`router-model-gateway.ts:186-360`；runtime 侧 `transportMaxAttempts: 1`、`contentRepairMaxAttempts: 0`），结算不查时间。所以按现有代码，ICP 设计不会因模型耗时在准入后过期；给它租约是产品负责人决定的防御性覆盖，今后它多出一次预算调用时才起作用。真正踩到 6 分钟边界的是查询计划：规划调用之后的每次分类调用都要重新核验与预留。
 - 结论：准入后唯一的时间检查是 attest（直接调用或经 reserve），它自 `20261009170000` 起已按 `COALESCE(admission_lease_expires_at, expires_at)` 判断。只要准入时写入租约，两条路径就端到端生效。attest 不重定义，TS 不改。
 
 ### 8.4 触点
@@ -270,9 +271,16 @@ COMMIT;
 
 ### 8.6 部署与回退
 
-- 迁移与带它的镜像在同一维护窗口上线，按名称顺序排在 #621（`20261010090000`）与 #622（`20261010100000`）之后。运行时要求库里最后完成的迁移与镜像的 `migration_revision` 一致；切换时不能有发现 run 或 ICP 请求在跑。
-- 回退：迁移只向前。正式回退是新迁移把 consume 的 CASE 与 CHECK 恢复为 `20261009170000` 的版本；先把已有的 ICP 租约置 NULL，否则旧 CHECK 校验失败。应急时以 owner 执行 `UPDATE … SET admission_lease_expires_at = NULL WHERE purpose IN ('icp.design', 'icp.query_plan')`（CHECK 允许 NULL），在跑的请求即回到 Grant 窗口。
+- 迁移与带它的镜像在同一维护窗口上线，按名称顺序排在 #621（`20261010090000`）与 #622（`20261010100000`）之后。运行时按 `finished_at` 取库里最后完成的迁移，要求它与镜像里名字最大的迁移一致；切换时不能有发现 run 或 ICP 请求在跑。
+- 合并顺序：#621、#622 先合，或三者合入后同一窗口部署。若本迁移先单独部署，之后再部署名字更早的 #621、#622，它们会最后完成，所有镜像都会报 `MIGRATION_REVISION_MISMATCH`；那时只能把它们的迁移改名排到 `20261010110000` 之后。静态测试无法检查部署顺序，这一条靠合并与部署时遵守。
+- 回退：迁移只向前。正式回退是新迁移把 consume 的 CASE 与 CHECK 恢复为 `20261009170000` 的版本；先把已有的 ICP 租约置 NULL，否则旧 CHECK 校验失败。
+- 应急（不换镜像）：以 owner 在一个事务里先执行 `SET LOCAL row_security = off`，再执行 `UPDATE "execution_budget_authority" SET "admission_lease_expires_at" = NULL WHERE "purpose" IN ('icp.design', 'icp.query_plan') AND "admission_lease_expires_at" > now()`（CHECK 允许 NULL），在跑的请求即回到 Grant 窗口。该表是 FORCE RLS：不是超级用户或 BYPASSRLS 的 owner 不加这一句时，策略会把行过滤掉，UPDATE 静默改 0 行；加了这一句则直接报错，不会误以为已生效。这一步不阻止新准入带租约，consume 的 CASE 要等正式回退的迁移上线才去掉。
 
 ### 8.7 与 #597 的交互
 
 #597（草稿，与 main 冲突）在「之前的 Grant 已超过 60 秒容差」时才为 `icp.*` 开重试账户。本扩展合入后，原 authority 在租约内仍能核验。#597 换户前会强制关闭旧账户，旧 binding 之后的预留会失败，不会重复花钱；但「签发后约 6 分钟才能重试」的口径要在 #597 变基时改为按租约判断。
+
+### 8.8 验收（需要真实调用，会花钱，由产品负责人发起）
+
+- 用**新的** ICP 验证：10-10 失败的那个 ICP 换版后仍不能直接重做查询计划。账户键由 purpose、subject 与请求摘要决定，同一 ICP 的账户仍绑定旧 authority，新 Grant 开户报 `GRANT_REUSED`（`open_authorized_tool_budget_v1`，#597 处理的问题）。ICP 设计同理，要换一个还没设计过 ICP 的公司。
+- 通过标准：查询计划越过约 6 分钟仍在预留并成功返回；其 authority 的租约为准入加 30 分钟；存在 `created_at > expires_at` 的预留。

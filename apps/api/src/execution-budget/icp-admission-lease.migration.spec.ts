@@ -8,11 +8,6 @@ const migrationsRoot = `${repoRoot}packages/db/prisma/migrations`;
 const ICP_LEASE_MIGRATION = '20261010110000_icp_admission_lease';
 const DISCOVERY_LEASE_MIGRATION = '20261009170000_discovery_run_admission_lease';
 const CONSUME_ORIGIN = '20260821090000_execution_budget_authority';
-/** Open when this migration was written; each deploys in the same window, in name order. */
-const EARLIER_PENDING_MIGRATIONS = [
-  '20261010090000_app_user_table_privileges',
-  '20261010100000_site_build_budget_publication_lock',
-] as const;
 const CONSUME = 'consume_workspace_execution_authority';
 const ATTEST = 'attest_authorized_tool_budget_v1';
 const LEASE_CHECK = 'execution_budget_authority_admission_lease_check';
@@ -238,15 +233,6 @@ describe('ICP design and query plan admission lease migration', () => {
       DISCOVERY_LEASE_MIGRATION,
       ICP_LEASE_MIGRATION,
     ]);
-  });
-
-  it('is named after every migration it deploys behind', async () => {
-    // The runtime compares the database's last finished migration with the image's
-    // alphabetically last one, so migrations deploy in name order in one window.
-    expect(await migrationDirectories()).toContain(DISCOVERY_LEASE_MIGRATION);
-    for (const earlier of [DISCOVERY_LEASE_MIGRATION, ...EARLIER_PENDING_MIGRATIONS]) {
-      expect(ICP_LEASE_MIGRATION > earlier, earlier).toBe(true);
-    }
   });
 
   it('documents both lease durations on the Prisma field', async () => {

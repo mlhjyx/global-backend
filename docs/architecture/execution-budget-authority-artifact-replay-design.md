@@ -137,7 +137,7 @@ Outbox/Relay 只负责传输；Backend 必须验签后才写入 authority。未�
 - `notBefore`
 - `expiresAt`
 - `consumedAt`
-- `admissionLeaseExpiresAt`（仅发现 run，准入时刻 + 3 小时；其余为 NULL）
+- `admissionLeaseExpiresAt`（发现 run 为准入时刻 + 3 小时；ICP 设计与 ICP 查询计划为准入时刻 + 30 分钟；其余为 NULL）
 - `revokedAt`
 
 约束：

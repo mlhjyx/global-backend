@@ -6,7 +6,7 @@
 
 ## 2026-10-10 · Extend the admission lease to ICP design and ICP query planning
 
-- 起因（2026-10-10 xin 实测）：一次 ICP 查询计划（`POST /icps/:icpId/query-plans`）返回 HTTP 402 `EXECUTION_BUDGET_GRANT_EXPIRED`。Grant 10:12:04 签发、10:17:04 到期，10:12:10 准入（authority 为 `icp.query_plan` + `icp`）。请求先做一次约 130 秒的规划调用，再做 9 次串行的 `taxonomy.normalize`（10:14:21 至 10:18:13）；10:18:04（到期加 60 秒容差）之后的下一次预留被拒。ICP 设计（`POST /companies/:companyId/icps`）是一次 130 至 150 秒的模型调用，账本里最长 3 分 04 秒，另有修复调用，同样有风险。产品负责人 2026-10-10 决定：准入租约扩展到这两个操作，时长 30 分钟；发现 run 仍是 3 小时，不包含其他用途。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §8。
+- 起因（2026-10-10 xin 实测）：一次 ICP 查询计划（`POST /icps/:icpId/query-plans`）返回 HTTP 402 `EXECUTION_BUDGET_GRANT_EXPIRED`。Grant 10:12:04 签发、10:17:04 到期，10:12:10 准入（authority 为 `icp.query_plan` + `icp`）。请求先做一次约 130 秒的规划调用，再做 9 次串行的 `taxonomy.normalize`（10:14:21 至 10:18:13）；10:18:04（到期加 60 秒容差）之后的下一次预留被拒。ICP 设计（`POST /companies/:companyId/icps`）是一次模型调用（10-10 为 130 至 150 秒，账本里最长 3 分 04 秒）；按现有代码它在准入后只核验与预留一次，修复调用也在同一个预留里，不会因模型耗时在准入后过期，给它租约是防御性的。产品负责人 2026-10-10 决定：准入租约扩展到这两个操作，时长 30 分钟；发现 run 仍是 3 小时，不包含其他用途。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §8。
 - 追踪结论：两个端点都是同步 HTTP，不经 outbox 或 Temporal。准入后唯一的时间检查是 `attest_authorized_tool_budget_v1`（模型调用前的直接核验、每次 reserve 都经过它），它自 #618 起已按 `COALESCE(admission_lease_expires_at, expires_at)` 判断；binding 不含时间，准入后没有 TS 代码比较 Grant 的 `exp`。所以只需在准入时写入租约，attest 与 TS 都不改。
 - 改动：
   - 新迁移 `20261010110000_icp_admission_lease`（单个事务，`lock_timeout 5s`）：
@@ -16,11 +16,11 @@
   - `schema.prisma` 只改该字段的文档注释，Copy 已重签（只变指纹）。
   - 文档：落地设计加「2026-10-10 扩展」；架构设计与 ADR-024 写明两个 ICP 操作的租约。
 - 测试：
-  - 新静态合同 `icp-admission-lease.migration.spec.ts` 8 项（零容器）：单事务、带锁超时、不回填、只去掉并重加这一个 CHECK；CHECK 原文；函数写入的时长与 CHECK 每组的上限一致；只重定义 consume；consume 与 #618 的定义逐字比对，只差两条 WHEN；中间没有别的重定义；迁移名排在 #618、#621、#622 之后；Prisma 字段注释。加迁移前 7 项失败（迁移名一项只比较名字，本来成立）。
+  - 新静态合同 `icp-admission-lease.migration.spec.ts` 7 项（零容器）：单事务、带锁超时、不回填、只去掉并重加这一个 CHECK；CHECK 原文；函数写入的时长与 CHECK 每组的上限一致；只重定义 consume；consume 与 #618 的定义逐字比对，只差两条 WHEN；中间没有别的重定义；Prisma 字段注释。加迁移前 7 项全部失败。部署顺序无法静态检查，见下面「部署」。
   - 真库合同扩写进 `discovery-run-admission-lease.postgres.spec.ts`，新增 7 项，原有 10 项保留（ICP 两种从「无租约」列表移到新用例）。同一开关、同一 CI 步骤，所以 ci.yml 不用改。新增用例：两个 ICP 操作的租约恰为准入加 30 分钟，重放不改租约；准入 10 分钟后仍能核验、预留（0 微美元）和释放；租约到期有 60 秒容差，过后报 `GRANT_EXPIRED` 且 TS 映射为同名错误；租约内撤销、额度耗尽、换工作区、账户关闭照旧拦住；准入与 open 仍受 Grant 窗口约束；CHECK 拒绝超过 30 分钟（含 1 小时）与不晚于 `expires_at` 的 ICP 租约，发现 run 仍以 3 小时为上限，其他用途连 10 分钟的租约也拒绝；租约为 NULL 的 ICP 行按旧口径判断。
   - 一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据放 tmpfs，用完即删）：只部署 main 的迁移时新增 7 项中 6 项失败（无租约一项本来成立），核心是准入 10 分钟后报 `GRANT_EXPIRED`；在同一个库上部署新迁移，红灯阶段留下的发现 run 3 小时租约行通过新 CHECK 校验，17 项全过。#616 的 search_path 静态与真库护栏、原生 SQL 参数类型、治理表只读的真库用例都通过。
   - xin 数据副本（`global_dev` 的 `pg_dump -Fc` 加不含密码的角色，恢复到一次性容器，没有写 xin 的库，转储用完即删）：`prisma migrate deploy` 只应用本迁移；49 行存量全部通过新 CHECK；consume 与 attest 的属主、ACL、SECURITY DEFINER、易变性与 search_path 前后一致，attest 定义未变；10-10 失败的那个 authority 仍报 `GRANT_EXPIRED`；在副本上准入一次 ICP 设计和一次查询计划（回滚），租约都恰为 30 分钟。
-- 部署：迁移与带它的镜像在同一窗口上线，按名称顺序排在 #621（`20261010090000`）与 #622（`20261010100000`）之后。运行时要求库里最后完成的迁移与镜像的 `migration_revision` 一致；切换时不能有发现 run 或 ICP 请求在跑。
+- 部署：迁移与带它的镜像在同一窗口上线，按名称顺序排在 #621（`20261010090000`）与 #622（`20261010100000`）之后。运行时要求库里最后完成的迁移与镜像的 `migration_revision` 一致；切换时不能有发现 run 或 ICP 请求在跑。#621、#622 须先合，或三者合入后同一窗口部署：若本迁移先单独上线，之后再部署名字更早的迁移会让运行时拒绝启动。
 - 未做：
   - 客户端超时或断开后，服务端会在租约内把请求跑完（最多花到 cap），此前约 6 分钟后被拒。GrowthOS 仍不能撤销 workspace grant。
   - #597（草稿）按「之前的 Grant 已过 60 秒容差」判断能否为 ICP 请求重试，合入本扩展后要在变基时改为按租约判断；它换户前会关闭旧账户，不会重复花钱。
