@@ -266,8 +266,8 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
 
 // Minimum reviewed versions in the resolved graph. Routine upgrades pass without
 // editing this table; an older release of a listed package fails wherever it is
-// pulled in. `from` confines a floor to the remediated line where an older line
-// legitimately coexists (undici 7, file-type 3). The root pnpm.overrides are one
+// pulled in. `from` confines a floor to the remediated line where another line
+// legitimately coexists (undici 7 and 8 each carry their own floor; file-type 3). The root pnpm.overrides are one
 // way to hold a floor, so an override may retire once upstream ranges hold it.
 const SECURITY_FLOORS = Object.freeze(
   [
@@ -281,6 +281,7 @@ const SECURITY_FLOORS = Object.freeze(
     { name: "svgo", floor: "4.1.0" },
     { name: "lodash", floor: "4.18.1" },
     { name: "uuid", floor: "11.1.1" },
+    { name: "undici", from: "7.0.0", floor: "7.29.1" },
     { name: "undici", from: "8.0.0", floor: "8.10.2" },
     { name: "@nestjs/core", floor: "11.2.3" },
     { name: "express", floor: "5.2.1" },
@@ -292,7 +293,6 @@ const SECURITY_FLOORS = Object.freeze(
     { name: "file-type", from: "20.0.0", floor: "21.3.4" },
     { name: "fast-xml-parser", floor: "5.11.0" },
     { name: "@grpc/grpc-js", floor: "1.14.5" },
-    { name: "axios", floor: "1.20.0" },
     { name: "brace-expansion", from: "4.0.0", floor: "5.0.12" },
     { name: "http-cache-semantics", floor: "4.3.0" },
     { name: "sharp", floor: "0.35.5" },
@@ -316,6 +316,7 @@ const VULNERABLE_PREDECESSORS = Object.freeze([
   "qs@6.14.2",
   "multer@2.0.2",
   "multer@2.3.0",
+  "undici@7.29.0",
   "undici@8.10.0",
   "path-to-regexp@0.1.13",
   "path-to-regexp@0.2.5",
@@ -323,7 +324,6 @@ const VULNERABLE_PREDECESSORS = Object.freeze([
   "file-type@20.4.1",
   "fast-xml-parser@4.5.7",
   "@grpc/grpc-js@1.14.4",
-  "axios@1.18.1",
   "brace-expansion@5.0.9",
   "smol-toml@1.7.1",
   "http-cache-semantics@4.2.0",

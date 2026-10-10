@@ -10,7 +10,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-10-08T08:07:53.062Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-10-10T13:59:35.073Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -960,7 +960,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+    expectedBootstrapBase: "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -973,13 +973,13 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+    "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+    expectedBootstrapBase: "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
     expectedSourceLockfileDigest:
-      "sha256:90fd84a7699e6fe2def09b43a9772ce2d66212cb80a12e010a819cc44da21dbe",
+      "sha256:14962679245f94987162656a5c23354f5ca92f59d4643c2d74d1a9fbf17a80b5",
   });
   assert.equal(clear.ok, true);
   const vulnerable = evaluateProductionAudit(
@@ -993,7 +993,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+      expectedBootstrapBase: "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
     },
   );
   assert.equal(vulnerable.ok, false);
@@ -1654,11 +1654,11 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4\.38\.2/,
+    /github\/codeql-action\/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4\.38\.3/,
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4\.38\.2/,
+    /github\/codeql-action\/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4\.38\.3/,
   );
   assert.match(workflow, /^          languages: javascript-typescript$/m);
   assert.match(workflow, /^          queries: security-extended$/m);

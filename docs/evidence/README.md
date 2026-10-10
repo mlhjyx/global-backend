@@ -27,6 +27,8 @@
 
 [2026-10-08 legacy-javascript 钉版](security/20261008-legacy-javascript-dist-tag-pin.json)：上游把 dist-tag `latest` 移到 0.0.3 后，镜像构建的 `pnpm deploy` 与锁文件 SBOM 不一致；加精确 override 后全新缓存 deploy 回到 0.0.1。同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
 
+[2026-10-10 月度依赖刷新与基线续期](security/20261010-monthly-dependency-refresh-baseline-renewal.json)：范围内批量升级、四条安全 override 升到最新补丁、撤掉已离开依赖图的 axios override、OpenTelemetry SDK 整族锁步到 2.12.0/0.223.0、把 nx 钉的 undici 7.29.0 覆盖到 7.30.0 后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`，`valid_until` 延至 2026-10-24T13:59:34Z；附新发布版本的 provenance 与发布账号核对；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
