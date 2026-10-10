@@ -331,12 +331,15 @@ jobs:
           RAW_SQL_TYPES_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           SECURITY_DEFINER_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           SECURITY_DEFINER_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          SITE_BUILD_BUDGET_LOCK_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          SITE_BUILD_BUDGET_LOCK_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
           pnpm --filter @global/api exec vitest run \
             src/prisma/raw-sql-parameter-types.postgres.spec.ts \
-            src/prisma/security-definer-search-path.postgres.spec.ts
+            src/prisma/security-definer-search-path.postgres.spec.ts \
+            src/site-builder/site-build-budget-publication-lock.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         run: pnpm --filter @global/site-builder-eval-runner test
@@ -362,6 +365,19 @@ jobs:
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
           pnpm --filter @global/api exec vitest run src/prisma/governance-table-privileges.postgres.spec.ts
+
+      # app_user's privileges on every table in public must equal
+      # docs/governance/app-user-table-privileges.json, new tables start SELECT-only for it,
+      # and the writes its code paths perform still succeed (all rolled back).
+      - name: app_user table privileges on PostgreSQL
+        env:
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          APP_USER_PRIVILEGES_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          APP_USER_PRIVILEGES_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+        run: |
+          set -euo pipefail
+          pnpm --filter @global/db exec prisma migrate deploy
+          pnpm --filter @global/api exec vitest run src/prisma/app-user-table-privileges.postgres.spec.ts
 
       - name: Evaluate Copy fixed-source impact
         id: copy-impact
