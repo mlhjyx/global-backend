@@ -147,12 +147,12 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 
 > 本节只记录这一项改动，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4–§4.3 的证据裁决。
 
-自 #545 起，全局写入守卫只认整体 readiness，而整体 readiness 包含独立的 platform Worker 租约：platform Worker 一不就绪（单独重启、换镜像窗口、R4 部署绑定到期、出网围栏重装），全部客户侧写入就返回 503 `RUNTIME_ADMISSION_CLOSED`，其中包括 GrowthOS 签 Grant 前调用的 workspace 技术报价。产品负责人 2026-10-10 批准 D3：客户写入准入按客户依赖集合判定（AGENTS §4 第 5 条同步补了一句澄清）。
+自 #545 起，全局写入守卫只认整体 readiness，而整体 readiness 包含独立的 platform Worker 租约：platform Worker 一不就绪（单独重启、换镜像后尚未重新就绪、R4 部署绑定到期、出网围栏重装），全部客户侧写入就返回 503 `RUNTIME_ADMISSION_CLOSED`，其中包括 GrowthOS 签 Grant 前调用的 workspace 技术报价。产品负责人 2026-10-10 批准 D3：客户写入准入按客户依赖集合判定（AGENTS §4 第 5 条同步补了一句澄清）。
 
 | 项 | 当前事实 | 不得外推 |
 | --- | --- | --- |
-| 改变的 | 全局写入守卫与建站门改用 `customerWriteAdmission`：硬组件仍须全部 ok，唯一例外是 platform Worker 恰为 `PLATFORM_WORKER_NOT_READY`（租约不在或尚未 READY） | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
-| 不变的 | `/health/ready` 的整体口径、响应格式与 503 码；platform Worker 自身的 fail-closed（不就绪不轮询、不出网）；静态发布准入；platform Worker 混版本、Temporal 身份不符、租约查询失败仍关闭客户写入 | 4 个平台 schedule 仍为 paused；R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达 |
+| 改变的 | 全局写入守卫与建站门改用 `customerWriteAdmission`：硬组件仍须全部 ok，唯一例外是 platform Worker 恰为 `PLATFORM_WORKER_NOT_READY`（没有 READY 租约：租约不在、已停止，或同一发布仍在 STARTING/DRAINING） | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
+| 不变的 | `/health/ready` 的整体口径、响应格式与 503 码；platform Worker 自身的 fail-closed（不就绪不轮询、不出网）；静态发布准入；platform Worker 混版本、Temporal 身份不符、租约查询失败仍关闭客户写入 | 换镜像时新旧发布的租约并存期间仍是混版本，客户写入照旧关闭，只有旧租约消失后的等待段不再关闭；4 个平台 schedule 仍为 paused；R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达 |
 | 代价 | platform Worker 故障不再经由客户写入 503 暴露，要靠 `/health/ready` 的 `components.platform_worker` 与本机巡检发现 | platform Worker 频繁单独重启的根因另立任务，本项不处理 |
 
 ## 5. 下一顺序与授权边界
