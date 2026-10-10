@@ -23,16 +23,22 @@ if (Boolean(ownerUrl) !== Boolean(appUrl)) {
     'app_user table privilege test needs both APP_USER_PRIVILEGES_TEST_DATABASE_URL and APP_USER_PRIVILEGES_TEST_APP_DATABASE_URL',
   );
 }
-for (const value of [ownerUrl, appUrl]) {
-  if (!value) continue;
-  const url = new URL(value);
+// Both URLs must name the same loopback /global_test database and carry no connection
+// parameters: a parameter such as ?host= would send the connection elsewhere.
+const databaseUrls = [ownerUrl, appUrl].flatMap((value) => (value ? [new URL(value)] : []));
+for (const url of databaseUrls) {
   if (
     url.protocol !== 'postgresql:' ||
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.pathname !== '/global_test'
+    url.pathname !== '/global_test' ||
+    url.search !== '' ||
+    url.hash !== ''
   ) {
     throw new Error('app_user table privilege test requires a loopback test database');
   }
+}
+if (databaseUrls.length === 2 && databaseUrls[0].host !== databaseUrls[1].host) {
+  throw new Error('app_user table privilege test needs both URLs to name the same database');
 }
 
 /**
@@ -126,20 +132,29 @@ describe('app_user table privilege manifest', () => {
 });
 
 /**
- * app_user's effective privileges on every relation in schema public, the same reading as the
- * self-check in 20261010090000_app_user_table_privileges: a privilege counts when app_user holds it
- * directly, through PUBLIC or an inherited membership, or through a role it can SET ROLE to or
- * administers (it could grant itself that role and switch to it); a superuser or the relation's
- * owner among those roles holds every privilege. A privilege held only on columns is reported per
- * column, as relation.column.
+ * app_user and every role it reaches over role memberships, directly or indirectly and whatever
+ * their INHERIT, SET and ADMIN options: a role it only administers can still be granted to itself
+ * and switched to, and onward from there. The same reading as the self-check in
+ * 20261010090000_app_user_table_privileges. Used inside WITH RECURSIVE.
+ */
+const REACH_CTE = `
+  reach(oid, rolsuper) AS (
+    SELECT r.oid, r.rolsuper FROM pg_catalog.pg_roles AS r WHERE r.rolname = 'app_user'
+    UNION
+    SELECT r.oid, r.rolsuper
+    FROM reach AS a
+    JOIN pg_catalog.pg_auth_members AS m ON m.member = a.oid
+    JOIN pg_catalog.pg_roles AS r ON r.oid = m.roleid
+  )`;
+
+/**
+ * app_user's effective privileges on every relation in schema public: a privilege counts when a
+ * role in the reach set holds it directly, through PUBLIC or by inheritance; a superuser or the
+ * relation's owner in that set holds every privilege. A privilege held only on columns is reported
+ * per column, as relation.column.
  */
 const EFFECTIVE_PRIVILEGES_SQL = `
-  WITH reach AS (
-    SELECT r.oid, r.rolsuper
-    FROM pg_catalog.pg_roles AS r
-    WHERE pg_catalog.pg_has_role('app_user', r.oid, 'SET')
-      OR pg_catalog.pg_has_role('app_user', r.oid, 'MEMBER WITH ADMIN OPTION')
-  ),
+  WITH RECURSIVE ${REACH_CTE},
   relation AS (
     SELECT c.oid, c.relname::text AS relname, c.relowner
     FROM pg_catalog.pg_class AS c
@@ -244,25 +259,27 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
     expect(actual).toEqual(manifestEntries(manifest));
   }, 30_000);
 
-  it('lets app_user grant nothing onward', async () => {
-    const held = await owner.$queryRaw<{ entry: string }[]>`
-      SELECT c.relname || ' ' || p.privilege AS entry
+  it('lets neither app_user nor any role it reaches grant anything onward', async () => {
+    const held = await owner.$queryRawUnsafe<{ entry: string }[]>(`
+      WITH RECURSIVE ${REACH_CTE}
+      SELECT DISTINCT c.relname || ' ' || p.privilege AS entry
       FROM pg_catalog.pg_class AS c
       JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
       CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'])
         AS p(privilege)
+      CROSS JOIN reach AS a
       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
         AND CASE WHEN p.privilege IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
-          THEN pg_catalog.has_any_column_privilege('app_user', c.oid, p.privilege || ' WITH GRANT OPTION')
-          ELSE pg_catalog.has_table_privilege('app_user', c.oid, p.privilege || ' WITH GRANT OPTION') END
-      ORDER BY 1`;
-    expect(held.map(({ entry }) => entry)).toEqual([]);
+          THEN pg_catalog.has_any_column_privilege(a.oid, c.oid, p.privilege || ' WITH GRANT OPTION')
+          ELSE pg_catalog.has_table_privilege(a.oid, c.oid, p.privilege || ' WITH GRANT OPTION') END`);
+    expect(held.map(({ entry }) => entry).sort()).toEqual([]);
   }, 30_000);
 
-  it("keeps the owner's default privileges for app_user and PUBLIC to the manifest's", async () => {
-    // Every default-ACL entry, for any owner and in any or no schema, that names app_user or PUBLIC
-    // for tables or sequences. A write here would reach every table created later.
-    const rows = await owner.$queryRaw<{ entry: string }[]>`
+  it("keeps the default privileges for app_user, the roles it reaches and PUBLIC to the manifest's", async () => {
+    // Every default-ACL entry, for any owner and in any or no schema, that names PUBLIC or a role
+    // in the reach set for tables or sequences. A write here would reach every table created later.
+    const rows = await owner.$queryRawUnsafe<{ entry: string }[]>(`
+      WITH RECURSIVE ${REACH_CTE}
       SELECT format('%s %s %s %s %s',
           pg_catalog.pg_get_userbyid(d.defaclrole),
           coalesce(nsp.nspname::text, '*'),
@@ -273,7 +290,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
       LEFT JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = d.defaclnamespace
       CROSS JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) AS a
       WHERE d.defaclobjtype IN ('r', 'S')
-        AND (a.grantee = 0 OR a.grantee = 'app_user'::regrole)`;
+        AND (a.grantee = 0 OR a.grantee IN (SELECT oid FROM reach))`);
     const expected = manifest.defaultPrivileges
       .flatMap(({ owner: role, schema, objectType, privileges }) =>
         privileges.map((privilege) => `${role} ${schema} ${objectType} app_user ${privilege}`))
@@ -512,6 +529,54 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
         });
       }
       await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } } });
+    });
+  }, 60_000);
+
+  // evidence is append-only for app_user (INSERT, SELECT); the claim bridge still upserts into it
+  // with an empty update, which Prisma runs as SELECT then INSERT. Were a Prisma upgrade to switch
+  // to INSERT ... ON CONFLICT DO UPDATE, that statement would need UPDATE and this test would fail.
+  it('lets app_user project a pending claim and its evidence, new or already there', async () => {
+    const workspaceId = randomUUID();
+    const claimOriginKey = randomUUID().replaceAll('-', '').padEnd(64, '0');
+    const evidenceOriginKey = randomUUID().replaceAll('-', '').padEnd(64, '1');
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+      await tx.workspace.create({ data: { id: workspaceId, name: 'privileges probe' } });
+      const company = await tx.companyProfile.create({
+        data: { workspaceId, name: 'Privileges Probe' },
+      });
+      // claim-evidence-bridge.prisma.ts projectPendingClaim, run twice: create, then replay.
+      for (let projection = 0; projection < 2; projection += 1) {
+        const claim = await tx.claim.upsert({
+          where: { companyId_originKey: { companyId: company.id, originKey: claimOriginKey } },
+          create: {
+            workspaceId,
+            companyId: company.id,
+            originKey: claimOriginKey,
+            factKey: 'privileges_probe',
+            type: 'certification',
+            statement: 'privileges probe',
+            status: 'NEEDS_REVIEW',
+            confidence: 1,
+          },
+          update: {},
+          select: { factKey: true, id: true, status: true },
+        });
+        await tx.evidence.upsert({
+          where: { claimId_originKey: { claimId: claim.id, originKey: evidenceOriginKey } },
+          create: {
+            workspaceId,
+            claimId: claim.id,
+            originKey: evidenceOriginKey,
+            snippet: 'privileges probe',
+            sourceUrl: 'https://privileges.example/',
+            fetchedAt: new Date(),
+            confidence: 1,
+          },
+          update: {},
+          select: { id: true },
+        });
+      }
     });
   }, 60_000);
 
