@@ -266,8 +266,8 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
 
 // Minimum reviewed versions in the resolved graph. Routine upgrades pass without
 // editing this table; an older release of a listed package fails wherever it is
-// pulled in. `from` confines a floor to the remediated line where an older line
-// legitimately coexists (undici 7, file-type 3). The root pnpm.overrides are one
+// pulled in. `from` confines a floor to the remediated line where another line
+// legitimately coexists (undici 7 and 8 each carry their own floor; file-type 3). The root pnpm.overrides are one
 // way to hold a floor, so an override may retire once upstream ranges hold it.
 const SECURITY_FLOORS = Object.freeze(
   [

@@ -3,16 +3,12 @@
   "scope": "Official npm production audit and exact-lock freshness for the 2026-10-10 monthly dependency refresh and baseline renewal; not runtime/release/UAT evidence",
   "release_age_review": {
     "reason": "pnpm 9 has no minimum release age, and a monthly in-range update locks versions published only hours earlier; a freshly published version is the usual entry point of a compromised maintainer account.",
-    "method": "Registry publish time of every newly locked version; for versions published on or after 2026-10-06 (or whose time could not be read) and for the four override bumps, npm provenance attestations, the publishing account compared with earlier versions, and install scripts.",
+    "method": "Registry publish time of every newly locked version; for versions published at or after 2026-10-06T00:00:00Z (UTC), versions whose publish time could not be read on the first fetch, and the four override bumps: npm provenance attestations (dist.attestations), the publishing account compared with the preceding versions, and install scripts.",
     "newly_locked_versions": 164,
     "reviewed_versions": 126,
-    "with_provenance": 97,
-    "without_provenance_same_publisher": 27,
-    "not_reviewed": [
-      "@nx/nx-linux-arm64-gnu@23.3.0",
-      "@nx/nx-linux-x64-musl@23.3.0"
-    ],
-    "not_reviewed_reason": "platform binaries that are not installed on linux-x64-gnu; the other eleven nx 23.3.0 platform packages carry provenance",
+    "with_provenance": 99,
+    "without_provenance_same_publisher": 26,
+    "publisher_changes": 1,
     "install_scripts": [
       "nx@23.3.0 postinstall (provenance, GitHub Actions)"
     ],
@@ -106,6 +102,6 @@
         "vulnerable_versions": "<=3.0.3"
       }
     ],
-    "note": "Both were already open on main (Dependabot alerts 80 and 118): faker only in the Prism mock chain, braces with no patched release. The undici 7.29.0 that nx 23.3.0 pins exactly is overridden to 7.30.0 in this refresh."
+    "note": "Both were already open on main (Dependabot alerts 80 and 118): faker only in the Prism mock chain, braces with no patched release. The undici 7.29.0 that nx 23.3.0 pins exactly is overridden to 7.30.0 with the range selector undici@>=7.0.0 <7.29.1; pnpm applies it to every declared range that intersects the selector, so the production @ai-sdk/provider-utils (^7.29.0) is held at the same 7.30.0. A parent-scoped nx>undici key is not admitted by the dependency source policy."
   }
 }
