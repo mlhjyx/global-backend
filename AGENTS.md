@@ -51,7 +51,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 环境差异只允许位于信任根、secret、endpoint、网络暴露、资源额度、可观测性和部署拓扑等配置边界；允许项及尚未清理的迁移债务必须逐项登记在 [`environment-parity-policy.json`](docs/governance/environment-parity-policy.json)，由 `pnpm governance:verify` 校验精确源码指纹。未登记分支、失效豁免和恢复旧分支一律失败。
 - 不因一致性复用生产密钥、生产租户或生产数据。开发使用独立凭据、JWKS、端点、数据与较低额度，但不得更换验证器、业务算法、状态模型或失败策略。
 - Stub、Fake、Sandbox、fixture、visual gallery、Dev Token verifier 和 evaluation runner 只可由测试入口或独立测试 workspace 注入；产品 composition root、运行依赖、OCI/Release 制品与用户站点不得包含或自动 fallback 到这些能力。单元测试可与源码相邻，但必须被产品编译与制品排除。
-- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。
+- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。「API 不接新工作」按该工作自身的依赖集合判定。
 
 ## 5. 所有权、worktree 与外部动作
 
