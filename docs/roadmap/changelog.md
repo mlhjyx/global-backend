@@ -219,6 +219,45 @@
   - 发现 run 现在不再自动注册网站监控（这条路在客户 worker 里本来就走不通）。要恢复，得把注册交给持有平台写入者的平台 worker，例如由 run 只记下候选、平台侧的 intent sweep 去读 sitemap 并写监控；另行设计。平台的 4 个 schedule 目前都暂停，已注册的监控本来也不会被巡检。
   - `IntentProjectionService.registerWatch` 自身仍会先出网、落产物，最后才因没有平台写入者而失败；唯一的生产调用点已在出网前拦住。在它内部提前检查要连带改动多处依赖「有 broker、无平台写入者」的用例，留给监控注册的重新设计一并处理。
 
+## 2026-10-09 · Give app_user only the table privileges its code uses
+
+- 起因（设计 `docs/superpowers/plans/2026-10-09-app-user-platform-table-privileges.md`，产品负责人 2026-10-09 确认 §5 全部按建议：一次收齐、新表默认只读、要清单与真库测试、平台写入者授权另起 PR、下一个窗口上线）：
+  - 基座迁移 `20260706033625_rls_and_app_role` 把当时所有表的增删改查授给 app_user，又把同样的授权设成属主 `global` 以后新建表的默认权限。之后给无 RLS 平台表写「app_user 只读」的迁移多数只 `GRANT SELECT`、没有收回其余权限，所以全新库上 app_user 也能写 15 张没有 RLS 的平台表（#619 已收回 `source_policy`、`data_provider`）：迁移账本 `_prisma_migrations`（运行时就绪门和迁移兼容核对都信它）、制裁名单两张表、词表、专利缓存刷新审计，以及本应只增不改的 Art.17 墓碑等。能以 app_user 执行 SQL 的会话（例如 SQL 注入）可以伪造迁移记录、改写制裁名单、删掉墓碑。属于纵深防御，利用前提与 #616、#619 相同。
+  - xin 的 `global_dev` 另有漂移（只读查目录核实）：17 张表上 app_user 比迁移给的多出 UPDATE、DELETE（`jurisdiction_policy` 还多 INSERT），多是证据、审计、删除回执这类加固时收成只追加的表（`evidence`、`policy_decision_log`、`deletion_receipt`、`brand_profile*`、`site_*` 快照等），授权者都是 `global`。其他角色、列级权限、默认权限都与全新库一致。
+- 改动前逐张核对 app_user 的写入路径，结论与设计 §2 一致：6 张只由属主或平台写入者写；10 张有生产路径以 app_user 写，各只用到部分操作（Prisma 的 upsert 要 SELECT、INSERT、UPDATE，createMany skipDuplicates 只要 INSERT，带条件的 deleteMany / updateMany 还要 SELECT）。这些表上没有以 app_user 写入的函数或触发器，也没有行锁查询。17 张漂移表的生产写入也都在迁移定义的权限之内（`evidence` 的 upsert 更新部分为空，实测只发 SELECT 和 INSERT）。
+- 改动：
+  - 新迁移 `20261010090000_app_user_table_privileges`（单事务，lock_timeout 5 秒、statement_timeout 30 秒，不建函数，不改数据和表结构）：
+    - 16 张平台表先 `REVOKE ALL … FROM PUBLIC, app_user`，再只授代码用到的操作：`_prisma_migrations`、`canonical_taxonomy`、`jurisdiction_policy`、`sanctions_source`、`sanctions_entity` 只读；`patent_cache_refresh_audit` 无权限；`monitored_source`、`source_fetch`、`source_entity`、`source_signal`、`signal_ingest`、`term_alias`、`patent_lookup_request` 读、增、改；`source_entity_change` 读、增、删（90 天清理）；`patent_inventor_cache` 读、删（Art.17 擦除）；`patent_inventor_tombstone` 读、增（墓碑只增不改）。
+    - 另 16 张漂移表（`jurisdiction_policy` 已在上面）同样先全收，再恢复成迁移定义的权限。授权语句从迁移到 #619 的一次性库导出，不手写；全新库上不改变任何东西。
+    - 默认权限：属主以后新建的表对 app_user 只给 SELECT，写权限要在建表迁移里显式授予；序列的默认权限（USAGE、SELECT）不变。
+    - 结尾自检：public 下每张表上 app_user 的有效权限必须与迁移里的期望表（113 张，与清单一致）完全相同。算进来的有：直接授予、经 PUBLIC、只授在某一列上，以及 app_user 沿成员关系（直接或间接，不论 INHERIT、SET、ADMIN 选项）能到达的每个角色的权限：只持有 ADMIN 选项的角色，也能先授给自己、切换过去，再往下切。这些角色里有超级用户或表属主，就算全部权限。这些角色都不能持有 WITH GRANT OPTION；给它们或 PUBLIC 的默认权限必须恰好是上面两条。表多、表少或权限不符都报 `APP_USER_PRIVILEGE_MISMATCH` 并列出差异，整个迁移回滚。`REVOKE ALL` 以属主身份执行，只能收回属主授出的权限；别的授权者授出的权限会被自检拦下、整体回滚，不会悄悄留下。
+  - 权限清单 `docs/governance/app-user-table-privileges.json`：public 下每张表 → app_user 的权限（只授在列上的权限另列在 `columns`，目前没有），加上属主的默认权限；从迁移后的一次性库生成，按字节序排列。
+  - 真库用例 `apps/api/src/prisma/app-user-table-privileges.postgres.spec.ts`，CI 新增一步「app_user table privileges on PostgreSQL」，放在 #619 那一步之后。两个连接地址只给一个时报错；只接受回环地址上的 `global_test`，不许带任何连接参数（`?host=` 之类会把连接改指别处），两个地址必须指向同一个库；不给时整组跳过，但清单格式检查（键有序、权限名合法、无重复）随单测一起跑。用例检查：
+    - 迁移后实际权限与清单逐表一致（口径同迁移自检，含沿成员关系能到达的角色）；这些角色都不持有 WITH GRANT OPTION；默认权限与清单一致；属主现建一张表和一个序列，app_user 分别只得到 SELECT 和 USAGE、SELECT（事务回滚）。
+    - 正向：以 app_user 在必回滚的事务里执行 10 张写表实际用到的写法：网站监控注册与页集合并、采集抓取与快照 diff、90 天清理（直接调 `WebsiteWatchService.purgeStaleEvents`）、信号 upsert 与账本记账（含记错误的分支）、过期翻转（直接调 `SignalIngestService.expireStale`）、别名写回、专利查询入队与读缓存（直接调 `enqueuePatentLookup`、`readPatentCache`）、Art.17 墓碑与缓存擦除。另按 claim 桥的写法，对 `claim`、`evidence` 做空更新的 upsert（新建、重放各一次）：Prisma 现在把它拆成 SELECT 加 INSERT，只追加的 `evidence` 不需要 UPDATE；哪天升级后改成 `INSERT … ON CONFLICT DO UPDATE`，这条会先在 CI 里失败。
+    - 负向：清单外的 SELECT、INSERT、UPDATE、DELETE、TRUNCATE 全部报 42501：113 张表共 324 次尝试，每条都要是「permission denied for table <该表>」。语句各自只需要那一项权限、不碰任何行。
+  - 运维脚本：`apps/api/scripts/verify-intent-loop.mts` 的清场和「伪造上周基线」改走 owner 连接（app_user 已不能删 `source_entity`），注册、抓取、投影仍走 app_user。其余以 app_user 写这些表的脚本（`intent-watch.mts`、`verify-signal-first.mts`、`verify-patent-cache-codex-p93.mts`、删除编排两份等）用的都是生产同样的写法，不用改；`verify-data-rights.mts` D4、`verify-site-builder-r4-a1.mts` 等「app_user 改不了只追加表」的检查，在 xin 上从此会如期被拒。
+- 部署：
+  - 下一个维护窗口上线（产品负责人选定），与带本迁移的镜像同一窗口，按名称顺序排在 `20261009160000`（#616）、`20261009170000`（#618）、`20261009180000`（#617）、`20261009190000`（#619）之后。运行时拿最后执行完的迁移与镜像里最新的迁移比对。窗口内不能有在跑的发现 run、删除编排或平台 schedule。
+  - 最好等那 4 个迁移先随上一个窗口上线：这样本迁移自检失败时什么也不改，库仍停在 `20261009190000`，旧镜像照常能用。Prisma 会把本迁移记为失败、之后的部署停住（P3009）：按报出的差异修正权限，`prisma migrate resolve --rolled-back 20261010090000_app_user_table_privileges`，再重新部署。若 5 个迁移挤在同一次 `migrate deploy` 里，前 4 个会先提交，自检一失败，新旧镜像都会以 `MIGRATION_REVISION_MISMATCH` 拒绝启动，直到修正后重新部署。
+  - 窗口前用同一口径对 `global_dev` 做只读预检（app_user 连接、只读事务、只查目录）。2026-10-10 已做一次：表集合与清单完全相同；只有 #619 和本迁移改写的 34 张表权限不同（都是多出的写权限），其余 79 张一致；没有只授在列上的权限，没有 WITH GRANT OPTION，app_user 没有任何成员关系，默认权限只多了要收回的增删改。窗口前再跑一次，出现别的差异先处理。
+  - 平台写入者的表授权（设计 §3.4 G1）不在本 PR，另起一个 PR；恢复平台 schedule 或启用 `google_patents` 之前必须先合。
+  - 回退：只改授权，回退是一个把权限授回的新迁移；紧急时可由属主手工 `GRANT`，事后补迁移。数据不受影响。
+- 测试（一次性容器，与 CI 同一 pgvector 镜像，tmpfs，只绑 127.0.0.1，用完即删）：
+  - 只跑 main 的迁移时新用例 12 项里 4 项失败：清单比对列出上面 15 张表多出的写权限，默认权限仍授增删改，新建表 app_user 能增删改，负向尝试里 22 次本应被拒的 UPDATE、DELETE、SELECT 被允许、6 次 INSERT 被允许（只因非空约束失败）。同一个库加跑本迁移后 12 项全部通过。
+  - 迁移自检：分别注入 15 种漂移后重跑迁移，都报 `APP_USER_PRIVILEGE_MISMATCH` 并点名那一项；表权限、默认权限、成员关系和事先多授的一项写权限都保持原样，证明整体回滚。15 种是：未涉及的表上多一项表级权限、只授在某一列、授给 PUBLIC、经继承的成员身份、能 SET ROLE 但不继承、只持有 ADMIN 选项、持有 ADMIN 选项的角色还能再 SET ROLE 到有写权限的角色、能 SET ROLE 过去的角色持有 WITH GRANT OPTION、默认权限授给 app_user 能到达的角色、能 SET ROLE 到属主（超级用户）、不限 schema 的默认权限、给 PUBLIC 的默认权限、少一项应有权限、app_user 自己持有 WITH GRANT OPTION、清单外的新表。清掉注入后迁移可重复执行。独立复审发现初版只看一跳的 SET 与 ADMIN，漏掉「ADMIN 之后再往下切」的链（复现：只持有某角色的 ADMIN 选项、该角色能 SET ROLE 到超级用户时，初版自检放行）；现已改成沿成员关系的全闭包，grant option 与默认权限的检查也扩到这些角色。
+  - 用例自检：迁移后分别注入 9 种漂移（多一项表写权限、只授在某列、默认权限给写、经 SET ROLE 获得写、ADMIN 之后再往下切获得写、能 SET ROLE 过去的角色持有 grant option、默认权限给 app_user 能到达的角色、收回一项需要的写、app_user 持有 grant option），用例都会失败，清掉后恢复通过。连接地址带 `?host=` 或两个地址指向不同的库时，用例直接报错。
+  - xin 预演：从全新库迁移到 xin 当前的 `20260925090000`，按只读查到的 xin 目录重放 17 张表的漂移授权和运行时登录角色的成员关系，与 xin 比对表权限（全部角色）、默认权限、成员关系都一致；然后一次 `migrate deploy` 跑完 5 个待上线迁移，全部通过；新用例 12 项、#619 的用例 4 项通过；最终权限与全新库逐表一致。
+  - 按 CI 顺序在一次性库上重放 build-test 的全部 PostgreSQL 步骤（运行时登录、provider-wire、平台写入者的开通与核验，原有真库用例，#619 与本 PR 的新步骤）：全部通过。
+- 未做：
+  - 平台写入者的表授权（G1），见上。
+  - 序列不在清单里：app_user 对 2 个序列只有基座迁移给的 USAGE、SELECT，代码不用 setval；需要时再纳入。
+  - 新表默认只读会把「忘了授写」推到运行时：清单从迁移后的库生成，忘了授写时清单与库一致、CI 照样绿，要到代码运行才报 42501。今后新建 app_user 要写的表，在建表迁移里显式授权、同一 PR 更新清单，并在本用例里补一条以 app_user 执行的正向写入。
+  - `term_alias` 由租户触发的模型结果写进跨租户共享的别名表（设计 §8），权限收窄后仍是数据投毒面，另议。
+  - 采集与监控四张表在「无回执」分支以 app_user 写平台数据。网站监控注册没有回执时（没有 broker，或 sitemap 请求全部失败、退回只监控首页）以 app_user 建 `monitored_source`；#620 合入后客户 worker 不再注册，到时 app_user 是否还需要 INSERT，与 G1 一起再看。G1 之后是否统一由平台写入者写、app_user 只留 SELECT，另议。
+  - 用同一份清单对 xin 做只读漂移比对、接进 `gctl doctor`（工作区工具，不在本仓库）。
+  - #619 的迁移自检同样只看一跳的 SET 与 ADMIN，#616、#619 的真库用例同样不拒 `?host=` 连接参数；本 PR 未改。
+
 ## 2026-10-08 · Treat single-name mailboxes as personal contacts
 
 - 起因（2026-10-08 BI-14 公司联系点设计调研）：手动联系人发现用的 `buildPublicContacts` 靠 `/^[a-z]+[._-][a-z]+$/i` 判断邮箱是否属于个人，只有 first.last 这种形状才算。`max@`、`mueller@`、`mm@` 这类单名或缩写邮箱因此被存成「公开联系点 (max@)」，不标个人数据，也不写 person.profile 证据。这违背 GDPR Art.4 和「只做公司级数据」的红线。仓库其他地方（采集清洗 `cleanEmail`、联系人持久化、邮箱验证合规门）早已改用白名单：只有职能邮箱算非个人。
