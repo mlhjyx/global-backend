@@ -32,6 +32,26 @@
     - 把 xin 上 07-13 版的 SDN 行只读复制到一次性库后 dry run：将新增 319、更新 19、不变 9,680、撤下 111，收缩保护通过。随后写入，结果与 dry run 逐项相同（活跃 10,018 行，撤下的 111 行保留 07-13 版本号），再跑一次零变化。
 - 未做：没有在 xin 的 `global_dev` 上运行；运行与打开制裁门都待产品负责人批准。SDN 已到 32 MiB 上限的约 87%。本机经代理下载时 DNS 解析与连接偶尔失败（实测中出现过 `dns_lookup_failed` 与 `ECONNRESET`），已由重试与单源重跑覆盖。
 
+## 2026-10-10 · Admit customer writes on their own dependencies, not platform worker availability
+
+- 起因：#545 把独立的 platform Worker 租约加进了整体 readiness 的硬组件，而全局写入守卫 `RuntimeWorkAdmissionGuard` 只认整体 readiness。所以 platform Worker 一不就绪（单独重启、换镜像后尚未重新就绪、R4 部署绑定到期、出网围栏重装），除平台控制面豁免外的全部客户侧写入都返回 503 `RUNTIME_ADMISSION_CLOSED`，包括 GrowthOS 签 Grant 前调用的 workspace 技术报价，以及删除请求、禁联这类保护性写入。而 platform Worker 只服务 `platform-automation` 命名空间（4 个 schedule 均 paused）；客户路径用的 `default` 命名空间、customer Worker、Outbox Relay 与 API 的 Temporal 客户端都不依赖它。产品负责人 2026-10-10 批准 D3 设计的推荐方案。
+- 改动：
+  - 新增纯函数 `customerWriteAdmission(report)`（`apps/api/src/runtime/customer-write-admission.ts`）：整体 ready 照旧放行；not_ready 时硬组件仍须全部 ok，唯一容忍 platform Worker 恰为 `failed` / `PLATFORM_WORKER_NOT_READY`（没有 READY 租约：租约不在、已停止，或同一发布仍在 STARTING/DRAINING）。容忍表以 `satisfies` 覆盖全部硬组件，新增组件不分类就无法编译；表外组件失败、缺组件、组件值或状态不合法、失败却没有字符串码、「not_ready 却没有失败项」的快照一律关闭。换镜像时新旧发布的租约并存期间仍是混版本，客户写入照旧关闭；只有旧租约消失后、新 platform Worker 尚未就绪的那段不再关闭。
+  - `RuntimeWorkAdmissionGuard` 改为 `admission.current().admitted && customerWriteAdmission(readiness.current()).open`；两类平台控制面豁免与 503 响应体都不变。
+  - `SiteBuildRuntimeGuard` 用同一函数（D3 决定 3）；`failedComponents` 照旧列出全部失败组件（含被容忍的那个），付费构建仍要求结算读回。
+  - 不变：`/health/ready` 的口径、响应格式与 503 码，「platform Worker 租约缺失时整体仍为 not_ready」的既有用例原样保留；platform Worker 自检与 fail-closed；静态发布准入；platform Worker 混版本（`PLATFORM_WORKER_MIXED_RELEASE_IDENTITY`）、Temporal 身份不符（`WORKER_TEMPORAL_IDENTITY_INVALID`）、租约查询失败（`RUNTIME_PROCESS_LEASE_UNAVAILABLE`）照旧关闭客户写入。没有迁移、OpenAPI、环境开关或 parity 指纹文件的变化。
+  - 文档：AGENTS §4 第 5 条补一句「『API 不接新工作』按该工作自身的依赖集合判定」（产品负责人批准）；架构页 readiness 一段补上 platform Worker 租约与「整体就绪不等于客户写入准入」；状态页新增 §4.4；R4 已批准规格 §4 加注。
+- 测试：
+  - 新 `customer-write-admission.spec.ts`（45 项，零容器）：只有 platform Worker NOT_READY 时放行；platform Worker 的其他码（混版本、身份不符、租约不可用、发布身份不可用、大小写或空格漂移）与 not_proven 都关闭并返回该码；其余每个硬组件逐一失败（failed 或 not_proven，单独或与 platform Worker NOT_READY 同时）都关闭；其余每个硬组件以 `failed` 但码为 null、undefined 或非字符串出现时都关闭；未分类组件失败、缺组件、不可枚举的组件、组件为 null、状态非法、not_ready 却无失败项、初始快照都关闭；就绪服务实际报告的组件键与容忍表逐一相同，且容忍项恰为一项；以真实 `RuntimeProcessLeaseService` 证明租约缺失、STARTING、DRAINING、STOPPED 产生的正是被容忍的码，换版本、错命名空间、错集群产生的码不被容忍。
+  - 守卫与建站门各加 3 项：platform Worker 只是 NOT_READY 时放行；platform Worker 完整性失败或客户 Worker 未就绪时仍是原样的 503；静态准入关闭、付费构建缺结算读回时仍关闭。
+  - 新组合测试 `customer-write-admission.composition.spec.ts`：真实就绪服务、真实租约检查、全局守卫与 HealthController 经 HTTP 串起来。platform Worker 缺席或 STARTING 时 `/health/ready` 为 503 且写明 `PLATFORM_WORKER_NOT_READY`，客户 POST 得到 201；platform Worker 换版本或客户 Worker 缺席时 POST 为 503；两者都 READY 时为 200 与 201。
+  - 红灯：改代码前，新纯函数测试因模块不存在而失败，守卫、建站门与组合测试里「只有 platform Worker NOT_READY」的 4 项失败，其余新增用例（仍应关闭的情形）通过；再以沿用整体 readiness 的过渡实现跑纯函数测试，只有 2 个放行用例失败、27 项通过。独立复审指出容忍表的 null（必须 ok）会与 `code: null` 的失败相等、不可枚举的组件会被跳过：补的 16 项先全部失败（函数放行），修正后通过；这两种输入目前没有任何生产者会产生。
+- 部署：只改 API 进程里的一个判定，没有迁移、数据、配置或契约变化。发布镜像、xin 切换与切换后的本机验收（停 platform Worker 时 `/health/ready` 为 503 而客户写入不被准入守卫拦下；停客户 Worker 时仍为 503）另行授权并记录。回退为 revert 后发布，或切回上一版镜像。
+- 未做：
+  - platform Worker 频繁单独重启的根因另立任务。
+  - 平台故障不再经由客户写入 503 暴露；本机 `gctl doctor` 的「platform_worker 持续不就绪」告警属工作区工具，另行修改。
+  - 按端点细分依赖（例如获客写入不再要求建站专属组件）不在本项范围。
+
 ## 2026-10-10 · Design the lead delivery loop: package fields, weekly report, feedback and contact drafts
 
 - 设计 `docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md`（APPROVED），对应 BI-15、BI-19–BI-23。产品负责人当天拍板 E1–E9：
