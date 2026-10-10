@@ -4,6 +4,28 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-10 · Lock the site-build budget for publication through an owner routine
+
+- 起因（2026-10-10 审计 app_user 表权限时发现，一次性库复现）：带质量环的建站翻新（Temporal patch `site-builder-m1f-quality-loop-v1`，新 run 都走这条路）在发布前要带行锁读本次构建的预算（`site-builder.activities.ts` 的 `finalizeRefurbish`），防止结算在检查和发布之间改动预算的状态或原因。这一步以 `app_user` 执行，而 `20260816220000_production_parity_budget_runtime` 起 `app_user` 对 `site_build_budget` 只有 SELECT。任何行锁（FOR UPDATE / SHARE 等）都要 UPDATE 权限，所以这句一律报 `permission denied for table site_build_budget`，不论有没有匹配的行：质量环的翻新一个也走不完。单测把 `$queryRaw` 整个替身掉，原生 SQL 真库测试只做 PREPARE、不检查权限，所以没有暴露。
+- 改动：
+  - 新迁移 `20261010100000_site_build_budget_publication_lock`：新增 SECURITY DEFINER 函数 `lock_site_build_budget_for_publication(workspace, build_run)`。它和现有的预算结算函数一样，先核对调用方事务的工作区，再以属主身份对预算行加 `FOR UPDATE` 锁，返回发布检查要读的两个字段。行锁持续到调用方事务结束，所以发布与结算按设计串行。search_path 以 `pg_temp` 结尾；只授 `app_user` 执行。`app_user` 的表权限不变。
+  - `finalizeRefurbish` 改为调用这个函数读预算。
+- 测试：
+  - 新的真库测试 `site-build-budget-publication-lock.postgres.spec.ts`，接进 CI「Raw SQL parameter types on PostgreSQL」一步。只跑 main 的迁移时除第一项外全部失败（函数不存在），加上迁移后 7 项全过：
+    - `app_user` 自己加行锁被拒（42501）；
+    - 函数返回本工作区构建的预算字段；
+    - 第一个调用方的锁持续到其事务结束，另一个调用方在 200 毫秒锁超时内报 55P03，前者提交后可取得；
+    - 锁住期间，结算函数 `disable_site_build_paid_calls` 同样报 55P03，改不了这一行；
+    - 其他工作区的调用被拒；
+    - 没有预算的构建返回空；
+    - PUBLIC 不能执行，`app_user` 可以（属主与 `app_user` 的成员角色本来就能）。
+  - 单测：质量环的发布经由这个函数读预算，SQL 里不再有任何行锁子句，参数是工作区与构建 ID。
+  - CI 那一步的三个真库测试在一次性库上全过；建站相关 132 个测试文件 3,253 项通过。
+- 部署：迁移与带它的镜像在同一窗口上线，按名称顺序；它排在 #621（`20261010090000`）之后，两者都随下一个窗口发布。
+- 未做：
+  - 收尾先调 `terminalCostSummary`，其中 `disable_site_build_paid_calls(…,'run_succeeded')` 会无条件改写 `disabled_reason`，且不取进度锁；所以已记下的取消、`settlement_exceeded_reservation` 等原因可能在加锁之前被覆盖，取消请求也可能在发布之前被收尾抢先。这是原有的缺口（这条路径此前根本走不通），另行处理：保留已有原因，或在进度锁下关闭预算。
+  - 原生 SQL 真库测试只以属主 PREPARE，PREPARE 不检查权限。系统性的补法是对收集到的语句再以 `app_user` 执行 EXPLAIN（会检查权限），其他身份执行的语句单列白名单；另行评估。
+
 ## 2026-10-09 · Give discovery runs a 3-hour admission lease
 
 - 起因（2026-10-09 xin 实测，run `733fbf03`）：发现 run 的授权（Grant）最长 5 分钟。准入后每个活动开头、每次模型或工具预留都要再核验授权是否过期，所以 run 开始约 6 分钟（5 分钟加 60 秒容差）后的第一次核验就报 `EXECUTION_BUDGET_GRANT_EXPIRED`。733fbf03 在准入后 6 分钟因此失败，而一个发现 run 预计要跑 1–1.5 小时。产品负责人 2026-10-09 选定「准入后给 run 一段租约」，并确认 3 小时、只给发现 run。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md`（已改为 APPROVED）。
