@@ -88,7 +88,7 @@ payload v1：
 
 验证规则复用 Site Build Grant 的固定语义：非对称算法白名单、必需 `kid`/`typ`、固定 audience、issuer/JWKS 信任根、300 秒最大 TTL、60 秒最大时钟容差、workspace 与 Bearer identity 一致、请求摘要与 subject/purpose 精确绑定、canonical decimal bigint。原始 JWS 不进入日志、trace 或数据库。
 
-300 秒只约束 Grant 的出示与准入（验签、`consume`、`open`）。发现 run（`discovery.run` + `discovery_run`）准入后按 authority 的准入租约核验：准入时写入 `admission_lease_expires_at` = 准入时刻 + 3 小时，此后每次 attest 与 reserve 都以它为有效期（同样 60 秒容差，到期同样报 `EXECUTION_BUDGET_GRANT_EXPIRED`）。其余 workspace grant 与平台 grant 没有租约，仍按 Grant 的 `expires_at`。依据：产品负责人 2026-10-09 决定，见 [ADR-024 补充](../adr/registry.md) 与 [落地设计](../superpowers/plans/2026-10-09-discovery-run-admission-lease.md)。
+300 秒只约束 Grant 的出示与准入（验签、`consume`、`open`）。有准入租约的 workspace grant 准入后按租约核验：准入时写入 `admission_lease_expires_at`，发现 run（`discovery.run` + `discovery_run`）为准入时刻 + 3 小时，ICP 设计（`icp.design` + `company`）与 ICP 查询计划（`icp.query_plan` + `icp`）为准入时刻 + 30 分钟；此后每次 attest 与 reserve 都以它为有效期（同样 60 秒容差，到期同样报 `EXECUTION_BUDGET_GRANT_EXPIRED`）。其余 workspace grant 与平台 grant 没有租约，仍按 Grant 的 `expires_at`。依据：产品负责人 2026-10-09 决定（发现 run）与 2026-10-10 决定（两个 ICP 操作），见 [ADR-024 补充](../adr/registry.md) 与 [落地设计](../superpowers/plans/2026-10-09-discovery-run-admission-lease.md)。
 
 ### 3.3 Platform Grant 交付合同
 
@@ -147,7 +147,7 @@ Outbox/Relay 只负责传输；Backend 必须验签后才写入 authority。未�
 - app role 对 authority 表只有 `SELECT`，写入（准入、开账户、计数）都经 SECURITY DEFINER 函数，不能设置或延长租约；对撤销表只有 `SELECT/INSERT`；两张表都禁止 `UPDATE/DELETE`。撤销通过 append-only `ExecutionBudgetAuthorityRevocation`。
 - `ToolBudgetAccount` 新增非空 `authorityId` 和 `authorizedCapMicrousd`。
 - `open_tool_budget` 改为接收 `authorityId + accountKey + replayScope`，数据库从 authority 读取 cap；不再接收调用方任意 cap。
-- reserve 函数再次验证 authority、scope、purpose、subject、有效期、撤销、run/campaign cap 与账户 generation。有效期取 `COALESCE(admission_lease_expires_at, expires_at)`：只有发现 run 有准入租约，其余仍是 Grant 的 `expires_at`。
+- reserve 函数再次验证 authority、scope、purpose、subject、有效期、撤销、run/campaign cap 与账户 generation。有效期取 `COALESCE(admission_lease_expires_at, expires_at)`：只有发现 run、ICP 设计与 ICP 查询计划有准入租约，其余仍是 Grant 的 `expires_at`。
 
 ### 3.5 错误合同
 
