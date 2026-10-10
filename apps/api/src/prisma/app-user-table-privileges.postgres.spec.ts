@@ -8,6 +8,10 @@ import {
   inventorErasureKeys,
   readPatentCache,
 } from '../adapters/patent-inventor-cache';
+import {
+  companyContactObservation,
+  persistCompanyContactPoints,
+} from '../discovery/company-contact-points';
 import { WebsiteWatchService } from '../intent/website-watch.service';
 import { SignalIngestService } from '../signals/signal-ingest.service';
 import type { PrismaService } from './prisma.service';
@@ -577,6 +581,46 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
           select: { id: true },
         });
       }
+    });
+  }, 60_000);
+
+  // company_contact_point (BI-14) is the one table created SELECT-only by default that its own
+  // migration grants writes on: the writer inserts and updates, DSR erasure deletes.
+  it('lets app_user record, refresh, remove and erase company contact points', async () => {
+    const workspaceId = randomUUID();
+    const companyId = randomUUID();
+    const site = 'https://privileges-probe.example';
+    const paths = {
+      contactPage: `${site}/kontakt`,
+      impressumPage: `${site}/impressum`,
+      supplierPage: null,
+      linkedinCompanyPage: null,
+      xCompanyAccount: null,
+      contactForm: `${site}/kontakt`,
+      contactFormChecked: true,
+    };
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+      await tx.canonicalCompany.create({
+        data: {
+          id: companyId,
+          workspaceId,
+          name: 'Privileges Probe GmbH',
+          domain: 'privileges-probe.example',
+          dedupeKey: 'domain:privileges-probe.example',
+        },
+      });
+      // company-contact-points.ts: insert, then refresh and REMOVED_FROM_SITE on a later profile.
+      const seenAt = new Date();
+      expect(await persistCompanyContactPoints(tx, {
+        workspaceId, companyId, observation: companyContactObservation(paths), seenAt,
+      })).toEqual({ written: 3, removed: 0 });
+      expect(await persistCompanyContactPoints(tx, {
+        workspaceId, companyId, observation: companyContactObservation({ ...paths, impressumPage: null }), seenAt,
+      })).toEqual({ written: 2, removed: 1 });
+      // deletion.activities.ts eraseSubject: a company subject's points are deleted.
+      const erased = await tx.companyContactPoint.deleteMany({ where: { companyId: { in: [companyId] } } });
+      expect(erased.count).toBe(3);
     });
   }, 60_000);
 
