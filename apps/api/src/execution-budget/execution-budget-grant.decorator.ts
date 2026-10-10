@@ -43,8 +43,14 @@ export const ExecutionBudgetGrant = createParamDecorator(
 
 export function ApiExecutionBudgetGrant(options?: {
   additionalForbiddenCodes?: readonly string[];
+  /** Operation-specific 409 codes, listed in the response description; the schema stays open. */
+  additionalConflictCodes?: readonly string[];
 }): MethodDecorator {
   const additionalForbiddenCodes = options?.additionalForbiddenCodes ?? [];
+  const conflictCodes = [
+    'EXECUTION_BUDGET_GRANT_REUSED',
+    ...(options?.additionalConflictCodes ?? []),
+  ];
   const forbiddenCodes = [
     'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
     'EXECUTION_BUDGET_AUTHORITY_REVOKED',
@@ -90,7 +96,10 @@ export function ApiExecutionBudgetGrant(options?: {
     }),
     ApiResponse({
       status: 409,
-      description: 'EXECUTION_BUDGET_GRANT_REUSED',
+      description:
+        conflictCodes.length === 1
+          ? conflictCodes[0]
+          : `${conflictCodes.slice(0, -1).join(', ')} or ${conflictCodes.at(-1)}`,
       schema: AUTHORITY_ERROR_SCHEMA,
     }),
     ApiResponse({

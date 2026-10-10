@@ -4,6 +4,32 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-10 · Plan discovery queries only for ENABLED data sources
+
+- 起因（BI-30，产品负责人 2026-10-10 批准）：xin 的 `data_provider` 里，公司发现源只有 `public_web` 是 ENABLED，`ted`、`openstreetmap`、`wikidata`、`directory`、`trade_fair`、`openfda` 都是 DISABLED（意图源 `samgov` 同样停用）。规划器的任务描述却写死了 TED、Wikidata、OSM 等子源，模型照样为它们出查询（只读核对 xin 的计划）：两份 14 条的计划各有 10 条落在停用的源上；21 条的那份有 7 条落在停用的源上，另有 3 条用的是 `trade_data`、`b2b_company_person` 这类根本没有 provider 的 source_class；计划里还有确定性注入的 TED/CPV 查询，而 TED 是停用的。执行时这些查询路由不到任何适配器，却先照常做词表归一（`taxonomy.normalize` 模型调用），再写一条 providers 为空的零回执：跑空，还花钱。
+- 路由规则（规划与执行共用新模块 `discovery/plan-query-sources.ts`）：查询按 `source_class` 加 `filters.source_hint` 路由到该类下 ENABLED 的公司发现 provider；hint 是源键本身，或旧计划里的部分写法（`wiki` → wikidata），仍按包含匹配，单测保证没有一个源键包含另一个，精确的源键只指向一个源。hint 现在去首尾空白、不分大小写，也可以是字符串列表；数字、对象这类没法用的 hint 不再让活动抛 TypeError（此前会算作查询失败，受治理物化随后因缺回执中止 run），而是路由不到任何源。
+- 规划（`POST /icps/:icpId/query-plans`）：
+  - 读 ICP 的同一事务里读一次 `data_provider` 开关快照（新增 `DiscoveryProviderRegistry.companyDiscoverySources` / `enabledCompanyDiscoverySources`），提示、过滤和冷路径注入都按这份快照。`IcpModule` 为此引入 `DiscoveryModule` 导出的 registry。
+  - 没有可规划的已启用数据源时，调用模型之前返回 409 `NO_ENABLED_DISCOVERY_SOURCE`：授权已消费但不花钱，与 `INVALID_STATE` 同一时机、同一状态码。`ted`、`openfda` 只承载冷路径确定性生成的查询，只启用它们不算。
+  - 提示新增「可用数据源」清单，只列已启用、模型可以写的源：源键、可用的 source_class、一句用法；`ted`/`openfda` 启用时只说明它们的查询由系统生成。任务描述和输出 schema 里的说明文字去掉了写死的子源名单，要求每条查询都写 `filters.source_hint`；schema 结构（字段、类型、枚举、必填项）与 `icp-query-plan/v1` 都不变。
+  - 模型返回后，路由不到已启用源的查询移出计划，按原因计数：`SOURCE_DISABLED`（源已登记但停用）、`SOURCE_UNKNOWN`（没有 provider，如 `trade_data`）、`SOURCE_SYSTEM_PLANNED`（模型自己写的 TED/openFDA 查询，它们的码只能由冷路径给）、`PLAN_QUERY_CAP`。留下的每条查询，`filters.source_hint` 都改写成它执行的那个源键。没写 hint、而该类有多个已启用源的查询，拆成每个源一条，保持原来的 fan-out；拆出的条数超过规划上限 64 条时按优先级保留，计划仍在运行报价覆盖的 66 条以内。移出的条数与原因记在首条规划查询的 rationale 里（`[source_filter] …`，与冷路径 warning 同处），人工确认时可见；规划查询一条不剩、只剩冷路径查询时记在计划首条。
+  - TED/CPV、openFDA 的冷路径解析与注入只在对应源已启用时进行，停用时不再为它们花词表归一的模型调用；贸易角色只写进留下的查询。冷路径解析的行业词仍从模型给出的全部查询采集，与此前一致。
+  - 计划里一条可执行的查询都没有（模型给出的全落在不可用的源上，冷路径也没注入）时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划；此前会保存一份空计划。
+  - `estimatedVolume` 只计会执行的查询：模型的估算覆盖它写的全部查询，按留下的模型查询占比折算；一条都没留下、只剩冷路径查询时为 null。
+- 执行（`executeQuery`）：
+  - 改为先路由、再做词表归一。路由不到 ENABLED 适配器的查询（数据源在规划之后被停用，或旧计划里的未知 source_class）跳过：不调词表归一模型、不调 provider，照常写一条零回执（受治理物化的准入要求每条计划查询都有回执），活动结果带 `skipReason`（`SOURCE_DISABLED` / `SOURCE_UNKNOWN`）。重试时重放出 providers 为空的受治理回执，同样报告跳过：受治理回执列出路由到的全部 provider，列表为空就是跳过；legacy 回执不列失败的 provider，所以 legacy 路径按路由结果判断。
+  - 工作流把跳过按原因计入 `stats.skippedQueries`，只有计数、不记查询内容；没有跳过时不出现这个键，原有 stats 形状不变。跳过不算失败：有跳过时 run 至少 PARTIAL（确认过的查询没跑），全部跳过也只是 PARTIAL。BI-25 的 FAILED 收尾同样带上计数。没有新增 Temporal 命令，不需要 patch，重放只比对活动类型与顺序；打包重放测试照常通过。
+  - `discovery-governed-lineage.activities.spec.ts` 里锁定的执行顺序相应改为「授权核验 → 路由 → 词表归一」；血缘核验先于预算、路由、词表归一和 provider 的约束不变。
+- 报价：确认前展示的计划规模（查询列表与 `estimatedVolume`）只计会执行的查询。发现 run 的技术报价（`POST /query-plans/:planId/execute`）仍是每个 run 的执行上限（66 条查询乘全部适配器），它是不读库的纯投影，不随计划内容变化，本次不改。
+- 契约：OpenAPI 只改说明文字（该操作的 description，409 列出 `INVALID_STATE`、`NO_ENABLED_DISCOVERY_SOURCE`、`NO_RUNNABLE_QUERIES`；`ApiExecutionBudgetGrant` 加可选的 `additionalConflictCodes`，其他操作的 409 不变），没有结构变更；`packages/contracts/INTEGRATION.md` 阶段 2 同步。
+- 测试：
+  - 先红：新增与改写的用例在实现前 25 项失败（另有新模块的用例文件因模块不存在而无法加载），包括：规划器在没有已启用源时仍调用模型、提示里没有可用源清单、停用源的查询留在计划里、TED/openFDA 停用时仍解析注入、空计划照存；执行器对停用源的查询仍调用词表归一、结果不带跳过原因、hint 为数字或列表时抛 TypeError；工作流不计跳过、全部跳过时判 DONE；registry 没有源清单方法；OpenAPI 409 只列授权复用。
+  - 新增 `plan-query-sources.spec.ts`（hint 解析、路由、跳过原因、规划过滤与拆分、上限、提示内容、规模折算、移出说明、每个已登记源都有用法说明且源键互不包含）；`icp.service.spec.ts` 加 8 项、`discovery.activities.spec.ts` 加 9 项（含受治理回执重放与运行状态）、工作流加 4 项、registry 加 2 项、OpenAPI 加 1 项；既有用例里依赖空计划或 TED/openFDA 默认启用的，改为写一条可执行的查询或显式启用这些源。
+- 未做：
+  - 已保存的 READY 计划不回写；执行时其中停用源的查询按跳过计数，run 判 PARTIAL。
+  - 发现 run 的技术报价不按计划内容收窄（见上）；要按计划算，报价服务得读库，属另一项设计。
+  - 代码阅读发现（未在真库验证）：`wikidata`、`openstreetmap`、`ted`、`openfda` 的 provider 没有受治理血缘（`companyResultLineage`），路由到它们的查询走 legacy 路径，不写受治理回执表；新 run 的物化准入要求每条计划查询都有这张表的回执，所以启用这些源后，含它们查询的 run 会在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下。重新启用这些源之前，要先给它们补受治理血缘，或另定处理。
+
 ## 2026-10-10 · Extend the admission lease to ICP design and ICP query planning
 
 - 起因（2026-10-10 xin 实测）：一次 ICP 查询计划（`POST /icps/:icpId/query-plans`）返回 HTTP 402 `EXECUTION_BUDGET_GRANT_EXPIRED`。Grant 10:12:04 签发、10:17:04 到期，10:12:10 准入（authority 为 `icp.query_plan` + `icp`）。请求先做一次约 130 秒的规划调用，再做 9 次串行的 `taxonomy.normalize`（10:14:21 至 10:18:13）；10:18:04（到期加 60 秒容差）之后的下一次预留被拒。ICP 设计（`POST /companies/:companyId/icps`）是一次模型调用（10-10 为 130 至 150 秒，账本里最长 3 分 04 秒）；按现有代码它在准入后只核验与预留一次，修复调用也在同一个预留里，不会因模型耗时在准入后过期，给它租约是防御性的。产品负责人 2026-10-10 决定：准入租约扩展到这两个操作，时长 30 分钟；发现 run 仍是 3 小时，不包含其他用途。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §8。

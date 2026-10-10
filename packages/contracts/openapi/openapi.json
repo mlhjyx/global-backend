@@ -6373,6 +6373,7 @@
     },
     "/api/v1/icps/{icpId}/query-plans": {
       "post": {
+        "description": "只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。",
         "operationId": "IcpController_generateQueryPlan_v1",
         "parameters": [
           {
@@ -6479,7 +6480,7 @@
             }
           },
           "409": {
-            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "description": "EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE, NO_ENABLED_DISCOVERY_SOURCE or NO_RUNNABLE_QUERIES",
             "content": {
               "application/json": {
                 "schema": {

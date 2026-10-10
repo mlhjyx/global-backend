@@ -9,6 +9,8 @@
  * Fit 判定按公司吸收的模型失败（判不出）同样至少 PARTIAL，绝不静默漏判假 DONE。它不单独
  * 判 FAILED：计数只覆盖活动的最后一次尝试，重试时已有结论的公司不再重判，「这次一家都没判出」
  * 不等于「这个 run 没有结论」，而 FAILED 会让已存的结论不进评分。
+ * BI-30：数据源在规划后被停用而跳过的查询也是漏了活儿 → 至少 PARTIAL；跳过不是失败，全部查询
+ * 都被跳过时同样是 PARTIAL，不让 run 失败。
  */
 export function resolveRunStatus(args: {
   failures: number;
@@ -17,10 +19,13 @@ export function resolveRunStatus(args: {
   skippedSubjects?: number;
   /** Companies whose fit judgment failed in the activity's last attempt: absorbed model failures. */
   fitUnjudged?: number;
+  /** Plan queries that ran on no provider because their source was off (BI-30). */
+  skippedQueries?: number;
 }): 'DONE' | 'PARTIAL' | 'FAILED' {
   const { failures, totalQueries, budgetTruncated } = args;
   const skipped = (args.skippedSubjects ?? 0) > 0;
   const unjudged = (args.fitUnjudged ?? 0) > 0;
-  if (failures === 0 && !budgetTruncated && !skipped && !unjudged) return 'DONE';
+  const queriesSkipped = (args.skippedQueries ?? 0) > 0;
+  if (failures === 0 && !budgetTruncated && !skipped && !unjudged && !queriesSkipped) return 'DONE';
   return failures < totalQueries ? 'PARTIAL' : 'FAILED';
 }

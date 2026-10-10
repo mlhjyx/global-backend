@@ -97,6 +97,8 @@ import {
 } from '../discovery/providers/website-profile.provider';
 import { targetCountryCodes } from '../discovery/search-localization';
 import { companyMatchesSuppression } from '../discovery/suppression-value';
+import type { DiscoveryQuerySkipReason } from '../discovery/discovery-query-skip';
+import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -129,6 +131,21 @@ interface DiscoveryQueryExecutionResult {
   provider: string | null;
   budgetTruncated: boolean;
   queryReceipt?: DiscoveryQueryReceipt;
+  /** BI-30: the query ran on no provider; the workflow counts the reason in the run's stats. */
+  skipReason?: DiscoveryQuerySkipReason;
+}
+
+/**
+ * BI-30: a governed query receipt lists every provider the query was routed
+ * to, so an empty list on it means the query was skipped.
+ */
+function withReceiptSkip(
+  result: DiscoveryQueryExecutionResult,
+  reason: () => DiscoveryQuerySkipReason,
+): DiscoveryQueryExecutionResult {
+  return result.queryReceipt?.providers.length === 0
+    ? { ...result, skipReason: reason() }
+    : result;
 }
 
 function invalidDiscoveryQueryReceiptIdentity(): never {
@@ -495,6 +512,9 @@ export function createDiscoveryActivities(deps: {
         keywords: args.query.keywords ?? [],
         priority: args.query.priority ?? 99,
       };
+      // BI-30: why a query routed to no provider, judged against every registered source.
+      const skipReason = (): DiscoveryQuerySkipReason =>
+        planQuerySkipReason(args.query, deps.providers.companyDiscoverySources());
       const queryKey = receiptIdentity
         ? discoveryQueryKey({
             runId: args.runId,
@@ -527,9 +547,9 @@ export function createDiscoveryActivities(deps: {
               'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
             );
           }
-          return executionResult(
-            prior.queryReceipt as DiscoveryQueryReceipt,
-            prior.budgetTruncated,
+          return withReceiptSkip(
+            executionResult(prior.queryReceipt as DiscoveryQueryReceipt, prior.budgetTruncated),
+            skipReason,
           );
         }
         if (prior.status === 'NOT_FOUND') {
@@ -545,13 +565,32 @@ export function createDiscoveryActivities(deps: {
         scopeKey: binding.scopeKey,
         accountKey: binding.accountKey,
       });
+      // 多源 fan-out：该 source_class 下**全部 ENABLED 适配器**并行召回（蓝图集成点 1）。
+      // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
+      // BI-30：先路由、再做词表归一。路由不到 ENABLED 适配器的查询（数据源在规划后被停用，或旧计划
+      // 里没有 provider 的 source_class）就此跳过：不调词表归一模型、不调 provider，照常落一条零回执
+      // （物化准入要求每条计划查询都有回执），并把跳过原因交给工作流按原因计数，run 不因此失败。
+      const sourceClass = args.query.source_class as SourceClass;
+      const classAdapters = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        deps.providers.routeCompanyDiscovery(tx as never, sourceClass),
+      );
+      const adapters = narrowBySourceHints(args.query.filters, classAdapters, (adapter) => adapter.key);
+      if (adapters.length > MAX_DISCOVERY_PROVIDER_ADAPTERS) {
+        throw ApplicationFailure.nonRetryable(
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+        );
+      }
+      for (const adapter of adapters) {
+        assertProductDiscoveryProvenance({ providerKey: adapter.key });
+      }
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
       const enriched: Record<string, unknown> = {
         ...(args.query.filters ?? {}),
       };
-      if (deps.taxonomy) {
+      if (deps.taxonomy && adapters.length > 0) {
         // Bounded per query: each unresolved term costs one taxonomy.normalize call.
         const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
         const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
@@ -578,7 +617,7 @@ export function createDiscoveryActivities(deps: {
         }
       }
       const q: CompanyDiscoveryQuery = {
-        sourceClass: args.query.source_class as SourceClass,
+        sourceClass,
         filters: enriched,
         keywords: args.query.keywords ?? [],
         limit: PER_SOURCE_LIMIT,
@@ -595,22 +634,6 @@ export function createDiscoveryActivities(deps: {
           updatedAt: true,
         },
       });
-      // 多源 fan-out：该 source_class 下**全部 ENABLED 适配器**并行召回（蓝图集成点 1）。
-      // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
-      const hint = (args.query.filters?.source_hint as string | undefined)?.toLowerCase();
-      let adapters = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
-      );
-      if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
-      if (adapters.length > MAX_DISCOVERY_PROVIDER_ADAPTERS) {
-        throw ApplicationFailure.nonRetryable(
-          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
-          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
-        );
-      }
-      for (const adapter of adapters) {
-        assertProductDiscoveryProvenance({ providerKey: adapter.key });
-      }
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
       const ctx: ExecutionContext = {
@@ -671,7 +694,7 @@ export function createDiscoveryActivities(deps: {
             'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
           );
         }
-        return commitGovernedDiscoveryQueryExecution({
+        const governed = await commitGovernedDiscoveryQueryExecution({
           prisma: deps.prisma,
           workspaceId: args.workspaceId,
           runId: args.runId,
@@ -686,6 +709,7 @@ export function createDiscoveryActivities(deps: {
           budgetAuthorization,
           budgetTruncated,
         });
+        return withReceiptSkip(governed, skipReason);
       }
       // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -873,7 +897,12 @@ export function createDiscoveryActivities(deps: {
             return executionResult(receipt, budgetTruncated);
           },
         });
-        return persisted.value;
+        // Only a query with no receipt identity can reach this path with no
+        // adapter; a legacy receipt omits providers that failed, so its
+        // provider list cannot tell a skip apart.
+        return adapters.length === 0
+          ? { ...persisted.value, skipReason: skipReason() }
+          : persisted.value;
       });
     },
 
