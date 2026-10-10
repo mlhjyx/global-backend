@@ -2831,6 +2831,7 @@ describe("company-subject call sites (G3 5.5)", () => {
     const deps = makeEnrichDeps([]) as unknown as {
       prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
       broker?: unknown;
+      platformWriter?: unknown;
     };
     await deps.prisma.withWorkspace("ws", async (tx) => {
       tx.fieldEvidence!.findMany = async () => [];
@@ -2839,13 +2840,51 @@ describe("company-subject call sites (G3 5.5)", () => {
       throw new ToolPolicyDenied("http.get", "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED");
     });
     deps.broker = { invoke };
+    const $transaction = vi.fn();
+    deps.platformWriter = { $transaction };
 
     const result = await createDiscoveryActivities(deps as never).registerWatchesForRun(
       discoveryArgs("run-watch-skip", { icpId: "icp-1" }) as never,
     );
 
     expect(invoke).toHaveBeenCalled();
+    expect($transaction).not.toHaveBeenCalled();
     expect(result).toEqual({ candidates: 1, registered: 0, skippedSubjects: 1 });
+  });
+
+  it("registers no watch and fetches no sitemap in a worker without the platform writer", async () => {
+    // A watch is a platform row. The sitemap reads behind it return durable receipts that only
+    // the platform writer's transaction may acknowledge, and the customer worker has no
+    // platform writer: registering would end in DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE, a
+    // control error that fails the whole run after its leads were already written.
+    const deps = makeEnrichDeps([]) as unknown as {
+      prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
+      broker?: unknown;
+    };
+    await deps.prisma.withWorkspace("ws", async (tx) => {
+      tx.fieldEvidence!.findMany = async () => [];
+    });
+    // What the broker really returns for a budgeted sitemap read: an http-get artifact receipt.
+    const httpReceipt: DurableExecutionReceipt = Object.freeze({
+      ...ENRICHMENT_RECEIPT,
+      operationKey: "watch-sitemap-http-get",
+      resultStrategy: "artifact_reference",
+      resultSchema: "http-get/v1",
+      artifactId: "50000000-0000-4000-8000-000000000001",
+    });
+    const invoke = vi.fn(async () => ({
+      data: { status: 404, ok: false, mediaType: "text/plain", text: "" },
+      costCents: 0,
+      durableReceipt: httpReceipt,
+    }));
+    deps.broker = { invoke };
+
+    await expect(
+      createDiscoveryActivities(deps as never).registerWatchesForRun(
+        discoveryArgs("run-watch-no-platform-writer", { icpId: "icp-1" }) as never,
+      ),
+    ).resolves.toEqual({ candidates: 1, registered: 0, skippedSubjects: 0 });
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("still fails the run when the artifact store itself is unavailable", async () => {

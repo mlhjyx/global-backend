@@ -210,6 +210,15 @@
   - 函数体里用动态 SQL 新建的函数，静态护栏看不到，由真库护栏兜底。
   - 部署：迁移要和带它的镜像在同一窗口上线，因为运行时要求库里最新的迁移与镜像的 migration_revision 一致。计划和准入租约（`20261009170000`）、来源策略（`20261009180000`）一起按名称顺序发布。
 
+## 2026-10-09 · Skip watch registration in a worker without the platform writer
+
+- 起因（2026-10-09 审计 app_user 写入平台表时核实）：发现 run 的倒数第二个阶段 `registerWatchesForRun` 为 Fit 判为 match、有域名、未被抑制、允许外部处理的公司注册网站监控。注册前要经 `http.get` 读 sitemap；这些读取在 run 预算下一定建预留（零成本工具也一样），又挂在公司主体上走产物路径，只要有一次读取完成就带回持久回执（404 与被 SSRF 护栏拦下的结果也会落产物）。监控是平台行，带回执的写入只能在平台写入者的事务里确认（`intent-projection.service.ts` 的 DomainAck 分支），可客户 worker 从不持有平台写入者（`worker.ts` 给发现活动的依赖里没有它）。于是注册必报 `DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE`。这是控制错误，阶段的「尽力而为」兜不住，工作流照样上抛：这样的 run 会在线索已经写入之后失败，带 `discovery-failure-finalize-v1` 补丁的记为 FAILED（阶段 `watches`）。此前没有 run 走到这一步，所以没有暴露。
+- 改动：`registerWatchesForRun` 先照常数出候选公司；进程没有平台写入者时，在任何出网之前返回「候选 N、注册 0、跳过 0」，并在 worker 日志里写明原因。有平台写入者的路径不变。不改工作流，不需要 patch：活动结果的形状没变，`finalizeRun` 不校验这一项。
+- 测试：新增「没有平台写入者时不注册、不读任何 sitemap」：模拟的 `http.get` 返回真实形状的结果与 http-get 产物回执。去掉守卫时活动以 `DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE` 失败（复现了上面的故障），加上守卫后正常返回、`http.get` 一次也没调。原有的「主体被拒的公司跳过」改为带平台写入者，仍走到出网那一步，且不开平台事务。发现活动、工作流授权、抑制线性化与 intent 相关 10 个文件 259 项通过；独立复审无 CRITICAL / HIGH / MEDIUM。
+- 未做：
+  - 发现 run 现在不再自动注册网站监控（这条路在客户 worker 里本来就走不通）。要恢复，得把注册交给持有平台写入者的平台 worker，例如由 run 只记下候选、平台侧的 intent sweep 去读 sitemap 并写监控；另行设计。平台的 4 个 schedule 目前都暂停，已注册的监控本来也不会被巡检。
+  - `IntentProjectionService.registerWatch` 自身仍会先出网、落产物，最后才因没有平台写入者而失败；唯一的生产调用点已在出网前拦住。在它内部提前检查要连带改动多处依赖「有 broker、无平台写入者」的用例，留给监控注册的重新设计一并处理。
+
 ## 2026-10-09 · Give app_user only the table privileges its code uses
 
 - 起因（设计 `docs/superpowers/plans/2026-10-09-app-user-platform-table-privileges.md`，产品负责人 2026-10-09 确认 §5 全部按建议：一次收齐、新表默认只读、要清单与真库测试、平台写入者授权另起 PR、下一个窗口上线）：
