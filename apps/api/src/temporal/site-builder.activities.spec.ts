@@ -3838,6 +3838,23 @@ describe("final publication authority and snapshot gates", () => {
       expect(f.tx.siteBuildRun.updateMany).not.toHaveBeenCalled();
     },
   );
+  it("locks the quality budget through the owner routine, never with a row lock of its own", async () => {
+    // app_user may only read site_build_budget; a FOR UPDATE of its own is refused outright.
+    const f = publicationActivityFixture();
+    f.input.qualityV1 = true;
+    f.tx.$queryRaw.mockResolvedValue([]);
+    await expect(f.acts.finalizeRefurbish(f.input)).rejects.toThrow(
+      "budget settlement is not publishable",
+    );
+    const [strings, ...values] = f.tx.$queryRaw.mock.calls[0]! as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    const sql = strings.join("?");
+    expect(sql).toContain("FROM lock_site_build_budget_for_publication(");
+    expect(sql).not.toMatch(/FOR\s+(UPDATE|SHARE|NO KEY UPDATE|KEY SHARE)/i);
+    expect(values).toEqual([f.input.workspaceId, f.input.buildRunId]);
+  });
   it.each([
     null,
     [],
