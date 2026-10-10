@@ -24,6 +24,19 @@
   - 平台故障不再经由客户写入 503 暴露；本机 `gctl doctor` 的「platform_worker 持续不就绪」告警属工作区工具，另行修改。
   - 按端点细分依赖（例如获客写入不再要求建站专属组件）不在本项范围。
 
+## 2026-10-10 · Design the lead delivery loop: package fields, weekly report, feedback and contact drafts
+
+- 设计 `docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md`（APPROVED），对应 BI-15、BI-19–BI-23。产品负责人当天拍板 E1–E9：
+  - `LeadQualified` 仍为 v1，只加可选字段；
+  - 周报为本周 accepted 线索的 CSV；
+  - 线索级成本分摊估算并注明口径；
+  - 拒绝原因码必填；
+  - 开发信草稿给目标国语言加中文译文，末尾附卖方自己的 WhatsApp 一键聊天链接，由买家先开口；
+  - 联系路径加入公司自己的领英公司页、X 账号链接；
+  - 修复信号挂不上有域名公司的缺陷。
+- 客户跟进前台只用 GrowthOS，不接其他 CRM。
+- 本条只有文档；按设计 §11 拆 6 个 PR 施工。
+
 ## 2026-10-10 · Record why paused platform schedules cannot be admitted, and the decision to freeze R4
 
 - 起因：为补平台写入者的表授权（2026-10-09 设计的 P4）做只读核对时发现，4 个暂停的平台 schedule 现在恢复，第一步就会失败。
