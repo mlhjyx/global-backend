@@ -3,7 +3,159 @@ import { describe, expect, it, vi } from "vitest";
 import { RuntimeReadinessService } from "../health/runtime-readiness.service";
 import { SiteBuildRuntimeGuard } from "./site-build-runtime.guard";
 
+const PLATFORM_WORKER_NOT_READY = Object.freeze({
+  status: "failed",
+  code: "PLATFORM_WORKER_NOT_READY",
+});
+// The initial snapshot carries every hard component the service reports.
+const HARD_COMPONENTS = Object.keys(
+  new RuntimeReadinessService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  ).current().components,
+);
+
+function notReadyReport(
+  overrides: Readonly<Record<string, unknown>>,
+  settlement: Readonly<Record<string, unknown>> = { status: "ok" },
+) {
+  return {
+    status: "not_ready",
+    components: {
+      ...Object.fromEntries(
+        HARD_COMPONENTS.map((name) => [name, { status: "ok" }]),
+      ),
+      ...overrides,
+    },
+    capabilities: { site_builder_model_settlement_readback: settlement },
+  };
+}
+
+function guardOver(report: Readonly<Record<string, unknown>>) {
+  return new SiteBuildRuntimeGuard({
+    checkHardComponents: vi.fn(async () => report),
+    checkSiteBuilderPaidCapability: vi.fn(async () => report),
+  } as never);
+}
+
+async function rejection(
+  guard: SiteBuildRuntimeGuard,
+  paidReachable: boolean,
+): Promise<unknown> {
+  return guard
+    .assertReady({ paidReachable })
+    .then(() => undefined)
+    .catch((caught: unknown) => caught);
+}
+
 describe("SiteBuildRuntimeGuard", () => {
+  it("admits intake and paid builds while only the separate platform worker is absent or not yet READY", async () => {
+    const guard = guardOver(
+      notReadyReport({ platform_worker: PLATFORM_WORKER_NOT_READY }),
+    );
+
+    await expect(
+      guard.assertReady({ paidReachable: false }),
+    ).resolves.toBeUndefined();
+    await expect(
+      guard.assertReady({ paidReachable: true }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still rejects a platform worker integrity failure and lists every failed component", async () => {
+    const mixed = {
+      status: "failed",
+      code: "PLATFORM_WORKER_MIXED_RELEASE_IDENTITY",
+    };
+    for (const paidReachable of [false, true]) {
+      const error = await rejection(
+        guardOver(notReadyReport({ platform_worker: mixed })),
+        paidReachable,
+      );
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect(
+        (error as ServiceUnavailableException).getResponse(),
+      ).toMatchObject({
+        error: {
+          code: "SITE_BUILD_RUNTIME_NOT_READY",
+          details: {
+            failedComponents: [
+              {
+                component: "platform_worker",
+                code: "PLATFORM_WORKER_MIXED_RELEASE_IDENTITY",
+              },
+            ],
+          },
+        },
+      });
+    }
+
+    const customerAndPlatform = await rejection(
+      guardOver(
+        notReadyReport({
+          worker: { status: "failed", code: "MATCHING_WORKER_NOT_READY" },
+          platform_worker: PLATFORM_WORKER_NOT_READY,
+        }),
+      ),
+      false,
+    );
+    expect(customerAndPlatform).toBeInstanceOf(ServiceUnavailableException);
+    expect(
+      (customerAndPlatform as ServiceUnavailableException).getResponse(),
+    ).toEqual({
+      error: {
+        code: "SITE_BUILD_RUNTIME_NOT_READY",
+        message: "site build runtime is not ready",
+        details: {
+          failedComponents: [
+            { component: "worker", code: "MATCHING_WORKER_NOT_READY" },
+            { component: "platform_worker", code: "PLATFORM_WORKER_NOT_READY" },
+          ],
+          failedCapabilities: [],
+        },
+      },
+    });
+  });
+
+  it("still requires settlement readback for a paid build while the platform worker is not READY", async () => {
+    const guard = guardOver(
+      notReadyReport(
+        { platform_worker: PLATFORM_WORKER_NOT_READY },
+        {
+          status: "failed",
+          code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+        },
+      ),
+    );
+
+    await expect(
+      guard.assertReady({ paidReachable: false }),
+    ).resolves.toBeUndefined();
+    const error = await rejection(guard, true);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    expect((error as ServiceUnavailableException).getResponse()).toEqual({
+      error: {
+        code: "SITE_BUILD_RUNTIME_NOT_READY",
+        message: "site build runtime is not ready",
+        details: {
+          failedComponents: [
+            { component: "platform_worker", code: "PLATFORM_WORKER_NOT_READY" },
+          ],
+          failedCapabilities: [
+            {
+              capability: "site_builder_model_settlement_readback",
+              code: "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it("allows a build only when the shared runtime report is ready", async () => {
     const readiness = {
       checkHardComponents: vi.fn(async () => ({
@@ -48,9 +200,7 @@ describe("SiteBuildRuntimeGuard", () => {
 
     expect(error).toBeInstanceOf(ServiceUnavailableException);
     expect(readiness.checkHardComponents).not.toHaveBeenCalled();
-    expect(
-      (error as ServiceUnavailableException).getResponse(),
-    ).toMatchObject({
+    expect((error as ServiceUnavailableException).getResponse()).toMatchObject({
       error: {
         details: {
           failedComponents: [

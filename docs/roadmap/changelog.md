@@ -4,31 +4,51 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-10-10 · Plan discovery queries only for ENABLED data sources
+## 2026-10-10 · Admit customer writes on their own dependencies, not platform worker availability
 
-- 起因（BI-30，产品负责人 2026-10-10 批准）：xin 的 `data_provider` 里，公司发现源只有 `public_web` 是 ENABLED，`ted`、`openstreetmap`、`wikidata`、`directory`、`trade_fair`、`openfda` 都是 DISABLED（意图源 `samgov` 同样停用）。规划器的任务描述却写死了 TED、Wikidata、OSM 等子源，模型照样为它们出查询（只读核对 xin 的计划）：两份 14 条的计划各有 10 条落在停用的源上；21 条的那份有 7 条落在停用的源上，另有 3 条用的是 `trade_data`、`b2b_company_person` 这类根本没有 provider 的 source_class；计划里还有确定性注入的 TED/CPV 查询，而 TED 是停用的。执行时这些查询路由不到任何适配器，却先照常做词表归一（`taxonomy.normalize` 模型调用），再写一条 providers 为空的零回执：跑空，还花钱。
-- 路由规则（规划与执行共用新模块 `discovery/plan-query-sources.ts`）：查询按 `source_class` 加 `filters.source_hint` 路由到该类下 ENABLED 的公司发现 provider；hint 是源键本身，或旧计划里的部分写法（`wiki` → wikidata），仍按包含匹配，单测保证没有一个源键包含另一个，精确的源键只指向一个源。hint 现在去首尾空白、不分大小写，也可以是字符串列表；数字、对象这类没法用的 hint 不再让活动抛 TypeError（此前会算作查询失败，受治理物化随后因缺回执中止 run），而是路由不到任何源。
-- 规划（`POST /icps/:icpId/query-plans`）：
-  - 读 ICP 的同一事务里读一次 `data_provider` 开关快照（新增 `DiscoveryProviderRegistry.companyDiscoverySources` / `enabledCompanyDiscoverySources`），提示、过滤和冷路径注入都按这份快照。`IcpModule` 为此引入 `DiscoveryModule` 导出的 registry。
-  - 没有可规划的已启用数据源时，调用模型之前返回 409 `NO_ENABLED_DISCOVERY_SOURCE`：授权已消费但不花钱，与 `INVALID_STATE` 同一时机、同一状态码。`ted`、`openfda` 只承载冷路径确定性生成的查询，只启用它们不算。
-  - 提示新增「可用数据源」清单，只列已启用、模型可以写的源：源键、可用的 source_class、一句用法；`ted`/`openfda` 启用时只说明它们的查询由系统生成。任务描述和输出 schema 里的说明文字去掉了写死的子源名单，要求每条查询都写 `filters.source_hint`；schema 结构（字段、类型、枚举、必填项）与 `icp-query-plan/v1` 都不变。
-  - 模型返回后，路由不到已启用源的查询移出计划，按原因计数：`SOURCE_DISABLED`（源已登记但停用）、`SOURCE_UNKNOWN`（没有 provider，如 `trade_data`）、`SOURCE_SYSTEM_PLANNED`（模型自己写的 TED/openFDA 查询，它们的码只能由冷路径给）、`PLAN_QUERY_CAP`。留下的每条查询，`filters.source_hint` 都改写成它执行的那个源键。没写 hint、而该类有多个已启用源的查询，拆成每个源一条，保持原来的 fan-out；拆出的条数超过规划上限 64 条时按优先级保留，计划仍在运行报价覆盖的 66 条以内。移出的条数与原因记在首条规划查询的 rationale 里（`[source_filter] …`，与冷路径 warning 同处），人工确认时可见；规划查询一条不剩、只剩冷路径查询时记在计划首条。
-  - TED/CPV、openFDA 的冷路径解析与注入只在对应源已启用时进行，停用时不再为它们花词表归一的模型调用；贸易角色只写进留下的查询。冷路径解析的行业词仍从模型给出的全部查询采集，与此前一致。
-  - 计划里一条可执行的查询都没有（模型给出的全落在不可用的源上，冷路径也没注入）时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划；此前会保存一份空计划。
-  - `estimatedVolume` 只计会执行的查询：模型的估算覆盖它写的全部查询，按留下的模型查询占比折算；一条都没留下、只剩冷路径查询时为 null。
-- 执行（`executeQuery`）：
-  - 改为先路由、再做词表归一。路由不到 ENABLED 适配器的查询（数据源在规划之后被停用，或旧计划里的未知 source_class）跳过：不调词表归一模型、不调 provider，照常写一条零回执（受治理物化的准入要求每条计划查询都有回执），活动结果带 `skipReason`（`SOURCE_DISABLED` / `SOURCE_UNKNOWN`）。重试时重放出 providers 为空的受治理回执，同样报告跳过：受治理回执列出路由到的全部 provider，列表为空就是跳过；legacy 回执不列失败的 provider，所以 legacy 路径按路由结果判断。
-  - 工作流把跳过按原因计入 `stats.skippedQueries`，只有计数、不记查询内容；没有跳过时不出现这个键，原有 stats 形状不变。跳过不算失败：有跳过时 run 至少 PARTIAL（确认过的查询没跑），全部跳过也只是 PARTIAL。BI-25 的 FAILED 收尾同样带上计数。没有新增 Temporal 命令，不需要 patch，重放只比对活动类型与顺序；打包重放测试照常通过。
-  - `discovery-governed-lineage.activities.spec.ts` 里锁定的执行顺序相应改为「授权核验 → 路由 → 词表归一」；血缘核验先于预算、路由、词表归一和 provider 的约束不变。
-- 报价：确认前展示的计划规模（查询列表与 `estimatedVolume`）只计会执行的查询。发现 run 的技术报价（`POST /query-plans/:planId/execute`）仍是每个 run 的执行上限（66 条查询乘全部适配器），它是不读库的纯投影，不随计划内容变化，本次不改。
-- 契约：OpenAPI 只改说明文字（该操作的 description，409 列出 `INVALID_STATE`、`NO_ENABLED_DISCOVERY_SOURCE`、`NO_RUNNABLE_QUERIES`；`ApiExecutionBudgetGrant` 加可选的 `additionalConflictCodes`，其他操作的 409 不变），没有结构变更；`packages/contracts/INTEGRATION.md` 阶段 2 同步。
+- 起因：#545 把独立的 platform Worker 租约加进了整体 readiness 的硬组件，而全局写入守卫 `RuntimeWorkAdmissionGuard` 只认整体 readiness。所以 platform Worker 一不就绪（单独重启、换镜像后尚未重新就绪、R4 部署绑定到期、出网围栏重装），除平台控制面豁免外的全部客户侧写入都返回 503 `RUNTIME_ADMISSION_CLOSED`，包括 GrowthOS 签 Grant 前调用的 workspace 技术报价，以及删除请求、禁联这类保护性写入。而 platform Worker 只服务 `platform-automation` 命名空间（4 个 schedule 均 paused）；客户路径用的 `default` 命名空间、customer Worker、Outbox Relay 与 API 的 Temporal 客户端都不依赖它。产品负责人 2026-10-10 批准 D3 设计的推荐方案。
+- 改动：
+  - 新增纯函数 `customerWriteAdmission(report)`（`apps/api/src/runtime/customer-write-admission.ts`）：整体 ready 照旧放行；not_ready 时硬组件仍须全部 ok，唯一容忍 platform Worker 恰为 `failed` / `PLATFORM_WORKER_NOT_READY`（没有 READY 租约：租约不在、已停止，或同一发布仍在 STARTING/DRAINING）。容忍表以 `satisfies` 覆盖全部硬组件，新增组件不分类就无法编译；表外组件失败、缺组件、组件值或状态不合法、失败却没有字符串码、「not_ready 却没有失败项」的快照一律关闭。换镜像时新旧发布的租约并存期间仍是混版本，客户写入照旧关闭；只有旧租约消失后、新 platform Worker 尚未就绪的那段不再关闭。
+  - `RuntimeWorkAdmissionGuard` 改为 `admission.current().admitted && customerWriteAdmission(readiness.current()).open`；两类平台控制面豁免与 503 响应体都不变。
+  - `SiteBuildRuntimeGuard` 用同一函数（D3 决定 3）；`failedComponents` 照旧列出全部失败组件（含被容忍的那个），付费构建仍要求结算读回。
+  - 不变：`/health/ready` 的口径、响应格式与 503 码，「platform Worker 租约缺失时整体仍为 not_ready」的既有用例原样保留；platform Worker 自检与 fail-closed；静态发布准入；platform Worker 混版本（`PLATFORM_WORKER_MIXED_RELEASE_IDENTITY`）、Temporal 身份不符（`WORKER_TEMPORAL_IDENTITY_INVALID`）、租约查询失败（`RUNTIME_PROCESS_LEASE_UNAVAILABLE`）照旧关闭客户写入。没有迁移、OpenAPI、环境开关或 parity 指纹文件的变化。
+  - 文档：AGENTS §4 第 5 条补一句「『API 不接新工作』按该工作自身的依赖集合判定」（产品负责人批准）；架构页 readiness 一段补上 platform Worker 租约与「整体就绪不等于客户写入准入」；状态页新增 §4.4；R4 已批准规格 §4 加注。
 - 测试：
-  - 先红：新增与改写的用例在实现前 25 项失败（另有新模块的用例文件因模块不存在而无法加载），包括：规划器在没有已启用源时仍调用模型、提示里没有可用源清单、停用源的查询留在计划里、TED/openFDA 停用时仍解析注入、空计划照存；执行器对停用源的查询仍调用词表归一、结果不带跳过原因、hint 为数字或列表时抛 TypeError；工作流不计跳过、全部跳过时判 DONE；registry 没有源清单方法；OpenAPI 409 只列授权复用。
-  - 新增 `plan-query-sources.spec.ts`（hint 解析、路由、跳过原因、规划过滤与拆分、上限、提示内容、规模折算、移出说明、每个已登记源都有用法说明且源键互不包含）；`icp.service.spec.ts` 加 8 项、`discovery.activities.spec.ts` 加 9 项（含受治理回执重放与运行状态）、工作流加 4 项、registry 加 2 项、OpenAPI 加 1 项；既有用例里依赖空计划或 TED/openFDA 默认启用的，改为写一条可执行的查询或显式启用这些源。
+  - 新 `customer-write-admission.spec.ts`（45 项，零容器）：只有 platform Worker NOT_READY 时放行；platform Worker 的其他码（混版本、身份不符、租约不可用、发布身份不可用、大小写或空格漂移）与 not_proven 都关闭并返回该码；其余每个硬组件逐一失败（failed 或 not_proven，单独或与 platform Worker NOT_READY 同时）都关闭；其余每个硬组件以 `failed` 但码为 null、undefined 或非字符串出现时都关闭；未分类组件失败、缺组件、不可枚举的组件、组件为 null、状态非法、not_ready 却无失败项、初始快照都关闭；就绪服务实际报告的组件键与容忍表逐一相同，且容忍项恰为一项；以真实 `RuntimeProcessLeaseService` 证明租约缺失、STARTING、DRAINING、STOPPED 产生的正是被容忍的码，换版本、错命名空间、错集群产生的码不被容忍。
+  - 守卫与建站门各加 3 项：platform Worker 只是 NOT_READY 时放行；platform Worker 完整性失败或客户 Worker 未就绪时仍是原样的 503；静态准入关闭、付费构建缺结算读回时仍关闭。
+  - 新组合测试 `customer-write-admission.composition.spec.ts`：真实就绪服务、真实租约检查、全局守卫与 HealthController 经 HTTP 串起来。platform Worker 缺席或 STARTING 时 `/health/ready` 为 503 且写明 `PLATFORM_WORKER_NOT_READY`，客户 POST 得到 201；platform Worker 换版本或客户 Worker 缺席时 POST 为 503；两者都 READY 时为 200 与 201。
+  - 红灯：改代码前，新纯函数测试因模块不存在而失败，守卫、建站门与组合测试里「只有 platform Worker NOT_READY」的 4 项失败，其余新增用例（仍应关闭的情形）通过；再以沿用整体 readiness 的过渡实现跑纯函数测试，只有 2 个放行用例失败、27 项通过。独立复审指出容忍表的 null（必须 ok）会与 `code: null` 的失败相等、不可枚举的组件会被跳过：补的 16 项先全部失败（函数放行），修正后通过；这两种输入目前没有任何生产者会产生。
+- 部署：只改 API 进程里的一个判定，没有迁移、数据、配置或契约变化。发布镜像、xin 切换与切换后的本机验收（停 platform Worker 时 `/health/ready` 为 503 而客户写入不被准入守卫拦下；停客户 Worker 时仍为 503）另行授权并记录。回退为 revert 后发布，或切回上一版镜像。
 - 未做：
-  - 已保存的 READY 计划不回写；执行时其中停用源的查询按跳过计数，run 判 PARTIAL。
-  - 发现 run 的技术报价不按计划内容收窄（见上）；要按计划算，报价服务得读库，属另一项设计。
-  - 代码阅读发现（未在真库验证）：`wikidata`、`openstreetmap`、`ted`、`openfda` 的 provider 没有受治理血缘（`companyResultLineage`），路由到它们的查询走 legacy 路径，不写受治理回执表；新 run 的物化准入要求每条计划查询都有这张表的回执，所以启用这些源后，含它们查询的 run 会在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下。重新启用这些源之前，要先给它们补受治理血缘，或另定处理。
+  - platform Worker 频繁单独重启的根因另立任务。
+  - 平台故障不再经由客户写入 503 暴露；本机 `gctl doctor` 的「platform_worker 持续不就绪」告警属工作区工具，另行修改。
+  - 按端点细分依赖（例如获客写入不再要求建站专属组件）不在本项范围。
+
+## 2026-10-10 · Design the lead delivery loop: package fields, weekly report, feedback and contact drafts
+
+- 设计 `docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md`（APPROVED），对应 BI-15、BI-19–BI-23。产品负责人当天拍板 E1–E9：
+  - `LeadQualified` 仍为 v1，只加可选字段；
+  - 周报为本周 accepted 线索的 CSV；
+  - 线索级成本分摊估算并注明口径；
+  - 拒绝原因码必填；
+  - 开发信草稿给目标国语言加中文译文，末尾附卖方自己的 WhatsApp 一键聊天链接，由买家先开口；
+  - 联系路径加入公司自己的领英公司页、X 账号链接；
+  - 修复信号挂不上有域名公司的缺陷。
+- 客户跟进前台只用 GrowthOS，不接其他 CRM。
+- 本条只有文档；按设计 §11 拆 6 个 PR 施工。
+
+## 2026-10-10 · Record why paused platform schedules cannot be admitted, and the decision to freeze R4
+
+- 起因：为补平台写入者的表授权（2026-10-09 设计的 P4）做只读核对时发现，4 个暂停的平台 schedule 现在恢复，第一步就会失败。
+  - 四个工作流的第一步 `admitPlatformSchedule` 调用 `admit_platform_execution_budget_run_v1`；`20260905193000` 已收回平台写入者对它的执行权。
+  - 替代的 v2 要 GrowthOS 为每次运行签发平台授权。GrowthOS 只有签名器，没有持久签发与投递；Backend 的 v2 服务没有调用方。
+  - 另有 10 张表平台写入者没有授权。
+- 设计 `docs/superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md`（APPROVED），产品负责人当天拍板：
+  - 冻结 R4（D2），不在 R4 准入上继续投入；
+  - RL1 期间平台 schedule 继续暂停；
+  - 制裁名单走不经平台 schedule 的运营刷新，之后打开制裁门（D9）；
+  - 平台工作流迁进 customer worker 的设计另出。
+- 本条只有文档，没有代码与迁移。
 
 ## 2026-10-10 · Extend the admission lease to ICP design and ICP query planning
 
@@ -81,6 +101,32 @@
 - Actions：`actions/setup-node` v7（82076278）→v7.1.0（949feb24，版本校验、清单拉取重试；我们只传 `node-version: 22`）；`github/codeql-action` v4.38.2→v4.38.3（只用于非必需 canary，默认 bundle 2.27.2）。`oasdiff-action` v0.1.18 暂不升：它带来的 oasdiff 1.33.0 把 schema diff 改成按图计算、改写子 schema 匹配，影响必需门 `breaking` 的判定，按上次先例需另行离线重放最近的 `openapi.json` 变更再升（本仓 44 个 schema 无循环引用，它主打的递归修复对我们无影响）。
 - 新发布版本核对：pnpm 9 没有最短发布时长，164 个新锁定版本里过半发布不足 4 天（最新的 strnum 2.5.1 只有数小时）。2026-10-06T00:00Z（UTC）以后发布的、首次没查到发布时间的，加上四条 override 升级，共 126 个逐个核对 npm provenance 与发布账号：99 个带 provenance，26 个不带 provenance 但由与先前版本相同的账号发布（aws-sdk-bot、sentry-bot、DefinitelyTyped 等），1 个换了发布账号；唯一带安装脚本的 nx 23.3.0 带 provenance。chromium-bidi 由 17.0.2（带 provenance）换成 Chromium 发布账号的 157.0.8090-0（无 provenance）：带 provenance 的 puppeteer-core 25.13.0 精确钉了该版本，chromium-bidi 源码已迁入 Chromium、版本改随 Chrome，予以接受。未回退任何版本。
 - 官方 registry 生产审计零 advisory（831 个依赖）；基线重新绑定到刷新提交，失效时间 2026-10-14T21:28:22Z → 2026-10-24T13:59:34Z（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261010-monthly-dependency-refresh-baseline-renewal.json)）。Copy fixed-source 回执只重签指纹（`HASH_ONLY`）。下一次月度刷新与续期须在 10-24 前合入。
+
+## 2026-10-10 · Plan discovery queries only for ENABLED data sources
+
+- 起因（BI-30，产品负责人 2026-10-10 批准）：xin 的 `data_provider` 里，公司发现源只有 `public_web` 是 ENABLED，`ted`、`openstreetmap`、`wikidata`、`directory`、`trade_fair`、`openfda` 都是 DISABLED（意图源 `samgov` 同样停用）。规划器的任务描述却写死了 TED、Wikidata、OSM 等子源，模型照样为它们出查询（只读核对 xin 的计划）：两份 14 条的计划各有 10 条落在停用的源上；21 条的那份有 7 条落在停用的源上，另有 3 条用的是 `trade_data`、`b2b_company_person` 这类根本没有 provider 的 source_class；计划里还有确定性注入的 TED/CPV 查询，而 TED 是停用的。执行时这些查询路由不到任何适配器，却先照常做词表归一（`taxonomy.normalize` 模型调用），再写一条 providers 为空的零回执：跑空，还花钱。
+- 路由规则（规划与执行共用新模块 `discovery/plan-query-sources.ts`）：查询按 `source_class` 加 `filters.source_hint` 路由到该类下 ENABLED 的公司发现 provider；hint 是源键本身，或旧计划里的部分写法（`wiki` → wikidata），仍按包含匹配，单测保证没有一个源键包含另一个，精确的源键只指向一个源。hint 现在去首尾空白、不分大小写，也可以是字符串列表；数字、对象这类没法用的 hint 不再让活动抛 TypeError（此前会算作查询失败，受治理物化随后因缺回执中止 run），而是路由不到任何源。
+- 规划（`POST /icps/:icpId/query-plans`）：
+  - 读 ICP 的同一事务里读一次 `data_provider` 开关快照（新增 `DiscoveryProviderRegistry.companyDiscoverySources` / `enabledCompanyDiscoverySources`），提示、过滤和冷路径注入都按这份快照。`IcpModule` 为此引入 `DiscoveryModule` 导出的 registry。
+  - 没有可规划的已启用数据源时，调用模型之前返回 409 `NO_ENABLED_DISCOVERY_SOURCE`：授权已消费但不花钱，与 `INVALID_STATE` 同一时机、同一状态码。`ted`、`openfda` 只承载冷路径确定性生成的查询，只启用它们不算。
+  - 提示新增「可用数据源」清单，只列已启用、模型可以写的源：源键、可用的 source_class、一句用法；`ted`/`openfda` 启用时只说明它们的查询由系统生成。任务描述和输出 schema 里的说明文字去掉了写死的子源名单，要求每条查询都写 `filters.source_hint`；schema 结构（字段、类型、枚举、必填项）与 `icp-query-plan/v1` 都不变。
+  - 模型返回后，路由不到已启用源的查询移出计划，按原因计数：`SOURCE_DISABLED`（源已登记但停用）、`SOURCE_UNKNOWN`（没有 provider，如 `trade_data`）、`SOURCE_SYSTEM_PLANNED`（模型自己写的 TED/openFDA 查询，它们的码只能由冷路径给）、`PLAN_QUERY_CAP`。留下的每条查询，`filters.source_hint` 都改写成它执行的那个源键。没写 hint、而该类有多个已启用源的查询，拆成每个源一条，保持原来的 fan-out；拆出的条数超过规划上限 64 条时按优先级保留，计划仍在运行报价覆盖的 66 条以内。移出的条数与原因记在首条规划查询的 rationale 里（`[source_filter] …`，与冷路径 warning 同处），人工确认时可见；规划查询一条不剩、只剩冷路径查询时记在计划首条。
+  - TED/CPV、openFDA 的冷路径解析与注入只在对应源已启用时进行，停用时不再为它们花词表归一的模型调用；贸易角色只写进留下的查询。冷路径解析的行业词仍从模型给出的全部查询采集，与此前一致。
+  - 计划里一条可执行的查询都没有（模型给出的全落在不可用的源上，冷路径也没注入）时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划；此前会保存一份空计划。
+  - `estimatedVolume` 只计会执行的查询：模型的估算覆盖它写的全部查询，按留下的模型查询占比折算；一条都没留下、只剩冷路径查询时为 null。
+- 执行（`executeQuery`）：
+  - 改为先路由、再做词表归一。路由不到 ENABLED 适配器的查询（数据源在规划之后被停用，或旧计划里的未知 source_class）跳过：不调词表归一模型、不调 provider，照常写一条零回执（受治理物化的准入要求每条计划查询都有回执），活动结果带 `skipReason`（`SOURCE_DISABLED` / `SOURCE_UNKNOWN`）。重试时重放出 providers 为空的受治理回执，同样报告跳过：受治理回执列出路由到的全部 provider，列表为空就是跳过；legacy 回执不列失败的 provider，所以 legacy 路径按路由结果判断。
+  - 工作流把跳过按原因计入 `stats.skippedQueries`，只有计数、不记查询内容；没有跳过时不出现这个键，原有 stats 形状不变。跳过不算失败：有跳过时 run 至少 PARTIAL（确认过的查询没跑），全部跳过也只是 PARTIAL。BI-25 的 FAILED 收尾同样带上计数。没有新增 Temporal 命令，不需要 patch，重放只比对活动类型与顺序；打包重放测试照常通过。
+  - `discovery-governed-lineage.activities.spec.ts` 里锁定的执行顺序相应改为「授权核验 → 路由 → 词表归一」；血缘核验先于预算、路由、词表归一和 provider 的约束不变。
+- 报价：确认前展示的计划规模（查询列表与 `estimatedVolume`）只计会执行的查询。发现 run 的技术报价（`POST /query-plans/:planId/execute`）仍是每个 run 的执行上限（66 条查询乘全部适配器），它是不读库的纯投影，不随计划内容变化，本次不改。
+- 契约：OpenAPI 只改说明文字（该操作的 description，409 列出 `INVALID_STATE`、`NO_ENABLED_DISCOVERY_SOURCE`、`NO_RUNNABLE_QUERIES`；`ApiExecutionBudgetGrant` 加可选的 `additionalConflictCodes`，其他操作的 409 不变），没有结构变更；`packages/contracts/INTEGRATION.md` 阶段 2 同步。
+- 测试：
+  - 先红：新增与改写的用例在实现前 25 项失败（另有新模块的用例文件因模块不存在而无法加载），包括：规划器在没有已启用源时仍调用模型、提示里没有可用源清单、停用源的查询留在计划里、TED/openFDA 停用时仍解析注入、空计划照存；执行器对停用源的查询仍调用词表归一、结果不带跳过原因、hint 为数字或列表时抛 TypeError；工作流不计跳过、全部跳过时判 DONE；registry 没有源清单方法；OpenAPI 409 只列授权复用。
+  - 新增 `plan-query-sources.spec.ts`（hint 解析、路由、跳过原因、规划过滤与拆分、上限、提示内容、规模折算、移出说明、每个已登记源都有用法说明且源键互不包含）；`icp.service.spec.ts` 加 8 项、`discovery.activities.spec.ts` 加 9 项（含受治理回执重放与运行状态）、工作流加 4 项、registry 加 2 项、OpenAPI 加 1 项；既有用例里依赖空计划或 TED/openFDA 默认启用的，改为写一条可执行的查询或显式启用这些源。
+- 未做：
+  - 已保存的 READY 计划不回写；执行时其中停用源的查询按跳过计数，run 判 PARTIAL。
+  - 发现 run 的技术报价不按计划内容收窄（见上）；要按计划算，报价服务得读库，属另一项设计。
+  - 代码阅读发现（未在真库验证）：`wikidata`、`openstreetmap`、`ted`、`openfda` 的 provider 没有受治理血缘（`companyResultLineage`），路由到它们的查询走 legacy 路径，不写受治理回执表；新 run 的物化准入要求每条计划查询都有这张表的回执，所以启用这些源后，含它们查询的 run 会在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下。重新启用这些源之前，要先给它们补受治理血缘，或另定处理。
 
 ## 2026-10-09 · Give discovery runs a 3-hour admission lease
 
