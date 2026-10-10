@@ -1,6 +1,6 @@
 import { getTask } from '../../ai-tasks/task-registry';
 import { extractSameSiteLinks } from '../../adapters/site-links';
-import type { CrawlResult } from '../../adapters/web-crawler';
+import type { CrawlHtmlResult, CrawlResult } from '../../adapters/web-crawler';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
@@ -10,6 +10,11 @@ import type { ArtifactSubjectRef } from '../../tools/artifact-execution-port';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { ExecutionContext } from '../provider-contract';
 import { matchCarriedBrands } from '../website-profile/brands';
+import {
+  findContactPaths,
+  hasContactForm,
+  type CompanyContactLinks,
+} from '../website-profile/contact-paths';
 import { parseImpressum, type ImpressumRegister } from '../website-profile/impressum';
 import { classifyTradeRoleByRules } from '../website-profile/trade-role-rules';
 import { scrubPii, scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
@@ -65,6 +70,17 @@ function modelSafeText(text: string): string {
 export type WebsiteTradeRole =
   | 'distributor' | 'wholesaler' | 'manufacturer' | 'mixed' | 'service' | 'other';
 
+/**
+ * BI-14: links to the company's own contact paths found on its homepage, and
+ * whether its linked contact page carries a contact form. Links only.
+ */
+export interface CompanyContactPaths extends CompanyContactLinks {
+  /** The contact page, when its rendered HTML has a contact form. */
+  readonly contactForm: string | null;
+  /** False when the contact page could not be rendered: its form is then unknown, not absent. */
+  readonly contactFormChecked: boolean;
+}
+
 /** Company-level website facts only: no person names, emails or phones. */
 export interface WebsiteProfile {
   readonly homepageUrl: string;
@@ -80,6 +96,8 @@ export interface WebsiteProfile {
   readonly register: ImpressumRegister | null;
   readonly vatId: string | null;
   readonly evidence: readonly string[];
+  /** Present only when the caller asked for contact paths (data_provider company_contact). */
+  readonly contactPaths?: CompanyContactPaths;
 }
 
 interface ClassifiedRole {
@@ -96,6 +114,11 @@ export interface WebsiteProfileInput {
   readonly homeCountry: string;
   /** ICP product/industry context for the model; never copied into output. */
   readonly icpContext: string;
+  /**
+   * BI-14: also find the company's contact paths among the homepage links and render
+   * the linked contact page (at most one page) to look for a contact form.
+   */
+  readonly contactPaths?: boolean;
 }
 
 /**
@@ -103,6 +126,9 @@ export interface WebsiteProfileInput {
  * both fetches are bound to that company (ToolBroker per-call subject
  * binding), rules decide clear cases and the model only the rest.
  * Prohibition-class denials propagate so the caller can skip the company.
+ * When asked (BI-14), it also reads the company's contact paths from the
+ * homepage links and renders the linked contact page, under the same subject,
+ * to look for a contact form: one page at most, never filled in or submitted.
  */
 export class WebsiteProfileProvider {
   constructor(private readonly deps: {
@@ -146,6 +172,9 @@ export class WebsiteProfileProvider {
         .filter((name) => !dictionary.brands.some((b) => b.name.toLowerCase() === name.toLowerCase()))
         .map((name) => ({ name, country: null })),
     ].slice(0, 30);
+    const contactPaths = input.contactPaths
+      ? await this.contactPaths(input.domain, home, ctx)
+      : undefined;
 
     return {
       homepageUrl,
@@ -161,21 +190,62 @@ export class WebsiteProfileProvider {
       register: identifiers.register,
       vatId: identifiers.vatId,
       evidence: companyEvidence(classified?.evidence ?? []),
+      ...(contactPaths ? { contactPaths } : {}),
     };
   }
 
-  private async fetch(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
-    const toolCtx: ToolContext = {
+  /**
+   * Contact paths from the homepage links. Only the linked contact page is rendered
+   * (MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY); a page that robots, an error or an
+   * empty render keeps unread leaves its form unknown rather than absent.
+   */
+  private async contactPaths(
+    domain: string,
+    home: string,
+    ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef },
+  ): Promise<CompanyContactPaths> {
+    const links = findContactPaths(home, domain);
+    if (!links.contactPage) return { ...links, contactForm: null, contactFormChecked: true };
+    let html = '';
+    try {
+      html = await this.render(links.contactPage, ctx);
+    } catch (error) {
+      if (artifactSubjectSkipReason(error) || isExecutionControlError(error)) throw error;
+      html = ''; // an unreadable contact page keeps its link; only the form stays unknown
+    }
+    if (!html) return { ...links, contactForm: null, contactFormChecked: false };
+    return {
+      ...links,
+      contactForm: hasContactForm(html) ? links.contactPage : null,
+      contactFormChecked: true,
+    };
+  }
+
+  private toolContext(ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): ToolContext {
+    return {
       ...ctx,
       taskContractId: WEBSITE_PROFILE_TASK,
       purpose: ['enrichment'],
     };
+  }
+
+  private async fetch(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
     const result = await this.deps.broker.invoke<{ url: string; maxChars?: number }, CrawlResult>(
       'crawl4ai.fetch',
       { url, maxChars: 40_000 },
-      toolCtx,
+      this.toolContext(ctx),
     );
     return result.data.text ?? '';
+  }
+
+  /** Rendered HTML of one page; empty when robots disallow it. robots and source_policy apply in the tool. */
+  private async render(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
+    const result = await this.deps.broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
+      'crawl4ai.render',
+      { url },
+      this.toolContext(ctx),
+    );
+    return result.data.robotsBlocked ? '' : result.data.html ?? '';
   }
 
   private async classify(
