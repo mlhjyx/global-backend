@@ -18,8 +18,9 @@ const MUTATING_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * admit any HTTP operation that can create or mutate product work. Applying
  * this globally prevents an individual controller from bypassing admission.
  * Customer writes are judged against the customer dependency set
- * (customerWriteAdmission), not aggregate readiness: an absent or not-yet-READY
- * platform worker keeps /health/ready at 503 but does not close them.
+ * (customerWriteAdmission), not aggregate readiness: a platform worker without
+ * a READY lease (PLATFORM_WORKER_NOT_READY) keeps /health/ready at 503 but
+ * does not close them.
  */
 @Injectable()
 export class RuntimeWorkAdmissionGuard implements CanActivate {

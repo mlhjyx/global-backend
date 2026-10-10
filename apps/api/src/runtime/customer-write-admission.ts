@@ -17,9 +17,10 @@ export const CUSTOMER_WRITE_TOLERATED_FAILURE = Object.freeze({
   temporal_control_plane: null,
   worker: null,
   // The platform worker serves only the platform-automation namespace, which
-  // no customer write uses. Only its absence or not-yet-READY state is
-  // tolerated; a mixed release, Temporal identity mismatch or lease query
-  // failure carries another code and still closes customer writes.
+  // no customer write uses. Tolerated only while it has no READY lease (none
+  // fresh, or a same-release one still STARTING or DRAINING); a mixed release,
+  // Temporal identity mismatch or lease query failure carries another code
+  // and still closes customer writes.
   platform_worker: "PLATFORM_WORKER_NOT_READY",
   outbox_relay: null,
   api_runtime: null,
@@ -55,10 +56,17 @@ function isToleratedFailure(
   name: string,
   component: Partial<ComponentStatus> | null | undefined,
 ): boolean {
+  const tolerated: string | null = Object.hasOwn(
+    CUSTOMER_WRITE_TOLERATED_FAILURE,
+    name,
+  )
+    ? CUSTOMER_WRITE_TOLERATED_FAILURE[name as HardComponent]
+    : null;
+  // `null` marks "must be ok"; it must never match a failure without a code.
   return (
     component?.status === "failed" &&
-    Object.hasOwn(CUSTOMER_WRITE_TOLERATED_FAILURE, name) &&
-    CUSTOMER_WRITE_TOLERATED_FAILURE[name as HardComponent] === component.code
+    tolerated !== null &&
+    component.code === tolerated
   );
 }
 
@@ -81,14 +89,20 @@ export function customerWriteAdmission(
   ) {
     return closed([{ component: "snapshot", code: SNAPSHOT_INVALID }]);
   }
-  const missing = Object.keys(CUSTOMER_WRITE_TOLERATED_FAILURE)
-    .filter((name) => !Object.hasOwn(components, name))
-    .map((name) => ({ component: name, code: COMPONENT_MISSING }));
-  const failures = Object.entries(
+  // Presence and failures come from the same enumeration, so a component the
+  // enumeration skips counts as missing instead of silently passing.
+  const entries = Object.entries(
     components as Readonly<
       Record<string, Partial<ComponentStatus> | null | undefined>
     >,
-  ).filter(([, component]) => component?.status !== "ok");
+  );
+  const present = new Set(entries.map(([name]) => name));
+  const missing = Object.keys(CUSTOMER_WRITE_TOLERATED_FAILURE)
+    .filter((name) => !present.has(name))
+    .map((name) => ({ component: name, code: COMPONENT_MISSING }));
+  const failures = entries.filter(
+    ([, component]) => component?.status !== "ok",
+  );
   const blocking = [
     ...missing,
     ...failures

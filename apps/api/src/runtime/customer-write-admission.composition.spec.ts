@@ -144,9 +144,11 @@ describe("customer write admission through the real readiness snapshot", () => {
     })
     class CustomerWriteAdmissionTestModule {}
 
+    // abortOnError: false turns a wiring error into a test failure instead of
+    // a process exit.
     const app = await NestFactory.create<NestExpressApplication>(
       CustomerWriteAdmissionTestModule,
-      { logger: false },
+      { logger: false, abortOnError: false },
     );
     app.setGlobalPrefix("api");
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });
@@ -195,6 +197,10 @@ describe("customer write admission through the real readiness snapshot", () => {
       ]);
       seen = await observe();
       expect(seen.ready).toBe(503);
+      expect(seen.report.components.platform_worker).toEqual({
+        status: "failed",
+        code: "PLATFORM_WORKER_NOT_READY",
+      });
       expect(seen.write).toBe(201);
 
       // A platform worker from another release still closes customer writes.

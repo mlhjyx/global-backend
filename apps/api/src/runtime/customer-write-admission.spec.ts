@@ -200,6 +200,46 @@ describe("customerWriteAdmission", () => {
     },
   );
 
+  it.each(CUSTOMER_DEPENDENCIES)(
+    "keeps customer writes closed when %s fails without a string code",
+    (name) => {
+      for (const code of [null, undefined, 0]) {
+        for (const platformWorker of [OK, PLATFORM_WORKER_NOT_READY]) {
+          const admission = customerWriteAdmission(
+            snapshot({
+              [name]: { status: "failed", code },
+              platform_worker: platformWorker,
+            }),
+          );
+          expect(admission.open).toBe(false);
+          expect(admission.blocking).toContainEqual({
+            component: name,
+            code: "RUNTIME_READINESS_COMPONENT_INVALID",
+          });
+        }
+      }
+    },
+  );
+
+  it("does not let a non-enumerable component hide its failure", () => {
+    const components: Record<string, unknown> = {
+      ...snapshot({ platform_worker: PLATFORM_WORKER_NOT_READY }).components,
+    };
+    Object.defineProperty(components, "database", {
+      value: { status: "failed", code: "DATABASE_UNAVAILABLE" },
+      enumerable: false,
+    });
+    const admission = customerWriteAdmission({
+      status: "not_ready",
+      components: components as Components,
+    });
+    expect(admission.open).toBe(false);
+    expect(admission.blocking).toContainEqual({
+      component: "database",
+      code: "RUNTIME_READINESS_COMPONENT_MISSING",
+    });
+  });
+
   it("treats a failing component it has not classified as a customer dependency", () => {
     const admission = customerWriteAdmission(
       snapshot({
