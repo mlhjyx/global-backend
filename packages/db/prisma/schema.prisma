@@ -200,7 +200,8 @@ model ExecutionBudgetAuthority {
   notBefore               DateTime                     @map("not_before") @db.Timestamptz(3)
   expiresAt               DateTime                     @map("expires_at") @db.Timestamptz(3)
   consumedAt              DateTime?                    @map("consumed_at") @db.Timestamptz(3)
-  /// Post-admission validity of a discovery run (consumedAt + 3 hours); null keeps expiresAt.
+  /// Post-admission validity: consumedAt + 3 hours for a discovery run, consumedAt + 30 minutes for
+  /// ICP design and ICP query planning; null keeps expiresAt.
   admissionLeaseExpiresAt DateTime?                    @map("admission_lease_expires_at") @db.Timestamptz(3)
   revokedAt               DateTime?                    @map("revoked_at") @db.Timestamptz(3)
   createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)

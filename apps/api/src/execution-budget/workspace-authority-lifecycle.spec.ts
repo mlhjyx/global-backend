@@ -54,7 +54,8 @@ describe('workspace authority post-admission lifecycle', () => {
 
     expect(body).toContain('\nSTABLE\nSECURITY DEFINER\n');
     expect(body).toContain('execution_budget_authority_time_state');
-    // Post-admission expiry is the discovery run admission lease, else the Grant window.
+    // Post-admission expiry is the admission lease (discovery runs; ICP design and query
+    // planning), else the Grant window.
     expect(body).toContain(
       'COALESCE(authority."admission_lease_expires_at", authority."expires_at")',
     );
