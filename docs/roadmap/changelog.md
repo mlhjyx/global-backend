@@ -47,6 +47,24 @@
   - 独立复审结论：可合并。三条低优先级建议都已采纳：区分「没有文件」与「写失败」、测试提交不走全局钩子、静态规则更准。
 - 未做：`ci.yml` 的 openapi 漂移检查里还有一处 `git diff … | head -100`。它只在已经要 `exit 1` 的报错分支里打印差异，不影响结论，没有改动。
 
+## 2026-10-11 · Never plan or route a discovery source without governed lineage (lineage gate)
+
+- 起因：#631 激活受治理公司物化后，带 v1 标记的 run 要求每条计划查询都有受治理回执，否则在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下（BI-30 条目的「未做」已记）。公司发现源里只有 `public_web`、`directory`、`trade_fair` 声明了受治理公司血缘（`companyResultLineage`），`wikidata`、`openstreetmap`、`ted`、`openfda` 没有。xin 上这四个源都是 DISABLED，但只要其中一个被改成 ENABLED，规划器就会为它出查询（TED/openFDA 还会经冷路径注入），执行时它走 legacy 路径、不写受治理回执，整个 run 卡在物化。
+- 改动（血缘闸门，只读既有的那一份声明）：
+  - `company-discovery-lineage.ts` 新增 `declaresDiscoveryCompanyLineage(adapter)`（`companyResultLineage === v1`），作为唯一判断：受治理执行计划（`buildGovernedDiscoveryQueryExecutionPlan`）、registry 路由与规划器都用它。另加 `isDiscoveryCompanyLineageProviderKey`，回执合同的解析不再另写一份键名单。
+  - registry：`companyDiscoverySources()` 的每个源带 `hasCompanyLineage`；`routeCompanyDiscovery` 只返回 ENABLED 且声明了血缘的适配器。
+  - 规划（`plan-query-sources.ts`）：源要 ENABLED 且有血缘才算可执行。没有血缘的源不进提示里的可用数据源清单；没写 hint 的查询不再拆出这些源的副本；只开了这些源时 `hasPlannableSource` 为 false（照旧 409 `NO_ENABLED_DISCOVERY_SOURCE`，不调模型）；TED/openFDA 冷路径只在源可执行时解析、注入（`isSourceEnabled` 改名 `isSourceRunnable`）。模型写给这些源的查询移出计划，按新原因 `SOURCE_LINEAGE_UNAVAILABLE` 计数，记在 `[source_filter]` 说明里；模型自己写的 TED/openFDA 查询仍记 `SOURCE_SYSTEM_PLANNED`。
+  - 执行（`executeQuery`）：路由不到适配器的查询照旧跳过并写一条零回执，不调词表归一与 provider。跳过原因由 `planQuerySkipReason` 判：查询指向的已登记源都没有血缘时为 `SOURCE_LINEAGE_UNAVAILABLE`（开没开都一样），有血缘的源只是停用时仍为 `SOURCE_DISABLED`；重试重放 providers 为空的受治理回执时同样报告。没写 hint 的旧计划查询只跑同类里有血缘的源。
+  - 工作流把 `SOURCE_LINEAGE_UNAVAILABLE` 计入 `stats.skippedQueries`，run 至少 PARTIAL，不失败。没有新增 Temporal 命令，工作流只引用无依赖的跳过原因清单，重放不受影响。
+- 测试：
+  - 先红：新增与改写的用例在实现前 20 项失败（规划规则 6、registry 4、`executeQuery` 6、工作流 1、ICP 规划 3）。
+  - `executeQuery` 用真实 registry（全部公司发现源 ENABLED）逐个跑 `wikidata`、`openstreetmap`、`ted`、`openfda` 的查询：provider 与词表归一都不调用，写零回执，跳过原因为 `SOURCE_LINEAGE_UNAVAILABLE`；`public_intelligence` 类无 hint 的查询只调用 `public_web`。
+  - registry：有血缘的源恰为 `public_web`、`directory`、`trade_fair`，且与回执合同覆盖的键逐一一致（声明了血缘而合同不收的源会让受治理查询失败）。
+  - BI-30 既有用例里把 Wikidata/OSM 当作「停用源」举例的，改用 `directory`/`trade_fair`；冷路径用例显式声明 TED/openFDA 有血缘，验证补上血缘后行为不变。
+  - 受影响的 8 个用例文件 339 项通过。
+- 契约：OpenAPI 无改动（409 码与说明不变）；`packages/contracts/INTEGRATION.md` 阶段 2 补上新跳过原因，`docs/backend/discovery-sources.md` 集成点 1、2 同步。
+- 未做：给 `wikidata`、`openstreetmap`、`ted`、`openfda` 补受治理血缘（lineage 合同升级，含迁移）不在本项；补上之后这些源自动通过闸门，不用改本项代码。已保存的 READY 计划不回写，其中指向这些源的查询执行时按 `SOURCE_LINEAGE_UNAVAILABLE` 跳过。
+
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
 - 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。
