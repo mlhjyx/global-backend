@@ -70,9 +70,21 @@ jobs:
           # Probe the base verifier from a file, never through a pipe: under
           # pipefail, a grep that quits on its first match makes git show die
           # with SIGPIPE (141) when it has more to write, which sent trusted
-          # bases down the bootstrap path below at random.
-          if ! git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER" \
-            || ! grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL" "$TRUSTED_VERIFIER"; then
+          # bases down the bootstrap path below at random. Only a base without
+          # the verifier, or one without the protocol marker, may bootstrap;
+          # failing to write or read the copy stops the job.
+          if git cat-file -e "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" 2>/dev/null; then
+            git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
+          else
+            : > "$TRUSTED_VERIFIER"
+          fi
+          marker_status=0
+          grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL" "$TRUSTED_VERIFIER" || marker_status=$?
+          if [ "$marker_status" -gt 1 ]; then
+            echo "::error::could not read the trusted base verifier copy"
+            exit 1
+          fi
+          if [ "$marker_status" -ne 0 ]; then
             # A self-hosting protocol bootstrap is admitted only when it cannot
             # change dependency inputs and changes no files beyond this narrow
             # workflow/verifier/test boundary. Once merged, every PR uses a

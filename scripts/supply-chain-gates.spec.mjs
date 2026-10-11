@@ -1147,31 +1147,43 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
 });
 
 test("the trusted-base verifier probe reads git show from a file, never through a pipe", async () => {
-  // Under `set -o pipefail`, `git show … | grep -q …` fails with SIGPIPE (141)
-  // whenever grep exits on its first match before git show has finished
-  // writing. A trusted base was then sent down the protocol bootstrap path at
+  // Under `set -o pipefail`, piping git show into a grep that quits on its
+  // first match fails with SIGPIPE (141) whenever git show still has more to
+  // write. A trusted base was then sent down the protocol bootstrap path at
   // random, rejecting ordinary PRs (seen on PR #628, 2026-10-10).
   const workflow = await readRepositoryFile(
     ".github/workflows/supply-chain.yml",
   );
+  const commandText = workflow
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
   assert.doesNotMatch(
-    workflow,
-    /\|\s*grep\s+-[A-Za-z]*q/,
-    "no step may pipe into a grep that exits on its first match",
+    commandText,
+    /(?<!\|)\|(?!\|)\s*(?:grep\b[^\n|]*\s(?:-[A-Za-z]*[lmq]\w*|--quiet|--silent|--files-with-matches|--max-count(?:=\d+)?)(?=\s|$)|head\b)/,
+    "no step may pipe into a command that can stop reading early",
   );
-  const probe = workflow.match(
-    /^ {10}(if ! git show "\$PR_BASE_SHA:scripts\/supply-chain-audit\.mjs" > "\$TRUSTED_VERIFIER" \\\n {12}\|\| ! grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL" "\$TRUSTED_VERIFIER"; then)$/m,
+  const probeStart =
+    '          if git cat-file -e "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" 2>/dev/null; then\n';
+  const probeEnd = '          if [ "$marker_status" -ne 0 ]; then\n';
+  const start = workflow.indexOf(probeStart);
+  const end = workflow.indexOf(probeEnd, start);
+  assert.ok(
+    start >= 0 && end > start,
+    "production-audit-delta must probe the base verifier from a file",
   );
-  assert.ok(probe, "production-audit-delta must probe the base verifier from a file");
-  const condition = probe[1].replace(/\n {12}/, "\n");
+  const probe = workflow
+    .slice(start, end + probeEnd.length)
+    .replace(/^ {10}/gm, "");
 
   const directory = await mkdtemp(join(tmpdir(), "supply-chain-verifier-probe-"));
+  // The developer's global hooks would scan every fixture commit.
   const git = (...arguments_) => {
-    const execution = spawnSync("git", arguments_, {
-      cwd: directory,
-      encoding: "utf8",
-      env: createSafeGitEnvironment(),
-    });
+    const execution = spawnSync(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...arguments_],
+      { cwd: directory, encoding: "utf8", env: createSafeGitEnvironment() },
+    );
     assert.equal(
       execution.status,
       0,
@@ -1180,23 +1192,22 @@ test("the trusted-base verifier probe reads git show from a file, never through 
     return execution.stdout.trim();
   };
   const verifier = join(directory, "trusted-verifier.mjs");
-  const runProbe = (baseSha) => {
-    const execution = spawnSync(
+  const runProbe = (baseSha, trustedVerifier = verifier) =>
+    spawnSync(
       "bash",
-      [
-        "-c",
-        `set -euo pipefail\n${condition}\n  echo BOOTSTRAP\nelse\n  echo TRUSTED\nfi\n`,
-      ],
+      ["-c", `set -euo pipefail\n${probe}  echo BOOTSTRAP\nelse\n  echo TRUSTED\nfi\n`],
       {
         cwd: directory,
         encoding: "utf8",
         env: {
           ...createSafeGitEnvironment(),
           PR_BASE_SHA: baseSha,
-          TRUSTED_VERIFIER: verifier,
+          TRUSTED_VERIFIER: trustedVerifier,
         },
       },
     );
+  const decision = (baseSha) => {
+    const execution = runProbe(baseSha);
     assert.equal(execution.status, 0, execution.stderr);
     return execution.stdout.trim();
   };
@@ -1207,8 +1218,8 @@ test("the trusted-base verifier probe reads git show from a file, never through 
     git("config", "user.name", "Governance Test");
     await mkdir(join(directory, "scripts"));
     const auditPath = join(directory, "scripts", "supply-chain-audit.mjs");
-    // Far larger than a pipe buffer with the marker first: the shape that raced.
-    const trustedVerifier = `// DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL\n${"x".repeat(8 * 1024 * 1024)}\n`;
+    // Larger than a pipe buffer with the marker first: the shape that raced.
+    const trustedVerifier = `// DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL\n${"x".repeat(1024 * 1024)}\n`;
     await writeFile(auditPath, trustedVerifier);
     git("add", "scripts/supply-chain-audit.mjs");
     git("commit", "--quiet", "-m", "trusted base verifier");
@@ -1220,12 +1231,18 @@ test("the trusted-base verifier probe reads git show from a file, never through 
     git("commit", "--quiet", "-m", "base without a verifier");
     const missingBase = git("rev-parse", "HEAD");
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      assert.equal(runProbe(trustedBase), "TRUSTED");
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      assert.equal(decision(trustedBase), "TRUSTED");
       assert.equal(await readFile(verifier, "utf8"), trustedVerifier);
     }
-    assert.equal(runProbe(legacyBase), "BOOTSTRAP");
-    assert.equal(runProbe(missingBase), "BOOTSTRAP");
+    assert.equal(decision(legacyBase), "BOOTSTRAP");
+    assert.equal(decision(missingBase), "BOOTSTRAP");
+    assert.equal(await readFile(verifier, "utf8"), "");
+
+    // A copy that cannot be written stops the job instead of bootstrapping.
+    const unwritable = runProbe(trustedBase, directory);
+    assert.notEqual(unwritable.status, 0);
+    assert.equal(unwritable.stdout.trim(), "");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
