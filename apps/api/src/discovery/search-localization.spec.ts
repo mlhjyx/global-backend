@@ -55,6 +55,7 @@ describe('DACH target countries', () => {
     [{ country: 'France', region: 'DACH' }, ['fr']],
     [{ region: 'Bayern' }, ['de']],
     [{ country: 'Nowhere' }, []],
+    [{ country: 'constructor', region: 'toString' }, []],
   ])('resolves %o to %o', (filters, codes) => {
     expect(targetCountryCodes({ filters })).toEqual(codes);
   });

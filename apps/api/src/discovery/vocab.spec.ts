@@ -3,6 +3,8 @@ import {
   mapIndustryToQids,
   mapCountryToQid,
   lookupCountryIso,
+  lookupIndustryOsmTags,
+  lookupRegionOsmArea,
   lookupMarketRegion,
   expandMarketRegions,
   COUNTRY_ISO,
@@ -92,6 +94,19 @@ describe('国家归一：奥地利、瑞士、荷兰、波兰、西班牙与「D
     expect(lookupMarketRegion('Germany')).toBeUndefined();
     expect(lookupMarketRegion('德国（DACH）')).toBeUndefined();
   });
+
+  it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
+    '模型给出的「%s」只是普通词：词表只认自有键，不返回原型上的属性',
+    (term) => {
+      expect(lookupMarketRegion(term)).toBeUndefined();
+      expect(expandMarketRegions([term])).toEqual([term]);
+      expect(lookupCountryIso(term)).toBeUndefined();
+      expect(mapCountryToQid(term)).toBeUndefined();
+      expect(mapIndustryToQids([term])).toEqual([]);
+      expect(lookupIndustryOsmTags(term)).toBeUndefined();
+      expect(lookupRegionOsmArea(term)).toBeUndefined();
+    },
+  );
 
   it('市场列表里的地区词就地展开为成员国码，其余词原样保留', () => {
     expect(expandMarketRegions(['德国', 'DACH区域', 'France'])).toEqual(['德国', 'DE', 'AT', 'CH', 'France']);

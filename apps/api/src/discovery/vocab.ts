@@ -184,34 +184,43 @@ export function normKey(term: string): string {
   return term.normalize('NFC').toLowerCase().trim();
 }
 
+/**
+ * 查表只认表自己的键：词来自模型与 ICP，「constructor」「toString」这类词不能取到对象原型上的属性
+ * （取到的是函数，会被当成国家码、QID 或地区成员国列表用）。
+ */
+function own<T>(table: Readonly<Record<string, T>>, term: string): T | undefined {
+  const key = normKey(term);
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 export function mapIndustryToQids(terms: string[]): string[] {
   const out = new Set<string>();
   for (const t of terms) {
-    const q = INDUSTRY_QIDS[normKey(t)];
+    const q = own(INDUSTRY_QIDS, t);
     if (q) out.add(q);
   }
   return [...out];
 }
 
 export function mapCountryToQid(term: string): string | undefined {
-  return COUNTRY_QIDS[normKey(term)];
+  return own(COUNTRY_QIDS, term);
 }
 
 export function lookupIndustryOsmTags(term: string): { k: string; v?: string }[] | undefined {
-  return INDUSTRY_OSM_TAGS[normKey(term)];
+  return own(INDUSTRY_OSM_TAGS, term);
 }
 
 export function lookupRegionOsmArea(term: string): string | undefined {
-  return REGION_OSM_AREA[normKey(term)];
+  return own(REGION_OSM_AREA, term);
 }
 
 export function lookupCountryIso(term: string): string | undefined {
-  return COUNTRY_ISO[normKey(term)];
+  return own(COUNTRY_ISO, term);
 }
 
 /** 地区词的成员国 alpha-2（「DACH」→ DE、AT、CH）；不是已知地区时为 undefined。 */
 export function lookupMarketRegion(term: string): readonly string[] | undefined {
-  return MARKET_REGION_COUNTRIES[normKey(term)];
+  return own(MARKET_REGION_COUNTRIES, term);
 }
 
 /** 目标市场列表：地区词就地换成成员国 alpha-2，其余词原样保留、顺序不变。 */
