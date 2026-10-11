@@ -20,7 +20,7 @@
   - 集成测试用真实 provider 与模拟上游，覆盖流式与非流式、文本与结构化、Responses 传输、混合署名、未署名内容、截断与流解析失败、首调与修复分属不同模型、定价与 pro 相同、持久回执扣费不超过预留、持久重放结果记 Flash、启动失败，以及付费上下文、继承来的替代字段、未审查组合都被拒。
   - 独立只读复审第一轮指出：封顶观测额会让替代调用绕过账本的 `cap_variance` 与账户耗尽（HIGH），首调 Flash、修复 pro 的调用不被标记（MEDIUM），另有继承字段、默认关闭说明不准、流解析失败记名、配置可被 `Map.prototype.set` 改写等 LOW。全部修正：对应新用例在修正前的源码上 13 项失败，修正后全绿。第二轮没有 CRITICAL、HIGH、MEDIUM；按其 LOW 建议，调用方自带替代字段改为直接拒绝（原先的剥离会连带丢掉继承来的其他字段），无署名答案加 `modelIdentityUnproven` 标记，新用例在修正前 6 项失败。第三轮复核见围栏复核记录。
 - 部署：默认关闭。不开开关时唯一的行为差异来自新别名：请求 `deepseek-v4-flash` 的调用（例如未指定模型、走 `MODEL_DEFAULT_MODEL` 的调用）现在承认审查过的 Flash 构建名，这是同一模型的身份事实，不是替代；请求 pro 的调用照旧只认 pro。要开启，在运行时环境加 `MODEL_IDENTITY_SUBSTITUTES=deepseek-v4-pro>deepseek-v4-flash` 并重启 API 与 Worker；关闭即删除该行再重启。开启期间的跑测报告必须单独统计被替代的调用（`ai_trace.meta->>'modelSubstituted' = 'true'`）与身份未证实的调用（`meta->>'modelIdentityUnproven' = 'true'`），统计 pro 的结果与用量时把这两类排除：首调 Flash、修复 pro 的调用整行记在 `model = deepseek-v4-pro` 下，但带替代标记。
-- 未做：真正 pro 的第二上游另行接入；本次没有在 xin 上开启或跑测。
+- 未做：真正 pro 的第二上游另行接入；本次没有在 xin 上开启或跑测。开关开启时，失败且上游没有署名的答案仍按 pro 记在 ERROR 行、不带标记（ERROR 行不写 `usage_ledger`），按 `ai_trace` 汇总 pro 的 token 时要排除开启期间的 ERROR 行。
 
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
