@@ -6,6 +6,7 @@
  */
 
 import { MAX_PUBLIC_WEB_SEARCHES_PER_QUERY } from './execution-envelope';
+import { lookupMarketRegion } from './vocab';
 
 export type SearchLanguage = 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl';
 export type TradeRole = 'distributor' | 'manufacturer';
@@ -85,22 +86,30 @@ function strings(value: unknown): string[] {
   return typeof value === 'string' ? [value] : [];
 }
 
+/** Lower-case alpha-2 codes of a multi-country market such as "DACH" (de, at, ch); undefined for any other term. */
+function marketRegionCodes(term: string): string[] | undefined {
+  return lookupMarketRegion(term)?.map((code) => code.toLowerCase());
+}
+
 function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
   const values = [...strings(filters.country), ...strings(filters.iso_country), ...strings(filters.buyer_country)]
     .flatMap((v) => v.split(/[,/;、，；]/u))
     .map((v) => v.trim().toLowerCase())
     .filter(Boolean);
   const found: CountryEntry[] = [];
-  for (const value of values) {
-    const entry = COUNTRIES.find((c) => c.aliases.includes(value));
+  const add = (entry: CountryEntry | undefined): void => {
     if (entry && !found.includes(entry)) found.push(entry);
+  };
+  const byCode = (iso2: string | undefined): CountryEntry | undefined => COUNTRIES.find((c) => c.iso2 === iso2);
+  for (const value of values) {
+    const members = marketRegionCodes(value);
+    if (members) members.forEach((iso2) => add(byCode(iso2)));
+    else add(COUNTRIES.find((c) => c.aliases.includes(value)));
   }
   if (found.length) return found;
-  // Region-only plans ("industry + country OR region") imply their country.
+  // Region-only plans ("industry + country OR region") imply their country, or each country of a "DACH" region.
   for (const region of strings(filters.region).map((v) => v.trim().toLowerCase())) {
-    const iso2 = REGION_COUNTRY[region];
-    const entry = COUNTRIES.find((c) => c.iso2 === iso2);
-    if (entry && !found.includes(entry)) found.push(entry);
+    for (const iso2 of marketRegionCodes(region) ?? [REGION_COUNTRY[region]]) add(byCode(iso2));
   }
   return found;
 }

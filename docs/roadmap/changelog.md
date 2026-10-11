@@ -24,6 +24,22 @@
   - 从真实查询阶段（`append_discovery_query_lineage_v2`）一路走到 canonicalize 的端到端真库测试：本项的 Q 血缘按 disposable spec 的做法由 owner 直接写入。
   - `apps/api/scripts/verify-openfda-discovery.mts` 与 `verify-ted-discovery.mts` 用 owner 连接创建不带 v1 标记的 run，激活后会被插入守卫以 `MARKER_REQUIRED` 拒绝；这两个是人工核验脚本，不在产品路径上。
 
+## 2026-10-11 · Normalize Austria, Switzerland, the Netherlands, Poland and Spain, and expand a DACH market to its three countries
+
+- 起因：发现侧的国家词表（`apps/api/src/discovery/vocab.ts`）只认 8 个国家（DE US CN JP IT FR GB IN），没有 AT/CH/NL/PL/ES；ICP 目标市场写成「DACH区域」这类地区词时，没有任何一处把它展开成国家：规划器提示词定不出关键词语言；TED、openFDA 冷路径与定时意向扫描把它当作一个国家词交给 taxonomy，未命中别名时由模型在码表里挑**一个**国家，并把这条别名沉淀下来。
+- 改动：
+  - `vocab.ts`：`COUNTRY_ISO` 与 `COUNTRY_QIDS` 各补 AT/CH/NL/PL/ES，写法与已有国家相同（中文名、英文名、本国语名，另收常见的无变音拼写与瑞士的法、意语名）；QID 与 `seed-taxonomy.mjs` 的 `ALPHA2_TO_QID` 一致。新数据表 `MARKET_REGION_COUNTRIES`（「DACH」及其常见写法 → DE、AT、CH）与 `lookupMarketRegion`、`expandMarketRegions`。地区词不进单国表：单个公司的所在国不会是「DACH」，public_web 对它照旧不填国家。
+  - `icp-to-cpv.ts` 的 `boundedTargetCountries`（TED、openFDA 冷路径与定时意向扫描共用）：地区词先展开为成员国 alpha-2 码再交给 taxonomy；这三个码由 seed 别名确定性归一，不再调用模型。
+  - `search-localization.ts` 的 `targetCountries`（规划器关键词语言、public_web 搜索语言与 ccTLD 过滤、名录查询的国家名、网站画像按 ICP 市场回退的本国）：country / iso_country / buyer_country 里的「DACH」，以及只有 region 时的「DACH」，都展开为三国，效果与直接写「德国、奥地利、瑞士」相同。
+  - 已有国家的映射与行为不变：单测逐条钉住原有 18 个国家词及国家码集合只新增五个。
+- 测试：
+  - 新增与改写的单测分布在 `vocab.spec.ts`、`search-localization.spec.ts`、`icp-to-cpv.spec.ts`、`icp.service.spec.ts`（规划器级：目标市场「DACH区域」→ 提示词要求德语关键词，TED 与 openFDA 冷路径收到 DE、AT、CH）与 `public-web-raw-governance.spec.ts`（「Österreich」→ AT、「ch」→ CH，原先「Österreich」被当作未知国家）。
+  - 红灯：实现前这 5 个文件 40 项失败；实现后 177 项全过。
+- 未做（留给国家包）：
+  - `search-localization.ts` 的 10 国表与 `vocab.ts` 的两张国家表仍各自维护。
+  - 执行查询时的 taxonomy 归一（`queryTaxonomyTerms` → 单值 `_countryQid`）、`wikidata.provider` 的 `mapCountry` 与 OSM 的 `REGION_OSM_AREA` 都只取一个国家，「DACH」在那里仍只落到一国；多国需要改这些源的查询形态。若 `term_alias` 里已有模型沉淀的地区词别名，本项不清理：列表路径先展开、不再查它，单值路径仍会命中它。
+  - 未在 xin 上重新生成查询计划（需要模型调用并写开发库），留到部署后的验收。
+
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
 - 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。

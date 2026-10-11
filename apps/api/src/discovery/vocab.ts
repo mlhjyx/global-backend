@@ -67,6 +67,26 @@ export const COUNTRY_QIDS: Record<string, string> = {
   'united kingdom': 'Q145',
   印度: 'Q668',
   india: 'Q668',
+  奥地利: 'Q40',
+  austria: 'Q40',
+  österreich: 'Q40',
+  oesterreich: 'Q40',
+  瑞士: 'Q39',
+  switzerland: 'Q39',
+  schweiz: 'Q39',
+  suisse: 'Q39',
+  svizzera: 'Q39',
+  荷兰: 'Q55',
+  netherlands: 'Q55',
+  nederland: 'Q55',
+  holland: 'Q55',
+  波兰: 'Q36',
+  poland: 'Q36',
+  polska: 'Q36',
+  西班牙: 'Q29',
+  spain: 'Q29',
+  españa: 'Q29',
+  espana: 'Q29',
 };
 
 /** 国家/地区词 → ISO 3166-1 alpha-2（供 OSM/canonical 归一）。 */
@@ -89,7 +109,45 @@ export const COUNTRY_ISO: Record<string, string> = {
   uk: 'GB',
   印度: 'IN',
   india: 'IN',
+  奥地利: 'AT',
+  austria: 'AT',
+  österreich: 'AT',
+  oesterreich: 'AT',
+  瑞士: 'CH',
+  switzerland: 'CH',
+  schweiz: 'CH',
+  suisse: 'CH',
+  svizzera: 'CH',
+  荷兰: 'NL',
+  netherlands: 'NL',
+  nederland: 'NL',
+  holland: 'NL',
+  波兰: 'PL',
+  poland: 'PL',
+  polska: 'PL',
+  西班牙: 'ES',
+  spain: 'ES',
+  españa: 'ES',
+  espana: 'ES',
 };
+
+const DACH: readonly string[] = Object.freeze(['DE', 'AT', 'CH']);
+
+/**
+ * 跨国市场地区词（归一为小写）→ 成员国 ISO 3166-1 alpha-2（有序）。只用于目标市场这类国家**列表**：
+ * 列表里的「DACH」就是德国、奥地利、瑞士三国，不能被归一成其中一国。单个公司的所在国不会是地区，
+ * 所以 COUNTRY_ISO / COUNTRY_QIDS 不收地区词。
+ */
+export const MARKET_REGION_COUNTRIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  dach: DACH,
+  'd-a-ch': DACH,
+  dach区域: DACH,
+  dach地区: DACH,
+  dach市场: DACH,
+  'dach region': DACH,
+  'dach-region': DACH,
+  'dach-raum': DACH,
+});
 
 /**
  * 行业词 → OSM 标签过滤（用于 Overpass 地理发现）。
@@ -149,4 +207,14 @@ export function lookupRegionOsmArea(term: string): string | undefined {
 
 export function lookupCountryIso(term: string): string | undefined {
   return COUNTRY_ISO[normKey(term)];
+}
+
+/** 地区词的成员国 alpha-2（「DACH」→ DE、AT、CH）；不是已知地区时为 undefined。 */
+export function lookupMarketRegion(term: string): readonly string[] | undefined {
+  return MARKET_REGION_COUNTRIES[normKey(term)];
+}
+
+/** 目标市场列表：地区词就地换成成员国 alpha-2，其余词原样保留、顺序不变。 */
+export function expandMarketRegions(terms: readonly string[]): string[] {
+  return terms.flatMap((term) => lookupMarketRegion(term) ?? [term]);
 }

@@ -3,6 +3,8 @@ import {
   searchableTerms,
   searchCountryName,
   searchLanguagesForMarkets,
+  targetCountryCodes,
+  targetCountryTlds,
 } from './search-localization';
 
 describe('searchableTerms', () => {
@@ -43,6 +45,26 @@ describe('searchCountryName', () => {
   });
 });
 
+describe('DACH target countries', () => {
+  it.each([
+    [{ country: 'DACH' }, ['de', 'at', 'ch']],
+    [{ country: ['France', 'D-A-CH'] }, ['fr', 'de', 'at', 'ch']],
+    [{ country: 'Österreich, DACH-Region' }, ['at', 'de', 'ch']],
+    [{ buyer_country: 'dach' }, ['de', 'at', 'ch']],
+    [{ region: 'DACH' }, ['de', 'at', 'ch']],
+    [{ country: 'France', region: 'DACH' }, ['fr']],
+    [{ region: 'Bayern' }, ['de']],
+    [{ country: 'Nowhere' }, []],
+  ])('resolves %o to %o', (filters, codes) => {
+    expect(targetCountryCodes({ filters })).toEqual(codes);
+  });
+
+  it('accepts all three ccTLDs and names Germany first for a DACH query', () => {
+    expect([...targetCountryTlds({ filters: { country: 'DACH' } })]).toEqual(['de', 'at', 'ch']);
+    expect(searchCountryName({ filters: { country: 'DACH' } })).toBe('Deutschland');
+  });
+});
+
 describe('searchLanguagesForMarkets', () => {
   it('maps ICP target markets, including qualified Chinese names, to their search languages once each', () => {
     expect(searchLanguagesForMarkets(['德国', '奥地利', '瑞士（德语区优先）'])).toEqual(['de']);
@@ -58,6 +80,11 @@ describe('searchLanguagesForMarkets', () => {
     expect(searchLanguagesForMarkets(['火星'])).toEqual([]);
     expect(searchLanguagesForMarkets(undefined)).toEqual([]);
     expect(searchLanguagesForMarkets([42, null])).toEqual([]);
+  });
+
+  it('expands a DACH market to Germany, Austria and Switzerland', () => {
+    expect(searchLanguagesForMarkets(['DACH区域'])).toEqual(['de']);
+    expect(searchLanguagesForMarkets(['DACH（德语区）', 'France'])).toEqual(['de', 'fr']);
   });
 
   it('strips qualifiers in linear time on adversarial input', () => {
