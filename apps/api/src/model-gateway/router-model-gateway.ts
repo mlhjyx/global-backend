@@ -127,12 +127,40 @@ import {
   resolveReportedModelIdentity,
 } from "./model-identity";
 import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from "./model-transports";
+import {
+  MODEL_IDENTITY_SUBSTITUTES_ENV,
+  parseModelIdentitySubstitutes,
+  type ModelIdentitySubstitutes,
+} from "./model-identity-substitutes";
 import { boundedModelUsage } from "./model-usage-boundary";
 import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
 
 type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
 >;
+
+/** Only this gateway may admit a substitute identity (D14); drop a caller's. */
+function withoutCallerModelIdentitySubstitutes(ctx: AiContext): AiContext {
+  if (!Object.prototype.hasOwnProperty.call(ctx, "modelIdentitySubstitutes")) {
+    return ctx;
+  }
+  const { modelIdentitySubstitutes: _callerSubstitutes, ...rest } = ctx;
+  return rest;
+}
+
+/** The requested model when `model` is a substitute admitted for this call. */
+function substitutedRequest(
+  requestedModel: string | undefined,
+  model: string | undefined,
+  substitutes: readonly string[],
+): string | undefined {
+  return requestedModel !== undefined &&
+    model !== undefined &&
+    model !== requestedModel &&
+    substitutes.includes(model)
+    ? requestedModel
+    : undefined;
+}
 
 /**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
@@ -160,6 +188,12 @@ export class RouterModelGateway extends ModelGateway {
   /** Strict startup snapshots required by every new paid physical wire. */
   settlementDerivationKeyring?: SettlementDerivationKeyring;
   settlementReadbackResolver?: NewApiRequestBoundSettlementResolver;
+  /**
+   * Deployment-approved substitute identities (owner decision D14), read once
+   * here so a malformed MODEL_IDENTITY_SUBSTITUTES stops startup. Empty by
+   * default: every call then keeps exact model identity.
+   */
+  readonly modelIdentitySubstitutes: ModelIdentitySubstitutes;
 
   constructor(
     private readonly router: ModelRouter,
@@ -168,6 +202,9 @@ export class RouterModelGateway extends ModelGateway {
   ) {
     super();
     this.budgetStore = budgetStore ?? this.unavailableBudgetStore;
+    this.modelIdentitySubstitutes = parseModelIdentitySubstitutes(
+      process.env[MODEL_IDENTITY_SUBSTITUTES_ENV],
+    );
   }
 
   generateText(
@@ -451,9 +488,10 @@ export class RouterModelGateway extends ModelGateway {
       schema?: Record<string, unknown>;
       signal?: AbortSignal;
     },
-    ctx: AiContext,
+    callerCtx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
+    const ctx = withoutCallerModelIdentitySubstitutes(callerCtx);
     assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
     const chain = this.router.route(op, input.task);
@@ -463,8 +501,14 @@ export class RouterModelGateway extends ModelGateway {
     // 预算门（收口② D）：task.maxCostCents 从纯声明变真闸——reserve-then-settle，
     // 账户（runId ?? workspaceId）超限即抛 BudgetExceededError（调用不发生=真拦截）。
     // settle 优先级：costUsd（按实）→ token 折算（centsFromTokens）→ est 兜底。
+    // D14: the deployment's substitutes for the requested model. The same
+    // registry lookup then decides whether this task opts in.
+    const deploymentSubstitutes = this.deploymentModelIdentitySubstitutes(
+      op,
+      input.model,
+    );
     const registeredTask =
-      input.maxCostCents === undefined
+      input.maxCostCents === undefined || deploymentSubstitutes.length > 0
         ? (await import("../ai-tasks/task-registry")).getTask(input.task)
         : undefined;
     const baseCents =
@@ -478,8 +522,17 @@ export class RouterModelGateway extends ModelGateway {
         ? baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND
         : baseCents;
     if (ctx.paidCost) {
+      // Paid calls are priced by the requested alias: exact identity only.
       return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }
+    const substitutes =
+      registeredTask?.acceptsModelSubstitute === true
+        ? deploymentSubstitutes
+        : [];
+    const callCtx: AiContext =
+      substitutes.length > 0
+        ? { ...ctx, modelIdentitySubstitutes: substitutes }
+        : ctx;
     const accountKey = ctx.runId ?? ctx.workspaceId;
     const operationKey = paidOperationKey([
       accountKey,
@@ -569,12 +622,19 @@ export class RouterModelGateway extends ModelGateway {
               reservation, workspaceId: ctx.workspaceId, accountKey,
               execution: { kind: "model", modelOp: op, taskId: input.task, providerId: provider.id,
                 ...(input.model !== undefined ? { requestedModel: input.model } : {}) } }),
-            () => call(provider, ctx),
+            () => call(provider, callCtx),
           )
-        : await call(provider, ctx);
+        : await call(provider, callCtx);
     } catch (err) {
       const failedUsage =
         err instanceof ProviderOutputError ? err.usage : undefined;
+      const failedModel =
+        err instanceof ProviderOutputError ? err.model : undefined;
+      const failedSubstitutedFrom = substitutedRequest(
+        input.model,
+        failedModel,
+        substitutes,
+      );
       if (
         err instanceof ExternalActionDeniedError &&
         err.callCount === 0 &&
@@ -592,14 +652,26 @@ export class RouterModelGateway extends ModelGateway {
                 centsFromTokens(err.usage) ?? baseCents * err.callCount,
               ))
             : centsToMicrousd(reserveCents);
-        await this.budgetStore.settle(reservation, observedMicrousd);
+        // A substitute's spend never exceeds the requested model's quote.
+        await this.budgetStore.settle(
+          reservation,
+          failedSubstitutedFrom &&
+            observedMicrousd > reservation.estimatedMicrousd
+            ? reservation.estimatedMicrousd
+            : observedMicrousd,
+        );
       }
       this.trace?.record({
         workspaceId: ctx.workspaceId,
         task: input.task,
         op,
         provider: provider.id,
-        model: input.model ?? "unknown",
+        model: failedSubstitutedFrom
+          ? failedModel!
+          : (input.model ?? "unknown"),
+        ...(failedSubstitutedFrom
+          ? { modelSubstitution: { requestedModel: failedSubstitutedFrom } }
+          : {}),
         status: "ERROR",
         // The class alone cannot tell a cut stream from bad JSON; the reason
         // code can, and it never carries model text.
@@ -643,6 +715,11 @@ export class RouterModelGateway extends ModelGateway {
       observedMicrousd < reservation.estimatedMicrousd
         ? observedMicrousd
         : reservation.estimatedMicrousd;
+    const substitutedFrom = substitutedRequest(
+      input.model,
+      result.model,
+      substitutes,
+    );
     const receiptFacts =
       projection && ctx.durableResultSchema
         ? modelExecutionReceiptFacts({
@@ -655,7 +732,8 @@ export class RouterModelGateway extends ModelGateway {
         : undefined;
     const settlement = [
       reservation,
-      observedMicrousd,
+      // A substitute's spend never exceeds the requested model's quote.
+      substitutedFrom ? chargedMicrousd : observedMicrousd,
       projection,
       receiptFacts,
     ] as const;
@@ -676,6 +754,9 @@ export class RouterModelGateway extends ModelGateway {
       op,
       provider: result.provider,
       model: result.model,
+      ...(substitutedFrom
+        ? { modelSubstitution: { requestedModel: substitutedFrom } }
+        : {}),
       status: "OK",
       latencyMs: Date.now() - started,
       inputTokens: result.usage?.inputTokens,
@@ -688,6 +769,23 @@ export class RouterModelGateway extends ModelGateway {
       ctx.onDurableReceipt?.(input.task, returnedResult.durableReceipt);
     }
     return returnedResult;
+  }
+
+  /**
+   * Owner decision D14: the deployment's substitutes for a text call's
+   * requested model. `run` admits them only for a registry task marked
+   * `acceptsModelSubstitute`; everything else keeps exact identity.
+   */
+  private deploymentModelIdentitySubstitutes(
+    op: ModelOp,
+    model: string | undefined,
+  ): readonly string[] {
+    if (op !== "generateText" && op !== "generateStructured") return [];
+    return (
+      (model === undefined
+        ? undefined
+        : this.modelIdentitySubstitutes.get(model)) ?? []
+    );
   }
 
   private pricedSettlementMicrousd(

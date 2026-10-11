@@ -15,6 +15,13 @@ export interface AiTaskContract {
   inputSchema?: Record<string, unknown>;
   /** Model name the 中转站 resolves (business-need selection; may be a model-group with fallback). */
   model: string;
+  /**
+   * Owner decision D14 (2026-10-11): a deployment's MODEL_IDENTITY_SUBSTITUTES
+   * may accept a reviewed substitute model for this task. The result, trace
+   * and spend then name the substitute, never `model`. Absent = the upstream
+   * must report the requested model itself.
+   */
+  acceptsModelSubstitute?: true;
   risk: 'low' | 'medium' | 'high';
   /** Output requires human approval before outbound use? */
   humanGate: boolean;

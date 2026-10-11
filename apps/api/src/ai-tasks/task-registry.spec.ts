@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getTask } from './task-registry';
+import { AI_TASKS, getTask } from './task-registry';
 
 describe('AI task registry personal-data boundaries', () => {
   it('keeps BrandProfile identity data in internal gaps while forbidding automatic public projection', () => {
@@ -116,5 +116,36 @@ describe('AI task registry model execution policy invariants', () => {
       expect(getTask(taskId)?.model, taskId).toBe('deepseek-v4-pro');
       expect(getTask(taskId)?.maxOutputTokens, taskId).toBe(16_000);
     }
+  });
+});
+
+describe('AI task registry model substitution opt-in (D14, 2026-10-11)', () => {
+  // Only these acquisition tasks may run on a deployment-approved substitute
+  // model (MODEL_IDENTITY_SUBSTITUTES); every other task keeps exact identity.
+  const ACQUISITION_TASKS = [
+    'company_understanding.extract_claims',
+    'company_understanding.extract_profile',
+    'company_understanding.extract_offerings',
+    'icp.design',
+    'discovery.query_plan',
+    'taxonomy.normalize',
+    'discovery.qualify_fit',
+    'discovery.extract_company',
+    'discovery.extract_list',
+    'discovery.classify_trade_role',
+    'contact.find_decision_makers',
+  ];
+
+  it('marks exactly the acquisition tasks as accepting a substitute', () => {
+    const marked = Object.values(AI_TASKS)
+      .filter((task) => task.acceptsModelSubstitute === true)
+      .map((task) => task.id)
+      .sort();
+
+    expect(marked).toEqual([...ACQUISITION_TASKS].sort());
+  });
+
+  it('keeps Site Builder on exact model identity', () => {
+    expect(getTask('site_builder.brand_profile')?.acceptsModelSubstitute).toBeUndefined();
   });
 });

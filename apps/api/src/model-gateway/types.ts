@@ -27,6 +27,15 @@ export interface AiContext {
   };
   /** Optional Site Builder policy evidence; copied to every gateway trace row. */
   modelPolicy?: ModelExecutionTrace;
+  /**
+   * Substitute model identities the provider may accept for this one call
+   * (owner decision D14). Only RouterModelGateway sets it, from the
+   * deployment's MODEL_IDENTITY_SUBSTITUTES and the task's
+   * `acceptsModelSubstitute`; it discards any caller-supplied value and never
+   * sets it on paid calls. A provider that accepts one must report the
+   * substitute as the result model.
+   */
+  modelIdentitySubstitutes?: readonly string[];
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: PaidCostContext;
   /** Registered typed durable-result schema for model replay. */

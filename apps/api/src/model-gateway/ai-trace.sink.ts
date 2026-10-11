@@ -18,6 +18,22 @@ export interface TraceEntry {
   correlationId?: string;
   /** Site Builder resolved policy + selected fallback position, when applicable. */
   modelPolicy?: ModelExecutionTrace;
+  /**
+   * Present only when `model` is a deployment-approved substitute (D14): the
+   * row names the model that answered and keeps the requested one beside it.
+   */
+  modelSubstitution?: { requestedModel: string };
+}
+
+function substitutionMeta(
+  entry: TraceEntry,
+): { requestedModel: string; modelSubstituted: true } | undefined {
+  return entry.modelSubstitution
+    ? {
+        requestedModel: entry.modelSubstitution.requestedModel,
+        modelSubstituted: true,
+      }
+    : undefined;
 }
 
 /**
@@ -31,6 +47,7 @@ export class AiTraceSink {
   constructor(private readonly prisma: PrismaService) {}
 
   record(entry: TraceEntry): void {
+    const substitution = substitutionMeta(entry);
     void this.prisma
       .withWorkspace(entry.workspaceId, async (tx) => {
         const trace = await tx.aiTrace.create({
@@ -47,11 +64,15 @@ export class AiTraceSink {
             outputTokens: entry.outputTokens ?? null,
             costUsd: entry.costUsd ?? null,
             correlationId: entry.correlationId ?? null,
-            meta: entry.modelPolicy
-              ? ({
-                  modelPolicy: entry.modelPolicy,
-                } as unknown as Prisma.InputJsonObject)
-              : undefined,
+            meta:
+              entry.modelPolicy || substitution
+                ? ({
+                    ...(entry.modelPolicy
+                      ? { modelPolicy: entry.modelPolicy }
+                      : {}),
+                    ...substitution,
+                  } as unknown as Prisma.InputJsonObject)
+                : undefined,
           },
         });
         const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
@@ -64,7 +85,7 @@ export class AiTraceSink {
               costUsd: entry.costUsd ?? null,
               refType: 'ai_trace',
               refId: trace.id,
-              meta: { task: entry.task, model: entry.model },
+              meta: { task: entry.task, model: entry.model, ...substitution },
             },
           });
         }
