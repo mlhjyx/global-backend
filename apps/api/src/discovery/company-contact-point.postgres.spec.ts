@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -55,7 +55,7 @@ interface PointRow {
 
 /** Lower-case letters only, so no fixture value carries a long digit run. */
 function letters(count: number): string {
-  return [...randomBytes(count)].map((byte) => String.fromCharCode(97 + (byte % 26))).join('');
+  return Array.from({ length: count }, () => String.fromCharCode(97 + randomInt(26))).join('');
 }
 
 describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL (BI-14)', { timeout: 60_000 }, () => {
