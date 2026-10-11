@@ -18,6 +18,10 @@ import {
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import type { DiscoveryQueryReceipt } from '../discovery/discovery-query-receipt';
 import { DISCOVERY_QUERY_RECEIPT_MODE as QUERY_RECEIPT_MODE } from '../discovery/discovery-query-receipt-contract';
+import {
+  isDiscoveryQuerySkipReason,
+  type DiscoveryQuerySkipReason,
+} from '../discovery/discovery-query-skip';
 
 export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
 export const DISCOVERY_RAW_GOVERNANCE_PATCH =
@@ -64,7 +68,8 @@ const signalActs = proxyActivities<DiscoveryActivities>({
 
 /**
  * Discover 编排（PRD 5.5 / 7.4.8 Waterfall 的发现段）：
- * READY 计划 → 按 priority 逐源执行（单源失败不终止整个 run → PARTIAL）→
+ * READY 计划 → 按 priority 逐源执行（单源失败不终止整个 run → PARTIAL；数据源已停用的查询
+ * 跳过，stats.skippedQueries 按原因计数，run 至少 PARTIAL，BI-30）→
  * 归一 + 身份解析 + Suppression → 收尾（计划 EXECUTED + DiscoveryRunCompleted 事件）。
  * 任一阶段失败（重试用尽，或控制错误）时先把 run 记为 FAILED，stats.failure 写明阶段与错误类型、
  * 不含消息，计划保持 READY；之后照旧抛出原错误，让工作流失败（BI-25）。
@@ -118,6 +123,12 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   let duplicateRaw = 0;
   let queryCount = 0;
   let stage: DiscoveryRunStage = 'plan';
+  // BI-30: plan queries that ran on no provider because their source was off, by reason.
+  const skippedQueries: Partial<Record<DiscoveryQuerySkipReason, number>> = {};
+  let skippedQueryCount = 0;
+  // Counts only, and only when a query was skipped: runs without skips keep their stats shape.
+  const skipStats = (): Record<string, unknown> =>
+    skippedQueryCount > 0 ? { skippedQueries: { ...skippedQueries } } : {};
 
   // Query totals in the exact shape finalizeRun checks against the stored receipts.
   const queryStats = (): Record<string, unknown> => ({
@@ -238,6 +249,11 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         }
         // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
         if (r.budgetTruncated) discoveryBudgetTruncated = true;
+        // BI-30：数据源已停用、查询被跳过 → 按原因计数（run 至少 PARTIAL，但不算失败）。
+        if (isDiscoveryQuerySkipReason(r.skipReason)) {
+          skippedQueries[r.skipReason] = (skippedQueries[r.skipReason] ?? 0) + 1;
+          skippedQueryCount += 1;
+        }
       } catch (err) {
         if (isExecutionControlError(err)) throw err;
         failures += 1;
@@ -352,6 +368,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       skippedSubjects,
       // Absent in histories recorded before the counter existed: replays keep their status.
       fitUnjudged: fit.unjudged ?? 0,
+      skippedQueries: skippedQueryCount,
     });
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
@@ -360,6 +377,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       status,
       stats: {
         ...queryStats(),
+        ...skipStats(),
         companies,
         suppressed,
         fit: fit.verdicts,
@@ -402,6 +420,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
             status: 'FAILED',
             stats: {
               ...queryStats(),
+              ...skipStats(),
               queries: queryCount,
               failures,
               failure: describeDiscoveryRunFailure(stage, error),

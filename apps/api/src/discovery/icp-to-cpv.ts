@@ -9,6 +9,12 @@ export const TED_COVERAGE: ReadonlySet<string> = new Set([
   'IRL', 'ISL', 'ITA', 'LIE', 'LTU', 'LUX', 'LVA', 'MLT', 'NLD', 'NOR', 'POL', 'PRT', 'ROU', 'SVK', 'SVN', 'SWE',
 ]);
 
+/** The source an injected TED query routes to; the planner injects it only while that source is ENABLED (BI-30). */
+export const TED_QUERY_SOURCE = Object.freeze({
+  sourceClass: 'public_intelligence',
+  providerKey: 'ted',
+} as const);
+
 /** Technical execution envelope for request-bound query-plan taxonomy work. */
 export const MAX_QUERY_PLAN_INDUSTRY_TERMS = 64;
 export const MAX_QUERY_PLAN_TARGET_COUNTRIES = 8;
@@ -132,8 +138,12 @@ export interface PlanQueryShape {
 export function buildTedQuery(cpv: IcpToCpvResult, planned: PlanQueryShape[]): PlanQueryShape[] {
   if (cpv.cpvCodes.length && cpv.buyerCountries.length) {
     const ted: PlanQueryShape = {
-      source_class: 'public_intelligence',
-      filters: { source_hint: 'ted', cpv: cpv.cpvCodes.join(','), buyer_country: cpv.buyerCountries.join(',') },
+      source_class: TED_QUERY_SOURCE.sourceClass,
+      filters: {
+        source_hint: TED_QUERY_SOURCE.providerKey,
+        cpv: cpv.cpvCodes.join(','),
+        buyer_country: cpv.buyerCountries.join(','),
+      },
       keywords: [],
       rationale: 'TED 欧盟中标发现（ICP→CPV 冷路径解析）' + (cpv.warnings.length ? '；' + cpv.warnings.join('；') : ''),
       priority: 1,

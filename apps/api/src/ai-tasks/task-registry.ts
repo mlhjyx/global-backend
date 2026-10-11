@@ -459,8 +459,10 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxCostCents: 40,
     maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
+    // BI-30: the sources the planner may use are listed per request in the prompt
+    // (only the ENABLED ones), so this description names none of them.
     description:
-      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（可用 filters.source_hint 精确路由，省略=该类全跑）：\n- public_intelligence → public_web（SearXNG 官网挖掘，关键词驱动）、ted（欧盟招投标中标发现：需 filters.cpv + filters.buyer_country；CPV 由系统按 ICP 冷路径确定性注入，勿自行臆造码）\n- company_registry → wikidata（结构化：按行业+国家零爬取查公司+官网+员工数）\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索，必须用目标市场的语言书写（如德国、奥地利、瑞士用德语），不要用中文。',
+      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）：按 ICP 行业与市场特征挑选最相关的数据源，生成有序查询，发现类在前（contact/email 验证属后续补全，不出现在此）。\n只能使用提示中「可用数据源」清单列出的源：每条查询都要写 filters.source_hint，它和 source_class 都取自清单同一行；不要为清单之外的数据源或 source_class 出查询，系统会丢弃，也不会执行。\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于关键词搜索，必须用目标市场的语言书写（如德国、奥地利、瑞士用德语），不要用中文。',
     outputSchema: closedObject({
       queries: boundedArray(MAX_QUERY_PLANNER_QUERIES, closedObject({
         source_class: boundedString(80, {
@@ -468,8 +470,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
             'trade_data', 'b2b_company_person', 'company_registry',
             'public_intelligence', 'industry_data',
           ],
-          description:
-            'trade_data | b2b_company_person | company_registry | public_intelligence | industry_data',
+          description: '取提示「可用数据源」清单里与 source_hint 同一行的 source_class',
         }),
         filters: closedObject({
           industry: MODEL_FILTER_VALUE,
@@ -489,7 +490,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
           since_days: MODEL_FILTER_VALUE,
         }, [], {
           description:
-            '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；可选 source_hint（public_web|wikidata|openstreetmap|ted）精确路由；TED 专用 filters：cpv（逗号分隔 8 位 CPV 前缀码）+ buyer_country（ISO-3，如 DEU/FRA，均由系统冷路径注入）；可选 area_name/hs_code 等。',
+            '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；source_hint 必填，写提示「可用数据源」清单里的源键，查询只在这个源上执行；cpv、buyer_country、product_code 由系统按 ICP 冷路径注入，不要自己填；可选 area_name/hs_code 等。',
         }),
         keywords: {
           ...boundedArray(32, boundedString(200)),

@@ -43,8 +43,8 @@
 
 ## 与现有管线的集成点
 
-1. **路由 fan-out（已实现）**（`discovery.activities.ts executeQuery`）：`routeCompanyDiscovery` 返回该 source_class 下全部 ENABLED 适配器并由 `Promise.allSettled` 并行召回；只有 `filters.source_hint` 存在时才收窄具体子源。所有源产出统一进 `raw_source_record` → `canonicalizeRun` 去重归并。
-2. **查询计划契约（已实现基础面）**（`discovery.query_plan`）：`filters.source_hint` 可选；TED/openFDA 等已使用结构化 CPV/product-code 键。未安装的 customs/trade_data 键不得由计划器伪造成可执行能力。
+1. **路由 fan-out（已实现）**（`discovery.activities.ts executeQuery`）：`routeCompanyDiscovery` 返回该 source_class 下全部 ENABLED 适配器并由 `Promise.allSettled` 并行召回；只有 `filters.source_hint` 存在时才收窄具体子源。所有源产出统一进 `raw_source_record` → `canonicalizeRun` 去重归并。BI-30（2026-10-10）起先路由再做词表归一：路由不到 ENABLED 适配器的查询跳过（只写零回执，不调模型与 provider），`stats.skippedQueries` 按原因计数。路由规则与规划共用 `discovery/plan-query-sources.ts`。
+2. **查询计划契约（已实现基础面）**（`discovery.query_plan`）：规划器只为 ENABLED 的数据源出查询，计划里每条查询的 `filters.source_hint` 写明它执行的源键（BI-30）；TED/openFDA 查询只由冷路径用结构化 CPV/product-code 键确定性生成，且只在对应源 ENABLED 时注入。未安装的 customs/trade_data 键不得由计划器伪造成可执行能力，规划时会被移出计划。
 3. **结构化源 → 官网富化**：Wikidata/OSM/GLEIF/名录产出的 website 命中率参差，统一交给现有 `mineDomain`（Crawl4AI+Gemini）判站富化——「官网单源」降格为**所有源的公共富化层**，不再是唯一发现入口。
 4. **召回与信号分离**：发现类源（名录/展会/Wikidata/OSM/官网）→ canonical；信号类源（news/jobs/patents/trade-stats）不建 canonical，写 attributes 供资格门四门判别与优先级打分。
 5. **Source Registry（已实现于当前受治理工具面）**：ToolBroker 对 required 源执行 `source_policy` fail-closed；可执行 provider、seed default 与具体 call gate 见[生成 Registry](provider-registry.md)。Comtrade/customs 未安装，因而也没有可执行的 registry/tool/provider 链。

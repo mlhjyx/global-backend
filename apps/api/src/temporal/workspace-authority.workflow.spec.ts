@@ -579,6 +579,125 @@ describe('discoveryWorkflow execution-control propagation', () => {
   });
 });
 
+describe('discoveryWorkflow queries skipped because their source is off (BI-30)', () => {
+  const QUERIES = [
+    { source_class: 'public_intelligence', filters: { source_hint: 'public_web' }, keywords: ['Pumpen'], priority: 1 },
+    { source_class: 'company_registry', filters: { source_hint: 'wikidata' }, keywords: [], priority: 2 },
+    { source_class: 'trade_data', filters: {}, keywords: [], priority: 3 },
+  ];
+
+  function executed(
+    queryOrdinal: number,
+    sourceClass: string,
+    providers: string[],
+    accepted: number,
+    skipReason?: string,
+  ) {
+    return {
+      rawCount: accepted,
+      quarantinedCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 0,
+      costCents: 0,
+      provider: providers.join('+') || null,
+      budgetTruncated: false,
+      queryReceipt: {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: String(queryOrdinal + 1).repeat(64),
+        queryOrdinal,
+        sourceClass,
+        providers,
+        accepted,
+        quarantined: 0,
+        rejected: 0,
+        governanceDenied: 0,
+        duplicate: 0,
+        usageQuantity: accepted,
+        costCents: 0,
+      },
+      ...(skipReason ? { skipReason } : {}),
+    };
+  }
+
+  it('counts each skipped query by reason and finalizes PARTIAL, not FAILED', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 'public_intelligence', ['public_web'], 1))
+      .mockResolvedValueOnce(executed(1, 'company_registry', [], 0, 'SOURCE_DISABLED'))
+      .mockResolvedValueOnce(executed(2, 'trade_data', [], 0, 'SOURCE_UNKNOWN'));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery).toHaveBeenCalledTimes(3);
+    expect(acts.canonicalizeRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          queries: 3,
+          failures: 0,
+          skippedQueries: { SOURCE_DISABLED: 1, SOURCE_UNKNOWN: 1 },
+          // Skipped queries still carry their zero receipt, as before.
+          perSource: expect.objectContaining({
+            company_registry: expect.objectContaining({ rawCount: 0, providers: [] }),
+            trade_data: expect.objectContaining({ rawCount: 0, providers: [] }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('keeps a run whose every query was skipped PARTIAL', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [QUERIES[1]] });
+    acts.executeQuery.mockResolvedValue(executed(0, 'company_registry', [], 0, 'SOURCE_DISABLED'));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          failures: 0,
+          skippedQueries: { SOURCE_DISABLED: 1 },
+        }),
+      }),
+    );
+  });
+
+  it('counts no skip for a reason it does not know', async () => {
+    primeDiscovery();
+    acts.executeQuery.mockResolvedValue(
+      executed(0, 'official_registry', ['gleif'], 1, 'SOMETHING_ELSE'),
+    );
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ status, stats }] = acts.finalizeRun.mock.calls[0]!;
+    expect(status).toBe('DONE');
+    expect(stats).not.toHaveProperty('skippedQueries');
+  });
+
+  it('records the skips on a run that a later control error fails (BI-25)', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    const control = activityFailure('executeQuery', 'BudgetOperationReplayError');
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 'company_registry', [], 0, 'SOURCE_DISABLED'))
+      .mockRejectedValueOnce(control);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(control);
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({ skippedQueries: { SOURCE_DISABLED: 1 } }),
+      }),
+    );
+  });
+});
+
 describe('discoveryWorkflow failure finalization (BI-25)', () => {
   const HAPPY_RECEIPT = {
     schemaVersion: 'discovery-query-receipt/v1',

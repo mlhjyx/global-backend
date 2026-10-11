@@ -181,8 +181,15 @@ export class IcpController {
   @Post('icps/:icpId/query-plans')
   @RequireScopes('acquisition:write')
   @HttpCode(201)
-  @ApiOperation({ summary: '从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）' })
-  @ApiExecutionBudgetGrant()
+  @ApiOperation({
+    summary: '从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）',
+    description:
+      '只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。',
+  })
+  @ApiExecutionBudgetGrant({
+    // BI-30: the planner only plans for ENABLED discovery sources.
+    additionalConflictCodes: ['INVALID_STATE', 'NO_ENABLED_DISCOVERY_SOURCE', 'NO_RUNNABLE_QUERIES'],
+  })
   @ApiEnvelope(QueryPlanDto, { status: 201 })
   async generateQueryPlan(
     @Ctx() ctx: RequestContext,
