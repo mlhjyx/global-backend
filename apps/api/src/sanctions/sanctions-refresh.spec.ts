@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  OWNER_PERSIST_TRANSACTION_OPTIONS,
   SanctionsRefreshService,
   countryToAlpha2,
   toDesiredEntity,
   diffSanctionsEntities,
+  sanctionsListVersion,
+  sanctionsParserFor,
+  sanctionsShrinkGuardTripped,
   type ExistingEntityRow,
 } from './sanctions-refresh.service';
+import { parseOfacXml } from '../adapters/ofac-xml';
+import { parseEuFsf } from '../adapters/eu-fsf-xml';
 import type { ParsedSanctionsEntity } from '../adapters/ofac-xml';
 import type { PrismaClient } from '@prisma/client';
 import type { ExecutionBroker } from '../tools/tool-contract';
@@ -122,7 +128,7 @@ describe('diffSanctionsEntities', () => {
 
 describe('SanctionsRefreshService — budget context', () => {
   function successfulOwnerDb() {
-    return {
+    const db = {
       sanctionsSource: {
         findUniqueOrThrow: vi.fn(async () => ({
           id: 'source-1', key: 'ofac', format: 'ofac_sdn_xml',
@@ -136,7 +142,9 @@ describe('SanctionsRefreshService — budget context', () => {
         update: vi.fn(async () => undefined),
         updateMany: vi.fn(async () => ({ count: 0 })),
       },
-    } as unknown as PrismaClient;
+      $transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => run(db)),
+    };
+    return db as unknown as PrismaClient;
   }
 
   it('persists a successful unreceipted refresh and requires the platform writer once a receipt exists', async () => {
@@ -221,3 +229,150 @@ describe('SanctionsRefreshService — budget context', () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'source-1' }, data: expect.objectContaining({ lastFetchStatus: 'FAILED' }) }));
   });
 });
+
+describe('SanctionsRefreshService — unreceipted owner persistence', () => {
+  function transactionalOwnerDb() {
+    const tx = {
+      sanctionsSource: { update: vi.fn(async () => undefined) },
+      sanctionsEntity: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const ownerDb = {
+      sanctionsSource: {
+        findUniqueOrThrow: vi.fn(async () => ({
+          id: 'source-1', key: 'ofac_sdn', format: 'ofac_sdn_xml',
+          url: 'https://example.test/sdn.xml', config: null,
+        })),
+        update: vi.fn(async () => undefined),
+      },
+      sanctionsEntity: {
+        findMany: vi.fn(async () => []),
+        createMany: vi.fn(async () => ({ count: 1 })),
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>, _options?: unknown) => run(tx)),
+    };
+    return { ownerDb, tx };
+  }
+  const unreceiptedBroker = (body: string) =>
+    ({
+      invoke: vi.fn(async () => ({
+        data: { body, contentType: 'application/xml', lastModified: null },
+        costCents: 0,
+      })),
+    }) as unknown as ExecutionBroker;
+
+  it('writes every entity and the source metadata inside one owner transaction, never on the bare client', async () => {
+    const { ownerDb, tx } = transactionalOwnerDb();
+    const service = new SanctionsRefreshService({
+      ownerDb: ownerDb as unknown as PrismaClient,
+      broker: unreceiptedBroker(ENTITY_XML),
+    });
+
+    await expect(service.refreshSource('source-1')).resolves.toMatchObject({ status: 'DONE', added: 1 });
+
+    expect(ownerDb.$transaction).toHaveBeenCalledOnce();
+    expect(ownerDb.$transaction.mock.calls[0]![1]).toEqual(OWNER_PERSIST_TRANSACTION_OPTIONS);
+    expect(OWNER_PERSIST_TRANSACTION_OPTIONS.timeout).toBeGreaterThanOrEqual(300_000);
+    expect(tx.sanctionsEntity.createMany).toHaveBeenCalledOnce();
+    expect(tx.sanctionsSource.update).toHaveBeenCalledWith({
+      where: { id: 'source-1' },
+      data: expect.objectContaining({ recordCount: 1, lastFetchStatus: 'DONE' }),
+    });
+    expect(tx.sanctionsSource.update.mock.calls[0]![0]).not.toHaveProperty('data.status');
+    expect(ownerDb.sanctionsEntity.createMany).not.toHaveBeenCalled();
+    expect(ownerDb.sanctionsEntity.updateMany).not.toHaveBeenCalled();
+    expect(ownerDb.sanctionsSource.update).not.toHaveBeenCalled();
+  });
+
+  it('lets a failed write inside the transaction surface instead of reporting a partial list as DONE', async () => {
+    const { ownerDb, tx } = transactionalOwnerDb();
+    tx.sanctionsSource.update.mockRejectedValueOnce(new Error('connection lost before commit'));
+    const service = new SanctionsRefreshService({
+      ownerDb: ownerDb as unknown as PrismaClient,
+      broker: unreceiptedBroker(ENTITY_XML),
+    });
+
+    await expect(service.refreshSource('source-1')).rejects.toThrow('connection lost before commit');
+  });
+});
+
+describe('SanctionsRefreshService.refreshSourcesByKey', () => {
+  it('refreshes the named sources whatever their status, in key order, and marks only failures FAILED', async () => {
+    const rows = [
+      { id: 'id-eu', key: 'eu_fsf', format: 'eu_fsf_xml', url: 'https://example.test/eu.xml', config: null, status: 'DISABLED' },
+      { id: 'id-sdn', key: 'ofac_sdn', format: 'ofac_sdn_xml', url: 'https://example.test/sdn.xml', config: null, status: 'DISABLED' },
+    ];
+    const findMany = vi.fn(async () => rows);
+    const update = vi.fn(async () => undefined);
+    const tx = {
+      sanctionsSource: { update: vi.fn(async () => undefined) },
+      sanctionsEntity: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const ownerDb = {
+      sanctionsSource: {
+        findMany,
+        findUniqueOrThrow: vi.fn(async ({ where }: { where: { id: string } }) => rows.find((row) => row.id === where.id)),
+        update,
+      },
+      sanctionsEntity: { findMany: vi.fn(async () => []) },
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)),
+    } as unknown as PrismaClient;
+    const invoke = vi.fn(async (_tool: string, input: { url: string }) => {
+      if (input.url.endsWith('/eu.xml')) throw new Error('download refused');
+      return { data: { body: ENTITY_XML, contentType: 'text/xml', lastModified: null }, costCents: 0 };
+    });
+    const service = new SanctionsRefreshService({ ownerDb, broker: { invoke } as unknown as ExecutionBroker });
+
+    const summaries = await service.refreshSourcesByKey(['ofac_sdn', 'eu_fsf']);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { key: { in: ['ofac_sdn', 'eu_fsf'] } },
+      orderBy: { key: 'asc' },
+    });
+    expect(summaries).toEqual([
+      expect.objectContaining({ sourceKey: 'eu_fsf', status: 'FAILED', error: 'download refused' }),
+      expect.objectContaining({ sourceKey: 'ofac_sdn', status: 'DONE', added: 1 }),
+    ]);
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'id-eu' },
+      data: { lastRefreshedAt: expect.any(Date), lastFetchStatus: 'FAILED' },
+    });
+    for (const call of [...update.mock.calls, ...tx.sanctionsSource.update.mock.calls]) {
+      expect(JSON.stringify(call)).not.toContain('"status"');
+    }
+  });
+});
+
+describe('sanctions refresh helpers shared with the operator dry run', () => {
+  it('trips the shrink guard on an empty parse or a collapse below half of the active rows', () => {
+    expect(sanctionsShrinkGuardTripped(0, 0)).toBe(true);
+    expect(sanctionsShrinkGuardTripped(0, 10)).toBe(true);
+    expect(sanctionsShrinkGuardTripped(4, 10)).toBe(true);
+    expect(sanctionsShrinkGuardTripped(5, 10)).toBe(false);
+    expect(sanctionsShrinkGuardTripped(1, 0)).toBe(false);
+  });
+
+  it('versions a list by its publish date, or by the refresh day when the list has none', () => {
+    const now = new Date('2026-10-10T23:59:00.000Z');
+    expect(sanctionsListVersion({ publishDate: '2026-10-09' }, now)).toBe('2026-10-09');
+    expect(sanctionsListVersion({ publishDate: null }, now)).toBe('2026-10-10');
+  });
+
+  it('resolves the parser for each recorded list format and nothing else', () => {
+    expect(sanctionsParserFor('ofac_sdn_xml')).toBe(parseOfacXml);
+    expect(sanctionsParserFor('eu_fsf_xml')).toBe(parseEuFsf);
+    expect(sanctionsParserFor('csv')).toBeUndefined();
+    expect(sanctionsParserFor('__proto__')).toBeUndefined();
+  });
+});
+
