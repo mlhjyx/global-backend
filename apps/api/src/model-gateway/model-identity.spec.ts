@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalReportedModelIdentifier,
   hasTrustedModelIdentity,
+  isReviewedModelIdentity,
   resolveReportedModelIdentity,
 } from './model-identity';
 
@@ -107,4 +108,46 @@ describe('DeepSeek v4 pro upstream identity aliases (OpenOx, observed 2026-10-07
       ).toBeUndefined();
     },
   );
+});
+
+describe('DeepSeek v4 flash upstream identity alias (OpenOx, observed 2026-10-10/11)', () => {
+  it('resolves the reviewed flash build name on chat completions', () => {
+    expect(
+      resolveReportedModelIdentity(
+        'deepseek-v4-flash',
+        'deepseek-ai/DeepSeek-V4-Flash-0731',
+        'openai-chat-completions',
+      ),
+    ).toBe('deepseek-v4-flash');
+  });
+
+  it.each([undefined, 'openai-responses', 'anthropic-messages'])(
+    'rejects the flash build name without its exact transport (%s)',
+    (transport) => {
+      expect(
+        resolveReportedModelIdentity(
+          'deepseek-v4-flash',
+          'deepseek-ai/DeepSeek-V4-Flash-0731',
+          transport,
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  it('never lets the flash build stand in for a pro request on its own', () => {
+    expect(
+      resolveReportedModelIdentity(
+        'deepseek-v4-pro',
+        'deepseek-ai/DeepSeek-V4-Flash-0731',
+        'openai-chat-completions',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('lists the reviewed model identities used to validate deployment settings', () => {
+    expect(isReviewedModelIdentity('deepseek-v4-flash')).toBe(true);
+    expect(isReviewedModelIdentity('deepseek-v4-pro')).toBe(true);
+    expect(isReviewedModelIdentity('deepseek-v4-pr')).toBe(false);
+    expect(isReviewedModelIdentity('constructor')).toBe(false);
+  });
 });

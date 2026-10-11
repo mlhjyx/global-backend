@@ -757,6 +757,20 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(prompt).toContain("无法确定时用英语");
     expect(prompt).toContain("不得出现中文");
   });
+  it("expands a DACH target market to Germany, Austria and Switzerland for the planner and its cold paths", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted", "openfda");
+    f.declareLineage("ted", "openfda");
+    Object.assign(f.icp, { targetMarkets: ["DACH区域"] });
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 1 };
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("必须全部用德语书写");
+    expect(prompt).not.toContain("无法确定时用英语");
+    expect(f.cpv.mock.calls[0]![1]).toMatchObject({ targetCountries: ["DE", "AT", "CH"] });
+    expect(f.fda.mock.calls[0]![1]).toMatchObject({ targetCountries: ["DE", "AT", "CH"] });
+  });
   it("injects deterministic TED/FDA facts from the taxonomy mapping, preserving seller filters", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";

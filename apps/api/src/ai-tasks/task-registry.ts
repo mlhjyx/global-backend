@@ -16,6 +16,11 @@ type OutputSchema = Record<string, unknown>;
  * identity check and spend records truthful; that gateway already charges
  * these calls at the pro ratio. Make this configurable per deployment before a
  * gateway that serves a real flash model is used.
+ *
+ * Since 2026-10-10 the same gateway also answers some pro requests with real
+ * DeepSeek V4 Flash. Owner decision D14 (2026-10-11): a deployment may accept
+ * that through MODEL_IDENTITY_SUBSTITUTES for the tasks marked
+ * `acceptsModelSubstitute` below; such results are labelled Flash, not pro.
  */
 const ACQUISITION_FLASH_TIER_MODEL = 'deepseek-v4-pro';
 
@@ -131,6 +136,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['claims']),
     // 抽取是高频、结构化任务：属 flash 档；获客网关暂无真 flash，见 ACQUISITION_FLASH_TIER_MODEL。
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
   },
@@ -148,6 +154,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       summary: boundedString(8000, { description: '80-150 字中文简介' }),
     }, ['industry', 'summary']),
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false, // 画像随 Claim 审批可被人工修正
   },
@@ -179,6 +186,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['offerings']),
     // 与 Claim 抽取同为高频结构化任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'low', // 只进结构化知识库，不直接对外
     humanGate: false,
   },
@@ -252,6 +260,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     ]),
     // ICP 设计是低频、策略推理任务 → 用更强的 pro。
     model: 'deepseek-v4-pro',
+    acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
   },
@@ -288,6 +297,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['is_company_site']),
     // 判站 + 抽取是高频任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL（路由沿革见 changelog）。
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -320,6 +330,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['trade_role']),
     // 分类是高频便宜任务：flash 档（设计 §3.6），见 ACQUISITION_FLASH_TIER_MODEL。
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -359,6 +370,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['people']),
     // flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
     humanGate: false,
   },
@@ -391,6 +403,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['is_directory', 'companies']),
     // 列表抽取是长上下文任务（一页多公司）：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
     model: ACQUISITION_FLASH_TIER_MODEL,
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -407,6 +420,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 60000,
     model: ACQUISITION_FLASH_TIER_MODEL, // 高频、冷路径（flash 档）
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -435,6 +449,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // 用了既撞关停又重蹈 flash 召回过宽。全仓一律显式 deepseek-v4-pro / deepseek-v4-flash。
     // 额度恢复后可切回 gemini-2.5-pro。
     model: 'deepseek-v4-pro',
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -494,6 +509,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['queries', 'estimated_volume']),
     // 计划生成是低频推理任务 → pro。
     model: 'deepseek-v4-pro',
+    acceptsModelSubstitute: true,
     risk: 'low', // 只产出计划，执行前还有成本 Dry Run 与人工确认
     humanGate: true,
   },

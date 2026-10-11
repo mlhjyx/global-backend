@@ -157,3 +157,33 @@
   5. 改动前就有：恢复任务 EXPIRE 时，`completeProviderSpendReconciliation` 若返回 UNRESOLVED 而不抛错，会记 EXPIRED 并停止巡检，支出可能一直停在 `RESERVED`、预留一直占着。这是保守的，费用以预留的形式占着、没有丢，记为后续事项。
 - **未覆盖**：没有用真实 PostgreSQL 做往返；守卫与恢复任务的行为只做了静态核对。
 - **结论**：更新 `router-model-gateway.ts` 指纹为 `bf31b8ee89249aece725d72cc18ad97ee00fbd3ddcb86e4c147d6bf6817fb9df`。
+
+## 2026-10-11 Router 改动复核（D14 模型身份替代）
+
+起因：获客唯一的模型上游（new-api 渠道 24 → OpenOx）会把部分 `deepseek-v4-pro` 请求交给 DeepSeek V4 Flash 应答，身份门照规定判 `MODEL_IDENTITY_MISMATCH`，验收 run 因此中断。产品负责人 2026-10-11 决定（D14）：在接入真正的 pro 第二上游之前，获客链路接受 Flash，结果如实标注。改动要动 `router-model-gateway.ts`，所以按围栏规则先复核、再更新指纹。
+
+- **改动（Router）**：
+  - 构造时解析部署设置 `MODEL_IDENTITY_SUBSTITUTES`（默认空），格式错误、未知模型或未审查的组合直接抛错，API 与 Worker 启动失败。解析结果放在 ES 私有字段里。
+  - `run` 的第一句：调用方的上下文只要带着 `modelIdentitySubstitutes`（自有或继承），就抛 `MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED`，发生在出网断言、路由、预留与任何物理请求之前。不拷贝上下文，付费路径（`ctx.paidCost` → `runPersistent`）拿到的仍是调用方原对象，其余逻辑不变：照旧要求 `result.model` 等于请求模型。
+  - 非付费路径只在 generateText / generateStructured、请求模型在部署设置里有替代、且注册表任务标了 `acceptsModelSubstitute` 时，才把允许的替代放进交给 provider 的上下文。注册表仍只查一次：沿用原有的那一处 `getTask(input.task)`，只是在部署设置给出替代时也加载（执行授权策略要求 Router 里恰好一处通用查表）。默认关闭时，加载条件与改动前逐字相同。
+  - 有允许的替代时，provider 外面套一层只做记录的包装 `observingSubstituteAnswers`：原样转发每个方法，记下答案或失败答案由替代应答的每次物理请求；它不发请求、不重试、不做授权。出网分支照旧经 `call()` 在 `authorizeAndDispatch` 内派发同一个操作，`providerId` 仍是真实 provider。
+  - trace：有任何一次物理请求由替代应答，就写 `modelSubstitution { requestedModel, substituteModels }`；`model` 列记返回答案（或失败答案）的模型。失败路径的 `model` 只在失败答案由允许的替代产出时改记替代，其余照旧记请求模型。允许替代、而上游对成功答案完全没有署名时，另写 `modelIdentityUnproven`。
+  - 结算：一字未改。观测额（provider 报价 → 模型无关的 token 混合价 → 按次上限）原样交给预算账本，`settle_tool_budget` 照旧按 `LEAST(观测, 预留)` 扣费，超出时记 `cap_variance` 并耗尽账户。
+- **围栏外的配套改动**：provider 只在非付费上下文、只认代码审查过的组合时才接受替代；任何名字解析为替代，答案就记为替代；两个不同替代则失败；流解析失败时已出现的替代名也记入失败。别名表新增 `deepseek-v4-flash` ← `deepseek-ai/DeepSeek-V4-Flash-0731`（仅 chat-completions）。trace 落库把这些标记写进 `ai_trace.meta` 与 `usage_ledger.meta`。注册表给 11 个获客任务加 `acceptsModelSubstitute`。
+- **放宽了什么**：这是一次经产品负责人批准的、有意的身份门放宽，而且很窄。只在部署显式开启、任务显式标记、非付费路径、文本与结构化调用、代码审查过的组合（目前仅 pro → flash）这几个条件同时满足时才生效；放行的答案按实际模型记录，不冒充请求的模型。授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放投影、出网围栏、物理调用的分配与计数都没有改动，也没有新增物理调用路径。默认关闭时唯一的行为差异来自新别名：请求 `deepseek-v4-flash` 的调用现在承认审查过的 Flash 构建名，这是同一模型的身份事实。
+- **独立复审**（只读代理，三轮）：
+  - 第一轮：HIGH 一项、MEDIUM 一项、LOW 四项，处理如下。
+    - HIGH：初版在两条路径上把替代调用的观测额封顶在预留以内。账本本来就按 `LEAST` 扣费，封顶反而让替代调用绕过 `cap_variance` 与账户耗尽，也压低了 `observed_microusd`。已改回原样结算；用例改为断言替代调用的定价与 pro 应答完全相同，且持久回执的扣费不超过预留。
+    - MEDIUM：结构化输出首调由 Flash 应答、修复由 pro 应答时，整次调用记为 pro 且不带标记，按 `modelSubstituted` 统计的跑测报告会漏掉。已改为观察每次物理请求，补了首调与修复分属不同模型的三项用例。
+    - LOW：继承来的替代字段能穿过剥离，provider 也未复核审查组合（provider 已补复核，剥离见第二轮）；默认关闭「行为不变」的说法不准（文档已改）；流解析失败记成 pro（已改）；配置可被 `Map.prototype.set` 改写、Router 字段只在类型上只读（已改为私有 Map 的只读视图与 ES 私有字段）。
+    - 修正前的源码上，对应新用例 13 项失败；修正后全绿。
+  - 第二轮：没有 CRITICAL、HIGH、MEDIUM，确认包装层不新增路径、默认关闭路径与 main 相同，同意更新指纹。LOW 四项：
+    - 剩余拷贝会连带丢掉继承来的 `paidCost`、`platformEgress`、`authorizeExternalAction`：改为直接拒绝调用方自带的字段，不再拷贝上下文。
+    - 无署名的答案记为 pro、trace 看不出是兜底：允许替代时加 `modelIdentityUnproven` 标记。
+    - 流解析失败按尚未过完身份门的名字记 Flash：偏向 Flash，按设计保留。
+    - 首调 Flash、修复 pro 的行整行记在 pro 下：文档要求统计 pro 时排除带标记的行。
+    - 对应新用例在修正前 6 项失败，修正后全绿。
+  - 第三轮：没有 CRITICAL、HIGH、MEDIUM，同意以下文指纹更新。确认拒绝发生在 `run` 的第一句，早于出网断言、路由与预留；`authorizeExternalAction()` 不带参数，provider 也不回调网关，所以带替代的调用上下文到不了能再交回 Router 的调用方；付费路径重新拿到调用方原对象；默认关闭时 `ai_trace.meta` 与 `usage_ledger` 的 `{task, model}` 与改动前逐字相同，唯一差异仍是新别名。可选 LOW 一项不改：允许替代时，失败且无署名的答案仍按 pro 记在 ERROR 行、不带标记。ERROR 行不写 `usage_ledger`，但 `ai_trace` 的 token 列有值，所以按 `ai_trace` 汇总 pro 的 token 时要排除开关开启期间的 ERROR 行，已写进文档；要加标记还得再改一次 Router。
+- **测试**：新 `router-model-identity-substitution.spec.ts`（真实 provider + 模拟上游）、`model-identity-substitutes.spec.ts`，以及身份别名、trace 落库、注册表标记的用例。覆盖：替代被接受且处处记 Flash；线上仍请求 pro；文本、非流式、Responses 传输；混合署名与未署名内容；首调与修复分属不同模型；截断与流解析失败；定价与 pro 相同、持久回执扣费不超过预留、持久重放记 Flash；启动失败。以下情形仍为 `MODEL_IDENTITY_MISMATCH`：默认关闭、空设置、任务未标记（含建站）、其他模型族、未审查的 Flash 名、反方向、付费上下文、未审查组合。调用方自带替代字段（含继承）在预留前被拒；无署名答案带 `modelIdentityUnproven`。API 全量单测 9,398 项通过，唯一失败为已知负载假红 `browser-readiness-probe`（单独重跑 24/24 通过）。
+- **未覆盖**：没有用真实 PostgreSQL 往返，也没有在 xin 上开启开关跑测；账本的 `LEAST`、`cap_variance` 与账户耗尽是既有 SQL 行为，只做了静态核对。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `d3194efcca04fefa9cce175a2e9b11772613aa9c9c4b813d2109c539435ec964`。

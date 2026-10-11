@@ -47,6 +47,41 @@
   - 独立复审结论：可合并。三条低优先级建议都已采纳：区分「没有文件」与「写失败」、测试提交不走全局钩子、静态规则更准。
 - 未做：`ci.yml` 的 openapi 漂移检查里还有一处 `git diff … | head -100`。它只在已经要 `exit 1` 的报错分支里打印差异，不影响结论，没有改动。
 
+## 2026-10-11 · Let a deployment accept DeepSeek V4 Flash for pro acquisition calls, labelled as Flash
+
+- 起因：获客唯一的模型上游（new-api 渠道 24 → OpenOx）在 DeepSeek V4 pro 与 Flash 之间不定向切换：请求 `deepseek-v4-pro` 有时由 Flash 应答并报告为 `deepseek-ai/DeepSeek-V4-Flash-0731`，反方向也出现过。身份门照规定判为 `MODEL_IDENTITY_MISMATCH`，验收 run 因此中断。产品负责人 2026-10-11 拍板（D14）：在接入真正的 pro 第二上游之前，获客链路接受 Flash 运行，结果如实标注。
+- 改动：
+  - 新部署设置 `MODEL_IDENTITY_SUBSTITUTES`（`model-gateway/model-identity-substitutes.ts`）：逗号分隔的「请求>接受」对，默认不设置即关闭。只能开启代码里审查过的组合，目前只有 `deepseek-v4-pro>deepseek-v4-flash`；格式错误、未知模型、自替代、重复或未审查的组合在 Router 构造时抛错，API 与 Worker 启动即失败。
+  - 任务合同新增 `acceptsModelSubstitute`，只标在 11 个获客任务上；`site_builder.brand_profile` 与注册表外的任务保持精确身份。获客任务照旧请求 `deepseek-v4-pro`。
+  - `model-identity.ts` 新增审查过的别名 `deepseek-v4-flash` ← `deepseek-ai/DeepSeek-V4-Flash-0731`（仅 chat-completions），并注明观察日期。这个别名本身只证明 Flash 身份，不让 Flash 冒充 pro 请求。
+  - Router（受围栏保护，复核见 `docs/evidence/execution-authority-fence-review-20261001.md`）：只在非付费路径、只对文本与结构化调用、只在任务标了 `acceptsModelSubstitute` 且部署设置给出该请求模型的替代时，把允许的替代身份经 `AiContext.modelIdentitySubstitutes` 交给 provider；调用方自己带这个字段（自有或继承）会在预留与任何物理请求之前被拒（`MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED`），付费路径从不替代。
+  - provider：上游报告的每个名字都必须解析为请求模型或允许的替代，否则照旧 `MODEL_IDENTITY_MISMATCH`。响应里任何一处名字解析为替代（包括内容块未署名、只有收尾块署名的情形），结果就记为替代模型；同一响应出现两个不同替代则失败；流在解析中途断掉时，已出现的 Flash 名同样让这次失败记为 Flash。provider 另外只认代码审查过的组合，付费上下文一律忽略替代。结果的 `model` 是 `deepseek-v4-flash`，`reportedModel` 是上游原名。
+  - 记账：只要一次调用里有任何一次物理请求由替代应答（包括结构化输出首调为 Flash、修复为 pro 的情形），`ai_trace.meta` 与 `usage_ledger.meta` 就写 `requestedModel`、`modelSubstituted: true` 与 `substituteModels`；`model` 列记产出返回答案（或失败答案）的模型，答案来自 Flash 时就是 Flash。开关生效的调用若上游对答案完全没有署名，`model` 只能按请求记 pro，此时 meta 另写 `modelIdentityUnproven: true`。定价与其他调用完全相同（provider 报价、模型无关的 token 混合价或按次上限，没有 pro 专属价格），观测额原样交给预算账本：账本按 `LEAST(观测, 预留)` 扣费，超出预留照常记 `cap_variance` 并耗尽该账户，替代不放宽这道闸。
+  - Flash 在现有输出上限与超时下没有问题；网关 provider 只读 `prompt_tokens`、`completion_tokens`、正文与 `finish_reason`，不依赖 pro 才有的推理字段。
+- 测试：
+  - 先写失败测试：新 `router-model-identity-substitution.spec.ts`、`model-identity-substitutes.spec.ts`，以及身份别名、trace 落库、注册表标记，共 13 项失败、配置模块因不存在而整文件失败；实现后全绿。「默认关闭、空设置、任务未标记、调用方自带替代、其他模型族、未审查的 Flash 名、反方向」这些仍须 `MODEL_IDENTITY_MISMATCH` 的用例在改动前后都通过。
+  - 集成测试用真实 provider 与模拟上游，覆盖流式与非流式、文本与结构化、Responses 传输、混合署名、未署名内容、截断与流解析失败、首调与修复分属不同模型、定价与 pro 相同、持久回执扣费不超过预留、持久重放结果记 Flash、启动失败，以及付费上下文、继承来的替代字段、未审查组合都被拒。
+  - 独立只读复审第一轮指出：封顶观测额会让替代调用绕过账本的 `cap_variance` 与账户耗尽（HIGH），首调 Flash、修复 pro 的调用不被标记（MEDIUM），另有继承字段、默认关闭说明不准、流解析失败记名、配置可被 `Map.prototype.set` 改写等 LOW。全部修正：对应新用例在修正前的源码上 13 项失败，修正后全绿。第二轮没有 CRITICAL、HIGH、MEDIUM；按其 LOW 建议，调用方自带替代字段改为直接拒绝（原先的剥离会连带丢掉继承来的其他字段），无署名答案加 `modelIdentityUnproven` 标记，新用例在修正前 6 项失败。第三轮复核见围栏复核记录。
+- 部署：默认关闭。不开开关时唯一的行为差异来自新别名：请求 `deepseek-v4-flash` 的调用（例如未指定模型、走 `MODEL_DEFAULT_MODEL` 的调用）现在承认审查过的 Flash 构建名，这是同一模型的身份事实，不是替代；请求 pro 的调用照旧只认 pro。要开启，在运行时环境加 `MODEL_IDENTITY_SUBSTITUTES=deepseek-v4-pro>deepseek-v4-flash` 并重启 API 与 Worker；关闭即删除该行再重启。开启期间的跑测报告必须单独统计被替代的调用（`ai_trace.meta->>'modelSubstituted' = 'true'`）与身份未证实的调用（`meta->>'modelIdentityUnproven' = 'true'`），统计 pro 的结果与用量时把这两类排除：首调 Flash、修复 pro 的调用整行记在 `model = deepseek-v4-pro` 下，但带替代标记。
+- 未做：真正 pro 的第二上游另行接入；本次没有在 xin 上开启或跑测。开关开启时，失败且上游没有署名的答案仍按 pro 记在 ERROR 行、不带标记（ERROR 行不写 `usage_ledger`），按 `ai_trace` 汇总 pro 的 token 时要排除开启期间的 ERROR 行。
+
+## 2026-10-11 · Normalize Austria, Switzerland, the Netherlands, Poland and Spain, and expand a DACH market to its three countries
+
+- 起因：发现侧的国家词表（`apps/api/src/discovery/vocab.ts`）只认 8 个国家（DE US CN JP IT FR GB IN），没有 AT/CH/NL/PL/ES；ICP 目标市场写成「DACH区域」这类地区词时，没有任何一处把它展开成国家：规划器提示词定不出关键词语言；TED、openFDA 冷路径与定时意向扫描把它当作一个国家词交给 taxonomy，未命中别名时由模型在码表里挑**一个**国家，并把这条别名沉淀下来。
+- 改动：
+  - `vocab.ts`：`COUNTRY_ISO` 与 `COUNTRY_QIDS` 各补 AT/CH/NL/PL/ES，写法与已有国家相同（中文名、英文名、本国语名，另收常见的无变音拼写与瑞士的法、意语名）；QID 与 `seed-taxonomy.mjs` 的 `ALPHA2_TO_QID` 一致。新数据表 `MARKET_REGION_COUNTRIES`（「DACH」及其常见写法 → DE、AT、CH）与 `lookupMarketRegion`、`expandMarketRegions`。地区词不进单国表：单个公司的所在国不会是「DACH」，public_web 对它照旧不填国家。
+  - `icp-to-cpv.ts` 的 `boundedTargetCountries`（TED、openFDA 冷路径与定时意向扫描共用）：地区词先展开为成员国 alpha-2 码再交给 taxonomy；这三个码由 seed 别名确定性归一，不再调用模型。
+  - `search-localization.ts` 的 `targetCountries`（规划器关键词语言、public_web 搜索语言与 ccTLD 过滤、名录查询的国家名、网站画像按 ICP 市场回退的本国）：country / iso_country / buyer_country 里的「DACH」，以及只有 region 时的「DACH」，都展开为三国，效果与直接写「德国、奥地利、瑞士」相同。
+  - `vocab.ts` 的查表只认表自己的键（`Object.hasOwn`）：地区查找每个计划、每条查询都要走，模型给出「constructor」「__proto__」这类词时原本会取到对象原型上的属性，`targetCountries` 因此抛 TypeError；旧的行业、国家、OSM 查找在同样输入下会把函数当成码返回。
+  - 已有国家的映射与行为不变：单测逐条钉住原有 18 个国家词及国家码集合只新增五个。
+- 测试：
+  - 新增与改写的单测分布在 `vocab.spec.ts`、`search-localization.spec.ts`、`icp-to-cpv.spec.ts`、`icp.service.spec.ts`（规划器级：目标市场「DACH区域」→ 提示词要求德语关键词，TED 与 openFDA 冷路径收到 DE、AT、CH）与 `public-web-raw-governance.spec.ts`（「Österreich」→ AT、「ch」→ CH，原先「Österreich」被当作未知国家）。
+  - 红灯：实现前这 5 个文件 40 项失败；实现后 177 项全过。查表加固另加 5 项（原型属性名），加固前其中 3 项失败（一项是 `targetCountries` 抛 TypeError），加固后 5 个文件 182 项全过。
+- 未做（留给国家包）：
+  - `search-localization.ts` 的 10 国表与 `vocab.ts` 的两张国家表仍各自维护。
+  - 执行查询时的 taxonomy 归一（`queryTaxonomyTerms` → 单值 `_countryQid`）、`wikidata.provider` 的 `mapCountry` 与 OSM 的 `REGION_OSM_AREA` 都只取一个国家，「DACH」在那里仍只落到一国；多国需要改这些源的查询形态。若 `term_alias` 里已有模型沉淀的地区词别名，本项不清理：列表路径先展开、不再查它，单值路径仍会命中它。
+  - 未在 xin 上重新生成查询计划（需要模型调用并写开发库），留到部署后的验收。
+
 ## 2026-10-11 · Never plan or route a discovery source without governed lineage (lineage gate)
 
 - 起因：#631 激活受治理公司物化后，带 v1 标记的 run 要求每条计划查询都有受治理回执，否则在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下（BI-30 条目的「未做」已记）。公司发现源里只有 `public_web`、`directory`、`trade_fair` 声明了受治理公司血缘（`companyResultLineage`），`wikidata`、`openstreetmap`、`ted`、`openfda` 没有。xin 上这四个源都是 DISABLED，但只要其中一个被改成 ENABLED，规划器就会为它出查询（TED/openFDA 还会经冷路径注入），执行时它走 legacy 路径、不写受治理回执，整个 run 卡在物化。
