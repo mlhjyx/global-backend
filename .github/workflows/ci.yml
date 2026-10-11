@@ -379,6 +379,17 @@ jobs:
           pnpm --filter @global/db exec prisma migrate deploy
           pnpm --filter @global/api exec vitest run src/prisma/app-user-table-privileges.postgres.spec.ts
 
+      # The operator sanctions refresh writes the official lists through the refresh service's
+      # owner transaction: entities only, refresh metadata updated, status untouched, a repeat
+      # changes nothing, a failed write rolls back, app_user is refused. Synthetic lists, no
+      # network; the database was migrated by the step above and the suite removes its rows.
+      - name: Sanctions operator refresh on PostgreSQL
+        env:
+          SANCTIONS_OPERATOR_REFRESH_DATABASE_TEST: "1"
+          SANCTIONS_OPERATOR_REFRESH_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          SANCTIONS_OPERATOR_REFRESH_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+        run: pnpm --filter @global/api exec vitest run src/sanctions/sanctions-operator-refresh.postgres.spec.ts
+
       # Release B of governed Discovery company materialization needs a database that has never
       # been activated, so it runs on its own empty PostgreSQL (same pinned image, loopback only,
       # removed afterwards). The suite migrates it to the release before activation, proves a v1

@@ -89,7 +89,9 @@ import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
  *  - robots.txt 抓取（adapters/robots.ts）——合规探测本身；
  *  - DNS 解析（resolveMx/lookup，net-guard/digital-footprint/email-verify）——非 HTTP，SSRF 护栏原语；
  *  - 模型网关 new-api（model-gateway/*）——内部基座，预算/trace 由 ModelGateway 层强制；
- *  - outbox relay webhook（relay/outbox-relay.service.ts）——B 侧交付契约，由 outbox_delivery 账本治理。
+ *  - outbox relay webhook（relay/outbox-relay.service.ts）——B 侧交付契约，由 outbox_delivery 账本治理；
+ *  - 运营制裁名单刷新（sanctions/sanctions-operator-download.ts）——R4 冻结期的属主运营命令（2026-10-10 计划 B0）：
+ *    只下种子里的官方端点，经 guarded HTTP 与 ToolBroker 的 source_policy 判定，不产生预算回执。
  */
 
 const hash = (s: string): string =>

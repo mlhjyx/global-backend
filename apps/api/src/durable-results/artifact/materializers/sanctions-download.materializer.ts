@@ -32,7 +32,11 @@ const SAFE_XML_PARSER = new XMLParser({
   processEntities: false,
 });
 
-function validateSanctionsXml(xml: string): void {
+/**
+ * Sanctions list XML safety gate (no DOCTYPE or entity declarations, well formed, a single OFAC
+ * `sdnList` or EU `export` root). Shared with the operator refresh download (B0).
+ */
+export function validateSanctionsXml(xml: string): void {
   try {
     if (/<!DOCTYPE\b/i.test(xml) || /<!ENTITY\b/i.test(xml)) {
       return invalidGenericOperationArtifact();

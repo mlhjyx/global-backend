@@ -3,7 +3,10 @@ import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   EgressBlockedError,
+  PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS,
+  PUBLIC_HTTP_TIMEOUT_MAX_MS,
   requestPublicHttp,
+  type PinnedHttpExecutor,
   type PinnedPublicUrl,
   type PublicUrlResolver } from './guarded-http';
 
@@ -254,5 +257,43 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
     });
     expect(executePinned.mock.calls[1][1].headers).toEqual({ Accept: 'text/plain',
     });
+  });
+});
+
+describe('requestPublicHttp — per-hop deadline ceilings', () => {
+  const resolver: PublicUrlResolver = async (raw) => ({
+    url: new URL(raw),
+    ip: '93.184.216.34',
+    family: 4,
+    addresses: [{ address: '93.184.216.34', family: 4 }],
+  });
+  const answered = () =>
+    vi.fn<PinnedHttpExecutor>(async () => ({ status: 200, headers: {}, body: Buffer.from('ok'), text: 'ok' }));
+
+  it('holds every runtime caller to 30 seconds per hop, however long a timeout it asks for', async () => {
+    const executePinned = answered();
+    await requestPublicHttp('https://list.example/file.xml', { timeoutMs: 600_000 }, { resolver, executePinned });
+
+    expect(PUBLIC_HTTP_TIMEOUT_MAX_MS).toBe(30_000);
+    expect(executePinned.mock.calls[0]![1].timeoutMs).toBe(PUBLIC_HTTP_TIMEOUT_MAX_MS);
+  });
+
+  it('lets an owner-run operator download wait longer per hop, up to its own ceiling', async () => {
+    const executePinned = answered();
+    await requestPublicHttp(
+      'https://list.example/file.xml',
+      { timeoutMs: 1_000, operatorTimeoutMs: 600_000 },
+      { resolver, executePinned },
+    );
+    expect(executePinned.mock.calls[0]![1].timeoutMs).toBe(600_000);
+
+    const capped = answered();
+    await requestPublicHttp(
+      'https://list.example/file.xml',
+      { operatorTimeoutMs: 10 * PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS },
+      { resolver, executePinned: capped },
+    );
+    expect(capped.mock.calls[0]![1].timeoutMs).toBe(PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS);
+    expect(PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS).toBe(1_800_000);
   });
 });

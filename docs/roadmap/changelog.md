@@ -20,6 +20,34 @@
 - 部署：与下一版运行镜像同一维护窗口：先停运行时、备份数据库、确认没有发现 run 在途，再 `prisma migrate deploy`。激活不可逆（单例不可变），回退即不部署。当前镜像（`163ab0fa`）虽已写 v1 标记，但不含上述两处修复，激活后仍会在 canonicalize 失败；且运行时启动时核对最后完成的迁移名，所以激活迁移必须与携带它的镜像一起上线。
 - 未做：canonicalize 之后的环节（qualify 等）不在本项范围；部署与 xin 上的真实 run 验收另行授权并记录。
 
+## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
+
+- 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。
+- 改动：
+  - 新运营命令 `apps/api/scripts/refresh-sanctions-lists.mts`（`--source=all` 或逗号列表、`--dry-run`、`--timeout-seconds`），逻辑在 `sanctions/sanctions-operator-refresh.ts` 与 `sanctions/sanctions-operator-download.ts`：
+    - 只用 `DATABASE_URL`（库属主）。连接角色是 `app_user`，或既非超级用户、又不拥有两张制裁表，就在读源和下载之前拒绝。
+    - 每个选中源的 `url`、`format` 必须与种子里的官方端点逐字一致（美国财政部 OFAC、欧盟 FSF），否则整次运行在下载前拒绝。source_policy 用 ToolBroker 自己的 `checkSourcePolicy` 判定，未登记、SUSPENDED、用途不符都拒绝。
+    - 下载经 guarded HTTP：只连公网地址，每一跳重新解析并钉住，最多 3 跳，32 MiB 上限，单跳截止默认 600 秒；最后一跳须为 https，媒体类型须为 XML，严格 UTF-8，再过 artifact 路径同一道 XML 安全检查。连接中断、超时、DNS 失败、HTTP 429/5xx 最多试 4 次（间隔 5、15、45 秒），其余失败不重试。
+    - 写入交给 `SanctionsRefreshService` 的无回执分支。新增 `refreshSourcesByKey`：不论状态刷新指定的源，逐源 fail-safe 与 `refreshAll` 相同。归一、内容摘要、撤下、版本与元数据更新全部复用，不写 `status`。
+    - `--dry-run` 下载、解析，用服务同一套纯函数算出将新增 / 更新 / 不变 / 撤下与收缩保护判定，打印每个源保留的实体数与按类型剔除的条数，不写库。
+  - `SanctionsRefreshService` 的无回执分支改为单个属主事务（`maxWait` 10 秒、`timeout` 10 分钟）。此前逐条直写，中途失败会留下半新半旧的名单。另导出 `sanctionsParserFor`、`sanctionsListVersion`、`sanctionsShrinkGuardTripped` 给 dry run 复用。
+  - 两个解析器多返回 `subjectTypes`：按 sdnType / subjectType 计数，只有数字，不含名字。OFAC Consolidated 与 SDN 同一 XML 结构，直接用 OFAC 解析器。
+  - `requestPublicHttp` 新增 `operatorTimeoutMs`：只有运营下载能把单跳截止设到 30 秒以上（上限 30 分钟）。工具与活动仍限 30 秒，有测试锁住。
+  - 导出 `SANCTIONS_SOURCE_SEEDS` 与物化器的 `validateSanctionsXml`；`source-tools.ts` 的「不经 Broker 的出网」例外清单加一行。
+  - 新 runbook `docs/backend/sanctions-operator-refresh.md`：运行命令、失败与重跑、单独的打开语句（SQL）与回退、新名单何时生效。
+- 新名单何时生效（没有加新机制）：只有 ENABLED 且有活跃实体的源进入筛查索引，刷新 DISABLED 的源对筛查没有影响。customer worker 每次 qualify 开始时重建索引；API 每 `SANCTIONS_INDEX_REBUILD_MS`（默认 1 小时）重建，要立即生效须重启 API。
+- 测试：
+  - 先写失败测试：解析器计数、HTTP 截止上限、服务事务与 `refreshSourcesByKey` 共 13 项失败，两个新模块的测试文件因模块不存在而失败；实现后全绿。之后加的重试 7 项同样先红后绿。
+  - 单测用合成 XML（名字全为虚构，含个人、船舶、飞机条目）：官方端点逐字比对与 10 种拒绝情形、属主守卫、参数解析、dry run 不写、计数、下载校验与重试、服务事务、不写 `status`。
+  - 真库测试 `sanctions-operator-refresh.postgres.spec.ts` 9 项，接进 CI 新步骤「Sanctions operator refresh on PostgreSQL」：拒绝 `app_user`；dry run 不写一行；只入实体、元数据更新、`status` 不变；同一名单重跑零增改撤；新版本的增改撤；写入末尾注入失败时整体回滚（去掉事务后此项与其后一项失败）；SUSPENDED 拒绝下载；失败后重跑恢复 DONE；runbook 的打开语句让 `app_user` 的筛查索引生效。
+  - 真实官方名单，写入一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据在 tmpfs，用完即删）：
+    - OFAC SDN 29,167,737 字节，发布日 2026-10-09，19,416 条，保留实体 10,018，剔除个人 7,497、船舶 1,559、飞机 342；
+    - OFAC Consolidated 1,062,957 字节，发布日 2026-09-14，481 条，保留 363，剔除个人 118；
+    - EU FSF 25,791,425 字节，生成日 2026-09-22，6,241 条，保留 1,776，剔除个人 4,465。
+    - 首次写入三源 DONE，`status` 仍为 DISABLED；每个源再跑一次都是零新增、零更新、零撤下。逐个核对 ID：库里没有一条个人、船舶或飞机条目。
+    - 把 xin 上 07-13 版的 SDN 行只读复制到一次性库后 dry run：将新增 319、更新 19、不变 9,680、撤下 111，收缩保护通过。随后写入，结果与 dry run 逐项相同（活跃 10,018 行，撤下的 111 行保留 07-13 版本号），再跑一次零变化。
+- 未做：没有在 xin 的 `global_dev` 上运行；运行与打开制裁门都待产品负责人批准。SDN 已到 32 MiB 上限的约 87%。本机经代理下载时 DNS 解析与连接偶尔失败（实测中出现过 `dns_lookup_failed` 与 `ECONNRESET`），已由重试与单源重跑覆盖。
+
 ## 2026-10-10 · Admit customer writes on their own dependencies, not platform worker availability
 
 - 起因：#545 把独立的 platform Worker 租约加进了整体 readiness 的硬组件，而全局写入守卫 `RuntimeWorkAdmissionGuard` 只认整体 readiness。所以 platform Worker 一不就绪（单独重启、换镜像后尚未重新就绪、R4 部署绑定到期、出网围栏重装），除平台控制面豁免外的全部客户侧写入都返回 503 `RUNTIME_ADMISSION_CLOSED`，包括 GrowthOS 签 Grant 前调用的 workspace 技术报价，以及删除请求、禁联这类保护性写入。而 platform Worker 只服务 `platform-automation` 命名空间（4 个 schedule 均 paused）；客户路径用的 `default` 命名空间、customer Worker、Outbox Relay 与 API 的 Temporal 客户端都不依赖它。产品负责人 2026-10-10 批准 D3 设计的推荐方案。
