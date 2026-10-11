@@ -5,8 +5,9 @@
 -- page carries a contact form.
 --
 -- Links only. No column holds an email address, a phone number or a name, and the CHECK
--- constraints admit green data only, the six kinds, https URLs without query, fragment, '@'
--- or whitespace, and the exact company-page patterns for the LinkedIn and X kinds. The
+-- constraints admit green data only, the six kinds, https URLs without query, fragment, '@',
+-- '%40' or whitespace, the exact company-page patterns for the LinkedIn and X kinds, and no
+-- LinkedIn, X or Twitter host for the four same-site kinds. The
 -- automatic path (provider company_contact) writes UNVERIFIED only; VALID and OPERATOR_REJECTED
 -- need updated_by, that is a person. The composite foreign key keeps a point on a company of
 -- the same workspace and removes it with the company; DSR erasure of a company deletes its
@@ -48,13 +49,16 @@ CREATE TABLE "company_contact_point" (
     AND strpos("value", '?') = 0
     AND strpos("value", '#') = 0
     AND strpos("value", '@') = 0
+    AND strpos(lower("value"), '%40') = 0
     AND "value" !~ '[[:space:]]'
   ),
+  -- The two social kinds have exact company-page shapes; the four same-site kinds may not point at
+  -- LinkedIn, X or Twitter at all, so no personal profile can be stored under another kind.
   CONSTRAINT "company_contact_point_social_value_check" CHECK (
     CASE "kind"
       WHEN 'linkedin_company_page' THEN "value" ~ '^https://www\.linkedin\.com/(company|showcase)/[a-z0-9]([a-z0-9-]{0,98}[a-z0-9])?$'
       WHEN 'x_company_account' THEN "value" ~ '^https://x\.com/[a-z0-9_]{1,15}$'
-      ELSE TRUE
+      ELSE "value" !~* '^https://([^/]*\.)?(linkedin\.com|x\.com|twitter\.com)(/|$)'
     END
   ),
   -- Every branch tests status_reason IS NOT NULL first: a NULL comparison would make the whole

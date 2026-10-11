@@ -330,6 +330,12 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL
       ['query string', { value: `${site}/kontakt?lang=de` }],
       ['fragment', { value: `${site}/kontakt#form` }],
       ['at sign', { value: `${site}/@kontakt` }],
+      // Built at runtime so the source holds no encoded at sign.
+      ['percent-encoded at sign', { value: `${site}/kontakt${'%'}${'40'}zz` }],
+      ['social host on a same-site kind', { value: 'https://www.linkedin.com/in/zz-sample-slug' }],
+      ['X host on a same-site kind', { kind: 'impressum_page', value: 'https://x.com/zzsample' }],
+      ['twitter.com host on a same-site kind', { kind: 'supplier_page', value: 'https://mobile.twitter.com/zzsample' }],
+      ['social host for the contact form', { kind: 'contact_form', value: 'https://www.linkedin.com/company/zz-sample' }],
       ['whitespace', { value: `${site}/kontakt seite` }],
       ['personal LinkedIn path', { kind: 'linkedin_company_page', value: 'https://www.linkedin.com/in/zz-sample-slug' }],
       ['LinkedIn host not normalised', { kind: 'linkedin_company_page', value: 'https://de.linkedin.com/company/zz-sample' }],

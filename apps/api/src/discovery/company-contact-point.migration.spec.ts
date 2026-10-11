@@ -83,6 +83,8 @@ describe('company_contact_point migration (BI-14)', () => {
       `strpos("value", '?') = 0`,
       `strpos("value", '#') = 0`,
       `strpos("value", '@') = 0`,
+      `strpos(lower("value"), '%40') = 0`,
+      `ELSE "value" !~* '^https://([^/]*\\.)?(linkedin\\.com|x\\.com|twitter\\.com)(/|$)'`,
       `WHEN 'linkedin_company_page' THEN "value" ~ '^https://www\\.linkedin\\.com/(company|showcase)/[a-z0-9]([a-z0-9-]{0,98}[a-z0-9])?$'`,
       `WHEN 'x_company_account' THEN "value" ~ '^https://x\\.com/[a-z0-9_]{1,15}$'`,
     ]) {
