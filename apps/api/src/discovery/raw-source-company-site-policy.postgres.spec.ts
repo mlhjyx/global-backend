@@ -65,7 +65,9 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
   let app: PrismaClient;
   const workspaceId = randomUUID();
   const runId = randomUUID();
-  const suffix = randomBytes(5).toString("hex");
+  // Starts with a letter: an all-digit suffix (about 1 run in 100) made `pumpen-<digits>.de` a
+  // phone-like run of 7+ digits, and the Raw contact check rejected every record of the file.
+  const suffix = `a${randomBytes(5).toString("hex")}`;
   const site = `pumpen-${suffix}.de`;
   const restoredProviders: Array<{ key: string; status: string | null }> = [];
 
