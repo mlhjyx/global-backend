@@ -4,6 +4,17 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-11 · Stop the dependency-delta canary from failing on a pipe race
+
+- 起因：非必需检查「production dependency delta · canary」在 #628 上报 `dependency-delta protocol bootstrap changed an untrusted path: apps/api/src/ai-tasks/task-registry.ts`，而 PR 的基线早已带新协议标记。`.github/workflows/supply-chain.yml` 在 `set -euo pipefail` 下把 `git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs"` 直接管道给 `grep -Fq`：grep 读到第一处匹配就退出，`git show` 还在写，于是被 SIGPIPE 杀掉（退出码 141）。pipefail 把整条管道判为失败，可信基线被误送进「协议自举」分支，任何改了白名单外文件的 PR 都会被拒。基线 verifier 越大，越容易撞上。
+- 改动：
+  - 先把 `git show` 写进 `$TRUSTED_VERIFIER`，再对文件做 `grep -Fq`；任一步失败才进自举分支。语义不变：基线没有该文件或没有协议标记时照旧走自举。
+  - `scripts/supply-chain-gates.spec.mjs`：原断言把有问题的管道写法逐字钉住，改为钉新写法。新增一项行为测试：从工作流里取出探测条件，在临时 git 仓库中用 `set -euo pipefail` 实跑。基线是 8 MiB、标记在首行的 verifier 时，连续 5 次都判为可信，写出的文件与基线逐字节相同；没有标记或没有该文件的基线判为自举。另加静态断言：工作流里不得出现管道接 `grep -q` 的写法。全仓工作流只有这一处。
+- 测试：
+  - 修改工作流前，新旧两项测试都失败；修改后 `node --test scripts/supply-chain-gates.spec.mjs` 27/27 通过。
+  - 本机对照：同一个 8 MiB 基线，旧的管道写法 20 次里 20 次误判为自举，新写法 0 次。
+- 未做：`ci.yml` 的 openapi 漂移检查里还有一处 `git diff … | head -100`。它只在已经要 `exit 1` 的报错分支里打印差异，不影响结论，没有改动。
+
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
 - 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。

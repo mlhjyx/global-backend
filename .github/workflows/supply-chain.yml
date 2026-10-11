@@ -67,9 +67,12 @@ jobs:
           git worktree add --detach "$TRUSTED_BASE_WORKTREE" "$PR_BASE_SHA"
           node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$TRUSTED_BASE_WORKTREE"
 
-          if git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" | grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL"; then
-            git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
-          else
+          # Probe the base verifier from a file, never through a pipe: under
+          # pipefail, a grep that quits on its first match makes git show die
+          # with SIGPIPE (141) when it has more to write, which sent trusted
+          # bases down the bootstrap path below at random.
+          if ! git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER" \
+            || ! grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL" "$TRUSTED_VERIFIER"; then
             # A self-hosting protocol bootstrap is admitted only when it cannot
             # change dependency inputs and changes no files beyond this narrow
             # workflow/verifier/test boundary. Once merged, every PR uses a
