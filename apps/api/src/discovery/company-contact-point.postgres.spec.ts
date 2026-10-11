@@ -189,15 +189,19 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL
       contactForm: `${site}/kontakt`,
       contactFormChecked: true,
     };
-    const write = (paths: typeof all) =>
-      inWorkspace(workspaceA, (tx) =>
+    // Each profile observes the site a minute after the previous one, as successive runs do.
+    let profiles = 0;
+    const write = (paths: typeof all) => {
+      profiles += 1;
+      return inWorkspace(workspaceA, (tx) =>
         persistCompanyContactPoints(tx, {
           workspaceId: workspaceA,
           companyId: company,
           observation: companyContactObservation(paths),
-          seenAt,
+          seenAt: new Date(seenAt.getTime() + profiles * 60_000),
         }),
       );
+    };
 
     await expect(write(all)).resolves.toEqual({ written: 6, removed: 0 });
     expect(await points(workspaceA, company)).toEqual(
@@ -232,6 +236,47 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL
     // Linked again: the automatic point comes back.
     await expect(write(all)).resolves.toEqual({ written: 6, removed: 0 });
     expect((await points(workspaceA, company)).every((point) => point.status === 'UNVERIFIED')).toBe(true);
+  });
+
+  it('never moves last_seen_at backwards when an older observation commits after a newer one', async () => {
+    const newer = new Date('2026-10-11T10:00:00.000Z');
+    const older = new Date('2026-10-11T08:00:00.000Z');
+    const paths = {
+      contactPage: `${site}/kontakt`,
+      impressumPage: `${site}/impressum`,
+      supplierPage: null as string | null,
+      linkedinCompanyPage: null,
+      xCompanyAccount: null,
+      contactForm: null,
+      contactFormChecked: false,
+    };
+    const write = (seenAt: Date, observed: typeof paths) =>
+      inWorkspace(workspaceA, (tx) =>
+        persistCompanyContactPoints(tx, {
+          workspaceId: workspaceA,
+          companyId: company,
+          observation: companyContactObservation(observed),
+          seenAt,
+        }),
+      );
+
+    // Two runs share the company: the one that observed later commits first and finds a new link.
+    await write(newer, { ...paths, supplierPage: `${site}/partner-werden` });
+    // The older observation commits second: no CHECK violation, no backwards move, and it does not
+    // remove what the newer observation saw.
+    await expect(write(older, paths)).resolves.toMatchObject({ removed: 0 });
+
+    const rows = await inWorkspace(workspaceA, (tx) =>
+      tx.companyContactPoint.findMany({
+        where: { companyId: company, kind: { in: ['contact_page', 'supplier_page'] }, status: 'UNVERIFIED' },
+        select: { kind: true, value: true, lastSeenAt: true },
+        orderBy: { kind: 'asc' },
+      }),
+    );
+    expect(rows).toEqual([
+      { kind: 'contact_page', value: `${site}/kontakt`, lastSeenAt: newer },
+      { kind: 'supplier_page', value: `${site}/partner-werden`, lastSeenAt: newer },
+    ]);
   });
 
   it('writes nothing for a SUPPRESSED company or one a domain suppression covers', async () => {

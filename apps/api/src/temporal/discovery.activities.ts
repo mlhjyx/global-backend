@@ -1517,6 +1517,8 @@ export function createDiscoveryActivities(deps: {
           }
           /* 单家画像失败不影响其余 */
         }
+        // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
+        const observedAt = new Date();
         if (subjectDenied) skippedSubjects += 1;
         else profiled += 1;
         if (profile && profile.tradeRoleSource === null) unclassified += 1;
@@ -1576,7 +1578,7 @@ export function createDiscoveryActivities(deps: {
                     workspaceId: args.workspaceId,
                     companyId: c.id,
                     observation: companyContactObservation(contactPaths),
-                    seenAt: new Date(nowMs),
+                    seenAt: observedAt,
                   })
                 : Promise.resolve(null),
               readback: async () => null,

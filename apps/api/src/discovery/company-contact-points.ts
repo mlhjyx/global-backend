@@ -157,7 +157,8 @@ export async function persistCompanyContactPoints(
     const row = existingByKey.get(key);
     if (!row || !automatic(row)) continue;
     const revive = row.status === 'INVALID' && row.statusReason === REMOVED_FROM_SITE;
-    // The where clause repeats what was read, so a concurrent change by a person wins.
+    // The where clause repeats what was read, so a concurrent change by a person wins, and only an
+    // observation at least as new as the stored one updates the row: last_seen_at never goes back.
     await tx.companyContactPoint.updateMany({
       where: {
         id: row.id,
@@ -165,6 +166,7 @@ export async function persistCompanyContactPoints(
         updatedBy: null,
         status: row.status,
         statusReason: row.statusReason,
+        lastSeenAt: { lte: args.seenAt },
       },
       data: {
         lastSeenAt: args.seenAt,
@@ -187,12 +189,15 @@ export async function persistCompanyContactPoints(
     .map((row) => row.id);
   let removed = 0;
   if (removedIds.length > 0) {
+    // Only points last seen before this observation: an older observation that commits after a
+    // newer one never removes what the newer one saw.
     const result = await tx.companyContactPoint.updateMany({
       where: {
         id: { in: removedIds },
         providerKey: COMPANY_CONTACT_PROVIDER_KEY,
         updatedBy: null,
         status: { not: 'INVALID' },
+        lastSeenAt: { lt: args.seenAt },
       },
       data: { status: 'INVALID', statusReason: REMOVED_FROM_SITE },
     });

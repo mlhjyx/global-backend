@@ -616,7 +616,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
         workspaceId, companyId, observation: companyContactObservation(paths), seenAt,
       })).toEqual({ written: 3, removed: 0 });
       expect(await persistCompanyContactPoints(tx, {
-        workspaceId, companyId, observation: companyContactObservation({ ...paths, impressumPage: null }), seenAt,
+        workspaceId, companyId, observation: companyContactObservation({ ...paths, impressumPage: null }),
+        seenAt: new Date(seenAt.getTime() + 60_000),
       })).toEqual({ written: 2, removed: 1 });
       // deletion.activities.ts eraseSubject: a company subject's points are deleted.
       const erased = await tx.companyContactPoint.deleteMany({ where: { companyId: { in: [companyId] } } });

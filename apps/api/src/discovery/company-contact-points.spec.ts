@@ -213,13 +213,20 @@ describe('persistCompanyContactPoints (BI-14)', () => {
       ],
       skipDuplicates: true,
     });
+    // lastSeenAt <= seenAt: an older observation committed after a newer one changes nothing.
     expect(tx.companyContactPoint.updateMany.mock.calls).toEqual([
       [{
-        where: { id: 'p-contact', providerKey: 'company_contact', updatedBy: null, status: 'UNVERIFIED', statusReason: null },
+        where: {
+          id: 'p-contact', providerKey: 'company_contact', updatedBy: null, status: 'UNVERIFIED', statusReason: null,
+          lastSeenAt: { lte: SEEN_AT },
+        },
         data: { lastSeenAt: SEEN_AT, sourceKind: 'homepage', parserVersion: 'company_contact/v1' },
       }],
       [{
-        where: { id: 'p-impressum', providerKey: 'company_contact', updatedBy: null, status: 'INVALID', statusReason: 'REMOVED_FROM_SITE' },
+        where: {
+          id: 'p-impressum', providerKey: 'company_contact', updatedBy: null, status: 'INVALID', statusReason: 'REMOVED_FROM_SITE',
+          lastSeenAt: { lte: SEEN_AT },
+        },
         data: {
           lastSeenAt: SEEN_AT,
           sourceKind: 'homepage',
@@ -251,12 +258,14 @@ describe('persistCompanyContactPoints (BI-14)', () => {
 
     await expect(persist(tx, observation)).resolves.toEqual({ written: 4, removed: 1 });
 
+    // lastSeenAt < seenAt: a point a newer observation saw is never removed by an older one.
     expect(tx.companyContactPoint.updateMany).toHaveBeenLastCalledWith({
       where: {
         id: { in: ['p-old-contact'] },
         providerKey: 'company_contact',
         updatedBy: null,
         status: { not: 'INVALID' },
+        lastSeenAt: { lt: SEEN_AT },
       },
       data: { status: 'INVALID', statusReason: 'REMOVED_FROM_SITE' },
     });
