@@ -1871,7 +1871,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 0, suppressed: 1 }];
+          return [{ status: "APPLIED", companies: 0n, suppressed: 1n }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed C-TX query: ${sql}`);
@@ -1935,7 +1935,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     "admit", "admitStatus", "admitMode", "inspect", "inspectReplayNext",
     "inspectRunSummary", "inspectNextKind", "facts", "factsStatus", "factsEmpty",
     "factsSnapshot", "factsProductNaN", "factsTooMany", "append", "appendStatus", "appendOrdinal",
-    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount",
+    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount", "finalizeRunNumber",
     "materializationDenied", "priorMissing", "existingLink", "identityP2002", "identityOther",
   ])(
     "fails closed on malformed %s database output",
@@ -2000,6 +2000,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               || malformedStage === "finalizeQueryKey"
               ? { kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0 }
               : malformedStage === "finalizeRun" || malformedStage === "finalizeRunCount"
+                || malformedStage === "finalizeRunNumber"
                 ? { kind: "FINALIZE_RUN" }
                 : malformedStage === "inspectNextKind" ? { kind: "INVALID" }
                   : { kind: "BATCH", queryKey, queryOrdinal: 0, batchOrdinal: 0 };
@@ -2055,9 +2056,12 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
             }];
           }
           if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+            // PostgreSQL BIGINT reaches Prisma raw queries as bigint; a plain number is malformed.
             return malformedStage === "finalizeRun" ? [{}] : [{
-              status: "APPLIED", companies: malformedStage === "finalizeRunCount" ? -1 : 0,
-              suppressed: 0,
+              status: "APPLIED",
+              companies: malformedStage === "finalizeRunCount" ? -1n
+                : malformedStage === "finalizeRunNumber" ? 0 : 0n,
+              suppressed: 0n,
             }];
           }
           if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
@@ -2228,7 +2232,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 1, suppressed: 3 }];
+          return [{ status: "APPLIED", companies: 1n, suppressed: 3n }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed canonical query: ${sql}`);

@@ -379,6 +379,42 @@ jobs:
           pnpm --filter @global/db exec prisma migrate deploy
           pnpm --filter @global/api exec vitest run src/prisma/app-user-table-privileges.postgres.spec.ts
 
+      # Release B of governed Discovery company materialization needs a database that has never
+      # been activated, so it runs on its own empty PostgreSQL (same pinned image, loopback only,
+      # removed afterwards). The suite migrates it to the release before activation, proves a v1
+      # run is refused there, applies the activation with prisma migrate deploy, and proves the
+      # run then materializes, the activation row stays immutable and pre-C runs keep the legacy path.
+      - name: Discovery company materialization activation on PostgreSQL
+        shell: bash
+        env:
+          DISCOVERY_MATERIALIZATION_ACTIVATION_DATABASE_TEST: "1"
+          DISCOVERY_MATERIALIZATION_ACTIVATION_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5433/discovery_materialization_activation_test
+          DISCOVERY_MATERIALIZATION_ACTIVATION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5433/discovery_materialization_activation_test
+        run: |
+          set -euo pipefail
+          container="discovery-materialization-activation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --rm --name "$container" -p 127.0.0.1:5433:5432 \
+            --tmpfs /var/lib/postgresql/data:rw,nosuid,size=1g \
+            -e POSTGRES_USER=global -e POSTGRES_PASSWORD=global-test-only \
+            -e POSTGRES_DB=discovery_materialization_activation_test \
+            pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b >/dev/null
+          ready=0
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" pg_isready -h 127.0.0.1 -U global -d discovery_materialization_activation_test >/dev/null 2>&1; then
+              ready=$((ready + 1))
+              if [[ "$ready" -ge 2 ]]; then break; fi
+            else
+              ready=0
+            fi
+            sleep 1
+          done
+          if [[ "$ready" -lt 2 ]]; then
+            echo "::error::activation PostgreSQL did not become ready"
+            exit 1
+          fi
+          pnpm --filter @global/api exec vitest run src/discovery/discovery-company-materialization-activation.postgres.spec.ts
+
       - name: Evaluate Copy fixed-source impact
         id: copy-impact
         run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"

@@ -186,10 +186,11 @@ async function lockCompanyRawIdentity(
   workspaceId: string,
   rawRecordId: string,
 ): Promise<void> {
+  // Prisma cannot deserialize PostgreSQL void; cast only the result, not the lock key.
   await transaction.$queryRaw(
     Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
       ${`discovery-company-raw-identity:${workspaceId}:${rawRecordId}`}, 0
-    ))`,
+    ))::text AS locked`,
   );
 }
 

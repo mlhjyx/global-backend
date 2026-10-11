@@ -99,6 +99,13 @@ function count(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {
   }
   return Number(value);
 }
+/** A PostgreSQL BIGINT column, which Prisma raw queries return as bigint. */
+function bigintCount(value: unknown): number {
+  if (typeof value !== 'bigint' || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
+  }
+  return Number(value);
+}
 function oneRow(value: unknown, keys: readonly string[]): Data {
   if (!Array.isArray(value) || types.isProxy(value) || value.length !== 1) {
     fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
@@ -376,8 +383,9 @@ function optionalText(value: unknown): string | undefined {
     identities.set(key, identity); identityKeys.add(identity.dedupeKey);
   }
   for (const identityKey of [...identityKeys].sort()) {
+    // Prisma cannot deserialize PostgreSQL void; cast only the result, not the lock key.
     await transaction.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
-      ${`discovery-company-identity:${input.workspaceId}:${identityKey}`},0))`);
+      ${`discovery-company-identity:${input.workspaceId}:${identityKey}`},0))::text AS locked`);
   }
   const canonicalByIdentity = new Map<string, Readonly<{
     id: string; dedupeKey: string; name: string; domain: string | null; status: string }> | null>();
@@ -523,8 +531,8 @@ async function finalizeDiscoveryCompanyMaterializationRun(
       fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
     }
     return Object.freeze({
-      companies: count(field(row, 'companies')),
-      suppressed: count(field(row, 'suppressed')),
+      companies: bigintCount(field(row, 'companies')),
+      suppressed: bigintCount(field(row, 'suppressed')),
     });
   });
 }
