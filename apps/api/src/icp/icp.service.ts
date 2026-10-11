@@ -13,9 +13,24 @@ import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
 import { qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
-import { resolveIcpToCpv, buildTedQuery, boundedTargetCountries, collectIndustryTerms } from '../discovery/icp-to-cpv';
-import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
+import {
+  resolveIcpToCpv,
+  buildTedQuery,
+  boundedTargetCountries,
+  collectIndustryTerms,
+  TED_QUERY_SOURCE,
+} from '../discovery/icp-to-cpv';
+import { resolveIcpToFda, buildFdaQuery, FDA_QUERY_SOURCE } from '../discovery/icp-to-fda';
 import { withIcpTradeRole } from '../discovery/icp-trade-role';
+import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
+import {
+  hasPlannableSource,
+  isSourceEnabled,
+  plannerSourcePrompt,
+  routePlannerQueries,
+  scaleEstimatedVolume,
+  withDroppedQueryNote,
+} from '../discovery/plan-query-sources';
 import { searchLanguagesForMarkets, type SearchLanguage } from '../discovery/search-localization';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
@@ -102,6 +117,7 @@ export class IcpService {
     private readonly gateway: ModelGateway,
     private readonly runtimeTelemetry: LangfuseRuntimeTelemetryService,
     private readonly authority: ExecutionBudgetAuthorityService,
+    private readonly providers: DiscoveryProviderRegistry,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
   ) {}
 
@@ -502,13 +518,25 @@ export class IcpService {
       }),
     });
     assertFreshExecutionBudgetBinding(binding);
-    const icp = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
-    );
+    // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。
+    const { icp, enabledSources } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => ({
+      icp: await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
+      enabledSources: await this.providers.enabledCompanyDiscoverySources(tx),
+    }));
     if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
     if (icp.status !== 'ACTIVE') {
       throw new ConflictException({
         error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; query plans require an ACTIVE icp` },
+      });
+    }
+    // 没有任何可规划的已启用数据源时，计划只会是空的：在调用模型之前拒绝，不花钱。
+    // ted / openfda 只承载冷路径确定性生成的查询，单独启用它们不足以规划。
+    if (!hasPlannableSource(enabledSources)) {
+      throw new ConflictException({
+        error: {
+          code: 'NO_ENABLED_DISCOVERY_SOURCE',
+          message: 'no ENABLED discovery data source the query planner can use',
+        },
       });
     }
 
@@ -521,7 +549,7 @@ export class IcpService {
       exclusions: icp.exclusions,
       rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
     };
-    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}`;
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(enabledSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}`;
     const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,
@@ -541,13 +569,42 @@ export class IcpService {
     });
     const out = result.data;
 
+    // BI-30：只保留路由得到已启用数据源的查询，每条写明唯一的源（filters.source_hint = 源键）；
+    // 不可执行的查询按原因计数，记在首条规划查询的 rationale 里（与冷路径 warning 同处），人工门可见。
+    const modelQueries = (out.queries ?? []) as QueryPlanModelOutput['queries'];
+    const routing = routePlannerQueries(modelQueries, {
+      enabled: enabledSources,
+      registered: this.providers.companyDiscoverySources(),
+    });
+    // G3 5.3：ICP 的贸易角色（分销商/制造商）确定性写进未带角色的 planner 查询，关键词搜索据此构造角色词。
+    const planned = withDroppedQueryNote(
+      withIcpTradeRole(routing.queries, icp.companyAttributes),
+      routing.dropped,
+    );
+    // §8.7 稳健：行业词仍从模型给出的全部查询采集（与数据源开关无关，只作冷路径解析的输入）。
+    const industryTerms = collectIndustryTerms(icp.companyAttributes, modelQueries);
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    // G3 5.3：ICP 的贸易角色（分销商/制造商）确定性写进未带角色的 planner 查询，关键词搜索据此构造角色词。
-    const planned = withIcpTradeRole((out.queries ?? []) as QueryPlanModelOutput['queries'], icp.companyAttributes);
-    let queries = await this.injectTedQuery(ctx.workspaceId, icp, planned, binding);
+    // BI-30：TED 未启用时不解析、不注入（解析本身要花词表归一的模型调用）。
+    let queries = isSourceEnabled(enabledSources, TED_QUERY_SOURCE)
+      ? await this.injectTedQuery(icp, planned, industryTerms, binding)
+      : planned;
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
-    queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries, binding);
+    // BI-30：openFDA 未启用时同样不解析、不注入。
+    queries = isSourceEnabled(enabledSources, FDA_QUERY_SOURCE)
+      ? await this.injectFdaQuery(icp, queries, industryTerms, binding)
+      : queries;
+    if (queries.length === 0) {
+      // 模型给出的查询全落在不可用的数据源上，冷路径也没有注入：不存一份执行不了的计划。
+      throw new ConflictException({
+        error: {
+          code: 'NO_RUNNABLE_QUERIES',
+          message: 'the query plan has no query for an ENABLED discovery data source',
+        },
+      });
+    }
+    // 规划查询一条不剩、只有冷路径注入的查询时，移出说明记在计划的首条查询上。
+    if (planned.length === 0) queries = withDroppedQueryNote(queries, routing.dropped);
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')
@@ -566,7 +623,12 @@ export class IcpService {
           icpId,
           status: 'DRAFT', // 人工确认（→READY）后才可被 Discover 执行
           queries: queries as never,
-          estimatedVolume: Number.isFinite(out.estimated_volume) ? Math.round(out.estimated_volume) : null,
+          // BI-30：模型的估算覆盖它写的全部查询，按留下的比例折算，只计会执行的查询。
+          estimatedVolume: scaleEstimatedVolume(
+            out.estimated_volume,
+            modelQueries.length,
+            routing.keptModelQueries,
+          ),
         },
       }),
       });
@@ -583,14 +645,13 @@ export class IcpService {
    * CPV/国别全由确定性 crosswalk 解析注入，planner LLM 绝不臆造码。
    */
   private async injectTedQuery(
-    workspaceId: string,
     icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
     planned: QueryPlanModelOutput['queries'],
+    // §8.7 稳健：从 company_attributes + planner 各查询双路采集的行业词（拆逗号），防单字段缺失/合并串漏掉 TED 注入。
+    industryTerms: string[],
     binding: ExecutionBudgetBinding,
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
-    // §8.7 稳健：从 company_attributes + planner 各查询双路采集行业词（拆逗号），防单字段缺失/合并串漏掉 TED 注入。
-    const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
     const targetCountries = boundedTargetCountries(icp.targetMarkets);
     try {
       const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry, this.budgetStore);
@@ -618,13 +679,12 @@ export class IcpService {
    * planner LLM 绝不臆造码。fail-safe：解析失败 → 不阻断计划。
    */
   private async injectFdaQuery(
-    workspaceId: string,
     icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
     planned: QueryPlanModelOutput['queries'],
+    industryTerms: string[],
     binding: ExecutionBudgetBinding,
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
-    const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
     try {
       const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry, this.budgetStore);
       const fda = await resolveIcpToFda(

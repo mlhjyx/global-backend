@@ -36,8 +36,8 @@ async executeQuery(args) {
     if (prior.status === 'REPLAYED') return replayDiscoveryQueryExecution(prior);
     if (prior.status !== 'NOT_FOUND') throw new ExecutionControlError('DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD');
     if (prior.status === 'NOT_FOUND') await budgetStore.attestAuthorized();
-    await taxonomy.resolveMany();
     const selectedProviders = await providers.routeCompanyDiscovery();
+    if (selectedProviders.length) await taxonomy.resolveMany();
     const providerPlan = buildDiscoveryQueryProviderPlan({ selectedProviders });
     if (providerPlan.mode === 'governed') executeQtxProviderPlan(providerPlan);
     else executeLegacyProviderPlan(selectedProviders);
@@ -58,7 +58,9 @@ function assertActivityContract(source: string): void {
   expectOrdered(body, [
     'parseExecutionBudgetBinding', 'buildDiscoveryQueryLineageLookup',
     'attestQueryLineageV2', "status === 'REPLAYED'", 'attestAuthorized',
-    'taxonomy', 'routeCompanyDiscovery',
+    // BI-30: a query is routed before the taxonomy cold path, so a query
+    // whose source is off never spends taxonomy model calls.
+    'routeCompanyDiscovery', 'taxonomy',
   ]);
   expect(body).toMatch(/status\s*===\s*['"]NOT_FOUND['"][\s\S]{0,500}attestAuthorized/u);
   expect(body).toMatch(/mode\s*===\s*['"]governed['"][\s\S]{0,500}(?:Qtx|QTX|qtx)/u);
@@ -73,12 +75,12 @@ function assertActivityContract(source: string): void {
 describe('executeQuery governed query-lineage activity contract', () => {
   it('accepts the locked reference orchestration', () => assertActivityContract(reference));
 
-  it('attests immutable lookup identity before budget, taxonomy, routing, or provider work', () => {
+  it('attests immutable lookup identity before budget, routing, taxonomy, or provider work', () => {
     const body = executeQueryBody(activitySource);
     expectOrdered(body, [
       'parseExecutionBudgetBinding', 'buildDiscoveryQueryLineageLookup',
       'attestQueryLineageV2', "status === 'REPLAYED'", 'attestAuthorized',
-      'taxonomy', 'routeCompanyDiscovery',
+      'routeCompanyDiscovery', 'taxonomy',
     ]);
     expect(body).toMatch(/status\s*===\s*['"]REPLAYED['"][\s\S]{0,350}return/u);
     expect(body).toMatch(/prior\.budgetTruncated[\s\S]{0,120}return|return[\s\S]{0,120}prior\.budgetTruncated/u);

@@ -63,6 +63,32 @@ describe('workspace execution authority OpenAPI', () => {
     );
   });
 
+  it('documents the query-plan conflicts that come from the data-source kill switch (BI-30)', () => {
+    const document = JSON.parse(
+      readFileSync(
+        resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
+        'utf8',
+      ),
+    ) as {
+      paths: Record<string, { post?: { responses?: Record<string, { description?: string }> } }>;
+    };
+    const conflict =
+      document.paths['/api/v1/icps/{icpId}/query-plans']?.post?.responses?.['409']?.description ?? '';
+
+    for (const code of [
+      'EXECUTION_BUDGET_GRANT_REUSED',
+      'INVALID_STATE',
+      'NO_ENABLED_DISCOVERY_SOURCE',
+      'NO_RUNNABLE_QUERIES',
+    ]) {
+      expect(conflict).toContain(code);
+    }
+    // The other grant-bound operations keep their own 409 text.
+    expect(
+      document.paths['/api/v1/query-plans/{planId}/execute']?.post?.responses?.['409']?.description,
+    ).toBe('EXECUTION_BUDGET_GRANT_REUSED');
+  });
+
   it('publishes the required lawful-basis body and stable 403 code for contact discovery', () => {
     type OpenApiSchema = {
       required?: string[];

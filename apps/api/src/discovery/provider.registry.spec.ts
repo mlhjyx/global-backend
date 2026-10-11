@@ -102,6 +102,46 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     ]);
   });
 
+  it('lists every company discovery source a plan query can route to, in registration order (BI-30)', () => {
+    const sources = new DiscoveryProviderRegistry({ gateway: {} as ModelGateway })
+      .companyDiscoverySources();
+
+    expect(sources).toEqual([
+      { sourceClass: 'public_intelligence', providerKey: 'public_web' },
+      { sourceClass: 'industry_data', providerKey: 'public_web' },
+      { sourceClass: 'industry_data', providerKey: 'directory' },
+      { sourceClass: 'company_registry', providerKey: 'wikidata' },
+      { sourceClass: 'industry_data', providerKey: 'wikidata' },
+      { sourceClass: 'industry_data', providerKey: 'openstreetmap' },
+      { sourceClass: 'industry_data', providerKey: 'trade_fair' },
+      { sourceClass: 'public_intelligence', providerKey: 'ted' },
+      { sourceClass: 'public_intelligence', providerKey: 'openfda' },
+    ]);
+    // Contact, email and enrichment adapters are never plan query sources.
+    expect(sources.map((source) => source.providerKey)).not.toEqual(
+      expect.arrayContaining(['gleif']),
+    );
+    expect(
+      new DiscoveryProviderRegistry().companyDiscoverySources().map((s) => s.providerKey),
+    ).not.toContain('public_web');
+  });
+
+  it('reads the ENABLED company discovery sources from the data_provider kill switch (BI-30)', async () => {
+    const findMany = async (args: unknown) => {
+      expect(args).toEqual({ where: { status: 'ENABLED' }, select: { key: true } });
+      return [{ key: 'public_web' }, { key: 'gleif' }, { key: 'ted' }];
+    };
+
+    const enabled = await new DiscoveryProviderRegistry({ gateway: {} as ModelGateway })
+      .enabledCompanyDiscoverySources({ dataProvider: { findMany } } as never);
+
+    expect(enabled).toEqual([
+      { sourceClass: 'public_intelligence', providerKey: 'public_web' },
+      { sourceClass: 'industry_data', providerKey: 'public_web' },
+      { sourceClass: 'public_intelligence', providerKey: 'ted' },
+    ]);
+  });
+
   it('writes the company-site seed as one brace-free create body, as the provider registry parse expects', () => {
     // scripts/governance-evidence-provider-contracts.mjs reads each `create: {...}` without nested
     // braces and keeps only bodies with a provider key, class and status, so this one stays out.
