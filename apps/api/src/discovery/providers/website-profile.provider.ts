@@ -250,7 +250,11 @@ export class WebsiteProfileProvider {
     return result.data.text ?? '';
   }
 
-  /** Rendered HTML of one page; empty when robots disallow it. robots and source_policy apply in the tool. */
+  /**
+   * Rendered HTML of one page; empty when robots disallow it. robots and source_policy apply in
+   * the tool, whose durable result keeps the HTML as a PERSONAL_DATA artifact for 24 hours under
+   * the company subject (as for the homepage and Impressum fetches; DSR erasure covers it).
+   */
   private async render(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
     const result = await this.deps.broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
       'crawl4ai.render',

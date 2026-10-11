@@ -7,8 +7,11 @@ import { canonicalizeSuppressionValue } from '../suppression-value';
  * homepage the website profile has already fetched, and whether its rendered contact
  * page carries a contact form. Pure and deterministic: no network, no model.
  *
- * Only links are kept, never page text. No email address, phone number or person
- * name is parsed, normalised or stored: a same-site link is kept only on the bare
+ * Only links are stored as contact points, never page text. (The pages themselves, the
+ * homepage and Impressum fetches and the contact-page render, are the tools' durable
+ * results: PERSONAL_DATA artifacts kept for 24 hours and covered by DSR erasure, like every
+ * website-profile fetch.) No email address, phone number or person name is parsed,
+ * normalised or stored by this module: a same-site link is kept only on the bare
  * company domain or its `www.` host and only when every path segment consists of
  * known words or short numbers (at most six digits in the whole path), so a stored
  * link cannot carry free text from the page; a social link must match its exact
@@ -438,8 +441,10 @@ function isContactFormMarkup(block: string): boolean {
 }
 
 /**
- * Whether rendered HTML carries a contact form. Reads markup only: never fills in or
- * submits a form, and keeps nothing of the page.
+ * Whether rendered HTML carries a contact form. Reads markup only and never fills in or
+ * submits a form. This function keeps nothing of the page; the render's durable result
+ * keeps the contact page HTML as a PERSONAL_DATA artifact for 24 hours (the Impressum
+ * fetch does the same), which DSR erasure covers.
  */
 export function hasContactForm(html: string): boolean {
   if (typeof html !== 'string' || !html) return false;
