@@ -11,6 +11,7 @@ import {
 } from './providers/provider-output-error';
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from './new-api-request-bound-settlement';
 import { createProviderTransportObservation } from './provider-transport-observation';
+import { restoreModelResultFromReplay } from '../durable-results/model-result-replay';
 
 /**
  * D14 (owner decision 2026-10-11): the only acquisition upstream (new-api
@@ -48,6 +49,27 @@ function stubUpstream(text: string): void {
   );
 }
 
+/** One upstream body per physical wire, in order (first call, then repair). */
+function stubUpstreamSequence(texts: readonly string[]): void {
+  const fetchMock = vi.fn();
+  for (const text of texts) {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () => text,
+      json: async () => JSON.parse(text),
+    });
+  }
+  vi.stubGlobal('fetch', fetchMock);
+}
+
+const oneChunk = (model: string, content: string) =>
+  sse([
+    { model, choices: [{ delta: { content }, finish_reason: 'stop' }] },
+    { model, choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+  ]);
+
 const flashStream = (usage = { prompt_tokens: 11, completion_tokens: 7 }) =>
   sse([
     { model: FLASH_BUILD, choices: [{ delta: { content: '{"a":' } }] },
@@ -83,7 +105,12 @@ function spyBudgetStore(reservedMicrousd = 400_000n) {
       estimatedMicrousd: reservedMicrousd,
       replay: false,
     })),
-    settle: vi.fn(async (_reservation: unknown, observed: bigint) => ({
+    settle: vi.fn(async (
+      _reservation: unknown,
+      observed: bigint,
+      _projection?: unknown,
+      _receiptFacts?: unknown,
+    ) => ({
       chargedMicrousd: observed < reservedMicrousd ? observed : reservedMicrousd,
       observedMicrousd: observed,
       capVariance: observed > reservedMicrousd,
@@ -149,7 +176,7 @@ describe('RouterModelGateway — deployment-approved model substitutes (D14)', (
       expect.objectContaining({
         status: 'OK',
         model: FLASH,
-        modelSubstitution: { requestedModel: PRO },
+        modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] },
       }),
     );
   });
@@ -186,7 +213,7 @@ describe('RouterModelGateway — deployment-approved model substitutes (D14)', (
 
     expect(out).toMatchObject({ data: 'ok', model: FLASH });
     expect(trace.record).toHaveBeenCalledWith(
-      expect.objectContaining({ model: FLASH, modelSubstitution: { requestedModel: PRO } }),
+      expect.objectContaining({ model: FLASH, modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] } }),
     );
   });
 
@@ -270,10 +297,47 @@ describe('RouterModelGateway — deployment-approved model substitutes (D14)', (
     expect(entry).not.toHaveProperty('modelSubstitution');
   });
 
-  it('settles a substituted call at no more than the reserved pro quote', async () => {
-    // 1,000,000 tokens price at 100 cents with the blended token rate, more
-    // than the 40-cent reservation for a two-wire structured call.
-    stubUpstream(flashStream({ prompt_tokens: 900_000, completion_tokens: 100_000 }));
+  it('prices a substituted call exactly like the same call answered by pro', async () => {
+    // 1,000,000 tokens price at 100 cents with the blended, model-agnostic
+    // token rate: more than the 40-cent reservation. The observed amount
+    // reaches the store unchanged, so its LEAST(observed, reserved) charge,
+    // cap-variance flag and account exhaustion still apply.
+    const usage = { prompt_tokens: 900_000, completion_tokens: 100_000 };
+    const observedFor = async (stream: string): Promise<bigint> => {
+      stubUpstream(stream);
+      const budgetStore = spyBudgetStore(400_000n);
+      const { gateway } = gatewayWith(
+        streamingProvider(),
+        'deepseek-v4-pro>deepseek-v4-flash',
+        budgetStore,
+      );
+      await gateway.generateStructured(structured(), ctx());
+      expect(budgetStore.settle).toHaveBeenCalledTimes(1);
+      return budgetStore.settle.mock.calls[0][1] as bigint;
+    };
+
+    const flash = await observedFor(flashStream(usage));
+    const pro = await observedFor(
+      sse([
+        { model: 'deepseek.deepseek-v4-pro', choices: [{ delta: { content: '{"a":1}' }, finish_reason: 'stop' }] },
+        { model: PRO, choices: [], usage },
+      ]),
+    );
+
+    expect(flash).toBe(1_000_000n);
+    expect(flash).toBe(pro);
+  });
+
+  it('records a durable receipt charge no larger than the reserved quote', async () => {
+    stubUpstream(
+      sse([
+        {
+          model: FLASH_BUILD,
+          choices: [{ delta: { content: '{"industry":"i","summary":"s"}' }, finish_reason: 'stop' }],
+        },
+        { model: FLASH_BUILD, choices: [], usage: { prompt_tokens: 900_000, completion_tokens: 100_000 } },
+      ]),
+    );
     const budgetStore = spyBudgetStore(400_000n);
     const { gateway } = gatewayWith(
       streamingProvider(),
@@ -281,14 +345,28 @@ describe('RouterModelGateway — deployment-approved model substitutes (D14)', (
       budgetStore,
     );
 
-    await gateway.generateStructured(structured(), ctx());
+    await gateway.generateStructured(
+      {
+        task: 'company_understanding.extract_profile',
+        prompt: 'p',
+        model: PRO,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['industry', 'summary'],
+          properties: { industry: { type: 'string' }, summary: { type: 'string' } },
+        },
+      },
+      ctx({ durableResultSchema: 'understanding-profile/v1' }),
+    );
 
-    expect(budgetStore.settle).toHaveBeenCalledTimes(1);
-    const observed = budgetStore.settle.mock.calls[0][1] as bigint;
-    expect(observed).toBeLessThanOrEqual(400_000n);
+    expect(budgetStore.settle.mock.calls[0][3]).toMatchObject({
+      costBasis: 'token_pricing',
+      usage: { chargedMicrousd: '400000', upperBoundMicrousd: '400000' },
+    });
   });
 
-  it('records the substitute on an unusable substituted answer and never charges above the reservation', async () => {
+  it('records the substitute on an unusable substituted answer and leaves the overrun to the store', async () => {
     stubUpstream(
       sse([
         { model: FLASH_BUILD, choices: [{ delta: { content: '{"a":' } }] },
@@ -309,10 +387,55 @@ describe('RouterModelGateway — deployment-approved model substitutes (D14)', (
       expect.objectContaining({
         status: 'ERROR',
         model: FLASH,
-        modelSubstitution: { requestedModel: PRO },
+        modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] },
       }),
     );
-    expect(budgetStore.settle.mock.calls[0][1] as bigint).toBeLessThanOrEqual(400_000n);
+    // Same blended token price as any other call; the store, not the gateway,
+    // caps the charge and flags the overrun.
+    expect(budgetStore.settle.mock.calls[0][1]).toBe(1_000_000n);
+  });
+
+  it('projects and replays the substitute, not pro, as the durable result', async () => {
+    stubUpstream(
+      sse([
+        {
+          model: FLASH_BUILD,
+          choices: [{ delta: { content: '{"industry":"i","summary":"s"}' }, finish_reason: 'stop' }],
+        },
+        { model: FLASH_BUILD, choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      ]),
+    );
+    const budgetStore = spyBudgetStore();
+    const { gateway } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+      budgetStore,
+    );
+
+    await gateway.generateStructured(
+      {
+        task: 'company_understanding.extract_profile',
+        prompt: 'p',
+        model: PRO,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['industry', 'summary'],
+          properties: { industry: { type: 'string' }, summary: { type: 'string' } },
+        },
+      },
+      ctx({ durableResultSchema: 'understanding-profile/v1' }),
+    );
+
+    const projection = budgetStore.settle.mock.calls[0][2];
+    expect(projection).toBeDefined();
+    expect(
+      restoreModelResultFromReplay('understanding-profile/v1', projection),
+    ).toMatchObject({
+      model: FLASH,
+      reportedModel: FLASH_BUILD,
+      modelResolutionSource: 'upstream_response',
+    });
   });
 
   it('fails startup on a malformed setting', () => {
@@ -425,6 +548,173 @@ describe('RouterModelGateway — identity stays exact outside the approved subst
     );
 
     await expectMismatch(gateway.generateStructured(structured(SUBSTITUTABLE_TASK, FLASH), ctx()));
+  });
+});
+
+describe('RouterModelGateway — operations a substitute answered in part', () => {
+  const PRO_ALIAS = 'deepseek.deepseek-v4-pro';
+
+  it('flags a Flash first answer even when the pro repair produced the result', async () => {
+    stubUpstreamSequence([oneChunk(FLASH_BUILD, '{"b":1}'), oneChunk(PRO_ALIAS, '{"a":1}')]);
+    const { gateway, trace } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    const out = await gateway.generateStructured(structured(), ctx());
+
+    // The returned answer is pro's; the operation still used a Flash wire.
+    expect(out).toMatchObject({ data: { a: 1 }, model: PRO, callCount: 2 });
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'OK',
+        model: PRO,
+        modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] },
+      }),
+    );
+  });
+
+  it('labels the result Flash when the Flash repair produced it', async () => {
+    stubUpstreamSequence([oneChunk(PRO_ALIAS, '{"b":1}'), oneChunk(FLASH_BUILD, '{"a":2}')]);
+    const { gateway, trace } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    await expect(gateway.generateStructured(structured(), ctx())).resolves.toMatchObject({
+      data: { a: 2 },
+      model: FLASH,
+    });
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: FLASH,
+        modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] },
+      }),
+    );
+  });
+
+  it('flags a failed repair whose first answer came from Flash', async () => {
+    stubUpstreamSequence([oneChunk(FLASH_BUILD, '{"b":1}'), oneChunk(PRO_ALIAS, '{"b":2}')]);
+    const { gateway, trace } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    await expect(gateway.generateStructured(structured(), ctx())).rejects.toMatchObject({
+      reasonCode: 'STRUCTURED_OUTPUT_SCHEMA_INVALID_AFTER_REPAIR',
+    });
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        model: PRO,
+        modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] },
+      }),
+    );
+  });
+
+  it('names Flash on a stream that broke after Flash-named chunks', async () => {
+    stubUpstream(
+      `data: ${JSON.stringify({ model: FLASH_BUILD, choices: [{ delta: { content: '{"a":' } }] })}\n\n` +
+        'data: {not json\n\n',
+    );
+    const { gateway, trace } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    await expect(gateway.generateStructured(structured(), ctx())).rejects.toMatchObject({
+      reasonCode: 'CHAT_COMPLETIONS_STREAM_LINE_INVALID',
+      model: FLASH,
+    });
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        model: FLASH,
+        modelSubstitution: { requestedModel: PRO, substituteModels: [FLASH] },
+      }),
+    );
+  });
+
+  it('keeps a broken stream under the requested model when the setting is off', async () => {
+    stubUpstream(
+      `data: ${JSON.stringify({ model: FLASH_BUILD, choices: [{ delta: { content: '{"a":' } }] })}\n\n` +
+        'data: {not json\n\n',
+    );
+    const { gateway, trace } = gatewayWith(streamingProvider());
+
+    await expect(gateway.generateStructured(structured(), ctx())).rejects.toMatchObject({
+      reasonCode: 'CHAT_COMPLETIONS_STREAM_LINE_INVALID',
+      model: PRO,
+    });
+    const entry = trace.record.mock.calls[0][0] as Record<string, unknown>;
+    expect(entry.model).toBe(PRO);
+    expect(entry).not.toHaveProperty('modelSubstitution');
+  });
+
+  it('drops substitutes a context only inherits', async () => {
+    stubUpstream(flashStream());
+    const { gateway } = gatewayWith(streamingProvider());
+    const inherited = Object.assign(
+      Object.create({ modelIdentitySubstitutes: [FLASH] }) as AiContext,
+      { workspaceId: WORKSPACE, runId: 'run-1' },
+    );
+
+    const error = await gateway
+      .generateStructured(structured('adhoc.unregistered_task'), inherited)
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toBeInstanceOf(ProviderIdentityError);
+  });
+});
+
+describe('OpenAICompatibleProvider — substitutes outside the gateway', () => {
+  it('honours only repository-reviewed substitutes even if a context carries others', async () => {
+    stubUpstream(
+      sse([{ model: 'gemini-3.5-flash', choices: [{ delta: { content: '{"a":1}' }, finish_reason: 'stop' }] }]),
+    );
+
+    const error = await streamingProvider()
+      .generateStructured(
+        { task: 't', prompt: 'p', schema: {}, model: PRO },
+        ctx({ modelIdentitySubstitutes: ['gemini-3.5-flash'] }),
+      )
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toBeInstanceOf(ProviderIdentityError);
+  });
+
+  it('accepts the exact substitute name on the Responses transport but not the chat-only build alias', async () => {
+    const responses = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'default-model',
+      modelTransports: { [PRO]: 'openai-responses' },
+    });
+    const body = (model: string) =>
+      JSON.stringify({
+        model,
+        status: 'completed',
+        output: [{ content: [{ type: 'output_text', text: '{"a":1}' }] }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    const call = () =>
+      responses.generateStructured(
+        { task: 't', prompt: 'p', schema: {}, model: PRO, maxTokens: 100 },
+        ctx({ modelIdentitySubstitutes: [FLASH] }),
+      );
+
+    stubUpstream(body(FLASH));
+    await expect(call()).resolves.toMatchObject({ model: FLASH, reportedModel: FLASH });
+
+    stubUpstream(body(FLASH_BUILD));
+    await expect(call()).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isReviewedModelSubstitution,
   MODEL_IDENTITY_SUBSTITUTES_ENV,
   parseModelIdentitySubstitutes,
 } from './model-identity-substitutes';
@@ -43,6 +44,15 @@ describe('MODEL_IDENTITY_SUBSTITUTES deployment setting (D14, 2026-10-11)', () =
     expect(() =>
       (substitutes as Map<string, readonly string[]>).set('x', ['y']),
     ).toThrow();
+    expect(() => Map.prototype.set.call(substitutes, 'x', ['y'])).toThrow(TypeError);
+    expect(() => Map.prototype.clear.call(substitutes)).toThrow(TypeError);
+    expect(substitutes.size).toBe(1);
+  });
+
+  it('reports reviewed substitutions only', () => {
+    expect(isReviewedModelSubstitution('deepseek-v4-pro', 'deepseek-v4-flash')).toBe(true);
+    expect(isReviewedModelSubstitution('deepseek-v4-flash', 'deepseek-v4-pro')).toBe(false);
+    expect(isReviewedModelSubstitution('constructor', 'deepseek-v4-flash')).toBe(false);
   });
 
   it.each([

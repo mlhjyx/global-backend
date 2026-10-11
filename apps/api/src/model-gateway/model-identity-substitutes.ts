@@ -5,8 +5,9 @@ import { isReviewedModelIdentity } from './model-identity';
  * (owner decision D14, 2026-10-11). The acquisition gateway's only upstream
  * sometimes answers deepseek-v4-pro requests with DeepSeek V4 Flash. Instead
  * of failing those calls, a deployment may accept the substitute for registry
- * tasks that opt in (`acceptsModelSubstitute`). Every accepted call is then
- * recorded under the substitute's name, never the requested one.
+ * tasks that opt in (`acceptsModelSubstitute`). An answer the substitute
+ * produced is recorded under the substitute's name, never the requested one,
+ * and the trace flags every call a substitute answered.
  *
  * Format: comma-separated `requested>accepted` pairs, e.g.
  * `MODEL_IDENTITY_SUBSTITUTES=deepseek-v4-pro>deepseek-v4-flash`.
@@ -29,26 +30,53 @@ const REVIEWED_MODEL_SUBSTITUTIONS: Readonly<Record<string, readonly string[]>> 
 const MAX_SETTING_LENGTH = 1024;
 const MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
 
-/** A Map whose entries are fixed at construction; writes throw. */
-class FrozenMap<K, V> extends Map<K, V> {
+/**
+ * Read-only view over a private Map. It is not itself a Map, so neither its
+ * own API nor Map.prototype.set/delete/clear can change the entries.
+ */
+class FrozenMap<K, V> implements ReadonlyMap<K, V> {
+  readonly #entries: Map<K, V>;
+
   constructor(entries: Iterable<readonly [K, V]> = []) {
-    super();
-    for (const [key, value] of entries) {
-      Map.prototype.set.call(this, key, value);
-    }
+    this.#entries = new Map(entries);
     Object.freeze(this);
   }
 
-  override set(): never {
-    throw new TypeError('MODEL_IDENTITY_SUBSTITUTES_IMMUTABLE');
+  get size(): number {
+    return this.#entries.size;
   }
 
-  override delete(): never {
-    throw new TypeError('MODEL_IDENTITY_SUBSTITUTES_IMMUTABLE');
+  get(key: K): V | undefined {
+    return this.#entries.get(key);
   }
 
-  override clear(): never {
-    throw new TypeError('MODEL_IDENTITY_SUBSTITUTES_IMMUTABLE');
+  has(key: K): boolean {
+    return this.#entries.has(key);
+  }
+
+  forEach(
+    callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void,
+    thisArg?: unknown,
+  ): void {
+    this.#entries.forEach((value, key) =>
+      callbackfn.call(thisArg, value, key, this),
+    );
+  }
+
+  entries(): MapIterator<[K, V]> {
+    return this.#entries.entries();
+  }
+
+  keys(): MapIterator<K> {
+    return this.#entries.keys();
+  }
+
+  values(): MapIterator<V> {
+    return this.#entries.values();
+  }
+
+  [Symbol.iterator](): MapIterator<[K, V]> {
+    return this.#entries[Symbol.iterator]();
   }
 }
 
@@ -56,6 +84,19 @@ const NO_SUBSTITUTES: ModelIdentitySubstitutes = new FrozenMap<
   string,
   readonly string[]
 >();
+
+/** Whether this repository has reviewed `substitute` standing in for `requested`. */
+export function isReviewedModelSubstitution(
+  requested: string,
+  substitute: string,
+): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(
+      REVIEWED_MODEL_SUBSTITUTIONS,
+      requested,
+    ) && REVIEWED_MODEL_SUBSTITUTIONS[requested]!.includes(substitute)
+  );
+}
 
 function invalid(reason: string): never {
   throw new Error(`MODEL_IDENTITY_SUBSTITUTES_INVALID: ${reason}`);
@@ -85,7 +126,7 @@ export function parseModelIdentitySubstitutes(
     const requested = modelName(sides[0]!, 'requested');
     const substitute = modelName(sides[1]!, 'accepted');
     if (requested === substitute) invalid(`${requested} cannot substitute itself`);
-    if (!REVIEWED_MODEL_SUBSTITUTIONS[requested]?.includes(substitute)) {
+    if (!isReviewedModelSubstitution(requested, substitute)) {
       invalid(`substitution ${requested}>${substitute} is not reviewed`);
     }
     const list = accepted.get(requested) ?? [];

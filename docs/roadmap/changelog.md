@@ -12,13 +12,14 @@
   - 任务合同新增 `acceptsModelSubstitute`，只标在 11 个获客任务上；`site_builder.brand_profile` 与注册表外的任务保持精确身份。获客任务照旧请求 `deepseek-v4-pro`。
   - `model-identity.ts` 新增审查过的别名 `deepseek-v4-flash` ← `deepseek-ai/DeepSeek-V4-Flash-0731`（仅 chat-completions），并注明观察日期。这个别名本身只证明 Flash 身份，不让 Flash 冒充 pro 请求。
   - Router（受围栏保护，复核见 `docs/evidence/execution-authority-fence-review-20261001.md`）：只在非付费路径、只对文本与结构化调用、只在任务标了 `acceptsModelSubstitute` 且部署设置给出该请求模型的替代时，把允许的替代身份经 `AiContext.modelIdentitySubstitutes` 交给 provider；调用方自带的该字段一律丢弃，付费路径从不替代。
-  - provider：上游报告的每个名字都必须解析为请求模型或允许的替代，否则照旧 `MODEL_IDENTITY_MISMATCH`。响应里任何一处名字解析为替代（包括内容块未署名、只有收尾块署名的情形），结果就记为替代模型；同一响应出现两个不同替代则失败。结果的 `model` 是 `deepseek-v4-flash`，`reportedModel` 是上游原名。
-  - 记账：被替代的调用 `ai_trace.model` 与 `usage_ledger.meta.model` 记 Flash，两处 meta 另写 `requestedModel` 与 `modelSubstituted: true`；失败的被替代调用同样记 Flash。结算额不超过请求模型的预留（成功与失败两条路径都封顶），不会以 pro 名义记账。
+  - provider：上游报告的每个名字都必须解析为请求模型或允许的替代，否则照旧 `MODEL_IDENTITY_MISMATCH`。响应里任何一处名字解析为替代（包括内容块未署名、只有收尾块署名的情形），结果就记为替代模型；同一响应出现两个不同替代则失败；流在解析中途断掉时，已出现的 Flash 名同样让这次失败记为 Flash。provider 另外只认代码审查过的组合，付费上下文一律忽略替代。结果的 `model` 是 `deepseek-v4-flash`，`reportedModel` 是上游原名。
+  - 记账：只要一次调用里有任何一次物理请求由替代应答（包括结构化输出首调为 Flash、修复为 pro 的情形），`ai_trace.meta` 与 `usage_ledger.meta` 就写 `requestedModel`、`modelSubstituted: true` 与 `substituteModels`；`model` 列记产出返回答案（或失败答案）的模型，答案来自 Flash 时就是 Flash。定价与其他调用完全相同（provider 报价、模型无关的 token 混合价或按次上限，没有 pro 专属价格），观测额原样交给预算账本：账本按 `LEAST(观测, 预留)` 扣费，超出预留照常记 `cap_variance` 并耗尽该账户，替代不放宽这道闸。
   - Flash 在现有输出上限与超时下没有问题；网关 provider 只读 `prompt_tokens`、`completion_tokens`、正文与 `finish_reason`，不依赖 pro 才有的推理字段。
 - 测试：
   - 先写失败测试：新 `router-model-identity-substitution.spec.ts`、`model-identity-substitutes.spec.ts`，以及身份别名、trace 落库、注册表标记，共 13 项失败、配置模块因不存在而整文件失败；实现后全绿。「默认关闭、空设置、任务未标记、调用方自带替代、其他模型族、未审查的 Flash 名、反方向」这些仍须 `MODEL_IDENTITY_MISMATCH` 的用例在改动前后都通过。
-  - 集成测试用真实 provider 与模拟上游，覆盖流式与非流式、文本与结构化、混合署名、未署名内容、截断失败、结算封顶、启动失败，以及付费上下文即使带着替代也被拒。
-- 部署：默认关闭，镜像发布后行为不变。要开启，在运行时环境加 `MODEL_IDENTITY_SUBSTITUTES=deepseek-v4-pro>deepseek-v4-flash` 并重启 API 与 Worker；关闭即删除该行再重启。开启期间的跑测报告必须单独统计被替代的调用（`ai_trace.meta->>'modelSubstituted' = 'true'`），不能把它们算作 pro 的结果。
+  - 集成测试用真实 provider 与模拟上游，覆盖流式与非流式、文本与结构化、Responses 传输、混合署名、未署名内容、截断与流解析失败、首调与修复分属不同模型、定价与 pro 相同、持久回执扣费不超过预留、持久重放结果记 Flash、启动失败，以及付费上下文、继承来的替代字段、未审查组合都被拒。
+  - 独立只读复审第一轮指出：封顶观测额会让替代调用绕过账本的 `cap_variance` 与账户耗尽（HIGH），首调 Flash、修复 pro 的调用不被标记（MEDIUM），另有继承字段、默认关闭说明不准、流解析失败记名、配置可被 `Map.prototype.set` 改写等 LOW。全部修正：对应新用例在修正前的源码上 13 项失败，修正后全绿。
+- 部署：默认关闭。不开开关时唯一的行为差异来自新别名：请求 `deepseek-v4-flash` 的调用（例如未指定模型、走 `MODEL_DEFAULT_MODEL` 的调用）现在承认审查过的 Flash 构建名，这是同一模型的身份事实，不是替代；请求 pro 的调用照旧只认 pro。要开启，在运行时环境加 `MODEL_IDENTITY_SUBSTITUTES=deepseek-v4-pro>deepseek-v4-flash` 并重启 API 与 Worker；关闭即删除该行再重启。开启期间的跑测报告必须单独统计被替代的调用（`ai_trace.meta->>'modelSubstituted' = 'true'`），不能把它们算作 pro 的结果。
 - 未做：真正 pro 的第二上游另行接入；本次没有在 xin 上开启或跑测。
 
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command

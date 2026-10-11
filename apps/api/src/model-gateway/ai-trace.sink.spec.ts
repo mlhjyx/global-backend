@@ -116,14 +116,21 @@ describe('AiTraceSink', () => {
       latencyMs: 12,
       inputTokens: 7,
       outputTokens: 3,
-      modelSubstitution: { requestedModel: 'deepseek-v4-pro' },
+      modelSubstitution: {
+        requestedModel: 'deepseek-v4-pro',
+        substituteModels: ['deepseek-v4-flash'],
+      },
     });
 
     await vi.waitFor(() => expect(usageLedgerCreate).toHaveBeenCalledTimes(1));
     expect(aiTraceCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         model: 'deepseek-v4-flash',
-        meta: { requestedModel: 'deepseek-v4-pro', modelSubstituted: true },
+        meta: {
+          requestedModel: 'deepseek-v4-pro',
+          modelSubstituted: true,
+          substituteModels: ['deepseek-v4-flash'],
+        },
       }),
     });
     expect(usageLedgerCreate).toHaveBeenCalledWith({
@@ -133,6 +140,7 @@ describe('AiTraceSink', () => {
           model: 'deepseek-v4-flash',
           requestedModel: 'deepseek-v4-pro',
           modelSubstituted: true,
+          substituteModels: ['deepseek-v4-flash'],
         },
       }),
     });

@@ -139,26 +139,65 @@ type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
 >;
 
-/** Only this gateway may admit a substitute identity (D14); drop a caller's. */
+/**
+ * Only this gateway may admit a substitute identity (D14). Drop a caller's,
+ * own or inherited: the rest copy keeps only own enumerable fields.
+ */
 function withoutCallerModelIdentitySubstitutes(ctx: AiContext): AiContext {
-  if (!Object.prototype.hasOwnProperty.call(ctx, "modelIdentitySubstitutes")) {
-    return ctx;
-  }
+  if (!("modelIdentitySubstitutes" in ctx)) return ctx;
   const { modelIdentitySubstitutes: _callerSubstitutes, ...rest } = ctx;
   return rest;
 }
 
-/** The requested model when `model` is a substitute admitted for this call. */
-function substitutedRequest(
-  requestedModel: string | undefined,
-  model: string | undefined,
+/**
+ * D14: forwards every call to `provider` unchanged and reports each text or
+ * structured wire whose answer (or failed answer) an admitted substitute
+ * produced. It adds no wire, retry or authorization path of its own.
+ */
+function observingSubstituteAnswers(
+  provider: ModelProvider,
   substitutes: readonly string[],
-): string | undefined {
-  return requestedModel !== undefined &&
-    model !== undefined &&
-    model !== requestedModel &&
-    substitutes.includes(model)
-    ? requestedModel
+  observe: (model: string) => void,
+): ModelProvider {
+  const note = (model: string | undefined): void => {
+    if (model !== undefined && substitutes.includes(model)) observe(model);
+  };
+  const noted = async <R extends { model: string }>(
+    dispatch: () => Promise<R>,
+  ): Promise<R> => {
+    try {
+      const answer = await dispatch();
+      note(answer.model);
+      return answer;
+    } catch (error) {
+      if (error instanceof ProviderOutputError) note(error.model);
+      throw error;
+    }
+  };
+  return Object.freeze({
+    id: provider.id,
+    supports: (op: ModelOp, task?: string) => provider.supports(op, task),
+    health: () => provider.health(),
+    generateText: (input: GenerateTextInput, runCtx: AiContext) =>
+      noted(() => provider.generateText(input, runCtx)),
+    generateStructured: <R = unknown>(
+      input: GenerateStructuredInput,
+      runCtx: AiContext,
+    ) => noted(() => provider.generateStructured<R>(input, runCtx)),
+    reviewVision: <R = unknown>(input: ReviewVisionInput, runCtx: AiContext) =>
+      provider.reviewVision<R>(input, runCtx),
+    embed: (input: EmbedInput, runCtx: AiContext) =>
+      provider.embed(input, runCtx),
+  });
+}
+
+/** Trace marker for an operation a substitute answered at least in part. */
+function modelSubstitution(
+  requestedModel: string | undefined,
+  substituteAnswers: ReadonlySet<string>,
+): { requestedModel: string; substituteModels: readonly string[] } | undefined {
+  return requestedModel !== undefined && substituteAnswers.size > 0
+    ? { requestedModel, substituteModels: Object.freeze([...substituteAnswers]) }
     : undefined;
 }
 
@@ -193,7 +232,7 @@ export class RouterModelGateway extends ModelGateway {
    * here so a malformed MODEL_IDENTITY_SUBSTITUTES stops startup. Empty by
    * default: every call then keeps exact model identity.
    */
-  readonly modelIdentitySubstitutes: ModelIdentitySubstitutes;
+  readonly #modelIdentitySubstitutes: ModelIdentitySubstitutes;
 
   constructor(
     private readonly router: ModelRouter,
@@ -202,7 +241,7 @@ export class RouterModelGateway extends ModelGateway {
   ) {
     super();
     this.budgetStore = budgetStore ?? this.unavailableBudgetStore;
-    this.modelIdentitySubstitutes = parseModelIdentitySubstitutes(
+    this.#modelIdentitySubstitutes = parseModelIdentitySubstitutes(
       process.env[MODEL_IDENTITY_SUBSTITUTES_ENV],
     );
   }
@@ -602,6 +641,15 @@ export class RouterModelGateway extends ModelGateway {
       throw err;
     }
     const provider = chain[0]!;
+    // D14: every wire a substitute answered, including a first structured
+    // call whose repair came back as the requested model.
+    const substituteAnswers = new Set<string>();
+    const dispatchProvider =
+      substitutes.length > 0
+        ? observingSubstituteAnswers(provider, substitutes, (model) =>
+            substituteAnswers.add(model),
+          )
+        : provider;
     const started = Date.now();
     let result: ModelResult<T>;
     try {
@@ -622,18 +670,17 @@ export class RouterModelGateway extends ModelGateway {
               reservation, workspaceId: ctx.workspaceId, accountKey,
               execution: { kind: "model", modelOp: op, taskId: input.task, providerId: provider.id,
                 ...(input.model !== undefined ? { requestedModel: input.model } : {}) } }),
-            () => call(provider, callCtx),
+            () => call(dispatchProvider, callCtx),
           )
-        : await call(provider, callCtx);
+        : await call(dispatchProvider, callCtx);
     } catch (err) {
       const failedUsage =
         err instanceof ProviderOutputError ? err.usage : undefined;
       const failedModel =
         err instanceof ProviderOutputError ? err.model : undefined;
-      const failedSubstitutedFrom = substitutedRequest(
+      const failedSubstitution = modelSubstitution(
         input.model,
-        failedModel,
-        substitutes,
+        substituteAnswers,
       );
       if (
         err instanceof ExternalActionDeniedError &&
@@ -652,25 +699,19 @@ export class RouterModelGateway extends ModelGateway {
                 centsFromTokens(err.usage) ?? baseCents * err.callCount,
               ))
             : centsToMicrousd(reserveCents);
-        // A substitute's spend never exceeds the requested model's quote.
-        await this.budgetStore.settle(
-          reservation,
-          failedSubstitutedFrom &&
-            observedMicrousd > reservation.estimatedMicrousd
-            ? reservation.estimatedMicrousd
-            : observedMicrousd,
-        );
+        await this.budgetStore.settle(reservation, observedMicrousd);
       }
       this.trace?.record({
         workspaceId: ctx.workspaceId,
         task: input.task,
         op,
         provider: provider.id,
-        model: failedSubstitutedFrom
-          ? failedModel!
-          : (input.model ?? "unknown"),
-        ...(failedSubstitutedFrom
-          ? { modelSubstitution: { requestedModel: failedSubstitutedFrom } }
+        model:
+          failedModel !== undefined && substitutes.includes(failedModel)
+            ? failedModel
+            : (input.model ?? "unknown"),
+        ...(failedSubstitution
+          ? { modelSubstitution: failedSubstitution }
           : {}),
         status: "ERROR",
         // The class alone cannot tell a cut stream from bad JSON; the reason
@@ -715,11 +756,7 @@ export class RouterModelGateway extends ModelGateway {
       observedMicrousd < reservation.estimatedMicrousd
         ? observedMicrousd
         : reservation.estimatedMicrousd;
-    const substitutedFrom = substitutedRequest(
-      input.model,
-      result.model,
-      substitutes,
-    );
+    const substitution = modelSubstitution(input.model, substituteAnswers);
     const receiptFacts =
       projection && ctx.durableResultSchema
         ? modelExecutionReceiptFacts({
@@ -732,8 +769,7 @@ export class RouterModelGateway extends ModelGateway {
         : undefined;
     const settlement = [
       reservation,
-      // A substitute's spend never exceeds the requested model's quote.
-      substitutedFrom ? chargedMicrousd : observedMicrousd,
+      observedMicrousd,
       projection,
       receiptFacts,
     ] as const;
@@ -754,9 +790,7 @@ export class RouterModelGateway extends ModelGateway {
       op,
       provider: result.provider,
       model: result.model,
-      ...(substitutedFrom
-        ? { modelSubstitution: { requestedModel: substitutedFrom } }
-        : {}),
+      ...(substitution ? { modelSubstitution: substitution } : {}),
       status: "OK",
       latencyMs: Date.now() - started,
       inputTokens: result.usage?.inputTokens,
@@ -784,7 +818,7 @@ export class RouterModelGateway extends ModelGateway {
     return (
       (model === undefined
         ? undefined
-        : this.modelIdentitySubstitutes.get(model)) ?? []
+        : this.#modelIdentitySubstitutes.get(model)) ?? []
     );
   }
 

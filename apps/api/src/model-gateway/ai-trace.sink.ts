@@ -19,19 +19,29 @@ export interface TraceEntry {
   /** Site Builder resolved policy + selected fallback position, when applicable. */
   modelPolicy?: ModelExecutionTrace;
   /**
-   * Present only when `model` is a deployment-approved substitute (D14): the
-   * row names the model that answered and keeps the requested one beside it.
+   * Present only when a deployment-approved substitute (D14) answered at
+   * least one wire of this call. `model` stays the model whose answer the
+   * call returned (or failed on); the requested model and the substitutes
+   * that answered are kept beside it.
    */
-  modelSubstitution?: { requestedModel: string };
+  modelSubstitution?: {
+    requestedModel: string;
+    substituteModels: readonly string[];
+  };
 }
 
-function substitutionMeta(
-  entry: TraceEntry,
-): { requestedModel: string; modelSubstituted: true } | undefined {
+function substitutionMeta(entry: TraceEntry):
+  | {
+      requestedModel: string;
+      modelSubstituted: true;
+      substituteModels: string[];
+    }
+  | undefined {
   return entry.modelSubstitution
     ? {
         requestedModel: entry.modelSubstitution.requestedModel,
         modelSubstituted: true,
+        substituteModels: [...entry.modelSubstitution.substituteModels],
       }
     : undefined;
 }

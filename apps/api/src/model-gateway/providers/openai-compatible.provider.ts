@@ -26,6 +26,7 @@ import {
   resolveReportedModelIdentity,
   resolveReportedModelIdentityAmong,
 } from "../model-identity";
+import { isReviewedModelSubstitution } from "../model-identity-substitutes";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
 import { boundedModelUsage } from "../model-usage-boundary";
 import {
@@ -333,7 +334,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         model,
         resolvedModel,
         transport,
-        this.substitutesFor(ctx),
+        this.substitutesFor(ctx, model),
       ),
       usage,
     };
@@ -374,7 +375,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       model,
       resolvedModel,
       transport,
-      this.substitutesFor(ctx),
+      this.substitutesFor(ctx, model),
     );
     if (!content.trim()) {
       // Empty content is an explicit failure, not JSON.parse(''). A length
@@ -511,17 +512,56 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   /**
    * Substitute identities admitted for this call (D14). Only the gateway sets
-   * them; paid calls are priced by the requested alias and never take one.
+   * them; paid calls are priced by the requested alias and never take one,
+   * and nothing outside the repository-reviewed pairs is ever honoured.
    */
-  private substitutesFor(ctx: AiContext | undefined): readonly string[] {
+  private substitutesFor(
+    ctx: AiContext | undefined,
+    requestedModel: string,
+  ): readonly string[] {
     const substitutes = ctx?.paidCost
       ? undefined
       : ctx?.modelIdentitySubstitutes;
     return Array.isArray(substitutes)
       ? substitutes.filter(
-          (substitute): substitute is string => typeof substitute === "string",
+          (substitute): substitute is string =>
+            typeof substitute === "string" &&
+            isReviewedModelSubstitution(requestedModel, substitute),
         )
       : [];
+  }
+
+  /**
+   * Identity of a stream that failed before the identity gate ran (D14). If a
+   * name seen so far resolves to an admitted substitute, the failed wire is
+   * that substitute's; otherwise it stays under the requested model.
+   */
+  private failedStreamProvenance(
+    requestedModel: string,
+    names: readonly unknown[],
+    substitutes: readonly string[],
+  ): {
+    model: string;
+    reportedModel?: string;
+    modelResolutionSource?: ModelResolutionSource;
+  } {
+    for (const value of names) {
+      const name = canonicalReportedModelIdentifier(value);
+      const resolved = resolveReportedModelIdentityAmong(
+        requestedModel,
+        substitutes,
+        name,
+        "openai-chat-completions",
+      );
+      if (name && resolved && resolved !== requestedModel) {
+        return {
+          model: resolved,
+          reportedModel: name,
+          modelResolutionSource: "upstream_response",
+        };
+      }
+    }
+    return { model: requestedModel };
   }
 
   /**
@@ -801,16 +841,22 @@ export class OpenAICompatibleProvider implements ModelProvider {
   private async parseChatCompletionStream(
     response: Response,
     model: string,
+    substitutes: readonly string[] = [],
   ): Promise<{
     body: ChatCompletionBody;
     streamedModels: readonly unknown[];
     truncated: boolean;
   }> {
+    const streamedModels: unknown[] = [];
     const invalid = (reason: string, reasonCode: string): never => {
       throw new ProviderTransportError(
         `${this.id} ${model}: ${reason}`,
         undefined,
-        { provider: this.id, model, reasonCode },
+        {
+          provider: this.id,
+          ...this.failedStreamProvenance(model, streamedModels, substitutes),
+          reasonCode,
+        },
       );
     };
     let text: string;
@@ -837,7 +883,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let lastNamedModel: string | undefined;
     let contentModel: string | undefined;
     let unnamedContentChunks = 0;
-    const streamedModels: unknown[] = [];
     const seenModels = new Set<string>();
     let usage: ChatCompletionBody["usage"];
     for (const rawLine of text.split(/\r?\n/u)) {
@@ -1007,8 +1052,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (!res.ok) {
       return this.throwHttpFailure(res, opts.model, ctx);
     }
+    const substitutes = this.substitutesFor(ctx, opts.model);
     const { body: json, streamedModels, truncated } = stream
-      ? await this.parseChatCompletionStream(res, opts.model)
+      ? await this.parseChatCompletionStream(res, opts.model, substitutes)
       : {
           body: await this.parseResponseJson<ChatCompletionBody>(
             res,
@@ -1039,7 +1085,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     // Every model name a stream carries, string or not, must pass the gate;
     // otherwise content from an untrusted model could ride under a trusted
     // name carried only by a later chunk.
-    const substitutes = this.substitutesFor(ctx);
     for (const streamedModel of streamedModels) {
       this.trustedReportedModel(
         opts.model,
@@ -1742,7 +1787,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    const substitutes = this.substitutesFor(ctx);
+    const substitutes = this.substitutesFor(ctx, opts.model);
     const reportedModel = this.trustedReportedModel(
       opts.model,
       json.model,
@@ -1881,7 +1926,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    const substitutes = this.substitutesFor(ctx);
+    const substitutes = this.substitutesFor(ctx, opts.model);
     const reportedModel = this.trustedReportedModel(
       opts.model,
       json.model,
