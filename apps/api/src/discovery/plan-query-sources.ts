@@ -11,12 +11,23 @@ import type { SourceClass } from './provider-contract';
  * class whose key the hint names. The planner and the executor share these
  * functions, so a plan written at planning time routes the same way when it
  * runs, and both read the same kill switch (`data_provider.status`).
+ *
+ * Lineage gate: a source runs only if its provider also declares the governed
+ * company lineage that materialization requires (`hasCompanyLineage`). A query
+ * on a source without it is never planned or routed, even while ENABLED, and is
+ * counted SOURCE_LINEAGE_UNAVAILABLE: running it would stall the run at
+ * materialization.
  */
 
 /** One provider a plan query can run on, under one of the provider's source classes. */
 export interface CompanyDiscoverySource {
   readonly sourceClass: SourceClass;
   readonly providerKey: string;
+  /**
+   * Whether the provider's adapter declares the governed company lineage that
+   * materialization requires (`declaresDiscoveryCompanyLineage`).
+   */
+  readonly hasCompanyLineage: boolean;
 }
 
 /** The two plan query fields that route it. */
@@ -106,23 +117,43 @@ export function planQueryRoutes(
   );
 }
 
-/** Why a query that routes to no ENABLED source is skipped, judged against every registered source. */
+/** The sources among `sources` whose provider declares governed company lineage. */
+function withCompanyLineage(sources: readonly CompanyDiscoverySource[]): CompanyDiscoverySource[] {
+  return sources.filter((source) => source.hasCompanyLineage);
+}
+
+/**
+ * Why a query whose registered routes include no runnable source runs on
+ * nothing: a source with governed lineage is only switched off, one without it
+ * never runs. Null when the query routes to no registered source at all.
+ */
+function unroutedReason(
+  routes: readonly CompanyDiscoverySource[],
+): 'SOURCE_DISABLED' | 'SOURCE_LINEAGE_UNAVAILABLE' | null {
+  if (routes.some((source) => source.hasCompanyLineage)) return 'SOURCE_DISABLED';
+  return routes.length > 0 ? 'SOURCE_LINEAGE_UNAVAILABLE' : null;
+}
+
+/** Why a query that routes to no runnable source is skipped, judged against every registered source. */
 export function planQuerySkipReason(
   query: PlanQueryRouting,
   registered: readonly CompanyDiscoverySource[],
 ): DiscoveryQuerySkipReason {
-  return planQueryRoutes(query, registered).length > 0 ? 'SOURCE_DISABLED' : 'SOURCE_UNKNOWN';
+  return unroutedReason(planQueryRoutes(query, registered)) ?? 'SOURCE_UNKNOWN';
 }
 
-/** Whether a query naming exactly this source would run on an ENABLED provider. */
-export function isSourceEnabled(
+/**
+ * Whether a query naming exactly this source would run: on an ENABLED provider
+ * that declares governed company lineage.
+ */
+export function isSourceRunnable(
   enabled: readonly CompanyDiscoverySource[],
-  source: CompanyDiscoverySource,
+  source: Readonly<{ sourceClass: SourceClass; providerKey: string }>,
 ): boolean {
   return (
     planQueryRoutes(
       { source_class: source.sourceClass, filters: { source_hint: source.providerKey } },
-      enabled,
+      withCompanyLineage(enabled),
     ).length > 0
   );
 }
@@ -131,18 +162,19 @@ function plannable(sources: readonly CompanyDiscoverySource[]): CompanyDiscovery
   return sources.filter((source) => !SYSTEM_PLANNED_SOURCE_KEYS.has(source.providerKey));
 }
 
-/** Whether the planner model has any ENABLED source to write queries for. */
+/** Whether the planner model has any runnable source (ENABLED, with governed lineage) to write queries for. */
 export function hasPlannableSource(enabled: readonly CompanyDiscoverySource[]): boolean {
-  return plannable(enabled).length > 0;
+  return plannable(withCompanyLineage(enabled)).length > 0;
 }
 
 /**
- * The planner prompt's list of sources: only ENABLED ones, so the model does
- * not spend output on queries that cannot run.
+ * The planner prompt's list of sources: only runnable ones (ENABLED, with
+ * governed lineage), so the model does not spend output on queries that cannot run.
  */
 export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]): string {
+  const runnable = withCompanyLineage(enabled);
   const classesByKey = new Map<string, string[]>();
-  for (const source of plannable(enabled)) {
+  for (const source of plannable(runnable)) {
     classesByKey.set(source.providerKey, [
       ...(classesByKey.get(source.providerKey) ?? []),
       source.sourceClass,
@@ -154,7 +186,7 @@ export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]):
   );
   const systemPlanned = [
     ...new Set(
-      enabled
+      runnable
         .map((source) => source.providerKey)
         .filter((key) => SYSTEM_PLANNED_SOURCE_KEYS.has(key)),
     ),
@@ -171,6 +203,8 @@ export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]):
 /** Why the planner left a model query (or, for PLAN_QUERY_CAP, a source copy of one) out of the plan. */
 export const PLANNER_DROP_REASONS = Object.freeze([
   'SOURCE_DISABLED',
+  /** The query's registered sources have no governed company lineage (lineage gate). */
+  'SOURCE_LINEAGE_UNAVAILABLE',
   'SOURCE_UNKNOWN',
   /** The query names TED or openFDA, whose queries only the cold path writes. */
   'SOURCE_SYSTEM_PLANNED',
@@ -196,11 +230,12 @@ function planPriority(priority: unknown): number {
 
 /**
  * Route the planner model's queries at planning time (BI-30). A query that
- * routes to no ENABLED source is left out and counted; every other query is
- * written once per ENABLED source it routes to, with `filters.source_hint` set
- * to that source's exact key, so each stored query states its one source. A
- * query without a hint therefore keeps the fan-out it had before, as explicit
- * copies. Copies beyond the planner query ceiling are left out, least urgent
+ * routes to no runnable source (ENABLED, with governed lineage) is left out and
+ * counted; every other query is written once per runnable source it routes to,
+ * with `filters.source_hint` set to that source's exact key, so each stored
+ * query states its one source. A query without a hint therefore keeps the
+ * fan-out it had before, as explicit copies, but never onto a source without
+ * governed lineage. Copies beyond the planner query ceiling are left out, least urgent
  * first, so the plan stays within the quoted run envelope.
  */
 export function routePlannerQueries<Q extends PlanQueryShape>(
@@ -211,7 +246,7 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
   }>,
   cap: number = MAX_QUERY_PLANNER_QUERIES,
 ): PlannerQueryRouting<Q> {
-  const enabled = plannable(sources.enabled);
+  const enabled = plannable(withCompanyLineage(sources.enabled));
   const registered = plannable(sources.registered);
   const dropped: Partial<Record<PlannerDropReason, number>> = {};
   const count = (reason: PlannerDropReason, by = 1): void => {
@@ -222,11 +257,10 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
     const routes = planQueryRoutes(query, enabled);
     if (routes.length === 0) {
       count(
-        planQueryRoutes(query, registered).length > 0
-          ? 'SOURCE_DISABLED'
-          : planQueryRoutes(query, sources.registered).length > 0
+        unroutedReason(planQueryRoutes(query, registered)) ??
+          (planQueryRoutes(query, sources.registered).length > 0
             ? 'SOURCE_SYSTEM_PLANNED'
-            : 'SOURCE_UNKNOWN',
+            : 'SOURCE_UNKNOWN'),
       );
       return;
     }

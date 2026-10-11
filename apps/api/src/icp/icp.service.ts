@@ -25,7 +25,7 @@ import { withIcpTradeRole } from '../discovery/icp-trade-role';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   hasPlannableSource,
-  isSourceEnabled,
+  isSourceRunnable,
   plannerSourcePrompt,
   routePlannerQueries,
   scaleEstimatedVolume,
@@ -585,13 +585,13 @@ export class IcpService {
     const industryTerms = collectIndustryTerms(icp.companyAttributes, modelQueries);
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    // BI-30：TED 未启用时不解析、不注入（解析本身要花词表归一的模型调用）。
-    let queries = isSourceEnabled(enabledSources, TED_QUERY_SOURCE)
+    // BI-30：TED 未启用时不解析、不注入（解析本身要花词表归一的模型调用）；血缘闸门：TED 没有受治理血缘时同样不注入。
+    let queries = isSourceRunnable(enabledSources, TED_QUERY_SOURCE)
       ? await this.injectTedQuery(icp, planned, industryTerms, binding)
       : planned;
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
-    // BI-30：openFDA 未启用时同样不解析、不注入。
-    queries = isSourceEnabled(enabledSources, FDA_QUERY_SOURCE)
+    // BI-30：openFDA 未启用或没有受治理血缘时同样不解析、不注入。
+    queries = isSourceRunnable(enabledSources, FDA_QUERY_SOURCE)
       ? await this.injectFdaQuery(icp, queries, industryTerms, binding)
       : queries;
     if (queries.length === 0) {
