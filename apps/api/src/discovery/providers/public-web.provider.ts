@@ -473,10 +473,10 @@ function companyName(raw: string): string {
 }
 
 /**
- * ISO 3166-1 alpha-2 code of the model's free-text country ("Germany", "Deutschland", "德国" → DE) from the
- * discovery vocabulary; Raw only takes two upper-case letters. An answer that already is one of the
- * vocabulary's codes ("DE", "de") is kept. Anything else ("DACH", "Österreich", "Germany (Bavaria)") is
- * omitted, not guessed.
+ * ISO 3166-1 alpha-2 code of the model's free-text country ("Germany", "Deutschland", "德国" → DE;
+ * "Österreich" → AT) from the discovery vocabulary; Raw only takes two upper-case letters. An answer that
+ * already is one of the vocabulary's codes ("DE", "de") is kept. Anything else is omitted, not guessed:
+ * "Germany (Bavaria)", and "DACH", a region of three countries that no single company is located in.
  */
 function countryIso(country: string | undefined): string | undefined {
   const term = country?.trim();

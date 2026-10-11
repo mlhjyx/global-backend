@@ -222,6 +222,31 @@ describe('复审修正 · cpvSubtreePrefix + 词采集稳健化', () => {
     expect(terms).not.toContain('planned-0');
   });
 
+  it('目标市场「DACH」展开为 DE、AT、CH，其余市场词原样、去重', () => {
+    expect(boundedTargetCountries(['DACH区域'])).toEqual(['DE', 'AT', 'CH']);
+    expect(boundedTargetCountries('DACH, Polska')).toEqual(['DE', 'AT', 'CH', 'Polska']);
+    expect(boundedTargetCountries(['DACH', 'D-A-CH'])).toEqual(['DE', 'AT', 'CH']);
+    expect(boundedTargetCountries(['德国', '奥地利', '瑞士（德语区优先）'])).toEqual(['德国', '奥地利', '瑞士（德语区优先）']);
+  });
+
+  it('DACH 市场确定性得到 TED 三国买方，不交给模型猜成一个国家', async () => {
+    const alpha3: Record<string, string> = { DE: 'DEU', AT: 'AUT', CH: 'CHE' };
+    const resolve = vi.fn(async (_kind: string, term: string) =>
+      alpha3[term] ? node('country', term, { alpha3: [alpha3[term]] }) : null);
+    const port = fakePort({
+      resolveMany: async () => [node('industry', '28', { cpv: ['42120000'] })],
+      resolve,
+    });
+    const r = await resolveIcpToCpv(
+      port,
+      { industryTerms: ['pumps'], targetCountries: boundedTargetCountries(['DACH区域']) },
+      { allowLlm: false },
+    );
+    expect(resolve.mock.calls.map(([, term]) => term)).toEqual(['DE', 'AT', 'CH']);
+    expect(r.buyerCountries).toEqual(['DEU', 'AUT', 'CHE']);
+    expect(r.warnings).toEqual([]);
+  });
+
   it('目标市场使用同一稳定上限，防数据库 JSON 扩大 taxonomy 物理调用', () => {
     const targets = boundedTargetCountries(
       Array.from({ length: 20 }, (_, index) => `country-${index}`),

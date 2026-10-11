@@ -65,6 +65,23 @@
 - 部署：默认关闭。不开开关时唯一的行为差异来自新别名：请求 `deepseek-v4-flash` 的调用（例如未指定模型、走 `MODEL_DEFAULT_MODEL` 的调用）现在承认审查过的 Flash 构建名，这是同一模型的身份事实，不是替代；请求 pro 的调用照旧只认 pro。要开启，在运行时环境加 `MODEL_IDENTITY_SUBSTITUTES=deepseek-v4-pro>deepseek-v4-flash` 并重启 API 与 Worker；关闭即删除该行再重启。开启期间的跑测报告必须单独统计被替代的调用（`ai_trace.meta->>'modelSubstituted' = 'true'`）与身份未证实的调用（`meta->>'modelIdentityUnproven' = 'true'`），统计 pro 的结果与用量时把这两类排除：首调 Flash、修复 pro 的调用整行记在 `model = deepseek-v4-pro` 下，但带替代标记。
 - 未做：真正 pro 的第二上游另行接入；本次没有在 xin 上开启或跑测。开关开启时，失败且上游没有署名的答案仍按 pro 记在 ERROR 行、不带标记（ERROR 行不写 `usage_ledger`），按 `ai_trace` 汇总 pro 的 token 时要排除开启期间的 ERROR 行。
 
+## 2026-10-11 · Normalize Austria, Switzerland, the Netherlands, Poland and Spain, and expand a DACH market to its three countries
+
+- 起因：发现侧的国家词表（`apps/api/src/discovery/vocab.ts`）只认 8 个国家（DE US CN JP IT FR GB IN），没有 AT/CH/NL/PL/ES；ICP 目标市场写成「DACH区域」这类地区词时，没有任何一处把它展开成国家：规划器提示词定不出关键词语言；TED、openFDA 冷路径与定时意向扫描把它当作一个国家词交给 taxonomy，未命中别名时由模型在码表里挑**一个**国家，并把这条别名沉淀下来。
+- 改动：
+  - `vocab.ts`：`COUNTRY_ISO` 与 `COUNTRY_QIDS` 各补 AT/CH/NL/PL/ES，写法与已有国家相同（中文名、英文名、本国语名，另收常见的无变音拼写与瑞士的法、意语名）；QID 与 `seed-taxonomy.mjs` 的 `ALPHA2_TO_QID` 一致。新数据表 `MARKET_REGION_COUNTRIES`（「DACH」及其常见写法 → DE、AT、CH）与 `lookupMarketRegion`、`expandMarketRegions`。地区词不进单国表：单个公司的所在国不会是「DACH」，public_web 对它照旧不填国家。
+  - `icp-to-cpv.ts` 的 `boundedTargetCountries`（TED、openFDA 冷路径与定时意向扫描共用）：地区词先展开为成员国 alpha-2 码再交给 taxonomy；这三个码由 seed 别名确定性归一，不再调用模型。
+  - `search-localization.ts` 的 `targetCountries`（规划器关键词语言、public_web 搜索语言与 ccTLD 过滤、名录查询的国家名、网站画像按 ICP 市场回退的本国）：country / iso_country / buyer_country 里的「DACH」，以及只有 region 时的「DACH」，都展开为三国，效果与直接写「德国、奥地利、瑞士」相同。
+  - `vocab.ts` 的查表只认表自己的键（`Object.hasOwn`）：地区查找每个计划、每条查询都要走，模型给出「constructor」「__proto__」这类词时原本会取到对象原型上的属性，`targetCountries` 因此抛 TypeError；旧的行业、国家、OSM 查找在同样输入下会把函数当成码返回。
+  - 已有国家的映射与行为不变：单测逐条钉住原有 18 个国家词及国家码集合只新增五个。
+- 测试：
+  - 新增与改写的单测分布在 `vocab.spec.ts`、`search-localization.spec.ts`、`icp-to-cpv.spec.ts`、`icp.service.spec.ts`（规划器级：目标市场「DACH区域」→ 提示词要求德语关键词，TED 与 openFDA 冷路径收到 DE、AT、CH）与 `public-web-raw-governance.spec.ts`（「Österreich」→ AT、「ch」→ CH，原先「Österreich」被当作未知国家）。
+  - 红灯：实现前这 5 个文件 40 项失败；实现后 177 项全过。查表加固另加 5 项（原型属性名），加固前其中 3 项失败（一项是 `targetCountries` 抛 TypeError），加固后 5 个文件 182 项全过。
+- 未做（留给国家包）：
+  - `search-localization.ts` 的 10 国表与 `vocab.ts` 的两张国家表仍各自维护。
+  - 执行查询时的 taxonomy 归一（`queryTaxonomyTerms` → 单值 `_countryQid`）、`wikidata.provider` 的 `mapCountry` 与 OSM 的 `REGION_OSM_AREA` 都只取一个国家，「DACH」在那里仍只落到一国；多国需要改这些源的查询形态。若 `term_alias` 里已有模型沉淀的地区词别名，本项不清理：列表路径先展开、不再查它，单值路径仍会命中它。
+  - 未在 xin 上重新生成查询计划（需要模型调用并写开发库），留到部署后的验收。
+
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
 - 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。

@@ -1,4 +1,5 @@
 import { CanonicalNode, TaxonomyKind, type TaxonomyResolveOptions } from './taxonomy-resolver';
+import { expandMarketRegions } from './vocab';
 
 /**
  * TED 覆盖的买方国别（EU-27 + EEA(ISL/LIE/NOR) + CHE + GBR），ISO-3。
@@ -115,9 +116,13 @@ export function collectIndustryTerms(companyAttributes: unknown, planned: PlanQu
   ]).slice(0, MAX_QUERY_PLAN_INDUSTRY_TERMS);
 }
 
-/** Stable first-seen market set shared by CPV, FDA and scheduled intent consumers. */
+/**
+ * Stable first-seen market set shared by CPV, FDA and scheduled intent consumers. A region market such as
+ * "DACH" becomes its member countries' alpha-2 codes (DE, AT, CH), which the taxonomy resolves without the
+ * model; left as one term, the model would have to pick a single country for it.
+ */
 export function boundedTargetCountries(value: unknown): string[] {
-  return uniq(splitTerms(value)).slice(0, MAX_QUERY_PLAN_TARGET_COUNTRIES);
+  return uniq(expandMarketRegions(splitTerms(value))).slice(0, MAX_QUERY_PLAN_TARGET_COUNTRIES);
 }
 
 /** 查询计划条目形状（与 discovery.query_plan 输出的 queries[] 结构一致）。 */

@@ -133,10 +133,10 @@ const CASES: readonly Case[] = [
     sourceUrl: 'https://pumpen-mueller.de/',
   },
   {
-    title: '"Österreich" is not in the vocabulary, hit on a subdomain',
+    title: '"Österreich" is Austria, hit on a subdomain',
     extracted: { country: 'Österreich' },
     hitUrls: ['https://shop.pumpen-mueller.de/pumpen'],
-    country: undefined,
+    country: 'AT',
     sourceUrl: 'https://pumpen-mueller.de/',
   },
   {
@@ -164,6 +164,13 @@ const CASES: readonly Case[] = [
     hitUrls: ['https://www.pumpen-mueller.de/', 'https://pumpen-mueller.de/impressum'],
     country: 'DE',
     sourceUrl: 'https://pumpen-mueller.de/impressum',
+  },
+  {
+    title: 'ISO code answer of another DACH country',
+    extracted: { country: 'ch' },
+    hitUrls: ['https://pumpen-mueller.de/'],
+    country: 'CH',
+    sourceUrl: 'https://pumpen-mueller.de/',
   },
   {
     title: 'a subdomain that is itself the record domain',
