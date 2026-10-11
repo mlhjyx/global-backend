@@ -69,8 +69,9 @@ describe('AI task registry model execution policy invariants', () => {
         timeoutMs: 180000,
       },
       'discovery.classify_trade_role': {
+        // BI-14: the website profile also renders the company's linked contact page (form check).
         model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
-        allowedTools: ['crawl4ai.fetch'], maxCostCents: 10, timeoutMs: 120000,
+        allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'], maxCostCents: 10, timeoutMs: 120000,
       },
       'contact.find_decision_makers': {
         model: 'deepseek-v4-pro', risk: 'medium', humanGate: false,

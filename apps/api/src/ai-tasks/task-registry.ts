@@ -295,7 +295,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
   'discovery.classify_trade_role': {
     id: 'discovery.classify_trade_role',
     // G3 5.4（2026-09-24）：官网画像富集以已建档公司为主体抓首页与 Impressum（ToolBroker 按调用绑定主体）。
-    allowedTools: ['crawl4ai.fetch'],
+    // BI-14（2026-10-10）：开关 company_contact 打开时，再以同一主体渲染首页链到的联系页（每家至多 1 页），只看有没有联系表单。
+    allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'],
     maxCostCents: 10,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,

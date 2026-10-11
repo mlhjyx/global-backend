@@ -95,6 +95,13 @@ import {
   WebsiteProfileProvider,
   type WebsiteProfile,
 } from '../discovery/providers/website-profile.provider';
+import {
+  COMPANY_CONTACT_PARSER_MARKER,
+  COMPANY_CONTACT_PARSER_VERSION,
+  COMPANY_CONTACT_PROVIDER_KEY,
+  companyContactObservation,
+  persistCompanyContactPoints,
+} from '../discovery/company-contact-points';
 import { targetCountryCodes } from '../discovery/search-localization';
 import { companyMatchesSuppression } from '../discovery/suppression-value';
 import type { DiscoveryQuerySkipReason } from '../discovery/discovery-query-skip';
@@ -320,6 +327,8 @@ function icpProductContext(companyAttributes: unknown): string {
 
 /** 官网画像 → 只含公司级事实的富集结果（命名空间 `website_profile`）。 */
 function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): EnrichmentResult {
+  // 画像事实所在的页（有 Impressum 用 Impressum，否则首页）；A4：贸易角色、登记号、税号据此有来源 URL。
+  const sourceUrl = profile.impressumUrl ?? profile.homepageUrl;
   const attributes = Object.fromEntries(
     Object.entries({
       trade_role: profile.tradeRole,
@@ -336,9 +345,9 @@ function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): Enr
       register_key: profile.register?.key ?? null,
       vat_id: profile.vatId,
       evidence: profile.evidence.length ? profile.evidence : null,
+      source_url: sourceUrl,
     }).filter(([, value]) => value !== null && value !== undefined),
   );
-  const sourceUrl = profile.impressumUrl ?? profile.homepageUrl;
   return {
     matched: true,
     confidence: profile.tradeRoleConfidence ?? 0.5,
@@ -1393,6 +1402,10 @@ export function createDiscoveryActivities(deps: {
      *  - kill-switch：data_provider `website_profile` 非 ENABLED → 整段不出网。
      *  - 上限 MAX_DISCOVERY_PROFILE_COMPANIES；30 天内画像过的公司不重抓。
      *  - 主体被拒（tombstone/SUPPRESSED/失效）→ 只跳过这家，计入 skippedSubjects；控制错误让 run 失败。
+     *  - BI-14 联系路径：开关 `company_contact`（种子 DISABLED）为 ENABLED 时，画像顺带从首页链接里找联系页、
+     *    Impressum、供应商页、公司 LinkedIn 与 X，并渲染联系页（每家至多 1 页）看有没有联系表单；在同一事务里
+     *    经禁联闸门写 company_contact_point。开关关闭时不渲染、不写点。画像在 30 天内、但还没用当前规则读过
+     *    联系路径的公司，开关打开后会重画像一次。
      */
     async profileWebsitesForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       profiled: number;
@@ -1410,6 +1423,11 @@ export function createDiscoveryActivities(deps: {
           select: { status: true },
         });
         if (source?.status !== 'ENABLED') return null;
+        // BI-14: the contact paths ride on the same profile behind their own switch (seeded DISABLED).
+        const contactSource = await tx.dataProvider.findUnique({
+          where: { key: COMPANY_CONTACT_PROVIDER_KEY },
+          select: { status: true },
+        });
         const icp = await tx.icpDefinition.findUnique({
           where: { id: args.icpId },
           select: { companyAttributes: true, targetMarkets: true },
@@ -1434,7 +1452,7 @@ export function createDiscoveryActivities(deps: {
           orderBy: { createdAt: 'asc' },
           take: MAX_DISCOVERY_PROFILE_COMPANIES,
         });
-        return { icp, companies };
+        return { icp, companies, contactPaths: contactSource?.status === 'ENABLED' };
       });
       if (!setup) return idle;
       const provider =
@@ -1458,9 +1476,14 @@ export function createDiscoveryActivities(deps: {
       let unclassified = 0;
       for (const c of setup.companies) {
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
-          | { _ts?: string }
+          | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
           | undefined;
-        if (existing?._ts && nowMs - Date.parse(existing._ts) < WEBSITE_PROFILE_TTL_MS) continue;
+        const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
+        // BI-14: with the switch on, a fresh profile still counts as stale until its contact paths
+        // were read under the current rules (once per company and rules version).
+        const contactPathsCurrent =
+          !setup.contactPaths || existing?.[COMPANY_CONTACT_PARSER_MARKER] === COMPANY_CONTACT_PARSER_VERSION;
+        if (fresh && contactPathsCurrent) continue;
         if (
           !c.domain ||
           !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -1474,7 +1497,7 @@ export function createDiscoveryActivities(deps: {
         try {
           const homeCountry = targetCountryCodes({ filters: { country: c.country } })[0] ?? icpHomeCountry;
           profile = await provider.profile(
-            { domain: c.domain, homeCountry, icpContext },
+            { domain: c.domain, homeCountry, icpContext, contactPaths: setup.contactPaths },
             {
               workspaceId: args.workspaceId,
               runId: binding.accountKey,
@@ -1494,6 +1517,8 @@ export function createDiscoveryActivities(deps: {
           }
           /* 单家画像失败不影响其余 */
         }
+        // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
+        const observedAt = new Date();
         if (subjectDenied) skippedSubjects += 1;
         else profiled += 1;
         if (profile && profile.tradeRoleSource === null) unclassified += 1;
@@ -1501,11 +1526,17 @@ export function createDiscoveryActivities(deps: {
         const hits = profile && !subjectDenied
           ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
           : [];
+        // BI-14: only while the switch is on; a provider answer for a switched-off run is ignored.
+        const contactPaths = profile && !subjectDenied && setup.contactPaths ? profile.contactPaths : undefined;
+        // The contact-page render is acknowledged as its own batch in the same transaction, so a
+        // profile replayed from an earlier attempt cannot mix replayed and new receipts.
+        const profileReceipts = durableReceipts.filter(({ producerId }) => producerId !== 'crawl4ai.render');
+        const contactReceipts = durableReceipts.filter(({ producerId }) => producerId === 'crawl4ai.render');
         if (!hits.length && !durableReceipts.length) continue;
         const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const result = await applyDomainAckConsumerTransactions({
             transaction: tx,
-            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+            acknowledgements: profileReceipts.map(({ producerId, receipt }) => ({
               producerId,
               receipt,
               domainAckKey: `${c.id}:${receipt.operationId}:website-profile`,
@@ -1517,6 +1548,9 @@ export function createDiscoveryActivities(deps: {
                   companyId: c.id,
                   hits,
                   signalTimestamp: new Date(nowMs),
+                  ...(contactPaths
+                    ? { namespaceMarkers: { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } }
+                    : {}),
                 })
               : Promise.resolve(false),
             readback: async (transaction) => {
@@ -1528,6 +1562,28 @@ export function createDiscoveryActivities(deps: {
               return hits.length > 0 && Object.hasOwn(attributes, WEBSITE_PROFILE_PROVIDER_KEY);
             },
           });
+          if (contactPaths || contactReceipts.length > 0) {
+            // persistCompanyContactPoints takes the policy lock, re-reads the company FOR SHARE and
+            // the suppression facts itself; a suppressed company gets no point.
+            await applyDomainAckConsumerTransactions({
+              transaction: tx,
+              acknowledgements: contactReceipts.map(({ producerId, receipt }) => ({
+                producerId,
+                receipt,
+                domainAckKey: `${c.id}:${receipt.operationId}:company-contact`,
+                domainRevision: receipt.resultDigest,
+              })),
+              apply: (transaction) => contactPaths
+                ? persistCompanyContactPoints(transaction, {
+                    workspaceId: args.workspaceId,
+                    companyId: c.id,
+                    observation: companyContactObservation(contactPaths),
+                    seenAt: observedAt,
+                  })
+                : Promise.resolve(null),
+              readback: async () => null,
+            });
+          }
           return result.value;
         });
         if (committed) matched += 1;

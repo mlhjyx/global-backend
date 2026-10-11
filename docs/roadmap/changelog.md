@@ -156,6 +156,31 @@
   - 发现 run 的技术报价不按计划内容收窄（见上）；要按计划算，报价服务得读库，属另一项设计。
   - 代码阅读发现（未在真库验证）：`wikidata`、`openstreetmap`、`ted`、`openfda` 的 provider 没有受治理血缘（`companyResultLineage`），路由到它们的查询走 legacy 路径，不写受治理回执表；新 run 的物化准入要求每条计划查询都有这张表的回执，所以启用这些源后，含它们查询的 run 会在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下。重新启用这些源之前，要先给它们补受治理血缘，或另定处理。
 
+## 2026-10-10 · Store links to each company's own contact paths (BI-14 PR-1, switch off by default)
+
+- 起因：BI-14 设计（产品负责人批准，2026-10-10 修订）改为只存公司自己的联系路径链接，不抽邮箱和电话。当天又批准两项范围补充：供应商页（`supplier_page`），以及首页链接里的公司 LinkedIn 页与 X 账号（决定 E9）。本 PR 只做数据通路，不改评分、原因码、运营端点与 OpenAPI（PR-2）。
+- 新表 `company_contact_point`（迁移 `20261011090000_company_contact_point`，单事务、只新增、零回填）：
+  - kind 只有六种：`contact_page`、`impressum_page`、`contact_form`、`supplier_page`、`linkedin_company_page`、`x_company_account`；value 是不带 query、fragment、`@`、`%40` 与空白的 https 链接；LinkedIn 只收 `https://www.linkedin.com/company|showcase/<slug>`，X 只收 `https://x.com/<handle>`；四种站内 kind 不能指向 LinkedIn、X 或 Twitter；`data_class` 只能是 green。表里没有邮箱、电话、人名字段，以上全部由 CHECK 约束。
+  - 自动来源（`company_contact`）只写 UNVERIFIED；VALID 与 OPERATOR_REJECTED 必须有 `updated_by`（人）。状态 CHECK 每个分支先判 `status_reason IS NOT NULL`：一次性库实测，没有这一判断时 INVALID 且无原因的行会因 CHECK 结果为 NULL 而写进去。
+  - 复合外键到 `canonical_company(workspace_id, id)`，随公司级联删除；唯一键 (workspace, company, kind, value)；ENABLE + FORCE RLS，租户策略同发现表；`app_user` 显式授予 SELECT、INSERT、UPDATE、DELETE，`app-user-table-privileges.json` 同步。`schema.prisma` 加模型，Copy 已重签（只变指纹）。
+- 找链接（`discovery/website-profile/contact-paths.ts`，纯函数）：只读官网画像已经抓到的首页里的链接。
+  - 站内链接只收公司域名本身或 `www.` 主机（其他子域名标签是站方写的任意文字，不收），且路径每一段都是已知词或短数字、整条路径最多 6 个数字，所以存下的链接带不出页面上的任意文字（比如人名或拆开的电话号码）。
+  - 按路径或链接文字判定联系页、Impressum、供应商页（德英文：Lieferant werden、Lieferantenportal、Partner werden、Händler werden、Hersteller werden、Become a supplier、Supplier portal、Partner program 等），每种至多 1 个，规范成 https、去掉 query 与 fragment；只靠链接文字命中且带 query 的链接不收。
+  - LinkedIn 只收 company / showcase 页：优先 slug 含公司域名名称的那个，否则只有在首页只链了一个公司页时才收（避免把合作方、客户的页面当成本公司）；数字 ID 最多 6 位，7 位以上按疑似电话号码丢弃。X 只收账号页，且账号名里必须含公司域名名称（无法确认账号属于公司时不存，避免把个人账号当成公司数据）。
+  - 首页文本达到抓取上限（40,000 字符）时，链接类种类不算「看过」，不会因页面被截断而把点标成已移除。
+- 联系表单：开关打开且首页链到联系页时，经 ToolBroker 以同一公司主体对联系页做 1 次 `crawl4ai.render`（robots 与 source_policy 在工具内照常执行），看是否有表单：提交控件、同意文本、必填标记三类至少两类，排除搜索、登录、购物车和不带留言框的订阅表单。只读 HTML，不填写、不提交。渲染失败或被 robots 拦时，表单记为「未知」，不当作「没有」。渲染工具的持久结果把联系页 HTML 作为 PERSONAL_DATA 产物保留 24 小时（与 Impressum 抓取同一模式，DSR 擦除覆盖）；表里只存链接。
+- 写入：在官网画像的同一事务里，先拿工作区禁联锁，再 FOR SHARE 复读公司状态，再读禁联事实；公司缺失、已 SUPPRESSED、命中域名或公司名禁联时一条不写，链接主机命中域名禁联时丢掉该点。
+  - 重画像时，本次看过的种类里不再出现的自动来源点改为 INVALID / `REMOVED_FROM_SITE`，再次出现时恢复为 UNVERIFIED；运营来源或被人改过的点从不自动修改。
+  - `last_seen_at` 只前进不后退：观测时间取这家页面读完的时刻；刷新只在 `last_seen_at <= 观测时间` 时生效，标记移除只作用于观测时间之前见过的点。两个 run 共享同一家公司、旧观测后提交时不改任何东西（复审发现，一次性库复现了旧版本的 `company_contact_point_seen_check` 违约）。
+  - 联系页渲染的回执单独成一批 ACK，避免重放与新回执混在同一批。
+- 开关 `data_provider.company_contact` 以 DISABLED 种入（`update: {}` 不覆盖运维改动）。关闭时不渲染、不写点，画像照常只抓首页和 Impressum；但每次画像会多存 `website_profile.source_url` 和对应的一条 field_evidence（见下）。打开后，30 天内画像过、但还没用当前规则读过联系路径的公司会重画像一次（`website_profile._contact_parser` 标记，不写 field_evidence）。
+- 其他：
+  - `website_profile.source_url` 记录画像事实所在的页（Impressum，否则首页），经现有安全 https 校验；贸易角色、登记号、税号因此有来源 URL（A4）。
+  - `discovery.classify_trade_role` 的 allowedTools 加 `crawl4ai.render`；发现 run 预算包络按每家画像公司至多 1 次 render 加上限（`crawl4ai.render` 24 → 74 次，技术报价上限多 0.50 美元，5,597.48 → 5,597.98 美元）。新调用点登记进执行授权清单（37 个）。
+  - 公司主体 DSR 擦除时删掉该公司的点，计数并入 `contact_points_erased`，DeletionCompleted 契约不加字段。
+- 测试：找链接 20 项（含运行时拼出的负向输入：mailto、tel、编码或拼写的 at 符号、拆开的数字、自由子域名、数字 LinkedIn slug）、画像提供方 7 项（含开关关闭时恰好 2 次抓取、首页被截断）、经真实 ToolBroker 验证渲染以公司 subjectRef 准入 2 项、写入 8 项、活动 4 项、命名空间标记 2 项、擦除 2 项、迁移静态合同 6 项、属性清洗 1 项、种子 1 项；真库用例 `company-contact-point.postgres.spec.ts` 6 项以 app_user 运行（带 superuser 与 BYPASSRLS 守卫，含旧观测后提交的用例），接入 CI「Raw SQL parameter types on PostgreSQL」步骤，`app-user-table-privileges.postgres.spec.ts` 新增一项正向用例。一次性库：只部署 main 的迁移时新用例与权限清单用例失败（表不存在），部署新迁移后全部通过。
+- 未做（PR-2）：可达性公式与评分、原因码、运营端点、读模型与 OpenAPI。真栈有界样本要等 D9 开关与预算拍板。
+
 ## 2026-10-09 · Give discovery runs a 3-hour admission lease
 
 - 起因（2026-10-09 xin 实测，run `733fbf03`）：发现 run 的授权（Grant）最长 5 分钟。准入后每个活动开头、每次模型或工具预留都要再核验授权是否过期，所以 run 开始约 6 分钟（5 分钟加 60 秒容差）后的第一次核验就报 `EXECUTION_BUDGET_GRANT_EXPIRED`。733fbf03 在准入后 6 分钟因此失败，而一个发现 run 预计要跑 1–1.5 小时。产品负责人 2026-10-09 选定「准入后给 run 一段租约」，并确认 3 小时、只给发现 run。设计见 `docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md`（已改为 APPROVED）。

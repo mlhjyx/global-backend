@@ -126,7 +126,9 @@ describe('workspace execution technical envelope catalog', () => {
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
       ['wikidata.entity', 50 * 3],
-      ['crawl4ai.render', 12 * 2],
+      // digital footprint + structured harvest per signal company, and the contact page of
+      // each profiled company (BI-14, at most one render each)
+      ['crawl4ai.render', 12 * 2 + 50 * 1],
       // structured harvest (sitemap 8 + careers probes 6 + ATS 1) + watch sitemap 8
       ['http.get', 12 * 15 + 12 * 8],
     ]);
@@ -143,8 +145,8 @@ describe('workspace execution technical envelope catalog', () => {
       watchCompanies: 12,
     });
     // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 11550×2×20 = 558_040 cents;
-    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 24×1 = 1_708 cents.
-    expect(envelope.requiredCapMicrousd).toBe(559_748n * 10_000n);
+    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 = 1_758 cents.
+    expect(envelope.requiredCapMicrousd).toBe(559_798n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {

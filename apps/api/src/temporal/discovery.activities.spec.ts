@@ -3126,7 +3126,12 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     };
     const updateMany = vi.fn(async () => ({ count: 1 }));
     await deps.prisma.withWorkspace("ws", async (tx) => {
-      tx.dataProvider = { findUnique: vi.fn(async () => ({ status: options.status ?? "ENABLED" })) };
+      // BI-14's company_contact switch keeps its seeded DISABLED here; its own cases are below.
+      tx.dataProvider = {
+        findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
+          status: where.key === "company_contact" ? "DISABLED" : options.status ?? "ENABLED",
+        })),
+      };
       tx.icpDefinition = {
         findUnique: vi.fn(async () => ({
           companyAttributes: { industry: "Pumpen", product: "Kreiselpumpen" },
@@ -3219,6 +3224,157 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
     ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+});
+
+describe("profileWebsitesForRun contact paths (BI-14)", () => {
+  // Synthetic `.example` company and made-up slugs and handles only.
+  const SITE = "https://pumpen-handel.example";
+  const COMPANY = { id: "c1", name: "Pumpen Handel GmbH", domain: "pumpen-handel.example", country: "DE" };
+  const PATHS = {
+    contactPage: `${SITE}/kontakt`,
+    impressumPage: `${SITE}/impressum`,
+    supplierPage: `${SITE}/lieferanten`,
+    linkedinCompanyPage: "https://www.linkedin.com/company/pumpen-handel-example",
+    xCompanyAccount: "https://x.com/pumpenhandel",
+    linksChecked: true,
+    contactForm: `${SITE}/kontakt`,
+    contactFormChecked: true,
+  };
+  const PROFILE = {
+    homepageUrl: `${SITE}/`,
+    impressumUrl: `${SITE}/impressum`,
+    tradeRole: "distributor",
+    tradeRoleSource: "rules",
+    tradeRoleConfidence: 0.7,
+    ownManufacturing: null,
+    carriedBrands: [],
+    carriesChineseBrand: false,
+    carriesForeignBrand: false,
+    legalName: "Pumpen Handel GmbH",
+    register: null,
+    vatId: null,
+    evidence: [],
+  };
+
+  type Committed = { data: { attributes: Record<string, Record<string, unknown>> } };
+
+  async function makeContactDeps(
+    profile: ReturnType<typeof vi.fn>,
+    options: { contactStatus?: string; attributes?: Record<string, unknown>; lockedStatus?: string } = {},
+  ) {
+    const deps = makeEnrichDeps([]) as unknown as {
+      prisma: { withWorkspace: (ws: string, fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };
+      websiteProfile?: unknown;
+    };
+    const updateMany = vi.fn(async (_args: Committed) => ({ count: 1 }));
+    const points = {
+      findMany: vi.fn(async () => []),
+      createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    };
+    const attributes = options.attributes ?? {};
+    await deps.prisma.withWorkspace("ws", async (raw) => {
+      const tx = raw as Record<string, unknown> & { canonicalCompany: Record<string, unknown> };
+      tx.$queryRaw = vi.fn(async (strings: TemplateStringsArray) =>
+        strings.join("?").includes("FOR SHARE")
+          ? [{ status: options.lockedStatus ?? "NEW", name: COMPANY.name, domain: COMPANY.domain }]
+          : [{ locked: true }]);
+      tx.dataProvider = {
+        findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
+          status: where.key === "company_contact" ? options.contactStatus ?? "DISABLED" : "ENABLED",
+        })),
+      };
+      tx.icpDefinition = {
+        findUnique: vi.fn(async () => ({ companyAttributes: { industry: "Pumpen" }, targetMarkets: ["DE"] })),
+      };
+      tx.canonicalCompany.updateMany = updateMany;
+      tx.canonicalCompany.findMany = async () => [{ ...COMPANY, attributes }];
+      tx.canonicalCompany.findUnique = async () => ({ ...COMPANY, status: "NEW", attributes });
+      tx.companyContactPoint = points;
+    });
+    deps.websiteProfile = { profile };
+    return { acts: createDiscoveryActivities(deps as never), updateMany, points };
+  }
+
+  it("leaves contact paths alone while company_contact is DISABLED: nothing asked for, no points", async () => {
+    // A provider that returns contact paths anyway is ignored.
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, updateMany, points } = await makeContactDeps(profile);
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-off", { icpId: "icp-1" }));
+
+    expect(profile.mock.calls[0]![0]).toMatchObject({ contactPaths: false });
+    expect(points.findMany).not.toHaveBeenCalled();
+    expect(points.createMany).not.toHaveBeenCalled();
+    expect(points.updateMany).not.toHaveBeenCalled();
+    const profileAttributes = updateMany.mock.calls[0]![0].data.attributes.website_profile;
+    expect(profileAttributes).not.toHaveProperty("_contact_parser");
+    // The source page of the profile facts is kept either way (A4).
+    expect(profileAttributes).toMatchObject({ source_url: `${SITE}/impressum` });
+  });
+
+  it("asks for contact paths while company_contact is ENABLED and stores them in the profile transaction", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, updateMany, points } = await makeContactDeps(profile, { contactStatus: "ENABLED" });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-on", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, matched: 1 });
+
+    expect(profile.mock.calls[0]![0]).toMatchObject({ domain: "pumpen-handel.example", contactPaths: true });
+    expect(points.createMany).toHaveBeenCalledOnce();
+    const created = points.createMany.mock.calls[0]![0] as {
+      data: Array<Record<string, unknown>>;
+      skipDuplicates: boolean;
+    };
+    expect(created.skipDuplicates).toBe(true);
+    expect(created.data.map(({ kind, value, status, dataClass, providerKey }) =>
+      [kind, value, status, dataClass, providerKey])).toEqual([
+      ["contact_page", PATHS.contactPage, "UNVERIFIED", "green", "company_contact"],
+      ["impressum_page", PATHS.impressumPage, "UNVERIFIED", "green", "company_contact"],
+      ["supplier_page", PATHS.supplierPage, "UNVERIFIED", "green", "company_contact"],
+      ["linkedin_company_page", PATHS.linkedinCompanyPage, "UNVERIFIED", "green", "company_contact"],
+      ["x_company_account", PATHS.xCompanyAccount, "UNVERIFIED", "green", "company_contact"],
+      ["contact_form", PATHS.contactForm, "UNVERIFIED", "green", "company_contact"],
+    ]);
+    expect(updateMany.mock.calls[0]![0].data.attributes.website_profile).toMatchObject({
+      _contact_parser: "company_contact/v1",
+      source_url: `${SITE}/impressum`,
+    });
+  });
+
+  it("re-reads a recently profiled company once when its contact paths were never read under the current rules", async () => {
+    const fresh = new Date().toISOString();
+    const cases: Array<[Record<string, unknown>, string, number]> = [
+      [{ trade_role: "distributor", _ts: fresh }, "ENABLED", 1],
+      [{ trade_role: "distributor", _ts: fresh, _contact_parser: "company_contact/v1" }, "ENABLED", 0],
+      [{ trade_role: "distributor", _ts: fresh }, "DISABLED", 0],
+    ];
+    for (const [websiteProfile, contactStatus, profiles] of cases) {
+      const profile = vi.fn(async () => PROFILE);
+      const { acts } = await makeContactDeps(profile, {
+        contactStatus,
+        attributes: { website_profile: websiteProfile },
+      });
+      await acts.profileWebsitesForRun(discoveryArgs(`run-contact-ttl-${profiles}`, { icpId: "icp-1" }));
+      expect(profile, `${contactStatus} ${JSON.stringify(websiteProfile)}`).toHaveBeenCalledTimes(profiles);
+    }
+  });
+
+  it("re-reads the company FOR SHARE before writing points: a company suppressed meanwhile gets none", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, points } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      lockedStatus: "SUPPRESSED",
+    });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-suppressed", { icpId: "icp-1" }));
+
+    expect(profile).toHaveBeenCalledOnce();
+    expect(points.findMany).not.toHaveBeenCalled();
+    expect(points.createMany).not.toHaveBeenCalled();
+    expect(points.updateMany).not.toHaveBeenCalled();
   });
 });
 

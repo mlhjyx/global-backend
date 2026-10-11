@@ -21,6 +21,7 @@
     "canonical_taxonomy": ["SELECT"],
     "citation": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "claim": ["INSERT", "SELECT", "UPDATE"],
+    "company_contact_point": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "company_profile": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "contact_point": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "data_provider": ["SELECT"],
