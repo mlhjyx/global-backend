@@ -30,9 +30,13 @@ describe('company_contact_point migration (BI-14)', () => {
   const statements = topLevelStatements(sql);
   const table = statements.find((statement) => statement.startsWith('CREATE TABLE')) ?? '';
 
-  it('is the newest migration and runs additively in one bounded transaction', () => {
+  it('follows the migrations it was written against and runs additively in one bounded transaction', () => {
+    // Later migrations may follow (#631 added 20261011100000); what must hold is that this one
+    // was never renamed ahead of a migration that environments had already applied.
     const names = readdirSync(MIGRATIONS).filter((name) => /^\d{14}_/u.test(name)).sort();
-    expect(names.at(-1)).toBe(MIGRATION);
+    expect(names).toContain(MIGRATION);
+    expect(names.indexOf(MIGRATION)).toBeGreaterThan(names.indexOf('20261010110000_icp_admission_lease'));
+    expect(names.indexOf('20261010110000_icp_admission_lease')).toBeGreaterThanOrEqual(0);
     expect(statements[0]).toBe('BEGIN');
     expect(statements.at(-1)).toBe('COMMIT');
     expect(statements).toContain("SET LOCAL lock_timeout = '5s'");
