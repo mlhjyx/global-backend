@@ -18,6 +18,7 @@ const PATHS = {
   supplierPage: `${SITE}/lieferanten`,
   linkedinCompanyPage: 'https://www.linkedin.com/company/pumpen-handel-example',
   xCompanyAccount: 'https://x.com/pumpenhandel',
+  linksChecked: true,
   contactForm: `${SITE}/kontakt`,
   contactFormChecked: true,
 };
@@ -128,6 +129,12 @@ describe('companyContactObservation (BI-14)', () => {
     ]);
     expect(observation.checkedKinds).not.toContain('contact_form');
     expect(observation.checkedKinds).toContain('supplier_page');
+  });
+
+  it('does not count the link kinds as looked at when the homepage text was cut at the fetch cap', () => {
+    const observation = companyContactObservation({ ...PATHS, linksChecked: false });
+    expect(observation.points).toHaveLength(6);
+    expect(observation.checkedKinds).toEqual(['contact_form']);
   });
 });
 

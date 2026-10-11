@@ -38,9 +38,10 @@ export interface CompanyContactObservation {
 }
 
 /**
- * The provider's contact paths as points. Links come from the homepage, so all link
- * kinds count as looked at; the form only when the contact page could be read (or
- * when the homepage links no contact page at all).
+ * The provider's contact paths as points. Links come from the homepage, so the link
+ * kinds count as looked at only when the homepage text was complete (not cut at the
+ * fetch cap); the form only when the contact page could be read, or when a complete
+ * homepage links no contact page at all.
  */
 export function companyContactObservation(paths: CompanyContactPaths): CompanyContactObservation {
   const candidates: ReadonlyArray<[CompanyContactPointKind, string | null, CompanyContactSourceKind]> = [
@@ -54,7 +55,7 @@ export function companyContactObservation(paths: CompanyContactPaths): CompanyCo
   return {
     points: candidates.flatMap(([kind, value, sourceKind]) => (value ? [{ kind, value, sourceKind }] : [])),
     checkedKinds: [
-      ...COMPANY_CONTACT_LINK_KINDS,
+      ...(paths.linksChecked ? COMPANY_CONTACT_LINK_KINDS : []),
       ...(paths.contactFormChecked ? (['contact_form'] as const) : []),
     ],
   };

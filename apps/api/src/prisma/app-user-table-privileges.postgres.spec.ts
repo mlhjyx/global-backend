@@ -596,6 +596,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
       supplierPage: null,
       linkedinCompanyPage: null,
       xCompanyAccount: null,
+      linksChecked: true,
       contactForm: `${site}/kontakt`,
       contactFormChecked: true,
     };

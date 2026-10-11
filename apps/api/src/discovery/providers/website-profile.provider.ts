@@ -22,6 +22,8 @@ import { scrubPii, scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
 /** data_provider kill switch and canonical attribute namespace. */
 export const WEBSITE_PROFILE_PROVIDER_KEY = 'website_profile' as const;
+/** crawl4ai.fetch text cap per page; a homepage this long may have been cut. */
+const PAGE_FETCH_MAX_CHARS = 40_000;
 const HOME_PROMPT_CHARS = 12_000;
 const IMPRESSUM_PROMPT_CHARS = 4_000;
 const RULES_CONFIDENCE = 0.7;
@@ -75,6 +77,11 @@ export type WebsiteTradeRole =
  * whether its linked contact page carries a contact form. Links only.
  */
 export interface CompanyContactPaths extends CompanyContactLinks {
+  /**
+   * False when the homepage text reached the fetch cap: links past the cut may exist, so a
+   * kind missing from the links proves nothing.
+   */
+  readonly linksChecked: boolean;
   /** The contact page, when its rendered HTML has a contact form. */
   readonly contactForm: string | null;
   /** False when the contact page could not be rendered: its form is then unknown, not absent. */
@@ -205,7 +212,11 @@ export class WebsiteProfileProvider {
     ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef },
   ): Promise<CompanyContactPaths> {
     const links = findContactPaths(home, domain);
-    if (!links.contactPage) return { ...links, contactForm: null, contactFormChecked: true };
+    const linksChecked = home.length < PAGE_FETCH_MAX_CHARS;
+    // No contact page in a complete homepage: there is no form to look for. In a cut one: unknown.
+    if (!links.contactPage) {
+      return { ...links, linksChecked, contactForm: null, contactFormChecked: linksChecked };
+    }
     let html = '';
     try {
       html = await this.render(links.contactPage, ctx);
@@ -213,9 +224,10 @@ export class WebsiteProfileProvider {
       if (artifactSubjectSkipReason(error) || isExecutionControlError(error)) throw error;
       html = ''; // an unreadable contact page keeps its link; only the form stays unknown
     }
-    if (!html) return { ...links, contactForm: null, contactFormChecked: false };
+    if (!html) return { ...links, linksChecked, contactForm: null, contactFormChecked: false };
     return {
       ...links,
+      linksChecked,
       contactForm: hasContactForm(html) ? links.contactPage : null,
       contactFormChecked: true,
     };
@@ -232,7 +244,7 @@ export class WebsiteProfileProvider {
   private async fetch(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
     const result = await this.deps.broker.invoke<{ url: string; maxChars?: number }, CrawlResult>(
       'crawl4ai.fetch',
-      { url, maxChars: 40_000 },
+      { url, maxChars: PAGE_FETCH_MAX_CHARS },
       this.toolContext(ctx),
     );
     return result.data.text ?? '';

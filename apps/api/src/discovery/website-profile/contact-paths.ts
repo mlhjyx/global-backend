@@ -8,10 +8,11 @@ import { canonicalizeSuppressionValue } from '../suppression-value';
  * page carries a contact form. Pure and deterministic: no network, no model.
  *
  * Only links are kept, never page text. No email address, phone number or person
- * name is parsed, normalised or stored: a same-site link is kept only when every
- * path segment consists of known words or short numbers, so a stored link cannot
- * carry free text from the page; a social link must match its exact company-page
- * pattern.
+ * name is parsed, normalised or stored: a same-site link is kept only on the bare
+ * company domain or its `www.` host and only when every path segment consists of
+ * known words or short numbers (at most six digits in the whole path), so a stored
+ * link cannot carry free text from the page; a social link must match its exact
+ * company-page pattern and be recognisably the company's own.
  */
 export const COMPANY_CONTACT_POINT_KINDS = Object.freeze([
   'contact_page',
@@ -55,6 +56,8 @@ const MAX_PATH_SEGMENTS = 3;
 const LINK_TARGET = /\]\(\s*(<[^>\n]{1,2048}>|[^)\s]{1,2048})/gu;
 const PAGE_EXTENSION = /\.(?:html?|php|aspx?|jsp|shtml)$/u;
 const SHORT_NUMBER = /^\d{1,6}$/u;
+/** Digits in a whole stored path: a phone number split over segments or `_` stays out. */
+const MAX_PATH_DIGITS = 6;
 
 /**
  * The words a stored same-site path may consist of: language and country codes,
@@ -174,6 +177,7 @@ function vocabularyPath(
   const segments = trimmed.slice(1).split('/');
   if (segments.length > MAX_PATH_SEGMENTS) return null;
   let lastTokens: string[] = [];
+  let pathDigits = 0;
   for (const segment of segments) {
     let decoded: string;
     try {
@@ -181,6 +185,8 @@ function vocabularyPath(
     } catch {
       return null;
     }
+    pathDigits += decoded.replace(/\D/gu, '').length;
+    if (pathDigits > MAX_PATH_DIGITS) return null;
     const word = decoded.normalize('NFC').toLowerCase().replace(PAGE_EXTENSION, '');
     if (!word) return null;
     const tokens = word.split(/[-_.]/u);
@@ -197,7 +203,10 @@ interface SameSitePage {
   readonly hadQuery: boolean;
 }
 
-/** A link on the company domain or a subdomain of it, as https without query or fragment. */
+/**
+ * A link on the bare company domain or its `www.` host, as https without query or fragment.
+ * Other subdomain labels are free text chosen by the site and are not stored.
+ */
 function sameSitePage(target: string, base: URL, domain: string): SameSitePage | null {
   const trimmed = target.trim();
   if (!trimmed || trimmed.length > MAX_TARGET_CHARS) return null;
@@ -210,7 +219,7 @@ function sameSitePage(target: string, base: URL, domain: string): SameSitePage |
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
   if (url.username || url.password || url.port) return null;
   const host = url.hostname;
-  if (host !== domain && !host.endsWith(`.${domain}`)) return null;
+  if (host !== domain && host !== `www.${domain}`) return null;
   const path = vocabularyPath(url.pathname);
   if (!path) return null;
   const value = `https://${host}${path.pathname}`;
@@ -296,6 +305,20 @@ function xCompanyAccount(target: string, domain: string): string | null {
   return isStableSafeHttpsUrl(value) ? value : null;
 }
 
+/**
+ * The company's own LinkedIn page among the distinct ones its homepage links: the first whose
+ * slug carries the company domain name, otherwise the only one. Several other pages (partners,
+ * customers, associations) leave it unknown rather than storing another company's page.
+ */
+function ownLinkedinPage(pages: readonly string[], domain: string): string | null {
+  const name = domainNameLabel(domain);
+  const named = name
+    ? pages.find((page) => page.slice(page.lastIndexOf('/') + 1).replaceAll('-', '').includes(name))
+    : undefined;
+  if (named) return named;
+  return pages.length === 1 ? pages[0]! : null;
+}
+
 function companyDomain(raw: unknown): string | null {
   return typeof raw === 'string' ? canonicalizeSuppressionValue('domain', raw) : null;
 }
@@ -320,10 +343,11 @@ export function findContactPaths(homeMarkdown: string, domainInput: string): Com
   if (!domain || typeof homeMarkdown !== 'string' || !homeMarkdown) return NO_LINKS;
   const base = new URL(`https://${domain}/`);
   const best = new Map<SameSiteKind, { url: string; rank: Rank }>();
-  let linkedin: string | null = null;
+  const linkedinPages: string[] = [];
   let x: string | null = null;
   markdownLinks(homeMarkdown).forEach((link, index) => {
-    linkedin ??= linkedinCompanyPage(link.target);
+    const linkedin = linkedinCompanyPage(link.target);
+    if (linkedin && !linkedinPages.includes(linkedin)) linkedinPages.push(linkedin);
     x ??= xCompanyAccount(link.target, domain);
     const page = sameSitePage(link.target, base, domain);
     if (!page) return;
@@ -340,7 +364,7 @@ export function findContactPaths(homeMarkdown: string, domainInput: string): Com
     contactPage: best.get('contact_page')?.url ?? null,
     impressumPage: best.get('impressum_page')?.url ?? null,
     supplierPage: best.get('supplier_page')?.url ?? null,
-    linkedinCompanyPage: linkedin,
+    linkedinCompanyPage: ownLinkedinPage(linkedinPages, domain),
     xCompanyAccount: x,
   });
 }

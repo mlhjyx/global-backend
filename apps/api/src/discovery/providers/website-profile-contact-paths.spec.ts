@@ -91,6 +91,7 @@ describe('WebsiteProfileProvider contact paths (BI-14)', () => {
       supplierPage: 'https://pumpen-handel.example/lieferanten',
       linkedinCompanyPage: 'https://www.linkedin.com/company/pumpen-handel-example',
       xCompanyAccount: 'https://x.com/pumpenhandel',
+      linksChecked: true,
       contactForm: CONTACT_URL,
       contactFormChecked: true,
     });
@@ -131,8 +132,24 @@ describe('WebsiteProfileProvider contact paths (BI-14)', () => {
       supplierPage: null,
       linkedinCompanyPage: null,
       xCompanyAccount: null,
+      linksChecked: true,
       contactForm: null,
       contactFormChecked: true,
+    });
+  });
+
+  it('counts neither the links nor the form as checked when the homepage text reached the fetch cap', async () => {
+    // 40,000 characters is the fetch cap: links past it may exist, so their absence proves nothing.
+    const truncated = 'Pumpen-Großhandel ab Lager. '.repeat(2_000).slice(0, 40_000);
+    const executionBroker = contactBroker({ ...PAGES, 'https://pumpen-handel.example/': truncated }, {});
+    const profile = await provider(executionBroker).profile({ ...INPUT, contactPaths: true }, CTX);
+
+    expect(executionBroker.invoke.mock.calls.map(([toolId]) => toolId)).not.toContain('crawl4ai.render');
+    expect(profile?.contactPaths).toMatchObject({
+      contactPage: null,
+      linksChecked: false,
+      contactForm: null,
+      contactFormChecked: false,
     });
   });
 

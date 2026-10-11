@@ -18,6 +18,9 @@ const NONE = {
 };
 
 const links = (...lines: string[]) => lines.join('\n');
+/** Digits built at runtime, so the source holds no phone-shaped literal. */
+const digits = (count: number) =>
+  Array.from({ length: count }, (_, index) => String((index * 3 + 1) % 10)).join('');
 
 describe('company contact point kinds (BI-14)', () => {
   it('are links and a contact-form marker only', () => {
@@ -76,7 +79,7 @@ describe('findContactPaths (BI-14)', () => {
     );
   });
 
-  it('keeps only links on the company domain or its subdomains', () => {
+  it('keeps only links on the company domain or its www host', () => {
     const home = links(
       '[Kontakt](https://pumpen-handel.example.other.example/kontakt)',
       '[Kontakt](https://notpumpen-handel.example/kontakt)',
@@ -90,8 +93,40 @@ describe('findContactPaths (BI-14)', () => {
     expect(findContactPaths(home, DOMAIN)).toEqual(NONE);
 
     expect(
-      findContactPaths('[Kontakt](https://service.pumpen-handel.example/kontakt)', DOMAIN).contactPage,
-    ).toBe('https://service.pumpen-handel.example/kontakt');
+      findContactPaths('[Kontakt](https://www.pumpen-handel.example/kontakt)', DOMAIN).contactPage,
+    ).toBe('https://www.pumpen-handel.example/kontakt');
+    // Any other subdomain label is free text from the site, so it is not stored.
+    const label = ['zz', 'sample'].join('-');
+    for (const host of ['service.pumpen-handel.example', `${label}.pumpen-handel.example`]) {
+      expect(findContactPaths(`[Kontakt](https://${host}/kontakt)`, DOMAIN).contactPage, host).toBeNull();
+    }
+  });
+
+  it('ignores mailto and tel links and paths with an encoded or spelled-out at sign', () => {
+    const mail = ['mailto', 'zz'].join(':');
+    const call = ['tel', digits(3)].join(':');
+    const encodedAt = ['%', '40'].join('');
+    const spelledAt = ['(', 'at', ')'].join('');
+    const home = links(
+      `[Kontakt](${mail})`,
+      `[Kontakt](${call})`,
+      `[Kontakt](/kontakt${encodedAt}zz)`,
+      `[Kontakt](/kontakt${spelledAt}zz)`,
+    );
+    expect(findContactPaths(home, DOMAIN)).toEqual(NONE);
+  });
+
+  it('caps the digits in a stored path at six, however they are split', () => {
+    for (const path of [
+      `/kontakt/${digits(4)}/${digits(6)}`,
+      `/kontakt/${digits(4)}_${digits(6)}`,
+      `/seite/${digits(7)}`,
+    ]) {
+      expect(findContactPaths(`[Kontakt](${path})`, DOMAIN).contactPage, path).toBeNull();
+    }
+    expect(findContactPaths(`[Kontakt](/seite/${digits(6)})`, DOMAIN).contactPage).toBe(
+      `https://pumpen-handel.example/seite/${digits(6)}`,
+    );
   });
 
   it('stores only paths made of known words, so no free page text reaches the stored link', () => {
@@ -184,6 +219,27 @@ describe('findContactPaths (BI-14)', () => {
     for (const url of dropped) {
       expect(findContactPaths(`[LinkedIn](${url})`, DOMAIN).linkedinCompanyPage, url).toBeNull();
     }
+  });
+
+  it("keeps a LinkedIn page only when it is recognisably the company's own", () => {
+    const page = (slug: string) => `[LinkedIn](https://www.linkedin.com/company/${slug})`;
+    // A slug carrying the domain name wins over other companies' pages on the homepage.
+    expect(
+      findContactPaths(links(page('zz-partner-verband'), page('pumpen-handel-gmbh')), DOMAIN).linkedinCompanyPage,
+    ).toBe('https://www.linkedin.com/company/pumpen-handel-gmbh');
+    // Several company pages and none with the domain name: none is kept.
+    expect(
+      findContactPaths(links(page('zz-partner-verband'), page('zz-kunde-ag')), DOMAIN).linkedinCompanyPage,
+    ).toBeNull();
+    // A single distinct company page is taken as the company's own, also when linked twice.
+    expect(
+      findContactPaths(links(page('zz-firmenname'), page('zz-firmenname')), DOMAIN).linkedinCompanyPage,
+    ).toBe('https://www.linkedin.com/company/zz-firmenname');
+    // Numeric ids: up to six digits are kept; seven or more look like a phone number and are dropped.
+    expect(findContactPaths(page(digits(6)), DOMAIN).linkedinCompanyPage).toBe(
+      `https://www.linkedin.com/company/${digits(6)}`,
+    );
+    expect(findContactPaths(page(digits(7)), DOMAIN).linkedinCompanyPage).toBeNull();
   });
 
   it('keeps an X account only when its handle carries the company domain name', () => {

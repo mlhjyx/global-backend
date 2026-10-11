@@ -186,6 +186,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL
       supplierPage: `${site}/lieferanten`,
       linkedinCompanyPage: `https://www.linkedin.com/company/pumpen-${suffix}`,
       xCompanyAccount: `https://x.com/pumpen${suffix}`,
+      linksChecked: true,
       contactForm: `${site}/kontakt`,
       contactFormChecked: true,
     };
@@ -247,6 +248,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL
       supplierPage: null as string | null,
       linkedinCompanyPage: null,
       xCompanyAccount: null,
+      linksChecked: true,
       contactForm: null,
       contactFormChecked: false,
     };
@@ -291,6 +293,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_point on PostgreSQL
             supplierPage: null,
             linkedinCompanyPage: null,
             xCompanyAccount: null,
+            linksChecked: true,
             contactForm: null,
             contactFormChecked: true,
           }),

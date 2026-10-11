@@ -3237,6 +3237,7 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     supplierPage: `${SITE}/lieferanten`,
     linkedinCompanyPage: "https://www.linkedin.com/company/pumpen-handel-example",
     xCompanyAccount: "https://x.com/pumpenhandel",
+    linksChecked: true,
     contactForm: `${SITE}/kontakt`,
     contactFormChecked: true,
   };
