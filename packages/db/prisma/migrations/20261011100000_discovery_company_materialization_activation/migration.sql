@@ -11,12 +11,14 @@
 --
 -- The only change is the activation singleton, written through the Release A insert guard
 -- (transaction-local setting plus the exact row). No run, admission or receipt is backfilled
--- or rewritten. The row is immutable (UPDATE and DELETE are rejected), so the activation cannot
--- be rolled back: the rollback is not to deploy it.
+-- or rewritten. Row triggers reject UPDATE and DELETE of the singleton, but the table owner can
+-- still remove it (TRUNCATE fires no row trigger), so that guard is not a rollback mechanism.
 --
--- Deploy in name order in the same maintenance window as the image that carries this migration
--- (that image writes the v1 marker), with the runtime stopped, no discovery run in flight and a
--- fresh database backup. SHA-256(UTF-8 "discovery-company-materialization/v1", no newline):
+-- Deploy in name order in the same maintenance window as the image that carries this migration,
+-- with the runtime stopped, no discovery run in flight and a fresh database backup. Once it is
+-- applied the previous image refuses to start (MIGRATION_REVISION_MISMATCH): roll back by
+-- restoring that backup together with the previous image.
+-- SHA-256(UTF-8 "discovery-company-materialization/v1", no newline):
 -- 558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe.
 BEGIN;
 

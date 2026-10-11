@@ -89,7 +89,10 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
-import { executeDiscoveryCompanyMaterialization } from './discovery-company-materialization';
+import {
+  DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS,
+  executeDiscoveryCompanyMaterialization,
+} from './discovery-company-materialization';
 import {
   WEBSITE_PROFILE_PROVIDER_KEY,
   WebsiteProfileProvider,
@@ -1079,7 +1082,7 @@ export function createDiscoveryActivities(deps: {
           }
         }
         return { companies, suppressed };
-      });
+      }, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
     },
 
     /**

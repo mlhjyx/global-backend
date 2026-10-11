@@ -28,7 +28,8 @@ vi.mock('@temporalio/activity', async (importOriginal) => ({
  * without the marker, and proves canonicalize refuses the v1 run there. It then applies the
  * activation migration the way a deploy does (`prisma migrate deploy` over the real migrations)
  * and proves that the same run is admitted and materializes its ACCEPTED public_web Raw record
- * into a canonical company, that the activation row can never change, that new runs must carry
+ * into a canonical company (also across two batch transactions), that row triggers reject any
+ * UPDATE, DELETE or second INSERT of the activation row, that new runs must carry
  * the marker, and that the pre-C run keeps the legacy path. Canonicalize runs through the
  * production activity (createDiscoveryActivities().canonicalizeRun) as app_user.
  *
@@ -94,11 +95,13 @@ function releaseBeforeActivation(): string {
   return root;
 }
 
+type RawFixture = Readonly<{ id: string; payloadHash: string; domain: string; name: string }>;
 type RunFixture = Readonly<{
   runId: string;
   rawRecordId: string;
   domain: string;
   name: string;
+  raws: readonly RawFixture[];
   input: Readonly<{
     workspaceId: string;
     runId: string;
@@ -172,35 +175,41 @@ describe.runIf(enabled)('Discovery company materialization activation (Release B
     return { id: receipt.id, payloadHash: receipt.payloadHash };
   }
 
-  async function createRun(subject: string, marker: string | null, queries: unknown[]): Promise<RunFixture> {
+  /** One READY plan with a single public_web query, its run, and `records` ACCEPTED Raw records. */
+  async function createRun(subject: string, marker: string | null, records = 1): Promise<RunFixture> {
     const runId = randomUUID();
     const planId = randomUUID();
-    const domain = `${subject}-${suffix}.de`;
-    const name = subject === 'governed' ? 'Pumpen Aktivierung GmbH' : 'Ventile Bestand GmbH';
-    await insertPlan(planId, queries);
+    await insertPlan(planId, [{ source: 'public_web' }]);
     await owner.$executeRaw`
       INSERT INTO discovery_run(id, workspace_id, plan_id, icp_id, status, materialization_contract_version)
       VALUES (${runId}::uuid, ${workspaceId}::uuid, ${planId}::uuid, ${randomUUID()}::uuid, 'RUNNING', ${marker})`;
-    const raw = await writeRawRecord(runId, domain, name);
+    const raws: RawFixture[] = [];
+    for (let index = 0; index < records; index += 1) {
+      const domain = records === 1 ? `${subject}-${suffix}.de` : `${subject}-${index}-${suffix}.de`;
+      const name = subject === 'governed' ? 'Pumpen Aktivierung GmbH'
+        : subject === 'legacy' ? 'Ventile Bestand GmbH' : `Pumpen Charge ${index} GmbH`;
+      raws.push({ ...(await writeRawRecord(runId, domain, name)), domain, name });
+    }
     return {
       runId,
-      rawRecordId: raw.id,
-      domain,
-      name,
+      rawRecordId: raws[0]!.id,
+      domain: raws[0]!.domain,
+      name: raws[0]!.name,
+      raws,
       input: { workspaceId, runId, executionContractVersion: 2, executionBudget: binding(subject) },
     };
   }
 
   /*
-   * The query phase's governed lineage for one query with one ACCEPTED item: a consumed workspace
-   * Grant, its settled operation and domain ack, the Q receipt/outcome/attempt and the A relation
-   * from the operation to the Raw record, as the Q-TX writer leaves them.
+   * The query phase's governed lineage for the run's one query, one ACCEPTED item per Raw record:
+   * a consumed workspace Grant, its settled operation and domain ack, the Q receipt/outcome/attempt
+   * and one A relation from the operation to each Raw record, as the Q-TX writer leaves them.
    */
-  async function completeQueryPhase(run: RunFixture, rawPayloadHash: string): Promise<string> {
+  async function completeQueryPhase(run: RunFixture): Promise<string[]> {
     const budget = run.input.executionBudget as ReturnType<typeof binding>;
     const accountId = randomUUID();
     const operationId = randomUUID();
-    const itemId = randomUUID();
+    const records = run.raws.length;
     const queryKey = sha256(`query:${run.runId}`);
     const domainAckKey = sha256(`ack-key:${run.runId}`);
     const domainRevision = sha256(`ack-revision:${run.runId}`);
@@ -251,7 +260,8 @@ describe.runIf(enabled)('Discovery company materialization activation (Release B
         governance_denied_count, usage_quantity, cost_cents, contract_sha256)
       SELECT ${workspaceId}::uuid, run.id, run.plan_id, ${budget.authorityId}::uuid, ${budget.accountKey},
         'discovery.run', 'discovery_run', ${budget.subjectId}, ${budget.requestSha256}, ${queryKey}, 0,
-        'public_intelligence', '["public_web"]'::jsonb, 1, 1, 1, 0, 0, 0, 0, 1, 0, ${Q_CONTRACT_SHA256}
+        'public_intelligence', '["public_web"]'::jsonb, 1, ${records}, ${records}, 0, 0, 0, 0, ${records}, 0,
+        ${Q_CONTRACT_SHA256}
       FROM discovery_run run WHERE run.id = ${run.runId}::uuid`;
     await owner.$executeRaw`
       INSERT INTO discovery_query_execution_outcome(workspace_id, run_id, query_key, budget_truncated, contract_sha256)
@@ -264,28 +274,34 @@ describe.runIf(enabled)('Discovery company materialization activation (Release B
       VALUES (${workspaceId}::uuid, ${run.runId}::uuid, ${queryKey}, 'public_web', 'discovery.extract_company',
         ${operationId}::uuid, ${workspaceId}, ${budget.authorityId}::uuid, ${accountId}::uuid, 1, ${ack!.ack_id},
         'PublicWebDiscoveryProvider.mineDomain', 'RawSourceRecord', ${domainAckKey}, ${domainRevision},
-        ${ack!.result_digest}, 'discovery-extract-company/v1', 'discovery-company-result-lineage/v1', 1, 1,
-        ${Q_CONTRACT_SHA256})`;
-    const [relation] = await app.withWorkspace(workspaceId, (tx) => tx.$queryRaw<Array<{
-      operation_subject_id: string; child_subject_id: string; relation_id: string;
-    }>>`
-      SELECT operation_subject_id::text, child_subject_id::text, relation_id::text
-      FROM append_workspace_governed_child_relation_v1(
-        ${workspaceId}::uuid, ${budget.authorityId}::uuid, ${accountId}::uuid, ${operationId}::uuid, 1,
-        ${ack!.ack_id}::char(64), ${ack!.result_digest}::char(64), 'tool_operation', ${operationId}::uuid,
-        'NON_PERSONAL', NULL, NULL, NULL, 'raw_source_record', ${run.rawRecordId}::uuid, 'NON_PERSONAL',
-        NULL, NULL, 'discovery.raw_source_record:0', 'MATERIALIZED_CHILD', 'discovery_query_attempt_item',
-        ${itemId}::uuid, NULL, ${A_CONTRACT_SHA256}::char(64))`);
-    expect(relation).toBeDefined();
-    await owner.$executeRaw`
-      INSERT INTO discovery_query_attempt_item(id, workspace_id, run_id, query_key, provider_key, operation_id,
-        record_index, resolution_kind, raw_record_id, raw_payload_hash, raw_ingest_status, relation_key,
-        operation_subject_id, child_subject_id, relation_id, contract_sha256)
-      VALUES (${itemId}::uuid, ${workspaceId}::uuid, ${run.runId}::uuid, ${queryKey}, 'public_web',
-        ${operationId}::uuid, 0, 'INSERTED', ${run.rawRecordId}::uuid, ${rawPayloadHash}, 'ACCEPTED',
-        'discovery.raw_source_record:0', ${relation!.operation_subject_id}::uuid,
-        ${relation!.child_subject_id}::uuid, ${relation!.relation_id}::uuid, ${A_CONTRACT_SHA256})`;
-    return itemId;
+        ${ack!.result_digest}, 'discovery-extract-company/v1', 'discovery-company-result-lineage/v1',
+        ${records}, ${records}, ${Q_CONTRACT_SHA256})`;
+    const itemIds: string[] = [];
+    for (const [recordIndex, raw] of run.raws.entries()) {
+      const itemId = randomUUID();
+      const relationKey = `discovery.raw_source_record:${recordIndex}`;
+      const [relation] = await app.withWorkspace(workspaceId, (tx) => tx.$queryRaw<Array<{
+        operation_subject_id: string; child_subject_id: string; relation_id: string;
+      }>>`
+        SELECT operation_subject_id::text, child_subject_id::text, relation_id::text
+        FROM append_workspace_governed_child_relation_v1(
+          ${workspaceId}::uuid, ${budget.authorityId}::uuid, ${accountId}::uuid, ${operationId}::uuid, 1,
+          ${ack!.ack_id}::char(64), ${ack!.result_digest}::char(64), 'tool_operation', ${operationId}::uuid,
+          'NON_PERSONAL', NULL, NULL, NULL, 'raw_source_record', ${raw.id}::uuid, 'NON_PERSONAL',
+          NULL, NULL, ${relationKey}, 'MATERIALIZED_CHILD', 'discovery_query_attempt_item',
+          ${itemId}::uuid, NULL, ${A_CONTRACT_SHA256}::char(64))`);
+      expect(relation).toBeDefined();
+      await owner.$executeRaw`
+        INSERT INTO discovery_query_attempt_item(id, workspace_id, run_id, query_key, provider_key, operation_id,
+          record_index, resolution_kind, raw_record_id, raw_payload_hash, raw_ingest_status, relation_key,
+          operation_subject_id, child_subject_id, relation_id, contract_sha256)
+        VALUES (${itemId}::uuid, ${workspaceId}::uuid, ${run.runId}::uuid, ${queryKey}, 'public_web',
+          ${operationId}::uuid, ${recordIndex}, 'INSERTED', ${raw.id}::uuid, ${raw.payloadHash}, 'ACCEPTED',
+          ${relationKey}, ${relation!.operation_subject_id}::uuid,
+          ${relation!.child_subject_id}::uuid, ${relation!.relation_id}::uuid, ${A_CONTRACT_SHA256})`;
+      itemIds.push(itemId);
+    }
+    return itemIds;
   }
 
   async function admissionOf(runId: string) {
@@ -350,11 +366,9 @@ describe.runIf(enabled)('Discovery company materialization activation (Release B
 
     // Both runs exist before Release B: the image already writes the v1 marker, and a pre-C run
     // without it may still be in flight when the activation migration is applied.
-    governed = await createRun('governed', DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION, [{ source: 'public_web' }]);
-    legacy = await createRun('legacy', null, [{ source: 'public_web' }]);
-    const [governedRaw] = await owner.$queryRaw<Array<{ payload_hash: string }>>`
-      SELECT payload_hash::text AS payload_hash FROM raw_source_record WHERE id = ${governed.rawRecordId}::uuid`;
-    governedItemId = await completeQueryPhase(governed, governedRaw!.payload_hash);
+    governed = await createRun('governed', DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION);
+    legacy = await createRun('legacy', null);
+    [governedItemId] = await completeQueryPhase(governed) as [string];
   }, TIMEOUT);
 
   afterAll(async () => {
@@ -413,7 +427,25 @@ describe.runIf(enabled)('Discovery company materialization activation (Release B
     expect(counts).toEqual({ companies: 1n, outcomes: 1n });
   }, TIMEOUT);
 
-  it('keeps the activation row immutable and requires the marker on every new run', async () => {
+  it('materializes a full 128-item batch and the next one, each in its own transaction', async () => {
+    // 129 items: batch 0 holds 128 and batch 1 holds one, so the cursor resumes across transactions.
+    const run = await createRun('batch', DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION, 129);
+    await completeQueryPhase(run);
+    await expect(activities.canonicalizeRun(run.input as never)).resolves.toEqual({ companies: 129, suppressed: 0 });
+    const batches = await owner.$queryRaw<Array<{ batch_ordinal: number }>>`
+      SELECT batch_ordinal::int AS batch_ordinal FROM discovery_company_materialization_batch_receipt
+      WHERE run_id = ${run.runId}::uuid ORDER BY batch_ordinal`;
+    expect(batches).toEqual([{ batch_ordinal: 0 }, { batch_ordinal: 1 }]);
+    const [state] = await owner.$queryRaw<Array<{ canonicalized: bigint; companies: bigint }>>`
+      SELECT (SELECT count(*) FROM discovery_company_materialization_outcome
+          WHERE run_id = ${run.runId}::uuid AND outcome = 'CANONICALIZED') AS canonicalized,
+        (SELECT count(DISTINCT l.canonical_id) FROM identity_link l
+          JOIN raw_source_record r ON r.id = l.raw_record_id
+          WHERE r.run_id = ${run.runId}::uuid AND l.canonical_type = 'company') AS companies`;
+    expect(state).toEqual({ canonicalized: 129n, companies: 129n });
+  }, TIMEOUT);
+
+  it('rejects any UPDATE, DELETE or second INSERT of the activation row and requires the marker on new runs', async () => {
     const before = await activationRows();
     await expect(owner.$executeRaw`
       UPDATE discovery_company_materialization_activation SET activated_at = clock_timestamp()`)

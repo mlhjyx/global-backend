@@ -21,6 +21,17 @@ const STABLE_FAILURES = new Set([
   'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE', 'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
   'DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT',
 ]);
+/**
+ * One governed batch (up to 128 items) and the legacy whole-run pass each run in a single
+ * interactive transaction. Prisma's defaults (maxWait 2 s, timeout 5 s) are too tight for that
+ * work under load, and its P2028 timeout surfaces as an ordinary, retried error. maxWait plus
+ * timeout stays below canonicalizeRun's 2-minute startToCloseTimeout (discovery.workflow.ts),
+ * so a stuck transaction is rolled back before Temporal starts the next attempt.
+ */
+export const DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS = Object.freeze({
+  maxWait: 10_000,
+  timeout: 90_000,
+});
 type Data = Readonly<Record<string, unknown>>;
 type Transaction = Prisma.TransactionClient;
 export type DiscoveryCompanyMaterializationInput = Readonly<{ workspaceId: string; runId: string; executionContractVersion?: 2; executionBudget?: ExecutionBudgetBinding }>;
@@ -606,7 +617,7 @@ export async function executeDiscoveryCompanyMaterialization(
             queryOrdinal: facts.queryOrdinal,
             batchOrdinal: facts.batchOrdinal,
           });
-        });
+        }, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
         break;
       }
       case 'FINALIZE_QUERY':

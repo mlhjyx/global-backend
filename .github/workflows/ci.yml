@@ -394,7 +394,8 @@ jobs:
       # been activated, so it runs on its own empty PostgreSQL (same pinned image, loopback only,
       # removed afterwards). The suite migrates it to the release before activation, proves a v1
       # run is refused there, applies the activation with prisma migrate deploy, and proves the
-      # run then materializes, the activation row stays immutable and pre-C runs keep the legacy path.
+      # run then materializes, row triggers reject changes to the activation row and pre-C runs keep
+      # the legacy path.
       - name: Discovery company materialization activation on PostgreSQL
         shell: bash
         env:
