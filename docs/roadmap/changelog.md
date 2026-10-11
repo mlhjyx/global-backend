@@ -86,9 +86,9 @@
 
 - 起因：#631 激活受治理公司物化后，带 v1 标记的 run 要求每条计划查询都有受治理回执，否则在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下（BI-30 条目的「未做」已记）。公司发现源里只有 `public_web`、`directory`、`trade_fair` 声明了受治理公司血缘（`companyResultLineage`），`wikidata`、`openstreetmap`、`ted`、`openfda` 没有。xin 上这四个源都是 DISABLED，但只要其中一个被改成 ENABLED，规划器就会为它出查询（TED/openFDA 还会经冷路径注入），执行时它走 legacy 路径、不写受治理回执，整个 run 卡在物化。
 - 改动（血缘闸门，只读既有的那一份声明）：
-  - `company-discovery-lineage.ts` 新增 `declaresDiscoveryCompanyLineage(adapter)`（`companyResultLineage === v1`），作为唯一判断：受治理执行计划（`buildGovernedDiscoveryQueryExecutionPlan`）、registry 路由与规划器都用它。另加 `isDiscoveryCompanyLineageProviderKey`，回执合同的解析不再另写一份键名单。
+  - `company-discovery-lineage.ts` 新增 `declaresDiscoveryCompanyLineage(adapter)`（`companyResultLineage === v1`），作为唯一判断：受治理执行计划（`buildGovernedDiscoveryQueryExecutionPlan`）、registry 路由与规划器都用它。两份血缘合同里手写的键判断改为读各自的合同对象（回执合同 `isDiscoveryCompanyLineageProviderKey`、查询血缘合同 `isDiscoveryQueryLineageProviderKey`）；合同对象本身仍各有一份（查询血缘合同的描述进合同哈希、钉在迁移里），补新源时要一起改。registry 用例逐源核对：声明了血缘 ⇔ 两份合同都收。
   - registry：`companyDiscoverySources()` 的每个源带 `hasCompanyLineage`；`routeCompanyDiscovery` 只返回 ENABLED 且声明了血缘的适配器。
-  - 规划（`plan-query-sources.ts`）：源要 ENABLED 且有血缘才算可执行。没有血缘的源不进提示里的可用数据源清单；没写 hint 的查询不再拆出这些源的副本；只开了这些源时 `hasPlannableSource` 为 false（照旧 409 `NO_ENABLED_DISCOVERY_SOURCE`，不调模型）；TED/openFDA 冷路径只在源可执行时解析、注入（`isSourceEnabled` 改名 `isSourceRunnable`）。模型写给这些源的查询移出计划，按新原因 `SOURCE_LINEAGE_UNAVAILABLE` 计数，记在 `[source_filter]` 说明里；模型自己写的 TED/openFDA 查询仍记 `SOURCE_SYSTEM_PLANNED`。
+  - 规划（`plan-query-sources.ts`）：源要 ENABLED 且有血缘才算可执行。没有血缘的源不进提示里的可用数据源清单；没写 hint 的查询不再拆出这些源的副本；只开了这些源时 `hasPlannableSource` 为 false（照旧 409 `NO_ENABLED_DISCOVERY_SOURCE`，不调模型；码不变，message 改为说明要有受治理血缘）；TED/openFDA 冷路径只在源可执行时解析、注入（`isSourceEnabled` 改名 `isSourceRunnable`），已启用却因没有血缘而没注入的冷路径源各按一条 `SOURCE_LINEAGE_UNAVAILABLE` 记进移出说明（`countLineageGatedColdPaths`）。模型写给这些源的查询移出计划，按新原因 `SOURCE_LINEAGE_UNAVAILABLE` 计数，记在 `[source_filter]` 说明里；模型自己写的 TED/openFDA 查询仍记 `SOURCE_SYSTEM_PLANNED`。
   - 执行（`executeQuery`）：路由不到适配器的查询照旧跳过并写一条零回执，不调词表归一与 provider。跳过原因由 `planQuerySkipReason` 判：查询指向的已登记源都没有血缘时为 `SOURCE_LINEAGE_UNAVAILABLE`（开没开都一样），有血缘的源只是停用时仍为 `SOURCE_DISABLED`；重试重放 providers 为空的受治理回执时同样报告。没写 hint 的旧计划查询只跑同类里有血缘的源。
   - 工作流把 `SOURCE_LINEAGE_UNAVAILABLE` 计入 `stats.skippedQueries`，run 至少 PARTIAL，不失败。没有新增 Temporal 命令，工作流只引用无依赖的跳过原因清单，重放不受影响。
 - 测试：
@@ -96,7 +96,8 @@
   - `executeQuery` 用真实 registry（全部公司发现源 ENABLED）逐个跑 `wikidata`、`openstreetmap`、`ted`、`openfda` 的查询：provider 与词表归一都不调用，写零回执，跳过原因为 `SOURCE_LINEAGE_UNAVAILABLE`；`public_intelligence` 类无 hint 的查询只调用 `public_web`。
   - registry：有血缘的源恰为 `public_web`、`directory`、`trade_fair`，且与回执合同覆盖的键逐一一致（声明了血缘而合同不收的源会让受治理查询失败）。
   - BI-30 既有用例里把 Wikidata/OSM 当作「停用源」举例的，改用 `directory`/`trade_fair`；冷路径用例显式声明 TED/openFDA 有血缘，验证补上血缘后行为不变。
-  - 受影响的 8 个用例文件 339 项通过。
+  - 复审修正（冷路径计入移出说明、409 文案）先红 6 项后通过；与 #635 合并后，它的 DACH 冷路径用例同样显式声明 TED/openFDA 有血缘。
+  - 受影响的 12 个用例文件（含 #635 的 vocab、search-localization、icp-to-cpv）439 项通过。
 - 契约：OpenAPI 无改动（409 码与说明不变）；`packages/contracts/INTEGRATION.md` 阶段 2 补上新跳过原因，`docs/backend/discovery-sources.md` 集成点 1、2 同步。
 - 未做：给 `wikidata`、`openstreetmap`、`ted`、`openfda` 补受治理血缘（lineage 合同升级，含迁移）不在本项；补上之后这些源自动通过闸门，不用改本项代码。已保存的 READY 计划不回写，其中指向这些源的查询执行时按 `SOURCE_LINEAGE_UNAVAILABLE` 跳过。
 
