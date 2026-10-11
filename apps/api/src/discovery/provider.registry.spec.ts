@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { isDiscoveryCompanyLineageProviderKey } from './company-discovery-lineage';
+import { isDiscoveryQueryLineageProviderKey } from './discovery-query-governed-lineage';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
 
@@ -176,17 +177,19 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     expect(await routed('public_intelligence')).toEqual(['public_web']);
   });
 
-  it('reads lineage from the adapter declaration, which matches the lineage receipt contract', () => {
+  it('reads lineage from the adapter declaration, which matches both lineage contracts', () => {
     const sources = new DiscoveryProviderRegistry({ gateway: {} as ModelGateway })
       .companyDiscoverySources();
 
     expect(
       [...new Set(sources.filter((source) => source.hasCompanyLineage).map((source) => source.providerKey))],
     ).toEqual(['public_web', 'directory', 'trade_fair']);
-    // A declared source the receipt contract rejects would fail its governed query instead of running it.
+    // A declared source that either contract rejects would fail its governed query instead of running it.
     for (const source of sources) {
       expect(source.hasCompanyLineage, source.providerKey)
         .toBe(isDiscoveryCompanyLineageProviderKey(source.providerKey));
+      expect(source.hasCompanyLineage, source.providerKey)
+        .toBe(isDiscoveryQueryLineageProviderKey(source.providerKey));
     }
   });
 

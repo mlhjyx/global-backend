@@ -557,7 +557,12 @@ describe("ICP generation authority and controlled enrichment", () => {
 
       await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
         status: 409,
-        response: { error: { code: "NO_ENABLED_DISCOVERY_SOURCE" } },
+        response: {
+          error: {
+            code: "NO_ENABLED_DISCOVERY_SOURCE",
+            message: "no ENABLED discovery data source with governed company lineage that the query planner can use",
+          },
+        },
       });
       expect(f.runtime).not.toHaveBeenCalled();
       expect(f.cpv).not.toHaveBeenCalled();
@@ -639,8 +644,12 @@ describe("ICP generation authority and controlled enrichment", () => {
 
     expect(f.cpv).not.toHaveBeenCalled();
     expect(f.fda).not.toHaveBeenCalled();
-    expect((plan.queries as Array<{ filters: { source_hint: string } }>).map((q) => q.filters.source_hint))
-      .toEqual(["public_web"]);
+    const queries = plan.queries as Array<{ filters: { source_hint: string }; rationale: string }>;
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
+    // The plan review sees why the ENABLED cold-path sources added nothing.
+    expect(queries[0]!.rationale).toBe(
+      "keyword discovery\n[source_filter] 已移出 2 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 2 条",
+    );
   });
   it("keeps an ENABLED source without governed lineage out of the prompt and the plan, with its own reason (lineage gate)", async () => {
     const f = generationFixture();

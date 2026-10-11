@@ -223,6 +223,31 @@ export interface PlannerQueryRouting<Q> {
   readonly keptModelQueries: number;
 }
 
+/**
+ * The planner's drop counts plus one SOURCE_LINEAGE_UNAVAILABLE for each
+ * cold-path source (TED, openFDA) that is ENABLED but has no governed lineage:
+ * the lineage gate keeps out the query it would have injected, and the plan
+ * review should see that in the [source_filter] note.
+ */
+export function countLineageGatedColdPaths(
+  dropped: PlannerDropCounts,
+  enabled: readonly CompanyDiscoverySource[],
+  coldPathSources: readonly Readonly<{ sourceClass: SourceClass; providerKey: string }>[],
+): PlannerDropCounts {
+  const gated = coldPathSources.filter((source) =>
+    planQueryRoutes(
+      { source_class: source.sourceClass, filters: { source_hint: source.providerKey } },
+      enabled,
+    ).length > 0 && !isSourceRunnable(enabled, source),
+  ).length;
+  return gated === 0
+    ? dropped
+    : {
+        ...dropped,
+        SOURCE_LINEAGE_UNAVAILABLE: (dropped.SOURCE_LINEAGE_UNAVAILABLE ?? 0) + gated,
+      };
+}
+
 /** The order a plan runs in (loadPlanQueries): a missing priority runs last. */
 function planPriority(priority: unknown): number {
   return typeof priority === 'number' && Number.isFinite(priority) ? priority : 99;

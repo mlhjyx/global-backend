@@ -6,6 +6,7 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import {
   PLANNER_SOURCE_GUIDE,
   SYSTEM_PLANNED_SOURCE_KEYS,
+  countLineageGatedColdPaths,
   hasPlannableSource,
   isSourceRunnable,
   planQueryRoutes,
@@ -129,6 +130,22 @@ describe('plan query routing (the executor rule)', () => {
     // Once a source declares lineage, an unrouted query on it is DISABLED again.
     expect(planQuerySkipReason(query('company_registry', { source_hint: 'wikidata' }), withLineage('wikidata')))
       .toBe('SOURCE_DISABLED');
+  });
+
+  it('counts each ENABLED cold-path source the lineage gate keeps out of the plan', () => {
+    const ted = { sourceClass: 'public_intelligence' as const, providerKey: 'ted' };
+    const fda = { sourceClass: 'public_intelligence' as const, providerKey: 'openfda' };
+    const dropped = Object.freeze({ SOURCE_DISABLED: 1 });
+
+    expect(countLineageGatedColdPaths(dropped, only('public_web', 'ted', 'openfda'), [ted, fda]))
+      .toEqual({ SOURCE_DISABLED: 1, SOURCE_LINEAGE_UNAVAILABLE: 2 });
+    // A switched-off cold-path source is not gated, and one with lineage runs.
+    expect(countLineageGatedColdPaths(dropped, only('public_web'), [ted, fda])).toBe(dropped);
+    expect(countLineageGatedColdPaths(
+      { SOURCE_LINEAGE_UNAVAILABLE: 1 },
+      withLineage('ted').filter((source) => ['ted', 'openfda'].includes(source.providerKey)),
+      [ted, fda],
+    )).toEqual({ SOURCE_LINEAGE_UNAVAILABLE: 2 });
   });
 
   it('runs a cold-path source only while it is ENABLED and declares governed lineage', () => {
