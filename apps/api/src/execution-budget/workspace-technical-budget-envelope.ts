@@ -10,6 +10,7 @@ import {
   MAX_DISCOVERY_PLAN_QUERIES,
   MAX_DISCOVERY_PROFILE_COMPANIES,
   MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY,
+  MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY,
   MAX_DISCOVERY_PROVIDER_RECORDS,
   MAX_DISCOVERY_SIGNAL_COMPANIES,
   MAX_DISCOVERY_WATCH_COMPANIES,
@@ -187,11 +188,13 @@ function discoveryRunEnvelope(
         contract(wikidataEntityTool),
         MAX_DISCOVERY_ENRICH_COMPANIES * MAX_WIKIDATA_ENTITY_READS_PER_COMPANY,
       ),
-      // enrichSignalsRun (digital footprint + structured harvest) and registerWatchesForRun.
+      // enrichSignalsRun (digital footprint + structured harvest), and profileWebsitesForRun:
+      // the linked contact page of each profiled company (BI-14, switch company_contact).
       tool(
         contract(crawl4aiRenderTool),
         MAX_DISCOVERY_SIGNAL_COMPANIES *
-          (MAX_DIGITAL_FOOTPRINT_RENDERS + MAX_STRUCTURED_HARVEST_RENDERS),
+          (MAX_DIGITAL_FOOTPRINT_RENDERS + MAX_STRUCTURED_HARVEST_RENDERS) +
+          MAX_DISCOVERY_PROFILE_COMPANIES * MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY,
       ),
       tool(
         contract(httpGetTool),

@@ -1754,6 +1754,7 @@ model CanonicalCompany {
   emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at") // 决策人邮箱猜测尝试（选项 B P0.4）
 
   contacts                CanonicalContact[]
+  companyContactPoints    CompanyContactPoint[]
   leads                   Lead[]
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
 
@@ -1808,6 +1809,32 @@ model ContactPoint {
   @@unique([contactId, type, value])
   @@index([workspaceId])
   @@map("contact_point")
+}
+
+/// 公司级联系路径（BI-14）：公司官网首页上链到的联系页、Impressum 页、供应商页、公司 LinkedIn 页与 X 账号，
+/// 以及联系页上是否有联系表单。只存链接（https，无 query 与 fragment），数据分级只允许 green；
+/// 表里没有邮箱、电话或人名字段，kind 与 value 形状由数据库 CHECK 约束（迁移 20261011090000）。
+/// 自动来源只写 UNVERIFIED；VALID 只能由人给出（须有 updated_by）。公司主体 DSR 擦除时删除，复合外键随公司级联删除。
+model CompanyContactPoint {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  kind          String // contact_page | impressum_page | contact_form | supplier_page | linkedin_company_page | x_company_account
+  value         String // https URL without query or fragment
+  status        String   @default("UNVERIFIED") // UNVERIFIED | VALID | INVALID
+  statusReason  String?  @map("status_reason") // OPERATOR_CONFIRMED | OPERATOR_REJECTED | REMOVED_FROM_SITE | CUSTOMER_BAD_CONTACT_PATH
+  dataClass     String   @default("green") @map("data_class") // green only
+  sourceKind    String   @map("source_kind") // homepage | contact_page | operator
+  providerKey   String   @map("provider_key") // company_contact | operator
+  parserVersion String   @map("parser_version") // company_contact/v1
+  firstSeenAt   DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime @map("last_seen_at")
+  updatedBy     String?  @map("updated_by") // set when a person changes the status
+
+  company CanonicalCompany @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "company_contact_point_company_fkey")
+
+  @@unique([workspaceId, companyId, kind, value])
+  @@map("company_contact_point")
 }
 
 /// 身份解析连接（PRD 8.8）：canonical 实体 ↔ raw 记录，可审计可回溯。

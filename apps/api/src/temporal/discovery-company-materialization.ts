@@ -21,6 +21,17 @@ const STABLE_FAILURES = new Set([
   'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE', 'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD',
   'DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT',
 ]);
+/**
+ * One governed batch (up to 128 items) and the legacy whole-run pass each run in a single
+ * interactive transaction. Prisma's defaults (maxWait 2 s, timeout 5 s) are too tight for that
+ * work under load, and its P2028 timeout surfaces as an ordinary, retried error. maxWait plus
+ * timeout stays below canonicalizeRun's 2-minute startToCloseTimeout (discovery.workflow.ts),
+ * so a stuck transaction is rolled back before Temporal starts the next attempt.
+ */
+export const DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS = Object.freeze({
+  maxWait: 10_000,
+  timeout: 90_000,
+});
 type Data = Readonly<Record<string, unknown>>;
 type Transaction = Prisma.TransactionClient;
 export type DiscoveryCompanyMaterializationInput = Readonly<{ workspaceId: string; runId: string; executionContractVersion?: 2; executionBudget?: ExecutionBudgetBinding }>;
@@ -95,6 +106,13 @@ function sha256(value: unknown): string {
 }
 function count(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum) {
+    fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
+  }
+  return Number(value);
+}
+/** A PostgreSQL BIGINT column, which Prisma raw queries return as bigint. */
+function bigintCount(value: unknown): number {
+  if (typeof value !== 'bigint' || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
     fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
   }
   return Number(value);
@@ -376,8 +394,9 @@ function optionalText(value: unknown): string | undefined {
     identities.set(key, identity); identityKeys.add(identity.dedupeKey);
   }
   for (const identityKey of [...identityKeys].sort()) {
+    // Prisma cannot deserialize PostgreSQL void; cast only the result, not the lock key.
     await transaction.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
-      ${`discovery-company-identity:${input.workspaceId}:${identityKey}`},0))`);
+      ${`discovery-company-identity:${input.workspaceId}:${identityKey}`},0))::text AS locked`);
   }
   const canonicalByIdentity = new Map<string, Readonly<{
     id: string; dedupeKey: string; name: string; domain: string | null; status: string }> | null>();
@@ -523,8 +542,8 @@ async function finalizeDiscoveryCompanyMaterializationRun(
       fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
     }
     return Object.freeze({
-      companies: count(field(row, 'companies')),
-      suppressed: count(field(row, 'suppressed')),
+      companies: bigintCount(field(row, 'companies')),
+      suppressed: bigintCount(field(row, 'suppressed')),
     });
   });
 }
@@ -598,7 +617,7 @@ export async function executeDiscoveryCompanyMaterialization(
             queryOrdinal: facts.queryOrdinal,
             batchOrdinal: facts.batchOrdinal,
           });
-        });
+        }, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
         break;
       }
       case 'FINALIZE_QUERY':

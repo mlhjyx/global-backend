@@ -4,6 +4,7 @@ import {
   isControlledBusinessTerm,
   isProviderCompanyName,
   isSecretFreeText,
+  isStableSafeHttpsUrl,
 } from "./raw-source-provider-normalizer";
 import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site-sections";
 import { isValidGermanVat } from "./website-profile/impressum";
@@ -81,6 +82,7 @@ const SEMANTIC_IDENTIFIER_KEYS = new Set([
   "register_key",
   "registration_number",
   "source",
+  "source_url",
   "ultimate_parent_lei",
   "vat_id",
   "wikidata_qid",
@@ -210,6 +212,8 @@ const semanticIdentifierContracts = new Map<
     { validate: (value) => /^de-hr[ab]:[a-z0-9]+(?:-[a-z0-9]+)*:\d{1,6}[a-z]{0,2}$/u.test(value) },
   ],
   ["website_profile.vat_id", { validate: isValidGermanVat }],
+  // BI-14 / A4: the page the profile facts came from (Impressum, else homepage).
+  ["website_profile.source_url", { validate: (value) => safeHttpsSource(value) && isStableSafeHttpsUrl(value) }],
 ]);
 
 const storedCompanyFieldAttributePaths = new Map<
@@ -250,6 +254,7 @@ const storedCompanyFieldAttributePaths = new Map<
   ["website_profile.legal_name", ["website_profile", "legal_name"]],
   ["website_profile.own_manufacturing", ["website_profile", "own_manufacturing"]],
   ["website_profile.register_key", ["website_profile", "register_key"]],
+  ["website_profile.source_url", ["website_profile", "source_url"]],
   ["website_profile.trade_role", ["website_profile", "trade_role"]],
   ["website_profile.trade_role_confidence", ["website_profile", "trade_role_confidence"]],
   ["website_profile.trade_role_source", ["website_profile", "trade_role_source"]],
@@ -320,6 +325,7 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "website_profile.legal_name",
   "website_profile.own_manufacturing",
   "website_profile.register_key",
+  "website_profile.source_url",
   "website_profile.trade_role",
   "website_profile.trade_role_confidence",
   "website_profile.trade_role_source",

@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = new URL('../../../../', import.meta.url);
+const migrationsUrl = new URL('packages/db/prisma/migrations/', repositoryRoot);
+const RELEASE_A_SCHEMA_MIGRATION = '20260830130300_discovery_company_materialization_schema';
+const RELEASE_B_ACTIVATION_MIGRATION = '20261011100000_discovery_company_materialization_activation';
+const ACTIVATION_SETTING = 'app.discovery_company_materialization_activation_v1';
+const ACTIVATION_INSERT =
+  /insert\s+into\s+(?:"?public"?\s*\.\s*)?"?discovery_company_materialization_activation\b/iu;
 const schemaMigrationUrl = new URL(
   'packages/db/prisma/migrations/20260830130300_discovery_company_materialization_schema/migration.sql',
   repositoryRoot,
@@ -136,6 +142,56 @@ function validateMaterializationSchemaMigration(sql: string): void {
   requireText(normalized, 'canonical_contact', 'C_TX_CONTACT_TARGET_CHECK_MISSING');
 }
 
+function withoutLineComments(sql: string): string {
+  return sql.replace(/--[^\n]*/gu, '');
+}
+
+/** Release B is the activation singleton and nothing else: no backfill, no other write. */
+function validateActivationMigration(sql: string): void {
+  const statements = withoutLineComments(sql).split(';').map(compact).filter(Boolean);
+  const expected = [
+    'begin',
+    "set local lock_timeout = '5s'",
+    "set local statement_timeout = '60s'",
+    `set local ${ACTIVATION_SETTING} = '${C_TX_CONTRACT_SHA256}'`,
+    'insert into public.discovery_company_materialization_activation(activation_id,contract_version,contract_sha256) ' +
+      `values(1,'discovery-company-materialization/v1','${C_TX_CONTRACT_SHA256}')`,
+    'commit',
+  ];
+  if (JSON.stringify(statements) !== JSON.stringify(expected)) {
+    throw new Error('C_TX_RELEASE_B_ACTIVATION_SHAPE_INVALID');
+  }
+}
+
+/** Only Release B may insert the activation row or present the activation setting. */
+function validateActivationOwnership(migrations: ReadonlyMap<string, string>): void {
+  for (const [name, sql] of migrations) {
+    const code = withoutLineComments(sql);
+    if (ACTIVATION_INSERT.test(code) && name !== RELEASE_B_ACTIVATION_MIGRATION) {
+      throw new Error(`C_TX_ACTIVATION_OUTSIDE_RELEASE_B_${name}`);
+    }
+    if (
+      code.includes(ACTIVATION_SETTING) &&
+      name !== RELEASE_A_SCHEMA_MIGRATION &&
+      name !== RELEASE_B_ACTIVATION_MIGRATION
+    ) {
+      throw new Error(`C_TX_ACTIVATION_SETTING_OUTSIDE_RELEASE_B_${name}`);
+    }
+  }
+  const releaseB = migrations.get(RELEASE_B_ACTIVATION_MIGRATION);
+  if (releaseB === undefined) throw new Error('C_TX_RELEASE_B_ACTIVATION_MISSING');
+  validateActivationMigration(releaseB);
+}
+
+async function readMigrations(): Promise<ReadonlyMap<string, string>> {
+  const migrations = new Map<string, string>();
+  for (const entry of await readdir(migrationsUrl, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    migrations.set(entry.name, await readFile(new URL(`${entry.name}/migration.sql`, migrationsUrl), 'utf8'));
+  }
+  return migrations;
+}
+
 async function readRequired(url: URL, missingCode: string): Promise<string> {
   try {
     return await readFile(url, 'utf8');
@@ -267,6 +323,51 @@ describe('Discovery company materialization C-TX inventory and schema migration'
     expect(source).toContain(
       "import { DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION } from './discovery-company-materialization-ctx';",
     );
+  });
+
+  it('mutation-proves that only the exact Release B migration may activate C-TX', () => {
+    const releaseB = `-- activation
+      BEGIN;
+      SET LOCAL lock_timeout = '5s';
+      SET LOCAL statement_timeout = '60s';
+      SET LOCAL ${ACTIVATION_SETTING} = '${C_TX_CONTRACT_SHA256}';
+      INSERT INTO public.discovery_company_materialization_activation(
+        activation_id, contract_version, contract_sha256)
+      VALUES (1, 'discovery-company-materialization/v1', '${C_TX_CONTRACT_SHA256}');
+      COMMIT;`;
+    const releaseA = `SELECT current_setting('${ACTIVATION_SETTING}', true);`;
+    const migrations = (extra: Record<string, string> = {}) => new Map(Object.entries({
+      [RELEASE_A_SCHEMA_MIGRATION]: releaseA,
+      [RELEASE_B_ACTIVATION_MIGRATION]: releaseB,
+      ...extra,
+    }));
+
+    expect(() => validateActivationOwnership(migrations())).not.toThrow();
+    expect(() => validateActivationOwnership(new Map([[RELEASE_A_SCHEMA_MIGRATION, releaseA]])))
+      .toThrow('C_TX_RELEASE_B_ACTIVATION_MISSING');
+    expect(() => validateActivationOwnership(migrations({
+      '20261012000000_later': 'INSERT INTO "discovery_company_materialization_activation" VALUES (1);',
+    }))).toThrow('C_TX_ACTIVATION_OUTSIDE_RELEASE_B_20261012000000_later');
+    expect(() => validateActivationOwnership(migrations({
+      '20261012000000_later': `SELECT set_config('${ACTIVATION_SETTING}', 'x', true);`,
+    }))).toThrow('C_TX_ACTIVATION_SETTING_OUTSIDE_RELEASE_B_20261012000000_later');
+    expect(() => validateActivationOwnership(migrations({
+      [RELEASE_A_SCHEMA_MIGRATION]: `${releaseA}\nINSERT INTO public.discovery_company_materialization_activation VALUES (1);`,
+    }))).toThrow(`C_TX_ACTIVATION_OUTSIDE_RELEASE_B_${RELEASE_A_SCHEMA_MIGRATION}`);
+    for (const mutation of [
+      releaseB.replace(`SET LOCAL ${ACTIVATION_SETTING} = '${C_TX_CONTRACT_SHA256}';`, ''),
+      releaseB.replace("VALUES (1,", 'VALUES (2,'),
+      releaseB.replace('COMMIT;', "UPDATE public.discovery_run SET materialization_contract_version = 'discovery-company-materialization/v1';\nCOMMIT;"),
+      releaseB.replace('BEGIN;', ''),
+      releaseB.replace('SET LOCAL lock_timeout', 'SET lock_timeout'),
+    ]) {
+      expect(() => validateActivationOwnership(migrations({ [RELEASE_B_ACTIVATION_MIGRATION]: mutation })))
+        .toThrow('C_TX_RELEASE_B_ACTIVATION_SHAPE_INVALID');
+    }
+  });
+
+  it('activates C-TX in the Release B migration only', async () => {
+    validateActivationOwnership(await readMigrations());
   });
 
   it('pins all previously accepted Q-TX migration bytes', async () => {
