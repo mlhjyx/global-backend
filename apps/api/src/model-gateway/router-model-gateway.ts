@@ -140,13 +140,13 @@ type FrozenSettlementContext = NonNullable<
 >;
 
 /**
- * Only this gateway may admit a substitute identity (D14). Drop a caller's,
- * own or inherited: the rest copy keeps only own enumerable fields.
+ * Only this gateway may admit a substitute identity (D14). A caller that
+ * supplies one, own or inherited, is refused before any reservation or wire.
  */
-function withoutCallerModelIdentitySubstitutes(ctx: AiContext): AiContext {
-  if (!("modelIdentitySubstitutes" in ctx)) return ctx;
-  const { modelIdentitySubstitutes: _callerSubstitutes, ...rest } = ctx;
-  return rest;
+function assertNoCallerModelIdentitySubstitutes(ctx: AiContext): void {
+  if ("modelIdentitySubstitutes" in ctx) {
+    throw new Error("MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED");
+  }
 }
 
 /**
@@ -527,10 +527,10 @@ export class RouterModelGateway extends ModelGateway {
       schema?: Record<string, unknown>;
       signal?: AbortSignal;
     },
-    callerCtx: AiContext,
+    ctx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
-    const ctx = withoutCallerModelIdentitySubstitutes(callerCtx);
+    assertNoCallerModelIdentitySubstitutes(ctx);
     assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
     const chain = this.router.route(op, input.task);
@@ -791,6 +791,12 @@ export class RouterModelGateway extends ModelGateway {
       provider: result.provider,
       model: result.model,
       ...(substitution ? { modelSubstitution: substitution } : {}),
+      // With substitutes admitted, a requested name the upstream never
+      // confirmed may hide a substitute: say so instead of implying proof.
+      ...(substitutes.length > 0 &&
+      result.modelResolutionSource === "requested_fallback"
+        ? { modelIdentityUnproven: true as const }
+        : {}),
       status: "OK",
       latencyMs: Date.now() - started,
       inputTokens: result.usage?.inputTokens,

@@ -31,8 +31,8 @@ export interface AiContext {
    * Substitute model identities the provider may accept for this one call
    * (owner decision D14). Only RouterModelGateway sets it, from the
    * deployment's MODEL_IDENTITY_SUBSTITUTES and the task's
-   * `acceptsModelSubstitute`; it discards any caller-supplied value and never
-   * sets it on paid calls. A provider that accepts one must report the
+   * `acceptsModelSubstitute`; it refuses a call whose caller supplied one and
+   * never sets it on paid calls. A provider that accepts one must report the
    * substitute as the result model.
    */
   modelIdentitySubstitutes?: readonly string[];

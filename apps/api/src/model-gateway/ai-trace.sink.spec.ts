@@ -146,6 +146,50 @@ describe('AiTraceSink', () => {
     });
   });
 
+  it('marks an answer whose identity the upstream never stated (D14)', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-unproven-1' }));
+    const usageLedgerCreate = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          aiTrace: { create: aiTraceCreate },
+          usageLedger: { create: usageLedgerCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const sink = new AiTraceSink(prisma);
+
+    sink.record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.qualify_fit',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'OK',
+      latencyMs: 12,
+      inputTokens: 7,
+      outputTokens: 3,
+      modelIdentityUnproven: true,
+    });
+
+    await vi.waitFor(() => expect(usageLedgerCreate).toHaveBeenCalledTimes(1));
+    expect(aiTraceCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        model: 'deepseek-v4-pro',
+        meta: { modelIdentityUnproven: true },
+      }),
+    });
+    expect(usageLedgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        meta: {
+          task: 'discovery.qualify_fit',
+          model: 'deepseek-v4-pro',
+          modelIdentityUnproven: true,
+        },
+      }),
+    });
+  });
+
   it('writes no substitution marker for an exact identity', async () => {
     const aiTraceCreate = vi.fn(async () => ({ id: 'trace-exact-1' }));
     const usageLedgerCreate = vi.fn(async () => ({}));

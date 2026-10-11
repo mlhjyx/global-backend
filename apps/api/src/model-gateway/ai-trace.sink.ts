@@ -28,22 +28,38 @@ export interface TraceEntry {
     requestedModel: string;
     substituteModels: readonly string[];
   };
+  /**
+   * Set only while substitutes were admitted for the call and the upstream
+   * named no model for the answer: `model` is the requested one by fallback,
+   * not upstream proof (D14).
+   */
+  modelIdentityUnproven?: true;
 }
 
-function substitutionMeta(entry: TraceEntry):
+/** D14 model-identity markers for ai_trace.meta and usage_ledger.meta. */
+function modelIdentityMeta(entry: TraceEntry):
   | {
-      requestedModel: string;
-      modelSubstituted: true;
-      substituteModels: string[];
+      requestedModel?: string;
+      modelSubstituted?: true;
+      substituteModels?: string[];
+      modelIdentityUnproven?: true;
     }
   | undefined {
-  return entry.modelSubstitution
-    ? {
-        requestedModel: entry.modelSubstitution.requestedModel,
-        modelSubstituted: true,
-        substituteModels: [...entry.modelSubstitution.substituteModels],
-      }
-    : undefined;
+  if (!entry.modelSubstitution && !entry.modelIdentityUnproven) {
+    return undefined;
+  }
+  return {
+    ...(entry.modelSubstitution
+      ? {
+          requestedModel: entry.modelSubstitution.requestedModel,
+          modelSubstituted: true as const,
+          substituteModels: [...entry.modelSubstitution.substituteModels],
+        }
+      : {}),
+    ...(entry.modelIdentityUnproven
+      ? { modelIdentityUnproven: true as const }
+      : {}),
+  };
 }
 
 /**
@@ -57,7 +73,7 @@ export class AiTraceSink {
   constructor(private readonly prisma: PrismaService) {}
 
   record(entry: TraceEntry): void {
-    const substitution = substitutionMeta(entry);
+    const identity = modelIdentityMeta(entry);
     void this.prisma
       .withWorkspace(entry.workspaceId, async (tx) => {
         const trace = await tx.aiTrace.create({
@@ -75,12 +91,12 @@ export class AiTraceSink {
             costUsd: entry.costUsd ?? null,
             correlationId: entry.correlationId ?? null,
             meta:
-              entry.modelPolicy || substitution
+              entry.modelPolicy || identity
                 ? ({
                     ...(entry.modelPolicy
                       ? { modelPolicy: entry.modelPolicy }
                       : {}),
-                    ...substitution,
+                    ...identity,
                   } as unknown as Prisma.InputJsonObject)
                 : undefined,
           },
@@ -95,7 +111,7 @@ export class AiTraceSink {
               costUsd: entry.costUsd ?? null,
               refType: 'ai_trace',
               refId: trace.id,
-              meta: { task: entry.task, model: entry.model, ...substitution },
+              meta: { task: entry.task, model: entry.model, ...identity },
             },
           });
         }

@@ -489,25 +489,19 @@ describe('RouterModelGateway — identity stays exact outside the approved subst
     },
   );
 
-  it('ignores substitutes a caller tries to supply itself', async () => {
+  it.each([
+    ['a task that has not opted in', 'adhoc.unregistered_task', undefined],
+    ['an opted-in task when the deployment has none', SUBSTITUTABLE_TASK, undefined],
+    ['an opted-in task even with the setting on', SUBSTITUTABLE_TASK, 'deepseek-v4-pro>deepseek-v4-flash'],
+  ])('refuses substitutes a caller supplies itself (%s)', async (_label, task, setting) => {
     stubUpstream(flashStream());
-    const { gateway } = gatewayWith(streamingProvider());
+    const { gateway, budgetStore } = gatewayWith(streamingProvider(), setting);
 
-    await expectMismatch(
-      gateway.generateStructured(
-        structured('adhoc.unregistered_task'),
-        ctx({ modelIdentitySubstitutes: [FLASH] }),
-      ),
-    );
-  });
-
-  it('ignores caller-supplied substitutes for an opted-in task when the deployment has none', async () => {
-    stubUpstream(flashStream());
-    const { gateway } = gatewayWith(streamingProvider());
-
-    await expectMismatch(
-      gateway.generateStructured(structured(), ctx({ modelIdentitySubstitutes: [FLASH] })),
-    );
+    await expect(
+      gateway.generateStructured(structured(task), ctx({ modelIdentitySubstitutes: [FLASH] })),
+    ).rejects.toThrow('MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED');
+    expect(budgetStore.reserve).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('rejects another model family even with the setting on', async () => {
@@ -651,22 +645,57 @@ describe('RouterModelGateway — operations a substitute answered in part', () =
     expect(entry).not.toHaveProperty('modelSubstitution');
   });
 
-  it('drops substitutes a context only inherits', async () => {
+  it('refuses substitutes a context only inherits, keeping nothing else from it', async () => {
     stubUpstream(flashStream());
-    const { gateway } = gatewayWith(streamingProvider());
+    const { gateway, budgetStore } = gatewayWith(streamingProvider());
+    const authorizeExternalAction = vi.fn(async () => true);
     const inherited = Object.assign(
-      Object.create({ modelIdentitySubstitutes: [FLASH] }) as AiContext,
+      Object.create({ modelIdentitySubstitutes: [FLASH], authorizeExternalAction }) as AiContext,
       { workspaceId: WORKSPACE, runId: 'run-1' },
     );
 
-    const error = await gateway
-      .generateStructured(structured('adhoc.unregistered_task'), inherited)
-      .then(
-        () => undefined,
-        (caught: unknown) => caught,
-      );
+    await expect(
+      gateway.generateStructured(structured('adhoc.unregistered_task'), inherited),
+    ).rejects.toThrow('MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED');
+    expect(budgetStore.reserve).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
 
-    expect(error).toBeInstanceOf(ProviderIdentityError);
+describe('RouterModelGateway — answers whose identity the upstream never stated', () => {
+  const unnamed = sse([
+    { choices: [{ delta: { content: '{"a":7}' }, finish_reason: 'stop' }] },
+    { choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+  ]);
+
+  it('marks an unnamed answer as unproven while substitutes are admitted', async () => {
+    stubUpstream(unnamed);
+    const { gateway, trace } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    await expect(gateway.generateStructured(structured(), ctx())).resolves.toMatchObject({
+      model: PRO,
+      modelResolutionSource: 'requested_fallback',
+    });
+    const entry = trace.record.mock.calls[0][0] as Record<string, unknown>;
+    expect(entry).toMatchObject({ status: 'OK', model: PRO, modelIdentityUnproven: true });
+    expect(entry).not.toHaveProperty('modelSubstitution');
+  });
+
+  it.each([
+    ['the setting is off', undefined, SUBSTITUTABLE_TASK],
+    ['the task has not opted in', 'deepseek-v4-pro>deepseek-v4-flash', 'adhoc.unregistered_task'],
+  ])('adds no marker when %s', async (_label, setting, task) => {
+    stubUpstream(unnamed);
+    const { gateway, trace } = gatewayWith(streamingProvider(), setting);
+
+    await gateway.generateStructured(structured(task), ctx());
+
+    const entry = trace.record.mock.calls[0][0] as Record<string, unknown>;
+    expect(entry).not.toHaveProperty('modelIdentityUnproven');
+    expect(entry).not.toHaveProperty('modelSubstitution');
   });
 });
 
