@@ -1,7 +1,7 @@
 # Discovery Company Materialization C-TX Implementation Plan
 
-> 生命周期：`SUPERSEDED`
-> 生命周期依据：自述 PLANNED / HOLD_IMPLEMENTATION；公司物化已随 governed lineage G3 落地（packages/db 的 discovery-company-materialization 测试）
+> 生命周期：`CLOSED`
+> 生命周期依据：Release A 随 #431 合入（迁移 20260830130300/130400，激活单例为空）；Release B 是激活迁移 20261011100000_discovery_company_materialization_activation，见 changelog 2026-10-11「Activate governed Discovery company materialization」，真库验证见 `apps/api/src/discovery/discovery-company-materialization-activation.postgres.spec.ts`。下方 Status 行是 2026-08-30 写作时的状态
 
 > Status: PLANNED / HOLD_IMPLEMENTATION
 >

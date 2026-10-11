@@ -89,7 +89,10 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
-import { executeDiscoveryCompanyMaterialization } from './discovery-company-materialization';
+import {
+  DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS,
+  executeDiscoveryCompanyMaterialization,
+} from './discovery-company-materialization';
 import {
   WEBSITE_PROFILE_PROVIDER_KEY,
   WebsiteProfileProvider,
@@ -210,10 +213,11 @@ async function lockCompanyRawIdentity(
   workspaceId: string,
   rawRecordId: string,
 ): Promise<void> {
+  // Prisma cannot deserialize PostgreSQL void; cast only the result, not the lock key.
   await transaction.$queryRaw(
     Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
       ${`discovery-company-raw-identity:${workspaceId}:${rawRecordId}`}, 0
-    ))`,
+    ))::text AS locked`,
   );
 }
 
@@ -1116,7 +1120,7 @@ export function createDiscoveryActivities(deps: {
           }
         }
         return { companies, suppressed };
-      });
+      }, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
     },
 
     /**

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
 import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
@@ -1335,15 +1336,15 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       rawSourceRecord: { findMany: rawFindMany },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
+    const withWorkspace = vi.fn(
+      async (
+        _workspaceId: string,
+        callback: (client: typeof tx) => Promise<unknown>,
+        _options?: unknown,
+      ) => callback(tx),
+    );
     const activities = createDiscoveryActivities({
-      prisma: {
-        withWorkspace: vi.fn(
-          async (
-            _workspaceId: string,
-            callback: (client: typeof tx) => Promise<unknown>,
-          ) => callback(tx),
-        ),
-      },
+      prisma: { withWorkspace },
       providers: {},
       gateway: {},
       budgetStore: authorityBudgetStore(),
@@ -1358,6 +1359,9 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         ingestVersion: "raw-source/v2",
       },
     });
+    // Admission keeps the client defaults; the whole-run legacy pass carries the canonicalize options.
+    expect(withWorkspace.mock.calls.map((call) => call[2]))
+      .toEqual([undefined, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS]);
   });
 
   it.each([
@@ -2067,15 +2071,24 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 0, suppressed: 1 }];
+          return [{ status: "APPLIED", companies: 0n, suppressed: 1n }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed C-TX query: ${sql}`);
       }),
     };
+    const transactions: Array<{ options: unknown; sql: string[] }> = [];
     const activities = createDiscoveryActivities({
       prisma: {
-        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+        withWorkspace: vi.fn(async (_workspaceId, callback, options) => {
+          const before = tx.$queryRaw.mock.calls.length;
+          const result = await callback(tx);
+          transactions.push({
+            options,
+            sql: tx.$queryRaw.mock.calls.slice(before).map(([query]) => materializationSqlText(query)),
+          });
+          return result;
+        }),
       },
       providers: {},
       gateway: {},
@@ -2087,6 +2100,13 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     ).resolves.toEqual({ companies: 0, suppressed: 1 });
     expect(attestAuthorized).not.toHaveBeenCalled();
     expect(inspection).toBe(3);
+    // Only the batch transaction carries the canonicalize options; admission, inspection and
+    // the two finalizations keep the client defaults.
+    const batch = transactions.filter(({ sql }) =>
+      sql.some((text) => text.includes("lock_discovery_company_materialization_batch_facts_v1")));
+    expect(batch).toHaveLength(1);
+    expect(batch[0]!.options).toBe(DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
+    expect(transactions.filter(({ options }) => options !== undefined)).toEqual(batch);
     const append = tx.$queryRaw.mock.calls.find(([query]) =>
       materializationSqlText(query).includes("append_discovery_company_materialization_batch_v1"));
     const appendValues = Object.getOwnPropertyDescriptor(append?.[0] as object, "values")?.value;
@@ -2131,7 +2151,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     "admit", "admitStatus", "admitMode", "inspect", "inspectReplayNext",
     "inspectRunSummary", "inspectNextKind", "facts", "factsStatus", "factsEmpty",
     "factsSnapshot", "factsProductNaN", "factsTooMany", "append", "appendStatus", "appendOrdinal",
-    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount",
+    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount", "finalizeRunNumber",
     "materializationDenied", "priorMissing", "existingLink", "identityP2002", "identityOther",
   ])(
     "fails closed on malformed %s database output",
@@ -2196,6 +2216,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               || malformedStage === "finalizeQueryKey"
               ? { kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0 }
               : malformedStage === "finalizeRun" || malformedStage === "finalizeRunCount"
+                || malformedStage === "finalizeRunNumber"
                 ? { kind: "FINALIZE_RUN" }
                 : malformedStage === "inspectNextKind" ? { kind: "INVALID" }
                   : { kind: "BATCH", queryKey, queryOrdinal: 0, batchOrdinal: 0 };
@@ -2251,9 +2272,12 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
             }];
           }
           if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+            // PostgreSQL BIGINT reaches Prisma raw queries as bigint; a plain number is malformed.
             return malformedStage === "finalizeRun" ? [{}] : [{
-              status: "APPLIED", companies: malformedStage === "finalizeRunCount" ? -1 : 0,
-              suppressed: 0,
+              status: "APPLIED",
+              companies: malformedStage === "finalizeRunCount" ? -1n
+                : malformedStage === "finalizeRunNumber" ? 0 : 0n,
+              suppressed: 0n,
             }];
           }
           if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
@@ -2424,7 +2448,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 1, suppressed: 3 }];
+          return [{ status: "APPLIED", companies: 1n, suppressed: 3n }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed canonical query: ${sql}`);

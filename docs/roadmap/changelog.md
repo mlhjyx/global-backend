@@ -4,6 +4,26 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
+
+- 起因：C-TX 只发了 Release A（#431：迁移 `20260830130300`/`20260830130400`，激活单例表为空），Release B 一直没做。API 自 Release A 起给每个新发现 run 写 v1 标记，而 `admit_discovery_company_materialization_v1` 对「v1 标记 + 无激活行」一律抛不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE`：任何走完查询阶段的 run 都会在 canonicalize 失败。xin 上激活表为 0 行，至今没有 run 走到 canonicalize。
+- 改动：
+  - 新迁移 `20261011100000_discovery_company_materialization_activation`：在事务内设置 Release A 插入守卫要求的事务级设置，写入唯一的激活行（1、`discovery-company-materialization/v1`、合同 SHA-256）。不回填、不改写任何 run、admission 或回执。行级触发器拒绝对激活行的 UPDATE 与 DELETE，但表属主仍能 TRUNCATE 掉它（TRUNCATE 不触发行级触发器），所以这道守卫不是回退手段，回退见下方「部署」。
+  - 新的真库测试暴露了 canonicalize 自身的两处缺陷，不修则激活后仍走不通，一并修复：
+    - 两处事务级咨询锁用 `$queryRaw` 读 `pg_advisory_xact_lock` 的 void 结果，Prisma 无法反序列化 void（P2010）：受治理路径的公司身份锁（`discovery-company-materialization.ts`）与 legacy 路径的 Raw 身份锁（`discovery.activities.ts` 的 `lockCompanyRawIdentity`）。改为与 `suppression-policy-lock.ts` 相同的写法，只把结果转为 text，锁键不变。修复前，run 只要有一条可物化的 ACCEPTED 记录，两条路径都会抛出可重试的数据库错误。
+    - `finalize_discovery_company_materialization_run_v1` 的 companies/suppressed 是 BIGINT，Prisma 交给 TypeScript 的是 bigint，而解析用的 `count()` 只收 number：每个受治理 run（包括 0 家公司的）都会在 finalize-run 以不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID` 失败。新增只用于这两列的 `bigintCount()`；单测里 finalize-run 的模拟行改为 bigint，并新增「普通 number 视为畸形」用例。
+  - 静态清单：`discovery-company-materialization.inventory.spec.ts` 扫描全部迁移，只有 Release B 可以插入激活行，只有 Release A/B 可以出现激活设置名；Release B 的语句序列必须恰好是 BEGIN、两条超时、激活设置、那一条 INSERT、COMMIT；Release A 仍不得激活。附变异证明。
+  - canonicalize 事务的选项：受治理路径的批次事务（最多 128 条）与 legacy 路径的整 run 事务此前用 Prisma 默认的 maxWait 2 秒、timeout 5 秒，负载下易超时，而 P2028 超时会被当作普通错误反复重试。两处改用导出常量 `DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS`（maxWait 10 秒、timeout 90 秒）：两者之和小于 canonicalizeRun 的 2 分钟 startToCloseTimeout，卡住的事务会在 Temporal 开始下一次尝试前回滚。admission、inspect 与两次 finalize 仍用客户端默认值。
+  - CI：build-test 作业在「Sanctions operator refresh on PostgreSQL」步骤之后新增「Discovery company materialization activation on PostgreSQL」，用同一钉住镜像在 `127.0.0.1:5433` 起一个独立空库，步骤结束即删除。
+- 测试：
+  - 新 `discovery-company-materialization-activation.postgres.spec.ts`（6 项，真库，经生产 activity `canonicalizeRun` 以 app_user 运行；只替换 Temporal heartbeat，以及 legacy 路径对 Grant 的校验）：先用 `prisma migrate deploy` 迁到「除激活迁移外的全部迁移」，写入一个查询阶段完整的 v1 run（ACCEPTED public_web Raw 由真实 Raw 写入路径落库）和一个无标记的 pre-C run。(a) v1 run 被拒，码为 UNAVAILABLE，不留 admission；随后用真实 migrations 目录再跑 `prisma migrate deploy`，恰好应用激活迁移、激活行恰为一行。(b) 同一 run 被准入为 `GOVERNED_C_TX`，物化出 1 家 canonical company（outcome `CANONICALIZED`/`CREATED`、identity_link、run 回执 1/0），重放不新增行。(c) 激活行连超级用户也改不了、删不了，也插不进第二行；新 run 必须带标记。(d) pre-C run 走 `LEGACY`（`PRE_C_NULL_MARKER`），由 legacy canonicalizer 物化，不产生 C-TX outcome 或回执。
+  - 红灯：没有激活迁移时 1 过 4 败（激活、准入为 UNAVAILABLE、不可变、legacy 撞 void）；加上迁移后，受治理路径先撞 void 锁，修复后又撞 finalize-run 的 bigint；两处修复后 5 项全过。随后加的第 6 项：129 条记录的 run 分成满 128 条与 1 条两个批次事务，物化出 129 家公司、两张批次回执。
+  - 事务选项：单测记录每次 `withWorkspace` 的选项与其中执行的 SQL，断言只有批次事务（与 legacy 整 run 事务）带 `DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS`，其余仍为默认；去掉两处调用的选项时这 2 项失败，恢复后通过。选项经 `withWorkspace` 原样交给 `$transaction` 已由 `pii-crypto.lifecycle.spec.ts` 覆盖。
+- 部署：与下一版运行镜像同一维护窗口：先停运行时、备份数据库、确认没有发现 run 在途，再 `prisma migrate deploy`。当前镜像（`163ab0fa`）虽已写 v1 标记，但不含上述修复，激活后仍会在 canonicalize 失败；运行时启动时又会核对最后完成的迁移名，迁移后旧镜像以 `MIGRATION_REVISION_MISMATCH` 拒绝启动，所以激活迁移必须与携带它的镜像一起上线。回退是恢复迁移前的数据库备份并切回旧镜像，不是「不部署」或删激活行。
+- 未做：canonicalize 之后的环节（qualify 等）不在本项范围；部署与 xin 上的真实 run 验收另行授权并记录。后续两项：
+  - 从真实查询阶段（`append_discovery_query_lineage_v2`）一路走到 canonicalize 的端到端真库测试：本项的 Q 血缘按 disposable spec 的做法由 owner 直接写入。
+  - `apps/api/scripts/verify-openfda-discovery.mts` 与 `verify-ted-discovery.mts` 用 owner 连接创建不带 v1 标记的 run，激活后会被插入守卫以 `MARKER_REQUIRED` 拒绝；这两个是人工核验脚本，不在产品路径上。
+
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
 - 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。
