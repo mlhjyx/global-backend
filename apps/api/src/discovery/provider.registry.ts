@@ -323,6 +323,14 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'website_profile', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
     });
+    // BI-14 公司级联系路径（随官网画像：首页上的联系页 / Impressum / 供应商页 / 公司 LinkedIn 与 X 链接，
+    // 加渲染联系页看有没有表单，只存链接）。默认 DISABLED：开关由 D9 拍板；关闭时不渲染、不写 company_contact_point。
+    // update:{} 不覆盖运维手动改过的状态。
+    await db.dataProvider.upsert({
+      where: { key: 'company_contact' },
+      update: {},
+      create: { key: 'company_contact', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
     await db.dataProvider.upsert({
       where: { key: 'smtp_self' },
       update: {},

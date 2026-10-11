@@ -167,6 +167,16 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           });
         }
 
+        // BI-14：company 主体擦除同时删掉该公司的公司级联系路径（company_contact_point，只有链接、green），
+        // 计数并入 contactPointsErased（DeletionCompleted 契约不加字段）。公司行已在上面 FOR UPDATE，
+        // 画像写入侧在同一 advisory lock 下 FOR SHARE 复读 status，SUPPRESSED 后不再写入。
+        if (located.companyIdsToSuppress.length) {
+          const companyPoints = await tx.companyContactPoint.deleteMany({
+            where: { companyId: { in: located.companyIdsToSuppress } },
+          });
+          contactPointsErased += companyPoints.count;
+        }
+
         // 🔴 Art.17 扫描面（scale-safe #89）：平台级专利发明人缓存（patent_inventor_cache，无 RLS/无 workspace）
         //   按被擦除人**盲键**命中并删。inventorErasureKeys(fullName) 走 personNameKeyVariants（over-suppress 方向：
         //   宁过删缓存也不漏——缓存可 TTL 内重新预热，误删他人同名缓存行只是让其下次刷新重建，无数据主体权利损害）。

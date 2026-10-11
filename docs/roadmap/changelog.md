@@ -4,6 +4,26 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
+
+- 起因：C-TX 只发了 Release A（#431：迁移 `20260830130300`/`20260830130400`，激活单例表为空），Release B 一直没做。API 自 Release A 起给每个新发现 run 写 v1 标记，而 `admit_discovery_company_materialization_v1` 对「v1 标记 + 无激活行」一律抛不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE`：任何走完查询阶段的 run 都会在 canonicalize 失败。xin 上激活表为 0 行，至今没有 run 走到 canonicalize。
+- 改动：
+  - 新迁移 `20261011100000_discovery_company_materialization_activation`：在事务内设置 Release A 插入守卫要求的事务级设置，写入唯一的激活行（1、`discovery-company-materialization/v1`、合同 SHA-256）。不回填、不改写任何 run、admission 或回执。行级触发器拒绝对激活行的 UPDATE 与 DELETE，但表属主仍能 TRUNCATE 掉它（TRUNCATE 不触发行级触发器），所以这道守卫不是回退手段，回退见下方「部署」。
+  - 新的真库测试暴露了 canonicalize 自身的两处缺陷，不修则激活后仍走不通，一并修复：
+    - 两处事务级咨询锁用 `$queryRaw` 读 `pg_advisory_xact_lock` 的 void 结果，Prisma 无法反序列化 void（P2010）：受治理路径的公司身份锁（`discovery-company-materialization.ts`）与 legacy 路径的 Raw 身份锁（`discovery.activities.ts` 的 `lockCompanyRawIdentity`）。改为与 `suppression-policy-lock.ts` 相同的写法，只把结果转为 text，锁键不变。修复前，run 只要有一条可物化的 ACCEPTED 记录，两条路径都会抛出可重试的数据库错误。
+    - `finalize_discovery_company_materialization_run_v1` 的 companies/suppressed 是 BIGINT，Prisma 交给 TypeScript 的是 bigint，而解析用的 `count()` 只收 number：每个受治理 run（包括 0 家公司的）都会在 finalize-run 以不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID` 失败。新增只用于这两列的 `bigintCount()`；单测里 finalize-run 的模拟行改为 bigint，并新增「普通 number 视为畸形」用例。
+  - 静态清单：`discovery-company-materialization.inventory.spec.ts` 扫描全部迁移，只有 Release B 可以插入激活行，只有 Release A/B 可以出现激活设置名；Release B 的语句序列必须恰好是 BEGIN、两条超时、激活设置、那一条 INSERT、COMMIT；Release A 仍不得激活。附变异证明。
+  - canonicalize 事务的选项：受治理路径的批次事务（最多 128 条）与 legacy 路径的整 run 事务此前用 Prisma 默认的 maxWait 2 秒、timeout 5 秒，负载下易超时，而 P2028 超时会被当作普通错误反复重试。两处改用导出常量 `DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS`（maxWait 10 秒、timeout 90 秒）：两者之和小于 canonicalizeRun 的 2 分钟 startToCloseTimeout，卡住的事务会在 Temporal 开始下一次尝试前回滚。admission、inspect 与两次 finalize 仍用客户端默认值。
+  - CI：build-test 作业在「Sanctions operator refresh on PostgreSQL」步骤之后新增「Discovery company materialization activation on PostgreSQL」，用同一钉住镜像在 `127.0.0.1:5433` 起一个独立空库，步骤结束即删除。
+- 测试：
+  - 新 `discovery-company-materialization-activation.postgres.spec.ts`（6 项，真库，经生产 activity `canonicalizeRun` 以 app_user 运行；只替换 Temporal heartbeat，以及 legacy 路径对 Grant 的校验）：先用 `prisma migrate deploy` 迁到「除激活迁移外的全部迁移」，写入一个查询阶段完整的 v1 run（ACCEPTED public_web Raw 由真实 Raw 写入路径落库）和一个无标记的 pre-C run。(a) v1 run 被拒，码为 UNAVAILABLE，不留 admission；随后用真实 migrations 目录再跑 `prisma migrate deploy`，恰好应用激活迁移、激活行恰为一行。(b) 同一 run 被准入为 `GOVERNED_C_TX`，物化出 1 家 canonical company（outcome `CANONICALIZED`/`CREATED`、identity_link、run 回执 1/0），重放不新增行。(c) 激活行连超级用户也改不了、删不了，也插不进第二行；新 run 必须带标记。(d) pre-C run 走 `LEGACY`（`PRE_C_NULL_MARKER`），由 legacy canonicalizer 物化，不产生 C-TX outcome 或回执。
+  - 红灯：没有激活迁移时 1 过 4 败（激活、准入为 UNAVAILABLE、不可变、legacy 撞 void）；加上迁移后，受治理路径先撞 void 锁，修复后又撞 finalize-run 的 bigint；两处修复后 5 项全过。随后加的第 6 项：129 条记录的 run 分成满 128 条与 1 条两个批次事务，物化出 129 家公司、两张批次回执。
+  - 事务选项：单测记录每次 `withWorkspace` 的选项与其中执行的 SQL，断言只有批次事务（与 legacy 整 run 事务）带 `DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS`，其余仍为默认；去掉两处调用的选项时这 2 项失败，恢复后通过。选项经 `withWorkspace` 原样交给 `$transaction` 已由 `pii-crypto.lifecycle.spec.ts` 覆盖。
+- 部署：与下一版运行镜像同一维护窗口：先停运行时、备份数据库、确认没有发现 run 在途，再 `prisma migrate deploy`。当前镜像（`163ab0fa`）虽已写 v1 标记，但不含上述修复，激活后仍会在 canonicalize 失败；运行时启动时又会核对最后完成的迁移名，迁移后旧镜像以 `MIGRATION_REVISION_MISMATCH` 拒绝启动，所以激活迁移必须与携带它的镜像一起上线。回退是恢复迁移前的数据库备份并切回旧镜像，不是「不部署」或删激活行。
+- 未做：canonicalize 之后的环节（qualify 等）不在本项范围；部署与 xin 上的真实 run 验收另行授权并记录。后续两项：
+  - 从真实查询阶段（`append_discovery_query_lineage_v2`）一路走到 canonicalize 的端到端真库测试：本项的 Q 血缘按 disposable spec 的做法由 owner 直接写入。
+  - `apps/api/scripts/verify-openfda-discovery.mts` 与 `verify-ted-discovery.mts` 用 owner 连接创建不带 v1 标记的 run，激活后会被插入守卫以 `MARKER_REQUIRED` 拒绝；这两个是人工核验脚本，不在产品路径上。
+
 ## 2026-10-11 · Let a deployment accept DeepSeek V4 Flash for pro acquisition calls, labelled as Flash
 
 - 起因：获客唯一的模型上游（new-api 渠道 24 → OpenOx）在 DeepSeek V4 pro 与 Flash 之间不定向切换：请求 `deepseek-v4-pro` 有时由 Flash 应答并报告为 `deepseek-ai/DeepSeek-V4-Flash-0731`，反方向也出现过。身份门照规定判为 `MODEL_IDENTITY_MISMATCH`，验收 run 因此中断。产品负责人 2026-10-11 拍板（D14）：在接入真正的 pro 第二上游之前，获客链路接受 Flash 运行，结果如实标注。
@@ -173,6 +193,31 @@
   - 已保存的 READY 计划不回写；执行时其中停用源的查询按跳过计数，run 判 PARTIAL。
   - 发现 run 的技术报价不按计划内容收窄（见上）；要按计划算，报价服务得读库，属另一项设计。
   - 代码阅读发现（未在真库验证）：`wikidata`、`openstreetmap`、`ted`、`openfda` 的 provider 没有受治理血缘（`companyResultLineage`），路由到它们的查询走 legacy 路径，不写受治理回执表；新 run 的物化准入要求每条计划查询都有这张表的回执，所以启用这些源后，含它们查询的 run 会在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下。重新启用这些源之前，要先给它们补受治理血缘，或另定处理。
+
+## 2026-10-10 · Store links to each company's own contact paths (BI-14 PR-1, switch off by default)
+
+- 起因：BI-14 设计（产品负责人批准，2026-10-10 修订）改为只存公司自己的联系路径链接，不抽邮箱和电话。当天又批准两项范围补充：供应商页（`supplier_page`），以及首页链接里的公司 LinkedIn 页与 X 账号（决定 E9）。本 PR 只做数据通路，不改评分、原因码、运营端点与 OpenAPI（PR-2）。
+- 新表 `company_contact_point`（迁移 `20261011090000_company_contact_point`，单事务、只新增、零回填）：
+  - kind 只有六种：`contact_page`、`impressum_page`、`contact_form`、`supplier_page`、`linkedin_company_page`、`x_company_account`；value 是不带 query、fragment、`@`、`%40` 与空白的 https 链接；LinkedIn 只收 `https://www.linkedin.com/company|showcase/<slug>`，X 只收 `https://x.com/<handle>`；四种站内 kind 不能指向 LinkedIn、X 或 Twitter；`data_class` 只能是 green。表里没有邮箱、电话、人名字段，以上全部由 CHECK 约束。
+  - 自动来源（`company_contact`）只写 UNVERIFIED；VALID 与 OPERATOR_REJECTED 必须有 `updated_by`（人）。状态 CHECK 每个分支先判 `status_reason IS NOT NULL`：一次性库实测，没有这一判断时 INVALID 且无原因的行会因 CHECK 结果为 NULL 而写进去。
+  - 复合外键到 `canonical_company(workspace_id, id)`，随公司级联删除；唯一键 (workspace, company, kind, value)；ENABLE + FORCE RLS，租户策略同发现表；`app_user` 显式授予 SELECT、INSERT、UPDATE、DELETE，`app-user-table-privileges.json` 同步。`schema.prisma` 加模型，Copy 已重签（只变指纹）。
+- 找链接（`discovery/website-profile/contact-paths.ts`，纯函数）：只读官网画像已经抓到的首页里的链接。
+  - 站内链接只收公司域名本身或 `www.` 主机（其他子域名标签是站方写的任意文字，不收），且路径每一段都是已知词或短数字、整条路径最多 6 个数字，所以存下的链接带不出页面上的任意文字（比如人名或拆开的电话号码）。
+  - 按路径或链接文字判定联系页、Impressum、供应商页（德英文：Lieferant werden、Lieferantenportal、Partner werden、Händler werden、Hersteller werden、Become a supplier、Supplier portal、Partner program 等），每种至多 1 个，规范成 https、去掉 query 与 fragment；只靠链接文字命中且带 query 的链接不收。
+  - LinkedIn 只收 company / showcase 页：优先 slug 含公司域名名称的那个，否则只有在首页只链了一个公司页时才收（避免把合作方、客户的页面当成本公司）；数字 ID 最多 6 位，7 位以上按疑似电话号码丢弃。X 只收账号页，且账号名里必须含公司域名名称（无法确认账号属于公司时不存，避免把个人账号当成公司数据）。
+  - 首页文本达到抓取上限（40,000 字符）时，链接类种类不算「看过」，不会因页面被截断而把点标成已移除。
+- 联系表单：开关打开且首页链到联系页时，经 ToolBroker 以同一公司主体对联系页做 1 次 `crawl4ai.render`（robots 与 source_policy 在工具内照常执行），看是否有表单：提交控件、同意文本、必填标记三类至少两类，排除搜索、登录、购物车和不带留言框的订阅表单。只读 HTML，不填写、不提交。渲染失败或被 robots 拦时，表单记为「未知」，不当作「没有」。渲染工具的持久结果把联系页 HTML 作为 PERSONAL_DATA 产物保留 24 小时（与 Impressum 抓取同一模式，DSR 擦除覆盖）；表里只存链接。
+- 写入：在官网画像的同一事务里，先拿工作区禁联锁，再 FOR SHARE 复读公司状态，再读禁联事实；公司缺失、已 SUPPRESSED、命中域名或公司名禁联时一条不写，链接主机命中域名禁联时丢掉该点。
+  - 重画像时，本次看过的种类里不再出现的自动来源点改为 INVALID / `REMOVED_FROM_SITE`，再次出现时恢复为 UNVERIFIED；运营来源或被人改过的点从不自动修改。
+  - `last_seen_at` 只前进不后退：观测时间取这家页面读完的时刻；刷新只在 `last_seen_at <= 观测时间` 时生效，标记移除只作用于观测时间之前见过的点。两个 run 共享同一家公司、旧观测后提交时不改任何东西（复审发现，一次性库复现了旧版本的 `company_contact_point_seen_check` 违约）。
+  - 联系页渲染的回执单独成一批 ACK，避免重放与新回执混在同一批。
+- 开关 `data_provider.company_contact` 以 DISABLED 种入（`update: {}` 不覆盖运维改动）。关闭时不渲染、不写点，画像照常只抓首页和 Impressum；但每次画像会多存 `website_profile.source_url` 和对应的一条 field_evidence（见下）。打开后，30 天内画像过、但还没用当前规则读过联系路径的公司会重画像一次（`website_profile._contact_parser` 标记，不写 field_evidence）。
+- 其他：
+  - `website_profile.source_url` 记录画像事实所在的页（Impressum，否则首页），经现有安全 https 校验；贸易角色、登记号、税号因此有来源 URL（A4）。
+  - `discovery.classify_trade_role` 的 allowedTools 加 `crawl4ai.render`；发现 run 预算包络按每家画像公司至多 1 次 render 加上限（`crawl4ai.render` 24 → 74 次，技术报价上限多 0.50 美元，5,597.48 → 5,597.98 美元）。新调用点登记进执行授权清单（37 个）。
+  - 公司主体 DSR 擦除时删掉该公司的点，计数并入 `contact_points_erased`，DeletionCompleted 契约不加字段。
+- 测试：找链接 20 项（含运行时拼出的负向输入：mailto、tel、编码或拼写的 at 符号、拆开的数字、自由子域名、数字 LinkedIn slug）、画像提供方 7 项（含开关关闭时恰好 2 次抓取、首页被截断）、经真实 ToolBroker 验证渲染以公司 subjectRef 准入 2 项、写入 8 项、活动 4 项、命名空间标记 2 项、擦除 2 项、迁移静态合同 6 项、属性清洗 1 项、种子 1 项；真库用例 `company-contact-point.postgres.spec.ts` 6 项以 app_user 运行（带 superuser 与 BYPASSRLS 守卫，含旧观测后提交的用例），接入 CI「Raw SQL parameter types on PostgreSQL」步骤，`app-user-table-privileges.postgres.spec.ts` 新增一项正向用例。一次性库：只部署 main 的迁移时新用例与权限清单用例失败（表不存在），部署新迁移后全部通过。
+- 未做（PR-2）：可达性公式与评分、原因码、运营端点、读模型与 OpenAPI。真栈有界样本要等 D9 开关与预算拍板。
 
 ## 2026-10-09 · Give discovery runs a 3-hour admission lease
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
 import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
@@ -1335,15 +1336,15 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       rawSourceRecord: { findMany: rawFindMany },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
+    const withWorkspace = vi.fn(
+      async (
+        _workspaceId: string,
+        callback: (client: typeof tx) => Promise<unknown>,
+        _options?: unknown,
+      ) => callback(tx),
+    );
     const activities = createDiscoveryActivities({
-      prisma: {
-        withWorkspace: vi.fn(
-          async (
-            _workspaceId: string,
-            callback: (client: typeof tx) => Promise<unknown>,
-          ) => callback(tx),
-        ),
-      },
+      prisma: { withWorkspace },
       providers: {},
       gateway: {},
       budgetStore: authorityBudgetStore(),
@@ -1358,6 +1359,9 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         ingestVersion: "raw-source/v2",
       },
     });
+    // Admission keeps the client defaults; the whole-run legacy pass carries the canonicalize options.
+    expect(withWorkspace.mock.calls.map((call) => call[2]))
+      .toEqual([undefined, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS]);
   });
 
   it.each([
@@ -2067,15 +2071,24 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 0, suppressed: 1 }];
+          return [{ status: "APPLIED", companies: 0n, suppressed: 1n }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed C-TX query: ${sql}`);
       }),
     };
+    const transactions: Array<{ options: unknown; sql: string[] }> = [];
     const activities = createDiscoveryActivities({
       prisma: {
-        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+        withWorkspace: vi.fn(async (_workspaceId, callback, options) => {
+          const before = tx.$queryRaw.mock.calls.length;
+          const result = await callback(tx);
+          transactions.push({
+            options,
+            sql: tx.$queryRaw.mock.calls.slice(before).map(([query]) => materializationSqlText(query)),
+          });
+          return result;
+        }),
       },
       providers: {},
       gateway: {},
@@ -2087,6 +2100,13 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     ).resolves.toEqual({ companies: 0, suppressed: 1 });
     expect(attestAuthorized).not.toHaveBeenCalled();
     expect(inspection).toBe(3);
+    // Only the batch transaction carries the canonicalize options; admission, inspection and
+    // the two finalizations keep the client defaults.
+    const batch = transactions.filter(({ sql }) =>
+      sql.some((text) => text.includes("lock_discovery_company_materialization_batch_facts_v1")));
+    expect(batch).toHaveLength(1);
+    expect(batch[0]!.options).toBe(DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
+    expect(transactions.filter(({ options }) => options !== undefined)).toEqual(batch);
     const append = tx.$queryRaw.mock.calls.find(([query]) =>
       materializationSqlText(query).includes("append_discovery_company_materialization_batch_v1"));
     const appendValues = Object.getOwnPropertyDescriptor(append?.[0] as object, "values")?.value;
@@ -2131,7 +2151,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     "admit", "admitStatus", "admitMode", "inspect", "inspectReplayNext",
     "inspectRunSummary", "inspectNextKind", "facts", "factsStatus", "factsEmpty",
     "factsSnapshot", "factsProductNaN", "factsTooMany", "append", "appendStatus", "appendOrdinal",
-    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount",
+    "finalizeQuery", "finalizeQueryKey", "finalizeRun", "finalizeRunCount", "finalizeRunNumber",
     "materializationDenied", "priorMissing", "existingLink", "identityP2002", "identityOther",
   ])(
     "fails closed on malformed %s database output",
@@ -2196,6 +2216,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               || malformedStage === "finalizeQueryKey"
               ? { kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0 }
               : malformedStage === "finalizeRun" || malformedStage === "finalizeRunCount"
+                || malformedStage === "finalizeRunNumber"
                 ? { kind: "FINALIZE_RUN" }
                 : malformedStage === "inspectNextKind" ? { kind: "INVALID" }
                   : { kind: "BATCH", queryKey, queryOrdinal: 0, batchOrdinal: 0 };
@@ -2251,9 +2272,12 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
             }];
           }
           if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+            // PostgreSQL BIGINT reaches Prisma raw queries as bigint; a plain number is malformed.
             return malformedStage === "finalizeRun" ? [{}] : [{
-              status: "APPLIED", companies: malformedStage === "finalizeRunCount" ? -1 : 0,
-              suppressed: 0,
+              status: "APPLIED",
+              companies: malformedStage === "finalizeRunCount" ? -1n
+                : malformedStage === "finalizeRunNumber" ? 0 : 0n,
+              suppressed: 0n,
             }];
           }
           if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
@@ -2424,7 +2448,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
           return [{ status: "APPLIED", query_key: queryKey }];
         }
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
-          return [{ status: "APPLIED", companies: 1, suppressed: 3 }];
+          return [{ status: "APPLIED", companies: 1n, suppressed: 3n }];
         }
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed canonical query: ${sql}`);
@@ -3126,7 +3150,12 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     };
     const updateMany = vi.fn(async () => ({ count: 1 }));
     await deps.prisma.withWorkspace("ws", async (tx) => {
-      tx.dataProvider = { findUnique: vi.fn(async () => ({ status: options.status ?? "ENABLED" })) };
+      // BI-14's company_contact switch keeps its seeded DISABLED here; its own cases are below.
+      tx.dataProvider = {
+        findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
+          status: where.key === "company_contact" ? "DISABLED" : options.status ?? "ENABLED",
+        })),
+      };
       tx.icpDefinition = {
         findUnique: vi.fn(async () => ({
           companyAttributes: { industry: "Pumpen", product: "Kreiselpumpen" },
@@ -3219,6 +3248,157 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
     ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+});
+
+describe("profileWebsitesForRun contact paths (BI-14)", () => {
+  // Synthetic `.example` company and made-up slugs and handles only.
+  const SITE = "https://pumpen-handel.example";
+  const COMPANY = { id: "c1", name: "Pumpen Handel GmbH", domain: "pumpen-handel.example", country: "DE" };
+  const PATHS = {
+    contactPage: `${SITE}/kontakt`,
+    impressumPage: `${SITE}/impressum`,
+    supplierPage: `${SITE}/lieferanten`,
+    linkedinCompanyPage: "https://www.linkedin.com/company/pumpen-handel-example",
+    xCompanyAccount: "https://x.com/pumpenhandel",
+    linksChecked: true,
+    contactForm: `${SITE}/kontakt`,
+    contactFormChecked: true,
+  };
+  const PROFILE = {
+    homepageUrl: `${SITE}/`,
+    impressumUrl: `${SITE}/impressum`,
+    tradeRole: "distributor",
+    tradeRoleSource: "rules",
+    tradeRoleConfidence: 0.7,
+    ownManufacturing: null,
+    carriedBrands: [],
+    carriesChineseBrand: false,
+    carriesForeignBrand: false,
+    legalName: "Pumpen Handel GmbH",
+    register: null,
+    vatId: null,
+    evidence: [],
+  };
+
+  type Committed = { data: { attributes: Record<string, Record<string, unknown>> } };
+
+  async function makeContactDeps(
+    profile: ReturnType<typeof vi.fn>,
+    options: { contactStatus?: string; attributes?: Record<string, unknown>; lockedStatus?: string } = {},
+  ) {
+    const deps = makeEnrichDeps([]) as unknown as {
+      prisma: { withWorkspace: (ws: string, fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };
+      websiteProfile?: unknown;
+    };
+    const updateMany = vi.fn(async (_args: Committed) => ({ count: 1 }));
+    const points = {
+      findMany: vi.fn(async () => []),
+      createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    };
+    const attributes = options.attributes ?? {};
+    await deps.prisma.withWorkspace("ws", async (raw) => {
+      const tx = raw as Record<string, unknown> & { canonicalCompany: Record<string, unknown> };
+      tx.$queryRaw = vi.fn(async (strings: TemplateStringsArray) =>
+        strings.join("?").includes("FOR SHARE")
+          ? [{ status: options.lockedStatus ?? "NEW", name: COMPANY.name, domain: COMPANY.domain }]
+          : [{ locked: true }]);
+      tx.dataProvider = {
+        findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
+          status: where.key === "company_contact" ? options.contactStatus ?? "DISABLED" : "ENABLED",
+        })),
+      };
+      tx.icpDefinition = {
+        findUnique: vi.fn(async () => ({ companyAttributes: { industry: "Pumpen" }, targetMarkets: ["DE"] })),
+      };
+      tx.canonicalCompany.updateMany = updateMany;
+      tx.canonicalCompany.findMany = async () => [{ ...COMPANY, attributes }];
+      tx.canonicalCompany.findUnique = async () => ({ ...COMPANY, status: "NEW", attributes });
+      tx.companyContactPoint = points;
+    });
+    deps.websiteProfile = { profile };
+    return { acts: createDiscoveryActivities(deps as never), updateMany, points };
+  }
+
+  it("leaves contact paths alone while company_contact is DISABLED: nothing asked for, no points", async () => {
+    // A provider that returns contact paths anyway is ignored.
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, updateMany, points } = await makeContactDeps(profile);
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-off", { icpId: "icp-1" }));
+
+    expect(profile.mock.calls[0]![0]).toMatchObject({ contactPaths: false });
+    expect(points.findMany).not.toHaveBeenCalled();
+    expect(points.createMany).not.toHaveBeenCalled();
+    expect(points.updateMany).not.toHaveBeenCalled();
+    const profileAttributes = updateMany.mock.calls[0]![0].data.attributes.website_profile;
+    expect(profileAttributes).not.toHaveProperty("_contact_parser");
+    // The source page of the profile facts is kept either way (A4).
+    expect(profileAttributes).toMatchObject({ source_url: `${SITE}/impressum` });
+  });
+
+  it("asks for contact paths while company_contact is ENABLED and stores them in the profile transaction", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, updateMany, points } = await makeContactDeps(profile, { contactStatus: "ENABLED" });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-on", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, matched: 1 });
+
+    expect(profile.mock.calls[0]![0]).toMatchObject({ domain: "pumpen-handel.example", contactPaths: true });
+    expect(points.createMany).toHaveBeenCalledOnce();
+    const created = points.createMany.mock.calls[0]![0] as {
+      data: Array<Record<string, unknown>>;
+      skipDuplicates: boolean;
+    };
+    expect(created.skipDuplicates).toBe(true);
+    expect(created.data.map(({ kind, value, status, dataClass, providerKey }) =>
+      [kind, value, status, dataClass, providerKey])).toEqual([
+      ["contact_page", PATHS.contactPage, "UNVERIFIED", "green", "company_contact"],
+      ["impressum_page", PATHS.impressumPage, "UNVERIFIED", "green", "company_contact"],
+      ["supplier_page", PATHS.supplierPage, "UNVERIFIED", "green", "company_contact"],
+      ["linkedin_company_page", PATHS.linkedinCompanyPage, "UNVERIFIED", "green", "company_contact"],
+      ["x_company_account", PATHS.xCompanyAccount, "UNVERIFIED", "green", "company_contact"],
+      ["contact_form", PATHS.contactForm, "UNVERIFIED", "green", "company_contact"],
+    ]);
+    expect(updateMany.mock.calls[0]![0].data.attributes.website_profile).toMatchObject({
+      _contact_parser: "company_contact/v1",
+      source_url: `${SITE}/impressum`,
+    });
+  });
+
+  it("re-reads a recently profiled company once when its contact paths were never read under the current rules", async () => {
+    const fresh = new Date().toISOString();
+    const cases: Array<[Record<string, unknown>, string, number]> = [
+      [{ trade_role: "distributor", _ts: fresh }, "ENABLED", 1],
+      [{ trade_role: "distributor", _ts: fresh, _contact_parser: "company_contact/v1" }, "ENABLED", 0],
+      [{ trade_role: "distributor", _ts: fresh }, "DISABLED", 0],
+    ];
+    for (const [websiteProfile, contactStatus, profiles] of cases) {
+      const profile = vi.fn(async () => PROFILE);
+      const { acts } = await makeContactDeps(profile, {
+        contactStatus,
+        attributes: { website_profile: websiteProfile },
+      });
+      await acts.profileWebsitesForRun(discoveryArgs(`run-contact-ttl-${profiles}`, { icpId: "icp-1" }));
+      expect(profile, `${contactStatus} ${JSON.stringify(websiteProfile)}`).toHaveBeenCalledTimes(profiles);
+    }
+  });
+
+  it("re-reads the company FOR SHARE before writing points: a company suppressed meanwhile gets none", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, points } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      lockedStatus: "SUPPRESSED",
+    });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-suppressed", { icpId: "icp-1" }));
+
+    expect(profile).toHaveBeenCalledOnce();
+    expect(points.findMany).not.toHaveBeenCalled();
+    expect(points.createMany).not.toHaveBeenCalled();
+    expect(points.updateMany).not.toHaveBeenCalled();
   });
 });
 

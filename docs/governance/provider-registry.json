@@ -146,6 +146,19 @@
       "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/providers/website-profile.provider.spec.ts" }]
     },
     {
+      "key": "company_contact",
+      "status": "IMPLEMENTED",
+      "source_classes": ["public_intelligence"],
+      "purpose": "Store links to a profiled company's own contact paths read from its homepage links: contact, Impressum and supplier pages on the company domain, the company LinkedIn page and X account, and whether the linked contact page carries a contact form (one render per company).",
+      "taxonomy": ["contact path kind", "same-site path vocabulary", "contact form signals"],
+      "license": { "classification": "SOURCE_SPECIFIC", "note": "Links only: no page text, email address, phone number or name is parsed or stored. Points are green, UNVERIFIED until a person confirms them, and carry provider, parser version and first and last seen times." },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": ["data_provider_status", "source_policy", "tool_broker", "egress_guard"],
+      "test_paths": ["apps/api/src/discovery/website-profile/contact-paths.spec.ts", "apps/api/src/discovery/providers/website-profile-contact-paths.spec.ts", "apps/api/src/discovery/providers/website-profile-contact-subject.spec.ts", "apps/api/src/discovery/company-contact-points.spec.ts", "apps/api/src/discovery/company-contact-point.migration.spec.ts", "apps/api/src/discovery/company-contact-point.postgres.spec.ts"],
+      "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/website-profile/contact-paths.spec.ts" }, { "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/company-contact-point.postgres.spec.ts" }]
+    },
+    {
       "key": "smtp_self",
       "status": "IMPLEMENTED",
       "source_classes": ["email_verification"],
