@@ -117,7 +117,9 @@ describe.runIf(enabled)('Discovery company materialization activation (Release B
   let activities: ReturnType<typeof createDiscoveryActivities>;
   let releaseA: string | undefined;
   const workspaceId = randomUUID();
-  const suffix = randomBytes(4).toString('hex');
+  // Starts with a letter: an all-digit suffix (about 1 run in 40) made `<subject>-<digits>.de` a
+  // phone-like run of 7+ digits, and the Raw contact check rejected the fixture records.
+  const suffix = `a${randomBytes(4).toString('hex')}`;
   let governed: RunFixture;
   let legacy: RunFixture;
   let governedItemId: string;
