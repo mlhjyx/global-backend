@@ -24,6 +24,29 @@
   - 从真实查询阶段（`append_discovery_query_lineage_v2`）一路走到 canonicalize 的端到端真库测试：本项的 Q 血缘按 disposable spec 的做法由 owner 直接写入。
   - `apps/api/scripts/verify-openfda-discovery.mts` 与 `verify-ted-discovery.mts` 用 owner 连接创建不带 v1 标记的 run，激活后会被插入守卫以 `MARKER_REQUIRED` 拒绝；这两个是人工核验脚本，不在产品路径上。
 
+## 2026-10-11 · Stop the dependency-delta canary from failing on a pipe race
+
+- 起因：非必需检查「production dependency delta · canary」在 #628 上报 `dependency-delta protocol bootstrap changed an untrusted path: apps/api/src/ai-tasks/task-registry.ts`，而 PR 的基线早已带新协议标记。`.github/workflows/supply-chain.yml` 在 `set -euo pipefail` 下把 `git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs"` 直接管道给 `grep -Fq`：grep 读到第一处匹配就退出，`git show` 还在写，于是被 SIGPIPE 杀掉（退出码 141）。pipefail 把整条管道判为失败，可信基线被误送进「协议自举」分支，任何改了白名单外文件的 PR 都会被拒。基线 verifier 越大，越容易撞上。
+- 改动：
+  - 探测不再经过管道，分三步：
+    1. 用 `git cat-file -e` 判断基线里有没有 verifier；
+    2. 有就把 `git show` 写进 `$TRUSTED_VERIFIER`，没有就写一个空文件；
+    3. 再对这个文件做 `grep -Fq`。
+  - 只有两种情况会走自举：基线没有该文件，或文件里没有协议标记。写副本失败时 `set -e` 直接中止；读副本失败（grep 退出码大于 1）时报错退出，不会误走自举。
+  - `scripts/supply-chain-gates.spec.mjs`：
+    - 原断言逐字钉住了有问题的管道写法，现改为钉新写法。
+    - 新增一项行为测试：从工作流里取出探测片段，在临时 git 仓库中用 `set -euo pipefail` 实跑。测试里的 git 提交关掉全局钩子，免得本机的提交前扫描拖慢测试。逐项结果：
+      - 1 MiB、首行带标记的基线：连续 3 次判为可信，写出的副本与基线逐字节相同。
+      - 没有标记的基线、没有该文件的基线：都判为自举，后者的副本为空。
+      - 副本路径不可写：作业非零退出，既不判可信也不走自举。
+    - 新增静态规则：去掉注释行后，工作流里不得出现管道接「会提前停止读取」的命令，即 `grep` 带 `-q`、`-m`、`-l`、`--quiet`、`--max-count`，或 `head`。`||` 不算管道。全仓工作流只有原来那一处。
+- 测试：
+  - 先红后绿：改工作流前，新旧测试都失败；改后 `node --test scripts/supply-chain-gates.spec.mjs` 27/27 通过（约 1.3 秒）。
+  - 本机对照：同一个 8 MiB 基线，旧的管道写法 20 次里 20 次误判为自举，新写法 0 次。
+  - 静态规则对照：7 种有风险的写法全部识别；`||`、`| awk`、`grep -v`、`grep -c` 等 5 种正常写法不误报。
+  - 独立复审结论：可合并。三条低优先级建议都已采纳：区分「没有文件」与「写失败」、测试提交不走全局钩子、静态规则更准。
+- 未做：`ci.yml` 的 openapi 漂移检查里还有一处 `git diff … | head -100`。它只在已经要 `exit 1` 的报错分支里打印差异，不影响结论，没有改动。
+
 ## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
 - 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。
