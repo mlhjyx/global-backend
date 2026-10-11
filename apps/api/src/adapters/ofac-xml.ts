@@ -31,6 +31,18 @@ export interface ParsedSanctionsList {
   publishDate: string | null; // ISO（源 Publish_Date=MM/DD/YYYY）
   recordCount: number | null;
   entities: ParsedSanctionsEntity[];
+  /**
+   * Every published entry counted by its subject type (OFAC sdnType, EU subjectType code) before
+   * the entity-only filter, so an operator can see what was dropped. Counts only, never names; an
+   * entry without a type counts as `unspecified`.
+   */
+  subjectTypes: Record<string, number>;
+}
+
+/** Count one entry under its subject type; a plain Map keeps a hostile value away from prototypes. */
+export function countSubjectType(counts: Map<string, number>, type: string | null): void {
+  const key = type ?? 'unspecified';
+  counts.set(key, (counts.get(key) ?? 0) + 1);
 }
 
 type XmlNode = Record<string, unknown>;
@@ -71,7 +83,7 @@ function entityName(node: XmlNode): string | null {
 }
 
 export function parseOfacXml(xml: string): ParsedSanctionsList {
-  const empty: ParsedSanctionsList = { publishDate: null, recordCount: null, entities: [] };
+  const empty: ParsedSanctionsList = { publishDate: null, recordCount: null, entities: [], subjectTypes: {} };
   if (!xml || !xml.trim()) return empty;
 
   let doc: { sdnList?: XmlNode };
@@ -87,8 +99,11 @@ export function parseOfacXml(xml: string): ParsedSanctionsList {
   const recordCount = rc && /^\d+$/.test(rc) ? Number(rc) : null;
 
   const entities: ParsedSanctionsEntity[] = [];
+  const subjectTypes = new Map<string, number>();
   for (const entry of asArray<XmlNode>(list.sdnEntry as XmlNode | XmlNode[])) {
-    if (toStr(entry.sdnType) !== 'Entity') continue; // 🔴 仅实体，Individual/Vessel/Aircraft 剔除
+    const sdnType = toStr(entry.sdnType);
+    countSubjectType(subjectTypes, sdnType);
+    if (sdnType !== 'Entity') continue; // 🔴 仅实体，Individual/Vessel/Aircraft 剔除
     const externalId = toStr(entry.uid);
     const primaryName = entityName(entry);
     if (!externalId || !primaryName) continue; // 缺稳定 id/名 → 跳过（防脏数据）
@@ -109,5 +124,5 @@ export function parseOfacXml(xml: string): ParsedSanctionsList {
 
     entities.push({ externalId, primaryName, country, programs, aliases });
   }
-  return { publishDate, recordCount, entities };
+  return { publishDate, recordCount, entities, subjectTypes: Object.fromEntries(subjectTypes) };
 }

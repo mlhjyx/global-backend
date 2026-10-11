@@ -33,6 +33,7 @@ import type {
 } from "../discovery/provider-contract";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import { DISCOVERY_COMPANY_RESULT_LINEAGE_V1 } from "../discovery/company-discovery-lineage";
+import { discoveryQueryKey } from "../discovery/discovery-query-receipt";
 
 const acknowledgementMocks = vi.hoisted(() => ({
   apply: vi.fn(
@@ -241,7 +242,10 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
       fn: (tx: unknown) => Promise<T>,
     ): Promise<T> => fn(tx),
   };
-  const providers = { routeCompanyDiscovery: async () => adapters };
+  const providers = {
+    routeCompanyDiscovery: async () => adapters,
+    companyDiscoverySources: () => REGISTERED_DISCOVERY_SOURCES,
+  };
   return {
     prisma,
     providers,
@@ -249,6 +253,19 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
     budgetStore: authorityBudgetStore(),
   } as unknown as Parameters<typeof createDiscoveryActivities>[0];
 }
+
+/** The company discovery sources a gateway-backed registry registers (BI-30). */
+const REGISTERED_DISCOVERY_SOURCES = Object.freeze([
+  { sourceClass: "public_intelligence", providerKey: "public_web" },
+  { sourceClass: "industry_data", providerKey: "public_web" },
+  { sourceClass: "industry_data", providerKey: "directory" },
+  { sourceClass: "company_registry", providerKey: "wikidata" },
+  { sourceClass: "industry_data", providerKey: "wikidata" },
+  { sourceClass: "industry_data", providerKey: "openstreetmap" },
+  { sourceClass: "industry_data", providerKey: "trade_fair" },
+  { sourceClass: "public_intelligence", providerKey: "ted" },
+  { sourceClass: "public_intelligence", providerKey: "openfda" },
+]);
 
 const QUERY = {
   source_class: "public_intelligence",
@@ -536,6 +553,8 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       costCents: 0,
       provider: null,
       budgetTruncated: false,
+      // BI-30: no ENABLED adapter serves the query's class, so it was skipped.
+      skipReason: "SOURCE_DISABLED",
     });
   });
 
@@ -1095,6 +1114,183 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     )).rejects.toMatchObject({
       code: "DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH",
     });
+  });
+});
+
+describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI-30）", () => {
+  const DISABLED_QUERY = {
+    source_class: "company_registry",
+    filters: { source_hint: "wikidata", industry: "pumps", country: "Germany" },
+    keywords: [],
+    priority: 1,
+  };
+
+  function taxonomySpy() {
+    return {
+      resolveMany: vi.fn(async () => []),
+      resolve: vi.fn(async () => null),
+    };
+  }
+
+  it("skips a query whose source is DISABLED: no taxonomy model call, no provider call, one zero receipt", async () => {
+    const deps = makeDeps([]);
+    const taxonomy = taxonomySpy();
+    deps.taxonomy = taxonomy as never;
+    const acts = createDiscoveryActivities(deps);
+
+    const result = await acts.executeQuery(
+      discoveryArgs("run-ok-x", { query: DISABLED_QUERY }),
+    );
+
+    expect(taxonomy.resolveMany).not.toHaveBeenCalled();
+    expect(taxonomy.resolve).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      rawCount: 0,
+      costCents: 0,
+      provider: null,
+      skipReason: "SOURCE_DISABLED",
+      // The materialization admission needs one receipt per plan query.
+      queryReceipt: {
+        sourceClass: "company_registry",
+        providers: [],
+        accepted: 0,
+        usageQuantity: 0,
+        costCents: 0,
+      },
+    });
+  });
+
+  it.each([
+    ["a source class no provider serves", { source_class: "trade_data", filters: {} }],
+    ["a hint that names no registered source", { source_class: "public_intelligence", filters: { source_hint: "missing" } }],
+  ])("reports SOURCE_UNKNOWN for %s", async (_label, routing) => {
+    const acts = createDiscoveryActivities(makeDeps([]));
+
+    await expect(
+      acts.executeQuery(
+        discoveryArgs("run-ok-x", { query: { ...routing, keywords: [], priority: 1 } }),
+      ),
+    ).resolves.toMatchObject({ skipReason: "SOURCE_UNKNOWN", queryReceipt: { providers: [] } });
+  });
+
+  it("runs an ENABLED source as before, with no skip reason", async () => {
+    const deps = makeDeps([okAdapter("wikidata", [REC])]);
+    const taxonomy = taxonomySpy();
+    deps.taxonomy = taxonomy as never;
+    const acts = createDiscoveryActivities(deps);
+
+    const result = await acts.executeQuery(
+      discoveryArgs("run-ok-x", { query: { ...DISABLED_QUERY, source_class: "public_intelligence" } }),
+    );
+
+    expect(result).toMatchObject({ rawCount: 1, provider: "wikidata" });
+    expect(result).not.toHaveProperty("skipReason");
+    expect(taxonomy.resolveMany).toHaveBeenCalledOnce();
+  });
+
+  it("skips a query with an unusable hint instead of failing it", async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
+    const acts = createDiscoveryActivities(
+      makeDeps([{ ...okAdapter("public_web", []), discoverCompanies }]),
+    );
+
+    await expect(
+      acts.executeQuery(
+        discoveryArgs("run-ok-x", {
+          query: { ...QUERY, filters: { source_hint: 42 } },
+        }),
+      ),
+    ).resolves.toMatchObject({ skipReason: "SOURCE_UNKNOWN", rawCount: 0 });
+    expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+
+  it("routes a list hint to each named source and to nothing else", async () => {
+    const wikidata = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const ted = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const publicWeb = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const acts = createDiscoveryActivities(
+      makeDeps([
+        { ...okAdapter("public_web", []), discoverCompanies: publicWeb },
+        { ...okAdapter("wikidata", []), discoverCompanies: wikidata },
+        { ...okAdapter("ted", []), discoverCompanies: ted },
+      ]),
+    );
+
+    const result = await acts.executeQuery(
+      discoveryArgs("run-ok-x", {
+        query: { ...QUERY, filters: { source_hint: ["Wikidata", "ted"] } },
+      }),
+    );
+
+    expect(wikidata).toHaveBeenCalledOnce();
+    expect(ted).toHaveBeenCalledOnce();
+    expect(publicWeb).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("skipReason");
+  });
+
+  it("reports the skip again when a retry replays a zero-provider lineage receipt", async () => {
+    const workspaceId = DISCOVERY_BINDING.scopeKey;
+    const runId = "20000000-0000-4000-8000-000000000001";
+    const planId = "30000000-0000-4000-8000-000000000001";
+    const queryKey = discoveryQueryKey({
+      runId,
+      planId,
+      queryOrdinal: 0,
+      query: DISABLED_QUERY,
+    });
+    const route = vi.fn();
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) =>
+          callback({
+            $queryRaw: vi.fn(async () => [{
+              status: "REPLAYED",
+              query_receipt: {
+                schemaVersion: "discovery-query-receipt/v1",
+                queryKey,
+                queryOrdinal: 0,
+                sourceClass: "company_registry",
+                providers: [],
+                accepted: 0,
+                quarantined: 0,
+                rejected: 0,
+                governanceDenied: 0,
+                duplicate: 0,
+                usageQuantity: 0,
+                costCents: 0,
+              },
+              budget_truncated: false,
+              attempt_count: 0,
+              item_count: 0,
+              replay: true,
+            }]),
+          })),
+      },
+      providers: {
+        routeCompanyDiscovery: route,
+        companyDiscoverySources: () => REGISTERED_DISCOVERY_SOURCES,
+      },
+      gateway: {},
+      budgetStore: { attestAuthorized: vi.fn(), status: vi.fn() },
+    } as never);
+
+    await expect(
+      activities.executeQuery({
+        workspaceId,
+        runId,
+        planId,
+        queryOrdinal: 0,
+        queryReceiptMode: QUERY_RECEIPT_MODE,
+        query: DISABLED_QUERY,
+        executionContractVersion: 2,
+        executionBudget: DISCOVERY_BINDING,
+      }),
+    ).resolves.toMatchObject({
+      rawCount: 0,
+      skipReason: "SOURCE_DISABLED",
+      queryReceipt: { providers: [] },
+    });
+    expect(route).not.toHaveBeenCalled();
   });
 });
 
@@ -3220,6 +3416,25 @@ describe("resolveRunStatus —— 按公司跳过（G3 5.2）", () => {
     expect(
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedSubjects: 0 }),
     ).toBe("DONE");
+  });
+});
+
+describe("resolveRunStatus —— 数据源停用而跳过的查询（BI-30）", () => {
+  it("有查询因数据源停用被跳过 → 至少 PARTIAL，绝不 DONE", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedQueries: 1 }),
+    ).toBe("PARTIAL");
+  });
+  it("全部查询被跳过也只是 PARTIAL，不让 run 失败", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 2, budgetTruncated: false, skippedQueries: 2 }),
+    ).toBe("PARTIAL");
+  });
+  it("零跳过与旧历史（缺这个字段）保持原语义", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedQueries: 0 }),
+    ).toBe("DONE");
+    expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
   });
 });
 

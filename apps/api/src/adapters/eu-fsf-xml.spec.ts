@@ -51,3 +51,51 @@ describe('parseEuFsf（Phase 1 仅公司/实体）', () => {
     expect(parseEuFsf('<export></export>').entities).toEqual([]);
   });
 });
+
+// EU FSF full-list shape (2026-09-22 generation); every name below is invented.
+const SUBJECT_FIXTURE = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<export xmlns="http://eu.europa.ec/fpi/fsd/export" generationDate="2026-09-22T20:01:34.799+02:00" globalFileId="900001">
+  <sanctionEntity designationDetails="" unitedNationId="" euReferenceNumber="EU.9001.01" logicalId="900101">
+    <regulation regulationType="regulation" publicationDate="2024-02-23" programme="RUS" logicalId="1"/>
+    <subjectType code="person" classificationCode="P"/>
+    <nameAlias firstName="Fictio" lastName="Personova" wholeName="Fictio Personova" strong="true" logicalId="2"/>
+    <birthdate birthdate="1970-01-01" logicalId="3"/>
+  </sanctionEntity>
+  <sanctionEntity euReferenceNumber="EU.9001.02" logicalId="900102">
+    <regulation programme="RUS" logicalId="4"/>
+    <subjectType code="enterprise" classificationCode="E"/>
+    <nameAlias wholeName="IMAGINARY MACHINE WORKS JSC" strong="true" logicalId="5"/>
+    <address countryDescription="RUSSIAN FEDERATION" country="RU" logicalId="6"/>
+  </sanctionEntity>
+  <sanctionEntity euReferenceNumber="EU.9001.03" logicalId="900103">
+    <regulation programme="BLR" logicalId="7"/>
+    <subjectType code="person" classificationCode="P"/>
+    <nameAlias wholeName="Inventa Madeupovich" strong="true" logicalId="8"/>
+  </sanctionEntity>
+  <sanctionEntity euReferenceNumber="EU.9001.04" logicalId="900104">
+    <regulation programme="BLR" logicalId="9"/>
+    <subjectType code="enterprise" classificationCode="E"/>
+    <nameAlias wholeName="PHANTOM POTASH EXPORT LLC" strong="true" logicalId="10"/>
+    <nameAlias wholeName="PPE LLC" strong="false" logicalId="11"/>
+  </sanctionEntity>
+</export>`;
+
+describe('parseEuFsf — subject-type counts', () => {
+  const parsed = parseEuFsf(SUBJECT_FIXTURE);
+
+  it('keeps enterprises only and counts every published entry by subjectType code', () => {
+    expect(parsed.publishDate).toBe('2026-09-22');
+    expect(parsed.entities.map((entity) => entity.externalId)).toEqual(['900102', '900104']);
+    expect(parsed.subjectTypes).toEqual({ person: 2, enterprise: 2 });
+    const blob = JSON.stringify(parsed).toLowerCase();
+    for (const personal of ['fictio', 'personova', 'inventa', 'madeupovich', '1970-01-01']) {
+      expect(blob).not.toContain(personal);
+    }
+  });
+
+  it('counts nothing for empty or foreign input', () => {
+    expect(parseEuFsf('').subjectTypes).toEqual({});
+    expect(parseEuFsf('<sdnList><sdnEntry><uid>1</uid></sdnEntry></sdnList>').subjectTypes).toEqual({});
+  });
+});
+

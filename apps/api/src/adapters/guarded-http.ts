@@ -22,10 +22,24 @@ export interface PublicHttpResponse {
   finalUrl: string;
 }
 
+/** Per-hop wall-clock ceiling, response body included, for every Tool and workflow activity. */
+export const PUBLIC_HTTP_TIMEOUT_MAX_MS = 30_000;
+/**
+ * Per-hop ceiling an owner-run operator download may ask for (the official sanctions lists are
+ * 25-30 MB and the dev host's route to them is slow). No Tool input reaches it.
+ */
+export const PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS = 1_800_000;
+
 export interface PublicHttpRequestOptions {
   method?: 'GET' | 'HEAD';
   headers?: Record<string, string>;
+  /** Per-hop deadline; clamped to [100 ms, PUBLIC_HTTP_TIMEOUT_MAX_MS]. */
   timeoutMs?: number;
+  /**
+   * Owner-run operator downloads only, never a Tool, provider or activity: replaces timeoutMs
+   * and may exceed PUBLIC_HTTP_TIMEOUT_MAX_MS, clamped to PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS.
+   */
+  operatorTimeoutMs?: number;
   maxBytes?: number;
   maxRedirects?: number;
 }
@@ -46,7 +60,7 @@ type HappyEyeballsRequestOptions = RequestOptions & {
 
 export type PinnedHttpExecutor = (
   target: PinnedPublicUrl,
-  options: Required<Omit<PublicHttpRequestOptions, 'headers'>> & {
+  options: Required<Omit<PublicHttpRequestOptions, 'headers' | 'operatorTimeoutMs'>> & {
     headers: Record<string, string>;
   },
 ) => Promise<PinnedHttpResult>;
@@ -226,7 +240,9 @@ export async function requestPublicHttp(
   const effective = {
     method: options.method ?? 'GET',
     headers: sanitizeRequestHeaders(options.headers),
-    timeoutMs: Math.min(Math.max(options.timeoutMs ?? 15_000, 100), 30_000),
+    timeoutMs: options.operatorTimeoutMs === undefined
+      ? Math.min(Math.max(options.timeoutMs ?? 15_000, 100), PUBLIC_HTTP_TIMEOUT_MAX_MS)
+      : Math.min(Math.max(options.operatorTimeoutMs, 100), PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS),
     maxBytes: Math.min(
       Math.max(options.maxBytes ?? 1_000_000, 1),
       PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES,

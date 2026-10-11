@@ -32,6 +32,7 @@ import {
   MAX_CONTACT_DISCOVERY_ADAPTERS,
 } from './execution-envelope';
 import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
+import type { CompanyDiscoverySource } from './plan-query-sources';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -473,6 +474,23 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'email_guess', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
     });
+  }
+
+  /**
+   * Every (source class, provider key) a discovery plan query can route to, in
+   * registration order (BI-30). Fixed for the process; `data_provider.status`
+   * decides which of them run.
+   */
+  companyDiscoverySources(): CompanyDiscoverySource[] {
+    return this.discovery.flatMap((adapter) =>
+      adapter.classes.map((sourceClass) => ({ sourceClass, providerKey: adapter.key })),
+    );
+  }
+
+  /** The company discovery sources whose data_provider row is ENABLED now (BI-30 planner input). */
+  async enabledCompanyDiscoverySources(db: ProviderDb): Promise<CompanyDiscoverySource[]> {
+    const enabled = await this.enabledKeys(db);
+    return this.companyDiscoverySources().filter((source) => enabled.has(source.providerKey));
   }
 
   /** 某 source_class 当前 ENABLED 的公司发现适配器，保持显式注册顺序；调用方负责 fan-out。 */

@@ -4,23 +4,33 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-10-10 · Store links to each company's own contact paths (BI-14 PR-1, switch off by default)
+## 2026-10-10 · Refresh the official sanctions lists through an owner-run operator command
 
-- 起因：BI-14 设计（产品负责人批准，2026-10-10 修订）改为只存公司自己的联系路径链接，不抽邮箱和电话。当天又批准两项范围补充：供应商页（`supplier_page`），以及首页链接里的公司 LinkedIn 页与 X 账号（决定 E9）。本 PR 只做数据通路，不改评分、原因码、运营端点与 OpenAPI（PR-2）。
-- 新表 `company_contact_point`（迁移 `20261011090000_company_contact_point`，单事务、只新增、零回填）：
-  - kind 只有六种：`contact_page`、`impressum_page`、`contact_form`、`supplier_page`、`linkedin_company_page`、`x_company_account`；value 是不带 query、fragment、`@` 与空白的 https 链接，LinkedIn 只收 `https://www.linkedin.com/company|showcase/<slug>`，X 只收 `https://x.com/<handle>`；`data_class` 只能是 green。表里没有邮箱、电话、人名字段，以上全部由 CHECK 约束。
-  - 自动来源（`company_contact`）只写 UNVERIFIED；VALID 与 OPERATOR_REJECTED 必须有 `updated_by`（人）。状态 CHECK 每个分支先判 `status_reason IS NOT NULL`：一次性库实测，没有这一判断时 INVALID 且无原因的行会因 CHECK 结果为 NULL 而写进去。
-  - 复合外键到 `canonical_company(workspace_id, id)`，随公司级联删除；唯一键 (workspace, company, kind, value)；ENABLE + FORCE RLS，租户策略同发现表；`app_user` 显式授予 SELECT、INSERT、UPDATE、DELETE，`app-user-table-privileges.json` 同步。`schema.prisma` 加模型，Copy 已重签（只变指纹）。
-- 找链接（`discovery/website-profile/contact-paths.ts`，纯函数）：只读官网画像已经抓到的首页里的链接。同站链接（公司域名或其子域）只有在路径每一段都是已知词或短数字时才收，所以存下的链接带不出页面上的任意文字（比如人名）；按路径或链接文字判定联系页、Impressum、供应商页（德英文：Lieferant werden、Lieferantenportal、Partner werden、Händler werden、Hersteller werden、Become a supplier、Supplier portal、Partner program 等），每种至多 1 个，规范成 https、去掉 query 与 fragment；只靠链接文字命中且带 query 的链接不收。LinkedIn 只收 company / showcase 页；X 只收账号页，且账号名里必须含公司域名名称（无法确认账号属于公司时不存，避免把个人账号当成公司数据）。
-- 联系表单：开关打开且首页链到联系页时，经 ToolBroker 以同一公司主体对联系页做 1 次 `crawl4ai.render`（robots 与 source_policy 在工具内照常执行），看是否有表单：提交控件、同意文本、必填标记三类至少两类，排除搜索、登录、购物车和不带留言框的订阅表单。只读 HTML，不填写、不提交。渲染失败或被 robots 拦时，表单记为「未知」，不当作「没有」。
-- 写入：在官网画像的同一事务里，先拿工作区禁联锁，再 FOR SHARE 复读公司状态，再读禁联事实；公司缺失、已 SUPPRESSED、命中域名或公司名禁联时一条不写，链接主机命中域名禁联时丢掉该点。重画像时，本次看过的种类里不再出现的自动来源点改为 INVALID / `REMOVED_FROM_SITE`，再次出现时恢复为 UNVERIFIED；运营来源或被人改过的点从不自动修改。联系页渲染的回执单独成一批 ACK，避免重放与新回执混在同一批。
-- 开关 `data_provider.company_contact` 以 DISABLED 种入（`update: {}` 不覆盖运维改动）。关闭时与改动前完全一样：只抓首页和 Impressum、不渲染、不写点。打开后，30 天内画像过、但还没用当前规则读过联系路径的公司会重画像一次（`website_profile._contact_parser` 标记，不写 field_evidence）。
-- 其他：
-  - `website_profile.source_url` 记录画像事实所在的页（Impressum，否则首页），经现有安全 https 校验；贸易角色、登记号、税号因此有来源 URL（A4）。
-  - `discovery.classify_trade_role` 的 allowedTools 加 `crawl4ai.render`；发现 run 预算包络按每家画像公司至多 1 次 render 加上限（`crawl4ai.render` 24 → 74 次，技术报价上限多 0.50 美元，5,597.48 → 5,597.98 美元）。新调用点登记进执行授权清单（37 个）。
-  - 公司主体 DSR 擦除时删掉该公司的点，计数并入 `contact_points_erased`，DeletionCompleted 契约不加字段。
-- 测试：纯函数 17 项、画像提供方 6 项（含开关关闭时恰好 2 次抓取）、经真实 ToolBroker 验证渲染以公司 subjectRef 准入 2 项、写入 7 项、活动 4 项、命名空间标记 2 项、擦除 2 项、迁移静态合同 6 项、属性清洗 1 项、种子 1 项；真库用例 `company-contact-point.postgres.spec.ts` 5 项以 app_user 运行（带 superuser 与 BYPASSRLS 守卫），接入 CI「Raw SQL parameter types on PostgreSQL」步骤，`app-user-table-privileges.postgres.spec.ts` 新增一项正向用例。一次性库：只部署 main 的迁移时新用例与权限清单用例失败（表不存在），在同一个库上部署新迁移后全部通过。
-- 未做（PR-2）：可达性公式与评分、原因码、运营端点、读模型与 OpenAPI。真栈有界样本要等 D9 开关与预算拍板。
+- 起因：产品负责人 2026-10-10 按平台 schedule 准入设计（PR #625）拍板：冻结 R4，4 个平台 schedule 继续暂停，制裁名单走方案 B0（不经平台 schedule 的运营刷新），打开制裁门另行批准（D9）。当时 `sanctions_source` 里 `ofac_sdn` 为 DISABLED、9,810 个实体（07-13 名单，07-14 刷新），`ofac_consolidated` 与 `eu_fsf` 为 DISABLED 且从未入库；平台 `sanctionsRefreshWorkflow` 跑不了，ToolBroker 对平台调用扣住 `sanctions-download/v1`。
+- 改动：
+  - 新运营命令 `apps/api/scripts/refresh-sanctions-lists.mts`（`--source=all` 或逗号列表、`--dry-run`、`--timeout-seconds`），逻辑在 `sanctions/sanctions-operator-refresh.ts` 与 `sanctions/sanctions-operator-download.ts`：
+    - 只用 `DATABASE_URL`（库属主）。连接角色是 `app_user`，或既非超级用户、又不拥有两张制裁表，就在读源和下载之前拒绝。
+    - 每个选中源的 `url`、`format` 必须与种子里的官方端点逐字一致（美国财政部 OFAC、欧盟 FSF），否则整次运行在下载前拒绝。source_policy 用 ToolBroker 自己的 `checkSourcePolicy` 判定，未登记、SUSPENDED、用途不符都拒绝。
+    - 下载经 guarded HTTP：只连公网地址，每一跳重新解析并钉住，最多 3 跳，32 MiB 上限，单跳截止默认 600 秒；最后一跳须为 https，媒体类型须为 XML，严格 UTF-8，再过 artifact 路径同一道 XML 安全检查。连接中断、超时、DNS 失败、HTTP 429/5xx 最多试 4 次（间隔 5、15、45 秒），其余失败不重试。
+    - 写入交给 `SanctionsRefreshService` 的无回执分支。新增 `refreshSourcesByKey`：不论状态刷新指定的源，逐源 fail-safe 与 `refreshAll` 相同。归一、内容摘要、撤下、版本与元数据更新全部复用，不写 `status`。
+    - `--dry-run` 下载、解析，用服务同一套纯函数算出将新增 / 更新 / 不变 / 撤下与收缩保护判定，打印每个源保留的实体数与按类型剔除的条数，不写库。
+  - `SanctionsRefreshService` 的无回执分支改为单个属主事务（`maxWait` 10 秒、`timeout` 10 分钟）。此前逐条直写，中途失败会留下半新半旧的名单。另导出 `sanctionsParserFor`、`sanctionsListVersion`、`sanctionsShrinkGuardTripped` 给 dry run 复用。
+  - 两个解析器多返回 `subjectTypes`：按 sdnType / subjectType 计数，只有数字，不含名字。OFAC Consolidated 与 SDN 同一 XML 结构，直接用 OFAC 解析器。
+  - `requestPublicHttp` 新增 `operatorTimeoutMs`：只有运营下载能把单跳截止设到 30 秒以上（上限 30 分钟）。工具与活动仍限 30 秒，有测试锁住。
+  - 导出 `SANCTIONS_SOURCE_SEEDS` 与物化器的 `validateSanctionsXml`；`source-tools.ts` 的「不经 Broker 的出网」例外清单加一行。
+  - 新 runbook `docs/backend/sanctions-operator-refresh.md`：运行命令、失败与重跑、单独的打开语句（SQL）与回退、新名单何时生效。
+- 新名单何时生效（没有加新机制）：只有 ENABLED 且有活跃实体的源进入筛查索引，刷新 DISABLED 的源对筛查没有影响。customer worker 每次 qualify 开始时重建索引；API 每 `SANCTIONS_INDEX_REBUILD_MS`（默认 1 小时）重建，要立即生效须重启 API。
+- 测试：
+  - 先写失败测试：解析器计数、HTTP 截止上限、服务事务与 `refreshSourcesByKey` 共 13 项失败，两个新模块的测试文件因模块不存在而失败；实现后全绿。之后加的重试 7 项同样先红后绿。
+  - 单测用合成 XML（名字全为虚构，含个人、船舶、飞机条目）：官方端点逐字比对与 10 种拒绝情形、属主守卫、参数解析、dry run 不写、计数、下载校验与重试、服务事务、不写 `status`。
+  - 真库测试 `sanctions-operator-refresh.postgres.spec.ts` 9 项，接进 CI 新步骤「Sanctions operator refresh on PostgreSQL」：拒绝 `app_user`；dry run 不写一行；只入实体、元数据更新、`status` 不变；同一名单重跑零增改撤；新版本的增改撤；写入末尾注入失败时整体回滚（去掉事务后此项与其后一项失败）；SUSPENDED 拒绝下载；失败后重跑恢复 DONE；runbook 的打开语句让 `app_user` 的筛查索引生效。
+  - 真实官方名单，写入一次性库（CI 钉住的同一 pgvector 镜像，只绑 127.0.0.1，数据在 tmpfs，用完即删）：
+    - OFAC SDN 29,167,737 字节，发布日 2026-10-09，19,416 条，保留实体 10,018，剔除个人 7,497、船舶 1,559、飞机 342；
+    - OFAC Consolidated 1,062,957 字节，发布日 2026-09-14，481 条，保留 363，剔除个人 118；
+    - EU FSF 25,791,425 字节，生成日 2026-09-22，6,241 条，保留 1,776，剔除个人 4,465。
+    - 首次写入三源 DONE，`status` 仍为 DISABLED；每个源再跑一次都是零新增、零更新、零撤下。逐个核对 ID：库里没有一条个人、船舶或飞机条目。
+    - 把 xin 上 07-13 版的 SDN 行只读复制到一次性库后 dry run：将新增 319、更新 19、不变 9,680、撤下 111，收缩保护通过。随后写入，结果与 dry run 逐项相同（活跃 10,018 行，撤下的 111 行保留 07-13 版本号），再跑一次零变化。
+- 未做：没有在 xin 的 `global_dev` 上运行；运行与打开制裁门都待产品负责人批准。SDN 已到 32 MiB 上限的约 87%。本机经代理下载时 DNS 解析与连接偶尔失败（实测中出现过 `dns_lookup_failed` 与 `ECONNRESET`），已由重试与单源重跑覆盖。
 
 ## 2026-10-10 · Admit customer writes on their own dependencies, not platform worker availability
 
@@ -119,6 +129,50 @@
 - Actions：`actions/setup-node` v7（82076278）→v7.1.0（949feb24，版本校验、清单拉取重试；我们只传 `node-version: 22`）；`github/codeql-action` v4.38.2→v4.38.3（只用于非必需 canary，默认 bundle 2.27.2）。`oasdiff-action` v0.1.18 暂不升：它带来的 oasdiff 1.33.0 把 schema diff 改成按图计算、改写子 schema 匹配，影响必需门 `breaking` 的判定，按上次先例需另行离线重放最近的 `openapi.json` 变更再升（本仓 44 个 schema 无循环引用，它主打的递归修复对我们无影响）。
 - 新发布版本核对：pnpm 9 没有最短发布时长，164 个新锁定版本里过半发布不足 4 天（最新的 strnum 2.5.1 只有数小时）。2026-10-06T00:00Z（UTC）以后发布的、首次没查到发布时间的，加上四条 override 升级，共 126 个逐个核对 npm provenance 与发布账号：99 个带 provenance，26 个不带 provenance 但由与先前版本相同的账号发布（aws-sdk-bot、sentry-bot、DefinitelyTyped 等），1 个换了发布账号；唯一带安装脚本的 nx 23.3.0 带 provenance。chromium-bidi 由 17.0.2（带 provenance）换成 Chromium 发布账号的 157.0.8090-0（无 provenance）：带 provenance 的 puppeteer-core 25.13.0 精确钉了该版本，chromium-bidi 源码已迁入 Chromium、版本改随 Chrome，予以接受。未回退任何版本。
 - 官方 registry 生产审计零 advisory（831 个依赖）；基线重新绑定到刷新提交，失效时间 2026-10-14T21:28:22Z → 2026-10-24T13:59:34Z（旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261010-monthly-dependency-refresh-baseline-renewal.json)）。Copy fixed-source 回执只重签指纹（`HASH_ONLY`）。下一次月度刷新与续期须在 10-24 前合入。
+
+## 2026-10-10 · Plan discovery queries only for ENABLED data sources
+
+- 起因（BI-30，产品负责人 2026-10-10 批准）：xin 的 `data_provider` 里，公司发现源只有 `public_web` 是 ENABLED，`ted`、`openstreetmap`、`wikidata`、`directory`、`trade_fair`、`openfda` 都是 DISABLED（意图源 `samgov` 同样停用）。规划器的任务描述却写死了 TED、Wikidata、OSM 等子源，模型照样为它们出查询（只读核对 xin 的计划）：两份 14 条的计划各有 10 条落在停用的源上；21 条的那份有 7 条落在停用的源上，另有 3 条用的是 `trade_data`、`b2b_company_person` 这类根本没有 provider 的 source_class；计划里还有确定性注入的 TED/CPV 查询，而 TED 是停用的。执行时这些查询路由不到任何适配器，却先照常做词表归一（`taxonomy.normalize` 模型调用），再写一条 providers 为空的零回执：跑空，还花钱。
+- 路由规则（规划与执行共用新模块 `discovery/plan-query-sources.ts`）：查询按 `source_class` 加 `filters.source_hint` 路由到该类下 ENABLED 的公司发现 provider；hint 是源键本身，或旧计划里的部分写法（`wiki` → wikidata），仍按包含匹配，单测保证没有一个源键包含另一个，精确的源键只指向一个源。hint 现在去首尾空白、不分大小写，也可以是字符串列表；数字、对象这类没法用的 hint 不再让活动抛 TypeError（此前会算作查询失败，受治理物化随后因缺回执中止 run），而是路由不到任何源。
+- 规划（`POST /icps/:icpId/query-plans`）：
+  - 读 ICP 的同一事务里读一次 `data_provider` 开关快照（新增 `DiscoveryProviderRegistry.companyDiscoverySources` / `enabledCompanyDiscoverySources`），提示、过滤和冷路径注入都按这份快照。`IcpModule` 为此引入 `DiscoveryModule` 导出的 registry。
+  - 没有可规划的已启用数据源时，调用模型之前返回 409 `NO_ENABLED_DISCOVERY_SOURCE`：授权已消费但不花钱，与 `INVALID_STATE` 同一时机、同一状态码。`ted`、`openfda` 只承载冷路径确定性生成的查询，只启用它们不算。
+  - 提示新增「可用数据源」清单，只列已启用、模型可以写的源：源键、可用的 source_class、一句用法；`ted`/`openfda` 启用时只说明它们的查询由系统生成。任务描述和输出 schema 里的说明文字去掉了写死的子源名单，要求每条查询都写 `filters.source_hint`；schema 结构（字段、类型、枚举、必填项）与 `icp-query-plan/v1` 都不变。
+  - 模型返回后，路由不到已启用源的查询移出计划，按原因计数：`SOURCE_DISABLED`（源已登记但停用）、`SOURCE_UNKNOWN`（没有 provider，如 `trade_data`）、`SOURCE_SYSTEM_PLANNED`（模型自己写的 TED/openFDA 查询，它们的码只能由冷路径给）、`PLAN_QUERY_CAP`。留下的每条查询，`filters.source_hint` 都改写成它执行的那个源键。没写 hint、而该类有多个已启用源的查询，拆成每个源一条，保持原来的 fan-out；拆出的条数超过规划上限 64 条时按优先级保留，计划仍在运行报价覆盖的 66 条以内。移出的条数与原因记在首条规划查询的 rationale 里（`[source_filter] …`，与冷路径 warning 同处），人工确认时可见；规划查询一条不剩、只剩冷路径查询时记在计划首条。
+  - TED/CPV、openFDA 的冷路径解析与注入只在对应源已启用时进行，停用时不再为它们花词表归一的模型调用；贸易角色只写进留下的查询。冷路径解析的行业词仍从模型给出的全部查询采集，与此前一致。
+  - 计划里一条可执行的查询都没有（模型给出的全落在不可用的源上，冷路径也没注入）时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划；此前会保存一份空计划。
+  - `estimatedVolume` 只计会执行的查询：模型的估算覆盖它写的全部查询，按留下的模型查询占比折算；一条都没留下、只剩冷路径查询时为 null。
+- 执行（`executeQuery`）：
+  - 改为先路由、再做词表归一。路由不到 ENABLED 适配器的查询（数据源在规划之后被停用，或旧计划里的未知 source_class）跳过：不调词表归一模型、不调 provider，照常写一条零回执（受治理物化的准入要求每条计划查询都有回执），活动结果带 `skipReason`（`SOURCE_DISABLED` / `SOURCE_UNKNOWN`）。重试时重放出 providers 为空的受治理回执，同样报告跳过：受治理回执列出路由到的全部 provider，列表为空就是跳过；legacy 回执不列失败的 provider，所以 legacy 路径按路由结果判断。
+  - 工作流把跳过按原因计入 `stats.skippedQueries`，只有计数、不记查询内容；没有跳过时不出现这个键，原有 stats 形状不变。跳过不算失败：有跳过时 run 至少 PARTIAL（确认过的查询没跑），全部跳过也只是 PARTIAL。BI-25 的 FAILED 收尾同样带上计数。没有新增 Temporal 命令，不需要 patch，重放只比对活动类型与顺序；打包重放测试照常通过。
+  - `discovery-governed-lineage.activities.spec.ts` 里锁定的执行顺序相应改为「授权核验 → 路由 → 词表归一」；血缘核验先于预算、路由、词表归一和 provider 的约束不变。
+- 报价：确认前展示的计划规模（查询列表与 `estimatedVolume`）只计会执行的查询。发现 run 的技术报价（`POST /query-plans/:planId/execute`）仍是每个 run 的执行上限（66 条查询乘全部适配器），它是不读库的纯投影，不随计划内容变化，本次不改。
+- 契约：OpenAPI 只改说明文字（该操作的 description，409 列出 `INVALID_STATE`、`NO_ENABLED_DISCOVERY_SOURCE`、`NO_RUNNABLE_QUERIES`；`ApiExecutionBudgetGrant` 加可选的 `additionalConflictCodes`，其他操作的 409 不变），没有结构变更；`packages/contracts/INTEGRATION.md` 阶段 2 同步。
+- 测试：
+  - 先红：新增与改写的用例在实现前 25 项失败（另有新模块的用例文件因模块不存在而无法加载），包括：规划器在没有已启用源时仍调用模型、提示里没有可用源清单、停用源的查询留在计划里、TED/openFDA 停用时仍解析注入、空计划照存；执行器对停用源的查询仍调用词表归一、结果不带跳过原因、hint 为数字或列表时抛 TypeError；工作流不计跳过、全部跳过时判 DONE；registry 没有源清单方法；OpenAPI 409 只列授权复用。
+  - 新增 `plan-query-sources.spec.ts`（hint 解析、路由、跳过原因、规划过滤与拆分、上限、提示内容、规模折算、移出说明、每个已登记源都有用法说明且源键互不包含）；`icp.service.spec.ts` 加 8 项、`discovery.activities.spec.ts` 加 9 项（含受治理回执重放与运行状态）、工作流加 4 项、registry 加 2 项、OpenAPI 加 1 项；既有用例里依赖空计划或 TED/openFDA 默认启用的，改为写一条可执行的查询或显式启用这些源。
+- 未做：
+  - 已保存的 READY 计划不回写；执行时其中停用源的查询按跳过计数，run 判 PARTIAL。
+  - 发现 run 的技术报价不按计划内容收窄（见上）；要按计划算，报价服务得读库，属另一项设计。
+  - 代码阅读发现（未在真库验证）：`wikidata`、`openstreetmap`、`ted`、`openfda` 的 provider 没有受治理血缘（`companyResultLineage`），路由到它们的查询走 legacy 路径，不写受治理回执表；新 run 的物化准入要求每条计划查询都有这张表的回执，所以启用这些源后，含它们查询的 run 会在归一阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 停下。重新启用这些源之前，要先给它们补受治理血缘，或另定处理。
+
+## 2026-10-10 · Store links to each company's own contact paths (BI-14 PR-1, switch off by default)
+
+- 起因：BI-14 设计（产品负责人批准，2026-10-10 修订）改为只存公司自己的联系路径链接，不抽邮箱和电话。当天又批准两项范围补充：供应商页（`supplier_page`），以及首页链接里的公司 LinkedIn 页与 X 账号（决定 E9）。本 PR 只做数据通路，不改评分、原因码、运营端点与 OpenAPI（PR-2）。
+- 新表 `company_contact_point`（迁移 `20261011090000_company_contact_point`，单事务、只新增、零回填）：
+  - kind 只有六种：`contact_page`、`impressum_page`、`contact_form`、`supplier_page`、`linkedin_company_page`、`x_company_account`；value 是不带 query、fragment、`@` 与空白的 https 链接，LinkedIn 只收 `https://www.linkedin.com/company|showcase/<slug>`，X 只收 `https://x.com/<handle>`；`data_class` 只能是 green。表里没有邮箱、电话、人名字段，以上全部由 CHECK 约束。
+  - 自动来源（`company_contact`）只写 UNVERIFIED；VALID 与 OPERATOR_REJECTED 必须有 `updated_by`（人）。状态 CHECK 每个分支先判 `status_reason IS NOT NULL`：一次性库实测，没有这一判断时 INVALID 且无原因的行会因 CHECK 结果为 NULL 而写进去。
+  - 复合外键到 `canonical_company(workspace_id, id)`，随公司级联删除；唯一键 (workspace, company, kind, value)；ENABLE + FORCE RLS，租户策略同发现表；`app_user` 显式授予 SELECT、INSERT、UPDATE、DELETE，`app-user-table-privileges.json` 同步。`schema.prisma` 加模型，Copy 已重签（只变指纹）。
+- 找链接（`discovery/website-profile/contact-paths.ts`，纯函数）：只读官网画像已经抓到的首页里的链接。同站链接（公司域名或其子域）只有在路径每一段都是已知词或短数字时才收，所以存下的链接带不出页面上的任意文字（比如人名）；按路径或链接文字判定联系页、Impressum、供应商页（德英文：Lieferant werden、Lieferantenportal、Partner werden、Händler werden、Hersteller werden、Become a supplier、Supplier portal、Partner program 等），每种至多 1 个，规范成 https、去掉 query 与 fragment；只靠链接文字命中且带 query 的链接不收。LinkedIn 只收 company / showcase 页；X 只收账号页，且账号名里必须含公司域名名称（无法确认账号属于公司时不存，避免把个人账号当成公司数据）。
+- 联系表单：开关打开且首页链到联系页时，经 ToolBroker 以同一公司主体对联系页做 1 次 `crawl4ai.render`（robots 与 source_policy 在工具内照常执行），看是否有表单：提交控件、同意文本、必填标记三类至少两类，排除搜索、登录、购物车和不带留言框的订阅表单。只读 HTML，不填写、不提交。渲染失败或被 robots 拦时，表单记为「未知」，不当作「没有」。
+- 写入：在官网画像的同一事务里，先拿工作区禁联锁，再 FOR SHARE 复读公司状态，再读禁联事实；公司缺失、已 SUPPRESSED、命中域名或公司名禁联时一条不写，链接主机命中域名禁联时丢掉该点。重画像时，本次看过的种类里不再出现的自动来源点改为 INVALID / `REMOVED_FROM_SITE`，再次出现时恢复为 UNVERIFIED；运营来源或被人改过的点从不自动修改。联系页渲染的回执单独成一批 ACK，避免重放与新回执混在同一批。
+- 开关 `data_provider.company_contact` 以 DISABLED 种入（`update: {}` 不覆盖运维改动）。关闭时与改动前完全一样：只抓首页和 Impressum、不渲染、不写点。打开后，30 天内画像过、但还没用当前规则读过联系路径的公司会重画像一次（`website_profile._contact_parser` 标记，不写 field_evidence）。
+- 其他：
+  - `website_profile.source_url` 记录画像事实所在的页（Impressum，否则首页），经现有安全 https 校验；贸易角色、登记号、税号因此有来源 URL（A4）。
+  - `discovery.classify_trade_role` 的 allowedTools 加 `crawl4ai.render`；发现 run 预算包络按每家画像公司至多 1 次 render 加上限（`crawl4ai.render` 24 → 74 次，技术报价上限多 0.50 美元，5,597.48 → 5,597.98 美元）。新调用点登记进执行授权清单（37 个）。
+  - 公司主体 DSR 擦除时删掉该公司的点，计数并入 `contact_points_erased`，DeletionCompleted 契约不加字段。
+- 测试：纯函数 17 项、画像提供方 6 项（含开关关闭时恰好 2 次抓取）、经真实 ToolBroker 验证渲染以公司 subjectRef 准入 2 项、写入 7 项、活动 4 项、命名空间标记 2 项、擦除 2 项、迁移静态合同 6 项、属性清洗 1 项、种子 1 项；真库用例 `company-contact-point.postgres.spec.ts` 5 项以 app_user 运行（带 superuser 与 BYPASSRLS 守卫），接入 CI「Raw SQL parameter types on PostgreSQL」步骤，`app-user-table-privileges.postgres.spec.ts` 新增一项正向用例。一次性库：只部署 main 的迁移时新用例与权限清单用例失败（表不存在），在同一个库上部署新迁移后全部通过。
+- 未做（PR-2）：可达性公式与评分、原因码、运营端点、读模型与 OpenAPI。真栈有界样本要等 D9 开关与预算拍板。
 
 ## 2026-10-09 · Give discovery runs a 3-hour admission lease
 

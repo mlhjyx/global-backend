@@ -55,7 +55,7 @@ function rejectingHarness(code: ExecutionBudgetGrantError['code']) {
     providers,
     withWorkspace,
     company: new CompanyService(prisma, authority),
-    icp: new IcpService(prisma, {} as never, {} as never, authority, budget as never),
+    icp: new IcpService(prisma, {} as never, {} as never, authority, {} as never, budget as never),
     discovery: new DiscoveryService(prisma, providers as never, authority, budget as never),
   };
 }

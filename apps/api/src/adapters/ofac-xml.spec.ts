@@ -92,3 +92,90 @@ describe('parseOfacXml（Phase 1 仅公司/实体）', () => {
     expect(parseOfacXml('<sdnList></sdnList>').entities).toEqual([]);
   });
 });
+
+/*
+ * OFAC Consolidated (non-SDN) export as published on the Sanctions List Service: the same
+ * <sdnList> schema and namespace as SDN.XML, individuals carrying birth data. Every name below is
+ * invented; the structure mirrors the 2026-09-14 publication.
+ */
+const CONSOLIDATED_FIXTURE = `<?xml version="1.0" standalone="yes"?>
+<sdnList xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/XML">
+  <publshInformation>
+    <Publish_Date>09/14/2026</Publish_Date>
+    <Record_Count>5</Record_Count>
+  </publshInformation>
+  <sdnEntry>
+    <uid>91001</uid>
+    <firstName>Imaginary</firstName>
+    <lastName>PERSONA ALPHA</lastName>
+    <sdnType>Individual</sdnType>
+    <programList><program>NS-PLC</program></programList>
+    <akaList><aka><uid>1</uid><type>a.k.a.</type><category>strong</category><lastName>PERSONA ALEPH</lastName><firstName>Imaginary</firstName></aka></akaList>
+    <dateOfBirthList><dateOfBirthItem><uid>2</uid><dateOfBirth>1950</dateOfBirth><mainEntry>true</mainEntry></dateOfBirthItem></dateOfBirthList>
+    <placeOfBirthList><placeOfBirthItem><uid>3</uid><placeOfBirth>Inventedtown</placeOfBirth><mainEntry>true</mainEntry></placeOfBirthItem></placeOfBirthList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>91002</uid>
+    <lastName>FICTIVE HARBOUR LOGISTICS</lastName>
+    <sdnType>Entity</sdnType>
+    <programList><program>MENA-EO13894</program></programList>
+    <akaList><aka><uid>4</uid><type>a.k.a.</type><category>weak</category><lastName>FHL</lastName></aka></akaList>
+    <addressList><address><uid>5</uid><city>Nowhere</city><country>Turkey</country></address></addressList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>91003</uid>
+    <firstName>Madeup</firstName>
+    <lastName>PERSONA BETA</lastName>
+    <sdnType>Individual</sdnType>
+    <programList><program>SSI</program></programList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>91004</uid>
+    <lastName>NONEXISTENT ENERGY TRADING</lastName>
+    <sdnType>Entity</sdnType>
+    <programList><program>SSI</program><program>UKRAINE-EO13662</program></programList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>91005</uid>
+    <lastName>UNNAMED TYPE ROW</lastName>
+    <programList><program>SSI</program></programList>
+  </sdnEntry>
+</sdnList>`;
+
+describe('parseOfacXml — OFAC Consolidated export and subject-type counts', () => {
+  const parsed = parseOfacXml(CONSOLIDATED_FIXTURE);
+
+  it('reads the Consolidated list with the SDN parser and keeps entities only', () => {
+    expect(parsed.publishDate).toBe('2026-09-14');
+    expect(parsed.recordCount).toBe(5);
+    expect(parsed.entities.map((entity) => entity.externalId)).toEqual(['91002', '91004']);
+    expect(parsed.entities[0]).toMatchObject({
+      primaryName: 'FICTIVE HARBOUR LOGISTICS',
+      country: 'Turkey',
+      aliases: [{ name: 'FHL', quality: 'weak' }],
+    });
+    const blob = JSON.stringify(parsed).toLowerCase();
+    for (const personal of ['persona alpha', 'persona aleph', 'persona beta', 'imaginary', 'madeup', 'inventedtown', '1950']) {
+      expect(blob).not.toContain(personal);
+    }
+  });
+
+  it('counts every published entry by sdnType, a missing type included, without naming anyone', () => {
+    expect(parsed.subjectTypes).toEqual({ Individual: 2, Entity: 2, unspecified: 1 });
+  });
+
+  it('counts nothing for empty or foreign input', () => {
+    expect(parseOfacXml('').subjectTypes).toEqual({});
+    expect(parseOfacXml('<export generationDate="2026-01-01"/>').subjectTypes).toEqual({});
+  });
+
+  it('keeps a hostile sdnType value as a plain count key', () => {
+    const hostile = parseOfacXml(
+      '<sdnList><sdnEntry><uid>1</uid><lastName>X</lastName><sdnType>__proto__</sdnType></sdnEntry></sdnList>',
+    );
+    expect(Object.getPrototypeOf(hostile.subjectTypes)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(hostile.subjectTypes, '__proto__')).toBe(true);
+    expect(hostile.entities).toEqual([]);
+  });
+});
+

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BudgetStore } from '../tools/budget-store';
+import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { IcpService } from './icp.service';
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001';
@@ -67,6 +68,7 @@ describe('IcpService receipt-aware domain consumer', () => {
       { generateStructured } as never,
       {} as never,
       authority as never,
+      new DiscoveryProviderRegistry({ gateway: { generateStructured } as never }),
       budgetStore,
     );
 
@@ -119,13 +121,23 @@ describe('IcpService receipt-aware domain consumer', () => {
       },
       canonicalTaxonomy: { findMany: vi.fn(async () => []) },
       termAlias: { findUnique: vi.fn(async () => null) },
+      dataProvider: { findMany: vi.fn(async () => [{ key: 'public_web' }]) },
     };
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId: string, callback: (value: typeof tx) => unknown) =>
         callback(tx)),
     };
     const gateway = { generateStructured: vi.fn(async () => ({
-      data: { queries: [], estimated_volume: 0 },
+      data: {
+        queries: [{
+          source_class: 'public_intelligence',
+          filters: { industry: 'Pumpen', country: 'Germany', source_hint: 'public_web' },
+          keywords: ['Kreiselpumpen'],
+          rationale: 'keyword discovery',
+          priority: 1,
+        }],
+        estimated_volume: 0,
+      },
       provider: 'test', model: 'test-model',
     })) };
     const authority = { consumeWorkspaceGrant: vi.fn(async () => queryBinding) };
@@ -135,6 +147,7 @@ describe('IcpService receipt-aware domain consumer', () => {
       gateway as never,
       {} as never,
       authority as never,
+      new DiscoveryProviderRegistry({ gateway: gateway as never }),
       budgetStore,
     );
 
