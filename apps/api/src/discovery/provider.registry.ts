@@ -33,6 +33,7 @@ import {
 } from './execution-envelope';
 import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
 import type { CompanyDiscoverySource } from './plan-query-sources';
+import { declaresDiscoveryCompanyLineage } from './company-discovery-lineage';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -478,13 +479,19 @@ export class DiscoveryProviderRegistry {
 
   /**
    * Every (source class, provider key) a discovery plan query can route to, in
-   * registration order (BI-30). Fixed for the process; `data_provider.status`
-   * decides which of them run.
+   * registration order (BI-30), with whether its adapter declares governed
+   * company lineage. Fixed for the process; `data_provider.status` and the
+   * lineage gate decide which of them run.
    */
   companyDiscoverySources(): CompanyDiscoverySource[] {
-    return this.discovery.flatMap((adapter) =>
-      adapter.classes.map((sourceClass) => ({ sourceClass, providerKey: adapter.key })),
-    );
+    return this.discovery.flatMap((adapter) => {
+      const hasCompanyLineage = declaresDiscoveryCompanyLineage(adapter);
+      return adapter.classes.map((sourceClass) => ({
+        sourceClass,
+        providerKey: adapter.key,
+        hasCompanyLineage,
+      }));
+    });
   }
 
   /** The company discovery sources whose data_provider row is ENABLED now (BI-30 planner input). */
@@ -493,10 +500,15 @@ export class DiscoveryProviderRegistry {
     return this.companyDiscoverySources().filter((source) => enabled.has(source.providerKey));
   }
 
-  /** 某 source_class 当前 ENABLED 的公司发现适配器，保持显式注册顺序；调用方负责 fan-out。 */
+  /**
+   * 某 source_class 当前 ENABLED、且声明了受治理公司血缘的公司发现适配器，保持显式注册顺序；
+   * 调用方负责 fan-out。血缘闸门：没有血缘的源即使被误开也不路由（否则 run 会卡在物化），
+   * 路由不到任何适配器的查询由调用方跳过，原因由 planQuerySkipReason 判（无血缘记 SOURCE_LINEAGE_UNAVAILABLE）。
+   */
   async routeCompanyDiscovery(db: ProviderDb, sourceClass: SourceClass): Promise<CompanyDiscoveryAdapter[]> {
     const enabled = await this.enabledKeys(db);
-    return this.discovery.filter((a) => a.classes.includes(sourceClass) && enabled.has(a.key));
+    return this.discovery.filter((a) =>
+      a.classes.includes(sourceClass) && enabled.has(a.key) && declaresDiscoveryCompanyLineage(a));
   }
 
   async routeContactDiscovery(db: ProviderDb): Promise<ContactDiscoveryAdapter[]> {

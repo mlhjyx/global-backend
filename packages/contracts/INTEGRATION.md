@@ -81,7 +81,8 @@
    - 没有可用的已启用数据源时返回 409 `NO_ENABLED_DISCOVERY_SOURCE`（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
-   - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
+   - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
+   - 没有受治理公司血缘的数据源（目前 `wikidata`、`openstreetmap`、`ted`、`openfda`）即使启用也不出查询、不执行；旧计划里指向它们的查询按 `SOURCE_LINEAGE_UNAVAILABLE` 跳过
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）

@@ -24,8 +24,9 @@ import { resolveIcpToFda, buildFdaQuery, FDA_QUERY_SOURCE } from '../discovery/i
 import { withIcpTradeRole } from '../discovery/icp-trade-role';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
+  countLineageGatedColdPaths,
   hasPlannableSource,
-  isSourceEnabled,
+  isSourceRunnable,
   plannerSourcePrompt,
   routePlannerQueries,
   scaleEstimatedVolume,
@@ -535,7 +536,7 @@ export class IcpService {
       throw new ConflictException({
         error: {
           code: 'NO_ENABLED_DISCOVERY_SOURCE',
-          message: 'no ENABLED discovery data source the query planner can use',
+          message: 'no ENABLED discovery data source with governed company lineage that the query planner can use',
         },
       });
     }
@@ -576,22 +577,27 @@ export class IcpService {
       enabled: enabledSources,
       registered: this.providers.companyDiscoverySources(),
     });
+    // 血缘闸门：已启用却没有受治理血缘的冷路径源（TED/openFDA）不注入，也按 SOURCE_LINEAGE_UNAVAILABLE 记进移出说明。
+    const dropped = countLineageGatedColdPaths(routing.dropped, enabledSources, [
+      TED_QUERY_SOURCE,
+      FDA_QUERY_SOURCE,
+    ]);
     // G3 5.3：ICP 的贸易角色（分销商/制造商）确定性写进未带角色的 planner 查询，关键词搜索据此构造角色词。
     const planned = withDroppedQueryNote(
       withIcpTradeRole(routing.queries, icp.companyAttributes),
-      routing.dropped,
+      dropped,
     );
     // §8.7 稳健：行业词仍从模型给出的全部查询采集（与数据源开关无关，只作冷路径解析的输入）。
     const industryTerms = collectIndustryTerms(icp.companyAttributes, modelQueries);
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    // BI-30：TED 未启用时不解析、不注入（解析本身要花词表归一的模型调用）。
-    let queries = isSourceEnabled(enabledSources, TED_QUERY_SOURCE)
+    // BI-30：TED 未启用时不解析、不注入（解析本身要花词表归一的模型调用）；血缘闸门：TED 没有受治理血缘时同样不注入。
+    let queries = isSourceRunnable(enabledSources, TED_QUERY_SOURCE)
       ? await this.injectTedQuery(icp, planned, industryTerms, binding)
       : planned;
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
-    // BI-30：openFDA 未启用时同样不解析、不注入。
-    queries = isSourceEnabled(enabledSources, FDA_QUERY_SOURCE)
+    // BI-30：openFDA 未启用或没有受治理血缘时同样不解析、不注入。
+    queries = isSourceRunnable(enabledSources, FDA_QUERY_SOURCE)
       ? await this.injectFdaQuery(icp, queries, industryTerms, binding)
       : queries;
     if (queries.length === 0) {
@@ -604,7 +610,7 @@ export class IcpService {
       });
     }
     // 规划查询一条不剩、只有冷路径注入的查询时，移出说明记在计划的首条查询上。
-    if (planned.length === 0) queries = withDroppedQueryNote(queries, routing.dropped);
+    if (planned.length === 0) queries = withDroppedQueryNote(queries, dropped);
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')

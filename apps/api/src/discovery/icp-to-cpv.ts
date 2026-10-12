@@ -10,7 +10,10 @@ export const TED_COVERAGE: ReadonlySet<string> = new Set([
   'IRL', 'ISL', 'ITA', 'LIE', 'LTU', 'LUX', 'LVA', 'MLT', 'NLD', 'NOR', 'POL', 'PRT', 'ROU', 'SVK', 'SVN', 'SWE',
 ]);
 
-/** The source an injected TED query routes to; the planner injects it only while that source is ENABLED (BI-30). */
+/**
+ * The source an injected TED query routes to; the planner injects it only while
+ * that source is ENABLED (BI-30) and declares governed company lineage (lineage gate).
+ */
 export const TED_QUERY_SOURCE = Object.freeze({
   sourceClass: 'public_intelligence',
   providerKey: 'ted',

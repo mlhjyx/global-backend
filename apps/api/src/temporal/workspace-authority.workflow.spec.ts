@@ -666,6 +666,28 @@ describe('discoveryWorkflow queries skipped because their source is off (BI-30)'
     );
   });
 
+  it('counts a query skipped for missing governed lineage and finalizes PARTIAL (lineage gate)', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 'public_intelligence', ['public_web'], 1))
+      .mockResolvedValueOnce(executed(1, 'company_registry', [], 0, 'SOURCE_LINEAGE_UNAVAILABLE'))
+      .mockResolvedValueOnce(executed(2, 'trade_data', [], 0, 'SOURCE_UNKNOWN'));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.canonicalizeRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          failures: 0,
+          skippedQueries: { SOURCE_LINEAGE_UNAVAILABLE: 1, SOURCE_UNKNOWN: 1 },
+        }),
+      }),
+    );
+  });
+
   it('counts no skip for a reason it does not know', async () => {
     primeDiscovery();
     acts.executeQuery.mockResolvedValue(

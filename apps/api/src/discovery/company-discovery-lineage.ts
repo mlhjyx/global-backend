@@ -119,6 +119,26 @@ export function isDiscoveryCompanyLineageInvalid(error: unknown): boolean {
   return error instanceof Error && error.message === DISCOVERY_COMPANY_LINEAGE_INVALID;
 }
 
+/**
+ * Whether a company discovery adapter declares the governed company result
+ * lineage that company materialization requires. This declaration is the one
+ * place a source's lineage is read: the governed query execution plan, the
+ * registry's routing and the query planner all use it, so a source without it
+ * is never planned or routed, even while ENABLED (lineage gate).
+ */
+export function declaresDiscoveryCompanyLineage(
+  adapter: Readonly<{ companyResultLineage?: unknown }>,
+): boolean {
+  return adapter.companyResultLineage === DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
+}
+
+/** Whether the lineage receipt contract covers this provider key. */
+export function isDiscoveryCompanyLineageProviderKey(
+  value: unknown,
+): value is DiscoveryCompanyLineageProviderKey {
+  return typeof value === 'string' && Object.hasOwn(PROVIDER_RECEIPT_CONTRACT, value);
+}
+
 export function isDiscoveryCompanyReceiptForwardingFailure(
   error: unknown,
 ): boolean {
@@ -194,13 +214,7 @@ function strictArray(value: unknown): readonly unknown[] {
 }
 
 function providerKey(value: unknown): DiscoveryCompanyLineageProviderKey {
-  if (
-    value !== 'trade_fair' &&
-    value !== 'public_web' &&
-    value !== 'directory'
-  ) {
-    invalid();
-  }
+  if (!isDiscoveryCompanyLineageProviderKey(value)) invalid();
   return value;
 }
 
