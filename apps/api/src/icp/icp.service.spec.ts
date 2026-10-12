@@ -117,7 +117,14 @@ function fixture() {
     providers,
   );
   const enable = (...keys: string[]) => enabledProviders.splice(0, enabledProviders.length, ...keys);
-  return { icp, tx, prisma, authority, gateway, service, enable };
+  /** As if `keys` declared governed company lineage, as TED and openFDA will once theirs lands. */
+  const declareLineage = (...keys: string[]) => {
+    const registered = providers.companyDiscoverySources.bind(providers);
+    vi.spyOn(providers, "companyDiscoverySources").mockImplementation(() =>
+      registered().map((source) =>
+        keys.includes(source.providerKey) ? { ...source, hasCompanyLineage: true } : source));
+  };
+  return { icp, tx, prisma, authority, gateway, service, enable, declareLineage };
 }
 
 /** One planner query for keyword discovery, the only source ENABLED on the dev host. */
@@ -540,6 +547,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     ["no provider row", []],
     ["only a non-discovery provider", ["gleif", "decision_maker"]],
     ["only the cold-path sources", ["ted", "openfda"]],
+    ["only sources without governed lineage", ["wikidata", "openstreetmap", "ted", "openfda"]],
   ])(
     "refuses to plan with %s ENABLED, before any model call (BI-30)",
     async (_label, enabled) => {
@@ -549,7 +557,12 @@ describe("ICP generation authority and controlled enrichment", () => {
 
       await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
         status: 409,
-        response: { error: { code: "NO_ENABLED_DISCOVERY_SOURCE" } },
+        response: {
+          error: {
+            code: "NO_ENABLED_DISCOVERY_SOURCE",
+            message: "no ENABLED discovery data source with governed company lineage that the query planner can use",
+          },
+        },
       });
       expect(f.runtime).not.toHaveBeenCalled();
       expect(f.cpv).not.toHaveBeenCalled();
@@ -578,8 +591,8 @@ describe("ICP generation authority and controlled enrichment", () => {
       estimated_volume: 1_000,
       queries: [
         { ...PUBLIC_WEB_QUERY, filters: { industry: "Pumpen", country: "Germany" } },
-        { ...PUBLIC_WEB_QUERY, source_class: "company_registry", filters: { source_hint: "wikidata" } },
-        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "openstreetmap" } },
+        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "directory" } },
+        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "trade_fair" } },
         { ...PUBLIC_WEB_QUERY, filters: { source_hint: "ted" } },
         { ...PUBLIC_WEB_QUERY, source_class: "trade_data", filters: {} },
       ],
@@ -616,15 +629,61 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect((plan.queries as Array<{ filters: { source_hint: string } }>).map((q) => q.filters.source_hint))
       .toEqual(["public_web"]);
   });
-  it("notes the left-out planner queries on the first planner query, not on an injected one (BI-30)", async () => {
+  it("neither resolves nor injects TED or openFDA queries while they lack governed lineage, even ENABLED (lineage gate)", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
-    f.enable("public_web", "ted");
+    f.enable("public_web", "ted", "openfda");
+    f.icp.companyAttributes = { industry: "devices", product: "pump", trade_side: "importer" };
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+    f.cpv.mockResolvedValue({ cpvCodes: ["42120000"], buyerCountries: ["DEU"], warnings: [] });
+    f.fda.mockResolvedValue({
+      productCodes: ["ABC"], panels: ["CV"], importerOnly: true, establishmentTypes: [], warnings: [],
+    });
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    expect(f.cpv).not.toHaveBeenCalled();
+    expect(f.fda).not.toHaveBeenCalled();
+    const queries = plan.queries as Array<{ filters: { source_hint: string }; rationale: string }>;
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
+    // The plan review sees why the ENABLED cold-path sources added nothing.
+    expect(queries[0]!.rationale).toBe(
+      "keyword discovery\n[source_filter] 已移出 2 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 2 条",
+    );
+  });
+  it("keeps an ENABLED source without governed lineage out of the prompt and the plan, with its own reason (lineage gate)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "wikidata", "openstreetmap");
     f.result.data = {
       estimated_volume: 10,
       queries: [
         PUBLIC_WEB_QUERY,
         { ...PUBLIC_WEB_QUERY, source_class: "company_registry", filters: { source_hint: "wikidata" } },
+      ],
+    };
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).not.toContain("wikidata");
+    expect(prompt).not.toContain("openstreetmap");
+    const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
+    expect(queries[0]!.rationale).toBe(
+      "keyword discovery\n[source_filter] 已移出 1 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 1 条",
+    );
+  });
+  it("notes the left-out planner queries on the first planner query, not on an injected one (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted");
+    f.declareLineage("ted");
+    f.result.data = {
+      estimated_volume: 10,
+      queries: [
+        PUBLIC_WEB_QUERY,
+        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "directory" } },
       ],
     };
     f.cpv.mockResolvedValue({ cpvCodes: ["42120000"], buyerCountries: ["DEU"], warnings: [] });
@@ -642,6 +701,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
     f.enable("public_web", "ted");
+    f.declareLineage("ted");
     f.result.data = {
       estimated_volume: 10,
       queries: [{ ...PUBLIC_WEB_QUERY, source_class: "trade_data", filters: {} }],
@@ -710,6 +770,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
     f.enable("public_web", "ted", "openfda");
+    f.declareLineage("ted", "openfda");
     Object.assign(f.icp, { targetMarkets: ["DACH区域"] });
     f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 1 };
     await f.service.generateQueryPlan(ctx, f.icp.id);
@@ -723,6 +784,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
     f.enable("public_web", "ted", "openfda");
+    f.declareLineage("ted", "openfda");
     f.icp.companyAttributes = {
       industry: "devices",
       product: "pump",
@@ -749,6 +811,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
     f.enable("public_web", "ted");
+    f.declareLineage("ted");
     f.icp.companyAttributes = { industry: "Pumpen", business_model: "Großhandel" };
     f.result.data = {
       estimated_volume: 20,
@@ -783,6 +846,7 @@ describe("ICP generation authority and controlled enrichment", () => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
       f.enable("public_web", "ted", "openfda");
+      f.declareLineage("ted", "openfda");
       f.icp.companyAttributes = null;
       f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
       f[resolver].mockRejectedValue(new Error("synthetic unavailable"));
@@ -798,6 +862,7 @@ describe("ICP generation authority and controlled enrichment", () => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
       f.enable("public_web", "ted", "openfda");
+      f.declareLineage("ted", "openfda");
       f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
       f.cpv.mockRejectedValue(failure);
       await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toBe(
@@ -826,6 +891,7 @@ describe("ICP generation authority and controlled enrichment", () => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
       f.enable("public_web", "ted");
+      f.declareLineage("ted");
       f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
       f.cpv.mockRejectedValue(failure);
       expect(await f.service.generateQueryPlan(ctx, f.icp.id)).toMatchObject({

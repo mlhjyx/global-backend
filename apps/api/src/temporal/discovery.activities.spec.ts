@@ -34,6 +34,12 @@ import type {
 } from "../discovery/provider-contract";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import { DISCOVERY_COMPANY_RESULT_LINEAGE_V1 } from "../discovery/company-discovery-lineage";
+import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
+import { OpenFdaDiscoveryProvider } from "../discovery/providers/openfda.provider";
+import { OsmDiscoveryProvider } from "../discovery/providers/osm.provider";
+import { PublicWebDiscoveryProvider } from "../discovery/providers/public-web.provider";
+import { TedDiscoveryProvider } from "../discovery/providers/ted.provider";
+import { WikidataDiscoveryProvider } from "../discovery/providers/wikidata.provider";
 import { discoveryQueryKey } from "../discovery/discovery-query-receipt";
 
 const acknowledgementMocks = vi.hoisted(() => ({
@@ -255,17 +261,17 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
   } as unknown as Parameters<typeof createDiscoveryActivities>[0];
 }
 
-/** The company discovery sources a gateway-backed registry registers (BI-30). */
+/** The company discovery sources a gateway-backed registry registers (BI-30), with their lineage. */
 const REGISTERED_DISCOVERY_SOURCES = Object.freeze([
-  { sourceClass: "public_intelligence", providerKey: "public_web" },
-  { sourceClass: "industry_data", providerKey: "public_web" },
-  { sourceClass: "industry_data", providerKey: "directory" },
-  { sourceClass: "company_registry", providerKey: "wikidata" },
-  { sourceClass: "industry_data", providerKey: "wikidata" },
-  { sourceClass: "industry_data", providerKey: "openstreetmap" },
-  { sourceClass: "industry_data", providerKey: "trade_fair" },
-  { sourceClass: "public_intelligence", providerKey: "ted" },
-  { sourceClass: "public_intelligence", providerKey: "openfda" },
+  { sourceClass: "public_intelligence", providerKey: "public_web", hasCompanyLineage: true },
+  { sourceClass: "industry_data", providerKey: "public_web", hasCompanyLineage: true },
+  { sourceClass: "industry_data", providerKey: "directory", hasCompanyLineage: true },
+  { sourceClass: "company_registry", providerKey: "wikidata", hasCompanyLineage: false },
+  { sourceClass: "industry_data", providerKey: "wikidata", hasCompanyLineage: false },
+  { sourceClass: "industry_data", providerKey: "openstreetmap", hasCompanyLineage: false },
+  { sourceClass: "industry_data", providerKey: "trade_fair", hasCompanyLineage: true },
+  { sourceClass: "public_intelligence", providerKey: "ted", hasCompanyLineage: false },
+  { sourceClass: "public_intelligence", providerKey: "openfda", hasCompanyLineage: false },
 ]);
 
 const QUERY = {
@@ -1120,8 +1126,8 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
 
 describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI-30）", () => {
   const DISABLED_QUERY = {
-    source_class: "company_registry",
-    filters: { source_hint: "wikidata", industry: "pumps", country: "Germany" },
+    source_class: "industry_data",
+    filters: { source_hint: "directory", industry: "pumps", country: "Germany" },
     keywords: [],
     priority: 1,
   };
@@ -1152,7 +1158,7 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
       skipReason: "SOURCE_DISABLED",
       // The materialization admission needs one receipt per plan query.
       queryReceipt: {
-        sourceClass: "company_registry",
+        sourceClass: "industry_data",
         providers: [],
         accepted: 0,
         usageQuantity: 0,
@@ -1174,14 +1180,20 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
     ).resolves.toMatchObject({ skipReason: "SOURCE_UNKNOWN", queryReceipt: { providers: [] } });
   });
 
-  it("runs an ENABLED source as before, with no skip reason", async () => {
+  it("runs a routed source as before, with no skip reason", async () => {
     const deps = makeDeps([okAdapter("wikidata", [REC])]);
     const taxonomy = taxonomySpy();
     deps.taxonomy = taxonomy as never;
     const acts = createDiscoveryActivities(deps);
 
     const result = await acts.executeQuery(
-      discoveryArgs("run-ok-x", { query: { ...DISABLED_QUERY, source_class: "public_intelligence" } }),
+      discoveryArgs("run-ok-x", {
+        query: {
+          ...DISABLED_QUERY,
+          source_class: "public_intelligence",
+          filters: { ...DISABLED_QUERY.filters, source_hint: "wikidata" },
+        },
+      }),
     );
 
     expect(result).toMatchObject({ rawCount: 1, provider: "wikidata" });
@@ -1229,7 +1241,18 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
     expect(result).not.toHaveProperty("skipReason");
   });
 
-  it("reports the skip again when a retry replays a zero-provider lineage receipt", async () => {
+  it.each([
+    ["a switched-off source", DISABLED_QUERY, "SOURCE_DISABLED"],
+    [
+      "a source without governed lineage",
+      { ...DISABLED_QUERY, source_class: "company_registry", filters: { source_hint: "wikidata" } },
+      "SOURCE_LINEAGE_UNAVAILABLE",
+    ],
+  ])("reports the skip again when a retry replays a zero-provider lineage receipt for %s", async (
+    _label,
+    replayedQuery,
+    expectedReason,
+  ) => {
     const workspaceId = DISCOVERY_BINDING.scopeKey;
     const runId = "20000000-0000-4000-8000-000000000001";
     const planId = "30000000-0000-4000-8000-000000000001";
@@ -1237,7 +1260,7 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
       runId,
       planId,
       queryOrdinal: 0,
-      query: DISABLED_QUERY,
+      query: replayedQuery,
     });
     const route = vi.fn();
     const activities = createDiscoveryActivities({
@@ -1250,7 +1273,7 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
                 schemaVersion: "discovery-query-receipt/v1",
                 queryKey,
                 queryOrdinal: 0,
-                sourceClass: "company_registry",
+                sourceClass: replayedQuery.source_class,
                 providers: [],
                 accepted: 0,
                 quarantined: 0,
@@ -1282,16 +1305,91 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
         planId,
         queryOrdinal: 0,
         queryReceiptMode: QUERY_RECEIPT_MODE,
-        query: DISABLED_QUERY,
+        query: replayedQuery,
         executionContractVersion: 2,
         executionBudget: DISCOVERY_BINDING,
       }),
     ).resolves.toMatchObject({
       rawCount: 0,
-      skipReason: "SOURCE_DISABLED",
+      skipReason: expectedReason,
       queryReceipt: { providers: [] },
     });
     expect(route).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeQuery —— 没有受治理血缘的数据源即使 ENABLED 也不路由（lineage gate）", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** executeQuery on the real registry, with every company discovery source ENABLED. */
+  function registryDeps() {
+    const registry = new DiscoveryProviderRegistry({ gateway: {} as never });
+    const keys = [...new Set(registry.companyDiscoverySources().map((source) => source.providerKey))];
+    const db = { dataProvider: { findMany: async () => keys.map((key) => ({ key })) } };
+    const deps = makeDeps([]);
+    deps.providers = {
+      routeCompanyDiscovery: (_tx: unknown, sourceClass: never) =>
+        registry.routeCompanyDiscovery(db as never, sourceClass),
+      companyDiscoverySources: () => registry.companyDiscoverySources(),
+    } as never;
+    const taxonomy = { resolveMany: vi.fn(async () => []), resolve: vi.fn(async () => null) };
+    deps.taxonomy = taxonomy as never;
+    return { deps, taxonomy };
+  }
+
+  it.each([
+    ["Wikidata", WikidataDiscoveryProvider, "company_registry", { source_hint: "wikidata", industry: "pumps" }],
+    ["OpenStreetMap", OsmDiscoveryProvider, "industry_data", { source_hint: "openstreetmap", industry: "pumps" }],
+    ["TED", TedDiscoveryProvider, "public_intelligence", { source_hint: "ted", cpv_codes: ["42122000"] }],
+    ["openFDA", OpenFdaDiscoveryProvider, "public_intelligence", { source_hint: "openfda", product_codes: ["LZG"] }],
+  ] as const)("skips an ENABLED %s query with one zero receipt and SOURCE_LINEAGE_UNAVAILABLE", async (
+    _label,
+    Provider,
+    sourceClass,
+    filters,
+  ) => {
+    const discover = vi.spyOn(Provider.prototype, "discoverCompanies");
+    const { deps, taxonomy } = registryDeps();
+    const acts = createDiscoveryActivities(deps);
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", {
+      query: { source_class: sourceClass, filters: { ...filters }, keywords: [], priority: 1 },
+    }));
+
+    expect(discover).not.toHaveBeenCalled();
+    expect(taxonomy.resolveMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      rawCount: 0,
+      costCents: 0,
+      provider: null,
+      skipReason: "SOURCE_LINEAGE_UNAVAILABLE",
+      queryReceipt: { sourceClass, providers: [], accepted: 0, usageQuantity: 0, costCents: 0 },
+    });
+  });
+
+  it("runs only the lineage source of a hint-less query whose class also has ENABLED lineage-less sources", async () => {
+    const ted = vi.spyOn(TedDiscoveryProvider.prototype, "discoverCompanies");
+    const openFda = vi.spyOn(OpenFdaDiscoveryProvider.prototype, "discoverCompanies");
+    const publicWeb = vi.spyOn(PublicWebDiscoveryProvider.prototype, "discoverCompanies")
+      .mockResolvedValue({
+        records: [],
+        costCents: 0,
+        lineage: {
+          schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+          recordCount: 0,
+          attemptReceipts: [],
+          receiptCoverage: [],
+        },
+      });
+    const acts = createDiscoveryActivities(registryDeps().deps);
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    expect(publicWeb).toHaveBeenCalledOnce();
+    expect(ted).not.toHaveBeenCalled();
+    expect(openFda).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ provider: "public_web", queryReceipt: { providers: ["public_web"] } });
+    expect(result).not.toHaveProperty("skipReason");
   });
 });
 

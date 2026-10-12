@@ -1,7 +1,10 @@
 import { CanonicalNode, TaxonomyKind, type TaxonomyResolveOptions } from './taxonomy-resolver';
 import { PlanQueryShape } from './icp-to-cpv';
 
-/** The source an injected openFDA query routes to; the planner injects it only while that source is ENABLED (BI-30). */
+/**
+ * The source an injected openFDA query routes to; the planner injects it only while
+ * that source is ENABLED (BI-30) and declares governed company lineage (lineage gate).
+ */
 export const FDA_QUERY_SOURCE = Object.freeze({
   sourceClass: 'public_intelligence',
   providerKey: 'openfda',

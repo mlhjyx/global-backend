@@ -493,7 +493,7 @@ export function createDiscoveryActivities(deps: {
     },
 
     /**
-     * Waterfall 步骤 3：fan-out 调用该 source_class 下全部 ENABLED 发现源（source_hint 可收窄），
+     * Waterfall 步骤 3：fan-out 调用该 source_class 下全部 ENABLED 且有受治理公司血缘的发现源（source_hint 可收窄），
      * raw 原样落地（幂等 by externalId）。
      * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
      */
@@ -578,9 +578,10 @@ export function createDiscoveryActivities(deps: {
         scopeKey: binding.scopeKey,
         accountKey: binding.accountKey,
       });
-      // 多源 fan-out：该 source_class 下**全部 ENABLED 适配器**并行召回（蓝图集成点 1）。
+      // 多源 fan-out：该 source_class 下**全部 ENABLED 且声明了受治理公司血缘的适配器**并行召回（蓝图集成点 1；
+      // 血缘闸门：没有血缘的源即使 ENABLED 也不路由，否则 run 会卡在物化）。
       // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
-      // BI-30：先路由、再做词表归一。路由不到 ENABLED 适配器的查询（数据源在规划后被停用，或旧计划
+      // BI-30：先路由、再做词表归一。路由不到适配器的查询（数据源在规划后被停用、源没有受治理血缘，或旧计划
       // 里没有 provider 的 source_class）就此跳过：不调词表归一模型、不调 provider，照常落一条零回执
       // （物化准入要求每条计划查询都有回执），并把跳过原因交给工作流按原因计数，run 不因此失败。
       const sourceClass = args.query.source_class as SourceClass;

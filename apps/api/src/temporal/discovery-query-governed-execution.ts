@@ -10,6 +10,7 @@ import type { BudgetAccountAuthorization } from '../tools/budget-store';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  declaresDiscoveryCompanyLineage,
   parseDiscoveryCompanyResultLineage,
   type DiscoveryCompanyLineageProviderKey,
 } from '../discovery/company-discovery-lineage';
@@ -91,10 +92,9 @@ export function buildGovernedDiscoveryQueryExecutionPlan(input: Readonly<{
   if (!input.lineageEnabled) return Object.freeze({ mode: 'legacy' });
   const selectedProviders = input.adapters.map((adapter) => ({
     providerKey: adapter.key,
-    lineageSchema:
-      adapter.companyResultLineage === DISCOVERY_COMPANY_RESULT_LINEAGE_V1
-        ? DISCOVERY_COMPANY_RESULT_LINEAGE_V1
-        : null,
+    lineageSchema: declaresDiscoveryCompanyLineage(adapter)
+      ? DISCOVERY_COMPANY_RESULT_LINEAGE_V1
+      : null,
   }));
   if (selectedProviders.some(({ lineageSchema }) => lineageSchema === null)) {
     return Object.freeze({ mode: 'legacy' });
