@@ -393,6 +393,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
     }
+    // Every extraction the run made failed and nothing was accepted: an upstream outage, not a
+    // thin market. FAILED keeps the plan READY for another run (BI-25) instead of consuming it.
+    if (
+      modelExtractions.invoked > 0 &&
+      modelExtractions.failed === modelExtractions.invoked &&
+      acceptedRaw === 0
+    ) {
+      status = 'FAILED';
+    }
     outcome = {
       status,
       stats: {

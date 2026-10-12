@@ -2,7 +2,10 @@ import Ajv from 'ajv';
 import { describe, expect, it, vi } from 'vitest';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
-import { ProviderOutputError } from '../model-gateway/providers/provider-output-error';
+import {
+  ProviderOutputError,
+  ProviderTransportError,
+} from '../model-gateway/providers/provider-output-error';
 import { TaxonomyResolver } from './taxonomy-resolver';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -234,6 +237,38 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       executionBudget: TEST_BINDING,
     })).resolves.toBeNull();
     expect(generateStructured).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['treats a cut stream the gateway settled as a miss', 'CHAT_COMPLETIONS_STREAM_TRUNCATED', 'miss'],
+    ['still fails the query on any other transport failure', 'CHAT_COMPLETIONS_BODY_NOT_JSON', 'throw'],
+  ])('%s', async (_case, reason, outcome) => {
+    const failure = new ProviderTransportError(reason, { inputTokens: 520 });
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        termAlias: { upsert: vi.fn(async () => ({})) },
+      })),
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: { findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]) },
+    };
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured: vi.fn(async () => { throw failure; }) } as never,
+      undefined,
+      {
+        open: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        attestAuthorized: vi.fn(async () => undefined),
+      } as never,
+    );
+    const resolution = resolver.resolve('industry', 'Pumpen Großhandel', {
+      workspaceId: TEST_BINDING.scopeKey,
+      runId: TEST_BINDING.accountKey,
+      executionBudget: TEST_BINDING,
+    });
+
+    if (outcome === 'miss') await expect(resolution).resolves.toBeNull();
+    else await expect(resolution).rejects.toBe(failure);
   });
 
   it('sends all four real taxonomy wires an exact enum over the closed bounded task schema', async () => {

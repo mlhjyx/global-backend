@@ -800,6 +800,28 @@ describe('discoveryWorkflow model extractions dropped after a failed call', () =
     });
   });
 
+  it('fails a run whose every extraction failed with nothing accepted, keeping its plan READY', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 0, {
+        invoked: 3,
+        failedByReason: { CHAT_COMPLETIONS_STREAM_TRUNCATED: 3 },
+      }))
+      .mockResolvedValueOnce(executed(1, 0, {
+        invoked: 2,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 2 },
+      }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ status, stats }] = acts.finalizeRun.mock.calls[0]!;
+    expect(status).toBe('FAILED');
+    expect(stats).toMatchObject({
+      modelExtractions: { invoked: 5, failed: 5, queriesAllFailed: 2 },
+    });
+  });
+
   it('keeps DONE and the stats shape when no extraction was dropped', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });

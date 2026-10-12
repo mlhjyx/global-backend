@@ -1268,12 +1268,13 @@ export function createDiscoveryActivities(deps: {
           }
           throw err;
         }
-        previousCallCut = false;
         if (!judgment) {
           // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
+          // An unusable answer is no sign the upstream recovered: a cut after it is still in a row.
           unjudged += 1;
           continue;
         }
+        previousCallCut = false;
         verdicts[judgment.verdict] += 1;
         judged += 1;
         await deps.prisma.withWorkspace(args.workspaceId, (tx) =>

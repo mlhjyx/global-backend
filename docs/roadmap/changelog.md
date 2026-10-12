@@ -32,38 +32,48 @@
   - 被跳过的失败调用不计入查询收据和 run 统计，只在 `ai_trace` 里可查。如果某条查询的调用全部失败，它会以 0 条记录提交，而不是报错。按原因码计数或加「全部失败」信号，另行处理。
   - 随下一个运行镜像上线，再用新卖方重跑验收。
 
-## 2026-10-12 · Count the company extractions a discovery run skips, and absorb a cut stream per company instead of failing the run
+## 2026-10-12 · Count the model extractions a discovery run skips, and let a lone cut stream cost one company instead of the run
 
 - 起因：
-  - #638 之后，被网关拒收的公司抽取只跳过一个域名，但跳过只记在 `ai_trace` 里；查询收据和 run 统计都看不到。上游如果把每次答案都截断，查询会以 0 条记录提交，run 照样 DONE（#638 复审 LOW-3）。
+  - #638 之后，被网关拒收的公司抽取只跳过一个域名，但跳过只记在 `ai_trace` 里，查询收据和 run 统计都看不到；如果上游把每次答案都截断，查询会以 0 条记录提交，run 照样结束（#638 复审 LOW-3）。
   - 卖方 #21 的验收 run（`5740150c`，xin，2026-10-12 10:55–11:30 UTC）跑完 11 条查询后失败。原因：159 次公司抽取里有 1 次 SSE 流被截断，报 `ProviderTransportError: CHAT_COMPLETIONS_STREAM_TRUNCATED`。
     - 传输错误按设计属于控制错误，活动因此失败；
     - Temporal 重试时，这次调用已结算、但没有持久结果，于是报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，三次尝试全部失败。
-  - 传输错误之所以 fail closed，是怕网关整体故障时每次调用都失败，而调用方各自吞掉，run 悄悄得到空结果。网关对流截断的结算方式和不可用答案完全一样：只结算一次，不带结果投影，也不发持久收据。
+  - 传输错误 fail closed 是有意的：网关整体故障时每次调用都会失败，调用方各自吞掉就会悄悄得到空结果。但网关对流截断的处理和不可用答案完全一样（只结算一次，不带结果投影，也不发持久收据）；而两次 run 里截断都是单独出现的（112 次里 1 次、159 次里 1 次）。
 - 改动：
-  - 新的纯函数模块 `discovery-model-extractions.ts`，不依赖其他模块，供工作流直接引用：
-    - 按查询统计模型调用次数，以及按原因码统计跳过次数；
-    - 原因码只接受网关的安全格式，其他一律记为 `MODEL_CALL_FAILED`；
-    - 汇总到 run 时严格校验，旧历史或格式不对的数据不计入。
-  - public_web、directory 把跳过的原因与调用数随结果返回（`DiscoveryResult.modelExtractions`），executeQuery 按查询汇总。
-  - 判断「网关已结算、没有结果」的函数 `settledModelFailureReason`（`discovery/settled-model-failure.ts`）认两类：
-    - 可恢复的 `ProviderOutputError`（#638）；
-    - 精确类型的 `ProviderTransportError`，并且 cause 链里没有控制错误。
-    - 公司抽取遇到这两类时，跳过这个域名或名录页、标记失败、保留血缘。结果未知的错误（`ProviderOutputUnresolvedError`、`ProviderSettlementError` 等）照旧抛出。
-  - fit 判定（`qualifyFitForRun`）保留原设计的意图：传输失败通常会打到每一家，所以照旧让活动失败。只有一种情况例外：单独一次、且网关已结算的流截断。重试只会撞上 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，所以这家公司记为未判定，run 照旧至少 `PARTIAL`。
-    - 连续两家都被截断，视为上游故障，照旧让活动失败；
-    - 其他传输失败（包括 cause 链里有控制错误的）也照旧让活动失败；
-    - `judgeFitCompany` 本身不变。
-    - 按每家一次 fit 调用、约 0.6% 的流截断率估算，30 家的 run 原本约有 17% 的概率死在这一步。
-  - 工作流：`stats.modelExtractions` 只在有跳过时出现，含 `invoked`、`failed`、`failedByReason`、`queriesAllFailed`（调用全部失败的查询数）。阶段失败时补写的 FAILED 统计里也带上它。
-  - `resolveRunStatus`：有跳过就至少 `PARTIAL`，与 fit 的未判定同理，不单独判 FAILED。旧历史没有这个字段，重放时状态不变。
+  - **判断「网关已结算、没有结果」**：`discovery/settled-model-failure.ts` 的 `settledModelFailureReason` 只认两类：
+    - 可恢复的 `ProviderOutputError`（#638，含 `TaskOutputValidationError`）；
+    - 精确类型的 `ProviderTransportError`，原因码必须是 `CHAT_COMPLETIONS_STREAM_TRUNCATED`，且 cause 链里没有控制错误。
+    - 其余传输错误照旧 fail closed：超时或读不出的响应、非 JSON、上游错误事件、`insufficient_system_resource` 这类无效 finish reason、Responses 失败状态。结果未知的 `ProviderOutputUnresolvedError`、`ProviderSettlementError` 也照旧抛出。
+  - **公司抽取**（public_web、directory）：遇到上述两类就跳过这个域名或名录页，标记失败，保留血缘。
+  - **统计**：新的纯函数模块 `discovery-model-extractions.ts`，不依赖其他模块，工作流直接引用。
+    - 按查询统计抽取调用数，以及按原因码统计跳过数；原因码只接受网关的安全格式，其他一律记为 `MODEL_CALL_FAILED`；汇总时严格校验，旧历史和格式不对的数据不计入。
+    - `DiscoveryResult.modelExtractions` → executeQuery 按查询汇总 → 工作流写入 `stats.modelExtractions`，含 `invoked`、`failed`、`failedByReason`、`queriesAllFailed`，只在有跳过时出现。阶段失败时补写的 FAILED 统计里也带上它。
+  - **run 状态**：有跳过就至少 `PARTIAL`（`resolveRunStatus`，与 fit 未判定同理）。整个 run 的抽取全部失败、且没有任何记录通过时判 `FAILED`：这是上游故障，不是市场冷清；FAILED 让计划保持 READY，可以重跑（BI-25），而 PARTIAL 会把计划用掉（#639 复审 HIGH-1）。旧历史没有这个字段，重放时状态不变。
+  - **fit 判定**（`qualifyFitForRun`）：原设计「传输失败通常打到每一家，所以让活动失败」保持不变，只吸收单独一次、网关已结算的流截断，这家记为未判定。
+    - 两次截断之间没有出现可用判定（包括中间只隔了不可用答案），就视为上游故障，照旧让活动失败；
+    - 其他传输失败也照旧让活动失败；`judgeFitCompany` 本身不变。
+    - 按约 0.6% 的截断率估算，30 家的 run 原本约有 17% 的概率死在这一步。
+  - **官网画像**（`website-profile.provider.ts` 的分类调用）：单次流截断和不可用答案一样，保留规则得出的确定性事实；其他传输失败照旧让 run 停下。官网画像在 fit 之前跑，截断如果是整体性的，会在 fit 阶段因「连续两次」停下。
+  - **taxonomy 归一**（`taxonomy-resolver.ts` 四处）：单次流截断当作未命中，查询继续，与不可用答案相同。
   - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）补了这个字段。
 - 测试：
-  - 先写失败测试：纯函数模块（计数、原因码过滤与防原型污染、求和、run 累加不可变、格式不对的输入）；public_web、directory 的计数；executeQuery 汇总；工作流的 PARTIAL、`queriesAllFailed`、DONE 时不出现该字段、BI-25 失败收尾也带统计；`resolveRunStatus`。改动前 10 项失败。
-  - 流截断：#638 曾把「`ProviderTransportError` 原样抛出」钉成约定，这次改为跳过并计数。结果未知的两类错误，以及带控制错误 cause 的传输错误，仍然钉住「原样抛出」。
-  - fit 判定：新测试覆盖四种情况——单次截断记为未判定、被已判定公司隔开的两次截断、连续两次截断让活动失败、带控制错误 cause 的照旧失败。改动前前三项失败；原测试「一次截断就让活动失败」改为「记为未判定」。
-  - `vitest run src/discovery/ src/temporal/ src/icp/ src/model-gateway/`：161 个文件 2514 项通过，7 个 PostgreSQL 文件跳过。
-- 未做：活动重试时，已结算但没有持久结果的调用仍会报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。这次改动让首次尝试不再因为单次失败而失败，所以很少走到重试；彻底解决属于 D13。
+  - 先写失败测试，覆盖：
+    - 纯函数模块：计数、原因码过滤与防原型污染、求和、run 累加不可变、格式不对的输入；
+    - public_web、directory 的计数；executeQuery 汇总；
+    - 工作流：PARTIAL、`queriesAllFailed`、DONE 时不出现该字段、BI-25 失败收尾也带统计、全部失败且无记录时判 FAILED；
+    - `resolveRunStatus`。
+  - `settledModelFailureReason`：白名单内外各种传输错误、子类、带控制错误或普通 cause、结果未知的错误、普通错误、非错误值。
+  - 流截断：#638 曾钉住「`ProviderTransportError` 原样抛出」，现改为跳过并计数（public_web、directory）；其他传输错误、结果未知的错误仍钉住「原样抛出」。
+  - fit：单次截断记未判定；被可用判定隔开的两次截断都吸收；连续两次、或中间只隔不可用答案的两次，都让活动失败；带控制错误 cause 的照旧失败。原测试「一次截断就让活动失败」改为「记为未判定」。
+  - 官网画像、taxonomy：单次截断被吸收，`CHAT_COMPLETIONS_BODY_NOT_JSON` 照旧抛出。
+  - 两轮独立对抗审查：第一轮在 `7feaf707` 上没有完成；第二轮结论「修完再合」，HIGH-1、MEDIUM-1、MEDIUM-2 与 LOW 的测试和文档问题都在本 PR 修复。
+  - `vitest run src/discovery/ src/temporal/ src/icp/ src/model-gateway/`：162 个文件 2538 项通过，7 个 PostgreSQL 文件跳过。
+- 未做：
+  - 活动重试时，已结算但没有持久结果的调用仍会报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。这次改动让首次尝试不再因为单次失败而失败，很少走到重试；彻底解决属于 D13。
+  - 网关修复调用里的传输错误会被包成 `ProviderOutputUnresolvedError`（结果未知），这里不吸收。
+  - 走「已有收据直接回放」路径的查询不带统计：一次尝试已提交、但完成信号丢了的话，它的跳过不会计入，run 可能以 DONE 结束。
+  - `invoked` 统计的是抽取调用次数，不是物理请求次数：一次带修复的抽取是两次请求。
 
 ## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
 

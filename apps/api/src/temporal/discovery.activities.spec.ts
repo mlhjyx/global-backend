@@ -3710,6 +3710,22 @@ describe("qualifyFitForRun —— 流截断", () => {
     expect(fitRuntimeMocks.execute).toHaveBeenCalledTimes(2);
   });
 
+  it("stops on a second cut after an unusable answer, which is no sign the upstream recovered", async () => {
+    const second = cut();
+    fitRuntimeMocks.execute
+      .mockRejectedValueOnce(cut())
+      .mockRejectedValueOnce(
+        new ProviderOutputError("STRUCTURED_OUTPUT_NOT_JSON: not JSON", { inputTokens: 520 }),
+      )
+      .mockRejectedValueOnce(second);
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(
+        discoveryArgs("run-1", { icpId: "icp-1" }),
+      ),
+    ).rejects.toBe(second);
+  });
+
   it("still stops on any other transport failure", async () => {
     const failure = new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", undefined, {
       cause: new ExecutionControlError("EXECUTION_BUDGET_EXHAUSTED"),

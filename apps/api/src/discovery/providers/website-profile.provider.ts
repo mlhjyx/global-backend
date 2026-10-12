@@ -2,6 +2,7 @@ import { getTask } from '../../ai-tasks/task-registry';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import type { CrawlHtmlResult, CrawlResult } from '../../adapters/web-crawler';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { settledModelFailureReason } from '../settled-model-failure';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
@@ -287,7 +288,10 @@ export class WebsiteProfileProvider {
       );
       return result.data ?? null;
     } catch (error) {
-      if (isExecutionControlError(error)) throw error;
+      // A transport failure usually hits every company, so it stops the run. A lone stream the
+      // gateway settled as cut short is one company's failure, like an unusable answer; a
+      // truncation outage is still stopped by the fit pass, which halts on two cuts in a row.
+      if (isExecutionControlError(error) && settledModelFailureReason(error) === undefined) throw error;
       return null; // model unavailable/invalid output: keep the deterministic facts
     }
   }
