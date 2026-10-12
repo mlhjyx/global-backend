@@ -49,6 +49,7 @@ import {
 } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { isRecoverableModelFailure } from '../../model-gateway/providers/provider-output-error';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -285,6 +286,9 @@ export class PublicWebDiscoveryProvider
       ) {
         throw error;
       }
+      // An unusable answer was settled by the gateway without a durable result: one domain is
+      // skipped and the query keeps its lineage. Any other failure leaves the outcome unknown.
+      if (isRecoverableModelFailure(error)) collector.markInvocationFailed();
       this.log('skip: extract failed (ERROR)');
       return Object.freeze({ record: null, collector });
     }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
+import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
 import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
@@ -284,6 +285,72 @@ describe('provider-owned company receipt lineage', () => {
     expect(result).not.toHaveProperty('lineage');
   });
 
+  it('keeps the public-web lineage when a model call answers unusably before any receipt', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [
+            { url: 'https://acme.test/', title: 'Acme pumps' },
+            { url: 'https://broken.test/', title: 'Broken pumps' },
+          ] },
+          costCents: 0,
+        }
+      : { data: { text: 'industrial pump distributor '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementation(async (_gateway, input, ctx) => {
+      // The gateway settles a truncated answer without a durable result (seller #20 run, 2026-10-11).
+      if (input.prompt.includes('broken.test')) {
+        throw new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY_TRUNCATED: empty answer');
+      }
+      ctx.onDurableReceipt?.(input.task, MODEL_A);
+      return {
+        data: { is_company_site: true, name: 'Acme GmbH' },
+        provider: 'gateway',
+        model: 'model',
+        runtimeExecution: {},
+      };
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const result = await new PublicWebDiscoveryProvider({
+        gateway: {} as never,
+        broker: executionBroker,
+      }).discoverCompanies(query, context());
+
+      expect(result.records.map((record) => record.domain)).toEqual(['acme.test']);
+      expect(result.lineage).toEqual({
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 1,
+        attemptReceipts: [],
+        receiptCoverage: [{
+          producerId: 'discovery.extract_company',
+          receipt: MODEL_A,
+          recordIndexes: [0],
+        }],
+      });
+    } finally {
+      log.mockRestore();
+      mocks.executeStructuredTaskWithRuntime.mockReset();
+    }
+  });
+
+  it('still omits the public-web lineage when a model call fails in any other way', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://acme.test/', title: 'Acme pumps' }] }, costCents: 0 }
+      : { data: { text: 'industrial pump distributor '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(new Error('socket hang up'));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const result = await new PublicWebDiscoveryProvider({
+        gateway: {} as never,
+        broker: executionBroker,
+      }).discoverCompanies(query, context());
+
+      expect(result.records).toEqual([]);
+      expect(result).not.toHaveProperty('lineage');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('returns an empty public-web lineage when no search hit carries usable text (no model call)', async () => {
     const executionBroker = broker(async () => ({
       data: { results: [{ url: 'https://acme.test/', title: '   ' }] },
@@ -537,6 +604,45 @@ describe('provider-owned company receipt lineage', () => {
     }).discoverCompanies(query, context());
     expect(missing.records).toHaveLength(1);
     expect(missing).not.toHaveProperty('lineage');
+  });
+
+  it('directory keeps its lineage when a listing model call answers unusably, and omits it on any other failure', async () => {
+    const listingBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [{
+            url: 'https://directory.test/members',
+            title: 'Members directory',
+          }] },
+          costCents: 0,
+        }
+      : { data: { text: 'Directory member companies '.repeat(20) }, costCents: 0 });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(
+        new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY_TRUNCATED: empty answer'),
+      );
+      const unusable = await new DirectoryDiscoveryProvider({
+        gateway: {} as never,
+        broker: listingBroker,
+      }).discoverCompanies(query, context());
+      expect(unusable.records).toEqual([]);
+      expect(unusable.lineage).toEqual({
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 0,
+        attemptReceipts: [],
+        receiptCoverage: [],
+      });
+
+      mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(new Error('socket hang up'));
+      const unknown = await new DirectoryDiscoveryProvider({
+        gateway: {} as never,
+        broker: listingBroker,
+      }).discoverCompanies(query, context());
+      expect(unknown.records).toEqual([]);
+      expect(unknown).not.toHaveProperty('lineage');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('directory propagates malformed company callback lineage', async () => {

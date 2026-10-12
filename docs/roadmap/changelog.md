@@ -4,6 +4,29 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
+
+- 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。
+  - 这次 run 共 112 次公司抽取，其中 1 次被网关以 `STRUCTURED_OUTPUT_EMPTY_TRUNCATED` 拒收（pro 跑了 139 秒，输出为空）。网关已结算这次预算操作，没有持久结果。
+  - public_web 把它当作「跳过这个域名」，但收据收集器仍记为「已调用、没有收据」。`buildDiscoveryCompanyResultLineage` 因此整份血缘都不给，受治理的执行计划判为 MISMATCH。
+  - Temporal 重试时，同一个预算操作「已存在但没有持久结果」，报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，run 失败。
+  - C-TX Release B（#631）激活前走 legacy 路径，失败的抽取只是被跳过；激活后，一次普通的模型失败就能让整个 run 失败。
+- 改动：
+  - `company-discovery-lineage.ts`：收集器新增 `markInvocationFailed()`，观察记录新增 `failed`。
+    - 只能在「已调用、还没有收据」时标记，标记后不能再收收据，也不能覆盖记录；
+    - 收据已经到了再标记，不改变任何东西，收据照常保留；
+    - 构建血缘时，标记为失败的调用不出现在血缘里；没标记又没有收据的调用，仍然让整份血缘作废（fail closed 不变）。
+  - `public-web.provider.ts`、`directory.provider.ts`：只有 `isRecoverableModelFailure` 成立时才标记失败，也就是网关已经结算的不可用答案（`ProviderOutputError`、`TaskOutputValidationError`）。
+    - 结果未知的失败（`ProviderOutputUnresolvedError`、`ProviderSettlementError`、`PaidOperationUnknownError` 等）按控制错误照旧抛出；
+    - 其他普通错误照旧让血缘作废。
+  - trade_fair 不变：它的失败来自 broker 工具调用，不是模型调用。原有「结算前失败即 fail closed」的测试保留。
+- 测试：
+  - 先红后绿：新增 11 项（收集器 3 项、观察记录格式 5 项、public_web 2 项、directory 1 项），改动前 6 项失败，改动后全部通过。已有的两条畸形观察用例补上 `failed: false`，仍然测原来的规则。
+  - `vitest run src/discovery/ src/temporal/discovery`：85 个文件 1359 项通过，4 个 PostgreSQL 文件跳过。
+- 未做：
+  - 同一活动因为别的原因被 Temporal 重试时，已结算但没有持久结果的模型调用仍会报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，让查询失败。这属于 D13「失败后重试」，要改受围栏保护的 router，另行处理。
+  - 随下一个运行镜像上线，再用新卖方重跑验收。
+
 ## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
 
 - 起因：C-TX 只发了 Release A（#431：迁移 `20260830130300`/`20260830130400`，激活单例表为空），Release B 一直没做。API 自 Release A 起给每个新发现 run 写 v1 标记，而 `admit_discovery_company_materialization_v1` 对「v1 标记 + 无激活行」一律抛不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE`：任何走完查询阶段的 run 都会在 canonicalize 失败。xin 上激活表为 0 行，至今没有 run 走到 canonicalize。
